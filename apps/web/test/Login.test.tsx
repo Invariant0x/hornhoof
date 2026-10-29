@@ -47,7 +47,9 @@ describe('AcceptInvite', () => {
     await user.type(screen.getByLabelText('Choose a password'), ' but longer now');
     await user.click(screen.getByRole('button', { name: 'Join' }));
     expect(calls.at(-1)).toEqual({ method: 'POST', path: '/api/invites/tok1/accept', body: { password: 'short but longer now' } });
-    expect(onDone).toHaveBeenCalled();
+    /* Next comes the connect step, see AcceptInvite.test.tsx. */
+    expect(await screen.findByRole('button', { name: 'Skip for now' })).toBeInTheDocument();
+    expect(onDone).not.toHaveBeenCalled();
   });
 
   it('explains an expired or used invite', async () => {

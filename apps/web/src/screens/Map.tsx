@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { api } from '../api';
 import { errorText, useT, type Messages } from '../i18n';
+import { PROVIDER_NAMES } from '../providers';
 import type { Department, Org, SubView } from '../types';
 import { Edge } from '../ui/Edge';
 import { AgentIcon, LogoMark, PersonIcon } from '../ui/icons';
@@ -12,15 +13,12 @@ const MIN_K = 0.3, MAX_K = 2.5;
 
 type View = { x: number; y: number; k: number };
 
-const PROVIDERS: Record<SubView['provider'], string> = {
-  anthropic_api: 'Anthropic', openai_api: 'OpenAI', claude: 'Claude', codex: 'Codex', kimi: 'Kimi', glm: 'GLM',
-};
 
 export function chiefStatus(t: Messages, sub: SubView | null): string {
   if (!sub) return t.map.needsSubscription;
-  if (sub.kind === 'api_key') return t.map.runsOnKey(PROVIDERS[sub.provider], sub.last4 ?? '');
-  if (sub.status === 'waiting_machine') return t.map.waitingMachine(PROVIDERS[sub.provider]);
-  return t.map.runsOnPersonal(sub.owner.name, PROVIDERS[sub.provider]);
+  if (sub.kind === 'api_key') return t.map.runsOnKey(PROVIDER_NAMES[sub.provider], sub.last4 ?? '');
+  if (sub.status === 'waiting_machine') return t.map.waitingMachine(PROVIDER_NAMES[sub.provider]);
+  return t.map.runsOnPersonal(sub.owner.name, PROVIDER_NAMES[sub.provider]);
 }
 
 function deptPositions(n: number): { x: number; y: number }[] {

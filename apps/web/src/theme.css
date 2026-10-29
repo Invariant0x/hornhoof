@@ -261,3 +261,30 @@ button, input, select { font: inherit; color: inherit; }
   .ptable td { padding: 2px 14px; border: 0; }
   .row-actions { text-align: left; }
 }
+
+/* Subscriptions */
+.subs-machines { display: grid; gap: 6px; margin-top: 12px; }
+.subs-machines h2 { font-size: 18px; }
+.sub-name { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 1px 7px; color: var(--pink-ink); border: 1px solid currentColor; vertical-align: 1px; }
+.status.ready { color: var(--ok); border-color: currentColor; }
+.status.needs_login, .status.waiting_machine { color: var(--amber-ink); border-color: currentColor; }
+.subs .status { display: inline-block; white-space: nowrap; }
+.status.offline, .status.builtin_offline { color: var(--muted); }
+.limits { display: block; margin-top: 4px; font-size: 12px; color: var(--muted); }
+.row-extra td { background: var(--surface2); }
+.ask { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ask span { flex: 1 1 280px; }
+.test { display: grid; gap: 6px; }
+.test.ok { color: var(--ok); }
+.test details summary { cursor: pointer; color: var(--cyan-ink); }
+.test pre { margin: 6px 0 0; padding: 10px; max-height: 240px; overflow: auto; font-family: var(--f-mono); font-size: 12px; white-space: pre-wrap; background: var(--surface); border: 1px solid var(--line); }
+.command-box { display: grid; gap: 8px; }
+.trust { font-size: 13px; padding-left: 10px; border-left: 3px solid var(--amber-ink); }
+.connect-form { display: grid; gap: 14px; }
+.connect-form .actions { display: flex; gap: 10px; justify-content: flex-end; }
+.plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; border: 0; padding: 0; margin: 0; }
+.plan { display: grid; grid-template-columns: auto 1fr; column-gap: 10px; row-gap: 2px; align-items: center; padding: 12px; border: 1px solid var(--line2); background: var(--surface); cursor: pointer; }
+.plan.on { border-color: var(--cyan); }
+.plan input { grid-row: span 2; }
+.plan span { font-size: 12px; }

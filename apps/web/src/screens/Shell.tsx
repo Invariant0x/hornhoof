@@ -6,9 +6,10 @@ import type { Me } from '../types';
 import { LogoMark } from '../ui/icons';
 import { MapScreen } from './Map';
 import { People } from './People';
+import { Subscriptions } from './Subscriptions';
 
-type Tab = 'map' | 'people';
-const TABS: Tab[] = ['map', 'people'];
+type Tab = 'map' | 'people' | 'subscriptions';
+const TABS: Tab[] = ['map', 'people', 'subscriptions'];
 const THEMES: Theme[] = ['light', 'dark'];
 
 function AccountMenu({ me, onClose, onSignOut }: { me: Me; onClose: () => void; onSignOut: () => void }) {
@@ -112,7 +113,11 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
           </div>
         </div>
       </header>
-      <main className="body">{tab === 'map' ? <MapScreen /> : <People me={me} />}</main>
+      <main className="body">
+        {tab === 'map' && <MapScreen />}
+        {tab === 'people' && <People me={me} />}
+        {tab === 'subscriptions' && <Subscriptions me={me} />}
+      </main>
     </div>
   );
 }

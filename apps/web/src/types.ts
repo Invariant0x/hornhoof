@@ -56,3 +56,26 @@ export type Org = {
   people: PersonView[];
   departments: Department[];
 };
+
+export type MachineView = {
+  id: string;
+  hostname: string;
+  os: string;
+  arch: string;
+  owner: { id: string; name: string };
+  online: boolean;
+  lastSeenAt: string | null;
+  subscriptions: number;
+};
+
+export type JobView = {
+  id: string;
+  status: 'queued' | 'running' | 'done' | 'failed';
+  result: string | null;
+  tail: string;
+  error: string | null;
+  machine: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+};

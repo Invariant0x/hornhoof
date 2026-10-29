@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { api, ApiFailure } from '../api';
 import { errorText, useT, type Messages } from '../i18n';
 import { Card } from '../ui/Card';
+import { ConnectPanel } from '../ui/ConnectPanel';
 import { Field } from '../ui/Field';
 
 type Invite = { companyName: string; name: string; email: string; title: string; scopeName: string; scopeKind?: 'company' | 'department' | 'team' };
@@ -20,6 +21,7 @@ export function AcceptInvite({ token, onDone }: { token: string; onDone: () => v
   const [problem, setProblem] = useState('');
   const [failure, setFailure] = useState('');
   const [busy, setBusy] = useState(false);
+  const [joined, setJoined] = useState(false);
 
   useEffect(() => {
     let live = true;
@@ -39,7 +41,7 @@ export function AcceptInvite({ token, onDone }: { token: string; onDone: () => v
     setBusy(true);
     try {
       await api.post(`/api/invites/${encodeURIComponent(token)}/accept`, { password });
-      onDone();
+      setJoined(true);
     } catch (err) {
       if (err instanceof ApiFailure && (err.status === 410 || err.status === 404)) setDead(err);
       else setFailure(explain(t, err));
@@ -56,6 +58,18 @@ export function AcceptInvite({ token, onDone }: { token: string; onDone: () => v
     );
   }
   if (!invite) return <Card><p className="muted">{t.invite.opening}</p></Card>;
+  /* Signed in now: connecting their own plans is the one thing left, and it can wait. */
+  if (joined) {
+    return (
+      <Card>
+        <div className="wizard-head">
+          <h1>{t.invite.join(invite.companyName)}</h1>
+          <p>{t.invite.connectNow}</p>
+        </div>
+        <ConnectPanel onDone={onDone} onSkip={onDone} />
+      </Card>
+    );
+  }
 
   const role = [invite.title, invite.scopeKind === 'company' ? t.people.wholeCompany : invite.scopeName].filter(Boolean).join(', ');
   return (

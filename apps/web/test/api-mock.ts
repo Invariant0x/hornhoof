@@ -1,5 +1,5 @@
 import { vi } from 'vitest';
-import type { Me, Org, PersonView } from '../src/types';
+import type { MachineView, Me, Org, PersonView, SubView } from '../src/types';
 
 type Reply = [status: number, body?: unknown];
 type Route = Reply | ((body: unknown) => Reply);
@@ -52,3 +52,22 @@ export const ORG_WITH_TEAMS: Org = {
     { id: 'd2', name: 'Development', roleCode: 'CTO', teams: [] },
   ],
 };
+
+const SUB_BASE = { kind: 'personal' as const, last4: null, owner: { id: 'p1', name: 'Ivan' }, place: { kind: 'company' as const, id: null, name: 'Whole company' }, limits: null, isChief: false };
+
+export const MACHINE = { id: 'm1', hostname: 'ivan-mbp' };
+
+export const SUBS: SubView[] = [
+  {
+    ...SUB_BASE, id: 's-claude', provider: 'claude', label: 'Claude', status: 'ready', online: true, machine: MACHINE,
+    limits: { status: 'allowed', windows: [{ name: 'five_hour', utilization: 0.42, resetsAt: '2026-10-29T18:00:00.000Z' }, { name: 'seven_day', utilization: 0.1, resetsAt: null }] },
+  },
+  { ...SUB_BASE, id: 's-codex', provider: 'codex', label: 'Codex', status: 'needs_login', online: true, machine: MACHINE },
+  { ...SUB_BASE, id: 's-kimi', provider: 'kimi', label: 'Kimi', status: 'waiting_machine', online: false, machine: null },
+  { ...SUB_BASE, id: 's-key', provider: 'anthropic_api', kind: 'api_key', label: 'Chief', status: 'ready', online: true, last4: '9f3a', machine: null, isChief: true },
+];
+
+export const MACHINES: MachineView[] = [
+  { id: 'm1', hostname: 'ivan-mbp', os: 'darwin', arch: 'arm64', owner: { id: 'p1', name: 'Ivan' }, online: true, lastSeenAt: null, subscriptions: 2 },
+  { id: 'm2', hostname: 'build-box', os: 'linux', arch: 'x86_64', owner: { id: 'p2', name: 'Maria' }, online: false, lastSeenAt: new Date(Date.now() - 5 * 60_000).toISOString(), subscriptions: 1 },
+];

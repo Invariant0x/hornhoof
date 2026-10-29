@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Shell } from '../src/screens/Shell';
-import { ME, mockApi, ORG } from './api-mock';
+import { MACHINES, ME, mockApi, ORG, SUBS } from './api-mock';
 
 function renderShell() {
   mockApi({ 'GET /api/org': [200, ORG] });
@@ -20,6 +20,16 @@ afterEach(() => {
 });
 
 describe('Shell', () => {
+  it('opens Subscriptions from the third tab', async () => {
+    mockApi({ 'GET /api/org': [200, ORG], 'GET /api/subscriptions': [200, { subscriptions: SUBS }], 'GET /api/machines': [200, { machines: MACHINES }] });
+    const user = userEvent.setup();
+    render(<Shell me={ME} onSignOut={() => {}} />);
+    expect(screen.getAllByRole('button').filter(b => b.closest('nav')).map(b => b.textContent)).toEqual(['Map', 'People', 'Subscriptions']);
+    await user.click(screen.getByRole('button', { name: 'Subscriptions' }));
+    expect(await screen.findByRole('heading', { name: 'Subscriptions' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Subscriptions' })).toHaveAttribute('aria-current', 'page');
+  });
+
   it('speaks the saved language and switches it from the account menu', async () => {
     localStorage.setItem('hh-lang', 'ru');
     const user = userEvent.setup();
