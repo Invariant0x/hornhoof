@@ -31,6 +31,20 @@ function deptPositions(n: number): { x: number; y: number }[] {
 }
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+const chipsWidth = (n: number) => n * CHIP_W + Math.max(0, n - 1) * 12;
+
+/* The part of the world that has something on it, so Fit fills the screen with it. */
+function contentBounds(org: Org): { x0: number; y0: number; x1: number; y1: number } {
+  const half = Math.max(chipsWidth(org.people.length) / 2, 220);
+  const b = { x0: CX - half, x1: CX + half, y0: CY - HUB - CHIP_H - 34, y1: CY + HUB + (org.departments.length ? 40 : 110) };
+  for (const p of deptPositions(org.departments.length)) {
+    b.x0 = Math.min(b.x0, p.x - DEPT_W / 2);
+    b.x1 = Math.max(b.x1, p.x + DEPT_W / 2);
+    b.y0 = Math.min(b.y0, p.y - DEPT_H / 2);
+    b.y1 = Math.max(b.y1, p.y + DEPT_H / 2);
+  }
+  return b;
+}
 
 export function MapScreen() {
   const [org, setOrg] = useState<Org | null>(null);
@@ -52,10 +66,12 @@ export function MapScreen() {
 
   const fit = useCallback(() => {
     const el = box.current;
-    if (!el || !el.clientWidth) return;
-    const k = Math.min(el.clientWidth / W, el.clientHeight / H, 1) * 0.94;
-    setView({ k, x: (el.clientWidth - W * k) / 2, y: (el.clientHeight - H * k) / 2 });
-  }, []);
+    if (!el || !el.clientWidth || !org) return;
+    const { x0, y0, x1, y1 } = contentBounds(org);
+    const pad = 32;
+    const k = Math.max(MIN_K, Math.min((el.clientWidth - pad * 2) / (x1 - x0), (el.clientHeight - pad * 2) / (y1 - y0), 1.15));
+    setView({ k, x: (el.clientWidth - (x1 - x0) * k) / 2 - x0 * k, y: (el.clientHeight - (y1 - y0) * k) / 2 - y0 * k });
+  }, [org]);
 
   useEffect(() => {
     fit();
@@ -64,7 +80,7 @@ export function MapScreen() {
     const ro = new ResizeObserver(fit);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [fit, org]);
+  }, [fit]);
 
   const zoomAt = useCallback((factor: number, px?: number, py?: number) => {
     const el = box.current;
@@ -109,7 +125,7 @@ export function MapScreen() {
 
   const depts = org.departments;
   const spots = deptPositions(depts.length);
-  const chipsW = org.people.length * CHIP_W + Math.max(0, org.people.length - 1) * 12;
+  const chipsW = chipsWidth(org.people.length);
 
   return (
     <div className="map" ref={box} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}>
@@ -135,7 +151,7 @@ export function MapScreen() {
         </ul>
 
         <div className="hub" style={{ left: CX - HUB, top: CY - HUB, width: HUB * 2, height: HUB * 2 }}>
-          <svg viewBox="0 0 240 240" aria-hidden="true">
+          <svg className="hub-art" viewBox="0 0 240 240" aria-hidden="true">
             <circle className="hub-ring" cx="120" cy="120" r="116" />
             <circle className="hub-gauge" cx="120" cy="120" r="104" pathLength="100" strokeDasharray={`${org.agents.total ? (org.agents.working / org.agents.total) * 100 : 0} 100`} />
           </svg>

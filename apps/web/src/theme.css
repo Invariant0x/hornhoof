@@ -142,7 +142,7 @@ button, input, select { font: inherit; color: inherit; }
 .segments input { position: absolute; opacity: 0; pointer-events: none; }
 .segments label:has(input:focus-visible) { outline: 2px solid var(--cyan); outline-offset: 2px; }
 .command { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: start; padding: 12px; background: var(--surface2); border: 1px solid var(--line); }
-.command code { font-family: var(--f-mono); font-size: 12px; line-height: 1.55; word-break: break-all; }
+.command code { font-family: var(--f-mono); font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; }
 
 /* Shell */
 .shell { height: 100%; display: grid; grid-template-rows: auto 1fr; }
@@ -200,14 +200,14 @@ button, input, select { font: inherit; color: inherit; }
 .chip b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chip small { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hub { display: grid; justify-items: center; align-content: center; gap: 2px; border-radius: 50%; background: var(--surface); box-shadow: 0 0 0 10px var(--glow); }
-.hub svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.hub .hub-art { position: absolute; inset: 0; width: 100%; height: 100%; }
 .hub-ring { fill: none; stroke: var(--line2); stroke-width: 1.2; }
 .hub-gauge { fill: none; stroke: var(--cyan); stroke-width: 4; transform: rotate(-90deg); transform-origin: 120px 120px; }
 .hub-mark { position: relative; width: 44px; height: 44px; }
 .hub-name { position: relative; max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--f-display); font-weight: 600; font-size: 15px; }
 .hub-num { position: relative; margin-top: 6px; font-family: var(--f-display); font-size: 28px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }
 .hub-label { position: relative; font-size: 12px; color: var(--muted); }
-.hub-chief { width: 360px; display: flex; justify-content: center; align-items: center; gap: 6px; margin: 0; font-size: 13px; }
+.hub-chief { width: 360px; display: flex; justify-content: center; align-items: center; gap: 6px; margin: 0; padding: 3px 0; font-size: 13px; background: var(--bg); }
 .hub-chief .ic { color: var(--cyan-ink); }
 .hub-chief span { color: var(--muted); }
 .map-empty { width: 440px; margin: 0; padding: 10px 14px; text-align: center; border: 1px dashed var(--line2); color: var(--muted); background: var(--surface); }
