@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+. "$STUB_SRC/_log.sh"
+url='' out='' fmt=''
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o) out=$2; shift ;;
+    -w) fmt=$2; shift ;;
+    --data-binary) case "$2" in @*) printf 'curl-data %s\n' "$(cat "${2#@}")" >> "$STUB_LOG" ;; esac; shift ;;
+    http://*|https://*) url=$1 ;;
+  esac
+  shift
+done
+reply() { if [ -n "$out" ]; then printf '%b' "$1" > "$out"; else printf '%b' "$1"; fi; }
+case "$url" in
+  */api/health)
+    if [ "${STUB_HEALTH:-ok}" = fail ]; then echo "curl: (7) Failed to connect" >&2; exit 7; fi
+    reply '{"ok":true}' ;;
+  */api/nodes/join)
+    reply "${STUB_JOIN_BODY:-}"
+    [ -n "$fmt" ] && printf '%s' "${STUB_JOIN_STATUS:-200}" ;;
+  *Homebrew/install*)
+    reply 'cp "$STUB_SRC/brew" "$STUB_BIN/brew"\necho "homebrew-install" >> "$STUB_LOG"\n' ;;
+  *get.docker.com*)
+    reply 'cp "$STUB_SRC/docker" "$STUB_BIN/docker"\necho "get-docker" >> "$STUB_LOG"\n' ;;
+  *compose.yaml)
+    reply 'services: {}\n' ;;
+  *) echo "curl stub: unknown url $url" >&2; exit 22 ;;
+esac

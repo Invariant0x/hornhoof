@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+. "$STUB_SRC/_log.sh"
+works() {
+  case "${STUB_DOCKER:-ok}" in
+    ok) return 0 ;;
+    sudo_only) [ "${STUB_SUDO:-}" = 1 ] ;;
+    *) [ -f "$STUB_STATE/docker-running" ] ;;
+  esac
+}
+if ! works; then echo "Cannot connect to the Docker daemon" >&2; exit 1; fi
+has() { case " $* " in *" $WORD "*) return 0 ;; esac; return 1; }
+case "$1" in
+  info) echo "Server Version: 28.0.0" ;;
+  pull) [ "${STUB_PULL:-ok}" = fail ] && { echo "pull access denied" >&2; exit 1; } ;;
+  image) [ "${STUB_IMAGE_LOCAL:-0}" = 1 ] || exit 1 ;;
+  ps) for n in ${STUB_CONTAINERS:-}; do echo "$n id-of-$n"; done ;;
+  run)
+    WORD=set-key; if has "$@"; then IFS= read -r line; printf 'stdin %s\n' "$line" >> "$STUB_LOG"; fi
+    WORD=-d; if has "$@"; then echo "0123456789ab"; fi ;;
+  exec)
+    WORD=/data/login-url; if has "$@"; then
+      WORD=cat; if has "$@"; then [ -n "${STUB_LOGIN_URL:-}" ] && echo "$STUB_LOGIN_URL" || exit 1; fi
+      exit 0
+    fi
+    WORD=login; if has "$@"; then
+      IFS= read -r line || true; printf 'tty %s\n' "$line" >> "$STUB_LOG"
+      sleep "${STUB_LOGIN_SLEEP:-0}"; echo "Logged in."; exit "${STUB_LOGIN_EXIT:-0}"
+    fi
+    WORD=status; if has "$@"; then
+      for n in ${STUB_REMOVED:-}; do WORD=$n; if has "$@"; then echo removed; exit 0; fi; done
+      echo "${STUB_STATUS:-ready}"
+    fi ;;
+  *) ;;
+esac
+exit 0

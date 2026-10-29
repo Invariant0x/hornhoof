@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+. "$STUB_SRC/_log.sh"
+case "${1:-}" in
+  -s) echo "${STUB_OS:-Linux}" ;;
+  -m) echo "${STUB_ARCH:-x86_64}" ;;
+  *) echo "${STUB_OS:-Linux}" ;;
+esac

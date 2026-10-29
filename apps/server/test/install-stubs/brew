@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+. "$STUB_SRC/_log.sh"
+case "$*" in
+  install*) for f in "$@"; do [ "$f" = docker ] && cp "$STUB_SRC/docker" "$STUB_BIN/docker"; done ;;
+  "services start colima") touch "$STUB_STATE/docker-running" ;;
+esac
+exit 0

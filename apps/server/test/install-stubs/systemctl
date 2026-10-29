@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+. "$STUB_SRC/_log.sh"
+[ "$*" = "enable --now docker" ] && touch "$STUB_STATE/docker-running"
+exit 0

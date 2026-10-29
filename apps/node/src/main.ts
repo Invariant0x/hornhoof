@@ -198,8 +198,9 @@ async function login(dir: string, io: Io): Promise<number> {
     return 1;
   }
   const adapter = personal(dir, state.provider);
-  const { name } = programFor(state.provider);
+  const { name, bin } = programFor(state.provider);
   try {
+    if (!existsSync(join(dir, 'tools', 'bin', bin))) io.stdout.write(`Installing ${name}.\n`);
     await ensureInstalled(join(dir, 'tools'), state.provider, adapter);
   } catch (err) {
     io.stderr.write(`Could not install ${name}: ${message(err)}\n`);

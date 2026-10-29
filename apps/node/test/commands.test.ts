@@ -124,6 +124,7 @@ describe('login', () => {
     expect(readFileSync(join(data, 'npm.log'), 'utf8')).toContain(`install -g --prefix ${join(data, 'tools')} @anthropic-ai/claude-code`);
     expect(logged().map(l => l.argv.join(' '))).toContain('auth login');
     expect(readFileSync(join(data, 'login-url'), 'utf8')).toBe('https://login.example.test/device?code=ABC\n');
+    expect(t.out()).toContain('Installing Claude Code.');
     expect(t.out()).toContain('Logged in.');
   });
 

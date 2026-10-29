@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+. "$STUB_SRC/_log.sh"
+STUB_SUDO=1 exec "$@"
