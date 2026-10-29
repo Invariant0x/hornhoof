@@ -1,12 +1,13 @@
 import { and, asc, eq, ne } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
-import type { Deps } from '../../app.js';
+import type { Ctx } from '../../app.js';
 import { personColumns, requirePerson } from '../../auth/session.js';
 import { agents, companies, departments, people, teams } from '../../db/schema.js';
 import { personViews } from '../people/views.js';
+import { identityOf } from '../nodes/hub.js';
 import { subView } from '../subscriptions/views.js';
 
-export function orgRoutes(app: FastifyInstance, { db }: Deps): void {
+export function orgRoutes(app: FastifyInstance, { db, hub }: Ctx): void {
   app.get('/api/org', async req => {
     const me = await requirePerson(req, db);
     const [company] = await db.select({ id: companies.id, name: companies.name }).from(companies).where(eq(companies.id, me.companyId));
@@ -25,7 +26,7 @@ export function orgRoutes(app: FastifyInstance, { db }: Deps): void {
       chief: chief && {
         name: chief.name,
         model: chief.model,
-        subscription: chief.subscriptionId ? await subView(db, () => false, chief.subscriptionId) : null,
+        subscription: chief.subscriptionId ? await subView(db, s => hub.isOnline(identityOf(s)), chief.subscriptionId) : null,
       },
       /* Nothing runs agents until nodes arrive in milestone 2, so none are working yet. */
       agents: { total: allAgents.length, working: 0 },

@@ -1,13 +1,14 @@
 import { and, eq, isNull } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import type { Deps } from '../../app.js';
+import type { Ctx } from '../../app.js';
 import { requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
 import { encryptSecret } from '../../crypto/secrets.js';
 import { agents, departments, people, subscriptions, teams } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { createNodeCode } from '../nodes/codes.js';
 import { installCommand } from '../nodes/command.js';
+import { identityOf } from '../nodes/hub.js';
 import { subView, subViews, type IsOnline } from './views.js';
 
 const Target = z.discriminatedUnion('kind', [
@@ -44,10 +45,9 @@ const IdParams = z.object({ id: z.uuid() });
 const unknown = () => new ApiError(404, 'not_found', 'This subscription does not exist.', 'subscription_unknown');
 const notOwner = () => new ApiError(403, 'forbidden', 'Only the owner of this subscription can do this.', 'not_owner');
 
-/* Nothing is online until the node hub arrives. */
-const offline: IsOnline = () => false;
+export function subscriptionRoutes(app: FastifyInstance, { db, config, hub }: Ctx): void {
+  const online: IsOnline = sub => hub.isOnline(identityOf(sub));
 
-export function subscriptionRoutes(app: FastifyInstance, { db, config }: Deps): void {
   async function liveSubscription(id: string) {
     const [row] = await db.select().from(subscriptions).where(and(eq(subscriptions.id, id), isNull(subscriptions.removedAt)));
     if (!row) throw unknown();
@@ -58,7 +58,7 @@ export function subscriptionRoutes(app: FastifyInstance, { db, config }: Deps): 
 
   app.get('/api/subscriptions', async req => {
     const me = await requirePerson(req, db);
-    const all = await subViews(db, offline);
+    const all = await subViews(db, online);
     return { subscriptions: me.scopeKind === 'company' ? all : all.filter(s => s.owner.id === me.id) };
   });
 
@@ -92,7 +92,7 @@ export function subscriptionRoutes(app: FastifyInstance, { db, config }: Deps): 
     });
 
     reply.code(201);
-    return { subscription: await subView(db, offline, id) };
+    return { subscription: await subView(db, online, id) };
   });
 
   /* A person connects their own plans. They serve wherever the person works, so there is nothing to place. */
@@ -107,7 +107,7 @@ export function subscriptionRoutes(app: FastifyInstance, { db, config }: Deps): 
       const ids = rows.map(r => r.id);
       return { ids, code: await createNodeCode(tx, { companyId: me.companyId, personId: me.id, subscriptionIds: ids }) };
     });
-    const views = (await subViews(db, offline)).filter(s => ids.includes(s.id));
+    const views = (await subViews(db, online)).filter(s => ids.includes(s.id));
     reply.code(201);
     return { subscriptions: views, command: installCommand(config.publicUrl, code) };
   });
@@ -133,7 +133,7 @@ export function subscriptionRoutes(app: FastifyInstance, { db, config }: Deps): 
       }
     }
     await db.update(agents).set({ subscriptionId: sub.id }).where(eq(agents.kind, 'chief'));
-    return { subscription: await subView(db, offline, sub.id) };
+    return { subscription: await subView(db, online, sub.id) };
   });
 
   app.delete('/api/subscriptions/:id', async (req, reply) => {
@@ -147,6 +147,8 @@ export function subscriptionRoutes(app: FastifyInstance, { db, config }: Deps): 
         .where(eq(subscriptions.id, sub.id));
       await tx.update(agents).set({ subscriptionId: null }).where(eq(agents.subscriptionId, sub.id));
     });
+    /* An offline node hears it at its next hello. */
+    if (sub.kind === 'personal') hub.send(identityOf(sub), { type: 'remove' });
     return reply.code(204).send();
   });
 }

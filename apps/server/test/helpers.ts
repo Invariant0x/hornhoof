@@ -1,6 +1,8 @@
+import type { NodeMessage, ServerMessage } from '@hornhoof/protocol';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
+import WebSocket from 'ws';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import { buildApp } from '../src/app.js';
 import { loadConfig, type Config } from '../src/config.js';
@@ -51,4 +53,48 @@ export async function invitePerson(app: FastifyInstance, ceoToken: string, input
   if (invited.statusCode !== 201) throw new Error(`Invite failed with ${invited.statusCode}: ${invited.body}`);
   const token = new URL(invited.json().inviteUrl).pathname.split('/').pop()!;
   return sessionFrom(await app.inject({ method: 'POST', url: `/api/invites/${token}/accept`, payload: { password: 'correct horse battery' } }));
+}
+
+export type FakeNode = {
+  ws: WebSocket;
+  send(msg: NodeMessage): void;
+  next(): Promise<ServerMessage>;
+  closed: Promise<number>;
+  close(): void;
+};
+
+/* A stand-in for a node: connects with a key and collects what the server sends. */
+export function connectNode(url: string, key: string, opts: { autoPong?: boolean } = {}): Promise<FakeNode> {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(url, { headers: { authorization: `Bearer ${key}` }, autoPong: opts.autoPong ?? true });
+    const queue: ServerMessage[] = [];
+    const waiters: ((m: ServerMessage) => void)[] = [];
+    ws.on('message', data => {
+      const msg = JSON.parse(String(data)) as ServerMessage;
+      const waiter = waiters.shift();
+      if (waiter) waiter(msg);
+      else queue.push(msg);
+    });
+    const closed = new Promise<number>(done => ws.on('close', code => done(code)));
+    ws.on('unexpected-response', (_req, res) => reject(new Error(`HTTP ${res.statusCode}`)));
+    ws.on('error', reject);
+    ws.on('open', () =>
+      resolve({
+        ws,
+        send: msg => ws.send(JSON.stringify(msg)),
+        next: () => (queue.length ? Promise.resolve(queue.shift()!) : new Promise(done => waiters.push(done))),
+        closed,
+        close: () => ws.close(),
+      }),
+    );
+  });
+}
+
+/* Waits until check() is true, for state that changes after a socket message. */
+export async function until(check: () => Promise<boolean> | boolean, ms = 2000): Promise<void> {
+  const end = Date.now() + ms;
+  while (!(await check())) {
+    if (Date.now() > end) throw new Error('Timed out waiting.');
+    await new Promise(r => setTimeout(r, 15));
+  }
 }

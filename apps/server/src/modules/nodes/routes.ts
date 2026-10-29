@@ -2,11 +2,12 @@ import { readFile } from 'node:fs/promises';
 import { and, count, eq, gt, inArray, isNull, max } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import type { Deps } from '../../app.js';
+import type { Ctx } from '../../app.js';
 import { requirePerson } from '../../auth/session.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
-import { machines, nodeCodes, people, subscriptions } from '../../db/schema.js';
+import { jobs, machines, nodeCodes, people, subscriptions } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
+import { failOpenJobs } from './messages.js';
 
 const JoinBody = z.object({
   code: z.string().min(1).max(200),
@@ -20,7 +21,8 @@ const IdParams = z.object({ id: z.uuid() });
 
 const codeUsed = () => new ApiError(410, 'gone', 'This install command was already used or has expired. Get a new one in Hornhoof.', 'code_used');
 
-export function nodeRoutes(app: FastifyInstance, { db, config }: Deps): void {
+export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
+  const { db, config, hub } = ctx;
   /* The installer calls this with the code from the command. The code is the only credential, and it works once. */
   app.post('/api/nodes/join', async (req, reply) => {
     const body = JoinBody.parse(req.body);
@@ -90,6 +92,8 @@ export function nodeRoutes(app: FastifyInstance, { db, config }: Deps): void {
       .where(isNull(subscriptions.removedAt))
       .groupBy(subscriptions.machineId);
     const byMachine = new Map(usage.map(u => [u.machineId, u]));
+    const served = await db.select({ id: subscriptions.id, machineId: subscriptions.machineId }).from(subscriptions).where(isNull(subscriptions.removedAt));
+    const onlineMachines = new Set(served.filter(s => hub.isOnline({ kind: 'node', subscriptionId: s.id })).map(s => s.machineId));
     return {
       machines: rows.map(m => ({
         id: m.id,
@@ -97,7 +101,7 @@ export function nodeRoutes(app: FastifyInstance, { db, config }: Deps): void {
         os: m.os,
         arch: m.arch,
         owner: { id: m.ownerId, name: m.ownerName },
-        online: false,
+        online: onlineMachines.has(m.id),
         lastSeenAt: byMachine.get(m.id)?.lastSeenAt ?? null,
         subscriptions: byMachine.get(m.id)?.total ?? 0,
       })),
@@ -110,6 +114,13 @@ export function nodeRoutes(app: FastifyInstance, { db, config }: Deps): void {
     const [machine] = await db.select().from(machines).where(and(eq(machines.id, id), isNull(machines.revokedAt)));
     if (!machine) throw new ApiError(404, 'not_found', 'This machine does not exist.', 'machine_unknown');
     if (machine.personId !== me.id && me.scopeKind !== 'company') throw new ApiError(403, 'forbidden', 'Only the owner of this machine can do this.', 'not_owner');
+    const served = await db
+      .select({ id: subscriptions.id })
+      .from(subscriptions)
+      .where(and(eq(subscriptions.machineId, id), isNull(subscriptions.removedAt)));
+    const ids = served.map(s => s.id);
+    if (ids.length) await failOpenJobs(ctx, inArray(jobs.subscriptionId, ids), 'machine_disconnected');
+    for (const subId of ids) hub.close(subId, 4001);
     await db.transaction(async tx => {
       await tx.update(machines).set({ revokedAt: new Date() }).where(eq(machines.id, id));
       await tx
