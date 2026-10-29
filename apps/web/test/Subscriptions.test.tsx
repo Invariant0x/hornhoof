@@ -121,11 +121,11 @@ describe('Subscriptions', () => {
   });
 
   it('moves the orchestrator to a company subscription and shows the badge', async () => {
-    const calls = lists({ 'POST /api/subscriptions/s-claude/chief': [200, { subscription: { ...SUBS[0]!, isChief: true } }] });
+    const calls = lists({ 'POST /api/subscriptions/s-claude/orchestrator': [200, { subscription: { ...SUBS[0]!, isOrchestrator: true } }] });
     const user = userEvent.setup();
     render(<Subscriptions me={ME} />);
     await user.click(await screen.findByRole('button', { name: 'Use Claude for the orchestrator' }));
-    expect(calls.find(c => c.method === 'POST')!.path).toBe('/api/subscriptions/s-claude/chief');
+    expect(calls.find(c => c.method === 'POST')!.path).toBe('/api/subscriptions/s-claude/orchestrator');
     expect(await within(rowOf('Claude')).findByText('Orchestrator')).toBeInTheDocument();
     expect(within(rowOf('Anthropic key ending 9f3a')).queryByText('Orchestrator')).not.toBeInTheDocument();
   });

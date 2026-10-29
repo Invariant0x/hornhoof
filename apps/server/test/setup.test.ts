@@ -13,7 +13,7 @@ describe('GET /api/setup', () => {
 });
 
 describe('POST /api/setup', () => {
-  it('creates the company, the CEO, the chief and an encrypted API key', async () => {
+  it('creates the company, the CEO, the orchestrator and an encrypted API key', async () => {
     const { app, db, config } = await testApp();
     const res = await app.inject({ method: 'POST', url: '/api/setup', payload: SETUP });
     expect(res.statusCode).toBe(201);
@@ -32,17 +32,17 @@ describe('POST /api/setup', () => {
 
     const [ceo] = await db.select().from(people);
     expect(ceo).toMatchObject({ isOwner: true, scopeKind: 'company', status: 'active' });
-    const [chief] = await db.select().from(agents);
-    expect(chief).toMatchObject({ kind: 'chief', name: 'Chief' });
+    const [orchestrator] = await db.select().from(agents);
+    expect(orchestrator).toMatchObject({ kind: 'orchestrator', name: 'Orchestrator' });
     const [sub] = await db.select().from(subscriptions);
-    expect(sub).toMatchObject({ kind: 'api_key', status: 'ready', targetKind: 'chief', last4: '9f3a', label: 'Chief' });
-    expect(chief!.subscriptionId).toBe(sub!.id);
+    expect(sub).toMatchObject({ kind: 'api_key', status: 'ready', targetKind: 'orchestrator', last4: '9f3a', label: 'Orchestrator' });
+    expect(orchestrator!.subscriptionId).toBe(sub!.id);
     expect(decryptSecret(sub!.secretEnc!, config.secret)).toBe(KEY);
   });
 
   it('answers the install command for a personal subscription', async () => {
     const { app, db } = await testApp();
-    const res = await app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, chief: { mode: 'personal', provider: 'claude' } } });
+    const res = await app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, orchestrator: { mode: 'personal', provider: 'claude' } } });
     expect(res.statusCode).toBe(201);
     const { command } = res.json();
     expect(command).toMatch(/^curl -fsSL http:\/\/localhost:8080\/install\.sh \| bash -s -- --join [A-Za-z0-9_-]{43}$/);
@@ -57,7 +57,7 @@ describe('POST /api/setup', () => {
 
   it('builds the command from the public address', async () => {
     const { app } = await testApp({ PUBLIC_URL: 'https://hq.acme.com/' });
-    const res = await app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, chief: { mode: 'personal', provider: 'kimi' } } });
+    const res = await app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, orchestrator: { mode: 'personal', provider: 'kimi' } } });
     expect(res.json().command).toMatch(/^curl -fsSL https:\/\/hq\.acme\.com\/install\.sh \| bash -s -- --join /);
   });
 
@@ -80,24 +80,24 @@ describe('POST /api/setup', () => {
     expect(res.statusCode).toBe(400);
   });
 
-  it('accepts a GLM Coding Plan as the personal chief', async () => {
+  it('accepts a GLM Coding Plan as the personal orchestrator', async () => {
     const { app, db } = await testApp();
-    const res = await app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, chief: { mode: 'personal', provider: 'glm' } } });
+    const res = await app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, orchestrator: { mode: 'personal', provider: 'glm' } } });
     expect(res.statusCode).toBe(201);
     expect(res.json().command).toMatch(/--join /);
     const [sub] = await db.select().from(subscriptions);
     expect(sub).toMatchObject({ kind: 'personal', provider: 'glm', label: 'GLM', status: 'waiting_machine' });
-    const [chief] = await db.select().from(agents);
-    expect(chief).toMatchObject({ subscriptionId: sub!.id, model: 'glm-5.3' });
+    const [orchestrator] = await db.select().from(agents);
+    expect(orchestrator).toMatchObject({ subscriptionId: sub!.id, model: 'glm-5.3' });
   });
 
-  it('lets the chief wait for a subscription', async () => {
+  it('lets the orchestrator wait for a subscription', async () => {
     const { app, db } = await testApp();
-    const res = await app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, chief: { mode: 'later' } } });
+    const res = await app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, orchestrator: { mode: 'later' } } });
     expect(res.statusCode).toBe(201);
     expect(await db.select().from(subscriptions)).toEqual([]);
-    const [chief] = await db.select().from(agents);
-    expect(chief!.subscriptionId).toBeNull();
+    const [orchestrator] = await db.select().from(agents);
+    expect(orchestrator!.subscriptionId).toBeNull();
   });
 
   it('refuses a second setup', async () => {

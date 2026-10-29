@@ -20,7 +20,7 @@ const MIN_K = 0.3, MAX_K = 2.5;
 type View = { x: number; y: number; k: number };
 export type DeptSpot = { x: number; y: number; w: number; h: number; path: Point[] };
 
-export function chiefStatus(t: Messages, sub: SubView | null): string {
+export function orchestratorStatus(t: Messages, sub: SubView | null): string {
   if (!sub) return t.map.needsSubscription;
   if (sub.kind === 'api_key') return t.map.runsOnKey(PROVIDER_NAMES[sub.provider], sub.last4 ?? '');
   if (sub.status === 'waiting_machine') return t.map.waitingMachine(sub.owner.name);
@@ -225,10 +225,10 @@ export function MapScreen() {
           </span>
           <span className="sr">{t.map.agentsWorking}</span>
         </div>
-        <p className="hub-chief" style={{ left: CX - 180, top: CY + HUB + 14 }}>
+        <p className="hub-orchestrator" style={{ left: CX - 180, top: CY + HUB + 14 }}>
           <AgentIcon label={t.map.agent} />
-          <b>{t.map.chief}</b>
-          <span>{chiefStatus(t, org.chief?.subscription ?? null)}</span>
+          <b>{t.map.orchestrator}</b>
+          <span>{orchestratorStatus(t, org.orchestrator?.subscription ?? null)}</span>
         </p>
 
         {depts.length === 0 && (

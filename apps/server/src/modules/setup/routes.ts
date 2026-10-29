@@ -21,19 +21,19 @@ const SetupBody = z.object({
   email: z.string().trim().toLowerCase().email(),
   password: z.string().min(10).max(200),
   title: z.string().trim().max(80).optional(),
-  chief: z.discriminatedUnion('mode', [
+  orchestrator: z.discriminatedUnion('mode', [
     z.object({ mode: z.literal('later') }),
     z.object({ mode: z.literal('api_key'), provider: z.enum(['anthropic_api', 'openai_api']), apiKey: z.string().trim().min(8) }),
     z.object({ mode: z.literal('personal'), provider: z.enum(['claude', 'codex', 'kimi', 'glm']) }),
   ]),
 });
 
-type Chief = z.infer<typeof SetupBody>['chief'];
+type Orchestrator = z.infer<typeof SetupBody>['orchestrator'];
 
-function chiefModel(chief: Chief): string {
-  if (chief.mode === 'later' || chief.provider === 'anthropic_api' || chief.provider === 'claude') return DEFAULT_MODEL;
-  if (chief.provider === 'glm') return GLM_MODEL;
-  return chief.provider;
+function orchestratorModel(orchestrator: Orchestrator): string {
+  if (orchestrator.mode === 'later' || orchestrator.provider === 'anthropic_api' || orchestrator.provider === 'claude') return DEFAULT_MODEL;
+  if (orchestrator.provider === 'glm') return GLM_MODEL;
+  return orchestrator.provider;
 }
 
 const alreadySetUp = () => new ApiError(409, 'conflict', 'This Hornhoof is already set up.', 'already_set_up');
@@ -50,7 +50,7 @@ export function setupRoutes(app: FastifyInstance, { db, config }: Deps): void {
     if (existing) throw alreadySetUp();
 
     const passwordHash = await hashPassword(body.password);
-    const { chief } = body;
+    const { orchestrator } = body;
     let result;
     try {
       result = await db.transaction(async tx => {
@@ -68,26 +68,26 @@ export function setupRoutes(app: FastifyInstance, { db, config }: Deps): void {
 
         let subscriptionId: string | null = null;
         let code: string | null = null;
-        if (chief.mode === 'api_key') {
+        if (orchestrator.mode === 'api_key') {
           const [sub] = await tx.insert(subscriptions).values({
             companyId: company!.id,
-            provider: chief.provider,
+            provider: orchestrator.provider,
             kind: 'api_key',
-            label: 'Chief',
+            label: 'Orchestrator',
             ownerPersonId: person!.id,
-            secretEnc: encryptSecret(chief.apiKey, config.secret),
-            last4: chief.apiKey.slice(-4),
+            secretEnc: encryptSecret(orchestrator.apiKey, config.secret),
+            last4: orchestrator.apiKey.slice(-4),
             status: 'ready',
-            targetKind: 'chief',
+            targetKind: 'orchestrator',
           }).returning({ id: subscriptions.id });
           subscriptionId = sub!.id;
-        } else if (chief.mode === 'personal') {
+        } else if (orchestrator.mode === 'personal') {
           /* A personal subscription has no target: it serves wherever its owner works, here the whole company. */
           const [sub] = await tx.insert(subscriptions).values({
             companyId: company!.id,
-            provider: chief.provider,
+            provider: orchestrator.provider,
             kind: 'personal',
-            label: PLAN_LABELS[chief.provider],
+            label: PLAN_LABELS[orchestrator.provider],
             ownerPersonId: person!.id,
             status: 'waiting_machine',
           }).returning({ id: subscriptions.id });
@@ -97,9 +97,9 @@ export function setupRoutes(app: FastifyInstance, { db, config }: Deps): void {
 
         await tx.insert(agents).values({
           companyId: company!.id,
-          kind: 'chief',
-          name: 'Chief',
-          model: chiefModel(chief),
+          kind: 'orchestrator',
+          name: 'Orchestrator',
+          model: orchestratorModel(orchestrator),
           subscriptionId,
         });
         return { company: company!, person: person!, code };

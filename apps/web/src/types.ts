@@ -42,7 +42,7 @@ export type SubView = {
   place: { kind: 'company' | 'department'; id: string | null; name: string };
   machine: { id: string; hostname: string } | null;
   limits: Limits | null;
-  isChief: boolean;
+  isOrchestrator: boolean;
 };
 
 export type Team = { id: string; name: string; about: string; stage: number; gate: boolean };
@@ -51,7 +51,7 @@ export type Department = { id: string; name: string; roleCode: string; teams: Te
 
 export type Org = {
   company: Company;
-  chief: { name: string; model: string; subscription: SubView | null } | null;
+  orchestrator: { name: string; model: string; subscription: SubView | null } | null;
   agents: { total: number; working: number };
   people: PersonView[];
   departments: Department[];

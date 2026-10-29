@@ -12,7 +12,7 @@ export function orgRoutes(app: FastifyInstance, { db, hub }: Ctx): void {
     const me = await requirePerson(req, db);
     const [company] = await db.select({ id: companies.id, name: companies.name }).from(companies).where(eq(companies.id, me.companyId));
     const allAgents = await db.select().from(agents);
-    const chief = allAgents.find(a => a.kind === 'chief');
+    const orchestrator = allAgents.find(a => a.kind === 'orchestrator');
     const leaders = await db
       .select(personColumns)
       .from(people)
@@ -23,10 +23,10 @@ export function orgRoutes(app: FastifyInstance, { db, hub }: Ctx): void {
 
     return {
       company,
-      chief: chief && {
-        name: chief.name,
-        model: chief.model,
-        subscription: chief.subscriptionId ? await subView(db, s => hub.isOnline(identityOf(s)), chief.subscriptionId) : null,
+      orchestrator: orchestrator && {
+        name: orchestrator.name,
+        model: orchestrator.model,
+        subscription: orchestrator.subscriptionId ? await subView(db, s => hub.isOnline(identityOf(s)), orchestrator.subscriptionId) : null,
       },
       /* Nothing runs agents until nodes arrive in milestone 2, so none are working yet. */
       agents: { total: allAgents.length, working: 0 },

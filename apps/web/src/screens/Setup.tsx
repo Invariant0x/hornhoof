@@ -49,7 +49,7 @@ export function Setup({ onDone }: { onDone: () => void }) {
       setProblems({ apiKey: t.setup.pasteWholeKey });
       return;
     }
-    const chief =
+    const orchestrator =
       mode === 'api_key' ? { mode, provider: keyProvider, apiKey: apiKey.trim() } : mode === 'personal' ? { mode, provider: plan } : { mode };
     setBusy(true);
     setFailure('');
@@ -60,7 +60,7 @@ export function Setup({ onDone }: { onDone: () => void }) {
         email: email.trim(),
         password,
         title: title.trim(),
-        chief,
+        orchestrator,
       });
       if (res.command) setCommand(res.command);
       else onDone();
@@ -134,9 +134,9 @@ export function Setup({ onDone }: { onDone: () => void }) {
 
       {step === 2 && (
         <form onSubmit={finish} noValidate>
-          <p className="muted">{t.setup.chiefIntro}</p>
+          <p className="muted">{t.setup.orchestratorIntro}</p>
           <fieldset className="choice">
-            <legend className="sr">{t.setup.howChiefRuns}</legend>
+            <legend className="sr">{t.setup.howOrchestratorRuns}</legend>
             {MODES.map(id => (
               <label key={id} className={mode === id ? 'on' : ''}>
                 <input

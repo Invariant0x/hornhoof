@@ -55,7 +55,7 @@ describe('Setup', () => {
         email: 'ivan@acme.com',
         password: 'correct horse battery',
         title: 'CEO',
-        chief: { mode: 'api_key', provider: 'anthropic_api', apiKey: 'sk-ant-xyz12345' },
+        orchestrator: { mode: 'api_key', provider: 'anthropic_api', apiKey: 'sk-ant-xyz12345' },
       },
     }]);
     expect(onDone).toHaveBeenCalled();
@@ -71,7 +71,7 @@ describe('Setup', () => {
     await user.click(screen.getByRole('radio', { name: 'My subscription' }));
     await user.click(screen.getByRole('radio', { name: 'Codex' }));
     await user.click(screen.getByRole('button', { name: 'Finish setup' }));
-    expect(calls[0]!.body).toMatchObject({ chief: { mode: 'personal', provider: 'codex' } });
+    expect(calls[0]!.body).toMatchObject({ orchestrator: { mode: 'personal', provider: 'codex' } });
     expect(await screen.findByRole('heading', { name: 'Connect your machine' })).toBeInTheDocument();
     expect(screen.getByText(command)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument();
@@ -96,7 +96,7 @@ describe('Setup', () => {
     await user.click(screen.getByRole('button', { name: 'Next' }));
     await user.click(screen.getByRole('radio', { name: 'Later' }));
     await user.click(screen.getByRole('button', { name: 'Finish setup' }));
-    expect(calls[0]!.body).toMatchObject({ title: 'Founder', chief: { mode: 'later' } });
+    expect(calls[0]!.body).toMatchObject({ title: 'Founder', orchestrator: { mode: 'later' } });
   });
 
   it('offers GLM as a personal plan for the orchestrator', async () => {
@@ -107,7 +107,7 @@ describe('Setup', () => {
     await user.click(screen.getByRole('radio', { name: 'My subscription' }));
     await user.click(screen.getByRole('radio', { name: 'GLM' }));
     await user.click(screen.getByRole('button', { name: 'Finish setup' }));
-    expect(calls[0]!.body).toMatchObject({ chief: { mode: 'personal', provider: 'glm' } });
+    expect(calls[0]!.body).toMatchObject({ orchestrator: { mode: 'personal', provider: 'glm' } });
   });
 
   it('shows the server message when setup fails', async () => {

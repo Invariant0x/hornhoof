@@ -69,13 +69,13 @@ describe('POST /api/subscriptions/:id/test', () => {
 
   it('runs an API key on the built-in node with the decrypted key', async () => {
     const { app, url, ceo } = await liveCompany({ NODE_KEY });
-    const chief = (await app.inject({ url: '/api/org', ...as(ceo) })).json().chief.subscription;
+    const orchestrator = (await app.inject({ url: '/api/org', ...as(ceo) })).json().orchestrator.subscription;
     const builtin = await connectNode(url, NODE_KEY);
     builtin.send({ type: 'hello', version: '0.2.0', loggedIn: true, running: [] });
-    await until(async () => (await app.inject({ url: '/api/org', ...as(ceo) })).json().chief.subscription.online === true);
-    const res = await app.inject({ method: 'POST', url: `/api/subscriptions/${chief.id}/test`, ...as(ceo) });
+    await until(async () => (await app.inject({ url: '/api/org', ...as(ceo) })).json().orchestrator.subscription.online === true);
+    const res = await app.inject({ method: 'POST', url: `/api/subscriptions/${orchestrator.id}/test`, ...as(ceo) });
     expect(res.statusCode).toBe(201);
-    expect(await builtin.next()).toMatchObject({ type: 'job.run', provider: 'anthropic_api', secret: TEST_API_KEY, subscriptionId: chief.id });
+    expect(await builtin.next()).toMatchObject({ type: 'job.run', provider: 'anthropic_api', secret: TEST_API_KEY, subscriptionId: orchestrator.id });
     builtin.close();
   });
 

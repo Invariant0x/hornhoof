@@ -13,7 +13,7 @@ import { failOpenJobs } from '../nodes/messages.js';
 import { subView, subViews, type IsOnline } from './views.js';
 
 const Target = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('chief') }),
+  z.object({ kind: z.literal('orchestrator') }),
   z.object({ kind: z.literal('department'), id: z.uuid() }),
   z.object({ kind: z.literal('team'), id: z.uuid() }),
   z.object({ kind: z.literal('any') }),
@@ -89,7 +89,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
         targetKind: target.kind,
         targetId: 'id' in target ? target.id : null,
       }).returning({ id: subscriptions.id });
-      if (target.kind === 'chief') await tx.update(agents).set({ subscriptionId: sub!.id }).where(eq(agents.kind, 'chief'));
+      if (target.kind === 'orchestrator') await tx.update(agents).set({ subscriptionId: sub!.id }).where(eq(agents.kind, 'orchestrator'));
       return sub!.id;
     });
 
@@ -135,7 +135,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { command: installCommand(config.publicUrl, code) };
   });
 
-  app.post('/api/subscriptions/:id/chief', async req => {
+  app.post('/api/subscriptions/:id/orchestrator', async req => {
     const me = await requirePerson(req, db);
     requireCompanyScope(me);
     const sub = await liveSubscription(IdParams.parse(req.params).id);
@@ -145,7 +145,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
       const [owner] = await db.select({ scopeKind: people.scopeKind }).from(people).where(eq(people.id, sub.ownerPersonId));
       if (owner?.scopeKind !== 'company') throw notCompanyLevel();
     }
-    await db.update(agents).set({ subscriptionId: sub.id }).where(eq(agents.kind, 'chief'));
+    await db.update(agents).set({ subscriptionId: sub.id }).where(eq(agents.kind, 'orchestrator'));
     return { subscription: await subView(db, online, sub.id) };
   });
 

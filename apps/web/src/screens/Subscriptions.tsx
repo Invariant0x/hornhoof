@@ -162,10 +162,10 @@ export function Subscriptions({ me }: { me: Me }) {
     }
   }
 
-  const makeChief = (sub: SubView) =>
+  const makeOrchestrator = (sub: SubView) =>
     run(async () => {
-      const { subscription } = await api.post<{ subscription: SubView }>(`/api/subscriptions/${sub.id}/chief`);
-      setSubs(list => list?.map(s => (s.id === subscription.id ? subscription : { ...s, isChief: false })) ?? null);
+      const { subscription } = await api.post<{ subscription: SubView }>(`/api/subscriptions/${sub.id}/orchestrator`);
+      setSubs(list => list?.map(s => (s.id === subscription.id ? subscription : { ...s, isOrchestrator: false })) ?? null);
     });
 
   const newCommand = (sub: SubView) =>
@@ -249,10 +249,10 @@ export function Subscriptions({ me }: { me: Me }) {
                     <td>
                       <span className="sub-name">
                         <span className="pname">{name}</span>
-                        {s.isChief && (
+                        {s.isOrchestrator && (
                           <>
                             {' '}
-                            <span className="badge">{t.subs.chief}</span>
+                            <span className="badge">{t.subs.orchestrator}</span>
                           </>
                         )}
                       </span>
@@ -267,8 +267,8 @@ export function Subscriptions({ me }: { me: Me }) {
                       {s.status === 'ready' && s.online && (
                         <button className="linkbtn" type="button" aria-label={t.subs.runTestLabel(name)} disabled={test?.phase === 'running'} onClick={() => runTest(s)}>{t.subs.runTest}</button>
                       )}
-                      {company && s.place.kind === 'company' && !s.isChief && (
-                        <button className="linkbtn" type="button" aria-label={t.subs.useForChiefLabel(name)} onClick={() => makeChief(s)}>{t.subs.useForChief}</button>
+                      {company && s.place.kind === 'company' && !s.isOrchestrator && (
+                        <button className="linkbtn" type="button" aria-label={t.subs.useForOrchestratorLabel(name)} onClick={() => makeOrchestrator(s)}>{t.subs.useForOrchestrator}</button>
                       )}
                       {mine && s.kind === 'personal' && s.status === 'waiting_machine' && (
                         <button className="linkbtn" type="button" aria-label={t.subs.newCommandLabel(name)} onClick={() => newCommand(s)}>{t.subs.newCommand}</button>

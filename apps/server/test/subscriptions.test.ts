@@ -40,7 +40,7 @@ describe('POST /api/subscriptions/connect', () => {
     expect(body.command).toMatch(COMMAND);
     expect(body.subscriptions).toHaveLength(2);
     for (const [i, label] of ['Claude', 'Codex'].entries()) {
-      expect(body.subscriptions[i]).toMatchObject({ label, kind: 'personal', status: 'waiting_machine', online: false, owner: { name: 'Ivan' }, place: WHOLE, machine: null, limits: null, isChief: false });
+      expect(body.subscriptions[i]).toMatchObject({ label, kind: 'personal', status: 'waiting_machine', online: false, owner: { name: 'Ivan' }, place: WHOLE, machine: null, limits: null, isOrchestrator: false });
     }
     const [code] = await db.select().from(nodeCodes);
     expect(code!.subscriptionIds.sort()).toEqual(body.subscriptions.map((s: { id: string }) => s.id).sort());
@@ -116,47 +116,53 @@ describe('POST /api/subscriptions/:id/command', () => {
   });
 });
 
-describe('POST /api/subscriptions/:id/chief', () => {
-  it('moves the chief to a company-level personal subscription', async () => {
+describe('POST /api/subscriptions/:id/orchestrator', () => {
+  it('moves the orchestrator to a company-level personal subscription', async () => {
     const { app, ceo } = await companyWithMaria();
     const id = (await connect(app, ceo, ['claude'])).json().subscriptions[0].id;
-    const res = await post(app, ceo, `/api/subscriptions/${id}/chief`);
+    const res = await post(app, ceo, `/api/subscriptions/${id}/orchestrator`);
     expect(res.statusCode).toBe(200);
-    expect(res.json().subscription).toMatchObject({ id, isChief: true });
+    expect(res.json().subscription).toMatchObject({ id, isOrchestrator: true });
     const org = (await app.inject({ url: '/api/org', ...as(ceo) })).json();
-    expect(org.chief.subscription.id).toBe(id);
-    expect((await list(app, ceo)).filter((s: { isChief: boolean }) => s.isChief).map((s: { id: string }) => s.id)).toEqual([id]);
+    expect(org.orchestrator.subscription.id).toBe(id);
+    expect((await list(app, ceo)).filter((s: { isOrchestrator: boolean }) => s.isOrchestrator).map((s: { id: string }) => s.id)).toEqual([id]);
+  });
+
+  it('no longer answers at the old chief address', async () => {
+    const { app, ceo } = await companyWithMaria();
+    const id = (await connect(app, ceo, ['claude'])).json().subscriptions[0].id;
+    expect((await post(app, ceo, `/api/subscriptions/${id}/chief`)).statusCode).toBe(404);
   });
 
   it('refuses an API key that serves only a department', async () => {
     const { app, ceo, marketing } = await companyWithMaria();
     const key = await addKey(app, ceo, { kind: 'api_key', provider: 'anthropic_api', label: 'Marketing key', apiKey: TEST_API_KEY, target: { kind: 'department', id: marketing.id } });
-    const res = await post(app, ceo, `/api/subscriptions/${key.json().subscription.id}/chief`);
+    const res = await post(app, ceo, `/api/subscriptions/${key.json().subscription.id}/orchestrator`);
     expect(res.statusCode).toBe(400);
     expect(res.json().error.reason).toBe('not_company_level');
   });
 
-  it('frees the chief when its owner leaves company scope', async () => {
+  it('frees the orchestrator when its owner leaves company scope', async () => {
     const { app, db, ceo, marketing } = await companyWithMaria();
     const deputy = await invitePerson(app, ceo, { name: 'Oleg', email: 'oleg@acme.com', scope: { kind: 'company' } });
     const id = (await connect(app, deputy, ['claude'])).json().subscriptions[0].id;
-    expect((await post(app, ceo, `/api/subscriptions/${id}/chief`)).statusCode).toBe(200);
+    expect((await post(app, ceo, `/api/subscriptions/${id}/orchestrator`)).statusCode).toBe(200);
     const owner = (await list(app, ceo)).find((s: { id: string }) => s.id === id).owner;
     const moved = await app.inject({ method: 'PATCH', url: `/api/people/${owner.id}`, payload: { scope: { kind: 'department', id: marketing.id } }, ...as(ceo) });
     expect(moved.statusCode).toBe(200);
-    const [chief] = await db.select().from(agents).where(eq(agents.kind, 'chief'));
-    expect(chief!.subscriptionId).toBeNull();
+    const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    expect(orchestrator!.subscriptionId).toBeNull();
   });
 
   it('refuses a department plan and a person without company scope', async () => {
     const { app, ceo, maria } = await companyWithMaria();
     const theirs = (await connect(app, maria, ['claude'])).json().subscriptions[0].id;
-    const res = await post(app, ceo, `/api/subscriptions/${theirs}/chief`);
+    const res = await post(app, ceo, `/api/subscriptions/${theirs}/orchestrator`);
     expect(res.statusCode).toBe(400);
     expect(res.json().error.reason).toBe('not_company_level');
 
     const mine = (await connect(app, ceo, ['codex'])).json().subscriptions[0].id;
-    const notAllowed = await post(app, maria, `/api/subscriptions/${mine}/chief`);
+    const notAllowed = await post(app, maria, `/api/subscriptions/${mine}/orchestrator`);
     expect(notAllowed.statusCode).toBe(403);
     expect(notAllowed.json().error.reason).toBe('company_scope_only');
   });
@@ -171,14 +177,14 @@ describe('DELETE /api/subscriptions/:id', () => {
     expect(await list(app, maria)).toEqual([]);
   });
 
-  it('leaves the chief without a subscription when its one is removed, and forgets the key', async () => {
+  it('leaves the orchestrator without a subscription when its one is removed, and forgets the key', async () => {
     const { app, db } = await testApp();
     const ceo = await setUpCompany(app);
-    const [chief] = await db.select().from(agents);
-    const res = await app.inject({ method: 'DELETE', url: `/api/subscriptions/${chief!.subscriptionId}`, ...as(ceo) });
+    const [orchestrator] = await db.select().from(agents);
+    const res = await app.inject({ method: 'DELETE', url: `/api/subscriptions/${orchestrator!.subscriptionId}`, ...as(ceo) });
     expect(res.statusCode).toBe(204);
     const org = (await app.inject({ url: '/api/org', ...as(ceo) })).json();
-    expect(org.chief.subscription).toBeNull();
+    expect(org.orchestrator.subscription).toBeNull();
     const [row] = await db.select().from(subscriptions);
     expect(row!.secretEnc).toBeNull();
     expect(row!.removedAt).not.toBeNull();
@@ -197,7 +203,7 @@ describe('GET /api/subscriptions', () => {
   it('shows company scope everything and everyone else only their own', async () => {
     const { app, ceo, maria } = await companyWithMaria();
     await connect(app, maria, ['claude']);
-    expect((await list(app, ceo)).map((s: { label: string }) => s.label)).toEqual(['Chief', 'Claude']);
+    expect((await list(app, ceo)).map((s: { label: string }) => s.label)).toEqual(['Orchestrator', 'Claude']);
     expect((await list(app, maria)).map((s: { owner: { name: string } }) => s.owner.name)).toEqual(['Maria']);
   });
 
@@ -212,8 +218,8 @@ describe('GET /api/subscriptions', () => {
       expect(body).not.toContain('secretEnc');
       expect(body).not.toContain('v1.');
     }
-    expect((await list(app, ceo)).map((s: { label: string; place: { name: string }; isChief: boolean }) => [s.label, s.place.name, s.isChief])).toEqual([
-      ['Chief', 'Whole company', true],
+    expect((await list(app, ceo)).map((s: { label: string; place: { name: string }; isOrchestrator: boolean }) => [s.label, s.place.name, s.isOrchestrator])).toEqual([
+      ['Orchestrator', 'Whole company', true],
       ['Company OpenAI', 'Whole company', false],
     ]);
   });
@@ -223,7 +229,7 @@ describe('POST /api/subscriptions', () => {
   it('takes only API keys, personal subscriptions connect through a machine', async () => {
     const { app } = await testApp();
     const ceo = await setUpCompany(app);
-    const res = await addKey(app, ceo, { provider: 'claude', kind: 'personal', label: 'Ivan Max', target: { kind: 'chief' } });
+    const res = await addKey(app, ceo, { provider: 'claude', kind: 'personal', label: 'Ivan Max', target: { kind: 'orchestrator' } });
     expect(res.statusCode).toBe(400);
     expect(res.json().error.code).toBe('validation');
   });
@@ -246,15 +252,15 @@ describe('POST /api/subscriptions', () => {
     expect(res.json().subscription.place).toEqual({ kind: 'department', id: development.id, name: 'Development' });
   });
 
-  it('connects a chief that waited for a subscription', async () => {
+  it('connects a orchestrator that waited for a subscription', async () => {
     const { app, db } = await testApp();
-    const setup = await app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, chief: { mode: 'later' } } });
+    const setup = await app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, orchestrator: { mode: 'later' } } });
     const ceo = setup.cookies[0]!.value;
-    const res = await addKey(app, ceo, { provider: 'anthropic_api', kind: 'api_key', label: 'Chief key', apiKey: 'sk-ant-api03-late-key-1234', target: { kind: 'chief' } });
+    const res = await addKey(app, ceo, { provider: 'anthropic_api', kind: 'api_key', label: 'Orchestrator key', apiKey: 'sk-ant-api03-late-key-1234', target: { kind: 'orchestrator' } });
     expect(res.statusCode).toBe(201);
-    const [chief] = await db.select().from(agents);
-    expect(chief!.subscriptionId).toBe(res.json().subscription.id);
+    const [orchestrator] = await db.select().from(agents);
+    expect(orchestrator!.subscriptionId).toBe(res.json().subscription.id);
     const org = (await app.inject({ url: '/api/org', ...as(ceo) })).json();
-    expect(org.chief.subscription).toMatchObject({ label: 'Chief key', last4: '1234', isChief: true });
+    expect(org.orchestrator.subscription).toMatchObject({ label: 'Orchestrator key', last4: '1234', isOrchestrator: true });
   });
 });

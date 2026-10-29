@@ -57,10 +57,10 @@ export async function reinvite(db: Db, personId: string, by: Pick<Person, 'id' |
   return { token, person };
 }
 
-/* The chief is company-wide, so it leaves a personal plan whose owner no longer works for the whole company. */
-async function freeChiefFrom(db: Db, personId: string): Promise<void> {
+/* The orchestrator is company-wide, so it leaves a personal plan whose owner no longer works for the whole company. */
+async function freeOrchestratorFrom(db: Db, personId: string): Promise<void> {
   const theirs = db.select({ id: subscriptions.id }).from(subscriptions).where(and(eq(subscriptions.ownerPersonId, personId), eq(subscriptions.kind, 'personal')));
-  await db.update(agents).set({ subscriptionId: null }).where(and(eq(agents.kind, 'chief'), inArray(agents.subscriptionId, theirs)));
+  await db.update(agents).set({ subscriptionId: null }).where(and(eq(agents.kind, 'orchestrator'), inArray(agents.subscriptionId, theirs)));
 }
 
 export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
@@ -186,12 +186,12 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
       if (changes.status === 'disabled') await tx.delete(sessions).where(eq(sessions.personId, id));
       return row!;
     });
-    /* A disabled person's plans stop serving the company: their machines disconnect and the chief lets go. */
+    /* A disabled person's plans stop serving the company: their machines disconnect and the orchestrator lets go. */
     if (changes.status === 'disabled') {
       const theirs = await db.select({ id: machines.id }).from(machines).where(and(eq(machines.personId, id), isNull(machines.revokedAt)));
       await disconnectMachines(ctx, theirs.map(m => m.id));
     }
-    if (changes.status === 'disabled' || (changes.scopeKind && changes.scopeKind !== 'company')) await freeChiefFrom(db, id);
+    if (changes.status === 'disabled' || (changes.scopeKind && changes.scopeKind !== 'company')) await freeOrchestratorFrom(db, id);
     return { person: await personView(db, person) };
   });
 }

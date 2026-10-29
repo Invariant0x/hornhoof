@@ -81,7 +81,7 @@ export const teams = pgTable('teams', {
 
 export const PROVIDERS = ['claude', 'codex', 'kimi', 'glm', 'anthropic_api', 'openai_api'] as const;
 export type Provider = (typeof PROVIDERS)[number];
-export const TARGET_KINDS = ['chief', 'department', 'team', 'any'] as const;
+export const TARGET_KINDS = ['orchestrator', 'department', 'team', 'any'] as const;
 
 /* A computer a person ran the installer on. One per person and machine key, so running it again reuses the row. */
 export const machines = pgTable(
@@ -142,7 +142,7 @@ export const subscriptions = pgTable(
 export const agents = pgTable('agents', {
   id: id(),
   companyId: companyId(),
-  kind: text('kind', { enum: ['chief', 'head', 'worker'] }).notNull(),
+  kind: text('kind', { enum: ['orchestrator', 'head', 'worker'] }).notNull(),
   name: text('name').notNull(),
   model: text('model').notNull(),
   departmentId: uuid('department_id').references(() => departments.id),

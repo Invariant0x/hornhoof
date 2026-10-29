@@ -35,10 +35,10 @@ export const PEOPLE: PersonView[] = [
 
 export const ORG: Org = {
   company: { id: 'c1', name: 'Acme' },
-  chief: {
-    name: 'Chief',
+  orchestrator: {
+    name: 'Orchestrator',
     model: 'claude-opus-5-5',
-    subscription: { id: 's1', provider: 'anthropic_api', kind: 'api_key', label: 'Chief', status: 'ready', online: false, last4: '9f3a', owner: { id: 'p1', name: 'Ivan' }, place: { kind: 'company', id: null, name: 'Whole company' }, machine: null, limits: null, isChief: true },
+    subscription: { id: 's1', provider: 'anthropic_api', kind: 'api_key', label: 'Orchestrator', status: 'ready', online: false, last4: '9f3a', owner: { id: 'p1', name: 'Ivan' }, place: { kind: 'company', id: null, name: 'Whole company' }, machine: null, limits: null, isOrchestrator: true },
   },
   agents: { total: 1, working: 0 },
   people: PEOPLE.slice(0, 2),
@@ -53,7 +53,7 @@ export const ORG_WITH_TEAMS: Org = {
   ],
 };
 
-const SUB_BASE = { kind: 'personal' as const, last4: null, owner: { id: 'p1', name: 'Ivan' }, place: { kind: 'company' as const, id: null, name: 'Whole company' }, limits: null, isChief: false };
+const SUB_BASE = { kind: 'personal' as const, last4: null, owner: { id: 'p1', name: 'Ivan' }, place: { kind: 'company' as const, id: null, name: 'Whole company' }, limits: null, isOrchestrator: false };
 
 export const MACHINE = { id: 'm1', hostname: 'ivan-mbp' };
 
@@ -64,7 +64,7 @@ export const SUBS: SubView[] = [
   },
   { ...SUB_BASE, id: 's-codex', provider: 'codex', label: 'Codex', status: 'needs_login', online: true, machine: MACHINE },
   { ...SUB_BASE, id: 's-kimi', provider: 'kimi', label: 'Kimi', status: 'waiting_machine', online: false, machine: null },
-  { ...SUB_BASE, id: 's-key', provider: 'anthropic_api', kind: 'api_key', label: 'Chief', status: 'ready', online: true, last4: '9f3a', machine: null, isChief: true },
+  { ...SUB_BASE, id: 's-key', provider: 'anthropic_api', kind: 'api_key', label: 'Orchestrator', status: 'ready', online: true, last4: '9f3a', machine: null, isOrchestrator: true },
 ];
 
 export const MACHINES: MachineView[] = [

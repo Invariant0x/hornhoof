@@ -18,7 +18,7 @@ export type SubView = {
   place: Place;
   machine: { id: string; hostname: string } | null;
   limits: Limits | null;
-  isChief: boolean;
+  isOrchestrator: boolean;
 };
 
 export type IsOnline = (sub: { id: string; kind: 'personal' | 'api_key' }) => boolean;
@@ -62,7 +62,7 @@ export async function subViews(db: Db, isOnline: IsOnline, id?: string): Promise
     .orderBy(asc(subscriptions.createdAt));
   const depts = new Map((await db.select({ id: departments.id, name: departments.name }).from(departments)).map(d => [d.id, d.name]));
   const teamDept = new Map((await db.select({ id: teams.id, departmentId: teams.departmentId }).from(teams)).map(t => [t.id, t.departmentId]));
-  const [chief] = await db.select({ subscriptionId: agents.subscriptionId }).from(agents).where(eq(agents.kind, 'chief'));
+  const [orchestrator] = await db.select({ subscriptionId: agents.subscriptionId }).from(agents).where(eq(agents.kind, 'orchestrator'));
   return rows.map(r => ({
     id: r.id,
     provider: r.provider,
@@ -75,7 +75,7 @@ export async function subViews(db: Db, isOnline: IsOnline, id?: string): Promise
     place: r.kind === 'personal' ? placeOf(r.ownerScopeKind, r.ownerScopeId, depts, teamDept) : placeOf(r.targetKind, r.targetId, depts, teamDept),
     machine: r.machineId ? { id: r.machineId, hostname: r.machineHost ?? '' } : null,
     limits: r.limits ?? null,
-    isChief: chief?.subscriptionId === r.id,
+    isOrchestrator: orchestrator?.subscriptionId === r.id,
   }));
 }
 

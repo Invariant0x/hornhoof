@@ -18,7 +18,7 @@ export const SETUP = {
   name: 'Ivan',
   email: ' Ivan@Acme.com ',
   password: 'correct horse battery',
-  chief: { mode: 'api_key', provider: 'anthropic_api', apiKey: TEST_API_KEY },
+  orchestrator: { mode: 'api_key', provider: 'anthropic_api', apiKey: TEST_API_KEY },
 };
 
 async function openTestDb(): Promise<{ client: PGlite; db: Db }> {

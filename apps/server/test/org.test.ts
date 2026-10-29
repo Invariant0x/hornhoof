@@ -3,17 +3,17 @@ import { companies, departments, people, teams } from '../src/db/schema.js';
 import { as, SETUP, setUpCompany, testApp } from './helpers.js';
 
 describe('GET /api/org', () => {
-  it('shows the chief with its active API key subscription', async () => {
+  it('shows the orchestrator with its active API key subscription', async () => {
     const { app } = await testApp();
     const ceo = await setUpCompany(app);
     const res = await app.inject({ url: '/api/org', ...as(ceo) });
     expect(res.statusCode).toBe(200);
     const org = res.json();
     expect(org.company.name).toBe('Acme');
-    expect(org.chief).toMatchObject({
-      name: 'Chief',
+    expect(org.orchestrator).toMatchObject({
+      name: 'Orchestrator',
       model: 'claude-opus-5-5',
-      subscription: { provider: 'anthropic_api', kind: 'api_key', status: 'ready', online: false, last4: '9f3a', owner: { name: 'Ivan' }, place: { kind: 'company', id: null, name: 'Whole company' }, isChief: true },
+      subscription: { provider: 'anthropic_api', kind: 'api_key', status: 'ready', online: false, last4: '9f3a', owner: { name: 'Ivan' }, place: { kind: 'company', id: null, name: 'Whole company' }, isOrchestrator: true },
     });
     expect(org.agents).toEqual({ total: 1, working: 0 });
     expect(org.people.map((p: { name: string }) => p.name)).toEqual(['Ivan']);
@@ -49,10 +49,10 @@ describe('GET /api/org', () => {
     expect(org.people.map((p: { name: string }) => p.name)).toEqual(['Ivan', 'New deputy']);
   });
 
-  it('shows no subscription when the chief waits for one', async () => {
+  it('shows no subscription when the orchestrator waits for one', async () => {
     const { app } = await testApp();
-    const res = await app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, chief: { mode: 'later' } } });
+    const res = await app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, orchestrator: { mode: 'later' } } });
     const org = (await app.inject({ url: '/api/org', cookies: { hh_session: res.cookies[0]!.value } })).json();
-    expect(org.chief.subscription).toBeNull();
+    expect(org.orchestrator.subscription).toBeNull();
   });
 });
