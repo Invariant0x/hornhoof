@@ -21,7 +21,9 @@ Open http://localhost:8080 and follow the setup: name your company, create your 
 
 Keep `.env` safe. `HORNHOOF_SECRET` encrypts the API keys stored in the database, and without it they cannot be read back.
 
-If people will open Hornhoof from other machines, add `PUBLIC_URL=https://your.domain` to `.env`. Invite links use it, and sign-in cookies are marked secure when it starts with `https://`.
+If people will open Hornhoof from other machines, add `PUBLIC_URL=https://your.domain` to `.env`. Invite links and the node command use it, and sign-in cookies are marked secure when it starts with `https://`. Hornhoof itself serves plain HTTP, so put something that handles TLS in front of it, like Caddy, nginx or a Cloudflare tunnel. Without TLS the browser drops the secure cookie and you stay on the login screen.
+
+Errors go to the container log: `docker compose logs app`.
 
 ## Development
 
