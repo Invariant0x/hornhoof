@@ -80,7 +80,7 @@ button, input, select { font: inherit; color: inherit; }
 
 /* Form fields */
 .field { display: grid; gap: 6px; }
-.field > span { font-size: 13px; font-weight: 500; color: var(--muted); }
+.field > label { font-size: 13px; font-weight: 500; color: var(--muted); }
 .field input, .field select {
   height: 40px; padding: 0 12px;
   border: 1px solid var(--line2); border-radius: 0;
@@ -115,3 +115,31 @@ button, input, select { font: inherit; color: inherit; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* Setup wizard */
+.wizard-head { display: grid; gap: 10px; }
+.steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 0; padding: 0; list-style: none; }
+.steps li { height: 3px; background: var(--line); }
+.steps li.on { background: var(--cyan); }
+.choice, .segments { margin: 0; padding: 0; border: 0; }
+.choice { display: grid; gap: 8px; }
+.choice label {
+  display: grid; grid-template-columns: auto 1fr; column-gap: 10px; row-gap: 2px; align-items: baseline;
+  padding: 12px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--surface2);
+}
+.choice label.on { border-color: var(--cyan); box-shadow: inset 3px 0 0 var(--cyan); }
+.choice input { margin: 0; accent-color: var(--cyan-ink); }
+.choice b { font-weight: 600; }
+.choice span { grid-column: 2; font-size: 13px; color: var(--muted); }
+.segments { display: flex; }
+.segments label {
+  flex: 1; display: flex; align-items: center; justify-content: center; min-height: 38px; cursor: pointer;
+  border: 1px solid var(--line2); margin-left: -1px; background: var(--surface2); font-weight: 500;
+}
+.segments label:first-of-type { margin-left: 0; }
+.segments label.on { position: relative; border-color: var(--cyan); background: var(--glow); color: var(--cyan-ink); }
+.segments input { position: absolute; opacity: 0; pointer-events: none; }
+.segments label:has(input:focus-visible) { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.command { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: start; padding: 12px; background: var(--surface2); border: 1px solid var(--line); }
+.command code { font-family: var(--f-mono); font-size: 12px; line-height: 1.55; word-break: break-all; }
