@@ -1,4 +1,4 @@
-import { asc, eq } from 'drizzle-orm';
+import { and, asc, eq, ne } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import type { Deps } from '../../app.js';
 import { personColumns, requirePerson } from '../../auth/session.js';
@@ -12,7 +12,11 @@ export function orgRoutes(app: FastifyInstance, { db }: Deps): void {
     const [company] = await db.select({ id: companies.id, name: companies.name }).from(companies).where(eq(companies.id, me.companyId));
     const allAgents = await db.select().from(agents);
     const chief = allAgents.find(a => a.kind === 'chief');
-    const leaders = await db.select(personColumns).from(people).where(eq(people.scopeKind, 'company')).orderBy(asc(people.createdAt));
+    const leaders = await db
+      .select(personColumns)
+      .from(people)
+      .where(and(eq(people.scopeKind, 'company'), ne(people.status, 'disabled')))
+      .orderBy(asc(people.createdAt));
     const depts = await db.select().from(departments).orderBy(asc(departments.position), asc(departments.createdAt));
     const allTeams = await db.select().from(teams).orderBy(asc(teams.stage), asc(teams.createdAt));
 
