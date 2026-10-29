@@ -19,7 +19,10 @@ export type ErrorReason =
   | 'not_owner'
   | 'already_connected'
   | 'not_company_level'
-  | 'subscription_unknown';
+  | 'subscription_unknown'
+  | 'code_unknown'
+  | 'code_used'
+  | 'machine_unknown';
 
 export class ApiError extends Error {
   constructor(

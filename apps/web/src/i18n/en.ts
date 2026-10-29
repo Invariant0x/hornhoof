@@ -135,10 +135,13 @@ export const en = {
     owner_locked: 'This cannot be done to the company owner.',
     self_locked: 'You cannot do this to yourself.',
     unknown_place: 'This department or team no longer exists. Reload the page and pick again.',
-    not_owner: 'Only the owner of this subscription can do this.',
+    not_owner: 'Only the owner can do this.',
     already_connected: 'This subscription is already connected to a machine.',
     not_company_level: 'The chief can only run on a subscription that serves the whole company.',
     subscription_unknown: 'This subscription no longer exists. Reload the page.',
+    code_unknown: 'This install command is not valid. Copy it again from Hornhoof.',
+    code_used: 'This install command was already used or has expired. Get a new one in Hornhoof.',
+    machine_unknown: 'This machine is no longer connected. Reload the page.',
   },
 };
 

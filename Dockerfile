@@ -22,6 +22,7 @@ RUN npm ci --omit=dev --workspace apps/server --workspace packages/protocol && n
 COPY --from=build /app/packages/protocol/dist packages/protocol/dist
 COPY --from=build /app/apps/server/dist apps/server/dist
 COPY apps/server/drizzle apps/server/drizzle
+COPY scripts/install.sh scripts/install.sh
 COPY --from=build /app/apps/web/dist apps/web/dist
 USER node
 EXPOSE 8080
