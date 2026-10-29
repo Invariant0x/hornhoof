@@ -11,17 +11,20 @@ import { createNodeCode } from '../nodes/codes.js';
 import { installCommand } from '../nodes/command.js';
 
 const DEFAULT_MODEL = 'claude-opus-5-5';
-const PLAN_LABELS = { claude: 'Claude', codex: 'Codex', kimi: 'Kimi' } as const;
+const PLAN_LABELS = { claude: 'Claude', codex: 'Codex', kimi: 'Kimi', glm: 'GLM' } as const;
+/* Claude Code passes it to Z.ai's endpoint as it is. */
+const GLM_MODEL = 'glm-5.3';
 
 const SetupBody = z.object({
   companyName: z.string().trim().min(1).max(80),
   name: z.string().trim().min(1).max(80),
   email: z.string().trim().toLowerCase().email(),
   password: z.string().min(10).max(200),
+  title: z.string().trim().max(80).optional(),
   chief: z.discriminatedUnion('mode', [
     z.object({ mode: z.literal('later') }),
     z.object({ mode: z.literal('api_key'), provider: z.enum(['anthropic_api', 'openai_api']), apiKey: z.string().trim().min(8) }),
-    z.object({ mode: z.literal('personal'), provider: z.enum(['claude', 'codex', 'kimi']) }),
+    z.object({ mode: z.literal('personal'), provider: z.enum(['claude', 'codex', 'kimi', 'glm']) }),
   ]),
 });
 
@@ -29,6 +32,7 @@ type Chief = z.infer<typeof SetupBody>['chief'];
 
 function chiefModel(chief: Chief): string {
   if (chief.mode === 'later' || chief.provider === 'anthropic_api' || chief.provider === 'claude') return DEFAULT_MODEL;
+  if (chief.provider === 'glm') return GLM_MODEL;
   return chief.provider;
 }
 
@@ -55,7 +59,7 @@ export function setupRoutes(app: FastifyInstance, { db, config }: Deps): void {
           companyId: company!.id,
           name: body.name,
           email: body.email,
-          title: 'CEO',
+          title: body.title || 'CEO',
           passwordHash,
           status: 'active',
           scopeKind: 'company',

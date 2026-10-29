@@ -61,6 +61,36 @@ describe('POST /api/setup', () => {
     expect(res.json().command).toMatch(/^curl -fsSL https:\/\/hq\.acme\.com\/install\.sh \| bash -s -- --join /);
   });
 
+  it('stores the title the CEO typed, and CEO when it is empty', async () => {
+    const first = await testApp();
+    const res = await first.app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, title: '  Founder  ' } });
+    expect(res.json().person.title).toBe('Founder');
+    const [founder] = await first.db.select().from(people);
+    expect(founder!.title).toBe('Founder');
+
+    const second = await testApp();
+    await second.app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, title: '   ' } });
+    const [ceo] = await second.db.select().from(people);
+    expect(ceo!.title).toBe('CEO');
+  });
+
+  it('refuses a title over 80 characters', async () => {
+    const { app } = await testApp();
+    const res = await app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, title: 'x'.repeat(81) } });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('accepts a GLM Coding Plan as the personal chief', async () => {
+    const { app, db } = await testApp();
+    const res = await app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, chief: { mode: 'personal', provider: 'glm' } } });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().command).toMatch(/--join /);
+    const [sub] = await db.select().from(subscriptions);
+    expect(sub).toMatchObject({ kind: 'personal', provider: 'glm', label: 'GLM', status: 'waiting_machine' });
+    const [chief] = await db.select().from(agents);
+    expect(chief).toMatchObject({ subscriptionId: sub!.id, model: 'glm-5.3' });
+  });
+
   it('lets the chief wait for a subscription', async () => {
     const { app, db } = await testApp();
     const res = await app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, chief: { mode: 'later' } } });

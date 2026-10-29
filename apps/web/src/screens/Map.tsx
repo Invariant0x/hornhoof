@@ -17,7 +17,9 @@ type View = { x: number; y: number; k: number };
 export function chiefStatus(t: Messages, sub: SubView | null): string {
   if (!sub) return t.map.needsSubscription;
   if (sub.kind === 'api_key') return t.map.runsOnKey(PROVIDER_NAMES[sub.provider], sub.last4 ?? '');
-  if (sub.status === 'waiting_machine') return t.map.waitingMachine(PROVIDER_NAMES[sub.provider]);
+  if (sub.status === 'waiting_machine') return t.map.waitingMachine(sub.owner.name);
+  if (sub.status === 'needs_login') return t.map.waitingLogin(PROVIDER_NAMES[sub.provider]);
+  if (!sub.online) return t.map.machineOffline(sub.owner.name);
   return t.map.runsOnPersonal(sub.owner.name, PROVIDER_NAMES[sub.provider]);
 }
 

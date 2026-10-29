@@ -54,6 +54,7 @@ describe('Setup', () => {
         name: 'Ivan',
         email: 'ivan@acme.com',
         password: 'correct horse battery',
+        title: 'CEO',
         chief: { mode: 'api_key', provider: 'anthropic_api', apiKey: 'sk-ant-xyz12345' },
       },
     }]);
@@ -74,9 +75,39 @@ describe('Setup', () => {
     expect(await screen.findByRole('heading', { name: 'Connect your machine' })).toBeInTheDocument();
     expect(screen.getByText(command)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument();
+    expect(screen.getByText('Agents will run on this machine with your subscription. People with access to this Hornhoof can give them work.')).toBeInTheDocument();
     expect(onDone).not.toHaveBeenCalled();
     await user.click(screen.getByRole('button', { name: 'Go to the map' }));
     expect(onDone).toHaveBeenCalled();
+  });
+
+  it('asks the CEO for a title and sends it', async () => {
+    const calls = mockApi({ 'POST /api/setup': [201, CREATED] });
+    const user = userEvent.setup();
+    render(<Setup onDone={() => {}} />);
+    await user.type(screen.getByLabelText('Company name'), 'Acme');
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    expect(screen.getByLabelText('Your title')).toHaveValue('CEO');
+    await user.clear(screen.getByLabelText('Your title'));
+    await user.type(screen.getByLabelText('Your title'), 'Founder');
+    await user.type(screen.getByLabelText('Your name'), 'Ivan');
+    await user.type(screen.getByLabelText('Email'), 'ivan@acme.com');
+    await user.type(screen.getByLabelText('Password'), 'correct horse battery');
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    await user.click(screen.getByRole('radio', { name: 'Later' }));
+    await user.click(screen.getByRole('button', { name: 'Finish setup' }));
+    expect(calls[0]!.body).toMatchObject({ title: 'Founder', chief: { mode: 'later' } });
+  });
+
+  it('offers GLM as a personal plan for the chief', async () => {
+    const calls = mockApi({ 'POST /api/setup': [201, { ...CREATED, command: 'curl x' }] });
+    const user = userEvent.setup();
+    render(<Setup onDone={() => {}} />);
+    await fillFirstTwoSteps(user);
+    await user.click(screen.getByRole('radio', { name: 'My subscription' }));
+    await user.click(screen.getByRole('radio', { name: 'GLM' }));
+    await user.click(screen.getByRole('button', { name: 'Finish setup' }));
+    expect(calls[0]!.body).toMatchObject({ chief: { mode: 'personal', provider: 'glm' } });
   });
 
   it('shows the server message when setup fails', async () => {

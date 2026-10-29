@@ -1,20 +1,15 @@
 import { useId, useState, type FormEvent } from 'react';
 import { api } from '../api';
 import { errorText, useT } from '../i18n';
+import { PLAN_PROVIDERS, PROVIDER_NAMES, type PlanProvider } from '../providers';
 import { Card } from '../ui/Card';
-import { CopyButton } from '../ui/CopyButton';
+import { CommandBox } from '../ui/CommandBox';
 import { Field } from '../ui/Field';
 
 type Mode = 'api_key' | 'personal' | 'later';
 type KeyProvider = 'anthropic_api' | 'openai_api';
-type PlanProvider = 'claude' | 'codex' | 'kimi';
 
 const MODES: Mode[] = ['api_key', 'personal', 'later'];
-const PLANS: { id: PlanProvider; label: string }[] = [
-  { id: 'claude', label: 'Claude' },
-  { id: 'codex', label: 'Codex' },
-  { id: 'kimi', label: 'Kimi' },
-];
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function Setup({ onDone }: { onDone: () => void }) {
@@ -24,6 +19,7 @@ export function Setup({ onDone }: { onDone: () => void }) {
   const [step, setStep] = useState(0);
   const [companyName, setCompanyName] = useState('');
   const [name, setName] = useState('');
+  const [title, setTitle] = useState('CEO');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [mode, setMode] = useState<Mode>('api_key');
@@ -63,6 +59,7 @@ export function Setup({ onDone }: { onDone: () => void }) {
         name: name.trim(),
         email: email.trim(),
         password,
+        title: title.trim(),
         chief,
       });
       if (res.command) setCommand(res.command);
@@ -78,11 +75,8 @@ export function Setup({ onDone }: { onDone: () => void }) {
     return (
       <Card>
         <h1>{t.setup.connectMachine}</h1>
-        <p className="muted">{t.setup.runThis(PLANS.find(p => p.id === plan)!.label)}</p>
-        <div className="command">
-          <code>{command}</code>
-          <CopyButton text={command} />
-        </div>
+        <p className="muted">{t.setup.runThis(PROVIDER_NAMES[plan])}</p>
+        <CommandBox command={command} />
         <p className="muted">{t.setup.joinOnce}</p>
         <div className="actions">
           <button className="btn" type="button" onClick={onDone}>{t.setup.goToMap}</button>
@@ -121,6 +115,9 @@ export function Setup({ onDone }: { onDone: () => void }) {
           <p className="muted">{t.setup.becomeCeo(companyName.trim())}</p>
           <Field label={t.setup.yourName}>
             {p => <input {...p} value={name} onChange={e => setName(e.target.value)} maxLength={80} autoFocus autoComplete="name" />}
+          </Field>
+          <Field label={t.setup.yourTitle}>
+            {p => <input {...p} value={title} onChange={e => setTitle(e.target.value)} maxLength={80} autoComplete="organization-title" />}
           </Field>
           <Field label={t.common.email} problem={problems.email}>
             {p => <input {...p} type="email" value={email} onChange={e => setEmail(e.target.value)} autoComplete="email" />}
@@ -176,10 +173,10 @@ export function Setup({ onDone }: { onDone: () => void }) {
           {mode === 'personal' && (
             <fieldset className="segments">
               <legend className="sr">{t.setup.subscription}</legend>
-              {PLANS.map(p => (
-                <label key={p.id} className={plan === p.id ? 'on' : ''}>
-                  <input type="radio" name="plan" value={p.id} checked={plan === p.id} onChange={() => setPlan(p.id)} />
-                  {p.label}
+              {PLAN_PROVIDERS.map(id => (
+                <label key={id} className={plan === id ? 'on' : ''}>
+                  <input type="radio" name="plan" value={id} checked={plan === id} onChange={() => setPlan(id)} />
+                  {PROVIDER_NAMES[id]}
                 </label>
               ))}
             </fieldset>
