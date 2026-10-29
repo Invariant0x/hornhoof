@@ -4,6 +4,7 @@ import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastif
 import type { Config } from './config.js';
 import { registerErrorHandling } from './errors.js';
 import { authRoutes } from './modules/auth/routes.js';
+import { jobRoutes } from './modules/jobs/routes.js';
 import { NodeHub } from './modules/nodes/hub.js';
 import { handleNodeClose, handleNodeMessage } from './modules/nodes/messages.js';
 import { nodeRoutes } from './modules/nodes/routes.js';
@@ -46,5 +47,6 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   subscriptionRoutes(app, ctx);
   nodeRoutes(app, ctx);
   nodeSocket(app, ctx);
+  jobRoutes(app, ctx);
   return app;
 }

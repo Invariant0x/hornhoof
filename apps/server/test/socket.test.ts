@@ -1,15 +1,13 @@
-import type { AddressInfo } from 'node:net';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { jobs, subscriptions } from '../src/db/schema.js';
-import { as, connectNode, setUpCompany, testApp, until } from './helpers.js';
+import { as, connectNode, listen, setUpCompany, testApp, until } from './helpers.js';
 
 async function liveCompany() {
   const { app, db } = await testApp({ NODE_PING_MS: '50' });
-  await app.listen({ host: '127.0.0.1', port: 0 });
+  const url = await listen(app);
   onTestFinished(() => app.close());
-  const url = `ws://127.0.0.1:${(app.server.address() as AddressInfo).port}/api/nodes/socket`;
   const ceo = await setUpCompany(app);
   const connected = await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude'] }, ...as(ceo) });
   const code = connected.json().command.split('--join ')[1];

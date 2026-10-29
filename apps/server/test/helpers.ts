@@ -1,3 +1,4 @@
+import type { AddressInfo } from 'node:net';
 import type { NodeMessage, ServerMessage } from '@hornhoof/protocol';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
@@ -97,4 +98,10 @@ export async function until(check: () => Promise<boolean> | boolean, ms = 2000):
     if (Date.now() > end) throw new Error('Timed out waiting.');
     await new Promise(r => setTimeout(r, 15));
   }
+}
+
+/* Starts the app on a free local port and returns the node socket address. */
+export async function listen(app: FastifyInstance): Promise<string> {
+  await app.listen({ host: '127.0.0.1', port: 0 });
+  return `ws://127.0.0.1:${(app.server.address() as AddressInfo).port}/api/nodes/socket`;
 }

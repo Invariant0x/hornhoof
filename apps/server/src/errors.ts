@@ -22,7 +22,10 @@ export type ErrorReason =
   | 'subscription_unknown'
   | 'code_unknown'
   | 'code_used'
-  | 'machine_unknown';
+  | 'machine_unknown'
+  | 'machine_offline'
+  | 'needs_login'
+  | 'job_unknown';
 
 export class ApiError extends Error {
   constructor(
