@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+. "$STUB_SRC/_log.sh"
+# The tests pick the user, so a run as root (a CI container) and a run as a person see the same thing.
+case "${1:-}" in
+  -u) echo "${STUB_UID:-1000}" ;;
+  *) echo "uid=${STUB_UID:-1000}" ;;
+esac

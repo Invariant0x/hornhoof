@@ -5,6 +5,7 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import WebSocket from 'ws';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
+import { onTestFinished } from 'vitest';
 import { buildApp } from '../src/app.js';
 import { loadConfig, type Config } from '../src/config.js';
 import { MIGRATIONS, type Db } from '../src/db/client.js';
@@ -20,16 +21,30 @@ export const SETUP = {
   chief: { mode: 'api_key', provider: 'anthropic_api', apiKey: TEST_API_KEY },
 };
 
-export async function createTestDb(): Promise<Db> {
-  const db = drizzle(new PGlite(), { schema });
+async function openTestDb(): Promise<{ client: PGlite; db: Db }> {
+  const client = new PGlite();
+  const db = drizzle(client, { schema });
   await migrate(db, { migrationsFolder: MIGRATIONS });
-  return db as unknown as Db;
+  return { client, db: db as unknown as Db };
+}
+
+/* Each PGlite is a whole Postgres in WASM memory, so it closes when its test ends. Call these inside a test. */
+export async function createTestDb(): Promise<Db> {
+  const { client, db } = await openTestDb();
+  onTestFinished(() => client.close());
+  return db;
 }
 
 export async function testApp(env: NodeJS.ProcessEnv = {}): Promise<{ app: FastifyInstance; db: Db; config: Config }> {
-  const db = await createTestDb();
+  const { client, db } = await openTestDb();
+  let app: FastifyInstance | undefined;
+  /* The app closes first, since stopping it can still write to the database. */
+  onTestFinished(async () => {
+    await app?.close();
+    await client.close();
+  });
   const config = loadConfig({ HORNHOOF_SECRET: TEST_SECRET, ...env });
-  const app = await buildApp({ db, config });
+  app = await buildApp({ db, config });
   return { app, db, config };
 }
 

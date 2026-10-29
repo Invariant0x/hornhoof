@@ -15,7 +15,7 @@ const SUB_B = '9f1e2d3c-0000-4000-8000-000000000002';
 const TWO_LINES = `${SUB_A} claude node-key-aaaaaaaaaaaaaaaa\\n${SUB_B} codex node-key-bbbbbbbbbbbbbbbb\\n`;
 
 /* System tools the script and the stubs may use. Real docker, brew, curl and sudo are never reachable. */
-const TOOLS = ['bash', 'sh', 'env', 'cat', 'od', 'tr', 'head', 'base64', 'sleep', 'mkdir', 'rm', 'chmod', 'grep', 'sed', 'cut', 'cp', 'touch', 'basename', 'dirname', 'wc', 'mktemp', 'date', 'sort', 'kill', 'printf', 'tail', 'awk', 'id'];
+const TOOLS = ['bash', 'sh', 'env', 'cat', 'od', 'tr', 'head', 'base64', 'sleep', 'mkdir', 'rm', 'chmod', 'grep', 'sed', 'cut', 'cp', 'touch', 'basename', 'dirname', 'wc', 'mktemp', 'date', 'sort', 'kill', 'printf', 'tail', 'awk'];
 
 type Options = { args?: string[]; omit?: string[]; env?: Record<string, string>; tty?: string };
 
@@ -109,6 +109,13 @@ describe('install.sh', () => {
     expect(r.code).toBe(0);
     expect(r.calls).toContain('get-docker');
     expect(r.calls).toContain('sudo systemctl enable --now docker');
+  });
+
+  it('runs everything directly as root, without sudo', () => {
+    const r = install({ omit: ['docker'], env: { STUB_DOCKER: 'after_start', STUB_UID: '0' } });
+    expect(r.code).toBe(0);
+    expect(r.calls).toContain('systemctl enable --now docker');
+    expect(r.calls.some(c => c.startsWith('sudo '))).toBe(false);
   });
 
   it('starts one locked-down container per subscription and signs each in from the terminal', () => {

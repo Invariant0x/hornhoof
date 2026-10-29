@@ -35,3 +35,17 @@ describe('database', () => {
     expect(sub).toMatchObject({ targetKind: null, targetId: null, machineId: null, limits: null, removedAt: null });
   });
 });
+
+/* Each PGlite is a whole Postgres in WASM memory; a file that leaves them open grows by gigabytes and gets killed on a small CI runner. */
+describe('test databases', () => {
+  let opened: { closed: boolean } | undefined;
+
+  it('opens one for the test', async () => {
+    opened = (await createTestDb()).$client;
+    expect(opened.closed).toBe(false);
+  });
+
+  it('closes it once that test ends', () => {
+    expect(opened?.closed).toBe(true);
+  });
+});
