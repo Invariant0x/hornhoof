@@ -20,7 +20,7 @@ describe('GET /api/org', () => {
     expect(org.chief).toMatchObject({
       name: 'Chief',
       model: 'claude-opus-5-5',
-      subscription: { provider: 'anthropic_api', kind: 'api_key', status: 'active', last4: '9f3a', owner: { name: 'Ivan' }, target: { kind: 'chief', id: null, name: 'Chief' } },
+      subscription: { provider: 'anthropic_api', kind: 'api_key', status: 'ready', last4: '9f3a', owner: { name: 'Ivan' }, target: { kind: 'chief', id: null, name: 'Chief' } },
     });
     expect(org.agents).toEqual({ total: 1, working: 0 });
     expect(org.people.map((p: { name: string }) => p.name)).toEqual(['Ivan']);
@@ -83,23 +83,10 @@ describe('subscriptions', () => {
     ]);
   });
 
-  it('adds a personal subscription for a team and returns a join code once', async () => {
-    const { app, db } = await testApp();
-    const ceo = await setUpCompany(app);
-    const [company] = await db.select().from(companies);
-    const [dept] = await db.insert(departments).values({ companyId: company!.id, name: 'Marketing', roleCode: 'CMO' }).returning();
-    const [team] = await db.insert(teams).values({ companyId: company!.id, departmentId: dept!.id, name: 'Social' }).returning();
-    const res = await addSubscription(app, ceo, { provider: 'claude', kind: 'personal', label: 'Ivan Max', target: { kind: 'team', id: team!.id } });
-    expect(res.statusCode).toBe(201);
-    expect(res.json().joinCode).toMatch(/^[A-Za-z0-9_-]{43}$/);
-    expect(res.json().subscription).toMatchObject({ provider: 'claude', status: 'waiting_machine', last4: null, target: { kind: 'team', id: team!.id, name: 'Social' } });
-    expect((await app.inject({ url: '/api/subscriptions', ...as(ceo) })).body).not.toContain(res.json().joinCode);
-  });
-
-  it('refuses a personal subscription shared with any department', async () => {
+  it('takes only API keys, personal subscriptions connect through a machine', async () => {
     const { app } = await testApp();
     const ceo = await setUpCompany(app);
-    const res = await addSubscription(app, ceo, { provider: 'claude', kind: 'personal', label: 'Ivan Max', target: { kind: 'any' } });
+    const res = await addSubscription(app, ceo, { provider: 'claude', kind: 'personal', label: 'Ivan Max', target: { kind: 'chief' } });
     expect(res.statusCode).toBe(400);
     expect(res.json().error.code).toBe('validation');
   });
@@ -109,7 +96,8 @@ describe('subscriptions', () => {
     const ceo = await setUpCompany(app);
     const wrongKind = await addSubscription(app, ceo, { provider: 'claude', kind: 'api_key', label: 'x', apiKey: 'sk-ant-12345678', target: { kind: 'any' } });
     expect(wrongKind.statusCode).toBe(400);
-    const noTeam = await addSubscription(app, ceo, { provider: 'kimi', kind: 'personal', label: 'x', target: { kind: 'team', id: '00000000-0000-4000-8000-000000000000' } });
+    const noTeam = await addSubscription(app, ceo, { provider: 'anthropic_api', kind: 'api_key', label: 'x', apiKey: 'sk-ant-12345678', target: { kind: 'team', id: '00000000-0000-4000-8000-000000000000' } });
+    expect(noTeam.json().error.reason).toBe('unknown_place');
     expect(noTeam.statusCode).toBe(400);
   });
 

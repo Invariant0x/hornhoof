@@ -61,7 +61,8 @@ describe('Setup', () => {
   });
 
   it('shows the node command for a personal subscription', async () => {
-    const calls = mockApi({ 'POST /api/setup': [201, { ...CREATED, joinCode: 'JOIN-CODE-123', serverUrl: 'https://hq.acme.com' }] });
+    const command = 'curl -fsSL https://hq.acme.com/install.sh | bash -s -- --join JOIN-CODE-123';
+    const calls = mockApi({ 'POST /api/setup': [201, { ...CREATED, command }] });
     const onDone = vi.fn();
     const user = userEvent.setup();
     render(<Setup onDone={onDone} />);
@@ -71,9 +72,7 @@ describe('Setup', () => {
     await user.click(screen.getByRole('button', { name: 'Finish setup' }));
     expect(calls[0]!.body).toMatchObject({ chief: { mode: 'personal', provider: 'codex' } });
     expect(await screen.findByRole('heading', { name: 'Connect your machine' })).toBeInTheDocument();
-    expect(screen.getByText(
-      'docker run -d --name hornhoof-node --restart unless-stopped -v hornhoof-node:/data ghcr.io/invariant0x/hornhoof-node --server https://hq.acme.com --join JOIN-CODE-123',
-    )).toBeInTheDocument();
+    expect(screen.getByText(command)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument();
     expect(onDone).not.toHaveBeenCalled();
     await user.click(screen.getByRole('button', { name: 'Go to the map' }));

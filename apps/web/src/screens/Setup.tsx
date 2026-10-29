@@ -4,7 +4,6 @@ import { errorText, useT } from '../i18n';
 import { Card } from '../ui/Card';
 import { CopyButton } from '../ui/CopyButton';
 import { Field } from '../ui/Field';
-import { nodeCommand } from '../ui/nodeCommand';
 
 type Mode = 'api_key' | 'personal' | 'later';
 type KeyProvider = 'anthropic_api' | 'openai_api';
@@ -34,7 +33,7 @@ export function Setup({ onDone }: { onDone: () => void }) {
   const [problems, setProblems] = useState<Record<string, string>>({});
   const [failure, setFailure] = useState('');
   const [busy, setBusy] = useState(false);
-  const [join, setJoin] = useState<{ code: string; server: string } | null>(null);
+  const [command, setCommand] = useState<string | null>(null);
 
   function next(e: FormEvent) {
     e.preventDefault();
@@ -59,14 +58,14 @@ export function Setup({ onDone }: { onDone: () => void }) {
     setBusy(true);
     setFailure('');
     try {
-      const res = await api.post<{ joinCode?: string; serverUrl?: string }>('/api/setup', {
+      const res = await api.post<{ command?: string }>('/api/setup', {
         companyName: companyName.trim(),
         name: name.trim(),
         email: email.trim(),
         password,
         chief,
       });
-      if (res.joinCode) setJoin({ code: res.joinCode, server: res.serverUrl ?? window.location.origin });
+      if (res.command) setCommand(res.command);
       else onDone();
     } catch (err) {
       setFailure(errorText(t, err));
@@ -75,8 +74,7 @@ export function Setup({ onDone }: { onDone: () => void }) {
     }
   }
 
-  if (join) {
-    const command = nodeCommand(join.code, join.server);
+  if (command) {
     return (
       <Card>
         <h1>{t.setup.connectMachine}</h1>

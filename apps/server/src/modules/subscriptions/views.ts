@@ -1,19 +1,20 @@
 import { asc, eq } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
-import { departments, people, subscriptions, teams, TARGET_KINDS, type Provider } from '../../db/schema.js';
+import { departments, people, subscriptions, teams, TARGET_KINDS, type Provider, type SUBSCRIPTION_STATUSES } from '../../db/schema.js';
 
 export type SubView = {
   id: string;
   provider: Provider;
   kind: 'personal' | 'api_key';
   label: string;
-  status: 'active' | 'waiting_machine';
+  status: (typeof SUBSCRIPTION_STATUSES)[number];
   last4: string | null;
   owner: { id: string; name: string };
-  target: { kind: (typeof TARGET_KINDS)[number]; id: string | null; name: string };
+  /* Only API keys have a target; a personal subscription follows its owner. */
+  target: { kind: (typeof TARGET_KINDS)[number]; id: string | null; name: string } | null;
 };
 
-/* Never selects secret_enc or join_code_hash, so they cannot leak into a response. */
+/* Never selects secret_enc or node_key_hash, so they cannot leak into a response. */
 const columns = {
   id: subscriptions.id,
   provider: subscriptions.provider,
@@ -43,11 +44,13 @@ export async function subViews(db: Db, id?: string): Promise<SubView[]> {
     status: r.status,
     last4: r.last4,
     owner: { id: r.ownerId, name: r.ownerName },
-    target: {
-      kind: r.targetKind,
-      id: r.targetId,
-      name: r.targetKind === 'chief' || r.targetKind === 'any' ? FIXED_TARGETS[r.targetKind] : names.get(r.targetId ?? '') ?? '',
-    },
+    target: r.targetKind
+      ? {
+          kind: r.targetKind,
+          id: r.targetId,
+          name: r.targetKind === 'chief' || r.targetKind === 'any' ? FIXED_TARGETS[r.targetKind] : names.get(r.targetId ?? '') ?? '',
+        }
+      : null,
   }));
 }
 

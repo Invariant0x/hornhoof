@@ -4,12 +4,14 @@ import type { Deps } from '../../app.js';
 import { hashPassword } from '../../auth/password.js';
 import { startSession } from '../../auth/session.js';
 import { encryptSecret } from '../../crypto/secrets.js';
-import { hashToken, newToken } from '../../crypto/tokens.js';
 import { isUniqueViolation } from '../../db/errors.js';
 import { agents, companies, people, subscriptions } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
+import { createNodeCode } from '../nodes/codes.js';
+import { installCommand } from '../nodes/command.js';
 
 const DEFAULT_MODEL = 'claude-opus-5-5';
+const PLAN_LABELS = { claude: 'Claude', codex: 'Codex', kimi: 'Kimi' } as const;
 
 const SetupBody = z.object({
   companyName: z.string().trim().min(1).max(80),
@@ -45,8 +47,6 @@ export function setupRoutes(app: FastifyInstance, { db, config }: Deps): void {
 
     const passwordHash = await hashPassword(body.password);
     const { chief } = body;
-    const joinCode = chief.mode === 'personal' ? newToken() : undefined;
-
     let result;
     try {
       result = await db.transaction(async tx => {
@@ -63,20 +63,32 @@ export function setupRoutes(app: FastifyInstance, { db, config }: Deps): void {
         }).returning();
 
         let subscriptionId: string | null = null;
-        if (chief.mode !== 'later') {
+        let code: string | null = null;
+        if (chief.mode === 'api_key') {
           const [sub] = await tx.insert(subscriptions).values({
             companyId: company!.id,
             provider: chief.provider,
-            kind: chief.mode === 'api_key' ? 'api_key' : 'personal',
+            kind: 'api_key',
             label: 'Chief',
             ownerPersonId: person!.id,
-            secretEnc: chief.mode === 'api_key' ? encryptSecret(chief.apiKey, config.secret) : null,
-            last4: chief.mode === 'api_key' ? chief.apiKey.slice(-4) : null,
-            joinCodeHash: joinCode ? hashToken(joinCode) : null,
-            status: chief.mode === 'api_key' ? 'active' : 'waiting_machine',
+            secretEnc: encryptSecret(chief.apiKey, config.secret),
+            last4: chief.apiKey.slice(-4),
+            status: 'ready',
             targetKind: 'chief',
           }).returning({ id: subscriptions.id });
           subscriptionId = sub!.id;
+        } else if (chief.mode === 'personal') {
+          /* A personal subscription has no target: it serves wherever its owner works, here the whole company. */
+          const [sub] = await tx.insert(subscriptions).values({
+            companyId: company!.id,
+            provider: chief.provider,
+            kind: 'personal',
+            label: PLAN_LABELS[chief.provider],
+            ownerPersonId: person!.id,
+            status: 'waiting_machine',
+          }).returning({ id: subscriptions.id });
+          subscriptionId = sub!.id;
+          code = await createNodeCode(tx, { companyId: company!.id, personId: person!.id, subscriptionIds: [sub!.id] });
         }
 
         await tx.insert(agents).values({
@@ -86,20 +98,20 @@ export function setupRoutes(app: FastifyInstance, { db, config }: Deps): void {
           model: chiefModel(chief),
           subscriptionId,
         });
-        return { company: company!, person: person! };
+        return { company: company!, person: person!, code };
       });
     } catch (err) {
       if (isUniqueViolation(err)) throw alreadySetUp();
       throw err;
     }
 
-    const { company, person } = result;
+    const { company, person, code } = result;
     await startSession(reply, db, config, person.id);
     reply.code(201);
     return {
       company: { id: company.id, name: company.name },
       person: { id: person.id, name: person.name, email: person.email, title: person.title },
-      ...(joinCode ? { joinCode, serverUrl: config.publicUrl } : {}),
+      ...(code ? { command: installCommand(config.publicUrl, code) } : {}),
     };
   });
 }

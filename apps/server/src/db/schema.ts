@@ -1,4 +1,5 @@
-import { boolean, integer, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import type { Limits } from '@hornhoof/protocol';
+import { boolean, integer, jsonb, pgTable, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core';
 
 const id = () => uuid('id').primaryKey().defaultRandom();
 const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow();
@@ -66,9 +67,39 @@ export const teams = pgTable('teams', {
   createdAt: createdAt(),
 });
 
-export const PROVIDERS = ['claude', 'codex', 'kimi', 'anthropic_api', 'openai_api'] as const;
+export const PROVIDERS = ['claude', 'codex', 'kimi', 'glm', 'anthropic_api', 'openai_api'] as const;
 export type Provider = (typeof PROVIDERS)[number];
 export const TARGET_KINDS = ['chief', 'department', 'team', 'any'] as const;
+
+/* A computer a person ran the installer on. One per person and machine key, so running it again reuses the row. */
+export const machines = pgTable(
+  'machines',
+  {
+    id: id(),
+    companyId: companyId(),
+    personId: uuid('person_id').notNull().references(() => people.id),
+    machineKey: text('machine_key').notNull(),
+    hostname: text('hostname').notNull().default(''),
+    os: text('os').notNull().default(''),
+    arch: text('arch').notNull().default(''),
+    createdAt: createdAt(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  },
+  t => [unique('machines_person_key').on(t.personId, t.machineKey)],
+);
+
+/* A one-time code inside an install command. Only its hash is stored. */
+export const nodeCodes = pgTable('node_codes', {
+  codeHash: text('code_hash').primaryKey(),
+  companyId: companyId(),
+  personId: uuid('person_id').notNull().references(() => people.id),
+  subscriptionIds: uuid('subscription_ids').array().notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  usedAt: timestamp('used_at', { withTimezone: true }),
+  createdAt: createdAt(),
+});
+
+export const SUBSCRIPTION_STATUSES = ['waiting_machine', 'needs_login', 'ready'] as const;
 
 export const subscriptions = pgTable('subscriptions', {
   id: id(),
@@ -79,10 +110,16 @@ export const subscriptions = pgTable('subscriptions', {
   ownerPersonId: uuid('owner_person_id').notNull().references(() => people.id),
   secretEnc: text('secret_enc'),
   last4: text('last4'),
-  joinCodeHash: text('join_code_hash'),
-  status: text('status', { enum: ['active', 'waiting_machine'] }).notNull(),
-  targetKind: text('target_kind', { enum: TARGET_KINDS }).notNull(),
+  status: text('status', { enum: SUBSCRIPTION_STATUSES }).notNull(),
+  /* Only API keys have a target. A personal subscription serves wherever its owner works. */
+  targetKind: text('target_kind', { enum: TARGET_KINDS }),
   targetId: uuid('target_id'),
+  machineId: uuid('machine_id').references(() => machines.id),
+  nodeKeyHash: text('node_key_hash').unique(),
+  nodeVersion: text('node_version'),
+  lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
+  limits: jsonb('limits').$type<Limits>(),
+  removedAt: timestamp('removed_at', { withTimezone: true }),
   createdAt: createdAt(),
 });
 
@@ -96,4 +133,25 @@ export const agents = pgTable('agents', {
   teamId: uuid('team_id').references(() => teams.id),
   subscriptionId: uuid('subscription_id').references(() => subscriptions.id),
   createdAt: createdAt(),
+});
+
+export const JOB_STATUSES = ['queued', 'running', 'done', 'failed'] as const;
+
+/* One prompt sent to one subscription's node. */
+export const jobs = pgTable('jobs', {
+  id: id(),
+  companyId: companyId(),
+  subscriptionId: uuid('subscription_id').notNull().references(() => subscriptions.id),
+  agentId: uuid('agent_id').references(() => agents.id),
+  prompt: text('prompt').notNull(),
+  sessionId: text('session_id'),
+  status: text('status', { enum: JOB_STATUSES }).notNull().default('queued'),
+  result: text('result'),
+  tail: text('tail').notNull().default(''),
+  error: text('error'),
+  timeoutMs: integer('timeout_ms').notNull(),
+  createdBy: uuid('created_by').references(() => people.id),
+  createdAt: createdAt(),
+  startedAt: timestamp('started_at', { withTimezone: true }),
+  finishedAt: timestamp('finished_at', { withTimezone: true }),
 });

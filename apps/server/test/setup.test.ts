@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { decryptSecret } from '../src/crypto/secrets.js';
-import { agents, companies, people, subscriptions } from '../src/db/schema.js';
+import { agents, companies, nodeCodes, people, subscriptions } from '../src/db/schema.js';
 import { SETUP, TEST_API_KEY as KEY, testApp } from './helpers.js';
 
 describe('GET /api/setup', () => {
@@ -22,7 +22,7 @@ describe('POST /api/setup', () => {
     const body = res.json();
     expect(body.company.name).toBe('Acme');
     expect(body.person).toMatchObject({ name: 'Ivan', email: 'ivan@acme.com', title: 'CEO' });
-    expect(body.joinCode).toBeUndefined();
+    expect(body.command).toBeUndefined();
 
     const cookie = String(res.headers['set-cookie']);
     expect(cookie).toMatch(/hh_session=/);
@@ -35,25 +35,30 @@ describe('POST /api/setup', () => {
     const [chief] = await db.select().from(agents);
     expect(chief).toMatchObject({ kind: 'chief', name: 'Chief' });
     const [sub] = await db.select().from(subscriptions);
-    expect(sub).toMatchObject({ kind: 'api_key', status: 'active', targetKind: 'chief', last4: '9f3a', label: 'Chief' });
+    expect(sub).toMatchObject({ kind: 'api_key', status: 'ready', targetKind: 'chief', last4: '9f3a', label: 'Chief' });
     expect(chief!.subscriptionId).toBe(sub!.id);
     expect(decryptSecret(sub!.secretEnc!, config.secret)).toBe(KEY);
   });
 
-  it('returns a join code for a personal subscription', async () => {
+  it('answers the install command for a personal subscription', async () => {
     const { app, db } = await testApp();
     const res = await app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, chief: { mode: 'personal', provider: 'claude' } } });
     expect(res.statusCode).toBe(201);
-    expect(res.json().joinCode).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    const { command } = res.json();
+    expect(command).toMatch(/^curl -fsSL http:\/\/localhost:8080\/install\.sh \| bash -s -- --join [A-Za-z0-9_-]{43}$/);
     const [sub] = await db.select().from(subscriptions);
-    expect(sub).toMatchObject({ kind: 'personal', provider: 'claude', status: 'waiting_machine', secretEnc: null });
-    expect(sub!.joinCodeHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(sub).toMatchObject({ kind: 'personal', provider: 'claude', status: 'waiting_machine', secretEnc: null, targetKind: null, targetId: null });
+    const codes = await db.select().from(nodeCodes);
+    expect(codes).toHaveLength(1);
+    expect(codes[0]).toMatchObject({ subscriptionIds: [sub!.id], usedAt: null });
+    expect(codes[0]!.codeHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(res.body).not.toContain(codes[0]!.codeHash);
   });
 
-  it('tells the browser which address the node should join', async () => {
+  it('builds the command from the public address', async () => {
     const { app } = await testApp({ PUBLIC_URL: 'https://hq.acme.com/' });
     const res = await app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, chief: { mode: 'personal', provider: 'kimi' } } });
-    expect(res.json().serverUrl).toBe('https://hq.acme.com');
+    expect(res.json().command).toMatch(/^curl -fsSL https:\/\/hq\.acme\.com\/install\.sh \| bash -s -- --join /);
   });
 
   it('lets the chief wait for a subscription', async () => {

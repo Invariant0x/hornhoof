@@ -48,8 +48,8 @@ export const en = {
     pasteWholeKey: 'Paste the whole key.',
     finish: 'Finish setup',
     connectMachine: 'Connect your machine',
-    runThis: (plan: string) => `Run this on the computer where your ${plan} subscription is signed in. The chief starts working as soon as the node connects.`,
-    joinOnce: 'The join code works once. You can close this page, the node keeps running in the background.',
+    runThis: (plan: string) => `Run this in a terminal on your computer. It installs Docker if needed, sets up a node for ${plan} and opens the sign-in link. The chief starts working as soon as you sign in.`,
+    joinOnce: 'The command works once, for 24 hours. The node keeps running in the background after the terminal is closed.',
     goToMap: 'Go to the map',
   },
   invite: {
