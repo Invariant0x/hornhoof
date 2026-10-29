@@ -43,4 +43,11 @@ describe('server messages', () => {
     expect(parseServerMessage(JSON.stringify({ ...SERVER[0], provider: 'gemini' }))).toBeNull();
     expect(parseServerMessage('null')).toBeNull();
   });
+
+  it('give null for ids that could leave the node folder, since the node puts them in paths', () => {
+    for (const id of ['../../etc', 'a/b', '', 'x'.repeat(65)]) {
+      expect(parseServerMessage(JSON.stringify({ ...SERVER[0], jobId: id }))).toBeNull();
+      expect(parseServerMessage(JSON.stringify({ ...SERVER[0], subscriptionId: id }))).toBeNull();
+    }
+  });
 });

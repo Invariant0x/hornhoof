@@ -149,6 +149,10 @@ export function tokensIn(path: string): string[] {
   return found;
 }
 
-export function installPackage(tools: string, pkg: string): Promise<Finished> {
-  return runProgram({ bin: 'npm', args: ['install', '-g', '--prefix', tools, pkg], env: childEnv(tools, {}), timeoutMs: 10 * 60_000 });
+/* Installs an agent program into tools with npm; a failure carries the last lines npm printed. */
+export async function installPackage(tools: string, pkg: string): Promise<void> {
+  const done = await runProgram({ bin: 'npm', args: ['install', '-g', '--prefix', tools, pkg], env: childEnv(tools, {}), timeoutMs: 10 * 60_000 });
+  if (done.code === 0) return;
+  const last = stripEscapes(done.output).trim().split('\n').slice(-5).join('\n');
+  throw new Error(done.timedOut ? 'npm did not finish within 10 minutes.' : last || `npm ended with code ${done.code}.`);
 }

@@ -1,6 +1,7 @@
 /* Shared body of the fake agent programs. Real output samples come from ../fixtures. */
 import { spawn } from 'node:child_process';
-import { appendFileSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 const LOGGED_ENV = [
   'CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'KIMI_CODE_HOME', 'ANTHROPIC_API_KEY', 'ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN',
@@ -26,8 +27,12 @@ export function run(name) {
     process.on('SIGTERM', () => {});
     return void setInterval(() => {}, 1000);
   }
-  if (words === 'auth status' || words === 'login status') process.exit(mode === 'signed_out' ? 1 : 0);
+  /* needs_login: signed out until a login has run in this home. */
+  const home = process.env.CLAUDE_CONFIG_DIR || process.env.CODEX_HOME || process.env.KIMI_CODE_HOME || '.';
+  const signedIn = mode === 'needs_login' ? existsSync(join(home, 'fake-signed-in')) : mode !== 'signed_out';
+  if (words === 'auth status' || words === 'login status') process.exit(signedIn ? 0 : 1);
   if (words === 'auth login' || words === 'login --device-auth' || words === 'login') {
+    writeFileSync(join(home, 'fake-signed-in'), '');
     /* Colored, inside a terminal hyperlink, the way the real programs print it. */
     process.stdout.write(`Open this link:\n\x1b[94m\x1b]8;;${LOGIN_URL}\x07${LOGIN_URL}\x1b]8;;\x07\x1b[0m\n`);
     process.exit(0);

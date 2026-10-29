@@ -1,0 +1,36 @@
+# syntax=docker/dockerfile:1
+# The node: runs the agent programs (Claude Code, Codex, Kimi Code) for one subscription, or for the company's API keys with --builtin.
+FROM node:22-bookworm-slim AS build
+WORKDIR /app
+COPY package.json package-lock.json tsconfig.base.json ./
+COPY packages/protocol/package.json packages/protocol/
+COPY apps/server/package.json apps/server/
+COPY apps/node/package.json apps/node/
+COPY apps/web/package.json apps/web/
+RUN npm ci
+COPY packages/protocol packages/protocol
+COPY apps/node apps/node
+RUN npm run build -w @hornhoof/protocol && npm run build -w @hornhoof/node
+
+FROM node:22-bookworm-slim
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends git ca-certificates curl ripgrep \
+  && rm -rf /var/lib/apt/lists/*
+ENV NODE_ENV=production
+WORKDIR /app
+COPY package.json package-lock.json ./
+COPY packages/protocol/package.json packages/protocol/
+COPY apps/server/package.json apps/server/
+COPY apps/node/package.json apps/node/
+COPY apps/web/package.json apps/web/
+RUN npm ci --omit=dev --workspace apps/node --workspace packages/protocol && npm cache clean --force
+COPY --from=build /app/packages/protocol/dist packages/protocol/dist
+COPY --from=build /app/apps/node/dist apps/node/dist
+RUN mkdir -p /data && chown node:node /data
+# Agent programs are installed into /data/tools at first use and keep their sign-in in /data/home.
+# Set after npm ci, so nothing root writes during the build lands in /data.
+ENV PATH=/data/tools/bin:$PATH HOME=/data/home
+USER node
+VOLUME /data
+ENTRYPOINT ["node", "/app/apps/node/dist/main.js"]
+CMD ["run"]

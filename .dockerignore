@@ -7,3 +7,4 @@ notes
 .env
 .env.*
 .DS_Store
+**/test

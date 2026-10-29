@@ -14,12 +14,13 @@ You need Docker with Compose.
 git clone https://github.com/Invariant0x/hornhoof.git
 cd hornhoof
 echo "HORNHOOF_SECRET=$(openssl rand -base64 32)" > .env
+echo "NODE_KEY=$(openssl rand -base64 32)" >> .env
 docker compose up -d
 ```
 
 Open http://localhost:8080 and follow the setup: name your company, create your account and connect the chief's subscription.
 
-Keep `.env` safe. `HORNHOOF_SECRET` encrypts the API keys stored in the database, and without it they cannot be read back.
+Keep `.env` safe. `HORNHOOF_SECRET` encrypts the API keys stored in the database, and without it they cannot be read back. `NODE_KEY` lets the built-in node, which runs the company's API keys, connect to Hornhoof.
 
 If people will open Hornhoof from other machines, add `PUBLIC_URL=https://your.domain` to `.env`. Invite links and the node command use it, and sign-in cookies are marked secure when it starts with `https://`. Hornhoof itself serves plain HTTP, so put something that handles TLS in front of it, like Caddy, nginx or a Cloudflare tunnel. Without TLS the browser drops the secure cookie and you stay on the login screen.
 

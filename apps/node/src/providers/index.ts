@@ -6,6 +6,13 @@ import { kimiAdapter } from './kimi.js';
 
 type Options = { home: string; tools: string; bin?: string; secret?: string | null };
 
+/* The program each provider runs on: its file in tools/bin and the name people know it by. */
+export function programFor(provider: ProviderId): { bin: string; name: string } {
+  if (provider === 'codex' || provider === 'openai_api') return { bin: 'codex', name: 'Codex' };
+  if (provider === 'kimi') return { bin: 'kimi', name: 'Kimi Code' };
+  return { bin: 'claude', name: 'Claude Code' };
+}
+
 /* bin overrides the program's path; tests point it at fake programs. */
 export function adapterFor(provider: ProviderId, opts: Options): ProviderAdapter {
   switch (provider) {

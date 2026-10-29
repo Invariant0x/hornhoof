@@ -24,6 +24,9 @@ const Limits = z.object({
 });
 export type Limits = z.infer<typeof Limits>;
 
+/* Job and subscription ids end up in folder names on the node, so they hold no slashes or dots. */
+const Id = z.string().regex(/^[A-Za-z0-9-]{1,64}$/);
+
 const NodeMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('hello'), version: z.string().max(40), loggedIn: z.boolean(), running: z.array(z.string()).max(100) }),
   z.object({ type: z.literal('status'), loggedIn: z.boolean(), limits: Limits.nullable() }),
@@ -44,8 +47,8 @@ export type NodeMessage = z.infer<typeof NodeMessage>;
 const ServerMessage = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('job.run'),
-    jobId: z.string(),
-    subscriptionId: z.string(),
+    jobId: Id,
+    subscriptionId: Id,
     provider: z.enum(PROVIDER_IDS),
     prompt: z.string(),
     sessionId: z.string().nullable(),
