@@ -186,6 +186,7 @@ export const en = {
       not_found: 'Not found.',
       conflict: 'This clashes with something that already exists.',
       gone: 'This is no longer available.',
+      too_many: 'Too many attempts. Wait a little and try again.',
       internal: 'Something went wrong.',
       network: 'Hornhoof cannot reach its server. Check your connection and try again.',
     },
@@ -210,6 +211,7 @@ export const en = {
     machine_offline: 'The machine for this subscription is offline. Start it and try again.',
     needs_login: 'Sign in to this subscription on its machine first.',
     job_unknown: 'This check no longer exists.',
+    too_many_attempts: 'Too many attempts. Wait up to 15 minutes, then try again.',
   },
 };
 

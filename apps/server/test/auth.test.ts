@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { requireCompanyScope, type Person } from '../src/auth/session.js';
 import { people, sessions } from '../src/db/schema.js';
-import { SETUP, sessionFrom, setUpCompany, testApp } from './helpers.js';
+import { invitePerson, SETUP, sessionFrom, setUpCompany, testApp } from './helpers.js';
 
 const login = (email: string, password: string) => ({ method: 'POST' as const, url: '/api/auth/login', payload: { email, password } });
 const me = (token?: string) => ({ url: '/api/me', ...(token ? { cookies: { hh_session: token } } : {}) });
@@ -25,6 +25,30 @@ describe('POST /api/auth/login', () => {
       expect(res.statusCode).toBe(401);
       expect(res.json().error).toEqual({ code: 'unauthorized', message: 'Wrong email or password.', reason: 'wrong_password' });
     }
+  });
+
+  it('stops the 11th attempt for one email within 15 minutes and leaves other emails alone', async () => {
+    const { app } = await testApp();
+    await setUpCompany(app);
+    for (let i = 0; i < 10; i++) expect((await app.inject(login('ivan@acme.com', 'wrong password!'))).statusCode).toBe(401);
+    const blocked = await app.inject(login(' IVAN@acme.com', SETUP.password));
+    expect(blocked.statusCode).toBe(429);
+    expect(blocked.json().error).toMatchObject({ code: 'too_many', reason: 'too_many_attempts' });
+    expect(Number(blocked.headers['retry-after'])).toBeGreaterThan(0);
+    expect((await app.inject(login('maria@acme.com', SETUP.password))).statusCode).toBe(401);
+  });
+
+  it('deletes expired sessions when someone signs in', async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', scope: { kind: 'company' } });
+    const [row] = await db.select().from(people).where(eq(people.email, 'maria@acme.com'));
+    await db.insert(sessions).values({ tokenHash: 'expired-session-hash', personId: row!.id, expiresAt: new Date(Date.now() - 1000) });
+    expect((await app.inject(login('ivan@acme.com', SETUP.password))).statusCode).toBe(200);
+    const left = await db.select().from(sessions).where(eq(sessions.personId, row!.id));
+    expect(left.map(s => s.tokenHash)).not.toContain('expired-session-hash');
+    expect(left).toHaveLength(1);
+    expect((await app.inject(me(maria))).statusCode).toBe(200);
   });
 
   it('refuses a disabled person', async () => {

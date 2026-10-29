@@ -62,6 +62,18 @@ describe('invites', () => {
     expect((await app.inject({ url: '/api/invites/no-such-token' })).statusCode).toBe(404);
   });
 
+  it('stops the 11th accept for one invite within 15 minutes and leaves other invites alone', async () => {
+    const { app } = await testApp();
+    const ceo = await setUpCompany(app);
+    const accept = (token: string) => app.inject({ method: 'POST', url: `/api/invites/${token}/accept`, payload: { password: PASSWORD } });
+    for (let i = 0; i < 10; i++) expect((await accept('guessed-token')).statusCode).toBe(404);
+    const blocked = await accept('guessed-token');
+    expect(blocked.statusCode).toBe(429);
+    expect(blocked.json().error).toMatchObject({ code: 'too_many', reason: 'too_many_attempts' });
+    const res = await invite(app, ceo, { name: 'Maria', email: 'maria@acme.com', title: '', scope: { kind: 'company' } });
+    expect((await accept(tokenOf(res.json().inviteUrl))).statusCode).toBe(200);
+  });
+
   it('gives 410 for an expired invite', async () => {
     const { app, db } = await testApp();
     const ceo = await setUpCompany(app);

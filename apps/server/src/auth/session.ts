@@ -1,4 +1,4 @@
-import { and, eq, gt } from 'drizzle-orm';
+import { and, eq, gt, lte } from 'drizzle-orm';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Config } from '../config.js';
 import type { Db } from '../db/client.js';
@@ -33,7 +33,9 @@ export type Person = {
   isOwner: boolean;
 };
 
+/* Every sign-in also clears out everyone's expired sessions, so the table does not grow forever. */
 export async function startSession(reply: FastifyReply, db: Db, config: Config, personId: string): Promise<void> {
+  await db.delete(sessions).where(lte(sessions.expiresAt, new Date()));
   const token = newToken();
   const expiresAt = new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000);
   await db.insert(sessions).values({ tokenHash: hashToken(token), personId, expiresAt });

@@ -1,7 +1,7 @@
 import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { ZodError } from 'zod';
 
-export type ErrorCode = 'validation' | 'unauthorized' | 'forbidden' | 'not_found' | 'conflict' | 'gone';
+export type ErrorCode = 'validation' | 'unauthorized' | 'forbidden' | 'not_found' | 'conflict' | 'gone' | 'too_many';
 
 /* A stable reason the web app turns into text in the person's language. */
 export type ErrorReason =
@@ -25,7 +25,8 @@ export type ErrorReason =
   | 'machine_unknown'
   | 'machine_offline'
   | 'needs_login'
-  | 'job_unknown';
+  | 'job_unknown'
+  | 'too_many_attempts';
 
 export class ApiError extends Error {
   constructor(

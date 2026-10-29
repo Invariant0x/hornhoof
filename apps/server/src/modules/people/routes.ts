@@ -2,9 +2,11 @@ import { and, asc, eq, gt, isNull } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Deps } from '../../app.js';
+import { guard, limiter } from '../../auth/limit.js';
 import { hashPassword } from '../../auth/password.js';
 import { personColumns, requireCompanyScope, requirePerson, startSession, type Person } from '../../auth/session.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
+import type { Db } from '../../db/client.js';
 import { isUniqueViolation } from '../../db/errors.js';
 import { companies, invites, people, sessions } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
@@ -30,7 +32,7 @@ const PatchBody = z.object({
 const IdParams = z.object({ id: z.uuid() });
 const TokenParams = z.object({ token: z.string().min(1).max(100) });
 
-const inviteFor = (token: string, by: Person, personId: string) => ({
+const inviteFor = (token: string, by: Pick<Person, 'id' | 'companyId'>, personId: string) => ({
   tokenHash: hashToken(token),
   companyId: by.companyId,
   personId,
@@ -41,7 +43,22 @@ const inviteFor = (token: string, by: Person, personId: string) => ({
 const notFound = () => new ApiError(404, 'not_found', 'This invite does not exist.', 'invite_unknown');
 const gone = () => new ApiError(410, 'gone', 'This invite has already been used or has expired. Ask for a new one.', 'invite_used');
 
+/* A fresh link for someone already in the company. It doubles as a password reset, so old access ends here. */
+export async function reinvite(db: Db, personId: string, by: Pick<Person, 'id' | 'companyId'>): Promise<{ token: string; person: Person }> {
+  const token = newToken();
+  const person = await db.transaction(async tx => {
+    await tx.update(invites).set({ usedAt: new Date() }).where(and(eq(invites.personId, personId), isNull(invites.usedAt)));
+    await tx.delete(sessions).where(eq(sessions.personId, personId));
+    const [row] = await tx.update(people).set({ status: 'invited', passwordHash: null }).where(eq(people.id, personId)).returning(personColumns);
+    await tx.insert(invites).values(inviteFor(token, by, personId));
+    return row!;
+  });
+  return { token, person };
+}
+
 export function peopleRoutes(app: FastifyInstance, { db, config }: Deps): void {
+  const acceptAttempts = limiter();
+
   /* Finds an invite that can still be accepted, or explains why not. */
   async function openInvite(token: string) {
     const [row] = await db
@@ -87,7 +104,6 @@ export function peopleRoutes(app: FastifyInstance, { db, config }: Deps): void {
     return { person: await personView(db, person), inviteUrl: `${config.publicUrl}/invite/${token}` };
   });
 
-  /* A fresh link for someone already in the company. It doubles as a password reset, so old access ends here. */
   app.post('/api/people/:id/invite', async (req, reply) => {
     const me = await requirePerson(req, db);
     requireCompanyScope(me);
@@ -97,15 +113,7 @@ export function peopleRoutes(app: FastifyInstance, { db, config }: Deps): void {
     if (target.isOwner) throw new ApiError(403, 'forbidden', 'The owner cannot be sent a new invite.', 'owner_locked');
     if (target.id === me.id) throw new ApiError(403, 'forbidden', 'You cannot send a new invite to yourself.', 'self_locked');
 
-    const token = newToken();
-    const person = await db.transaction(async tx => {
-      await tx.update(invites).set({ usedAt: new Date() }).where(and(eq(invites.personId, id), isNull(invites.usedAt)));
-      await tx.delete(sessions).where(eq(sessions.personId, id));
-      const [row] = await tx.update(people).set({ status: 'invited', passwordHash: null }).where(eq(people.id, id)).returning(personColumns);
-      await tx.insert(invites).values(inviteFor(token, me, id));
-      return row!;
-    });
-
+    const { token, person } = await reinvite(db, id, me);
     reply.code(201);
     return { person: await personView(db, person), inviteUrl: `${config.publicUrl}/invite/${token}` };
   });
@@ -119,6 +127,7 @@ export function peopleRoutes(app: FastifyInstance, { db, config }: Deps): void {
 
   app.post('/api/invites/:token/accept', async (req, reply) => {
     const { token } = TokenParams.parse(req.params);
+    guard(reply, acceptAttempts, hashToken(token));
     const { password } = AcceptBody.parse(req.body);
     const { invite } = await openInvite(token);
     const passwordHash = await hashPassword(password);

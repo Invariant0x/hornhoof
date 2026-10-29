@@ -26,6 +26,8 @@ If people will open Hornhoof from other machines, add `PUBLIC_URL=https://your.d
 
 Errors go to the container log: `docker compose logs app`.
 
+If the owner forgets the password, run `docker compose exec app node apps/server/dist/cli.js owner-link` next to `compose.yaml`. It prints a one-time link that works for 7 days and sets a new password. The old password and open sessions stop working at once.
+
 ## Install with one command
 
 On a Linux or macOS server:

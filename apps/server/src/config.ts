@@ -24,13 +24,15 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
   if (secret.length !== 32) throw new Error('HORNHOOF_SECRET must be 32 bytes encoded as base64.');
 
   const publicUrl = (env.PUBLIC_URL || 'http://localhost:8080').replace(/\/+$/, '');
+  const port = env.PORT ? Number(env.PORT) : 8080;
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT must be a number between 1 and 65535.');
   const nodeKey = env.NODE_KEY || undefined;
   if (nodeKey && nodeKey.length < 32) throw new Error('NODE_KEY must be at least 32 characters. Generate one with: openssl rand -base64 32');
   return {
     databaseUrl: env.DATABASE_URL || undefined,
     secret,
     publicUrl,
-    port: env.PORT ? Number(env.PORT) : 8080,
+    port,
     secureCookies: publicUrl.startsWith('https://'),
     webDist: env.WEB_DIST || DEFAULT_WEB_DIST,
     installScript: env.INSTALL_SCRIPT || DEFAULT_INSTALL_SCRIPT,

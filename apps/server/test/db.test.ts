@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { isUniqueViolation } from '../src/db/errors.js';
 import { companies, machines, people, subscriptions } from '../src/db/schema.js';
@@ -33,6 +34,17 @@ describe('database', () => {
     const [person] = await db.insert(people).values({ companyId: company!.id, name: 'Ivan', email: 'ivan@acme.com', status: 'active', scopeKind: 'company' }).returning();
     const [sub] = await db.insert(subscriptions).values({ companyId: company!.id, provider: 'glm', kind: 'personal', label: 'GLM', ownerPersonId: person!.id, status: 'waiting_machine' }).returning();
     expect(sub).toMatchObject({ targetKind: null, targetId: null, machineId: null, limits: null, removedAt: null });
+  });
+});
+
+describe('indexes', () => {
+  it('cover the columns that sign-in, cleanups and lists look up', async () => {
+    const db = await createTestDb();
+    const res = await db.execute<{ indexdef: string }>(sql`select indexdef from pg_indexes where schemaname = 'public'`);
+    const defs = res.rows.map(r => r.indexdef);
+    for (const [table, column] of [['sessions', 'person_id'], ['invites', 'person_id'], ['people', 'company_id'], ['subscriptions', 'owner_person_id'], ['jobs', 'subscription_id']]) {
+      expect(defs.some(d => d.includes(`ON public.${table} USING btree (${column})`)), `${table}.${column}`).toBe(true);
+    }
   });
 });
 

@@ -23,6 +23,6 @@ export async function serveWebApp(app: FastifyInstance, dir: string): Promise<vo
 export const webAppRoutes: Fallback = (req: FastifyRequest, reply: FastifyReply) => {
   if (req.method !== 'GET' && req.method !== 'HEAD') return undefined;
   const path = req.url.split('?')[0]!;
-  if (path.startsWith('/api/') || path.startsWith('/assets/') || path.split('/').pop()!.includes('.')) return undefined;
+  if (path === '/api' || path.startsWith('/api/') || path.startsWith('/assets/') || path.split('/').pop()!.includes('.')) return undefined;
   return reply.header('cache-control', 'no-cache').sendFile('index.html');
 };

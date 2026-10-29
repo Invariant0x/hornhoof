@@ -34,7 +34,7 @@ describe('web app serving', () => {
 
   it('keeps JSON 404s for the API and for missing assets', async () => {
     const { app } = await testApp({ WEB_DIST: fakeDist() });
-    for (const url of ['/api/nope', '/assets/missing.js']) {
+    for (const url of ['/api', '/api/', '/api/nope', '/assets/missing.js']) {
       const res = await app.inject({ url });
       expect(res.statusCode).toBe(404);
       expect(res.json()).toEqual({ error: { code: 'not_found', message: 'Not found.' } });
