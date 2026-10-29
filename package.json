@@ -1,0 +1,12 @@
+{
+  "name": "hornhoof",
+  "private": true,
+  "type": "module",
+  "workspaces": ["apps/*"],
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "test": "npm test --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present",
+    "dev": "npm run dev -w apps/server"
+  }
+}
