@@ -1,16 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { decryptSecret } from '../src/crypto/secrets.js';
 import { agents, companies, people, subscriptions } from '../src/db/schema.js';
-import { testApp } from './helpers.js';
-
-const KEY = 'sk-ant-api03-test-key-9f3a';
-export const SETUP = {
-  companyName: 'Acme',
-  name: 'Ivan',
-  email: ' Ivan@Acme.com ',
-  password: 'correct horse battery',
-  chief: { mode: 'api_key', provider: 'anthropic_api', apiKey: KEY },
-};
+import { SETUP, TEST_API_KEY as KEY, testApp } from './helpers.js';
 
 describe('GET /api/setup', () => {
   it('says setup is needed until a company exists', async () => {

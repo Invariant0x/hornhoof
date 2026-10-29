@@ -1,11 +1,37 @@
-import type { FastifyReply } from 'fastify';
+import { and, eq, gt } from 'drizzle-orm';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Config } from '../config.js';
 import type { Db } from '../db/client.js';
-import { sessions } from '../db/schema.js';
+import { people, sessions } from '../db/schema.js';
 import { hashToken, newToken } from '../crypto/tokens.js';
+import { ApiError } from '../errors.js';
 
 export const SESSION_COOKIE = 'hh_session';
 const SESSION_DAYS = 30;
+
+export const personColumns = {
+  id: people.id,
+  companyId: people.companyId,
+  name: people.name,
+  email: people.email,
+  title: people.title,
+  status: people.status,
+  scopeKind: people.scopeKind,
+  scopeId: people.scopeId,
+  isOwner: people.isOwner,
+};
+
+export type Person = {
+  id: string;
+  companyId: string;
+  name: string;
+  email: string;
+  title: string;
+  status: 'active' | 'invited' | 'disabled';
+  scopeKind: 'company' | 'department' | 'team';
+  scopeId: string | null;
+  isOwner: boolean;
+};
 
 export async function startSession(reply: FastifyReply, db: Db, config: Config, personId: string): Promise<void> {
   const token = newToken();
@@ -18,4 +44,28 @@ export async function startSession(reply: FastifyReply, db: Db, config: Config, 
     secure: config.secureCookies,
     expires: expiresAt,
   });
+}
+
+export async function endSession(req: FastifyRequest, reply: FastifyReply, db: Db): Promise<void> {
+  const token = req.cookies[SESSION_COOKIE];
+  if (token) await db.delete(sessions).where(eq(sessions.tokenHash, hashToken(token)));
+  reply.clearCookie(SESSION_COOKIE, { path: '/' });
+}
+
+const notSignedIn = () => new ApiError(401, 'unauthorized', 'Sign in to continue.');
+
+export async function requirePerson(req: FastifyRequest, db: Db): Promise<Person> {
+  const token = req.cookies[SESSION_COOKIE];
+  if (!token) throw notSignedIn();
+  const [person] = await db
+    .select(personColumns)
+    .from(sessions)
+    .innerJoin(people, eq(people.id, sessions.personId))
+    .where(and(eq(sessions.tokenHash, hashToken(token)), gt(sessions.expiresAt, new Date())));
+  if (!person || person.status !== 'active') throw notSignedIn();
+  return person;
+}
+
+export function requireCompanyScope(person: Person): void {
+  if (person.scopeKind !== 'company') throw new ApiError(403, 'forbidden', 'Only people with access to the whole company can do this.');
 }
