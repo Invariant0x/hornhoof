@@ -38,7 +38,7 @@ export const ORG: Org = {
   chief: {
     name: 'Chief',
     model: 'claude-opus-5-5',
-    subscription: { id: 's1', provider: 'anthropic_api', kind: 'api_key', label: 'Chief', status: 'active', last4: '9f3a', owner: { id: 'p1', name: 'Ivan' }, target: { kind: 'chief', id: null, name: 'Chief' } },
+    subscription: { id: 's1', provider: 'anthropic_api', kind: 'api_key', label: 'Chief', status: 'ready', online: false, last4: '9f3a', owner: { id: 'p1', name: 'Ivan' }, place: { kind: 'company', id: null, name: 'Whole company' }, machine: null, limits: null, isChief: true },
   },
   agents: { total: 1, working: 0 },
   people: PEOPLE.slice(0, 2),

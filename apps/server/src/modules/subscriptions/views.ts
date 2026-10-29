@@ -1,6 +1,10 @@
-import { asc, eq } from 'drizzle-orm';
+import type { Limits } from '@hornhoof/protocol';
+import { and, asc, eq, isNull } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
-import { departments, people, subscriptions, teams, TARGET_KINDS, type Provider, type SUBSCRIPTION_STATUSES } from '../../db/schema.js';
+import { agents, departments, machines, people, subscriptions, teams, type Provider, type SUBSCRIPTION_STATUSES } from '../../db/schema.js';
+import { WHOLE_COMPANY } from '../people/views.js';
+
+export type Place = { kind: 'company' | 'department'; id: string | null; name: string };
 
 export type SubView = {
   id: string;
@@ -8,11 +12,16 @@ export type SubView = {
   kind: 'personal' | 'api_key';
   label: string;
   status: (typeof SUBSCRIPTION_STATUSES)[number];
+  online: boolean;
   last4: string | null;
   owner: { id: string; name: string };
-  /* Only API keys have a target; a personal subscription follows its owner. */
-  target: { kind: (typeof TARGET_KINDS)[number]; id: string | null; name: string } | null;
+  place: Place;
+  machine: { id: string; hostname: string } | null;
+  limits: Limits | null;
+  isChief: boolean;
 };
+
+export type IsOnline = (sub: { id: string; kind: 'personal' | 'api_key' }) => boolean;
 
 /* Never selects secret_enc or node_key_hash, so they cannot leak into a response. */
 const columns = {
@@ -22,38 +31,54 @@ const columns = {
   label: subscriptions.label,
   status: subscriptions.status,
   last4: subscriptions.last4,
-  ownerId: people.id,
-  ownerName: people.name,
+  limits: subscriptions.limits,
   targetKind: subscriptions.targetKind,
   targetId: subscriptions.targetId,
+  ownerId: people.id,
+  ownerName: people.name,
+  ownerScopeKind: people.scopeKind,
+  ownerScopeId: people.scopeId,
+  machineId: machines.id,
+  machineHost: machines.hostname,
 };
 
-const FIXED_TARGETS = { chief: 'Chief', any: 'Any department' } as const;
+const COMPANY: Place = { kind: 'company', id: null, name: WHOLE_COMPANY };
 
-export async function subViews(db: Db, id?: string): Promise<SubView[]> {
-  const query = db.select(columns).from(subscriptions).innerJoin(people, eq(people.id, subscriptions.ownerPersonId));
-  const rows = await (id ? query.where(eq(subscriptions.id, id)) : query).orderBy(asc(subscriptions.createdAt));
-  const names = new Map<string, string>();
-  for (const d of await db.select({ id: departments.id, name: departments.name }).from(departments)) names.set(d.id, d.name);
-  for (const t of await db.select({ id: teams.id, name: teams.name }).from(teams)) names.set(t.id, t.name);
+/* Where a subscription serves. A personal one follows its owner; an API key follows its target. Teams count as their department. */
+function placeOf(kind: string | null, id: string | null, depts: Map<string, string>, teamDept: Map<string, string>): Place {
+  const deptId = kind === 'department' ? id : kind === 'team' ? teamDept.get(id ?? '') ?? null : null;
+  if (!deptId) return COMPANY;
+  return { kind: 'department', id: deptId, name: depts.get(deptId) ?? '' };
+}
+
+export async function subViews(db: Db, isOnline: IsOnline, id?: string): Promise<SubView[]> {
+  const live = isNull(subscriptions.removedAt);
+  const rows = await db
+    .select(columns)
+    .from(subscriptions)
+    .innerJoin(people, eq(people.id, subscriptions.ownerPersonId))
+    .leftJoin(machines, eq(machines.id, subscriptions.machineId))
+    .where(id ? and(live, eq(subscriptions.id, id)) : live)
+    .orderBy(asc(subscriptions.createdAt));
+  const depts = new Map((await db.select({ id: departments.id, name: departments.name }).from(departments)).map(d => [d.id, d.name]));
+  const teamDept = new Map((await db.select({ id: teams.id, departmentId: teams.departmentId }).from(teams)).map(t => [t.id, t.departmentId]));
+  const [chief] = await db.select({ subscriptionId: agents.subscriptionId }).from(agents).where(eq(agents.kind, 'chief'));
   return rows.map(r => ({
     id: r.id,
     provider: r.provider,
     kind: r.kind,
     label: r.label,
     status: r.status,
+    online: isOnline({ id: r.id, kind: r.kind }),
     last4: r.last4,
     owner: { id: r.ownerId, name: r.ownerName },
-    target: r.targetKind
-      ? {
-          kind: r.targetKind,
-          id: r.targetId,
-          name: r.targetKind === 'chief' || r.targetKind === 'any' ? FIXED_TARGETS[r.targetKind] : names.get(r.targetId ?? '') ?? '',
-        }
-      : null,
+    place: r.kind === 'personal' ? placeOf(r.ownerScopeKind, r.ownerScopeId, depts, teamDept) : placeOf(r.targetKind, r.targetId, depts, teamDept),
+    machine: r.machineId ? { id: r.machineId, hostname: r.machineHost ?? '' } : null,
+    limits: r.limits ?? null,
+    isChief: chief?.subscriptionId === r.id,
   }));
 }
 
-export async function subView(db: Db, id: string): Promise<SubView | null> {
-  return (await subViews(db, id))[0] ?? null;
+export async function subView(db: Db, isOnline: IsOnline, id: string): Promise<SubView | null> {
+  return (await subViews(db, isOnline, id))[0] ?? null;
 }

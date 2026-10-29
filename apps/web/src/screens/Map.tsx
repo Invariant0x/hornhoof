@@ -13,7 +13,7 @@ const MIN_K = 0.3, MAX_K = 2.5;
 type View = { x: number; y: number; k: number };
 
 const PROVIDERS: Record<SubView['provider'], string> = {
-  anthropic_api: 'Anthropic', openai_api: 'OpenAI', claude: 'Claude', codex: 'Codex', kimi: 'Kimi',
+  anthropic_api: 'Anthropic', openai_api: 'OpenAI', claude: 'Claude', codex: 'Codex', kimi: 'Kimi', glm: 'GLM',
 };
 
 export function chiefStatus(t: Messages, sub: SubView | null): string {

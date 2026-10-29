@@ -25,7 +25,7 @@ export function orgRoutes(app: FastifyInstance, { db }: Deps): void {
       chief: chief && {
         name: chief.name,
         model: chief.model,
-        subscription: chief.subscriptionId ? await subView(db, chief.subscriptionId) : null,
+        subscription: chief.subscriptionId ? await subView(db, () => false, chief.subscriptionId) : null,
       },
       /* Nothing runs agents until nodes arrive in milestone 2, so none are working yet. */
       agents: { total: allAgents.length, working: 0 },

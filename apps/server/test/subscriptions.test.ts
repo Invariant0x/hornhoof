@@ -1,0 +1,222 @@
+import { eq } from 'drizzle-orm';
+import type { FastifyInstance } from 'fastify';
+import { describe, expect, it } from 'vitest';
+import type { Db } from '../src/db/client.js';
+import { agents, companies, departments, nodeCodes, subscriptions, teams } from '../src/db/schema.js';
+import { as, invitePerson, SETUP, setUpCompany, TEST_API_KEY, testApp } from './helpers.js';
+
+const COMMAND = /^curl -fsSL http:\/\/localhost:8080\/install\.sh \| bash -s -- --join ([A-Za-z0-9_-]{43})$/;
+const WHOLE = { kind: 'company', id: null, name: 'Whole company' };
+
+const post = (app: FastifyInstance, token: string, url: string, payload?: object) => app.inject({ method: 'POST', url, payload, ...as(token) });
+const connect = (app: FastifyInstance, token: string, providers: string[]) => post(app, token, '/api/subscriptions/connect', { providers });
+const list = async (app: FastifyInstance, token: string) => (await app.inject({ url: '/api/subscriptions', ...as(token) })).json().subscriptions;
+const addKey = (app: FastifyInstance, token: string, payload: object) => post(app, token, '/api/subscriptions', payload);
+
+/* Marketing, and Development with a Backend team. */
+async function places(db: Db) {
+  const [company] = await db.select().from(companies);
+  const [marketing] = await db.insert(departments).values({ companyId: company!.id, name: 'Marketing', roleCode: 'CMO' }).returning();
+  const [development] = await db.insert(departments).values({ companyId: company!.id, name: 'Development', roleCode: 'CTO' }).returning();
+  const [backend] = await db.insert(teams).values({ companyId: company!.id, departmentId: development!.id, name: 'Backend' }).returning();
+  return { marketing: marketing!, development: development!, backend: backend! };
+}
+
+async function companyWithMaria() {
+  const { app, db } = await testApp();
+  const ceo = await setUpCompany(app);
+  const where = await places(db);
+  const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', scope: { kind: 'department', id: where.marketing.id } });
+  return { app, db, ceo, maria, ...where };
+}
+
+describe('POST /api/subscriptions/connect', () => {
+  it('lets the CEO connect two plans with one command', async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    const res = await connect(app, ceo, ['claude', 'codex']);
+    expect(res.statusCode).toBe(201);
+    const body = res.json();
+    expect(body.command).toMatch(COMMAND);
+    expect(body.subscriptions).toHaveLength(2);
+    for (const [i, label] of ['Claude', 'Codex'].entries()) {
+      expect(body.subscriptions[i]).toMatchObject({ label, kind: 'personal', status: 'waiting_machine', online: false, owner: { name: 'Ivan' }, place: WHOLE, machine: null, limits: null, isChief: false });
+    }
+    const [code] = await db.select().from(nodeCodes);
+    expect(code!.subscriptionIds.sort()).toEqual(body.subscriptions.map((s: { id: string }) => s.id).sort());
+  });
+
+  it('places a person plan in their department and follows them when they move', async () => {
+    const { app, ceo, maria, marketing, development, backend } = await companyWithMaria();
+    const res = await connect(app, maria, ['claude']);
+    expect(res.statusCode).toBe(201);
+    const [sub] = res.json().subscriptions;
+    expect(sub.place).toEqual({ kind: 'department', id: marketing.id, name: 'Marketing' });
+
+    const person = (await list(app, ceo)).find((s: { id: string }) => s.id === sub.id).owner;
+    const moved = await app.inject({ method: 'PATCH', url: `/api/people/${person.id}`, payload: { scope: { kind: 'team', id: backend.id } }, ...as(ceo) });
+    expect(moved.statusCode).toBe(200);
+    const after = (await list(app, ceo)).find((s: { id: string }) => s.id === sub.id);
+    expect(after).toEqual({ ...sub, place: { kind: 'department', id: development.id, name: 'Development' } });
+  });
+
+  it('refuses an empty list, repeats and API key providers', async () => {
+    const { app } = await testApp();
+    const ceo = await setUpCompany(app);
+    for (const providers of [[], ['anthropic_api'], ['claude', 'claude']]) {
+      expect((await connect(app, ceo, providers)).statusCode).toBe(400);
+    }
+  });
+});
+
+describe('POST /api/subscriptions/:id/command', () => {
+  it('gives the owner a fresh command until the machine joins', async () => {
+    const { app, db, ceo, maria } = await companyWithMaria();
+    const first = (await connect(app, ceo, ['claude'])).json();
+    const id = first.subscriptions[0].id;
+    const again = await post(app, ceo, `/api/subscriptions/${id}/command`);
+    expect(again.statusCode).toBe(201);
+    expect(again.json().command).toMatch(COMMAND);
+    expect(again.json().command).not.toBe(first.command);
+
+    const other = await post(app, maria, `/api/subscriptions/${id}/command`);
+    expect(other.statusCode).toBe(403);
+    expect(other.json().error.reason).toBe('not_owner');
+
+    await db.update(subscriptions).set({ status: 'needs_login' }).where(eq(subscriptions.id, id));
+    const joined = await post(app, ceo, `/api/subscriptions/${id}/command`);
+    expect(joined.statusCode).toBe(409);
+    expect(joined.json().error.reason).toBe('already_connected');
+  });
+
+  it('says when the subscription does not exist', async () => {
+    const { app } = await testApp();
+    const ceo = await setUpCompany(app);
+    const res = await post(app, ceo, '/api/subscriptions/00000000-0000-4000-8000-000000000000/command');
+    expect(res.statusCode).toBe(404);
+    expect(res.json().error.reason).toBe('subscription_unknown');
+  });
+});
+
+describe('POST /api/subscriptions/:id/chief', () => {
+  it('moves the chief to a company-level personal subscription', async () => {
+    const { app, ceo } = await companyWithMaria();
+    const id = (await connect(app, ceo, ['claude'])).json().subscriptions[0].id;
+    const res = await post(app, ceo, `/api/subscriptions/${id}/chief`);
+    expect(res.statusCode).toBe(200);
+    expect(res.json().subscription).toMatchObject({ id, isChief: true });
+    const org = (await app.inject({ url: '/api/org', ...as(ceo) })).json();
+    expect(org.chief.subscription.id).toBe(id);
+    expect((await list(app, ceo)).filter((s: { isChief: boolean }) => s.isChief).map((s: { id: string }) => s.id)).toEqual([id]);
+  });
+
+  it('refuses a department plan and a person without company scope', async () => {
+    const { app, ceo, maria } = await companyWithMaria();
+    const theirs = (await connect(app, maria, ['claude'])).json().subscriptions[0].id;
+    const res = await post(app, ceo, `/api/subscriptions/${theirs}/chief`);
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.reason).toBe('not_company_level');
+
+    const mine = (await connect(app, ceo, ['codex'])).json().subscriptions[0].id;
+    const notAllowed = await post(app, maria, `/api/subscriptions/${mine}/chief`);
+    expect(notAllowed.statusCode).toBe(403);
+    expect(notAllowed.json().error.reason).toBe('company_scope_only');
+  });
+});
+
+describe('DELETE /api/subscriptions/:id', () => {
+  it('lets the owner remove a plan', async () => {
+    const { app, maria } = await companyWithMaria();
+    const id = (await connect(app, maria, ['kimi'])).json().subscriptions[0].id;
+    const res = await app.inject({ method: 'DELETE', url: `/api/subscriptions/${id}`, ...as(maria) });
+    expect(res.statusCode).toBe(204);
+    expect(await list(app, maria)).toEqual([]);
+  });
+
+  it('leaves the chief without a subscription when its one is removed, and forgets the key', async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    const [chief] = await db.select().from(agents);
+    const res = await app.inject({ method: 'DELETE', url: `/api/subscriptions/${chief!.subscriptionId}`, ...as(ceo) });
+    expect(res.statusCode).toBe(204);
+    const org = (await app.inject({ url: '/api/org', ...as(ceo) })).json();
+    expect(org.chief.subscription).toBeNull();
+    const [row] = await db.select().from(subscriptions);
+    expect(row!.secretEnc).toBeNull();
+    expect(row!.removedAt).not.toBeNull();
+  });
+
+  it('refuses a person who neither owns it nor has company scope', async () => {
+    const { app, ceo, maria } = await companyWithMaria();
+    const id = (await connect(app, ceo, ['claude'])).json().subscriptions[0].id;
+    const res = await app.inject({ method: 'DELETE', url: `/api/subscriptions/${id}`, ...as(maria) });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error.reason).toBe('not_owner');
+  });
+});
+
+describe('GET /api/subscriptions', () => {
+  it('shows company scope everything and everyone else only their own', async () => {
+    const { app, ceo, maria } = await companyWithMaria();
+    await connect(app, maria, ['claude']);
+    expect((await list(app, ceo)).map((s: { label: string }) => s.label)).toEqual(['Chief', 'Claude']);
+    expect((await list(app, maria)).map((s: { owner: { name: string } }) => s.owner.name)).toEqual(['Maria']);
+  });
+
+  it('never returns the key or its ciphertext', async () => {
+    const { app } = await testApp();
+    const ceo = await setUpCompany(app);
+    await addKey(app, ceo, { provider: 'openai_api', kind: 'api_key', label: 'Company OpenAI', apiKey: 'sk-proj-another-key-7777', target: { kind: 'any' } });
+    for (const url of ['/api/org', '/api/subscriptions']) {
+      const body = (await app.inject({ url, ...as(ceo) })).body;
+      expect(body).not.toContain(TEST_API_KEY);
+      expect(body).not.toContain('sk-proj-another-key');
+      expect(body).not.toContain('secretEnc');
+      expect(body).not.toContain('v1.');
+    }
+    expect((await list(app, ceo)).map((s: { label: string; place: { name: string }; isChief: boolean }) => [s.label, s.place.name, s.isChief])).toEqual([
+      ['Chief', 'Whole company', true],
+      ['Company OpenAI', 'Whole company', false],
+    ]);
+  });
+});
+
+describe('POST /api/subscriptions', () => {
+  it('takes only API keys, personal subscriptions connect through a machine', async () => {
+    const { app } = await testApp();
+    const ceo = await setUpCompany(app);
+    const res = await addKey(app, ceo, { provider: 'claude', kind: 'personal', label: 'Ivan Max', target: { kind: 'chief' } });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.code).toBe('validation');
+  });
+
+  it('refuses a provider that does not match the kind and a target that does not exist', async () => {
+    const { app } = await testApp();
+    const ceo = await setUpCompany(app);
+    const wrongKind = await addKey(app, ceo, { provider: 'claude', kind: 'api_key', label: 'x', apiKey: 'sk-ant-12345678', target: { kind: 'any' } });
+    expect(wrongKind.statusCode).toBe(400);
+    const noTeam = await addKey(app, ceo, { provider: 'anthropic_api', kind: 'api_key', label: 'x', apiKey: 'sk-ant-12345678', target: { kind: 'team', id: '00000000-0000-4000-8000-000000000000' } });
+    expect(noTeam.statusCode).toBe(400);
+    expect(noTeam.json().error.reason).toBe('unknown_place');
+  });
+
+  it('places a department key in its department', async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    const { development, backend } = await places(db);
+    const res = await addKey(app, ceo, { provider: 'anthropic_api', kind: 'api_key', label: 'Backend key', apiKey: 'sk-ant-api03-team-key-5555', target: { kind: 'team', id: backend.id } });
+    expect(res.json().subscription.place).toEqual({ kind: 'department', id: development.id, name: 'Development' });
+  });
+
+  it('connects a chief that waited for a subscription', async () => {
+    const { app, db } = await testApp();
+    const setup = await app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, chief: { mode: 'later' } } });
+    const ceo = setup.cookies[0]!.value;
+    const res = await addKey(app, ceo, { provider: 'anthropic_api', kind: 'api_key', label: 'Chief key', apiKey: 'sk-ant-api03-late-key-1234', target: { kind: 'chief' } });
+    expect(res.statusCode).toBe(201);
+    const [chief] = await db.select().from(agents);
+    expect(chief!.subscriptionId).toBe(res.json().subscription.id);
+    const org = (await app.inject({ url: '/api/org', ...as(ceo) })).json();
+    expect(org.chief.subscription).toMatchObject({ label: 'Chief key', last4: '1234', isChief: true });
+  });
+});

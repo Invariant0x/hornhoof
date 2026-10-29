@@ -15,7 +15,11 @@ export type ErrorReason =
   | 'person_unknown'
   | 'owner_locked'
   | 'self_locked'
-  | 'unknown_place';
+  | 'unknown_place'
+  | 'not_owner'
+  | 'already_connected'
+  | 'not_company_level'
+  | 'subscription_unknown';
 
 export class ApiError extends Error {
   constructor(

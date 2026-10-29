@@ -1,13 +1,6 @@
-import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
-import { agents, companies, departments, people, teams } from '../src/db/schema.js';
-import { SETUP, TEST_API_KEY, setUpCompany, testApp } from './helpers.js';
-
-const as = (token: string) => ({ cookies: { hh_session: token } });
-
-function addSubscription(app: FastifyInstance, token: string, payload: object) {
-  return app.inject({ method: 'POST', url: '/api/subscriptions', payload, ...as(token) });
-}
+import { companies, departments, people, teams } from '../src/db/schema.js';
+import { as, SETUP, setUpCompany, testApp } from './helpers.js';
 
 describe('GET /api/org', () => {
   it('shows the chief with its active API key subscription', async () => {
@@ -20,7 +13,7 @@ describe('GET /api/org', () => {
     expect(org.chief).toMatchObject({
       name: 'Chief',
       model: 'claude-opus-5-5',
-      subscription: { provider: 'anthropic_api', kind: 'api_key', status: 'ready', last4: '9f3a', owner: { name: 'Ivan' }, target: { kind: 'chief', id: null, name: 'Chief' } },
+      subscription: { provider: 'anthropic_api', kind: 'api_key', status: 'ready', online: false, last4: '9f3a', owner: { name: 'Ivan' }, place: { kind: 'company', id: null, name: 'Whole company' }, isChief: true },
     });
     expect(org.agents).toEqual({ total: 1, working: 0 });
     expect(org.people.map((p: { name: string }) => p.name)).toEqual(['Ivan']);
@@ -61,55 +54,5 @@ describe('GET /api/org', () => {
     const res = await app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, chief: { mode: 'later' } } });
     const org = (await app.inject({ url: '/api/org', cookies: { hh_session: res.cookies[0]!.value } })).json();
     expect(org.chief.subscription).toBeNull();
-  });
-});
-
-describe('subscriptions', () => {
-  it('never returns the key or its ciphertext', async () => {
-    const { app } = await testApp();
-    const ceo = await setUpCompany(app);
-    await addSubscription(app, ceo, { provider: 'openai_api', kind: 'api_key', label: 'Company OpenAI', apiKey: 'sk-proj-another-key-7777', target: { kind: 'any' } });
-    for (const url of ['/api/org', '/api/subscriptions']) {
-      const body = (await app.inject({ url, ...as(ceo) })).body;
-      expect(body).not.toContain(TEST_API_KEY);
-      expect(body).not.toContain('sk-proj-another-key');
-      expect(body).not.toContain('secretEnc');
-      expect(body).not.toContain('v1.');
-    }
-    const list = (await app.inject({ url: '/api/subscriptions', ...as(ceo) })).json();
-    expect(list.subscriptions.map((s: { label: string; target: { name: string } }) => [s.label, s.target.name])).toEqual([
-      ['Chief', 'Chief'],
-      ['Company OpenAI', 'Any department'],
-    ]);
-  });
-
-  it('takes only API keys, personal subscriptions connect through a machine', async () => {
-    const { app } = await testApp();
-    const ceo = await setUpCompany(app);
-    const res = await addSubscription(app, ceo, { provider: 'claude', kind: 'personal', label: 'Ivan Max', target: { kind: 'chief' } });
-    expect(res.statusCode).toBe(400);
-    expect(res.json().error.code).toBe('validation');
-  });
-
-  it('refuses a provider that does not match the kind and a target that does not exist', async () => {
-    const { app } = await testApp();
-    const ceo = await setUpCompany(app);
-    const wrongKind = await addSubscription(app, ceo, { provider: 'claude', kind: 'api_key', label: 'x', apiKey: 'sk-ant-12345678', target: { kind: 'any' } });
-    expect(wrongKind.statusCode).toBe(400);
-    const noTeam = await addSubscription(app, ceo, { provider: 'anthropic_api', kind: 'api_key', label: 'x', apiKey: 'sk-ant-12345678', target: { kind: 'team', id: '00000000-0000-4000-8000-000000000000' } });
-    expect(noTeam.json().error.reason).toBe('unknown_place');
-    expect(noTeam.statusCode).toBe(400);
-  });
-
-  it('connects a chief that waited for a subscription', async () => {
-    const { app, db } = await testApp();
-    const setup = await app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, chief: { mode: 'later' } } });
-    const ceo = setup.cookies[0]!.value;
-    const res = await addSubscription(app, ceo, { provider: 'anthropic_api', kind: 'api_key', label: 'Chief key', apiKey: 'sk-ant-api03-late-key-1234', target: { kind: 'chief' } });
-    expect(res.statusCode).toBe(201);
-    const [chief] = await db.select().from(agents);
-    expect(chief!.subscriptionId).toBe(res.json().subscription.id);
-    const org = (await app.inject({ url: '/api/org', ...as(ceo) })).json();
-    expect(org.chief.subscription).toMatchObject({ label: 'Chief key', last4: '1234' });
   });
 });

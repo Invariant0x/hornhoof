@@ -1,3 +1,7 @@
+import type { Limits, ProviderId } from '@hornhoof/protocol';
+
+export type { Limits, ProviderId };
+
 export type ScopeKind = 'company' | 'department' | 'team';
 
 export type Person = {
@@ -28,13 +32,17 @@ export type PersonView = {
 
 export type SubView = {
   id: string;
-  provider: 'claude' | 'codex' | 'kimi' | 'anthropic_api' | 'openai_api';
+  provider: ProviderId;
   kind: 'personal' | 'api_key';
   label: string;
-  status: 'active' | 'waiting_machine';
+  status: 'waiting_machine' | 'needs_login' | 'ready';
+  online: boolean;
   last4: string | null;
   owner: { id: string; name: string };
-  target: { kind: 'chief' | 'department' | 'team' | 'any'; id: string | null; name: string };
+  place: { kind: 'company' | 'department'; id: string | null; name: string };
+  machine: { id: string; hostname: string } | null;
+  limits: Limits | null;
+  isChief: boolean;
 };
 
 export type Team = { id: string; name: string; about: string; stage: number; gate: boolean };
