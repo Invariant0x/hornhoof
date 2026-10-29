@@ -11,8 +11,8 @@ import { subView, subViews } from './views.js';
 
 const Target = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('chief') }),
-  z.object({ kind: z.literal('department'), id: z.string().uuid() }),
-  z.object({ kind: z.literal('team'), id: z.string().uuid() }),
+  z.object({ kind: z.literal('department'), id: z.uuid() }),
+  z.object({ kind: z.literal('team'), id: z.uuid() }),
   z.object({ kind: z.literal('any') }),
 ]);
 

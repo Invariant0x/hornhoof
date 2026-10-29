@@ -27,7 +27,7 @@ const PatchBody = z.object({
   status: z.enum(['active', 'disabled']).optional(),
 });
 
-const IdParams = z.object({ id: z.string().uuid() });
+const IdParams = z.object({ id: z.uuid() });
 const TokenParams = z.object({ token: z.string().min(1).max(100) });
 
 const notFound = () => new ApiError(404, 'not_found', 'This invite does not exist.');

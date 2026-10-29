@@ -1,0 +1,117 @@
+/* Tokens from prototype v4. Light is the default, dark follows the system unless the person picks a theme. */
+:root {
+  --bg: #E6EBF0; --surface: #F8FAFC; --surface2: #EEF2F6; --line: #C9D3DD; --line2: #A9B7C5;
+  --ink: #0F1B27; --muted: #4C5A68;
+  --cyan: #00A3BD; --cyan-ink: #00768A; --amber: #E08A00; --amber-ink: #9A5A00; --pink: #E0307F; --pink-ink: #B0185F; --ok: #1E8E4E;
+  --idle: #C5D0DB; --dot: rgba(30, 60, 90, .17); --glow: rgba(0, 163, 189, .10);
+  --btn: #00768A; --on-btn: #FFFFFF; --hud: rgba(240, 244, 247, .88); --shadow: rgba(20, 40, 60, .18);
+  --f-display: 'Tektur', 'Onest', system-ui, sans-serif;
+  --f-body: 'Onest', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --f-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #141A22; --surface: #1B232D; --surface2: #212B37; --line: #2C3845; --line2: #3D4C5C;
+    --ink: #E3EAF1; --muted: #93A0AE;
+    --cyan: #46E0EF; --cyan-ink: #6FE9F5; --amber: #FFB54A; --amber-ink: #FFC36E; --pink: #FF62AA; --pink-ink: #FF8CC2; --ok: #5FD08A;
+    --idle: #2C3744; --dot: rgba(140, 175, 205, .15); --glow: rgba(70, 224, 239, .10);
+    --btn: #46E0EF; --on-btn: #05222A; --hud: rgba(23, 30, 39, .84); --shadow: rgba(0, 0, 0, .45);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #141A22; --surface: #1B232D; --surface2: #212B37; --line: #2C3845; --line2: #3D4C5C;
+  --ink: #E3EAF1; --muted: #93A0AE;
+  --cyan: #46E0EF; --cyan-ink: #6FE9F5; --amber: #FFB54A; --amber-ink: #FFC36E; --pink: #FF62AA; --pink-ink: #FF8CC2; --ok: #5FD08A;
+  --idle: #2C3744; --dot: rgba(140, 175, 205, .15); --glow: rgba(70, 224, 239, .10);
+  --btn: #46E0EF; --on-btn: #05222A; --hud: rgba(23, 30, 39, .84); --shadow: rgba(0, 0, 0, .45);
+  color-scheme: dark;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--f-body);
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+h1, h2, h3 { font-family: var(--f-display); font-weight: 600; margin: 0; line-height: 1.15; }
+h1 { font-size: 26px; }
+h2 { font-size: 18px; }
+p { margin: 0; }
+a { color: var(--cyan-ink); }
+button, input, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.muted { color: var(--muted); }
+
+/* Chamfered frame: the outer layer is the line, the inner layer is the fill. */
+.edge {
+  --cut: 10px;
+  position: relative;
+  padding: 1px;
+  background: var(--line);
+  clip-path: polygon(0 0, calc(100% - var(--cut)) 0, 100% var(--cut), 100% 100%, var(--cut) 100%, 0 calc(100% - var(--cut)));
+}
+.edge > .edge-in { height: 100%; background: var(--surface); clip-path: inherit; }
+.edge.accent { background: var(--cyan); }
+
+/* Buttons */
+.btn {
+  --cut: 7px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 40px; padding: 0 18px;
+  border: 0; cursor: pointer;
+  background: var(--btn); color: var(--on-btn);
+  font-family: var(--f-display); font-size: 14px; font-weight: 600;
+  clip-path: polygon(0 0, calc(100% - var(--cut)) 0, 100% var(--cut), 100% 100%, var(--cut) 100%, 0 calc(100% - var(--cut)));
+}
+.btn:hover { filter: brightness(1.08); }
+.btn:disabled { cursor: not-allowed; opacity: .45; filter: none; }
+.btn.ghost { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 1px var(--line2); clip-path: none; }
+.btn.ghost:hover { box-shadow: inset 0 0 0 1px var(--cyan); }
+.btn.small { min-height: 30px; padding: 0 12px; font-size: 13px; }
+.linkbtn { border: 0; padding: 0; background: none; color: var(--cyan-ink); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+
+/* Form fields */
+.field { display: grid; gap: 6px; }
+.field > span { font-size: 13px; font-weight: 500; color: var(--muted); }
+.field input, .field select {
+  height: 40px; padding: 0 12px;
+  border: 1px solid var(--line2); border-radius: 0;
+  background: var(--surface2);
+}
+.field input:focus, .field select:focus { outline: none; border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow); }
+.field .hint { font-size: 12px; color: var(--muted); }
+.field .bad { font-size: 12px; color: var(--pink-ink); }
+.alert { padding: 10px 12px; border-left: 3px solid var(--pink); background: var(--surface2); color: var(--ink); }
+
+/* Centered card screens: setup, log in, invite */
+.stage {
+  min-height: 100%;
+  display: grid; place-items: center;
+  padding: 32px 16px;
+  background-image: radial-gradient(var(--dot) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+.card { width: min(440px, 100%); }
+.card > .edge-in { padding: 28px; display: grid; gap: 18px; }
+.card .brand { display: flex; align-items: center; gap: 10px; font-family: var(--f-display); font-weight: 600; color: var(--muted); }
+.card .brand svg { width: 26px; height: 26px; }
+.card form { display: grid; gap: 14px; }
+.card .actions { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
+
+/* Logo mark */
+.mk-dome { fill: none; stroke: var(--cyan); stroke-width: 2.4; }
+.mk-base { stroke: var(--ink); stroke-width: 2.4; }
+.mk-dot { fill: var(--ink); }
+.ic { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}

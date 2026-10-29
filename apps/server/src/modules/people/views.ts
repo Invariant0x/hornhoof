@@ -18,8 +18,8 @@ export type PersonView = {
 
 export const ScopeInput = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('company') }),
-  z.object({ kind: z.literal('department'), id: z.string().uuid() }),
-  z.object({ kind: z.literal('team'), id: z.string().uuid() }),
+  z.object({ kind: z.literal('department'), id: z.uuid() }),
+  z.object({ kind: z.literal('team'), id: z.uuid() }),
 ]);
 
 /* Checks that the department or team exists and returns the columns to store. */
