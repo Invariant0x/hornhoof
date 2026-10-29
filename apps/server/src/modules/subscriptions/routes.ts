@@ -42,7 +42,7 @@ export function subscriptionRoutes(app: FastifyInstance, { db, config }: Deps): 
     if (target.kind === 'department' || target.kind === 'team') {
       const table = target.kind === 'department' ? departments : teams;
       const [row] = await db.select({ id: table.id }).from(table).where(eq(table.id, target.id));
-      if (!row) throw new ApiError(400, 'validation', `target.id: No ${target.kind} with this id.`);
+      if (!row) throw new ApiError(400, 'validation', `target.id: No ${target.kind} with this id.`, 'unknown_place');
     }
 
     const joinCode = body.kind === 'personal' ? newToken() : undefined;

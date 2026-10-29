@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiFailure } from './api';
+import { errorText, useT } from './i18n';
 import { AcceptInvite } from './screens/AcceptInvite';
 import { Login } from './screens/Login';
 import { Setup } from './screens/Setup';
@@ -13,11 +14,12 @@ type Screen =
   | { kind: 'setup' }
   | { kind: 'login' }
   | { kind: 'shell'; me: Me }
-  | { kind: 'error'; message: string };
+  | { kind: 'error'; failure: unknown };
 
 const INVITE_PATH = /^\/invite\/([^/]+)\/?$/;
 
 export function App() {
+  const t = useT();
   const [screen, setScreen] = useState<Screen>({ kind: 'loading' });
 
   const decide = useCallback(async () => {
@@ -29,7 +31,7 @@ export function App() {
       setScreen({ kind: 'shell', me: await api.get<Me>('/api/me') });
     } catch (err) {
       if (err instanceof ApiFailure && err.status === 401) return setScreen({ kind: 'login' });
-      setScreen({ kind: 'error', message: err instanceof Error ? err.message : 'Something went wrong.' });
+      setScreen({ kind: 'error', failure: err });
     }
   }, []);
 
@@ -56,10 +58,10 @@ export function App() {
     case 'error':
       return (
         <Card>
-          <h1>Hornhoof is not responding</h1>
-          <p className="muted">{screen.message}</p>
+          <h1>{t.app.notResponding}</h1>
+          <p className="muted">{errorText(t, screen.failure)}</p>
           <div className="actions">
-            <button className="btn" type="button" onClick={home}>Try again</button>
+            <button className="btn" type="button" onClick={home}>{t.app.tryAgain}</button>
           </div>
         </Card>
       );

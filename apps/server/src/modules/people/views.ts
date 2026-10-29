@@ -28,7 +28,7 @@ export async function resolveScope(db: Db, scope: z.infer<typeof ScopeInput>): P
   if (scope.kind === 'company') return { scopeKind: 'company', scopeId: null };
   const table = scope.kind === 'department' ? departments : teams;
   const [row] = await db.select({ id: table.id }).from(table).where(eq(table.id, scope.id));
-  if (!row) throw new ApiError(400, 'validation', `scope.id: No ${scope.kind} with this id.`);
+  if (!row) throw new ApiError(400, 'validation', `scope.id: No ${scope.kind} with this id.`, 'unknown_place');
   return { scopeKind: scope.kind, scopeId: row.id };
 }
 

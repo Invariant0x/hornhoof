@@ -38,8 +38,8 @@ const inviteFor = (token: string, by: Person, personId: string) => ({
   expiresAt: new Date(Date.now() + INVITE_DAYS * 24 * 60 * 60 * 1000),
 });
 
-const notFound = () => new ApiError(404, 'not_found', 'This invite does not exist.');
-const gone = () => new ApiError(410, 'gone', 'This invite has already been used or has expired. Ask for a new one.');
+const notFound = () => new ApiError(404, 'not_found', 'This invite does not exist.', 'invite_unknown');
+const gone = () => new ApiError(410, 'gone', 'This invite has already been used or has expired. Ask for a new one.', 'invite_used');
 
 export function peopleRoutes(app: FastifyInstance, { db, config }: Deps): void {
   /* Finds an invite that can still be accepted, or explains why not. */
@@ -79,7 +79,7 @@ export function peopleRoutes(app: FastifyInstance, { db, config }: Deps): void {
         return row!;
       });
     } catch (err) {
-      if (isUniqueViolation(err)) throw new ApiError(409, 'conflict', 'Someone with this email is already in the company.');
+      if (isUniqueViolation(err)) throw new ApiError(409, 'conflict', 'Someone with this email is already in the company.', 'email_taken');
       throw err;
     }
 
@@ -93,9 +93,9 @@ export function peopleRoutes(app: FastifyInstance, { db, config }: Deps): void {
     requireCompanyScope(me);
     const { id } = IdParams.parse(req.params);
     const [target] = await db.select(personColumns).from(people).where(eq(people.id, id));
-    if (!target) throw new ApiError(404, 'not_found', 'This person does not exist.');
-    if (target.isOwner) throw new ApiError(403, 'forbidden', 'The owner cannot be sent a new invite.');
-    if (target.id === me.id) throw new ApiError(403, 'forbidden', 'You cannot send a new invite to yourself.');
+    if (!target) throw new ApiError(404, 'not_found', 'This person does not exist.', 'person_unknown');
+    if (target.isOwner) throw new ApiError(403, 'forbidden', 'The owner cannot be sent a new invite.', 'owner_locked');
+    if (target.id === me.id) throw new ApiError(403, 'forbidden', 'You cannot send a new invite to yourself.', 'self_locked');
 
     const token = newToken();
     const person = await db.transaction(async tx => {
@@ -114,7 +114,7 @@ export function peopleRoutes(app: FastifyInstance, { db, config }: Deps): void {
     const { token } = TokenParams.parse(req.params);
     const { person, companyName } = await openInvite(token);
     const view = await personView(db, person);
-    return { companyName, name: person.name, email: person.email, title: person.title, scopeName: view.scope.name };
+    return { companyName, name: person.name, email: person.email, title: person.title, scopeName: view.scope.name, scopeKind: view.scope.kind };
   });
 
   app.post('/api/invites/:token/accept', async (req, reply) => {
@@ -150,11 +150,11 @@ export function peopleRoutes(app: FastifyInstance, { db, config }: Deps): void {
     const body = PatchBody.parse(req.body);
 
     const [target] = await db.select({ ...personColumns, passwordHash: people.passwordHash }).from(people).where(eq(people.id, id));
-    if (!target) throw new ApiError(404, 'not_found', 'This person does not exist.');
+    if (!target) throw new ApiError(404, 'not_found', 'This person does not exist.', 'person_unknown');
     if (body.status === 'disabled' && (target.isOwner || target.id === me.id)) {
-      throw new ApiError(403, 'forbidden', target.isOwner ? 'The owner cannot be disabled.' : 'You cannot disable yourself.');
+      throw new ApiError(403, 'forbidden', target.isOwner ? 'The owner cannot be disabled.' : 'You cannot disable yourself.', target.isOwner ? 'owner_locked' : 'self_locked');
     }
-    if (body.scope && target.isOwner) throw new ApiError(403, 'forbidden', 'The owner always has access to the whole company.');
+    if (body.scope && target.isOwner) throw new ApiError(403, 'forbidden', 'The owner always has access to the whole company.', 'owner_locked');
 
     const changes: Partial<typeof people.$inferInsert> = {};
     if (body.title !== undefined) changes.title = body.title;

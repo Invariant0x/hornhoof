@@ -30,7 +30,7 @@ function chiefModel(chief: Chief): string {
   return chief.provider;
 }
 
-const alreadySetUp = () => new ApiError(409, 'conflict', 'This Hornhoof is already set up.');
+const alreadySetUp = () => new ApiError(409, 'conflict', 'This Hornhoof is already set up.', 'already_set_up');
 
 export function setupRoutes(app: FastifyInstance, { db, config }: Deps): void {
   app.get('/api/setup', async () => {

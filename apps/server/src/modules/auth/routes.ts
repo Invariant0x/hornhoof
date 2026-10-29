@@ -21,7 +21,7 @@ export function authRoutes(app: FastifyInstance, { db, config }: Deps): void {
     const body = LoginBody.parse(req.body);
     const [row] = await db.select({ ...personColumns, passwordHash: people.passwordHash }).from(people).where(eq(people.email, body.email));
     const ok = await verifyPassword(body.password, row?.passwordHash ?? (await fallbackHash()));
-    if (!row || !ok || row.status !== 'active') throw new ApiError(401, 'unauthorized', 'Wrong email or password.');
+    if (!row || !ok || row.status !== 'active') throw new ApiError(401, 'unauthorized', 'Wrong email or password.', 'wrong_password');
 
     const { passwordHash: _, ...person } = row;
     await startSession(reply, db, config, person.id);

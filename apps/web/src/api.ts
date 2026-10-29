@@ -1,5 +1,10 @@
 export class ApiFailure extends Error {
-  constructor(readonly status: number, readonly code: string, message: string) {
+  constructor(
+    readonly status: number,
+    readonly code: string,
+    message: string,
+    readonly reason?: string,
+  ) {
     super(message);
   }
 }
@@ -18,7 +23,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   }
   if (res.status === 204) return undefined as T;
   const data = await res.json().catch(() => null);
-  if (!res.ok) throw new ApiFailure(res.status, data?.error?.code ?? 'internal', data?.error?.message ?? 'Something went wrong.');
+  if (!res.ok) throw new ApiFailure(res.status, data?.error?.code ?? 'internal', data?.error?.message ?? 'Something went wrong.', data?.error?.reason);
   return data as T;
 }
 

@@ -1,6 +1,8 @@
 import { useState } from 'react';
+import { useT } from '../i18n';
 
-export function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }) {
+export function CopyButton({ text, label }: { text: string; label?: string }) {
+  const t = useT();
   const [done, setDone] = useState(false);
   async function copy() {
     try {
@@ -12,8 +14,8 @@ export function CopyButton({ text, label = 'Copy' }: { text: string; label?: str
     }
   }
   return (
-    <button className="btn small ghost" type="button" onClick={copy} aria-label={label}>
-      {done ? 'Copied' : label}
+    <button className="btn small ghost" type="button" onClick={copy} aria-label={label ?? t.common.copy}>
+      {done ? t.common.copied : (label ?? t.common.copy)}
     </button>
   );
 }

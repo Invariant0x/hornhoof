@@ -52,7 +52,7 @@ export async function endSession(req: FastifyRequest, reply: FastifyReply, db: D
   reply.clearCookie(SESSION_COOKIE, { path: '/' });
 }
 
-const notSignedIn = () => new ApiError(401, 'unauthorized', 'Sign in to continue.');
+const notSignedIn = () => new ApiError(401, 'unauthorized', 'Sign in to continue.', 'signed_out');
 
 export async function requirePerson(req: FastifyRequest, db: Db): Promise<Person> {
   const token = req.cookies[SESSION_COOKIE];
@@ -67,5 +67,5 @@ export async function requirePerson(req: FastifyRequest, db: Db): Promise<Person
 }
 
 export function requireCompanyScope(person: Person): void {
-  if (person.scopeKind !== 'company') throw new ApiError(403, 'forbidden', 'Only people with access to the whole company can do this.');
+  if (person.scopeKind !== 'company') throw new ApiError(403, 'forbidden', 'Only people with access to the whole company can do this.', 'company_scope_only');
 }

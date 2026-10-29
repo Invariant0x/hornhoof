@@ -23,7 +23,7 @@ describe('POST /api/auth/login', () => {
     await setUpCompany(app);
     for (const res of [await app.inject(login('ivan@acme.com', 'wrong password!')), await app.inject(login('nobody@acme.com', SETUP.password))]) {
       expect(res.statusCode).toBe(401);
-      expect(res.json().error).toEqual({ code: 'unauthorized', message: 'Wrong email or password.' });
+      expect(res.json().error).toEqual({ code: 'unauthorized', message: 'Wrong email or password.', reason: 'wrong_password' });
     }
   });
 

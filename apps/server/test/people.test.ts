@@ -40,7 +40,7 @@ describe('invites', () => {
 
     const token = tokenOf(res.json().inviteUrl);
     const opened = await app.inject({ url: `/api/invites/${token}` });
-    expect(opened.json()).toEqual({ companyName: 'Acme', name: 'Maria', email: 'maria@acme.com', title: 'Deputy CEO', scopeName: 'Whole company' });
+    expect(opened.json()).toEqual({ companyName: 'Acme', name: 'Maria', email: 'maria@acme.com', title: 'Deputy CEO', scopeName: 'Whole company', scopeKind: 'company' });
 
     const accepted = await app.inject({ method: 'POST', url: `/api/invites/${token}/accept`, payload: { password: PASSWORD } });
     expect(accepted.statusCode).toBe(200);

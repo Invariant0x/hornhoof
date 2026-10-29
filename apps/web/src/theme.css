@@ -163,8 +163,6 @@ button, input, select { font: inherit; color: inherit; }
 .tabs button:hover { color: var(--ink); }
 .tabs button.on { color: var(--ink); box-shadow: inset 0 -2px 0 var(--cyan); }
 .tb-right { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
-.iconbtn { display: grid; place-items: center; width: 34px; height: 34px; border: 1px solid var(--line); background: var(--surface2); cursor: pointer; }
-.iconbtn .ic { width: 16px; height: 16px; }
 .account { position: relative; }
 .avatar {
   width: 34px; height: 34px; border: 0; cursor: pointer;
@@ -178,7 +176,17 @@ button, input, select { font: inherit; color: inherit; }
   background: var(--surface); border: 1px solid var(--line2); box-shadow: 0 10px 30px var(--shadow);
 }
 .account-menu p { display: grid; gap: 2px; }
-.account-menu span { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.account-menu p span { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.menu-row { display: grid; gap: 6px; }
+.menu-row > span { color: var(--muted); font-size: 12px; }
+.seg { display: flex; }
+.seg button {
+  flex: 1; min-height: 32px; margin-left: -1px; padding: 0 8px; cursor: pointer;
+  border: 1px solid var(--line2); background: var(--surface2); color: inherit; font: inherit; font-size: 13px; font-weight: 500;
+}
+.seg button:first-child { margin-left: 0; }
+.seg button[aria-pressed='true'] { position: relative; border-color: var(--cyan); background: var(--glow); color: var(--cyan-ink); }
+.seg button:focus-visible { position: relative; outline: 2px solid var(--cyan); outline-offset: 2px; }
 .body { position: relative; min-height: 0; overflow: auto; }
 
 /* Map */

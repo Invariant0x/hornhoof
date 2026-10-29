@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import { api, ApiFailure } from '../api';
+import { api } from '../api';
+import { errorText, useT, type Messages } from '../i18n';
 import type { Department, Org, SubView } from '../types';
 import { Edge } from '../ui/Edge';
 import { AgentIcon, LogoMark, PersonIcon } from '../ui/icons';
@@ -15,11 +16,11 @@ const PROVIDERS: Record<SubView['provider'], string> = {
   anthropic_api: 'Anthropic', openai_api: 'OpenAI', claude: 'Claude', codex: 'Codex', kimi: 'Kimi',
 };
 
-export function chiefStatus(sub: SubView | null): string {
-  if (!sub) return 'Needs a subscription to start';
-  if (sub.kind === 'api_key') return `Runs on ${PROVIDERS[sub.provider]} key ending ${sub.last4}`;
-  if (sub.status === 'waiting_machine') return `Waiting for the machine with ${PROVIDERS[sub.provider]}`;
-  return `Runs on ${sub.owner.name}'s ${PROVIDERS[sub.provider]} subscription`;
+export function chiefStatus(t: Messages, sub: SubView | null): string {
+  if (!sub) return t.map.needsSubscription;
+  if (sub.kind === 'api_key') return t.map.runsOnKey(PROVIDERS[sub.provider], sub.last4 ?? '');
+  if (sub.status === 'waiting_machine') return t.map.waitingMachine(PROVIDERS[sub.provider]);
+  return t.map.runsOnPersonal(sub.owner.name, PROVIDERS[sub.provider]);
 }
 
 function deptPositions(n: number): { x: number; y: number }[] {
@@ -30,7 +31,6 @@ function deptPositions(n: number): { x: number; y: number }[] {
   });
 }
 
-const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const chipsWidth = (n: number) => n * CHIP_W + Math.max(0, n - 1) * 12;
 
 /* The part of the world that has something on it, so Fit fills the screen with it. */
@@ -47,8 +47,9 @@ function contentBounds(org: Org): { x0: number; y0: number; x1: number; y1: numb
 }
 
 export function MapScreen() {
+  const t = useT();
   const [org, setOrg] = useState<Org | null>(null);
-  const [failure, setFailure] = useState('');
+  const [failure, setFailure] = useState<unknown>(null);
   const [view, setView] = useState<View>({ x: 0, y: 0, k: 1 });
   const box = useRef<HTMLDivElement>(null);
   const drag = useRef<{ id: number; x: number; y: number } | null>(null);
@@ -57,7 +58,7 @@ export function MapScreen() {
     let live = true;
     api.get<Org>('/api/org').then(
       data => live && setOrg(data),
-      err => live && setFailure(err instanceof ApiFailure ? err.message : 'Something went wrong.'),
+      err => live && setFailure(err),
     );
     return () => {
       live = false;
@@ -120,7 +121,7 @@ export function MapScreen() {
     drag.current = null;
   }
 
-  if (failure) return <p className="alert map-failure" role="alert">{failure}</p>;
+  if (failure !== null) return <p className="alert map-failure" role="alert">{errorText(t, failure)}</p>;
   if (!org) return <div className="map" aria-busy="true" />;
 
   const depts = org.departments;
@@ -136,14 +137,14 @@ export function MapScreen() {
           ))}
         </svg>
 
-        <ul className="chips" style={{ left: CX - chipsW / 2, top: CY - HUB - CHIP_H - 34 }} aria-label="Company leaders">
+        <ul className="chips" style={{ left: CX - chipsW / 2, top: CY - HUB - CHIP_H - 34 }} aria-label={t.map.leaders}>
           {org.people.map(p => (
             <li key={p.id} style={{ width: CHIP_W, height: CHIP_H }}>
               <Edge cut={8} className="chip">
-                <PersonIcon label="Person" />
+                <PersonIcon label={t.map.person} />
                 <span>
                   <b>{p.name}</b>
-                  <small>{p.title || 'Whole company'}</small>
+                  <small>{p.title || t.map.wholeCompany}</small>
                 </span>
               </Edge>
             </li>
@@ -158,16 +159,16 @@ export function MapScreen() {
           <LogoMark className="hub-mark" />
           <span className="hub-name">{org.company.name}</span>
           <span className="hub-num">{`${org.agents.working}/${org.agents.total}`}</span>
-          <span className="hub-label">agents working</span>
+          <span className="hub-label">{t.map.agentsWorking}</span>
         </div>
         <p className="hub-chief" style={{ left: CX - 180, top: CY + HUB + 14 }}>
-          <AgentIcon label="Agent" />
-          <b>{org.chief?.name ?? 'Chief'}</b>
-          <span>{chiefStatus(org.chief?.subscription ?? null)}</span>
+          <AgentIcon label={t.map.agent} />
+          <b>{org.chief?.name ?? t.map.chief}</b>
+          <span>{chiefStatus(t, org.chief?.subscription ?? null)}</span>
         </p>
 
         {depts.length === 0 && (
-          <p className="map-empty" style={{ left: CX - 220, top: CY + HUB + 64 }}>No departments yet. Ask the chief to create the first one.</p>
+          <p className="map-empty" style={{ left: CX - 220, top: CY + HUB + 64 }}>{t.map.empty}</p>
         )}
 
         {depts.map((d: Department, i) => (
@@ -175,16 +176,16 @@ export function MapScreen() {
             <Edge cut={12}>
               <span className="role">{d.roleCode}</span>
               <b className="dname">{d.name}</b>
-              <span className="cnt">{plural(d.teams.length, 'team')}</span>
+              <span className="cnt">{t.map.teams(d.teams.length)}</span>
             </Edge>
           </div>
         ))}
       </div>
 
       <div className="zoom" onPointerDown={e => e.stopPropagation()}>
-        <button className="btn small ghost" type="button" aria-label="Zoom out" onClick={() => zoomAt(1 / 1.2)}>−</button>
-        <button className="btn small ghost" type="button" aria-label="Zoom in" onClick={() => zoomAt(1.2)}>+</button>
-        <button className="btn small ghost" type="button" aria-label="Show everything" onClick={fit}>Fit</button>
+        <button className="btn small ghost" type="button" aria-label={t.map.zoomOut} onClick={() => zoomAt(1 / 1.2)}>−</button>
+        <button className="btn small ghost" type="button" aria-label={t.map.zoomIn} onClick={() => zoomAt(1.2)}>+</button>
+        <button className="btn small ghost" type="button" aria-label={t.map.showAll} onClick={fit}>{t.map.fit}</button>
       </div>
     </div>
   );

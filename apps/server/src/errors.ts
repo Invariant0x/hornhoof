@@ -3,24 +3,39 @@ import { ZodError } from 'zod';
 
 export type ErrorCode = 'validation' | 'unauthorized' | 'forbidden' | 'not_found' | 'conflict' | 'gone';
 
+/* A stable reason the web app turns into text in the person's language. */
+export type ErrorReason =
+  | 'signed_out'
+  | 'company_scope_only'
+  | 'wrong_password'
+  | 'already_set_up'
+  | 'invite_unknown'
+  | 'invite_used'
+  | 'email_taken'
+  | 'person_unknown'
+  | 'owner_locked'
+  | 'self_locked'
+  | 'unknown_place';
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
     readonly code: ErrorCode,
     message: string,
+    readonly reason?: ErrorReason,
   ) {
     super(message);
   }
 }
 
-const body = (code: ErrorCode, message: string) => ({ error: { code, message } });
+const body = (code: ErrorCode, message: string, reason?: ErrorReason) => ({ error: reason ? { code, message, reason } : { code, message } });
 
 /* Optional handler for unmatched requests that are not errors, like the web app's own routes. */
 export type Fallback = (req: FastifyRequest, reply: FastifyReply) => FastifyReply | Promise<FastifyReply> | undefined;
 
 export function registerErrorHandling(app: FastifyInstance, fallback?: Fallback): void {
   app.setErrorHandler((err: FastifyError | Error, _req, reply) => {
-    if (err instanceof ApiError) return reply.status(err.status).send(body(err.code, err.message));
+    if (err instanceof ApiError) return reply.status(err.status).send(body(err.code, err.message, err.reason));
     if (err instanceof ZodError) {
       const first = err.issues[0];
       const where = first?.path.length ? first.path.join('.') + ': ' : '';
