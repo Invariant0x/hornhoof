@@ -8,7 +8,9 @@ import { AgentIcon, PersonIcon } from '../ui/icons';
 
 const STATUS: Record<PersonView['status'], string> = { active: 'Active', invited: 'Invited', disabled: 'Disabled' };
 
-type ScopeOption = { value: string; label: string; scope: { kind: 'company' } | { kind: 'department' | 'team'; id: string } };
+type Scope = { kind: 'company' } | { kind: 'department' | 'team'; id: string };
+type ScopeOption = { value: string; label: string; scope: Scope };
+type Panel = { kind: 'invite' } | { kind: 'link'; name: string; url: string } | { kind: 'edit'; person: PersonView } | null;
 
 function scopeOptions(org: Org | null): ScopeOption[] {
   const options: ScopeOption[] = [{ value: 'company', label: 'Whole company', scope: { kind: 'company' } }];
@@ -19,71 +21,73 @@ function scopeOptions(org: Org | null): ScopeOption[] {
   return options;
 }
 
+const scopeValue = (p: PersonView) => (p.scope.kind === 'company' ? 'company' : `${p.scope.kind}:${p.scope.id}`);
 const message = (err: unknown) => (err instanceof ApiFailure ? err.message : 'Something went wrong.');
 
-function InviteForm({ org, onInvited, onClose }: { org: Org | null; onInvited: () => void; onClose: () => void }) {
-  const options = scopeOptions(org);
+function ScopeSelect({ options, value, onChange }: { options: ScopeOption[]; value: string; onChange: (v: string) => void }) {
+  return (
+    <Field label="Scope" hint="What they can see and who they can write to.">
+      {p => (
+        <select {...p} value={value} onChange={e => onChange(e.target.value)}>
+          {options.map(o => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </select>
+      )}
+    </Field>
+  );
+}
+
+function InviteLink({ name, url, onClose }: { name: string; url: string; onClose: () => void }) {
+  return (
+    <Edge className="panel" cut={12}>
+      <h2>Invite link for {name}</h2>
+      <p className="muted">Send this link to {name} yourself. It works once and expires in 7 days. Hornhoof shows it only now.</p>
+      <div className="command">
+        <code>{url}</code>
+        <CopyButton text={url} label="Copy link" />
+      </div>
+      <div className="actions">
+        <button className="btn" type="button" onClick={onClose}>Done</button>
+      </div>
+    </Edge>
+  );
+}
+
+function InviteForm({ options, onSent, onClose }: { options: ScopeOption[]; onSent: (name: string, url: string) => void; onClose: () => void }) {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [title, setTitle] = useState('');
   const [scope, setScope] = useState('company');
   const [failure, setFailure] = useState('');
   const [busy, setBusy] = useState(false);
-  const [sent, setSent] = useState<{ name: string; url: string } | null>(null);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setFailure('');
     try {
-      const chosen = options.find(o => o.value === scope)!.scope;
       const res = await api.post<{ person: PersonView; inviteUrl: string }>('/api/people/invite', {
         name: name.trim(),
         email: email.trim(),
         title: title.trim(),
-        scope: chosen,
+        scope: options.find(o => o.value === scope)!.scope,
       });
-      setSent({ name: res.person.name, url: res.inviteUrl });
-      onInvited();
+      onSent(res.person.name, res.inviteUrl);
     } catch (err) {
       setFailure(message(err));
-    } finally {
       setBusy(false);
     }
-  }
-
-  if (sent) {
-    return (
-      <Edge className="panel" cut={12}>
-        <h2>Invite link for {sent.name}</h2>
-        <p className="muted">Send this link to {sent.name} yourself. It works once and expires in 7 days. Hornhoof shows it only now.</p>
-        <div className="command">
-          <code>{sent.url}</code>
-          <CopyButton text={sent.url} label="Copy link" />
-        </div>
-        <div className="actions">
-          <button className="btn" type="button" onClick={onClose}>Done</button>
-        </div>
-      </Edge>
-    );
   }
 
   return (
     <Edge className="panel" cut={12}>
       <h2>Invite person</h2>
-      <form onSubmit={submit} className="invite-form">
+      <form onSubmit={submit} className="panel-form">
         <Field label="Name">{p => <input {...p} value={name} onChange={e => setName(e.target.value)} maxLength={80} autoFocus required />}</Field>
         <Field label="Email">{p => <input {...p} type="email" value={email} onChange={e => setEmail(e.target.value)} required />}</Field>
         <Field label="Title">{p => <input {...p} value={title} onChange={e => setTitle(e.target.value)} maxLength={80} placeholder="Head of marketing" />}</Field>
-        <Field label="Scope" hint="What they can see and who they can write to.">
-          {p => (
-            <select {...p} value={scope} onChange={e => setScope(e.target.value)}>
-              {options.map(o => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
-          )}
-        </Field>
+        <ScopeSelect options={options} value={scope} onChange={setScope} />
         {failure && <p className="alert" role="alert">{failure}</p>}
         <div className="actions">
           <button className="btn ghost" type="button" onClick={onClose}>Cancel</button>
@@ -94,12 +98,51 @@ function InviteForm({ org, onInvited, onClose }: { org: Org | null; onInvited: (
   );
 }
 
+function EditForm({ person, options, onSaved, onClose }: { person: PersonView; options: ScopeOption[]; onSaved: (p: PersonView) => void; onClose: () => void }) {
+  const [title, setTitle] = useState(person.title);
+  const [scope, setScope] = useState(scopeValue(person));
+  const [failure, setFailure] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setFailure('');
+    try {
+      const res = await api.patch<{ person: PersonView }>(`/api/people/${person.id}`, {
+        title: title.trim(),
+        scope: options.find(o => o.value === scope)!.scope,
+      });
+      onSaved(res.person);
+    } catch (err) {
+      setFailure(message(err));
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Edge className="panel" cut={12}>
+      <h2>Edit {person.name}</h2>
+      <form onSubmit={submit} className="panel-form">
+        <Field label="Title">{p => <input {...p} value={title} onChange={e => setTitle(e.target.value)} maxLength={80} autoFocus />}</Field>
+        <ScopeSelect options={options} value={scope} onChange={setScope} />
+        {failure && <p className="alert" role="alert">{failure}</p>}
+        <div className="actions">
+          <button className="btn ghost" type="button" onClick={onClose}>Cancel</button>
+          <button className="btn" type="submit" disabled={busy}>Save</button>
+        </div>
+      </form>
+    </Edge>
+  );
+}
+
 export function People({ me }: { me: Me }) {
   const [people, setPeople] = useState<PersonView[] | null>(null);
   const [org, setOrg] = useState<Org | null>(null);
-  const [inviting, setInviting] = useState(false);
+  const [panel, setPanel] = useState<Panel>(null);
   const [failure, setFailure] = useState('');
   const canManage = me.person.scopeKind === 'company';
+  const options = scopeOptions(org);
 
   const load = useCallback(async () => {
     try {
@@ -115,15 +158,26 @@ export function People({ me }: { me: Me }) {
     void load();
   }, [load]);
 
-  async function setStatus(person: PersonView, status: 'active' | 'disabled') {
+  const replace = (person: PersonView) => setPeople(list => list?.map(p => (p.id === person.id ? person : p)) ?? null);
+
+  async function run(action: () => Promise<void>) {
     setFailure('');
     try {
-      const res = await api.patch<{ person: PersonView }>(`/api/people/${person.id}`, { status });
-      setPeople(list => list?.map(p => (p.id === person.id ? res.person : p)) ?? null);
+      await action();
     } catch (err) {
       setFailure(message(err));
     }
   }
+
+  const setStatus = (person: PersonView, status: 'active' | 'disabled') =>
+    run(async () => replace((await api.patch<{ person: PersonView }>(`/api/people/${person.id}`, { status })).person));
+
+  const newLink = (person: PersonView) =>
+    run(async () => {
+      const res = await api.post<{ person: PersonView; inviteUrl: string }>(`/api/people/${person.id}/invite`);
+      replace(res.person);
+      setPanel({ kind: 'link', name: res.person.name, url: res.inviteUrl });
+    });
 
   return (
     <section className="people">
@@ -132,12 +186,34 @@ export function People({ me }: { me: Me }) {
           <h1>People</h1>
           <p className="muted">People work next to the agents. Each one sees the whole company, one department or one team.</p>
         </div>
-        {canManage && !inviting && (
-          <button className="btn" type="button" onClick={() => setInviting(true)}>Invite person</button>
+        {canManage && !panel && (
+          <button className="btn" type="button" onClick={() => setPanel({ kind: 'invite' })}>Invite person</button>
         )}
       </header>
 
-      {inviting && <InviteForm org={org} onInvited={load} onClose={() => setInviting(false)} />}
+      {panel?.kind === 'invite' && (
+        <InviteForm
+          options={options}
+          onSent={(name, url) => {
+            setPanel({ kind: 'link', name, url });
+            void load();
+          }}
+          onClose={() => setPanel(null)}
+        />
+      )}
+      {panel?.kind === 'link' && <InviteLink name={panel.name} url={panel.url} onClose={() => setPanel(null)} />}
+      {panel?.kind === 'edit' && (
+        <EditForm
+          key={panel.person.id}
+          person={panel.person}
+          options={options}
+          onSaved={person => {
+            replace(person);
+            setPanel(null);
+          }}
+          onClose={() => setPanel(null)}
+        />
+      )}
       {failure && <p className="alert" role="alert">{failure}</p>}
 
       {people && (
@@ -163,11 +239,16 @@ export function People({ me }: { me: Me }) {
                   <td>{p.scope.name}</td>
                   <td><span className={`status ${p.status}`}>{STATUS[p.status]}</span></td>
                   <td className="row-actions">
-                    {editable && p.status !== 'disabled' && (
-                      <button className="linkbtn" type="button" aria-label={`Disable ${p.name}`} onClick={() => setStatus(p, 'disabled')}>Disable</button>
-                    )}
-                    {editable && p.status === 'disabled' && (
-                      <button className="linkbtn" type="button" aria-label={`Enable ${p.name}`} onClick={() => setStatus(p, 'active')}>Enable</button>
+                    {editable && (
+                      <>
+                        <button className="linkbtn" type="button" aria-label={`Edit ${p.name}`} onClick={() => setPanel({ kind: 'edit', person: p })}>Edit</button>
+                        <button className="linkbtn" type="button" aria-label={`New invite link for ${p.name}`} onClick={() => newLink(p)}>New link</button>
+                        {p.status === 'disabled' ? (
+                          <button className="linkbtn" type="button" aria-label={`Enable ${p.name}`} onClick={() => setStatus(p, 'active')}>Enable</button>
+                        ) : (
+                          <button className="linkbtn" type="button" aria-label={`Disable ${p.name}`} onClick={() => setStatus(p, 'disabled')}>Disable</button>
+                        )}
+                      </>
                     )}
                   </td>
                 </tr>

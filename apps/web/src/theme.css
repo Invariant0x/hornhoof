@@ -79,7 +79,7 @@ button, input, select { font: inherit; color: inherit; }
 .linkbtn { border: 0; padding: 0; background: none; color: var(--cyan-ink); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
 
 /* Form fields */
-.field { display: grid; gap: 6px; }
+.field { display: grid; gap: 6px; align-content: start; }
 .field > label { font-size: 13px; font-weight: 500; color: var(--muted); }
 .field input, .field select {
   height: 40px; padding: 0 12px;
@@ -224,9 +224,9 @@ button, input, select { font: inherit; color: inherit; }
 .people-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; }
 .people-head > div { display: grid; gap: 6px; max-width: 60ch; }
 .panel > .edge-in { padding: 20px; display: grid; gap: 14px; }
-.invite-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
-.invite-form .alert, .invite-form .actions { grid-column: 1 / -1; }
-.invite-form .actions { display: flex; gap: 10px; justify-content: flex-end; }
+.panel-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.panel-form .alert, .panel-form .actions { grid-column: 1 / -1; }
+.panel-form .actions { display: flex; gap: 10px; justify-content: flex-end; }
 .panel .actions { display: flex; justify-content: flex-end; }
 .ptable { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--line); }
 .ptable th { text-align: left; font-size: 12px; font-weight: 600; color: var(--muted); padding: 10px 14px; border-bottom: 1px solid var(--line); }
@@ -239,13 +239,14 @@ button, input, select { font: inherit; color: inherit; }
 .status.active { color: var(--ok); border-color: currentColor; }
 .status.invited { color: var(--amber-ink); border-color: currentColor; }
 .row-actions { text-align: right; white-space: nowrap; }
+.row-actions .linkbtn + .linkbtn { margin-left: 14px; }
 .people-foot { display: flex; align-items: center; gap: 8px; font-size: 13px; }
 @media (max-width: 760px) {
   .topbar { grid-template-columns: 1fr auto; }
   .tabs { grid-column: 1 / -1; grid-row: 2; }
   .topbar { height: auto; padding-top: 8px; }
   .tabs button { height: 42px; }
-  .invite-form { grid-template-columns: 1fr; }
+  .panel-form { grid-template-columns: 1fr; }
   .ptable thead { display: none; }
   .ptable, .ptable tbody, .ptable tr, .ptable td { display: block; width: 100%; }
   .ptable tr { padding: 10px 0; border-bottom: 1px solid var(--line); }

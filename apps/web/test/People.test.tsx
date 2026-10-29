@@ -52,8 +52,9 @@ describe('People', () => {
     const maria = { ...ME, person: { ...ME.person, id: 'p2', name: 'Maria', isOwner: false } };
     render(<People me={maria} />);
     await screen.findByRole('cell', { name: 'Sasha' });
-    expect(within(rowOf('Ivan')).queryByRole('button', { name: /Disable/ })).not.toBeInTheDocument();
-    expect(within(rowOf('Maria')).queryByRole('button', { name: /Disable/ })).not.toBeInTheDocument();
+    for (const name of ['Ivan', 'Maria']) {
+      expect(within(rowOf(name)).queryByRole('button')).not.toBeInTheDocument();
+    }
     await user.click(within(rowOf('Sasha')).getByRole('button', { name: 'Disable Sasha' }));
     expect(calls.find(c => c.method === 'PATCH')).toEqual({ method: 'PATCH', path: '/api/people/p3', body: { status: 'disabled' } });
   });
@@ -65,5 +66,48 @@ describe('People', () => {
     await screen.findByRole('cell', { name: 'Sasha' });
     expect(screen.queryByRole('button', { name: 'Invite person' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Disable/ })).not.toBeInTheDocument();
+  });
+});
+
+describe('People row actions', () => {
+  it('sends a new invite link and shows it once', async () => {
+    const link = 'https://hq.acme.com/invite/NEWTOKEN';
+    const calls = mockApi({
+      'GET /api/people': [200, { people: PEOPLE }],
+      'GET /api/org': [200, ORG_WITH_TEAMS],
+      'POST /api/people/p2/invite': [201, { person: { ...PEOPLE[1], status: 'invited' }, inviteUrl: link }],
+    });
+    const user = userEvent.setup();
+    render(<People me={ME} />);
+    await user.click(await screen.findByRole('button', { name: 'New invite link for Maria' }));
+    expect(calls.find(c => c.method === 'POST')).toEqual({ method: 'POST', path: '/api/people/p2/invite', body: undefined });
+    expect(await screen.findByText(link)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Invite link for Maria' })).toBeInTheDocument();
+    expect(within(rowOf('Maria')).getByText('Invited')).toBeInTheDocument();
+  });
+
+  it('edits title and scope', async () => {
+    const calls = mockApi({
+      'GET /api/people': [200, { people: PEOPLE }],
+      'GET /api/org': [200, ORG_WITH_TEAMS],
+      'PATCH /api/people/p3': [200, { person: { ...PEOPLE[2], title: 'Head of social', scope: { kind: 'department', id: 'd1', name: 'Marketing' } } }],
+    });
+    const user = userEvent.setup();
+    render(<People me={ME} />);
+    await user.click(await screen.findByRole('button', { name: 'Edit Sasha' }));
+    const title = screen.getByLabelText('Title');
+    expect(title).toHaveValue('SMM');
+    expect(screen.getByLabelText('Scope')).toHaveDisplayValue('Marketing / Social');
+    await user.clear(title);
+    await user.type(title, 'Head of social');
+    await user.selectOptions(screen.getByLabelText('Scope'), 'Marketing');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect(calls.find(c => c.method === 'PATCH')).toEqual({
+      method: 'PATCH',
+      path: '/api/people/p3',
+      body: { title: 'Head of social', scope: { kind: 'department', id: 'd1' } },
+    });
+    expect(await screen.findByRole('cell', { name: 'Head of social' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
   });
 });

@@ -3,7 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Deps } from '../../app.js';
 import { hashPassword } from '../../auth/password.js';
-import { personColumns, requireCompanyScope, requirePerson, startSession } from '../../auth/session.js';
+import { personColumns, requireCompanyScope, requirePerson, startSession, type Person } from '../../auth/session.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
 import { isUniqueViolation } from '../../db/errors.js';
 import { companies, invites, people, sessions } from '../../db/schema.js';
@@ -29,6 +29,14 @@ const PatchBody = z.object({
 
 const IdParams = z.object({ id: z.uuid() });
 const TokenParams = z.object({ token: z.string().min(1).max(100) });
+
+const inviteFor = (token: string, by: Person, personId: string) => ({
+  tokenHash: hashToken(token),
+  companyId: by.companyId,
+  personId,
+  createdBy: by.id,
+  expiresAt: new Date(Date.now() + INVITE_DAYS * 24 * 60 * 60 * 1000),
+});
 
 const notFound = () => new ApiError(404, 'not_found', 'This invite does not exist.');
 const gone = () => new ApiError(410, 'gone', 'This invite has already been used or has expired. Ask for a new one.');
@@ -67,19 +75,36 @@ export function peopleRoutes(app: FastifyInstance, { db, config }: Deps): void {
           .insert(people)
           .values({ companyId: me.companyId, name: body.name, email: body.email, title: body.title, status: 'invited', ...scope })
           .returning(personColumns);
-        await tx.insert(invites).values({
-          tokenHash: hashToken(token),
-          companyId: me.companyId,
-          personId: row!.id,
-          createdBy: me.id,
-          expiresAt: new Date(Date.now() + INVITE_DAYS * 24 * 60 * 60 * 1000),
-        });
+        await tx.insert(invites).values(inviteFor(token, me, row!.id));
         return row!;
       });
     } catch (err) {
       if (isUniqueViolation(err)) throw new ApiError(409, 'conflict', 'Someone with this email is already in the company.');
       throw err;
     }
+
+    reply.code(201);
+    return { person: await personView(db, person), inviteUrl: `${config.publicUrl}/invite/${token}` };
+  });
+
+  /* A fresh link for someone already in the company. It doubles as a password reset, so old access ends here. */
+  app.post('/api/people/:id/invite', async (req, reply) => {
+    const me = await requirePerson(req, db);
+    requireCompanyScope(me);
+    const { id } = IdParams.parse(req.params);
+    const [target] = await db.select(personColumns).from(people).where(eq(people.id, id));
+    if (!target) throw new ApiError(404, 'not_found', 'This person does not exist.');
+    if (target.isOwner) throw new ApiError(403, 'forbidden', 'The owner cannot be sent a new invite.');
+    if (target.id === me.id) throw new ApiError(403, 'forbidden', 'You cannot send a new invite to yourself.');
+
+    const token = newToken();
+    const person = await db.transaction(async tx => {
+      await tx.update(invites).set({ usedAt: new Date() }).where(and(eq(invites.personId, id), isNull(invites.usedAt)));
+      await tx.delete(sessions).where(eq(sessions.personId, id));
+      const [row] = await tx.update(people).set({ status: 'invited', passwordHash: null }).where(eq(people.id, id)).returning(personColumns);
+      await tx.insert(invites).values(inviteFor(token, me, id));
+      return row!;
+    });
 
     reply.code(201);
     return { person: await personView(db, person), inviteUrl: `${config.publicUrl}/invite/${token}` };
