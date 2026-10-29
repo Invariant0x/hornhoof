@@ -8,7 +8,11 @@ function requireDbUrl(url: string | undefined): string {
 }
 
 const config = loadConfig(process.env);
-const app = await buildApp({ db: await createDb(requireDbUrl(config.databaseUrl)), config });
+const app = await buildApp({
+  db: await createDb(requireDbUrl(config.databaseUrl)),
+  config,
+  logger: { level: process.env.LOG_LEVEL || 'info' },
+});
 await app.listen({ port: config.port, host: '0.0.0.0' });
 console.log(`Hornhoof is running at ${config.publicUrl}`);
 
