@@ -61,7 +61,7 @@ describe('Setup', () => {
   });
 
   it('shows the node command for a personal subscription', async () => {
-    const calls = mockApi({ 'POST /api/setup': [201, { ...CREATED, joinCode: 'JOIN-CODE-123' }] });
+    const calls = mockApi({ 'POST /api/setup': [201, { ...CREATED, joinCode: 'JOIN-CODE-123', serverUrl: 'https://hq.acme.com' }] });
     const onDone = vi.fn();
     const user = userEvent.setup();
     render(<Setup onDone={onDone} />);
@@ -72,7 +72,7 @@ describe('Setup', () => {
     expect(calls[0]!.body).toMatchObject({ chief: { mode: 'personal', provider: 'codex' } });
     expect(await screen.findByRole('heading', { name: 'Connect your machine' })).toBeInTheDocument();
     expect(screen.getByText(
-      `docker run -d --name hornhoof-node --restart unless-stopped -v hornhoof-node:/data ghcr.io/invariant0x/hornhoof-node --server ${window.location.origin} --join JOIN-CODE-123`,
+      'docker run -d --name hornhoof-node --restart unless-stopped -v hornhoof-node:/data ghcr.io/invariant0x/hornhoof-node --server https://hq.acme.com --join JOIN-CODE-123',
     )).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument();
     expect(onDone).not.toHaveBeenCalled();

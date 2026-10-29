@@ -99,7 +99,7 @@ export function setupRoutes(app: FastifyInstance, { db, config }: Deps): void {
     return {
       company: { id: company.id, name: company.name },
       person: { id: person.id, name: person.name, email: person.email, title: person.title },
-      ...(joinCode ? { joinCode } : {}),
+      ...(joinCode ? { joinCode, serverUrl: config.publicUrl } : {}),
     };
   });
 }

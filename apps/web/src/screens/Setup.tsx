@@ -36,7 +36,7 @@ export function Setup({ onDone }: { onDone: () => void }) {
   const [problems, setProblems] = useState<Record<string, string>>({});
   const [failure, setFailure] = useState('');
   const [busy, setBusy] = useState(false);
-  const [joinCode, setJoinCode] = useState('');
+  const [join, setJoin] = useState<{ code: string; server: string } | null>(null);
 
   function next(e: FormEvent) {
     e.preventDefault();
@@ -61,14 +61,14 @@ export function Setup({ onDone }: { onDone: () => void }) {
     setBusy(true);
     setFailure('');
     try {
-      const res = await api.post<{ joinCode?: string }>('/api/setup', {
+      const res = await api.post<{ joinCode?: string; serverUrl?: string }>('/api/setup', {
         companyName: companyName.trim(),
         name: name.trim(),
         email: email.trim(),
         password,
         chief,
       });
-      if (res.joinCode) setJoinCode(res.joinCode);
+      if (res.joinCode) setJoin({ code: res.joinCode, server: res.serverUrl ?? window.location.origin });
       else onDone();
     } catch (err) {
       setFailure(err instanceof ApiFailure ? err.message : 'Something went wrong.');
@@ -77,8 +77,8 @@ export function Setup({ onDone }: { onDone: () => void }) {
     }
   }
 
-  if (joinCode) {
-    const command = nodeCommand(joinCode);
+  if (join) {
+    const command = nodeCommand(join.code, join.server);
     return (
       <Card>
         <h1>Connect your machine</h1>

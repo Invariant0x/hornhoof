@@ -50,6 +50,12 @@ describe('POST /api/setup', () => {
     expect(sub!.joinCodeHash).toMatch(/^[0-9a-f]{64}$/);
   });
 
+  it('tells the browser which address the node should join', async () => {
+    const { app } = await testApp({ PUBLIC_URL: 'https://hq.acme.com/' });
+    const res = await app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, chief: { mode: 'personal', provider: 'kimi' } } });
+    expect(res.json().serverUrl).toBe('https://hq.acme.com');
+  });
+
   it('lets the chief wait for a subscription', async () => {
     const { app, db } = await testApp();
     const res = await app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, chief: { mode: 'later' } } });
