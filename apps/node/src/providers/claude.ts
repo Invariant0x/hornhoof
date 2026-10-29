@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Limits } from '@hornhoof/protocol';
 import type { ProviderAdapter, RunInput, RunResult } from '../runner.js';
@@ -93,6 +93,7 @@ export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'),
         env: env(input.secret),
         cwd: input.workDir,
         timeoutMs: input.timeoutMs,
+        signal: input.signal,
         onLine(line) {
           let ev: Record<string, unknown>;
           try {
@@ -112,6 +113,8 @@ export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'),
       if (done.timedOut) return { ok: false, sessionId, result: '', output: done.output, error: 'timeout', limits };
       if (final && !final.isError && done.code === 0) return { ok: true, sessionId, result: final.text, output: done.output, error: null, limits };
       const out = signedOut || SIGNED_OUT.test(final?.text ?? '');
+      /* A GLM key Z.ai rejects is dropped, so the status says signed out and the next sign-in asks for a new key. */
+      if (out && mode === 'glm') rmSync(keyFile, { force: true });
       return { ok: false, sessionId, result: final?.text ?? '', output: done.output, error: out ? 'not_logged_in' : 'agent_failed', limits };
     },
 

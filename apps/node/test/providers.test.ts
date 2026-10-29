@@ -187,6 +187,15 @@ describe('GLM Coding Plan', () => {
     expect(await a.secrets()).toEqual([KEY]);
   });
 
+  it('forgets a key Z.ai rejects, so the next sign-in asks for a new one', async () => {
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(home, 'glm-key'), `${KEY}\n`);
+    process.env.FAKE_MODE = 'auth_error';
+    const a = adapter('glm');
+    expect(await a.run(input())).toMatchObject({ ok: false, error: 'not_logged_in' });
+    expect(await a.loggedIn()).toBe(false);
+  });
+
   it('points Claude Code at Z.ai with the GLM models', async () => {
     mkdirSync(home, { recursive: true });
     writeFileSync(join(home, 'glm-key'), `${KEY}\n`);
@@ -314,6 +323,18 @@ describe('Kimi Code', () => {
     await adapter('kimi').login(io);
     expect(lastRun().argv).toEqual(['login']);
     expect(readFileSync(io.urlFile, 'utf8')).toBe(`${LOGIN_URL}\n`);
+  });
+});
+
+describe('calling a job off', () => {
+  it.each(['claude', 'codex', 'kimi'] as const)('stops the whole process group of %s', async provider => {
+    process.env.FAKE_MODE = 'hang';
+    const stop = new AbortController();
+    setTimeout(() => stop.abort(), 300);
+    const started = Date.now();
+    await adapter(provider).run(input({ timeoutMs: 15000, signal: stop.signal }));
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(alive(logged().find(l => l.grandchild)!.grandchild!)).toBe(false);
   });
 });
 

@@ -20,6 +20,31 @@ describe('plural', () => {
   });
 });
 
+/* Every text in a language, with functions called on placeholder arguments. */
+function textsOf(messages: unknown): string[] {
+  const texts: string[] = [];
+  const walk = (v: unknown): void => {
+    if (typeof v === 'string') texts.push(v);
+    else if (typeof v === 'function') texts.push(String((v as (...a: string[]) => unknown)('X', 'Y', 'Z')));
+    else if (v && typeof v === 'object') Object.values(v).forEach(walk);
+  };
+  walk(messages);
+  return texts;
+}
+
+describe('Russian vocabulary', () => {
+  it('calls them машина and нода everywhere', () => {
+    expect(textsOf(ru).filter(t => /узел|узл|компьютер/i.test(t))).toEqual([]);
+  });
+});
+
+describe('The agent in the center', () => {
+  it('is the orchestrator in both languages, since the chief is the CEO', () => {
+    expect(textsOf(en).filter(t => /chief/i.test(t))).toEqual([]);
+    expect(textsOf(ru).filter(t => /шеф/i.test(t))).toEqual([]);
+  });
+});
+
 describe('errorText', () => {
   it('shows a known reason in the chosen language', () => {
     expect(errorText(ru, new ApiFailure(401, 'unauthorized', 'Wrong email or password.', 'wrong_password'))).toBe(ru.errors.wrong_password);

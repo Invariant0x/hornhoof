@@ -48,6 +48,7 @@ export function codexAdapter({ home, tools, bin = join(tools, 'bin', 'codex'), s
         env: env(input.secret),
         cwd: input.workDir,
         timeoutMs: input.timeoutMs,
+        signal: input.signal,
         onLine(line) {
           let ev: { type?: string; thread_id?: string; item?: { type?: string; text?: string }; error?: { message?: string }; message?: string };
           try {

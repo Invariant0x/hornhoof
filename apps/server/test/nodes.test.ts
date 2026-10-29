@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
-import { departments, companies, nodeCodes, subscriptions } from '../src/db/schema.js';
+import { agents, departments, companies, nodeCodes, people, subscriptions } from '../src/db/schema.js';
 import { as, invitePerson, setUpCompany, testApp } from './helpers.js';
 
 const MACHINE = { machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' };
@@ -114,6 +114,28 @@ describe('POST /api/machines/:id/disconnect', () => {
       expect(row).toMatchObject({ status: 'waiting_machine', machineId: null, nodeKeyHash: null });
     }
     expect(await machinesOf(app, ceo)).toEqual([]);
+  });
+
+  it("disconnects a disabled person's machines, frees the chief and refuses their unused code", async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    const oleg = await invitePerson(app, ceo, { name: 'Oleg', email: 'oleg@acme.com', scope: { kind: 'company' } });
+    const connect = (providers: string[]) => app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers }, ...as(oleg) });
+    const first = (await connect(['claude'])).json();
+    const subId = first.subscriptions[0].id;
+    expect((await join(app, codeOf(first.command))).statusCode).toBe(200);
+    expect((await app.inject({ method: 'POST', url: `/api/subscriptions/${subId}/chief`, ...as(ceo) })).statusCode).toBe(200);
+    const spare = codeOf((await connect(['codex'])).json().command);
+
+    const [person] = await db.select().from(people).where(eq(people.email, 'oleg@acme.com'));
+    expect((await app.inject({ method: 'PATCH', url: `/api/people/${person!.id}`, payload: { status: 'disabled' }, ...as(ceo) })).statusCode).toBe(200);
+
+    const [row] = await db.select().from(subscriptions).where(eq(subscriptions.id, subId));
+    expect(row).toMatchObject({ status: 'waiting_machine', machineId: null, nodeKeyHash: null });
+    expect(await machinesOf(app, ceo)).toEqual([]);
+    const [chief] = await db.select().from(agents).where(eq(agents.kind, 'chief'));
+    expect(chief!.subscriptionId).toBeNull();
+    expect((await join(app, spare, { machineId: 'mac-0002-abcd' })).statusCode).toBe(410);
   });
 
   it('says when the machine does not exist', async () => {

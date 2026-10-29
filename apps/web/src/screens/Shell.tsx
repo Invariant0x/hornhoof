@@ -93,11 +93,11 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   return (
     <div className="shell">
       <header className="topbar">
-        <div className="tb-brand">
+        <div className="tb-brand glass">
           <LogoMark />
-          <span>{me.company.name}</span>
+          <span className="sr">{me.company.name}</span>
         </div>
-        <nav className="tabs" aria-label={t.shell.sections}>
+        <nav className="tabs glass" aria-label={t.shell.sections}>
           {TABS.map(id => (
             <button key={id} type="button" className={tab === id ? 'on' : ''} aria-current={tab === id ? 'page' : undefined} onClick={() => setTab(id)}>
               {t.shell.tabs[id]}
@@ -106,7 +106,7 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
         </nav>
         <div className="tb-right">
           <div className="account" ref={account}>
-            <button className="avatar" type="button" aria-label={t.shell.account} aria-expanded={menu} onClick={() => setMenu(!menu)}>
+            <button className="avatar glass" type="button" aria-label={t.shell.account} aria-expanded={menu} onClick={() => setMenu(!menu)}>
               {me.person.name.trim().charAt(0).toUpperCase()}
             </button>
             {menu && <AccountMenu me={me} onClose={() => setMenu(false)} onSignOut={signOut} />}

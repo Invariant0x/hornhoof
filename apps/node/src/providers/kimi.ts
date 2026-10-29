@@ -54,6 +54,7 @@ export function kimiAdapter({ home, tools, bin = join(tools, 'bin', 'kimi') }: O
         env: env(),
         cwd: input.workDir,
         timeoutMs: input.timeoutMs,
+        signal: input.signal,
         onLine(line) {
           let ev: KimiEvent;
           try {

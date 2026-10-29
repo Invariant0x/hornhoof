@@ -70,6 +70,51 @@ describe('runNode', () => {
     expect(isRemoved(dir)).toBe(true);
   });
 
+  it('stops its running jobs before it deletes their folders on removal', async () => {
+    const server = await fakeServer();
+    const dir = nodeDir(server.url);
+    let folderAtStop: boolean | null = null;
+    const slow: ProviderAdapter = {
+      ...adapter,
+      run: input =>
+        new Promise(done => {
+          input.signal?.addEventListener('abort', () => {
+            folderAtStop = existsSync(input.workDir);
+            done({ ok: false, sessionId: null, result: '', output: 'stopped', error: 'agent_failed', limits: null });
+          });
+        }),
+    };
+    const node = await runNode({ dir, adapter: slow, log: () => {} });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 60000, secret: null });
+    await server.wait(() => server.received.some(m => m.type === 'job.started'));
+    server.send({ type: 'remove' });
+    await server.wait(() => server.received.some(m => m.type === 'removed'));
+    expect(folderAtStop).toBe(true);
+    expect(existsSync(join(dir, 'work'))).toBe(false);
+  });
+
+  it('answers agent_failed and keeps serving when a job cannot even start', async () => {
+    const server = await fakeServer();
+    let picks = 0;
+    const pick = () => {
+      if (++picks === 1) throw new Error('no program for this job');
+      return adapter;
+    };
+    const node = await runNode({ dir: nodeDir(server.url), adapter: pick, log: () => {} });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    const run = (jobId: string) => server.send({ type: 'job.run', jobId, subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 5000, secret: null });
+    const doneOf = (jobId: string) => server.received.find(m => m.type === 'job.done' && m.jobId === jobId);
+    run('j1');
+    await server.wait(() => !!doneOf('j1'));
+    expect(doneOf('j1')).toMatchObject({ ok: false, error: 'agent_failed' });
+    run('j2');
+    await server.wait(() => !!doneOf('j2'));
+    expect(doneOf('j2')).toMatchObject({ ok: true, result: 'ready' });
+  });
+
   it('stays idle once removed', async () => {
     const lines: string[] = [];
     const dir = nodeDir('http://127.0.0.1:9');

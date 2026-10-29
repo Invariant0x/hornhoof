@@ -20,6 +20,12 @@ afterEach(() => {
 });
 
 describe('Shell', () => {
+  it('shows only the logo in the top left, with the company name for screen readers', () => {
+    const { container } = renderShell();
+    expect(container.querySelector('.tb-brand svg')).toBeInTheDocument();
+    expect(screen.getByText(ME.company.name)).toHaveClass('sr');
+  });
+
   it('opens Subscriptions from the third tab', async () => {
     mockApi({ 'GET /api/org': [200, ORG], 'GET /api/subscriptions': [200, { subscriptions: SUBS }], 'GET /api/machines': [200, { machines: MACHINES }] });
     const user = userEvent.setup();

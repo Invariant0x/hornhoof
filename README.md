@@ -18,7 +18,7 @@ echo "NODE_KEY=$(openssl rand -base64 32)" >> .env
 docker compose up -d --build
 ```
 
-Open http://localhost:8080 and follow the setup: name your company, create your account and connect the chief's subscription.
+Open http://localhost:8080 and follow the setup: name your company, create your account and connect the orchestrator's subscription.
 
 Keep `.env` safe. `HORNHOOF_SECRET` encrypts the API keys stored in the database, and without it they cannot be read back. `NODE_KEY` lets the built-in node, which runs the company's API keys, connect to Hornhoof.
 

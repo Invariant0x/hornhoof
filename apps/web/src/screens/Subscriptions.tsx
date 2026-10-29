@@ -9,6 +9,7 @@ import { Edge } from '../ui/Edge';
 
 const POLL_MS = 1000;
 const POLL_LIMIT_MS = 150_000;
+const REFRESH_MS = 5000;
 
 type Test = { phase: 'running' } | { phase: 'done'; text: string } | { phase: 'failed'; text: string; tail: string | null };
 type Panel = { kind: 'connect' } | { kind: 'command'; command: string } | null;
@@ -126,8 +127,11 @@ export function Subscriptions({ me }: { me: Me }) {
     }
   }, []);
 
+  /* Nodes sign in and come online on their own, so the screen looks again every few seconds. */
   useEffect(() => {
     void load();
+    const timer = setInterval(() => void load(), REFRESH_MS);
+    return () => clearInterval(timer);
   }, [load]);
 
   async function run(action: () => Promise<void>) {

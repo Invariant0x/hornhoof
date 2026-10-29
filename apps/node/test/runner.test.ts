@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ServerMessage } from '@hornhoof/protocol';
@@ -63,5 +63,31 @@ describe('runJob', () => {
     const done = await runJob(adapter, job(), dir);
     expect(done).toMatchObject({ ok: false, error: 'agent_failed' });
     expect(done.tail).toContain('[hidden]');
+  });
+
+  it('hides what the program held before the run and after it, and the node key', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
+    let reads = 0;
+    const adapter = {
+      ...fakeAdapter(async () => ok({ output: 'old-token-0123456789 new-token-0123456789 node-key-1234567890' })),
+      secrets: async () => [++reads === 1 ? 'old-token-0123456789' : 'new-token-0123456789'],
+    };
+    const done = await runJob(adapter, job(), dir, { hidden: ['node-key-1234567890'] });
+    expect(done.tail).toBe('[hidden] [hidden] [hidden]');
+  });
+
+  it('starts a new folder for a session it never saved, even one named like constructor', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
+    const adapter = fakeAdapter(async () => ok());
+    const done = await runJob(adapter, job({ jobId: 'j-x', sessionId: 'constructor' }), dir);
+    expect(done.ok).toBe(true);
+    expect(adapter.inputs[0]!.workDir).toBe(join(dir, 'work', 'j-x'));
+  });
+
+  it('turns a work folder it cannot make into agent_failed', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
+    writeFileSync(join(dir, 'work'), 'not a folder');
+    const done = await runJob(fakeAdapter(async () => ok()), job(), dir);
+    expect(done).toMatchObject({ ok: false, error: 'agent_failed' });
   });
 });

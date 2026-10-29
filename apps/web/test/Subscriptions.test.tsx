@@ -1,6 +1,6 @@
-import { render, screen, within } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Subscriptions } from '../src/screens/Subscriptions';
 import type { Me } from '../src/types';
@@ -28,7 +28,7 @@ describe('Subscriptions', () => {
     expect(within(rowOf('Kimi')).getByText('Waiting for the machine')).toBeInTheDocument();
     expect(within(rowOf('Kimi')).getByText('No machine yet')).toBeInTheDocument();
     expect(within(rowOf('Claude')).getByText('Whole company')).toBeInTheDocument();
-    expect(within(rowOf('Anthropic key ending 9f3a')).getByText('Chief')).toBeInTheDocument();
+    expect(within(rowOf('Anthropic key ending 9f3a')).getByText('Orchestrator')).toBeInTheDocument();
   });
 
   it('says Built-in node offline for an API key whose node is down', async () => {
@@ -42,6 +42,25 @@ describe('Subscriptions', () => {
     render(<Subscriptions me={ME} />);
     expect(await screen.findByText('Machine offline')).toBeInTheDocument();
     expect(within(rowOf('Claude')).queryByRole('button', { name: /Run a test/ })).not.toBeInTheDocument();
+  });
+
+  it('refreshes on its own, so a node that signs in turns Ready without a reload', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
+    let calls = 0;
+    mockApi({
+      'GET /api/subscriptions': () => {
+        calls += 1;
+        return [200, { subscriptions: [calls < 2 ? SUBS[1]! : { ...SUBS[1]!, status: 'ready' }] }];
+      },
+      'GET /api/machines': [200, { machines: MACHINES }],
+    });
+    render(<Subscriptions me={ME} />);
+    expect(await screen.findByText('Waiting for the login')).toBeInTheDocument();
+    await act(() => vi.advanceTimersByTimeAsync(5000));
+    expect(await screen.findByText('Ready')).toBeInTheDocument();
   });
 
   it('connects Claude and Codex and shows the command with Copy and the trust line', async () => {
@@ -101,22 +120,22 @@ describe('Subscriptions', () => {
     expect(calls.find(c => c.method === 'DELETE')).toEqual({ method: 'DELETE', path: '/api/subscriptions/s-kimi', body: undefined });
   });
 
-  it('moves the chief to a company subscription and shows the badge', async () => {
+  it('moves the orchestrator to a company subscription and shows the badge', async () => {
     const calls = lists({ 'POST /api/subscriptions/s-claude/chief': [200, { subscription: { ...SUBS[0]!, isChief: true } }] });
     const user = userEvent.setup();
     render(<Subscriptions me={ME} />);
-    await user.click(await screen.findByRole('button', { name: 'Use Claude for the chief' }));
+    await user.click(await screen.findByRole('button', { name: 'Use Claude for the orchestrator' }));
     expect(calls.find(c => c.method === 'POST')!.path).toBe('/api/subscriptions/s-claude/chief');
-    expect(await within(rowOf('Claude')).findByText('Chief')).toBeInTheDocument();
-    expect(within(rowOf('Anthropic key ending 9f3a')).queryByText('Chief')).not.toBeInTheDocument();
+    expect(await within(rowOf('Claude')).findByText('Orchestrator')).toBeInTheDocument();
+    expect(within(rowOf('Anthropic key ending 9f3a')).queryByText('Orchestrator')).not.toBeInTheDocument();
   });
 
-  it('offers no chief choice to a department-scope viewer', async () => {
+  it('offers no orchestrator choice to a department-scope viewer', async () => {
     lists();
     const lead: Me = { ...ME, person: { ...ME.person, scopeKind: 'department', scopeId: 'd1', isOwner: false } };
     render(<Subscriptions me={lead} />);
     await screen.findByRole('row', { name: /^Claude\b/ });
-    expect(screen.queryByRole('button', { name: /for the chief/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /for the orchestrator/ })).not.toBeInTheDocument();
   });
 
   it('gets a new command for a subscription still waiting for its machine', async () => {

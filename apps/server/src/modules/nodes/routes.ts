@@ -5,9 +5,9 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { requirePerson } from '../../auth/session.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
-import { jobs, machines, nodeCodes, people, subscriptions } from '../../db/schema.js';
+import { machines, nodeCodes, people, subscriptions } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import { failOpenJobs } from './messages.js';
+import { disconnectMachines } from './disconnect.js';
 
 const JoinBody = z.object({
   code: z.string().min(1).max(200),
@@ -29,6 +29,9 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     const codeHash = hashToken(body.code);
     const [code] = await db.select().from(nodeCodes).where(eq(nodeCodes.codeHash, codeHash));
     if (!code) throw new ApiError(404, 'not_found', 'This install command is not valid. Copy it again from Hornhoof.', 'code_unknown');
+    /* A person who was disabled after getting the command cannot connect machines with it. */
+    const [owner] = await db.select({ status: people.status }).from(people).where(eq(people.id, code.personId));
+    if (owner?.status !== 'active') throw codeUsed();
 
     const joined = await db.transaction(async tx => {
       const used = await tx
@@ -59,15 +62,18 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
         .onConflictDoUpdate({ target: [machines.personId, machines.machineKey], set: { ...details, revokedAt: null } })
         .returning({ id: machines.id });
 
+      /* Claimed only while still waiting, so a second code for the same subscription cannot take it at the same time. */
       const nodes = [];
       for (const sub of subs) {
         const key = newToken();
-        await tx
+        const claimed = await tx
           .update(subscriptions)
           .set({ machineId: machine!.id, nodeKeyHash: hashToken(key), status: 'needs_login' })
-          .where(eq(subscriptions.id, sub.id));
-        nodes.push({ subscriptionId: sub.id, provider: sub.provider, key });
+          .where(and(eq(subscriptions.id, sub.id), eq(subscriptions.status, 'waiting_machine'), isNull(subscriptions.machineId)))
+          .returning({ id: subscriptions.id });
+        if (claimed.length) nodes.push({ subscriptionId: sub.id, provider: sub.provider, key });
       }
+      if (nodes.length === 0) throw codeUsed();
       return { machine: { id: machine!.id }, nodes };
     });
 
@@ -114,20 +120,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     const [machine] = await db.select().from(machines).where(and(eq(machines.id, id), isNull(machines.revokedAt)));
     if (!machine) throw new ApiError(404, 'not_found', 'This machine does not exist.', 'machine_unknown');
     if (machine.personId !== me.id && me.scopeKind !== 'company') throw new ApiError(403, 'forbidden', 'Only the owner of this machine can do this.', 'not_owner');
-    const served = await db
-      .select({ id: subscriptions.id })
-      .from(subscriptions)
-      .where(and(eq(subscriptions.machineId, id), isNull(subscriptions.removedAt)));
-    const ids = served.map(s => s.id);
-    if (ids.length) await failOpenJobs(ctx, inArray(jobs.subscriptionId, ids), 'machine_disconnected');
-    for (const subId of ids) hub.close(subId, 4001);
-    await db.transaction(async tx => {
-      await tx.update(machines).set({ revokedAt: new Date() }).where(eq(machines.id, id));
-      await tx
-        .update(subscriptions)
-        .set({ machineId: null, nodeKeyHash: null, status: 'waiting_machine' })
-        .where(and(eq(subscriptions.machineId, id), isNull(subscriptions.removedAt)));
-    });
+    await disconnectMachines(ctx, [id]);
     return reply.code(204).send();
   });
 

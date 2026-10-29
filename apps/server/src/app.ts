@@ -42,7 +42,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   app.get('/api/health', async () => ({ ok: true }));
   setupRoutes(app, deps);
   authRoutes(app, deps);
-  peopleRoutes(app, deps);
+  peopleRoutes(app, ctx);
   orgRoutes(app, ctx);
   subscriptionRoutes(app, ctx);
   nodeRoutes(app, ctx);

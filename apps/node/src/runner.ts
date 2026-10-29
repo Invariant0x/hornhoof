@@ -4,7 +4,16 @@ import { TAIL_BYTES, type JobError, type Limits, type NodeMessage, type ServerMe
 import { redact } from './redact.js';
 import { readSessions, rememberSession } from './state.js';
 
-export type RunInput = { prompt: string; sessionId: string | null; model: string | null; workDir: string; secret: string | null; timeoutMs: number };
+export type RunInput = {
+  prompt: string;
+  sessionId: string | null;
+  model: string | null;
+  workDir: string;
+  secret: string | null;
+  timeoutMs: number;
+  /* Aborted when the job is called off, for example when Hornhoof removes the subscription. */
+  signal?: AbortSignal;
+};
 export type RunResult = { ok: boolean; sessionId: string | null; result: string; output: string; error: JobError | null; limits: Limits | null };
 export type LoginIo = { input: NodeJS.ReadableStream; output: NodeJS.WritableStream; urlFile: string };
 
@@ -37,16 +46,37 @@ function withTimeout(run: Promise<RunResult>, ms: number): Promise<RunResult> {
   return Promise.race([run, timeout]).finally(() => clearTimeout(timer));
 }
 
-export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string): Promise<JobDone> {
-  const workDir = (msg.sessionId && readSessions(dir)[msg.sessionId]) || join(dir, 'work', msg.jobId);
-  mkdirSync(workDir, { recursive: true });
-  const input = { prompt: msg.prompt, sessionId: msg.sessionId, model: msg.model, workDir, secret: msg.secret, timeoutMs: msg.timeoutMs };
-  const res = await withTimeout(
-    adapter.run(input).catch((err: unknown) => failed(err instanceof Error ? err.message : String(err), 'agent_failed')),
-    msg.timeoutMs,
-  );
-  if (res.sessionId) rememberSession(dir, res.sessionId, workDir);
-  const secrets = [...(await adapter.secrets().catch(() => [])), ...(msg.secret ? [msg.secret] : [])];
+const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
+/* The folder a saved session works in, or a new one for this job. Only sessions this node saved count. */
+function workDirFor(msg: JobRun, dir: string): string {
+  const saved = msg.sessionId ? readSessions(dir) : {};
+  const known = msg.sessionId && Object.hasOwn(saved, msg.sessionId) ? saved[msg.sessionId] : undefined;
+  return typeof known === 'string' ? known : join(dir, 'work', msg.jobId);
+}
+
+type RunOptions = {
+  /* More values to hide, such as the node's own key. */
+  hidden?: string[];
+  signal?: AbortSignal;
+};
+
+/* Always ends with a job.done, whatever breaks on the way. */
+export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string, { hidden = [], signal }: RunOptions = {}): Promise<JobDone> {
+  /* Programs refresh their tokens during a run, so the values from before and after are both hidden. */
+  const before = await adapter.secrets().catch(() => []);
+  let res: RunResult;
+  try {
+    const workDir = workDirFor(msg, dir);
+    mkdirSync(workDir, { recursive: true });
+    const input = { prompt: msg.prompt, sessionId: msg.sessionId, model: msg.model, workDir, secret: msg.secret, timeoutMs: msg.timeoutMs, signal };
+    res = await withTimeout(adapter.run(input).catch((err: unknown) => failed(message(err), 'agent_failed')), msg.timeoutMs);
+    if (res.sessionId) rememberSession(dir, res.sessionId, workDir);
+  } catch (err) {
+    res = failed(message(err), 'agent_failed');
+  }
+  const after = await adapter.secrets().catch(() => []);
+  const secrets = [...before, ...after, ...hidden, ...(msg.secret ? [msg.secret] : [])];
   return {
     type: 'job.done',
     jobId: msg.jobId,

@@ -5,14 +5,20 @@ import { PROVIDER_NAMES } from '../providers';
 import type { Department, Org, SubView } from '../types';
 import { Edge } from '../ui/Edge';
 import { AgentIcon, LogoMark, PersonIcon } from '../ui/icons';
+import { Pulse, toD, useReducedMotion, type Point } from '../ui/wires';
 
-/* World coordinates. The chief sits in the middle, people above it, departments on an arc around it. */
-const W = 1200, H = 860, CX = W / 2, CY = H / 2 + 20, HUB = 120;
-const CHIP_W = 184, CHIP_H = 56, DEPT_W = 220, DEPT_H = 96;
+/* World coordinates, laid out like the approved prototype: people on top, the orchestrator in the middle, departments in two columns. */
+const W = 1200, H = 900, CX = W / 2, CY = 420, HUB = 120;
+const CHIP_W = 184, CHIP_H = 56, CHIP_GAP = 20;
+const CHIPS_TOP = CY - 384, BUS_Y = CY - 314;
+const DEPT_W = 240, DEPT_H = 104;
+/* Where a department trace turns: 84 out on the diagonal, and the inner side of each column. */
+const BEND = 84, INNER = 210;
+const GAUGE_SEGMENTS = 24;
 const MIN_K = 0.3, MAX_K = 2.5;
 
 type View = { x: number; y: number; k: number };
-
+export type DeptSpot = { x: number; y: number; w: number; h: number; path: Point[] };
 
 export function chiefStatus(t: Messages, sub: SubView | null): string {
   if (!sub) return t.map.needsSubscription;
@@ -23,31 +29,60 @@ export function chiefStatus(t: Messages, sub: SubView | null): string {
   return t.map.runsOnPersonal(sub.owner.name, PROVIDER_NAMES[sub.provider]);
 }
 
-function deptPositions(n: number): { x: number; y: number }[] {
-  /* Spread over the right, bottom and left, leaving the top for people. */
+/* Departments fill the left and right columns in turn, top row first, each on a trace that leaves the hub at 45 degrees. */
+export function deptLayout(n: number): DeptSpot[] {
   return Array.from({ length: n }, (_, i) => {
-    const a = ((-20 + (220 * (i + 0.5)) / n) * Math.PI) / 180;
-    return { x: CX + Math.cos(a) * 410, y: CY + Math.sin(a) * 280 };
+    const side = i % 2 ? 1 : -1;
+    const row = Math.floor(i / 2);
+    const up = row === 0 ? -1 : 1;
+    const midY = row === 0 ? CY - 220 : CY + 220 + 160 * (row - 1);
+    const edgeX = CX + side * INNER;
+    return {
+      x: side < 0 ? edgeX - DEPT_W : edgeX,
+      y: midY - DEPT_H / 2,
+      w: DEPT_W,
+      h: DEPT_H,
+      path: [[CX, CY], [CX + side * BEND, CY + up * BEND], [CX + side * BEND, midY], [edgeX, midY]],
+    };
   });
 }
 
-const chipsWidth = (n: number) => n * CHIP_W + Math.max(0, n - 1) * 12;
+const chipsWidth = (n: number) => n * CHIP_W + Math.max(0, n - 1) * CHIP_GAP;
+
+/* The centers of the people chips, left to right. */
+function chipCenters(n: number): number[] {
+  const left = CX - chipsWidth(n) / 2 + CHIP_W / 2;
+  return Array.from({ length: n }, (_, i) => left + i * (CHIP_W + CHIP_GAP));
+}
+
+/* One gauge segment lights per 1/24 of the agents at work, and at least one while any agent works. */
+function gaugeArc(working: number, total: number): { d: string; n: number } {
+  const n = working && total ? Math.max(1, Math.round((GAUGE_SEGMENTS * working) / total)) : 0;
+  if (!n) return { d: 'M 17 120 A 103 103 0 0 1 17 120', n };
+  const a = Math.PI + (Math.PI * n) / GAUGE_SEGMENTS;
+  return { d: `M 17 120 A 103 103 0 0 1 ${(120 + 103 * Math.cos(a)).toFixed(2)} ${(120 + 103 * Math.sin(a)).toFixed(2)}`, n };
+}
+
+const GAUGE_TRACK: Point[] = Array.from({ length: 37 }, (_, i) => {
+  const a = Math.PI + (Math.PI * i) / 36;
+  return [120 + 103 * Math.cos(a), 120 + 103 * Math.sin(a)];
+});
 
 /* The part of the world that has something on it, so Fit fills the screen with it. */
 function contentBounds(org: Org): { x0: number; y0: number; x1: number; y1: number } {
-  const half = Math.max(chipsWidth(org.people.length) / 2, 220);
-  const b = { x0: CX - half, x1: CX + half, y0: CY - HUB - CHIP_H - 34, y1: CY + HUB + (org.departments.length ? 40 : 110) };
-  for (const p of deptPositions(org.departments.length)) {
-    b.x0 = Math.min(b.x0, p.x - DEPT_W / 2);
-    b.x1 = Math.max(b.x1, p.x + DEPT_W / 2);
-    b.y0 = Math.min(b.y0, p.y - DEPT_H / 2);
-    b.y1 = Math.max(b.y1, p.y + DEPT_H / 2);
+  const half = Math.max(chipsWidth(org.people.length) / 2, 260);
+  const b = { x0: CX - half, x1: CX + half, y0: CHIPS_TOP, y1: CY + HUB + (org.departments.length ? 40 : 110) };
+  for (const s of deptLayout(org.departments.length)) {
+    b.x0 = Math.min(b.x0, s.x);
+    b.x1 = Math.max(b.x1, s.x + s.w);
+    b.y1 = Math.max(b.y1, s.y + s.h);
   }
   return b;
 }
 
 export function MapScreen() {
   const t = useT();
+  const still = useReducedMotion();
   const [org, setOrg] = useState<Org | null>(null);
   const [failure, setFailure] = useState<unknown>(null);
   const [view, setView] = useState<View>({ x: 0, y: 0, k: 1 });
@@ -69,9 +104,11 @@ export function MapScreen() {
     const el = box.current;
     if (!el || !el.clientWidth || !org) return;
     const { x0, y0, x1, y1 } = contentBounds(org);
-    const pad = 32;
-    const k = Math.max(MIN_K, Math.min((el.clientWidth - pad * 2) / (x1 - x0), (el.clientHeight - pad * 2) / (y1 - y0), 1.15));
-    setView({ k, x: (el.clientWidth - (x1 - x0) * k) / 2 - x0 * k, y: (el.clientHeight - (y1 - y0) * k) / 2 - y0 * k });
+    /* The header floats over the top of the map and the zoom over the bottom. */
+    const padX = 32, padTop = 76, padBottom = 72;
+    const room = el.clientHeight - padTop - padBottom;
+    const k = Math.max(MIN_K, Math.min((el.clientWidth - padX * 2) / (x1 - x0), room / (y1 - y0), 1.15));
+    setView({ k, x: (el.clientWidth - (x1 - x0) * k) / 2 - x0 * k, y: padTop + (room - (y1 - y0) * k) / 2 - y0 * k });
   }, [org]);
 
   useEffect(() => {
@@ -125,19 +162,35 @@ export function MapScreen() {
   if (!org) return <div className="map" aria-busy="true" />;
 
   const depts = org.departments;
-  const spots = deptPositions(depts.length);
+  const spots = deptLayout(depts.length);
+  const chips = chipCenters(org.people.length);
   const chipsW = chipsWidth(org.people.length);
+  const gauge = gaugeArc(org.agents.working, org.agents.total);
 
   return (
     <div className="map" ref={box} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}>
       <div className="world" style={{ width: W, height: H, transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})` }}>
+        <div className="halo" style={{ left: CX - 260, top: CY - 260, width: 520, height: 520 }} />
         <svg className="wires" width={W} height={H} viewBox={`0 0 ${W} ${H}`} aria-hidden="true">
-          {spots.map((p, i) => (
-            <line key={depts[i]!.id} x1={CX} y1={CY} x2={p.x} y2={p.y} />
+          {chips.length > 0 && (
+            <>
+              <path className="tr" d={`M ${chips[0]} ${CHIPS_TOP + CHIP_H} V ${BUS_Y} H ${chips[chips.length - 1]} V ${CHIPS_TOP + CHIP_H}`} />
+              {chips.slice(1, -1).map(x => (
+                <path key={x} className="tr" d={`M ${x} ${CHIPS_TOP + CHIP_H} V ${BUS_Y}`} />
+              ))}
+              <path className="tr" data-wire="people" d={`M ${CX} ${BUS_Y} V ${CY - HUB}`} />
+              <circle className="via" cx={CX} cy={BUS_Y} r="4" />
+            </>
+          )}
+          {spots.map((s, i) => (
+            <path key={depts[i]!.id} className="tr" data-wire={depts[i]!.id} d={toD(s.path)} />
+          ))}
+          {spots.map((s, i) => (
+            <circle key={depts[i]!.id} className="via" cx={s.path[2]![0]} cy={s.path[2]![1]} r="4" />
           ))}
         </svg>
 
-        <ul className="chips" style={{ left: CX - chipsW / 2, top: CY - HUB - CHIP_H - 34 }} aria-label={t.map.leaders}>
+        <ul className="chips" style={{ left: CX - chipsW / 2, top: CHIPS_TOP, gap: CHIP_GAP }} aria-label={t.map.leaders}>
           {org.people.map(p => (
             <li key={p.id} style={{ width: CHIP_W, height: CHIP_H }}>
               <Edge cut={8} className="chip">
@@ -153,26 +206,37 @@ export function MapScreen() {
 
         <div className="hub" style={{ left: CX - HUB, top: CY - HUB, width: HUB * 2, height: HUB * 2 }}>
           <svg className="hub-art" viewBox="0 0 240 240" aria-hidden="true">
-            <circle className="hub-ring" cx="120" cy="120" r="116" />
-            <circle className="hub-gauge" cx="120" cy="120" r="104" pathLength="100" strokeDasharray={`${org.agents.total ? (org.agents.working / org.agents.total) * 100 : 0} 100`} />
+            <circle className="hub-bg" cx="120" cy="120" r="116" />
+            <g className="spin">
+              <circle className="hub-ring" cx="120" cy="120" r="119" />
+            </g>
+            <path className="gauge-bg" d="M 17 120 A 103 103 0 0 1 223 120" pathLength={GAUGE_SEGMENTS} />
+            <path className="gauge" d={gauge.d} pathLength={gauge.n || 1} />
+            <circle className="hub-in" cx="120" cy="120" r="88" />
+            <path className="hub-hz" d="M 40 132 L 200 132" />
+            {/* Motion means real work: the dot runs only while an agent works. Pulses on the traces wait for real messages (M3). */}
+            {!still && org.agents.working > 0 && <Pulse pts={GAUGE_TRACK} speed={55} bounce tone="k" />}
           </svg>
           <LogoMark className="hub-mark" />
-          <span className="hub-name">{org.company.name}</span>
-          <span className="hub-num">{`${org.agents.working}/${org.agents.total}`}</span>
-          <span className="hub-label">{t.map.agentsWorking}</span>
+          <span className="hub-num">
+            <b>{org.agents.working}</b>
+            <span>/</span>
+            <span>{org.agents.total}</span>
+          </span>
+          <span className="sr">{t.map.agentsWorking}</span>
         </div>
         <p className="hub-chief" style={{ left: CX - 180, top: CY + HUB + 14 }}>
           <AgentIcon label={t.map.agent} />
-          <b>{org.chief?.name ?? t.map.chief}</b>
+          <b>{t.map.chief}</b>
           <span>{chiefStatus(t, org.chief?.subscription ?? null)}</span>
         </p>
 
         {depts.length === 0 && (
-          <p className="map-empty" style={{ left: CX - 220, top: CY + HUB + 64 }}>{t.map.empty}</p>
+          <p className="map-empty" style={{ left: CX - 260, top: CY + HUB + 64 }}>{t.map.empty}</p>
         )}
 
         {depts.map((d: Department, i) => (
-          <div key={d.id} className="dept" style={{ left: spots[i]!.x - DEPT_W / 2, top: spots[i]!.y - DEPT_H / 2, width: DEPT_W, height: DEPT_H }}>
+          <div key={d.id} className="dept" style={{ left: spots[i]!.x, top: spots[i]!.y, width: DEPT_W, height: DEPT_H }}>
             <Edge cut={12}>
               <span className="role">{d.roleCode}</span>
               <b className="dname">{d.name}</b>

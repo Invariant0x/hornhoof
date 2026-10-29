@@ -233,20 +233,22 @@ join_machine() {
 node_name() { printf 'hornhoof-%s-%s' "$2" "${1:0:8}"; }
 
 STARTED=''
+# What a failed start tells the person. Once the join used the code, running it again only gets a 410.
+RETRY='Run this command again.'
 # start_node <name> <id> <provider> [key]: the key goes into the node's volume through stdin, never on a command line.
 start_node() {
   local name=$1 id=$2 provider=$3 key=${4:-}
   if [ -n "$key" ]; then
     printf '%s %s %s %s\n' "$NODE_SERVER" "$id" "$provider" "$key" |
       "${DOCKER[@]}" run --rm -i --network none --cap-drop ALL --security-opt no-new-privileges -v "$name:/data" "$IMAGE" set-key ||
-      fail "Could not save the key for $name. Run this command again."
+      fail "Could not save the key for $name. $RETRY"
   fi
   say "Starting $name."
   "${DOCKER[@]}" rm -f "$name" > /dev/null 2>&1 || true
   # shellcheck disable=SC2086 # the two --add-host words appear only for a server on localhost
   "${DOCKER[@]}" run -d --name "$name" --label "$LABEL=$id" --restart unless-stopped --cap-drop ALL \
     --security-opt no-new-privileges -v "$name:/data" ${LOCAL_SERVER:+--add-host} ${LOCAL_SERVER:+host.docker.internal:host-gateway} \
-    "$IMAGE" > /dev/null || fail "Could not start $name. Run docker logs $name to see why."
+    "$IMAGE" > /dev/null || fail "Could not start $name (docker logs $name shows why). $RETRY"
   STARTED="$STARTED $name"
 }
 
@@ -274,7 +276,11 @@ watch_link() {
     url=$("${DOCKER[@]}" exec "$1" cat /data/login-url 2> /dev/null || true)
     if [ -n "$url" ] && [ "$url" != "$seen" ]; then
       seen=$url
-      open_link "$url"
+      # The link comes from inside the node, where an agent could write anything, so only a plain https address opens.
+      case "$url" in
+        https://*[[:space:]]*) ;;
+        https://*) open_link "$url" ;;
+      esac
     fi
     sleep 1
   done
@@ -316,6 +322,7 @@ node_mode() {
 
   if [ -n "$code" ]; then
     join_machine "$code"
+    RETRY='This command is used up: disconnect this machine in Hornhoof under Subscriptions, then get a new command.'
     for entry in $JOINED; do
       id=${entry%%:*}
       key=${entry##*:}
@@ -327,15 +334,18 @@ node_mode() {
     done
   fi
 
-  # The other nodes on this machine move to the new image with their volumes.
-  for entry in $existing; do
-    name=${entry%%:*}
-    id=${entry#*:}
-    case " $removed $STARTED " in *" $name "*) continue ;; esac
-    provider=${name#hornhoof-}
-    provider=${provider%-*}
-    start_node "$name" "$id" "$provider"
-  done
+  # Without a code this run updates the nodes on this machine: they move to the new image with their volumes.
+  # With a code it only starts the joined nodes and leaves the others, and their running jobs, alone.
+  if [ -z "$code" ]; then
+    for entry in $existing; do
+      name=${entry%%:*}
+      id=${entry#*:}
+      case " $removed $STARTED " in *" $name "*) continue ;; esac
+      provider=${name#hornhoof-}
+      provider=${provider%-*}
+      start_node "$name" "$id" "$provider"
+    done
+  fi
 
   if [ -z "$STARTED" ]; then
     say "There are no Hornhoof nodes on this machine yet. Get the install command in Hornhoof under Subscriptions."
@@ -440,7 +450,7 @@ server_mode() {
     )
     say "Wrote fresh secrets to $env_file. Keep it safe: HORNHOOF_SECRET is needed to read the stored API keys."
   fi
-  public=$(grep '^PUBLIC_URL=' "$env_file" | tail -1 | cut -d= -f2-)
+  public=$(grep '^PUBLIC_URL=' "$env_file" | tail -1 | cut -d= -f2- || true)
   [ -n "$public" ] || public=$LOCAL_URL
 
   say "Downloading the Hornhoof images."

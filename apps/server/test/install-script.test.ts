@@ -188,6 +188,27 @@ describe('install.sh', () => {
     expect(r.calls.some(c => c.startsWith('docker volume rm'))).toBe(false);
   });
 
+  it('leaves the other nodes on this machine alone on --join', () => {
+    const r = install({ env: { STUB_CONTAINERS: 'hornhoof-kimi-00000000' } });
+    expect(r.code).toBe(0);
+    expect(r.calls.some(c => c.includes('hornhoof-kimi-00000000') && /docker (rm|run)/.test(c))).toBe(false);
+    expect(r.calls.some(c => c.startsWith(`docker run -d --name hornhoof-claude-${SUB_A.slice(0, 8)}`))).toBe(true);
+  });
+
+  it('names the way out when a node does not start after the join used the code', () => {
+    const r = install({ env: { STUB_RUN: 'fail' } });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('This command is used up: disconnect this machine in Hornhoof under Subscriptions, then get a new command.');
+  });
+
+  it('opens only https sign-in links', () => {
+    for (const link of ['file:///etc/passwd', '-a Terminal']) {
+      const r = install({ env: { STUB_OS: 'Darwin', STUB_ARCH: 'arm64', STUB_LOGIN_URL: link, STUB_LOGIN_SLEEP: '1.5' } });
+      expect(r.code).toBe(0);
+      expect(r.calls.filter(c => c.startsWith('open '))).toEqual([]);
+    }
+  });
+
   it('removes the nodes Hornhoof removed, with their volumes', () => {
     const r = install({ env: { STUB_CONTAINERS: 'hornhoof-kimi-00000000', STUB_REMOVED: 'hornhoof-kimi-00000000' } });
     expect(r.code).toBe(0);
@@ -245,6 +266,14 @@ describe('install.sh', () => {
     const env = readFileSync(join(dir, '.env'), 'utf8');
     expect(env).toContain('HORNHOOF_SECRET=keep-me');
     expect(env).toMatch(/^NODE_KEY=.{44}$/m);
+  });
+
+  it('keeps an existing .env that has no PUBLIC_URL and opens localhost', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-server-'));
+    writeFileSync(join(dir, '.env'), 'HORNHOOF_SECRET=keep-me\n');
+    const r = install({ args: ['server'], env: { HORNHOOF_DIR: dir } });
+    expect(r.code).toBe(0);
+    expect(r.out).toContain('Hornhoof is running. Open http://localhost:8080 to set it up.');
   });
 
   it('takes localhost when Enter is pressed for the address', () => {

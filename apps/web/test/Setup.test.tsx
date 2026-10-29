@@ -41,7 +41,7 @@ describe('Setup', () => {
     const user = userEvent.setup();
     render(<Setup onDone={onDone} />);
     await fillFirstTwoSteps(user);
-    expect(screen.getByRole('heading', { name: 'Connect the chief' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Connect the orchestrator' })).toBeInTheDocument();
     await user.click(screen.getByRole('radio', { name: 'API key' }));
     await user.selectOptions(screen.getByLabelText('Provider'), 'Anthropic');
     await user.type(screen.getByLabelText('Key'), 'sk-ant-xyz12345');
@@ -99,7 +99,7 @@ describe('Setup', () => {
     expect(calls[0]!.body).toMatchObject({ title: 'Founder', chief: { mode: 'later' } });
   });
 
-  it('offers GLM as a personal plan for the chief', async () => {
+  it('offers GLM as a personal plan for the orchestrator', async () => {
     const calls = mockApi({ 'POST /api/setup': [201, { ...CREATED, command: 'curl x' }] });
     const user = userEvent.setup();
     render(<Setup onDone={() => {}} />);

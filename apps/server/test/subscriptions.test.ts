@@ -60,6 +60,24 @@ describe('POST /api/subscriptions/connect', () => {
     expect(after).toEqual({ ...sub, place: { kind: 'department', id: development.id, name: 'Development' } });
   });
 
+  it('reuses a plan still waiting for its machine instead of making a second one', async () => {
+    const { app, ceo } = await companyWithMaria();
+    const first = (await connect(app, ceo, ['claude'])).json().subscriptions[0];
+    const again = await connect(app, ceo, ['claude', 'codex']);
+    expect(again.statusCode).toBe(201);
+    expect(again.json().subscriptions.map((s: { id: string }) => s.id)).toContain(first.id);
+    expect((await list(app, ceo)).filter((s: { label: string }) => s.label === 'Claude')).toHaveLength(1);
+  });
+
+  it('refuses a plan the person already has on a machine', async () => {
+    const { app, ceo } = await companyWithMaria();
+    const code = (await connect(app, ceo, ['claude'])).json().command.split('--join ')[1];
+    await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' } });
+    const res = await connect(app, ceo, ['claude']);
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error.reason).toBe('already_connected');
+  });
+
   it('refuses an empty list, repeats and API key providers', async () => {
     const { app } = await testApp();
     const ceo = await setUpCompany(app);
@@ -108,6 +126,26 @@ describe('POST /api/subscriptions/:id/chief', () => {
     const org = (await app.inject({ url: '/api/org', ...as(ceo) })).json();
     expect(org.chief.subscription.id).toBe(id);
     expect((await list(app, ceo)).filter((s: { isChief: boolean }) => s.isChief).map((s: { id: string }) => s.id)).toEqual([id]);
+  });
+
+  it('refuses an API key that serves only a department', async () => {
+    const { app, ceo, marketing } = await companyWithMaria();
+    const key = await addKey(app, ceo, { kind: 'api_key', provider: 'anthropic_api', label: 'Marketing key', apiKey: TEST_API_KEY, target: { kind: 'department', id: marketing.id } });
+    const res = await post(app, ceo, `/api/subscriptions/${key.json().subscription.id}/chief`);
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.reason).toBe('not_company_level');
+  });
+
+  it('frees the chief when its owner leaves company scope', async () => {
+    const { app, db, ceo, marketing } = await companyWithMaria();
+    const deputy = await invitePerson(app, ceo, { name: 'Oleg', email: 'oleg@acme.com', scope: { kind: 'company' } });
+    const id = (await connect(app, deputy, ['claude'])).json().subscriptions[0].id;
+    expect((await post(app, ceo, `/api/subscriptions/${id}/chief`)).statusCode).toBe(200);
+    const owner = (await list(app, ceo)).find((s: { id: string }) => s.id === id).owner;
+    const moved = await app.inject({ method: 'PATCH', url: `/api/people/${owner.id}`, payload: { scope: { kind: 'department', id: marketing.id } }, ...as(ceo) });
+    expect(moved.statusCode).toBe(200);
+    const [chief] = await db.select().from(agents).where(eq(agents.kind, 'chief'));
+    expect(chief!.subscriptionId).toBeNull();
   });
 
   it('refuses a department plan and a person without company scope', async () => {

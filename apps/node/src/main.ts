@@ -11,6 +11,8 @@ import { dataDir, isRemoved, markRemoved, readState, writeState, type NodeState 
 export const VERSION: string = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
 const LOGIN_CHECK_MS = 10_000;
+/* How long a removal waits for called-off jobs to stop before it deletes their folders. */
+const STOP_WAIT_MS = 5_000;
 
 type JobRun = Extract<ServerMessage, { type: 'job.run' }>;
 
@@ -32,11 +34,14 @@ export async function runNode({ dir, adapter, builtin, log = console.log, loginC
   }
   const state = builtin ?? readState(dir);
   if (!state) throw new Error(`No node settings in ${dir}/node.json. Run the install command from Hornhoof again.`);
+  /* The node's own key never leaves in a job's output. */
+  const hidden = [state.key];
   /* The built-in node serves API keys, which need no sign-in. */
   const single = typeof adapter === 'function' ? null : adapter;
   const pick = typeof adapter === 'function' ? adapter : () => adapter;
 
-  const running = new Set<string>();
+  /* Each running job with the way to call it off and the promise of its end. */
+  const running = new Map<string, { stop: AbortController; done: Promise<void> }>();
   /* Messages that could not be sent while offline. They go out right after the next hello. */
   const outbox: NodeMessage[] = [];
   let send: ((m: NodeMessage) => boolean) | null = null;
@@ -56,7 +61,7 @@ export async function runNode({ dir, adapter, builtin, log = console.log, loginC
       send = next;
       /* Finished jobs waiting in the outbox still count as running, so the server does not give up on them. */
       const pending = outbox.flatMap(m => (m.type === 'job.done' ? [m.jobId] : []));
-      next({ type: 'hello', version: VERSION, loggedIn, running: [...running, ...pending] });
+      next({ type: 'hello', version: VERSION, loggedIn, running: [...running.keys(), ...pending] });
       for (const m of outbox.splice(0)) emit(m);
     },
     onMessage: m => void handle(m),
@@ -66,7 +71,12 @@ export async function runNode({ dir, adapter, builtin, log = console.log, loginC
   async function handle(m: ServerMessage) {
     if (m.type === 'remove') {
       /* Only personal subscriptions are removed this way; the built-in node stays. */
-      if (builtin) return;
+      if (builtin || stopped) return;
+      stopped = true;
+      /* The agents stop first, so nothing writes into the folders while they go. */
+      const jobs = [...running.values()];
+      for (const job of jobs) job.stop.abort();
+      await Promise.race([Promise.allSettled(jobs.map(j => j.done)), new Promise(r => setTimeout(r, STOP_WAIT_MS))]);
       for (const sub of ['home', 'work']) rmSync(join(dir, sub), { recursive: true, force: true });
       markRemoved(dir);
       emit({ type: 'removed' });
@@ -74,19 +84,30 @@ export async function runNode({ dir, adapter, builtin, log = console.log, loginC
       stop();
       return;
     }
-    if (running.has(m.jobId)) return;
-    running.add(m.jobId);
+    if (stopped || running.has(m.jobId)) return;
+    const controller = new AbortController();
+    const done = runOne(m, controller.signal);
+    running.set(m.jobId, { stop: controller, done });
+    await done;
+  }
+
+  async function runOne(m: JobRun, signal: AbortSignal) {
     emit({ type: 'job.started', jobId: m.jobId });
-    const chosen = pick(m);
-    const tracked: ProviderAdapter = {
-      ...chosen,
-      run: async input => {
-        const res = await chosen.run(input);
-        if (res.limits) limits = res.limits;
-        return res;
-      },
-    };
-    const done = await runJob(tracked, m, dir);
+    let done: Awaited<ReturnType<typeof runJob>>;
+    try {
+      const chosen = pick(m);
+      const tracked: ProviderAdapter = {
+        ...chosen,
+        run: async input => {
+          const res = await chosen.run(input);
+          if (res.limits) limits = res.limits;
+          return res;
+        },
+      };
+      done = await runJob(tracked, m, dir, { hidden, signal });
+    } catch (err) {
+      done = { type: 'job.done', jobId: m.jobId, ok: false, sessionId: null, result: '', tail: message(err), error: 'agent_failed' };
+    }
     running.delete(m.jobId);
     emit(done);
     if (done.error === 'not_logged_in') loggedIn = false;

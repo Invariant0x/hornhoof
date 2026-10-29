@@ -16,10 +16,10 @@ export function childEnv(tools: string, extra: Record<string, string>): NodeJS.P
 
 export type Finished = { code: number | null; output: string; timedOut: boolean };
 
-type SpawnOptions = { bin: string; args: string[]; env: NodeJS.ProcessEnv; cwd?: string; timeoutMs: number; onLine?: (line: string) => void };
+type SpawnOptions = { bin: string; args: string[]; env: NodeJS.ProcessEnv; cwd?: string; timeoutMs: number; signal?: AbortSignal; onLine?: (line: string) => void };
 
-/* Runs a program with no input, reads stdout line by line and stops the whole process group at the timeout. */
-export function runProgram({ bin, args, env, cwd, timeoutMs, onLine }: SpawnOptions): Promise<Finished> {
+/* Runs a program with no input, reads stdout line by line and stops the whole process group at the timeout or when the signal aborts. */
+export function runProgram({ bin, args, env, cwd, timeoutMs, signal, onLine }: SpawnOptions): Promise<Finished> {
   return new Promise(resolve => {
     const child = spawn(bin, args, { env, cwd, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
     let output = '';
@@ -36,26 +36,32 @@ export function runProgram({ bin, args, env, cwd, timeoutMs, onLine }: SpawnOpti
       for (const line of lines) onLine?.(line);
     });
     child.stderr.setEncoding('utf8').on('data', keep);
-    const killGroup = (signal: NodeJS.Signals) => {
+    const killGroup = (sig: NodeJS.Signals) => {
       try {
-        process.kill(-child.pid!, signal);
+        process.kill(-child.pid!, sig);
       } catch {
         /* Already gone. */
       }
     };
-    const timer = setTimeout(() => {
-      timedOut = true;
+    const stop = () => {
       killGroup('SIGTERM');
       setTimeout(() => killGroup('SIGKILL'), KILL_GRACE_MS).unref();
+    };
+    const timer = setTimeout(() => {
+      timedOut = true;
+      stop();
     }, timeoutMs);
-    child.on('error', err => {
+    if (signal?.aborted) stop();
+    else signal?.addEventListener('abort', stop, { once: true });
+    const finish = (res: Finished) => {
       clearTimeout(timer);
-      resolve({ code: null, output: `${output}\n${err.message}`, timedOut });
-    });
+      signal?.removeEventListener('abort', stop);
+      resolve(res);
+    };
+    child.on('error', err => finish({ code: null, output: `${output}\n${err.message}`, timedOut }));
     child.on('close', code => {
-      clearTimeout(timer);
       if (partial) onLine?.(partial);
-      resolve({ code, output, timedOut });
+      finish({ code, output, timedOut });
     });
   });
 }

@@ -49,6 +49,24 @@ describe('POST /api/subscriptions/:id/test', () => {
     node.close();
   });
 
+  it('ends the open jobs of a subscription when it is removed', async () => {
+    const { app, url, ceo } = await liveCompany();
+    const { subscriptionId, key } = await joinedClaude(app, ceo);
+    const node = await connectNode(url, key);
+    node.send({ type: 'hello', version: '0.2.0', loggedIn: true, running: [] });
+    await until(async () => (await statusOf(app, ceo, subscriptionId)) === 'ready');
+    const { job } = (await app.inject({ method: 'POST', url: `/api/subscriptions/${subscriptionId}/test`, ...as(ceo) })).json();
+    await node.next();
+    node.send({ type: 'job.started', jobId: job.id });
+    await until(async () => (await getJob(app, ceo, job.id)).json().job.status === 'running');
+
+    expect((await app.inject({ method: 'DELETE', url: `/api/subscriptions/${subscriptionId}`, ...as(ceo) })).statusCode).toBe(204);
+    const ended = (await getJob(app, ceo, job.id)).json().job;
+    expect(ended).toMatchObject({ status: 'failed', error: 'subscription_removed' });
+    expect(ended.finishedAt).not.toBeNull();
+    node.close();
+  });
+
   it('runs an API key on the built-in node with the decrypted key', async () => {
     const { app, url, ceo } = await liveCompany({ NODE_KEY });
     const chief = (await app.inject({ url: '/api/org', ...as(ceo) })).json().chief.subscription;

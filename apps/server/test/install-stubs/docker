@@ -16,7 +16,7 @@ case "$1" in
   ps) for n in ${STUB_CONTAINERS:-}; do echo "$n id-of-$n"; done ;;
   run)
     WORD=set-key; if has "$@"; then IFS= read -r line; printf 'stdin %s\n' "$line" >> "$STUB_LOG"; fi
-    WORD=-d; if has "$@"; then echo "0123456789ab"; fi ;;
+    WORD=-d; if has "$@"; then [ "${STUB_RUN:-ok}" = fail ] && { echo "docker: Error response from daemon: port is already allocated" >&2; exit 1; }; echo "0123456789ab"; fi ;;
   exec)
     WORD=/data/login-url; if has "$@"; then
       WORD=cat; if has "$@"; then [ -n "${STUB_LOGIN_URL:-}" ] && echo "$STUB_LOGIN_URL" || exit 1; fi
