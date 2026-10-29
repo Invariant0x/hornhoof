@@ -7,6 +7,7 @@ import { orgRoutes } from './modules/org/routes.js';
 import { peopleRoutes } from './modules/people/routes.js';
 import { setupRoutes } from './modules/setup/routes.js';
 import { subscriptionRoutes } from './modules/subscriptions/routes.js';
+import { hasWebApp, serveWebApp, webAppRoutes } from './web.js';
 
 export type { Db } from './db/client.js';
 import type { Db } from './db/client.js';
@@ -15,8 +16,10 @@ export type Deps = { db: Db; config: Config };
 
 export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
-  registerErrorHandling(app);
+  const web = hasWebApp(deps.config.webDist);
+  registerErrorHandling(app, web ? webAppRoutes : undefined);
   await app.register(cookie);
+  if (web) await serveWebApp(app, deps.config.webDist);
   app.get('/api/health', async () => ({ ok: true }));
   setupRoutes(app, deps);
   authRoutes(app, deps);

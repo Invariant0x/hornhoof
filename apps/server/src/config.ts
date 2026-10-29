@@ -1,10 +1,16 @@
+import { fileURLToPath } from 'node:url';
+
 export type Config = {
   databaseUrl?: string;
   secret: Buffer;
   publicUrl: string;
   port: number;
   secureCookies: boolean;
+  webDist: string;
 };
+
+/* Both src/ and dist/ sit one level below apps/server, so this finds apps/web/dist either way. */
+const DEFAULT_WEB_DIST = fileURLToPath(new URL('../../web/dist', import.meta.url));
 
 export function loadConfig(env: NodeJS.ProcessEnv): Config {
   const raw = env.HORNHOOF_SECRET;
@@ -19,5 +25,6 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     publicUrl,
     port: env.PORT ? Number(env.PORT) : 8080,
     secureCookies: publicUrl.startsWith('https://'),
+    webDist: env.WEB_DIST || DEFAULT_WEB_DIST,
   };
 }

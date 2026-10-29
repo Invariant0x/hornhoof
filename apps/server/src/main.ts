@@ -11,3 +11,9 @@ const config = loadConfig(process.env);
 const app = await buildApp({ db: await createDb(requireDbUrl(config.databaseUrl)), config });
 await app.listen({ port: config.port, host: '0.0.0.0' });
 console.log(`Hornhoof is running at ${config.publicUrl}`);
+
+for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+  process.once(signal, () => {
+    void app.close().then(() => process.exit(0));
+  });
+}
