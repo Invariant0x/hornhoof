@@ -1,0 +1,175 @@
+import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { api, ApiFailure } from '../api';
+import type { Department, Org, SubView } from '../types';
+import { Edge } from '../ui/Edge';
+import { AgentIcon, LogoMark, PersonIcon } from '../ui/icons';
+
+/* World coordinates. The chief sits in the middle, people above it, departments on an arc around it. */
+const W = 1200, H = 860, CX = W / 2, CY = H / 2 + 20, HUB = 120;
+const CHIP_W = 184, CHIP_H = 56, DEPT_W = 220, DEPT_H = 96;
+const MIN_K = 0.3, MAX_K = 2.5;
+
+type View = { x: number; y: number; k: number };
+
+const PROVIDERS: Record<SubView['provider'], string> = {
+  anthropic_api: 'Anthropic', openai_api: 'OpenAI', claude: 'Claude', codex: 'Codex', kimi: 'Kimi',
+};
+
+export function chiefStatus(sub: SubView | null): string {
+  if (!sub) return 'Needs a subscription to start';
+  if (sub.kind === 'api_key') return `Runs on ${PROVIDERS[sub.provider]} key ending ${sub.last4}`;
+  if (sub.status === 'waiting_machine') return `Waiting for the machine with ${PROVIDERS[sub.provider]}`;
+  return `Runs on ${sub.owner.name}'s ${PROVIDERS[sub.provider]} subscription`;
+}
+
+function deptPositions(n: number): { x: number; y: number }[] {
+  /* Spread over the right, bottom and left, leaving the top for people. */
+  return Array.from({ length: n }, (_, i) => {
+    const a = ((-20 + (220 * (i + 0.5)) / n) * Math.PI) / 180;
+    return { x: CX + Math.cos(a) * 410, y: CY + Math.sin(a) * 280 };
+  });
+}
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+export function MapScreen() {
+  const [org, setOrg] = useState<Org | null>(null);
+  const [failure, setFailure] = useState('');
+  const [view, setView] = useState<View>({ x: 0, y: 0, k: 1 });
+  const box = useRef<HTMLDivElement>(null);
+  const drag = useRef<{ id: number; x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    api.get<Org>('/api/org').then(
+      data => live && setOrg(data),
+      err => live && setFailure(err instanceof ApiFailure ? err.message : 'Something went wrong.'),
+    );
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  const fit = useCallback(() => {
+    const el = box.current;
+    if (!el || !el.clientWidth) return;
+    const k = Math.min(el.clientWidth / W, el.clientHeight / H, 1) * 0.94;
+    setView({ k, x: (el.clientWidth - W * k) / 2, y: (el.clientHeight - H * k) / 2 });
+  }, []);
+
+  useEffect(() => {
+    fit();
+    const el = box.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(fit);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [fit, org]);
+
+  const zoomAt = useCallback((factor: number, px?: number, py?: number) => {
+    const el = box.current;
+    setView(v => {
+      const k = Math.min(MAX_K, Math.max(MIN_K, v.k * factor));
+      const cx = px ?? (el ? el.clientWidth / 2 : 0);
+      const cy = py ?? (el ? el.clientHeight / 2 : 0);
+      return { k, x: cx - ((cx - v.x) * k) / v.k, y: cy - ((cy - v.y) * k) / v.k };
+    });
+  }, []);
+
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const r = el.getBoundingClientRect();
+      zoomAt(Math.exp(-e.deltaY * 0.0015), e.clientX - r.left, e.clientY - r.top);
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [zoomAt, org]);
+
+  function down(e: ReactPointerEvent) {
+    if (e.button !== 0) return;
+    drag.current = { id: e.pointerId, x: e.clientX, y: e.clientY };
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+  }
+  function move(e: ReactPointerEvent) {
+    const d = drag.current;
+    if (!d || d.id !== e.pointerId) return;
+    const dx = e.clientX - d.x, dy = e.clientY - d.y;
+    drag.current = { ...d, x: e.clientX, y: e.clientY };
+    setView(v => ({ ...v, x: v.x + dx, y: v.y + dy }));
+  }
+  function up() {
+    drag.current = null;
+  }
+
+  if (failure) return <p className="alert map-failure" role="alert">{failure}</p>;
+  if (!org) return <div className="map" aria-busy="true" />;
+
+  const depts = org.departments;
+  const spots = deptPositions(depts.length);
+  const chipsW = org.people.length * CHIP_W + Math.max(0, org.people.length - 1) * 12;
+
+  return (
+    <div className="map" ref={box} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}>
+      <div className="world" style={{ width: W, height: H, transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})` }}>
+        <svg className="wires" width={W} height={H} viewBox={`0 0 ${W} ${H}`} aria-hidden="true">
+          {spots.map((p, i) => (
+            <line key={depts[i]!.id} x1={CX} y1={CY} x2={p.x} y2={p.y} />
+          ))}
+        </svg>
+
+        <ul className="chips" style={{ left: CX - chipsW / 2, top: CY - HUB - CHIP_H - 34 }} aria-label="Company leaders">
+          {org.people.map(p => (
+            <li key={p.id} style={{ width: CHIP_W, height: CHIP_H }}>
+              <Edge cut={8} className="chip">
+                <PersonIcon label="Person" />
+                <span>
+                  <b>{p.name}</b>
+                  <small>{p.title || 'Whole company'}</small>
+                </span>
+              </Edge>
+            </li>
+          ))}
+        </ul>
+
+        <div className="hub" style={{ left: CX - HUB, top: CY - HUB, width: HUB * 2, height: HUB * 2 }}>
+          <svg viewBox="0 0 240 240" aria-hidden="true">
+            <circle className="hub-ring" cx="120" cy="120" r="116" />
+            <circle className="hub-gauge" cx="120" cy="120" r="104" pathLength="100" strokeDasharray={`${org.agents.total ? (org.agents.working / org.agents.total) * 100 : 0} 100`} />
+          </svg>
+          <LogoMark className="hub-mark" />
+          <span className="hub-name">{org.company.name}</span>
+          <span className="hub-num">{`${org.agents.working}/${org.agents.total}`}</span>
+          <span className="hub-label">agents working</span>
+        </div>
+        <p className="hub-chief" style={{ left: CX - 180, top: CY + HUB + 14 }}>
+          <AgentIcon label="Agent" />
+          <b>{org.chief?.name ?? 'Chief'}</b>
+          <span>{chiefStatus(org.chief?.subscription ?? null)}</span>
+        </p>
+
+        {depts.length === 0 && (
+          <p className="map-empty" style={{ left: CX - 220, top: CY + HUB + 64 }}>No departments yet. Ask the chief to create the first one.</p>
+        )}
+
+        {depts.map((d: Department, i) => (
+          <div key={d.id} className="dept" style={{ left: spots[i]!.x - DEPT_W / 2, top: spots[i]!.y - DEPT_H / 2, width: DEPT_W, height: DEPT_H }}>
+            <Edge cut={12}>
+              <span className="role">{d.roleCode}</span>
+              <b className="dname">{d.name}</b>
+              <span className="cnt">{plural(d.teams.length, 'team')}</span>
+            </Edge>
+          </div>
+        ))}
+      </div>
+
+      <div className="zoom" onPointerDown={e => e.stopPropagation()}>
+        <button className="btn small ghost" type="button" aria-label="Zoom out" onClick={() => zoomAt(1 / 1.2)}>−</button>
+        <button className="btn small ghost" type="button" aria-label="Zoom in" onClick={() => zoomAt(1.2)}>+</button>
+        <button className="btn small ghost" type="button" aria-label="Show everything" onClick={fit}>Fit</button>
+      </div>
+    </div>
+  );
+}

@@ -22,6 +22,7 @@ export type PersonView = {
   email: string;
   title: string;
   status: Person['status'];
+  isOwner: boolean;
   scope: { kind: ScopeKind; id: string | null; name: string };
 };
 

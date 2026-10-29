@@ -13,6 +13,7 @@ export type PersonView = {
   email: string;
   title: string;
   status: Person['status'];
+  isOwner: boolean;
   scope: { kind: ScopeKind; id: string | null; name: string };
 };
 
@@ -41,6 +42,7 @@ export async function personViews(db: Db, rows: Person[]): Promise<PersonView[]>
     email: p.email,
     title: p.title,
     status: p.status,
+    isOwner: p.isOwner,
     scope: { kind: p.scopeKind, id: p.scopeId, name: p.scopeId ? names.get(p.scopeId) ?? '' : WHOLE_COMPANY },
   }));
 }

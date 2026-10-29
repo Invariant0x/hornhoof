@@ -112,6 +112,8 @@ describe('GET /api/people', () => {
     expect(res.statusCode).toBe(200);
     const scopes = Object.fromEntries(res.json().people.map((p: { name: string; scope: { name: string } }) => [p.name, p.scope.name]));
     expect(scopes).toEqual({ Ivan: 'Whole company', Kate: 'Marketing', Sasha: 'Social' });
+    const owners = res.json().people.filter((p: { isOwner: boolean }) => p.isOwner).map((p: { name: string }) => p.name);
+    expect(owners).toEqual(['Ivan']);
     expect(res.body).not.toContain('scrypt');
     expect((await app.inject({ url: '/api/people' })).statusCode).toBe(401);
   });
