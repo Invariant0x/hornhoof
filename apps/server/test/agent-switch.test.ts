@@ -400,6 +400,29 @@ describe('work an agent held when it was switched off', () => {
     expect(await told(db, hana.id, 'Nobody who can check it at gate 1')).toBe(true);
   });
 
+  it('leaves a gate that waits for a person to the reviewer who asked', async () => {
+    const { app, ctx, db, ceo, bruno, rita, rex, patch, memberTask } = await company();
+    const task = await memberTask();
+    await submit(ctx, bruno.id, task.id, done);
+    const { request } = await ask(ctx, rita.id, task.id, { kind: 'question', text: 'Is tax in scope?' });
+    await patch(rex.id, { on: false });
+    expect(await row(db, task.id)).toMatchObject({ status: 'waiting', panel: [rita.id] });
+    await app.inject({ method: 'POST', url: `/api/requests/${request.id}`, payload: { answer: 'Yes, with tax.' }, ...as(ceo) });
+    expect((await verdict(ctx, rita.id, task.id, { pass: true, comment: 'Tax is in.' })).task.status).toBe('done');
+  });
+
+  it('hands the gate on once the answer comes for a reviewer that asked and was switched off meanwhile', async () => {
+    const { app, ctx, db, ceo, bruno, rita, rex, patch, memberTask } = await company();
+    const task = await memberTask();
+    await submit(ctx, bruno.id, task.id, done);
+    const { request } = await ask(ctx, rita.id, task.id, { kind: 'question', text: 'Is tax in scope?' });
+    await patch(rita.id, { on: false });
+    expect(await row(db, task.id)).toMatchObject({ status: 'waiting', panel: [rita.id, rex.id] });
+    await app.inject({ method: 'POST', url: `/api/requests/${request.id}`, payload: { answer: 'Yes, with tax.' }, ...as(ceo) });
+    expect(await row(db, task.id)).toMatchObject({ status: 'review', panel: [rex.id], assigneeAgentId: rex.id });
+    expect(await db.select().from(jobs).where(and(eq(jobs.agentId, rita.id), eq(jobs.status, 'queued')))).toEqual([]);
+  });
+
   it('starts the gate again when a reviewer of its role is switched on', async () => {
     const { ctx, db, bruno, rita, rex, off, patch, memberTask } = await company();
     const task = await memberTask();

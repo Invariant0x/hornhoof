@@ -344,21 +344,26 @@ export type TaskChange = { title?: string; brief?: string; body?: string; execut
 
 /* An agent switched off once its running turn is over: work it does and has not handed in goes to whoever gave it out,
    and it leaves the gates it has not given its verdict at, which decide with the rest or wait with the giver. Work that
-   waits for a person stays. handed: the tasks it no longer holds, closed: the ones that finished as it left. */
+   waits for its own question to a person stays until the answer comes. handed: the tasks it no longer holds, closed: the
+   ones that finished as it left. */
 export async function leaveWork(ctx: Live, actor: Actor, agent: { id: string; name: string; companyId: string }): Promise<{ wakes: Wake[]; handed: string[]; closed: Task[] }> {
-  const open = await ctx.db.select().from(tasks).where(and(eq(tasks.companyId, agent.companyId), notInArray(tasks.status, [...CLOSED, 'planned', 'waiting'])));
+  const open = await ctx.db.select().from(tasks).where(and(eq(tasks.companyId, agent.companyId), notInArray(tasks.status, [...CLOSED, 'planned'])));
+  const asked = new Set((await ctx.db.select({ taskId: requests.taskId }).from(requests).where(and(eq(requests.agentId, agent.id), eq(requests.status, 'open')))).map(r => r.taskId));
   const n: Note = { kind: 'updated', actor, text: `${agent.name} was switched off.`, data: { fields: ['assignee'] } };
   const wakes: Wake[] = [];
   const handed: string[] = [];
   const closed: Task[] = [];
   for (const task of open) {
+    if (task.status === 'waiting' && (asked.has(task.id) || !task.panel.includes(agent.id))) continue;
     if (task.stage === 0 && task.executorAgentId === agent.id && task.assigneeAgentId === agent.id && task.createdByAgentId && task.createdByAgentId !== agent.id) {
       await move(ctx, task, { assigneeAgentId: task.createdByAgentId, status: task.status === 'working' ? 'open' : task.status }, n);
       wakes.push(...giver(task, 'switched', agent.id, `${agent.name} does it and was switched off. Give it to someone who is on with update_task, or tell the CEO it waits for ${agent.name}.`));
       handed.push(task.id);
-    } else if (task.status === 'review' && task.panel.includes(agent.id)) {
-      handed.push(task.id);
+    } else if (task.stage > 0 && task.panel.includes(agent.id)) {
       const panel = task.panel.filter(id => id !== agent.id);
+      /* Someone else at the gate asked a person, so someone is left to decide it. */
+      if (task.status === 'waiting' && !panel.length) continue;
+      handed.push(task.id);
       if (panel.length) {
         await move(ctx, task, { panel, assigneeAgentId: panel[0]! }, n);
         continue;

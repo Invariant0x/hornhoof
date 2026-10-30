@@ -10,7 +10,7 @@ import { answer, cancel, CLOSED, comment, createTask, refuse, taskSpot, type Tas
 import { commitUrl, picturesOf } from './attachments.js';
 import { taskDetail, taskLines } from './views.js';
 import { settle, tell, turnRows, type Turn } from './turns.js';
-import { stopTurns, wakeAll } from './wake.js';
+import { leaveIfOff, stopTurns, wakeAll } from './wake.js';
 
 const IdParams = z.object({ id: z.uuid() });
 const NewTaskBody = z.object({
@@ -162,6 +162,8 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (found.kind === 'approval') requireCompanyScope(me);
     const done = await answer(ctx, me.id, id, body);
     await wakeAll(ctx, done.wakes);
+    /* An agent switched off while it waited for this answer leaves the work now. */
+    await leaveIfOff(ctx, done.request.agentId);
     return { request: { id: done.request.id, status: done.request.status } };
   });
 
