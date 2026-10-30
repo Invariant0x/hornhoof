@@ -2,6 +2,7 @@ import { TAIL_BYTES, type NodeMessage } from '@hornhoof/protocol';
 import { and, eq, inArray, isNull, notInArray, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { jobs, subscriptions } from '../../db/schema.js';
+import { workingCount } from '../events/store.js';
 import type { NodeIdentity } from './hub.js';
 
 const OPEN_JOBS = ['queued', 'running'] as const;
@@ -22,6 +23,11 @@ export async function failOpenJobs(ctx: Ctx, scope: SQL, error: string, stillRun
   const conditions = [scope, inArray(jobs.status, OPEN_JOBS)];
   if (stillRunning.length) conditions.push(notInArray(jobs.id, stillRunning));
   await ctx.db.update(jobs).set({ status: 'failed', error, finishedAt: new Date() }).where(and(...conditions));
+}
+
+/* How many agents work right now, for the map's counter. */
+async function publishWorking(ctx: Ctx, companyId: string): Promise<void> {
+  ctx.bus.publish(companyId, { type: 'working', working: await workingCount(ctx.db, companyId) });
 }
 
 export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage): Promise<void> {
@@ -53,14 +59,16 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       return;
     }
     case 'job.started': {
-      await db
+      const started = await db
         .update(jobs)
         .set({ status: 'running', startedAt: now })
-        .where(and(eq(jobs.id, msg.jobId), eq(jobs.status, 'queued'), jobsOf(id, ctx)));
+        .where(and(eq(jobs.id, msg.jobId), eq(jobs.status, 'queued'), jobsOf(id, ctx)))
+        .returning({ companyId: jobs.companyId });
+      for (const { companyId } of started) await publishWorking(ctx, companyId);
       return;
     }
     case 'job.done': {
-      await db
+      const finished = await db
         .update(jobs)
         .set({
           status: msg.ok ? 'done' : 'failed',
@@ -70,7 +78,9 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
           sessionId: msg.sessionId,
           finishedAt: now,
         })
-        .where(and(eq(jobs.id, msg.jobId), inArray(jobs.status, OPEN_JOBS), jobsOf(id, ctx)));
+        .where(and(eq(jobs.id, msg.jobId), inArray(jobs.status, OPEN_JOBS), jobsOf(id, ctx)))
+        .returning({ companyId: jobs.companyId });
+      for (const { companyId } of finished) await publishWorking(ctx, companyId);
       return;
     }
     case 'removed': {

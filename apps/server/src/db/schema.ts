@@ -1,5 +1,5 @@
-import type { Limits } from '@hornhoof/protocol';
-import { boolean, index, integer, jsonb, pgTable, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core';
+import { TEMPLATE_KEYS, type Limits } from '@hornhoof/protocol';
+import { bigserial, boolean, index, integer, jsonb, pgTable, text, timestamp, unique, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
 
 const id = () => uuid('id').primaryKey().defaultRandom();
 const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow();
@@ -9,6 +9,8 @@ const companyId = () => uuid('company_id').notNull().references(() => companies.
 export const companies = pgTable('companies', {
   id: id(),
   name: text('name').notNull(),
+  /* What the orchestrator learned about the company, saved when the CEO creates the structure. */
+  brief: text('brief').notNull().default(''),
   singleton: boolean('singleton').notNull().default(true).unique(),
   createdAt: createdAt(),
 });
@@ -59,10 +61,14 @@ export const invites = pgTable(
   t => [index('invites_person_id').on(t.personId)],
 );
 
+/* A template department without a typed name shows its template's name in the reader's language. A product sits under its parent. */
 export const departments = pgTable('departments', {
   id: id(),
   companyId: companyId(),
-  name: text('name').notNull(),
+  name: text('name'),
+  templateKey: text('template_key', { enum: TEMPLATE_KEYS }),
+  parentId: uuid('parent_id').references((): AnyPgColumn => departments.id),
+  about: text('about').notNull().default(''),
   roleCode: text('role_code').notNull(),
   position: integer('position').notNull().default(0),
   createdAt: createdAt(),
@@ -152,6 +158,7 @@ export const agents = pgTable('agents', {
 });
 
 export const JOB_STATUSES = ['queued', 'running', 'done', 'failed'] as const;
+export const JOB_KINDS = ['test', 'conversation'] as const;
 
 /* One prompt sent to one subscription's node. */
 export const jobs = pgTable(
@@ -168,6 +175,9 @@ export const jobs = pgTable(
     tail: text('tail').notNull().default(''),
     error: text('error'),
     timeoutMs: integer('timeout_ms').notNull(),
+    kind: text('kind', { enum: JOB_KINDS }).notNull().default('test'),
+    /* The job's Hornhoof tools present this token; it works only while the job runs. */
+    toolTokenHash: text('tool_token_hash').unique(),
     createdBy: uuid('created_by').references(() => people.id),
     createdAt: createdAt(),
     startedAt: timestamp('started_at', { withTimezone: true }),
@@ -175,3 +185,37 @@ export const jobs = pgTable(
   },
   t => [index('jobs_subscription_id').on(t.subscriptionId)],
 );
+
+export const AGENT_EVENT_KINDS = ['message', 'text', 'tool', 'tool_result', 'todo', 'proposal', 'applied', 'stopped', 'failed'] as const;
+export type AgentEventKind = (typeof AGENT_EVENT_KINDS)[number];
+
+/* An agent's conversation as people see it: their messages, what the agent did, and what came of it. */
+export const agentEvents = pgTable(
+  'agent_events',
+  {
+    id: id(),
+    companyId: companyId(),
+    agentId: uuid('agent_id').notNull().references(() => agents.id),
+    jobId: uuid('job_id').references(() => jobs.id),
+    seq: bigserial('seq', { mode: 'number' }).notNull(),
+    kind: text('kind', { enum: AGENT_EVENT_KINDS }).notNull(),
+    data: jsonb('data').notNull(),
+    /* The author of a message, or the person who confirmed a proposal. */
+    personId: uuid('person_id').references(() => people.id),
+    createdAt: createdAt(),
+  },
+  t => [index('agent_events_agent_id_seq').on(t.agentId, t.seq)],
+);
+
+export const proposals = pgTable('proposals', {
+  id: id(),
+  companyId: companyId(),
+  agentId: uuid('agent_id').notNull().references(() => agents.id),
+  jobId: uuid('job_id').references(() => jobs.id),
+  brief: text('brief').notNull().default(''),
+  items: jsonb('items').notNull(),
+  status: text('status', { enum: ['pending', 'applied', 'dismissed'] }).notNull().default('pending'),
+  appliedBy: uuid('applied_by').references(() => people.id),
+  appliedAt: timestamp('applied_at', { withTimezone: true }),
+  createdAt: createdAt(),
+});

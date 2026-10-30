@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import type { Ctx } from '../../app.js';
 import { personColumns, requirePerson } from '../../auth/session.js';
 import { agents, companies, departments, people, teams } from '../../db/schema.js';
+import { workingCount } from '../events/store.js';
 import { personViews } from '../people/views.js';
 import { identityOf } from '../nodes/hub.js';
 import { subView } from '../subscriptions/views.js';
@@ -28,8 +29,7 @@ export function orgRoutes(app: FastifyInstance, { db, hub }: Ctx): void {
         model: orchestrator.model,
         subscription: orchestrator.subscriptionId ? await subView(db, s => hub.isOnline(identityOf(s)), orchestrator.subscriptionId) : null,
       },
-      /* Nothing runs agents until nodes arrive in milestone 2, so none are working yet. */
-      agents: { total: allAgents.length, working: 0 },
+      agents: { total: allAgents.length, working: await workingCount(db, me.companyId) },
       people: await personViews(db, leaders),
       departments: depts.map(d => ({
         id: d.id,

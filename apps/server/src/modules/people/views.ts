@@ -4,6 +4,7 @@ import type { Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { departments, teams, type ScopeKind } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
+import { deptName } from '../departments/templates.js';
 
 export const WHOLE_COMPANY = 'Whole company';
 
@@ -34,7 +35,7 @@ export async function resolveScope(db: Db, scope: z.infer<typeof ScopeInput>): P
 
 export async function personViews(db: Db, rows: Person[]): Promise<PersonView[]> {
   const names = new Map<string, string>();
-  for (const d of await db.select({ id: departments.id, name: departments.name }).from(departments)) names.set(d.id, d.name);
+  for (const d of await db.select({ id: departments.id, name: departments.name, templateKey: departments.templateKey }).from(departments)) names.set(d.id, deptName(d));
   for (const t of await db.select({ id: teams.id, name: teams.name }).from(teams)) names.set(t.id, t.name);
   return rows.map(p => ({
     id: p.id,

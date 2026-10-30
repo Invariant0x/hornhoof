@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { isUniqueViolation } from '../src/db/errors.js';
-import { companies, machines, people, subscriptions } from '../src/db/schema.js';
+import { agentEvents, agents, companies, departments, machines, people, subscriptions } from '../src/db/schema.js';
 import { createTestDb } from './helpers.js';
 
 describe('database', () => {
@@ -34,6 +34,27 @@ describe('database', () => {
     const [person] = await db.insert(people).values({ companyId: company!.id, name: 'Ivan', email: 'ivan@acme.com', status: 'active', scopeKind: 'company' }).returning();
     const [sub] = await db.insert(subscriptions).values({ companyId: company!.id, provider: 'glm', kind: 'personal', label: 'GLM', ownerPersonId: person!.id, status: 'waiting_machine' }).returning();
     expect(sub).toMatchObject({ targetKind: null, targetId: null, machineId: null, limits: null, removedAt: null });
+  });
+});
+
+describe('conversations', () => {
+  it('number an agent\'s events in the order they were written', async () => {
+    const db = await createTestDb();
+    const [company] = await db.insert(companies).values({ name: 'Acme' }).returning();
+    const [agent] = await db.insert(agents).values({ companyId: company!.id, kind: 'orchestrator', name: 'Orchestrator', model: 'claude-opus-5-5' }).returning();
+    const [first] = await db.insert(agentEvents).values({ companyId: company!.id, agentId: agent!.id, kind: 'message', data: { text: 'hi' } }).returning();
+    const [second] = await db.insert(agentEvents).values({ companyId: company!.id, agentId: agent!.id, kind: 'text', data: { text: 'hello' } }).returning();
+    expect(second!.seq).toBeGreaterThan(first!.seq);
+    expect(typeof first!.seq).toBe('number');
+  });
+
+  it('keep a template department without a typed name', async () => {
+    const db = await createTestDb();
+    const [company] = await db.insert(companies).values({ name: 'Acme' }).returning();
+    const [sales] = await db.insert(departments).values({ companyId: company!.id, name: null, templateKey: 'sales', roleCode: 'SAL' }).returning();
+    expect(sales).toMatchObject({ name: null, templateKey: 'sales', parentId: null, about: '' });
+    const [europe] = await db.insert(departments).values({ companyId: company!.id, name: 'Sales Europe', roleCode: 'SAL', parentId: sales!.id }).returning();
+    expect(europe!.parentId).toBe(sales!.id);
   });
 });
 

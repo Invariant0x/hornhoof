@@ -11,6 +11,7 @@ export type Config = {
   /* The built-in node's key, set by compose. Optional: without it there is no built-in node. */
   nodeKey?: string;
   nodePingMs: number;
+  streamPingMs: number;
 };
 
 /* Both src/ and dist/ sit one level below apps/server, so this finds apps/web/dist either way. */
@@ -38,5 +39,6 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     installScript: env.INSTALL_SCRIPT || DEFAULT_INSTALL_SCRIPT,
     nodeKey,
     nodePingMs: env.NODE_PING_MS ? Number(env.NODE_PING_MS) : 20000,
+    streamPingMs: env.STREAM_PING_MS ? Number(env.STREAM_PING_MS) : 25000,
   };
 }

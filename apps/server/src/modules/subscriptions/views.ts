@@ -3,6 +3,7 @@ import { and, asc, eq, isNull } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import { agents, departments, machines, people, subscriptions, teams, type Provider, type SUBSCRIPTION_STATUSES } from '../../db/schema.js';
 import { WHOLE_COMPANY } from '../people/views.js';
+import { deptName } from '../departments/templates.js';
 
 export type Place = { kind: 'company' | 'department'; id: string | null; name: string };
 
@@ -60,7 +61,7 @@ export async function subViews(db: Db, isOnline: IsOnline, id?: string): Promise
     .leftJoin(machines, eq(machines.id, subscriptions.machineId))
     .where(id ? and(live, eq(subscriptions.id, id)) : live)
     .orderBy(asc(subscriptions.createdAt));
-  const depts = new Map((await db.select({ id: departments.id, name: departments.name }).from(departments)).map(d => [d.id, d.name]));
+  const depts = new Map((await db.select({ id: departments.id, name: departments.name, templateKey: departments.templateKey }).from(departments)).map(d => [d.id, deptName(d)]));
   const teamDept = new Map((await db.select({ id: teams.id, departmentId: teams.departmentId }).from(teams)).map(t => [t.id, t.departmentId]));
   const [orchestrator] = await db.select({ subscriptionId: agents.subscriptionId }).from(agents).where(eq(agents.kind, 'orchestrator'));
   return rows.map(r => ({
