@@ -3,16 +3,19 @@
 // "echo: LINE" on the screen and in its session log, and calls the prompt and stop hooks around each answer.
 // SLOW makes an answer take 2 s, LAG writes the answer to the log only after the stop hook, as Claude Code can, HANG never
 // answers (as when a person stops it with Escape: no stop hook), EXIT ends the
-// program, SECRET prints the value of FAKE_SECRET.
+// program, SECRET prints the value of FAKE_SECRET. INTERRUPT logs what Claude Code logs when a person stops a turn with
+// Escape, and calls no stop hook. CLEAR starts a new session, as /clear does.
+import { randomUUID } from 'node:crypto';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 
 const args = process.argv.slice(2);
 const flag = name => (args.includes(name) ? args[args.indexOf(name) + 1] : null);
-const session = flag('--session-id') ?? flag('--resume') ?? 'none';
+let session = flag('--session-id') ?? flag('--resume') ?? 'none';
 const home = process.env.CLAUDE_CONFIG_DIR ?? '/tmp';
-const log = join(home, 'projects', process.cwd().replace(/[^A-Za-z0-9]/g, '-'), `${session}.jsonl`);
+const logOf = id => join(home, 'projects', process.cwd().replace(/[^A-Za-z0-9]/g, '-'), `${id}.jsonl`);
+let log = logOf(session);
 mkdirSync(dirname(log), { recursive: true });
 const hook = (event, body) => fetch(`${process.env.HH_BRIDGE}/${event}`, { method: 'POST', body: JSON.stringify({ session_id: session, ...body }) }).catch(() => {});
 
@@ -22,8 +25,20 @@ for await (const typed of createInterface({ input: process.stdin })) {
   // Escape stops an answer; it is not part of the next line.
   const line = typed.replaceAll('\u001b', '');
   if (line === 'EXIT') process.exit(3);
+  if (line === 'CLEAR') {
+    session = randomUUID();
+    log = logOf(session);
+    process.stdout.write('❯ ');
+    await hook('start', { source: 'clear' });
+    continue;
+  }
   await hook('prompt', { prompt: line });
   if (line.includes('HANG')) continue;
+  if (line.includes('INTERRUPT')) {
+    appendFileSync(log, JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: '[Request interrupted by user]' }] } }) + '\n');
+    process.stdout.write('  ⎿  Interrupted\n❯ ');
+    continue;
+  }
   if (line.includes('SLOW')) await new Promise(r => setTimeout(r, 2000));
   const answer = line === 'SECRET' ? `the key is ${process.env.FAKE_SECRET}` : `echo: ${line}`;
   const write = () => appendFileSync(log, JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: answer }] } }) + '\n');

@@ -6,10 +6,11 @@ import { fileURLToPath } from 'node:url';
 import type { AgentEvent, NodeMessage } from '@hornhoof/protocol';
 import { afterEach, describe, expect, it } from 'vitest';
 import { TerminalHost, type TermJob } from '../src/terminal/host.js';
-import { claudeProgram } from '../src/terminal/programs.js';
+import { claudeProgram, codexProgram } from '../src/terminal/programs.js';
 import { Tmux } from '../src/terminal/tmux.js';
 
 const FAKE = fileURLToPath(new URL('./fakes/fake-term.mjs', import.meta.url));
+const FAKE_CODEX = fileURLToPath(new URL('./fakes/fake-codex-term.mjs', import.meta.url));
 const SECRET = 'sk-fake-0123456789abcdef';
 
 const hasTmux = (() => {
@@ -31,10 +32,10 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
   let sent: NodeMessage[];
   const home = mkdtempSync(join(tmpdir(), 'hh-home-'));
 
-  function setUp() {
+  function setUp(more: { openMs?: number; typedMs?: number } = {}) {
     sent = [];
     const tmux = new Tmux({ socket: `hh-host-${process.pid}-${Math.random().toString(36).slice(2, 8)}`, env: { PATH: process.env.PATH ?? '', HOME: home } });
-    host = new TerminalHost({ tmux, hornhoof: 'http://127.0.0.1:9', send: m => sent.push(m), secrets: () => [SECRET], readyMs: 10_000, pollMs: 100 });
+    host = new TerminalHost({ tmux, hornhoof: 'http://127.0.0.1:9', send: m => sent.push(m), secrets: () => [SECRET], readyMs: 10_000, pollMs: 100, ...more });
     return host.start();
   }
   afterEach(async () => host?.stop());
@@ -50,6 +51,17 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
       events,
       input: { prompt, sessionId: null, model: null, workDir: join(home, 'work', key), secret: null, timeoutMs: 20_000, instructions: 'Be brief.', tools: { url: 'http://x/mcp', token: 'tok-turn' }, onEvent: e => events.push(e), env: { FAKE_SECRET: SECRET }, ...more },
     };
+  };
+
+  const codexJob = (key: string, prompt: string, more: Partial<TermJob['input']> = {}) => ({ ...job(key, prompt, more), program: codexProgram, bin: FAKE_CODEX });
+  const done = (jobId: string) => sent.find(m => m.type === 'job.done' && m.jobId === jobId);
+  /* A person types a line into the agent's terminal, and Hornhoof opens a turn for it. */
+  const typeTurn = async (key: string, termId: string, line: string, jobId: string) => {
+    await host.open({ type: 'term.open', termId, agentKey: key, cols: 80, rows: 24, write: true });
+    host.input({ type: 'term.input', termId, data: `${line}\r` });
+    await until(() => sent.some(m => m.type === 'turn.open'));
+    host.opened({ type: 'turn.opened', agentKey: key, jobId, toolToken: `tok-${jobId}` });
+    await until(() => host.typedJobs().includes(jobId) || Boolean(done(jobId)));
   };
 
   it('runs a turn in the agent session: pastes the prompt, shows what it does and ends with its answer and limits', async () => {
@@ -199,4 +211,116 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     host.close({ type: 'term.close', termId: 't3' });
     await until(() => sent.some(m => m.type === 'term.exit' && m.termId === 't3'));
   });
+
+  it('ends a turn as stopped when a person stops it with Escape in the terminal', async () => {
+    await setUp();
+    const first = await host.run(job('b1', 'warm up'));
+    const started = Date.now();
+    expect(await host.run(job('b1', 'INTERRUPT', { sessionId: first.sessionId }))).toMatchObject({ ok: false, error: 'cancelled' });
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(await host.run(job('b1', 'next', { sessionId: first.sessionId }))).toMatchObject({ ok: true, result: 'echo: next' });
+  }, 30_000);
+
+  it('ends a typed turn as stopped when a person stops it with Escape', async () => {
+    await setUp();
+    await host.run(job('b2', 'hello'));
+    await typeTurn('b2', 'u1', 'INTERRUPT typed', 'job-int');
+    await until(() => Boolean(done('job-int')));
+    expect(done('job-int')).toMatchObject({ ok: false, error: 'cancelled' });
+    expect(host.typedJobs()).toEqual([]);
+  });
+
+  it('fails a typed turn whose program ended, and takes the next turn', async () => {
+    await setUp();
+    const first = await host.run(job('b3', 'hello'));
+    await typeTurn('b3', 'u2', 'HANG typed', 'job-dead');
+    process.kill((await host['opts'].tmux.programPid('a-b3'))!, 'SIGKILL');
+    await until(() => Boolean(done('job-dead')));
+    expect(done('job-dead')).toMatchObject({ ok: false, error: 'agent_failed' });
+    expect(host.typedJobs()).toEqual([]);
+    expect(await host.run(job('b3', 'next', { sessionId: first.sessionId }))).toMatchObject({ ok: true, result: 'echo: next' });
+  }, 30_000);
+
+  it('ends a typed turn that runs too long', async () => {
+    await setUp({ typedMs: 1000 });
+    await host.run(job('b4', 'hello'));
+    await typeTurn('b4', 'u3', 'HANG typed', 'job-long');
+    await until(() => Boolean(done('job-long')));
+    expect(done('job-long')).toMatchObject({ ok: false, error: 'timeout' });
+    expect(host.typedJobs()).toEqual([]);
+  });
+
+  it("takes Hornhoof's late answer for a typed turn that still runs", async () => {
+    await setUp({ openMs: 300 });
+    await host.run(job('b5', 'hello'));
+    await host.open({ type: 'term.open', termId: 'u4', agentKey: 'b5', cols: 80, rows: 24, write: true });
+    host.input({ type: 'term.input', termId: 'u4', data: 'HANG late\r' });
+    await until(() => sent.some(m => m.type === 'turn.open'));
+    await new Promise(r => setTimeout(r, 600));
+    host.opened({ type: 'turn.opened', agentKey: 'b5', jobId: 'job-late', toolToken: 'tok-late' });
+    expect(host.typedJobs()).toEqual(['job-late']);
+  });
+
+  it('ends a turn Hornhoof opened too late, after the typed turn was over', async () => {
+    await setUp({ openMs: 300 });
+    await host.run(job('b6', 'hello'));
+    await host.open({ type: 'term.open', termId: 'u5', agentKey: 'b6', cols: 80, rows: 24, write: true });
+    host.input({ type: 'term.input', termId: 'u5', data: 'quick\r' });
+    await until(async () => (await host.screen('b6')).includes('echo: quick'));
+    await new Promise(r => setTimeout(r, 300));
+    host.opened({ type: 'turn.opened', agentKey: 'b6', jobId: 'job-over', toolToken: 'tok-over' });
+    expect(done('job-over')).toMatchObject({ ok: false, error: 'cancelled' });
+    expect(host.typedJobs()).toEqual([]);
+  });
+
+  it('shows nothing to a view Hornhoof closed while it was opening', async () => {
+    await setUp();
+    const opening = host.open({ type: 'term.open', termId: 'u6', agentKey: 'b7', cols: 80, rows: 24, write: true });
+    host.close({ type: 'term.close', termId: 'u6' });
+    await opening;
+    await new Promise(r => setTimeout(r, 300));
+    expect((await host['opts'].tmux.run(['list-clients'])).trim()).toBe('');
+    expect(sent.some(m => m.type === 'term.data' && m.termId === 'u6')).toBe(false);
+  });
+
+  it("runs Hornhoof's turns for one agent one after another", async () => {
+    await setUp();
+    const [one, two] = await Promise.all([host.run(job('b8', 'one')), host.run(job('b8', 'two'))]);
+    expect(one).toMatchObject({ ok: true, result: 'echo: one' });
+    expect(two).toMatchObject({ ok: true, result: 'echo: two' });
+  }, 30_000);
+
+  it('follows the new session when a person clears the conversation', async () => {
+    await setUp();
+    const first = await host.run(job('b9', 'hello'));
+    await host.open({ type: 'term.open', termId: 'u7', agentKey: 'b9', cols: 80, rows: 24, write: true });
+    host.input({ type: 'term.input', termId: 'u7', data: 'CLEAR\r' });
+    await new Promise(r => setTimeout(r, 500));
+    host.input({ type: 'term.input', termId: 'u7', data: 'after clear\r' });
+    await until(() => sent.some(m => m.type === 'turn.open'));
+    host.opened({ type: 'turn.opened', agentKey: 'b9', jobId: 'job-clear', toolToken: 'tok-clear' });
+    await until(() => Boolean(done('job-clear')));
+    expect(done('job-clear')).toMatchObject({ ok: true, result: 'echo: after clear' });
+    expect((done('job-clear') as { sessionId: string }).sessionId).not.toBe(first.sessionId);
+    expect(sent).toContainEqual({ type: 'job.event', jobId: 'job-clear', seq: 0, event: { kind: 'text', text: 'echo: after clear' } });
+  });
+
+  it('runs a turn in Codex and opens a turn for what a person typed in it', async () => {
+    await setUp();
+    const first = await host.run(codexJob('c1', 'hello'));
+    expect(first).toMatchObject({ ok: true, result: 'echo: hello' });
+    await typeTurn('c1', 'v1', 'typed in codex', 'job-codex');
+    expect(sent.find(m => m.type === 'turn.open')).toEqual({ type: 'turn.open', agentKey: 'c1', text: 'typed in codex' });
+    await until(() => Boolean(done('job-codex')));
+    expect(done('job-codex')).toMatchObject({ ok: true, result: 'echo: typed in codex', sessionId: first.sessionId });
+    expect(sent).toContainEqual({ type: 'job.event', jobId: 'job-codex', seq: 0, event: { kind: 'text', text: 'echo: typed in codex' } });
+  });
+
+  it('ends a Codex turn as stopped when a person stops it', async () => {
+    await setUp();
+    const first = await host.run(codexJob('c2', 'hello'));
+    const started = Date.now();
+    expect(await host.run(codexJob('c2', 'ABORT', { sessionId: first.sessionId }))).toMatchObject({ ok: false, error: 'cancelled' });
+    expect(Date.now() - started).toBeLessThan(5000);
+  }, 30_000);
 });

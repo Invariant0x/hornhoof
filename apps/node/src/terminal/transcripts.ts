@@ -49,8 +49,9 @@ function windowName(minutes: unknown): string {
   return typeof minutes === 'number' ? `${minutes}_minutes` : 'window';
 }
 
-/* What a line of Codex's session log tells: things to show, the session, a turn's start or end, the limits. */
-export type RolloutNews = { events: AgentEvent[]; session?: { id: string; cwd: string }; started?: true; ended?: { message: string }; limits?: Limits };
+/* What a line of Codex's session log tells: things to show, the session, a turn's start, what a person typed, the turn's
+   end or that a person stopped it, the limits. */
+export type RolloutNews = { events: AgentEvent[]; session?: { id: string; cwd: string }; started?: true; typed?: string; ended?: { message: string }; aborted?: true; limits?: Limits };
 
 const textOf = (content: unknown) =>
   Array.isArray(content)
@@ -96,9 +97,12 @@ export function codexRollout(line: unknown): RolloutNews {
   if (line.type !== 'event_msg') return { events: [] };
   switch (p.type) {
     case 'item_completed':
+      if (isRecord(p.item) && p.item.type === 'UserMessage') return { events: [], typed: textOf(p.item.content) };
       return { events: isRecord(p.item) ? itemEvents(p.item) : [] };
     case 'task_started':
       return { events: [], started: true };
+    case 'turn_aborted':
+      return { events: [], aborted: true };
     case 'task_complete':
       return { events: [], ended: { message: String(p.last_agent_message ?? '') } };
     case 'token_count': {

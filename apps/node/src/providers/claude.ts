@@ -63,6 +63,14 @@ export function claudeEvents(line: unknown): AgentEvent[] {
   });
 }
 
+/* The line Claude Code logs when a person stops a turn with Escape; it calls no stop hook then. */
+export function claudeInterrupted(line: unknown): boolean {
+  if (!isRecord(line) || line.type !== 'user' || !isRecord(line.message)) return false;
+  const content = line.message.content;
+  const texts = typeof content === 'string' ? [content] : Array.isArray(content) ? content.filter(isRecord).map(b => (typeof b.text === 'string' ? b.text : '')) : [];
+  return texts.some(t => t.startsWith('[Request interrupted by user'));
+}
+
 export const SIGNED_OUT = /not logged in|please run \/login|invalid api key|authentication/i;
 
 export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'), secret = null, mode, user = null }: Options): ProviderAdapter {

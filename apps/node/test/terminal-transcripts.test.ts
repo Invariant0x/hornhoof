@@ -29,6 +29,11 @@ describe("Codex's session log", () => {
     expect(codexRollout({ type: 'event_msg', payload: { type: 'task_complete', last_agent_message: 'Done.' } })).toEqual({ events: [], ended: { message: 'Done.' } });
   });
 
+  it('tells what a person typed and when a person stopped the turn', () => {
+    expect(codexRollout(item({ type: 'UserMessage', content: [{ type: 'text', text: 'Fix the build' }] }))).toEqual({ events: [], typed: 'Fix the build' });
+    expect(codexRollout({ type: 'event_msg', payload: { type: 'turn_aborted', reason: 'interrupted' } })).toEqual({ events: [], aborted: true });
+  });
+
   it('reads the limits it reports, by the length of each window', () => {
     const rate = { primary: { used_percent: 72, window_minutes: 10080, resets_at: 1793774136 }, secondary: { used_percent: 10, window_minutes: 300, resets_at: 1793380000 }, rate_limit_reached_type: null };
     expect(codexRollout({ type: 'event_msg', payload: { type: 'token_count', rate_limits: rate } }).limits).toEqual({
@@ -43,7 +48,6 @@ describe("Codex's session log", () => {
 
   it('leaves out what people need not see', () => {
     expect(codexRollout({ type: 'response_item', payload: { type: 'message', role: 'developer' } })).toEqual({ events: [] });
-    expect(codexRollout(item({ type: 'UserMessage', content: [] }))).toEqual({ events: [] });
     expect(codexRollout('nonsense')).toEqual({ events: [] });
   });
 });

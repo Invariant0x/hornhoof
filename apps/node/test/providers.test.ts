@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { CLAUDE_ALIASES, type AgentEvent, type ProviderId } from '@hornhoof/protocol';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { adapterFor } from '../src/providers/index.js';
-import { claudeEvents, limitsFrom } from '../src/providers/claude.js';
+import { claudeEvents, claudeInterrupted, limitsFrom } from '../src/providers/claude.js';
 import { codexEvents } from '../src/providers/codex.js';
 import { kimiEvents } from '../src/providers/kimi.js';
 import { childEnv, lastUrl } from '../src/providers/process.js';
@@ -509,6 +509,13 @@ describe('live events', () => {
     expect(codexEvents({ type: 'item.updated', item: { id: 'i1', type: 'todo_list', items: [{ text: 'Ask', completed: true }, { text: 'Propose', completed: false }] } })).toEqual([
       { kind: 'todo', items: [{ text: 'Ask', state: 'done' }, { text: 'Propose', state: 'todo' }] },
     ]);
+  });
+
+  it('tell when a person stopped a Claude Code turn with Escape', () => {
+    expect(claudeInterrupted({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: '[Request interrupted by user]' }] } })).toBe(true);
+    expect(claudeInterrupted({ type: 'user', message: { role: 'user', content: '[Request interrupted by user for tool use]' } })).toBe(true);
+    expect(claudeInterrupted({ type: 'user', message: { role: 'user', content: 'Please say [Request interrupted by user]' } })).toBe(false);
+    expect(claudeInterrupted({ type: 'assistant', message: { content: [{ type: 'text', text: '[Request interrupted by user]' }] } })).toBe(false);
   });
 
   it('give nothing for lines they do not show', () => {
