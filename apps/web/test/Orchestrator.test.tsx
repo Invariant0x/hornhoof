@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { OrchestratorWindow } from '../src/screens/Orchestrator';
 import type { EventView, Org } from '../src/types';
-import { ME, mockApi, ORG } from './api-mock';
+import { ME, mockApi, ORG, SUBS } from './api-mock';
 import { fakeStream } from './fake-stream';
 
 const EVENTS = '/api/agents/orchestrator/events';
@@ -126,6 +126,12 @@ describe('OrchestratorWindow', () => {
     expect(screen.getByLabelText('Write to the orchestrator')).toBeDisabled();
     expect(screen.getByText('Company structure')).toBeInTheDocument();
     expect(screen.getAllByRole('checkbox')).toHaveLength(8);
+  });
+
+  it('tells to update Hornhoof on a machine too old to run his turns', async () => {
+    const mac = { ...SUBS[1]!, kind: 'personal' as const, owner: { id: 'p1', name: 'Ivan' } };
+    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, ready: false, reason: 'node_outdated' } }] }, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: mac } });
+    expect(await screen.findByText("Hornhoof on Ivan's machine is out of date. Run the install command there again.")).toBeInTheDocument();
   });
 
   it('shows a line once when the stream and a catch-up both bring it', async () => {

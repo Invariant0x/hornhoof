@@ -198,6 +198,7 @@ export const en = {
     removed: (name: string) => `Removed: ${name}`,
     pickByHand: 'Pick departments by hand',
     builtinOffline: 'The built-in machine is offline',
+    nodeOutdated: (owner: string) => `Hornhoof on ${owner}'s machine is out of date. Run the install command there again.`,
     failed: {
       timeout: 'The orchestrator did not finish within 15 minutes.',
       not_logged_in: 'The orchestrator\'s subscription is signed out on its machine. Sign in again, then write once more.',

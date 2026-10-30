@@ -61,7 +61,7 @@ export type Org = {
 /* Whether the orchestrator can take a turn now, and what he is doing. */
 export type OrchestratorState = {
   ready: boolean;
-  reason: 'no_subscription' | 'waiting_machine' | 'needs_login' | 'machine_offline' | null;
+  reason: 'no_subscription' | 'waiting_machine' | 'needs_login' | 'node_outdated' | 'machine_offline' | null;
   busy: boolean;
   runningJobId: string | null;
   queued: number;

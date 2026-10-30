@@ -172,15 +172,35 @@ describe('the orchestrator\'s conversation', () => {
     expect(await builtin.next()).toEqual({ type: 'job.cancel', jobId: run.jobId });
   });
 
-  it('keeps the next message waiting when the machine says its login ran out', async () => {
+  /* The orchestrator moves to Ivan's Claude plan on his Mac, whose node says hello with this version. */
+  async function onMac(version: string) {
     const { app, url, ceo } = await live();
     const connected = await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude'] }, ...as(ceo) });
     const code = connected.json().command.split('--join ')[1];
     const joined = await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' } });
     const node = joined.json().nodes[0] as { subscriptionId: string; key: string };
     const mac = await connectNode(url, node.key);
-    mac.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [] });
+    mac.send({ type: 'hello', version, loggedIn: true, running: [] });
     expect((await app.inject({ method: 'POST', url: `/api/subscriptions/${node.subscriptionId}/orchestrator`, ...as(ceo) })).statusCode).toBe(200);
+    return { app, url, ceo, mac, node };
+  }
+
+  it('keeps turns from a machine whose Hornhoof is too old to run them, and says so', async () => {
+    const { app, url, ceo, mac, node } = await onMac('0.2.0');
+    await until(async () => (await state(app, ceo)).reason === 'node_outdated');
+    expect((await say(app, ceo, 'Hello')).statusCode).toBe(409);
+    expect(await quiet(mac)).toBe(0);
+    mac.close();
+    await mac.closed;
+    const updated = await connectNode(url, node.key);
+    updated.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [] });
+    await until(async () => (await state(app, ceo)).ready);
+    await say(app, ceo, 'Hello');
+    expect((await nextRun(updated)).prompt).toBe('Ivan (CEO): Hello');
+  });
+
+  it('keeps the next message waiting when the machine says its login ran out', async () => {
+    const { app, ceo, mac } = await onMac('0.3.0');
     await until(async () => (await state(app, ceo)).ready);
     await say(app, ceo, 'First');
     const first = await nextRun(mac);

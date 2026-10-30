@@ -11,7 +11,7 @@ export const CONVERSATION_TIMEOUT_MS = 15 * 60_000;
 
 export type OrchestratorState = {
   ready: boolean;
-  reason: 'no_subscription' | 'waiting_machine' | 'needs_login' | 'machine_offline' | null;
+  reason: 'no_subscription' | 'waiting_machine' | 'needs_login' | 'node_outdated' | 'machine_offline' | null;
   busy: boolean;
   runningJobId: string | null;
   queued: number;
@@ -75,12 +75,21 @@ async function sessionFor(ctx: Ctx, agentId: string, subscriptionId: string, pro
   return { sessionId: null, prompt: talk.length ? `${preface(talk)}\n\n${prompt}` : prompt };
 }
 
+/* Turns need a node from 0.3.0 on: older ones drop his instructions and tool token, cannot stop a turn and send nothing live. */
+const CONVERSATION_NODE = [0, 3, 0];
+function outdated(sub: { kind: string; nodeVersion: string | null }): boolean {
+  if (sub.kind !== 'personal') return false;
+  const have = (sub.nodeVersion ?? '0').split('.').map(n => parseInt(n, 10) || 0);
+  for (let i = 0; i < CONVERSATION_NODE.length; i++) if ((have[i] ?? 0) !== CONVERSATION_NODE[i]) return (have[i] ?? 0) < CONVERSATION_NODE[i]!;
+  return false;
+}
+
 async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   const { db, hub } = ctx;
   const [running] = await db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
   if (running) return;
   const sub = await liveSubscription(ctx, agentId);
-  if (!sub || sub.status !== 'ready' || !hub.isReady(identityOf(sub))) return;
+  if (!sub || sub.status !== 'ready' || outdated(sub) || !hub.isReady(identityOf(sub))) return;
   const [job] = await db.select().from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'queued'))).orderBy(asc(jobs.createdAt)).limit(1);
   if (!job) return;
 
@@ -139,8 +148,10 @@ export async function orchestratorState(ctx: Ctx, companyId: string): Promise<Or
       ? 'waiting_machine'
       : sub.status === 'needs_login'
         ? 'needs_login'
-        : !ctx.hub.isReady(identityOf(sub))
-          ? 'machine_offline'
-          : null;
+        : outdated(sub)
+          ? 'node_outdated'
+          : !ctx.hub.isReady(identityOf(sub))
+            ? 'machine_offline'
+            : null;
   return { ready: reason === null, reason, busy: Boolean(running), runningJobId: running?.id ?? null, queued: Number(waiting?.n ?? 0) };
 }

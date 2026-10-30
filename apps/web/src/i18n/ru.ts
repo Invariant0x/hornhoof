@@ -197,6 +197,7 @@ export const ru: Messages = {
       products ? `Создан отдел: ${name}, ${products} ${plural('ru', products, { one: 'продукт', few: 'продукта', many: 'продуктов', other: 'продукта' })}` : `Создан отдел: ${name}`,
     removed: name => `Убран отдел: ${name}`,
     pickByHand: 'Выбрать отделы вручную',
+    nodeOutdated: owner => `Старая версия Hornhoof на машине, владелец ${owner}. Запустите там команду установки еще раз.`,
     builtinOffline: 'Встроенная машина не в сети',
     failed: {
       timeout: 'Оркестратор не закончил за 15 минут.',
