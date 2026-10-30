@@ -585,6 +585,9 @@ export class TerminalHost {
     try {
       if (!(await this.opts.tmux.has(a.name))) {
         await this.opts.tmux.launch(a.name, { cwd: '/', command: ['sh', '-c', `printf '\\n  %s\\n' '${starts ? STARTING : WAITING}'; exec sleep 2147483647`], cols: m.cols, rows: m.rows });
+        /* The waiting screen is no program of the agent's: the next turn starts one in its place. A turn that runs now is
+           starting its own. */
+        if (!a.turn) a.hash = null;
       }
     } finally {
       this.viewsOpening.delete(m.termId);

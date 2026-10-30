@@ -31,12 +31,13 @@ const until = async (check: () => boolean | Promise<boolean>, ms = 8000) => {
 
 describe.skipIf(!hasTmux)('agents in live terminals', () => {
   let host: TerminalHost;
+  let tmux: Tmux;
   let sent: NodeMessage[];
   const home = mkdtempSync(join(tmpdir(), 'hh-home-'));
 
   function setUp(more: Partial<ConstructorParameters<typeof TerminalHost>[0]> = {}) {
     sent = [];
-    const tmux = new Tmux({ socket: `hh-host-${process.pid}-${Math.random().toString(36).slice(2, 8)}`, env: { PATH: process.env.PATH ?? '', HOME: home } });
+    tmux = new Tmux({ socket: `hh-host-${process.pid}-${Math.random().toString(36).slice(2, 8)}`, env: { PATH: process.env.PATH ?? '', HOME: home } });
     host = new TerminalHost({ tmux, hornhoof: 'http://127.0.0.1:9', send: m => sent.push(m), secrets: () => [SECRET], readyMs: 10_000, pollMs: 100, toolsMs: 300, ...more });
     return host.start();
   }
@@ -333,6 +334,16 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     expect(await host.run(job('a44', 'again', { sessionId }))).toMatchObject({ ok: true, result: 'echo: again' });
     expect(await host.screen('a44')).toContain(`fake claude resumed ${sessionId}`);
     expect(readFileSync(join(home, 'work', 'a44', '.hh-instructions.md'), 'utf8')).toContain('we sell software');
+  });
+
+  it('starts the program in place of the waiting screen shown after its session was gone', async () => {
+    await setUp();
+    const first = await host.run(job('a45', 'hello'));
+    await tmux.kill('a-a45');
+    await host.open({ type: 'term.open', termId: 't45', agentKey: 'a45', cols: 80, rows: 24, write: true });
+    expect(sent).toContainEqual({ type: 'agent.start', agentKey: 'a45' });
+    expect(await host.run(job('a45', '', { sessionId: first.sessionId }))).toMatchObject({ ok: true, sessionId: first.sessionId });
+    expect(await host.screen('a45')).toContain(`fake claude resumed ${first.sessionId}`);
   });
 
   it('resumes the session for a turn with nothing to type', async () => {
