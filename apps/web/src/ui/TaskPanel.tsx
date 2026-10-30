@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { api } from '../api';
 import { errorText, useLanguage, useT, type Messages } from '../i18n';
 import { useOrg } from '../org';
-import { placeName, useTask } from '../tasks';
+import { placeName, roleAfter, useTask } from '../tasks';
 import type { AgentRef, TaskDetail, TaskLogLine } from '../types';
 import { Field } from './Field';
 import { Markdown } from './Markdown';
@@ -28,7 +28,7 @@ function TaskBody({ task, onOpen, onChanged }: { task: TaskDetail; onOpen: (id: 
   const { language } = useLanguage();
   const { org } = useOrg();
   const when = (at: string) => new Date(at).toLocaleString(language === 'ru' ? 'ru-RU' : 'en-GB', { dateStyle: 'short', timeStyle: 'short' });
-  const who = (a: AgentRef) => `${a.name}${a.role ? `, ${a.role[language]}` : ''}`;
+  const who = (a: AgentRef) => `${a.name}${roleAfter(a, language)}`;
   const closed = task.status === 'done' || task.status === 'cancelled';
 
   return (
@@ -51,12 +51,12 @@ function TaskBody({ task, onOpen, onChanged }: { task: TaskDetail; onOpen: (id: 
         <ol className="tgates" aria-label={t.tasks.gates}>
           <li className={task.stage > 0 || task.status === 'done' ? 'passed' : 'current'}>
             <b>{task.executor.name}</b>
-            {task.executor.role && `, ${task.executor.role[language]}`}, <span>{task.stage > 0 || task.status === 'done' ? t.tasks.gateStates.did : t.tasks.gateStates.working}</span>
+            {roleAfter(task.executor, language)}, <span>{task.stage > 0 || task.status === 'done' ? t.tasks.gateStates.did : t.tasks.gateStates.working}</span>
           </li>
           {task.gates.map(g => (
             <li key={g.id} className={g.state}>
               <b>{g.name}</b>
-              {g.role && `, ${g.role[language]}`}, <span>{t.tasks.gateStates[g.state]}</span>
+              {roleAfter(g, language)}, <span>{t.tasks.gateStates[g.state]}</span>
             </li>
           ))}
         </ol>

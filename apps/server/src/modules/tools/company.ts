@@ -19,13 +19,16 @@ export async function companyView(db: Db, templates: Templates, companyId: strin
   const owners = new Map((await db.select({ id: people.id, scopeKind: people.scopeKind }).from(people)).map(p => [p.id, p.scopeKind]));
   const subs = await db.select().from(subscriptions).where(and(eq(subscriptions.companyId, companyId), isNull(subscriptions.removedAt)));
   const staff = await db.select().from(agents).where(and(eq(agents.companyId, companyId), ne(agents.kind, 'orchestrator'), isNull(agents.removedAt)));
-  /* Each department's employees, so a head knows its team: role, product and what it runs on. */
+  /* Each department's employees, so a head knows its team: role, product and what it runs on. The id is what create_task
+     takes as the executor, the role id what it takes as a gate. */
   const employeesOf = (dept: (typeof depts)[number]) =>
     staff
       .filter(a => a.departmentId === dept.id)
       .sort(employeeOrder(templates, dept.templateKey))
       .map(a => ({
+        id: a.id,
         name: a.name,
+        roleId: a.roleKey,
         role: (a.roleKey && templates.roles.get(a.roleKey)?.title.en) || null,
         kind: a.kind,
         product: (a.productId && deptName(depts.find(p => p.id === a.productId)!)) || null,

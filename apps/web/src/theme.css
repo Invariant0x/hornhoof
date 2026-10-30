@@ -291,10 +291,10 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .dept .now.task { color: var(--ink); }
 .dept .now.task i { background: var(--cyan); }
 .dept .now > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-/* The company's turn under the hub: its number, then its goal on one line. */
+/* The company's turn under the hub: its number, then its goal in two lines at most. */
 .hub-turn { position: absolute; margin: 0; display: grid; justify-items: center; gap: 2px; text-align: center; font-size: 13px; pointer-events: none; }
 .hub-turn b { font-family: var(--f-display); font-size: 12px; font-weight: 600; letter-spacing: .04em; color: var(--cyan-ink); }
-.hub-turn span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
+.hub-turn span { max-width: 100%; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; font-size: 12.5px; line-height: 1.3; color: var(--ink); }
 .role { font-family: var(--f-display); font-size: 12px; font-weight: 600; letter-spacing: .08em; color: var(--cyan-ink); }
 .dname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--f-display); font-size: 20px; font-weight: 600; }
 .cnt { flex: none; font-family: var(--f-display); font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }

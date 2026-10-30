@@ -134,6 +134,15 @@ describe('Department view', () => {
     expect(await screen.findByRole('complementary', { name: '#12 Checkout API' })).toBeInTheDocument();
   });
 
+  it('names an assignee once when it is called after its role', async () => {
+    const user = userEvent.setup();
+    const head = { id: 'b0', name: 'Head of development', kind: 'head' as const, role: { en: 'Head of development', ru: 'Руководитель разработки' } };
+    shell({ [DEV_TASKS]: [200, { tasks: [{ ...TASKS[2]!, assignee: head }] }] });
+    await flyIn(user);
+    const row = await within(screen.getByRole('region', { name: 'Tasks' })).findByRole('button', { name: /#9/ });
+    expect(row.textContent!.match(/Head of development/g)).toHaveLength(1);
+  });
+
   it('gives the department a task through its head', async () => {
     const user = userEvent.setup();
     const made = { ...TASK_DETAIL, id: 't14', number: 14, title: 'Refund API' };
@@ -153,6 +162,16 @@ describe('Department view', () => {
     );
     expect(await screen.findByRole('complementary', { name: '#14 Refund API' })).toBeInTheDocument();
     expect(within(tasks).queryByLabelText('Title')).not.toBeInTheDocument();
+  });
+
+  it('says the head gets a new task without naming it twice when it is called after its role', async () => {
+    const user = userEvent.setup();
+    const [dev] = DEV_ORG.departments;
+    shell({ [DEV_TASKS]: [200, { tasks: [] }] }, { ...DEV_ORG, departments: [{ ...dev!, employees: [{ ...dev!.employees[0]!, name: 'Head of development' }] }] });
+    await flyIn(user);
+    const tasks = screen.getByRole('region', { name: 'Tasks' });
+    await user.click(await within(tasks).findByRole('button', { name: 'New task' }));
+    expect(within(tasks).getByText('The head gets it and splits it among the department.')).toBeInTheDocument();
   });
 
   it('asks for a head before the department takes tasks', async () => {

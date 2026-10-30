@@ -247,7 +247,7 @@ export const en = {
     newTask: 'New task',
     noTasks: 'No open tasks.',
     needsHead: 'Tasks go to the department through its head. Hire one first.',
-    goesTo: (head: string) => `${head}, the head, gets it and splits it among the department.`,
+    goesTo: (head: string | null) => (head ? `${head}, the head, gets it and splits it among the department.` : 'The head gets it and splits it among the department.'),
     brief: 'In one line',
     details: 'Details',
     detailsPlaceholder: 'What to build, how to tell it is done, links. Markdown works.',

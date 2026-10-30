@@ -63,6 +63,14 @@ describe('task tools', () => {
     expect(await names(bruno)).toEqual(['ask_person', 'blocked', 'comment', 'company', 'submit', 'task', 'tasks', 'verdict']);
   });
 
+  it("tells a head to give work to members, and to itself only when no member can do it", async () => {
+    const { head, tools } = await company();
+    const create = (await (await tools(head)).listTools()).tools.find(t => t.name === 'create_task')!;
+    expect(create.description).toContain('Gives work to a member of your department');
+    expect(create.description).toContain('Name yourself only when no member can do it.');
+    expect(create.description).not.toContain('(or yourself)');
+  });
+
   it("gives a department task to its head, and refuses a department without one", async () => {
     const { db, orchestrator, dev, sales, head, tools } = await company();
     const client = await tools(orchestrator);

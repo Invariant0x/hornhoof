@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api';
 import { useStream, type LiveMessage } from './live';
 import { deptLabel, type Messages } from './i18n';
-import type { Org, TaskDetail, TaskLine, TaskPlace, TurnView, WaitingRequest } from './types';
+import type { AgentRef, Lang, Org, TaskDetail, TaskLine, TaskPlace, TurnView, WaitingRequest } from './types';
 
 /* Fetches the path, again whenever a stream message says it may have changed. undefined until the first answer. */
 function useLive<T>(path: string | null, pick: (body: never) => T, refresh: (m: LiveMessage) => boolean): { data: T | undefined; failure: unknown; load: () => void } {
@@ -70,4 +70,10 @@ export function placeName(t: Messages, org: Org | null | undefined, place: TaskP
   if (!place) return '';
   const dept = org?.departments.find(d => d.id === place.id);
   return dept ? deptLabel(t, dept) : place.name;
+}
+
+/* ", role" after an agent's name, or nothing when it has none or is called after it. */
+export function roleAfter(a: Pick<AgentRef, 'name' | 'role'>, language: keyof Lang): string {
+  const role = a.role?.[language];
+  return role && role !== a.name ? `, ${role}` : '';
 }

@@ -43,6 +43,7 @@ function EmployeeCard({ e, on, onOpen }: { e: Employee; on: boolean; onOpen(id: 
 /* The department's open tasks, and a new one for its head from people whose access lists the department. */
 function DeptTasks({ department: d, head, canGive, selected, onOpenTask }: { department: Department; head: Employee | undefined; canGive: boolean; selected: string | null; onOpenTask(id: string): void }) {
   const t = useT();
+  const { language } = useLanguage();
   const id = useId();
   const { tasks, failure, load } = useTasks({ status: 'open', department: d.id });
   const [writing, setWriting] = useState(false);
@@ -61,7 +62,7 @@ function DeptTasks({ department: d, head, canGive, selected, onOpenTask }: { dep
       {writing && head && (
         <NewTask
           department={d}
-          head={head.name}
+          head={head.title?.[language] === head.name ? null : head.name}
           onCancel={() => setWriting(false)}
           onCreated={task => {
             setWriting(false);

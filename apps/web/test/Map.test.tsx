@@ -249,7 +249,11 @@ describe('Map', () => {
     const turn = await screen.findByText('Turn 3');
     expect(turn.closest('.hub-turn')).toHaveTextContent('Turn 3Take payments');
     const top = (el: Element | null) => parseFloat((el as HTMLElement).style.top);
-    expect(top(container.querySelector('.add'))).toBeGreaterThan(top(container.querySelector('.hub-turn')) + 24);
+    expect(top(container.querySelector('.add'))).toBeGreaterThan(top(container.querySelector('.hub-turn')) + 48);
+    /* Traces to the lower rows leave the hub 84 to each side of its middle (600); the turn stays between them. */
+    const box = container.querySelector('.hub-turn') as HTMLElement;
+    expect(parseFloat(box.style.left)).toBeGreaterThanOrEqual(600 - 84);
+    expect(parseFloat(box.style.left) + parseFloat(box.style.width)).toBeLessThanOrEqual(600 + 84);
   });
 
   it('tells when the orchestrator has no subscription', async () => {

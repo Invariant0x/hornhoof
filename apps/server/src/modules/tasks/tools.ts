@@ -159,7 +159,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
       'create_task',
       {
         description:
-          'Gives work to someone in your department (or yourself): executor is an employee id from company. gates are the reviewers it passes in order, as role ids (DEV-REV) or employee ids; ' +
+          'Gives work to a member of your department: executor is an employee id from company. Name yourself only when no member can do it. gates are the reviewers it passes in order, as role ids (DEV-REV) or employee ids; ' +
           'left out, the department\'s usual gates that are hired; [] for none. The executor never reviews its own work. parent: the department task it serves.',
         inputSchema: { title: Title, brief: Brief, body: Body, executor: z.uuid(), gates: z.array(z.string().max(40)).max(8).optional(), parent: Ref.optional(), product: z.uuid().optional() },
       },

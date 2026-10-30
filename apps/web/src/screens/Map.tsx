@@ -75,8 +75,8 @@ function chipsTop(n: number): number {
 }
 const busY = (n: number) => chipsTop(n) + CHIP_H + 14;
 
-/* The company's turn sits right under the hub, in a line this tall. */
-const TURN_TOP = CY + HUB + 10, TURN_H = 40;
+/* The company's turn sits right under the hub, between the traces that leave it downwards, in two lines at most. */
+const TURN_TOP = CY + HUB + 10, TURN_W = 2 * BEND - 16, TURN_H = 56;
 
 /* "+ Add department" sits under the hub, below the turn when one runs, or under the lowest row once departments go below it. */
 function addTop(n: number, turn: boolean): number {
@@ -375,7 +375,7 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator, inside = false, 
         )}
 
         {org.turn && (
-          <p className="hub-turn" style={{ left: CX - 180, top: TURN_TOP, width: 360 }} title={org.turn.goal}>
+          <p className="hub-turn" style={{ left: CX - TURN_W / 2, top: TURN_TOP, width: TURN_W }} title={org.turn.goal}>
             <b>{t.tasks.turn(org.turn.number)}</b>
             <span>{org.turn.goal}</span>
           </p>

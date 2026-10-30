@@ -1,4 +1,5 @@
 import { useLanguage, useT } from '../i18n';
+import { roleAfter } from '../tasks';
 import type { TaskLine, TaskStatus } from '../types';
 
 /* What needs people first, then what moves, then what has not started; closed tasks after. */
@@ -22,7 +23,7 @@ export function TaskRow({ task, on, place, onOpen }: { task: TaskLine; on: boole
         {task.assignee && (
           <span>
             {task.assignee.name}
-            {task.assignee.role ? `, ${task.assignee.role[language]}` : ''}
+            {roleAfter(task.assignee, language)}
           </span>
         )}
         {task.status === 'review' && task.stage > 0 && <span className="trow-gate">{t.tasks.gateOf(task.stage, task.gateCount)}</span>}

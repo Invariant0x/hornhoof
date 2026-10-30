@@ -6,7 +6,8 @@ import { Field } from './Field';
 
 type Props = {
   department: Department;
-  head: string;
+  /* The head's name, or null when it is called after its role. */
+  head: string | null;
   onCreated: (task: TaskDetail) => void;
   onCancel: () => void;
 };
