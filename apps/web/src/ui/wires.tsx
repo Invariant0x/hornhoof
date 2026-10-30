@@ -4,7 +4,7 @@ export type Point = [number, number];
 
 export const toD = (pts: Point[]) => pts.map((p, i) => `${i ? 'L' : 'M'} ${p[0]} ${p[1]}`).join(' ');
 
-const lengthOf = (pts: Point[]) => pts.slice(1).reduce((sum, p, i) => sum + Math.hypot(p[0] - pts[i]![0], p[1] - pts[i]![1]), 0);
+export const lengthOf = (pts: Point[]) => pts.slice(1).reduce((sum, p, i) => sum + Math.hypot(p[0] - pts[i]![0], p[1] - pts[i]![1]), 0);
 
 const REDUCE = '(prefers-reduced-motion: reduce)';
 
@@ -27,19 +27,24 @@ type PulseProps = {
   speed: number;
   /* Goes to the end and back instead of starting over. */
   bounce?: boolean;
+  /* Runs one time, for one message; whoever shows it takes it away after pulseSeconds. */
+  once?: boolean;
   tone?: 'c' | 'a' | 'k';
   r?: number;
 };
 
-/* A dot that keeps running along a path while something real is going on. */
-export function Pulse({ pts, speed, bounce = false, tone = 'c', r = 3 }: PulseProps) {
-  const dur = (lengthOf(pts) * (bounce ? 2 : 1)) / speed;
+export const pulseSeconds = (pts: Point[], speed: number, bounce = false) => (lengthOf(pts) * (bounce ? 2 : 1)) / speed;
+
+/* A dot that runs along a path while something real is going on, or once for one message. */
+export function Pulse({ pts, speed, bounce = false, once = false, tone = 'c', r = 3 }: PulseProps) {
+  const dur = pulseSeconds(pts, speed, bounce);
   return (
     <circle className={`pt ${tone}`} r={r}>
       <animateMotion
         path={toD(pts)}
         dur={`${dur.toFixed(2)}s`}
-        repeatCount="indefinite"
+        repeatCount={once ? '1' : 'indefinite'}
+        fill={once ? 'freeze' : 'remove'}
         {...(bounce ? { keyPoints: '0;1;0', keyTimes: '0;0.5;1', calcMode: 'linear' } : {})}
       />
     </circle>

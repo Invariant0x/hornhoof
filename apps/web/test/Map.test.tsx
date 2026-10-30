@@ -1,12 +1,19 @@
-import { render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import { orchestratorStatus, deptLayout, MapScreen } from '../src/screens/Map';
 import type { SubView } from '../src/types';
-import { mockApi, ORG, ORG_WITH_TEAMS, SUBS } from './api-mock';
+import { LanguageProvider } from '../src/i18n';
+import type { Department, Me } from '../src/types';
+import { ME, mockApi, ORG, ORG_WITH_TEAMS, SUBS } from './api-mock';
+import { fakeStream } from './fake-stream';
 
 const claude = SUBS[0]!;
+const PROPS = { me: ME, windowOpen: false, onOpenOrchestrator: () => {} };
+const DEPUTY: Me = { ...ME, person: { ...ME.person, scopeKind: 'department', scopeId: 'd1', isOwner: false } };
+
+const dept = (d: Partial<Department> & { id: string }): Department => ({ name: null, templateKey: null, roleCode: 'SAL', about: '', products: [], teams: [], ...d });
 const STATES: [string, SubView | null, string, string][] = [
   ['none', null, 'Needs a subscription to start', 'Чтобы начать, нужна подписка'],
   ['API key', SUBS[3]!, 'Runs on Anthropic key ending 9f3a', 'Работает на ключе Anthropic, последние символы 9f3a'],
@@ -26,8 +33,8 @@ describe('orchestratorStatus', () => {
 describe('Map', () => {
   it('shows the orchestrator, the company people and the empty state on first run', async () => {
     mockApi({ 'GET /api/org': [200, ORG] });
-    const { container } = render(<MapScreen />);
-    expect(await screen.findByText('No departments yet. Ask the orchestrator to create the first one.')).toBeInTheDocument();
+    const { container } = render(<MapScreen {...PROPS} />);
+    expect(await screen.findByText('No departments yet. Tell the orchestrator about the company and he will propose a structure.')).toBeInTheDocument();
     expect(container.querySelector('.hub-num')).toHaveTextContent('0/1');
     /* Only the count shows; the words are there for screen readers. */
     expect(screen.getByText('agents working')).toHaveClass('sr');
@@ -39,7 +46,7 @@ describe('Map', () => {
 
   it('fills the half gauge one segment of 24 per share of working agents', async () => {
     mockApi({ 'GET /api/org': [200, { ...ORG, agents: { total: 4, working: 1 } }] });
-    const { container } = render(<MapScreen />);
+    const { container } = render(<MapScreen {...PROPS} />);
     await screen.findByText('agents working');
     expect(container.querySelector('.hub-num')).toHaveTextContent('1/4');
     expect(container.querySelector('.gauge-bg')).toHaveAttribute('pathLength', '24');
@@ -48,7 +55,7 @@ describe('Map', () => {
 
   it('joins the people to the orchestrator with a trace, even before any department', async () => {
     mockApi({ 'GET /api/org': [200, ORG] });
-    const { container } = render(<MapScreen />);
+    const { container } = render(<MapScreen {...PROPS} />);
     await screen.findByText('agents working');
     expect(container.querySelector('.wires [data-wire="people"]')).toBeInTheDocument();
     expect(container.querySelectorAll('.wires .via')).toHaveLength(1);
@@ -56,7 +63,7 @@ describe('Map', () => {
 
   it('places departments around the orchestrator, each on its own trace', async () => {
     mockApi({ 'GET /api/org': [200, ORG_WITH_TEAMS] });
-    const { container } = render(<MapScreen />);
+    const { container } = render(<MapScreen {...PROPS} />);
     expect(await screen.findByText('Marketing')).toBeInTheDocument();
     expect(screen.getByText('Development')).toBeInTheDocument();
     expect(screen.getByText('2 teams')).toBeInTheDocument();
@@ -67,14 +74,14 @@ describe('Map', () => {
 
   it('sends no pulses while nobody exchanges messages', async () => {
     mockApi({ 'GET /api/org': [200, ORG_WITH_TEAMS] });
-    const { container } = render(<MapScreen />);
+    const { container } = render(<MapScreen {...PROPS} />);
     await screen.findByText('Marketing');
     expect(container.querySelectorAll('animateMotion')).toHaveLength(0);
   });
 
   it('moves the dot along the gauge while an agent works', async () => {
     mockApi({ 'GET /api/org': [200, { ...ORG, agents: { total: 1, working: 1 } }] });
-    const { container } = render(<MapScreen />);
+    const { container } = render(<MapScreen {...PROPS} />);
     await screen.findByText('agents working');
     expect(container.querySelector('.hub animateMotion')).toBeInTheDocument();
   });
@@ -85,14 +92,88 @@ describe('Map', () => {
       vi.unstubAllGlobals();
     });
     mockApi({ 'GET /api/org': [200, { ...ORG, agents: { total: 1, working: 1 } }] });
-    const { container } = render(<MapScreen />);
+    const { container } = render(<MapScreen {...PROPS} />);
     await screen.findByText('agents working');
     expect(container.querySelectorAll('animateMotion')).toHaveLength(0);
   });
 
+  it('opens the orchestrator from the empty map and from the hub', async () => {
+    mockApi({ 'GET /api/org': [200, ORG] });
+    let opened = 0;
+    render(<MapScreen {...PROPS} onOpenOrchestrator={() => opened++} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Build the company' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open the orchestrator' }));
+    expect(opened).toBe(2);
+  });
+
+  it('gives a department-scope person nothing to open', async () => {
+    mockApi({ 'GET /api/org': [200, ORG] });
+    render(<MapScreen {...PROPS} me={DEPUTY} />);
+    await screen.findByText(/No departments yet/);
+    expect(screen.queryByRole('button', { name: 'Build the company' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open the orchestrator' })).not.toBeInTheDocument();
+  });
+
+  it('names template departments in the person\'s language and counts their products', async () => {
+    const org = { ...ORG, departments: [dept({ id: 'd1', templateKey: 'sales' }), dept({ id: 'd2', templateKey: 'development', roleCode: 'DEV', products: [{ id: 'p1', name: 'Mascot' }, { id: 'p2', name: 'Characters' }] })] };
+    mockApi({ 'GET /api/org': [200, org] });
+    const { unmount } = render(<MapScreen {...PROPS} />);
+    expect(await screen.findByText('Sales')).toBeInTheDocument();
+    expect(screen.getByText('2 products, no agents yet')).toBeInTheDocument();
+    expect(screen.getByText('No agents yet')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '+ Add department' })).toBeInTheDocument();
+    unmount();
+    localStorage.setItem('hh-lang', 'ru');
+    try {
+      render(<LanguageProvider><MapScreen {...PROPS} /></LanguageProvider>);
+      expect(await screen.findByText('Продажи')).toBeInTheDocument();
+      expect(screen.getByText('2 продукта, пока без агентов')).toBeInTheDocument();
+    } finally {
+      localStorage.removeItem('hh-lang');
+    }
+  });
+
+  it('runs a pulse once along the trace a message took', async () => {
+    const stream = fakeStream();
+    mockApi({ 'GET /api/org': [200, { ...ORG, departments: [dept({ id: 'd1', templateKey: 'sales' })] }] });
+    const { container } = render(<MapScreen {...PROPS} />);
+    await screen.findByText('Sales');
+    vi.useFakeTimers();
+    try {
+      stream.send({ type: 'pulse', from: { kind: 'person', id: 'p1' }, to: { kind: 'orchestrator' } });
+      stream.send({ type: 'pulse', from: { kind: 'orchestrator' }, to: { kind: 'department', id: 'd1' } });
+      expect(container.querySelectorAll('circle.pt.c')).toHaveLength(2);
+      act(() => vi.advanceTimersByTime(10_000));
+      expect(container.querySelectorAll('circle.pt.c')).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('runs no pulse for a person who asks for less motion', async () => {
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: query.includes('reduce'), addEventListener() {}, removeEventListener() {} }));
+    const stream = fakeStream();
+    mockApi({ 'GET /api/org': [200, ORG] });
+    const { container } = render(<MapScreen {...PROPS} />);
+    await screen.findByText('agents working');
+    stream.send({ type: 'pulse', from: { kind: 'person', id: 'p1' }, to: { kind: 'orchestrator' } });
+    expect(container.querySelectorAll('circle.pt')).toHaveLength(0);
+  });
+
+  it('follows the company live: a changed org is fetched again and the working count moves', async () => {
+    const stream = fakeStream();
+    const calls = mockApi({ 'GET /api/org': [200, ORG] });
+    const { container } = render(<MapScreen {...PROPS} />);
+    await screen.findByText('agents working');
+    stream.send({ type: 'working', working: 1 });
+    expect(container.querySelector('.hub-num')).toHaveTextContent('1/1');
+    stream.send({ type: 'org' });
+    await vi.waitFor(() => expect(calls.filter(c => c.path === '/api/org')).toHaveLength(2));
+  });
+
   it('tells when the orchestrator has no subscription', async () => {
     mockApi({ 'GET /api/org': [200, { ...ORG, orchestrator: { ...ORG.orchestrator, subscription: null } }] });
-    render(<MapScreen />);
+    render(<MapScreen {...PROPS} />);
     expect(await screen.findByText('Needs a subscription to start')).toBeInTheDocument();
   });
 });

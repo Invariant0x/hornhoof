@@ -225,7 +225,14 @@ button, input, select { font: inherit; color: inherit; }
 .hub-orchestrator { width: 360px; display: flex; justify-content: center; align-items: center; gap: 6px; margin: 0; padding: 3px 0; font-size: 13px; background: var(--bg); }
 .hub-orchestrator .ic { color: var(--cyan-ink); }
 .hub-orchestrator span { color: var(--muted); }
-.map-empty { width: 520px; margin: 0; padding: 10px 14px; text-align: center; border: 1px dashed var(--line2); color: var(--muted); background: var(--surface); }
+button.hub { padding: 0; border: 0; background: none; font: inherit; cursor: pointer; }
+button.hub:focus-visible { outline: 2px solid var(--cyan); outline-offset: 4px; }
+button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
+.hub.on .hub-ring { stroke: var(--cyan); }
+.start { position: absolute; width: 520px; box-sizing: border-box; padding: 16px 18px 18px; display: grid; justify-items: center; gap: 14px; text-align: center; border: 1px dashed var(--line2); background: var(--surface); }
+.start p { margin: 0; color: var(--muted); }
+.add { position: absolute; width: 148px; }
+.add .btn { width: 100%; }
 .dept > .edge { height: 100%; }
 .dept .edge-in { display: grid; align-content: center; gap: 2px; padding: 0 16px; }
 .role { font-family: var(--f-display); font-size: 12px; font-weight: 600; letter-spacing: .08em; color: var(--cyan-ink); }

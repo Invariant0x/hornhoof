@@ -58,6 +58,21 @@ export type Org = {
   departments: Department[];
 };
 
+/* Who a pulse on the map runs between. */
+export type Endpoint = { kind: 'person'; id: string } | { kind: 'orchestrator' } | { kind: 'department'; id: string };
+
+export type AgentEventKind = 'message' | 'text' | 'tool' | 'tool_result' | 'todo' | 'proposal' | 'applied' | 'stopped' | 'failed';
+
+/* One line of an agent's conversation, as the server keeps it. */
+export type EventView = { seq: number; kind: AgentEventKind; data: unknown; jobId: string | null; person: { id: string; name: string } | null; at: string };
+
+/* What the browser hears live from /api/stream. */
+export type StreamMessage =
+  | { type: 'agent_event'; agentId: string; event: EventView }
+  | { type: 'working'; working: number }
+  | { type: 'org' }
+  | { type: 'pulse'; from: Endpoint; to: Endpoint };
+
 export type MachineView = {
   id: string;
   hostname: string;

@@ -66,6 +66,8 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   const t = useT();
   const [tab, setTab] = useState<Tab>('map');
   const [menu, setMenu] = useState(false);
+  /* The orchestrator's window opens over the map; it comes in the next step. */
+  const [windowOpen, setWindowOpen] = useState(false);
   const account = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -114,7 +116,7 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
         </div>
       </header>
       <main className="body">
-        {tab === 'map' && <MapScreen />}
+        {tab === 'map' && <MapScreen me={me} windowOpen={windowOpen} onOpenOrchestrator={() => setWindowOpen(true)} />}
         {tab === 'people' && <People me={me} />}
         {tab === 'subscriptions' && <Subscriptions me={me} />}
       </main>
