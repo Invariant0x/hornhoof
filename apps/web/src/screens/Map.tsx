@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import { api } from '../api';
 import { deptLabel, errorText, useT, type Messages } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
 import { useStream, type LiveMessage } from '../live';
+import { useOrg } from '../org';
 import type { Department, Endpoint, Me, Org, SubView } from '../types';
 import { Edge } from '../ui/Edge';
 import { AgentIcon, LogoMark, PersonIcon } from '../ui/icons';
@@ -117,38 +117,24 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator }: { me: Me; wind
   const t = useT();
   const still = useReducedMotion();
   const company = me.person.scopeKind === 'company';
-  const [org, setOrg] = useState<Org | null>(null);
-  const [failure, setFailure] = useState<unknown>(null);
+  const { org, failure } = useOrg();
   const [view, setView] = useState<View>({ x: 0, y: 0, k: 1, smooth: false });
   const [shots, setShots] = useState<Shot[]>([]);
   const box = useRef<HTMLDivElement>(null);
   const drag = useRef<{ id: number; x: number; y: number } | null>(null);
-  const mounted = useRef(true);
   const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
   const shotKey = useRef(0);
 
-  const load = useCallback(() => {
-    api.get<Org>('/api/org').then(
-      data => mounted.current && setOrg(data),
-      err => mounted.current && setFailure(err),
-    );
-  }, []);
-
   useEffect(() => {
-    mounted.current = true;
-    load();
     const pending = timers.current;
     return () => {
-      mounted.current = false;
       for (const id of pending) clearTimeout(id);
       pending.clear();
     };
-  }, [load]);
+  }, []);
 
-  /* Real signals only: a pulse per message, the working count, and a fresh org when it changed or the stream was away. */
+  /* Real signals only: a pulse runs once per message. useOrg keeps the working count and the org itself fresh. */
   useStream((m: LiveMessage) => {
-    if (m.type === 'org' || m.type === 'reconnected') load();
-    if (m.type === 'working') setOrg(o => o && { ...o, agents: { ...o.agents, working: m.working } });
     if (m.type !== 'pulse' || still || !org) return;
     const pts = pulsePath(m.from, m.to, org);
     if (!pts) return;

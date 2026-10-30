@@ -36,6 +36,7 @@ export const PEOPLE: PersonView[] = [
 export const ORG: Org = {
   company: { id: 'c1', name: 'Acme' },
   orchestrator: {
+    id: 'a1',
     name: 'Orchestrator',
     model: 'claude-opus-5-5',
     subscription: { id: 's1', provider: 'anthropic_api', kind: 'api_key', label: 'Orchestrator', status: 'ready', online: false, last4: '9f3a', owner: { id: 'p1', name: 'Ivan' }, place: { kind: 'company', id: null, name: 'Whole company' }, machine: null, limits: null, isOrchestrator: true },

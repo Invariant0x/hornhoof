@@ -52,10 +52,19 @@ export type Department = { id: string; name: string | null; templateKey: Templat
 
 export type Org = {
   company: Company;
-  orchestrator: { name: string; model: string; subscription: SubView | null } | null;
+  orchestrator: { id: string; name: string; model: string; subscription: SubView | null } | null;
   agents: { total: number; working: number };
   people: PersonView[];
   departments: Department[];
+};
+
+/* Whether the orchestrator can take a turn now, and what he is doing. */
+export type OrchestratorState = {
+  ready: boolean;
+  reason: 'no_subscription' | 'waiting_machine' | 'needs_login' | 'machine_offline' | null;
+  busy: boolean;
+  runningJobId: string | null;
+  queued: number;
 };
 
 /* An item of the orchestrator's card: a department to create from a template, or a change to one that exists. */

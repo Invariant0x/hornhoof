@@ -58,7 +58,7 @@ describe('Setup', () => {
         orchestrator: { mode: 'api_key', provider: 'anthropic_api', apiKey: 'sk-ant-xyz12345' },
       },
     }]);
-    expect(onDone).toHaveBeenCalled();
+    expect(onDone).toHaveBeenCalledWith({ welcome: true });
   });
 
   it('shows the node command for a personal subscription', async () => {

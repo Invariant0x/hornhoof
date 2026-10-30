@@ -26,6 +26,7 @@ export function orgRoutes(app: FastifyInstance, { db, hub }: Ctx): void {
     return {
       company,
       orchestrator: orchestrator && {
+        id: orchestrator.id,
         name: orchestrator.name,
         model: orchestrator.model,
         subscription: orchestrator.subscriptionId ? await subView(db, s => hub.isOnline(identityOf(s)), orchestrator.subscriptionId) : null,

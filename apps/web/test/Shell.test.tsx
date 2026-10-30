@@ -61,6 +61,19 @@ describe('Shell', () => {
     expect(screen.getByRole('button', { name: 'Dark' })).toHaveAttribute('aria-pressed', 'true');
   });
 
+  it('opens the orchestrator\'s window at once after setup, and closes it', async () => {
+    mockApi({
+      'GET /api/org': [200, ORG],
+      'GET /api/agents/orchestrator/events?after=0': [200, { events: [], state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 } }],
+      'POST /api/agents/orchestrator/start': [200, { started: false }],
+    });
+    render(<Shell me={ME} welcome onSignOut={() => {}} />);
+    const window = await screen.findByRole('complementary', { name: 'Orchestrator' });
+    expect(window).toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Close' }));
+    expect(screen.queryByRole('complementary', { name: 'Orchestrator' })).not.toBeInTheDocument();
+  });
+
   it('closes the account menu on Escape and on a click outside it', async () => {
     const user = userEvent.setup();
     renderShell();

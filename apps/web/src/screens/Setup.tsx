@@ -12,7 +12,7 @@ type KeyProvider = 'anthropic_api' | 'openai_api';
 const MODES: Mode[] = ['api_key', 'personal', 'later'];
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-export function Setup({ onDone }: { onDone: () => void }) {
+export function Setup({ onDone }: { onDone: (done: { welcome: boolean }) => void }) {
   const t = useT();
   const steps = t.setup.steps;
   const uid = useId();
@@ -63,7 +63,7 @@ export function Setup({ onDone }: { onDone: () => void }) {
         orchestrator,
       });
       if (res.command) setCommand(res.command);
-      else onDone();
+      else onDone({ welcome: true });
     } catch (err) {
       setFailure(errorText(t, err));
     } finally {
@@ -79,7 +79,7 @@ export function Setup({ onDone }: { onDone: () => void }) {
         <CommandBox command={command} />
         <p className="muted">{t.setup.joinOnce}</p>
         <div className="actions">
-          <button className="btn" type="button" onClick={onDone}>{t.setup.goToMap}</button>
+          <button className="btn" type="button" onClick={() => onDone({ welcome: true })}>{t.setup.goToMap}</button>
         </div>
       </Card>
     );
