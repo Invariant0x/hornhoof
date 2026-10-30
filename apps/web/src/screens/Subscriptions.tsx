@@ -265,16 +265,16 @@ export function Subscriptions({ me }: { me: Me }) {
                     </td>
                     <td className="row-actions">
                       {s.status === 'ready' && s.online && (
-                        <button className="linkbtn" type="button" aria-label={t.subs.runTestLabel(name)} disabled={test?.phase === 'running'} onClick={() => runTest(s)}>{t.subs.runTest}</button>
+                        <button className="act" type="button" aria-label={t.subs.runTestLabel(name)} disabled={test?.phase === 'running'} onClick={() => runTest(s)}>{t.subs.runTest}</button>
                       )}
                       {company && s.place.kind === 'company' && !s.isOrchestrator && (
-                        <button className="linkbtn" type="button" aria-label={t.subs.useForOrchestratorLabel(name)} onClick={() => makeOrchestrator(s)}>{t.subs.useForOrchestrator}</button>
+                        <button className="act" type="button" aria-label={t.subs.useForOrchestratorLabel(name)} onClick={() => makeOrchestrator(s)}>{t.subs.useForOrchestrator}</button>
                       )}
                       {mine && s.kind === 'personal' && s.status === 'waiting_machine' && (
-                        <button className="linkbtn" type="button" aria-label={t.subs.newCommandLabel(name)} onClick={() => newCommand(s)}>{t.subs.newCommand}</button>
+                        <button className="act" type="button" aria-label={t.subs.newCommandLabel(name)} onClick={() => newCommand(s)}>{t.subs.newCommand}</button>
                       )}
                       {(mine || company) && (
-                        <button className="linkbtn" type="button" aria-label={t.subs.removeLabel(name)} onClick={() => setConfirm({ kind: 'sub', id: s.id })}>{t.subs.remove}</button>
+                        <button className="act danger" type="button" aria-label={t.subs.removeLabel(name)} onClick={() => setConfirm({ kind: 'sub', id: s.id })}>{t.subs.remove}</button>
                       )}
                     </td>
                   </tr>
@@ -326,7 +326,7 @@ export function Subscriptions({ me }: { me: Me }) {
                     <td>{m.online ? <span className="status ready">{t.subs.online}</span> : <span className="muted">{lastSeen(t, language, m.lastSeenAt)}</span>}</td>
                     <td className="row-actions">
                       {(company || m.owner.id === me.person.id) && (
-                        <button className="linkbtn" type="button" aria-label={t.subs.disconnectLabel(m.hostname)} onClick={() => setConfirm({ kind: 'machine', id: m.id })}>{t.subs.disconnect}</button>
+                        <button className="act danger" type="button" aria-label={t.subs.disconnectLabel(m.hostname)} onClick={() => setConfirm({ kind: 'machine', id: m.id })}>{t.subs.disconnect}</button>
                       )}
                     </td>
                   </tr>

@@ -247,15 +247,15 @@ export function People({ me }: { me: Me }) {
                   <td><span className={`status ${p.status}`}>{t.people.status[p.status]}</span></td>
                   <td className="row-actions">
                     {(manageable || titleOnly) && (
-                      <button className="linkbtn" type="button" aria-label={t.people.editLabel(p.name)} onClick={() => setPanel({ kind: 'edit', person: p, titleOnly })}>{t.people.edit}</button>
+                      <button className="act" type="button" aria-label={t.people.editLabel(p.name)} onClick={() => setPanel({ kind: 'edit', person: p, titleOnly })}>{t.people.edit}</button>
                     )}
                     {manageable && (
                       <>
-                        <button className="linkbtn" type="button" aria-label={t.people.newLinkLabel(p.name)} onClick={() => newLink(p)}>{t.people.newLink}</button>
+                        <button className="act" type="button" aria-label={t.people.newLinkLabel(p.name)} onClick={() => newLink(p)}>{t.people.newLink}</button>
                         {p.status === 'disabled' ? (
-                          <button className="linkbtn" type="button" aria-label={t.people.enableLabel(p.name)} onClick={() => setStatus(p, 'active')}>{t.people.enable}</button>
+                          <button className="act" type="button" aria-label={t.people.enableLabel(p.name)} onClick={() => setStatus(p, 'active')}>{t.people.enable}</button>
                         ) : (
-                          <button className="linkbtn" type="button" aria-label={t.people.disableLabel(p.name)} onClick={() => setStatus(p, 'disabled')}>{t.people.disable}</button>
+                          <button className="act danger" type="button" aria-label={t.people.disableLabel(p.name)} onClick={() => setStatus(p, 'disabled')}>{t.people.disable}</button>
                         )}
                       </>
                     )}

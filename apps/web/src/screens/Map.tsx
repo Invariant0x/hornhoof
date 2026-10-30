@@ -5,16 +5,18 @@ import { useStream, type LiveMessage } from '../live';
 import { useOrg } from '../org';
 import type { Department, Endpoint, Me, Org, SubView } from '../types';
 import { Edge } from '../ui/Edge';
-import { AgentIcon, LogoMark, PersonIcon } from '../ui/icons';
+import { LogoMark, PersonIcon } from '../ui/icons';
 import { Pulse, pulseSeconds, toD, useReducedMotion, type Point } from '../ui/wires';
 
-/* World coordinates, laid out like the approved prototype: people on top, the orchestrator in the middle, departments in two columns. */
+/* World coordinates, laid out like the prototype: people on top, the orchestrator in the middle, departments in two columns around him. */
 const W = 1200, H = 900, CX = W / 2, CY = 420, HUB = 120;
-const CHIP_W = 184, CHIP_H = 56, CHIP_GAP = 20;
-const CHIPS_TOP = CY - 384, BUS_Y = CY - 314;
-const DEPT_W = 240, DEPT_H = 104;
-/* The orchestrator's chip under the hub, and what comes below it (the empty-state block or "+ Add department"). */
-const ORCH_W = 340, ORCH_TOP = CY + HUB + 16, BELOW = ORCH_TOP + CHIP_H + 20;
+const CHIP_W = 160, CHIP_H = 56, CHIP_GAP = 20;
+const DEPT_W = 280, DEPT_H = 160;
+/* Up to two rows sit at the prototype's corners; more rows stack evenly around the hub, this far apart. */
+const CORNER = 220, ROW = 220;
+/* Room between the people and the top row, and above whatever comes below the hub or the lowest row. */
+const GAP = 28;
+const BELOW = CY + HUB + GAP;
 /* Where a department trace turns: 84 out on the diagonal, and the inner side of each column. */
 const BEND = 84, INNER = 210;
 const GAUGE_SEGMENTS = 24;
@@ -36,28 +38,40 @@ export function orchestratorStatus(t: Messages, sub: SubView | null): string {
   return t.map.runsOnPersonal(sub.owner.name, PROVIDER_NAMES[sub.provider]);
 }
 
-/* Departments fill the left and right columns in turn, top row first, each on a trace that leaves the hub at 45 degrees. */
+/* How far above or below the hub each row's middle sits. */
+function rowOffsets(rows: number): number[] {
+  if (rows <= 2) return [-CORNER, CORNER].slice(0, rows);
+  return Array.from({ length: rows }, (_, r) => (r - (rows - 1) / 2) * ROW);
+}
+
+/* Departments fill the left and right columns in turn, top row first. A row level with the hub runs straight out; the others leave it at 45 degrees. */
 export function deptLayout(n: number): DeptSpot[] {
+  const offsets = rowOffsets(Math.ceil(n / 2));
   return Array.from({ length: n }, (_, i) => {
     const side = i % 2 ? 1 : -1;
-    const row = Math.floor(i / 2);
-    const up = row === 0 ? -1 : 1;
-    const midY = row === 0 ? CY - 220 : CY + 220 + 160 * (row - 1);
+    const midY = CY + offsets[Math.floor(i / 2)]!;
+    const up = Math.sign(midY - CY);
     const edgeX = CX + side * INNER;
     return {
       x: side < 0 ? edgeX - DEPT_W : edgeX,
       y: midY - DEPT_H / 2,
       w: DEPT_W,
       h: DEPT_H,
-      path: [[CX, CY], [CX + side * BEND, CY + up * BEND], [CX + side * BEND, midY], [edgeX, midY]],
+      path: up ? [[CX, CY], [CX + side * BEND, CY + up * BEND], [CX + side * BEND, midY], [edgeX, midY]] : [[CX, CY], [edgeX, CY]],
     };
   });
 }
 
-/* "+ Add department" sits under the orchestrator's chip, or under the lowest row once departments go below the hub, clear of the traces. */
+/* The people sit just above the top row, and their bus runs 14 below them. */
+function chipsTop(n: number): number {
+  return CY + Math.min(-CORNER, rowOffsets(Math.ceil(n / 2))[0] ?? -CORNER) - DEPT_H / 2 - GAP - CHIP_H;
+}
+const busY = (n: number) => chipsTop(n) + CHIP_H + 14;
+
+/* "+ Add department" sits under the hub, or under the lowest row once departments go below it. */
 function addTop(n: number): number {
-  const rows = Math.ceil(n / 2);
-  return rows > 1 ? CY + 220 + 160 * (rows - 2) + DEPT_H / 2 + 28 : BELOW;
+  const offsets = rowOffsets(Math.ceil(n / 2));
+  return offsets.length > 1 ? CY + offsets[offsets.length - 1]! + DEPT_H / 2 + GAP : BELOW;
 }
 
 const chipsWidth = (n: number) => n * CHIP_W + Math.max(0, n - 1) * CHIP_GAP;
@@ -88,7 +102,8 @@ function toHub(e: Endpoint, org: Org): Point[] | null {
     const i = org.people.findIndex(p => p.id === e.id);
     if (i < 0) return null;
     const x = chipCenters(org.people.length)[i]!;
-    return [[x, CHIPS_TOP + CHIP_H], [x, BUS_Y], [CX, BUS_Y], [CX, CY - HUB]];
+    const n = org.departments.length;
+    return [[x, chipsTop(n) + CHIP_H], [x, busY(n)], [CX, busY(n)], [CX, CY - HUB]];
   }
   const i = org.departments.findIndex(d => d.id === e.id);
   return i < 0 ? null : [...deptLayout(org.departments.length)[i]!.path].reverse();
@@ -102,15 +117,19 @@ export function pulsePath(from: Endpoint, to: Endpoint, org: Org): Point[] | nul
   return pts.length >= 2 ? pts : null;
 }
 
-function deptCount(t: Messages, d: Department): string {
-  if (d.products.length) return t.map.productsNoAgents(d.products.length);
-  return d.teams.length ? t.map.teams(d.teams.length) : t.map.noAgents;
+/* The line under a department's name: its products, or its teams. */
+function deptDetail(t: Messages, d: Department): string {
+  if (d.products.length) return d.products.map(p => p.name).join(', ');
+  return d.teams.length ? t.map.teams(d.teams.length) : '';
 }
+
+const orchestratorReady = (sub: SubView | null) => !!sub && sub.status === 'ready' && (sub.kind === 'api_key' || sub.online);
 
 /* The part of the world that has something on it, so Fit fills the screen with it. */
 function contentBounds(org: Org): { x0: number; y0: number; x1: number; y1: number } {
   const half = Math.max(chipsWidth(org.people.length) / 2, 260);
-  const b = { x0: CX - half, x1: CX + half, y0: CHIPS_TOP, y1: org.departments.length ? addTop(org.departments.length) + 40 : BELOW + 120 };
+  const n = org.departments.length;
+  const b = { x0: CX - half, x1: CX + half, y0: chipsTop(n), y1: n ? addTop(n) + 40 : BELOW + 120 };
   for (const s of deptLayout(org.departments.length)) {
     b.x0 = Math.min(b.x0, s.x);
     b.x1 = Math.max(b.x1, s.x + s.w);
@@ -218,8 +237,10 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator }: { me: Me; wind
   if (!org) return <div className="map" aria-busy="true" />;
 
   const depts = org.departments;
-  const status = orchestratorStatus(t, org.orchestrator?.subscription ?? null);
+  const sub = org.orchestrator?.subscription ?? null;
+  const status = orchestratorStatus(t, sub);
   const spots = deptLayout(depts.length);
+  const top = chipsTop(depts.length), bus = busY(depts.length);
   const chips = chipCenters(org.people.length);
   const chipsW = chipsWidth(org.people.length);
   const gauge = gaugeArc(org.agents.working, org.agents.total);
@@ -244,7 +265,7 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator }: { me: Me; wind
         <span>/</span>
         <span>{org.agents.total}</span>
       </span>
-      <span className="sr">{t.map.agentsWorking}</span>
+      <span className="hub-lbl">{t.map.agentsWorking}</span>
     </>
   );
 
@@ -258,26 +279,24 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator }: { me: Me; wind
         <svg className="wires" width={W} height={H} viewBox={`0 0 ${W} ${H}`} aria-hidden="true">
           {chips.length > 0 && (
             <>
-              <path className="tr" d={`M ${chips[0]} ${CHIPS_TOP + CHIP_H} V ${BUS_Y} H ${chips[chips.length - 1]} V ${CHIPS_TOP + CHIP_H}`} />
+              <path className="tr" d={`M ${chips[0]} ${top + CHIP_H} V ${bus} H ${chips[chips.length - 1]} V ${top + CHIP_H}`} />
               {chips.slice(1, -1).map(x => (
-                <path key={x} className="tr" d={`M ${x} ${CHIPS_TOP + CHIP_H} V ${BUS_Y}`} />
+                <path key={x} className="tr" d={`M ${x} ${top + CHIP_H} V ${bus}`} />
               ))}
-              <path className="tr" data-wire="people" d={`M ${CX} ${BUS_Y} V ${CY - HUB}`} />
-              <circle className="via" cx={CX} cy={BUS_Y} r="4" />
+              <path className="tr" data-wire="people" d={`M ${CX} ${bus} V ${CY - HUB}`} />
+              <circle className="via" cx={CX} cy={bus} r="4" />
             </>
           )}
           {spots.map((s, i) => (
             <path key={depts[i]!.id} className="tr" data-wire={depts[i]!.id} d={toD(s.path)} />
           ))}
-          {spots.map((s, i) => (
-            <circle key={depts[i]!.id} className="via" cx={s.path[2]![0]} cy={s.path[2]![1]} r="4" />
-          ))}
+          {spots.map((s, i) => s.path.length > 2 && <circle key={depts[i]!.id} className="via" cx={s.path[2]![0]} cy={s.path[2]![1]} r="4" />)}
           {shots.map(s => (
             <Pulse key={s.key} pts={s.pts} speed={PULSE_SPEED} once tone="c" />
           ))}
         </svg>
 
-        <ul className="chips" style={{ left: CX - chipsW / 2, top: CHIPS_TOP, gap: CHIP_GAP }} aria-label={t.map.leaders}>
+        <ul className="chips" style={{ left: CX - chipsW / 2, top, gap: CHIP_GAP }} aria-label={t.map.leaders}>
           {org.people.map(p => (
             <li key={p.id} style={{ width: CHIP_W, height: CHIP_H }}>
               <Edge cut={8} className="chip">
@@ -300,15 +319,6 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator }: { me: Me; wind
             {hubArt}
           </div>
         )}
-        <div className="hub-orchestrator" style={{ left: CX - ORCH_W / 2, top: ORCH_TOP, width: ORCH_W, height: CHIP_H }}>
-          <Edge cut={8} className="chip">
-            <AgentIcon label={t.map.agent} />
-            <span>
-              <b>{t.map.orchestrator}</b>
-              <small title={status}>{status}</small>
-            </span>
-          </Edge>
-        </div>
 
         {depts.length === 0 && (
           <div className="start" style={{ left: CX - 260, top: BELOW }}>
@@ -330,20 +340,48 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator }: { me: Me; wind
 
         {depts.map((d: Department, i) => (
           <div key={d.id} className="dept" style={{ left: spots[i]!.x, top: spots[i]!.y, width: DEPT_W, height: DEPT_H }}>
-            <Edge cut={12}>
-              <span className="role">{d.roleCode}</span>
-              <b className="dname">{deptLabel(t, d)}</b>
-              <span className="cnt">{deptCount(t, d)}</span>
+            <Edge cut={12} corner>
+              <span className="row1">
+                <b className="dname">{deptLabel(t, d)}</b>
+                <span className="cnt" title={t.map.deptAgents}>
+                  <b>{d.agents.working}</b>/{d.agents.total}
+                </span>
+              </span>
+              <span className="row2">
+                <span className="role">{d.roleCode}</span>
+                {deptDetail(t, d) && <span className="detail">{deptDetail(t, d)}</span>}
+              </span>
+              {d.agents.total === 0 && (
+                <span className="now">
+                  <i />
+                  <span>{t.map.noAgents}</span>
+                </span>
+              )}
             </Edge>
           </div>
         ))}
       </div>
 
-      <div className="zoom" onPointerDown={e => e.stopPropagation()}>
-        <button className="btn small ghost" type="button" aria-label={t.map.zoomOut} onClick={() => zoomAt(1 / 1.2)}>−</button>
-        <button className="btn small ghost" type="button" aria-label={t.map.zoomIn} onClick={() => zoomAt(1.2)}>+</button>
-        <button className="btn small ghost" type="button" aria-label={t.map.showAll} onClick={fit}>{t.map.fit}</button>
+      <div className="zoom glass" onPointerDown={e => e.stopPropagation()}>
+        <button className="zbtn" type="button" aria-label={t.map.zoomOut} onClick={() => zoomAt(1 / 1.2)}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /></svg>
+        </button>
+        <span className="zv">{Math.round(view.k * 100)}%</span>
+        <button className="zbtn" type="button" aria-label={t.map.zoomIn} onClick={() => zoomAt(1.2)}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+        </button>
+        <button className="zbtn" type="button" aria-label={t.map.showAll} onClick={fit}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></svg>
+        </button>
       </div>
+      {/* The orchestrator is the hub; this line says where he runs, until his window opens and says it there. */}
+      {!windowOpen && (
+        <div className="ticker glass" aria-live="polite" onPointerDown={e => e.stopPropagation()}>
+          <span className={`live${orchestratorReady(sub) ? '' : ' off'}`} />
+          <span className="tt">{t.map.orchestrator}</span>
+          <span className="tx" title={status}>{status}</span>
+        </div>
+      )}
     </div>
   );
 }

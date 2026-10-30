@@ -48,7 +48,7 @@ export type SubView = {
 export type Team = { id: string; name: string; about: string; stage: number; gate: boolean };
 
 /* A template department without a typed name shows its template's name in the person's language. */
-export type Department = { id: string; name: string | null; templateKey: TemplateKey | null; roleCode: string; about: string; products: { id: string; name: string }[]; teams: Team[] };
+export type Department = { id: string; name: string | null; templateKey: TemplateKey | null; roleCode: string; about: string; agents: { total: number; working: number }; products: { id: string; name: string }[]; teams: Team[] };
 
 export type Org = {
   company: Company;

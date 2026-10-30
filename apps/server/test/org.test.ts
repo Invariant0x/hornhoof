@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { companies, departments, people, teams } from '../src/db/schema.js';
+import { agents, companies, departments, jobs, people, subscriptions, teams } from '../src/db/schema.js';
 import { as, SETUP, setUpCompany, testApp } from './helpers.js';
 
 describe('GET /api/org', () => {
@@ -52,6 +52,26 @@ describe('GET /api/org', () => {
     expect(org.departments[0]).toMatchObject({ id: dev!.id, name: null, templateKey: 'development', roleCode: 'DEV', about: 'Builds both products' });
     expect(org.departments[0].products.map((p: { name: string }) => p.name)).toEqual(['Mascot', 'Characters']);
     expect(org.departments[1]).toMatchObject({ name: 'Sales Europe', templateKey: 'sales', products: [] });
+  });
+
+  it('counts the agents of each department, its products included, and those at work', async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    const [company] = await db.select().from(companies);
+    const [sub] = await db.select().from(subscriptions);
+    const [dev] = await db.insert(departments).values({ companyId: company!.id, name: 'Development', roleCode: 'DEV', position: 0 }).returning();
+    const [app1] = await db.insert(departments).values({ companyId: company!.id, name: 'App', parentId: dev!.id, roleCode: 'DEV', position: 1 }).returning();
+    await db.insert(departments).values({ companyId: company!.id, name: 'Sales', roleCode: 'SAL', position: 2 });
+    const [, worker] = await db
+      .insert(agents)
+      .values([
+        { companyId: company!.id, kind: 'head', name: 'Atlas', model: 'm', departmentId: dev!.id },
+        { companyId: company!.id, kind: 'worker', name: 'App-1', model: 'm', departmentId: app1!.id },
+      ])
+      .returning();
+    await db.insert(jobs).values({ companyId: company!.id, subscriptionId: sub!.id, agentId: worker!.id, prompt: 'build', status: 'running', timeoutMs: 1000 });
+    const org = (await app.inject({ url: '/api/org', ...as(ceo) })).json();
+    expect(org.departments.map((d: { agents: unknown }) => d.agents)).toEqual([{ total: 2, working: 1 }, { total: 0, working: 0 }]);
   });
 
   it('names a template department by its template where a subscription serves it', async () => {

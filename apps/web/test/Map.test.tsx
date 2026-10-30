@@ -13,7 +13,7 @@ const claude = SUBS[0]!;
 const PROPS = { me: ME, windowOpen: false, onOpenOrchestrator: () => {} };
 const DEPUTY: Me = { ...ME, person: { ...ME.person, scopeKind: 'department', scopeId: 'd1', isOwner: false } };
 
-const dept = (d: Partial<Department> & { id: string }): Department => ({ name: null, templateKey: null, roleCode: 'SAL', about: '', products: [], teams: [], ...d });
+const dept = (d: Partial<Department> & { id: string }): Department => ({ name: null, templateKey: null, roleCode: 'SAL', about: '', agents: { total: 0, working: 0 }, products: [], teams: [], ...d });
 const STATES: [string, SubView | null, string, string][] = [
   ['none', null, 'Needs a subscription to start', 'Чтобы начать, нужна подписка'],
   ['API key', SUBS[3]!, 'Runs on Anthropic key ending 9f3a', 'Работает на ключе Anthropic, последние символы 9f3a'],
@@ -36,12 +36,10 @@ describe('Map', () => {
     const { container } = render(<MapScreen {...PROPS} />);
     expect(await screen.findByText('No departments yet. Tell the orchestrator about the company and he will propose a structure.')).toBeInTheDocument();
     expect(container.querySelector('.hub-num')).toHaveTextContent('0/1');
-    /* Only the count shows; the words are there for screen readers. */
-    expect(screen.getByText('agents working')).toHaveClass('sr');
-    expect(screen.getByText('Orchestrator')).toBeInTheDocument();
+    expect(screen.getByText('agents working')).toHaveClass('hub-lbl');
     expect(screen.getByText('Ivan')).toBeInTheDocument();
     expect(screen.getByText('Maria')).toBeInTheDocument();
-    expect(screen.getByText('Runs on Anthropic key ending 9f3a')).toBeInTheDocument();
+    expect(container.querySelector('.ticker')).toHaveTextContent('OrchestratorRuns on Anthropic key ending 9f3a');
   });
 
   it('fills the half gauge one segment of 24 per share of working agents', async () => {
@@ -70,17 +68,35 @@ describe('Map', () => {
     expect(screen.queryByText(/No departments yet/)).not.toBeInTheDocument();
     expect(container.querySelector('.wires [data-wire="d1"]')).toBeInTheDocument();
     expect(container.querySelector('.wires [data-wire="d2"]')).toBeInTheDocument();
+    expect(container.querySelectorAll('.dept .corner')).toHaveLength(2);
   });
 
-  it('shows the orchestrator as a chip with room below it for the add button', async () => {
+  it('says where the orchestrator runs in the line at the bottom, and leaves that to his window once it is open', async () => {
+    mockApi({ 'GET /api/org': [200, ORG_WITH_TEAMS] });
+    const { container, rerender } = render(<MapScreen {...PROPS} />);
+    await screen.findByText('Marketing');
+    expect(container.querySelector('.ticker')).toHaveTextContent('OrchestratorRuns on Anthropic key ending 9f3a');
+    expect(container.querySelector('.hub-orchestrator')).not.toBeInTheDocument();
+    rerender(<MapScreen {...PROPS} windowOpen />);
+    expect(container.querySelector('.ticker')).not.toBeInTheDocument();
+  });
+
+  it('shows the zoom as a percentage', async () => {
     mockApi({ 'GET /api/org': [200, ORG_WITH_TEAMS] });
     const { container } = render(<MapScreen {...PROPS} />);
     await screen.findByText('Marketing');
-    const chip = container.querySelector<HTMLElement>('.hub-orchestrator')!;
-    expect(chip.querySelector('.chip b')).toHaveTextContent('Orchestrator');
-    expect(chip.querySelector('.chip small')).toHaveTextContent('Runs on Anthropic key ending 9f3a');
-    const add = container.querySelector<HTMLElement>('.add')!;
-    expect(parseFloat(add.style.top)).toBeGreaterThanOrEqual(parseFloat(chip.style.top) + parseFloat(chip.style.height) + 16);
+    expect(container.querySelector('.zoom .zv')).toHaveTextContent('100%');
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }));
+    expect(container.querySelector('.zoom .zv')).toHaveTextContent('120%');
+  });
+
+  it('keeps the people above the top row however many rows there are', async () => {
+    const many = { ...ORG_WITH_TEAMS, departments: Array.from({ length: 8 }, (_, i) => ({ ...ORG_WITH_TEAMS.departments[0]!, id: `d${i}`, name: `Dept ${i}` })) };
+    mockApi({ 'GET /api/org': [200, many] });
+    const { container } = render(<MapScreen {...PROPS} />);
+    await screen.findByText('Dept 7');
+    const top = Math.min(...[...container.querySelectorAll<HTMLElement>('.dept')].map(d => parseFloat(d.style.top)));
+    expect(parseFloat(container.querySelector<HTMLElement>('.chips')!.style.top) + 56).toBeLessThanOrEqual(top - 20);
   });
 
   it('puts the add button under the lowest row once departments go below the hub', async () => {
@@ -137,17 +153,18 @@ describe('Map', () => {
   it('names template departments in the person\'s language and counts their products', async () => {
     const org = { ...ORG, departments: [dept({ id: 'd1', templateKey: 'sales' }), dept({ id: 'd2', templateKey: 'development', roleCode: 'DEV', products: [{ id: 'p1', name: 'Mascot' }, { id: 'p2', name: 'Characters' }] })] };
     mockApi({ 'GET /api/org': [200, org] });
-    const { unmount } = render(<MapScreen {...PROPS} />);
+    const { container, unmount } = render(<MapScreen {...PROPS} />);
     expect(await screen.findByText('Sales')).toBeInTheDocument();
-    expect(screen.getByText('2 products, no agents yet')).toBeInTheDocument();
-    expect(screen.getByText('No agents yet')).toBeInTheDocument();
+    expect(screen.getByText('Mascot, Characters')).toBeInTheDocument();
+    expect(screen.getAllByText('No agents yet')).toHaveLength(2);
+    expect([...container.querySelectorAll('.dept .cnt')].map(c => c.textContent)).toEqual(['0/0', '0/0']);
     expect(screen.getByRole('button', { name: '+ Add department' })).toBeInTheDocument();
     unmount();
     localStorage.setItem('hh-lang', 'ru');
     try {
       render(<LanguageProvider><MapScreen {...PROPS} /></LanguageProvider>);
       expect(await screen.findByText('Продажи')).toBeInTheDocument();
-      expect(screen.getByText('2 продукта, пока без агентов')).toBeInTheDocument();
+      expect(screen.getAllByText('Пока без агентов')).toHaveLength(2);
     } finally {
       localStorage.removeItem('hh-lang');
     }
@@ -205,8 +222,8 @@ describe('deptLayout', () => {
     for (const s of spots) {
       const [start, bend, ...rest] = s.path;
       expect(start).toEqual([hx, hy]);
-      /* The first step leaves the hub on a 45 degree line, the rest run straight across or down. */
-      expect(Math.abs(bend![0] - hx)).toBe(Math.abs(bend![1] - hy));
+      /* The first step runs straight out along the hub's row or leaves on a 45 degree line; the rest run straight across or down. */
+      if (bend![1] !== hy) expect(Math.abs(bend![0] - hx)).toBe(Math.abs(bend![1] - hy));
       let prev = bend!;
       for (const p of rest) {
         expect(p[0] === prev[0] || p[1] === prev[1]).toBe(true);
@@ -218,5 +235,21 @@ describe('deptLayout', () => {
     for (const a of spots)
       for (const b of spots)
         if (a !== b) expect(a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y).toBe(true);
+  });
+
+  const rows = (n: number) => {
+    const spots = deptLayout(n);
+    const hy = spots[0]!.path[0]![1];
+    return [...new Set(spots.map(s => s.y + s.h / 2 - hy))];
+  };
+
+  it('puts up to four departments at the corners around the hub, as in the prototype', () => {
+    expect(rows(4)).toEqual([-220, 220]);
+    expect(deptLayout(4).map(s => [s.w, s.h])).toEqual(Array(4).fill([280, 160]));
+  });
+
+  it('stacks more rows evenly around the hub instead of hanging them below', () => {
+    expect(rows(6)).toEqual([-220, 0, 220]);
+    expect(rows(8)).toEqual([-330, -110, 110, 330]);
   });
 });
