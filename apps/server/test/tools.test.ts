@@ -62,7 +62,7 @@ describe('/mcp', () => {
     const { app, job } = await company();
     await job('running');
     const client = await mcp(app, TOKEN);
-    expect((await client.listTools()).tools.map(t => t.name).sort()).toEqual(['ask_person', 'cancel_task', 'comment', 'company', 'create_task', 'propose_staff', 'propose_structure', 'report', 'staffing_options', 'task', 'tasks']);
+    expect((await client.listTools()).tools.map(t => t.name).sort()).toEqual(['add_tasks', 'ask_person', 'cancel_task', 'comment', 'company', 'edit_turn', 'plan_turn', 'propose_staff', 'propose_structure', 'report', 'staffing_options', 'task', 'tasks', 'turns']);
   });
 
   it('gives an employee the company view and its task tools', async () => {

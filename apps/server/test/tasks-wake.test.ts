@@ -149,7 +149,8 @@ describe('waking agents for their tasks', () => {
     const prompt = wakePrompt(orchestrator, task, { agentId: orchestrator.id, taskId: task.id, why: 'blocked', text: 'No designer.' });
     expect(prompt).not.toContain('update_task');
     expect(prompt).toContain('cancel_task');
-    expect(prompt).toContain('create_task');
+    expect(prompt).toContain('add_tasks');
+    expect(prompt).not.toContain('create_task');
     expect(prompt).toContain('No designer.');
   });
 

@@ -283,25 +283,35 @@ export const proposals = pgTable('proposals', {
 });
 
 /* A company-wide cycle the CEO starts with a goal; one is open at a time. */
+export const TURN_STATUSES = ['planned', 'open', 'closed'] as const;
+export type TurnMessage = { by: string; text: string; at: string };
+
 export const turns = pgTable(
   'turns',
   {
     id: id(),
     companyId: companyId(),
     number: integer('number').notNull(),
+    /* A short name and the main point in a line or two. */
+    title: text('title').notNull().default(''),
     goal: text('goal').notNull(),
-    status: text('status', { enum: ['open', 'closed'] }).notNull().default('open'),
-    /* The orchestrator's task for the turn. */
+    /* Planned turns wait in number order; the lowest opens when the open one closes. */
+    status: text('status', { enum: TURN_STATUSES }).notNull().default('open'),
+    /* The people's own words the turn was laid out from, as they wrote them. */
+    messages: jsonb('messages').$type<TurnMessage[]>().notNull().default([]),
+    /* The orchestrator's task for a turn started by a person, from before he laid turns out himself. */
     taskId: uuid('task_id').references((): AnyPgColumn => tasks.id),
-    startedBy: uuid('started_by').notNull().references(() => people.id),
+    startedBy: uuid('started_by').references(() => people.id),
+    createdByAgentId: uuid('created_by_agent_id').references((): AnyPgColumn => agents.id),
     closedBy: uuid('closed_by').references(() => people.id),
     createdAt: createdAt(),
+    openedAt: timestamp('opened_at', { withTimezone: true }),
     closedAt: timestamp('closed_at', { withTimezone: true }),
   },
   t => [unique('turns_company_number').on(t.companyId, t.number), uniqueIndex('turns_one_open').on(t.companyId).where(sql`status = 'open'`)],
 );
 
-export const TASK_STATUSES = ['open', 'working', 'review', 'waiting', 'blocked', 'done', 'cancelled'] as const;
+export const TASK_STATUSES = ['planned', 'open', 'working', 'review', 'waiting', 'blocked', 'done', 'cancelled'] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 
 /* A piece of work: the title and brief for people, the body every agent reads as the current truth, and its gates. */

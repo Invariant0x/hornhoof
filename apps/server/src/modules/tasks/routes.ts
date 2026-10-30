@@ -1,14 +1,15 @@
-import { and, asc, count, desc, eq, inArray, isNull, max, notInArray } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray, isNull, notInArray } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { accessOf, canReach, type Access } from '../../auth/access.js';
 import { requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
 import { agents, departments, requests, tasks, turns } from '../../db/schema.js';
-import { liveSubscription, orchestratorOf } from '../conversation/queue.js';
+import { orchestratorOf } from '../conversation/queue.js';
 import { answer, cancel, CLOSED, comment, createTask, refuse, taskSpot, type Task } from './engine.js';
 import { commitUrl, picturesOf } from './attachments.js';
 import { taskDetail, taskLines } from './views.js';
+import { settle, tell, turnRows, type Turn } from './turns.js';
 import { stopTurns, wakeAll } from './wake.js';
 
 const IdParams = z.object({ id: z.uuid() });
@@ -105,7 +106,8 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { why } = z.object({ why: z.string().max(1000).default('') }).parse(req.body ?? {});
     const moved = await cancel(ctx, { personId: me.id }, (await reachable(me, id)).id, why);
     await stopTurns(ctx, moved.closed);
-    await wakeAll(ctx, moved.wakes);
+    const settled = await settle(ctx, moved.task);
+    await wakeAll(ctx, tell(moved.wakes, settled, (await orchestratorOf(ctx, me.companyId))?.id ?? null, moved.task.id));
     return { task: await detail(me, moved.task) };
   });
 
@@ -159,62 +161,35 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { request: { id: done.request.id, status: done.request.status } };
   });
 
-  /* Turns belong to the whole company. */
-  async function turnView(turn: typeof turns.$inferSelect | undefined) {
+  /* Turns belong to the whole company. The words they were laid out from only reach people who see all of it. */
+  async function turnView(turn: Turn | undefined, whole: boolean) {
     if (!turn) return null;
     const [all] = await db.select({ n: count() }).from(tasks).where(eq(tasks.turnId, turn.id));
     const [done] = await db.select({ n: count() }).from(tasks).where(and(eq(tasks.turnId, turn.id), eq(tasks.status, 'done')));
-    return { id: turn.id, number: turn.number, goal: turn.goal, status: turn.status, taskId: turn.taskId, startedAt: turn.createdAt.toISOString(), tasks: { total: Number(all?.n ?? 0), done: Number(done?.n ?? 0) } };
+    return {
+      id: turn.id,
+      number: turn.number,
+      title: turn.title || turn.goal,
+      goal: turn.goal,
+      status: turn.status,
+      messages: whole ? turn.messages : [],
+      taskId: turn.taskId,
+      startedAt: (turn.openedAt ?? turn.createdAt).toISOString(),
+      openedAt: turn.openedAt?.toISOString() ?? null,
+      closedAt: turn.closedAt?.toISOString() ?? null,
+      tasks: { total: Number(all?.n ?? 0), done: Number(done?.n ?? 0) },
+    };
   }
+
+  app.get('/api/turns', async req => {
+    const me = await requirePerson(req, db);
+    const whole = me.scopeKind === 'company';
+    return { turns: await Promise.all((await turnRows(ctx, me.companyId)).map(t => turnView(t, whole))) };
+  });
 
   app.get('/api/turns/current', async req => {
     const me = await requirePerson(req, db);
     const [turn] = await db.select().from(turns).where(and(eq(turns.companyId, me.companyId), eq(turns.status, 'open')));
-    return { turn: await turnView(turn) };
-  });
-
-  /* A turn starts as the orchestrator's task with its goal. */
-  app.post('/api/turns', async (req, reply) => {
-    const me = await requirePerson(req, db);
-    requireCompanyScope(me);
-    const { goal } = z.object({ goal: z.string().trim().min(1).max(600) }).parse(req.body);
-    const orchestrator = await orchestratorOf(ctx, me.companyId);
-    if (!orchestrator) throw refuse(409, 'no_head', 'This company has no orchestrator.');
-    if (!(await liveSubscription(ctx, orchestrator.id))) throw refuse(409, 'no_subscription', 'The orchestrator has no subscription to run on. Connect one first.');
-    const turn = await db.transaction(async tx => {
-      const [open] = await tx.select({ id: turns.id }).from(turns).where(and(eq(turns.companyId, me.companyId), eq(turns.status, 'open')));
-      if (open) throw refuse(409, 'turn_open', 'A turn is open. Close it before starting the next.');
-      const [last] = await tx.select({ n: max(turns.number) }).from(turns).where(eq(turns.companyId, me.companyId));
-      const [row] = await tx.insert(turns).values({ companyId: me.companyId, number: (last?.n ?? 0) + 1, goal, startedBy: me.id }).returning();
-      return row!;
-    }).catch((err: { code?: string }) => {
-      /* Two starts at once: the one-open-turn index refuses the second. */
-      if (err.code === '23505') throw refuse(409, 'turn_open', 'A turn is open. Close it before starting the next.');
-      throw err;
-    });
-    const moved = await createTask(ctx, { personId: me.id }, { title: `Turn ${turn.number}: ${goal}`.slice(0, 120), brief: goal, body: goal, departmentId: null, assigneeAgentId: orchestrator.id });
-    const [linked] = await db.update(turns).set({ taskId: moved.task.id }).where(eq(turns.id, turn.id)).returning();
-    await wakeAll(ctx, moved.wakes);
-    ctx.bus.publish(me.companyId, { type: 'org' });
-    return reply.code(201).send({ turn: await turnView(linked) });
-  });
-
-  /* Open tasks of a closed turn stay open, without a turn. */
-  app.post('/api/turns/:id/close', async req => {
-    const me = await requirePerson(req, db);
-    requireCompanyScope(me);
-    const { id } = IdParams.parse(req.params);
-    const closed = await db.transaction(async tx => {
-      const [row] = await tx
-        .update(turns)
-        .set({ status: 'closed', closedBy: me.id, closedAt: new Date() })
-        .where(and(eq(turns.id, id), eq(turns.companyId, me.companyId), eq(turns.status, 'open')))
-        .returning();
-      if (!row) throw refuse(404, 'turn_unknown', 'There is no open turn with this id.');
-      await tx.update(tasks).set({ turnId: null }).where(and(eq(tasks.turnId, id), notInArray(tasks.status, [...CLOSED])));
-      return row;
-    });
-    ctx.bus.publish(me.companyId, { type: 'org' });
-    return { turn: await turnView(closed) };
+    return { turn: await turnView(turn, me.scopeKind === 'company') };
   });
 }
