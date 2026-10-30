@@ -383,6 +383,11 @@ export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Pro
           <i />
         </span>
         <span>{title}</span>
+        {terminal && state?.busy && (
+          <button className="btn small ghost" type="button" onClick={stop}>
+            {t.window.stop}
+          </button>
+        )}
         {hasTerminal && (
           <button type="button" aria-label={asLog ? t.window.showTerminal : t.window.showLog} title={asLog ? t.window.showTerminal : t.window.showLog} onClick={() => setAsLog(v => !v)}>
             <svg viewBox="0 0 24 24" aria-hidden="true">

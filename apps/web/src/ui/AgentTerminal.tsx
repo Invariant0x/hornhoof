@@ -57,11 +57,12 @@ export function AgentTerminal({ agentId, onGone }: Props) {
       const ws = new WebSocket(`${scheme}://${location.host}/api/agents/${agentId}/terminal?cols=${term.cols}&rows=${term.rows}`);
       socket = ws;
       ws.onmessage = e => {
-        const m = JSON.parse(String(e.data)) as { type: string; data?: string };
-        /* The session draws its whole screen for each new view. */
+        const m = JSON.parse(String(e.data)) as { type: string; data?: string; write?: boolean };
+        /* The session draws its whole screen for each new view. Only its subscription's owner types into it. */
         if (m.type === 'ready') {
           tries = 0;
           term.reset();
+          term.options.disableStdin = !m.write;
         }
         if (m.type === 'data' && m.data) term.write(m.data);
       };
@@ -73,6 +74,7 @@ export function AgentTerminal({ agentId, onGone }: Props) {
     };
 
     term.onData(data => {
+      if (term.options.disableStdin) return;
       for (let i = 0; i < data.length; i += PIECE) send({ type: 'input', data: data.slice(i, i + PIECE) });
     });
     term.onResize(({ cols, rows }) => send({ type: 'resize', cols, rows }));

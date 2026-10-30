@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { AgentWindow } from '../src/screens/AgentWindow';
-import type { EventView } from '../src/types';
+import type { EventView, OrchestratorState } from '../src/types';
 import { ME, mockApi, ORG } from './api-mock';
 
 /* The terminal itself needs a real browser; these stand-ins keep what the window gives it and what it hands back. */
@@ -70,10 +70,10 @@ class FakeSocket {
     this.readyState = 3;
   }
   /* What the server does. */
-  opened() {
+  opened(write = true) {
     this.readyState = 1;
     this.onopen?.();
-    this.onmessage?.({ data: JSON.stringify({ type: 'ready', write: true }) });
+    this.onmessage?.({ data: JSON.stringify({ type: 'ready', write }) });
   }
   screen(data: string) {
     this.onmessage?.({ data: JSON.stringify({ type: 'data', data }) });
@@ -85,15 +85,20 @@ class FakeSocket {
 }
 
 const EVENTS = '/api/agents/orchestrator/events';
-const READY = { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 };
+const READY: OrchestratorState = { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 };
 const LOG: EventView[] = [{ seq: 1, kind: 'text', data: { kind: 'text', text: 'Hello from the log' }, jobId: 'j1', person: null, at: '2026-10-30T10:00:00Z' }];
 
-function open(terminal = true) {
-  mockApi({
-    [`GET ${EVENTS}?after=0`]: [200, { events: LOG, state: { ...READY, terminal } }],
-    [`GET ${EVENTS}?after=1`]: [200, { events: [], state: { ...READY, terminal } }],
+function open(terminal = true, more: Partial<OrchestratorState> = {}) {
+  const calls = mockApi({
+    [`GET ${EVENTS}?after=0`]: [200, { events: LOG, state: { ...READY, ...more, terminal } }],
+    [`GET ${EVENTS}?after=1`]: [200, { events: [], state: { ...READY, ...more, terminal } }],
     'POST /api/agents/orchestrator/start': [200, { started: false }],
+    'POST /api/agents/orchestrator/stop': [202],
   });
+  return { calls, ...view() };
+}
+
+function view() {
   return render(
     <LanguageProvider>
       <AgentWindow me={ME} org={ORG} agentId="orchestrator" onClose={() => {}} />
@@ -142,6 +147,23 @@ describe("an agent's live terminal in its window", () => {
       { type: 'input', data: 'ls\r' },
       { type: 'resize', cols: 132, rows: 40 },
     ]);
+  });
+
+  it('lets a person who may only watch see the screen without typing into it', async () => {
+    open();
+    const ws = await socket();
+    ws.opened(false);
+    expect(terms[0]!.options.disableStdin).toBe(true);
+    terms[0]!.type('ls\r');
+    expect(ws.sent).toEqual([]);
+  });
+
+  it('offers Stop above the terminal while the agent works', async () => {
+    const user = userEvent.setup();
+    const { calls } = open(true, { busy: true, runningJobId: 'j1' });
+    await socket();
+    await user.click(await screen.findByRole('button', { name: 'Stop' }));
+    expect(calls.some(c => c.method === 'POST' && c.path === '/api/agents/orchestrator/stop')).toBe(true);
   });
 
   it('cuts a long paste into pieces the server takes', async () => {

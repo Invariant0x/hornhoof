@@ -2,7 +2,8 @@ import type { ServerMessage } from '@hornhoof/protocol';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
-import { agents, companies, departments } from '../src/db/schema.js';
+import { eq } from 'drizzle-orm';
+import { agents, companies, departments, people, subscriptions } from '../src/db/schema.js';
 import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
@@ -29,8 +30,8 @@ async function next<T extends ServerMessage['type']>(node: FakeNode, type: T): P
   }
 }
 
-async function live(terminals = true) {
-  const { app, db } = await testApp({ NODE_KEY });
+async function live(terminals = true, env: NodeJS.ProcessEnv = {}) {
+  const { app, db } = await testApp({ NODE_KEY, ...env });
   const url = await listen(app);
   const ceo = await setUpCompany(app);
   const builtin = await connectNode(url, NODE_KEY);
@@ -86,6 +87,39 @@ describe("an agent's live terminal", () => {
     expect(await state(shown.app, shown.ceo)).toMatchObject({ terminal: true });
     const plain = await live(false);
     expect(await state(plain.app, plain.ceo)).toMatchObject({ terminal: false });
+  });
+
+  it("lets only the subscription's owner type: anyone else who reaches the agent watches", async () => {
+    const { app, url, ceo, builtin } = await live();
+    const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.test', access: { whole: true } });
+    const screen = await watch(url, maria);
+    const open = await next(builtin, 'term.open');
+    expect(open.write).toBe(false);
+    await until(() => screen.frames.length > 0);
+    expect(screen.frames[0]).toEqual({ type: 'ready', write: false });
+    screen.ws.send(JSON.stringify({ type: 'input', data: '! cat /data/node.json\r' }));
+    screen.ws.send(JSON.stringify({ type: 'resize', cols: 90, rows: 30 }));
+    expect(await builtin.next()).toEqual({ type: 'term.resize', termId: open.termId, cols: 90, rows: 30 });
+  });
+
+  it('keeps the view trying while the node is away, instead of saying it has no terminal', async () => {
+    const { url, ceo, builtin } = await live();
+    builtin.close();
+    await builtin.closed;
+    const screen = await watch(url, ceo);
+    expect(await screen.closed).toEqual({ code: 4410, reason: 'node_offline' });
+  });
+
+  it('ends the view when the agent moves to another subscription, so it opens again on the new node', async () => {
+    const { db, url, ceo, builtin, orchestratorId } = await live(true, { STREAM_PING_MS: '100' });
+    const screen = await watch(url, ceo);
+    await next(builtin, 'term.open');
+    const [ceoRow] = await db.select().from(people);
+    const [acme] = await db.select().from(companies);
+    const [mine] = await db.insert(subscriptions).values({ companyId: acme!.id, provider: 'claude', kind: 'personal', label: 'Claude', ownerPersonId: ceoRow!.id, status: 'ready' }).returning();
+    await db.update(agents).set({ subscriptionId: mine!.id }).where(eq(agents.id, orchestratorId));
+    expect(await screen.closed).toEqual({ code: 4410, reason: 'node_offline' });
+    expect(await next(builtin, 'term.close')).toMatchObject({ type: 'term.close' });
   });
 
   it('says so when the node of the agent cannot show a terminal', async () => {
@@ -154,6 +188,27 @@ describe('a turn a person typed into the terminal', () => {
 
     await app.inject({ method: 'POST', url: '/api/agents/orchestrator/messages', payload: { text: 'thanks' }, ...as(ceo) });
     expect(await next(builtin, 'job.run')).toMatchObject({ sessionId: 'sess-1' });
+  });
+
+  it('counts as typed by a person only when they pressed Enter in the terminal', async () => {
+    const { app, url, ceo, builtin, orchestratorId } = await live();
+    const screen = await watch(url, ceo);
+    await next(builtin, 'term.open');
+    screen.ws.send(JSON.stringify({ type: 'input', data: '\u001b[<64;10;5M' }));
+    await next(builtin, 'term.input');
+    builtin.send({ type: 'turn.open', agentKey: orchestratorId, text: 'from the machine itself' });
+    const first = await next(builtin, 'turn.opened');
+    builtin.send({ type: 'job.done', jobId: first.jobId!, ok: true, sessionId: 's', result: 'ok', tail: '', error: null });
+    await until(async () => !(await state(app, ceo)).busy);
+    screen.ws.send(JSON.stringify({ type: 'input', data: 'hi\r' }));
+    await next(builtin, 'term.input');
+    builtin.send({ type: 'turn.open', agentKey: orchestratorId, text: 'hi' });
+    await next(builtin, 'turn.opened');
+    const said = (await events(app, ceo)).filter((e: { kind: string }) => e.kind === 'message');
+    expect(said.map((e: { data: { text: string }; person: unknown }) => [e.data.text, e.person !== null])).toEqual([
+      ['from the machine itself', false],
+      ['hi', true],
+    ]);
   });
 
   it('is not opened while another turn runs, or for an agent the node does not run', async () => {
