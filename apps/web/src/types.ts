@@ -149,7 +149,59 @@ export type StreamMessage =
   | { type: 'agent_event'; agentId: string; event: EventView }
   | { type: 'working'; working: number }
   | { type: 'org' }
-  | { type: 'pulse'; from: Endpoint; to: Endpoint };
+  | { type: 'pulse'; from: Endpoint; to: Endpoint }
+  | { type: 'task'; id: string }
+  | { type: 'requests' };
+
+export type TaskStatus = 'open' | 'working' | 'review' | 'waiting' | 'blocked' | 'done' | 'cancelled';
+export type AgentRef = { id: string; name: string; kind: 'orchestrator' | 'head' | 'worker'; role: Lang | null };
+export type TaskPlace = { id: string; name: string } | null;
+
+/* A task as lists show it. stage 0 is with its executor; 1 and up is the gate it waits at. */
+export type TaskLine = {
+  id: string;
+  number: number;
+  title: string;
+  brief: string;
+  status: TaskStatus;
+  department: TaskPlace;
+  product: TaskPlace;
+  assignee: AgentRef | null;
+  stage: number;
+  gateCount: number;
+  bounces: number;
+  turn: number | null;
+  parentId: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type TaskLogLine = { kind: string; text: string; data: unknown; by: { kind: 'person' | 'agent'; id: string; name: string } | null; at: string };
+export type TaskRequest = { id: string; kind: 'question' | 'approval' | 'stuck'; text: string; commit: string | null; status: string; answer: string | null; agent: AgentRef | null; at: string };
+
+export type TaskDetail = TaskLine & {
+  body: string;
+  parent: { id: string; number: number; title: string } | null;
+  executor: AgentRef | null;
+  gates: (AgentRef & { state: 'passed' | 'current' | 'next' })[];
+  createdBy: { kind: 'person' | 'agent'; id: string; name: string } | null;
+  subtasks: TaskLine[];
+  log: TaskLogLine[];
+  requests: TaskRequest[];
+};
+
+/* What an agent asks of people, under "Waiting for you". */
+export type WaitingRequest = {
+  id: string;
+  kind: 'question' | 'approval' | 'stuck';
+  text: string;
+  commit: string | null;
+  at: string;
+  agent: { id: string; name: string };
+  task: { id: string; number: number; title: string; department: TaskPlace };
+};
+
+export type TurnView = { id: string; number: number; goal: string; status: 'open' | 'closed'; taskId: string | null; startedAt: string; tasks: { total: number; done: number } };
 
 export type MachineView = {
   id: string;

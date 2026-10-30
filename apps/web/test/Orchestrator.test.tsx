@@ -58,6 +58,12 @@ describe('AgentWindow', () => {
     expect(screen.getByText('Stopped')).toBeInTheDocument();
   });
 
+  it("names Hornhoof for the turns it starts on a task", async () => {
+    const { container } = open({ [`GET ${EVENTS}?after=0`]: [200, { events: [ev(1, 'message', { text: '#4 "Payments" is yours.', task: { id: 't4', number: 4 } })], state: READY }] });
+    await screen.findByText(/Payments/);
+    expect(container.querySelector('.t-u')).toHaveTextContent('> Hornhoof: #4 "Payments" is yours.');
+  });
+
   it('shows his answers with bold and lists, and hides how Claude loads its tools', async () => {
     const { container } = open({
       [`GET ${EVENTS}?after=0`]: [

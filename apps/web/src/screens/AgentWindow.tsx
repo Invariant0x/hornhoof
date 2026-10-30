@@ -259,7 +259,7 @@ export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Pro
       case 'message':
         return (
           <div className="t-u">
-            &gt; <em>{e.person?.name ?? ''}:</em> {field(e.data, 'text')}
+            &gt; <em>{e.person?.name ?? t.window.hornhoof}:</em> {field(e.data, 'text')}
           </div>
         );
       case 'text':
