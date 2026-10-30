@@ -20,6 +20,8 @@ export type Role = {
   tier: 'deep' | 'standard' | 'fast';
   perProduct: boolean;
   inDefault: boolean;
+  /* Where the role stands among its department's default gates; none for a role that is not a gate. */
+  gate: number | null;
   skills: RoleSkill[];
   body: string;
   hash: string;
@@ -51,6 +53,7 @@ const RoleHead = z.object({
   default: z.boolean().default(true),
   /* Where the role stands in its roster, after the head. */
   order: z.number().int().default(50),
+  gate: z.number().int().positive().optional(),
   /* A plain id is on by default; { id, on: false } is offered but off. Core and head skills are added, not listed. */
   skills: z.array(z.union([z.string(), z.object({ id: z.string(), on: z.boolean() })])).default([]),
 });
@@ -109,6 +112,7 @@ export function loadTemplates(dir: string): Templates {
         tier: r.tier,
         perProduct: r.perProduct,
         inDefault: r.default,
+        gate: r.gate ?? null,
         skills: [...locked, ...listed.filter(s => !locked.some(l => l.id === s.id))],
         body,
         hash: textHash(body),

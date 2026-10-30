@@ -58,20 +58,20 @@ describe('/mcp', () => {
     expect((await app.inject({ method: 'DELETE', url: '/mcp' })).statusCode).toBe(405);
   });
 
-  it('offers the orchestrator the company view, the structure proposal and staffing', async () => {
+  it('offers the orchestrator the company view, the structure proposal, staffing and tasks', async () => {
     const { app, job } = await company();
     await job('running');
     const client = await mcp(app, TOKEN);
-    expect((await client.listTools()).tools.map(t => t.name).sort()).toEqual(['company', 'propose_staff', 'propose_structure', 'staffing_options']);
+    expect((await client.listTools()).tools.map(t => t.name).sort()).toEqual(['ask_person', 'cancel_task', 'comment', 'company', 'create_task', 'propose_staff', 'propose_structure', 'report', 'staffing_options', 'task', 'tasks']);
   });
 
-  it('gives an employee only the company view', async () => {
+  it('gives an employee the company view and its task tools', async () => {
     const { app, db, companyId } = await company();
     const [sub] = await db.select().from(subscriptions);
     const [bruno] = await db.insert(agents).values({ companyId, kind: 'worker', name: 'Bruno', model: 'sonnet', subscriptionId: sub!.id }).returning();
     await db.insert(jobs).values({ companyId, subscriptionId: sub!.id, agentId: bruno!.id, kind: 'conversation', prompt: 'hi', timeoutMs: 900000, status: 'running', toolTokenHash: hashToken(TOKEN) });
     const client = await mcp(app, TOKEN);
-    expect((await client.listTools()).tools.map(t => t.name)).toEqual(['company']);
+    expect((await client.listTools()).tools.map(t => t.name).sort()).toEqual(['ask_person', 'blocked', 'comment', 'company', 'submit', 'task', 'tasks', 'verdict']);
   });
 
   it('describes the company with the templates and no email addresses', async () => {

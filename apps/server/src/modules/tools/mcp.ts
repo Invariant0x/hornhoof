@@ -11,6 +11,7 @@ import { appendEvent } from '../events/store.js';
 import { companyView } from './company.js';
 import { checkStaff, departmentOf, StaffProposal, staffingOptions } from './staff.js';
 import { checkItems, Proposal } from './structure.js';
+import { registerTaskTools } from '../tasks/tools.js';
 
 type ToolJob = { id: string; companyId: string; agentId: string; agentKind: (typeof agents.$inferSelect)['kind'] };
 
@@ -39,6 +40,7 @@ function toolsFor(ctx: Ctx, job: ToolJob): McpServer {
     { description: 'The company as it is now: its brief, the people who run it, departments with their products and employees, subscriptions, and the department templates.' },
     async () => say(JSON.stringify(await companyView(ctx.db, ctx.templates, job.companyId))),
   );
+  registerTaskTools(server, ctx, job);
   if (job.agentKind !== 'orchestrator') return server;
   server.registerTool(
     'propose_structure',
