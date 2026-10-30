@@ -220,13 +220,18 @@ describe('Map', () => {
 
   it('follows the company live: a changed org is fetched again and the working count moves', async () => {
     const stream = fakeStream();
-    const calls = mockApi({ 'GET /api/org': [200, ORG] });
+    let working = 0;
+    const calls = mockApi({ 'GET /api/org': () => [200, { ...ORG, agents: { ...ORG.agents, working } }] });
     const { container } = render(<MapScreen {...PROPS} />);
     await screen.findByText('agents working');
+    working = 1;
     stream.send({ type: 'working', working: 1 });
     expect(container.querySelector('.hub-num')).toHaveTextContent('1/1');
-    stream.send({ type: 'org' });
+    /* Who works changed, so the employees' states are fetched too. */
     await vi.waitFor(() => expect(calls.filter(c => c.path === '/api/org')).toHaveLength(2));
+    stream.send({ type: 'org' });
+    await vi.waitFor(() => expect(calls.filter(c => c.path === '/api/org')).toHaveLength(3));
+    expect(container.querySelector('.hub-num')).toHaveTextContent('1/1');
   });
 
   it('tells when the orchestrator has no subscription', async () => {

@@ -115,6 +115,8 @@ export type AgentCardView = {
   raw: string;
   runsOn: { subscription: SubView; models: ModelOption[] }[];
   changes: { field: string; personName: string | null; at: string }[];
+  /* The whole company or the agent's department may change it; only the whole company removes it. */
+  canEdit: boolean;
 };
 
 /* A subscription or key that may serve a department, with the models it runs. */

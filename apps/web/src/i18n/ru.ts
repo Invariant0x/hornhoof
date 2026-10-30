@@ -266,7 +266,7 @@ export const ru: Messages = {
     history: 'Изменения',
     changed: (what: string, who: string | null, when: string) => (who ? `${what}: ${who}, ${when}` : `${what}, ${when}`),
     fields: { hired: 'Нанят', name: 'Имя', model: 'Модель', subscription: 'Подписка', skills: 'Навыки', prompt: 'Промпт', reset: 'Возврат к шаблону', removed: 'Убран' } as Record<string, string>,
-    viewOnly: 'Менять сотрудников могут только люди с доступом ко всей компании.',
+    viewOnly: 'Менять этого сотрудника могут только люди с доступом к его отделу или ко всей компании.',
     orchestratorNote: 'У оркестратора нет навыков: его инструкции приходят вместе с Hornhoof.',
   },
   staff: {
@@ -275,6 +275,7 @@ export const ru: Messages = {
     hired: 'Наняты',
     modelOf: (name: string) => `Модель для ${name}`,
     runsOnOf: (name: string) => `Где работает ${name}`,
+    noServing: 'Этот отдел пока не обслуживает ни одна подписка. Добавьте подписку в разделе «Подписки», а нанятые сотрудники подождут.',
   },
   templates: {
     operations: { name: 'Операции', description: 'Есть всегда: настраивает инструменты, аккаунты, регистрации и интеграции для других отделов и чинит то, что сломалось.' },

@@ -104,10 +104,34 @@ describe('AgentCard', () => {
 
   it('only shows the card to someone who cannot change it', async () => {
     const listed: Me = { ...ME, person: { ...ME.person, scopeKind: 'listed' } };
-    open({}, listed);
+    open({ 'GET /api/agents/b1': [200, { ...CARD, canEdit: false }] }, listed);
     expect(await screen.findByRole('combobox', { name: 'Model' })).toBeDisabled();
     expect(screen.getByRole('checkbox', { name: /API design/ })).toBeDisabled();
     expect(screen.queryByRole('button', { name: 'Reset to template' })).not.toBeInTheDocument();
-    expect(screen.getByText('Only people with access to the whole company can change employees.')).toBeInTheDocument();
+    expect(screen.getByText("Only people with access to this employee's department or the whole company can change it.")).toBeInTheDocument();
+  });
+
+  it("lets a person of the department change the card but not remove the employee", async () => {
+    const listed: Me = { ...ME, person: { ...ME.person, scopeKind: 'listed' } };
+    open({}, listed);
+    expect(await screen.findByRole('combobox', { name: 'Model' })).toBeEnabled();
+    expect(screen.getByRole('checkbox', { name: /API design/ })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Reset to template' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Remove from the company' })).not.toBeInTheDocument();
+  });
+
+  it('keeps edits made in both views of the prompt', async () => {
+    const user = userEvent.setup();
+    const { calls } = open({ 'PATCH /api/agents/b1': [200, CARD] });
+    await user.click(await screen.findByRole('button', { name: 'Raw' }));
+    const billing = CARD.raw.replace('You build the API.', 'You build the billing API.');
+    fireEvent.change(screen.getByRole('textbox', { name: 'Raw' }), { target: { value: billing } });
+    await user.click(screen.getByRole('button', { name: 'By skill' }));
+    expect(screen.getByRole('textbox', { name: 'Backend engineer' })).toHaveValue('You build the billing API.');
+    fireEvent.change(screen.getByRole('textbox', { name: 'Test first' }), { target: { value: 'Write it first.' } });
+    await user.click(screen.getByRole('button', { name: 'Raw' }));
+    expect(screen.getByRole('textbox', { name: 'Raw' })).toHaveValue(billing.replace('Write the test first.', 'Write it first.'));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await vi.waitFor(() => expect(calls.find(c => c.method === 'PATCH')?.body).toEqual({ base: 'You build the billing API.', skillText: { 'dev-tdd': 'Write it first.' } }));
   });
 });

@@ -102,6 +102,7 @@ export function StaffCard({ department, proposal, onCorrect, onDone, onHide }: P
     <div className={`t-card staff${sent ? ' done' : ''}`}>
       <h4>{t.staff.title(department.name)}</h4>
       {proposal?.brief && <p className="t-card-brief">{proposal.brief}</p>}
+      {roster && !roster.subscriptions.length && !sent && <p className="t-card-brief">{t.staff.noServing}</p>}
       {rows.map((r, i) => {
         const name = nameOf(r);
         const sub = roster?.subscriptions.find(s => s.id === r.subscription);

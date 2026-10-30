@@ -8,8 +8,8 @@ import { mockApi, ROSTER } from './api-mock';
 
 const DEPT = { id: 'd2', name: 'Development' };
 
-function card(proposal?: { id: string; brief: string; people: StaffLine[] }) {
-  const calls = mockApi({ 'GET /api/departments/d2/roster': [200, ROSTER], 'POST /api/departments/d2/staff': [201, { hired: ['x1', 'x2'] }] });
+function card(proposal?: { id: string; brief: string; people: StaffLine[] }, roster = ROSTER) {
+  const calls = mockApi({ 'GET /api/departments/d2/roster': [200, roster], 'POST /api/departments/d2/staff': [201, { hired: ['x1', 'x2'] }] });
   render(
     <LanguageProvider>
       <StaffCard department={DEPT} proposal={proposal} onCorrect={() => {}} />
@@ -61,6 +61,11 @@ describe('StaffCard', () => {
     await user.selectOptions(runs, 's-codex');
     expect(options(model)).toEqual(['Default', 'GPT-6.1 Sol']);
     expect(model).toHaveValue('');
+  });
+
+  it('says where to add a subscription when none serves the department', async () => {
+    card(undefined, { ...ROSTER, subscriptions: [], roles: ROSTER.roles.map(r => ({ ...r, subscription: null })) });
+    expect(await screen.findByText('No subscription serves this department yet. Add one in Subscriptions; people hired now wait for it.')).toBeInTheDocument();
   });
 
   it("names the people in the person's language", async () => {

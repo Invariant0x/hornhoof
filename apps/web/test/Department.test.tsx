@@ -5,6 +5,7 @@ import { LanguageProvider } from '../src/i18n';
 import { Shell } from '../src/screens/Shell';
 import type { Org } from '../src/types';
 import { CARD, DEV_ORG, ME, mockApi, ROSTER } from './api-mock';
+import { fakeStream } from './fake-stream';
 
 const EVENTS = '/api/agents/orchestrator/events?after=0';
 const READY = { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 };
@@ -66,6 +67,21 @@ describe('Department view', () => {
     await flyIn(user);
     const people = screen.getByRole('region', { name: 'People with access' });
     expect(within(people).getAllByRole('listitem').map(li => li.querySelector('b')!.textContent)).toEqual(['Sasha', 'Oleg']);
+  });
+
+  it('shows an employee start working while the department is open', async () => {
+    const user = userEvent.setup();
+    const stream = fakeStream();
+    const [dev] = DEV_ORG.departments;
+    const busy: Org = { ...DEV_ORG, departments: [{ ...dev!, employees: dev!.employees.map(e => ({ ...e, state: 'working' as const })) }] };
+    let started = false;
+    shell({ 'GET /api/org': () => [200, started ? busy : DEV_ORG] });
+    await flyIn(user);
+    const bruno = within(screen.getByRole('region', { name: 'Members' })).getByRole('button', { name: /Bruno/ });
+    expect(bruno).toHaveTextContent('Sleeping');
+    started = true;
+    stream.send({ type: 'working', working: 2 });
+    await vi.waitFor(() => expect(within(screen.getByRole('region', { name: 'Members' })).getByRole('button', { name: /Bruno/ })).toHaveTextContent('Working'));
   });
 
   it('hires through the orchestrator', async () => {

@@ -27,7 +27,11 @@ export function useOrg(enabled = true): { org: Org | null; failure: unknown } {
   useStream(m => {
     if (!enabled) return;
     if (m.type === 'org' || m.type === 'reconnected') load();
-    if (m.type === 'working') setOrg(o => o && { ...o, agents: { ...o.agents, working: m.working } });
+    if (m.type === 'working') {
+      setOrg(o => o && { ...o, agents: { ...o.agents, working: m.working } });
+      /* Employees move between working and sleeping too, so the company is fetched again for their states. */
+      load();
+    }
   });
 
   return { org, failure };

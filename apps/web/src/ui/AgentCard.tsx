@@ -37,6 +37,29 @@ export function fromRaw(raw: string, parts: Part[]): { base: string | null; skil
 
 const keyOf = (p: Part) => (p.kind === 'base' ? 'base' : (p.id ?? ''));
 
+/* The raw text with the edits made by skill in place of the parts' own text. */
+export function toRaw(parts: Part[], drafts: Record<string, string>): string {
+  return parts
+    .map(p => {
+      const draft = p.kind === 'header' ? undefined : drafts[keyOf(p)];
+      if (draft === undefined) return p.text;
+      return p.kind === 'base' ? draft : p.text.replace(/^(<!-- hh:skill [a-z0-9-]+ -->\n## [^\n]*\n\n)[\s\S]*(\n<!-- \/hh:skill -->)$/, (_, open: string, close: string) => open + draft + close);
+    })
+    .join('\n\n');
+}
+
+/* The edits by skill an edited raw text makes, or null when its first part or the skill markers changed. */
+function draftsOf(raw: string, parts: Part[]): Record<string, string> | null {
+  const parsed = fromRaw(raw, parts);
+  if (!parsed) return null;
+  const drafts: Record<string, string> = {};
+  for (const p of parts) {
+    const text = p.kind === 'base' ? parsed.base : p.kind === 'skill' ? parsed.skills[p.id ?? ''] : undefined;
+    if (text != null && text !== bodyOf(p)) drafts[keyOf(p)] = text;
+  }
+  return drafts;
+}
+
 const subLabel = (s: SubView) => servingLabel({ kind: s.kind, label: s.label, provider: s.provider, owner: s.owner.name });
 
 /* An agent's card in the side panel: where it runs, its skills and the text it runs with, with every change kept. */
@@ -53,6 +76,7 @@ export function AgentCard({ me, agentId, onClose, onTerminal }: Props) {
   const [rawDraft, setRawDraft] = useState<string | null>(null);
   const [broken, setBroken] = useState(false);
   const [asking, setAsking] = useState<'reset' | 'remove' | null>(null);
+  /* Only the whole company removes an employee; the card says who may change it. */
   const company = me.person.scopeKind === 'company';
   const base = `/api/agents/${agentId}`;
 
@@ -155,6 +179,23 @@ export function AgentCard({ me, agentId, onClose, onTerminal }: Props) {
   const where = [card.department?.name, card.product?.name].filter(Boolean).join(', ');
   const dirty = rawDraft !== null ? rawDraft !== card.raw : Object.keys(drafts).length > 0;
   const when = (at: string) => new Date(at).toLocaleString(language === 'ru' ? 'ru-RU' : 'en-GB', { dateStyle: 'short', timeStyle: 'short' });
+  const editable = card.canEdit;
+
+  /* An edit carries over to the other view; a raw text with broken markers stays in the raw view until it is fixed. */
+  function showRaw(next: boolean) {
+    if (!card || next === raw) return;
+    if (next) {
+      if (Object.keys(drafts).length) setRawDraft(toRaw(card.parts, drafts));
+      setDrafts({});
+    } else if (rawDraft !== null) {
+      const carried = draftsOf(rawDraft, card.parts);
+      if (!carried) return setBroken(true);
+      setDrafts(carried);
+      setRawDraft(null);
+    }
+    setBroken(false);
+    setRaw(next);
+  }
 
   return (
     <aside className="acard" aria-label={title}>
@@ -172,12 +213,12 @@ export function AgentCard({ me, agentId, onClose, onTerminal }: Props) {
             {t.agent.openTerminal}
           </button>
         </header>
-        {!company && <p className="muted">{t.agent.viewOnly}</p>}
+        {!editable && <p className="muted">{t.agent.viewOnly}</p>}
 
         <div className="ac-pick">
           <div className="field">
             <label htmlFor={`${id}-sub`}>{t.agent.runsOn}</label>
-            <select id={`${id}-sub`} value={card.subscription?.id ?? ''} disabled={!company} onChange={e => void change({ subscription: e.target.value || null })}>
+            <select id={`${id}-sub`} value={card.subscription?.id ?? ''} disabled={!editable} onChange={e => void change({ subscription: e.target.value || null })}>
               {(!orchestrator || !card.subscription) && <option value="">{t.agent.noSubscription}</option>}
               {byProvider(subs, r => r.subscription.provider).map(([p, list]) => (
                 <optgroup key={p} label={PROVIDER_NAMES[p]}>
@@ -192,7 +233,7 @@ export function AgentCard({ me, agentId, onClose, onTerminal }: Props) {
           </div>
           <div className="field">
             <label htmlFor={`${id}-model`}>{t.agent.model}</label>
-            <select id={`${id}-model`} value={card.model} disabled={!company || !card.subscription} onChange={e => void change({ model: e.target.value })}>
+            <select id={`${id}-model`} value={card.model} disabled={!editable || !card.subscription} onChange={e => void change({ model: e.target.value })}>
               <option value="">{t.agent.default}</option>
               {card.model && !models.some(m => m.id === card.model) && <option value={card.model}>{card.model}</option>}
               {models.map(m => (
@@ -219,7 +260,7 @@ export function AgentCard({ me, agentId, onClose, onTerminal }: Props) {
             <h4 id={`${id}-skills`}>{t.agent.skills}</h4>
             {card.skills.map(s => (
               <label key={s.id} className={s.locked ? 'lock' : ''}>
-                <input type="checkbox" checked={s.on || s.locked} disabled={!company || s.locked} onChange={e => void change({ skills: { [s.id]: e.target.checked } })} />
+                <input type="checkbox" checked={s.on || s.locked} disabled={!editable || s.locked} onChange={e => void change({ skills: { [s.id]: e.target.checked } })} />
                 <span>
                   <b>{s.title[language]}</b>
                   <small>{s.description[language]}</small>
@@ -235,10 +276,10 @@ export function AgentCard({ me, agentId, onClose, onTerminal }: Props) {
             <h4 id={`${id}-prompt`}>{t.agent.prompt}</h4>
             {!orchestrator && (
               <div className="seg">
-                <button type="button" aria-pressed={!raw} onClick={() => setRaw(false)}>
+                <button type="button" aria-pressed={!raw} onClick={() => showRaw(false)}>
                   {t.agent.bySkill}
                 </button>
-                <button type="button" aria-pressed={raw} onClick={() => setRaw(true)}>
+                <button type="button" aria-pressed={raw} onClick={() => showRaw(true)}>
                   {t.agent.raw}
                 </button>
               </div>
@@ -252,7 +293,7 @@ export function AgentCard({ me, agentId, onClose, onTerminal }: Props) {
               <label className="sr" htmlFor={`${id}-raw`}>
                 {t.agent.raw}
               </label>
-              <textarea id={`${id}-raw`} className="ac-text" rows={18} value={rawDraft ?? card.raw} readOnly={!company} onChange={e => setRawDraft(e.target.value)} />
+              <textarea id={`${id}-raw`} className="ac-text" rows={18} value={rawDraft ?? card.raw} readOnly={!editable} onChange={e => setRawDraft(e.target.value)} />
             </>
           ) : (
             card.parts.map(p =>
@@ -270,7 +311,7 @@ export function AgentCard({ me, agentId, onClose, onTerminal }: Props) {
                     className="ac-text"
                     rows={Math.min(14, Math.max(3, bodyOf(p).split('\n').length + 1))}
                     value={drafts[keyOf(p)] ?? bodyOf(p)}
-                    readOnly={!company}
+                    readOnly={!editable}
                     onChange={e => setDrafts(d => ({ ...d, [keyOf(p)]: e.target.value }))}
                   />
                 </div>
@@ -282,7 +323,7 @@ export function AgentCard({ me, agentId, onClose, onTerminal }: Props) {
               {t.agent.rawBroken}
             </p>
           )}
-          {company && dirty && (
+          {editable && dirty && (
             <div className="f">
               <button className="btn small" type="button" onClick={savePrompt}>
                 {t.common.save}
@@ -302,7 +343,7 @@ export function AgentCard({ me, agentId, onClose, onTerminal }: Props) {
           )}
         </section>
 
-        {company && !orchestrator && (
+        {editable && !orchestrator && (
           <div className="ac-actions">
             {asking === 'reset' ? (
               <Ask text={t.agent.resetAsk(card.name)} yes={t.agent.yesReset} onYes={() => { setAsking(null); void save(() => api.post<AgentCardView>(`${base}/reset`)); }} onNo={() => setAsking(null)} />
@@ -315,9 +356,11 @@ export function AgentCard({ me, agentId, onClose, onTerminal }: Props) {
                     {t.agent.reset}
                   </button>
                 )}
-                <button className="act danger" type="button" onClick={() => setAsking('remove')}>
-                  {t.agent.remove}
-                </button>
+                {company && (
+                  <button className="act danger" type="button" onClick={() => setAsking('remove')}>
+                    {t.agent.remove}
+                  </button>
+                )}
               </>
             )}
           </div>

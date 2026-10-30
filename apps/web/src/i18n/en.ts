@@ -266,7 +266,7 @@ export const en = {
     history: 'Changes',
     changed: (what: string, who: string | null, when: string) => (who ? `${what}: ${who}, ${when}` : `${what}, ${when}`),
     fields: { hired: 'Hired', name: 'Name', model: 'Model', subscription: 'Subscription', skills: 'Skills', prompt: 'Prompt', reset: 'Reset to the template', removed: 'Removed' } as Record<string, string>,
-    viewOnly: 'Only people with access to the whole company can change employees.',
+    viewOnly: "Only people with access to this employee's department or the whole company can change it.",
     orchestratorNote: 'The orchestrator has no skills: his instructions come with Hornhoof.',
   },
   staff: {
@@ -275,6 +275,7 @@ export const en = {
     hired: 'Hired',
     modelOf: (name: string) => `Model for ${name}`,
     runsOnOf: (name: string) => `Where ${name} runs`,
+    noServing: 'No subscription serves this department yet. Add one in Subscriptions; people hired now wait for it.',
   },
   templates: {
     operations: { name: 'Operations', description: 'Always there: sets up tools, accounts, registrations and integrations for the other departments, and fixes what breaks.' },
