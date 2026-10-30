@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AgentEvent, Limits, NodeMessage, ProviderId, ServerMessage } from '@hornhoof/protocol';
 import { connect } from './connection.js';
+import { builtinAdapters } from './isolation.js';
 import { adapterFor, programFor } from './providers/index.js';
 import { runJob, type ProviderAdapter, type RunResult } from './runner.js';
 import { dataDir, isRemoved, markRemoved, readState, writeState, type NodeState } from './state.js';
@@ -272,8 +273,9 @@ async function run(dir: string, builtinMode: boolean, io: Io): Promise<number | 
     io.stderr.write('The built-in node needs HORNHOOF_SERVER and NODE_KEY in its env.\n');
     return 1;
   }
-  /* Each API key gets its own home, so two keys of one provider never share settings. */
-  const pick = (job: JobRun) => withInstall(adapterFor(job.provider, { home: join(dir, 'subs', job.subscriptionId), tools }), tools, job.provider);
+  /* Each API key gets its own home and, as root, its own user, so two keys never share settings or files. */
+  const builtinPick = builtinAdapters(dir, tools);
+  const pick = (job: JobRun) => withInstall(builtinPick(job), tools, job.provider);
   /* Install both programs right away, so the first check does not wait for npm. */
   for (const provider of ['anthropic_api', 'openai_api'] as const) {
     ensureInstalled(tools, provider, adapterFor(provider, { home: dir, tools })).catch(err => log(`Could not install ${programFor(provider).name}: ${message(err)}`));

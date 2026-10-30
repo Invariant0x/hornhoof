@@ -1,12 +1,13 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AgentEvent } from '@hornhoof/protocol';
+import type { JobUser } from '../isolation.js';
 import type { ProviderAdapter, RunInput, RunResult } from '../runner.js';
 import { contentText, inputText, isRecord } from './events.js';
 import { childEnv, ensureDir, exitsCleanly, installPackage, interactiveLogin, runProgram, tokensIn } from './process.js';
 
 /* Codex serves a ChatGPT plan, or a company OpenAI key on the built-in node. */
-type Options = { home: string; tools: string; bin?: string; secret?: string | null; mode: 'plan' | 'api_key' };
+type Options = { home: string; tools: string; bin?: string; secret?: string | null; mode: 'plan' | 'api_key'; user?: JobUser | null };
 
 /* The container is the sandbox, so Codex's own approvals and sandbox are off; resume takes no -C or -s. */
 const FLAGS = ['--json', '--skip-git-repo-check', '--dangerously-bypass-approvals-and-sandbox'];
@@ -36,9 +37,11 @@ export function codexEvents(line: unknown): AgentEvent[] {
   return [];
 }
 
-export function codexAdapter({ home, tools, bin = join(tools, 'bin', 'codex'), secret = null, mode }: Options): ProviderAdapter {
+export function codexAdapter({ home, tools, bin = join(tools, 'bin', 'codex'), secret = null, mode, user = null }: Options): ProviderAdapter {
   function env(jobSecret: string | null, toolToken: string | null = null): NodeJS.ProcessEnv {
     const extra: Record<string, string> = { CODEX_HOME: ensureDir(home) };
+    /* A job user cannot write the node's own HOME, so its home is the key's folder. */
+    if (user) extra.HOME = home;
     if (mode === 'api_key') extra.CODEX_API_KEY = jobSecret ?? secret ?? '';
     if (toolToken) extra.HH_TOOL_TOKEN = toolToken;
     return childEnv(tools, extra);
@@ -80,6 +83,7 @@ export function codexAdapter({ home, tools, bin = join(tools, 'bin', 'codex'), s
         cwd: input.workDir,
         timeoutMs: input.timeoutMs,
         signal: input.signal,
+        user,
         onLine(line) {
           let ev: { type?: string; thread_id?: string; item?: { type?: string; text?: string }; error?: { message?: string }; message?: string };
           try {

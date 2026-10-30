@@ -394,6 +394,15 @@ describe('Hornhoof tools and instructions', () => {
     expect(events).toContainEqual({ kind: 'tool', name: 'hornhoof.ping', input: '{"note":"hi"}' });
   });
 
+  it('run as the job user with the key folder as HOME, the MCP config handed to that user', async () => {
+    process.env.FAKE_MODE = 'tools';
+    const user = { uid: process.getuid!(), gid: process.getgid!() };
+    const res = await adapterFor('anthropic_api', { home, tools, bin: join(FAKES, 'claude'), secret: 'company-key-0123456789', user }).run(input({ tools: TOOLS }));
+    expect(res.ok).toBe(true);
+    expect(lastRun().env.HOME).toBe(home);
+    expect(lastRun().mcpConfig!.json).toMatchObject({ mcpServers: { hornhoof: { url: TOOLS.url } } });
+  });
+
   it('leave the Hornhoof server out of a run without tools', async () => {
     process.env.FAKE_MODE = 'tools';
     await adapter('kimi').run(input({ tools: TOOLS }));

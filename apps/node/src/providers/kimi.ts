@@ -1,11 +1,12 @@
 import { readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AgentEvent } from '@hornhoof/protocol';
+import type { JobUser } from '../isolation.js';
 import type { ProviderAdapter, RunInput, RunResult } from '../runner.js';
 import { contentText, inputText, isRecord, toolName } from './events.js';
-import { childEnv, ensureDir, installPackage, interactiveLogin, runProgram, tokensIn } from './process.js';
+import { childEnv, ensureDir, installPackage, interactiveLogin, runProgram, tokensIn, writePrivate } from './process.js';
 
-type Options = { home: string; tools: string; bin?: string };
+type Options = { home: string; tools: string; bin?: string; user?: JobUser | null };
 
 const SIGNED_OUT = /no model configured|\/login|not logged in/i;
 
@@ -42,7 +43,7 @@ export function kimiEvents(line: unknown): AgentEvent[] {
   return events;
 }
 
-export function kimiAdapter({ home, tools, bin = join(tools, 'bin', 'kimi') }: Options): ProviderAdapter {
+export function kimiAdapter({ home, tools, bin = join(tools, 'bin', 'kimi'), user = null }: Options): ProviderAdapter {
   const env = (toolToken: string | null = null) => childEnv(tools, { KIMI_CODE_HOME: ensureDir(home), ...(toolToken ? { HH_TOOL_TOKEN: toolToken } : {}) });
   const credentials = () => files(join(home, 'credentials'));
 
@@ -68,7 +69,7 @@ export function kimiAdapter({ home, tools, bin = join(tools, 'bin', 'kimi') }: O
       const mcpJson = join(ensureDir(home), 'mcp.json');
       if (input.tools) {
         const server = { transport: 'http', url: input.tools.url, bearerTokenEnvVar: 'HH_TOOL_TOKEN' };
-        writeFileSync(mcpJson, JSON.stringify({ mcpServers: { hornhoof: server } }), { mode: 0o600 });
+        writePrivate(mcpJson, JSON.stringify({ mcpServers: { hornhoof: server } }), user);
       } else rmSync(mcpJson, { force: true });
       if (input.instructions) writeFileSync(join(input.workDir, 'AGENTS.md'), input.instructions + '\n');
 
@@ -78,6 +79,7 @@ export function kimiAdapter({ home, tools, bin = join(tools, 'bin', 'kimi') }: O
         bin,
         args,
         env: env(input.tools?.token ?? null),
+        user,
         cwd: input.workDir,
         timeoutMs: input.timeoutMs,
         signal: input.signal,

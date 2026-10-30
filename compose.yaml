@@ -54,8 +54,18 @@ services:
       NODE_KEY: ${NODE_KEY:?Set NODE_KEY in .env}
     volumes:
       - nodedata:/data
+    # Root inside this container only, to start each company key's jobs as a user of its own.
+    # Nothing from the host is mounted and no new privileges can be gained.
+    user: "0:0"
     cap_drop:
       - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETUID
+      - SETGID
+      - KILL
     security_opt:
       - no-new-privileges:true
     depends_on:

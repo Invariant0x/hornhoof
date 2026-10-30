@@ -2,14 +2,15 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AgentEvent, Limits } from '@hornhoof/protocol';
+import type { JobUser } from '../isolation.js';
 import type { ProviderAdapter, RunInput, RunResult } from '../runner.js';
 import { contentText, inputText, isRecord, toolName } from './events.js';
-import { askHidden, childEnv, ensureDir, exitsCleanly, installPackage, interactiveLogin, runProgram, tokensIn } from './process.js';
+import { askHidden, childEnv, ensureDir, exitsCleanly, installPackage, interactiveLogin, runProgram, tokensIn, writePrivate } from './process.js';
 
 /* Claude Code serves three kinds of subscription: a personal plan, a company Anthropic key, and a GLM Coding Plan through Z.ai's Anthropic-compatible endpoint. */
 export type ClaudeMode = 'plan' | 'api_key' | 'glm';
 
-type Options = { home: string; tools: string; bin?: string; secret?: string | null; mode: ClaudeMode };
+type Options = { home: string; tools: string; bin?: string; secret?: string | null; mode: ClaudeMode; user?: JobUser | null };
 
 const GLM_ENV = {
   ANTHROPIC_BASE_URL: 'https://api.z.ai/api/anthropic',
@@ -64,12 +65,14 @@ export function claudeEvents(line: unknown): AgentEvent[] {
 
 const SIGNED_OUT = /not logged in|please run \/login|invalid api key|authentication/i;
 
-export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'), secret = null, mode }: Options): ProviderAdapter {
+export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'), secret = null, mode, user = null }: Options): ProviderAdapter {
   const keyFile = join(home, 'glm-key');
   const glmKey = () => (existsSync(keyFile) ? readFileSync(keyFile, 'utf8').trim() : '');
 
   function env(jobSecret: string | null): NodeJS.ProcessEnv {
     const extra: Record<string, string> = { CLAUDE_CONFIG_DIR: ensureDir(home) };
+    /* A job user cannot write the node's own HOME, so its home is the key's folder. */
+    if (user) extra.HOME = home;
     if (mode === 'api_key') extra.ANTHROPIC_API_KEY = jobSecret ?? secret ?? '';
     if (mode === 'glm') Object.assign(extra, GLM_ENV, { ANTHROPIC_AUTH_TOKEN: glmKey() });
     return childEnv(tools, extra);
@@ -107,7 +110,7 @@ export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'),
       const mcpFile = input.tools ? join(ensureDir(home), `mcp-${randomUUID()}.json`) : null;
       if (mcpFile && input.tools) {
         const server = { type: 'http', url: input.tools.url, headers: { Authorization: `Bearer ${input.tools.token}` } };
-        writeFileSync(mcpFile, JSON.stringify({ mcpServers: { hornhoof: server } }), { mode: 0o600 });
+        writePrivate(mcpFile, JSON.stringify({ mcpServers: { hornhoof: server } }), user);
         args.push('--mcp-config', mcpFile, '--strict-mcp-config');
       }
       if (input.model) args.push('--model', input.model);
@@ -124,6 +127,7 @@ export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'),
         cwd: input.workDir,
         timeoutMs: input.timeoutMs,
         signal: input.signal,
+        user,
         onLine(line) {
           let ev: Record<string, unknown>;
           try {

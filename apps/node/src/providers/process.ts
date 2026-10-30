@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chownSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import type { JobUser } from '../isolation.js';
 import type { LoginIo } from '../runner.js';
 
 /* Output kept in memory per run. The tail sent to Hornhoof is cut from the end of it. */
@@ -16,12 +17,22 @@ export function childEnv(tools: string, extra: Record<string, string>): NodeJS.P
 
 export type Finished = { code: number | null; output: string; timedOut: boolean };
 
-type SpawnOptions = { bin: string; args: string[]; env: NodeJS.ProcessEnv; cwd?: string; timeoutMs: number; signal?: AbortSignal; onLine?: (line: string) => void };
+type SpawnOptions = {
+  bin: string;
+  args: string[];
+  env: NodeJS.ProcessEnv;
+  cwd?: string;
+  timeoutMs: number;
+  signal?: AbortSignal;
+  onLine?: (line: string) => void;
+  /* The built-in node runs each key's program as that key's user. */
+  user?: JobUser | null;
+};
 
 /* Runs a program with no input, reads stdout line by line and stops the whole process group at the timeout or when the signal aborts. */
-export function runProgram({ bin, args, env, cwd, timeoutMs, signal, onLine }: SpawnOptions): Promise<Finished> {
+export function runProgram({ bin, args, env, cwd, timeoutMs, signal, onLine, user }: SpawnOptions): Promise<Finished> {
   return new Promise(resolve => {
-    const child = spawn(bin, args, { env, cwd, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+    const child = spawn(bin, args, { env, cwd, stdio: ['ignore', 'pipe', 'pipe'], detached: true, uid: user?.uid, gid: user?.gid });
     let output = '';
     let partial = '';
     let timedOut = false;
@@ -131,6 +142,12 @@ export function askHidden(io: LoginIo, question: string): Promise<string> {
     input.on('data', onData);
     input.resume();
   });
+}
+
+/* A file only the program's user may read, such as a config that carries a token. */
+export function writePrivate(path: string, content: string, user: JobUser | null): void {
+  writeFileSync(path, content, { mode: 0o600 });
+  if (user) chownSync(path, user.uid, user.gid);
 }
 
 export function ensureDir(path: string): string {
