@@ -84,7 +84,6 @@ export const ru: Messages = {
     orchestrator: 'Оркестратор',
     emptyHint: 'Отделов пока нет. Расскажите оркестратору о компании, и он предложит структуру.',
     build: 'Построить компанию',
-    addDepartment: '+ Добавить отдел',
     openOrchestrator: 'Открыть оркестратора',
     noAgents: 'Пока без агентов',
     teams: n => `${n} ${plural('ru', n, { one: 'команда', few: 'команды', many: 'команд', other: 'команды' })}`,

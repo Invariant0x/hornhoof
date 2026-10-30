@@ -138,15 +138,6 @@ describe('Map', () => {
     expect(parseFloat(container.querySelector<HTMLElement>('.chips')!.style.top) + 56).toBeLessThanOrEqual(top - 20);
   });
 
-  it('puts the add button under the lowest row once departments go below the hub', async () => {
-    const many = { ...ORG_WITH_TEAMS, departments: Array.from({ length: 6 }, (_, i) => ({ ...ORG_WITH_TEAMS.departments[0]!, id: `d${i}`, name: `Dept ${i}` })) };
-    mockApi({ 'GET /api/org': [200, many] });
-    const { container } = render(<MapScreen {...PROPS} />);
-    await screen.findByText('Dept 5');
-    const lowest = Math.max(...[...container.querySelectorAll<HTMLElement>('.dept')].map(d => parseFloat(d.style.top) + parseFloat(d.style.height)));
-    expect(parseFloat(container.querySelector<HTMLElement>('.add')!.style.top)).toBeGreaterThanOrEqual(lowest + 16);
-  });
-
   it('sends no pulses while nobody exchanges messages', async () => {
     mockApi({ 'GET /api/org': [200, ORG_WITH_TEAMS] });
     const { container } = render(<MapScreen {...PROPS} />);
@@ -197,7 +188,8 @@ describe('Map', () => {
     expect(screen.getByText('Mascot, Characters')).toBeInTheDocument();
     expect(screen.getAllByText('No agents yet')).toHaveLength(2);
     expect([...container.querySelectorAll('.dept .cnt')].map(c => c.textContent)).toEqual(['0/0', '0/0']);
-    expect(screen.getByRole('button', { name: '+ Add department' })).toBeInTheDocument();
+    /* Departments are added by asking the orchestrator. */
+    expect(screen.queryByRole('button', { name: '+ Add department' })).not.toBeInTheDocument();
     unmount();
     localStorage.setItem('hh-lang', 'ru');
     try {
@@ -323,13 +315,11 @@ describe('Map', () => {
     expect(screen.getByRole('button', { name: /Support/ })).toHaveTextContent('No agents yet');
   });
 
-  it("shows the company's turn under the hub and keeps the add button clear of it", async () => {
+  it("shows the company's turn under the hub, between the traces", async () => {
     mockApi({ 'GET /api/org': [200, { ...ORG_WITH_TEAMS, turn: { id: 'u3', number: 3, goal: 'Take payments' } }] });
     const { container } = render(<MapScreen {...PROPS} />);
     const turn = await screen.findByText('Turn 3');
     expect(turn.closest('.hub-turn')).toHaveTextContent('Turn 3Take payments');
-    const top = (el: Element | null) => parseFloat((el as HTMLElement).style.top);
-    expect(top(container.querySelector('.add'))).toBeGreaterThan(top(container.querySelector('.hub-turn')) + 48);
     /* Traces to the lower rows leave the hub 84 to each side of its middle (600); the turn stays between them. */
     const box = container.querySelector('.hub-turn') as HTMLElement;
     expect(parseFloat(box.style.left)).toBeGreaterThanOrEqual(600 - 84);
