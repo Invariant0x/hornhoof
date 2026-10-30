@@ -40,7 +40,7 @@ type Turn = {
   over?: { message: string; error: JobError; sessionId: string | null } | null;
   opened?: Deferred<void>;
   /* A turn that only starts the program, until the program has its tools. A person who types meanwhile takes its place. */
-  starting?: Promise<unknown>;
+  starting?: boolean;
 };
 type JobError = RunResult['error'];
 
@@ -78,6 +78,8 @@ type Agent = {
   settling: Promise<void> | null;
   /* The program was started for a person and nothing was said in it yet: its new session has no log to resume. */
   fresh: boolean;
+  /* While a start turn waits for the program's tools: what people type meanwhile reaches Hornhoof after it, in order. */
+  starting: Promise<unknown> | null;
 };
 
 type View = { child: ChildProcess; key: string; write: boolean; mask: StreamMask; decoder: StringDecoder; pending: string; timer: NodeJS.Timeout | null; quiet: NodeJS.Timeout | null };
@@ -184,7 +186,7 @@ export class TerminalHost {
   private agent(key: string): Agent {
     let a = this.agents.get(key);
     if (!a) {
-      a = { key, name: `a-${key}`, program: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, viewers: 0, idle: null, watch: null, queue: Promise.resolve(), unopened: [], stopped: false, lastText: null, settling: null, fresh: false };
+      a = { key, name: `a-${key}`, program: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, viewers: 0, idle: null, watch: null, queue: Promise.resolve(), unopened: [], stopped: false, lastText: null, settling: null, fresh: false, starting: null };
       this.agents.set(key, a);
     }
     return a;
@@ -214,7 +216,7 @@ export class TerminalHost {
        keeps only what was said in its log, so what a new session was told from before goes with it to every resume. */
     const kept = program.kind === 'claude' && input.sessionId ? keptContext(input.workDir, input.sessionId) : null;
     const context = kept && input.context && !kept.includes(input.context) ? `${kept}\n\n${input.context}` : (kept ?? input.context);
-    const told = [input.instructions, context].filter(Boolean).join('\n\n');
+    const told = [input.instructions, context, input.guidance].filter(Boolean).join('\n\n');
     if (told && program.kind === 'claude') {
       instructionsFile = join(input.workDir, '.hh-instructions.md');
       writeFileSync(instructionsFile, told + '\n', { mode: 0o600 });
@@ -232,7 +234,9 @@ export class TerminalHost {
     this.drain(a);
     a.lastText = null;
     this.bridge.setToken(job.key, input.tools?.token ?? null);
-    const turn: Turn = { jobId: null, onEvent: input.onEvent ?? (() => {}), typed: false, seq: 0, deadline, ...(input.prompt ? {} : { starting: tools ?? Promise.resolve() }) };
+    const starting = input.prompt ? null : (tools ?? Promise.resolve());
+    const turn: Turn = { jobId: null, onEvent: input.onEvent ?? (() => {}), typed: false, seq: 0, deadline, ...(starting ? { starting: true } : {}) };
+    if (starting) a.starting = starting;
     a.turn = turn;
     a.ended = deferred();
     a.stopped = false;
@@ -294,6 +298,7 @@ export class TerminalHost {
         }
       }
     } finally {
+      if (starting && a.starting === starting) a.starting = null;
       if (a.turn === turn) {
         this.bridge.setToken(job.key, null);
         a.turn = null;
@@ -493,7 +498,7 @@ export class TerminalHost {
      for a while; Codex goes on, and what it does waits in the turn. fromLog: the typing was read from the log, which is
      being read now. */
   private async openTyped(a: Agent, text: string, fromLog = false): Promise<void> {
-    const start = a.turn?.starting;
+    const start = a.starting;
     if (a.idle) clearTimeout(a.idle);
     a.fresh = false;
     if (!fromLog) this.drain(a);

@@ -228,10 +228,12 @@ describe("working in the product's repository", () => {
     await repository(dev.id, { url: 'https://github.com/acme/platform.git', branch: 'main' });
     const pia = await hire('Pia', null);
     builtin.send({ type: 'agent.start', agentKey: pia.id });
-    const start = (await nextRun(builtin)) as Run & { context?: string | null };
+    const start = (await nextRun(builtin)) as Run & { context?: string | null; guidance?: string | null };
     expect(start.prompt).toBe('');
-    expect(start.context).toContain('https://github.com/acme/platform.git');
-    expect(start.context).toContain('./platform');
+    /* Apart from the conversation, which the node keeps with the session: the repository can change. */
+    expect(start.guidance).toContain('https://github.com/acme/platform.git');
+    expect(start.guidance).toContain('./platform');
+    expect(start.context ?? '').not.toContain('platform');
   });
 
   it('sends a turn without a repository with the agent folder alone', async () => {

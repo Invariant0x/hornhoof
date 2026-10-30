@@ -325,15 +325,36 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
 
   it('gives a Claude session it resumes the conversation from before that the session was started with', async () => {
     await setUp();
-    await host.run(job('a44', '', { context: 'Earlier: Ivan said we sell software.' }));
+    await host.run(job('a44', '', { context: 'Earlier: Ivan said we sell software.', guidance: 'Your repository is ./shop.' }));
+    expect(readFileSync(join(home, 'work', 'a44', '.hh-instructions.md'), 'utf8')).toContain('./shop');
     await typeTurn('a44', 't44', 'hello', 'job-44');
     await until(() => Boolean(done('job-44')));
     const { sessionId } = done('job-44') as { sessionId: string };
     await host.run(job('a44', 'EXIT', { sessionId }));
-    /* Hornhoof goes on with the session and sends nothing from before: Claude Code's log has only what was said in it. */
-    expect(await host.run(job('a44', 'again', { sessionId }))).toMatchObject({ ok: true, result: 'echo: again' });
+    /* Hornhoof goes on with the session and sends nothing from before: Claude Code's log has only what was said in it.
+       Where the repository is comes fresh with each start, as it can change. */
+    expect(await host.run(job('a44', '', { sessionId, guidance: 'Your repository is ./platform.' }))).toMatchObject({ ok: true });
     expect(await host.screen('a44')).toContain(`fake claude resumed ${sessionId}`);
-    expect(readFileSync(join(home, 'work', 'a44', '.hh-instructions.md'), 'utf8')).toContain('we sell software');
+    const told = readFileSync(join(home, 'work', 'a44', '.hh-instructions.md'), 'utf8');
+    expect(told).toContain('we sell software');
+    expect(told).toContain('./platform');
+    expect(told).not.toContain('./shop');
+  });
+
+  it('tells Hornhoof of turns typed while the program starts in the order they were typed', async () => {
+    await setUp({ toolsMs: 1500 });
+    const starting = host.run(codexJob('c46', ''));
+    await until(async () => (await host.screen('c46')).includes('›'));
+    await host.open({ type: 'term.open', termId: 'v46', agentKey: 'c46', cols: 80, rows: 24, write: true });
+    for (const line of ['first', 'second']) {
+      host.input({ type: 'term.input', termId: 'v46', data: line });
+      await new Promise(r => setTimeout(r, 200));
+      host.input({ type: 'term.input', termId: 'v46', data: '\r' });
+      await until(async () => (await host.screen('c46')).includes(`echo: ${line}`));
+    }
+    await starting;
+    await until(() => sent.filter(m => m.type === 'turn.open').length === 2);
+    expect(sent.flatMap(m => (m.type === 'turn.open' ? [m.text] : []))).toEqual(['first', 'second']);
   });
 
   it('starts the program in place of the waiting screen shown after its session was gone', async () => {

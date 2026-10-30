@@ -219,7 +219,8 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
     timeoutMs: job.timeoutMs,
     instructions: instructions.text,
     toolToken: token,
-    context: job.prompt ? null : [catchUp, repo ? repoLine(repo) : null].filter(Boolean).join('\n\n') || null,
+    context: job.prompt ? null : catchUp,
+    guidance: job.prompt || !repo ? null : repoLine(repo),
     /* Each agent keeps one folder on the node, with its repository's clone inside. */
     workspace: { key: agent.id, repo },
   });
