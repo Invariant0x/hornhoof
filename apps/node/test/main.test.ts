@@ -81,6 +81,30 @@ describe('a node that runs agents in terminals', () => {
     expect(server.received.find(m => m.type === 'job.done' && m.jobId === 'j2')).toMatchObject({ ok: true, result: 'ready' });
   });
 
+  it.skipIf(!hasTmux)("hides on a screen a program's token from after the node started, with no Hornhoof turn since", async () => {
+    const server = await fakeServer();
+    const dir = nodeDir(server.url);
+    const tmux = new Tmux({ socket: `hh-learn-${process.pid}`, env: { PATH: process.env.PATH ?? '', HOME: dir } });
+    const fake = new URL('./fakes/fake-term.mjs', import.meta.url).pathname;
+    const tokens: string[] = [];
+    const node = await runNode({ dir, adapter: { ...adapter, secrets: async () => tokens }, log: () => {}, learnMs: 50, terminal: { tmux, program: claudeProgram, bin: fake, home: join(dir, 'home'), signedOut: /not logged in/i } });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', sessionId: null, model: null, timeoutMs: 20000, secret: null, instructions: 'Be brief.', toolToken: 'tok-1', prompt: 'hi', workspace: { key: 'agent-1', repo: null } });
+    await server.wait(() => server.received.some(m => m.type === 'job.done'), 15000);
+    tokens.push('late-token-1234567890');
+    await new Promise(r => setTimeout(r, 200));
+    server.send({ type: 'term.open', termId: 't1', agentKey: 'agent-1', cols: 90, rows: 30, write: true });
+    const screen = () => server.received.flatMap(m => (m.type === 'term.data' ? [String(m.data)] : [])).join('');
+    await server.wait(() => screen().length > 0, 8000);
+    server.send({ type: 'term.input', termId: 't1', data: 'say late-token-1234567890\r' });
+    await server.wait(() => server.received.some(m => m.type === 'turn.open'), 8000);
+    server.send({ type: 'turn.opened', agentKey: 'agent-1', jobId: null, toolToken: null });
+    await server.wait(() => screen().includes('echo: say'), 8000);
+    expect(screen()).toContain('[hidden]');
+    expect(screen()).not.toContain('late-token-1234567890');
+  });
+
   it('ends a view it cannot show when it runs no terminals', async () => {
     const server = await fakeServer();
     const node = await runNode({ dir: nodeDir(server.url), adapter, log: () => {} });

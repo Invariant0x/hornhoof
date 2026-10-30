@@ -1,5 +1,5 @@
-const HIDDEN = '[hidden]';
-const MIN_LENGTH = 8;
+export const HIDDEN = '[hidden]';
+export const MIN_LENGTH = 8;
 
 /* Every form a secret may show in, plain or base64, longest first. Short values are left out, they would hide ordinary words. */
 export function secretForms(secrets: string[]): string[] {

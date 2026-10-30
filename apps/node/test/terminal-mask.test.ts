@@ -27,4 +27,28 @@ describe('hiding secrets on a live screen', () => {
     const mask = new StreamMask(() => [SECRET]);
     expect(mask.push(`key ${Buffer.from(SECRET).toString('base64')} ok`) + mask.flush()).toBe('key [hidden] ok');
   });
+
+  it('hides a long start of a secret when the screen goes quiet on it', () => {
+    const mask = new StreamMask(() => [SECRET]);
+    expect(mask.push('key tok-1234567')).toBe('key ');
+    expect(mask.flush()).toBe('[hidden]');
+  });
+
+  it('hides the rest of a secret whose short start went out on a quiet screen', () => {
+    const mask = new StreamMask(() => [SECRET]);
+    expect(mask.push('see tok-') + mask.flush()).toBe('see tok-');
+    expect(mask.push('1234567890abcdef end') + mask.flush()).toBe('[hidden] end');
+  });
+
+  it('keeps a secret hidden when it comes one quiet piece at a time, as an answer streams', () => {
+    const mask = new StreamMask(() => [SECRET]);
+    const out = [...SECRET].map(c => mask.push(c) + mask.flush()).join('');
+    expect(out.replaceAll('[hidden]', '')).toBe('tok-123');
+  });
+
+  it('forgets a start that the screen did not go on with', () => {
+    const mask = new StreamMask(() => [SECRET]);
+    expect(mask.push('tok') + mask.flush()).toBe('tok');
+    expect(mask.push('en ok') + mask.flush()).toBe('en ok');
+  });
 });

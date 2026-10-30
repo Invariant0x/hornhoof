@@ -1,25 +1,56 @@
-import { redact, secretForms } from '../redact.js';
+import { HIDDEN, MIN_LENGTH, redact, secretForms } from '../redact.js';
 
 /* Hides secrets in a screen that arrives in pieces. The end of a piece that could be the start of a secret waits for the
-   next piece, or for flush() when the screen goes quiet. */
+   next piece, or for flush() when the screen goes quiet. A start that went out then is remembered, so the rest of the
+   secret is hidden when it comes, and once it is long enough to tell something it goes out hidden too. */
 export class StreamMask {
   private held = '';
+  private sent = '';
 
   constructor(private readonly secrets: () => string[]) {}
 
   push(chunk: string): string {
     const secrets = this.secrets();
-    const text = redact(this.held + chunk, secrets);
-    const keep = longestStart(text, secretForms(secrets));
+    const forms = secretForms(secrets);
+    let text = this.held + chunk;
+    this.held = '';
+    if (this.sent) {
+      const go = goOn(this.sent, text, forms);
+      if (go === 'partly') {
+        this.held = text;
+        return '';
+      }
+      this.sent = '';
+      if (go !== null) text = HIDDEN + text.slice(go);
+    }
+    text = redact(text, secrets);
+    const keep = longestStart(text, forms);
     this.held = text.slice(text.length - keep);
     return text.slice(0, text.length - keep);
   }
 
   flush(): string {
-    const rest = this.held;
+    if (!this.held) return '';
+    const start = this.sent + this.held;
+    const out = start.length >= MIN_LENGTH ? HIDDEN : this.held;
+    this.sent = start;
     this.held = '';
-    return rest;
+    return out;
   }
+}
+
+/* How text goes on from a start that is already out: with the rest of a secret (its length), with a piece of that rest
+   ('partly'), or with something else (null). */
+function goOn(sent: string, text: string, values: string[]): number | 'partly' | null {
+  for (const value of values) {
+    for (let n = Math.min(value.length - 1, sent.length); n > 0; n--) {
+      if (!sent.endsWith(value.slice(0, n))) continue;
+      const rest = value.slice(n);
+      if (text.startsWith(rest)) return rest.length;
+      if (rest.startsWith(text)) return 'partly';
+    }
+  }
+  return null;
 }
 
 /* How many characters at the end of text could begin one of the values. */

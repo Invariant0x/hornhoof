@@ -19,6 +19,8 @@ import { Tmux } from './terminal/tmux.js';
 export const VERSION: string = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
 const LOGIN_CHECK_MS = 10_000;
+/* How often a node with terminals reads its program's tokens again: a program signs in again or renews them between turns. */
+const LEARN_MS = 60_000;
 /* How long a removal waits for called-off jobs to stop before it deletes their folders. */
 const STOP_WAIT_MS = 5_000;
 
@@ -36,10 +38,11 @@ type RunOptions = {
   builtin?: { server: string; key: string };
   log?: (line: string) => void;
   loginCheckMs?: number;
+  learnMs?: number;
 };
 
 /* The node's life: stay connected, run jobs, report the sign-in state and the limits, clean up when removed. */
-export async function runNode({ dir, adapter, builtin, terminal, log = console.log, loginCheckMs = LOGIN_CHECK_MS }: RunOptions): Promise<{ stop(): void }> {
+export async function runNode({ dir, adapter, builtin, terminal, log = console.log, loginCheckMs = LOGIN_CHECK_MS, learnMs = LEARN_MS }: RunOptions): Promise<{ stop(): void }> {
   if (!builtin && isRemoved(dir)) {
     log('This node was removed in Hornhoof.');
     return { stop() {} };
@@ -186,10 +189,13 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
     }
   }, loginCheckMs);
   timer.unref();
+  const learning = host ? setInterval(() => void learn(), learnMs) : null;
+  learning?.unref();
 
   function stop() {
     stopped = true;
     clearInterval(timer);
+    if (learning) clearInterval(learning);
     void host?.stop();
     /* Let the last message leave before the socket closes. */
     setTimeout(() => conn.close(), 50);
