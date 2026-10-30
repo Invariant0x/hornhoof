@@ -1,0 +1,122 @@
+import type { AddressInfo } from 'node:net';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { asc, eq } from 'drizzle-orm';
+import type { FastifyInstance } from 'fastify';
+import { describe, expect, it, onTestFinished } from 'vitest';
+import { hashToken } from '../src/crypto/tokens.js';
+import type { Db } from '../src/db/client.js';
+import { agentEvents, agents, companies, departments, jobs, proposals, subscriptions } from '../src/db/schema.js';
+import { listen, setUpCompany, testApp } from './helpers.js';
+
+const TOKEN = 'tool-token-0123456789abcdef0123456789';
+
+async function company() {
+  const { app, db } = await testApp();
+  await listen(app);
+  await setUpCompany(app);
+  const [acme] = await db.select().from(companies);
+  const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+  const [sub] = await db.select().from(subscriptions);
+  const job = async (status: 'running' | 'done', token = TOKEN) =>
+    (await db.insert(jobs).values({ companyId: acme!.id, subscriptionId: sub!.id, agentId: orchestrator!.id, kind: 'conversation', prompt: 'hi', timeoutMs: 900000, status, toolTokenHash: hashToken(token) }).returning())[0]!;
+  return { app, db, companyId: acme!.id, orchestrator: orchestrator!, job };
+}
+
+async function mcp(app: FastifyInstance, token?: string): Promise<Client> {
+  const url = new URL(`http://127.0.0.1:${(app.server.address() as AddressInfo).port}/mcp`);
+  const transport = new StreamableHTTPClientTransport(url, { requestInit: { headers: token ? { Authorization: `Bearer ${token}` } : {} } });
+  const client = new Client({ name: 'test', version: '0.0.0' });
+  await client.connect(transport);
+  onTestFinished(() => client.close());
+  return client;
+}
+
+const text = (res: unknown) => ((res as { content: { type: string; text: string }[] }).content[0]!.text);
+const SALES = { template: 'sales', checked: true, note: 'Schools first' };
+
+async function propose(client: Client, items: object[]) {
+  return client.callTool({ name: 'propose_structure', arguments: { brief: 'Acme sells characters to schools. Two products.', items } });
+}
+
+const stored = async (db: Db) => ({
+  proposals: await db.select().from(proposals).orderBy(asc(proposals.createdAt)),
+  events: await db.select().from(agentEvents).where(eq(agentEvents.kind, 'proposal')),
+});
+
+describe('/mcp', () => {
+  it('refuses a request without a token or with the token of a finished job', async () => {
+    const { app, job } = await company();
+    await job('done');
+    await expect(mcp(app)).rejects.toThrow();
+    await expect(mcp(app, TOKEN)).rejects.toThrow();
+  });
+
+  it('answers 405 to GET and DELETE', async () => {
+    const { app } = await company();
+    expect((await app.inject({ method: 'GET', url: '/mcp' })).statusCode).toBe(405);
+    expect((await app.inject({ method: 'DELETE', url: '/mcp' })).statusCode).toBe(405);
+  });
+
+  it('offers exactly the company view and the structure proposal', async () => {
+    const { app, job } = await company();
+    await job('running');
+    const client = await mcp(app, TOKEN);
+    expect((await client.listTools()).tools.map(t => t.name).sort()).toEqual(['company', 'propose_structure']);
+  });
+
+  it('describes the company with the templates and no email addresses', async () => {
+    const { app, db, companyId, job } = await company();
+    await job('running');
+    await db.update(companies).set({ brief: 'Characters for schools.' }).where(eq(companies.id, companyId));
+    const [dev] = await db.insert(departments).values({ companyId, name: null, templateKey: 'development', roleCode: 'DEV', about: 'Two products' }).returning();
+    await db.insert(departments).values({ companyId, name: 'Mascot', roleCode: 'DEV', parentId: dev!.id });
+    const client = await mcp(app, TOKEN);
+    const raw = text(await client.callTool({ name: 'company', arguments: {} }));
+    expect(raw).not.toMatch(/@/);
+    const view = JSON.parse(raw);
+    expect(view).toMatchObject({
+      name: 'Acme',
+      brief: 'Characters for schools.',
+      people: [{ name: 'Ivan', title: 'CEO' }],
+      departments: [{ id: dev!.id, name: 'Development', template: 'development', about: 'Two products', products: [{ name: 'Mascot' }] }],
+      subscriptions: [{ provider: 'anthropic_api', kind: 'api_key', servesWholeCompany: true }],
+    });
+    expect(view.templates).toHaveLength(8);
+    expect(view.templates.filter((t: { alwaysOn: boolean }) => t.alwaysOn).map((t: { key: string }) => t.key)).toEqual(['operations']);
+    expect(view.templates[0]).toMatchObject({ key: 'operations', name: 'Operations', description: expect.any(String) });
+  });
+
+  it('turns a structure it cannot accept into an error the agent can read, and stores nothing', async () => {
+    const { app, db, companyId, job } = await company();
+    await job('running');
+    const [ops] = await db.insert(departments).values({ companyId, name: null, templateKey: 'operations', roleCode: 'OPS' }).returning();
+    const client = await mcp(app, TOKEN);
+    for (const items of [
+      [{ department: ops!.id, checked: true, note: '', remove: true }],
+      [{ department: '00000000-0000-4000-8000-000000000000', checked: true, note: '' }],
+      [SALES, SALES],
+      [{ template: 'operations', checked: true, note: '' }],
+    ]) {
+      const res = await propose(client, items);
+      expect(res.isError, JSON.stringify(items)).toBe(true);
+      expect(text(res).length).toBeGreaterThan(10);
+    }
+    expect(await stored(db)).toEqual({ proposals: [], events: [] });
+  });
+
+  it('shows a valid structure to the CEO, and a newer one replaces it', async () => {
+    const { app, db, orchestrator, job } = await company();
+    const running = await job('running');
+    const client = await mcp(app, TOKEN);
+    const first = await propose(client, [SALES]);
+    expect(first.isError).toBeFalsy();
+    expect(text(first)).toBe('Shown to the CEO. Wait for their answer.');
+    await propose(client, [SALES, { template: 'sales', name: 'Sales Europe', checked: true, note: 'Later' }]);
+    const { proposals: rows, events } = await stored(db);
+    expect(rows.map(p => p.status)).toEqual(['dismissed', 'pending']);
+    expect(rows[1]).toMatchObject({ agentId: orchestrator.id, jobId: running.id, brief: 'Acme sells characters to schools. Two products.' });
+    expect(events).toHaveLength(2);
+    expect(events[1]!.data).toMatchObject({ proposalId: rows[1]!.id, items: [SALES, { name: 'Sales Europe' }] });
+  });
+});

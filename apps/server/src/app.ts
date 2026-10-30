@@ -15,6 +15,7 @@ import { orgRoutes } from './modules/org/routes.js';
 import { peopleRoutes } from './modules/people/routes.js';
 import { setupRoutes } from './modules/setup/routes.js';
 import { subscriptionRoutes } from './modules/subscriptions/routes.js';
+import { mcpRoutes } from './modules/tools/mcp.js';
 import { hasWebApp, serveWebApp, webAppRoutes } from './web.js';
 
 export type { Db } from './db/client.js';
@@ -59,5 +60,6 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   nodeSocket(app, ctx);
   jobRoutes(app, ctx);
   streamRoutes(app, ctx);
+  mcpRoutes(app, ctx);
   return app;
 }

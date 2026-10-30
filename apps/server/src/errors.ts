@@ -26,7 +26,8 @@ export type ErrorReason =
   | 'machine_offline'
   | 'needs_login'
   | 'job_unknown'
-  | 'too_many_attempts';
+  | 'too_many_attempts'
+  | 'tool_token_invalid';
 
 export class ApiError extends Error {
   constructor(
