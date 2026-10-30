@@ -94,6 +94,24 @@ describe("an agent's folder and its repository", () => {
     expect(moved.calls[0]!.cwd).toBe(join(dir, 'work', 'agents', AGENT, 'shop'));
   });
 
+  it("sets the commit author Hornhoof names in the clone on every turn, and leaves the clone's own otherwise", async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-ws-'));
+    const author = { name: 'Ivan Korol', email: 'ivan@acme.dev' };
+    const first = fakeGit();
+    await runJob(fakeAdapter(), job({ workspace: { key: AGENT, repo: { ...REPO, author } } }), dir, { git: first.git });
+    const clone = join(dir, 'work', 'agents', AGENT, 'shop');
+    expect(first.calls.slice(1).map(c => [c.args, c.cwd])).toEqual([
+      [['config', '--', 'user.name', 'Ivan Korol'], clone],
+      [['config', '--', 'user.email', 'ivan@acme.dev'], clone],
+    ]);
+    const again = fakeGit();
+    await runJob(fakeAdapter(), job({ jobId: 'job-2', workspace: { key: AGENT, repo: { ...REPO, author } } }), dir, { git: again.git });
+    expect(again.calls.map(c => c.args)).toEqual([['remote', 'get-url', 'origin'], ['config', '--', 'user.name', 'Ivan Korol'], ['config', '--', 'user.email', 'ivan@acme.dev']]);
+    const none = fakeGit();
+    await runJob(fakeAdapter(), job({ jobId: 'job-3', workspace: { key: AGENT, repo: { ...REPO, author: null } } }), dir, { git: none.git });
+    expect(none.calls.map(c => c.args)).toEqual([['remote', 'get-url', 'origin']]);
+  });
+
   it('leaves out the askpass helper for a public repository without a token', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'hh-ws-'));
     const { git, calls } = fakeGit();

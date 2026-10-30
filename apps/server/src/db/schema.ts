@@ -77,6 +77,9 @@ export const departments = pgTable('departments', {
   repoBranch: text('repo_branch'),
   repoTokenEnc: text('repo_token_enc'),
   repoTokenLast4: text('repo_token_last4'),
+  /* Who the agents' commits are by; without one each agent's program sets its own. */
+  repoAuthorName: text('repo_author_name'),
+  repoAuthorEmail: text('repo_author_email'),
   createdAt: createdAt(),
 });
 

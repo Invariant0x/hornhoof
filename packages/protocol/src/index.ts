@@ -127,7 +127,13 @@ export const Repo = z.object({
     .refine(u => !/^https:\/\/[^/]*@/.test(u), 'Put the token in its own field, not in the address.'),
   branch: z.string().min(1).max(200).regex(/^[A-Za-z0-9._\/-]+$/).refine(b => !b.startsWith('-') && !b.includes('..'), 'Not a branch name.'),
   token: z.string().max(500),
+  /* Who the agents' commits are by: set in the clone, so a node from before it leaves the field out. */
+  author: z
+    .object({ name: z.string().trim().min(1).max(100).regex(/^[^\p{Cc}<>]+$/u), email: z.email().max(200) })
+    .nullable()
+    .optional(),
 });
+export type RepoAuthor = NonNullable<z.infer<typeof Repo>['author']>;
 const Workspace = z.object({ key: Id, repo: Repo.nullable() });
 export type Workspace = z.infer<typeof Workspace>;
 

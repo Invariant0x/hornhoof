@@ -57,6 +57,13 @@
       "when": 1793342185240,
       "tag": "0007_tasks",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1793358565403,
+      "tag": "0008_commit_author",
+      "breakpoints": true
     }
   ]
 }

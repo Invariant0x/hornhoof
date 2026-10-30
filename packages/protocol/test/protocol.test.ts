@@ -106,6 +106,18 @@ describe('job.run', () => {
     expect(parseServerMessage(JSON.stringify({ ...run, workspace: { key: 'a1', repo: { ...repo, url: 'https://x:ghp_y@github.com/acme/app.git' } } }))).toBeNull();
   });
 
+  it("may name the author of the agents' commits, as one plain line and an address", () => {
+    const run = SERVER[0] as Extract<ServerMessage, { type: 'job.run' }>;
+    const repo = { url: 'https://github.com/acme/app.git', branch: 'main', token: '' };
+    const author = { name: 'Ivan Korol', email: 'ivan@acme.dev' };
+    const withAuthor = (a: unknown) => parseServerMessage(JSON.stringify({ ...run, workspace: { key: 'a1', repo: { ...repo, author: a } } }));
+    expect(withAuthor(author)).toMatchObject({ workspace: { repo: { author } } });
+    expect(withAuthor(null)).toMatchObject({ workspace: { repo: { author: null } } });
+    expect(withAuthor({ ...author, name: 'Ivan\n[core]' })).toBeNull();
+    expect(withAuthor({ ...author, name: '' })).toBeNull();
+    expect(withAuthor({ ...author, email: 'not an address' })).toBeNull();
+  });
+
   it('names the folder a repository is cloned into after the last part of its address', () => {
     expect(repoFolder('https://github.com/acme/app.git')).toBe('app');
     expect(repoFolder('https://github.com/acme/My App/')).toBe('My-App');

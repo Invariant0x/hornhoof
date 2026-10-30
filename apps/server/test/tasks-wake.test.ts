@@ -202,12 +202,24 @@ describe("working in the product's repository", () => {
     const pia = await hire('Pia', null);
     await wakeAll(ctx, [{ agentId: bruno.id, taskId: (await task(bruno.id)).id, why: 'assigned' }]);
     const first = await nextRun(builtin);
-    expect(first.workspace).toEqual({ key: bruno.id, repo: { url: 'https://github.com/acme/shop.git', branch: 'release', token: 'ghp_shop2222' } });
+    expect(first.workspace).toEqual({ key: bruno.id, repo: { url: 'https://github.com/acme/shop.git', branch: 'release', token: 'ghp_shop2222', author: null } });
     expect(first.prompt).toContain('https://github.com/acme/shop.git');
     expect(first.prompt).toContain('./shop');
     expect(first.prompt).not.toContain('ghp_');
     await wakeAll(ctx, [{ agentId: pia.id, taskId: (await task(pia.id)).id, why: 'assigned' }]);
-    expect((await nextRun(builtin)).workspace).toEqual({ key: pia.id, repo: { url: 'https://github.com/acme/platform.git', branch: 'main', token: 'ghp_platform1111' } });
+    expect((await nextRun(builtin)).workspace).toEqual({ key: pia.id, repo: { url: 'https://github.com/acme/platform.git', branch: 'main', token: 'ghp_platform1111', author: null } });
+  });
+
+  it('tells the agent who its commits are by, and to add no co-author lines', async () => {
+    const { ctx, builtin, dev, hire, repository, task } = await withRepositories();
+    const author = { name: 'Ivan Korol', email: 'ivan@acme.dev' };
+    await repository(dev.id, { url: 'https://github.com/acme/platform.git', branch: 'main', author });
+    const pia = await hire('Pia', null);
+    await wakeAll(ctx, [{ agentId: pia.id, taskId: (await task(pia.id)).id, why: 'assigned' }]);
+    const run = await nextRun(builtin);
+    expect(run.workspace?.repo?.author).toEqual(author);
+    expect(run.prompt).toContain('Commit as Ivan Korol <ivan@acme.dev>');
+    expect(run.prompt).toContain('Co-Authored-By');
   });
 
   it('sends a turn without a repository with the agent folder alone', async () => {

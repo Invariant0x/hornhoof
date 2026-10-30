@@ -266,6 +266,10 @@ export const en = {
     token: 'Token',
     tokenHint: 'A GitHub token that can read and push to this repository only: it goes with each turn to the machines that run this department\'s agents. Leave it empty for a public one.',
     tokenKeep: 'Leave it empty to keep the saved token. An address on another host needs a new one.',
+    authorName: 'Commit author',
+    authorEmail: 'Author email',
+    authorHint: "Every agent's commits carry this name and address. Leave both empty to let each agent's program pick its own.",
+    commitsAs: (name: string, email: string) => `Commits as ${name} <${email}>`,
     remove: 'Remove',
     removeAsk: 'Remove the repository? Agents keep their clones and the token is deleted.',
     yesRemove: 'Yes, remove',
@@ -478,7 +482,7 @@ export const en = {
     request_closed: 'This was answered already.',
     turn_open: 'A turn is running. Close it before starting the next.',
     no_head: 'This department has no head yet. Hire one first.',
-    repo_invalid: 'Use an https address with no name or token in it, and a plain branch name.',
+    repo_invalid: 'Use an https address with no name or token in it, a plain branch name, and an author name on one line with a full email.',
   },
 };
 
