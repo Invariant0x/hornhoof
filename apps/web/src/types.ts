@@ -58,6 +58,11 @@ export type Org = {
   departments: Department[];
 };
 
+/* An item of the orchestrator's card: a department to create from a template, or a change to one that exists. */
+export type NewItem = { template: TemplateKey; name?: string; checked: boolean; note: string; products?: string[] };
+export type ChangeItem = { department: string; checked: boolean; note: string; products?: string[]; remove?: boolean };
+export type StructureItem = NewItem | ChangeItem;
+
 /* Who a pulse on the map runs between. */
 export type Endpoint = { kind: 'person'; id: string } | { kind: 'orchestrator' } | { kind: 'department'; id: string };
 

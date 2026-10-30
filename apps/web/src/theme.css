@@ -306,3 +306,17 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
   .tabs { padding: 0 2px; }
   .tabs button { padding: 0 7px; font-size: 13px; }
 }
+
+/* The structure card in the orchestrator's window. */
+.t-card { margin-left: 18px; padding: 14px 16px 16px; display: grid; gap: 4px; background: var(--surface2); border: 1px solid var(--line2); border-left: 2px solid var(--cyan); font-family: var(--f-body); font-size: 14px; line-height: 1.4; }
+.t-card h4 { margin: 0 0 6px; font-family: var(--f-display); font-size: 15px; font-weight: 600; }
+.t-card label { display: grid; grid-template-columns: 22px 1fr; gap: 8px; align-items: start; padding: 6px 0; cursor: pointer; }
+.t-card label.lock { cursor: default; }
+.t-card input { width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--cyan); }
+.t-card small { display: block; color: var(--muted); font-size: 12.5px; }
+.t-card .f { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 10px; }
+.t-card .alert { margin: 6px 0 0; }
+.t-card-tag { margin-left: 8px; font-style: normal; font-size: 12.5px; color: var(--pink); }
+.t-card-state { font-size: 13px; color: var(--muted); }
+.t-card.done label { cursor: default; }
+.t-card.done label > *, .t-card.done h4 { opacity: .6; }

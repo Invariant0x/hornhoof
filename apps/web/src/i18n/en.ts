@@ -184,6 +184,16 @@ export const en = {
     yesDisconnect: 'Yes, disconnect',
     noMachines: 'No machines yet.',
   },
+  card: {
+    title: 'Company structure',
+    create: (n: number) => `Create departments (${n})`,
+    apply: (n: number) => `Apply changes (${n})`,
+    correct: 'Correct in words',
+    applied: 'Applied',
+    replaced: 'Replaced by a newer proposal',
+    remove: 'Remove',
+    products: 'Products',
+  },
   templates: {
     operations: { name: 'Operations', description: 'Always there: sets up tools, accounts, registrations and integrations for the other departments, and fixes what breaks.' },
     development: { name: 'Development', description: 'Builds and ships the products: code, tests, releases.' },
@@ -228,6 +238,10 @@ export const en = {
     needs_login: 'Sign in to this subscription on its machine first.',
     job_unknown: 'This check no longer exists.',
     too_many_attempts: 'Too many attempts. Wait up to 15 minutes, then try again.',
+    orchestrator_not_ready: 'The orchestrator cannot answer right now.',
+    nothing_running: 'Nothing is running now.',
+    proposal_closed: 'This card was already applied or replaced by a newer one.',
+    structure_invalid: 'This structure does not fit the company as it is now. Ask the orchestrator to correct the card.',
   },
 };
 
