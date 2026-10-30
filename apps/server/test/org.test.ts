@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { agents, companies, departments, jobs, people, subscriptions, teams } from '../src/db/schema.js';
-import { as, SETUP, setUpCompany, testApp } from './helpers.js';
+import { ask, createTask, submit } from '../src/modules/tasks/engine.js';
+import { as, invitePerson, SETUP, setUpCompany, testApp } from './helpers.js';
 
 describe('GET /api/org', () => {
   it('shows the orchestrator with its active API key subscription', async () => {
@@ -52,6 +53,71 @@ describe('GET /api/org', () => {
     expect(org.departments[0]).toMatchObject({ id: dev!.id, name: null, templateKey: 'development', roleCode: 'DEV', about: 'Builds both products' });
     expect(org.departments[0].products.map((p: { name: string }) => p.name)).toEqual(['Mascot', 'Characters']);
     expect(org.departments[1]).toMatchObject({ name: 'Sales Europe', templateKey: 'sales', products: [] });
+  });
+
+  it('tells what each employee does now, and its task only to people who reach the department', async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    const [company] = await db.select().from(companies);
+    const [sub] = await db.select().from(subscriptions);
+    const companyId = company!.id;
+    const [dev, sales] = await db
+      .insert(departments)
+      .values([
+        { companyId, templateKey: 'development', roleCode: 'DEV', position: 0 },
+        { companyId, templateKey: 'sales', roleCode: 'SAL', position: 1 },
+      ])
+      .returning();
+    const hire = async (name: string, kind: 'head' | 'worker', roleKey: string, subscriptionId: string | null = sub!.id) =>
+      (await db.insert(agents).values({ companyId, kind, name, roleKey, departmentId: dev!.id, model: '', subscriptionId }).returning())[0]!;
+    const hana = await hire('Hana', 'head', 'DEV-HEAD');
+    const bruno = await hire('Bruno', 'worker', 'DEV-BE');
+    const felix = await hire('Felix', 'worker', 'DEV-FE');
+    const rita = await hire('Rita', 'worker', 'DEV-REV');
+    const quinn = await hire('Quinn', 'worker', 'DEV-QA');
+    await hire('Ida', 'worker', 'DEV-OPS');
+    await hire('Otto', 'worker', 'DEV-TEST', null);
+    const ctx = app.ctx;
+    const [ceoRow] = await db.select().from(people);
+    const top = (await createTask(ctx, { personId: ceoRow!.id }, { title: 'Payments', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: hana.id })).task;
+    const member = async (title: string, agentId: string, gates: string[] = []) =>
+      (await createTask(ctx, { agentId: hana.id }, { title, brief: '', body: '', departmentId: dev!.id, parentId: top.id, assigneeAgentId: agentId, executor: true, gates })).task;
+    const api = await member('Checkout API', bruno.id);
+    const page = await member('Checkout page', felix.id, [rita.id]);
+    const accept = await member('Acceptance', quinn.id);
+    await submit(ctx, felix.id, page.id, { summary: 'Done', evidence: 'npm test' });
+    await ask(ctx, quinn.id, accept.id, { kind: 'question', text: 'Which cards?' });
+    await db.insert(jobs).values({ companyId, subscriptionId: sub!.id, agentId: bruno.id, taskId: api.id, prompt: 'build', status: 'running', timeoutMs: 1000 });
+
+    const doing = (org: { departments: { id: string; employees: { name: string; status: string; task: { number: number; stage: number } | null }[] }[] }) =>
+      Object.fromEntries(org.departments.find(d => d.id === dev!.id)!.employees.map(e => [e.name, [e.status, e.task && e.task.number]]));
+    const org = (await app.inject({ url: '/api/org', ...as(ceo) })).json();
+    expect(doing(org)).toEqual({
+      Hana: ['handed', top.number],
+      Bruno: ['working', api.number],
+      Felix: ['handed', page.number],
+      Rita: ['queued', page.number],
+      Quinn: ['waiting', accept.number],
+      Ida: ['idle', null],
+      Otto: ['off', null],
+    });
+    const felixLine = org.departments.find((d: { id: string }) => d.id === dev!.id).employees.find((e: { name: string }) => e.name === 'Felix');
+    expect(felixLine.task).toMatchObject({ id: page.id, title: 'Checkout page', stage: 1, gateCount: 1, bounces: 0 });
+    const roles = org.departments.find((d: { id: string }) => d.id === dev!.id).roles;
+    expect(roles.find((r: { id: string }) => r.id === 'DEV-REV')).toMatchObject({ gate: 1, title: { en: 'Code reviewer' } });
+    expect(roles.find((r: { id: string }) => r.id === 'DEV-BE')).toMatchObject({ gate: null });
+
+    const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { departments: [sales!.id] } });
+    const hers = (await app.inject({ url: '/api/org', ...as(maria) })).json();
+    expect(doing(hers)).toEqual({
+      Hana: ['handed', null],
+      Bruno: ['working', null],
+      Felix: ['handed', null],
+      Rita: ['queued', null],
+      Quinn: ['waiting', null],
+      Ida: ['idle', null],
+      Otto: ['off', null],
+    });
   });
 
   it('counts the agents of each department, its products included, and those at work', async () => {

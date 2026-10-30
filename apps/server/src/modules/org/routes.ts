@@ -4,7 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import type { Ctx } from '../../app.js';
 import { accessOf, canReach } from '../../auth/access.js';
 import { personColumns, requirePerson } from '../../auth/session.js';
-import { agents, companies, departments, jobs, people, personAccess, subscriptions, tasks, teams, turns } from '../../db/schema.js';
+import { agents, companies, departments, jobs, people, personAccess, requests, subscriptions, tasks, teams, turns } from '../../db/schema.js';
 import { employeeOrder } from '../agents/order.js';
 import { authorOf } from '../departments/repository.js';
 import { deptName } from '../departments/templates.js';
@@ -26,14 +26,14 @@ export function orgRoutes(app: FastifyInstance, { db, hub, templates }: Ctx): vo
        Only for people who reach the department; the rest see that it exists, not what it does. */
     const reach = await accessOf(db, me);
     const openTasks = await db
-      .select({ id: tasks.id, number: tasks.number, title: tasks.title, departmentId: tasks.departmentId, executor: tasks.executorAgentId })
+      .select()
       .from(tasks)
       .where(and(eq(tasks.companyId, me.companyId), notInArray(tasks.status, ['done', 'cancelled'])))
       .orderBy(desc(tasks.number));
     const currentOf = (id: string) => {
       if (!canReach(reach, { departmentId: id })) return null;
       const mine = openTasks.filter(t => t.departmentId === id);
-      const t = mine.find(x => !x.executor) ?? mine[0];
+      const t = mine.find(x => !x.executorAgentId) ?? mine[0];
       return t ? { id: t.id, number: t.number, title: t.title } : null;
     };
     /* Only people who see the whole company set repositories, so only they read where they are. */
@@ -53,9 +53,35 @@ export function orgRoutes(app: FastifyInstance, { db, hub, templates }: Ctx): vo
     const nextToCeo = active.filter(p => p.scopeKind === 'company' || homes.get(p.id)!.size > 1);
     const views = new Map((await personViews(db, active)).map(v => [v.id, v]));
     const inDepartment = (deptId: string) => active.filter(p => p.scopeKind !== 'company' && homes.get(p.id)!.size === 1 && homes.get(p.id)!.has(deptId)).map(p => views.get(p.id)!);
-    const busy = new Set(
-      (await db.select({ agentId: jobs.agentId }).from(jobs).where(and(eq(jobs.companyId, me.companyId), eq(jobs.status, 'running'), isNotNull(jobs.agentId)))).map(j => j.agentId),
-    );
+    const running = await db
+      .select({ agentId: jobs.agentId, taskId: jobs.taskId })
+      .from(jobs)
+      .where(and(eq(jobs.companyId, me.companyId), eq(jobs.status, 'running'), isNotNull(jobs.agentId)));
+    const busy = new Set(running.map(j => j.agentId));
+    const asked = await db
+      .select({ agentId: requests.agentId, taskId: requests.taskId })
+      .from(requests)
+      .where(and(eq(requests.companyId, me.companyId), eq(requests.status, 'open')));
+    const byId = new Map(openTasks.map(t => [t.id, t]));
+    const parents = new Set(openTasks.map(t => t.parentId));
+    /* The task an agent acts on next: at its own gate, or with it as executor (or holder, for a head's task) before any gate. */
+    const holds = (t: (typeof openTasks)[number], id: string) => (t.stage > 0 ? t.status === 'review' && t.gates[t.stage - 1] === id : (t.executorAgentId ?? t.assigneeAgentId) === id);
+    /* What an employee does now. Working: a turn runs. Waiting: it asked people, or it is blocked. Queued: it holds a task
+       and its turn has not started. Handed: what it holds is with gates or with the tasks it gave out. */
+    const doing = (a: (typeof allAgents)[number]) => {
+      const run = running.find(j => j.agentId === a.id);
+      const held = openTasks.filter(t => holds(t, a.id));
+      const waits = [...asked.filter(r => r.agentId === a.id).map(r => byId.get(r.taskId)), ...held.filter(t => t.status === 'blocked' || t.status === 'waiting')].filter(t => t !== undefined);
+      const next = held.filter(t => !parents.has(t.id) && !waits.includes(t));
+      const gave = [...openTasks.filter(t => t.stage > 0 && t.executorAgentId === a.id), ...held.filter(t => parents.has(t.id))];
+      const pick = (status: 'off' | 'working' | 'waiting' | 'queued' | 'handed' | 'idle', t: (typeof openTasks)[number] | null | undefined) => ({ status, task: t ?? null });
+      if (!a.subscriptionId) return pick('off', null);
+      if (busy.has(a.id)) return pick('working', (run?.taskId && byId.get(run.taskId)) || next[0] || held[0]);
+      if (waits.length) return pick('waiting', waits[0]);
+      if (next.length) return pick('queued', next[0]);
+      if (gave.length) return pick('handed', gave[0]);
+      return pick('idle', null);
+    };
     /* A department's agents include those in its products. */
     const agentsOf = (deptId: string) => {
       const ids = new Set([deptId, ...depts.filter(p => p.parentId === deptId).map(p => p.id)]);
@@ -68,6 +94,7 @@ export function orgRoutes(app: FastifyInstance, { db, hub, templates }: Ctx): vo
         .sort(employeeOrder(templates, dept.templateKey))
         .map(a => {
           const sub = a.subscriptionId ? subs.get(a.subscriptionId) : undefined;
+          const now = doing(a);
           return {
             id: a.id,
             name: a.name,
@@ -78,8 +105,23 @@ export function orgRoutes(app: FastifyInstance, { db, hub, templates }: Ctx): vo
             modelName: (a.model && sub && modelsFor(sub.provider, sub.models).find(m => m.id === a.model)?.name) || null,
             provider: sub?.provider ?? null,
             state: busy.has(a.id) ? 'working' : a.subscriptionId ? 'sleeping' : 'needs_subscription',
+            status: now.status,
+            /* Like the department's current task, only for people who reach it. */
+            task: now.task && canReach(reach, { departmentId: dept.id }) ? { id: now.task.id, number: now.task.number, title: now.task.title, stage: now.task.stage, gateCount: now.task.gates.length, bounces: now.task.bounces } : null,
           };
         });
+    /* The roles a department's employees hold, with the gate each one keeps, for the department's schema. */
+    const rolesOf = (dept: (typeof depts)[number]) => {
+      const held = new Set(allAgents.filter(a => a.departmentId === dept.id && a.roleKey).map(a => a.roleKey!));
+      const roster = dept.templateKey ? templates.roster(dept.templateKey).map(r => r.id) : [];
+      const at = (id: string) => (roster.includes(id) ? roster.indexOf(id) : roster.length);
+      return [...held]
+        .sort((a, b) => at(a) - at(b))
+        .flatMap(id => {
+          const role = templates.roles.get(id);
+          return role ? [{ id, title: role.title, description: role.description, kind: role.kind, gate: role.gate }] : [];
+        });
+    };
 
     return {
       company,
@@ -104,6 +146,7 @@ export function orgRoutes(app: FastifyInstance, { db, hub, templates }: Ctx): vo
           agents: agentsOf(d.id),
           people: inDepartment(d.id),
           employees: employeesOf(d),
+          roles: rolesOf(d),
           products: depts.filter(p => p.parentId === d.id).map(p => ({ id: p.id, name: deptName(p), repository: repositoryOf(p) })),
           current: currentOf(d.id),
           repository: repositoryOf(d),
