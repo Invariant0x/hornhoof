@@ -17,6 +17,10 @@ export type Config = {
   version: string;
   commit: string;
   migrations: number;
+  /* Where newer builds are published, and how often to look; 0 looks only when someone asks. */
+  image: string;
+  registryUrl?: string;
+  updateCheckMs: number;
 };
 
 /* Both src/ and dist/ sit one level below apps/server, so this finds apps/web/dist either way. */
@@ -53,5 +57,8 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     version: env.HORNHOOF_VERSION || productVersion(),
     commit: env.HORNHOOF_COMMIT || 'local',
     migrations: migrationCount(),
+    image: env.HORNHOOF_IMAGE || 'ghcr.io/invariant0x/hornhoof',
+    registryUrl: env.REGISTRY_URL || undefined,
+    updateCheckMs: env.UPDATE_CHECK_MS ? Number(env.UPDATE_CHECK_MS) : 1800000,
   };
 }

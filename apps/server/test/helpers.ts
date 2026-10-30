@@ -43,7 +43,8 @@ export async function testApp(env: NodeJS.ProcessEnv = {}): Promise<{ app: Fasti
     await app?.close();
     await client.close();
   });
-  const config = loadConfig({ HORNHOOF_SECRET: TEST_SECRET, ...env });
+  /* Tests never reach the real registry unless they ask. */
+  const config = loadConfig({ HORNHOOF_SECRET: TEST_SECRET, UPDATE_CHECK_MS: '0', ...env });
   app = await buildApp({ db, config });
   return { app, db, config };
 }
