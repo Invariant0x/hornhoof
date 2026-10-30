@@ -9,7 +9,7 @@ export type Task = typeof tasks.$inferSelect;
 export type Request = typeof requests.$inferSelect;
 /* Who moves a task: a person from the web app, or an agent from its tools. */
 export type Actor = { personId: string; agentId?: undefined } | { agentId: string; personId?: undefined };
-export type WakeWhy = 'assigned' | 'review' | 'changes' | 'stuck_at_gate' | 'done' | 'reported' | 'blocked' | 'answered' | 'comment' | 'updated' | 'reminder';
+export type WakeWhy = 'assigned' | 'review' | 'changes' | 'stuck_at_gate' | 'done' | 'reported' | 'blocked' | 'cancelled' | 'answered' | 'comment' | 'updated' | 'reminder';
 /* An agent that has to act on a task now; Hornhoof queues a turn for it. */
 export type Wake = { agentId: string; taskId: string; why: WakeWhy; text?: string };
 export type Moved = { task: Task; wakes: Wake[] };
@@ -216,7 +216,7 @@ export async function blocked(ctx: Live, agentId: string, taskId: string, why: s
   return { task: row, wakes: giver(task, 'blocked', agentId, why) };
 }
 
-/* Ends the task and every open task under it; questions waiting on them are withdrawn. */
+/* Ends the task and every open task under it; questions waiting on them are withdrawn. Whoever gave it out hears why. */
 export async function cancel(ctx: Live, actor: Actor, taskId: string, why: string): Promise<Moved> {
   const task = await loadTask(ctx.db, taskId);
   stillOpen(task);
@@ -240,7 +240,7 @@ export async function cancel(ctx: Live, actor: Actor, taskId: string, why: strin
   });
   for (const t of ended) published(ctx, t);
   ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
-  return { task: row, wakes: [] };
+  return { task: row, wakes: giver(task, 'cancelled', actor.agentId, why.trim()) };
 }
 
 export type TaskChange = { title?: string; brief?: string; body?: string; executor?: string; gates?: string[] };

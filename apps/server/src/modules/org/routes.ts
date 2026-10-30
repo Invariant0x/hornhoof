@@ -35,7 +35,8 @@ export function orgRoutes(app: FastifyInstance, { db, hub, templates }: Ctx): vo
       const t = mine.find(x => !x.executor) ?? mine[0];
       return t ? { id: t.id, number: t.number, title: t.title } : null;
     };
-    const repositoryOf = (d: (typeof depts)[number]) => (d.repoUrl ? { url: d.repoUrl, branch: d.repoBranch ?? 'main', tokenLast4: d.repoTokenLast4 } : null);
+    /* Only people who see the whole company set repositories, so only they read where they are. */
+    const repositoryOf = (d: (typeof depts)[number]) => (reach.whole && d.repoUrl ? { url: d.repoUrl, branch: d.repoBranch ?? 'main', tokenLast4: d.repoTokenLast4 } : null);
     const [turn] = await db.select({ id: turns.id, number: turns.number, goal: turns.goal }).from(turns).where(and(eq(turns.companyId, me.companyId), eq(turns.status, 'open')));
     const allTeams = await db.select().from(teams).orderBy(asc(teams.stage), asc(teams.createdAt));
     /* A listed person counts each place as its top-level department: a product as the department holding it, a team as its department. */

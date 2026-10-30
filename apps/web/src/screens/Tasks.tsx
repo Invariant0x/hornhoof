@@ -38,7 +38,7 @@ export function Tasks({ me, requests, onRequestsChanged, selected, onOpenTask }:
       <section className="waiting" aria-label={t.tasks.waiting}>
         <h2>{t.tasks.waiting}</h2>
         {requests?.length ? (
-          <Requests requests={requests} onChanged={onRequestsChanged} onOpenTask={onOpenTask} placeName={place} />
+          <Requests requests={requests} onChanged={onRequestsChanged} company={me.person.scopeKind === 'company'} onOpenTask={onOpenTask} placeName={place} />
         ) : (
           requests && <p className="muted">{t.tasks.nothingWaiting}</p>
         )}

@@ -81,11 +81,11 @@ A turn is the goal the whole company works on now. Someone who sees the whole co
 
 Hornhoof wakes an agent when there is something for it: a task given to it, work at its gate, a task sent back, an answer from a person. An agent that ends three turns in a row without moving its task stops and asks a person how to go on.
 
-Anyone whose access lists a department can give it a task from inside the department with "New task"; it goes to the department's head. Nothing reaches the main branch until a person approves the exact commit.
+Anyone whose access lists a department can give it a task from inside the department with "New task"; it goes to the department's head. Nothing reaches the main branch until someone who sees the whole company approves the exact commit; the department's people see it waiting.
 
 ## Repositories
 
-A department, or a product inside it, can name the git repository its agents work in. Inside the department, people who see the whole company set its address, branch and a token. The token is kept encrypted and shows only its last four characters; it never reaches a command line or the clone's settings. A product's repository goes to the agents of that product instead of the department's.
+A department, or a product inside it, can name the git repository its agents work in. Inside the department, people who see the whole company set its address, branch and a token. The token is kept encrypted and shows only its last four characters; it never reaches a command line or the clone's settings, and git gets it only for the repository's own host. A new address on another host needs a new token. A product's repository goes to the agents of that product instead of the department's.
 
 Each agent gets its own clone in its own folder on the node before its first turn, keeps it between turns, and works in a branch per task. Nodes from 0.5.0 on take turns with a repository; an older node keeps them waiting until it is updated.
 

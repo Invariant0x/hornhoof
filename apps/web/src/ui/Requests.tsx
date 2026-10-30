@@ -4,10 +4,11 @@ import { errorText, useT } from '../i18n';
 import type { TaskPlace, WaitingRequest } from '../types';
 import { Field } from './Field';
 
-type Shared = { onOpenTask: (id: string) => void; placeName: (p: TaskPlace) => string };
+/* company: whether the person sees the whole company, the only people who approve a commit. */
+type Shared = { company: boolean; onOpenTask: (id: string) => void; placeName: (p: TaskPlace) => string };
 
 /* One thing an agent waits for: a question to answer, a commit to approve, or a task it is stuck on. */
-function RequestItem({ request, onDone, onOpenTask, placeName }: Shared & { request: WaitingRequest; onDone: () => void }) {
+function RequestItem({ request, onDone, company, onOpenTask, placeName }: Shared & { request: WaitingRequest; onDone: () => void }) {
   const t = useT();
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
@@ -49,7 +50,13 @@ function RequestItem({ request, onDone, onOpenTask, placeName }: Shared & { requ
           <button className="btn small" type="submit" disabled={busy || !text.trim()}>{t.tasks.answer}</button>
         </form>
       )}
-      {request.kind === 'approval' && (
+      {request.kind === 'approval' && !company && (
+        <div className="req-form">
+          <code className="req-commit">{request.commit}</code>
+          <p className="muted">{t.tasks.approvedByCompany}</p>
+        </div>
+      )}
+      {request.kind === 'approval' && company && (
         <div className="req-form">
           <code className="req-commit">{request.commit}</code>
           <Field label={t.tasks.note}>{p => <input {...p} value={text} maxLength={4000} onChange={e => setText(e.target.value)} />}</Field>

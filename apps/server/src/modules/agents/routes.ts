@@ -11,6 +11,7 @@ import { onAgent, pump, pumpWaiting } from '../conversation/queue.js';
 import { deptName } from '../departments/templates.js';
 import { identityOf } from '../nodes/hub.js';
 import { subViews, type SubView } from '../subscriptions/views.js';
+import { resumeAgent } from '../tasks/wake.js';
 import { orchestratorServing, servingSubscriptions, type Serving } from '../tools/staff.js';
 import type { Lang } from '../templates/load.js';
 import { agentFor, type AgentRow } from './find.js';
@@ -150,8 +151,11 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { agent, next, changed } = await changing(found, agent => patched(me, agent, body));
     if (changed) {
       ctx.bus.publish(agent.companyId, { type: 'org' });
-      /* Turns that waited for a subscription can go now. */
-      if (next.subscriptionId !== agent.subscriptionId) await (agent.kind === 'orchestrator' ? pumpWaiting(ctx) : pump(ctx, agent.id));
+      /* Turns that waited for a subscription can go now, with the tasks it missed while it had none. */
+      if (next.subscriptionId !== agent.subscriptionId) {
+        if (next.subscriptionId) await resumeAgent(ctx, agent.id);
+        await (agent.kind === 'orchestrator' ? pumpWaiting(ctx) : pump(ctx, agent.id));
+      }
     }
     return card(next, me);
   });

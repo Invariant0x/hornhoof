@@ -86,11 +86,13 @@ export async function taskLines(ctx: Pick<Ctx, 'db' | 'templates'>, rows: Task[]
 
 const LOG_SHOWN = 200;
 
-/* One task as people and agents read it: the body, its gates with where it stands, what it was split into, and its log. */
-export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates'>, task: Task): Promise<TaskDetail> {
+/* One task as people and agents read it: the body, its gates with where it stands, what it was split into, and its log.
+   The task it serves and the tasks under it show only when the reader may see them too. */
+export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates'>, task: Task, sees: (t: Task) => boolean): Promise<TaskDetail> {
   const { db } = ctx;
-  const subs = await db.select().from(tasks).where(eq(tasks.parentId, task.id)).orderBy(asc(tasks.number));
-  const [parent] = task.parentId ? await db.select({ id: tasks.id, number: tasks.number, title: tasks.title }).from(tasks).where(eq(tasks.id, task.parentId)) : [];
+  const subs = (await db.select().from(tasks).where(eq(tasks.parentId, task.id)).orderBy(asc(tasks.number))).filter(sees);
+  const [above] = task.parentId ? await db.select().from(tasks).where(eq(tasks.id, task.parentId)) : [];
+  const parent = above && sees(above) ? { id: above.id, number: above.number, title: above.title } : null;
   const events = await db
     .select({ kind: taskEvents.kind, text: taskEvents.text, data: taskEvents.data, personId: taskEvents.personId, personName: people.name, agentId: taskEvents.agentId, at: taskEvents.createdAt })
     .from(taskEvents)
@@ -106,7 +108,7 @@ export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates'>, task: Task)
   return {
     ...line(task, n),
     body: task.body,
-    parent: parent ?? null,
+    parent,
     executor: n.agent(task.executorAgentId),
     gates: task.gates.flatMap((id, i) => {
       const a = n.agent(id);

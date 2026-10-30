@@ -160,7 +160,13 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (!checked.success) throw new ApiError(400, 'validation', 'Use an https address and a plain branch name.', 'repo_invalid');
     const [dept] = await db.select().from(departments).where(and(eq(departments.id, id), eq(departments.companyId, me.companyId)));
     if (!dept) throw new ApiError(404, 'not_found', 'This department does not exist.', 'department_unknown');
-    const token = body.token ? { repoTokenEnc: encryptSecret(body.token, ctx.config.secret), repoTokenLast4: body.token.slice(-4) } : {};
+    /* A new token replaces the saved one; without one the saved token stays, unless the address moves to another host. */
+    const host = (url: string | null) => (url ? new URL(url).host : null);
+    const token = body.token
+      ? { repoTokenEnc: encryptSecret(body.token, ctx.config.secret), repoTokenLast4: body.token.slice(-4) }
+      : host(dept.repoUrl) !== host(checked.data.url)
+        ? { repoTokenEnc: null, repoTokenLast4: null }
+        : {};
     const [row] = await db
       .update(departments)
       .set({ repoUrl: checked.data.url, repoBranch: checked.data.branch, ...token })

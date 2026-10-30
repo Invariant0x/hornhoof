@@ -72,10 +72,10 @@ describe("an agent's folder and its repository", () => {
     expect(done.ok).toBe(true);
     expect(calls.map(c => c.args)).toEqual([['clone', '--quiet', '--branch', 'release', '--', REPO.url, join(folder, 'shop')]]);
     expect(calls.flatMap(c => c.args).join(' ')).not.toContain(TOKEN);
-    expect(calls[0]!.env).toMatchObject({ GIT_ASKPASS: ASKPASS, HH_GIT_PASSWORD: TOKEN, GIT_TERMINAL_PROMPT: '0' });
+    expect(calls[0]!.env).toMatchObject({ GIT_ASKPASS: ASKPASS, HH_GIT_PASSWORD: TOKEN, HH_GIT_HOST: 'github.com', GIT_TERMINAL_PROMPT: '0' });
     expect(calls[0]!.env.NODE_KEY).toBeUndefined();
     expect(adapter.inputs[0]!.workDir).toBe(folder);
-    expect(adapter.inputs[0]!.env).toEqual({ GIT_ASKPASS: ASKPASS, HH_GIT_PASSWORD: TOKEN, GIT_TERMINAL_PROMPT: '0' });
+    expect(adapter.inputs[0]!.env).toEqual({ GIT_ASKPASS: ASKPASS, HH_GIT_PASSWORD: TOKEN, HH_GIT_HOST: 'github.com', GIT_TERMINAL_PROMPT: '0' });
   });
 
   it('reuses the clone on the next turn and follows a repository that moved', async () => {
@@ -162,11 +162,18 @@ describe("an agent's folder and its repository", () => {
 
 describe('the askpass helper in the image', () => {
   const helper = join(import.meta.dirname, '..', 'git-askpass');
-  const ask = (prompt: string) => spawnSync('sh', [helper, prompt], { env: { HH_GIT_PASSWORD: TOKEN }, encoding: 'utf8' }).stdout;
+  const ask = (prompt: string) => spawnSync('sh', [helper, prompt], { env: { HH_GIT_PASSWORD: TOKEN, HH_GIT_HOST: 'github.com' }, encoding: 'utf8' }).stdout;
 
   it("gives git the turn's token as the password and a fixed name", () => {
     expect(ask("Password for 'https://x-access-token@github.com': ")).toBe(`${TOKEN}\n`);
     expect(ask("Username for 'https://github.com': ")).toBe('x-access-token\n');
+  });
+
+  it("answers nothing for any other host, so the token never leaves for one", () => {
+    expect(ask("Password for 'https://x-access-token@gitlab.com': ")).toBe('');
+    expect(ask("Username for 'https://evil.example': ")).toBe('');
+    expect(ask("Password for 'https://x-access-token@github.com.evil.example': ")).toBe('');
+    expect(ask("Password for 'https://github.com@evil.example': ")).toBe('');
   });
 });
 

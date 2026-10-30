@@ -90,7 +90,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
     { description: 'One task in full: its body (the current truth), gates and where it stands, subtasks, open questions and its log.', inputSchema: { task: Ref } },
     async ({ task: ref }) =>
       find(ref).then(
-        async ({ task }) => json(await taskDetail(ctx, task)),
+        async ({ agent, task }) => json(await taskDetail(ctx, task, t => sees(agent, t))),
         (err: unknown) => (err instanceof ApiError ? say(err.message, true) : Promise.reject(err)),
       ),
   );

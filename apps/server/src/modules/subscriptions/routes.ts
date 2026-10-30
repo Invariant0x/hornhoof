@@ -7,8 +7,9 @@ import { encryptSecret } from '../../crypto/secrets.js';
 import { agents, departments, jobs, people, subscriptions, teams } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { servesWholeCompany } from '../tools/staff.js';
-import { pumpWaiting } from '../conversation/queue.js';
+import { orchestratorOf, pumpWaiting } from '../conversation/queue.js';
 import { createNodeCode } from '../nodes/codes.js';
+import { resumeAgent } from '../tasks/wake.js';
 import { installCommand } from '../nodes/command.js';
 import { identityOf } from '../nodes/hub.js';
 import { failOpenJobs } from '../nodes/messages.js';
@@ -60,6 +61,13 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   const ownsOrCompany = (me: Person, ownerId: string) => me.id === ownerId || me.scopeKind === 'company';
 
+  /* The orchestrator on a new subscription: his waiting turns go out on it, with the tasks he missed while he had none. */
+  async function orchestratorBack(companyId: string) {
+    const orchestrator = await orchestratorOf(ctx, companyId);
+    if (orchestrator) await resumeAgent(ctx, orchestrator.id);
+    await pumpWaiting(ctx);
+  }
+
   app.get('/api/subscriptions', async req => {
     const me = await requirePerson(req, db);
     const all = await subViews(db, online);
@@ -94,8 +102,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
       if (target.kind === 'orchestrator') await tx.update(agents).set({ subscriptionId: sub!.id }).where(eq(agents.kind, 'orchestrator'));
       return sub!.id;
     });
-    /* His waiting turns go out on the new key. */
-    if (target.kind === 'orchestrator') await pumpWaiting(ctx);
+    if (target.kind === 'orchestrator') await orchestratorBack(me.companyId);
 
     reply.code(201);
     return { subscription: await subView(db, online, id) };
@@ -147,7 +154,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
     const [owner] = await db.select({ scopeKind: people.scopeKind }).from(people).where(eq(people.id, sub.ownerPersonId));
     if (!servesWholeCompany(sub, owner?.scopeKind)) throw notCompanyLevel();
     await db.update(agents).set({ subscriptionId: sub.id }).where(eq(agents.kind, 'orchestrator'));
-    await pumpWaiting(ctx);
+    await orchestratorBack(me.companyId);
     return { subscription: await subView(db, online, sub.id) };
   });
 

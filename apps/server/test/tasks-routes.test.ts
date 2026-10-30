@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agents, companies, departments, requests, subscriptions, tasks } from '../src/db/schema.js';
+import { agents, companies, departments, jobs, requests, subscriptions, tasks } from '../src/db/schema.js';
 import { ask, createTask } from '../src/modules/tasks/engine.js';
 import { as, invitePerson, listen, openStream, setUpCompany, testApp, until } from './helpers.js';
 
@@ -27,7 +27,7 @@ async function company() {
   const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { departments: [sales!.id] } });
   const post = (token: string, path: string, payload: object) => app.inject({ method: 'POST', url: path, payload, ...as(token) });
   const get = (token: string, path: string) => app.inject({ url: path, ...as(token) });
-  return { app, db, url, ctx: app.ctx, companyId, ceo, oleg, maria, orchestrator: orchestrator!, dev: dev!, sales: sales!, head, bruno, post, get };
+  return { app, db, url, ctx: app.ctx, companyId, ceo, oleg, maria, orchestrator: orchestrator!, dev: dev!, sales: sales!, head, bruno, hire, post, get };
 }
 
 describe('tasks for people', () => {
@@ -70,6 +70,45 @@ describe('tasks for people', () => {
     expect((await db.select().from(requests))[0]!.status).toBe('answered');
   });
 
+  it('shows inside a task only the tasks around it that the person reaches', async () => {
+    const { ctx, dev, sales, head, orchestrator, hire, ceo, oleg, maria, get } = await company();
+    const sam = await hire('Sam', 'head', 'SAL-HEAD', sales.id);
+    const { task: payments } = await createTask(ctx, { agentId: orchestrator.id }, { title: 'Payments', brief: '', body: '', departmentId: dev.id, assigneeAgentId: head.id });
+    const { task: pricing } = await createTask(ctx, { agentId: orchestrator.id }, { title: 'Pricing page', brief: '', body: '', departmentId: sales.id, parentId: payments.id, assigneeAgentId: sam.id });
+    expect((await get(oleg, `/api/tasks/${payments.id}`)).json().task.subtasks).toEqual([]);
+    expect((await get(maria, `/api/tasks/${pricing.id}`)).json().task.parent).toBe(null);
+    expect((await get(ceo, `/api/tasks/${payments.id}`)).json().task.subtasks.map((t: { id: string }) => t.id)).toEqual([pricing.id]);
+    expect((await get(ceo, `/api/tasks/${pricing.id}`)).json().task.parent).toMatchObject({ id: payments.id });
+  });
+
+  it('gives a person\'s task to the head who works in the department now', async () => {
+    const { db, dev, head, hire, oleg, post } = await company();
+    await db.update(agents).set({ removedAt: new Date() }).where(eq(agents.id, head.id));
+    await hire('Ivo', 'head', 'DEV-HEAD');
+    const made = await post(oleg, '/api/tasks', { title: 'Payments', brief: '', body: '', department: dev.id });
+    expect(made.statusCode).toBe(201);
+    expect(made.json().task.assignee.name).toBe('Ivo');
+  });
+
+  it('tells whoever gave a task that a person cancelled it', async () => {
+    const { ctx, db, head, bruno, dev, oleg, post } = await company();
+    const { task } = await createTask(ctx, { agentId: head.id }, { title: 'Checkout API', brief: '', body: '', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true });
+    await post(oleg, `/api/tasks/${task.id}/cancel`, { why: 'Not now.' });
+    const turns = await db.select().from(jobs).where(eq(jobs.agentId, head.id));
+    expect(turns).toHaveLength(1);
+    expect(turns[0]!.prompt).toContain('#1 "Checkout API", which you gave out, was cancelled');
+    expect(turns[0]!.prompt).toContain('Not now.');
+  });
+
+  it('shows a commit to approve to the people of the department, and lets only the whole company approve it', async () => {
+    const { ctx, head, bruno, dev, oleg, ceo, post, get } = await company();
+    const { task } = await createTask(ctx, { agentId: head.id }, { title: 'Release', brief: '', body: '', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true });
+    const { request } = await ask(ctx, bruno.id, task.id, { kind: 'approval', text: 'Release 0.5.0 to main.', commit: 'a'.repeat(40) });
+    expect((await get(oleg, '/api/requests')).json().requests.map((r: { id: string }) => r.id)).toEqual([request.id]);
+    expect((await post(oleg, `/api/requests/${request.id}`, { approve: true })).json().error.reason).toBe('company_scope_only');
+    expect((await post(ceo, `/api/requests/${request.id}`, { approve: true })).json().request.status).toBe('approved');
+  });
+
   it('runs one turn at a time and leaves its open tasks without a turn when it closes', async () => {
     const { db, ceo, oleg, orchestrator, post, get } = await company();
     expect((await post(oleg, '/api/turns', { goal: 'Payments' })).json().error.reason).toBe('company_scope_only');
@@ -87,7 +126,7 @@ describe('tasks for people', () => {
   });
 
   it('keeps a repository token secret and refuses plain http', async () => {
-    const { db, companyId, dev, ceo, oleg, app, get } = await company();
+    const { db, companyId, dev, ceo, oleg, maria, app, get } = await company();
     const put = (token: string, payload: object) => app.inject({ method: 'PUT', url: `/api/departments/${dev.id}/repository`, payload, ...as(token) });
     expect((await put(oleg, { url: 'https://github.com/acme/app.git', branch: 'main', token: 'ghp_secret1234' })).json().error.reason).toBe('company_scope_only');
     expect((await put(ceo, { url: 'http://github.com/acme/app.git', branch: 'main' })).json().error.reason).toBe('repo_invalid');
@@ -98,11 +137,21 @@ describe('tasks for people', () => {
     expect(org.body).not.toContain('ghp_secret');
     expect(org.json().departments.find((d: { id: string }) => d.id === dev.id).repository).toEqual({ url: 'https://github.com/acme/app.git', branch: 'main', tokenLast4: '1234' });
     expect((await put(ceo, { url: 'https://github.com/acme/app2.git', branch: 'dev' })).json().repository.tokenLast4).toBe('1234');
+    /* Another host never gets the token saved for the first one. */
+    expect((await put(ceo, { url: 'https://gitlab.com/acme/app.git', branch: 'dev' })).json().repository.tokenLast4).toBe(null);
+    const [moved] = await db.select().from(departments).where(eq(departments.id, dev.id));
+    expect(moved!.repoTokenEnc).toBe(null);
     const [shop] = await db.insert(departments).values({ companyId, name: 'Shop', parentId: dev.id, roleCode: 'DEV', position: 1 }).returning();
     await put(ceo, { url: 'https://github.com/acme/app.git', branch: 'main', token: 'ghp_secret1234' });
     await app.inject({ method: 'PUT', url: `/api/departments/${shop!.id}/repository`, payload: { url: 'https://github.com/acme/shop.git', branch: 'main', token: 'ghp_shop9999' }, ...as(ceo) });
     const products = (await get(ceo, '/api/org')).json().departments.find((d: { id: string }) => d.id === dev.id).products;
     expect(products).toEqual([{ id: shop!.id, name: 'Shop', repository: { url: 'https://github.com/acme/shop.git', branch: 'main', tokenLast4: '9999' } }]);
+    /* Only people who see the whole company set repositories, so only they read where they are. */
+    for (const person of [oleg, maria]) {
+      const listed = (await get(person, '/api/org')).json().departments.find((d: { id: string }) => d.id === dev.id);
+      expect(listed.repository).toBe(null);
+      expect(listed.products).toEqual([{ id: shop!.id, name: 'Shop', repository: null }]);
+    }
     expect((await app.inject({ method: 'DELETE', url: `/api/departments/${dev.id}/repository`, ...as(ceo) })).statusCode).toBe(204);
     expect((await get(ceo, '/api/org')).json().departments.find((d: { id: string }) => d.id === dev.id).repository).toBe(null);
   });

@@ -1,4 +1,4 @@
-import { and, count, eq, gte, isNull, notInArray, sql } from 'drizzle-orm';
+import { and, count, eq, gte, inArray, isNull, notInArray, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, requests, taskEvents, tasks } from '../../db/schema.js';
 import { insertTurn, liveSubscription, onAgent, pump } from '../conversation/queue.js';
@@ -38,7 +38,11 @@ export function wakePrompt(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): str
     case 'reported':
       return `${ref}, which you gave out, was reported done${said}Go on with your own task.`;
     case 'blocked':
+      /* The orchestrator does not rewrite a department's task: he gives the department a new one. */
+      if (agent.kind === 'orchestrator') return `${ref}, which you gave out, cannot go on${said}Cancel it with cancel_task and give the department a task it can do with create_task, or ask a person with ask_person on your own task.`;
       return `${ref}, which you gave out, cannot go on${said}Unblock it: rewrite it with update_task, give it to someone else, or cancel it.`;
+    case 'cancelled':
+      return `${ref}, which you gave out, was cancelled${said}Go on with your own task without it.`;
     case 'answered':
       return `A person answered on ${ref}${said}Go on with it.`;
     case 'comment':
@@ -60,6 +64,15 @@ export async function wakeAll(ctx: Ctx, wakes: Wake[]): Promise<void> {
     seen.add(key);
     if (await queueWake(ctx, w)) await pump(ctx, w.agentId);
   }
+}
+
+/* An agent back on a subscription: the wakes it missed without one were left out, so every task waiting on it gets a turn. */
+export async function resumeAgent(ctx: Ctx, agentId: string): Promise<void> {
+  const held = await ctx.db.select().from(tasks).where(and(eq(tasks.assigneeAgentId, agentId), inArray(tasks.status, ['open', 'working', 'review'])));
+  await wakeAll(
+    ctx,
+    held.map(t => ({ agentId, taskId: t.id, why: t.status === 'review' ? 'review' : 'assigned' })),
+  );
 }
 
 async function queueWake(ctx: Ctx, w: Wake): Promise<boolean> {
@@ -110,7 +123,7 @@ const NOT_A_MOVE = ['comment', 'reminded', 'stuck'] as const;
 
 /* After a turn on a task: an agent that went idle holding the task without moving it is reminded, and after
    SILENT_TURNS such turns a person is asked. A failed turn counts as silent; a turn a person stopped does not count.
-   Nothing is checked while the agent has another turn waiting, or while the task waits on its subtasks or on people. */
+   Nothing is checked while the agent has another turn waiting on the task, or while the task waits on its subtasks or on people. */
 export async function checkLiveness(ctx: Ctx, jobId: string): Promise<void> {
   const { db } = ctx;
   const [job] = await db.select().from(jobs).where(eq(jobs.id, jobId));
@@ -118,7 +131,13 @@ export async function checkLiveness(ctx: Ctx, jobId: string): Promise<void> {
   const agentId = job.agentId;
   const task = await heldTask(ctx, agentId, job.taskId);
   if (!task || !['open', 'working', 'review'].includes(task.status)) return;
-  const [next] = await db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, agentId), eq(jobs.kind, 'conversation'), eq(jobs.status, 'queued'))).limit(1);
+  /* A turn already waiting on this task, or on one it gave out, comes back to it anyway. */
+  const [next] = await db
+    .select({ id: jobs.id })
+    .from(jobs)
+    .innerJoin(tasks, eq(tasks.id, jobs.taskId))
+    .where(and(eq(jobs.agentId, agentId), eq(jobs.kind, 'conversation'), eq(jobs.status, 'queued'), or(eq(tasks.id, task.id), eq(tasks.parentId, task.id))))
+    .limit(1);
   if (next) return;
   const [subtasks] = await db.select({ n: count() }).from(tasks).where(and(eq(tasks.parentId, task.id), notInArray(tasks.status, [...CLOSED])));
   const [asked] = await db.select({ n: count() }).from(requests).where(and(eq(requests.taskId, task.id), eq(requests.status, 'open')));

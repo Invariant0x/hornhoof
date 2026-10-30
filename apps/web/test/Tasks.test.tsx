@@ -97,6 +97,17 @@ describe('the tracker', () => {
     expect(calls.find(c => c.path === '/api/requests/r2')?.body).toEqual({ approve: true });
   });
 
+  it('shows a commit waiting for approval to people with part of the company, without letting them approve it', async () => {
+    const user = userEvent.setup();
+    shell({}, { ...ME, person: { ...ME.person, scopeKind: 'listed', isOwner: false } });
+    await openTasks(user);
+    const approval = within(screen.getByRole('region', { name: 'Waiting for you' })).getByRole('article', { name: /#10/ });
+    expect(approval).toHaveTextContent('a'.repeat(40));
+    expect(approval).toHaveTextContent('Someone who sees the whole company approves it.');
+    expect(within(approval).queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
+    expect(within(approval).queryByRole('button', { name: 'Decline' })).not.toBeInTheDocument();
+  });
+
   it('groups tasks by state, newest first, and filters them by department', async () => {
     const user = userEvent.setup();
     const calls = shell({ 'GET /api/tasks?status=open&department=d2': [200, { tasks: TASKS.slice(0, 1) }] });

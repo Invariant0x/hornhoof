@@ -3,12 +3,12 @@ import { describe, expect, it } from 'vitest';
 import { agents, companies, departments, jobs, people, requests, subscriptions, tasks } from '../src/db/schema.js';
 import { afterJob } from '../src/modules/conversation/queue.js';
 import { createTask, submit } from '../src/modules/tasks/engine.js';
-import { SILENT_TURNS, startWork, wakeAll } from '../src/modules/tasks/wake.js';
+import { SILENT_TURNS, startWork, wakeAll, wakePrompt } from '../src/modules/tasks/wake.js';
 import { as, connectNode, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
 async function company() {
   const { app, db } = await testApp();
-  await setUpCompany(app);
+  const owner = await setUpCompany(app);
   const [acme] = await db.select().from(companies);
   const companyId = acme!.id;
   const [ceo] = await db.select().from(people);
@@ -32,7 +32,8 @@ async function company() {
     await afterJob(ctx, job!.id);
     return job!;
   };
-  return { ctx, db, ceo: ceo!, dev: dev!, head, bruno, rita, memberTask, turnsOf, finish };
+  const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+  return { app, owner, ctx, db, sub: sub!, ceo: ceo!, dev: dev!, orchestrator: orchestrator!, head, bruno, rita, memberTask, turnsOf, finish };
 }
 
 describe('waking agents for their tasks', () => {
@@ -91,6 +92,58 @@ describe('waking agents for their tasks', () => {
     expect((await turnsOf(bruno.id)).filter(j => j.status === 'queued')).toEqual([]);
     expect((await turnsOf(rita.id)).map(j => j.taskId)).toEqual([task.id]);
     expect((await db.select().from(tasks).where(eq(tasks.id, task.id)))[0]!.silent).toBe(0);
+  });
+
+  it('reminds an agent about a task it left without moving, though a turn on another task waits', async () => {
+    const { ctx, db, bruno, memberTask, turnsOf, finish } = await company();
+    const first = await memberTask();
+    const second = await memberTask();
+    await wakeAll(ctx, [
+      { agentId: bruno.id, taskId: first.id, why: 'assigned' },
+      { agentId: bruno.id, taskId: second.id, why: 'assigned' },
+    ]);
+    await finish(bruno.id);
+    expect((await db.select().from(tasks).where(eq(tasks.id, first.id)))[0]!.silent).toBe(1);
+    expect((await turnsOf(bruno.id)).filter(j => j.status === 'queued').map(j => j.taskId).sort()).toEqual([first.id, second.id].sort());
+  });
+
+  it('leaves the count alone while a turn on the same task waits', async () => {
+    const { ctx, db, bruno, memberTask, finish } = await company();
+    const task = await memberTask();
+    await wakeAll(ctx, [{ agentId: bruno.id, taskId: task.id, why: 'assigned' }]);
+    await finish(bruno.id, () => wakeAll(ctx, [{ agentId: bruno.id, taskId: task.id, why: 'comment', text: 'EUR only.' }]));
+    expect((await db.select().from(tasks).where(eq(tasks.id, task.id)))[0]!.silent).toBe(0);
+  });
+
+  it('wakes an employee for its waiting tasks when it gets a subscription again', async () => {
+    const { app, owner, ctx, db, sub, bruno, memberTask, turnsOf } = await company();
+    await db.update(agents).set({ subscriptionId: null }).where(eq(agents.id, bruno.id));
+    const task = await memberTask();
+    await wakeAll(ctx, [{ agentId: bruno.id, taskId: task.id, why: 'assigned' }]);
+    expect(await turnsOf(bruno.id)).toEqual([]);
+    const patched = await app.inject({ method: 'PATCH', url: `/api/agents/${bruno.id}`, payload: { subscription: sub.id }, ...as(owner) });
+    expect(patched.statusCode).toBe(200);
+    expect((await turnsOf(bruno.id)).map(j => j.taskId)).toEqual([task.id]);
+  });
+
+  it('wakes the orchestrator for his waiting tasks when he gets a subscription again', async () => {
+    const { app, owner, ctx, db, sub, ceo, orchestrator, turnsOf } = await company();
+    await db.update(agents).set({ subscriptionId: null }).where(eq(agents.id, orchestrator.id));
+    const { task } = await createTask(ctx, { personId: ceo.id }, { title: 'Turn 1: Launch', brief: '', body: '', departmentId: null, assigneeAgentId: orchestrator.id });
+    await wakeAll(ctx, [{ agentId: orchestrator.id, taskId: task.id, why: 'assigned' }]);
+    expect(await turnsOf(orchestrator.id)).toEqual([]);
+    expect((await app.inject({ method: 'POST', url: `/api/subscriptions/${sub.id}/orchestrator`, ...as(owner) })).statusCode).toBe(200);
+    expect((await turnsOf(orchestrator.id)).map(j => j.taskId)).toEqual([task.id]);
+  });
+
+  it("tells the orchestrator to go on with a department's task that cannot by the tools he has", async () => {
+    const { ctx, dev, head, orchestrator } = await company();
+    const { task } = await createTask(ctx, { agentId: orchestrator.id }, { title: 'Payments', brief: '', body: '', departmentId: dev.id, assigneeAgentId: head.id });
+    const prompt = wakePrompt(orchestrator, task, { agentId: orchestrator.id, taskId: task.id, why: 'blocked', text: 'No designer.' });
+    expect(prompt).not.toContain('update_task');
+    expect(prompt).toContain('cancel_task');
+    expect(prompt).toContain('create_task');
+    expect(prompt).toContain('No designer.');
   });
 
   it('lets a head wait for the tasks it gave out', async () => {

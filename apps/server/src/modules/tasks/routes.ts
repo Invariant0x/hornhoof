@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, inArray, max, notInArray } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray, isNull, max, notInArray } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -38,6 +38,12 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     return task;
   }
 
+  /* The task as this person reads it. */
+  async function detail(me: Person, task: Task) {
+    const access = await accessOf(db, me);
+    return taskDetail(ctx, task, t => reaches(access, t));
+  }
+
   app.get('/api/tasks', async req => {
     const me = await requirePerson(req, db);
     const q = ListQuery.parse(req.query);
@@ -55,7 +61,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/api/tasks/:id', async req => {
     const me = await requirePerson(req, db);
     const { id } = IdParams.parse(req.params);
-    return { task: await taskDetail(ctx, await reachable(me, id)) };
+    return { task: await detail(me, await reachable(me, id)) };
   });
 
   /* Without a department the task goes to the orchestrator; with one, to its head. */
@@ -74,12 +80,12 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
         const [product] = await db.select({ id: departments.id }).from(departments).where(and(eq(departments.id, body.product), eq(departments.parentId, dept.id)));
         if (!product) throw refuse(404, 'department_unknown', 'This product does not exist.');
       }
-      [assignee] = await db.select({ id: agents.id }).from(agents).where(and(eq(agents.departmentId, dept.id), eq(agents.kind, 'head'))).orderBy(asc(agents.createdAt));
+      [assignee] = await db.select({ id: agents.id }).from(agents).where(and(eq(agents.departmentId, dept.id), eq(agents.kind, 'head'), isNull(agents.removedAt))).orderBy(asc(agents.createdAt));
       if (!assignee) throw refuse(409, 'no_head', 'This department has no head yet. Hire one first.');
     }
     const moved = await createTask(ctx, { personId: me.id }, { title: body.title, brief: body.brief, body: body.body, departmentId: body.department ?? null, productId: body.product ?? null, assigneeAgentId: assignee.id });
     await wakeAll(ctx, moved.wakes);
-    return reply.code(201).send({ task: await taskDetail(ctx, moved.task) });
+    return reply.code(201).send({ task: await detail(me, moved.task) });
   });
 
   app.post('/api/tasks/:id/comments', async (req, reply) => {
@@ -88,7 +94,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { text } = z.object({ text: z.string().trim().min(1).max(4000) }).parse(req.body);
     const moved = await comment(ctx, { personId: me.id }, (await reachable(me, id)).id, text);
     await wakeAll(ctx, moved.wakes);
-    return reply.code(201).send({ task: await taskDetail(ctx, moved.task) });
+    return reply.code(201).send({ task: await detail(me, moved.task) });
   });
 
   app.post('/api/tasks/:id/cancel', async req => {
@@ -96,7 +102,8 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { id } = IdParams.parse(req.params);
     const { why } = z.object({ why: z.string().max(1000).default('') }).parse(req.body ?? {});
     const moved = await cancel(ctx, { personId: me.id }, (await reachable(me, id)).id, why);
-    return { task: await taskDetail(ctx, moved.task) };
+    await wakeAll(ctx, moved.wakes);
+    return { task: await detail(me, moved.task) };
   });
 
   app.get('/api/requests', async req => {
@@ -131,11 +138,13 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const { id } = IdParams.parse(req.params);
     const body = AnswerBody.parse(req.body);
-    const [found] = await db.select({ taskId: requests.taskId }).from(requests).where(and(eq(requests.id, id), eq(requests.companyId, me.companyId)));
+    const [found] = await db.select({ taskId: requests.taskId, kind: requests.kind }).from(requests).where(and(eq(requests.id, id), eq(requests.companyId, me.companyId)));
     if (!found) throw refuse(404, 'request_unknown', 'There is no such request.');
     await reachable(me, found.taskId).catch(() => {
       throw refuse(404, 'request_unknown', 'There is no such request.');
     });
+    /* The people of the department see a commit waiting for approval; only someone who sees the whole company lets it into main. */
+    if (found.kind === 'approval') requireCompanyScope(me);
     const done = await answer(ctx, me.id, id, body);
     await wakeAll(ctx, done.wakes);
     return { request: { id: done.request.id, status: done.request.status } };

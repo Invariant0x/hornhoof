@@ -21,9 +21,10 @@ const realGit: Git = (args, { cwd, env, user }) =>
     });
   });
 
-/* What the agent's program gets for the turn, so its own git commands reach the repository too. */
+/* What the agent's program gets for the turn, so its own git commands reach the repository too. The helper answers only
+   the repository's host, so a clone from anywhere else never gets the token. */
 export function gitEnv(repo: Repo): Record<string, string> {
-  return repo.token ? { GIT_ASKPASS: ASKPASS, HH_GIT_PASSWORD: repo.token, GIT_TERMINAL_PROMPT: '0' } : { GIT_TERMINAL_PROMPT: '0' };
+  return repo.token ? { GIT_ASKPASS: ASKPASS, HH_GIT_PASSWORD: repo.token, HH_GIT_HOST: new URL(repo.url).host, GIT_TERMINAL_PROMPT: '0' } : { GIT_TERMINAL_PROMPT: '0' };
 }
 
 type Owner = { user: JobUser | null; home: string | null };
