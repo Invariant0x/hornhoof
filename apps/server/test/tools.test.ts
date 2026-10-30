@@ -62,7 +62,7 @@ describe('/mcp', () => {
     const { app, job } = await company();
     await job('running');
     const client = await mcp(app, TOKEN);
-    expect((await client.listTools()).tools.map(t => t.name).sort()).toEqual(['add_tasks', 'ask_person', 'cancel_task', 'comment', 'company', 'edit_turn', 'plan_turn', 'propose_staff', 'propose_structure', 'report', 'staffing_options', 'task', 'tasks', 'turns']);
+    expect((await client.listTools()).tools.map(t => t.name).sort()).toEqual(['add_api_key', 'add_tasks', 'answer_request', 'ask_person', 'build_structure', 'cancel_task', 'cancel_update', 'change_employee', 'change_person', 'check_updates', 'comment', 'company', 'connect_plans', 'disconnect_machine', 'edit_turn', 'fire_employee', 'hire', 'invite_again', 'invite_person', 'message_employee', 'move_orchestrator', 'plan_command', 'plan_turn', 'propose_staff', 'propose_structure', 'remove_repository', 'remove_subscription', 'report', 'reset_employee', 'set_repository', 'staffing_options', 'stop_employee', 'task', 'tasks', 'test_subscription', 'turns', 'update_hornhoof', 'update_task', 'view']);
   });
 
   it('gives an employee the company view and its task tools', async () => {

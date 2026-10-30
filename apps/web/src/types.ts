@@ -148,7 +148,7 @@ export type AgentCardView = {
   parts: Part[];
   raw: string;
   runsOn: { subscription: SubView; models: ModelOption[] }[];
-  changes: { field: string; personName: string | null; at: string }[];
+  changes: { field: string; personName: string | null; byOrchestrator: boolean; at: string }[];
   /* The whole company or the agent's department may change it; only the whole company removes it. */
   canEdit: boolean;
 };

@@ -5,7 +5,7 @@ import type { Ctx } from '../../app.js';
 import { AccessInput, accessOf, agentSpot, canReach, checkAccess, saveAccess } from '../../auth/access.js';
 import { guard, limiter } from '../../auth/limit.js';
 import { hashPassword } from '../../auth/password.js';
-import { personColumns, requireCompanyScope, requirePerson, startSession, type Person } from '../../auth/session.js';
+import { changedBy, personColumns, requireCompanyScope, requirePerson, startSession, type Person } from '../../auth/session.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
 import type { Db } from '../../db/client.js';
 import { isUniqueViolation } from '../../db/errors.js';
@@ -17,7 +17,7 @@ import { personView, personViews } from './views.js';
 
 const INVITE_DAYS = 7;
 
-const InviteBody = z.object({
+export const InviteBody = z.object({
   name: z.string().trim().min(1).max(80),
   email: z.string().trim().toLowerCase().email(),
   title: z.string().trim().max(80).default(''),
@@ -26,7 +26,7 @@ const InviteBody = z.object({
 
 const AcceptBody = z.object({ password: z.string().min(10).max(200) });
 
-const PatchBody = z.object({
+export const PersonPatch = z.object({
   title: z.string().trim().max(80).optional(),
   access: AccessInput.optional(),
   status: z.enum(['active', 'disabled']).optional(),
@@ -61,7 +61,7 @@ export async function reinvite(db: Db, personId: string, by: Pick<Person, 'id' |
 
 /* A personal plan serves where its owner works. When the owner is disabled or no longer reaches an agent's place, the agent
    lets go of the plan and waits for another; the orchestrator is company-wide, so it needs an owner with the whole company. */
-async function releasePlansOf(ctx: Ctx, owner: Pick<Person, 'id' | 'companyId' | 'scopeKind' | 'status'>, by: string): Promise<void> {
+async function releasePlansOf(ctx: Ctx, owner: Pick<Person, 'id' | 'companyId' | 'scopeKind' | 'status'>, by: Person): Promise<void> {
   const { db } = ctx;
   const theirs = (await db.select({ id: subscriptions.id }).from(subscriptions).where(and(eq(subscriptions.ownerPersonId, owner.id), eq(subscriptions.kind, 'personal')))).map(s => s.id);
   if (!theirs.length) return;
@@ -77,7 +77,7 @@ async function releasePlansOf(ctx: Ctx, owner: Pick<Person, 'id' | 'companyId' |
       if (stays) return;
       await db.transaction(async tx => {
         await tx.update(agents).set({ subscriptionId: null }).where(eq(agents.id, id));
-        await tx.insert(agentChanges).values({ companyId: agent.companyId, agentId: id, personId: by, field: 'subscription', before: agent.subscriptionId, after: null });
+        await tx.insert(agentChanges).values({ companyId: agent.companyId, agentId: id, ...changedBy(by), field: 'subscription', before: agent.subscriptionId, after: null });
       });
       freed = true;
     });
@@ -186,7 +186,7 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.patch('/api/people/:id', async req => {
     const me = await requirePerson(req, db);
     const { id } = IdParams.parse(req.params);
-    const body = PatchBody.parse(req.body);
+    const body = PersonPatch.parse(req.body);
     /* Anyone may rename their own title; everything else needs the whole company. */
     if (id !== me.id || body.access !== undefined || body.status !== undefined) requireCompanyScope(me);
 
@@ -215,7 +215,7 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
       const theirs = await db.select({ id: machines.id }).from(machines).where(and(eq(machines.personId, id), isNull(machines.revokedAt)));
       await disconnectMachines(ctx, theirs.map(m => m.id));
     }
-    if (changes.status === 'disabled' || body.access) await releasePlansOf(ctx, person, me.id);
+    if (changes.status === 'disabled' || body.access) await releasePlansOf(ctx, person, me);
     return { person: await personView(db, person) };
   });
 }

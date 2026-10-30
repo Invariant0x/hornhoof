@@ -27,7 +27,7 @@ export type AgentState = {
   terminal: boolean;
 };
 
-type Turn = { companyId: string; agentId: string; prompt: string; createdBy: string | null; message?: { personId: string; text: string }; taskId?: string };
+type Turn = { companyId: string; agentId: string; prompt: string; createdBy: string | null; message?: { personId: string | null; text: string; from?: 'orchestrator' }; taskId?: string };
 
 /* One thing at a time per agent, so two pumps never send two turns. */
 const chains = new WeakMap<Ctx, Map<string, Promise<unknown>>>();
@@ -69,7 +69,7 @@ export async function insertTurn(ctx: Ctx, t: Turn): Promise<string> {
     })
     .returning({ id: jobs.id });
   if (t.message) {
-    await appendEvent(ctx, { companyId: t.companyId, agentId: t.agentId, jobId: job!.id, kind: 'message', data: { text: t.message.text }, personId: t.message.personId });
+    await appendEvent(ctx, { companyId: t.companyId, agentId: t.agentId, jobId: job!.id, kind: 'message', data: { text: t.message.text, ...(t.message.from ? { from: t.message.from } : {}) }, personId: t.message.personId });
   }
   return job!.id;
 }

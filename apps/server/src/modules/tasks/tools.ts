@@ -30,6 +30,8 @@ const Body = z.string().max(20000).describe('What every agent on the task reads:
 /* The tools an agent gets for tasks, by its kind. Each one checks that the task is the agent's to move. */
 export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): void {
   const { db } = ctx;
+  /* The orchestrator runs the company: it cancels and rewrites any task. */
+  const boss = job.agentKind === 'orchestrator';
   const me = async (): Promise<Agent> => (await db.select().from(agents).where(eq(agents.id, job.agentId)))[0]!;
   const startedAt = async () => (await db.select({ at: jobs.startedAt }).from(jobs).where(eq(jobs.id, job.id)))[0]?.at ?? new Date(0);
 
@@ -231,27 +233,32 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
           return { text: `Created #${moved.task.number} for ${executor.name}${gates.length ? ` with ${gates.length} gate${gates.length > 1 ? 's' : ''}` : ''}.`, moved };
         }),
     );
+  }
+
+  if (job.agentKind !== 'worker') {
     server.registerTool(
       'update_task',
       {
-        description:
-          "Rewrites one of your department's member tasks so it reads as the current truth, or hands it to another executor or gates (only while it is with its executor). " +
-          'A task waiting at a gate with nobody on to check it takes new gates from that gate on. A blocked task opens again.',
+        description: boss
+          ? 'Rewrites any task that is not closed so it reads as the current truth, or hands a member task to another executor or gates of its department (only while it is with its executor). ' +
+            'Whoever holds it is woken with the change. A blocked task opens again.'
+          : "Rewrites one of your department's member tasks so it reads as the current truth, or hands it to another executor or gates (only while it is with its executor). " +
+            'A task waiting at a gate with nobody on to check it takes new gates from that gate on. A blocked task opens again.',
         inputSchema: { task: Ref, title: Title.optional(), brief: Brief.optional(), body: Body.optional(), executor: z.uuid().optional(), gates: z.array(z.string().max(40)).max(8).optional() },
       },
       async ({ task: ref, executor, gates, ...text }) =>
         run(async () => {
           const { agent, task } = await find(ref);
-          if (task.departmentId !== agent.departmentId || !task.executorAgentId) throw refuse(403, 'task_not_yours', `#${task.number} is not a member task of your department.`);
-          const next = executor !== undefined ? (await member(agent, executor)).id : undefined;
-          const gateIds = gates !== undefined ? await gatesFor(agent, next ?? task.executorAgentId, gates) : undefined;
+          if (!boss && (task.departmentId !== agent.departmentId || !task.executorAgentId)) throw refuse(403, 'task_not_yours', `#${task.number} is not a member task of your department.`);
+          /* The orchestrator hands a task on within the task's own department, as its head would. */
+          const head = boss ? { ...agent, departmentId: task.departmentId } : agent;
+          if (head.departmentId === null && (executor !== undefined || gates !== undefined)) throw refuse(400, 'task_invalid', `#${task.number} has no executor or gates.`);
+          const next = executor !== undefined ? (await member(head, executor)).id : undefined;
+          const gateIds = gates !== undefined ? await gatesFor(head, next ?? task.executorAgentId!, gates) : undefined;
           const moved = await updateTask(ctx, agent.id, task.id, { ...text, executor: next, gates: gateIds });
           return { text: `Updated. ${await where(moved.task)}`, moved };
         }),
     );
-  }
-
-  if (job.agentKind !== 'worker') {
     server.registerTool(
       'report',
       {
@@ -267,11 +274,11 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
     );
     server.registerTool(
       'cancel_task',
-      { description: 'Cancels a task you created, with every open task under it.', inputSchema: { task: Ref, why: z.string().trim().min(1).max(1000) } },
+      { description: boss ? 'Cancels any task, with every open task under it.' : 'Cancels a task you created, with every open task under it.', inputSchema: { task: Ref, why: z.string().trim().min(1).max(1000) } },
       async ({ task: ref, why }) =>
         run(async () => {
           const { task } = await find(ref);
-          if (task.createdByAgentId !== job.agentId) throw refuse(403, 'task_not_yours', `#${task.number} was not created by you.`);
+          if (!boss && task.createdByAgentId !== job.agentId) throw refuse(403, 'task_not_yours', `#${task.number} was not created by you.`);
           const moved = await cancel(ctx, { agentId: job.agentId }, task.id, why);
           await stopTurns(ctx, moved.closed, job.agentId);
           return { text: `Cancelled #${task.number}.`, moved };

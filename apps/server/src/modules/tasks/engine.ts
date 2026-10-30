@@ -436,7 +436,8 @@ async function regate(ctx: Live, agentId: string, task: Task, c: TaskChange): Pr
   const gates = [...task.gates.slice(0, task.stage - 1), ...given];
   const text = rewrite(task, c);
   const n: Note = { kind: 'updated', actor: { agentId }, data: { fields: [...text.fields, 'gates'] } };
-  if (!given.length) return { task: await move(ctx, task, { ...text.set, gates, ...closing(), panel: [] }, n), wakes: [] };
+  /* No gates left finishes it: whoever gave it hears so, unless they did it. */
+  if (!given.length) return { task: await move(ctx, task, { ...text.set, gates, ...closing(), panel: [] }, n), wakes: giver(task, 'done', agentId) };
   const gate = await atGate(ctx.db, { ...task, gates }, task.stage);
   return { task: await move(ctx, task, { ...text.set, gates, ...gate.set }, n), wakes: gate.wakes };
 }
@@ -477,8 +478,8 @@ export async function updateTask(ctx: Live, agentId: string, taskId: string, c: 
     fields.push('gates');
   }
   if (!fields.length) return { task, wakes: [] };
-  /* A rewrite answers a blocked executor. */
-  if (task.status === 'blocked') set.status = 'open';
+  /* A rewrite answers a blocked executor. A task nobody holds stays blocked until someone can take it. */
+  if (task.status === 'blocked' && (set.assigneeAgentId ?? task.assigneeAgentId)) set.status = 'open';
   const row = await move(ctx, task, set, { kind: 'updated', actor: { agentId }, data: { fields } });
   const wakes: Wake[] = [];
   if (set.assigneeAgentId) wakes.push({ agentId: set.assigneeAgentId, taskId, why: 'assigned' });
@@ -562,7 +563,7 @@ async function checkPictures(db: Db, companyId: string, agentId: string, ids: st
 }
 
 /* A person answers: the request closes, the task goes on where it stood, and the agent that asked wakes with the answer. */
-export async function answer(ctx: Live, personId: string, requestId: string, a: Answer): Promise<{ request: Request; task: Task; wakes: Wake[] }> {
+export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answer): Promise<{ request: Request; task: Task; wakes: Wake[] }> {
   const [found] = await ctx.db.select().from(requests).where(eq(requests.id, requestId));
   if (!found) throw refuse(404, 'request_unknown', 'There is no such request.');
   if (found.status !== 'open') throw refuse(409, 'request_closed', 'This request is answered already.');
@@ -591,11 +592,11 @@ export async function answer(ctx: Live, personId: string, requestId: string, a: 
   const row = await ctx.db.transaction(async tx => {
     const [request] = await tx
       .update(requests)
-      .set({ status, answer: text || null, picked: option ? a.pick! : null, answeredBy: personId, answeredAt: new Date() })
+      .set({ status, answer: text || null, picked: option ? a.pick! : null, answeredBy: actor.personId ?? null, answeredAt: new Date() })
       .where(and(eq(requests.id, requestId), eq(requests.status, 'open')))
       .returning();
     if (!request) throw refuse(409, 'request_closed', 'This request is answered already.');
-    await note(tx, task, { kind: 'answered', actor: { personId }, text: said, data: { requestId, kind: found.kind, status } });
+    await note(tx, task, { kind: 'answered', actor, text: said, data: { requestId, kind: found.kind, status } });
     const [left] = await tx.select({ n: count() }).from(requests).where(and(eq(requests.taskId, task.id), eq(requests.status, 'open')));
     if (task.status === 'waiting' && !Number(left?.n ?? 0)) {
       await tx
@@ -607,7 +608,7 @@ export async function answer(ctx: Live, personId: string, requestId: string, a: 
   });
   const now = await loadTask(ctx.db, task.id);
   published(ctx, now);
-  await handOff(ctx, { personId }, now);
+  await handOff(ctx, actor, now);
   ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
   const wakes: Wake[] = CLOSED.includes(now.status) ? [] : [{ agentId: found.agentId, taskId: task.id, why: 'answered', text: said }];
   /* The last answer at a gate: everyone else still to give a verdict there goes on too, also after a turn spent waiting. */

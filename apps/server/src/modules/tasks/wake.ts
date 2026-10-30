@@ -79,12 +79,13 @@ export async function leaveIfOff(ctx: Ctx, agentId: string): Promise<void> {
   const [running] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, agentId), eq(jobs.status, 'running'))).limit(1);
   if (running) return;
   const [change] = await ctx.db
-    .select({ personId: agentChanges.personId })
+    .select({ personId: agentChanges.personId, byOrchestrator: agentChanges.byOrchestrator })
     .from(agentChanges)
     .where(and(eq(agentChanges.agentId, agentId), eq(agentChanges.field, 'switch')))
     .orderBy(desc(agentChanges.createdAt))
     .limit(1);
-  const actor = change?.personId ? { personId: change.personId } : { agentId };
+  const orchestrator = change?.byOrchestrator ? await orchestratorOf(ctx, agent.companyId) : null;
+  const actor = change?.personId ? { personId: change.personId } : { agentId: orchestrator?.id ?? agentId };
   const { wakes, handed, closed } = await leaveWork(ctx, actor, agent);
   /* Turns it would have taken on work it no longer holds would only confuse it once it is on again. */
   if (handed.length) {

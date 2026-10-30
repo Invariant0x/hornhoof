@@ -65,7 +65,7 @@ Agents will run on that machine with your subscription, and people with access t
 
 ## Running the company
 
-The orchestrator is the circle in the middle of the map. Click it and tell him about the company: he proposes departments on a card, and one click creates them. Later changes, such as another department, go through him the same way.
+The orchestrator is the circle in the middle of the map. Click it and tell him about the company: he proposes departments on a card, and one click creates them. He runs the company the way the CEO does in the screens, so you can also just tell him what to do: add or remove a department, hire, rename or fire an employee, switch employees off or on, change their models, skills and prompts, write to an employee, answer what an employee asked, rewrite or cancel a task, invite people, and manage subscriptions, machines and updates. He is allowed and refused exactly what the CEO is, and the employee's card and window say the orchestrator did it.
 
 Click a department to fly into it. Its schema shows the head on top and a frame for each role, with work going left to right through the gates and an amber line for what a gate sent back; every employee shows what it does now (working, queued, handed on, waiting for a decision, free) and the task it is about. On the map, a department's card has one square per employee in the same colors. "Department tasks" and "About the department" open its tasks, repository, products and people at the left. "+ Hire" asks the orchestrator to staff it: he proposes people, each with a role, a subscription and a model, and "Hire" creates the ticked ones. When he cannot answer, the card comes from the department's default roster. Roles and their skills come from the templates in `templates/`.
 

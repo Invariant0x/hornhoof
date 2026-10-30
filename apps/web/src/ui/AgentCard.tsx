@@ -371,7 +371,7 @@ export function AgentCard({ me, agentId, onClose, onTerminal }: Props) {
             <h4 id={`${id}-history`}>{t.agent.history}</h4>
             <ul>
               {card.changes.map((c, i) => (
-                <li key={i}>{t.agent.changed(t.agent.fields[c.field] ?? c.field, c.personName, when(c.at))}</li>
+                <li key={i}>{t.agent.changed(t.agent.fields[c.field] ?? c.field, c.byOrchestrator ? t.agent.byOrchestrator : c.personName, when(c.at))}</li>
               ))}
             </ul>
           </section>

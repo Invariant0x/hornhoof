@@ -1,0 +1,1 @@
+ALTER TABLE "agent_changes" ADD COLUMN "by_orchestrator" boolean DEFAULT false NOT NULL;
