@@ -99,8 +99,16 @@ export const DEPARTMENT_TEMPLATES: readonly { key: TemplateKey; roleCode: string
   { key: 'finance', roleCode: 'FIN', ticked: false, always: false },
 ];
 
+/* A live terminal between a person's browser and an agent's session on a node: its id, and the screen size in cells. */
+const TermId = z.string().regex(/^[A-Za-z0-9-]{1,64}$/);
+const Cols = z.number().int().min(10).max(500);
+const Rows = z.number().int().min(4).max(200);
+/* What one frame carries of a terminal's screen or of a person's keys and pastes. */
+export const TERM_CHUNK = 64 * 1024;
+
 const NodeMessage = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('hello'), version: z.string().max(40), loggedIn: z.boolean(), running: z.array(z.string()).max(100), models: Models.optional() }),
+  /* terminals: the node runs agents in sessions people can watch and type into. */
+  z.object({ type: z.literal('hello'), version: z.string().max(40), loggedIn: z.boolean(), running: z.array(z.string()).max(100), models: Models.optional(), terminals: z.boolean().optional() }),
   z.object({ type: z.literal('status'), loggedIn: z.boolean(), limits: Limits.nullable(), models: Models.optional() }),
   z.object({ type: z.literal('job.started'), jobId: z.string() }),
   z.object({
@@ -114,6 +122,10 @@ const NodeMessage = z.discriminatedUnion('type', [
   }),
   z.object({ type: z.literal('job.event'), jobId: z.string(), seq: z.number().int().min(0), event: AgentEvent }),
   z.object({ type: z.literal('removed') }),
+  z.object({ type: z.literal('term.data'), termId: TermId, data: z.string().max(4 * TERM_CHUNK) }),
+  z.object({ type: z.literal('term.exit'), termId: TermId }),
+  /* A person typed to an agent that had no turn running: Hornhoof opens one so the agent has its tools. */
+  z.object({ type: z.literal('turn.open'), agentKey: z.string().regex(/^[A-Za-z0-9-]{1,64}$/), text: z.string().max(100_000) }),
 ]);
 export type NodeMessage = z.infer<typeof NodeMessage>;
 
@@ -162,6 +174,13 @@ const ServerMessage = z.discriminatedUnion('type', [
   }),
   z.object({ type: z.literal('job.cancel'), jobId: Id }),
   z.object({ type: z.literal('remove') }),
+  /* write: the person may type; anyone else watches. agentKey: the agent's folder and session on the node. */
+  z.object({ type: z.literal('term.open'), termId: TermId, agentKey: Id, cols: Cols, rows: Rows, write: z.boolean() }),
+  z.object({ type: z.literal('term.input'), termId: TermId, data: z.string().max(TERM_CHUNK) }),
+  z.object({ type: z.literal('term.resize'), termId: TermId, cols: Cols, rows: Rows }),
+  z.object({ type: z.literal('term.close'), termId: TermId }),
+  /* The turn Hornhoof opened for what a person typed, or none when it could not. */
+  z.object({ type: z.literal('turn.opened'), agentKey: Id, jobId: Id.nullable(), toolToken: z.string().max(200).nullable() }),
 ]);
 export type ServerMessage = z.infer<typeof ServerMessage>;
 

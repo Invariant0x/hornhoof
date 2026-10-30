@@ -162,3 +162,31 @@ describe('models', () => {
     expect(modelsFor('codex', [])).toEqual([]);
   });
 });
+
+describe('live terminals', () => {
+  it('round-trip the screen, the keys and the size between Hornhoof and a node', () => {
+    const node: NodeMessage[] = [
+      { type: 'hello', version: '0.6.0', loggedIn: true, running: [], terminals: true },
+      { type: 'term.data', termId: 't-1', data: '\u001b[1mhi\u001b[0m ❯' },
+      { type: 'term.exit', termId: 't-1' },
+      { type: 'turn.open', agentKey: 'agent-1', text: 'Look at the build' },
+    ];
+    const server: ServerMessage[] = [
+      { type: 'term.open', termId: 't-1', agentKey: 'agent-1', cols: 120, rows: 36, write: true },
+      { type: 'term.input', termId: 't-1', data: 'hello\r' },
+      { type: 'term.resize', termId: 't-1', cols: 80, rows: 24 },
+      { type: 'term.close', termId: 't-1' },
+      { type: 'turn.opened', agentKey: 'agent-1', jobId: 'job-9', toolToken: 'tok' },
+      { type: 'turn.opened', agentKey: 'agent-1', jobId: null, toolToken: null },
+    ];
+    for (const m of node) expect(parseNodeMessage(JSON.stringify(m))).toEqual(m);
+    for (const m of server) expect(parseServerMessage(JSON.stringify(m))).toEqual(m);
+  });
+
+  it('refuse a terminal that is too big, an agent key that could leave its folder and more keys than one frame takes', () => {
+    expect(parseServerMessage(JSON.stringify({ type: 'term.open', termId: 't-1', agentKey: 'a', cols: 1000, rows: 36, write: false }))).toBeNull();
+    expect(parseServerMessage(JSON.stringify({ type: 'term.open', termId: 't-1', agentKey: '../x', cols: 80, rows: 24, write: false }))).toBeNull();
+    expect(parseServerMessage(JSON.stringify({ type: 'term.input', termId: 't-1', data: 'x'.repeat(70_000) }))).toBeNull();
+    expect(parseNodeMessage(JSON.stringify({ type: 'turn.open', agentKey: 'a/b', text: 'x' }))).toBeNull();
+  });
+});
