@@ -135,7 +135,8 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   /* The default roster for the card by hand: one line per default role, a perProduct role once per product, on the first
-     subscription that serves the department and runs the role's tier, with the program's Default model. */
+     subscription that serves the department and runs the role's tier, with the program's Default model. Every staff card
+     picks from its roles, products and subscriptions. */
   app.get('/api/departments/:id/roster', async req => {
     const me = await requirePerson(req, db);
     requireCompanyScope(me);
@@ -143,13 +144,23 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (!dept) throw new ApiError(404, 'not_found', 'This department does not exist.', 'department_unknown');
     const products = await db.select().from(departments).where(eq(departments.parentId, dept.id)).orderBy(asc(departments.position));
     const serving = await servingSubscriptions(ctx, me.companyId, spotIn(dept));
+    const roles = (dept.templateKey ? ctx.templates.roster(dept.templateKey) : []).map(role => ({
+      id: role.id,
+      title: role.title,
+      kind: role.kind,
+      tier: role.tier,
+      perProduct: role.perProduct,
+      inDefault: role.inDefault,
+      skills: role.skills.filter(s => s.on).map(s => s.id),
+      subscription: serving.find(s => runsTier(s.provider, role.tier))?.id ?? null,
+    }));
     const people: HireLine[] = [];
-    for (const role of dept.templateKey ? ctx.templates.roster(dept.templateKey).filter(r => r.inDefault) : []) {
-      const line = { role: role.id, model: '', subscription: serving.find(s => runsTier(s.provider, role.tier))?.id ?? null, skills: role.skills.filter(s => s.on).map(s => s.id) };
+    for (const role of roles.filter(r => r.inDefault)) {
+      const line = { role: role.id, model: '', subscription: role.subscription, skills: role.skills };
       if (role.perProduct && products.length) for (const p of products) people.push({ ...line, name: `${role.title.en} (${deptName(p)})`, product: p.id });
       else people.push({ ...line, name: role.title.en, product: null });
     }
-    return { people };
+    return { people, roles, products: products.map(p => ({ id: p.id, name: deptName(p) })), subscriptions: serving };
   });
 
   /* The CEO's click on a staff card: the only way employees are hired. */

@@ -13,7 +13,7 @@ const claude = SUBS[0]!;
 const PROPS = { me: ME, windowOpen: false, onOpenOrchestrator: () => {} };
 const DEPUTY: Me = { ...ME, person: { ...ME.person, scopeKind: 'department', scopeId: 'd1', isOwner: false } };
 
-const dept = (d: Partial<Department> & { id: string }): Department => ({ name: null, templateKey: null, roleCode: 'SAL', about: '', agents: { total: 0, working: 0 }, products: [], teams: [], ...d });
+const dept = (d: Partial<Department> & { id: string }): Department => ({ name: null, templateKey: null, roleCode: 'SAL', about: '', agents: { total: 0, working: 0 }, products: [], teams: [], people: [], employees: [], ...d });
 const STATES: [string, SubView | null, string, string][] = [
   ['none', null, 'Needs a subscription to start', 'Чтобы начать, нужна подписка'],
   ['API key', SUBS[3]!, 'Runs on Anthropic key ending 9f3a', 'Работает на ключе Anthropic, последние символы 9f3a'],

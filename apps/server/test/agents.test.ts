@@ -167,8 +167,8 @@ describe('the employee card', () => {
   });
 
   it('lists the employees of each department on the map', async () => {
-    const { app, ceo, brunoId } = await company();
+    const { app, ceo, brunoId, role } = await company();
     const org = (await app.inject({ url: '/api/org', ...as(ceo) })).json();
-    expect(org.departments[0].employees).toEqual([{ id: brunoId, name: 'Bruno', roleId: 'DEV-BE', kind: 'worker', model: 'claude-sonnet-5-5', provider: 'anthropic_api', state: 'sleeping' }]);
+    expect(org.departments[0].employees).toEqual([{ id: brunoId, name: 'Bruno', roleId: 'DEV-BE', title: role.title, kind: 'worker', model: 'claude-sonnet-5-5', provider: 'anthropic_api', state: 'sleeping' }]);
   });
 });

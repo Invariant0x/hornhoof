@@ -1,20 +1,24 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
-import { LANGUAGES, useLanguage, useT } from '../i18n';
+import { deptLabel, LANGUAGES, useLanguage, useT } from '../i18n';
 import { useOrg } from '../org';
 import { currentTheme, setTheme, type Theme } from '../theme';
 import type { Me } from '../types';
+import { AgentCard } from '../ui/AgentCard';
 import { LogoMark } from '../ui/icons';
 import { UpdateBanner } from '../ui/UpdateBanner';
 import { useVersion, versionText } from '../ui/VersionMark';
 import { useUpdates } from '../updates';
+import { AgentWindow, type StaffAsk } from './AgentWindow';
+import { DepartmentView } from './Department';
 import { MapScreen } from './Map';
-import { OrchestratorWindow } from './Orchestrator';
 import { People } from './People';
 import { Subscriptions } from './Subscriptions';
 import { Versions } from './Versions';
 
 type Tab = 'map' | 'people' | 'subscriptions';
+/* The right panel: an agent's terminal or its card. agentId is 'orchestrator' or an employee's id. */
+type Panel = { kind: 'window' | 'card'; agentId: string } | null;
 const TABS: Tab[] = ['map', 'people', 'subscriptions'];
 const THEMES: Theme[] = ['light', 'dark'];
 
@@ -90,8 +94,15 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   const [menu, setMenu] = useState(false);
   const company = me.person.scopeKind === 'company';
   /* The orchestrator's window opens over the map, for people who see the whole company. */
-  const [windowOpen, setWindowOpen] = useState(welcome && company);
-  const { org } = useOrg(windowOpen);
+  const [panel, setPanel] = useState<Panel>(welcome && company ? { kind: 'window', agentId: 'orchestrator' } : null);
+  const [deptId, setDeptId] = useState<string | null>(null);
+  const [staff, setStaff] = useState<StaffAsk | null>(null);
+  const { org } = useOrg(panel !== null || deptId !== null);
+  const dept = deptId ? org?.departments.find(d => d.id === deptId) : undefined;
+  /* A department removed while its view was open closes the view. */
+  useEffect(() => {
+    if (org && deptId && !dept) setDeptId(null);
+  }, [org, deptId, dept]);
   const updates = useUpdates(company);
   const [versionsOpen, setVersionsOpen] = useState(false);
   const account = useRef<HTMLDivElement>(null);
@@ -142,12 +153,46 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
         </div>
       </header>
       {company && <UpdateBanner updates={updates} onDetails={() => setVersionsOpen(true)} />}
-      <main className="body">
-        {tab === 'map' && <MapScreen me={me} windowOpen={windowOpen} onOpenOrchestrator={() => setWindowOpen(true)} />}
+      <main className={`body${panel ? ` with-${panel.kind}` : ''}`}>
+        {tab === 'map' && (
+          <MapScreen
+            me={me}
+            windowOpen={panel !== null}
+            onOpenOrchestrator={() => setPanel({ kind: 'window', agentId: 'orchestrator' })}
+            inside={!!dept}
+            onOpenDepartment={setDeptId}
+          />
+        )}
+        {tab === 'map' && dept && (
+          <DepartmentView
+            me={me}
+            department={dept}
+            selected={panel?.agentId ?? null}
+            onBack={() => setDeptId(null)}
+            onOpen={agentId => setPanel({ kind: 'card', agentId })}
+            onHire={() => {
+              setStaff({ id: dept.id, name: deptLabel(t, dept), at: Date.now() });
+              setPanel({ kind: 'window', agentId: 'orchestrator' });
+            }}
+          />
+        )}
         {tab === 'people' && <People me={me} />}
         {tab === 'subscriptions' && <Subscriptions me={me} />}
       </main>
-      {windowOpen && org && <OrchestratorWindow me={me} org={org} onClose={() => setWindowOpen(false)} />}
+      {panel?.kind === 'window' && org && (
+        <AgentWindow
+          key={panel.agentId}
+          me={me}
+          org={org}
+          agentId={panel.agentId}
+          staff={panel.agentId === 'orchestrator' ? staff : null}
+          onClose={() => setPanel(null)}
+          onCard={() => setPanel({ kind: 'card', agentId: panel.agentId })}
+        />
+      )}
+      {panel?.kind === 'card' && (
+        <AgentCard key={panel.agentId} me={me} agentId={panel.agentId} onClose={() => setPanel(null)} onTerminal={() => setPanel({ kind: 'window', agentId: panel.agentId })} />
+      )}
       {versionsOpen && <Versions updates={updates} onClose={() => setVersionsOpen(false)} />}
     </div>
   );

@@ -2,9 +2,9 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
-import { OrchestratorWindow } from '../src/screens/Orchestrator';
+import { AgentWindow } from '../src/screens/AgentWindow';
 import type { EventView, Org } from '../src/types';
-import { ME, mockApi, ORG, SUBS } from './api-mock';
+import { CARD, DEV_ORG, ME, mockApi, ORG, ROSTER, SUBS } from './api-mock';
 import { fakeStream } from './fake-stream';
 
 const EVENTS = '/api/agents/orchestrator/events';
@@ -35,13 +35,13 @@ function open(routes: Record<string, unknown> = {}, org: Org = ORG) {
   const onClose = vi.fn();
   const view = render(
     <LanguageProvider>
-      <OrchestratorWindow me={ME} org={org} onClose={onClose} />
+      <AgentWindow me={ME} org={org} agentId="orchestrator" onClose={onClose} />
     </LanguageProvider>,
   );
   return { calls, onClose, ...view };
 }
 
-describe('OrchestratorWindow', () => {
+describe('AgentWindow', () => {
   it('shows each kind of line the way a terminal would', async () => {
     const { container } = open({ [`GET ${EVENTS}?after=0`]: [200, { events: LOG, state: READY }] });
     expect(await screen.findByText('What matters most right now?')).toBeInTheDocument();
@@ -113,11 +113,11 @@ describe('OrchestratorWindow', () => {
   });
 
   it('shows that he works and stops him on Esc', async () => {
-    const { calls } = open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...BUSY, queued: 2 } }], 'POST /api/jobs/j1/cancel': [202] });
+    const { calls } = open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...BUSY, queued: 2 } }], 'POST /api/agents/orchestrator/stop': [202] });
     expect(await screen.findByText(/esc to stop/)).toBeInTheDocument();
     expect(screen.getByText('2 waiting')).toBeInTheDocument();
     fireEvent.keyDown(document, { key: 'Escape' });
-    await vi.waitFor(() => expect(calls.some(c => c.method === 'POST' && c.path === '/api/jobs/j1/cancel')).toBe(true));
+    await vi.waitFor(() => expect(calls.some(c => c.method === 'POST' && c.path === '/api/agents/orchestrator/stop')).toBe(true));
   });
 
   it('says why he cannot answer and offers the card by hand', async () => {
@@ -214,6 +214,51 @@ describe('OrchestratorWindow', () => {
     open();
     fireEvent.click(await screen.findByRole('button', { name: 'Pick departments by hand' }));
     expect(screen.getByText('Company structure')).toBeInTheDocument();
+  });
+
+  it('talks to an employee by its id', async () => {
+    const user = userEvent.setup();
+    const stream = fakeStream();
+    const calls = mockApi({
+      'GET /api/agents/b1': [200, CARD],
+      'GET /api/agents/b1/events?after=0': [200, { events: [ev(1, 'text', { kind: 'text', text: 'I build the API.' })], state: READY }],
+      'POST /api/agents/b1/messages': [202, { jobId: 'j3' }],
+    });
+    render(
+      <LanguageProvider>
+        <AgentWindow me={ME} org={DEV_ORG} agentId="b1" onClose={() => {}} />
+      </LanguageProvider>,
+    );
+    expect(await screen.findByText('I build the API.')).toBeInTheDocument();
+    expect(await screen.findByRole('complementary', { name: 'Bruno, Backend engineer' })).toBeInTheDocument();
+    stream.send({ type: 'agent_event', agentId: 'b1', event: ev(2, 'text', { kind: 'text', text: 'Live from Bruno' }) });
+    stream.send({ type: 'agent_event', agentId: 'a1', event: ev(3, 'text', { kind: 'text', text: 'From the orchestrator' }) });
+    expect(await screen.findByText('Live from Bruno')).toBeInTheDocument();
+    expect(screen.queryByText('From the orchestrator')).not.toBeInTheDocument();
+    const input = screen.getByLabelText('Write to Bruno');
+    await vi.waitFor(() => expect(input).toBeEnabled());
+    await user.type(input, 'What do you do?{Enter}');
+    await vi.waitFor(() => expect(calls.find(c => c.path === '/api/agents/b1/messages')?.body).toEqual({ text: 'What do you do?' }));
+    expect(calls.some(c => c.path.startsWith('/api/agents/orchestrator') || c.path === '/api/agents/b1/start')).toBe(false);
+    expect(screen.queryByRole('button', { name: 'Pick departments by hand' })).not.toBeInTheDocument();
+  });
+
+  it('shows his staff proposal as a hiring card and the hired line after it', async () => {
+    const staff = ev(1, 'proposal', { proposalId: 'pr5', kind: 'staff', department: 'd2', brief: 'The API first.', people: [{ role: 'DEV-BE', name: 'Bruno', checked: true }] });
+    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [staff], state: READY }], 'GET /api/departments/d2/roster': [200, ROSTER] }, DEV_ORG);
+    expect(await screen.findByText('Hiring for Development')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Hire (1)' })).toBeInTheDocument();
+    expect(screen.queryByText('Company structure')).not.toBeInTheDocument();
+  });
+
+  it('says who was hired once the card is applied', async () => {
+    const events = [
+      ev(1, 'proposal', { proposalId: 'pr5', kind: 'staff', department: 'd2', brief: '', people: [{ role: 'DEV-BE', name: 'Bruno', checked: true }] }),
+      ev(2, 'applied', { proposalId: 'pr5', kind: 'staff', department: 'd2', hired: [{ id: 'b1', name: 'Bruno', role: 'DEV-BE' }] }, { person: IVAN }),
+    ];
+    open({ [`GET ${EVENTS}?after=0`]: [200, { events, state: READY }] }, DEV_ORG);
+    expect(await screen.findByText('Hired: Bruno')).toBeInTheDocument();
+    expect(screen.queryByText('Hiring for Development')).not.toBeInTheDocument();
   });
 
   it('closes', async () => {

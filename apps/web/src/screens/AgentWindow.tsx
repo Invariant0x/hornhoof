@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { api } from '../api';
-import { errorText, useT, type Messages } from '../i18n';
+import { deptLabel, errorText, useLanguage, useT, type Messages } from '../i18n';
 import { useStream } from '../live';
 import { PROVIDER_NAMES } from '../providers';
-import type { EventView, Me, OrchestratorState, Org, StructureItem, SubView, TemplateKey } from '../types';
+import type { AgentCardView, EventView, Me, OrchestratorState, Org, StaffLine, StructureItem, SubView, TemplateKey } from '../types';
 import { Markdown } from '../ui/Markdown';
+import { StaffCard } from '../ui/StaffCard';
 import { StructureCard } from '../ui/StructureCard';
 import { orchestratorStatus } from './Map';
 
-const EVENTS = '/api/agents/orchestrator/events';
 /* The most events the server sends at a time. */
 const PAGE = 500;
 /* Machines come and go without a message on the stream, so the window asks again now and then. */
@@ -16,8 +16,14 @@ const POLL_MS = 15_000;
 /* Many lines can arrive in a second while he works; one catch-up covers them. */
 const CATCH_UP_MS = 300;
 
-type Applied = { proposalId: string | null; created: { template: TemplateKey | null; name: string | null; products: string[] }[]; removed: { template: TemplateKey | null; name: string | null }[] };
+type Applied = {
+  proposalId: string | null;
+  created?: { template: TemplateKey | null; name: string | null; products: string[] }[];
+  removed?: { template: TemplateKey | null; name: string | null }[];
+  hired?: { id: string; name: string }[];
+};
 type Proposal = { proposalId: string; brief: string; items: StructureItem[] };
+type StaffProposal = { proposalId: string; kind: 'staff'; department: string; brief: string; people: StaffLine[] };
 type Todo = { items: { text: string; state: 'todo' | 'doing' | 'done' }[] };
 
 const field = (data: unknown, key: string): string => {
@@ -49,29 +55,52 @@ function reasonText(t: Messages, reason: OrchestratorState['reason'], sub: SubVi
   return t.map.needsSubscription;
 }
 
-function failedText(t: Messages, data: unknown): string {
-  const failed: Record<string, string> = t.window.failed;
+function failedText(t: Messages, data: unknown, employee: boolean): string {
+  const failed: Record<string, string> = employee ? { ...t.window.failed, ...t.window.failedEmployee } : t.window.failed;
   return failed[field(data, 'error')] ?? t.window.failed.other;
 }
 
-type Props = { me: Me; org: Org; onClose(): void };
+/* A department the CEO asked to staff: at says when, so asking again about the same department counts. */
+export type StaffAsk = { id: string; name: string; at: number };
 
-/* The orchestrator's terminal: his conversation as it happens, the structure card, and the line to write to him. */
-export function OrchestratorWindow({ org, onClose }: Props) {
+/* agentId: 'orchestrator' or an employee's id. staff: the CEO's "+ Hire", for the orchestrator's window only. */
+type Props = { me: Me; org: Org; agentId: string; staff?: StaffAsk | null; onClose(): void; onCard?(): void };
+
+/* An agent's terminal: its conversation as it happens, the orchestrator's cards, and the line to write to it. */
+export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Props) {
   const t = useT();
+  const { language } = useLanguage();
+  const orchestrator = agentId === 'orchestrator';
+  const path = `/api/agents/${agentId}`;
+  const [card, setCard] = useState<AgentCardView | null>(null);
   const [events, setEvents] = useState<EventView[]>([]);
   const [state, setState] = useState<OrchestratorState | null>(null);
   const [text, setText] = useState('');
   /* The hand-made card: null follows the orchestrator (shown while he cannot answer), true or false is the CEO's choice. */
   const [manual, setManual] = useState<boolean | null>(null);
   const [failure, setFailure] = useState<unknown>(null);
+  /* The department to staff by hand, when the orchestrator could not answer the CEO's "+ Hire". */
+  const [staffByHand, setStaffByHand] = useState<{ id: string; name: string } | null>(null);
+  const asked = useRef<number | null>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const log = useRef<HTMLDivElement>(null);
   const last = useRef(0);
   const mounted = useRef(true);
   const catchUpTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const agentId = org.orchestrator?.id;
-  const sub = org.orchestrator?.subscription ?? null;
+  const liveId = orchestrator ? org.orchestrator?.id : agentId;
+  const sub = orchestrator ? (org.orchestrator?.subscription ?? null) : (card?.subscription ?? null);
+  const model = orchestrator ? org.orchestrator?.model : card?.model;
+  const title = orchestrator ? t.window.title : card ? [card.name, card.role?.title[language]].filter(Boolean).join(', ') : '';
+  const placeholder = orchestrator ? t.window.placeholder : t.window.writeTo(card?.name ?? '');
+
+  /* An employee's name, role and subscription come from its card; the orchestrator's from the company. */
+  const loadCard = useCallback(() => {
+    if (orchestrator) return;
+    api.get<AgentCardView>(path).then(
+      c => mounted.current && setCard(c),
+      err => mounted.current && setFailure(err),
+    );
+  }, [orchestrator, path]);
 
   /* A line comes once, whether the stream or a catch-up brought it first. */
   const merge = useCallback((more: EventView[]) => {
@@ -87,7 +116,7 @@ export function OrchestratorWindow({ org, onClose }: Props) {
   const catchUp = useCallback(async () => {
     try {
       for (;;) {
-        const res = await api.get<{ events: EventView[]; state: OrchestratorState }>(`${EVENTS}?after=${last.current}`);
+        const res = await api.get<{ events: EventView[]; state: OrchestratorState }>(`${path}/events?after=${last.current}`);
         if (!mounted.current) return;
         merge(res.events);
         setState(res.state);
@@ -97,7 +126,7 @@ export function OrchestratorWindow({ org, onClose }: Props) {
     } catch (err) {
       if (mounted.current) setFailure(err);
     }
-  }, [merge]);
+  }, [merge, path]);
 
   const soon = useCallback(() => {
     if (catchUpTimer.current) return;
@@ -107,14 +136,16 @@ export function OrchestratorWindow({ org, onClose }: Props) {
     }, CATCH_UP_MS);
   }, [catchUp]);
 
-  /* His greeting, when the conversation never began on an empty company; the server decides. */
+  /* His greeting, when the conversation never began on an empty company; the server decides. Employees wait to be written to. */
   const greet = useCallback(async () => {
+    if (!orchestrator) return;
     const res = await api.post<{ started: boolean }>('/api/agents/orchestrator/start').catch(() => ({ started: false }));
     if (res.started && mounted.current) await catchUp();
-  }, [catchUp]);
+  }, [catchUp, orchestrator]);
 
   useEffect(() => {
     mounted.current = true;
+    loadCard();
     (async () => {
       await catchUp();
       await greet();
@@ -126,7 +157,7 @@ export function OrchestratorWindow({ org, onClose }: Props) {
       if (catchUpTimer.current) clearTimeout(catchUpTimer.current);
       catchUpTimer.current = null;
     };
-  }, [catchUp, greet]);
+  }, [catchUp, greet, loadCard]);
 
   /* He may become able to answer while the window is open, as when the machine comes up after setup. */
   const wasReady = useRef<boolean | null>(null);
@@ -138,17 +169,36 @@ export function OrchestratorWindow({ org, onClose }: Props) {
   }, [canAnswer, greet]);
 
   useStream(m => {
-    if (m.type === 'agent_event' && m.agentId === agentId) {
+    if (m.type === 'agent_event' && m.agentId === liveId) {
       merge([m.event]);
       soon();
     }
     if (m.type === 'working') soon();
-    if (m.type === 'reconnected') void catchUp();
+    if (m.type === 'org') loadCard();
+    if (m.type === 'reconnected') {
+      loadCard();
+      void catchUp();
+    }
   });
 
+  /* "+ Hire": once it is known whether he can answer, he is asked to staff the department, or its default roster shows. */
+  useLayoutEffect(() => {
+    if (!staff || !state || asked.current === staff.at) return;
+    asked.current = staff.at;
+    if (!state.ready) {
+      setStaffByHand({ id: staff.id, name: staff.name });
+      return;
+    }
+    setStaffByHand(null);
+    api.post(`${path}/messages`, { text: t.dept.staffAsk(staff.name) }).then(
+      () => void catchUp(),
+      err => mounted.current && setFailure(err),
+    );
+  }, [staff, state, path, t, catchUp]);
+
   const stop = useCallback(() => {
-    if (state?.runningJobId) void api.post(`/api/jobs/${state.runningJobId}/cancel`).catch(setFailure);
-  }, [state?.runningJobId]);
+    if (state?.runningJobId) void api.post(`${path}/stop`).catch(setFailure);
+  }, [state?.runningJobId, path]);
 
   useEffect(() => {
     if (!state?.busy) return;
@@ -175,7 +225,7 @@ export function OrchestratorWindow({ org, onClose }: Props) {
     setText('');
     setFailure(null);
     try {
-      await api.post(`/api/agents/orchestrator/messages`, { text: body });
+      await api.post(`${path}/messages`, { text: body });
       void catchUp();
     } catch (err) {
       setText(body);
@@ -193,12 +243,15 @@ export function OrchestratorWindow({ org, onClose }: Props) {
   const shown = visible(events);
   const newest = events.findLast(e => e.kind === 'proposal');
   const applied = new Set(events.filter(e => e.kind === 'applied').map(e => (e.data as Applied).proposalId));
-  const pending = newest && !applied.has(field(newest.data, 'proposalId')) ? (newest.data as Proposal) : null;
+  const open = newest && !applied.has(field(newest.data, 'proposalId')) ? newest.data : null;
+  const pending = open && field(open, 'kind') !== 'staff' ? (open as Proposal) : null;
+  const staffing = open && field(open, 'kind') === 'staff' ? (open as StaffProposal) : null;
+  const staffDept = staffing && org.departments.find(d => d.id === staffing.department);
   const ready = state?.ready ?? false;
   const existing = org.departments.flatMap(d => (d.templateKey ? [d.templateKey] : []));
-  const byHand = !pending && (manual ?? (state !== null && !ready));
-  const offerByHand = !pending && !byHand && !state?.busy && !state?.queued && (!ready || !org.departments.length);
-  const where = [org.orchestrator?.model, orchestratorStatus(t, sub), sub?.machine?.hostname].filter(Boolean).join(', ');
+  const byHand = orchestrator && !open && !staffByHand && (manual ?? (state !== null && !ready));
+  const offerByHand = orchestrator && !open && !byHand && !staffByHand && !state?.busy && !state?.queued && (!ready || !org.departments.length);
+  const where = [model || t.agent.default, orchestratorStatus(t, sub), sub?.machine?.hostname].filter(Boolean).join(', ');
 
   function line(e: EventView, i: number) {
     switch (e.kind) {
@@ -249,16 +302,22 @@ export function OrchestratorWindow({ org, onClose }: Props) {
         const a = e.data as Applied;
         return (
           <div className="t-done">
-            {a.created.map((d, j) => (
+            {(a.created ?? []).map((d, j) => (
               <div key={`c${j}`} className="t-l">
                 <i>⏺</i>
                 <div>{t.window.created(named(t, d), d.products.length)}</div>
               </div>
             ))}
-            {a.removed.map((d, j) => (
+            {(a.removed ?? []).map((d, j) => (
               <div key={`r${j}`} className="t-l">
                 <i>⏺</i>
                 <div>{t.window.removed(named(t, d))}</div>
+              </div>
+            ))}
+            {(a.hired ?? []).map(h => (
+              <div key={h.id} className="t-l">
+                <i>⏺</i>
+                <div>{t.window.hiredLine(h.name)}</div>
               </div>
             ))}
           </div>
@@ -268,7 +327,7 @@ export function OrchestratorWindow({ org, onClose }: Props) {
         return (
           <div className="t-l t-bad">
             <i>⏺</i>
-            <div>{failedText(t, e.data)}</div>
+            <div>{failedText(t, e.data, !orchestrator)}</div>
           </div>
         );
       case 'stopped':
@@ -282,14 +341,21 @@ export function OrchestratorWindow({ org, onClose }: Props) {
   }
 
   return (
-    <aside className="orch" aria-label={t.window.title}>
+    <aside className="orch" aria-label={title}>
       <div className="t-bar">
         <span className="lights" aria-hidden="true">
           <i />
           <i />
           <i />
         </span>
-        <span>{t.window.title}</span>
+        <span>{title}</span>
+        {onCard && (
+          <button type="button" aria-label={t.window.card} onClick={onCard}>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 7h10M18 7h2M4 17h4M12 17h8M14 4v6M8 14v6" />
+            </svg>
+          </button>
+        )}
         <button type="button" aria-label={t.window.close} onClick={onClose}>
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M6 6l12 12M18 6L6 18" />
@@ -299,7 +365,7 @@ export function OrchestratorWindow({ org, onClose }: Props) {
       <div className="t-log" ref={log} role="log">
         <div className="t-wel">
           <div className="w1">
-            <i>✻</i> {t.window.title}
+            <i>✻</i> {title}
           </div>
           <div className="w2">{where}</div>
         </div>
@@ -309,6 +375,12 @@ export function OrchestratorWindow({ org, onClose }: Props) {
           </div>
         ))}
         {pending && <StructureCard key={pending.proposalId} proposal={{ id: pending.proposalId, brief: pending.brief, items: pending.items }} departments={org.departments} onCorrect={() => input.current?.focus()} />}
+        {staffing && (
+          <StaffCard key={staffing.proposalId} department={{ id: staffing.department, name: staffDept ? deptLabel(t, staffDept) : '' }} proposal={{ id: staffing.proposalId, brief: staffing.brief, people: staffing.people }} onCorrect={() => input.current?.focus()} />
+        )}
+        {!open && staffByHand && (
+          <StaffCard key={`hand-${staffByHand.id}`} department={staffByHand} onDone={() => setStaffByHand(null)} onHide={() => setStaffByHand(null)} />
+        )}
         {byHand && <StructureCard manual={{ existing }} departments={org.departments} onCorrect={() => input.current?.focus()} onDone={() => setManual(false)} onHide={() => setManual(false)} />}
         {state?.busy && (
           <div className="t-sp">
@@ -342,10 +414,10 @@ export function OrchestratorWindow({ org, onClose }: Props) {
         }}
       >
         <span aria-hidden="true">&gt;</span>
-        <label className="sr" htmlFor="orch-input">
-          {t.window.placeholder}
+        <label className="sr" htmlFor={`input-${agentId}`}>
+          {placeholder}
         </label>
-        <textarea id="orch-input" ref={input} rows={1} value={text} placeholder={t.window.placeholder} disabled={!ready} onChange={e => setText(e.target.value)} onKeyDown={onKeyDown} />
+        <textarea id={`input-${agentId}`} ref={input} rows={1} value={text} placeholder={placeholder} disabled={!ready} onChange={e => setText(e.target.value)} onKeyDown={onKeyDown} />
       </form>
       <div className="t-st">
         <span>{where}</span>

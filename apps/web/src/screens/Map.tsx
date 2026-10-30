@@ -26,9 +26,13 @@ const WINDOW_W = 672, NARROW = 760;
 const PULSE_SPEED = 100;
 /* How long a pulse waits for its end to appear on the map. */
 const HOLD_MS = 5000;
+/* Flying into a department takes this long before its view opens. */
+const FLY_MS = 600;
+/* A press that moves further than this drags the map instead of clicking. */
+const DRAG_PX = 4;
 
-/* smooth: the change came from Fit and glides; drag and zoom follow the hand at once. */
-type View = { x: number; y: number; k: number; smooth: boolean };
+/* smooth: the change came from Fit and glides, or flies into a department; drag and zoom follow the hand at once. */
+type View = { x: number; y: number; k: number; smooth: boolean | 'fly' };
 export type DeptSpot = { x: number; y: number; w: number; h: number; path: Point[] };
 
 export function orchestratorStatus(t: Messages, sub: SubView | null): string {
@@ -142,7 +146,10 @@ function contentBounds(org: Org): { x0: number; y0: number; x1: number; y1: numb
 
 type Shot = { key: number; pts: Point[] };
 
-export function MapScreen({ me, windowOpen, onOpenOrchestrator }: { me: Me; windowOpen: boolean; onOpenOrchestrator(): void }) {
+type Props = { me: Me; windowOpen: boolean; onOpenOrchestrator(): void; inside?: boolean; onOpenDepartment?(id: string): void };
+
+/* inside: a department's view is open over the map, which stays flown into it until the view closes. */
+export function MapScreen({ me, windowOpen, onOpenOrchestrator, inside = false, onOpenDepartment }: Props) {
   const t = useT();
   const still = useReducedMotion();
   const company = me.person.scopeKind === 'company';
@@ -150,7 +157,9 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator }: { me: Me; wind
   const [view, setView] = useState<View>({ x: 0, y: 0, k: 1, smooth: false });
   const [shots, setShots] = useState<Shot[]>([]);
   const box = useRef<HTMLDivElement>(null);
-  const drag = useRef<{ id: number; x: number; y: number } | null>(null);
+  const drag = useRef<{ id: number; x: number; y: number; moved: number } | null>(null);
+  /* How far the last press moved, so the click that ends a drag opens nothing. */
+  const lastMoved = useRef(0);
   const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
   const shotKey = useRef(0);
   const held = useRef<{ m: Extract<LiveMessage, { type: 'pulse' }>; at: number }[]>([]);
@@ -194,7 +203,7 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator }: { me: Me; wind
 
   const fit = useCallback(() => {
     const el = box.current;
-    if (!el || !el.clientWidth || !org) return;
+    if (!el || !el.clientWidth || !org || inside) return;
     const { x0, y0, x1, y1 } = contentBounds(org);
     /* The header floats over the top of the map and the zoom over the bottom. */
     const padX = 32, padTop = 76, padBottom = 72;
@@ -202,7 +211,7 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator }: { me: Me; wind
     const room = el.clientHeight - padTop - padBottom;
     const k = Math.max(MIN_K, Math.min((width - padX * 2) / (x1 - x0), room / (y1 - y0), 1.15));
     setView({ k, x: (width - (x1 - x0) * k) / 2 - x0 * k, y: padTop + (room - (y1 - y0) * k) / 2 - y0 * k, smooth: true });
-  }, [org, windowOpen]);
+  }, [org, windowOpen, inside]);
 
   useEffect(() => {
     fit();
@@ -235,20 +244,37 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator }: { me: Me; wind
     return () => el.removeEventListener('wheel', onWheel);
   }, [zoomAt, org]);
 
+  /* The map takes the pointer only once a press moves, so a press on a department still clicks it. */
   function down(e: ReactPointerEvent) {
     if (e.button !== 0) return;
-    drag.current = { id: e.pointerId, x: e.clientX, y: e.clientY };
-    e.currentTarget.setPointerCapture?.(e.pointerId);
+    drag.current = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: 0 };
   }
   function move(e: ReactPointerEvent) {
     const d = drag.current;
     if (!d || d.id !== e.pointerId) return;
     const dx = e.clientX - d.x, dy = e.clientY - d.y;
-    drag.current = { ...d, x: e.clientX, y: e.clientY };
+    const moved = d.moved + Math.abs(dx) + Math.abs(dy);
+    if (d.moved <= DRAG_PX && moved > DRAG_PX) e.currentTarget.setPointerCapture?.(e.pointerId);
+    drag.current = { ...d, x: e.clientX, y: e.clientY, moved };
     setView(v => ({ ...v, x: v.x + dx, y: v.y + dy, smooth: false }));
   }
   function up() {
+    lastMoved.current = drag.current?.moved ?? 0;
     drag.current = null;
+  }
+
+  /* The map flies into the department's card until it fills the screen, then the department opens. */
+  function enter(spot: DeptSpot, id: string) {
+    if (lastMoved.current > DRAG_PX || !onOpenDepartment) return;
+    const el = box.current;
+    if (!el || !el.clientWidth || still) return onOpenDepartment(id);
+    const k = Math.min(el.clientWidth / spot.w, el.clientHeight / spot.h);
+    setView({ k, x: el.clientWidth / 2 - (spot.x + spot.w / 2) * k, y: el.clientHeight / 2 - (spot.y + spot.h / 2) * k, smooth: 'fly' });
+    const timer = setTimeout(() => {
+      timers.current.delete(timer);
+      onOpenDepartment(id);
+    }, FLY_MS);
+    timers.current.add(timer);
   }
 
   if (failure !== null) return <p className="alert map-failure" role="alert">{errorText(t, failure)}</p>;
@@ -288,10 +314,15 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator }: { me: Me; wind
   );
 
   return (
-    <div className="map" ref={box} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}>
+    <div className="map" ref={box} inert={inside} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}>
       <div
         className="world"
-        style={{ width: W, height: H, transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})`, transition: view.smooth && !still ? 'transform .8s cubic-bezier(.3,.7,.2,1)' : 'none' }}
+        style={{
+          width: W,
+          height: H,
+          transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})`,
+          transition: still || !view.smooth ? 'none' : view.smooth === 'fly' ? `transform ${FLY_MS / 1000}s cubic-bezier(.55,0,.25,1)` : 'transform .8s cubic-bezier(.3,.7,.2,1)',
+        }}
       >
         <div className="halo" style={{ left: CX - 260, top: CY - 260, width: 520, height: 520 }} />
         <svg className="wires" width={W} height={H} viewBox={`0 0 ${W} ${H}`} aria-hidden="true">
@@ -357,7 +388,7 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator }: { me: Me; wind
         )}
 
         {depts.map((d: Department, i) => (
-          <div key={d.id} className="dept" style={{ left: spots[i]!.x, top: spots[i]!.y, width: DEPT_W, height: DEPT_H }}>
+          <button key={d.id} type="button" className="dept" style={{ left: spots[i]!.x, top: spots[i]!.y, width: DEPT_W, height: DEPT_H }} onClick={() => enter(spots[i]!, d.id)}>
             <Edge cut={12} corner>
               <span className="row1">
                 <b className="dname">{deptLabel(t, d)}</b>
@@ -376,7 +407,7 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator }: { me: Me; wind
                 </span>
               )}
             </Edge>
-          </div>
+          </button>
         ))}
       </div>
 

@@ -9,7 +9,7 @@ import { personViews } from '../people/views.js';
 import { identityOf } from '../nodes/hub.js';
 import { subView } from '../subscriptions/views.js';
 
-export function orgRoutes(app: FastifyInstance, { db, hub }: Ctx): void {
+export function orgRoutes(app: FastifyInstance, { db, hub, templates }: Ctx): void {
   app.get('/api/org', async req => {
     const me = await requirePerson(req, db);
     const [company] = await db.select({ id: companies.id, name: companies.name }).from(companies).where(eq(companies.id, me.companyId));
@@ -50,6 +50,7 @@ export function orgRoutes(app: FastifyInstance, { db, hub }: Ctx): void {
           id: a.id,
           name: a.name,
           roleId: a.roleKey,
+          title: (a.roleKey && templates.roles.get(a.roleKey)?.title) || null,
           kind: a.kind,
           model: a.model,
           provider: a.subscriptionId ? (providers.get(a.subscriptionId) ?? null) : null,

@@ -207,6 +207,12 @@ describe('staffing', () => {
     expect(ui.map((l: { product: string; name: string }) => [l.product, l.name])).toEqual(designProducts.map(p => [p.id, `Product UI designer (${p.name})`]));
     expect(roster[0]).toMatchObject({ role: 'DSN-HEAD', model: '', subscription: c.teamKey });
     for (const l of roster) expect(l.skills).toContain('hh-report-to-head');
+    const { roles, products, subscriptions } = res.json();
+    expect(roles[0]).toMatchObject({ id: 'DSN-HEAD', kind: 'head', subscription: c.teamKey });
+    expect(roles[0].skills).toContain('hh-report-to-head');
+    expect(roles.find((r: { id: string }) => r.id === 'DSN-UI')).toMatchObject({ title: { en: 'Product UI designer' }, kind: 'member', perProduct: true });
+    expect(products).toEqual(designProducts.map(p => ({ id: p.id, name: p.name })));
+    expect(subscriptions.find((s: { id: string }) => s.id === c.teamKey)).toMatchObject({ provider: 'anthropic_api', label: 'Team key', models: API_MODELS.anthropic_api });
     const dev = (await c.app.inject({ url: `/api/departments/${c.dev.id}/roster`, ...as(c.ceo) })).json().people;
     expect(dev.map((l: { role: string }) => l.role)).not.toContain('DEV-DOCS');
     expect((await hire(c.app, c.ceo, c.design.id, { people: roster })).statusCode).toBe(201);

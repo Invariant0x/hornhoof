@@ -441,3 +441,89 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .t-st > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 760px) { .orch { left: 0; right: 0; top: 56px; bottom: 0; width: auto; border-left: 0; border-right: 0; } }
 @media (prefers-reduced-motion: reduce) { .t-log > *, .t-sp > i { animation: none; } }
+
+/* A department card on the map opens the department. */
+button.dept { padding: 0; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+button.dept:hover > .edge, button.dept:focus-visible > .edge { background: var(--cyan); }
+button.dept:focus-visible { outline: none; }
+
+/* Inside a department: the head on top, the members below, products and people at the side. */
+.dview {
+  position: absolute; inset: 0; z-index: 2; overflow: auto; box-sizing: border-box; padding: 76px 32px 32px;
+  background-color: var(--bg); background-image: radial-gradient(var(--dot) 1px, transparent 1px); background-size: 22px 22px;
+  animation: dvin .25s ease-out;
+}
+@keyframes dvin { from { opacity: 0; } }
+.body.with-window .dview { padding-right: 688px; }
+.body.with-card .dview { padding-right: 508px; }
+.dv-top { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; max-width: 1040px; }
+.dv-top .btn svg { width: 16px; height: 16px; margin-right: 6px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.dv-title { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 12px; }
+.dv-title h2 { font-size: 30px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dv-body { display: grid; grid-template-columns: minmax(0, 1fr) 240px; gap: 32px; max-width: 1040px; margin-top: 28px; }
+.dv-main, .dv-side { display: grid; gap: 28px; align-content: start; }
+.dview h3 { margin-bottom: 10px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.dv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; margin: 0; padding: 0; list-style: none; }
+.emp { display: block; width: 100%; height: 124px; padding: 0; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.dv-main > section:first-child .emp { max-width: 320px; }
+.emp > .edge { height: 100%; }
+.emp .edge-in { display: grid; gap: 4px; align-content: start; padding: 14px 16px; }
+.emp:hover > .edge, .emp.on > .edge, .emp:focus-visible > .edge { background: var(--cyan); }
+.emp:focus-visible { outline: none; }
+.emp-name { font-family: var(--f-display); font-size: 17px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.emp-role { font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.emp-model { font-family: var(--f-mono); font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.emp-state { display: flex; align-items: center; gap: 8px; margin-top: 4px; font-size: 12.5px; color: var(--muted); }
+.dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--idle); }
+.dot.working { background: var(--cyan); animation: blink 1.6s ease-in-out infinite; }
+.dot.needs_subscription { background: var(--amber); }
+.dv-side ul { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.dv-side li { display: grid; padding-left: 10px; border-left: 2px solid var(--line2); }
+.dv-side small { font-size: 12.5px; color: var(--muted); }
+
+/* An agent's card in the right panel. */
+.acard { position: fixed; z-index: 9; top: 68px; right: 16px; bottom: 76px; width: 460px; box-sizing: border-box; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-top: 2px solid var(--cyan); box-shadow: 0 24px 60px var(--shadow); }
+.ac-body { flex: 1 1 auto; min-height: 0; overflow: auto; display: grid; gap: 18px; align-content: start; padding: 16px 18px 20px; }
+.ac-head { display: grid; gap: 4px; justify-items: start; }
+.ac-head h3 { font-size: 22px; }
+.ac-head p { margin: 0; }
+.ac-head .btn { margin-top: 8px; }
+.ac-state { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.ac-pick { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.ac-note { margin: -8px 0 0; font-size: 13px; color: var(--ok); }
+.acard h4 { margin: 0 0 8px; font-family: var(--f-display); font-size: 15px; font-weight: 600; }
+.ac-skills label { display: grid; grid-template-columns: 22px 1fr auto; gap: 8px; align-items: start; padding: 7px 0; border-top: 1px solid var(--line); cursor: pointer; }
+.ac-skills label.lock { cursor: default; }
+.ac-skills input { width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--cyan); }
+.ac-skills small { display: block; font-size: 12.5px; color: var(--muted); }
+.ac-prompt { display: grid; gap: 10px; }
+.ac-prompt-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ac-prompt-top h4 { margin: 0; }
+.ac-part { display: grid; gap: 4px; }
+.ac-part > label, .ac-part > span { font-size: 13px; font-weight: 600; color: var(--muted); }
+.ac-text { width: 100%; box-sizing: border-box; margin: 0; padding: 10px 12px; border: 1px solid var(--line2); background: var(--surface2); color: var(--ink); font-family: var(--f-mono); font-size: 12.5px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; resize: vertical; }
+pre.ac-text { max-height: 260px; overflow: auto; }
+textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow); }
+.ac-prompt .f { display: flex; gap: 10px; }
+.ac-actions { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 14px; border-top: 1px solid var(--line); }
+.ac-history ul { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; font-size: 12.5px; color: var(--muted); }
+
+/* The staff card: a line per person with where it runs and its model. */
+.t-card-brief { margin: 0 0 4px; color: var(--muted); }
+.staff-row { display: grid; gap: 6px; padding: 8px 0; border-top: 1px solid var(--line); }
+.staff-row:first-of-type { border-top: 0; }
+.t-card .staff-row label { padding: 0; }
+.t-card.staff .t-card-tag { color: var(--cyan-ink); }
+.staff-pick { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-left: 30px; }
+.staff-pick select { min-width: 0; height: 32px; padding: 0 8px; border: 1px solid var(--line2); background: var(--surface); color: var(--ink); font: inherit; font-size: 13px; }
+.staff-pick select:disabled { opacity: .55; }
+
+@media (max-width: 1180px) { .body.with-window .dview, .body.with-card .dview { padding-right: 32px; } }
+@media (max-width: 760px) {
+  .dview, .body.with-window .dview, .body.with-card .dview { padding: 72px 16px 24px; }
+  .dv-body { grid-template-columns: 1fr; }
+  .acard { left: 0; right: 0; top: 56px; bottom: 0; width: auto; border-left: 0; border-right: 0; }
+  .ac-pick, .staff-pick { grid-template-columns: 1fr; }
+  .staff-pick { margin-left: 0; }
+}
+@media (prefers-reduced-motion: reduce) { .dview, .dot.working { animation: none; } }

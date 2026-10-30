@@ -3,6 +3,7 @@ import { api } from '../api';
 import { errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
 import type { JobView, Limits, MachineView, Me, SubView } from '../types';
+import { Ask } from '../ui/Ask';
 import { CommandBox } from '../ui/CommandBox';
 import { ConnectPanel } from '../ui/ConnectPanel';
 import { Edge } from '../ui/Edge';
@@ -82,17 +83,6 @@ function TestResult({ test }: { test: Test }) {
           <pre>{test.tail}</pre>
         </details>
       )}
-    </div>
-  );
-}
-
-function Ask({ text, yes, onYes, onNo }: { text: string; yes: string; onYes: () => void; onNo: () => void }) {
-  const t = useT();
-  return (
-    <div className="ask">
-      <span>{text}</span>
-      <button className="btn small" type="button" onClick={onYes}>{yes}</button>
-      <button className="btn small ghost" type="button" onClick={onNo}>{t.common.cancel}</button>
     </div>
   );
 }
