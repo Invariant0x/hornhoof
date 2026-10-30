@@ -114,7 +114,6 @@ const EARLY_MAX = 1000;
 const SETTLE_MS = 3000;
 
 const hashOf = (v: unknown) => createHash('sha256').update(JSON.stringify(v)).digest('hex');
-/* The turn's own address and token for pictures change every turn; the bridge serves them instead. */
 /* What a session was told from before it started, kept in the agent's folder by the session's id. */
 const contextFile = (workDir: string, sessionId: string) => (/^[\w-]+$/.test(sessionId) ? join(workDir, '.hh-context', `${sessionId}.md`) : null);
 
@@ -134,6 +133,7 @@ function keptContext(workDir: string, sessionId: string): string | null {
   }
 }
 
+/* The turn's own address and token for pictures change every turn; the bridge serves them instead. */
 const lasting = (env: Record<string, string> = {}) => Object.fromEntries(Object.entries(env).filter(([k]) => !k.startsWith('HH_ATTACH_')));
 
 /* Runs agents in their tmux sessions on this node and shows those sessions to the people watching. */
