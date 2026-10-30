@@ -2,7 +2,7 @@ import { TAIL_BYTES, type NodeMessage } from '@hornhoof/protocol';
 import { and, eq, inArray, isNull, notInArray, or, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { jobs, subscriptions } from '../../db/schema.js';
-import { afterJob, pumpWaiting } from '../conversation/queue.js';
+import { afterJob, openTypedTurn, pumpWaiting } from '../conversation/queue.js';
 import { appendEvent, publishWorking } from '../events/store.js';
 import type { NodeIdentity } from './hub.js';
 
@@ -56,7 +56,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
           .where(eq(subscriptions.id, sub.id));
       }
       await failOpenJobs(ctx, jobsOf(id, ctx), 'machine_restarted', msg.running);
-      ctx.hub.greet(id);
+      ctx.hub.greet(id, msg.terminals === true);
       /* Hornhoof ended these while the node was away, with a stop or a removed subscription; the node stops them now. */
       if (msg.running.length) {
         const open = await db.select({ id: jobs.id }).from(jobs).where(and(inArray(jobs.id, msg.running), inArray(jobs.status, OPEN_JOBS), jobsOf(id, ctx)));
@@ -115,6 +115,11 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       if (finished.length) await afterJob(ctx, msg.jobId);
       return;
     }
+    case 'turn.open': {
+      const opened = await openTypedTurn(ctx, id, msg.agentKey, msg.text, ctx.terminals.typist(msg.agentKey));
+      ctx.hub.send(id, { type: 'turn.opened', agentKey: msg.agentKey, jobId: opened?.jobId ?? null, toolToken: opened?.token ?? null });
+      return;
+    }
     case 'removed': {
       if (id.kind !== 'node') return;
       await db.update(subscriptions).set({ nodeKeyHash: null, machineId: null }).where(eq(subscriptions.id, id.subscriptionId));
@@ -126,6 +131,8 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
 
 /* Jobs keep running on the node while it is away and report after it reconnects, so only the time is kept. */
 export async function handleNodeClose(ctx: Ctx, id: NodeIdentity): Promise<void> {
+  /* A newer connection of the same node keeps the views. */
+  if (!ctx.hub.isOnline(id)) ctx.terminals.nodeGone(id);
   if (id.kind !== 'node') return;
   await ctx.db.update(subscriptions).set({ lastSeenAt: new Date() }).where(eq(subscriptions.id, id.subscriptionId));
 }

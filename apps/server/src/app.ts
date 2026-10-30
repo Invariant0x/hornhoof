@@ -26,6 +26,8 @@ import { archOf, registry } from './modules/updates/registry.js';
 import { updateRoutes } from './modules/updates/routes.js';
 import { attachmentRoutes } from './modules/tasks/attachments.js';
 import { taskRoutes } from './modules/tasks/routes.js';
+import { TerminalRelay } from './modules/terminals/relay.js';
+import { terminalRoutes } from './modules/terminals/routes.js';
 import { hasWebApp, serveWebApp, webAppRoutes } from './web.js';
 
 export type { Db } from './db/client.js';
@@ -34,8 +36,9 @@ import type { Db } from './db/client.js';
 /* logger is off unless given: tests stay quiet, main.ts turns it on so errors reach the container log. */
 export type Deps = { db: Db; config: Config; logger?: FastifyServerOptions['logger'] };
 
-/* What routes get: the deps, the live node connections, the live stream to browsers and the check for newer builds. */
-export type Ctx = Deps & { hub: NodeHub; bus: EventBus; updates: UpdateCheck; updater: UpdaterControl; templates: Templates };
+/* What routes get: the deps, the live node connections, the live stream to browsers, the terminals people watch and the
+   check for newer builds. */
+export type Ctx = Deps & { hub: NodeHub; bus: EventBus; terminals: TerminalRelay; updates: UpdateCheck; updater: UpdaterControl; templates: Templates };
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -48,11 +51,12 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   const app = Fastify({ logger: deps.logger ?? false, disableRequestLogging: true });
   const web = hasWebApp(deps.config.webDist);
   registerErrorHandling(app, web ? webAppRoutes : undefined);
-  const ctx = { ...deps, bus: new EventBus() } as Ctx;
+  const ctx = { ...deps, bus: new EventBus(), terminals: new TerminalRelay() } as Ctx;
   app.decorate('ctx', ctx);
   ctx.hub = new NodeHub({
     pingMs: deps.config.nodePingMs,
     onMessage: (id, msg) => handleNodeMessage(ctx, id, msg),
+    onTerminal: (id, msg) => ctx.terminals.fromNode(id, msg),
     onClose: id => handleNodeClose(ctx, id),
     onError: err => app.log.error(err),
   });
@@ -84,6 +88,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   streamRoutes(app, ctx);
   mcpRoutes(app, ctx);
   conversationRoutes(app, ctx);
+  terminalRoutes(app, ctx);
   agentRoutes(app, ctx);
   departmentRoutes(app, ctx);
   updateRoutes(app, ctx);

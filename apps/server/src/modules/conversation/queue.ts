@@ -1,10 +1,11 @@
 import { modelsFor } from '@hornhoof/protocol';
-import { and, asc, count, desc, eq } from 'drizzle-orm';
+import { and, asc, count, desc, eq, isNotNull, isNull } from 'drizzle-orm';
+import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
 import { agents, jobs, subscriptions } from '../../db/schema.js';
 import { dispatchJob } from '../jobs/dispatch.js';
-import { identityOf } from '../nodes/hub.js';
+import { identityOf, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { appendEvent, earlierTalk, publishWorking } from '../events/store.js';
 import { instructionsOf } from '../agents/instructions.js';
 import { repoFor, repoLine } from '../departments/repository.js';
@@ -22,6 +23,8 @@ export type AgentState = {
   busy: boolean;
   runningJobId: string | null;
   queued: number;
+  /* Its node shows the agent's live terminal. */
+  terminal: boolean;
 };
 
 type Turn = { companyId: string; agentId: string; prompt: string; createdBy: string | null; message?: { personId: string; text: string }; taskId?: string };
@@ -76,6 +79,46 @@ export async function enqueueTurn(ctx: Ctx, t: Turn): Promise<string> {
   const jobId = await insertTurn(ctx, t);
   await pump(ctx, t.agentId);
   return jobId;
+}
+
+/* A person typed into the agent's terminal while no turn ran. The turn is theirs and runs from now on the node that shows
+   the session, which goes on with the instructions it was started with: their hash stays, so the next turn resumes it. */
+export function openTypedTurn(ctx: Ctx, node: NodeIdentity, agentId: string, text: string, personId: string | null): Promise<{ jobId: string; token: string } | null> {
+  if (!z.uuid().safeParse(agentId).success) return Promise.resolve(null);
+  return onAgent(ctx, agentId, async () => {
+    const { db } = ctx;
+    const [agent] = await db.select().from(agents).where(and(eq(agents.id, agentId), isNull(agents.removedAt)));
+    const sub = agent ? await liveSubscription(ctx, agent.id) : null;
+    if (!agent || !sub || !sameNode(identityOf(sub), node)) return null;
+    const [running] = await db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
+    if (running) return null;
+    const [last] = await db
+      .select({ hash: jobs.instructionsHash })
+      .from(jobs)
+      .where(and(conversationOf(agentId), eq(jobs.subscriptionId, sub.id), isNotNull(jobs.instructionsHash)))
+      .orderBy(desc(jobs.startedAt))
+      .limit(1);
+    const token = newToken();
+    const [job] = await db
+      .insert(jobs)
+      .values({
+        companyId: agent.companyId,
+        subscriptionId: sub.id,
+        agentId,
+        kind: 'conversation',
+        status: 'running',
+        startedAt: new Date(),
+        prompt: text,
+        timeoutMs: CONVERSATION_TIMEOUT_MS,
+        createdBy: personId,
+        toolTokenHash: hashToken(token),
+        instructionsHash: last?.hash ?? null,
+      })
+      .returning({ id: jobs.id });
+    if (text.trim()) await appendEvent(ctx, { companyId: agent.companyId, agentId, jobId: job!.id, kind: 'message', data: { text }, personId });
+    await publishWorking(ctx, agent.companyId);
+    return { jobId: job!.id, token };
+  });
 }
 
 /* A new session catches up from the conversation. The last finished turn's session goes on only on the same subscription
@@ -197,7 +240,7 @@ export async function orchestratorOf(ctx: Ctx, companyId: string) {
 
 export async function orchestratorState(ctx: Ctx, companyId: string): Promise<AgentState> {
   const agent = await orchestratorOf(ctx, companyId);
-  if (!agent) return { ready: false, reason: 'no_subscription', busy: false, runningJobId: null, queued: 0 };
+  if (!agent) return { ready: false, reason: 'no_subscription', busy: false, runningJobId: null, queued: 0, terminal: false };
   return agentState(ctx, agent.id);
 }
 
@@ -218,5 +261,6 @@ export async function agentState(ctx: Ctx, agentId: string): Promise<AgentState>
           : !ctx.hub.isReady(identityOf(sub))
             ? 'machine_offline'
             : null;
-  return { ready: reason === null, reason, busy: Boolean(running), runningJobId: running?.id ?? null, queued: Number(waiting?.n ?? 0) };
+  const terminal = Boolean(sub && ctx.hub.hasTerminals(identityOf(sub)));
+  return { ready: reason === null, reason, busy: Boolean(running), runningJobId: running?.id ?? null, queued: Number(waiting?.n ?? 0), terminal };
 }
