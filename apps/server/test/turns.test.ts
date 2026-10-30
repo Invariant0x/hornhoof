@@ -206,6 +206,18 @@ describe('turns', () => {
     expect((await db.select().from(turns))[0]!.messages.map(m => m.text)).toEqual(['Now card payments, please.']);
   });
 
+  it("keeps a planned task away from its department's head until its turn starts", async () => {
+    const { orchestrator, dev, hana, bruno, tools } = await company();
+    const boss = await tools(orchestrator);
+    await call(boss, 'plan_turn', { title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
+    await call(boss, 'plan_turn', { title: 'Refunds', goal: 'Money goes back.', tasks: [work(dev.id, 'Refund button')] });
+    const head = await tools(hana);
+    expect(JSON.parse(text(await call(head, 'tasks', {}))).map((t: { number: number }) => t.number)).toEqual([1]);
+    expect((await call(head, 'task', { task: 2 })).isError).toBe(true);
+    const early = await call(head, 'create_task', { title: 'Refund API', brief: '', body: '', executor: bruno.id, parent: 2 });
+    expect(early.isError).toBe(true);
+  });
+
   it('renames a turn that has not closed', async () => {
     const { db, orchestrator, dev, tools } = await company();
     const client = await tools(orchestrator);

@@ -36,7 +36,7 @@ function TaskBody({ task, onOpen, onChanged }: { task: TaskDetail; onOpen: (id: 
       <header className="ac-head">
         <h3>{task.title}</h3>
         <p className="muted">{[placeName(t, org, task.department), task.product?.name, task.turn !== null ? t.tasks.turn(task.turn) : null].filter(Boolean).join(' / ')}</p>
-        <p className={`tstate ${task.status}`}>{t.tasks.groups[task.status]}</p>
+        <p className={`tstate ${task.status}`}>{t.tasks.states[task.status]}</p>
         {task.createdBy && <p className="muted">{t.tasks.givenBy(task.createdBy.name)}</p>}
       </header>
       {task.parent && (
@@ -79,7 +79,7 @@ function TaskBody({ task, onOpen, onChanged }: { task: TaskDetail; onOpen: (id: 
                 <button className="linkish" type="button" onClick={() => onOpen(s.id)}>
                   #{s.number} {s.title}
                 </button>
-                <small>{t.tasks.groups[s.status]}</small>
+                <small>{t.tasks.states[s.status]}</small>
               </li>
             ))}
           </ul>

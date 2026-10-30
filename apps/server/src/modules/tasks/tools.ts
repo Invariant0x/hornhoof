@@ -33,9 +33,10 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
   const me = async (): Promise<Agent> => (await db.select().from(agents).where(eq(agents.id, job.agentId)))[0]!;
   const startedAt = async () => (await db.select({ at: jobs.startedAt }).from(jobs).where(eq(jobs.id, job.id)))[0]?.at ?? new Date(0);
 
-  /* The orchestrator sees every task; an employee its department's, and any it holds or reviews. */
+  /* The orchestrator sees every task; an employee its department's, and any it holds or reviews, once its turn started. */
   const sees = (agent: Agent, t: Task) =>
-    agent.kind === 'orchestrator' || (agent.departmentId !== null && t.departmentId === agent.departmentId) || t.assigneeAgentId === agent.id || t.executorAgentId === agent.id || t.gates.includes(agent.id);
+    agent.kind === 'orchestrator' ||
+    (t.status !== 'planned' && ((agent.departmentId !== null && t.departmentId === agent.departmentId) || t.assigneeAgentId === agent.id || t.executorAgentId === agent.id || t.gates.includes(agent.id)));
 
   async function find(ref: number | string): Promise<{ agent: Agent; task: Task }> {
     const agent = await me();
