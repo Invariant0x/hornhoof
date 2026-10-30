@@ -84,6 +84,7 @@ export async function runNode({ dir, adapter, builtin, log = console.log, loginC
       stop();
       return;
     }
+    if (m.type === 'job.cancel') return;
     if (stopped || running.has(m.jobId)) return;
     const controller = new AbortController();
     const done = runOne(m, controller.signal);

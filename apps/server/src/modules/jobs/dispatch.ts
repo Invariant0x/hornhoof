@@ -24,5 +24,7 @@ export async function dispatchJob(ctx: Ctx, job: JobToSend): Promise<boolean> {
     model: null,
     timeoutMs: job.timeoutMs,
     secret,
+    instructions: null,
+    toolToken: null,
   });
 }

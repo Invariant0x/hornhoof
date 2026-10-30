@@ -1,0 +1,10 @@
+{"type":"thread.started","thread_id":"01a18a19-316e-7113-8877-0c9a2fc2ab59"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"I’ll create the two-step plan, call Hornhoof’s ping tool with `note: hi`, then mark the plan done."}}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"The plan tool isn’t available in this session, so I’ll track the two steps here:\n\n1. Ping Hornhoof with `note: hi`.\n2. Mark both steps done and report the secret word."}}
+{"type":"item.started","item":{"id":"item_2","type":"mcp_tool_call","server":"hornhoof","tool":"ping","arguments":{"note":"hi"},"result":null,"error":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_2","type":"mcp_tool_call","server":"hornhoof","tool":"ping","arguments":{"note":"hi"},"result":{"content":[{"type":"text","text":"pong hi"}],"structured_content":null},"error":null,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_3","type":"agent_message","text":"Both steps are done, tracked in chat because no plan tool was available. Hornhoof returned `pong hi`.\n\nSecret word: **HERON**."}}
+{"type":"item.started","item":{"id":"item_4","type":"command_execution","command":"/bin/bash -lc 'echo start'","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_4","type":"command_execution","command":"/bin/bash -lc 'echo start'","aggregated_output":"start\n","exit_code":0,"status":"completed"}}
+{"type":"turn.completed","usage":{"input_tokens":91759,"cached_input_tokens":78336,"cache_write_input_tokens":0,"output_tokens":507,"reasoning_output_tokens":288}}

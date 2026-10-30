@@ -50,7 +50,7 @@ describe('runNode', () => {
     const node = await runNode({ dir: nodeDir(server.url), adapter, log: () => {} });
     onTestFinished(() => node.stop());
     await server.wait(() => server.received.some(m => m.type === 'hello'));
-    server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 5000, secret: null });
+    server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
     await server.wait(() => server.received.some(m => m.type === 'status'));
     expect(server.received.map(m => m.type)).toEqual(['hello', 'job.started', 'job.done', 'status']);
     expect(server.received[2]).toMatchObject({ jobId: 'j1', ok: true, result: 'ready', sessionId: 'sess-9' });
@@ -87,7 +87,7 @@ describe('runNode', () => {
     const node = await runNode({ dir, adapter: slow, log: () => {} });
     onTestFinished(() => node.stop());
     await server.wait(() => server.received.some(m => m.type === 'hello'));
-    server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 60000, secret: null });
+    server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 60000, secret: null, instructions: null, toolToken: null });
     await server.wait(() => server.received.some(m => m.type === 'job.started'));
     server.send({ type: 'remove' });
     await server.wait(() => server.received.some(m => m.type === 'removed'));
@@ -105,7 +105,7 @@ describe('runNode', () => {
     const node = await runNode({ dir: nodeDir(server.url), adapter: pick, log: () => {} });
     onTestFinished(() => node.stop());
     await server.wait(() => server.received.some(m => m.type === 'hello'));
-    const run = (jobId: string) => server.send({ type: 'job.run', jobId, subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 5000, secret: null });
+    const run = (jobId: string) => server.send({ type: 'job.run', jobId, subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
     const doneOf = (jobId: string) => server.received.find(m => m.type === 'job.done' && m.jobId === jobId);
     run('j1');
     await server.wait(() => !!doneOf('j1'));

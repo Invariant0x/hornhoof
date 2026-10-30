@@ -200,7 +200,7 @@ describe('run --builtin', () => {
     expect(server.headers[0]).toBe(`Bearer ${NODE_KEY}`);
     expect(server.received[0]).toMatchObject({ loggedIn: true, running: [] });
 
-    const job = { subscriptionId: 'sub-a', sessionId: null, model: null, timeoutMs: 10000, prompt: 'say ready' };
+    const job = { subscriptionId: 'sub-a', sessionId: null, model: null, timeoutMs: 10000, prompt: 'say ready', instructions: null, toolToken: null };
     server.send({ type: 'job.run', jobId: 'j1', provider: 'anthropic_api', secret: 'company-anthropic-key-000000', ...job });
     server.send({ type: 'job.run', jobId: 'j2', provider: 'openai_api', secret: 'company-openai-key-0000000000', ...job, subscriptionId: 'sub-b' });
     await server.wait(() => server.received.filter(m => m.type === 'job.done').length === 2);
