@@ -185,7 +185,7 @@ export type StreamMessage =
   | { type: 'task'; id: string }
   | { type: 'requests' };
 
-export type TaskStatus = 'open' | 'working' | 'review' | 'waiting' | 'blocked' | 'done' | 'cancelled';
+export type TaskStatus = 'planned' | 'open' | 'working' | 'review' | 'waiting' | 'blocked' | 'done' | 'cancelled';
 export type AgentRef = { id: string; name: string; kind: 'orchestrator' | 'head' | 'worker'; role: Lang | null };
 export type TaskPlace = { id: string; name: string } | null;
 
@@ -233,7 +233,21 @@ export type WaitingRequest = {
   task: { id: string; number: number; title: string; department: TaskPlace };
 };
 
-export type TurnView = { id: string; number: number; goal: string; status: 'open' | 'closed'; taskId: string | null; startedAt: string; tasks: { total: number; done: number } };
+/* A turn as the orchestrator laid it out: a short title, its main point, and the people's own words it came from (only for
+   people who see the whole company). Planned turns wait in number order. */
+export type TurnView = {
+  id: string;
+  number: number;
+  title: string;
+  goal: string;
+  status: 'planned' | 'open' | 'closed';
+  messages: { by: string; text: string; at: string }[];
+  taskId: string | null;
+  startedAt: string;
+  openedAt: string | null;
+  closedAt: string | null;
+  tasks: { total: number; done: number };
+};
 
 export type MachineView = {
   id: string;

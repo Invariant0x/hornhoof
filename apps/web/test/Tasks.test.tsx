@@ -4,17 +4,19 @@ import { describe, expect, it } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Shell } from '../src/screens/Shell';
 import type { Me } from '../src/types';
-import { CLOSED_TASKS, DEV_ORG, ME, mockApi, REQUESTS, TASKS, TURN } from './api-mock';
+import { CLOSED_TASKS, DEV_ORG, FINISHED_TURN, ME, mockApi, PLANNED_TURN, REQUESTS, TASKS, TURN } from './api-mock';
 import { fakeStream } from './fake-stream';
 
-const OPEN = '/api/tasks?status=open';
+const ALL = '/api/tasks?status=all';
+const PLANNED = { ...TASKS[1]!, id: 't14', number: 14, title: 'Refund button', brief: '', status: 'planned' as const, assignee: null, turn: 4 };
+const SUBTASK = { ...TASKS[1]!, id: 't13', number: 13, title: 'Card form', brief: '', status: 'open' as const, parentId: 't12' };
 
 function shell(routes: Record<string, unknown> = {}, me: Me = ME) {
   const calls = mockApi({
     'GET /api/org': [200, DEV_ORG],
     'GET /api/requests': [200, { requests: REQUESTS }],
-    'GET /api/turns/current': [200, { turn: TURN }],
-    [`GET ${OPEN}`]: [200, { tasks: TASKS }],
+    'GET /api/turns': [200, { turns: [FINISHED_TURN, TURN, PLANNED_TURN] }],
+    [`GET ${ALL}`]: [200, { tasks: [...TASKS, SUBTASK, PLANNED, { ...CLOSED_TASKS[0]!, turn: 2 }] }],
     ...(routes as Record<string, [number, unknown]>),
   });
   render(
@@ -36,32 +38,86 @@ describe('the tracker', () => {
     expect(await screen.findByRole('button', { name: 'Tasks, 2 waiting for you' })).toBeInTheDocument();
   });
 
-  it('shows the open turn with its progress, and lets the whole company close it', async () => {
+  it('shows the running turn with its title, main point, progress and tasks, and nothing to start or close', async () => {
     const user = userEvent.setup();
-    const calls = shell({ 'POST /api/turns/u3/close': [200, { turn: { ...TURN, status: 'closed' } }] });
+    shell();
     await openTasks(user);
     const turn = screen.getByRole('region', { name: 'Turn 3' });
-    expect(turn).toHaveTextContent('Take payments');
+    expect(turn).toHaveTextContent('Running');
+    expect(within(turn).getByRole('heading', { name: 'Payments' })).toBeInTheDocument();
+    expect(turn).toHaveTextContent('Take card payments in the shop.');
     expect(turn).toHaveTextContent('2 of 5 tasks done');
-    await user.click(within(turn).getByRole('button', { name: 'Close turn' }));
-    await user.click(within(turn).getByRole('button', { name: 'Yes, close it' }));
-    expect(calls.some(c => c.method === 'POST' && c.path === '/api/turns/u3/close')).toBe(true);
+    expect(within(turn).getByRole('button', { name: /#12/ })).toHaveTextContent('In review');
+    for (const name of ['Start turn', 'Close turn']) expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
+    /* The only fields are the answers to what agents ask. */
+    const waiting = screen.getByRole('region', { name: 'Waiting for you' });
+    for (const box of screen.queryAllByRole('textbox')) expect(waiting).toContainElement(box);
   });
 
-  it('starts a turn with its goal when none is open', async () => {
+  it("shows the words a turn came from on click", async () => {
     const user = userEvent.setup();
-    const calls = shell({ 'GET /api/turns/current': [200, { turn: null }], 'POST /api/turns': [201, { turn: TURN }] });
+    shell();
     await openTasks(user);
-    await user.type(screen.getByLabelText('Goal of the next turn'), 'Take payments');
-    await user.click(screen.getByRole('button', { name: 'Start turn' }));
-    expect(calls.find(c => c.method === 'POST' && c.path === '/api/turns')?.body).toEqual({ goal: 'Take payments' });
+    const turn = screen.getByRole('region', { name: 'Turn 3' });
+    const words = within(turn).getByText('The words it came from');
+    expect(within(turn).getByText(/Stripe is fine/)).not.toBeVisible();
+    await user.click(words);
+    expect(within(turn).getByText(/Stripe is fine/)).toBeVisible();
+    expect(turn).toHaveTextContent('Ivan');
   });
 
-  it('shows no turn controls to people with part of the company', async () => {
+  it('nests a task under the one it serves', async () => {
     const user = userEvent.setup();
-    shell({ 'GET /api/turns/current': [200, { turn: null }] }, { ...ME, person: { ...ME.person, scopeKind: 'listed', isOwner: false } });
+    shell();
     await openTasks(user);
-    expect(screen.queryByRole('button', { name: 'Start turn' })).not.toBeInTheDocument();
+    const parent = screen.getByRole('button', { name: /#12/ }).closest('li')!;
+    expect(within(parent as HTMLElement).getByRole('button', { name: /#13/ })).toHaveTextContent('Card form');
+  });
+
+  it('lists the planned turns after the running one, and folds the finished ones away', async () => {
+    const user = userEvent.setup();
+    shell();
+    await openTasks(user);
+    const next = screen.getByRole('region', { name: 'Planned next' });
+    const planned = within(next).getByRole('region', { name: 'Turn 4' });
+    expect(planned).toHaveTextContent('Refunds');
+    expect(planned).toHaveTextContent('1 task waiting for this turn');
+    expect(within(planned).getByRole('button', { name: /#14/ })).toHaveTextContent('Planned');
+    const finished = screen.getByRole('region', { name: 'Finished turns' });
+    expect(finished).toHaveTextContent('Login');
+    expect(within(finished).getByRole('button', { name: /#8/ })).not.toBeVisible();
+  });
+
+  it('keeps open tasks outside turns in view and folds the closed ones away', async () => {
+    const user = userEvent.setup();
+    shell({ [`GET ${ALL}`]: [200, { tasks: [{ ...TASKS[1]!, turn: null }, { ...CLOSED_TASKS[0]!, turn: null }] }] });
+    await openTasks(user);
+    expect(within(screen.getByRole('region', { name: 'Outside turns' })).getByRole('button', { name: /#11/ })).toBeVisible();
+    expect(screen.getByRole('button', { name: /#8/ })).not.toBeVisible();
+    await user.click(screen.getByText('Closed outside turns: 1'));
+    expect(screen.getByRole('button', { name: /#8/ })).toBeVisible();
+  });
+
+  it('opens the orchestrator to write to him, for people who see the whole company', async () => {
+    const user = userEvent.setup();
+    shell({ 'GET /api/agents/orchestrator/events?after=0': [200, { events: [], state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 } }] });
+    await openTasks(user);
+    await user.click(screen.getByRole('button', { name: 'Write to the orchestrator' }));
+    expect(await screen.findByRole('complementary', { name: /Orchestrator/ })).toBeInTheDocument();
+  });
+
+  it('asks people with part of the company to write to nobody from here', async () => {
+    const user = userEvent.setup();
+    shell({}, { ...ME, person: { ...ME.person, scopeKind: 'listed', isOwner: false } });
+    await openTasks(user);
+    expect(screen.queryByRole('button', { name: 'Write to the orchestrator' })).not.toBeInTheDocument();
+  });
+
+  it('says what to do when there is no turn yet', async () => {
+    const user = userEvent.setup();
+    shell({ 'GET /api/turns': [200, { turns: [] }], [`GET ${ALL}`]: [200, { tasks: [] }] });
+    await openTasks(user);
+    expect(await screen.findByText(/No turns yet/)).toBeInTheDocument();
   });
 
   it('answers a question and takes it off the list', async () => {
@@ -108,38 +164,29 @@ describe('the tracker', () => {
     expect(within(approval).queryByRole('button', { name: 'Decline' })).not.toBeInTheDocument();
   });
 
-  it('groups tasks by state, newest first, and filters them by department', async () => {
+  it('filters the tasks by department', async () => {
     const user = userEvent.setup();
-    const calls = shell({ 'GET /api/tasks?status=open&department=d2': [200, { tasks: TASKS.slice(0, 1) }] });
+    const calls = shell({ 'GET /api/tasks?status=all&department=d2': [200, { tasks: TASKS.slice(0, 1) }] });
     await openTasks(user);
-    const groups = screen.getAllByRole('region', { name: /^(Waiting for a person|In review|In progress)$/ });
-    expect(groups.map(g => g.getAttribute('aria-label'))).toEqual(['Waiting for a person', 'In review', 'In progress']);
-    const review = within(groups[1]!).getByRole('button', { name: /#12/ });
+    const review = screen.getByRole('button', { name: /#12/ });
     expect(review).toHaveTextContent('Checkout API');
     expect(review).toHaveTextContent('Gate 2 of 3');
     expect(review).toHaveTextContent('Tom');
     expect(review).toHaveTextContent('Development');
     await user.selectOptions(screen.getByLabelText('Department'), 'd2');
     await waitFor(() => expect(screen.queryByRole('button', { name: /#11/ })).not.toBeInTheDocument());
-    expect(calls.some(c => c.path === '/api/tasks?status=open&department=d2')).toBe(true);
-  });
-
-  it('shows closed tasks on request', async () => {
-    const user = userEvent.setup();
-    shell({ 'GET /api/tasks?status=closed': [200, { tasks: CLOSED_TASKS }] });
-    await openTasks(user);
-    await user.click(screen.getByRole('button', { name: 'Closed' }));
-    expect(within(await screen.findByRole('region', { name: 'Done' })).getByRole('button', { name: /#8/ })).toHaveTextContent('Login page');
+    expect(calls.some(c => c.path === '/api/tasks?status=all&department=d2')).toBe(true);
   });
 
   it('fetches the tasks again when one changes', async () => {
     const user = userEvent.setup();
     const stream = fakeStream();
     let moved = false;
-    shell({ [`GET ${OPEN}`]: () => [200, { tasks: moved ? [{ ...TASKS[1]!, status: 'review', stage: 1, gateCount: 3 }] : TASKS }] });
+    shell({ [`GET ${ALL}`]: () => [200, { tasks: moved ? [{ ...TASKS[1]!, status: 'review', stage: 1, gateCount: 3 }] : TASKS }] });
     await openTasks(user);
     moved = true;
     stream.send({ type: 'task', id: 't11' });
-    expect(within(await screen.findByRole('region', { name: 'In review' })).getByRole('button', { name: /#11/ })).toHaveTextContent('Gate 1 of 3');
+    await waitFor(() => expect(screen.getByRole('button', { name: /#11/ })).toHaveTextContent('Gate 1 of 3'));
+    expect(screen.getByRole('button', { name: /#11/ })).toHaveTextContent('In review');
   });
 });

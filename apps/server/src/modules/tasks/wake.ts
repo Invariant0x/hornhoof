@@ -16,16 +16,24 @@ function nextStep(task: Task): { finish: string; stuck: string } {
   return { finish: 'report it', stuck: 'report it as not done, with what stands in the way' };
 }
 
-/* The turn's prompt: which task, why the agent wakes, and what is expected of it. Always English, like the agents' instructions. */
+/* The turn's prompt: which task, why the agent wakes, and what is expected of it, then what else it should know. Always
+   English, like the agents' instructions. */
 export function wakePrompt(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string {
+  const prompt = reason(agent, task, w);
+  return w.note ? `${prompt}\n\n${w.note}` : prompt;
+}
+
+function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string {
   const ref = `#${task.number} "${task.title}"`;
   const read = 'Read it with the task tool first: its body is the current truth and its log has the rest.';
   const said = w.text ? `:\n\n${w.text}\n\n` : '. ';
   const { finish, stuck } = nextStep(task);
+  /* The orchestrator holds no task of his own: he runs the turn. */
+  const own = agent.kind === 'orchestrator' ? 'the turn' : 'your own task';
   switch (w.why) {
     case 'assigned':
       if (task.executorAgentId) return `${ref} is yours to do. ${read} Do the work, then ${finish}. If you cannot go on, ${stuck}; if only a person can answer, use ask_person.`;
-      if (agent.kind === 'orchestrator') return `${ref} is yours. ${read} Give each department its part with create_task, and report it when every part is done.`;
+      if (agent.kind === 'orchestrator') return `${ref} is yours. ${read} Lay the work out as tasks for the departments with add_tasks or plan_turn, and report it when every part is done.`;
       return `${ref} is your department's. ${read} Split it into member tasks with create_task, each with its executor and gates, and report it when they are done.`;
     case 'review':
       return `${ref} is at your gate. ${read} Check the work yourself, then give your verdict with your reasons: pass it, or send it back with what to change.`;
@@ -34,15 +42,15 @@ export function wakePrompt(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): str
     case 'stuck_at_gate':
       return `${ref}, which you gave out, went back from the same gate ${GATE_ROUNDS} times. Read its log, then step in: rewrite it with update_task, give it another executor or other gates, or cancel it.`;
     case 'done':
-      return `${ref}, which you gave out, passed its gates and is done. Read the result with the task tool, then go on with your own task.`;
+      return `${ref}, which you gave out, passed its gates and is done. Read the result with the task tool, then go on with ${own}.`;
     case 'reported':
-      return `${ref}, which you gave out, was reported done${said}Go on with your own task.`;
+      return `${ref}, which you gave out, was reported done${said}Go on with ${own}.`;
     case 'blocked':
       /* The orchestrator does not rewrite a department's task: he gives the department a new one. */
-      if (agent.kind === 'orchestrator') return `${ref}, which you gave out, cannot go on${said}Cancel it with cancel_task and give the department a task it can do with create_task, or ask a person with ask_person on your own task.`;
+      if (agent.kind === 'orchestrator') return `${ref}, which you gave out, cannot go on${said}Cancel it with cancel_task and give the department a task it can do with add_tasks, or tell the CEO what stands in the way.`;
       return `${ref}, which you gave out, cannot go on${said}Unblock it: rewrite it with update_task, give it to someone else, or cancel it.`;
     case 'cancelled':
-      return `${ref}, which you gave out, was cancelled${said}Go on with your own task without it.`;
+      return `${ref}, which you gave out, was cancelled${said}Go on with ${own} without it.`;
     case 'answered':
       return `A person answered on ${ref}${said}Go on with it.`;
     case 'comment':
@@ -51,6 +59,8 @@ export function wakePrompt(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): str
       return `${ref} was rewritten. Read it again with the task tool and go on from its new body.`;
     case 'reminder':
       return `You ended your last turn on ${ref} without moving it. Go on with the work, then ${finish}. If you cannot go on, ${stuck}.`;
+    case 'turn':
+      return `${ref} is closed.`;
   }
 }
 

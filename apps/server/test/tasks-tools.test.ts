@@ -58,7 +58,7 @@ describe('task tools', () => {
   it('gives each kind of agent its task tools', async () => {
     const { orchestrator, head, bruno, tools } = await company();
     const names = async (agent: { id: string }) => (await (await tools(agent)).listTools()).tools.map(t => t.name).sort();
-    expect(await names(orchestrator)).toEqual(['ask_person', 'cancel_task', 'comment', 'company', 'create_task', 'propose_staff', 'propose_structure', 'report', 'staffing_options', 'task', 'tasks']);
+    expect(await names(orchestrator)).toEqual(['add_tasks', 'ask_person', 'cancel_task', 'comment', 'company', 'edit_turn', 'plan_turn', 'propose_staff', 'propose_structure', 'report', 'staffing_options', 'task', 'tasks', 'turns']);
     expect(await names(head)).toEqual(['ask_person', 'blocked', 'cancel_task', 'comment', 'company', 'create_task', 'report', 'submit', 'task', 'tasks', 'update_task', 'verdict']);
     expect(await names(bruno)).toEqual(['ask_person', 'blocked', 'comment', 'company', 'submit', 'task', 'tasks', 'verdict']);
   });
@@ -69,18 +69,6 @@ describe('task tools', () => {
     expect(create.description).toContain('Gives work to a member of your department');
     expect(create.description).toContain('Name yourself only when no member can do it.');
     expect(create.description).not.toContain('(or yourself)');
-  });
-
-  it("gives a department task to its head, and refuses a department without one", async () => {
-    const { db, orchestrator, dev, sales, head, tools } = await company();
-    const client = await tools(orchestrator);
-    const made = await call(client, 'create_task', { department: dev.id, title: 'Payments', brief: 'Take card payments.', body: 'Stripe checkout, EUR.' });
-    expect(made.isError).toBeFalsy();
-    expect(text(made)).toContain('#1');
-    expect(await db.select({ assignee: tasks.assigneeAgentId, by: tasks.createdByAgentId }).from(tasks)).toEqual([{ assignee: head.id, by: orchestrator.id }]);
-    const none = await call(client, 'create_task', { department: sales.id, title: 'Leads', brief: '', body: '' });
-    expect(none.isError).toBe(true);
-    expect(text(none)).toMatch(/no head/i);
   });
 
   it('lets a head give a member task with gates named by role, only inside its department', async () => {
@@ -106,8 +94,9 @@ describe('task tools', () => {
   it('refuses the eleventh task in one turn', async () => {
     const { orchestrator, dev, tools } = await company();
     const client = await tools(orchestrator);
-    for (let i = 1; i <= 10; i++) expect((await call(client, 'create_task', { department: dev.id, title: `Task ${i}`, brief: '', body: '' })).isError).toBeFalsy();
-    const eleventh = await call(client, 'create_task', { department: dev.id, title: 'Task 11', brief: '', body: '' });
+    const ten = Array.from({ length: 10 }, (_, i) => ({ department: dev.id, title: `Task ${i + 1}`, brief: '', body: '' }));
+    expect((await call(client, 'plan_turn', { title: 'Big', goal: 'Ten things.', tasks: ten })).isError).toBeFalsy();
+    const eleventh = await call(client, 'add_tasks', { turn: 1, tasks: [{ department: dev.id, title: 'Task 11', brief: '', body: '' }] });
     expect(eleventh.isError).toBe(true);
     expect(text(eleventh)).toMatch(/10 tasks/);
   });

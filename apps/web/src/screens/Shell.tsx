@@ -202,6 +202,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
             onRequestsChanged={loadRequests}
             selected={panel?.kind === 'task' ? panel.taskId : null}
             onOpenTask={taskId => setPanel({ kind: 'task', taskId })}
+            onOpenOrchestrator={company ? () => setPanel({ kind: 'window', agentId: 'orchestrator' }) : undefined}
           />
         )}
         {tab === 'people' && <People me={me} />}

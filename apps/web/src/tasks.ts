@@ -37,7 +37,7 @@ function useLive<T>(path: string | null, pick: (body: never) => T, refresh: (m: 
   return { data, failure, load };
 }
 
-export type TaskFilter = { status: 'open' | 'closed'; department: string | null };
+export type TaskFilter = { status: 'open' | 'closed' | 'all'; department: string | null };
 
 export const tasksPath = (f: TaskFilter) => `/api/tasks?status=${f.status}${f.department ? `&department=${f.department}` : ''}`;
 
@@ -59,10 +59,10 @@ export function useRequests() {
   return { requests: data, failure, load };
 }
 
-/* The company's open turn, or null when none runs. */
-export function useTurn() {
-  const { data, failure, load } = useLive('/api/turns/current', (b: { turn: TurnView | null }) => b.turn, m => m.type === 'org' || m.type === 'task');
-  return { turn: data, failure, load };
+/* The company's turns: the last finished ones, the running one and the planned ones, in number order. */
+export function useTurns() {
+  const { data, failure, load } = useLive('/api/turns', (b: { turns: TurnView[] }) => b.turns, m => m.type === 'org' || m.type === 'task');
+  return { turns: data, failure, load };
 }
 
 /* A department by the name the person's screen gives it; a product, or a department the company no longer has, by its own. */

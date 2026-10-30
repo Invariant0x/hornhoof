@@ -10,12 +10,12 @@ export type Task = typeof tasks.$inferSelect;
 export type Request = typeof requests.$inferSelect;
 /* Who moves a task: a person from the web app, or an agent from its tools. */
 export type Actor = { personId: string; agentId?: undefined } | { agentId: string; personId?: undefined };
-export type WakeWhy = 'assigned' | 'review' | 'changes' | 'stuck_at_gate' | 'done' | 'reported' | 'blocked' | 'cancelled' | 'answered' | 'comment' | 'updated' | 'reminder';
-/* An agent that has to act on a task now; Hornhoof queues a turn for it. */
-export type Wake = { agentId: string; taskId: string; why: WakeWhy; text?: string };
+export type WakeWhy = 'assigned' | 'review' | 'changes' | 'stuck_at_gate' | 'done' | 'reported' | 'blocked' | 'cancelled' | 'answered' | 'comment' | 'updated' | 'reminder' | 'turn';
+/* An agent that has to act on a task now; Hornhoof queues a turn for it. note: what else it should know, after the rest. */
+export type Wake = { agentId: string; taskId: string; why: WakeWhy; text?: string; note?: string };
 export type Moved = { task: Task; wakes: Wake[] };
 
-type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
+export type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 type Live = Pick<Ctx, 'db' | 'bus'>;
 
 export const CLOSED: readonly Task['status'][] = ['done', 'cancelled'];
@@ -48,7 +48,7 @@ const actorColumns = (a: Actor) => ({ personId: a.personId ?? null, agentId: a.a
 
 type Note = { kind: TaskEventKind; actor: Actor; text?: string; data?: Record<string, unknown> };
 
-async function note(tx: Tx | Db, task: Pick<Task, 'id' | 'companyId'>, n: Note): Promise<void> {
+export async function note(tx: Tx | Db, task: Pick<Task, 'id' | 'companyId'>, n: Note): Promise<void> {
   await tx.insert(taskEvents).values({ companyId: task.companyId, taskId: task.id, kind: n.kind, ...actorColumns(n.actor), text: n.text ?? '', data: n.data ?? {} });
 }
 

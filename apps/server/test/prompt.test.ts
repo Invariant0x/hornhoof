@@ -13,8 +13,11 @@ describe('orchestrator instructions', () => {
     expect(ORCHESTRATOR_INSTRUCTIONS).not.toContain('Hornhoof cannot put people or agents into departments yet');
   });
 
-  it('runs turns through department tasks', () => {
-    for (const words of ['turn', '"create_task"', '"report"', '"tasks"', 'head']) expect(ORCHESTRATOR_INSTRUCTIONS).toContain(words);
+  it('lays the work out in turns he plans and fills himself', () => {
+    for (const words of ['"plan_turn"', '"add_tasks"', '"turns"', 'starts by itself', 'never tell people to start or close a turn', 'Turn 2, task #14', 'head']) {
+      expect(ORCHESTRATOR_INSTRUCTIONS).toContain(words);
+    }
+    expect(ORCHESTRATOR_INSTRUCTIONS).not.toContain('"create_task"');
     expect(ORCHESTRATOR_INSTRUCTIONS).not.toContain('later version');
   });
 });

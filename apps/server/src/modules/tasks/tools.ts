@@ -2,11 +2,13 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { and, asc, count, desc, eq, gte, inArray, isNull, notInArray } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { agents, departments, jobs, requests, tasks, turns } from '../../db/schema.js';
+import { agents, departments, jobs, requests, tasks } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { ask, blocked, cancel, CLOSED, comment, createTask, refuse, report, submit, updateTask, verdict, type Moved, type Task } from './engine.js';
 import { taskByRef, taskDetail, taskLines } from './views.js';
+import { addTasks, editTurn, planTurn, settle, tell, TURN_MESSAGES, turnName, turnRows } from './turns.js';
 import { stopTurns, wakeAll } from './wake.js';
+import { orchestratorOf } from '../conversation/queue.js';
 
 export type ToolJob = { id: string; companyId: string; agentId: string; agentKind: 'orchestrator' | 'head' | 'worker' };
 type Agent = typeof agents.$inferSelect;
@@ -31,9 +33,10 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
   const me = async (): Promise<Agent> => (await db.select().from(agents).where(eq(agents.id, job.agentId)))[0]!;
   const startedAt = async () => (await db.select({ at: jobs.startedAt }).from(jobs).where(eq(jobs.id, job.id)))[0]?.at ?? new Date(0);
 
-  /* The orchestrator sees every task; an employee its department's, and any it holds or reviews. */
+  /* The orchestrator sees every task; an employee its department's, and any it holds or reviews, once its turn started. */
   const sees = (agent: Agent, t: Task) =>
-    agent.kind === 'orchestrator' || (agent.departmentId !== null && t.departmentId === agent.departmentId) || t.assigneeAgentId === agent.id || t.executorAgentId === agent.id || t.gates.includes(agent.id);
+    agent.kind === 'orchestrator' ||
+    (t.status !== 'planned' && ((agent.departmentId !== null && t.departmentId === agent.departmentId) || t.assigneeAgentId === agent.id || t.executorAgentId === agent.id || t.gates.includes(agent.id)));
 
   async function find(ref: number | string): Promise<{ agent: Agent; task: Task }> {
     const agent = await me();
@@ -42,12 +45,16 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
     return { agent, task };
   }
 
-  /* Runs a move, wakes whoever it needs and answers in a line; a refused move comes back as a readable error. */
-  const run = (fn: () => Promise<{ text: string; moved?: Pick<Moved, 'wakes'> }>) =>
+  /* Runs a move, wakes whoever it needs and answers in a line; a refused move comes back as a readable error. A move that
+     closed the last task of the open turn moves the company on to the next turn. */
+  const run = (fn: () => Promise<{ text: string; moved?: Pick<Moved, 'wakes'> & { task?: Task } }>) =>
     fn().then(
       async ({ text, moved }) => {
-        if (moved) await wakeAll(ctx, moved.wakes);
-        return say(text);
+        if (!moved) return say(text);
+        const settled = moved.task ? await settle(ctx, moved.task) : null;
+        const orchestrator = settled ? await orchestratorOf(ctx, job.companyId) : null;
+        await wakeAll(ctx, tell(moved.wakes, settled, orchestrator?.id ?? null, moved.task?.id ?? '', job.agentId));
+        return say(settled && orchestrator?.id === job.agentId ? `${text} ${settled.note}` : text);
       },
       (err: unknown) => {
         if (err instanceof ApiError) return say(err.message, true);
@@ -61,12 +68,12 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
     return `#${t.number} is ${t.status}${holder}.`;
   }
 
-  async function underCap(agent: Agent): Promise<void> {
+  async function underCap(agent: Agent, adding = 1): Promise<void> {
     const [made] = await db
       .select({ n: count() })
       .from(tasks)
       .where(and(eq(tasks.createdByAgentId, agent.id), gte(tasks.createdAt, await startedAt())));
-    if (Number(made?.n ?? 0) >= TURN_TASKS) throw refuse(409, 'task_invalid', `One turn creates at most ${TURN_TASKS} tasks. Finish this turn and go on in the next.`);
+    if (Number(made?.n ?? 0) + adding > TURN_TASKS) throw refuse(409, 'task_invalid', `One turn creates at most ${TURN_TASKS} tasks. Finish this turn and go on in the next.`);
   }
 
   server.registerTool(
@@ -138,29 +145,63 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
   );
 
   if (job.agentKind === 'orchestrator') {
+    const Item = z.object({ department: z.uuid(), product: z.uuid().optional(), title: Title, brief: Brief, body: Body });
+    const Turn = z.number().int().positive().describe('The turn number, like 2.');
+    const Words = z
+      .number()
+      .int()
+      .min(1)
+      .max(TURN_MESSAGES)
+      .optional()
+      .describe("How many of people's messages to you this comes from, counting back from the one you are answering, when the ask took several messages. 1 by default. They are kept with the turn word for word.");
     server.registerTool(
-      'create_task',
+      'turns',
+      { description: 'The last closed turn, the running turn and the planned ones in order, each with its title, main point and tasks, and where each task stands.', inputSchema: {} },
+      async () => {
+        const rows = (await turnRows(ctx, job.companyId)).filter((t, i, all) => t.status !== 'closed' || all[i + 1]?.status !== 'closed');
+        const top = rows.length ? await db.select().from(tasks).where(and(inArray(tasks.turnId, rows.map(t => t.id)), isNull(tasks.parentId))).orderBy(asc(tasks.number)) : [];
+        const lines = await taskLines(ctx, top);
+        return json(rows.map(t => ({ number: t.number, title: t.title || t.goal, goal: t.goal, status: t.status, tasks: lines.filter((_, i) => top[i]!.turnId === t.id) })));
+      },
+    );
+    server.registerTool(
+      'plan_turn',
       {
         description:
-          "Gives a department a task: it goes to the department's head, who splits it among the department and reports back to you when it is done. " +
-          'department and product ids from company. parent: the task this one serves (by default the open turn\'s task).',
-        inputSchema: { department: z.uuid(), product: z.uuid().optional(), title: Title, brief: Brief, body: Body, parent: Ref.optional() },
+          "Lays out a new turn: a short title, the main point in one or two sentences, and its tasks, one for each department's part, each going to that department's head. " +
+          'When no turn runs it starts at once; otherwise it waits after the planned turns and starts by itself when the turn before it is done. ' +
+          'A turn is about one feature: split a bigger ask into several turns. department and product ids from company.',
+        inputSchema: { title: z.string().trim().min(1).max(80), goal: z.string().trim().min(1).max(600), tasks: z.array(Item), words: Words },
       },
       async input =>
         run(async () => {
-          const agent = await me();
-          await underCap(agent);
-          const [dept] = await db.select().from(departments).where(and(eq(departments.id, input.department), eq(departments.companyId, job.companyId), isNull(departments.parentId)));
-          if (!dept) throw refuse(404, 'department_unknown', `There is no department ${input.department}. Call company for the ids.`);
-          if (input.product) {
-            const [product] = await db.select({ id: departments.id }).from(departments).where(and(eq(departments.id, input.product), eq(departments.parentId, dept.id)));
-            if (!product) throw refuse(404, 'department_unknown', `${input.product} is not a product of this department.`);
-          }
-          const [head] = await db.select().from(agents).where(and(eq(agents.departmentId, dept.id), eq(agents.kind, 'head'), isNull(agents.removedAt))).orderBy(asc(agents.createdAt));
-          if (!head) throw refuse(409, 'no_head', 'This department has no head yet. Propose staff for it first.');
-          const parent = await parentFor(agent, input.parent);
-          const moved = await createTask(ctx, { agentId: agent.id }, { title: input.title, brief: input.brief, body: input.body, departmentId: dept.id, productId: input.product ?? null, parentId: parent, assigneeAgentId: head.id });
-          return { text: `Created #${moved.task.number} for ${head.name}, the head. You will hear back when it is done.`, moved };
+          await underCap(await me(), input.tasks.length);
+          const moved = await planTurn(ctx, { companyId: job.companyId, agentId: job.agentId, jobId: job.id }, input);
+          return { text: moved.text, moved };
+        }),
+    );
+    server.registerTool(
+      'add_tasks',
+      {
+        description:
+          'Adds tasks to a turn that is not over, when people add to what it does: in the running turn they go to the heads at once, in a planned turn they wait for it to start. ' +
+          'Work that does not belong to any planned turn goes into a new one with plan_turn.',
+        inputSchema: { turn: Turn, tasks: z.array(Item), words: Words },
+      },
+      async input =>
+        run(async () => {
+          await underCap(await me(), input.tasks.length);
+          const moved = await addTasks(ctx, { companyId: job.companyId, agentId: job.agentId, jobId: job.id }, input.turn, input.tasks, input.words);
+          return { text: moved.text, moved };
+        }),
+    );
+    server.registerTool(
+      'edit_turn',
+      { description: 'Gives a turn that is not over a new title or main point.', inputSchema: { turn: Turn, title: z.string().max(80).optional(), goal: z.string().max(600).optional() } },
+      async input =>
+        run(async () => {
+          const turn = await editTurn(ctx, job.companyId, input.turn, input);
+          return { text: `${turnName(turn)} now reads: ${turn.goal}` };
         }),
     );
   }
@@ -298,16 +339,4 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
       return found.id;
     });
   }
-
-  /* The parent the orchestrator names, or the open turn's task when he holds it. */
-  async function parentFor(agent: Agent, ref: number | string | undefined): Promise<string | null> {
-    if (ref !== undefined) return (await find(ref)).task.id;
-    const [turn] = await db
-      .select({ taskId: turns.taskId })
-      .from(turns)
-      .innerJoin(tasks, eq(tasks.id, turns.taskId))
-      .where(and(eq(turns.companyId, job.companyId), eq(turns.status, 'open'), eq(tasks.assigneeAgentId, agent.id), notInArray(tasks.status, [...CLOSED])));
-    return turn?.taskId ?? null;
-  }
-
 }

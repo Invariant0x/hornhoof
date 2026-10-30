@@ -216,4 +216,18 @@ export const REQUESTS: WaitingRequest[] = [
   { id: 'r2', kind: 'approval', text: 'Release 0.5.0 to main.', commit: 'a'.repeat(40), at: '2026-10-30T09:20:00.000Z', agent: { id: 'b0', name: 'Dana' }, task: { id: 't10', number: 10, title: 'Payments', department: DEV } },
 ];
 
-export const TURN: TurnView = { id: 'u3', number: 3, goal: 'Take payments', status: 'open', taskId: 't1', startedAt: '2026-10-30T07:00:00.000Z', tasks: { total: 5, done: 2 } };
+export const TURN: TurnView = {
+  id: 'u3',
+  number: 3,
+  title: 'Payments',
+  goal: 'Take card payments in the shop.',
+  status: 'open',
+  messages: [{ by: 'Ivan', text: 'We need card payments.\nStripe is fine.', at: '2026-10-30T06:50:00.000Z' }],
+  taskId: null,
+  startedAt: '2026-10-30T07:00:00.000Z',
+  openedAt: '2026-10-30T07:00:00.000Z',
+  closedAt: null,
+  tasks: { total: 5, done: 2 },
+};
+export const PLANNED_TURN: TurnView = { ...TURN, id: 'u4', number: 4, title: 'Refunds', goal: 'Money goes back.', status: 'planned', messages: [], openedAt: null, tasks: { total: 1, done: 0 } };
+export const FINISHED_TURN: TurnView = { ...TURN, id: 'u2', number: 2, title: 'Login', goal: 'People sign in.', status: 'closed', messages: [], closedAt: '2026-10-29T20:00:00.000Z', tasks: { total: 1, done: 1 } };

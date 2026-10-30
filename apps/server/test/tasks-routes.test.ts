@@ -155,20 +155,11 @@ describe('tasks for people', () => {
     expect((await post(ceo, `/api/requests/${request.id}`, { approve: true })).json().request.status).toBe('approved');
   });
 
-  it('runs one turn at a time and leaves its open tasks without a turn when it closes', async () => {
-    const { db, ceo, oleg, orchestrator, post, get } = await company();
-    expect((await post(oleg, '/api/turns', { goal: 'Payments' })).json().error.reason).toBe('company_scope_only');
-    const started = await post(ceo, '/api/turns', { goal: 'Payments' });
-    expect(started.statusCode).toBe(201);
-    expect(started.json().turn).toMatchObject({ number: 1, goal: 'Payments', status: 'open' });
-    expect((await post(ceo, '/api/turns', { goal: 'More' })).json().error.reason).toBe('turn_open');
-    const [turnTask] = await db.select().from(tasks);
-    expect(turnTask).toMatchObject({ title: 'Turn 1: Payments', assigneeAgentId: orchestrator.id, turnId: started.json().turn.id });
-    expect((await get(ceo, '/api/turns/current')).json().turn).toMatchObject({ number: 1, tasks: { total: 1, done: 0 } });
-    expect((await post(ceo, `/api/turns/${started.json().turn.id}/close`, {})).json().turn.status).toBe('closed');
-    expect((await db.select().from(tasks))[0]).toMatchObject({ turnId: null, status: 'open' });
+  it('leaves starting and closing turns to the orchestrator', async () => {
+    const { ceo, post, get } = await company();
+    expect((await post(ceo, '/api/turns', { goal: 'Payments' })).statusCode).toBe(404);
+    expect((await get(ceo, '/api/turns')).json().turns).toEqual([]);
     expect((await get(ceo, '/api/turns/current')).json().turn).toBe(null);
-    expect((await post(ceo, '/api/turns', { goal: 'More' })).json().turn.number).toBe(2);
   });
 
   it('keeps a repository token secret and refuses plain http', async () => {
