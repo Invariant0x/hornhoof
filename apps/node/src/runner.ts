@@ -90,6 +90,17 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
   const before = await adapter.secrets().catch(() => []);
   const given = [...hidden, ...(msg.secret ? [msg.secret] : []), ...(msg.toolToken ? [msg.toolToken] : [])];
   const tools = msg.toolToken && toolsUrl ? { url: toolsUrl, token: msg.toolToken } : null;
+  /* A live event goes out hidden against what the program holds by then, and the events keep their order. */
+  const known = new Set([...before, ...given]);
+  let live = Promise.resolve();
+  const emit = (event: AgentEvent) => {
+    live = live
+      .then(async () => {
+        for (const s of await adapter.secrets().catch(() => [])) known.add(s);
+        onEvent?.(tidy(event, [...known]));
+      })
+      .catch(() => {});
+  };
   let res: RunResult;
   try {
     const workDir = workDirFor(msg, dir);
@@ -104,13 +115,14 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
       signal,
       instructions: msg.instructions,
       tools,
-      onEvent: event => onEvent?.(tidy(event, [...before, ...given])),
+      onEvent: emit,
     };
     res = await withTimeout(adapter.run(input).catch((err: unknown) => failed(message(err), 'agent_failed')), msg.timeoutMs);
     if (res.sessionId) rememberSession(dir, res.sessionId, workDir);
   } catch (err) {
     res = failed(message(err), 'agent_failed');
   }
+  await live;
   /* A job Hornhoof called off ends as cancelled, whatever the stopped program said. */
   if (signal?.aborted) res = { ...res, ok: false, result: 'Stopped.', error: 'cancelled' };
   const after = await adapter.secrets().catch(() => []);

@@ -101,6 +101,22 @@ describe('runJob', () => {
     expect(adapter.inputs[0]!.instructions).toBe('Be the orchestrator.');
   });
 
+  it('hides a token the program refreshed during the run in its live events too', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
+    const events: AgentEvent[] = [];
+    let token = 'old-token-0123456789';
+    const adapter = {
+      ...fakeAdapter(async input => {
+        token = 'new-token-0123456789';
+        input.onEvent?.({ kind: 'text', text: 'got new-token-0123456789' });
+        return ok();
+      }),
+      secrets: async () => [token],
+    };
+    await runJob(adapter, job(), dir, { onEvent: e => events.push(e) });
+    expect(events).toEqual([{ kind: 'text', text: 'got [hidden]' }]);
+  });
+
   it('hides secrets in live events and cuts them to size', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
     const events: AgentEvent[] = [];
