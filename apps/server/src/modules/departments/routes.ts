@@ -1,15 +1,19 @@
 import { DEPARTMENT_TEMPLATES, type TemplateKey } from '@hornhoof/protocol';
-import { and, eq, inArray, max } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, max } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { requireCompanyScope, requirePerson } from '../../auth/session.js';
-import { companies, departments, proposals, teams } from '../../db/schema.js';
+import { agentChanges, agents, companies, departments, proposals, teams } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { enqueueTurn, orchestratorOf, orchestratorState } from '../conversation/queue.js';
 import { appendEvent } from '../events/store.js';
+import { checkStaff, departmentOf, HireLine, runsTier, servingSubscriptions, spotIn } from '../tools/staff.js';
 import { BuildItem, checkItems, isNew } from '../tools/structure.js';
-import { TEMPLATE_TEXT } from './templates.js';
+import { deptName, TEMPLATE_TEXT } from './templates.js';
+
+const IdParams = z.object({ id: z.uuid() });
+const StaffBody = z.object({ proposalId: z.uuid().optional(), people: z.array(HireLine).min(1).max(30) });
 
 const BuildBody = z.object({ proposalId: z.uuid().optional(), brief: z.string().trim().max(1500).optional(), items: z.array(BuildItem).min(1).max(20) });
 
@@ -28,8 +32,19 @@ function builtNote(created: Created[], removed: Removed[]): string {
   const lines = ['Hornhoof applied the CEO\'s click.'];
   if (created.length) lines.push(`Created: ${created.map(listed).join('; ')}.`);
   if (removed.length) lines.push(`Removed: ${removed.map(listed).join('; ')}.`);
-  lines.push('Continue in the CEO\'s language: say what is there now in a line or two. Hornhoof cannot put people or agents into departments yet; that comes in the next version, so do not offer to plan the staff.');
+  lines.push('Continue in the CEO\'s language: say what is there now in a line or two, then offer to staff the new departments, one department at a time.');
   return lines.join('\n');
+}
+
+type Hired = { id: string; name: string; role: string; title: string };
+
+/* What he reads after the CEO hired people, so he goes on from there. */
+function staffedNote(department: string, hired: Hired[]): string {
+  return [
+    'Hornhoof applied the CEO\'s click.',
+    `Hired in ${department}: ${hired.map(h => `${h.name} (${h.title})`).join(', ')}.`,
+    'Continue in the CEO\'s language: say who is there now in a line or two. Their tasks come in a later version of Hornhoof; people can already write to them.',
+  ].join('\n');
 }
 
 /* The CEO's click: the only way departments come and go in M3. */
@@ -48,7 +63,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
         const [taken] = await tx
           .update(proposals)
           .set({ status: 'applied', appliedBy: me.id, appliedAt: new Date() })
-          .where(and(eq(proposals.id, body.proposalId), eq(proposals.companyId, me.companyId), eq(proposals.status, 'pending')))
+          .where(and(eq(proposals.id, body.proposalId), eq(proposals.companyId, me.companyId), eq(proposals.kind, 'structure'), eq(proposals.status, 'pending')))
           .returning({ brief: proposals.brief, agentId: proposals.agentId });
         if (!taken) throw new ApiError(409, 'conflict', 'This card was already applied or replaced by a newer one.', 'proposal_closed');
         brief ??= taken.brief;
@@ -117,5 +132,98 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     }
     reply.code(201);
     return { created: result.fresh, removed: result.removed.map(r => r.id) };
+  });
+
+  /* The default roster for the card by hand: one line per default role, a perProduct role once per product, on the first
+     subscription that serves the department and runs the role's tier, with the program's Default model. */
+  app.get('/api/departments/:id/roster', async req => {
+    const me = await requirePerson(req, db);
+    requireCompanyScope(me);
+    const dept = await departmentOf(db, me.companyId, IdParams.parse(req.params).id);
+    if (!dept) throw new ApiError(404, 'not_found', 'This department does not exist.', 'department_unknown');
+    const products = await db.select().from(departments).where(eq(departments.parentId, dept.id)).orderBy(asc(departments.position));
+    const serving = await servingSubscriptions(ctx, me.companyId, spotIn(dept));
+    const people: HireLine[] = [];
+    for (const role of dept.templateKey ? ctx.templates.roster(dept.templateKey).filter(r => r.inDefault) : []) {
+      const line = { role: role.id, model: '', subscription: serving.find(s => runsTier(s.provider, role.tier))?.id ?? null, skills: role.skills.filter(s => s.on).map(s => s.id) };
+      if (role.perProduct && products.length) for (const p of products) people.push({ ...line, name: `${role.title.en} (${deptName(p)})`, product: p.id });
+      else people.push({ ...line, name: role.title.en, product: null });
+    }
+    return { people };
+  });
+
+  /* The CEO's click on a staff card: the only way employees are hired. */
+  app.post('/api/departments/:id/staff', async (req, reply) => {
+    const me = await requirePerson(req, db);
+    requireCompanyScope(me);
+    const dept = await departmentOf(db, me.companyId, IdParams.parse(req.params).id);
+    if (!dept) throw new ApiError(404, 'not_found', 'This department does not exist.', 'department_unknown');
+    const body = StaffBody.parse(req.body);
+    const invalid = (message: string) => new ApiError(400, 'validation', message, 'staff_invalid');
+
+    const result = await db.transaction(async tx => {
+      let agentId: string | null = null;
+      if (body.proposalId) {
+        const [taken] = await tx
+          .update(proposals)
+          .set({ status: 'applied', appliedBy: me.id, appliedAt: new Date() })
+          .where(and(eq(proposals.id, body.proposalId), eq(proposals.companyId, me.companyId), eq(proposals.kind, 'staff'), eq(proposals.departmentId, dept.id), eq(proposals.status, 'pending')))
+          .returning({ agentId: proposals.agentId });
+        if (!taken) throw new ApiError(409, 'conflict', 'This card was already applied or replaced by a newer one.', 'proposal_closed');
+        agentId = taken.agentId;
+      }
+      const problem = await checkStaff({ db: tx, templates: ctx.templates }, me.companyId, dept, body.people);
+      if (problem) throw invalid(problem);
+      const heads = body.people.filter(l => ctx.templates.roles.get(l.role)!.kind === 'head');
+      if (heads.length > 1) throw invalid(`${deptName(dept)} can have one head; the card has ${heads.length}.`);
+      if (heads.length) {
+        const [head] = await tx.select({ name: agents.name }).from(agents).where(and(eq(agents.departmentId, dept.id), eq(agents.kind, 'head'), isNull(agents.removedAt)));
+        if (head) throw invalid(`${deptName(dept)} already has a head, ${head.name}.`);
+      }
+
+      const hired: Hired[] = [];
+      for (const line of body.people) {
+        const role = ctx.templates.roles.get(line.role)!;
+        const hashes = Object.fromEntries([[role.id, role.hash], ...line.skills.map(id => [id, ctx.templates.skills.get(id)!.hash])]);
+        const [agent] = await tx
+          .insert(agents)
+          .values({
+            companyId: me.companyId,
+            kind: role.kind === 'head' ? 'head' : 'worker',
+            name: line.name,
+            model: line.model,
+            departmentId: dept.id,
+            productId: line.product ?? null,
+            subscriptionId: line.subscription,
+            roleKey: role.id,
+            skills: line.skills,
+            templateHashes: hashes,
+            createdBy: me.id,
+          })
+          .returning({ id: agents.id });
+        await tx.insert(agentChanges).values({ companyId: me.companyId, agentId: agent!.id, personId: me.id, field: 'hired', before: null, after: line });
+        hired.push({ id: agent!.id, name: line.name, role: role.id, title: role.title.en });
+      }
+      return { hired, agentId };
+    });
+
+    const orchestrator = await orchestratorOf(ctx, me.companyId);
+    const agentId = result.agentId ?? orchestrator?.id;
+    if (agentId) {
+      await appendEvent(ctx, {
+        companyId: me.companyId,
+        agentId,
+        kind: 'applied',
+        data: { proposalId: body.proposalId ?? null, kind: 'staff', department: dept.id, hired: result.hired.map(({ id, name, role }) => ({ id, name, role })) },
+        personId: me.id,
+      });
+    }
+    ctx.bus.publish(me.companyId, { type: 'org' });
+    ctx.bus.publish(me.companyId, { type: 'pulse', from: { kind: 'orchestrator' }, to: { kind: 'department', id: dept.id } });
+    if (agentId && (await orchestratorState(ctx, me.companyId)).ready) {
+      await enqueueTurn(ctx, { companyId: me.companyId, agentId, prompt: staffedNote(deptName(dept), result.hired), createdBy: null });
+    }
+    reply.code(201);
+    return { hired: result.hired.map(h => h.id) };
   });
 }

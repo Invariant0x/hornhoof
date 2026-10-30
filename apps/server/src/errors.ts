@@ -35,6 +35,8 @@ export type ErrorReason =
   | 'nothing_running'
   | 'proposal_closed'
   | 'structure_invalid'
+  | 'staff_invalid'
+  | 'department_unknown'
   | 'updater_missing'
   | 'update_running'
   | 'version_unknown';

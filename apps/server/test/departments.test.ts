@@ -70,9 +70,7 @@ describe('POST /api/departments/build', () => {
     expect(stream.messages.some(m => m.type === 'org')).toBe(true);
     const note = await nextPrompt(builtin);
     expect(note).toContain('Development (products: Mascot, Characters)');
-    /* The same as his standing instructions: staffing is not his to offer yet. */
-    expect(note).not.toMatch(/offer to staff/);
-    expect(note).toContain('cannot put people or agents into departments yet');
+    expect(note).toContain('offer to staff the new departments, one department at a time');
   });
 
   it('applies a proposal only once', async () => {

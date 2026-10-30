@@ -58,11 +58,11 @@ describe('/mcp', () => {
     expect((await app.inject({ method: 'DELETE', url: '/mcp' })).statusCode).toBe(405);
   });
 
-  it('offers exactly the company view and the structure proposal', async () => {
+  it('offers the orchestrator the company view, the structure proposal and staffing', async () => {
     const { app, job } = await company();
     await job('running');
     const client = await mcp(app, TOKEN);
-    expect((await client.listTools()).tools.map(t => t.name).sort()).toEqual(['company', 'propose_structure']);
+    expect((await client.listTools()).tools.map(t => t.name).sort()).toEqual(['company', 'propose_staff', 'propose_structure', 'staffing_options']);
   });
 
   it('gives an employee only the company view', async () => {
