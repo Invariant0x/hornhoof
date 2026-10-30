@@ -425,7 +425,11 @@ export const en = {
     later: 'Later',
     waiting: (version: string) => `Hornhoof will update to ${version} when the agents finish.`,
     callOff: 'Call off',
-    running: (version: string, step: string) => `Updating Hornhoof to ${version}: ${step}`,
+    running: (version: string) => (version ? `Updating Hornhoof to ${version}` : 'Updating Hornhoof'),
+    progress: 'Update progress',
+    stepOf: (n: number, total: number, step: string) => `Step ${n} of ${total}: ${step}`,
+    starting: 'Getting the update ready',
+    restarting: 'Hornhoof is restarting. The page reloads by itself.',
     steps: { backup: 'saving the database', pull: 'downloading', install: 'installing', health: 'waiting for the new server', rollback: 'going back', finished: 'finished' },
     result: (s: { state: string; version: string }, current: string) =>
       s.state === 'done'

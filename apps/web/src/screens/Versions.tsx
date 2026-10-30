@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { errorText, useT } from '../i18n';
 import type { Build } from '../types';
 import type { Updates } from '../updates';
+import { UpdateProgress } from '../ui/UpdateProgress';
 import { versionText } from '../ui/VersionMark';
 
 /* The builds Hornhoof can run, the one it runs, and the update under way or the last one's end. */
@@ -62,9 +63,14 @@ export function Versions({ updates, onClose }: { updates: Updates; onClose: () =
           <span className="muted">{view.error ? t.updates.checkFailed : view.checkedAt && t.updates.checkedAt(new Date(view.checkedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))}</span>
         </div>
         {!updater.present && <p className="update-note">{t.updates.missing}</p>}
+        {updates.starting && !status && <UpdateProgress version={latest?.version ?? ''} step={null} starting offline={updates.offline} />}
         {status && (
           <div className="update-progress">
-            <p>{status.state === 'running' ? t.updates.running(status.version, t.updates.steps[status.step]) : t.updates.result(status, current.version)}</p>
+            {updates.starting || status.state === 'running' ? (
+              <UpdateProgress version={updates.starting ? (latest?.version ?? '') : status.version} step={updates.starting ? null : status.step} starting={updates.starting} offline={updates.offline} />
+            ) : (
+              <p>{t.updates.result(status, current.version)}</p>
+            )}
             {status.log && <pre>{status.log}</pre>}
           </div>
         )}

@@ -419,7 +419,11 @@ export const ru: Messages = {
     later: 'Позже',
     waiting: version => `Hornhoof обновится до ${version}, когда агенты закончат.`,
     callOff: 'Отменить',
-    running: (version, step) => `Hornhoof обновляется до ${version}: ${step}`,
+    running: version => (version ? `Hornhoof обновляется до ${version}` : 'Hornhoof обновляется'),
+    progress: 'Ход обновления',
+    stepOf: (n, total, step) => `Шаг ${n} из ${total}: ${step}`,
+    starting: 'Готовлю обновление',
+    restarting: 'Hornhoof перезапускается. Страница обновится сама.',
     steps: { backup: 'сохраняю базу', pull: 'скачиваю', install: 'устанавливаю', health: 'жду ответа нового сервера', rollback: 'возвращаю прежнюю версию', finished: 'готово' },
     result: (s, current) =>
       s.state === 'done'

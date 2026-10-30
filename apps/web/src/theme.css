@@ -200,6 +200,18 @@ button, input, select { font: inherit; color: inherit; }
 .versions-check { display: flex; align-items: center; gap: 10px; font-size: 13px; }
 .update-note { padding: 10px 12px; border-left: 3px solid var(--amber); background: var(--surface2); font-size: 13px; }
 .update-progress { display: grid; gap: 8px; }
+/* An update under way: a turning ring, the version, four steps with the current one moving, and what it does now. */
+.uprog { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; font-size: 13px; }
+.uprog > b { font-weight: 600; }
+.spinner { flex: none; width: 16px; height: 16px; box-sizing: border-box; border: 2px solid var(--idle); border-top-color: var(--cyan); border-radius: 50%; animation: spin .9s linear infinite; }
+.uprog-bar { display: flex; gap: 3px; }
+.uprog-bar i { width: 34px; height: 6px; background: var(--idle); }
+.uprog-bar i.done { background: var(--cyan); }
+.uprog-bar i.now { --c2: color-mix(in srgb, var(--cyan) 30%, var(--idle)); background: linear-gradient(-45deg, var(--cyan) 25%, var(--c2) 25% 50%, var(--cyan) 50% 75%, var(--c2) 75%); background-size: 12px 12px; animation: uflow .7s linear infinite; }
+.uprog.back .spinner { border-top-color: var(--amber); }
+.uprog.back .uprog-bar i.done, .uprog.back .uprog-bar i.now { background: var(--amber); }
+.uprog-text { color: var(--muted); }
+@keyframes uflow { to { background-position: 12px 0; } }
 .update-progress pre {
   margin: 0; max-height: 180px; overflow: auto; padding: 10px 12px;
   background: var(--surface2); border: 1px solid var(--line); font-family: var(--f-mono); font-size: 12px; white-space: pre-wrap;

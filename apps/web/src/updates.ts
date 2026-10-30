@@ -12,6 +12,10 @@ const BUSY_POLL_MS = 2_000;
 export type Updates = {
   view: UpdatesView | null;
   busy: boolean;
+  /* An update was asked for and the updater has not reported on it yet. */
+  starting: boolean;
+  /* The server stopped answering while an update runs: it is restarting. */
+  offline: boolean;
   check(): Promise<void>;
   update(version: string, whenIdle: boolean): Promise<void>;
   callOff(): Promise<void>;
@@ -21,7 +25,9 @@ export type Updates = {
 export function useUpdates(enabled: boolean): Updates {
   const [view, setView] = useState<UpdatesView | null>(null);
   const [sent, setSent] = useState<string | null>(null);
+  const [offline, setOffline] = useState(false);
   const boot = useRef<string | null>(null);
+  const busyNow = useRef(false);
 
   const take = useCallback((next: UpdatesView) => {
     boot.current ??= next.current.commit;
@@ -32,8 +38,10 @@ export function useUpdates(enabled: boolean): Updates {
   const load = useCallback(async () => {
     try {
       take(await api.get<UpdatesView>('/api/updates'));
+      setOffline(false);
     } catch {
       /* The server restarts during an update; the next poll asks again. */
+      if (busyNow.current) setOffline(true);
     }
   }, [take]);
 
@@ -41,6 +49,8 @@ export function useUpdates(enabled: boolean): Updates {
   /* A sent request counts until the updater reports on it. */
   const answered = sent !== null && status?.id === sent && status.state !== 'running';
   const busy = (sent !== null && !answered) || status?.state === 'running' || Boolean(view?.updater.waiting);
+  const starting = sent !== null && status?.id !== sent;
+  busyNow.current = busy;
 
   useEffect(() => {
     if (answered) setSent(null);
@@ -56,6 +66,8 @@ export function useUpdates(enabled: boolean): Updates {
   return {
     view,
     busy,
+    starting,
+    offline,
     check: async () => take(await api.post<UpdatesView>('/api/updates/check')),
     update: async (version, whenIdle) => {
       const { id } = await api.post<{ id: string }>('/api/updates', { version, whenIdle });

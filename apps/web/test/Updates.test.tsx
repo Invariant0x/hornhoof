@@ -85,7 +85,30 @@ describe('updates', () => {
     expect(calls.some(c => c.method === 'DELETE' && c.path === '/api/updates')).toBe(true);
     await user.click(await screen.findByRole('button', { name: 'Update' }));
     expect(calls.filter(c => c.method === 'POST' && c.path === '/api/updates').pop()!.body).toEqual({ version: 'latest', whenIdle: false });
-    expect(await screen.findByText('Updating Hornhoof to 0.4.1: saving the database')).toBeInTheDocument();
+    expect(await screen.findByText('Updating Hornhoof to 0.4.1')).toBeInTheDocument();
+    const bar = screen.getByRole('progressbar', { name: 'Update progress' });
+    expect(bar).toHaveAttribute('aria-valuetext', 'Step 1 of 4: saving the database');
+    expect(bar).toHaveAttribute('aria-valuenow', '0');
+  });
+
+  it('shows the update starting at once, then the server restarting', async () => {
+    let view = updates();
+    let down = false;
+    mockApi({
+      'GET /api/org': [200, ORG],
+      'GET /api/updates': () => (down ? [502, { error: 'unavailable', message: 'Bad gateway' }] : [200, view]),
+      'POST /api/updates': () => [202, { id: 'u2' }],
+    });
+    const user = userEvent.setup();
+    render(<Shell me={ME} onSignOut={() => {}} />);
+    await user.click(await screen.findByRole('button', { name: 'Update' }));
+    /* The updater has not picked it up yet, and the banner already moves. */
+    expect(await screen.findByRole('progressbar', { name: 'Update progress' })).toHaveAttribute('aria-valuetext', 'Getting the update ready');
+    view = updates({}, { status: { ...status('running', 'install'), id: 'u2' } });
+    await waitFor(() => expect(screen.getByRole('progressbar', { name: 'Update progress' })).toHaveAttribute('aria-valuetext', 'Step 3 of 4: installing'), { timeout: 4000 });
+    expect(screen.getByRole('progressbar', { name: 'Update progress' })).toHaveAttribute('aria-valuenow', '2');
+    down = true;
+    await waitFor(() => expect(screen.getByRole('progressbar', { name: 'Update progress' })).toHaveAttribute('aria-valuetext', 'Hornhoof is restarting. The page reloads by itself.'), { timeout: 4000 });
   });
 
   it('lists versions and marks the running one', async () => {
@@ -122,7 +145,8 @@ describe('updates', () => {
     const user = userEvent.setup();
     render(<Shell me={ME} onSignOut={() => {}} />);
     const dialog = await openVersions(user);
-    expect(within(dialog).getByText('Updating Hornhoof to 0.4.1: downloading')).toBeInTheDocument();
+    expect(within(dialog).getByText('Updating Hornhoof to 0.4.1')).toBeInTheDocument();
+    expect(within(dialog).getByRole('progressbar', { name: 'Update progress' })).toHaveAttribute('aria-valuetext', 'Step 2 of 4: downloading');
     expect(within(dialog).getByText(/Downloading 0\.4\.1\./)).toBeInTheDocument();
     view = updates({ current: { version: '0.4.1', commit: 'b'.repeat(40), migrations: 6 }, available: false }, { status: status('done', 'finished') });
     await waitFor(() => expect(reload).toHaveBeenCalled(), { timeout: 4000 });

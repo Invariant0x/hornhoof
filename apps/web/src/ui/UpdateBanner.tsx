@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { errorText, useT } from '../i18n';
 import type { Updates } from '../updates';
+import { UpdateProgress } from './UpdateProgress';
 
 const LATER = 'hh-later';
 const SEEN = 'hh-update-seen';
@@ -45,10 +46,11 @@ export function UpdateBanner({ updates, onDetails }: { updates: Updates; onDetai
   };
 
   let body: React.ReactNode = null;
-  if (status?.state === 'running') {
+  if (updates.starting || status?.state === 'running') {
+    const version = updates.starting ? (view.latest?.version ?? '') : status!.version;
     body = (
       <>
-        <span>{t.updates.running(status.version, t.updates.steps[status.step])}</span>
+        <UpdateProgress version={version} step={updates.starting ? null : status!.step} starting={updates.starting} offline={updates.offline} />
         <button className="btn small ghost" type="button" onClick={onDetails}>{t.updates.details}</button>
       </>
     );
