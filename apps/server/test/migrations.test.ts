@@ -51,3 +51,55 @@ describe('migration 0003', () => {
     ]);
   });
 });
+
+describe('migration 0005', () => {
+  const C = '00000000-0000-4000-8000-000000000001';
+  const DEPT = '00000000-0000-4000-8000-0000000000d1';
+  const TEAM = '00000000-0000-4000-8000-0000000000e1';
+
+  async function at0004() {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0004_conversations') });
+    await db.execute(sql`insert into companies (id, name) values (${C}, 'Acme')`);
+    await db.execute(sql`insert into departments (id, company_id, name, role_code) values (${DEPT}, ${C}, 'Sales', 'SAL')`);
+    await db.execute(sql`insert into teams (id, company_id, department_id, name) values (${TEAM}, ${C}, ${DEPT}, 'Outbound')`);
+    await db.execute(sql`insert into people (id, company_id, name, email, status, scope_kind, scope_id, is_owner) values
+      ('00000000-0000-4000-8000-000000000002', ${C}, 'Ivan', 'ivan@acme.com', 'active', 'company', null, true),
+      ('00000000-0000-4000-8000-000000000003', ${C}, 'Maria', 'maria@acme.com', 'active', 'department', ${DEPT}, false),
+      ('00000000-0000-4000-8000-000000000004', ${C}, 'Sasha', 'sasha@acme.com', 'invited', 'team', ${TEAM}, false)`);
+    return db;
+  }
+
+  it('moves single scopes into access lists', async () => {
+    const db = await at0004();
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    const people = await db.execute<{ name: string; scope_kind: string }>(sql`select name, scope_kind from people order by email`);
+    expect(people.rows).toEqual([
+      { name: 'Ivan', scope_kind: 'company' },
+      { name: 'Maria', scope_kind: 'listed' },
+      { name: 'Sasha', scope_kind: 'listed' },
+    ]);
+    const access = await db.execute<{ name: string; department_id: string | null; team_id: string | null }>(
+      sql`select p.name, a.department_id, a.team_id from person_access a join people p on p.id = a.person_id order by p.email`,
+    );
+    expect(access.rows).toEqual([
+      { name: 'Maria', department_id: DEPT, team_id: null },
+      { name: 'Sasha', department_id: null, team_id: TEAM },
+    ]);
+  });
+
+  it('keeps the orchestrator and his conversation', async () => {
+    const db = await at0004();
+    await db.execute(sql`insert into subscriptions (id, company_id, provider, kind, label, owner_person_id, status, target_kind)
+      values ('00000000-0000-4000-8000-000000000005', ${C}, 'anthropic_api', 'api_key', 'Orchestrator', '00000000-0000-4000-8000-000000000002', 'ready', 'orchestrator')`);
+    await db.execute(sql`insert into agents (id, company_id, kind, name, model, subscription_id)
+      values ('00000000-0000-4000-8000-000000000006', ${C}, 'orchestrator', 'Orchestrator', 'claude-opus-5-5', '00000000-0000-4000-8000-000000000005')`);
+    await db.execute(sql`insert into agent_events (company_id, agent_id, kind, data) values (${C}, '00000000-0000-4000-8000-000000000006', 'text', '{"text":"Hello"}')`);
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    const agents = await db.execute<{ kind: string; skills: unknown; overrides: unknown; role_key: string | null }>(sql`select kind, skills, overrides, role_key from agents`);
+    expect(agents.rows).toEqual([{ kind: 'orchestrator', skills: [], overrides: {}, role_key: null }]);
+    expect((await db.execute(sql`select kind from agent_events`)).rows).toEqual([{ kind: 'text' }]);
+  });
+});

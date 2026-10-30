@@ -2,7 +2,7 @@ import { and, eq, gt, lte } from 'drizzle-orm';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Config } from '../config.js';
 import type { Db } from '../db/client.js';
-import { people, sessions } from '../db/schema.js';
+import { people, sessions, type ScopeKind } from '../db/schema.js';
 import { hashToken, newToken } from '../crypto/tokens.js';
 import { ApiError } from '../errors.js';
 
@@ -28,7 +28,7 @@ export type Person = {
   email: string;
   title: string;
   status: 'active' | 'invited' | 'disabled';
-  scopeKind: 'company' | 'department' | 'team';
+  scopeKind: ScopeKind;
   scopeId: string | null;
   isOwner: boolean;
 };

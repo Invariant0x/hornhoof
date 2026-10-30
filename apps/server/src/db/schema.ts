@@ -15,7 +15,9 @@ export const companies = pgTable('companies', {
   createdAt: createdAt(),
 });
 
-export const SCOPE_KINDS = ['company', 'department', 'team'] as const;
+/* listed: the person reaches the departments and teams in person_access. department and team are the single scopes
+   from before access lists; migration 0005 turns them into listed, and Task 8 stops writing them. */
+export const SCOPE_KINDS = ['company', 'listed', 'department', 'team'] as const;
 export type ScopeKind = (typeof SCOPE_KINDS)[number];
 
 export const people = pgTable(
@@ -139,6 +141,8 @@ export const subscriptions = pgTable(
     nodeVersion: text('node_version'),
     lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
     limits: jsonb('limits').$type<Limits>(),
+    /* The models its node says it can run; null until a node reports them. */
+    models: jsonb('models').$type<{ id: string; name: string }[]>(),
     removedAt: timestamp('removed_at', { withTimezone: true }),
     createdAt: createdAt(),
   },
@@ -154,8 +158,51 @@ export const agents = pgTable('agents', {
   departmentId: uuid('department_id').references(() => departments.id),
   teamId: uuid('team_id').references(() => teams.id),
   subscriptionId: uuid('subscription_id').references(() => subscriptions.id),
+  /* The role template it was hired from, its enabled skills, its own text over the template's, and the template
+     hashes it was hired with, so the card can say a template moved on. */
+  roleKey: text('role_key'),
+  skills: jsonb('skills').$type<string[]>().notNull().default([]),
+  overrides: jsonb('overrides').$type<AgentOverrides>().notNull().default({}),
+  templateHashes: jsonb('template_hashes').$type<Record<string, string>>().notNull().default({}),
+  /* A product department the employee works for, inside its department. */
+  productId: uuid('product_id').references((): AnyPgColumn => departments.id),
+  createdBy: uuid('created_by').references(() => people.id),
+  removedAt: timestamp('removed_at', { withTimezone: true }),
   createdAt: createdAt(),
 });
+
+export type AgentOverrides = { base?: string; skills?: Record<string, string> };
+
+export const AGENT_CHANGE_FIELDS = ['name', 'model', 'subscription', 'skills', 'prompt', 'reset', 'hired', 'removed'] as const;
+
+/* Every change to an employee's card: who, when, what, before and after. */
+export const agentChanges = pgTable(
+  'agent_changes',
+  {
+    id: id(),
+    companyId: companyId(),
+    agentId: uuid('agent_id').notNull().references(() => agents.id),
+    personId: uuid('person_id').references(() => people.id),
+    field: text('field', { enum: AGENT_CHANGE_FIELDS }).notNull(),
+    before: jsonb('before'),
+    after: jsonb('after'),
+    createdAt: createdAt(),
+  },
+  t => [index('agent_changes_agent_id').on(t.agentId)],
+);
+
+/* The departments and teams a listed person reaches. */
+export const personAccess = pgTable(
+  'person_access',
+  {
+    id: id(),
+    companyId: companyId(),
+    personId: uuid('person_id').notNull().references(() => people.id),
+    departmentId: uuid('department_id').references(() => departments.id),
+    teamId: uuid('team_id').references(() => teams.id),
+  },
+  t => [unique('person_access_place').on(t.personId, t.departmentId, t.teamId).nullsNotDistinct(), index('person_access_person_id').on(t.personId)],
+);
 
 export const JOB_STATUSES = ['queued', 'running', 'done', 'failed'] as const;
 export const JOB_KINDS = ['test', 'conversation'] as const;
@@ -178,6 +225,8 @@ export const jobs = pgTable(
     kind: text('kind', { enum: JOB_KINDS }).notNull().default('test'),
     /* The job's Hornhoof tools present this token; it works only while the job runs. */
     toolTokenHash: text('tool_token_hash').unique(),
+    /* The hash of the instructions it ran with; a change starts a fresh session. */
+    instructionsHash: text('instructions_hash'),
     createdBy: uuid('created_by').references(() => people.id),
     createdAt: createdAt(),
     startedAt: timestamp('started_at', { withTimezone: true }),
@@ -214,6 +263,9 @@ export const proposals = pgTable('proposals', {
   jobId: uuid('job_id').references(() => jobs.id),
   brief: text('brief').notNull().default(''),
   items: jsonb('items').notNull(),
+  /* structure: departments for the company; staff: employees for one department. */
+  kind: text('kind', { enum: ['structure', 'staff'] }).notNull().default('structure'),
+  departmentId: uuid('department_id').references(() => departments.id),
   status: text('status', { enum: ['pending', 'applied', 'dismissed'] }).notNull().default('pending'),
   appliedBy: uuid('applied_by').references(() => people.id),
   appliedAt: timestamp('applied_at', { withTimezone: true }),

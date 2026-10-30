@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { isUniqueViolation } from '../src/db/errors.js';
-import { agentEvents, agents, companies, departments, machines, people, subscriptions } from '../src/db/schema.js';
+import { agentChanges, agentEvents, agents, companies, departments, machines, people, personAccess, subscriptions } from '../src/db/schema.js';
 import { createTestDb } from './helpers.js';
 
 describe('database', () => {
@@ -16,6 +16,20 @@ describe('database', () => {
     const db = await createTestDb();
     await db.insert(companies).values({ name: 'Acme' });
     await expect(db.insert(companies).values({ name: 'Other' })).rejects.toThrow();
+  });
+
+  it('keeps one access row per person and place, and the changes to an employee', async () => {
+    const db = await createTestDb();
+    const [company] = await db.insert(companies).values({ name: 'Acme' }).returning();
+    const [person] = await db.insert(people).values({ companyId: company!.id, name: 'Maria', email: 'maria@acme.com', status: 'active', scopeKind: 'listed' }).returning();
+    const [sales] = await db.insert(departments).values({ companyId: company!.id, name: 'Sales', roleCode: 'SAL' }).returning();
+    const place = { companyId: company!.id, personId: person!.id, departmentId: sales!.id };
+    await db.insert(personAccess).values(place);
+    expect(isUniqueViolation(await db.insert(personAccess).values(place).catch((e: unknown) => e))).toBe(true);
+    const [agent] = await db.insert(agents).values({ companyId: company!.id, kind: 'worker', name: 'Lena', model: 'default', departmentId: sales!.id, roleKey: 'SAL-SDR', skills: ['sal-cold-outreach'] }).returning();
+    expect(agent).toMatchObject({ skills: ['sal-cold-outreach'], overrides: {}, templateHashes: {}, removedAt: null });
+    await db.insert(agentChanges).values({ companyId: company!.id, agentId: agent!.id, personId: person!.id, field: 'model', before: 'default', after: 'opus' });
+    expect((await db.select().from(agentChanges)).map(c => [c.field, c.before, c.after])).toEqual([['model', 'default', 'opus']]);
   });
 
   it('keeps one machine row per person and machine key', async () => {
