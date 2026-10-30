@@ -98,7 +98,7 @@ describe('Department view', () => {
     expect(screen.getByText(/Work goes left to right through the gates/)).toBeInTheDocument();
     started = true;
     stream.send({ type: 'working', working: 2 });
-    await vi.waitFor(() => expect(within(screen.getByRole('region', { name: 'Members' })).getByRole('button', { name: /Bruno/ })).toHaveTextContent('BrunoworkingClaude Sonnet 5.5, Anthropic#12 Checkout API'));
+    await vi.waitFor(() => expect(within(screen.getByRole('region', { name: 'Members' })).getByRole('button', { name: /Bruno/ })).toHaveTextContent('BrunoClaudeworkingClaude Sonnet 5.5, Anthropic#12 Checkout API'));
     /* The line at the bottom says what changed last. */
     expect(screen.getByText('Bruno: working, #12 Checkout API')).toBeInTheDocument();
   });
@@ -157,12 +157,22 @@ describe('Department view', () => {
     expect(calls.some(c => c.path === '/api/agents/orchestrator/messages')).toBe(false);
   });
 
-  it('opens an employee card from the department', async () => {
+  it("opens an employee's window from the department, with its card one click away", async () => {
     const user = userEvent.setup();
-    shell({ 'GET /api/agents/b1': [200, CARD] });
+    shell({ 'GET /api/agents/b1': [200, CARD], 'GET /api/agents/b1/events?after=0': [200, { events: [], state: READY }] });
     await flyIn(user);
     await user.click(screen.getByRole('button', { name: /Bruno/ }));
+    expect(await screen.findByRole('complementary', { name: 'Bruno, Backend engineer' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Card' }));
     expect(await screen.findByRole('button', { name: 'Open terminal' })).toBeInTheDocument();
+  });
+
+  it('marks the head and each employee with the program they work in', async () => {
+    const user = userEvent.setup();
+    shell({});
+    await flyIn(user);
+    expect(within(screen.getByRole('button', { name: /Bruno/ })).getByRole('img', { name: 'Claude' })).toBeInTheDocument();
+    expect(within(screen.getByRole('button', { name: /Dana/ })).getByRole('img', { name: 'Claude' })).toBeInTheDocument();
   });
 
   it("lists the department's open tasks and opens one at the side", async () => {

@@ -2,6 +2,7 @@
 :root {
   --bg: #E6EBF0; --surface: #F8FAFC; --surface2: #EEF2F6; --line: #C9D3DD; --line2: #A9B7C5;
   --ink: #0F1B27; --muted: #4C5A68;
+  --p-claude: #C2593A; --p-kimi: #1667E0; --p-glm: #3D47D6;
   --cyan: #00A3BD; --cyan-ink: #00768A; --amber: #E08A00; --amber-ink: #9A5A00; --pink: #E0307F; --pink-ink: #B0185F; --ok: #1E8E4E;
   --idle: #C5D0DB; --dot: rgba(30, 60, 90, .17); --glow: rgba(0, 163, 189, .10);
   --btn: #00768A; --on-btn: #FFFFFF; --hud: rgba(240, 244, 247, .88); --shadow: rgba(20, 40, 60, .18);
@@ -14,6 +15,7 @@
   :root:not([data-theme="light"]) {
     --bg: #141A22; --surface: #1B232D; --surface2: #212B37; --line: #2C3845; --line2: #3D4C5C;
     --ink: #E3EAF1; --muted: #93A0AE;
+    --p-claude: #F08A66; --p-kimi: #5E9BFF; --p-glm: #8D95FF;
     --cyan: #46E0EF; --cyan-ink: #6FE9F5; --amber: #FFB54A; --amber-ink: #FFC36E; --pink: #FF62AA; --pink-ink: #FF8CC2; --ok: #5FD08A;
     --idle: #2C3744; --dot: rgba(140, 175, 205, .15); --glow: rgba(70, 224, 239, .10);
     --btn: #46E0EF; --on-btn: #05222A; --hud: rgba(23, 30, 39, .84); --shadow: rgba(0, 0, 0, .45);
@@ -23,6 +25,7 @@
 :root[data-theme="dark"] {
   --bg: #141A22; --surface: #1B232D; --surface2: #212B37; --line: #2C3845; --line2: #3D4C5C;
   --ink: #E3EAF1; --muted: #93A0AE;
+  --p-claude: #F08A66; --p-kimi: #5E9BFF; --p-glm: #8D95FF;
   --cyan: #46E0EF; --cyan-ink: #6FE9F5; --amber: #FFB54A; --amber-ink: #FFC36E; --pink: #FF62AA; --pink-ink: #FF8CC2; --ok: #5FD08A;
   --idle: #2C3744; --dot: rgba(140, 175, 205, .15); --glow: rgba(70, 224, 239, .10);
   --btn: #46E0EF; --on-btn: #05222A; --hud: rgba(23, 30, 39, .84); --shadow: rgba(0, 0, 0, .45);
@@ -115,6 +118,11 @@ button, input, select { font: inherit; color: inherit; }
 .mk-base { stroke: var(--ink); stroke-width: 2.4; }
 .mk-dot { fill: var(--ink); }
 .ic { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.pm { width: 13px; height: 13px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; color: var(--ink); }
+.pm .fill { fill: currentColor; stroke: none; }
+.pm.claude { color: var(--p-claude); }
+.pm.kimi { color: var(--p-kimi); }
+.pm.glm { color: var(--p-glm); }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
