@@ -311,6 +311,17 @@ describe('install.sh', () => {
     expect(r.calls.some(c => c.includes('hornhoof-codex-9f1e2d3c') && /docker (rm|run)/.test(c))).toBe(false);
   });
 
+  it('leaves a node from before servers were named alone when its own settings name another server', () => {
+    const env = {
+      STUB_CONTAINERS: 'hornhoof-kimi-00000000 hornhoof-codex-11111111',
+      STUB_NODE_SERVERS: `hornhoof-kimi-00000000=http://host.docker.internal:8080 hornhoof-codex-11111111=${SERVER}`,
+    };
+    const r = install({ args: [], env });
+    expect(r.code).toBe(0);
+    expect(r.calls.some(c => c.includes('hornhoof-kimi-00000000') && /docker (rm|run)/.test(c))).toBe(false);
+    expect(r.calls.some(c => c.startsWith('docker run -d --name hornhoof-codex-11111111') && c.includes(`--label hornhoof.server=${SERVER}`))).toBe(true);
+  });
+
   it('installs a named server in its own folder, compose project and free port', () => {
     const r = install({ args: ['server', '--name', 'acme'], tty: '\n', env: { STUB_PORTS_TAKEN: '8080' } });
     expect(r.code).toBe(0);

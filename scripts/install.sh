@@ -261,15 +261,21 @@ start_node() {
 
 node_status() { "${DOCKER[@]}" exec "$1" node "$NODE_MAIN" status 2> /dev/null || echo offline; }
 
-# This server's nodes on this machine as "name:id" words. A node from before nodes carried their server counts as
-# this server's. A script that does not know its server (downloaded on its own) sees every node.
+# This server's nodes on this machine as "name:id" words. A node from before nodes carried their server is this
+# server's unless its own settings name another one. A script that does not know its server (downloaded on its own)
+# sees every node.
 existing_nodes() {
-  local known=1
+  local known=1 own
   case "$SERVER" in __HORNHOOF_* | '') known='' ;; esac
+  if [ -n "$known" ]; then node_server; fi
   "${DOCKER[@]}" ps -a --filter "label=$LABEL" --format '{{.Names}} {{.Label "hornhoof.subscription"}} {{.Label "hornhoof.server"}}' 2> /dev/null |
     while read -r name id server; do
       [ -n "$name" ] || continue
       if [ -n "$known" ] && [ -n "$server" ] && [ "$server" != "$SERVER" ]; then continue; fi
+      if [ -n "$known" ] && [ -z "$server" ]; then
+        own=$("${DOCKER[@]}" exec "$name" cat /data/node.json 2> /dev/null | sed -n 's/^ *"server": *"\([^"]*\)".*/\1/p')
+        if [ -n "$own" ] && [ "$own" != "$NODE_SERVER" ]; then continue; fi
+      fi
       printf '%s:%s ' "$name" "$id"
     done
 }
