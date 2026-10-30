@@ -1,18 +1,21 @@
 import { and, count, desc, eq, gte, inArray, isNull, notInArray, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentChanges, agents, jobs, requests, taskEvents, tasks } from '../../db/schema.js';
-import { afterJob, cancelJob, insertTurn, liveSubscription, onAgent, pump } from '../conversation/queue.js';
+import { afterJob, cancelJob, insertTurn, liveSubscription, onAgent, orchestratorOf, pump } from '../conversation/queue.js';
 import { appendEvent } from '../events/store.js';
-import { CLOSED, GATE_ROUNDS, leaveWork, published, silentTurn, type Task, type Wake } from './engine.js';
+import { CLOSED, GATE_ROUNDS, leaveWork, published, rejoin, silentTurn, type Actor, type Task, type Wake } from './engine.js';
+import { settle, tell } from './turns.js';
 
 export { SILENT_TURNS } from './engine.js';
 
 type Agent = typeof agents.$inferSelect;
 
 /* What finishes the task for whoever holds it, and what to do when that cannot happen. */
-function nextStep(task: Task): { finish: string; stuck: string } {
-  if (task.status === 'review') return { finish: 'give your verdict with your reasons', stuck: 'ask a person with ask_person' };
-  if (task.executorAgentId) return { finish: 'submit it with what you did and the evidence (the commands you ran and what they showed)', stuck: 'say so with blocked' };
+function nextStep(task: Task, agentId: string): { finish: string; stuck: string } {
+  if (task.stage > 0 && task.panel.includes(agentId)) return { finish: 'give your verdict with your reasons', stuck: 'ask a person with ask_person' };
+  if (task.executorAgentId === agentId) return { finish: 'submit it with what you did and the evidence (the commands you ran and what they showed)', stuck: 'say so with blocked' };
+  /* Member work that waits with whoever gave it out, while nobody who does or checks it is on. */
+  if (task.executorAgentId) return { finish: 'give it to someone who is on with update_task', stuck: 'tell the CEO it waits' };
   return { finish: 'report it', stuck: 'report it as not done, with what stands in the way' };
 }
 
@@ -27,7 +30,7 @@ function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string {
   const ref = `#${task.number} "${task.title}"`;
   const read = 'Read it with the task tool first: its body is the current truth and its log has the rest.';
   const said = w.text ? `:\n\n${w.text}\n\n` : '. ';
-  const { finish, stuck } = nextStep(task);
+  const { finish, stuck } = nextStep(task, w.agentId);
   /* The orchestrator holds no task of his own: he runs the turn. */
   const own = agent.kind === 'orchestrator' ? 'the turn' : 'your own task';
   switch (w.why) {
@@ -64,7 +67,8 @@ function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string {
     case 'turn':
       return `${ref} is closed.`;
     case 'switched':
-      return `${ref}, which you gave out, has nobody on to go on with it${said}Do that, or tell the CEO it waits.`;
+      /* Its text says what to do. */
+      return `${ref}, which you gave out, has nobody on to go on with it${w.text ? `:\n\n${w.text}` : '. Give it to someone who is on with update_task, or tell the CEO it waits.'}`;
   }
 }
 
@@ -81,7 +85,7 @@ export async function leaveIfOff(ctx: Ctx, agentId: string): Promise<void> {
     .orderBy(desc(agentChanges.createdAt))
     .limit(1);
   const actor = change?.personId ? { personId: change.personId } : { agentId };
-  const { wakes, handed } = await leaveWork(ctx, actor, agent);
+  const { wakes, handed, closed } = await leaveWork(ctx, actor, agent);
   /* Turns it would have taken on work it no longer holds would only confuse it once it is on again. */
   if (handed.length) {
     await ctx.db
@@ -89,7 +93,21 @@ export async function leaveIfOff(ctx: Ctx, agentId: string): Promise<void> {
       .set({ status: 'failed', error: 'switched_off', finishedAt: new Date() })
       .where(and(eq(jobs.agentId, agentId), eq(jobs.status, 'queued'), inArray(jobs.taskId, handed)));
   }
-  await wakeAll(ctx, wakes);
+  /* A gate it left may have finished the last task of the open turn. */
+  let all = wakes;
+  for (const task of closed) {
+    const settled = await settle(ctx, task);
+    if (settled) all = tell(all, settled, (await orchestratorOf(ctx, agent.companyId))?.id ?? null, task.id);
+  }
+  await wakeAll(ctx, all);
+}
+
+/* An agent switched on again picks up the gates that waited for someone of its role, and the turns it missed go out. */
+export async function backOn(ctx: Ctx, actor: Actor, agentId: string): Promise<void> {
+  const [agent] = await ctx.db.select().from(agents).where(eq(agents.id, agentId));
+  if (!agent || agent.switchedOffAt) return;
+  await wakeAll(ctx, await rejoin(ctx, actor, agent));
+  await pump(ctx, agentId);
 }
 
 /* Queues a turn for every agent a task move needs, one per agent and task: a turn already waiting reads the task as it is
