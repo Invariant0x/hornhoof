@@ -109,3 +109,17 @@ export type JobView = {
   startedAt: string | null;
   finishedAt: string | null;
 };
+
+/* A published build of Hornhoof, from the registry. */
+export type Build = { tag: string; version: string; commit: string; created: string; title: string; migrations: number };
+export type UpdateStep = 'backup' | 'pull' | 'install' | 'health' | 'rollback' | 'finished';
+export type UpdaterStatus = { id: string; version: string; state: 'running' | 'done' | 'failed' | 'rolled_back'; step: UpdateStep; log: string; at: string };
+export type UpdatesView = {
+  current: { version: string; commit: string; migrations: number };
+  available: boolean;
+  checkedAt: string | null;
+  latest: Build | null;
+  versions: Build[];
+  error: string | null;
+  updater: { present: boolean; status: UpdaterStatus | null; waiting: { version: string } | null };
+};

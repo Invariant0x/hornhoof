@@ -180,6 +180,37 @@ button, input, select { font: inherit; color: inherit; }
 .account-menu p span { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
 .menu-row { display: grid; gap: 6px; }
 .menu-version { color: var(--muted); font-size: 12px; }
+
+/* Updates: a banner under the top bar and the Versions dialog. */
+.update-banner {
+  position: absolute; z-index: 9; top: 64px; left: 50%; transform: translateX(-50%);
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px;
+  max-width: calc(100% - 32px); padding: 8px 10px 8px 14px;
+  box-shadow: 0 6px 20px var(--shadow);
+}
+.update-banner > span { font-size: 13px; }
+.update-error { flex-basis: 100%; color: var(--pink-ink); font-size: 13px; }
+.dialog-back { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 16px; background: rgba(10, 20, 30, .35); }
+.dialog {
+  display: grid; gap: 12px; width: min(560px, 100%); max-height: calc(100vh - 32px); overflow: auto; padding: 18px;
+  background: var(--surface); border: 1px solid var(--line2); box-shadow: 0 16px 40px var(--shadow);
+}
+.dialog:focus { outline: none; }
+.dialog > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.versions-check { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.update-note { padding: 10px 12px; border-left: 3px solid var(--amber); background: var(--surface2); font-size: 13px; }
+.update-progress { display: grid; gap: 8px; }
+.update-progress pre {
+  margin: 0; max-height: 180px; overflow: auto; padding: 10px 12px;
+  background: var(--surface2); border: 1px solid var(--line); font-family: var(--f-mono); font-size: 12px; white-space: pre-wrap;
+}
+.versions { list-style: none; margin: 0; padding: 0; display: grid; }
+.versions li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); }
+.versions li > div { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; min-width: 0; }
+.versions li b { font-family: var(--f-display); }
+.versions li span { font-size: 13px; }
+.versions-now { color: var(--cyan-ink); font-family: var(--f-display); font-weight: 600; white-space: nowrap; }
+.update-confirm { display: grid; gap: 10px; padding: 12px; border-left: 3px solid var(--amber); background: var(--surface2); }
 .version-mark {
   position: fixed;
   right: 12px;

@@ -230,6 +230,37 @@ export const en = {
     support: { name: 'Support', description: 'Answers customers and passes what they report to the right department.' },
     finance: { name: 'Finance', description: 'Budget, payments, invoices and reports.' },
   },
+  updates: {
+    label: 'Hornhoof update',
+    out: (version: string, title: string) => (title ? `Hornhoof ${version} is out: ${title}` : `Hornhoof ${version} is out.`),
+    update: 'Update',
+    whenIdle: 'Update when agents finish',
+    later: 'Later',
+    waiting: (version: string) => `Hornhoof will update to ${version} when the agents finish.`,
+    callOff: 'Call off',
+    running: (version: string, step: string) => `Updating Hornhoof to ${version}: ${step}`,
+    steps: { backup: 'saving the database', pull: 'downloading', install: 'installing', health: 'waiting for the new server', rollback: 'going back', finished: 'finished' },
+    result: (s: { state: string; version: string }, current: string) =>
+      s.state === 'done'
+        ? `Updated to ${s.version}.`
+        : s.state === 'rolled_back'
+          ? `The update to ${s.version} did not start. Hornhoof went back to ${current}.`
+          : `The update to ${s.version} failed. What the updater wrote is in Versions.`,
+    details: 'Details',
+    ok: 'OK',
+    menu: 'Versions',
+    title: 'Versions',
+    current: (build: string) => `Running now: ${build}`,
+    runningNow: 'Running now',
+    newest: 'Newest build',
+    checkNow: 'Check now',
+    checkedAt: (time: string) => `Checked at ${time}`,
+    checkFailed: 'Could not check for updates.',
+    install: 'Install',
+    goBack: (version: string) => `Go back to ${version}`,
+    pastMigration: 'Going back past a database change may not start. If it does not, update to the newest version again.',
+    missing: 'The updater is not running. Run the install command for this server again to add it.',
+  },
   errors: {
     codes: {
       validation: 'Check the fields and try again.',
@@ -239,6 +270,7 @@ export const en = {
       conflict: 'This clashes with something that already exists.',
       gone: 'This is no longer available.',
       too_many: 'Too many attempts. Wait a little and try again.',
+      unavailable: 'This is not available right now.',
       internal: 'Something went wrong.',
       network: 'Hornhoof cannot reach its server. Check your connection and try again.',
     },
@@ -267,6 +299,9 @@ export const en = {
     orchestrator_not_ready: 'The orchestrator cannot answer right now.',
     nothing_running: 'Nothing is running now.',
     proposal_closed: 'This card was already applied or replaced by a newer one.',
+    updater_missing: 'The updater is not running. Run the install command for this server again to add it.',
+    update_running: 'An update is running already. Wait for it to finish.',
+    version_unknown: 'This version is not published. Check for updates and pick another one.',
     structure_invalid: 'This structure does not fit the company as it is now. Ask the orchestrator to correct the card.',
   },
 };

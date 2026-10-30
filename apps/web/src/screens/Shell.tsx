@@ -5,17 +5,21 @@ import { useOrg } from '../org';
 import { currentTheme, setTheme, type Theme } from '../theme';
 import type { Me } from '../types';
 import { LogoMark } from '../ui/icons';
+import { UpdateBanner } from '../ui/UpdateBanner';
 import { useVersion, versionText } from '../ui/VersionMark';
+import { useUpdates } from '../updates';
 import { MapScreen } from './Map';
 import { OrchestratorWindow } from './Orchestrator';
 import { People } from './People';
 import { Subscriptions } from './Subscriptions';
+import { Versions } from './Versions';
 
 type Tab = 'map' | 'people' | 'subscriptions';
 const TABS: Tab[] = ['map', 'people', 'subscriptions'];
 const THEMES: Theme[] = ['light', 'dark'];
 
-function AccountMenu({ me, onClose, onSignOut }: { me: Me; onClose: () => void; onSignOut: () => void }) {
+/* onVersions: only for people who see the whole company. */
+function AccountMenu({ me, onClose, onSignOut, onVersions }: { me: Me; onClose: () => void; onSignOut: () => void; onVersions?: () => void }) {
   const t = useT();
   const { language, setLanguage } = useLanguage();
   const [theme, setThemeState] = useState<Theme>(currentTheme);
@@ -53,6 +57,18 @@ function AccountMenu({ me, onClose, onSignOut }: { me: Me; onClose: () => void; 
         </div>
       </div>
       {version && <p className="menu-version">{t.shell.version(versionText(version))}</p>}
+      {onVersions && (
+        <button
+          className="btn small ghost"
+          type="button"
+          onClick={() => {
+            onClose();
+            onVersions();
+          }}
+        >
+          {t.updates.menu}
+        </button>
+      )}
       <button
         className="btn small ghost"
         type="button"
@@ -76,6 +92,8 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   /* The orchestrator's window opens over the map, for people who see the whole company. */
   const [windowOpen, setWindowOpen] = useState(welcome && company);
   const { org } = useOrg(windowOpen);
+  const updates = useUpdates(company);
+  const [versionsOpen, setVersionsOpen] = useState(false);
   const account = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -119,16 +137,18 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
             <button className="avatar glass" type="button" aria-label={t.shell.account} aria-expanded={menu} onClick={() => setMenu(!menu)}>
               {me.person.name.trim().charAt(0).toUpperCase()}
             </button>
-            {menu && <AccountMenu me={me} onClose={() => setMenu(false)} onSignOut={signOut} />}
+            {menu && <AccountMenu me={me} onClose={() => setMenu(false)} onSignOut={signOut} onVersions={company ? () => setVersionsOpen(true) : undefined} />}
           </div>
         </div>
       </header>
+      {company && <UpdateBanner updates={updates} onDetails={() => setVersionsOpen(true)} />}
       <main className="body">
         {tab === 'map' && <MapScreen me={me} windowOpen={windowOpen} onOpenOrchestrator={() => setWindowOpen(true)} />}
         {tab === 'people' && <People me={me} />}
         {tab === 'subscriptions' && <Subscriptions me={me} />}
       </main>
       {windowOpen && org && <OrchestratorWindow me={me} org={org} onClose={() => setWindowOpen(false)} />}
+      {versionsOpen && <Versions updates={updates} onClose={() => setVersionsOpen(false)} />}
     </div>
   );
 }
