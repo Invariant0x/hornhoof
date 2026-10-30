@@ -77,6 +77,8 @@ export type Employee = {
   provider: ProviderId | null;
   state: AgentState;
   status: EmployeeStatus;
+  /* Off for now: it takes no work until a person switches it on. */
+  on: boolean;
   task: EmployeeTask | null;
 };
 

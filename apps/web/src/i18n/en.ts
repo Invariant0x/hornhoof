@@ -289,6 +289,9 @@ export const en = {
     status: { working: 'working', queued: 'queued', handed: 'handed on', waiting: 'waiting for a decision', idle: 'free', off: 'no subscription' },
     statusSummary: (counts: StatusCounts) => summary(counts, { working: 'working', queued: 'queued', handed: 'handed on', waiting: 'waiting for a decision', idle: 'free', off: 'no subscription' }),
     waitsForTask: 'Waiting for a new task',
+    switchedOff: 'Switched off',
+    isOn: (name: string) => `${name} is on`,
+    switchedLine: (name: string, on: boolean) => `${name}: ${on ? 'on' : 'switched off'}`,
     needsSubscription: 'Needs a subscription to work',
     gate: (n: number) => `gate ${n}`,
     lastGate: 'last gate',
@@ -517,6 +520,7 @@ export const en = {
     request_closed: 'This was answered already.',
     turn_open: 'A turn is running. Close it before starting the next.',
     no_head: 'This department has no head yet. Hire one first.',
+    switched_off: 'This employee is switched off right now. Switch it on on the department schema first.',
     repo_invalid: 'Use an https address with no name or token in it, a plain branch name, and an author name on one line with a full email.',
   },
 };

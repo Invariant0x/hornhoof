@@ -66,8 +66,10 @@ export function orgRoutes(app: FastifyInstance, { db, hub, templates }: Ctx): vo
       .where(and(eq(requests.companyId, me.companyId), eq(requests.status, 'open')));
     const byId = new Map(openTasks.map(t => [t.id, t]));
     const parents = new Set(openTasks.map(t => t.parentId));
-    /* The task an agent acts on next: at its own gate, or with it as executor (or holder, for a head's task) before any gate. */
-    const holds = (t: (typeof openTasks)[number], id: string) => (t.stage > 0 ? t.status === 'review' && t.gates[t.stage - 1] === id : (t.executorAgentId ?? t.assigneeAgentId) === id);
+    /* The task an agent acts on next: at a gate it still checks (or holds, when nobody on can), or with it as executor (or
+       holder, for a head's task) before any gate. */
+    const holds = (t: (typeof openTasks)[number], id: string) =>
+      t.stage > 0 ? t.status === 'review' && (t.panel.length ? t.panel.includes(id) : t.assigneeAgentId === id) : (t.executorAgentId ?? t.assigneeAgentId) === id;
     /* What an employee does now. Working: a turn runs. Waiting: it asked people, or it is blocked. Queued: it holds a task
        and its turn has not started. Handed: what it holds is with gates or with the tasks it gave out. */
     const doing = (a: (typeof allAgents)[number]) => {
@@ -108,6 +110,7 @@ export function orgRoutes(app: FastifyInstance, { db, hub, templates }: Ctx): vo
             provider: sub?.provider ?? null,
             state: busy.has(a.id) ? 'working' : a.subscriptionId ? 'sleeping' : 'needs_subscription',
             status: now.status,
+            on: !a.switchedOffAt,
             /* Like the department's current task, only for people who reach it. */
             task: now.task && canReach(reach, { departmentId: dept.id }) ? { id: now.task.id, number: now.task.number, title: now.task.title, stage: now.task.stage, gateCount: now.task.gates.length, bounces: now.task.bounces } : null,
           };

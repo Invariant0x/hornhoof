@@ -279,6 +279,9 @@ export const ru: Messages = {
     status: { working: 'в работе', queued: 'в очереди', handed: 'сдал дальше', waiting: 'ждет решения', idle: 'свободен', off: 'нет подписки' },
     statusSummary: counts => summary(counts, { working: 'в работе', queued: 'в очереди', handed: 'сдали дальше', waiting: 'ждут решения', idle: 'свободны', off: 'без подписки' }),
     waitsForTask: 'Ждет новую задачу',
+    switchedOff: 'Выключен',
+    isOn: (name: string) => `${name} включен`,
+    switchedLine: (name: string, on: boolean) => `${name}: ${on ? 'включен' : 'выключен'}`,
     needsSubscription: 'Чтобы работать, нужна подписка',
     gate: n => `рубеж ${n}`,
     lastGate: 'последний рубеж',
@@ -511,6 +514,7 @@ export const ru: Messages = {
     request_closed: 'На это уже ответили.',
     turn_open: 'Ход уже идет. Закройте его, прежде чем начать следующий.',
     no_head: 'У этого отдела еще нет руководителя. Сначала наймите его.',
+    switched_off: 'Этот сотрудник сейчас выключен. Сначала включите его на схеме отдела.',
     repo_invalid: 'Нужен адрес https без имени и токена внутри, простое имя ветки, а у автора имя в одну строку и полная почта.',
   },
 };

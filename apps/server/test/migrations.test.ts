@@ -128,3 +128,31 @@ describe('migration 0007', () => {
     expect(cols.rows.map(r => r.column_name)).toEqual(['repo_author_email', 'repo_author_name', 'repo_branch', 'repo_token_enc', 'repo_token_last4', 'repo_url']);
   });
 });
+
+describe('migration 0011', () => {
+  const C = '00000000-0000-4000-8000-000000000001';
+
+  it('puts the reviewer of a task at a gate on its panel, also while the task waits for a person', async () => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0010_turn_plans') });
+    await db.execute(sql`insert into companies (id, name) values (${C}, 'Acme')`);
+    const gates = JSON.stringify(['rita', 'sam']);
+    await db.execute(sql`insert into tasks (company_id, number, title, status, stage, gates) values
+      (${C}, 1, 'At gate one', 'review', 1, ${gates}::jsonb),
+      (${C}, 2, 'Asking at gate two', 'waiting', 2, ${gates}::jsonb),
+      (${C}, 3, 'Asking before its gates', 'waiting', 0, ${gates}::jsonb),
+      (${C}, 4, 'Being done', 'working', 0, ${gates}::jsonb)`);
+
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+
+    const rows = await db.execute<{ number: number; panel: string[] }>(sql`select number, panel from tasks order by number`);
+    expect(rows.rows).toEqual([
+      { number: 1, panel: ['rita'] },
+      { number: 2, panel: ['sam'] },
+      { number: 3, panel: [] },
+      { number: 4, panel: [] },
+    ]);
+  });
+});

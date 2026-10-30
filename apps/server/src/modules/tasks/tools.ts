@@ -36,7 +36,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
   /* The orchestrator sees every task; an employee its department's, and any it holds or reviews, once its turn started. */
   const sees = (agent: Agent, t: Task) =>
     agent.kind === 'orchestrator' ||
-    (t.status !== 'planned' && ((agent.departmentId !== null && t.departmentId === agent.departmentId) || t.assigneeAgentId === agent.id || t.executorAgentId === agent.id || t.gates.includes(agent.id)));
+    (t.status !== 'planned' && ((agent.departmentId !== null && t.departmentId === agent.departmentId) || t.assigneeAgentId === agent.id || t.executorAgentId === agent.id || t.gates.includes(agent.id) || t.panel.includes(agent.id)));
 
   async function find(ref: number | string): Promise<{ agent: Agent; task: Task }> {
     const agent = await me();
@@ -87,7 +87,8 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         .where(and(eq(tasks.companyId, job.companyId), notInArray(tasks.status, [...CLOSED])))
         .orderBy(desc(tasks.number))
         .limit(200);
-      const mine = open.filter(t => sees(agent, t)).sort((a, b) => Number(b.assigneeAgentId === agent.id) - Number(a.assigneeAgentId === agent.id));
+      const holds = (t: Task) => t.assigneeAgentId === agent.id || t.panel.includes(agent.id);
+      const mine = open.filter(t => sees(agent, t)).sort((a, b) => Number(holds(b)) - Number(holds(a)));
       return json(await taskLines(ctx, mine.slice(0, 40)));
     },
   );
@@ -233,7 +234,9 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
     server.registerTool(
       'update_task',
       {
-        description: "Rewrites one of your department's member tasks so it reads as the current truth, or hands it to another executor or gates (only while it is with its executor). A blocked task opens again.",
+        description:
+          "Rewrites one of your department's member tasks so it reads as the current truth, or hands it to another executor or gates (only while it is with its executor). " +
+          'A task waiting at a gate with nobody on to check it takes new gates from that gate on. A blocked task opens again.',
         inputSchema: { task: Ref, title: Title.optional(), brief: Brief.optional(), body: Body.optional(), executor: z.uuid().optional(), gates: z.array(z.string().max(40)).max(8).optional() },
       },
       async ({ task: ref, executor, gates, ...text }) =>
@@ -329,12 +332,13 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
       const seen = new Set<string>();
       return staff
         .filter(a => a.id !== executor && gate(a) !== null)
-        .sort((a, b) => gate(a)! - gate(b)!)
+        .sort((a, b) => gate(a)! - gate(b)! || Number(!!a.switchedOffAt) - Number(!!b.switchedOffAt))
         .filter(a => !seen.has(a.roleKey!) && seen.add(a.roleKey!))
         .map(a => a.id);
     }
     return given.map(g => {
-      const found = /^[A-Z]{3}-[A-Z0-9]+$/.test(g) ? staff.find(a => a.roleKey === g && a.id !== executor) : staff.find(a => a.id === g);
+      const role = (a: Agent) => a.roleKey === g && a.id !== executor;
+      const found = /^[A-Z]{3}-[A-Z0-9]+$/.test(g) ? (staff.find(a => role(a) && !a.switchedOffAt) ?? staff.find(role)) : staff.find(a => a.id === g);
       if (!found) throw refuse(400, 'task_invalid', `No one in your department can be the gate ${g}.`);
       return found.id;
     });

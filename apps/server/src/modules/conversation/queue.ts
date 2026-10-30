@@ -10,7 +10,7 @@ import { appendEvent, earlierTalk, publishWorking } from '../events/store.js';
 import { instructionsOf } from '../agents/instructions.js';
 import { repoFor, repoLine } from '../departments/repository.js';
 import { textHash } from '../templates/load.js';
-import { checkLiveness, startWork } from '../tasks/wake.js';
+import { checkLiveness, leaveIfOff, startWork } from '../tasks/wake.js';
 import { preface } from './prompt.js';
 
 export const CONVERSATION_TIMEOUT_MS = 15 * 60_000;
@@ -152,10 +152,16 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   if (running) return;
   const sub = await liveSubscription(ctx, agentId);
   if (!sub || sub.status !== 'ready' || outdated(sub) || !hub.isReady(identityOf(sub))) return;
-  const [job] = await db.select().from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'queued'))).orderBy(asc(jobs.createdAt)).limit(1);
-  if (!job) return;
   const [agent] = await db.select().from(agents).where(eq(agents.id, agentId));
   if (!agent) return;
+  /* Switched off, it still answers people who write to it; its task turns wait until it is on. */
+  const [job] = await db
+    .select()
+    .from(jobs)
+    .where(and(conversationOf(agentId), eq(jobs.status, 'queued'), agent.switchedOffAt ? isNull(jobs.taskId) : undefined))
+    .orderBy(asc(jobs.createdAt))
+    .limit(1);
+  if (!job) return;
   const repo = await repoFor(ctx, agent);
   if (repo && outdated(sub, REPOSITORY_NODE)) return;
 
@@ -215,6 +221,7 @@ export async function afterJob(ctx: Ctx, jobId: string): Promise<void> {
     await appendEvent(ctx, { companyId: job.companyId, agentId: job.agentId, jobId, kind: stopped ? 'stopped' : 'failed', data: stopped ? {} : { error: job.error } });
   }
   if (job.taskId) await checkLiveness(ctx, jobId);
+  await leaveIfOff(ctx, job.agentId);
   await pump(ctx, job.agentId);
 }
 

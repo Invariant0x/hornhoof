@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { api } from '../api';
 import { deptLabel, errorText, useLanguage, useT } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
 import { useTasks } from '../tasks';
@@ -54,35 +55,55 @@ function modelLine(t: ReturnType<typeof useT>, e: Employee): string {
 /* What an employee's third line says: its task, or why it has none. */
 function doingLine(t: ReturnType<typeof useT>, e: Employee): string {
   if (e.task) return taskText(e);
+  if (!e.on) return t.dept.switchedOff;
   if (e.status === 'off') return t.dept.needsSubscription;
   return e.status === 'idle' ? t.dept.waitsForTask : '';
 }
 
-function Chip({ e, x, y, on, flash, onOpen }: { e: Employee; x: number; y: number; on: boolean; flash: boolean; onOpen(): void }) {
+/* The tick that switches an agent off for now and on again; it sits beside the chip's button, not inside it. */
+function Switch({ e, onSwitch }: { e: Employee; onSwitch?(on: boolean): void }) {
   const t = useT();
+  if (!onSwitch) return null;
   return (
-    <button
-      type="button"
-      className={`schip ${STATUS_CLASS[e.status]}${on ? ' on' : ''}${flash ? ' flash' : ''}`}
-      style={{ left: x, top: y, width: CW, height: CH }}
-      aria-pressed={on}
-      onClick={onOpen}
-    >
-      <Edge cut={10}>
-        <span className="r1">
-          <AgentIcon />
-          <span className="mn">{e.name}</span>
-          <ProviderMark provider={e.provider} />
-          <span className="st">{t.dept.status[e.status]}</span>
-        </span>
-        <span className="r2">{modelLine(t, e)}</span>
-        <span className="r3">{doingLine(t, e)}</span>
-      </Edge>
-    </button>
+    <input
+      type="checkbox"
+      className="sw"
+      checked={e.on}
+      aria-label={t.dept.isOn(e.name)}
+      title={t.dept.isOn(e.name)}
+      onPointerDown={ev => ev.stopPropagation()}
+      onChange={ev => onSwitch(ev.target.checked)}
+    />
   );
 }
 
-function HeadCard({ d, head, stats, on, flash, onOpen }: { d: Department; head: Employee | null; stats: string; on: boolean; flash: boolean; onOpen(id: string): void }) {
+function Chip({ e, x, y, on, flash, onOpen, onSwitch }: { e: Employee; x: number; y: number; on: boolean; flash: boolean; onOpen(): void; onSwitch?(on: boolean): void }) {
+  const t = useT();
+  return (
+    <div className={`sslot${e.on ? '' : ' off'}${onSwitch ? ' has-sw' : ''}`} style={{ left: x, top: y, width: CW, height: CH }}>
+      <button
+        type="button"
+        className={`schip ${STATUS_CLASS[e.status]}${on ? ' on' : ''}${flash ? ' flash' : ''}`}
+        aria-pressed={on}
+        onClick={onOpen}
+      >
+        <Edge cut={10}>
+          <span className="r1">
+            <AgentIcon />
+            <span className="mn">{e.name}</span>
+            <ProviderMark provider={e.provider} />
+            <span className="st">{t.dept.status[e.status]}</span>
+          </span>
+          <span className="r2">{modelLine(t, e)}</span>
+          <span className="r3">{doingLine(t, e)}</span>
+        </Edge>
+      </button>
+      <Switch e={e} onSwitch={onSwitch} />
+    </div>
+  );
+}
+
+function HeadCard({ d, head, stats, on, flash, onOpen, onSwitch }: { d: Department; head: Employee | null; stats: string; on: boolean; flash: boolean; onOpen(id: string): void; onSwitch?(on: boolean): void }) {
   const t = useT();
   const { language } = useLanguage();
   const style = { left: 0, top: 0, width: HW, height: HH };
@@ -101,22 +122,25 @@ function HeadCard({ d, head, stats, on, flash, onOpen }: { d: Department; head: 
     );
   const role = head.title?.[language];
   return (
-    <button type="button" className={`shead ${STATUS_CLASS[head.status]}${on ? ' on' : ''}${flash ? ' flash' : ''}`} style={style} aria-pressed={on} onClick={() => onOpen(head.id)}>
-      <Edge cut={14} corner>
-        <span className="hr">
-          <AgentIcon />
-          <span className="role">{`${d.roleCode}, ${deptLabel(t, d)}`}</span>
-          <ProviderMark provider={head.provider} />
-        </span>
-        <span className="hn">{head.name}</span>
-        <span className="meta">{[role && role !== head.name ? role : null, modelLine(t, head)].filter(Boolean).join(', ')}</span>
-        <span className="meta">{stats}</span>
-        <span className="hx">
-          <span className="st">{t.dept.status[head.status]}</span>
-          <span className="hx-task">{doingLine(t, head)}</span>
-        </span>
-      </Edge>
-    </button>
+    <div className={`sslot${head.on ? '' : ' off'}${onSwitch ? ' has-sw' : ''}`} style={style}>
+      <button type="button" className={`shead ${STATUS_CLASS[head.status]}${on ? ' on' : ''}${flash ? ' flash' : ''}`} aria-pressed={on} onClick={() => onOpen(head.id)}>
+        <Edge cut={14} corner>
+          <span className="hr">
+            <AgentIcon />
+            <span className="role">{`${d.roleCode}, ${deptLabel(t, d)}`}</span>
+            <ProviderMark provider={head.provider} />
+          </span>
+          <span className="hn">{head.name}</span>
+          <span className="meta">{[role && role !== head.name ? role : null, modelLine(t, head)].filter(Boolean).join(', ')}</span>
+          <span className="meta">{stats}</span>
+          <span className="hx">
+            <span className="st">{t.dept.status[head.status]}</span>
+            <span className="hx-task">{doingLine(t, head)}</span>
+          </span>
+        </Edge>
+      </button>
+      <Switch e={head} onSwitch={onSwitch} />
+    </div>
   );
 }
 
@@ -295,6 +319,21 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
     if (!dragged()) onOpen(agentId);
   }
 
+  /* A switch shows at once and holds until the company says the same; a refusal puts it back and says why. */
+  const [switched, setSwitched] = useState<Record<string, boolean>>({});
+  useEffect(() => setSwitched(x => Object.fromEntries(Object.entries(x).filter(([id, on]) => d.employees.find(e => e.id === id)?.on !== on))), [d.employees]);
+  const shown = (e: Employee): Employee => (e.id in switched ? { ...e, on: switched[e.id]! } : e);
+  const flip = (e: Employee) => (on: boolean) => {
+    setSwitched(x => ({ ...x, [e.id]: on }));
+    api.patch(`/api/agents/${e.id}`, { on }).then(
+      () => setSaid({ key: Date.now(), at: hhmm(new Date()), text: t.dept.switchedLine(e.name, on) }),
+      err => {
+        setSwitched(x => Object.fromEntries(Object.entries(x).filter(([id]) => id !== e.id)));
+        setSaid({ key: Date.now(), at: hhmm(new Date()), text: errorText(t, err) });
+      },
+    );
+  };
+
   const working = d.employees.filter(e => e.status === 'working').length;
   const stats = t.dept.stats(working, d.employees.length, s.frames.length, s.gates.length);
   const far = view.k < FAR_K;
@@ -358,7 +397,15 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
             <h3 id={`${id}-head`} className="sr">
               {t.dept.head}
             </h3>
-            <HeadCard d={d} head={s.head} stats={stats} on={!!s.head && selected === s.head.id} flash={!!s.head && flashing.has(s.head.id)} onOpen={open} />
+            <HeadCard
+              d={d}
+              head={s.head && shown(s.head)}
+              stats={stats}
+              on={!!s.head && selected === s.head.id}
+              flash={!!s.head && flashing.has(s.head.id)}
+              onOpen={open}
+              onSwitch={s.head && canGive ? flip(s.head) : undefined}
+            />
           </section>
           {reach.map((p, k) => (
             <div key={p.id} className="pchip" style={{ left: s.people[k]![0], top: s.people[k]![1], width: PW, height: PH }}>
@@ -375,7 +422,11 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
             <h3 id={`${id}-members`} className="sr">
               {t.dept.members}
             </h3>
-            {s.frames.flatMap(f => f.members.map(m => <Chip key={m.e.id} e={m.e} x={m.x} y={m.y} on={selected === m.e.id} flash={flashing.has(m.e.id)} onOpen={() => open(m.e.id)} />))}
+            {s.frames.flatMap(f =>
+              f.members.map(m => (
+                <Chip key={m.e.id} e={shown(m.e)} x={m.x} y={m.y} on={selected === m.e.id} flash={flashing.has(m.e.id)} onOpen={() => open(m.e.id)} onSwitch={canGive ? flip(m.e) : undefined} />
+              )),
+            )}
           </section>
         </div>
         {!d.employees.some(e => e.kind !== 'head') && <p className="dv-empty glass">{t.dept.noMembers}</p>}

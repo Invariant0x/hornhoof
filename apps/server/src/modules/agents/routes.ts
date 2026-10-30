@@ -1,5 +1,5 @@
 import { MAX_INSTRUCTIONS, modelsFor, type ModelOption } from '@hornhoof/protocol';
-import { and, asc, desc, eq, inArray, isNull, notInArray, or } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, notInArray, or, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -12,7 +12,7 @@ import { deptName } from '../departments/templates.js';
 import { identityOf } from '../nodes/hub.js';
 import { subViews, type SubView } from '../subscriptions/views.js';
 import { CLOSED, dropGate } from '../tasks/engine.js';
-import { resumeAgent } from '../tasks/wake.js';
+import { backOn, leaveIfOff, resumeAgent } from '../tasks/wake.js';
 import { orchestratorServing, servingSubscriptions, type Serving } from '../tools/staff.js';
 import type { Lang } from '../templates/load.js';
 import { agentFor, type AgentRow } from './find.js';
@@ -35,6 +35,8 @@ export type AgentCard = {
   changes: { field: string; personName: string | null; at: string; before: unknown; after: unknown }[];
   /* The whole company or the agent's department may change it; only the whole company removes it. */
   canEdit: boolean;
+  /* Off for now: it takes no task turns. */
+  on: boolean;
 };
 
 const Text = z.string().max(8000);
@@ -46,6 +48,7 @@ const PatchBody = z
     skills: z.record(z.string().max(80), z.boolean()).optional(),
     base: Text.nullable().optional(),
     skillText: z.record(z.string().max(80), Text.nullable()).optional(),
+    on: z.boolean().optional(),
   })
   .strict();
 
@@ -137,6 +140,7 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
       }),
       changes: changes.map(c => ({ ...c, at: c.at.toISOString() })),
       canEdit: await mayEdit(me, agent),
+      on: !agent.switchedOffAt,
     };
   }
 
@@ -157,6 +161,10 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
         if (next.subscriptionId && !agent.subscriptionId) await resumeAgent(ctx, agent.id);
         await (agent.kind === 'orchestrator' ? pumpWaiting(ctx) : pump(ctx, agent.id));
       }
+      /* Back on: gates that waited for its role start again and the task turns it missed go out. Off: its work goes back
+         once no turn of it runs. */
+      if (agent.switchedOffAt && !next.switchedOffAt) await backOn(ctx, { personId: me.id }, agent.id);
+      if (!agent.switchedOffAt && next.switchedOffAt) await leaveIfOff(ctx, agent.id);
     }
     return card(next, me);
   });
@@ -164,11 +172,12 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
   /* Applies a card change to the agent as it is now and records each changed field. */
   async function patched(me: Person, agent: AgentRow, body: z.infer<typeof PatchBody>): Promise<{ agent: AgentRow; next: AgentRow; changed: boolean }> {
     const orchestrator = agent.kind === 'orchestrator';
-    if (orchestrator && (body.name !== undefined || body.skills || body.base !== undefined || body.skillText)) {
+    if (orchestrator && (body.name !== undefined || body.skills || body.base !== undefined || body.skillText || body.on !== undefined)) {
       throw invalid("The orchestrator's card changes only his model and the subscription he runs on.", 'orchestrator_card');
     }
     const next: AgentRow = { ...agent, skills: [...agent.skills], overrides: { ...agent.overrides, skills: { ...agent.overrides.skills } }, templateHashes: { ...agent.templateHashes } };
     if (body.name !== undefined) next.name = body.name;
+    if (body.on !== undefined && body.on === !!agent.switchedOffAt) next.switchedOffAt = body.on ? null : new Date();
 
     if (body.subscription !== undefined) {
       if (body.subscription === null) {
@@ -225,11 +234,12 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (next.subscriptionId !== agent.subscriptionId) changed.push({ field: 'subscription', before: agent.subscriptionId, after: next.subscriptionId });
     if (!same(next.skills, agent.skills)) changed.push({ field: 'skills', before: agent.skills, after: next.skills });
     if (!same(next.overrides, agent.overrides)) changed.push({ field: 'prompt', before: agent.overrides, after: next.overrides });
+    if (next.switchedOffAt !== agent.switchedOffAt) changed.push({ field: 'switch', before: !agent.switchedOffAt, after: !next.switchedOffAt });
     if (changed.length) {
       await db.transaction(async tx => {
         await tx
           .update(agents)
-          .set({ name: next.name, model: next.model, subscriptionId: next.subscriptionId, skills: next.skills, overrides: next.overrides, templateHashes: next.templateHashes })
+          .set({ name: next.name, model: next.model, subscriptionId: next.subscriptionId, skills: next.skills, overrides: next.overrides, templateHashes: next.templateHashes, switchedOffAt: next.switchedOffAt })
           .where(eq(agents.id, agent.id));
         await tx.insert(agentChanges).values(changed.map(c => ({ companyId: agent.companyId, agentId: agent.id, personId: me.id, ...c })));
       });
@@ -267,7 +277,7 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
       const held = await db
         .select({ number: tasks.number })
         .from(tasks)
-        .where(and(or(eq(tasks.assigneeAgentId, agent.id), eq(tasks.executorAgentId, agent.id)), notInArray(tasks.status, [...CLOSED])))
+        .where(and(or(eq(tasks.assigneeAgentId, agent.id), eq(tasks.executorAgentId, agent.id), sql`${tasks.panel} @> ${JSON.stringify([agent.id])}::jsonb`), notInArray(tasks.status, [...CLOSED])))
         .orderBy(asc(tasks.number));
       if (held.length) {
         const list = held.map(t => `#${t.number}`).join(', ');

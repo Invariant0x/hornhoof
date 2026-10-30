@@ -34,6 +34,8 @@ export async function companyView(db: Db, templates: Templates, companyId: strin
         product: (a.productId && deptName(depts.find(p => p.id === a.productId)!)) || null,
         provider: subs.find(s => s.id === a.subscriptionId)?.provider ?? null,
         model: a.model || null,
+        /* Off for now: it takes no work until a person switches it on. */
+        on: !a.switchedOffAt,
       }));
   return {
     name: company?.name ?? '',

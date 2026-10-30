@@ -8,7 +8,8 @@ type Live = Pick<Ctx, 'db' | 'bus'>;
 export type Turn = typeof turns.$inferSelect;
 /* One task of a turn as the orchestrator lays it out. */
 export type PlanItem = { department: string; product?: string; title: string; brief: string; body: string };
-type Placed = PlanItem & { head: { id: string; name: string } };
+type Head = { id: string; name: string };
+type Placed = PlanItem & { head: Head };
 /* The orchestrator and the run he lays the turn out in. */
 export type By = { companyId: string; agentId: string; jobId: string };
 
@@ -19,11 +20,20 @@ const lockCompany = (tx: Tx, companyId: string) => tx.select({ id: companies.id 
 
 async function headOf(db: Live['db'] | Tx, departmentId: string) {
   const [head] = await db
-    .select({ id: agents.id, name: agents.name })
+    .select({ id: agents.id, name: agents.name, off: agents.switchedOffAt })
     .from(agents)
     .where(and(eq(agents.departmentId, departmentId), eq(agents.kind, 'head'), isNull(agents.removedAt)))
     .orderBy(asc(agents.createdAt));
   return head ?? null;
+}
+
+/* A department is off when its head is, or when it has employees, in it or in its products, and every one of them is off. */
+async function switchedOff(db: Live['db'] | Tx, departmentId: string, head: { off: Date | null }): Promise<boolean> {
+  if (head.off) return true;
+  const products = await db.select({ id: departments.id }).from(departments).where(eq(departments.parentId, departmentId));
+  const places = [departmentId, ...products.map(p => p.id)];
+  const staff = await db.select({ off: agents.switchedOffAt }).from(agents).where(and(inArray(agents.departmentId, places), eq(agents.kind, 'worker'), isNull(agents.removedAt)));
+  return staff.length > 0 && staff.every(a => a.off);
 }
 
 /* Every item names a department of the company, a product inside it, and the department has a head to take it. */
@@ -40,6 +50,7 @@ async function place(ctx: Live, companyId: string, items: PlanItem[]): Promise<P
     }
     const head = await headOf(ctx.db, dept.id);
     if (!head) throw refuse(409, 'no_head', `"${item.title}": its department has no head yet. Propose staff for it first.`);
+    if (await switchedOff(ctx.db, dept.id, head)) throw refuse(409, 'switched_off', `"${item.title}": its department is switched off right now. Give it no work until people switch it on.`);
     placed.push({ ...item, head });
   }
   return placed;
@@ -94,11 +105,14 @@ async function insertPlanned(tx: Tx, companyId: string, agentId: string, turnId:
   return rows;
 }
 
-type Started = { task: Task; head: { id: string; name: string } | null };
+type Started = { task: Task; head: Head | null; off?: boolean };
 
-/* A planned task goes to its department's head now. A department that lost its head meanwhile sends it back to whoever planned it. */
+/* A planned task goes to its department's head now. A department that lost its head meanwhile, or was switched off, sends
+   it back to whoever planned it. */
 async function start(tx: Tx, task: Task): Promise<Started | null> {
-  const head = await headOf(tx, task.departmentId!);
+  const found = await headOf(tx, task.departmentId!);
+  const off = !!found && (await switchedOff(tx, task.departmentId!, found));
+  const head = found && !off ? { id: found.id, name: found.name } : null;
   const set = head ? { status: 'open' as const, assigneeAgentId: head.id } : { status: 'blocked' as const };
   const [row] = await tx
     .update(tasks)
@@ -107,15 +121,22 @@ async function start(tx: Tx, task: Task): Promise<Started | null> {
     .returning();
   if (!row) return null;
   if (head) await note(tx, row, { kind: 'assigned', actor: { agentId: task.createdByAgentId! }, data: { assignee: head.id } });
-  else await note(tx, row, { kind: 'blocked', actor: { agentId: task.createdByAgentId! }, text: 'Its department has no head, so it could not start.' });
-  return { task: row, head };
+  else await note(tx, row, { kind: 'blocked', actor: { agentId: task.createdByAgentId! }, text: off ? 'Its department is switched off, so it could not start.' : 'Its department has no head, so it could not start.' });
+  return { task: row, head, off };
 }
 
 function wakesFor(started: Started[]): Wake[] {
   return started.map(s =>
     s.head
       ? { agentId: s.head.id, taskId: s.task.id, why: 'assigned' as const }
-      : { agentId: s.task.createdByAgentId!, taskId: s.task.id, why: 'blocked' as const, text: `#${s.task.number} could not start: its department has no head. Hire one, or cancel it.` },
+      : {
+          agentId: s.task.createdByAgentId!,
+          taskId: s.task.id,
+          why: 'blocked' as const,
+          text: s.off
+            ? `#${s.task.number} could not start: its department is switched off. Tell the CEO, or cancel it.`
+            : `#${s.task.number} could not start: its department has no head. Hire one, or cancel it.`,
+        },
   );
 }
 
@@ -159,7 +180,8 @@ async function openNext(tx: Tx, companyId: string): Promise<{ turn: Turn; starte
 }
 
 export const turnName = (t: Pick<Turn, 'number' | 'title' | 'goal'>) => `Turn ${t.number} "${t.title || t.goal}"`;
-const whoGot = (started: Started[]) => started.map(s => (s.head ? `#${s.task.number} to ${s.head.name}` : `#${s.task.number} has no head to go to`)).join(', ');
+const whoGot = (started: Started[]) =>
+  started.map(s => (s.head ? `#${s.task.number} to ${s.head.name}` : s.off ? `#${s.task.number} waits: its department is switched off` : `#${s.task.number} has no head to go to`)).join(', ');
 const numbers = (rows: Task[]) => rows.map(t => `#${t.number}`).join(', ');
 
 export type TurnMove = { turn: Turn; text: string; wakes: Wake[] };
