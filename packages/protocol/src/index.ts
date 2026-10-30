@@ -127,6 +127,9 @@ const NodeMessage = z.discriminatedUnion('type', [
   /* A person typed to an agent that had no turn running: Hornhoof opens one so the agent has its tools. ref names the
      typed turn, and Hornhoof's answer carries it back. */
   z.object({ type: z.literal('turn.open'), agentKey: z.string().regex(/^[A-Za-z0-9-]{1,64}$/), text: z.string().max(100_000), ref: z.string().max(64).optional() }),
+  /* Someone who may type opened the window of an agent whose program does not run: Hornhoof starts it with a turn that
+     types nothing. */
+  z.object({ type: z.literal('agent.start'), agentKey: z.string().regex(/^[A-Za-z0-9-]{1,64}$/) }),
 ]);
 export type NodeMessage = z.infer<typeof NodeMessage>;
 
@@ -170,6 +173,11 @@ const ServerMessage = z.discriminatedUnion('type', [
     /* The agent's standing instructions for this job, and the token its Hornhoof tools present. */
     instructions: z.string().max(MAX_INSTRUCTIONS).nullable(),
     toolToken: z.string().max(200).nullable(),
+    /* The conversation from before, for a program that starts a new session on a turn that types nothing: it goes with
+       the instructions when the program starts and is no change of them. */
+    context: z.string().max(64 * 1024).nullable().optional(),
+    /* Where the agent works, for such a turn too; it comes again with each start, as it can change. */
+    guidance: z.string().max(16 * 1024).nullable().optional(),
     /* The agent's own folder on the node and the repository it works in; a test job has none. */
     workspace: Workspace.nullable().optional(),
   }),

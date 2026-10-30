@@ -19,6 +19,10 @@ export type RunInput = {
   signal?: AbortSignal;
   /* Standing instructions for the agent, and Hornhoof's MCP server with the job's token. */
   instructions: string | null;
+  /* What the agent should know from before, when its program starts a new session. */
+  context?: string | null;
+  /* Where the agent works, for a program that starts on a turn that types nothing. */
+  guidance?: string | null;
   tools: { url: string; token: string } | null;
   /* Each thing the agent does, as the program reports it while it runs. */
   onEvent?: (event: AgentEvent) => void;
@@ -140,6 +144,8 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
       timeoutMs: msg.timeoutMs,
       signal,
       instructions: msg.instructions,
+      context: msg.context ?? null,
+      guidance: msg.guidance ?? null,
       tools,
       onEvent: emit,
       ...(env ? { env } : {}),

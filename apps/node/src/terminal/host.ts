@@ -1,7 +1,7 @@
 import { execFile, type ChildProcess } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { TERM_CHUNK, type AgentEvent, type Limits, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
 import { claudeEvents, claudeInterrupted } from '../providers/claude.js';
@@ -39,6 +39,8 @@ type Turn = {
   early?: AgentEvent[] | null;
   over?: { message: string; error: JobError; sessionId: string | null } | null;
   opened?: Deferred<void>;
+  /* A turn that only starts the program, until the program has its tools. A person who types meanwhile takes its place. */
+  starting?: boolean;
 };
 type JobError = RunResult['error'];
 
@@ -74,6 +76,10 @@ type Agent = {
   lastText: string | null;
   /* A typed turn that ended and waits for the rest of its log. */
   settling: Promise<void> | null;
+  /* The program was started for a person and nothing was said in it yet: its new session has no log to resume. */
+  fresh: boolean;
+  /* While a start turn waits for the program's tools: what people type meanwhile reaches Hornhoof after it, in order. */
+  starting: Promise<unknown> | null;
 };
 
 type View = { child: ChildProcess; key: string; write: boolean; mask: StreamMask; decoder: StringDecoder; pending: string; timer: NodeJS.Timeout | null; quiet: NodeJS.Timeout | null };
@@ -84,6 +90,8 @@ type Options = {
   send(m: NodeMessage): void;
   /* Values that never reach a screen people watch. */
   secrets(): string[];
+  /* A session a person started by typing, kept with its folder so Hornhoof's next turn can go on with it. */
+  remember?(sessionId: string, workDir: string): void;
   readyMs?: number;
   pollMs?: number;
   /* A program idle this long with nobody watching ends; its next turn resumes the session. */
@@ -91,11 +99,14 @@ type Options = {
   /* How long a typed turn waits for Hornhoof to open it, and how long it may run. */
   openMs?: number;
   typedMs?: number;
+  /* How long a program started with nothing to type gets to connect to its tools. */
+  toolsMs?: number;
   cols?: number;
   rows?: number;
 };
 
 const WAITING = 'This agent starts with its next turn.';
+const STARTING = 'Starting this agent...';
 const STOP_WAIT_MS = 5000;
 /* What a typed turn keeps at most while Hornhoof has not answered it. */
 const EARLY_MAX = 1000;
@@ -103,6 +114,25 @@ const EARLY_MAX = 1000;
 const SETTLE_MS = 3000;
 
 const hashOf = (v: unknown) => createHash('sha256').update(JSON.stringify(v)).digest('hex');
+/* What a session was told from before it started, kept in the agent's folder by the session's id. */
+const contextFile = (workDir: string, sessionId: string) => (/^[\w-]+$/.test(sessionId) ? join(workDir, '.hh-context', `${sessionId}.md`) : null);
+
+function keepContext(workDir: string, sessionId: string, context: string): void {
+  const file = contextFile(workDir, sessionId);
+  if (!file) return;
+  mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+  writeFileSync(file, context, { mode: 0o600 });
+}
+
+function keptContext(workDir: string, sessionId: string): string | null {
+  const file = contextFile(workDir, sessionId);
+  try {
+    return file ? readFileSync(file, 'utf8') : null;
+  } catch {
+    return null;
+  }
+}
+
 /* The turn's own address and token for pictures change every turn; the bridge serves them instead. */
 const lasting = (env: Record<string, string> = {}) => Object.fromEntries(Object.entries(env).filter(([k]) => !k.startsWith('HH_ATTACH_')));
 
@@ -116,6 +146,7 @@ export class TerminalHost {
   private readonly idleMs: number;
   private readonly openMs: number;
   private readonly typedMs: number;
+  private readonly toolsMs: number;
   /* Views being opened, and those Hornhoof closed meanwhile. */
   private readonly viewsOpening = new Set<string>();
   private readonly viewsClosed = new Set<string>();
@@ -129,6 +160,7 @@ export class TerminalHost {
     this.idleMs = opts.idleMs ?? 10 * 60_000;
     this.openMs = opts.openMs ?? 8000;
     this.typedMs = opts.typedMs ?? 60 * 60_000;
+    this.toolsMs = opts.toolsMs ?? 15_000;
     this.cols = opts.cols ?? 160;
     this.rows = opts.rows ?? 48;
   }
@@ -154,7 +186,7 @@ export class TerminalHost {
   private agent(key: string): Agent {
     let a = this.agents.get(key);
     if (!a) {
-      a = { key, name: `a-${key}`, program: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, viewers: 0, idle: null, watch: null, queue: Promise.resolve(), unopened: [], stopped: false, lastText: null, settling: null };
+      a = { key, name: `a-${key}`, program: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, viewers: 0, idle: null, watch: null, queue: Promise.resolve(), unopened: [], stopped: false, lastText: null, settling: null, fresh: false, starting: null };
       this.agents.set(key, a);
     }
     return a;
@@ -180,28 +212,39 @@ export class TerminalHost {
     mkdirSync(input.workDir, { recursive: true });
     const urls = this.bridge.agent(job.key);
     let instructionsFile: string | null = null;
-    if (input.instructions && program.kind === 'claude') {
+    /* The conversation from before reaches a program that starts now; it is not part of its instructions' hash. Claude Code
+       keeps only what was said in its log, so what a new session was told from before goes with it to every resume. */
+    const kept = program.kind === 'claude' && input.sessionId ? keptContext(input.workDir, input.sessionId) : null;
+    const context = kept && input.context && !kept.includes(input.context) ? `${kept}\n\n${input.context}` : (kept ?? input.context);
+    const told = [input.instructions, context, input.guidance].filter(Boolean).join('\n\n');
+    if (told && program.kind === 'claude') {
       instructionsFile = join(input.workDir, '.hh-instructions.md');
-      writeFileSync(instructionsFile, input.instructions + '\n', { mode: 0o600 });
+      writeFileSync(instructionsFile, told + '\n', { mode: 0o600 });
     }
-    if (input.instructions && program.kind === 'codex') writeFileSync(join(input.workDir, 'AGENTS.md'), input.instructions + '\n', { mode: 0o600 });
+    if (told && program.kind === 'codex') writeFileSync(join(input.workDir, 'AGENTS.md'), told + '\n', { mode: 0o600 });
     const spec = program.launch({ bin: job.bin, home: job.home, workDir: input.workDir, sessionId: input.sessionId, model: input.model, instructionsFile, urls });
     const hash = hashOf({ kind: program.kind, bin: job.bin, model: input.model, instructions: input.instructions, env: lasting(input.env) });
-    const sameSession = input.sessionId !== null && (input.sessionId === a.sessionId || a.cleared.has(input.sessionId));
+    /* A new session asked for goes on in a program started for a person that nothing was said in yet. */
+    const sameSession = input.sessionId === null ? a.fresh : input.sessionId === a.sessionId || a.cleared.has(input.sessionId);
     const goesOn = sameSession && a.hash === hash && (await this.opts.tmux.alive(a.name));
+    /* A program started with nothing to type gets its tools before its turn ends, while Hornhoof still answers for them. */
+    const tools = !goesOn && !input.prompt && input.tools ? this.bridge.listed(job.key, this.toolsMs) : null;
 
     /* What is left in the log from before belongs to no turn. */
     this.drain(a);
     a.lastText = null;
     this.bridge.setToken(job.key, input.tools?.token ?? null);
-    const turn: Turn = { jobId: null, onEvent: input.onEvent ?? (() => {}), typed: false, seq: 0, deadline };
+    const starting = input.prompt ? null : (tools ?? Promise.resolve());
+    const turn: Turn = { jobId: null, onEvent: input.onEvent ?? (() => {}), typed: false, seq: 0, deadline, ...(starting ? { starting: true } : {}) };
+    if (starting) a.starting = starting;
     a.turn = turn;
     a.ended = deferred();
     a.stopped = false;
     try {
       if (!goesOn) {
         if (program.kind === 'claude') acceptClaudeDialogs(job.home, input.workDir);
-        Object.assign(a, { program, home: job.home, workDir: input.workDir, hash, sessionId: spec.sessionId, cleared: new Set(), startedAt: Date.now(), started: deferred<void>() });
+        Object.assign(a, { program, home: job.home, workDir: input.workDir, hash, sessionId: spec.sessionId, cleared: new Set(), startedAt: Date.now(), started: deferred<void>(), fresh: false });
+        if (program.kind === 'claude' && !input.sessionId && input.context && spec.sessionId) keepContext(input.workDir, spec.sessionId, input.context);
         a.tail = this.tailFor(a);
         const env = { ...lasting(input.env), ...spec.env };
         await this.opts.tmux.launch(a.name, { cwd: input.workDir, command: spec.command, cols: this.cols, rows: this.rows, envFile: envFile(input.workDir, env) });
@@ -211,6 +254,15 @@ export class TerminalHost {
           return await fail(job.signedOut.test(screen) ? 'not_logged_in' : 'agent_failed', screen);
         }
       }
+      /* Nothing to type: the turn only starts the program for the person who opened its window. */
+      if (!input.prompt) {
+        await tools;
+        /* A person typed meanwhile: the program goes on with their turn, and the session is theirs to name. */
+        if (a.turn !== turn) return { ok: true, sessionId: null, result: '', output: '', error: null, limits: a.limits };
+        if (!goesOn) a.fresh = input.sessionId === null;
+        return { ok: true, sessionId: a.fresh ? null : a.sessionId, result: '', output: '', error: null, limits: a.limits };
+      }
+      a.fresh = false;
       await this.opts.tmux.paste(a.name, input.prompt);
       await sleep(Math.min(3000, 300 + input.prompt.length / 20));
       await this.opts.tmux.keys(a.name, 'Enter');
@@ -246,6 +298,7 @@ export class TerminalHost {
         }
       }
     } finally {
+      if (starting && a.starting === starting) a.starting = null;
       if (a.turn === turn) {
         this.bridge.setToken(job.key, null);
         a.turn = null;
@@ -360,7 +413,7 @@ export class TerminalHost {
         continue;
       }
       const news = codexRollout(data);
-      if (news.typed !== undefined && !a.turn) void this.openTyped(a, news.typed, true);
+      if (news.typed !== undefined && (!a.turn || a.turn.starting)) void this.openTyped(a, news.typed, true);
       for (const e of news.events) this.emit(a, e);
       if (news.limits) a.limits = news.limits;
       if (news.session) a.sessionId = news.session.id;
@@ -419,7 +472,7 @@ export class TerminalHost {
       case 'prompt':
         await a.settling;
         a.busy = true;
-        if (!a.turn) await this.openTyped(a, String(data.prompt ?? ''));
+        if (!a.turn || a.turn.starting) await this.openTyped(a, String(data.prompt ?? ''));
         return;
       case 'stop': {
         this.drain(a);
@@ -440,19 +493,34 @@ export class TerminalHost {
     }
   }
 
-  /* A person typed while no turn ran: the turn starts at once and Hornhoof opens a job for it, so the agent has its tools
-     and the turn shows like any other. Claude Code waits in its hook for Hornhoof's answer, for a while; Codex goes on, and
-     what it does waits in the turn. fromLog: the typing was read from the log, which is being read now. */
+  /* A person typed while no turn ran, or while the program started: the turn starts at once and Hornhoof opens a job for
+     it, so the agent has its tools and the turn shows like any other. Claude Code waits in its hook for Hornhoof's answer,
+     for a while; Codex goes on, and what it does waits in the turn. fromLog: the typing was read from the log, which is
+     being read now. */
   private async openTyped(a: Agent, text: string, fromLog = false): Promise<void> {
+    const start = a.starting;
     if (a.idle) clearTimeout(a.idle);
+    a.fresh = false;
     if (!fromLog) this.drain(a);
     a.lastText = null;
     const turn: Turn = { jobId: null, onEvent: () => {}, typed: true, seq: 0, deadline: Date.now() + this.typedMs, ref: randomUUID(), early: [], over: null, opened: deferred() };
     a.turn = turn;
     a.unopened.push(turn);
     this.watch(a);
+    const answered = () => Promise.race([turn.opened!.promise, sleep(this.openMs)]);
+    if (start) {
+      /* The start turn's token gets the program its tools first; Hornhoof then ends that turn for this one. Turns typed
+         meanwhile go one by one, each once Hornhoof answered the last, whose end goes out with that answer when it is
+         over: Hornhoof opens a typed turn only while none runs. */
+      const next = start.then(answered);
+      a.starting = next;
+      void next.then(() => {
+        if (a.starting === next) a.starting = null;
+      });
+      await start;
+    }
     this.opts.send({ type: 'turn.open', agentKey: a.key, text: text.slice(0, 100_000), ref: turn.ref });
-    await Promise.race([turn.opened!.promise, sleep(this.openMs)]);
+    await answered();
   }
 
   /* Hornhoof's answer to turn.open, found by its ref; a Hornhoof from before refs answers in order. A typed turn gets its
@@ -480,6 +548,7 @@ export class TerminalHost {
     const turn = a.turn;
     if (!turn?.typed) return;
     a.turn = null;
+    if (a.sessionId) this.opts.remember?.(a.sessionId, a.workDir);
     this.bridge.setToken(a.key, null);
     /* Hornhoof has not answered yet: the end goes out with its answer. */
     if (turn.early) turn.over = { message, error, sessionId: a.sessionId };
@@ -526,9 +595,14 @@ export class TerminalHost {
   async open(m: Msg<'term.open'>): Promise<void> {
     const a = this.agent(m.agentKey);
     this.viewsOpening.add(m.termId);
+    /* Someone who may type gets the program at once, to talk to it; watchers see it once it has a turn. */
+    const starts = m.write && !a.turn && !(a.hash && (await this.opts.tmux.alive(a.name)));
     try {
       if (!(await this.opts.tmux.has(a.name))) {
-        await this.opts.tmux.launch(a.name, { cwd: '/', command: ['sh', '-c', `printf '\\n  %s\\n' '${WAITING}'; exec sleep 2147483647`], cols: m.cols, rows: m.rows });
+        await this.opts.tmux.launch(a.name, { cwd: '/', command: ['sh', '-c', `printf '\\n  %s\\n' '${starts ? STARTING : WAITING}'; exec sleep 2147483647`], cols: m.cols, rows: m.rows });
+        /* The waiting screen is no program of the agent's: the next turn starts one in its place. A turn that runs now is
+           starting its own. */
+        if (!a.turn) a.hash = null;
       }
     } finally {
       this.viewsOpening.delete(m.termId);
@@ -566,6 +640,7 @@ export class TerminalHost {
       this.opts.send({ type: 'term.exit', termId: m.termId });
       this.restLater(a);
     });
+    if (starts) this.opts.send({ type: 'agent.start', agentKey: m.agentKey });
   }
 
   input(m: Msg<'term.input'>): void {

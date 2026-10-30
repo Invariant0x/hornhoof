@@ -94,7 +94,6 @@ export const en = {
     orchestrator: 'Orchestrator',
     emptyHint: 'No departments yet. Tell the orchestrator about the company and he will propose a structure.',
     build: 'Build the company',
-    addDepartment: '+ Add department',
     openOrchestrator: 'Open the orchestrator',
     noAgents: 'No agents yet',
     teams: (n: number) => `${n} ${plural('en', n, { one: 'team', other: 'teams' })}`,

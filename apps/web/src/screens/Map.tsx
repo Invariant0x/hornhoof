@@ -78,12 +78,6 @@ const busY = (n: number) => chipsTop(n) + CHIP_H + 14;
 /* The company's turn sits right under the hub, between the traces that leave it downwards, in two lines at most. */
 const TURN_TOP = CY + HUB + 10, TURN_W = 2 * BEND - 16, TURN_H = 56;
 
-/* "+ Add department" sits under the hub, below the turn when one runs, or under the lowest row once departments go below it. */
-function addTop(n: number, turn: boolean): number {
-  const offsets = rowOffsets(Math.ceil(n / 2));
-  return offsets.length > 1 ? CY + offsets[offsets.length - 1]! + DEPT_H / 2 + GAP : BELOW + (turn ? TURN_H : 0);
-}
-
 const chipsWidth = (n: number) => n * CHIP_W + Math.max(0, n - 1) * CHIP_GAP;
 
 /* The centers of the people chips, left to right. */
@@ -182,7 +176,7 @@ function contentBounds(org: Org): { x0: number; y0: number; x1: number; y1: numb
   const half = Math.max(chipsWidth(org.people.length) / 2, 260);
   const n = org.departments.length;
   const turn = org.turn ? TURN_H : 0;
-  const b = { x0: CX - half, x1: CX + half, y0: chipsTop(n), y1: n ? addTop(n, !!org.turn) + 40 : BELOW + turn + 120 };
+  const b = { x0: CX - half, x1: CX + half, y0: chipsTop(n), y1: BELOW + turn + (n ? 0 : 120) };
   for (const s of deptLayout(org.departments.length)) {
     b.x0 = Math.min(b.x0, s.x);
     b.x1 = Math.max(b.x1, s.x + s.w);
@@ -414,13 +408,6 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator, inside = false, 
                 {t.map.build}
               </button>
             )}
-          </div>
-        )}
-        {depts.length > 0 && company && (
-          <div className="add" style={{ left: CX - 74, top: addTop(depts.length, !!org.turn) }}>
-            <button className="btn small ghost" type="button" onPointerDown={e => e.stopPropagation()} onClick={onOpenOrchestrator}>
-              {t.map.addDepartment}
-            </button>
           </div>
         )}
 

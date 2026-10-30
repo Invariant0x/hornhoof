@@ -8,7 +8,7 @@ import { connect } from './connection.js';
 import { builtinAdapters } from './isolation.js';
 import { adapterFor, programFor } from './providers/index.js';
 import { runJob, type ProviderAdapter, type RunResult } from './runner.js';
-import { dataDir, isRemoved, markRemoved, readState, writeState, type NodeState } from './state.js';
+import { dataDir, isRemoved, markRemoved, readState, rememberSession, writeState, type NodeState } from './state.js';
 import { SIGNED_OUT as CLAUDE_SIGNED_OUT } from './providers/claude.js';
 import { SIGNED_OUT as CODEX_SIGNED_OUT } from './providers/codex.js';
 import { childEnv } from './providers/process.js';
@@ -76,7 +76,13 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
   };
   /* A screen nobody receives is not worth keeping; everything else waits for the connection like any message. */
   const host = terminal
-    ? new TerminalHost({ tmux: terminal.tmux, hornhoof: state.server, send: m => (m.type === 'term.data' || m.type === 'term.exit' ? void send?.(m) : emit(m)), secrets: () => [...known] })
+    ? new TerminalHost({
+        tmux: terminal.tmux,
+        hornhoof: state.server,
+        send: m => (m.type === 'term.data' || m.type === 'term.exit' ? void send?.(m) : emit(m)),
+        secrets: () => [...known],
+        remember: (sessionId, workDir) => rememberSession(dir, sessionId, workDir),
+      })
     : null;
   if (host && terminal) {
     /* Sessions from before a restart talk to a bridge that is gone; their turns failed with the restart. */

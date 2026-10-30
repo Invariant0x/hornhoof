@@ -3,7 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { eq } from 'drizzle-orm';
-import { agents, companies, departments, people, subscriptions } from '../src/db/schema.js';
+import { agents, companies, departments, jobs, people, subscriptions, tasks } from '../src/db/schema.js';
 import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
@@ -221,5 +221,72 @@ describe('a turn a person typed into the terminal', () => {
     expect(await next(builtin, 'turn.opened')).toMatchObject({ jobId: null });
     builtin.send({ type: 'turn.open', agentKey: '00000000-0000-4000-8000-000000000000', text: 'hi' });
     expect(await next(builtin, 'turn.opened')).toMatchObject({ jobId: null });
+  });
+});
+
+describe('starting an agent for someone who opens its window to talk', () => {
+  it('starts the program with a turn that types nothing, and the next turn catches up in it', async () => {
+    const { app, ceo, builtin, orchestratorId } = await live();
+    await app.inject({ method: 'POST', url: '/api/agents/orchestrator/messages', payload: { text: 'what do we sell' }, ...as(ceo) });
+    const earlier = await next(builtin, 'job.run');
+    builtin.send({ type: 'job.event', jobId: earlier.jobId, seq: 0, event: { kind: 'text', text: 'Software.' } });
+    builtin.send({ type: 'job.done', jobId: earlier.jobId, ok: true, sessionId: null, result: 'Software.', tail: '', error: null });
+    await until(async () => !(await state(app, ceo)).busy);
+
+    builtin.send({ type: 'agent.start', agentKey: orchestratorId });
+    const start = await next(builtin, 'job.run');
+    expect(start).toMatchObject({ prompt: '', sessionId: null });
+    /* What was said before goes with the instructions, for what the person types into the new session. */
+    expect(start.context).toContain('Earlier in this conversation');
+    expect(start.context).toContain('what do we sell');
+    builtin.send({ type: 'job.done', jobId: start.jobId, ok: true, sessionId: null, result: '', tail: '', error: null });
+    await until(async () => !(await state(app, ceo)).busy);
+    expect((await events(app, ceo)).filter((e: { kind: string }) => e.kind === 'message')).toHaveLength(1);
+
+    await app.inject({ method: 'POST', url: '/api/agents/orchestrator/messages', payload: { text: 'thanks' }, ...as(ceo) });
+    const later = await next(builtin, 'job.run');
+    expect(later.sessionId).toBeNull();
+    expect(later.prompt).toContain('Earlier in this conversation');
+    expect(later.prompt).toContain('thanks');
+  });
+
+  it('starts a switched-off employee whose task turns wait for it to be on', async () => {
+    const { db, builtin, orchestratorId } = await live();
+    const [orchestrator] = await db.select().from(agents).where(eq(agents.id, orchestratorId));
+    const [dept] = await db.insert(departments).values({ companyId: orchestrator!.companyId, templateKey: 'development', roleCode: 'DEV' }).returning();
+    const [bruno] = await db
+      .insert(agents)
+      .values({ companyId: orchestrator!.companyId, kind: 'worker', name: 'Bruno', roleKey: 'DEV-BE', departmentId: dept!.id, model: '', subscriptionId: orchestrator!.subscriptionId, switchedOffAt: new Date() })
+      .returning();
+    const [task] = await db.insert(tasks).values({ companyId: orchestrator!.companyId, number: 1, title: 'Checkout API', assigneeAgentId: bruno!.id }).returning();
+    await db.insert(jobs).values({ companyId: orchestrator!.companyId, subscriptionId: orchestrator!.subscriptionId, agentId: bruno!.id, taskId: task!.id, kind: 'conversation', prompt: 'Do #1.', timeoutMs: 900000 });
+    builtin.send({ type: 'agent.start', agentKey: bruno!.id });
+    expect(await next(builtin, 'job.run')).toMatchObject({ prompt: '' });
+  });
+
+  it('lets a person who types while the program starts take over its start turn', async () => {
+    const { app, db, ceo, builtin, orchestratorId } = await live();
+    builtin.send({ type: 'agent.start', agentKey: orchestratorId });
+    const start = await next(builtin, 'job.run');
+    builtin.send({ type: 'turn.open', agentKey: orchestratorId, text: 'add a department', ref: 'r-1' });
+    const opened = await next(builtin, 'turn.opened');
+    expect(opened).toMatchObject({ jobId: expect.any(String), toolToken: expect.any(String), ref: 'r-1' });
+    expect((await db.select().from(jobs).where(eq(jobs.id, start.jobId)))[0]).toMatchObject({ status: 'done' });
+    /* The node's own end of the start turn comes after, and changes nothing. */
+    builtin.send({ type: 'job.done', jobId: start.jobId, ok: true, sessionId: null, result: '', tail: '', error: null });
+    await new Promise(r => setTimeout(r, 300));
+    expect(await state(app, ceo)).toMatchObject({ busy: true, runningJobId: opened.jobId });
+    expect((await events(app, ceo)).filter((e: { kind: string }) => e.kind === 'message').map((e: { data: { text: string } }) => e.data.text)).toEqual(['add a department']);
+  });
+
+  it('starts nothing while a turn waits or runs, or for an agent it does not know', async () => {
+    const { app, db, ceo, builtin, orchestratorId } = await live();
+    await app.inject({ method: 'POST', url: '/api/agents/orchestrator/messages', payload: { text: 'hello' }, ...as(ceo) });
+    await next(builtin, 'job.run');
+    builtin.send({ type: 'agent.start', agentKey: orchestratorId });
+    builtin.send({ type: 'agent.start', agentKey: 'not-an-agent' });
+    builtin.send({ type: 'agent.start', agentKey: '00000000-0000-4000-8000-000000000000' });
+    await new Promise(r => setTimeout(r, 300));
+    expect(await db.select().from(jobs)).toHaveLength(1);
   });
 });

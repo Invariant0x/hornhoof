@@ -297,8 +297,6 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .hub.on .hub-ring { stroke: var(--cyan); }
 .start { position: absolute; width: 520px; box-sizing: border-box; padding: 16px 18px 18px; display: grid; justify-items: center; gap: 14px; text-align: center; border: 1px dashed var(--line2); background: var(--surface); }
 .start p { margin: 0; color: var(--muted); }
-.add { position: absolute; width: 148px; }
-.add .btn { width: 100%; }
 /* A department card as in the prototype: name and agents at work, code and products, then what goes on. */
 .dept > .edge { height: 100%; }
 .dept .edge-in { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; }

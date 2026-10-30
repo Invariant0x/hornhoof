@@ -19,6 +19,10 @@ type JobToSend = {
   instructions: string | null;
   toolToken: string | null;
   workspace?: Workspace | null;
+  /* The conversation from before, for a program that starts a new session on a turn that types nothing. */
+  context?: string | null;
+  /* Where the agent works, for such a turn too. */
+  guidance?: string | null;
 };
 
 /* Sends a job to the node that runs its subscription. A personal plan's node signs in itself; an API key travels with the job to the built-in node. */
@@ -39,5 +43,7 @@ export async function dispatchJob(ctx: Ctx, job: JobToSend): Promise<boolean> {
     instructions: job.instructions,
     toolToken: job.toolToken,
     ...(job.workspace ? { workspace: job.workspace } : {}),
+    ...(job.context ? { context: job.context } : {}),
+    ...(job.guidance ? { guidance: job.guidance } : {}),
   });
 }

@@ -2,7 +2,7 @@ import { TAIL_BYTES, type NodeMessage } from '@hornhoof/protocol';
 import { and, eq, inArray, isNull, notInArray, or, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { jobs, subscriptions } from '../../db/schema.js';
-import { afterJob, openTypedTurn, pumpWaiting } from '../conversation/queue.js';
+import { afterJob, openTypedTurn, pumpWaiting, startProgram } from '../conversation/queue.js';
 import { appendEvent, publishWorking } from '../events/store.js';
 import type { NodeIdentity } from './hub.js';
 
@@ -120,6 +120,9 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       ctx.hub.send(id, { type: 'turn.opened', agentKey: msg.agentKey, jobId: opened?.jobId ?? null, toolToken: opened?.token ?? null, ...(msg.ref ? { ref: msg.ref } : {}) });
       return;
     }
+    case 'agent.start':
+      await startProgram(ctx, id, msg.agentKey);
+      return;
     case 'removed': {
       if (id.kind !== 'node') return;
       await db.update(subscriptions).set({ nodeKeyHash: null, machineId: null }).where(eq(subscriptions.id, id.subscriptionId));
