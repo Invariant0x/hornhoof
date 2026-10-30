@@ -5,12 +5,13 @@ import { dirname, join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { TERM_CHUNK, type AgentEvent, type Limits, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
 import { claudeEvents, claudeInterrupted } from '../providers/claude.js';
+import { contentText } from '../providers/events.js';
 import { redact } from '../redact.js';
 import { tidy, type RunInput, type RunResult } from '../runner.js';
 import { Bridge } from './bridge.js';
 import { StreamMask } from './mask.js';
-import { acceptClaudeDialogs, claudeTranscript, findRollout, type TermProgram } from './programs.js';
-import { claudeStatusLimits, codexRollout, LineTail } from './transcripts.js';
+import { acceptClaudeDialogs, claudeTranscript, findKimiWire, findRollout, prepareKimi, type TermProgram } from './programs.js';
+import { claudeStatusLimits, codexRollout, kimiWire, LineTail, type WireNews } from './transcripts.js';
 import { envFile, type Tmux } from './tmux.js';
 
 /* An agent's turn in its terminal: which program, where it keeps its sign-in, and what the runner hands every program. */
@@ -72,6 +73,8 @@ type Agent = {
   unopened: Turn[];
   /* A person stopped the running turn with Escape. */
   stopped: boolean;
+  /* Why the program said the running turn failed. */
+  failure: string | null;
   /* The turn's last line of text, to tell when its answer reached the log. */
   lastText: string | null;
   /* A typed turn that ended and waits for the rest of its log. */
@@ -80,6 +83,8 @@ type Agent = {
   fresh: boolean;
   /* While a start turn waits for the program's tools: what people type meanwhile reaches Hornhoof after it, in order. */
   starting: Promise<unknown> | null;
+  /* What a new Kimi session was told from before, kept by the session's id once Kimi names it. */
+  keep: string | null;
 };
 
 type View = { child: ChildProcess; key: string; write: boolean; mask: StreamMask; decoder: StringDecoder; pending: string; timer: NodeJS.Timeout | null; quiet: NodeJS.Timeout | null };
@@ -112,6 +117,14 @@ const STOP_WAIT_MS = 5000;
 const EARLY_MAX = 1000;
 /* Claude Code can say a turn ended before its answer is in the session log; the turn waits this long for it. */
 const SETTLE_MS = 3000;
+/* How long the plan's limits may take to come after a turn of a program that does not log them. */
+const LIMITS_WAIT_MS = 3000;
+/* A program is ready for its first prompt once its screen shows this; Claude Code says so through its hook instead. */
+const READY: Record<'codex' | 'kimi', (screen: string) => boolean> = {
+  codex: screen => /OpenAI Codex/.test(screen) && /›/.test(screen),
+  /* The footer under Kimi's prompt, with how full its context is. */
+  kimi: screen => /context: \d+%/.test(screen),
+};
 
 const hashOf = (v: unknown) => createHash('sha256').update(JSON.stringify(v)).digest('hex');
 /* What a session was told from before it started, kept in the agent's folder by the session's id. */
@@ -186,7 +199,7 @@ export class TerminalHost {
   private agent(key: string): Agent {
     let a = this.agents.get(key);
     if (!a) {
-      a = { key, name: `a-${key}`, program: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, viewers: 0, idle: null, watch: null, queue: Promise.resolve(), unopened: [], stopped: false, lastText: null, settling: null, fresh: false, starting: null };
+      a = { key, name: `a-${key}`, program: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, viewers: 0, idle: null, watch: null, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, settling: null, fresh: false, starting: null, keep: null };
       this.agents.set(key, a);
     }
     return a;
@@ -213,22 +226,26 @@ export class TerminalHost {
     const urls = this.bridge.agent(job.key);
     let instructionsFile: string | null = null;
     /* The conversation from before reaches a program that starts now; it is not part of its instructions' hash. Claude Code
-       keeps only what was said in its log, so what a new session was told from before goes with it to every resume. */
-    const kept = program.kind === 'claude' && input.sessionId ? keptContext(input.workDir, input.sessionId) : null;
+       keeps only what was said in its log, so what a new session was told from before goes with it to every resume. So it
+       does for Kimi Code, which may read AGENTS.md afresh for a session it resumes. */
+    const kept = program.kind !== 'codex' && input.sessionId ? keptContext(input.workDir, input.sessionId) : null;
     const context = kept && input.context && !kept.includes(input.context) ? `${kept}\n\n${input.context}` : (kept ?? input.context);
     const told = [input.instructions, context, input.guidance].filter(Boolean).join('\n\n');
     if (told && program.kind === 'claude') {
       instructionsFile = join(input.workDir, '.hh-instructions.md');
       writeFileSync(instructionsFile, told + '\n', { mode: 0o600 });
     }
-    if (told && program.kind === 'codex') writeFileSync(join(input.workDir, 'AGENTS.md'), told + '\n', { mode: 0o600 });
+    /* Codex and Kimi Code read AGENTS.md in the folder they start in. */
+    if (told && program.kind !== 'claude') writeFileSync(join(input.workDir, 'AGENTS.md'), told + '\n', { mode: 0o600 });
     const spec = program.launch({ bin: job.bin, home: job.home, workDir: input.workDir, sessionId: input.sessionId, model: input.model, instructionsFile, urls });
     const hash = hashOf({ kind: program.kind, bin: job.bin, model: input.model, instructions: input.instructions, env: lasting(input.env) });
     /* A new session asked for goes on in a program started for a person that nothing was said in yet. */
     const sameSession = input.sessionId === null ? a.fresh : input.sessionId === a.sessionId || a.cleared.has(input.sessionId);
     const goesOn = sameSession && a.hash === hash && (await this.opts.tmux.alive(a.name));
-    /* A program started with nothing to type gets its tools before its turn ends, while Hornhoof still answers for them. */
-    const tools = !goesOn && !input.prompt && input.tools ? this.bridge.listed(job.key, this.toolsMs) : null;
+    /* A program started with nothing to type gets its tools before its turn ends, while Hornhoof still answers for them.
+       Kimi Code connects to its tools only once it has a session, which a new one gets with the first message. */
+    const lazy = program.kind === 'kimi' && !input.sessionId;
+    const tools = !goesOn && !input.prompt && input.tools && !lazy ? this.bridge.listed(job.key, this.toolsMs) : null;
 
     /* What is left in the log from before belongs to no turn. */
     this.drain(a);
@@ -240,10 +257,14 @@ export class TerminalHost {
     a.turn = turn;
     a.ended = deferred();
     a.stopped = false;
+    a.failure = null;
     try {
       if (!goesOn) {
         if (program.kind === 'claude') acceptClaudeDialogs(job.home, input.workDir);
-        Object.assign(a, { program, home: job.home, workDir: input.workDir, hash, sessionId: spec.sessionId, cleared: new Set(), startedAt: Date.now(), started: deferred<void>(), fresh: false });
+        if (program.kind === 'kimi') prepareKimi(job.home, input.workDir, urls.mcpUrl);
+        /* A person's first message into a new Kimi session reaches its tools a moment before Hornhoof opens their turn. */
+        this.bridge.waitForTurns(job.key, program.kind === 'kimi' ? this.openMs + 2000 : 0);
+        Object.assign(a, { program, home: job.home, workDir: input.workDir, hash, sessionId: spec.sessionId, cleared: new Set(), startedAt: Date.now(), started: deferred<void>(), fresh: false, keep: lazy ? (input.context ?? null) : null });
         if (program.kind === 'claude' && !input.sessionId && input.context && spec.sessionId) keepContext(input.workDir, spec.sessionId, input.context);
         a.tail = this.tailFor(a);
         const env = { ...lasting(input.env), ...spec.env };
@@ -276,7 +297,12 @@ export class TerminalHost {
             a.busy = false;
             return await fail('cancelled');
           }
+          if (a.failure !== null) {
+            const output = `${a.failure}\n\n${await this.screen(job.key)}`;
+            return await fail(job.signedOut.test(a.failure) ? 'not_logged_in' : 'agent_failed', output);
+          }
           await this.settle(a, message);
+          await this.planLimits(a);
           return { ok: true, sessionId: a.sessionId, result: message, output: '', error: null, limits: a.limits };
         }
         /* A program stopped with Escape does not say its turn ended: it waits for the next prompt. */
@@ -340,12 +366,25 @@ export class TerminalHost {
     }
   }
 
-  /* A person cleared the conversation in Claude Code, which goes on in a new session with a log of its own. */
+  /* A person cleared the conversation in Claude Code, which goes on in a new session with a log of its own; or Kimi Code
+     named its session, whose log the host finds once Kimi writes it. */
   private follow(a: Agent, sessionId: string): void {
     if (sessionId === a.sessionId) return;
     if (a.sessionId) a.cleared.add(a.sessionId);
     a.sessionId = sessionId;
     if (a.program?.kind === 'claude') a.tail = new LineTail(claudeTranscript(a.home, realpathSync(a.workDir), sessionId));
+    if (a.program?.kind === 'kimi') {
+      a.tail = null;
+      if (a.keep) keepContext(a.workDir, sessionId, a.keep);
+      a.keep = null;
+    }
+  }
+
+  /* Programs that do not log their plan's limits are asked after a turn, for a while. */
+  private async planLimits(a: Agent): Promise<void> {
+    if (!a.program?.limits) return;
+    const limits = await Promise.race([a.program.limits(a.home).catch(() => null), sleep(LIMITS_WAIT_MS).then(() => null)]);
+    if (limits) a.limits = limits;
   }
 
   /* A stop in the log counts for the running turn once its prompt went in: one logged before is the last turn's. */
@@ -361,16 +400,19 @@ export class TerminalHost {
     a.ended?.resolve('');
   }
 
-  /* Claude Code says it started through its hook; Codex is ready once its prompt shows. */
+  /* Claude Code says it started through its hook; Codex and Kimi Code are ready once their prompt shows. Kimi shows its
+     prompt also when it is not signed in, with a word to sign in. */
   private async ready(a: Agent, job: TermJob): Promise<boolean> {
     const end = Date.now() + this.readyMs;
     while (Date.now() < end) {
       if (!(await this.opts.tmux.alive(a.name))) return false;
-      if (job.program.kind === 'claude') {
+      const kind = job.program.kind;
+      if (kind === 'claude') {
         if (await Promise.race([a.started!.promise.then(() => true), sleep(this.pollMs).then(() => false)])) return true;
       } else {
         const screen = await this.screen(a.key);
-        if (/OpenAI Codex/.test(screen) && /›/.test(screen)) {
+        if (kind === 'kimi' && job.signedOut.test(screen)) return false;
+        if (READY[kind](screen)) {
           await sleep(500);
           return true;
         }
@@ -388,7 +430,8 @@ export class TerminalHost {
       const found = findRollout(a.home, a.workDir, 0, a.sessionId);
       return found ? new LineTail(found.file, { fromEnd: true }) : null;
     }
-    return null;
+    const wire = a.program?.kind === 'kimi' && a.sessionId ? findKimiWire(a.home, a.sessionId) : null;
+    return wire ? new LineTail(wire, { fromEnd: true }) : null;
   }
 
   /* What the program wrote to its log since last time: events for the turn, Codex's limits, session and turn end. */
@@ -400,6 +443,11 @@ export class TerminalHost {
         a.tail = new LineTail(found.file);
       }
     }
+    /* Kimi named a session it started now; its log comes once it writes it. */
+    if (!a.tail && a.program?.kind === 'kimi' && a.sessionId) {
+      const wire = findKimiWire(a.home, a.sessionId);
+      if (wire) a.tail = new LineTail(wire);
+    }
     for (const line of a.tail?.read() ?? []) {
       let data: unknown;
       try {
@@ -410,6 +458,10 @@ export class TerminalHost {
       if (a.program?.kind === 'claude') {
         if (this.stoppable(a) && claudeInterrupted(data)) this.interrupted(a);
         for (const e of claudeEvents(data)) this.emit(a, e);
+        continue;
+      }
+      if (a.program?.kind === 'kimi') {
+        this.kimiNews(a, kimiWire(data));
         continue;
       }
       const news = codexRollout(data);
@@ -428,6 +480,25 @@ export class TerminalHost {
         else if (a.turn) a.ended?.resolve(message);
       }
     }
+  }
+
+  /* Kimi Code logs a turn's end without its answer, which is the turn's last text. A person's turn reaches Hornhoof
+     through Kimi's prompt hook, as in Claude Code. */
+  private kimiNews(a: Agent, news: WireNews): void {
+    for (const e of news.events) this.emit(a, e);
+    if (news.started) a.busy = true;
+    if (!(news.ended || news.aborted || news.failed !== undefined)) return;
+    /* An end logged before the running turn's prompt went in belongs to the last turn. With no turn, the program is free. */
+    if (!this.stoppable(a)) {
+      if (!a.turn) a.busy = false;
+      return;
+    }
+    a.busy = false;
+    if (news.aborted) return this.interrupted(a);
+    const message = a.lastText ?? '';
+    if (a.turn?.typed) return this.finishTyped(a, news.failed === undefined ? message : '', news.failed === undefined ? null : 'agent_failed');
+    if (news.failed !== undefined) a.failure = news.failed;
+    a.ended?.resolve(news.failed === undefined ? message : '');
   }
 
   /* Reads the log until the turn's answer is in it. */
@@ -461,7 +532,8 @@ export class TerminalHost {
     const data = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
     switch (event) {
       case 'start':
-        if (typeof data.session_id === 'string' && a.sessionId) this.follow(a, data.session_id);
+        /* Claude Code starts with the id the host gave it; Kimi Code names a new session here. */
+        if (typeof data.session_id === 'string' && (a.sessionId || a.program?.kind === 'kimi')) this.follow(a, data.session_id);
         a.started?.resolve();
         return;
       case 'status': {
@@ -472,7 +544,8 @@ export class TerminalHost {
       case 'prompt':
         await a.settling;
         a.busy = true;
-        if (!a.turn || a.turn.starting) await this.openTyped(a, String(data.prompt ?? ''));
+        /* Kimi Code hands the prompt as parts of a message. */
+        if (!a.turn || a.turn.starting) await this.openTyped(a, typeof data.prompt === 'string' ? data.prompt : contentText(data.prompt));
         return;
       case 'stop': {
         this.drain(a);
@@ -550,6 +623,8 @@ export class TerminalHost {
     a.turn = null;
     if (a.sessionId) this.opts.remember?.(a.sessionId, a.workDir);
     this.bridge.setToken(a.key, null);
+    /* Hornhoof hears the limits with the next turn it runs. */
+    void this.planLimits(a);
     /* Hornhoof has not answered yet: the end goes out with its answer. */
     if (turn.early) turn.over = { message, error, sessionId: a.sessionId };
     else this.typedDone(turn, message, error, a.sessionId);

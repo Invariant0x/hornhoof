@@ -21,6 +21,9 @@ export class Bridge {
   private readonly secrets = new Map<string, string>();
   private readonly tokens = new Map<string, string>();
   private readonly listing = new Map<string, Set<() => void>>();
+  /* How long an agent's tool calls between turns wait for a turn to open, and the calls waiting now. */
+  private readonly patience = new Map<string, number>();
+  private readonly waiting = new Map<string, Set<() => void>>();
 
   constructor(
     private readonly hornhoof: string,
@@ -54,6 +57,32 @@ export class Bridge {
   setToken(key: string, token: string | null): void {
     if (token) this.tokens.set(key, token);
     else this.tokens.delete(key);
+    if (token) for (const go of [...(this.waiting.get(key) ?? [])]) go();
+  }
+
+  /* Kimi Code connects to its tools when a person's first message starts its session, a moment before Hornhoof opens
+     that person's turn: its calls between turns wait this long for a turn's token instead of failing at once. */
+  waitForTurns(key: string, ms: number): void {
+    if (ms > 0) this.patience.set(key, ms);
+    else this.patience.delete(key);
+  }
+
+  private tokenFor(key: string): Promise<string | undefined> {
+    const token = this.tokens.get(key);
+    const ms = this.patience.get(key);
+    if (token || !ms) return Promise.resolve(token);
+    return new Promise(resolve => {
+      const waiters = this.waiting.get(key) ?? new Set();
+      this.waiting.set(key, waiters);
+      const done = () => {
+        clearTimeout(timer);
+        waiters.delete(done);
+        if (!waiters.size && this.waiting.get(key) === waiters) this.waiting.delete(key);
+        resolve(this.tokens.get(key));
+      };
+      const timer = setTimeout(done, ms);
+      waiters.add(done);
+    });
   }
 
   /* Resolves true once the agent's program has listed its tools through the bridge, or false after ms. A program
@@ -90,7 +119,7 @@ export class Bridge {
       return reply(res, 200, '');
     }
     if (kind !== 'mcp' && kind !== 'attach') return reply(res, 404, '');
-    const token = this.tokens.get(key);
+    const token = kind === 'mcp' ? await this.tokenFor(key) : this.tokens.get(key);
     if (!token) return kind === 'mcp' ? noTurn(res, body) : reply(res, 409, JSON.stringify({ error: { message: 'No Hornhoof turn is running for this agent.' } }));
     const headers: Record<string, string> = { authorization: `Bearer ${token}` };
     for (const h of FORWARD) {

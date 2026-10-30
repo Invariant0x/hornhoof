@@ -7,12 +7,14 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AgentEvent, NodeMessage } from '@hornhoof/protocol';
 import { afterEach, describe, expect, it } from 'vitest';
+import { SCREEN_SIGNED_OUT } from '../src/providers/kimi.js';
 import { TerminalHost, type TermJob } from '../src/terminal/host.js';
-import { claudeProgram, codexProgram } from '../src/terminal/programs.js';
+import { claudeProgram, codexProgram, kimiProgram } from '../src/terminal/programs.js';
 import { Tmux } from '../src/terminal/tmux.js';
 
 const FAKE = fileURLToPath(new URL('./fakes/fake-term.mjs', import.meta.url));
 const FAKE_CODEX = fileURLToPath(new URL('./fakes/fake-codex-term.mjs', import.meta.url));
+const FAKE_KIMI = fileURLToPath(new URL('./fakes/fake-kimi-term.mjs', import.meta.url));
 const SECRET = 'sk-fake-0123456789abcdef';
 
 const hasTmux = (() => {
@@ -57,6 +59,14 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
   };
 
   const codexJob = (key: string, prompt: string, more: Partial<TermJob['input']> = {}) => ({ ...job(key, prompt, more), program: codexProgram, bin: FAKE_CODEX });
+  /* Kimi keeps its settings in its home, which these tests give each agent of their own. */
+  const kimiJob = (key: string, prompt: string, more: Partial<TermJob['input']> = {}) => ({
+    ...job(key, prompt, more),
+    program: { ...kimiProgram, limits: async () => ({ status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0.3, resetsAt: null }] }) },
+    bin: FAKE_KIMI,
+    home: join(home, 'kimi', key),
+    signedOut: SCREEN_SIGNED_OUT,
+  });
   const done = (jobId: string) => sent.find(m => m.type === 'job.done' && m.jobId === jobId);
   /* Hornhoof answers the nth turn.open the node sent, naming it by its ref. */
   const ack = (key: string, jobId: string, nth = 0) => {
@@ -536,6 +546,111 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     expect(done('job-2')).toMatchObject({ ok: true, result: 'echo: second typed' });
     expect(sent).toContainEqual({ type: 'job.event', jobId: 'job-2', seq: 0, event: { kind: 'text', text: 'echo: second typed' } });
     expect(sent.filter(m => m.type === 'job.event' && m.jobId === 'job-1')).toHaveLength(1);
+  });
+
+  it('runs a turn in Kimi, with the answer and limits, and opens a turn for what a person typed in it', async () => {
+    await setUp();
+    const first = kimiJob('k1', 'hello');
+    const res = await host.run(first);
+    expect(res).toMatchObject({ ok: true, result: 'echo: hello', error: null });
+    expect(res.sessionId).toMatch(/^session_[0-9a-f-]{36}$/);
+    expect(res.limits?.windows[0]).toMatchObject({ name: 'five_hour', utilization: 0.3 });
+    expect(first.events).toEqual([{ kind: 'text', text: 'echo: hello' }]);
+    await typeTurn('k1', 'w1', 'typed in kimi', 'job-kimi');
+    expect(sent.find(m => m.type === 'turn.open')).toEqual({ type: 'turn.open', agentKey: 'k1', text: 'typed in kimi', ref: expect.any(String) });
+    await until(() => Boolean(done('job-kimi')));
+    expect(done('job-kimi')).toMatchObject({ ok: true, result: 'echo: typed in kimi', sessionId: res.sessionId });
+    expect(sent).toContainEqual({ type: 'job.event', jobId: 'job-kimi', seq: 0, event: { kind: 'text', text: 'echo: typed in kimi' } });
+  });
+
+  it('goes on in the same Kimi for the next turn, and resumes its session once Kimi ended', async () => {
+    await setUp();
+    const first = await host.run(kimiJob('k2', 'one'));
+    expect(await host.run(kimiJob('k2', 'two', { sessionId: first.sessionId }))).toMatchObject({ ok: true, result: 'echo: two', sessionId: first.sessionId });
+    expect((await host.screen('k2')).match(/fake kimi new/g)).toHaveLength(1);
+    expect(await host.run(kimiJob('k2', 'EXIT', { sessionId: first.sessionId }))).toMatchObject({ ok: false, error: 'agent_failed' });
+    expect(await host.run(kimiJob('k2', 'three', { sessionId: first.sessionId }))).toMatchObject({ ok: true, result: 'echo: three', sessionId: first.sessionId });
+    expect(await host.screen('k2')).toContain(`fake kimi resumed ${first.sessionId}`);
+  });
+
+  it('stops a Kimi turn with Escape, as Hornhoof calls it off or a person stops it, and takes the next turn', async () => {
+    await setUp();
+    const first = await host.run(kimiJob('k3', 'warm up'));
+    const stop = new AbortController();
+    const running = host.run(kimiJob('k3', 'HANG', { sessionId: first.sessionId, signal: stop.signal }));
+    setTimeout(() => stop.abort(), 300);
+    const started = Date.now();
+    expect(await running).toMatchObject({ ok: false, error: 'cancelled' });
+    expect(await host.run(kimiJob('k3', 'ABORT', { sessionId: first.sessionId }))).toMatchObject({ ok: false, error: 'cancelled' });
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(await host.run(kimiJob('k3', 'next', { sessionId: first.sessionId }))).toMatchObject({ ok: true, result: 'echo: next' });
+    await typeTurn('k3', 'w3', 'HANG typed', 'job-k3');
+    host.input({ type: 'term.input', termId: 'w3', data: '\u001b' });
+    await until(() => Boolean(done('job-k3')));
+    expect(done('job-k3')).toMatchObject({ ok: false, error: 'cancelled' });
+  }, 30_000);
+
+  it('fails a Kimi turn that Kimi says failed, and tells a Kimi that is not signed in', async () => {
+    await setUp();
+    const failed = await host.run(kimiJob('k4', 'FAIL'));
+    expect(failed).toMatchObject({ ok: false, error: 'agent_failed' });
+    expect(failed.output).toContain('The plan ran out.');
+    expect(await host.run(kimiJob('k5', 'hello', { env: { FAKE_SIGNED_OUT: '1' } }))).toMatchObject({ ok: false, error: 'not_logged_in' });
+  });
+
+  it('starts Kimi for a person at once, and gives their first message its tools once Hornhoof opened their turn', () =>
+    withTools(async auths => {
+      /* Kimi starts its session, and connects to its tools, only with the first message: there is nothing to wait for. */
+      const start = await host.run(kimiJob('k6', '', { env: { FAKE_MCP_LIST_MS: '10' } }));
+      expect(start).toMatchObject({ ok: true, sessionId: null });
+      expect(auths).toEqual([]);
+      await typeTurn('k6', 'w6', 'hello', 'job-k6');
+      await until(() => Boolean(done('job-k6')));
+      expect(done('job-k6')).toMatchObject({ ok: true, result: 'echo: hello', sessionId: expect.stringMatching(/^session_/) });
+      await until(async () => (await host.screen('k6')).includes('tools:'));
+      expect(await host.screen('k6')).toContain('tools: ok');
+      expect(auths).toEqual(['Bearer tok-job-k6']);
+    }));
+
+  it('keeps the turn that resumes Kimi going until Kimi has its tools', () =>
+    withTools(async auths => {
+      const first = await host.run(kimiJob('k7', 'one'));
+      await host.run(kimiJob('k7', 'EXIT', { sessionId: first.sessionId }));
+      expect(await host.run(kimiJob('k7', '', { sessionId: first.sessionId, env: { FAKE_MCP_LIST_MS: '700' } }))).toMatchObject({ ok: true, sessionId: first.sessionId });
+      await until(async () => (await host.screen('k7')).includes('tools:'));
+      expect(await host.screen('k7')).toContain('tools: ok');
+      expect(auths).toEqual(['Bearer tok-turn']);
+    }));
+
+  it('gives Kimi its instructions, the conversation from before and where it works, also when it resumes the session', async () => {
+    await setUp();
+    await host.run(kimiJob('k8', '', { context: 'Earlier: Ivan said we sell software.', guidance: 'Your repository is ./shop.' }));
+    const agents = () => readFileSync(join(home, 'work', 'k8', 'AGENTS.md'), 'utf8');
+    expect(agents()).toContain('Be brief.');
+    expect(agents()).toContain('we sell software');
+    expect(agents()).toContain('./shop');
+    await typeTurn('k8', 'w8', 'hello', 'job-k8');
+    await until(() => Boolean(done('job-k8')));
+    const { sessionId } = done('job-k8') as { sessionId: string };
+    await host.run(kimiJob('k8', 'EXIT', { sessionId }));
+    expect(await host.run(kimiJob('k8', '', { sessionId, guidance: 'Your repository is ./platform.' }))).toMatchObject({ ok: true });
+    expect(await host.screen('k8')).toContain(`fake kimi resumed ${sessionId}`);
+    expect(agents()).toContain('we sell software');
+    expect(agents()).toContain('./platform');
+    expect(agents()).not.toContain('./shop');
+  });
+
+  it('follows the new session when a person starts one in Kimi', async () => {
+    await setUp();
+    const first = await host.run(kimiJob('k9', 'hello'));
+    await host.open({ type: 'term.open', termId: 'w9', agentKey: 'k9', cols: 80, rows: 24, write: true });
+    host.input({ type: 'term.input', termId: 'w9', data: '/new\r' });
+    await new Promise(r => setTimeout(r, 500));
+    const next = await host.run(kimiJob('k9', 'after new', { sessionId: first.sessionId }));
+    expect(next).toMatchObject({ ok: true, result: 'echo: after new' });
+    expect(next.sessionId).toMatch(/^session_/);
+    expect(next.sessionId).not.toBe(first.sessionId);
+    expect(await host.screen('k9')).not.toContain('resumed');
   });
 
   it('takes an answer without a ref, from a Hornhoof before refs, for the oldest typed turn', async () => {

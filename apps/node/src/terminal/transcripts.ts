@@ -1,6 +1,6 @@
 import { closeSync, openSync, readSync, statSync } from 'node:fs';
 import type { AgentEvent, Limits } from '@hornhoof/protocol';
-import { isRecord } from '../providers/events.js';
+import { contentText, inputText, isRecord, toolName } from '../providers/events.js';
 
 /* Follows a log file a program appends to, a whole line at a time. */
 export class LineTail {
@@ -114,6 +114,65 @@ export function codexRollout(line: unknown): RolloutNews {
     default:
       return { events: [] };
   }
+}
+
+/* What a line of the main agent's log in Kimi Code tells: things to show, a turn's start, and how it ended. Kimi logs a
+   turn's end without its answer, which is the turn's last text. Read from Kimi Code 2.4's source, not yet from a
+   signed-in run. */
+export type WireNews = { events: AgentEvent[]; started?: true; ended?: true; aborted?: true; failed?: string };
+
+function loopEvents(event: Record<string, unknown>): AgentEvent[] {
+  switch (event.type) {
+    case 'content.part': {
+      const part = isRecord(event.part) ? event.part : {};
+      return part.type === 'text' && typeof part.text === 'string' && part.text.trim() ? [{ kind: 'text', text: part.text }] : [];
+    }
+    case 'tool.call':
+      return [{ kind: 'tool', name: toolName(String(event.name ?? '')), input: inputText(event.args) }];
+    case 'tool.result': {
+      const result = isRecord(event.result) ? event.result : {};
+      return [{ kind: 'tool_result', ok: result.isError !== true, summary: contentText(result.output) }];
+    }
+    default:
+      return [];
+  }
+}
+
+export function kimiWire(line: unknown): WireNews {
+  if (!isRecord(line) || (line.agentId !== undefined && line.agentId !== 'main')) return { events: [] };
+  switch (line.type) {
+    case 'context.append_loop_event':
+      return { events: isRecord(line.event) ? loopEvents(line.event) : [] };
+    case 'turn.prompt':
+      return { events: [], started: true };
+    case 'turn.ended': {
+      if (line.reason === 'completed') return { events: [], ended: true };
+      if (line.reason === 'cancelled') return { events: [], aborted: true };
+      const error = isRecord(line.error) && typeof line.error.message === 'string' ? line.error.message : '';
+      return { events: [], failed: error || String(line.reason ?? 'failed') };
+    }
+    default:
+      return { events: [] };
+  }
+}
+
+/* The plan's limits from Kimi's usage page: five hours and seven days, each used as a share. */
+export function kimiUsageLimits(page: unknown): Limits | null {
+  if (!isRecord(page) || !isRecord(page.usages)) return null;
+  const usages = page.usages;
+  const windows = (
+    [
+      ['five_hour', usages.limit_5h],
+      ['seven_day', usages.limit_7d],
+    ] as const
+  ).flatMap(([name, w]) => {
+    const used = isRecord(w) ? Number(w.used_ratio) : NaN;
+    if (!isRecord(w) || !Number.isFinite(used)) return [];
+    const reset = typeof w.reset_time === 'string' ? new Date(w.reset_time) : null;
+    return [{ name, utilization: Math.min(1, Math.max(0, used)), resetsAt: reset && !Number.isNaN(reset.getTime()) ? reset.toISOString() : null }];
+  });
+  if (!windows.length) return null;
+  return { status: windows.some(w => w.utilization >= 1) ? 'rejected' : 'allowed', windows };
 }
 
 /* The limits Claude Code hands its status line: five hours and seven days. */
