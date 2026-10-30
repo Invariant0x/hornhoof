@@ -25,6 +25,7 @@ COPY --from=build /app/packages/protocol/dist packages/protocol/dist
 COPY --from=build /app/apps/server/dist apps/server/dist
 COPY apps/server/drizzle apps/server/drizzle
 COPY scripts/install.sh scripts/install.sh
+COPY templates templates
 # The updater takes the installer and the compose file of the build it moves to from this image.
 COPY compose.yaml compose.yaml
 COPY --from=build /app/apps/web/dist apps/web/dist

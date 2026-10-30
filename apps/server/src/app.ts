@@ -17,11 +17,12 @@ import { orgRoutes } from './modules/org/routes.js';
 import { peopleRoutes } from './modules/people/routes.js';
 import { setupRoutes } from './modules/setup/routes.js';
 import { subscriptionRoutes } from './modules/subscriptions/routes.js';
+import { loadTemplates, type Templates } from './modules/templates/load.js';
+import { mcpRoutes } from './modules/tools/mcp.js';
 import { UpdateCheck } from './modules/updates/check.js';
 import { UpdaterControl } from './modules/updates/control.js';
 import { archOf, registry } from './modules/updates/registry.js';
 import { updateRoutes } from './modules/updates/routes.js';
-import { mcpRoutes } from './modules/tools/mcp.js';
 import { hasWebApp, serveWebApp, webAppRoutes } from './web.js';
 
 export type { Db } from './db/client.js';
@@ -31,7 +32,7 @@ import type { Db } from './db/client.js';
 export type Deps = { db: Db; config: Config; logger?: FastifyServerOptions['logger'] };
 
 /* What routes get: the deps, the live node connections, the live stream to browsers and the check for newer builds. */
-export type Ctx = Deps & { hub: NodeHub; bus: EventBus; updates: UpdateCheck; updater: UpdaterControl };
+export type Ctx = Deps & { hub: NodeHub; bus: EventBus; updates: UpdateCheck; updater: UpdaterControl; templates: Templates };
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -60,6 +61,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
     onError: err => app.log.warn({ err }, 'Could not check for newer builds.'),
   });
   ctx.updater = new UpdaterControl(config.controlDir);
+  ctx.templates = loadTemplates(config.templatesDir);
   app.addHook('onReady', async () => ctx.updates.start());
   app.addHook('onClose', async () => ctx.updates.stop());
   await app.register(cookie);

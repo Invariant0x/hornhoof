@@ -23,12 +23,15 @@ export type Config = {
   updateCheckMs: number;
   /* The folder the app shares with the updater service. */
   controlDir: string;
+  /* Role and skill templates, loaded once at start. */
+  templatesDir: string;
 };
 
 /* Both src/ and dist/ sit one level below apps/server, so this finds apps/web/dist either way. */
 const DEFAULT_WEB_DIST = fileURLToPath(new URL('../../web/dist', import.meta.url));
 const DEFAULT_INSTALL_SCRIPT = fileURLToPath(new URL('../../../scripts/install.sh', import.meta.url));
 const ROOT_PACKAGE = new URL('../../../package.json', import.meta.url);
+const DEFAULT_TEMPLATES = fileURLToPath(new URL('../../../templates', import.meta.url));
 const MIGRATIONS = new URL('../drizzle', import.meta.url);
 
 const productVersion = (): string => (JSON.parse(readFileSync(ROOT_PACKAGE, 'utf8')) as { version: string }).version;
@@ -63,5 +66,6 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     registryUrl: env.REGISTRY_URL || undefined,
     updateCheckMs: env.UPDATE_CHECK_MS ? Number(env.UPDATE_CHECK_MS) : 1800000,
     controlDir: env.HORNHOOF_CONTROL_DIR || '/control',
+    templatesDir: env.TEMPLATES_DIR || DEFAULT_TEMPLATES,
   };
 }
