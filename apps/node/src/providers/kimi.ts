@@ -1,6 +1,8 @@
-import { readdirSync } from 'node:fs';
+import { readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { AgentEvent } from '@hornhoof/protocol';
 import type { ProviderAdapter, RunInput, RunResult } from '../runner.js';
+import { contentText, inputText, isRecord, toolName } from './events.js';
 import { childEnv, ensureDir, installPackage, interactiveLogin, runProgram, tokensIn } from './process.js';
 
 type Options = { home: string; tools: string; bin?: string };
@@ -24,8 +26,24 @@ function textOf(content: unknown): string {
   return '';
 }
 
+/* What a stream-json line shows people: assistant text with its tool calls, and each tool's output. Read from Kimi Code 2.4's source, not yet from a signed-in run. */
+export function kimiEvents(line: unknown): AgentEvent[] {
+  if (!isRecord(line)) return [];
+  if (line.role === 'tool') return [{ kind: 'tool_result', ok: true, summary: contentText(line.content) }];
+  if (line.role !== 'assistant') return [];
+  const events: AgentEvent[] = [];
+  const text = textOf(line.content);
+  if (text.trim()) events.push({ kind: 'text', text });
+  for (const call of Array.isArray(line.tool_calls) ? line.tool_calls : []) {
+    if (isRecord(call) && isRecord(call.function) && typeof call.function.name === 'string') {
+      events.push({ kind: 'tool', name: toolName(call.function.name), input: inputText(call.function.arguments) });
+    }
+  }
+  return events;
+}
+
 export function kimiAdapter({ home, tools, bin = join(tools, 'bin', 'kimi') }: Options): ProviderAdapter {
-  const env = () => childEnv(tools, { KIMI_CODE_HOME: ensureDir(home) });
+  const env = (toolToken: string | null = null) => childEnv(tools, { KIMI_CODE_HOME: ensureDir(home), ...(toolToken ? { HH_TOOL_TOKEN: toolToken } : {}) });
   const credentials = () => files(join(home, 'credentials'));
 
   return {
@@ -46,12 +64,20 @@ export function kimiAdapter({ home, tools, bin = join(tools, 'bin', 'kimi') }: O
       if (input.sessionId) args.push('--session', input.sessionId);
       if (input.model) args.push('-m', input.model);
 
+      /* Kimi has no MCP flag: it reads mcp.json from its home, and the token from the env variable named there. */
+      const mcpJson = join(ensureDir(home), 'mcp.json');
+      if (input.tools) {
+        const server = { transport: 'http', url: input.tools.url, bearerTokenEnvVar: 'HH_TOOL_TOKEN' };
+        writeFileSync(mcpJson, JSON.stringify({ mcpServers: { hornhoof: server } }), { mode: 0o600 });
+      } else rmSync(mcpJson, { force: true });
+      if (input.instructions) writeFileSync(join(input.workDir, 'AGENTS.md'), input.instructions + '\n');
+
       let sessionId: string | null = input.sessionId;
       let answer = '';
       const done = await runProgram({
         bin,
         args,
-        env: env(),
+        env: env(input.tools?.token ?? null),
         cwd: input.workDir,
         timeoutMs: input.timeoutMs,
         signal: input.signal,
@@ -62,6 +88,7 @@ export function kimiAdapter({ home, tools, bin = join(tools, 'bin', 'kimi') }: O
           } catch {
             return;
           }
+          for (const event of kimiEvents(ev)) input.onEvent?.(event);
           const id = ev.session_id ?? ev.sessionId;
           if (typeof id === 'string') sessionId = id;
           if (ev.role === 'assistant') answer = textOf(ev.content) || answer;

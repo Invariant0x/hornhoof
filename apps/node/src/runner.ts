@@ -1,6 +1,6 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { TAIL_BYTES, type JobError, type Limits, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
+import { cut, TAIL_BYTES, type AgentEvent, type JobError, type Limits, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
 import { redact } from './redact.js';
 import { readSessions, rememberSession } from './state.js';
 
@@ -13,6 +13,11 @@ export type RunInput = {
   timeoutMs: number;
   /* Aborted when the job is called off, for example when Hornhoof removes the subscription. */
   signal?: AbortSignal;
+  /* Standing instructions for the agent, and Hornhoof's MCP server with the job's token. */
+  instructions: string | null;
+  tools: { url: string; token: string } | null;
+  /* Each thing the agent does, as the program reports it while it runs. */
+  onEvent?: (event: AgentEvent) => void;
 };
 export type RunResult = { ok: boolean; sessionId: string | null; result: string; output: string; error: JobError | null; limits: Limits | null };
 export type LoginIo = { input: NodeJS.ReadableStream; output: NodeJS.WritableStream; urlFile: string };
@@ -59,24 +64,57 @@ type RunOptions = {
   /* More values to hide, such as the node's own key. */
   hidden?: string[];
   signal?: AbortSignal;
+  /* Where agents reach Hornhoof's tools: <server>/mcp. */
+  toolsUrl?: string;
+  onEvent?: (event: AgentEvent) => void;
 };
 
+/* An event as people may see it: no secrets, and within the sizes the protocol allows. */
+function tidy(event: AgentEvent, secrets: string[]): AgentEvent {
+  const clean = (text: string, max: number) => cut(redact(text, secrets), max);
+  switch (event.kind) {
+    case 'text':
+      return { kind: 'text', text: clean(event.text, 8000) };
+    case 'tool':
+      return { kind: 'tool', name: clean(event.name, 100), input: clean(event.input, 300) };
+    case 'tool_result':
+      return { kind: 'tool_result', ok: event.ok, summary: clean(event.summary, 500) };
+    case 'todo':
+      return { kind: 'todo', items: event.items.slice(0, 20).map(i => ({ text: clean(i.text, 200), state: i.state })) };
+  }
+}
+
 /* Always ends with a job.done, whatever breaks on the way. */
-export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string, { hidden = [], signal }: RunOptions = {}): Promise<JobDone> {
+export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string, { hidden = [], signal, toolsUrl, onEvent }: RunOptions = {}): Promise<JobDone> {
   /* Programs refresh their tokens during a run, so the values from before and after are both hidden. */
   const before = await adapter.secrets().catch(() => []);
+  const given = [...hidden, ...(msg.secret ? [msg.secret] : []), ...(msg.toolToken ? [msg.toolToken] : [])];
+  const tools = msg.toolToken && toolsUrl ? { url: toolsUrl, token: msg.toolToken } : null;
   let res: RunResult;
   try {
     const workDir = workDirFor(msg, dir);
     mkdirSync(workDir, { recursive: true });
-    const input = { prompt: msg.prompt, sessionId: msg.sessionId, model: msg.model, workDir, secret: msg.secret, timeoutMs: msg.timeoutMs, signal };
+    const input: RunInput = {
+      prompt: msg.prompt,
+      sessionId: msg.sessionId,
+      model: msg.model,
+      workDir,
+      secret: msg.secret,
+      timeoutMs: msg.timeoutMs,
+      signal,
+      instructions: msg.instructions,
+      tools,
+      onEvent: event => onEvent?.(tidy(event, [...before, ...given])),
+    };
     res = await withTimeout(adapter.run(input).catch((err: unknown) => failed(message(err), 'agent_failed')), msg.timeoutMs);
     if (res.sessionId) rememberSession(dir, res.sessionId, workDir);
   } catch (err) {
     res = failed(message(err), 'agent_failed');
   }
+  /* A job Hornhoof called off ends as cancelled, whatever the stopped program said. */
+  if (signal?.aborted) res = { ...res, ok: false, result: 'Stopped.', error: 'cancelled' };
   const after = await adapter.secrets().catch(() => []);
-  const secrets = [...before, ...after, ...hidden, ...(msg.secret ? [msg.secret] : [])];
+  const secrets = [...before, ...after, ...given];
   return {
     type: 'job.done',
     jobId: msg.jobId,

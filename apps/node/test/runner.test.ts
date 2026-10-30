@@ -1,7 +1,7 @@
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ServerMessage } from '@hornhoof/protocol';
+import type { AgentEvent, ServerMessage } from '@hornhoof/protocol';
 import { describe, expect, it } from 'vitest';
 import { runJob, type ProviderAdapter, type RunInput, type RunResult } from '../src/runner.js';
 
@@ -89,5 +89,40 @@ describe('runJob', () => {
     writeFileSync(join(dir, 'work'), 'not a folder');
     const done = await runJob(fakeAdapter(async () => ok()), job(), dir);
     expect(done).toMatchObject({ ok: false, error: 'agent_failed' });
+  });
+
+  it('passes the Hornhoof tools only when the job has a token and the node knows the address', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
+    const adapter = fakeAdapter(async () => ok());
+    await runJob(adapter, job({ toolToken: 'tool-token-0123456789', instructions: 'Be the orchestrator.' }), dir, { toolsUrl: 'http://hub.test/mcp' });
+    await runJob(adapter, job({ jobId: 'job-2' }), dir, { toolsUrl: 'http://hub.test/mcp' });
+    await runJob(adapter, job({ jobId: 'job-3', toolToken: 'tool-token-0123456789' }), dir);
+    expect(adapter.inputs.map(i => i.tools)).toEqual([{ url: 'http://hub.test/mcp', token: 'tool-token-0123456789' }, null, null]);
+    expect(adapter.inputs[0]!.instructions).toBe('Be the orchestrator.');
+  });
+
+  it('hides secrets in live events and cuts them to size', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
+    const events: AgentEvent[] = [];
+    const adapter = fakeAdapter(async input => {
+      input.onEvent?.({ kind: 'tool', name: 'Bash', input: `curl -H "Authorization: Bearer tool-token-0123456789" ${SECRET}` });
+      input.onEvent?.({ kind: 'tool', name: 'Bash', input: 'x'.repeat(1000) });
+      input.onEvent?.({ kind: 'text', text: `key sk-job-secret-999 ${'y'.repeat(9000)}` });
+      return ok();
+    });
+    await runJob(adapter, job({ secret: 'sk-job-secret-999', toolToken: 'tool-token-0123456789' }), dir, { onEvent: e => events.push(e) });
+    expect(events[0]).toEqual({ kind: 'tool', name: 'Bash', input: 'curl -H "Authorization: Bearer [hidden]" [hidden]' });
+    expect(events[1]).toEqual({ kind: 'tool', name: 'Bash', input: 'x'.repeat(299) + '…' });
+    expect(events[2]).toMatchObject({ kind: 'text', text: expect.stringMatching(/^key \[hidden\] y+…$/) });
+    expect((events[2] as { text: string }).text).toHaveLength(8000);
+  });
+
+  it('ends a job that was called off as cancelled', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
+    const stop = new AbortController();
+    const adapter = fakeAdapter(input => new Promise(done => input.signal?.addEventListener('abort', () => done(ok({ ok: false, error: 'agent_failed', output: 'killed' })))));
+    setTimeout(() => stop.abort(), 50);
+    const done = await runJob(adapter, job(), dir, { signal: stop.signal });
+    expect(done).toMatchObject({ ok: false, error: 'cancelled', result: 'Stopped.' });
   });
 });

@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Limits } from '@hornhoof/protocol';
+import type { AgentEvent, Limits } from '@hornhoof/protocol';
 import type { ProviderAdapter, RunInput, RunResult } from '../runner.js';
+import { contentText, inputText, isRecord, toolName } from './events.js';
 import { askHidden, childEnv, ensureDir, exitsCleanly, installPackage, interactiveLogin, runProgram, tokensIn } from './process.js';
 
 /* Claude Code serves three kinds of subscription: a personal plan, a company Anthropic key, and a GLM Coding Plan through Z.ai's Anthropic-compatible endpoint. */
@@ -39,6 +40,27 @@ export function limitsFrom(info: RateInfo): Limits {
 }
 
 type Outcome = { text: string; isError: boolean; sessionId: string | null };
+
+const TODO_STATES: Record<string, 'todo' | 'doing' | 'done'> = { pending: 'todo', in_progress: 'doing', completed: 'done' };
+
+/* What a stream-json line shows people: the agent's text, its tool calls and their results, and its plan. */
+export function claudeEvents(line: unknown): AgentEvent[] {
+  if (!isRecord(line) || (line.type !== 'assistant' && line.type !== 'user') || !isRecord(line.message)) return [];
+  const blocks = Array.isArray(line.message.content) ? line.message.content : [];
+  return blocks.flatMap((b): AgentEvent[] => {
+    if (!isRecord(b)) return [];
+    if (line.type === 'assistant' && b.type === 'text' && typeof b.text === 'string' && b.text.trim()) return [{ kind: 'text', text: b.text }];
+    if (b.type === 'tool_use' && typeof b.name === 'string') {
+      if (b.name === 'TodoWrite' && isRecord(b.input) && Array.isArray(b.input.todos)) {
+        const items = b.input.todos.filter(isRecord).map(t => ({ text: String(t.content ?? ''), state: TODO_STATES[String(t.status)] ?? 'todo' }));
+        return [{ kind: 'todo', items }];
+      }
+      return [{ kind: 'tool', name: toolName(b.name), input: inputText(b.input) }];
+    }
+    if (b.type === 'tool_result') return [{ kind: 'tool_result', ok: b.is_error !== true, summary: contentText(b.content) }];
+    return [];
+  });
+}
 
 const SIGNED_OUT = /not logged in|please run \/login|invalid api key|authentication/i;
 
@@ -80,6 +102,14 @@ export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'),
     async run(input: RunInput): Promise<RunResult> {
       const session = input.sessionId ? ['--resume', input.sessionId] : ['--session-id', randomUUID()];
       const args = ['-p', '--output-format', 'stream-json', '--verbose', ...session, '--permission-mode', 'bypassPermissions'];
+      if (input.instructions) args.push('--append-system-prompt', input.instructions);
+      /* The token sits in a file only the node reads, for this run alone, never on the command line. */
+      const mcpFile = input.tools ? join(ensureDir(home), `mcp-${randomUUID()}.json`) : null;
+      if (mcpFile && input.tools) {
+        const server = { type: 'http', url: input.tools.url, headers: { Authorization: `Bearer ${input.tools.token}` } };
+        writeFileSync(mcpFile, JSON.stringify({ mcpServers: { hornhoof: server } }), { mode: 0o600 });
+        args.push('--mcp-config', mcpFile, '--strict-mcp-config');
+      }
       if (input.model) args.push('--model', input.model);
       args.push('--', input.prompt);
 
@@ -104,8 +134,13 @@ export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'),
           if (typeof ev.session_id === 'string') sessionId = ev.session_id;
           if (ev.type === 'assistant' && ev.error === 'authentication_failed') signedOut = true;
           if (ev.type === 'rate_limit_event' && ev.rate_limit_info) limits = limitsFrom(ev.rate_limit_info as RateInfo);
-          if (ev.type === 'result') result = { text: String(ev.result ?? ''), isError: ev.is_error === true, sessionId };
+          /* A finished background task adds an empty result after the real one, which must not replace it. */
+          const text = String(ev.result ?? '');
+          if (ev.type === 'result' && (text || ev.is_error === true || !result)) result = { text, isError: ev.is_error === true, sessionId };
+          for (const event of claudeEvents(ev)) input.onEvent?.(event);
         },
+      }).finally(() => {
+        if (mcpFile) rmSync(mcpFile, { force: true });
       });
 
       /* Assigned in onLine, which TypeScript does not follow. */

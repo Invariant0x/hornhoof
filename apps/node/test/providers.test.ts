@@ -1,12 +1,14 @@
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
-import type { ProviderId } from '@hornhoof/protocol';
+import type { AgentEvent, ProviderId } from '@hornhoof/protocol';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { adapterFor } from '../src/providers/index.js';
-import { limitsFrom } from '../src/providers/claude.js';
+import { claudeEvents, limitsFrom } from '../src/providers/claude.js';
+import { codexEvents } from '../src/providers/codex.js';
+import { kimiEvents } from '../src/providers/kimi.js';
 import { childEnv, lastUrl } from '../src/providers/process.js';
 import type { RunInput } from '../src/runner.js';
 
@@ -20,7 +22,10 @@ const CODEX_THREAD = 'c0dec000-0000-7000-8000-000000000001';
 const KIMI_SESSION = 'k1m1c0de-0000-4000-8000-000000000001';
 const FLAGS = ['--json', '--skip-git-repo-check', '--dangerously-bypass-approvals-and-sandbox'];
 
-type Logged = { name: string; argv: string[]; cwd: string; pid: number; env: Record<string, string>; grandchild?: number };
+type Logged = {
+  name: string; argv: string[]; cwd: string; pid: number; env: Record<string, string>; grandchild?: number;
+  mcpConfig?: { path: string; mode: number; json: unknown }; agentsMd?: string; kimiMcp?: unknown;
+};
 
 let dir: string;
 let home: string;
@@ -46,7 +51,7 @@ afterEach(() => {
 });
 
 const adapter = (provider: ProviderId, secret: string | null = null) => adapterFor(provider, { home, tools, bin: join(FAKES, FAKE_BIN[provider]), secret });
-const input = (over: Partial<RunInput> = {}): RunInput => ({ prompt: 'say ready', sessionId: null, model: null, workDir: work, secret: null, timeoutMs: 15000, ...over });
+const input = (over: Partial<RunInput> = {}): RunInput => ({ prompt: 'say ready', sessionId: null, model: null, workDir: work, secret: null, timeoutMs: 15000, instructions: null, tools: null, ...over });
 const logged = (): Logged[] => readFileSync(logFile, 'utf8').trim().split('\n').map(l => JSON.parse(l));
 const lastRun = () => logged().filter(l => l.argv)[logged().filter(l => l.argv).length - 1]!;
 const alive = (pid: number) => {
@@ -106,6 +111,11 @@ describe('Claude Code', () => {
     expect(env).not.toHaveProperty('HORNHOOF_DATA');
     expect(env).not.toHaveProperty('ANTHROPIC_API_KEY');
     expect(env).not.toHaveProperty('ANTHROPIC_BASE_URL');
+  });
+
+  it('keeps the answer when a background task adds an empty result after it', async () => {
+    process.env.FAKE_MODE = 'background';
+    expect(await adapter('claude').run(input())).toMatchObject({ ok: true, result: 'ready' });
   });
 
   it('reports a failed run as agent_failed', async () => {
@@ -335,6 +345,117 @@ describe('calling a job off', () => {
     await adapter(provider).run(input({ timeoutMs: 15000, signal: stop.signal }));
     expect(Date.now() - started).toBeLessThan(5000);
     expect(alive(logged().find(l => l.grandchild)!.grandchild!)).toBe(false);
+  });
+});
+
+const TOOLS = { url: 'http://hub.example.test/mcp', token: 'tool-token-0123456789abcdef' };
+const INSTRUCTIONS = 'You are the orchestrator of Acme.';
+
+function withTools(provider: ProviderId) {
+  process.env.FAKE_MODE = 'tools';
+  const events: AgentEvent[] = [];
+  return { events, run: (over: Partial<RunInput> = {}) => adapter(provider).run(input({ instructions: INSTRUCTIONS, tools: TOOLS, onEvent: e => events.push(e), ...over })) };
+}
+
+describe('Hornhoof tools and instructions', () => {
+  it('give Claude Code the instructions and a private MCP config it deletes after the run', async () => {
+    const { events, run } = withTools('claude');
+    await run();
+    const { argv, mcpConfig } = lastRun();
+    expect(argv).toEqual(expect.arrayContaining(['--append-system-prompt', INSTRUCTIONS, '--mcp-config', mcpConfig!.path, '--strict-mcp-config']));
+    expect(argv.indexOf('--')).toBe(argv.length - 2);
+    expect(argv.join(' ')).not.toContain(TOOLS.token);
+    expect(mcpConfig!.json).toEqual({ mcpServers: { hornhoof: { type: 'http', url: TOOLS.url, headers: { Authorization: `Bearer ${TOOLS.token}` } } } });
+    expect(mcpConfig!.mode & 0o777).toBe(0o600);
+    expect(existsSync(mcpConfig!.path)).toBe(false);
+    expect(events).toContainEqual({ kind: 'tool', name: 'hornhoof.ping', input: '{"note":"hi"}' });
+  });
+
+  it('give Codex AGENTS.md and the server by config, with the token only in its env', async () => {
+    const { events, run } = withTools('codex');
+    await run();
+    const { argv, env, agentsMd } = lastRun();
+    expect(agentsMd).toBe(INSTRUCTIONS + '\n');
+    expect(argv).toEqual(['exec', '-c', `mcp_servers.hornhoof.url="${TOOLS.url}"`, '-c', 'mcp_servers.hornhoof.bearer_token_env_var="HH_TOOL_TOKEN"', ...FLAGS, '-C', work, '--', 'say ready']);
+    expect(env.HH_TOOL_TOKEN).toBe(TOOLS.token);
+    expect(events).toContainEqual({ kind: 'tool', name: 'hornhoof.ping', input: '{"note":"hi"}' });
+
+    await run({ sessionId: CODEX_THREAD });
+    expect(lastRun().argv.slice(0, 6)).toEqual(['exec', 'resume', '-c', `mcp_servers.hornhoof.url="${TOOLS.url}"`, '-c', 'mcp_servers.hornhoof.bearer_token_env_var="HH_TOOL_TOKEN"']);
+  });
+
+  it('give Kimi Code AGENTS.md and an mcp.json in its home that names the env variable, not the token', async () => {
+    const { events, run } = withTools('kimi');
+    await run();
+    const { env, agentsMd, kimiMcp } = lastRun();
+    expect(agentsMd).toBe(INSTRUCTIONS + '\n');
+    expect(kimiMcp).toEqual({ mcpServers: { hornhoof: { transport: 'http', url: TOOLS.url, bearerTokenEnvVar: 'HH_TOOL_TOKEN' } } });
+    expect(env.HH_TOOL_TOKEN).toBe(TOOLS.token);
+    expect(events).toContainEqual({ kind: 'tool', name: 'hornhoof.ping', input: '{"note":"hi"}' });
+  });
+
+  it('leave the Hornhoof server out of a run without tools', async () => {
+    process.env.FAKE_MODE = 'tools';
+    await adapter('kimi').run(input({ tools: TOOLS }));
+    await adapter('kimi').run(input());
+    expect(lastRun().kimiMcp).toBeUndefined();
+    expect(lastRun().env).not.toHaveProperty('HH_TOOL_TOKEN');
+  });
+});
+
+const linesOf = (file: string): unknown[] => readFileSync(new URL(`./fixtures/${file}.jsonl`, import.meta.url), 'utf8').trim().split('\n').map(l => JSON.parse(l));
+
+describe('live events', () => {
+  it('read the tool call, its result and the answer from Claude Code', () => {
+    expect(linesOf('claude-tools').flatMap(claudeEvents)).toEqual([
+      { kind: 'tool', name: 'hornhoof.ping', input: '{"note":"hi"}' },
+      { kind: 'tool_result', ok: true, summary: 'pong hi' },
+      { kind: 'text', text: expect.stringContaining('returned "pong hi"') },
+    ]);
+  });
+
+  it('read Codex messages, its MCP call and a shell command', () => {
+    expect(linesOf('codex-tools').flatMap(codexEvents)).toEqual([
+      { kind: 'text', text: expect.stringContaining('ping tool') },
+      { kind: 'text', text: expect.stringContaining('plan tool') },
+      { kind: 'tool', name: 'hornhoof.ping', input: '{"note":"hi"}' },
+      { kind: 'tool_result', ok: true, summary: 'pong hi' },
+      { kind: 'text', text: expect.stringContaining('HERON') },
+      { kind: 'tool', name: 'shell', input: "/bin/bash -lc 'echo start'" },
+      { kind: 'tool_result', ok: true, summary: 'start' },
+    ]);
+  });
+
+  it('read Kimi Code assistant lines with tool calls and the tool lines', () => {
+    expect(linesOf('kimi-tools').flatMap(kimiEvents)).toEqual([
+      { kind: 'text', text: 'Pinging the server.' },
+      { kind: 'tool', name: 'hornhoof.ping', input: '{"note":"hi"}' },
+      { kind: 'tool_result', ok: true, summary: 'pong hi' },
+      { kind: 'text', text: 'HERON' },
+    ]);
+  });
+
+  it('keep the names of built-in tools and show a shell command as it is', () => {
+    const use = { type: 'assistant', message: { content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls -la', description: 'List' } }] } };
+    expect(claudeEvents(use)).toEqual([{ kind: 'tool', name: 'Bash', input: 'ls -la' }]);
+    const failed = { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: 'Exit code 137', is_error: true }] } };
+    expect(claudeEvents(failed)).toEqual([{ kind: 'tool_result', ok: false, summary: 'Exit code 137' }]);
+  });
+
+  it('turn a TodoWrite call and a Codex todo list into a plan', () => {
+    const todos = [{ content: 'Ask about products', status: 'completed' }, { content: 'Propose', status: 'in_progress' }, { content: 'Build', status: 'pending' }];
+    expect(claudeEvents({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 't2', name: 'TodoWrite', input: { todos } }] } })).toEqual([
+      { kind: 'todo', items: [{ text: 'Ask about products', state: 'done' }, { text: 'Propose', state: 'doing' }, { text: 'Build', state: 'todo' }] },
+    ]);
+    expect(codexEvents({ type: 'item.updated', item: { id: 'i1', type: 'todo_list', items: [{ text: 'Ask', completed: true }, { text: 'Propose', completed: false }] } })).toEqual([
+      { kind: 'todo', items: [{ text: 'Ask', state: 'done' }, { text: 'Propose', state: 'todo' }] },
+    ]);
+  });
+
+  it('give nothing for lines they do not show', () => {
+    for (const line of [null, 'x', 42, { type: 'system', subtype: 'init' }, { type: 'assistant', message: { content: [{ type: 'thinking', thinking: 'hm' }] } }]) expect(claudeEvents(line)).toEqual([]);
+    for (const line of [null, { type: 'turn.started' }, { type: 'item.completed', item: { type: 'reasoning', text: 'hm' } }]) expect(codexEvents(line)).toEqual([]);
+    for (const line of [null, { role: 'meta', type: 'system.version' }, { role: 'assistant', content: '' }]) expect(kimiEvents(line)).toEqual([]);
   });
 });
 

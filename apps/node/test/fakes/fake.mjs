@@ -1,12 +1,12 @@
 /* Shared body of the fake agent programs. Real output samples come from ../fixtures. */
 import { spawn } from 'node:child_process';
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const LOGGED_ENV = [
   'CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'KIMI_CODE_HOME', 'ANTHROPIC_API_KEY', 'ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN',
   'API_TIMEOUT_MS', 'ANTHROPIC_DEFAULT_OPUS_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL',
-  'CODEX_API_KEY', 'NODE_KEY', 'HORNHOOF_DATA', 'PATH',
+  'CODEX_API_KEY', 'NODE_KEY', 'HORNHOOF_DATA', 'HH_TOOL_TOKEN', 'PATH',
 ];
 
 const LOGIN_URL = 'https://login.example.test/device?code=ABC';
@@ -16,7 +16,17 @@ export function run(name) {
   const mode = process.env.FAKE_MODE ?? '';
   const log = entry => process.env.FAKE_LOG && appendFileSync(process.env.FAKE_LOG, JSON.stringify(entry) + '\n');
   const env = Object.fromEntries(LOGGED_ENV.filter(k => k in process.env).map(k => [k, process.env[k]]));
-  log({ name, argv, cwd: process.cwd(), pid: process.pid, env });
+  /* What the node prepared for this run, read now, since the node may delete it when the run ends. */
+  const seen = {};
+  const mcpAt = argv.indexOf('--mcp-config');
+  if (mcpAt >= 0 && existsSync(argv[mcpAt + 1])) {
+    const path = argv[mcpAt + 1];
+    seen.mcpConfig = { path, mode: statSync(path).mode, json: JSON.parse(readFileSync(path, 'utf8')) };
+  }
+  if (existsSync('AGENTS.md')) seen.agentsMd = readFileSync('AGENTS.md', 'utf8');
+  const kimiMcp = process.env.KIMI_CODE_HOME && join(process.env.KIMI_CODE_HOME, 'mcp.json');
+  if (kimiMcp && existsSync(kimiMcp)) seen.kimiMcp = JSON.parse(readFileSync(kimiMcp, 'utf8'));
+  log({ name, argv, cwd: process.cwd(), pid: process.pid, env, ...seen });
   const print = file => process.stdout.write(readFileSync(new URL(`../fixtures/${file}.jsonl`, import.meta.url)));
   const words = argv.join(' ');
 
@@ -58,6 +68,12 @@ export function run(name) {
   if (mode === 'bad_key' && name === 'codex') {
     print('codex-api-key-invalid');
     process.exit(1);
+  }
+  if (mode === 'tools') return void print(`${name}-tools`);
+  if (mode === 'background' && name === 'claude') {
+    /* A background shell task that ends after the answer adds an empty zero-turn result. */
+    print('claude-new');
+    return void process.stdout.write('{"type":"result","subtype":"success","is_error":false,"result":"","num_turns":0,"session_id":"5e55c1a0-0000-4000-8000-000000000001"}\n');
   }
   const resume = name === 'claude' ? argv.includes('--resume') : name === 'codex' ? argv[1] === 'resume' : argv.includes('--session');
   print(`${name}-${resume ? 'resume' : 'new'}`);

@@ -2,7 +2,7 @@
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { Limits, NodeMessage, ProviderId, ServerMessage } from '@hornhoof/protocol';
+import type { AgentEvent, Limits, NodeMessage, ProviderId, ServerMessage } from '@hornhoof/protocol';
 import { connect } from './connection.js';
 import { adapterFor, programFor } from './providers/index.js';
 import { runJob, type ProviderAdapter, type RunResult } from './runner.js';
@@ -36,6 +36,7 @@ export async function runNode({ dir, adapter, builtin, log = console.log, loginC
   if (!state) throw new Error(`No node settings in ${dir}/node.json. Run the install command from Hornhoof again.`);
   /* The node's own key never leaves in a job's output. */
   const hidden = [state.key];
+  const toolsUrl = `${state.server}/mcp`;
   /* The built-in node serves API keys, which need no sign-in. */
   const single = typeof adapter === 'function' ? null : adapter;
   const pick = typeof adapter === 'function' ? adapter : () => adapter;
@@ -84,7 +85,10 @@ export async function runNode({ dir, adapter, builtin, log = console.log, loginC
       stop();
       return;
     }
-    if (m.type === 'job.cancel') return;
+    if (m.type === 'job.cancel') {
+      running.get(m.jobId)?.stop.abort();
+      return;
+    }
     if (stopped || running.has(m.jobId)) return;
     const controller = new AbortController();
     const done = runOne(m, controller.signal);
@@ -105,7 +109,9 @@ export async function runNode({ dir, adapter, builtin, log = console.log, loginC
           return res;
         },
       };
-      done = await runJob(tracked, m, dir, { hidden, signal });
+      let seq = 0;
+      const onEvent = (event: AgentEvent) => emit({ type: 'job.event', jobId: m.jobId, seq: seq++, event });
+      done = await runJob(tracked, m, dir, { hidden, signal, toolsUrl, onEvent });
     } catch (err) {
       done = { type: 'job.done', jobId: m.jobId, ok: false, sessionId: null, result: '', tail: message(err), error: 'agent_failed' };
     }

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { runNode } from '../src/main.js';
-import type { ProviderAdapter } from '../src/runner.js';
+import type { ProviderAdapter, RunInput } from '../src/runner.js';
 import { isRemoved, writeState } from '../src/state.js';
 
 const adapter: ProviderAdapter = {
@@ -113,6 +113,48 @@ describe('runNode', () => {
     run('j2');
     await server.wait(() => !!doneOf('j2'));
     expect(doneOf('j2')).toMatchObject({ ok: true, result: 'ready' });
+  });
+
+  it('streams the agent\'s work as numbered events before the job ends, with the tools at <server>/mcp', async () => {
+    const server = await fakeServer();
+    let seen: RunInput | null = null;
+    const talkative: ProviderAdapter = {
+      ...adapter,
+      run: async input => {
+        seen = input;
+        input.onEvent?.({ kind: 'text', text: 'Hello' });
+        input.onEvent?.({ kind: 'tool', name: 'hornhoof.company', input: '{}' });
+        input.onEvent?.({ kind: 'tool_result', ok: true, summary: 'Acme' });
+        return { ok: true, sessionId: 'sess-9', result: 'Hello', output: '', error: null, limits: null };
+      },
+    };
+    const node = await runNode({ dir: nodeDir(server.url), adapter: talkative, log: () => {} });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: 'Be brief.', toolToken: 'tool-token-0123456789' });
+    await server.wait(() => server.received.some(m => m.type === 'job.done'));
+    expect(server.received.filter(m => m.type !== 'hello' && m.type !== 'status').map(m => (m.type === 'job.event' ? `event ${m.seq}` : m.type))).toEqual([
+      'job.started', 'event 0', 'event 1', 'event 2', 'job.done',
+    ]);
+    expect(server.received.find(m => m.type === 'job.event')).toMatchObject({ jobId: 'j1', event: { kind: 'text', text: 'Hello' } });
+    expect(seen!.tools).toEqual({ url: `${server.url}/mcp`, token: 'tool-token-0123456789' });
+  });
+
+  it('calls a running job off when Hornhoof asks and ignores ids it does not run', async () => {
+    const server = await fakeServer();
+    const slow: ProviderAdapter = {
+      ...adapter,
+      run: input => new Promise(done => input.signal?.addEventListener('abort', () => done({ ok: false, sessionId: null, result: '', output: 'killed', error: 'agent_failed', limits: null }))),
+    };
+    const node = await runNode({ dir: nodeDir(server.url), adapter: slow, log: () => {} });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 60000, secret: null, instructions: null, toolToken: null });
+    await server.wait(() => server.received.some(m => m.type === 'job.started'));
+    server.send({ type: 'job.cancel', jobId: 'other' });
+    server.send({ type: 'job.cancel', jobId: 'j1' });
+    await server.wait(() => server.received.some(m => m.type === 'job.done'));
+    expect(server.received.find(m => m.type === 'job.done')).toMatchObject({ jobId: 'j1', ok: false, error: 'cancelled' });
   });
 
   it('stays idle once removed', async () => {
