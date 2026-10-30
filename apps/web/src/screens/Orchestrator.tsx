@@ -44,7 +44,8 @@ export function OrchestratorWindow({ org, onClose }: Props) {
   const [events, setEvents] = useState<EventView[]>([]);
   const [state, setState] = useState<OrchestratorState | null>(null);
   const [text, setText] = useState('');
-  const [manual, setManual] = useState(false);
+  /* The hand-made card: null follows the orchestrator (shown while he cannot answer), true or false is the CEO's choice. */
+  const [manual, setManual] = useState<boolean | null>(null);
   const [failure, setFailure] = useState<unknown>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const log = useRef<HTMLDivElement>(null);
@@ -153,14 +154,15 @@ export function OrchestratorWindow({ org, onClose }: Props) {
     void send();
   }
 
-  const proposals = events.filter(e => e.kind === 'proposal');
-  const appliedIds = new Set(events.filter(e => e.kind === 'applied').map(e => (e.data as Applied).proposalId));
-  const lastProposal = proposals.length ? proposals[proposals.length - 1]!.seq : 0;
-  const cardStatus = (e: EventView) => (appliedIds.has(field(e.data, 'proposalId')) ? 'applied' : e.seq < lastProposal ? 'replaced' : 'pending');
-  const pendingCard = proposals.some(e => cardStatus(e) === 'pending');
+  /* One card at a time: his newest proposal until it is applied, below his latest line. */
+  const shown = events.filter(e => e.kind !== 'proposal');
+  const newest = events.findLast(e => e.kind === 'proposal');
+  const applied = new Set(events.filter(e => e.kind === 'applied').map(e => (e.data as Applied).proposalId));
+  const pending = newest && !applied.has(field(newest.data, 'proposalId')) ? (newest.data as Proposal) : null;
   const ready = state?.ready ?? false;
   const existing = org.departments.flatMap(d => (d.templateKey ? [d.templateKey] : []));
-  const offerByHand = ready && !manual && !org.departments.length && !state?.busy && !state?.queued && !pendingCard;
+  const byHand = !pending && (manual ?? (state !== null && !ready));
+  const offerByHand = !pending && !byHand && !state?.busy && !state?.queued && (!ready || !org.departments.length);
   const where = [org.orchestrator?.model, orchestratorStatus(t, sub), sub?.machine?.hostname].filter(Boolean).join(', ');
 
   function line(e: EventView, i: number) {
@@ -189,7 +191,7 @@ export function OrchestratorWindow({ org, onClose }: Props) {
         );
       case 'tool_result':
         return (
-          <div className={`t-r${events[i - 1]?.kind === 'tool' ? '' : ' alone'}`}>
+          <div className={`t-r${shown[i - 1]?.kind === 'tool' ? '' : ' alone'}`}>
             <span />
             <span>⎿</span>
             <div>{field(e.data, 'summary')}</div>
@@ -208,10 +210,6 @@ export function OrchestratorWindow({ org, onClose }: Props) {
             </div>
           </div>
         );
-      case 'proposal': {
-        const p = e.data as Proposal;
-        return <StructureCard proposal={{ id: p.proposalId, brief: p.brief, items: p.items }} status={cardStatus(e)} departments={org.departments} onCorrect={() => input.current?.focus()} />;
-      }
       case 'applied': {
         const a = e.data as Applied;
         return (
@@ -270,11 +268,13 @@ export function OrchestratorWindow({ org, onClose }: Props) {
           </div>
           <div className="w2">{where}</div>
         </div>
-        {events.map((e, i) => (
+        {shown.map((e, i) => (
           <div key={e.seq} className="t-line">
             {line(e, i)}
           </div>
         ))}
+        {pending && <StructureCard key={pending.proposalId} proposal={{ id: pending.proposalId, brief: pending.brief, items: pending.items }} departments={org.departments} onCorrect={() => input.current?.focus()} />}
+        {byHand && <StructureCard manual={{ existing }} departments={org.departments} onCorrect={() => input.current?.focus()} onDone={() => setManual(false)} onHide={() => setManual(false)} />}
         {state?.busy && (
           <div className="t-sp">
             <i>✻</i>
@@ -287,7 +287,6 @@ export function OrchestratorWindow({ org, onClose }: Props) {
             </div>
           </div>
         )}
-        {(state && !ready) || manual ? <StructureCard manual={{ existing }} status="pending" departments={org.departments} onCorrect={() => input.current?.focus()} /> : null}
         {offerByHand && (
           <button className="t-link" type="button" onClick={() => setManual(true)}>
             {t.window.pickByHand}

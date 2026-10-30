@@ -215,7 +215,7 @@ export const ru: Messages = {
     apply: n => `Применить изменения (${n})`,
     correct: 'Поправить словами',
     applied: 'Применено',
-    replaced: 'Заменено новым предложением',
+    hide: 'Скрыть',
     remove: 'Убрать',
     products: 'Продукты',
   },

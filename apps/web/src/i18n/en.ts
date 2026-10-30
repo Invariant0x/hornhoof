@@ -215,7 +215,7 @@ export const en = {
     apply: (n: number) => `Apply changes (${n})`,
     correct: 'Correct in words',
     applied: 'Applied',
-    replaced: 'Replaced by a newer proposal',
+    hide: 'Hide',
     remove: 'Remove',
     products: 'Products',
   },

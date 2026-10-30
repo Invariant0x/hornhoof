@@ -24,7 +24,7 @@ const noop = () => {};
 describe('StructureCard', () => {
   it('counts the ticked departments and creates exactly those', async () => {
     const calls = mockApi({ 'POST /api/departments/build': [201, { created: ['a', 'b', 'c', 'd'], removed: [] }] });
-    render(<StructureCard proposal={PROPOSAL} status="pending" departments={[]} onCorrect={noop} />);
+    render(<StructureCard proposal={PROPOSAL} departments={[]} onCorrect={noop} />);
     expect(screen.getByText('Company structure')).toBeInTheDocument();
     expect(screen.getByText('Mascot, Characters')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('checkbox', { name: /Design/ }));
@@ -42,7 +42,7 @@ describe('StructureCard', () => {
   });
 
   it('starts at five and keeps Operations ticked', () => {
-    render(<StructureCard proposal={PROPOSAL} status="pending" departments={[]} onCorrect={noop} />);
+    render(<StructureCard proposal={PROPOSAL} departments={[]} onCorrect={noop} />);
     expect(screen.getByRole('button', { name: 'Create departments (5)' })).toBeInTheDocument();
     const ops = screen.getByRole('checkbox', { name: /Operations/ });
     expect(ops).toBeChecked();
@@ -51,7 +51,7 @@ describe('StructureCard', () => {
 
   it('offers the missing templates with the default ticks when building by hand', async () => {
     const calls = mockApi({ 'POST /api/departments/build': [201, { created: [], removed: [] }] });
-    render(<StructureCard manual={{ existing: ['operations', 'sales'] }} status="pending" departments={[]} onCorrect={noop} />);
+    render(<StructureCard manual={{ existing: ['operations', 'sales'] }} departments={[]} onCorrect={noop} />);
     expect(screen.getAllByRole('checkbox')).toHaveLength(6);
     const ticked = screen.getAllByRole('checkbox').filter(b => (b as HTMLInputElement).checked).map(b => b.getAttribute('data-template'));
     expect(ticked).toEqual(['development', 'marketing', 'business_development']);
@@ -62,32 +62,44 @@ describe('StructureCard', () => {
 
   it('shows a change to an existing department by its name', () => {
     const departments = [{ id: 'd9', name: null, templateKey: 'finance' as const, roleCode: 'FIN', about: '', products: [], teams: [] }];
-    render(<StructureCard proposal={{ id: 'pr2', brief: 'b', items: [{ department: 'd9', checked: true, note: 'Not yet', remove: true }] }} status="pending" departments={departments} onCorrect={noop} />);
+    render(<StructureCard proposal={{ id: 'pr2', brief: 'b', items: [{ department: 'd9', checked: true, note: 'Not yet', remove: true }] }} departments={departments} onCorrect={noop} />);
     expect(screen.getByText('Finance')).toBeInTheDocument();
     expect(screen.getByText('Remove')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Apply changes (1)' })).toBeInTheDocument();
   });
 
-  it('locks an applied card and a replaced one', () => {
-    const { unmount } = render(<StructureCard proposal={PROPOSAL} status="applied" departments={[]} onCorrect={noop} />);
-    expect(screen.getByText('Applied')).toBeInTheDocument();
+  it('locks itself once applied and tells the window', async () => {
+    mockApi({ 'POST /api/departments/build': [201, { created: ['a'], removed: [] }] });
+    const onDone = vi.fn();
+    render(<StructureCard proposal={PROPOSAL} departments={[]} onCorrect={noop} onDone={onDone} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Create departments (5)' }));
+    expect(await screen.findByText('Applied')).toBeInTheDocument();
+    expect(onDone).toHaveBeenCalled();
     expect(screen.getByRole('button', { name: 'Create departments (5)' })).toBeDisabled();
     for (const box of screen.getAllByRole('checkbox')) expect(box).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Correct in words' })).not.toBeInTheDocument();
+  });
+
+  it('can be hidden only when the window offers it', () => {
+    const onHide = vi.fn();
+    const { unmount } = render(<StructureCard proposal={PROPOSAL} departments={[]} onCorrect={noop} />);
+    expect(screen.queryByRole('button', { name: 'Hide' })).not.toBeInTheDocument();
     unmount();
-    render(<StructureCard proposal={PROPOSAL} status="replaced" departments={[]} onCorrect={noop} />);
-    expect(screen.getByText('Replaced by a newer proposal')).toBeInTheDocument();
+    render(<StructureCard manual={{ existing: [] }} departments={[]} onCorrect={noop} onHide={onHide} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Hide' }));
+    expect(onHide).toHaveBeenCalled();
   });
 
   it('says why the click did not work', async () => {
     mockApi({ 'POST /api/departments/build': [409, { error: { code: 'conflict', message: 'Already applied.', reason: 'proposal_closed' } }] });
-    render(<StructureCard proposal={PROPOSAL} status="pending" departments={[]} onCorrect={noop} />);
+    render(<StructureCard proposal={PROPOSAL} departments={[]} onCorrect={noop} />);
     fireEvent.click(screen.getByRole('button', { name: 'Create departments (5)' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('This card was already applied or replaced by a newer one.');
   });
 
   it('hands correcting in words to the window', () => {
     const onCorrect = vi.fn();
-    render(<StructureCard proposal={PROPOSAL} status="pending" departments={[]} onCorrect={onCorrect} />);
+    render(<StructureCard proposal={PROPOSAL} departments={[]} onCorrect={onCorrect} />);
     fireEvent.click(screen.getByRole('button', { name: 'Correct in words' }));
     expect(onCorrect).toHaveBeenCalled();
   });
@@ -97,7 +109,7 @@ describe('StructureCard', () => {
     try {
       render(
         <LanguageProvider>
-          <StructureCard proposal={PROPOSAL} status="pending" departments={[]} onCorrect={noop} />
+          <StructureCard proposal={PROPOSAL} departments={[]} onCorrect={noop} />
         </LanguageProvider>,
       );
       expect(screen.getByText('Структура компании')).toBeInTheDocument();

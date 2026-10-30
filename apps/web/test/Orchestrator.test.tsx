@@ -50,8 +50,7 @@ describe('OrchestratorWindow', () => {
     expect(container.querySelector('.t-r')).toHaveTextContent('⎿Acme, 1 person');
     expect(screen.getByText('Ask about products').parentElement).toHaveTextContent('☒ Ask about products');
     expect(screen.getByText('Propose departments').tagName).toBe('B');
-    expect(screen.getByText('Company structure')).toBeInTheDocument();
-    expect(screen.getByText('Applied')).toBeInTheDocument();
+    expect(screen.queryByText('Company structure')).not.toBeInTheDocument();
     expect(screen.getByText('Created: Operations')).toBeInTheDocument();
     expect(screen.getByText('Created: Development, 2 products')).toBeInTheDocument();
     expect(screen.getByText('Removed: Finance')).toBeInTheDocument();
@@ -119,6 +118,44 @@ describe('OrchestratorWindow', () => {
     expect(await screen.findByText('Third')).toBeInTheDocument();
     expect(screen.getAllByText('Second')).toHaveLength(1);
     expect(screen.queryByText('Not his')).not.toBeInTheDocument();
+  });
+
+  it('keeps one card that changes with the newest proposal, under his latest line', async () => {
+    const { container } = open({
+      [`GET ${EVENTS}?after=0`]: [
+        200,
+        {
+          events: [
+            ev(1, 'proposal', { proposalId: 'pr1', brief: 'Acme.', items: [{ template: 'operations', checked: true, note: '' }, { template: 'development', checked: true, note: '' }] }),
+            ev(2, 'message', { text: 'One design for all three' }, { person: IVAN }),
+            ev(3, 'proposal', { proposalId: 'pr2', brief: 'Acme.', items: [{ template: 'operations', checked: true, note: '' }, { template: 'design', checked: true, note: 'Shared style' }] }),
+            ev(4, 'text', { kind: 'text', text: 'The new card is on the screen.' }),
+          ],
+          state: READY,
+        },
+      ],
+    });
+    expect(await screen.findByText('The new card is on the screen.')).toBeInTheDocument();
+    expect(screen.getAllByText('Company structure')).toHaveLength(1);
+    expect(screen.getByRole('checkbox', { name: /Design/ })).toBeChecked();
+    expect(screen.queryByRole('checkbox', { name: /Development/ })).not.toBeInTheDocument();
+    const card = container.querySelector('.t-card')!;
+    expect(screen.getByText('The new card is on the screen.').compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('hides the hand-made card and offers it again', async () => {
+    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, ready: false, reason: 'machine_offline' } }] });
+    fireEvent.click(await screen.findByRole('button', { name: 'Hide' }));
+    expect(screen.queryByText('Company structure')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Pick departments by hand' }));
+    expect(screen.getByText('Company structure')).toBeInTheDocument();
+  });
+
+  it('closes the hand-made card once its departments are created', async () => {
+    open({ 'POST /api/departments/build': [201, { created: ['d1'], removed: [] }] });
+    fireEvent.click(await screen.findByRole('button', { name: 'Pick departments by hand' }));
+    fireEvent.click(screen.getByRole('button', { name: /Create departments/ }));
+    await vi.waitFor(() => expect(screen.queryByText('Company structure')).not.toBeInTheDocument());
   });
 
   it('lets the CEO pick departments by hand on an empty company', async () => {
