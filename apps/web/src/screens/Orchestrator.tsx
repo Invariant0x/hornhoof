@@ -9,9 +9,9 @@ import { StructureCard } from '../ui/StructureCard';
 import { orchestratorStatus } from './Map';
 
 const EVENTS = '/api/agents/orchestrator/events';
-/* Machines come and go without a message on the stream, so the window asks again now and then. */
 /* The most events the server sends at a time. */
 const PAGE = 500;
+/* Machines come and go without a message on the stream, so the window asks again now and then. */
 const POLL_MS = 15_000;
 /* Many lines can arrive in a second while he works; one catch-up covers them. */
 const CATCH_UP_MS = 300;
