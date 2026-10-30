@@ -6,6 +6,7 @@ import { requireCompanyScope, requirePerson, type Person } from '../../auth/sess
 import { encryptSecret } from '../../crypto/secrets.js';
 import { agents, departments, jobs, people, subscriptions, teams } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
+import { pumpWaiting } from '../conversation/queue.js';
 import { createNodeCode } from '../nodes/codes.js';
 import { installCommand } from '../nodes/command.js';
 import { identityOf } from '../nodes/hub.js';
@@ -92,6 +93,8 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
       if (target.kind === 'orchestrator') await tx.update(agents).set({ subscriptionId: sub!.id }).where(eq(agents.kind, 'orchestrator'));
       return sub!.id;
     });
+    /* His waiting turns go out on the new key. */
+    if (target.kind === 'orchestrator') await pumpWaiting(ctx);
 
     reply.code(201);
     return { subscription: await subView(db, online, id) };
@@ -146,6 +149,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
       if (owner?.scopeKind !== 'company') throw notCompanyLevel();
     }
     await db.update(agents).set({ subscriptionId: sub.id }).where(eq(agents.kind, 'orchestrator'));
+    await pumpWaiting(ctx);
     return { subscription: await subView(db, online, sub.id) };
   });
 

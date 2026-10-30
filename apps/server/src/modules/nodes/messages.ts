@@ -1,8 +1,9 @@
 import { TAIL_BYTES, type NodeMessage } from '@hornhoof/protocol';
-import { and, eq, inArray, isNull, notInArray, type SQL } from 'drizzle-orm';
+import { and, eq, inArray, isNull, notInArray, or, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { jobs, subscriptions } from '../../db/schema.js';
-import { workingCount } from '../events/store.js';
+import { afterJob, pumpWaiting } from '../conversation/queue.js';
+import { appendEvent, publishWorking } from '../events/store.js';
 import type { NodeIdentity } from './hub.js';
 
 const OPEN_JOBS = ['queued', 'running'] as const;
@@ -18,16 +19,22 @@ const lastBytes = (text: string) => {
   return buf.length <= TAIL_BYTES ? text : buf.subarray(buf.length - TAIL_BYTES).toString();
 };
 
-/* Open jobs of these subscriptions become failed with the reason, except the ones the node still runs. */
-export async function failOpenJobs(ctx: Ctx, scope: SQL, error: string, stillRunning: string[] = []): Promise<void> {
-  const conditions = [scope, inArray(jobs.status, OPEN_JOBS)];
-  if (stillRunning.length) conditions.push(notInArray(jobs.id, stillRunning));
-  await ctx.db.update(jobs).set({ status: 'failed', error, finishedAt: new Date() }).where(and(...conditions));
-}
+/* Jobs a node has or had: running ones, and test jobs, which go out the moment they are made.
+   A queued conversation turn still waits in Hornhoof and goes out later. */
+const ON_NODE = or(eq(jobs.status, 'running'), and(eq(jobs.status, 'queued'), eq(jobs.kind, 'test')));
 
-/* How many agents work right now, for the map's counter. */
-async function publishWorking(ctx: Ctx, companyId: string): Promise<void> {
-  ctx.bus.publish(companyId, { type: 'working', working: await workingCount(ctx.db, companyId) });
+/* Jobs of these subscriptions that a node had become failed with the reason, except the ones the node still runs.
+   A failed turn goes into its conversation and the agent's next turn goes out. */
+export async function failOpenJobs(ctx: Ctx, scope: SQL, error: string, stillRunning: string[] = []): Promise<void> {
+  const conditions = [scope, ON_NODE];
+  if (stillRunning.length) conditions.push(notInArray(jobs.id, stillRunning));
+  const failed = await ctx.db
+    .update(jobs)
+    .set({ status: 'failed', error, finishedAt: new Date() })
+    .where(and(...conditions))
+    .returning({ id: jobs.id, companyId: jobs.companyId });
+  for (const companyId of new Set(failed.map(j => j.companyId))) await publishWorking(ctx, companyId);
+  for (const { id } of failed) await afterJob(ctx, id);
 }
 
 export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage): Promise<void> {
@@ -48,6 +55,8 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
           .where(eq(subscriptions.id, sub.id));
       }
       await failOpenJobs(ctx, jobsOf(id, ctx), 'machine_restarted', msg.running);
+      ctx.hub.greet(id);
+      await pumpWaiting(ctx);
       return;
     }
     case 'status': {
@@ -56,6 +65,17 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
         .update(subscriptions)
         .set({ status: msg.loggedIn ? 'ready' : 'needs_login', limits: msg.limits, lastSeenAt: now })
         .where(and(eq(subscriptions.id, id.subscriptionId), isNull(subscriptions.removedAt)));
+      /* A signed-in subscription may have turns waiting for it. */
+      if (msg.loggedIn) await pumpWaiting(ctx);
+      return;
+    }
+    case 'job.event': {
+      const [job] = await db
+        .select({ companyId: jobs.companyId, agentId: jobs.agentId })
+        .from(jobs)
+        .where(and(eq(jobs.id, msg.jobId), eq(jobs.status, 'running'), eq(jobs.kind, 'conversation'), jobsOf(id, ctx)));
+      if (!job?.agentId) return;
+      await appendEvent(ctx, { companyId: job.companyId, agentId: job.agentId, jobId: msg.jobId, kind: msg.event.kind, data: msg.event });
       return;
     }
     case 'job.started': {
@@ -81,6 +101,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
         .where(and(eq(jobs.id, msg.jobId), inArray(jobs.status, OPEN_JOBS), jobsOf(id, ctx)))
         .returning({ companyId: jobs.companyId });
       for (const { companyId } of finished) await publishWorking(ctx, companyId);
+      if (finished.length) await afterJob(ctx, msg.jobId);
       return;
     }
     case 'removed': {

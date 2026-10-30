@@ -27,7 +27,9 @@ export type ErrorReason =
   | 'needs_login'
   | 'job_unknown'
   | 'too_many_attempts'
-  | 'tool_token_invalid';
+  | 'tool_token_invalid'
+  | 'orchestrator_not_ready'
+  | 'nothing_running';
 
 export class ApiError extends Error {
   constructor(

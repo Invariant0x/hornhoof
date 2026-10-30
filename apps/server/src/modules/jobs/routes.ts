@@ -2,9 +2,11 @@ import { and, eq, isNull } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { requirePerson } from '../../auth/session.js';
+import { requireCompanyScope, requirePerson } from '../../auth/session.js';
 import { jobs, subscriptions } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
+import { afterJob } from '../conversation/queue.js';
+import { publishWorking } from '../events/store.js';
 import { identityOf } from '../nodes/hub.js';
 import { dispatchJob, TEST_PROMPT, TEST_TIMEOUT_MS } from './dispatch.js';
 import { jobView, publicJob } from './views.js';
@@ -31,7 +33,7 @@ export function jobRoutes(app: FastifyInstance, ctx: Ctx): void {
       .insert(jobs)
       .values({ companyId: sub.companyId, subscriptionId: sub.id, prompt: TEST_PROMPT, timeoutMs: TEST_TIMEOUT_MS, createdBy: me.id })
       .returning({ id: jobs.id });
-    if (!(await dispatchJob(ctx, { id: job!.id, subscriptionId: sub.id, prompt: TEST_PROMPT, sessionId: null, timeoutMs: TEST_TIMEOUT_MS }))) {
+    if (!(await dispatchJob(ctx, { id: job!.id, subscriptionId: sub.id, prompt: TEST_PROMPT, sessionId: null, timeoutMs: TEST_TIMEOUT_MS, instructions: null, toolToken: null }))) {
       await db.update(jobs).set({ status: 'failed', error: 'machine_offline', finishedAt: new Date() }).where(eq(jobs.id, job!.id));
       throw offline();
     }
@@ -45,5 +47,27 @@ export function jobRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (!view) throw new ApiError(404, 'not_found', 'This job does not exist.', 'job_unknown');
     if (me.scopeKind !== 'company' && view.createdBy !== me.id && view.ownerId !== me.id) throw notOwner();
     return { job: publicJob(view) };
+  });
+
+  /* The node stops the program and reports the job as cancelled. A node that is away cannot, so the job ends here. */
+  app.post('/api/jobs/:id/cancel', async (req, reply) => {
+    const me = await requirePerson(req, db);
+    requireCompanyScope(me);
+    const { id } = IdParams.parse(req.params);
+    const [job] = await db.select({ job: jobs, sub: subscriptions }).from(jobs).innerJoin(subscriptions, eq(subscriptions.id, jobs.subscriptionId)).where(eq(jobs.id, id));
+    if (!job) throw new ApiError(404, 'not_found', 'This job does not exist.', 'job_unknown');
+    if (job.job.status !== 'running') throw new ApiError(409, 'conflict', 'This job is not running.', 'nothing_running');
+    if (!hub.send(identityOf(job.sub), { type: 'job.cancel', jobId: id })) {
+      const [ended] = await db
+        .update(jobs)
+        .set({ status: 'failed', error: 'cancelled', result: 'Stopped.', finishedAt: new Date() })
+        .where(and(eq(jobs.id, id), eq(jobs.status, 'running')))
+        .returning({ id: jobs.id });
+      if (ended) {
+        await publishWorking(ctx, job.job.companyId);
+        await afterJob(ctx, id);
+      }
+    }
+    return reply.code(202).send();
   });
 }

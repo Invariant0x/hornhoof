@@ -75,6 +75,8 @@ export type FakeNode = {
   ws: WebSocket;
   send(msg: NodeMessage): void;
   next(): Promise<ServerMessage>;
+  /* Messages that arrived and nobody took yet. */
+  queued(): number;
   closed: Promise<number>;
   close(): void;
 };
@@ -99,6 +101,7 @@ export function connectNode(url: string, key: string, opts: { autoPong?: boolean
         ws,
         send: msg => ws.send(JSON.stringify(msg)),
         next: () => (queue.length ? Promise.resolve(queue.shift()!) : new Promise(done => waiters.push(done))),
+        queued: () => queue.length,
         closed,
         close: () => ws.close(),
       }),
@@ -119,4 +122,36 @@ export async function until(check: () => Promise<boolean> | boolean, ms = 2000):
 export async function listen(app: FastifyInstance): Promise<string> {
   await app.listen({ host: '127.0.0.1', port: 0 });
   return `ws://127.0.0.1:${(app.server.address() as AddressInfo).port}/api/nodes/socket`;
+}
+
+export type StreamReader = { res: Response; messages: { type: string; [k: string]: unknown }[]; ended(): boolean; close(): void };
+
+/* Reads Server-Sent Events from /api/stream of a listening app as parsed messages. */
+export async function openStream(app: FastifyInstance, token?: string): Promise<StreamReader> {
+  const base = `http://127.0.0.1:${(app.server.address() as AddressInfo).port}`;
+  const stop = new AbortController();
+  const res = await fetch(`${base}/api/stream`, { headers: token ? { cookie: `hh_session=${token}` } : {}, signal: stop.signal });
+  const messages: StreamReader['messages'] = [];
+  let ended = false;
+  if (res.ok) {
+    void (async () => {
+      const reader = res.body!.pipeThrough(new TextDecoderStream()).getReader();
+      let buffer = '';
+      try {
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += value;
+          const frames = buffer.split('\n\n');
+          buffer = frames.pop() ?? '';
+          for (const frame of frames) for (const line of frame.split('\n')) if (line.startsWith('data: ')) messages.push(JSON.parse(line.slice(6)));
+        }
+      } catch {
+        /* Aborted. */
+      }
+      ended = true;
+    })();
+  }
+  onTestFinished(() => stop.abort());
+  return { res, messages, ended: () => ended, close: () => stop.abort() };
 }

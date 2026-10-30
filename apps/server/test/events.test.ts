@@ -1,41 +1,10 @@
-import type { AddressInfo } from 'node:net';
 import { eq } from 'drizzle-orm';
-import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import { agents, companies, departments, jobs, subscriptions } from '../src/db/schema.js';
 import { appendEvent } from '../src/modules/events/store.js';
-import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until } from './helpers.js';
+import { as, connectNode, invitePerson, listen, openStream, setUpCompany, testApp, until } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
-
-/* Reads Server-Sent Events from /api/stream as parsed messages. */
-async function openStream(app: FastifyInstance, token?: string) {
-  const base = `http://127.0.0.1:${(app.server.address() as AddressInfo).port}`;
-  const stop = new AbortController();
-  const res = await fetch(`${base}/api/stream`, { headers: token ? { cookie: `hh_session=${token}` } : {}, signal: stop.signal });
-  const messages: { type: string; [k: string]: unknown }[] = [];
-  let ended = false;
-  if (res.ok) {
-    void (async () => {
-      const reader = res.body!.pipeThrough(new TextDecoderStream()).getReader();
-      let buffer = '';
-      try {
-        for (;;) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buffer += value;
-          const frames = buffer.split('\n\n');
-          buffer = frames.pop() ?? '';
-          for (const frame of frames) for (const line of frame.split('\n')) if (line.startsWith('data: ')) messages.push(JSON.parse(line.slice(6)));
-        }
-      } catch {
-        /* Aborted. */
-      }
-      ended = true;
-    })();
-  }
-  return { res, messages, ended: () => ended, close: () => stop.abort() };
-}
 
 async function company(env: NodeJS.ProcessEnv = {}) {
   const { app, db } = await testApp({ NODE_KEY, ...env });

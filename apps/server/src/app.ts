@@ -4,6 +4,7 @@ import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastif
 import type { Config } from './config.js';
 import { registerErrorHandling } from './errors.js';
 import { authRoutes } from './modules/auth/routes.js';
+import { conversationRoutes } from './modules/conversation/routes.js';
 import { EventBus } from './modules/events/bus.js';
 import { streamRoutes } from './modules/events/stream.js';
 import { jobRoutes } from './modules/jobs/routes.js';
@@ -61,5 +62,6 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   jobRoutes(app, ctx);
   streamRoutes(app, ctx);
   mcpRoutes(app, ctx);
+  conversationRoutes(app, ctx);
   return app;
 }

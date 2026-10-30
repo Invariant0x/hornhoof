@@ -14,7 +14,8 @@ const keyOf = (id: NodeIdentity) => (id.kind === 'builtin' ? 'builtin' : id.subs
 /* A node that misses this many pings in a row is dropped. */
 const MISSED_PINGS = 3;
 
-type Entry = { socket: WebSocket; missed: number };
+/* greeted: Hornhoof has handled the node's hello, so a job sent now cannot be mistaken for one lost in a restart. */
+type Entry = { socket: WebSocket; missed: number; greeted: boolean };
 
 type HubOptions = {
   pingMs: number;
@@ -36,7 +37,7 @@ export class NodeHub {
   attach(id: NodeIdentity, socket: WebSocket): void {
     const key = keyOf(id);
     this.sockets.get(key)?.socket.close(4000, 'Replaced by a newer connection.');
-    const entry: Entry = { socket, missed: 0 };
+    const entry: Entry = { socket, missed: 0, greeted: false };
     this.sockets.set(key, entry);
     const report = (err: unknown) => this.opts.onError?.(err);
     /* Messages run one after another, so job.started is stored before job.done. */
@@ -57,6 +58,17 @@ export class NodeHub {
 
   isOnline(id: NodeIdentity): boolean {
     return this.sockets.get(keyOf(id))?.socket.readyState === 1;
+  }
+
+  greet(id: NodeIdentity): void {
+    const entry = this.sockets.get(keyOf(id));
+    if (entry) entry.greeted = true;
+  }
+
+  /* Online and past its hello: ready for an agent's turn. */
+  isReady(id: NodeIdentity): boolean {
+    const entry = this.sockets.get(keyOf(id));
+    return entry?.socket.readyState === 1 && entry.greeted;
   }
 
   send(id: NodeIdentity, msg: ServerMessage): boolean {

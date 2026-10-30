@@ -7,7 +7,8 @@ import { identityOf } from '../nodes/hub.js';
 export const TEST_PROMPT = 'Reply with one word: ready';
 export const TEST_TIMEOUT_MS = 120_000;
 
-type JobToSend = { id: string; subscriptionId: string; prompt: string; sessionId: string | null; timeoutMs: number };
+/* instructions and toolToken go with an agent's turns; a test job has neither. */
+type JobToSend = { id: string; subscriptionId: string; prompt: string; sessionId: string | null; timeoutMs: number; instructions: string | null; toolToken: string | null };
 
 /* Sends a job to the node that runs its subscription. A personal plan's node signs in itself; an API key travels with the job to the built-in node. */
 export async function dispatchJob(ctx: Ctx, job: JobToSend): Promise<boolean> {
@@ -24,7 +25,7 @@ export async function dispatchJob(ctx: Ctx, job: JobToSend): Promise<boolean> {
     model: null,
     timeoutMs: job.timeoutMs,
     secret,
-    instructions: null,
-    toolToken: null,
+    instructions: job.instructions,
+    toolToken: job.toolToken,
   });
 }
