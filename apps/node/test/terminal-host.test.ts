@@ -55,12 +55,17 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
 
   const codexJob = (key: string, prompt: string, more: Partial<TermJob['input']> = {}) => ({ ...job(key, prompt, more), program: codexProgram, bin: FAKE_CODEX });
   const done = (jobId: string) => sent.find(m => m.type === 'job.done' && m.jobId === jobId);
+  /* Hornhoof answers the nth turn.open the node sent, naming it by its ref. */
+  const ack = (key: string, jobId: string, nth = 0) => {
+    const asked = sent.filter((m): m is Extract<NodeMessage, { type: 'turn.open' }> => m.type === 'turn.open' && m.agentKey === key)[nth];
+    host.opened({ type: 'turn.opened', agentKey: key, jobId, toolToken: `tok-${jobId}`, ref: asked?.ref });
+  };
   /* A person types a line into the agent's terminal, and Hornhoof opens a turn for it. */
   const typeTurn = async (key: string, termId: string, line: string, jobId: string) => {
     await host.open({ type: 'term.open', termId, agentKey: key, cols: 80, rows: 24, write: true });
     host.input({ type: 'term.input', termId, data: `${line}\r` });
     await until(() => sent.some(m => m.type === 'turn.open'));
-    host.opened({ type: 'turn.opened', agentKey: key, jobId, toolToken: `tok-${jobId}` });
+    ack(key, jobId);
     await until(() => host.typedJobs().includes(jobId) || Boolean(done(jobId)));
   };
 
@@ -176,7 +181,7 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
 
     host.input({ type: 'term.input', termId: 't1', data: 'typed by Ivan\r' });
     await until(() => sent.some(m => m.type === 'turn.open'));
-    expect(sent.find(m => m.type === 'turn.open')).toEqual({ type: 'turn.open', agentKey: 'a5', text: 'typed by Ivan' });
+    expect(sent.find(m => m.type === 'turn.open')).toEqual({ type: 'turn.open', agentKey: 'a5', text: 'typed by Ivan', ref: expect.any(String) });
     host.opened({ type: 'turn.opened', agentKey: 'a5', jobId: 'job-typed', toolToken: 'tok-typed' });
     await until(() => sent.some(m => m.type === 'job.done'));
     expect(sent.find(m => m.type === 'job.done')).toMatchObject({ type: 'job.done', jobId: 'job-typed', ok: true, result: 'echo: typed by Ivan', error: null });
@@ -257,19 +262,21 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     host.input({ type: 'term.input', termId: 'u4', data: 'HANG late\r' });
     await until(() => sent.some(m => m.type === 'turn.open'));
     await new Promise(r => setTimeout(r, 600));
-    host.opened({ type: 'turn.opened', agentKey: 'b5', jobId: 'job-late', toolToken: 'tok-late' });
+    ack('b5', 'job-late');
     expect(host.typedJobs()).toEqual(['job-late']);
   });
 
-  it('ends a turn Hornhoof opened too late, after the typed turn was over', async () => {
+  it('reports a typed turn that was over before Hornhoof opened it, once Hornhoof does', async () => {
     await setUp({ openMs: 300 });
     await host.run(job('b6', 'hello'));
     await host.open({ type: 'term.open', termId: 'u5', agentKey: 'b6', cols: 80, rows: 24, write: true });
     host.input({ type: 'term.input', termId: 'u5', data: 'quick\r' });
     await until(async () => (await host.screen('b6')).includes('echo: quick'));
     await new Promise(r => setTimeout(r, 300));
-    host.opened({ type: 'turn.opened', agentKey: 'b6', jobId: 'job-over', toolToken: 'tok-over' });
-    expect(done('job-over')).toMatchObject({ ok: false, error: 'cancelled' });
+    ack('b6', 'job-over');
+    expect(done('job-over')).toMatchObject({ ok: true, result: 'echo: quick' });
+    const mine = sent.filter(m => (m.type === 'job.event' || m.type === 'job.done') && m.jobId === 'job-over').map(m => m.type);
+    expect(mine).toEqual(['job.event', 'job.done']);
     expect(host.typedJobs()).toEqual([]);
   });
 
@@ -310,7 +317,7 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     const first = await host.run(codexJob('c1', 'hello'));
     expect(first).toMatchObject({ ok: true, result: 'echo: hello' });
     await typeTurn('c1', 'v1', 'typed in codex', 'job-codex');
-    expect(sent.find(m => m.type === 'turn.open')).toEqual({ type: 'turn.open', agentKey: 'c1', text: 'typed in codex' });
+    expect(sent.find(m => m.type === 'turn.open')).toEqual({ type: 'turn.open', agentKey: 'c1', text: 'typed in codex', ref: expect.any(String) });
     await until(() => Boolean(done('job-codex')));
     expect(done('job-codex')).toMatchObject({ ok: true, result: 'echo: typed in codex', sessionId: first.sessionId });
     expect(sent).toContainEqual({ type: 'job.event', jobId: 'job-codex', seq: 0, event: { kind: 'text', text: 'echo: typed in codex' } });
@@ -342,4 +349,32 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     expect(next.sessionId).not.toBe(first.sessionId);
     expect(await host.screen('b10')).not.toContain('resumed');
   }, 30_000);
+
+  it('keeps two turns typed into Codex apart while Hornhoof has not answered yet', async () => {
+    await setUp();
+    await host.run(codexJob('c4', 'hello'));
+    await host.open({ type: 'term.open', termId: 'v2', agentKey: 'c4', cols: 80, rows: 24, write: true });
+    host.input({ type: 'term.input', termId: 'v2', data: 'first typed\r' });
+    await until(() => sent.filter(m => m.type === 'turn.open').length === 1);
+    await until(async () => (await host.screen('c4')).includes('echo: first typed'));
+    host.input({ type: 'term.input', termId: 'v2', data: 'second typed\r' });
+    await until(() => sent.filter(m => m.type === 'turn.open').length === 2);
+    await until(async () => (await host.screen('c4')).includes('echo: second typed'));
+    ack('c4', 'job-1', 0);
+    ack('c4', 'job-2', 1);
+    expect(done('job-1')).toMatchObject({ ok: true, result: 'echo: first typed' });
+    expect(done('job-2')).toMatchObject({ ok: true, result: 'echo: second typed' });
+    expect(sent).toContainEqual({ type: 'job.event', jobId: 'job-2', seq: 0, event: { kind: 'text', text: 'echo: second typed' } });
+    expect(sent.filter(m => m.type === 'job.event' && m.jobId === 'job-1')).toHaveLength(1);
+  });
+
+  it('takes an answer without a ref, from a Hornhoof before refs, for the oldest typed turn', async () => {
+    await setUp();
+    await host.run(job('b11', 'hello'));
+    await host.open({ type: 'term.open', termId: 'u9', agentKey: 'b11', cols: 80, rows: 24, write: true });
+    host.input({ type: 'term.input', termId: 'u9', data: 'HANG old server\r' });
+    await until(() => sent.some(m => m.type === 'turn.open'));
+    host.opened({ type: 'turn.opened', agentKey: 'b11', jobId: 'job-old', toolToken: 'tok-old' });
+    expect(host.typedJobs()).toEqual(['job-old']);
+  });
 });

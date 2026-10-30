@@ -1,5 +1,5 @@
 import { execFile, type ChildProcess } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
@@ -27,8 +27,19 @@ function deferred<T>(): Deferred<T> {
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
-/* A turn running now: one Hornhoof sent, or one a person typed, whose events the host sends itself. */
-type Turn = { jobId: string | null; onEvent(e: AgentEvent): void; typed: boolean; seq: number; deadline: number };
+/* A turn running now: one Hornhoof sent, or one a person typed, whose events the host sends itself. A typed turn keeps
+   what happened until Hornhoof answers its turn.open (early), and how it ended if it ended before that (over). */
+type Turn = {
+  jobId: string | null;
+  onEvent(e: AgentEvent): void;
+  typed: boolean;
+  seq: number;
+  deadline: number;
+  ref?: string;
+  early?: AgentEvent[] | null;
+  over?: { message: string; error: JobError; sessionId: string | null } | null;
+  opened?: Deferred<void>;
+};
 type JobError = RunResult['error'];
 
 type Agent = {
@@ -55,10 +66,8 @@ type Agent = {
   watch: NodeJS.Timeout | null;
   /* Hornhoof's turns, one after another. */
   queue: Promise<unknown>;
-  opening: Deferred<{ jobId: string; token: string } | null> | null;
-  /* While Hornhoof opens a typed turn: what the program did meanwhile, and how the turn ended if it did. */
-  early: AgentEvent[] | null;
-  over: { message: string; error: JobError } | null;
+  /* Typed turns Hornhoof has not answered yet, oldest first. */
+  unopened: Turn[];
   /* A person stopped the running turn with Escape. */
   stopped: boolean;
   /* The turn's last line of text, to tell when its answer reached the log. */
@@ -88,6 +97,8 @@ type Options = {
 
 const WAITING = 'This agent starts with its next turn.';
 const STOP_WAIT_MS = 5000;
+/* What a typed turn keeps at most while Hornhoof has not answered it. */
+const EARLY_MAX = 1000;
 /* Claude Code can say a turn ended before its answer is in the session log; the turn waits this long for it. */
 const SETTLE_MS = 3000;
 
@@ -143,7 +154,7 @@ export class TerminalHost {
   private agent(key: string): Agent {
     let a = this.agents.get(key);
     if (!a) {
-      a = { key, name: `a-${key}`, program: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, viewers: 0, idle: null, watch: null, queue: Promise.resolve(), opening: null, early: null, over: null, stopped: false, lastText: null, settling: null };
+      a = { key, name: `a-${key}`, program: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, viewers: 0, idle: null, watch: null, queue: Promise.resolve(), unopened: [], stopped: false, lastText: null, settling: null };
       this.agents.set(key, a);
     }
     return a;
@@ -349,7 +360,7 @@ export class TerminalHost {
         continue;
       }
       const news = codexRollout(data);
-      if (news.typed !== undefined && !a.turn && !a.opening) void this.openTyped(a, news.typed, true);
+      if (news.typed !== undefined && !a.turn) void this.openTyped(a, news.typed, true);
       for (const e of news.events) this.emit(a, e);
       if (news.limits) a.limits = news.limits;
       if (news.session) a.sessionId = news.session.id;
@@ -362,7 +373,6 @@ export class TerminalHost {
         if (news.aborted) this.interrupted(a);
         else if (a.turn?.typed) this.finishTyped(a, message);
         else if (a.turn) a.ended?.resolve(message);
-        else if (a.opening) a.over = { message, error: news.aborted ? 'cancelled' : null };
       }
     }
   }
@@ -378,12 +388,17 @@ export class TerminalHost {
 
   private emit(a: Agent, event: AgentEvent): void {
     const turn = a.turn;
-    if (!turn) {
-      a.early?.push(event);
-      return;
-    }
+    if (!turn) return;
     if (event.kind === 'text') a.lastText = event.text;
     if (!turn.typed) return turn.onEvent(event);
+    this.typedEvent(turn, event);
+  }
+
+  private typedEvent(turn: Turn, event: AgentEvent): void {
+    if (turn.early) {
+      if (turn.early.length < EARLY_MAX) turn.early.push(event);
+      return;
+    }
     if (turn.jobId) this.opts.send({ type: 'job.event', jobId: turn.jobId, seq: turn.seq++, event: tidy(event, this.opts.secrets()) });
   }
 
@@ -425,42 +440,40 @@ export class TerminalHost {
     }
   }
 
-  /* A person typed while no turn ran: Hornhoof opens one, so the agent has its tools and the turn shows like any other.
-     Claude Code waits in its hook meanwhile; Codex goes on, and what it does waits for the turn. fromLog: the typing was
-     read from the log, which is being read now. */
+  /* A person typed while no turn ran: the turn starts at once and Hornhoof opens a job for it, so the agent has its tools
+     and the turn shows like any other. Claude Code waits in its hook for Hornhoof's answer, for a while; Codex goes on, and
+     what it does waits in the turn. fromLog: the typing was read from the log, which is being read now. */
   private async openTyped(a: Agent, text: string, fromLog = false): Promise<void> {
     if (a.idle) clearTimeout(a.idle);
     if (!fromLog) this.drain(a);
-    a.opening = deferred();
-    a.early = [];
-    a.over = null;
     a.lastText = null;
-    this.opts.send({ type: 'turn.open', agentKey: a.key, text: text.slice(0, 100_000) });
-    const got = await Promise.race([a.opening.promise, sleep(this.openMs).then(() => null)]);
-    const early = a.early;
-    a.opening = null;
-    a.early = null;
-    if (got) this.typedTurn(a, got, early);
-    a.over = null;
-  }
-
-  private typedTurn(a: Agent, got: { jobId: string; token: string }, early: AgentEvent[] = []): void {
-    a.turn = { jobId: got.jobId, onEvent: () => {}, typed: true, seq: 0, deadline: Date.now() + this.typedMs };
-    this.bridge.setToken(a.key, got.token);
-    for (const e of early) this.emit(a, e);
+    const turn: Turn = { jobId: null, onEvent: () => {}, typed: true, seq: 0, deadline: Date.now() + this.typedMs, ref: randomUUID(), early: [], over: null, opened: deferred() };
+    a.turn = turn;
+    a.unopened.push(turn);
     this.watch(a);
-    if (a.over) this.finishTyped(a, a.over.message, a.over.error);
+    this.opts.send({ type: 'turn.open', agentKey: a.key, text: text.slice(0, 100_000), ref: turn.ref });
+    await Promise.race([turn.opened!.promise, sleep(this.openMs)]);
   }
 
-  /* Hornhoof's answer to turn.open. One that comes after the host stopped waiting still counts while the typed turn runs;
-     otherwise the turn it opened ends at once. */
+  /* Hornhoof's answer to turn.open, found by its ref; a Hornhoof from before refs answers in order. A typed turn gets its
+     job and tool token, and what it did or how it ended so far goes out. An answer no typed turn waits for ends its job. */
   opened(m: Msg<'turn.opened'>): void {
     const a = this.agents.get(m.agentKey);
-    const got = m.jobId && m.toolToken ? { jobId: m.jobId, token: m.toolToken } : null;
-    if (a?.opening) return a.opening.resolve(got);
-    if (!got) return;
-    if (a && a.busy && !a.turn) return this.typedTurn(a, got);
-    this.opts.send({ type: 'job.done', jobId: got.jobId, ok: false, sessionId: a?.sessionId ?? null, result: 'Stopped.', tail: '', error: 'cancelled' });
+    const at = a ? (m.ref ? a.unopened.findIndex(t => t.ref === m.ref) : a.unopened.length ? 0 : -1) : -1;
+    const turn = at >= 0 ? a!.unopened.splice(at, 1)[0]! : null;
+    if (!a || !turn) {
+      if (m.jobId) this.opts.send({ type: 'job.done', jobId: m.jobId, ok: false, sessionId: a?.sessionId ?? null, result: 'Stopped.', tail: '', error: 'cancelled' });
+      return;
+    }
+    const early = turn.early ?? [];
+    turn.early = null;
+    if (m.jobId && m.toolToken) {
+      turn.jobId = m.jobId;
+      if (a.turn === turn) this.bridge.setToken(a.key, m.toolToken);
+      for (const e of early) this.typedEvent(turn, e);
+    }
+    turn.opened?.resolve();
+    if (turn.over) this.typedDone(turn, turn.over.message, turn.over.error, turn.over.sessionId);
   }
 
   private finishTyped(a: Agent, message: string, error: JobError = null): void {
@@ -468,11 +481,16 @@ export class TerminalHost {
     if (!turn?.typed) return;
     a.turn = null;
     this.bridge.setToken(a.key, null);
-    if (turn.jobId) {
-      const result = error === 'cancelled' ? 'Stopped.' : error ? '' : redact(message, this.opts.secrets());
-      this.opts.send({ type: 'job.done', jobId: turn.jobId, ok: !error, sessionId: a.sessionId, result, tail: '', error });
-    }
+    /* Hornhoof has not answered yet: the end goes out with its answer. */
+    if (turn.early) turn.over = { message, error, sessionId: a.sessionId };
+    else this.typedDone(turn, message, error, a.sessionId);
     this.restLater(a);
+  }
+
+  private typedDone(turn: Turn, message: string, error: JobError, sessionId: string | null): void {
+    if (!turn.jobId) return;
+    const result = error === 'cancelled' ? 'Stopped.' : error ? '' : redact(message, this.opts.secrets());
+    this.opts.send({ type: 'job.done', jobId: turn.jobId, ok: !error, sessionId, result, tail: '', error });
   }
 
   /* Turns people typed that run now: they count as running when the node says hello again. */

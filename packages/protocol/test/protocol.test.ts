@@ -169,14 +169,14 @@ describe('live terminals', () => {
       { type: 'hello', version: '0.6.0', loggedIn: true, running: [], terminals: true },
       { type: 'term.data', termId: 't-1', data: '\u001b[1mhi\u001b[0m ❯' },
       { type: 'term.exit', termId: 't-1' },
-      { type: 'turn.open', agentKey: 'agent-1', text: 'Look at the build' },
+      { type: 'turn.open', agentKey: 'agent-1', text: 'Look at the build', ref: 'r-1' },
     ];
     const server: ServerMessage[] = [
       { type: 'term.open', termId: 't-1', agentKey: 'agent-1', cols: 120, rows: 36, write: true },
       { type: 'term.input', termId: 't-1', data: 'hello\r' },
       { type: 'term.resize', termId: 't-1', cols: 80, rows: 24 },
       { type: 'term.close', termId: 't-1' },
-      { type: 'turn.opened', agentKey: 'agent-1', jobId: 'job-9', toolToken: 'tok' },
+      { type: 'turn.opened', agentKey: 'agent-1', jobId: 'job-9', toolToken: 'tok', ref: 'r-1' },
       { type: 'turn.opened', agentKey: 'agent-1', jobId: null, toolToken: null },
     ];
     for (const m of node) expect(parseNodeMessage(JSON.stringify(m))).toEqual(m);

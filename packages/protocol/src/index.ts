@@ -124,8 +124,9 @@ const NodeMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('removed') }),
   z.object({ type: z.literal('term.data'), termId: TermId, data: z.string().max(4 * TERM_CHUNK) }),
   z.object({ type: z.literal('term.exit'), termId: TermId }),
-  /* A person typed to an agent that had no turn running: Hornhoof opens one so the agent has its tools. */
-  z.object({ type: z.literal('turn.open'), agentKey: z.string().regex(/^[A-Za-z0-9-]{1,64}$/), text: z.string().max(100_000) }),
+  /* A person typed to an agent that had no turn running: Hornhoof opens one so the agent has its tools. ref names the
+     typed turn, and Hornhoof's answer carries it back. */
+  z.object({ type: z.literal('turn.open'), agentKey: z.string().regex(/^[A-Za-z0-9-]{1,64}$/), text: z.string().max(100_000), ref: z.string().max(64).optional() }),
 ]);
 export type NodeMessage = z.infer<typeof NodeMessage>;
 
@@ -180,7 +181,7 @@ const ServerMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('term.resize'), termId: TermId, cols: Cols, rows: Rows }),
   z.object({ type: z.literal('term.close'), termId: TermId }),
   /* The turn Hornhoof opened for what a person typed, or none when it could not. */
-  z.object({ type: z.literal('turn.opened'), agentKey: Id, jobId: Id.nullable(), toolToken: z.string().max(200).nullable() }),
+  z.object({ type: z.literal('turn.opened'), agentKey: Id, jobId: Id.nullable(), toolToken: z.string().max(200).nullable(), ref: z.string().max(64).optional() }),
 ]);
 export type ServerMessage = z.infer<typeof ServerMessage>;
 

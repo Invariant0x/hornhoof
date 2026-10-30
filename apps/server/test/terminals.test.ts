@@ -171,9 +171,9 @@ describe('a turn a person typed into the terminal', () => {
     await next(builtin, 'term.open');
     screen.ws.send(JSON.stringify({ type: 'input', data: 'what do we sell\r' }));
     await next(builtin, 'term.input');
-    builtin.send({ type: 'turn.open', agentKey: orchestratorId, text: 'what do we sell' });
+    builtin.send({ type: 'turn.open', agentKey: orchestratorId, text: 'what do we sell', ref: 'r-7' });
     const opened = await next(builtin, 'turn.opened');
-    expect(opened).toMatchObject({ agentKey: orchestratorId, jobId: expect.any(String), toolToken: expect.stringMatching(/^[A-Za-z0-9_-]{40,}$/) });
+    expect(opened).toMatchObject({ agentKey: orchestratorId, jobId: expect.any(String), toolToken: expect.stringMatching(/^[A-Za-z0-9_-]{40,}$/), ref: 'r-7' });
     expect(await state(app, ceo)).toMatchObject({ busy: true, runningJobId: opened.jobId });
     const message = (await events(app, ceo)).find((e: { kind: string }) => e.kind === 'message');
     expect(message).toMatchObject({ jobId: opened.jobId, data: { text: 'what do we sell' }, person: { name: expect.any(String) } });
