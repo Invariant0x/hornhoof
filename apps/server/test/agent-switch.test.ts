@@ -1,14 +1,14 @@
 import type { AddressInfo } from 'node:net';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agentChanges, agents, companies, departments, jobs, requests, subscriptions, tasks, turns } from '../src/db/schema.js';
+import { agentChanges, agents, companies, departments, jobs, people, subscriptions, tasks, turns } from '../src/db/schema.js';
 import { afterJob, pumpWaiting } from '../src/modules/conversation/queue.js';
 import { identityOf } from '../src/modules/nodes/hub.js';
-import { ask, createTask, submit, verdict } from '../src/modules/tasks/engine.js';
+import { answer, ask, createTask, submit, verdict } from '../src/modules/tasks/engine.js';
 import { wakeAll, wakePrompt } from '../src/modules/tasks/wake.js';
 import { as, connectNode, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
@@ -421,6 +421,65 @@ describe('work an agent held when it was switched off', () => {
     await app.inject({ method: 'POST', url: `/api/requests/${request.id}`, payload: { answer: 'Yes, with tax.' }, ...as(ceo) });
     expect(await row(db, task.id)).toMatchObject({ status: 'review', panel: [rex.id], assigneeAgentId: rex.id });
     expect(await db.select().from(jobs).where(and(eq(jobs.agentId, rita.id), eq(jobs.status, 'queued')))).toEqual([]);
+  });
+
+  it('wakes a reviewer whose answer came first again once the last question at the gate is answered', async () => {
+    const { ctx, db, bruno, rita, rex, memberTask } = await company();
+    const task = await memberTask();
+    await submit(ctx, bruno.id, task.id, done);
+    const first = await ask(ctx, rita.id, task.id, { kind: 'question', text: 'Is tax in scope?' });
+    const second = await ask(ctx, rex.id, task.id, { kind: 'question', text: 'Which currency?' });
+    const [ceo] = await db.select().from(people);
+    const early = await answer(ctx, ceo!.id, first.request.id, { answer: 'Yes, with tax.' });
+    expect(early.task.status).toBe('waiting');
+    expect(early.wakes.map(w => [w.agentId, w.why])).toEqual([[rita.id, 'answered']]);
+    const last = await answer(ctx, ceo!.id, second.request.id, { answer: 'Euro.' });
+    expect(last.task.status).toBe('review');
+    expect(last.wakes.map(w => [w.agentId, w.why])).toEqual([
+      [rex.id, 'answered'],
+      [rita.id, 'review'],
+    ]);
+  });
+
+  /* Someone moves the other task in the moment between the switch reading the tasks and moving them. */
+  const meddle = (ctx: Awaited<ReturnType<typeof company>>['ctx'], db: Awaited<ReturnType<typeof company>>['db'], ids: string[]) => {
+    const publish = ctx.bus.publish.bind(ctx.bus);
+    let done = false;
+    ctx.bus.publish = ((companyId: string, e: { type: string; id?: string }) => {
+      if (!done && e.type === 'task' && e.id && ids.includes(e.id)) {
+        done = true;
+        const other = ids.find(id => id !== e.id)!;
+        void db.update(tasks).set({ version: sql`${tasks.version} + 1` }).where(eq(tasks.id, other)).then(() => undefined);
+      }
+      return publish(companyId, e as never);
+    }) as typeof ctx.bus.publish;
+    onTestFinished(() => {
+      ctx.bus.publish = publish;
+    });
+  };
+
+  it('starts every waiting gate when a reviewer is switched on while someone moves one of them', async () => {
+    const { ctx, db, bruno, bea, rita, rex, off, patch, memberTask } = await company();
+    const one = await memberTask(bruno.id);
+    const two = await memberTask(bea.id);
+    await off(rita.id, rex.id);
+    await submit(ctx, bruno.id, one.id, done);
+    await submit(ctx, bea.id, two.id, done);
+    meddle(ctx, db, [one.id, two.id]);
+    await patch(rex.id, { on: true });
+    for (const t of [one, two]) {
+      expect(await row(db, t.id)).toMatchObject({ panel: [rex.id], assigneeAgentId: rex.id });
+      expect((await db.select().from(jobs).where(and(eq(jobs.agentId, rex.id), eq(jobs.taskId, t.id)))).length).toBe(1);
+    }
+  });
+
+  it('hands every task back when an agent is switched off while someone moves one of them', async () => {
+    const { ctx, db, hana, bruno, patch, memberTask } = await company();
+    const one = await memberTask();
+    const two = await memberTask();
+    meddle(ctx, db, [one.id, two.id]);
+    await patch(bruno.id, { on: false });
+    for (const t of [one, two]) expect((await row(db, t.id)).assigneeAgentId).toBe(hana.id);
   });
 
   it('starts the gate again when a reviewer of its role is switched on', async () => {

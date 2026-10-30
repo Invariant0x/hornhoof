@@ -342,59 +342,86 @@ export async function dropGate(ctx: Live, actor: Actor, task: Task, agentId: str
 
 export type TaskChange = { title?: string; brief?: string; body?: string; executor?: string; gates?: string[] };
 
+/* Runs fn on the task, and again on a fresh read of it when someone moved it meanwhile; null when it kept moving. */
+async function onFresh<T>(ctx: Live, task: Task, fn: (task: Task) => Promise<T>): Promise<T | null> {
+  for (let tries = 0; tries < 3; tries++) {
+    try {
+      return await fn(task);
+    } catch (err) {
+      if (!(err instanceof ApiError) || err.reason !== 'task_changed') throw err;
+      task = await loadTask(ctx.db, task.id);
+    }
+  }
+  return null;
+}
+
+type Leaver = { id: string; name: string; companyId: string };
+
 /* An agent switched off once its running turn is over: work it does and has not handed in goes to whoever gave it out,
    and it leaves the gates it has not given its verdict at, which decide with the rest or wait with the giver. Work that
    waits for its own question to a person stays until the answer comes. handed: the tasks it no longer holds, closed: the
    ones that finished as it left. */
-export async function leaveWork(ctx: Live, actor: Actor, agent: { id: string; name: string; companyId: string }): Promise<{ wakes: Wake[]; handed: string[]; closed: Task[] }> {
-  const open = await ctx.db.select().from(tasks).where(and(eq(tasks.companyId, agent.companyId), notInArray(tasks.status, [...CLOSED, 'planned'])));
+export async function leaveWork(ctx: Live, actor: Actor, agent: Leaver): Promise<{ wakes: Wake[]; handed: string[]; closed: Task[] }> {
+  const open = await ctx.db.select().from(tasks).where(and(eq(tasks.companyId, agent.companyId), notInArray(tasks.status, [...CLOSED, 'planned']))).orderBy(asc(tasks.number));
   const asked = new Set((await ctx.db.select({ taskId: requests.taskId }).from(requests).where(and(eq(requests.agentId, agent.id), eq(requests.status, 'open')))).map(r => r.taskId));
   const n: Note = { kind: 'updated', actor, text: `${agent.name} was switched off.`, data: { fields: ['assignee'] } };
   const wakes: Wake[] = [];
   const handed: string[] = [];
   const closed: Task[] = [];
-  for (const task of open) {
-    if (task.status === 'waiting' && (asked.has(task.id) || !task.panel.includes(agent.id))) continue;
-    if (task.stage === 0 && task.executorAgentId === agent.id && task.assigneeAgentId === agent.id && task.createdByAgentId && task.createdByAgentId !== agent.id) {
-      await move(ctx, task, { assigneeAgentId: task.createdByAgentId, status: task.status === 'working' ? 'open' : task.status }, n);
-      wakes.push(...giver(task, 'switched', agent.id, `${agent.name} does it and was switched off. Give it to someone who is on with update_task, or tell the CEO it waits for ${agent.name}.`));
-      handed.push(task.id);
-    } else if (task.stage > 0 && task.panel.includes(agent.id)) {
-      const panel = task.panel.filter(id => id !== agent.id);
-      /* Someone else at the gate asked a person, so someone is left to decide it. */
-      if (task.status === 'waiting' && !panel.length) continue;
-      handed.push(task.id);
-      if (panel.length) {
-        await move(ctx, task, { panel, assigneeAgentId: panel[0]! }, n);
-        continue;
-      }
-      const given = await gateVerdicts(ctx.db, task);
-      if (given.length) {
-        const moved = await closeGate(ctx, task, n, given);
-        wakes.push(...moved.wakes);
-        if (CLOSED.includes(moved.task.status)) closed.push(moved.task);
-        continue;
-      }
-      await move(ctx, task, { panel: [], assigneeAgentId: task.createdByAgentId }, n);
-      wakes.push(...giver(task, 'switched', agent.id, `Nobody who can check it at gate ${task.stage} is on now that ${agent.name} was switched off. Give it other gates with update_task, or tell the CEO it waits for one of them.`));
-    }
+  for (const found of open) {
+    const left = await onFresh(ctx, found, task => leaveTask(ctx, n, agent, asked, task));
+    if (!left) continue;
+    handed.push(found.id);
+    wakes.push(...left.wakes);
+    if (left.closed) closed.push(left.closed);
   }
   return { wakes, handed, closed };
 }
 
+/* The agent leaves one task; null when it does not hold it. */
+async function leaveTask(ctx: Live, n: Note, agent: Leaver, asked: Set<string>, task: Task): Promise<{ wakes: Wake[]; closed: Task | null } | null> {
+  if (CLOSED.includes(task.status) || task.status === 'planned') return null;
+  if (task.status === 'waiting' && (asked.has(task.id) || !task.panel.includes(agent.id))) return null;
+  if (task.stage === 0 && task.executorAgentId === agent.id && task.assigneeAgentId === agent.id && task.createdByAgentId && task.createdByAgentId !== agent.id) {
+    await move(ctx, task, { assigneeAgentId: task.createdByAgentId, status: task.status === 'working' ? 'open' : task.status }, n);
+    return { wakes: giver(task, 'switched', agent.id, `${agent.name} does it and was switched off. Give it to someone who is on with update_task, or tell the CEO it waits for ${agent.name}.`), closed: null };
+  }
+  if (task.stage < 1 || !task.panel.includes(agent.id)) return null;
+  const panel = task.panel.filter(id => id !== agent.id);
+  /* Someone else at the gate asked a person, so someone is left to decide it. */
+  if (task.status === 'waiting' && !panel.length) return null;
+  if (panel.length) {
+    await move(ctx, task, { panel, assigneeAgentId: panel[0]! }, n);
+    return { wakes: [], closed: null };
+  }
+  const given = await gateVerdicts(ctx.db, task);
+  if (given.length) {
+    const moved = await closeGate(ctx, task, n, given);
+    return { wakes: moved.wakes, closed: CLOSED.includes(moved.task.status) ? moved.task : null };
+  }
+  await move(ctx, task, { panel: [], assigneeAgentId: task.createdByAgentId }, n);
+  const text = `Nobody who can check it at gate ${task.stage} is on now that ${agent.name} was switched off. Give it other gates with update_task, or tell the CEO it waits for one of them.`;
+  return { wakes: giver(task, 'switched', agent.id, text), closed: null };
+}
+
 /* An agent switched on again: a task that waits at a gate with nobody on to check it starts that gate again once someone
    can. */
-export async function rejoin(ctx: Live, actor: Actor, agent: { id: string; name: string; companyId: string }): Promise<Wake[]> {
+export async function rejoin(ctx: Live, actor: Actor, agent: Leaver): Promise<Wake[]> {
   const held = await ctx.db
     .select()
     .from(tasks)
-    .where(and(eq(tasks.companyId, agent.companyId), eq(tasks.status, 'review'), sql`${tasks.stage} > 0`, sql`${tasks.panel} = '[]'::jsonb`));
+    .where(and(eq(tasks.companyId, agent.companyId), eq(tasks.status, 'review'), sql`${tasks.stage} > 0`, sql`${tasks.panel} = '[]'::jsonb`))
+    .orderBy(asc(tasks.number));
   const wakes: Wake[] = [];
-  for (const task of held) {
-    const gate = await atGate(ctx.db, task, task.stage);
-    if (!gate.set.panel?.length) continue;
-    await move(ctx, task, gate.set, { kind: 'updated', actor, text: `${agent.name} was switched on.`, data: { fields: ['assignee'] } });
-    wakes.push(...gate.wakes);
+  for (const found of held) {
+    const started = await onFresh(ctx, found, async task => {
+      if (task.status !== 'review' || task.stage < 1 || task.panel.length) return [];
+      const gate = await atGate(ctx.db, task, task.stage);
+      if (!gate.set.panel?.length) return [];
+      await move(ctx, task, gate.set, { kind: 'updated', actor, text: `${agent.name} was switched on.`, data: { fields: ['assignee'] } });
+      return gate.wakes;
+    });
+    wakes.push(...(started ?? []));
   }
   return wakes;
 }
@@ -581,5 +608,7 @@ export async function answer(ctx: Live, personId: string, requestId: string, a: 
   await handOff(ctx, { personId }, now);
   ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
   const wakes: Wake[] = CLOSED.includes(now.status) ? [] : [{ agentId: found.agentId, taskId: task.id, why: 'answered', text: said }];
+  /* The last answer at a gate: everyone else still to give a verdict there goes on too, also after a turn spent waiting. */
+  if (task.status === 'waiting' && now.status === 'review') wakes.push(...now.panel.filter(id => id !== found.agentId).map(agentId => ({ agentId, taskId: task.id, why: 'review' as const })));
   return { request: row, task: now, wakes };
 }
