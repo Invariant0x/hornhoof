@@ -454,6 +454,16 @@ describe('Hornhoof tools and instructions', () => {
 
 const linesOf = (file: string): unknown[] => readFileSync(new URL(`./fixtures/${file}.jsonl`, import.meta.url), 'utf8').trim().split('\n').map(l => JSON.parse(l));
 
+describe("the turn's repository", () => {
+  it('reaches every program as git access in its environment', async () => {
+    const env = { GIT_ASKPASS: '/app/git-askpass', HH_GIT_PASSWORD: 'ghp_repo1234', GIT_TERMINAL_PROMPT: '0' };
+    for (const provider of ['claude', 'codex', 'kimi'] as const) {
+      await adapter(provider).run(input({ env }));
+      expect(lastRun().env).toMatchObject(env);
+    }
+  });
+});
+
 describe('live events', () => {
   it('read the tool call, its result and the answer from Claude Code', () => {
     expect(linesOf('claude-tools').flatMap(claudeEvents)).toEqual([

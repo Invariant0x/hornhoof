@@ -70,6 +70,8 @@ describe('renderInstructions', () => {
     ]);
     expect(parts[0]!.text).toContain('You are Bruno, the Backend engineer of the Development department at Acme, working on Mascot.');
     expect(parts[0]!.text).toContain('Hornhoof');
+    expect(parts[0]!.text).toContain('Work comes to you as tasks');
+    expect(parts[0]!.text).not.toContain('later version');
     expect(parts[1]!.text).toBe('You own the server side.');
     expect(parts[3]!.text).toBe('<!-- hh:skill dev-tdd -->\n## Test first\n\nWrite the test first.\n<!-- /hh:skill -->');
     expect(text).toBe(parts.map(p => p.text).join('\n\n'));

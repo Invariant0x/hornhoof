@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ORCHESTRATOR_INSTRUCTIONS } from '../src/modules/conversation/prompt.js';
+import { ORCHESTRATOR_INSTRUCTIONS, preface } from '../src/modules/conversation/prompt.js';
 
 describe('orchestrator instructions', () => {
   it('names the departments the way the Russian screen shows them', () => {
@@ -11,5 +11,24 @@ describe('orchestrator instructions', () => {
       expect(ORCHESTRATOR_INSTRUCTIONS).toContain(words);
     }
     expect(ORCHESTRATOR_INSTRUCTIONS).not.toContain('Hornhoof cannot put people or agents into departments yet');
+  });
+
+  it('runs turns through department tasks', () => {
+    for (const words of ['turn', '"create_task"', '"report"', '"tasks"', 'head']) expect(ORCHESTRATOR_INSTRUCTIONS).toContain(words);
+    expect(ORCHESTRATOR_INSTRUCTIONS).not.toContain('later version');
+  });
+});
+
+describe('catching a new session up', () => {
+  it("names Hornhoof for the messages it wrote itself, like a task's wake", () => {
+    const at = new Date().toISOString();
+    const text = preface(
+      [
+        { seq: 1, kind: 'message', data: { text: '#1 "Checkout API" is yours to do.' }, jobId: null, person: null, at },
+        { seq: 2, kind: 'text', data: { text: 'On it.' }, jobId: null, person: null, at },
+      ],
+      'Bruno',
+    );
+    expect(text).toContain('Hornhoof: #1 "Checkout API" is yours to do.\nBruno: On it.');
   });
 });

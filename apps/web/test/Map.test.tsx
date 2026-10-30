@@ -234,6 +234,28 @@ describe('Map', () => {
     expect(container.querySelector('.hub-num')).toHaveTextContent('1/1');
   });
 
+  it('shows what a department works on now where it would say it has no agents', async () => {
+    mockApi({ 'GET /api/org': [200, { ...ORG, departments: [dept({ id: 'd1', name: 'Sales', current: { id: 't5', number: 5, title: 'Call ten shops' } }), dept({ id: 'd2', name: 'Support' })] }] });
+    render(<MapScreen {...PROPS} />);
+    const sales = await screen.findByRole('button', { name: /Sales/ });
+    expect(sales.querySelector('.now')).toHaveTextContent('#5 Call ten shops');
+    expect(sales).not.toHaveTextContent('No agents yet');
+    expect(screen.getByRole('button', { name: /Support/ })).toHaveTextContent('No agents yet');
+  });
+
+  it("shows the company's turn under the hub and keeps the add button clear of it", async () => {
+    mockApi({ 'GET /api/org': [200, { ...ORG_WITH_TEAMS, turn: { id: 'u3', number: 3, goal: 'Take payments' } }] });
+    const { container } = render(<MapScreen {...PROPS} />);
+    const turn = await screen.findByText('Turn 3');
+    expect(turn.closest('.hub-turn')).toHaveTextContent('Turn 3Take payments');
+    const top = (el: Element | null) => parseFloat((el as HTMLElement).style.top);
+    expect(top(container.querySelector('.add'))).toBeGreaterThan(top(container.querySelector('.hub-turn')) + 48);
+    /* Traces to the lower rows leave the hub 84 to each side of its middle (600); the turn stays between them. */
+    const box = container.querySelector('.hub-turn') as HTMLElement;
+    expect(parseFloat(box.style.left)).toBeGreaterThanOrEqual(600 - 84);
+    expect(parseFloat(box.style.left) + parseFloat(box.style.width)).toBeLessThanOrEqual(600 + 84);
+  });
+
   it('tells when the orchestrator has no subscription', async () => {
     mockApi({ 'GET /api/org': [200, { ...ORG, orchestrator: { ...ORG.orchestrator, subscription: null } }] });
     render(<MapScreen {...PROPS} />);

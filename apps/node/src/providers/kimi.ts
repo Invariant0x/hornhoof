@@ -83,7 +83,7 @@ export function kimiAdapter({ home, tools, bin = join(tools, 'bin', 'kimi'), use
       const done = await runProgram({
         bin,
         args,
-        env: env(input.tools?.token ?? null),
+        env: { ...env(input.tools?.token ?? null), ...input.env },
         user,
         cwd: input.workDir,
         timeoutMs: input.timeoutMs,

@@ -1,5 +1,6 @@
 import { TEMPLATE_KEYS, type Limits, type ModelOption } from '@hornhoof/protocol';
-import { bigserial, boolean, index, integer, jsonb, pgTable, text, timestamp, unique, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
+import { bigserial, boolean, index, integer, jsonb, pgTable, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
 
 const id = () => uuid('id').primaryKey().defaultRandom();
 const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow();
@@ -71,6 +72,11 @@ export const departments = pgTable('departments', {
   about: text('about').notNull().default(''),
   roleCode: text('role_code').notNull(),
   position: integer('position').notNull().default(0),
+  /* The git repository its agents work in: https only; the token is stored encrypted and shown by its last 4 characters. */
+  repoUrl: text('repo_url'),
+  repoBranch: text('repo_branch'),
+  repoTokenEnc: text('repo_token_enc'),
+  repoTokenLast4: text('repo_token_last4'),
   createdAt: createdAt(),
 });
 
@@ -226,11 +232,13 @@ export const jobs = pgTable(
     /* The hash of the instructions it ran with; a change starts a fresh session. */
     instructionsHash: text('instructions_hash'),
     createdBy: uuid('created_by').references(() => people.id),
+    /* The task a turn works on, when a task woke the agent. */
+    taskId: uuid('task_id').references((): AnyPgColumn => tasks.id),
     createdAt: createdAt(),
     startedAt: timestamp('started_at', { withTimezone: true }),
     finishedAt: timestamp('finished_at', { withTimezone: true }),
   },
-  t => [index('jobs_subscription_id').on(t.subscriptionId)],
+  t => [index('jobs_subscription_id').on(t.subscriptionId), index('jobs_task_id').on(t.taskId)],
 );
 
 export const AGENT_EVENT_KINDS = ['message', 'text', 'tool', 'tool_result', 'todo', 'proposal', 'applied', 'stopped', 'failed'] as const;
@@ -269,3 +277,103 @@ export const proposals = pgTable('proposals', {
   appliedAt: timestamp('applied_at', { withTimezone: true }),
   createdAt: createdAt(),
 });
+
+/* A company-wide cycle the CEO starts with a goal; one is open at a time. */
+export const turns = pgTable(
+  'turns',
+  {
+    id: id(),
+    companyId: companyId(),
+    number: integer('number').notNull(),
+    goal: text('goal').notNull(),
+    status: text('status', { enum: ['open', 'closed'] }).notNull().default('open'),
+    /* The orchestrator's task for the turn. */
+    taskId: uuid('task_id').references((): AnyPgColumn => tasks.id),
+    startedBy: uuid('started_by').notNull().references(() => people.id),
+    closedBy: uuid('closed_by').references(() => people.id),
+    createdAt: createdAt(),
+    closedAt: timestamp('closed_at', { withTimezone: true }),
+  },
+  t => [unique('turns_company_number').on(t.companyId, t.number), uniqueIndex('turns_one_open').on(t.companyId).where(sql`status = 'open'`)],
+);
+
+export const TASK_STATUSES = ['open', 'working', 'review', 'waiting', 'blocked', 'done', 'cancelled'] as const;
+export type TaskStatus = (typeof TASK_STATUSES)[number];
+
+/* A piece of work: the title and brief for people, the body every agent reads as the current truth, and its gates. */
+export const tasks = pgTable(
+  'tasks',
+  {
+    id: id(),
+    companyId: companyId(),
+    number: integer('number').notNull(),
+    turnId: uuid('turn_id').references((): AnyPgColumn => turns.id),
+    parentId: uuid('parent_id').references((): AnyPgColumn => tasks.id),
+    departmentId: uuid('department_id').references(() => departments.id),
+    productId: uuid('product_id').references(() => departments.id),
+    title: text('title').notNull(),
+    brief: text('brief').notNull().default(''),
+    body: text('body').notNull().default(''),
+    status: text('status', { enum: TASK_STATUSES }).notNull().default('open'),
+    /* Who holds the task now: the executor, the gate at its stage, or the head or orchestrator that owns it. */
+    assigneeAgentId: uuid('assignee_agent_id').references(() => agents.id),
+    /* A member task's executor; its gates are employees in order and stage 0 is the executor's turn. */
+    executorAgentId: uuid('executor_agent_id').references(() => agents.id),
+    gates: jsonb('gates').$type<string[]>().notNull().default([]),
+    stage: integer('stage').notNull().default(0),
+    bounces: integer('bounces').notNull().default(0),
+    /* Task turns in a row that ended without moving the task. */
+    silent: integer('silent').notNull().default(0),
+    /* Grows with every move, so two moves that read the same task cannot both land. */
+    version: integer('version').notNull().default(0),
+    createdByPersonId: uuid('created_by_person_id').references(() => people.id),
+    createdByAgentId: uuid('created_by_agent_id').references(() => agents.id),
+    createdAt: createdAt(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    closedAt: timestamp('closed_at', { withTimezone: true }),
+  },
+  t => [unique('tasks_company_number').on(t.companyId, t.number), index('tasks_department_id').on(t.departmentId), index('tasks_assignee').on(t.assigneeAgentId), index('tasks_parent_id').on(t.parentId)],
+);
+
+export const TASK_EVENT_KINDS = ['created', 'assigned', 'updated', 'comment', 'submitted', 'verdict', 'report', 'blocked', 'asked', 'answered', 'reminded', 'stuck', 'cancelled', 'done'] as const;
+export type TaskEventKind = (typeof TASK_EVENT_KINDS)[number];
+
+/* Everything that happened to a task, with the person or agent who did it. */
+export const taskEvents = pgTable(
+  'task_events',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    companyId: companyId(),
+    taskId: uuid('task_id').notNull().references(() => tasks.id),
+    kind: text('kind', { enum: TASK_EVENT_KINDS }).notNull(),
+    personId: uuid('person_id').references(() => people.id),
+    agentId: uuid('agent_id').references(() => agents.id),
+    text: text('text').notNull().default(''),
+    data: jsonb('data').$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: createdAt(),
+  },
+  t => [index('task_events_task_id').on(t.taskId)],
+);
+
+export const REQUEST_KINDS = ['question', 'approval', 'stuck'] as const;
+export const REQUEST_STATUSES = ['open', 'answered', 'approved', 'declined', 'withdrawn'] as const;
+
+/* What an agent waits for from a person: an answer, an approval of an exact commit, or help with a stuck task. */
+export const requests = pgTable(
+  'requests',
+  {
+    id: id(),
+    companyId: companyId(),
+    taskId: uuid('task_id').notNull().references(() => tasks.id),
+    agentId: uuid('agent_id').notNull().references(() => agents.id),
+    kind: text('kind', { enum: REQUEST_KINDS }).notNull(),
+    text: text('text').notNull(),
+    commit: text('commit'),
+    status: text('status', { enum: REQUEST_STATUSES }).notNull().default('open'),
+    answer: text('answer'),
+    answeredBy: uuid('answered_by').references(() => people.id),
+    createdAt: createdAt(),
+    answeredAt: timestamp('answered_at', { withTimezone: true }),
+  },
+  t => [index('requests_task_id').on(t.taskId)],
+);

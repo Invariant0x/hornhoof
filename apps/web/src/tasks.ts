@@ -1,0 +1,79 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { api } from './api';
+import { useStream, type LiveMessage } from './live';
+import { deptLabel, type Messages } from './i18n';
+import type { AgentRef, Lang, Org, TaskDetail, TaskLine, TaskPlace, TurnView, WaitingRequest } from './types';
+
+/* Fetches the path, again whenever a stream message says it may have changed. undefined until the first answer. */
+function useLive<T>(path: string | null, pick: (body: never) => T, refresh: (m: LiveMessage) => boolean): { data: T | undefined; failure: unknown; load: () => void } {
+  const [data, setData] = useState<T | undefined>(undefined);
+  const [failure, setFailure] = useState<unknown>(null);
+  const latest = useRef(path);
+  latest.current = path;
+  const pickRef = useRef(pick);
+  pickRef.current = pick;
+
+  const load = useCallback(() => {
+    if (!path) return;
+    api.get<never>(path).then(
+      body => {
+        if (latest.current !== path) return;
+        setData(pickRef.current(body));
+        setFailure(null);
+      },
+      err => latest.current === path && setFailure(err),
+    );
+  }, [path]);
+
+  useEffect(() => {
+    setData(undefined);
+    load();
+  }, [load]);
+
+  useStream(m => {
+    if (path && (m.type === 'reconnected' || refresh(m))) load();
+  });
+
+  return { data, failure, load };
+}
+
+export type TaskFilter = { status: 'open' | 'closed'; department: string | null };
+
+export const tasksPath = (f: TaskFilter) => `/api/tasks?status=${f.status}${f.department ? `&department=${f.department}` : ''}`;
+
+/* Tasks the person reaches, as the tracker lists them. */
+export function useTasks(filter: TaskFilter) {
+  const { data, failure, load } = useLive(tasksPath(filter), (b: { tasks: TaskLine[] }) => b.tasks, m => m.type === 'task');
+  return { tasks: data, failure, load };
+}
+
+/* One task with its gates, subtasks and log. */
+export function useTask(id: string) {
+  const { data, failure, load } = useLive(`/api/tasks/${id}`, (b: { task: TaskDetail }) => b.task, m => m.type === 'task' || m.type === 'requests');
+  return { task: data, failure, load };
+}
+
+/* What agents ask of the people who reach their tasks. */
+export function useRequests() {
+  const { data, failure, load } = useLive('/api/requests', (b: { requests: WaitingRequest[] }) => b.requests, m => m.type === 'requests');
+  return { requests: data, failure, load };
+}
+
+/* The company's open turn, or null when none runs. */
+export function useTurn() {
+  const { data, failure, load } = useLive('/api/turns/current', (b: { turn: TurnView | null }) => b.turn, m => m.type === 'org' || m.type === 'task');
+  return { turn: data, failure, load };
+}
+
+/* A department by the name the person's screen gives it; a product, or a department the company no longer has, by its own. */
+export function placeName(t: Messages, org: Org | null | undefined, place: TaskPlace): string {
+  if (!place) return '';
+  const dept = org?.departments.find(d => d.id === place.id);
+  return dept ? deptLabel(t, dept) : place.name;
+}
+
+/* ", role" after an agent's name, or nothing when it has none or is called after it. */
+export function roleAfter(a: Pick<AgentRef, 'name' | 'role'>, language: keyof Lang): string {
+  const role = a.role?.[language];
+  return role && role !== a.name ? `, ${role}` : '';
+}

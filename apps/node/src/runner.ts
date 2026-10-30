@@ -1,8 +1,10 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { cut, TAIL_BYTES, type AgentEvent, type JobError, type Limits, type ModelOption, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
+import type { JobUser } from './isolation.js';
 import { redact } from './redact.js';
 import { readSessions, rememberSession } from './state.js';
+import { prepareRepo, type Git } from './workspace.js';
 
 export type RunInput = {
   prompt: string;
@@ -18,6 +20,8 @@ export type RunInput = {
   tools: { url: string; token: string } | null;
   /* Each thing the agent does, as the program reports it while it runs. */
   onEvent?: (event: AgentEvent) => void;
+  /* More environment for the program, such as git access to the agent's repository for this turn. */
+  env?: Record<string, string>;
 };
 export type RunResult = { ok: boolean; sessionId: string | null; result: string; output: string; error: JobError | null; limits: Limits | null };
 export type LoginIo = { input: NodeJS.ReadableStream; output: NodeJS.WritableStream; urlFile: string };
@@ -32,6 +36,9 @@ export interface ProviderAdapter {
   secrets(): Promise<string[]>;
   /* The models the program can run, when it can tell. Hornhoof falls back to what it knows for the provider. */
   models?(): Promise<ModelOption[]>;
+  /* On the built-in node, the user a key's program runs as and its home: the folder is handed to that user first,
+     and the node's own git work in it runs as that user too. */
+  owner?: { user: JobUser | null; home: string; prepare(path: string): void };
 }
 
 type JobRun = Extract<ServerMessage, { type: 'job.run' }>;
@@ -55,11 +62,17 @@ function withTimeout(run: Promise<RunResult>, ms: number): Promise<RunResult> {
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
-/* The folder a saved session works in, or a new one for this job. Only sessions this node saved count. */
-function workDirFor(msg: JobRun, dir: string): string {
+/* An agent's turn works in the agent's own folder; a session this node saved in another folder cannot go on there, so
+   the turn starts a new one. Other jobs work in the folder of the session they resume, or a new one. Only sessions this
+   node saved count. */
+function workDirFor(msg: JobRun, dir: string): { workDir: string; sessionId: string | null } {
   const saved = msg.sessionId ? readSessions(dir) : {};
   const known = msg.sessionId && Object.hasOwn(saved, msg.sessionId) ? saved[msg.sessionId] : undefined;
-  return typeof known === 'string' ? known : join(dir, 'work', msg.jobId);
+  if (msg.workspace) {
+    const workDir = join(dir, 'work', 'agents', msg.workspace.key);
+    return { workDir, sessionId: typeof known === 'string' && known !== workDir ? null : msg.sessionId };
+  }
+  return { workDir: typeof known === 'string' ? known : join(dir, 'work', msg.jobId), sessionId: msg.sessionId };
 }
 
 type RunOptions = {
@@ -69,6 +82,8 @@ type RunOptions = {
   /* Where agents reach Hornhoof's tools: <server>/mcp. */
   toolsUrl?: string;
   onEvent?: (event: AgentEvent) => void;
+  /* Runs git; tests pass a fake. */
+  git?: Git;
 };
 
 /* An event as people may see it: no secrets, and within the sizes the protocol allows. */
@@ -87,10 +102,11 @@ function tidy(event: AgentEvent, secrets: string[]): AgentEvent {
 }
 
 /* Always ends with a job.done, whatever breaks on the way. */
-export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string, { hidden = [], signal, toolsUrl, onEvent }: RunOptions = {}): Promise<JobDone> {
+export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string, { hidden = [], signal, toolsUrl, onEvent, git }: RunOptions = {}): Promise<JobDone> {
   /* Programs refresh their tokens during a run, so the values from before and after are both hidden. */
   const before = await adapter.secrets().catch(() => []);
-  const given = [...hidden, ...(msg.secret ? [msg.secret] : []), ...(msg.toolToken ? [msg.toolToken] : [])];
+  const repo = msg.workspace?.repo ?? null;
+  const given = [...hidden, ...(msg.secret ? [msg.secret] : []), ...(msg.toolToken ? [msg.toolToken] : []), ...(repo?.token ? [repo.token] : [])];
   const tools = msg.toolToken && toolsUrl ? { url: toolsUrl, token: msg.toolToken } : null;
   /* A live event goes out hidden against what the program holds by then, and the events keep their order. */
   const known = new Set([...before, ...given]);
@@ -105,11 +121,13 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
   };
   let res: RunResult;
   try {
-    const workDir = workDirFor(msg, dir);
+    const { workDir, sessionId } = workDirFor(msg, dir);
     mkdirSync(workDir, { recursive: true });
+    adapter.owner?.prepare(workDir);
+    const env = repo ? await prepareRepo(workDir, repo, { user: adapter.owner?.user ?? null, home: adapter.owner?.home ?? null }, git) : undefined;
     const input: RunInput = {
       prompt: msg.prompt,
-      sessionId: msg.sessionId,
+      sessionId,
       model: msg.model,
       workDir,
       secret: msg.secret,
@@ -118,6 +136,7 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
       instructions: msg.instructions,
       tools,
       onEvent: emit,
+      ...(env ? { env } : {}),
     };
     res = await withTimeout(adapter.run(input).catch((err: unknown) => failed(message(err), 'agent_failed')), msg.timeoutMs);
     if (res.sessionId) rememberSession(dir, res.sessionId, workDir);

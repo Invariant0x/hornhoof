@@ -1,5 +1,5 @@
 import { vi } from 'vitest';
-import type { AgentCardView, MachineView, Me, Org, PersonView, Roster, Serving, SubView } from '../src/types';
+import type { AgentCardView, MachineView, Me, Org, PersonView, Roster, Serving, SubView, TaskDetail, TaskLine, TurnView, WaitingRequest } from '../src/types';
 
 type Reply = [status: number, body?: unknown];
 type Route = Reply | ((body: unknown) => Reply);
@@ -167,3 +167,49 @@ export const CARD: AgentCardView = {
   changes: [{ field: 'hired', personName: 'Ivan', at: '2026-10-30T08:00:00.000Z' }],
   canEdit: true,
 };
+
+/* Tasks as /api/tasks lists them: Development's #12 at its second gate, #11 with Bruno, #9 waiting for a person, #8 done. */
+const DANA = { id: 'b0', name: 'Dana', kind: 'head' as const, role: HEAD_TITLE };
+const BRUNO = { id: 'b1', name: 'Bruno', kind: 'worker' as const, role: BE_TITLE };
+const RITA = { id: 'b2', name: 'Rita', kind: 'worker' as const, role: { en: 'Code reviewer', ru: 'Ревьюер кода' } };
+const TOM = { id: 'b3', name: 'Tom', kind: 'worker' as const, role: { en: 'Test engineer', ru: 'Инженер по тестам' } };
+const DEV = { id: 'd2', name: 'Development' };
+const line = (over: Partial<TaskLine>): TaskLine => ({
+  id: 't0', number: 0, title: '', brief: '', status: 'open', department: DEV, product: null, assignee: BRUNO, stage: 0, gateCount: 0, bounces: 0, turn: 3, parentId: 't10',
+  createdAt: '2026-10-30T08:00:00.000Z', updatedAt: '2026-10-30T09:00:00.000Z', ...over,
+});
+
+export const TASKS: TaskLine[] = [
+  line({ id: 't12', number: 12, title: 'Checkout API', brief: 'Take card payments.', status: 'review', assignee: TOM, stage: 2, gateCount: 3, bounces: 1 }),
+  line({ id: 't11', number: 11, title: 'Cart page', brief: 'Show the cart.', status: 'working' }),
+  line({ id: 't9', number: 9, title: 'Pick a payment provider', status: 'waiting', assignee: DANA, parentId: null }),
+];
+export const CLOSED_TASKS: TaskLine[] = [line({ id: 't8', number: 8, title: 'Login page', status: 'done', assignee: null })];
+
+export const TASK_DETAIL: TaskDetail = {
+  ...TASKS[0]!,
+  body: 'POST /checkout takes a **card token**.',
+  parent: { id: 't10', number: 10, title: 'Payments' },
+  executor: BRUNO,
+  gates: [
+    { ...RITA, state: 'passed' },
+    { ...TOM, state: 'current' },
+    { id: 'b4', name: 'Sam', kind: 'worker', role: { en: 'Security engineer', ru: 'Инженер безопасности' }, state: 'next' },
+  ],
+  createdBy: { kind: 'agent', id: 'b0', name: 'Dana' },
+  subtasks: [line({ id: 't13', number: 13, title: 'Refunds', status: 'open', parentId: 't12' })],
+  log: [
+    { kind: 'created', text: 'Take card payments.', data: {}, by: { kind: 'agent', id: 'b0', name: 'Dana' }, at: '2026-10-30T08:00:00.000Z' },
+    { kind: 'submitted', text: 'Endpoint done.', data: { evidence: 'npm test: 42 passed' }, by: { kind: 'agent', id: 'b1', name: 'Bruno' }, at: '2026-10-30T08:30:00.000Z' },
+    { kind: 'verdict', text: 'Looks right.', data: { pass: true, stage: 1 }, by: { kind: 'agent', id: 'b2', name: 'Rita' }, at: '2026-10-30T08:40:00.000Z' },
+    { kind: 'comment', text: 'EUR only.', data: {}, by: { kind: 'person', id: 'p1', name: 'Ivan' }, at: '2026-10-30T08:50:00.000Z' },
+  ],
+  requests: [],
+};
+
+export const REQUESTS: WaitingRequest[] = [
+  { id: 'r1', kind: 'question', text: 'Stripe or Adyen?', commit: null, at: '2026-10-30T09:10:00.000Z', agent: { id: 'b0', name: 'Dana' }, task: { id: 't9', number: 9, title: 'Pick a payment provider', department: DEV } },
+  { id: 'r2', kind: 'approval', text: 'Release 0.5.0 to main.', commit: 'a'.repeat(40), at: '2026-10-30T09:20:00.000Z', agent: { id: 'b0', name: 'Dana' }, task: { id: 't10', number: 10, title: 'Payments', department: DEV } },
+];
+
+export const TURN: TurnView = { id: 'u3', number: 3, goal: 'Take payments', status: 'open', taskId: 't1', startedAt: '2026-10-30T07:00:00.000Z', tasks: { total: 5, done: 2 } };

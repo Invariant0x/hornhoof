@@ -128,7 +128,7 @@ export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'),
       const done = await runProgram({
         bin,
         args,
-        env: env(input.secret),
+        env: { ...env(input.secret), ...input.env },
         cwd: input.workDir,
         timeoutMs: input.timeoutMs,
         signal: input.signal,

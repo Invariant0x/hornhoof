@@ -8,18 +8,21 @@ import { AgentCard } from '../ui/AgentCard';
 import { LogoMark } from '../ui/icons';
 import { UpdateBanner } from '../ui/UpdateBanner';
 import { useVersion, versionText } from '../ui/VersionMark';
+import { useRequests } from '../tasks';
+import { TaskPanel } from '../ui/TaskPanel';
 import { useUpdates } from '../updates';
 import { AgentWindow, type StaffAsk } from './AgentWindow';
 import { DepartmentView } from './Department';
 import { MapScreen } from './Map';
 import { People } from './People';
 import { Subscriptions } from './Subscriptions';
+import { Tasks } from './Tasks';
 import { Versions } from './Versions';
 
-type Tab = 'map' | 'people' | 'subscriptions';
-/* The right panel: an agent's terminal or its card. agentId is 'orchestrator' or an employee's id. */
-type Panel = { kind: 'window' | 'card'; agentId: string } | null;
-const TABS: Tab[] = ['map', 'people', 'subscriptions'];
+type Tab = 'map' | 'tasks' | 'people' | 'subscriptions';
+/* The right panel: an agent's terminal or its card, or a task. agentId is 'orchestrator' or an employee's id. */
+type Panel = { kind: 'window' | 'card'; agentId: string } | { kind: 'task'; taskId: string } | null;
+const TABS: Tab[] = ['map', 'tasks', 'people', 'subscriptions'];
 const THEMES: Theme[] = ['light', 'dark'];
 
 /* onVersions: only for people who see the whole company. */
@@ -104,6 +107,10 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
     if (org && deptId && !dept) setDeptId(null);
   }, [org, deptId, dept]);
   const updates = useUpdates(company);
+  /* What agents wait for, counted in the navigation. */
+  const { requests, load: loadRequests } = useRequests();
+  const waiting = requests?.length ?? 0;
+  const agentPanel = panel && panel.kind !== 'task' ? panel : null;
   const [versionsOpen, setVersionsOpen] = useState(false);
   const account = useRef<HTMLDivElement>(null);
 
@@ -138,8 +145,16 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
         </div>
         <nav className="tabs glass" aria-label={t.shell.sections}>
           {TABS.map(id => (
-            <button key={id} type="button" className={tab === id ? 'on' : ''} aria-current={tab === id ? 'page' : undefined} onClick={() => setTab(id)}>
+            <button
+              key={id}
+              type="button"
+              className={tab === id ? 'on' : ''}
+              aria-current={tab === id ? 'page' : undefined}
+              aria-label={id === 'tasks' && waiting ? t.tasks.navWaiting(waiting) : undefined}
+              onClick={() => setTab(id)}
+            >
               {t.shell.tabs[id]}
+              {id === 'tasks' && waiting > 0 && <span className="nav-count" aria-hidden="true">{waiting}</span>}
             </button>
           ))}
         </nav>
@@ -168,13 +183,24 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
             me={me}
             department={dept}
             deputies={org?.people ?? []}
-            selected={panel?.agentId ?? null}
+            selected={agentPanel?.agentId ?? null}
+            selectedTask={panel?.kind === 'task' ? panel.taskId : null}
             onBack={() => setDeptId(null)}
             onOpen={agentId => setPanel({ kind: 'card', agentId })}
+            onOpenTask={taskId => setPanel({ kind: 'task', taskId })}
             onHire={() => {
               setStaff({ id: dept.id, name: deptLabel(t, dept), at: Date.now() });
               setPanel({ kind: 'window', agentId: 'orchestrator' });
             }}
+          />
+        )}
+        {tab === 'tasks' && (
+          <Tasks
+            me={me}
+            requests={requests}
+            onRequestsChanged={loadRequests}
+            selected={panel?.kind === 'task' ? panel.taskId : null}
+            onOpenTask={taskId => setPanel({ kind: 'task', taskId })}
           />
         )}
         {tab === 'people' && <People me={me} />}
@@ -191,6 +217,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
           onCard={() => setPanel({ kind: 'card', agentId: panel.agentId })}
         />
       )}
+      {panel?.kind === 'task' && <TaskPanel key={panel.taskId} taskId={panel.taskId} onClose={() => setPanel(null)} onOpen={taskId => setPanel({ kind: 'task', taskId })} />}
       {panel?.kind === 'card' && (
         <AgentCard key={panel.agentId} me={me} agentId={panel.agentId} onClose={() => setPanel(null)} onTerminal={() => setPanel({ kind: 'window', agentId: panel.agentId })} />
       )}

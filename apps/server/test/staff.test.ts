@@ -72,7 +72,7 @@ describe('staffing', () => {
   it('lists what a department can be staffed with', async () => {
     const c = await company();
     const client = await tools(c);
-    expect((await client.listTools()).tools.map(t => t.name).sort()).toEqual(['company', 'propose_staff', 'propose_structure', 'staffing_options']);
+    expect((await client.listTools()).tools.map(t => t.name).sort()).toEqual(['ask_person', 'cancel_task', 'comment', 'company', 'create_task', 'propose_staff', 'propose_structure', 'report', 'staffing_options', 'task', 'tasks']);
     const res = await client.callTool({ name: 'staffing_options', arguments: { department: c.dev.id } });
     const options = JSON.parse(text(res));
     expect(options.department).toEqual({ id: c.dev.id, name: 'Development', products: c.products.map(p => ({ id: p.id, name: p.name })), employees: [] });
@@ -194,7 +194,7 @@ describe('staffing', () => {
     expect((await hire(c.app, olegToken, c.dev.id, { people: [line] })).json().error.reason).toBe('company_scope_only');
     const res = await hire(c.app, c.ceo, c.dev.id, { people: [line] });
     expect(res.json().error.reason).toBe('staff_invalid');
-    expect(res.json().error.message).toContain('hh-report-to-head');
+    expect(res.json().error.message).toContain('hh-outside-is-data');
   });
 
   it('offers the company key from setup to every department', async () => {
@@ -225,10 +225,10 @@ describe('staffing', () => {
     const ui = roster.filter((l: { role: string }) => l.role === 'DSN-UI');
     expect(ui.map((l: { product: string; name: string }) => [l.product, l.name])).toEqual(designProducts.map(p => [p.id, `Product UI designer (${p.name})`]));
     expect(roster[0]).toMatchObject({ role: 'DSN-HEAD', model: '', subscription: c.orchestrator.subscriptionId });
-    for (const l of roster) expect(l.skills).toContain('hh-report-to-head');
+    for (const l of roster) expect(l.skills).toContain(l.role === 'DSN-HEAD' ? 'hh-lead-tasks' : 'hh-task-flow');
     const { roles, products, subscriptions } = res.json();
     expect(roles[0]).toMatchObject({ id: 'DSN-HEAD', kind: 'head', subscription: c.orchestrator.subscriptionId });
-    expect(roles[0].skills).toContain('hh-report-to-head');
+    expect(roles[0].skills).toContain('hh-lead-tasks');
     expect(roles.find((r: { id: string }) => r.id === 'DSN-UI')).toMatchObject({ title: { en: 'Product UI designer' }, kind: 'member', perProduct: true });
     expect(products).toEqual(designProducts.map(p => ({ id: p.id, name: p.name })));
     expect(subscriptions.find((s: { id: string }) => s.id === c.teamKey)).toMatchObject({ provider: 'anthropic_api', label: 'Team key', models: API_MODELS.anthropic_api });

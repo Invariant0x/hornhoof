@@ -90,4 +90,17 @@ describe('builtinAdapters', () => {
     expect(calls).toContain(`chown ${join(dir, 'subs', 'sub-b')} 20001:20001`);
     expect(readFileSync(files.passwd, 'utf8')).toContain(`hh20001:x:20001:20001:Hornhoof agent:${join(dir, 'subs', 'sub-b')}:/bin/bash`);
   });
+
+  it("names the key's user and home, and hands a folder to that user", async () => {
+    const dir = tmp();
+    const { ops, calls } = fakeOps();
+    const files = { passwd: join(dir, 'passwd'), group: join(dir, 'group') };
+    writeFileSync(files.passwd, '');
+    writeFileSync(files.group, '');
+    const pick = builtinAdapters(dir, join(dir, 'tools'), { isRoot: true, ops, files });
+    const adapter = pick({ type: 'job.run', jobId: 'job-a', subscriptionId: 'sub-a', provider: 'anthropic_api', prompt: 'hi', sessionId: null, model: null, timeoutMs: 1000, secret: null, instructions: null, toolToken: null });
+    expect(adapter.owner).toMatchObject({ user: { uid: 20000, gid: 20000 }, home: join(dir, 'subs', 'sub-a') });
+    adapter.owner!.prepare(join(dir, 'work', 'agents', 'a1'));
+    expect(calls).toContain(`chown ${join(dir, 'work', 'agents', 'a1')} 20000:20000`);
+  });
 });

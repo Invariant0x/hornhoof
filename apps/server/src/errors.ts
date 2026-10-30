@@ -48,7 +48,18 @@ export type ErrorReason =
   | 'department_unknown'
   | 'updater_missing'
   | 'update_running'
-  | 'version_unknown';
+  | 'version_unknown'
+  | 'task_unknown'
+  | 'task_closed'
+  | 'task_changed'
+  | 'task_not_yours'
+  | 'task_invalid'
+  | 'request_unknown'
+  | 'request_closed'
+  | 'no_head'
+  | 'turn_open'
+  | 'turn_unknown'
+  | 'repo_invalid';
 
 export class ApiError extends Error {
   constructor(

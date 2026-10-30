@@ -1,0 +1,13 @@
+#!/bin/sh
+# git runs this when a repository asks for a name or a password. The node gives each turn its token in HH_GIT_PASSWORD,
+# for the repository's host in HH_GIT_HOST only: a prompt from any other host gets nothing.
+url=${1#*\'}
+url=${url%%\'*}
+host=${url#*://}
+host=${host##*@}
+host=${host%%/*}
+if [ -z "$HH_GIT_HOST" ] || [ "$host" != "$HH_GIT_HOST" ]; then exit 0; fi
+case "$1" in
+  Username*) printf '%s\n' x-access-token ;;
+  *) printf '%s\n' "$HH_GIT_PASSWORD" ;;
+esac

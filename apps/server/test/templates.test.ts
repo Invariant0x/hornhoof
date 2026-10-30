@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { TEMPLATE_KEYS } from '@hornhoof/protocol';
 import { describe, expect, it } from 'vitest';
-import { CORE_SKILLS, HEAD_SKILLS, loadTemplates } from '../src/modules/templates/load.js';
+import { CORE_SKILLS, HEAD_SKILLS, loadTemplates, MEMBER_SKILLS } from '../src/modules/templates/load.js';
 
 const DIR = fileURLToPath(new URL('../../../templates', import.meta.url));
 const templates = loadTemplates(DIR);
@@ -51,16 +51,40 @@ describe('templates', () => {
     for (const r of roles) expect(r.id.startsWith(`${codes[r.department]}-`), r.id).toBe(true);
   });
 
-  it('locks the core skills on for everyone and the head set on for heads', () => {
+  it('locks the core skills on for everyone, the task flow for members and the lead set for heads', () => {
+    expect(HEAD_SKILLS).toContain('hh-lead-tasks');
+    expect(MEMBER_SKILLS).toEqual(['hh-report-to-head', 'hh-task-flow']);
     for (const r of roles) {
       for (const id of CORE_SKILLS) expect(r.skills.find(s => s.id === id), `${r.id} ${id}`).toEqual({ id, on: true, locked: true });
-      for (const id of HEAD_SKILLS) {
-        const s = r.skills.find(x => x.id === id);
-        if (r.kind === 'head') expect(s, `${r.id} ${id}`).toEqual({ id, on: true, locked: true });
-        else expect(s, `${r.id} ${id}`).toBeUndefined();
+      for (const [set, kind] of [[HEAD_SKILLS, 'head'], [MEMBER_SKILLS, 'member']] as const) {
+        for (const id of set) {
+          const s = r.skills.find(x => x.id === id);
+          if (r.kind === kind) expect(s, `${r.id} ${id}`).toEqual({ id, on: true, locked: true });
+          else expect(s, `${r.id} ${id}`).toBeUndefined();
+        }
       }
       expect(new Set(r.skills.map(s => s.id)).size, r.id).toBe(r.skills.length);
     }
+  });
+
+  it('orders the gates a change passes in development, design and finance', () => {
+    const gates = (key: 'development' | 'design' | 'finance') =>
+      templates
+        .roster(key)
+        .filter(r => r.gate !== null)
+        .sort((a, b) => a.gate! - b.gate!)
+        .map(r => r.id);
+    expect(gates('development')).toEqual(['DEV-REV', 'DEV-TEST', 'DEV-SEC', 'DEV-RED', 'DEV-QA']);
+    expect(gates('design')).toEqual(['DSN-QA']);
+    expect(gates('finance')).toEqual(['FIN-AUDIT']);
+    for (const r of roles) if (r.kind === 'head') expect(r.gate, r.id).toBeNull();
+  });
+
+  it('teaches the task tools by their names', () => {
+    const flow = templates.skills.get('hh-task-flow')!.body;
+    for (const tool of ['task', 'submit', 'verdict', 'blocked', 'ask_person']) expect(flow, tool).toContain(`"${tool}"`);
+    const lead = templates.skills.get('hh-lead-tasks')!.body;
+    for (const tool of ['create_task', 'update_task', 'report', 'cancel_task', 'ask_person']) expect(lead, tool).toContain(`"${tool}"`);
   });
 
   it('has English and Russian titles and descriptions', () => {

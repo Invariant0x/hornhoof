@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { API_MODELS, CLAUDE_ALIASES, cut, DEPARTMENT_TEMPLATES, modelsFor, parseNodeMessage, parseServerMessage, type AgentEvent, type NodeMessage, type ServerMessage } from '../src/index.js';
+import { API_MODELS, CLAUDE_ALIASES, cut, DEPARTMENT_TEMPLATES, modelsFor, parseNodeMessage, parseServerMessage, repoFolder, type AgentEvent, type NodeMessage, type ServerMessage } from '../src/index.js';
 
 const LIMITS = { status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0.38, resetsAt: '2026-10-29T21:30:00.000Z' }] };
 
@@ -92,6 +92,25 @@ describe('job.run', () => {
     const { toolToken: __, ...noToken } = SERVER[0] as Extract<ServerMessage, { type: 'job.run' }>;
     expect(parseServerMessage(JSON.stringify(noInstructions))).toBeNull();
     expect(parseServerMessage(JSON.stringify(noToken))).toBeNull();
+  });
+
+  it('may carry the workspace an agent works in, with its repository', () => {
+    const run = SERVER[0] as Extract<ServerMessage, { type: 'job.run' }>;
+    const repo = { url: 'https://github.com/acme/app.git', branch: 'main', token: 'ghp_x' };
+    expect(parseServerMessage(JSON.stringify({ ...run, workspace: { key: 'a1', repo } }))).toMatchObject({ workspace: { key: 'a1', repo } });
+    expect(parseServerMessage(JSON.stringify({ ...run, workspace: { key: 'a1', repo: null } }))).toMatchObject({ workspace: { key: 'a1', repo: null } });
+    expect(parseServerMessage(JSON.stringify(run))).not.toBeNull();
+    expect(parseServerMessage(JSON.stringify({ ...run, workspace: { key: '../x', repo: null } }))).toBeNull();
+    expect(parseServerMessage(JSON.stringify({ ...run, workspace: { key: 'a1', repo: { ...repo, url: 'http://github.com/acme/app.git' } } }))).toBeNull();
+    expect(parseServerMessage(JSON.stringify({ ...run, workspace: { key: 'a1', repo: { ...repo, branch: '--upload-pack=x' } } }))).toBeNull();
+    expect(parseServerMessage(JSON.stringify({ ...run, workspace: { key: 'a1', repo: { ...repo, url: 'https://x:ghp_y@github.com/acme/app.git' } } }))).toBeNull();
+  });
+
+  it('names the folder a repository is cloned into after the last part of its address', () => {
+    expect(repoFolder('https://github.com/acme/app.git')).toBe('app');
+    expect(repoFolder('https://github.com/acme/My App/')).toBe('My-App');
+    expect(repoFolder('https://gitlab.com/acme/.hidden.git')).toBe('hidden');
+    expect(repoFolder('https://github.com/acme/..')).toBe('repo');
   });
 });
 

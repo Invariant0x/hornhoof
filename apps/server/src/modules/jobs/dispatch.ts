@@ -1,3 +1,4 @@
+import type { Workspace } from '@hornhoof/protocol';
 import { eq } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { decryptSecret } from '../../crypto/secrets.js';
@@ -7,8 +8,18 @@ import { identityOf } from '../nodes/hub.js';
 export const TEST_PROMPT = 'Reply with one word: ready';
 export const TEST_TIMEOUT_MS = 120_000;
 
-/* instructions and toolToken go with an agent's turns; a test job has neither. */
-type JobToSend = { id: string; subscriptionId: string; prompt: string; sessionId: string | null; model?: string | null; timeoutMs: number; instructions: string | null; toolToken: string | null };
+/* instructions, toolToken and the workspace go with an agent's turns; a test job has none of them. */
+type JobToSend = {
+  id: string;
+  subscriptionId: string;
+  prompt: string;
+  sessionId: string | null;
+  model?: string | null;
+  timeoutMs: number;
+  instructions: string | null;
+  toolToken: string | null;
+  workspace?: Workspace | null;
+};
 
 /* Sends a job to the node that runs its subscription. A personal plan's node signs in itself; an API key travels with the job to the built-in node. */
 export async function dispatchJob(ctx: Ctx, job: JobToSend): Promise<boolean> {
@@ -27,5 +38,6 @@ export async function dispatchJob(ctx: Ctx, job: JobToSend): Promise<boolean> {
     secret,
     instructions: job.instructions,
     toolToken: job.toolToken,
+    ...(job.workspace ? { workspace: job.workspace } : {}),
   });
 }

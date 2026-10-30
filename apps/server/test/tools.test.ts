@@ -58,20 +58,20 @@ describe('/mcp', () => {
     expect((await app.inject({ method: 'DELETE', url: '/mcp' })).statusCode).toBe(405);
   });
 
-  it('offers the orchestrator the company view, the structure proposal and staffing', async () => {
+  it('offers the orchestrator the company view, the structure proposal, staffing and tasks', async () => {
     const { app, job } = await company();
     await job('running');
     const client = await mcp(app, TOKEN);
-    expect((await client.listTools()).tools.map(t => t.name).sort()).toEqual(['company', 'propose_staff', 'propose_structure', 'staffing_options']);
+    expect((await client.listTools()).tools.map(t => t.name).sort()).toEqual(['ask_person', 'cancel_task', 'comment', 'company', 'create_task', 'propose_staff', 'propose_structure', 'report', 'staffing_options', 'task', 'tasks']);
   });
 
-  it('gives an employee only the company view', async () => {
+  it('gives an employee the company view and its task tools', async () => {
     const { app, db, companyId } = await company();
     const [sub] = await db.select().from(subscriptions);
     const [bruno] = await db.insert(agents).values({ companyId, kind: 'worker', name: 'Bruno', model: 'sonnet', subscriptionId: sub!.id }).returning();
     await db.insert(jobs).values({ companyId, subscriptionId: sub!.id, agentId: bruno!.id, kind: 'conversation', prompt: 'hi', timeoutMs: 900000, status: 'running', toolTokenHash: hashToken(TOKEN) });
     const client = await mcp(app, TOKEN);
-    expect((await client.listTools()).tools.map(t => t.name)).toEqual(['company']);
+    expect((await client.listTools()).tools.map(t => t.name).sort()).toEqual(['ask_person', 'blocked', 'comment', 'company', 'submit', 'task', 'tasks', 'verdict']);
   });
 
   it('describes the company with the templates and no email addresses', async () => {
@@ -81,11 +81,14 @@ describe('/mcp', () => {
     const [dev] = await db.insert(departments).values({ companyId, name: null, templateKey: 'development', roleCode: 'DEV', about: 'Two products' }).returning();
     const [mascot] = await db.insert(departments).values({ companyId, name: 'Mascot', roleCode: 'DEV', parentId: dev!.id }).returning();
     const [sub] = await db.select().from(subscriptions);
-    await db.insert(agents).values([
-      { companyId, kind: 'worker', name: 'Bruno', roleKey: 'DEV-BE', departmentId: dev!.id, productId: mascot!.id, model: 'claude-sonnet-5-5', subscriptionId: sub!.id },
-      { companyId, kind: 'head', name: 'Hana', roleKey: 'DEV-HEAD', departmentId: dev!.id, model: '' },
-      { companyId, kind: 'worker', name: 'Gone', roleKey: 'DEV-FE', departmentId: dev!.id, model: '', removedAt: new Date() },
-    ]);
+    const [bruno, hana] = await db
+      .insert(agents)
+      .values([
+        { companyId, kind: 'worker', name: 'Bruno', roleKey: 'DEV-BE', departmentId: dev!.id, productId: mascot!.id, model: 'claude-sonnet-5-5', subscriptionId: sub!.id },
+        { companyId, kind: 'head', name: 'Hana', roleKey: 'DEV-HEAD', departmentId: dev!.id, model: '' },
+        { companyId, kind: 'worker', name: 'Gone', roleKey: 'DEV-FE', departmentId: dev!.id, model: '', removedAt: new Date() },
+      ])
+      .returning();
     const client = await mcp(app, TOKEN);
     const raw = text(await client.callTool({ name: 'company', arguments: {} }));
     expect(raw).not.toMatch(/@/);
@@ -102,8 +105,9 @@ describe('/mcp', () => {
           about: 'Two products',
           products: [{ name: 'Mascot' }],
           employees: [
-            { name: 'Hana', role: 'Head of development', kind: 'head', product: null, provider: null, model: null },
-            { name: 'Bruno', role: 'Backend engineer', kind: 'worker', product: 'Mascot', provider: 'anthropic_api', model: 'claude-sonnet-5-5' },
+            /* The id is what create_task takes as the executor; the role id is what it takes as a gate. */
+            { id: hana!.id, name: 'Hana', roleId: 'DEV-HEAD', role: 'Head of development', kind: 'head', product: null, provider: null, model: null },
+            { id: bruno!.id, name: 'Bruno', roleId: 'DEV-BE', role: 'Backend engineer', kind: 'worker', product: 'Mascot', provider: 'anthropic_api', model: 'claude-sonnet-5-5' },
           ],
         },
       ],

@@ -1,8 +1,8 @@
 import { TEMPLATE_KEYS } from '@hornhoof/protocol';
-import { and, eq, inArray, isNull, or } from 'drizzle-orm';
+import { and, eq, inArray, isNull, notInArray, or } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Db } from '../../db/client.js';
-import { agents, departments, personAccess, subscriptions, teams } from '../../db/schema.js';
+import { agents, departments, personAccess, subscriptions, tasks, teams } from '../../db/schema.js';
 import { deptName, TEMPLATE_TEXT } from '../departments/templates.js';
 
 const Name = z.string().trim().min(1).max(60);
@@ -52,6 +52,8 @@ export async function checkItems(db: Db, companyId: string, items: StructureItem
       if (person) return `People work in ${deptName(dept)}; move them first.`;
       const [key] = await db.select({ id: subscriptions.id }).from(subscriptions).where(and(inArray(subscriptions.targetId, places), isNull(subscriptions.removedAt)));
       if (key) return `An API key serves ${deptName(dept)}; point it elsewhere first.`;
+      const [busy] = await db.select({ id: tasks.id }).from(tasks).where(and(or(inArray(tasks.departmentId, inside), inArray(tasks.productId, inside)), notInArray(tasks.status, ['done', 'cancelled'])));
+      if (busy) return `${deptName(dept)} has open tasks; finish or cancel them first.`;
       continue;
     }
     if (item.template === 'operations') {

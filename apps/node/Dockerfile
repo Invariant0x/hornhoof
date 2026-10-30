@@ -33,6 +33,8 @@ COPY apps/web/package.json apps/web/
 RUN npm ci --omit=dev --workspace apps/node --workspace packages/protocol && npm cache clean --force
 COPY --from=build /app/packages/protocol/dist packages/protocol/dist
 COPY --from=build /app/apps/node/dist apps/node/dist
+# git asks this for a repository's password; the node gives each turn its token in HH_GIT_PASSWORD.
+COPY --chmod=755 apps/node/git-askpass /app/git-askpass
 RUN mkdir -p /data && chown node:node /data
 # Agent programs are installed into /data/tools at first use and keep their sign-in in /data/home.
 # Set after npm ci, so nothing root writes during the build lands in /data.

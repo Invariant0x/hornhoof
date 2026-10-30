@@ -3,14 +3,19 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Shell } from '../src/screens/Shell';
-import type { Org } from '../src/types';
-import { CARD, DEV_ORG, ME, mockApi, ROSTER } from './api-mock';
+import type { Me, Org } from '../src/types';
+import { CARD, DEV_ORG, ME, mockApi, ROSTER, TASK_DETAIL, TASKS } from './api-mock';
 import { fakeStream } from './fake-stream';
 
 const EVENTS = '/api/agents/orchestrator/events?after=0';
 const READY = { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 };
+const DEV_TASKS = 'GET /api/tasks?status=open&department=d2';
+const REPO = { url: 'https://github.com/acme/app.git', branch: 'main', tokenLast4: '1234' };
+/* Lena reaches Development by its own line in her access; Kira reaches only Sales. */
+const LENA = { id: 'p6', name: 'Lena', email: 'lena@acme.com', title: 'Product lead', status: 'active' as const, isOwner: false, access: { whole: false, departments: [{ id: 'd2', name: 'Development' }], teams: [] } };
+const listed = (id: string, name: string): Me => ({ ...ME, person: { ...ME.person, id, name, scopeKind: 'listed', isOwner: false } });
 
-function shell(routes: Record<string, unknown> = {}, org: Org = DEV_ORG) {
+function shell(routes: Record<string, unknown> = {}, org: Org = DEV_ORG, me: Me = ME) {
   const calls = mockApi({
     'GET /api/org': [200, org],
     [`GET ${EVENTS}`]: [200, { events: [], state: READY }],
@@ -19,7 +24,7 @@ function shell(routes: Record<string, unknown> = {}, org: Org = DEV_ORG) {
   });
   render(
     <LanguageProvider>
-      <Shell me={ME} onSignOut={() => {}} />
+      <Shell me={me} onSignOut={() => {}} />
     </LanguageProvider>,
   );
   return calls;
@@ -115,5 +120,126 @@ describe('Department view', () => {
     await flyIn(user);
     await user.click(screen.getByRole('button', { name: /Bruno/ }));
     expect(await screen.findByRole('button', { name: 'Open terminal' })).toBeInTheDocument();
+  });
+
+  it("lists the department's open tasks and opens one at the side", async () => {
+    const user = userEvent.setup();
+    shell({ [DEV_TASKS]: [200, { tasks: TASKS }], 'GET /api/tasks/t12': [200, { task: TASK_DETAIL }] });
+    await flyIn(user);
+    const tasks = screen.getByRole('region', { name: 'Tasks' });
+    const row = await within(tasks).findByRole('button', { name: /#12 Checkout API/ });
+    expect(row).toHaveTextContent('Gate 2 of 3');
+    expect(within(tasks).getAllByRole('button', { name: /^#/ }).map(b => b.querySelector('b')!.textContent)).toEqual(['#9', '#12', '#11']);
+    await user.click(row);
+    expect(await screen.findByRole('complementary', { name: '#12 Checkout API' })).toBeInTheDocument();
+  });
+
+  it('names an assignee once when it is called after its role', async () => {
+    const user = userEvent.setup();
+    const head = { id: 'b0', name: 'Head of development', kind: 'head' as const, role: { en: 'Head of development', ru: 'Руководитель разработки' } };
+    shell({ [DEV_TASKS]: [200, { tasks: [{ ...TASKS[2]!, assignee: head }] }] });
+    await flyIn(user);
+    const row = await within(screen.getByRole('region', { name: 'Tasks' })).findByRole('button', { name: /#9/ });
+    expect(row.textContent!.match(/Head of development/g)).toHaveLength(1);
+  });
+
+  it('gives the department a task through its head', async () => {
+    const user = userEvent.setup();
+    const made = { ...TASK_DETAIL, id: 't14', number: 14, title: 'Refund API' };
+    const calls = shell({ [DEV_TASKS]: [200, { tasks: [] }], 'POST /api/tasks': [201, { task: made }], 'GET /api/tasks/t14': [200, { task: made }] });
+    await flyIn(user);
+    const tasks = screen.getByRole('region', { name: 'Tasks' });
+    expect(await within(tasks).findByText('No open tasks.')).toBeInTheDocument();
+    await user.click(within(tasks).getByRole('button', { name: 'New task' }));
+    expect(within(tasks).getByText('Dana, the head, gets it and splits it among the department.')).toBeInTheDocument();
+    await user.type(within(tasks).getByLabelText('Title'), 'Refund API');
+    await user.type(within(tasks).getByLabelText('In one line'), 'Give the money back.');
+    await user.type(within(tasks).getByLabelText('Details'), 'Card payments only.');
+    await user.selectOptions(within(tasks).getByLabelText('Product'), 'pd1');
+    await user.click(within(tasks).getByRole('button', { name: 'Create task' }));
+    await vi.waitFor(() =>
+      expect(calls.find(c => c.method === 'POST' && c.path === '/api/tasks')?.body).toEqual({ title: 'Refund API', brief: 'Give the money back.', body: 'Card payments only.', department: 'd2', product: 'pd1' }),
+    );
+    expect(await screen.findByRole('complementary', { name: '#14 Refund API' })).toBeInTheDocument();
+    expect(within(tasks).queryByLabelText('Title')).not.toBeInTheDocument();
+  });
+
+  it('says the head gets a new task without naming it twice when it is called after its role', async () => {
+    const user = userEvent.setup();
+    const [dev] = DEV_ORG.departments;
+    shell({ [DEV_TASKS]: [200, { tasks: [] }] }, { ...DEV_ORG, departments: [{ ...dev!, employees: [{ ...dev!.employees[0]!, name: 'Head of development' }] }] });
+    await flyIn(user);
+    const tasks = screen.getByRole('region', { name: 'Tasks' });
+    await user.click(await within(tasks).findByRole('button', { name: 'New task' }));
+    expect(within(tasks).getByText('The head gets it and splits it among the department.')).toBeInTheDocument();
+  });
+
+  it('asks for a head before the department takes tasks', async () => {
+    const user = userEvent.setup();
+    const [dev] = DEV_ORG.departments;
+    shell({ [DEV_TASKS]: [200, { tasks: [] }] }, { ...DEV_ORG, departments: [{ ...dev!, employees: [] }] });
+    await flyIn(user);
+    const tasks = screen.getByRole('region', { name: 'Tasks' });
+    expect(within(tasks).getByText('Tasks go to the department through its head. Hire one first.')).toBeInTheDocument();
+    expect(within(tasks).queryByRole('button', { name: 'New task' })).not.toBeInTheDocument();
+  });
+
+  it('lets a person whose access lists the department give it tasks', async () => {
+    const user = userEvent.setup();
+    const [dev] = DEV_ORG.departments;
+    shell({ [DEV_TASKS]: [200, { tasks: [] }] }, { ...DEV_ORG, departments: [{ ...dev!, people: [...dev!.people, LENA] }] }, listed('p6', 'Lena'));
+    await flyIn(user);
+    expect(within(screen.getByRole('region', { name: 'Tasks' })).getByRole('button', { name: 'New task' })).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Repository' })).not.toBeInTheDocument();
+  });
+
+  it("keeps a department's tasks from people who do not reach it", async () => {
+    const user = userEvent.setup();
+    const calls = shell({}, DEV_ORG, listed('p7', 'Kira'));
+    await flyIn(user);
+    expect(screen.queryByRole('region', { name: 'Tasks' })).not.toBeInTheDocument();
+    expect(calls.some(c => c.path.startsWith('/api/tasks?'))).toBe(false);
+  });
+
+  it('shows and changes the repository for people who see the whole company', async () => {
+    const user = userEvent.setup();
+    const [dev] = DEV_ORG.departments;
+    const calls = shell(
+      { [DEV_TASKS]: [200, { tasks: [] }], 'PUT /api/departments/d2/repository': [200, { repository: { ...REPO, branch: 'develop' } }], 'DELETE /api/departments/d2/repository': [204] },
+      { ...DEV_ORG, departments: [{ ...dev!, repository: REPO }] },
+    );
+    await flyIn(user);
+    const repo = screen.getByRole('region', { name: 'Repository' });
+    expect(repo).toHaveTextContent('https://github.com/acme/app.git');
+    expect(repo).toHaveTextContent('Branch main');
+    expect(repo).toHaveTextContent('Token ending in 1234');
+    await user.click(within(repo).getByRole('button', { name: 'Change' }));
+    expect(within(repo).getByLabelText('Address')).toHaveValue('https://github.com/acme/app.git');
+    expect(within(repo).getByLabelText('Token')).toHaveAttribute('type', 'password');
+    expect(within(repo).getByLabelText('Token')).toHaveValue('');
+    const branch = within(repo).getByLabelText('Branch');
+    await user.clear(branch);
+    await user.type(branch, 'develop');
+    await user.click(within(repo).getByRole('button', { name: 'Save' }));
+    await vi.waitFor(() => expect(calls.find(c => c.method === 'PUT')?.body).toEqual({ url: 'https://github.com/acme/app.git', branch: 'develop' }));
+    expect(within(repo).queryByLabelText('Branch')).not.toBeInTheDocument();
+    await user.click(within(repo).getByRole('button', { name: 'Remove' }));
+    await user.click(within(repo).getByRole('button', { name: 'Yes, remove' }));
+    await vi.waitFor(() => expect(calls.some(c => c.method === 'DELETE' && c.path === '/api/departments/d2/repository')).toBe(true));
+  });
+
+  it("gives a product its own repository with a token", async () => {
+    const user = userEvent.setup();
+    const calls = shell({ [DEV_TASKS]: [200, { tasks: [] }], 'PUT /api/departments/pd1/repository': [200, { repository: REPO }] });
+    await flyIn(user);
+    const products = screen.getByRole('region', { name: 'Products' });
+    expect(within(screen.getByRole('region', { name: 'Repository' })).getByText('No repository yet. Agents work in empty folders.')).toBeInTheDocument();
+    await user.click(within(products).getByRole('button', { name: 'Add repository' }));
+    await user.type(within(products).getByLabelText('Address'), 'https://github.com/acme/mascot.git');
+    await user.type(within(products).getByLabelText('Token'), 'ghp_mascot5678');
+    await user.click(within(products).getByRole('button', { name: 'Save' }));
+    await vi.waitFor(() =>
+      expect(calls.find(c => c.method === 'PUT')).toEqual({ method: 'PUT', path: '/api/departments/pd1/repository', body: { url: 'https://github.com/acme/mascot.git', branch: 'main', token: 'ghp_mascot5678' } }),
+    );
   });
 });
