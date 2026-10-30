@@ -4,6 +4,7 @@ import { errorText, useT, type Messages } from '../i18n';
 import { useStream } from '../live';
 import { PROVIDER_NAMES } from '../providers';
 import type { EventView, Me, OrchestratorState, Org, StructureItem, SubView, TemplateKey } from '../types';
+import { Markdown } from '../ui/Markdown';
 import { StructureCard } from '../ui/StructureCard';
 import { orchestratorStatus } from './Map';
 
@@ -21,6 +22,20 @@ const field = (data: unknown, key: string): string => {
   const v = data && typeof data === 'object' ? (data as Record<string, unknown>)[key] : undefined;
   return typeof v === 'string' ? v : '';
 };
+
+/* Claude Code loading its own tools: plumbing, not something he did. */
+const LOADER = 'ToolSearch';
+
+/* The lines people read: no proposal (the one card shows below the log) and no tool loading, with its result. */
+function visible(events: EventView[]): EventView[] {
+  let call = '';
+  return events.filter(e => {
+    if (e.kind === 'tool') call = field(e.data, 'name');
+    if (e.kind === 'proposal') return false;
+    if (e.kind === 'tool' || e.kind === 'tool_result') return call !== LOADER;
+    return true;
+  });
+}
 
 const named = (t: Messages, d: { template: TemplateKey | null; name: string | null }) => d.name ?? (d.template ? t.templates[d.template].name : '');
 
@@ -155,7 +170,7 @@ export function OrchestratorWindow({ org, onClose }: Props) {
   }
 
   /* One card at a time: his newest proposal until it is applied, below his latest line. */
-  const shown = events.filter(e => e.kind !== 'proposal');
+  const shown = visible(events);
   const newest = events.findLast(e => e.kind === 'proposal');
   const applied = new Set(events.filter(e => e.kind === 'applied').map(e => (e.data as Applied).proposalId));
   const pending = newest && !applied.has(field(newest.data, 'proposalId')) ? (newest.data as Proposal) : null;
@@ -177,7 +192,7 @@ export function OrchestratorWindow({ org, onClose }: Props) {
         return (
           <div className="t-l">
             <i>⏺</i>
-            <div>{field(e.data, 'text')}</div>
+            <Markdown text={field(e.data, 'text')} />
           </div>
         );
       case 'tool':

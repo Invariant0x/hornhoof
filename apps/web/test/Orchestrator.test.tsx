@@ -58,6 +58,29 @@ describe('OrchestratorWindow', () => {
     expect(screen.getByText('Stopped')).toBeInTheDocument();
   });
 
+  it('shows his answers with bold and lists, and hides how Claude loads its tools', async () => {
+    const { container } = open({
+      [`GET ${EVENTS}?after=0`]: [
+        200,
+        {
+          events: [
+            ev(1, 'tool', { kind: 'tool', name: 'ToolSearch', input: '{"query":"select:mcp__hornhoof__company"}' }),
+            ev(2, 'tool_result', { kind: 'tool_result', ok: true, summary: '' }),
+            ev(3, 'tool', { kind: 'tool', name: 'hornhoof.company', input: '{}' }),
+            ev(4, 'tool_result', { kind: 'tool_result', ok: true, summary: 'Acme, 1 person' }),
+            ev(5, 'text', { kind: 'text', text: 'Five departments:\n- **Operations**: tools\n- Sales' }),
+          ],
+          state: READY,
+        },
+      ],
+    });
+    expect(await screen.findByText('Operations')).toHaveProperty('tagName', 'STRONG');
+    expect(container.querySelectorAll('.t-l ul > li')).toHaveLength(2);
+    expect(screen.queryByText('ToolSearch')).not.toBeInTheDocument();
+    expect(container.querySelectorAll('.t-r')).toHaveLength(1);
+    expect(container.querySelector('.t-r')).not.toHaveClass('alone');
+  });
+
   it('speaks Russian', async () => {
     localStorage.setItem('hh-lang', 'ru');
     try {

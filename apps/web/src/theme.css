@@ -350,6 +350,14 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .t-done { display: grid; gap: 2px; }
 .t-r { display: grid; grid-template-columns: 18px 28px 1fr; color: var(--muted); }
 .t-r > div { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Like Claude Code: a tool call takes two lines at most and its result three. */
+.t-t > div { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.t-r > div { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.t-l > .md { white-space: normal; display: grid; gap: 8px; }
+.md p, .md ul, .md ol { margin: 0; }
+.md ul, .md ol { padding-left: 20px; }
+.md strong { font-weight: 700; color: var(--ink); }
+.md code { color: var(--cyan-ink); }
 .t-sp { display: grid; grid-template-columns: 18px 1fr; color: var(--amber-ink); }
 .t-sp > i { font-style: normal; color: var(--amber); animation: spin 2.4s linear infinite; display: inline-block; width: 12px; }
 .t-sp span { color: var(--muted); }
