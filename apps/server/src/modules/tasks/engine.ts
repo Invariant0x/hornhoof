@@ -20,6 +20,8 @@ type Live = Pick<Ctx, 'db' | 'bus'>;
 export const CLOSED: readonly Task['status'][] = ['done', 'cancelled'];
 /* The send-back at one gate that also calls the head in. */
 export const GATE_ROUNDS = 3;
+/* Turns in a row that end without moving the task before a person is asked to step in. */
+export const SILENT_TURNS = 3;
 const COMMIT = /^[0-9a-f]{40}$/;
 
 const STATUS_CODES = { 400: 'validation', 403: 'forbidden', 404: 'not_found', 409: 'conflict' } as const;
@@ -306,6 +308,21 @@ export async function ask(ctx: Live, agentId: string, taskId: string, q: { kind:
   });
   ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
   return { task: row, request: request!, wakes: [] };
+}
+
+/* The agent holding the task ended a turn without moving it: a reminder, and from SILENT_TURNS on a person is asked. */
+export async function silentTurn(ctx: Live, agentId: string, task: Task): Promise<Moved> {
+  const silent = task.silent + 1;
+  if (silent < SILENT_TURNS) {
+    const row = await move(ctx, task, { silent }, { kind: 'reminded', actor: { agentId }, data: { silent } });
+    return { task: row, wakes: [{ agentId, taskId: task.id, why: 'reminder' }] };
+  }
+  const text = `Ended ${silent} turns in a row on #${task.number} without moving it. Tell it how to go on, or cancel the task.`;
+  const row = await move(ctx, task, { silent, status: 'waiting' }, { kind: 'stuck', actor: { agentId }, text }, async tx => {
+    await tx.insert(requests).values({ companyId: task.companyId, taskId: task.id, agentId, kind: 'stuck', text });
+  });
+  ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
+  return { task: row, wakes: [] };
 }
 
 export type Answer = { answer?: string; approve?: boolean; retry?: boolean };

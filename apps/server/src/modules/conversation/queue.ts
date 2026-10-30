@@ -8,9 +8,12 @@ import { identityOf } from '../nodes/hub.js';
 import { appendEvent, earlierTalk, publishWorking } from '../events/store.js';
 import { instructionsOf } from '../agents/instructions.js';
 import { textHash } from '../templates/load.js';
+import { checkLiveness, startWork } from '../tasks/wake.js';
 import { preface } from './prompt.js';
 
 export const CONVERSATION_TIMEOUT_MS = 15 * 60_000;
+/* A turn on a task may run long: the work, its tests and a review fit in one. */
+export const TASK_TURN_TIMEOUT_MS = 45 * 60_000;
 
 export type AgentState = {
   ready: boolean;
@@ -20,7 +23,7 @@ export type AgentState = {
   queued: number;
 };
 
-type Turn = { companyId: string; agentId: string; prompt: string; createdBy: string | null; message?: { personId: string; text: string } };
+type Turn = { companyId: string; agentId: string; prompt: string; createdBy: string | null; message?: { personId: string; text: string }; taskId?: string };
 
 /* One thing at a time per agent, so two pumps never send two turns. */
 const chains = new WeakMap<Ctx, Map<string, Promise<unknown>>>();
@@ -39,7 +42,7 @@ export function onAgent<T>(ctx: Ctx, agentId: string, fn: () => Promise<T>): Pro
 
 const conversationOf = (agentId: string) => and(eq(jobs.agentId, agentId), eq(jobs.kind, 'conversation'));
 
-async function liveSubscription(ctx: Ctx, agentId: string) {
+export async function liveSubscription(ctx: Ctx, agentId: string) {
   const [row] = await ctx.db.select({ sub: subscriptions }).from(agents).innerJoin(subscriptions, eq(subscriptions.id, agents.subscriptionId)).where(eq(agents.id, agentId));
   return row && !row.sub.removedAt ? row.sub : null;
 }
@@ -50,7 +53,16 @@ export async function insertTurn(ctx: Ctx, t: Turn): Promise<string> {
   if (!sub) throw new Error('The agent has no subscription.');
   const [job] = await ctx.db
     .insert(jobs)
-    .values({ companyId: t.companyId, subscriptionId: sub.id, agentId: t.agentId, kind: 'conversation', prompt: t.prompt, timeoutMs: CONVERSATION_TIMEOUT_MS, createdBy: t.createdBy })
+    .values({
+      companyId: t.companyId,
+      subscriptionId: sub.id,
+      agentId: t.agentId,
+      kind: 'conversation',
+      prompt: t.prompt,
+      timeoutMs: t.taskId ? TASK_TURN_TIMEOUT_MS : CONVERSATION_TIMEOUT_MS,
+      createdBy: t.createdBy,
+      taskId: t.taskId ?? null,
+    })
     .returning({ id: jobs.id });
   if (t.message) {
     await appendEvent(ctx, { companyId: t.companyId, agentId: t.agentId, jobId: job!.id, kind: 'message', data: { text: t.message.text }, personId: t.message.personId });
@@ -115,7 +127,10 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   if (!taken) return;
   await publishWorking(ctx, job.companyId);
   const sent = await dispatchJob(ctx, { id: job.id, subscriptionId: sub.id, prompt, sessionId, model, timeoutMs: job.timeoutMs, instructions: instructions.text, toolToken: token });
-  if (sent) return;
+  if (sent) {
+    if (job.taskId) await startWork(ctx, job.id);
+    return;
+  }
   await db.update(jobs).set({ status: 'queued', startedAt: null, prompt: job.prompt, toolTokenHash: null, instructionsHash: null }).where(eq(jobs.id, job.id));
   await publishWorking(ctx, job.companyId);
 }
@@ -131,14 +146,16 @@ export async function pumpWaiting(ctx: Ctx): Promise<void> {
   for (const { agentId } of waiting) if (agentId) await pump(ctx, agentId);
 }
 
-/* A finished turn: a failure or a stop goes into the conversation, then the next turn goes out. */
+/* A finished turn: a failure or a stop goes into the conversation, a turn on a task that left it where it was is caught,
+   then the next turn goes out. */
 export async function afterJob(ctx: Ctx, jobId: string): Promise<void> {
-  const [job] = await ctx.db.select({ companyId: jobs.companyId, agentId: jobs.agentId, kind: jobs.kind, status: jobs.status, error: jobs.error }).from(jobs).where(eq(jobs.id, jobId));
+  const [job] = await ctx.db.select({ companyId: jobs.companyId, agentId: jobs.agentId, kind: jobs.kind, status: jobs.status, error: jobs.error, taskId: jobs.taskId }).from(jobs).where(eq(jobs.id, jobId));
   if (!job?.agentId || job.kind !== 'conversation') return;
   if (job.status === 'failed') {
     const stopped = job.error === 'cancelled';
     await appendEvent(ctx, { companyId: job.companyId, agentId: job.agentId, jobId, kind: stopped ? 'stopped' : 'failed', data: stopped ? {} : { error: job.error } });
   }
+  if (job.taskId) await checkLiveness(ctx, jobId);
   await pump(ctx, job.agentId);
 }
 
