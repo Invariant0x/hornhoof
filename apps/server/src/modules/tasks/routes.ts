@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, inArray, isNull, notInArray } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray, isNull, notInArray, type SQL } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -51,13 +51,17 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const q = ListQuery.parse(req.query);
     const access = await accessOf(db, me);
-    const state = q.status === 'open' ? notInArray(tasks.status, [...CLOSED]) : q.status === 'closed' ? inArray(tasks.status, [...CLOSED]) : undefined;
-    const rows = await db
-      .select()
-      .from(tasks)
-      .where(and(eq(tasks.companyId, me.companyId), state, q.department ? eq(tasks.departmentId, q.department) : undefined))
-      .orderBy(desc(tasks.number))
-      .limit(500);
+    const page = (state: SQL) =>
+      db
+        .select()
+        .from(tasks)
+        .where(and(eq(tasks.companyId, me.companyId), state, q.department ? eq(tasks.departmentId, q.department) : undefined))
+        .orderBy(desc(tasks.number))
+        .limit(500);
+    /* All of them: every open one stays even under many closed ones, the newest closed ones come with them. */
+    const open = q.status === 'closed' ? [] : await page(notInArray(tasks.status, [...CLOSED]));
+    const closed = q.status === 'open' ? [] : await page(inArray(tasks.status, [...CLOSED]));
+    const rows = [...open, ...closed].sort((a, b) => b.number - a.number);
     return { tasks: await taskLines(ctx, rows.filter(t => reaches(access, t))) };
   });
 
@@ -172,7 +176,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
       title: turn.title || turn.goal,
       goal: turn.goal,
       status: turn.status,
-      messages: whole ? turn.messages : [],
+      messages: whole ? turn.messages.map(({ by, text, at }) => ({ by, text, at })) : [],
       taskId: turn.taskId,
       startedAt: (turn.openedAt ?? turn.createdAt).toISOString(),
       openedAt: turn.openedAt?.toISOString() ?? null,

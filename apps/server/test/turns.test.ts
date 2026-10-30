@@ -5,7 +5,7 @@ import { and, asc, eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, companies, departments, jobs, people, proposals, subscriptions, tasks, turns } from '../src/db/schema.js';
+import { agents, companies, departments, jobs, people, subscriptions, tasks, turns } from '../src/db/schema.js';
 import { appendEvent } from '../src/modules/events/store.js';
 import { invitePerson, listen, setUpCompany, testApp } from './helpers.js';
 
@@ -44,10 +44,22 @@ async function company() {
     await new Promise(r => setTimeout(r, 5));
     await appendEvent(app.ctx, { companyId, agentId: orchestrator!.id, kind: 'message', data: { text }, personId });
   };
+  /* A person's message to the orchestrator with the turn it makes: queued, or running with his tools. */
+  const message = async (text: string, status: 'running' | 'queued' = 'running') => {
+    await new Promise(r => setTimeout(r, 5));
+    const [job] = await db.insert(jobs).values({ companyId, subscriptionId: sub!.id, agentId: orchestrator!.id, kind: 'conversation', prompt: `Ivan (CEO): ${text}`, timeoutMs: 900000, status: 'queued', createdBy: ceo!.id }).returning();
+    await appendEvent(app.ctx, { companyId, agentId: orchestrator!.id, jobId: job!.id, kind: 'message', data: { text }, personId: ceo!.id });
+    const run = async () => {
+      const token = `tool-token-${++n}-0123456789abcdef0123456789`;
+      await db.update(jobs).set({ status: 'running', startedAt: new Date(), toolTokenHash: hashToken(token) }).where(eq(jobs.id, job!.id));
+      return mcp(app, token);
+    };
+    return { run, tools: status === 'running' ? await run() : null };
+  };
   /* Turns queued for an agent, oldest first. */
   const queued = async (agentId: string) => db.select({ prompt: jobs.prompt, taskId: jobs.taskId }).from(jobs).where(and(eq(jobs.agentId, agentId), eq(jobs.status, 'queued'))).orderBy(asc(jobs.createdAt));
   const get = (token: string, url: string) => app.inject({ method: 'GET', url, headers: { cookie: `hh_session=${token}` } });
-  return { app, db, ctx: app.ctx, companyId, ceo: ceo!, ceoToken, orchestrator: orchestrator!, dev: dev!, sales: sales!, design: design!, hana, sara, bruno, tools, say, queued, get };
+  return { app, db, ctx: app.ctx, companyId, ceo: ceo!, ceoToken, orchestrator: orchestrator!, dev: dev!, sales: sales!, design: design!, hana, sara, bruno, tools, say, message, queued, get };
 }
 
 async function mcp(app: FastifyInstance, token: string): Promise<Client> {
@@ -171,39 +183,87 @@ describe('turns', () => {
   });
 
   it("keeps the people's own words with the turn they asked for", async () => {
-    const { db, orchestrator, dev, tools, say } = await company();
+    const { db, dev, say, message } = await company();
     await say('We need card payments, Stripe is fine.');
-    await say('And Apple Pay too.');
-    const client = await tools(orchestrator);
-    await call(client, 'plan_turn', { title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')], words: 2 });
-    await say('Also refunds later.');
-    await call(client, 'plan_turn', { title: 'Refunds', goal: 'Money goes back.', tasks: [work(dev.id, 'Refund button')] });
-    const [first, second] = await db.select().from(turns).orderBy(asc(turns.number));
-    expect(first!.messages.map(m => [m.by, m.text])).toEqual([
+    const first = (await message('And Apple Pay too.')).tools!;
+    await call(first, 'plan_turn', { title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')], words: 2 });
+    const second = (await message('Also refunds later.')).tools!;
+    await call(second, 'plan_turn', { title: 'Refunds', goal: 'Money goes back.', tasks: [work(dev.id, 'Refund button')] });
+    const [one, two] = await db.select().from(turns).orderBy(asc(turns.number));
+    expect(one!.messages.map(m => [m.by, m.text])).toEqual([
       ['Ivan', 'We need card payments, Stripe is fine.'],
       ['Ivan', 'And Apple Pay too.'],
     ]);
-    expect(second!.messages.map(m => m.text)).toEqual(['Also refunds later.']);
-    await say('Add a refund reason field.');
-    await call(client, 'add_tasks', { turn: 2, tasks: [work(dev.id, 'Refund reason')] });
+    expect(two!.messages.map(m => m.text)).toEqual(['Also refunds later.']);
+    const third = (await message('Add a refund reason field.')).tools!;
+    await call(third, 'add_tasks', { turn: 2, tasks: [work(dev.id, 'Refund reason')] });
     expect((await db.select().from(turns).where(eq(turns.number, 2)))[0]!.messages.map(m => m.text)).toEqual(['Also refunds later.', 'Add a refund reason field.']);
   });
 
-  it('keeps only the newest message unless he names more', async () => {
-    const { db, orchestrator, dev, tools, say } = await company();
+  it('keeps only the message he answers unless he names more, and never words another turn kept', async () => {
+    const { db, dev, say, message } = await company();
     await say('How are you?');
-    await say('Make card payments.');
-    await call(await tools(orchestrator), 'plan_turn', { title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
-    expect((await db.select().from(turns))[0]!.messages.map(m => m.text)).toEqual(['Make card payments.']);
+    const first = (await message('Make card payments.')).tools!;
+    await call(first, 'plan_turn', { title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
+    await call(first, 'plan_turn', { title: 'Again', goal: 'Same words.', tasks: [work(dev.id, 'Other')], words: 6 });
+    const [one, two] = await db.select().from(turns).orderBy(asc(turns.number));
+    expect(one!.messages.map(m => m.text)).toEqual(['Make card payments.']);
+    expect(two!.messages.map(m => m.text)).toEqual(['How are you?']);
   });
 
-  it('leaves out the words from before the last card he showed or the last turn', async () => {
-    const { db, companyId, orchestrator, dev, tools, say } = await company();
-    await say('We sell shoes online.');
-    await db.insert(proposals).values({ companyId, agentId: orchestrator.id, brief: 'Shoes.', items: [] });
-    await say('Now card payments, please.');
-    await call(await tools(orchestrator), 'plan_turn', { title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')], words: 6 });
-    expect((await db.select().from(turns))[0]!.messages.map(m => m.text)).toEqual(['Now card payments, please.']);
+  it('takes the words of the message he answers, not of one that came in meanwhile', async () => {
+    const { db, dev, message } = await company();
+    const card = (await message('Card payments.')).tools!;
+    const later = await message('Refunds too.', 'queued');
+    await call(card, 'plan_turn', { title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
+    await call(await later.run(), 'plan_turn', { title: 'Refunds', goal: 'Money goes back.', tasks: [work(dev.id, 'Refund button')] });
+    const [one, two] = await db.select().from(turns).orderBy(asc(turns.number));
+    expect(one!.messages.map(m => m.text)).toEqual(['Card payments.']);
+    expect(two!.messages.map(m => m.text)).toEqual(['Refunds too.']);
+  });
+
+  it("keeps no words with a turn he lays out when a task's news woke him", async () => {
+    const { db, orchestrator, dev, tools, say } = await company();
+    await say('Make card payments.');
+    await call(await tools(orchestrator), 'plan_turn', { title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
+    expect((await db.select().from(turns))[0]!.messages).toEqual([]);
+  });
+
+  it('skips a planned turn whose tasks were all cancelled and starts the one after it', async () => {
+    const { db, orchestrator, dev, hana, tools } = await company();
+    const boss = await tools(orchestrator);
+    await call(boss, 'plan_turn', { title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
+    await call(boss, 'plan_turn', { title: 'Refunds', goal: 'Money goes back.', tasks: [work(dev.id, 'Refund button')] });
+    await call(boss, 'plan_turn', { title: 'Reports', goal: 'Monthly totals.', tasks: [work(dev.id, 'Totals')] });
+    expect((await call(boss, 'cancel_task', { task: 2, why: 'Not needed.' })).isError).toBeFalsy();
+    await call(await tools(hana), 'report', { task: 1, done: true, summary: 'Shipped.' });
+    expect((await db.select({ n: turns.number, s: turns.status }).from(turns).orderBy(asc(turns.number))).map(t => [t.n, t.s])).toEqual([
+      [1, 'closed'],
+      [2, 'closed'],
+      [3, 'open'],
+    ]);
+    expect((await db.select().from(tasks).where(eq(tasks.title, 'Totals')))[0]).toMatchObject({ status: 'open', assigneeAgentId: hana.id });
+  });
+
+  it('closes a turn from before, whose tasks are all done, when he lays out the next one', async () => {
+    const { db, companyId, ceo, orchestrator, dev, hana, tools } = await company();
+    const [old] = await db.insert(turns).values({ companyId, number: 1, goal: 'Old goal', status: 'open', startedBy: ceo.id, openedAt: new Date() }).returning();
+    await db.insert(tasks).values({ companyId, number: 1, turnId: old!.id, title: 'Turn 1: Old goal', status: 'done', createdByPersonId: ceo.id });
+    const res = await call(await tools(orchestrator), 'plan_turn', { title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
+    expect(text(res)).toContain('started');
+    expect((await db.select({ n: turns.number, s: turns.status }).from(turns).orderBy(asc(turns.number))).map(t => [t.n, t.s])).toEqual([
+      [1, 'closed'],
+      [2, 'open'],
+    ]);
+    expect((await db.select().from(tasks).where(eq(tasks.title, 'Checkout')))[0]!.assigneeAgentId).toBe(hana.id);
+  });
+
+  it('lists every open task for the tracker even after many newer closed ones', async () => {
+    const { db, companyId, orchestrator, dev, tools, ceoToken, get } = await company();
+    await call(await tools(orchestrator), 'plan_turn', { title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
+    await db.insert(tasks).values(Array.from({ length: 500 }, (_, i) => ({ companyId, number: i + 2, title: `Old ${i}`, status: 'done' as const })));
+    const all = (await get(ceoToken, '/api/tasks?status=all')).json().tasks as { number: number }[];
+    expect(all.some(t => t.number === 1)).toBe(true);
   });
 
   it("keeps a planned task away from its department's head until its turn starts", async () => {
@@ -250,9 +310,8 @@ describe('turns', () => {
   });
 
   it('shows turns to everyone and the words behind them only to people with the whole company', async () => {
-    const { app, orchestrator, dev, tools, say, ceoToken, get } = await company();
-    await say('We need card payments.');
-    await call(await tools(orchestrator), 'plan_turn', { title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
+    const { app, orchestrator, dev, tools, message, ceoToken, get } = await company();
+    await call((await message('We need card payments.')).tools!, 'plan_turn', { title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
     await call(await tools(orchestrator), 'plan_turn', { title: 'Refunds', goal: 'Money goes back.', tasks: [work(dev.id, 'Refund button')] });
     const mine = (await get(ceoToken, '/api/turns')).json().turns;
     expect(mine.map((t: { number: number; title: string; status: string }) => [t.number, t.title, t.status])).toEqual([

@@ -153,7 +153,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
       .min(1)
       .max(TURN_MESSAGES)
       .optional()
-      .describe("How many of people's newest messages to you this comes from, counting back from the newest, when the ask took several messages. 1 by default. They are kept with the turn word for word.");
+      .describe("How many of people's messages to you this comes from, counting back from the one you are answering, when the ask took several messages. 1 by default. They are kept with the turn word for word.");
     server.registerTool(
       'turns',
       { description: 'The last closed turn, the running turn and the planned ones in order, each with its title, main point and tasks, and where each task stands.', inputSchema: {} },
@@ -176,7 +176,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
       async input =>
         run(async () => {
           await underCap(await me(), input.tasks.length);
-          const moved = await planTurn(ctx, job.companyId, job.agentId, input);
+          const moved = await planTurn(ctx, { companyId: job.companyId, agentId: job.agentId, jobId: job.id }, input);
           return { text: moved.text, moved };
         }),
     );
@@ -191,7 +191,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
       async input =>
         run(async () => {
           await underCap(await me(), input.tasks.length);
-          const moved = await addTasks(ctx, job.companyId, job.agentId, input.turn, input.tasks, input.words);
+          const moved = await addTasks(ctx, { companyId: job.companyId, agentId: job.agentId, jobId: job.id }, input.turn, input.tasks, input.words);
           return { text: moved.text, moved };
         }),
     );

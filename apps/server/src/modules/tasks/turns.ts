@@ -1,6 +1,6 @@
-import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, max, notInArray } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lte, max, notInArray } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { agentEvents, agents, companies, departments, people, proposals, tasks, turns, type TurnMessage } from '../../db/schema.js';
+import { agentEvents, agents, companies, departments, people, tasks, turns, type TurnMessage } from '../../db/schema.js';
 import { CLOSED, note, published, refuse, type Task, type Tx, type Wake } from './engine.js';
 import { handOff } from './pulses.js';
 
@@ -9,6 +9,8 @@ export type Turn = typeof turns.$inferSelect;
 /* One task of a turn as the orchestrator lays it out. */
 export type PlanItem = { department: string; product?: string; title: string; brief: string; body: string };
 type Placed = PlanItem & { head: { id: string; name: string } };
+/* The orchestrator and the run he lays the turn out in. */
+export type By = { companyId: string; agentId: string; jobId: string };
 
 /* The people's words the orchestrator lays a turn out from: their newest messages to him, as many as he says, at most this. */
 export const TURN_MESSAGES = 6;
@@ -43,23 +45,24 @@ async function place(ctx: Live, companyId: string, items: PlanItem[]): Promise<P
   return placed;
 }
 
-/* The newest messages people wrote to the orchestrator, as many as he names, from after the words a turn already keeps,
-   the newest turn and the newest card he showed: earlier words were about something else. */
-async function newWords(tx: Tx, companyId: string, agentId: string, words: number): Promise<TurnMessage[]> {
-  const kept = await tx.select({ messages: turns.messages, at: turns.createdAt }).from(turns).where(eq(turns.companyId, companyId));
-  const [card] = await tx.select({ at: proposals.createdAt }).from(proposals).where(eq(proposals.companyId, companyId)).orderBy(desc(proposals.createdAt)).limit(1);
-  const marks = [...kept.flatMap(t => [t.at.getTime(), ...t.messages.map(m => Date.parse(m.at))]), card?.at.getTime() ?? 0];
-  const since = new Date(Math.max(0, ...marks));
+/* The words of the message this run answers, and as many of the messages before it as he names, leaving out words a turn
+   already keeps. A run that a task's news started answers no one, so it keeps none. Messages that came in meanwhile wait
+   for the runs that answer them. */
+async function newWords(tx: Tx, by: By, words: number): Promise<TurnMessage[]> {
+  const mine = and(eq(agentEvents.agentId, by.agentId), eq(agentEvents.kind, 'message'), isNotNull(agentEvents.personId));
+  const [asked] = await tx.select({ seq: agentEvents.seq }).from(agentEvents).where(and(mine, eq(agentEvents.jobId, by.jobId))).orderBy(desc(agentEvents.seq)).limit(1);
+  if (!asked) return [];
+  const kept = (await tx.select({ messages: turns.messages }).from(turns).where(eq(turns.companyId, by.companyId))).flatMap(t => t.messages.flatMap(m => (m.id ? [m.id] : [])));
   const rows = await tx
-    .select({ text: agentEvents.data, at: agentEvents.createdAt, by: people.name })
+    .select({ id: agentEvents.id, text: agentEvents.data, at: agentEvents.createdAt, by: people.name })
     .from(agentEvents)
     .innerJoin(people, eq(people.id, agentEvents.personId))
-    .where(and(eq(agentEvents.agentId, agentId), eq(agentEvents.kind, 'message'), isNotNull(agentEvents.personId), gt(agentEvents.createdAt, since)))
+    .where(and(mine, lte(agentEvents.seq, asked.seq), kept.length ? notInArray(agentEvents.id, kept) : undefined))
     .orderBy(desc(agentEvents.seq))
     .limit(Math.min(Math.max(words, 1), TURN_MESSAGES));
   return rows
     .reverse()
-    .map(r => ({ by: r.by, text: typeof (r.text as { text?: unknown }).text === 'string' ? (r.text as { text: string }).text : '', at: r.at.toISOString() }))
+    .map(r => ({ id: r.id, by: r.by, text: typeof (r.text as { text?: unknown }).text === 'string' ? (r.text as { text: string }).text : '', at: r.at.toISOString() }))
     .filter(m => m.text.trim());
 }
 
@@ -123,20 +126,36 @@ async function announce(ctx: Live, started: Started[]): Promise<void> {
   }
 }
 
-/* Opens the lowest planned turn when none is open, and sends its tasks to their heads. */
+const liveAtTop = (turnId: string) => and(eq(tasks.turnId, turnId), isNull(tasks.parentId), notInArray(tasks.status, [...CLOSED]));
+
+/* Opens the lowest planned turn when none is open, and sends its tasks to their heads. An open turn with nothing left at
+   its top closes first, and a planned turn whose tasks were all cancelled closes without starting, so the turns after
+   them do not wait for nothing. */
 async function openNext(tx: Tx, companyId: string): Promise<{ turn: Turn; started: Started[] } | null> {
-  const [open] = await tx.select({ id: turns.id }).from(turns).where(and(eq(turns.companyId, companyId), eq(turns.status, 'open')));
-  if (open) return null;
-  const [next] = await tx.select().from(turns).where(and(eq(turns.companyId, companyId), eq(turns.status, 'planned'))).orderBy(asc(turns.number)).limit(1);
-  if (!next) return null;
-  const [turn] = await tx.update(turns).set({ status: 'open', openedAt: new Date() }).where(eq(turns.id, next.id)).returning();
-  const planned = await tx.select().from(tasks).where(and(eq(tasks.turnId, next.id), eq(tasks.status, 'planned'))).orderBy(asc(tasks.number));
-  const started: Started[] = [];
-  for (const task of planned) {
-    const s = await start(tx, task);
-    if (s) started.push(s);
+  for (;;) {
+    const [open] = await tx.select({ id: turns.id }).from(turns).where(and(eq(turns.companyId, companyId), eq(turns.status, 'open')));
+    if (open) {
+      const [left] = await tx.select({ n: count() }).from(tasks).where(liveAtTop(open.id));
+      if (Number(left?.n ?? 0)) return null;
+      await tx.update(turns).set({ status: 'closed', closedAt: new Date() }).where(eq(turns.id, open.id));
+      continue;
+    }
+    const [next] = await tx.select().from(turns).where(and(eq(turns.companyId, companyId), eq(turns.status, 'planned'))).orderBy(asc(turns.number)).limit(1);
+    if (!next) return null;
+    const planned = await tx.select().from(tasks).where(and(eq(tasks.turnId, next.id), eq(tasks.status, 'planned'))).orderBy(asc(tasks.number));
+    const at = new Date();
+    if (!planned.length) {
+      await tx.update(turns).set({ status: 'closed', openedAt: at, closedAt: at }).where(eq(turns.id, next.id));
+      continue;
+    }
+    const [turn] = await tx.update(turns).set({ status: 'open', openedAt: at }).where(eq(turns.id, next.id)).returning();
+    const started: Started[] = [];
+    for (const task of planned) {
+      const s = await start(tx, task);
+      if (s) started.push(s);
+    }
+    return { turn: turn!, started };
   }
-  return { turn: turn!, started };
 }
 
 export const turnName = (t: Pick<Turn, 'number' | 'title' | 'goal'>) => `Turn ${t.number} "${t.title || t.goal}"`;
@@ -146,12 +165,13 @@ const numbers = (rows: Task[]) => rows.map(t => `#${t.number}`).join(', ');
 export type TurnMove = { turn: Turn; text: string; wakes: Wake[] };
 
 /* A new turn with its tasks: it starts at once when no turn runs, else it waits after the planned ones. */
-export async function planTurn(ctx: Live, companyId: string, agentId: string, input: { title: string; goal: string; tasks: PlanItem[]; words?: number }): Promise<TurnMove> {
+export async function planTurn(ctx: Live, by: By, input: { title: string; goal: string; tasks: PlanItem[]; words?: number }): Promise<TurnMove> {
+  const { companyId, agentId } = by;
   const items = await place(ctx, companyId, input.tasks);
   const done = await ctx.db.transaction(async tx => {
     await lockCompany(tx, companyId);
     const [last] = await tx.select({ n: max(turns.number) }).from(turns).where(eq(turns.companyId, companyId));
-    const messages = await newWords(tx, companyId, agentId, input.words ?? 1);
+    const messages = await newWords(tx, by, input.words ?? 1);
     const [turn] = await tx
       .insert(turns)
       .values({ companyId, number: (last?.n ?? 0) + 1, title: input.title.trim(), goal: input.goal.trim(), status: 'planned', messages, createdByAgentId: agentId })
@@ -177,13 +197,14 @@ async function liveTurn(tx: Tx | Live['db'], companyId: string, number: number):
 }
 
 /* More tasks for a turn that has not closed: in the open one they go out at once, in a planned one they wait with it. */
-export async function addTasks(ctx: Live, companyId: string, agentId: string, number: number, items: PlanItem[], words = 1): Promise<TurnMove> {
+export async function addTasks(ctx: Live, by: By, number: number, items: PlanItem[], words = 1): Promise<TurnMove> {
+  const { companyId, agentId } = by;
   await liveTurn(ctx.db, companyId, number);
   const placed = await place(ctx, companyId, items);
   const done = await ctx.db.transaction(async tx => {
     await lockCompany(tx, companyId);
     const turn = await liveTurn(tx, companyId, number);
-    const said = await newWords(tx, companyId, agentId, words);
+    const said = await newWords(tx, by, words);
     const [kept] = said.length ? await tx.update(turns).set({ messages: [...turn.messages, ...said] }).where(eq(turns.id, turn.id)).returning() : [turn];
     const planned = await insertPlanned(tx, companyId, agentId, turn.id, placed);
     const started: Started[] = [];
@@ -221,7 +242,7 @@ export async function settle(ctx: Live, task: Pick<Task, 'turnId' | 'companyId' 
     await lockCompany(tx, task.companyId);
     const [turn] = await tx.select().from(turns).where(and(eq(turns.id, turnId), eq(turns.status, 'open')));
     if (!turn) return null;
-    const [left] = await tx.select({ n: count() }).from(tasks).where(and(eq(tasks.turnId, turnId), isNull(tasks.parentId), notInArray(tasks.status, [...CLOSED])));
+    const [left] = await tx.select({ n: count() }).from(tasks).where(liveAtTop(turnId));
     if (Number(left?.n ?? 0)) return null;
     const [closed] = await tx.update(turns).set({ status: 'closed', closedAt: new Date() }).where(eq(turns.id, turnId)).returning();
     return { closed: closed!, opened: await openNext(tx, task.companyId) };

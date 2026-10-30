@@ -284,7 +284,8 @@ export const proposals = pgTable('proposals', {
 
 /* A company-wide cycle the CEO starts with a goal; one is open at a time. */
 export const TURN_STATUSES = ['planned', 'open', 'closed'] as const;
-export type TurnMessage = { by: string; text: string; at: string };
+/* id is the message's agent event; words kept before it was recorded have none. */
+export type TurnMessage = { id?: string; by: string; text: string; at: string };
 
 export const turns = pgTable(
   'turns',
