@@ -21,16 +21,18 @@ export function mockApi(routes: Record<string, Route>): Call[] {
 }
 
 export const ME: Me = {
-  person: { id: 'p1', companyId: 'c1', name: 'Ivan', email: 'ivan@acme.com', title: 'CEO', status: 'active', scopeKind: 'company', scopeId: null, isOwner: true },
+  person: { id: 'p1', companyId: 'c1', name: 'Ivan', email: 'ivan@acme.com', title: 'CEO', status: 'active', scopeKind: 'company', isOwner: true },
   company: { id: 'c1', name: 'Acme' },
 };
+
+export const WHOLE = { whole: true, departments: [], teams: [] };
 
 export const signedOut = { error: { code: 'unauthorized', message: 'Sign in to continue.' } };
 
 export const PEOPLE: PersonView[] = [
-  { id: 'p1', name: 'Ivan', email: 'ivan@acme.com', title: 'CEO', status: 'active', isOwner: true, scope: { kind: 'company', id: null, name: 'Whole company' } },
-  { id: 'p2', name: 'Maria', email: 'maria@acme.com', title: 'Deputy CEO', status: 'active', isOwner: false, scope: { kind: 'company', id: null, name: 'Whole company' } },
-  { id: 'p3', name: 'Sasha', email: 'sasha@acme.com', title: 'SMM', status: 'invited', isOwner: false, scope: { kind: 'team', id: 't1', name: 'Social' } },
+  { id: 'p1', name: 'Ivan', email: 'ivan@acme.com', title: 'CEO', status: 'active', isOwner: true, access: WHOLE },
+  { id: 'p2', name: 'Maria', email: 'maria@acme.com', title: 'Deputy CEO', status: 'active', isOwner: false, access: WHOLE },
+  { id: 'p3', name: 'Sasha', email: 'sasha@acme.com', title: 'SMM', status: 'invited', isOwner: false, access: { whole: false, departments: [], teams: [{ id: 't1', name: 'Social', departmentId: 'd1' }] } },
 ];
 
 export const ORG: Org = {

@@ -6,12 +6,12 @@ import { orchestratorStatus, deptLayout, MapScreen } from '../src/screens/Map';
 import type { SubView } from '../src/types';
 import { LanguageProvider } from '../src/i18n';
 import type { Department, Me } from '../src/types';
-import { ME, mockApi, ORG, ORG_WITH_TEAMS, SUBS } from './api-mock';
+import { ME, mockApi, ORG, ORG_WITH_TEAMS, PEOPLE, SUBS } from './api-mock';
 import { fakeStream } from './fake-stream';
 
 const claude = SUBS[0]!;
 const PROPS = { me: ME, windowOpen: false, onOpenOrchestrator: () => {} };
-const DEPUTY: Me = { ...ME, person: { ...ME.person, scopeKind: 'department', scopeId: 'd1', isOwner: false } };
+const DEPUTY: Me = { ...ME, person: { ...ME.person, scopeKind: 'listed', isOwner: false } };
 
 const dept = (d: Partial<Department> & { id: string }): Department => ({ name: null, templateKey: null, roleCode: 'SAL', about: '', agents: { total: 0, working: 0 }, products: [], teams: [], people: [], employees: [], ...d });
 const STATES: [string, SubView | null, string, string][] = [
@@ -40,6 +40,14 @@ describe('Map', () => {
     expect(screen.getByText('Ivan')).toBeInTheDocument();
     expect(screen.getByText('Maria')).toBeInTheDocument();
     expect(container.querySelector('.ticker')).toHaveTextContent('OrchestratorRuns on Anthropic key ending 9f3a');
+  });
+
+  it('shows a deputy next to the CEO on the map', async () => {
+    const oleg = { ...PEOPLE[2]!, id: 'p5', name: 'Oleg', title: '', access: { whole: false, departments: [{ id: 'd1', name: 'Marketing' }, { id: 'd2', name: 'Development' }], teams: [] }, deputy: true };
+    mockApi({ 'GET /api/org': [200, { ...ORG_WITH_TEAMS, people: [...ORG.people, oleg] }] });
+    render(<MapScreen {...PROPS} />);
+    expect((await screen.findByText('Oleg')).closest('li')).toHaveTextContent('Deputy: Marketing, Development');
+    expect(screen.getByText('Maria').closest('li')).toHaveTextContent('Deputy CEO');
   });
 
   it('fills the half gauge one segment of 24 per share of working agents', async () => {

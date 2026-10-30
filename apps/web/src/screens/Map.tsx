@@ -4,6 +4,7 @@ import { PROVIDER_NAMES } from '../providers';
 import { useStream, type LiveMessage } from '../live';
 import { useOrg } from '../org';
 import type { Department, Endpoint, Me, Org, SubView } from '../types';
+import { accessText } from '../ui/AccessPicker';
 import { Edge } from '../ui/Edge';
 import { LogoMark, PersonIcon } from '../ui/icons';
 import { Pulse, pulseSeconds, toD, useReducedMotion, type Point } from '../ui/wires';
@@ -352,7 +353,7 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator, inside = false, 
                 <PersonIcon label={t.map.person} />
                 <span>
                   <b>{p.name}</b>
-                  <small>{p.title || t.map.wholeCompany}</small>
+                  <small>{p.title || (p.deputy ? t.map.deputy(accessText(t, p.access, org)) : t.map.wholeCompany)}</small>
                 </span>
               </Edge>
             </li>

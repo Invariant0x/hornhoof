@@ -1,42 +1,14 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { api } from '../api';
-import { deptLabel, errorText, useT, type Messages } from '../i18n';
-import type { Me, Org, PersonView } from '../types';
+import { errorText, useT } from '../i18n';
+import type { AccessInput, Me, Org, PersonView } from '../types';
+import { accessEmpty, accessInput, AccessPicker, accessText } from '../ui/AccessPicker';
 import { CopyButton } from '../ui/CopyButton';
 import { Edge } from '../ui/Edge';
 import { Field } from '../ui/Field';
 import { AgentIcon, PersonIcon } from '../ui/icons';
 
-type Scope = { kind: 'company' } | { kind: 'department' | 'team'; id: string };
-type ScopeOption = { value: string; label: string; scope: Scope };
 type Panel = { kind: 'invite' } | { kind: 'link'; name: string; url: string } | { kind: 'edit'; person: PersonView; titleOnly: boolean } | null;
-
-function scopeOptions(t: Messages, org: Org | null): ScopeOption[] {
-  const options: ScopeOption[] = [{ value: 'company', label: t.people.wholeCompany, scope: { kind: 'company' } }];
-  for (const d of org?.departments ?? []) options.push({ value: `department:${d.id}`, label: deptLabel(t, d), scope: { kind: 'department', id: d.id } });
-  for (const d of org?.departments ?? []) {
-    for (const team of d.teams) options.push({ value: `team:${team.id}`, label: `${deptLabel(t, d)} / ${team.name}`, scope: { kind: 'team', id: team.id } });
-  }
-  return options;
-}
-
-const scopeValue = (p: PersonView) => (p.scope.kind === 'company' ? 'company' : `${p.scope.kind}:${p.scope.id}`);
-const scopeName = (t: Messages, p: PersonView) => (p.scope.kind === 'company' ? t.people.wholeCompany : p.scope.name);
-
-function ScopeSelect({ options, value, onChange }: { options: ScopeOption[]; value: string; onChange: (v: string) => void }) {
-  const t = useT();
-  return (
-    <Field label={t.people.scope} hint={t.people.scopeHint}>
-      {p => (
-        <select {...p} value={value} onChange={e => onChange(e.target.value)}>
-          {options.map(o => (
-            <option key={o.value} value={o.value}>{o.label}</option>
-          ))}
-        </select>
-      )}
-    </Field>
-  );
-}
 
 function InviteLink({ name, url, onClose }: { name: string; url: string; onClose: () => void }) {
   const t = useT();
@@ -55,17 +27,18 @@ function InviteLink({ name, url, onClose }: { name: string; url: string; onClose
   );
 }
 
-function InviteForm({ options, onSent, onClose }: { options: ScopeOption[]; onSent: (name: string, url: string) => void; onClose: () => void }) {
+function InviteForm({ org, onSent, onClose }: { org: Org | null; onSent: (name: string, url: string) => void; onClose: () => void }) {
   const t = useT();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [title, setTitle] = useState('');
-  const [scope, setScope] = useState('company');
+  const [access, setAccess] = useState<AccessInput>({ whole: true });
   const [failure, setFailure] = useState('');
   const [busy, setBusy] = useState(false);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
+    if (accessEmpty(access)) return;
     setBusy(true);
     setFailure('');
     try {
@@ -73,7 +46,7 @@ function InviteForm({ options, onSent, onClose }: { options: ScopeOption[]; onSe
         name: name.trim(),
         email: email.trim(),
         title: title.trim(),
-        scope: options.find(o => o.value === scope)!.scope,
+        access,
       });
       onSent(res.person.name, res.inviteUrl);
     } catch (err) {
@@ -89,22 +62,22 @@ function InviteForm({ options, onSent, onClose }: { options: ScopeOption[]; onSe
         <Field label={t.common.name}>{p => <input {...p} value={name} onChange={e => setName(e.target.value)} maxLength={80} autoFocus required />}</Field>
         <Field label={t.common.email}>{p => <input {...p} type="email" value={email} onChange={e => setEmail(e.target.value)} required />}</Field>
         <Field label={t.common.title}>{p => <input {...p} value={title} onChange={e => setTitle(e.target.value)} maxLength={80} placeholder={t.people.titlePlaceholder} />}</Field>
-        <ScopeSelect options={options} value={scope} onChange={setScope} />
+        <AccessPicker org={org} value={access} onChange={setAccess} />
         {failure && <p className="alert" role="alert">{failure}</p>}
         <div className="actions">
           <button className="btn ghost" type="button" onClick={onClose}>{t.common.cancel}</button>
-          <button className="btn" type="submit" disabled={busy || !name.trim() || !email.trim()}>{t.people.sendInvite}</button>
+          <button className="btn" type="submit" disabled={busy || !name.trim() || !email.trim() || accessEmpty(access)}>{t.people.sendInvite}</button>
         </div>
       </form>
     </Edge>
   );
 }
 
-/* Your own row and the owner's take a new title only: scope is not theirs to change here. */
-function EditForm({ person, options, titleOnly, onSaved, onClose }: { person: PersonView; options: ScopeOption[]; titleOnly: boolean; onSaved: (p: PersonView) => void; onClose: () => void }) {
+/* Your own row and the owner's take a new title only: access is not theirs to change here. */
+function EditForm({ person, org, titleOnly, onSaved, onClose }: { person: PersonView; org: Org | null; titleOnly: boolean; onSaved: (p: PersonView) => void; onClose: () => void }) {
   const t = useT();
   const [title, setTitle] = useState(person.title);
-  const [scope, setScope] = useState(scopeValue(person));
+  const [access, setAccess] = useState<AccessInput>(() => accessInput(person.access));
   const [failure, setFailure] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -115,7 +88,7 @@ function EditForm({ person, options, titleOnly, onSaved, onClose }: { person: Pe
     try {
       const res = await api.patch<{ person: PersonView }>(
         `/api/people/${person.id}`,
-        titleOnly ? { title: title.trim() } : { title: title.trim(), scope: options.find(o => o.value === scope)!.scope },
+        titleOnly ? { title: title.trim() } : { title: title.trim(), access },
       );
       onSaved(res.person);
     } catch (err) {
@@ -129,11 +102,11 @@ function EditForm({ person, options, titleOnly, onSaved, onClose }: { person: Pe
       <h2>{t.people.editHeading(person.name)}</h2>
       <form onSubmit={submit} className="panel-form">
         <Field label={t.common.title}>{p => <input {...p} value={title} onChange={e => setTitle(e.target.value)} maxLength={80} autoFocus />}</Field>
-        {!titleOnly && <ScopeSelect options={options} value={scope} onChange={setScope} />}
+        {!titleOnly && <AccessPicker org={org} value={access} onChange={setAccess} />}
         {failure && <p className="alert" role="alert">{failure}</p>}
         <div className="actions">
           <button className="btn ghost" type="button" onClick={onClose}>{t.common.cancel}</button>
-          <button className="btn" type="submit" disabled={busy}>{t.common.save}</button>
+          <button className="btn" type="submit" disabled={busy || (!titleOnly && accessEmpty(access))}>{t.common.save}</button>
         </div>
       </form>
     </Edge>
@@ -147,7 +120,6 @@ export function People({ me }: { me: Me }) {
   const [panel, setPanel] = useState<Panel>(null);
   const [failure, setFailure] = useState<unknown>(null);
   const canManage = me.person.scopeKind === 'company';
-  const options = scopeOptions(t, org);
 
   const load = useCallback(async () => {
     try {
@@ -198,7 +170,7 @@ export function People({ me }: { me: Me }) {
 
       {panel?.kind === 'invite' && (
         <InviteForm
-          options={options}
+          org={org}
           onSent={(name, url) => {
             setPanel({ kind: 'link', name, url });
             void load();
@@ -211,7 +183,7 @@ export function People({ me }: { me: Me }) {
         <EditForm
           key={panel.person.id}
           person={panel.person}
-          options={options}
+          org={org}
           titleOnly={panel.titleOnly}
           onSaved={person => {
             replace(person);
@@ -228,7 +200,7 @@ export function People({ me }: { me: Me }) {
             <tr>
               <th scope="col">{t.people.columns.name}</th>
               <th scope="col">{t.people.columns.title}</th>
-              <th scope="col">{t.people.columns.scope}</th>
+              <th scope="col">{t.people.columns.access}</th>
               <th scope="col">{t.people.columns.status}</th>
               <th scope="col"><span className="sr">{t.people.columns.actions}</span></th>
             </tr>
@@ -243,7 +215,7 @@ export function People({ me }: { me: Me }) {
                     <span className="pname"><PersonIcon />{p.name}</span>
                   </td>
                   <td>{p.title}</td>
-                  <td>{scopeName(t, p)}</td>
+                  <td>{accessText(t, p.access, org)}</td>
                   <td><span className={`status ${p.status}`}>{t.people.status[p.status]}</span></td>
                   <td className="row-actions">
                     {(manageable || titleOnly) && (

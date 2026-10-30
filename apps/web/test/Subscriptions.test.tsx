@@ -132,7 +132,7 @@ describe('Subscriptions', () => {
 
   it('offers no orchestrator choice to a department-scope viewer', async () => {
     lists();
-    const lead: Me = { ...ME, person: { ...ME.person, scopeKind: 'department', scopeId: 'd1', isOwner: false } };
+    const lead: Me = { ...ME, person: { ...ME.person, scopeKind: 'listed', isOwner: false } };
     render(<Subscriptions me={lead} />);
     await screen.findByRole('row', { name: /^Claude\b/ });
     expect(screen.queryByRole('button', { name: /for the orchestrator/ })).not.toBeInTheDocument();

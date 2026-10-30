@@ -45,7 +45,7 @@ describe('updates', () => {
 
   it('hides the banner for people who do not see the whole company', async () => {
     const calls = mockApi({ 'GET /api/org': [200, ORG], 'GET /api/updates': [200, updates()] });
-    render(<Shell me={{ ...ME, person: { ...ME.person, scopeKind: 'department', scopeId: 'd1' } }} onSignOut={() => {}} />);
+    render(<Shell me={{ ...ME, person: { ...ME.person, scopeKind: 'listed' } }} onSignOut={() => {}} />);
     await screen.findByRole('button', { name: 'Map' });
     await new Promise(r => setTimeout(r, 50));
     expect(calls.map(c => c.path)).not.toContain('/api/updates');

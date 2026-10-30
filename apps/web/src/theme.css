@@ -527,3 +527,14 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
   .staff-pick { margin-left: 0; }
 }
 @media (prefers-reduced-motion: reduce) { .dview, .dot.working { animation: none; } }
+
+/* Access: whole company, or departments with their teams below them. */
+.access { grid-column: 1 / -1; display: grid; gap: 6px; margin: 0; padding: 0; border: 0; }
+.access legend { padding: 0; margin-bottom: 4px; font-size: 13px; font-weight: 500; color: var(--muted); }
+.access .hint { margin: 0 0 4px; font-size: 12px; color: var(--muted); }
+.access .bad { margin: 0; font-size: 12px; color: var(--pink-ink); }
+.access label { display: inline-flex; align-items: center; gap: 8px; padding: 3px 0; cursor: pointer; }
+.access label:has(input:disabled) { cursor: default; color: var(--muted); }
+.access input { width: 16px; height: 16px; margin: 0; accent-color: var(--cyan); }
+.access-list, .access-list ul { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.access-list ul { padding-left: 24px; }

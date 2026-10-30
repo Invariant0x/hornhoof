@@ -5,7 +5,8 @@ export type { Limits, ModelOption, ProviderId, TemplateKey };
 /* Template text that comes in both languages. */
 export type Lang = { en: string; ru: string };
 
-export type ScopeKind = 'company' | 'department' | 'team';
+/* company: the whole company; listed: the departments and teams ticked for the person. */
+export type ScopeKind = 'company' | 'listed';
 
 export type Person = {
   id: string;
@@ -15,7 +16,6 @@ export type Person = {
   title: string;
   status: 'active' | 'invited' | 'disabled';
   scopeKind: ScopeKind;
-  scopeId: string | null;
   isOwner: boolean;
 };
 
@@ -30,8 +30,14 @@ export type PersonView = {
   title: string;
   status: Person['status'];
   isOwner: boolean;
-  scope: { kind: ScopeKind; id: string | null; name: string };
+  access: AccessView;
 };
+
+/* What a person reaches: the whole company, or departments and teams, in the order of the map. */
+export type AccessView = { whole: boolean; departments: { id: string; name: string }[]; teams: { id: string; name: string; departmentId: string }[] };
+
+/* What the People screen sends for a person's access. */
+export type AccessInput = { whole: true } | { departments: string[]; teams: string[] };
 
 export type SubView = {
   id: string;
@@ -42,7 +48,7 @@ export type SubView = {
   online: boolean;
   last4: string | null;
   owner: { id: string; name: string };
-  place: { kind: 'company' | 'department'; id: string | null; name: string };
+  place: { kind: 'company' | 'department' | 'listed'; id: string | null; name: string };
   machine: { id: string; hostname: string } | null;
   limits: Limits | null;
   isOrchestrator: boolean;
@@ -74,7 +80,8 @@ export type Org = {
   company: Company;
   orchestrator: { id: string; name: string; model: string; subscription: SubView | null } | null;
   agents: { total: number; working: number };
-  people: PersonView[];
+  /* Next to the CEO: people who see the whole company, and deputies whose departments span more than one. */
+  people: (PersonView & { deputy?: boolean })[];
   departments: Department[];
 };
 

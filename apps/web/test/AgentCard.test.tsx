@@ -94,7 +94,7 @@ describe('AgentCard', () => {
   });
 
   it('only shows the card to someone who cannot change it', async () => {
-    const listed: Me = { ...ME, person: { ...ME.person, scopeKind: 'department' } };
+    const listed: Me = { ...ME, person: { ...ME.person, scopeKind: 'listed' } };
     open({}, listed);
     expect(await screen.findByRole('combobox', { name: 'Model' })).toBeDisabled();
     expect(screen.getByRole('checkbox', { name: /API design/ })).toBeDisabled();

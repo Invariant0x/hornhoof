@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { AcceptInvite } from '../src/screens/AcceptInvite';
 import { mockApi } from './api-mock';
 
-const INVITE = { companyName: 'Acme', name: 'Maria', email: 'maria@acme.com', title: 'Deputy CEO', scopeName: 'Whole company', scopeKind: 'company' };
+const INVITE = { companyName: 'Acme', name: 'Maria', email: 'maria@acme.com', title: 'Deputy CEO', access: { whole: true, departments: [], teams: [] } };
 
 describe('AcceptInvite', () => {
   it('offers to connect a subscription after the password, and Skip leads into the app', async () => {

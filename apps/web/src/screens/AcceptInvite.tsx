@@ -1,11 +1,13 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { api, ApiFailure } from '../api';
 import { errorText, useT, type Messages } from '../i18n';
+import type { AccessView } from '../types';
+import { accessText } from '../ui/AccessPicker';
 import { Card } from '../ui/Card';
 import { ConnectPanel } from '../ui/ConnectPanel';
 import { Field } from '../ui/Field';
 
-type Invite = { companyName: string; name: string; email: string; title: string; scopeName: string; scopeKind?: 'company' | 'department' | 'team' };
+type Invite = { companyName: string; name: string; email: string; title: string; access: AccessView };
 
 function explain(t: Messages, err: unknown): string {
   if (err instanceof ApiFailure && err.status === 410) return t.errors.invite_used;
@@ -71,7 +73,7 @@ export function AcceptInvite({ token, onDone }: { token: string; onDone: () => v
     );
   }
 
-  const role = [invite.title, invite.scopeKind === 'company' ? t.people.wholeCompany : invite.scopeName].filter(Boolean).join(', ');
+  const role = [invite.title, accessText(t, invite.access, null)].filter(Boolean).join(', ');
   return (
     <Card>
       <div className="wizard-head">

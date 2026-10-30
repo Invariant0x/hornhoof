@@ -18,7 +18,7 @@ describe('App', () => {
 
   it('opens the invite screen on an invite link without checking the session', async () => {
     window.history.replaceState(null, '', '/invite/abc123');
-    const calls = mockApi({ 'GET /api/invites/abc123': [200, { companyName: 'Acme', name: 'Maria', email: 'maria@acme.com', title: '', scopeName: 'Whole company' }] });
+    const calls = mockApi({ 'GET /api/invites/abc123': [200, { companyName: 'Acme', name: 'Maria', email: 'maria@acme.com', title: '', access: { whole: true, departments: [], teams: [] } }] });
     render(<App />);
     expect(await screen.findByRole('heading', { name: /^Join/ })).toBeInTheDocument();
     expect(calls.map(c => c.path)).not.toContain('/api/me');

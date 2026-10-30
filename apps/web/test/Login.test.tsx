@@ -5,7 +5,7 @@ import { AcceptInvite } from '../src/screens/AcceptInvite';
 import { Login } from '../src/screens/Login';
 import { ME, mockApi } from './api-mock';
 
-const INVITE = { companyName: 'Acme', name: 'Maria', email: 'maria@acme.com', title: 'Deputy CEO', scopeName: 'Whole company' };
+const INVITE = { companyName: 'Acme', name: 'Maria', email: 'maria@acme.com', title: 'Deputy CEO', access: { whole: true, departments: [], teams: [] } };
 
 describe('Login', () => {
   it('shows the server message when the password is wrong', async () => {
