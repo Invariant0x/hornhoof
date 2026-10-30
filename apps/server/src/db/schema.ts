@@ -175,13 +175,15 @@ export const agents = pgTable('agents', {
   /* A product department the employee works for, inside its department. */
   productId: uuid('product_id').references((): AnyPgColumn => departments.id),
   createdBy: uuid('created_by').references(() => people.id),
+  /* Switched off for now: it ends the turn it runs and takes no task turns until it is on again. */
+  switchedOffAt: timestamp('switched_off_at', { withTimezone: true }),
   removedAt: timestamp('removed_at', { withTimezone: true }),
   createdAt: createdAt(),
 });
 
 export type AgentOverrides = { base?: string; skills?: Record<string, string> };
 
-export const AGENT_CHANGE_FIELDS = ['name', 'model', 'subscription', 'skills', 'prompt', 'reset', 'hired', 'removed'] as const;
+export const AGENT_CHANGE_FIELDS = ['name', 'model', 'subscription', 'skills', 'prompt', 'reset', 'hired', 'removed', 'switch'] as const;
 
 /* Every change to an employee's card: who, when, what, before and after. */
 export const agentChanges = pgTable(
@@ -335,6 +337,8 @@ export const tasks = pgTable(
     /* A member task's executor; its gates are employees in order and stage 0 is the executor's turn. */
     executorAgentId: uuid('executor_agent_id').references(() => agents.id),
     gates: jsonb('gates').$type<string[]>().notNull().default([]),
+    /* Everyone who checks the work at the current gate: each employee of its reviewer's role that is on. */
+    panel: jsonb('panel').$type<string[]>().notNull().default([]),
     stage: integer('stage').notNull().default(0),
     bounces: integer('bounces').notNull().default(0),
     /* Task turns in a row that ended without moving the task. */

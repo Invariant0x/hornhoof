@@ -517,6 +517,7 @@ export const en = {
     request_closed: 'This was answered already.',
     turn_open: 'A turn is running. Close it before starting the next.',
     no_head: 'This department has no head yet. Hire one first.',
+    switched_off: 'This employee is switched off right now. Switch it on on the department schema first.',
     repo_invalid: 'Use an https address with no name or token in it, a plain branch name, and an author name on one line with a full email.',
   },
 };

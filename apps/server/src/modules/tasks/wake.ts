@@ -35,8 +35,10 @@ function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string {
       if (task.executorAgentId) return `${ref} is yours to do. ${read} Do the work, then ${finish}. If you cannot go on, ${stuck}; if only a person can answer, use ask_person.`;
       if (agent.kind === 'orchestrator') return `${ref} is yours. ${read} Lay the work out as tasks for the departments with add_tasks or plan_turn, and report it when every part is done.`;
       return `${ref} is your department's. ${read} Split it into member tasks with create_task, each with its executor and gates, and report it when they are done.`;
-    case 'review':
-      return `${ref} is at your gate. ${read} Check the work yourself, then give your verdict with your reasons: pass it, or send it back with what to change.`;
+    case 'review': {
+      const together = task.panel.length > 1 ? ' Others of your role check it at the same time; give your own verdict.' : '';
+      return `${ref} is at your gate. ${read} Check the work yourself, then give your verdict with your reasons: pass it, or send it back with what to change.${together}`;
+    }
     case 'changes':
       return `${ref} came back to you with changes requested${said}Make them, then submit it again.`;
     case 'stuck_at_gate':
@@ -61,6 +63,8 @@ function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string {
       return `You ended your last turn on ${ref} without moving it. Go on with the work, then ${finish}. If you cannot go on, ${stuck}.`;
     case 'turn':
       return `${ref} is closed.`;
+    case 'switched':
+      return `${ref}, which you gave out, has nobody on to go on with it${said}Do that, or tell the CEO it waits.`;
   }
 }
 
@@ -142,7 +146,7 @@ export async function startWork(ctx: Ctx, jobId: string): Promise<void> {
 
 /* The open task the agent holds after a turn about this one: the task itself, or the task it gave this one out from. */
 async function heldTask(ctx: Ctx, agentId: string, taskId: string): Promise<Task | null> {
-  const holds = (t: Task | undefined) => t && t.assigneeAgentId === agentId && !CLOSED.includes(t.status) ? t : null;
+  const holds = (t: Task | undefined) => (t && (t.assigneeAgentId === agentId || t.panel.includes(agentId)) && !CLOSED.includes(t.status) ? t : null);
   const [task] = await ctx.db.select().from(tasks).where(eq(tasks.id, taskId));
   if (!task) return null;
   if (holds(task)) return task;

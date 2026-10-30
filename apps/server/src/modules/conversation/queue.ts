@@ -152,10 +152,16 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   if (running) return;
   const sub = await liveSubscription(ctx, agentId);
   if (!sub || sub.status !== 'ready' || outdated(sub) || !hub.isReady(identityOf(sub))) return;
-  const [job] = await db.select().from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'queued'))).orderBy(asc(jobs.createdAt)).limit(1);
-  if (!job) return;
   const [agent] = await db.select().from(agents).where(eq(agents.id, agentId));
   if (!agent) return;
+  /* Switched off, it still answers people who write to it; its task turns wait until it is on. */
+  const [job] = await db
+    .select()
+    .from(jobs)
+    .where(and(conversationOf(agentId), eq(jobs.status, 'queued'), agent.switchedOffAt ? isNull(jobs.taskId) : undefined))
+    .orderBy(asc(jobs.createdAt))
+    .limit(1);
+  if (!job) return;
   const repo = await repoFor(ctx, agent);
   if (repo && outdated(sub, REPOSITORY_NODE)) return;
 

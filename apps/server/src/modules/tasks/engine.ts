@@ -1,4 +1,4 @@
-import { and, count, eq, inArray, isNull, max, notInArray, sql } from 'drizzle-orm';
+import { and, asc, count, eq, inArray, isNull, max, notInArray, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Spot } from '../../auth/access.js';
 import type { Db } from '../../db/client.js';
@@ -10,7 +10,7 @@ export type Task = typeof tasks.$inferSelect;
 export type Request = typeof requests.$inferSelect;
 /* Who moves a task: a person from the web app, or an agent from its tools. */
 export type Actor = { personId: string; agentId?: undefined } | { agentId: string; personId?: undefined };
-export type WakeWhy = 'assigned' | 'review' | 'changes' | 'stuck_at_gate' | 'done' | 'reported' | 'blocked' | 'cancelled' | 'answered' | 'comment' | 'updated' | 'reminder' | 'turn';
+export type WakeWhy = 'assigned' | 'review' | 'changes' | 'stuck_at_gate' | 'done' | 'reported' | 'blocked' | 'cancelled' | 'answered' | 'comment' | 'updated' | 'reminder' | 'turn' | 'switched';
 /* An agent that has to act on a task now; Hornhoof queues a turn for it. note: what else it should know, after the rest. */
 export type Wake = { agentId: string; taskId: string; why: WakeWhy; text?: string; note?: string };
 export type Moved = { task: Task; wakes: Wake[] };
@@ -100,9 +100,11 @@ async function liveAgent(db: Db | Tx, companyId: string | null, id: string) {
   return agent;
 }
 
-/* A live agent that can take a turn: one without a subscription would never wake for the task. */
-async function workingAgent(db: Db | Tx, companyId: string | null, id: string) {
+/* A live agent that can take a turn: one without a subscription would never wake for the task, one switched off not
+   until it is on again. A gate may be off: its role's employees that are on check the work. */
+async function workingAgent(db: Db | Tx, companyId: string | null, id: string, gate = false) {
   const agent = await liveAgent(db, companyId, id);
+  if (agent.switchedOffAt && !gate) throw refuse(409, 'switched_off', `${agent.name} is switched off right now. Give the work to someone who is on.`);
   const [sub] = agent.subscriptionId
     ? await db.select({ id: subscriptions.id }).from(subscriptions).where(and(eq(subscriptions.id, agent.subscriptionId), isNull(subscriptions.removedAt)))
     : [];
@@ -113,7 +115,7 @@ async function workingAgent(db: Db | Tx, companyId: string | null, id: string) {
 async function checkGates(db: Db, companyId: string, executor: string, gates: string[]): Promise<void> {
   if (new Set(gates).size !== gates.length) throw refuse(400, 'task_invalid', 'A gate is listed twice.');
   if (gates.includes(executor)) throw refuse(400, 'task_invalid', 'Whoever does the work never passes its gate. Pick another reviewer.');
-  for (const id of gates) await workingAgent(db, companyId, id);
+  for (const id of gates) await workingAgent(db, companyId, id, true);
 }
 
 export async function createTask(ctx: Live, actor: Actor, input: NewTask): Promise<Moved> {
@@ -165,41 +167,101 @@ export async function submit(ctx: Live, agentId: string, taskId: string, r: { su
   if (task.executorAgentId !== agentId || task.stage !== 0) throw notYours(task, 'is not waiting for your work');
   if (task.status === 'waiting') throw refuse(409, 'task_invalid', `#${task.number} waits for a person's answer first.`);
   const n: Note = { kind: 'submitted', actor: { agentId }, text: r.summary, data: { evidence: r.evidence } };
-  const [first] = task.gates;
-  if (first) {
-    const row = await move(ctx, task, { status: 'review', stage: 1, assigneeAgentId: first, silent: 0 }, n);
-    return { task: row, wakes: [{ agentId: first, taskId, why: 'review' }] };
+  if (task.gates.length) {
+    const gate = await atGate(ctx.db, task, 1);
+    return { task: await move(ctx, task, gate.set, n), wakes: gate.wakes };
   }
   const row = await move(ctx, task, closing(), n);
   return { task: row, wakes: giver(task, 'done', agentId) };
 }
 
-/* The gate at the task's stage passes it on, or sends it back with its reasons. */
+/* Everyone who checks the work at a gate: each live employee of the named reviewer's role in its department, for the
+   task's product or for none, that is on and has a subscription, the named one first, never the executor. A reviewer
+   without a role checks alone. */
+async function panelFor(db: Db | Tx, task: Task, stage: number): Promise<string[]> {
+  const named = task.gates[stage - 1];
+  if (!named) return [];
+  const [lead] = await db.select().from(agents).where(eq(agents.id, named));
+  if (!lead || lead.removedAt) return [];
+  const same = lead.roleKey && lead.departmentId ? and(eq(agents.departmentId, lead.departmentId), eq(agents.roleKey, lead.roleKey)) : eq(agents.id, lead.id);
+  const rows = await db
+    .select({ id: agents.id, productId: agents.productId })
+    .from(agents)
+    .innerJoin(subscriptions, and(eq(subscriptions.id, agents.subscriptionId), isNull(subscriptions.removedAt)))
+    .where(and(same, isNull(agents.removedAt), isNull(agents.switchedOffAt)))
+    .orderBy(asc(agents.createdAt));
+  const product = task.productId ?? lead.productId;
+  const ids = rows.filter(a => a.id !== task.executorAgentId && (!a.productId || a.productId === product)).map(a => a.id);
+  return [...ids.filter(id => id === named), ...ids.filter(id => id !== named)];
+}
+
+/* The task reaches a gate: its whole panel checks it at once. With nobody on to check it, it waits with whoever gave it out. */
+async function atGate(db: Db | Tx, task: Task, stage: number): Promise<{ set: Partial<Task>; wakes: Wake[] }> {
+  const panel = await panelFor(db, task, stage);
+  const at = { status: 'review' as const, stage, panel, silent: 0 };
+  if (panel.length) return { set: { ...at, assigneeAgentId: panel[0]! }, wakes: panel.map(agentId => ({ agentId, taskId: task.id, why: 'review' as const })) };
+  const [lead] = await db.select({ name: agents.name, roleKey: agents.roleKey }).from(agents).where(eq(agents.id, task.gates[stage - 1]!));
+  const who = lead?.roleKey ?? lead?.name ?? 'its reviewer';
+  const text = `Nobody who can check it at gate ${stage} (${who}) is on. Switch one on, or give it other gates with update_task.`;
+  return { set: { ...at, assigneeAgentId: task.createdByAgentId }, wakes: giver(task, 'switched', undefined, text) };
+}
+
+type Given = { agentId: string; name: string; pass: boolean; comment: string };
+
+/* The verdicts given at the task's gate in this round, oldest first. */
+async function gateVerdicts(db: Db, task: Task): Promise<Given[]> {
+  const rows = await db
+    .select({ agentId: taskEvents.agentId, name: agents.name, text: taskEvents.text, data: taskEvents.data })
+    .from(taskEvents)
+    .innerJoin(agents, eq(agents.id, taskEvents.agentId))
+    .where(
+      and(
+        eq(taskEvents.taskId, task.id),
+        eq(taskEvents.kind, 'verdict'),
+        sql`${taskEvents.data}->>'stage' = ${String(task.stage)}`,
+        sql`${taskEvents.data}->>'round' = ${String(task.bounces)}`,
+      ),
+    )
+    .orderBy(asc(taskEvents.id));
+  return rows.map(r => ({ agentId: r.agentId!, name: r.name, pass: r.data.pass === true, comment: r.text }));
+}
+
+/* A reviewer at the task's gate gives its verdict. The gate decides once its whole panel has. */
 export async function verdict(ctx: Live, agentId: string, taskId: string, v: { pass: boolean; comment: string }): Promise<Moved> {
   const task = await loadTask(ctx.db, taskId);
   stillOpen(task);
-  if (task.status !== 'review' || task.stage < 1 || task.gates[task.stage - 1] !== agentId || task.executorAgentId === agentId) throw notYours(task, 'is not at your gate');
+  if (task.status !== 'review' || task.stage < 1 || !task.panel.includes(agentId) || task.executorAgentId === agentId) throw notYours(task, 'is not at your gate');
   if (!v.comment.trim()) throw refuse(400, 'task_invalid', 'A verdict needs its reasons.');
-  const n: Note = { kind: 'verdict', actor: { agentId }, text: v.comment.trim(), data: { pass: v.pass, stage: task.stage } };
-  if (v.pass) {
-    const next = task.gates[task.stage];
-    if (next) {
-      const row = await move(ctx, task, { stage: task.stage + 1, assigneeAgentId: next, silent: 0 }, n);
-      return { task: row, wakes: [{ agentId: next, taskId, why: 'review' }] };
+  const n: Note = { kind: 'verdict', actor: { agentId }, text: v.comment.trim(), data: { pass: v.pass, stage: task.stage, round: task.bounces } };
+  const panel = task.panel.filter(id => id !== agentId);
+  if (panel.length) return { task: await move(ctx, task, { panel, assigneeAgentId: panel[0]!, silent: 0 }, n), wakes: [] };
+  const [me] = await ctx.db.select({ name: agents.name }).from(agents).where(eq(agents.id, agentId));
+  return closeGate(ctx, task, n, [...(await gateVerdicts(ctx.db, task)), { agentId, name: me?.name ?? '', pass: v.pass, comment: v.comment.trim() }]);
+}
+
+/* Everyone at the gate has given a verdict: it passes the task on (or finishes it) when all of them passed, else the work
+   goes back to its executor with every reason in one list. n is the move that closes the gate. */
+async function closeGate(ctx: Live, task: Task, n: Note, given: Given[]): Promise<Moved> {
+  const actorId = n.actor.agentId;
+  if (given.every(g => g.pass)) {
+    if (task.gates[task.stage]) {
+      const gate = await atGate(ctx.db, task, task.stage + 1);
+      return { task: await move(ctx, task, gate.set, n), wakes: gate.wakes };
     }
-    const row = await move(ctx, task, closing(), n);
-    return { task: row, wakes: giver(task, 'done', agentId) };
+    return { task: await move(ctx, task, { ...closing(), panel: [] }, n), wakes: giver(task, 'done', actorId) };
   }
+  const failed = given.filter(g => !g.pass);
+  const reasons = given.length === 1 ? failed[0]!.comment : failed.map(g => `${g.name}: ${g.comment}`).join('\n\n');
   let rounds = 0;
-  const row = await move(ctx, task, { status: 'open', stage: 0, assigneeAgentId: task.executorAgentId, bounces: task.bounces + 1, silent: 0 }, n, async tx => {
+  const row = await move(ctx, task, { status: 'open', stage: 0, panel: [], assigneeAgentId: task.executorAgentId, bounces: task.bounces + 1, silent: 0 }, n, async tx => {
     const [sent] = await tx
-      .select({ n: count() })
+      .select({ n: sql<number>`count(distinct coalesce(${taskEvents.data}->>'round', ${taskEvents.id}::text))` })
       .from(taskEvents)
-      .where(and(eq(taskEvents.taskId, taskId), eq(taskEvents.kind, 'verdict'), sql`${taskEvents.data}->>'pass' = 'false'`, sql`${taskEvents.data}->>'stage' = ${String(task.stage)}`));
+      .where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'verdict'), sql`${taskEvents.data}->>'pass' = 'false'`, sql`${taskEvents.data}->>'stage' = ${String(task.stage)}`));
     rounds = Number(sent?.n ?? 0);
   });
-  const wakes: Wake[] = [{ agentId: task.executorAgentId!, taskId, why: 'changes', text: v.comment.trim() }];
-  if (rounds >= GATE_ROUNDS) wakes.push(...giver(task, 'stuck_at_gate', agentId));
+  const wakes: Wake[] = [{ agentId: task.executorAgentId!, taskId: task.id, why: 'changes', text: reasons }];
+  if (rounds >= GATE_ROUNDS) wakes.push(...giver(task, 'stuck_at_gate', actorId));
   return { task: row, wakes };
 }
 
@@ -265,18 +327,28 @@ export async function dropGate(ctx: Live, actor: Actor, task: Task, agentId: str
 
 export type TaskChange = { title?: string; brief?: string; body?: string; executor?: string; gates?: string[] };
 
+/* A task waits at a gate with nobody on to check it: the gates from there on are the given ones, and the first of them
+   starts at once. None left finishes the task. */
+async function regate(ctx: Live, agentId: string, task: Task, given: string[]): Promise<Moved> {
+  await checkGates(ctx.db, task.companyId, task.executorAgentId!, given);
+  const gates = [...task.gates.slice(0, task.stage - 1), ...given];
+  const n: Note = { kind: 'updated', actor: { agentId }, data: { fields: ['gates'] } };
+  if (!given.length) return { task: await move(ctx, task, { gates, ...closing(), panel: [] }, n), wakes: [] };
+  const gate = await atGate(ctx.db, { ...task, gates }, task.stage);
+  return { task: await move(ctx, task, { gates, ...gate.set }, n), wakes: gate.wakes };
+}
+
 /* The owner rewrites the task so it reads as the current truth, or hands it to another executor or other gates. */
 export async function updateTask(ctx: Live, agentId: string, taskId: string, c: TaskChange): Promise<Moved> {
   const task = await loadTask(ctx.db, taskId);
   stillOpen(task);
   if ((c.executor !== undefined || c.gates !== undefined) && !task.executorAgentId) throw refuse(400, 'task_invalid', `#${task.number} has no executor or gates.`);
+  if (c.gates !== undefined && c.executor === undefined && task.status === 'review' && task.stage > 0 && !task.panel.length) return regate(ctx, agentId, task, c.gates);
   if ((c.executor !== undefined || c.gates !== undefined) && task.stage !== 0) throw refuse(409, 'task_invalid', `#${task.number} is at a gate; change who works on it after the verdict.`);
   const executor = c.executor ?? task.executorAgentId;
   const gates = c.gates ?? task.gates;
-  if (executor && (c.executor !== undefined || c.gates !== undefined)) {
-    await workingAgent(ctx.db, task.companyId, executor);
-    await checkGates(ctx.db, task.companyId, executor, gates);
-  }
+  if (executor && c.executor !== undefined) await workingAgent(ctx.db, task.companyId, executor);
+  if (executor && (c.executor !== undefined || c.gates !== undefined)) await checkGates(ctx.db, task.companyId, executor, gates);
   const set: Partial<Task> = {};
   const fields: string[] = [];
   for (const key of ['title', 'brief', 'body'] as const) {

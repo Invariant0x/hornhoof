@@ -59,6 +59,7 @@ export type ErrorReason =
   | 'request_unknown'
   | 'request_closed'
   | 'no_head'
+  | 'switched_off'
   | 'turn_open'
   | 'turn_unknown'
   | 'repo_invalid'
