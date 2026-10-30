@@ -10,7 +10,7 @@ import { appendEvent, earlierTalk, publishWorking } from '../events/store.js';
 import { instructionsOf } from '../agents/instructions.js';
 import { repoFor, repoLine } from '../departments/repository.js';
 import { textHash } from '../templates/load.js';
-import { checkLiveness, startWork } from '../tasks/wake.js';
+import { checkLiveness, leaveIfOff, startWork } from '../tasks/wake.js';
 import { preface } from './prompt.js';
 
 export const CONVERSATION_TIMEOUT_MS = 15 * 60_000;
@@ -221,6 +221,7 @@ export async function afterJob(ctx: Ctx, jobId: string): Promise<void> {
     await appendEvent(ctx, { companyId: job.companyId, agentId: job.agentId, jobId, kind: stopped ? 'stopped' : 'failed', data: stopped ? {} : { error: job.error } });
   }
   if (job.taskId) await checkLiveness(ctx, jobId);
+  await leaveIfOff(ctx, job.agentId);
   await pump(ctx, job.agentId);
 }
 

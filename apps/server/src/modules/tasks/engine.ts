@@ -327,6 +327,35 @@ export async function dropGate(ctx: Live, actor: Actor, task: Task, agentId: str
 
 export type TaskChange = { title?: string; brief?: string; body?: string; executor?: string; gates?: string[] };
 
+/* An agent switched off once its running turn is over: work it does and has not handed in goes to whoever gave it out,
+   and it leaves the gates it has not given its verdict at, which decide with the rest or wait with the giver. Work that
+   waits for a person stays. */
+export async function leaveWork(ctx: Live, actor: Actor, agent: { id: string; name: string; companyId: string }): Promise<Wake[]> {
+  const open = await ctx.db.select().from(tasks).where(and(eq(tasks.companyId, agent.companyId), notInArray(tasks.status, [...CLOSED, 'planned', 'waiting'])));
+  const n: Note = { kind: 'updated', actor, text: `${agent.name} was switched off.`, data: { fields: ['assignee'] } };
+  const wakes: Wake[] = [];
+  for (const task of open) {
+    if (task.stage === 0 && task.executorAgentId === agent.id && task.assigneeAgentId === agent.id && task.createdByAgentId && task.createdByAgentId !== agent.id) {
+      await move(ctx, task, { assigneeAgentId: task.createdByAgentId, status: task.status === 'working' ? 'open' : task.status }, n);
+      wakes.push(...giver(task, 'switched', agent.id, `${agent.name} does it and was switched off. Give it to someone who is on with update_task, or wait until ${agent.name} is on again.`));
+    } else if (task.status === 'review' && task.panel.includes(agent.id)) {
+      const panel = task.panel.filter(id => id !== agent.id);
+      if (panel.length) {
+        await move(ctx, task, { panel, assigneeAgentId: panel[0]! }, n);
+        continue;
+      }
+      const given = await gateVerdicts(ctx.db, task);
+      if (given.length) {
+        wakes.push(...(await closeGate(ctx, task, n, given)).wakes);
+        continue;
+      }
+      await move(ctx, task, { panel: [], assigneeAgentId: task.createdByAgentId }, n);
+      wakes.push(...giver(task, 'switched', agent.id, `Nobody who can check it at gate ${task.stage} is on now that ${agent.name} was switched off. Switch one on, or give it other gates with update_task.`));
+    }
+  }
+  return wakes;
+}
+
 /* A task waits at a gate with nobody on to check it: the gates from there on are the given ones, and the first of them
    starts at once. None left finishes the task. */
 async function regate(ctx: Live, agentId: string, task: Task, given: string[]): Promise<Moved> {
@@ -357,7 +386,8 @@ export async function updateTask(ctx: Live, agentId: string, taskId: string, c: 
       fields.push(key);
     }
   }
-  if (executor !== task.executorAgentId) {
+  /* Handing it to its executor again gives it back after it waited with the head. */
+  if (executor !== task.executorAgentId || (c.executor !== undefined && task.assigneeAgentId !== executor)) {
     set.executorAgentId = executor;
     set.assigneeAgentId = executor;
     fields.push('executor');

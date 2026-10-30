@@ -1,9 +1,9 @@
-import { and, count, eq, gte, inArray, isNull, notInArray, or, sql } from 'drizzle-orm';
+import { and, count, desc, eq, gte, inArray, isNull, notInArray, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { agents, jobs, requests, taskEvents, tasks } from '../../db/schema.js';
+import { agentChanges, agents, jobs, requests, taskEvents, tasks } from '../../db/schema.js';
 import { afterJob, cancelJob, insertTurn, liveSubscription, onAgent, pump } from '../conversation/queue.js';
 import { appendEvent } from '../events/store.js';
-import { CLOSED, GATE_ROUNDS, published, silentTurn, type Task, type Wake } from './engine.js';
+import { CLOSED, GATE_ROUNDS, leaveWork, published, silentTurn, type Task, type Wake } from './engine.js';
 
 export { SILENT_TURNS } from './engine.js';
 
@@ -66,6 +66,22 @@ function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string {
     case 'switched':
       return `${ref}, which you gave out, has nobody on to go on with it${said}Do that, or tell the CEO it waits.`;
   }
+}
+
+/* A switched-off agent with no turn running hands its work back; the person who switched it off moved it. */
+export async function leaveIfOff(ctx: Ctx, agentId: string): Promise<void> {
+  const [agent] = await ctx.db.select().from(agents).where(eq(agents.id, agentId));
+  if (!agent?.switchedOffAt || agent.kind === 'orchestrator') return;
+  const [running] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, agentId), eq(jobs.status, 'running'))).limit(1);
+  if (running) return;
+  const [change] = await ctx.db
+    .select({ personId: agentChanges.personId })
+    .from(agentChanges)
+    .where(and(eq(agentChanges.agentId, agentId), eq(agentChanges.field, 'switch')))
+    .orderBy(desc(agentChanges.createdAt))
+    .limit(1);
+  const actor = change?.personId ? { personId: change.personId } : { agentId };
+  await wakeAll(ctx, await leaveWork(ctx, actor, agent));
 }
 
 /* Queues a turn for every agent a task move needs, one per agent and task: a turn already waiting reads the task as it is

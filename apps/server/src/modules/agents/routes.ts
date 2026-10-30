@@ -12,7 +12,7 @@ import { deptName } from '../departments/templates.js';
 import { identityOf } from '../nodes/hub.js';
 import { subViews, type SubView } from '../subscriptions/views.js';
 import { CLOSED, dropGate } from '../tasks/engine.js';
-import { resumeAgent } from '../tasks/wake.js';
+import { leaveIfOff, resumeAgent } from '../tasks/wake.js';
 import { orchestratorServing, servingSubscriptions, type Serving } from '../tools/staff.js';
 import type { Lang } from '../templates/load.js';
 import { agentFor, type AgentRow } from './find.js';
@@ -161,8 +161,9 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
         if (next.subscriptionId && !agent.subscriptionId) await resumeAgent(ctx, agent.id);
         await (agent.kind === 'orchestrator' ? pumpWaiting(ctx) : pump(ctx, agent.id));
       }
-      /* Back on: the task turns it missed go out. */
+      /* Back on: the task turns it missed go out. Off: its work goes back once no turn of it runs. */
       if (agent.switchedOffAt && !next.switchedOffAt) await pump(ctx, agent.id);
+      if (!agent.switchedOffAt && next.switchedOffAt) await leaveIfOff(ctx, agent.id);
     }
     return card(next, me);
   });

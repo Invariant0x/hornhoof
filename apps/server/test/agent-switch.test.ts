@@ -6,7 +6,7 @@ import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agentChanges, agents, companies, departments, jobs, subscriptions, tasks } from '../src/db/schema.js';
-import { pumpWaiting } from '../src/modules/conversation/queue.js';
+import { afterJob, pumpWaiting } from '../src/modules/conversation/queue.js';
 import { identityOf } from '../src/modules/nodes/hub.js';
 import { createTask, submit, verdict } from '../src/modules/tasks/engine.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
@@ -102,8 +102,10 @@ describe('switching an agent off and on', () => {
     await pumpWaiting(ctx);
     expect((await jobsOf(bruno.id)).map(j => j.status)).toEqual(['queued']);
     await patch(bruno.id, { on: true });
-    const run = await nextRun(builtin);
-    expect(run.jobId).toBe((await jobsOf(bruno.id))[0]!.id);
+    /* The head hears first that the work came back to it; Bruno's turn goes out once it is on. */
+    const mine = (await jobsOf(bruno.id))[0]!.id;
+    let run = await nextRun(builtin);
+    while (run.jobId !== mine) run = await nextRun(builtin);
     expect((await db.select().from(jobs).where(eq(jobs.id, run.jobId)))[0]!.status).toBe('running');
   });
 
@@ -253,5 +255,72 @@ describe('reviewers of one role checking the same work', () => {
     const [row] = await db.select().from(tasks).where(eq(tasks.id, task.id));
     expect(row).toMatchObject({ status: 'review', stage: 1, gates: [sec!.id], panel: [sec!.id], assigneeAgentId: sec!.id });
     expect((await db.select().from(jobs).where(and(eq(jobs.agentId, sec!.id), eq(jobs.status, 'queued')))).length + (await db.select().from(jobs).where(and(eq(jobs.agentId, sec!.id), eq(jobs.status, 'running')))).length).toBe(1);
+  });
+});
+
+describe('work an agent held when it was switched off', () => {
+  const done = { summary: 'Done.', evidence: 'npm test: 12 passed' };
+  const row = async (db: Awaited<ReturnType<typeof company>>['db'], id: string) => (await db.select().from(tasks).where(eq(tasks.id, id)))[0]!;
+  const told = async (db: Awaited<ReturnType<typeof company>>['db'], agentId: string, words: string) =>
+    (await db.select().from(jobs).where(eq(jobs.agentId, agentId))).some(j => j.prompt.includes(words));
+
+  it('goes back to the head, who can give it to someone who is on', async () => {
+    const { db, hana, bruno, bea, patch, tools, memberTask } = await company();
+    const task = await memberTask();
+    await patch(bruno.id, { on: false });
+    /* The head's turn on it starts at once. */
+    expect(await row(db, task.id)).toMatchObject({ assigneeAgentId: hana.id, executorAgentId: bruno.id, stage: 0 });
+    expect(await told(db, hana.id, 'Bruno does it and was switched off')).toBe(true);
+    expect((await call(await tools(hana), 'update_task', { task: task.number, executor: bea.id })).isError).toBeFalsy();
+    expect(await row(db, task.id)).toMatchObject({ assigneeAgentId: bea.id, executorAgentId: bea.id });
+  });
+
+  it('goes back to the same employee when the head gives it back once it is on again', async () => {
+    const { db, hana, bruno, patch, tools, memberTask } = await company();
+    const task = await memberTask();
+    await patch(bruno.id, { on: false });
+    await patch(bruno.id, { on: true });
+    expect((await call(await tools(hana), 'update_task', { task: task.number, executor: bruno.id })).isError).toBeFalsy();
+    expect(await row(db, task.id)).toMatchObject({ assigneeAgentId: bruno.id, executorAgentId: bruno.id });
+  });
+
+  it('stays with the employee until the turn it runs is over', async () => {
+    const { ctx, db, companyId, sub, hana, bruno, patch, memberTask } = await company();
+    const task = await memberTask();
+    const [job] = await db.insert(jobs).values({ companyId, subscriptionId: sub.id, agentId: bruno.id, taskId: task.id, kind: 'conversation', prompt: 'work', timeoutMs: 900000, status: 'running', startedAt: new Date() }).returning();
+    await patch(bruno.id, { on: false });
+    expect((await row(db, task.id)).assigneeAgentId).toBe(bruno.id);
+    await db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, job!.id));
+    await afterJob(ctx, job!.id);
+    expect((await row(db, task.id)).assigneeAgentId).toBe(hana.id);
+  });
+
+  it('leaves the gate a switched-off reviewer was checking to the others there', async () => {
+    const { ctx, db, bruno, rita, rex, patch, memberTask } = await company();
+    const task = await memberTask();
+    await submit(ctx, bruno.id, task.id, done);
+    await patch(rex.id, { on: false });
+    expect(await row(db, task.id)).toMatchObject({ panel: [rita.id], assigneeAgentId: rita.id, status: 'review' });
+    expect((await verdict(ctx, rita.id, task.id, { pass: true, comment: 'Fine.' })).task.status).toBe('done');
+  });
+
+  it('decides the gate with the verdicts given when the last reviewer still checking is switched off', async () => {
+    const { ctx, db, bruno, rita, rex, patch, memberTask } = await company();
+    const task = await memberTask();
+    await submit(ctx, bruno.id, task.id, done);
+    await verdict(ctx, rita.id, task.id, { pass: false, comment: 'No test for an empty cart.' });
+    await patch(rex.id, { on: false });
+    expect(await row(db, task.id)).toMatchObject({ stage: 0, assigneeAgentId: bruno.id, panel: [], bounces: 1 });
+    expect(await told(db, bruno.id, 'No test for an empty cart.')).toBe(true);
+  });
+
+  it('waits with the head when the only reviewer at the gate is switched off', async () => {
+    const { ctx, db, bruno, rita, rex, hana, off, patch, memberTask } = await company();
+    const task = await memberTask();
+    await off(rex.id);
+    await submit(ctx, bruno.id, task.id, done);
+    await patch(rita.id, { on: false });
+    expect(await row(db, task.id)).toMatchObject({ status: 'review', stage: 1, panel: [], assigneeAgentId: hana.id });
+    expect(await told(db, hana.id, 'Nobody who can check it at gate 1')).toBe(true);
   });
 });
