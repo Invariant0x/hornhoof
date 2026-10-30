@@ -7,6 +7,7 @@ import { dispatchJob } from '../jobs/dispatch.js';
 import { identityOf } from '../nodes/hub.js';
 import { appendEvent, earlierTalk, publishWorking } from '../events/store.js';
 import { instructionsOf } from '../agents/instructions.js';
+import { repoFor, repoLine } from '../departments/repository.js';
 import { textHash } from '../templates/load.js';
 import { checkLiveness, startWork } from '../tasks/wake.js';
 import { preface } from './prompt.js';
@@ -91,12 +92,14 @@ async function sessionFor(ctx: Ctx, agent: { id: string; kind: string; name: str
   return { sessionId: null, prompt: talk.length ? `${preface(talk, agent.kind === 'orchestrator' ? 'Orchestrator' : agent.name)}\n\n${prompt}` : prompt };
 }
 
-/* Turns need a node from 0.3.0 on: older ones drop his instructions and tool token, cannot stop a turn and send nothing live. */
+/* Turns need a node from 0.3.0 on: older ones drop his instructions and tool token, cannot stop a turn and send nothing live.
+   Turns with a repository need 0.5.0, which clones it. The built-in node always matches the server. */
 const CONVERSATION_NODE = [0, 3, 0];
-function outdated(sub: { kind: string; nodeVersion: string | null }): boolean {
+const REPOSITORY_NODE = [0, 5, 0];
+function outdated(sub: { kind: string; nodeVersion: string | null }, need = CONVERSATION_NODE): boolean {
   if (sub.kind !== 'personal') return false;
   const have = (sub.nodeVersion ?? '0').split('.').map(n => parseInt(n, 10) || 0);
-  for (let i = 0; i < CONVERSATION_NODE.length; i++) if ((have[i] ?? 0) !== CONVERSATION_NODE[i]) return (have[i] ?? 0) < CONVERSATION_NODE[i]!;
+  for (let i = 0; i < need.length; i++) if ((have[i] ?? 0) !== need[i]) return (have[i] ?? 0) < need[i]!;
   return false;
 }
 
@@ -110,13 +113,15 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   if (!job) return;
   const [agent] = await db.select().from(agents).where(eq(agents.id, agentId));
   if (!agent) return;
+  const repo = await repoFor(ctx, agent);
+  if (repo && outdated(sub, REPOSITORY_NODE)) return;
 
   const instructions = await instructionsOf(ctx, agent);
   /* The program's flag only for a model this subscription can run; anything else runs on its Default. */
   const model = agent.model && modelsFor(sub.provider, sub.models).some(m => m.id === agent.model) ? agent.model : null;
   /* The hash covers the model too, so a new model starts a fresh session like new instructions do. */
   const runHash = model ? textHash(`${instructions.hash}:${model}`) : instructions.hash;
-  const { sessionId, prompt } = await sessionFor(ctx, agent, sub.id, runHash, job.prompt);
+  const { sessionId, prompt } = await sessionFor(ctx, agent, sub.id, runHash, repo ? `${job.prompt}\n\n${repoLine(repo)}` : job.prompt);
   const token = newToken();
   /* Running from the moment it is sent: the token works for its tools at once, and the next turn waits. */
   const [taken] = await db
@@ -126,7 +131,18 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
     .returning({ id: jobs.id });
   if (!taken) return;
   await publishWorking(ctx, job.companyId);
-  const sent = await dispatchJob(ctx, { id: job.id, subscriptionId: sub.id, prompt, sessionId, model, timeoutMs: job.timeoutMs, instructions: instructions.text, toolToken: token });
+  const sent = await dispatchJob(ctx, {
+    id: job.id,
+    subscriptionId: sub.id,
+    prompt,
+    sessionId,
+    model,
+    timeoutMs: job.timeoutMs,
+    instructions: instructions.text,
+    toolToken: token,
+    /* Each agent keeps one folder on the node, with its repository's clone inside. */
+    workspace: { key: agent.id, repo },
+  });
   if (sent) {
     if (job.taskId) await startWork(ctx, job.id);
     return;
@@ -190,13 +206,14 @@ export async function agentState(ctx: Ctx, agentId: string): Promise<AgentState>
   const [running] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
   const [waiting] = await ctx.db.select({ n: count() }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'queued')));
   const sub = await liveSubscription(ctx, agentId);
+  const [agent] = sub ? await ctx.db.select({ productId: agents.productId, departmentId: agents.departmentId }).from(agents).where(eq(agents.id, agentId)) : [];
   const reason: AgentState['reason'] = !sub
     ? 'no_subscription'
     : sub.status === 'waiting_machine'
       ? 'waiting_machine'
       : sub.status === 'needs_login'
         ? 'needs_login'
-        : outdated(sub)
+        : outdated(sub) || (outdated(sub, REPOSITORY_NODE) && agent && (await repoFor(ctx, agent)))
           ? 'node_outdated'
           : !ctx.hub.isReady(identityOf(sub))
             ? 'machine_offline'

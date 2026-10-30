@@ -1,0 +1,6 @@
+#!/bin/sh
+# git runs this when a repository asks for a name or a password. The node gives each turn its token in HH_GIT_PASSWORD.
+case "$1" in
+  Username*) printf '%s\n' x-access-token ;;
+  *) printf '%s\n' "$HH_GIT_PASSWORD" ;;
+esac

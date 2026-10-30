@@ -117,14 +117,25 @@ const NodeMessage = z.discriminatedUnion('type', [
 ]);
 export type NodeMessage = z.infer<typeof NodeMessage>;
 
-/* A git repository over https and a branch name git takes as a plain name, never as an option. */
+/* A git repository over https and a branch name git takes as a plain name, never as an option. The token has its own
+   field: an address with a name or password in it would put them on command lines and into the clone's settings. */
 export const Repo = z.object({
-  url: z.string().max(500).regex(/^https:\/\/[^\s]+$/),
+  url: z
+    .string()
+    .max(500)
+    .regex(/^https:\/\/[^\s]+$/)
+    .refine(u => !/^https:\/\/[^/]*@/.test(u), 'Put the token in its own field, not in the address.'),
   branch: z.string().min(1).max(200).regex(/^[A-Za-z0-9._\/-]+$/).refine(b => !b.startsWith('-') && !b.includes('..'), 'Not a branch name.'),
   token: z.string().max(500),
 });
 const Workspace = z.object({ key: Id, repo: Repo.nullable() });
 export type Workspace = z.infer<typeof Workspace>;
+
+/* The folder inside an agent's folder that holds a repository's clone: the last part of its address without .git. */
+export function repoFolder(url: string): string {
+  const last = url.replace(/\/+$/, '').split('/').pop() ?? '';
+  return last.replace(/\.git$/i, '').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[.-]+/, '') || 'repo';
+}
 
 const ServerMessage = z.discriminatedUnion('type', [
   z.object({

@@ -99,7 +99,7 @@ export function codexAdapter({ home, tools, bin = join(tools, 'bin', 'codex'), s
       const done = await runProgram({
         bin,
         args,
-        env: env(input.secret, input.tools?.token ?? null),
+        env: { ...env(input.secret, input.tools?.token ?? null), ...input.env },
         cwd: input.workDir,
         timeoutMs: input.timeoutMs,
         signal: input.signal,

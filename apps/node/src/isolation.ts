@@ -94,6 +94,7 @@ export function builtinAdapters(dir: string, tools: string, { isRoot = isRootUse
     const adapter = adapterFor(job.provider, { home, tools, user });
     return {
       ...adapter,
+      owner: { user, home, prepare: path => void prepareFolder(path, user, ops) },
       run: input => {
         prepareFolder(input.workDir, user, ops);
         return adapter.run(input);
