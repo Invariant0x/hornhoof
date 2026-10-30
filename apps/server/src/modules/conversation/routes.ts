@@ -26,6 +26,7 @@ export function conversationRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/agents/:id/messages', async (req, reply) => {
     const { me, agent } = await agentFor(ctx, req);
     const { text } = MessageBody.parse(req.body);
+    if (me.via === agent.id) throw new ApiError(400, 'validation', 'This is your own conversation. Write to people in your answer.');
     if (!(await agentState(ctx, agent.id)).ready) {
       throw agent.kind === 'orchestrator'
         ? new ApiError(409, 'conflict', 'The orchestrator cannot answer right now. See the window for what to do.', 'orchestrator_not_ready')
@@ -33,10 +34,14 @@ export function conversationRoutes(app: FastifyInstance, ctx: Ctx): void {
     }
     ctx.bus.publish(me.companyId, {
       type: 'pulse',
-      from: { kind: 'person', id: me.id },
+      from: me.via ? { kind: 'orchestrator' } : { kind: 'person', id: me.id },
       to: agent.kind === 'orchestrator' ? { kind: 'orchestrator' } : { kind: 'department', id: agent.departmentId ?? '' },
     });
-    const jobId = await enqueueTurn(ctx, { companyId: me.companyId, agentId: agent.id, prompt: turnPrompt(me, text), createdBy: me.id, message: { personId: me.id, text } });
+    /* The orchestrator writes as itself. */
+    const turn = me.via
+      ? { prompt: turnPrompt({ name: 'Orchestrator', title: '' }, text), createdBy: null, message: { personId: null, text, from: 'orchestrator' as const } }
+      : { prompt: turnPrompt(me, text), createdBy: me.id, message: { personId: me.id, text } };
+    const jobId = await enqueueTurn(ctx, { companyId: me.companyId, agentId: agent.id, ...turn });
     reply.code(202);
     return { jobId };
   });

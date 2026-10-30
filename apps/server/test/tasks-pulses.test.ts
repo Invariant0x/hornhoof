@@ -62,7 +62,7 @@ describe('pulses on the map for tasks', () => {
     pulses();
     const { request } = await ask(ctx, bruno.id, task.id, { kind: 'question', text: 'Round or square?' });
     expect(pulses()).toEqual([`department:${dev.id} -> person:${ceo.id}`]);
-    await answer(ctx, ceo.id, request.id, { answer: 'Round.' });
+    await answer(ctx, { personId: ceo.id }, request.id, { answer: 'Round.' });
     expect(pulses()).toEqual([`person:${ceo.id} -> department:${dev.id}`]);
   });
 });

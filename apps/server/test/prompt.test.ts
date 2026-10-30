@@ -13,6 +13,13 @@ describe('orchestrator instructions', () => {
     expect(ORCHESTRATOR_INSTRUCTIONS).not.toContain('Hornhoof cannot put people or agents into departments yet');
   });
 
+  it('does what people ask himself, with the tools for every screen', () => {
+    for (const words of ['"build_structure"', '"hire"', '"change_employee"', '"message_employee"', '"answer_request"', '"update_task"', '"view"', 'cannot be undone']) {
+      expect(ORCHESTRATOR_INSTRUCTIONS).toContain(words);
+    }
+    expect(ORCHESTRATOR_INSTRUCTIONS).not.toContain('You cannot create, change or remove departments yourself');
+  });
+
   it('lays the work out in turns he plans and fills himself', () => {
     for (const words of ['"plan_turn"', '"add_tasks"', '"turns"', 'starts by itself', 'never tell people to start or close a turn', 'Turn 2, task #14', 'head']) {
       expect(ORCHESTRATOR_INSTRUCTIONS).toContain(words);

@@ -430,10 +430,10 @@ describe('work an agent held when it was switched off', () => {
     const first = await ask(ctx, rita.id, task.id, { kind: 'question', text: 'Is tax in scope?' });
     const second = await ask(ctx, rex.id, task.id, { kind: 'question', text: 'Which currency?' });
     const [ceo] = await db.select().from(people);
-    const early = await answer(ctx, ceo!.id, first.request.id, { answer: 'Yes, with tax.' });
+    const early = await answer(ctx, { personId: ceo!.id }, first.request.id, { answer: 'Yes, with tax.' });
     expect(early.task.status).toBe('waiting');
     expect(early.wakes.map(w => [w.agentId, w.why])).toEqual([[rita.id, 'answered']]);
-    const last = await answer(ctx, ceo!.id, second.request.id, { answer: 'Euro.' });
+    const last = await answer(ctx, { personId: ceo!.id }, second.request.id, { answer: 'Euro.' });
     expect(last.task.status).toBe('review');
     expect(last.wakes.map(w => [w.agentId, w.why])).toEqual([
       [rex.id, 'answered'],

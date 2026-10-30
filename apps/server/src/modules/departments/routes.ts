@@ -3,7 +3,7 @@ import { and, asc, eq, inArray, isNotNull, isNull, max, or } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { requireCompanyScope, requirePerson } from '../../auth/session.js';
+import { changedBy, personOf, requireCompanyScope, requirePerson } from '../../auth/session.js';
 import { agentChanges, agents, companies, departments, proposals, tasks, teams } from '../../db/schema.js';
 import { encryptSecret } from '../../crypto/secrets.js';
 import { Repo } from '@hornhoof/protocol';
@@ -17,9 +17,11 @@ import { authorOf } from './repository.js';
 import { deptName, TEMPLATE_TEXT } from './templates.js';
 
 const IdParams = z.object({ id: z.uuid() });
-const StaffBody = z.object({ proposalId: z.uuid().optional(), people: z.array(HireLine).min(1).max(30) });
+export const StaffBody = z.object({ proposalId: z.uuid().optional(), people: z.array(HireLine).min(1).max(30) });
 
-const BuildBody = z.object({ proposalId: z.uuid().optional(), brief: z.string().trim().max(1500).optional(), items: z.array(BuildItem).min(1).max(20) });
+export const BuildBody = z.object({ proposalId: z.uuid().optional(), brief: z.string().trim().max(1500).optional(), items: z.array(BuildItem).min(1).max(20) });
+
+export const RepoBody = z.object({ url: z.string(), branch: z.string().default('main'), token: z.string().trim().max(500).optional(), author: z.unknown().optional() }).strict();
 
 type Created = { id: string; template: TemplateKey | null; name: string | null; products: string[] };
 type Removed = { id: string; template: TemplateKey | null; name: string | null };
@@ -51,7 +53,7 @@ function staffedNote(department: string, hired: Hired[]): string {
   ].join('\n');
 }
 
-/* The CEO's click: the only way departments come and go in M3. */
+/* Departments come and go here: the CEO's click on a structure card, or the orchestrator's build_structure. */
 export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db } = ctx;
 
@@ -66,7 +68,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
       if (body.proposalId) {
         const [taken] = await tx
           .update(proposals)
-          .set({ status: 'applied', appliedBy: me.id, appliedAt: new Date() })
+          .set({ status: 'applied', appliedBy: personOf(me), appliedAt: new Date() })
           .where(and(eq(proposals.id, body.proposalId), eq(proposals.companyId, me.companyId), eq(proposals.kind, 'structure'), eq(proposals.status, 'pending')))
           .returning({ brief: proposals.brief, agentId: proposals.agentId });
         if (!taken) throw new ApiError(409, 'conflict', 'This card was already applied or replaced by a newer one.', 'proposal_closed');
@@ -136,12 +138,13 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
         agentId,
         kind: 'applied',
         data: { proposalId: body.proposalId ?? null, created: result.created, removed: result.removed },
-        personId: me.id,
+        personId: personOf(me),
       });
     }
     ctx.bus.publish(me.companyId, { type: 'org' });
     for (const id of result.fresh) ctx.bus.publish(me.companyId, { type: 'pulse', from: { kind: 'orchestrator' }, to: { kind: 'department', id } });
-    if (agentId && (await orchestratorState(ctx, me.companyId)).ready) {
+    /* The orchestrator that built it reads the outcome in its tool's answer. */
+    if (agentId && !me.via && (await orchestratorState(ctx, me.companyId)).ready) {
       await enqueueTurn(ctx, { companyId: me.companyId, agentId, prompt: builtNote(result.created, result.removed), createdBy: null });
     }
     reply.code(201);
@@ -152,7 +155,6 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
      subscription that serves the department and runs the role's tier, with the program's Default model. Every staff card
      picks from its roles, products and subscriptions. */
   /* The git repository the department's agents work in. Only the whole company sets it; the token never comes back. */
-  const RepoBody = z.object({ url: z.string(), branch: z.string().default('main'), token: z.string().trim().max(500).optional(), author: z.unknown().optional() }).strict();
   const repoView = (d: typeof departments.$inferSelect) => (d.repoUrl ? { url: d.repoUrl, branch: d.repoBranch ?? 'main', tokenLast4: d.repoTokenLast4, author: authorOf(d) } : null);
 
   app.put('/api/departments/:id/repository', async req => {
@@ -221,7 +223,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { people, roles, products: products.map(p => ({ id: p.id, name: deptName(p) })), subscriptions: serving };
   });
 
-  /* The CEO's click on a staff card: the only way employees are hired. */
+  /* The CEO's click on a staff card, or the orchestrator's hire. */
   app.post('/api/departments/:id/staff', async (req, reply) => {
     const me = await requirePerson(req, db);
     requireCompanyScope(me);
@@ -235,7 +237,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
       if (body.proposalId) {
         const [taken] = await tx
           .update(proposals)
-          .set({ status: 'applied', appliedBy: me.id, appliedAt: new Date() })
+          .set({ status: 'applied', appliedBy: personOf(me), appliedAt: new Date() })
           .where(and(eq(proposals.id, body.proposalId), eq(proposals.companyId, me.companyId), eq(proposals.kind, 'staff'), eq(proposals.departmentId, dept.id), eq(proposals.status, 'pending')))
           .returning({ agentId: proposals.agentId });
         if (!taken) throw new ApiError(409, 'conflict', 'This card was already applied or replaced by a newer one.', 'proposal_closed');
@@ -267,14 +269,14 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
             roleKey: role.id,
             skills: line.skills,
             templateHashes: hashes,
-            createdBy: me.id,
+            createdBy: personOf(me),
           })
           .returning();
         /* A turn carries the instructions whole, so a hire whose skills make them too long would never run. */
         if ((await instructionsOf({ db: tx, templates: ctx.templates }, agent!)).text.length > MAX_INSTRUCTIONS) {
           throw new ApiError(400, 'validation', `${line.name}'s instructions would be longer than ${MAX_INSTRUCTIONS} characters. Turn some skills off.`, 'instructions_too_long');
         }
-        await tx.insert(agentChanges).values({ companyId: me.companyId, agentId: agent!.id, personId: me.id, field: 'hired', before: null, after: line });
+        await tx.insert(agentChanges).values({ companyId: me.companyId, agentId: agent!.id, ...changedBy(me), field: 'hired', before: null, after: line });
         hired.push({ id: agent!.id, name: line.name, role: role.id, title: role.title.en });
       }
       return { hired, agentId };
@@ -288,12 +290,12 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
         agentId,
         kind: 'applied',
         data: { proposalId: body.proposalId ?? null, kind: 'staff', department: dept.id, hired: result.hired.map(({ id, name, role }) => ({ id, name, role })) },
-        personId: me.id,
+        personId: personOf(me),
       });
     }
     ctx.bus.publish(me.companyId, { type: 'org' });
     ctx.bus.publish(me.companyId, { type: 'pulse', from: { kind: 'orchestrator' }, to: { kind: 'department', id: dept.id } });
-    if (agentId && (await orchestratorState(ctx, me.companyId)).ready) {
+    if (agentId && !me.via && (await orchestratorState(ctx, me.companyId)).ready) {
       await enqueueTurn(ctx, { companyId: me.companyId, agentId, prompt: staffedNote(deptName(dept), result.hired), createdBy: null });
     }
     reply.code(201);

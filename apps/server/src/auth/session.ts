@@ -5,6 +5,7 @@ import type { Db } from '../db/client.js';
 import { people, sessions, type ScopeKind } from '../db/schema.js';
 import { hashToken, newToken } from '../crypto/tokens.js';
 import { ApiError } from '../errors.js';
+import { internalCall } from './internal.js';
 
 export const SESSION_COOKIE = 'hh_session';
 const SESSION_DAYS = 30;
@@ -29,6 +30,8 @@ export type Person = {
   status: 'active' | 'invited' | 'disabled';
   scopeKind: ScopeKind;
   isOwner: boolean;
+  /* The orchestrator acting as this person, the owner: what it changes is its own. */
+  via?: string;
 };
 
 /* Every sign-in also clears out everyone's expired sessions, so the table does not grow forever. */
@@ -54,7 +57,22 @@ export async function endSession(req: FastifyRequest, reply: FastifyReply, db: D
 
 const notSignedIn = () => new ApiError(401, 'unauthorized', 'Sign in to continue.', 'signed_out');
 
+/* The person who did it, or null when the orchestrator did it for the owner. */
+export const personOf = (me: Person): string | null => (me.via ? null : me.id);
+
+/* Who a change is by: the person, or the orchestrator when it acts for the owner. */
+export const changedBy = (me: Person) => ({ personId: personOf(me), byOrchestrator: !!me.via });
+
+/* Who acts on a task: the person, or the orchestrator when it acts for the owner. */
+export const actorOf = (me: Person): { personId: string } | { agentId: string } => (me.via ? { agentId: me.via } : { personId: me.id });
+
 export async function requirePerson(req: FastifyRequest, db: Db): Promise<Person> {
+  const inside = internalCall(req);
+  if (inside) {
+    const [owner] = await db.select(personColumns).from(people).where(eq(people.id, inside.personId));
+    if (!owner || owner.status !== 'active') throw notSignedIn();
+    return { ...owner, via: inside.agentId };
+  }
   const token = req.cookies[SESSION_COOKIE];
   if (!token) throw notSignedIn();
   const [person] = await db

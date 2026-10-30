@@ -3,7 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { accessOf, canReach, type Access } from '../../auth/access.js';
-import { requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
+import { actorOf, requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
 import { agents, departments, requests, tasks, turns } from '../../db/schema.js';
 import { orchestratorOf } from '../conversation/queue.js';
 import { answer, cancel, CLOSED, comment, createTask, refuse, taskSpot, type Task } from './engine.js';
@@ -90,7 +90,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
       [assignee] = await db.select({ id: agents.id }).from(agents).where(and(eq(agents.departmentId, dept.id), eq(agents.kind, 'head'), isNull(agents.removedAt))).orderBy(asc(agents.createdAt));
       if (!assignee) throw refuse(409, 'no_head', 'This department has no head yet. Hire one first.');
     }
-    const moved = await createTask(ctx, { personId: me.id }, { title: body.title, brief: body.brief, body: body.body, departmentId: body.department ?? null, productId: body.product ?? null, assigneeAgentId: assignee.id });
+    const moved = await createTask(ctx, actorOf(me), { title: body.title, brief: body.brief, body: body.body, departmentId: body.department ?? null, productId: body.product ?? null, assigneeAgentId: assignee.id });
     await wakeAll(ctx, moved.wakes);
     return reply.code(201).send({ task: await detail(me, moved.task) });
   });
@@ -99,7 +99,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const { id } = IdParams.parse(req.params);
     const { text } = z.object({ text: z.string().trim().min(1).max(4000) }).parse(req.body);
-    const moved = await comment(ctx, { personId: me.id }, (await reachable(me, id)).id, text);
+    const moved = await comment(ctx, actorOf(me), (await reachable(me, id)).id, text);
     await wakeAll(ctx, moved.wakes);
     return reply.code(201).send({ task: await detail(me, moved.task) });
   });
@@ -108,7 +108,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const { id } = IdParams.parse(req.params);
     const { why } = z.object({ why: z.string().max(1000).default('') }).parse(req.body ?? {});
-    const moved = await cancel(ctx, { personId: me.id }, (await reachable(me, id)).id, why);
+    const moved = await cancel(ctx, actorOf(me), (await reachable(me, id)).id, why);
     await stopTurns(ctx, moved.closed);
     const settled = await settle(ctx, moved.task);
     await wakeAll(ctx, tell(moved.wakes, settled, (await orchestratorOf(ctx, me.companyId))?.id ?? null, moved.task.id));
@@ -160,7 +160,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     });
     /* The people of the department see a commit waiting for approval; only someone who sees the whole company lets it into main. */
     if (found.kind === 'approval') requireCompanyScope(me);
-    const done = await answer(ctx, me.id, id, body);
+    const done = await answer(ctx, actorOf(me), id, body);
     await wakeAll(ctx, done.wakes);
     /* An agent switched off while it waited for this answer leaves the work now. */
     await leaveIfOff(ctx, done.request.agentId);

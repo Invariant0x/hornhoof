@@ -25,7 +25,7 @@ const Target = z.discriminatedUnion('kind', [
 const label = z.string().trim().min(1).max(80);
 
 /* Company API keys only. Personal subscriptions are connected by their owner through a machine. */
-const SubscriptionBody = z.object({
+export const SubscriptionBody = z.object({
   kind: z.literal('api_key'),
   provider: z.enum(['anthropic_api', 'openai_api']),
   label,
@@ -36,7 +36,7 @@ const SubscriptionBody = z.object({
 const PLANS = { claude: 'Claude', codex: 'Codex', kimi: 'Kimi', glm: 'GLM' } as const;
 type Plan = keyof typeof PLANS;
 
-const ConnectBody = z.object({
+export const ConnectBody = z.object({
   providers: z
     .array(z.enum(Object.keys(PLANS) as [Plan, ...Plan[]]))
     .min(1)

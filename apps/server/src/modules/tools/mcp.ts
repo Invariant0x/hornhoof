@@ -9,6 +9,7 @@ import { agents, jobs, proposals } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { appendEvent } from '../events/store.js';
 import { companyView } from './company.js';
+import { registerControlTools } from './control.js';
 import { checkStaff, departmentOf, StaffProposal, staffingOptions } from './staff.js';
 import { checkItems, Proposal } from './structure.js';
 import { registerTaskTools } from '../tasks/tools.js';
@@ -31,9 +32,9 @@ export async function jobOf(ctx: Ctx, req: FastifyRequest): Promise<ToolJob> {
 
 const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
 
-/* Hornhoof's tools as one agent's job sees them: every agent reads the company, only the orchestrator proposes.
-   Departments and employees are never created here: the CEO's click does that. */
-function toolsFor(ctx: Ctx, job: ToolJob): McpServer {
+/* Hornhoof's tools as one agent's job sees them: every agent reads the company; the orchestrator also proposes cards and
+   does whatever the CEO can do in the screens. */
+function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob): McpServer {
   const server = new McpServer({ name: 'hornhoof', version: '0.5.0' });
   server.registerTool(
     'company',
@@ -106,6 +107,7 @@ function toolsFor(ctx: Ctx, job: ToolJob): McpServer {
       return say('Shown to the CEO. Wait for their answer.');
     },
   );
+  registerControlTools(server, ctx, app, job);
   return server;
 }
 
@@ -113,7 +115,7 @@ function toolsFor(ctx: Ctx, job: ToolJob): McpServer {
 export function mcpRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/mcp', async (req, reply) => {
     const job = await jobOf(ctx, req);
-    const server = toolsFor(ctx, job);
+    const server = toolsFor(ctx, app, job);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     reply.hijack();
     reply.raw.on('close', () => {

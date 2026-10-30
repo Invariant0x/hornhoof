@@ -193,6 +193,8 @@ export const agentChanges = pgTable(
     companyId: companyId(),
     agentId: uuid('agent_id').notNull().references(() => agents.id),
     personId: uuid('person_id').references(() => people.id),
+    /* Made by the orchestrator, which runs the company as the CEO can; no person then. */
+    byOrchestrator: boolean('by_orchestrator').notNull().default(false),
     field: text('field', { enum: AGENT_CHANGE_FIELDS }).notNull(),
     before: jsonb('before'),
     after: jsonb('after'),

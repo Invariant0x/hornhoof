@@ -17,7 +17,7 @@ import { personView, personViews } from './views.js';
 
 const INVITE_DAYS = 7;
 
-const InviteBody = z.object({
+export const InviteBody = z.object({
   name: z.string().trim().min(1).max(80),
   email: z.string().trim().toLowerCase().email(),
   title: z.string().trim().max(80).default(''),
@@ -26,7 +26,7 @@ const InviteBody = z.object({
 
 const AcceptBody = z.object({ password: z.string().min(10).max(200) });
 
-const PatchBody = z.object({
+export const PersonPatch = z.object({
   title: z.string().trim().max(80).optional(),
   access: AccessInput.optional(),
   status: z.enum(['active', 'disabled']).optional(),
@@ -186,7 +186,7 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.patch('/api/people/:id', async req => {
     const me = await requirePerson(req, db);
     const { id } = IdParams.parse(req.params);
-    const body = PatchBody.parse(req.body);
+    const body = PersonPatch.parse(req.body);
     /* Anyone may rename their own title; everything else needs the whole company. */
     if (id !== me.id || body.access !== undefined || body.status !== undefined) requireCompanyScope(me);
 

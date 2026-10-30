@@ -64,6 +64,12 @@ describe('AgentWindow', () => {
     expect(container.querySelector('.t-u')).toHaveTextContent('> Hornhoof: #4 "Payments" is yours.');
   });
 
+  it('names the orchestrator for what it wrote to an employee', async () => {
+    const { container } = open({ [`GET ${EVENTS}?after=0`]: [200, { events: [ev(1, 'message', { text: 'Look at checkout first.', from: 'orchestrator' })], state: READY }] });
+    await screen.findByText(/Look at checkout first/);
+    expect(container.querySelector('.t-u')).toHaveTextContent('> Orchestrator: Look at checkout first.');
+  });
+
   it('shows his answers with bold and lists, and hides how Claude loads its tools', async () => {
     const { container } = open({
       [`GET ${EVENTS}?after=0`]: [

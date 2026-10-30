@@ -138,15 +138,15 @@ describe('the task engine', () => {
     const task = await memberTask();
     const asked = await ask(ctx, bruno.id, task.id, { kind: 'question', text: 'Which currency?' });
     expect((await read(task.id)).status).toBe('waiting');
-    const answered = await answer(ctx, CEO.personId, asked.request.id, { answer: 'EUR' });
+    const answered = await answer(ctx, CEO, asked.request.id, { answer: 'EUR' });
     expect(answered.request).toMatchObject({ status: 'answered', answer: 'EUR', answeredBy: CEO.personId });
     expect((await read(task.id)).status).toBe('working');
     expect(woken(answered)).toEqual([[bruno.id, 'answered']]);
     expect(await reason(ask(ctx, bruno.id, task.id, { kind: 'approval', text: 'Release?', commit: 'abc' }))).toBe('task_invalid');
     const approval = await ask(ctx, bruno.id, task.id, { kind: 'approval', text: 'Release 0.5.0?', commit: 'a'.repeat(40) });
-    expect(await reason(answer(ctx, CEO.personId, approval.request.id, { answer: 'yes' }))).toBe('task_invalid');
-    expect((await answer(ctx, CEO.personId, approval.request.id, { approve: true })).request.status).toBe('approved');
-    expect(await reason(answer(ctx, CEO.personId, approval.request.id, { approve: false }))).toBe('request_closed');
+    expect(await reason(answer(ctx, CEO, approval.request.id, { answer: 'yes' }))).toBe('task_invalid');
+    expect((await answer(ctx, CEO, approval.request.id, { approve: true })).request.status).toBe('approved');
+    expect(await reason(answer(ctx, CEO, approval.request.id, { approve: false }))).toBe('request_closed');
   });
 
   it("wakes the assignee for a person's comment but nobody for an agent's", async () => {

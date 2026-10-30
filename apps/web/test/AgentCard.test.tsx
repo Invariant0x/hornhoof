@@ -20,6 +20,11 @@ function open(routes: Record<string, unknown> = {}, me: Me = ME) {
 const patched = (body: unknown): [number, AgentCardView] => [200, { ...CARD, ...(body as Partial<AgentCardView>) }];
 
 describe('AgentCard', () => {
+  it('says the orchestrator made a change, and what it was', async () => {
+    open({ 'GET /api/agents/b1': [200, { ...CARD, changes: [{ field: 'switch', personName: null, byOrchestrator: true, at: '2026-10-30T09:00:00.000Z' }] }] });
+    expect(await screen.findByText(/^Switched on or off: Orchestrator, /)).toBeInTheDocument();
+  });
+
   it('shows the skills as a checklist with locked core skills', async () => {
     const user = userEvent.setup();
     const { calls } = open({ 'PATCH /api/agents/b1': [200, CARD] });
@@ -79,7 +84,7 @@ describe('AgentCard', () => {
 
   it('resets to the template after asking', async () => {
     const user = userEvent.setup();
-    const { calls } = open({ 'POST /api/agents/b1/reset': [200, { ...CARD, changes: [{ field: 'reset', personName: 'Ivan', at: '2026-10-30T09:00:00.000Z' }, ...CARD.changes] }] });
+    const { calls } = open({ 'POST /api/agents/b1/reset': [200, { ...CARD, changes: [{ field: 'reset', personName: 'Ivan', byOrchestrator: false, at: '2026-10-30T09:00:00.000Z' }, ...CARD.changes] }] });
     await user.click(await screen.findByRole('button', { name: 'Reset to template' }));
     expect(calls.some(c => c.path === '/api/agents/b1/reset')).toBe(false);
     expect(screen.getByText('Reset Bruno to the template? Its own prompt and skill changes are lost.')).toBeInTheDocument();

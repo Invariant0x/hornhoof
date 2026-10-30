@@ -4,7 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { accessOf, agentSpot, canReach } from '../../auth/access.js';
-import { requireCompanyScope, type Person } from '../../auth/session.js';
+import { actorOf, changedBy, requireCompanyScope, type Person } from '../../auth/session.js';
 import { agentChanges, agents, departments, jobs, people, subscriptions, tasks, type AGENT_CHANGE_FIELDS } from '../../db/schema.js';
 import { ApiError, type ErrorReason } from '../../errors.js';
 import { onAgent, pump, pumpWaiting } from '../conversation/queue.js';
@@ -32,7 +32,7 @@ export type AgentCard = {
   parts: Part[];
   raw: string;
   runsOn: { subscription: SubView; models: ModelOption[] }[];
-  changes: { field: string; personName: string | null; at: string; before: unknown; after: unknown }[];
+  changes: { field: string; personName: string | null; byOrchestrator: boolean; at: string; before: unknown; after: unknown }[];
   /* The whole company or the agent's department may change it; only the whole company removes it. */
   canEdit: boolean;
   /* Off for now: it takes no task turns. */
@@ -40,7 +40,7 @@ export type AgentCard = {
 };
 
 const Text = z.string().max(8000);
-const PatchBody = z
+export const AgentPatch = z
   .object({
     name: z.string().trim().min(1).max(60).optional(),
     model: z.string().max(80).optional(),
@@ -100,7 +100,7 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { parts, text } = await instructionsOf(ctx, agent);
     const offered = [...(role?.skills ?? []), ...agent.skills.filter(id => !role?.skills.some(s => s.id === id)).map(id => ({ id, on: true, locked: false }))];
     const changes = await db
-      .select({ field: agentChanges.field, personName: people.name, at: agentChanges.createdAt, before: agentChanges.before, after: agentChanges.after })
+      .select({ field: agentChanges.field, personName: people.name, byOrchestrator: agentChanges.byOrchestrator, at: agentChanges.createdAt, before: agentChanges.before, after: agentChanges.after })
       .from(agentChanges)
       .leftJoin(people, eq(people.id, agentChanges.personId))
       .where(eq(agentChanges.agentId, agent.id))
@@ -152,7 +152,7 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.patch('/api/agents/:id', async req => {
     const { me, agent: found } = await agentFor(ctx, req);
     await requireEditor(me, found);
-    const body = PatchBody.parse(req.body);
+    const body = AgentPatch.parse(req.body);
     const { agent, next, changed } = await changing(found, agent => patched(me, agent, body));
     if (changed) {
       ctx.bus.publish(agent.companyId, { type: 'org' });
@@ -163,14 +163,14 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
       }
       /* Back on: gates that waited for its role start again and the task turns it missed go out. Off: its work goes back
          once no turn of it runs. */
-      if (agent.switchedOffAt && !next.switchedOffAt) await backOn(ctx, { personId: me.id }, agent.id);
+      if (agent.switchedOffAt && !next.switchedOffAt) await backOn(ctx, actorOf(me), agent.id);
       if (!agent.switchedOffAt && next.switchedOffAt) await leaveIfOff(ctx, agent.id);
     }
     return card(next, me);
   });
 
   /* Applies a card change to the agent as it is now and records each changed field. */
-  async function patched(me: Person, agent: AgentRow, body: z.infer<typeof PatchBody>): Promise<{ agent: AgentRow; next: AgentRow; changed: boolean }> {
+  async function patched(me: Person, agent: AgentRow, body: z.infer<typeof AgentPatch>): Promise<{ agent: AgentRow; next: AgentRow; changed: boolean }> {
     const orchestrator = agent.kind === 'orchestrator';
     if (orchestrator && (body.name !== undefined || body.skills || body.base !== undefined || body.skillText || body.on !== undefined)) {
       throw invalid("The orchestrator's card changes only his model and the subscription he runs on.", 'orchestrator_card');
@@ -241,7 +241,7 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
           .update(agents)
           .set({ name: next.name, model: next.model, subscriptionId: next.subscriptionId, skills: next.skills, overrides: next.overrides, templateHashes: next.templateHashes, switchedOffAt: next.switchedOffAt })
           .where(eq(agents.id, agent.id));
-        await tx.insert(agentChanges).values(changed.map(c => ({ companyId: agent.companyId, agentId: agent.id, personId: me.id, ...c })));
+        await tx.insert(agentChanges).values(changed.map(c => ({ companyId: agent.companyId, agentId: agent.id, ...changedBy(me), ...c })));
       });
     }
     return { agent, next, changed: changed.length > 0 };
@@ -258,7 +258,7 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
       const templateHashes = Object.fromEntries([[role.id, role.hash], ...skills.map(id => [id, ctx.templates.skills.get(id)!.hash])]);
       await db.transaction(async tx => {
         await tx.update(agents).set({ skills, overrides: {}, templateHashes }).where(eq(agents.id, agent.id));
-        await tx.insert(agentChanges).values({ companyId: agent.companyId, agentId: agent.id, personId: me.id, field: 'reset', before: { skills: agent.skills, overrides: agent.overrides }, after: { skills } });
+        await tx.insert(agentChanges).values({ companyId: agent.companyId, agentId: agent.id, ...changedBy(me), field: 'reset', before: { skills: agent.skills, overrides: agent.overrides }, after: { skills } });
       });
       return { ...agent, skills, overrides: {}, templateHashes };
     });
@@ -289,10 +289,10 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
           .update(jobs)
           .set({ status: 'failed', error: 'removed', finishedAt: new Date() })
           .where(and(eq(jobs.agentId, agent.id), eq(jobs.status, 'queued')));
-        await tx.insert(agentChanges).values({ companyId: agent.companyId, agentId: agent.id, personId: me.id, field: 'removed', before: null, after: null });
+        await tx.insert(agentChanges).values({ companyId: agent.companyId, agentId: agent.id, ...changedBy(me), field: 'removed', before: null, after: null });
       });
       const gated = await db.select().from(tasks).where(and(eq(tasks.companyId, agent.companyId), notInArray(tasks.status, [...CLOSED])));
-      for (const task of gated.filter(t => t.gates.includes(agent.id))) await dropGate(ctx, { personId: me.id }, task, agent.id);
+      for (const task of gated.filter(t => t.gates.includes(agent.id))) await dropGate(ctx, actorOf(me), task, agent.id);
     });
     ctx.bus.publish(found.companyId, { type: 'org' });
     return reply.code(204).send();
