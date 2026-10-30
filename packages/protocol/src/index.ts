@@ -10,6 +10,8 @@ export type JobError = (typeof JOB_ERRORS)[number];
 
 /* The last bytes of a job's output kept for people to read when something fails. */
 export const TAIL_BYTES = 4096;
+/* The longest standing instructions a job may carry; Hornhoof refuses edits that would go past it. */
+export const MAX_INSTRUCTIONS = 20_000;
 
 const LimitWindow = z.object({
   name: z.string().min(1).max(40),
@@ -127,7 +129,7 @@ const ServerMessage = z.discriminatedUnion('type', [
     timeoutMs: z.number().int().positive(),
     secret: z.string().nullable(),
     /* The agent's standing instructions for this job, and the token its Hornhoof tools present. */
-    instructions: z.string().max(20000).nullable(),
+    instructions: z.string().max(MAX_INSTRUCTIONS).nullable(),
     toolToken: z.string().max(200).nullable(),
   }),
   z.object({ type: z.literal('job.cancel'), jobId: Id }),

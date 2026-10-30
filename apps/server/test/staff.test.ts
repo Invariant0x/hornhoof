@@ -81,7 +81,7 @@ describe('staffing', () => {
     expect(be).toMatchObject({ title: 'Backend engineer', kind: 'member', perProduct: false });
     expect(be.skills).toContainEqual({ id: 'dev-tdd', on: true, locked: false });
     expect(be.skills).toContainEqual({ id: 'hh-report-to-head', on: true, locked: true });
-    expect(options.subscriptions.map((s: { id: string }) => s.id).sort()).toEqual([c.teamKey, c.olegCodex].sort());
+    expect(options.subscriptions.map((s: { id: string }) => s.id)).toEqual([c.olegCodex, c.orchestrator.subscriptionId, c.teamKey]);
     expect(options.subscriptions.find((s: { id: string }) => s.id === c.teamKey)).toMatchObject({ provider: 'anthropic_api', label: 'Team key', models: API_MODELS.anthropic_api });
     expect(options.subscriptions.find((s: { id: string }) => s.id === c.olegCodex)).toMatchObject({ provider: 'codex', owner: 'Oleg', models: [{ id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol' }] });
     expect(failed(await client.callTool({ name: 'staffing_options', arguments: { department: '00000000-0000-4000-8000-000000000000' } }))).toBe(true);
@@ -197,6 +197,25 @@ describe('staffing', () => {
     expect(res.json().error.message).toContain('hh-report-to-head');
   });
 
+  it('offers the company key from setup to every department', async () => {
+    const { app, ceo, sales, orchestrator } = await company();
+    const roster = (await app.inject({ url: `/api/departments/${sales.id}/roster`, ...as(ceo) })).json();
+    expect(roster.subscriptions.map((s: { id: string }) => s.id)).toContain(orchestrator.subscriptionId);
+  });
+
+  it("starts new employees on a key bought for the department before a company-wide one", async () => {
+    const { app, ceo, design } = await company();
+    const own = await app.inject({
+      method: 'POST',
+      url: '/api/subscriptions',
+      payload: { provider: 'anthropic_api', kind: 'api_key', label: 'Design key', apiKey: 'sk-ant-api03-design-key-9012', target: { kind: 'department', id: design.id } },
+      ...as(ceo),
+    });
+    expect(own.statusCode).toBe(201);
+    const roster = (await app.inject({ url: `/api/departments/${design.id}/roster`, ...as(ceo) })).json();
+    expect(roster.roles[0]).toMatchObject({ id: 'DSN-HEAD', subscription: own.json().subscription.id });
+  });
+
   it('offers the default roster by hand, one designer per product', async () => {
     const c = await company();
     const res = await c.app.inject({ url: `/api/departments/${c.design.id}/roster`, ...as(c.ceo) });
@@ -205,10 +224,10 @@ describe('staffing', () => {
     const designProducts = await c.db.select().from(departments).where(eq(departments.parentId, c.design.id)).orderBy(asc(departments.position));
     const ui = roster.filter((l: { role: string }) => l.role === 'DSN-UI');
     expect(ui.map((l: { product: string; name: string }) => [l.product, l.name])).toEqual(designProducts.map(p => [p.id, `Product UI designer (${p.name})`]));
-    expect(roster[0]).toMatchObject({ role: 'DSN-HEAD', model: '', subscription: c.teamKey });
+    expect(roster[0]).toMatchObject({ role: 'DSN-HEAD', model: '', subscription: c.orchestrator.subscriptionId });
     for (const l of roster) expect(l.skills).toContain('hh-report-to-head');
     const { roles, products, subscriptions } = res.json();
-    expect(roles[0]).toMatchObject({ id: 'DSN-HEAD', kind: 'head', subscription: c.teamKey });
+    expect(roles[0]).toMatchObject({ id: 'DSN-HEAD', kind: 'head', subscription: c.orchestrator.subscriptionId });
     expect(roles[0].skills).toContain('hh-report-to-head');
     expect(roles.find((r: { id: string }) => r.id === 'DSN-UI')).toMatchObject({ title: { en: 'Product UI designer' }, kind: 'member', perProduct: true });
     expect(products).toEqual(designProducts.map(p => ({ id: p.id, name: p.name })));

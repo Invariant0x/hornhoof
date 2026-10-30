@@ -1,5 +1,5 @@
 import { DEPARTMENT_TEMPLATES, type TemplateKey } from '@hornhoof/protocol';
-import { and, asc, eq, inArray, isNull, max } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, isNull, max } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -99,6 +99,10 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
         if (!dept) continue;
         if (item.remove) {
           const inside = [dept.id, ...(await tx.select({ id: departments.id }).from(departments).where(eq(departments.parentId, dept.id))).map(d => d.id)];
+          /* Removed employees and staff proposals keep their history without the department; a waiting proposal ends. */
+          await tx.update(agents).set({ departmentId: null, productId: null, teamId: null }).where(and(inArray(agents.departmentId, inside), isNotNull(agents.removedAt)));
+          await tx.update(proposals).set({ status: 'dismissed' }).where(and(inArray(proposals.departmentId, inside), eq(proposals.status, 'pending')));
+          await tx.update(proposals).set({ departmentId: null }).where(inArray(proposals.departmentId, inside));
           await tx.delete(teams).where(inArray(teams.departmentId, inside));
           await tx.delete(departments).where(eq(departments.parentId, dept.id));
           await tx.delete(departments).where(eq(departments.id, dept.id));

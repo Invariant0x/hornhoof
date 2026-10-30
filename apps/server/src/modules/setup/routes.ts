@@ -78,7 +78,8 @@ export function setupRoutes(app: FastifyInstance, { db, config }: Deps): void {
             secretEnc: encryptSecret(orchestrator.apiKey, config.secret),
             last4: orchestrator.apiKey.slice(-4),
             status: 'ready',
-            targetKind: 'orchestrator',
+            /* The company's first key serves every department too, so the first people can be hired on it. */
+            targetKind: 'any',
           }).returning({ id: subscriptions.id });
           subscriptionId = sub!.id;
         } else if (orchestrator.mode === 'personal') {

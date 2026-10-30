@@ -83,11 +83,14 @@ export async function servingSubscriptions(ctx: Pick<Ctx, 'db'>, companyId: stri
   const { db } = ctx;
   const places = [spot.departmentId, spot.parentId].filter((id): id is string => Boolean(id));
   const teamIds = places.length ? (await db.select({ id: teams.id }).from(teams).where(inArray(teams.departmentId, places))).map(t => t.id) : [];
-  return connected(db, companyId, async (sub, owner) =>
-    sub.kind === 'personal'
-      ? canReach(await accessOf(db, owner), spot)
-      : sub.targetKind === 'any' || (sub.targetKind === 'department' && places.includes(sub.targetId ?? '')) || (sub.targetKind === 'team' && teamIds.includes(sub.targetId ?? '')),
-  );
+  const wide = new Set<string>();
+  const serving = await connected(db, companyId, async (sub, owner) => {
+    if (sub.kind === 'personal') return canReach(await accessOf(db, owner), spot);
+    if (sub.targetKind === 'any') wide.add(sub.id);
+    return sub.targetKind === 'any' || (sub.targetKind === 'department' && places.includes(sub.targetId ?? '')) || (sub.targetKind === 'team' && teamIds.includes(sub.targetId ?? ''));
+  });
+  /* Keys for any department come last, so a new employee starts on what was bought for its place when there is one. */
+  return [...serving.filter(s => !wide.has(s.id)), ...serving.filter(s => wide.has(s.id))];
 }
 
 /* The orchestrator works for the whole company: a plan of someone who sees all of it, or a key not tied to a department. */

@@ -2,15 +2,16 @@ import { and, asc, eq, gt, inArray, isNull } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { AccessInput, checkAccess, saveAccess } from '../../auth/access.js';
+import { AccessInput, accessOf, agentSpot, canReach, checkAccess, saveAccess } from '../../auth/access.js';
 import { guard, limiter } from '../../auth/limit.js';
 import { hashPassword } from '../../auth/password.js';
 import { personColumns, requireCompanyScope, requirePerson, startSession, type Person } from '../../auth/session.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
 import type { Db } from '../../db/client.js';
 import { isUniqueViolation } from '../../db/errors.js';
-import { agents, companies, invites, machines, people, sessions, subscriptions } from '../../db/schema.js';
+import { agentChanges, agents, companies, invites, machines, people, sessions, subscriptions } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
+import { onAgent } from '../conversation/queue.js';
 import { disconnectMachines } from '../nodes/disconnect.js';
 import { personView, personViews } from './views.js';
 
@@ -58,10 +59,30 @@ export async function reinvite(db: Db, personId: string, by: Pick<Person, 'id' |
   return { token, person };
 }
 
-/* The orchestrator is company-wide, so it leaves a personal plan whose owner no longer works for the whole company. */
-async function freeOrchestratorFrom(db: Db, personId: string): Promise<void> {
-  const theirs = db.select({ id: subscriptions.id }).from(subscriptions).where(and(eq(subscriptions.ownerPersonId, personId), eq(subscriptions.kind, 'personal')));
-  await db.update(agents).set({ subscriptionId: null }).where(and(eq(agents.kind, 'orchestrator'), inArray(agents.subscriptionId, theirs)));
+/* A personal plan serves where its owner works. When the owner is disabled or no longer reaches an agent's place, the agent
+   lets go of the plan and waits for another; the orchestrator is company-wide, so it needs an owner with the whole company. */
+async function releasePlansOf(ctx: Ctx, owner: Pick<Person, 'id' | 'companyId' | 'scopeKind' | 'status'>, by: string): Promise<void> {
+  const { db } = ctx;
+  const theirs = (await db.select({ id: subscriptions.id }).from(subscriptions).where(and(eq(subscriptions.ownerPersonId, owner.id), eq(subscriptions.kind, 'personal')))).map(s => s.id);
+  if (!theirs.length) return;
+  const bound = await db.select({ id: agents.id }).from(agents).where(and(inArray(agents.subscriptionId, theirs), isNull(agents.removedAt)));
+  const access = await accessOf(db, owner);
+  let freed = false;
+  for (const { id } of bound) {
+    /* In the agent's line, so a card change that read the plan cannot put it back. */
+    await onAgent(ctx, id, async () => {
+      const [agent] = await db.select().from(agents).where(eq(agents.id, id));
+      if (!agent?.subscriptionId || !theirs.includes(agent.subscriptionId)) return;
+      const stays = owner.status !== 'disabled' && (agent.kind === 'orchestrator' ? access.whole : canReach(access, await agentSpot(db, agent)));
+      if (stays) return;
+      await db.transaction(async tx => {
+        await tx.update(agents).set({ subscriptionId: null }).where(eq(agents.id, id));
+        await tx.insert(agentChanges).values({ companyId: agent.companyId, agentId: id, personId: by, field: 'subscription', before: agent.subscriptionId, after: null });
+      });
+      freed = true;
+    });
+  }
+  if (freed) ctx.bus.publish(owner.companyId, { type: 'org' });
 }
 
 export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
@@ -194,7 +215,7 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
       const theirs = await db.select({ id: machines.id }).from(machines).where(and(eq(machines.personId, id), isNull(machines.revokedAt)));
       await disconnectMachines(ctx, theirs.map(m => m.id));
     }
-    if (changes.status === 'disabled' || (body.access && !('whole' in body.access))) await freeOrchestratorFrom(db, id);
+    if (changes.status === 'disabled' || body.access) await releasePlansOf(ctx, person, me.id);
     return { person: await personView(db, person) };
   });
 }

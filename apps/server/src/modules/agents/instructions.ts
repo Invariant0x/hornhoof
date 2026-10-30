@@ -61,9 +61,6 @@ export function renderInstructions(t: Templates, agent: AgentRow, place: Place):
   return { parts, text, hash: textHash(text) };
 }
 
-/* The longest instructions an employee may run with; the default roles stay under 19,000 characters. */
-export const MAX_INSTRUCTIONS = 24_000;
-
 /* The names an employee's header uses: its company, department and product. */
 export async function placeOf(db: Ctx['db'], agent: AgentRow): Promise<Place> {
   const [company] = await db.select({ name: companies.name }).from(companies).where(eq(companies.id, agent.companyId));

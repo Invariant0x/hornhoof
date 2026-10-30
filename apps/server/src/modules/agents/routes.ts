@@ -1,20 +1,20 @@
-import { modelsFor, type ModelOption } from '@hornhoof/protocol';
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { MAX_INSTRUCTIONS, modelsFor, type ModelOption } from '@hornhoof/protocol';
+import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { agentSpot } from '../../auth/access.js';
-import { requireCompanyScope } from '../../auth/session.js';
+import { accessOf, agentSpot, canReach } from '../../auth/access.js';
+import { requireCompanyScope, type Person } from '../../auth/session.js';
 import { agentChanges, agents, departments, jobs, people, subscriptions, type AGENT_CHANGE_FIELDS } from '../../db/schema.js';
 import { ApiError, type ErrorReason } from '../../errors.js';
-import { pump, pumpWaiting } from '../conversation/queue.js';
+import { onAgent, pump, pumpWaiting } from '../conversation/queue.js';
 import { deptName } from '../departments/templates.js';
 import { identityOf } from '../nodes/hub.js';
 import { subViews, type SubView } from '../subscriptions/views.js';
 import { orchestratorServing, servingSubscriptions, type Serving } from '../tools/staff.js';
 import type { Lang } from '../templates/load.js';
 import { agentFor, type AgentRow } from './find.js';
-import { instructionsOf, MAX_INSTRUCTIONS, renderInstructions, placeOf, type Part } from './instructions.js';
+import { instructionsOf, renderInstructions, placeOf, type Part } from './instructions.js';
 
 export type AgentCard = {
   id: string;
@@ -31,6 +31,8 @@ export type AgentCard = {
   raw: string;
   runsOn: { subscription: SubView; models: ModelOption[] }[];
   changes: { field: string; personName: string | null; at: string; before: unknown; after: unknown }[];
+  /* The whole company or the agent's department may change it; only the whole company removes it. */
+  canEdit: boolean;
 };
 
 const Text = z.string().max(8000);
@@ -60,7 +62,27 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
   const servingFor = async (agent: AgentRow): Promise<Serving[]> =>
     agent.kind === 'orchestrator' ? orchestratorServing(ctx, agent.companyId) : servingSubscriptions(ctx, agent.companyId, await agentSpot(db, agent));
 
-  async function card(agent: AgentRow): Promise<AgentCard> {
+  /* People of the employee's department change its card, the whole company changes every card; a team alone only sees it. */
+  async function mayEdit(me: Person, agent: AgentRow): Promise<boolean> {
+    if (me.scopeKind === 'company') return true;
+    if (agent.kind === 'orchestrator') return false;
+    return canReach({ ...(await accessOf(db, me)), teams: new Set() }, await agentSpot(db, agent));
+  }
+
+  async function requireEditor(me: Person, agent: AgentRow): Promise<void> {
+    if (!(await mayEdit(me, agent))) throw new ApiError(403, 'forbidden', "Only people with access to this employee's department or the whole company can change it.", 'not_your_department');
+  }
+
+  /* Changes to one agent go one at a time, each from the agent as the change before it left it. */
+  async function changing<T>(found: AgentRow, fn: (agent: AgentRow) => Promise<T>): Promise<T> {
+    return onAgent(ctx, found.id, async () => {
+      const [agent] = await db.select().from(agents).where(and(eq(agents.id, found.id), isNull(agents.removedAt)));
+      if (!agent) throw new ApiError(404, 'not_found', 'This employee does not exist.', 'agent_unknown');
+      return fn(agent);
+    });
+  }
+
+  async function card(agent: AgentRow, me: Person): Promise<AgentCard> {
     const role = agent.roleKey ? ctx.templates.roles.get(agent.roleKey) : undefined;
     const ids = [agent.departmentId, agent.productId].filter((id): id is string => Boolean(id));
     const depts = ids.length ? await db.select().from(departments).where(inArray(departments.id, ids)) : [];
@@ -112,18 +134,30 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
         return view ? [{ subscription: view, models: s.models }] : [];
       }),
       changes: changes.map(c => ({ ...c, at: c.at.toISOString() })),
+      canEdit: await mayEdit(me, agent),
     };
   }
 
   app.get('/api/agents/:id', async req => {
-    const { agent } = await agentFor(ctx, req);
-    return card(agent);
+    const { me, agent } = await agentFor(ctx, req);
+    return card(agent, me);
   });
 
   app.patch('/api/agents/:id', async req => {
-    const { me, agent } = await agentFor(ctx, req);
-    requireCompanyScope(me);
+    const { me, agent: found } = await agentFor(ctx, req);
+    await requireEditor(me, found);
     const body = PatchBody.parse(req.body);
+    const { agent, next, changed } = await changing(found, agent => patched(me, agent, body));
+    if (changed) {
+      ctx.bus.publish(agent.companyId, { type: 'org' });
+      /* Turns that waited for a subscription can go now. */
+      if (next.subscriptionId !== agent.subscriptionId) await (agent.kind === 'orchestrator' ? pumpWaiting(ctx) : pump(ctx, agent.id));
+    }
+    return card(next, me);
+  });
+
+  /* Applies a card change to the agent as it is now and records each changed field. */
+  async function patched(me: Person, agent: AgentRow, body: z.infer<typeof PatchBody>): Promise<{ agent: AgentRow; next: AgentRow; changed: boolean }> {
     const orchestrator = agent.kind === 'orchestrator';
     if (orchestrator && (body.name !== undefined || body.skills || body.base !== undefined || body.skillText)) {
       throw invalid("The orchestrator's card changes only his model and the subscription he runs on.", 'orchestrator_card');
@@ -194,44 +228,46 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
           .where(eq(agents.id, agent.id));
         await tx.insert(agentChanges).values(changed.map(c => ({ companyId: agent.companyId, agentId: agent.id, personId: me.id, ...c })));
       });
-      ctx.bus.publish(agent.companyId, { type: 'org' });
-      /* Turns that waited for a subscription can go now. */
-      if (next.subscriptionId !== agent.subscriptionId) await (orchestrator ? pumpWaiting(ctx) : pump(ctx, agent.id));
     }
-    return card(next);
-  });
+    return { agent, next, changed: changed.length > 0 };
+  }
 
   /* Back to the role as the templates have it now: its skills and texts. The model and subscription stay. */
   app.post('/api/agents/:id/reset', async req => {
-    const { me, agent } = await agentFor(ctx, req);
-    requireCompanyScope(me);
-    const role = agent.roleKey ? ctx.templates.roles.get(agent.roleKey) : undefined;
-    if (!role) throw invalid('This agent has no role template to go back to.', 'no_role');
-    const skills = role.skills.filter(s => s.on).map(s => s.id);
-    const templateHashes = Object.fromEntries([[role.id, role.hash], ...skills.map(id => [id, ctx.templates.skills.get(id)!.hash])]);
-    await db.transaction(async tx => {
-      await tx.update(agents).set({ skills, overrides: {}, templateHashes }).where(eq(agents.id, agent.id));
-      await tx.insert(agentChanges).values({ companyId: agent.companyId, agentId: agent.id, personId: me.id, field: 'reset', before: { skills: agent.skills, overrides: agent.overrides }, after: { skills } });
+    const { me, agent: found } = await agentFor(ctx, req);
+    await requireEditor(me, found);
+    const reset = await changing(found, async agent => {
+      const role = agent.roleKey ? ctx.templates.roles.get(agent.roleKey) : undefined;
+      if (!role) throw invalid('This agent has no role template to go back to.', 'no_role');
+      const skills = role.skills.filter(s => s.on).map(s => s.id);
+      const templateHashes = Object.fromEntries([[role.id, role.hash], ...skills.map(id => [id, ctx.templates.skills.get(id)!.hash])]);
+      await db.transaction(async tx => {
+        await tx.update(agents).set({ skills, overrides: {}, templateHashes }).where(eq(agents.id, agent.id));
+        await tx.insert(agentChanges).values({ companyId: agent.companyId, agentId: agent.id, personId: me.id, field: 'reset', before: { skills: agent.skills, overrides: agent.overrides }, after: { skills } });
+      });
+      return { ...agent, skills, overrides: {}, templateHashes };
     });
-    return card({ ...agent, skills, overrides: {}, templateHashes });
+    return card(reset, me);
   });
 
   /* An employee leaves the company: its history stays, its waiting turns end. Never while it works, never the orchestrator. */
   app.delete('/api/agents/:id', async (req, reply) => {
-    const { me, agent } = await agentFor(ctx, req);
+    const { me, agent: found } = await agentFor(ctx, req);
     requireCompanyScope(me);
-    if (agent.kind === 'orchestrator') throw new ApiError(403, 'forbidden', 'The orchestrator stays with the company.', 'orchestrator_locked');
-    const [running] = await db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, agent.id), eq(jobs.status, 'running'))).limit(1);
-    if (running) throw new ApiError(409, 'conflict', 'This employee is working. Stop it first.', 'agent_working');
-    await db.transaction(async tx => {
-      await tx.update(agents).set({ removedAt: new Date() }).where(eq(agents.id, agent.id));
-      await tx
-        .update(jobs)
-        .set({ status: 'failed', error: 'removed', finishedAt: new Date() })
-        .where(and(eq(jobs.agentId, agent.id), eq(jobs.status, 'queued')));
-      await tx.insert(agentChanges).values({ companyId: agent.companyId, agentId: agent.id, personId: me.id, field: 'removed', before: null, after: null });
+    if (found.kind === 'orchestrator') throw new ApiError(403, 'forbidden', 'The orchestrator stays with the company.', 'orchestrator_locked');
+    await changing(found, async agent => {
+      const [running] = await db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, agent.id), eq(jobs.status, 'running'))).limit(1);
+      if (running) throw new ApiError(409, 'conflict', 'This employee is working. Stop it first.', 'agent_working');
+      await db.transaction(async tx => {
+        await tx.update(agents).set({ removedAt: new Date() }).where(eq(agents.id, agent.id));
+        await tx
+          .update(jobs)
+          .set({ status: 'failed', error: 'removed', finishedAt: new Date() })
+          .where(and(eq(jobs.agentId, agent.id), eq(jobs.status, 'queued')));
+        await tx.insert(agentChanges).values({ companyId: agent.companyId, agentId: agent.id, personId: me.id, field: 'removed', before: null, after: null });
+      });
     });
-    ctx.bus.publish(agent.companyId, { type: 'org' });
+    ctx.bus.publish(found.companyId, { type: 'org' });
     return reply.code(204).send();
   });
 }

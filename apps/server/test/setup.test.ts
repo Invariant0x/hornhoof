@@ -35,7 +35,7 @@ describe('POST /api/setup', () => {
     const [orchestrator] = await db.select().from(agents);
     expect(orchestrator).toMatchObject({ kind: 'orchestrator', name: 'Orchestrator' });
     const [sub] = await db.select().from(subscriptions);
-    expect(sub).toMatchObject({ kind: 'api_key', status: 'ready', targetKind: 'orchestrator', last4: '9f3a', label: 'Orchestrator' });
+    expect(sub).toMatchObject({ kind: 'api_key', status: 'ready', targetKind: 'any', last4: '9f3a', label: 'Orchestrator' });
     expect(orchestrator!.subscriptionId).toBe(sub!.id);
     expect(decryptSecret(sub!.secretEnc!, config.secret)).toBe(KEY);
   });
