@@ -6,7 +6,8 @@ import { requirePerson } from '../../auth/session.js';
 /* One Server-Sent Events stream per open page. Conversations go only to people who see the whole company. */
 export function streamRoutes(app: FastifyInstance, ctx: Ctx): void {
   const open = new Set<ServerResponse>();
-  app.addHook('onClose', async () => {
+  /* Before Fastify waits for requests to finish, since a stream never does. */
+  app.addHook('preClose', async () => {
     for (const res of open) res.end();
   });
 

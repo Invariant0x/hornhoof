@@ -49,6 +49,16 @@ describe('GET /api/stream', () => {
     stream.close();
   });
 
+  it('ends open streams first when the server shuts down, so it does not wait for them', async () => {
+    const { app } = await testApp();
+    await listen(app);
+    const ceo = await setUpCompany(app);
+    const stream = await openStream(app, ceo);
+    const hung = new Promise((_, fail) => setTimeout(() => fail(new Error('close waited for the stream')), 2000));
+    await Promise.race([app.close(), hung]);
+    await until(() => stream.ended());
+  });
+
   it('ends the stream of a person who was disabled, at the next ping', async () => {
     const { app, db, ceo, companyId } = await company({ STREAM_PING_MS: '50' });
     const [sales] = await db.insert(departments).values({ companyId, name: 'Sales', roleCode: 'SAL' }).returning();
