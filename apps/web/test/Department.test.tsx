@@ -228,6 +228,43 @@ describe('Department view', () => {
     await vi.waitFor(() => expect(calls.some(c => c.method === 'DELETE' && c.path === '/api/departments/d2/repository')).toBe(true));
   });
 
+  it("names who the agents' commits are by once both fields are filled", async () => {
+    const user = userEvent.setup();
+    const [dev] = DEV_ORG.departments;
+    const author = { name: 'Ivan Korol', email: 'ivan@acme.dev' };
+    const calls = shell(
+      { [DEV_TASKS]: [200, { tasks: [] }], 'PUT /api/departments/d2/repository': [200, { repository: { ...REPO, author } }] },
+      { ...DEV_ORG, departments: [{ ...dev!, repository: REPO }] },
+    );
+    await flyIn(user);
+    const repo = screen.getByRole('region', { name: 'Repository' });
+    expect(repo).not.toHaveTextContent('Commits as');
+    await user.click(within(repo).getByRole('button', { name: 'Change' }));
+    await user.type(within(repo).getByLabelText('Commit author'), 'Ivan Korol');
+    expect(within(repo).getByRole('button', { name: 'Save' })).toBeDisabled();
+    await user.type(within(repo).getByLabelText('Author email'), 'ivan@acme.dev');
+    await user.click(within(repo).getByRole('button', { name: 'Save' }));
+    await vi.waitFor(() => expect(calls.find(c => c.method === 'PUT')?.body).toEqual({ url: 'https://github.com/acme/app.git', branch: 'main', author }));
+  });
+
+  it("shows who the agents' commits are by, and takes the name away when both fields are empty", async () => {
+    const user = userEvent.setup();
+    const [dev] = DEV_ORG.departments;
+    const calls = shell(
+      { [DEV_TASKS]: [200, { tasks: [] }], 'PUT /api/departments/d2/repository': [200, { repository: { ...REPO, author: null } }] },
+      { ...DEV_ORG, departments: [{ ...dev!, repository: { ...REPO, author: { name: 'Ivan Korol', email: 'ivan@acme.dev' } } }] },
+    );
+    await flyIn(user);
+    const repo = screen.getByRole('region', { name: 'Repository' });
+    expect(repo).toHaveTextContent('Commits as Ivan Korol <ivan@acme.dev>');
+    await user.click(within(repo).getByRole('button', { name: 'Change' }));
+    expect(within(repo).getByLabelText('Commit author')).toHaveValue('Ivan Korol');
+    await user.clear(within(repo).getByLabelText('Commit author'));
+    await user.clear(within(repo).getByLabelText('Author email'));
+    await user.click(within(repo).getByRole('button', { name: 'Save' }));
+    await vi.waitFor(() => expect(calls.find(c => c.method === 'PUT')?.body).toEqual({ url: 'https://github.com/acme/app.git', branch: 'main', author: null }));
+  });
+
   it("gives a product its own repository with a token", async () => {
     const user = userEvent.setup();
     const calls = shell({ [DEV_TASKS]: [200, { tasks: [] }], 'PUT /api/departments/pd1/repository': [200, { repository: REPO }] });

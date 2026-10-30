@@ -13,6 +13,7 @@ import { enqueueTurn, orchestratorOf, orchestratorState } from '../conversation/
 import { appendEvent } from '../events/store.js';
 import { checkStaff, departmentOf, HireLine, runsTier, servingSubscriptions, spotIn } from '../tools/staff.js';
 import { BuildItem, checkItems, isNew } from '../tools/structure.js';
+import { authorOf } from './repository.js';
 import { deptName, TEMPLATE_TEXT } from './templates.js';
 
 const IdParams = z.object({ id: z.uuid() });
@@ -151,17 +152,16 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
      subscription that serves the department and runs the role's tier, with the program's Default model. Every staff card
      picks from its roles, products and subscriptions. */
   /* The git repository the department's agents work in. Only the whole company sets it; the token never comes back. */
-  const RepoBody = z.object({ url: z.string(), branch: z.string().default('main'), token: z.string().trim().max(500).optional() }).strict();
-  const repoView = (d: { repoUrl: string | null; repoBranch: string | null; repoTokenLast4: string | null }) =>
-    d.repoUrl ? { url: d.repoUrl, branch: d.repoBranch ?? 'main', tokenLast4: d.repoTokenLast4 } : null;
+  const RepoBody = z.object({ url: z.string(), branch: z.string().default('main'), token: z.string().trim().max(500).optional(), author: z.unknown().optional() }).strict();
+  const repoView = (d: typeof departments.$inferSelect) => (d.repoUrl ? { url: d.repoUrl, branch: d.repoBranch ?? 'main', tokenLast4: d.repoTokenLast4, author: authorOf(d) } : null);
 
   app.put('/api/departments/:id/repository', async req => {
     const me = await requirePerson(req, db);
     requireCompanyScope(me);
     const { id } = IdParams.parse(req.params);
     const body = RepoBody.parse(req.body);
-    const checked = Repo.pick({ url: true, branch: true }).safeParse({ url: body.url.trim(), branch: body.branch.trim() });
-    if (!checked.success) throw new ApiError(400, 'validation', 'Use an https address and a plain branch name.', 'repo_invalid');
+    const checked = Repo.pick({ url: true, branch: true, author: true }).safeParse({ url: body.url.trim(), branch: body.branch.trim(), author: body.author });
+    if (!checked.success) throw new ApiError(400, 'validation', 'Use an https address, a plain branch name, and an author name on one line with a full email.', 'repo_invalid');
     const [dept] = await db.select().from(departments).where(and(eq(departments.id, id), eq(departments.companyId, me.companyId)));
     if (!dept) throw new ApiError(404, 'not_found', 'This department does not exist.', 'department_unknown');
     /* A new token replaces the saved one; without one the saved token stays, unless the address moves to another host. */
@@ -171,9 +171,12 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
       : host(dept.repoUrl) !== host(checked.data.url)
         ? { repoTokenEnc: null, repoTokenLast4: null }
         : {};
+    /* Left out, the saved author stays; null takes it away. */
+    const given = checked.data.author;
+    const author = given === undefined ? {} : { repoAuthorName: given?.name ?? null, repoAuthorEmail: given?.email ?? null };
     const [row] = await db
       .update(departments)
-      .set({ repoUrl: checked.data.url, repoBranch: checked.data.branch, ...token })
+      .set({ repoUrl: checked.data.url, repoBranch: checked.data.branch, ...token, ...author })
       .where(eq(departments.id, id))
       .returning();
     ctx.bus.publish(me.companyId, { type: 'org' });
@@ -186,7 +189,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { id } = IdParams.parse(req.params);
     await db
       .update(departments)
-      .set({ repoUrl: null, repoBranch: null, repoTokenEnc: null, repoTokenLast4: null })
+      .set({ repoUrl: null, repoBranch: null, repoTokenEnc: null, repoTokenLast4: null, repoAuthorName: null, repoAuthorEmail: null })
       .where(and(eq(departments.id, id), eq(departments.companyId, me.companyId)));
     ctx.bus.publish(me.companyId, { type: 'org' });
     return reply.code(204).send();

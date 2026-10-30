@@ -6,6 +6,7 @@ import { accessOf, canReach } from '../../auth/access.js';
 import { personColumns, requirePerson } from '../../auth/session.js';
 import { agents, companies, departments, jobs, people, personAccess, subscriptions, tasks, teams, turns } from '../../db/schema.js';
 import { employeeOrder } from '../agents/order.js';
+import { authorOf } from '../departments/repository.js';
 import { deptName } from '../departments/templates.js';
 import { workingCount } from '../events/store.js';
 import { personViews } from '../people/views.js';
@@ -36,7 +37,7 @@ export function orgRoutes(app: FastifyInstance, { db, hub, templates }: Ctx): vo
       return t ? { id: t.id, number: t.number, title: t.title } : null;
     };
     /* Only people who see the whole company set repositories, so only they read where they are. */
-    const repositoryOf = (d: (typeof depts)[number]) => (reach.whole && d.repoUrl ? { url: d.repoUrl, branch: d.repoBranch ?? 'main', tokenLast4: d.repoTokenLast4 } : null);
+    const repositoryOf = (d: (typeof depts)[number]) => (reach.whole && d.repoUrl ? { url: d.repoUrl, branch: d.repoBranch ?? 'main', tokenLast4: d.repoTokenLast4, author: authorOf(d) } : null);
     const [turn] = await db.select({ id: turns.id, number: turns.number, goal: turns.goal }).from(turns).where(and(eq(turns.companyId, me.companyId), eq(turns.status, 'open')));
     const allTeams = await db.select().from(teams).orderBy(asc(teams.stage), asc(teams.createdAt));
     /* A listed person counts each place as its top-level department: a product as the department holding it, a team as its department. */

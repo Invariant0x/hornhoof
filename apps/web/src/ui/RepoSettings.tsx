@@ -19,6 +19,8 @@ export function RepoSettings({ placeId, repository, compact = false }: Props) {
   const [url, setUrl] = useState('');
   const [branch, setBranch] = useState('');
   const [token, setToken] = useState('');
+  const [authorName, setAuthorName] = useState('');
+  const [authorEmail, setAuthorEmail] = useState('');
   const [asking, setAsking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<unknown>(null);
@@ -43,13 +45,17 @@ export function RepoSettings({ placeId, repository, compact = false }: Props) {
     setUrl(repository?.url ?? '');
     setBranch(repository?.branch ?? 'main');
     setToken('');
+    setAuthorName(repository?.author?.name ?? '');
+    setAuthorEmail(repository?.author?.email ?? '');
     setFailure(null);
     setEditing(true);
   }
 
   function save(e: FormEvent) {
     e.preventDefault();
-    const body = { url: url.trim(), branch: branch.trim() || 'main', ...(token.trim() ? { token: token.trim() } : {}) };
+    /* Both fields name the author; both empty take a saved one away. */
+    const author = authorName.trim() ? { author: { name: authorName.trim(), email: authorEmail.trim() } } : repository?.author ? { author: null } : {};
+    const body = { url: url.trim(), branch: branch.trim() || 'main', ...(token.trim() ? { token: token.trim() } : {}), ...author };
     void run(() => api.put(path, body));
   }
 
@@ -63,8 +69,10 @@ export function RepoSettings({ placeId, repository, compact = false }: Props) {
         <Field label={t.dept.token} hint={repository?.tokenLast4 ? t.dept.tokenKeep : t.dept.tokenHint}>
           {p => <input {...p} type="password" autoComplete="off" value={token} onChange={e => setToken(e.target.value)} maxLength={500} />}
         </Field>
+        <Field label={t.dept.authorName} hint={t.dept.authorHint}>{p => <input {...p} value={authorName} onChange={e => setAuthorName(e.target.value)} maxLength={100} placeholder="Ivan Korol" />}</Field>
+        <Field label={t.dept.authorEmail}>{p => <input {...p} type="email" value={authorEmail} onChange={e => setAuthorEmail(e.target.value)} maxLength={200} />}</Field>
         <div className="repo-actions">
-          <button className="btn small" type="submit" disabled={busy || !url.trim()}>{t.common.save}</button>
+          <button className="btn small" type="submit" disabled={busy || !url.trim() || !authorName.trim() !== !authorEmail.trim()}>{t.common.save}</button>
           <button className="btn small ghost" type="button" onClick={() => setEditing(false)}>{t.common.cancel}</button>
         </div>
         {alert}
@@ -87,6 +95,7 @@ export function RepoSettings({ placeId, repository, compact = false }: Props) {
       <span className="repo-url">{repository.url}</span>
       <small>{t.dept.branchIs(repository.branch)}</small>
       <small>{repository.tokenLast4 ? t.dept.tokenEnding(repository.tokenLast4) : t.dept.noToken}</small>
+      {repository.author && <small>{t.dept.commitsAs(repository.author.name, repository.author.email)}</small>}
       {asking ? (
         <div className="repo-actions">
           <span>{t.dept.removeAsk}</span>

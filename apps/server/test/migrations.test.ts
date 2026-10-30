@@ -125,6 +125,6 @@ describe('migration 0007', () => {
     await db.execute(sql`insert into tasks (company_id, number, title) values (${C}, 1, 'Build the payment page')`);
     await expect(db.execute(sql`insert into tasks (company_id, number, title) values (${C}, 1, 'Again')`)).rejects.toThrow();
     const cols = await db.execute<{ column_name: string }>(sql`select column_name from information_schema.columns where table_name = 'departments' and column_name like 'repo_%' order by column_name`);
-    expect(cols.rows.map(r => r.column_name)).toEqual(['repo_branch', 'repo_token_enc', 'repo_token_last4', 'repo_url']);
+    expect(cols.rows.map(r => r.column_name)).toEqual(['repo_author_email', 'repo_author_name', 'repo_branch', 'repo_token_enc', 'repo_token_last4', 'repo_url']);
   });
 });

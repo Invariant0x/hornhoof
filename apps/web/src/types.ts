@@ -80,7 +80,7 @@ export type Department = {
 };
 
 /* The git repository a department's or product's agents clone; the token never comes back, only its last four. */
-export type Repository = { url: string; branch: string; tokenLast4: string | null };
+export type Repository = { url: string; branch: string; tokenLast4: string | null; author?: { name: string; email: string } | null };
 
 export type Org = {
   company: Company;

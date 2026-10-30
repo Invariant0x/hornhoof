@@ -44,5 +44,10 @@ export async function prepareRepo(workDir: string, repo: Repo, owner: Owner, git
   } else if ((await run(['remote', 'get-url', 'origin'], target)) !== repo.url) {
     await run(['remote', 'set-url', 'origin', repo.url], target);
   }
+  /* Set each turn, so a changed author reaches clones made before. */
+  if (repo.author) {
+    await run(['config', '--', 'user.name', repo.author.name], target);
+    await run(['config', '--', 'user.email', repo.author.email], target);
+  }
   return env;
 }

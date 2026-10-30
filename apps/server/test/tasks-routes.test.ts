@@ -181,7 +181,7 @@ describe('tasks for people', () => {
     expect(saved.body).not.toContain('ghp_secret');
     const org = await get(ceo, '/api/org');
     expect(org.body).not.toContain('ghp_secret');
-    expect(org.json().departments.find((d: { id: string }) => d.id === dev.id).repository).toEqual({ url: 'https://github.com/acme/app.git', branch: 'main', tokenLast4: '1234' });
+    expect(org.json().departments.find((d: { id: string }) => d.id === dev.id).repository).toEqual({ url: 'https://github.com/acme/app.git', branch: 'main', tokenLast4: '1234', author: null });
     expect((await put(ceo, { url: 'https://github.com/acme/app2.git', branch: 'dev' })).json().repository.tokenLast4).toBe('1234');
     /* Another host never gets the token saved for the first one. */
     expect((await put(ceo, { url: 'https://gitlab.com/acme/app.git', branch: 'dev' })).json().repository.tokenLast4).toBe(null);
@@ -191,7 +191,7 @@ describe('tasks for people', () => {
     await put(ceo, { url: 'https://github.com/acme/app.git', branch: 'main', token: 'ghp_secret1234' });
     await app.inject({ method: 'PUT', url: `/api/departments/${shop!.id}/repository`, payload: { url: 'https://github.com/acme/shop.git', branch: 'main', token: 'ghp_shop9999' }, ...as(ceo) });
     const products = (await get(ceo, '/api/org')).json().departments.find((d: { id: string }) => d.id === dev.id).products;
-    expect(products).toEqual([{ id: shop!.id, name: 'Shop', repository: { url: 'https://github.com/acme/shop.git', branch: 'main', tokenLast4: '9999' } }]);
+    expect(products).toEqual([{ id: shop!.id, name: 'Shop', repository: { url: 'https://github.com/acme/shop.git', branch: 'main', tokenLast4: '9999', author: null } }]);
     /* Only people who see the whole company set repositories, so only they read where they are. */
     for (const person of [oleg, maria]) {
       const listed = (await get(person, '/api/org')).json().departments.find((d: { id: string }) => d.id === dev.id);
@@ -200,6 +200,17 @@ describe('tasks for people', () => {
     }
     expect((await app.inject({ method: 'DELETE', url: `/api/departments/${dev.id}/repository`, ...as(ceo) })).statusCode).toBe(204);
     expect((await get(ceo, '/api/org')).json().departments.find((d: { id: string }) => d.id === dev.id).repository).toBe(null);
+  });
+
+  it("names who the agents' commits are by, and keeps it until it is changed", async () => {
+    const { dev, ceo, app, get } = await company();
+    const put = (payload: object) => app.inject({ method: 'PUT', url: `/api/departments/${dev.id}/repository`, payload, ...as(ceo) });
+    const author = { name: 'Ivan Korol', email: 'ivan@acme.dev' };
+    expect((await put({ url: 'https://github.com/acme/app.git', branch: 'main', author })).json().repository).toEqual({ url: 'https://github.com/acme/app.git', branch: 'main', tokenLast4: null, author });
+    expect((await put({ url: 'https://github.com/acme/app.git', branch: 'dev' })).json().repository.author).toEqual(author);
+    expect((await get(ceo, '/api/org')).json().departments.find((d: { id: string }) => d.id === dev.id).repository.author).toEqual(author);
+    expect((await put({ url: 'https://github.com/acme/app.git', branch: 'dev', author: { ...author, email: 'ivan' } })).json().error.reason).toBe('repo_invalid');
+    expect((await put({ url: 'https://github.com/acme/app.git', branch: 'dev', author: null })).json().repository.author).toBe(null);
   });
 
   it("streams a task's changes only to people who reach its department", async () => {
