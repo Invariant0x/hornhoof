@@ -5,7 +5,7 @@ import { and, asc, eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, companies, departments, jobs, people, subscriptions, tasks, turns } from '../src/db/schema.js';
+import { agents, companies, departments, jobs, people, proposals, subscriptions, tasks, turns } from '../src/db/schema.js';
 import { appendEvent } from '../src/modules/events/store.js';
 import { invitePerson, listen, setUpCompany, testApp } from './helpers.js';
 
@@ -38,8 +38,12 @@ async function company() {
     await db.insert(jobs).values({ companyId, subscriptionId: sub!.id, agentId: agent.id, kind: 'conversation', prompt: 'hi', timeoutMs: 900000, status: 'running', startedAt: new Date(), toolTokenHash: hashToken(token) });
     return mcp(app, token);
   };
-  /* What a person wrote to the orchestrator, as the window or his terminal stores it. */
-  const say = (text: string, personId = ceo!.id) => appendEvent(app.ctx, { companyId, agentId: orchestrator!.id, kind: 'message', data: { text }, personId });
+  /* What a person wrote to the orchestrator, as the window or his terminal stores it. Times count in milliseconds and
+     people write seconds apart, so it waits a little first. */
+  const say = async (text: string, personId = ceo!.id) => {
+    await new Promise(r => setTimeout(r, 5));
+    await appendEvent(app.ctx, { companyId, agentId: orchestrator!.id, kind: 'message', data: { text }, personId });
+  };
   /* Turns queued for an agent, oldest first. */
   const queued = async (agentId: string) => db.select({ prompt: jobs.prompt, taskId: jobs.taskId }).from(jobs).where(and(eq(jobs.agentId, agentId), eq(jobs.status, 'queued'))).orderBy(asc(jobs.createdAt));
   const get = (token: string, url: string) => app.inject({ method: 'GET', url, headers: { cookie: `hh_session=${token}` } });
@@ -171,7 +175,7 @@ describe('turns', () => {
     await say('We need card payments, Stripe is fine.');
     await say('And Apple Pay too.');
     const client = await tools(orchestrator);
-    await call(client, 'plan_turn', { title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
+    await call(client, 'plan_turn', { title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')], words: 2 });
     await say('Also refunds later.');
     await call(client, 'plan_turn', { title: 'Refunds', goal: 'Money goes back.', tasks: [work(dev.id, 'Refund button')] });
     const [first, second] = await db.select().from(turns).orderBy(asc(turns.number));
@@ -183,6 +187,23 @@ describe('turns', () => {
     await say('Add a refund reason field.');
     await call(client, 'add_tasks', { turn: 2, tasks: [work(dev.id, 'Refund reason')] });
     expect((await db.select().from(turns).where(eq(turns.number, 2)))[0]!.messages.map(m => m.text)).toEqual(['Also refunds later.', 'Add a refund reason field.']);
+  });
+
+  it('keeps only the newest message unless he names more', async () => {
+    const { db, orchestrator, dev, tools, say } = await company();
+    await say('How are you?');
+    await say('Make card payments.');
+    await call(await tools(orchestrator), 'plan_turn', { title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
+    expect((await db.select().from(turns))[0]!.messages.map(m => m.text)).toEqual(['Make card payments.']);
+  });
+
+  it('leaves out the words from before the last card he showed or the last turn', async () => {
+    const { db, companyId, orchestrator, dev, tools, say } = await company();
+    await say('We sell shoes online.');
+    await db.insert(proposals).values({ companyId, agentId: orchestrator.id, brief: 'Shoes.', items: [] });
+    await say('Now card payments, please.');
+    await call(await tools(orchestrator), 'plan_turn', { title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')], words: 6 });
+    expect((await db.select().from(turns))[0]!.messages.map(m => m.text)).toEqual(['Now card payments, please.']);
   });
 
   it('renames a turn that has not closed', async () => {

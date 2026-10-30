@@ -1,6 +1,6 @@
 import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, max, notInArray } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { agentEvents, agents, companies, departments, people, tasks, turns, type TurnMessage } from '../../db/schema.js';
+import { agentEvents, agents, companies, departments, people, proposals, tasks, turns, type TurnMessage } from '../../db/schema.js';
 import { CLOSED, note, published, refuse, type Task, type Tx, type Wake } from './engine.js';
 import { handOff } from './pulses.js';
 
@@ -10,7 +10,7 @@ export type Turn = typeof turns.$inferSelect;
 export type PlanItem = { department: string; product?: string; title: string; brief: string; body: string };
 type Placed = PlanItem & { head: { id: string; name: string } };
 
-/* The people's words the orchestrator lays a turn out from: what they wrote to him since a turn last took theirs. */
+/* The people's words the orchestrator lays a turn out from: their newest messages to him, as many as he says, at most this. */
 export const TURN_MESSAGES = 6;
 
 const lockCompany = (tx: Tx, companyId: string) => tx.select({ id: companies.id }).from(companies).where(eq(companies.id, companyId)).for('update');
@@ -43,17 +43,20 @@ async function place(ctx: Live, companyId: string, items: PlanItem[]): Promise<P
   return placed;
 }
 
-/* What people wrote to the orchestrator after the newest words any turn of the company keeps, the latest TURN_MESSAGES. */
-async function newWords(tx: Tx, companyId: string, agentId: string): Promise<TurnMessage[]> {
-  const kept = (await tx.select({ messages: turns.messages }).from(turns).where(eq(turns.companyId, companyId))).flatMap(t => t.messages.map(m => m.at));
-  const since = kept.length ? new Date(kept.sort().at(-1)!) : new Date(0);
+/* The newest messages people wrote to the orchestrator, as many as he names, from after the words a turn already keeps,
+   the newest turn and the newest card he showed: earlier words were about something else. */
+async function newWords(tx: Tx, companyId: string, agentId: string, words: number): Promise<TurnMessage[]> {
+  const kept = await tx.select({ messages: turns.messages, at: turns.createdAt }).from(turns).where(eq(turns.companyId, companyId));
+  const [card] = await tx.select({ at: proposals.createdAt }).from(proposals).where(eq(proposals.companyId, companyId)).orderBy(desc(proposals.createdAt)).limit(1);
+  const marks = [...kept.flatMap(t => [t.at.getTime(), ...t.messages.map(m => Date.parse(m.at))]), card?.at.getTime() ?? 0];
+  const since = new Date(Math.max(0, ...marks));
   const rows = await tx
     .select({ text: agentEvents.data, at: agentEvents.createdAt, by: people.name })
     .from(agentEvents)
     .innerJoin(people, eq(people.id, agentEvents.personId))
     .where(and(eq(agentEvents.agentId, agentId), eq(agentEvents.kind, 'message'), isNotNull(agentEvents.personId), gt(agentEvents.createdAt, since)))
     .orderBy(desc(agentEvents.seq))
-    .limit(TURN_MESSAGES);
+    .limit(Math.min(Math.max(words, 1), TURN_MESSAGES));
   return rows
     .reverse()
     .map(r => ({ by: r.by, text: typeof (r.text as { text?: unknown }).text === 'string' ? (r.text as { text: string }).text : '', at: r.at.toISOString() }))
@@ -143,12 +146,12 @@ const numbers = (rows: Task[]) => rows.map(t => `#${t.number}`).join(', ');
 export type TurnMove = { turn: Turn; text: string; wakes: Wake[] };
 
 /* A new turn with its tasks: it starts at once when no turn runs, else it waits after the planned ones. */
-export async function planTurn(ctx: Live, companyId: string, agentId: string, input: { title: string; goal: string; tasks: PlanItem[] }): Promise<TurnMove> {
+export async function planTurn(ctx: Live, companyId: string, agentId: string, input: { title: string; goal: string; tasks: PlanItem[]; words?: number }): Promise<TurnMove> {
   const items = await place(ctx, companyId, input.tasks);
   const done = await ctx.db.transaction(async tx => {
     await lockCompany(tx, companyId);
     const [last] = await tx.select({ n: max(turns.number) }).from(turns).where(eq(turns.companyId, companyId));
-    const messages = await newWords(tx, companyId, agentId);
+    const messages = await newWords(tx, companyId, agentId, input.words ?? 1);
     const [turn] = await tx
       .insert(turns)
       .values({ companyId, number: (last?.n ?? 0) + 1, title: input.title.trim(), goal: input.goal.trim(), status: 'planned', messages, createdByAgentId: agentId })
@@ -174,14 +177,14 @@ async function liveTurn(tx: Tx | Live['db'], companyId: string, number: number):
 }
 
 /* More tasks for a turn that has not closed: in the open one they go out at once, in a planned one they wait with it. */
-export async function addTasks(ctx: Live, companyId: string, agentId: string, number: number, items: PlanItem[]): Promise<TurnMove> {
+export async function addTasks(ctx: Live, companyId: string, agentId: string, number: number, items: PlanItem[], words = 1): Promise<TurnMove> {
   await liveTurn(ctx.db, companyId, number);
   const placed = await place(ctx, companyId, items);
   const done = await ctx.db.transaction(async tx => {
     await lockCompany(tx, companyId);
     const turn = await liveTurn(tx, companyId, number);
-    const words = await newWords(tx, companyId, agentId);
-    const [kept] = words.length ? await tx.update(turns).set({ messages: [...turn.messages, ...words] }).where(eq(turns.id, turn.id)).returning() : [turn];
+    const said = await newWords(tx, companyId, agentId, words);
+    const [kept] = said.length ? await tx.update(turns).set({ messages: [...turn.messages, ...said] }).where(eq(turns.id, turn.id)).returning() : [turn];
     const planned = await insertPlanned(tx, companyId, agentId, turn.id, placed);
     const started: Started[] = [];
     if (turn.status === 'open') for (const task of planned) {

@@ -6,7 +6,7 @@ import { agents, departments, jobs, requests, tasks } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { ask, blocked, cancel, CLOSED, comment, createTask, refuse, report, submit, updateTask, verdict, type Moved, type Task } from './engine.js';
 import { taskByRef, taskDetail, taskLines } from './views.js';
-import { addTasks, editTurn, planTurn, settle, tell, turnName, turnRows } from './turns.js';
+import { addTasks, editTurn, planTurn, settle, tell, TURN_MESSAGES, turnName, turnRows } from './turns.js';
 import { stopTurns, wakeAll } from './wake.js';
 import { orchestratorOf } from '../conversation/queue.js';
 
@@ -146,6 +146,13 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
   if (job.agentKind === 'orchestrator') {
     const Item = z.object({ department: z.uuid(), product: z.uuid().optional(), title: Title, brief: Brief, body: Body });
     const Turn = z.number().int().positive().describe('The turn number, like 2.');
+    const Words = z
+      .number()
+      .int()
+      .min(1)
+      .max(TURN_MESSAGES)
+      .optional()
+      .describe("How many of people's newest messages to you this comes from, counting back from the newest, when the ask took several messages. 1 by default. They are kept with the turn word for word.");
     server.registerTool(
       'turns',
       { description: 'The last closed turn, the running turn and the planned ones in order, each with its title, main point and tasks, and where each task stands.', inputSchema: {} },
@@ -162,8 +169,8 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         description:
           "Lays out a new turn: a short title, the main point in one or two sentences, and its tasks, one for each department's part, each going to that department's head. " +
           'When no turn runs it starts at once; otherwise it waits after the planned turns and starts by itself when the turn before it is done. ' +
-          "People's own words since the last turn are kept with it. A turn is about one feature: split a bigger ask into several turns. department and product ids from company.",
-        inputSchema: { title: z.string().trim().min(1).max(80), goal: z.string().trim().min(1).max(600), tasks: z.array(Item) },
+          'A turn is about one feature: split a bigger ask into several turns. department and product ids from company.',
+        inputSchema: { title: z.string().trim().min(1).max(80), goal: z.string().trim().min(1).max(600), tasks: z.array(Item), words: Words },
       },
       async input =>
         run(async () => {
@@ -178,12 +185,12 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         description:
           'Adds tasks to a turn that is not over, when people add to what it does: in the running turn they go to the heads at once, in a planned turn they wait for it to start. ' +
           'Work that does not belong to any planned turn goes into a new one with plan_turn.',
-        inputSchema: { turn: Turn, tasks: z.array(Item) },
+        inputSchema: { turn: Turn, tasks: z.array(Item), words: Words },
       },
       async input =>
         run(async () => {
           await underCap(await me(), input.tasks.length);
-          const moved = await addTasks(ctx, job.companyId, job.agentId, input.turn, input.tasks);
+          const moved = await addTasks(ctx, job.companyId, job.agentId, input.turn, input.tasks, input.words);
           return { text: moved.text, moved };
         }),
     );
