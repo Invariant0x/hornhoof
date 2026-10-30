@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { deptLabel, errorText, useT, type Messages } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
 import { useStream, type LiveMessage } from '../live';
 import { useOrg } from '../org';
-import type { Department, Endpoint, Me, Org, SubView } from '../types';
+import type { Department, Employee, EmployeeStatus, Endpoint, Me, Org, SubView } from '../types';
 import { accessText } from '../ui/AccessPicker';
+import { usePanZoom, ZoomBar } from '../ui/canvas';
 import { Edge } from '../ui/Edge';
 import { LogoMark, PersonIcon } from '../ui/icons';
 import { Pulse, pulseSeconds, toD, useReducedMotion, type Point } from '../ui/wires';
@@ -29,11 +30,9 @@ const PULSE_SPEED = 100;
 const HOLD_MS = 5000;
 /* Flying into a department takes this long before its view opens. */
 const FLY_MS = 600;
-/* A press that moves further than this drags the map instead of clicking. */
-const DRAG_PX = 4;
+/* A square of an employee flashes this long when what it does changes. */
+const PING_MS = 950;
 
-/* smooth: the change came from Fit and glides, or flies into a department; drag and zoom follow the hand at once. */
-type View = { x: number; y: number; k: number; smooth: boolean | 'fly' };
 export type DeptSpot = { x: number; y: number; w: number; h: number; path: Point[] };
 
 export function orchestratorStatus(t: Messages, sub: SubView | null): string {
@@ -133,6 +132,34 @@ function deptDetail(t: Messages, d: Department): string {
   return d.teams.length ? t.map.teams(d.teams.length) : '';
 }
 
+/* One square per employee on a department's card, colored by what it does. */
+const CELL: Record<EmployeeStatus, string> = { working: 'w', queued: 'q', handed: 'r', waiting: 'h', idle: '', off: 'o' };
+
+function Cells({ employees }: { employees: Employee[] }) {
+  const t = useT();
+  const was = useRef(new Map<string, EmployeeStatus>());
+  const [pinged, setPinged] = useState<Set<string>>(new Set());
+  /* Kept apart from the effect, so a fetch that changes nothing does not cancel the end of a flash. */
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  useEffect(() => {
+    const changed = employees.filter(e => was.current.has(e.id) && was.current.get(e.id) !== e.status).map(e => e.id);
+    was.current = new Map(employees.map(e => [e.id, e.status]));
+    if (!changed.length) return;
+    setPinged(new Set(changed));
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => setPinged(new Set()), PING_MS);
+  }, [employees]);
+  if (!employees.length) return null;
+  return (
+    <span className="cells" role="img" aria-label={t.dept.statusSummary(employees.reduce<Partial<Record<EmployeeStatus, number>>>((n, e) => ({ ...n, [e.status]: (n[e.status] ?? 0) + 1 }), {}))}>
+      {employees.map((e, k) => (
+        <i key={e.id} className={`cell ${CELL[e.status]}${pinged.has(e.id) ? ' ping' : ''}`.trim()} style={{ animationDelay: `${-((k * 37) % 220) / 100}s` }} />
+      ))}
+    </span>
+  );
+}
+
 const orchestratorReady = (sub: SubView | null) => !!sub && sub.status === 'ready' && (sub.kind === 'api_key' || sub.online);
 
 /* The part of the world that has something on it, so Fit fills the screen with it. */
@@ -159,12 +186,9 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator, inside = false, 
   const still = useReducedMotion();
   const company = me.person.scopeKind === 'company';
   const { org, failure } = useOrg();
-  const [view, setView] = useState<View>({ x: 0, y: 0, k: 1, smooth: false });
   const [shots, setShots] = useState<Shot[]>([]);
   const box = useRef<HTMLDivElement>(null);
-  const drag = useRef<{ id: number; x: number; y: number; moved: number } | null>(null);
-  /* How far the last press moved, so the click that ends a drag opens nothing. */
-  const lastMoved = useRef(0);
+  const { view, setView, zoomAt, handlers, dragged } = usePanZoom(box, org, { min: MIN_K, max: MAX_K });
   const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
   const shotKey = useRef(0);
   const held = useRef<{ m: Extract<LiveMessage, { type: 'pulse' }>; at: number }[]>([]);
@@ -216,7 +240,7 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator, inside = false, 
     const room = el.clientHeight - padTop - padBottom;
     const k = Math.max(MIN_K, Math.min((width - padX * 2) / (x1 - x0), room / (y1 - y0), 1.15));
     setView({ k, x: (width - (x1 - x0) * k) / 2 - x0 * k, y: padTop + (room - (y1 - y0) * k) / 2 - y0 * k, smooth: true });
-  }, [org, windowOpen, inside]);
+  }, [org, windowOpen, inside, setView]);
 
   useEffect(() => {
     fit();
@@ -227,50 +251,9 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator, inside = false, 
     return () => ro.disconnect();
   }, [fit]);
 
-  const zoomAt = useCallback((factor: number, px?: number, py?: number) => {
-    const el = box.current;
-    setView(v => {
-      const k = Math.min(MAX_K, Math.max(MIN_K, v.k * factor));
-      const cx = px ?? (el ? el.clientWidth / 2 : 0);
-      const cy = py ?? (el ? el.clientHeight / 2 : 0);
-      return { k, x: cx - ((cx - v.x) * k) / v.k, y: cy - ((cy - v.y) * k) / v.k, smooth: false };
-    });
-  }, []);
-
-  useEffect(() => {
-    const el = box.current;
-    if (!el) return;
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      const r = el.getBoundingClientRect();
-      zoomAt(Math.exp(-e.deltaY * 0.0015), e.clientX - r.left, e.clientY - r.top);
-    };
-    el.addEventListener('wheel', onWheel, { passive: false });
-    return () => el.removeEventListener('wheel', onWheel);
-  }, [zoomAt, org]);
-
-  /* The map takes the pointer only once a press moves, so a press on a department still clicks it. */
-  function down(e: ReactPointerEvent) {
-    if (e.button !== 0) return;
-    drag.current = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: 0 };
-  }
-  function move(e: ReactPointerEvent) {
-    const d = drag.current;
-    if (!d || d.id !== e.pointerId) return;
-    const dx = e.clientX - d.x, dy = e.clientY - d.y;
-    const moved = d.moved + Math.abs(dx) + Math.abs(dy);
-    if (d.moved <= DRAG_PX && moved > DRAG_PX) e.currentTarget.setPointerCapture?.(e.pointerId);
-    drag.current = { ...d, x: e.clientX, y: e.clientY, moved };
-    setView(v => ({ ...v, x: v.x + dx, y: v.y + dy, smooth: false }));
-  }
-  function up() {
-    lastMoved.current = drag.current?.moved ?? 0;
-    drag.current = null;
-  }
-
   /* The map flies into the department's card until it fills the screen, then the department opens. */
   function enter(spot: DeptSpot, id: string) {
-    if (lastMoved.current > DRAG_PX || !onOpenDepartment) return;
+    if (dragged() || !onOpenDepartment) return;
     const el = box.current;
     if (!el || !el.clientWidth || still) return onOpenDepartment(id);
     const k = Math.min(el.clientWidth / spot.w, el.clientHeight / spot.h);
@@ -319,7 +302,7 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator, inside = false, 
   );
 
   return (
-    <div className="map" ref={box} inert={inside} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}>
+    <div className="map" ref={box} inert={inside} {...handlers}>
       <div
         className="world"
         style={{
@@ -412,6 +395,7 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator, inside = false, 
                 <span className="role">{d.roleCode}</span>
                 {deptDetail(t, d) && <span className="detail">{deptDetail(t, d)}</span>}
               </span>
+              <Cells employees={d.employees} />
               {d.current ? (
                 <span className="now task">
                   <i />
@@ -432,18 +416,7 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator, inside = false, 
         ))}
       </div>
 
-      <div className="zoom glass" onPointerDown={e => e.stopPropagation()}>
-        <button className="zbtn" type="button" aria-label={t.map.zoomOut} onClick={() => zoomAt(1 / 1.2)}>
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /></svg>
-        </button>
-        <span className="zv">{Math.round(view.k * 100)}%</span>
-        <button className="zbtn" type="button" aria-label={t.map.zoomIn} onClick={() => zoomAt(1.2)}>
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
-        </button>
-        <button className="zbtn" type="button" aria-label={t.map.showAll} onClick={fit}>
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></svg>
-        </button>
-      </div>
+      <ZoomBar k={view.k} onZoom={f => zoomAt(f)} onFit={fit} />
       {/* The orchestrator is the hub; this line says where he runs, until his window opens and says it there. */}
       {!windowOpen && (
         <div className="ticker glass" aria-live="polite" onPointerDown={e => e.stopPropagation()}>

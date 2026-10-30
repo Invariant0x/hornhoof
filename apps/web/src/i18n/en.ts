@@ -1,4 +1,14 @@
+import type { EmployeeStatus } from '../types';
 import { plural } from './plural';
+
+const STATUS_ORDER: EmployeeStatus[] = ['working', 'waiting', 'queued', 'handed', 'idle', 'off'];
+
+export type StatusCounts = Partial<Record<EmployeeStatus, number>>;
+
+/* How many employees do what, as "working: 2, free: 1". */
+export function summary(counts: StatusCounts, words: Record<EmployeeStatus, string>): string {
+  return STATUS_ORDER.flatMap(st => (counts[st] ? [`${words[st]}: ${counts[st]}`] : [])).join(', ');
+}
 
 /* English is the source. Every other language has to match this shape. */
 export const en = {
@@ -273,6 +283,25 @@ export const en = {
     remove: 'Remove',
     removeAsk: 'Remove the repository? Agents keep their clones and the token is deleted.',
     yesRemove: 'Yes, remove',
+    schema: 'Department schema',
+    status: { working: 'working', queued: 'queued', handed: 'handed on', waiting: 'waiting for a decision', idle: 'free', off: 'no subscription' },
+    statusSummary: (counts: StatusCounts) => summary(counts, { working: 'working', queued: 'queued', handed: 'handed on', waiting: 'waiting for a decision', idle: 'free', off: 'no subscription' }),
+    waitsForTask: 'Waiting for a new task',
+    needsSubscription: 'Needs a subscription to work',
+    gate: (n: number) => `gate ${n}`,
+    lastGate: 'last gate',
+    sentBackLine: 'Sent back for rework',
+    reportLine: 'Report to the head',
+    stats: (working: number, total: number, roles: number, gates: number) =>
+      [`${working} of ${total} ${plural('en', total, { one: 'agent', other: 'agents' })} working`, `${roles} ${plural('en', roles, { one: 'role', other: 'roles' })}`, ...(gates ? [`${gates} ${plural('en', gates, { one: 'gate', other: 'gates' })}`] : [])].join(', '),
+    agents: (n: number) => (n ? `${n} ${plural('en', n, { one: 'agent', other: 'agents' })}` : 'Nobody yet'),
+    hint: 'Work goes left to right through the gates. The amber line shows what a gate sent back for rework.',
+    cameBack: (name: string) => `${name}: work came back for rework`,
+    about: 'About the department',
+    tasksButton: 'Department tasks',
+    leads: 'Leads the department',
+    others: 'Others',
+    close: 'Close',
   },
   agent: {
     openTerminal: 'Open terminal',

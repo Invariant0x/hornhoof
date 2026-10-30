@@ -61,7 +61,7 @@ describe('StructureCard', () => {
   });
 
   it('shows a change to an existing department by its name', () => {
-    const departments = [{ id: 'd9', name: null, templateKey: 'finance' as const, roleCode: 'FIN', about: '', agents: { total: 0, working: 0 }, products: [], teams: [], people: [], employees: [] }];
+    const departments = [{ id: 'd9', name: null, templateKey: 'finance' as const, roleCode: 'FIN', about: '', agents: { total: 0, working: 0 }, products: [], teams: [], people: [], employees: [], roles: [] }];
     render(<StructureCard proposal={{ id: 'pr2', brief: 'b', items: [{ department: 'd9', checked: true, note: 'Not yet', remove: true }] }} departments={departments} onCorrect={noop} />);
     expect(screen.getByText('Finance')).toBeInTheDocument();
     expect(screen.getByText('Remove')).toBeInTheDocument();

@@ -35,6 +35,9 @@ async function flyIn(user: ReturnType<typeof userEvent.setup>) {
   return screen.findByRole('heading', { level: 2, name: 'Development' });
 }
 
+/* The department's tasks, or its repository, products and people, in the drawer at the left. */
+const drawer = (user: ReturnType<typeof userEvent.setup>, name: 'Department tasks' | 'About the department') => user.click(screen.getByRole('button', { name }));
+
 describe('Department view', () => {
   it('flies into a department and shows its head and members', async () => {
     const user = userEvent.setup();
@@ -42,13 +45,19 @@ describe('Department view', () => {
     await flyIn(user);
     const head = screen.getByRole('region', { name: 'Head' });
     expect(within(head).getByRole('button', { name: /Dana/ })).toHaveTextContent('Head of development');
-    expect(within(head).getByText('Working')).toBeInTheDocument();
+    expect(within(head).getByText('working')).toBeInTheDocument();
+    expect(head).toHaveTextContent('1 of 2 agents working, 1 role');
     const members = screen.getByRole('region', { name: 'Members' });
     const bruno = within(members).getByRole('button', { name: /Bruno/ });
-    expect(bruno).toHaveTextContent('Backend engineer');
     expect(bruno).toHaveTextContent('Claude Sonnet 5.5');
     expect(bruno).toHaveTextContent('Anthropic');
-    expect(within(members).getByText('Sleeping')).toBeInTheDocument();
+    expect(bruno).toHaveTextContent('free');
+    expect(bruno).toHaveTextContent('Waiting for a new task');
+    const schema = screen.getByRole('region', { name: 'Department schema' });
+    expect(within(schema).getByText('Backend engineer')).toBeInTheDocument();
+    expect(within(schema).getByText('1 agent')).toBeInTheDocument();
+    expect(within(schema).getByText('Sasha')).toBeInTheDocument();
+    await drawer(user, 'About the department');
     expect(within(screen.getByRole('region', { name: 'Products' })).getByText('Mascot')).toBeInTheDocument();
     expect(within(screen.getByRole('region', { name: 'People with access' })).getByText('Sasha')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Back to the map' }));
@@ -70,6 +79,7 @@ describe('Department view', () => {
     const away = { ...oleg, id: 'p5', name: 'Lena', access: { whole: false, departments: [{ id: 'd8', name: 'Sales' }, { id: 'd9', name: 'Design' }], teams: [] } };
     shell({}, { ...DEV_ORG, people: [...DEV_ORG.people, oleg, away] });
     await flyIn(user);
+    await drawer(user, 'About the department');
     const people = screen.getByRole('region', { name: 'People with access' });
     expect(within(people).getAllByRole('listitem').map(li => li.querySelector('b')!.textContent)).toEqual(['Sasha', 'Oleg']);
   });
@@ -78,15 +88,48 @@ describe('Department view', () => {
     const user = userEvent.setup();
     const stream = fakeStream();
     const [dev] = DEV_ORG.departments;
-    const busy: Org = { ...DEV_ORG, departments: [{ ...dev!, employees: dev!.employees.map(e => ({ ...e, state: 'working' as const })) }] };
+    const task = { id: 't12', number: 12, title: 'Checkout API', stage: 0, gateCount: 1, bounces: 0 };
+    const busy: Org = { ...DEV_ORG, departments: [{ ...dev!, employees: dev!.employees.map(e => ({ ...e, state: 'working' as const, status: 'working' as const, task })) }] };
     let started = false;
     shell({ 'GET /api/org': () => [200, started ? busy : DEV_ORG] });
     await flyIn(user);
     const bruno = within(screen.getByRole('region', { name: 'Members' })).getByRole('button', { name: /Bruno/ });
-    expect(bruno).toHaveTextContent('Sleeping');
+    expect(bruno).toHaveTextContent('free');
+    expect(screen.getByText(/Work goes left to right through the gates/)).toBeInTheDocument();
     started = true;
     stream.send({ type: 'working', working: 2 });
-    await vi.waitFor(() => expect(within(screen.getByRole('region', { name: 'Members' })).getByRole('button', { name: /Bruno/ })).toHaveTextContent('Working'));
+    await vi.waitFor(() => expect(within(screen.getByRole('region', { name: 'Members' })).getByRole('button', { name: /Bruno/ })).toHaveTextContent('BrunoworkingClaude Sonnet 5.5, Anthropic#12 Checkout API'));
+    /* The line at the bottom says what changed last. */
+    expect(screen.getByText('Bruno: working, #12 Checkout API')).toBeInTheDocument();
+  });
+
+  it('refetches what employees do when their tasks move', async () => {
+    const user = userEvent.setup();
+    const stream = fakeStream();
+    const [dev] = DEV_ORG.departments;
+    const task = { id: 't12', number: 12, title: 'Checkout API', stage: 1, gateCount: 1, bounces: 0 };
+    const waits: Org = { ...DEV_ORG, departments: [{ ...dev!, employees: dev!.employees.map(e => (e.id === 'b1' ? { ...e, status: 'waiting' as const, task } : e)) }] };
+    let asked = false;
+    shell({ 'GET /api/org': () => [200, asked ? waits : DEV_ORG] });
+    await flyIn(user);
+    asked = true;
+    stream.send({ type: 'requests' });
+    await vi.waitFor(() => expect(within(screen.getByRole('region', { name: 'Members' })).getByRole('button', { name: /Bruno/ })).toHaveTextContent('waiting for a decision'));
+  });
+
+  it('lays out the gates after the work, the way back from them and the report to the head', async () => {
+    const user = userEvent.setup();
+    const [dev] = DEV_ORG.departments;
+    const rita = { ...dev!.employees[1]!, id: 'b2', name: 'Rita', roleId: 'DEV-REV', title: { en: 'Code reviewer', ru: 'Ревьюер кода' } };
+    const reviewer = { id: 'DEV-REV', title: rita.title, description: { en: 'Reviews every change.', ru: 'Смотрит каждое изменение.' }, kind: 'member' as const, gate: 1 };
+    shell({}, { ...DEV_ORG, departments: [{ ...dev!, employees: [...dev!.employees, rita], roles: [...dev!.roles, reviewer] }] });
+    await flyIn(user);
+    const schema = screen.getByRole('region', { name: 'Department schema' });
+    expect(within(schema).getByText('Code reviewer')).toBeInTheDocument();
+    expect(within(schema).getByText('last gate')).toBeInTheDocument();
+    expect(within(schema).getByText('Sent back for rework')).toBeInTheDocument();
+    expect(within(schema).getByText('Report to the head')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Head' })).toHaveTextContent('1 of 3 agents working, 2 roles, 1 gate');
   });
 
   it('hires through the orchestrator', async () => {
@@ -126,6 +169,7 @@ describe('Department view', () => {
     const user = userEvent.setup();
     shell({ [DEV_TASKS]: [200, { tasks: TASKS }], 'GET /api/tasks/t12': [200, { task: TASK_DETAIL }] });
     await flyIn(user);
+    await drawer(user, 'Department tasks');
     const tasks = screen.getByRole('region', { name: 'Tasks' });
     const row = await within(tasks).findByRole('button', { name: /#12 Checkout API/ });
     expect(row).toHaveTextContent('Gate 2 of 3');
@@ -139,6 +183,7 @@ describe('Department view', () => {
     const head = { id: 'b0', name: 'Head of development', kind: 'head' as const, role: { en: 'Head of development', ru: 'Руководитель разработки' } };
     shell({ [DEV_TASKS]: [200, { tasks: [{ ...TASKS[2]!, assignee: head }] }] });
     await flyIn(user);
+    await drawer(user, 'Department tasks');
     const row = await within(screen.getByRole('region', { name: 'Tasks' })).findByRole('button', { name: /#9/ });
     expect(row.textContent!.match(/Head of development/g)).toHaveLength(1);
   });
@@ -148,6 +193,7 @@ describe('Department view', () => {
     const made = { ...TASK_DETAIL, id: 't14', number: 14, title: 'Refund API' };
     const calls = shell({ [DEV_TASKS]: [200, { tasks: [] }], 'POST /api/tasks': [201, { task: made }], 'GET /api/tasks/t14': [200, { task: made }] });
     await flyIn(user);
+    await drawer(user, 'Department tasks');
     const tasks = screen.getByRole('region', { name: 'Tasks' });
     expect(await within(tasks).findByText('No open tasks.')).toBeInTheDocument();
     await user.click(within(tasks).getByRole('button', { name: 'New task' }));
@@ -169,6 +215,7 @@ describe('Department view', () => {
     const [dev] = DEV_ORG.departments;
     shell({ [DEV_TASKS]: [200, { tasks: [] }] }, { ...DEV_ORG, departments: [{ ...dev!, employees: [{ ...dev!.employees[0]!, name: 'Head of development' }] }] });
     await flyIn(user);
+    await drawer(user, 'Department tasks');
     const tasks = screen.getByRole('region', { name: 'Tasks' });
     await user.click(await within(tasks).findByRole('button', { name: 'New task' }));
     expect(within(tasks).getByText('The head gets it and splits it among the department.')).toBeInTheDocument();
@@ -179,6 +226,7 @@ describe('Department view', () => {
     const [dev] = DEV_ORG.departments;
     shell({ [DEV_TASKS]: [200, { tasks: [] }] }, { ...DEV_ORG, departments: [{ ...dev!, employees: [] }] });
     await flyIn(user);
+    await drawer(user, 'Department tasks');
     const tasks = screen.getByRole('region', { name: 'Tasks' });
     expect(within(tasks).getByText('Tasks go to the department through its head. Hire one first.')).toBeInTheDocument();
     expect(within(tasks).queryByRole('button', { name: 'New task' })).not.toBeInTheDocument();
@@ -189,7 +237,9 @@ describe('Department view', () => {
     const [dev] = DEV_ORG.departments;
     shell({ [DEV_TASKS]: [200, { tasks: [] }] }, { ...DEV_ORG, departments: [{ ...dev!, people: [...dev!.people, LENA] }] }, listed('p6', 'Lena'));
     await flyIn(user);
+    await drawer(user, 'Department tasks');
     expect(within(screen.getByRole('region', { name: 'Tasks' })).getByRole('button', { name: 'New task' })).toBeInTheDocument();
+    await drawer(user, 'About the department');
     expect(screen.queryByRole('region', { name: 'Repository' })).not.toBeInTheDocument();
   });
 
@@ -197,6 +247,7 @@ describe('Department view', () => {
     const user = userEvent.setup();
     const calls = shell({}, DEV_ORG, listed('p7', 'Kira'));
     await flyIn(user);
+    expect(screen.queryByRole('button', { name: 'Department tasks' })).not.toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Tasks' })).not.toBeInTheDocument();
     expect(calls.some(c => c.path.startsWith('/api/tasks?'))).toBe(false);
   });
@@ -209,6 +260,7 @@ describe('Department view', () => {
       { ...DEV_ORG, departments: [{ ...dev!, repository: REPO }] },
     );
     await flyIn(user);
+    await drawer(user, 'About the department');
     const repo = screen.getByRole('region', { name: 'Repository' });
     expect(repo).toHaveTextContent('https://github.com/acme/app.git');
     expect(repo).toHaveTextContent('Branch main');
@@ -237,6 +289,7 @@ describe('Department view', () => {
       { ...DEV_ORG, departments: [{ ...dev!, repository: REPO }] },
     );
     await flyIn(user);
+    await drawer(user, 'About the department');
     const repo = screen.getByRole('region', { name: 'Repository' });
     expect(repo).not.toHaveTextContent('Commits as');
     await user.click(within(repo).getByRole('button', { name: 'Change' }));
@@ -255,6 +308,7 @@ describe('Department view', () => {
       { ...DEV_ORG, departments: [{ ...dev!, repository: { ...REPO, author: { name: 'Ivan Korol', email: 'ivan@acme.dev' } } }] },
     );
     await flyIn(user);
+    await drawer(user, 'About the department');
     const repo = screen.getByRole('region', { name: 'Repository' });
     expect(repo).toHaveTextContent('Commits as Ivan Korol <ivan@acme.dev>');
     await user.click(within(repo).getByRole('button', { name: 'Change' }));
@@ -269,6 +323,7 @@ describe('Department view', () => {
     const user = userEvent.setup();
     const calls = shell({ [DEV_TASKS]: [200, { tasks: [] }], 'PUT /api/departments/pd1/repository': [200, { repository: REPO }] });
     await flyIn(user);
+    await drawer(user, 'About the department');
     const products = screen.getByRole('region', { name: 'Products' });
     expect(within(screen.getByRole('region', { name: 'Repository' })).getByText('No repository yet. Agents work in empty folders.')).toBeInTheDocument();
     await user.click(within(products).getByRole('button', { name: 'Add repository' }));

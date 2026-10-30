@@ -58,8 +58,30 @@ export type Team = { id: string; name: string; about: string; stage: number; gat
 
 export type AgentState = 'working' | 'sleeping' | 'needs_subscription';
 
+/* What an employee does now. queued: it holds a task whose turn has not started; handed: what it holds is with gates or
+   with the tasks it gave out; waiting: it waits for people; off: it has no subscription. */
+export type EmployeeStatus = 'working' | 'queued' | 'handed' | 'waiting' | 'idle' | 'off';
+
+/* The task an employee is about, for people who reach its department. */
+export type EmployeeTask = { id: string; number: number; title: string; stage: number; gateCount: number; bounces: number };
+
 /* An employee as the map lists it: the head first, then members in the order they were hired. */
-export type Employee = { id: string; name: string; roleId: string | null; title: Lang | null; kind: 'head' | 'worker'; model: string; modelName: string | null; provider: ProviderId | null; state: AgentState };
+export type Employee = {
+  id: string;
+  name: string;
+  roleId: string | null;
+  title: Lang | null;
+  kind: 'head' | 'worker';
+  model: string;
+  modelName: string | null;
+  provider: ProviderId | null;
+  state: AgentState;
+  status: EmployeeStatus;
+  task: EmployeeTask | null;
+};
+
+/* A role a department's employees hold, in its template's order; gate: where it stands among the default gates. */
+export type DeptRole = { id: string; title: Lang; description: Lang; kind: 'head' | 'member'; gate: number | null };
 
 /* A template department without a typed name shows its template's name in the person's language. people: those who reach
    only this department. */
@@ -74,6 +96,7 @@ export type Department = {
   teams: Team[];
   people: PersonView[];
   employees: Employee[];
+  roles: DeptRole[];
   /* What it works on now, for people who reach it. */
   current?: { id: string; number: number; title: string } | null;
   repository?: Repository | null;

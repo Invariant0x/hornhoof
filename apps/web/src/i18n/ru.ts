@@ -1,4 +1,4 @@
-import type { Messages } from './en';
+import { summary, type Messages } from './en';
 import { plural } from './plural';
 
 export const ru: Messages = {
@@ -273,6 +273,29 @@ export const ru: Messages = {
     remove: 'Убрать',
     removeAsk: 'Убрать репозиторий? Клоны у агентов останутся, токен будет удален.',
     yesRemove: 'Да, убрать',
+    schema: 'Схема отдела',
+    status: { working: 'в работе', queued: 'в очереди', handed: 'сдал дальше', waiting: 'ждет решения', idle: 'свободен', off: 'нет подписки' },
+    statusSummary: counts => summary(counts, { working: 'в работе', queued: 'в очереди', handed: 'сдали дальше', waiting: 'ждут решения', idle: 'свободны', off: 'без подписки' }),
+    waitsForTask: 'Ждет новую задачу',
+    needsSubscription: 'Чтобы работать, нужна подписка',
+    gate: n => `рубеж ${n}`,
+    lastGate: 'последний рубеж',
+    sentBackLine: 'Вернули на доработку',
+    reportLine: 'Доклад руководителю',
+    stats: (working, total, roles, gates) =>
+      [
+        `${working} из ${total} ${plural('ru', total, { one: 'агента', few: 'агентов', many: 'агентов', other: 'агента' })} в работе`,
+        `${roles} ${plural('ru', roles, { one: 'роль', few: 'роли', many: 'ролей', other: 'роли' })}`,
+        ...(gates ? [`${gates} ${plural('ru', gates, { one: 'рубеж', few: 'рубежа', many: 'рубежей', other: 'рубежа' })}`] : []),
+      ].join(', '),
+    agents: n => (n ? `${n} ${plural('ru', n, { one: 'агент', few: 'агента', many: 'агентов', other: 'агента' })}` : 'Пока никого'),
+    hint: 'Работа идет слева направо через рубежи. Желтая линия показывает, что рубеж вернул на доработку.',
+    cameBack: name => `${name}: работу вернули на доработку`,
+    about: 'Об отделе',
+    tasksButton: 'Задачи отдела',
+    leads: 'Ведет отдел',
+    others: 'Другие',
+    close: 'Закрыть',
   },
   agent: {
     openTerminal: 'Открыть терминал',

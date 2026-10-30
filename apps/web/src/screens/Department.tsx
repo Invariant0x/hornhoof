@@ -1,12 +1,16 @@
-import { useId, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { deptLabel, errorText, useLanguage, useT } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
 import { useTasks } from '../tasks';
-import type { Department, Employee, Me, PersonView } from '../types';
+import type { Department, Employee, EmployeeStatus, Me, PersonView } from '../types';
+import { usePanZoom, ZoomBar } from '../ui/canvas';
 import { Edge } from '../ui/Edge';
+import { AgentIcon, PersonIcon } from '../ui/icons';
 import { NewTask } from '../ui/NewTask';
 import { RepoSettings } from '../ui/RepoSettings';
 import { byState, TaskRow } from '../ui/TaskRow';
+import { Pulse, pulseSeconds, toD, useReducedMotion, type Point } from '../ui/wires';
+import { arrowD, CH, CW, CY, FT, FW, HH, HW, PH, PW, schemaLayout, stepPaths, type Line } from './schema';
 
 type Props = {
   me: Me;
@@ -15,28 +19,114 @@ type Props = {
   deputies: PersonView[];
   selected: string | null;
   selectedTask: string | null;
+  /* What covers the right of the screen, so the schema starts clear of it. */
+  panel: 'window' | 'card' | 'task' | null;
   onBack(): void;
   onHire(): void;
   onOpen(agentId: string): void;
   onOpenTask(taskId: string): void;
 };
 
-function EmployeeCard({ e, on, onOpen }: { e: Employee; on: boolean; onOpen(id: string): void }) {
+/* The orchestrator's window and the right panels, with their margins. */
+const COVER = { window: 688, card: 492, task: 492 } as const;
+const NARROW = 760;
+const MIN_K = 0.15, MAX_K = 2;
+/* Below this scale the schema shows colors instead of text, as in the prototype. */
+const FAR_K = 0.55;
+/* The schema opens at least this large, from its left edge, when it does not fit the screen. */
+const START_K = 0.62;
+const PULSE_SPEED = 160;
+const FLASH_MS = 1400;
+
+const STATUS_CLASS: Record<EmployeeStatus, string> = { working: 's-w', queued: 's-q', handed: 's-r', waiting: 's-h', idle: 's-i', off: 's-o' };
+
+type Shot = { key: number; pts: Point[]; tone: 'c' | 'a' };
+type Said = { key: number; at: string; text: string } | null;
+type Seen = Map<string, { status: EmployeeStatus; taskId: string | null; bounces: number }>;
+
+const hhmm = (d: Date) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+const taskText = (e: Employee) => (e.task ? `#${e.task.number} ${e.task.title}` : '');
+
+function modelLine(t: ReturnType<typeof useT>, e: Employee): string {
+  return [e.modelName || e.model || t.agent.default, e.provider && PROVIDER_NAMES[e.provider]].filter(Boolean).join(', ');
+}
+
+/* What an employee's third line says: its task, or why it has none. */
+function doingLine(t: ReturnType<typeof useT>, e: Employee): string {
+  if (e.task) return taskText(e);
+  if (e.status === 'off') return t.dept.needsSubscription;
+  return e.status === 'idle' ? t.dept.waitsForTask : '';
+}
+
+function Chip({ e, x, y, on, flash, onOpen }: { e: Employee; x: number; y: number; on: boolean; flash: boolean; onOpen(): void }) {
+  const t = useT();
+  return (
+    <button
+      type="button"
+      className={`schip ${STATUS_CLASS[e.status]}${on ? ' on' : ''}${flash ? ' flash' : ''}`}
+      style={{ left: x, top: y, width: CW, height: CH }}
+      aria-pressed={on}
+      onClick={onOpen}
+    >
+      <Edge cut={10}>
+        <span className="r1">
+          <AgentIcon />
+          <span className="mn">{e.name}</span>
+          <span className="st">{t.dept.status[e.status]}</span>
+        </span>
+        <span className="r2">{modelLine(t, e)}</span>
+        <span className="r3">{doingLine(t, e)}</span>
+      </Edge>
+    </button>
+  );
+}
+
+function HeadCard({ d, head, stats, on, flash, onOpen }: { d: Department; head: Employee | null; stats: string; on: boolean; flash: boolean; onOpen(id: string): void }) {
   const t = useT();
   const { language } = useLanguage();
-  const role = e.title?.[language] ?? e.roleId;
+  const style = { left: 0, top: 0, width: HW, height: HH };
+  if (!head)
+    return (
+      <div className="shead empty" style={style}>
+        <Edge cut={14} corner>
+          <span className="hr">
+            <AgentIcon />
+            <span className="role">{`${d.roleCode}, ${deptLabel(t, d)}`}</span>
+          </span>
+          <span className="hn">{t.dept.noHead}</span>
+          <span className="meta">{stats}</span>
+        </Edge>
+      </div>
+    );
+  const role = head.title?.[language];
   return (
-    <button type="button" className={`emp${on ? ' on' : ''}`} aria-pressed={on} onClick={() => onOpen(e.id)}>
-      <Edge cut={10} corner={e.kind === 'head'}>
-        <b className="emp-name">{e.name}</b>
-        {role && role !== e.name && <span className="emp-role">{role}</span>}
-        <span className="emp-model">{[e.modelName || e.model || t.agent.default, e.provider && PROVIDER_NAMES[e.provider]].filter(Boolean).join(', ')}</span>
-        <span className="emp-state">
-          <i className={`dot ${e.state}`} />
-          <span>{t.dept.states[e.state]}</span>
+    <button type="button" className={`shead ${STATUS_CLASS[head.status]}${on ? ' on' : ''}${flash ? ' flash' : ''}`} style={style} aria-pressed={on} onClick={() => onOpen(head.id)}>
+      <Edge cut={14} corner>
+        <span className="hr">
+          <AgentIcon />
+          <span className="role">{`${d.roleCode}, ${deptLabel(t, d)}`}</span>
+        </span>
+        <span className="hn">{head.name}</span>
+        <span className="meta">{[role && role !== head.name ? role : null, modelLine(t, head)].filter(Boolean).join(', ')}</span>
+        <span className="meta">{stats}</span>
+        <span className="hx">
+          <span className="st">{t.dept.status[head.status]}</span>
+          <span className="hx-task">{doingLine(t, head)}</span>
         </span>
       </Edge>
     </button>
+  );
+}
+
+function Wire({ l }: { l: Line }) {
+  const d = toD(l.pts);
+  const knock = l.cls === 'pl' || l.cls === 'rl';
+  return (
+    <>
+      {knock && <path className="ko" d={d} />}
+      <path className={l.cls} d={d} />
+      {l.arrow && <path className={l.cls === 'rl' ? 'rah' : 'ah'} d={arrowD(l.pts)} />}
+    </>
   );
 }
 
@@ -51,7 +141,9 @@ function DeptTasks({ department: d, head, canGive, selected, onOpenTask }: { dep
   return (
     <section aria-labelledby={`${id}-tasks`}>
       <div className="dv-h">
-        <h3 id={`${id}-tasks`}>{t.dept.tasks}</h3>
+        <h3 id={`${id}-tasks`} className="sr">
+          {t.dept.tasks}
+        </h3>
         {canGive && head && !writing && (
           <button className="btn small ghost" type="button" onClick={() => setWriting(true)}>
             {t.dept.newTask}
@@ -86,13 +178,15 @@ function DeptTasks({ department: d, head, canGive, selected, onOpenTask }: { dep
   );
 }
 
-/* Inside a department: its head on top, the members below, its tasks, and at the side its repository, products and the people who reach it. */
-export function DepartmentView({ me, department: d, deputies, selected, selectedTask, onBack, onHire, onOpen, onOpenTask }: Props) {
+/* Inside a department: its schema as in the prototype. The head on top, a frame per role in stages left to right through
+   the gates, and the way back from them. Tasks, the repository, products and people open in a drawer at the left. */
+export function DepartmentView({ me, department: d, deputies, selected, selectedTask, panel, onBack, onHire, onOpen, onOpenTask }: Props) {
   const t = useT();
+  const { language } = useLanguage();
   const id = useId();
+  const still = useReducedMotion();
   const company = me.person.scopeKind === 'company';
   const head = d.employees.find(e => e.kind === 'head');
-  const members = d.employees.filter(e => e.kind !== 'head');
   const reach = [
     ...d.people,
     ...deputies.filter(p => !p.access.whole && (p.access.departments.some(x => x.id === d.id) || p.access.teams.some(x => x.departmentId === d.id))),
@@ -101,85 +195,281 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
   const mine = reach.find(p => p.id === me.person.id);
   const sees = company || !!mine;
   const canGive = company || !!mine?.access.departments.some(x => x.id === d.id);
+  const [drawer, setDrawer] = useState<'tasks' | 'about' | null>(null);
+
+  const s = useMemo(() => schemaLayout(d, reach.length), [d, reach.length]);
+  const paths = useMemo(() => stepPaths(s), [s]);
+  const box = useRef<HTMLDivElement>(null);
+  const { view, setView, zoomAt, handlers, dragged } = usePanZoom(box, d.id, { min: MIN_K, max: MAX_K });
+  const covered = panel ? COVER[panel] : 0;
+
+  /* Opens at a readable size from the left when the schema is wider than the screen, as the prototype does; Fit shows all of it. */
+  const place = useCallback(
+    (whole: boolean) => {
+      const el = box.current;
+      if (!el || !el.clientWidth) return;
+      const width = el.clientWidth - (el.clientWidth > NARROW ? covered : 0);
+      const padTop = 76, padBottom = 76, padX = 48;
+      const bw = s.right + 80, bh = s.h + 40;
+      const fitK = Math.max(MIN_K, Math.min((width - padX * 2) / bw, (el.clientHeight - padTop - padBottom) / bh, 1));
+      const k = whole || fitK >= START_K ? fitK : START_K;
+      const x = k === fitK ? (width - bw * k) / 2 + 40 * k : padX + 40 * k;
+      const y = k === fitK ? padTop + (el.clientHeight - padTop - padBottom - bh * k) / 2 + 20 * k : padTop + 20 * k;
+      setView({ k, x, y, smooth: true });
+    },
+    [s.right, s.h, covered, setView],
+  );
+
+  useEffect(() => {
+    place(false);
+    const el = box.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => place(false));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [place]);
+
+  /* Real changes only: an employee's chip flashes, a pulse runs where its work went, and the line below says what happened. */
+  const seen = useRef<Seen | null>(null);
+  const [shots, setShots] = useState<Shot[]>([]);
+  const [flashing, setFlashing] = useState<Set<string>>(new Set());
+  const [said, setSaid] = useState<Said>(null);
+  const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
+  const shotKey = useRef(0);
+
+  useEffect(() => {
+    const pending = timers.current;
+    return () => {
+      for (const x of pending) clearTimeout(x);
+      pending.clear();
+    };
+  }, []);
+
+  const later = useCallback((ms: number, fn: () => void) => {
+    const x = setTimeout(() => {
+      timers.current.delete(x);
+      fn();
+    }, ms);
+    timers.current.add(x);
+  }, []);
+
+  useEffect(() => {
+    const before = seen.current;
+    seen.current = new Map(d.employees.map(e => [e.id, { status: e.status, taskId: e.task?.id ?? null, bounces: e.task?.bounces ?? 0 }]));
+    if (!before) return;
+    const fired: Shot[] = [];
+    const changed: string[] = [];
+    let text: string | null = null;
+    for (const e of d.employees) {
+      const was = before.get(e.id);
+      if (!was) continue;
+      const taskId = e.task?.id ?? null;
+      const cameBack = !!e.task && was.taskId === taskId && e.task.bounces > was.bounces;
+      if (!cameBack && was.status === e.status && was.taskId === taskId) continue;
+      changed.push(e.id);
+      if (cameBack) {
+        text = t.dept.cameBack(e.name);
+        const gate = [...before.entries()].find(([other, v]) => other !== e.id && v.taskId === taskId && v.status === 'queued')?.[0];
+        const pts = gate ? paths.back(gate, e.id) : null;
+        if (pts) fired.push({ key: ++shotKey.current, pts, tone: 'a' });
+        continue;
+      }
+      text = [`${e.name}: ${t.dept.status[e.status]}`, taskText(e)].filter(Boolean).join(', ');
+      const pts = e.status === 'handed' ? paths.onward(e.id) : taskId && taskId !== was.taskId ? paths.toMember(e.id) : null;
+      if (pts) fired.push({ key: ++shotKey.current, pts, tone: 'c' });
+    }
+    if (text) setSaid({ key: Date.now(), at: hhmm(new Date()), text });
+    if (changed.length) {
+      setFlashing(new Set(changed));
+      later(FLASH_MS, () => setFlashing(new Set()));
+    }
+    if (fired.length && !still) {
+      setShots(x => [...x, ...fired]);
+      for (const f of fired) later(pulseSeconds(f.pts, PULSE_SPEED) * 1000, () => setShots(x => x.filter(y => y.key !== f.key)));
+    }
+  }, [d.employees, paths, still, later, t]);
+
+  function open(agentId: string) {
+    if (!dragged()) onOpen(agentId);
+  }
+
+  const working = d.employees.filter(e => e.status === 'working').length;
+  const stats = t.dept.stats(working, d.employees.length, s.frames.length, s.gates.length);
+  const far = view.k < FAR_K;
+  const worldStyle = {
+    width: s.right,
+    height: s.h,
+    transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})`,
+    transition: still || !view.smooth ? 'none' : 'transform .8s cubic-bezier(.3,.7,.2,1)',
+    ['--k' as string]: far ? Math.min(2, Math.max(1, 0.72 / view.k)).toFixed(3) : '1',
+  } as CSSProperties;
+  const lines = (...cls: Line['cls'][]) => s.lines.filter(l => cls.includes(l.cls)).map((l, i) => <Wire key={`${l.cls}${i}`} l={l} />);
 
   return (
     <div className="dview">
-      <header className="dv-top">
-        <button className="btn small ghost" type="button" onClick={onBack}>
+      <div className={`dcanvas${far ? ' far' : ''}`} ref={box} role="region" aria-label={t.dept.schema} {...handlers}>
+        <div className="world" style={worldStyle}>
+          {s.frames.map(f => (
+            <div key={f.key || 'others'} className={`frame${f.role?.gate != null ? ' gt' : ''}`} style={{ left: f.x, top: FT, width: FW, height: f.h }}>
+              <Edge cut={14} corner>
+                <span className="fh">
+                  <span className="fn">{f.role ? f.role.title[language] : t.dept.others}</span>
+                  {f.role && <span className="fa">{f.role.description[language]}</span>}
+                  <span className="fc">{t.dept.agents(f.members.length)}</span>
+                </span>
+              </Edge>
+            </div>
+          ))}
+          <svg className="wires" width={s.right} height={s.h} viewBox={`0 0 ${s.right} ${s.h}`} aria-hidden="true">
+            {lines('gate')}
+            {lines('tr', 'tick')}
+            {s.vias.map(([x, y]) => (
+              <circle key={`${x}-${y}`} className="via" cx={x} cy={y} r="4" />
+            ))}
+            {lines('pl')}
+            {s.gates.map(g => (
+              <path key={g.x} className="gd" d={`M ${g.x} ${CY - 7} L ${g.x + 7} ${CY} L ${g.x} ${CY + 7} L ${g.x - 7} ${CY} Z`} />
+            ))}
+            {lines('rl')}
+            {s.report && <Wire l={{ cls: 'pl', pts: s.report.pts, arrow: true }} />}
+            {shots.map(x => (
+              <Pulse key={x.key} pts={x.pts} speed={PULSE_SPEED} once tone={x.tone} />
+            ))}
+          </svg>
+          {s.gates.map(g => (
+            <span key={g.x} className="gl" style={{ left: g.x, top: CY + 12 }}>
+              {g.last ? t.dept.lastGate : t.dept.gate(g.n)}
+            </span>
+          ))}
+          {s.back && (
+            <span className="llab ret" style={{ left: s.back[0], top: s.back[1] }}>
+              {t.dept.sentBackLine}
+            </span>
+          )}
+          {s.report && (
+            <span className="llab" style={{ left: s.report.label[0], top: s.report.label[1] }}>
+              {t.dept.reportLine}
+            </span>
+          )}
+
+          <section aria-labelledby={`${id}-head`} className="slayer" style={{ left: s.hx - HW / 2 }}>
+            <h3 id={`${id}-head`} className="sr">
+              {t.dept.head}
+            </h3>
+            <HeadCard d={d} head={s.head} stats={stats} on={!!s.head && selected === s.head.id} flash={!!s.head && flashing.has(s.head.id)} onOpen={open} />
+          </section>
+          {reach.map((p, k) => (
+            <div key={p.id} className="pchip" style={{ left: s.people[k]![0], top: s.people[k]![1], width: PW, height: PH }}>
+              <Edge cut={8}>
+                <PersonIcon />
+                <span className="pn">
+                  <b>{p.name}</b>
+                  <span>{p.title || t.dept.leads}</span>
+                </span>
+              </Edge>
+            </div>
+          ))}
+          <section aria-labelledby={`${id}-members`} className="slayer">
+            <h3 id={`${id}-members`} className="sr">
+              {t.dept.members}
+            </h3>
+            {s.frames.flatMap(f => f.members.map(m => <Chip key={m.e.id} e={m.e} x={m.x} y={m.y} on={selected === m.e.id} flash={flashing.has(m.e.id)} onOpen={() => open(m.e.id)} />))}
+          </section>
+        </div>
+        {!d.employees.some(e => e.kind !== 'head') && <p className="dv-empty glass">{t.dept.noMembers}</p>}
+      </div>
+
+      <nav className="crumbs glass" aria-label={deptLabel(t, d)}>
+        <button className="crumb" type="button" aria-label={t.dept.back} title={t.dept.back} onClick={onBack}>
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M15 5l-7 7 7 7" />
           </svg>
-          {t.dept.back}
         </button>
-        <div className="dv-title">
-          <h2>{deptLabel(t, d)}</h2>
-          <span className="role">{d.roleCode}</span>
-        </div>
+        <h2>{deptLabel(t, d)}</h2>
+        <span className="role">{d.roleCode}</span>
+      </nav>
+
+      <div className="dv-acts" onPointerDown={e => e.stopPropagation()}>
+        {sees && (
+          <button className={`hbtn glass${drawer === 'tasks' ? ' on' : ''}`} type="button" aria-expanded={drawer === 'tasks'} onClick={() => setDrawer(drawer === 'tasks' ? null : 'tasks')}>
+            {t.dept.tasksButton}
+          </button>
+        )}
+        <button className={`hbtn glass${drawer === 'about' ? ' on' : ''}`} type="button" aria-expanded={drawer === 'about'} onClick={() => setDrawer(drawer === 'about' ? null : 'about')}>
+          {t.dept.about}
+        </button>
         {company && (
           <button className="btn" type="button" onClick={onHire}>
             {t.dept.hire}
           </button>
         )}
-      </header>
-      <div className="dv-body">
-        <div className="dv-main">
-          <section aria-labelledby={`${id}-head`}>
-            <h3 id={`${id}-head`}>{t.dept.head}</h3>
-            {head ? <EmployeeCard e={head} on={selected === head.id} onOpen={onOpen} /> : <p className="muted">{t.dept.noHead}</p>}
-          </section>
-          <section aria-labelledby={`${id}-members`}>
-            <h3 id={`${id}-members`}>{t.dept.members}</h3>
-            {members.length ? (
-              <ul className="dv-grid">
-                {members.map(e => (
-                  <li key={e.id}>
-                    <EmployeeCard e={e} on={selected === e.id} onOpen={onOpen} />
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="muted">{t.dept.noMembers}</p>
-            )}
-          </section>
-          {sees && <DeptTasks department={d} head={head} canGive={canGive} selected={selectedTask} onOpenTask={onOpenTask} />}
-        </div>
-        <div className="dv-side">
-          {company && (
-            <section aria-labelledby={`${id}-repo`}>
-              <h3 id={`${id}-repo`}>{t.dept.repository}</h3>
-              <RepoSettings placeId={d.id} repository={d.repository} />
-            </section>
-          )}
-          {d.products.length > 0 && (
-            <section aria-labelledby={`${id}-products`}>
-              <h3 id={`${id}-products`}>{t.dept.products}</h3>
-              <ul>
-                {d.products.map(p => (
-                  <li key={p.id}>
-                    <b>{p.name}</b>
-                    {company && <RepoSettings placeId={p.id} repository={p.repository} compact />}
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
-          <section aria-labelledby={`${id}-people`}>
-            <h3 id={`${id}-people`}>{t.dept.people}</h3>
-            {reach.length ? (
-              <ul>
-                {reach.map(p => (
-                  <li key={p.id}>
-                    <b>{p.name}</b>
-                    {p.title && <small>{p.title}</small>}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="muted">{t.dept.noPeople}</p>
-            )}
-          </section>
-        </div>
       </div>
+
+      {drawer && (
+        <aside className="dv-drawer" aria-label={drawer === 'tasks' ? t.dept.tasksButton : t.dept.about}>
+          <div className="dv-drawer-h">
+            <b>{drawer === 'tasks' ? t.dept.tasksButton : t.dept.about}</b>
+            <button className="zbtn" type="button" aria-label={t.dept.close} onClick={() => setDrawer(null)}>
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M6 6l12 12M18 6L6 18" />
+              </svg>
+            </button>
+          </div>
+          <div className="dv-drawer-b">
+            {drawer === 'tasks' && sees && <DeptTasks department={d} head={head} canGive={canGive} selected={selectedTask} onOpenTask={onOpenTask} />}
+            {drawer === 'about' && (
+              <>
+                {company && (
+                  <section aria-labelledby={`${id}-repo`}>
+                    <h3 id={`${id}-repo`}>{t.dept.repository}</h3>
+                    <RepoSettings placeId={d.id} repository={d.repository} />
+                  </section>
+                )}
+                {d.products.length > 0 && (
+                  <section aria-labelledby={`${id}-products`}>
+                    <h3 id={`${id}-products`}>{t.dept.products}</h3>
+                    <ul className="dv-list">
+                      {d.products.map(p => (
+                        <li key={p.id}>
+                          <b>{p.name}</b>
+                          {company && <RepoSettings placeId={p.id} repository={p.repository} compact />}
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                )}
+                <section aria-labelledby={`${id}-people`}>
+                  <h3 id={`${id}-people`}>{t.dept.people}</h3>
+                  {reach.length ? (
+                    <ul className="dv-list">
+                      {reach.map(p => (
+                        <li key={p.id}>
+                          <b>{p.name}</b>
+                          {p.title && <small>{p.title}</small>}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="muted">{t.dept.noPeople}</p>
+                  )}
+                </section>
+              </>
+            )}
+          </div>
+        </aside>
+      )}
+
+      <ZoomBar k={view.k} onZoom={f => zoomAt(f)} onFit={() => place(true)} />
+      {/* A panel at the right takes the room the line needs. */}
+      {!panel && (
+        <div className="ticker glass" aria-live="polite" onPointerDown={e => e.stopPropagation()}>
+          <span className="live" />
+          {said && <span className="tt">{said.at}</span>}
+          <span key={said?.key ?? 0} className="tx in" title={said?.text ?? t.dept.hint}>
+            {said?.text ?? t.dept.hint}
+          </span>
+        </div>
+      )}
     </div>
   );
 }

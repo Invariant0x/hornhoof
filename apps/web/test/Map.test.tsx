@@ -5,15 +5,15 @@ import { ru } from '../src/i18n/ru';
 import { orchestratorStatus, deptLayout, MapScreen } from '../src/screens/Map';
 import type { SubView } from '../src/types';
 import { LanguageProvider } from '../src/i18n';
-import type { Department, Me } from '../src/types';
-import { ME, mockApi, ORG, ORG_WITH_TEAMS, PEOPLE, SUBS } from './api-mock';
+import type { Department, Employee, Me } from '../src/types';
+import { DEV_ORG, ME, mockApi, ORG, ORG_WITH_TEAMS, PEOPLE, SUBS } from './api-mock';
 import { fakeStream } from './fake-stream';
 
 const claude = SUBS[0]!;
 const PROPS = { me: ME, windowOpen: false, onOpenOrchestrator: () => {} };
 const DEPUTY: Me = { ...ME, person: { ...ME.person, scopeKind: 'listed', isOwner: false } };
 
-const dept = (d: Partial<Department> & { id: string }): Department => ({ name: null, templateKey: null, roleCode: 'SAL', about: '', agents: { total: 0, working: 0 }, products: [], teams: [], people: [], employees: [], ...d });
+const dept = (d: Partial<Department> & { id: string }): Department => ({ name: null, templateKey: null, roleCode: 'SAL', about: '', agents: { total: 0, working: 0 }, products: [], teams: [], people: [], employees: [], roles: [], ...d });
 const STATES: [string, SubView | null, string, string][] = [
   ['none', null, 'Needs a subscription to start', 'Чтобы начать, нужна подписка'],
   ['API key', SUBS[3]!, 'Runs on Anthropic key ending 9f3a', 'Работает на ключе Anthropic, последние символы 9f3a'],
@@ -60,6 +60,25 @@ describe('Map', () => {
     render(<MapScreen {...PROPS} />);
     expect((await screen.findByText('Oleg')).closest('li')).toHaveTextContent('Deputy: Marketing, Development');
     expect(screen.getByText('Maria').closest('li')).toHaveTextContent('Deputy CEO');
+  });
+
+  it("puts a square per employee on a department's card, colored by what it does", async () => {
+    const stream = fakeStream();
+    const [dev] = DEV_ORG.departments;
+    const one = (id: string, status: Employee['status']): Employee => ({ ...dev!.employees[1]!, id, name: id, status });
+    const staffed = { ...DEV_ORG, departments: [{ ...dev!, employees: [one('a', 'working'), one('b', 'waiting'), one('c', 'idle'), one('d', 'idle')] }] };
+    let later = false;
+    mockApi({ 'GET /api/org': () => [200, later ? { ...staffed, departments: [{ ...staffed.departments[0]!, employees: [one('a', 'handed'), ...staffed.departments[0]!.employees.slice(1)] }] } : staffed] });
+    const { container } = render(<MapScreen {...PROPS} />);
+    const cells = await screen.findByRole('img', { name: 'working: 1, waiting for a decision: 1, free: 2' });
+    expect([...cells.querySelectorAll('.cell')].map(c => c.className)).toEqual(['cell w', 'cell h', 'cell', 'cell']);
+    later = true;
+    stream.send({ type: 'task', id: 't1' });
+    /* The square whose employee changed flashes once, even when the company is fetched again meanwhile. */
+    await vi.waitFor(() => expect(container.querySelector('.cell.r.ping')).not.toBeNull());
+    stream.send({ type: 'org' });
+    await vi.waitFor(() => expect(container.querySelector('.cell.ping')).toBeNull(), { timeout: 2000 });
+    expect(container.querySelector('.cell.r')).not.toBeNull();
   });
 
   it('fills the half gauge one segment of 24 per share of working agents', async () => {

@@ -1,0 +1,188 @@
+import type { Department, DeptRole, Employee } from '../types';
+import type { Point } from '../ui/wires';
+
+/* A department's schema in world pixels, laid out like the prototype. From the top: the head with the people who reach the
+   department at its right, the bus from the head to every frame, the amber line back from the gates, the pipeline between
+   stages, then a frame per role. Work goes left to right: the roles without a gate first, then each gate in its order. */
+export const FW = 280, GS = 44, G = 150, CW = 240, CH = 84, PY = 96, HW = 380, HH = 184, PW = 220, PH = 56;
+export const BUS = HH + 44, RY = BUS + 44, CY = BUS + 84, FT = CY + 50, FHEAD = 100, REP = 92;
+const PEOPLE_Y = 12, PEOPLE_STEP = 66;
+
+export type Placed = { e: Employee; x: number; y: number; cy: number };
+/* key: the role's id, or '' for the frame of employees whose role the department does not know. */
+export type Frame = { key: string; role: DeptRole | null; x: number; h: number; stage: number; members: Placed[] };
+/* tr: the bus from the head; tick: from a spine to a chip; pl: the pipeline and the report; rl: the way back; gate: between stages. */
+export type Line = { cls: 'tr' | 'tick' | 'pl' | 'rl' | 'gate'; pts: Point[]; arrow?: boolean };
+
+export type Schema = {
+  head: Employee | null;
+  hx: number;
+  /* The frames' width and the bottom of the tallest one; right: where the content ends, the people's chips included. */
+  w: number;
+  h: number;
+  right: number;
+  frames: Frame[];
+  stages: Frame[][];
+  lines: Line[];
+  vias: Point[];
+  /* Diamonds on the pipeline between stages, numbered from the first gate. */
+  gates: { x: number; n: number; last: boolean }[];
+  /* Where the way back is named, when there is one. */
+  back: Point | null;
+  report: { pts: Point[]; label: Point } | null;
+  /* The top left of each person's chip. */
+  people: Point[];
+};
+
+const outX = (f: Frame) => f.x + FW - 30;
+const inX = (f: Frame) => f.x + 30;
+const midX = (f: Frame) => f.x + FW / 2;
+
+export function schemaLayout(d: Department, people: number): Schema {
+  const head = d.employees.find(e => e.kind === 'head') ?? null;
+  const members = d.employees.filter(e => e.kind !== 'head');
+  const known = new Map(d.roles.filter(r => members.some(e => e.roleId === r.id)).map(r => [r.id, r]));
+  const loose = members.filter(e => !e.roleId || !known.has(e.roleId));
+
+  /* Stage 0 holds the roles without a gate and the loose employees; each gate number makes a stage of its own. */
+  const plain = [...known.values()].filter(r => r.gate === null);
+  const gateNumbers = [...new Set([...known.values()].flatMap(r => (r.gate === null ? [] : [r.gate])))].sort((a, b) => a - b);
+  const groups: { role: DeptRole | null; key: string; gate: number | null }[][] = [];
+  if (plain.length || loose.length) groups.push([...plain.map(r => ({ role: r, key: r.id, gate: null })), ...(loose.length ? [{ role: null, key: '', gate: null }] : [])]);
+  for (const n of gateNumbers) groups.push([...known.values()].filter(r => r.gate === n).map(r => ({ role: r, key: r.id, gate: n })));
+
+  const stages: Frame[][] = [];
+  const starts: number[] = [];
+  const ends: number[] = [];
+  let x = 0;
+  for (const [k, group] of groups.entries()) {
+    starts.push(x);
+    const frames = group.map(g => {
+      const held = g.role ? members.filter(e => e.roleId === g.role!.id) : loose;
+      const frame: Frame = {
+        key: g.key,
+        role: g.role,
+        x,
+        h: FHEAD + Math.max(1, held.length) * PY + 8,
+        stage: k,
+        members: held.map((e, i) => ({ e, x: x + 20, y: FT + FHEAD + i * PY, cy: FT + FHEAD + i * PY + CH / 2 })),
+      };
+      x += FW + GS;
+      return frame;
+    });
+    ends.push(x - GS);
+    x = x - GS + G;
+    stages.push(frames);
+  }
+  const frames = stages.flat();
+  const w = ends.length ? ends[ends.length - 1]! : 0;
+  const h = FT + Math.max(0, ...frames.map(f => f.h));
+  const hx = Math.max(HW / 2, w / 2);
+  const firstGated = gateNumbers.length && plain.length + loose.length ? 1 : 0;
+
+  const lines: Line[] = [];
+  const vias: Point[] = [];
+  /* Between stages, a dotted divider; on the pipeline, a diamond where a stage is a gate. */
+  const gates: Schema['gates'] = [];
+  for (let k = 1; k < stages.length; k++) {
+    const sx = (ends[k - 1]! + starts[k]!) / 2;
+    lines.push({ cls: 'gate', pts: [[sx, RY + 16], [sx, h]] });
+    if (groups[k]![0]!.gate !== null) gates.push({ x: sx, n: k - firstGated + 1, last: false });
+  }
+  if (gates.length) gates[gates.length - 1]!.last = true;
+
+  /* The head leads every frame: down to the bus, along it, and down each frame's spine to its chips. */
+  if (frames.length) {
+    lines.push({ cls: 'tr', pts: [[hx, HH], [hx, BUS]] });
+    lines.push({ cls: 'tr', pts: [[Math.min(hx, frames[0]!.x + 10), BUS], [Math.max(hx, frames[frames.length - 1]!.x + 10), BUS]] });
+    for (const f of frames) {
+      const end = f.members.length ? f.members[f.members.length - 1]!.cy : FT + 40;
+      lines.push({ cls: 'tr', pts: [[f.x + 10, BUS], [f.x + 10, end]] });
+      for (const m of f.members) lines.push({ cls: 'tick', pts: [[f.x + 10, m.cy], [m.x, m.cy]] });
+      vias.push([f.x + 10, BUS]);
+    }
+    vias.push([hx, BUS]);
+  }
+
+  const px = hx + HW / 2 + 40;
+  if (people) {
+    lines.push({ cls: 'tr', pts: [[hx + HW / 2, 40], [px - 14, 40], [px - 14, 40 + (people - 1) * PEOPLE_STEP]] });
+    for (let k = 0; k < people; k++) lines.push({ cls: 'tick', pts: [[px - 14, 40 + k * PEOPLE_STEP], [px, 40 + k * PEOPLE_STEP]] });
+  }
+
+  /* The pipeline: each stage's outputs meet on one line and go down into the next stage's inputs. */
+  for (let k = 0; k < stages.length - 1; k++) {
+    const a = stages[k]!, b = stages[k + 1]!;
+    for (const f of a) lines.push({ cls: 'pl', pts: [[outX(f), FT], [outX(f), CY]] });
+    lines.push({ cls: 'pl', pts: [[Math.min(...a.map(outX)), CY], [Math.max(...b.map(inX)), CY]] });
+    for (const f of b) lines.push({ cls: 'pl', pts: [[inX(f), CY], [inX(f), FT]], arrow: true });
+  }
+
+  /* The way back: any gate can send work back to the first stage. */
+  let back: Point | null = null;
+  const gated = frames.filter(f => f.stage >= firstGated && groups[f.stage]![0]!.gate !== null);
+  const first = firstGated ? stages[0]! : [];
+  if (gated.length && first.length) {
+    for (const g of gated) lines.push({ cls: 'rl', pts: [[midX(g), FT], [midX(g), RY]] });
+    lines.push({ cls: 'rl', pts: [[Math.min(...first.map(midX)), RY], [Math.max(...gated.map(midX)), RY]] });
+    for (const f of first) lines.push({ cls: 'rl', pts: [[midX(f), RY], [midX(f), FT]], arrow: true });
+    const lx = Math.max(...first.map(midX));
+    back = [lx + Math.min(150, (gated[0]!.x - lx) / 2 + 40), RY];
+  }
+
+  /* The report: from the last frame up and over into the head, or straight up when the head sits above it. */
+  let report: Schema['report'] = null;
+  const last = frames[frames.length - 1];
+  if (head && last) {
+    const ox = outX(last);
+    const pts: Point[] = ox <= hx + HW / 2 ? [[ox, FT], [ox, HH]] : [[ox, FT], [ox, REP], [hx + HW / 2, REP]];
+    report = { pts, label: pts.length === 3 ? [(ox + hx + HW / 2) / 2, REP] : [ox, (FT + HH) / 2] };
+  }
+
+  const peopleAt: Point[] = Array.from({ length: people }, (_, k) => [px, PEOPLE_Y + k * PEOPLE_STEP]);
+  const right = Math.max(w, hx + HW / 2, people ? px + PW : 0);
+  return { head, hx, w, h, right, frames, stages, lines, vias, gates, back, report, people: peopleAt };
+}
+
+/* The paths a pulse runs along when an employee's work moves. */
+export function stepPaths(s: Schema) {
+  const spot = (id: string) => {
+    for (const f of s.frames) {
+      const m = f.members.find(x => x.e.id === id);
+      if (m) return { f, m };
+    }
+    return null;
+  };
+  return {
+    /* The head hands an employee a task. */
+    toMember(id: string): Point[] | null {
+      const at = spot(id);
+      if (!at) return null;
+      const sx = at.f.x + 10;
+      return [[s.hx, HH - 30], [s.hx, BUS], [sx, BUS], [sx, at.m.cy], [at.m.x + 14, at.m.cy]];
+    },
+    /* An employee hands its work on: to the next stage, or from the last one to the head. */
+    onward(id: string): Point[] | null {
+      const at = spot(id);
+      if (!at) return null;
+      const next = s.stages[at.f.stage + 1];
+      if (next) return [[outX(at.f), FT], [outX(at.f), CY], [inX(next[0]!), CY], [inX(next[0]!), FT]];
+      return s.report?.pts ?? null;
+    },
+    /* A gate sends work back to the employee who made it. */
+    back(from: string, to: string): Point[] | null {
+      const a = spot(from), b = spot(to);
+      if (!a || !b) return null;
+      return [[midX(a.f), FT], [midX(a.f), RY], [midX(b.f), RY], [midX(b.f), FT]];
+    },
+  };
+}
+
+/* The arrowhead at the end of a line, as in the prototype. */
+export function arrowD(pts: Point[]): string {
+  const b = pts[pts.length - 1]!, a = pts[pts.length - 2]!;
+  const len = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+  const ux = (b[0] - a[0]) / len, uy = (b[1] - a[1]) / len, s = 10, w = 5;
+  const r = (v: number) => Math.round(v * 10) / 10;
+  return `M ${b[0]} ${b[1]} L ${r(b[0] - ux * s - uy * w)} ${r(b[1] - uy * s + ux * w)} L ${r(b[0] - ux * s + uy * w)} ${r(b[1] - uy * s - ux * w)} Z`;
+}
