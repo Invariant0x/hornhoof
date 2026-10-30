@@ -7,6 +7,8 @@ import { readSessions, rememberSession } from './state.js';
 import { prepareRepo, type Git } from './workspace.js';
 
 export type RunInput = {
+  /* The agent whose turn this is, from its workspace; a test job has none. */
+  agentKey?: string | null;
   prompt: string;
   sessionId: string | null;
   model: string | null;
@@ -87,7 +89,7 @@ type RunOptions = {
 };
 
 /* An event as people may see it: no secrets, and within the sizes the protocol allows. */
-function tidy(event: AgentEvent, secrets: string[]): AgentEvent {
+export function tidy(event: AgentEvent, secrets: string[]): AgentEvent {
   const clean = (text: string, max: number) => cut(redact(text, secrets), max);
   switch (event.kind) {
     case 'text':
@@ -129,6 +131,7 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
     const attachEnv = tools ? { HH_ATTACH_URL: tools.url.replace(/\/mcp$/, '/api/attachments'), HH_ATTACH_PASS: tools.token } : undefined;
     const env = repoEnv || attachEnv ? { ...repoEnv, ...attachEnv } : undefined;
     const input: RunInput = {
+      agentKey: msg.workspace?.key ?? null,
       prompt: msg.prompt,
       sessionId,
       model: msg.model,

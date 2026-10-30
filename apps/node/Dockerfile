@@ -40,7 +40,7 @@ RUN target="debian12-$(case "$TARGETARCH" in amd64) echo x64 ;; *) echo "$TARGET
 FROM node:22-bookworm-slim
 COPY --from=browser /opt/browser-packages /opt/browser-packages
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends git ca-certificates curl ripgrep $(cat /opt/browser-packages) \
+  && apt-get install -y --no-install-recommends git ca-certificates curl ripgrep tmux $(cat /opt/browser-packages) \
   && rm -rf /var/lib/apt/lists/*
 # Outside /data and readable by every job user, so require('playwright') works anywhere.
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright NODE_PATH=/usr/local/lib/node_modules
@@ -55,6 +55,8 @@ COPY --from=build /app/apps/node/dist apps/node/dist
 COPY --chmod=755 apps/node/git-askpass /app/git-askpass
 # Agents send screenshots for people with hh-attach; the node gives each turn its address and token.
 COPY --chmod=755 apps/node/hh-attach.cjs /usr/local/bin/hh-attach
+# Agents run in tmux sessions; their hooks and status line tell the node how a turn goes through hh-hook.
+COPY --chmod=755 apps/node/hh-hook.cjs /usr/local/bin/hh-hook
 RUN mkdir -p /data && chown node:node /data
 # Agent programs are installed into /data/tools at first use and keep their sign-in in /data/home.
 # Set last, so nothing the build writes lands in /data.

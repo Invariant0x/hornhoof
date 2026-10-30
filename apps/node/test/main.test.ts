@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -5,6 +6,8 @@ import { join } from 'node:path';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { runNode } from '../src/main.js';
+import { claudeProgram } from '../src/terminal/programs.js';
+import { Tmux } from '../src/terminal/tmux.js';
 import type { ProviderAdapter, RunInput } from '../src/runner.js';
 import { isRemoved, writeState } from '../src/state.js';
 
@@ -26,8 +29,8 @@ async function fakeServer() {
     socket = s;
     s.on('message', data => received.push(JSON.parse(String(data))));
   });
-  const wait = async (check: () => boolean) => {
-    const end = Date.now() + 3000;
+  const wait = async (check: () => boolean, ms = 3000) => {
+    const end = Date.now() + ms;
     while (!check() && Date.now() < end) await new Promise(r => setTimeout(r, 10));
     expect(check()).toBe(true);
   };
@@ -43,6 +46,51 @@ function nodeDir(server: string) {
   }
   return dir;
 }
+
+const hasTmux = (() => {
+  try {
+    execFileSync('tmux', ['-V']);
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
+describe('a node that runs agents in terminals', () => {
+  it.skipIf(!hasTmux)("says so, runs an agent's turn in its session, shows the session and keeps test jobs as they were", async () => {
+    const server = await fakeServer();
+    const dir = nodeDir(server.url);
+    const tmux = new Tmux({ socket: `hh-main-${process.pid}`, env: { PATH: process.env.PATH ?? '', HOME: dir } });
+    const fake = new URL('./fakes/fake-term.mjs', import.meta.url).pathname;
+    const node = await runNode({ dir, adapter, log: () => {}, terminal: { tmux, program: claudeProgram, bin: fake, home: join(dir, 'home'), signedOut: /not logged in/i } });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    expect(server.received[0]).toMatchObject({ type: 'hello', terminals: true });
+
+    const run = { type: 'job.run', subscriptionId: 's1', provider: 'claude', sessionId: null, model: null, timeoutMs: 20000, secret: null, instructions: 'Be brief.', toolToken: 'tok-1' };
+    server.send({ ...run, jobId: 'j1', prompt: 'hi', workspace: { key: 'agent-1', repo: null } });
+    await server.wait(() => server.received.some(m => m.type === 'job.done'), 15000);
+    expect(server.received.find(m => m.type === 'job.done')).toMatchObject({ jobId: 'j1', ok: true, result: 'echo: hi' });
+    expect(server.received).toContainEqual({ type: 'job.event', jobId: 'j1', seq: 0, event: { kind: 'text', text: 'echo: hi' } });
+
+    server.send({ type: 'term.open', termId: 't1', agentKey: 'agent-1', cols: 90, rows: 30, write: false });
+    await server.wait(() => server.received.some(m => m.type === 'term.data' && String(m.data).includes('echo: hi')), 8000);
+
+    server.send({ ...run, jobId: 'j2', prompt: 'test', toolToken: null });
+    await server.wait(() => server.received.some(m => m.type === 'job.done' && m.jobId === 'j2'));
+    expect(server.received.find(m => m.type === 'job.done' && m.jobId === 'j2')).toMatchObject({ ok: true, result: 'ready' });
+  });
+
+  it('ends a view it cannot show when it runs no terminals', async () => {
+    const server = await fakeServer();
+    const node = await runNode({ dir: nodeDir(server.url), adapter, log: () => {} });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    expect(server.received[0]).toMatchObject({ terminals: false });
+    server.send({ type: 'term.open', termId: 't9', agentKey: 'agent-1', cols: 90, rows: 30, write: true });
+    await server.wait(() => server.received.some(m => m.type === 'term.exit' && m.termId === 't9'));
+  });
+});
 
 describe('runNode', () => {
   it('runs a job and reports it, then the limits', async () => {

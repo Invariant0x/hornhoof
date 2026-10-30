@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,6 +9,12 @@ import { builtinAdapters } from './isolation.js';
 import { adapterFor, programFor } from './providers/index.js';
 import { runJob, type ProviderAdapter, type RunResult } from './runner.js';
 import { dataDir, isRemoved, markRemoved, readState, writeState, type NodeState } from './state.js';
+import { SIGNED_OUT as CLAUDE_SIGNED_OUT } from './providers/claude.js';
+import { SIGNED_OUT as CODEX_SIGNED_OUT } from './providers/codex.js';
+import { childEnv } from './providers/process.js';
+import { TerminalHost } from './terminal/host.js';
+import { claudeProgram, codexProgram, type TermProgram } from './terminal/programs.js';
+import { Tmux } from './terminal/tmux.js';
 
 export const VERSION: string = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
@@ -17,8 +24,12 @@ const STOP_WAIT_MS = 5_000;
 
 type JobRun = Extract<ServerMessage, { type: 'job.run' }>;
 
+/* Agents of a personal Claude Code or Codex plan run in tmux sessions people can watch and type into. */
+export type TerminalSetup = { tmux: Tmux; program: TermProgram; bin: string; home: string; signedOut: RegExp };
+
 type RunOptions = {
   dir: string;
+  terminal?: TerminalSetup;
   /* A personal node runs one agent program; the built-in node picks one per job. */
   adapter: ProviderAdapter | ((job: JobRun) => ProviderAdapter);
   /* The built-in node takes Hornhoof's address and its key from the env instead of node.json. */
@@ -28,7 +39,7 @@ type RunOptions = {
 };
 
 /* The node's life: stay connected, run jobs, report the sign-in state and the limits, clean up when removed. */
-export async function runNode({ dir, adapter, builtin, log = console.log, loginCheckMs = LOGIN_CHECK_MS }: RunOptions): Promise<{ stop(): void }> {
+export async function runNode({ dir, adapter, builtin, terminal, log = console.log, loginCheckMs = LOGIN_CHECK_MS }: RunOptions): Promise<{ stop(): void }> {
   if (!builtin && isRemoved(dir)) {
     log('This node was removed in Hornhoof.');
     return { stop() {} };
@@ -54,6 +65,22 @@ export async function runNode({ dir, adapter, builtin, log = console.log, loginC
   const emit = (m: NodeMessage) => {
     if (!send?.(m)) outbox.push(m);
   };
+  /* Values no screen shows: the node's key, the programs' tokens and each turn's tokens. */
+  const known = new Set(hidden);
+  const learn = async (more: (string | null | undefined)[] = []) => {
+    for (const s of more) if (s) known.add(s);
+    for (const s of await (single?.secrets() ?? Promise.resolve([])).catch(() => [])) known.add(s);
+  };
+  /* A screen nobody receives is not worth keeping; everything else waits for the connection like any message. */
+  const host = terminal
+    ? new TerminalHost({ tmux: terminal.tmux, hornhoof: state.server, send: m => (m.type === 'term.data' || m.type === 'term.exit' ? void send?.(m) : emit(m)), secrets: () => [...known] })
+    : null;
+  if (host && terminal) {
+    /* Sessions from before a restart talk to a bridge that is gone; their turns failed with the restart. */
+    await terminal.tmux.stopAll();
+    await host.start();
+    await learn();
+  }
   /* A personal node says which models its program can run, read again after each job since a plan's list can change.
      The built-in node serves API keys, whose models Hornhoof knows. */
   const readModels = async () => (single?.models ? await single.models() : undefined);
@@ -70,7 +97,7 @@ export async function runNode({ dir, adapter, builtin, log = console.log, loginC
       send = next;
       /* Finished jobs waiting in the outbox still count as running, so the server does not give up on them. */
       const pending = outbox.flatMap(m => (m.type === 'job.done' ? [m.jobId] : []));
-      next({ type: 'hello', version: VERSION, loggedIn, running: [...running.keys(), ...pending], ...(models ? { models } : {}) });
+      next({ type: 'hello', version: VERSION, loggedIn, running: [...running.keys(), ...pending], ...(models ? { models } : {}), terminals: Boolean(host) });
       for (const m of outbox.splice(0)) emit(m);
     },
     onMessage: m => void handle(m),
@@ -86,6 +113,7 @@ export async function runNode({ dir, adapter, builtin, log = console.log, loginC
       const jobs = [...running.values()];
       for (const job of jobs) job.stop.abort();
       await Promise.race([Promise.allSettled(jobs.map(j => j.done)), new Promise(r => setTimeout(r, STOP_WAIT_MS))]);
+      await host?.stop();
       for (const sub of ['home', 'work']) rmSync(join(dir, sub), { recursive: true, force: true });
       markRemoved(dir);
       emit({ type: 'removed' });
@@ -96,6 +124,19 @@ export async function runNode({ dir, adapter, builtin, log = console.log, loginC
     if (m.type === 'job.cancel') {
       running.get(m.jobId)?.stop.abort();
       return;
+    }
+    switch (m.type) {
+      case 'term.open':
+        if (!host) return void send?.({ type: 'term.exit', termId: m.termId });
+        return host.open(m).catch(() => void send?.({ type: 'term.exit', termId: m.termId }));
+      case 'term.input':
+        return host?.input(m);
+      case 'term.resize':
+        return host?.resize(m);
+      case 'term.close':
+        return host?.close(m);
+      case 'turn.opened':
+        return host?.opened(m);
     }
     if (stopped || running.has(m.jobId)) return;
     const controller = new AbortController();
@@ -109,10 +150,14 @@ export async function runNode({ dir, adapter, builtin, log = console.log, loginC
     let done: Awaited<ReturnType<typeof runJob>>;
     try {
       const chosen = pick(m);
+      await learn([m.toolToken, m.secret, m.workspace?.repo?.token]);
+      /* An agent's turn runs in its session; a test job, with no agent, runs as before. */
+      const runIn = (input: Parameters<ProviderAdapter['run']>[0]) =>
+        host && terminal && input.agentKey ? host.run({ key: input.agentKey, program: terminal.program, bin: terminal.bin, home: terminal.home, signedOut: terminal.signedOut, input }) : chosen.run(input);
       const tracked: ProviderAdapter = {
         ...chosen,
         run: async input => {
-          const res = await chosen.run(input);
+          const res = await runIn(input);
           if (res.limits) limits = res.limits;
           return res;
         },
@@ -142,6 +187,7 @@ export async function runNode({ dir, adapter, builtin, log = console.log, loginC
   function stop() {
     stopped = true;
     clearInterval(timer);
+    void host?.stop();
     /* Let the last message leave before the socket closes. */
     setTimeout(() => conn.close(), 50);
   }
@@ -261,6 +307,21 @@ async function login(dir: string, io: Io): Promise<number> {
   return 0;
 }
 
+/* A personal Claude Code or Codex plan runs its agents in tmux when the machine has it; the rest run as before. */
+function terminalFor(dir: string, provider: ProviderId): { terminal?: TerminalSetup } {
+  if (provider !== 'claude' && provider !== 'codex') return {};
+  try {
+    execFileSync('tmux', ['-V'], { stdio: 'ignore' });
+  } catch {
+    return {};
+  }
+  const tools = join(dir, 'tools');
+  const program = provider === 'claude' ? claudeProgram : codexProgram;
+  const home = join(dir, 'home');
+  const tmux = new Tmux({ env: childEnv(tools, { HOME: process.env.HOME ?? home }) });
+  return { terminal: { tmux, program, bin: join(tools, 'bin', programFor(provider).bin), home, signedOut: provider === 'claude' ? CLAUDE_SIGNED_OUT : CODEX_SIGNED_OUT } };
+}
+
 async function run(dir: string, builtinMode: boolean, io: Io): Promise<number | { stop(): void }> {
   const log = (line: string) => void io.stdout.write(line + '\n');
   const tools = join(dir, 'tools');
@@ -271,7 +332,7 @@ async function run(dir: string, builtinMode: boolean, io: Io): Promise<number | 
       return 1;
     }
     const provider = state?.provider ?? 'claude';
-    return runNode({ dir, adapter: withInstall(personal(dir, provider), tools, provider), log });
+    return runNode({ dir, adapter: withInstall(personal(dir, provider), tools, provider), log, ...terminalFor(dir, provider) });
   }
 
   const server = process.env.HORNHOOF_SERVER;

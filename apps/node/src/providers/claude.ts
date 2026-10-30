@@ -63,7 +63,7 @@ export function claudeEvents(line: unknown): AgentEvent[] {
   });
 }
 
-const SIGNED_OUT = /not logged in|please run \/login|invalid api key|authentication/i;
+export const SIGNED_OUT = /not logged in|please run \/login|invalid api key|authentication/i;
 
 export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'), secret = null, mode, user = null }: Options): ProviderAdapter {
   const keyFile = join(home, 'glm-key');
