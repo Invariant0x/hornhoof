@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 import type { StreamMessage } from './types';
 
 export type LiveMessage = StreamMessage | { type: 'reconnected' };
@@ -68,7 +68,8 @@ function subscribe(fn: Listener): () => void {
 /* Calls onMessage for everything the server says live, for as long as the component is on screen. */
 export function useStream(onMessage: Listener): void {
   const latest = useRef(onMessage);
-  useEffect(() => {
+  /* At commit, not after paint: a message that comes right after a render must reach that render's handler. */
+  useLayoutEffect(() => {
     latest.current = onMessage;
   });
   useEffect(() => subscribe(m => latest.current(m)), []);

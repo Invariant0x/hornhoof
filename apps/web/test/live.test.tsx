@@ -1,4 +1,5 @@
-import { act, render } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
+import { useEffect, useLayoutEffect, useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { useStream } from '../src/live';
 import { fakeStream } from './fake-stream';
@@ -8,7 +9,42 @@ function Listener({ onMessage }: { onMessage: (m: unknown) => void }) {
   return null;
 }
 
+/* A listener that reads the newest word, and a sibling after it that gets a message the moment the word changes:
+   after the screen shows it, before React's passive effects run. */
+function Handler({ word, heard }: { word: string; heard: (word: string, m: unknown) => void }) {
+  useStream(m => heard(word, m));
+  return <p>{word}</p>;
+}
+
+function Arrives({ word, fire }: { word: string; fire: () => void }) {
+  useLayoutEffect(() => {
+    if (word === 'ready') fire();
+  }, [word, fire]);
+  return null;
+}
+
+function Late({ heard, fire }: { heard: (word: string, m: unknown) => void; fire: () => void }) {
+  const [word, setWord] = useState('waiting');
+  useEffect(() => {
+    void Promise.resolve().then(() => setWord('ready'));
+  }, []);
+  return (
+    <>
+      <Handler word={word} heard={heard} />
+      <Arrives word={word} fire={fire} />
+    </>
+  );
+}
+
 describe('useStream', () => {
+  it('hands a message to the handler of the newest render, even right after it shows', async () => {
+    const stream = fakeStream();
+    const heard = vi.fn();
+    render(<Late heard={heard} fire={() => stream.sources()[0]!.fire('message', { type: 'org' })} />);
+    await screen.findByText('ready');
+    expect(heard).toHaveBeenCalledWith('ready', { type: 'org' });
+  });
+
   it('shares one stream between everyone who listens on the page', () => {
     const stream = fakeStream();
     const a = vi.fn();
