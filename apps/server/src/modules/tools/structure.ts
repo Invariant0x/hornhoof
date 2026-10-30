@@ -41,7 +41,10 @@ export async function checkItems(db: Db, companyId: string, items: StructureItem
       if (!item.remove) continue;
       if (dept.templateKey === 'operations') return 'Operations is always there and cannot be removed.';
       const inside = [dept.id, ...all.filter(d => d.parentId === dept.id).map(d => d.id)];
-      const staffed = await db.select({ id: agents.id }).from(agents).where(and(inArray(agents.departmentId, inside), isNull(agents.removedAt)));
+      const staffed = await db
+        .select({ id: agents.id })
+        .from(agents)
+        .where(and(or(inArray(agents.departmentId, inside), inArray(agents.productId, inside)), isNull(agents.removedAt)));
       if (staffed.length) return `${deptName(dept)} has agents and cannot be removed.`;
       const teamIds = (await db.select({ id: teams.id }).from(teams).where(inArray(teams.departmentId, inside))).map(t => t.id);
       const places = [...inside, ...teamIds];

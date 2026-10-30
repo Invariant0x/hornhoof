@@ -42,6 +42,18 @@ describe('Map', () => {
     expect(container.querySelector('.ticker')).toHaveTextContent('OrchestratorRuns on Anthropic key ending 9f3a');
   });
 
+  it('shows the map again once the server answers after a failure', async () => {
+    const stream = fakeStream();
+    let up = false;
+    mockApi({ 'GET /api/org': () => (up ? [200, ORG] : [500, { error: { code: 'internal', message: 'Down.' } }]) });
+    render(<MapScreen {...PROPS} />);
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    up = true;
+    stream.send({ type: 'reconnected' });
+    expect(await screen.findByText('agents working')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
   it('shows a deputy next to the CEO on the map', async () => {
     const oleg = { ...PEOPLE[2]!, id: 'p5', name: 'Oleg', title: '', access: { whole: false, departments: [{ id: 'd1', name: 'Marketing' }, { id: 'd2', name: 'Development' }], teams: [] }, deputy: true };
     mockApi({ 'GET /api/org': [200, { ...ORG_WITH_TEAMS, people: [...ORG.people, oleg] }] });

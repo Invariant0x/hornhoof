@@ -2,7 +2,7 @@ import { and, count, eq, inArray, isNull, max, notInArray, sql } from 'drizzle-o
 import type { Ctx } from '../../app.js';
 import type { Spot } from '../../auth/access.js';
 import type { Db } from '../../db/client.js';
-import { agents, companies, requests, taskEvents, tasks, turns, type TaskEventKind } from '../../db/schema.js';
+import { agents, companies, requests, subscriptions, taskEvents, tasks, turns, type TaskEventKind } from '../../db/schema.js';
 import { ApiError, type ErrorReason } from '../../errors.js';
 
 export type Task = typeof tasks.$inferSelect;
@@ -98,14 +98,24 @@ async function liveAgent(db: Db | Tx, companyId: string | null, id: string) {
   return agent;
 }
 
+/* A live agent that can take a turn: one without a subscription would never wake for the task. */
+async function workingAgent(db: Db | Tx, companyId: string | null, id: string) {
+  const agent = await liveAgent(db, companyId, id);
+  const [sub] = agent.subscriptionId
+    ? await db.select({ id: subscriptions.id }).from(subscriptions).where(and(eq(subscriptions.id, agent.subscriptionId), isNull(subscriptions.removedAt)))
+    : [];
+  if (!sub) throw refuse(409, 'no_subscription', `${agent.name} has no subscription to run on. Give them one on their card first.`);
+  return agent;
+}
+
 async function checkGates(db: Db, companyId: string, executor: string, gates: string[]): Promise<void> {
   if (new Set(gates).size !== gates.length) throw refuse(400, 'task_invalid', 'A gate is listed twice.');
   if (gates.includes(executor)) throw refuse(400, 'task_invalid', 'Whoever does the work never passes its gate. Pick another reviewer.');
-  for (const id of gates) await liveAgent(db, companyId, id);
+  for (const id of gates) await workingAgent(db, companyId, id);
 }
 
 export async function createTask(ctx: Live, actor: Actor, input: NewTask): Promise<Moved> {
-  const assignee = await liveAgent(ctx.db, null, input.assigneeAgentId);
+  const assignee = await workingAgent(ctx.db, null, input.assigneeAgentId);
   const gates = input.executor ? (input.gates ?? []) : [];
   if (!input.executor && input.gates?.length) throw refuse(400, 'task_invalid', 'Only a task with an executor has gates.');
   if (input.executor) await checkGates(ctx.db, assignee.companyId, assignee.id, gates);
@@ -216,8 +226,9 @@ export async function blocked(ctx: Live, agentId: string, taskId: string, why: s
   return { task: row, wakes: giver(task, 'blocked', agentId, why) };
 }
 
-/* Ends the task and every open task under it; questions waiting on them are withdrawn. Whoever gave it out hears why. */
-export async function cancel(ctx: Live, actor: Actor, taskId: string, why: string): Promise<Moved> {
+/* Ends the task and every open task under it; questions waiting on them are withdrawn. Whoever gave it out hears why.
+   closed names every task that ended, for their turns to stop. */
+export async function cancel(ctx: Live, actor: Actor, taskId: string, why: string): Promise<Moved & { closed: string[] }> {
   const task = await loadTask(ctx.db, taskId);
   stillOpen(task);
   const ended: Task[] = [];
@@ -240,7 +251,13 @@ export async function cancel(ctx: Live, actor: Actor, taskId: string, why: strin
   });
   for (const t of ended) published(ctx, t);
   ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
-  return { task: row, wakes: giver(task, 'cancelled', actor.agentId, why.trim()) };
+  return { task: row, wakes: giver(task, 'cancelled', actor.agentId, why.trim()), closed: [taskId, ...ended.map(t => t.id)] };
+}
+
+/* An employee leaves: it comes off the gates of a task it has not reached yet; gates it passed stay as the task's history. */
+export async function dropGate(ctx: Live, actor: Actor, task: Task, agentId: string): Promise<Task> {
+  const gates = task.gates.filter((id, i) => id !== agentId || i < task.stage);
+  return move(ctx, task, { gates }, { kind: 'updated', actor, data: { fields: ['gates'] } });
 }
 
 export type TaskChange = { title?: string; brief?: string; body?: string; executor?: string; gates?: string[] };
@@ -253,8 +270,8 @@ export async function updateTask(ctx: Live, agentId: string, taskId: string, c: 
   if ((c.executor !== undefined || c.gates !== undefined) && task.stage !== 0) throw refuse(409, 'task_invalid', `#${task.number} is at a gate; change who works on it after the verdict.`);
   const executor = c.executor ?? task.executorAgentId;
   const gates = c.gates ?? task.gates;
-  if (executor) {
-    await liveAgent(ctx.db, task.companyId, executor);
+  if (executor && (c.executor !== undefined || c.gates !== undefined)) {
+    await workingAgent(ctx.db, task.companyId, executor);
     await checkGates(ctx.db, task.companyId, executor, gates);
   }
   const set: Partial<Task> = {};

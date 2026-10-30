@@ -22,14 +22,24 @@ export function turnPrompt(author: { name: string; title: string }, text: string
 }
 
 const PREFACE_EVENTS = 20;
+/* The prompt goes to the agent program as one command-line argument, which Linux caps at 128 KiB. */
+const PREFACE_BYTES = 48 * 1024;
 
 const textOf = (data: unknown): string => (data && typeof data === 'object' && 'text' in data && typeof data.text === 'string' ? data.text : '');
 
-/* The conversation so far, for a new session that never saw it: people's and Hornhoof's messages and the agent's answers, oldest first. */
+/* The conversation so far, for a new session that never saw it: people's and Hornhoof's messages and the agent's answers,
+   oldest first, as many of the newest as fit in PREFACE_BYTES. */
 export function preface(events: EventView[], agentName = 'Orchestrator'): string {
   const lines = events
     .filter(e => e.kind === 'message' || e.kind === 'text')
     .slice(-PREFACE_EVENTS)
     .map(e => `${e.kind === 'message' ? (e.person?.name ?? 'Hornhoof') : agentName}: ${textOf(e.data)}`);
-  return `Earlier in this conversation, in another session you cannot see:\n\n${lines.join('\n')}`;
+  const kept: string[] = [];
+  let bytes = 0;
+  for (const line of lines.reverse()) {
+    bytes += Buffer.byteLength(line) + 1;
+    if (bytes > PREFACE_BYTES) break;
+    kept.unshift(line);
+  }
+  return `Earlier in this conversation, in another session you cannot see:\n\n${kept.join('\n')}`;
 }

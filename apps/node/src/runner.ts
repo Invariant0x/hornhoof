@@ -64,15 +64,15 @@ const message = (err: unknown) => (err instanceof Error ? err.message : String(e
 
 /* An agent's turn works in the agent's own folder; a session this node saved in another folder cannot go on there, so
    the turn starts a new one. Other jobs work in the folder of the session they resume, or a new one. Only sessions this
-   node saved count. */
+   node saved count: one from another machine, or from before a fresh volume, is not here to resume, so the turn starts a new one. */
 function workDirFor(msg: JobRun, dir: string): { workDir: string; sessionId: string | null } {
   const saved = msg.sessionId ? readSessions(dir) : {};
   const known = msg.sessionId && Object.hasOwn(saved, msg.sessionId) ? saved[msg.sessionId] : undefined;
   if (msg.workspace) {
     const workDir = join(dir, 'work', 'agents', msg.workspace.key);
-    return { workDir, sessionId: typeof known === 'string' && known !== workDir ? null : msg.sessionId };
+    return { workDir, sessionId: known === workDir ? msg.sessionId : null };
   }
-  return { workDir: typeof known === 'string' ? known : join(dir, 'work', msg.jobId), sessionId: msg.sessionId };
+  return typeof known === 'string' ? { workDir: known, sessionId: msg.sessionId } : { workDir: join(dir, 'work', msg.jobId), sessionId: null };
 }
 
 type RunOptions = {

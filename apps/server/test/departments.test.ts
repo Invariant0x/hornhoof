@@ -110,6 +110,24 @@ describe('POST /api/departments/build', () => {
     expect(refused.json().error.message).toContain('Operations');
   });
 
+  it('removes a product that once had an employee, and keeps one that has one', async () => {
+    const { app, db, ceo, acme } = await withOrchestrator();
+    await build(app, ceo, { items: [{ template: 'operations' }, { template: 'development', products: ['Mascot', 'Characters'] }] });
+    const [dev] = await db.select().from(departments).where(eq(departments.templateKey, 'development'));
+    const [mascot] = await db.select().from(departments).where(eq(departments.name, 'Mascot'));
+    const [characters] = await db.select().from(departments).where(eq(departments.name, 'Characters'));
+    const hire = (name: string, productId: string, removedAt: Date | null) =>
+      db.insert(agents).values({ companyId: acme.id, kind: 'worker', name, roleKey: 'DEV-FE', departmentId: dev!.id, productId, model: '', removedAt });
+    await hire('Ira', mascot!.id, new Date());
+    await hire('Lev', characters!.id, null);
+    const kept = await build(app, ceo, { items: [{ department: characters!.id, note: '', remove: true }] });
+    expect(kept.statusCode).toBe(400);
+    expect(kept.json().error.message).toContain('has agents');
+    const removed = await build(app, ceo, { items: [{ department: mascot!.id, note: 'Renamed', remove: true }] });
+    expect(removed.statusCode).toBe(201);
+    expect((await db.select().from(agents).where(eq(agents.name, 'Ira')))[0]!.productId).toBe(null);
+  });
+
   it('keeps a department that people work in', async () => {
     const { app, db, ceo } = await withOrchestrator();
     await build(app, ceo, { items: [{ template: 'operations' }, { template: 'support' }] });

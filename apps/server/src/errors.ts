@@ -40,6 +40,8 @@ export type ErrorReason =
   | 'skill_locked'
   | 'instructions_too_long'
   | 'agent_working'
+  | 'agent_has_tasks'
+  | 'no_subscription'
   | 'no_role'
   | 'nothing_running'
   | 'proposal_closed'

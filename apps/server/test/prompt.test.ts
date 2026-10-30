@@ -31,4 +31,14 @@ describe('catching a new session up', () => {
     );
     expect(text).toContain('Hornhoof: #1 "Checkout API" is yours to do.\nBruno: On it.');
   });
+
+  it('keeps the newest lines within one command-line argument', () => {
+    const at = new Date().toISOString();
+    const long = 'Отчет '.repeat(1300);
+    const events = Array.from({ length: 20 }, (_, i) => ({ seq: i + 1, kind: 'text' as const, data: { text: `${i + 1}. ${long}` }, jobId: null, person: null, at }));
+    const text = preface(events, 'Hana');
+    expect(Buffer.byteLength(text)).toBeLessThanOrEqual(64 * 1024);
+    expect(text).toContain('Hana: 20. ');
+    expect(text).not.toContain('Hana: 1. ');
+  });
 });

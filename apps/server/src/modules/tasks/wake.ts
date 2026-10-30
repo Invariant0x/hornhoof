@@ -1,7 +1,7 @@
 import { and, count, eq, gte, inArray, isNull, notInArray, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, requests, taskEvents, tasks } from '../../db/schema.js';
-import { insertTurn, liveSubscription, onAgent, pump } from '../conversation/queue.js';
+import { afterJob, cancelJob, insertTurn, liveSubscription, onAgent, pump } from '../conversation/queue.js';
 import { appendEvent } from '../events/store.js';
 import { CLOSED, GATE_ROUNDS, published, silentTurn, type Task, type Wake } from './engine.js';
 
@@ -73,6 +73,28 @@ export async function resumeAgent(ctx: Ctx, agentId: string): Promise<void> {
     ctx,
     held.map(t => ({ agentId, taskId: t.id, why: t.status === 'review' ? 'review' : 'assigned' })),
   );
+}
+
+/* Turns on cancelled tasks end: a waiting one at once, a running one through its node. The agent that cancelled keeps its own. */
+export async function stopTurns(ctx: Ctx, taskIds: string[], keep?: string): Promise<void> {
+  if (!taskIds.length) return;
+  const open = await ctx.db
+    .select({ id: jobs.id, status: jobs.status, agentId: jobs.agentId })
+    .from(jobs)
+    .where(and(inArray(jobs.taskId, taskIds), inArray(jobs.status, ['queued', 'running'])));
+  for (const job of open) {
+    if (keep && job.agentId === keep) continue;
+    if (job.status === 'running') {
+      await cancelJob(ctx, job.id);
+      continue;
+    }
+    const [ended] = await ctx.db
+      .update(jobs)
+      .set({ status: 'failed', error: 'cancelled', result: 'Stopped.', finishedAt: new Date() })
+      .where(and(eq(jobs.id, job.id), eq(jobs.status, 'queued')))
+      .returning({ id: jobs.id });
+    if (ended) await afterJob(ctx, ended.id);
+  }
 }
 
 async function queueWake(ctx: Ctx, w: Wake): Promise<boolean> {

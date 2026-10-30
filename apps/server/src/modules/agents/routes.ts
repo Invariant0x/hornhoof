@@ -1,16 +1,17 @@
 import { MAX_INSTRUCTIONS, modelsFor, type ModelOption } from '@hornhoof/protocol';
-import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, notInArray, or } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { accessOf, agentSpot, canReach } from '../../auth/access.js';
 import { requireCompanyScope, type Person } from '../../auth/session.js';
-import { agentChanges, agents, departments, jobs, people, subscriptions, type AGENT_CHANGE_FIELDS } from '../../db/schema.js';
+import { agentChanges, agents, departments, jobs, people, subscriptions, tasks, type AGENT_CHANGE_FIELDS } from '../../db/schema.js';
 import { ApiError, type ErrorReason } from '../../errors.js';
 import { onAgent, pump, pumpWaiting } from '../conversation/queue.js';
 import { deptName } from '../departments/templates.js';
 import { identityOf } from '../nodes/hub.js';
 import { subViews, type SubView } from '../subscriptions/views.js';
+import { CLOSED, dropGate } from '../tasks/engine.js';
 import { resumeAgent } from '../tasks/wake.js';
 import { orchestratorServing, servingSubscriptions, type Serving } from '../tools/staff.js';
 import type { Lang } from '../templates/load.js';
@@ -153,7 +154,7 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
       ctx.bus.publish(agent.companyId, { type: 'org' });
       /* Turns that waited for a subscription can go now, with the tasks it missed while it had none. */
       if (next.subscriptionId !== agent.subscriptionId) {
-        if (next.subscriptionId) await resumeAgent(ctx, agent.id);
+        if (next.subscriptionId && !agent.subscriptionId) await resumeAgent(ctx, agent.id);
         await (agent.kind === 'orchestrator' ? pumpWaiting(ctx) : pump(ctx, agent.id));
       }
     }
@@ -262,6 +263,16 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
     await changing(found, async agent => {
       const [running] = await db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, agent.id), eq(jobs.status, 'running'))).limit(1);
       if (running) throw new ApiError(409, 'conflict', 'This employee is working. Stop it first.', 'agent_working');
+      /* A task it holds or does would wait for it for good. */
+      const held = await db
+        .select({ number: tasks.number })
+        .from(tasks)
+        .where(and(or(eq(tasks.assigneeAgentId, agent.id), eq(tasks.executorAgentId, agent.id)), notInArray(tasks.status, [...CLOSED])))
+        .orderBy(asc(tasks.number));
+      if (held.length) {
+        const list = held.map(t => `#${t.number}`).join(', ');
+        throw new ApiError(409, 'conflict', `${agent.name} works on ${list}. Wait until they are done or cancel them, then remove ${agent.name}.`, 'agent_has_tasks');
+      }
       await db.transaction(async tx => {
         await tx.update(agents).set({ removedAt: new Date() }).where(eq(agents.id, agent.id));
         await tx
@@ -270,6 +281,8 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
           .where(and(eq(jobs.agentId, agent.id), eq(jobs.status, 'queued')));
         await tx.insert(agentChanges).values({ companyId: agent.companyId, agentId: agent.id, personId: me.id, field: 'removed', before: null, after: null });
       });
+      const gated = await db.select().from(tasks).where(and(eq(tasks.companyId, agent.companyId), notInArray(tasks.status, [...CLOSED])));
+      for (const task of gated.filter(t => t.gates.includes(agent.id))) await dropGate(ctx, { personId: me.id }, task, agent.id);
     });
     ctx.bus.publish(found.companyId, { type: 'org' });
     return reply.code(204).send();

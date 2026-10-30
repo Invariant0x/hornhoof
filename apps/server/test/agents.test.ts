@@ -36,6 +36,23 @@ async function company() {
 const open = (app: FastifyInstance, token: string, id: string) => app.inject({ url: `/api/agents/${id}`, ...as(token) });
 const patch = (app: FastifyInstance, token: string, id: string, payload: object) => app.inject({ method: 'PATCH', url: `/api/agents/${id}`, payload, ...as(token) });
 
+describe('hiring', () => {
+  it('refuses an employee whose instructions would be too long for a turn', async () => {
+    const { app, ceo, dev, teamKey } = await company();
+    const own = app.ctx.templates.roles.get('DEV-FE')!.skills.filter(s => s.on).map(s => s.id);
+    const all = [...new Set([...own, ...app.ctx.templates.skills.keys()])].slice(0, 40);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/departments/${dev.id}/staff`,
+      payload: { people: [{ role: 'DEV-FE', name: 'Ira', model: 'claude-sonnet-5-5', subscription: teamKey, skills: all }] },
+      ...as(ceo),
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.reason).toBe('instructions_too_long');
+    expect(res.json().error.message).toContain('Ira');
+  });
+});
+
 describe('the employee card', () => {
   it("opens an employee's card with its skills, prompt parts and raw text", async () => {
     const { app, db, ceo, dev, teamKey, codex, brunoId, role } = await company();

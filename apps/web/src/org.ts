@@ -11,7 +11,11 @@ export function useOrg(enabled = true): { org: Org | null; failure: unknown } {
 
   const load = useCallback(() => {
     api.get<Org>('/api/org').then(
-      data => mounted.current && setOrg(data),
+      data => {
+        if (!mounted.current) return;
+        setOrg(data);
+        setFailure(null);
+      },
       err => mounted.current && setFailure(err),
     );
   }, []);
