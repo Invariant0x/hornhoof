@@ -1,7 +1,7 @@
 import { execFile, type ChildProcess } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { TERM_CHUNK, type AgentEvent, type Limits, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
 import { claudeEvents, claudeInterrupted } from '../providers/claude.js';
@@ -39,6 +39,8 @@ type Turn = {
   early?: AgentEvent[] | null;
   over?: { message: string; error: JobError; sessionId: string | null } | null;
   opened?: Deferred<void>;
+  /* A turn that only starts the program, until the program has its tools. A person who types meanwhile takes its place. */
+  starting?: Promise<unknown>;
 };
 type JobError = RunResult['error'];
 
@@ -111,6 +113,25 @@ const SETTLE_MS = 3000;
 
 const hashOf = (v: unknown) => createHash('sha256').update(JSON.stringify(v)).digest('hex');
 /* The turn's own address and token for pictures change every turn; the bridge serves them instead. */
+/* What a session was told from before it started, kept in the agent's folder by the session's id. */
+const contextFile = (workDir: string, sessionId: string) => (/^[\w-]+$/.test(sessionId) ? join(workDir, '.hh-context', `${sessionId}.md`) : null);
+
+function keepContext(workDir: string, sessionId: string, context: string): void {
+  const file = contextFile(workDir, sessionId);
+  if (!file) return;
+  mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+  writeFileSync(file, context, { mode: 0o600 });
+}
+
+function keptContext(workDir: string, sessionId: string): string | null {
+  const file = contextFile(workDir, sessionId);
+  try {
+    return file ? readFileSync(file, 'utf8') : null;
+  } catch {
+    return null;
+  }
+}
+
 const lasting = (env: Record<string, string> = {}) => Object.fromEntries(Object.entries(env).filter(([k]) => !k.startsWith('HH_ATTACH_')));
 
 /* Runs agents in their tmux sessions on this node and shows those sessions to the people watching. */
@@ -189,8 +210,11 @@ export class TerminalHost {
     mkdirSync(input.workDir, { recursive: true });
     const urls = this.bridge.agent(job.key);
     let instructionsFile: string | null = null;
-    /* The conversation from before reaches a program that starts now; it is not part of its instructions' hash. */
-    const told = [input.instructions, input.context].filter(Boolean).join('\n\n');
+    /* The conversation from before reaches a program that starts now; it is not part of its instructions' hash. Claude Code
+       keeps only what was said in its log, so what a new session was told from before goes with it to every resume. */
+    const kept = program.kind === 'claude' && input.sessionId ? keptContext(input.workDir, input.sessionId) : null;
+    const context = kept && input.context && !kept.includes(input.context) ? `${kept}\n\n${input.context}` : (kept ?? input.context);
+    const told = [input.instructions, context].filter(Boolean).join('\n\n');
     if (told && program.kind === 'claude') {
       instructionsFile = join(input.workDir, '.hh-instructions.md');
       writeFileSync(instructionsFile, told + '\n', { mode: 0o600 });
@@ -208,7 +232,7 @@ export class TerminalHost {
     this.drain(a);
     a.lastText = null;
     this.bridge.setToken(job.key, input.tools?.token ?? null);
-    const turn: Turn = { jobId: null, onEvent: input.onEvent ?? (() => {}), typed: false, seq: 0, deadline };
+    const turn: Turn = { jobId: null, onEvent: input.onEvent ?? (() => {}), typed: false, seq: 0, deadline, ...(input.prompt ? {} : { starting: tools ?? Promise.resolve() }) };
     a.turn = turn;
     a.ended = deferred();
     a.stopped = false;
@@ -216,6 +240,7 @@ export class TerminalHost {
       if (!goesOn) {
         if (program.kind === 'claude') acceptClaudeDialogs(job.home, input.workDir);
         Object.assign(a, { program, home: job.home, workDir: input.workDir, hash, sessionId: spec.sessionId, cleared: new Set(), startedAt: Date.now(), started: deferred<void>(), fresh: false });
+        if (program.kind === 'claude' && !input.sessionId && input.context && spec.sessionId) keepContext(input.workDir, spec.sessionId, input.context);
         a.tail = this.tailFor(a);
         const env = { ...lasting(input.env), ...spec.env };
         await this.opts.tmux.launch(a.name, { cwd: input.workDir, command: spec.command, cols: this.cols, rows: this.rows, envFile: envFile(input.workDir, env) });
@@ -228,6 +253,8 @@ export class TerminalHost {
       /* Nothing to type: the turn only starts the program for the person who opened its window. */
       if (!input.prompt) {
         await tools;
+        /* A person typed meanwhile: the program goes on with their turn, and the session is theirs to name. */
+        if (a.turn !== turn) return { ok: true, sessionId: null, result: '', output: '', error: null, limits: a.limits };
         if (!goesOn) a.fresh = input.sessionId === null;
         return { ok: true, sessionId: a.fresh ? null : a.sessionId, result: '', output: '', error: null, limits: a.limits };
       }
@@ -381,7 +408,7 @@ export class TerminalHost {
         continue;
       }
       const news = codexRollout(data);
-      if (news.typed !== undefined && !a.turn) void this.openTyped(a, news.typed, true);
+      if (news.typed !== undefined && (!a.turn || a.turn.starting)) void this.openTyped(a, news.typed, true);
       for (const e of news.events) this.emit(a, e);
       if (news.limits) a.limits = news.limits;
       if (news.session) a.sessionId = news.session.id;
@@ -440,7 +467,7 @@ export class TerminalHost {
       case 'prompt':
         await a.settling;
         a.busy = true;
-        if (!a.turn) await this.openTyped(a, String(data.prompt ?? ''));
+        if (!a.turn || a.turn.starting) await this.openTyped(a, String(data.prompt ?? ''));
         return;
       case 'stop': {
         this.drain(a);
@@ -461,10 +488,12 @@ export class TerminalHost {
     }
   }
 
-  /* A person typed while no turn ran: the turn starts at once and Hornhoof opens a job for it, so the agent has its tools
-     and the turn shows like any other. Claude Code waits in its hook for Hornhoof's answer, for a while; Codex goes on, and
-     what it does waits in the turn. fromLog: the typing was read from the log, which is being read now. */
+  /* A person typed while no turn ran, or while the program started: the turn starts at once and Hornhoof opens a job for
+     it, so the agent has its tools and the turn shows like any other. Claude Code waits in its hook for Hornhoof's answer,
+     for a while; Codex goes on, and what it does waits in the turn. fromLog: the typing was read from the log, which is
+     being read now. */
   private async openTyped(a: Agent, text: string, fromLog = false): Promise<void> {
+    const start = a.turn?.starting;
     if (a.idle) clearTimeout(a.idle);
     a.fresh = false;
     if (!fromLog) this.drain(a);
@@ -473,6 +502,8 @@ export class TerminalHost {
     a.turn = turn;
     a.unopened.push(turn);
     this.watch(a);
+    /* The start turn's token gets the program its tools first; Hornhoof then ends that turn for this one. */
+    if (start) await start;
     this.opts.send({ type: 'turn.open', agentKey: a.key, text: text.slice(0, 100_000), ref: turn.ref });
     await Promise.race([turn.opened!.promise, sleep(this.openMs)]);
   }

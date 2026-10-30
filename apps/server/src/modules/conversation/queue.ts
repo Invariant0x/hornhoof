@@ -81,8 +81,9 @@ export async function enqueueTurn(ctx: Ctx, t: Turn): Promise<string> {
   return jobId;
 }
 
-/* A person typed into the agent's terminal while no turn ran. The turn is theirs and runs from now on the node that shows
-   the session, which goes on with the instructions it was started with: their hash stays, so the next turn resumes it. */
+/* A person typed into the agent's terminal while no turn ran, or while the program started. The turn is theirs and runs
+   from now on the node that shows the session, which goes on with the instructions it was started with: their hash stays,
+   so the next turn resumes it. */
 export function openTypedTurn(ctx: Ctx, node: NodeIdentity, agentId: string, text: string, personId: string | null): Promise<{ jobId: string; token: string } | null> {
   if (!z.uuid().safeParse(agentId).success) return Promise.resolve(null);
   return onAgent(ctx, agentId, async () => {
@@ -90,6 +91,11 @@ export function openTypedTurn(ctx: Ctx, node: NodeIdentity, agentId: string, tex
     const [agent] = await db.select().from(agents).where(and(eq(agents.id, agentId), isNull(agents.removedAt)));
     const sub = agent ? await liveSubscription(ctx, agent.id) : null;
     if (!agent || !sub || !sameNode(identityOf(sub), node)) return null;
+    /* A turn that only started the program is over once the person types: their turn takes its place. */
+    await db
+      .update(jobs)
+      .set({ status: 'done', result: '', finishedAt: new Date() })
+      .where(and(conversationOf(agentId), eq(jobs.status, 'running'), eq(jobs.prompt, ''), isNull(jobs.taskId)));
     const [running] = await db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
     if (running) return null;
     const [last] = await db
@@ -192,8 +198,8 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   const runHash = model ? textHash(`${instructions.hash}:${model}`) : instructions.hash;
   const { sessionId, catchUp } = await sessionFor(ctx, agent, sub.id, runHash);
   const said = repo ? `${job.prompt}\n\n${repoLine(repo)}` : job.prompt;
-  /* A turn that types nothing only starts the program, for a person to talk to it: what was said before goes with its
-     instructions instead. */
+  /* A turn that types nothing only starts the program, for a person to talk to it: what was said before and where the
+     repository is go with its instructions instead. */
   const prompt = !job.prompt ? '' : catchUp ? `${catchUp}\n\n${said}` : said;
   const token = newToken();
   /* Running from the moment it is sent: the token works for its tools at once, and the next turn waits. */
@@ -213,7 +219,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
     timeoutMs: job.timeoutMs,
     instructions: instructions.text,
     toolToken: token,
-    context: job.prompt ? null : catchUp,
+    context: job.prompt ? null : [catchUp, repo ? repoLine(repo) : null].filter(Boolean).join('\n\n') || null,
     /* Each agent keeps one folder on the node, with its repository's clone inside. */
     workspace: { key: agent.id, repo },
   });

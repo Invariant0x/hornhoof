@@ -264,6 +264,21 @@ describe('starting an agent for someone who opens its window to talk', () => {
     expect(await next(builtin, 'job.run')).toMatchObject({ prompt: '' });
   });
 
+  it('lets a person who types while the program starts take over its start turn', async () => {
+    const { app, db, ceo, builtin, orchestratorId } = await live();
+    builtin.send({ type: 'agent.start', agentKey: orchestratorId });
+    const start = await next(builtin, 'job.run');
+    builtin.send({ type: 'turn.open', agentKey: orchestratorId, text: 'add a department', ref: 'r-1' });
+    const opened = await next(builtin, 'turn.opened');
+    expect(opened).toMatchObject({ jobId: expect.any(String), toolToken: expect.any(String), ref: 'r-1' });
+    expect((await db.select().from(jobs).where(eq(jobs.id, start.jobId)))[0]).toMatchObject({ status: 'done' });
+    /* The node's own end of the start turn comes after, and changes nothing. */
+    builtin.send({ type: 'job.done', jobId: start.jobId, ok: true, sessionId: null, result: '', tail: '', error: null });
+    await new Promise(r => setTimeout(r, 300));
+    expect(await state(app, ceo)).toMatchObject({ busy: true, runningJobId: opened.jobId });
+    expect((await events(app, ceo)).filter((e: { kind: string }) => e.kind === 'message').map((e: { data: { text: string } }) => e.data.text)).toEqual(['add a department']);
+  });
+
   it('starts nothing while a turn waits or runs, or for an agent it does not know', async () => {
     const { app, db, ceo, builtin, orchestratorId } = await live();
     await app.inject({ method: 'POST', url: '/api/agents/orchestrator/messages', payload: { text: 'hello' }, ...as(ceo) });

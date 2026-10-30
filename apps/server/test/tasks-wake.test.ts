@@ -223,6 +223,17 @@ describe("working in the product's repository", () => {
     expect(run.prompt).toContain('Co-Authored-By');
   });
 
+  it('tells an agent started for its window where its repository is, with its instructions', async () => {
+    const { builtin, dev, hire, repository } = await withRepositories();
+    await repository(dev.id, { url: 'https://github.com/acme/platform.git', branch: 'main' });
+    const pia = await hire('Pia', null);
+    builtin.send({ type: 'agent.start', agentKey: pia.id });
+    const start = (await nextRun(builtin)) as Run & { context?: string | null };
+    expect(start.prompt).toBe('');
+    expect(start.context).toContain('https://github.com/acme/platform.git');
+    expect(start.context).toContain('./platform');
+  });
+
   it('sends a turn without a repository with the agent folder alone', async () => {
     const { ctx, builtin, hire, task } = await withRepositories();
     const pia = await hire('Pia', null);
