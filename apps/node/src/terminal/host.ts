@@ -95,6 +95,8 @@ type Options = {
   /* How long a typed turn waits for Hornhoof to open it, and how long it may run. */
   openMs?: number;
   typedMs?: number;
+  /* How long a program started with nothing to type gets to connect to its tools. */
+  toolsMs?: number;
   cols?: number;
   rows?: number;
 };
@@ -121,6 +123,7 @@ export class TerminalHost {
   private readonly idleMs: number;
   private readonly openMs: number;
   private readonly typedMs: number;
+  private readonly toolsMs: number;
   /* Views being opened, and those Hornhoof closed meanwhile. */
   private readonly viewsOpening = new Set<string>();
   private readonly viewsClosed = new Set<string>();
@@ -134,6 +137,7 @@ export class TerminalHost {
     this.idleMs = opts.idleMs ?? 10 * 60_000;
     this.openMs = opts.openMs ?? 8000;
     this.typedMs = opts.typedMs ?? 60 * 60_000;
+    this.toolsMs = opts.toolsMs ?? 15_000;
     this.cols = opts.cols ?? 160;
     this.rows = opts.rows ?? 48;
   }
@@ -197,6 +201,8 @@ export class TerminalHost {
     /* A new session asked for goes on in a program started for a person that nothing was said in yet. */
     const sameSession = input.sessionId === null ? a.fresh : input.sessionId === a.sessionId || a.cleared.has(input.sessionId);
     const goesOn = sameSession && a.hash === hash && (await this.opts.tmux.alive(a.name));
+    /* A program started with nothing to type gets its tools before its turn ends, while Hornhoof still answers for them. */
+    const tools = !goesOn && !input.prompt && input.tools ? this.bridge.listed(job.key, this.toolsMs) : null;
 
     /* What is left in the log from before belongs to no turn. */
     this.drain(a);
@@ -221,6 +227,7 @@ export class TerminalHost {
       }
       /* Nothing to type: the turn only starts the program for the person who opened its window. */
       if (!input.prompt) {
+        await tools;
         if (!goesOn) a.fresh = input.sessionId === null;
         return { ok: true, sessionId: a.fresh ? null : a.sessionId, result: '', output: '', error: null, limits: a.limits };
       }

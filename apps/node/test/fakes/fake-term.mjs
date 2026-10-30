@@ -4,7 +4,8 @@
 // SLOW makes an answer take 2 s, LAG writes the answer to the log only after the stop hook, as Claude Code can, HANG never
 // answers (as when a person stops it with Escape: no stop hook), EXIT ends the
 // program, SECRET prints the value of FAKE_SECRET. INTERRUPT logs what Claude Code logs when a person stops a turn with
-// Escape, and calls no stop hook. CLEAR starts a new session, as /clear does.
+// Escape, and calls no stop hook. CLEAR starts a new session, as /clear does. FAKE_MCP_LIST_MS makes it list its Hornhoof
+// tools that long after it started, as Claude Code connects to its MCP servers, and show "tools: ok" or "tools: failed".
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -21,6 +22,15 @@ const hook = (event, body) => fetch(`${process.env.HH_BRIDGE}/${event}`, { metho
 
 process.stdout.write(`fake claude ${args.includes('--resume') ? 'resumed' : 'new'} ${session}\n❯ `);
 await hook('start', {});
+if (process.env.FAKE_MCP_LIST_MS) {
+  const { url } = JSON.parse(flag('--mcp-config')).mcpServers.hornhoof;
+  setTimeout(async () => {
+    const listed = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) })
+      .then(r => r.json())
+      .catch(() => null);
+    process.stdout.write(`tools: ${listed?.result ? 'ok' : 'failed'}\n❯ `);
+  }, Number(process.env.FAKE_MCP_LIST_MS));
+}
 for await (const typed of createInterface({ input: process.stdin })) {
   // Escape stops an answer; it is not part of the next line.
   const line = typed.replaceAll('\u001b', '');

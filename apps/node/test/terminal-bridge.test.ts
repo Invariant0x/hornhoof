@@ -40,6 +40,27 @@ describe("the node's bridge to Hornhoof's tools", () => {
     expect(up.seen[1]).toMatchObject({ url: '/api/attachments', auth: 'Bearer tok-turn-2', body: 'png' });
   });
 
+  it("says when the agent's program has listed its tools during a turn, and gives up after the time it was given", async () => {
+    const up = await upstream();
+    const bridge = new Bridge(up.url, () => {});
+    await bridge.start();
+    closers.push(() => bridge.stop(), () => up.server.close());
+    const a = bridge.agent('agent-1');
+    const post = (method: string) => fetch(a.mcpUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method }) });
+    const early = bridge.listed('agent-1', 100);
+    await post('tools/list');
+    expect(await early).toBe(false);
+    bridge.setToken('agent-1', 'tok-turn-1');
+    let listed: boolean | null = null;
+    void bridge.listed('agent-1', 5000).then(ok => (listed = ok));
+    await post('tools/call');
+    await new Promise(r => setTimeout(r, 20));
+    expect(listed).toBeNull();
+    await post('tools/list');
+    await new Promise(r => setTimeout(r, 20));
+    expect(listed).toBe(true);
+  });
+
   it('answers a tool call between turns with an error the agent can read, without asking Hornhoof', async () => {
     const up = await upstream();
     const bridge = new Bridge(up.url, () => {});

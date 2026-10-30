@@ -1,5 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -242,6 +244,25 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     const next = await host.run(job('a33', 'hello', { sessionId: null }));
     expect(next).toMatchObject({ ok: true, result: 'echo: hello' });
     expect((await host.screen('a33')).match(/fake claude new/g)).toHaveLength(1);
+  });
+
+  it('keeps the turn that starts a program going until the program has its tools', async () => {
+    const auths: string[] = [];
+    const hornhoof = createServer((req, res) => {
+      auths.push(req.headers.authorization ?? '');
+      req.resume().on('end', () => res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { tools: [] } })));
+    });
+    await new Promise<void>(r => hornhoof.listen(0, '127.0.0.1', r));
+    try {
+      await setUp({ hornhoof: `http://127.0.0.1:${(hornhoof.address() as AddressInfo).port}` });
+      /* The program connects to its tools a while after it is ready to take a prompt, as Codex and Claude Code do. */
+      expect(await host.run(job('a42', '', { env: { FAKE_SECRET: SECRET, FAKE_MCP_LIST_MS: '700' } }))).toMatchObject({ ok: true });
+      await until(async () => (await host.screen('a42')).includes('tools:'));
+      expect(await host.screen('a42')).toContain('tools: ok');
+      expect(auths).toEqual(['Bearer tok-turn']);
+    } finally {
+      hornhoof.close();
+    }
   });
 
   it('remembers the session a person started by typing into a program started for them', async () => {

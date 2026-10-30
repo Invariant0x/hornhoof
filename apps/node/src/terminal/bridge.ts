@@ -20,6 +20,7 @@ export class Bridge {
   private readonly bySecret = new Map<string, string>();
   private readonly secrets = new Map<string, string>();
   private readonly tokens = new Map<string, string>();
+  private readonly listing = new Map<string, Set<() => void>>();
 
   constructor(
     private readonly hornhoof: string,
@@ -55,6 +56,24 @@ export class Bridge {
     else this.tokens.delete(key);
   }
 
+  /* Resolves true once the agent's program has listed its tools through the bridge, or false after ms. A program
+     connects to its tools on its own time after it starts, and Hornhoof answers only while a turn runs. */
+  listed(key: string, ms: number): Promise<boolean> {
+    return new Promise(resolve => {
+      const waiting = this.listing.get(key) ?? new Set();
+      this.listing.set(key, waiting);
+      const done = (ok: boolean) => {
+        clearTimeout(timer);
+        waiting.delete(heard);
+        if (!waiting.size && this.listing.get(key) === waiting) this.listing.delete(key);
+        resolve(ok);
+      };
+      const heard = () => done(true);
+      const timer = setTimeout(() => done(false), ms);
+      waiting.add(heard);
+    });
+  }
+
   private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const [, kind, secret, event] = (req.url ?? '').split('?')[0]!.split('/');
     const key = secret ? this.bySecret.get(secret) : undefined;
@@ -87,6 +106,7 @@ export class Bridge {
     }
     res.writeHead(up.status, out);
     res.end(Buffer.from(await up.arrayBuffer()));
+    if (kind === 'mcp' && up.ok && asks(body, 'tools/list')) for (const heard of [...(this.listing.get(key) ?? [])]) heard();
   }
 }
 
@@ -110,6 +130,16 @@ function noTurn(res: ServerResponse, body: Buffer): void {
   }
   if (id === null) return reply(res, 202, '');
   reply(res, 200, JSON.stringify({ jsonrpc: '2.0', id, error: { code: -32001, message: "No Hornhoof turn is running for this agent. Hornhoof's tools work during a turn." } }));
+}
+
+/* Whether a JSON-RPC message, or a batch of them, calls this method. */
+function asks(body: Buffer, method: string): boolean {
+  try {
+    const msg = JSON.parse(body.toString('utf8'));
+    return (Array.isArray(msg) ? msg : [msg]).some(m => m?.method === method);
+  } catch {
+    return false;
+  }
 }
 
 function readBody(req: IncomingMessage): Promise<Buffer> {
