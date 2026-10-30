@@ -226,6 +226,16 @@ async function gateVerdicts(db: Db, task: Task): Promise<Given[]> {
   return rows.map(r => ({ agentId: r.agentId!, name: r.name, pass: r.data.pass === true, comment: r.text }));
 }
 
+/* The agent asked a person on the task and waits for the answer. */
+async function asked(db: Db, task: Task, agentId: string): Promise<boolean> {
+  const [mine] = await db
+    .select({ id: requests.id })
+    .from(requests)
+    .where(and(eq(requests.taskId, task.id), eq(requests.agentId, agentId), eq(requests.status, 'open')))
+    .limit(1);
+  return !!mine;
+}
+
 /* A reviewer at the task's gate gives its verdict. The gate decides once its whole panel has. */
 export async function verdict(ctx: Live, agentId: string, taskId: string, v: { pass: boolean; comment: string }): Promise<Moved> {
   const task = await loadTask(ctx.db, taskId);
@@ -233,14 +243,7 @@ export async function verdict(ctx: Live, agentId: string, taskId: string, v: { p
   if (!['review', 'waiting'].includes(task.status) || task.stage < 1 || !task.panel.includes(agentId) || task.executorAgentId === agentId) throw notYours(task, 'is not at your gate');
   if (!v.comment.trim()) throw refuse(400, 'task_invalid', 'A verdict needs its reasons.');
   /* The others at the gate go on while one of them waits for a person; that one decides once the answer is in. */
-  if (task.status === 'waiting') {
-    const [mine] = await ctx.db
-      .select({ id: requests.id })
-      .from(requests)
-      .where(and(eq(requests.taskId, task.id), eq(requests.agentId, agentId), eq(requests.status, 'open')))
-      .limit(1);
-    if (mine) throw refuse(409, 'task_invalid', `#${task.number} waits for the answer to your question first.`);
-  }
+  if (task.status === 'waiting' && (await asked(ctx.db, task, agentId))) throw refuse(409, 'task_invalid', `#${task.number} waits for the answer to your question first.`);
   const n: Note = { kind: 'verdict', actor: { agentId }, text: v.comment.trim(), data: { pass: v.pass, stage: task.stage, round: task.bounces } };
   const panel = task.panel.filter(id => id !== agentId);
   if (panel.length) return { task: await move(ctx, task, { panel, assigneeAgentId: panel[0]!, silent: 0 }, n), wakes: [] };
@@ -363,13 +366,12 @@ type Leaver = { id: string; name: string; companyId: string };
    ones that finished as it left. */
 export async function leaveWork(ctx: Live, actor: Actor, agent: Leaver): Promise<{ wakes: Wake[]; handed: string[]; closed: Task[] }> {
   const open = await ctx.db.select().from(tasks).where(and(eq(tasks.companyId, agent.companyId), notInArray(tasks.status, [...CLOSED, 'planned']))).orderBy(asc(tasks.number));
-  const asked = new Set((await ctx.db.select({ taskId: requests.taskId }).from(requests).where(and(eq(requests.agentId, agent.id), eq(requests.status, 'open')))).map(r => r.taskId));
   const n: Note = { kind: 'updated', actor, text: `${agent.name} was switched off.`, data: { fields: ['assignee'] } };
   const wakes: Wake[] = [];
   const handed: string[] = [];
   const closed: Task[] = [];
   for (const found of open) {
-    const left = await onFresh(ctx, found, task => leaveTask(ctx, n, agent, asked, task));
+    const left = await onFresh(ctx, found, task => leaveTask(ctx, n, agent, task));
     if (!left) continue;
     handed.push(found.id);
     wakes.push(...left.wakes);
@@ -379,9 +381,9 @@ export async function leaveWork(ctx: Live, actor: Actor, agent: Leaver): Promise
 }
 
 /* The agent leaves one task; null when it does not hold it. */
-async function leaveTask(ctx: Live, n: Note, agent: Leaver, asked: Set<string>, task: Task): Promise<{ wakes: Wake[]; closed: Task | null } | null> {
+async function leaveTask(ctx: Live, n: Note, agent: Leaver, task: Task): Promise<{ wakes: Wake[]; closed: Task | null } | null> {
   if (CLOSED.includes(task.status) || task.status === 'planned') return null;
-  if (task.status === 'waiting' && (asked.has(task.id) || !task.panel.includes(agent.id))) return null;
+  if (task.status === 'waiting' && (!task.panel.includes(agent.id) || (await asked(ctx.db, task, agent.id)))) return null;
   if (task.stage === 0 && task.executorAgentId === agent.id && task.assigneeAgentId === agent.id && task.createdByAgentId && task.createdByAgentId !== agent.id) {
     await move(ctx, task, { assigneeAgentId: task.createdByAgentId, status: task.status === 'working' ? 'open' : task.status }, n);
     return { wakes: giver(task, 'switched', agent.id, `${agent.name} does it and was switched off. Give it to someone who is on with update_task, or tell the CEO it waits for ${agent.name}.`), closed: null };

@@ -5,7 +5,7 @@ import { and, asc, eq, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agentChanges, agents, companies, departments, jobs, people, subscriptions, tasks, turns } from '../src/db/schema.js';
+import { agentChanges, agents, companies, departments, jobs, people, requests, subscriptions, tasks, turns } from '../src/db/schema.js';
 import { afterJob, pumpWaiting } from '../src/modules/conversation/queue.js';
 import { identityOf } from '../src/modules/nodes/hub.js';
 import { answer, ask, createTask, submit, verdict } from '../src/modules/tasks/engine.js';
@@ -442,14 +442,18 @@ describe('work an agent held when it was switched off', () => {
   });
 
   /* Someone moves the other task in the moment between the switch reading the tasks and moving them. */
-  const meddle = (ctx: Awaited<ReturnType<typeof company>>['ctx'], db: Awaited<ReturnType<typeof company>>['db'], ids: string[]) => {
+  const meddle = (
+    ctx: Awaited<ReturnType<typeof company>>['ctx'],
+    db: Awaited<ReturnType<typeof company>>['db'],
+    ids: string[],
+    how: (other: string) => Promise<unknown> = other => db.update(tasks).set({ version: sql`${tasks.version} + 1` }).where(eq(tasks.id, other)),
+  ) => {
     const publish = ctx.bus.publish.bind(ctx.bus);
     let done = false;
     ctx.bus.publish = ((companyId: string, e: { type: string; id?: string }) => {
       if (!done && e.type === 'task' && e.id && ids.includes(e.id)) {
         done = true;
-        const other = ids.find(id => id !== e.id)!;
-        void db.update(tasks).set({ version: sql`${tasks.version} + 1` }).where(eq(tasks.id, other)).then(() => undefined);
+        void how(ids.find(id => id !== e.id)!).then(() => undefined);
       }
       return publish(companyId, e as never);
     }) as typeof ctx.bus.publish;
@@ -480,6 +484,20 @@ describe('work an agent held when it was switched off', () => {
     meddle(ctx, db, [one.id, two.id]);
     await patch(bruno.id, { on: false });
     for (const t of [one, two]) expect((await row(db, t.id)).assigneeAgentId).toBe(hana.id);
+  });
+
+  it('keeps a reviewer at the gate whose question to a person comes in while it is switched off', async () => {
+    const { ctx, db, companyId, bruno, bea, rita, patch, memberTask } = await company();
+    const one = await memberTask(bruno.id);
+    const two = await memberTask(bea.id);
+    await submit(ctx, bruno.id, one.id, done);
+    await submit(ctx, bea.id, two.id, done);
+    meddle(ctx, db, [one.id, two.id], async other => {
+      await db.insert(requests).values({ companyId, taskId: other, agentId: rita.id, kind: 'question', text: 'Is tax in scope?' });
+      await db.update(tasks).set({ status: 'waiting', version: sql`${tasks.version} + 1` }).where(eq(tasks.id, other));
+    });
+    await patch(rita.id, { on: false });
+    expect((await row(db, two.id)).panel).toContain(rita.id);
   });
 
   it('starts the gate again when a reviewer of its role is switched on', async () => {
