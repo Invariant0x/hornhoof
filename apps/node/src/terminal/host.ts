@@ -40,6 +40,8 @@ type Agent = {
   /* What the running program was started with; a turn that needs anything else starts it again. */
   hash: string | null;
   sessionId: string | null;
+  /* Sessions a person cleared in the running program: a turn asking for one goes on in the session that replaced it. */
+  cleared: Set<string>;
   tail: LineTail | null;
   startedAt: number;
   started: Deferred<void> | null;
@@ -141,7 +143,7 @@ export class TerminalHost {
   private agent(key: string): Agent {
     let a = this.agents.get(key);
     if (!a) {
-      a = { key, name: `a-${key}`, program: null, home: '', workDir: '', hash: null, sessionId: null, tail: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, viewers: 0, idle: null, watch: null, queue: Promise.resolve(), opening: null, early: null, over: null, stopped: false, lastText: null, settling: null };
+      a = { key, name: `a-${key}`, program: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, viewers: 0, idle: null, watch: null, queue: Promise.resolve(), opening: null, early: null, over: null, stopped: false, lastText: null, settling: null };
       this.agents.set(key, a);
     }
     return a;
@@ -174,7 +176,8 @@ export class TerminalHost {
     if (input.instructions && program.kind === 'codex') writeFileSync(join(input.workDir, 'AGENTS.md'), input.instructions + '\n', { mode: 0o600 });
     const spec = program.launch({ bin: job.bin, home: job.home, workDir: input.workDir, sessionId: input.sessionId, model: input.model, instructionsFile, urls });
     const hash = hashOf({ kind: program.kind, bin: job.bin, model: input.model, instructions: input.instructions, env: lasting(input.env) });
-    const goesOn = input.sessionId !== null && input.sessionId === a.sessionId && a.hash === hash && (await this.opts.tmux.alive(a.name));
+    const sameSession = input.sessionId !== null && (input.sessionId === a.sessionId || a.cleared.has(input.sessionId));
+    const goesOn = sameSession && a.hash === hash && (await this.opts.tmux.alive(a.name));
 
     /* What is left in the log from before belongs to no turn. */
     this.drain(a);
@@ -187,7 +190,7 @@ export class TerminalHost {
     try {
       if (!goesOn) {
         if (program.kind === 'claude') acceptClaudeDialogs(job.home, input.workDir);
-        Object.assign(a, { program, home: job.home, workDir: input.workDir, hash, sessionId: spec.sessionId, startedAt: Date.now(), started: deferred<void>() });
+        Object.assign(a, { program, home: job.home, workDir: input.workDir, hash, sessionId: spec.sessionId, cleared: new Set(), startedAt: Date.now(), started: deferred<void>() });
         a.tail = this.tailFor(a);
         const env = { ...lasting(input.env), ...spec.env };
         await this.opts.tmux.launch(a.name, { cwd: input.workDir, command: spec.command, cols: this.cols, rows: this.rows, envFile: envFile(input.workDir, env) });
@@ -276,6 +279,7 @@ export class TerminalHost {
   /* A person cleared the conversation in Claude Code, which goes on in a new session with a log of its own. */
   private follow(a: Agent, sessionId: string): void {
     if (sessionId === a.sessionId) return;
+    if (a.sessionId) a.cleared.add(a.sessionId);
     a.sessionId = sessionId;
     if (a.program?.kind === 'claude') a.tail = new LineTail(claudeTranscript(a.home, realpathSync(a.workDir), sessionId));
   }
@@ -350,11 +354,12 @@ export class TerminalHost {
       if (news.limits) a.limits = news.limits;
       if (news.session) a.sessionId = news.session.id;
       if (news.started) a.busy = true;
+      /* A stop logged before the running turn's prompt went in belongs to the last turn. */
+      if (news.aborted && !this.stoppable(a)) continue;
       if (news.ended || news.aborted) {
         const message = news.ended?.message ?? '';
-        const stoppable = this.stoppable(a);
         a.busy = false;
-        if (news.aborted && stoppable) this.interrupted(a);
+        if (news.aborted) this.interrupted(a);
         else if (a.turn?.typed) this.finishTyped(a, message);
         else if (a.turn) a.ended?.resolve(message);
         else if (a.opening) a.over = { message, error: news.aborted ? 'cancelled' : null };

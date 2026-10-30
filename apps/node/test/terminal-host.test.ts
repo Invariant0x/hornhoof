@@ -323,4 +323,23 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     expect(await host.run(codexJob('c2', 'ABORT', { sessionId: first.sessionId }))).toMatchObject({ ok: false, error: 'cancelled' });
     expect(Date.now() - started).toBeLessThan(5000);
   }, 30_000);
+
+  it("does not take the last turn's stop logged late for the end of the next turn", async () => {
+    await setUp();
+    const first = await host.run(codexJob('c3', 'LATE one'));
+    expect(first).toMatchObject({ ok: true, result: 'echo: LATE one' });
+    expect(await host.run(codexJob('c3', 'two', { sessionId: first.sessionId }))).toMatchObject({ ok: true, result: 'echo: two' });
+  }, 30_000);
+
+  it('goes on in the cleared session when Hornhoof asks for the session it was cleared from', async () => {
+    await setUp();
+    const first = await host.run(job('b10', 'hello'));
+    await host.open({ type: 'term.open', termId: 'u8', agentKey: 'b10', cols: 80, rows: 24, write: true });
+    host.input({ type: 'term.input', termId: 'u8', data: 'CLEAR\r' });
+    await new Promise(r => setTimeout(r, 500));
+    const next = await host.run(job('b10', 'after clear', { sessionId: first.sessionId }));
+    expect(next).toMatchObject({ ok: true, result: 'echo: after clear' });
+    expect(next.sessionId).not.toBe(first.sessionId);
+    expect(await host.screen('b10')).not.toContain('resumed');
+  }, 30_000);
 });

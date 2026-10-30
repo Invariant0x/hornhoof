@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Plays Codex in a terminal for the host tests: shows its prompt, keeps a session log under CODEX_HOME/sessions as Codex
 // does, and answers each line typed or pasted with "echo: LINE". HANG never answers, ABORT logs what Codex logs when a
-// person stops a turn with Escape.
+// person stops a turn with Escape; LATE answers, then logs a stop of that turn a moment later.
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, mkdirSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -37,4 +37,5 @@ for await (const typed of createInterface({ input: process.stdin })) {
   item('AgentMessage', answer);
   event({ type: 'task_complete', last_agent_message: answer });
   process.stdout.write(`• ${answer}\n› `);
+  if (line.includes('LATE')) setTimeout(() => event({ type: 'turn_aborted', reason: 'interrupted' }), 150);
 }
