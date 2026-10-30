@@ -507,10 +507,20 @@ export class TerminalHost {
     a.turn = turn;
     a.unopened.push(turn);
     this.watch(a);
-    /* The start turn's token gets the program its tools first; Hornhoof then ends that turn for this one. */
-    if (start) await start;
+    const answered = () => Promise.race([turn.opened!.promise, sleep(this.openMs)]);
+    if (start) {
+      /* The start turn's token gets the program its tools first; Hornhoof then ends that turn for this one. Turns typed
+         meanwhile go one by one, each once Hornhoof answered the last, whose end goes out with that answer when it is
+         over: Hornhoof opens a typed turn only while none runs. */
+      const next = start.then(answered);
+      a.starting = next;
+      void next.then(() => {
+        if (a.starting === next) a.starting = null;
+      });
+      await start;
+    }
     this.opts.send({ type: 'turn.open', agentKey: a.key, text: text.slice(0, 100_000), ref: turn.ref });
-    await Promise.race([turn.opened!.promise, sleep(this.openMs)]);
+    await answered();
   }
 
   /* Hornhoof's answer to turn.open, found by its ref; a Hornhoof from before refs answers in order. A typed turn gets its

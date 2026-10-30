@@ -341,7 +341,7 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     expect(told).not.toContain('./shop');
   });
 
-  it('tells Hornhoof of turns typed while the program starts in the order they were typed', async () => {
+  it('tells Hornhoof of turns typed while the program starts one by one, in order, each after the last one ended', async () => {
     await setUp({ toolsMs: 1500 });
     const starting = host.run(codexJob('c46', ''));
     await until(async () => (await host.screen('c46')).includes('›'));
@@ -353,8 +353,19 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
       await until(async () => (await host.screen('c46')).includes(`echo: ${line}`));
     }
     await starting;
-    await until(() => sent.filter(m => m.type === 'turn.open').length === 2);
-    expect(sent.flatMap(m => (m.type === 'turn.open' ? [m.text] : []))).toEqual(['first', 'second']);
+    const opens = () => sent.flatMap(m => (m.type === 'turn.open' ? [m.text] : []));
+    await until(() => opens().length === 1);
+    await new Promise(r => setTimeout(r, 300));
+    /* Hornhoof takes a typed turn only when none runs: the second waits until the first is answered and over. */
+    expect(opens()).toEqual(['first']);
+    ack('c46', 'job-46a', 0);
+    await until(() => opens().length === 2);
+    expect(opens()).toEqual(['first', 'second']);
+    const at = (found: (m: NodeMessage) => boolean) => sent.findIndex(found);
+    expect(at(m => m.type === 'job.done' && m.jobId === 'job-46a')).toBeLessThan(at(m => m.type === 'turn.open' && m.text === 'second'));
+    ack('c46', 'job-46b', 1);
+    await until(() => Boolean(done('job-46b')));
+    expect(done('job-46b')).toMatchObject({ ok: true, result: 'echo: second' });
   });
 
   it('starts the program in place of the waiting screen shown after its session was gone', async () => {
