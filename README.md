@@ -4,7 +4,7 @@ Run your company with a team of AI agents.
 
 Hornhoof is a self-hosted workspace where people and AI agents work together as one company. You set up departments, each one led by an agent, and watch every agent's work live on one map.
 
-The project is in early development. Right now you can set up a company, invite people, connect subscriptions from your machines, have the orchestrator build departments and staff them with agents, and talk to every agent. Agents take tasks in a later version.
+The project is in early development. Right now you can set up a company, invite people, connect subscriptions from your machines, have the orchestrator build departments, staff them with agents and lay the work out in turns, and talk to every agent.
 
 ## Quick start
 
@@ -77,13 +77,13 @@ Each person sees the whole company, or the departments and teams ticked for them
 
 ## Tasks and turns
 
-Work moves as tasks. The Tasks tab lists every task a person reaches, grouped by where it stands, with what agents wait for from people on top: questions to answer, commits to approve, and tasks an agent got stuck on.
+Work moves as tasks, and tasks come in turns. Nobody fills the tracker by hand: people write to the orchestrator, and he lays the work out. A turn has a short title, its main point, and one task for each department's part; the people's own words it came from open on a click. The Tasks tab shows what agents wait for from people on top (questions to answer, commits to approve, tasks an agent got stuck on), then the running turn with its tasks, the planned turns in order, and the finished ones folded away.
 
-A turn is the goal the whole company works on now. Someone who sees the whole company starts it on the Tasks tab; the orchestrator gets it as a task, splits it into one task per department and hands each to the department's head. The head breaks it into tasks for members, and gives each task its gates: the reviewers, testers or security people who check the work in order. A member works the task in a branch, hands it in with evidence, and each gate passes it on or sends it back with a reason. When all gates pass, the head reports to the orchestrator, and he reports the turn's task once every department is done. Closing the turn is the CEO's click.
+One turn runs at a time. When the orchestrator lays out a turn while one runs, it waits as planned, with its tasks planned too. When people add to the work, he puts it into the running turn, where it starts at once, into a planned turn, or into a new turn after them, and says where it went. Each task of a running turn goes to its department's head, who breaks it into tasks for members and gives each its gates: the reviewers, testers or security people who check the work in order. A member works the task in a branch, hands it in with evidence, and each gate passes it on or sends it back with a reason. When all gates pass, the head reports to the orchestrator. Once every task of the turn is closed, the turn ends and the next planned one starts by itself.
 
 Hornhoof wakes an agent when there is something for it: a task given to it, work at its gate, a task sent back, an answer from a person. An agent that ends three turns in a row without moving its task stops and asks a person how to go on.
 
-Anyone whose access lists a department can give it a task from inside the department with "New task"; it goes to the department's head. Nothing reaches the main branch until someone who sees the whole company approves the exact commit; the department's people see it waiting.
+Anyone whose access lists a department can give it a task from inside the department with "New task"; it goes to the department's head and joins the running turn, if one runs. Nothing reaches the main branch until someone who sees the whole company approves the exact commit; the department's people see it waiting.
 
 ## Repositories
 

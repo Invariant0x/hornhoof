@@ -169,7 +169,7 @@ function DeptTasks({ department: d, head, canGive, selected, onOpenTask }: { dep
         <ul className="dv-tasks">
           {[...tasks].sort(byState).map(task => (
             <li key={task.id}>
-              <TaskRow task={task} on={selected === task.id} place={[t.tasks.groups[task.status], task.product?.name].filter(Boolean).join(' / ')} onOpen={onOpenTask} />
+              <TaskRow task={task} on={selected === task.id} place={task.product?.name ?? ''} onOpen={onOpenTask} />
             </li>
           ))}
         </ul>

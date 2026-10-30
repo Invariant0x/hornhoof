@@ -9,8 +9,8 @@ function shell(routes: Record<string, unknown> = {}) {
   const calls = mockApi({
     'GET /api/org': [200, DEV_ORG],
     'GET /api/requests': [200, { requests: [] }],
-    'GET /api/turns/current': [200, { turn: TURN }],
-    'GET /api/tasks?status=open': [200, { tasks: TASKS }],
+    'GET /api/turns': [200, { turns: [TURN] }],
+    'GET /api/tasks?status=all': [200, { tasks: TASKS }],
     'GET /api/tasks/t12': [200, { task: TASK_DETAIL }],
     ...(routes as Record<string, [number, unknown]>),
   });
