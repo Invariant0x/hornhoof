@@ -1,5 +1,6 @@
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { AgentEvent } from '@hornhoof/protocol';
+import { API_MODELS, type AgentEvent, type ModelOption } from '@hornhoof/protocol';
 import type { JobUser } from '../isolation.js';
 import type { ProviderAdapter, RunInput, RunResult } from '../runner.js';
 import { contentText, inputText, isRecord } from './events.js';
@@ -36,6 +37,20 @@ export function codexEvents(line: unknown): AgentEvent[] {
   return [];
 }
 
+type CachedModel = { slug?: unknown; display_name?: unknown; visibility?: unknown };
+
+function cachedModels(file: string): ModelOption[] {
+  try {
+    const { models } = JSON.parse(readFileSync(file, 'utf8')) as { models?: CachedModel[] };
+    return (models ?? [])
+      .filter((m): m is { slug: string; display_name: string } => m.visibility === 'list' && typeof m.slug === 'string' && typeof m.display_name === 'string')
+      .map(m => ({ id: m.slug.slice(0, 80), name: m.display_name.slice(0, 80) }))
+      .slice(0, 60);
+  } catch {
+    return [];
+  }
+}
+
 export function codexAdapter({ home, tools, bin = join(tools, 'bin', 'codex'), secret = null, mode, user = null }: Options): ProviderAdapter {
   function env(jobSecret: string | null, toolToken: string | null = null): NodeJS.ProcessEnv {
     const extra: Record<string, string> = { CODEX_HOME: ensureDir(home) };
@@ -49,6 +64,12 @@ export function codexAdapter({ home, tools, bin = join(tools, 'bin', 'codex'), s
   return {
     async install() {
       await installPackage(tools, '@openai/codex');
+    },
+
+    /* Codex keeps the models a plan offers in its home; the ones its picker shows are visibility "list". */
+    async models() {
+      if (mode === 'api_key') return API_MODELS.openai_api;
+      return cachedModels(join(home, 'models_cache.json'));
     },
 
     async loggedIn() {

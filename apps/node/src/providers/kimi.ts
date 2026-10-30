@@ -56,6 +56,11 @@ export function kimiAdapter({ home, tools, bin = join(tools, 'bin', 'kimi'), use
       return credentials().length > 0;
     },
 
+    /* Kimi Code does not list its models; it runs its default. */
+    async models() {
+      return [];
+    },
+
     async login(io) {
       await interactiveLogin(bin, ['login'], env(), io);
     },

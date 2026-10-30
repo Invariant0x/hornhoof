@@ -24,6 +24,44 @@ const Limits = z.object({
 });
 export type Limits = z.infer<typeof Limits>;
 
+/* A model a subscription can run, as its program names it. */
+const ModelOption = z.object({ id: z.string().min(1).max(80), name: z.string().min(1).max(80) });
+export type ModelOption = z.infer<typeof ModelOption>;
+const Models = z.array(ModelOption).max(60);
+
+/* API keys run these; a node never needs to report them. */
+export const API_MODELS: { anthropic_api: ModelOption[]; openai_api: ModelOption[] } = {
+  anthropic_api: [
+    { id: 'claude-fable-5-1', name: 'Claude Fable 5.1' },
+    { id: 'claude-opus-5-5', name: 'Claude Opus 5.5' },
+    { id: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5' },
+    { id: 'claude-haiku-5-5', name: 'Claude Haiku 5.5' },
+  ],
+  openai_api: [
+    { id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol' },
+    { id: 'gpt-6-astra', name: 'GPT-6 Astra' },
+    { id: 'gpt-6.1-terra', name: 'GPT-6.1 Terra' },
+    { id: 'gpt-6-sol', name: 'GPT-6 Sol' },
+    { id: 'gpt-6-luna', name: 'GPT-6 Luna' },
+  ],
+};
+
+/* Claude Code takes these and moves each to the newest model of its family. */
+export const CLAUDE_ALIASES: ModelOption[] = [
+  { id: 'fable', name: 'Fable' },
+  { id: 'opus', name: 'Opus' },
+  { id: 'sonnet', name: 'Sonnet' },
+  { id: 'haiku', name: 'Haiku' },
+];
+
+/* What a subscription can run: what its node reported, else what Hornhoof knows for the provider. The web adds "Default" on top. */
+export function modelsFor(provider: ProviderId, reported: ModelOption[] | null): ModelOption[] {
+  if (reported) return reported;
+  if (provider === 'anthropic_api' || provider === 'openai_api') return API_MODELS[provider];
+  if (provider === 'claude') return CLAUDE_ALIASES;
+  return [];
+}
+
 /* Job and subscription ids end up in folder names on the node, so they hold no slashes or dots. */
 const Id = z.string().regex(/^[A-Za-z0-9-]{1,64}$/);
 
@@ -60,8 +98,8 @@ export const DEPARTMENT_TEMPLATES: readonly { key: TemplateKey; roleCode: string
 ];
 
 const NodeMessage = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('hello'), version: z.string().max(40), loggedIn: z.boolean(), running: z.array(z.string()).max(100) }),
-  z.object({ type: z.literal('status'), loggedIn: z.boolean(), limits: Limits.nullable() }),
+  z.object({ type: z.literal('hello'), version: z.string().max(40), loggedIn: z.boolean(), running: z.array(z.string()).max(100), models: Models.optional() }),
+  z.object({ type: z.literal('status'), loggedIn: z.boolean(), limits: Limits.nullable(), models: Models.optional() }),
   z.object({ type: z.literal('job.started'), jobId: z.string() }),
   z.object({
     type: z.literal('job.done'),

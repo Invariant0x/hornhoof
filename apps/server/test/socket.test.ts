@@ -48,6 +48,21 @@ describe('node socket', () => {
     await until(async () => (await subOf(app, ceo, subId)).online === false);
   });
 
+  it('keeps the models a node reports, and keeps them when a message has none', async () => {
+    const { db, url, subId, key } = await liveCompany();
+    const node = await connectNode(url, key);
+    const models = [{ id: 'opus', name: 'Opus' }, { id: 'sonnet', name: 'Sonnet' }];
+    node.send({ ...hello(), models });
+    const stored = async () => (await db.select().from(subscriptions).where(eq(subscriptions.id, subId)))[0]!;
+    await until(async () => (await stored()).models !== null);
+    expect((await stored()).models).toEqual(models);
+    node.send({ type: 'status', loggedIn: true, limits: null, models: [models[0]!] });
+    await until(async () => (await stored()).models?.length === 1);
+    node.send({ type: 'status', loggedIn: false, limits: null });
+    await until(async () => (await stored()).status === 'needs_login');
+    expect((await stored()).models).toEqual([models[0]]);
+  });
+
   it('drops a node that stops answering pings', async () => {
     const { app, url, ceo, subId, key } = await liveCompany();
     const node = await connectNode(url, key, { autoPong: false });

@@ -57,6 +57,18 @@ describe('runNode', () => {
     expect(server.received[3]).toMatchObject({ loggedIn: true, limits: { status: 'allowed', windows: [] } });
   });
 
+  it('sends the models its program can run in hello and status', async () => {
+    const server = await fakeServer();
+    const models = [{ id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol' }];
+    const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, models: async () => models }, log: () => {} });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    expect(server.received[0]).toMatchObject({ type: 'hello', models });
+    server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'codex', prompt: 'hi', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
+    await server.wait(() => server.received.some(m => m.type === 'status'));
+    expect(server.received.find(m => m.type === 'status')).toMatchObject({ models });
+  });
+
   it('cleans up and says so when Hornhoof removes the subscription', async () => {
     const server = await fakeServer();
     const dir = nodeDir(server.url);

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { AgentEvent, Limits } from '@hornhoof/protocol';
+import { API_MODELS, CLAUDE_ALIASES, type AgentEvent, type Limits } from '@hornhoof/protocol';
 import type { JobUser } from '../isolation.js';
 import type { ProviderAdapter, RunInput, RunResult } from '../runner.js';
 import { contentText, inputText, isRecord, toolName } from './events.js';
@@ -81,6 +81,11 @@ export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'),
   return {
     async install() {
       await installPackage(tools, '@anthropic-ai/claude-code');
+    },
+
+    /* Z.ai maps the aliases to its GLM models, so a GLM plan offers only the default. */
+    async models() {
+      return mode === 'plan' ? CLAUDE_ALIASES : mode === 'api_key' ? API_MODELS.anthropic_api : [];
     },
 
     async loggedIn() {

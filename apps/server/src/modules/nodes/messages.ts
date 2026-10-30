@@ -52,7 +52,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
         }
         await db
           .update(subscriptions)
-          .set({ nodeVersion: msg.version, lastSeenAt: now, status: msg.loggedIn ? 'ready' : 'needs_login' })
+          .set({ nodeVersion: msg.version, lastSeenAt: now, status: msg.loggedIn ? 'ready' : 'needs_login', ...(msg.models ? { models: msg.models } : {}) })
           .where(eq(subscriptions.id, sub.id));
       }
       await failOpenJobs(ctx, jobsOf(id, ctx), 'machine_restarted', msg.running);
@@ -70,7 +70,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       if (id.kind !== 'node') return;
       await db
         .update(subscriptions)
-        .set({ status: msg.loggedIn ? 'ready' : 'needs_login', limits: msg.limits, lastSeenAt: now })
+        .set({ status: msg.loggedIn ? 'ready' : 'needs_login', limits: msg.limits, lastSeenAt: now, ...(msg.models ? { models: msg.models } : {}) })
         .where(and(eq(subscriptions.id, id.subscriptionId), isNull(subscriptions.removedAt)));
       /* A signed-in subscription may have turns waiting for it. */
       if (msg.loggedIn) await pumpWaiting(ctx);

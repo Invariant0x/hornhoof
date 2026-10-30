@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cut, DEPARTMENT_TEMPLATES, parseNodeMessage, parseServerMessage, type AgentEvent, type NodeMessage, type ServerMessage } from '../src/index.js';
+import { API_MODELS, CLAUDE_ALIASES, cut, DEPARTMENT_TEMPLATES, modelsFor, parseNodeMessage, parseServerMessage, type AgentEvent, type NodeMessage, type ServerMessage } from '../src/index.js';
 
 const LIMITS = { status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0.38, resetsAt: '2026-10-29T21:30:00.000Z' }] };
 
@@ -7,6 +7,8 @@ const NODE: NodeMessage[] = [
   { type: 'hello', version: '0.2.0', loggedIn: true, running: ['job-1'] },
   { type: 'status', loggedIn: false, limits: LIMITS },
   { type: 'status', loggedIn: true, limits: null },
+  { type: 'hello', version: '0.4.0', loggedIn: true, running: [], models: [{ id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol' }] },
+  { type: 'status', loggedIn: true, limits: null, models: [] },
   { type: 'job.started', jobId: 'job-1' },
   { type: 'job.done', jobId: 'job-1', ok: true, sessionId: 'abc', result: 'ready', tail: '', error: null },
   { type: 'job.done', jobId: 'job-2', ok: false, sessionId: null, result: '', tail: 'boom', error: 'timeout' },
@@ -106,5 +108,26 @@ describe('cut', () => {
     expect(cut('abcdef', 4)).toBe('abc…');
     expect(cut('abc', 4)).toBe('abc');
     expect(cut('abcd', 4)).toBe('abcd');
+  });
+});
+
+describe('models', () => {
+  it('accepts hello with models and without, up to 60 of them', () => {
+    const many = Array.from({ length: 61 }, (_, i) => ({ id: `m${i}`, name: `M${i}` }));
+    expect(parseNodeMessage(JSON.stringify({ type: 'hello', version: '0.4.0', loggedIn: true, running: [], models: many }))).toBeNull();
+    expect(parseNodeMessage(JSON.stringify({ type: 'hello', version: '0.4.0', loggedIn: true, running: [], models: [{ id: 'x'.repeat(81), name: 'X' }] }))).toBeNull();
+    expect(parseNodeMessage(JSON.stringify({ type: 'hello', version: '0.3.0', loggedIn: true, running: [] }))).toEqual({ type: 'hello', version: '0.3.0', loggedIn: true, running: [] });
+  });
+
+  it('lists models for each provider', () => {
+    expect(API_MODELS.anthropic_api.map(m => m.id)).toEqual(['claude-fable-5-1', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5']);
+    expect(API_MODELS.openai_api.map(m => m.id)).toEqual(['gpt-6.1-sol', 'gpt-6-astra', 'gpt-6.1-terra', 'gpt-6-sol', 'gpt-6-luna']);
+    expect(CLAUDE_ALIASES.map(m => m.id)).toEqual(['fable', 'opus', 'sonnet', 'haiku']);
+    const reported = [{ id: 'gpt-6-astra', name: 'GPT-6 Astra' }];
+    expect(modelsFor('codex', reported)).toEqual(reported);
+    expect(modelsFor('anthropic_api', null)).toEqual(API_MODELS.anthropic_api);
+    expect(modelsFor('claude', null)).toEqual(CLAUDE_ALIASES);
+    expect(modelsFor('kimi', null)).toEqual([]);
+    expect(modelsFor('codex', [])).toEqual([]);
   });
 });

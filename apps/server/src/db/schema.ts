@@ -1,4 +1,4 @@
-import { TEMPLATE_KEYS, type Limits } from '@hornhoof/protocol';
+import { TEMPLATE_KEYS, type Limits, type ModelOption } from '@hornhoof/protocol';
 import { bigserial, boolean, index, integer, jsonb, pgTable, text, timestamp, unique, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
 
 const id = () => uuid('id').primaryKey().defaultRandom();
@@ -142,7 +142,7 @@ export const subscriptions = pgTable(
     lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
     limits: jsonb('limits').$type<Limits>(),
     /* The models its node says it can run; null until a node reports them. */
-    models: jsonb('models').$type<{ id: string; name: string }[]>(),
+    models: jsonb('models').$type<ModelOption[]>(),
     removedAt: timestamp('removed_at', { withTimezone: true }),
     createdAt: createdAt(),
   },

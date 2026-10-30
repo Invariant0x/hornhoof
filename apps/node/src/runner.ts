@@ -1,6 +1,6 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { cut, TAIL_BYTES, type AgentEvent, type JobError, type Limits, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
+import { cut, TAIL_BYTES, type AgentEvent, type JobError, type Limits, type ModelOption, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
 import { redact } from './redact.js';
 import { readSessions, rememberSession } from './state.js';
 
@@ -30,6 +30,8 @@ export interface ProviderAdapter {
   run(input: RunInput): Promise<RunResult>;
   /* Values that must never leave the node, such as the tokens in the program's credentials file. */
   secrets(): Promise<string[]>;
+  /* The models the program can run, when it can tell. Hornhoof falls back to what it knows for the provider. */
+  models?(): Promise<ModelOption[]>;
 }
 
 type JobRun = Extract<ServerMessage, { type: 'job.run' }>;

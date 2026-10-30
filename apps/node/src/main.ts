@@ -54,7 +54,14 @@ export async function runNode({ dir, adapter, builtin, log = console.log, loginC
   const emit = (m: NodeMessage) => {
     if (!send?.(m)) outbox.push(m);
   };
-  const status = () => emit({ type: 'status', loggedIn, limits });
+  /* A personal node says which models its program can run, read again after each job since a plan's list can change.
+     The built-in node serves API keys, whose models Hornhoof knows. */
+  const readModels = async () => (single?.models ? await single.models() : undefined);
+  let models = await readModels();
+  const status = async () => {
+    models = await readModels();
+    emit({ type: 'status', loggedIn, limits, ...(models ? { models } : {}) });
+  };
 
   const conn = connect({
     url: state.server.replace(/^http/, 'ws') + '/api/nodes/socket',
@@ -63,7 +70,7 @@ export async function runNode({ dir, adapter, builtin, log = console.log, loginC
       send = next;
       /* Finished jobs waiting in the outbox still count as running, so the server does not give up on them. */
       const pending = outbox.flatMap(m => (m.type === 'job.done' ? [m.jobId] : []));
-      next({ type: 'hello', version: VERSION, loggedIn, running: [...running.keys(), ...pending] });
+      next({ type: 'hello', version: VERSION, loggedIn, running: [...running.keys(), ...pending], ...(models ? { models } : {}) });
       for (const m of outbox.splice(0)) emit(m);
     },
     onMessage: m => void handle(m),
@@ -119,7 +126,7 @@ export async function runNode({ dir, adapter, builtin, log = console.log, loginC
     running.delete(m.jobId);
     emit(done);
     if (done.error === 'not_logged_in') loggedIn = false;
-    status();
+    void status();
   }
 
   /* While signed out, look again now and then, so the person sees Ready soon after signing in. */
@@ -127,7 +134,7 @@ export async function runNode({ dir, adapter, builtin, log = console.log, loginC
     if (loggedIn || stopped || !single) return;
     if (await single.loggedIn()) {
       loggedIn = true;
-      status();
+      void status();
     }
   }, loginCheckMs);
   timer.unref();

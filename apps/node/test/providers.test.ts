@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
-import type { AgentEvent, ProviderId } from '@hornhoof/protocol';
+import { CLAUDE_ALIASES, type AgentEvent, type ProviderId } from '@hornhoof/protocol';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { adapterFor } from '../src/providers/index.js';
 import { claudeEvents, limitsFrom } from '../src/providers/claude.js';
@@ -278,6 +278,32 @@ describe('Codex', () => {
     expect(lastRun().argv).toEqual(['login', '--device-auth']);
     expect(readFileSync(io.urlFile, 'utf8')).toBe(`${LOGIN_URL}\n`);
     expect(printed()).toContain('device code sign-in');
+  });
+});
+
+describe('models', () => {
+  it('lists the Codex models its plan shows in its picker', async () => {
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(home, 'models_cache.json'), JSON.stringify({
+      fetched_at: '2026-10-30T00:00:00Z',
+      models: [
+        { slug: 'gpt-6.1-sol', display_name: 'GPT-6.1 Sol', visibility: 'list' },
+        { slug: 'gpt-6-internal', display_name: 'Internal', visibility: 'hide' },
+        { slug: 'gpt-6-luna', display_name: 'GPT-6 Luna', visibility: 'list' },
+      ],
+    }));
+    expect(await adapter('codex').models!()).toEqual([
+      { id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol' },
+      { id: 'gpt-6-luna', name: 'GPT-6 Luna' },
+    ]);
+    writeFileSync(join(home, 'models_cache.json'), '{ not json');
+    expect(await adapter('codex').models!()).toEqual([]);
+  });
+
+  it("lists Claude's aliases, and nothing for programs that do not say", async () => {
+    expect(await adapter('claude').models!()).toEqual(CLAUDE_ALIASES);
+    expect(await adapter('codex').models!()).toEqual([]);
+    expect(await adapter('kimi').models!()).toEqual([]);
   });
 });
 
