@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { api } from '../api';
-import { errorText, useT, type Messages } from '../i18n';
+import { deptLabel, errorText, useT, type Messages } from '../i18n';
 import type { Me, Org, PersonView } from '../types';
 import { CopyButton } from '../ui/CopyButton';
 import { Edge } from '../ui/Edge';
@@ -13,9 +13,9 @@ type Panel = { kind: 'invite' } | { kind: 'link'; name: string; url: string } | 
 
 function scopeOptions(t: Messages, org: Org | null): ScopeOption[] {
   const options: ScopeOption[] = [{ value: 'company', label: t.people.wholeCompany, scope: { kind: 'company' } }];
-  for (const d of org?.departments ?? []) options.push({ value: `department:${d.id}`, label: d.name, scope: { kind: 'department', id: d.id } });
+  for (const d of org?.departments ?? []) options.push({ value: `department:${d.id}`, label: deptLabel(t, d), scope: { kind: 'department', id: d.id } });
   for (const d of org?.departments ?? []) {
-    for (const t of d.teams) options.push({ value: `team:${t.id}`, label: `${d.name} / ${t.name}`, scope: { kind: 'team', id: t.id } });
+    for (const team of d.teams) options.push({ value: `team:${team.id}`, label: `${deptLabel(t, d)} / ${team.name}`, scope: { kind: 'team', id: team.id } });
   }
   return options;
 }

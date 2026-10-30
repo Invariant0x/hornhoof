@@ -37,6 +37,37 @@ describe('GET /api/org', () => {
     expect(org.departments[0].teams[1]).toMatchObject({ stage: 2, gate: true, about: '' });
   });
 
+  it('shows template departments by template, with their products inside', async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    const [company] = await db.select().from(companies);
+    const [dev] = await db.insert(departments).values({ companyId: company!.id, name: null, templateKey: 'development', roleCode: 'DEV', about: 'Builds both products', position: 0 }).returning();
+    await db.insert(departments).values([
+      { companyId: company!.id, name: 'Mascot', parentId: dev!.id, roleCode: 'DEV', position: 1 },
+      { companyId: company!.id, name: 'Characters', parentId: dev!.id, roleCode: 'DEV', position: 2 },
+      { companyId: company!.id, name: 'Sales Europe', templateKey: 'sales', roleCode: 'SAL', position: 3 },
+    ]);
+    const org = (await app.inject({ url: '/api/org', ...as(ceo) })).json();
+    expect(org.departments).toHaveLength(2);
+    expect(org.departments[0]).toMatchObject({ id: dev!.id, name: null, templateKey: 'development', roleCode: 'DEV', about: 'Builds both products' });
+    expect(org.departments[0].products.map((p: { name: string }) => p.name)).toEqual(['Mascot', 'Characters']);
+    expect(org.departments[1]).toMatchObject({ name: 'Sales Europe', templateKey: 'sales', products: [] });
+  });
+
+  it('names a template department by its template where a subscription serves it', async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    const [company] = await db.select().from(companies);
+    const [dev] = await db.insert(departments).values({ companyId: company!.id, name: null, templateKey: 'development', roleCode: 'DEV' }).returning();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/subscriptions',
+      payload: { provider: 'openai_api', kind: 'api_key', label: 'Dev key', apiKey: 'sk-proj-dev-key-1234', target: { kind: 'department', id: dev!.id } },
+      ...as(ceo),
+    });
+    expect(res.json().subscription.place).toEqual({ kind: 'department', id: dev!.id, name: 'Development' });
+  });
+
   it('leaves disabled people off the map', async () => {
     const { app, db } = await testApp();
     const ceo = await setUpCompany(app);

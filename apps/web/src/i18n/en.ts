@@ -179,6 +179,16 @@ export const en = {
     yesDisconnect: 'Yes, disconnect',
     noMachines: 'No machines yet.',
   },
+  templates: {
+    operations: { name: 'Operations', description: 'Always there: sets up tools, accounts, registrations and integrations for the other departments, and fixes what breaks.' },
+    development: { name: 'Development', description: 'Builds and ships the products: code, tests, releases.' },
+    marketing: { name: 'Marketing', description: 'Tells the market about the products: positioning, content, campaigns, launches.' },
+    sales: { name: 'Sales', description: 'Finds customers and closes deals.' },
+    business_development: { name: 'Business development', description: 'Partnerships, new markets and new lines of business.' },
+    design: { name: 'Design', description: 'Interfaces, brand and visual materials.' },
+    support: { name: 'Support', description: 'Answers customers and passes what they report to the right department.' },
+    finance: { name: 'Finance', description: 'Budget, payments, invoices and reports.' },
+  },
   errors: {
     codes: {
       validation: 'Check the fields and try again.',

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { api } from '../api';
-import { errorText, useT, type Messages } from '../i18n';
+import { deptLabel, errorText, useT, type Messages } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
 import type { Department, Org, SubView } from '../types';
 import { Edge } from '../ui/Edge';
@@ -239,7 +239,7 @@ export function MapScreen() {
           <div key={d.id} className="dept" style={{ left: spots[i]!.x, top: spots[i]!.y, width: DEPT_W, height: DEPT_H }}>
             <Edge cut={12}>
               <span className="role">{d.roleCode}</span>
-              <b className="dname">{d.name}</b>
+              <b className="dname">{deptLabel(t, d)}</b>
               <span className="cnt">{t.map.teams(d.teams.length)}</span>
             </Edge>
           </div>

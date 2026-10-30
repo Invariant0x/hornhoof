@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import type { Ctx } from '../../app.js';
 import { personColumns, requirePerson } from '../../auth/session.js';
 import { agents, companies, departments, people, teams } from '../../db/schema.js';
+import { deptName } from '../departments/templates.js';
 import { workingCount } from '../events/store.js';
 import { personViews } from '../people/views.js';
 import { identityOf } from '../nodes/hub.js';
@@ -31,14 +32,20 @@ export function orgRoutes(app: FastifyInstance, { db, hub }: Ctx): void {
       },
       agents: { total: allAgents.length, working: await workingCount(db, me.companyId) },
       people: await personViews(db, leaders),
-      departments: depts.map(d => ({
-        id: d.id,
-        name: d.name,
-        roleCode: d.roleCode,
-        teams: allTeams
-          .filter(t => t.departmentId === d.id)
-          .map(t => ({ id: t.id, name: t.name, about: t.about, stage: t.stage, gate: t.gate })),
-      })),
+      /* Products are departments inside a department; the map shows only the top level and lists the products on it. */
+      departments: depts
+        .filter(d => !d.parentId)
+        .map(d => ({
+          id: d.id,
+          name: d.name,
+          templateKey: d.templateKey,
+          roleCode: d.roleCode,
+          about: d.about,
+          products: depts.filter(p => p.parentId === d.id).map(p => ({ id: p.id, name: deptName(p) })),
+          teams: allTeams
+            .filter(t => t.departmentId === d.id)
+            .map(t => ({ id: t.id, name: t.name, about: t.about, stage: t.stage, gate: t.gate })),
+        })),
     };
   });
 }

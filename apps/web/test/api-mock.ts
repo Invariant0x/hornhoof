@@ -48,8 +48,8 @@ export const ORG: Org = {
 export const ORG_WITH_TEAMS: Org = {
   ...ORG,
   departments: [
-    { id: 'd1', name: 'Marketing', roleCode: 'CMO', teams: [{ id: 't1', name: 'Social', about: '', stage: 0, gate: false }, { id: 't2', name: 'Content', about: '', stage: 0, gate: false }] },
-    { id: 'd2', name: 'Development', roleCode: 'CTO', teams: [] },
+    { id: 'd1', name: 'Marketing', templateKey: null, roleCode: 'CMO', about: '', products: [], teams: [{ id: 't1', name: 'Social', about: '', stage: 0, gate: false }, { id: 't2', name: 'Content', about: '', stage: 0, gate: false }] },
+    { id: 'd2', name: 'Development', templateKey: null, roleCode: 'CTO', about: '', products: [], teams: [] },
   ],
 };
 

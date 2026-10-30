@@ -76,3 +76,8 @@ export function errorText(t: Messages, err: unknown): string {
   const codes: Record<string, string> = t.errors.codes;
   return codes[err.code] ?? t.errors.codes.internal;
 }
+
+/* A typed name as typed; a template department without one by its template's name in the person's language. */
+export function deptLabel(t: Messages, d: { name: string | null; templateKey: keyof Messages['templates'] | null }): string {
+  return d.name ?? (d.templateKey ? t.templates[d.templateKey].name : '');
+}

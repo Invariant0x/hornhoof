@@ -1,6 +1,6 @@
-import type { Limits, ProviderId } from '@hornhoof/protocol';
+import type { Limits, ProviderId, TemplateKey } from '@hornhoof/protocol';
 
-export type { Limits, ProviderId };
+export type { Limits, ProviderId, TemplateKey };
 
 export type ScopeKind = 'company' | 'department' | 'team';
 
@@ -47,7 +47,8 @@ export type SubView = {
 
 export type Team = { id: string; name: string; about: string; stage: number; gate: boolean };
 
-export type Department = { id: string; name: string; roleCode: string; teams: Team[] };
+/* A template department without a typed name shows its template's name in the person's language. */
+export type Department = { id: string; name: string | null; templateKey: TemplateKey | null; roleCode: string; about: string; products: { id: string; name: string }[]; teams: Team[] };
 
 export type Org = {
   company: Company;
