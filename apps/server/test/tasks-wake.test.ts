@@ -117,8 +117,8 @@ describe('waking agents for their tasks', () => {
 
   it('wakes an employee for its waiting tasks when it gets a subscription again', async () => {
     const { app, owner, ctx, db, sub, bruno, memberTask, turnsOf } = await company();
-    await db.update(agents).set({ subscriptionId: null }).where(eq(agents.id, bruno.id));
     const task = await memberTask();
+    await db.update(agents).set({ subscriptionId: null }).where(eq(agents.id, bruno.id));
     await wakeAll(ctx, [{ agentId: bruno.id, taskId: task.id, why: 'assigned' }]);
     expect(await turnsOf(bruno.id)).toEqual([]);
     const patched = await app.inject({ method: 'PATCH', url: `/api/agents/${bruno.id}`, payload: { subscription: sub.id }, ...as(owner) });
@@ -128,12 +128,19 @@ describe('waking agents for their tasks', () => {
 
   it('wakes the orchestrator for his waiting tasks when he gets a subscription again', async () => {
     const { app, owner, ctx, db, sub, ceo, orchestrator, turnsOf } = await company();
-    await db.update(agents).set({ subscriptionId: null }).where(eq(agents.id, orchestrator.id));
     const { task } = await createTask(ctx, { personId: ceo.id }, { title: 'Turn 1: Launch', brief: '', body: '', departmentId: null, assigneeAgentId: orchestrator.id });
+    await db.update(agents).set({ subscriptionId: null }).where(eq(agents.id, orchestrator.id));
     await wakeAll(ctx, [{ agentId: orchestrator.id, taskId: task.id, why: 'assigned' }]);
     expect(await turnsOf(orchestrator.id)).toEqual([]);
     expect((await app.inject({ method: 'POST', url: `/api/subscriptions/${sub.id}/orchestrator`, ...as(owner) })).statusCode).toBe(200);
     expect((await turnsOf(orchestrator.id)).map(j => j.taskId)).toEqual([task.id]);
+  });
+
+  it('wakes nobody when an agent moves from one subscription to another', async () => {
+    const { app, owner, ctx, sub, ceo, orchestrator, turnsOf } = await company();
+    await createTask(ctx, { personId: ceo.id }, { title: 'Turn 1: Launch', brief: '', body: '', departmentId: null, assigneeAgentId: orchestrator.id });
+    expect((await app.inject({ method: 'POST', url: `/api/subscriptions/${sub.id}/orchestrator`, ...as(owner) })).statusCode).toBe(200);
+    expect(await turnsOf(orchestrator.id)).toEqual([]);
   });
 
   it("tells the orchestrator to go on with a department's task that cannot by the tools he has", async () => {

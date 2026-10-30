@@ -1,5 +1,5 @@
-import { DEPARTMENT_TEMPLATES, type TemplateKey } from '@hornhoof/protocol';
-import { and, asc, eq, inArray, isNotNull, isNull, max } from 'drizzle-orm';
+import { DEPARTMENT_TEMPLATES, MAX_INSTRUCTIONS, type TemplateKey } from '@hornhoof/protocol';
+import { and, asc, eq, inArray, isNotNull, isNull, max, or } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -8,6 +8,7 @@ import { agentChanges, agents, companies, departments, proposals, tasks, teams }
 import { encryptSecret } from '../../crypto/secrets.js';
 import { Repo } from '@hornhoof/protocol';
 import { ApiError } from '../../errors.js';
+import { instructionsOf } from '../agents/instructions.js';
 import { enqueueTurn, orchestratorOf, orchestratorState } from '../conversation/queue.js';
 import { appendEvent } from '../events/store.js';
 import { checkStaff, departmentOf, HireLine, runsTier, servingSubscriptions, spotIn } from '../tools/staff.js';
@@ -102,7 +103,10 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
         if (item.remove) {
           const inside = [dept.id, ...(await tx.select({ id: departments.id }).from(departments).where(eq(departments.parentId, dept.id))).map(d => d.id)];
           /* Removed employees and staff proposals keep their history without the department; a waiting proposal ends. */
-          await tx.update(agents).set({ departmentId: null, productId: null, teamId: null }).where(and(inArray(agents.departmentId, inside), isNotNull(agents.removedAt)));
+          await tx
+            .update(agents)
+            .set({ departmentId: null, productId: null, teamId: null })
+            .where(and(or(inArray(agents.departmentId, inside), inArray(agents.productId, inside)), isNotNull(agents.removedAt)));
           await tx.update(proposals).set({ status: 'dismissed' }).where(and(inArray(proposals.departmentId, inside), eq(proposals.status, 'pending')));
           await tx.update(proposals).set({ departmentId: null }).where(inArray(proposals.departmentId, inside));
           /* Finished tasks keep their log without the department. */
@@ -262,7 +266,11 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
             templateHashes: hashes,
             createdBy: me.id,
           })
-          .returning({ id: agents.id });
+          .returning();
+        /* A turn carries the instructions whole, so a hire whose skills make them too long would never run. */
+        if ((await instructionsOf({ db: tx, templates: ctx.templates }, agent!)).text.length > MAX_INSTRUCTIONS) {
+          throw new ApiError(400, 'validation', `${line.name}'s instructions would be longer than ${MAX_INSTRUCTIONS} characters. Turn some skills off.`, 'instructions_too_long');
+        }
         await tx.insert(agentChanges).values({ companyId: me.companyId, agentId: agent!.id, personId: me.id, field: 'hired', before: null, after: line });
         hired.push({ id: agent!.id, name: line.name, role: role.id, title: role.title.en });
       }

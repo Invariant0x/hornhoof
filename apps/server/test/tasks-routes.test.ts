@@ -1,7 +1,8 @@
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agents, companies, departments, jobs, requests, subscriptions, tasks } from '../src/db/schema.js';
-import { ask, createTask } from '../src/modules/tasks/engine.js';
+import { ask, createTask, submit } from '../src/modules/tasks/engine.js';
+import { wakeAll } from '../src/modules/tasks/wake.js';
 import { as, invitePerson, listen, openStream, setUpCompany, testApp, until } from './helpers.js';
 
 async function company() {
@@ -100,6 +101,51 @@ describe('tasks for people', () => {
     expect(turns[0]!.prompt).toContain('Not now.');
   });
 
+  it('keeps an employee who holds or does an open task, and takes it off the gates it has not reached', async () => {
+    const { app, ctx, db, ceo, head, bruno, dev, hire } = await company();
+    const rita = await hire('Rita', 'worker', 'DEV-REV');
+    const ira = await hire('Ira', 'worker', 'DEV-QA');
+    const { task } = await createTask(ctx, { agentId: head.id }, { title: 'Checkout API', brief: '', body: '', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true, gates: [rita.id, ira.id] });
+    const remove = (id: string) => app.inject({ method: 'DELETE', url: `/api/agents/${id}`, ...as(ceo) });
+    const refused = await remove(bruno.id);
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json().error.reason).toBe('agent_has_tasks');
+    expect(refused.json().error.message).toContain('#1');
+    expect((await remove(rita.id)).statusCode).toBe(204);
+    const [now] = await db.select().from(tasks).where(eq(tasks.id, task.id));
+    expect(now!.gates).toEqual([ira.id]);
+    await submit(ctx, bruno.id, task.id, { summary: 'Done.', evidence: 'npm test' });
+    expect((await remove(ira.id)).json().error.reason).toBe('agent_has_tasks');
+  });
+
+  it('gives no task to an employee without a subscription', async () => {
+    const { ctx, db, head, bruno, dev, oleg, post } = await company();
+    await db.update(agents).set({ subscriptionId: null }).where(eq(agents.id, bruno.id));
+    await expect(createTask(ctx, { agentId: head.id }, { title: 'Checkout API', brief: '', body: '', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true })).rejects.toMatchObject({ reason: 'no_subscription' });
+    await db.update(agents).set({ subscriptionId: null }).where(eq(agents.id, head.id));
+    const made = await post(oleg, '/api/tasks', { title: 'Payments', brief: '', body: '', department: dev.id });
+    expect(made.statusCode).toBe(409);
+    expect(made.json().error.reason).toBe('no_subscription');
+  });
+
+  it("stops the turns on a task a person cancels, and the tasks under it", async () => {
+    const { ctx, db, head, bruno, dev, oleg, post } = await company();
+    const { task: parent } = await createTask(ctx, { agentId: head.id }, { title: 'Checkout', brief: '', body: '', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true });
+    const { task: child } = await createTask(ctx, { agentId: bruno.id }, { title: 'Checkout API', brief: '', body: '', departmentId: dev.id, parentId: parent.id, assigneeAgentId: head.id, executor: true });
+    await wakeAll(ctx, [
+      { agentId: bruno.id, taskId: parent.id, why: 'assigned' },
+      { agentId: head.id, taskId: child.id, why: 'assigned' },
+    ]);
+    const [running] = await db.select().from(jobs).where(eq(jobs.taskId, parent.id));
+    await db.update(jobs).set({ status: 'running', startedAt: new Date() }).where(eq(jobs.id, running!.id));
+    await post(oleg, `/api/tasks/${parent.id}/cancel`, { why: 'Not now.' });
+    const ended = await db.select({ taskId: jobs.taskId, status: jobs.status, error: jobs.error }).from(jobs).where(inArray(jobs.taskId, [parent.id, child.id]));
+    expect(ended).toEqual(expect.arrayContaining([
+      { taskId: parent.id, status: 'failed', error: 'cancelled' },
+      { taskId: child.id, status: 'failed', error: 'cancelled' },
+    ]));
+  });
+
   it('shows a commit to approve to the people of the department, and lets only the whole company approve it', async () => {
     const { ctx, head, bruno, dev, oleg, ceo, post, get } = await company();
     const { task } = await createTask(ctx, { agentId: head.id }, { title: 'Release', brief: '', body: '', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true });
@@ -168,9 +214,9 @@ describe('tasks for people', () => {
   });
 
   it('shows what a department works on now, and keeps a department with open tasks', async () => {
-    const { ctx, db, companyId, ceo, maria, post, get } = await company();
+    const { ctx, db, companyId, ceo, maria, post, get, hire } = await company();
     const [design] = await db.insert(departments).values({ companyId, templateKey: 'design', roleCode: 'DSN', position: 3 }).returning();
-    const [lead] = await db.insert(agents).values({ companyId, kind: 'head', name: 'Dora', roleKey: 'DSN-HEAD', departmentId: design!.id, model: '' }).returning();
+    const lead = await hire('Dora', 'head', 'DSN-HEAD', design!.id);
     const { task } = await createTask(ctx, { personId: (await get(ceo, '/api/me')).json().person.id }, { title: 'Payments', brief: '', body: '', departmentId: design!.id, assigneeAgentId: lead!.id });
     expect((await get(ceo, '/api/org')).json().departments.find((d: { id: string }) => d.id === design!.id).current).toMatchObject({ number: 1, title: 'Payments' });
     expect((await get(maria, '/api/org')).json().departments.find((d: { id: string }) => d.id === design!.id).current).toBe(null);

@@ -76,12 +76,21 @@ describe('runJob', () => {
     expect(done.tail).toBe('[hidden] [hidden] [hidden]');
   });
 
-  it('starts a new folder for a session it never saved, even one named like constructor', async () => {
+  it('starts a new session in a new folder for a session it never saved, even one named like constructor', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
     const adapter = fakeAdapter(async () => ok());
     const done = await runJob(adapter, job({ jobId: 'j-x', sessionId: 'constructor' }), dir);
     expect(done.ok).toBe(true);
     expect(adapter.inputs[0]!.workDir).toBe(join(dir, 'work', 'j-x'));
+    expect(adapter.inputs[0]!.sessionId).toBe(null);
+  });
+
+  it("starts a new session in an agent's folder when this machine never saved the one the server names", async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
+    const adapter = fakeAdapter(async () => ok());
+    await runJob(adapter, job({ jobId: 'j-y', sessionId: 'sess-elsewhere', workspace: { key: 'agent-1', repo: null } }), dir);
+    expect(adapter.inputs[0]!.workDir).toBe(join(dir, 'work', 'agents', 'agent-1'));
+    expect(adapter.inputs[0]!.sessionId).toBe(null);
   });
 
   it('turns a work folder it cannot make into agent_failed', async () => {

@@ -5,10 +5,10 @@ import type { Ctx } from '../../app.js';
 import { accessOf, canReach, type Access } from '../../auth/access.js';
 import { requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
 import { agents, departments, requests, tasks, turns } from '../../db/schema.js';
-import { orchestratorOf } from '../conversation/queue.js';
+import { liveSubscription, orchestratorOf } from '../conversation/queue.js';
 import { answer, cancel, CLOSED, comment, createTask, refuse, taskSpot, type Task } from './engine.js';
 import { taskDetail, taskLines } from './views.js';
-import { wakeAll } from './wake.js';
+import { stopTurns, wakeAll } from './wake.js';
 
 const IdParams = z.object({ id: z.uuid() });
 const NewTaskBody = z.object({
@@ -102,6 +102,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { id } = IdParams.parse(req.params);
     const { why } = z.object({ why: z.string().max(1000).default('') }).parse(req.body ?? {});
     const moved = await cancel(ctx, { personId: me.id }, (await reachable(me, id)).id, why);
+    await stopTurns(ctx, moved.closed);
     await wakeAll(ctx, moved.wakes);
     return { task: await detail(me, moved.task) };
   });
@@ -171,6 +172,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { goal } = z.object({ goal: z.string().trim().min(1).max(600) }).parse(req.body);
     const orchestrator = await orchestratorOf(ctx, me.companyId);
     if (!orchestrator) throw refuse(409, 'no_head', 'This company has no orchestrator.');
+    if (!(await liveSubscription(ctx, orchestrator.id))) throw refuse(409, 'no_subscription', 'The orchestrator has no subscription to run on. Connect one first.');
     const turn = await db.transaction(async tx => {
       const [open] = await tx.select({ id: turns.id }).from(turns).where(and(eq(turns.companyId, me.companyId), eq(turns.status, 'open')));
       if (open) throw refuse(409, 'turn_open', 'A turn is open. Close it before starting the next.');

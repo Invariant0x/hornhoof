@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agents, companies, departments, people, requests, taskEvents, tasks } from '../src/db/schema.js';
+import { agents, companies, departments, people, requests, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
 import { answer, ask, blocked, cancel, comment, createTask, report, submit, updateTask, verdict } from '../src/modules/tasks/engine.js';
 import { setUpCompany, testApp } from './helpers.js';
 
@@ -11,9 +11,10 @@ async function company() {
   const companyId = acme!.id;
   const [ceo] = await db.select().from(people);
   const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+  const [sub] = await db.select().from(subscriptions);
   const [dev] = await db.insert(departments).values({ companyId, templateKey: 'development', roleCode: 'DEV' }).returning();
   const hire = async (name: string, kind: 'head' | 'worker', roleKey: string) =>
-    (await db.insert(agents).values({ companyId, kind, name, roleKey, departmentId: dev!.id, model: '' }).returning())[0]!;
+    (await db.insert(agents).values({ companyId, kind, name, roleKey, departmentId: dev!.id, model: '', subscriptionId: sub!.id }).returning())[0]!;
   const head = await hire('Hana', 'head', 'DEV-HEAD');
   const bruno = await hire('Bruno', 'worker', 'DEV-BE');
   const rita = await hire('Rita', 'worker', 'DEV-REV');

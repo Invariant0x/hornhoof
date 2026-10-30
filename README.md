@@ -61,7 +61,7 @@ Open Subscriptions, choose Connect a subscription, tick the plans this machine w
 
 Every node carries git, ripgrep and a headless Chromium with Playwright, so agents can open and check web pages; anything else they need they install into their own folder.
 
-Agents will run on that machine with your subscription, and people with access to this Hornhoof can give them work. To update the nodes on a machine later, run `curl -fsSL <your Hornhoof address>/install.sh | bash` on it. To remove them, end the same command with `bash -s -- --uninstall`.
+Agents will run on that machine with your subscription, and people with access to this Hornhoof can give them work. Agents that share one subscription run as one user on its machine, so they can read each other's folders and, while they work, each other's tokens; give departments whose work must stay apart subscriptions of their own. To update the nodes on a machine later, run `curl -fsSL <your Hornhoof address>/install.sh | bash` on it. To remove them, end the same command with `bash -s -- --uninstall`.
 
 ## Running the company
 
@@ -85,7 +85,7 @@ Anyone whose access lists a department can give it a task from inside the depart
 
 ## Repositories
 
-A department, or a product inside it, can name the git repository its agents work in. Inside the department, people who see the whole company set its address, branch and a token. The token is kept encrypted and shows only its last four characters; it never reaches a command line or the clone's settings, and git gets it only for the repository's own host. A new address on another host needs a new token. A product's repository goes to the agents of that product instead of the department's.
+A department, or a product inside it, can name the git repository its agents work in. Inside the department, people who see the whole company set its address, branch and a token. The token is kept encrypted and shows only its last four characters; it never reaches a command line or the clone's settings, and git gets it only for the repository's own host. A new address on another host needs a new token. Each turn carries it to the machine that runs the agent, so it lands on the machines of whoever's subscriptions serve the department: give it a fine-grained token for this one repository. A product's repository goes to the agents of that product instead of the department's.
 
 Each agent gets its own clone in its own folder on the node before its first turn, keeps it between turns, and works in a branch per task. Nodes from 0.5.0 on take turns with a repository; an older node keeps them waiting until it is updated.
 

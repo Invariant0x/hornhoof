@@ -6,7 +6,7 @@ import { agents, departments, jobs, requests, tasks, turns } from '../../db/sche
 import { ApiError } from '../../errors.js';
 import { ask, blocked, cancel, CLOSED, comment, createTask, refuse, report, submit, updateTask, verdict, type Moved, type Task } from './engine.js';
 import { taskByRef, taskDetail, taskLines } from './views.js';
-import { wakeAll } from './wake.js';
+import { stopTurns, wakeAll } from './wake.js';
 
 export type ToolJob = { id: string; companyId: string; agentId: string; agentKind: 'orchestrator' | 'head' | 'worker' };
 type Agent = typeof agents.$inferSelect;
@@ -217,7 +217,9 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         run(async () => {
           const { task } = await find(ref);
           if (task.createdByAgentId !== job.agentId) throw refuse(403, 'task_not_yours', `#${task.number} was not created by you.`);
-          return { text: `Cancelled #${task.number}.`, moved: await cancel(ctx, { agentId: job.agentId }, task.id, why) };
+          const moved = await cancel(ctx, { agentId: job.agentId }, task.id, why);
+          await stopTurns(ctx, moved.closed, job.agentId);
+          return { text: `Cancelled #${task.number}.`, moved };
         }),
     );
   }
