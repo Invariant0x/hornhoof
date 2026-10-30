@@ -1,7 +1,12 @@
 import Fastify, { type FastifyInstance } from 'fastify';
+import { existsSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished } from 'vitest';
-import { companies, departments } from '../src/db/schema.js';
+import { agents, companies, departments, jobs, subscriptions } from '../src/db/schema.js';
+import { publishWorking } from '../src/modules/events/store.js';
 import { as, invitePerson, setUpCompany, testApp } from './helpers.js';
 
 type FakeBuild = { commit: string; version?: string; title?: string; migrations?: number; created?: string };
@@ -59,10 +64,25 @@ async function fakeRegistry(tags: Record<string, FakeBuild>): Promise<{ base: st
   };
 }
 
-async function company(registry: { base: string }, commit = 'aaa') {
-  const { app, db } = await testApp({ HORNHOOF_IMAGE: 'ghcr.io/acme/hornhoof', REGISTRY_URL: registry.base, HORNHOOF_VERSION: '0.4.0', HORNHOOF_COMMIT: commit });
-  return { app, db, ceo: await setUpCompany(app) };
+async function company(registry: { base: string }, commit = 'aaa', control = mkdtempSync(join(tmpdir(), 'hh-control-'))) {
+  const { app, db } = await testApp({
+    HORNHOOF_IMAGE: 'ghcr.io/acme/hornhoof',
+    REGISTRY_URL: registry.base,
+    HORNHOOF_VERSION: '0.4.0',
+    HORNHOOF_COMMIT: commit,
+    HORNHOOF_CONTROL_DIR: control,
+  });
+  return { app, db, control, ceo: await setUpCompany(app) };
 }
+
+/* The updater is alive when it touched alive in the last 30 seconds. */
+const updaterAlive = (control: string, ageSeconds = 0) => {
+  writeFileSync(join(control, 'alive'), '');
+  const when = Date.now() / 1000 - ageSeconds;
+  utimesSync(join(control, 'alive'), when, when);
+};
+const request = (control: string) => (existsSync(join(control, 'request.json')) ? JSON.parse(readFileSync(join(control, 'request.json'), 'utf8')) : null);
+const SHA = 'b'.repeat(40);
 
 describe('updates', () => {
   it('finds a newer build of the main line', async () => {
@@ -124,5 +144,76 @@ describe('updates', () => {
     expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(seller) })).statusCode).toBe(403);
     expect((await app.inject({ method: 'POST', url: '/api/updates/check', ...as(seller) })).statusCode).toBe(403);
     expect(registry.calls).toEqual([]);
+  });
+
+  it('asks the updater for a version, by the commit of its build', async () => {
+    const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' }, '0.4.1': { commit: SHA, version: '0.4.1' } });
+    const { app, ceo, control } = await company(registry);
+    updaterAlive(control);
+    await app.inject({ method: 'POST', url: '/api/updates/check', ...as(ceo) });
+    const res = await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest' }, ...as(ceo) });
+    expect(res.statusCode).toBe(202);
+    expect(request(control)).toEqual({ id: res.json().id, version: '0.4.1', tag: SHA });
+    writeFileSync(join(control, 'status.json'), JSON.stringify({ id: res.json().id, version: '0.4.1', state: 'running', step: 'pull', log: 'Downloading 0.4.1.\n', at: '2026-10-30T01:00:00Z' }));
+    const view = (await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json();
+    expect(view.updater).toEqual({ present: true, status: expect.objectContaining({ state: 'running', step: 'pull' }), waiting: null });
+    const again = await app.inject({ method: 'POST', url: '/api/updates', payload: { version: '0.4.1' }, ...as(ceo) });
+    expect(again.statusCode).toBe(409);
+    expect(again.json().error.reason).toBe('update_running');
+  });
+
+  it('refuses a version that is not published', async () => {
+    const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' } });
+    const { app, ceo, control } = await company(registry);
+    updaterAlive(control);
+    const res = await app.inject({ method: 'POST', url: '/api/updates', payload: { version: '9.9.9' }, ...as(ceo) });
+    expect(res.statusCode).toBe(400);
+    expect(request(control)).toBeNull();
+  });
+
+  it('waits for the agents before an update when asked', async () => {
+    const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' } });
+    const { app, db, ceo, control } = await company(registry);
+    updaterAlive(control);
+    const [acme] = await db.select().from(companies);
+    const [sub] = await db.select().from(subscriptions);
+    const [orchestrator] = await db.select().from(agents);
+    const [job] = await db
+      .insert(jobs)
+      .values({ companyId: acme!.id, subscriptionId: sub!.id, agentId: orchestrator!.id, prompt: 'build', status: 'running', timeoutMs: 1000 })
+      .returning();
+    const res = await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: true }, ...as(ceo) });
+    expect(res.statusCode).toBe(202);
+    expect(request(control)).toBeNull();
+    expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.waiting).toEqual({ version: '0.4.1' });
+    await db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, job!.id));
+    await publishWorking(app.ctx, acme!.id);
+    await expect.poll(() => request(control)).toEqual({ id: res.json().id, version: '0.4.1', tag: SHA });
+    expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.waiting).toBeNull();
+  });
+
+  it('calls off an update that waits for the agents', async () => {
+    const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' } });
+    const { app, db, ceo, control } = await company(registry);
+    updaterAlive(control);
+    const [acme] = await db.select().from(companies);
+    const [sub] = await db.select().from(subscriptions);
+    const [job] = await db.insert(jobs).values({ companyId: acme!.id, subscriptionId: sub!.id, agentId: (await db.select().from(agents))[0]!.id, prompt: 'x', status: 'running', timeoutMs: 1000 }).returning();
+    await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: true }, ...as(ceo) });
+    expect((await app.inject({ method: 'DELETE', url: '/api/updates', ...as(ceo) })).statusCode).toBe(204);
+    await db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, job!.id));
+    await publishWorking(app.ctx, acme!.id);
+    expect(request(control)).toBeNull();
+  });
+
+  it('says when no updater runs', async () => {
+    const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' } });
+    const { app, ceo, control } = await company(registry);
+    expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater).toEqual({ present: false, status: null, waiting: null });
+    const missing = await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest' }, ...as(ceo) });
+    expect(missing.statusCode).toBe(503);
+    expect(missing.json().error.reason).toBe('updater_missing');
+    updaterAlive(control, 31);
+    expect((await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest' }, ...as(ceo) })).statusCode).toBe(503);
   });
 });

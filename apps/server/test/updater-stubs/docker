@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# The host's Docker as the updater sees it. STUB_COMMITS words are "tag=commit": what each build of the app image is.
+printf 'docker %s\n' "$*" >> "$STUB_LOG"
+commit_of() { for w in ${STUB_COMMITS:-}; do [ "${w%%=*}" = "$1" ] && { printf '%s' "${w#*=}"; return; }; done; }
+case "$1 $2" in
+  'compose ps')
+    case " $* " in *' db '*) echo dbcid ;; *' app '*) echo appcid ;; esac ;;
+  'exec dbcid') echo '-- a dump of the hornhoof database' ;;
+  'image inspect') last=${!#}; commit_of "${last##*:}" ;;
+  'inspect --format') [ "${!#}" = appcid ] && printf '%s\n' "${STUB_RUNNING_COMMIT:-}" ;;
+  *)
+    case "$1" in
+      pull) [ "${STUB_PULL:-ok}" = fail ] && { echo "pull access denied" >&2; exit 1; } ;;
+      create) echo "cid-${2##*:}" ;;
+      cp)
+        tag=${2%%:*}; tag=${tag#cid-}
+        case "$2" in
+          *:/app/scripts/install.sh)
+            # The installer of that build: records how it was run and starts that build, unless it is broken.
+            cat > "$3" <<SCRIPT
+#!/usr/bin/env bash
+printf 'installer %s HORNHOOF_VERSION=%s HORNHOOF_FROM_UPDATER=%s HORNHOOF_SERVER_DIR=%s HORNHOOF_COMPOSE_FILE=%s\n' "\$*" "\$HORNHOOF_VERSION" "\$HORNHOOF_FROM_UPDATER" "\$HORNHOOF_SERVER_DIR" "\$(basename "\$HORNHOOF_COMPOSE_FILE")" >> "$STUB_LOG"
+grep -v '^HORNHOOF_VERSION=' "\$HORNHOOF_SERVER_DIR/.env" > "\$HORNHOOF_SERVER_DIR/.env.new"; printf 'HORNHOOF_VERSION=%s\n' "\$HORNHOOF_VERSION" >> "\$HORNHOOF_SERVER_DIR/.env.new"; mv "\$HORNHOOF_SERVER_DIR/.env.new" "\$HORNHOOF_SERVER_DIR/.env"
+case " ${STUB_BROKEN:-} " in *" $tag "*) echo dead > "$STUB_STATE/running" ;; *) printf '%s' "$(commit_of "$tag")" > "$STUB_STATE/running" ;; esac
+SCRIPT
+            ;;
+          *:/app/compose.yaml) echo 'services: {}' > "$3" ;;
+        esac ;;
+    esac ;;
+esac
+exit 0

@@ -1,7 +1,7 @@
 import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { ZodError } from 'zod';
 
-export type ErrorCode = 'validation' | 'unauthorized' | 'forbidden' | 'not_found' | 'conflict' | 'gone' | 'too_many';
+export type ErrorCode = 'validation' | 'unauthorized' | 'forbidden' | 'not_found' | 'conflict' | 'gone' | 'too_many' | 'unavailable';
 
 /* A stable reason the web app turns into text in the person's language. */
 export type ErrorReason =
@@ -31,7 +31,10 @@ export type ErrorReason =
   | 'orchestrator_not_ready'
   | 'nothing_running'
   | 'proposal_closed'
-  | 'structure_invalid';
+  | 'structure_invalid'
+  | 'updater_missing'
+  | 'update_running'
+  | 'version_unknown';
 
 export class ApiError extends Error {
   constructor(

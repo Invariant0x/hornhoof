@@ -7,6 +7,11 @@
 #   install.sh server --name <name>                              another company's server on this computer, in ~/hornhoof-<name>
 #   install.sh --uninstall                                       remove this machine's nodes
 #
+# Server installs pin the build in .env as HORNHOOF_VERSION (HORNHOOF_VERSION=<tag> picks one, latest otherwise) and
+# take compose.yaml from that build of the image. The updater service runs the installer of the build it moves to
+# with HORNHOOF_FROM_UPDATER=1: no questions and no Docker setup, the compose file it brings, and this server's nodes
+# on this machine move to the same build.
+#
 # Several companies can share a computer: each node carries the address of the server it works for, and an
 # update or an uninstall touches only that server's nodes.
 #
@@ -18,10 +23,14 @@ SERVER="${HORNHOOF_SERVER:-__HORNHOOF_SERVER__}"
 TTY="${HORNHOOF_TTY:-/dev/tty}"
 STATE_DIR="${HORNHOOF_HOME:-$HOME/.hornhoof}"
 IMAGE="${HORNHOOF_NODE_IMAGE:-ghcr.io/invariant0x/hornhoof-node:latest}"
-COMPOSE_URL="${HORNHOOF_COMPOSE_URL:-https://raw.githubusercontent.com/Invariant0x/hornhoof/main/compose.yaml}"
+COMPOSE_URL="${HORNHOOF_COMPOSE_URL:-}"
+APP_IMAGE="${HORNHOOF_APP_IMAGE:-ghcr.io/invariant0x/hornhoof}"
 BASE_DIR="${HORNHOOF_DIR:-$HOME/hornhoof}"
 SERVER_DIR=$BASE_DIR
 NAME=''
+PIN="${HORNHOOF_VERSION:-}"
+FROM_UPDATER="${HORNHOOF_FROM_UPDATER:-}"
+COMPOSE_SRC="${HORNHOOF_COMPOSE_FILE:-}"
 
 LABEL=hornhoof.subscription
 SERVER_LABEL=hornhoof.server
@@ -457,11 +466,65 @@ free_port() {
   printf '%s' "$port"
 }
 
+# set_env <key> <value>: one line for the key in the server's .env, which stays readable only by its owner.
+set_env() {
+  local file="$SERVER_DIR/.env"
+  (
+    umask 077
+    {
+      grep -v "^$1=" "$file" 2> /dev/null || true
+      printf '%s=%s\n' "$1" "$2"
+    } > "$file.new"
+  )
+  cat "$file.new" > "$file"
+  rm -f "$file.new"
+}
+
+env_value() { grep "^$1=" "$SERVER_DIR/.env" 2> /dev/null | tail -1 | cut -d= -f2- || true; }
+
+# compose.yaml comes inside the app image, so the compose file always matches the build it starts.
+compose_from_image() {
+  local image="$APP_IMAGE:${PIN:-latest}" cid
+  say "Getting compose.yaml from $image."
+  "${DOCKER[@]}" pull "$image" > /dev/null || fail "Could not download $image. Check the internet connection, then run this command again."
+  cid=$("${DOCKER[@]}" create "$image") || fail "Could not read $image. Run this command again."
+  if ! "${DOCKER[@]}" cp "$cid:/app/compose.yaml" "$SERVER_DIR/compose.yaml" > /dev/null; then
+    "${DOCKER[@]}" rm "$cid" > /dev/null 2>&1 || true
+    fail "$image has no compose.yaml. Pick a newer build with HORNHOOF_VERSION, or set HORNHOOF_COMPOSE_URL."
+  fi
+  "${DOCKER[@]}" rm "$cid" > /dev/null 2>&1 || true
+}
+
+# This server's nodes on this machine move to the node image of the same build, with their volumes.
+sweep_nodes() {
+  local public port entry name id provider seen=' ' pulled=''
+  IMAGE="${HORNHOOF_NODE_IMAGE:-ghcr.io/invariant0x/hornhoof-node:${PIN:-latest}}"
+  public=$(env_value PUBLIC_URL)
+  port=$(port_of "$SERVER_DIR/.env")
+  for SERVER in $public "http://localhost:$port"; do
+    for entry in $(existing_nodes); do
+      name=${entry%%:*}
+      id=${entry#*:}
+      case "$seen" in *" $name "*) continue ;; esac
+      seen="$seen$name "
+      if [ -z "$pulled" ]; then
+        pull_image
+        pulled=1
+      fi
+      provider=${name#hornhoof-}
+      provider=${provider%-*}
+      LOCAL_SERVER=''
+      node_server
+      start_node "$name" "$id" "$provider"
+    done
+  done
+}
+
 server_mode() {
-  local env_file url public port local_url i=0
+  local env_file url public port local_url project i=0
   local -a compose
   detect_system
-  ensure_docker
+  if [ -z "$FROM_UPDATER" ]; then ensure_docker; fi
   if "${DOCKER[@]}" compose version > /dev/null 2>&1; then
     compose=("${DOCKER[@]}" compose)
   elif command -v docker-compose > /dev/null 2>&1; then
@@ -477,10 +540,8 @@ server_mode() {
   if [ -n "$NAME" ]; then compose+=(-p "hornhoof-$NAME"); fi
 
   mkdir -p "$SERVER_DIR"
-  say "Getting compose.yaml into $SERVER_DIR."
-  curl -fsSL "$COMPOSE_URL" -o "$SERVER_DIR/compose.yaml" || fail "Could not download $COMPOSE_URL. Check the internet connection, then run this command again."
-
   env_file="$SERVER_DIR/.env"
+  if [ -n "$FROM_UPDATER" ] && [ ! -f "$env_file" ]; then fail "There is no $env_file to update."; fi
   if [ -f "$env_file" ]; then
     say "Keeping the settings in $env_file."
     if ! grep -q '^NODE_KEY=' "$env_file"; then
@@ -500,12 +561,38 @@ server_mode() {
     )
     say "Wrote fresh secrets to $env_file. Keep it safe: HORNHOOF_SECRET is needed to read the stored API keys."
   fi
+  # .env names the compose project and the folder too, for the updater and for docker compose run by hand here.
+  if [ -n "$NAME" ]; then
+    project="hornhoof-$NAME"
+  else
+    project=$(env_value COMPOSE_PROJECT_NAME)
+    [ -n "$project" ] || project=$(basename "$SERVER_DIR" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')
+  fi
+  set_env COMPOSE_PROJECT_NAME "$project"
+  set_env HORNHOOF_SERVER_DIR "$SERVER_DIR"
+  set_env HORNHOOF_VERSION "${PIN:-latest}"
   local_url="http://localhost:$(port_of "$env_file")"
-  public=$(grep '^PUBLIC_URL=' "$env_file" | tail -1 | cut -d= -f2- || true)
+  public=$(env_value PUBLIC_URL)
   [ -n "$public" ] || public=$local_url
+
+  if [ -n "$FROM_UPDATER" ] && [ -n "$COMPOSE_SRC" ]; then
+    cp "$COMPOSE_SRC" "$SERVER_DIR/compose.yaml"
+  elif [ -n "$COMPOSE_URL" ]; then
+    say "Getting compose.yaml into $SERVER_DIR."
+    curl -fsSL "$COMPOSE_URL" -o "$SERVER_DIR/compose.yaml" || fail "Could not download $COMPOSE_URL. Check the internet connection, then run this command again."
+  else
+    compose_from_image
+  fi
 
   say "Downloading the Hornhoof images."
   (cd "$SERVER_DIR" && "${compose[@]}" pull) || fail "Could not download the images. Check the internet connection, then run this command again."
+  # The updater checks the new server's answer itself, and replaces itself once it comes.
+  if [ -n "$FROM_UPDATER" ]; then
+    say "Starting Hornhoof ${PIN:-latest}."
+    (cd "$SERVER_DIR" && "${compose[@]}" up -d --no-build db app node) || fail "Hornhoof did not start."
+    sweep_nodes
+    return 0
+  fi
   say "Starting Hornhoof."
   (cd "$SERVER_DIR" && "${compose[@]}" up -d --no-build) || fail "Hornhoof did not start. Run docker compose logs in $SERVER_DIR to see why."
   say "Waiting for Hornhoof to answer."
@@ -558,6 +645,8 @@ if [ -n "$NAME" ]; then
   [ "${#NAME}" -le 32 ] || fail "--name takes up to 32 characters."
   SERVER_DIR="$BASE_DIR-$NAME"
 fi
+# The updater names the folder it runs in.
+if [ -n "${HORNHOOF_SERVER_DIR:-}" ]; then SERVER_DIR=$HORNHOOF_SERVER_DIR; fi
 
 case "$MODE" in
   node) node_mode "$CODE" ;;

@@ -1,7 +1,8 @@
 services:
   app:
     build: .
-    image: ghcr.io/invariant0x/hornhoof:latest
+    # install.sh and the updater pin the build in .env as HORNHOOF_VERSION.
+    image: ghcr.io/invariant0x/hornhoof:${HORNHOOF_VERSION:-latest}
     restart: unless-stopped
     # install.sh picks a free port for each company's server on one computer and keeps it in .env.
     ports:
@@ -11,6 +12,8 @@ services:
       HORNHOOF_SECRET: ${HORNHOOF_SECRET:?Set HORNHOOF_SECRET in .env}
       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8080}
       NODE_KEY: ${NODE_KEY:?Set NODE_KEY in .env}
+    volumes:
+      - control:/control
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:8080/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 10s
@@ -44,7 +47,7 @@ services:
   # Runs checks and jobs for the company's API keys. Agents run whatever their prompt asks, so it has no
   # capabilities and cannot reach the database.
   node:
-    image: ghcr.io/invariant0x/hornhoof-node:latest
+    image: ghcr.io/invariant0x/hornhoof-node:${HORNHOOF_VERSION:-latest}
     build:
       context: .
       dockerfile: apps/node/Dockerfile
@@ -74,6 +77,27 @@ services:
     networks:
       - default
 
+  # Moves this server to another build when someone updates from the web app: it saves the database, runs the
+  # installer that comes inside that build, and goes back if the new server does not answer. It holds the Docker
+  # socket, so it reads nothing from the app but the tag of a Hornhoof image. The server folder is mounted at the
+  # same path as on the host, so compose finds the same files from inside.
+  updater:
+    image: ghcr.io/invariant0x/hornhoof-updater:${HORNHOOF_VERSION:-latest}
+    build:
+      context: .
+      dockerfile: apps/updater/Dockerfile
+    restart: unless-stopped
+    environment:
+      HORNHOOF_IMAGE: ghcr.io/invariant0x/hornhoof
+      HORNHOOF_SERVER_DIR: ${HORNHOOF_SERVER_DIR:-}
+      COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-hornhoof}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - control:/control
+      - ${HORNHOOF_SERVER_DIR:-.}:${HORNHOOF_SERVER_DIR:-/srv/hornhoof}
+    networks:
+      - default
+
 networks:
   internal:
     internal: true
@@ -81,3 +105,4 @@ networks:
 volumes:
   pgdata:
   nodedata:
+  control:

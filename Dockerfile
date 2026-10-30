@@ -32,6 +32,8 @@ COPY --from=build /app/apps/web/dist apps/web/dist
 ARG HORNHOOF_VERSION=
 ARG HORNHOOF_COMMIT=
 ENV HORNHOOF_VERSION=$HORNHOOF_VERSION HORNHOOF_COMMIT=$HORNHOOF_COMMIT
+# The folder the app shares with the updater; a new volume takes this owner.
+RUN mkdir -p /control && chown node:node /control
 USER node
 EXPOSE 8080
 CMD ["node", "apps/server/dist/main.js"]

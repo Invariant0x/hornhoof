@@ -352,6 +352,71 @@ describe('install.sh', () => {
     expect(readFileSync(join(home, 'hornhoof-beta', '.env'), 'utf8')).toContain('HORNHOOF_PORT=8081');
   });
 
+  it('pins the version and the project name for the updater', () => {
+    const r = install({ args: ['server', '--name', 'acme'], tty: '\n', env: { HORNHOOF_VERSION: '0.4.1', STUB_PORTS_TAKEN: '8080' } });
+    expect(r.code).toBe(0);
+    const env = readFileSync(join(r.dir, 'home', 'hornhoof-acme', '.env'), 'utf8');
+    expect(env).toMatch(/^HORNHOOF_VERSION=0\.4\.1$/m);
+    expect(env).toMatch(/^COMPOSE_PROJECT_NAME=hornhoof-acme$/m);
+    expect(env).toContain(`HORNHOOF_SERVER_DIR=${join(r.dir, 'home', 'hornhoof-acme')}\n`);
+    expect(env).toMatch(/^HORNHOOF_SECRET=.{44}$/m);
+    const plain = install({ args: ['server'], tty: '\n' });
+    const plainEnv = readFileSync(join(plain.dir, 'home', 'hornhoof', '.env'), 'utf8');
+    expect(plainEnv).toMatch(/^HORNHOOF_VERSION=latest$/m);
+    expect(plainEnv).toMatch(/^COMPOSE_PROJECT_NAME=hornhoof$/m);
+    expect(plainEnv.match(/^HORNHOOF_VERSION=/gm)).toHaveLength(1);
+  });
+
+  it('takes compose.yaml from the build it installs, not from GitHub', () => {
+    const r = install({ args: ['server'], tty: '\n', env: { HORNHOOF_VERSION: '0.4.1' } });
+    expect(r.code).toBe(0);
+    const dir = join(r.dir, 'home', 'hornhoof');
+    expect(r.calls).toContain('docker pull ghcr.io/invariant0x/hornhoof:0.4.1');
+    expect(r.calls).toContain('docker create ghcr.io/invariant0x/hornhoof:0.4.1');
+    expect(r.calls).toContain(`docker cp cid-app:/app/compose.yaml ${dir}/compose.yaml`);
+    expect(r.calls.some(c => c.startsWith('curl') && c.includes('compose.yaml'))).toBe(false);
+    expect(readFileSync(join(dir, 'compose.yaml'), 'utf8')).toBe('services: {}\n');
+  });
+
+  it('updates without questions or downloads from the updater', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-server-'));
+    writeFileSync(join(dir, '.env'), 'HORNHOOF_SECRET=keep-me\nNODE_KEY=k\nPUBLIC_URL=http://localhost:8080\nCOMPOSE_PROJECT_NAME=hornhoof\nHORNHOOF_VERSION=0.4.0\n');
+    const compose = join(dir, 'brought.yaml');
+    writeFileSync(compose, 'services: {app: {}}\n');
+    const r = install({ args: ['server'], tty: '', env: { HORNHOOF_FROM_UPDATER: '1', HORNHOOF_SERVER_DIR: dir, HORNHOOF_VERSION: '0.4.1', HORNHOOF_COMPOSE_FILE: compose } });
+    expect(r.code).toBe(0);
+    expect(readFileSync(join(dir, 'compose.yaml'), 'utf8')).toBe('services: {app: {}}\n');
+    const env = readFileSync(join(dir, '.env'), 'utf8');
+    expect(env).toMatch(/^HORNHOOF_VERSION=0\.4\.1$/m);
+    expect(env).toContain('HORNHOOF_SECRET=keep-me');
+    expect(r.calls.some(c => c.startsWith('curl'))).toBe(false);
+    expect(r.calls.some(c => c.startsWith('docker create') || c.startsWith('docker info'))).toBe(false);
+    expect(r.calls).toContain('docker compose pull');
+    expect(r.calls).toContain('docker compose up -d --no-build db app node');
+    expect(r.calls).not.toContain('docker compose up -d --no-build');
+  });
+
+  it("moves this server's nodes on this machine to the new build from the updater", () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-server-'));
+    writeFileSync(join(dir, '.env'), 'HORNHOOF_SECRET=s\nNODE_KEY=k\nPUBLIC_URL=https://hh.acme.test\nHORNHOOF_PORT=8081\n');
+    const r = install({
+      args: ['server'],
+      env: {
+        HORNHOOF_FROM_UPDATER: '1',
+        HORNHOOF_SERVER_DIR: dir,
+        HORNHOOF_VERSION: '0.4.1',
+        STUB_CONTAINERS: 'hornhoof-claude-1c07dac4=http://localhost:8081 hornhoof-kimi-22222222=https://hh.acme.test hornhoof-codex-9f1e2d3c=https://other.example.test',
+      },
+    });
+    expect(r.code).toBe(0);
+    const runs = r.calls.filter(c => c.startsWith('docker run -d'));
+    expect(runs).toHaveLength(2);
+    expect(runs.find(c => c.includes('--name hornhoof-claude-1c07dac4'))).toMatch(/--label hornhoof\.server=http:\/\/localhost:8081 .*--add-host host\.docker\.internal:host-gateway ghcr\.io\/invariant0x\/hornhoof-node:0\.4\.1$/);
+    expect(runs.find(c => c.includes('--name hornhoof-kimi-22222222'))).toMatch(/--label hornhoof\.server=https:\/\/hh\.acme\.test .*hornhoof-node:0\.4\.1$/);
+    expect(runs.find(c => c.includes('--name hornhoof-kimi-22222222'))).not.toContain('--add-host');
+    expect(r.calls).toContain('docker pull ghcr.io/invariant0x/hornhoof-node:0.4.1');
+  });
+
   it('refuses a server name it cannot use as a folder', () => {
     const r = install({ args: ['server', '--name', 'Acme Inc'] });
     expect(r.code).toBe(1);

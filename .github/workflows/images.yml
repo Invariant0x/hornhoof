@@ -35,6 +35,8 @@ jobs:
             file: Dockerfile
           - name: hornhoof-node
             file: apps/node/Dockerfile
+          - name: hornhoof-updater
+            file: apps/updater/Dockerfile
     steps:
       - uses: actions/checkout@v7
       # The product version, the commit's title and how many database migrations the build carries.

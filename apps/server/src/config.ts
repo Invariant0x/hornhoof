@@ -21,6 +21,8 @@ export type Config = {
   image: string;
   registryUrl?: string;
   updateCheckMs: number;
+  /* The folder the app shares with the updater service. */
+  controlDir: string;
 };
 
 /* Both src/ and dist/ sit one level below apps/server, so this finds apps/web/dist either way. */
@@ -60,5 +62,6 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     image: env.HORNHOOF_IMAGE || 'ghcr.io/invariant0x/hornhoof',
     registryUrl: env.REGISTRY_URL || undefined,
     updateCheckMs: env.UPDATE_CHECK_MS ? Number(env.UPDATE_CHECK_MS) : 1800000,
+    controlDir: env.HORNHOOF_CONTROL_DIR || '/control',
   };
 }

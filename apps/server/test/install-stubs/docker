@@ -12,6 +12,8 @@ has() { case " $* " in *" $WORD "*) return 0 ;; esac; return 1; }
 case "$1" in
   info) echo "Server Version: 28.0.0" ;;
   pull) [ "${STUB_PULL:-ok}" = fail ] && { echo "pull access denied" >&2; exit 1; } ;;
+  create) echo cid-app ;;
+  cp) case "$2" in *:/app/compose.yaml) echo 'services: {}' > "$3" ;; esac ;;
   image) [ "${STUB_IMAGE_LOCAL:-0}" = 1 ] || exit 1 ;;
   # STUB_CONTAINERS words are "name" or "name=server", the server label of a node.
   ps) for n in ${STUB_CONTAINERS:-}; do name=${n%%=*}; server=''; case "$n" in *=*) server=${n#*=} ;; esac; echo "$name id-of-$name $server"; done ;;
