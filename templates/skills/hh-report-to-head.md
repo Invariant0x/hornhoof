@@ -5,7 +5,7 @@ description: { en: "Ends every piece of work with a short status your head can a
 kind: core
 sources: [obra/superpowers skills/subagent-driven-development/implementer-prompt.md]
 ---
-When you finish a piece of work, or stop, report in this shape and nothing longer than 15 lines:
+When you submit a task or say it is blocked, write the summary in this shape, in no more than 15 lines:
 
 - **Status**: one of DONE, DONE_WITH_CONCERNS, BLOCKED, NEEDS_CONTEXT.
 - **What changed**: the files, records or documents you touched, by name.

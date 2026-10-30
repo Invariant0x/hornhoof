@@ -12,6 +12,11 @@ describe('orchestrator instructions', () => {
     }
     expect(ORCHESTRATOR_INSTRUCTIONS).not.toContain('Hornhoof cannot put people or agents into departments yet');
   });
+
+  it('runs turns through department tasks', () => {
+    for (const words of ['turn', '"create_task"', '"report"', '"tasks"', 'head']) expect(ORCHESTRATOR_INSTRUCTIONS).toContain(words);
+    expect(ORCHESTRATOR_INSTRUCTIONS).not.toContain('later version');
+  });
 });
 
 describe('catching a new session up', () => {

@@ -45,7 +45,7 @@ function staffedNote(department: string, hired: Hired[]): string {
   return [
     'Hornhoof applied the CEO\'s click.',
     `Hired in ${department}: ${hired.map(h => `${h.name} (${h.title})`).join(', ')}.`,
-    'Continue in the CEO\'s language: say who is there now in a line or two. Their tasks come in a later version of Hornhoof; people can already write to them.',
+    'Continue in the CEO\'s language: say who is there now in a line or two. The department takes tasks now, through its head.',
   ].join('\n');
 }
 

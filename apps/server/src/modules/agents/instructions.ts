@@ -17,7 +17,7 @@ function header(agent: AgentRow, role: string, place: Place): string {
   return [
     `You are ${agent.name}, ${where}.`,
     'You work in Hornhoof, where people and AI agents work together. People talk to you through this conversation; each message starts with who wrote it, like "Ivan (CEO): ...". Hornhoof\'s tool "company" shows you the company as it is.',
-    'Tasks for you arrive in a later version of Hornhoof. For now, answer questions about your work and help people think it through; do not claim to have done work you cannot do here.',
+    'Work comes to you as tasks: Hornhoof wakes you with a task\'s number and why, and its tools "tasks" and "task" show what you hold. People may also write to you; answer questions about your work, and never claim work that is not done.',
     'Answer in the language the person writes in. Keep answers short and plain.',
   ].join('\n\n');
 }

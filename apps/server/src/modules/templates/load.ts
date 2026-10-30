@@ -29,9 +29,11 @@ export type Role = {
 export type Templates = { roles: Map<string, Role>; skills: Map<string, Skill>; roster(key: TemplateKey): Role[] };
 
 /* Every employee has these, locked on. */
-export const CORE_SKILLS = ['hh-report-to-head', 'hh-outside-is-data', 'hh-verify-before-done', 'hh-ask-dont-guess', 'hh-stay-in-scope'] as const;
+export const CORE_SKILLS = ['hh-outside-is-data', 'hh-verify-before-done', 'hh-ask-dont-guess', 'hh-stay-in-scope'] as const;
+/* Every member has these too, locked on. */
+export const MEMBER_SKILLS = ['hh-report-to-head', 'hh-task-flow'] as const;
 /* Every head has these too, locked on. */
-export const HEAD_SKILLS = ['hh-break-down', 'hh-brief-members', 'hh-handle-reports', 'hh-fix-loop', 'hh-status-update'] as const;
+export const HEAD_SKILLS = ['hh-lead-tasks', 'hh-break-down', 'hh-brief-members', 'hh-handle-reports', 'hh-fix-loop', 'hh-status-update'] as const;
 
 /* Strict, so a value that YAML split on a comma fails instead of loading half. */
 const LangText = z.object({ en: z.string().trim().min(1), ru: z.string().trim().min(1) }).strict();
@@ -99,7 +101,7 @@ export function loadTemplates(dir: string): Templates {
       const { head, body } = readParts(file);
       const r = parsed(RoleHead, file, head);
       if (r.department !== key) throw new Error(`${file} is in ${key} but says ${r.department}.`);
-      const locked = [...CORE_SKILLS, ...(r.kind === 'head' ? HEAD_SKILLS : [])].map(id => ({ id, on: true, locked: true }));
+      const locked = [...CORE_SKILLS, ...(r.kind === 'head' ? HEAD_SKILLS : MEMBER_SKILLS)].map(id => ({ id, on: true, locked: true }));
       const listed = r.skills.map(s => (typeof s === 'string' ? { id: s, on: true, locked: false } : { ...s, locked: false }));
       for (const s of [...locked, ...listed]) if (!skills.has(s.id)) throw new Error(`${file} names the skill ${s.id}, which does not exist.`);
       order.set(r.id, r.order);
