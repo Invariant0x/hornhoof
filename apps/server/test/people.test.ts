@@ -33,14 +33,14 @@ describe('invites', () => {
   it('lets the CEO invite a person who then signs in', async () => {
     const { app } = await testApp({ PUBLIC_URL: 'https://hq.acme.com/' });
     const ceo = await setUpCompany(app);
-    const res = await invite(app, ceo, { name: 'Maria', email: 'Maria@Acme.com', title: 'Deputy CEO', scope: { kind: 'company' } });
+    const res = await invite(app, ceo, { name: 'Maria', email: 'Maria@Acme.com', title: 'Deputy CEO', access: { whole: true } });
     expect(res.statusCode).toBe(201);
-    expect(res.json().person).toMatchObject({ name: 'Maria', email: 'maria@acme.com', status: 'invited', scope: { kind: 'company', id: null, name: 'Whole company' } });
+    expect(res.json().person).toMatchObject({ name: 'Maria', email: 'maria@acme.com', status: 'invited', access: { whole: true, departments: [], teams: [] } });
     expect(res.json().inviteUrl).toMatch(/^https:\/\/hq\.acme\.com\/invite\/[A-Za-z0-9_-]{43}$/);
 
     const token = tokenOf(res.json().inviteUrl);
     const opened = await app.inject({ url: `/api/invites/${token}` });
-    expect(opened.json()).toEqual({ companyName: 'Acme', name: 'Maria', email: 'maria@acme.com', title: 'Deputy CEO', scopeName: 'Whole company', scopeKind: 'company' });
+    expect(opened.json()).toEqual({ companyName: 'Acme', name: 'Maria', email: 'maria@acme.com', title: 'Deputy CEO', access: { whole: true, departments: [], teams: [] } });
 
     const accepted = await app.inject({ method: 'POST', url: `/api/invites/${token}/accept`, payload: { password: PASSWORD } });
     expect(accepted.statusCode).toBe(200);
@@ -52,7 +52,7 @@ describe('invites', () => {
   it('gives 410 for a used invite and 404 for an unknown one', async () => {
     const { app } = await testApp();
     const ceo = await setUpCompany(app);
-    const res = await invite(app, ceo, { name: 'Maria', email: 'maria@acme.com', title: '', scope: { kind: 'company' } });
+    const res = await invite(app, ceo, { name: 'Maria', email: 'maria@acme.com', title: '', access: { whole: true } });
     const url = `/api/invites/${tokenOf(res.json().inviteUrl)}`;
     expect((await app.inject({ method: 'POST', url: `${url}/accept`, payload: { password: PASSWORD } })).statusCode).toBe(200);
     const again = await app.inject({ method: 'POST', url: `${url}/accept`, payload: { password: 'another long password' } });
@@ -70,14 +70,14 @@ describe('invites', () => {
     const blocked = await accept('guessed-token');
     expect(blocked.statusCode).toBe(429);
     expect(blocked.json().error).toMatchObject({ code: 'too_many', reason: 'too_many_attempts' });
-    const res = await invite(app, ceo, { name: 'Maria', email: 'maria@acme.com', title: '', scope: { kind: 'company' } });
+    const res = await invite(app, ceo, { name: 'Maria', email: 'maria@acme.com', title: '', access: { whole: true } });
     expect((await accept(tokenOf(res.json().inviteUrl))).statusCode).toBe(200);
   });
 
   it('gives 410 for an expired invite', async () => {
     const { app, db } = await testApp();
     const ceo = await setUpCompany(app);
-    const res = await invite(app, ceo, { name: 'Maria', email: 'maria@acme.com', title: '', scope: { kind: 'company' } });
+    const res = await invite(app, ceo, { name: 'Maria', email: 'maria@acme.com', title: '', access: { whole: true } });
     await db.update(invites).set({ expiresAt: new Date(Date.now() - 1000) });
     const url = `/api/invites/${tokenOf(res.json().inviteUrl)}`;
     expect((await app.inject({ url })).statusCode).toBe(410);
@@ -87,7 +87,7 @@ describe('invites', () => {
   it('refuses a duplicate email in a different case', async () => {
     const { app } = await testApp();
     const ceo = await setUpCompany(app);
-    const res = await invite(app, ceo, { name: 'Ivan again', email: 'IVAN@acme.com', title: '', scope: { kind: 'company' } });
+    const res = await invite(app, ceo, { name: 'Ivan again', email: 'IVAN@acme.com', title: '', access: { whole: true } });
     expect(res.statusCode).toBe(409);
     expect(res.json().error.code).toBe('conflict');
   });
@@ -96,34 +96,35 @@ describe('invites', () => {
     const { app } = await testApp();
     const ceo = await setUpCompany(app);
     for (const kind of ['department', 'team']) {
-      const res = await invite(app, ceo, { name: 'Oleg', email: `${kind}@acme.com`, title: '', scope: { kind, id: '00000000-0000-4000-8000-000000000000' } });
+      const res = await invite(app, ceo, { name: 'Oleg', email: `${kind}@acme.com`, title: '', access: { [kind === 'department' ? 'departments' : 'teams']: ['00000000-0000-4000-8000-000000000000'] } });
       expect(res.statusCode).toBe(400);
       expect(res.json().error.code).toBe('validation');
     }
   });
 
-  it('only lets company scope invite people', async () => {
+  it('only lets people with the whole company invite people', async () => {
     const { app, db } = await testApp();
     const ceo = await setUpCompany(app);
     const { teamId } = await addTeam(db);
-    const smm = await inviteAndAccept(app, ceo, { name: 'Sasha', email: 'sasha@acme.com', title: 'SMM', scope: { kind: 'team', id: teamId } });
-    const res = await invite(app, smm.token, { name: 'Friend', email: 'friend@acme.com', title: '', scope: { kind: 'company' } });
+    const smm = await inviteAndAccept(app, ceo, { name: 'Sasha', email: 'sasha@acme.com', title: 'SMM', access: { teams: [teamId] } });
+    const res = await invite(app, smm.token, { name: 'Friend', email: 'friend@acme.com', title: '', access: { whole: true } });
     expect(res.statusCode).toBe(403);
     expect(res.json().error.code).toBe('forbidden');
   });
 });
 
 describe('GET /api/people', () => {
-  it('lists people with their scope names', async () => {
+  it('lists people with the names of what they reach', async () => {
     const { app, db } = await testApp();
     const ceo = await setUpCompany(app);
     const { departmentId, teamId } = await addTeam(db);
-    await invite(app, ceo, { name: 'Kate', email: 'kate@acme.com', title: 'Head of marketing', scope: { kind: 'department', id: departmentId } });
-    await invite(app, ceo, { name: 'Sasha', email: 'sasha@acme.com', title: 'SMM', scope: { kind: 'team', id: teamId } });
+    await invite(app, ceo, { name: 'Kate', email: 'kate@acme.com', title: 'Head of marketing', access: { departments: [departmentId] } });
+    await invite(app, ceo, { name: 'Sasha', email: 'sasha@acme.com', title: 'SMM', access: { teams: [teamId] } });
     const res = await app.inject({ url: '/api/people', ...as(ceo) });
     expect(res.statusCode).toBe(200);
-    const scopes = Object.fromEntries(res.json().people.map((p: { name: string; scope: { name: string } }) => [p.name, p.scope.name]));
-    expect(scopes).toEqual({ Ivan: 'Whole company', Kate: 'Marketing', Sasha: 'Social' });
+    type Seen = { name: string; access: { whole: boolean; departments: { name: string }[]; teams: { name: string }[] } };
+    const reach = Object.fromEntries(res.json().people.map((p: Seen) => [p.name, p.access.whole ? 'whole' : [...p.access.departments, ...p.access.teams].map(x => x.name).join(', ')]));
+    expect(reach).toEqual({ Ivan: 'whole', Kate: 'Marketing', Sasha: 'Social' });
     const owners = res.json().people.filter((p: { isOwner: boolean }) => p.isOwner).map((p: { name: string }) => p.name);
     expect(owners).toEqual(['Ivan']);
     expect(res.body).not.toContain('scrypt');
@@ -135,7 +136,7 @@ describe('PATCH /api/people/:id', () => {
   it('disables a person and ends their sessions', async () => {
     const { app, db } = await testApp();
     const ceo = await setUpCompany(app);
-    const maria = await inviteAndAccept(app, ceo, { name: 'Maria', email: 'maria@acme.com', title: '', scope: { kind: 'company' } });
+    const maria = await inviteAndAccept(app, ceo, { name: 'Maria', email: 'maria@acme.com', title: '', access: { whole: true } });
     const res = await app.inject({ method: 'PATCH', url: `/api/people/${maria.id}`, payload: { status: 'disabled' }, ...as(ceo) });
     expect(res.statusCode).toBe(200);
     expect(res.json().person.status).toBe('disabled');
@@ -143,19 +144,19 @@ describe('PATCH /api/people/:id', () => {
     expect((await app.inject({ url: '/api/me', ...as(maria.token) })).statusCode).toBe(401);
   });
 
-  it('changes title and scope', async () => {
+  it('changes title and access', async () => {
     const { app, db } = await testApp();
     const ceo = await setUpCompany(app);
     const { departmentId } = await addTeam(db);
-    const maria = await inviteAndAccept(app, ceo, { name: 'Maria', email: 'maria@acme.com', title: '', scope: { kind: 'company' } });
-    const res = await app.inject({ method: 'PATCH', url: `/api/people/${maria.id}`, payload: { title: 'Head of marketing', scope: { kind: 'department', id: departmentId } }, ...as(ceo) });
-    expect(res.json().person).toMatchObject({ title: 'Head of marketing', scope: { kind: 'department', id: departmentId, name: 'Marketing' } });
+    const maria = await inviteAndAccept(app, ceo, { name: 'Maria', email: 'maria@acme.com', title: '', access: { whole: true } });
+    const res = await app.inject({ method: 'PATCH', url: `/api/people/${maria.id}`, payload: { title: 'Head of marketing', access: { departments: [departmentId] } }, ...as(ceo) });
+    expect(res.json().person).toMatchObject({ title: 'Head of marketing', access: { whole: false, departments: [{ id: departmentId, name: 'Marketing' }], teams: [] } });
   });
 
   it('protects the owner and yourself', async () => {
     const { app, db } = await testApp();
     const ceo = await setUpCompany(app);
-    const maria = await inviteAndAccept(app, ceo, { name: 'Maria', email: 'maria@acme.com', title: 'Deputy CEO', scope: { kind: 'company' } });
+    const maria = await inviteAndAccept(app, ceo, { name: 'Maria', email: 'maria@acme.com', title: 'Deputy CEO', access: { whole: true } });
     const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
     const byMaria = await app.inject({ method: 'PATCH', url: `/api/people/${owner!.id}`, payload: { status: 'disabled' }, ...as(maria.token) });
     expect(byMaria.statusCode).toBe(403);
@@ -172,11 +173,11 @@ describe('PATCH /api/people/:id', () => {
     const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
     const own = await app.inject({ method: 'PATCH', url: `/api/people/${owner!.id}`, payload: { title: 'CEO' }, ...as(ceo) });
     expect(own.json().person.title).toBe('CEO');
-    const olga = await inviteAndAccept(app, ceo, { name: 'Olga', email: 'olga@acme.com', title: '', scope: { kind: 'department', id: departmentId } });
+    const olga = await inviteAndAccept(app, ceo, { name: 'Olga', email: 'olga@acme.com', title: '', access: { departments: [departmentId] } });
     const mine = await app.inject({ method: 'PATCH', url: `/api/people/${olga.id}`, payload: { title: 'Head of marketing' }, ...as(olga.token) });
     expect(mine.statusCode).toBe(200);
     expect(mine.json().person.title).toBe('Head of marketing');
-    const wider = await app.inject({ method: 'PATCH', url: `/api/people/${olga.id}`, payload: { title: 'x', scope: { kind: 'company' } }, ...as(olga.token) });
+    const wider = await app.inject({ method: 'PATCH', url: `/api/people/${olga.id}`, payload: { title: 'x', access: { whole: true } }, ...as(olga.token) });
     expect(wider.statusCode).toBe(403);
     const others = await app.inject({ method: 'PATCH', url: `/api/people/${owner!.id}`, payload: { title: 'x' }, ...as(olga.token) });
     expect(others.statusCode).toBe(403);
@@ -185,7 +186,7 @@ describe('PATCH /api/people/:id', () => {
   it('stops a disabled invitee from accepting', async () => {
     const { app } = await testApp();
     const ceo = await setUpCompany(app);
-    const res = await invite(app, ceo, { name: 'Maria', email: 'maria@acme.com', title: '', scope: { kind: 'company' } });
+    const res = await invite(app, ceo, { name: 'Maria', email: 'maria@acme.com', title: '', access: { whole: true } });
     await app.inject({ method: 'PATCH', url: `/api/people/${res.json().person.id}`, payload: { status: 'disabled' }, ...as(ceo) });
     const accept = () => app.inject({ method: 'POST', url: `/api/invites/${tokenOf(res.json().inviteUrl)}/accept`, payload: { password: PASSWORD } });
     expect((await accept()).statusCode).toBe(410);
@@ -203,7 +204,7 @@ describe('POST /api/people/:id/invite', () => {
   it('gives a person a new link that also resets their password', async () => {
     const { app } = await testApp();
     const ceo = await setUpCompany(app);
-    const first = await invite(app, ceo, { name: 'Maria', email: 'maria@acme.com', title: '', scope: { kind: 'company' } });
+    const first = await invite(app, ceo, { name: 'Maria', email: 'maria@acme.com', title: '', access: { whole: true } });
     const oldLink = tokenOf(first.json().inviteUrl);
     const maria = { id: first.json().person.id, token: sessionFrom(await app.inject({ method: 'POST', url: `/api/invites/${oldLink}/accept`, payload: { password: PASSWORD } })) };
 
@@ -224,7 +225,7 @@ describe('POST /api/people/:id/invite', () => {
   it('replaces an expired invite', async () => {
     const { app, db } = await testApp();
     const ceo = await setUpCompany(app);
-    const first = await invite(app, ceo, { name: 'Maria', email: 'maria@acme.com', title: '', scope: { kind: 'company' } });
+    const first = await invite(app, ceo, { name: 'Maria', email: 'maria@acme.com', title: '', access: { whole: true } });
     await db.update(invites).set({ expiresAt: new Date(Date.now() - 1000) });
     const res = await reinvite(app, ceo, first.json().person.id);
     expect((await app.inject({ url: `/api/invites/${tokenOf(res.json().inviteUrl)}` })).statusCode).toBe(200);
@@ -234,9 +235,9 @@ describe('POST /api/people/:id/invite', () => {
     const { app, db } = await testApp();
     const ceo = await setUpCompany(app);
     const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
-    const maria = await inviteAndAccept(app, ceo, { name: 'Maria', email: 'maria@acme.com', title: '', scope: { kind: 'company' } });
+    const maria = await inviteAndAccept(app, ceo, { name: 'Maria', email: 'maria@acme.com', title: '', access: { whole: true } });
     const { teamId } = await addTeam(db);
-    const smm = await inviteAndAccept(app, ceo, { name: 'Sasha', email: 'sasha@acme.com', title: '', scope: { kind: 'team', id: teamId } });
+    const smm = await inviteAndAccept(app, ceo, { name: 'Sasha', email: 'sasha@acme.com', title: '', access: { teams: [teamId] } });
     expect((await reinvite(app, maria.token, owner!.id)).statusCode).toBe(403);
     expect((await reinvite(app, maria.token, maria.id)).statusCode).toBe(403);
     expect((await reinvite(app, smm.token, maria.id)).statusCode).toBe(403);

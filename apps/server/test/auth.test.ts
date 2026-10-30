@@ -41,7 +41,7 @@ describe('POST /api/auth/login', () => {
   it('deletes expired sessions when someone signs in', async () => {
     const { app, db } = await testApp();
     const ceo = await setUpCompany(app);
-    const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', scope: { kind: 'company' } });
+    const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { whole: true } });
     const [row] = await db.select().from(people).where(eq(people.email, 'maria@acme.com'));
     await db.insert(sessions).values({ tokenHash: 'expired-session-hash', personId: row!.id, expiresAt: new Date(Date.now() - 1000) });
     expect((await app.inject(login('ivan@acme.com', SETUP.password))).statusCode).toBe(200);
@@ -101,14 +101,12 @@ describe('POST /api/auth/logout', () => {
 });
 
 describe('requireCompanyScope', () => {
-  it('lets company scope through and stops department and team scope', async () => {
+  it('lets the whole company through and stops a list of departments', async () => {
     const { app, db } = await testApp();
     await setUpCompany(app);
     const [row] = await db.select().from(people).where(eq(people.email, 'ivan@acme.com'));
     const person = row as unknown as Person;
     expect(() => requireCompanyScope(person)).not.toThrow();
-    for (const scopeKind of ['department', 'team'] as const) {
-      expect(() => requireCompanyScope({ ...person, scopeKind })).toThrow(expect.objectContaining({ status: 403, code: 'forbidden' }));
-    }
+    expect(() => requireCompanyScope({ ...person, scopeKind: 'listed' })).toThrow(expect.objectContaining({ status: 403, code: 'forbidden' }));
   });
 });

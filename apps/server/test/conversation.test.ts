@@ -91,7 +91,7 @@ describe('the orchestrator\'s conversation', () => {
 
   it('sends two people\'s messages in the order they wrote', async () => {
     const { app, db, ceo, builtin } = await live();
-    const olga = await invitePerson(app, ceo, { name: 'Olga', email: 'olga@acme.com', scope: { kind: 'company' } });
+    const olga = await invitePerson(app, ceo, { name: 'Olga', email: 'olga@acme.com', access: { whole: true } });
     await db.update(people).set({ title: 'Deputy' }).where(eq(people.name, 'Olga'));
     await start(app, ceo);
     const first = await nextRun(builtin);
@@ -239,7 +239,7 @@ describe('the orchestrator\'s conversation', () => {
     const run = await nextRun(builtin);
     const [acme] = await db.select().from(companies);
     const [sales] = await db.insert(departments).values({ companyId: acme!.id, name: 'Sales', roleCode: 'SAL' }).returning();
-    const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', scope: { kind: 'department', id: sales!.id } });
+    const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { departments: [sales!.id] } });
     for (const res of [
       await app.inject({ url: '/api/agents/orchestrator/events', ...as(maria) }),
       await say(app, maria, 'hi'),

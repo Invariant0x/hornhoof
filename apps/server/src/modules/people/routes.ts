@@ -2,6 +2,7 @@ import { and, asc, eq, gt, inArray, isNull } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
+import { AccessInput, checkAccess, saveAccess } from '../../auth/access.js';
 import { guard, limiter } from '../../auth/limit.js';
 import { hashPassword } from '../../auth/password.js';
 import { personColumns, requireCompanyScope, requirePerson, startSession, type Person } from '../../auth/session.js';
@@ -11,7 +12,7 @@ import { isUniqueViolation } from '../../db/errors.js';
 import { agents, companies, invites, machines, people, sessions, subscriptions } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { disconnectMachines } from '../nodes/disconnect.js';
-import { personView, personViews, resolveScope, ScopeInput } from './views.js';
+import { personView, personViews } from './views.js';
 
 const INVITE_DAYS = 7;
 
@@ -19,14 +20,14 @@ const InviteBody = z.object({
   name: z.string().trim().min(1).max(80),
   email: z.string().trim().toLowerCase().email(),
   title: z.string().trim().max(80).default(''),
-  scope: ScopeInput,
+  access: AccessInput,
 });
 
 const AcceptBody = z.object({ password: z.string().min(10).max(200) });
 
 const PatchBody = z.object({
   title: z.string().trim().max(80).optional(),
-  scope: ScopeInput.optional(),
+  access: AccessInput.optional(),
   status: z.enum(['active', 'disabled']).optional(),
 });
 
@@ -90,7 +91,7 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     requireCompanyScope(me);
     const body = InviteBody.parse(req.body);
-    const scope = await resolveScope(db, body.scope);
+    await checkAccess(db, me.companyId, body.access);
     const token = newToken();
 
     let person;
@@ -98,8 +99,9 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
       person = await db.transaction(async tx => {
         const [row] = await tx
           .insert(people)
-          .values({ companyId: me.companyId, name: body.name, email: body.email, title: body.title, status: 'invited', ...scope })
+          .values({ companyId: me.companyId, name: body.name, email: body.email, title: body.title, status: 'invited', scopeKind: 'whole' in body.access ? 'company' : 'listed' })
           .returning(personColumns);
+        await saveAccess(tx, row!, body.access);
         await tx.insert(invites).values(inviteFor(token, me, row!.id));
         return row!;
       });
@@ -130,7 +132,7 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { token } = TokenParams.parse(req.params);
     const { person, companyName } = await openInvite(token);
     const view = await personView(db, person);
-    return { companyName, name: person.name, email: person.email, title: person.title, scopeName: view.scope.name, scopeKind: view.scope.kind };
+    return { companyName, name: person.name, email: person.email, title: person.title, access: view.access };
   });
 
   app.post('/api/invites/:token/accept', async (req, reply) => {
@@ -165,26 +167,26 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { id } = IdParams.parse(req.params);
     const body = PatchBody.parse(req.body);
     /* Anyone may rename their own title; everything else needs the whole company. */
-    if (id !== me.id || body.scope !== undefined || body.status !== undefined) requireCompanyScope(me);
+    if (id !== me.id || body.access !== undefined || body.status !== undefined) requireCompanyScope(me);
 
     const [target] = await db.select({ ...personColumns, passwordHash: people.passwordHash }).from(people).where(eq(people.id, id));
     if (!target) throw new ApiError(404, 'not_found', 'This person does not exist.', 'person_unknown');
     if (body.status === 'disabled' && (target.isOwner || target.id === me.id)) {
       throw new ApiError(403, 'forbidden', target.isOwner ? 'The owner cannot be disabled.' : 'You cannot disable yourself.', target.isOwner ? 'owner_locked' : 'self_locked');
     }
-    if (body.scope && target.isOwner) throw new ApiError(403, 'forbidden', 'The owner always has access to the whole company.', 'owner_locked');
+    if (body.access && target.isOwner) throw new ApiError(403, 'forbidden', 'The owner always has access to the whole company.', 'owner_locked');
+    if (body.access) await checkAccess(db, me.companyId, body.access);
 
     const changes: Partial<typeof people.$inferInsert> = {};
     if (body.title !== undefined) changes.title = body.title;
-    if (body.scope) Object.assign(changes, await resolveScope(db, body.scope));
     /* A person who never set a password goes back to waiting for their invite. */
     if (body.status) changes.status = body.status === 'active' && !target.passwordHash ? 'invited' : body.status;
 
     const person = await db.transaction(async tx => {
-      const [row] = Object.keys(changes).length
-        ? await tx.update(people).set(changes).where(eq(people.id, id)).returning(personColumns)
-        : [target];
+      if (Object.keys(changes).length) await tx.update(people).set(changes).where(eq(people.id, id));
+      if (body.access) await saveAccess(tx, target, body.access);
       if (changes.status === 'disabled') await tx.delete(sessions).where(eq(sessions.personId, id));
+      const [row] = await tx.select(personColumns).from(people).where(eq(people.id, id));
       return row!;
     });
     /* A disabled person's plans stop serving the company: their machines disconnect and the orchestrator lets go. */
@@ -192,7 +194,7 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
       const theirs = await db.select({ id: machines.id }).from(machines).where(and(eq(machines.personId, id), isNull(machines.revokedAt)));
       await disconnectMachines(ctx, theirs.map(m => m.id));
     }
-    if (changes.status === 'disabled' || (changes.scopeKind && changes.scopeKind !== 'company')) await freeOrchestratorFrom(db, id);
+    if (changes.status === 'disabled' || (body.access && !('whole' in body.access))) await freeOrchestratorFrom(db, id);
     return { person: await personView(db, person) };
   });
 }

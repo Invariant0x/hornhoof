@@ -26,7 +26,7 @@ async function companyWithMaria() {
   const { app, db } = await testApp();
   const ceo = await setUpCompany(app);
   const where = await places(db);
-  const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', scope: { kind: 'department', id: where.marketing.id } });
+  const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { departments: [where.marketing.id] } });
   return { app, db, ceo, maria, ...where };
 }
 
@@ -54,7 +54,7 @@ describe('POST /api/subscriptions/connect', () => {
     expect(sub.place).toEqual({ kind: 'department', id: marketing.id, name: 'Marketing' });
 
     const person = (await list(app, ceo)).find((s: { id: string }) => s.id === sub.id).owner;
-    const moved = await app.inject({ method: 'PATCH', url: `/api/people/${person.id}`, payload: { scope: { kind: 'team', id: backend.id } }, ...as(ceo) });
+    const moved = await app.inject({ method: 'PATCH', url: `/api/people/${person.id}`, payload: { access: { teams: [backend.id] } }, ...as(ceo) });
     expect(moved.statusCode).toBe(200);
     const after = (await list(app, ceo)).find((s: { id: string }) => s.id === sub.id);
     expect(after).toEqual({ ...sub, place: { kind: 'department', id: development.id, name: 'Development' } });
@@ -144,11 +144,11 @@ describe('POST /api/subscriptions/:id/orchestrator', () => {
 
   it('frees the orchestrator when its owner leaves company scope', async () => {
     const { app, db, ceo, marketing } = await companyWithMaria();
-    const deputy = await invitePerson(app, ceo, { name: 'Oleg', email: 'oleg@acme.com', scope: { kind: 'company' } });
+    const deputy = await invitePerson(app, ceo, { name: 'Oleg', email: 'oleg@acme.com', access: { whole: true } });
     const id = (await connect(app, deputy, ['claude'])).json().subscriptions[0].id;
     expect((await post(app, ceo, `/api/subscriptions/${id}/orchestrator`)).statusCode).toBe(200);
     const owner = (await list(app, ceo)).find((s: { id: string }) => s.id === id).owner;
-    const moved = await app.inject({ method: 'PATCH', url: `/api/people/${owner.id}`, payload: { scope: { kind: 'department', id: marketing.id } }, ...as(ceo) });
+    const moved = await app.inject({ method: 'PATCH', url: `/api/people/${owner.id}`, payload: { access: { departments: [marketing.id] } }, ...as(ceo) });
     expect(moved.statusCode).toBe(200);
     const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
     expect(orchestrator!.subscriptionId).toBeNull();

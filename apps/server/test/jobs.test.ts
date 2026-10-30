@@ -107,7 +107,7 @@ describe('GET /api/jobs/:id', () => {
 
     const [company] = await db.select().from(companies);
     const [sales] = await db.insert(departments).values({ companyId: company!.id, name: 'Sales', roleCode: 'CSO' }).returning();
-    const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', scope: { kind: 'department', id: sales!.id } });
+    const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { departments: [sales!.id] } });
     expect((await getJob(app, ceo, job.id)).statusCode).toBe(200);
     expect((await getJob(app, maria, job.id)).statusCode).toBe(403);
     const missing = await getJob(app, ceo, '00000000-0000-4000-8000-000000000000');

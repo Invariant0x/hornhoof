@@ -1,11 +1,13 @@
+import type { Spot } from '../../auth/access.js';
 import type { EventView } from './store.js';
 
 /* Who a pulse on the map runs between. */
 export type Endpoint = { kind: 'person'; id: string } | { kind: 'orchestrator' } | { kind: 'department'; id: string };
 
-/* What the browser hears live: a conversation event, how many agents work, that the org changed, or a pulse to draw. */
+/* What the browser hears live: a conversation event, how many agents work, that the org changed, or a pulse to draw.
+   An agent event carries where its agent works, so the stream sends it only to people who reach that place. */
 export type StreamMessage =
-  | { type: 'agent_event'; agentId: string; event: EventView }
+  | { type: 'agent_event'; agentId: string; event: EventView; spot: Spot }
   | { type: 'working'; working: number }
   | { type: 'org' }
   | { type: 'pulse'; from: Endpoint; to: Endpoint };

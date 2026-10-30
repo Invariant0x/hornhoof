@@ -2,7 +2,7 @@ import { TEMPLATE_KEYS } from '@hornhoof/protocol';
 import { and, eq, inArray, isNull, or } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Db } from '../../db/client.js';
-import { agents, departments, people, subscriptions, teams } from '../../db/schema.js';
+import { agents, departments, personAccess, subscriptions, teams } from '../../db/schema.js';
 import { deptName, TEMPLATE_TEXT } from '../departments/templates.js';
 
 const Name = z.string().trim().min(1).max(60);
@@ -45,7 +45,10 @@ export async function checkItems(db: Db, companyId: string, items: StructureItem
       if (staffed.length) return `${deptName(dept)} has agents and cannot be removed.`;
       const teamIds = (await db.select({ id: teams.id }).from(teams).where(inArray(teams.departmentId, inside))).map(t => t.id);
       const places = [...inside, ...teamIds];
-      const [person] = await db.select({ id: people.id }).from(people).where(and(inArray(people.scopeId, places), or(eq(people.scopeKind, 'department'), eq(people.scopeKind, 'team'))));
+      const [person] = await db
+        .select({ id: personAccess.id })
+        .from(personAccess)
+        .where(or(inArray(personAccess.departmentId, inside), teamIds.length ? inArray(personAccess.teamId, teamIds) : undefined));
       if (person) return `People work in ${deptName(dept)}; move them first.`;
       const [key] = await db.select({ id: subscriptions.id }).from(subscriptions).where(and(inArray(subscriptions.targetId, places), isNull(subscriptions.removedAt)));
       if (key) return `An API key serves ${deptName(dept)}; point it elsewhere first.`;

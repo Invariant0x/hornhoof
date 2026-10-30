@@ -39,7 +39,7 @@ describe('GET /api/stream', () => {
   it('keeps the conversation from a department head but tells them the org changed', async () => {
     const { app, db, ceo, orchestrator, companyId } = await company();
     const [sales] = await db.insert(departments).values({ companyId, name: 'Sales', roleCode: 'SAL' }).returning();
-    const head = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', scope: { kind: 'department', id: sales!.id } });
+    const head = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { departments: [sales!.id] } });
     const stream = await openStream(app, head);
     await new Promise(r => setTimeout(r, 50));
     await appendEvent(app.ctx, { companyId, agentId: orchestrator.id, kind: 'text', data: { text: 'secret plans' } });
@@ -62,7 +62,7 @@ describe('GET /api/stream', () => {
   it('ends the stream of a person who was disabled, at the next ping', async () => {
     const { app, db, ceo, companyId } = await company({ STREAM_PING_MS: '50' });
     const [sales] = await db.insert(departments).values({ companyId, name: 'Sales', roleCode: 'SAL' }).returning();
-    const head = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', scope: { kind: 'department', id: sales!.id } });
+    const head = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { departments: [sales!.id] } });
     const stream = await openStream(app, head);
     const maria = (await app.inject({ url: '/api/people', ...as(ceo) })).json().people.find((p: { name: string }) => p.name === 'Maria');
     expect((await app.inject({ method: 'PATCH', url: `/api/people/${maria.id}`, payload: { status: 'disabled' }, ...as(ceo) })).statusCode).toBe(200);

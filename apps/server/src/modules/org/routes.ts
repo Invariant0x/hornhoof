@@ -2,7 +2,7 @@ import { and, asc, eq, isNotNull, ne } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import type { Ctx } from '../../app.js';
 import { personColumns, requirePerson } from '../../auth/session.js';
-import { agents, companies, departments, jobs, people, teams } from '../../db/schema.js';
+import { agents, companies, departments, jobs, people, personAccess, teams } from '../../db/schema.js';
 import { deptName } from '../departments/templates.js';
 import { workingCount } from '../events/store.js';
 import { personViews } from '../people/views.js';
@@ -15,13 +15,22 @@ export function orgRoutes(app: FastifyInstance, { db, hub }: Ctx): void {
     const [company] = await db.select({ id: companies.id, name: companies.name }).from(companies).where(eq(companies.id, me.companyId));
     const allAgents = await db.select().from(agents);
     const orchestrator = allAgents.find(a => a.kind === 'orchestrator');
-    const leaders = await db
-      .select(personColumns)
-      .from(people)
-      .where(and(eq(people.scopeKind, 'company'), ne(people.status, 'disabled')))
-      .orderBy(asc(people.createdAt));
+    const active = await db.select(personColumns).from(people).where(ne(people.status, 'disabled')).orderBy(asc(people.createdAt));
     const depts = await db.select().from(departments).orderBy(asc(departments.position), asc(departments.createdAt));
     const allTeams = await db.select().from(teams).orderBy(asc(teams.stage), asc(teams.createdAt));
+    /* A listed person counts each place as its top-level department: a product as the department holding it, a team as its department. */
+    const topOf = (deptId: string | undefined) => {
+      const d = depts.find(x => x.id === deptId);
+      return d?.parentId ?? d?.id;
+    };
+    const access = await db.select().from(personAccess);
+    const homes = new Map(
+      active.map(p => [p.id, new Set(access.filter(a => a.personId === p.id).map(a => topOf(a.departmentId ?? allTeams.find(t => t.id === a.teamId)?.departmentId)))]),
+    );
+    /* People who see the whole company or more than one department sit next to the CEO; the rest in their department. */
+    const nextToCeo = active.filter(p => p.scopeKind === 'company' || homes.get(p.id)!.size > 1);
+    const views = new Map((await personViews(db, active)).map(v => [v.id, v]));
+    const inDepartment = (deptId: string) => active.filter(p => p.scopeKind !== 'company' && homes.get(p.id)!.size === 1 && homes.get(p.id)!.has(deptId)).map(p => views.get(p.id)!);
     const busy = new Set(
       (await db.select({ agentId: jobs.agentId }).from(jobs).where(and(eq(jobs.companyId, me.companyId), eq(jobs.status, 'running'), isNotNull(jobs.agentId)))).map(j => j.agentId),
     );
@@ -41,7 +50,7 @@ export function orgRoutes(app: FastifyInstance, { db, hub }: Ctx): void {
         subscription: orchestrator.subscriptionId ? await subView(db, s => hub.isOnline(identityOf(s)), orchestrator.subscriptionId) : null,
       },
       agents: { total: allAgents.length, working: await workingCount(db, me.companyId) },
-      people: await personViews(db, leaders),
+      people: nextToCeo.map(p => ({ ...views.get(p.id)!, deputy: p.scopeKind !== 'company' })),
       /* Products are departments inside a department; the map shows only the top level and lists the products on it. */
       departments: depts
         .filter(d => !d.parentId)
@@ -52,6 +61,7 @@ export function orgRoutes(app: FastifyInstance, { db, hub }: Ctx): void {
           roleCode: d.roleCode,
           about: d.about,
           agents: agentsOf(d.id),
+          people: inDepartment(d.id),
           products: depts.filter(p => p.parentId === d.id).map(p => ({ id: p.id, name: deptName(p) })),
           teams: allTeams
             .filter(t => t.departmentId === d.id)

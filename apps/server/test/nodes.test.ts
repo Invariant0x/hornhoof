@@ -100,7 +100,7 @@ describe('POST /api/machines/:id/disconnect', () => {
     const { machine } = (await join(app, code)).json();
     const [company] = await db.select().from(companies);
     const [dept] = await db.insert(departments).values({ companyId: company!.id, name: 'Sales', roleCode: 'CSO' }).returning();
-    const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', scope: { kind: 'department', id: dept!.id } });
+    const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { departments: [dept!.id] } });
 
     const refused = await app.inject({ method: 'POST', url: `/api/machines/${machine.id}/disconnect`, ...as(maria) });
     expect(refused.statusCode).toBe(403);
@@ -119,7 +119,7 @@ describe('POST /api/machines/:id/disconnect', () => {
   it("disconnects a disabled person's machines, frees the orchestrator and refuses their unused code", async () => {
     const { app, db } = await testApp();
     const ceo = await setUpCompany(app);
-    const oleg = await invitePerson(app, ceo, { name: 'Oleg', email: 'oleg@acme.com', scope: { kind: 'company' } });
+    const oleg = await invitePerson(app, ceo, { name: 'Oleg', email: 'oleg@acme.com', access: { whole: true } });
     const connect = (providers: string[]) => app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers }, ...as(oleg) });
     const first = (await connect(['claude'])).json();
     const subId = first.subscriptions[0].id;

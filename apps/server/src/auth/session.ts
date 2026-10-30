@@ -17,7 +17,6 @@ export const personColumns = {
   title: people.title,
   status: people.status,
   scopeKind: people.scopeKind,
-  scopeId: people.scopeId,
   isOwner: people.isOwner,
 };
 
@@ -29,7 +28,6 @@ export type Person = {
   title: string;
   status: 'active' | 'invited' | 'disabled';
   scopeKind: ScopeKind;
-  scopeId: string | null;
   isOwner: boolean;
 };
 

@@ -116,7 +116,7 @@ describe('POST /api/departments/build', () => {
     const { app, db, ceo } = await withOrchestrator();
     await build(app, ceo, { items: [{ template: 'operations' }, { template: 'support' }] });
     const [support] = await db.select().from(departments).where(eq(departments.templateKey, 'support'));
-    await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', scope: { kind: 'department', id: support!.id } });
+    await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { departments: [support!.id] } });
     const refused = await build(app, ceo, { items: [{ department: support!.id, note: '', remove: true }] });
     expect(refused.statusCode).toBe(400);
     expect(refused.json().error.reason).toBe('structure_invalid');
@@ -125,7 +125,7 @@ describe('POST /api/departments/build', () => {
   it('is only for people who see the whole company', async () => {
     const { app, db, ceo, acme } = await withOrchestrator();
     const [sales] = await db.insert(departments).values({ companyId: acme.id, name: 'Sales', roleCode: 'SAL' }).returning();
-    const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', scope: { kind: 'department', id: sales!.id } });
+    const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { departments: [sales!.id] } });
     const res = await build(app, maria, { items: [{ template: 'operations' }] });
     expect(res.statusCode).toBe(403);
     expect(res.json().error.reason).toBe('company_scope_only');

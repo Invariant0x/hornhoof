@@ -140,7 +140,7 @@ describe('updates', () => {
     const { app, db, ceo } = await company(registry);
     const [acme] = await db.select().from(companies);
     const [sales] = await db.insert(departments).values({ companyId: acme!.id, name: 'Sales', roleCode: 'SAL' }).returning();
-    const seller = await invitePerson(app, ceo, { name: 'Oleg', email: 'oleg@acme.com', scope: { kind: 'department', id: sales!.id } });
+    const seller = await invitePerson(app, ceo, { name: 'Oleg', email: 'oleg@acme.com', access: { departments: [sales!.id] } });
     expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(seller) })).statusCode).toBe(403);
     expect((await app.inject({ method: 'POST', url: '/api/updates/check', ...as(seller) })).statusCode).toBe(403);
     expect(registry.calls).toEqual([]);

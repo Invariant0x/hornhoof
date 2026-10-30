@@ -15,9 +15,8 @@ export const companies = pgTable('companies', {
   createdAt: createdAt(),
 });
 
-/* listed: the person reaches the departments and teams in person_access. department and team are the single scopes
-   from before access lists; migration 0005 turns them into listed, and Task 8 stops writing them. */
-export const SCOPE_KINDS = ['company', 'listed', 'department', 'team'] as const;
+/* company: the person reaches the whole company. listed: the departments and teams in person_access. */
+export const SCOPE_KINDS = ['company', 'listed'] as const;
 export type ScopeKind = (typeof SCOPE_KINDS)[number];
 
 export const people = pgTable(
@@ -31,7 +30,6 @@ export const people = pgTable(
     passwordHash: text('password_hash'),
     status: text('status', { enum: ['active', 'invited', 'disabled'] }).notNull(),
     scopeKind: text('scope_kind', { enum: SCOPE_KINDS }).notNull(),
-    scopeId: uuid('scope_id'),
     isOwner: boolean('is_owner').notNull().default(false),
     createdAt: createdAt(),
   },

@@ -62,10 +62,10 @@ export async function setUpCompany(app: FastifyInstance): Promise<string> {
 
 export const as = (token: string) => ({ cookies: { hh_session: token } });
 
-type Scope = { kind: 'company' } | { kind: 'department' | 'team'; id: string };
+type Access = { whole: true } | { departments?: string[]; teams?: string[] };
 
 /* Invites a person, accepts the invite with a password and returns their session token. */
-export async function invitePerson(app: FastifyInstance, ceoToken: string, input: { name: string; email: string; scope: Scope }): Promise<string> {
+export async function invitePerson(app: FastifyInstance, ceoToken: string, input: { name: string; email: string; access: Access }): Promise<string> {
   const invited = await app.inject({ method: 'POST', url: '/api/people/invite', payload: { ...input, title: '' }, ...as(ceoToken) });
   if (invited.statusCode !== 201) throw new Error(`Invite failed with ${invited.statusCode}: ${invited.body}`);
   const token = new URL(invited.json().inviteUrl).pathname.split('/').pop()!;

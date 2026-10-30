@@ -1,11 +1,12 @@
 import type { Limits } from '@hornhoof/protocol';
-import { and, asc, eq, isNull } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
-import { agents, departments, machines, people, subscriptions, teams, type Provider, type SUBSCRIPTION_STATUSES } from '../../db/schema.js';
+import { agents, departments, machines, people, personAccess, subscriptions, teams, type Provider, type SUBSCRIPTION_STATUSES } from '../../db/schema.js';
 import { WHOLE_COMPANY } from '../people/views.js';
 import { deptName } from '../departments/templates.js';
 
-export type Place = { kind: 'company' | 'department'; id: string | null; name: string };
+/* listed: a personal plan whose owner has several departments; the name lists them. */
+export type Place = { kind: 'company' | 'department' | 'listed'; id: string | null; name: string };
 
 export type SubView = {
   id: string;
@@ -38,18 +39,23 @@ const columns = {
   ownerId: people.id,
   ownerName: people.name,
   ownerScopeKind: people.scopeKind,
-  ownerScopeId: people.scopeId,
   machineId: machines.id,
   machineHost: machines.hostname,
 };
 
 const COMPANY: Place = { kind: 'company', id: null, name: WHOLE_COMPANY };
 
-/* Where a subscription serves. A personal one follows its owner; an API key follows its target. Teams count as their department. */
+/* Where an API key serves: its target. Teams count as their department. */
 function placeOf(kind: string | null, id: string | null, depts: Map<string, string>, teamDept: Map<string, string>): Place {
   const deptId = kind === 'department' ? id : kind === 'team' ? teamDept.get(id ?? '') ?? null : null;
   if (!deptId) return COMPANY;
   return { kind: 'department', id: deptId, name: depts.get(deptId) ?? '' };
+}
+
+/* A personal plan serves wherever its owner works: the whole company, or each listed department, teams counting as theirs. */
+function ownerPlace(deptIds: string[], depts: Map<string, string>): Place {
+  if (deptIds.length === 1) return { kind: 'department', id: deptIds[0]!, name: depts.get(deptIds[0]!) ?? '' };
+  return { kind: 'listed', id: null, name: deptIds.map(d => depts.get(d) ?? '').join(', ') };
 }
 
 export async function subViews(db: Db, isOnline: IsOnline, id?: string): Promise<SubView[]> {
@@ -61,8 +67,19 @@ export async function subViews(db: Db, isOnline: IsOnline, id?: string): Promise
     .leftJoin(machines, eq(machines.id, subscriptions.machineId))
     .where(id ? and(live, eq(subscriptions.id, id)) : live)
     .orderBy(asc(subscriptions.createdAt));
-  const depts = new Map((await db.select({ id: departments.id, name: departments.name, templateKey: departments.templateKey }).from(departments)).map(d => [d.id, deptName(d)]));
+  const deptRows = await db
+    .select({ id: departments.id, name: departments.name, templateKey: departments.templateKey })
+    .from(departments)
+    .orderBy(asc(departments.position), asc(departments.createdAt));
+  const depts = new Map(deptRows.map(d => [d.id, deptName(d)]));
   const teamDept = new Map((await db.select({ id: teams.id, departmentId: teams.departmentId }).from(teams)).map(t => [t.id, t.departmentId]));
+  const listedOwners = [...new Set(rows.filter(r => r.kind === 'personal' && r.ownerScopeKind !== 'company').map(r => r.ownerId))];
+  const access = listedOwners.length ? await db.select().from(personAccess).where(inArray(personAccess.personId, listedOwners)) : [];
+  /* Each listed owner's departments, in the map's order. */
+  const ownerDepts = (ownerId: string) => {
+    const mine = new Set(access.filter(a => a.personId === ownerId).map(a => a.departmentId ?? teamDept.get(a.teamId ?? '')));
+    return deptRows.filter(d => mine.has(d.id)).map(d => d.id);
+  };
   const [orchestrator] = await db.select({ subscriptionId: agents.subscriptionId }).from(agents).where(eq(agents.kind, 'orchestrator'));
   return rows.map(r => ({
     id: r.id,
@@ -73,7 +90,7 @@ export async function subViews(db: Db, isOnline: IsOnline, id?: string): Promise
     online: isOnline({ id: r.id, kind: r.kind }),
     last4: r.last4,
     owner: { id: r.ownerId, name: r.ownerName },
-    place: r.kind === 'personal' ? placeOf(r.ownerScopeKind, r.ownerScopeId, depts, teamDept) : placeOf(r.targetKind, r.targetId, depts, teamDept),
+    place: r.kind === 'api_key' ? placeOf(r.targetKind, r.targetId, depts, teamDept) : r.ownerScopeKind === 'company' ? COMPANY : ownerPlace(ownerDepts(r.ownerId), depts),
     machine: r.machineId ? { id: r.machineId, hostname: r.machineHost ?? '' } : null,
     limits: r.limits ?? null,
     isOrchestrator: orchestrator?.subscriptionId === r.id,
