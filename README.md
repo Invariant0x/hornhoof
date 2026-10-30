@@ -65,7 +65,7 @@ Agents will run on that machine with your subscription, and people with access t
 
 ## Running the company
 
-The orchestrator is the circle in the middle of the map. Click it and tell him about the company: he proposes departments on a card, and one click creates them.
+The orchestrator is the circle in the middle of the map. Click it and tell him about the company: he proposes departments on a card, and one click creates them. Later changes, such as another department, go through him the same way.
 
 Click a department to fly into it. Its schema shows the head on top and a frame for each role, with work going left to right through the gates and an amber line for what a gate sent back; every employee shows what it does now (working, queued, handed on, waiting for a decision, free) and the task it is about. On the map, a department's card has one square per employee in the same colors. "Department tasks" and "About the department" open its tasks, repository, products and people at the left. "+ Hire" asks the orchestrator to staff it: he proposes people, each with a role, a subscription and a model, and "Hire" creates the ticked ones. When he cannot answer, the card comes from the department's default roster. Roles and their skills come from the templates in `templates/`.
 
@@ -73,7 +73,7 @@ Click an employee to open its window, with its terminal or its log; a small mark
 
 The tick on each employee and on the head switches it off for now, without opening it. An employee that is off ends the turn it runs, then takes no task turns until it is on again; people can still write to it. The work it was doing goes back to its head, who gives it to someone who is on. The head spreads tasks over the implementers that are on, a different task for each. Every employee of a gate's role that is on checks the same work at once: the gate passes when all of them pass, and a send-back gives the executor all their reasons in one list. A gate with nobody of its role on waits with the head, who can give it other gates, and starts again when one of them is switched on. A department whose head is off, or whose employees are all off, gets no work from the orchestrator.
 
-An employee on a personal Claude Code or Codex plan works in its own terminal session on its owner's machine, and its window shows that session live, as the program draws it. The plan's owner can type into it as into any terminal: a line sent there becomes a turn of the conversation, with Hornhoof's tools, and Escape stops it as it stops the program. Everyone else who reaches the employee watches. "Log" shows the conversation as Hornhoof keeps it, and "Stop" ends the running turn. Employees on company API keys show the log.
+An employee on a personal Claude Code or Codex plan works in its own terminal session on its owner's machine, and its window shows that session live, as the program draws it. The plan's owner can type into it as into any terminal: a line sent there becomes a turn of the conversation, with Hornhoof's tools, and Escape stops it as it stops the program. Opening the window of an employee whose program does not run starts it, so the owner can type to it at once. Everyone else who reaches the employee watches. "Log" shows the conversation as Hornhoof keeps it, and "Stop" ends the running turn. Employees on company API keys show the log.
 
 Each person sees the whole company, or the departments and teams ticked for them. Someone who reaches more than one department shows next to the CEO on the map as a deputy.
 
