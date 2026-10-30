@@ -3,12 +3,12 @@ import { Terminal, type ITerminalOptions, type ITheme } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import { useEffect, useRef } from 'react';
 
-/* Ivan's iTerm2 profile, which the terminal repeats: its sixteen colors, and the page's light or dark. */
+/* Ivan's iTerm2 profile in dark mode, which the terminal repeats on any page: Claude Code and Codex run their dark theme,
+   which a light background would wash out. */
 const ANSI = ['#14191e', '#b43c2a', '#00c200', '#c7c400', '#2744c7', '#c040be', '#00c5c7', '#c7c7c7', '#686868', '#dd7975', '#58e790', '#ece100', '#a7abf2', '#e17ee1', '#60fdff', '#ffffff'];
 const NAMES = ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'] as const;
 const COLORS = Object.fromEntries(ANSI.map((c, i) => [i < 8 ? NAMES[i]! : `bright${NAMES[i - 8]![0]!.toUpperCase()}${NAMES[i - 8]!.slice(1)}`, c]));
-const DARK: ITheme = { ...COLORS, background: '#15191f', foreground: '#dcdcdc', cursor: '#ffffff', cursorAccent: '#000000', selectionBackground: '#b3d7ff', selectionForeground: '#000000' };
-const LIGHT: ITheme = { ...COLORS, background: '#fafafa', foreground: '#101010', cursor: '#000000', cursorAccent: '#ffffff', selectionBackground: '#b3d7ff', selectionForeground: '#000000' };
+const THEME: ITheme = { ...COLORS, background: '#15191f', foreground: '#dcdcdc', cursor: '#ffffff', cursorAccent: '#000000', selectionBackground: '#b3d7ff', selectionForeground: '#000000' };
 
 const OPTIONS: ITerminalOptions = {
   fontFamily: 'Monaco, Menlo, "DejaVu Sans Mono", monospace',
@@ -21,6 +21,7 @@ const OPTIONS: ITerminalOptions = {
   cursorStyle: 'block',
   cursorBlink: false,
   scrollback: 5000,
+  theme: THEME,
 };
 
 /* What one frame of keys or a paste carries; the server takes up to 64 KB. */
@@ -31,12 +32,6 @@ const RETRY_MAX_MS = 10_000;
 const NO_TERMINAL = 4404;
 const NO_ACCESS = 4403;
 
-function dark(): boolean {
-  const picked = document.documentElement.dataset.theme;
-  if (picked) return picked === 'dark';
-  return window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false;
-}
-
 type Props = { agentId: string; onGone(): void };
 
 /* An agent's live terminal: its session on the node, as it is, with the person's keys going back to it. */
@@ -46,7 +41,7 @@ export function AgentTerminal({ agentId, onGone }: Props) {
   gone.current = onGone;
 
   useEffect(() => {
-    const term = new Terminal({ ...OPTIONS, theme: dark() ? DARK : LIGHT });
+    const term = new Terminal(OPTIONS);
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(box.current!);
@@ -83,9 +78,6 @@ export function AgentTerminal({ agentId, onGone }: Props) {
     term.onResize(({ cols, rows }) => send({ type: 'resize', cols, rows }));
     const resized = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => fit.fit());
     resized?.observe(box.current!);
-    const scheme = window.matchMedia?.('(prefers-color-scheme: dark)');
-    const recolor = () => (term.options.theme = dark() ? DARK : LIGHT);
-    scheme?.addEventListener('change', recolor);
     connect();
     term.focus();
 
@@ -94,7 +86,6 @@ export function AgentTerminal({ agentId, onGone }: Props) {
       if (retry) clearTimeout(retry);
       socket?.close();
       resized?.disconnect();
-      scheme?.removeEventListener('change', recolor);
       term.dispose();
     };
   }, [agentId]);

@@ -123,24 +123,13 @@ describe("an agent's live terminal in its window", () => {
     expect(screen.queryByText('Hello from the log')).not.toBeInTheDocument();
   });
 
-  it('looks like Ivan\'s iTerm2: Monaco 12, a block cursor and its colors', async () => {
+  it("looks like Ivan's iTerm2 in dark mode, on a light page too, since the programs inside run their dark theme", async () => {
     open();
     await socket();
     const o = terms[0]!.options as { fontFamily: string; fontSize: number; lineHeight: number; cursorStyle: string; cursorBlink: boolean; drawBoldTextInBrightColors: boolean; theme: Record<string, string> };
     expect(o.fontFamily.split(',')[0]).toBe('Monaco');
     expect(o).toMatchObject({ fontSize: 12, lineHeight: 1, cursorStyle: 'block', cursorBlink: false, drawBoldTextInBrightColors: true });
-    expect(o.theme).toMatchObject({ background: '#fafafa', foreground: '#101010', red: '#b43c2a', brightCyan: '#60fdff' });
-  });
-
-  it('takes the dark colors when the page is dark', async () => {
-    document.documentElement.dataset.theme = 'dark';
-    try {
-      open();
-      await socket();
-      expect(terms[0]!.options.theme).toMatchObject({ background: '#15191f', foreground: '#dcdcdc', cursor: '#ffffff', black: '#14191e' });
-    } finally {
-      delete document.documentElement.dataset.theme;
-    }
+    expect(o.theme).toMatchObject({ background: '#15191f', foreground: '#dcdcdc', cursor: '#ffffff', black: '#14191e', red: '#b43c2a', brightCyan: '#60fdff' });
   });
 
   it('sends what the person types and the new size of the window', async () => {
