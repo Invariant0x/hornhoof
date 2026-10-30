@@ -243,6 +243,19 @@ describe('AgentWindow', () => {
     expect(screen.queryByRole('button', { name: 'Pick departments by hand' })).not.toBeInTheDocument();
   });
 
+  it('titles an employee by its name alone when it is called after its role', async () => {
+    mockApi({
+      'GET /api/agents/b1': [200, { ...CARD, name: 'Backend engineer' }],
+      'GET /api/agents/b1/events?after=0': [200, { events: [], state: READY }],
+    });
+    render(
+      <LanguageProvider>
+        <AgentWindow me={ME} org={DEV_ORG} agentId="b1" onClose={() => {}} />
+      </LanguageProvider>,
+    );
+    expect(await screen.findByRole('complementary', { name: 'Backend engineer' })).toBeInTheDocument();
+  });
+
   it('shows his staff proposal as a hiring card and the hired line after it', async () => {
     const staff = ev(1, 'proposal', { proposalId: 'pr5', kind: 'staff', department: 'd2', brief: 'The API first.', people: [{ role: 'DEV-BE', name: 'Bruno', checked: true }] });
     open({ [`GET ${EVENTS}?after=0`]: [200, { events: [staff], state: READY }], 'GET /api/departments/d2/roster': [200, ROSTER] }, DEV_ORG);

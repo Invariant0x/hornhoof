@@ -167,6 +167,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
           <DepartmentView
             me={me}
             department={dept}
+            deputies={org?.people ?? []}
             selected={panel?.agentId ?? null}
             onBack={() => setDeptId(null)}
             onOpen={agentId => setPanel({ kind: 'card', agentId })}

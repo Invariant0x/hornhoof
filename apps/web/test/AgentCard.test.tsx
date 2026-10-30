@@ -88,6 +88,13 @@ describe('AgentCard', () => {
     expect(await screen.findByText(/Reset to the template: Ivan/)).toBeInTheDocument();
   });
 
+  it('names an employee once when it is called after its role', async () => {
+    open({ 'GET /api/agents/b1': [200, { ...CARD, name: 'Backend engineer' }] });
+    const card = await screen.findByRole('complementary', { name: 'Backend engineer' });
+    expect(within(card).getByRole('heading', { level: 3 })).toHaveTextContent('Backend engineer');
+    expect(within(card).queryByText('Backend engineer', { selector: 'p' })).not.toBeInTheDocument();
+  });
+
   it('opens the terminal', async () => {
     const user = userEvent.setup();
     const { onTerminal } = open();

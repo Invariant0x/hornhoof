@@ -90,7 +90,8 @@ export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Pro
   const liveId = orchestrator ? org.orchestrator?.id : agentId;
   const sub = orchestrator ? (org.orchestrator?.subscription ?? null) : (card?.subscription ?? null);
   const model = orchestrator ? org.orchestrator?.model : card?.model;
-  const title = orchestrator ? t.window.title : card ? [card.name, card.role?.title[language]].filter(Boolean).join(', ') : '';
+  const role = card?.role?.title[language];
+  const title = orchestrator ? t.window.title : card ? [card.name, role !== card.name && role].filter(Boolean).join(', ') : '';
   const placeholder = orchestrator ? t.window.placeholder : t.window.writeTo(card?.name ?? '');
 
   /* An employee's name, role and subscription come from its card; the orchestrator's from the company. */

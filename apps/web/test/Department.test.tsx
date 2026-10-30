@@ -3,14 +3,15 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Shell } from '../src/screens/Shell';
+import type { Org } from '../src/types';
 import { CARD, DEV_ORG, ME, mockApi, ROSTER } from './api-mock';
 
 const EVENTS = '/api/agents/orchestrator/events?after=0';
 const READY = { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 };
 
-function shell(routes: Record<string, unknown> = {}) {
+function shell(routes: Record<string, unknown> = {}, org: Org = DEV_ORG) {
   const calls = mockApi({
-    'GET /api/org': [200, DEV_ORG],
+    'GET /api/org': [200, org],
     [`GET ${EVENTS}`]: [200, { events: [], state: READY }],
     'POST /api/agents/orchestrator/start': [200, { started: false }],
     ...(routes as Record<string, [number, unknown]>),
@@ -39,13 +40,32 @@ describe('Department view', () => {
     const members = screen.getByRole('region', { name: 'Members' });
     const bruno = within(members).getByRole('button', { name: /Bruno/ });
     expect(bruno).toHaveTextContent('Backend engineer');
-    expect(bruno).toHaveTextContent('claude-sonnet-5-5');
+    expect(bruno).toHaveTextContent('Claude Sonnet 5.5');
     expect(bruno).toHaveTextContent('Anthropic');
     expect(within(members).getByText('Sleeping')).toBeInTheDocument();
     expect(within(screen.getByRole('region', { name: 'Products' })).getByText('Mascot')).toBeInTheDocument();
     expect(within(screen.getByRole('region', { name: 'People with access' })).getByText('Sasha')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Back to the map' }));
     expect(screen.queryByRole('heading', { level: 2, name: 'Development' })).not.toBeInTheDocument();
+  });
+
+  it('names an employee once when it is called after its role', async () => {
+    const user = userEvent.setup();
+    const [dev] = DEV_ORG.departments;
+    shell({}, { ...DEV_ORG, departments: [{ ...dev!, employees: [{ ...dev!.employees[0]!, name: 'Head of development' }] }] });
+    await flyIn(user);
+    const head = within(screen.getByRole('region', { name: 'Head' })).getByRole('button');
+    expect(head.textContent!.match(/Head of development/g)).toHaveLength(1);
+  });
+
+  it('lists the deputies who reach the department among the people with access', async () => {
+    const user = userEvent.setup();
+    const oleg = { id: 'p4', name: 'Oleg', email: 'oleg@acme.com', title: 'Art director', status: 'invited' as const, isOwner: false, deputy: true, access: { whole: false, departments: [{ id: 'd2', name: 'Development' }, { id: 'd9', name: 'Design' }], teams: [] } };
+    const away = { ...oleg, id: 'p5', name: 'Lena', access: { whole: false, departments: [{ id: 'd8', name: 'Sales' }, { id: 'd9', name: 'Design' }], teams: [] } };
+    shell({}, { ...DEV_ORG, people: [...DEV_ORG.people, oleg, away] });
+    await flyIn(user);
+    const people = screen.getByRole('region', { name: 'People with access' });
+    expect(within(people).getAllByRole('listitem').map(li => li.querySelector('b')!.textContent)).toEqual(['Sasha', 'Oleg']);
   });
 
   it('hires through the orchestrator', async () => {

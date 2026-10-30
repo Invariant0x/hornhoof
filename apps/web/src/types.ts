@@ -59,7 +59,7 @@ export type Team = { id: string; name: string; about: string; stage: number; gat
 export type AgentState = 'working' | 'sleeping' | 'needs_subscription';
 
 /* An employee as the map lists it: the head first, then members in the order they were hired. */
-export type Employee = { id: string; name: string; roleId: string | null; title: Lang | null; kind: 'head' | 'worker'; model: string; provider: ProviderId | null; state: AgentState };
+export type Employee = { id: string; name: string; roleId: string | null; title: Lang | null; kind: 'head' | 'worker'; model: string; modelName: string | null; provider: ProviderId | null; state: AgentState };
 
 /* A template department without a typed name shows its template's name in the person's language. people: those who reach
    only this department. */

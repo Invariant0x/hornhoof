@@ -162,7 +162,7 @@ export function AgentCard({ me, agentId, onClose, onTerminal }: Props) {
       <div className="ac-body">
         <header className="ac-head">
           <h3>{title}</h3>
-          {card.role && <p>{card.role.title[language]}</p>}
+          {card.role && card.role.title[language] !== card.name && <p>{card.role.title[language]}</p>}
           {where && <p className="muted">{where}</p>}
           <p className="ac-state">
             <i className={`dot ${card.state}`} />
