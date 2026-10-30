@@ -324,6 +324,8 @@ export const tasks = pgTable(
     bounces: integer('bounces').notNull().default(0),
     /* Task turns in a row that ended without moving the task. */
     silent: integer('silent').notNull().default(0),
+    /* Grows with every move, so two moves that read the same task cannot both land. */
+    version: integer('version').notNull().default(0),
     createdByPersonId: uuid('created_by_person_id').references(() => people.id),
     createdByAgentId: uuid('created_by_agent_id').references(() => agents.id),
     createdAt: createdAt(),

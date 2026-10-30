@@ -43,6 +43,7 @@ CREATE TABLE "tasks" (
 	"stage" integer DEFAULT 0 NOT NULL,
 	"bounces" integer DEFAULT 0 NOT NULL,
 	"silent" integer DEFAULT 0 NOT NULL,
+	"version" integer DEFAULT 0 NOT NULL,
 	"created_by_person_id" uuid,
 	"created_by_agent_id" uuid,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,

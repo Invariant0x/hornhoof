@@ -10,7 +10,11 @@ export type StreamMessage =
   | { type: 'agent_event'; agentId: string; event: EventView; spot: Spot }
   | { type: 'working'; working: number }
   | { type: 'org' }
-  | { type: 'pulse'; from: Endpoint; to: Endpoint };
+  | { type: 'pulse'; from: Endpoint; to: Endpoint }
+  /* A task changed; people who reach its place fetch it again. */
+  | { type: 'task'; id: string; spot: Spot }
+  /* What waits for people changed in this place. */
+  | { type: 'requests'; spot: Spot };
 
 /* In-process fan-out per company. One server process serves one deployment, so nothing crosses processes. */
 export class EventBus {

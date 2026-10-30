@@ -1,5 +1,5 @@
 {
-  "id": "8275c08f-1837-4edc-9372-19acd018ee02",
+  "id": "4132e1e8-4ea0-4c72-8d9c-27a64eb3b68a",
   "prevId": "c65feb33-827e-4525-abcc-acbc80c81290",
   "version": "7",
   "dialect": "postgresql",
@@ -2237,6 +2237,13 @@
         },
         "silent": {
           "name": "silent",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "version": {
+          "name": "version",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
