@@ -4,7 +4,7 @@ Run your company with a team of AI agents.
 
 Hornhoof is a self-hosted workspace where people and AI agents work together as one company. You set up departments, each one led by an agent, and watch every agent's work live on one map.
 
-The project is in early development. Right now you can set up a company, invite people, see the map, connect subscriptions from your machines and run a test job on each one. Agents start working in departments in later versions.
+The project is in early development. Right now you can set up a company, invite people, connect subscriptions from your machines, have the orchestrator build departments and staff them with agents, and talk to every agent. Agents take tasks in a later version.
 
 ## Quick start
 
@@ -62,6 +62,22 @@ Open Subscriptions, choose Connect a subscription, tick the plans this machine w
 Every node carries git, ripgrep and a headless Chromium with Playwright, so agents can open and check web pages; anything else they need they install into their own folder.
 
 Agents will run on that machine with your subscription, and people with access to this Hornhoof can give them work. To update the nodes on a machine later, run `curl -fsSL <your Hornhoof address>/install.sh | bash` on it. To remove them, end the same command with `bash -s -- --uninstall`.
+
+## Running the company
+
+The orchestrator is the circle in the middle of the map. Click it and tell him about the company: he proposes departments on a card, and one click creates them.
+
+Click a department to fly into it. "+ Hire" asks the orchestrator to staff it: he proposes people, each with a role, a subscription and a model, and "Hire" creates the ticked ones. When he cannot answer, the card comes from the department's default roster. Roles and their skills come from the templates in `templates/`.
+
+Click an employee to open its card. It shows where the employee runs and on which model, with every subscription and key that may serve its department, its skills as a checklist, and its prompt by skill or as the raw text it receives. Any change applies from the employee's next turn, and the card keeps who made it and when. "Open terminal" talks to the employee.
+
+Each person sees the whole company, or the departments and teams ticked for them. Someone who reaches more than one department shows next to the CEO on the map as a deputy.
+
+## Updates
+
+Hornhoof checks for a newer build every 30 minutes. People who see the whole company get a banner when one is out: "Update" moves to it now, "Update when agents finish" waits until no agent is working. Versions in the account menu lists the published builds with the one running now and goes back to an earlier one the same way.
+
+The updater runs next to the server. It saves the database, starts the new build with the installer inside it, and puts the previous build back if the new server does not answer. A server installed before the updater existed gets it when you run the install command once more.
 
 ## Development
 
