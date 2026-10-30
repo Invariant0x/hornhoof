@@ -59,6 +59,8 @@ Open Subscriptions, choose Connect a subscription, tick the plans this machine w
 - Kimi opens the Kimi Code login.
 - GLM asks you to paste your GLM Coding Plan key from z.ai.
 
+Every node carries git, ripgrep and a headless Chromium with Playwright, so agents can open and check web pages; anything else they need they install into their own folder.
+
 Agents will run on that machine with your subscription, and people with access to this Hornhoof can give them work. To update the nodes on a machine later, run `curl -fsSL <your Hornhoof address>/install.sh | bash` on it. To remove them, end the same command with `bash -s -- --uninstall`.
 
 ## Development
