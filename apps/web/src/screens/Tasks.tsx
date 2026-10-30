@@ -1,14 +1,12 @@
 import { useState } from 'react';
-import { deptLabel, errorText, useLanguage, useT } from '../i18n';
+import { deptLabel, errorText, useT } from '../i18n';
 import { useOrg } from '../org';
 import { placeName, useTasks, type TaskFilter } from '../tasks';
-import type { Me, TaskLine, TaskStatus, WaitingRequest } from '../types';
+import type { Me, TaskLine, WaitingRequest } from '../types';
 import { Field } from '../ui/Field';
 import { Requests } from '../ui/Requests';
+import { ORDER, TaskRow } from '../ui/TaskRow';
 import { TurnBar } from '../ui/TurnBar';
-
-/* What needs people first, then what moves, then what has not started; closed tasks after. */
-const ORDER: TaskStatus[] = ['waiting', 'blocked', 'review', 'working', 'open', 'done', 'cancelled'];
 
 type Props = {
   me: Me;
@@ -21,29 +19,10 @@ type Props = {
 /* The tracker: the company's turn, what waits for the person, and every task they reach, by state. */
 export function Tasks({ me, requests, onRequestsChanged, selected, onOpenTask }: Props) {
   const t = useT();
-  const { language } = useLanguage();
   const { org } = useOrg();
   const [filter, setFilter] = useState<TaskFilter>({ status: 'open', department: null });
   const { tasks, failure } = useTasks(filter);
   const place = (p: TaskLine['department']) => placeName(t, org, p);
-
-  const row = (task: TaskLine) => (
-    <li key={task.id}>
-      <button className={`trow${selected === task.id ? ' on' : ''}`} type="button" onClick={() => onOpenTask(task.id)}>
-        <span className="trow-title">
-          <b>#{task.number}</b> {task.title}
-        </span>
-        {task.brief && <span className="trow-brief">{task.brief}</span>}
-        <span className="trow-meta">
-          {[place(task.department), task.product?.name].filter(Boolean).join(' / ')}
-          {task.assignee && <span>{task.assignee.name}{task.assignee.role ? `, ${task.assignee.role[language]}` : ''}</span>}
-          {task.status === 'review' && task.stage > 0 && <span className="trow-gate">{t.tasks.gateOf(task.stage, task.gateCount)}</span>}
-          {task.bounces > 0 && <span className="trow-back">{t.tasks.sentBack(task.bounces)}</span>}
-          {task.turn !== null && <span>{t.tasks.turn(task.turn)}</span>}
-        </span>
-      </button>
-    </li>
-  );
 
   return (
     <section className="tasks">
@@ -97,7 +76,11 @@ export function Tasks({ me, requests, onRequestsChanged, selected, onOpenTask }:
               {tasks
                 .filter(x => x.status === status)
                 .sort((a, b) => b.number - a.number)
-                .map(row)}
+                .map(task => (
+                  <li key={task.id}>
+                    <TaskRow task={task} on={selected === task.id} place={[place(task.department), task.product?.name].filter(Boolean).join(' / ')} onOpen={onOpenTask} />
+                  </li>
+                ))}
             </ul>
           </section>
         ))}

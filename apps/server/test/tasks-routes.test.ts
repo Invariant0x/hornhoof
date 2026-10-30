@@ -87,7 +87,7 @@ describe('tasks for people', () => {
   });
 
   it('keeps a repository token secret and refuses plain http', async () => {
-    const { dev, ceo, oleg, app, get } = await company();
+    const { db, companyId, dev, ceo, oleg, app, get } = await company();
     const put = (token: string, payload: object) => app.inject({ method: 'PUT', url: `/api/departments/${dev.id}/repository`, payload, ...as(token) });
     expect((await put(oleg, { url: 'https://github.com/acme/app.git', branch: 'main', token: 'ghp_secret1234' })).json().error.reason).toBe('company_scope_only');
     expect((await put(ceo, { url: 'http://github.com/acme/app.git', branch: 'main' })).json().error.reason).toBe('repo_invalid');
@@ -98,6 +98,11 @@ describe('tasks for people', () => {
     expect(org.body).not.toContain('ghp_secret');
     expect(org.json().departments.find((d: { id: string }) => d.id === dev.id).repository).toEqual({ url: 'https://github.com/acme/app.git', branch: 'main', tokenLast4: '1234' });
     expect((await put(ceo, { url: 'https://github.com/acme/app2.git', branch: 'dev' })).json().repository.tokenLast4).toBe('1234');
+    const [shop] = await db.insert(departments).values({ companyId, name: 'Shop', parentId: dev.id, roleCode: 'DEV', position: 1 }).returning();
+    await put(ceo, { url: 'https://github.com/acme/app.git', branch: 'main', token: 'ghp_secret1234' });
+    await app.inject({ method: 'PUT', url: `/api/departments/${shop!.id}/repository`, payload: { url: 'https://github.com/acme/shop.git', branch: 'main', token: 'ghp_shop9999' }, ...as(ceo) });
+    const products = (await get(ceo, '/api/org')).json().departments.find((d: { id: string }) => d.id === dev.id).products;
+    expect(products).toEqual([{ id: shop!.id, name: 'Shop', repository: { url: 'https://github.com/acme/shop.git', branch: 'main', tokenLast4: '9999' } }]);
     expect((await app.inject({ method: 'DELETE', url: `/api/departments/${dev.id}/repository`, ...as(ceo) })).statusCode).toBe(204);
     expect((await get(ceo, '/api/org')).json().departments.find((d: { id: string }) => d.id === dev.id).repository).toBe(null);
   });
@@ -114,11 +119,12 @@ describe('tasks for people', () => {
   });
 
   it('shows what a department works on now, and keeps a department with open tasks', async () => {
-    const { ctx, db, companyId, ceo, post, get } = await company();
+    const { ctx, db, companyId, ceo, maria, post, get } = await company();
     const [design] = await db.insert(departments).values({ companyId, templateKey: 'design', roleCode: 'DSN', position: 3 }).returning();
     const [lead] = await db.insert(agents).values({ companyId, kind: 'head', name: 'Dora', roleKey: 'DSN-HEAD', departmentId: design!.id, model: '' }).returning();
     const { task } = await createTask(ctx, { personId: (await get(ceo, '/api/me')).json().person.id }, { title: 'Payments', brief: '', body: '', departmentId: design!.id, assigneeAgentId: lead!.id });
     expect((await get(ceo, '/api/org')).json().departments.find((d: { id: string }) => d.id === design!.id).current).toMatchObject({ number: 1, title: 'Payments' });
+    expect((await get(maria, '/api/org')).json().departments.find((d: { id: string }) => d.id === design!.id).current).toBe(null);
     await db.update(agents).set({ removedAt: new Date() }).where(eq(agents.id, lead!.id));
     const dev = design!;
     const kept = await post(ceo, '/api/departments/build', { items: [{ department: dev.id, note: '', remove: true }] });

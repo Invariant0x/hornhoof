@@ -288,6 +288,13 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .dept .detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
 .dept .now { margin-top: auto; display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; }
 .dept .now i { flex: none; width: 6px; height: 6px; background: var(--idle); }
+.dept .now.task { color: var(--ink); }
+.dept .now.task i { background: var(--cyan); }
+.dept .now > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* The company's turn under the hub: its number, then its goal on one line. */
+.hub-turn { position: absolute; margin: 0; display: grid; justify-items: center; gap: 2px; text-align: center; font-size: 13px; pointer-events: none; }
+.hub-turn b { font-family: var(--f-display); font-size: 12px; font-weight: 600; letter-spacing: .04em; color: var(--cyan-ink); }
+.hub-turn span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
 .role { font-family: var(--f-display); font-size: 12px; font-weight: 600; letter-spacing: .08em; color: var(--cyan-ink); }
 .dname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--f-display); font-size: 20px; font-weight: 600; }
 .cnt { flex: none; font-family: var(--f-display); font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -455,7 +462,7 @@ button.dept:focus-visible { outline: none; }
 }
 @keyframes dvin { from { opacity: 0; } }
 .body.with-window .dview { padding-right: 688px; }
-.body.with-card .dview { padding-right: 508px; }
+.body.with-card .dview, .body.with-task .dview { padding-right: 508px; }
 .dv-top { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; max-width: 1040px; }
 .dv-top .btn svg { width: 16px; height: 16px; margin-right: 6px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .dv-title { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 12px; }
@@ -481,6 +488,21 @@ button.dept:focus-visible { outline: none; }
 .dv-side ul { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .dv-side li { display: grid; padding-left: 10px; border-left: 2px solid var(--line2); }
 .dv-side small { font-size: 12.5px; color: var(--muted); }
+/* The department's tasks under its people, and a new task written in place. */
+.dv-h { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.dv-h h3 { margin-bottom: 10px; }
+.dv-tasks { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.new-task { display: grid; gap: 12px; max-width: 640px; margin-bottom: 14px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--line); border-top: 2px solid var(--cyan); }
+.new-task > p { margin: 0; font-size: 13px; }
+.new-task textarea { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--line2); background: var(--surface2); color: var(--ink); font: inherit; resize: vertical; }
+.new-task textarea:focus { outline: none; border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow); }
+/* A repository at the side: its address, branch and token ending, changed in place. */
+.repo, .repo-form { display: grid; gap: 6px; justify-items: start; }
+.repo-form { gap: 10px; justify-items: stretch; }
+.repo p { margin: 0; font-size: 13px; }
+.repo-url { font-family: var(--f-mono); font-size: 12.5px; overflow-wrap: anywhere; }
+.repo-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 4px; font-size: 13px; }
+.dv-side li .repo { margin-top: 6px; }
 
 /* An agent's card in the right panel. */
 .acard { position: fixed; z-index: 9; top: 68px; right: 16px; bottom: 76px; width: 460px; box-sizing: border-box; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-top: 2px solid var(--cyan); box-shadow: 0 24px 60px var(--shadow); }
@@ -519,9 +541,9 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .staff-pick select { min-width: 0; height: 32px; padding: 0 8px; border: 1px solid var(--line2); background: var(--surface); color: var(--ink); font: inherit; font-size: 13px; }
 .staff-pick select:disabled { opacity: .55; }
 
-@media (max-width: 1180px) { .body.with-window .dview, .body.with-card .dview { padding-right: 32px; } }
+@media (max-width: 1180px) { .body.with-window .dview, .body.with-card .dview, .body.with-task .dview { padding-right: 32px; } }
 @media (max-width: 760px) {
-  .dview, .body.with-window .dview, .body.with-card .dview { padding: 72px 16px 24px; }
+  .dview, .body.with-window .dview, .body.with-card .dview, .body.with-task .dview { padding: 72px 16px 24px; }
   .dv-body { grid-template-columns: 1fr; }
   .acard { left: 0; right: 0; top: 56px; bottom: 0; width: auto; border-left: 0; border-right: 0; }
   .ac-pick, .staff-pick { grid-template-columns: 1fr; }
