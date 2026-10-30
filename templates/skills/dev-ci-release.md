@@ -5,7 +5,7 @@ description: { en: "Keeps the pipeline green and turns a passed change into a ve
 kind: procedure
 sources: [addyosmani/agent-skills skills/ci-cd-and-automation/SKILL.md, wshobson/agents plugins/cicd-automation/skills/deployment-pipeline-design/SKILL.md, openai/skills skills/.curated/gh-fix-ci/SKILL.md]
 ---
-**The pipeline.** Every change runs the same checks: install, build, the whole test suite, linters and script checks. The main line is always green. A red build is fixed or reverted first, before anything new merges.
+**The pipeline.** Every change runs the same checks: install, build, the whole test suite, the formatter, linters, type checks and script checks, and crapper and dryer on what changed. The main line is always green. A red build is fixed or reverted first, before anything new merges.
 
 **Fixing CI.** Read the failing job's log from the top of the first error. Reproduce it locally with the same command. Fix the cause; never skip, mute or retry a check to get green. Note flaky jobs and hand them to tests.
 

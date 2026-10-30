@@ -105,12 +105,12 @@ describe('the employee card', () => {
 
   it('turns a skill off but never a locked one', async () => {
     const { app, ceo, brunoId } = await company();
-    const off = await patch(app, ceo, brunoId, { skills: { 'dev-tdd': false, 'dev-api-design': true } });
+    const off = await patch(app, ceo, brunoId, { skills: { 'dev-debugging': false, 'dev-api-design': true } });
     expect(off.statusCode).toBe(200);
     const skills = off.json().skills;
-    expect(skills.find((s: { id: string }) => s.id === 'dev-tdd').on).toBe(false);
+    expect(skills.find((s: { id: string }) => s.id === 'dev-debugging').on).toBe(false);
     expect(skills.find((s: { id: string }) => s.id === 'dev-api-design')).toMatchObject({ on: true, locked: false });
-    expect(off.json().raw).not.toContain('<!-- hh:skill dev-tdd -->');
+    expect(off.json().raw).not.toContain('<!-- hh:skill dev-debugging -->');
     const locked = await patch(app, ceo, brunoId, { skills: { 'hh-report-to-head': false } });
     expect(locked.statusCode).toBe(400);
     expect(locked.json().error.reason).toBe('skill_locked');
@@ -167,10 +167,10 @@ describe('the employee card', () => {
       }
       return transaction(...args);
     }) as typeof db.transaction;
-    const answers = await Promise.all([patch(app, ceo, brunoId, { skills: { 'dev-tdd': false } }), patch(app, ceo, brunoId, { skills: { 'dev-api-design': true } })]);
+    const answers = await Promise.all([patch(app, ceo, brunoId, { skills: { 'dev-debugging': false } }), patch(app, ceo, brunoId, { skills: { 'dev-api-design': true } })]);
     expect(answers.map(a => a.statusCode)).toEqual([200, 200]);
     const on = new Set(((await open(app, ceo, brunoId)).json().skills as { id: string; on: boolean }[]).filter(s => s.on).map(s => s.id));
-    expect([on.has('dev-tdd'), on.has('dev-api-design')]).toEqual([false, true]);
+    expect([on.has('dev-debugging'), on.has('dev-api-design')]).toEqual([false, true]);
   });
 
   it('removes a department whose employees were removed and that had a staff proposal', async () => {
@@ -201,7 +201,7 @@ describe('the employee card', () => {
 
   it('resets an employee to its template', async () => {
     const { app, ceo, brunoId, role } = await company();
-    await patch(app, ceo, brunoId, { base: 'Mine.', skills: { 'dev-tdd': false }, skillText: { 'hh-report-to-head': 'Report briefly.' } });
+    await patch(app, ceo, brunoId, { base: 'Mine.', skills: { 'dev-debugging': false }, skillText: { 'hh-report-to-head': 'Report briefly.' } });
     const res = await app.inject({ method: 'POST', url: `/api/agents/${brunoId}/reset`, ...as(ceo) });
     expect(res.statusCode).toBe(200);
     expect(res.json().parts[1]).toMatchObject({ text: role.body, overridden: false });

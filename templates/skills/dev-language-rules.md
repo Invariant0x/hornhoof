@@ -1,0 +1,14 @@
+---
+id: dev-language-rules
+title: { en: "Rules of each language", ru: "Правила каждого языка" }
+description: { en: "Follows the style, patterns, security and testing rules of every language the code is in, and runs that language's checks.", ru: "Следует правилам стиля, приемов, безопасности и тестов для каждого языка кода и запускает проверки этого языка." }
+kind: procedure
+sources: [affaan-m/ECC rules]
+---
+Before you write or review code:
+
+1. **Find the languages** the work touches, from its files and build files. When the task or a person names one, use it.
+2. **Read their rules** in `/opt/hornhoof/rules/<language>/` on your machine: style, patterns, security and testing. `ls /opt/hornhoof/rules` lists them. For a language without a folder, say so in your report.
+3. **The repository's own rules come first**: its AGENTS.md, CLAUDE.md, CONTRIBUTING.md and its formatter and linter settings win where they differ.
+4. **Run the language's checks** before you hand in: the formatter, linter and type checker the repository configures, or else the ones the rules name (cargo fmt and clippy, gofmt and go vet, ruff, eslint and tsc). Fix what they report; never silence a check.
+5. **Name what you ran** in your report, with the result.

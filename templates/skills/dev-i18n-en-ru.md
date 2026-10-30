@@ -1,15 +1,15 @@
 ---
 id: dev-i18n-en-ru
-title: { en: "English and Russian copy", ru: "Тексты на английском и русском" }
-description: { en: "Keeps every user-facing text in both languages with the same meaning and the house style.", ru: "Держит каждый текст интерфейса на двух языках с одинаковым смыслом и в стиле компании." }
+title: { en: "Languages of the product", ru: "Языки продукта" }
+description: { en: "Keeps every text a user sees in each language the product supports, written well in each.", ru: "Держит каждый текст, который видит пользователь, на всех языках продукта и хорошо написанным на каждом." }
 kind: checklist
 sources: []
 ---
-- Every text a person sees exists in English and Russian, in the translation files, with the same meaning. English is the source; Russian is written, not machine-translated word for word.
-- Plain words, short sentences, sentence case. Buttons say what happens ("Save changes", "Сохранить изменения").
-- No em dashes in either language; use a colon, a comma or a plain hyphen. In Russian write е, never the dotted yo letter.
-- Plurals use the plural helper, never "1 items" or "(s)". Russian has three plural forms.
-- Numbers, dates and times are formatted for the person's language.
-- Russian text runs about a third longer: check that buttons and labels still fit.
-- Errors explain what happened and what to do, in both languages, without apologising.
-- When you add a key, add it to both files in the same commit; the type check must keep the two files the same shape.
+- Every text a user sees exists in each language the product supports, in its translation files, with the same meaning. The repository says which languages there are and which one is the source. Each translation is written, not translated word for word by a machine.
+- Plain words, short sentences. Buttons say what happens ("Save changes", not "OK").
+- Follow the copy rules the repository sets for each language.
+- Plurals use the plural helper, never "1 items" or "(s)"; some languages have three or more plural forms.
+- Numbers, dates, times and money are formatted for the user's language and region.
+- A translation runs longer or shorter than the source: check that buttons and labels still fit.
+- Errors explain what happened and what to do, in every language, without apologising.
+- When you add a key, add it for every language in the same commit, and keep the files the same shape.
