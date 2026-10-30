@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Colima as brew installs it: copied into the PATH folder by the brew stub, so a Mac starts without it.
+. "$STUB_SRC/_log.sh"
+exit 0

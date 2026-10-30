@@ -58,6 +58,8 @@ services:
       NODE_KEY: ${NODE_KEY:?Set NODE_KEY in .env}
     volumes:
       - nodedata:/data
+    # Browsers that agents run for checks need more shared memory than Docker's 64 MB.
+    shm_size: 2gb
     # Root inside this container only, to start each company key's jobs as a user of its own.
     # Nothing from the host is mounted and no new privileges can be gained.
     user: "0:0"

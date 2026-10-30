@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
@@ -17,10 +17,14 @@ const TWO_LINES = `${SUB_A} claude node-key-aaaaaaaaaaaaaaaa\\n${SUB_B} codex no
 /* System tools the script and the stubs may use. Real docker, brew, curl and sudo are never reachable. */
 const TOOLS = ['bash', 'sh', 'env', 'cat', 'od', 'tr', 'head', 'base64', 'sleep', 'mkdir', 'rm', 'chmod', 'grep', 'sed', 'cut', 'cp', 'touch', 'basename', 'dirname', 'wc', 'mktemp', 'date', 'sort', 'kill', 'printf', 'tail', 'awk'];
 
-type Options = { args?: string[]; omit?: string[]; env?: Record<string, string>; tty?: string };
+type Options = { args?: string[]; omit?: string[]; env?: Record<string, string>; tty?: string; home?: Record<string, string> };
 
-function install({ args = ['--join', CODE], omit = [], env = {}, tty = 'typed-answer\n' }: Options = {}) {
+function install({ args = ['--join', CODE], omit = [], env = {}, tty = 'typed-answer\n', home = {} }: Options = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'hh-install-'));
+  for (const [file, text] of Object.entries(home)) {
+    mkdirSync(dirname(join(dir, 'home', file)), { recursive: true });
+    writeFileSync(join(dir, 'home', file), text);
+  }
   const bin = join(dir, 'stubs');
   const sys = join(dir, 'sys');
   mkdirSync(bin);
@@ -87,6 +91,22 @@ describe('install.sh', () => {
     expect(r.out).toContain('password');
   });
 
+  it("gives a new Colima all of the Mac's processors and three quarters of its memory before it starts at login", () => {
+    const r = install({ omit: ['docker', 'brew'], env: { STUB_OS: 'Darwin', STUB_ARCH: 'arm64', STUB_DOCKER: 'after_start', STUB_NCPU: '10', STUB_MEMSIZE: String(16 * 1024 ** 3) } });
+    expect(r.code).toBe(0);
+    const steps = ['colima start --cpu 10 --memory 12', 'colima stop', 'brew services start colima'].map(s => indexOf(r.calls, s));
+    expect(steps.every(i => i >= 0)).toBe(true);
+    expect([...steps].sort((a, b) => a - b)).toEqual(steps);
+    expect(r.out).toContain('10 processors and 12 GB of memory');
+  });
+
+  it('leaves the processors and memory of a Colima set up before as they are', () => {
+    const r = install({ omit: ['docker', 'brew'], env: { STUB_OS: 'Darwin', STUB_ARCH: 'arm64', STUB_DOCKER: 'after_start' }, home: { '.colima/default/colima.yaml': 'cpu: 4\n' } });
+    expect(r.code).toBe(0);
+    expect(r.calls.some(c => c.startsWith('colima start'))).toBe(false);
+    expect(indexOf(r.calls, 'brew services start colima')).toBeGreaterThanOrEqual(0);
+  });
+
   it('uses a working Docker on Linux as it is, without sudo', () => {
     const r = install();
     expect(r.code).toBe(0);
@@ -139,6 +159,7 @@ describe('install.sh', () => {
       expect(run).toContain('--restart unless-stopped');
       expect(run).toContain('--cap-drop ALL');
       expect(run).toContain('--security-opt no-new-privileges');
+      expect(run).toContain('--shm-size 2g');
       expect(run).toContain(`-v ${name}:/data`);
       expect(run.endsWith(IMAGE)).toBe(true);
       expect(run).not.toContain('node-key-');
