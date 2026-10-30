@@ -1,4 +1,4 @@
-import { readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AgentEvent } from '@hornhoof/protocol';
 import type { JobUser } from '../isolation.js';
@@ -71,7 +71,7 @@ export function kimiAdapter({ home, tools, bin = join(tools, 'bin', 'kimi'), use
         const server = { transport: 'http', url: input.tools.url, bearerTokenEnvVar: 'HH_TOOL_TOKEN' };
         writePrivate(mcpJson, JSON.stringify({ mcpServers: { hornhoof: server } }), user);
       } else rmSync(mcpJson, { force: true });
-      if (input.instructions) writeFileSync(join(input.workDir, 'AGENTS.md'), input.instructions + '\n');
+      if (input.instructions) writePrivate(join(input.workDir, 'AGENTS.md'), input.instructions + '\n', user);
 
       let sessionId: string | null = input.sessionId;
       let answer = '';

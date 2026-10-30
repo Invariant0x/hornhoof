@@ -1,10 +1,9 @@
-import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AgentEvent } from '@hornhoof/protocol';
 import type { JobUser } from '../isolation.js';
 import type { ProviderAdapter, RunInput, RunResult } from '../runner.js';
 import { contentText, inputText, isRecord } from './events.js';
-import { childEnv, ensureDir, exitsCleanly, installPackage, interactiveLogin, runProgram, tokensIn } from './process.js';
+import { childEnv, ensureDir, exitsCleanly, installPackage, interactiveLogin, runProgram, tokensIn, writePrivate } from './process.js';
 
 /* Codex serves a ChatGPT plan, or a company OpenAI key on the built-in node. */
 type Options = { home: string; tools: string; bin?: string; secret?: string | null; mode: 'plan' | 'api_key'; user?: JobUser | null };
@@ -67,7 +66,7 @@ export function codexAdapter({ home, tools, bin = join(tools, 'bin', 'codex'), s
       const model = input.model ? ['-m', input.model] : [];
       /* Codex reads the token from the env variable the config names, so it never shows in the process list. */
       const mcp = input.tools ? ['-c', `mcp_servers.hornhoof.url=${JSON.stringify(input.tools.url)}`, '-c', 'mcp_servers.hornhoof.bearer_token_env_var="HH_TOOL_TOKEN"'] : [];
-      if (input.instructions) writeFileSync(join(input.workDir, 'AGENTS.md'), input.instructions + '\n');
+      if (input.instructions) writePrivate(join(input.workDir, 'AGENTS.md'), input.instructions + '\n', user);
       const args = input.sessionId
         ? ['exec', 'resume', ...mcp, ...FLAGS, ...model, '--', input.sessionId, input.prompt]
         : ['exec', ...mcp, ...FLAGS, '-C', input.workDir, ...model, '--', input.prompt];

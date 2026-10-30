@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { chownSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, fchownSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import type { JobUser } from '../isolation.js';
 import type { LoginIo } from '../runner.js';
 
@@ -144,10 +144,16 @@ export function askHidden(io: LoginIo, question: string): Promise<string> {
   });
 }
 
-/* A file only the program's user may read, such as a config that carries a token. */
+/* A file only the program's user may read, such as a config that carries a token. The folder is the agent's, so whatever it left at the path goes first and nothing is followed. */
 export function writePrivate(path: string, content: string, user: JobUser | null): void {
-  writeFileSync(path, content, { mode: 0o600 });
-  if (user) chownSync(path, user.uid, user.gid);
+  rmSync(path, { force: true });
+  const fd = openSync(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+  try {
+    writeFileSync(fd, content);
+    if (user) fchownSync(fd, user.uid, user.gid);
+  } finally {
+    closeSync(fd);
+  }
 }
 
 export function ensureDir(path: string): string {

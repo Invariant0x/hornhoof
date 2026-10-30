@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -392,6 +392,20 @@ describe('Hornhoof tools and instructions', () => {
     expect(kimiMcp).toEqual({ mcpServers: { hornhoof: { transport: 'http', url: TOOLS.url, bearerTokenEnvVar: 'HH_TOOL_TOKEN' } } });
     expect(env.HH_TOOL_TOKEN).toBe(TOOLS.token);
     expect(events).toContainEqual({ kind: 'tool', name: 'hornhoof.ping', input: '{"note":"hi"}' });
+  });
+
+  it.each(['codex', 'kimi'] as const)('never follow a link the %s agent left where its files go', async provider => {
+    const { run } = withTools(provider);
+    const outside = join(dir, 'outside.txt');
+    writeFileSync(outside, 'keep me');
+    mkdirSync(home, { recursive: true });
+    symlinkSync(outside, join(work, 'AGENTS.md'));
+    if (provider === 'kimi') symlinkSync(outside, join(home, 'mcp.json'));
+    await run();
+    expect(readFileSync(outside, 'utf8')).toBe('keep me');
+    expect(lstatSync(join(work, 'AGENTS.md')).isSymbolicLink()).toBe(false);
+    expect(lastRun().agentsMd).toBe(INSTRUCTIONS + '\n');
+    if (provider === 'kimi') expect(lastRun().kimiMcp).toMatchObject({ mcpServers: { hornhoof: { url: TOOLS.url } } });
   });
 
   it('run as the job user with the key folder as HOME, the MCP config handed to that user', async () => {
