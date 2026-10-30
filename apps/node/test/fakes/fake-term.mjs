@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Plays Claude Code in a terminal for the host tests: tells the bridge it started, answers each line typed or pasted with
 // "echo: LINE" on the screen and in its session log, and calls the prompt and stop hooks around each answer.
-// SLOW makes an answer take 2 s, EXIT ends the program, SECRET prints the value of FAKE_SECRET.
+// SLOW makes an answer take 2 s, HANG never answers (as when a person stops it with Escape: no stop hook), EXIT ends the
+// program, SECRET prints the value of FAKE_SECRET.
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -16,9 +17,12 @@ const hook = (event, body) => fetch(`${process.env.HH_BRIDGE}/${event}`, { metho
 
 process.stdout.write(`fake claude ${args.includes('--resume') ? 'resumed' : 'new'} ${session}\n❯ `);
 await hook('start', {});
-for await (const line of createInterface({ input: process.stdin })) {
+for await (const typed of createInterface({ input: process.stdin })) {
+  // Escape stops an answer; it is not part of the next line.
+  const line = typed.replaceAll('\u001b', '');
   if (line === 'EXIT') process.exit(3);
   await hook('prompt', { prompt: line });
+  if (line.includes('HANG')) continue;
   if (line.includes('SLOW')) await new Promise(r => setTimeout(r, 2000));
   const answer = line === 'SECRET' ? `the key is ${process.env.FAKE_SECRET}` : `echo: ${line}`;
   appendFileSync(log, JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: answer }] } }) + '\n');

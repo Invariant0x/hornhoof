@@ -95,9 +95,11 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
     key: state.key,
     onOpen(next) {
       send = next;
+      host?.closeViews();
       /* Finished jobs waiting in the outbox still count as running, so the server does not give up on them. */
       const pending = outbox.flatMap(m => (m.type === 'job.done' ? [m.jobId] : []));
-      next({ type: 'hello', version: VERSION, loggedIn, running: [...running.keys(), ...pending], ...(models ? { models } : {}), terminals: Boolean(host) });
+      const typed = host?.typedJobs() ?? [];
+      next({ type: 'hello', version: VERSION, loggedIn, running: [...running.keys(), ...typed, ...pending], ...(models ? { models } : {}), terminals: Boolean(host) });
       for (const m of outbox.splice(0)) emit(m);
     },
     onMessage: m => void handle(m),
@@ -123,6 +125,7 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
     }
     if (m.type === 'job.cancel') {
       running.get(m.jobId)?.stop.abort();
+      await host?.cancel(m.jobId);
       return;
     }
     switch (m.type) {

@@ -100,7 +100,7 @@ export class TerminalHost {
   }
 
   async stop(): Promise<void> {
-    for (const view of this.views.values()) view.child.kill();
+    this.closeViews();
     for (const a of this.agents.values()) {
       if (a.idle) clearTimeout(a.idle);
       if (a.poll) clearInterval(a.poll);
@@ -170,9 +170,11 @@ export class TerminalHost {
           this.drain(a);
           return { ok: true, sessionId: a.sessionId, result: message, output: '', error: null, limits: a.limits };
         }
+        /* A program stopped with Escape does not say its turn ended: it waits for the next prompt. */
         if (input.signal?.aborted) {
           await this.opts.tmux.keys(a.name, 'Escape');
           await Promise.race([a.ended.promise, sleep(STOP_WAIT_MS)]);
+          a.busy = false;
           return await fail('cancelled');
         }
         if (!(await this.opts.tmux.alive(a.name))) {
@@ -182,6 +184,7 @@ export class TerminalHost {
         }
         if (Date.now() > deadline) {
           await this.opts.tmux.keys(a.name, 'Escape');
+          a.busy = false;
           return await fail('timeout');
         }
       }
@@ -309,14 +312,36 @@ export class TerminalHost {
     this.agents.get(m.agentKey)?.opening?.resolve(m.jobId && m.toolToken ? { jobId: m.jobId, token: m.toolToken } : null);
   }
 
-  private finishTyped(a: Agent, message: string): void {
+  private finishTyped(a: Agent, message: string, stopped = false): void {
     const turn = a.turn;
     if (a.poll) clearInterval(a.poll);
     a.poll = null;
     a.turn = null;
     this.bridge.setToken(a.key, null);
-    if (turn?.jobId) this.opts.send({ type: 'job.done', jobId: turn.jobId, ok: true, sessionId: a.sessionId, result: redact(message, this.opts.secrets()), tail: '', error: null });
+    if (turn?.jobId) {
+      const result = stopped ? 'Stopped.' : redact(message, this.opts.secrets());
+      this.opts.send({ type: 'job.done', jobId: turn.jobId, ok: !stopped, sessionId: a.sessionId, result, tail: '', error: stopped ? 'cancelled' : null });
+    }
     this.restLater(a);
+  }
+
+  /* Turns people typed that run now: they count as running when the node says hello again. */
+  typedJobs(): string[] {
+    return [...this.agents.values()].flatMap(a => (a.turn?.typed && a.turn.jobId ? [a.turn.jobId] : []));
+  }
+
+  /* Hornhoof calls off a turn a person typed: the program stops as on Escape, and the turn ends as stopped. */
+  async cancel(jobId: string): Promise<void> {
+    const a = [...this.agents.values()].find(x => x.turn?.typed && x.turn.jobId === jobId);
+    if (!a) return;
+    await this.opts.tmux.keys(a.name, 'Escape');
+    a.busy = false;
+    this.finishTyped(a, '', true);
+  }
+
+  /* Views belong to one connection to Hornhoof; after it came back, people open them again. */
+  closeViews(): void {
+    for (const view of this.views.values()) view.child.kill();
   }
 
   /* Ends a program nobody needs for a while; the pane keeps its last screen and the next turn resumes the session. */

@@ -93,6 +93,40 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     expect(await running).toMatchObject({ ok: false, error: 'cancelled' });
   });
 
+  it('takes the next turn at once after one was stopped, though the program says nothing when stopped', async () => {
+    await setUp();
+    const first = await host.run(job('a11', 'warm up'));
+    const stop = new AbortController();
+    const running = host.run(job('a11', 'HANG', { sessionId: first.sessionId, signal: stop.signal }));
+    setTimeout(() => stop.abort(), 300);
+    expect(await running).toMatchObject({ ok: false, error: 'cancelled' });
+    const started = Date.now();
+    expect(await host.run(job('a11', 'next', { sessionId: first.sessionId }))).toMatchObject({ ok: true, result: 'echo: next' });
+    expect(Date.now() - started).toBeLessThan(5000);
+  }, 30_000);
+
+  it('lets Hornhoof stop a turn a person typed, and counts it as running until then', async () => {
+    await setUp();
+    const first = await host.run(job('a9', 'hello'));
+    await host.open({ type: 'term.open', termId: 't5', agentKey: 'a9', cols: 80, rows: 24, write: true });
+    host.input({ type: 'term.input', termId: 't5', data: 'HANG typed\r' });
+    await until(() => sent.some(m => m.type === 'turn.open'));
+    host.opened({ type: 'turn.opened', agentKey: 'a9', jobId: 'job-hang', toolToken: 'tok-hang' });
+    await until(() => host.typedJobs().includes('job-hang'));
+    await host.cancel('job-hang');
+    expect(sent.find(m => m.type === 'job.done')).toMatchObject({ type: 'job.done', jobId: 'job-hang', ok: false, error: 'cancelled' });
+    expect(host.typedJobs()).toEqual([]);
+    expect(await host.run(job('a9', 'next', { sessionId: first.sessionId }))).toMatchObject({ ok: true, result: 'echo: next' });
+  }, 30_000);
+
+  it('ends every view when asked, as after the connection to Hornhoof came back', async () => {
+    await setUp();
+    await host.open({ type: 'term.open', termId: 't6', agentKey: 'a10', cols: 80, rows: 24, write: true });
+    await until(() => sent.some(m => m.type === 'term.data' && m.termId === 't6'));
+    host.closeViews();
+    await until(() => sent.some(m => m.type === 'term.exit' && m.termId === 't6'));
+  });
+
   it('shows people the live screen without secrets, and lets one who may type start a turn', async () => {
     await setUp();
     await host.run(job('a5', 'hello'));
