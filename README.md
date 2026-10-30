@@ -71,6 +71,8 @@ Click a department to fly into it. Its schema shows the head on top and a frame 
 
 Click an employee to open its card. It shows where the employee runs and on which model, with every subscription and key that may serve its department, its skills as a checklist, and its prompt by skill or as the raw text it receives. Any change applies from the employee's next turn, and the card keeps who made it and when. "Open terminal" talks to the employee.
 
+An employee on a personal Claude Code or Codex plan works in its own terminal session on its owner's machine, and its window shows that session live, as the program draws it. The plan's owner can type into it as into any terminal: a line sent there becomes a turn of the conversation, with Hornhoof's tools, and Escape stops it as it stops the program. Everyone else who reaches the employee watches. "Log" shows the conversation as Hornhoof keeps it, and "Stop" ends the running turn. Employees on company API keys show the log.
+
 Each person sees the whole company, or the departments and teams ticked for them. Someone who reaches more than one department shows next to the CEO on the map as a deputy.
 
 ## Tasks and turns
