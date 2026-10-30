@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { accessOf, canReach, type Spot } from '../../auth/access.js';
 import type { Db } from '../../db/client.js';
-import { agents, departments, people, subscriptions, teams, type Provider } from '../../db/schema.js';
+import { agents, departments, people, subscriptions, teams, type Provider, type ScopeKind } from '../../db/schema.js';
 import { deptName } from '../departments/templates.js';
 import type { Role } from '../templates/load.js';
 
@@ -58,28 +58,44 @@ export async function departmentOf(db: Db, companyId: string, id: string): Promi
   return dept ?? null;
 }
 
-/* Personal plans of people who reach the place, and API keys for it, the department holding it, or any department.
-   Only those that are connected: ready, or signed out and waiting for a new login. */
-export async function servingSubscriptions(ctx: Pick<Ctx, 'db'>, companyId: string, spot: Spot): Promise<Serving[]> {
-  const { db } = ctx;
+type Sub = typeof subscriptions.$inferSelect;
+type Owner = { id: string; name: string; scopeKind: ScopeKind; status: string };
+
+/* Connected subscriptions the test accepts: ready, or signed out and waiting for a new login. */
+async function connected(db: Db, companyId: string, accept: (sub: Sub, owner: Owner) => boolean | Promise<boolean>): Promise<Serving[]> {
   const rows = await db
     .select({ sub: subscriptions, owner: { id: people.id, name: people.name, scopeKind: people.scopeKind, status: people.status } })
     .from(subscriptions)
     .innerJoin(people, eq(people.id, subscriptions.ownerPersonId))
     .where(and(eq(subscriptions.companyId, companyId), isNull(subscriptions.removedAt), inArray(subscriptions.status, ['ready', 'needs_login'])))
     .orderBy(asc(subscriptions.createdAt));
-  const places = [spot.departmentId, spot.parentId].filter((id): id is string => Boolean(id));
-  const teamIds = places.length ? (await db.select({ id: teams.id }).from(teams).where(inArray(teams.departmentId, places))).map(t => t.id) : [];
   const out: Serving[] = [];
   for (const { sub, owner } of rows) {
-    if (sub.kind === 'personal') {
-      if (owner.status === 'disabled' || !canReach(await accessOf(db, owner), spot)) continue;
-    } else if (!(sub.targetKind === 'any' || (sub.targetKind === 'department' && places.includes(sub.targetId ?? '')) || (sub.targetKind === 'team' && teamIds.includes(sub.targetId ?? '')))) {
-      continue;
-    }
+    if (sub.kind === 'personal' && owner.status === 'disabled') continue;
+    if (!(await accept(sub, owner))) continue;
     out.push({ id: sub.id, provider: sub.provider, kind: sub.kind, label: sub.label, owner: owner.name, models: modelsFor(sub.provider, sub.models) });
   }
   return out;
+}
+
+/* Personal plans of people who reach the place, and API keys for it, the department holding it, or any department. */
+export async function servingSubscriptions(ctx: Pick<Ctx, 'db'>, companyId: string, spot: Spot): Promise<Serving[]> {
+  const { db } = ctx;
+  const places = [spot.departmentId, spot.parentId].filter((id): id is string => Boolean(id));
+  const teamIds = places.length ? (await db.select({ id: teams.id }).from(teams).where(inArray(teams.departmentId, places))).map(t => t.id) : [];
+  return connected(db, companyId, async (sub, owner) =>
+    sub.kind === 'personal'
+      ? canReach(await accessOf(db, owner), spot)
+      : sub.targetKind === 'any' || (sub.targetKind === 'department' && places.includes(sub.targetId ?? '')) || (sub.targetKind === 'team' && teamIds.includes(sub.targetId ?? '')),
+  );
+}
+
+/* The orchestrator works for the whole company: a plan of someone who sees all of it, or a key not tied to a department. */
+export const servesWholeCompany = (sub: Pick<Sub, 'kind' | 'targetKind'>, ownerScopeKind: ScopeKind | undefined) =>
+  sub.kind === 'personal' ? ownerScopeKind === 'company' : sub.targetKind !== 'department' && sub.targetKind !== 'team';
+
+export function orchestratorServing(ctx: Pick<Ctx, 'db'>, companyId: string): Promise<Serving[]> {
+  return connected(ctx.db, companyId, (sub, owner) => servesWholeCompany(sub, owner.scopeKind));
 }
 
 type Line = { role: string; product?: string | null; model?: string; subscription?: string | null; skills: { on: string[]; off: string[] } | string[] };

@@ -3,6 +3,7 @@ import { and, asc, eq, isNull, ne } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import { companies, departments, people, subscriptions } from '../../db/schema.js';
 import { deptName, TEMPLATE_TEXT } from '../departments/templates.js';
+import { servesWholeCompany } from './staff.js';
 
 /* What the company tool shows an agent: names and roles, never emails or keys. */
 export async function companyView(db: Db, companyId: string) {
@@ -31,7 +32,7 @@ export async function companyView(db: Db, companyId: string) {
     subscriptions: subs.map(s => ({
       provider: s.provider,
       kind: s.kind,
-      servesWholeCompany: s.kind === 'personal' ? owners.get(s.ownerPersonId) === 'company' : s.targetKind !== 'department' && s.targetKind !== 'team',
+      servesWholeCompany: servesWholeCompany(s, owners.get(s.ownerPersonId)),
     })),
     templates: DEPARTMENT_TEMPLATES.map(t => ({ key: t.key, ...TEMPLATE_TEXT[t.key], alwaysOn: t.always })),
   };

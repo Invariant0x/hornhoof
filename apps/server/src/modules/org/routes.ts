@@ -1,8 +1,8 @@
-import { and, asc, eq, isNotNull, ne } from 'drizzle-orm';
+import { and, asc, eq, isNotNull, isNull, ne } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import type { Ctx } from '../../app.js';
 import { personColumns, requirePerson } from '../../auth/session.js';
-import { agents, companies, departments, jobs, people, personAccess, teams } from '../../db/schema.js';
+import { agents, companies, departments, jobs, people, personAccess, subscriptions, teams } from '../../db/schema.js';
 import { deptName } from '../departments/templates.js';
 import { workingCount } from '../events/store.js';
 import { personViews } from '../people/views.js';
@@ -13,7 +13,8 @@ export function orgRoutes(app: FastifyInstance, { db, hub }: Ctx): void {
   app.get('/api/org', async req => {
     const me = await requirePerson(req, db);
     const [company] = await db.select({ id: companies.id, name: companies.name }).from(companies).where(eq(companies.id, me.companyId));
-    const allAgents = await db.select().from(agents);
+    const allAgents = await db.select().from(agents).where(isNull(agents.removedAt));
+    const providers = new Map((await db.select({ id: subscriptions.id, provider: subscriptions.provider }).from(subscriptions)).map(s => [s.id, s.provider]));
     const orchestrator = allAgents.find(a => a.kind === 'orchestrator');
     const active = await db.select(personColumns).from(people).where(ne(people.status, 'disabled')).orderBy(asc(people.createdAt));
     const depts = await db.select().from(departments).orderBy(asc(departments.position), asc(departments.createdAt));
@@ -40,6 +41,20 @@ export function orgRoutes(app: FastifyInstance, { db, hub }: Ctx): void {
       const mine = allAgents.filter(a => a.departmentId && ids.has(a.departmentId));
       return { total: mine.length, working: mine.filter(a => busy.has(a.id)).length };
     };
+    /* The head first, then members in the order they were hired. */
+    const employeesOf = (deptId: string) =>
+      allAgents
+        .filter(a => a.departmentId === deptId && a.kind !== 'orchestrator')
+        .sort((a, b) => Number(b.kind === 'head') - Number(a.kind === 'head') || a.createdAt.getTime() - b.createdAt.getTime())
+        .map(a => ({
+          id: a.id,
+          name: a.name,
+          roleId: a.roleKey,
+          kind: a.kind,
+          model: a.model,
+          provider: a.subscriptionId ? (providers.get(a.subscriptionId) ?? null) : null,
+          state: busy.has(a.id) ? 'working' : a.subscriptionId ? 'sleeping' : 'needs_subscription',
+        }));
 
     return {
       company,
@@ -62,6 +77,7 @@ export function orgRoutes(app: FastifyInstance, { db, hub }: Ctx): void {
           about: d.about,
           agents: agentsOf(d.id),
           people: inDepartment(d.id),
+          employees: employeesOf(d.id),
           products: depts.filter(p => p.parentId === d.id).map(p => ({ id: p.id, name: deptName(p) })),
           teams: allTeams
             .filter(t => t.departmentId === d.id)

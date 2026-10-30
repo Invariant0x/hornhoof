@@ -8,7 +8,7 @@ import { as, connectNode, invitePerson, listen, openStream, setUpCompany, testAp
 
 const NODE_KEY = 'k'.repeat(40);
 
-type Run = { type: 'job.run'; jobId: string; prompt: string; sessionId: string | null; instructions: string | null; toolToken: string | null; timeoutMs: number };
+type Run = { type: 'job.run'; jobId: string; prompt: string; sessionId: string | null; model: string | null; instructions: string | null; toolToken: string | null; timeoutMs: number };
 
 async function live() {
   const { app, db } = await testApp({ NODE_KEY });
@@ -323,6 +323,21 @@ describe("an employee's conversation", () => {
     }
     expect((await sayTo(app, maria, 'orchestrator', 'Hi')).json().error.reason).toBe('company_scope_only');
     expect((await sayTo(app, ceo, '00000000-0000-4000-8000-000000000000', 'Hi')).statusCode).toBe(404);
+  });
+
+  it('runs an employee on its model, and a new model starts a fresh session', async () => {
+    const { app, db, ceo, builtin, bruno } = await withEmployee();
+    await sayTo(app, ceo, bruno.id, 'Hello');
+    const first = await nextRun(builtin);
+    expect(first.model).toBeNull();
+    await finish(builtin, first, 'sess-1');
+    await until(async () => !(await stateOf(app, ceo, bruno.id)).busy);
+    expect((await app.inject({ method: 'PATCH', url: `/api/agents/${bruno.id}`, payload: { model: 'claude-opus-5-5' }, ...as(ceo) })).statusCode).toBe(200);
+    await sayTo(app, ceo, bruno.id, 'And now?');
+    const second = await nextRun(builtin);
+    expect(second).toMatchObject({ model: 'claude-opus-5-5', sessionId: null });
+    const [agent] = await db.select().from(agents).where(eq(agents.id, bruno.id));
+    expect(agent!.model).toBe('claude-opus-5-5');
   });
 
   it('stops an employee while it works', async () => {

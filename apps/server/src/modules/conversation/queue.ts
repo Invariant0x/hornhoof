@@ -1,3 +1,4 @@
+import { modelsFor } from '@hornhoof/protocol';
 import { and, asc, count, desc, eq } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
@@ -6,6 +7,7 @@ import { dispatchJob } from '../jobs/dispatch.js';
 import { identityOf } from '../nodes/hub.js';
 import { appendEvent, earlierTalk, publishWorking } from '../events/store.js';
 import { instructionsOf } from '../agents/instructions.js';
+import { textHash } from '../templates/load.js';
 import { preface } from './prompt.js';
 
 export const CONVERSATION_TIMEOUT_MS = 15 * 60_000;
@@ -98,17 +100,21 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   if (!agent) return;
 
   const instructions = await instructionsOf(ctx, agent);
-  const { sessionId, prompt } = await sessionFor(ctx, agent, sub.id, instructions.hash, job.prompt);
+  /* The program's flag only for a model this subscription can run; anything else runs on its Default. */
+  const model = agent.model && modelsFor(sub.provider, sub.models).some(m => m.id === agent.model) ? agent.model : null;
+  /* The hash covers the model too, so a new model starts a fresh session like new instructions do. */
+  const runHash = model ? textHash(`${instructions.hash}:${model}`) : instructions.hash;
+  const { sessionId, prompt } = await sessionFor(ctx, agent, sub.id, runHash, job.prompt);
   const token = newToken();
   /* Running from the moment it is sent: the token works for its tools at once, and the next turn waits. */
   const [taken] = await db
     .update(jobs)
-    .set({ status: 'running', startedAt: new Date(), subscriptionId: sub.id, prompt, toolTokenHash: hashToken(token), instructionsHash: instructions.hash })
+    .set({ status: 'running', startedAt: new Date(), subscriptionId: sub.id, prompt, toolTokenHash: hashToken(token), instructionsHash: runHash })
     .where(and(eq(jobs.id, job.id), eq(jobs.status, 'queued')))
     .returning({ id: jobs.id });
   if (!taken) return;
   await publishWorking(ctx, job.companyId);
-  const sent = await dispatchJob(ctx, { id: job.id, subscriptionId: sub.id, prompt, sessionId, timeoutMs: job.timeoutMs, instructions: instructions.text, toolToken: token });
+  const sent = await dispatchJob(ctx, { id: job.id, subscriptionId: sub.id, prompt, sessionId, model, timeoutMs: job.timeoutMs, instructions: instructions.text, toolToken: token });
   if (sent) return;
   await db.update(jobs).set({ status: 'queued', startedAt: null, prompt: job.prompt, toolTokenHash: null, instructionsHash: null }).where(eq(jobs.id, job.id));
   await publishWorking(ctx, job.companyId);

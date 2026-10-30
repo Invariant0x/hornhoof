@@ -6,6 +6,7 @@ import { requireCompanyScope, requirePerson, type Person } from '../../auth/sess
 import { encryptSecret } from '../../crypto/secrets.js';
 import { agents, departments, jobs, people, subscriptions, teams } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
+import { servesWholeCompany } from '../tools/staff.js';
 import { pumpWaiting } from '../conversation/queue.js';
 import { createNodeCode } from '../nodes/codes.js';
 import { installCommand } from '../nodes/command.js';
@@ -143,11 +144,8 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
     requireCompanyScope(me);
     const sub = await liveSubscription(IdParams.parse(req.params).id);
     const notCompanyLevel = () => new ApiError(400, 'validation', 'The orchestrator can only run on a subscription that serves the whole company.', 'not_company_level');
-    if (sub.kind === 'api_key' && (sub.targetKind === 'department' || sub.targetKind === 'team')) throw notCompanyLevel();
-    if (sub.kind === 'personal') {
-      const [owner] = await db.select({ scopeKind: people.scopeKind }).from(people).where(eq(people.id, sub.ownerPersonId));
-      if (owner?.scopeKind !== 'company') throw notCompanyLevel();
-    }
+    const [owner] = await db.select({ scopeKind: people.scopeKind }).from(people).where(eq(people.id, sub.ownerPersonId));
+    if (!servesWholeCompany(sub, owner?.scopeKind)) throw notCompanyLevel();
     await db.update(agents).set({ subscriptionId: sub.id }).where(eq(agents.kind, 'orchestrator'));
     await pumpWaiting(ctx);
     return { subscription: await subView(db, online, sub.id) };

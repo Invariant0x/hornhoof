@@ -61,15 +61,26 @@ export function renderInstructions(t: Templates, agent: AgentRow, place: Place):
   return { parts, text, hash: textHash(text) };
 }
 
-/* What an agent runs with now: the orchestrator's standing role, or an employee's rendered instructions. */
-export async function instructionsOf(ctx: Pick<Ctx, 'db' | 'templates'>, agent: AgentRow): Promise<{ text: string; hash: string }> {
-  if (agent.kind === 'orchestrator') return { text: ORCHESTRATOR_INSTRUCTIONS, hash: textHash(ORCHESTRATOR_INSTRUCTIONS) };
-  const [company] = await ctx.db.select({ name: companies.name }).from(companies).where(eq(companies.id, agent.companyId));
+/* The longest instructions an employee may run with; the default roles stay under 19,000 characters. */
+export const MAX_INSTRUCTIONS = 24_000;
+
+/* The names an employee's header uses: its company, department and product. */
+export async function placeOf(db: Ctx['db'], agent: AgentRow): Promise<Place> {
+  const [company] = await db.select({ name: companies.name }).from(companies).where(eq(companies.id, agent.companyId));
   const ids = [agent.departmentId, agent.productId].filter((id): id is string => Boolean(id));
-  const depts = ids.length ? await ctx.db.select().from(departments).where(inArray(departments.id, ids)) : [];
+  const depts = ids.length ? await db.select().from(departments).where(inArray(departments.id, ids)) : [];
   const nameOf = (id: string | null) => {
     const d = depts.find(x => x.id === id);
     return d ? deptName(d) : null;
   };
-  return renderInstructions(ctx.templates, agent, { company: company?.name ?? '', department: nameOf(agent.departmentId) ?? '', product: nameOf(agent.productId) });
+  return { company: company?.name ?? '', department: nameOf(agent.departmentId) ?? '', product: nameOf(agent.productId) };
+}
+
+/* What an agent runs with now: the orchestrator's standing role, or an employee's rendered instructions. */
+export async function instructionsOf(ctx: Pick<Ctx, 'db' | 'templates'>, agent: AgentRow): Promise<{ parts: Part[]; text: string; hash: string }> {
+  if (agent.kind === 'orchestrator') {
+    const text = ORCHESTRATOR_INSTRUCTIONS;
+    return { parts: [{ kind: 'base', id: null, title: null, text, overridden: false, templateChanged: false }], text, hash: textHash(text) };
+  }
+  return renderInstructions(ctx.templates, agent, await placeOf(ctx.db, agent));
 }
