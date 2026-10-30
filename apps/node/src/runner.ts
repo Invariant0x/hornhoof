@@ -124,7 +124,10 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
     const { workDir, sessionId } = workDirFor(msg, dir);
     mkdirSync(workDir, { recursive: true });
     adapter.owner?.prepare(workDir);
-    const env = repo ? await prepareRepo(workDir, repo, { user: adapter.owner?.user ?? null, home: adapter.owner?.home ?? null }, git) : undefined;
+    const repoEnv = repo ? await prepareRepo(workDir, repo, { user: adapter.owner?.user ?? null, home: adapter.owner?.home ?? null }, git) : undefined;
+    /* hh-attach sends the turn's pictures with its token. The name has no KEY, SECRET or TOKEN in it, so Codex passes it on. */
+    const attachEnv = tools ? { HH_ATTACH_URL: tools.url.replace(/\/mcp$/, '/api/attachments'), HH_ATTACH_PASS: tools.token } : undefined;
+    const env = repoEnv || attachEnv ? { ...repoEnv, ...attachEnv } : undefined;
     const input: RunInput = {
       prompt: msg.prompt,
       sessionId,

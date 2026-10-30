@@ -2,7 +2,7 @@ import { and, count, eq, inArray, isNull, max, notInArray, sql } from 'drizzle-o
 import type { Ctx } from '../../app.js';
 import type { Spot } from '../../auth/access.js';
 import type { Db } from '../../db/client.js';
-import { agents, companies, requests, subscriptions, taskEvents, tasks, turns, type TaskEventKind } from '../../db/schema.js';
+import { agents, attachments, companies, requests, subscriptions, taskEvents, tasks, turns, type RequestOption, type TaskEventKind } from '../../db/schema.js';
 import { ApiError, type ErrorReason } from '../../errors.js';
 import { handOff } from './pulses.js';
 
@@ -314,17 +314,36 @@ export async function comment(ctx: Live, actor: Actor, taskId: string, text: str
   return { task, wakes: wake ? [{ agentId: task.assigneeAgentId!, taskId, why: 'comment', text: text.trim() }] : [] };
 }
 
+/* What an agent asks: words, an approval of an exact commit, or a pick of one of 2 to 4 ways. images: pictures it sent
+   with hh-attach, link: where to see the work. */
+export type Ask = { kind: 'question' | 'approval' | 'choice'; text: string; commit?: string; images?: string[]; options?: RequestOption[]; link?: string | null };
+
 /* The agent that holds the task asks a person and the task waits for the answer. */
-export async function ask(ctx: Live, agentId: string, taskId: string, q: { kind: 'question' | 'approval'; text: string; commit?: string }): Promise<Moved & { request: Request }> {
+export async function ask(ctx: Live, agentId: string, taskId: string, q: Ask): Promise<Moved & { request: Request }> {
   const task = await loadTask(ctx.db, taskId);
   stillOpen(task);
   if (task.assigneeAgentId !== agentId) throw notYours(task, 'is not with you');
   if (!q.text.trim()) throw refuse(400, 'task_invalid', 'Say what you need.');
   if (q.kind === 'approval' && !COMMIT.test(q.commit ?? '')) throw refuse(400, 'task_invalid', 'An approval names the full 40-character commit.');
-  if (q.kind === 'question' && q.commit) throw refuse(400, 'task_invalid', 'A question has no commit; ask for an approval instead.');
+  if (q.kind !== 'approval' && q.commit) throw refuse(400, 'task_invalid', 'Only an approval names a commit; ask for an approval instead.');
+  const options = q.kind === 'choice' ? (q.options ?? []) : [];
+  if (q.kind === 'choice' && (options.length < 2 || options.length > 4)) throw refuse(400, 'task_invalid', 'A choice offers 2 to 4 ways.');
+  if (q.kind !== 'choice' && q.options?.length) throw refuse(400, 'task_invalid', 'Ways to pick from make a choice; a choice names no commit.');
+  const pictures = [...(q.images ?? []), ...options.flatMap(o => (o.image ? [o.image] : []))];
+  await checkPictures(ctx.db, task.companyId, agentId, pictures);
   let request: Request | undefined;
   const row = await move(ctx, task, { status: 'waiting', silent: 0 }, { kind: 'asked', actor: { agentId }, text: q.text.trim(), data: { kind: q.kind, commit: q.commit ?? null } }, async tx => {
-    [request] = await tx.insert(requests).values({ companyId: task.companyId, taskId, agentId, kind: q.kind, text: q.text.trim(), commit: q.commit ?? null }).returning();
+    [request] = await tx
+      .insert(requests)
+      .values({ companyId: task.companyId, taskId, agentId, kind: q.kind, text: q.text.trim(), commit: q.commit ?? null, options, link: q.link ?? null })
+      .returning();
+    if (!pictures.length) return;
+    const shown = await tx
+      .update(attachments)
+      .set({ requestId: request!.id })
+      .where(and(inArray(attachments.id, pictures), eq(attachments.agentId, agentId), isNull(attachments.requestId)))
+      .returning({ id: attachments.id });
+    if (shown.length !== pictures.length) throw refuse(409, 'task_changed', 'A picture was shown meanwhile. Send it again with hh-attach.');
   });
   ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
   return { task: row, request: request!, wakes: [] };
@@ -345,7 +364,20 @@ export async function silentTurn(ctx: Live, agentId: string, task: Task): Promis
   return { task: row, wakes: [] };
 }
 
-export type Answer = { answer?: string; approve?: boolean; retry?: boolean };
+/* pick: the way a person took, from 0, in a choice. */
+export type Answer = { answer?: string; approve?: boolean; retry?: boolean; pick?: number };
+
+/* Pictures are the agent's own, from hh-attach, each shown once. */
+async function checkPictures(db: Db, companyId: string, agentId: string, ids: string[]): Promise<void> {
+  if (!ids.length) return;
+  if (new Set(ids).size !== ids.length) throw refuse(400, 'task_invalid', 'A picture is listed twice.');
+  const rows = await db.select({ id: attachments.id, companyId: attachments.companyId, agentId: attachments.agentId, requestId: attachments.requestId }).from(attachments).where(inArray(attachments.id, ids));
+  for (const id of ids) {
+    const found = rows.find(r => r.id === id);
+    if (!found || found.companyId !== companyId || found.agentId !== agentId) throw refuse(400, 'task_invalid', `${id} is not a picture you sent. Send it with hh-attach and use the id it prints.`);
+    if (found.requestId) throw refuse(400, 'task_invalid', `${id} is shown in another request already. Send it again with hh-attach.`);
+  }
+}
 
 /* A person answers: the request closes, the task goes on where it stood, and the agent that asked wakes with the answer. */
 export async function answer(ctx: Live, personId: string, requestId: string, a: Answer): Promise<{ request: Request; task: Task; wakes: Wake[] }> {
@@ -354,20 +386,30 @@ export async function answer(ctx: Live, personId: string, requestId: string, a: 
   if (found.status !== 'open') throw refuse(409, 'request_closed', 'This request is answered already.');
   const text = a.answer?.trim() ?? '';
   let status: Request['status'];
+  const option = found.kind === 'choice' && a.pick !== undefined ? found.options[a.pick] : undefined;
+  if (found.kind !== 'choice' && a.pick !== undefined) throw refuse(400, 'task_invalid', 'Only a choice is answered with a pick.');
   if (found.kind === 'approval') {
     if (a.approve === undefined) throw refuse(400, 'task_invalid', 'Approve or decline this commit.');
     status = a.approve ? 'approved' : 'declined';
+  } else if (found.kind === 'choice') {
+    if (!option) throw refuse(400, 'task_invalid', `Pick one of the ${found.options.length} ways.`);
+    status = 'answered';
   } else {
     if (a.approve !== undefined) throw refuse(400, 'task_invalid', 'Only a commit is approved; answer in words.');
     if (!text && !(found.kind === 'stuck' && a.retry)) throw refuse(400, 'task_invalid', 'Write an answer.');
     status = 'answered';
   }
-  const said = found.kind === 'approval' ? `${a.approve ? 'Approved' : 'Declined'} ${found.commit}.${text ? ` ${text}` : ''}` : text || 'Try again.';
+  const said =
+    found.kind === 'approval'
+      ? `${a.approve ? 'Approved' : 'Declined'} ${found.commit}.${text ? ` ${text}` : ''}`
+      : option
+        ? `Picked ${a.pick! + 1}: ${option.label}.${text ? ` ${text}` : ''}`
+        : text || 'Try again.';
   const task = await loadTask(ctx.db, found.taskId);
   const row = await ctx.db.transaction(async tx => {
     const [request] = await tx
       .update(requests)
-      .set({ status, answer: text || null, answeredBy: personId, answeredAt: new Date() })
+      .set({ status, answer: text || null, picked: option ? a.pick! : null, answeredBy: personId, answeredAt: new Date() })
       .where(and(eq(requests.id, requestId), eq(requests.status, 'open')))
       .returning();
     if (!request) throw refuse(409, 'request_closed', 'This request is answered already.');

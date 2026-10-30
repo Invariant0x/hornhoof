@@ -110,6 +110,15 @@ describe('runJob', () => {
     expect(adapter.inputs[0]!.instructions).toBe('Be the orchestrator.');
   });
 
+  it('lets the agent send pictures for the turn: the address and the token in its environment', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
+    const adapter = fakeAdapter(async () => ok());
+    await runJob(adapter, job({ toolToken: 'tool-token-0123456789' }), dir, { toolsUrl: 'http://hub.test/mcp' });
+    await runJob(adapter, job({ jobId: 'job-2' }), dir, { toolsUrl: 'http://hub.test/mcp' });
+    expect(adapter.inputs[0]!.env).toEqual({ HH_ATTACH_URL: 'http://hub.test/api/attachments', HH_ATTACH_PASS: 'tool-token-0123456789' });
+    expect(adapter.inputs[1]!.env).toBeUndefined();
+  });
+
   it('hides a token the program refreshed during the run in its live events too', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
     const events: AgentEvent[] = [];

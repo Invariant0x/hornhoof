@@ -24,6 +24,7 @@ import { UpdateCheck } from './modules/updates/check.js';
 import { UpdaterControl } from './modules/updates/control.js';
 import { archOf, registry } from './modules/updates/registry.js';
 import { updateRoutes } from './modules/updates/routes.js';
+import { attachmentRoutes } from './modules/tasks/attachments.js';
 import { taskRoutes } from './modules/tasks/routes.js';
 import { hasWebApp, serveWebApp, webAppRoutes } from './web.js';
 
@@ -87,5 +88,6 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   departmentRoutes(app, ctx);
   updateRoutes(app, ctx);
   taskRoutes(app, ctx);
+  attachmentRoutes(app, ctx);
   return app;
 }

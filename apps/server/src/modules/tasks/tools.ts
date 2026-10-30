@@ -109,19 +109,30 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
     'ask_person',
     {
       description:
-        'Asks the people responsible for the task a question, or (with commit) for approval of that exact commit before a release. The task waits; you are woken with the answer. ' +
+        'Asks the people responsible for the task a question, (with commit) for approval of that exact commit before a release, or (with options) to pick one of 2 to 4 ways. The task waits; you are woken with the answer. ' +
+        'Show what people judge instead of describing it: take screenshots, send each with the shell command `hh-attach FILE` and pass the ids it prints as images, or as an option\'s image. ' +
+        'link: an https page where the work can be seen, like a branch comparison; an approval links its commit by itself. ' +
         `At most ${TURN_QUESTIONS} per turn; ask only what you cannot decide or find out yourself.`,
-      inputSchema: { task: Ref, question: z.string().trim().min(1).max(2000), commit: z.string().regex(/^[0-9a-f]{40}$/).optional() },
+      inputSchema: {
+        task: Ref,
+        question: z.string().trim().min(1).max(2000),
+        commit: z.string().regex(/^[0-9a-f]{40}$/).optional(),
+        images: z.array(z.uuid()).max(6).optional(),
+        options: z.array(z.object({ label: z.string().trim().min(1).max(200), image: z.uuid().optional() })).max(4).optional(),
+        link: z.url({ protocol: /^https$/ }).max(500).optional(),
+      },
     },
-    async ({ task: ref, question, commit }) =>
+    async ({ task: ref, question, commit, images, options, link }) =>
       run(async () => {
         const { task } = await find(ref);
         const [asked] = await db
           .select({ n: count() })
           .from(requests)
-          .where(and(eq(requests.agentId, job.agentId), inArray(requests.kind, ['question', 'approval']), gte(requests.createdAt, await startedAt())));
+          .where(and(eq(requests.agentId, job.agentId), inArray(requests.kind, ['question', 'approval', 'choice']), gte(requests.createdAt, await startedAt())));
         if (Number(asked?.n ?? 0) >= TURN_QUESTIONS) throw refuse(409, 'task_invalid', `One turn asks people at most ${TURN_QUESTIONS} times.`);
-        const moved = await ask(ctx, job.agentId, task.id, commit ? { kind: 'approval', text: question, commit } : { kind: 'question', text: question });
+        const kind = commit ? 'approval' : options?.length ? 'choice' : 'question';
+        const ways = options?.map(o => ({ label: o.label, image: o.image ?? null }));
+        const moved = await ask(ctx, job.agentId, task.id, { kind, text: question, ...(commit ? { commit } : {}), images, options: ways, link: link ?? null });
         return { text: `Asked. #${task.number} waits for a person's answer; you will be woken with it.`, moved };
       }),
   );

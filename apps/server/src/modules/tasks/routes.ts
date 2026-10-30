@@ -7,6 +7,7 @@ import { requireCompanyScope, requirePerson, type Person } from '../../auth/sess
 import { agents, departments, requests, tasks, turns } from '../../db/schema.js';
 import { liveSubscription, orchestratorOf } from '../conversation/queue.js';
 import { answer, cancel, CLOSED, comment, createTask, refuse, taskSpot, type Task } from './engine.js';
+import { commitUrl, picturesOf } from './attachments.js';
 import { taskDetail, taskLines } from './views.js';
 import { stopTurns, wakeAll } from './wake.js';
 
@@ -23,6 +24,7 @@ const AnswerBody = z.union([
   z.object({ answer: z.string().trim().min(1).max(4000) }).strict(),
   z.object({ approve: z.boolean(), answer: z.string().max(4000).optional() }).strict(),
   z.object({ retry: z.literal(true) }).strict(),
+  z.object({ pick: z.number().int().min(0).max(9), answer: z.string().trim().max(4000).optional() }).strict(),
 ]);
 
 const reaches = (access: Access, t: Pick<Task, 'departmentId' | 'productId'>) => canReach(access, taskSpot(t));
@@ -122,12 +124,18 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
       mine.map(r => r.task),
     );
     const names = new Map((mine.length ? await db.select({ id: agents.id, name: agents.name }).from(agents).where(inArray(agents.id, mine.map(r => r.request.agentId))) : []).map(a => [a.id, a.name]));
+    const pictures = await picturesOf(db, mine.map(r => r.request));
+    const commits = await Promise.all(mine.map(r => commitUrl(db, r.task, r.request.commit)));
     return {
       requests: mine.map((r, i) => ({
         id: r.request.id,
         kind: r.request.kind,
         text: r.request.text,
         commit: r.request.commit,
+        commitUrl: commits[i],
+        images: pictures.get(r.request.id) ?? [],
+        options: r.request.options,
+        link: r.request.link,
         at: r.request.createdAt.toISOString(),
         agent: { id: r.request.agentId, name: names.get(r.request.agentId) ?? '' },
         task: { id: lines[i]!.id, number: lines[i]!.number, title: lines[i]!.title, department: lines[i]!.department },

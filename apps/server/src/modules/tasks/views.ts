@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { agents, departments, people, requests, taskEvents, tasks, turns } from '../../db/schema.js';
+import { agents, departments, people, requests, taskEvents, tasks, turns, type RequestOption } from '../../db/schema.js';
+import { commitUrl, picturesOf } from './attachments.js';
 import { deptName } from '../departments/templates.js';
 import type { Lang } from '../templates/load.js';
 import type { Task } from './engine.js';
@@ -26,7 +27,22 @@ export type TaskLine = {
 };
 export type GateView = AgentRef & { state: 'passed' | 'current' | 'next' };
 export type LogLine = { kind: string; text: string; data: unknown; by: { kind: 'person' | 'agent'; id: string; name: string } | null; at: string };
-export type RequestView = { id: string; kind: 'question' | 'approval' | 'stuck'; text: string; commit: string | null; status: string; answer: string | null; agent: AgentRef | null; at: string };
+/* images: the pictures the agent showed, commitUrl: where its commit can be seen, picked: the way a person took in a choice. */
+export type RequestView = {
+  id: string;
+  kind: (typeof requests.$inferSelect)['kind'];
+  text: string;
+  commit: string | null;
+  commitUrl: string | null;
+  images: string[];
+  options: RequestOption[];
+  link: string | null;
+  picked: number | null;
+  status: string;
+  answer: string | null;
+  agent: AgentRef | null;
+  at: string;
+};
 export type TaskDetail = TaskLine & {
   body: string;
   parent: { id: string; number: number; title: string } | null;
@@ -101,6 +117,8 @@ export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates'>, task: Task,
     .orderBy(desc(taskEvents.id))
     .limit(LOG_SHOWN);
   const asks = await db.select().from(requests).where(eq(requests.taskId, task.id)).orderBy(asc(requests.createdAt));
+  const pictures = await picturesOf(db, asks);
+  const commits = await Promise.all(asks.map(r => commitUrl(db, task, r.commit)));
   const [creator] = task.createdByPersonId ? await db.select({ id: people.id, name: people.name }).from(people).where(eq(people.id, task.createdByPersonId)) : [];
   const n = await names(ctx, [task, ...subs], [...events.map(e => e.agentId), ...asks.map(r => r.agentId)].filter((x): x is string => Boolean(x)));
   const by = (personId: string | null, personName: string | null, agentId: string | null): LogLine['by'] =>
@@ -119,7 +137,21 @@ export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates'>, task: Task,
     createdBy: creator ? { kind: 'person', ...creator } : task.createdByAgentId ? { kind: 'agent', id: task.createdByAgentId, name: n.agent(task.createdByAgentId)?.name ?? '' } : null,
     subtasks: subs.map(t => line(t, n)),
     log: events.reverse().map(e => ({ kind: e.kind, text: e.text, data: e.data, by: by(e.personId, e.personName, e.agentId), at: e.at.toISOString() })),
-    requests: asks.map(r => ({ id: r.id, kind: r.kind, text: r.text, commit: r.commit, status: r.status, answer: r.answer, agent: n.agent(r.agentId), at: r.createdAt.toISOString() })),
+    requests: asks.map((r, i) => ({
+      id: r.id,
+      kind: r.kind,
+      text: r.text,
+      commit: r.commit,
+      commitUrl: commits[i]!,
+      images: pictures.get(r.id) ?? [],
+      options: r.options,
+      link: r.link,
+      picked: r.picked,
+      status: r.status,
+      answer: r.answer,
+      agent: n.agent(r.agentId),
+      at: r.createdAt.toISOString(),
+    })),
   };
 }
 

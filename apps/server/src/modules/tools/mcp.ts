@@ -16,7 +16,7 @@ import { registerTaskTools } from '../tasks/tools.js';
 type ToolJob = { id: string; companyId: string; agentId: string; agentKind: (typeof agents.$inferSelect)['kind'] };
 
 /* The token works only while its job runs, and only for a job that belongs to an agent. */
-async function jobOf(ctx: Ctx, req: FastifyRequest): Promise<ToolJob> {
+export async function jobOf(ctx: Ctx, req: FastifyRequest): Promise<ToolJob> {
   const token = /^Bearer (\S+)$/.exec(req.headers.authorization ?? '')?.[1];
   const [job] = token
     ? await ctx.db

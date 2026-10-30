@@ -1,10 +1,11 @@
 import { TEMPLATE_KEYS, type Limits, type ModelOption } from '@hornhoof/protocol';
 import { sql } from 'drizzle-orm';
-import { bigserial, boolean, index, integer, jsonb, pgTable, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
+import { bigserial, boolean, customType, index, integer, jsonb, pgTable, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
 
 const id = () => uuid('id').primaryKey().defaultRandom();
 const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow();
 const companyId = () => uuid('company_id').notNull().references(() => companies.id);
+const bytea = customType<{ data: Uint8Array; driverData: Uint8Array }>({ dataType: () => 'bytea' });
 
 /* One deployment serves one company: the unique singleton column makes a second row impossible. */
 export const companies = pgTable('companies', {
@@ -358,10 +359,14 @@ export const taskEvents = pgTable(
   t => [index('task_events_task_id').on(t.taskId)],
 );
 
-export const REQUEST_KINDS = ['question', 'approval', 'stuck'] as const;
+export const REQUEST_KINDS = ['question', 'approval', 'choice', 'stuck'] as const;
 export const REQUEST_STATUSES = ['open', 'answered', 'approved', 'declined', 'withdrawn'] as const;
 
-/* What an agent waits for from a person: an answer, an approval of an exact commit, or help with a stuck task. */
+/* One of the ways a person can pick from, with the picture that shows it. */
+export type RequestOption = { label: string; image: string | null };
+
+/* What an agent waits for from a person: an answer, an approval of an exact commit, a pick of one way out of a few, or
+   help with a stuck task. link: where to see the work, picked: the option the person took. */
 export const requests = pgTable(
   'requests',
   {
@@ -372,6 +377,9 @@ export const requests = pgTable(
     kind: text('kind', { enum: REQUEST_KINDS }).notNull(),
     text: text('text').notNull(),
     commit: text('commit'),
+    options: jsonb('options').$type<RequestOption[]>().notNull().default([]),
+    link: text('link'),
+    picked: integer('picked'),
     status: text('status', { enum: REQUEST_STATUSES }).notNull().default('open'),
     answer: text('answer'),
     answeredBy: uuid('answered_by').references(() => people.id),
@@ -379,4 +387,21 @@ export const requests = pgTable(
     answeredAt: timestamp('answered_at', { withTimezone: true }),
   },
   t => [index('requests_task_id').on(t.taskId)],
+);
+
+/* A picture an agent sent from its turn to show its work. People see it once a request of that agent shows it. */
+export const attachments = pgTable(
+  'attachments',
+  {
+    id: id(),
+    companyId: companyId(),
+    jobId: uuid('job_id').notNull().references(() => jobs.id),
+    agentId: uuid('agent_id').notNull().references(() => agents.id),
+    requestId: uuid('request_id').references(() => requests.id),
+    mediaType: text('media_type').notNull(),
+    bytes: bytea('bytes').notNull(),
+    size: integer('size').notNull(),
+    createdAt: createdAt(),
+  },
+  t => [index('attachments_request_id').on(t.requestId), index('attachments_job_id').on(t.jobId)],
 );
