@@ -212,6 +212,8 @@ export const en = {
     removed: (name: string) => `Removed: ${name}`,
     pickByHand: 'Pick departments by hand',
     card: 'Card',
+    showLog: 'Log',
+    showTerminal: 'Terminal',
     writeTo: (name: string) => `Write to ${name}`,
     hiredLine: (name: string) => `Hired: ${name}`,
     failedEmployee: {

@@ -122,6 +122,8 @@ export type OrchestratorState = {
   busy: boolean;
   runningJobId: string | null;
   queued: number;
+  /* Its node shows the agent's live terminal; older nodes do not. */
+  terminal?: boolean;
 };
 
 /* One part of an agent's instructions: who it is (written by Hornhoof), its role, or a skill between markers. */

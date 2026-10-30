@@ -202,6 +202,8 @@ export const ru: Messages = {
     removed: name => `Убран отдел: ${name}`,
     pickByHand: 'Выбрать отделы вручную',
     card: 'Карточка',
+    showLog: 'Журнал',
+    showTerminal: 'Терминал',
     writeTo: (name: string) => `Сообщение для ${name}`,
     hiredLine: (name: string) => `Нанят: ${name}`,
     failedEmployee: {

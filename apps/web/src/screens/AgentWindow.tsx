@@ -4,6 +4,7 @@ import { deptLabel, errorText, useLanguage, useT, type Messages } from '../i18n'
 import { useStream } from '../live';
 import { PROVIDER_NAMES } from '../providers';
 import type { AgentCardView, EventView, Me, OrchestratorState, Org, StaffLine, StructureItem, SubView, TemplateKey } from '../types';
+import { AgentTerminal } from '../ui/AgentTerminal';
 import { Markdown } from '../ui/Markdown';
 import { StaffCard } from '../ui/StaffCard';
 import { StructureCard } from '../ui/StructureCard';
@@ -66,7 +67,8 @@ export type StaffAsk = { id: string; name: string; at: number };
 /* agentId: 'orchestrator' or an employee's id. staff: the CEO's "+ Hire", for the orchestrator's window only. */
 type Props = { me: Me; org: Org; agentId: string; staff?: StaffAsk | null; onClose(): void; onCard?(): void };
 
-/* An agent's terminal: its conversation as it happens, the orchestrator's cards, and the line to write to it. */
+/* An agent's window: its live terminal when its node shows one, or its conversation as a log; the orchestrator's cards,
+   and the line to write to it. */
 export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Props) {
   const t = useT();
   const { language } = useLanguage();
@@ -81,6 +83,9 @@ export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Pro
   const [failure, setFailure] = useState<unknown>(null);
   /* The department to staff by hand, when the orchestrator could not answer the CEO's "+ Hire". */
   const [staffByHand, setStaffByHand] = useState<{ id: string; name: string } | null>(null);
+  /* The terminal shows unless the person asked for the log or the node could not show one. */
+  const [asLog, setAsLog] = useState(false);
+  const [noTerminal, setNoTerminal] = useState(false);
   const asked = useRef<number | null>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const log = useRef<HTMLDivElement>(null);
@@ -211,7 +216,7 @@ export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Pro
   useLayoutEffect(() => {
     const el = log.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [events.length, state?.busy]);
+  }, [events.length, state?.busy, asLog]);
 
   useLayoutEffect(() => {
     const el = input.current;
@@ -253,6 +258,34 @@ export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Pro
   const byHand = orchestrator && !open && !staffByHand && (manual ?? (state !== null && !ready));
   const offerByHand = orchestrator && !open && !byHand && !staffByHand && !state?.busy && !state?.queued && (!ready || !org.departments.length);
   const where = [model || t.agent.default, orchestratorStatus(t, sub), sub?.machine?.hostname].filter(Boolean).join(', ');
+  const hasTerminal = Boolean(state?.terminal) && !noTerminal;
+  const terminal = hasTerminal && !asLog;
+
+  const cards = (
+    <>
+      {pending && <StructureCard key={pending.proposalId} proposal={{ id: pending.proposalId, brief: pending.brief, items: pending.items }} departments={org.departments} onCorrect={() => input.current?.focus()} />}
+      {staffing && (
+        <StaffCard key={staffing.proposalId} department={{ id: staffing.department, name: staffDept ? deptLabel(t, staffDept) : '' }} proposal={{ id: staffing.proposalId, brief: staffing.brief, people: staffing.people }} onCorrect={() => input.current?.focus()} />
+      )}
+      {!open && staffByHand && <StaffCard key={`hand-${staffByHand.id}`} department={staffByHand} onDone={() => setStaffByHand(null)} onHide={() => setStaffByHand(null)} />}
+      {byHand && <StructureCard manual={{ existing }} departments={org.departments} onCorrect={() => input.current?.focus()} onDone={() => setManual(false)} onHide={() => setManual(false)} />}
+    </>
+  );
+  const after = (
+    <>
+      {offerByHand && (
+        <button className="t-link" type="button" onClick={() => setManual(true)}>
+          {t.window.pickByHand}
+        </button>
+      )}
+      {failure !== null && (
+        <p className="alert" role="alert">
+          {errorText(t, failure)}
+        </p>
+      )}
+    </>
+  );
+  const hasCards = Boolean(pending || staffing || (!open && staffByHand) || byHand || offerByHand || failure !== null);
 
   function line(e: EventView, i: number) {
     switch (e.kind) {
@@ -342,7 +375,7 @@ export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Pro
   }
 
   return (
-    <aside className="orch" aria-label={title}>
+    <aside className={`orch${terminal ? ' term' : ''}`} aria-label={title}>
       <div className="t-bar">
         <span className="lights" aria-hidden="true">
           <i />
@@ -350,6 +383,13 @@ export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Pro
           <i />
         </span>
         <span>{title}</span>
+        {hasTerminal && (
+          <button type="button" aria-label={asLog ? t.window.showTerminal : t.window.showLog} title={asLog ? t.window.showTerminal : t.window.showLog} onClick={() => setAsLog(v => !v)}>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d={asLog ? 'M5 7l5 5-5 5M12 17h7' : 'M5 6h14M5 10h14M5 14h9M5 18h11'} />
+            </svg>
+          </button>
+        )}
         {onCard && (
           <button type="button" aria-label={t.window.card} onClick={onCard}>
             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -363,49 +403,42 @@ export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Pro
           </svg>
         </button>
       </div>
-      <div className="t-log" ref={log} role="log">
-        <div className="t-wel">
-          <div className="w1">
-            <i>✻</i> {title}
-          </div>
-          <div className="w2">{where}</div>
+      {terminal && <AgentTerminal agentId={agentId} onGone={() => setNoTerminal(true)} />}
+      {terminal && hasCards && (
+        <div className="t-cards">
+          {cards}
+          {after}
         </div>
-        {shown.map((e, i) => (
-          <div key={e.seq} className="t-line">
-            {line(e, i)}
-          </div>
-        ))}
-        {pending && <StructureCard key={pending.proposalId} proposal={{ id: pending.proposalId, brief: pending.brief, items: pending.items }} departments={org.departments} onCorrect={() => input.current?.focus()} />}
-        {staffing && (
-          <StaffCard key={staffing.proposalId} department={{ id: staffing.department, name: staffDept ? deptLabel(t, staffDept) : '' }} proposal={{ id: staffing.proposalId, brief: staffing.brief, people: staffing.people }} onCorrect={() => input.current?.focus()} />
-        )}
-        {!open && staffByHand && (
-          <StaffCard key={`hand-${staffByHand.id}`} department={staffByHand} onDone={() => setStaffByHand(null)} onHide={() => setStaffByHand(null)} />
-        )}
-        {byHand && <StructureCard manual={{ existing }} departments={org.departments} onCorrect={() => input.current?.focus()} onDone={() => setManual(false)} onHide={() => setManual(false)} />}
-        {state?.busy && (
-          <div className="t-sp">
-            <i>✻</i>
-            <div>
-              {t.window.working} <span>{t.window.escToStop}</span>
-              {state.queued > 0 && <span className="t-q">{t.window.waiting(state.queued)}</span>}
-              <button className="btn small ghost" type="button" onClick={stop}>
-                {t.window.stop}
-              </button>
+      )}
+      {!terminal && (
+        <div className="t-log" ref={log} role="log">
+          <div className="t-wel">
+            <div className="w1">
+              <i>✻</i> {title}
             </div>
+            <div className="w2">{where}</div>
           </div>
-        )}
-        {offerByHand && (
-          <button className="t-link" type="button" onClick={() => setManual(true)}>
-            {t.window.pickByHand}
-          </button>
-        )}
-        {failure !== null && (
-          <p className="alert" role="alert">
-            {errorText(t, failure)}
-          </p>
-        )}
-      </div>
+          {shown.map((e, i) => (
+            <div key={e.seq} className="t-line">
+              {line(e, i)}
+            </div>
+          ))}
+          {cards}
+          {state?.busy && (
+            <div className="t-sp">
+              <i>✻</i>
+              <div>
+                {t.window.working} <span>{t.window.escToStop}</span>
+                {state.queued > 0 && <span className="t-q">{t.window.waiting(state.queued)}</span>}
+                <button className="btn small ghost" type="button" onClick={stop}>
+                  {t.window.stop}
+                </button>
+              </div>
+            </div>
+          )}
+          {after}
+        </div>
+      )}
       {state && !ready && <p className="t-why">{reasonText(t, state.reason, sub)}</p>}
       <form
         className="t-in"
