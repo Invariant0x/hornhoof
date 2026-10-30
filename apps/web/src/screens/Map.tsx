@@ -30,8 +30,9 @@ const PULSE_SPEED = 100;
 const HOLD_MS = 5000;
 /* Flying into a department takes this long before its view opens. */
 const FLY_MS = 600;
-/* A square of an employee flashes this long when what it does changes. */
+/* A square of an employee flashes this long when what it does changes, and a department's frame when work reaches or leaves it. */
 const PING_MS = 950;
+const FLASH_MS = 1400;
 
 export type DeptSpot = { x: number; y: number; w: number; h: number; path: Point[] };
 
@@ -126,6 +127,9 @@ export function pulsePath(from: Endpoint, to: Endpoint, org: Org): Point[] | nul
   return pts.length >= 2 ? pts : null;
 }
 
+/* Work going back up, to a person or from a department to the hub, runs amber; work handed down runs cyan. */
+export const pulseTone = (from: Endpoint, to: Endpoint): 'c' | 'a' => (to.kind === 'person' || (to.kind === 'orchestrator' && from.kind === 'department') ? 'a' : 'c');
+
 /* The line under a department's name: its products, or its teams. */
 function deptDetail(t: Messages, d: Department): string {
   if (d.products.length) return d.products.map(p => p.name).join(', ');
@@ -135,9 +139,12 @@ function deptDetail(t: Messages, d: Department): string {
 /* One square per employee on a department's card, colored by what it does. */
 const CELL: Record<EmployeeStatus, string> = { working: 'w', queued: 'q', handed: 'r', waiting: 'h', idle: '', off: 'o' };
 
-function Cells({ employees }: { employees: Employee[] }) {
+/* onChange: someone's status changed since the last look. */
+function Cells({ employees, onChange }: { employees: Employee[]; onChange?(): void }) {
   const t = useT();
   const was = useRef(new Map<string, EmployeeStatus>());
+  const changedRef = useRef(onChange);
+  changedRef.current = onChange;
   const [pinged, setPinged] = useState<Set<string>>(new Set());
   /* Kept apart from the effect, so a fetch that changes nothing does not cancel the end of a flash. */
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -146,6 +153,7 @@ function Cells({ employees }: { employees: Employee[] }) {
     const changed = employees.filter(e => was.current.has(e.id) && was.current.get(e.id) !== e.status).map(e => e.id);
     was.current = new Map(employees.map(e => [e.id, e.status]));
     if (!changed.length) return;
+    changedRef.current?.();
     setPinged(new Set(changed));
     clearTimeout(timer.current);
     timer.current = setTimeout(() => setPinged(new Set()), PING_MS);
@@ -158,6 +166,13 @@ function Cells({ employees }: { employees: Employee[] }) {
       ))}
     </span>
   );
+}
+
+/* busy: someone works, and the frame breathes cyan; waits: nobody works and someone waits for people, so it breathes amber. */
+function deptClass(d: Department, flashing: boolean): string {
+  const busy = d.employees.some(e => e.status === 'working');
+  const waits = !busy && d.employees.some(e => e.status === 'waiting');
+  return `dept${busy ? ' busy' : ''}${waits ? ' waits' : ''}${flashing ? ' flash' : ''}`;
 }
 
 const orchestratorReady = (sub: SubView | null) => !!sub && sub.status === 'ready' && (sub.kind === 'api_key' || sub.online);
@@ -176,7 +191,7 @@ function contentBounds(org: Org): { x0: number; y0: number; x1: number; y1: numb
   return b;
 }
 
-type Shot = { key: number; pts: Point[] };
+type Shot = { key: number; pts: Point[]; tone: 'c' | 'a' };
 
 type Props = { me: Me; windowOpen: boolean; onOpenOrchestrator(): void; inside?: boolean; onOpenDepartment?(id: string): void };
 
@@ -192,30 +207,57 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator, inside = false, 
   const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
   const shotKey = useRef(0);
   const held = useRef<{ m: Extract<LiveMessage, { type: 'pulse' }>; at: number }[]>([]);
+  const [flashing, setFlashing] = useState<Set<string>>(new Set());
+  const flashTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
   useEffect(() => {
     const pending = timers.current;
+    const flashes = flashTimers.current;
     return () => {
       for (const id of pending) clearTimeout(id);
       pending.clear();
+      for (const id of flashes.values()) clearTimeout(id);
+      flashes.clear();
     };
   }, []);
 
-  const fire = useCallback((pts: Point[]) => {
-    const key = ++shotKey.current;
-    setShots(s => [...s, { key, pts }]);
-    const id = setTimeout(() => {
-      timers.current.delete(id);
-      setShots(s => s.filter(x => x.key !== key));
-    }, pulseSeconds(pts, PULSE_SPEED) * 1000);
-    timers.current.add(id);
+  /* A department's frame flashes once; flashing again while it flashes only makes it last. */
+  const flash = useCallback((id: string) => {
+    setFlashing(s => (s.has(id) ? s : new Set(s).add(id)));
+    clearTimeout(flashTimers.current.get(id));
+    flashTimers.current.set(
+      id,
+      setTimeout(() => {
+        flashTimers.current.delete(id);
+        setFlashing(s => {
+          const next = new Set(s);
+          next.delete(id);
+          return next;
+        });
+      }, FLASH_MS),
+    );
   }, []);
 
-  /* Real signals only: a pulse runs once per message. useOrg keeps the working count and the org itself fresh. */
+  const fire = useCallback(
+    (pts: Point[], m: Extract<LiveMessage, { type: 'pulse' }>) => {
+      const key = ++shotKey.current;
+      setShots(s => [...s, { key, pts, tone: pulseTone(m.from, m.to) }]);
+      if (m.from.kind === 'department') flash(m.from.id);
+      const id = setTimeout(() => {
+        timers.current.delete(id);
+        setShots(s => s.filter(x => x.key !== key));
+        if (m.to.kind === 'department') flash(m.to.id);
+      }, pulseSeconds(pts, PULSE_SPEED) * 1000);
+      timers.current.add(id);
+    },
+    [flash],
+  );
+
+  /* Real signals only: a pulse runs once per message or move of a task. useOrg keeps the working count and the org itself fresh. */
   useStream((m: LiveMessage) => {
     if (m.type !== 'pulse' || still) return;
     const pts = org && pulsePath(m.from, m.to, org);
-    if (pts) fire(pts);
+    if (pts) fire(pts, m);
     /* A pulse to a department that was just made comes before the map has fetched it, so it waits a little for it. */
     else held.current = [...held.current.filter(h => Date.now() - h.at < HOLD_MS), { m, at: Date.now() }];
   });
@@ -225,7 +267,7 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator, inside = false, 
     const now = Date.now();
     held.current = held.current.filter(h => {
       const pts = pulsePath(h.m.from, h.m.to, org);
-      if (pts) fire(pts);
+      if (pts) fire(pts, h.m);
       return !pts && now - h.at < HOLD_MS;
     });
   }, [org, fire]);
@@ -329,7 +371,7 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator, inside = false, 
           ))}
           {spots.map((s, i) => s.path.length > 2 && <circle key={depts[i]!.id} className="via" cx={s.path[2]![0]} cy={s.path[2]![1]} r="4" />)}
           {shots.map(s => (
-            <Pulse key={s.key} pts={s.pts} speed={PULSE_SPEED} once tone="c" />
+            <Pulse key={s.key} pts={s.pts} speed={PULSE_SPEED} once tone={s.tone} />
           ))}
         </svg>
 
@@ -383,7 +425,7 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator, inside = false, 
         )}
 
         {depts.map((d: Department, i) => (
-          <button key={d.id} type="button" className="dept" style={{ left: spots[i]!.x, top: spots[i]!.y, width: DEPT_W, height: DEPT_H }} onClick={() => enter(spots[i]!, d.id)}>
+          <button key={d.id} type="button" className={deptClass(d, flashing.has(d.id))} style={{ left: spots[i]!.x, top: spots[i]!.y, width: DEPT_W, height: DEPT_H }} onClick={() => enter(spots[i]!, d.id)}>
             <Edge cut={12} corner>
               <span className="row1">
                 <b className="dname">{deptLabel(t, d)}</b>
@@ -395,7 +437,7 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator, inside = false, 
                 <span className="role">{d.roleCode}</span>
                 {deptDetail(t, d) && <span className="detail">{deptDetail(t, d)}</span>}
               </span>
-              <Cells employees={d.employees} />
+              <Cells employees={d.employees} onChange={() => flash(d.id)} />
               {d.current ? (
                 <span className="now task">
                   <i />

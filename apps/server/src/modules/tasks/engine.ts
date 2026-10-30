@@ -4,6 +4,7 @@ import type { Spot } from '../../auth/access.js';
 import type { Db } from '../../db/client.js';
 import { agents, companies, requests, subscriptions, taskEvents, tasks, turns, type TaskEventKind } from '../../db/schema.js';
 import { ApiError, type ErrorReason } from '../../errors.js';
+import { handOff } from './pulses.js';
 
 export type Task = typeof tasks.$inferSelect;
 export type Request = typeof requests.$inferSelect;
@@ -65,6 +66,7 @@ async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, also?: (
     return row;
   });
   published(ctx, row);
+  await handOff(ctx, n.actor, row);
   return row;
 }
 
@@ -151,6 +153,7 @@ export async function createTask(ctx: Live, actor: Actor, input: NewTask): Promi
     return row!;
   });
   published(ctx, task);
+  await handOff(ctx, actor, task);
   return { task, wakes: [{ agentId: assignee.id, taskId: task.id, why: 'assigned' }] };
 }
 
@@ -380,6 +383,7 @@ export async function answer(ctx: Live, personId: string, requestId: string, a: 
   });
   const now = await loadTask(ctx.db, task.id);
   published(ctx, now);
+  await handOff(ctx, { personId }, now);
   ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
   const wakes: Wake[] = CLOSED.includes(now.status) ? [] : [{ agentId: found.agentId, taskId: task.id, why: 'answered', text: said }];
   return { request: row, task: now, wakes };

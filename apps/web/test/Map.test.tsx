@@ -226,6 +226,55 @@ describe('Map', () => {
     }
   });
 
+  it('runs work back to the hub in amber, and flashes a card where work leaves or lands', async () => {
+    const stream = fakeStream();
+    mockApi({ 'GET /api/org': [200, { ...ORG, departments: [dept({ id: 'd1', templateKey: 'sales' }), dept({ id: 'd2', templateKey: 'design' })] }] });
+    const { container } = render(<MapScreen {...PROPS} />);
+    await screen.findByText('Sales');
+    const card = (name: string) => screen.getByText(name).closest('button')!;
+    vi.useFakeTimers();
+    try {
+      stream.send({ type: 'pulse', from: { kind: 'orchestrator' }, to: { kind: 'department', id: 'd1' } });
+      expect(container.querySelectorAll('circle.pt.c')).toHaveLength(1);
+      expect(card('Sales')).not.toHaveClass('flash');
+      /* The frame lights when the dot gets there, and not before. */
+      for (let ms = 0; ms < 10_000 && !card('Sales').classList.contains('flash'); ms += 100) act(() => vi.advanceTimersByTime(100));
+      expect(container.querySelectorAll('circle.pt.c')).toHaveLength(0);
+      expect(card('Sales')).toHaveClass('flash');
+      act(() => vi.advanceTimersByTime(2_000));
+      expect(card('Sales')).not.toHaveClass('flash');
+
+      stream.send({ type: 'pulse', from: { kind: 'department', id: 'd2' }, to: { kind: 'orchestrator' } });
+      expect(container.querySelectorAll('circle.pt.a')).toHaveLength(1);
+      expect(card('Design')).toHaveClass('flash');
+      stream.send({ type: 'pulse', from: { kind: 'department', id: 'd2' }, to: { kind: 'person', id: 'p1' } });
+      expect(container.querySelectorAll('circle.pt.a')).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('breathes the frame of a department at work, and in amber while it waits for people', async () => {
+    const [dev] = DEV_ORG.departments;
+    const one = (id: string, status: Employee['status']): Employee => ({ ...dev!.employees[1]!, id, name: id, status });
+    const org = {
+      ...ORG,
+      departments: [
+        dept({ id: 'd1', templateKey: 'sales', employees: [one('a', 'working'), one('b', 'waiting')] }),
+        dept({ id: 'd2', templateKey: 'design', employees: [one('c', 'waiting'), one('d', 'idle')] }),
+        dept({ id: 'd3', templateKey: 'support', employees: [one('e', 'queued'), one('f', 'idle')] }),
+      ],
+    };
+    mockApi({ 'GET /api/org': [200, org] });
+    render(<MapScreen {...PROPS} />);
+    const card = async (name: string) => (await screen.findByText(name)).closest('button')!;
+    expect(await card('Sales')).toHaveClass('busy');
+    expect(await card('Sales')).not.toHaveClass('waits');
+    expect(await card('Design')).toHaveClass('waits');
+    expect(await card('Support')).not.toHaveClass('busy');
+    expect(await card('Support')).not.toHaveClass('waits');
+  });
+
   it('runs the pulse to a department that was just made, once the map has fetched it', async () => {
     const stream = fakeStream();
     let loads = 0;

@@ -466,6 +466,19 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 button.dept { padding: 0; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
 button.dept:hover > .edge, button.dept:focus-visible > .edge { background: var(--cyan); }
 button.dept:focus-visible { outline: none; }
+/* While someone works the frame breathes cyan, while the department waits for people it breathes amber, and it flashes
+   once when work reaches or leaves it. */
+button.dept.busy, button.dept.waits { animation: dglow 2.6s ease-in-out infinite; }
+button.dept.busy { --glow: var(--cyan); }
+button.dept.waits { --glow: var(--amber); }
+button.dept.busy > .edge, button.dept.waits > .edge { animation: dbreathe 2.6s ease-in-out infinite; }
+button.dept.flash > .edge { animation: eflash 1.4s ease-out; }
+@keyframes dbreathe { 50% { background: var(--glow); } }
+@keyframes dglow { 50% { filter: drop-shadow(0 0 10px color-mix(in srgb, var(--glow) 45%, transparent)); } }
+@media (prefers-reduced-motion: reduce) {
+  button.dept.busy, button.dept.waits, button.dept.flash > .edge { animation: none; }
+  button.dept.busy > .edge, button.dept.waits > .edge { animation: none; background: var(--glow); }
+}
 
 /* Inside a department: its schema from the prototype, over the map. */
 .dview { position: absolute; inset: 0; z-index: 2; background-color: var(--bg); animation: dvin .25s ease-out; }
