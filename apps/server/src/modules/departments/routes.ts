@@ -4,7 +4,9 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { requireCompanyScope, requirePerson } from '../../auth/session.js';
-import { agentChanges, agents, companies, departments, proposals, teams } from '../../db/schema.js';
+import { agentChanges, agents, companies, departments, proposals, tasks, teams } from '../../db/schema.js';
+import { encryptSecret } from '../../crypto/secrets.js';
+import { Repo } from '@hornhoof/protocol';
 import { ApiError } from '../../errors.js';
 import { enqueueTurn, orchestratorOf, orchestratorState } from '../conversation/queue.js';
 import { appendEvent } from '../events/store.js';
@@ -103,6 +105,9 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
           await tx.update(agents).set({ departmentId: null, productId: null, teamId: null }).where(and(inArray(agents.departmentId, inside), isNotNull(agents.removedAt)));
           await tx.update(proposals).set({ status: 'dismissed' }).where(and(inArray(proposals.departmentId, inside), eq(proposals.status, 'pending')));
           await tx.update(proposals).set({ departmentId: null }).where(inArray(proposals.departmentId, inside));
+          /* Finished tasks keep their log without the department. */
+          await tx.update(tasks).set({ departmentId: null }).where(inArray(tasks.departmentId, inside));
+          await tx.update(tasks).set({ productId: null }).where(inArray(tasks.productId, inside));
           await tx.delete(teams).where(inArray(teams.departmentId, inside));
           await tx.delete(departments).where(eq(departments.parentId, dept.id));
           await tx.delete(departments).where(eq(departments.id, dept.id));
@@ -141,6 +146,42 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
   /* The default roster for the card by hand: one line per default role, a perProduct role once per product, on the first
      subscription that serves the department and runs the role's tier, with the program's Default model. Every staff card
      picks from its roles, products and subscriptions. */
+  /* The git repository the department's agents work in. Only the whole company sets it; the token never comes back. */
+  const RepoBody = z.object({ url: z.string(), branch: z.string().default('main'), token: z.string().trim().max(500).optional() }).strict();
+  const repoView = (d: { repoUrl: string | null; repoBranch: string | null; repoTokenLast4: string | null }) =>
+    d.repoUrl ? { url: d.repoUrl, branch: d.repoBranch ?? 'main', tokenLast4: d.repoTokenLast4 } : null;
+
+  app.put('/api/departments/:id/repository', async req => {
+    const me = await requirePerson(req, db);
+    requireCompanyScope(me);
+    const { id } = IdParams.parse(req.params);
+    const body = RepoBody.parse(req.body);
+    const checked = Repo.pick({ url: true, branch: true }).safeParse({ url: body.url.trim(), branch: body.branch.trim() });
+    if (!checked.success) throw new ApiError(400, 'validation', 'Use an https address and a plain branch name.', 'repo_invalid');
+    const [dept] = await db.select().from(departments).where(and(eq(departments.id, id), eq(departments.companyId, me.companyId)));
+    if (!dept) throw new ApiError(404, 'not_found', 'This department does not exist.', 'department_unknown');
+    const token = body.token ? { repoTokenEnc: encryptSecret(body.token, ctx.config.secret), repoTokenLast4: body.token.slice(-4) } : {};
+    const [row] = await db
+      .update(departments)
+      .set({ repoUrl: checked.data.url, repoBranch: checked.data.branch, ...token })
+      .where(eq(departments.id, id))
+      .returning();
+    ctx.bus.publish(me.companyId, { type: 'org' });
+    return { repository: repoView(row!) };
+  });
+
+  app.delete('/api/departments/:id/repository', async (req, reply) => {
+    const me = await requirePerson(req, db);
+    requireCompanyScope(me);
+    const { id } = IdParams.parse(req.params);
+    await db
+      .update(departments)
+      .set({ repoUrl: null, repoBranch: null, repoTokenEnc: null, repoTokenLast4: null })
+      .where(and(eq(departments.id, id), eq(departments.companyId, me.companyId)));
+    ctx.bus.publish(me.companyId, { type: 'org' });
+    return reply.code(204).send();
+  });
+
   app.get('/api/departments/:id/roster', async req => {
     const me = await requirePerson(req, db);
     requireCompanyScope(me);

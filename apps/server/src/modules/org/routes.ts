@@ -1,9 +1,9 @@
 import { modelsFor } from '@hornhoof/protocol';
-import { and, asc, eq, isNotNull, isNull, ne } from 'drizzle-orm';
+import { and, asc, desc, eq, isNotNull, isNull, ne, notInArray } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import type { Ctx } from '../../app.js';
 import { personColumns, requirePerson } from '../../auth/session.js';
-import { agents, companies, departments, jobs, people, personAccess, subscriptions, teams } from '../../db/schema.js';
+import { agents, companies, departments, jobs, people, personAccess, subscriptions, tasks, teams, turns } from '../../db/schema.js';
 import { employeeOrder } from '../agents/order.js';
 import { deptName } from '../departments/templates.js';
 import { workingCount } from '../events/store.js';
@@ -20,6 +20,18 @@ export function orgRoutes(app: FastifyInstance, { db, hub, templates }: Ctx): vo
     const orchestrator = allAgents.find(a => a.kind === 'orchestrator');
     const active = await db.select(personColumns).from(people).where(ne(people.status, 'disabled')).orderBy(asc(people.createdAt));
     const depts = await db.select().from(departments).orderBy(asc(departments.position), asc(departments.createdAt));
+    /* What each department works on now: its newest open task without an executor (the head's), else its newest open one. */
+    const openTasks = await db
+      .select({ id: tasks.id, number: tasks.number, title: tasks.title, departmentId: tasks.departmentId, executor: tasks.executorAgentId })
+      .from(tasks)
+      .where(and(eq(tasks.companyId, me.companyId), notInArray(tasks.status, ['done', 'cancelled'])))
+      .orderBy(desc(tasks.number));
+    const currentOf = (id: string) => {
+      const mine = openTasks.filter(t => t.departmentId === id);
+      const t = mine.find(x => !x.executor) ?? mine[0];
+      return t ? { id: t.id, number: t.number, title: t.title } : null;
+    };
+    const [turn] = await db.select({ id: turns.id, number: turns.number, goal: turns.goal }).from(turns).where(and(eq(turns.companyId, me.companyId), eq(turns.status, 'open')));
     const allTeams = await db.select().from(teams).orderBy(asc(teams.stage), asc(teams.createdAt));
     /* A listed person counts each place as its top-level department: a product as the department holding it, a team as its department. */
     const topOf = (deptId: string | undefined) => {
@@ -71,6 +83,7 @@ export function orgRoutes(app: FastifyInstance, { db, hub, templates }: Ctx): vo
         subscription: orchestrator.subscriptionId ? await subView(db, s => hub.isOnline(identityOf(s)), orchestrator.subscriptionId) : null,
       },
       agents: { total: allAgents.length, working: await workingCount(db, me.companyId) },
+      turn: turn ?? null,
       people: nextToCeo.map(p => ({ ...views.get(p.id)!, deputy: p.scopeKind !== 'company' })),
       /* Products are departments inside a department; the map shows only the top level and lists the products on it. */
       departments: depts
@@ -85,6 +98,8 @@ export function orgRoutes(app: FastifyInstance, { db, hub, templates }: Ctx): vo
           people: inDepartment(d.id),
           employees: employeesOf(d),
           products: depts.filter(p => p.parentId === d.id).map(p => ({ id: p.id, name: deptName(p) })),
+          current: currentOf(d.id),
+          repository: d.repoUrl ? { url: d.repoUrl, branch: d.repoBranch ?? 'main', tokenLast4: d.repoTokenLast4 } : null,
           teams: allTeams
             .filter(t => t.departmentId === d.id)
             .map(t => ({ id: t.id, name: t.name, about: t.about, stage: t.stage, gate: t.gate })),
