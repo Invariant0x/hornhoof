@@ -564,6 +564,13 @@ button.shead:hover > .edge, button.schip:hover > .edge { background: var(--line2
 .shead.on > .edge, .schip.on > .edge, button.shead:focus-visible > .edge, button.schip:focus-visible > .edge { background: var(--cyan); }
 button.shead:focus-visible, button.schip:focus-visible { outline: none; }
 .shead.flash > .edge, .schip.flash > .edge { animation: eflash 1.4s ease-out; }
+/* An agent's place on the schema: its chip, and the tick that switches it off for now. An agent that is off fades. */
+.sslot > .schip, .sslot > .shead { width: 100%; height: 100%; }
+.sslot .sw { position: absolute; top: 10px; right: 14px; width: 14px; height: 14px; margin: 0; accent-color: var(--cyan-ink); cursor: pointer; }
+.sslot > .shead ~ .sw { top: 17px; right: 20px; }
+.sslot.has-sw .schip .r1 { padding-right: 22px; }
+.sslot.has-sw .shead .hr { padding-right: 24px; }
+.sslot.off > .schip, .sslot.off > .shead { opacity: 0.55; }
 @keyframes eflash { 0% { background: var(--cyan); } }
 .far .schip .r2, .far .schip .r3, .far .schip .st { visibility: hidden; }
 .far .schip.s-w .edge-in { background: color-mix(in srgb, var(--cyan) 18%, var(--surface)); }

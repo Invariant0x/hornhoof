@@ -167,6 +167,29 @@ describe('Department view', () => {
     expect(await screen.findByRole('button', { name: 'Open terminal' })).toBeInTheDocument();
   });
 
+  it('switches an employee off from its chip without opening it', async () => {
+    const user = userEvent.setup();
+    const calls = shell({ 'PATCH /api/agents/b1': [200, { ...CARD, on: false }] });
+    await flyIn(user);
+    const tick = screen.getByRole('checkbox', { name: 'Bruno is on' });
+    expect(tick).toBeChecked();
+    await user.click(tick);
+    await vi.waitFor(() => expect(calls.find(c => c.method === 'PATCH' && c.path === '/api/agents/b1')?.body).toEqual({ on: false }));
+    expect(tick).not.toBeChecked();
+    expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
+    expect(screen.getByText('Bruno: switched off')).toBeInTheDocument();
+  });
+
+  it('shows an employee that is off as switched off', async () => {
+    const user = userEvent.setup();
+    const [dev] = DEV_ORG.departments;
+    const off: Org = { ...DEV_ORG, departments: [{ ...dev!, employees: dev!.employees.map(e => (e.id === 'b1' ? { ...e, on: false } : e)) }] };
+    shell({}, off);
+    await flyIn(user);
+    expect(screen.getByRole('checkbox', { name: 'Bruno is on' })).not.toBeChecked();
+    expect(screen.getByRole('button', { name: /Bruno/ })).toHaveTextContent('Switched off');
+  });
+
   it('marks the head and each employee with the program they work in', async () => {
     const user = userEvent.setup();
     shell({});
