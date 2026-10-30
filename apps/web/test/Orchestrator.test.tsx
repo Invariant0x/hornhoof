@@ -138,7 +138,8 @@ describe('OrchestratorWindow', () => {
     const stream = fakeStream();
     open({
       [`GET ${EVENTS}?after=0`]: [200, { events: [ev(1, 'text', { kind: 'text', text: 'First' })], state: READY }],
-      [`GET ${EVENTS}?after=2`]: [200, { events: [ev(2, 'text', { kind: 'text', text: 'Second' }), ev(3, 'text', { kind: 'text', text: 'Third' })], state: READY }],
+      /* The live line does not move where history is fetched from, so nothing between is skipped. */
+      [`GET ${EVENTS}?after=1`]: [200, { events: [ev(2, 'text', { kind: 'text', text: 'Second' }), ev(3, 'text', { kind: 'text', text: 'Third' })], state: READY }],
     });
     await screen.findByText('First');
     stream.send({ type: 'agent_event', agentId: 'a1', event: ev(2, 'text', { kind: 'text', text: 'Second' }) });
@@ -147,6 +148,28 @@ describe('OrchestratorWindow', () => {
     expect(await screen.findByText('Third')).toBeInTheDocument();
     expect(screen.getAllByText('Second')).toHaveLength(1);
     expect(screen.queryByText('Not his')).not.toBeInTheDocument();
+  });
+
+  it('loads a long conversation page by page up to the newest line', async () => {
+    const page = Array.from({ length: 500 }, (_, i) => ev(i + 1, 'text', { kind: 'text', text: `Line ${i + 1}` }));
+    open({
+      [`GET ${EVENTS}?after=0`]: [200, { events: page, state: READY }],
+      [`GET ${EVENTS}?after=500`]: [200, { events: [ev(501, 'text', { kind: 'text', text: 'Newest' })], state: READY }],
+    });
+    expect(await screen.findByText('Newest')).toBeInTheDocument();
+  });
+
+  it('greets once he can answer, when the window was open before that', async () => {
+    const stream = fakeStream();
+    let ready = false;
+    const { calls } = open({
+      [`GET ${EVENTS}?after=0`]: () => [200, { events: [], state: ready ? READY : { ...READY, ready: false, reason: 'waiting_machine' } }],
+    });
+    const starts = () => calls.filter(c => c.path === '/api/agents/orchestrator/start').length;
+    await vi.waitFor(() => expect(starts()).toBe(1));
+    ready = true;
+    stream.send({ type: 'reconnected' });
+    await vi.waitFor(() => expect(starts()).toBe(2));
   });
 
   it('keeps one card that changes with the newest proposal, under his latest line', async () => {

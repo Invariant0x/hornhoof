@@ -10,6 +10,8 @@ import { orchestratorStatus } from './Map';
 
 const EVENTS = '/api/agents/orchestrator/events';
 /* Machines come and go without a message on the stream, so the window asks again now and then. */
+/* The most events the server sends at a time. */
+const PAGE = 500;
 const POLL_MS = 15_000;
 /* Many lines can arrive in a second while he works; one catch-up covers them. */
 const CATCH_UP_MS = 300;
@@ -74,7 +76,6 @@ export function OrchestratorWindow({ org, onClose }: Props) {
   /* A line comes once, whether the stream or a catch-up brought it first. */
   const merge = useCallback((more: EventView[]) => {
     if (!more.length) return;
-    last.current = Math.max(last.current, ...more.map(e => e.seq));
     setEvents(list => {
       const seen = new Set(list.map(e => e.seq));
       const fresh = more.filter(e => !seen.has(e.seq));
@@ -82,12 +83,17 @@ export function OrchestratorWindow({ org, onClose }: Props) {
     });
   }, []);
 
+  /* History comes in order, a page at a time, and only it moves the cursor: a live line never skips what came before it. */
   const catchUp = useCallback(async () => {
     try {
-      const res = await api.get<{ events: EventView[]; state: OrchestratorState }>(`${EVENTS}?after=${last.current}`);
-      if (!mounted.current) return;
-      merge(res.events);
-      setState(res.state);
+      for (;;) {
+        const res = await api.get<{ events: EventView[]; state: OrchestratorState }>(`${EVENTS}?after=${last.current}`);
+        if (!mounted.current) return;
+        merge(res.events);
+        setState(res.state);
+        if (res.events.length) last.current = Math.max(last.current, ...res.events.map(e => e.seq));
+        if (res.events.length < PAGE) break;
+      }
     } catch (err) {
       if (mounted.current) setFailure(err);
     }
@@ -101,13 +107,17 @@ export function OrchestratorWindow({ org, onClose }: Props) {
     }, CATCH_UP_MS);
   }, [catchUp]);
 
+  /* His greeting, when the conversation never began on an empty company; the server decides. */
+  const greet = useCallback(async () => {
+    const res = await api.post<{ started: boolean }>('/api/agents/orchestrator/start').catch(() => ({ started: false }));
+    if (res.started && mounted.current) await catchUp();
+  }, [catchUp]);
+
   useEffect(() => {
     mounted.current = true;
     (async () => {
       await catchUp();
-      /* His greeting, when the conversation never began on an empty company; the server decides. */
-      const res = await api.post<{ started: boolean }>('/api/agents/orchestrator/start').catch(() => ({ started: false }));
-      if (res.started && mounted.current) await catchUp();
+      await greet();
     })();
     const poll = setInterval(() => void catchUp(), POLL_MS);
     return () => {
@@ -116,7 +126,16 @@ export function OrchestratorWindow({ org, onClose }: Props) {
       if (catchUpTimer.current) clearTimeout(catchUpTimer.current);
       catchUpTimer.current = null;
     };
-  }, [catchUp]);
+  }, [catchUp, greet]);
+
+  /* He may become able to answer while the window is open, as when the machine comes up after setup. */
+  const wasReady = useRef<boolean | null>(null);
+  const canAnswer = state?.ready ?? null;
+  useEffect(() => {
+    if (canAnswer === null) return;
+    if (wasReady.current === false && canAnswer) void greet();
+    wasReady.current = canAnswer;
+  }, [canAnswer, greet]);
 
   useStream(m => {
     if (m.type === 'agent_event' && m.agentId === agentId) {
