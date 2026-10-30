@@ -73,6 +73,22 @@ Click an employee to open its card. It shows where the employee runs and on whic
 
 Each person sees the whole company, or the departments and teams ticked for them. Someone who reaches more than one department shows next to the CEO on the map as a deputy.
 
+## Tasks and turns
+
+Work moves as tasks. The Tasks tab lists every task a person reaches, grouped by where it stands, with what agents wait for from people on top: questions to answer, commits to approve, and tasks an agent got stuck on.
+
+A turn is the goal the whole company works on now. Someone who sees the whole company starts it on the Tasks tab; the orchestrator gets it as a task, splits it into one task per department and hands each to the department's head. The head breaks it into tasks for members, and gives each task its gates: the reviewers, testers or security people who check the work in order. A member works the task in a branch, hands it in with evidence, and each gate passes it on or sends it back with a reason. When all gates pass, the head reports to the orchestrator, and he reports the turn's task once every department is done. Closing the turn is the CEO's click.
+
+Hornhoof wakes an agent when there is something for it: a task given to it, work at its gate, a task sent back, an answer from a person. An agent that ends three turns in a row without moving its task stops and asks a person how to go on.
+
+Anyone whose access lists a department can give it a task from inside the department with "New task"; it goes to the department's head. Nothing reaches the main branch until a person approves the exact commit.
+
+## Repositories
+
+A department, or a product inside it, can name the git repository its agents work in. Inside the department, people who see the whole company set its address, branch and a token. The token is kept encrypted and shows only its last four characters; it never reaches a command line or the clone's settings. A product's repository goes to the agents of that product instead of the department's.
+
+Each agent gets its own clone in its own folder on the node before its first turn, keeps it between turns, and works in a branch per task. Nodes from 0.5.0 on take turns with a repository; an older node keeps them waiting until it is updated.
+
 ## Updates
 
 Hornhoof checks for a newer build every 30 minutes. People who see the whole company get a banner when one is out: "Update" moves to it now, "Update when agents finish" waits until no agent is working. Versions in the account menu lists the published builds with the one running now and goes back to an earlier one the same way.
