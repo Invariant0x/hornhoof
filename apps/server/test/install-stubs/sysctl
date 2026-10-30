@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+. "$STUB_SRC/_log.sh"
+case "$*" in
+  "-n hw.ncpu") echo "${STUB_NCPU:-8}" ;;
+  "-n hw.memsize") echo "${STUB_MEMSIZE:-17179869184}" ;;
+  *) exit 1 ;;
+esac

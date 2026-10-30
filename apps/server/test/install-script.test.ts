@@ -87,6 +87,22 @@ describe('install.sh', () => {
     expect(r.out).toContain('password');
   });
 
+  it("gives a new Colima all of the Mac's processors and three quarters of its memory before it starts at login", () => {
+    const r = install({ omit: ['docker', 'brew'], env: { STUB_OS: 'Darwin', STUB_ARCH: 'arm64', STUB_DOCKER: 'after_start', STUB_NCPU: '10', STUB_MEMSIZE: String(16 * 1024 ** 3) } });
+    expect(r.code).toBe(0);
+    const steps = ['colima start --cpu 10 --memory 12', 'colima stop', 'brew services start colima'].map(s => indexOf(r.calls, s));
+    expect(steps.every(i => i >= 0)).toBe(true);
+    expect([...steps].sort((a, b) => a - b)).toEqual(steps);
+    expect(r.out).toContain('10 processors and 12 GB of memory');
+  });
+
+  it('leaves the processors and memory of a Colima set up before as they are', () => {
+    const r = install({ omit: ['docker', 'brew'], env: { STUB_OS: 'Darwin', STUB_ARCH: 'arm64', STUB_DOCKER: 'after_start', STUB_COLIMA_LIST: '{"name":"work","status":"Stopped","cpus":4}' } });
+    expect(r.code).toBe(0);
+    expect(r.calls.some(c => c.startsWith('colima start'))).toBe(false);
+    expect(indexOf(r.calls, 'brew services start colima')).toBeGreaterThanOrEqual(0);
+  });
+
   it('uses a working Docker on Linux as it is, without sudo', () => {
     const r = install();
     expect(r.code).toBe(0);
@@ -139,6 +155,7 @@ describe('install.sh', () => {
       expect(run).toContain('--restart unless-stopped');
       expect(run).toContain('--cap-drop ALL');
       expect(run).toContain('--security-opt no-new-privileges');
+      expect(run).toContain('--shm-size 2g');
       expect(run).toContain(`-v ${name}:/data`);
       expect(run.endsWith(IMAGE)).toBe(true);
       expect(run).not.toContain('node-key-');

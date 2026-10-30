@@ -124,8 +124,24 @@ install_colima() {
   fi
   say "Installing Colima and the Docker command line with Homebrew."
   brew install colima docker || fail "Homebrew could not install Colima. Run brew doctor, fix what it reports, then run this command again."
+  size_colima
   say "Starting Colima and setting it to start when you log in."
   brew services start colima || fail "Colima did not start. Run colima start to see why, then run this command again."
+}
+
+# Colima starts with 2 processors and 2 GB of memory, too little for agents that build and test. A new one gets all of
+# the Mac's processors and three quarters of its memory; one set up before, in any folder or profile, keeps what its
+# owner gave it.
+size_colima() {
+  [ -n "$(colima list --json 2> /dev/null)" ] && return 0
+  local cpus gb
+  cpus=$(sysctl -n hw.ncpu 2> /dev/null || echo 2)
+  gb=$(($(sysctl -n hw.memsize 2> /dev/null || echo 0) / 1073741824 * 3 / 4))
+  [ "$cpus" -ge 2 ] 2> /dev/null || cpus=2
+  [ "$gb" -ge 2 ] || gb=2
+  say "Setting up Colima with $cpus processors and $gb GB of memory. The first start downloads its system and can take a few minutes."
+  colima start --cpu "$cpus" --memory "$gb" || fail "Colima did not start. Run colima start to see why, then run this command again."
+  colima stop || true
 }
 
 install_docker_engine() {
@@ -263,7 +279,7 @@ start_node() {
   "${DOCKER[@]}" rm -f "$name" > /dev/null 2>&1 || true
   # shellcheck disable=SC2086 # the two --add-host words appear only for a server on localhost
   "${DOCKER[@]}" run -d --name "$name" --label "$LABEL=$id" --label "$SERVER_LABEL=$SERVER" --restart unless-stopped --cap-drop ALL \
-    --security-opt no-new-privileges -v "$name:/data" ${LOCAL_SERVER:+--add-host} ${LOCAL_SERVER:+host.docker.internal:host-gateway} \
+    --security-opt no-new-privileges --shm-size 2g -v "$name:/data" ${LOCAL_SERVER:+--add-host} ${LOCAL_SERVER:+host.docker.internal:host-gateway} \
     "$IMAGE" > /dev/null || fail "Could not start $name (docker logs $name shows why). $RETRY"
   STARTED="$STARTED $name"
 }

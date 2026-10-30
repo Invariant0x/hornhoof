@@ -36,7 +36,7 @@ On a Linux or macOS server:
 curl -fsSL https://raw.githubusercontent.com/Invariant0x/hornhoof/main/scripts/install.sh | bash -s -- server
 ```
 
-It installs Docker if it is missing (Colima through Homebrew on macOS), puts `compose.yaml` and a `.env` with fresh secrets into `~/hornhoof`, asks for the address people will open Hornhoof at, then downloads the images and starts them. Run it again to update; it keeps the existing `.env`.
+It installs Docker if it is missing (Colima through Homebrew on macOS), puts `compose.yaml` and a `.env` with fresh secrets into `~/hornhoof`, asks for the address people will open Hornhoof at, then downloads the images and starts them. Run it again to update; it keeps the existing `.env`. A Colima it sets up gets all of the Mac's processors and three quarters of its memory, and every node gets 2 GB of shared memory for the browsers agents run.
 
 ### Several companies on one computer
 

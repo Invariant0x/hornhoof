@@ -5,7 +5,7 @@ import { useTasks } from '../tasks';
 import type { Department, Employee, EmployeeStatus, Me, PersonView } from '../types';
 import { usePanZoom, ZoomBar } from '../ui/canvas';
 import { Edge } from '../ui/Edge';
-import { AgentIcon, PersonIcon } from '../ui/icons';
+import { AgentIcon, PersonIcon, ProviderMark } from '../ui/icons';
 import { NewTask } from '../ui/NewTask';
 import { RepoSettings } from '../ui/RepoSettings';
 import { byState, TaskRow } from '../ui/TaskRow';
@@ -72,6 +72,7 @@ function Chip({ e, x, y, on, flash, onOpen }: { e: Employee; x: number; y: numbe
         <span className="r1">
           <AgentIcon />
           <span className="mn">{e.name}</span>
+          <ProviderMark provider={e.provider} />
           <span className="st">{t.dept.status[e.status]}</span>
         </span>
         <span className="r2">{modelLine(t, e)}</span>
@@ -105,6 +106,7 @@ function HeadCard({ d, head, stats, on, flash, onOpen }: { d: Department; head: 
         <span className="hr">
           <AgentIcon />
           <span className="role">{`${d.roleCode}, ${deptLabel(t, d)}`}</span>
+          <ProviderMark provider={head.provider} />
         </span>
         <span className="hn">{head.name}</span>
         <span className="meta">{[role && role !== head.name ? role : null, modelLine(t, head)].filter(Boolean).join(', ')}</span>

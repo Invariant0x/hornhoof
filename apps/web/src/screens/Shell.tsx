@@ -187,7 +187,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
             selectedTask={panel?.kind === 'task' ? panel.taskId : null}
             panel={panel?.kind ?? null}
             onBack={() => setDeptId(null)}
-            onOpen={agentId => setPanel({ kind: 'card', agentId })}
+            onOpen={agentId => setPanel({ kind: 'window', agentId })}
             onOpenTask={taskId => setPanel({ kind: 'task', taskId })}
             onHire={() => {
               setStaff({ id: dept.id, name: deptLabel(t, dept), at: Date.now() });
