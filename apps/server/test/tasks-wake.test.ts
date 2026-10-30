@@ -233,6 +233,7 @@ describe("working in the product's repository", () => {
     /* Apart from the conversation, which the node keeps with the session: the repository can change. */
     expect(start.guidance).toContain('https://github.com/acme/platform.git');
     expect(start.guidance).toContain('./platform');
+    expect(start.guidance).toContain('read its own rules first (AGENTS.md, CLAUDE.md, CONTRIBUTING.md, README.md)');
     expect(start.context ?? '').not.toContain('platform');
   });
 
