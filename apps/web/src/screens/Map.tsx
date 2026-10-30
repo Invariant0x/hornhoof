@@ -13,6 +13,8 @@ const W = 1200, H = 900, CX = W / 2, CY = 420, HUB = 120;
 const CHIP_W = 184, CHIP_H = 56, CHIP_GAP = 20;
 const CHIPS_TOP = CY - 384, BUS_Y = CY - 314;
 const DEPT_W = 240, DEPT_H = 104;
+/* The orchestrator's chip under the hub, and what comes below it (the empty-state block or "+ Add department"). */
+const ORCH_W = 340, ORCH_TOP = CY + HUB + 16, BELOW = ORCH_TOP + CHIP_H + 20;
 /* Where a department trace turns: 84 out on the diagonal, and the inner side of each column. */
 const BEND = 84, INNER = 210;
 const GAUGE_SEGMENTS = 24;
@@ -50,6 +52,12 @@ export function deptLayout(n: number): DeptSpot[] {
       path: [[CX, CY], [CX + side * BEND, CY + up * BEND], [CX + side * BEND, midY], [edgeX, midY]],
     };
   });
+}
+
+/* "+ Add department" sits under the orchestrator's chip, or under the lowest row once departments go below the hub, clear of the traces. */
+function addTop(n: number): number {
+  const rows = Math.ceil(n / 2);
+  return rows > 1 ? CY + 220 + 160 * (rows - 2) + DEPT_H / 2 + 28 : BELOW;
 }
 
 const chipsWidth = (n: number) => n * CHIP_W + Math.max(0, n - 1) * CHIP_GAP;
@@ -102,7 +110,7 @@ function deptCount(t: Messages, d: Department): string {
 /* The part of the world that has something on it, so Fit fills the screen with it. */
 function contentBounds(org: Org): { x0: number; y0: number; x1: number; y1: number } {
   const half = Math.max(chipsWidth(org.people.length) / 2, 260);
-  const b = { x0: CX - half, x1: CX + half, y0: CHIPS_TOP, y1: CY + HUB + (org.departments.length ? 96 : 180) };
+  const b = { x0: CX - half, x1: CX + half, y0: CHIPS_TOP, y1: org.departments.length ? addTop(org.departments.length) + 40 : BELOW + 120 };
   for (const s of deptLayout(org.departments.length)) {
     b.x0 = Math.min(b.x0, s.x);
     b.x1 = Math.max(b.x1, s.x + s.w);
@@ -210,6 +218,7 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator }: { me: Me; wind
   if (!org) return <div className="map" aria-busy="true" />;
 
   const depts = org.departments;
+  const status = orchestratorStatus(t, org.orchestrator?.subscription ?? null);
   const spots = deptLayout(depts.length);
   const chips = chipCenters(org.people.length);
   const chipsW = chipsWidth(org.people.length);
@@ -291,14 +300,18 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator }: { me: Me; wind
             {hubArt}
           </div>
         )}
-        <p className="hub-orchestrator" style={{ left: CX - 180, top: CY + HUB + 14 }}>
-          <AgentIcon label={t.map.agent} />
-          <b>{t.map.orchestrator}</b>
-          <span>{orchestratorStatus(t, org.orchestrator?.subscription ?? null)}</span>
-        </p>
+        <div className="hub-orchestrator" style={{ left: CX - ORCH_W / 2, top: ORCH_TOP, width: ORCH_W, height: CHIP_H }}>
+          <Edge cut={8} className="chip">
+            <AgentIcon label={t.map.agent} />
+            <span>
+              <b>{t.map.orchestrator}</b>
+              <small title={status}>{status}</small>
+            </span>
+          </Edge>
+        </div>
 
         {depts.length === 0 && (
-          <div className="start" style={{ left: CX - 260, top: CY + HUB + 60 }}>
+          <div className="start" style={{ left: CX - 260, top: BELOW }}>
             <p>{t.map.emptyHint}</p>
             {company && (
               <button className="btn" type="button" onPointerDown={e => e.stopPropagation()} onClick={onOpenOrchestrator}>
@@ -308,7 +321,7 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator }: { me: Me; wind
           </div>
         )}
         {depts.length > 0 && company && (
-          <div className="add" style={{ left: CX - 74, top: CY + HUB + 56 }}>
+          <div className="add" style={{ left: CX - 74, top: addTop(depts.length) }}>
             <button className="btn small ghost" type="button" onPointerDown={e => e.stopPropagation()} onClick={onOpenOrchestrator}>
               {t.map.addDepartment}
             </button>

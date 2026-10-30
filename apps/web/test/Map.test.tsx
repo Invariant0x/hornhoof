@@ -72,6 +72,26 @@ describe('Map', () => {
     expect(container.querySelector('.wires [data-wire="d2"]')).toBeInTheDocument();
   });
 
+  it('shows the orchestrator as a chip with room below it for the add button', async () => {
+    mockApi({ 'GET /api/org': [200, ORG_WITH_TEAMS] });
+    const { container } = render(<MapScreen {...PROPS} />);
+    await screen.findByText('Marketing');
+    const chip = container.querySelector<HTMLElement>('.hub-orchestrator')!;
+    expect(chip.querySelector('.chip b')).toHaveTextContent('Orchestrator');
+    expect(chip.querySelector('.chip small')).toHaveTextContent('Runs on Anthropic key ending 9f3a');
+    const add = container.querySelector<HTMLElement>('.add')!;
+    expect(parseFloat(add.style.top)).toBeGreaterThanOrEqual(parseFloat(chip.style.top) + parseFloat(chip.style.height) + 16);
+  });
+
+  it('puts the add button under the lowest row once departments go below the hub', async () => {
+    const many = { ...ORG_WITH_TEAMS, departments: Array.from({ length: 6 }, (_, i) => ({ ...ORG_WITH_TEAMS.departments[0]!, id: `d${i}`, name: `Dept ${i}` })) };
+    mockApi({ 'GET /api/org': [200, many] });
+    const { container } = render(<MapScreen {...PROPS} />);
+    await screen.findByText('Dept 5');
+    const lowest = Math.max(...[...container.querySelectorAll<HTMLElement>('.dept')].map(d => parseFloat(d.style.top) + parseFloat(d.style.height)));
+    expect(parseFloat(container.querySelector<HTMLElement>('.add')!.style.top)).toBeGreaterThanOrEqual(lowest + 16);
+  });
+
   it('sends no pulses while nobody exchanges messages', async () => {
     mockApi({ 'GET /api/org': [200, ORG_WITH_TEAMS] });
     const { container } = render(<MapScreen {...PROPS} />);
