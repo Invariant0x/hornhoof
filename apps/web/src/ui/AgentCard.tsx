@@ -1,9 +1,10 @@
 import { useEffect, useId, useState } from 'react';
 import { api } from '../api';
 import { errorText, useLanguage, useT } from '../i18n';
+import { PROVIDER_NAMES } from '../providers';
 import type { AgentCardView, Me, Part, SubView } from '../types';
 import { Ask } from './Ask';
-import { servingLabel } from './StaffCard';
+import { byProvider, servingLabel } from './StaffCard';
 
 type Props = { me: Me; agentId: string; onClose(): void; onTerminal(): void };
 
@@ -178,10 +179,14 @@ export function AgentCard({ me, agentId, onClose, onTerminal }: Props) {
             <label htmlFor={`${id}-sub`}>{t.agent.runsOn}</label>
             <select id={`${id}-sub`} value={card.subscription?.id ?? ''} disabled={!company} onChange={e => void change({ subscription: e.target.value || null })}>
               {(!orchestrator || !card.subscription) && <option value="">{t.agent.noSubscription}</option>}
-              {subs.map(r => (
-                <option key={r.subscription.id} value={r.subscription.id}>
-                  {subLabel(r.subscription)}
-                </option>
+              {byProvider(subs, r => r.subscription.provider).map(([p, list]) => (
+                <optgroup key={p} label={PROVIDER_NAMES[p]}>
+                  {list.map(r => (
+                    <option key={r.subscription.id} value={r.subscription.id}>
+                      {subLabel(r.subscription)}
+                    </option>
+                  ))}
+                </optgroup>
               ))}
             </select>
           </div>

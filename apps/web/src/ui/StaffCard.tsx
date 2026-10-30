@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { errorText, useLanguage, useT } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
-import type { RoleOption, Roster, Serving, StaffLine } from '../types';
+import type { ProviderId, RoleOption, Roster, Serving, StaffLine } from '../types';
 
 type Props = {
   department: { id: string; name: string };
@@ -19,6 +19,14 @@ type Row = { line: StaffLine; role: RoleOption; checked: boolean; subscription: 
 
 export const servingLabel = (s: { kind: Serving['kind']; label: string; provider: Serving['provider']; owner: string }) =>
   s.kind === 'api_key' ? `${s.label} (${PROVIDER_NAMES[s.provider]})` : `${PROVIDER_NAMES[s.provider]}, ${s.owner}`;
+
+/* Subscriptions grouped by provider, in the order Hornhoof lists providers. */
+export function byProvider<T>(items: T[], provider: (item: T) => ProviderId): [ProviderId, T[]][] {
+  return (Object.keys(PROVIDER_NAMES) as ProviderId[]).flatMap(p => {
+    const mine = items.filter(i => provider(i) === p);
+    return mine.length ? [[p, mine] as [ProviderId, T[]]] : [];
+  });
+}
 
 /* The skills a line starts with: the role's, with the line's changes. */
 function skillsOf(role: RoleOption, line: StaffLine): string[] {
@@ -111,10 +119,14 @@ export function StaffCard({ department, proposal, onCorrect, onDone, onHide }: P
             <div className="staff-pick">
               <select aria-label={t.staff.runsOnOf(name)} value={r.subscription ?? ''} disabled={off} onChange={e => update(i, { subscription: e.target.value || null, model: '' })}>
                 <option value="">{t.agent.noSubscription}</option>
-                {roster?.subscriptions.map(s => (
-                  <option key={s.id} value={s.id}>
-                    {servingLabel(s)}
-                  </option>
+                {byProvider(roster?.subscriptions ?? [], s => s.provider).map(([p, subs]) => (
+                  <optgroup key={p} label={PROVIDER_NAMES[p]}>
+                    {subs.map(s => (
+                      <option key={s.id} value={s.id}>
+                        {servingLabel(s)}
+                      </option>
+                    ))}
+                  </optgroup>
                 ))}
               </select>
               <select aria-label={t.staff.modelOf(name)} value={r.model} disabled={off || !sub} onChange={e => update(i, { model: e.target.value })}>

@@ -56,7 +56,8 @@ describe('StaffCard', () => {
     expect(options(model)).toEqual(['Default', 'Claude Opus 5.5', 'Claude Sonnet 5.5']);
     await user.selectOptions(model, 'claude-opus-5-5');
     const runs = screen.getByRole('combobox', { name: 'Where Backend engineer runs' });
-    expect(options(runs)).toEqual(['None yet', 'Team key (Anthropic)', 'Codex, Oleg']);
+    expect(options(runs)).toEqual(['None yet', 'Codex, Oleg', 'Team key (Anthropic)']);
+    expect(within(runs).getAllByRole('group').map(g => g.getAttribute('label'))).toEqual(['Codex', 'Anthropic']);
     await user.selectOptions(runs, 's-codex');
     expect(options(model)).toEqual(['Default', 'GPT-6.1 Sol']);
     expect(model).toHaveValue('');

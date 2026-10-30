@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
@@ -70,7 +70,9 @@ describe('AgentCard', () => {
   it('moves the employee to another subscription', async () => {
     const user = userEvent.setup();
     const { calls } = open({ 'PATCH /api/agents/b1': [200, { ...CARD, model: '', subscription: CARD.runsOn[1]!.subscription }] });
-    await user.selectOptions(await screen.findByRole('combobox', { name: 'Runs on' }), 's-codex');
+    const runs = await screen.findByRole('combobox', { name: 'Runs on' });
+    expect(within(runs).getAllByRole('group').map(g => g.getAttribute('label'))).toEqual(['Codex', 'Anthropic']);
+    await user.selectOptions(runs, 's-codex');
     await vi.waitFor(() => expect(calls.find(c => c.method === 'PATCH')?.body).toEqual({ subscription: 's-codex' }));
     expect(await screen.findByRole('option', { name: 'GPT-6.1 Sol' })).toBeInTheDocument();
   });
