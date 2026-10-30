@@ -1,5 +1,5 @@
 import { modelsFor } from '@hornhoof/protocol';
-import { and, asc, count, desc, eq, isNotNull, isNull } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
@@ -121,6 +121,24 @@ export function openTypedTurn(ctx: Ctx, node: NodeIdentity, agentId: string, tex
   });
 }
 
+/* Someone who may type opened the window of an agent whose program does not run: a turn that types nothing starts it on
+   the node, so they talk to it at once. A turn that waits or runs starts it anyway. */
+export async function startProgram(ctx: Ctx, node: NodeIdentity, agentId: string): Promise<void> {
+  if (!z.uuid().safeParse(agentId).success) return;
+  const started = await onAgent(ctx, agentId, async () => {
+    const { db } = ctx;
+    const [agent] = await db.select().from(agents).where(and(eq(agents.id, agentId), isNull(agents.removedAt)));
+    const sub = agent ? await liveSubscription(ctx, agent.id) : null;
+    if (!agent || !sub || !sameNode(identityOf(sub), node)) return false;
+    const [open] = await db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), inArray(jobs.status, ['queued', 'running']))).limit(1);
+    if (open) return false;
+    await insertTurn(ctx, { companyId: agent.companyId, agentId, prompt: '', createdBy: null });
+    return true;
+  });
+  /* Outside the agent's line, which the pump waits on. */
+  if (started) await pump(ctx, agentId);
+}
+
 /* A new session catches up from the conversation. The last finished turn's session goes on only on the same subscription
    with the same instructions: changed instructions would not reach a session that already has the old ones. */
 async function sessionFor(ctx: Ctx, agent: { id: string; kind: string; name: string }, subscriptionId: string, instructionsHash: string, prompt: string): Promise<{ sessionId: string | null; prompt: string }> {
@@ -170,7 +188,10 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   const model = agent.model && modelsFor(sub.provider, sub.models).some(m => m.id === agent.model) ? agent.model : null;
   /* The hash covers the model too, so a new model starts a fresh session like new instructions do. */
   const runHash = model ? textHash(`${instructions.hash}:${model}`) : instructions.hash;
-  const { sessionId, prompt } = await sessionFor(ctx, agent, sub.id, runHash, repo ? `${job.prompt}\n\n${repoLine(repo)}` : job.prompt);
+  const run = await sessionFor(ctx, agent, sub.id, runHash, repo ? `${job.prompt}\n\n${repoLine(repo)}` : job.prompt);
+  /* A turn that types nothing only starts the program: the person talks to it, and the next turn catches it up. */
+  const { sessionId } = run;
+  const prompt = job.prompt ? run.prompt : '';
   const token = newToken();
   /* Running from the moment it is sent: the token works for its tools at once, and the next turn waits. */
   const [taken] = await db

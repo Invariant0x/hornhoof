@@ -210,11 +210,47 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
 
   it('shows a waiting screen for an agent that has not started yet, and ends the view when asked', async () => {
     await setUp();
-    await host.open({ type: 'term.open', termId: 't3', agentKey: 'a7', cols: 80, rows: 24, write: true });
+    await host.open({ type: 'term.open', termId: 't3', agentKey: 'a7', cols: 80, rows: 24, write: false });
     const screen = () => sent.flatMap(m => (m.type === 'term.data' && m.termId === 't3' ? [m.data] : [])).join('');
     await until(() => screen().includes('starts with its next turn'));
     host.close({ type: 'term.close', termId: 't3' });
     await until(() => sent.some(m => m.type === 'term.exit' && m.termId === 't3'));
+  });
+
+  it('asks Hornhoof to start an agent that does not run when someone who may type opens it', async () => {
+    await setUp();
+    const starts = (key: string) => sent.filter(m => m.type === 'agent.start' && m.agentKey === key).length;
+    await host.open({ type: 'term.open', termId: 't30', agentKey: 'a30', cols: 80, rows: 24, write: true });
+    const screen = () => sent.flatMap(m => (m.type === 'term.data' && m.termId === 't30' ? [m.data] : [])).join('');
+    await until(() => screen().includes('Starting'));
+    expect(starts('a30')).toBe(1);
+    /* A watcher who may not type starts nothing, and a running program needs no start. */
+    await host.open({ type: 'term.open', termId: 't31', agentKey: 'a31', cols: 80, rows: 24, write: false });
+    await host.run(job('a32', 'hello'));
+    await host.open({ type: 'term.open', termId: 't32', agentKey: 'a32', cols: 80, rows: 24, write: true });
+    await until(() => sent.some(m => m.type === 'term.data' && m.termId === 't32'));
+    expect(starts('a31') + starts('a32')).toBe(0);
+  });
+
+  it('starts the program for a turn with nothing to type, and the next turn goes on in it', async () => {
+    await setUp();
+    const start = await host.run(job('a33', ''));
+    expect(start).toMatchObject({ ok: true, result: '', error: null });
+    /* A new session has no log until something is said in it, so there is nothing to resume yet. */
+    expect(start.sessionId).toBeNull();
+    expect(await host.screen('a33')).not.toContain('echo:');
+    const next = await host.run(job('a33', 'hello', { sessionId: null }));
+    expect(next).toMatchObject({ ok: true, result: 'echo: hello' });
+    expect((await host.screen('a33')).match(/fake claude new/g)).toHaveLength(1);
+  });
+
+  it('resumes the session for a turn with nothing to type', async () => {
+    await setUp();
+    const first = await host.run(job('a34', 'one'));
+    await host.run(job('a34', 'EXIT', { sessionId: first.sessionId }));
+    const start = await host.run(job('a34', '', { sessionId: first.sessionId }));
+    expect(start).toMatchObject({ ok: true, sessionId: first.sessionId });
+    expect(await host.screen('a34')).toContain(`fake claude resumed ${first.sessionId}`);
   });
 
   it('ends a turn as stopped when a person stops it with Escape in the terminal', async () => {

@@ -74,6 +74,8 @@ type Agent = {
   lastText: string | null;
   /* A typed turn that ended and waits for the rest of its log. */
   settling: Promise<void> | null;
+  /* The program was started for a person and nothing was said in it yet: its new session has no log to resume. */
+  fresh: boolean;
 };
 
 type View = { child: ChildProcess; key: string; write: boolean; mask: StreamMask; decoder: StringDecoder; pending: string; timer: NodeJS.Timeout | null; quiet: NodeJS.Timeout | null };
@@ -96,6 +98,7 @@ type Options = {
 };
 
 const WAITING = 'This agent starts with its next turn.';
+const STARTING = 'Starting this agent...';
 const STOP_WAIT_MS = 5000;
 /* What a typed turn keeps at most while Hornhoof has not answered it. */
 const EARLY_MAX = 1000;
@@ -154,7 +157,7 @@ export class TerminalHost {
   private agent(key: string): Agent {
     let a = this.agents.get(key);
     if (!a) {
-      a = { key, name: `a-${key}`, program: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, viewers: 0, idle: null, watch: null, queue: Promise.resolve(), unopened: [], stopped: false, lastText: null, settling: null };
+      a = { key, name: `a-${key}`, program: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, viewers: 0, idle: null, watch: null, queue: Promise.resolve(), unopened: [], stopped: false, lastText: null, settling: null, fresh: false };
       this.agents.set(key, a);
     }
     return a;
@@ -187,7 +190,8 @@ export class TerminalHost {
     if (input.instructions && program.kind === 'codex') writeFileSync(join(input.workDir, 'AGENTS.md'), input.instructions + '\n', { mode: 0o600 });
     const spec = program.launch({ bin: job.bin, home: job.home, workDir: input.workDir, sessionId: input.sessionId, model: input.model, instructionsFile, urls });
     const hash = hashOf({ kind: program.kind, bin: job.bin, model: input.model, instructions: input.instructions, env: lasting(input.env) });
-    const sameSession = input.sessionId !== null && (input.sessionId === a.sessionId || a.cleared.has(input.sessionId));
+    /* A new session asked for goes on in a program started for a person that nothing was said in yet. */
+    const sameSession = input.sessionId === null ? a.fresh : input.sessionId === a.sessionId || a.cleared.has(input.sessionId);
     const goesOn = sameSession && a.hash === hash && (await this.opts.tmux.alive(a.name));
 
     /* What is left in the log from before belongs to no turn. */
@@ -201,7 +205,7 @@ export class TerminalHost {
     try {
       if (!goesOn) {
         if (program.kind === 'claude') acceptClaudeDialogs(job.home, input.workDir);
-        Object.assign(a, { program, home: job.home, workDir: input.workDir, hash, sessionId: spec.sessionId, cleared: new Set(), startedAt: Date.now(), started: deferred<void>() });
+        Object.assign(a, { program, home: job.home, workDir: input.workDir, hash, sessionId: spec.sessionId, cleared: new Set(), startedAt: Date.now(), started: deferred<void>(), fresh: false });
         a.tail = this.tailFor(a);
         const env = { ...lasting(input.env), ...spec.env };
         await this.opts.tmux.launch(a.name, { cwd: input.workDir, command: spec.command, cols: this.cols, rows: this.rows, envFile: envFile(input.workDir, env) });
@@ -211,6 +215,12 @@ export class TerminalHost {
           return await fail(job.signedOut.test(screen) ? 'not_logged_in' : 'agent_failed', screen);
         }
       }
+      /* Nothing to type: the turn only starts the program for the person who opened its window. */
+      if (!input.prompt) {
+        if (!goesOn) a.fresh = input.sessionId === null;
+        return { ok: true, sessionId: a.fresh ? null : a.sessionId, result: '', output: '', error: null, limits: a.limits };
+      }
+      a.fresh = false;
       await this.opts.tmux.paste(a.name, input.prompt);
       await sleep(Math.min(3000, 300 + input.prompt.length / 20));
       await this.opts.tmux.keys(a.name, 'Enter');
@@ -445,6 +455,7 @@ export class TerminalHost {
      what it does waits in the turn. fromLog: the typing was read from the log, which is being read now. */
   private async openTyped(a: Agent, text: string, fromLog = false): Promise<void> {
     if (a.idle) clearTimeout(a.idle);
+    a.fresh = false;
     if (!fromLog) this.drain(a);
     a.lastText = null;
     const turn: Turn = { jobId: null, onEvent: () => {}, typed: true, seq: 0, deadline: Date.now() + this.typedMs, ref: randomUUID(), early: [], over: null, opened: deferred() };
@@ -526,9 +537,11 @@ export class TerminalHost {
   async open(m: Msg<'term.open'>): Promise<void> {
     const a = this.agent(m.agentKey);
     this.viewsOpening.add(m.termId);
+    /* Someone who may type gets the program at once, to talk to it; watchers see it once it has a turn. */
+    const starts = m.write && !a.turn && !(a.hash && (await this.opts.tmux.alive(a.name)));
     try {
       if (!(await this.opts.tmux.has(a.name))) {
-        await this.opts.tmux.launch(a.name, { cwd: '/', command: ['sh', '-c', `printf '\\n  %s\\n' '${WAITING}'; exec sleep 2147483647`], cols: m.cols, rows: m.rows });
+        await this.opts.tmux.launch(a.name, { cwd: '/', command: ['sh', '-c', `printf '\\n  %s\\n' '${starts ? STARTING : WAITING}'; exec sleep 2147483647`], cols: m.cols, rows: m.rows });
       }
     } finally {
       this.viewsOpening.delete(m.termId);
@@ -566,6 +579,7 @@ export class TerminalHost {
       this.opts.send({ type: 'term.exit', termId: m.termId });
       this.restLater(a);
     });
+    if (starts) this.opts.send({ type: 'agent.start', agentKey: m.agentKey });
   }
 
   input(m: Msg<'term.input'>): void {

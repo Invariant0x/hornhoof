@@ -3,7 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { eq } from 'drizzle-orm';
-import { agents, companies, departments, people, subscriptions } from '../src/db/schema.js';
+import { agents, companies, departments, jobs, people, subscriptions } from '../src/db/schema.js';
 import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
@@ -221,5 +221,40 @@ describe('a turn a person typed into the terminal', () => {
     expect(await next(builtin, 'turn.opened')).toMatchObject({ jobId: null });
     builtin.send({ type: 'turn.open', agentKey: '00000000-0000-4000-8000-000000000000', text: 'hi' });
     expect(await next(builtin, 'turn.opened')).toMatchObject({ jobId: null });
+  });
+});
+
+describe('starting an agent for someone who opens its window to talk', () => {
+  it('starts the program with a turn that types nothing, and the next turn catches up in it', async () => {
+    const { app, ceo, builtin, orchestratorId } = await live();
+    await app.inject({ method: 'POST', url: '/api/agents/orchestrator/messages', payload: { text: 'what do we sell' }, ...as(ceo) });
+    const earlier = await next(builtin, 'job.run');
+    builtin.send({ type: 'job.event', jobId: earlier.jobId, seq: 0, event: { kind: 'text', text: 'Software.' } });
+    builtin.send({ type: 'job.done', jobId: earlier.jobId, ok: true, sessionId: null, result: 'Software.', tail: '', error: null });
+    await until(async () => !(await state(app, ceo)).busy);
+
+    builtin.send({ type: 'agent.start', agentKey: orchestratorId });
+    const start = await next(builtin, 'job.run');
+    expect(start).toMatchObject({ prompt: '', sessionId: null });
+    builtin.send({ type: 'job.done', jobId: start.jobId, ok: true, sessionId: null, result: '', tail: '', error: null });
+    await until(async () => !(await state(app, ceo)).busy);
+    expect((await events(app, ceo)).filter((e: { kind: string }) => e.kind === 'message')).toHaveLength(1);
+
+    await app.inject({ method: 'POST', url: '/api/agents/orchestrator/messages', payload: { text: 'thanks' }, ...as(ceo) });
+    const later = await next(builtin, 'job.run');
+    expect(later.sessionId).toBeNull();
+    expect(later.prompt).toContain('Earlier in this conversation');
+    expect(later.prompt).toContain('thanks');
+  });
+
+  it('starts nothing while a turn waits or runs, or for an agent it does not know', async () => {
+    const { app, db, ceo, builtin, orchestratorId } = await live();
+    await app.inject({ method: 'POST', url: '/api/agents/orchestrator/messages', payload: { text: 'hello' }, ...as(ceo) });
+    await next(builtin, 'job.run');
+    builtin.send({ type: 'agent.start', agentKey: orchestratorId });
+    builtin.send({ type: 'agent.start', agentKey: 'not-an-agent' });
+    builtin.send({ type: 'agent.start', agentKey: '00000000-0000-4000-8000-000000000000' });
+    await new Promise(r => setTimeout(r, 300));
+    expect(await db.select().from(jobs)).toHaveLength(1);
   });
 });
