@@ -187,6 +187,19 @@ describe('Map', () => {
     }
   });
 
+  it('runs the pulse to a department that was just made, once the map has fetched it', async () => {
+    const stream = fakeStream();
+    let loads = 0;
+    mockApi({ 'GET /api/org': () => [200, ++loads === 1 ? ORG : { ...ORG, departments: [dept({ id: 'd1', templateKey: 'sales' })] }] });
+    const { container } = render(<MapScreen {...PROPS} />);
+    await screen.findByText('agents working');
+    /* The order the server sends them in when the CEO builds the company. */
+    stream.send({ type: 'org' });
+    stream.send({ type: 'pulse', from: { kind: 'orchestrator' }, to: { kind: 'department', id: 'd1' } });
+    await screen.findByText('Sales');
+    await vi.waitFor(() => expect(container.querySelectorAll('circle.pt.c')).toHaveLength(1));
+  });
+
   it('runs no pulse for a person who asks for less motion', async () => {
     vi.stubGlobal('matchMedia', (query: string) => ({ matches: query.includes('reduce'), addEventListener() {}, removeEventListener() {} }));
     const stream = fakeStream();

@@ -24,6 +24,8 @@ const MIN_K = 0.3, MAX_K = 2.5;
 /* The orchestrator's window covers the right of a wide screen; Fit keeps the company clear of it. */
 const WINDOW_W = 672, NARROW = 760;
 const PULSE_SPEED = 100;
+/* How long a pulse waits for its end to appear on the map. */
+const HOLD_MS = 5000;
 
 /* smooth: the change came from Fit and glides; drag and zoom follow the hand at once. */
 type View = { x: number; y: number; k: number; smooth: boolean };
@@ -151,6 +153,7 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator }: { me: Me; wind
   const drag = useRef<{ id: number; x: number; y: number } | null>(null);
   const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
   const shotKey = useRef(0);
+  const held = useRef<{ m: Extract<LiveMessage, { type: 'pulse' }>; at: number }[]>([]);
 
   useEffect(() => {
     const pending = timers.current;
@@ -160,11 +163,7 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator }: { me: Me; wind
     };
   }, []);
 
-  /* Real signals only: a pulse runs once per message. useOrg keeps the working count and the org itself fresh. */
-  useStream((m: LiveMessage) => {
-    if (m.type !== 'pulse' || still || !org) return;
-    const pts = pulsePath(m.from, m.to, org);
-    if (!pts) return;
+  const fire = useCallback((pts: Point[]) => {
     const key = ++shotKey.current;
     setShots(s => [...s, { key, pts }]);
     const id = setTimeout(() => {
@@ -172,7 +171,26 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator }: { me: Me; wind
       setShots(s => s.filter(x => x.key !== key));
     }, pulseSeconds(pts, PULSE_SPEED) * 1000);
     timers.current.add(id);
+  }, []);
+
+  /* Real signals only: a pulse runs once per message. useOrg keeps the working count and the org itself fresh. */
+  useStream((m: LiveMessage) => {
+    if (m.type !== 'pulse' || still) return;
+    const pts = org && pulsePath(m.from, m.to, org);
+    if (pts) fire(pts);
+    /* A pulse to a department that was just made comes before the map has fetched it, so it waits a little for it. */
+    else held.current = [...held.current.filter(h => Date.now() - h.at < HOLD_MS), { m, at: Date.now() }];
   });
+
+  useEffect(() => {
+    if (!org || !held.current.length) return;
+    const now = Date.now();
+    held.current = held.current.filter(h => {
+      const pts = pulsePath(h.m.from, h.m.to, org);
+      if (pts) fire(pts);
+      return !pts && now - h.at < HOLD_MS;
+    });
+  }, [org, fire]);
 
   const fit = useCallback(() => {
     const el = box.current;
