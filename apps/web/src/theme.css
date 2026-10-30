@@ -179,6 +179,18 @@ button, input, select { font: inherit; color: inherit; }
 .account-menu p { display: grid; gap: 2px; }
 .account-menu p span { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
 .menu-row { display: grid; gap: 6px; }
+.menu-version { color: var(--muted); font-size: 12px; }
+.version-mark {
+  position: fixed;
+  right: 12px;
+  bottom: 8px;
+  z-index: 5;
+  color: var(--muted);
+  font-size: 11px;
+  opacity: 0.7;
+  pointer-events: none;
+  user-select: none;
+}
 .menu-row > span { color: var(--muted); font-size: 12px; }
 .seg { display: flex; }
 .seg button {

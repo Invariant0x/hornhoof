@@ -5,6 +5,7 @@ import { useOrg } from '../org';
 import { currentTheme, setTheme, type Theme } from '../theme';
 import type { Me } from '../types';
 import { LogoMark } from '../ui/icons';
+import { useVersion, versionText } from '../ui/VersionMark';
 import { MapScreen } from './Map';
 import { OrchestratorWindow } from './Orchestrator';
 import { People } from './People';
@@ -18,6 +19,7 @@ function AccountMenu({ me, onClose, onSignOut }: { me: Me; onClose: () => void; 
   const t = useT();
   const { language, setLanguage } = useLanguage();
   const [theme, setThemeState] = useState<Theme>(currentTheme);
+  const version = useVersion();
 
   function pickTheme(next: Theme) {
     setTheme(next);
@@ -50,6 +52,7 @@ function AccountMenu({ me, onClose, onSignOut }: { me: Me; onClose: () => void; 
           ))}
         </div>
       </div>
+      {version && <p className="menu-version">{t.shell.version(versionText(version))}</p>}
       <button
         className="btn small ghost"
         type="button"

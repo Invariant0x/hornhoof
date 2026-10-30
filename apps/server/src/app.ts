@@ -52,7 +52,9 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   await app.register(cookie);
   await app.register(websocket, SOCKET_OPTIONS);
   if (web) await serveWebApp(app, deps.config.webDist);
-  app.get('/api/health', async () => ({ ok: true }));
+  const { version, commit, migrations } = deps.config;
+  app.get('/api/health', async () => ({ ok: true, version, commit }));
+  app.get('/api/version', async () => ({ version, commit, migrations }));
   setupRoutes(app, deps);
   authRoutes(app, deps);
   peopleRoutes(app, ctx);

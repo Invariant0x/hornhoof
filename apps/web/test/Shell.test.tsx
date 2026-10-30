@@ -51,6 +51,14 @@ describe('Shell', () => {
     expect(document.documentElement.lang).toBe('en');
   });
 
+  it('shows the version and build in the account menu', async () => {
+    mockApi({ 'GET /api/org': [200, ORG], 'GET /api/version': [200, { version: '0.4.0', commit: 'abc1234def', migrations: 5 }] });
+    const user = userEvent.setup();
+    render(<Shell me={ME} onSignOut={() => {}} />);
+    await user.click(screen.getByRole('button', { name: 'Account' }));
+    expect(await screen.findByText('Version 0.4.0 · abc1234')).toBeInTheDocument();
+  });
+
   it('keeps the theme in the account menu, not in the top bar', async () => {
     const user = userEvent.setup();
     renderShell();

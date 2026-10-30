@@ -71,6 +71,7 @@ export const en = {
     dark: 'Dark',
     language: 'Language',
     logOut: 'Log out',
+    version: (v: string) => `Version ${v}`,
   },
   map: {
     leaders: 'Company leaders',

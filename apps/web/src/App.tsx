@@ -7,6 +7,7 @@ import { Setup } from './screens/Setup';
 import { Shell } from './screens/Shell';
 import type { Me } from './types';
 import { Card } from './ui/Card';
+import { VersionMark } from './ui/VersionMark';
 
 type Screen =
   | { kind: 'loading' }
@@ -19,6 +20,15 @@ type Screen =
 const INVITE_PATH = /^\/invite\/([^/]+)\/?$/;
 
 export function App() {
+  return (
+    <>
+      <Screens />
+      <VersionMark />
+    </>
+  );
+}
+
+function Screens() {
   const t = useT();
   const [screen, setScreen] = useState<Screen>({ kind: 'loading' });
 

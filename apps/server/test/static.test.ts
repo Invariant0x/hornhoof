@@ -46,6 +46,6 @@ describe('web app serving', () => {
     const { app } = await testApp({ WEB_DIST: join(tmpdir(), 'hornhoof-no-such-dir') });
     const res = await app.inject({ url: '/people', headers: { accept: 'text/html' } });
     expect(res.statusCode).toBe(404);
-    expect((await app.inject({ url: '/api/health' })).json()).toEqual({ ok: true });
+    expect((await app.inject({ url: '/api/health' })).json()).toMatchObject({ ok: true });
   });
 });

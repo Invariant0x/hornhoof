@@ -71,6 +71,7 @@ export const ru: Messages = {
     dark: 'Темная',
     language: 'Язык',
     logOut: 'Выйти',
+    version: (v: string) => `Версия ${v}`,
   },
   map: {
     leaders: 'Руководство компании',

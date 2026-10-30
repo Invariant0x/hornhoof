@@ -30,6 +30,9 @@ RUN mkdir -p /data && chown node:node /data
 # Agent programs are installed into /data/tools at first use and keep their sign-in in /data/home.
 # Set after npm ci, so nothing root writes during the build lands in /data.
 ENV PATH=/data/tools/bin:$PATH HOME=/data/home
+ARG HORNHOOF_VERSION=
+ARG HORNHOOF_COMMIT=
+ENV HORNHOOF_VERSION=$HORNHOOF_VERSION HORNHOOF_COMMIT=$HORNHOOF_COMMIT
 # Personal nodes run as node. The built-in node overrides the user to root in compose.yaml, to run each company key as its own user.
 USER node
 VOLUME /data

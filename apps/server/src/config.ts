@@ -1,3 +1,4 @@
+import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 export type Config = {
@@ -12,11 +13,20 @@ export type Config = {
   nodeKey?: string;
   nodePingMs: number;
   streamPingMs: number;
+  /* The running build: the product version, its commit, and how many database migrations it carries. */
+  version: string;
+  commit: string;
+  migrations: number;
 };
 
 /* Both src/ and dist/ sit one level below apps/server, so this finds apps/web/dist either way. */
 const DEFAULT_WEB_DIST = fileURLToPath(new URL('../../web/dist', import.meta.url));
 const DEFAULT_INSTALL_SCRIPT = fileURLToPath(new URL('../../../scripts/install.sh', import.meta.url));
+const ROOT_PACKAGE = new URL('../../../package.json', import.meta.url);
+const MIGRATIONS = new URL('../drizzle', import.meta.url);
+
+const productVersion = (): string => (JSON.parse(readFileSync(ROOT_PACKAGE, 'utf8')) as { version: string }).version;
+const migrationCount = (): number => readdirSync(MIGRATIONS).filter(f => f.endsWith('.sql')).length;
 
 export function loadConfig(env: NodeJS.ProcessEnv): Config {
   const raw = env.HORNHOOF_SECRET;
@@ -40,5 +50,8 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     nodeKey,
     nodePingMs: env.NODE_PING_MS ? Number(env.NODE_PING_MS) : 20000,
     streamPingMs: env.STREAM_PING_MS ? Number(env.STREAM_PING_MS) : 25000,
+    version: env.HORNHOOF_VERSION || productVersion(),
+    commit: env.HORNHOOF_COMMIT || 'local',
+    migrations: migrationCount(),
   };
 }
