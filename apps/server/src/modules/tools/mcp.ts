@@ -33,7 +33,7 @@ const say = (text: string, isError = false) => ({ content: [{ type: 'text' as co
 /* Hornhoof's tools as one agent's job sees them: every agent reads the company, only the orchestrator proposes.
    Departments and employees are never created here: the CEO's click does that. */
 function toolsFor(ctx: Ctx, job: ToolJob): McpServer {
-  const server = new McpServer({ name: 'hornhoof', version: '0.4.0' });
+  const server = new McpServer({ name: 'hornhoof', version: '0.5.0' });
   server.registerTool(
     'company',
     { description: 'The company as it is now: its brief, the people who run it, departments with their products and employees, subscriptions, and the department templates.' },

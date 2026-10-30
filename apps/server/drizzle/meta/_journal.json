@@ -50,6 +50,13 @@
       "when": 1793335624562,
       "tag": "0006_access_lists",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793342077406,
+      "tag": "0007_tasks",
+      "breakpoints": true
     }
   ]
 }

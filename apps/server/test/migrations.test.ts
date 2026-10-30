@@ -103,3 +103,28 @@ describe('migration 0005', () => {
     expect((await db.execute(sql`select kind from agent_events`)).rows).toEqual([{ kind: 'text' }]);
   });
 });
+
+describe('migration 0007', () => {
+  const C = '00000000-0000-4000-8000-000000000001';
+
+  it('adds tasks to an older install and keeps one open turn per company', async () => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0006_access_lists') });
+    await db.execute(sql`insert into companies (id, name) values (${C}, 'Acme')`);
+    await db.execute(sql`insert into people (id, company_id, name, email, status, scope_kind)
+      values ('00000000-0000-4000-8000-000000000002', ${C}, 'Ivan', 'ivan@acme.com', 'active', 'company')`);
+
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+
+    await db.execute(sql`insert into turns (company_id, number, goal, started_by) values (${C}, 1, 'Payments', '00000000-0000-4000-8000-000000000002')`);
+    await expect(db.execute(sql`insert into turns (company_id, number, goal, started_by) values (${C}, 2, 'More', '00000000-0000-4000-8000-000000000002')`)).rejects.toThrow();
+    await db.execute(sql`update turns set status = 'closed'`);
+    await db.execute(sql`insert into turns (company_id, number, goal, started_by) values (${C}, 2, 'More', '00000000-0000-4000-8000-000000000002')`);
+    await db.execute(sql`insert into tasks (company_id, number, title) values (${C}, 1, 'Build the payment page')`);
+    await expect(db.execute(sql`insert into tasks (company_id, number, title) values (${C}, 1, 'Again')`)).rejects.toThrow();
+    const cols = await db.execute<{ column_name: string }>(sql`select column_name from information_schema.columns where table_name = 'departments' and column_name like 'repo_%' order by column_name`);
+    expect(cols.rows.map(r => r.column_name)).toEqual(['repo_branch', 'repo_token_enc', 'repo_token_last4', 'repo_url']);
+  });
+});

@@ -93,6 +93,17 @@ describe('job.run', () => {
     expect(parseServerMessage(JSON.stringify(noInstructions))).toBeNull();
     expect(parseServerMessage(JSON.stringify(noToken))).toBeNull();
   });
+
+  it('may carry the workspace an agent works in, with its repository', () => {
+    const run = SERVER[0] as Extract<ServerMessage, { type: 'job.run' }>;
+    const repo = { url: 'https://github.com/acme/app.git', branch: 'main', token: 'ghp_x' };
+    expect(parseServerMessage(JSON.stringify({ ...run, workspace: { key: 'a1', repo } }))).toMatchObject({ workspace: { key: 'a1', repo } });
+    expect(parseServerMessage(JSON.stringify({ ...run, workspace: { key: 'a1', repo: null } }))).toMatchObject({ workspace: { key: 'a1', repo: null } });
+    expect(parseServerMessage(JSON.stringify(run))).not.toBeNull();
+    expect(parseServerMessage(JSON.stringify({ ...run, workspace: { key: '../x', repo: null } }))).toBeNull();
+    expect(parseServerMessage(JSON.stringify({ ...run, workspace: { key: 'a1', repo: { ...repo, url: 'http://github.com/acme/app.git' } } }))).toBeNull();
+    expect(parseServerMessage(JSON.stringify({ ...run, workspace: { key: 'a1', repo: { ...repo, branch: '--upload-pack=x' } } }))).toBeNull();
+  });
 });
 
 describe('department templates', () => {
