@@ -81,7 +81,15 @@ export async function leaveIfOff(ctx: Ctx, agentId: string): Promise<void> {
     .orderBy(desc(agentChanges.createdAt))
     .limit(1);
   const actor = change?.personId ? { personId: change.personId } : { agentId };
-  await wakeAll(ctx, await leaveWork(ctx, actor, agent));
+  const { wakes, handed } = await leaveWork(ctx, actor, agent);
+  /* Turns it would have taken on work it no longer holds would only confuse it once it is on again. */
+  if (handed.length) {
+    await ctx.db
+      .update(jobs)
+      .set({ status: 'failed', error: 'switched_off', finishedAt: new Date() })
+      .where(and(eq(jobs.agentId, agentId), eq(jobs.status, 'queued'), inArray(jobs.taskId, handed)));
+  }
+  await wakeAll(ctx, wakes);
 }
 
 /* Queues a turn for every agent a task move needs, one per agent and task: a turn already waiting reads the task as it is

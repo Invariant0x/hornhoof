@@ -27,10 +27,12 @@ async function headOf(db: Live['db'] | Tx, departmentId: string) {
   return head ?? null;
 }
 
-/* A department is off when its head is, or when it has employees and every one of them is off. */
+/* A department is off when its head is, or when it has employees, in it or in its products, and every one of them is off. */
 async function switchedOff(db: Live['db'] | Tx, departmentId: string, head: { off: Date | null }): Promise<boolean> {
   if (head.off) return true;
-  const staff = await db.select({ off: agents.switchedOffAt }).from(agents).where(and(eq(agents.departmentId, departmentId), eq(agents.kind, 'worker'), isNull(agents.removedAt)));
+  const products = await db.select({ id: departments.id }).from(departments).where(eq(departments.parentId, departmentId));
+  const places = [departmentId, ...products.map(p => p.id)];
+  const staff = await db.select({ off: agents.switchedOffAt }).from(agents).where(and(inArray(agents.departmentId, places), eq(agents.kind, 'worker'), isNull(agents.removedAt)));
   return staff.length > 0 && staff.every(a => a.off);
 }
 

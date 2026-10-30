@@ -275,6 +275,16 @@ describe('work an agent held when it was switched off', () => {
     expect(await row(db, task.id)).toMatchObject({ assigneeAgentId: bea.id, executorAgentId: bea.id });
   });
 
+  it('drops the turns that waited for the employee on work it handed back', async () => {
+    const { ctx, db, bruno, patch, memberTask, off } = await company();
+    const task = await memberTask();
+    await off(bruno.id);
+    await wakeAll(ctx, [{ agentId: bruno.id, taskId: task.id, why: 'assigned' }]);
+    await db.update(agents).set({ switchedOffAt: null }).where(eq(agents.id, bruno.id));
+    await patch(bruno.id, { on: false });
+    expect((await db.select().from(jobs).where(and(eq(jobs.agentId, bruno.id), eq(jobs.status, 'queued'))))).toEqual([]);
+  });
+
   it('goes back to the same employee when the head gives it back once it is on again', async () => {
     const { db, hana, bruno, patch, tools, memberTask } = await company();
     const task = await memberTask();
