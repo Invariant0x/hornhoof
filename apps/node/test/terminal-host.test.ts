@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -32,7 +32,7 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
   let sent: NodeMessage[];
   const home = mkdtempSync(join(tmpdir(), 'hh-home-'));
 
-  function setUp(more: { openMs?: number; typedMs?: number } = {}) {
+  function setUp(more: Partial<ConstructorParameters<typeof TerminalHost>[0]> = {}) {
     sent = [];
     const tmux = new Tmux({ socket: `hh-host-${process.pid}-${Math.random().toString(36).slice(2, 8)}`, env: { PATH: process.env.PATH ?? '', HOME: home } });
     host = new TerminalHost({ tmux, hornhoof: 'http://127.0.0.1:9', send: m => sent.push(m), secrets: () => [SECRET], readyMs: 10_000, pollMs: 100, ...more });
@@ -242,6 +242,27 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     const next = await host.run(job('a33', 'hello', { sessionId: null }));
     expect(next).toMatchObject({ ok: true, result: 'echo: hello' });
     expect((await host.screen('a33')).match(/fake claude new/g)).toHaveLength(1);
+  });
+
+  it('remembers the session a person started by typing into a program started for them', async () => {
+    const remembered: [string, string][] = [];
+    await setUp({ remember: (sessionId, workDir) => remembered.push([sessionId, workDir]) });
+    await host.run(job('a40', ''));
+    await typeTurn('a40', 't40', 'hello', 'job-40');
+    await until(() => Boolean(done('job-40')));
+    const { sessionId } = done('job-40') as { sessionId: string };
+    expect(sessionId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(remembered).toContainEqual([sessionId, join(home, 'work', 'a40')]);
+  });
+
+  it('gives a program started fresh the conversation from before, without counting it as new instructions', async () => {
+    await setUp();
+    await host.run(job('a41', '', { context: 'Earlier: Ivan said we sell software.' }));
+    const file = readFileSync(join(home, 'work', 'a41', '.hh-instructions.md'), 'utf8');
+    expect(file).toContain('Be brief.');
+    expect(file).toContain('we sell software');
+    expect(await host.run(job('a41', 'hello', { sessionId: null }))).toMatchObject({ ok: true, result: 'echo: hello' });
+    expect((await host.screen('a41')).match(/fake claude new/g)).toHaveLength(1);
   });
 
   it('resumes the session for a turn with nothing to type', async () => {

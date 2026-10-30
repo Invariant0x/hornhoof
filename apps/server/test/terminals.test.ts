@@ -3,7 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { eq } from 'drizzle-orm';
-import { agents, companies, departments, jobs, people, subscriptions } from '../src/db/schema.js';
+import { agents, companies, departments, jobs, people, subscriptions, tasks } from '../src/db/schema.js';
 import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
@@ -236,6 +236,9 @@ describe('starting an agent for someone who opens its window to talk', () => {
     builtin.send({ type: 'agent.start', agentKey: orchestratorId });
     const start = await next(builtin, 'job.run');
     expect(start).toMatchObject({ prompt: '', sessionId: null });
+    /* What was said before goes with the instructions, for what the person types into the new session. */
+    expect(start.context).toContain('Earlier in this conversation');
+    expect(start.context).toContain('what do we sell');
     builtin.send({ type: 'job.done', jobId: start.jobId, ok: true, sessionId: null, result: '', tail: '', error: null });
     await until(async () => !(await state(app, ceo)).busy);
     expect((await events(app, ceo)).filter((e: { kind: string }) => e.kind === 'message')).toHaveLength(1);
@@ -245,6 +248,20 @@ describe('starting an agent for someone who opens its window to talk', () => {
     expect(later.sessionId).toBeNull();
     expect(later.prompt).toContain('Earlier in this conversation');
     expect(later.prompt).toContain('thanks');
+  });
+
+  it('starts a switched-off employee whose task turns wait for it to be on', async () => {
+    const { db, builtin, orchestratorId } = await live();
+    const [orchestrator] = await db.select().from(agents).where(eq(agents.id, orchestratorId));
+    const [dept] = await db.insert(departments).values({ companyId: orchestrator!.companyId, templateKey: 'development', roleCode: 'DEV' }).returning();
+    const [bruno] = await db
+      .insert(agents)
+      .values({ companyId: orchestrator!.companyId, kind: 'worker', name: 'Bruno', roleKey: 'DEV-BE', departmentId: dept!.id, model: '', subscriptionId: orchestrator!.subscriptionId, switchedOffAt: new Date() })
+      .returning();
+    const [task] = await db.insert(tasks).values({ companyId: orchestrator!.companyId, number: 1, title: 'Checkout API', assigneeAgentId: bruno!.id }).returning();
+    await db.insert(jobs).values({ companyId: orchestrator!.companyId, subscriptionId: orchestrator!.subscriptionId, agentId: bruno!.id, taskId: task!.id, kind: 'conversation', prompt: 'Do #1.', timeoutMs: 900000 });
+    builtin.send({ type: 'agent.start', agentKey: bruno!.id });
+    expect(await next(builtin, 'job.run')).toMatchObject({ prompt: '' });
   });
 
   it('starts nothing while a turn waits or runs, or for an agent it does not know', async () => {

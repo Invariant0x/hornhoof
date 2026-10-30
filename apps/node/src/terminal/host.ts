@@ -86,6 +86,8 @@ type Options = {
   send(m: NodeMessage): void;
   /* Values that never reach a screen people watch. */
   secrets(): string[];
+  /* A session a person started by typing, kept with its folder so Hornhoof's next turn can go on with it. */
+  remember?(sessionId: string, workDir: string): void;
   readyMs?: number;
   pollMs?: number;
   /* A program idle this long with nobody watching ends; its next turn resumes the session. */
@@ -183,11 +185,13 @@ export class TerminalHost {
     mkdirSync(input.workDir, { recursive: true });
     const urls = this.bridge.agent(job.key);
     let instructionsFile: string | null = null;
-    if (input.instructions && program.kind === 'claude') {
+    /* The conversation from before reaches a program that starts now; it is not part of its instructions' hash. */
+    const told = [input.instructions, input.context].filter(Boolean).join('\n\n');
+    if (told && program.kind === 'claude') {
       instructionsFile = join(input.workDir, '.hh-instructions.md');
-      writeFileSync(instructionsFile, input.instructions + '\n', { mode: 0o600 });
+      writeFileSync(instructionsFile, told + '\n', { mode: 0o600 });
     }
-    if (input.instructions && program.kind === 'codex') writeFileSync(join(input.workDir, 'AGENTS.md'), input.instructions + '\n', { mode: 0o600 });
+    if (told && program.kind === 'codex') writeFileSync(join(input.workDir, 'AGENTS.md'), told + '\n', { mode: 0o600 });
     const spec = program.launch({ bin: job.bin, home: job.home, workDir: input.workDir, sessionId: input.sessionId, model: input.model, instructionsFile, urls });
     const hash = hashOf({ kind: program.kind, bin: job.bin, model: input.model, instructions: input.instructions, env: lasting(input.env) });
     /* A new session asked for goes on in a program started for a person that nothing was said in yet. */
@@ -491,6 +495,7 @@ export class TerminalHost {
     const turn = a.turn;
     if (!turn?.typed) return;
     a.turn = null;
+    if (a.sessionId) this.opts.remember?.(a.sessionId, a.workDir);
     this.bridge.setToken(a.key, null);
     /* Hornhoof has not answered yet: the end goes out with its answer. */
     if (turn.early) turn.over = { message, error, sessionId: a.sessionId };
