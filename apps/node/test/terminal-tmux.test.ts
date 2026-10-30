@@ -44,6 +44,17 @@ describe.skipIf(!hasTmux)('tmux sessions for agents', () => {
     expect(await tmux.has('a-3')).toBe(false);
   });
 
+  it('gives the people watching no tmux keys: no prefix, no menus, only the wheel to scroll', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-tmux-'));
+    await tmux.launch('a-5', { cwd: dir, command: ['sh', '-c', 'sleep 30'], cols: 80, rows: 24 });
+    await tmux.launch('a-6', { cwd: dir, command: ['sh', '-c', 'sleep 30'], cols: 80, rows: 24 });
+    expect(await tmux.run(['show-options', '-g', 'prefix'])).toBe('prefix None\n');
+    expect(await tmux.run(['show-options', '-g', 'prefix2'])).toBe('prefix2 None\n');
+    const root = (await tmux.run(['list-keys', '-T', 'root'])).trim().split('\n');
+    expect(root).toHaveLength(1);
+    expect(root[0]).toContain('WheelUpPane');
+  });
+
   it('starts the program again in the same session, with the env from a file it removes', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'hh-tmux-'));
     await tmux.launch('a-4', { cwd: dir, command: ['sh', '-c', 'echo first; sleep 30'], cols: 80, rows: 24 });

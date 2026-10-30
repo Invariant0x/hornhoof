@@ -17,6 +17,16 @@ const OPTIONS: string[][] = [
   ['remain-on-exit', 'on'],
 ];
 
+/* People watch through tmux clients, and tmux keys could take one to another agent's session, open its menus or run its
+   commands. They get none: no prefix, so the prefix table is out of reach, and no keys without it but the wheel, which
+   scrolls the history as it does by default. */
+const KEYS: string[][] = [
+  ['set-option', '-g', 'prefix', 'None'],
+  ['set-option', '-g', 'prefix2', 'None'],
+  ['unbind-key', '-a', '-T', 'root'],
+  ['bind-key', '-n', 'WheelUpPane', 'if-shell', '-F', '#{||:#{alternate_on},#{pane_in_mode},#{mouse_any_flag}}', 'send-keys -M', 'copy-mode -e'],
+];
+
 export type Launch = { cwd: string; command: string[]; cols: number; rows: number; envFile?: string };
 export type Client = { pid: number; tty: string; session: string };
 
@@ -86,7 +96,9 @@ export class Tmux {
       : ['new-session', '-d', '-s', name, '-x', String(cols), '-y', String(rows), '-c', cwd, ...argv];
     /* One command line, so the options hold before a program that ends at once could close the server. */
     const options = OPTIONS.flatMap(([option, value]) => ['set-option', '-g', option!, value!, ';']);
-    await this.run(['start-server', ';', ...options, 'set-option', '-g', 'terminal-features', 'xterm-256color:RGB', ';', ...start]);
+    /* A command that fails ends the line, so the keys come after the program has started. */
+    const keys = KEYS.flatMap(c => [';', ...c]);
+    await this.run(['start-server', ';', ...options, 'set-option', '-g', 'terminal-features', 'xterm-256color:RGB', ';', ...start, ...keys]);
   }
 
   /* Pastes text the way a terminal does, bracketed when the program asked for it, so a long prompt arrives as one paste. */
