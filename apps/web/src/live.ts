@@ -7,16 +7,22 @@ type Listener = (m: LiveMessage) => void;
 const listeners = new Set<Listener>();
 let source: EventSource | null = null;
 let broken = false;
+/* A stream the browser gave up on opens again after this wait, which doubles up to the cap while it keeps failing. */
+const RETRY_MS = 1000, RETRY_MAX_MS = 30000;
+let retry: ReturnType<typeof setTimeout> | null = null;
+let wait = RETRY_MS;
 
 const tell = (m: LiveMessage) => {
   for (const fn of [...listeners]) fn(m);
 };
 
-/* One stream per tab. After a break the browser reconnects by itself; listeners hear "reconnected" and fetch what they missed. */
+/* One stream per tab. After a break the browser reconnects by itself, or Hornhoof opens a new stream when the browser gave up;
+   listeners hear "reconnected" and fetch what they missed. */
 function connect(): void {
   if (typeof EventSource === 'undefined') return;
-  source = new EventSource('/api/stream');
-  source.addEventListener('message', e => {
+  const es = new EventSource('/api/stream');
+  source = es;
+  es.addEventListener('message', e => {
     let m: StreamMessage;
     try {
       m = JSON.parse((e as MessageEvent<string>).data);
@@ -25,10 +31,19 @@ function connect(): void {
     }
     tell(m);
   });
-  source.addEventListener('error', () => {
+  es.addEventListener('error', () => {
     broken = true;
+    /* An error page, such as a proxy's while Hornhoof restarts, closes the stream for good. */
+    if (es.readyState !== EventSource.CLOSED || source !== es || retry) return;
+    es.close();
+    retry = setTimeout(() => {
+      retry = null;
+      if (listeners.size) connect();
+    }, wait);
+    wait = Math.min(wait * 2, RETRY_MAX_MS);
   });
-  source.addEventListener('open', () => {
+  es.addEventListener('open', () => {
+    wait = RETRY_MS;
     if (!broken) return;
     broken = false;
     tell({ type: 'reconnected' });
@@ -44,6 +59,9 @@ function subscribe(fn: Listener): () => void {
     source.close();
     source = null;
     broken = false;
+    if (retry) clearTimeout(retry);
+    retry = null;
+    wait = RETRY_MS;
   };
 }
 

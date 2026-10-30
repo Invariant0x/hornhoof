@@ -6,7 +6,10 @@ type Handler = (e: { data?: string }) => void;
 /* A stand-in for the browser's EventSource that tests drive by hand. */
 export class FakeEventSource {
   static all: FakeEventSource[] = [];
+  static readonly CLOSED = 2;
   closed = false;
+  /* 2 once the browser gave up on it, as after an error page from a proxy. */
+  readyState = 1;
   private handlers = new Map<string, Set<Handler>>();
 
   constructor(readonly url: string) {

@@ -41,4 +41,25 @@ describe('useStream', () => {
     });
     expect(heard).toHaveBeenCalledWith({ type: 'reconnected' });
   });
+
+  it('opens a new stream when the browser gives up on the old one, and says it came back', () => {
+    vi.useFakeTimers();
+    try {
+      const stream = fakeStream();
+      const heard = vi.fn();
+      render(<Listener onMessage={heard} />);
+      const first = stream.sources()[0]!;
+      act(() => {
+        first.readyState = 2;
+        first.fire('error');
+      });
+      act(() => vi.advanceTimersByTime(1000));
+      expect(first.closed).toBe(true);
+      expect(stream.sources()).toHaveLength(2);
+      act(() => stream.sources()[1]!.fire('open'));
+      expect(heard).toHaveBeenCalledWith({ type: 'reconnected' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
