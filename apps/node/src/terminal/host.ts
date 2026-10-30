@@ -50,6 +50,10 @@ type Agent = {
   idle: NodeJS.Timeout | null;
   poll: NodeJS.Timeout | null;
   opening: Deferred<{ jobId: string; token: string } | null> | null;
+  /* The turn's last line of text, to tell when its answer reached the log. */
+  lastText: string | null;
+  /* A typed turn that ended and waits for the rest of its log. */
+  settling: Promise<void> | null;
 };
 
 type View = { child: ChildProcess; key: string; write: boolean; mask: StreamMask; decoder: StringDecoder; pending: string; timer: NodeJS.Timeout | null; quiet: NodeJS.Timeout | null };
@@ -70,6 +74,8 @@ type Options = {
 
 const WAITING = 'This agent starts with its next turn.';
 const STOP_WAIT_MS = 5000;
+/* Claude Code can say a turn ended before its answer is in the session log; the turn waits this long for it. */
+const SETTLE_MS = 3000;
 
 const hashOf = (v: unknown) => createHash('sha256').update(JSON.stringify(v)).digest('hex');
 /* The turn's own address and token for pictures change every turn; the bridge serves them instead. */
@@ -116,7 +122,7 @@ export class TerminalHost {
   private agent(key: string): Agent {
     let a = this.agents.get(key);
     if (!a) {
-      a = { key, name: `a-${key}`, program: null, home: '', workDir: '', hash: null, sessionId: null, tail: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, viewers: 0, idle: null, poll: null, opening: null };
+      a = { key, name: `a-${key}`, program: null, home: '', workDir: '', hash: null, sessionId: null, tail: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, viewers: 0, idle: null, poll: null, opening: null, lastText: null, settling: null };
       this.agents.set(key, a);
     }
     return a;
@@ -143,6 +149,9 @@ export class TerminalHost {
     const hash = hashOf({ kind: program.kind, bin: job.bin, model: input.model, instructions: input.instructions, env: lasting(input.env) });
     const goesOn = input.sessionId !== null && input.sessionId === a.sessionId && a.hash === hash && (await this.opts.tmux.alive(a.name));
 
+    /* What is left in the log from before belongs to no turn. */
+    this.drain(a);
+    a.lastText = null;
     this.bridge.setToken(job.key, input.tools?.token ?? null);
     a.turn = { jobId: null, onEvent: input.onEvent ?? (() => {}), typed: false, seq: 0 };
     a.ended = deferred();
@@ -167,7 +176,7 @@ export class TerminalHost {
         this.drain(a);
         const message = await Promise.race([a.ended.promise, sleep(this.pollMs).then(() => null)]);
         if (message !== null) {
-          this.drain(a);
+          await this.settle(a, message);
           return { ok: true, sessionId: a.sessionId, result: message, output: '', error: null, limits: a.limits };
         }
         /* A program stopped with Escape does not say its turn ended: it waits for the next prompt. */
@@ -259,9 +268,19 @@ export class TerminalHost {
     }
   }
 
+  /* Reads the log until the turn's answer is in it. */
+  private async settle(a: Agent, message: string): Promise<void> {
+    const answer = message.trim();
+    for (const end = Date.now() + SETTLE_MS; ; await sleep(100)) {
+      this.drain(a);
+      if (a.program?.kind !== 'claude' || !answer || a.lastText?.trim() === answer || Date.now() > end) return;
+    }
+  }
+
   private emit(a: Agent, event: AgentEvent): void {
     const turn = a.turn;
     if (!turn) return;
+    if (event.kind === 'text') a.lastText = event.text;
     if (!turn.typed) return turn.onEvent(event);
     if (turn.jobId) this.opts.send({ type: 'job.event', jobId: turn.jobId, seq: turn.seq++, event: tidy(event, this.opts.secrets()) });
   }
@@ -280,6 +299,7 @@ export class TerminalHost {
         return;
       }
       case 'prompt':
+        await a.settling;
         a.busy = true;
         if (!a.turn) await this.openTyped(a, String(data.prompt ?? ''));
         return;
@@ -288,7 +308,8 @@ export class TerminalHost {
         a.busy = false;
         if (typeof data.session_id === 'string') a.sessionId = data.session_id;
         const message = String(data.last_assistant_message ?? '');
-        if (a.turn?.typed) this.finishTyped(a, message);
+        /* The hook answers first: the program may write the rest of its log only after. */
+        if (a.turn?.typed) a.settling = this.settle(a, message).then(() => this.finishTyped(a, message)).finally(() => (a.settling = null));
         else a.ended?.resolve(message);
         return;
       }
@@ -299,6 +320,8 @@ export class TerminalHost {
   private async openTyped(a: Agent, text: string): Promise<void> {
     if (a.idle) clearTimeout(a.idle);
     a.opening = deferred();
+    this.drain(a);
+    a.lastText = null;
     this.opts.send({ type: 'turn.open', agentKey: a.key, text: text.slice(0, 100_000) });
     const got = await Promise.race([a.opening.promise, sleep(8000).then(() => null)]);
     a.opening = null;

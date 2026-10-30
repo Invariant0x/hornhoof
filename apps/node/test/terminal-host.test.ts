@@ -62,6 +62,17 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     expect(j.events).toEqual([{ kind: 'text', text: 'echo: hello there' }]);
   });
 
+  it("keeps a turn's answer with its turn when the program logs it after saying the turn ended", async () => {
+    await setUp();
+    const first = job('a12', 'LAG one');
+    const done = await host.run(first);
+    expect(done).toMatchObject({ ok: true, result: 'echo: LAG one' });
+    expect(first.events).toEqual([{ kind: 'text', text: 'echo: LAG one' }]);
+    const second = job('a12', 'two', { sessionId: done.sessionId });
+    await host.run(second);
+    expect(second.events).toEqual([{ kind: 'text', text: 'echo: two' }]);
+  });
+
   it('goes on in the same live program for the next turn, and resumes the session once the program ended', async () => {
     await setUp();
     const first = await host.run(job('a2', 'one'));
@@ -118,6 +129,19 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     expect(host.typedJobs()).toEqual([]);
     expect(await host.run(job('a9', 'next', { sessionId: first.sessionId }))).toMatchObject({ ok: true, result: 'echo: next' });
   }, 30_000);
+
+  it('sends the answer of a typed turn before its end, though the program logs it late', async () => {
+    await setUp();
+    await host.run(job('a13', 'hello'));
+    await host.open({ type: 'term.open', termId: 't7', agentKey: 'a13', cols: 80, rows: 24, write: true });
+    host.input({ type: 'term.input', termId: 't7', data: 'LAG typed\r' });
+    await until(() => sent.some(m => m.type === 'turn.open'));
+    host.opened({ type: 'turn.opened', agentKey: 'a13', jobId: 'job-lag', toolToken: 'tok-lag' });
+    await until(() => sent.some(m => m.type === 'job.done'));
+    const mine = sent.filter(m => (m.type === 'job.event' || m.type === 'job.done') && m.jobId === 'job-lag').map(m => m.type);
+    expect(mine).toEqual(['job.event', 'job.done']);
+    expect(sent).toContainEqual({ type: 'job.event', jobId: 'job-lag', seq: 0, event: { kind: 'text', text: 'echo: LAG typed' } });
+  });
 
   it('ends every view when asked, as after the connection to Hornhoof came back', async () => {
     await setUp();
