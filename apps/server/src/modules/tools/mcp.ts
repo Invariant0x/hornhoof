@@ -36,8 +36,8 @@ function toolsFor(ctx: Ctx, job: ToolJob): McpServer {
   const server = new McpServer({ name: 'hornhoof', version: '0.4.0' });
   server.registerTool(
     'company',
-    { description: 'The company as it is now: its brief, the people who run it, departments with their products, subscriptions, and the department templates.' },
-    async () => say(JSON.stringify(await companyView(ctx.db, job.companyId))),
+    { description: 'The company as it is now: its brief, the people who run it, departments with their products and employees, subscriptions, and the department templates.' },
+    async () => say(JSON.stringify(await companyView(ctx.db, ctx.templates, job.companyId))),
   );
   if (job.agentKind !== 'orchestrator') return server;
   server.registerTool(

@@ -79,7 +79,13 @@ describe('/mcp', () => {
     await job('running');
     await db.update(companies).set({ brief: 'Characters for schools.' }).where(eq(companies.id, companyId));
     const [dev] = await db.insert(departments).values({ companyId, name: null, templateKey: 'development', roleCode: 'DEV', about: 'Two products' }).returning();
-    await db.insert(departments).values({ companyId, name: 'Mascot', roleCode: 'DEV', parentId: dev!.id });
+    const [mascot] = await db.insert(departments).values({ companyId, name: 'Mascot', roleCode: 'DEV', parentId: dev!.id }).returning();
+    const [sub] = await db.select().from(subscriptions);
+    await db.insert(agents).values([
+      { companyId, kind: 'worker', name: 'Bruno', roleKey: 'DEV-BE', departmentId: dev!.id, productId: mascot!.id, model: 'claude-sonnet-5-5', subscriptionId: sub!.id },
+      { companyId, kind: 'head', name: 'Hana', roleKey: 'DEV-HEAD', departmentId: dev!.id, model: '' },
+      { companyId, kind: 'worker', name: 'Gone', roleKey: 'DEV-FE', departmentId: dev!.id, model: '', removedAt: new Date() },
+    ]);
     const client = await mcp(app, TOKEN);
     const raw = text(await client.callTool({ name: 'company', arguments: {} }));
     expect(raw).not.toMatch(/@/);
@@ -88,7 +94,19 @@ describe('/mcp', () => {
       name: 'Acme',
       brief: 'Characters for schools.',
       people: [{ name: 'Ivan', title: 'CEO' }],
-      departments: [{ id: dev!.id, name: 'Development', template: 'development', about: 'Two products', products: [{ name: 'Mascot' }] }],
+      departments: [
+        {
+          id: dev!.id,
+          name: 'Development',
+          template: 'development',
+          about: 'Two products',
+          products: [{ name: 'Mascot' }],
+          employees: [
+            { name: 'Hana', role: 'Head of development', kind: 'head', product: null, provider: null, model: null },
+            { name: 'Bruno', role: 'Backend engineer', kind: 'worker', product: 'Mascot', provider: 'anthropic_api', model: 'claude-sonnet-5-5' },
+          ],
+        },
+      ],
       subscriptions: [{ provider: 'anthropic_api', kind: 'api_key', servesWholeCompany: true }],
     });
     expect(view.templates).toHaveLength(8);

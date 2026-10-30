@@ -169,6 +169,22 @@ describe('the employee card', () => {
   it('lists the employees of each department on the map', async () => {
     const { app, ceo, brunoId, role } = await company();
     const org = (await app.inject({ url: '/api/org', ...as(ceo) })).json();
-    expect(org.departments[0].employees).toEqual([{ id: brunoId, name: 'Bruno', roleId: 'DEV-BE', title: role.title, kind: 'worker', model: 'claude-sonnet-5-5', provider: 'anthropic_api', state: 'sleeping' }]);
+    expect(org.departments[0].employees).toEqual([
+      { id: brunoId, name: 'Bruno', roleId: 'DEV-BE', title: role.title, kind: 'worker', model: 'claude-sonnet-5-5', modelName: 'Claude Sonnet 5.5', provider: 'anthropic_api', state: 'sleeping' },
+    ]);
+  });
+
+  it('lists the head first, then by hire, people hired together in the order of the roster', async () => {
+    const { app, ceo, dev, teamKey, brunoId } = await company();
+    const line = (role: string, name: string) => ({ role, name, model: '', subscription: teamKey, skills: app.ctx.templates.roles.get(role)!.skills.filter(s => s.on).map(s => s.id) });
+    await app.inject({
+      method: 'POST',
+      url: `/api/departments/${dev.id}/staff`,
+      payload: { people: [line('DEV-RED', 'Rita'), line('DEV-REV', 'Rob'), line('DEV-HEAD', 'Hana'), line('DEV-ARCH', 'Ann')] },
+      ...as(ceo),
+    });
+    await patch(app, ceo, brunoId, { model: 'claude-opus-5-5' });
+    const org = (await app.inject({ url: '/api/org', ...as(ceo) })).json();
+    expect(org.departments[0].employees.map((e: { name: string }) => e.name)).toEqual(['Hana', 'Bruno', 'Ann', 'Rob', 'Rita']);
   });
 });
