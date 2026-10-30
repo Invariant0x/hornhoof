@@ -436,7 +436,8 @@ async function regate(ctx: Live, agentId: string, task: Task, c: TaskChange): Pr
   const gates = [...task.gates.slice(0, task.stage - 1), ...given];
   const text = rewrite(task, c);
   const n: Note = { kind: 'updated', actor: { agentId }, data: { fields: [...text.fields, 'gates'] } };
-  if (!given.length) return { task: await move(ctx, task, { ...text.set, gates, ...closing(), panel: [] }, n), wakes: [] };
+  /* No gates left finishes it: whoever gave it hears so, unless they did it. */
+  if (!given.length) return { task: await move(ctx, task, { ...text.set, gates, ...closing(), panel: [] }, n), wakes: giver(task, 'done', agentId) };
   const gate = await atGate(ctx.db, { ...task, gates }, task.stage);
   return { task: await move(ctx, task, { ...text.set, gates, ...gate.set }, n), wakes: gate.wakes };
 }
@@ -477,8 +478,8 @@ export async function updateTask(ctx: Live, agentId: string, taskId: string, c: 
     fields.push('gates');
   }
   if (!fields.length) return { task, wakes: [] };
-  /* A rewrite answers a blocked executor. */
-  if (task.status === 'blocked') set.status = 'open';
+  /* A rewrite answers a blocked executor. A task nobody holds stays blocked until someone can take it. */
+  if (task.status === 'blocked' && (set.assigneeAgentId ?? task.assigneeAgentId)) set.status = 'open';
   const row = await move(ctx, task, set, { kind: 'updated', actor: { agentId }, data: { fields } });
   const wakes: Wake[] = [];
   if (set.assigneeAgentId) wakes.push({ agentId: set.assigneeAgentId, taskId, why: 'assigned' });

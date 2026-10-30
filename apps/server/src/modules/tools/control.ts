@@ -77,12 +77,12 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
     'hire',
     'Hires employees into a department, as the CEO\'s click on a staff card does. Each person is { role, name?, product?, model?, subscription?, skills?: { on, off } } as in propose_staff: ' +
       'left out, the name is the role\'s title, the model is Default, the subscription is the first one that serves the department and runs the role, and the skills are the role\'s. ' +
-      'Call staffing_options first. A department has one head.',
-    { department: Id('department'), people: z.array(StaffLine.omit({ checked: true })).min(1).max(30) },
-    async ({ department, people: lines }) => {
+      'Call staffing_options first. A department has one head. proposalId: the staff card this hires from, so it closes.',
+    { department: Id('department'), proposalId: z.uuid().optional(), people: z.array(StaffLine.omit({ checked: true })).min(1).max(30) },
+    async ({ department, proposalId, people: lines }) => {
       const url = `/api/departments/${department}/staff`;
       const dept = await departmentOf(ctx.db, job.companyId, department);
-      return dept ? { method: 'POST', url, payload: { people: await hireLines(ctx, job.companyId, dept, lines) } } : { method: 'POST', url };
+      return dept ? { method: 'POST', url, payload: { proposalId, people: await hireLines(ctx, job.companyId, dept, lines) } } : { method: 'POST', url };
     },
   );
 

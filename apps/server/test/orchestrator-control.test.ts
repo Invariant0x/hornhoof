@@ -1,11 +1,11 @@
 import type { AddressInfo } from 'node:net';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { and, eq, isNull, like } from 'drizzle-orm';
+import { and, desc, eq, isNull, like } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agentChanges, agentEvents, agents, companies, departments, jobs, requests, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
+import { agentChanges, agentEvents, agents, companies, departments, jobs, people, proposals, requests, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
 import { identityOf } from '../src/modules/nodes/hub.js';
 import { ask, createTask } from '../src/modules/tasks/engine.js';
 import { as, connectNode, listen, setUpCompany, testApp, until } from './helpers.js';
@@ -163,6 +163,55 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
     const [hired] = await db.select().from(agentChanges).where(eq(agentChanges.agentId, qa!.id));
     expect(hired).toMatchObject({ field: 'hired', personId: null, byOrchestrator: true });
     expect(await db.select().from(jobs).where(and(eq(jobs.agentId, orchestrator.id), like(jobs.prompt, 'Hornhoof applied%')))).toEqual([]);
+  });
+
+  it('keeps a task nobody holds blocked when it rewrites it', async () => {
+    const { app, db, orchestrator, hana, dev } = await company();
+    const payments = (await createTask(app.ctx, { agentId: orchestrator.id }, { title: 'Payments', brief: '', body: '', departmentId: dev.id, assigneeAgentId: hana.id })).task;
+    await db.update(tasks).set({ status: 'blocked', assigneeAgentId: null }).where(eq(tasks.id, payments.id));
+    const res = await call(await mcp(app), 'update_task', { task: payments.number, body: 'Payments with tax.' });
+    expect(res.isError).toBeFalsy();
+    expect((await db.select().from(tasks).where(eq(tasks.id, payments.id)))[0]).toMatchObject({ body: 'Payments with tax.', status: 'blocked' });
+  });
+
+  it('tells the head when it takes the last gate off a member task', async () => {
+    const { app, db, hana, bruno, dev } = await company();
+    const [rita] = await db.insert(agents).values({ companyId: dev.companyId, kind: 'worker', name: 'Rita', roleKey: 'DEV-REV', departmentId: dev.id, model: '', subscriptionId: bruno.subscriptionId }).returning();
+    const checked = (await createTask(app.ctx, { agentId: hana.id }, { title: 'Refunds', brief: '', body: '', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true, gates: [rita!.id] })).task;
+    await db.update(tasks).set({ status: 'review', stage: 1, panel: [], assigneeAgentId: hana.id }).where(eq(tasks.id, checked.id));
+    const res = await call(await mcp(app), 'update_task', { task: checked.number, gates: [] });
+    expect(res.isError).toBeFalsy();
+    expect((await db.select().from(tasks).where(eq(tasks.id, checked.id)))[0]!.status).toBe('done');
+    expect(await db.select().from(jobs).where(and(eq(jobs.agentId, hana.id), eq(jobs.taskId, checked.id)))).toHaveLength(1);
+  });
+
+  it('closes the staff card it hires from', async () => {
+    const { app, db, dev } = await company();
+    const client = await mcp(app);
+    await call(client, 'propose_staff', { department: dev.id, brief: 'Acceptance first.', people: [{ role: 'DEV-QA', checked: true }] });
+    const [card] = await db.select().from(proposals).where(eq(proposals.kind, 'staff'));
+    const res = await call(client, 'hire', { department: dev.id, proposalId: card!.id, people: [{ role: 'DEV-QA' }] });
+    expect(res.isError).toBeFalsy();
+    expect((await db.select().from(proposals).where(eq(proposals.id, card!.id)))[0]!.status).toBe('applied');
+  });
+
+  it('records the plans a person it disables lets go as its own change', async () => {
+    const { app, db, bruno, dev } = await company();
+    const [lena] = await db.insert(people).values({ companyId: dev.companyId, name: 'Lena', email: 'lena@example.com', title: 'Engineer', status: 'active', scopeKind: 'company' }).returning();
+    const [plan] = await db.insert(subscriptions).values({ companyId: dev.companyId, provider: 'claude', kind: 'personal', label: 'Claude', ownerPersonId: lena!.id, status: 'ready' }).returning();
+    await db.update(agents).set({ subscriptionId: plan!.id }).where(eq(agents.id, bruno.id));
+    const res = await call(await mcp(app), 'change_person', { person: lena!.id, status: 'disabled' });
+    expect(res.isError).toBeFalsy();
+    const [freed] = await db.select().from(agentChanges).where(and(eq(agentChanges.agentId, bruno.id), eq(agentChanges.field, 'subscription')));
+    expect(freed).toMatchObject({ personId: null, byOrchestrator: true });
+  });
+
+  it('hands the work of an employee it switches off on in its own name', async () => {
+    const { app, db, orchestrator, bruno, task } = await company();
+    const res = await call(await mcp(app), 'change_employee', { employee: bruno.id, on: false });
+    expect(res.isError).toBeFalsy();
+    const [handed] = await db.select().from(taskEvents).where(eq(taskEvents.taskId, task.id)).orderBy(desc(taskEvents.id)).limit(1);
+    expect(handed).toMatchObject({ text: 'Bruno was switched off.', agentId: orchestrator.id, personId: null });
   });
 });
 
