@@ -130,9 +130,10 @@ install_colima() {
 }
 
 # Colima starts with 2 processors and 2 GB of memory, too little for agents that build and test. A new one gets all of
-# the Mac's processors and three quarters of its memory; one set up before keeps what its owner gave it.
+# the Mac's processors and three quarters of its memory; one set up before, in any folder or profile, keeps what its
+# owner gave it.
 size_colima() {
-  [ -f "${COLIMA_HOME:-$HOME/.colima}/default/colima.yaml" ] && return 0
+  [ -n "$(colima list --json 2> /dev/null)" ] && return 0
   local cpus gb
   cpus=$(sysctl -n hw.ncpu 2> /dev/null || echo 2)
   gb=$(($(sysctl -n hw.memsize 2> /dev/null || echo 0) / 1073741824 * 3 / 4))

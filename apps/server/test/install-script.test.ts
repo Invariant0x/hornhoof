@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
@@ -17,14 +17,10 @@ const TWO_LINES = `${SUB_A} claude node-key-aaaaaaaaaaaaaaaa\\n${SUB_B} codex no
 /* System tools the script and the stubs may use. Real docker, brew, curl and sudo are never reachable. */
 const TOOLS = ['bash', 'sh', 'env', 'cat', 'od', 'tr', 'head', 'base64', 'sleep', 'mkdir', 'rm', 'chmod', 'grep', 'sed', 'cut', 'cp', 'touch', 'basename', 'dirname', 'wc', 'mktemp', 'date', 'sort', 'kill', 'printf', 'tail', 'awk'];
 
-type Options = { args?: string[]; omit?: string[]; env?: Record<string, string>; tty?: string; home?: Record<string, string> };
+type Options = { args?: string[]; omit?: string[]; env?: Record<string, string>; tty?: string };
 
-function install({ args = ['--join', CODE], omit = [], env = {}, tty = 'typed-answer\n', home = {} }: Options = {}) {
+function install({ args = ['--join', CODE], omit = [], env = {}, tty = 'typed-answer\n' }: Options = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'hh-install-'));
-  for (const [file, text] of Object.entries(home)) {
-    mkdirSync(dirname(join(dir, 'home', file)), { recursive: true });
-    writeFileSync(join(dir, 'home', file), text);
-  }
   const bin = join(dir, 'stubs');
   const sys = join(dir, 'sys');
   mkdirSync(bin);
@@ -101,7 +97,7 @@ describe('install.sh', () => {
   });
 
   it('leaves the processors and memory of a Colima set up before as they are', () => {
-    const r = install({ omit: ['docker', 'brew'], env: { STUB_OS: 'Darwin', STUB_ARCH: 'arm64', STUB_DOCKER: 'after_start' }, home: { '.colima/default/colima.yaml': 'cpu: 4\n' } });
+    const r = install({ omit: ['docker', 'brew'], env: { STUB_OS: 'Darwin', STUB_ARCH: 'arm64', STUB_DOCKER: 'after_start', STUB_COLIMA_LIST: '{"name":"work","status":"Stopped","cpus":4}' } });
     expect(r.code).toBe(0);
     expect(r.calls.some(c => c.startsWith('colima start'))).toBe(false);
     expect(indexOf(r.calls, 'brew services start colima')).toBeGreaterThanOrEqual(0);
