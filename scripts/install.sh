@@ -136,7 +136,7 @@ size_colima() {
   [ -n "$(colima list --json 2> /dev/null)" ] && return 0
   local cpus gb
   cpus=$(sysctl -n hw.ncpu 2> /dev/null || echo 2)
-  gb=$(($(sysctl -n hw.memsize 2> /dev/null || echo 0) / 1073741824 * 3 / 4))
+  gb=$(($(sysctl -n hw.memsize 2> /dev/null || echo 0) * 3 / 4 / 1073741824))
   [ "$cpus" -ge 2 ] 2> /dev/null || cpus=2
   [ "$gb" -ge 2 ] || gb=2
   say "Setting up Colima with $cpus processors and $gb GB of memory. The first start downloads its system and can take a few minutes."
