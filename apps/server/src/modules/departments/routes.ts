@@ -28,7 +28,7 @@ function builtNote(created: Created[], removed: Removed[]): string {
   const lines = ['Hornhoof applied the CEO\'s click.'];
   if (created.length) lines.push(`Created: ${created.map(listed).join('; ')}.`);
   if (removed.length) lines.push(`Removed: ${removed.map(listed).join('; ')}.`);
-  lines.push('Continue in the CEO\'s language: say what is there now in a line or two, then offer to staff the departments one by one, most urgent first.');
+  lines.push('Continue in the CEO\'s language: say what is there now in a line or two. Hornhoof cannot put people or agents into departments yet; that comes in the next version, so do not offer to plan the staff.');
   return lines.join('\n');
 }
 
