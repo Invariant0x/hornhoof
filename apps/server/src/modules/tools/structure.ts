@@ -1,8 +1,8 @@
 import { TEMPLATE_KEYS } from '@hornhoof/protocol';
-import { eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, isNull, or } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Db } from '../../db/client.js';
-import { agents, departments } from '../../db/schema.js';
+import { agents, departments, people, subscriptions, teams } from '../../db/schema.js';
 import { deptName, TEMPLATE_TEXT } from '../departments/templates.js';
 
 const Name = z.string().trim().min(1).max(60);
@@ -17,9 +17,15 @@ export const Proposal = z.object({ brief: z.string().trim().min(1).max(1500), it
 
 export type NewItem = z.infer<typeof NewItem>;
 export type ChangeItem = z.infer<typeof ChangeItem>;
-export type StructureItem = NewItem | ChangeItem;
+/* What the CEO's click sends: the ticked items, without the tick. */
+export const BuildItem = z.union([NewItem.omit({ checked: true }).extend({ note: Note.default('') }), ChangeItem.omit({ checked: true }).extend({ note: Note.default('') })]);
+export type BuildItem = z.infer<typeof BuildItem>;
 
-export const isNew = (item: StructureItem): item is NewItem => 'template' in item;
+type NewPart = Omit<NewItem, 'checked'>;
+type ChangePart = Omit<ChangeItem, 'checked'>;
+export type StructureItem = NewPart | ChangePart;
+
+export const isNew = <T extends StructureItem>(item: T): item is Extract<T, NewPart> => 'template' in item;
 
 /* What is wrong with these items against the company as it is, in plain English for the agent to fix, or null. */
 export async function checkItems(db: Db, companyId: string, items: StructureItem[]): Promise<string | null> {
@@ -37,6 +43,12 @@ export async function checkItems(db: Db, companyId: string, items: StructureItem
       const inside = [dept.id, ...all.filter(d => d.parentId === dept.id).map(d => d.id)];
       const staffed = await db.select({ id: agents.id }).from(agents).where(inArray(agents.departmentId, inside));
       if (staffed.length) return `${deptName(dept)} has agents and cannot be removed.`;
+      const teamIds = (await db.select({ id: teams.id }).from(teams).where(inArray(teams.departmentId, inside))).map(t => t.id);
+      const places = [...inside, ...teamIds];
+      const [person] = await db.select({ id: people.id }).from(people).where(and(inArray(people.scopeId, places), or(eq(people.scopeKind, 'department'), eq(people.scopeKind, 'team'))));
+      if (person) return `People work in ${deptName(dept)}; move them first.`;
+      const [key] = await db.select({ id: subscriptions.id }).from(subscriptions).where(and(inArray(subscriptions.targetId, places), isNull(subscriptions.removedAt)));
+      if (key) return `An API key serves ${deptName(dept)}; point it elsewhere first.`;
       continue;
     }
     if (item.template === 'operations') {

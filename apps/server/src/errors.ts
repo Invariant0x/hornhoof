@@ -29,7 +29,9 @@ export type ErrorReason =
   | 'too_many_attempts'
   | 'tool_token_invalid'
   | 'orchestrator_not_ready'
-  | 'nothing_running';
+  | 'nothing_running'
+  | 'proposal_closed'
+  | 'structure_invalid';
 
 export class ApiError extends Error {
   constructor(
