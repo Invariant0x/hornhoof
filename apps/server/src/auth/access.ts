@@ -25,6 +25,14 @@ export type AccessInput = z.infer<typeof AccessInput>;
 
 export const WHOLE: Access = { whole: true, departments: new Set(), teams: new Set() };
 
+/* Where an employee works: its product inside its department when it has one. */
+export async function agentSpot(db: Db, agent: { departmentId: string | null; productId: string | null; teamId: string | null }): Promise<Spot> {
+  if (agent.productId) return { departmentId: agent.productId, parentId: agent.departmentId, teamId: agent.teamId };
+  if (!agent.departmentId) return { departmentId: null };
+  const [dept] = await db.select({ parentId: departments.parentId }).from(departments).where(eq(departments.id, agent.departmentId));
+  return { departmentId: agent.departmentId, parentId: dept?.parentId ?? null, teamId: agent.teamId };
+}
+
 export async function accessOf(db: Db, person: Pick<Person, 'id' | 'scopeKind'>): Promise<Access> {
   if (person.scopeKind === 'company') return WHOLE;
   const rows = await db.select().from(personAccess).where(eq(personAccess.personId, person.id));

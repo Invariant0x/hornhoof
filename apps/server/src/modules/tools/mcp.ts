@@ -4,37 +4,40 @@ import { and, eq } from 'drizzle-orm';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Ctx } from '../../app.js';
 import { hashToken } from '../../crypto/tokens.js';
-import { jobs, proposals } from '../../db/schema.js';
+import { agents, jobs, proposals } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { appendEvent } from '../events/store.js';
 import { companyView } from './company.js';
 import { checkItems, Proposal } from './structure.js';
 
-type ToolJob = { id: string; companyId: string; agentId: string };
+type ToolJob = { id: string; companyId: string; agentId: string; agentKind: (typeof agents.$inferSelect)['kind'] };
 
 /* The token works only while its job runs, and only for a job that belongs to an agent. */
 async function jobOf(ctx: Ctx, req: FastifyRequest): Promise<ToolJob> {
   const token = /^Bearer (\S+)$/.exec(req.headers.authorization ?? '')?.[1];
   const [job] = token
     ? await ctx.db
-        .select({ id: jobs.id, companyId: jobs.companyId, agentId: jobs.agentId })
+        .select({ id: jobs.id, companyId: jobs.companyId, agentId: agents.id, agentKind: agents.kind })
         .from(jobs)
+        .innerJoin(agents, eq(agents.id, jobs.agentId))
         .where(and(eq(jobs.toolTokenHash, hashToken(token)), eq(jobs.status, 'running')))
     : [];
-  if (!job?.agentId) throw new ApiError(401, 'unauthorized', 'This tool token is not valid.', 'tool_token_invalid');
-  return { ...job, agentId: job.agentId };
+  if (!job) throw new ApiError(401, 'unauthorized', 'This tool token is not valid.', 'tool_token_invalid');
+  return job;
 }
 
 const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
 
-/* Hornhoof's tools as one agent's job sees them. Departments are never created here: the CEO's click does that. */
+/* Hornhoof's tools as one agent's job sees them: every agent reads the company, only the orchestrator proposes.
+   Departments and employees are never created here: the CEO's click does that. */
 function toolsFor(ctx: Ctx, job: ToolJob): McpServer {
-  const server = new McpServer({ name: 'hornhoof', version: '0.3.0' });
+  const server = new McpServer({ name: 'hornhoof', version: '0.4.0' });
   server.registerTool(
     'company',
     { description: 'The company as it is now: its brief, the people who run it, departments with their products, subscriptions, and the department templates.' },
     async () => say(JSON.stringify(await companyView(ctx.db, job.companyId))),
   );
+  if (job.agentKind !== 'orchestrator') return server;
   server.registerTool(
     'propose_structure',
     {

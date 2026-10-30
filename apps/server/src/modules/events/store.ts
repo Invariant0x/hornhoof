@@ -1,7 +1,8 @@
 import { and, asc, countDistinct, desc, eq, gt, inArray, isNotNull, isNull, notInArray, or } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
-import { agentEvents, agents, departments, jobs, people, type AgentEventKind } from '../../db/schema.js';
+import { agentSpot } from '../../auth/access.js';
+import { agentEvents, agents, jobs, people, type AgentEventKind } from '../../db/schema.js';
 
 export type EventView = { seq: number; kind: AgentEventKind; data: unknown; jobId: string | null; person: { id: string; name: string } | null; at: string };
 
@@ -36,12 +37,8 @@ export async function appendEvent(ctx: Pick<Ctx, 'db' | 'bus'>, e: NewEvent): Pr
     .returning({ id: agentEvents.id });
   const [stored] = await ctx.db.select(columns).from(agentEvents).leftJoin(people, eq(people.id, agentEvents.personId)).where(eq(agentEvents.id, row!.id));
   const event = view(stored!);
-  const [spot] = await ctx.db
-    .select({ departmentId: agents.departmentId, teamId: agents.teamId, parentId: departments.parentId })
-    .from(agents)
-    .leftJoin(departments, eq(departments.id, agents.departmentId))
-    .where(eq(agents.id, e.agentId));
-  ctx.bus.publish(e.companyId, { type: 'agent_event', agentId: e.agentId, event, spot: spot ?? { departmentId: null } });
+  const [agent] = await ctx.db.select({ departmentId: agents.departmentId, productId: agents.productId, teamId: agents.teamId }).from(agents).where(eq(agents.id, e.agentId));
+  ctx.bus.publish(e.companyId, { type: 'agent_event', agentId: e.agentId, event, spot: agent ? await agentSpot(ctx.db, agent) : { departmentId: null } });
   return event;
 }
 

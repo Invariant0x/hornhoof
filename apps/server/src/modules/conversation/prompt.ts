@@ -24,11 +24,11 @@ const PREFACE_EVENTS = 20;
 
 const textOf = (data: unknown): string => (data && typeof data === 'object' && 'text' in data && typeof data.text === 'string' ? data.text : '');
 
-/* The conversation so far, for a new session that never saw it: people's messages and his answers, oldest first. */
-export function preface(events: EventView[]): string {
+/* The conversation so far, for a new session that never saw it: people's messages and the agent's answers, oldest first. */
+export function preface(events: EventView[], agentName = 'Orchestrator'): string {
   const lines = events
     .filter(e => e.kind === 'message' || e.kind === 'text')
     .slice(-PREFACE_EVENTS)
-    .map(e => `${e.kind === 'message' ? (e.person?.name ?? 'Someone') : 'Orchestrator'}: ${textOf(e.data)}`);
+    .map(e => `${e.kind === 'message' ? (e.person?.name ?? 'Someone') : agentName}: ${textOf(e.data)}`);
   return `Earlier in this conversation, in another session you cannot see:\n\n${lines.join('\n')}`;
 }

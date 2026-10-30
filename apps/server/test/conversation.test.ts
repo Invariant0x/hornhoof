@@ -1,7 +1,8 @@
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
-import { agents, companies, departments, people, subscriptions } from '../src/db/schema.js';
+import { agents, companies, departments, jobs, people, subscriptions } from '../src/db/schema.js';
+import { renderInstructions } from '../src/modules/agents/instructions.js';
 import { FIRST_TURN, ORCHESTRATOR_INSTRUCTIONS } from '../src/modules/conversation/prompt.js';
 import { as, connectNode, invitePerson, listen, openStream, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
@@ -250,5 +251,102 @@ describe('the orchestrator\'s conversation', () => {
       expect(res.json().error.reason).toBe('company_scope_only');
     }
     expect(await db.select().from(agents)).toHaveLength(1);
+  });
+});
+
+describe("an employee's conversation", () => {
+  const sayTo = (app: FastifyInstance, token: string, id: string, text: string) => app.inject({ method: 'POST', url: `/api/agents/${id}/messages`, payload: { text }, ...as(token) });
+  const stateOf = async (app: FastifyInstance, token: string, id: string) => (await app.inject({ url: `/api/agents/${id}/events`, ...as(token) })).json().state;
+
+  /* A backend engineer in Development on the orchestrator's key, as hiring will make one. */
+  async function withEmployee() {
+    const company = await live();
+    const { db, app } = company;
+    const [acme] = await db.select().from(companies);
+    const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    const [dev] = await db.insert(departments).values({ companyId: acme!.id, name: null, templateKey: 'development', roleCode: 'DEV' }).returning();
+    const [sales] = await db.insert(departments).values({ companyId: acme!.id, name: null, templateKey: 'sales', roleCode: 'SAL' }).returning();
+    const role = app.ctx.templates.roles.get('DEV-BE')!;
+    const hire = async (name: string, departmentId: string, subscriptionId: string | null = orchestrator!.subscriptionId) =>
+      (
+        await db
+          .insert(agents)
+          .values({ companyId: acme!.id, kind: 'worker', name, model: 'sonnet', departmentId, subscriptionId, roleKey: role.id, skills: role.skills.filter(s => s.on).map(s => s.id) })
+          .returning()
+      )[0]!;
+    return { ...company, dev: dev!, sales: sales!, hire, bruno: await hire('Bruno', dev!.id) };
+  }
+
+  it('talks to an employee with its rendered instructions', async () => {
+    const { app, db, ceo, builtin, bruno } = await withEmployee();
+    const res = await sayTo(app, ceo, bruno.id, 'What do you own?');
+    expect(res.statusCode).toBe(202);
+    const run = await nextRun(builtin);
+    const expected = renderInstructions(app.ctx.templates, bruno, { company: 'Acme', department: 'Development', product: null });
+    expect(run).toMatchObject({ prompt: 'Ivan (CEO): What do you own?', instructions: expected.text, sessionId: null });
+    expect(run.instructions).toContain('You are Bruno, the Backend engineer of the Development department at Acme.');
+    expect(run.toolToken).toMatch(/^[A-Za-z0-9_-]{40,}$/);
+    const [job] = await db.select().from(jobs).where(eq(jobs.id, run.jobId));
+    expect(job!.instructionsHash).toBe(expected.hash);
+    const log = (await app.inject({ url: `/api/agents/${bruno.id}/events`, ...as(ceo) })).json().events;
+    expect(log[0]).toMatchObject({ kind: 'message', data: { text: 'What do you own?' }, person: { name: 'Ivan' } });
+    expect((await app.inject({ method: 'POST', url: `/api/agents/${bruno.id}/start`, ...as(ceo) })).json()).toEqual({ started: false });
+  });
+
+  it("starts a fresh session after the employee's instructions changed", async () => {
+    const { app, db, ceo, builtin, bruno } = await withEmployee();
+    await sayTo(app, ceo, bruno.id, 'Hello');
+    await finish(builtin, await nextRun(builtin), 'sess-1');
+    await sayTo(app, ceo, bruno.id, 'Still you?');
+    const same = await nextRun(builtin);
+    expect(same.sessionId).toBe('sess-1');
+    await finish(builtin, same, 'sess-1');
+    await until(async () => !(await stateOf(app, ceo, bruno.id)).busy);
+    await db.update(agents).set({ overrides: { base: 'You own the billing API.' } }).where(eq(agents.id, bruno.id));
+    await sayTo(app, ceo, bruno.id, 'And now?');
+    const fresh = await nextRun(builtin);
+    expect(fresh.sessionId).toBeNull();
+    expect(fresh.instructions).toContain('You own the billing API.');
+    expect(fresh.prompt).toMatch(/^Earlier in this conversation/);
+    expect(fresh.prompt.endsWith('Ivan (CEO): And now?')).toBe(true);
+  });
+
+  it("lets a person with the department write to its employees and nobody else's", async () => {
+    const { app, ceo, builtin, dev, sales, hire, bruno } = await withEmployee();
+    const seller = await hire('Sam', sales.id);
+    const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { departments: [dev.id] } });
+    expect((await sayTo(app, maria, bruno.id, 'Hi Bruno')).statusCode).toBe(202);
+    expect((await nextRun(builtin)).prompt).toBe('Maria: Hi Bruno');
+    for (const res of [await sayTo(app, maria, seller.id, 'Hi Sam'), await app.inject({ url: `/api/agents/${seller.id}/events`, ...as(maria) })]) {
+      expect(res.statusCode).toBe(403);
+      expect(res.json().error.reason).toBe('not_your_department');
+    }
+    expect((await sayTo(app, maria, 'orchestrator', 'Hi')).json().error.reason).toBe('company_scope_only');
+    expect((await sayTo(app, ceo, '00000000-0000-4000-8000-000000000000', 'Hi')).statusCode).toBe(404);
+  });
+
+  it('stops an employee while it works', async () => {
+    const { app, ceo, builtin, bruno } = await withEmployee();
+    expect((await app.inject({ method: 'POST', url: `/api/agents/${bruno.id}/stop`, ...as(ceo) })).json().error.reason).toBe('nothing_running');
+    await sayTo(app, ceo, bruno.id, 'Write a long essay');
+    const run = await nextRun(builtin);
+    expect((await app.inject({ method: 'POST', url: `/api/agents/${bruno.id}/stop`, ...as(ceo) })).statusCode).toBe(202);
+    expect(await builtin.next()).toEqual({ type: 'job.cancel', jobId: run.jobId });
+  });
+
+  it('says why an employee without a subscription cannot answer', async () => {
+    const { app, ceo, dev, hire } = await withEmployee();
+    const idle = await hire('Ida', dev.id, null);
+    expect(await stateOf(app, ceo, idle.id)).toMatchObject({ ready: false, reason: 'no_subscription' });
+    const res = await sayTo(app, ceo, idle.id, 'Hello?');
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error.reason).toBe('agent_not_ready');
+  });
+
+  it('still talks to the orchestrator by its id as before', async () => {
+    const { app, db, ceo, builtin } = await withEmployee();
+    const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    expect((await sayTo(app, ceo, orchestrator!.id, 'Hello')).statusCode).toBe(202);
+    expect(await nextRun(builtin)).toMatchObject({ prompt: 'Ivan (CEO): Hello', instructions: ORCHESTRATOR_INSTRUCTIONS });
   });
 });

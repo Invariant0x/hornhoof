@@ -5,11 +5,12 @@ import { agents, jobs, subscriptions } from '../../db/schema.js';
 import { dispatchJob } from '../jobs/dispatch.js';
 import { identityOf } from '../nodes/hub.js';
 import { appendEvent, earlierTalk, publishWorking } from '../events/store.js';
-import { ORCHESTRATOR_INSTRUCTIONS, preface } from './prompt.js';
+import { instructionsOf } from '../agents/instructions.js';
+import { preface } from './prompt.js';
 
 export const CONVERSATION_TIMEOUT_MS = 15 * 60_000;
 
-export type OrchestratorState = {
+export type AgentState = {
   ready: boolean;
   reason: 'no_subscription' | 'waiting_machine' | 'needs_login' | 'node_outdated' | 'machine_offline' | null;
   busy: boolean;
@@ -62,17 +63,18 @@ export async function enqueueTurn(ctx: Ctx, t: Turn): Promise<string> {
   return jobId;
 }
 
-/* A new session catches up from the conversation; the same subscription resumes the last finished turn's session. */
-async function sessionFor(ctx: Ctx, agentId: string, subscriptionId: string, prompt: string): Promise<{ sessionId: string | null; prompt: string }> {
+/* A new session catches up from the conversation. The last finished turn's session goes on only on the same subscription
+   with the same instructions: changed instructions would not reach a session that already has the old ones. */
+async function sessionFor(ctx: Ctx, agent: { id: string; kind: string; name: string }, subscriptionId: string, instructionsHash: string, prompt: string): Promise<{ sessionId: string | null; prompt: string }> {
   const [last] = await ctx.db
-    .select({ subscriptionId: jobs.subscriptionId, sessionId: jobs.sessionId })
+    .select({ subscriptionId: jobs.subscriptionId, sessionId: jobs.sessionId, instructionsHash: jobs.instructionsHash })
     .from(jobs)
-    .where(and(conversationOf(agentId), eq(jobs.status, 'done')))
+    .where(and(conversationOf(agent.id), eq(jobs.status, 'done')))
     .orderBy(desc(jobs.finishedAt))
     .limit(1);
-  if (last?.sessionId && last.subscriptionId === subscriptionId) return { sessionId: last.sessionId, prompt };
-  const talk = await earlierTalk(ctx.db, agentId);
-  return { sessionId: null, prompt: talk.length ? `${preface(talk)}\n\n${prompt}` : prompt };
+  if (last?.sessionId && last.subscriptionId === subscriptionId && last.instructionsHash === instructionsHash) return { sessionId: last.sessionId, prompt };
+  const talk = await earlierTalk(ctx.db, agent.id);
+  return { sessionId: null, prompt: talk.length ? `${preface(talk, agent.kind === 'orchestrator' ? 'Orchestrator' : agent.name)}\n\n${prompt}` : prompt };
 }
 
 /* Turns need a node from 0.3.0 on: older ones drop his instructions and tool token, cannot stop a turn and send nothing live. */
@@ -92,20 +94,23 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   if (!sub || sub.status !== 'ready' || outdated(sub) || !hub.isReady(identityOf(sub))) return;
   const [job] = await db.select().from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'queued'))).orderBy(asc(jobs.createdAt)).limit(1);
   if (!job) return;
+  const [agent] = await db.select().from(agents).where(eq(agents.id, agentId));
+  if (!agent) return;
 
-  const { sessionId, prompt } = await sessionFor(ctx, agentId, sub.id, job.prompt);
+  const instructions = await instructionsOf(ctx, agent);
+  const { sessionId, prompt } = await sessionFor(ctx, agent, sub.id, instructions.hash, job.prompt);
   const token = newToken();
   /* Running from the moment it is sent: the token works for its tools at once, and the next turn waits. */
   const [taken] = await db
     .update(jobs)
-    .set({ status: 'running', startedAt: new Date(), subscriptionId: sub.id, prompt, toolTokenHash: hashToken(token) })
+    .set({ status: 'running', startedAt: new Date(), subscriptionId: sub.id, prompt, toolTokenHash: hashToken(token), instructionsHash: instructions.hash })
     .where(and(eq(jobs.id, job.id), eq(jobs.status, 'queued')))
     .returning({ id: jobs.id });
   if (!taken) return;
   await publishWorking(ctx, job.companyId);
-  const sent = await dispatchJob(ctx, { id: job.id, subscriptionId: sub.id, prompt, sessionId, timeoutMs: job.timeoutMs, instructions: ORCHESTRATOR_INSTRUCTIONS, toolToken: token });
+  const sent = await dispatchJob(ctx, { id: job.id, subscriptionId: sub.id, prompt, sessionId, timeoutMs: job.timeoutMs, instructions: instructions.text, toolToken: token });
   if (sent) return;
-  await db.update(jobs).set({ status: 'queued', startedAt: null, prompt: job.prompt, toolTokenHash: null }).where(eq(jobs.id, job.id));
+  await db.update(jobs).set({ status: 'queued', startedAt: null, prompt: job.prompt, toolTokenHash: null, instructionsHash: null }).where(eq(jobs.id, job.id));
   await publishWorking(ctx, job.companyId);
 }
 
@@ -131,18 +136,38 @@ export async function afterJob(ctx: Ctx, jobId: string): Promise<void> {
   await pump(ctx, job.agentId);
 }
 
+/* The node stops the program and reports the job as cancelled. A node that is away cannot, so the job ends here. */
+export async function cancelJob(ctx: Ctx, jobId: string): Promise<void> {
+  const [job] = await ctx.db.select({ job: jobs, sub: subscriptions }).from(jobs).innerJoin(subscriptions, eq(subscriptions.id, jobs.subscriptionId)).where(eq(jobs.id, jobId));
+  if (!job || job.job.status !== 'running') return;
+  if (ctx.hub.send(identityOf(job.sub), { type: 'job.cancel', jobId })) return;
+  const [ended] = await ctx.db
+    .update(jobs)
+    .set({ status: 'failed', error: 'cancelled', result: 'Stopped.', finishedAt: new Date() })
+    .where(and(eq(jobs.id, jobId), eq(jobs.status, 'running')))
+    .returning({ id: jobs.id });
+  if (!ended) return;
+  await publishWorking(ctx, job.job.companyId);
+  await afterJob(ctx, jobId);
+}
+
 export async function orchestratorOf(ctx: Ctx, companyId: string) {
   const [agent] = await ctx.db.select().from(agents).where(and(eq(agents.companyId, companyId), eq(agents.kind, 'orchestrator')));
   return agent ?? null;
 }
 
-export async function orchestratorState(ctx: Ctx, companyId: string): Promise<OrchestratorState> {
+export async function orchestratorState(ctx: Ctx, companyId: string): Promise<AgentState> {
   const agent = await orchestratorOf(ctx, companyId);
   if (!agent) return { ready: false, reason: 'no_subscription', busy: false, runningJobId: null, queued: 0 };
-  const [running] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agent.id), eq(jobs.status, 'running'))).limit(1);
-  const [waiting] = await ctx.db.select({ n: count() }).from(jobs).where(and(conversationOf(agent.id), eq(jobs.status, 'queued')));
-  const sub = await liveSubscription(ctx, agent.id);
-  const reason: OrchestratorState['reason'] = !sub
+  return agentState(ctx, agent.id);
+}
+
+/* Whether the agent can answer now and, if not, why; what it is doing and how many turns wait. */
+export async function agentState(ctx: Ctx, agentId: string): Promise<AgentState> {
+  const [running] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
+  const [waiting] = await ctx.db.select({ n: count() }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'queued')));
+  const sub = await liveSubscription(ctx, agentId);
+  const reason: AgentState['reason'] = !sub
     ? 'no_subscription'
     : sub.status === 'waiting_machine'
       ? 'waiting_machine'

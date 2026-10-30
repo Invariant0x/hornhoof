@@ -65,6 +65,15 @@ describe('/mcp', () => {
     expect((await client.listTools()).tools.map(t => t.name).sort()).toEqual(['company', 'propose_structure']);
   });
 
+  it('gives an employee only the company view', async () => {
+    const { app, db, companyId } = await company();
+    const [sub] = await db.select().from(subscriptions);
+    const [bruno] = await db.insert(agents).values({ companyId, kind: 'worker', name: 'Bruno', model: 'sonnet', subscriptionId: sub!.id }).returning();
+    await db.insert(jobs).values({ companyId, subscriptionId: sub!.id, agentId: bruno!.id, kind: 'conversation', prompt: 'hi', timeoutMs: 900000, status: 'running', toolTokenHash: hashToken(TOKEN) });
+    const client = await mcp(app, TOKEN);
+    expect((await client.listTools()).tools.map(t => t.name)).toEqual(['company']);
+  });
+
   it('describes the company with the templates and no email addresses', async () => {
     const { app, db, companyId, job } = await company();
     await job('running');
