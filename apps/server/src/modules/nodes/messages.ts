@@ -25,7 +25,7 @@ const ON_NODE = or(eq(jobs.status, 'running'), and(eq(jobs.status, 'queued'), eq
 
 /* Jobs of these subscriptions that a node had become failed with the reason, except the ones the node still runs.
    A failed turn goes into its conversation and the agent's next turn goes out. */
-export async function failOpenJobs(ctx: Ctx, scope: SQL, error: string, stillRunning: string[] = []): Promise<void> {
+export async function failOpenJobs(ctx: Ctx, scope: SQL, error: string, stillRunning: string[] = []): Promise<string[]> {
   const conditions = [scope, ON_NODE];
   if (stillRunning.length) conditions.push(notInArray(jobs.id, stillRunning));
   const failed = await ctx.db
@@ -35,6 +35,7 @@ export async function failOpenJobs(ctx: Ctx, scope: SQL, error: string, stillRun
     .returning({ id: jobs.id, companyId: jobs.companyId });
   for (const companyId of new Set(failed.map(j => j.companyId))) await publishWorking(ctx, companyId);
   for (const { id } of failed) await afterJob(ctx, id);
+  return failed.map(j => j.id);
 }
 
 export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage): Promise<void> {
@@ -56,6 +57,12 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       }
       await failOpenJobs(ctx, jobsOf(id, ctx), 'machine_restarted', msg.running);
       ctx.hub.greet(id);
+      /* Hornhoof ended these while the node was away, with a stop or a removed subscription; the node stops them now. */
+      if (msg.running.length) {
+        const open = await db.select({ id: jobs.id }).from(jobs).where(and(inArray(jobs.id, msg.running), inArray(jobs.status, OPEN_JOBS), jobsOf(id, ctx)));
+        const keep = new Set(open.map(j => j.id));
+        for (const jobId of msg.running) if (!keep.has(jobId)) ctx.hub.send(id, { type: 'job.cancel', jobId });
+      }
       await pumpWaiting(ctx);
       return;
     }
@@ -101,6 +108,10 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
         .where(and(eq(jobs.id, msg.jobId), inArray(jobs.status, OPEN_JOBS), jobsOf(id, ctx)))
         .returning({ companyId: jobs.companyId });
       for (const { companyId } of finished) await publishWorking(ctx, companyId);
+      /* The login ran out: the subscription waits for one before the next turn could go out and fail too. */
+      if (finished.length && msg.error === 'not_logged_in' && id.kind === 'node') {
+        await db.update(subscriptions).set({ status: 'needs_login' }).where(eq(subscriptions.id, id.subscriptionId));
+      }
       if (finished.length) await afterJob(ctx, msg.jobId);
       return;
     }

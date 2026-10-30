@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
-import { agents, companies, departments, people } from '../src/db/schema.js';
+import { agents, companies, departments, people, subscriptions } from '../src/db/schema.js';
 import { FIRST_TURN, ORCHESTRATOR_INSTRUCTIONS } from '../src/modules/conversation/prompt.js';
 import { as, connectNode, invitePerson, listen, openStream, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
@@ -148,6 +148,47 @@ describe('the orchestrator\'s conversation', () => {
     const again = await app.inject({ method: 'POST', url: `/api/jobs/${run.jobId}/cancel`, ...as(ceo) });
     expect(again.statusCode).toBe(409);
     expect(again.json().error.reason).toBe('nothing_running');
+  });
+
+  it('stops a turn that was stopped while the machine was away, once it is back', async () => {
+    const { app, url, ceo, builtin } = await live();
+    await start(app, ceo);
+    const run = await nextRun(builtin);
+    builtin.close();
+    await builtin.closed;
+    await until(async () => (await app.inject({ method: 'POST', url: `/api/jobs/${run.jobId}/cancel`, ...as(ceo) })).statusCode === 202);
+    await until(async () => (await events(app, ceo)).some((e: { kind: string }) => e.kind === 'stopped'));
+    const back = await connectNode(url, NODE_KEY);
+    back.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [run.jobId] });
+    expect(await back.next()).toEqual({ type: 'job.cancel', jobId: run.jobId });
+  });
+
+  it('stops the jobs of a removed company key on the built-in node', async () => {
+    const { app, db, ceo, builtin } = await live();
+    await start(app, ceo);
+    const run = await nextRun(builtin);
+    const [key] = await db.select().from(subscriptions);
+    expect((await app.inject({ method: 'DELETE', url: `/api/subscriptions/${key!.id}`, ...as(ceo) })).statusCode).toBe(204);
+    expect(await builtin.next()).toEqual({ type: 'job.cancel', jobId: run.jobId });
+  });
+
+  it('keeps the next message waiting when the machine says its login ran out', async () => {
+    const { app, url, ceo } = await live();
+    const connected = await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude'] }, ...as(ceo) });
+    const code = connected.json().command.split('--join ')[1];
+    const joined = await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' } });
+    const node = joined.json().nodes[0] as { subscriptionId: string; key: string };
+    const mac = await connectNode(url, node.key);
+    mac.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [] });
+    expect((await app.inject({ method: 'POST', url: `/api/subscriptions/${node.subscriptionId}/orchestrator`, ...as(ceo) })).statusCode).toBe(200);
+    await until(async () => (await state(app, ceo)).ready);
+    await say(app, ceo, 'First');
+    const first = await nextRun(mac);
+    await say(app, ceo, 'Second');
+    mac.send({ type: 'job.done', jobId: first.jobId, ok: false, sessionId: null, result: '', tail: 'signed out', error: 'not_logged_in' });
+    await until(async () => (await state(app, ceo)).reason === 'needs_login');
+    expect(await quiet(mac)).toBe(0);
+    expect((await state(app, ceo)).queued).toBe(1);
   });
 
   it('waits for a machine that connected until it said hello', async () => {

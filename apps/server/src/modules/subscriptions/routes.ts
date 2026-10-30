@@ -165,9 +165,10 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
       await tx.update(agents).set({ subscriptionId: null }).where(eq(agents.subscriptionId, sub.id));
     });
     /* The node stops its jobs when it hears remove, and may never report them, so they end here. */
-    await failOpenJobs(ctx, eq(jobs.subscriptionId, sub.id), 'subscription_removed');
-    /* An offline node hears it at its next hello. */
+    const ended = await failOpenJobs(ctx, eq(jobs.subscriptionId, sub.id), 'subscription_removed');
+    /* An offline node hears it at its next hello. The built-in node keeps running for other keys, so it stops just this key's jobs. */
     if (sub.kind === 'personal') hub.send(identityOf(sub), { type: 'remove' });
+    else for (const jobId of ended) hub.send(identityOf(sub), { type: 'job.cancel', jobId });
     return reply.code(204).send();
   });
 }
