@@ -3,8 +3,9 @@ services:
     build: .
     image: ghcr.io/invariant0x/hornhoof:latest
     restart: unless-stopped
+    # install.sh picks a free port for each company's server on one computer and keeps it in .env.
     ports:
-      - "8080:8080"
+      - "${HORNHOOF_PORT:-8080}:8080"
     environment:
       DATABASE_URL: postgres://hornhoof:${POSTGRES_PASSWORD:-hornhoof}@db:5432/hornhoof
       HORNHOOF_SECRET: ${HORNHOOF_SECRET:?Set HORNHOOF_SECRET in .env}

@@ -24,5 +24,10 @@ case "$url" in
     reply 'cp "$STUB_SRC/docker" "$STUB_BIN/docker"\necho "get-docker" >> "$STUB_LOG"\n' ;;
   *compose.yaml)
     reply 'services: {}\n' ;;
+  # A port probe: STUB_PORTS_TAKEN lists the ports something answers on.
+  http://localhost:*/)
+    port=${url#http://localhost:}; port=${port%/}
+    case " ${STUB_PORTS_TAKEN:-} " in *" $port "*) exit 0 ;; esac
+    echo "curl: (7) Failed to connect" >&2; exit 7 ;;
   *) echo "curl stub: unknown url $url" >&2; exit 22 ;;
 esac

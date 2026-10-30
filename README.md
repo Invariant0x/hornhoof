@@ -38,6 +38,16 @@ curl -fsSL https://raw.githubusercontent.com/Invariant0x/hornhoof/main/scripts/i
 
 It installs Docker if it is missing (Colima through Homebrew on macOS), puts `compose.yaml` and a `.env` with fresh secrets into `~/hornhoof`, asks for the address people will open Hornhoof at, then downloads the images and starts them. Run it again to update; it keeps the existing `.env`.
 
+### Several companies on one computer
+
+Each company is its own Hornhoof. To run a second one next to the first, give it a name:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Invariant0x/hornhoof/main/scripts/install.sh | bash -s -- server --name acme
+```
+
+It goes into `~/hornhoof-acme` as its own compose project, on the first free port from 8080, which it keeps in `.env` as `HORNHOOF_PORT`. Run the same command again to update that company. Machines can carry nodes for several companies too: each node remembers the address of its Hornhoof, and an update or `--uninstall` from one Hornhoof touches only that company's nodes.
+
 ## Connecting machines
 
 Agents run on machines that hold the subscriptions. Company API keys run on the built-in node that comes with the server. A personal plan runs on its owner's machine, and only on Linux or macOS.

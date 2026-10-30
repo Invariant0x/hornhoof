@@ -289,6 +289,64 @@ describe('install.sh', () => {
     expect(r.calls).toContain('docker volume rm hornhoof-claude-1c07dac4');
   });
 
+  it('labels each node with the server it works for', () => {
+    const r = install();
+    expect(r.code).toBe(0);
+    for (const run of r.calls.filter(c => c.startsWith('docker run -d'))) expect(run).toContain(`--label hornhoof.server=${SERVER}`);
+  });
+
+  it('removes only this server\'s nodes on --uninstall when another company has nodes here too', () => {
+    const r = install({ args: ['--uninstall'], tty: 'y\nn\n', env: { STUB_CONTAINERS: `hornhoof-claude-1c07dac4=${SERVER} hornhoof-codex-9f1e2d3c=https://other.example.test` } });
+    expect(r.code).toBe(0);
+    expect(r.calls).toContain('docker rm -f hornhoof-claude-1c07dac4');
+    expect(r.calls.some(c => c.includes('hornhoof-codex-9f1e2d3c') && c.startsWith('docker rm'))).toBe(false);
+    expect(r.out).not.toContain('hornhoof-codex-9f1e2d3c');
+  });
+
+  it('updates only this server\'s nodes, and the ones from before servers were named', () => {
+    const r = install({ args: [], env: { STUB_CONTAINERS: `hornhoof-claude-1c07dac4=${SERVER} hornhoof-codex-9f1e2d3c=https://other.example.test hornhoof-kimi-00000000` } });
+    expect(r.code).toBe(0);
+    expect(r.calls.some(c => c.startsWith('docker run -d --name hornhoof-claude-1c07dac4'))).toBe(true);
+    expect(r.calls.some(c => c.startsWith('docker run -d --name hornhoof-kimi-00000000') && c.includes(`--label hornhoof.server=${SERVER}`))).toBe(true);
+    expect(r.calls.some(c => c.includes('hornhoof-codex-9f1e2d3c') && /docker (rm|run)/.test(c))).toBe(false);
+  });
+
+  it('installs a named server in its own folder, compose project and free port', () => {
+    const r = install({ args: ['server', '--name', 'acme'], tty: '\n', env: { STUB_PORTS_TAKEN: '8080' } });
+    expect(r.code).toBe(0);
+    const env = readFileSync(join(r.dir, 'home', 'hornhoof-acme', '.env'), 'utf8');
+    expect(env).toContain('HORNHOOF_PORT=8081');
+    expect(env).toContain('PUBLIC_URL=http://localhost:8081');
+    expect(existsSync(join(r.dir, 'home', 'hornhoof', '.env'))).toBe(false);
+    expect(r.calls).toContain('docker compose -p hornhoof-acme pull');
+    expect(r.calls).toContain('docker compose -p hornhoof-acme up -d --no-build');
+    expect(r.out).toContain('Open http://localhost:8081 to set it up.');
+  });
+
+  it('keeps the folder and port of a named server on the next run', () => {
+    const first = install({ args: ['server', '--name', 'acme'], tty: '\n', env: { STUB_PORTS_TAKEN: '8080' } });
+    const home = join(first.dir, 'home');
+    const again = install({ args: ['server', '--name', 'acme'], env: { HOME: home, HORNHOOF_DIR: join(home, 'hornhoof'), STUB_PORTS_TAKEN: '8080 8081' } });
+    expect(again.code).toBe(0);
+    expect(again.out).toContain('Keeping the settings');
+    expect(readFileSync(join(home, 'hornhoof-acme', '.env'), 'utf8')).toContain('HORNHOOF_PORT=8081');
+    expect(again.out).toContain('Open http://localhost:8081 to set it up.');
+  });
+
+  it('leaves the port of another Hornhoof on this computer to it, even while it is stopped', () => {
+    const first = install({ args: ['server'], tty: '\n' });
+    const home = join(first.dir, 'home');
+    const named = install({ args: ['server', '--name', 'beta'], tty: '\n', env: { HOME: home, HORNHOOF_DIR: join(home, 'hornhoof') } });
+    expect(named.code).toBe(0);
+    expect(readFileSync(join(home, 'hornhoof-beta', '.env'), 'utf8')).toContain('HORNHOOF_PORT=8081');
+  });
+
+  it('refuses a server name it cannot use as a folder', () => {
+    const r = install({ args: ['server', '--name', 'Acme Inc'] });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('--name takes lowercase letters, digits and dashes');
+  });
+
   it('keeps everything on --uninstall without a y', () => {
     const r = install({ args: ['--uninstall'], tty: 'n\n', env: { STUB_CONTAINERS: 'hornhoof-claude-1c07dac4' } });
     expect(r.code).toBe(0);

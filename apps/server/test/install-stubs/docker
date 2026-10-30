@@ -13,7 +13,8 @@ case "$1" in
   info) echo "Server Version: 28.0.0" ;;
   pull) [ "${STUB_PULL:-ok}" = fail ] && { echo "pull access denied" >&2; exit 1; } ;;
   image) [ "${STUB_IMAGE_LOCAL:-0}" = 1 ] || exit 1 ;;
-  ps) for n in ${STUB_CONTAINERS:-}; do echo "$n id-of-$n"; done ;;
+  # STUB_CONTAINERS words are "name" or "name=server", the server label of a node.
+  ps) for n in ${STUB_CONTAINERS:-}; do name=${n%%=*}; server=''; case "$n" in *=*) server=${n#*=} ;; esac; echo "$name id-of-$name $server"; done ;;
   run)
     WORD=set-key; if has "$@"; then IFS= read -r line; printf 'stdin %s\n' "$line" >> "$STUB_LOG"; fi
     WORD=-d; if has "$@"; then [ "${STUB_RUN:-ok}" = fail ] && { echo "docker: Error response from daemon: port is already allocated" >&2; exit 1; }; echo "0123456789ab"; fi ;;

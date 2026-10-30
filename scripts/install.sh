@@ -4,7 +4,11 @@
 #   curl -fsSL <server>/install.sh | bash -s -- --join <code>   start this machine's nodes for the subscriptions in the code
 #   install.sh                                                   update the nodes already on this machine
 #   install.sh server                                            install or update the Hornhoof server
+#   install.sh server --name <name>                              another company's server on this computer, in ~/hornhoof-<name>
 #   install.sh --uninstall                                       remove this machine's nodes
+#
+# Several companies can share a computer: each node carries the address of the server it works for, and an
+# update or an uninstall touches only that server's nodes.
 #
 # The server fills in its own address when it serves this file. The script arrives through a pipe, so every
 # question is read from the terminal. It runs on the bash that ships with macOS (3.2).
@@ -15,12 +19,15 @@ TTY="${HORNHOOF_TTY:-/dev/tty}"
 STATE_DIR="${HORNHOOF_HOME:-$HOME/.hornhoof}"
 IMAGE="${HORNHOOF_NODE_IMAGE:-ghcr.io/invariant0x/hornhoof-node:latest}"
 COMPOSE_URL="${HORNHOOF_COMPOSE_URL:-https://raw.githubusercontent.com/Invariant0x/hornhoof/main/compose.yaml}"
-SERVER_DIR="${HORNHOOF_DIR:-$HOME/hornhoof}"
+BASE_DIR="${HORNHOOF_DIR:-$HOME/hornhoof}"
+SERVER_DIR=$BASE_DIR
+NAME=''
 
 LABEL=hornhoof.subscription
+SERVER_LABEL=hornhoof.server
 NODE_MAIN=/app/apps/node/dist/main.js
-LOCAL_URL=http://localhost:8080
-USAGE='Usage: install.sh [--join <code>] | server | --uninstall'
+FIRST_PORT=8080
+USAGE='Usage: install.sh [--join <code>] | server [--name <name>] | --uninstall'
 
 OS=''
 ARCH=''
@@ -246,7 +253,7 @@ start_node() {
   say "Starting $name."
   "${DOCKER[@]}" rm -f "$name" > /dev/null 2>&1 || true
   # shellcheck disable=SC2086 # the two --add-host words appear only for a server on localhost
-  "${DOCKER[@]}" run -d --name "$name" --label "$LABEL=$id" --restart unless-stopped --cap-drop ALL \
+  "${DOCKER[@]}" run -d --name "$name" --label "$LABEL=$id" --label "$SERVER_LABEL=$SERVER" --restart unless-stopped --cap-drop ALL \
     --security-opt no-new-privileges -v "$name:/data" ${LOCAL_SERVER:+--add-host} ${LOCAL_SERVER:+host.docker.internal:host-gateway} \
     "$IMAGE" > /dev/null || fail "Could not start $name (docker logs $name shows why). $RETRY"
   STARTED="$STARTED $name"
@@ -254,10 +261,17 @@ start_node() {
 
 node_status() { "${DOCKER[@]}" exec "$1" node "$NODE_MAIN" status 2> /dev/null || echo offline; }
 
-# Existing nodes as "name:id" words.
+# This server's nodes on this machine as "name:id" words. A node from before nodes carried their server counts as
+# this server's. A script that does not know its server (downloaded on its own) sees every node.
 existing_nodes() {
-  "${DOCKER[@]}" ps -a --filter "label=$LABEL" --format '{{.Names}} {{.Label "hornhoof.subscription"}}' 2> /dev/null |
-    while read -r name id; do [ -n "$name" ] && printf '%s:%s ' "$name" "$id"; done
+  local known=1
+  case "$SERVER" in __HORNHOOF_* | '') known='' ;; esac
+  "${DOCKER[@]}" ps -a --filter "label=$LABEL" --format '{{.Names}} {{.Label "hornhoof.subscription"}} {{.Label "hornhoof.server"}}' 2> /dev/null |
+    while read -r name id server; do
+      [ -n "$name" ] || continue
+      if [ -n "$known" ] && [ -n "$server" ] && [ "$server" != "$SERVER" ]; then continue; fi
+      printf '%s:%s ' "$name" "$id"
+    done
 }
 
 open_link() {
@@ -410,8 +424,35 @@ uninstall_mode() {
 
 new_secret() { head -c 32 /dev/urandom | base64 | tr -d '\n'; }
 
+# The port a server's .env keeps; one from before servers kept a port has the first one.
+port_of() {
+  local port
+  port=$(grep '^HORNHOOF_PORT=' "$1" 2> /dev/null | tail -1 | cut -d= -f2- || true)
+  printf '%s\n' "${port:-$FIRST_PORT}"
+}
+
+# Something listens on the port; curl ends with 7 only when nothing does.
+port_answers() {
+  local rc=0
+  curl -s -o /dev/null --max-time 2 "http://localhost:$1/" > /dev/null 2>&1 || rc=$?
+  [ "$rc" -ne 7 ]
+}
+
+# The first port from 8080 that no other Hornhoof on this computer keeps, running or not, and nothing listens on.
+free_port() {
+  local port=$FIRST_PORT env claimed=' '
+  for env in "$BASE_DIR/.env" "$BASE_DIR"-*/.env; do
+    if [ -f "$env" ] && [ "$env" != "$SERVER_DIR/.env" ]; then claimed="$claimed$(port_of "$env") "; fi
+  done
+  while case "$claimed" in *" $port "*) true ;; *) false ;; esac || port_answers "$port"; do
+    port=$((port + 1))
+    [ "$port" -lt $((FIRST_PORT + 100)) ] || fail "No free port from $FIRST_PORT to $((FIRST_PORT + 99)) for Hornhoof. Stop what uses them, then run this command again."
+  done
+  printf '%s' "$port"
+}
+
 server_mode() {
-  local env_file url public i=0
+  local env_file url public port local_url i=0
   local -a compose
   detect_system
   ensure_docker
@@ -426,6 +467,8 @@ server_mode() {
   else
     fail "Docker Compose is missing. Install the Docker Compose plugin, then run this command again."
   fi
+  # A named server is its own compose project, so its containers, network and volumes never meet another's.
+  if [ -n "$NAME" ]; then compose+=(-p "hornhoof-$NAME"); fi
 
   mkdir -p "$SERVER_DIR"
   say "Getting compose.yaml into $SERVER_DIR."
@@ -439,26 +482,28 @@ server_mode() {
       say "Added NODE_KEY to $env_file."
     fi
   else
-    url=$(ask "Address people will open Hornhoof at (Enter for $LOCAL_URL): " "$LOCAL_URL")
+    port=$(free_port)
+    url=$(ask "Address people will open Hornhoof at (Enter for http://localhost:$port): " "http://localhost:$port")
     case "$url" in
       http://* | https://*) ;;
       *) fail "The address must start with http:// or https://. Run this command again." ;;
     esac
     (
       umask 077
-      printf 'HORNHOOF_SECRET=%s\nNODE_KEY=%s\nPUBLIC_URL=%s\n' "$(new_secret)" "$(new_secret)" "${url%/}" > "$env_file"
+      printf 'HORNHOOF_SECRET=%s\nNODE_KEY=%s\nPUBLIC_URL=%s\nHORNHOOF_PORT=%s\n' "$(new_secret)" "$(new_secret)" "${url%/}" "$port" > "$env_file"
     )
     say "Wrote fresh secrets to $env_file. Keep it safe: HORNHOOF_SECRET is needed to read the stored API keys."
   fi
+  local_url="http://localhost:$(port_of "$env_file")"
   public=$(grep '^PUBLIC_URL=' "$env_file" | tail -1 | cut -d= -f2- || true)
-  [ -n "$public" ] || public=$LOCAL_URL
+  [ -n "$public" ] || public=$local_url
 
   say "Downloading the Hornhoof images."
   (cd "$SERVER_DIR" && "${compose[@]}" pull) || fail "Could not download the images. Check the internet connection, then run this command again."
   say "Starting Hornhoof."
   (cd "$SERVER_DIR" && "${compose[@]}" up -d --no-build) || fail "Hornhoof did not start. Run docker compose logs in $SERVER_DIR to see why."
   say "Waiting for Hornhoof to answer."
-  until curl -fsS --max-time 5 "$LOCAL_URL/api/health" > /dev/null 2>&1; do
+  until curl -fsS --max-time 5 "$local_url/api/health" > /dev/null 2>&1; do
     i=$((i + 1))
     [ "$i" -lt 60 ] || fail "Hornhoof did not answer within 2 minutes. Run docker compose logs app in $SERVER_DIR to see why."
     sleep 2
@@ -482,6 +527,11 @@ while [ $# -gt 0 ]; do
       SERVER=${2%/}
       shift
       ;;
+    --name)
+      [ $# -ge 2 ] || fail "--name needs a name for this company's server. $USAGE"
+      NAME=$2
+      shift
+      ;;
     node) MODE=node ;;
     server) MODE=server ;;
     --uninstall) MODE=uninstall ;;
@@ -493,6 +543,15 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
+
+if [ -n "$NAME" ]; then
+  [ "$MODE" = server ] || fail "--name is for install.sh server. $USAGE"
+  case "$NAME" in
+    -* | *[!a-z0-9-]*) fail "--name takes lowercase letters, digits and dashes, such as acme." ;;
+  esac
+  [ "${#NAME}" -le 32 ] || fail "--name takes up to 32 characters."
+  SERVER_DIR="$BASE_DIR-$NAME"
+fi
 
 case "$MODE" in
   node) node_mode "$CODE" ;;
