@@ -9,7 +9,7 @@ import { AgentIcon, PersonIcon } from '../ui/icons';
 
 type Scope = { kind: 'company' } | { kind: 'department' | 'team'; id: string };
 type ScopeOption = { value: string; label: string; scope: Scope };
-type Panel = { kind: 'invite' } | { kind: 'link'; name: string; url: string } | { kind: 'edit'; person: PersonView } | null;
+type Panel = { kind: 'invite' } | { kind: 'link'; name: string; url: string } | { kind: 'edit'; person: PersonView; titleOnly: boolean } | null;
 
 function scopeOptions(t: Messages, org: Org | null): ScopeOption[] {
   const options: ScopeOption[] = [{ value: 'company', label: t.people.wholeCompany, scope: { kind: 'company' } }];
@@ -100,7 +100,8 @@ function InviteForm({ options, onSent, onClose }: { options: ScopeOption[]; onSe
   );
 }
 
-function EditForm({ person, options, onSaved, onClose }: { person: PersonView; options: ScopeOption[]; onSaved: (p: PersonView) => void; onClose: () => void }) {
+/* Your own row and the owner's take a new title only: scope is not theirs to change here. */
+function EditForm({ person, options, titleOnly, onSaved, onClose }: { person: PersonView; options: ScopeOption[]; titleOnly: boolean; onSaved: (p: PersonView) => void; onClose: () => void }) {
   const t = useT();
   const [title, setTitle] = useState(person.title);
   const [scope, setScope] = useState(scopeValue(person));
@@ -112,10 +113,10 @@ function EditForm({ person, options, onSaved, onClose }: { person: PersonView; o
     setBusy(true);
     setFailure('');
     try {
-      const res = await api.patch<{ person: PersonView }>(`/api/people/${person.id}`, {
-        title: title.trim(),
-        scope: options.find(o => o.value === scope)!.scope,
-      });
+      const res = await api.patch<{ person: PersonView }>(
+        `/api/people/${person.id}`,
+        titleOnly ? { title: title.trim() } : { title: title.trim(), scope: options.find(o => o.value === scope)!.scope },
+      );
       onSaved(res.person);
     } catch (err) {
       setFailure(errorText(t, err));
@@ -128,7 +129,7 @@ function EditForm({ person, options, onSaved, onClose }: { person: PersonView; o
       <h2>{t.people.editHeading(person.name)}</h2>
       <form onSubmit={submit} className="panel-form">
         <Field label={t.common.title}>{p => <input {...p} value={title} onChange={e => setTitle(e.target.value)} maxLength={80} autoFocus />}</Field>
-        <ScopeSelect options={options} value={scope} onChange={setScope} />
+        {!titleOnly && <ScopeSelect options={options} value={scope} onChange={setScope} />}
         {failure && <p className="alert" role="alert">{failure}</p>}
         <div className="actions">
           <button className="btn ghost" type="button" onClick={onClose}>{t.common.cancel}</button>
@@ -211,6 +212,7 @@ export function People({ me }: { me: Me }) {
           key={panel.person.id}
           person={panel.person}
           options={options}
+          titleOnly={panel.titleOnly}
           onSaved={person => {
             replace(person);
             setPanel(null);
@@ -233,7 +235,8 @@ export function People({ me }: { me: Me }) {
           </thead>
           <tbody>
             {people.map(p => {
-              const editable = canManage && !p.isOwner && p.id !== me.person.id;
+              const manageable = canManage && !p.isOwner && p.id !== me.person.id;
+              const titleOnly = !manageable && (p.id === me.person.id || (canManage && p.isOwner));
               return (
                 <tr key={p.id} className={p.status}>
                   <td>
@@ -243,9 +246,11 @@ export function People({ me }: { me: Me }) {
                   <td>{scopeName(t, p)}</td>
                   <td><span className={`status ${p.status}`}>{t.people.status[p.status]}</span></td>
                   <td className="row-actions">
-                    {editable && (
+                    {(manageable || titleOnly) && (
+                      <button className="linkbtn" type="button" aria-label={t.people.editLabel(p.name)} onClick={() => setPanel({ kind: 'edit', person: p, titleOnly })}>{t.people.edit}</button>
+                    )}
+                    {manageable && (
                       <>
-                        <button className="linkbtn" type="button" aria-label={t.people.editLabel(p.name)} onClick={() => setPanel({ kind: 'edit', person: p })}>{t.people.edit}</button>
                         <button className="linkbtn" type="button" aria-label={t.people.newLinkLabel(p.name)} onClick={() => newLink(p)}>{t.people.newLink}</button>
                         {p.status === 'disabled' ? (
                           <button className="linkbtn" type="button" aria-label={t.people.enableLabel(p.name)} onClick={() => setStatus(p, 'active')}>{t.people.enable}</button>

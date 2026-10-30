@@ -162,9 +162,10 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.patch('/api/people/:id', async req => {
     const me = await requirePerson(req, db);
-    requireCompanyScope(me);
     const { id } = IdParams.parse(req.params);
     const body = PatchBody.parse(req.body);
+    /* Anyone may rename their own title; everything else needs the whole company. */
+    if (id !== me.id || body.scope !== undefined || body.status !== undefined) requireCompanyScope(me);
 
     const [target] = await db.select({ ...personColumns, passwordHash: people.passwordHash }).from(people).where(eq(people.id, id));
     if (!target) throw new ApiError(404, 'not_found', 'This person does not exist.', 'person_unknown');

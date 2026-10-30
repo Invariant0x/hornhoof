@@ -165,6 +165,23 @@ describe('PATCH /api/people/:id', () => {
     expect(unknown.statusCode).toBe(404);
   });
 
+  it('lets anyone change their own title, and only that', async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    const { departmentId } = await addTeam(db);
+    const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
+    const own = await app.inject({ method: 'PATCH', url: `/api/people/${owner!.id}`, payload: { title: 'CEO' }, ...as(ceo) });
+    expect(own.json().person.title).toBe('CEO');
+    const olga = await inviteAndAccept(app, ceo, { name: 'Olga', email: 'olga@acme.com', title: '', scope: { kind: 'department', id: departmentId } });
+    const mine = await app.inject({ method: 'PATCH', url: `/api/people/${olga.id}`, payload: { title: 'Head of marketing' }, ...as(olga.token) });
+    expect(mine.statusCode).toBe(200);
+    expect(mine.json().person.title).toBe('Head of marketing');
+    const wider = await app.inject({ method: 'PATCH', url: `/api/people/${olga.id}`, payload: { title: 'x', scope: { kind: 'company' } }, ...as(olga.token) });
+    expect(wider.statusCode).toBe(403);
+    const others = await app.inject({ method: 'PATCH', url: `/api/people/${owner!.id}`, payload: { title: 'x' }, ...as(olga.token) });
+    expect(others.statusCode).toBe(403);
+  });
+
   it('stops a disabled invitee from accepting', async () => {
     const { app } = await testApp();
     const ceo = await setUpCompany(app);

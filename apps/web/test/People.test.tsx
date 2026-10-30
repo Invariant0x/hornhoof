@@ -53,7 +53,7 @@ describe('People', () => {
     render(<People me={maria} />);
     await screen.findByRole('cell', { name: 'Sasha' });
     for (const name of ['Ivan', 'Maria']) {
-      expect(within(rowOf(name)).queryByRole('button')).not.toBeInTheDocument();
+      expect(within(rowOf(name)).getAllByRole('button').map(b => b.textContent)).toEqual(['Edit']);
     }
     await user.click(within(rowOf('Sasha')).getByRole('button', { name: 'Disable Sasha' }));
     expect(calls.find(c => c.method === 'PATCH')).toEqual({ method: 'PATCH', path: '/api/people/p3', body: { status: 'disabled' } });
@@ -66,6 +66,8 @@ describe('People', () => {
     await screen.findByRole('cell', { name: 'Sasha' });
     expect(screen.queryByRole('button', { name: 'Invite person' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Disable/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Edit Sasha' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Edit Ivan' })).not.toBeInTheDocument();
   });
 });
 
@@ -84,6 +86,24 @@ describe('People row actions', () => {
     expect(await screen.findByText(link)).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Invite link for Maria' })).toBeInTheDocument();
     expect(within(rowOf('Maria')).getByText('Invited')).toBeInTheDocument();
+  });
+
+  it('lets you change your own title, and only the title', async () => {
+    const calls = mockApi({
+      'GET /api/people': [200, { people: PEOPLE }],
+      'GET /api/org': [200, ORG_WITH_TEAMS],
+      'PATCH /api/people/p1': [200, { person: { ...PEOPLE[0], title: 'Founder' } }],
+    });
+    const user = userEvent.setup();
+    render(<People me={ME} />);
+    await user.click(await screen.findByRole('button', { name: 'Edit Ivan' }));
+    expect(screen.queryByLabelText('Scope')).not.toBeInTheDocument();
+    const title = screen.getByLabelText('Title');
+    await user.clear(title);
+    await user.type(title, 'Founder');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect(calls.find(c => c.method === 'PATCH')).toEqual({ method: 'PATCH', path: '/api/people/p1', body: { title: 'Founder' } });
+    expect(await within(rowOf('Ivan')).findByRole('cell', { name: 'Founder' })).toBeInTheDocument();
   });
 
   it('edits title and scope', async () => {
