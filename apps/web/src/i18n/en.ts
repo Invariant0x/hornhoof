@@ -205,6 +205,7 @@ export const en = {
   notebook: {
     title: 'Notebook',
     intro: 'What the orchestrator remembers between conversations: decisions, rules and agreements. He reads it before every answer and writes to it himself.',
+    departmentIntro: 'What the head of this department remembers between conversations: rules and agreements for the department. It reads the notebook again after its conversation is compacted and writes to it itself.',
     empty: 'The notebook is empty so far.',
     newNote: 'New note',
     placeholder: 'One fact, like "Every release waits for a yes from the CEO"',

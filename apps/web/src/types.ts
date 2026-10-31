@@ -200,7 +200,7 @@ export type StreamMessage =
   | { type: 'agent_event'; agentId: string; event: EventView }
   | { type: 'working'; working: number }
   | { type: 'org' }
-  | { type: 'notebook' }
+  | { type: 'notebook'; spot: { departmentId: string | null } }
   | { type: 'pulse'; from: Endpoint; to: Endpoint }
   | { type: 'task'; id: string }
   | { type: 'requests' }
@@ -307,5 +307,5 @@ export type UpdatesView = {
   updater: { present: boolean; status: UpdaterStatus | null; waiting: { version: string } | null };
 };
 
-/* A note of the company notebook and who wrote it last. */
-export type NoteView = { number: number; text: string; by: { kind: 'orchestrator' } | { kind: 'person'; id: string; name: string } | null; updatedAt: string };
+/* A note of the company notebook or a department's, and who wrote it last: a person, the orchestrator or the head. */
+export type NoteView = { number: number; text: string; by: { kind: 'orchestrator' } | { kind: 'person' | 'agent'; id: string; name: string } | null; updatedAt: string };

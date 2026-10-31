@@ -4,9 +4,9 @@ import { errorText, useT } from '../i18n';
 import { useStream } from '../live';
 import type { NoteView } from '../types';
 
-/* The company notebook in the orchestrator's window: what he keeps across conversations, which people who see the
-   whole company read and change too. It is read again whenever it changes. */
-export function Notebook() {
+/* A notebook in an agent's window: the company's in the orchestrator's, which people who see the whole company read and
+   change too, or a department's in its head's, for people who run that department. It is read again whenever it changes. */
+export function Notebook({ departmentId = null }: { departmentId?: string | null }) {
   const t = useT();
   const [notes, setNotes] = useState<NoteView[] | null>(null);
   const [text, setText] = useState('');
@@ -14,13 +14,14 @@ export function Notebook() {
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<unknown>(null);
 
+  const base = departmentId ? `/api/departments/${departmentId}/notebook` : '/api/notebook';
   const load = useCallback(async () => {
-    const res = await api.get<{ notes: NoteView[] }>('/api/notebook').catch(() => null);
+    const res = await api.get<{ notes: NoteView[] }>(base).catch(() => null);
     if (res) setNotes(res.notes);
-  }, []);
+  }, [base]);
   useEffect(() => void load(), [load]);
   useStream(m => {
-    if (m.type === 'notebook' || m.type === 'reconnected') void load();
+    if ((m.type === 'notebook' && m.spot.departmentId === departmentId) || m.type === 'reconnected') void load();
   });
 
   async function run(action: () => Promise<unknown>, after: () => void) {
@@ -40,20 +41,20 @@ export function Notebook() {
   function add(e: FormEvent) {
     e.preventDefault();
     if (!text.trim()) return;
-    void run(() => api.post('/api/notebook', { text: text.trim() }), () => setText(''));
+    void run(() => api.post(base, { text: text.trim() }), () => setText(''));
   }
 
   function save(e: FormEvent) {
     e.preventDefault();
     if (!editing?.text.trim()) return;
-    void run(() => api.patch(`/api/notebook/${editing.number}`, { text: editing.text.trim() }), () => setEditing(null));
+    void run(() => api.patch(`${base}/${editing.number}`, { text: editing.text.trim() }), () => setEditing(null));
   }
 
-  const who = (n: NoteView) => (n.by?.kind === 'orchestrator' ? t.window.orchestrator : n.by?.kind === 'person' ? n.by.name : '');
+  const who = (n: NoteView) => (n.by?.kind === 'orchestrator' ? t.window.orchestrator : n.by ? n.by.name : '');
 
   return (
     <section className="notebook" aria-label={t.notebook.title}>
-      <p className="muted">{t.notebook.intro}</p>
+      <p className="muted">{departmentId ? t.notebook.departmentIntro : t.notebook.intro}</p>
       {notes && !notes.length && <p className="muted">{t.notebook.empty}</p>}
       {notes && notes.length > 0 && (
         <ul aria-label={t.notebook.title}>
@@ -77,7 +78,7 @@ export function Notebook() {
                   <button className="t-link" type="button" aria-label={t.notebook.changeNote(n.number)} onClick={() => setEditing({ number: n.number, text: n.text })}>
                     {t.notebook.change}
                   </button>
-                  <button className="t-link" type="button" aria-label={t.notebook.removeNote(n.number)} disabled={busy} onClick={() => void run(() => api.del(`/api/notebook/${n.number}`), () => {})}>
+                  <button className="t-link" type="button" aria-label={t.notebook.removeNote(n.number)} disabled={busy} onClick={() => void run(() => api.del(`${base}/${n.number}`), () => {})}>
                     {t.notebook.remove}
                   </button>
                 </>
