@@ -10,7 +10,7 @@ import { Bar, percent } from '../ui/Bar';
 import { usePanZoom, ZoomBar } from '../ui/canvas';
 import { Edge } from '../ui/Edge';
 import { LogoMark, PersonIcon } from '../ui/icons';
-import { Pulse, pulseSeconds, toD, useReducedMotion, type Point } from '../ui/wires';
+import { Pulse, pulseSeconds, SIGNALS, toD, useReducedMotion, type Point } from '../ui/wires';
 
 /* World coordinates, laid out like the prototype: people on top, the orchestrator in the middle, departments in two columns around him. */
 const W = 1200, H = 900, CX = W / 2, CY = 420, HUB = 120;
@@ -380,7 +380,16 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator, inside = false, 
           {spots.map((s, i) => s.path.length > 2 && <circle key={depts[i]!.id} className="via" cx={s.path[2]![0]} cy={s.path[2]![1]} r="4" />)}
           {channels.live.map(c => {
             const pts = pulsePath(c.from, c.to, org);
-            return pts && <path key={wayKey(c.from, c.to)} className={`tr live ${pulseTone(c.from, c.to)}`} d={toD(pts)} />;
+            const tone = pulseTone(c.from, c.to);
+            /* A live way lights up, and signals keep running along it until it goes quiet. */
+            return (
+              pts && (
+                <g key={wayKey(c.from, c.to)}>
+                  <path className={`tr live ${tone}`} d={toD(pts)} />
+                  {!still && SIGNALS.map(phase => <Pulse key={phase} pts={pts} speed={PULSE_SPEED} tone={tone} phase={phase} />)}
+                </g>
+              )
+            );
           })}
           {shots.map(s => (
             <Pulse key={s.key} pts={s.pts} speed={PULSE_SPEED} once tone={s.tone} />

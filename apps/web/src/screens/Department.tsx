@@ -13,7 +13,7 @@ import { AgentIcon, PersonIcon, ProviderMark } from '../ui/icons';
 import { NewTask } from '../ui/NewTask';
 import { RepoSettings } from '../ui/RepoSettings';
 import { byState, TaskRow } from '../ui/TaskRow';
-import { Pulse, pulseSeconds, toD, useReducedMotion, type Point } from '../ui/wires';
+import { Pulse, pulseSeconds, SIGNALS, toD, useReducedMotion, type Point } from '../ui/wires';
 import { arrowD, CH, CW, CY, FT, FW, HH, HW, PH, PW, schemaLayout, stepPaths, type Line } from './schema';
 
 type Props = {
@@ -400,7 +400,15 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
             {s.report && <Wire l={{ cls: 'pl', pts: s.report.pts, arrow: true }} />}
             {channels.live.map(c => {
               const pts = paths.way(c.from, c.to);
-              return pts && <path key={`${c.from}>${c.to}`} className={`tr live ${wayTone(c.from, c.to)}`} d={toD(pts)} />;
+              const tone = wayTone(c.from, c.to);
+              return (
+                pts && (
+                  <g key={`${c.from}>${c.to}`}>
+                    <path className={`tr live ${tone}`} d={toD(pts)} />
+                    {!still && SIGNALS.map(phase => <Pulse key={phase} pts={pts} speed={PULSE_SPEED} tone={tone} phase={phase} />)}
+                  </g>
+                )
+              );
             })}
             {shots.map(x => (
               <Pulse key={x.key} pts={x.pts} speed={PULSE_SPEED} once tone={x.tone} />

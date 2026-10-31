@@ -23,6 +23,9 @@ const STATES: [string, SubView | null, string, string][] = [
   ['ready and online', claude, "Ready, on Ivan's Claude subscription", 'На связи, подписка Claude, владелец Ivan'],
 ];
 
+
+/* The dots that run once, one per message; a live way's signals keep running and are not counted. */
+const shots = (container: HTMLElement, tone: 'c' | 'a') => [...container.querySelectorAll(`circle.pt.${tone}`)].filter(c => c.querySelector('animateMotion')?.getAttribute('repeatCount') === '1');
 describe('orchestratorStatus', () => {
   it.each(STATES)('says where the orchestrator runs: %s', (_, sub, english, russian) => {
     expect(orchestratorStatus(en, sub)).toBe(english);
@@ -228,9 +231,9 @@ describe('Map', () => {
     try {
       stream.send({ type: 'pulse', from: { kind: 'person', id: 'p1' }, to: { kind: 'orchestrator' } });
       stream.send({ type: 'pulse', from: { kind: 'orchestrator' }, to: { kind: 'department', id: 'd1' } });
-      expect(container.querySelectorAll('circle.pt.c')).toHaveLength(2);
+      expect(shots(container, 'c')).toHaveLength(2);
       act(() => vi.advanceTimersByTime(10_000));
-      expect(container.querySelectorAll('circle.pt.c')).toHaveLength(0);
+      expect(shots(container, 'c')).toHaveLength(0);
     } finally {
       vi.useRealTimers();
     }
@@ -274,7 +277,12 @@ describe('Map', () => {
     await screen.findByText('Sales');
     /* The ways come in a moment after the card. */
     await vi.waitFor(() => expect(container.querySelectorAll('path.live')).toHaveLength(1));
-    expect(container.querySelector('path.live')).toHaveClass('a');
+    const way = container.querySelector('path.live')!;
+    expect(way).toHaveClass('a');
+    /* Signals keep running along it while it is live. */
+    const signals = [...container.querySelectorAll('circle.pt animateMotion')].filter(m => m.getAttribute('path') === way.getAttribute('d'));
+    expect(signals.length).toBeGreaterThan(0);
+    expect(signals.every(m => m.getAttribute('repeatCount') === 'indefinite')).toBe(true);
   });
 
   it('runs work back to the hub in amber, and flashes a card where work leaves or lands', async () => {
@@ -286,20 +294,20 @@ describe('Map', () => {
     vi.useFakeTimers();
     try {
       stream.send({ type: 'pulse', from: { kind: 'orchestrator' }, to: { kind: 'department', id: 'd1' } });
-      expect(container.querySelectorAll('circle.pt.c')).toHaveLength(1);
+      expect(shots(container, 'c')).toHaveLength(1);
       expect(card('Sales')).not.toHaveClass('flash');
       /* The frame lights when the dot gets there, and not before. */
       for (let ms = 0; ms < 10_000 && !card('Sales').classList.contains('flash'); ms += 100) act(() => vi.advanceTimersByTime(100));
-      expect(container.querySelectorAll('circle.pt.c')).toHaveLength(0);
+      expect(shots(container, 'c')).toHaveLength(0);
       expect(card('Sales')).toHaveClass('flash');
       act(() => vi.advanceTimersByTime(2_000));
       expect(card('Sales')).not.toHaveClass('flash');
 
       stream.send({ type: 'pulse', from: { kind: 'department', id: 'd2' }, to: { kind: 'orchestrator' } });
-      expect(container.querySelectorAll('circle.pt.a')).toHaveLength(1);
+      expect(shots(container, 'a')).toHaveLength(1);
       expect(card('Design')).toHaveClass('flash');
       stream.send({ type: 'pulse', from: { kind: 'department', id: 'd2' }, to: { kind: 'person', id: 'p1' } });
-      expect(container.querySelectorAll('circle.pt.a')).toHaveLength(2);
+      expect(shots(container, 'a')).toHaveLength(2);
     } finally {
       vi.useRealTimers();
     }
@@ -336,7 +344,7 @@ describe('Map', () => {
     stream.send({ type: 'org' });
     stream.send({ type: 'pulse', from: { kind: 'orchestrator' }, to: { kind: 'department', id: 'd1' } });
     await screen.findByText('Sales');
-    await vi.waitFor(() => expect(container.querySelectorAll('circle.pt.c')).toHaveLength(1));
+    await vi.waitFor(() => expect(shots(container, 'c')).toHaveLength(1));
   });
 
   it('runs no pulse for a person who asks for less motion', async () => {
