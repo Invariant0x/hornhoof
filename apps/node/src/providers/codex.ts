@@ -54,7 +54,9 @@ export function codexRateLimits(result: unknown): Limits | null {
     return [{ name: WINDOW_NAMES[mins] ?? `${mins}_minutes`, utilization: Math.min(1, Math.max(0, used / 100)), resetsAt: reset }];
   });
   if (!windows.length) return null;
-  return { status: rate.rateLimitReachedType ? 'rejected' : 'allowed', windows };
+  /* Codex can also say the plan takes no ordinary work at all now, while no window is full. */
+  const blocked = rate.rateLimitReachedType || (isRecord(result) && result.ordinaryUsageAllowed === false);
+  return { status: blocked ? 'rejected' : 'allowed', windows };
 }
 
 /* Asks Codex's app server for the plan's limits over JSON-RPC. It keeps its own sign-in fresh, so no turn is needed. */

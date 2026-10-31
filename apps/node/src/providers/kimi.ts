@@ -47,22 +47,25 @@ export function kimiEvents(line: unknown): AgentEvent[] {
   return events;
 }
 
-/* The [models."<alias>"] tables in Kimi's config.toml, with their plain values. -m takes the alias. */
+/* The [models."<alias>"] tables in Kimi's config.toml, with their plain values. A model's own
+   [models."<alias>".overrides] win over what the plan wrote for it, as in Kimi. -m takes the alias. */
 function modelTables(config: string): { id: string; values: Map<string, string> }[] {
-  const tables: { id: string; values: Map<string, string> }[] = [];
-  let current: (typeof tables)[number] | null = null;
+  const tables = new Map<string, { base: Map<string, string>; overrides: Map<string, string> }>();
+  let current: Map<string, string> | null = null;
   for (const line of config.split('\n')) {
-    const table = /^\s*\[models\.(?:"([^"]+)"|([\w.-]+))\]\s*$/.exec(line);
+    const table = /^\s*\[models\.(?:"([^"]+)"|([\w-]+))(\.overrides)?\]\s*$/.exec(line);
     if (table) {
-      current = { id: (table[1] ?? table[2])!.slice(0, 80), values: new Map() };
-      tables.push(current);
+      const id = (table[1] ?? table[2])!.slice(0, 80);
+      const found = tables.get(id) ?? { base: new Map(), overrides: new Map() };
+      tables.set(id, found);
+      current = table[3] ? found.overrides : found.base;
       continue;
     }
     if (/^\s*\[/.test(line)) current = null;
     const pair = current && /^\s*(\w+)\s*=\s*(?:"([^"]*)"|(\S+))/.exec(line);
-    if (current && pair) current.values.set(pair[1]!, pair[2] ?? pair[3]!);
+    if (current && pair) current.set(pair[1]!, pair[2] ?? pair[3]!);
   }
-  return tables;
+  return [...tables].map(([id, t]) => ({ id, values: new Map([...t.base, ...t.overrides]) }));
 }
 
 /* The models Kimi's plan wrote into its settings once it was signed in, by the name Kimi shows each under. */

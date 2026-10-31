@@ -130,10 +130,10 @@ export function codexRollout(line: unknown): RolloutNews {
   }
 }
 
-/* What a line of the main agent's log in Kimi Code tells: things to show, a turn's start, how it ended, and how many
-   tokens its context holds. Kimi logs a turn's end without its answer, which is the turn's last text. Read from Kimi Code
-   2.4's source, not yet from a signed-in run. */
-export type WireNews = { events: AgentEvent[]; started?: true; ended?: true; aborted?: true; failed?: string; step?: true; blocked?: true; tokens?: number };
+/* What a line of the main agent's log in Kimi Code tells: things to show, a turn's start, how it ended, which model runs
+   and how many tokens its context holds. Kimi logs a turn's end without its answer, which is the turn's last text. Read
+   from Kimi Code 2.4's source, not yet from a signed-in run. */
+export type WireNews = { events: AgentEvent[]; started?: true; ended?: true; aborted?: true; failed?: string; step?: true; blocked?: true; tokens?: number; model?: string };
 
 function loopEvents(event: Record<string, unknown>): AgentEvent[] {
   switch (event.type) {
@@ -169,6 +169,9 @@ export function kimiWire(line: unknown): WireNews {
     case 'token_counting.rebased':
     case 'token_counting.turn_recorded':
       return typeof line.tokens === 'number' ? { events: [], tokens: line.tokens } : { events: [] };
+    /* The model Kimi runs now, also when a person picked another one with /model. */
+    case 'config.update':
+      return typeof line.modelAlias === 'string' && line.modelAlias ? { events: [], model: line.modelAlias } : { events: [] };
     case 'turn.ended': {
       if (line.reason === 'completed') return { events: [], ended: true };
       if (line.reason === 'cancelled') return { events: [], aborted: true };

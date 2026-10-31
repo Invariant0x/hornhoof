@@ -112,6 +112,7 @@ async function take(line) {
   }
   const answer = line === 'SECRET' ? `the key is ${process.env.FAKE_SECRET}` : `echo: ${line}`;
   loop({ type: 'content.part', step: 1, part: { type: 'text', text: answer } });
+  if (line.includes('SWITCH')) record('config.update', { modelAlias: 'small' });
   record('token_counting.measured', { length: 2, tokens: 262144 });
   record('turn.ended', { turnId, reason: 'completed' });
   print(`● ${answer}\n❯ `);

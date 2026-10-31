@@ -76,6 +76,9 @@ describe("Kimi Code's session log", () => {
     expect(kimiWire({ type: 'token_counting.measured', agentId: 'main', length: 4, tokens: 50_000 })).toEqual({ events: [], tokens: 50_000 });
     expect(kimiWire({ type: 'token_counting.rebased', agentId: 'main', length: 2, tokens: 9000, measured: false })).toEqual({ events: [], tokens: 9000 });
     expect(kimiWire({ type: 'token_counting.measured', agentId: 'sub-1', length: 4, tokens: 70_000 })).toEqual({ events: [] });
+    /* A person picked another model with /model, whose context is another size. */
+    expect(kimiWire({ type: 'config.update', agentId: 'main', modelAlias: 'kimi-code/k3' })).toEqual({ events: [], model: 'kimi-code/k3' });
+    expect(kimiWire({ type: 'config.update', agentId: 'main', thinkingEffort: 'high' })).toEqual({ events: [] });
   });
 
   it('tells when a turn starts, ends, was stopped or failed', () => {

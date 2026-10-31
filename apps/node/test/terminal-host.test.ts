@@ -500,10 +500,14 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     mkdirSync(join(home, 'kimi', 'x3'), { recursive: true });
     writeFileSync(join(home, 'kimi', 'x3', 'config.toml'), 'default_model = "k"\n\n[models."k"]\nmax_context_size = 1048576\n');
     await host.run(kimiJob('x3', 'hello'));
+    /* A person picked a smaller model in Kimi with /model. */
+    writeFileSync(join(home, 'kimi', 'x3', 'config.toml'), 'default_model = "k"\n\n[models."k"]\nmax_context_size = 1048576\n\n[models."small"]\nmax_context_size = 524288\n', { flag: 'a' });
+    await host.run(kimiJob('x3', 'SWITCH'));
     expect(sent.filter(m => m.type === 'agent.context')).toEqual([
       { type: 'agent.context', agentKey: 'x1', used: 0.25 },
       { type: 'agent.context', agentKey: 'x2', used: 0.5 },
       { type: 'agent.context', agentKey: 'x3', used: 0.25 },
+      { type: 'agent.context', agentKey: 'x3', used: 0.5 },
     ]);
   });
 

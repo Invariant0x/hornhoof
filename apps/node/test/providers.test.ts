@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { adapterFor } from '../src/providers/index.js';
 import { claudeEvents, claudeInterrupted, limitsFrom } from '../src/providers/claude.js';
 import { codexEvents, codexRateLimits } from '../src/providers/codex.js';
-import { kimiContextSize, kimiEvents } from '../src/providers/kimi.js';
+import { kimiContextSize, kimiEvents, kimiModels } from '../src/providers/kimi.js';
 import { childEnv, lastUrl } from '../src/providers/process.js';
 import type { RunInput } from '../src/runner.js';
 
@@ -326,6 +326,9 @@ describe('models', () => {
         { name: 'one_day', utilization: 0.05, resetsAt: null },
       ],
     });
+    /* Codex can say the plan takes no ordinary work while no window is full. */
+    expect(codexRateLimits({ rateLimits: { primary: weekly, secondary: null, rateLimitReachedType: null }, ordinaryUsageAllowed: false })?.status).toBe('rejected');
+    expect(codexRateLimits({ rateLimits: { primary: weekly, secondary: null, rateLimitReachedType: null }, ordinaryUsageAllowed: null })?.status).toBe('allowed');
     expect(codexRateLimits({ rateLimits: { primary: null, secondary: null } })).toBeNull();
     expect(codexRateLimits('nonsense')).toBeNull();
   });
@@ -382,9 +385,21 @@ describe('models', () => {
       '',
       '[models.bare]',
       'model = "bare"',
+      '',
+      '[models."kimi-code/k3.1-pro"]',
+      'max_context_size = 1048576',
+      '',
+      '[models."kimi-code/k3.1-pro".overrides]',
+      'max_input_size = 300000',
+      '',
+      '[models.bare.overrides]',
+      'display_name = "Bare"',
     ].join('\n');
     expect(kimiContextSize(config, null)).toBe(1_048_576);
     expect(kimiContextSize(config, 'kimi-code/k3')).toBe(200_000);
+    /* A model's own overrides win over what the plan wrote for it. */
+    expect(kimiContextSize(config, 'kimi-code/k3.1-pro')).toBe(300_000);
+    expect(kimiModels(config).map(m => m.name)).toEqual(['kimi-code/kimi-for-coding', 'kimi-code/k3', 'Bare', 'kimi-code/k3.1-pro']);
     expect(kimiContextSize(config, 'bare')).toBeNull();
     expect(kimiContextSize(config, 'missing')).toBeNull();
   });

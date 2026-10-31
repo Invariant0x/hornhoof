@@ -494,6 +494,7 @@ export class TerminalHost {
      person's turn reaches Hornhoof through Kimi's prompt hook, as in Claude Code. */
   private kimiNews(a: Agent, news: WireNews): void {
     if (news.step) a.stepSaid = false;
+    if (news.model) a.contextSize = kimiWindow(a.home, news.model);
     if (news.tokens !== undefined && a.contextSize) this.context(a, Math.min(1, news.tokens / a.contextSize));
     for (const e of news.events) {
       const before = a.lastText;
