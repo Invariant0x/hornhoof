@@ -1,4 +1,4 @@
-import { modelsFor } from '@hornhoof/protocol';
+import { effortFor, effortsOf, modelsFor, type ModelOption, type ProviderId } from '@hornhoof/protocol';
 import { and, asc, desc, eq, isNotNull, isNull, ne, notInArray } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import type { Ctx } from '../../app.js';
@@ -12,6 +12,12 @@ import { workingCount } from '../events/store.js';
 import { personViews } from '../people/views.js';
 import { identityOf } from '../nodes/hub.js';
 import { subView } from '../subscriptions/views.js';
+
+/* The level an agent thinks at, as far as Hornhoof knows: the one it was set to or Kimi's most, else its model's default. */
+function effortShown(sub: { provider: ProviderId; models: ModelOption[] | null }, agent: { model: string; effort: string | null }): string | null {
+  const models = modelsFor(sub.provider, sub.models);
+  return effortFor(sub.provider, agent.effort, effortsOf(models, agent.model)) ?? models.find(m => m.id === agent.model)?.defaultEffort ?? null;
+}
 
 export function orgRoutes(app: FastifyInstance, { db, hub, templates }: Ctx): void {
   app.get('/api/org', async req => {
@@ -108,6 +114,7 @@ export function orgRoutes(app: FastifyInstance, { db, hub, templates }: Ctx): vo
             model: a.model,
             modelName: (a.model && sub && modelsFor(sub.provider, sub.models).find(m => m.id === a.model)?.name) || null,
             provider: sub?.provider ?? null,
+            effort: sub ? effortShown(sub, a) : null,
             state: busy.has(a.id) ? 'working' : a.subscriptionId ? 'sleeping' : 'needs_subscription',
             context: a.contextUsed,
             status: now.status,
@@ -135,6 +142,7 @@ export function orgRoutes(app: FastifyInstance, { db, hub, templates }: Ctx): vo
         id: orchestrator.id,
         name: orchestrator.name,
         model: orchestrator.model,
+        effort: (orchestrator.subscriptionId && subs.has(orchestrator.subscriptionId) && effortShown(subs.get(orchestrator.subscriptionId)!, orchestrator)) || null,
         context: orchestrator.contextUsed,
         subscription: orchestrator.subscriptionId ? await subView(db, s => hub.isOnline(identityOf(s)), orchestrator.subscriptionId) : null,
       },

@@ -62,9 +62,18 @@ export const CLAUDE_ALIASES: ModelOption[] = [
   { id: 'haiku', name: 'Haiku', efforts: EFFORTS },
 ];
 
-/* The effort an agent runs at: what a person picked, else Kimi at its most and the others at their program's default. */
-export function effortFor(provider: ProviderId, chosen: string | null): string | null {
-  return chosen ?? (provider === 'kimi' ? 'max' : null);
+/* The effort an agent runs at: what a person picked while its model takes it, else Kimi at its most and the others at
+   their program's default. No efforts known takes what was picked. */
+export function effortFor(provider: ProviderId, chosen: string | null, efforts: string[] = []): string | null {
+  const kept = chosen && (!efforts.length || efforts.includes(chosen)) ? chosen : null;
+  return kept ?? (provider === 'kimi' ? 'max' : null);
+}
+
+/* The efforts a model takes. The Default model, and one the subscription does not run, which runs on the Default, may be
+   any of the subscription's, so they take all of theirs. */
+export function effortsOf(models: ModelOption[], model: string | null): string[] {
+  const found = model ? models.find(m => m.id === model) : undefined;
+  return found ? (found.efforts ?? []) : [...new Set(models.flatMap(m => m.efforts ?? []))];
 }
 
 /* What a subscription can run: what its node reported, else what Hornhoof knows for the provider. The web adds "Default" on top. */

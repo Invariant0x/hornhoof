@@ -8,7 +8,7 @@ import { as, connectNode, invitePerson, listen, openStream, setUpCompany, testAp
 
 const NODE_KEY = 'k'.repeat(40);
 
-type Run = { type: 'job.run'; jobId: string; prompt: string; sessionId: string | null; model: string | null; instructions: string | null; toolToken: string | null; timeoutMs: number };
+type Run = { type: 'job.run'; jobId: string; prompt: string; sessionId: string | null; model: string | null; effort?: string | null; instructions: string | null; toolToken: string | null; timeoutMs: number };
 
 async function live() {
   const { app, db } = await testApp({ NODE_KEY });
@@ -174,14 +174,14 @@ describe('the orchestrator\'s conversation', () => {
   });
 
   /* The orchestrator moves to Ivan's Claude plan on his Mac, whose node says hello with this version. */
-  async function onMac(version: string) {
+  async function onMac(version: string, provider = 'claude', hello: object = {}) {
     const { app, url, ceo } = await live();
-    const connected = await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude'] }, ...as(ceo) });
+    const connected = await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: [provider] }, ...as(ceo) });
     const code = connected.json().command.split('--join ')[1];
     const joined = await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' } });
     const node = joined.json().nodes[0] as { subscriptionId: string; key: string };
     const mac = await connectNode(url, node.key);
-    mac.send({ type: 'hello', version, loggedIn: true, running: [] });
+    mac.send({ type: 'hello', version, loggedIn: true, running: [], ...hello });
     expect((await app.inject({ method: 'POST', url: `/api/subscriptions/${node.subscriptionId}/orchestrator`, ...as(ceo) })).statusCode).toBe(200);
     return { app, url, ceo, mac, node };
   }
@@ -198,6 +198,21 @@ describe('the orchestrator\'s conversation', () => {
     await until(async () => (await state(app, ceo)).ready);
     await say(app, ceo, 'Hello');
     expect((await nextRun(updated)).prompt).toBe('Ivan (CEO): Hello');
+  });
+
+  it('runs him on a Kimi plan at its most, and at the effort a person picks in the same session', async () => {
+    const models = [{ id: 'kimi-code/k3', name: 'K3', efforts: ['low', 'high', 'max'], defaultEffort: 'high' }];
+    const { app, ceo, mac } = await onMac('0.3.0', 'kimi', { models });
+    await until(async () => (await state(app, ceo)).ready);
+    await say(app, ceo, 'First');
+    const first = await nextRun(mac);
+    expect(first.effort).toBe('max');
+    await finish(mac, first, 'sess-k');
+    await until(async () => !(await state(app, ceo)).busy);
+    const r = await app.inject({ method: 'PATCH', url: '/api/agents/orchestrator', payload: { effort: 'low' }, ...as(ceo) });
+    expect(r.statusCode).toBe(200);
+    await say(app, ceo, 'Second');
+    expect(await nextRun(mac)).toMatchObject({ effort: 'low', sessionId: 'sess-k' });
   });
 
   it('keeps the next message waiting when the machine says its login ran out', async () => {
@@ -338,6 +353,18 @@ describe("an employee's conversation", () => {
     expect(second).toMatchObject({ model: 'claude-opus-5-5', sessionId: null });
     const [agent] = await db.select().from(agents).where(eq(agents.id, bruno.id));
     expect(agent!.model).toBe('claude-opus-5-5');
+  });
+
+  it('runs an employee at the effort it was set to, in the same session, and Claude at its own default', async () => {
+    const { app, ceo, builtin, bruno } = await withEmployee();
+    await sayTo(app, ceo, bruno.id, 'Hello');
+    const first = await nextRun(builtin);
+    expect(first.effort).toBeNull();
+    await finish(builtin, first, 'sess-1');
+    await until(async () => !(await stateOf(app, ceo, bruno.id)).busy);
+    expect((await app.inject({ method: 'PATCH', url: `/api/agents/${bruno.id}`, payload: { effort: 'max' }, ...as(ceo) })).statusCode).toBe(200);
+    await sayTo(app, ceo, bruno.id, 'Think hard');
+    expect(await nextRun(builtin)).toMatchObject({ effort: 'max', sessionId: 'sess-1' });
   });
 
   it('stops an employee while it works', async () => {

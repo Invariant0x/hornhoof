@@ -1,4 +1,4 @@
-import { modelsFor } from '@hornhoof/protocol';
+import { effortFor, effortsOf, modelsFor } from '@hornhoof/protocol';
 import { and, asc, count, desc, eq, isNotNull, isNull, or } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -193,7 +193,10 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
 
   const instructions = await instructionsOf(ctx, agent);
   /* The program's flag only for a model this subscription can run; anything else runs on its Default. */
-  const model = agent.model && modelsFor(sub.provider, sub.models).some(m => m.id === agent.model) ? agent.model : null;
+  const models = modelsFor(sub.provider, sub.models);
+  const model = agent.model && models.some(m => m.id === agent.model) ? agent.model : null;
+  /* How hard it thinks goes on in the same session; the program starts again at the new level. */
+  const effort = effortFor(sub.provider, agent.effort, effortsOf(models, model));
   /* The hash covers the model too, so a new model starts a fresh session like new instructions do. */
   const runHash = model ? textHash(`${instructions.hash}:${model}`) : instructions.hash;
   const { sessionId, catchUp } = await sessionFor(ctx, agent, sub.id, runHash);
@@ -216,6 +219,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
     prompt,
     sessionId,
     model,
+    effort,
     timeoutMs: job.timeoutMs,
     instructions: instructions.text,
     toolToken: token,

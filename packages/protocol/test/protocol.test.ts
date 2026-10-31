@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { API_MODELS, CLAUDE_ALIASES, cut, DEPARTMENT_TEMPLATES, effortFor, modelsFor, parseNodeMessage, parseServerMessage, repoFolder, type AgentEvent, type NodeMessage, type ServerMessage } from '../src/index.js';
+import { API_MODELS, CLAUDE_ALIASES, cut, DEPARTMENT_TEMPLATES, effortFor, effortsOf, modelsFor, parseNodeMessage, parseServerMessage, repoFolder, type AgentEvent, type NodeMessage, type ServerMessage } from '../src/index.js';
 
 const LIMITS = { status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0.38, resetsAt: '2026-10-29T21:30:00.000Z' }] };
 
@@ -182,6 +182,26 @@ describe('models', () => {
     expect(effortFor('kimi', 'low')).toBe('low');
     expect(effortFor('codex', null)).toBeNull();
     expect(effortFor('claude', 'xhigh')).toBe('xhigh');
+  });
+
+  it('keeps a picked effort only while the model takes it', () => {
+    expect(effortFor('kimi', 'xhigh', ['low', 'high', 'max'])).toBe('max');
+    expect(effortFor('codex', 'ultra', ['low', 'medium'])).toBeNull();
+    expect(effortFor('codex', 'medium', ['low', 'medium'])).toBe('medium');
+  });
+
+  it("lists a model's efforts, and for the Default model every level the subscription's models take", () => {
+    const models = [
+      { id: 'a', name: 'A', efforts: ['low', 'high'] },
+      { id: 'b', name: 'B', efforts: ['low', 'max'] },
+      { id: 'c', name: 'C' },
+    ];
+    expect(effortsOf(models, 'b')).toEqual(['low', 'max']);
+    expect(effortsOf(models, 'c')).toEqual([]);
+    expect(effortsOf(models, '')).toEqual(['low', 'high', 'max']);
+    expect(effortsOf(models, null)).toEqual(['low', 'high', 'max']);
+    /* A model the subscription does not run runs on its Default. */
+    expect(effortsOf(models, 'gone')).toEqual(['low', 'high', 'max']);
   });
 });
 
