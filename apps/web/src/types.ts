@@ -81,6 +81,8 @@ export type Employee = {
   status: EmployeeStatus;
   /* Off for now: it takes no work until a person switches it on. */
   on: boolean;
+  /* How often it wakes on its timer, in minutes; null without one. */
+  timer: number | null;
   task: EmployeeTask | null;
   /* How full its context was when its machine last said, from 0 to 1; null before it said. */
   context: number | null;
@@ -157,6 +159,8 @@ export type AgentCardView = {
   changes: { field: string; personName: string | null; byOrchestrator: boolean; at: string }[];
   /* The whole company or the agent's department may change it; only the whole company removes it. */
   canEdit: boolean;
+  /* Wakes every so many minutes, outside any task, to do its order; lastAt: the last round, or when it was set. */
+  timer: { minutes: number; order: string; lastAt: string | null } | null;
 };
 
 /* A subscription or key that may serve a department, with the models it runs. */

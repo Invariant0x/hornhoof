@@ -83,6 +83,37 @@ describe('AgentCard', () => {
     expect(screen.getByRole('combobox', { name: 'Effort' })).toHaveValue('max');
   });
 
+  it('sets a timer: how often the employee wakes and what it does each time', async () => {
+    const user = userEvent.setup();
+    const { calls } = open({ 'PATCH /api/agents/b1': patched });
+    const on = await screen.findByRole('checkbox', { name: 'Wake on a timer' });
+    expect(on).not.toBeChecked();
+    expect(screen.queryByRole('combobox', { name: 'How often' })).not.toBeInTheDocument();
+    await user.click(on);
+    const often = screen.getByRole('combobox', { name: 'How often' });
+    expect(within(often).getAllByRole('option').map(o => o.textContent)).toEqual([
+      'Every 10 minutes', 'Every 15 minutes', 'Every 30 minutes', 'Every hour', 'Every 2 hours', 'Every 3 hours', 'Every 6 hours', 'Every 12 hours', 'Every 24 hours',
+    ]);
+    await user.selectOptions(often, '60');
+    expect(screen.getByRole('button', { name: 'Save timer' })).toBeDisabled();
+    await user.type(screen.getByRole('textbox', { name: 'What to do each time' }), 'Check that every agent reported its task.');
+    await user.click(screen.getByRole('button', { name: 'Save timer' }));
+    await vi.waitFor(() => expect(calls.find(c => c.method === 'PATCH')?.body).toEqual({ timer: { minutes: 60, order: 'Check that every agent reported its task.' } }));
+  });
+
+  it('shows the timer the employee has and takes it away', async () => {
+    const user = userEvent.setup();
+    const timer = { minutes: 10, order: 'Look around.', lastAt: '2026-10-31T03:00:00.000Z' };
+    const { calls } = open({ 'GET /api/agents/b1': [200, { ...CARD, timer }], 'PATCH /api/agents/b1': patched });
+    const on = await screen.findByRole('checkbox', { name: 'Wake on a timer' });
+    expect(on).toBeChecked();
+    expect(screen.getByRole('combobox', { name: 'How often' })).toHaveValue('10');
+    expect(screen.getByRole('textbox', { name: 'What to do each time' })).toHaveValue('Look around.');
+    expect(screen.getByText(/^Last round: /)).toBeInTheDocument();
+    await user.click(on);
+    await vi.waitFor(() => expect(calls.find(c => c.method === 'PATCH')?.body).toEqual({ timer: null }));
+  });
+
   it('names the level the Default runs at: Kimi at its most', async () => {
     const kimi = { ...TEAM_KEY, id: 's-kimi', provider: 'kimi' as const };
     const k3 = { id: 'k3', name: 'K3', efforts: ['low', 'high', 'max'], defaultEffort: 'high' };

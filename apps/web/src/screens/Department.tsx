@@ -59,6 +59,7 @@ function doingLine(t: ReturnType<typeof useT>, e: Employee): string {
   if (e.task) return taskText(e);
   if (!e.on) return t.dept.switchedOff;
   if (e.status === 'off') return t.dept.needsSubscription;
+  if (e.timer && e.status === 'idle') return t.dept.onTimer(t.agent.every(e.timer));
   return e.status === 'idle' ? t.dept.waitsForTask : '';
 }
 

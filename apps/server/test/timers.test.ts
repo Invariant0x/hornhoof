@@ -34,6 +34,8 @@ describe('timers', () => {
     expect(set.json().timer).toMatchObject({ minutes: 10, order: 'Check that every agent reported its task.', lastAt: expect.any(String) });
     const [change] = await db.select().from(agentChanges).where(and(eq(agentChanges.agentId, wandaId), eq(agentChanges.field, 'timer')));
     expect(change).toMatchObject({ before: null, after: { minutes: 10, order: 'Check that every agent reported its task.' } });
+    const org = (await app.inject({ url: '/api/org', ...as(ceo) })).json();
+    expect(org.departments[0].employees.find((e: { id: string }) => e.id === wandaId).timer).toBe(10);
     expect((await patch(app, ceo, wandaId, { timer: null })).json().timer).toBeNull();
     expect((await patch(app, ceo, wandaId, { timer: { minutes: 2, order: 'Too often.' } })).statusCode).toBe(400);
     expect((await patch(app, ceo, wandaId, { timer: { minutes: 10, order: '' } })).statusCode).toBe(400);

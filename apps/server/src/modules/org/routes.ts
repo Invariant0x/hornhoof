@@ -119,6 +119,8 @@ export function orgRoutes(app: FastifyInstance, { db, hub, templates }: Ctx): vo
             context: a.contextUsed,
             status: now.status,
             on: !a.switchedOffAt,
+            /* How often it wakes on its timer, in minutes. */
+            timer: a.timerMinutes,
             /* Like the department's current task, only for people who reach it. */
             task: now.task && canReach(reach, { departmentId: dept.id }) ? { id: now.task.id, number: now.task.number, title: now.task.title, stage: now.task.stage, gateCount: now.task.gates.length, bounces: now.task.bounces } : null,
           };

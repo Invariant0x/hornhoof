@@ -302,6 +302,7 @@ export const ru: Messages = {
     status: { working: 'в работе', queued: 'в очереди', handed: 'сдал дальше', waiting: 'ждет решения', idle: 'свободен', off: 'нет подписки' },
     statusSummary: counts => summary(counts, { working: 'в работе', queued: 'в очереди', handed: 'сдали дальше', waiting: 'ждут решения', idle: 'свободны', off: 'без подписки' }),
     waitsForTask: 'Ждет новую задачу',
+    onTimer: (every: string) => `По таймеру, ${every.toLowerCase()}`,
     context: 'Контекст',
     contextUsed: pct => `Контекст ${pct}%`,
     switchedOff: 'Выключен',
@@ -354,10 +355,24 @@ export const ru: Messages = {
     rawBroken: 'Оставьте первую часть и метки навыков как есть. Навыки включаются и выключаются в списке выше.',
     history: 'Изменения',
     changed: (what: string, who: string | null, when: string) => (who ? `${what}: ${who}, ${when}` : `${what}, ${when}`),
-    fields: { hired: 'Нанят', name: 'Имя', model: 'Модель', effort: 'Усилие', subscription: 'Подписка', skills: 'Навыки', prompt: 'Промпт', reset: 'Возврат к шаблону', removed: 'Убран', switch: 'Включен или выключен' } as Record<string, string>,
+    timer: 'Таймер',
+    timerAbout: 'Сотрудник сам просыпается через заданное время, вне задач, и делает то, что здесь написано.',
+    timerOn: 'Просыпаться по таймеру',
+    timerEvery: 'Как часто',
+    timerOrder: 'Что делать каждый раз',
+    timerPlaceholder: 'Например: проверить, что каждый агент отчитался по своей задаче, и подтолкнуть тех, кто застрял.',
+    saveTimer: 'Сохранить таймер',
+    every: m =>
+      m % 60
+        ? `Каждые ${m} ${plural('ru', m, { one: 'минуту', few: 'минуты', many: 'минут', other: 'минуты' })}`
+        : m === 60
+          ? 'Каждый час'
+          : `Каждые ${m / 60} ${plural('ru', m / 60, { one: 'час', few: 'часа', many: 'часов', other: 'часа' })}`,
+    lastRound: at => `Последний раз: ${at}`,
+    fields: { hired: 'Нанят', name: 'Имя', model: 'Модель', effort: 'Усилие', timer: 'Таймер', subscription: 'Подписка', skills: 'Навыки', prompt: 'Промпт', reset: 'Возврат к шаблону', removed: 'Убран', switch: 'Включен или выключен' } as Record<string, string>,
     byOrchestrator: 'Оркестратор',
     viewOnly: 'Менять этого сотрудника могут только люди с доступом к его отделу или ко всей компании.',
-    orchestratorNote: 'У оркестратора нет навыков: его инструкции приходят вместе с Hornhoof.',
+    orchestratorNote: 'Инструкции и навыки оркестратора приходят вместе с Hornhoof. Блокнот компании в их конце открывается в его окне.',
   },
   staff: {
     title: (name: string) => `Найм в отдел ${name}`,
