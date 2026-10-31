@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { acceptClaudeDialogs, claudeProgram, claudeTranscript, codexProgram, findKimiWire, findRollout, kimiPlanLimits, kimiProgram, prepareKimi } from '../src/terminal/programs.js';
+import { acceptClaudeDialogs, claudePlanLimits, claudeProgram, claudeTranscript, codexProgram, findKimiWire, findRollout, kimiPlanLimits, kimiProgram, prepareKimi } from '../src/terminal/programs.js';
 
 const URLS = { mcpUrl: 'http://127.0.0.1:5000/mcp/s3cr3t', attachUrl: 'http://127.0.0.1:5000/attach/s3cr3t', hookUrl: 'http://127.0.0.1:5000/hook/s3cr3t' };
 const arg = (cmd: string[], flag: string) => cmd[cmd.indexOf(flag) + 1];
@@ -58,6 +58,35 @@ describe('Claude Code in a terminal', () => {
     const home = mkdtempSync(join(tmpdir(), 'hh-claude-'));
     acceptClaudeDialogs(home, '/w/a1');
     expect(JSON.parse(readFileSync(join(home, 'settings.json'), 'utf8'))).toEqual({ theme: 'dark', skipDangerousModePermissionPrompt: true });
+  });
+
+  it("asks Claude's usage page for the plan's limits with the token Claude keeps, and gives nothing without one", async () => {
+    const home = mkdtempSync(join(tmpdir(), 'hh-claude-'));
+    const asked: string[] = [];
+    const server = createServer((req, res) => {
+      asked.push(`${req.url} ${req.headers.authorization} ${req.headers['anthropic-beta']}`);
+      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ five_hour: { utilization: 40, resets_at: '2026-10-31T03:00:00Z' }, seven_day: { utilization: 93, resets_at: '2026-11-01T07:00:00Z' } }));
+    });
+    await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      expect(await claudePlanLimits(home, base)).toBeNull();
+      const signIn = (token: string, expiresAt: number) => writeFileSync(join(home, '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: token, refreshToken: 'refresh', expiresAt } }));
+      signIn('claude-access-1', Date.now() + 600_000);
+      expect(await claudePlanLimits(home, base)).toEqual({
+        status: 'allowed',
+        windows: [
+          { name: 'five_hour', utilization: 0.4, resetsAt: '2026-10-31T03:00:00.000Z' },
+          { name: 'seven_day', utilization: 0.93, resetsAt: '2026-11-01T07:00:00.000Z' },
+        ],
+      });
+      /* Claude Code alone renews its token while it runs; one that ran out would only be refused. */
+      signIn('claude-access-2', Date.now() - 60_000);
+      expect(await claudePlanLimits(home, base)).toBeNull();
+      expect(asked).toEqual(['/api/oauth/usage Bearer claude-access-1 oauth-2025-04-20']);
+    } finally {
+      server.close();
+    }
   });
 
   it('keeps its log where Claude Code puts it for the folder', () => {

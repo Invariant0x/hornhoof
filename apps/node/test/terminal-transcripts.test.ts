@@ -2,7 +2,7 @@ import { appendFileSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { claudeStatusContext, claudeStatusLimits, codexRollout, kimiUsageLimits, kimiWire, LineTail } from '../src/terminal/transcripts.js';
+import { claudeStatusContext, claudeStatusLimits, claudeUsageLimits, codexRollout, kimiUsageLimits, kimiWire, LineTail } from '../src/terminal/transcripts.js';
 
 const item = (it: object) => ({ type: 'event_msg', payload: { type: 'item_completed', item: it } });
 const loop = (event: object) => ({ type: 'context.append_loop_event', agentId: 'main', event, time: 1 });
@@ -122,6 +122,24 @@ describe("Kimi Code's session log", () => {
       ],
     });
     expect(kimiUsageLimits({ error: 'nope' })).toBeNull();
+  });
+
+  it("reads the plan's limits Claude's usage page gives, in percent", () => {
+    const page = {
+      five_hour: { utilization: 16, resets_at: '2026-10-31T02:50:00.895244+00:00', limit_dollars: null },
+      seven_day: { utilization: 100, resets_at: '2026-11-01T07:00:00.895267+00:00' },
+      seven_day_opus: null,
+      extra_usage: { is_enabled: false, utilization: null },
+    };
+    expect(claudeUsageLimits(page)).toEqual({
+      status: 'rejected',
+      windows: [
+        { name: 'five_hour', utilization: 0.16, resetsAt: '2026-10-31T02:50:00.895Z' },
+        { name: 'seven_day', utilization: 1, resetsAt: '2026-11-01T07:00:00.895Z' },
+      ],
+    });
+    expect(claudeUsageLimits({ five_hour: { utilization: 3, resets_at: null }, seven_day: null })).toEqual({ status: 'allowed', windows: [{ name: 'five_hour', utilization: 0.03, resetsAt: null }] });
+    expect(claudeUsageLimits({ error: { type: 'authentication_error' } })).toBeNull();
   });
 });
 

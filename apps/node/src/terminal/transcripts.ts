@@ -200,6 +200,20 @@ export function kimiUsageLimits(page: unknown): Limits | null {
   return { status: windows.some(w => w.utilization >= 1) ? 'rejected' : 'allowed', windows };
 }
 
+/* The plan's limits from Claude's usage page, the one its /usage shows: five hours and seven days, used in percent. */
+export function claudeUsageLimits(page: unknown): Limits | null {
+  if (!isRecord(page)) return null;
+  const windows = (['five_hour', 'seven_day'] as const).flatMap(name => {
+    const w = page[name];
+    const used = isRecord(w) ? share(w.utilization) : null;
+    if (!isRecord(w) || used === null) return [];
+    const reset = typeof w.resets_at === 'string' ? new Date(w.resets_at) : null;
+    return [{ name, utilization: used, resetsAt: reset && !Number.isNaN(reset.getTime()) ? reset.toISOString() : null }];
+  });
+  if (!windows.length) return null;
+  return { status: windows.some(w => w.utilization >= 1) ? 'rejected' : 'allowed', windows };
+}
+
 /* How full Claude Code's context is, from its status line. */
 export function claudeStatusContext(status: unknown): number | null {
   return isRecord(status) && isRecord(status.context_window) ? share(status.context_window.used_percentage) : null;

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { Limits } from '@hornhoof/protocol';
 import { writePrivate } from '../providers/process.js';
 import type { AgentUrls } from './bridge.js';
-import { kimiUsageLimits } from './transcripts.js';
+import { claudeUsageLimits, kimiUsageLimits } from './transcripts.js';
 
 export type LaunchInput = {
   bin: string;
@@ -75,6 +75,24 @@ export const codexProgram: TermProgram = {
     return { command, env: { CODEX_HOME: home, ...bridgeEnv(urls) }, sessionId };
   },
 };
+
+/* What Claude's /usage shows, asked from Anthropic's own servers only, with the token Claude Code keeps fresh while it
+   runs. A token that ran out gives nothing, and the host keeps what it knew. */
+export async function claudePlanLimits(home: string, base = 'https://api.anthropic.com'): Promise<Limits | null> {
+  const oauth = readJson(join(home, '.credentials.json')).claudeAiOauth;
+  const { accessToken: token, expiresAt: expires } = (oauth && typeof oauth === 'object' ? oauth : {}) as Record<string, unknown>;
+  if (typeof token !== 'string' || !token) return null;
+  if (typeof expires === 'number' && expires < Date.now() + 30_000) return null;
+  try {
+    const res = await fetch(`${base}/api/oauth/usage`, {
+      headers: { authorization: `Bearer ${token}`, 'anthropic-beta': 'oauth-2025-04-20', accept: 'application/json' },
+      signal: AbortSignal.timeout(5000),
+    });
+    return res.ok ? claudeUsageLimits(await res.json()) : null;
+  } catch {
+    return null;
+  }
+}
 
 /* Kimi Code's plan page, on its own servers only: the sign-in token goes nowhere else. KIMI_CODE_BASE_URL is Kimi's own
    way to point it elsewhere. */

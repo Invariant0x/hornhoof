@@ -355,6 +355,16 @@ describe('models', () => {
     expect(codexRateLimits('nonsense')).toBeNull();
   });
 
+  it("asks Claude's plan limits with no turn, and nothing for a key or a home not signed in", async () => {
+    const claude = adapter('claude');
+    expect(claude.limits).toBeTypeOf('function');
+    expect(await claude.limits!()).toBeNull();
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(home, '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'claude-access', expiresAt: Date.now() - 60_000 } }));
+    expect(await claude.limits!()).toBeNull();
+    expect(await adapter('anthropic_api', 'sk-ant-api03-key').limits!()).toBeNull();
+  });
+
   it("lists Claude's aliases, and nothing for programs that do not say", async () => {
     expect(await adapter('claude').models!()).toEqual(CLAUDE_ALIASES);
     expect(await adapter('codex').models!()).toEqual([]);
