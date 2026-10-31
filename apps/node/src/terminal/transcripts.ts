@@ -123,7 +123,7 @@ export function codexRollout(line: unknown): RolloutNews {
       const rate = isRecord(p.rate_limits) ? p.rate_limits : null;
       if (!rate) return news;
       const windows = [rate.primary, rate.secondary].filter(isRecord).map(w => ({ name: windowName(w.window_minutes), utilization: share(w.used_percent), resetsAt: iso(w.resets_at) }));
-      return { ...news, limits: { status: rate.rate_limit_reached_type ? 'rejected' : 'allowed', windows } };
+      return { ...news, limits: { status: rate.rate_limit_reached_type ? 'rejected' : 'allowed', windows, complete: true } };
     }
     default:
       return { events: [] };
@@ -197,13 +197,15 @@ export function kimiUsageLimits(page: unknown): Limits | null {
   const month = [...read('month', usages.limit_month_total), ...read('month', usages.limit_month_code)].sort((a, b) => b.utilization - a.utilization).slice(0, 1);
   const windows = [...read('five_hour', usages.limit_5h), ...read('seven_day', usages.limit_7d), ...month];
   if (!windows.length) return null;
-  return { status: windows.some(w => w.utilization >= 1) ? 'rejected' : 'allowed', windows };
+  return { status: windows.some(w => w.utilization >= 1) ? 'rejected' : 'allowed', windows, complete: true };
 }
 
-/* The plan's limits from Claude's usage page, the one its /usage shows: five hours and seven days, used in percent. */
+/* The plan's limits from Claude's usage page, the one its /usage shows: five hours and seven days, used in percent, and
+   a week of one model, such as seven_day_opus, where the plan counts it apart and that week can run out first. */
 export function claudeUsageLimits(page: unknown): Limits | null {
   if (!isRecord(page)) return null;
-  const windows = (['five_hour', 'seven_day'] as const).flatMap(name => {
+  const names = ['five_hour', 'seven_day', ...Object.keys(page).filter(name => /^seven_day_[a-z]+$/.test(name))];
+  const windows = names.flatMap(name => {
     const w = page[name];
     const used = isRecord(w) ? share(w.utilization) : null;
     if (!isRecord(w) || used === null) return [];
@@ -211,7 +213,7 @@ export function claudeUsageLimits(page: unknown): Limits | null {
     return [{ name, utilization: used, resetsAt: reset && !Number.isNaN(reset.getTime()) ? reset.toISOString() : null }];
   });
   if (!windows.length) return null;
-  return { status: windows.some(w => w.utilization >= 1) ? 'rejected' : 'allowed', windows };
+  return { status: windows.some(w => w.utilization >= 1) ? 'rejected' : 'allowed', windows: windows.slice(0, 8), complete: true };
 }
 
 /* How full Claude Code's context is, from its status line. */

@@ -45,6 +45,15 @@ type RunOptions = {
   limitsMs?: number;
 };
 
+/* A complete list of the plan's windows replaces what the node knew. A partial one, such as the single window a turn
+   tells, updates the windows it names and leaves the others as they were. */
+function merged(known: Limits | null, news: Limits): Limits {
+  if (news.complete || !known) return news;
+  const fresh = new Map(news.windows.map(w => [w.name, w]));
+  const windows = [...known.windows.map(w => fresh.get(w.name) ?? w), ...news.windows.filter(w => !known.windows.some(k => k.name === w.name))];
+  return { status: news.status, windows: windows.slice(0, 8), ...(known.complete ? { complete: true } : {}) };
+}
+
 /* The node's life: stay connected, run jobs, report the sign-in state and the limits, clean up when removed. */
 export async function runNode({ dir, adapter, builtin, terminal, log = console.log, loginCheckMs = LOGIN_CHECK_MS, learnMs = LEARN_MS, limitsMs = LIMITS_MS }: RunOptions): Promise<{ stop(): void }> {
   if (!builtin && isRemoved(dir)) {
@@ -174,7 +183,7 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
         ...chosen,
         run: async input => {
           const res = await runIn(input);
-          if (res.limits) limits = res.limits;
+          if (res.limits) limits = merged(limits, res.limits);
           return res;
         },
       };
@@ -204,8 +213,8 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
   const askLimits = async () => {
     if (stopped || !single?.limits) return;
     const now = await single.limits().catch(() => null);
-    if (!now || JSON.stringify(now) === JSON.stringify(limits)) return;
-    limits = now;
+    if (!now || JSON.stringify(merged(limits, now)) === JSON.stringify(limits)) return;
+    limits = merged(limits, now);
     void status();
   };
   void askLimits();

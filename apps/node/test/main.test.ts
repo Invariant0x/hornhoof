@@ -142,6 +142,30 @@ describe('runNode', () => {
     expect(asked).toBeGreaterThanOrEqual(3);
   });
 
+  it('keeps the windows it knew when a turn tells only some of them, and takes a full list as it is', async () => {
+    const server = await fakeServer();
+    const week = { status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0.1, resetsAt: null }, { name: 'seven_day', utilization: 0.9, resetsAt: null }], complete: true };
+    const turns = [
+      { status: 'warning' as const, windows: [{ name: 'five_hour', utilization: 0.8, resetsAt: null }] },
+      { status: 'allowed' as const, windows: [{ name: 'seven_day', utilization: 0.95, resetsAt: null }], complete: true },
+    ];
+    const run = async () => ({ ok: true, sessionId: 'sess-9', result: 'ready', output: '', error: null, limits: turns.shift()! });
+    const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, run, limits: async () => week }, log: () => {}, limitsMs: 60_000 });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.filter(m => m.type === 'status').length >= 1);
+    const job = (jobId: string) => ({ type: 'job.run', jobId, subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
+    server.send(job('j1'));
+    await server.wait(() => server.received.filter(m => m.type === 'status').length >= 2);
+    expect(server.received.filter(m => m.type === 'status').at(-1)!.limits).toEqual({
+      status: 'warning',
+      windows: [{ name: 'five_hour', utilization: 0.8, resetsAt: null }, { name: 'seven_day', utilization: 0.9, resetsAt: null }],
+      complete: true,
+    });
+    server.send(job('j2'));
+    await server.wait(() => server.received.filter(m => m.type === 'status').length >= 3);
+    expect(server.received.filter(m => m.type === 'status').at(-1)!.limits).toEqual({ status: 'allowed', windows: [{ name: 'seven_day', utilization: 0.95, resetsAt: null }], complete: true });
+  });
+
   it('sends the models its program can run in hello and status', async () => {
     const server = await fakeServer();
     const models = [{ id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol' }];

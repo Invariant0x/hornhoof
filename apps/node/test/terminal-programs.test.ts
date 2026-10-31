@@ -79,6 +79,7 @@ describe('Claude Code in a terminal', () => {
           { name: 'five_hour', utilization: 0.4, resetsAt: '2026-10-31T03:00:00.000Z' },
           { name: 'seven_day', utilization: 0.93, resetsAt: '2026-11-01T07:00:00.000Z' },
         ],
+        complete: true,
       });
       /* Claude Code alone renews its token while it runs; one that ran out would only be refused. */
       signIn('claude-access-2', Date.now() - 60_000);
@@ -192,7 +193,7 @@ describe('Kimi Code in a terminal', () => {
     try {
       mkdirSync(join(home, 'credentials'));
       writeFileSync(join(home, 'credentials', 'kimi-code.json'), JSON.stringify({ access_token: 'kimi-access-1', refresh_token: 'kimi-refresh-1' }));
-      expect(await kimiPlanLimits(home)).toEqual({ status: 'allowed', windows: [{ name: 'five_hour', utilization: 0.5, resetsAt: '2026-10-31T03:00:00.000Z' }] });
+      expect(await kimiPlanLimits(home)).toEqual({ status: 'allowed', windows: [{ name: 'five_hour', utilization: 0.5, resetsAt: '2026-10-31T03:00:00.000Z' }], complete: true });
       expect(auths).toEqual(['/coding/v1/usages Bearer kimi-access-1']);
       /* A token that ran out asks nothing: Kimi alone renews it, and the last limits stay. */
       writeFileSync(join(home, 'credentials', 'kimi-code.json'), JSON.stringify({ access_token: 'kimi-access-2', refresh_token: 'kimi-refresh-2', expires_at: Date.now() / 1000 - 60 }));
