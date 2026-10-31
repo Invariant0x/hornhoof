@@ -67,4 +67,17 @@ describe('live channels', () => {
     expect(org.departments[0].live).toEqual([{ from: hana.id, to: bruno.id, at: new Date(sent).toISOString(), held: true }]);
     expect(org.departments[1].live).toEqual([]);
   });
+
+  it('come held while young too, so a map that fetched them keeps them on past ten minutes while the work goes on', async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    const [acme] = await db.select().from(companies);
+    const [sub] = await db.select().from(subscriptions);
+    const [dev] = await db.insert(departments).values({ companyId: acme!.id, templateKey: 'development', roleCode: 'DEV' }).returning();
+    const [bruno] = await db.insert(agents).values({ companyId: acme!.id, kind: 'worker', name: 'Bruno', departmentId: dev!.id, model: '', subscriptionId: sub!.id }).returning();
+    await db.insert(jobs).values({ companyId: acme!.id, subscriptionId: sub!.id, agentId: bruno!.id, prompt: 'work', status: 'running', timeoutMs: 1000, startedAt: new Date() });
+    app.ctx.bus.publish(acme!.id, { type: 'pulse', from: { kind: 'orchestrator' }, to: { kind: 'department', id: dev!.id } });
+    const org = (await app.inject({ url: '/api/org', ...as(ceo) })).json();
+    expect(org.live).toEqual([{ from: { kind: 'orchestrator' }, to: { kind: 'department', id: dev!.id }, at: expect.any(String), held: true }]);
+  });
 });

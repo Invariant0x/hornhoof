@@ -47,12 +47,13 @@ export class EventBus {
     for (const fn of this.listeners.get(companyId) ?? []) fn(m);
   }
 
-  /* The ways a message went in the last CHANNEL_MS, and older ones `held` keeps on, oldest first. */
+  /* The ways a message went in the last CHANNEL_MS, and older ones `held` keeps on, oldest first. A young way is marked held
+     too, so a map that fetched it keeps it on past CHANNEL_MS while the work goes on. */
   channels(companyId: string, now = Date.now(), held: (w: Channel) => boolean = () => false): Channel[] {
     return [...(this.ways.get(companyId)?.values() ?? [])].flatMap(w => {
       const way: Channel = { from: w.from, to: w.to, at: new Date(w.at).toISOString() };
-      if (now - w.at <= CHANNEL_MS) return [way];
-      return held(way) ? [{ ...way, held: true as const }] : [];
+      if (held(way)) return [{ ...way, held: true as const }];
+      return now - w.at <= CHANNEL_MS ? [way] : [];
     });
   }
 
