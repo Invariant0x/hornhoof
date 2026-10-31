@@ -99,7 +99,8 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
     'change_employee',
     'Changes an employee as its card does: name, model (\'\' for Default), effort (a level its model takes, null for the program\'s default), subscription (null for none), skills { id: on/off }, base (its role text, null for the template\'s), ' +
       'skillText { id: text or null }, on (false switches it off: it ends the turn it runs and takes no task turns until it is on again), ' +
-      'and timer { minutes, order } (null for none): it wakes every so many minutes, 5 to 1440, outside any task, and does what the order says.',
+      'and timer { minutes, order, forWork? } (null for none): it wakes every so many minutes, 5 to 1440, outside any task, and does what the order says; ' +
+      'with forWork true it skips a round while no task is open and nothing failed since the last one.',
     { employee: Id('employee'), ...AgentPatch.shape },
     ({ employee, ...body }) => ({ method: 'PATCH', url: `/api/agents/${employee}`, payload: body }),
   );
