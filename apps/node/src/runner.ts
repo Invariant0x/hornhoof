@@ -63,6 +63,14 @@ function lastBytes(text: string, bytes: number): string {
   return buf.length <= bytes ? text : buf.subarray(buf.length - bytes).toString();
 }
 
+/* Both dispatched and typed turns use the same redaction and tail boundary. */
+export function jobDone(jobId: string, res: RunResult, secrets: string[]): JobDone {
+  return {
+    type: 'job.done', jobId, ok: res.ok, sessionId: res.sessionId,
+    result: redact(res.result, secrets), tail: lastBytes(redact(res.output, secrets), TAIL_BYTES), error: res.error,
+  };
+}
+
 /* The adapter stops its own program at the timeout and says which session it was in, so the next turn goes on in it.
    This only makes sure the job always ends, a while after that. */
 function withTimeout(run: Promise<RunResult>, ms: number): Promise<RunResult> {
@@ -172,13 +180,5 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
   if (signal?.aborted) res = { ...res, ok: false, result: 'Stopped.', error: 'cancelled' };
   const after = await adapter.secrets().catch(() => []);
   const secrets = [...before, ...after, ...given];
-  return {
-    type: 'job.done',
-    jobId: msg.jobId,
-    ok: res.ok,
-    sessionId: res.sessionId,
-    result: redact(res.result, secrets),
-    tail: lastBytes(redact(res.output, secrets), TAIL_BYTES),
-    error: res.error,
-  };
+  return jobDone(msg.jobId, res, secrets);
 }

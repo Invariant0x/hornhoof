@@ -1,8 +1,11 @@
 import { execFile, spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { writeFileSync } from 'node:fs';
+import { closeSync, constants, fstatSync, openSync, readSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { JobUser } from '../isolation.js';
+import { programEnded, type ProgramExit } from '../program-exit.js';
+import { KEEP_BYTES, writePrivate } from '../providers/process.js';
 
 /* How agent sessions look and behave: no tmux bar, the wheel scrolls, the size follows the person who looks last, colours
    pass through, and a finished program leaves its last screen. */
@@ -27,7 +30,7 @@ const KEYS: string[][] = [
   ['bind-key', '-n', 'WheelUpPane', 'if-shell', '-F', '#{||:#{alternate_on},#{pane_in_mode},#{mouse_any_flag}}', 'send-keys -M', 'copy-mode -e'],
 ];
 
-export type Launch = { cwd: string; command: string[]; cols: number; rows: number; envFile?: string };
+export type Launch = { cwd: string; command: string[]; cols: number; rows: number; envFile?: string; outputDir?: string };
 export type Client = { pid: number; tty: string; session: string };
 
 type Options = {
@@ -42,18 +45,45 @@ type Options = {
    values never show on a command line. */
 export function envFile(dir: string, env: Record<string, string>): string {
   const file = join(dir, `.hh-env-${randomBytes(8).toString('hex')}`);
-  const quote = (v: string) => `'${v.replaceAll("'", "'\\''")}'`;
   writeFileSync(file, Object.entries(env).map(([k, v]) => `${k}=${quote(v)}\n`).join(''), { mode: 0o600 });
   return file;
 }
 
 const FROM_ENV_FILE = 'set -a; . "$0"; set +a; rm -f "$0"; exec "$@"';
+const WAIT_FOR_CAPTURE = 'IFS= read -r ready; exec "$@"';
+const CAPTURE = fileURLToPath(new URL('../../hh-capture.cjs', import.meta.url));
+const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+type Recording = { file: string; ready: string; ended: Promise<string | null> | null };
+
+/* Even a damaged or replaced recording cannot make the host read an unbounded file or follow a link. */
+function recorded(file: string): string | null {
+  let fd: number | undefined;
+  try {
+    fd = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    const stat = fstatSync(fd);
+    if (!stat.isFile()) return null;
+    const bytes = Math.min(stat.size, KEEP_BYTES);
+    const buffer = Buffer.alloc(bytes);
+    return buffer.subarray(0, readSync(fd, buffer, 0, bytes, stat.size - bytes)).toString('utf8');
+  } catch {
+    return null;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
+
+const integer = (value: string | undefined): number | null => value && /^-?\d+$/.test(value) ? Number(value) : null;
+const endedAt = (value: string | undefined, observed: string): string => {
+  const time = value ? new Date(Number(value) * 1000) : new Date(observed);
+  return Number.isNaN(time.getTime()) ? observed : time.toISOString();
+};
 
 /* The node's tmux: one server, one session per agent. */
 export class Tmux {
   readonly socket: string;
   private readonly env: NodeJS.ProcessEnv;
   private readonly user: JobUser | null;
+  private readonly recordings = new Map<string, Recording>();
 
   constructor({ socket = 'hh', env, user = null }: Options) {
     this.socket = socket;
@@ -89,16 +119,83 @@ export class Tmux {
   }
 
   /* Starts the program in a new session, or in place of whatever the session ran before. */
-  async launch(name: string, { cwd, command, cols, rows, envFile: file }: Launch): Promise<void> {
+  async launch(name: string, { cwd, command, cols, rows, envFile: file, outputDir }: Launch): Promise<void> {
     const argv = file ? ['sh', '-c', FROM_ENV_FILE, file, ...command] : command;
-    const start = (await this.has(name))
-      ? ['respawn-pane', '-k', '-c', cwd, '-t', name, ...argv]
-      : ['new-session', '-d', '-s', name, '-x', String(cols), '-y', String(rows), '-c', cwd, ...argv];
+    const has = await this.has(name);
+    if (has) await this.ended(name);
+    /* The program starts only after its recorder is listening, including programs that exit immediately. */
+    const gated = outputDir ? ['sh', '-c', WAIT_FOR_CAPTURE, 'hh-start', ...argv] : argv;
+    const start = has
+      ? ['respawn-pane', '-k', '-c', cwd, '-t', name, ...gated]
+      : ['new-session', '-d', '-s', name, '-x', String(cols), '-y', String(rows), '-c', cwd, ...gated];
     /* One command line, so the options hold before a program that ends at once could close the server. */
     const options = OPTIONS.flatMap(([option, value]) => ['set-option', '-g', option!, value!, ';']);
     /* A command that fails ends the line, so the keys come after the program has started. */
     const keys = KEYS.flatMap(c => [';', ...c]);
     await this.run(['start-server', ';', ...options, 'set-option', '-g', 'terminal-features', 'xterm-256color:RGB', ';', ...start, ...keys]);
+    if (this.recordings.has(name)) await this.run(['pipe-pane', '-t', name]).catch(() => {});
+    this.removeRecording(name);
+    if (outputDir) {
+      await this.capture(name, outputDir);
+      await this.keys(name, 'Enter');
+    }
+  }
+
+  private async capture(name: string, dir: string): Promise<void> {
+    const file = join(dir, `.hh-output-${randomBytes(8).toString('hex')}.log`);
+    const ready = `${file}.ready`;
+    writePrivate(file, '', this.user);
+    writePrivate(ready, '', this.user);
+    this.recordings.set(name, { file, ready, ended: null });
+    const command = [process.execPath, CAPTURE, file, ready, String(KEEP_BYTES), this.socket, name].map(quote).join(' ');
+    await this.run(['pipe-pane', '-t', name, `exec ${command}`]);
+    for (const end = Date.now() + 5000; recorded(ready) !== 'ready';) {
+      if (Date.now() >= end) throw new Error('The terminal output recorder did not start.');
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+  }
+
+  /* Read before a pane can be respawned or removed. Keep the first observation time on tmux versions without one. */
+  async ended(name: string): Promise<string | null> {
+    const recording = this.recordings.get(name);
+    if (recording?.ended) return recording.ended;
+    const reading = this.readEnd(name);
+    if (recording) recording.ended = reading;
+    const output = await reading;
+    if (recording && output === null) recording.ended = null;
+    return output;
+  }
+
+  private async readEnd(name: string): Promise<string | null> {
+    const exit = await this.paneExit(name);
+    if (!exit) return null;
+    const file = this.recordings.get(name)?.file;
+    const output = (file ? recorded(file) : null) ?? await this.screen(name);
+    return programEnded(output, exit);
+  }
+
+  private async paneExit(name: string): Promise<ProgramExit | null> {
+    let observed: string | undefined;
+    const deadline = Date.now() + 5000;
+    for (;;) {
+      const row = await this.run(['display-message', '-p', '-t', name, '#{pane_dead}|#{pane_dead_status}|#{pane_dead_signal}|#{pane_dead_time}']).catch(() => '');
+      const [dead, status, signal, time] = row.trim().split('|');
+      if (dead !== '1') return null;
+      observed ??= new Date().toISOString();
+      const code = integer(status);
+      const number = integer(signal) || null;
+      /* EOF can mark the pane dead before tmux reaps the process and fills in its native status. */
+      if (code !== null || number !== null || Date.now() >= deadline) return { code, signal: number, at: endedAt(time, observed) };
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+  }
+
+  private removeRecording(name: string): void {
+    const recording = this.recordings.get(name);
+    if (!recording) return;
+    this.recordings.delete(name);
+    rmSync(recording.file, { force: true });
+    rmSync(recording.ready, { force: true });
   }
 
   /* Pastes text the way a terminal does, bracketed when the program asked for it, so a long prompt arrives as one paste. */
@@ -136,11 +233,15 @@ export class Tmux {
   }
 
   async kill(name: string): Promise<void> {
+    await this.ended(name);
     await this.run(['kill-session', '-t', `=${name}`]).catch(() => {});
+    this.removeRecording(name);
   }
 
   async stopAll(): Promise<void> {
+    for (const name of this.recordings.keys()) await this.ended(name);
     await this.run(['kill-server']).catch(() => {});
+    for (const name of this.recordings.keys()) this.removeRecording(name);
   }
 
   /* A viewer: a terminal of its own size attached to the session, read-only unless the person may type. */

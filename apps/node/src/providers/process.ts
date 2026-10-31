@@ -5,7 +5,7 @@ import type { LoginIo } from '../runner.js';
 import type { ProgramExit } from '../program-exit.js';
 
 /* Output kept in memory per run. The tail sent to Hornhoof is cut from the end of it. */
-const KEEP_BYTES = 256 * 1024;
+export const KEEP_BYTES = 256 * 1024;
 const KILL_GRACE_MS = 2000;
 
 /* The node's own key and settings never reach the agent, which runs whatever its prompt asks. */

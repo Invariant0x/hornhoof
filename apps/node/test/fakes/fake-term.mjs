@@ -15,6 +15,9 @@ import { randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
+import { crash } from './crash.mjs';
+
+if (process.env.FAKE_CRASH_START) crash(process.env.FAKE_CRASH_START);
 
 const args = process.argv.slice(2);
 const flag = name => (args.includes(name) ? args[args.indexOf(name) + 1] : null);
@@ -64,6 +67,8 @@ for await (const typed of createInterface({ input: process.stdin })) {
     continue;
   }
   await hook('prompt', { prompt: line });
+  if (line.startsWith('CRASH')) crash(line.includes('LONG') ? 'long' : '');
+  if (line.includes('HANG_EXIT')) process.stdout.write('exit-test running\n');
   if (line.includes('HANG')) continue;
   if (line.includes('INTERRUPT')) {
     appendFileSync(log, JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: '[Request interrupted by user]' }] } }) + '\n');

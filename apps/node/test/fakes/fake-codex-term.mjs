@@ -6,6 +6,9 @@ import { randomUUID } from 'node:crypto';
 import { appendFileSync, mkdirSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
+import { crash } from './crash.mjs';
+
+if (process.env.FAKE_CRASH_START) crash(process.env.FAKE_CRASH_START);
 
 const args = process.argv.slice(2);
 const home = process.env.CODEX_HOME ?? '/tmp';
@@ -27,6 +30,8 @@ for await (const typed of createInterface({ input: process.stdin })) {
   const line = typed.replaceAll('\u001b', '');
   event({ type: 'task_started', turn_id: randomUUID() });
   item('UserMessage', line);
+  if (line.startsWith('CRASH')) crash(line.includes('LONG') ? 'long' : '');
+  if (line.includes('HANG_EXIT')) process.stdout.write('exit-test running\n');
   if (line.includes('HANG')) continue;
   if (line.includes('ABORT')) {
     event({ type: 'turn_aborted', reason: 'interrupted' });
