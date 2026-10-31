@@ -28,6 +28,10 @@ function deferred<T>(): Deferred<T> {
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
+function exitError(output: string | null, signedOut: RegExp | null, fallback: JobError): JobError {
+  return output && signedOut?.test(output) ? 'not_logged_in' : fallback;
+}
+
 /* A turn running now: one Hornhoof sent, or one a person typed, whose events the host sends itself. A typed turn keeps
    what happened until Hornhoof answers its turn.open (early), and how it ended if it ended before that (over). */
 type Turn = {
@@ -194,9 +198,7 @@ export class TerminalHost {
 
   async stop(): Promise<void> {
     this.closeViews();
-    for (const a of this.agents.values()) {
-      if (a.watch) clearInterval(a.watch);
-    }
+    for (const a of this.agents.values()) this.unwatch(a);
     this.bridge.stop();
     await this.opts.tmux.stopAll();
   }
@@ -224,11 +226,7 @@ export class TerminalHost {
 
   private async turnIn(a: Agent, job: TermJob): Promise<RunResult> {
     const { input, program } = job;
-    const fail = async (error: RunResult['error'], output?: string): Promise<RunResult> => {
-      const ended = error === 'agent_failed' || error === 'not_logged_in' ? await this.opts.tmux.ended(a.name) : null;
-      const details = ended ?? output ?? await this.screen(job.key);
-      return { ok: false, sessionId: a.sessionId, result: '', output: details, error: ended && job.signedOut.test(details) ? 'not_logged_in' : error, limits: a.limits };
-    };
+    const fail = (error: RunResult['error'], output?: string) => this.failedTurn(a, job, error, output);
     /* A turn a person typed may still run, or wait for the rest of its log; Hornhoof's turn goes in after it, or into it
        once the time Hornhoof gave this turn is over. Nothing stops the program: only its own end or a person does. */
     const deadline = Date.now() + input.timeoutMs;
@@ -363,6 +361,12 @@ export class TerminalHost {
     }
   }
 
+  private async failedTurn(a: Agent, job: TermJob, error: RunResult['error'], output?: string): Promise<RunResult> {
+    const ended = error === 'agent_failed' || error === 'not_logged_in' ? await this.opts.tmux.ended(a.name) : null;
+    const details = ended ?? output ?? await this.screen(job.key);
+    return { ok: false, sessionId: a.sessionId, result: '', output: details, error: exitError(ended, job.signedOut, error), limits: a.limits };
+  }
+
   /* While its program runs the host reads the agent's log, where a turn a person typed into Codex shows, and ends a typed
      turn whose program ended or that ran too long. Hornhoof's own turns look after themselves. */
   private watch(a: Agent): void {
@@ -376,22 +380,29 @@ export class TerminalHost {
     a.watch.unref();
   }
 
+  private unwatch(a: Agent): void {
+    if (a.watch) clearInterval(a.watch);
+    a.watch = null;
+  }
+
   private async look(a: Agent): Promise<void> {
     this.drain(a);
     if (a.turn && !a.turn.typed) return;
     const alive = await this.opts.tmux.alive(a.name);
     if (a.turn && !a.turn.typed) return;
     if (!alive) {
-      const turn = a.turn;
-      const output = turn?.typed ? await this.opts.tmux.ended(a.name) : null;
-      if (a.turn !== turn) return;
-      a.busy = false;
-      this.programEnded(a);
-      this.finishTyped(a, '', output && a.signedOut?.test(output) ? 'not_logged_in' : 'agent_failed', output ?? '');
-      if (a.watch) clearInterval(a.watch);
-      a.watch = null;
-      return;
+      await this.endedTyped(a);
     }
+  }
+
+  private async endedTyped(a: Agent): Promise<void> {
+    const turn = a.turn;
+    const output = turn?.typed ? await this.opts.tmux.ended(a.name) : null;
+    if (a.turn !== turn) return;
+    a.busy = false;
+    this.programEnded(a);
+    this.finishTyped(a, '', exitError(output, a.signedOut, 'agent_failed'), output ?? '');
+    this.unwatch(a);
   }
 
   /* A person cleared the conversation in Claude Code, which goes on in a new session with a log of its own; or Kimi Code
