@@ -116,6 +116,20 @@ describe('templates', () => {
     }
   });
 
+  it('has a task watchdog and a failure collector in operations, each waking on its own timer with the tools to watch', () => {
+    const ops = templates.roster('operations');
+    expect(ops.filter(r => r.inDefault).map(r => r.id)).toEqual(['OPS-HEAD', 'OPS-INTEG', 'OPS-ACCT', 'OPS-FIX', 'OPS-WATCH', 'OPS-BUGS']);
+    const watch = templates.roles.get('OPS-WATCH')!;
+    const bugs = templates.roles.get('OPS-BUGS')!;
+    expect([watch.timer?.minutes, bugs.timer?.minutes]).toEqual([10, 180]);
+    expect(watch.skills.find(s => s.id === 'ops-task-watch')?.on).toBe(true);
+    expect(bugs.skills.find(s => s.id === 'ops-failure-review')?.on).toBe(true);
+    expect(templates.skills.get('ops-task-watch')!.grants).toEqual(['agents', 'message_employee']);
+    expect(templates.skills.get('ops-failure-review')!.grants).toEqual(['failures', 'agents', 'message_employee']);
+    for (const r of roles) if (r.timer) expect(r.timer.order.length, r.id).toBeLessThanOrEqual(2000);
+    expect(roles.filter(r => r.timer).map(r => r.id).sort()).toEqual(['OPS-BUGS', 'OPS-WATCH']);
+  });
+
   it('has the full development roster', () => {
     const dev = templates.roster('development');
     const ids = dev.filter(r => r.inDefault).map(r => r.id);

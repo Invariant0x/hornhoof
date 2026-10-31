@@ -6,10 +6,7 @@ import { appendEvent } from '../events/store.js';
 import { insertTurn, liveSubscription, onAgent, pump } from '../conversation/queue.js';
 import type { AgentRow } from './find.js';
 
-/* How often, in minutes, an employee may wake on its timer, and how long its order may be. */
-export const TIMER_MIN = 5;
-export const TIMER_MAX = 1440;
-export const TIMER_ORDER_MAX = 2000;
+export { TIMER_MAX, TIMER_MIN, TIMER_ORDER_MAX } from '../templates/load.js';
 /* Hornhoof looks for due rounds this often. */
 const TICK_MS = 60_000;
 

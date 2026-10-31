@@ -269,6 +269,8 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
             roleKey: role.id,
             skills: line.skills,
             templateHashes: hashes,
+            /* A role that watches the company wakes on its timer from the hire on. */
+            ...(role.timer ? { timerMinutes: role.timer.minutes, timerOrder: role.timer.order, timerAt: new Date() } : {}),
             createdBy: personOf(me),
           })
           .returning();

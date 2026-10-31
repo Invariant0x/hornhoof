@@ -15,6 +15,11 @@ export type Skill = { id: string; title: Lang; description: Lang; kind: SkillKin
 export const GRANTS = ['agents', 'failures', 'message_employee'] as const;
 export type Grant = (typeof GRANTS)[number];
 export type RoleSkill = { id: string; on: boolean; locked: boolean };
+/* How often, in minutes, an employee may wake on its timer, and how long its order may be; a role's timer keeps to them too. */
+export const TIMER_MIN = 5;
+export const TIMER_MAX = 1440;
+export const TIMER_ORDER_MAX = 2000;
+export type RoleTimer = { minutes: number; order: string };
 export type Role = {
   id: string;
   department: TemplateKey;
@@ -26,6 +31,8 @@ export type Role = {
   inDefault: boolean;
   /* Where the role stands among its department's default gates; none for a role that is not a gate. */
   gate: number | null;
+  /* A hire of this role wakes on this timer from the start. */
+  timer: RoleTimer | null;
   skills: RoleSkill[];
   body: string;
   hash: string;
@@ -62,6 +69,7 @@ const RoleHead = z.object({
   /* Where the role stands in its roster, after the head. */
   order: z.number().int().default(50),
   gate: z.number().int().positive().optional(),
+  timer: z.object({ minutes: z.number().int().min(TIMER_MIN).max(TIMER_MAX), order: z.string().trim().min(1).max(TIMER_ORDER_MAX) }).strict().optional(),
   /* A plain id is on by default; { id, on: false } is offered but off. Core and head skills are added, not listed. */
   skills: z.array(z.union([z.string(), z.object({ id: z.string(), on: z.boolean() })])).default([]),
 });
@@ -121,6 +129,7 @@ export function loadTemplates(dir: string): Templates {
         perProduct: r.perProduct,
         inDefault: r.default,
         gate: r.gate ?? null,
+        timer: r.timer ?? null,
         skills: [...locked, ...listed.filter(s => !locked.some(l => l.id === s.id))],
         body,
         hash: textHash(body),

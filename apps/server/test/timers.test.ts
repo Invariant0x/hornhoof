@@ -68,6 +68,21 @@ describe('timers', () => {
     expect(await timerTick(app.ctx, new Date(timerAt.getTime() + 26 * MIN))).toBe(0);
   });
 
+  it("gives a hire the timer of its role, starting from the hire", async () => {
+    const { app, db, ceo, orchestrator } = await company();
+    const [ops] = await db.select().from(departments).where(isNull(departments.parentId));
+    const role = app.ctx.templates.roles.get('OPS-WATCH')!;
+    const hired = await app.inject({
+      method: 'POST',
+      url: `/api/departments/${ops!.id}/staff`,
+      payload: { people: [{ role: 'OPS-WATCH', name: 'Walt', model: '', subscription: orchestrator.subscriptionId, skills: role.skills.filter(s => s.on).map(s => s.id) }] },
+      ...as(ceo),
+    });
+    const [walt] = await db.select().from(agents).where(eq(agents.id, hired.json().hired[0] as string));
+    expect([walt!.timerMinutes, walt!.timerOrder]).toEqual([10, role.timer!.order]);
+    expect(walt!.timerAt!.getTime()).toBeGreaterThan(Date.now() - MIN);
+  });
+
   it('lets an employee that is off or has no subscription sleep through its timer', async () => {
     const { app, db, ceo, wandaId } = await company();
     await patch(app, ceo, wandaId, { timer: { minutes: 10, order: 'Look around.' } });
