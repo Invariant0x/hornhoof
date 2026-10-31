@@ -36,7 +36,6 @@ type Turn = {
   onEvent(e: AgentEvent): void;
   typed: boolean;
   seq: number;
-  deadline: number;
   ref?: string;
   early?: AgentEvent[] | null;
   over?: { message: string; error: JobError; sessionId: string | null } | null;
@@ -70,7 +69,6 @@ type Agent = {
   contextUsed: number | null;
   contextSize: number | null;
   viewers: number;
-  idle: NodeJS.Timeout | null;
   /* Reads the log and looks at the program while it runs. */
   watch: NodeJS.Timeout | null;
   /* Hornhoof's turns, one after another. */
@@ -108,11 +106,8 @@ type Options = {
   /* How long a program may take to show its prompt. Kimi Code takes most of a minute on a busy machine. */
   readyMs?: number;
   pollMs?: number;
-  /* A program idle this long with nobody watching ends; its next turn resumes the session. */
-  idleMs?: number;
-  /* How long a typed turn waits for Hornhoof to open it, and how long it may run. */
+  /* How long a typed turn waits for Hornhoof to open it. */
   openMs?: number;
-  typedMs?: number;
   /* How long a program started with nothing to type gets to connect to its tools. */
   toolsMs?: number;
   /* How long the host waits for the program to take a prompt before it presses Enter again. */
@@ -169,9 +164,7 @@ export class TerminalHost {
   private readonly bridge: Bridge;
   private readonly readyMs: number;
   private readonly pollMs: number;
-  private readonly idleMs: number;
   private readonly openMs: number;
-  private readonly typedMs: number;
   private readonly toolsMs: number;
   private readonly enterWaitMs: number;
   /* Views being opened, and those Hornhoof closed meanwhile. */
@@ -184,9 +177,7 @@ export class TerminalHost {
     this.bridge = new Bridge(opts.hornhoof, (key, event, body) => this.hook(key, event, body));
     this.readyMs = opts.readyMs ?? 120_000;
     this.pollMs = opts.pollMs ?? 500;
-    this.idleMs = opts.idleMs ?? 10 * 60_000;
     this.openMs = opts.openMs ?? 8000;
-    this.typedMs = opts.typedMs ?? 60 * 60_000;
     this.toolsMs = opts.toolsMs ?? 15_000;
     this.enterWaitMs = opts.enterWaitMs ?? 4000;
     this.cols = opts.cols ?? 160;
@@ -200,7 +191,6 @@ export class TerminalHost {
   async stop(): Promise<void> {
     this.closeViews();
     for (const a of this.agents.values()) {
-      if (a.idle) clearTimeout(a.idle);
       if (a.watch) clearInterval(a.watch);
     }
     this.bridge.stop();
@@ -214,7 +204,7 @@ export class TerminalHost {
   private agent(key: string): Agent {
     let a = this.agents.get(key);
     if (!a) {
-      a = { key, name: `a-${key}`, program: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, viewers: 0, idle: null, watch: null, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null };
+      a = { key, name: `a-${key}`, program: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, viewers: 0, watch: null, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null };
       this.agents.set(key, a);
     }
     return a;
@@ -230,10 +220,10 @@ export class TerminalHost {
 
   private async turnIn(a: Agent, job: TermJob): Promise<RunResult> {
     const { input, program } = job;
-    if (a.idle) clearTimeout(a.idle);
     const fail = async (error: RunResult['error'], output?: string): Promise<RunResult> => ({ ok: false, sessionId: a.sessionId, result: '', output: output ?? (await this.screen(job.key)), error, limits: a.limits });
+    /* A turn a person typed may still run, or wait for the rest of its log; Hornhoof's turn goes in after it, or into it
+       once the time Hornhoof gave this turn is over. Nothing stops the program: only its own end or a person does. */
     const deadline = Date.now() + input.timeoutMs;
-    /* A turn a person typed may still run, or wait for the rest of its log; Hornhoof's turn goes in after it. */
     for (this.drain(a); a.busy && Date.now() < deadline; this.drain(a)) await sleep(this.pollMs);
     await a.settling;
 
@@ -268,7 +258,7 @@ export class TerminalHost {
     a.stepSaid = false;
     this.bridge.setToken(job.key, input.tools?.token ?? null);
     const starting = input.prompt ? null : (tools ?? Promise.resolve());
-    const turn: Turn = { jobId: null, onEvent: input.onEvent ?? (() => {}), typed: false, seq: 0, deadline, ...(starting ? { starting: true } : {}) };
+    const turn: Turn = { jobId: null, onEvent: input.onEvent ?? (() => {}), typed: false, seq: 0, ...(starting ? { starting: true } : {}) };
     if (starting) a.starting = starting;
     a.turn = turn;
     a.ended = deferred();
@@ -337,11 +327,6 @@ export class TerminalHost {
           const screen = await this.screen(job.key);
           return await fail(job.signedOut.test(screen) ? 'not_logged_in' : 'agent_failed', screen);
         }
-        if (Date.now() > deadline) {
-          await this.opts.tmux.keys(a.name, 'Escape');
-          a.busy = false;
-          return await fail('timeout');
-        }
       }
     } finally {
       if (starting && a.starting === starting) a.starting = null;
@@ -350,7 +335,6 @@ export class TerminalHost {
         a.turn = null;
         a.ended = null;
       }
-      this.restLater(a);
     }
   }
 
@@ -378,11 +362,6 @@ export class TerminalHost {
       if (a.watch) clearInterval(a.watch);
       a.watch = null;
       return;
-    }
-    if (a.turn?.typed && Date.now() > a.turn.deadline) {
-      await this.opts.tmux.keys(a.name, 'Escape');
-      a.busy = false;
-      this.finishTyped(a, '', 'timeout');
     }
   }
 
@@ -625,12 +604,11 @@ export class TerminalHost {
      being read now. */
   private async openTyped(a: Agent, text: string, fromLog = false): Promise<void> {
     const start = a.starting;
-    if (a.idle) clearTimeout(a.idle);
     a.fresh = false;
     if (!fromLog) this.drain(a);
     a.lastText = null;
     a.stepSaid = false;
-    const turn: Turn = { jobId: null, onEvent: () => {}, typed: true, seq: 0, deadline: Date.now() + this.typedMs, ref: randomUUID(), early: [], over: null, opened: deferred() };
+    const turn: Turn = { jobId: null, onEvent: () => {}, typed: true, seq: 0, ref: randomUUID(), early: [], over: null, opened: deferred() };
     a.turn = turn;
     a.unopened.push(turn);
     this.watch(a);
@@ -682,7 +660,6 @@ export class TerminalHost {
     /* Hornhoof has not answered yet: the end goes out with its answer. */
     if (turn.early) turn.over = { message, error, sessionId: a.sessionId };
     else this.typedDone(turn, message, error, a.sessionId);
-    this.restLater(a);
   }
 
   private typedDone(turn: Turn, message: string, error: JobError, sessionId: string | null): void {
@@ -710,17 +687,6 @@ export class TerminalHost {
     for (const view of this.views.values()) view.child.kill();
   }
 
-  /* Ends a program nobody needs for a while; the pane keeps its last screen and the next turn resumes the session. */
-  private restLater(a: Agent): void {
-    if (a.idle) clearTimeout(a.idle);
-    a.idle = setTimeout(async () => {
-      if (a.turn || a.busy || a.viewers > 0) return;
-      const pid = await this.opts.tmux.programPid(a.name);
-      if (pid) process.kill(pid, 'SIGTERM');
-    }, this.idleMs);
-    a.idle.unref();
-  }
-
   async open(m: Msg<'term.open'>): Promise<void> {
     const a = this.agent(m.agentKey);
     this.viewsOpening.add(m.termId);
@@ -741,7 +707,6 @@ export class TerminalHost {
     const view: View = { child, key: m.agentKey, write: m.write, mask: new StreamMask(this.opts.secrets), decoder: new StringDecoder('utf8'), pending: '', timer: null, quiet: null };
     this.views.set(m.termId, view);
     a.viewers++;
-    if (a.idle) clearTimeout(a.idle);
     const flush = () => {
       view.timer = null;
       while (view.pending) {
@@ -767,7 +732,6 @@ export class TerminalHost {
       this.views.delete(m.termId);
       a.viewers = Math.max(0, a.viewers - 1);
       this.opts.send({ type: 'term.exit', termId: m.termId });
-      this.restLater(a);
     });
     if (starts) this.opts.send({ type: 'agent.start', agentKey: m.agentKey });
   }

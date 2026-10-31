@@ -46,7 +46,7 @@ describe('the orchestrator\'s conversation', () => {
     const { app, ceo, builtin } = await live();
     expect((await start(app, ceo)).json()).toEqual({ started: true });
     const run = await nextRun(builtin);
-    expect(run).toMatchObject({ prompt: FIRST_TURN, sessionId: null, timeoutMs: 900000 });
+    expect(run).toMatchObject({ prompt: FIRST_TURN, sessionId: null, timeoutMs: 2 * 3_600_000 });
     expect(run.instructions?.startsWith(ORCHESTRATOR_INSTRUCTIONS)).toBe(true);
     expect(run.toolToken).toMatch(/^[A-Za-z0-9_-]{40,}$/);
     expect((await start(app, ceo)).json()).toEqual({ started: false });

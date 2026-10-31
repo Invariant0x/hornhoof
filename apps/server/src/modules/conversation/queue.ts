@@ -18,9 +18,9 @@ import { preface } from './prompt.js';
    keep the whole window, since they hold the department's and the company's picture. */
 export const WORKER_COMPACT_WINDOW = 500_000;
 
-export const CONVERSATION_TIMEOUT_MS = 15 * 60_000;
-/* A turn on a task may run long: the work, its tests and a review fit in one. */
-export const TASK_TURN_TIMEOUT_MS = 45 * 60_000;
+/* Any turn may run as long as its work takes. This only ends one that hangs, a program frozen or waiting for input
+   nobody gives, so the agent's next turns are not stuck behind it; the agent goes on in the same session. */
+export const TURN_TIMEOUT_MS = 2 * 3_600_000;
 
 export type AgentState = {
   ready: boolean;
@@ -71,7 +71,7 @@ export async function insertTurn(ctx: Ctx, t: Turn): Promise<string> {
       agentId: t.agentId,
       kind: 'conversation',
       prompt: t.prompt,
-      timeoutMs: t.taskId ? TASK_TURN_TIMEOUT_MS : CONVERSATION_TIMEOUT_MS,
+      timeoutMs: TURN_TIMEOUT_MS,
       createdBy: t.createdBy,
       taskId: t.taskId ?? null,
     })
@@ -125,7 +125,7 @@ export async function openTypedTurn(ctx: Ctx, node: NodeIdentity, agentId: strin
         status: 'running',
         startedAt: new Date(),
         prompt: text,
-        timeoutMs: CONVERSATION_TIMEOUT_MS,
+        timeoutMs: TURN_TIMEOUT_MS,
         createdBy: personId,
         toolTokenHash: hashToken(token),
         instructionsHash: last?.hash ?? null,

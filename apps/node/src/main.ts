@@ -192,7 +192,7 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
       };
       let seq = 0;
       const onEvent = (event: AgentEvent) => emit({ type: 'job.event', jobId: m.jobId, seq: seq++, event });
-      done = await runJob(tracked, m, dir, { hidden, signal, toolsUrl, onEvent });
+      done = await runJob(tracked, m, dir, { hidden, signal, toolsUrl, onEvent, untimed: Boolean(host && terminal && m.workspace?.key) });
     } catch (err) {
       done = { type: 'job.done', jobId: m.jobId, ok: false, sessionId: null, result: '', tail: message(err), error: 'agent_failed' };
     }

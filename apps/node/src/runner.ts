@@ -97,6 +97,8 @@ type RunOptions = {
   onEvent?: (event: AgentEvent) => void;
   /* Runs git; tests pass a fake. */
   git?: Git;
+  /* The turn runs in a live program that people watch: only its own end or a stop ends it, never a time limit. */
+  untimed?: boolean;
 };
 
 /* An event as people may see it: no secrets, and within the sizes the protocol allows. */
@@ -115,7 +117,7 @@ export function tidy(event: AgentEvent, secrets: string[]): AgentEvent {
 }
 
 /* Always ends with a job.done, whatever breaks on the way. */
-export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string, { hidden = [], signal, toolsUrl, onEvent, git }: RunOptions = {}): Promise<JobDone> {
+export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string, { hidden = [], signal, toolsUrl, onEvent, git, untimed = false }: RunOptions = {}): Promise<JobDone> {
   /* Programs refresh their tokens during a run, so the values from before and after are both hidden. */
   const before = await adapter.secrets().catch(() => []);
   const repo = msg.workspace?.repo ?? null;
@@ -159,7 +161,8 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
       onEvent: emit,
       ...(env ? { env } : {}),
     };
-    res = await withTimeout(adapter.run(input).catch((err: unknown) => failed(message(err), 'agent_failed')), msg.timeoutMs);
+    const run = adapter.run(input).catch((err: unknown) => failed(message(err), 'agent_failed'));
+    res = await (untimed ? run : withTimeout(run, msg.timeoutMs));
     if (res.sessionId) rememberSession(dir, res.sessionId, workDir);
   } catch (err) {
     res = failed(message(err), 'agent_failed');

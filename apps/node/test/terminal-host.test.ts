@@ -148,6 +148,25 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     expect(await running).toMatchObject({ ok: false, error: 'cancelled' });
   });
 
+  it('lets a turn run past the time it was given, until it is called off', async () => {
+    await setUp();
+    await host.run(job('a5', 'warm up'));
+    const stop = new AbortController();
+    let over = false;
+    const running = host.run(job('a5', 'HANG', { timeoutMs: 300, signal: stop.signal })).finally(() => (over = true));
+    await new Promise(r => setTimeout(r, 1500));
+    expect(over).toBe(false);
+    stop.abort();
+    expect(await running).toMatchObject({ ok: false, error: 'cancelled' });
+  });
+
+  it('keeps the program running after its turn, however long nobody needs it', async () => {
+    await setUp();
+    await host.run(job('a6', 'one'));
+    await new Promise(r => setTimeout(r, 1000));
+    expect(await tmux.alive('a-a6')).toBe(true);
+  });
+
   it('takes the next turn at once after one was stopped, though the program says nothing when stopped', async () => {
     await setUp();
     const first = await host.run(job('a11', 'warm up'));
@@ -439,15 +458,6 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     expect(host.typedJobs()).toEqual([]);
     expect(await host.run(job('b3', 'next', { sessionId: first.sessionId }))).toMatchObject({ ok: true, result: 'echo: next' });
   }, 30_000);
-
-  it('ends a typed turn that runs too long', async () => {
-    await setUp({ typedMs: 1000 });
-    await host.run(job('b4', 'hello'));
-    await typeTurn('b4', 'u3', 'HANG typed', 'job-long');
-    await until(() => Boolean(done('job-long')));
-    expect(done('job-long')).toMatchObject({ ok: false, error: 'timeout' });
-    expect(host.typedJobs()).toEqual([]);
-  });
 
   it("takes Hornhoof's late answer for a typed turn that still runs", async () => {
     await setUp({ openMs: 300 });

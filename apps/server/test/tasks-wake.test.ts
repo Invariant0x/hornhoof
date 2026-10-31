@@ -155,7 +155,7 @@ describe('waking agents for their tasks', () => {
     expect(queued).toHaveLength(1);
     expect(queued[0]).toMatchObject({ taskId: task.id, status: 'queued', kind: 'conversation' });
     expect(queued[0]!.prompt).toContain('#1 "Checkout API"');
-    expect(queued[0]!.timeoutMs).toBeGreaterThan(15 * 60_000);
+    expect(queued[0]!.timeoutMs).toBe(2 * 3_600_000);
   });
 
   it('marks a task working when its turn starts', async () => {
