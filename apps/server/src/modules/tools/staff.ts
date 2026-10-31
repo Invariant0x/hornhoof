@@ -146,7 +146,7 @@ export async function staffingOptions(ctx: Pick<Ctx, 'db' | 'templates'>, compan
   return {
     department: { id: dept.id, name: deptName(dept), products: products.map(p => ({ id: p.id, name: deptName(p) })), employees },
     roster: dept.templateKey
-      ? ctx.templates.roster(dept.templateKey).map(r => ({ role: r.id, title: r.title.en, kind: r.kind, tier: r.tier, perProduct: r.perProduct, inDefault: r.inDefault, skills: r.skills }))
+      ? ctx.templates.roster(dept.templateKey).map(r => ({ role: r.id, title: r.title.en, kind: r.kind, tier: r.tier, perProduct: r.perProduct, inDefault: r.inDefault, timer: r.timer, skills: r.skills }))
       : [],
     subscriptions: (await servingSubscriptions(ctx, companyId, spotIn(dept))).map(({ id, provider, label, owner, models }) => ({ id, provider, label, owner, models })),
   };

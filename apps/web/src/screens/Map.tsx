@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { deptLabel, errorText, useT, type Messages } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
 import { useStream, type LiveMessage } from '../live';
 import { useOrg } from '../org';
 import type { Department, Employee, EmployeeStatus, Endpoint, Me, Org, SubView } from '../types';
 import { accessText } from '../ui/AccessPicker';
+import { useChannels } from '../ui/channels';
 import { Bar, percent } from '../ui/Bar';
 import { usePanZoom, ZoomBar } from '../ui/canvas';
 import { Edge } from '../ui/Edge';
@@ -103,6 +104,8 @@ const GAUGE_TRACK: Point[] = Array.from({ length: 37 }, (_, i) => {
 /* The way from an endpoint to the hub: down from a person's chip, or in from a department along its trace. */
 function toHub(e: Endpoint, org: Org): Point[] | null {
   if (e.kind === 'orchestrator') return [];
+  /* Agents inside one department run on its card. */
+  if (e.kind === 'agent') return null;
   if (e.kind === 'person') {
     const i = org.people.findIndex(p => p.id === e.id);
     if (i < 0) return null;
@@ -121,6 +124,9 @@ export function pulsePath(from: Endpoint, to: Endpoint, org: Org): Point[] | nul
   const pts = [...a, ...[...b].reverse()];
   return pts.length >= 2 ? pts : null;
 }
+
+const endKey = (e: Endpoint) => (e.kind === 'orchestrator' ? e.kind : `${e.kind}:${e.id}`);
+const wayKey = (from: Endpoint, to: Endpoint) => `${endKey(from)}>${endKey(to)}`;
 
 /* Work going back up, to a person or from a department to the hub, runs amber; work handed down runs cyan. */
 export const pulseTone = (from: Endpoint, to: Endpoint): 'c' | 'a' => (to.kind === 'person' || (to.kind === 'orchestrator' && from.kind === 'department') ? 'a' : 'c');
@@ -248,9 +254,16 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator, inside = false, 
     [flash],
   );
 
+  /* Each way a message went keeps running for ten minutes after the last one, so a glance shows where work goes on. */
+  const seed = useMemo(() => (org?.live ?? []).map(c => ({ key: wayKey(c.from, c.to), at: c.at, value: { from: c.from, to: c.to } })), [org?.live]);
+  const channels = useChannels(seed);
+  const { touch } = channels;
+
   /* Real signals only: a pulse runs once per message or move of a task. useOrg keeps the working count and the org itself fresh. */
   useStream((m: LiveMessage) => {
-    if (m.type !== 'pulse' || still) return;
+    if (m.type !== 'pulse' || m.from.kind === 'agent' || m.to.kind === 'agent') return;
+    touch(wayKey(m.from, m.to), { from: m.from, to: m.to });
+    if (still) return;
     const pts = org && pulsePath(m.from, m.to, org);
     if (pts) fire(pts, m);
     /* A pulse to a department that was just made comes before the map has fetched it, so it waits a little for it. */
@@ -365,6 +378,10 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator, inside = false, 
             <path key={depts[i]!.id} className="tr" data-wire={depts[i]!.id} d={toD(s.path)} />
           ))}
           {spots.map((s, i) => s.path.length > 2 && <circle key={depts[i]!.id} className="via" cx={s.path[2]![0]} cy={s.path[2]![1]} r="4" />)}
+          {channels.live.map(c => {
+            const pts = pulsePath(c.from, c.to, org);
+            return pts && <path key={wayKey(c.from, c.to)} className={`tr live ${pulseTone(c.from, c.to)}`} d={toD(pts)} />;
+          })}
           {shots.map(s => (
             <Pulse key={s.key} pts={s.pts} speed={PULSE_SPEED} once tone={s.tone} />
           ))}

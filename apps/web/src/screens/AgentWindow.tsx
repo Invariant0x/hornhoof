@@ -6,6 +6,7 @@ import { PROVIDER_NAMES } from '../providers';
 import type { AgentCardView, EventView, Me, OrchestratorState, Org, StaffLine, StructureItem, SubView, TemplateKey } from '../types';
 import { AgentTerminal } from '../ui/AgentTerminal';
 import { Markdown } from '../ui/Markdown';
+import { Notebook } from '../ui/Notebook';
 import { StaffCard } from '../ui/StaffCard';
 import { StructureCard } from '../ui/StructureCard';
 import { orchestratorStatus } from './Map';
@@ -85,6 +86,8 @@ export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Pro
   const [staffByHand, setStaffByHand] = useState<{ id: string; name: string } | null>(null);
   /* The terminal shows unless the person asked for the log or the node could not show one. */
   const [asLog, setAsLog] = useState(false);
+  /* The orchestrator's window shows the company notebook in place of his conversation while this is on. */
+  const [notebook, setNotebook] = useState(false);
   const [noTerminal, setNoTerminal] = useState(false);
   const asked = useRef<number | null>(null);
   const input = useRef<HTMLTextAreaElement>(null);
@@ -293,12 +296,15 @@ export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Pro
   );
   const hasCards = Boolean(pending || staffing || (!open && staffByHand) || byHand || offerByHand || failure !== null);
 
+  /* Who wrote a message no person typed: the orchestrator, an employee by its name, or Hornhoof itself. */
+  const author = (from: string, name: string) => (from === 'orchestrator' ? t.window.orchestrator : from === 'agent' && name ? name : t.window.hornhoof);
+
   function line(e: EventView, i: number) {
     switch (e.kind) {
       case 'message':
         return (
           <div className="t-u">
-            &gt; <em>{e.person?.name ?? (field(e.data, 'from') === 'orchestrator' ? t.window.orchestrator : t.window.hornhoof)}:</em> {field(e.data, 'text')}
+            &gt; <em>{e.person?.name ?? author(field(e.data, 'from'), field(e.data, 'name'))}:</em> {field(e.data, 'text')}
           </div>
         );
       case 'text':
@@ -401,6 +407,13 @@ export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Pro
             </svg>
           </button>
         )}
+        {orchestrator && (
+          <button type="button" aria-label={t.window.notebook} title={t.window.notebook} aria-pressed={notebook} onClick={() => setNotebook(v => !v)}>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M6 4h11v16H6zM9 4v16M12 9h3M12 13h3" />
+            </svg>
+          </button>
+        )}
         {onCard && (
           <button type="button" aria-label={t.window.card} onClick={onCard}>
             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -414,14 +427,15 @@ export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Pro
           </svg>
         </button>
       </div>
-      {terminal && <AgentTerminal agentId={agentId} onGone={() => setNoTerminal(true)} />}
-      {terminal && hasCards && (
+      {notebook && <Notebook />}
+      {!notebook && terminal && <AgentTerminal agentId={agentId} onGone={() => setNoTerminal(true)} />}
+      {!notebook && terminal && hasCards && (
         <div className="t-cards">
           {cards}
           {after}
         </div>
       )}
-      {!terminal && (
+      {!notebook && !terminal && (
         <div className="t-log" ref={log} role="log">
           <div className="t-wel">
             <div className="w1">

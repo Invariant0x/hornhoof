@@ -17,6 +17,7 @@ const emp = (id: string, roleId: string | null, kind: Employee['kind'] = 'worker
   on: true,
   task: null,
   effort: null,
+  timer: null,
   context: null,
 });
 const dept = (employees: Employee[], roles: DeptRole[]): Department => ({
@@ -137,5 +138,17 @@ describe('the department schema', () => {
       [s.frames[1]!.x + FW / 2, FT],
     ]);
     expect(p.toMember('nobody')).toBeNull();
+  });
+
+  it('finds the way a message between two agents runs: down from the head, up to it, on to a later stage, back to an earlier one', () => {
+    const s = schemaLayout(dept(TEAM, ROLES), 0);
+    const p = stepPaths(s);
+    expect(p.way('hana', 'felix')).toEqual(p.toMember('felix'));
+    expect(p.way('felix', 'hana')).toEqual([...p.toMember('felix')!].reverse());
+    expect(p.way('quinn', 'hana')).toEqual(s.report!.pts);
+    expect(p.way('felix', 'rita')).toEqual(p.onward('felix'));
+    expect(p.way('rita', 'felix')).toEqual(p.back('rita', 'felix'));
+    expect(p.way('felix', 'fiona')).toBeNull();
+    expect(p.way('felix', 'nobody')).toBeNull();
   });
 });

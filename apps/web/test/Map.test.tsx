@@ -236,6 +236,47 @@ describe('Map', () => {
     }
   });
 
+  it('keeps a way running for ten minutes after its last message, then lets it go quiet', async () => {
+    const stream = fakeStream();
+    mockApi({ 'GET /api/org': [200, { ...ORG, departments: [dept({ id: 'd1', templateKey: 'sales' })] }] });
+    const { container } = render(<MapScreen {...PROPS} />);
+    await screen.findByText('Sales');
+    const live = () => container.querySelectorAll('path.live');
+    vi.useFakeTimers();
+    try {
+      stream.send({ type: 'pulse', from: { kind: 'orchestrator' }, to: { kind: 'department', id: 'd1' } });
+      expect(live()).toHaveLength(1);
+      expect(live()[0]).toHaveClass('c');
+      act(() => vi.advanceTimersByTime(9 * 60_000));
+      expect(live()).toHaveLength(1);
+      /* Another message keeps it going ten minutes from then. */
+      stream.send({ type: 'pulse', from: { kind: 'orchestrator' }, to: { kind: 'department', id: 'd1' } });
+      act(() => vi.advanceTimersByTime(9 * 60_000));
+      expect(live()).toHaveLength(1);
+      act(() => vi.advanceTimersByTime(2 * 60_000));
+      expect(live()).toHaveLength(0);
+      /* Agents inside a department run on its card, not on the map. */
+      stream.send({ type: 'pulse', from: { kind: 'agent', id: 'a1', departmentId: 'd1' }, to: { kind: 'agent', id: 'a2', departmentId: 'd1' } });
+      expect(live()).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('shows the ways a message went in the last ten minutes when the map opens', async () => {
+    const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+    const live = [
+      { from: { kind: 'department', id: 'd1' }, to: { kind: 'orchestrator' }, at: ago(4) },
+      { from: { kind: 'orchestrator' }, to: { kind: 'department', id: 'd1' }, at: ago(11) },
+    ];
+    mockApi({ 'GET /api/org': [200, { ...ORG, live, departments: [dept({ id: 'd1', templateKey: 'sales' })] }] });
+    const { container } = render(<MapScreen {...PROPS} />);
+    await screen.findByText('Sales');
+    /* The ways come in a moment after the card. */
+    await vi.waitFor(() => expect(container.querySelectorAll('path.live')).toHaveLength(1));
+    expect(container.querySelector('path.live')).toHaveClass('a');
+  });
+
   it('runs work back to the hub in amber, and flashes a card where work leaves or lands', async () => {
     const stream = fakeStream();
     mockApi({ 'GET /api/org': [200, { ...ORG, departments: [dept({ id: 'd1', templateKey: 'sales' }), dept({ id: 'd2', templateKey: 'design' })] }] });

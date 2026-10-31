@@ -2,9 +2,11 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSPrope
 import { api } from '../api';
 import { deptLabel, errorText, useLanguage, useT } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
+import { useStream } from '../live';
 import { useTasks } from '../tasks';
 import type { Department, Employee, EmployeeStatus, Me, PersonView } from '../types';
 import { Bar, percent } from '../ui/Bar';
+import { useChannels } from '../ui/channels';
 import { usePanZoom, ZoomBar } from '../ui/canvas';
 import { Edge } from '../ui/Edge';
 import { AgentIcon, PersonIcon, ProviderMark } from '../ui/icons';
@@ -50,7 +52,8 @@ const hhmm = (d: Date) => `${String(d.getHours()).padStart(2, '0')}:${String(d.g
 const taskText = (e: Employee) => (e.task ? `#${e.task.number} ${e.task.title}` : '');
 
 function modelLine(t: ReturnType<typeof useT>, e: Employee): string {
-  const effort = e.effort && t.agent.effortLine(t.agent.efforts[e.effort] ?? e.effort);
+  /* Hornhoof names the level whenever it knows it, the Default's too; else it says the program picks it. */
+  const effort = e.effort ? t.agent.effortLine(t.agent.efforts[e.effort] ?? e.effort) : e.provider && t.agent.effortDefault;
   return [e.modelName || e.model || t.agent.default, effort, e.provider && PROVIDER_NAMES[e.provider]].filter(Boolean).join(', ');
 }
 
@@ -59,6 +62,7 @@ function doingLine(t: ReturnType<typeof useT>, e: Employee): string {
   if (e.task) return taskText(e);
   if (!e.on) return t.dept.switchedOff;
   if (e.status === 'off') return t.dept.needsSubscription;
+  if (e.timer && e.status === 'idle') return t.dept.onTimer(t.agent.every(e.timer));
   return e.status === 'idle' ? t.dept.waitsForTask : '';
 }
 
@@ -265,6 +269,17 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
     return () => ro.disconnect();
   }, [place]);
 
+  /* Each way a message went between two of its agents keeps running for ten minutes after the last one: amber up to the
+     head and back from a gate, cyan down and on. */
+  const seed = useMemo(() => (d.live ?? []).map(w => ({ key: `${w.from}>${w.to}`, at: w.at, value: { from: w.from, to: w.to } })), [d.live]);
+  const channels = useChannels(seed);
+  const { touch } = channels;
+  useStream(m => {
+    if (m.type === 'pulse' && m.from.kind === 'agent' && m.to.kind === 'agent' && m.from.departmentId === d.id) touch(`${m.from.id}>${m.to.id}`, { from: m.from.id, to: m.to.id });
+  });
+  const stageOf = (id: string) => s.frames.find(f => f.members.some(m => m.e.id === id))?.stage ?? -1;
+  const wayTone = (from: string, to: string) => (to === s.head?.id || stageOf(to) < stageOf(from) ? 'a' : 'c');
+
   /* Real changes only: an employee's chip flashes, a pulse runs where its work went, and the line below says what happened. */
   const seen = useRef<Seen | null>(null);
   const [shots, setShots] = useState<Shot[]>([]);
@@ -383,6 +398,10 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
             ))}
             {lines('rl')}
             {s.report && <Wire l={{ cls: 'pl', pts: s.report.pts, arrow: true }} />}
+            {channels.live.map(c => {
+              const pts = paths.way(c.from, c.to);
+              return pts && <path key={`${c.from}>${c.to}`} className={`tr live ${wayTone(c.from, c.to)}`} d={toD(pts)} />;
+            })}
             {shots.map(x => (
               <Pulse key={x.key} pts={x.pts} speed={PULSE_SPEED} once tone={x.tone} />
             ))}

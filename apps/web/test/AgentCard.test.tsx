@@ -83,11 +83,60 @@ describe('AgentCard', () => {
     expect(screen.getByRole('combobox', { name: 'Effort' })).toHaveValue('max');
   });
 
+  it('sets a timer: how often the employee wakes and what it does each time', async () => {
+    const user = userEvent.setup();
+    const { calls } = open({ 'PATCH /api/agents/b1': patched });
+    const on = await screen.findByRole('checkbox', { name: 'Wake on a timer' });
+    expect(on).not.toBeChecked();
+    expect(screen.queryByRole('combobox', { name: 'How often' })).not.toBeInTheDocument();
+    await user.click(on);
+    const often = screen.getByRole('combobox', { name: 'How often' });
+    expect(within(often).getAllByRole('option').map(o => o.textContent)).toEqual([
+      'Every 10 minutes', 'Every 15 minutes', 'Every 30 minutes', 'Every hour', 'Every 2 hours', 'Every 3 hours', 'Every 6 hours', 'Every 12 hours', 'Every 24 hours',
+    ]);
+    await user.selectOptions(often, '60');
+    expect(screen.getByRole('button', { name: 'Save timer' })).toBeDisabled();
+    await user.type(screen.getByRole('textbox', { name: 'What to do each time' }), 'Check that every agent reported its task.');
+    const forWork = screen.getByRole('checkbox', { name: 'Only when there is work: a task is open or something failed since the last round' });
+    expect(forWork).not.toBeChecked();
+    await user.click(forWork);
+    await user.click(screen.getByRole('button', { name: 'Save timer' }));
+    await vi.waitFor(() => expect(calls.find(c => c.method === 'PATCH')?.body).toEqual({ timer: { minutes: 60, order: 'Check that every agent reported its task.', forWork: true } }));
+  });
+
+  it('shows the timer the employee has and takes it away', async () => {
+    const user = userEvent.setup();
+    const timer = { minutes: 10, order: 'Look around.', forWork: true, lastAt: new Date(Date.now() - 2 * 60_000).toISOString() };
+    const { calls } = open({ 'GET /api/agents/b1': [200, { ...CARD, timer }], 'PATCH /api/agents/b1': patched });
+    const on = await screen.findByRole('checkbox', { name: 'Wake on a timer' });
+    expect(on).toBeChecked();
+    expect(screen.getByRole('combobox', { name: 'How often' })).toHaveValue('10');
+    expect(screen.getByRole('textbox', { name: 'What to do each time' })).toHaveValue('Look around.');
+    expect(screen.getByRole('checkbox', { name: /^Only when there is work/ })).toBeChecked();
+    /* It counts from the last round or from when the timer was set, so the card says when the next one comes. */
+    expect(screen.getByText(/^Next round: \D{3}/)).toBeInTheDocument();
+    await user.click(on);
+    await vi.waitFor(() => expect(calls.find(c => c.method === 'PATCH')?.body).toEqual({ timer: null }));
+  });
+
+  it('says a round that is due comes as soon as the employee is free', async () => {
+    const timer = { minutes: 10, order: 'Look around.', forWork: false, lastAt: new Date(Date.now() - 30 * 60_000).toISOString() };
+    open({ 'GET /api/agents/b1': [200, { ...CARD, timer }] });
+    expect(await screen.findByText('Next round: as soon as it is free')).toBeInTheDocument();
+  });
+
   it('names the level the Default runs at: Kimi at its most', async () => {
     const kimi = { ...TEAM_KEY, id: 's-kimi', provider: 'kimi' as const };
     const k3 = { id: 'k3', name: 'K3', efforts: ['low', 'high', 'max'], defaultEffort: 'high' };
     open({ 'GET /api/agents/b1': [200, { ...CARD, model: '', subscription: kimi, runsOn: [{ subscription: kimi, models: [k3] }] }] });
     expect(await screen.findByRole('option', { name: 'Default (Max)' })).toBeInTheDocument();
+  });
+
+  it('names the level Claude Code runs its Default model at: medium on Opus 5.5', async () => {
+    const plan = { ...TEAM_KEY, id: 's-cl', provider: 'claude' as const };
+    const opus = { id: 'opus', name: 'Opus', efforts: ['low', 'medium', 'high', 'xhigh', 'max'], defaultEffort: 'medium' };
+    open({ 'GET /api/agents/b1': [200, { ...CARD, model: '', subscription: plan, runsOn: [{ subscription: plan, models: [opus] }] }] });
+    expect(await screen.findByRole('option', { name: 'Default (Medium)' })).toBeInTheDocument();
   });
 
   it("names the Default by its model's own level when the program has one", async () => {

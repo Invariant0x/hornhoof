@@ -98,7 +98,7 @@ describe('Department view', () => {
     expect(screen.getByText(/Work goes left to right through the gates/)).toBeInTheDocument();
     started = true;
     stream.send({ type: 'working', working: 2 });
-    await vi.waitFor(() => expect(within(screen.getByRole('region', { name: 'Members' })).getByRole('button', { name: /Bruno/ })).toHaveTextContent('BrunoClaudeworkingClaude Sonnet 5.5, Anthropic#12 Checkout API'));
+    await vi.waitFor(() => expect(within(screen.getByRole('region', { name: 'Members' })).getByRole('button', { name: /Bruno/ })).toHaveTextContent('BrunoClaudeworkingClaude Sonnet 5.5, default effort, Anthropic#12 Checkout API'));
     /* The line at the bottom says what changed last. */
     expect(screen.getByText('Bruno: working, #12 Checkout API')).toBeInTheDocument();
   });
@@ -121,6 +121,21 @@ describe('Department view', () => {
     expect(within(members).getByTitle('Context 20%')).not.toHaveClass('hi');
   });
 
+  it('keeps the way between two agents running for ten minutes after their last message, also when it opens later', async () => {
+    const user = userEvent.setup();
+    const stream = fakeStream();
+    const [dev] = DEV_ORG.departments;
+    shell({}, { ...DEV_ORG, departments: [{ ...dev!, live: [{ from: 'b1', to: 'b0', at: new Date(Date.now() - 3 * 60_000).toISOString() }] }] });
+    await flyIn(user);
+    const live = () => document.querySelectorAll('path.live');
+    await vi.waitFor(() => expect(live()).toHaveLength(1));
+    stream.send({ type: 'pulse', from: { kind: 'agent', id: 'b0', departmentId: dev!.id }, to: { kind: 'agent', id: 'b1', departmentId: dev!.id } });
+    await vi.waitFor(() => expect(live()).toHaveLength(2));
+    /* Another department's agents are not this one's. */
+    stream.send({ type: 'pulse', from: { kind: 'agent', id: 'x0', departmentId: 'other' }, to: { kind: 'agent', id: 'x1', departmentId: 'other' } });
+    expect(live()).toHaveLength(2);
+  });
+
   it('shows how hard each employee thinks next to its model', async () => {
     const user = userEvent.setup();
     const [dev] = DEV_ORG.departments;
@@ -129,6 +144,26 @@ describe('Department view', () => {
     await flyIn(user);
     const members = screen.getByRole('region', { name: 'Members' });
     expect(within(members).getByRole('button', { name: /Bruno/ })).toHaveTextContent('Claude Sonnet 5.5, max effort, Anthropic');
+  });
+
+  it('says default effort for an employee whose level Hornhoof does not know', async () => {
+    const user = userEvent.setup();
+    const [dev] = DEV_ORG.departments;
+    const [dana, bruno] = dev!.employees;
+    shell({}, { ...DEV_ORG, departments: [{ ...dev!, employees: [dana!, { ...bruno!, effort: null }] }] });
+    await flyIn(user);
+    const members = screen.getByRole('region', { name: 'Members' });
+    expect(within(members).getByRole('button', { name: /Bruno/ })).toHaveTextContent('Claude Sonnet 5.5, default effort, Anthropic');
+  });
+
+  it('says how often an employee on a timer wakes, when it holds no task', async () => {
+    const user = userEvent.setup();
+    const [dev] = DEV_ORG.departments;
+    const [dana, bruno] = dev!.employees;
+    shell({}, { ...DEV_ORG, departments: [{ ...dev!, employees: [dana!, { ...bruno!, timer: 10 }] }] });
+    await flyIn(user);
+    const members = screen.getByRole('region', { name: 'Members' });
+    expect(within(members).getByRole('button', { name: /Bruno/ })).toHaveTextContent('On a timer, every 10 minutes');
   });
 
   it('refetches what employees do when their tasks move', async () => {

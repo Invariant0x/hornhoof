@@ -27,7 +27,10 @@ export type AgentState = {
   terminal: boolean;
 };
 
-type Turn = { companyId: string; agentId: string; prompt: string; createdBy: string | null; message?: { personId: string | null; text: string; from?: 'orchestrator' }; taskId?: string };
+/* What a turn ends with when a person or Hornhoof stopped it on purpose; none of these is a failure. */
+export const STOPPED_ON_PURPOSE = ['cancelled', 'removed', 'switched_off'];
+
+type Turn = { companyId: string; agentId: string; prompt: string; createdBy: string | null; message?: { personId: string | null; text: string; from?: 'orchestrator' | 'agent'; name?: string; by?: string }; taskId?: string };
 
 /* One thing at a time per agent, so two pumps never send two turns. */
 const chains = new WeakMap<Ctx, Map<string, Promise<unknown>>>();
@@ -69,7 +72,9 @@ export async function insertTurn(ctx: Ctx, t: Turn): Promise<string> {
     })
     .returning({ id: jobs.id });
   if (t.message) {
-    await appendEvent(ctx, { companyId: t.companyId, agentId: t.agentId, jobId: job!.id, kind: 'message', data: { text: t.message.text, ...(t.message.from ? { from: t.message.from } : {}) }, personId: t.message.personId });
+    /* An employee's message carries its name for the window and its id in by. */
+    const { personId, ...data } = t.message;
+    await appendEvent(ctx, { companyId: t.companyId, agentId: t.agentId, jobId: job!.id, kind: 'message', data, personId });
   }
   return job!.id;
 }

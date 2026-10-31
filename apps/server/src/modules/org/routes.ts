@@ -1,4 +1,4 @@
-import { effortFor, effortsOf, modelsFor, type ModelOption, type ProviderId } from '@hornhoof/protocol';
+import { defaultEffortOf, effortFor, effortsOf, modelsFor, type ModelOption, type ProviderId } from '@hornhoof/protocol';
 import { and, asc, desc, eq, isNotNull, isNull, ne, notInArray } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import type { Ctx } from '../../app.js';
@@ -16,10 +16,10 @@ import { subView } from '../subscriptions/views.js';
 /* The level an agent thinks at, as far as Hornhoof knows: the one it was set to or Kimi's most, else its model's default. */
 function effortShown(sub: { provider: ProviderId; models: ModelOption[] | null }, agent: { model: string; effort: string | null }): string | null {
   const models = modelsFor(sub.provider, sub.models);
-  return effortFor(sub.provider, agent.effort, effortsOf(models, agent.model)) ?? models.find(m => m.id === agent.model)?.defaultEffort ?? null;
+  return effortFor(sub.provider, agent.effort, effortsOf(models, agent.model)) ?? defaultEffortOf(sub.provider, models, agent.model);
 }
 
-export function orgRoutes(app: FastifyInstance, { db, hub, templates }: Ctx): void {
+export function orgRoutes(app: FastifyInstance, { db, hub, templates, bus }: Ctx): void {
   app.get('/api/org', async req => {
     const me = await requirePerson(req, db);
     const [company] = await db.select({ id: companies.id, name: companies.name }).from(companies).where(eq(companies.id, me.companyId));
@@ -119,6 +119,8 @@ export function orgRoutes(app: FastifyInstance, { db, hub, templates }: Ctx): vo
             context: a.contextUsed,
             status: now.status,
             on: !a.switchedOffAt,
+            /* How often it wakes on its timer, in minutes. */
+            timer: a.timerMinutes,
             /* Like the department's current task, only for people who reach it. */
             task: now.task && canReach(reach, { departmentId: dept.id }) ? { id: now.task.id, number: now.task.number, title: now.task.title, stage: now.task.stage, gateCount: now.task.gates.length, bounces: now.task.bounces } : null,
           };
@@ -136,8 +138,14 @@ export function orgRoutes(app: FastifyInstance, { db, hub, templates }: Ctx): vo
         });
     };
 
+    /* The ways messages went in the last minutes: between places on the map, and between agents on a department's card. */
+    const ways = bus.channels(me.companyId);
+    const inside = (id: string) =>
+      ways.flatMap(w => (w.from.kind === 'agent' && w.to.kind === 'agent' && w.from.departmentId === id ? [{ from: w.from.id, to: w.to.id, at: w.at }] : []));
+
     return {
       company,
+      live: ways.filter(w => w.from.kind !== 'agent' && w.to.kind !== 'agent'),
       orchestrator: orchestrator && {
         id: orchestrator.id,
         name: orchestrator.name,
@@ -168,6 +176,7 @@ export function orgRoutes(app: FastifyInstance, { db, hub, templates }: Ctx): vo
           teams: allTeams
             .filter(t => t.departmentId === d.id)
             .map(t => ({ id: t.id, name: t.name, about: t.about, stage: t.stage, gate: t.gate })),
+          live: inside(d.id),
         })),
     };
   });

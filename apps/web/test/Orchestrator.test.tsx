@@ -98,6 +98,12 @@ describe('AgentWindow', () => {
     expect(container.querySelector('.t-u')).toHaveTextContent('> Orchestrator: Look at checkout first.');
   });
 
+  it('names the employee who wrote, as one does on a timer round', async () => {
+    const { container } = open({ [`GET ${EVENTS}?after=0`]: [200, { events: [ev(1, 'message', { text: 'Report on #4, please.', from: 'agent', name: 'Wendy' })], state: READY }] });
+    await screen.findByText(/Report on #4/);
+    expect(container.querySelector('.t-u')).toHaveTextContent('> Wendy: Report on #4, please.');
+  });
+
   it('shows his answers with bold and lists, and hides how Claude loads its tools', async () => {
     const { container } = open({
       [`GET ${EVENTS}?after=0`]: [
@@ -312,6 +318,16 @@ describe('AgentWindow', () => {
     open({ [`GET ${EVENTS}?after=0`]: [200, { events, state: READY }] }, DEV_ORG);
     expect(await screen.findByText('Hired: Bruno')).toBeInTheDocument();
     expect(screen.queryByText('Hiring for Development')).not.toBeInTheDocument();
+  });
+
+  it('opens the company notebook from his window, and back to his conversation', async () => {
+    const user = userEvent.setup();
+    open({ 'GET /api/notebook': [200, { notes: [{ number: 1, text: 'Turns stay small.', by: { kind: 'orchestrator' }, updatedAt: '2026-10-31T02:00:00Z' }] }] });
+    await user.click(await screen.findByRole('button', { name: 'Notebook' }));
+    expect(await screen.findByText('Turns stay small.')).toBeInTheDocument();
+    expect(screen.queryByRole('log')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Notebook' }));
+    expect(screen.getByRole('log')).toBeInTheDocument();
   });
 
   it('closes', async () => {

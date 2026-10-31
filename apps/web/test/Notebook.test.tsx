@@ -1,0 +1,84 @@
+import { render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { describe, expect, it } from 'vitest';
+import { LanguageProvider } from '../src/i18n';
+import { Notebook } from '../src/ui/Notebook';
+import { mockApi } from './api-mock';
+import { fakeStream } from './fake-stream';
+
+const NOTES = [
+  { number: 1, text: 'Commits are made by Ivan only.', by: { kind: 'person', id: 'p1', name: 'Ivan' }, updatedAt: '2026-10-31T01:00:00Z' },
+  { number: 3, text: 'Turns stay small.', by: { kind: 'orchestrator' }, updatedAt: '2026-10-31T02:00:00Z' },
+];
+
+function show(routes: Record<string, unknown> = {}) {
+  const calls = mockApi({ 'GET /api/notebook': [200, { notes: NOTES }], ...(routes as Record<string, [number, unknown]>) });
+  render(
+    <LanguageProvider>
+      <Notebook />
+    </LanguageProvider>,
+  );
+  return calls;
+}
+
+describe('the company notebook', () => {
+  it('lists the notes with who wrote each', async () => {
+    show();
+    const list = await screen.findByRole('list', { name: 'Notebook' });
+    const [first, second] = within(list).getAllByRole('listitem');
+    expect(first).toHaveTextContent('#1Commits are made by Ivan only.Ivan');
+    expect(second).toHaveTextContent('#3Turns stay small.Orchestrator');
+  });
+
+  it('adds, changes and removes notes', async () => {
+    const user = userEvent.setup();
+    const calls = show({
+      'POST /api/notebook': [201, { note: { number: 4, text: 'One question at a time.' } }],
+      'PATCH /api/notebook/3': [200, { note: { number: 3, text: 'Turns stay very small.' } }],
+      'DELETE /api/notebook/1': [204, undefined],
+    });
+    await screen.findByText('Turns stay small.');
+    await user.type(screen.getByRole('textbox', { name: 'New note' }), 'One question at a time.');
+    await user.click(screen.getByRole('button', { name: 'Add' }));
+    await user.click(screen.getByRole('button', { name: 'Change note #3' }));
+    const edit = screen.getByRole('textbox', { name: 'Note #3' });
+    await user.clear(edit);
+    await user.type(edit, 'Turns stay very small.');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await user.click(screen.getByRole('button', { name: 'Remove note #1' }));
+    expect(calls.filter(c => c.method !== 'GET')).toEqual([
+      { method: 'POST', path: '/api/notebook', body: { text: 'One question at a time.' } },
+      { method: 'PATCH', path: '/api/notebook/3', body: { text: 'Turns stay very small.' } },
+      { method: 'DELETE', path: '/api/notebook/1', body: undefined },
+    ]);
+  });
+
+  it('says when the notebook is full', async () => {
+    const user = userEvent.setup();
+    show({ 'POST /api/notebook': [409, { error: { code: 'conflict', message: 'Full.', reason: 'notebook_full' } }] });
+    await screen.findByText('Turns stay small.');
+    await user.type(screen.getByRole('textbox', { name: 'New note' }), 'More.');
+    await user.click(screen.getByRole('button', { name: 'Add' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('The notebook is full: 30 notes and 4000 characters at most. Change or remove a note first.');
+  });
+
+  it('reads the notes again when the stream says the notebook changed', async () => {
+    const stream = fakeStream();
+    const calls = show();
+    await screen.findByText('Turns stay small.');
+    stream.send({ type: 'notebook' });
+    await expect.poll(() => calls.filter(c => c.path === '/api/notebook').length).toBe(2);
+  });
+
+  it('shows in Russian', async () => {
+    localStorage.setItem('hh-lang', 'ru');
+    mockApi({ 'GET /api/notebook': [200, { notes: [] }] });
+    render(
+      <LanguageProvider>
+        <Notebook />
+      </LanguageProvider>,
+    );
+    expect(await screen.findByText('Блокнот пока пуст.')).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Новая запись' })).toBeInTheDocument();
+  });
+});

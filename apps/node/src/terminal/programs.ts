@@ -44,7 +44,8 @@ export const claudeProgram: TermProgram = {
   launch({ bin, home, sessionId, model, effort, instructionsFile, urls }) {
     const id = sessionId ?? randomUUID();
     const settings = {
-      hooks: { SessionStart: hook('start'), UserPromptSubmit: hook('prompt'), Stop: hook('stop') },
+      /* After compacting its conversation, Claude Code adds what hh-hook compact prints, which sends it back to its tools. */
+      hooks: { SessionStart: [...hook('start'), { matcher: 'compact', ...hook('compact')[0]! }], UserPromptSubmit: hook('prompt'), Stop: hook('stop') },
       /* The status line hears the plan's limits; it shows nothing. */
       statusLine: { type: 'command', command: 'hh-hook status' },
     };

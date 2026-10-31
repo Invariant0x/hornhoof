@@ -1,7 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { TEMPLATE_KEYS } from '@hornhoof/protocol';
+import { MAX_INSTRUCTIONS, TEMPLATE_KEYS } from '@hornhoof/protocol';
 import { describe, expect, it } from 'vitest';
+import { ORCHESTRATOR_SKILLS, orchestratorSteady } from '../src/modules/agents/instructions.js';
+import { NOTEBOOK_MAX, NOTES_MAX } from '../src/modules/notebook/routes.js';
 import { CORE_SKILLS, HEAD_SKILLS, loadTemplates, MEMBER_SKILLS } from '../src/modules/templates/load.js';
 
 const DIR = fileURLToPath(new URL('../../../templates', import.meta.url));
@@ -31,6 +33,15 @@ describe('templates', () => {
       const total = HEADER_ALLOWANCE + r.body.length + r.skills.reduce((n, s) => n + templates.skills.get(s.id)!.body.length + 60, 0);
       expect(total, r.id).toBeLessThanOrEqual(19000);
     }
+  });
+
+  it("gives the orchestrator his own skills, which fit his instructions with a full notebook", () => {
+    expect(ORCHESTRATOR_SKILLS).toEqual(['orch-interview', 'orch-plan-turn', 'orch-verify', 'orch-trouble']);
+    const steady = orchestratorSteady(templates);
+    for (const id of ORCHESTRATOR_SKILLS) expect(steady).toContain(`<!-- hh:skill ${id} -->`);
+    /* The notebook's heading and a "[#30] " before each note come on top of its text. */
+    expect(steady.length + NOTEBOOK_MAX + NOTES_MAX * 8 + 300).toBeLessThanOrEqual(MAX_INSTRUCTIONS);
+    for (const r of roles) expect(r.skills.map(s => s.id).some(id => id.startsWith('orch-')), r.id).toBe(false);
   });
 
   it('names only skills that exist', () => {
@@ -103,6 +114,22 @@ describe('templates', () => {
       const text = [x.body, x.title.en, x.title.ru, x.description.en, x.description.ru].join('\n');
       expect(text, x.id).not.toMatch(/[—ёЁ]/);
     }
+  });
+
+  it('has a task watchdog and a failure collector in operations, each waking on its own timer with the tools to watch', () => {
+    const ops = templates.roster('operations');
+    expect(ops.filter(r => r.inDefault).map(r => r.id)).toEqual(['OPS-HEAD', 'OPS-INTEG', 'OPS-ACCT', 'OPS-FIX', 'OPS-WATCH', 'OPS-BUGS']);
+    const watch = templates.roles.get('OPS-WATCH')!;
+    const bugs = templates.roles.get('OPS-BUGS')!;
+    expect([watch.timer?.minutes, bugs.timer?.minutes]).toEqual([10, 180]);
+    /* Neither goes on a round while nothing is open or failed. */
+    expect([watch.timer?.forWork, bugs.timer?.forWork]).toEqual([true, true]);
+    expect(watch.skills.find(s => s.id === 'ops-task-watch')?.on).toBe(true);
+    expect(bugs.skills.find(s => s.id === 'ops-failure-review')?.on).toBe(true);
+    expect(templates.skills.get('ops-task-watch')!.grants).toEqual(['agents', 'message_employee']);
+    expect(templates.skills.get('ops-failure-review')!.grants).toEqual(['failures', 'agents', 'message_employee']);
+    for (const r of roles) if (r.timer) expect(r.timer.order.length, r.id).toBeLessThanOrEqual(2000);
+    expect(roles.filter(r => r.timer).map(r => r.id).sort()).toEqual(['OPS-BUGS', 'OPS-WATCH']);
   });
 
   it('has the full development roster', () => {

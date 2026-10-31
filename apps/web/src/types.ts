@@ -81,6 +81,8 @@ export type Employee = {
   status: EmployeeStatus;
   /* Off for now: it takes no work until a person switches it on. */
   on: boolean;
+  /* How often it wakes on its timer, in minutes; null without one. */
+  timer: number | null;
   task: EmployeeTask | null;
   /* How full its context was when its machine last said, from 0 to 1; null before it said. */
   context: number | null;
@@ -93,6 +95,8 @@ export type DeptRole = { id: string; title: Lang; description: Lang; kind: 'head
    only this department. */
 export type Department = {
   id: string;
+  /* The ways messages went between its agents in the last minutes. */
+  live?: { from: string; to: string; at: string }[];
   name: string | null;
   templateKey: TemplateKey | null;
   roleCode: string;
@@ -119,6 +123,8 @@ export type Org = {
   people: (PersonView & { deputy?: boolean })[];
   departments: Department[];
   turn?: { id: string; number: number; goal: string } | null;
+  /* The ways messages went between places on the map in the last minutes. */
+  live?: Channel[];
 };
 
 /* Whether the orchestrator can take a turn now, and what he is doing. */
@@ -133,7 +139,7 @@ export type OrchestratorState = {
 };
 
 /* One part of an agent's instructions: who it is (written by Hornhoof), its role, or a skill between markers. */
-export type Part = { kind: 'header' | 'base' | 'skill'; id: string | null; title: Lang | null; text: string; overridden: boolean; templateChanged: boolean };
+export type Part = { kind: 'header' | 'base' | 'skill' | 'notebook'; id: string | null; title: Lang | null; text: string; overridden: boolean; templateChanged: boolean };
 
 export type CardSkill = { id: string; title: Lang; description: Lang; on: boolean; locked: boolean; overridden: boolean; templateChanged: boolean };
 
@@ -157,6 +163,9 @@ export type AgentCardView = {
   changes: { field: string; personName: string | null; byOrchestrator: boolean; at: string }[];
   /* The whole company or the agent's department may change it; only the whole company removes it. */
   canEdit: boolean;
+  /* Wakes every so many minutes, outside any task, to do its order; lastAt: the last round, or when it was set. */
+  /* forWork: it skips a round while no task is open and nothing failed since the last one. */
+  timer: { minutes: number; order: string; forWork: boolean; lastAt: string | null } | null;
 };
 
 /* A subscription or key that may serve a department, with the models it runs. */
@@ -177,7 +186,9 @@ export type ChangeItem = { department: string; checked: boolean; note: string; p
 export type StructureItem = NewItem | ChangeItem;
 
 /* Who a pulse on the map runs between. */
-export type Endpoint = { kind: 'person'; id: string } | { kind: 'orchestrator' } | { kind: 'department'; id: string };
+export type Endpoint = { kind: 'person'; id: string } | { kind: 'orchestrator' } | { kind: 'department'; id: string } | { kind: 'agent'; id: string; departmentId: string };
+/* A way a message went in the last minutes, with when the last one did. */
+export type Channel = { from: Endpoint; to: Endpoint; at: string };
 
 export type AgentEventKind = 'message' | 'text' | 'tool' | 'tool_result' | 'todo' | 'proposal' | 'applied' | 'stopped' | 'failed';
 
@@ -189,6 +200,7 @@ export type StreamMessage =
   | { type: 'agent_event'; agentId: string; event: EventView }
   | { type: 'working'; working: number }
   | { type: 'org' }
+  | { type: 'notebook' }
   | { type: 'pulse'; from: Endpoint; to: Endpoint }
   | { type: 'task'; id: string }
   | { type: 'requests' }
@@ -294,3 +306,6 @@ export type UpdatesView = {
   error: string | null;
   updater: { present: boolean; status: UpdaterStatus | null; waiting: { version: string } | null };
 };
+
+/* A note of the company notebook and who wrote it last. */
+export type NoteView = { number: number; text: string; by: { kind: 'orchestrator' } | { kind: 'person'; id: string; name: string } | null; updatedAt: string };

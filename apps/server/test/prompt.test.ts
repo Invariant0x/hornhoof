@@ -20,6 +20,12 @@ describe('orchestrator instructions', () => {
     expect(ORCHESTRATOR_INSTRUCTIONS).not.toContain('You cannot create, change or remove departments yourself');
   });
 
+  it('keeps the notebook and reads the company again after his conversation was compacted', () => {
+    for (const words of ['"remember"', '"rewrite_note"', '"forget"', 'one fact per note', 'compacted', '"turns"', '"company"', 'timer', 'Task watchdog', 'System failure collector']) {
+      expect(ORCHESTRATOR_INSTRUCTIONS).toContain(words);
+    }
+  });
+
   it('lays the work out in turns he plans and fills himself', () => {
     for (const words of ['"plan_turn"', '"add_tasks"', '"turns"', 'starts by itself', 'never tell people to start or close a turn', 'Turn 2, task #14', 'head']) {
       expect(ORCHESTRATOR_INSTRUCTIONS).toContain(words);

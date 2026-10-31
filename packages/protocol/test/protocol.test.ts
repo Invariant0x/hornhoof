@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { API_MODELS, CLAUDE_ALIASES, cut, DEPARTMENT_TEMPLATES, effortFor, effortsOf, modelsFor, parseNodeMessage, parseServerMessage, repoFolder, type AgentEvent, type NodeMessage, type ServerMessage } from '../src/index.js';
+import { API_MODELS, CLAUDE_ALIASES, cut, defaultEffortOf, DEPARTMENT_TEMPLATES, effortFor, effortsOf, modelsFor, parseNodeMessage, parseServerMessage, repoFolder, type AgentEvent, type NodeMessage, type ServerMessage } from '../src/index.js';
 
 const LIMITS = { status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0.38, resetsAt: '2026-10-29T21:30:00.000Z' }] };
 
@@ -175,6 +175,19 @@ describe('models', () => {
     expect(parseNodeMessage(JSON.stringify({ type: 'status', loggedIn: true, limits: null, models: [{ ...kimi, efforts: ['max; rm -rf'] }] }))).toBeNull();
     for (const m of [...CLAUDE_ALIASES, ...API_MODELS.anthropic_api]) expect(m.efforts).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
     for (const m of API_MODELS.openai_api) expect(m.efforts).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+  });
+
+  it("knows the level each model runs at when nobody picked one, as its program's docs give it", () => {
+    /* Claude Code: high, but medium on the 5.5 models, and its Default model is Opus 5.5. A node's older list has no defaults. */
+    const old = CLAUDE_ALIASES.map(({ defaultEffort: _, ...m }) => m);
+    expect(['fable', 'opus', 'sonnet', 'haiku', ''].map(m => defaultEffortOf('claude', old, m))).toEqual(['high', 'medium', 'medium', 'medium', 'medium']);
+    expect(['claude-fable-5-1', 'claude-opus-5-5', ''].map(m => defaultEffortOf('anthropic_api', API_MODELS.anthropic_api, m))).toEqual(['high', 'medium', 'medium']);
+    /* Codex says it per model; its Default model and GLM's say nothing. */
+    expect(defaultEffortOf('codex', [{ id: 'gpt-6.1-sol', name: 'Sol', defaultEffort: 'low' }], 'gpt-6.1-sol')).toBe('low');
+    expect(defaultEffortOf('codex', [{ id: 'gpt-6.1-sol', name: 'Sol', defaultEffort: 'low' }], '')).toBeNull();
+    expect(defaultEffortOf('glm', [], '')).toBeNull();
+    expect(defaultEffortOf('kimi', [{ id: 'k3', name: 'K3', efforts: ['low', 'high'] }], 'k3')).toBe('high');
+    expect(modelsFor('claude', old).map(m => m.defaultEffort)).toEqual(['high', 'medium', 'medium', 'medium']);
   });
 
   it('runs Kimi at its most unless a person picked less, and the others at their own default', () => {

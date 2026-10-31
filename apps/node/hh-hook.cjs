@@ -2,10 +2,13 @@
 // hh-hook EVENT [JSON]: Claude Code's hooks and status line, Codex's notify and Kimi Code's hooks call this to tell the
 // node how the agent's turn goes: start, prompt, stop, status. It reads the program's JSON from the last argument or from
 // stdin, posts it to the node's bridge in HH_BRIDGE and prints nothing, so a status line stays empty and Kimi adds nothing
-// to the prompt. It never fails the program's turn.
+// to the prompt. It never fails the program's turn. hh-hook compact only prints what Claude Code adds to a conversation
+// it just compacted.
 'use strict';
 
 const WAIT_MS = { prompt: 12000 };
+const AFTER_COMPACT =
+  'Hornhoof: your conversation was just compacted, so details of it may be gone. Before you go on, read again what your instructions say to read after a compaction.';
 
 function readStdin() {
   return new Promise(resolve => {
@@ -21,6 +24,8 @@ function readStdin() {
 
 async function main() {
   const event = process.argv[2];
+  /* Written before the exit below cuts a pipe short. */
+  if (event === 'compact') return new Promise(resolve => process.stdout.write(`${AFTER_COMPACT}\n`, () => resolve()));
   const url = process.env.HH_BRIDGE;
   if (!event || !url || !/^[a-z]+$/.test(event)) return;
   const body = process.argv[3] ?? (await readStdin());

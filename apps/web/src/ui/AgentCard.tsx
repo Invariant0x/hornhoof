@@ -3,6 +3,7 @@ import { api } from '../api';
 import { errorText, useLanguage, useT } from '../i18n';
 import { defaultEffort, effortsOf, PROVIDER_NAMES } from '../providers';
 import type { AgentCardView, Me, Part, SubView } from '../types';
+import { TimerSettings } from './TimerSettings';
 import { Ask } from './Ask';
 import { byProvider, servingLabel } from './StaffCard';
 
@@ -269,6 +270,8 @@ export function AgentCard({ me, agentId, onClose, onTerminal }: Props) {
             {errorText(t, failure)}
           </p>
         )}
+
+        {!orchestrator && <TimerSettings timer={card.timer} editable={editable} onChange={body => void change(body)} />}
 
         {!orchestrator && (
           <section className="ac-skills" aria-labelledby={`${id}-skills`}>

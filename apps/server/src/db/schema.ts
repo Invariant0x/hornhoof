@@ -181,13 +181,19 @@ export const agents = pgTable('agents', {
   contextUsed: real('context_used'),
   /* How hard its model thinks, as its program names the level; none runs at the program's default, Kimi at its most. */
   effort: text('effort'),
+  /* Wakes on its own every so many minutes, outside any task, to do what its order says; none means it does not. The
+     last round started, or was skipped, at timer_at. A timer for work skips its round while nothing is open or failed. */
+  timerMinutes: integer('timer_minutes'),
+  timerOrder: text('timer_order'),
+  timerAt: timestamp('timer_at', { withTimezone: true }),
+  timerForWork: boolean('timer_for_work').notNull().default(false),
   removedAt: timestamp('removed_at', { withTimezone: true }),
   createdAt: createdAt(),
 });
 
 export type AgentOverrides = { base?: string; skills?: Record<string, string> };
 
-export const AGENT_CHANGE_FIELDS = ['name', 'model', 'effort', 'subscription', 'skills', 'prompt', 'reset', 'hired', 'removed', 'switch'] as const;
+export const AGENT_CHANGE_FIELDS = ['name', 'model', 'effort', 'timer', 'subscription', 'skills', 'prompt', 'reset', 'hired', 'removed', 'switch'] as const;
 
 /* Every change to an employee's card: who, when, what, before and after. */
 export const agentChanges = pgTable(
@@ -250,7 +256,7 @@ export const jobs = pgTable(
     startedAt: timestamp('started_at', { withTimezone: true }),
     finishedAt: timestamp('finished_at', { withTimezone: true }),
   },
-  t => [index('jobs_subscription_id').on(t.subscriptionId), index('jobs_task_id').on(t.taskId)],
+  t => [index('jobs_subscription_id').on(t.subscriptionId), index('jobs_task_id').on(t.taskId), index('jobs_agent_id_status').on(t.agentId, t.status)],
 );
 
 export const AGENT_EVENT_KINDS = ['message', 'text', 'tool', 'tool_result', 'todo', 'proposal', 'applied', 'stopped', 'failed'] as const;
@@ -425,4 +431,23 @@ export const attachments = pgTable(
     createdAt: createdAt(),
   },
   t => [index('attachments_request_id').on(t.requestId), index('attachments_job_id').on(t.jobId)],
+);
+
+/* The company's notebook: short notes the orchestrator keeps across conversations, such as the CEO's decisions, rules
+   and agreements. People who see the whole company read and change it too. */
+export const notebookNotes = pgTable(
+  'notebook_notes',
+  {
+    id: id(),
+    companyId: companyId(),
+    number: integer('number').notNull(),
+    text: text('text').notNull(),
+    personId: uuid('person_id').references(() => people.id),
+    byOrchestrator: boolean('by_orchestrator').notNull().default(false),
+    createdAt: createdAt(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    /* A removed note keeps its number, so a number never names two notes. */
+    removedAt: timestamp('removed_at', { withTimezone: true }),
+  },
+  t => [unique('notebook_notes_company_number').on(t.companyId, t.number)],
 );
