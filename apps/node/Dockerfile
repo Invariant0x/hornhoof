@@ -69,8 +69,9 @@ RUN set -e; ub=/opt/hornhoof/ub; mkdir -p $ub /opt/hornhoof/bin /opt/hornhoof/ru
 
 FROM node:22-bookworm-slim
 COPY --from=browser /opt/browser-packages /opt/browser-packages
+# procps gives agents ps and free, and python-is-python3 the python that scripts call; agents looked for both.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends git ca-certificates curl ripgrep tmux python3 python3-venv $(cat /opt/browser-packages) \
+  && apt-get install -y --no-install-recommends git ca-certificates curl ripgrep tmux procps python3 python3-venv python-is-python3 $(cat /opt/browser-packages) \
   && rm -rf /var/lib/apt/lists/*
 COPY --from=quality /opt/hornhoof/ub /opt/hornhoof/ub
 COPY --from=quality /opt/hornhoof/rules /opt/hornhoof/rules
