@@ -615,3 +615,29 @@ export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answ
   if (task.status === 'waiting' && now.status === 'review') wakes.push(...now.panel.filter(id => id !== found.agentId).map(agentId => ({ agentId, taskId: task.id, why: 'review' as const })));
   return { request: row, task: now, wakes };
 }
+
+/* As long as an answer given in the task may be. */
+const ANSWER_MAX = 4000;
+
+/* A person spoke to the agent directly, in its window or its terminal: what they said answers the questions it asked people
+   and tells it how to go on where it was stuck. A commit to approve and a choice wait for their own answer. The agent reads
+   the words in that very turn, so it is not woken for them again; others the answer lets go on are. */
+export async function answerDirectly(ctx: Live, personId: string, agentId: string, text: string): Promise<Wake[]> {
+  const said = text.trim().slice(0, ANSWER_MAX);
+  if (!said) return [];
+  const open = await ctx.db
+    .select({ id: requests.id })
+    .from(requests)
+    .where(and(eq(requests.agentId, agentId), eq(requests.status, 'open'), inArray(requests.kind, ['question', 'stuck'])))
+    .orderBy(asc(requests.createdAt));
+  const wakes: Wake[] = [];
+  for (const { id } of open) {
+    try {
+      wakes.push(...(await answer(ctx, { personId }, id, { answer: said })).wakes.filter(w => w.agentId !== agentId));
+    } catch (err) {
+      /* Someone answered it in the task meanwhile. */
+      if (!(err instanceof ApiError && err.reason === 'request_closed')) throw err;
+    }
+  }
+  return wakes;
+}

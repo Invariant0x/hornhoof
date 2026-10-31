@@ -10,7 +10,8 @@ import { appendEvent, earlierTalk, publishWorking } from '../events/store.js';
 import { instructionsOf } from '../agents/instructions.js';
 import { repoFor, repoLine } from '../departments/repository.js';
 import { textHash } from '../templates/load.js';
-import { checkLiveness, leaveIfOff, startWork } from '../tasks/wake.js';
+import { answerDirectly } from '../tasks/engine.js';
+import { checkLiveness, leaveIfOff, startWork, wakeAll } from '../tasks/wake.js';
 import { preface } from './prompt.js';
 
 /* Workers compact their conversation at half a million tokens, which keeps their turns quick; heads and the orchestrator
@@ -132,6 +133,7 @@ export function openTypedTurn(ctx: Ctx, node: NodeIdentity, agentId: string, tex
       .returning({ id: jobs.id });
     if (text.trim()) await appendEvent(ctx, { companyId: agent.companyId, agentId, jobId: job!.id, kind: 'message', data: { text }, personId });
     await publishWorking(ctx, agent.companyId);
+    if (personId) await wakeAll(ctx, await answerDirectly(ctx, personId, agentId, text));
     return { jobId: job!.id, token };
   });
 }

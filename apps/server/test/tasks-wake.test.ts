@@ -1,8 +1,9 @@
 import { and, asc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agents, companies, departments, jobs, people, requests, subscriptions, tasks } from '../src/db/schema.js';
-import { afterJob } from '../src/modules/conversation/queue.js';
-import { createTask, submit } from '../src/modules/tasks/engine.js';
+import { afterJob, agentState, openTypedTurn } from '../src/modules/conversation/queue.js';
+import { identityOf } from '../src/modules/nodes/hub.js';
+import { ask, createTask, submit } from '../src/modules/tasks/engine.js';
 import { SILENT_TURNS, startWork, wakeAll, wakePrompt } from '../src/modules/tasks/wake.js';
 import { as, connectNode, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
@@ -35,6 +36,46 @@ async function company() {
   const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
   return { app, owner, ctx, db, sub: sub!, ceo: ceo!, dev: dev!, orchestrator: orchestrator!, head, bruno, rita, memberTask, turnsOf, finish };
 }
+
+describe('a person who speaks to an agent directly', () => {
+  /* Bruno ends turns on his task without moving it until Hornhoof asks a person how he should go on. */
+  async function stuck() {
+    const c = await company();
+    const task = await c.memberTask();
+    await wakeAll(c.ctx, [{ agentId: c.bruno.id, taskId: task.id, why: 'assigned' }]);
+    for (let i = 0; i < SILENT_TURNS; i++) await c.finish(c.bruno.id);
+    return { ...c, task };
+  }
+  const requestsOf = (c: Awaited<ReturnType<typeof company>>) =>
+    c.db.select({ kind: requests.kind, status: requests.status, answer: requests.answer, answeredBy: requests.answeredBy }).from(requests).orderBy(asc(requests.createdAt));
+
+  it("tells a stuck agent how to go on by typing into its terminal, and the task goes on without another turn", async () => {
+    const c = await stuck();
+    expect(await c.db.select({ status: tasks.status }).from(tasks).where(eq(tasks.id, c.task.id))).toEqual([{ status: 'waiting' }]);
+    expect(await openTypedTurn(c.ctx, identityOf(c.sub), c.bruno.id, 'Run the tests first, then submit.', c.ceo.id)).not.toBeNull();
+    expect(await requestsOf(c)).toEqual([{ kind: 'stuck', status: 'answered', answer: 'Run the tests first, then submit.', answeredBy: c.ceo.id }]);
+    expect(await c.db.select({ status: tasks.status, silent: tasks.silent }).from(tasks).where(eq(tasks.id, c.task.id))).toEqual([{ status: 'working', silent: 0 }]);
+    /* The typed turn carries the words. */
+    expect((await c.turnsOf(c.bruno.id)).filter(j => j.status === 'queued')).toEqual([]);
+  });
+
+  it("answers the agent's question with a message in its window, and leaves a commit to approve open", async () => {
+    const { app, db, ceo, hire, task } = await withRepositories();
+    const bruno = await hire('Bruno', null);
+    const mine = await task(bruno.id);
+    await ask(app.ctx, bruno.id, mine.id, { kind: 'question', text: 'EUR or USD?' });
+    await ask(app.ctx, bruno.id, mine.id, { kind: 'approval', text: 'Merge it?', commit: 'a'.repeat(40) });
+    const [me] = await db.select().from(people);
+    await until(async () => (await agentState(app.ctx, bruno.id)).ready);
+    expect((await app.inject({ method: 'POST', url: `/api/agents/${bruno.id}/messages`, payload: { text: 'EUR only.' }, ...as(ceo) })).statusCode).toBe(202);
+    expect(await db.select({ kind: requests.kind, status: requests.status, answer: requests.answer, answeredBy: requests.answeredBy }).from(requests).orderBy(asc(requests.createdAt))).toEqual([
+      { kind: 'question', status: 'answered', answer: 'EUR only.', answeredBy: me!.id },
+      { kind: 'approval', status: 'open', answer: null, answeredBy: null },
+    ]);
+    /* Only the message's own turn: the answer is in it. */
+    expect(await db.select({ id: jobs.id }).from(jobs).where(eq(jobs.agentId, bruno.id))).toHaveLength(1);
+  });
+});
 
 describe('waking agents for their tasks', () => {
   it('queues one turn per agent and task, naming the task', async () => {

@@ -5,6 +5,8 @@ import type { Ctx } from '../../app.js';
 import { departments, jobs } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { agentFor } from '../agents/find.js';
+import { answerDirectly } from '../tasks/engine.js';
+import { wakeAll } from '../tasks/wake.js';
 import { listEvents } from '../events/store.js';
 import { FIRST_TURN, turnPrompt } from './prompt.js';
 import { agentState, cancelJob, enqueueTurn, insertTurn, onAgent, pump } from './queue.js';
@@ -37,6 +39,8 @@ export function conversationRoutes(app: FastifyInstance, ctx: Ctx): void {
       from: me.via ? { kind: 'orchestrator' } : { kind: 'person', id: me.id },
       to: agent.kind === 'orchestrator' ? { kind: 'orchestrator' } : { kind: 'department', id: agent.departmentId ?? '' },
     });
+    /* A person's words answer what the agent waits for from people; the orchestrator answers requests with its own tool. */
+    if (!me.via) await wakeAll(ctx, await answerDirectly(ctx, me.id, agent.id, text));
     /* The orchestrator writes as itself. */
     const turn = me.via
       ? { prompt: turnPrompt({ name: 'Orchestrator', title: '' }, text), createdBy: null, message: { personId: null, text, from: 'orchestrator' as const } }
