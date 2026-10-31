@@ -47,6 +47,14 @@ describe('runJob', () => {
     expect(adapter.inputs.map(i => i.effort)).toEqual(['max', null]);
   });
 
+  it('passes on when Claude Code compacts the conversation, and nothing when Hornhoof leaves it to the program', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
+    const adapter = fakeAdapter(async () => ok());
+    await runJob(adapter, job({ compactWindow: 500_000 }), dir);
+    await runJob(adapter, job({ jobId: 'job-2' }), dir);
+    expect(adapter.inputs.map(i => i.compactWindow)).toEqual([500_000, null]);
+  });
+
   it('gives up with a timeout when the agent does not finish in time', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
     const adapter = fakeAdapter(() => new Promise(() => {}));

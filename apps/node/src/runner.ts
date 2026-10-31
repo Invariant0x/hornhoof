@@ -14,6 +14,8 @@ export type RunInput = {
   model: string | null;
   /* How hard the model thinks, as its program names it; none leaves it at the program's default. */
   effort?: string | null;
+  /* How full Claude Code's context gets before it compacts the conversation; none leaves it at the program's own. */
+  compactWindow?: number | null;
   workDir: string;
   secret: string | null;
   timeoutMs: number;
@@ -144,6 +146,7 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
       sessionId,
       model: msg.model,
       effort: msg.effort ?? null,
+      compactWindow: msg.compactWindow ?? null,
       workDir,
       secret: msg.secret,
       timeoutMs: msg.timeoutMs,

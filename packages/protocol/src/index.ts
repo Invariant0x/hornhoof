@@ -216,6 +216,8 @@ const ServerMessage = z.discriminatedUnion('type', [
     model: z.string().nullable(),
     /* How hard the program thinks; null leaves it at its own default. */
     effort: Effort.nullable().optional(),
+    /* How full Claude Code's context gets before it compacts the conversation, in tokens; left out, its own window. */
+    compactWindow: z.number().int().min(100_000).max(1_000_000).optional(),
     timeoutMs: z.number().int().positive(),
     secret: z.string().nullable(),
     /* The agent's standing instructions for this job, and the token its Hornhoof tools present. */

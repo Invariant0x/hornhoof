@@ -91,6 +91,13 @@ describe('Claude Code', () => {
     expect(res).toMatchObject({ ok: true, result: 'ready', sessionId: CLAUDE_SESSION });
   });
 
+  it('compacts the conversation at the window Hornhoof set, or at its own when none is set', async () => {
+    await adapter('claude').run(input({ compactWindow: 500_000 }));
+    expect(lastRun().env.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBe('500000');
+    await adapter('claude').run(input());
+    expect(lastRun().env).not.toHaveProperty('CLAUDE_CODE_AUTO_COMPACT_WINDOW');
+  });
+
   it('thinks as hard as the agent was set to', async () => {
     await adapter('claude').run(input({ effort: 'high' }));
     const { argv } = lastRun();

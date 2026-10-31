@@ -13,6 +13,10 @@ import { textHash } from '../templates/load.js';
 import { checkLiveness, leaveIfOff, startWork } from '../tasks/wake.js';
 import { preface } from './prompt.js';
 
+/* Workers compact their conversation at half a million tokens, which keeps their turns quick; heads and the orchestrator
+   keep the whole window, since they hold the department's and the company's picture. */
+export const WORKER_COMPACT_WINDOW = 500_000;
+
 export const CONVERSATION_TIMEOUT_MS = 15 * 60_000;
 /* A turn on a task may run long: the work, its tests and a review fit in one. */
 export const TASK_TURN_TIMEOUT_MS = 45 * 60_000;
@@ -225,6 +229,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
     sessionId,
     model,
     effort,
+    compactWindow: agent.kind === 'worker' ? WORKER_COMPACT_WINDOW : null,
     timeoutMs: job.timeoutMs,
     instructions: instructions.text,
     toolToken: token,

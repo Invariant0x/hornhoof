@@ -16,6 +16,8 @@ export type LaunchInput = {
   model: string | null;
   /* How hard the model thinks, as the program names it; none leaves it at the program's default. */
   effort?: string | null;
+  /* How full Claude Code's context gets before it compacts the conversation; none leaves it at its own. */
+  compactWindow?: number | null;
   instructionsFile: string | null;
   urls: AgentUrls;
 };
@@ -41,7 +43,7 @@ const hook = (event: string) => [{ hooks: [{ type: 'command', command: `hh-hook 
 
 export const claudeProgram: TermProgram = {
   kind: 'claude',
-  launch({ bin, home, sessionId, model, effort, instructionsFile, urls }) {
+  launch({ bin, home, sessionId, model, effort, compactWindow, instructionsFile, urls }) {
     const id = sessionId ?? randomUUID();
     const settings = {
       /* After compacting its conversation, Claude Code adds what hh-hook compact prints, which sends it back to its tools. */
@@ -62,7 +64,8 @@ export const claudeProgram: TermProgram = {
       ...(model ? ['--model', model] : []),
       ...(effort ? ['--effort', effort] : []),
     ];
-    return { command, env: { CLAUDE_CONFIG_DIR: home, ...bridgeEnv(urls) }, sessionId: id };
+    const compact: Record<string, string> = compactWindow ? { CLAUDE_CODE_AUTO_COMPACT_WINDOW: String(compactWindow) } : {};
+    return { command, env: { CLAUDE_CONFIG_DIR: home, ...bridgeEnv(urls), ...compact }, sessionId: id };
   },
 };
 

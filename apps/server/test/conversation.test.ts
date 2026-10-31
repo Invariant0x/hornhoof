@@ -8,7 +8,7 @@ import { as, connectNode, invitePerson, listen, openStream, setUpCompany, testAp
 
 const NODE_KEY = 'k'.repeat(40);
 
-type Run = { type: 'job.run'; jobId: string; prompt: string; sessionId: string | null; model: string | null; effort?: string | null; instructions: string | null; toolToken: string | null; timeoutMs: number };
+type Run = { type: 'job.run'; jobId: string; prompt: string; sessionId: string | null; model: string | null; effort?: string | null; compactWindow?: number; instructions: string | null; toolToken: string | null; timeoutMs: number };
 
 async function live() {
   const { app, db } = await testApp({ NODE_KEY });
@@ -214,6 +214,26 @@ describe('the orchestrator\'s conversation', () => {
     await until(async () => (await state(app, ceo)).ready);
     await say(app, ceo, 'Hello');
     expect((await nextRun(updated)).prompt).toBe('Ivan (CEO): Hello');
+  });
+
+  it('lets a worker compact its conversation at half a million tokens, while heads and the orchestrator keep the full window', async () => {
+    const { app, db, ceo, builtin } = await live();
+    const [acme] = await db.select().from(companies);
+    const [sub] = await db.select().from(subscriptions);
+    const [dev] = await db.insert(departments).values({ companyId: acme!.id, templateKey: 'development', roleCode: 'DEV' }).returning();
+    const hire = async (name: string, kind: 'head' | 'worker', roleKey: string) =>
+      (await db.insert(agents).values({ companyId: acme!.id, kind, name, roleKey, departmentId: dev!.id, model: '', subscriptionId: sub!.id }).returning())[0]!;
+    const hana = await hire('Hana', 'head', 'DEV-HEAD');
+    const bruno = await hire('Bruno', 'worker', 'DEV-BE');
+    const runOf = async (id: string) => {
+      expect((await app.inject({ method: 'POST', url: `/api/agents/${id}/messages`, payload: { text: 'Hi' }, ...as(ceo) })).statusCode).toBeLessThan(300);
+      const run = await nextRun(builtin);
+      await finish(builtin, run);
+      return run;
+    };
+    expect((await runOf('orchestrator')).compactWindow).toBeUndefined();
+    expect((await runOf(hana.id)).compactWindow).toBeUndefined();
+    expect((await runOf(bruno.id)).compactWindow).toBe(500_000);
   });
 
   it('runs him on a Kimi plan at its most, and at the effort a person picks in the same session', async () => {
