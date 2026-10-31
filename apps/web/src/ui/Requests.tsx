@@ -4,6 +4,9 @@ import { errorText, useT } from '../i18n';
 import type { TaskPlace, WaitingRequest } from '../types';
 import { Field } from './Field';
 
+/* A picture an agent showed, as people who reach its task load it. */
+const picture = (id: string) => `/api/attachments/${id}`;
+
 /* company: whether the person sees the whole company, the only people who approve a commit. */
 type Shared = { company: boolean; onOpenTask: (id: string) => void; placeName: (p: TaskPlace) => string };
 
@@ -33,7 +36,10 @@ function RequestItem({ request, onDone, company, onOpenTask, placeName }: Shared
     if (text.trim()) void reply({ answer: text.trim() });
   }
 
-  const who = request.kind === 'approval' ? t.tasks.asksApproval(agent.name) : request.kind === 'stuck' ? t.tasks.stuck(agent.name) : t.tasks.asks(agent.name);
+  const who =
+    request.kind === 'approval' ? t.tasks.asksApproval(agent.name) : request.kind === 'stuck' ? t.tasks.stuck(agent.name) : request.kind === 'choice' ? t.tasks.asksChoice(agent.name) : t.tasks.asks(agent.name);
+  /* Hornhoof's own words about a stuck task are said in the person's language. */
+  const said = request.kind === 'stuck' ? t.tasks.stuckText(agent.name, task.number) : request.text;
   return (
     <article className={`req ${request.kind}`} aria-label={`#${task.number} ${task.title}`}>
       <header>
@@ -43,7 +49,34 @@ function RequestItem({ request, onDone, company, onOpenTask, placeName }: Shared
         </button>
         {task.department && <small>{placeName(task.department)}</small>}
       </header>
-      <p className="req-text">{request.text}</p>
+      <p className="req-text">{said}</p>
+      {request.images.length > 0 && (
+        <div className="req-pics">
+          {request.images.map((id, i) => (
+            <a key={id} href={picture(id)} target="_blank" rel="noreferrer">
+              <img src={picture(id)} alt={t.tasks.picture(i + 1)} />
+            </a>
+          ))}
+        </div>
+      )}
+      {request.link && (
+        <a className="req-link" href={request.link} target="_blank" rel="noreferrer">
+          {t.tasks.seeWork}
+        </a>
+      )}
+      {request.kind === 'choice' && (
+        <div className="req-form">
+          <div className="req-options">
+            {request.options.map((o, i) => (
+              <button key={i} className="req-option" type="button" disabled={busy} onClick={() => void reply(text.trim() ? { pick: i, answer: text.trim() } : { pick: i })}>
+                {o.image && <img src={picture(o.image)} alt={o.label} />}
+                <span>{o.label}</span>
+              </button>
+            ))}
+          </div>
+          <Field label={t.tasks.note}>{p => <input {...p} value={text} maxLength={4000} onChange={e => setText(e.target.value)} />}</Field>
+        </div>
+      )}
       {request.kind === 'question' && (
         <form className="req-form" onSubmit={answer}>
           <Field label={t.tasks.yourAnswer}>{p => <textarea {...p} rows={2} value={text} maxLength={4000} onChange={e => setText(e.target.value)} />}</Field>
@@ -52,13 +85,13 @@ function RequestItem({ request, onDone, company, onOpenTask, placeName }: Shared
       )}
       {request.kind === 'approval' && !company && (
         <div className="req-form">
-          <code className="req-commit">{request.commit}</code>
+          <Commit request={request} />
           <p className="muted">{t.tasks.approvedByCompany}</p>
         </div>
       )}
       {request.kind === 'approval' && company && (
         <div className="req-form">
-          <code className="req-commit">{request.commit}</code>
+          <Commit request={request} />
           <Field label={t.tasks.note}>{p => <input {...p} value={text} maxLength={4000} onChange={e => setText(e.target.value)} />}</Field>
           <div className="req-actions">
             <button className="btn small" type="button" disabled={busy} onClick={() => void reply(text.trim() ? { approve: true, answer: text.trim() } : { approve: true })}>
@@ -85,6 +118,18 @@ function RequestItem({ request, onDone, company, onOpenTask, placeName }: Shared
       )}
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
     </article>
+  );
+}
+
+/* The exact commit, linked on GitHub when the repository is there. */
+function Commit({ request }: { request: WaitingRequest }) {
+  const code = <code className="req-commit">{request.commit}</code>;
+  return request.commitUrl ? (
+    <a className="req-commit-link" href={request.commitUrl} target="_blank" rel="noreferrer">
+      {code}
+    </a>
+  ) : (
+    code
   );
 }
 

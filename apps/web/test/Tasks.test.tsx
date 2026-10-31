@@ -142,6 +142,31 @@ describe('the tracker', () => {
     expect(screen.getByRole('button', { name: 'Tasks, 1 waiting for you' })).toBeInTheDocument();
   });
 
+  it('offers the ways an agent gives to pick from, with their pictures and a link to the work, and sends the pick', async () => {
+    const user = userEvent.setup();
+    const choice = {
+      ...REQUESTS[0]!,
+      id: 'r4',
+      kind: 'choice' as const,
+      text: 'Which logo?',
+      images: ['p0'],
+      options: [
+        { label: 'Round', image: 'p1' },
+        { label: 'Square', image: null },
+      ],
+      link: 'https://preview.example.com/logo',
+      task: { ...REQUESTS[0]!.task, id: 't11', number: 11, title: 'Logo' },
+    };
+    const calls = shell({ 'GET /api/requests': [200, { requests: [choice] }], 'POST /api/requests/r4': [200, { request: { id: 'r4', status: 'answered' } }] });
+    await openTasks(user);
+    const asked = within(screen.getByRole('region', { name: 'Waiting for you' })).getByRole('article', { name: /#11/ });
+    expect(within(asked).getByRole('img', { name: 'Picture 1' })).toHaveAttribute('src', '/api/attachments/p0');
+    expect(within(asked).getByRole('img', { name: 'Round' })).toHaveAttribute('src', '/api/attachments/p1');
+    expect(within(asked).getByRole('link', { name: 'See the work' })).toHaveAttribute('href', 'https://preview.example.com/logo');
+    await user.click(within(asked).getByRole('button', { name: /Square/ }));
+    expect(calls.find(c => c.path === '/api/requests/r4')?.body).toEqual({ pick: 1 });
+  });
+
   it('shows the exact commit an approval is for, with Approve and Decline', async () => {
     const user = userEvent.setup();
     const calls = shell({ 'POST /api/requests/r2': [200, { request: { id: 'r2', status: 'approved' } }] });

@@ -247,9 +247,16 @@ export type TaskDetail = TaskLine & {
 /* What an agent asks of people, under "Waiting for you". */
 export type WaitingRequest = {
   id: string;
-  kind: 'question' | 'approval' | 'stuck';
+  kind: 'question' | 'choice' | 'approval' | 'stuck';
   text: string;
   commit: string | null;
+  /* The commit on GitHub, when the repository is there. */
+  commitUrl: string | null;
+  /* Pictures the agent shows, by id; a choice's ways may carry their own. */
+  images: string[];
+  options: { label: string; image: string | null }[];
+  /* Where to see the work. */
+  link: string | null;
   at: string;
   agent: { id: string; name: string };
   task: { id: string; number: number; title: string; department: TaskPlace };

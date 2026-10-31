@@ -790,6 +790,15 @@ summary.turn-head:focus-visible { outline: 2px solid var(--cyan); outline-offset
 .req-form > .btn { justify-self: start; }
 .req-commit { justify-self: start; padding: 4px 8px; background: var(--surface2); border: 1px solid var(--line); font-family: var(--f-mono); font-size: 12.5px; overflow-wrap: anywhere; }
 .req-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.req-pics { display: flex; flex-wrap: wrap; gap: 8px; }
+.req-pics img { display: block; max-width: 240px; max-height: 160px; border: 1px solid var(--line); }
+.req-link { justify-self: start; }
+.req-options { display: flex; flex-wrap: wrap; gap: 8px; }
+.req-option { display: grid; gap: 6px; justify-items: start; padding: 8px 10px; border: 1px solid var(--line2); background: var(--surface2); color: var(--ink); font: inherit; cursor: pointer; }
+.req-option img { display: block; max-width: 200px; max-height: 140px; }
+.req-option:hover:not(:disabled), .req-option:focus-visible { border-color: var(--cyan); outline: none; box-shadow: 0 0 0 3px var(--glow); }
+.req-commit-link { justify-self: start; }
+.tp-wait { display: grid; gap: 8px; }
 .task-filters { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px; }
 .task-filters .field { min-width: 240px; }
 .trow { display: grid; gap: 4px; width: 100%; padding: 10px 14px; background: var(--surface); border: 1px solid var(--line); color: inherit; font: inherit; text-align: left; cursor: pointer; }

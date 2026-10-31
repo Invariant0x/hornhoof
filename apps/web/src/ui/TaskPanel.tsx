@@ -3,9 +3,10 @@ import { api } from '../api';
 import { errorText, useLanguage, useT, type Messages } from '../i18n';
 import { useOrg } from '../org';
 import { placeName, roleAfter, useTask } from '../tasks';
-import type { AgentRef, TaskDetail, TaskLogLine } from '../types';
+import type { AgentRef, TaskDetail, TaskLogLine, WaitingRequest } from '../types';
 import { Field } from './Field';
 import { Markdown } from './Markdown';
+import { Requests } from './Requests';
 
 const field = (data: unknown, key: string): unknown => (data && typeof data === 'object' && key in data ? (data as Record<string, unknown>)[key] : undefined);
 
@@ -23,7 +24,10 @@ function eventTitle(t: Messages, e: TaskLogLine): string {
   }
 }
 
-function TaskBody({ task, onOpen, onChanged }: { task: TaskDetail; onOpen: (id: string) => void; onChanged: () => void }) {
+/* What waits for the person in this task, and whether they see the whole company, which approving a commit takes. */
+type Waiting = { requests: WaitingRequest[]; company: boolean; onRequestsChanged: () => void };
+
+function TaskBody({ task, onOpen, onChanged, waiting }: { task: TaskDetail; onOpen: (id: string) => void; onChanged: () => void; waiting: Waiting }) {
   const t = useT();
   const { language } = useLanguage();
   const { org } = useOrg();
@@ -39,6 +43,22 @@ function TaskBody({ task, onOpen, onChanged }: { task: TaskDetail; onOpen: (id: 
         <p className={`tstate ${task.status}`}>{t.tasks.states[task.status]}</p>
         {task.createdBy && <p className="muted">{t.tasks.givenBy(task.createdBy.name)}</p>}
       </header>
+      {waiting.requests.length > 0 && (
+        <section className="tp-wait" aria-label={t.tasks.waitingHere}>
+          <h4>{t.tasks.waitingHere}</h4>
+          <Requests
+            requests={waiting.requests}
+            onChanged={() => {
+              waiting.onRequestsChanged();
+              onChanged();
+            }}
+            company={waiting.company}
+            onOpenTask={onOpen}
+            placeName={p => placeName(t, org, p)}
+          />
+          <p className="muted">{t.tasks.answerElsewhere}</p>
+        </section>
+      )}
       {task.parent && (
         <p className="tp-parent">
           {t.tasks.partOf}{' '}
@@ -183,7 +203,7 @@ function Actions({ task, onChanged }: { task: TaskDetail; onChanged: () => void 
 }
 
 /* One task in the right panel, kept fresh from the live stream. */
-export function TaskPanel({ taskId, onClose, onOpen }: { taskId: string; onClose: () => void; onOpen: (id: string) => void }) {
+export function TaskPanel({ taskId, onClose, onOpen, ...waiting }: { taskId: string; onClose: () => void; onOpen: (id: string) => void } & Waiting) {
   const t = useT();
   const { task, failure, load } = useTask(taskId);
   const title = task ? `#${task.number} ${task.title}` : t.tasks.heading;
@@ -204,7 +224,7 @@ export function TaskPanel({ taskId, onClose, onOpen }: { taskId: string; onClose
       </div>
       <div className="ac-body">
         {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
-        {task && <TaskBody task={task} onOpen={onOpen} onChanged={load} />}
+        {task && <TaskBody task={task} onOpen={onOpen} onChanged={load} waiting={waiting} />}
       </div>
     </aside>
   );
