@@ -166,6 +166,17 @@ describe('templates', () => {
     for (const surface of ['command-line tool', 'public API', 'library', 'Playwright']) expect(check).toContain(surface);
   });
 
+  it('keeps the red team on broken logic and flows, and security on protecting what the company has', () => {
+    const textOf = (roleId: string) => {
+      const role = templates.roles.get(roleId)!;
+      const own = role.skills.filter(k => k.id.startsWith('dev-')).map(k => templates.skills.get(k.id)!);
+      return [role, ...own].map(x => `${x.title.en} ${x.title.ru} ${x.description.en} ${x.description.ru} ${x.body}`).join('\n');
+    };
+    expect(templates.roles.get('DEV-RED')!.skills.map(k => k.id)).not.toContain('dev-threat-model');
+    expect(textOf('DEV-RED')).not.toMatch(/attack|hostile|exploit|secur|threat|inject|token|secret|атак|враждеб|безопасн|угроз|взлом/i);
+    expect(textOf('DEV-SEC')).not.toMatch(/attack|hostile|exploit|steal|атак|враждеб|эксплуат|взлом/i);
+  });
+
   it('credits every source a skill names in SOURCES.md', () => {
     const credits = readFileSync(`${DIR}/SOURCES.md`, 'utf8');
     for (const s of skills) for (const src of s.sources) expect(credits, `${s.id} ${src}`).toContain(src.split(' ')[0]);
