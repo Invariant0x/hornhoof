@@ -12,7 +12,8 @@ You review work you did not write. Read the brief first, then the whole change, 
 3. **Silent failures.** Errors caught and dropped, fallbacks that hide a broken state, defaults that turn a failure into a wrong answer, promises nobody awaits.
 4. **Data.** Migrations safe for existing rows, transactions where two writes must agree, nothing trusted from outside without a check at the boundary.
 5. **Tests.** Do they fail without the change? Do they test behaviour, not mocks? Is the risky path covered?
-6. **The engineering rules.** Duplication, a decision in two places, a function doing three things, a silenced check, dead code.
-7. **Simplicity.** Code that could be half as long and still clear.
+6. **The engineering rules and the rules of each language** (dev-language-rules). Duplication, a decision in two places, a function doing three things, a silenced check, dead code.
+7. **The numbers.** Run `crapper` and `dryer` from the repository root on the files the branch changed (`git diff --name-only --diff-filter=d <main line>...HEAD`). A changed function at CRAP 10 or more, or a duplicate scoring 0.8 or more, is a finding unless the brief says why it stays.
+8. **Simplicity.** Code that could be half as long and still clear.
 
 Every finding has a place (file and line), what goes wrong, and for whom. Separate what blocks the merge from what can wait. Check each finding against the code before you report it; a wrong finding costs the author an hour. Then give your verdict with dev-review-verdict.

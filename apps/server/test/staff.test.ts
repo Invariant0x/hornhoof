@@ -79,7 +79,7 @@ describe('staffing', () => {
     expect(options.roster[0]).toMatchObject({ role: 'DEV-HEAD', kind: 'head', tier: 'deep', inDefault: true });
     const be = options.roster.find((r: { role: string }) => r.role === 'DEV-BE');
     expect(be).toMatchObject({ title: 'Backend engineer', kind: 'member', perProduct: false });
-    expect(be.skills).toContainEqual({ id: 'dev-tdd', on: true, locked: false });
+    expect(be.skills).toContainEqual({ id: 'dev-engineering-rules', on: true, locked: false });
     expect(be.skills).toContainEqual({ id: 'hh-report-to-head', on: true, locked: true });
     expect(options.subscriptions.map((s: { id: string }) => s.id)).toEqual([c.olegCodex, c.orchestrator.subscriptionId, c.teamKey]);
     expect(options.subscriptions.find((s: { id: string }) => s.id === c.teamKey)).toMatchObject({ provider: 'anthropic_api', label: 'Team key', models: API_MODELS.anthropic_api });
@@ -190,7 +190,7 @@ describe('staffing', () => {
       const accepted = await c.app.inject({ method: 'POST', url: `/api/invites/${token}/accept`, payload: { password: 'correct horse battery' } });
       return accepted.cookies.find(k => k.name === 'hh_session')!.value;
     })();
-    const line = { role: 'DEV-BE', name: 'Bruno', model: '', subscription: null, skills: ['dev-tdd'] };
+    const line = { role: 'DEV-BE', name: 'Bruno', model: '', subscription: null, skills: ['dev-implement'] };
     expect((await hire(c.app, olegToken, c.dev.id, { people: [line] })).json().error.reason).toBe('company_scope_only');
     const res = await hire(c.app, c.ceo, c.dev.id, { people: [line] });
     expect(res.json().error.reason).toBe('staff_invalid');

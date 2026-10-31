@@ -21,7 +21,8 @@ describe('templates', () => {
 
   it('keeps roles short and skills small', () => {
     for (const r of roles) expect(r.body.length, r.id).toBeLessThanOrEqual(600);
-    for (const s of skills) expect(s.body.length, s.id).toBeLessThanOrEqual(2500);
+    /* ub-mode is taken whole. */
+    for (const s of skills) expect(s.body.length, s.id).toBeLessThanOrEqual(s.id === 'dev-engineering-rules' ? 4500 : 2500);
     for (const s of skills) expect(s.body.length, s.id).toBeGreaterThan(80);
   });
 
@@ -112,6 +113,30 @@ describe('templates', () => {
     expect(templates.roles.get('DSN-UI')!.perProduct).toBe(true);
     for (const id of ['DEV-BE', 'DEV-FE', 'DEV-ARCH', 'DEV-REV']) expect(templates.roles.get(id)!.skills.find(s => s.id === 'dev-engineering-rules')?.on, id).toBe(true);
     for (const id of ['DEV-HEAD', 'DEV-ARCH', 'DEV-SEC']) expect(templates.roles.get(id)!.tier, id).toBe('deep');
+  });
+
+  it('takes ub-mode whole, with the tools it runs', () => {
+    const rules = templates.skills.get('dev-engineering-rules')!.body;
+    for (const words of ['Every time you are asked to make a change follow:', '* Use the crapper tool', '* Use the dryer tool to eliminate duplication that rank 0.8 or above.', '* Kill the survivors.', '* Push to the main line at the end.']) {
+      expect(rules).toContain(words);
+    }
+    expect(rules).toContain('crapper, dryer and mutator are installed on your machine');
+    expect(rules).toContain('Push your branch, not the main line');
+    /* A submitted branch is committed, and --changed sees only what is not: the gates check what the branch changed. */
+    const changed = 'git diff --name-only --diff-filter=d';
+    for (const id of ['dev-engineering-rules', 'dev-review-diff', 'dev-test-gaps']) expect(templates.skills.get(id)!.body, id).toContain(changed);
+    expect(templates.skills.get('dev-review-diff')!.body).toMatch(/crapper[\s\S]*dryer/);
+    expect(templates.skills.get('dev-test-gaps')!.body).toContain('mutator');
+    for (const s of skills.filter(x => x.id.startsWith('dev-'))) expect(s.body, s.id).not.toMatch(/(crapper|dryer|mutator) --changed/);
+    for (const id of ['DEV-BE', 'DEV-FE', 'DEV-REV', 'DEV-TEST', 'DEV-SEC', 'DEV-PERF']) expect(templates.roles.get(id)!.skills.find(s => s.id === 'dev-language-rules')?.on, id).toBe(true);
+    for (const id of ['DEV-BE', 'DEV-FE', 'DEV-ARCH', 'DEV-REV', 'DEV-TEST', 'DEV-PERF']) expect(templates.roles.get(id)!.skills.find(s => s.id === 'dev-engineering-rules')?.on, id).toBe(true);
+  });
+
+  it('writes development for any language and any kind of product', () => {
+    const dev = [...roles.filter(r => r.department === 'development'), ...skills.filter(s => s.id.startsWith('dev-'))];
+    for (const x of dev) expect(`${x.title.en} ${x.description.en} ${x.body}`, x.id).not.toMatch(/\b(Russian|English)\b/);
+    const check = templates.skills.get('dev-browser-check')!.body;
+    for (const surface of ['command-line tool', 'public API', 'library', 'Playwright']) expect(check).toContain(surface);
   });
 
   it('credits every source a skill names in SOURCES.md', () => {

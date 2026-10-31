@@ -1,32 +1,154 @@
 ---
 id: dev-engineering-rules
-title: { en: "Engineering rules", ru: "Инженерные правила" }
-description: { en: "How this company writes code: working first, then right, in small proved steps.", ru: "Как эта компания пишет код: сначала чтобы работало, потом чтобы было правильно, маленькими проверенными шагами." }
+title: { en: "Engineering rules (ub-mode)", ru: "Инженерные правила (ub-mode)" }
+description: { en: "Uncle Bob's ub-mode word for word: first make it work, then make it right, then follow practice.", ru: "ub-mode Дяди Боба слово в слово: сначала чтобы работало, потом чтобы было правильно, затем практика." }
 kind: checklist
-sources: [unclebob/ub-mode SKILL.md]
+sources: [unclebob/ub-mode SKILL.md, unclebob/crapper README.md, unclebob/dryer README.md, unclebob/mutator README.md]
 ---
-**First make it work.**
-- Settle the shape of the data before the logic. Most bugs are a wrong shape.
-- One decision lives in one place. If the same rule appears twice, one copy will drift.
-- Make the smallest edit that moves toward the goal. Remove before you add.
-- Aim at an end state someone can check: a test, a command, a page.
-- Write the test first, watch it fail for the right reason, then make the smallest change that passes it. A test that cannot fail, or that checks a mock instead of the code, is dishonest; do not write one.
-- After two failed fixes of the same problem, stop patching and question the premise: the design, the data, your reading of the error.
-- When a task repeats, do one by hand, then build the tool for the rest.
+Every time you are asked to make a change follow:
+* First Make it Work.
+* Then Make it Right.
+* Follow Practice
 
-**Architecture.**
-- Make illegal states impossible to represent. Check data at the boundary once, then trust it inside.
-- Keep business logic pure; side effects at the edges. Operations that may run twice must be safe to run twice. Shared state has one writer.
-- Never silence the compiler, the linter or a failing test to get green. Fix the cause or report it.
-- Use the project's words for things, the same word everywhere.
+### First Make it Work
 
-**Then make it right.**
-- Reproduce a bug before fixing it, and fix its root cause, not the place it showed up.
-- Test behaviour, not implementation details, so refactors keep tests green.
-- Refactor only with behaviour pinned by tests. Keep functions small and simple; split one that needs a comment to explain its parts.
-- Delete dead code and duplicated code you touch.
+#### Laziness Protocol
 
-**Practice.**
-- Commit in small ordered steps. Each message says why the change was made and how it was proved.
-- Keep a short log of what you did and why, and put it in your report.
-- Read the code around your change and match its style, naming and comment density.
+* One decision lives in one place.
+* Ship the smallest edit that solves the problem.
+
+#### Foundational Thinking
+
+* Get the data shape right before you write the logic.
+* Do first whatever helps every later phase.
+* If a concurrent writer would matter, do not share state.
+
+#### TDD
+
+* Write the failing test before you change the code.
+* See it fail for the reason you expect.
+* Make the smallest change that makes it pass.
+* If an honest test is impractical, do not write a bad one.
+
+#### Redesign From First Principles
+
+* Do not bolt a new requirement onto the old design.
+* Ask what you would have built if it had been there from the start, think that through, and deliver it in pieces.
+
+#### Attack the Premise
+
+* When two fixes that share one premise fail the same gate, write that premise in one sentence and count which actors hold the imbalance.
+* Remove the assignment.
+* Do not start another fix until you have done that.
+
+#### Subtract Before You Add
+
+* Take complexity out before you add anything.
+
+#### Outcome-Oriented Execution
+
+* Aim at the end state you can check.
+* A break in the middle is allowed when you planned it and can undo it.
+
+#### Build the Lever
+
+* If the work is not obvious at a glance, build the tool that does it.
+* Do one unit by hand, then make the tool match that unit.
+
+#### Architecture
+
+##### Model the Domain
+
+* Put the domain in a structure that makes the illegal states impossible.
+* Maintain a glossary of domain terms.
+* If the code is already clear and local, leave it.
+
+##### Boundary Discipline
+
+* Check the data where it enters.
+* Inside, trust it.
+* Keep the business logic in a pure function.
+
+##### Type System Discipline
+
+* Make the illegal value impossible to write.
+* Parse outside data once, where it comes in.
+* Do not silence the compiler.
+
+##### Make Operations Idempotent
+
+* Running it twice, or running it after a crash halfway through, ends in the same state.
+
+##### Separate Before Serializing Shared State
+
+* If they do not need the same mutable thing, give each its own.
+* If they do, allow one writer, and enforce that in the structure.
+
+### Then Make it Right
+
+#### Fix Root Causes
+
+* Reproduce it.
+* Fix the cause.
+* A guard that only hides the crash is not a fix.
+
+#### Sequence work into verifiable units
+
+* Finish one small unit and check it.
+* Then start the next.
+
+#### Test Behavior, Not Implementation
+
+* The test calls the code the way its user does and checks the result that user would see.
+* If the test would still pass when every function returned nothing, throw it out.
+
+#### Crapper
+
+* Use the crapper tool
+* Reduce each function under  CRAP 10 by splitting it, by testing it, or both.
+* Consider whether case statements are worth reducing.
+
+#### Dryer
+
+* Use the dryer tool to eliminate duplication that rank 0.8 or above.
+
+#### Mutator
+
+* Use the mutator tool
+* Cover the uncovered.
+* Kill the survivors.
+* Delete dead code.
+
+#### Refactoring
+
+* Pin what the code does.
+* Change the structure.
+* Prove the behavior did not change.
+
+### Practice
+
+#### Keep a Log
+
+* Keep a log of every action you take and the reason you took it.
+* Report that log upon completion.
+
+#### Guard the Context Window
+
+* Keep the main thread small.
+* Send the bulk elsewhere, and keep the summary.
+
+#### Worktree Cleanup
+
+* Find what is safe to remove, confirm nothing still in use needs it, then reclaim the disk.
+* Uncommitted work waits for a decision.
+
+#### Commit and Push
+
+* Commit often, in small ordered commits.
+* Each commit says why, what changed, and how you proved it.
+* Push to the main line at the end.
+
+### In Hornhoof
+
+* crapper, dryer and mutator are installed on your machine. Run them from the repository root on the files your branch changed, `git diff --name-only --diff-filter=d <main line>...HEAD`: `--changed` sees only uncommitted files. Their coverage comes from the project's own test tools; install what is missing in your home folder.
+* Push your branch, not the main line: the main line takes it after the gates and the CEO's approval.

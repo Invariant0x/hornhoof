@@ -7,10 +7,11 @@ sources: [affaan-m/ECC agents/security-reviewer.md, addyosmani/agent-skills skil
 ---
 Trace every input from where it enters to where it is used. Check:
 
-- **Access**: every route and action checks who is asking and what they may reach, on the server. Another company's or another person's data is never reachable by changing an id.
-- **Injection**: SQL, shell, paths, HTML and templates built from input; anything passed to a command line.
+- **Access**: every entry point (a route, a command, a message, a job) checks who is asking and what they may reach, on the side that owns the data. Another company's or another person's data is never reachable by changing an id.
+- **Injection**: queries, shell, paths, markup and templates built from input; anything passed to a command line or an interpreter.
+- **Memory and native code**: unsafe blocks, foreign calls, buffer sizes, integer overflow, untrusted data deserialized into objects.
 - **Secrets**: keys and tokens never in code, logs, error messages, URLs or responses; compared in constant time; stored encrypted where the project does that.
-- **Sessions**: cookies flagged, tokens expire, sign-out ends the session, invites and one-time codes work once.
+- **Sessions**, where the product has them: cookies flagged, tokens expire, sign-out ends the session, invites and one-time codes work once.
 - **Agents and tools**: text an agent reads cannot widen what it may do; tool calls check the caller; prompts carry no secrets.
 - **Supply chain**: new dependencies are needed, maintained and pinned; scripts from the internet are not run blind.
 - **Infrastructure**: containers without needless privileges; a mounted Docker socket or host folder is justified.
