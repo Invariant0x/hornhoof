@@ -1,6 +1,6 @@
 import { and, count, desc, eq, gte, inArray, isNull, notInArray, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { agentChanges, agents, jobs, requests, subscriptions, taskEvents, tasks } from '../../db/schema.js';
+import { agentChanges, agentEvents, agents, jobs, requests, subscriptions, taskEvents, tasks } from '../../db/schema.js';
 import { afterJob, cancelJob, insertTurn, limitUntil, liveSubscription, onAgent, orchestratorOf, pump } from '../conversation/queue.js';
 import { sayLive } from '../conversation/live.js';
 import { appendEvent } from '../events/store.js';
@@ -159,6 +159,23 @@ async function explainRequest(ctx: Ctx, w: Wake): Promise<void> {
   await appendEvent(ctx, { companyId: task.companyId, agentId: w.agentId, jobId, kind: 'message', data: { text, task: { id: task.id, number: task.number }, request: request.id } });
   ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
   if (!into) await pump(ctx, w.agentId);
+}
+
+/* A turn that was to put requests into words ended: people see again that nobody is on them, whether or not it did. */
+export async function explainEnded(ctx: Ctx, jobId: string): Promise<void> {
+  const asked = sql<string>`${agentEvents.data}->>'request'`;
+  const ended = await ctx.db
+    .select({ task: tasks })
+    .from(agentEvents)
+    .innerJoin(requests, eq(sql`${requests.id}::text`, asked))
+    .innerJoin(tasks, eq(tasks.id, requests.taskId))
+    .where(and(eq(agentEvents.jobId, jobId), eq(agentEvents.kind, 'message')));
+  const told = new Set<string>();
+  for (const { task } of ended) {
+    if (told.has(task.id)) continue;
+    told.add(task.id);
+    ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
+  }
 }
 
 /* An agent back on a subscription: the wakes it missed without one were left out, so every task waiting on it gets a turn. */

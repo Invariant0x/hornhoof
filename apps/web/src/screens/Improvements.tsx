@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import { api } from '../api';
 import { errorText, useT } from '../i18n';
-import type { Improvement } from '../types';
+import { useOrg } from '../org';
+import { placeName } from '../tasks';
+import type { Improvement, Org } from '../types';
 import { Markdown } from '../ui/Markdown';
 
 /* One thing to improve: what it is, who found it and how often, the orchestrator's word on it, and for one that waits,
    taking it into work or setting it aside. */
-function Item({ item, onChanged }: { item: Improvement; onChanged: () => void }) {
+function Item({ item, org, onChanged }: { item: Improvement; org: Org | null; onChanged: () => void }) {
   const t = useT();
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<unknown>(null);
@@ -23,7 +25,7 @@ function Item({ item, onChanged }: { item: Improvement; onChanged: () => void })
     setBusy(false);
   }
 
-  const who = item.department ? `${item.agent.name}, ${item.department.name}` : item.agent.name;
+  const who = item.department ? `${item.agent.name}, ${placeName(t, org, item.department)}` : item.agent.name;
   return (
     <article className={`imp imp-${item.status}`} aria-labelledby={`imp-${item.id}`}>
       <header>
@@ -61,11 +63,12 @@ function Item({ item, onChanged }: { item: Improvement; onChanged: () => void })
    decision first, then what the orchestrator does now, what was done, and what was set aside, folded away. */
 export function Improvements({ improvements, failure, onChanged }: { improvements: Improvement[] | undefined; failure: unknown; onChanged: () => void }) {
   const t = useT();
+  const { org } = useOrg();
   const of = (status: Improvement['status']) => improvements?.filter(i => i.status === status) ?? [];
   const list = (items: Improvement[]) => (
     <div className="imps">
       {items.map(i => (
-        <Item key={i.id} item={i} onChanged={onChanged} />
+        <Item key={i.id} item={i} org={org} onChanged={onChanged} />
       ))}
     </div>
   );

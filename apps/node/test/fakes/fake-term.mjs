@@ -10,9 +10,9 @@
 // FAKE_LOSE_ENTER misses the first Enter, as Claude Code just started can: the line stays in its input until the next one.
 // FAKE_START_MS makes it say it started that long after it shows, as Claude Code can while it loads. FAKE_DEAF_MS makes
 // it keep what is typed in its input without taking Enter for that long after it started, as Claude Code does while it
-// loads a long session it resumed.
+// loads a long session it resumed. FAKE_DEAF_ONCE_MS does so only the first time it starts in its folder.
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, mkdirSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 
@@ -38,7 +38,9 @@ if (process.env.FAKE_MCP_LIST_MS) {
   }, Number(process.env.FAKE_MCP_LIST_MS));
 }
 let kept = process.env.FAKE_LOSE_ENTER ? '' : null;
-const deafUntil = Date.now() + Number(process.env.FAKE_DEAF_MS ?? 0);
+const deafOnce = process.env.FAKE_DEAF_ONCE_MS && !existsSync('.fake-deaf') ? Number(process.env.FAKE_DEAF_ONCE_MS) : 0;
+if (deafOnce) writeFileSync('.fake-deaf', '');
+const deafUntil = Date.now() + Number(process.env.FAKE_DEAF_MS ?? 0) + deafOnce;
 for await (const typed of createInterface({ input: process.stdin })) {
   if (Date.now() < deafUntil) {
     kept = `${kept ?? ''}${typed}`;

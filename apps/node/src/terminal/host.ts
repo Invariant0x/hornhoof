@@ -308,6 +308,8 @@ export class TerminalHost {
       for (const end = Date.now() + this.readyMs; !(await this.tookPrompt(a, input.signal)); ) {
         if (Date.now() >= end) {
           a.busy = false;
+          /* Its input still holds the prompt, so the next turn starts the program anew, resuming the session. */
+          a.hash = null;
           return await fail('agent_failed', `The program did not take Hornhoof's prompt within ${Math.round(this.readyMs / 1000)} s.\n\n${await this.screen(job.key)}`);
         }
         await this.opts.tmux.keys(a.name, 'Enter');

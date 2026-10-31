@@ -77,6 +77,19 @@ describe('improvements', () => {
     await waitFor(() => expect(calls.some(c => c.method === 'POST' && c.path === '/api/improvements/i1/dismiss')).toBe(true));
   });
 
+  it("name the department in the person's language", async () => {
+    localStorage.setItem('hh-lang', 'ru');
+    try {
+      const user = userEvent.setup();
+      shell();
+      await user.click(await screen.findByRole('button', { name: /^Улучшения/ }));
+      const taken = await screen.findByRole('article', { name: 'Let reviewers run the tests without asking' });
+      expect(taken).toHaveTextContent('Dana, Разработка');
+    } finally {
+      localStorage.removeItem('hh-lang');
+    }
+  });
+
   it('are not there for people who see only some departments', async () => {
     const calls = shell({}, listed('p6'));
     expect(await screen.findByRole('button', { name: /^Tasks/ })).toBeInTheDocument();

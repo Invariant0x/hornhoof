@@ -196,6 +196,15 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     expect((res as { output: string }).output).toContain('did not take');
   });
 
+  it('starts the program anew for the next turn after one it never took, resuming the session', async () => {
+    await setUp({ enterWaitMs: 200, readyMs: 2000 });
+    const first = await host.run(job('a16', 'hello', { env: { FAKE_SECRET: SECRET, FAKE_DEAF_ONCE_MS: '60000' } }));
+    expect(first).toMatchObject({ ok: false, error: 'agent_failed' });
+    const next = host.run(job('a16', 'next', { sessionId: first.sessionId, env: { FAKE_SECRET: SECRET, FAKE_DEAF_ONCE_MS: '60000' } }));
+    const late = new Promise(r => setTimeout(() => r('still waiting'), 15000));
+    expect(await Promise.race([next, late])).toMatchObject({ ok: true, result: 'echo: next' });
+  });
+
   it("keeps the screen of a turn that ended with no answer, which says why, as when the provider refused the work", async () => {
     await setUp();
     const res = await host.run(job('a15', 'MUTE please'));

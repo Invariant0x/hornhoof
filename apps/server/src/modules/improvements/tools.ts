@@ -1,5 +1,5 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { and, count, eq, gte } from 'drizzle-orm';
+import { and, count, eq, gte, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { improvements, jobs } from '../../db/schema.js';
@@ -10,6 +10,10 @@ type ToolJob = { id: string; companyId: string; agentId: string };
 
 /* What one turn may put under Improvements, so a round that goes wrong cannot flood the CEO. */
 export const TURN_IMPROVEMENTS = 10;
+/* What each running turn put, counted before the next one goes in so parallel calls cannot both pass; the oldest turns
+   are forgotten. */
+const put = new WeakMap<Ctx, Map<string, number>>();
+const PUT_KEPT = 500;
 
 const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
 const json = (value: unknown) => say(JSON.stringify(value));
@@ -30,6 +34,26 @@ const brief = (list: Awaited<ReturnType<typeof listImprovements>>) =>
    again. */
 export function registerImprovementTools(server: McpServer, ctx: Ctx, job: ToolJob): void {
   const { db } = ctx;
+  /* Whether this turn may put one more, counted at once. A turn's first one reads what it put before, which a restart of
+     Hornhoof would otherwise forget. */
+  async function room(): Promise<boolean> {
+    const counts = put.get(ctx) ?? new Map<string, number>();
+    put.set(ctx, counts);
+    if (!counts.has(job.id)) {
+      const [run] = await db.select({ startedAt: jobs.startedAt, createdAt: jobs.createdAt }).from(jobs).where(eq(jobs.id, job.id));
+      const [before] = await db
+        .select({ n: count() })
+        .from(improvements)
+        .where(and(eq(improvements.agentId, job.agentId), gte(improvements.updatedAt, run?.startedAt ?? run?.createdAt ?? new Date(0))));
+      if (!counts.has(job.id)) counts.set(job.id, before?.n ?? 0);
+    }
+    const n = counts.get(job.id)!;
+    if (n >= TURN_IMPROVEMENTS) return false;
+    counts.delete(job.id);
+    counts.set(job.id, n + 1);
+    if (counts.size > PUT_KEPT) counts.delete(counts.keys().next().value!);
+    return true;
+  }
   server.registerTool(
     'improvements',
     { description: 'What waits under Improvements for the CEO or is in work now, the latest first, with how many rounds found each. Read it before you put one there, so you find one again instead of twice.' },
@@ -46,15 +70,9 @@ export function registerImprovementTools(server: McpServer, ctx: Ctx, job: ToolJ
     },
     async ({ title, text, improvement }) =>
       refused(async () => {
-        const [run] = await db.select({ startedAt: jobs.startedAt, createdAt: jobs.createdAt }).from(jobs).where(eq(jobs.id, job.id));
-        const [put] = await db
-          .select({ n: count() })
-          .from(improvements)
-          .where(and(eq(improvements.agentId, job.agentId), gte(improvements.updatedAt, run?.startedAt ?? run?.createdAt ?? new Date(0))));
-        if ((put?.n ?? 0) >= TURN_IMPROVEMENTS) return say(`One turn puts at most ${TURN_IMPROVEMENTS} improvements. Go on in your next round.`, true);
+        if (!(await room())) return say(`One turn puts at most ${TURN_IMPROVEMENTS} improvements. Go on in your next round.`, true);
         if (improvement) {
-          const [again] = await db.select({ seen: improvements.seen }).from(improvements).where(and(eq(improvements.id, improvement), eq(improvements.companyId, job.companyId)));
-          await moveImprovement(ctx, job.companyId, improvement, 'open', { title, text, seen: (again?.seen ?? 0) + 1 });
+          await moveImprovement(ctx, job.companyId, improvement, 'open', { title, text, seen: sql`${improvements.seen} + 1` });
           return json({ improvement });
         }
         const [row] = await db.insert(improvements).values({ companyId: job.companyId, agentId: job.agentId, title, text }).returning({ id: improvements.id });

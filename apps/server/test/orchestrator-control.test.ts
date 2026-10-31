@@ -6,6 +6,7 @@ import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agentChanges, agentEvents, agents, companies, departments, jobs, people, proposals, requests, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
+import { afterJob } from '../src/modules/conversation/queue.js';
 import { identityOf } from '../src/modules/nodes/hub.js';
 import { ask, createTask } from '../src/modules/tasks/engine.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
@@ -151,6 +152,20 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
     const res = await call(await mcp(app), 'update_task', { task: task.number, body: 'POST /checkout with tax.' });
     expect(res.isError).toBeFalsy();
     expect((await db.select().from(tasks).where(eq(tasks.id, task.id)))[0]!.body).toBe('POST /checkout with tax.');
+  });
+
+  it('tells people when the turn that was to put a request into words ended without them', async () => {
+    const { app, db, ceo, orchestrator, bruno, task } = await company();
+    await db.delete(jobs).where(eq(jobs.agentId, orchestrator.id));
+    const { request, wakes } = await ask(app.ctx, bruno.id, task.id, { kind: 'question', text: 'JWT or sessions for /checkout?' });
+    await wakeAll(app.ctx, wakes);
+    const [asked] = await db.select().from(jobs).where(eq(jobs.agentId, orchestrator.id));
+    const heard: string[] = [];
+    app.ctx.bus.subscribe(task.companyId, m => heard.push(m.type));
+    await db.update(jobs).set({ status: 'failed', error: 'agent_failed', finishedAt: new Date() }).where(eq(jobs.id, asked!.id));
+    await afterJob(app.ctx, asked!.id);
+    expect(heard).toContain('requests');
+    expect((await app.inject({ url: '/api/requests', ...as(ceo) })).json().requests).toMatchObject([{ id: request.id, explained: null, explaining: false }]);
   });
 
   it('builds a department itself and is not woken about its own change', async () => {

@@ -12,7 +12,7 @@ import { instructionsOf } from '../agents/instructions.js';
 import { repoFor, repoLine } from '../departments/repository.js';
 import { textHash } from '../templates/load.js';
 import { answerDirectly } from '../tasks/engine.js';
-import { checkLiveness, leaveIfOff, startWork, wakeAll } from '../tasks/wake.js';
+import { checkLiveness, explainEnded, leaveIfOff, startWork, wakeAll } from '../tasks/wake.js';
 import { preface } from './prompt.js';
 
 /* Workers compact their conversation at half a million tokens, which keeps their turns quick; heads and the orchestrator
@@ -313,6 +313,7 @@ export async function afterJob(ctx: Ctx, jobId: string): Promise<void> {
     await appendEvent(ctx, { companyId: job.companyId, agentId: job.agentId, jobId, kind: stopped ? 'stopped' : 'failed', data: stopped ? {} : { error: job.error } });
   }
   if (job.taskId) await checkLiveness(ctx, jobId);
+  await explainEnded(ctx, jobId);
   await leaveIfOff(ctx, job.agentId);
   await pump(ctx, job.agentId);
 }

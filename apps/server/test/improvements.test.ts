@@ -115,6 +115,40 @@ describe('improvements', () => {
     expect(row).toMatchObject({ status: 'done', result: 'The node image installs jq from the next update.' });
   });
 
+  it('stay waiting when the orchestrator has no subscription to take one on', async () => {
+    const { app, db, ceo, orchestrator } = await company();
+    const { improvement: id } = JSON.parse((await call(await mcp(app, TOKENS.wendy), 'propose_improvement', { title: 'Install jq', text: 'Looked for jq.' })).content[0]!.text);
+    await db.update(agents).set({ subscriptionId: null }).where(eq(agents.id, orchestrator.id));
+    const taken = await app.inject({ method: 'POST', url: `/api/improvements/${id}/take`, ...as(ceo) });
+    expect([taken.statusCode, taken.json().error.reason]).toEqual([409, 'no_subscription']);
+    expect((await db.select().from(improvements).where(eq(improvements.id, id)))[0]!.status).toBe('open');
+  });
+
+  it('list all that wait or are in work, however many are closed', async () => {
+    const { app, db, ceo, acme, wendy } = await company();
+    const long = new Date(Date.now() - 86_400_000);
+    await db.insert(improvements).values({ companyId: acme.id, agentId: wendy.id, title: 'Old but open', text: 'x', updatedAt: long, createdAt: long });
+    await db.insert(improvements).values(Array.from({ length: 201 }, (_, i) => ({ companyId: acme.id, agentId: wendy.id, title: `Closed ${i}`, text: 'x', status: 'dismissed' as const })));
+    const listed = (await app.inject({ url: '/api/improvements', ...as(ceo) })).json().improvements as { title: string }[];
+    expect(listed.map(i => i.title)).toContain('Old but open');
+  });
+
+  it('take at most ten from one turn, though it sends them all at once', async () => {
+    const { app } = await company();
+    const wendy = await mcp(app, TOKENS.wendy);
+    const all = await Promise.all(Array.from({ length: 11 }, (_, i) => call(wendy, 'propose_improvement', { title: `Fix ${i}`, text: 'x' })));
+    expect(all.filter(r => !r.isError)).toHaveLength(10);
+  });
+
+  it('count every round that finds one again, though two do at once', async () => {
+    const { app, db } = await company();
+    const wendy = await mcp(app, TOKENS.wendy);
+    const { improvement: id } = JSON.parse((await call(wendy, 'propose_improvement', { title: 'Install jq', text: 'Looked for jq.' })).content[0]!.text);
+    const hana = await mcp(app, TOKENS.hana);
+    await Promise.all([call(wendy, 'propose_improvement', { improvement: id, title: 'Install jq', text: 'Again.' }), call(hana, 'propose_improvement', { improvement: id, title: 'Install jq', text: 'Again too.' })]);
+    expect((await db.select().from(improvements).where(eq(improvements.id, id)))[0]!.seen).toBe(3);
+  });
+
   it('go back to the CEO with the reason when the orchestrator cannot do one, and can be set aside', async () => {
     const { app, db, ceo } = await company();
     const wendy = await mcp(app, TOKENS.wendy);
