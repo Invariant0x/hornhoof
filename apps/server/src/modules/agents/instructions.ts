@@ -93,31 +93,28 @@ export function orchestratorSteady(t: Templates): string {
   return [ORCHESTRATOR_INSTRUCTIONS, ...skills].join('\n\n');
 }
 
-/* A notebook as its agent reads it, each note with its number: the company's for the orchestrator, a department's for
-   its head. */
-export async function notebookPart(db: Ctx['db'], book: Book): Promise<string> {
-  const notes = await listNotes(db, book);
-  const lines = notes.length ? notes.map(n => `[#${n.number}] ${n.text}`).join('\n') : 'The notebook is empty.';
-  return book.departmentId
-    ? `## Department notebook\n\nWhat you and the people who run your department keep across conversations. Change it with remember, rewrite_note and forget.\n\n${lines}`
-    : `## Company notebook\n\nWhat you and the people who run the company keep across conversations. Change it with remember, rewrite_note and forget.\n\n${lines}`;
-}
-
-const notebookOf = (text: string): Part => ({ kind: 'notebook', id: null, title: null, text, overridden: false, templateChanged: false });
-
 const CUT = '\n\nThe rest of the notebook did not fit here. Read it whole with the notebook tool.';
 
-/* A notebook in the room a turn has left, cut after a whole note, with where to read the rest; none when not even that fits. */
-function fitted(notebook: string, room: number): string {
-  if (notebook.length <= room) return notebook;
-  let kept = '';
-  for (const line of notebook.split('\n')) {
-    const next = kept ? `${kept}\n${line}` : line;
+/* A notebook as its agent reads it, each note with its number: the company's for the orchestrator, a department's for
+   its head. In less room it is cut after a whole note, with where to read the rest; none when not even that fits. */
+export async function notebookPart(db: Ctx['db'], book: Book, room = Infinity): Promise<string> {
+  const notes = await listNotes(db, book);
+  const head = book.departmentId
+    ? `## Department notebook\n\nWhat you and the people who run your department keep across conversations. Change it with remember, rewrite_note and forget.\n\n`
+    : `## Company notebook\n\nWhat you and the people who run the company keep across conversations. Change it with remember, rewrite_note and forget.\n\n`;
+  const lines = notes.map(n => `[#${n.number}] ${n.text}`);
+  const whole = head + (lines.length ? lines.join('\n') : 'The notebook is empty.');
+  if (whole.length <= room) return whole;
+  let kept = head.trimEnd();
+  for (let i = 0; i < lines.length; i++) {
+    const next = i ? `${kept}\n${lines[i]}` : `${head}${lines[i]}`;
     if (next.length + CUT.length > room) break;
     kept = next;
   }
-  return kept ? kept + CUT : '';
+  return kept.length + CUT.length <= room ? kept + CUT : '';
 }
+
+const notebookOf = (text: string): Part => ({ kind: 'notebook', id: null, title: null, text, overridden: false, templateChanged: false });
 
 /* What an agent runs with now: the orchestrator's standing role with the company notebook, or an employee's rendered
    instructions, a head's with its department's notebook. The hash leaves a notebook out: a new note reaches the program
@@ -141,7 +138,7 @@ export async function instructionsOf(ctx: Pick<Ctx, 'db' | 'templates'>, agent: 
   const [dept] = agent.kind === 'head' && agent.departmentId ? await ctx.db.select().from(departments).where(eq(departments.id, agent.departmentId)) : [];
   if (!dept) return rendered;
   /* A turn carries MAX_INSTRUCTIONS at most, the notebook included. */
-  const notebook = fitted(await notebookPart(ctx.db, departmentBook(dept)), MAX_INSTRUCTIONS - rendered.text.length - 2);
+  const notebook = await notebookPart(ctx.db, departmentBook(dept), MAX_INSTRUCTIONS - rendered.text.length - 2);
   if (!notebook) return rendered;
   return { parts: [...rendered.parts, notebookOf(notebook)], text: `${rendered.text}\n\n${notebook}`, hash: rendered.hash };
 }

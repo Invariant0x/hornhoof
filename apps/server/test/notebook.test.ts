@@ -8,7 +8,6 @@ import { describe, expect, it, onTestFinished } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, companies, departments, jobs, notebookNotes, subscriptions } from '../src/db/schema.js';
 import { instructionsOf } from '../src/modules/agents/instructions.js';
-import { NOTE_MAX } from '../src/modules/notebook/book.js';
 import { as, invitePerson, listen, openStream, setUpCompany, testApp, until } from './helpers.js';
 
 const TOKEN = 'tool-token-0123456789abcdef0123456789';
@@ -156,7 +155,9 @@ describe("a department's notebook", () => {
   it('gives a head as much of a full notebook as a turn takes, and its tool for the rest', async () => {
     const { app, db, ceo, acme } = await withDepartments();
     const [mkt] = await db.insert(departments).values({ companyId: acme.id, templateKey: 'marketing', roleCode: 'MKT' }).returning();
-    for (let i = 0; i < 13; i++) expect((await add(app, ceo, mkt!.id, `${i} `.padEnd(NOTE_MAX, 'x'))).statusCode).toBe(201);
+    /* Notes of many lines, so that a cut between lines would fall inside one. */
+    const note = (i: number) => [`${i} `, ...Array<string>(25).fill('xxxxxxxxx'), `end ${i}.`].join('\n');
+    for (let i = 0; i < 13; i++) expect((await add(app, ceo, mkt!.id, note(i))).statusCode).toBe(201);
     const key = await app.inject({
       method: 'POST',
       url: '/api/subscriptions',
@@ -185,6 +186,8 @@ describe("a department's notebook", () => {
     expect(text.length).toBeLessThanOrEqual(MAX_INSTRUCTIONS);
     expect(text).toContain(`[#1] 0 `);
     expect(text).not.toContain(`[#13] 12 `);
+    /* Only whole notes. */
+    for (let i = 0; i < 13; i++) expect([i, text.includes(`[#${i + 1}] ${i} `)]).toEqual([i, text.includes(`end ${i}.`)]);
     expect(text).toContain('The rest of the notebook did not fit here. Read it whole with the notebook tool.');
     /* Any node takes the turn. */
     const run = { type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 1000, secret: null, instructions: text, toolToken: null };
