@@ -121,6 +121,14 @@ describe('Department view', () => {
     expect(within(members).getByTitle('Context 20%')).not.toHaveClass('hi');
   });
 
+  it('keeps the way to an agent on past ten minutes while the server holds it for work that goes on', async () => {
+    const user = userEvent.setup();
+    const [dev] = DEV_ORG.departments;
+    shell({}, { ...DEV_ORG, departments: [{ ...dev!, live: [{ from: 'b0', to: 'b1', at: new Date(Date.now() - 25 * 60_000).toISOString(), held: true }] }] });
+    await flyIn(user);
+    await vi.waitFor(() => expect(document.querySelectorAll('path.live')).toHaveLength(1));
+  });
+
   it('keeps the way between two agents running for ten minutes after their last message, also when it opens later', async () => {
     const user = userEvent.setup();
     const stream = fakeStream();
@@ -129,6 +137,8 @@ describe('Department view', () => {
     await flyIn(user);
     const live = () => document.querySelectorAll('path.live');
     await vi.waitFor(() => expect(live()).toHaveLength(1));
+    /* Signals keep running along it while it is live. */
+    expect([...document.querySelectorAll('circle.pt animateMotion[repeatCount="indefinite"]')].some(m => m.getAttribute('path') === live()[0]!.getAttribute('d'))).toBe(true);
     stream.send({ type: 'pulse', from: { kind: 'agent', id: 'b0', departmentId: dev!.id }, to: { kind: 'agent', id: 'b1', departmentId: dev!.id } });
     await vi.waitFor(() => expect(live()).toHaveLength(2));
     /* Another department's agents are not this one's. */
@@ -228,6 +238,23 @@ describe('Department view', () => {
     expect(await screen.findByRole('complementary', { name: 'Bruno, Backend engineer' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Card' }));
     expect(await screen.findByRole('button', { name: 'Open terminal' })).toBeInTheDocument();
+  });
+
+  it("opens a head's department notebook from its window", async () => {
+    const user = userEvent.setup();
+    const DANA_CARD = { ...CARD, id: 'b0', name: 'Dana', kind: 'head' };
+    const calls = shell({
+      'GET /api/agents/b0': [200, DANA_CARD],
+      'GET /api/agents/b0/events?after=0': [200, { events: [], state: READY }],
+      'GET /api/departments/d2/notebook': [200, { notes: [{ number: 2, text: 'Review every merge.', by: { kind: 'agent', id: 'b0', name: 'Dana' }, updatedAt: '2026-10-31T02:00:00Z' }] }],
+    });
+    await flyIn(user);
+    await user.click(document.querySelector<HTMLButtonElement>('button.shead')!);
+    await user.click(await screen.findByRole('button', { name: 'Notebook' }));
+    const list = await screen.findByRole('list', { name: 'Notebook' });
+    expect(list).toHaveTextContent('#2Review every merge.Dana');
+    expect(screen.getByText(/What the head of this department remembers/)).toBeInTheDocument();
+    expect(calls.some(c => c.path === '/api/notebook')).toBe(false);
   });
 
   it('switches an employee off from its chip without opening it', async () => {

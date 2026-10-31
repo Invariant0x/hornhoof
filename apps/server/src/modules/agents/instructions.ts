@@ -1,8 +1,9 @@
+import { MAX_INSTRUCTIONS } from '@hornhoof/protocol';
 import { eq, inArray } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { companies, departments, type agents } from '../../db/schema.js';
 import { ORCHESTRATOR_INSTRUCTIONS } from '../conversation/prompt.js';
-import { listNotes } from '../notebook/routes.js';
+import { type Book, companyBook, departmentBook, listNotes } from '../notebook/book.js';
 import { deptName } from '../departments/templates.js';
 import { textHash, type Lang, type Templates } from '../templates/load.js';
 
@@ -19,7 +20,9 @@ function header(agent: AgentRow, role: string, place: Place): string {
     `You are ${agent.name}, ${where}.`,
     'You work in Hornhoof, where people and AI agents work together. People talk to you through this conversation; each message starts with who wrote it, like "Ivan (CEO): ...". Hornhoof\'s tool "company" shows you the company as it is.',
     'Work comes to you as tasks: Hornhoof wakes you with a task\'s number and why, and its tools "tasks" and "task" show what you hold. People may also write to you; answer questions about your work, and never claim work that is not done.',
-    'When your conversation was compacted and you see a summary instead of it, read "tasks" and the task you were on with "task" before you go on.',
+    agent.kind === 'head'
+      ? 'When your conversation was compacted and you see a summary instead of it, read "tasks", the task you were on with "task" and your department notebook again with "notebook" before you go on.'
+      : 'When your conversation was compacted and you see a summary instead of it, read "tasks" and the task you were on with "task" before you go on.',
     'Answer in the language the person writes in. Keep answers short and plain.',
   ].join('\n\n');
 }
@@ -90,19 +93,36 @@ export function orchestratorSteady(t: Templates): string {
   return [ORCHESTRATOR_INSTRUCTIONS, ...skills].join('\n\n');
 }
 
-/* The company notebook as the orchestrator reads it, each note with its number. */
-export async function notebookPart(db: Ctx['db'], companyId: string): Promise<string> {
-  const notes = await listNotes(db, companyId);
-  const lines = notes.length ? notes.map(n => `[#${n.number}] ${n.text}`).join('\n') : 'The notebook is empty.';
-  return `## Company notebook\n\nWhat you and the people who run the company keep across conversations. Change it with remember, rewrite_note and forget.\n\n${lines}`;
+const CUT = '\n\nThe rest of the notebook did not fit here. Read it whole with the notebook tool.';
+
+/* A notebook as its agent reads it, each note with its number: the company's for the orchestrator, a department's for
+   its head. In less room it is cut after a whole note, with where to read the rest; none when not even that fits. */
+export async function notebookPart(db: Ctx['db'], book: Book, room = Infinity): Promise<string> {
+  const notes = await listNotes(db, book);
+  const head = book.departmentId
+    ? `## Department notebook\n\nWhat you and the people who run your department keep across conversations. Change it with remember, rewrite_note and forget.\n\n`
+    : `## Company notebook\n\nWhat you and the people who run the company keep across conversations. Change it with remember, rewrite_note and forget.\n\n`;
+  const lines = notes.map(n => `[#${n.number}] ${n.text}`);
+  const whole = head + (lines.length ? lines.join('\n') : 'The notebook is empty.');
+  if (whole.length <= room) return whole;
+  let kept = head.trimEnd();
+  for (let i = 0; i < lines.length; i++) {
+    const next = i ? `${kept}\n${lines[i]}` : `${head}${lines[i]}`;
+    if (next.length + CUT.length > room) break;
+    kept = next;
+  }
+  return kept.length + CUT.length <= room ? kept + CUT : '';
 }
 
+const notebookOf = (text: string): Part => ({ kind: 'notebook', id: null, title: null, text, overridden: false, templateChanged: false });
+
 /* What an agent runs with now: the orchestrator's standing role with the company notebook, or an employee's rendered
-   instructions. The hash leaves the notebook out: a new note reaches the program as it starts again in the same session. */
+   instructions, a head's with its department's notebook. The hash leaves a notebook out: a new note reaches the program
+   as it starts again in the same session, or as it reads the notebook with its tool. */
 export async function instructionsOf(ctx: Pick<Ctx, 'db' | 'templates'>, agent: AgentRow): Promise<{ parts: Part[]; text: string; hash: string }> {
   if (agent.kind === 'orchestrator') {
     const steady = orchestratorSteady(ctx.templates);
-    const notebook = await notebookPart(ctx.db, agent.companyId);
+    const notebook = await notebookPart(ctx.db, companyBook(agent.companyId));
     const skills = ORCHESTRATOR_SKILLS.flatMap(id => {
       const skill = ctx.templates.skills.get(id);
       return skill ? [{ kind: 'skill' as const, id, title: skill.title, text: skillBlock(id, skill.title.en, skill.body), overridden: false, templateChanged: false }] : [];
@@ -110,9 +130,15 @@ export async function instructionsOf(ctx: Pick<Ctx, 'db' | 'templates'>, agent: 
     const parts: Part[] = [
       { kind: 'base', id: null, title: null, text: ORCHESTRATOR_INSTRUCTIONS, overridden: false, templateChanged: false },
       ...skills,
-      { kind: 'notebook', id: null, title: null, text: notebook, overridden: false, templateChanged: false },
+      notebookOf(notebook),
     ];
     return { parts, text: `${steady}\n\n${notebook}`, hash: textHash(steady) };
   }
-  return renderInstructions(ctx.templates, agent, await placeOf(ctx.db, agent));
+  const rendered = renderInstructions(ctx.templates, agent, await placeOf(ctx.db, agent));
+  const [dept] = agent.kind === 'head' && agent.departmentId ? await ctx.db.select().from(departments).where(eq(departments.id, agent.departmentId)) : [];
+  if (!dept) return rendered;
+  /* A turn carries MAX_INSTRUCTIONS at most, the notebook included. */
+  const notebook = await notebookPart(ctx.db, departmentBook(dept), MAX_INSTRUCTIONS - rendered.text.length - 2);
+  if (!notebook) return rendered;
+  return { parts: [...rendered.parts, notebookOf(notebook)], text: `${rendered.text}\n\n${notebook}`, hash: rendered.hash };
 }

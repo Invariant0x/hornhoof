@@ -46,6 +46,13 @@ describe('Claude Code in a terminal', () => {
     expect(unset.command).not.toContain('--effort');
   });
 
+  it('compacts the conversation at the window Hornhoof set, or at its own when none is set', () => {
+    const set = claudeProgram.launch({ bin: 'claude', home: '/h', workDir: '/w', sessionId: null, model: null, compactWindow: 500_000, instructionsFile: null, urls: URLS });
+    expect(set.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBe('500000');
+    const unset = claudeProgram.launch({ bin: 'claude', home: '/h', workDir: '/w', sessionId: null, model: null, instructionsFile: null, urls: URLS });
+    expect(unset.env).not.toHaveProperty('CLAUDE_CODE_AUTO_COMPACT_WINDOW');
+  });
+
   it("answers the first-run questions before they are asked, keeping the person's own settings", () => {
     const home = mkdtempSync(join(tmpdir(), 'hh-claude-'));
     writeFileSync(join(home, '.claude.json'), JSON.stringify({ oauthAccount: { a: 1 }, projects: { '/other': { allowedTools: ['x'] } } }));

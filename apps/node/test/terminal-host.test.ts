@@ -92,6 +92,12 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     expect(j.events).toEqual([{ kind: 'text', text: 'echo: hello there' }]);
   });
 
+  it('presses Enter again when the program did not take the prompt, as Claude Code that just started can miss it', async () => {
+    await setUp({ enterWaitMs: 300 });
+    const res = await host.run(job('a1', 'hello there', { timeoutMs: 4000, env: { FAKE_SECRET: SECRET, FAKE_LOSE_ENTER: '1' } }));
+    expect(res).toMatchObject({ ok: true, result: 'echo: hello there' });
+  });
+
   it("keeps a turn's answer with its turn when the program logs it after saying the turn ended", async () => {
     await setUp();
     const first = job('a12', 'LAG one');

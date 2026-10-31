@@ -14,6 +14,8 @@ export type RunInput = {
   model: string | null;
   /* How hard the model thinks, as its program names it; none leaves it at the program's default. */
   effort?: string | null;
+  /* How full Claude Code's context gets before it compacts the conversation; none leaves it at the program's own. */
+  compactWindow?: number | null;
   workDir: string;
   secret: string | null;
   timeoutMs: number;
@@ -61,11 +63,12 @@ function lastBytes(text: string, bytes: number): string {
   return buf.length <= bytes ? text : buf.subarray(buf.length - bytes).toString();
 }
 
-/* The adapter stops its own program at the timeout; this only makes sure the job always ends. */
+/* The adapter stops its own program at the timeout and says which session it was in, so the next turn goes on in it.
+   This only makes sure the job always ends, a while after that. */
 function withTimeout(run: Promise<RunResult>, ms: number): Promise<RunResult> {
   let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise<RunResult>(done => {
-    timer = setTimeout(() => done(failed(`The agent did not finish within ${Math.round(ms / 1000)} s.`, 'timeout')), ms);
+    timer = setTimeout(() => done(failed(`The agent did not finish within ${Math.round(ms / 1000)} s.`, 'timeout')), ms + Math.min(30_000, ms / 10));
   });
   return Promise.race([run, timeout]).finally(() => clearTimeout(timer));
 }
@@ -144,6 +147,7 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
       sessionId,
       model: msg.model,
       effort: msg.effort ?? null,
+      compactWindow: msg.compactWindow ?? null,
       workDir,
       secret: msg.secret,
       timeoutMs: msg.timeoutMs,

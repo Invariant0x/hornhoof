@@ -96,7 +96,7 @@ export type DeptRole = { id: string; title: Lang; description: Lang; kind: 'head
 export type Department = {
   id: string;
   /* The ways messages went between its agents in the last minutes. */
-  live?: { from: string; to: string; at: string }[];
+  live?: { from: string; to: string; at: string; held?: boolean }[];
   name: string | null;
   templateKey: TemplateKey | null;
   roleCode: string;
@@ -188,7 +188,8 @@ export type StructureItem = NewItem | ChangeItem;
 /* Who a pulse on the map runs between. */
 export type Endpoint = { kind: 'person'; id: string } | { kind: 'orchestrator' } | { kind: 'department'; id: string } | { kind: 'agent'; id: string; departmentId: string };
 /* A way a message went in the last minutes, with when the last one did. */
-export type Channel = { from: Endpoint; to: Endpoint; at: string };
+/* held: kept on past the last minutes while the work it brought goes on. */
+export type Channel = { from: Endpoint; to: Endpoint; at: string; held?: boolean };
 
 export type AgentEventKind = 'message' | 'text' | 'tool' | 'tool_result' | 'todo' | 'proposal' | 'applied' | 'stopped' | 'failed';
 
@@ -200,7 +201,7 @@ export type StreamMessage =
   | { type: 'agent_event'; agentId: string; event: EventView }
   | { type: 'working'; working: number }
   | { type: 'org' }
-  | { type: 'notebook' }
+  | { type: 'notebook'; spot: { departmentId: string | null } }
   | { type: 'pulse'; from: Endpoint; to: Endpoint }
   | { type: 'task'; id: string }
   | { type: 'requests' }
@@ -246,9 +247,16 @@ export type TaskDetail = TaskLine & {
 /* What an agent asks of people, under "Waiting for you". */
 export type WaitingRequest = {
   id: string;
-  kind: 'question' | 'approval' | 'stuck';
+  kind: 'question' | 'choice' | 'approval' | 'stuck';
   text: string;
   commit: string | null;
+  /* The commit on GitHub, when the repository is there. */
+  commitUrl: string | null;
+  /* Pictures the agent shows, by id; a choice's ways may carry their own. */
+  images: string[];
+  options: { label: string; image: string | null }[];
+  /* Where to see the work. */
+  link: string | null;
   at: string;
   agent: { id: string; name: string };
   task: { id: string; number: number; title: string; department: TaskPlace };
@@ -307,5 +315,5 @@ export type UpdatesView = {
   updater: { present: boolean; status: UpdaterStatus | null; waiting: { version: string } | null };
 };
 
-/* A note of the company notebook and who wrote it last. */
-export type NoteView = { number: number; text: string; by: { kind: 'orchestrator' } | { kind: 'person'; id: string; name: string } | null; updatedAt: string };
+/* A note of the company notebook or a department's, and who wrote it last: a person, the orchestrator or the head. */
+export type NoteView = { number: number; text: string; by: { kind: 'orchestrator' } | { kind: 'person' | 'agent'; id: string; name: string } | null; updatedAt: string };

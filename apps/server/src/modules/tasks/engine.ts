@@ -1,8 +1,8 @@
 import { and, asc, count, eq, inArray, isNull, max, notInArray, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import type { Spot } from '../../auth/access.js';
+import { accessOf, canReach, type Spot } from '../../auth/access.js';
 import type { Db } from '../../db/client.js';
-import { agents, attachments, companies, requests, subscriptions, taskEvents, tasks, turns, type RequestOption, type TaskEventKind } from '../../db/schema.js';
+import { agents, attachments, companies, people, requests, subscriptions, taskEvents, tasks, turns, type RequestOption, type TaskEventKind } from '../../db/schema.js';
 import { ApiError, type ErrorReason } from '../../errors.js';
 import { handOff } from './pulses.js';
 
@@ -614,4 +614,35 @@ export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answ
   /* The last answer at a gate: everyone else still to give a verdict there goes on too, also after a turn spent waiting. */
   if (task.status === 'waiting' && now.status === 'review') wakes.push(...now.panel.filter(id => id !== found.agentId).map(agentId => ({ agentId, taskId: task.id, why: 'review' as const })));
   return { request: row, task: now, wakes };
+}
+
+/* As long as an answer given in the task may be. */
+const ANSWER_MAX = 4000;
+
+/* A person spoke to the agent directly, in its window or its terminal: what they said answers the questions it asked people
+   and tells it how to go on where it was stuck, on the tasks that person reaches. A commit to approve and a choice wait for
+   their own answer. The task's own turn still follows, which watches that the task moves. */
+export async function answerDirectly(ctx: Live, personId: string, agentId: string, text: string): Promise<Wake[]> {
+  const said = text.trim().slice(0, ANSWER_MAX);
+  if (!said) return [];
+  const [person] = await ctx.db.select({ id: people.id, scopeKind: people.scopeKind }).from(people).where(eq(people.id, personId));
+  if (!person) return [];
+  const access = await accessOf(ctx.db, person);
+  const open = await ctx.db
+    .select({ id: requests.id, departmentId: tasks.departmentId, productId: tasks.productId })
+    .from(requests)
+    .innerJoin(tasks, eq(tasks.id, requests.taskId))
+    .where(and(eq(requests.agentId, agentId), eq(requests.status, 'open'), inArray(requests.kind, ['question', 'stuck'])))
+    .orderBy(asc(requests.createdAt));
+  const wakes: Wake[] = [];
+  for (const r of open) {
+    if (!canReach(access, taskSpot(r))) continue;
+    try {
+      wakes.push(...(await answer(ctx, { personId }, r.id, { answer: said })).wakes);
+    } catch (err) {
+      /* Someone answered it in the task meanwhile. */
+      if (!(err instanceof ApiError && err.reason === 'request_closed')) throw err;
+    }
+  }
+  return wakes;
 }

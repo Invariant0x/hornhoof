@@ -63,6 +63,8 @@ type Agent = {
   ended: Deferred<string> | null;
   turn: Turn | null;
   busy: boolean;
+  /* The program took the prompt Hornhoof typed: its prompt hook ran or its log says the turn started. */
+  took?: boolean;
   limits: Limits | null;
   /* How full the context is as Hornhoof last heard it, and how many tokens Kimi's model takes in it. */
   contextUsed: number | null;
@@ -103,6 +105,7 @@ type Options = {
   secrets(): string[];
   /* A session a person started by typing, kept with its folder so Hornhoof's next turn can go on with it. */
   remember?(sessionId: string, workDir: string): void;
+  /* How long a program may take to show its prompt. Kimi Code takes most of a minute on a busy machine. */
   readyMs?: number;
   pollMs?: number;
   /* A program idle this long with nobody watching ends; its next turn resumes the session. */
@@ -112,6 +115,8 @@ type Options = {
   typedMs?: number;
   /* How long a program started with nothing to type gets to connect to its tools. */
   toolsMs?: number;
+  /* How long the host waits for the program to take a prompt before it presses Enter again. */
+  enterWaitMs?: number;
   cols?: number;
   rows?: number;
 };
@@ -119,6 +124,8 @@ type Options = {
 const WAITING = 'This agent starts with its next turn.';
 const STARTING = 'Starting this agent...';
 const STOP_WAIT_MS = 5000;
+/* How often the host presses Enter again for a prompt the program did not take. */
+const ENTER_TRIES = 3;
 /* What a typed turn keeps at most while Hornhoof has not answered it. */
 const EARLY_MAX = 1000;
 /* Claude Code can say a turn ended before its answer is in the session log; the turn waits this long for it. */
@@ -166,6 +173,7 @@ export class TerminalHost {
   private readonly openMs: number;
   private readonly typedMs: number;
   private readonly toolsMs: number;
+  private readonly enterWaitMs: number;
   /* Views being opened, and those Hornhoof closed meanwhile. */
   private readonly viewsOpening = new Set<string>();
   private readonly viewsClosed = new Set<string>();
@@ -174,12 +182,13 @@ export class TerminalHost {
 
   constructor(private readonly opts: Options) {
     this.bridge = new Bridge(opts.hornhoof, (key, event, body) => this.hook(key, event, body));
-    this.readyMs = opts.readyMs ?? 45_000;
+    this.readyMs = opts.readyMs ?? 120_000;
     this.pollMs = opts.pollMs ?? 500;
     this.idleMs = opts.idleMs ?? 10 * 60_000;
     this.openMs = opts.openMs ?? 8000;
     this.typedMs = opts.typedMs ?? 60 * 60_000;
     this.toolsMs = opts.toolsMs ?? 15_000;
+    this.enterWaitMs = opts.enterWaitMs ?? 4000;
     this.cols = opts.cols ?? 160;
     this.rows = opts.rows ?? 48;
   }
@@ -243,8 +252,8 @@ export class TerminalHost {
     }
     /* Codex and Kimi Code read AGENTS.md in the folder they start in. */
     if (told && program.kind !== 'claude') writeFileSync(join(input.workDir, 'AGENTS.md'), told + '\n', { mode: 0o600 });
-    const spec = program.launch({ bin: job.bin, home: job.home, workDir: input.workDir, sessionId: input.sessionId, model: input.model, effort: input.effort, instructionsFile, urls });
-    const hash = hashOf({ kind: program.kind, bin: job.bin, model: input.model, effort: input.effort ?? null, instructions: input.instructions, env: lasting(input.env) });
+    const spec = program.launch({ bin: job.bin, home: job.home, workDir: input.workDir, sessionId: input.sessionId, model: input.model, effort: input.effort, compactWindow: input.compactWindow, instructionsFile, urls });
+    const hash = hashOf({ kind: program.kind, bin: job.bin, model: input.model, effort: input.effort ?? null, compactWindow: input.compactWindow ?? null, instructions: input.instructions, env: lasting(input.env) });
     /* A new session asked for goes on in a program started for a person that nothing was said in yet. */
     const sameSession = input.sessionId === null ? a.fresh : input.sessionId === a.sessionId || a.cleared.has(input.sessionId);
     const goesOn = sameSession && a.hash === hash && (await this.opts.tmux.alive(a.name));
@@ -291,10 +300,14 @@ export class TerminalHost {
         return { ok: true, sessionId: a.fresh ? null : a.sessionId, result: '', output: '', error: null, limits: a.limits };
       }
       a.fresh = false;
+      a.took = false;
       await this.opts.tmux.paste(a.name, input.prompt);
       await sleep(Math.min(3000, 300 + input.prompt.length / 20));
       await this.opts.tmux.keys(a.name, 'Enter');
       a.busy = true;
+      /* A program that just started can miss the Enter and keep the prompt in its input: Enter again until it takes it.
+         An Enter into an empty input does nothing. */
+      for (let i = 0; i < ENTER_TRIES && !(await this.tookPrompt(a, input.signal)); i++) await this.opts.tmux.keys(a.name, 'Enter');
 
       for (;;) {
         this.drain(a);
@@ -407,6 +420,18 @@ export class TerminalHost {
     a.ended?.resolve('');
   }
 
+  /* Whether within enterWaitMs the program took the prompt Hornhoof typed, ended its turn or ended itself, or the turn
+     was called off: the turn goes on from there without another Enter. */
+  private async tookPrompt(a: Agent, signal?: AbortSignal): Promise<boolean> {
+    let ended = false;
+    void a.ended?.promise.then(() => (ended = true));
+    for (const end = Date.now() + this.enterWaitMs; Date.now() < end; await sleep(this.pollMs)) {
+      this.drain(a);
+      if (a.took || ended || signal?.aborted || !(await this.opts.tmux.alive(a.name))) return true;
+    }
+    return false;
+  }
+
   /* Claude Code says it started through its hook; Codex and Kimi Code are ready once their prompt shows. Kimi shows its
      prompt also when it is not signed in, with a word to sign in. */
   private async ready(a: Agent, job: TermJob): Promise<boolean> {
@@ -477,7 +502,7 @@ export class TerminalHost {
       if (news.limits) a.limits = news.limits;
       if (news.context !== undefined) this.context(a, news.context);
       if (news.session) a.sessionId = news.session.id;
-      if (news.started) a.busy = true;
+      if (news.started) a.busy = a.took = true;
       /* A stop logged before the running turn's prompt went in belongs to the last turn. */
       if (news.aborted && !this.stoppable(a)) continue;
       if (news.ended || news.aborted) {
@@ -503,7 +528,7 @@ export class TerminalHost {
       if (a.stepSaid) a.lastText = (before ?? '') + e.text;
       a.stepSaid = true;
     }
-    if (news.started) a.busy = true;
+    if (news.started) a.busy = a.took = true;
     if (!(news.ended || news.aborted || news.failed !== undefined)) return;
     /* An end logged before the running turn's prompt went in belongs to the last turn, but a blocked prompt is the running
        turn's own: it never starts. With no turn, the program is free. */
@@ -569,6 +594,7 @@ export class TerminalHost {
         return;
       }
       case 'prompt':
+        a.took = true;
         await a.settling;
         a.busy = true;
         /* Kimi Code hands the prompt as parts of a message. */

@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Shell } from '../src/screens/Shell';
-import { DEV_ORG, ME, mockApi, TASK_DETAIL, TASKS, TURN } from './api-mock';
+import { DEV_ORG, ME, mockApi, REQUESTS, TASK_DETAIL, TASKS, TURN } from './api-mock';
 
 function shell(routes: Record<string, unknown> = {}) {
   const calls = mockApi({
@@ -29,6 +29,32 @@ async function openTask(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe('a task', () => {
+  it('puts what waits for the person at the top, with a field to answer, and says that writing to the agent counts too', async () => {
+    const user = userEvent.setup();
+    const stuck = {
+      ...REQUESTS[0]!,
+      id: 'r3',
+      kind: 'stuck' as const,
+      text: 'Ended 3 turns in a row on #12 without moving it. Tell it how to go on, or cancel the task.',
+      agent: { id: 'b1', name: 'Bruno' },
+      task: { ...REQUESTS[0]!.task, id: 't12', number: 12, title: 'Checkout API' },
+    };
+    const calls = shell({ 'GET /api/requests': [200, { requests: [REQUESTS[0], stuck] }], 'POST /api/requests/r3': [200, { request: { id: 'r3', status: 'answered' } }] });
+    /* From the list of what waits, as a person goes. */
+    await user.click(await screen.findByRole('button', { name: /^Tasks/ }));
+    await user.click(within(await screen.findByRole('region', { name: 'Waiting for you' })).getByRole('button', { name: /#12/ }));
+    const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
+    const waiting = await within(panel).findByRole('region', { name: 'Waiting for your answer' });
+    /* Only this task's. */
+    expect(within(waiting).getAllByRole('article')).toHaveLength(1);
+    expect(waiting).toHaveTextContent('Bruno ended several turns in a row without moving #12. Write how it should go on, or cancel the task.');
+    expect(waiting).not.toHaveTextContent('Ended 3 turns');
+    expect(waiting).toHaveTextContent("A question can be answered in the agent's window or terminal too: what you write there counts.");
+    await user.type(within(waiting).getByLabelText('Your answer'), 'Run the tests first.');
+    await user.click(within(waiting).getByRole('button', { name: 'Answer' }));
+    expect(calls.find(c => c.path === '/api/requests/r3')?.body).toEqual({ answer: 'Run the tests first.' });
+  });
+
   it('opens with where it stands at its gates, its brief, body, subtasks and log', async () => {
     const user = userEvent.setup();
     shell();

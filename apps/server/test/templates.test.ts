@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { MAX_INSTRUCTIONS, TEMPLATE_KEYS } from '@hornhoof/protocol';
 import { describe, expect, it } from 'vitest';
 import { ORCHESTRATOR_SKILLS, orchestratorSteady } from '../src/modules/agents/instructions.js';
-import { NOTEBOOK_MAX, NOTES_MAX } from '../src/modules/notebook/routes.js';
+import { NOTEBOOK_MAX, NOTES_MAX } from '../src/modules/notebook/book.js';
 import { CORE_SKILLS, HEAD_SKILLS, loadTemplates, MEMBER_SKILLS } from '../src/modules/templates/load.js';
 
 const DIR = fileURLToPath(new URL('../../../templates', import.meta.url));

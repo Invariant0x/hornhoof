@@ -8,6 +8,7 @@ import { agents, companies, departments, jobs, people, personAccess, requests, s
 import { employeeOrder } from '../agents/order.js';
 import { authorOf } from '../departments/repository.js';
 import { deptName } from '../departments/templates.js';
+import { CHANNEL_MS, type Endpoint } from '../events/bus.js';
 import { workingCount } from '../events/store.js';
 import { personViews } from '../people/views.js';
 import { identityOf } from '../nodes/hub.js';
@@ -62,7 +63,7 @@ export function orgRoutes(app: FastifyInstance, { db, hub, templates, bus }: Ctx
     const views = new Map((await personViews(db, active)).map(v => [v.id, v]));
     const inDepartment = (deptId: string) => active.filter(p => p.scopeKind !== 'company' && homes.get(p.id)!.size === 1 && homes.get(p.id)!.has(deptId)).map(p => views.get(p.id)!);
     const running = await db
-      .select({ agentId: jobs.agentId, taskId: jobs.taskId })
+      .select({ agentId: jobs.agentId, taskId: jobs.taskId, startedAt: jobs.startedAt, createdAt: jobs.createdAt })
       .from(jobs)
       .where(and(eq(jobs.companyId, me.companyId), eq(jobs.status, 'running'), isNotNull(jobs.agentId)));
     const busy = new Set(running.map(j => j.agentId));
@@ -93,10 +94,13 @@ export function orgRoutes(app: FastifyInstance, { db, hub, templates, bus }: Ctx
       return pick('idle', null);
     };
     /* A department's agents include those in its products. */
-    const agentsOf = (deptId: string) => {
+    const agentIdsOf = (deptId: string) => {
       const ids = new Set([deptId, ...depts.filter(p => p.parentId === deptId).map(p => p.id)]);
-      const mine = allAgents.filter(a => a.departmentId && ids.has(a.departmentId));
-      return { total: mine.length, working: mine.filter(a => busy.has(a.id)).length };
+      return allAgents.filter(a => a.departmentId && ids.has(a.departmentId)).map(a => a.id);
+    };
+    const agentsOf = (deptId: string) => {
+      const mine = agentIdsOf(deptId);
+      return { total: mine.length, working: mine.filter(id => busy.has(id)).length };
     };
     const employeesOf = (dept: (typeof depts)[number]) =>
       allAgents
@@ -138,10 +142,22 @@ export function orgRoutes(app: FastifyInstance, { db, hub, templates, bus }: Ctx
         });
     };
 
-    /* The ways messages went in the last minutes: between places on the map, and between agents on a department's card. */
-    const ways = bus.channels(me.companyId);
+    /* The agents at the end of a way: one agent, a department's with its products', or the orchestrator. */
+    const at = (e: Endpoint): string[] =>
+      e.kind === 'agent' ? [e.id] : e.kind === 'orchestrator' ? (orchestrator ? [orchestrator.id] : []) : e.kind === 'department' ? agentIdsOf(e.id) : [];
+    /* Whether one of them still runs a turn it started before the way went quiet: the work the way brought goes on. A turn
+       started later, on a timer say, does not keep it. */
+    const goesOn = (w: { to: Endpoint; at: string }) => {
+      const ids = at(w.to);
+      return running.some(j => j.agentId !== null && ids.includes(j.agentId) && (j.startedAt ?? j.createdAt).getTime() <= Date.parse(w.at) + CHANNEL_MS);
+    };
+    /* The ways messages went in the last minutes, and those held while their work goes on: between places on the map, and
+       between agents on a department's card. */
+    const ways = bus.channels(me.companyId, Date.now(), goesOn);
     const inside = (id: string) =>
-      ways.flatMap(w => (w.from.kind === 'agent' && w.to.kind === 'agent' && w.from.departmentId === id ? [{ from: w.from.id, to: w.to.id, at: w.at }] : []));
+      ways.flatMap(w =>
+        w.from.kind === 'agent' && w.to.kind === 'agent' && w.from.departmentId === id ? [{ from: w.from.id, to: w.to.id, at: w.at, ...(w.held ? { held: w.held } : {}) }] : [],
+      );
 
     return {
       company,

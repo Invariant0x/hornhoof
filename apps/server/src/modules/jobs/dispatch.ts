@@ -16,6 +16,8 @@ type JobToSend = {
   sessionId: string | null;
   model?: string | null;
   effort?: string | null;
+  /* How full Claude Code's context gets before it compacts; left out, its own window. */
+  compactWindow?: number | null;
   timeoutMs: number;
   instructions: string | null;
   toolToken: string | null;
@@ -40,6 +42,7 @@ export async function dispatchJob(ctx: Ctx, job: JobToSend): Promise<boolean> {
     sessionId: job.sessionId,
     model: job.model ?? null,
     effort: job.effort ?? null,
+    ...(job.compactWindow ? { compactWindow: job.compactWindow } : {}),
     timeoutMs: job.timeoutMs,
     secret,
     instructions: job.instructions,

@@ -13,7 +13,7 @@ import { AgentIcon, PersonIcon, ProviderMark } from '../ui/icons';
 import { NewTask } from '../ui/NewTask';
 import { RepoSettings } from '../ui/RepoSettings';
 import { byState, TaskRow } from '../ui/TaskRow';
-import { Pulse, pulseSeconds, toD, useReducedMotion, type Point } from '../ui/wires';
+import { Pulse, pulseSeconds, SIGNALS, toD, useReducedMotion, type Point } from '../ui/wires';
 import { arrowD, CH, CW, CY, FT, FW, HH, HW, PH, PW, schemaLayout, stepPaths, type Line } from './schema';
 
 type Props = {
@@ -269,9 +269,9 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
     return () => ro.disconnect();
   }, [place]);
 
-  /* Each way a message went between two of its agents keeps running for ten minutes after the last one: amber up to the
-     head and back from a gate, cyan down and on. */
-  const seed = useMemo(() => (d.live ?? []).map(w => ({ key: `${w.from}>${w.to}`, at: w.at, value: { from: w.from, to: w.to } })), [d.live]);
+  /* Each way a message went between two of its agents keeps running for ten minutes after the last one, and longer while
+     the work it brought goes on: amber up to the head and back from a gate, cyan down and on. */
+  const seed = useMemo(() => (d.live ?? []).map(w => ({ key: `${w.from}>${w.to}`, at: w.at, held: w.held, value: { from: w.from, to: w.to } })), [d.live]);
   const channels = useChannels(seed);
   const { touch } = channels;
   useStream(m => {
@@ -400,7 +400,15 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
             {s.report && <Wire l={{ cls: 'pl', pts: s.report.pts, arrow: true }} />}
             {channels.live.map(c => {
               const pts = paths.way(c.from, c.to);
-              return pts && <path key={`${c.from}>${c.to}`} className={`tr live ${wayTone(c.from, c.to)}`} d={toD(pts)} />;
+              const tone = wayTone(c.from, c.to);
+              return (
+                pts && (
+                  <g key={`${c.from}>${c.to}`}>
+                    <path className={`tr live ${tone}`} d={toD(pts)} />
+                    {!still && SIGNALS.map(phase => <Pulse key={phase} pts={pts} speed={PULSE_SPEED} tone={tone} phase={phase} />)}
+                  </g>
+                )
+              );
             })}
             {shots.map(x => (
               <Pulse key={x.key} pts={x.pts} speed={PULSE_SPEED} once tone={x.tone} />

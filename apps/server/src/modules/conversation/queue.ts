@@ -1,5 +1,5 @@
 import { effortFor, effortsOf, modelsFor } from '@hornhoof/protocol';
-import { and, asc, count, desc, eq, isNotNull, isNull, or } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray, isNotNull, isNull, or } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
@@ -10,8 +10,13 @@ import { appendEvent, earlierTalk, publishWorking } from '../events/store.js';
 import { instructionsOf } from '../agents/instructions.js';
 import { repoFor, repoLine } from '../departments/repository.js';
 import { textHash } from '../templates/load.js';
-import { checkLiveness, leaveIfOff, startWork } from '../tasks/wake.js';
+import { answerDirectly } from '../tasks/engine.js';
+import { checkLiveness, leaveIfOff, startWork, wakeAll } from '../tasks/wake.js';
 import { preface } from './prompt.js';
+
+/* Workers compact their conversation at half a million tokens, which keeps their turns quick; heads and the orchestrator
+   keep the whole window, since they hold the department's and the company's picture. */
+export const WORKER_COMPACT_WINDOW = 500_000;
 
 export const CONVERSATION_TIMEOUT_MS = 15 * 60_000;
 /* A turn on a task may run long: the work, its tests and a review fit in one. */
@@ -89,9 +94,9 @@ export async function enqueueTurn(ctx: Ctx, t: Turn): Promise<string> {
 /* A person typed into the agent's terminal while no turn ran, or while the program started. The turn is theirs and runs
    from now on the node that shows the session, which goes on with the instructions it was started with: their hash stays,
    so the next turn resumes it. */
-export function openTypedTurn(ctx: Ctx, node: NodeIdentity, agentId: string, text: string, personId: string | null): Promise<{ jobId: string; token: string } | null> {
-  if (!z.uuid().safeParse(agentId).success) return Promise.resolve(null);
-  return onAgent(ctx, agentId, async () => {
+export async function openTypedTurn(ctx: Ctx, node: NodeIdentity, agentId: string, text: string, personId: string | null): Promise<{ jobId: string; token: string } | null> {
+  if (!z.uuid().safeParse(agentId).success) return null;
+  const opened = await onAgent(ctx, agentId, async () => {
     const { db } = ctx;
     const [agent] = await db.select().from(agents).where(and(eq(agents.id, agentId), isNull(agents.removedAt)));
     const sub = agent ? await liveSubscription(ctx, agent.id) : null;
@@ -130,6 +135,9 @@ export function openTypedTurn(ctx: Ctx, node: NodeIdentity, agentId: string, tex
     await publishWorking(ctx, agent.companyId);
     return { jobId: job!.id, token };
   });
+  /* Out of the agent's line, which the pump of its task's turn waits on. */
+  if (opened && personId) await wakeAll(ctx, await answerDirectly(ctx, personId, agentId, text));
+  return opened;
 }
 
 /* Someone who may type opened the window of an agent whose program does not run: a turn that types nothing starts it on
@@ -153,12 +161,14 @@ export async function startProgram(ctx: Ctx, node: NodeIdentity, agentId: string
 }
 
 /* A new session catches up from the conversation. The last finished turn's session goes on only on the same subscription
-   with the same instructions: changed instructions would not reach a session that already has the old ones. */
+   with the same instructions: changed instructions would not reach a session that already has the old ones. A turn that
+   ran out of time or was stopped in its session finished too, the session whole; one that broke, or was called off
+   before it ran, leaves the session before it. */
 async function sessionFor(ctx: Ctx, agent: { id: string; kind: string; name: string }, subscriptionId: string, instructionsHash: string): Promise<{ sessionId: string | null; catchUp: string | null }> {
   const [last] = await ctx.db
     .select({ subscriptionId: jobs.subscriptionId, sessionId: jobs.sessionId, instructionsHash: jobs.instructionsHash })
     .from(jobs)
-    .where(and(conversationOf(agent.id), eq(jobs.status, 'done')))
+    .where(and(conversationOf(agent.id), or(eq(jobs.status, 'done'), and(eq(jobs.status, 'failed'), inArray(jobs.error, ['timeout', 'cancelled']), isNotNull(jobs.sessionId)))))
     .orderBy(desc(jobs.finishedAt))
     .limit(1);
   if (last?.sessionId && last.subscriptionId === subscriptionId && last.instructionsHash === instructionsHash) return { sessionId: last.sessionId, catchUp: null };
@@ -225,6 +235,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
     sessionId,
     model,
     effort,
+    compactWindow: agent.kind === 'worker' ? WORKER_COMPACT_WINDOW : null,
     timeoutMs: job.timeoutMs,
     instructions: instructions.text,
     toolToken: token,

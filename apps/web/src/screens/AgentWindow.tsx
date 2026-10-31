@@ -86,7 +86,8 @@ export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Pro
   const [staffByHand, setStaffByHand] = useState<{ id: string; name: string } | null>(null);
   /* The terminal shows unless the person asked for the log or the node could not show one. */
   const [asLog, setAsLog] = useState(false);
-  /* The orchestrator's window shows the company notebook in place of his conversation while this is on. */
+  /* The orchestrator's window shows the company notebook in place of his conversation while this is on, a head's its
+     department's. */
   const [notebook, setNotebook] = useState(false);
   const [noTerminal, setNoTerminal] = useState(false);
   const asked = useRef<number | null>(null);
@@ -97,6 +98,8 @@ export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Pro
   const mounted = useRef(true);
   const catchUpTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const liveId = orchestrator ? org.orchestrator?.id : agentId;
+  /* The department whose notebook a head keeps. */
+  const headOf = card?.kind === 'head' ? (card.department?.id ?? null) : null;
   const sub = orchestrator ? (org.orchestrator?.subscription ?? null) : (card?.subscription ?? null);
   const model = orchestrator ? org.orchestrator?.model : card?.model;
   const role = card?.role?.title[language];
@@ -407,7 +410,7 @@ export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Pro
             </svg>
           </button>
         )}
-        {orchestrator && (
+        {(orchestrator || headOf) && (
           <button type="button" aria-label={t.window.notebook} title={t.window.notebook} aria-pressed={notebook} onClick={() => setNotebook(v => !v)}>
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M6 4h11v16H6zM9 4v16M12 9h3M12 13h3" />
@@ -427,7 +430,7 @@ export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Pro
           </svg>
         </button>
       </div>
-      {notebook && <Notebook />}
+      {notebook && <Notebook departmentId={orchestrator ? null : headOf} />}
       {!notebook && terminal && <AgentTerminal agentId={agentId} onGone={() => setNoTerminal(true)} />}
       {!notebook && terminal && hasCards && (
         <div className="t-cards">

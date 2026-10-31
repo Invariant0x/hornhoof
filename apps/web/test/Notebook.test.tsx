@@ -66,8 +66,33 @@ describe('the company notebook', () => {
     const stream = fakeStream();
     const calls = show();
     await screen.findByText('Turns stay small.');
-    stream.send({ type: 'notebook' });
+    stream.send({ type: 'notebook', spot: { departmentId: 'd2' } });
+    stream.send({ type: 'notebook', spot: { departmentId: null } });
     await expect.poll(() => calls.filter(c => c.path === '/api/notebook').length).toBe(2);
+  });
+
+  it("keeps a department's notebook for its head, and reads it again only when that one changed", async () => {
+    const user = userEvent.setup();
+    const stream = fakeStream();
+    const calls = mockApi({
+      'GET /api/departments/d2/notebook': [200, { notes: [{ number: 1, text: 'Tests first.', by: { kind: 'agent', id: 'b0', name: 'Dana' }, updatedAt: '2026-10-31T02:00:00Z' }] }],
+      'POST /api/departments/d2/notebook': [201, { note: { number: 2, text: 'Small commits.' } }],
+    });
+    render(
+      <LanguageProvider>
+        <Notebook departmentId="d2" />
+      </LanguageProvider>,
+    );
+    expect(await screen.findByRole('listitem')).toHaveTextContent('#1Tests first.Dana');
+    await user.type(screen.getByRole('textbox', { name: 'New note' }), 'Small commits.');
+    await user.click(screen.getByRole('button', { name: 'Add' }));
+    expect(calls.find(c => c.method === 'POST')).toEqual({ method: 'POST', path: '/api/departments/d2/notebook', body: { text: 'Small commits.' } });
+    const reads = () => calls.filter(c => c.method === 'GET').length;
+    const before = reads();
+    stream.send({ type: 'notebook', spot: { departmentId: 'd9' } });
+    stream.send({ type: 'notebook', spot: { departmentId: null } });
+    stream.send({ type: 'notebook', spot: { departmentId: 'd2' } });
+    await expect.poll(reads).toBe(before + 1);
   });
 
   it('shows in Russian', async () => {

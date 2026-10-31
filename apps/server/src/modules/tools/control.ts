@@ -8,7 +8,7 @@ import { departments, people } from '../../db/schema.js';
 import { AgentPatch } from '../agents/routes.js';
 import { deptName } from '../departments/templates.js';
 import { BuildBody, RepoBody } from '../departments/routes.js';
-import { NOTE_MAX, NoteBody } from '../notebook/routes.js';
+import { NOTE_MAX, NoteBody } from '../notebook/book.js';
 import { InviteBody, PersonPatch } from '../people/routes.js';
 import { ConnectBody, SubscriptionBody } from '../subscriptions/routes.js';
 import { UpdateBody } from '../updates/routes.js';
@@ -193,15 +193,29 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
   tool('cancel_update', 'Calls off an update that waits for the agents to finish.', {}, () => ({ method: 'DELETE', url: '/api/updates' }));
 
   const Note = z.number().int().positive().describe('The note\'s number, as your notebook shows it, like 3 for [#3].');
+  /* The company notebook, or with department the one its head carries. */
+  const Book = { department: Id('department').optional().describe("A department's id for the notebook its head carries; left out, the company notebook.") };
+  const bookUrl = (department: string | undefined) => (department ? `/api/departments/${department}/notebook` : '/api/notebook');
+  tool('notebook', 'Reads the company notebook as it is now, or with department the one its head carries. People may change them while you work.', Book, ({ department }) => ({
+    method: 'GET',
+    url: bookUrl(department),
+  }));
   tool(
     'remember',
     'Writes a note into the company notebook, which your instructions carry into every conversation: a decision, rule, preference or agreement that must outlive this one. One fact per note, ' +
-      `${NOTE_MAX} characters at most. People who see the whole company read and change it too.`,
-    NoteBody.shape,
-    body => ({ method: 'POST', url: '/api/notebook', payload: body }),
+      `${NOTE_MAX} characters at most. People who see the whole company read and change it too. With department it goes into that department's notebook, for its head.`,
+    { ...Book, ...NoteBody.shape },
+    ({ department, text }) => ({ method: 'POST', url: bookUrl(department), payload: { text } }),
   );
-  tool('rewrite_note', 'Rewrites a note of the company notebook when what it says changed.', { note: Note, ...NoteBody.shape }, ({ note, text }) => ({ method: 'PATCH', url: `/api/notebook/${note}`, payload: { text } }));
-  tool('forget', 'Removes a note from the company notebook that no longer holds.', { note: Note }, ({ note }) => ({ method: 'DELETE', url: `/api/notebook/${note}` }));
+  tool('rewrite_note', 'Rewrites a note of the company notebook, or with department of that one, when what it says changed.', { ...Book, note: Note, ...NoteBody.shape }, ({ department, note, text }) => ({
+    method: 'PATCH',
+    url: `${bookUrl(department)}/${note}`,
+    payload: { text },
+  }));
+  tool('forget', 'Removes a note that no longer holds from the company notebook, or with department from that one.', { ...Book, note: Note }, ({ department, note }) => ({
+    method: 'DELETE',
+    url: `${bookUrl(department)}/${note}`,
+  }));
 }
 
 /* The staff card's lines from the orchestrator's: what it leaves out is what the card starts with. A role the department

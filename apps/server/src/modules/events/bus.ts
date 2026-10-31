@@ -4,9 +4,12 @@ import type { EventView } from './store.js';
 /* Who a pulse runs between: places on the map, or two agents inside one department, which its card shows. */
 export type Endpoint = { kind: 'person'; id: string } | { kind: 'orchestrator' } | { kind: 'department'; id: string } | { kind: 'agent'; id: string; departmentId: string };
 
-/* A way a message went, and when the last one did. It runs on the map while it is younger than CHANNEL_MS. */
-export type Channel = { from: Endpoint; to: Endpoint; at: string };
+/* A way a message went, and when the last one did. It runs on the map while it is younger than CHANNEL_MS, and held
+   past that while the work it brought goes on. */
+export type Channel = { from: Endpoint; to: Endpoint; at: string; held?: true };
 export const CHANNEL_MS = 10 * 60_000;
+/* How long a way is remembered after its last message, so it can be held while long work goes on. */
+const KEPT_MS = 24 * 60 * 60_000;
 
 const ends = (e: Endpoint) => (e.kind === 'orchestrator' ? e.kind : `${e.kind}:${e.id}`);
 
@@ -39,14 +42,19 @@ export class EventBus {
       const key = `${ends(m.from)}>${ends(m.to)}`;
       ways.delete(key);
       ways.set(key, { from: m.from, to: m.to, at: now });
-      for (const [k, w] of ways) if (now - w.at > CHANNEL_MS) ways.delete(k);
+      for (const [k, w] of ways) if (now - w.at > KEPT_MS) ways.delete(k);
     }
     for (const fn of this.listeners.get(companyId) ?? []) fn(m);
   }
 
-  /* The ways a message went in the last CHANNEL_MS, oldest first. */
-  channels(companyId: string, now = Date.now()): Channel[] {
-    return [...(this.ways.get(companyId)?.values() ?? [])].filter(w => now - w.at <= CHANNEL_MS).map(w => ({ from: w.from, to: w.to, at: new Date(w.at).toISOString() }));
+  /* The ways a message went in the last CHANNEL_MS, and older ones `held` keeps on, oldest first. A young way is marked held
+     too, so a map that fetched it keeps it on past CHANNEL_MS while the work goes on. */
+  channels(companyId: string, now = Date.now(), held: (w: Channel) => boolean = () => false): Channel[] {
+    return [...(this.ways.get(companyId)?.values() ?? [])].flatMap(w => {
+      const way: Channel = { from: w.from, to: w.to, at: new Date(w.at).toISOString() };
+      if (held(way)) return [{ ...way, held: true as const }];
+      return now - w.at <= CHANNEL_MS ? [way] : [];
+    });
   }
 
   subscribe(companyId: string, fn: (m: StreamMessage) => void): () => void {

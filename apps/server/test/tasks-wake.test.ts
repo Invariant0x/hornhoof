@@ -1,8 +1,9 @@
 import { and, asc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agents, companies, departments, jobs, people, requests, subscriptions, tasks } from '../src/db/schema.js';
-import { afterJob } from '../src/modules/conversation/queue.js';
-import { createTask, submit } from '../src/modules/tasks/engine.js';
+import { agents, companies, departments, jobs, people, personAccess, requests, subscriptions, tasks } from '../src/db/schema.js';
+import { afterJob, agentState, openTypedTurn } from '../src/modules/conversation/queue.js';
+import { identityOf } from '../src/modules/nodes/hub.js';
+import { ask, createTask, submit } from '../src/modules/tasks/engine.js';
 import { SILENT_TURNS, startWork, wakeAll, wakePrompt } from '../src/modules/tasks/wake.js';
 import { as, connectNode, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
@@ -35,6 +36,58 @@ async function company() {
   const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
   return { app, owner, ctx, db, sub: sub!, ceo: ceo!, dev: dev!, orchestrator: orchestrator!, head, bruno, rita, memberTask, turnsOf, finish };
 }
+
+describe('a person who speaks to an agent directly', () => {
+  /* Bruno ends turns on his task without moving it until Hornhoof asks a person how he should go on. */
+  async function stuck() {
+    const c = await company();
+    const task = await c.memberTask();
+    await wakeAll(c.ctx, [{ agentId: c.bruno.id, taskId: task.id, why: 'assigned' }]);
+    for (let i = 0; i < SILENT_TURNS; i++) await c.finish(c.bruno.id);
+    return { ...c, task };
+  }
+  const requestsOf = (c: Awaited<ReturnType<typeof company>>) =>
+    c.db.select({ kind: requests.kind, status: requests.status, answer: requests.answer, answeredBy: requests.answeredBy }).from(requests).orderBy(asc(requests.createdAt));
+
+  it("tells a stuck agent how to go on by typing into its terminal, and the task goes on", async () => {
+    const c = await stuck();
+    expect(await c.db.select({ status: tasks.status }).from(tasks).where(eq(tasks.id, c.task.id))).toEqual([{ status: 'waiting' }]);
+    expect(await openTypedTurn(c.ctx, identityOf(c.sub), c.bruno.id, 'Run the tests first, then submit.', c.ceo.id)).not.toBeNull();
+    expect(await requestsOf(c)).toEqual([{ kind: 'stuck', status: 'answered', answer: 'Run the tests first, then submit.', answeredBy: c.ceo.id }]);
+    expect(await c.db.select({ status: tasks.status, silent: tasks.silent }).from(tasks).where(eq(tasks.id, c.task.id))).toEqual([{ status: 'working', silent: 0 }]);
+    /* After the typed turn the task's own turn follows, so a typed turn that goes nowhere still leaves the task watched. */
+    const queued = (await c.turnsOf(c.bruno.id)).filter(j => j.status === 'queued');
+    expect(queued.map(j => j.taskId)).toEqual([c.task.id]);
+    expect(queued[0]!.prompt).toContain('Run the tests first, then submit.');
+  });
+
+  it('leaves what waits on a task alone for a person who cannot reach the task', async () => {
+    const c = await stuck();
+    const [sales] = await c.db.insert(departments).values({ companyId: c.dev.companyId, templateKey: 'sales', roleCode: 'SAL' }).returning();
+    const [maria] = await c.db.insert(people).values({ companyId: c.dev.companyId, name: 'Maria', email: 'maria@acme.com', status: 'active', scopeKind: 'listed' }).returning();
+    await c.db.insert(personAccess).values({ companyId: c.dev.companyId, personId: maria!.id, departmentId: sales!.id });
+    expect(await openTypedTurn(c.ctx, identityOf(c.sub), c.bruno.id, 'Skip the tests.', maria!.id)).not.toBeNull();
+    expect(await requestsOf(c)).toEqual([{ kind: 'stuck', status: 'open', answer: null, answeredBy: null }]);
+    expect(await c.db.select({ status: tasks.status }).from(tasks).where(eq(tasks.id, c.task.id))).toEqual([{ status: 'waiting' }]);
+  });
+
+  it("answers the agent's question with a message in its window, and leaves a commit to approve open", async () => {
+    const { app, db, ceo, hire, task } = await withRepositories();
+    const bruno = await hire('Bruno', null);
+    const mine = await task(bruno.id);
+    await ask(app.ctx, bruno.id, mine.id, { kind: 'question', text: 'EUR or USD?' });
+    await ask(app.ctx, bruno.id, mine.id, { kind: 'approval', text: 'Merge it?', commit: 'a'.repeat(40) });
+    const [me] = await db.select().from(people);
+    await until(async () => (await agentState(app.ctx, bruno.id)).ready);
+    expect((await app.inject({ method: 'POST', url: `/api/agents/${bruno.id}/messages`, payload: { text: 'EUR only.' }, ...as(ceo) })).statusCode).toBe(202);
+    expect(await db.select({ kind: requests.kind, status: requests.status, answer: requests.answer, answeredBy: requests.answeredBy }).from(requests).orderBy(asc(requests.createdAt))).toEqual([
+      { kind: 'question', status: 'answered', answer: 'EUR only.', answeredBy: me!.id },
+      { kind: 'approval', status: 'open', answer: null, answeredBy: null },
+    ]);
+    /* The message's own turn, and the task's after it. */
+    expect((await db.select({ taskId: jobs.taskId }).from(jobs).where(eq(jobs.agentId, bruno.id)).orderBy(asc(jobs.createdAt))).map(j => j.taskId)).toEqual([null, mine.id]);
+  });
+});
 
 describe('waking agents for their tasks', () => {
   it('queues one turn per agent and task, naming the task', async () => {

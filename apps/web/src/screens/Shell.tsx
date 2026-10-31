@@ -219,7 +219,17 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
           onCard={() => setPanel({ kind: 'card', agentId: panel.agentId })}
         />
       )}
-      {panel?.kind === 'task' && <TaskPanel key={panel.taskId} taskId={panel.taskId} onClose={() => setPanel(null)} onOpen={taskId => setPanel({ kind: 'task', taskId })} />}
+      {panel?.kind === 'task' && (
+        <TaskPanel
+          key={panel.taskId}
+          taskId={panel.taskId}
+          onClose={() => setPanel(null)}
+          onOpen={taskId => setPanel({ kind: 'task', taskId })}
+          requests={(requests ?? []).filter(r => r.task.id === panel.taskId)}
+          company={company}
+          onRequestsChanged={loadRequests}
+        />
+      )}
       {panel?.kind === 'card' && (
         <AgentCard key={panel.agentId} me={me} agentId={panel.agentId} onClose={() => setPanel(null)} onTerminal={() => setPanel({ kind: 'window', agentId: panel.agentId })} />
       )}

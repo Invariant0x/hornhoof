@@ -135,6 +135,8 @@ export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'),
       if (input.model) args.push('--model', input.model);
       if (input.effort) args.push('--effort', input.effort);
       args.push('--', input.prompt);
+      /* Hornhoof's window for this agent, or Claude Code's own when it sets none. */
+      const compact: Record<string, string> = input.compactWindow ? { CLAUDE_CODE_AUTO_COMPACT_WINDOW: String(input.compactWindow) } : {};
 
       let result: Outcome | null = null;
       let sessionId: string | null = input.sessionId;
@@ -143,7 +145,7 @@ export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'),
       const done = await runProgram({
         bin,
         args,
-        env: { ...env(input.secret), ...input.env },
+        env: { ...env(input.secret), ...input.env, ...compact },
         cwd: input.workDir,
         timeoutMs: input.timeoutMs,
         signal: input.signal,

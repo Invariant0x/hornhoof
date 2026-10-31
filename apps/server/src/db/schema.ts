@@ -442,12 +442,16 @@ export const notebookNotes = pgTable(
     companyId: companyId(),
     number: integer('number').notNull(),
     text: text('text').notNull(),
+    /* The department whose head carries the note; none for the company notebook the orchestrator carries. */
+    departmentId: uuid('department_id').references(() => departments.id, { onDelete: 'cascade' }),
     personId: uuid('person_id').references(() => people.id),
     byOrchestrator: boolean('by_orchestrator').notNull().default(false),
+    /* The head that wrote it last, when it was one. */
+    agentId: uuid('agent_id').references(() => agents.id),
     createdAt: createdAt(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
     /* A removed note keeps its number, so a number never names two notes. */
     removedAt: timestamp('removed_at', { withTimezone: true }),
   },
-  t => [unique('notebook_notes_company_number').on(t.companyId, t.number)],
+  t => [unique('notebook_notes_book_number').on(t.companyId, t.departmentId, t.number).nullsNotDistinct()],
 );

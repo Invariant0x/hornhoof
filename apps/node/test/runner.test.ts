@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { AgentEvent, ServerMessage } from '@hornhoof/protocol';
 import { describe, expect, it } from 'vitest';
 import { runJob, type ProviderAdapter, type RunInput, type RunResult } from '../src/runner.js';
+import { readSessions } from '../src/state.js';
 
 const SECRET = 'oauth-token-0123456789abcdef';
 
@@ -47,11 +48,28 @@ describe('runJob', () => {
     expect(adapter.inputs.map(i => i.effort)).toEqual(['max', null]);
   });
 
+  it('passes on when Claude Code compacts the conversation, and nothing when Hornhoof leaves it to the program', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
+    const adapter = fakeAdapter(async () => ok());
+    await runJob(adapter, job({ compactWindow: 500_000 }), dir);
+    await runJob(adapter, job({ jobId: 'job-2' }), dir);
+    expect(adapter.inputs.map(i => i.compactWindow)).toEqual([500_000, null]);
+  });
+
   it('gives up with a timeout when the agent does not finish in time', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
     const adapter = fakeAdapter(() => new Promise(() => {}));
     const done = await runJob(adapter, job({ timeoutMs: 100 }), dir);
     expect(done).toMatchObject({ ok: false, error: 'timeout' });
+  });
+
+  it('keeps the session of a turn that ran out of time as its program ends it, so the next turn goes on in it', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
+    /* The program is stopped at the time and says so a moment later, with its session. */
+    const adapter = fakeAdapter(input => new Promise(done => setTimeout(() => done({ ok: false, sessionId: 'sess-1', result: '', output: '', error: 'timeout', limits: null }), input.timeoutMs + 20)));
+    const done = await runJob(adapter, job({ timeoutMs: 1000 }), dir);
+    expect(done).toMatchObject({ ok: false, error: 'timeout', sessionId: 'sess-1' });
+    expect(readSessions(dir)).toEqual({ 'sess-1': join(dir, 'work', 'job-1') });
   });
 
   it('runs a resumed session in the folder of the job that started it', async () => {

@@ -8,7 +8,7 @@ import { as, connectNode, invitePerson, listen, openStream, setUpCompany, testAp
 
 const NODE_KEY = 'k'.repeat(40);
 
-type Run = { type: 'job.run'; jobId: string; prompt: string; sessionId: string | null; model: string | null; effort?: string | null; instructions: string | null; toolToken: string | null; timeoutMs: number };
+type Run = { type: 'job.run'; jobId: string; prompt: string; sessionId: string | null; model: string | null; effort?: string | null; compactWindow?: number; instructions: string | null; toolToken: string | null; timeoutMs: number };
 
 async function live() {
   const { app, db } = await testApp({ NODE_KEY });
@@ -104,6 +104,27 @@ describe('the orchestrator\'s conversation', () => {
     expect(second).toMatchObject({ prompt: 'Ivan (CEO): We make characters for schools', sessionId: 'sess-1' });
     const log = await events(app, ceo);
     expect(log.find((e: { kind: string }) => e.kind === 'message')).toMatchObject({ person: { name: 'Ivan' }, data: { text: 'We make characters for schools' }, jobId: second.jobId });
+  });
+
+  it('goes on in the session of a turn that ran out of time or was stopped, and not of one that broke or never ran', async () => {
+    const { app, db, ceo, builtin } = await live();
+    await start(app, ceo);
+    const first = await nextRun(builtin);
+    builtin.send({ type: 'job.done', jobId: first.jobId, ok: false, sessionId: 'sess-1', result: '', tail: '', error: 'timeout' });
+    await say(app, ceo, 'Go on');
+    const second = await nextRun(builtin);
+    expect(second.sessionId).toBe('sess-1');
+    builtin.send({ type: 'job.done', jobId: second.jobId, ok: false, sessionId: 'sess-2', result: 'Stopped.', tail: '', error: 'cancelled' });
+    await say(app, ceo, 'And on');
+    const third = await nextRun(builtin);
+    expect(third.sessionId).toBe('sess-2');
+    builtin.send({ type: 'job.done', jobId: third.jobId, ok: false, sessionId: 'sess-3', result: '', tail: 'broken', error: 'agent_failed' });
+    await until(async () => (await state(app, ceo)).busy === false);
+    /* A turn called off while it waited for its machine. */
+    const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    await db.insert(jobs).values({ companyId: orchestrator!.companyId, subscriptionId: orchestrator!.subscriptionId!, agentId: orchestrator!.id, kind: 'conversation', prompt: 'x', status: 'failed', error: 'cancelled', timeoutMs: 1000, finishedAt: new Date() });
+    await say(app, ceo, 'Again');
+    expect((await nextRun(builtin)).sessionId).toBe('sess-2');
   });
 
   it('sends two people\'s messages in the order they wrote', async () => {
@@ -214,6 +235,26 @@ describe('the orchestrator\'s conversation', () => {
     await until(async () => (await state(app, ceo)).ready);
     await say(app, ceo, 'Hello');
     expect((await nextRun(updated)).prompt).toBe('Ivan (CEO): Hello');
+  });
+
+  it('lets a worker compact its conversation at half a million tokens, while heads and the orchestrator keep the full window', async () => {
+    const { app, db, ceo, builtin } = await live();
+    const [acme] = await db.select().from(companies);
+    const [sub] = await db.select().from(subscriptions);
+    const [dev] = await db.insert(departments).values({ companyId: acme!.id, templateKey: 'development', roleCode: 'DEV' }).returning();
+    const hire = async (name: string, kind: 'head' | 'worker', roleKey: string) =>
+      (await db.insert(agents).values({ companyId: acme!.id, kind, name, roleKey, departmentId: dev!.id, model: '', subscriptionId: sub!.id }).returning())[0]!;
+    const hana = await hire('Hana', 'head', 'DEV-HEAD');
+    const bruno = await hire('Bruno', 'worker', 'DEV-BE');
+    const runOf = async (id: string) => {
+      expect((await app.inject({ method: 'POST', url: `/api/agents/${id}/messages`, payload: { text: 'Hi' }, ...as(ceo) })).statusCode).toBeLessThan(300);
+      const run = await nextRun(builtin);
+      await finish(builtin, run);
+      return run;
+    };
+    expect((await runOf('orchestrator')).compactWindow).toBeUndefined();
+    expect((await runOf(hana.id)).compactWindow).toBeUndefined();
+    expect((await runOf(bruno.id)).compactWindow).toBe(500_000);
   });
 
   it('runs him on a Kimi plan at its most, and at the effort a person picks in the same session', async () => {
