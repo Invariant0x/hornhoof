@@ -23,12 +23,40 @@ describe('Subscriptions', () => {
     await screen.findByRole('row', { name: /^Claude\b/ });
     expect(within(rowOf('Claude')).getByText('Ready')).toBeInTheDocument();
     expect(within(rowOf('Claude')).getByText('ivan-mbp')).toBeInTheDocument();
-    expect(within(rowOf('Claude')).getByText(/^42% of the limit used, resets at /)).toBeInTheDocument();
     expect(within(rowOf('Codex')).getByText('Waiting for the login')).toBeInTheDocument();
     expect(within(rowOf('Kimi')).getByText('Waiting for the machine')).toBeInTheDocument();
     expect(within(rowOf('Kimi')).getByText('No machine yet')).toBeInTheDocument();
     expect(within(rowOf('Claude')).getByText('Whole company')).toBeInTheDocument();
     expect(within(rowOf('Anthropic key ending 9f3a')).getByText('Orchestrator')).toBeInTheDocument();
+  });
+
+  it("shows each window of a plan's limits as a bar with its share and when it resets", async () => {
+    const limits = {
+      status: 'allowed' as const,
+      windows: [
+        { name: 'five_hour', utilization: 0.42, resetsAt: '2026-10-29T18:00:00.000Z' },
+        { name: 'seven_day', utilization: 0.93, resetsAt: null },
+        { name: '120_minutes', utilization: 0.05, resetsAt: null },
+        { name: 'one_day', utilization: null, resetsAt: null },
+      ],
+    };
+    mockApi({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, limits }] }], 'GET /api/machines': [200, { machines: MACHINES }] });
+    render(<Subscriptions me={ME} />);
+    const list = within(await screen.findByRole('row', { name: /^Claude\b/ })).getByRole('list', { name: 'Limits' });
+    const [five, seven, two, ...rest] = within(list).getAllByRole('listitem');
+    expect(five).toHaveTextContent(/^5 hours42%resets at /);
+    expect(five!.querySelector('.bar')).not.toHaveClass('hi');
+    expect(seven).toHaveTextContent(/^7 days93%$/);
+    expect(seven!.querySelector('.bar')).toHaveClass('max');
+    expect(two).toHaveTextContent(/^2 hours5%$/);
+    expect(rest).toEqual([]);
+  });
+
+  it('says when a plan reached its limit', async () => {
+    const limits = { status: 'rejected' as const, windows: [{ name: 'five_hour', utilization: 1, resetsAt: '2026-10-29T18:00:00.000Z' }] };
+    mockApi({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, limits }] }], 'GET /api/machines': [200, { machines: MACHINES }] });
+    render(<Subscriptions me={ME} />);
+    expect(within(await screen.findByRole('row', { name: /^Claude\b/ })).getByText(/^Limit reached, resets at /)).toBeInTheDocument();
   });
 
   it('says Built-in node offline for an API key whose node is down', async () => {
@@ -171,6 +199,8 @@ describe('Subscriptions', () => {
     expect(await screen.findAllByText('Готова')).toHaveLength(2);
     expect(screen.getByText('Ждет входа')).toBeInTheDocument();
     expect(screen.getByText('Ждет машину')).toBeInTheDocument();
-    expect(screen.getByText(/^Использовано 42% лимита, сброс в /)).toBeInTheDocument();
+    const [five, seven] = within(screen.getByRole('list', { name: 'Лимиты' })).getAllByRole('listitem');
+    expect(five).toHaveTextContent(/^5 часов42%сброс в /);
+    expect(seven).toHaveTextContent(/^7 дней10%$/);
   });
 });

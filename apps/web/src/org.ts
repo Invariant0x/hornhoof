@@ -6,6 +6,13 @@ import type { Org } from './types';
 /* What each employee does changes with its tasks and questions. */
 const SETTLE_MS = 400;
 
+/* An agent's context moves with every step it takes; only its bar changes. */
+function withContext(org: Org, agentId: string, used: number): Org {
+  const departments = org.departments.map(d => (d.employees.some(e => e.id === agentId) ? { ...d, employees: d.employees.map(e => (e.id === agentId ? { ...e, context: used } : e)) } : d));
+  const orchestrator = org.orchestrator?.id === agentId ? { ...org.orchestrator, context: used } : org.orchestrator;
+  return { ...org, orchestrator, departments };
+}
+
 /* The company as /api/org shows it, kept fresh from the live stream while enabled. */
 export function useOrg(enabled = true): { org: Org | null; failure: unknown } {
   const [org, setOrg] = useState<Org | null>(null);
@@ -50,6 +57,7 @@ export function useOrg(enabled = true): { org: Org | null; failure: unknown } {
       }, SETTLE_MS);
     }
     if (m.type === 'org' || m.type === 'reconnected') load();
+    if (m.type === 'context') setOrg(o => o && withContext(o, m.agentId, m.used));
     if (m.type === 'working') {
       setOrg(o => o && { ...o, agents: { ...o.agents, working: m.working } });
       /* Employees move between working and sleeping too, so the company is fetched again for their states. */

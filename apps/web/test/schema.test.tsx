@@ -16,6 +16,7 @@ const emp = (id: string, roleId: string | null, kind: Employee['kind'] = 'worker
   status: 'idle',
   on: true,
   task: null,
+  context: null,
 });
 const dept = (employees: Employee[], roles: DeptRole[]): Department => ({
   id: 'd1',

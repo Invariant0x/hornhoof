@@ -4,6 +4,7 @@ import { deptLabel, errorText, useLanguage, useT } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
 import { useTasks } from '../tasks';
 import type { Department, Employee, EmployeeStatus, Me, PersonView } from '../types';
+import { Bar, percent } from '../ui/Bar';
 import { usePanZoom, ZoomBar } from '../ui/canvas';
 import { Edge } from '../ui/Edge';
 import { AgentIcon, PersonIcon, ProviderMark } from '../ui/icons';
@@ -96,6 +97,7 @@ function Chip({ e, x, y, on, flash, onOpen, onSwitch }: { e: Employee; x: number
           </span>
           <span className="r2">{modelLine(t, e)}</span>
           <span className="r3">{doingLine(t, e)}</span>
+          {e.context !== null && <Bar used={e.context} className="cx" title={t.dept.contextUsed(percent(e.context))} />}
         </Edge>
       </button>
       <Switch e={e} onSwitch={onSwitch} />
@@ -137,6 +139,13 @@ function HeadCard({ d, head, stats, on, flash, onOpen, onSwitch }: { d: Departme
             <span className="st">{t.dept.status[head.status]}</span>
             <span className="hx-task">{doingLine(t, head)}</span>
           </span>
+          {head.context !== null && (
+            <span className="hc">
+              <span>{t.dept.context}</span>
+              <Bar used={head.context} title={t.dept.contextUsed(percent(head.context))} />
+              <b>{percent(head.context)}%</b>
+            </span>
+          )}
         </Edge>
       </button>
       <Switch e={head} onSwitch={onSwitch} />
