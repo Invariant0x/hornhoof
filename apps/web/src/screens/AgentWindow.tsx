@@ -10,6 +10,7 @@ import { Notebook } from '../ui/Notebook';
 import { StaffCard } from '../ui/StaffCard';
 import { StructureCard } from '../ui/StructureCard';
 import { orchestratorStatus } from './Map';
+import { clock } from './Subscriptions';
 
 /* The most events the server sends at a time. */
 const PAGE = 500;
@@ -468,6 +469,7 @@ export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Pro
         </div>
       )}
       {state && !ready && <p className="t-why">{reasonText(t, state.reason, sub)}</p>}
+      {state?.limitUntil && <p className="t-why">{t.window.limitUntil(clock(language, state.limitUntil)!)}</p>}
       {/* A live terminal has its own line to type in; the log needs this one. */}
       {!terminal && (
         <form

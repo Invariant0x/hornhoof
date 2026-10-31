@@ -137,6 +137,22 @@ describe('words for an agent at work', () => {
   });
 });
 
+describe('a plan at its limit', () => {
+  it('does not count a turn that ended at the limit as standing still: the agent goes on after the reset', async () => {
+    const c = await company();
+    const task = await c.memberTask();
+    await wakeAll(c.ctx, [{ agentId: c.bruno.id, taskId: task.id, why: 'assigned' }]);
+    const resetsAt = new Date(Date.now() + 3_600_000).toISOString();
+    await c.db.update(subscriptions).set({ limits: { status: 'rejected', windows: [{ name: 'five_hour', utilization: 1, resetsAt }] } }).where(eq(subscriptions.id, c.sub.id));
+    for (let i = 0; i < SILENT_TURNS + 1; i++) await c.finish(c.bruno.id, async () => {}, 'failed');
+    expect(await c.db.select({ status: tasks.status, silent: tasks.silent }).from(tasks).where(eq(tasks.id, task.id))).toEqual([{ status: 'open', silent: 0 }]);
+    expect(await c.db.select().from(requests)).toEqual([]);
+    const queued = (await c.turnsOf(c.bruno.id)).filter(j => j.status === 'queued');
+    expect(queued).toHaveLength(1);
+    expect(queued[0]!.prompt).toContain('Go on with the work from where you left off');
+  });
+});
+
 describe("Hornhoof's note that a task stands still", () => {
   async function stuck() {
     const c = await company();

@@ -236,6 +236,7 @@ export const ru: Messages = {
       agent_failed: 'Сотрудник остановился с ошибкой.',
     } as Record<string, string>,
     nodeOutdated: owner => `Старая версия Hornhoof на машине, владелец ${owner}. Запустите там команду установки еще раз.`,
+    limitUntil: at => `Лимит подписки исчерпан. Ходы ждут до ${at} и потом продолжатся сами.`,
     builtinOffline: 'Встроенная машина не в сети',
     failed: {
       timeout: 'Оркестратор не закончил за 15 минут.',

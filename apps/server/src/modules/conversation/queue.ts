@@ -1,4 +1,4 @@
-import { effortFor, effortsOf, modelsFor } from '@hornhoof/protocol';
+import { effortFor, effortsOf, modelsFor, type Limits } from '@hornhoof/protocol';
 import { and, asc, count, desc, eq, inArray, isNotNull, isNull, or } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -25,6 +25,8 @@ export const TURN_TIMEOUT_MS = 2 * 3_600_000;
 
 export type AgentState = {
   ready: boolean;
+  /* Its plan is at its limit until then: its turns wait in line, and people may still write to it. */
+  limitUntil: string | null;
   reason: 'no_subscription' | 'waiting_machine' | 'needs_login' | 'node_outdated' | 'machine_offline' | null;
   busy: boolean;
   runningJobId: string | null;
@@ -32,6 +34,32 @@ export type AgentState = {
   /* Its node shows the agent's live terminal. */
   terminal: boolean;
 };
+
+/* How long after a plan's limit starts over its waiting turns go out, so the program sees the new limit. */
+const LIMIT_GRACE_MS = 5_000;
+
+/* When the plan's limit starts over, while the plan is at it: the latest reset of a full window still to come. A plan at
+   its limit that says no reset holds nothing, so its turns go out and fail as before rather than wait forever. */
+export function limitUntil(limits: Limits | null, now = Date.now()): string | null {
+  if (limits?.status !== 'rejected') return null;
+  const resets = limits.windows.filter(w => (w.utilization === null || w.utilization >= 1) && w.resetsAt && Date.parse(w.resetsAt) > now).map(w => w.resetsAt!);
+  return resets.length ? resets.reduce((a, b) => (Date.parse(a) >= Date.parse(b) ? a : b)) : null;
+}
+
+/* Wakes the agent's line once its plan's limit starts over. */
+const resets = new WeakMap<Ctx, Map<string, { at: string; timer: NodeJS.Timeout }>>();
+function pumpAt(ctx: Ctx, agentId: string, at: string): void {
+  const timers = resets.get(ctx) ?? new Map<string, { at: string; timer: NodeJS.Timeout }>();
+  resets.set(ctx, timers);
+  if (timers.get(agentId)?.at === at) return;
+  clearTimeout(timers.get(agentId)?.timer);
+  const timer = setTimeout(() => {
+    timers.delete(agentId);
+    void pump(ctx, agentId).catch(() => {});
+  }, Date.parse(at) - Date.now() + LIMIT_GRACE_MS);
+  timer.unref();
+  timers.set(agentId, { at, timer });
+}
 
 /* What a turn ends with when a person or Hornhoof stopped it on purpose; none of these is a failure. */
 export const STOPPED_ON_PURPOSE = ['cancelled', 'removed', 'switched_off'];
@@ -202,6 +230,9 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   if (running) return;
   const sub = await liveSubscription(ctx, agentId);
   if (!sub || sub.status !== 'ready' || outdated(sub) || !hub.isReady(identityOf(sub))) return;
+  /* A turn sent now would end at once: it waits until the limit starts over. */
+  const until = limitUntil(sub.limits);
+  if (until) return pumpAt(ctx, agentId, until);
   const [agent] = await db.select().from(agents).where(eq(agents.id, agentId));
   if (!agent) return;
   /* Switched off, it still answers people who write to it; its task turns wait until it is on. */
@@ -308,7 +339,7 @@ export async function orchestratorOf(ctx: Ctx, companyId: string) {
 
 export async function orchestratorState(ctx: Ctx, companyId: string): Promise<AgentState> {
   const agent = await orchestratorOf(ctx, companyId);
-  if (!agent) return { ready: false, reason: 'no_subscription', busy: false, runningJobId: null, queued: 0, terminal: false };
+  if (!agent) return { ready: false, limitUntil: null, reason: 'no_subscription', busy: false, runningJobId: null, queued: 0, terminal: false };
   return agentState(ctx, agent.id);
 }
 
@@ -330,5 +361,5 @@ export async function agentState(ctx: Ctx, agentId: string): Promise<AgentState>
             ? 'machine_offline'
             : null;
   const terminal = Boolean(sub && ctx.hub.hasTerminals(identityOf(sub)));
-  return { ready: reason === null, reason, busy: Boolean(running), runningJobId: running?.id ?? null, queued: Number(waiting?.n ?? 0), terminal };
+  return { ready: reason === null, limitUntil: sub ? limitUntil(sub.limits) : null, reason, busy: Boolean(running), runningJobId: running?.id ?? null, queued: Number(waiting?.n ?? 0), terminal };
 }

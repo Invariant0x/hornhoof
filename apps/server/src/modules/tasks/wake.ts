@@ -1,7 +1,7 @@
 import { and, count, desc, eq, gte, inArray, isNull, notInArray, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { agentChanges, agents, jobs, requests, taskEvents, tasks } from '../../db/schema.js';
-import { afterJob, cancelJob, insertTurn, liveSubscription, onAgent, orchestratorOf, pump } from '../conversation/queue.js';
+import { agentChanges, agents, jobs, requests, subscriptions, taskEvents, tasks } from '../../db/schema.js';
+import { afterJob, cancelJob, insertTurn, limitUntil, liveSubscription, onAgent, orchestratorOf, pump } from '../conversation/queue.js';
 import { sayLive } from '../conversation/live.js';
 import { appendEvent } from '../events/store.js';
 import { CLOSED, GATE_ROUNDS, leaveWork, NOT_A_MOVE, published, rejoin, silentTurn, wentOn, type Actor, type Task, type Wake, type WakeWhy } from './engine.js';
@@ -243,7 +243,10 @@ export async function checkLiveness(ctx: Ctx, jobId: string): Promise<void> {
     if (task.silent) await db.update(tasks).set({ silent: 0 }).where(eq(tasks.id, task.id));
     return;
   }
-  /* A turn that worked until its time ran out, or that said in the task how far it got, did not stand still. */
+  /* A turn that ended at the plan's limit did not stand still: the agent goes on once the limit starts over. */
+  const [sub] = job.subscriptionId ? await db.select({ limits: subscriptions.limits }).from(subscriptions).where(eq(subscriptions.id, job.subscriptionId)) : [];
+  if (limitUntil(sub?.limits ?? null)) return wakeAll(ctx, [{ agentId, taskId: task.id, why: 'go_on' }]);
+    /* A turn that worked until its time ran out, or that said in the task how far it got, did not stand still. */
   const [told] = await db
     .select({ n: count() })
     .from(taskEvents)

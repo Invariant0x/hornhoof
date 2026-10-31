@@ -247,6 +247,7 @@ export const en = {
     } as Record<string, string>,
     builtinOffline: 'The built-in machine is offline',
     nodeOutdated: (owner: string) => `Hornhoof on ${owner}'s machine is out of date. Run the install command there again.`,
+    limitUntil: (at: string) => `The plan is at its limit. Turns wait until ${at} and go on by themselves then.`,
     failed: {
       timeout: 'The orchestrator did not finish within 15 minutes.',
       not_logged_in: 'The orchestrator\'s subscription is signed out on its machine. Sign in again, then write once more.',
