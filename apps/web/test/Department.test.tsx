@@ -103,6 +103,24 @@ describe('Department view', () => {
     expect(screen.getByText('Bruno: working, #12 Checkout API')).toBeInTheDocument();
   });
 
+  it("shows how full each agent's context is on its card, and follows it live", async () => {
+    const user = userEvent.setup();
+    const stream = fakeStream();
+    const [dev] = DEV_ORG.departments;
+    const [dana, bruno] = dev!.employees;
+    shell({}, { ...DEV_ORG, departments: [{ ...dev!, employees: [{ ...dana!, context: 0.75 }, { ...bruno!, context: null }] }] });
+    await flyIn(user);
+    const head = screen.getByRole('region', { name: 'Head' });
+    expect(within(head).getByTitle('Context 75%')).toHaveClass('bar', 'hi');
+    expect(head).toHaveTextContent('Context75%');
+    const members = screen.getByRole('region', { name: 'Members' });
+    expect(within(members).queryByTitle(/^Context/)).not.toBeInTheDocument();
+    stream.send({ type: 'context', agentId: 'b1', used: 0.93 });
+    expect(within(members).getByTitle('Context 93%')).toHaveClass('bar', 'max');
+    stream.send({ type: 'context', agentId: 'b1', used: 0.2 });
+    expect(within(members).getByTitle('Context 20%')).not.toHaveClass('hi');
+  });
+
   it('refetches what employees do when their tasks move', async () => {
     const user = userEvent.setup();
     const stream = fakeStream();

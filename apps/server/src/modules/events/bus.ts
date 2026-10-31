@@ -14,7 +14,9 @@ export type StreamMessage =
   /* A task changed; people who reach its place fetch it again. */
   | { type: 'task'; id: string; spot: Spot }
   /* What waits for people changed in this place. */
-  | { type: 'requests'; spot: Spot };
+  | { type: 'requests'; spot: Spot }
+  /* How full an agent's context is now, for the bar on the map, which everyone sees. */
+  | { type: 'context'; agentId: string; used: number };
 
 /* In-process fan-out per company. One server process serves one deployment, so nothing crosses processes. */
 export class EventBus {

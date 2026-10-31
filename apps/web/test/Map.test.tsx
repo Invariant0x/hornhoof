@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
@@ -40,6 +40,17 @@ describe('Map', () => {
     expect(screen.getByText('Ivan')).toBeInTheDocument();
     expect(screen.getByText('Maria')).toBeInTheDocument();
     expect(container.querySelector('.ticker')).toHaveTextContent('OrchestratorRuns on Anthropic key ending 9f3a');
+  });
+
+  it("shows how full the orchestrator's context is in the line at the bottom, and follows it live", async () => {
+    const stream = fakeStream();
+    mockApi({ 'GET /api/org': [200, { ...ORG, orchestrator: { ...ORG.orchestrator!, context: 0.34 } }] });
+    const { container } = render(<MapScreen {...PROPS} />);
+    await screen.findByText('Ivan');
+    const ticker = container.querySelector<HTMLElement>('.ticker')!;
+    expect(within(ticker).getByTitle('Context 34%')).toHaveTextContent('34%');
+    stream.send({ type: 'context', agentId: 'a1', used: 0.71 });
+    expect(within(ticker).getByTitle('Context 71%').querySelector('.bar')).toHaveClass('hi');
   });
 
   it('shows the map again once the server answers after a failure', async () => {

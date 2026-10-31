@@ -4,6 +4,7 @@ import { errorText, useLanguage, useT, type Language, type Messages } from '../i
 import { PROVIDER_NAMES } from '../providers';
 import type { JobView, Limits, MachineView, Me, SubView } from '../types';
 import { Ask } from '../ui/Ask';
+import { Bar, percent } from '../ui/Bar';
 import { CommandBox } from '../ui/CommandBox';
 import { ConnectPanel } from '../ui/ConnectPanel';
 import { Edge } from '../ui/Edge';
@@ -35,15 +36,43 @@ function clock(language: Language, iso: string | null): string | null {
   return new Intl.DateTimeFormat(language, parts).format(at);
 }
 
-/* The fullest window speaks for the subscription. */
-function limitsLine(t: Messages, language: Language, limits: Limits | null): string | null {
+/* Windows by the names Claude Code gives them; Codex names its others by their minutes. */
+const WINDOW_MINUTES: Record<string, number> = { five_hour: 300, one_day: 1440, seven_day: 10080 };
+
+function windowName(t: Messages, name: string): string {
+  const minutes = WINDOW_MINUTES[name] ?? Number(/^(\d+)_minutes$/.exec(name)?.[1]);
+  if (!minutes) return name.replaceAll('_', ' ');
+  if (minutes % 1440 === 0) return t.subs.days(minutes / 1440);
+  return minutes % 60 === 0 ? t.subs.hours(minutes / 60) : t.subs.minutes(minutes);
+}
+
+/* Each window of the plan's limits as a bar with its share; a plan that reached one says when the fullest resets. */
+function LimitBars({ limits }: { limits: Limits | null }) {
+  const t = useT();
+  const { language } = useLanguage();
   if (!limits) return null;
   const top = [...limits.windows].sort((a, b) => (b.utilization ?? -1) - (a.utilization ?? -1))[0];
-  if (limits.status === 'rejected') return t.subs.limitReached(clock(language, top?.resetsAt ?? null));
-  if (!top || top.utilization === null) return null;
-  const pct = Math.round(top.utilization * 100);
-  const at = clock(language, top.resetsAt);
-  return limits.status === 'warning' ? t.subs.limitWarning(pct, at) : t.subs.limitUsed(pct, at);
+  const known = limits.windows.flatMap(w => (w.utilization === null ? [] : [{ ...w, utilization: w.utilization }]));
+  return (
+    <>
+      {limits.status === 'rejected' && <small className="limits">{t.subs.limitReached(clock(language, top?.resetsAt ?? null))}</small>}
+      {known.length > 0 && (
+        <ul className="limit-bars" aria-label={t.subs.limits}>
+          {known.map(w => {
+            const at = clock(language, w.resetsAt);
+            return (
+              <li key={w.name}>
+                <span>{windowName(t, w.name)}</span>
+                <Bar used={w.utilization} />
+                <b>{percent(w.utilization)}%</b>
+                {at && <span>{t.subs.resetsAt(at)}</span>}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </>
+  );
 }
 
 function lastSeen(t: Messages, language: Language, iso: string | null): string {
@@ -229,7 +258,6 @@ export function Subscriptions({ me }: { me: Me }) {
             {subs.map(s => {
               const name = subName(t, s);
               const state = stateOf(s);
-              const limits = limitsLine(t, language, s.limits);
               const test = tests[s.id];
               const mine = s.owner.id === me.person.id;
               const asking = confirm?.kind === 'sub' && confirm.id === s.id;
@@ -251,7 +279,7 @@ export function Subscriptions({ me }: { me: Me }) {
                     <td>{s.kind === 'api_key' ? t.subs.builtin : (s.machine?.hostname ?? <span className="muted">{t.subs.noMachine}</span>)}</td>
                     <td>
                       <span className={`status ${state}`}>{t.subs.states[state]}</span>
-                      {limits && <small className="limits">{limits}</small>}
+                      <LimitBars limits={s.limits} />
                     </td>
                     <td className="row-actions">
                       {s.status === 'ready' && s.online && (

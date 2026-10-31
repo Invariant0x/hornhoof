@@ -6,12 +6,13 @@ import { StringDecoder } from 'node:string_decoder';
 import { TERM_CHUNK, type AgentEvent, type Limits, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
 import { claudeEvents, claudeInterrupted } from '../providers/claude.js';
 import { contentText } from '../providers/events.js';
+import { kimiContextSize } from '../providers/kimi.js';
 import { redact } from '../redact.js';
 import { tidy, type RunInput, type RunResult } from '../runner.js';
 import { Bridge } from './bridge.js';
 import { StreamMask } from './mask.js';
 import { acceptClaudeDialogs, claudeTranscript, findKimiWire, findRollout, prepareKimi, type TermProgram } from './programs.js';
-import { claudeStatusLimits, codexRollout, kimiWire, LineTail, type WireNews } from './transcripts.js';
+import { claudeStatusContext, claudeStatusLimits, codexRollout, kimiWire, LineTail, type WireNews } from './transcripts.js';
 import { envFile, type Tmux } from './tmux.js';
 
 /* An agent's turn in its terminal: which program, where it keeps its sign-in, and what the runner hands every program. */
@@ -63,6 +64,9 @@ type Agent = {
   turn: Turn | null;
   busy: boolean;
   limits: Limits | null;
+  /* How full the context is as Hornhoof last heard it, and how many tokens Kimi's model takes in it. */
+  contextUsed: number | null;
+  contextSize: number | null;
   viewers: number;
   idle: NodeJS.Timeout | null;
   /* Reads the log and looks at the program while it runs. */
@@ -201,7 +205,7 @@ export class TerminalHost {
   private agent(key: string): Agent {
     let a = this.agents.get(key);
     if (!a) {
-      a = { key, name: `a-${key}`, program: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, viewers: 0, idle: null, watch: null, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null };
+      a = { key, name: `a-${key}`, program: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, viewers: 0, idle: null, watch: null, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null };
       this.agents.set(key, a);
     }
     return a;
@@ -267,7 +271,7 @@ export class TerminalHost {
         if (program.kind === 'kimi') prepareKimi(job.home, input.workDir, urls.mcpUrl);
         /* A person's first message into a new Kimi session reaches its tools a moment before Hornhoof opens their turn. */
         this.bridge.waitForTurns(job.key, program.kind === 'kimi' ? this.openMs + 2000 : 0);
-        Object.assign(a, { program, home: job.home, workDir: input.workDir, hash, sessionId: spec.sessionId, cleared: new Set(), startedAt: Date.now(), started: deferred<void>(), fresh: false, keep: lazy ? (input.context ?? null) : null });
+        Object.assign(a, { program, home: job.home, workDir: input.workDir, hash, sessionId: spec.sessionId, cleared: new Set(), startedAt: Date.now(), started: deferred<void>(), fresh: false, keep: lazy ? (input.context ?? null) : null, contextSize: program.kind === 'kimi' ? kimiWindow(job.home, input.model) : null });
         if (program.kind === 'claude' && !input.sessionId && input.context && spec.sessionId) keepContext(input.workDir, spec.sessionId, input.context);
         a.tail = this.tailFor(a);
         const env = { ...lasting(input.env), ...spec.env };
@@ -471,6 +475,7 @@ export class TerminalHost {
       if (news.typed !== undefined && (!a.turn || a.turn.starting)) void this.openTyped(a, news.typed, true);
       for (const e of news.events) this.emit(a, e);
       if (news.limits) a.limits = news.limits;
+      if (news.context !== undefined) this.context(a, news.context);
       if (news.session) a.sessionId = news.session.id;
       if (news.started) a.busy = true;
       /* A stop logged before the running turn's prompt went in belongs to the last turn. */
@@ -489,6 +494,8 @@ export class TerminalHost {
      person's turn reaches Hornhoof through Kimi's prompt hook, as in Claude Code. */
   private kimiNews(a: Agent, news: WireNews): void {
     if (news.step) a.stepSaid = false;
+    if (news.model) a.contextSize = kimiWindow(a.home, news.model);
+    if (news.tokens !== undefined && a.contextSize) this.context(a, Math.min(1, news.tokens / a.contextSize));
     for (const e of news.events) {
       const before = a.lastText;
       this.emit(a, e);
@@ -521,6 +528,13 @@ export class TerminalHost {
     }
   }
 
+  /* Hornhoof hears how full the context is once it moved by a percent or more, for the bar on the map. */
+  private context(a: Agent, used: number): void {
+    if (a.contextUsed !== null && Math.abs(used - a.contextUsed) < 0.01) return;
+    a.contextUsed = used;
+    this.opts.send({ type: 'agent.context', agentKey: a.key, used });
+  }
+
   private emit(a: Agent, event: AgentEvent): void {
     const turn = a.turn;
     if (!turn) return;
@@ -550,6 +564,8 @@ export class TerminalHost {
       case 'status': {
         const limits = claudeStatusLimits(data);
         if (limits) a.limits = limits;
+        const used = claudeStatusContext(data);
+        if (used !== null) this.context(a, used);
         return;
       }
       case 'prompt':
@@ -759,5 +775,14 @@ async function parentOf(pid: number): Promise<number | null> {
     return Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[1]);
   } catch {
     return new Promise(resolve => execFile('ps', ['-o', 'ppid=', '-p', String(pid)], (err, out) => resolve(err ? null : Number(out.trim()))));
+  }
+}
+
+/* How many tokens the model Kimi starts with takes in its context, from its settings. */
+function kimiWindow(home: string, model: string | null): number | null {
+  try {
+    return kimiContextSize(readFileSync(join(home, 'config.toml'), 'utf8'), model);
+  } catch {
+    return null;
   }
 }

@@ -1,6 +1,6 @@
 import { TEMPLATE_KEYS, type Limits, type ModelOption } from '@hornhoof/protocol';
 import { sql } from 'drizzle-orm';
-import { bigserial, boolean, customType, index, integer, jsonb, pgTable, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
+import { bigserial, boolean, customType, index, integer, jsonb, pgTable, real, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
 
 const id = () => uuid('id').primaryKey().defaultRandom();
 const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow();
@@ -177,6 +177,8 @@ export const agents = pgTable('agents', {
   createdBy: uuid('created_by').references(() => people.id),
   /* Switched off for now: it ends the turn it runs and takes no task turns until it is on again. */
   switchedOffAt: timestamp('switched_off_at', { withTimezone: true }),
+  /* How full its context was when its node last said, as a share from 0 to 1. */
+  contextUsed: real('context_used'),
   removedAt: timestamp('removed_at', { withTimezone: true }),
   createdAt: createdAt(),
 });

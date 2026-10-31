@@ -140,6 +140,12 @@ describe('Kimi Code in a terminal', () => {
       writeFileSync(join(home, 'credentials', 'kimi-code.json'), JSON.stringify({ access_token: 'kimi-access-1', refresh_token: 'kimi-refresh-1' }));
       expect(await kimiPlanLimits(home)).toEqual({ status: 'allowed', windows: [{ name: 'five_hour', utilization: 0.5, resetsAt: '2026-10-31T03:00:00.000Z' }] });
       expect(auths).toEqual(['/coding/v1/usages Bearer kimi-access-1']);
+      /* A token that ran out asks nothing: Kimi alone renews it, and the last limits stay. */
+      writeFileSync(join(home, 'credentials', 'kimi-code.json'), JSON.stringify({ access_token: 'kimi-access-2', refresh_token: 'kimi-refresh-2', expires_at: Date.now() / 1000 - 60 }));
+      expect(await kimiPlanLimits(home)).toBeNull();
+      writeFileSync(join(home, 'credentials', 'kimi-code.json'), JSON.stringify({ access_token: 'kimi-access-3', refresh_token: 'kimi-refresh-3', expires_at: Date.now() / 1000 + 600 }));
+      expect(await kimiPlanLimits(home)).not.toBeNull();
+      expect(auths).toEqual(['/coding/v1/usages Bearer kimi-access-1', '/coding/v1/usages Bearer kimi-access-3']);
     } finally {
       if (before === undefined) delete process.env.KIMI_CODE_BASE_URL;
       else process.env.KIMI_CODE_BASE_URL = before;

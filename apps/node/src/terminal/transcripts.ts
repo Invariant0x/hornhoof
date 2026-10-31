@@ -50,8 +50,19 @@ function windowName(minutes: unknown): string {
 }
 
 /* What a line of Codex's session log tells: things to show, the session, a turn's start, what a person typed, the turn's
-   end or that a person stopped it, the limits. */
-export type RolloutNews = { events: AgentEvent[]; session?: { id: string; cwd: string }; started?: true; typed?: string; ended?: { message: string }; aborted?: true; limits?: Limits };
+   end or that a person stopped it, the limits, how full the context is. */
+export type RolloutNews = { events: AgentEvent[]; session?: { id: string; cwd: string }; started?: true; typed?: string; ended?: { message: string }; aborted?: true; limits?: Limits; context?: number };
+
+/* Codex counts its context past the part every session starts with, and so does Hornhoof, to show what its screen shows. */
+const CODEX_BASELINE = 12_000;
+
+function codexContext(info: unknown): number | null {
+  if (!isRecord(info) || !isRecord(info.last_token_usage)) return null;
+  const tokens = info.last_token_usage.total_tokens;
+  const window = info.model_context_window;
+  if (typeof tokens !== 'number' || typeof window !== 'number' || window <= CODEX_BASELINE) return null;
+  return Math.min(1, Math.max(0, (tokens - CODEX_BASELINE) / (window - CODEX_BASELINE)));
+}
 
 const textOf = (content: unknown) =>
   Array.isArray(content)
@@ -106,20 +117,23 @@ export function codexRollout(line: unknown): RolloutNews {
     case 'task_complete':
       return { events: [], ended: { message: String(p.last_agent_message ?? '') } };
     case 'token_count': {
+      const news: RolloutNews = { events: [] };
+      const context = codexContext(p.info);
+      if (context !== null) news.context = context;
       const rate = isRecord(p.rate_limits) ? p.rate_limits : null;
-      if (!rate) return { events: [] };
+      if (!rate) return news;
       const windows = [rate.primary, rate.secondary].filter(isRecord).map(w => ({ name: windowName(w.window_minutes), utilization: share(w.used_percent), resetsAt: iso(w.resets_at) }));
-      return { events: [], limits: { status: rate.rate_limit_reached_type ? 'rejected' : 'allowed', windows } };
+      return { ...news, limits: { status: rate.rate_limit_reached_type ? 'rejected' : 'allowed', windows } };
     }
     default:
       return { events: [] };
   }
 }
 
-/* What a line of the main agent's log in Kimi Code tells: things to show, a turn's start, and how it ended. Kimi logs a
-   turn's end without its answer, which is the turn's last text. Read from Kimi Code 2.4's source, not yet from a
-   signed-in run. */
-export type WireNews = { events: AgentEvent[]; started?: true; ended?: true; aborted?: true; failed?: string; step?: true; blocked?: true };
+/* What a line of the main agent's log in Kimi Code tells: things to show, a turn's start, how it ended, which model runs
+   and how many tokens its context holds. Kimi logs a turn's end without its answer, which is the turn's last text. Read
+   from Kimi Code 2.4's source, not yet from a signed-in run. */
+export type WireNews = { events: AgentEvent[]; started?: true; ended?: true; aborted?: true; failed?: string; step?: true; blocked?: true; tokens?: number; model?: string };
 
 function loopEvents(event: Record<string, unknown>): AgentEvent[] {
   switch (event.type) {
@@ -149,6 +163,15 @@ export function kimiWire(line: unknown): WireNews {
       return line.reason === 'blocked' ? { events: [], failed: 'A hook in Kimi Code blocked this message.', blocked: true } : { events: [] };
     case 'turn.prompt':
       return { events: [], started: true };
+    /* Kimi counts its context again as it grows, is compacted or a turn ends; each count is the size now. */
+    case 'token_counting.measured':
+    case 'token_counting.truncated':
+    case 'token_counting.rebased':
+    case 'token_counting.turn_recorded':
+      return typeof line.tokens === 'number' ? { events: [], tokens: line.tokens } : { events: [] };
+    /* The model Kimi runs now, also when a person picked another one with /model. */
+    case 'config.update':
+      return typeof line.modelAlias === 'string' && line.modelAlias ? { events: [], model: line.modelAlias } : { events: [] };
     case 'turn.ended': {
       if (line.reason === 'completed') return { events: [], ended: true };
       if (line.reason === 'cancelled') return { events: [], aborted: true };
@@ -177,6 +200,11 @@ export function kimiUsageLimits(page: unknown): Limits | null {
   });
   if (!windows.length) return null;
   return { status: windows.some(w => w.utilization >= 1) ? 'rejected' : 'allowed', windows };
+}
+
+/* How full Claude Code's context is, from its status line. */
+export function claudeStatusContext(status: unknown): number | null {
+  return isRecord(status) && isRecord(status.context_window) ? share(status.context_window.used_percentage) : null;
 }
 
 /* The limits Claude Code hands its status line: five hours and seven days. */

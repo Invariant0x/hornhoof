@@ -134,8 +134,10 @@ export function findKimiWire(home: string, sessionId: string): string | null {
 /* What Kimi's /usage shows, asked with the token Kimi keeps fresh while it runs. A token that went stale gives nothing,
    and the host keeps what it knew. */
 export async function kimiPlanLimits(home: string): Promise<Limits | null> {
-  const token = readJson(join(home, 'credentials', 'kimi-code.json')).access_token;
+  const { access_token: token, expires_at: expires } = readJson(join(home, 'credentials', 'kimi-code.json'));
   if (typeof token !== 'string' || !token) return null;
+  /* Kimi alone renews its token, with a lock its own processes share; a token that ran out would only be refused. */
+  if (typeof expires === 'number' && expires * 1000 < Date.now() + 30_000) return null;
   let config = '';
   try {
     config = readFileSync(join(home, 'config.toml'), 'utf8');

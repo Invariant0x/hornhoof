@@ -1,8 +1,8 @@
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
-import { jobs, subscriptions } from '../src/db/schema.js';
-import { as, connectNode, listen, setUpCompany, testApp, until } from './helpers.js';
+import { agents, departments, jobs, subscriptions } from '../src/db/schema.js';
+import { as, connectNode, listen, openStream, setUpCompany, testApp, until } from './helpers.js';
 
 async function liveCompany() {
   const { app, db } = await testApp({ NODE_PING_MS: '50' });
@@ -61,6 +61,28 @@ describe('node socket', () => {
     node.send({ type: 'status', loggedIn: false, limits: null });
     await until(async () => (await stored()).status === 'needs_login');
     expect((await stored()).models).toEqual([models[0]]);
+  });
+
+  it("keeps how full each of its agents' context is and tells the map, for its own agents only", async () => {
+    const { app, db, url, ceo, subId, key } = await liveCompany();
+    const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    const [dept] = await db.insert(departments).values({ companyId: orchestrator!.companyId, templateKey: 'development', roleCode: 'DEV' }).returning();
+    const [bruno] = await db
+      .insert(agents)
+      .values({ companyId: orchestrator!.companyId, kind: 'worker', name: 'Bruno', roleKey: 'DEV-BE', departmentId: dept!.id, model: '', subscriptionId: subId })
+      .returning();
+    const stream = await openStream(app, ceo);
+    const node = await connectNode(url, key);
+    node.send(hello());
+    node.send({ type: 'agent.context', agentKey: orchestrator!.id, used: 0.9 });
+    node.send({ type: 'agent.context', agentKey: '00000000-0000-4000-8000-000000000000', used: 0.9 });
+    node.send({ type: 'agent.context', agentKey: bruno!.id, used: 0.42 });
+    await until(() => stream.messages.some(m => m.type === 'context'));
+    await new Promise(r => setTimeout(r, 200));
+    expect(stream.messages.filter(m => m.type === 'context')).toEqual([{ type: 'context', agentId: bruno!.id, used: 0.42 }]);
+    const org = (await app.inject({ url: '/api/org', ...as(ceo) })).json();
+    expect(org.departments[0].employees[0]).toMatchObject({ name: 'Bruno', context: 0.42 });
+    expect(org.orchestrator.context).toBeNull();
   });
 
   it('drops a node that stops answering pings', async () => {

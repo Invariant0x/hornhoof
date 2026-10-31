@@ -2,7 +2,7 @@ import { appendFileSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { claudeStatusLimits, codexRollout, kimiUsageLimits, kimiWire, LineTail } from '../src/terminal/transcripts.js';
+import { claudeStatusContext, claudeStatusLimits, codexRollout, kimiUsageLimits, kimiWire, LineTail } from '../src/terminal/transcripts.js';
 
 const item = (it: object) => ({ type: 'event_msg', payload: { type: 'item_completed', item: it } });
 const loop = (event: object) => ({ type: 'context.append_loop_event', agentId: 'main', event, time: 1 });
@@ -47,6 +47,13 @@ describe("Codex's session log", () => {
     expect(codexRollout({ type: 'event_msg', payload: { type: 'token_count', rate_limits: { ...rate, rate_limit_reached_type: 'primary' } } }).limits?.status).toBe('rejected');
   });
 
+  it('reads how full its context is as its own screen counts it, past the part every session starts with', () => {
+    const info = { last_token_usage: { total_tokens: 112_000 }, total_token_usage: { total_tokens: 900_000 }, model_context_window: 212_000 };
+    expect(codexRollout({ type: 'event_msg', payload: { type: 'token_count', info, rate_limits: null } })).toEqual({ events: [], context: 0.5 });
+    expect(codexRollout({ type: 'event_msg', payload: { type: 'token_count', info: { ...info, last_token_usage: { total_tokens: 5000 } }, rate_limits: null } }).context).toBe(0);
+    expect(codexRollout({ type: 'event_msg', payload: { type: 'token_count', info: null, rate_limits: null } })).toEqual({ events: [] });
+  });
+
   it('leaves out what people need not see', () => {
     expect(codexRollout({ type: 'response_item', payload: { type: 'message', role: 'developer' } })).toEqual({ events: [] });
     expect(codexRollout('nonsense')).toEqual({ events: [] });
@@ -63,6 +70,15 @@ describe("Kimi Code's session log", () => {
     expect(kimiWire(loop({ type: 'tool.result', toolCallId: 'c2', result: { output: [{ type: 'text', text: 'No such task.' }], isError: true } })).events).toEqual([
       { kind: 'tool_result', ok: false, summary: 'No such task.' },
     ]);
+  });
+
+  it("tells how many tokens the main agent's context holds now", () => {
+    expect(kimiWire({ type: 'token_counting.measured', agentId: 'main', length: 4, tokens: 50_000 })).toEqual({ events: [], tokens: 50_000 });
+    expect(kimiWire({ type: 'token_counting.rebased', agentId: 'main', length: 2, tokens: 9000, measured: false })).toEqual({ events: [], tokens: 9000 });
+    expect(kimiWire({ type: 'token_counting.measured', agentId: 'sub-1', length: 4, tokens: 70_000 })).toEqual({ events: [] });
+    /* A person picked another model with /model, whose context is another size. */
+    expect(kimiWire({ type: 'config.update', agentId: 'main', modelAlias: 'kimi-code/k3' })).toEqual({ events: [], model: 'kimi-code/k3' });
+    expect(kimiWire({ type: 'config.update', agentId: 'main', thinkingEffort: 'high' })).toEqual({ events: [] });
   });
 
   it('tells when a turn starts, ends, was stopped or failed', () => {
@@ -106,6 +122,12 @@ describe("Claude Code's status line", () => {
       ],
     });
     expect(claudeStatusLimits({ model: {} })).toBeNull();
+  });
+
+  it('gives how full the context is', () => {
+    expect(claudeStatusContext({ context_window: { used_percentage: 42.5, context_window_size: 200_000 } })).toBe(0.425);
+    expect(claudeStatusContext({ context_window: { used_percentage: null } })).toBeNull();
+    expect(claudeStatusContext({ model: {} })).toBeNull();
   });
 });
 

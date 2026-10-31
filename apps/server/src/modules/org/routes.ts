@@ -109,6 +109,7 @@ export function orgRoutes(app: FastifyInstance, { db, hub, templates }: Ctx): vo
             modelName: (a.model && sub && modelsFor(sub.provider, sub.models).find(m => m.id === a.model)?.name) || null,
             provider: sub?.provider ?? null,
             state: busy.has(a.id) ? 'working' : a.subscriptionId ? 'sleeping' : 'needs_subscription',
+            context: a.contextUsed,
             status: now.status,
             on: !a.switchedOffAt,
             /* Like the department's current task, only for people who reach it. */
@@ -134,6 +135,7 @@ export function orgRoutes(app: FastifyInstance, { db, hub, templates }: Ctx): vo
         id: orchestrator.id,
         name: orchestrator.name,
         model: orchestrator.model,
+        context: orchestrator.contextUsed,
         subscription: orchestrator.subscriptionId ? await subView(db, s => hub.isOnline(identityOf(s)), orchestrator.subscriptionId) : null,
       },
       agents: { total: allAgents.length, working: await workingCount(db, me.companyId) },

@@ -5,6 +5,7 @@ import { useStream, type LiveMessage } from '../live';
 import { useOrg } from '../org';
 import type { Department, Employee, EmployeeStatus, Endpoint, Me, Org, SubView } from '../types';
 import { accessText } from '../ui/AccessPicker';
+import { Bar, percent } from '../ui/Bar';
 import { usePanZoom, ZoomBar } from '../ui/canvas';
 import { Edge } from '../ui/Edge';
 import { LogoMark, PersonIcon } from '../ui/icons';
@@ -452,6 +453,12 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator, inside = false, 
           <span className={`live${orchestratorReady(sub) ? '' : ' off'}`} />
           <span className="tt">{t.map.orchestrator}</span>
           <span className="tx" title={status}>{status}</span>
+          {org.orchestrator?.context != null && (
+            <span className="tc" title={t.dept.contextUsed(percent(org.orchestrator.context))}>
+              <Bar used={org.orchestrator.context} />
+              {percent(org.orchestrator.context)}%
+            </span>
+          )}
         </div>
       )}
     </div>

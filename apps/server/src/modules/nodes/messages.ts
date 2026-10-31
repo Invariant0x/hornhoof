@@ -1,10 +1,11 @@
 import { TAIL_BYTES, type NodeMessage } from '@hornhoof/protocol';
 import { and, eq, inArray, isNull, notInArray, or, type SQL } from 'drizzle-orm';
+import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { jobs, subscriptions } from '../../db/schema.js';
-import { afterJob, openTypedTurn, pumpWaiting, startProgram } from '../conversation/queue.js';
+import { agents, jobs, subscriptions } from '../../db/schema.js';
+import { afterJob, liveSubscription, openTypedTurn, pumpWaiting, startProgram } from '../conversation/queue.js';
 import { appendEvent, publishWorking } from '../events/store.js';
-import type { NodeIdentity } from './hub.js';
+import { identityOf, sameNode, type NodeIdentity } from './hub.js';
 
 const OPEN_JOBS = ['queued', 'running'] as const;
 
@@ -123,6 +124,19 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
     case 'agent.start':
       await startProgram(ctx, id, msg.agentKey);
       return;
+    /* Only the node that runs the agent's subscription tells how full its context is. */
+    case 'agent.context': {
+      if (!z.uuid().safeParse(msg.agentKey).success) return;
+      const sub = await liveSubscription(ctx, msg.agentKey);
+      if (!sub || !sameNode(identityOf(sub), id)) return;
+      const [agent] = await db
+        .update(agents)
+        .set({ contextUsed: msg.used })
+        .where(and(eq(agents.id, msg.agentKey), isNull(agents.removedAt)))
+        .returning({ companyId: agents.companyId });
+      if (agent) ctx.bus.publish(agent.companyId, { type: 'context', agentId: msg.agentKey, used: msg.used });
+      return;
+    }
     case 'removed': {
       if (id.kind !== 'node') return;
       await db.update(subscriptions).set({ nodeKeyHash: null, machineId: null }).where(eq(subscriptions.id, id.subscriptionId));

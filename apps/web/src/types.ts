@@ -80,6 +80,8 @@ export type Employee = {
   /* Off for now: it takes no work until a person switches it on. */
   on: boolean;
   task: EmployeeTask | null;
+  /* How full its context was when its machine last said, from 0 to 1; null before it said. */
+  context: number | null;
 };
 
 /* A role a department's employees hold, in its template's order; gate: where it stands among the default gates. */
@@ -109,7 +111,7 @@ export type Repository = { url: string; branch: string; tokenLast4: string | nul
 
 export type Org = {
   company: Company;
-  orchestrator: { id: string; name: string; model: string; subscription: SubView | null } | null;
+  orchestrator: { id: string; name: string; model: string; subscription: SubView | null; context: number | null } | null;
   agents: { total: number; working: number };
   /* Next to the CEO: people who see the whole company, and deputies whose departments span more than one. */
   people: (PersonView & { deputy?: boolean })[];
@@ -185,7 +187,8 @@ export type StreamMessage =
   | { type: 'org' }
   | { type: 'pulse'; from: Endpoint; to: Endpoint }
   | { type: 'task'; id: string }
-  | { type: 'requests' };
+  | { type: 'requests' }
+  | { type: 'context'; agentId: string; used: number };
 
 export type TaskStatus = 'planned' | 'open' | 'working' | 'review' | 'waiting' | 'blocked' | 'done' | 'cancelled';
 export type AgentRef = { id: string; name: string; kind: 'orchestrator' | 'head' | 'worker'; role: Lang | null };

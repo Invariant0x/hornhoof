@@ -129,6 +129,19 @@ describe('runNode', () => {
     expect(server.received[3]).toMatchObject({ loggedIn: true, limits: { status: 'allowed', windows: [] } });
   });
 
+  it("asks its program for the plan's limits on its own, now and then, and says when they change", async () => {
+    const server = await fakeServer();
+    const seen = [0.1, 0.1, 0.25];
+    let asked = 0;
+    const limits = async () => ({ status: 'allowed' as const, windows: [{ name: 'seven_day', utilization: seen[Math.min(asked++, seen.length - 1)]!, resetsAt: null }] });
+    const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, limits }, log: () => {}, limitsMs: 40 });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.filter(m => m.type === 'status').length >= 2);
+    const statuses = server.received.filter(m => m.type === 'status').map(m => (m.limits as { windows: { utilization: number }[] }).windows[0]!.utilization);
+    expect(statuses.slice(0, 2)).toEqual([0.1, 0.25]);
+    expect(asked).toBeGreaterThanOrEqual(3);
+  });
+
   it('sends the models its program can run in hello and status', async () => {
     const server = await fakeServer();
     const models = [{ id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol' }];
