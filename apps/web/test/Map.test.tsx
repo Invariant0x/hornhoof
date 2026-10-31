@@ -53,6 +53,13 @@ describe('Map', () => {
     expect(within(ticker).getByTitle('Context 71%').querySelector('.bar')).toHaveClass('hi');
   });
 
+  it('shows how hard the orchestrator thinks in the line at the bottom', async () => {
+    mockApi({ 'GET /api/org': [200, { ...ORG, orchestrator: { ...ORG.orchestrator!, effort: 'xhigh' } }] });
+    const { container } = render(<MapScreen {...PROPS} />);
+    await screen.findByText('Ivan');
+    expect(container.querySelector('.ticker')).toHaveTextContent('extra high effort');
+  });
+
   it('shows the map again once the server answers after a failure', async () => {
     const stream = fakeStream();
     let up = false;

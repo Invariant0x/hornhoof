@@ -336,6 +336,7 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .ticker .tx { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ticker .tc { flex: none; display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .ticker .tc .bar { width: 48px; }
+.ticker .te { flex: none; font-size: 12px; color: var(--muted); }
 .ticker .tx.in { animation: tin .45s ease-out; }
 @keyframes blink { 50% { opacity: .35; } }
 @media (max-width: 720px) { .ticker { bottom: 72px; max-width: calc(100% - 32px); } }

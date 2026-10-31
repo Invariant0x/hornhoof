@@ -121,6 +121,16 @@ describe('Department view', () => {
     expect(within(members).getByTitle('Context 20%')).not.toHaveClass('hi');
   });
 
+  it('shows how hard each employee thinks next to its model', async () => {
+    const user = userEvent.setup();
+    const [dev] = DEV_ORG.departments;
+    const [dana, bruno] = dev!.employees;
+    shell({}, { ...DEV_ORG, departments: [{ ...dev!, employees: [dana!, { ...bruno!, effort: 'max' }] }] });
+    await flyIn(user);
+    const members = screen.getByRole('region', { name: 'Members' });
+    expect(within(members).getByRole('button', { name: /Bruno/ })).toHaveTextContent('Claude Sonnet 5.5, max effort, Anthropic');
+  });
+
   it('refetches what employees do when their tasks move', async () => {
     const user = userEvent.setup();
     const stream = fakeStream();

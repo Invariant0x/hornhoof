@@ -453,6 +453,7 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator, inside = false, 
           <span className={`live${orchestratorReady(sub) ? '' : ' off'}`} />
           <span className="tt">{t.map.orchestrator}</span>
           <span className="tx" title={status}>{status}</span>
+          {org.orchestrator?.effort && <span className="te">{t.agent.effortLine(t.agent.efforts[org.orchestrator.effort] ?? org.orchestrator.effort)}</span>}
           {org.orchestrator?.context != null && (
             <span className="tc" title={t.dept.contextUsed(percent(org.orchestrator.context))}>
               <Bar used={org.orchestrator.context} />

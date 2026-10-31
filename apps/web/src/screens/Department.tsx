@@ -50,7 +50,8 @@ const hhmm = (d: Date) => `${String(d.getHours()).padStart(2, '0')}:${String(d.g
 const taskText = (e: Employee) => (e.task ? `#${e.task.number} ${e.task.title}` : '');
 
 function modelLine(t: ReturnType<typeof useT>, e: Employee): string {
-  return [e.modelName || e.model || t.agent.default, e.provider && PROVIDER_NAMES[e.provider]].filter(Boolean).join(', ');
+  const effort = e.effort && t.agent.effortLine(t.agent.efforts[e.effort] ?? e.effort);
+  return [e.modelName || e.model || t.agent.default, effort, e.provider && PROVIDER_NAMES[e.provider]].filter(Boolean).join(', ');
 }
 
 /* What an employee's third line says: its task, or why it has none. */

@@ -75,6 +75,8 @@ export type Employee = {
   model: string;
   modelName: string | null;
   provider: ProviderId | null;
+  /* The level its model thinks at, when Hornhoof knows it. */
+  effort: string | null;
   state: AgentState;
   status: EmployeeStatus;
   /* Off for now: it takes no work until a person switches it on. */
@@ -111,7 +113,7 @@ export type Repository = { url: string; branch: string; tokenLast4: string | nul
 
 export type Org = {
   company: Company;
-  orchestrator: { id: string; name: string; model: string; subscription: SubView | null; context: number | null } | null;
+  orchestrator: { id: string; name: string; model: string; effort: string | null; subscription: SubView | null; context: number | null } | null;
   agents: { total: number; working: number };
   /* Next to the CEO: people who see the whole company, and deputies whose departments span more than one. */
   people: (PersonView & { deputy?: boolean })[];
@@ -144,6 +146,8 @@ export type AgentCardView = {
   department: { id: string; name: string } | null;
   product: { id: string; name: string } | null;
   model: string;
+  /* The level a person picked, or null for the Default. */
+  effort: string | null;
   subscription: SubView | null;
   state: AgentState;
   skills: CardSkill[];
