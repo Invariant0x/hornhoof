@@ -141,6 +141,13 @@ describe('tools a skill grants', () => {
     expect(recent.blocked).toEqual([]);
   });
 
+  it('lets a failure collector see the commands a node reports missing', async () => {
+    const { app, db, sub } = await company(['ops-failure-review']);
+    await db.update(subscriptions).set({ missing: [{ provider: sub.provider, command: 'uptime' }] }).where(eq(subscriptions.id, sub.id));
+    const recent = JSON.parse((await call(await mcp(app), 'failures', { hours: 6 })).content[0]!.text);
+    expect(recent.missingCommands).toEqual([{ provider: sub.provider, command: 'uptime', subscription: sub.label, node: 'built-in' }]);
+  });
+
   it('let a failure collector see where agents stumbled: programs they lacked, what they installed by hand, and where they stopped for people', async () => {
     const { app, db, acme, sub, hana, bruno, task } = await company(['ops-failure-review']);
     const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000);

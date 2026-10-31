@@ -1,4 +1,4 @@
-import { TEMPLATE_KEYS, type Limits, type ModelOption } from '@hornhoof/protocol';
+import { TEMPLATE_KEYS, type Limits, type MissingCommand, type ModelOption } from '@hornhoof/protocol';
 import { sql } from 'drizzle-orm';
 import { bigserial, boolean, customType, index, integer, jsonb, pgTable, real, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
 
@@ -151,6 +151,8 @@ export const subscriptions = pgTable(
     limits: jsonb('limits').$type<Limits>(),
     /* The models its node says it can run; null until a node reports them. */
     models: jsonb('models').$type<ModelOption[]>(),
+    /* Basic commands the node could not find, or null until it reports them. */
+    missing: jsonb('missing').$type<MissingCommand[]>(),
     removedAt: timestamp('removed_at', { withTimezone: true }),
     createdAt: createdAt(),
   },

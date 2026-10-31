@@ -1,4 +1,4 @@
-import type { Limits } from '@hornhoof/protocol';
+import type { Limits, MissingCommand } from '@hornhoof/protocol';
 import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import { agents, departments, machines, people, personAccess, subscriptions, teams, type Provider, type SUBSCRIPTION_STATUSES } from '../../db/schema.js';
@@ -20,6 +20,7 @@ export type SubView = {
   place: Place;
   machine: { id: string; hostname: string } | null;
   limits: Limits | null;
+  missing: MissingCommand[] | null;
   isOrchestrator: boolean;
 };
 
@@ -34,6 +35,7 @@ const columns = {
   status: subscriptions.status,
   last4: subscriptions.last4,
   limits: subscriptions.limits,
+  missing: subscriptions.missing,
   targetKind: subscriptions.targetKind,
   targetId: subscriptions.targetId,
   ownerId: people.id,
@@ -93,6 +95,7 @@ export async function subViews(db: Db, isOnline: IsOnline, id?: string): Promise
     place: r.kind === 'api_key' ? placeOf(r.targetKind, r.targetId, depts, teamDept) : r.ownerScopeKind === 'company' ? COMPANY : ownerPlace(ownerDepts(r.ownerId), depts),
     machine: r.machineId ? { id: r.machineId, hostname: r.machineHost ?? '' } : null,
     limits: r.limits ?? null,
+    missing: r.missing ?? null,
     isOrchestrator: orchestrator?.subscriptionId === r.id,
   }));
 }

@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { JobUser } from '../isolation.js';
+import { findMissingCommands } from '../providers/process.js';
 
 /* How agent sessions look and behave: no tmux bar, the wheel scrolls, the size follows the person who looks last, colours
    pass through, and a finished program leaves its last screen. */
@@ -59,6 +60,10 @@ export class Tmux {
     this.socket = socket;
     this.env = { LANG: 'C.UTF-8', ...withoutNodeSecrets(env) };
     this.user = user;
+  }
+
+  missingCommands(): Promise<string[]> {
+    return findMissingCommands(this.env, this.user);
   }
 
   /* The arguments that reach this server; viewers attach with them too. */

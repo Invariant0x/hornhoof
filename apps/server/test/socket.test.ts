@@ -69,6 +69,22 @@ describe('node socket', () => {
     expect((await stored()).models).toEqual([models[0]]);
   });
 
+  it('keeps the commands a node reports missing without changing the subscription status', async () => {
+    const { app, db, url, ceo, subId, key } = await liveCompany();
+    const node = await connectNode(url, key);
+    const missing = [{ provider: 'claude' as const, command: 'uptime' }];
+    node.send({ ...hello(), missing });
+    const stored = async () => (await db.select().from(subscriptions).where(eq(subscriptions.id, subId)))[0]!;
+    await until(async () => (await stored()).nodeVersion === '0.2.0');
+    expect((await stored()).missing).toEqual(missing);
+    expect(await subOf(app, ceo, subId)).toMatchObject({ status: 'ready', missing });
+    node.send({ type: 'status', loggedIn: false, limits: null, missing: [] });
+    await until(async () => (await stored()).status === 'needs_login');
+    expect((await stored()).missing).toEqual([]);
+    expect(await subOf(app, ceo, subId)).toMatchObject({ status: 'needs_login', missing: [] });
+    node.close();
+  });
+
   it("keeps how full each of its agents' context is and tells the map, for its own agents only", async () => {
     const { app, db, url, ceo, subId, key } = await liveCompany();
     const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));

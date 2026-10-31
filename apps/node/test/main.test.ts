@@ -1,11 +1,13 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { runNode } from '../src/main.js';
+import { adapterFor } from '../src/providers/index.js';
+import { findMissingCommands } from '../src/providers/process.js';
 import { claudeProgram } from '../src/terminal/programs.js';
 import { Tmux } from '../src/terminal/tmux.js';
 import type { ProviderAdapter, RunInput } from '../src/runner.js';
@@ -323,5 +325,108 @@ describe('runNode', () => {
     const node = await runNode({ dir, adapter, log: l => lines.push(l) });
     node.stop();
     expect(lines).toEqual(['This node was removed in Hornhoof.']);
+  });
+});
+
+function commandBin(dir: string, commands: string[]) {
+  mkdirSync(dir, { recursive: true });
+  for (const command of commands) {
+    const file = join(dir, command);
+    writeFileSync(file, '#!/bin/sh\nexit 0\n');
+    chmodSync(file, 0o755);
+  }
+}
+
+function processAdapter(dir: string, commands: string[]) {
+  const tools = join(dir, 'tools');
+  commandBin(join(tools, 'bin'), commands);
+  return adapterFor('claude', { home: join(dir, 'home'), tools });
+}
+
+async function withEmptyPath<T>(run: () => Promise<T>): Promise<T> {
+  const before = process.env.PATH;
+  process.env.PATH = '';
+  try {
+    return await run();
+  } finally {
+    if (before === undefined) delete process.env.PATH;
+    else process.env.PATH = before;
+  }
+}
+
+describe('required commands', () => {
+  it('does not report a failed check as an empty missing list', async () => {
+    await expect(findMissingCommands({}, null, async () => ({ code: 1, output: '', timedOut: false }))).rejects.toThrow('Could not check the agent commands.');
+    await expect(findMissingCommands({}, null, async () => ({ code: 0, output: '', timedOut: true }))).rejects.toThrow('Could not check the agent commands.');
+  });
+
+  it('reports a command missing from the agent PATH without stopping the node', async () => {
+    const server = await fakeServer();
+    const dir = nodeDir(server.url);
+    await withEmptyPath(async () => {
+      const node = await runNode({ dir, adapter: processAdapter(dir, ['ps', 'free', 'pgrep']), log: () => {} });
+      onTestFinished(() => node.stop());
+      await server.wait(() => server.received.some(m => m.type === 'status' && m.missing !== undefined));
+    });
+    expect(server.received.find(m => m.type === 'status' && m.missing !== undefined)).toMatchObject({ missing: [{ provider: 'claude', command: 'uptime' }] });
+    server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
+    await server.wait(() => server.received.some(m => m.type === 'job.done'));
+  });
+
+  it('reports an empty list when every command is in the agent PATH', async () => {
+    const server = await fakeServer();
+    const dir = nodeDir(server.url);
+    await withEmptyPath(async () => {
+      const node = await runNode({ dir, adapter: processAdapter(dir, ['ps', 'free', 'pgrep', 'uptime']), log: () => {} });
+      onTestFinished(() => node.stop());
+      await server.wait(() => server.received.some(m => m.type === 'status' && m.missing !== undefined));
+    });
+    expect(server.received.find(m => m.type === 'status' && m.missing !== undefined)).toMatchObject({ missing: [] });
+  });
+
+  it('uses the terminal env rather than the process adapter env', async () => {
+    const server = await fakeServer();
+    const dir = nodeDir(server.url);
+    const terminalBin = join(dir, 'terminal-bin');
+    commandBin(terminalBin, ['ps', 'free', 'pgrep', 'uptime']);
+    const tmux = new Tmux({ socket: `hh-commands-${process.pid}`, env: { PATH: terminalBin, HOME: dir } });
+    await withEmptyPath(async () => {
+      const node = await runNode({
+        dir,
+        adapter: processAdapter(dir, []),
+        log: () => {},
+        terminal: { tmux, program: claudeProgram, bin: join(dir, 'tools', 'bin', 'claude'), home: join(dir, 'home'), signedOut: /not logged in/i },
+      });
+      onTestFinished(() => node.stop());
+      await server.wait(() => server.received.some(m => m.type === 'status' && m.missing !== undefined));
+    });
+    expect(server.received.find(m => m.type === 'status' && m.missing !== undefined)).toMatchObject({ missing: [] });
+  });
+
+  it('checks a built-in subscription once on its first job without holding the job', async () => {
+    const server = await fakeServer();
+    let checks = 0;
+    let release!: (commands: string[]) => void;
+    const pending = new Promise<string[]>(resolve => { release = resolve; });
+    const checking: ProviderAdapter = {
+      ...adapter,
+      missingCommands: () => {
+        checks++;
+        return pending;
+      },
+    };
+    const node = await runNode({ dir: nodeDir(server.url), adapter: () => checking, builtin: { server: server.url, key: 'node-key-1234567890' }, log: () => {} });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    const run = (jobId: string) => server.send({ type: 'job.run', jobId, subscriptionId: 's1', provider: 'anthropic_api', prompt: 'hi', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
+    run('j1');
+    await server.wait(() => server.received.some(m => m.type === 'job.done' && m.jobId === 'j1'));
+    expect(checks).toBe(1);
+    release(['uptime']);
+    await server.wait(() => server.received.some(m => m.type === 'status' && m.missing !== undefined));
+    run('j2');
+    await server.wait(() => server.received.some(m => m.type === 'job.done' && m.jobId === 'j2'));
+    expect(checks).toBe(1);
+    expect(server.received.find(m => m.type === 'status' && m.missing !== undefined)).toMatchObject({ missing: [{ provider: 'anthropic_api', command: 'uptime' }] });
   });
 });

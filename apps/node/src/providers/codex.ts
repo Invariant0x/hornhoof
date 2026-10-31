@@ -5,7 +5,7 @@ import { API_MODELS, type AgentEvent, type Limits, type ModelOption } from '@hor
 import type { JobUser } from '../isolation.js';
 import type { ProviderAdapter, RunInput, RunResult } from '../runner.js';
 import { contentText, inputText, isRecord } from './events.js';
-import { childEnv, ensureDir, exitsCleanly, installPackage, interactiveLogin, runProgram, tokensIn, withEfforts, writePrivate } from './process.js';
+import { childEnv, ensureDir, exitsCleanly, findMissingCommands, installPackage, interactiveLogin, runProgram, tokensIn, withEfforts, writePrivate } from './process.js';
 
 /* Codex serves a ChatGPT plan, or a company OpenAI key on the built-in node. */
 type Options = { home: string; tools: string; bin?: string; secret?: string | null; mode: 'plan' | 'api_key'; user?: JobUser | null };
@@ -128,6 +128,8 @@ export function codexAdapter({ home, tools, bin = join(tools, 'bin', 'codex'), s
     async install() {
       await installPackage(tools, '@openai/codex');
     },
+
+    missingCommands: () => findMissingCommands(env(null), user),
 
     /* Codex keeps the models a plan offers in its home; the ones its picker shows are visibility "list". */
     async models() {

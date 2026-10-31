@@ -150,10 +150,14 @@ const Rows = z.number().int().min(4).max(200);
 /* What one frame carries of a terminal's screen or of a person's keys and pastes. */
 export const TERM_CHUNK = 64 * 1024;
 
+const MissingCommand = z.object({ provider: z.enum(PROVIDER_IDS), command: z.string().min(1).max(40) });
+export type MissingCommand = z.infer<typeof MissingCommand>;
+const MissingCommands = z.array(MissingCommand).max(100);
+
 const NodeMessage = z.discriminatedUnion('type', [
   /* terminals: the node runs agents in sessions people can watch and type into. */
-  z.object({ type: z.literal('hello'), version: z.string().max(40), loggedIn: z.boolean(), running: z.array(z.string()).max(100), models: Models.optional(), terminals: z.boolean().optional() }),
-  z.object({ type: z.literal('status'), loggedIn: z.boolean(), limits: Limits.nullable(), models: Models.optional() }),
+  z.object({ type: z.literal('hello'), version: z.string().max(40), loggedIn: z.boolean(), running: z.array(z.string()).max(100), models: Models.optional(), terminals: z.boolean().optional(), missing: MissingCommands.optional() }),
+  z.object({ type: z.literal('status'), loggedIn: z.boolean(), limits: Limits.nullable(), models: Models.optional(), missing: MissingCommands.optional() }),
   z.object({ type: z.literal('job.started'), jobId: z.string() }),
   z.object({
     type: z.literal('job.done'),

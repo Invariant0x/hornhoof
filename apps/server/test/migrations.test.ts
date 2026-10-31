@@ -181,3 +181,22 @@ describe('migration 0020', () => {
     ]);
   });
 });
+
+describe('migration 0021', () => {
+  it('adds missing command reports and keeps the subscriptions already there', async () => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0020_red_team_skills') });
+    const company = '00000000-0000-4000-8000-000000000001';
+    const person = '00000000-0000-4000-8000-000000000002';
+    await db.execute(sql`insert into companies (id, name) values (${company}, 'Acme')`);
+    await db.execute(sql`insert into people (id, company_id, name, email, status, scope_kind) values (${person}, ${company}, 'Ivan', 'ivan@acme.com', 'active', 'company')`);
+    await db.execute(sql`insert into subscriptions (company_id, provider, kind, label, owner_person_id, status) values (${company}, 'claude', 'personal', 'Claude', ${person}, 'ready')`);
+
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+
+    const rows = await db.execute<{ label: string; missing: null }>(sql`select label, missing from subscriptions`);
+    expect(rows.rows).toEqual([{ label: 'Claude', missing: null }]);
+  });
+});

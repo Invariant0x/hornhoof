@@ -2,7 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { and, desc, eq, gte, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { agentEvents, agents, departments, jobs, requests, tasks } from '../../db/schema.js';
+import { agentEvents, agents, departments, jobs, machines, requests, subscriptions, tasks } from '../../db/schema.js';
 import { turnPrompt } from '../conversation/prompt.js';
 import { agentState, enqueueTurn, orchestratorOf, STOPPED_ON_PURPOSE } from '../conversation/queue.js';
 import { deptName } from '../departments/templates.js';
@@ -110,11 +110,16 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
         description:
           'What went wrong in the last hours: the turns that failed, newest first, with the agent, the error, the end of its output and the task, and the tasks blocked now. ' +
           'Turns people or Hornhoof stopped on purpose are left out. Also where agents stumbled: commands and modules that were not installed, the tools they installed by hand, ' +
-          'and the questions and stuck tasks they stopped on for people, with the answer and how their last turn on the task ended.',
+          'the commands each node could not find, and the questions and stuck tasks they stopped on for people, with the answer and how their last turn on the task ended.',
         inputSchema: { hours: z.number().int().min(1).max(72).default(6).describe('How many hours back to read, 1 to 72.') },
       },
       async ({ hours }) => {
         const names = await deptNames();
+        const nodeCommands = await db
+          .select({ label: subscriptions.label, kind: subscriptions.kind, missing: subscriptions.missing, machineHost: machines.hostname })
+          .from(subscriptions)
+          .leftJoin(machines, eq(machines.id, subscriptions.machineId))
+          .where(and(eq(subscriptions.companyId, job.companyId), isNull(subscriptions.removedAt), isNotNull(subscriptions.missing)));
         const failed = await db
           .select({ agent: agents.name, departmentId: agents.departmentId, at: jobs.finishedAt, error: jobs.error, tail: jobs.tail, task: tasks.number })
           .from(jobs)
@@ -163,6 +168,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
           failed: failed.map(({ departmentId, tail, ...f }) => ({ ...f, department: (departmentId && names.get(departmentId)) || null, tail: tail.slice(-TAIL) })),
           blocked,
           missing: missing.map(({ value, ...m }) => ({ ...value, ...m })),
+          missingCommands: nodeCommands.flatMap(s => (s.missing ?? []).map(item => ({ ...item, subscription: s.label, node: s.machineHost ?? (s.kind === 'api_key' ? 'built-in' : null) }))),
           installed: installed.map(({ value, example: _, ...i }) => ({ command: value, ...i })),
           stops,
         });

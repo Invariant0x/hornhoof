@@ -9,6 +9,8 @@ const NODE: NodeMessage[] = [
   { type: 'status', loggedIn: true, limits: null },
   { type: 'hello', version: '0.4.0', loggedIn: true, running: [], models: [{ id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol' }] },
   { type: 'status', loggedIn: true, limits: null, models: [] },
+  { type: 'hello', version: '0.5.0', loggedIn: true, running: [], missing: [{ provider: 'claude', command: 'uptime' }] },
+  { type: 'status', loggedIn: true, limits: null, missing: [] },
   { type: 'job.started', jobId: 'job-1' },
   { type: 'job.done', jobId: 'job-1', ok: true, sessionId: 'abc', result: 'ready', tail: '', error: null },
   { type: 'job.done', jobId: 'job-2', ok: false, sessionId: null, result: '', tail: 'boom', error: 'timeout' },
@@ -36,6 +38,14 @@ describe('node messages', () => {
     expect(parseNodeMessage(JSON.stringify({ type: 'hack' }))).toBeNull();
     expect(parseNodeMessage(JSON.stringify({ type: 'job.done', jobId: 'x', ok: true }))).toBeNull();
     expect(parseNodeMessage(JSON.stringify({ type: 'status', loggedIn: true, limits: { status: 'fine', windows: [] } }))).toBeNull();
+  });
+
+  it('bounds the commands a node reports missing', () => {
+    const status = { type: 'status', loggedIn: true, limits: null };
+    const missing = Array.from({ length: 101 }, () => ({ provider: 'codex', command: 'ps' }));
+    expect(parseNodeMessage(JSON.stringify({ ...status, missing }))).toBeNull();
+    expect(parseNodeMessage(JSON.stringify({ ...status, missing: [{ provider: 'codex', command: 'x'.repeat(41) }] }))).toBeNull();
+    expect(parseNodeMessage(JSON.stringify({ ...status, missing: [{ provider: 'unknown', command: 'ps' }] }))).toBeNull();
   });
 });
 

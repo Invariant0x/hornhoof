@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { AgentEvent, Limits, NodeMessage, ProviderId, ServerMessage } from '@hornhoof/protocol';
+import type { AgentEvent, Limits, MissingCommand, NodeMessage, ProviderId, ServerMessage } from '@hornhoof/protocol';
 import { connect } from './connection.js';
 import { builtinAdapters } from './isolation.js';
 import { adapterFor, programFor } from './providers/index.js';
@@ -63,7 +63,8 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
     log('This node was removed in Hornhoof.');
     return { stop() {} };
   }
-  const state = builtin ?? readState(dir);
+  const saved = builtin ? null : readState(dir);
+  const state = builtin ?? saved;
   if (!state) throw new Error(`No node settings in ${dir}/node.json. Run the install command from Hornhoof again.`);
   /* The node's own key never leaves in a job's output. */
   const hidden = [state.key];
@@ -80,6 +81,8 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
   let loggedIn = single ? await single.loggedIn() : true;
   let limits: Limits | null = null;
   let stopped = false;
+  const commandReports = new Map<string, MissingCommand[]>();
+  const commandChecks = new Set<string>();
 
   const emit = (m: NodeMessage) => {
     if (!send?.(m)) outbox.push(m);
@@ -110,11 +113,31 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
      The built-in node serves API keys, whose models Hornhoof knows. */
   const readModels = async () => (single?.models ? await single.models() : undefined);
   let models = await readModels();
+  const missingField = (): { missing?: MissingCommand[] } => {
+    if (!commandReports.size) return {};
+    const unique = new Map<string, MissingCommand>();
+    for (const report of commandReports.values()) for (const item of report) unique.set(`${item.provider}:${item.command}`, item);
+    return { missing: [...unique.values()] };
+  };
   const status = async () => {
     /* A program that cannot list its models now keeps those it listed before. */
     models = await readModels().catch(() => models);
-    emit({ type: 'status', loggedIn, limits, ...(models ? { models } : {}) });
+    emit({ type: 'status', loggedIn, limits, ...(models ? { models } : {}), ...missingField() });
   };
+
+  async function checkCommands(chosen: ProviderAdapter, provider: ProviderId, key: string) {
+    if (commandChecks.has(key)) return;
+    const check = terminal ? () => terminal.tmux.missingCommands() : chosen.missingCommands?.bind(chosen);
+    if (!check) return;
+    commandChecks.add(key);
+    try {
+      const commands = await check();
+      commandReports.set(key, commands.map(command => ({ provider, command })));
+      await status();
+    } catch {
+      commandChecks.delete(key);
+    }
+  }
 
   const conn = connect({
     url: state.server.replace(/^http/, 'ws') + '/api/nodes/socket',
@@ -125,12 +148,13 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
       /* Finished jobs waiting in the outbox still count as running, so the server does not give up on them. */
       const pending = outbox.flatMap(m => (m.type === 'job.done' ? [m.jobId] : []));
       const typed = host?.typedJobs() ?? [];
-      next({ type: 'hello', version: VERSION, loggedIn, running: [...running.keys(), ...typed, ...pending], ...(models ? { models } : {}), terminals: Boolean(host) });
+      next({ type: 'hello', version: VERSION, loggedIn, running: [...running.keys(), ...typed, ...pending], ...(models ? { models } : {}), terminals: Boolean(host), ...missingField() });
       for (const m of outbox.splice(0)) emit(m);
     },
     onMessage: m => void handle(m),
     onRefused: () => log('Hornhoof does not know this machine any more. Run the install command from Hornhoof again to reconnect.'),
   });
+  if (single && saved) void checkCommands(single, saved.provider, saved.subscriptionId);
 
   async function handle(m: ServerMessage) {
     if (m.type === 'remove') {
@@ -183,6 +207,7 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
     let done: Awaited<ReturnType<typeof runJob>>;
     try {
       const chosen = pick(m);
+      void checkCommands(chosen, m.provider, m.subscriptionId);
       await learn([m.toolToken, m.secret, m.workspace?.repo?.token]);
       /* An agent's turn runs in its session; a test job, with no agent, runs as before. */
       const runIn = (input: Parameters<ProviderAdapter['run']>[0]) =>

@@ -54,7 +54,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
         }
         await db
           .update(subscriptions)
-          .set({ nodeVersion: msg.version, lastSeenAt: now, status: msg.loggedIn ? 'ready' : 'needs_login', ...(msg.models ? { models: msg.models } : {}) })
+          .set({ nodeVersion: msg.version, lastSeenAt: now, status: msg.loggedIn ? 'ready' : 'needs_login', ...(msg.models ? { models: msg.models } : {}), ...(msg.missing ? { missing: msg.missing } : {}) })
           .where(eq(subscriptions.id, sub.id));
       }
       await failOpenJobs(ctx, jobsOf(id, ctx), 'machine_restarted', msg.running);
@@ -73,7 +73,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       /* A node that started again knows no limits until its program says them; the last ones stay until then. */
       await db
         .update(subscriptions)
-        .set({ status: msg.loggedIn ? 'ready' : 'needs_login', lastSeenAt: now, ...(msg.limits ? { limits: msg.limits } : {}), ...(msg.models ? { models: msg.models } : {}) })
+        .set({ status: msg.loggedIn ? 'ready' : 'needs_login', lastSeenAt: now, ...(msg.limits ? { limits: msg.limits } : {}), ...(msg.models ? { models: msg.models } : {}), ...(msg.missing ? { missing: msg.missing } : {}) })
         .where(and(eq(subscriptions.id, id.subscriptionId), isNull(subscriptions.removedAt)));
       /* A signed-in subscription may have turns waiting for it. */
       if (msg.loggedIn) await pumpWaiting(ctx);

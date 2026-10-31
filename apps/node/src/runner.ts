@@ -44,6 +44,8 @@ export interface ProviderAdapter {
   run(input: RunInput): Promise<RunResult>;
   /* Values that must never leave the node, such as the tokens in the program's credentials file. */
   secrets(): Promise<string[]>;
+  /* Basic commands missing from this adapter's own environment and user. */
+  missingCommands?(): Promise<string[]>;
   /* The models the program can run, when it can tell. Hornhoof falls back to what it knows for the provider. */
   models?(): Promise<ModelOption[]>;
   /* The plan's limits now, asked without a turn, or null when the program cannot tell at the moment. */

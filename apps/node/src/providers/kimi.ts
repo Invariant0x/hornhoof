@@ -5,7 +5,7 @@ import type { JobUser } from '../isolation.js';
 import type { ProviderAdapter, RunInput, RunResult } from '../runner.js';
 import { kimiPlanLimits } from '../terminal/programs.js';
 import { contentText, inputText, isRecord, toolName } from './events.js';
-import { childEnv, ensureDir, installPackage, interactiveLogin, runProgram, tokensIn, withEfforts, writePrivate } from './process.js';
+import { childEnv, ensureDir, findMissingCommands, installPackage, interactiveLogin, runProgram, tokensIn, withEfforts, writePrivate } from './process.js';
 
 type Options = { home: string; tools: string; bin?: string; user?: JobUser | null };
 
@@ -95,6 +95,8 @@ export function kimiAdapter({ home, tools, bin = join(tools, 'bin', 'kimi'), use
     async install() {
       await installPackage(tools, '@moonshot-ai/kimi-code');
     },
+
+    missingCommands: () => findMissingCommands(env(), user),
 
     async loggedIn() {
       return credentials().length > 0;

@@ -15,6 +15,22 @@ export function childEnv(tools: string, extra: Record<string, string>): NodeJS.P
   return { ...env, ...extra };
 }
 
+export const AGENT_COMMANDS = ['ps', 'free', 'pgrep', 'uptime'] as const;
+
+/* Checks in the same shell environment and as the same user as the agent, without changing its PATH. */
+export async function findMissingCommands(env: NodeJS.ProcessEnv, user: JobUser | null = null, run = runProgram): Promise<string[]> {
+  const done = await run({
+    bin: '/bin/sh',
+    args: ['-c', 'for command do command -v "$command" > /dev/null 2>&1 || printf \'%s\\n\' "$command"; done', 'sh', ...AGENT_COMMANDS],
+    env,
+    user,
+    timeoutMs: 5000,
+  });
+  if (done.code !== 0 || done.timedOut) throw new Error('Could not check the agent commands.');
+  const lines = done.output.split('\n');
+  return AGENT_COMMANDS.filter(command => lines.includes(command));
+}
+
 export type Finished = { code: number | null; output: string; timedOut: boolean };
 
 type SpawnOptions = {
