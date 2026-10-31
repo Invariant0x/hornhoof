@@ -230,6 +230,10 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
       const skill = ctx.templates.skills.get(id);
       if (!skill) throw invalid(`There is no skill ${id}.`, 'skill_unknown');
       if (!on && role?.skills.some(s => s.id === id && s.locked)) throw invalid(`${id} is locked on for this role.`, 'skill_locked');
+      /* A skill that grants tools shows the whole company through this employee, so only people who see it turn one on. */
+      if (on && skill.grants.length && !next.skills.includes(id) && me.scopeKind !== 'company') {
+        throw new ApiError(403, 'forbidden', `Only people who see the whole company can turn on ${id}.`, 'skill_company_only');
+      }
       if (on && !next.skills.includes(id)) {
         next.skills.push(id);
         next.templateHashes[id] ??= skill.hash;

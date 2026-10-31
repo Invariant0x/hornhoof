@@ -7,7 +7,7 @@ import { describe, expect, it, onTestFinished } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agents, companies, departments, jobs, subscriptions } from '../src/db/schema.js';
 import { createTask } from '../src/modules/tasks/engine.js';
-import { connectNode, listen, setUpCompany, testApp, until } from './helpers.js';
+import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until } from './helpers.js';
 import { agentState } from '../src/modules/conversation/queue.js';
 
 const TOKEN = 'tool-token-watch-0123456789abcdef0123';
@@ -18,7 +18,7 @@ const NODE_KEY = 'k'.repeat(40);
 async function company(skills: string[]) {
   const { app, db } = await testApp({ NODE_KEY });
   const url = await listen(app);
-  await setUpCompany(app);
+  const ceo = await setUpCompany(app);
   const builtin = await connectNode(url, NODE_KEY);
   onTestFinished(() => builtin.close());
   builtin.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [] });
@@ -35,7 +35,7 @@ async function company(skills: string[]) {
   await until(async () => (await agentState(app.ctx, bruno.id)).ready);
   await db.insert(jobs).values({ companyId: acme!.id, subscriptionId: sub!.id, agentId: wendy.id, kind: 'conversation', prompt: 'round', timeoutMs: 900000, status: 'running', toolTokenHash: hashToken(TOKEN) });
   const task = (await createTask(app.ctx, { agentId: hana.id }, { title: 'Checkout API', brief: '', body: 'POST /checkout.', departmentId: dev!.id, assigneeAgentId: bruno.id, executor: true, gates: [] })).task;
-  return { app, db, acme: acme!, sub: sub!, wendy, hana, bruno, task };
+  return { app, db, ceo, dev: dev!, acme: acme!, sub: sub!, wendy, hana, bruno, task };
 }
 
 async function mcp(app: FastifyInstance): Promise<Client> {
@@ -75,6 +75,16 @@ describe('tools a skill grants', () => {
     const [said] = await db.select().from(agentEvents).where(and(eq(agentEvents.agentId, bruno.id), eq(agentEvents.kind, 'message')));
     expect(said!.data).toMatchObject({ text: 'Task #1 has had no report for an hour. Report or say what blocks you.', from: 'agent', name: 'Wendy' });
     expect((await call(client, 'message_employee', { employee: wendy.id, text: 'Hi me.' })).isError).toBe(true);
+  });
+
+  it('are turned on only by people who see the whole company, since they show all of it', async () => {
+    const { app, ceo, dev, bruno } = await company([]);
+    const dana = await invitePerson(app, ceo, { name: 'Dana', email: 'dana@acme.test', access: { departments: [dev.id] } });
+    const grant = (token: string, skill: string) => app.inject({ method: 'PATCH', url: `/api/agents/${bruno.id}`, payload: { skills: { [skill]: true } }, ...as(token) });
+    const refused = await grant(dana, 'ops-failure-review');
+    expect([refused.statusCode, refused.json().error.reason]).toEqual([403, 'skill_company_only']);
+    expect((await grant(dana, 'ops-postmortem')).statusCode).toBe(200);
+    expect((await grant(ceo, 'ops-failure-review')).statusCode).toBe(200);
   });
 
   it('send at most ten messages in one turn', async () => {

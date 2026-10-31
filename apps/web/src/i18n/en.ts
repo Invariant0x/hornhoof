@@ -556,6 +556,7 @@ export const en = {
     note_unknown: 'This note is gone already.',
     skill_unknown: 'This skill no longer exists. Reload the page.',
     skill_locked: 'This skill stays on for every employee.',
+    skill_company_only: 'This skill shows the whole company, so only people who see the whole company can turn it on.',
     instructions_too_long: 'The instructions got too long. Shorten the prompt and save again.',
     agent_working: 'This employee is working now. Stop it or wait until it finishes.',
     agent_has_tasks: 'This employee works on open tasks. Wait until they are done or cancel them, then remove the employee.',

@@ -41,6 +41,7 @@ export type ErrorReason =
   | 'note_unknown'
   | 'skill_unknown'
   | 'skill_locked'
+  | 'skill_company_only'
   | 'instructions_too_long'
   | 'agent_working'
   | 'agent_has_tasks'
