@@ -8,7 +8,7 @@ import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agents, companies, departments, jobs, subscriptions } from '../src/db/schema.js';
 import { createTask } from '../src/modules/tasks/engine.js';
 import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until } from './helpers.js';
-import { agentState } from '../src/modules/conversation/queue.js';
+import { agentState, enqueueTurn } from '../src/modules/conversation/queue.js';
 
 const TOKEN = 'tool-token-watch-0123456789abcdef0123';
 const NODE_KEY = 'k'.repeat(40);
@@ -106,6 +106,16 @@ describe('tools a skill grants', () => {
     for (let i = 0; i < 9; i++) await call(client, 'message_employee', { employee: bruno.id, text: `Nudge ${i}.` });
     const last = await Promise.all([1, 2, 3].map(i => call(client, 'message_employee', { employee: hana.id, text: `At once ${i}.` })));
     expect(last.filter(r => !r.isError)).toHaveLength(1);
+  });
+
+  it('count what a turn sent before Hornhoof restarted', async () => {
+    const { app, acme, wendy, hana, bruno } = await company(['ops-task-watch']);
+    /* Sent through the queue before a restart, so only what Hornhoof keeps knows of them. */
+    for (let i = 0; i < 9; i++)
+      await enqueueTurn(app.ctx, { companyId: acme.id, agentId: bruno.id, prompt: `Nudge ${i}.`, createdBy: null, message: { personId: null, text: `Nudge ${i}.`, from: 'agent', name: 'Wendy', by: wendy.id } });
+    const client = await mcp(app);
+    expect((await call(client, 'message_employee', { employee: hana.id, text: 'Last one.' })).isError).toBeFalsy();
+    expect((await call(client, 'message_employee', { employee: hana.id, text: 'One more.' })).isError).toBe(true);
   });
 
   it('let a failure collector read the failed turns and blocked tasks of the last hours', async () => {

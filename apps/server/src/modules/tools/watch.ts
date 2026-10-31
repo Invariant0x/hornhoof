@@ -1,5 +1,5 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { and, desc, eq, gte, inArray, isNotNull, isNull, notInArray, or } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agentEvents, agents, departments, jobs, tasks } from '../../db/schema.js';
@@ -130,10 +130,19 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
         if (target.id === me.id) return say('That is you. Write to another employee.', true);
         if (target.switchedOffAt) return say(`${target.name} is switched off and takes no work until a person switches it on.`, true);
         if (!(await agentState(ctx, target.id)).ready) return say(`${target.name} cannot run now. Tell your head, who tells the CEO.`, true);
-        /* Counted with no wait between the check and the count, so parallel calls cannot both take the last one. */
         const counts = sent.get(ctx) ?? new Map<string, number>();
         sent.set(ctx, counts);
-        const n = counts.get(job.id) ?? 0;
+        /* A turn's first message reads what it sent before, which a restart of Hornhoof would otherwise forget. */
+        if (!counts.has(job.id)) {
+          const [run] = await db.select({ startedAt: jobs.startedAt, createdAt: jobs.createdAt }).from(jobs).where(eq(jobs.id, job.id));
+          const [before] = await db
+            .select({ n: sql<number>`count(*)` })
+            .from(agentEvents)
+            .where(and(eq(agentEvents.companyId, job.companyId), eq(agentEvents.kind, 'message'), sql`${agentEvents.data}->>'by' = ${me.id}`, gte(agentEvents.createdAt, run?.startedAt ?? run?.createdAt ?? new Date(0))));
+          if (!counts.has(job.id)) counts.set(job.id, Number(before?.n ?? 0));
+        }
+        /* Counted with no wait between the check and the count, so parallel calls cannot both take the last one. */
+        const n = counts.get(job.id)!;
         if (n >= TURN_NUDGES) return say(`One turn sends at most ${TURN_NUDGES} messages. Go on in your next round.`, true);
         counts.delete(job.id);
         counts.set(job.id, n + 1);
