@@ -17,6 +17,7 @@ import { orchestratorServing, servingSubscriptions, type Serving } from '../tool
 import type { Lang } from '../templates/load.js';
 import { agentFor, type AgentRow } from './find.js';
 import { instructionsOf, renderInstructions, placeOf, type Part } from './instructions.js';
+import { TIMER_MAX, TIMER_MIN, TIMER_ORDER_MAX, timerOf } from './timers.js';
 
 export type AgentCard = {
   id: string;
@@ -39,6 +40,8 @@ export type AgentCard = {
   canEdit: boolean;
   /* Off for now: it takes no task turns. */
   on: boolean;
+  /* Wakes every so many minutes to do its order; lastAt is when the last round started, or when the timer was set. */
+  timer: { minutes: number; order: string; lastAt: string | null } | null;
 };
 
 const Text = z.string().max(8000);
@@ -52,6 +55,7 @@ export const AgentPatch = z
     base: Text.nullable().optional(),
     skillText: z.record(z.string().max(80), Text.nullable()).optional(),
     on: z.boolean().optional(),
+    timer: z.object({ minutes: z.number().int().min(TIMER_MIN).max(TIMER_MAX), order: z.string().trim().min(1).max(TIMER_ORDER_MAX) }).strict().nullable().optional(),
   })
   .strict();
 
@@ -145,6 +149,7 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
       changes: changes.map(c => ({ ...c, at: c.at.toISOString() })),
       canEdit: await mayEdit(me, agent),
       on: !agent.switchedOffAt,
+      timer: timerOf(agent),
     };
   }
 
@@ -176,12 +181,18 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
   /* Applies a card change to the agent as it is now and records each changed field. */
   async function patched(me: Person, agent: AgentRow, body: z.infer<typeof AgentPatch>): Promise<{ agent: AgentRow; next: AgentRow; changed: boolean }> {
     const orchestrator = agent.kind === 'orchestrator';
-    if (orchestrator && (body.name !== undefined || body.skills || body.base !== undefined || body.skillText || body.on !== undefined)) {
+    if (orchestrator && (body.name !== undefined || body.skills || body.base !== undefined || body.skillText || body.on !== undefined || body.timer !== undefined)) {
       throw invalid("The orchestrator's card changes only his model, his effort and the subscription he runs on.", 'orchestrator_card');
     }
     const next: AgentRow = { ...agent, skills: [...agent.skills], overrides: { ...agent.overrides, skills: { ...agent.overrides.skills } }, templateHashes: { ...agent.templateHashes } };
     if (body.name !== undefined) next.name = body.name;
     if (body.on !== undefined && body.on === !!agent.switchedOffAt) next.switchedOffAt = body.on ? null : new Date();
+    /* A timer set or moved to another interval counts its first round from now. */
+    if (body.timer !== undefined) {
+      next.timerMinutes = body.timer?.minutes ?? null;
+      next.timerOrder = body.timer?.order ?? null;
+      if (next.timerMinutes !== agent.timerMinutes) next.timerAt = body.timer ? new Date() : null;
+    }
 
     if (body.subscription !== undefined) {
       if (body.subscription === null) {
@@ -249,11 +260,25 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (!same(next.skills, agent.skills)) changed.push({ field: 'skills', before: agent.skills, after: next.skills });
     if (!same(next.overrides, agent.overrides)) changed.push({ field: 'prompt', before: agent.overrides, after: next.overrides });
     if (next.switchedOffAt !== agent.switchedOffAt) changed.push({ field: 'switch', before: !agent.switchedOffAt, after: !next.switchedOffAt });
+    const timer = (a: AgentRow) => (a.timerMinutes ? { minutes: a.timerMinutes, order: a.timerOrder } : null);
+    if (!same(timer(next), timer(agent))) changed.push({ field: 'timer', before: timer(agent), after: timer(next) });
     if (changed.length) {
       await db.transaction(async tx => {
         await tx
           .update(agents)
-          .set({ name: next.name, model: next.model, effort: next.effort, subscriptionId: next.subscriptionId, skills: next.skills, overrides: next.overrides, templateHashes: next.templateHashes, switchedOffAt: next.switchedOffAt })
+          .set({
+            name: next.name,
+            model: next.model,
+            effort: next.effort,
+            subscriptionId: next.subscriptionId,
+            skills: next.skills,
+            overrides: next.overrides,
+            templateHashes: next.templateHashes,
+            switchedOffAt: next.switchedOffAt,
+            timerMinutes: next.timerMinutes,
+            timerOrder: next.timerOrder,
+            timerAt: next.timerAt,
+          })
           .where(eq(agents.id, agent.id));
         await tx.insert(agentChanges).values(changed.map(c => ({ companyId: agent.companyId, agentId: agent.id, ...changedBy(me), ...c })));
       });

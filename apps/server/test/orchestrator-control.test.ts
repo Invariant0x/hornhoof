@@ -54,6 +54,16 @@ const call = async (client: Client, name: string, args: object) => (await client
 const text = (res: Result) => res.content[0]!.text;
 
 describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
+  it("sets an employee's timer and takes it away", async () => {
+    const { app, db, bruno } = await company();
+    const client = await mcp(app);
+    const set = await call(client, 'change_employee', { employee: bruno.id, timer: { minutes: 60, order: 'Read the failed jobs of the last hour.' } });
+    expect(set.isError).toBeFalsy();
+    expect((await db.select().from(agents).where(eq(agents.id, bruno.id)))[0]).toMatchObject({ timerMinutes: 60, timerOrder: 'Read the failed jobs of the last hour.' });
+    await call(client, 'change_employee', { employee: bruno.id, timer: null });
+    expect((await db.select().from(agents).where(eq(agents.id, bruno.id)))[0]!.timerMinutes).toBeNull();
+  });
+
   it('switches an employee off and on, and the card says the orchestrator did it', async () => {
     const { app, db, ceo, bruno } = await company();
     const client = await mcp(app);

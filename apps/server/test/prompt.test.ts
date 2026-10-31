@@ -21,7 +21,7 @@ describe('orchestrator instructions', () => {
   });
 
   it('keeps the notebook and reads the company again after his conversation was compacted', () => {
-    for (const words of ['"remember"', '"rewrite_note"', '"forget"', 'one fact per note', 'compacted', '"turns"', '"company"']) {
+    for (const words of ['"remember"', '"rewrite_note"', '"forget"', 'one fact per note', 'compacted', '"turns"', '"company"', 'timer']) {
       expect(ORCHESTRATOR_INSTRUCTIONS).toContain(words);
     }
   });
