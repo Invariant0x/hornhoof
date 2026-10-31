@@ -37,7 +37,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
       'agents',
       {
         description:
-          'Every agent of the company as it is now: department, role, whether it is on and ready (and why not), whether a turn runs and since when, ' +
+          'Every agent of the company as it is now: department, role, whether it is on and ready (and why not), until when its plan is at its limit, whether a turn runs and since when, ' +
           'turns waiting, the open tasks it holds with when each last moved, its last activity and how its last turn ended.',
       },
       async () => {
@@ -70,6 +70,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
             on: !a.switchedOffAt,
             ready: state.ready,
             reason: state.reason,
+            limitUntil: state.limitUntil,
             busy: state.busy,
             runningSince: running?.at ?? null,
             queued: state.queued,
