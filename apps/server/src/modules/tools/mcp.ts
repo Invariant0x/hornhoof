@@ -13,15 +13,16 @@ import { registerControlTools } from './control.js';
 import { checkStaff, departmentOf, StaffProposal, staffingOptions } from './staff.js';
 import { checkItems, Proposal } from './structure.js';
 import { registerTaskTools } from '../tasks/tools.js';
+import { registerWatchTools } from './watch.js';
 
-type ToolJob = { id: string; companyId: string; agentId: string; agentKind: (typeof agents.$inferSelect)['kind'] };
+type ToolJob = { id: string; companyId: string; agentId: string; agentKind: (typeof agents.$inferSelect)['kind']; skills: string[] };
 
 /* The token works only while its job runs, and only for a job that belongs to an agent. */
 export async function jobOf(ctx: Ctx, req: FastifyRequest): Promise<ToolJob> {
   const token = /^Bearer (\S+)$/.exec(req.headers.authorization ?? '')?.[1];
   const [job] = token
     ? await ctx.db
-        .select({ id: jobs.id, companyId: jobs.companyId, agentId: agents.id, agentKind: agents.kind })
+        .select({ id: jobs.id, companyId: jobs.companyId, agentId: agents.id, agentKind: agents.kind, skills: agents.skills })
         .from(jobs)
         .innerJoin(agents, eq(agents.id, jobs.agentId))
         .where(and(eq(jobs.toolTokenHash, hashToken(token)), eq(jobs.status, 'running')))
@@ -32,8 +33,8 @@ export async function jobOf(ctx: Ctx, req: FastifyRequest): Promise<ToolJob> {
 
 const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
 
-/* Hornhoof's tools as one agent's job sees them: every agent reads the company; the orchestrator also proposes cards and
-   does whatever the CEO can do in the screens. */
+/* Hornhoof's tools as one agent's job sees them: every agent reads the company, an employee gets the tools its skills
+   grant, and the orchestrator also proposes cards and does whatever the CEO can do in the screens. */
 function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob): McpServer {
   const server = new McpServer({ name: 'hornhoof', version: '0.5.0' });
   server.registerTool(
@@ -42,7 +43,10 @@ function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob): McpServer {
     async () => say(JSON.stringify(await companyView(ctx.db, ctx.templates, job.companyId))),
   );
   registerTaskTools(server, ctx, job);
-  if (job.agentKind !== 'orchestrator') return server;
+  if (job.agentKind !== 'orchestrator') {
+    registerWatchTools(server, ctx, job, new Set(job.skills.flatMap(id => ctx.templates.skills.get(id)?.grants ?? [])));
+    return server;
+  }
   server.registerTool(
     'propose_structure',
     {

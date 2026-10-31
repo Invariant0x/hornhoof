@@ -27,7 +27,7 @@ export type AgentState = {
   terminal: boolean;
 };
 
-type Turn = { companyId: string; agentId: string; prompt: string; createdBy: string | null; message?: { personId: string | null; text: string; from?: 'orchestrator' }; taskId?: string };
+type Turn = { companyId: string; agentId: string; prompt: string; createdBy: string | null; message?: { personId: string | null; text: string; from?: 'orchestrator' | 'agent'; name?: string; by?: string }; taskId?: string };
 
 /* One thing at a time per agent, so two pumps never send two turns. */
 const chains = new WeakMap<Ctx, Map<string, Promise<unknown>>>();
@@ -69,7 +69,9 @@ export async function insertTurn(ctx: Ctx, t: Turn): Promise<string> {
     })
     .returning({ id: jobs.id });
   if (t.message) {
-    await appendEvent(ctx, { companyId: t.companyId, agentId: t.agentId, jobId: job!.id, kind: 'message', data: { text: t.message.text, ...(t.message.from ? { from: t.message.from } : {}) }, personId: t.message.personId });
+    /* An employee's message carries its name and id: name for the window, by for counting what one turn sent. */
+    const { personId, ...data } = t.message;
+    await appendEvent(ctx, { companyId: t.companyId, agentId: t.agentId, jobId: job!.id, kind: 'message', data, personId });
   }
   return job!.id;
 }

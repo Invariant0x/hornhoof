@@ -98,6 +98,12 @@ describe('AgentWindow', () => {
     expect(container.querySelector('.t-u')).toHaveTextContent('> Orchestrator: Look at checkout first.');
   });
 
+  it('names the employee who wrote, as one does on a timer round', async () => {
+    const { container } = open({ [`GET ${EVENTS}?after=0`]: [200, { events: [ev(1, 'message', { text: 'Report on #4, please.', from: 'agent', name: 'Wendy' })], state: READY }] });
+    await screen.findByText(/Report on #4/);
+    expect(container.querySelector('.t-u')).toHaveTextContent('> Wendy: Report on #4, please.');
+  });
+
   it('shows his answers with bold and lists, and hides how Claude loads its tools', async () => {
     const { container } = open({
       [`GET ${EVENTS}?after=0`]: [

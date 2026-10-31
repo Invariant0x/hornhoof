@@ -9,7 +9,11 @@ import { z } from 'zod';
 
 export type Lang = { en: string; ru: string };
 export type SkillKind = 'core' | 'procedure' | 'checklist' | 'gate';
-export type Skill = { id: string; title: Lang; description: Lang; kind: SkillKind; body: string; hash: string; sources: string[] };
+export type Skill = { id: string; title: Lang; description: Lang; kind: SkillKind; body: string; hash: string; sources: string[]; grants: Grant[] };
+
+/* Tools a skill may grant: every agent's state, the failed turns and blocked tasks, and writing to another employee. */
+export const GRANTS = ['agents', 'failures', 'message_employee'] as const;
+export type Grant = (typeof GRANTS)[number];
 export type RoleSkill = { id: string; on: boolean; locked: boolean };
 export type Role = {
   id: string;
@@ -43,6 +47,8 @@ const SkillHead = z.object({
   description: LangText,
   kind: z.enum(['core', 'procedure', 'checklist', 'gate']),
   sources: z.array(z.string().min(1)).default([]),
+  /* Hornhoof tools an employee gets while this skill is on, beyond every employee's. */
+  grants: z.array(z.enum(GRANTS)).default([]),
 });
 const RoleHead = z.object({
   id: z.string().regex(/^[A-Z]{3}-[A-Z0-9]+$/),

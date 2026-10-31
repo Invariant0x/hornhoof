@@ -296,12 +296,15 @@ export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Pro
   );
   const hasCards = Boolean(pending || staffing || (!open && staffByHand) || byHand || offerByHand || failure !== null);
 
+  /* Who wrote a message no person typed: the orchestrator, an employee by its name, or Hornhoof itself. */
+  const author = (from: string, name: string) => (from === 'orchestrator' ? t.window.orchestrator : from === 'agent' && name ? name : t.window.hornhoof);
+
   function line(e: EventView, i: number) {
     switch (e.kind) {
       case 'message':
         return (
           <div className="t-u">
-            &gt; <em>{e.person?.name ?? (field(e.data, 'from') === 'orchestrator' ? t.window.orchestrator : t.window.hornhoof)}:</em> {field(e.data, 'text')}
+            &gt; <em>{e.person?.name ?? author(field(e.data, 'from'), field(e.data, 'name'))}:</em> {field(e.data, 'text')}
           </div>
         );
       case 'text':
