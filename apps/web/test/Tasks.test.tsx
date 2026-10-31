@@ -163,6 +163,8 @@ describe('the tracker', () => {
     expect(within(asked).getByRole('img', { name: 'Picture 1' })).toHaveAttribute('src', '/api/attachments/p0');
     expect(within(asked).getByRole('img', { name: 'Round' })).toHaveAttribute('src', '/api/attachments/p1');
     expect(within(asked).getByRole('link', { name: 'See the work' })).toHaveAttribute('href', 'https://preview.example.com/logo');
+    /* A pick is made here only: words to the agent answer a question, not a choice. */
+    expect(screen.getByRole('region', { name: 'Waiting for you' })).not.toHaveTextContent(/window or terminal/);
     await user.click(within(asked).getByRole('button', { name: /Square/ }));
     expect(calls.find(c => c.path === '/api/requests/r4')?.body).toEqual({ pick: 1 });
   });

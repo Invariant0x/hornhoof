@@ -423,7 +423,7 @@ export const en = {
     picture: (n: number) => `Picture ${n}`,
     seeWork: 'See the work',
     waitingHere: 'Waiting for your answer',
-    answerElsewhere: 'Writing to the agent in its window or terminal counts as the answer too.',
+    answerElsewhere: "A question can be answered in the agent's window or terminal too: what you write there counts.",
     yourAnswer: 'Your answer',
     answer: 'Answer',
     approve: 'Approve',

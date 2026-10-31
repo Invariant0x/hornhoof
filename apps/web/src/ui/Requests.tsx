@@ -4,6 +4,10 @@ import { errorText, useT } from '../i18n';
 import type { TaskPlace, WaitingRequest } from '../types';
 import { Field } from './Field';
 
+/* Whether words to the agent in its window or terminal answer any of these: a question and a stuck task take them, a pick
+   and a commit to approve do not. */
+export const wordsAnswer = (requests: WaitingRequest[]) => requests.some(r => r.kind === 'question' || r.kind === 'stuck');
+
 /* A picture an agent showed, as people who reach its task load it. */
 const picture = (id: string) => `/api/attachments/${id}`;
 
@@ -41,7 +45,7 @@ function RequestItem({ request, onDone, company, onOpenTask, placeName }: Shared
   /* Hornhoof's own words about a stuck task are said in the person's language. */
   const said = request.kind === 'stuck' ? t.tasks.stuckText(agent.name, task.number) : request.text;
   return (
-    <article className={`req ${request.kind}`} aria-label={`#${task.number} ${task.title}`}>
+    <article className={`req req-${request.kind}`} aria-label={`#${task.number} ${task.title}`}>
       <header>
         <b>{who}</b>
         <button className="linkish" type="button" onClick={() => onOpenTask(task.id)}>

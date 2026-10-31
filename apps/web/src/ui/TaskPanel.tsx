@@ -6,7 +6,7 @@ import { placeName, roleAfter, useTask } from '../tasks';
 import type { AgentRef, TaskDetail, TaskLogLine, WaitingRequest } from '../types';
 import { Field } from './Field';
 import { Markdown } from './Markdown';
-import { Requests } from './Requests';
+import { Requests, wordsAnswer } from './Requests';
 
 const field = (data: unknown, key: string): unknown => (data && typeof data === 'object' && key in data ? (data as Record<string, unknown>)[key] : undefined);
 
@@ -56,7 +56,7 @@ function TaskBody({ task, onOpen, onChanged, waiting }: { task: TaskDetail; onOp
             onOpenTask={onOpen}
             placeName={p => placeName(t, org, p)}
           />
-          <p className="muted">{t.tasks.answerElsewhere}</p>
+          {wordsAnswer(waiting.requests) && <p className="muted">{t.tasks.answerElsewhere}</p>}
         </section>
       )}
       {task.parent && (

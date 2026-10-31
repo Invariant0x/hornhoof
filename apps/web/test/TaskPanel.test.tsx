@@ -49,7 +49,7 @@ describe('a task', () => {
     expect(within(waiting).getAllByRole('article')).toHaveLength(1);
     expect(waiting).toHaveTextContent('Bruno ended several turns in a row without moving #12. Write how it should go on, or cancel the task.');
     expect(waiting).not.toHaveTextContent('Ended 3 turns');
-    expect(waiting).toHaveTextContent('Writing to the agent in its window or terminal counts as the answer too.');
+    expect(waiting).toHaveTextContent("A question can be answered in the agent's window or terminal too: what you write there counts.");
     await user.type(within(waiting).getByLabelText('Your answer'), 'Run the tests first.');
     await user.click(within(waiting).getByRole('button', { name: 'Answer' }));
     expect(calls.find(c => c.path === '/api/requests/r3')?.body).toEqual({ answer: 'Run the tests first.' });

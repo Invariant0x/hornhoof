@@ -4,7 +4,7 @@ import { useOrg } from '../org';
 import { placeName, useTasks, useTurns } from '../tasks';
 import type { Me, TaskLine, TaskStatus, TurnView, WaitingRequest } from '../types';
 import { Field } from '../ui/Field';
-import { Requests } from '../ui/Requests';
+import { Requests, wordsAnswer } from '../ui/Requests';
 import { TaskRow } from '../ui/TaskRow';
 
 type Props = {
@@ -133,7 +133,7 @@ export function Tasks({ me, requests, onRequestsChanged, selected, onOpenTask, o
         {requests?.length ? (
           <>
             <Requests requests={requests} onChanged={onRequestsChanged} company={me.person.scopeKind === 'company'} onOpenTask={onOpenTask} placeName={place} />
-            <p className="muted">{t.tasks.answerElsewhere}</p>
+            {wordsAnswer(requests) && <p className="muted">{t.tasks.answerElsewhere}</p>}
           </>
         ) : (
           requests && <p className="muted">{t.tasks.nothingWaiting}</p>
