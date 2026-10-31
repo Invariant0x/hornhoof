@@ -67,8 +67,8 @@ export type StaffAsk = { id: string; name: string; at: number };
 /* agentId: 'orchestrator' or an employee's id. staff: the CEO's "+ Hire", for the orchestrator's window only. */
 type Props = { me: Me; org: Org; agentId: string; staff?: StaffAsk | null; onClose(): void; onCard?(): void };
 
-/* An agent's window: its live terminal when its node shows one, or its conversation as a log; the orchestrator's cards,
-   and the line to write to it. */
+/* An agent's window: its live terminal when its node shows one, or its conversation as a log with a line to write to it;
+   and the orchestrator's cards. */
 export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Props) {
   const t = useT();
   const { language } = useLanguage();
@@ -88,6 +88,7 @@ export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Pro
   const [noTerminal, setNoTerminal] = useState(false);
   const asked = useRef<number | null>(null);
   const input = useRef<HTMLTextAreaElement>(null);
+  const box = useRef<HTMLElement>(null);
   const log = useRef<HTMLDivElement>(null);
   const last = useRef(0);
   const mounted = useRef(true);
@@ -225,6 +226,11 @@ export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Pro
     el.style.height = `${el.scrollHeight}px`;
   }, [text]);
 
+  /* Where the person types: the live terminal's own line, or the log's. */
+  function focusLine() {
+    (input.current ?? box.current?.querySelector<HTMLTextAreaElement>('.xterm-helper-textarea'))?.focus();
+  }
+
   async function send() {
     const body = text.trim();
     if (!body || !state?.ready) return;
@@ -263,12 +269,12 @@ export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Pro
 
   const cards = (
     <>
-      {pending && <StructureCard key={pending.proposalId} proposal={{ id: pending.proposalId, brief: pending.brief, items: pending.items }} departments={org.departments} onCorrect={() => input.current?.focus()} />}
+      {pending && <StructureCard key={pending.proposalId} proposal={{ id: pending.proposalId, brief: pending.brief, items: pending.items }} departments={org.departments} onCorrect={focusLine} />}
       {staffing && (
-        <StaffCard key={staffing.proposalId} department={{ id: staffing.department, name: staffDept ? deptLabel(t, staffDept) : '' }} proposal={{ id: staffing.proposalId, brief: staffing.brief, people: staffing.people }} onCorrect={() => input.current?.focus()} />
+        <StaffCard key={staffing.proposalId} department={{ id: staffing.department, name: staffDept ? deptLabel(t, staffDept) : '' }} proposal={{ id: staffing.proposalId, brief: staffing.brief, people: staffing.people }} onCorrect={focusLine} />
       )}
       {!open && staffByHand && <StaffCard key={`hand-${staffByHand.id}`} department={staffByHand} onDone={() => setStaffByHand(null)} onHide={() => setStaffByHand(null)} />}
-      {byHand && <StructureCard manual={{ existing }} departments={org.departments} onCorrect={() => input.current?.focus()} onDone={() => setManual(false)} onHide={() => setManual(false)} />}
+      {byHand && <StructureCard manual={{ existing }} departments={org.departments} onCorrect={focusLine} onDone={() => setManual(false)} onHide={() => setManual(false)} />}
     </>
   );
   const after = (
@@ -375,7 +381,7 @@ export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Pro
   }
 
   return (
-    <aside className={`orch${terminal ? ' term' : ''}`} aria-label={title}>
+    <aside ref={box} className={`orch${terminal ? ' term' : ''}`} aria-label={title}>
       <div className="t-bar">
         <span className="lights" aria-hidden="true">
           <i />
@@ -445,22 +451,25 @@ export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Pro
         </div>
       )}
       {state && !ready && <p className="t-why">{reasonText(t, state.reason, sub)}</p>}
-      <form
-        className="t-in"
-        onSubmit={e => {
-          e.preventDefault();
-          void send();
-        }}
-      >
-        <span aria-hidden="true">&gt;</span>
-        <label className="sr" htmlFor={`input-${agentId}`}>
-          {placeholder}
-        </label>
-        <textarea id={`input-${agentId}`} ref={input} rows={1} value={text} placeholder={placeholder} disabled={!ready} onChange={e => setText(e.target.value)} onKeyDown={onKeyDown} />
-      </form>
+      {/* A live terminal has its own line to type in; the log needs this one. */}
+      {!terminal && (
+        <form
+          className="t-in"
+          onSubmit={e => {
+            e.preventDefault();
+            void send();
+          }}
+        >
+          <span aria-hidden="true">&gt;</span>
+          <label className="sr" htmlFor={`input-${agentId}`}>
+            {placeholder}
+          </label>
+          <textarea id={`input-${agentId}`} ref={input} rows={1} value={text} placeholder={placeholder} disabled={!ready} onChange={e => setText(e.target.value)} onKeyDown={onKeyDown} />
+        </form>
+      )}
       <div className="t-st">
         <span>{where}</span>
-        <span>{t.window.hint}</span>
+        {!terminal && <span>{t.window.hint}</span>}
       </div>
     </aside>
   );
