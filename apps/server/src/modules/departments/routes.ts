@@ -270,7 +270,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
             skills: line.skills,
             templateHashes: hashes,
             /* A role that watches the company wakes on its timer from the hire on. */
-            ...(role.timer ? { timerMinutes: role.timer.minutes, timerOrder: role.timer.order, timerAt: new Date() } : {}),
+            ...(role.timer ? { timerMinutes: role.timer.minutes, timerOrder: role.timer.order, timerForWork: role.timer.forWork, timerAt: new Date() } : {}),
             createdBy: personOf(me),
           })
           .returning();

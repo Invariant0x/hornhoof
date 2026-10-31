@@ -1,5 +1,5 @@
 {
-  "id": "078787e6-b72d-4f4b-a327-9a93cac5e896",
+  "id": "12688dfb-f967-439c-b4da-a19f4fef37e7",
   "prevId": "f0f75b16-25d4-46c0-838d-aa7d7e83d6ac",
   "version": "7",
   "dialect": "postgresql",
@@ -401,6 +401,13 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
+        },
+        "timer_for_work": {
+          "name": "timer_for_work",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         },
         "removed_at": {
           "name": "removed_at",
@@ -1111,6 +1118,27 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "jobs_agent_id_status": {
+          "name": "jobs_agent_id_status",
+          "columns": [
+            {
+              "expression": "agent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -1440,6 +1468,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "removed_at": {
+          "name": "removed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {},

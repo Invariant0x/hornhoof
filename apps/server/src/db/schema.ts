@@ -182,10 +182,11 @@ export const agents = pgTable('agents', {
   /* How hard its model thinks, as its program names the level; none runs at the program's default, Kimi at its most. */
   effort: text('effort'),
   /* Wakes on its own every so many minutes, outside any task, to do what its order says; none means it does not. The
-     last round started at timer_at. */
+     last round started, or was skipped, at timer_at. A timer for work skips its round while nothing is open or failed. */
   timerMinutes: integer('timer_minutes'),
   timerOrder: text('timer_order'),
   timerAt: timestamp('timer_at', { withTimezone: true }),
+  timerForWork: boolean('timer_for_work').notNull().default(false),
   removedAt: timestamp('removed_at', { withTimezone: true }),
   createdAt: createdAt(),
 });
@@ -255,7 +256,7 @@ export const jobs = pgTable(
     startedAt: timestamp('started_at', { withTimezone: true }),
     finishedAt: timestamp('finished_at', { withTimezone: true }),
   },
-  t => [index('jobs_subscription_id').on(t.subscriptionId), index('jobs_task_id').on(t.taskId)],
+  t => [index('jobs_subscription_id').on(t.subscriptionId), index('jobs_task_id').on(t.taskId), index('jobs_agent_id_status').on(t.agentId, t.status)],
 );
 
 export const AGENT_EVENT_KINDS = ['message', 'text', 'tool', 'tool_result', 'todo', 'proposal', 'applied', 'stopped', 'failed'] as const;
@@ -445,6 +446,8 @@ export const notebookNotes = pgTable(
     byOrchestrator: boolean('by_orchestrator').notNull().default(false),
     createdAt: createdAt(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    /* A removed note keeps its number, so a number never names two notes. */
+    removedAt: timestamp('removed_at', { withTimezone: true }),
   },
   t => [unique('notebook_notes_company_number').on(t.companyId, t.number)],
 );

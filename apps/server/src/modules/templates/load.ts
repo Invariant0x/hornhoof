@@ -19,7 +19,7 @@ export type RoleSkill = { id: string; on: boolean; locked: boolean };
 export const TIMER_MIN = 5;
 export const TIMER_MAX = 1440;
 export const TIMER_ORDER_MAX = 2000;
-export type RoleTimer = { minutes: number; order: string };
+export type RoleTimer = { minutes: number; order: string; forWork: boolean };
 export type Role = {
   id: string;
   department: TemplateKey;
@@ -69,7 +69,10 @@ const RoleHead = z.object({
   /* Where the role stands in its roster, after the head. */
   order: z.number().int().default(50),
   gate: z.number().int().positive().optional(),
-  timer: z.object({ minutes: z.number().int().min(TIMER_MIN).max(TIMER_MAX), order: z.string().trim().min(1).max(TIMER_ORDER_MAX) }).strict().optional(),
+  timer: z
+    .object({ minutes: z.number().int().min(TIMER_MIN).max(TIMER_MAX), order: z.string().trim().min(1).max(TIMER_ORDER_MAX), forWork: z.boolean().default(false) })
+    .strict()
+    .optional(),
   /* A plain id is on by default; { id, on: false } is offered but off. Core and head skills are added, not listed. */
   skills: z.array(z.union([z.string(), z.object({ id: z.string(), on: z.boolean() })])).default([]),
 });

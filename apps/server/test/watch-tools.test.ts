@@ -95,12 +95,22 @@ describe('tools a skill grants', () => {
     expect([more.isError, more.content[0]!.text]).toEqual([true, 'One turn sends at most 10 messages. Go on in your next round.']);
   });
 
+  it('keep to ten messages when a turn sends several at once', async () => {
+    const { app, hana, bruno } = await company(['ops-task-watch']);
+    const client = await mcp(app);
+    for (let i = 0; i < 9; i++) await call(client, 'message_employee', { employee: bruno.id, text: `Nudge ${i}.` });
+    const last = await Promise.all([1, 2, 3].map(i => call(client, 'message_employee', { employee: hana.id, text: `At once ${i}.` })));
+    expect(last.filter(r => !r.isError)).toHaveLength(1);
+  });
+
   it('let a failure collector read the failed turns and blocked tasks of the last hours', async () => {
     const { app, db, acme, sub, bruno } = await company(['ops-failure-review']);
     const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000);
     await db.insert(jobs).values([
       { companyId: acme.id, subscriptionId: sub.id, agentId: bruno.id, kind: 'conversation', prompt: 'x', timeoutMs: 1, status: 'failed', error: 'timeout', tail: 'npm test hung', finishedAt: ago(30) },
       { companyId: acme.id, subscriptionId: sub.id, agentId: bruno.id, kind: 'conversation', prompt: 'x', timeoutMs: 1, status: 'failed', error: 'agent_failed', tail: 'old', finishedAt: ago(600) },
+      /* Stopped by a person: no failure of the system. */
+      { companyId: acme.id, subscriptionId: sub.id, agentId: bruno.id, kind: 'conversation', prompt: 'x', timeoutMs: 1, status: 'failed', error: 'cancelled', tail: 'stopped', finishedAt: ago(20) },
     ]);
     const client = await mcp(app);
     const recent = JSON.parse((await call(client, 'failures', { hours: 6 })).content[0]!.text) as { failed: { agent: string; error: string; tail: string }[]; blocked: unknown[] };

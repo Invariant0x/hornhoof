@@ -1,10 +1,10 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { and, desc, eq, gte, inArray, isNotNull, isNull, max, notInArray, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNotNull, isNull, notInArray, or } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agentEvents, agents, departments, jobs, tasks } from '../../db/schema.js';
 import { turnPrompt } from '../conversation/prompt.js';
-import { agentState, enqueueTurn } from '../conversation/queue.js';
+import { agentState, enqueueTurn, STOPPED_ON_PURPOSE } from '../conversation/queue.js';
 import { deptName } from '../departments/templates.js';
 import { CLOSED } from '../tasks/engine.js';
 import type { Grant } from '../templates/load.js';
@@ -15,8 +15,11 @@ type ToolJob = { id: string; companyId: string; agentId: string };
 export const TURN_NUDGES = 10;
 const TAIL = 400;
 const FAILED_MAX = 50;
-/* How far back an agent's last turn counts for agents. */
-const LAST_TURN_HOURS = 24;
+
+/* Messages each running turn sent, counted before the next one goes out so two at once cannot both pass; the oldest turns
+   are forgotten. */
+const sent = new WeakMap<Ctx, Map<string, number>>();
+const SENT_KEPT = 500;
 
 const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
 const json = (value: unknown) => say(JSON.stringify(value));
@@ -46,24 +49,18 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
           .select({ number: tasks.number, title: tasks.title, status: tasks.status, updatedAt: tasks.updatedAt, holder: tasks.assigneeAgentId })
           .from(tasks)
           .where(and(eq(tasks.companyId, job.companyId), inArray(tasks.assigneeAgentId, ids), notInArray(tasks.status, [...CLOSED, 'planned'])));
-        const running = await db
-          .select({ agentId: jobs.agentId, startedAt: jobs.startedAt })
-          .from(jobs)
-          .where(and(eq(jobs.companyId, job.companyId), eq(jobs.kind, 'conversation'), eq(jobs.status, 'running')));
-        const active = await db
-          .select({ agentId: agentEvents.agentId, at: max(agentEvents.createdAt) })
-          .from(agentEvents)
-          .where(eq(agentEvents.companyId, job.companyId))
-          .groupBy(agentEvents.agentId);
-        const finished = await db
-          .select({ agentId: jobs.agentId, status: jobs.status, error: jobs.error, at: jobs.finishedAt })
-          .from(jobs)
-          .where(and(eq(jobs.companyId, job.companyId), eq(jobs.kind, 'conversation'), isNotNull(jobs.finishedAt), gte(jobs.finishedAt, hoursAgo(LAST_TURN_HOURS))))
-          .orderBy(desc(jobs.finishedAt));
         const out = [];
+        /* Each agent by its own indexes, so a round costs the same however long the company has run. */
         for (const a of staff) {
           const state = await agentState(ctx, a.id);
-          const last = finished.find(j => j.agentId === a.id);
+          const [running] = state.runningJobId ? await db.select({ at: jobs.startedAt }).from(jobs).where(eq(jobs.id, state.runningJobId)) : [];
+          const [active] = await db.select({ at: agentEvents.createdAt }).from(agentEvents).where(eq(agentEvents.agentId, a.id)).orderBy(desc(agentEvents.seq)).limit(1);
+          const [last] = await db
+            .select({ status: jobs.status, error: jobs.error, at: jobs.finishedAt })
+            .from(jobs)
+            .where(and(eq(jobs.agentId, a.id), inArray(jobs.status, ['done', 'failed']), isNotNull(jobs.finishedAt)))
+            .orderBy(desc(jobs.finishedAt))
+            .limit(1);
           out.push({
             id: a.id,
             name: a.name,
@@ -74,10 +71,10 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
             ready: state.ready,
             reason: state.reason,
             busy: state.busy,
-            runningSince: running.find(j => j.agentId === a.id)?.startedAt ?? null,
+            runningSince: running?.at ?? null,
             queued: state.queued,
             tasks: held.filter(t => t.holder === a.id).map(({ holder: _, ...t }) => t),
-            lastActivityAt: active.find(e => e.agentId === a.id)?.at ?? null,
+            lastActivityAt: active?.at ?? null,
             lastTurn: last ? { status: last.status, at: last.at, error: last.error } : null,
           });
         }
@@ -90,7 +87,9 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
     server.registerTool(
       'failures',
       {
-        description: 'What went wrong in the last hours: the turns that failed, newest first, with the agent, the error, the end of its output and the task, and the tasks blocked now.',
+        description:
+          'What went wrong in the last hours: the turns that failed, newest first, with the agent, the error, the end of its output and the task, and the tasks blocked now. ' +
+          'Turns people or Hornhoof stopped on purpose are left out.',
         inputSchema: { hours: z.number().int().min(1).max(72).default(6).describe('How many hours back to read, 1 to 72.') },
       },
       async ({ hours }) => {
@@ -100,7 +99,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
           .from(jobs)
           .innerJoin(agents, eq(agents.id, jobs.agentId))
           .leftJoin(tasks, eq(tasks.id, jobs.taskId))
-          .where(and(eq(jobs.companyId, job.companyId), eq(jobs.status, 'failed'), gte(jobs.finishedAt, hoursAgo(hours))))
+          .where(and(eq(jobs.companyId, job.companyId), eq(jobs.status, 'failed'), or(isNull(jobs.error), notInArray(jobs.error, STOPPED_ON_PURPOSE)), gte(jobs.finishedAt, hoursAgo(hours))))
           .orderBy(desc(jobs.finishedAt))
           .limit(FAILED_MAX);
         const blocked = await db
@@ -131,12 +130,14 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
         if (target.id === me.id) return say('That is you. Write to another employee.', true);
         if (target.switchedOffAt) return say(`${target.name} is switched off and takes no work until a person switches it on.`, true);
         if (!(await agentState(ctx, target.id)).ready) return say(`${target.name} cannot run now. Tell your head, who tells the CEO.`, true);
-        const [started] = await db.select({ at: jobs.startedAt }).from(jobs).where(eq(jobs.id, job.id));
-        const [sent] = await db
-          .select({ n: sql<number>`count(*)` })
-          .from(agentEvents)
-          .where(and(eq(agentEvents.companyId, job.companyId), eq(agentEvents.kind, 'message'), sql`${agentEvents.data}->>'by' = ${me.id}`, gte(agentEvents.createdAt, started?.at ?? new Date(0))));
-        if (Number(sent?.n ?? 0) >= TURN_NUDGES) return say(`One turn sends at most ${TURN_NUDGES} messages. Go on in your next round.`, true);
+        /* Counted with no wait between the check and the count, so parallel calls cannot both take the last one. */
+        const counts = sent.get(ctx) ?? new Map<string, number>();
+        sent.set(ctx, counts);
+        const n = counts.get(job.id) ?? 0;
+        if (n >= TURN_NUDGES) return say(`One turn sends at most ${TURN_NUDGES} messages. Go on in your next round.`, true);
+        counts.delete(job.id);
+        counts.set(job.id, n + 1);
+        if (counts.size > SENT_KEPT) counts.delete(counts.keys().next().value!);
         await enqueueTurn(ctx, {
           companyId: job.companyId,
           agentId: target.id,

@@ -40,8 +40,9 @@ export type AgentCard = {
   canEdit: boolean;
   /* Off for now: it takes no task turns. */
   on: boolean;
-  /* Wakes every so many minutes to do its order; lastAt is when the last round started, or when the timer was set. */
-  timer: { minutes: number; order: string; lastAt: string | null } | null;
+  /* Wakes every so many minutes to do its order, and with forWork only while there is work to look at; lastAt is when the
+     last round started or was skipped, or when the timer was set. */
+  timer: { minutes: number; order: string; forWork: boolean; lastAt: string | null } | null;
 };
 
 const Text = z.string().max(8000);
@@ -55,7 +56,11 @@ export const AgentPatch = z
     base: Text.nullable().optional(),
     skillText: z.record(z.string().max(80), Text.nullable()).optional(),
     on: z.boolean().optional(),
-    timer: z.object({ minutes: z.number().int().min(TIMER_MIN).max(TIMER_MAX), order: z.string().trim().min(1).max(TIMER_ORDER_MAX) }).strict().nullable().optional(),
+    timer: z
+      .object({ minutes: z.number().int().min(TIMER_MIN).max(TIMER_MAX), order: z.string().trim().min(1).max(TIMER_ORDER_MAX), forWork: z.boolean().default(false) })
+      .strict()
+      .nullable()
+      .optional(),
   })
   .strict();
 
@@ -191,6 +196,7 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (body.timer !== undefined) {
       next.timerMinutes = body.timer?.minutes ?? null;
       next.timerOrder = body.timer?.order ?? null;
+      next.timerForWork = body.timer?.forWork ?? false;
       if (next.timerMinutes !== agent.timerMinutes) next.timerAt = body.timer ? new Date() : null;
     }
 
@@ -264,7 +270,7 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (!same(next.skills, agent.skills)) changed.push({ field: 'skills', before: agent.skills, after: next.skills });
     if (!same(next.overrides, agent.overrides)) changed.push({ field: 'prompt', before: agent.overrides, after: next.overrides });
     if (next.switchedOffAt !== agent.switchedOffAt) changed.push({ field: 'switch', before: !agent.switchedOffAt, after: !next.switchedOffAt });
-    const timer = (a: AgentRow) => (a.timerMinutes ? { minutes: a.timerMinutes, order: a.timerOrder } : null);
+    const timer = (a: AgentRow) => (a.timerMinutes ? { minutes: a.timerMinutes, order: a.timerOrder, forWork: a.timerForWork } : null);
     if (!same(timer(next), timer(agent))) changed.push({ field: 'timer', before: timer(agent), after: timer(next) });
     if (changed.length) {
       await db.transaction(async tx => {
@@ -282,6 +288,7 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
             timerMinutes: next.timerMinutes,
             timerOrder: next.timerOrder,
             timerAt: next.timerAt,
+            timerForWork: next.timerForWork,
           })
           .where(eq(agents.id, agent.id));
         await tx.insert(agentChanges).values(changed.map(c => ({ companyId: agent.companyId, agentId: agent.id, ...changedBy(me), ...c })));

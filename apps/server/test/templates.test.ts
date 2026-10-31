@@ -122,6 +122,8 @@ describe('templates', () => {
     const watch = templates.roles.get('OPS-WATCH')!;
     const bugs = templates.roles.get('OPS-BUGS')!;
     expect([watch.timer?.minutes, bugs.timer?.minutes]).toEqual([10, 180]);
+    /* Neither goes on a round while nothing is open or failed. */
+    expect([watch.timer?.forWork, bugs.timer?.forWork]).toEqual([true, true]);
     expect(watch.skills.find(s => s.id === 'ops-task-watch')?.on).toBe(true);
     expect(bugs.skills.find(s => s.id === 'ops-failure-review')?.on).toBe(true);
     expect(templates.skills.get('ops-task-watch')!.grants).toEqual(['agents', 'message_employee']);
