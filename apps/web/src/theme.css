@@ -695,6 +695,13 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .ac-prompt .f { display: flex; gap: 10px; }
 .ac-actions { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 14px; border-top: 1px solid var(--line); }
 .ac-history ul { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; font-size: 12.5px; color: var(--muted); }
+/* The timer: a tick to wake, then how often, what to do and when the next round comes, each on its own line. */
+.ac-timer, .ac-timer form { display: grid; gap: 10px; justify-items: start; }
+.ac-timer > p { margin: 0; font-size: 13px; }
+.ac-timer .field { justify-self: stretch; }
+.ac-timer label.check { display: flex; gap: 8px; align-items: start; font-size: 13px; cursor: pointer; }
+.ac-timer label.check input { width: 16px; height: 16px; margin: 2px 0 0; flex: none; accent-color: var(--cyan); }
+.ac-timer small { font-size: 12.5px; color: var(--muted); }
 
 /* The staff card: a line per person with where it runs and its model. */
 .t-card-brief { margin: 0 0 4px; color: var(--muted); }

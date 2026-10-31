@@ -63,7 +63,7 @@ export function TimerSettings({ timer, editable, onChange }: Props) {
           </div>
           <div className="field">
             <label htmlFor={`${id}-order`}>{t.agent.timerOrder}</label>
-            <textarea id={`${id}-order`} rows={3} maxLength={2000} value={order} readOnly={!editable} placeholder={t.agent.timerPlaceholder} onChange={e => setOrder(e.target.value)} />
+            <textarea id={`${id}-order`} className="ac-text" rows={3} maxLength={2000} value={order} readOnly={!editable} placeholder={t.agent.timerPlaceholder} onChange={e => setOrder(e.target.value)} />
           </div>
           <label className="check">
             <input type="checkbox" checked={forWork} disabled={!editable} onChange={e => setForWork(e.target.checked)} />
