@@ -41,6 +41,7 @@ export function run(name) {
   const home = process.env.CLAUDE_CONFIG_DIR || process.env.CODEX_HOME || process.env.KIMI_CODE_HOME || '.';
   const signedIn = mode === 'needs_login' ? existsSync(join(home, 'fake-signed-in')) : mode !== 'signed_out';
   if (words === 'auth status' || words === 'login status') process.exit(signedIn ? 0 : 1);
+  if (name === 'codex' && words === 'app-server') return void appServer(signedIn);
   if (words === 'auth login' || words === 'login --device-auth' || words === 'login') {
     writeFileSync(join(home, 'fake-signed-in'), '');
     /* Colored, inside a terminal hyperlink, the way the real programs print it. */
@@ -77,4 +78,35 @@ export function run(name) {
   }
   const resume = name === 'claude' ? argv.includes('--resume') : name === 'codex' ? argv[1] === 'resume' : argv.includes('--session');
   print(`${name}-${resume ? 'resume' : 'new'}`);
+}
+
+/* Codex's app server over stdin and stdout, one JSON-RPC message a line: the plan's limits as Codex 0.166 answers them. */
+function appServer(signedIn) {
+  const answer = m => process.stdout.write(JSON.stringify(m) + '\n');
+  let buf = '';
+  process.stdin.setEncoding('utf8');
+  process.stdin.on('data', chunk => {
+    buf += chunk;
+    for (let i = buf.indexOf('\n'); i >= 0; i = buf.indexOf('\n')) {
+      const m = JSON.parse(buf.slice(0, i));
+      buf = buf.slice(i + 1);
+      if (m.method === 'initialize') answer({ id: m.id, result: { userAgent: 'codex_cli_rs/0.166.0' } });
+      if (m.method !== 'account/rateLimits/read') continue;
+      if (!signedIn) answer({ id: m.id, error: { code: -32600, message: 'codex account authentication required to read rate limits' } });
+      else
+        answer({
+          id: m.id,
+          result: {
+            ordinaryUsageAllowed: true,
+            rateLimits: {
+              limitId: 'codex',
+              primary: { usedPercent: 12, windowDurationMins: 300, resetsAt: Date.parse('2026-10-31T03:00:00Z') / 1000 },
+              secondary: { usedPercent: 73, windowDurationMins: 10080, resetsAt: Date.parse('2026-11-04T10:00:00Z') / 1000 },
+              planType: 'pro',
+              rateLimitReachedType: null,
+            },
+          },
+        });
+    }
+  });
 }

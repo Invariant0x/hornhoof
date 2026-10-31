@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -490,6 +490,21 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     expect(done('job-clear')).toMatchObject({ ok: true, result: 'echo: after clear' });
     expect((done('job-clear') as { sessionId: string }).sessionId).not.toBe(first.sessionId);
     expect(sent).toContainEqual({ type: 'job.event', jobId: 'job-clear', seq: 0, event: { kind: 'text', text: 'echo: after clear' } });
+  });
+
+  it("tells Hornhoof how full each agent's context is, once it moved by a percent or more", async () => {
+    await setUp();
+    await host.run(job('x1', 'one'));
+    await host.run(job('x1', 'two'));
+    await host.run(codexJob('x2', 'hello'));
+    mkdirSync(join(home, 'kimi', 'x3'), { recursive: true });
+    writeFileSync(join(home, 'kimi', 'x3', 'config.toml'), 'default_model = "k"\n\n[models."k"]\nmax_context_size = 1048576\n');
+    await host.run(kimiJob('x3', 'hello'));
+    expect(sent.filter(m => m.type === 'agent.context')).toEqual([
+      { type: 'agent.context', agentKey: 'x1', used: 0.25 },
+      { type: 'agent.context', agentKey: 'x2', used: 0.5 },
+      { type: 'agent.context', agentKey: 'x3', used: 0.25 },
+    ]);
   });
 
   it('runs a turn in Codex and opens a turn for what a person typed in it', async () => {

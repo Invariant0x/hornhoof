@@ -42,6 +42,8 @@ export interface ProviderAdapter {
   secrets(): Promise<string[]>;
   /* The models the program can run, when it can tell. Hornhoof falls back to what it knows for the provider. */
   models?(): Promise<ModelOption[]>;
+  /* The plan's limits now, asked without a turn, or null when the program cannot tell at the moment. */
+  limits?(): Promise<Limits | null>;
   /* On the built-in node, the user a key's program runs as and its home: the folder is handed to that user first,
      and the node's own git work in it runs as that user too. */
   owner?: { user: JobUser | null; home: string; prepare(path: string): void };

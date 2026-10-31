@@ -1,6 +1,7 @@
+import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { API_MODELS, type AgentEvent, type ModelOption } from '@hornhoof/protocol';
+import { API_MODELS, type AgentEvent, type Limits, type ModelOption } from '@hornhoof/protocol';
 import type { JobUser } from '../isolation.js';
 import type { ProviderAdapter, RunInput, RunResult } from '../runner.js';
 import { contentText, inputText, isRecord } from './events.js';
@@ -35,6 +36,63 @@ export function codexEvents(line: unknown): AgentEvent[] {
     return [{ kind: 'todo', items: item.items.filter(isRecord).map(i => ({ text: String(i.text ?? ''), state: i.completed === true ? ('done' as const) : ('todo' as const) })) }];
   }
   return [];
+}
+
+/* Codex names its windows by their length in minutes. */
+const WINDOW_NAMES: Record<number, string> = { 300: 'five_hour', 1440: 'one_day', 10080: 'seven_day' };
+const LIMITS_WAIT_MS = 15_000;
+
+/* The plan's limits as Codex's app server reads them: up to two windows, the used share and when each starts over. */
+export function codexRateLimits(result: unknown): Limits | null {
+  const rate = isRecord(result) && isRecord(result.rateLimits) ? result.rateLimits : null;
+  if (!rate) return null;
+  const windows = [rate.primary, rate.secondary].filter(isRecord).flatMap(w => {
+    const used = Number(w.usedPercent);
+    const mins = Number(w.windowDurationMins);
+    if (!Number.isFinite(used) || !Number.isFinite(mins)) return [];
+    const reset = typeof w.resetsAt === 'number' ? new Date(w.resetsAt * 1000).toISOString() : null;
+    return [{ name: WINDOW_NAMES[mins] ?? `${mins}_minutes`, utilization: Math.min(1, Math.max(0, used / 100)), resetsAt: reset }];
+  });
+  if (!windows.length) return null;
+  return { status: rate.rateLimitReachedType ? 'rejected' : 'allowed', windows };
+}
+
+/* Asks Codex's app server for the plan's limits over JSON-RPC. It keeps its own sign-in fresh, so no turn is needed. */
+function askLimits(bin: string, env: NodeJS.ProcessEnv): Promise<Limits | null> {
+  return new Promise(resolve => {
+    const child = spawn(bin, ['app-server'], { env, stdio: ['pipe', 'pipe', 'ignore'] });
+    let buf = '';
+    const done = (limits: Limits | null) => {
+      clearTimeout(timer);
+      child.kill();
+      resolve(limits);
+    };
+    const timer = setTimeout(() => done(null), LIMITS_WAIT_MS);
+    const send = (m: unknown) => child.stdin.write(JSON.stringify(m) + '\n');
+    child.on('error', () => done(null));
+    child.on('exit', () => done(null));
+    child.stdin.on('error', () => {});
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk: string) => {
+      buf += chunk;
+      for (let i = buf.indexOf('\n'); i >= 0; i = buf.indexOf('\n')) {
+        const line = buf.slice(0, i);
+        buf = buf.slice(i + 1);
+        let m: unknown;
+        try {
+          m = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        if (!isRecord(m)) continue;
+        if (m.id === 1) {
+          send({ method: 'initialized' });
+          send({ id: 2, method: 'account/rateLimits/read' });
+        } else if (m.id === 2) done(codexRateLimits(m.result));
+      }
+    });
+    send({ id: 1, method: 'initialize', params: { clientInfo: { name: 'hornhoof', title: 'Hornhoof', version: '1' } } });
+  });
 }
 
 type CachedModel = { slug?: unknown; display_name?: unknown; visibility?: unknown };
@@ -75,6 +133,11 @@ export function codexAdapter({ home, tools, bin = join(tools, 'bin', 'codex'), s
     async loggedIn() {
       if (mode === 'api_key') return true;
       return exitsCleanly(bin, ['login', 'status'], env(null));
+    },
+
+    /* A company key has no plan limits. */
+    async limits() {
+      return mode === 'api_key' ? null : askLimits(bin, env(null));
     },
 
     async login(io) {

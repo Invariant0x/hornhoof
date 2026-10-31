@@ -54,7 +54,7 @@ for await (const typed of createInterface({ input: process.stdin })) {
   const write = () => appendFileSync(log, JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: answer }] } }) + '\n');
   if (!line.includes('LAG')) write();
   process.stdout.write(`● ${answer}\n❯ `);
-  await hook('status', { rate_limits: { five_hour: { used_percentage: 40, resets_at: 1793379000 } } });
+  await hook('status', { rate_limits: { five_hour: { used_percentage: 40, resets_at: 1793379000 } }, context_window: { used_percentage: 25 } });
   await hook('stop', { last_assistant_message: answer, transcript_path: log });
   if (line.includes('LAG')) setTimeout(write, 300);
 }

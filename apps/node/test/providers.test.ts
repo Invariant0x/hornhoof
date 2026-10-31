@@ -7,8 +7,8 @@ import { CLAUDE_ALIASES, type AgentEvent, type ProviderId } from '@hornhoof/prot
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { adapterFor } from '../src/providers/index.js';
 import { claudeEvents, claudeInterrupted, limitsFrom } from '../src/providers/claude.js';
-import { codexEvents } from '../src/providers/codex.js';
-import { kimiEvents } from '../src/providers/kimi.js';
+import { codexEvents, codexRateLimits } from '../src/providers/codex.js';
+import { kimiContextSize, kimiEvents } from '../src/providers/kimi.js';
 import { childEnv, lastUrl } from '../src/providers/process.js';
 import type { RunInput } from '../src/runner.js';
 
@@ -300,10 +300,99 @@ describe('models', () => {
     expect(await adapter('codex').models!()).toEqual([]);
   });
 
+  it("reads the plan's limits from Codex's own server, with no turn, and nothing while signed out", async () => {
+    expect(await adapter('codex').limits!()).toEqual({
+      status: 'allowed',
+      windows: [
+        { name: 'five_hour', utilization: 0.12, resetsAt: '2026-10-31T03:00:00.000Z' },
+        { name: 'seven_day', utilization: 0.73, resetsAt: '2026-11-04T10:00:00.000Z' },
+      ],
+    });
+    expect(lastRun().argv).toEqual(['app-server']);
+    process.env.FAKE_MODE = 'signed_out';
+    expect(await adapter('codex').limits!()).toBeNull();
+  });
+
+  it("reads Codex's windows by their length, and a reached limit", () => {
+    const weekly = { usedPercent: 73, windowDurationMins: 10080, resetsAt: 1793774136 };
+    expect(codexRateLimits({ rateLimits: { primary: weekly, secondary: null, rateLimitReachedType: null } })).toEqual({
+      status: 'allowed',
+      windows: [{ name: 'seven_day', utilization: 0.73, resetsAt: new Date(1793774136 * 1000).toISOString() }],
+    });
+    expect(codexRateLimits({ rateLimits: { primary: { usedPercent: 100, windowDurationMins: 300, resetsAt: null }, secondary: { usedPercent: 5, windowDurationMins: 1440, resetsAt: null }, rateLimitReachedType: 'primary' } })).toEqual({
+      status: 'rejected',
+      windows: [
+        { name: 'five_hour', utilization: 1, resetsAt: null },
+        { name: 'one_day', utilization: 0.05, resetsAt: null },
+      ],
+    });
+    expect(codexRateLimits({ rateLimits: { primary: null, secondary: null } })).toBeNull();
+    expect(codexRateLimits('nonsense')).toBeNull();
+  });
+
   it("lists Claude's aliases, and nothing for programs that do not say", async () => {
     expect(await adapter('claude').models!()).toEqual(CLAUDE_ALIASES);
     expect(await adapter('codex').models!()).toEqual([]);
     expect(await adapter('kimi').models!()).toEqual([]);
+  });
+
+  it('lists the Kimi models its plan wrote into its settings, by the names Kimi shows', async () => {
+    mkdirSync(home, { recursive: true });
+    writeFileSync(
+      join(home, 'config.toml'),
+      [
+        'default_model = "kimi-code/kimi-for-coding"',
+        '',
+        '[providers."managed:kimi-code"]',
+        'type = "kimi"',
+        '',
+        '[models."kimi-code/kimi-for-coding"]',
+        'provider = "managed:kimi-code"',
+        'model = "kimi-for-coding"',
+        'display_name = "K2.8 Preview"',
+        '',
+        '[models."kimi-code/k3.1-pro"]',
+        'model = "k3.1-pro"',
+        'display_name = "K3.1 Pro"',
+        '',
+        '[models.local]',
+        'model = "local"',
+        '',
+        '[thinking]',
+        'enabled = true',
+      ].join('\n'),
+    );
+    expect(await adapter('kimi').models!()).toEqual([
+      { id: 'kimi-code/kimi-for-coding', name: 'K2.8 Preview' },
+      { id: 'kimi-code/k3.1-pro', name: 'K3.1 Pro' },
+      { id: 'local', name: 'local' },
+    ]);
+  });
+
+  it("knows how much its model's context holds, by the alias -m takes or the default one", () => {
+    const config = [
+      'default_model = "kimi-code/kimi-for-coding"',
+      '',
+      '[models."kimi-code/kimi-for-coding"]',
+      'max_context_size = 1048576',
+      '',
+      '[models."kimi-code/k3"]',
+      'max_context_size = 262144',
+      'max_input_size = 200000',
+      '',
+      '[models.bare]',
+      'model = "bare"',
+    ].join('\n');
+    expect(kimiContextSize(config, null)).toBe(1_048_576);
+    expect(kimiContextSize(config, 'kimi-code/k3')).toBe(200_000);
+    expect(kimiContextSize(config, 'bare')).toBeNull();
+    expect(kimiContextSize(config, 'missing')).toBeNull();
+  });
+
+  it("asks Kimi's plan limits only with a token that is still fresh", async () => {
+    mkdirSync(join(home, 'credentials'), { recursive: true });
+    writeFileSync(join(home, 'credentials', 'kimi-code.json'), JSON.stringify({ access_token: 'old', refresh_token: 'r', expires_at: Date.now() / 1000 - 60 }));
+    expect(await adapter('kimi').limits!()).toBeNull();
   });
 });
 

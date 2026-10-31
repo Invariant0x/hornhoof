@@ -35,6 +35,7 @@ for await (const typed of createInterface({ input: process.stdin })) {
   }
   const answer = `echo: ${line}`;
   item('AgentMessage', answer);
+  event({ type: 'token_count', info: { last_token_usage: { total_tokens: 112000 }, model_context_window: 212000 }, rate_limits: null });
   event({ type: 'task_complete', last_agent_message: answer });
   process.stdout.write(`• ${answer}\n› `);
   if (line.includes('LATE')) setTimeout(() => event({ type: 'turn_aborted', reason: 'interrupted' }), 150);

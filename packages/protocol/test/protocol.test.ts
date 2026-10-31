@@ -189,4 +189,12 @@ describe('live terminals', () => {
     expect(parseServerMessage(JSON.stringify({ type: 'term.input', termId: 't-1', data: 'x'.repeat(70_000) }))).toBeNull();
     expect(parseNodeMessage(JSON.stringify({ type: 'turn.open', agentKey: 'a/b', text: 'x' }))).toBeNull();
   });
+
+  it("carry how full an agent's context is, as a share", () => {
+    const m: NodeMessage = { type: 'agent.context', agentKey: 'agent-1', used: 0.42 };
+    expect(parseNodeMessage(JSON.stringify(m))).toEqual(m);
+    expect(parseNodeMessage(JSON.stringify({ ...m, used: 1.2 }))).toBeNull();
+    expect(parseNodeMessage(JSON.stringify({ ...m, used: -0.1 }))).toBeNull();
+    expect(parseNodeMessage(JSON.stringify({ ...m, agentKey: '../x' }))).toBeNull();
+  });
 });

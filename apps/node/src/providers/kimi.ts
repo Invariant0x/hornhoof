@@ -1,8 +1,9 @@
-import { readdirSync, rmSync } from 'node:fs';
+import { readdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import type { AgentEvent } from '@hornhoof/protocol';
+import type { AgentEvent, ModelOption } from '@hornhoof/protocol';
 import type { JobUser } from '../isolation.js';
 import type { ProviderAdapter, RunInput, RunResult } from '../runner.js';
+import { kimiPlanLimits } from '../terminal/programs.js';
 import { contentText, inputText, isRecord, toolName } from './events.js';
 import { childEnv, ensureDir, installPackage, interactiveLogin, runProgram, tokensIn, writePrivate } from './process.js';
 
@@ -46,6 +47,40 @@ export function kimiEvents(line: unknown): AgentEvent[] {
   return events;
 }
 
+/* The [models."<alias>"] tables in Kimi's config.toml, with their plain values. -m takes the alias. */
+function modelTables(config: string): { id: string; values: Map<string, string> }[] {
+  const tables: { id: string; values: Map<string, string> }[] = [];
+  let current: (typeof tables)[number] | null = null;
+  for (const line of config.split('\n')) {
+    const table = /^\s*\[models\.(?:"([^"]+)"|([\w.-]+))\]\s*$/.exec(line);
+    if (table) {
+      current = { id: (table[1] ?? table[2])!.slice(0, 80), values: new Map() };
+      tables.push(current);
+      continue;
+    }
+    if (/^\s*\[/.test(line)) current = null;
+    const pair = current && /^\s*(\w+)\s*=\s*(?:"([^"]*)"|(\S+))/.exec(line);
+    if (current && pair) current.values.set(pair[1]!, pair[2] ?? pair[3]!);
+  }
+  return tables;
+}
+
+/* The models Kimi's plan wrote into its settings once it was signed in, by the name Kimi shows each under. */
+export function kimiModels(config: string): ModelOption[] {
+  return modelTables(config)
+    .slice(0, 60)
+    .map(t => ({ id: t.id, name: (t.values.get('display_name') || t.id).slice(0, 80) }));
+}
+
+/* How many tokens a model's context takes, as Kimi counts it for its screen: what it may send, else its whole context.
+   No model named is the default one. */
+export function kimiContextSize(config: string, model: string | null): number | null {
+  const id = model ?? /^\s*default_model\s*=\s*"([^"]+)"/m.exec(config.split(/^\s*\[/m)[0] ?? '')?.[1];
+  const values = modelTables(config).find(t => t.id === id)?.values;
+  const size = Number(values?.get('max_input_size') ?? values?.get('max_context_size'));
+  return Number.isInteger(size) && size > 0 ? size : null;
+}
+
 export function kimiAdapter({ home, tools, bin = join(tools, 'bin', 'kimi'), user = null }: Options): ProviderAdapter {
   const env = (toolToken: string | null = null) => childEnv(tools, { KIMI_CODE_HOME: ensureDir(home), ...(toolToken ? { HH_TOOL_TOKEN: toolToken } : {}) });
   const credentials = () => files(join(home, 'credentials'));
@@ -59,9 +94,17 @@ export function kimiAdapter({ home, tools, bin = join(tools, 'bin', 'kimi'), use
       return credentials().length > 0;
     },
 
-    /* Kimi Code does not list its models; it runs its default. */
     async models() {
-      return [];
+      try {
+        return kimiModels(readFileSync(join(home, 'config.toml'), 'utf8'));
+      } catch {
+        /* Not signed in yet: no settings, and Kimi runs its default. */
+        return [];
+      }
+    },
+
+    async limits() {
+      return kimiPlanLimits(home);
     },
 
     async login(io) {

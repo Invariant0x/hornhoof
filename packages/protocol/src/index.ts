@@ -130,6 +130,8 @@ const NodeMessage = z.discriminatedUnion('type', [
   /* Someone who may type opened the window of an agent whose program does not run: Hornhoof starts it with a turn that
      types nothing. */
   z.object({ type: z.literal('agent.start'), agentKey: z.string().regex(/^[A-Za-z0-9-]{1,64}$/) }),
+  /* How full the agent's context is now, as its program counts it: a share from 0 to 1. */
+  z.object({ type: z.literal('agent.context'), agentKey: z.string().regex(/^[A-Za-z0-9-]{1,64}$/), used: z.number().min(0).max(1) }),
 ]);
 export type NodeMessage = z.infer<typeof NodeMessage>;
 
