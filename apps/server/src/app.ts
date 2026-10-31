@@ -11,6 +11,7 @@ import { startTimers } from './modules/agents/timers.js';
 import { departmentRoutes } from './modules/departments/routes.js';
 import { EventBus } from './modules/events/bus.js';
 import { streamRoutes } from './modules/events/stream.js';
+import { improvementRoutes } from './modules/improvements/routes.js';
 import { jobRoutes } from './modules/jobs/routes.js';
 import { NodeHub } from './modules/nodes/hub.js';
 import { handleNodeClose, handleNodeMessage } from './modules/nodes/messages.js';
@@ -91,6 +92,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   mcpRoutes(app, ctx);
   conversationRoutes(app, ctx);
   notebookRoutes(app, ctx);
+  improvementRoutes(app, ctx);
   startTimers(app, ctx);
   terminalRoutes(app, ctx);
   agentRoutes(app, ctx);

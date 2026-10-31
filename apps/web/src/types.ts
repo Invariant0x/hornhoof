@@ -207,6 +207,7 @@ export type StreamMessage =
   | { type: 'pulse'; from: Endpoint; to: Endpoint }
   | { type: 'task'; id: string }
   | { type: 'requests' }
+  | { type: 'improvements' }
   | { type: 'context'; agentId: string; used: number };
 
 export type TaskStatus = 'planned' | 'open' | 'working' | 'review' | 'waiting' | 'blocked' | 'done' | 'cancelled';
@@ -247,6 +248,22 @@ export type TaskDetail = TaskLine & {
 };
 
 /* What an agent asks of people, under "Waiting for you". */
+/* Something an employee found to improve in how the company works. open waits for the CEO, taken is with the
+   orchestrator, done is done, dismissed was set aside. result: the orchestrator's word on what came of it. */
+export type Improvement = {
+  id: string;
+  title: string;
+  text: string;
+  seen: number;
+  status: 'open' | 'taken' | 'done' | 'dismissed';
+  result: string | null;
+  at: string;
+  updatedAt: string;
+  agent: { id: string; name: string };
+  department: { id: string; name: string } | null;
+  decidedBy: string | null;
+};
+
 export type WaitingRequest = {
   id: string;
   kind: 'question' | 'choice' | 'approval' | 'stuck';

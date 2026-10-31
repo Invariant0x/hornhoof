@@ -4,13 +4,13 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agentEvents, agents, departments, jobs, requests, tasks } from '../../db/schema.js';
 import { turnPrompt } from '../conversation/prompt.js';
-import { agentState, enqueueTurn, STOPPED_ON_PURPOSE } from '../conversation/queue.js';
+import { agentState, enqueueTurn, orchestratorOf, STOPPED_ON_PURPOSE } from '../conversation/queue.js';
 import { deptName } from '../departments/templates.js';
 import { CLOSED } from '../tasks/engine.js';
 import type { Grant } from '../templates/load.js';
 import { INSTALL_HINT, installsIn, MISSING_HINT, missingIn, type Missing } from './stumbles.js';
 
-type ToolJob = { id: string; companyId: string; agentId: string };
+type ToolJob = { id: string; companyId: string; agentId: string; agentKind: string };
 
 /* What one turn may send to others, so a round that goes wrong cannot flood the company. */
 export const TURN_NUDGES = 10;
@@ -45,7 +45,7 @@ function tally<T>(items: { key: string; value: T; agent: string; example?: strin
 const lineOf = (text: string, what: string) => text.split('\n').find(l => l.includes(what))?.trim().slice(0, TAIL) ?? '';
 
 /* The tools a skill grants an employee, for watching the company on a timer round: every agent's state, what failed, and
-   writing to another employee as itself. */
+   writing to another employee as itself; and a head's way to tell the orchestrator. */
 export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, grants: ReadonlySet<Grant>): void {
   const { db } = ctx;
   const deptNames = async () => new Map((await db.select().from(departments).where(eq(departments.companyId, job.companyId))).map(d => [d.id, deptName(d)]));
@@ -170,6 +170,55 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
     );
   }
 
+  /* Whether this turn may send one more message, counted at once. */
+  async function counted(me: string): Promise<boolean> {
+    const counts = sent.get(ctx) ?? new Map<string, number>();
+    sent.set(ctx, counts);
+    /* A turn's first message reads what it sent before, which a restart of Hornhoof would otherwise forget. */
+    if (!counts.has(job.id)) {
+      const [run] = await db.select({ startedAt: jobs.startedAt, createdAt: jobs.createdAt }).from(jobs).where(eq(jobs.id, job.id));
+      const [before] = await db
+        .select({ n: sql<number>`count(*)` })
+        .from(agentEvents)
+        .where(and(eq(agentEvents.companyId, job.companyId), eq(agentEvents.kind, 'message'), sql`${agentEvents.data}->>'by' = ${me}`, gte(agentEvents.createdAt, run?.startedAt ?? run?.createdAt ?? new Date(0))));
+      if (!counts.has(job.id)) counts.set(job.id, Number(before?.n ?? 0));
+    }
+    /* Counted with no wait between the check and the count, so parallel calls cannot both take the last one. */
+    const n = counts.get(job.id)!;
+    if (n >= TURN_NUDGES) return false;
+    counts.delete(job.id);
+    counts.set(job.id, n + 1);
+    if (counts.size > SENT_KEPT) counts.delete(counts.keys().next().value!);
+    return true;
+  }
+
+  if (job.agentKind === 'head') {
+    server.registerTool(
+      'tell_orchestrator',
+      {
+        description:
+          'Writes to the orchestrator, as you, into its window, which the CEO reads: what came of your work outside the tasks it gave you, such as a timer round, what you need decided, what blocks your department. ' +
+          `It decides with the CEO or the employee concerned. One turn sends at most ${TURN_NUDGES} messages.`,
+        inputSchema: { text: z.string().trim().min(1).max(4000) },
+      },
+      async ({ text }) => {
+        const [me] = await db.select().from(agents).where(eq(agents.id, job.agentId));
+        const orchestrator = await orchestratorOf(ctx, job.companyId);
+        if (!me || !orchestrator) return say('This company has no orchestrator.', true);
+        if (!(await counted(me.id))) return say(`One turn sends at most ${TURN_NUDGES} messages. Go on in your next round.`, true);
+        await enqueueTurn(ctx, {
+          companyId: job.companyId,
+          agentId: orchestrator.id,
+          prompt: turnPrompt({ name: me.name, title: roleTitle(me.roleKey) ?? '' }, text),
+          createdBy: null,
+          message: { personId: null, text, from: 'agent', name: me.name, by: me.id },
+        });
+        if (me.departmentId) ctx.bus.publish(job.companyId, { type: 'pulse', from: { kind: 'department', id: me.departmentId }, to: { kind: 'orchestrator' } });
+        return say('Told the orchestrator.');
+      },
+    );
+  }
+
   if (grants.has('message_employee')) {
     server.registerTool(
       'message_employee',
@@ -184,23 +233,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
         if (target.id === me.id) return say('That is you. Write to another employee.', true);
         if (target.switchedOffAt) return say(`${target.name} is switched off and takes no work until a person switches it on.`, true);
         if (!(await agentState(ctx, target.id)).ready) return say(`${target.name} cannot run now. Tell your head, who tells the CEO.`, true);
-        const counts = sent.get(ctx) ?? new Map<string, number>();
-        sent.set(ctx, counts);
-        /* A turn's first message reads what it sent before, which a restart of Hornhoof would otherwise forget. */
-        if (!counts.has(job.id)) {
-          const [run] = await db.select({ startedAt: jobs.startedAt, createdAt: jobs.createdAt }).from(jobs).where(eq(jobs.id, job.id));
-          const [before] = await db
-            .select({ n: sql<number>`count(*)` })
-            .from(agentEvents)
-            .where(and(eq(agentEvents.companyId, job.companyId), eq(agentEvents.kind, 'message'), sql`${agentEvents.data}->>'by' = ${me.id}`, gte(agentEvents.createdAt, run?.startedAt ?? run?.createdAt ?? new Date(0))));
-          if (!counts.has(job.id)) counts.set(job.id, Number(before?.n ?? 0));
-        }
-        /* Counted with no wait between the check and the count, so parallel calls cannot both take the last one. */
-        const n = counts.get(job.id)!;
-        if (n >= TURN_NUDGES) return say(`One turn sends at most ${TURN_NUDGES} messages. Go on in your next round.`, true);
-        counts.delete(job.id);
-        counts.set(job.id, n + 1);
-        if (counts.size > SENT_KEPT) counts.delete(counts.keys().next().value!);
+        if (!(await counted(me.id))) return say(`One turn sends at most ${TURN_NUDGES} messages. Go on in your next round.`, true);
         await enqueueTurn(ctx, {
           companyId: job.companyId,
           agentId: target.id,

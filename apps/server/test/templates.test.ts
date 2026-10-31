@@ -127,7 +127,7 @@ describe('templates', () => {
     expect(watch.skills.find(s => s.id === 'ops-task-watch')?.on).toBe(true);
     expect(bugs.skills.find(s => s.id === 'ops-failure-review')?.on).toBe(true);
     expect(templates.skills.get('ops-task-watch')!.grants).toEqual(['agents', 'message_employee']);
-    expect(templates.skills.get('ops-failure-review')!.grants).toEqual(['failures', 'agents', 'message_employee']);
+    expect(templates.skills.get('ops-failure-review')!.grants).toEqual(['failures', 'agents', 'message_employee', 'improvements']);
     for (const r of roles) if (r.timer) expect(r.timer.order.length, r.id).toBeLessThanOrEqual(2000);
     expect(roles.filter(r => r.timer).map(r => r.id).sort()).toEqual(['OPS-BUGS', 'OPS-WATCH']);
   });

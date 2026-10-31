@@ -15,6 +15,7 @@ import { checkItems, Proposal } from './structure.js';
 import { registerTaskTools } from '../tasks/tools.js';
 import { registerWatchTools } from './watch.js';
 import { registerHeadNotebookTools } from '../notebook/tools.js';
+import { registerImprovementTools, registerOrchestratorImprovementTools } from '../improvements/tools.js';
 
 type ToolJob = { id: string; companyId: string; agentId: string; agentKind: (typeof agents.$inferSelect)['kind']; departmentId: string | null; skills: string[] };
 
@@ -35,7 +36,8 @@ export async function jobOf(ctx: Ctx, req: FastifyRequest): Promise<ToolJob> {
 const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
 
 /* Hornhoof's tools as one agent's job sees them: every agent reads the company, an employee gets the tools its skills
-   grant, a head keeps its department notebook, and the orchestrator also proposes cards and does whatever the CEO can do in the screens. */
+   grant, a head keeps its department notebook, tells the orchestrator and puts what to improve under Improvements, and the
+   orchestrator also proposes cards and does whatever the CEO can do in the screens. */
 function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob): McpServer {
   const server = new McpServer({ name: 'hornhoof', version: '0.5.0' });
   server.registerTool(
@@ -45,8 +47,10 @@ function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob): McpServer {
   );
   registerTaskTools(server, ctx, job);
   if (job.agentKind !== 'orchestrator') {
-    registerWatchTools(server, ctx, job, new Set(job.skills.flatMap(id => ctx.templates.skills.get(id)?.grants ?? [])));
+    const grants = new Set(job.skills.flatMap(id => ctx.templates.skills.get(id)?.grants ?? []));
+    registerWatchTools(server, ctx, job, grants);
     if (job.agentKind === 'head') registerHeadNotebookTools(server, ctx, job);
+    if (job.agentKind === 'head' || grants.has('improvements')) registerImprovementTools(server, ctx, job);
     return server;
   }
   server.registerTool(
@@ -114,6 +118,7 @@ function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob): McpServer {
     },
   );
   registerControlTools(server, ctx, app, job);
+  registerOrchestratorImprovementTools(server, ctx, job);
   return server;
 }
 

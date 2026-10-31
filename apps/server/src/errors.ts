@@ -63,6 +63,8 @@ export type ErrorReason =
   | 'task_invalid'
   | 'request_unknown'
   | 'request_closed'
+  | 'improvement_unknown'
+  | 'improvement_decided'
   | 'no_head'
   | 'switched_off'
   | 'turn_open'

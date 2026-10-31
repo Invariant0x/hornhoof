@@ -1,0 +1,130 @@
+import type { AddressInfo } from 'node:net';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { and, eq, inArray } from 'drizzle-orm';
+import type { FastifyInstance } from 'fastify';
+import { describe, expect, it, onTestFinished } from 'vitest';
+import { hashToken } from '../src/crypto/tokens.js';
+import { agentEvents, agents, companies, departments, improvements, jobs, subscriptions } from '../src/db/schema.js';
+import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until } from './helpers.js';
+import { agentState } from '../src/modules/conversation/queue.js';
+
+const NODE_KEY = 'k'.repeat(40);
+const TOKENS = { orchestrator: 'tool-token-orch-0123456789abcdef0123', hana: 'tool-token-hana-0123456789abcdef0123', bruno: 'tool-token-bruno-0123456789abcdef012', wendy: 'tool-token-wendy-0123456789abcdef012' };
+
+/* Development with Hana at its head and Bruno in it, Operations with Wendy, who collects weak points, and a running turn
+   for each of them and the orchestrator, whose tokens reach their tools. */
+async function company() {
+  const { app, db } = await testApp({ NODE_KEY });
+  const url = await listen(app);
+  const ceo = await setUpCompany(app);
+  const builtin = await connectNode(url, NODE_KEY);
+  onTestFinished(() => builtin.close());
+  builtin.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [] });
+  const [acme] = await db.select().from(companies);
+  const [sub] = await db.select().from(subscriptions);
+  const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+  const [ops] = await db.insert(departments).values({ companyId: acme!.id, templateKey: 'operations', roleCode: 'OPS' }).returning();
+  const [dev] = await db.insert(departments).values({ companyId: acme!.id, templateKey: 'development', roleCode: 'DEV' }).returning();
+  const hire = async (name: string, kind: 'head' | 'worker', roleKey: string, departmentId: string, skills: string[] = []) =>
+    (await db.insert(agents).values({ companyId: acme!.id, kind, name, roleKey, departmentId, model: '', subscriptionId: sub!.id, skills }).returning())[0]!;
+  const hana = await hire('Hana', 'head', 'DEV-HEAD', dev!.id);
+  const bruno = await hire('Bruno', 'worker', 'DEV-BE', dev!.id);
+  const wendy = await hire('Wendy', 'worker', 'OPS-BUGS', ops!.id, ['ops-failure-review']);
+  await until(async () => (await agentState(app.ctx, bruno.id)).ready);
+  for (const [agentId, token] of [
+    [orchestrator!.id, TOKENS.orchestrator],
+    [hana.id, TOKENS.hana],
+    [bruno.id, TOKENS.bruno],
+    [wendy.id, TOKENS.wendy],
+  ] as const)
+    await db.insert(jobs).values({ companyId: acme!.id, subscriptionId: sub!.id, agentId, kind: 'conversation', prompt: 'round', timeoutMs: 900000, status: 'running', toolTokenHash: hashToken(token) });
+  return { app, db, ceo, acme: acme!, orchestrator: orchestrator!, dev: dev!, hana, bruno, wendy };
+}
+
+async function mcp(app: FastifyInstance, token: string): Promise<Client> {
+  const url = new URL(`http://127.0.0.1:${(app.server.address() as AddressInfo).port}/mcp`);
+  const client = new Client({ name: 'test', version: '0.0.0' });
+  await client.connect(new StreamableHTTPClientTransport(url, { requestInit: { headers: { Authorization: `Bearer ${token}` } } }));
+  onTestFinished(() => client.close());
+  return client;
+}
+
+type Result = { content: { text: string }[]; isError?: boolean };
+const call = async (client: Client, name: string, args: object = {}) => (await client.callTool({ name, arguments: args })) as Result;
+const names = async (client: Client) => (await client.listTools()).tools.map(t => t.name);
+const waiting = (db: Awaited<ReturnType<typeof company>>['db'], agentId: string) =>
+  db.select().from(jobs).where(and(eq(jobs.agentId, agentId), inArray(jobs.status, ['queued', 'running'])));
+
+describe('heads and the orchestrator', () => {
+  it('let a head tell the orchestrator what came of its work, in the window people see', async () => {
+    const { app, db, orchestrator, hana } = await company();
+    const client = await mcp(app, TOKENS.hana);
+    const told = await call(client, 'tell_orchestrator', { text: 'The checkout is done and released. Next I need the payment keys from the CEO.' });
+    expect(told.content[0]!.text).toBe('Told the orchestrator.');
+    const turns = (await waiting(db, orchestrator.id)).filter(j => j.prompt !== 'round');
+    expect(turns.map(j => j.prompt)).toEqual(['Hana (Head of development): The checkout is done and released. Next I need the payment keys from the CEO.']);
+    const [said] = await db.select().from(agentEvents).where(and(eq(agentEvents.agentId, orchestrator.id), eq(agentEvents.kind, 'message')));
+    expect(said!.data).toMatchObject({ text: 'The checkout is done and released. Next I need the payment keys from the CEO.', from: 'agent', name: 'Hana', by: hana.id });
+  });
+
+  it('leave members to tell their head, not the orchestrator', async () => {
+    const { app } = await company();
+    expect(await names(await mcp(app, TOKENS.bruno))).not.toContain('tell_orchestrator');
+  });
+});
+
+describe('improvements', () => {
+  it('are put by heads and the weak point collector where the CEO sees them, and found again instead of twice', async () => {
+    const { app, ceo, dev } = await company();
+    expect(await names(await mcp(app, TOKENS.bruno))).not.toContain('propose_improvement');
+    const wendy = await mcp(app, TOKENS.wendy);
+    const put = JSON.parse((await call(wendy, 'propose_improvement', { title: 'Install jq on the nodes', text: 'Agents looked for jq 3 times.' })).content[0]!.text);
+    expect(put.improvement).toMatch(/^[0-9a-f-]{36}$/);
+    const again = await call(wendy, 'propose_improvement', { improvement: put.improvement, title: 'Install jq on the nodes', text: 'Agents looked for jq 7 times, on #4 and #9.' });
+    expect(again.isError).toBeFalsy();
+    await call(await mcp(app, TOKENS.hana), 'propose_improvement', { title: 'Let reviewers run the tests without asking', text: 'Rita asked twice whether she may run npm test.' });
+    const listed = (await app.inject({ url: '/api/improvements', ...as(ceo) })).json().improvements;
+    expect(listed).toMatchObject([
+      { title: 'Let reviewers run the tests without asking', seen: 1, status: 'open', agent: { name: 'Hana' }, department: { id: dev.id, name: 'Development' } },
+      { id: put.improvement, title: 'Install jq on the nodes', text: 'Agents looked for jq 7 times, on #4 and #9.', seen: 2, status: 'open', agent: { name: 'Wendy' }, result: null },
+    ]);
+    const open = JSON.parse((await call(wendy, 'improvements')).content[0]!.text);
+    expect(open.map((i: { title: string }) => i.title)).toEqual(['Let reviewers run the tests without asking', 'Install jq on the nodes']);
+  });
+
+  it('are for people who see the whole company', async () => {
+    const { app, ceo, dev } = await company();
+    const dana = await invitePerson(app, ceo, { name: 'Dana', email: 'dana@acme.test', access: { departments: [dev.id] } });
+    expect((await app.inject({ url: '/api/improvements', ...as(dana) })).statusCode).toBe(403);
+  });
+
+  it('go to the orchestrator when the CEO takes one into work, and it says what came of it', async () => {
+    const { app, db, ceo, orchestrator } = await company();
+    const { improvement: id } = JSON.parse((await call(await mcp(app, TOKENS.wendy), 'propose_improvement', { title: 'Install jq on the nodes', text: 'Agents looked for jq 3 times.' })).content[0]!.text);
+    const taken = await app.inject({ method: 'POST', url: `/api/improvements/${id}/take`, ...as(ceo) });
+    expect(taken.statusCode).toBe(200);
+    const [turn] = (await waiting(db, orchestrator.id)).filter(j => j.prompt !== 'round');
+    expect(turn!.prompt).toContain('Install jq on the nodes');
+    expect(turn!.prompt).toContain('Agents looked for jq 3 times.');
+    expect(turn!.prompt).toContain('close_improvement');
+    expect((await app.inject({ method: 'POST', url: `/api/improvements/${id}/take`, ...as(ceo) })).statusCode).toBe(409);
+    const orch = await mcp(app, TOKENS.orchestrator);
+    expect((await call(orch, 'close_improvement', { improvement: id, done: true, text: 'The node image installs jq from the next update.' })).isError).toBeFalsy();
+    const [row] = await db.select().from(improvements).where(eq(improvements.id, id));
+    expect(row).toMatchObject({ status: 'done', result: 'The node image installs jq from the next update.' });
+  });
+
+  it('go back to the CEO with the reason when the orchestrator cannot do one, and can be set aside', async () => {
+    const { app, db, ceo } = await company();
+    const wendy = await mcp(app, TOKENS.wendy);
+    const first = JSON.parse((await call(wendy, 'propose_improvement', { title: 'Buy a bigger machine', text: 'Builds time out.' })).content[0]!.text).improvement;
+    const second = JSON.parse((await call(wendy, 'propose_improvement', { title: 'Install jq', text: 'Looked for jq.' })).content[0]!.text).improvement;
+    await app.inject({ method: 'POST', url: `/api/improvements/${first}/take`, ...as(ceo) });
+    await call(await mcp(app, TOKENS.orchestrator), 'close_improvement', { improvement: first, done: false, text: 'This costs money: the CEO has to choose the machine.' });
+    expect((await app.inject({ method: 'POST', url: `/api/improvements/${second}/dismiss`, ...as(ceo) })).statusCode).toBe(200);
+    const rows = await db.select().from(improvements);
+    expect(rows.find(r => r.id === first)).toMatchObject({ status: 'open', result: 'This costs money: the CEO has to choose the machine.' });
+    expect(rows.find(r => r.id === second)).toMatchObject({ status: 'dismissed' });
+  });
+});

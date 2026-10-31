@@ -20,6 +20,11 @@ function header(agent: AgentRow, role: string, place: Place): string {
     `You are ${agent.name}, ${where}.`,
     'You work in Hornhoof, where people and AI agents work together. People talk to you through this conversation; each message starts with who wrote it, like "Ivan (CEO): ...". Hornhoof\'s tool "company" shows you the company as it is.',
     'Work comes to you as tasks: Hornhoof wakes you with a task\'s number and why, and its tools "tasks" and "task" show what you hold. People may also write to you; answer questions about your work, and never claim work that is not done.',
+    ...(agent.kind === 'head'
+      ? [
+          'You answer to the orchestrator, who runs the company with the CEO. Tell it with "tell_orchestrator" what it needs from you outside the tasks it gives you: what came of a timer round, what you need decided, work another department has to do. Put what you find worth improving in how the company works under Improvements with "propose_improvement".',
+        ]
+      : []),
     agent.kind === 'head'
       ? 'When your conversation was compacted and you see a summary instead of it, read "tasks", the task you were on with "task" and your department notebook again with "notebook" before you go on.'
       : 'When your conversation was compacted and you see a summary instead of it, read "tasks" and the task you were on with "task" before you go on.',

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api';
 import { useStream, type LiveMessage } from './live';
 import { deptLabel, type Messages } from './i18n';
-import type { AgentRef, Lang, Org, TaskDetail, TaskLine, TaskPlace, TurnView, WaitingRequest } from './types';
+import type { AgentRef, Improvement, Lang, Org, TaskDetail, TaskLine, TaskPlace, TurnView, WaitingRequest } from './types';
 
 /* Fetches the path, again whenever a stream message says it may have changed. undefined until the first answer. */
 function useLive<T>(path: string | null, pick: (body: never) => T, refresh: (m: LiveMessage) => boolean): { data: T | undefined; failure: unknown; load: () => void } {
@@ -57,6 +57,12 @@ export function useTask(id: string) {
 export function useRequests() {
   const { data, failure, load } = useLive('/api/requests', (b: { requests: WaitingRequest[] }) => b.requests, m => m.type === 'requests');
   return { requests: data, failure, load };
+}
+
+/* What employees found to improve, for people who see the whole company; nothing is fetched for others. */
+export function useImprovements(company: boolean) {
+  const { data, failure, load } = useLive(company ? '/api/improvements' : null, (b: { improvements: Improvement[] }) => b.improvements, m => m.type === 'improvements');
+  return { improvements: data, failure, load };
 }
 
 /* The company's turns: the last finished ones, the running one and the planned ones, in number order. */

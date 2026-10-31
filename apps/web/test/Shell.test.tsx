@@ -26,11 +26,11 @@ describe('Shell', () => {
     expect(screen.getByText(ME.company.name)).toHaveClass('sr');
   });
 
-  it('opens Subscriptions from the last tab', async () => {
+  it('opens Subscriptions from its tab, with Improvements after it for people who see the whole company', async () => {
     mockApi({ 'GET /api/org': [200, ORG], 'GET /api/subscriptions': [200, { subscriptions: SUBS }], 'GET /api/machines': [200, { machines: MACHINES }] });
     const user = userEvent.setup();
     render(<Shell me={ME} onSignOut={() => {}} />);
-    expect(screen.getAllByRole('button').filter(b => b.closest('nav')).map(b => b.textContent)).toEqual(['Map', 'Tasks', 'People', 'Subscriptions']);
+    expect(screen.getAllByRole('button').filter(b => b.closest('nav')).map(b => b.textContent)).toEqual(['Map', 'Tasks', 'People', 'Subscriptions', 'Improvements']);
     await user.click(screen.getByRole('button', { name: 'Subscriptions' }));
     expect(await screen.findByRole('heading', { name: 'Subscriptions' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Subscriptions' })).toHaveAttribute('aria-current', 'page');

@@ -12,7 +12,7 @@ export type SkillKind = 'core' | 'procedure' | 'checklist' | 'gate';
 export type Skill = { id: string; title: Lang; description: Lang; kind: SkillKind; body: string; hash: string; sources: string[]; grants: Grant[] };
 
 /* Tools a skill may grant: every agent's state, the failed turns and blocked tasks, and writing to another employee. */
-export const GRANTS = ['agents', 'failures', 'message_employee'] as const;
+export const GRANTS = ['agents', 'failures', 'message_employee', 'improvements'] as const;
 export type Grant = (typeof GRANTS)[number];
 export type RoleSkill = { id: string; on: boolean; locked: boolean };
 /* How often, in minutes, an employee may wake on its timer, and how long its order may be; a role's timer keeps to them too. */

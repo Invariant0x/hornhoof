@@ -457,3 +457,32 @@ export const notebookNotes = pgTable(
   },
   t => [unique('notebook_notes_book_number').on(t.companyId, t.departmentId, t.number).nullsNotDistinct()],
 );
+
+/* open: waits for the CEO. taken: the CEO gave it to the orchestrator. done: the orchestrator did it. dismissed: the CEO
+   set it aside. */
+export const IMPROVEMENT_STATUSES = ['open', 'taken', 'done', 'dismissed'] as const;
+
+/* Something an employee found to improve in how the company works, such as a program to install ahead or a harmless
+   action to allow, for the CEO to take into work. Its department is its finder's. */
+export const improvements = pgTable(
+  'improvements',
+  {
+    id: id(),
+    companyId: companyId(),
+    agentId: uuid('agent_id')
+      .notNull()
+      .references(() => agents.id),
+    title: text('title').notNull(),
+    text: text('text').notNull(),
+    /* How many rounds found it: one that finds it again rewrites it and adds one. */
+    seen: integer('seen').notNull().default(1),
+    status: text('status', { enum: IMPROVEMENT_STATUSES }).notNull().default('open'),
+    /* The person who took it into work or set it aside. */
+    decidedBy: uuid('decided_by').references(() => people.id),
+    /* The orchestrator's word on what came of it, or why it could not be done. */
+    result: text('result'),
+    createdAt: createdAt(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  t => [index('improvements_company_id_status').on(t.companyId, t.status)],
+);

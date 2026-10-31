@@ -8,21 +8,23 @@ import { AgentCard } from '../ui/AgentCard';
 import { LogoMark } from '../ui/icons';
 import { UpdateBanner } from '../ui/UpdateBanner';
 import { useVersion, versionText } from '../ui/VersionMark';
-import { useRequests } from '../tasks';
+import { useImprovements, useRequests } from '../tasks';
 import { TaskPanel } from '../ui/TaskPanel';
 import { useUpdates } from '../updates';
 import { AgentWindow, type StaffAsk } from './AgentWindow';
 import { DepartmentView } from './Department';
+import { Improvements } from './Improvements';
 import { MapScreen } from './Map';
 import { People } from './People';
 import { Subscriptions } from './Subscriptions';
 import { Tasks } from './Tasks';
 import { Versions } from './Versions';
 
-type Tab = 'map' | 'tasks' | 'people' | 'subscriptions';
+type Tab = 'map' | 'tasks' | 'people' | 'subscriptions' | 'improvements';
 /* The right panel: an agent's terminal or its card, or a task. agentId is 'orchestrator' or an employee's id. */
 type Panel = { kind: 'window' | 'card'; agentId: string } | { kind: 'task'; taskId: string } | null;
-const TABS: Tab[] = ['map', 'tasks', 'people', 'subscriptions'];
+/* Improvements only for people who see the whole company, who decide on them. */
+const TABS: Tab[] = ['map', 'tasks', 'people', 'subscriptions', 'improvements'];
 const THEMES: Theme[] = ['light', 'dark'];
 
 /* onVersions: only for people who see the whole company. */
@@ -110,6 +112,8 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   /* What agents wait for, counted in the navigation. */
   const { requests, load: loadRequests } = useRequests();
   const waiting = requests?.length ?? 0;
+  const { improvements, failure: improvementsFailure, load: loadImprovements } = useImprovements(company);
+  const toDecide = improvements?.filter(i => i.status === 'open').length ?? 0;
   const agentPanel = panel && panel.kind !== 'task' ? panel : null;
   const [versionsOpen, setVersionsOpen] = useState(false);
   const account = useRef<HTMLDivElement>(null);
@@ -144,19 +148,22 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
           <span className="sr">{me.company.name}</span>
         </div>
         <nav className="tabs glass" aria-label={t.shell.sections}>
-          {TABS.map(id => (
-            <button
-              key={id}
-              type="button"
-              className={tab === id ? 'on' : ''}
-              aria-current={tab === id ? 'page' : undefined}
-              aria-label={id === 'tasks' && waiting ? t.tasks.navWaiting(waiting) : undefined}
-              onClick={() => setTab(id)}
-            >
-              {t.shell.tabs[id]}
-              {id === 'tasks' && waiting > 0 && <span className="nav-count" aria-hidden="true">{waiting}</span>}
-            </button>
-          ))}
+          {TABS.filter(id => company || id !== 'improvements').map(id => {
+            const count = id === 'tasks' ? waiting : id === 'improvements' ? toDecide : 0;
+            return (
+              <button
+                key={id}
+                type="button"
+                className={tab === id ? 'on' : ''}
+                aria-current={tab === id ? 'page' : undefined}
+                aria-label={count ? (id === 'tasks' ? t.tasks.navWaiting(count) : t.improvements.nav(count)) : undefined}
+                onClick={() => setTab(id)}
+              >
+                {t.shell.tabs[id]}
+                {count > 0 && <span className="nav-count" aria-hidden="true">{count}</span>}
+              </button>
+            );
+          })}
         </nav>
         <div className="tb-right">
           <div className="account" ref={account}>
@@ -208,6 +215,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
         )}
         {tab === 'people' && <People me={me} />}
         {tab === 'subscriptions' && <Subscriptions me={me} />}
+        {tab === 'improvements' && company && <Improvements improvements={improvements} failure={improvementsFailure} onChanged={loadImprovements} />}
       </main>
       {panel?.kind === 'window' && org && (
         <AgentWindow
