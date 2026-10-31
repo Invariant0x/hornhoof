@@ -368,7 +368,8 @@ export const ru: Messages = {
         : m === 60
           ? 'Каждый час'
           : `Каждые ${m / 60} ${plural('ru', m / 60, { one: 'час', few: 'часа', many: 'часов', other: 'часа' })}`,
-    lastRound: at => `Последний раз: ${at}`,
+    nextRound: at => `Следующий обход: ${at}`,
+    nextRoundSoon: 'Следующий обход: как только освободится',
     fields: { hired: 'Нанят', name: 'Имя', model: 'Модель', effort: 'Усилие', timer: 'Таймер', subscription: 'Подписка', skills: 'Навыки', prompt: 'Промпт', reset: 'Возврат к шаблону', removed: 'Убран', switch: 'Включен или выключен' } as Record<string, string>,
     byOrchestrator: 'Оркестратор',
     viewOnly: 'Менять этого сотрудника могут только люди с доступом к его отделу или ко всей компании.',

@@ -29,7 +29,10 @@ export function TimerSettings({ timer, editable, onChange }: Props) {
 
   const offered = EVERY.includes(minutes) ? EVERY : [...EVERY, minutes].sort((a, b) => a - b);
   const unchanged = timer !== null && timer.minutes === minutes && timer.order === order.trim();
-  const last = timer?.lastAt ? new Intl.DateTimeFormat(language, { weekday: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(timer.lastAt)) : null;
+  /* The timer counts from the last round, or from when it was set; a due round waits until the employee is free. */
+  const next = timer?.lastAt ? Date.parse(timer.lastAt) + timer.minutes * 60_000 : null;
+  const when =
+    next === null ? null : next <= Date.now() ? t.agent.nextRoundSoon : t.agent.nextRound(new Intl.DateTimeFormat(language, { weekday: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(next)));
 
   return (
     <section className="ac-timer" aria-labelledby={`${id}-timer`}>
@@ -60,7 +63,7 @@ export function TimerSettings({ timer, editable, onChange }: Props) {
             <label htmlFor={`${id}-order`}>{t.agent.timerOrder}</label>
             <textarea id={`${id}-order`} rows={3} maxLength={2000} value={order} readOnly={!editable} placeholder={t.agent.timerPlaceholder} onChange={e => setOrder(e.target.value)} />
           </div>
-          {last && <small>{t.agent.lastRound(last)}</small>}
+          {when && <small>{when}</small>}
           {editable && (
             <button className="btn small" type="submit" disabled={!order.trim() || unchanged}>
               {t.agent.saveTimer}

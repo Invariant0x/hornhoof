@@ -103,15 +103,22 @@ describe('AgentCard', () => {
 
   it('shows the timer the employee has and takes it away', async () => {
     const user = userEvent.setup();
-    const timer = { minutes: 10, order: 'Look around.', lastAt: '2026-10-31T03:00:00.000Z' };
+    const timer = { minutes: 10, order: 'Look around.', lastAt: new Date(Date.now() - 2 * 60_000).toISOString() };
     const { calls } = open({ 'GET /api/agents/b1': [200, { ...CARD, timer }], 'PATCH /api/agents/b1': patched });
     const on = await screen.findByRole('checkbox', { name: 'Wake on a timer' });
     expect(on).toBeChecked();
     expect(screen.getByRole('combobox', { name: 'How often' })).toHaveValue('10');
     expect(screen.getByRole('textbox', { name: 'What to do each time' })).toHaveValue('Look around.');
-    expect(screen.getByText(/^Last round: /)).toBeInTheDocument();
+    /* It counts from the last round or from when the timer was set, so the card says when the next one comes. */
+    expect(screen.getByText(/^Next round: \D{3}/)).toBeInTheDocument();
     await user.click(on);
     await vi.waitFor(() => expect(calls.find(c => c.method === 'PATCH')?.body).toEqual({ timer: null }));
+  });
+
+  it('says a round that is due comes as soon as the employee is free', async () => {
+    const timer = { minutes: 10, order: 'Look around.', lastAt: new Date(Date.now() - 30 * 60_000).toISOString() };
+    open({ 'GET /api/agents/b1': [200, { ...CARD, timer }] });
+    expect(await screen.findByText('Next round: as soon as it is free')).toBeInTheDocument();
   });
 
   it('names the level the Default runs at: Kimi at its most', async () => {
