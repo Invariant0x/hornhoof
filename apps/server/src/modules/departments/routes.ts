@@ -8,7 +8,7 @@ import { agentChanges, agents, companies, departments, proposals, tasks, teams }
 import { encryptSecret } from '../../crypto/secrets.js';
 import { Repo } from '@hornhoof/protocol';
 import { ApiError } from '../../errors.js';
-import { instructionsOf } from '../agents/instructions.js';
+import { placeOf, renderInstructions } from '../agents/instructions.js';
 import { enqueueTurn, orchestratorOf, orchestratorState } from '../conversation/queue.js';
 import { appendEvent } from '../events/store.js';
 import { checkStaff, departmentOf, HireLine, runsTier, servingSubscriptions, spotIn } from '../tools/staff.js';
@@ -274,8 +274,9 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
             createdBy: personOf(me),
           })
           .returning();
-        /* A turn carries the instructions whole, so a hire whose skills make them too long would never run. */
-        if ((await instructionsOf({ db: tx, templates: ctx.templates }, agent!)).text.length > MAX_INSTRUCTIONS) {
+        /* A turn carries the instructions whole, so a hire whose skills make them too long would never run. A head's
+           notebook has room of its own on top, as on the employee's card. */
+        if (renderInstructions(ctx.templates, agent!, await placeOf(tx, agent!)).text.length > MAX_INSTRUCTIONS) {
           throw new ApiError(400, 'validation', `${line.name}'s instructions would be longer than ${MAX_INSTRUCTIONS} characters. Turn some skills off.`, 'instructions_too_long');
         }
         await tx.insert(agentChanges).values({ companyId: me.companyId, agentId: agent!.id, ...changedBy(me), field: 'hired', before: null, after: line });

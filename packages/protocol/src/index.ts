@@ -10,8 +10,10 @@ export type JobError = (typeof JOB_ERRORS)[number];
 
 /* The last bytes of a job's output kept for people to read when something fails. */
 export const TAIL_BYTES = 4096;
-/* The longest standing instructions a job may carry; Hornhoof refuses edits that would go past it. */
+/* The longest standing instructions people and templates may give an agent; Hornhoof refuses edits that would go past it. */
 export const MAX_INSTRUCTIONS = 20_000;
+/* A head's or the orchestrator's notebook comes on top of them in a job: its heading, notes and their numbers. */
+export const NOTEBOOK_ROOM = 5_000;
 
 const LimitWindow = z.object({
   name: z.string().min(1).max(40),
@@ -221,7 +223,7 @@ const ServerMessage = z.discriminatedUnion('type', [
     timeoutMs: z.number().int().positive(),
     secret: z.string().nullable(),
     /* The agent's standing instructions for this job, and the token its Hornhoof tools present. */
-    instructions: z.string().max(MAX_INSTRUCTIONS).nullable(),
+    instructions: z.string().max(MAX_INSTRUCTIONS + NOTEBOOK_ROOM).nullable(),
     toolToken: z.string().max(200).nullable(),
     /* The conversation from before, for a program that starts a new session on a turn that types nothing: it goes with
        the instructions when the program starts and is no change of them. */

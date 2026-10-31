@@ -2,11 +2,13 @@ import type { AddressInfo } from 'node:net';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { eq } from 'drizzle-orm';
+import { MAX_INSTRUCTIONS, parseServerMessage } from '@hornhoof/protocol';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, companies, departments, jobs, notebookNotes, subscriptions } from '../src/db/schema.js';
 import { instructionsOf } from '../src/modules/agents/instructions.js';
+import { NOTE_MAX } from '../src/modules/notebook/book.js';
 import { as, invitePerson, listen, openStream, setUpCompany, testApp, until } from './helpers.js';
 
 const TOKEN = 'tool-token-0123456789abcdef0123456789';
@@ -149,6 +151,40 @@ describe("a department's notebook", () => {
     expect((await app.inject({ url: book(ops.id), ...as(dana) })).statusCode).toBe(403);
     expect((await add(app, dana, ops.id, 'Theirs.')).statusCode).toBe(403);
     expect((await app.inject({ url: book('00000000-0000-4000-8000-000000000000'), ...as(ceo) })).statusCode).toBe(404);
+  });
+
+  it('leaves room in a turn for a full notebook on top of what a head may be given', async () => {
+    const { app, db, ceo, acme } = await withDepartments();
+    const [mkt] = await db.insert(departments).values({ companyId: acme.id, templateKey: 'marketing', roleCode: 'MKT' }).returning();
+    for (let i = 0; i < 13; i++) expect((await add(app, ceo, mkt!.id, `${i} `.padEnd(NOTE_MAX, 'x'))).statusCode).toBe(201);
+    const key = await app.inject({
+      method: 'POST',
+      url: '/api/subscriptions',
+      payload: { provider: 'anthropic_api', kind: 'api_key', label: 'Team key', apiKey: 'sk-ant-api03-team-key-5678', target: { kind: 'any' } },
+      ...as(ceo),
+    });
+    /* Its own skills and others up to near the limit a person may write; the notebook comes on top. */
+    const { templates } = app.ctx;
+    const role = templates.roles.get('MKT-HEAD')!;
+    const skills = role.skills.map(s => s.id);
+    let size = role.body.length + skills.reduce((n, id) => n + templates.skills.get(id)!.body.length + 60, 0);
+    for (const [id, skill] of templates.skills) {
+      if (skills.includes(id) || id.startsWith('orch-') || size + skill.body.length + 60 > 17_500) continue;
+      skills.push(id);
+      size += skill.body.length + 60;
+    }
+    const hired = await app.inject({
+      method: 'POST',
+      url: `/api/departments/${mkt!.id}/staff`,
+      payload: { people: [{ role: 'MKT-HEAD', name: 'Mira', model: 'claude-sonnet-5-5', subscription: key.json().subscription.id, skills }] },
+      ...as(ceo),
+    });
+    expect(hired.statusCode).toBe(201);
+    const [mira] = await db.select().from(agents).where(eq(agents.name, 'Mira'));
+    const { text } = await instructionsOf(app.ctx, mira!);
+    expect(text.length).toBeGreaterThan(MAX_INSTRUCTIONS);
+    const run = { type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 1000, secret: null, instructions: text, toolToken: null };
+    expect(parseServerMessage(JSON.stringify(run))).toMatchObject({ instructions: text });
   });
 
   it("goes into its head's instructions, which say to read it again after a compaction", async () => {
