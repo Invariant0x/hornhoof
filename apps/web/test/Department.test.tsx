@@ -98,7 +98,7 @@ describe('Department view', () => {
     expect(screen.getByText(/Work goes left to right through the gates/)).toBeInTheDocument();
     started = true;
     stream.send({ type: 'working', working: 2 });
-    await vi.waitFor(() => expect(within(screen.getByRole('region', { name: 'Members' })).getByRole('button', { name: /Bruno/ })).toHaveTextContent('BrunoClaudeworkingClaude Sonnet 5.5, Anthropic#12 Checkout API'));
+    await vi.waitFor(() => expect(within(screen.getByRole('region', { name: 'Members' })).getByRole('button', { name: /Bruno/ })).toHaveTextContent('BrunoClaudeworkingClaude Sonnet 5.5, default effort, Anthropic#12 Checkout API'));
     /* The line at the bottom says what changed last. */
     expect(screen.getByText('Bruno: working, #12 Checkout API')).toBeInTheDocument();
   });
@@ -129,6 +129,16 @@ describe('Department view', () => {
     await flyIn(user);
     const members = screen.getByRole('region', { name: 'Members' });
     expect(within(members).getByRole('button', { name: /Bruno/ })).toHaveTextContent('Claude Sonnet 5.5, max effort, Anthropic');
+  });
+
+  it('says default effort for an employee whose level Hornhoof does not know', async () => {
+    const user = userEvent.setup();
+    const [dev] = DEV_ORG.departments;
+    const [dana, bruno] = dev!.employees;
+    shell({}, { ...DEV_ORG, departments: [{ ...dev!, employees: [dana!, { ...bruno!, effort: null }] }] });
+    await flyIn(user);
+    const members = screen.getByRole('region', { name: 'Members' });
+    expect(within(members).getByRole('button', { name: /Bruno/ })).toHaveTextContent('Claude Sonnet 5.5, default effort, Anthropic');
   });
 
   it('says how often an employee on a timer wakes, when it holds no task', async () => {

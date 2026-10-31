@@ -18,8 +18,10 @@ export function effortsOf(models: ModelOption[], model: string): string[] {
   return named.length ? named[0]!.filter(level => named.every(list => list.includes(level))) : [];
 }
 
-/* The level the Default runs at, when Hornhoof knows it: Kimi at the most its model takes, else the model's own. */
+/* The level the Default runs at, when Hornhoof knows it: Kimi at the most its model takes, Claude Code's Default model,
+   Opus 5.5, at medium, else the model's own. */
 export function defaultEffort(provider: ProviderId, models: ModelOption[], model: string): string | null {
+  if (!model && (provider === 'claude' || provider === 'anthropic_api')) return 'medium';
   if (provider !== 'kimi') return models.find(m => m.id === model)?.defaultEffort ?? null;
   const efforts = effortsOf(models, model);
   return efforts.length && !efforts.includes('max') ? efforts[efforts.length - 1]! : 'max';

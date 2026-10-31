@@ -42,10 +42,10 @@ const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 /* API keys run these; a node never needs to report them. */
 export const API_MODELS: { anthropic_api: ModelOption[]; openai_api: ModelOption[] } = {
   anthropic_api: [
-    { id: 'claude-fable-5-1', name: 'Claude Fable 5.1', efforts: EFFORTS },
-    { id: 'claude-opus-5-5', name: 'Claude Opus 5.5', efforts: EFFORTS },
-    { id: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5', efforts: EFFORTS },
-    { id: 'claude-haiku-5-5', name: 'Claude Haiku 5.5', efforts: EFFORTS },
+    { id: 'claude-fable-5-1', name: 'Claude Fable 5.1', efforts: EFFORTS, defaultEffort: 'high' },
+    { id: 'claude-opus-5-5', name: 'Claude Opus 5.5', efforts: EFFORTS, defaultEffort: 'medium' },
+    { id: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5', efforts: EFFORTS, defaultEffort: 'medium' },
+    { id: 'claude-haiku-5-5', name: 'Claude Haiku 5.5', efforts: EFFORTS, defaultEffort: 'medium' },
   ],
   openai_api: [
     { id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol', efforts: EFFORTS },
@@ -56,12 +56,14 @@ export const API_MODELS: { anthropic_api: ModelOption[]; openai_api: ModelOption
   ],
 };
 
-/* Claude Code takes these and moves each to the newest model of its family. */
+/* Claude Code takes these and moves each to the newest model of its family. Each runs at high unless picked, but the
+   5.5 models at medium, and the Default model is Opus 5.5 (code.claude.com/docs/en/model-config). */
+export const CLAUDE_DEFAULT_EFFORT = 'medium';
 export const CLAUDE_ALIASES: ModelOption[] = [
-  { id: 'fable', name: 'Fable', efforts: EFFORTS },
-  { id: 'opus', name: 'Opus', efforts: EFFORTS },
-  { id: 'sonnet', name: 'Sonnet', efforts: EFFORTS },
-  { id: 'haiku', name: 'Haiku', efforts: EFFORTS },
+  { id: 'fable', name: 'Fable', efforts: EFFORTS, defaultEffort: 'high' },
+  { id: 'opus', name: 'Opus', efforts: EFFORTS, defaultEffort: 'medium' },
+  { id: 'sonnet', name: 'Sonnet', efforts: EFFORTS, defaultEffort: 'medium' },
+  { id: 'haiku', name: 'Haiku', efforts: EFFORTS, defaultEffort: 'medium' },
 ];
 
 /* The effort an agent runs at: what a person picked while its model takes it, else Kimi at the most its model takes and
@@ -81,8 +83,25 @@ export function effortsOf(models: ModelOption[], model: string | null): string[]
   return named.length ? named[0]!.filter(level => named.every(list => list.includes(level))) : [];
 }
 
+const pick = (defaultEffort: string | undefined) => (defaultEffort ? { defaultEffort } : {});
+
+/* The level an agent runs at when nobody picked one, when Hornhoof knows it: Kimi at the most its model takes, Claude Code
+   as its docs give it, even for a node's older list, and the others as their node reported. */
+export function defaultEffortOf(provider: ProviderId, models: ModelOption[], model: string | null): string | null {
+  if (provider === 'kimi') {
+    const efforts = effortsOf(models, model);
+    return efforts.length && !efforts.includes('max') ? efforts[efforts.length - 1]! : 'max';
+  }
+  const claude = provider === 'claude' || provider === 'anthropic_api';
+  if (!model) return claude ? CLAUDE_DEFAULT_EFFORT : null;
+  const known = claude ? [...CLAUDE_ALIASES, ...API_MODELS.anthropic_api] : [];
+  return models.find(m => m.id === model)?.defaultEffort ?? known.find(m => m.id === model)?.defaultEffort ?? null;
+}
+
 /* What a subscription can run: what its node reported, else what Hornhoof knows for the provider. The web adds "Default" on top. */
 export function modelsFor(provider: ProviderId, reported: ModelOption[] | null): ModelOption[] {
+  /* A node from before Hornhoof knew Claude Code's levels reports its models without them. */
+  if (reported && provider === 'claude') return reported.map(m => (m.defaultEffort ? m : { ...m, ...pick(CLAUDE_ALIASES.find(a => a.id === m.id)?.defaultEffort) }));
   if (reported) return reported;
   if (provider === 'anthropic_api' || provider === 'openai_api') return API_MODELS[provider];
   if (provider === 'claude') return CLAUDE_ALIASES;

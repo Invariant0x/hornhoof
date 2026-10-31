@@ -338,6 +338,7 @@ export const ru: Messages = {
     defaultEffort: (level: string) => `По умолчанию (${level.toLowerCase()})`,
     efforts: { none: 'Без размышлений', minimal: 'Минимальное', low: 'Низкое', medium: 'Среднее', high: 'Высокое', xhigh: 'Очень высокое', max: 'Максимальное', ultra: 'Предельное' } as Record<string, string>,
     effortLine: (level: string) => `${level.toLowerCase()} усилие`,
+    effortDefault: 'усилие по умолчанию',
     noSubscription: 'Пока нет',
     skills: 'Навыки',
     prompt: 'Промпт',

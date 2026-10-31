@@ -50,7 +50,8 @@ const hhmm = (d: Date) => `${String(d.getHours()).padStart(2, '0')}:${String(d.g
 const taskText = (e: Employee) => (e.task ? `#${e.task.number} ${e.task.title}` : '');
 
 function modelLine(t: ReturnType<typeof useT>, e: Employee): string {
-  const effort = e.effort && t.agent.effortLine(t.agent.efforts[e.effort] ?? e.effort);
+  /* Hornhoof names the level whenever it knows it, the Default's too; else it says the program picks it. */
+  const effort = e.effort ? t.agent.effortLine(t.agent.efforts[e.effort] ?? e.effort) : e.provider && t.agent.effortDefault;
   return [e.modelName || e.model || t.agent.default, effort, e.provider && PROVIDER_NAMES[e.provider]].filter(Boolean).join(', ');
 }
 

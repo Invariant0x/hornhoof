@@ -344,6 +344,7 @@ export const en = {
     defaultEffort: (level: string) => `Default (${level})`,
     efforts: { none: 'None', minimal: 'Minimal', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max', ultra: 'Ultra' } as Record<string, string>,
     effortLine: (level: string) => `${level.toLowerCase()} effort`,
+    effortDefault: 'default effort',
     noSubscription: 'None yet',
     skills: 'Skills',
     prompt: 'Prompt',

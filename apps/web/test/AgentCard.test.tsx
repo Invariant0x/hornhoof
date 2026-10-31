@@ -128,6 +128,13 @@ describe('AgentCard', () => {
     expect(await screen.findByRole('option', { name: 'Default (Max)' })).toBeInTheDocument();
   });
 
+  it('names the level Claude Code runs its Default model at: medium on Opus 5.5', async () => {
+    const plan = { ...TEAM_KEY, id: 's-cl', provider: 'claude' as const };
+    const opus = { id: 'opus', name: 'Opus', efforts: ['low', 'medium', 'high', 'xhigh', 'max'], defaultEffort: 'medium' };
+    open({ 'GET /api/agents/b1': [200, { ...CARD, model: '', subscription: plan, runsOn: [{ subscription: plan, models: [opus] }] }] });
+    expect(await screen.findByRole('option', { name: 'Default (Medium)' })).toBeInTheDocument();
+  });
+
   it("names the Default by its model's own level when the program has one", async () => {
     const codex = { ...TEAM_KEY, id: 's-cx', provider: 'codex' as const };
     const sol = { id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol', efforts: ['low', 'xhigh', 'ultra'], defaultEffort: 'low' };

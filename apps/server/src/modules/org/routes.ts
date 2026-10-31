@@ -1,4 +1,4 @@
-import { effortFor, effortsOf, modelsFor, type ModelOption, type ProviderId } from '@hornhoof/protocol';
+import { defaultEffortOf, effortFor, effortsOf, modelsFor, type ModelOption, type ProviderId } from '@hornhoof/protocol';
 import { and, asc, desc, eq, isNotNull, isNull, ne, notInArray } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import type { Ctx } from '../../app.js';
@@ -16,7 +16,7 @@ import { subView } from '../subscriptions/views.js';
 /* The level an agent thinks at, as far as Hornhoof knows: the one it was set to or Kimi's most, else its model's default. */
 function effortShown(sub: { provider: ProviderId; models: ModelOption[] | null }, agent: { model: string; effort: string | null }): string | null {
   const models = modelsFor(sub.provider, sub.models);
-  return effortFor(sub.provider, agent.effort, effortsOf(models, agent.model)) ?? models.find(m => m.id === agent.model)?.defaultEffort ?? null;
+  return effortFor(sub.provider, agent.effort, effortsOf(models, agent.model)) ?? defaultEffortOf(sub.provider, models, agent.model);
 }
 
 export function orgRoutes(app: FastifyInstance, { db, hub, templates }: Ctx): void {
