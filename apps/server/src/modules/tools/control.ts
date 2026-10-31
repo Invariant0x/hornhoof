@@ -8,7 +8,7 @@ import { departments, people } from '../../db/schema.js';
 import { AgentPatch } from '../agents/routes.js';
 import { deptName } from '../departments/templates.js';
 import { BuildBody, RepoBody } from '../departments/routes.js';
-import { NOTE_MAX, NoteBody } from '../notebook/routes.js';
+import { NOTE_MAX, NoteBody } from '../notebook/book.js';
 import { InviteBody, PersonPatch } from '../people/routes.js';
 import { ConnectBody, SubscriptionBody } from '../subscriptions/routes.js';
 import { UpdateBody } from '../updates/routes.js';

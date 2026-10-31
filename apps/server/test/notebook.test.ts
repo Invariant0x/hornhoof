@@ -113,3 +113,50 @@ describe("the company's notebook", () => {
     expect(await notes(app, ceo)).toMatchObject([{ number: 1, by: { kind: 'orchestrator' } }]);
   });
 });
+
+describe("a department's notebook", () => {
+  async function withDepartments() {
+    const { app, db, ceo } = await company();
+    const [acme] = await db.select().from(companies);
+    const [dev] = await db.insert(departments).values({ companyId: acme!.id, templateKey: 'development', roleCode: 'DEV' }).returning();
+    const [ops] = await db.insert(departments).values({ companyId: acme!.id, templateKey: 'operations', roleCode: 'OPS' }).returning();
+    return { app, db, ceo, acme: acme!, dev: dev!, ops: ops! };
+  }
+  const book = (id: string) => `/api/departments/${id}/notebook`;
+  const add = (app: FastifyInstance, token: string, id: string, text: string) => app.inject({ method: 'POST', url: book(id), payload: { text }, ...as(token) });
+  const texts = async (app: FastifyInstance, token: string, id: string) => (await app.inject({ url: book(id), ...as(token) })).json().notes.map((n: { text: string }) => n.text);
+
+  it('keeps numbered notes of its own, apart from the company notebook and other departments', async () => {
+    const { app, ceo, dev, ops } = await withDepartments();
+    await write(app, ceo, 'A company rule.');
+    expect((await add(app, ceo, dev.id, 'Tests first.')).json().note.number).toBe(1);
+    await add(app, ceo, dev.id, 'Small commits.');
+    expect((await add(app, ceo, ops.id, 'Check every hour.')).json().note.number).toBe(1);
+    expect((await app.inject({ method: 'PATCH', url: `${book(dev.id)}/2`, payload: { text: 'Small commits, one idea each.' }, ...as(ceo) })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'DELETE', url: `${book(dev.id)}/1`, ...as(ceo) })).statusCode).toBe(204);
+    expect((await app.inject({ url: book(dev.id), ...as(ceo) })).json().notes).toMatchObject([{ number: 2, text: 'Small commits, one idea each.', by: { kind: 'person', name: 'Ivan' } }]);
+    expect((await add(app, ceo, dev.id, 'Review before merge.')).json().note.number).toBe(3);
+    expect(await texts(app, ceo, ops.id)).toEqual(['Check every hour.']);
+    expect((await notes(app, ceo)).map((n: { text: string }) => n.text)).toEqual(['A company rule.']);
+  });
+
+  it("is for people who may change the department's employees", async () => {
+    const { app, ceo, dev, ops } = await withDepartments();
+    const dana = await invitePerson(app, ceo, { name: 'Dana', email: 'dana@acme.test', access: { departments: [dev.id] } });
+    expect((await add(app, dana, dev.id, 'Mine.')).statusCode).toBe(201);
+    expect(await texts(app, dana, dev.id)).toEqual(['Mine.']);
+    expect((await app.inject({ url: book(ops.id), ...as(dana) })).statusCode).toBe(403);
+    expect((await add(app, dana, ops.id, 'Theirs.')).statusCode).toBe(403);
+    expect((await app.inject({ url: book('00000000-0000-4000-8000-000000000000'), ...as(ceo) })).statusCode).toBe(404);
+  });
+
+  it('says on the stream that it changed, only to people who reach the department', async () => {
+    const { app, ceo, dev, ops } = await withDepartments();
+    const dana = await invitePerson(app, ceo, { name: 'Dana', email: 'dana@acme.test', access: { departments: [ops.id] } });
+    const hers = await openStream(app, dana);
+    const mine = await openStream(app, ceo);
+    await add(app, ceo, dev.id, 'A rule.');
+    await until(() => mine.messages.some(m => m.type === 'notebook' && (m as { spot?: { departmentId: string } }).spot?.departmentId === dev.id));
+    expect(hers.messages.some(m => m.type === 'notebook')).toBe(false);
+  });
+});

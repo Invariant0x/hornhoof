@@ -2,7 +2,7 @@ import { eq, inArray } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { companies, departments, type agents } from '../../db/schema.js';
 import { ORCHESTRATOR_INSTRUCTIONS } from '../conversation/prompt.js';
-import { listNotes } from '../notebook/routes.js';
+import { companyBook, listNotes } from '../notebook/book.js';
 import { deptName } from '../departments/templates.js';
 import { textHash, type Lang, type Templates } from '../templates/load.js';
 
@@ -92,7 +92,7 @@ export function orchestratorSteady(t: Templates): string {
 
 /* The company notebook as the orchestrator reads it, each note with its number. */
 export async function notebookPart(db: Ctx['db'], companyId: string): Promise<string> {
-  const notes = await listNotes(db, companyId);
+  const notes = await listNotes(db, companyBook(companyId));
   const lines = notes.length ? notes.map(n => `[#${n.number}] ${n.text}`).join('\n') : 'The notebook is empty.';
   return `## Company notebook\n\nWhat you and the people who run the company keep across conversations. Change it with remember, rewrite_note and forget.\n\n${lines}`;
 }
