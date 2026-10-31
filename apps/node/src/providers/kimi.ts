@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import type { AgentEvent, ModelOption } from '@hornhoof/protocol';
 import type { JobUser } from '../isolation.js';
 import type { ProviderAdapter, RunInput, RunResult } from '../runner.js';
+import { programEnded } from '../program-exit.js';
 import { kimiPlanLimits } from '../terminal/programs.js';
 import { contentText, inputText, isRecord, toolName } from './events.js';
 import { childEnv, ensureDir, installPackage, interactiveLogin, runProgram, tokensIn, withEfforts, writePrivate } from './process.js';
@@ -154,9 +155,10 @@ export function kimiAdapter({ home, tools, bin = join(tools, 'bin', 'kimi'), use
         },
       });
 
-      if (done.timedOut) return { ok: false, sessionId, result: '', output: done.output, error: 'timeout', limits: null };
+      const output = programEnded(done.output, done);
+      if (done.timedOut) return { ok: false, sessionId, result: '', output, error: 'timeout', limits: null };
       if (done.code === 0 && answer) return { ok: true, sessionId, result: answer, output: done.output, error: null, limits: null };
-      return { ok: false, sessionId, result: answer, output: done.output, error: SIGNED_OUT.test(done.output) ? 'not_logged_in' : 'agent_failed', limits: null };
+      return { ok: false, sessionId, result: answer, output, error: SIGNED_OUT.test(done.output) ? 'not_logged_in' : 'agent_failed', limits: null };
     },
 
     async secrets() {

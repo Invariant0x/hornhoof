@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { closeSync, constants, fchownSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import type { JobUser } from '../isolation.js';
 import type { LoginIo } from '../runner.js';
+import type { ProgramExit } from '../program-exit.js';
 
 /* Output kept in memory per run. The tail sent to Hornhoof is cut from the end of it. */
 const KEEP_BYTES = 256 * 1024;
@@ -15,7 +16,7 @@ export function childEnv(tools: string, extra: Record<string, string>): NodeJS.P
   return { ...env, ...extra };
 }
 
-export type Finished = { code: number | null; output: string; timedOut: boolean };
+export type Finished = ProgramExit & { output: string; timedOut: boolean };
 
 type SpawnOptions = {
   bin: string;
@@ -69,10 +70,10 @@ export function runProgram({ bin, args, env, cwd, timeoutMs, signal, onLine, use
       signal?.removeEventListener('abort', stop);
       resolve(res);
     };
-    child.on('error', err => finish({ code: null, output: `${output}\n${err.message}`, timedOut }));
-    child.on('close', code => {
+    child.on('error', err => finish({ code: null, signal: null, at: new Date().toISOString(), output: `${output}\n${err.message}`, timedOut }));
+    child.on('close', (code, signal) => {
       if (partial) onLine?.(partial);
-      finish({ code, output, timedOut });
+      finish({ code, signal, at: new Date().toISOString(), output, timedOut });
     });
   });
 }
