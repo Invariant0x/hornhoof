@@ -168,6 +168,12 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
     method: 'POST',
     url: `/api/subscriptions/${subscription}/orchestrator`,
   }));
+  tool(
+    'change_orchestrator',
+    "Changes your own model ('' for Default) and effort (a level your model takes, null for the program's default), as your card does. They count from your next turn.",
+    { model: AgentPatch.shape.model, effort: AgentPatch.shape.effort },
+    body => ({ method: 'PATCH', url: `/api/agents/${job.agentId}`, payload: body }),
+  );
   tool('remove_subscription', 'Removes a subscription or API key; the employees on it stay without one.', { subscription: Id('subscription') }, ({ subscription }) => ({
     method: 'DELETE',
     url: `/api/subscriptions/${subscription}`,
