@@ -34,7 +34,7 @@ describe('Subscriptions', () => {
     const limits = {
       status: 'allowed' as const,
       windows: [
-        { name: 'five_hour', utilization: 0.42, resetsAt: '2026-10-29T18:00:00.000Z' },
+        { name: 'five_hour', utilization: 0.42, resetsAt: '2099-10-29T18:00:00.000Z' },
         { name: 'seven_day', utilization: 0.93, resetsAt: null },
         { name: '120_minutes', utilization: 0.05, resetsAt: null },
         { name: 'month', utilization: 0.06, resetsAt: null },
@@ -55,17 +55,19 @@ describe('Subscriptions', () => {
   });
 
   it('shows five hours and seven days for every plan, saying which the plan does not have and which are not known yet', async () => {
-    const codex = { status: 'allowed' as const, windows: [{ name: 'seven_day', utilization: 0.73, resetsAt: null }] };
-    const kimi = { status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0.88, resetsAt: null }, { name: 'month', utilization: 0.06, resetsAt: null }] };
-    const subs = [{ ...SUBS[0]!, limits: null }, { ...SUBS[1]!, limits: codex }, { ...SUBS[2]!, limits: kimi }, SUBS[3]!];
+    /* A turn tells only some windows; only a complete list says the plan has no other. */
+    const claude = { status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0.3, resetsAt: null }, { name: 'seven_day_opus', utilization: 1, resetsAt: null }] };
+    const codex = { status: 'allowed' as const, windows: [{ name: 'seven_day', utilization: 0.73, resetsAt: null }], complete: true };
+    const kimi = { status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0.88, resetsAt: null }, { name: 'month', utilization: 0.06, resetsAt: null }], complete: true };
+    const subs = [{ ...SUBS[0]!, limits: claude }, { ...SUBS[1]!, limits: codex }, { ...SUBS[2]!, limits: kimi }, SUBS[3]!];
     mockApi({ 'GET /api/subscriptions': [200, { subscriptions: subs }], 'GET /api/machines': [200, { machines: MACHINES }] });
     render(<Subscriptions me={ME} />);
     const rows = async (name: string) => within(within(await screen.findByRole('row', { name: new RegExp(`^${name}\\b`) })).getByRole('list', { name: 'Limits' })).getAllByRole('listitem');
     const [claudeFive, claudeSeven, ...claudeMore] = await rows('Claude');
-    expect(claudeFive).toHaveTextContent(/^5 hoursNo data yet$/);
+    expect(claudeFive).toHaveTextContent(/^5 hours30%$/);
     expect(claudeSeven).toHaveTextContent(/^7 daysNo data yet$/);
-    expect(claudeFive!.querySelector('.bar')).toHaveClass('none');
-    expect(claudeMore).toEqual([]);
+    expect(claudeSeven!.querySelector('.bar')).toHaveClass('none');
+    expect(claudeMore.map(r => r.textContent)).toEqual(['7 days, Opus100%']);
     const [codexFive, codexSeven] = await rows('Codex');
     expect(codexFive).toHaveTextContent(/^5 hoursNot on this plan$/);
     expect(codexSeven).toHaveTextContent(/^7 days73%$/);
@@ -76,10 +78,25 @@ describe('Subscriptions', () => {
   });
 
   it('says when a plan reached its limit', async () => {
-    const limits = { status: 'rejected' as const, windows: [{ name: 'five_hour', utilization: 1, resetsAt: '2026-10-29T18:00:00.000Z' }] };
+    const limits = { status: 'rejected' as const, windows: [{ name: 'five_hour', utilization: 1, resetsAt: '2099-10-29T18:00:00.000Z' }] };
     mockApi({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, limits }] }], 'GET /api/machines': [200, { machines: MACHINES }] });
     render(<Subscriptions me={ME} />);
     expect(within(await screen.findByRole('row', { name: /^Claude\b/ })).getByText(/^Limit reached, resets at /)).toBeInTheDocument();
+  });
+
+  it('shows a window that started over since the plan last spoke as not known yet, and no reached limit for it', async () => {
+    const limits = {
+      status: 'rejected' as const,
+      windows: [{ name: 'five_hour', utilization: 1, resetsAt: '2026-10-29T18:00:00.000Z' }, { name: 'seven_day', utilization: 0.4, resetsAt: '2099-11-04T00:00:00.000Z' }],
+      complete: true,
+    };
+    mockApi({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, limits }] }], 'GET /api/machines': [200, { machines: MACHINES }] });
+    render(<Subscriptions me={ME} />);
+    const row = await screen.findByRole('row', { name: /^Claude\b/ });
+    const [five, seven] = within(within(row).getByRole('list', { name: 'Limits' })).getAllByRole('listitem');
+    expect(five).toHaveTextContent(/^5 hoursNo data yet$/);
+    expect(seven).toHaveTextContent(/^7 days40%resets at /);
+    expect(within(row).queryByText(/^Limit reached/)).not.toBeInTheDocument();
   });
 
   it('says Built-in node offline for an API key whose node is down', async () => {

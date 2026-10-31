@@ -41,6 +41,9 @@ const WINDOW_MINUTES: Record<string, number> = { five_hour: 300, one_day: 1440, 
 
 function windowName(t: Messages, name: string): string {
   if (name === 'month') return t.subs.month;
+  /* A week the plan counts for one model apart, such as Opus. */
+  const model = /^seven_day_([a-z]+)$/.exec(name)?.[1];
+  if (model) return `${t.subs.days(7)}, ${model[0]!.toUpperCase()}${model.slice(1)}`;
   const minutes = WINDOW_MINUTES[name] ?? Number(/^(\d+)_minutes$/.exec(name)?.[1]);
   if (!minutes) return name.replaceAll('_', ' ');
   if (minutes % 1440 === 0) return t.subs.days(minutes / 1440);
@@ -50,29 +53,37 @@ function windowName(t: Messages, name: string): string {
 /* The windows every plan shows, so plans read alike; a plan's other windows follow them. */
 const MAIN_WINDOWS = ['five_hour', 'seven_day'];
 
+/* A window that started over since the plan last spoke: its share is not known again until the plan speaks. */
+const startedOver = (w: Limits['windows'][number]) => w.resetsAt !== null && Date.parse(w.resetsAt) <= Date.now();
+
 /* Each window of the plan's limits as a bar with its share: five hours and seven days always, empty when the plan has
-   no such window or has not said yet. A plan that reached one says when the fullest resets. A key pays as it goes. */
+   no such window or has not said yet. Only a complete list says the plan has none. A plan that reached one says when
+   the fullest resets. A key pays as it goes. */
 function LimitBars({ sub }: { sub: SubView }) {
   const t = useT();
   const { language } = useLanguage();
   if (sub.kind === 'api_key') return <small className="limits">{t.subs.noPlanLimits}</small>;
   const limits: Limits | null = sub.limits;
-  const top = [...(limits?.windows ?? [])].sort((a, b) => (b.utilization ?? -1) - (a.utilization ?? -1))[0];
+  const live = (limits?.windows ?? []).filter(w => !startedOver(w));
+  const top = [...live].sort((a, b) => (b.utilization ?? -1) - (a.utilization ?? -1))[0];
+  /* A plan that reached a window still says so until that window starts over. */
+  const full = (limits?.windows ?? []).filter(w => (w.utilization ?? 0) >= 1);
+  const reached = limits?.status === 'rejected' && (!full.length || full.some(w => !startedOver(w)));
   const rows = [
     ...MAIN_WINDOWS.map(name => ({ name, window: limits?.windows.find(w => w.name === name) })),
     ...(limits?.windows ?? []).filter(w => !MAIN_WINDOWS.includes(w.name) && w.utilization !== null).map(w => ({ name: w.name, window: w })),
   ];
   return (
     <>
-      {limits?.status === 'rejected' && <small className="limits">{t.subs.limitReached(clock(language, top?.resetsAt ?? null))}</small>}
+      {reached && <small className="limits">{t.subs.limitReached(clock(language, top?.resetsAt ?? null))}</small>}
       <ul className="limit-bars" aria-label={t.subs.limits}>
         {rows.map(({ name, window: w }) => {
-          if (!w || w.utilization === null) {
+          if (!w || w.utilization === null || startedOver(w)) {
             return (
               <li key={name}>
                 <span>{windowName(t, name)}</span>
                 <span className="bar none" />
-                <em>{limits && !w ? t.subs.notOnPlan : t.subs.noDataYet}</em>
+                <em>{limits?.complete && !w ? t.subs.notOnPlan : t.subs.noDataYet}</em>
               </li>
             );
           }
