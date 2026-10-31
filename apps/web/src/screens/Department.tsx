@@ -269,9 +269,9 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
     return () => ro.disconnect();
   }, [place]);
 
-  /* Each way a message went between two of its agents keeps running for ten minutes after the last one: amber up to the
-     head and back from a gate, cyan down and on. */
-  const seed = useMemo(() => (d.live ?? []).map(w => ({ key: `${w.from}>${w.to}`, at: w.at, value: { from: w.from, to: w.to } })), [d.live]);
+  /* Each way a message went between two of its agents keeps running for ten minutes after the last one, and longer while
+     the work it brought goes on: amber up to the head and back from a gate, cyan down and on. */
+  const seed = useMemo(() => (d.live ?? []).map(w => ({ key: `${w.from}>${w.to}`, at: w.at, held: w.held, value: { from: w.from, to: w.to } })), [d.live]);
   const channels = useChannels(seed);
   const { touch } = channels;
   useStream(m => {

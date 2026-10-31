@@ -285,6 +285,14 @@ describe('Map', () => {
     expect(signals.every(m => m.getAttribute('repeatCount') === 'indefinite')).toBe(true);
   });
 
+  it('keeps a way on past ten minutes while the server holds it for work that goes on', async () => {
+    const live = [{ from: { kind: 'orchestrator' }, to: { kind: 'department', id: 'd1' }, at: new Date(Date.now() - 25 * 60_000).toISOString(), held: true }];
+    mockApi({ 'GET /api/org': [200, { ...ORG, live, departments: [dept({ id: 'd1', templateKey: 'sales' })] }] });
+    const { container } = render(<MapScreen {...PROPS} />);
+    await screen.findByText('Sales');
+    await vi.waitFor(() => expect(container.querySelectorAll('path.live')).toHaveLength(1));
+  });
+
   it('runs work back to the hub in amber, and flashes a card where work leaves or lands', async () => {
     const stream = fakeStream();
     mockApi({ 'GET /api/org': [200, { ...ORG, departments: [dept({ id: 'd1', templateKey: 'sales' }), dept({ id: 'd2', templateKey: 'design' })] }] });

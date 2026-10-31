@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { companies, departments } from '../src/db/schema.js';
-import { CHANNEL_MS, EventBus } from '../src/modules/events/bus.js';
+import { agents, companies, departments, jobs, subscriptions } from '../src/db/schema.js';
+import { CHANNEL_MS, type Endpoint, EventBus } from '../src/modules/events/bus.js';
 import { as, setUpCompany, testApp } from './helpers.js';
 
 describe('live channels', () => {
@@ -29,5 +29,42 @@ describe('live channels', () => {
     const org = (await app.inject({ url: '/api/org', ...as(ceo) })).json();
     expect(org.live).toEqual([{ from: { kind: 'orchestrator' }, to: { kind: 'department', id: dev!.id }, at: expect.any(String) }]);
     expect(org.departments[0].live).toEqual([{ from: 'a1', to: 'a2', at: expect.any(String) }]);
+  });
+
+  it('stay on past ten minutes while the one they lead to goes on with work that started before they went quiet', async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    const [acme] = await db.select().from(companies);
+    const [sub] = await db.select().from(subscriptions);
+    const companyId = acme!.id;
+    const [dev, ops] = await db
+      .insert(departments)
+      .values([
+        { companyId, templateKey: 'development', roleCode: 'DEV', position: 0 },
+        { companyId, templateKey: 'operations', roleCode: 'OPS', position: 1 },
+      ])
+      .returning();
+    const hire = async (name: string, kind: 'head' | 'worker', departmentId: string) =>
+      (await db.insert(agents).values({ companyId, kind, name, departmentId, model: '', subscriptionId: sub!.id }).returning())[0]!;
+    const hana = await hire('Hana', 'head', dev!.id);
+    const bruno = await hire('Bruno', 'worker', dev!.id);
+    const felix = await hire('Felix', 'worker', dev!.id);
+    const otto = await hire('Otto', 'worker', ops!.id);
+    const sent = Date.now() - CHANNEL_MS - 60_000;
+    const work = (agentId: string, startedAt: Date) => ({ companyId, subscriptionId: sub!.id, agentId, prompt: 'work', status: 'running' as const, timeoutMs: 1000, startedAt });
+    /* Bruno works on what came twenty minutes ago; Felix and Otto started anew after their ways went quiet. */
+    await db.insert(jobs).values([work(bruno.id, new Date(sent + 1000)), work(felix.id, new Date()), work(otto.id, new Date())]);
+    const way = (from: Endpoint, to: Endpoint) => app.ctx.bus.publish(companyId, { type: 'pulse', from, to }, sent);
+    const inDev = (id: string) => ({ kind: 'agent' as const, id, departmentId: dev!.id });
+    way({ kind: 'orchestrator' }, { kind: 'department', id: dev!.id });
+    way({ kind: 'orchestrator' }, { kind: 'department', id: ops!.id });
+    way(inDev(hana.id), inDev(bruno.id));
+    way(inDev(hana.id), inDev(felix.id));
+    way(inDev(bruno.id), inDev(hana.id));
+
+    const org = (await app.inject({ url: '/api/org', ...as(ceo) })).json();
+    expect(org.live).toEqual([{ from: { kind: 'orchestrator' }, to: { kind: 'department', id: dev!.id }, at: new Date(sent).toISOString(), held: true }]);
+    expect(org.departments[0].live).toEqual([{ from: hana.id, to: bruno.id, at: new Date(sent).toISOString(), held: true }]);
+    expect(org.departments[1].live).toEqual([]);
   });
 });

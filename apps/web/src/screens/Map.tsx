@@ -254,8 +254,9 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator, inside = false, 
     [flash],
   );
 
-  /* Each way a message went keeps running for ten minutes after the last one, so a glance shows where work goes on. */
-  const seed = useMemo(() => (org?.live ?? []).map(c => ({ key: wayKey(c.from, c.to), at: c.at, value: { from: c.from, to: c.to } })), [org?.live]);
+  /* Each way a message went keeps running for ten minutes after the last one, and longer while the work it brought goes
+     on, so a glance shows where work goes on. */
+  const seed = useMemo(() => (org?.live ?? []).map(c => ({ key: wayKey(c.from, c.to), at: c.at, held: c.held, value: { from: c.from, to: c.to } })), [org?.live]);
   const channels = useChannels(seed);
   const { touch } = channels;
 

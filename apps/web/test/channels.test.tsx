@@ -17,4 +17,17 @@ describe('the ways messages went', () => {
     act(() => vi.advanceTimersByTime(5 * 60_000 + 1));
     expect(result.current.live).toEqual([]);
   });
+
+  it('stay on while the server holds them for work that goes on, and go quiet once it does not', () => {
+    vi.useFakeTimers();
+    const old = new Date(Date.now() - 20 * 60_000).toISOString();
+    const held: Way<string>[] = [{ key: 'a', at: old, value: 'a', held: true }];
+    const { result, rerender } = renderHook(({ seed }) => useChannels(seed), { initialProps: { seed: held } });
+    expect(result.current.live).toEqual(['a']);
+    act(() => vi.advanceTimersByTime(30 * 60_000));
+    expect(result.current.live).toEqual(['a']);
+    /* The agent finished: the company fetched again no longer holds the way. */
+    rerender({ seed: [] });
+    expect(result.current.live).toEqual([]);
+  });
 });

@@ -121,6 +121,14 @@ describe('Department view', () => {
     expect(within(members).getByTitle('Context 20%')).not.toHaveClass('hi');
   });
 
+  it('keeps the way to an agent on past ten minutes while the server holds it for work that goes on', async () => {
+    const user = userEvent.setup();
+    const [dev] = DEV_ORG.departments;
+    shell({}, { ...DEV_ORG, departments: [{ ...dev!, live: [{ from: 'b0', to: 'b1', at: new Date(Date.now() - 25 * 60_000).toISOString(), held: true }] }] });
+    await flyIn(user);
+    await vi.waitFor(() => expect(document.querySelectorAll('path.live')).toHaveLength(1));
+  });
+
   it('keeps the way between two agents running for ten minutes after their last message, also when it opens later', async () => {
     const user = userEvent.setup();
     const stream = fakeStream();
