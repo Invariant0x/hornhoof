@@ -39,13 +39,14 @@ export function conversationRoutes(app: FastifyInstance, ctx: Ctx): void {
       from: me.via ? { kind: 'orchestrator' } : { kind: 'person', id: me.id },
       to: agent.kind === 'orchestrator' ? { kind: 'orchestrator' } : { kind: 'department', id: agent.departmentId ?? '' },
     });
-    /* A person's words answer what the agent waits for from people; the orchestrator answers requests with its own tool. */
-    if (!me.via) await wakeAll(ctx, await answerDirectly(ctx, me.id, agent.id, text));
     /* The orchestrator writes as itself. */
     const turn = me.via
       ? { prompt: turnPrompt({ name: 'Orchestrator', title: '' }, text), createdBy: null, message: { personId: null, text, from: 'orchestrator' as const } }
       : { prompt: turnPrompt(me, text), createdBy: me.id, message: { personId: me.id, text } };
     const jobId = await enqueueTurn(ctx, { companyId: me.companyId, agentId: agent.id, ...turn });
+    /* Once the words are on their way, a person's words answer what the agent waits for from people; the orchestrator
+       answers requests with its own tool. */
+    if (!me.via) await wakeAll(ctx, await answerDirectly(ctx, me.id, agent.id, text));
     reply.code(202);
     return { jobId };
   });
