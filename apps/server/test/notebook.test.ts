@@ -6,6 +6,7 @@ import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, companies, departments, jobs, notebookNotes, subscriptions } from '../src/db/schema.js';
+import { instructionsOf } from '../src/modules/agents/instructions.js';
 import { as, invitePerson, listen, openStream, setUpCompany, testApp, until } from './helpers.js';
 
 const TOKEN = 'tool-token-0123456789abcdef0123456789';
@@ -150,6 +151,25 @@ describe("a department's notebook", () => {
     expect((await app.inject({ url: book('00000000-0000-4000-8000-000000000000'), ...as(ceo) })).statusCode).toBe(404);
   });
 
+  it("goes into its head's instructions, which say to read it again after a compaction", async () => {
+    const { app, db, ceo, acme, dev } = await withDepartments();
+    const [sub] = await db.select().from(subscriptions);
+    const hire = async (name: string, kind: 'head' | 'worker', roleKey: string) =>
+      (await db.insert(agents).values({ companyId: acme.id, kind, name, roleKey, departmentId: dev.id, model: '', subscriptionId: sub!.id }).returning())[0]!;
+    const hana = await hire('Hana', 'head', 'DEV-HEAD');
+    const bruno = await hire('Bruno', 'worker', 'DEV-BE');
+    const before = await instructionsOf(app.ctx, hana);
+    await add(app, ceo, dev.id, 'Tests first.');
+    const card = (await app.inject({ url: `/api/agents/${hana.id}`, ...as(ceo) })).json();
+    expect(card.parts.at(-1)).toMatchObject({ kind: 'notebook' });
+    expect(card.raw).toContain('## Department notebook');
+    expect(card.raw).toContain('[#1] Tests first.');
+    expect(card.raw).toContain('your department notebook again with "notebook"');
+    /* A note does not start its program again: it reads the notebook with its tool. */
+    expect((await instructionsOf(app.ctx, hana)).hash).toBe(before.hash);
+    expect((await app.inject({ url: `/api/agents/${bruno.id}`, ...as(ceo) })).json().raw).not.toContain('notebook');
+  });
+
   it('says on the stream that it changed, only to people who reach the department', async () => {
     const { app, ceo, dev, ops } = await withDepartments();
     const dana = await invitePerson(app, ceo, { name: 'Dana', email: 'dana@acme.test', access: { departments: [ops.id] } });
@@ -158,5 +178,41 @@ describe("a department's notebook", () => {
     await add(app, ceo, dev.id, 'A rule.');
     await until(() => mine.messages.some(m => m.type === 'notebook' && (m as { spot?: { departmentId: string } }).spot?.departmentId === dev.id));
     expect(hers.messages.some(m => m.type === 'notebook')).toBe(false);
+  });
+
+  it('is read and written by its head with its own tools, and by the orchestrator naming the department', async () => {
+    const { app, db, ceo, acme, dev } = await withDepartments();
+    const [sub] = await db.select().from(subscriptions);
+    const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    const hire = async (name: string, kind: 'head' | 'worker', roleKey: string) =>
+      (await db.insert(agents).values({ companyId: acme.id, kind, name, roleKey, departmentId: dev.id, model: '', subscriptionId: sub!.id }).returning())[0]!;
+    const hana = await hire('Hana', 'head', 'DEV-HEAD');
+    const bruno = await hire('Bruno', 'worker', 'DEV-BE');
+    const tokens = { [hana.id]: 'tool-token-head-0123456789abcdef0123', [bruno.id]: 'tool-token-worker-0123456789abcdef01', [orchestrator!.id]: TOKEN };
+    for (const [agentId, token] of Object.entries(tokens))
+      await db.insert(jobs).values({ companyId: acme.id, subscriptionId: sub!.id, agentId, kind: 'conversation', prompt: 'hi', timeoutMs: 900000, status: 'running', toolTokenHash: hashToken(token) });
+    const connect = async (token: string) => {
+      const client = new Client({ name: 'test', version: '0.0.0' });
+      await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${(app.server.address() as AddressInfo).port}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${token}` } } }));
+      onTestFinished(() => client.close());
+      type Result = { content: { text: string }[]; isError?: boolean };
+      return { names: async () => (await client.listTools()).tools.map(t => t.name), call: async (name: string, args: object = {}) => (await client.callTool({ name, arguments: args })) as Result };
+    };
+    const head = await connect(tokens[hana.id]!);
+    expect(await head.names()).toEqual(expect.arrayContaining(['notebook', 'remember', 'rewrite_note', 'forget']));
+    expect(await (await connect(tokens[bruno.id]!)).names()).not.toContain('remember');
+    await add(app, ceo, dev.id, 'Tests first.');
+    expect((await head.call('notebook')).content[0]!.text).toContain('[#1] Tests first.');
+    expect(JSON.parse((await head.call('remember', { text: 'Review before merge.' })).content[0]!.text)).toMatchObject({ note: { number: 2 } });
+    expect((await head.call('rewrite_note', { note: 2, text: 'Review every merge.' })).isError).toBeFalsy();
+    expect((await head.call('forget', { note: 1 })).isError).toBeFalsy();
+    expect((await head.call('forget', { note: 1 })).isError).toBe(true);
+    expect((await app.inject({ url: book(dev.id), ...as(ceo) })).json().notes).toMatchObject([{ number: 2, text: 'Review every merge.', by: { kind: 'agent', name: 'Hana' } }]);
+    const orch = await connect(TOKEN);
+    expect((await orch.call('remember', { department: dev.id, text: 'Hana plans the week.' })).isError).toBeFalsy();
+    expect((await orch.call('notebook', { department: dev.id })).content[0]!.text).toContain('Hana plans the week.');
+    expect((await orch.call('remember', { text: 'A company rule.' })).isError).toBeFalsy();
+    expect((await orch.call('notebook')).content[0]!.text).toContain('A company rule.');
+    expect(await texts(app, ceo, dev.id)).toEqual(['Review every merge.', 'Hana plans the week.']);
   });
 });
