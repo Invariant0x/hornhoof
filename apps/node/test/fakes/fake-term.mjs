@@ -7,6 +7,7 @@
 // Escape, and calls no stop hook. CLEAR starts a new session, as /clear does. FAKE_MCP_LIST_MS makes it list its Hornhoof
 // tools that long after it started, as Claude Code connects to its MCP servers, and show "tools: ok" or "tools: failed".
 // FAKE_LOSE_ENTER misses the first Enter, as Claude Code just started can: the line stays in its input until the next one.
+// FAKE_START_MS makes it say it started that long after it shows, as Claude Code can while it loads.
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -22,6 +23,7 @@ mkdirSync(dirname(log), { recursive: true });
 const hook = (event, body) => fetch(`${process.env.HH_BRIDGE}/${event}`, { method: 'POST', body: JSON.stringify({ session_id: session, ...body }) }).catch(() => {});
 
 process.stdout.write(`fake claude ${args.includes('--resume') ? 'resumed' : 'new'} ${session}\n❯ `);
+if (process.env.FAKE_START_MS) await new Promise(r => setTimeout(r, Number(process.env.FAKE_START_MS)));
 await hook('start', {});
 if (process.env.FAKE_MCP_LIST_MS) {
   const { url } = JSON.parse(flag('--mcp-config')).mcpServers.hornhoof;

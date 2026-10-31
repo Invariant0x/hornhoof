@@ -331,7 +331,7 @@ export class TerminalHost {
         }
         if (!(await this.opts.tmux.alive(a.name))) {
           a.busy = false;
-          this.programIs(a, false);
+          this.programEnded(a);
           const screen = await this.screen(job.key);
           return await fail(job.signedOut.test(screen) ? 'not_logged_in' : 'agent_failed', screen);
         }
@@ -366,7 +366,7 @@ export class TerminalHost {
     if (a.turn && !a.turn.typed) return;
     if (!alive) {
       a.busy = false;
-      this.programIs(a, false);
+      this.programEnded(a);
       this.finishTyped(a, '', 'agent_failed');
       if (a.watch) clearInterval(a.watch);
       a.watch = null;
@@ -695,7 +695,7 @@ export class TerminalHost {
   private async sayIn(a: Agent, text: string): Promise<boolean> {
     /* Hornhoof's own prompt goes in first, or the words would join it in the program's input. */
     for (const end = Date.now() + ENTER_TRIES * this.enterWaitMs; a.turn && !a.turn.typed && !a.took && Date.now() < end; ) await sleep(this.pollMs);
-    if (!a.turn || a.turn.starting || !(await this.opts.tmux.alive(a.name))) return false;
+    if (!a.turn || a.turn.starting || (!a.turn.typed && !a.took) || !(await this.opts.tmux.alive(a.name))) return false;
     await this.opts.tmux.paste(a.name, text);
     await sleep(Math.min(3000, 300 + text.length / 20));
     await this.opts.tmux.keys(a.name, 'Enter');
@@ -716,6 +716,12 @@ export class TerminalHost {
     if (a.up === up) return;
     a.up = up;
     this.showViews(a, up);
+  }
+
+  /* A program that ended keeps its last screen on show, which says why; the loader is for a program that starts. */
+  private programEnded(a: Agent): void {
+    a.up = false;
+    this.showViews(a);
   }
 
   private showViews(a: Agent, running = true): void {

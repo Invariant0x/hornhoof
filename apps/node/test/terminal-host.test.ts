@@ -172,6 +172,14 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     expect(await host.say('nobody', 'Hello.')).toBe(false);
   });
 
+  it("does not type Hornhoof's words before the turn's own prompt went in, so they get the next turn", async () => {
+    await setUp({ enterWaitMs: 200 });
+    const running = host.run(job('a12', 'hello', { env: { FAKE_SECRET: SECRET, FAKE_START_MS: '2500' } }));
+    await new Promise(r => setTimeout(r, 300));
+    expect(await host.say('a12', 'Use the new schema.')).toBe(false);
+    expect(await running).toMatchObject({ ok: true, result: 'echo: hello' });
+  });
+
   it('keeps the program running after its turn, however long nobody needs it', async () => {
     await setUp();
     await host.run(job('a6', 'one'));
@@ -290,6 +298,16 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     await host.open({ type: 'term.open', termId: 't41', agentKey: 'a40', cols: 80, rows: 24, write: true });
     await until(() => states('t41').length > 0);
     expect(states('t41')).toEqual([true]);
+  });
+
+  it('shows the last screen of a program that ended, which says why, instead of the loader', async () => {
+    await setUp();
+    const states = () => sent.flatMap(m => (m.type === 'term.program' && m.termId === 't42' ? [m.running] : []));
+    await host.open({ type: 'term.open', termId: 't42', agentKey: 'a42', cols: 80, rows: 24, write: true });
+    await host.run(job('a42', 'warm up'));
+    expect(await host.run(job('a42', 'EXIT'))).toMatchObject({ ok: false, error: 'agent_failed' });
+    expect(states()[0]).toBe(false);
+    expect(states().at(-1)).toBe(true);
   });
 
   it('asks Hornhoof to start an agent that does not run when someone who may type opens it', async () => {
