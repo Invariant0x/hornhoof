@@ -62,18 +62,21 @@ export const CLAUDE_ALIASES: ModelOption[] = [
   { id: 'haiku', name: 'Haiku', efforts: EFFORTS },
 ];
 
-/* The effort an agent runs at: what a person picked while its model takes it, else Kimi at its most and the others at
-   their program's default. No efforts known takes what was picked. */
+/* The effort an agent runs at: what a person picked while its model takes it, else Kimi at the most its model takes and
+   the others at their program's default. No efforts known takes what was picked, and Kimi's max. */
 export function effortFor(provider: ProviderId, chosen: string | null, efforts: string[] = []): string | null {
   const kept = chosen && (!efforts.length || efforts.includes(chosen)) ? chosen : null;
-  return kept ?? (provider === 'kimi' ? 'max' : null);
+  if (kept || provider !== 'kimi') return kept;
+  return efforts.length && !efforts.includes('max') ? efforts[efforts.length - 1]! : 'max';
 }
 
-/* The efforts a model takes. The Default model, and one the subscription does not run, which runs on the Default, may be
-   any of the subscription's, so they take all of theirs. */
+/* The efforts a model takes. The program picks the Default model itself, and a model the subscription does not run runs
+   on it, so they take only the levels every model that names some takes. */
 export function effortsOf(models: ModelOption[], model: string | null): string[] {
   const found = model ? models.find(m => m.id === model) : undefined;
-  return found ? (found.efforts ?? []) : [...new Set(models.flatMap(m => m.efforts ?? []))];
+  if (found) return found.efforts ?? [];
+  const named = models.flatMap(m => (m.efforts?.length ? [m.efforts] : []));
+  return named.length ? named[0]!.filter(level => named.every(list => list.includes(level))) : [];
 }
 
 /* What a subscription can run: what its node reported, else what Hornhoof knows for the provider. The web adds "Default" on top. */

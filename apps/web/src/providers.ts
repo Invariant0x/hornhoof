@@ -9,14 +9,18 @@ export const PROVIDER_NAMES: Record<ProviderId, string> = {
 export const PLAN_PROVIDERS = ['claude', 'codex', 'kimi', 'glm'] as const;
 export type PlanProvider = (typeof PLAN_PROVIDERS)[number];
 
-/* The levels a model thinks at. The Default model, and one the subscription does not run, which runs on the Default,
-   take every level of the subscription's models. */
+/* The levels a model thinks at. The program picks the Default model itself, and one the subscription does not run runs
+   on it, so they take only the levels every model that names some takes. */
 export function effortsOf(models: ModelOption[], model: string): string[] {
   const found = model ? models.find(m => m.id === model) : undefined;
-  return found ? (found.efforts ?? []) : [...new Set(models.flatMap(m => m.efforts ?? []))];
+  if (found) return found.efforts ?? [];
+  const named = models.flatMap(m => (m.efforts?.length ? [m.efforts] : []));
+  return named.length ? named[0]!.filter(level => named.every(list => list.includes(level))) : [];
 }
 
-/* The level the Default runs at, when Hornhoof knows it: Kimi at its most, else the model's own. */
+/* The level the Default runs at, when Hornhoof knows it: Kimi at the most its model takes, else the model's own. */
 export function defaultEffort(provider: ProviderId, models: ModelOption[], model: string): string | null {
-  return provider === 'kimi' ? 'max' : (models.find(m => m.id === model)?.defaultEffort ?? null);
+  if (provider !== 'kimi') return models.find(m => m.id === model)?.defaultEffort ?? null;
+  const efforts = effortsOf(models, model);
+  return efforts.length && !efforts.includes('max') ? efforts[efforts.length - 1]! : 'max';
 }

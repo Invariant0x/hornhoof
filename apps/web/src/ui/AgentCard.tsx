@@ -248,7 +248,7 @@ export function AgentCard({ me, agentId, onClose, onTerminal }: Props) {
           </div>
           <div className="field">
             <label htmlFor={`${id}-effort`}>{t.agent.effort}</label>
-            <select id={`${id}-effort`} value={card.effort ?? ''} disabled={!editable || !efforts.length} onChange={e => void change({ effort: e.target.value || null })}>
+            <select id={`${id}-effort`} value={card.effort ?? ''} disabled={!editable || (!efforts.length && !card.effort)} onChange={e => void change({ effort: e.target.value || null })}>
               <option value="">{usual ? t.agent.defaultEffort(effortName(usual)) : t.agent.default}</option>
               {card.effort && !efforts.includes(card.effort) && <option value={card.effort}>{effortName(card.effort)}</option>}
               {efforts.map(level => (

@@ -184,13 +184,14 @@ describe('models', () => {
     expect(effortFor('claude', 'xhigh')).toBe('xhigh');
   });
 
-  it('keeps a picked effort only while the model takes it', () => {
+  it('keeps a picked effort only while the model takes it, and runs Kimi at the most its model takes', () => {
     expect(effortFor('kimi', 'xhigh', ['low', 'high', 'max'])).toBe('max');
+    expect(effortFor('kimi', null, ['low', 'high'])).toBe('high');
     expect(effortFor('codex', 'ultra', ['low', 'medium'])).toBeNull();
     expect(effortFor('codex', 'medium', ['low', 'medium'])).toBe('medium');
   });
 
-  it("lists a model's efforts, and for the Default model every level the subscription's models take", () => {
+  it("lists a model's efforts, and for the Default model the levels every model that names some takes", () => {
     const models = [
       { id: 'a', name: 'A', efforts: ['low', 'high'] },
       { id: 'b', name: 'B', efforts: ['low', 'max'] },
@@ -198,10 +199,12 @@ describe('models', () => {
     ];
     expect(effortsOf(models, 'b')).toEqual(['low', 'max']);
     expect(effortsOf(models, 'c')).toEqual([]);
-    expect(effortsOf(models, '')).toEqual(['low', 'high', 'max']);
-    expect(effortsOf(models, null)).toEqual(['low', 'high', 'max']);
+    /* The program picks the Default model itself, so only a level every model takes is safe for it. */
+    expect(effortsOf(models, '')).toEqual(['low']);
+    expect(effortsOf(models, null)).toEqual(['low']);
     /* A model the subscription does not run runs on its Default. */
-    expect(effortsOf(models, 'gone')).toEqual(['low', 'high', 'max']);
+    expect(effortsOf(models, 'gone')).toEqual(['low']);
+    expect(effortsOf([{ id: 'c', name: 'C' }], '')).toEqual([]);
   });
 });
 

@@ -98,6 +98,17 @@ describe('AgentCard', () => {
     expect(within(effort).getAllByRole('option').map(o => o.textContent)).toEqual(['Default (Low)', 'Low', 'Extra high', 'Ultra']);
   });
 
+  it('lets a person go back to Default when the program no longer says which levels its model takes', async () => {
+    const user = userEvent.setup();
+    const bare = { ...CARD, effort: 'max', runsOn: [{ subscription: TEAM_KEY, models: [{ id: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5' }] }] };
+    const { calls } = open({ 'GET /api/agents/b1': [200, bare], 'PATCH /api/agents/b1': [200, { ...bare, effort: null }] });
+    const effort = await screen.findByRole('combobox', { name: 'Effort' });
+    expect(effort).toBeEnabled();
+    expect(within(effort).getAllByRole('option').map(o => o.textContent)).toEqual(['Default', 'Max']);
+    await user.selectOptions(effort, '');
+    await vi.waitFor(() => expect(calls.find(c => c.method === 'PATCH')?.body).toEqual({ effort: null }));
+  });
+
   it('moves the employee to another subscription', async () => {
     const user = userEvent.setup();
     const { calls } = open({ 'PATCH /api/agents/b1': [200, { ...CARD, model: '', subscription: CARD.runsOn[1]!.subscription }] });
