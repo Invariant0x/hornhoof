@@ -106,8 +106,8 @@ describe('the orchestrator\'s conversation', () => {
     expect(log.find((e: { kind: string }) => e.kind === 'message')).toMatchObject({ person: { name: 'Ivan' }, data: { text: 'We make characters for schools' }, jobId: second.jobId });
   });
 
-  it('goes on in the session of a turn that ran out of time or was stopped, and not of one that broke', async () => {
-    const { app, ceo, builtin } = await live();
+  it('goes on in the session of a turn that ran out of time or was stopped, and not of one that broke or never ran', async () => {
+    const { app, db, ceo, builtin } = await live();
     await start(app, ceo);
     const first = await nextRun(builtin);
     builtin.send({ type: 'job.done', jobId: first.jobId, ok: false, sessionId: 'sess-1', result: '', tail: '', error: 'timeout' });
@@ -119,6 +119,10 @@ describe('the orchestrator\'s conversation', () => {
     const third = await nextRun(builtin);
     expect(third.sessionId).toBe('sess-2');
     builtin.send({ type: 'job.done', jobId: third.jobId, ok: false, sessionId: 'sess-3', result: '', tail: 'broken', error: 'agent_failed' });
+    await until(async () => (await state(app, ceo)).busy === false);
+    /* A turn called off while it waited for its machine. */
+    const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    await db.insert(jobs).values({ companyId: orchestrator!.companyId, subscriptionId: orchestrator!.subscriptionId!, agentId: orchestrator!.id, kind: 'conversation', prompt: 'x', status: 'failed', error: 'cancelled', timeoutMs: 1000, finishedAt: new Date() });
     await say(app, ceo, 'Again');
     expect((await nextRun(builtin)).sessionId).toBe('sess-2');
   });

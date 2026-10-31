@@ -162,12 +162,13 @@ export async function startProgram(ctx: Ctx, node: NodeIdentity, agentId: string
 
 /* A new session catches up from the conversation. The last finished turn's session goes on only on the same subscription
    with the same instructions: changed instructions would not reach a session that already has the old ones. A turn that
-   ran out of time or was stopped finished too, its session whole; one that broke leaves the session before it. */
+   ran out of time or was stopped in its session finished too, the session whole; one that broke, or was called off
+   before it ran, leaves the session before it. */
 async function sessionFor(ctx: Ctx, agent: { id: string; kind: string; name: string }, subscriptionId: string, instructionsHash: string): Promise<{ sessionId: string | null; catchUp: string | null }> {
   const [last] = await ctx.db
     .select({ subscriptionId: jobs.subscriptionId, sessionId: jobs.sessionId, instructionsHash: jobs.instructionsHash })
     .from(jobs)
-    .where(and(conversationOf(agent.id), or(eq(jobs.status, 'done'), and(eq(jobs.status, 'failed'), inArray(jobs.error, ['timeout', 'cancelled'])))))
+    .where(and(conversationOf(agent.id), or(eq(jobs.status, 'done'), and(eq(jobs.status, 'failed'), inArray(jobs.error, ['timeout', 'cancelled']), isNotNull(jobs.sessionId)))))
     .orderBy(desc(jobs.finishedAt))
     .limit(1);
   if (last?.sessionId && last.subscriptionId === subscriptionId && last.instructionsHash === instructionsHash) return { sessionId: last.sessionId, catchUp: null };
