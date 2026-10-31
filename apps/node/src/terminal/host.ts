@@ -77,6 +77,8 @@ type Agent = {
   failure: string | null;
   /* The turn's last line of text, to tell when its answer reached the log. */
   lastText: string | null;
+  /* Kimi's running step has text already, so its next part goes on the same message. */
+  stepSaid: boolean;
   /* A typed turn that ended and waits for the rest of its log. */
   settling: Promise<void> | null;
   /* The program was started for a person and nothing was said in it yet: its new session has no log to resume. */
@@ -199,7 +201,7 @@ export class TerminalHost {
   private agent(key: string): Agent {
     let a = this.agents.get(key);
     if (!a) {
-      a = { key, name: `a-${key}`, program: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, viewers: 0, idle: null, watch: null, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, settling: null, fresh: false, starting: null, keep: null };
+      a = { key, name: `a-${key}`, program: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, viewers: 0, idle: null, watch: null, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null };
       this.agents.set(key, a);
     }
     return a;
@@ -250,6 +252,7 @@ export class TerminalHost {
     /* What is left in the log from before belongs to no turn. */
     this.drain(a);
     a.lastText = null;
+    a.stepSaid = false;
     this.bridge.setToken(job.key, input.tools?.token ?? null);
     const starting = input.prompt ? null : (tools ?? Promise.resolve());
     const turn: Turn = { jobId: null, onEvent: input.onEvent ?? (() => {}), typed: false, seq: 0, deadline, ...(starting ? { starting: true } : {}) };
@@ -482,14 +485,22 @@ export class TerminalHost {
     }
   }
 
-  /* Kimi Code logs a turn's end without its answer, which is the turn's last text. A person's turn reaches Hornhoof
-     through Kimi's prompt hook, as in Claude Code. */
+  /* Kimi Code logs a turn's end without its answer, which is the text of its last step that said anything, in parts. A
+     person's turn reaches Hornhoof through Kimi's prompt hook, as in Claude Code. */
   private kimiNews(a: Agent, news: WireNews): void {
-    for (const e of news.events) this.emit(a, e);
+    if (news.step) a.stepSaid = false;
+    for (const e of news.events) {
+      const before = a.lastText;
+      this.emit(a, e);
+      if (e.kind !== 'text') continue;
+      if (a.stepSaid) a.lastText = (before ?? '') + e.text;
+      a.stepSaid = true;
+    }
     if (news.started) a.busy = true;
     if (!(news.ended || news.aborted || news.failed !== undefined)) return;
-    /* An end logged before the running turn's prompt went in belongs to the last turn. With no turn, the program is free. */
-    if (!this.stoppable(a)) {
+    /* An end logged before the running turn's prompt went in belongs to the last turn, but a blocked prompt is the running
+       turn's own: it never starts. With no turn, the program is free. */
+    if (!this.stoppable(a) && !(news.blocked && a.turn)) {
       if (!a.turn) a.busy = false;
       return;
     }
@@ -576,6 +587,7 @@ export class TerminalHost {
     a.fresh = false;
     if (!fromLog) this.drain(a);
     a.lastText = null;
+    a.stepSaid = false;
     const turn: Turn = { jobId: null, onEvent: () => {}, typed: true, seq: 0, deadline: Date.now() + this.typedMs, ref: randomUUID(), early: [], over: null, opened: deferred() };
     a.turn = turn;
     a.unopened.push(turn);

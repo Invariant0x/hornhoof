@@ -69,6 +69,9 @@ describe("Kimi Code's session log", () => {
     expect(kimiWire({ type: 'turn.prompt', agentId: 'main', input: [{ type: 'text', text: 'hi' }], origin: { kind: 'user' } })).toEqual({ events: [], started: true });
     expect(kimiWire({ type: 'turn.ended', agentId: 'main', turnId: 0, reason: 'completed' })).toEqual({ events: [], ended: true });
     expect(kimiWire({ type: 'turn.ended', agentId: 'main', turnId: 1, reason: 'cancelled' })).toEqual({ events: [], aborted: true });
+    expect(kimiWire(loop({ type: 'step.begin', turnId: '1', step: 2 }))).toEqual({ events: [], step: true });
+    expect(kimiWire({ type: 'prompt.completed', agentId: 'main', promptId: 'p1', reason: 'completed' })).toEqual({ events: [] });
+    expect(kimiWire({ type: 'prompt.completed', agentId: 'main', promptId: 'p2', reason: 'blocked' })).toEqual({ events: [], failed: 'A hook in Kimi Code blocked this message.', blocked: true });
     expect(kimiWire({ type: 'turn.ended', agentId: 'main', turnId: 2, reason: 'failed', error: { name: 'APIError', message: 'Quota exceeded.' } })).toEqual({ events: [], failed: 'Quota exceeded.' });
     expect(kimiWire({ type: 'turn.ended', agentId: 'main', turnId: 3, reason: 'blocked' })).toEqual({ events: [], failed: 'blocked' });
   });

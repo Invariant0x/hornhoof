@@ -590,6 +590,22 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     expect(done('job-k3')).toMatchObject({ ok: false, error: 'cancelled' });
   }, 30_000);
 
+  it("hands on Kimi's whole last message, made of several parts", async () => {
+    await setUp();
+    expect(await host.run(kimiJob('k6', 'PARTS'))).toMatchObject({ ok: true, result: 'first half. second half.' });
+  });
+
+  it("fails a turn whose prompt one of Kimi's own hooks blocked, at once, and takes the next turn", async () => {
+    await setUp();
+    const started = Date.now();
+    expect(await host.run(kimiJob('k7', 'BLOCKED'))).toMatchObject({ ok: false, error: 'agent_failed' });
+    expect(Date.now() - started).toBeLessThan(10_000);
+    expect(await host.run(kimiJob('k7', 'next'))).toMatchObject({ ok: true, result: 'echo: next' });
+    await typeTurn('k7', 'w7', 'BLOCKED typed', 'job-k7');
+    await until(() => Boolean(done('job-k7')));
+    expect(done('job-k7')).toMatchObject({ ok: false, error: 'agent_failed' });
+  }, 30_000);
+
   it('fails a Kimi turn that Kimi says failed, and tells a Kimi that is not signed in', async () => {
     await setUp();
     const failed = await host.run(kimiJob('k4', 'FAIL'));

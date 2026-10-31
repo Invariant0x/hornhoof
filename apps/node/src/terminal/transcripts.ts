@@ -119,7 +119,7 @@ export function codexRollout(line: unknown): RolloutNews {
 /* What a line of the main agent's log in Kimi Code tells: things to show, a turn's start, and how it ended. Kimi logs a
    turn's end without its answer, which is the turn's last text. Read from Kimi Code 2.4's source, not yet from a
    signed-in run. */
-export type WireNews = { events: AgentEvent[]; started?: true; ended?: true; aborted?: true; failed?: string };
+export type WireNews = { events: AgentEvent[]; started?: true; ended?: true; aborted?: true; failed?: string; step?: true; blocked?: true };
 
 function loopEvents(event: Record<string, unknown>): AgentEvent[] {
   switch (event.type) {
@@ -142,7 +142,11 @@ export function kimiWire(line: unknown): WireNews {
   if (!isRecord(line) || (line.agentId !== undefined && line.agentId !== 'main')) return { events: [] };
   switch (line.type) {
     case 'context.append_loop_event':
+      if (isRecord(line.event) && line.event.type === 'step.begin') return { events: [], step: true };
       return { events: isRecord(line.event) ? loopEvents(line.event) : [] };
+    /* A prompt hook of the person's own said no: the prompt is over, and no turn starts or ends for it. */
+    case 'prompt.completed':
+      return line.reason === 'blocked' ? { events: [], failed: 'A hook in Kimi Code blocked this message.', blocked: true } : { events: [] };
     case 'turn.prompt':
       return { events: [], started: true };
     case 'turn.ended': {

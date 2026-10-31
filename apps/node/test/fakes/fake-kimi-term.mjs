@@ -75,6 +75,12 @@ async function take(line) {
   }
   if (!session) await startSession('startup');
   await hook('prompt', 'UserPromptSubmit', { prompt: [{ type: 'text', text: line }], is_steer: false });
+  if (line.includes('BLOCKED')) {
+    // A prompt hook of the person's own said no: Kimi completes the prompt as blocked and starts no turn.
+    record('prompt.completed', { promptId: `p${turn}`, finishedAt: new Date().toISOString(), reason: 'blocked' });
+    print('Blocked by a hook\n❯ ');
+    return;
+  }
   const turnId = turn++;
   record('turn.prompt', { input: [{ type: 'text', text: line }], origin: { kind: 'user' } });
   if (line.includes('HANG')) {
@@ -87,8 +93,25 @@ async function take(line) {
     return;
   }
   if (line.includes('SLOW')) await new Promise(r => setTimeout(r, 2000));
+  const loop = event => record('context.append_loop_event', { event: { turnId: String(turnId), ...event } });
+  if (line.includes('PARTS')) {
+    // A step with a tool call, then a final message in two text parts with a thought between them.
+    loop({ type: 'step.begin', step: 1 });
+    loop({ type: 'content.part', step: 1, part: { type: 'text', text: 'Looking.' } });
+    loop({ type: 'tool.call', step: 1, toolCallId: 'c1', name: 'Bash', args: { command: 'ls' } });
+    loop({ type: 'tool.result', step: 1, toolCallId: 'c1', result: { output: 'a.txt', isError: false } });
+    loop({ type: 'step.end', step: 1 });
+    loop({ type: 'step.begin', step: 2 });
+    loop({ type: 'content.part', step: 2, part: { type: 'text', text: 'first half.' } });
+    loop({ type: 'content.part', step: 2, part: { type: 'think', think: 'More.' } });
+    loop({ type: 'content.part', step: 2, part: { type: 'text', text: ' second half.' } });
+    loop({ type: 'step.end', step: 2 });
+    record('turn.ended', { turnId, reason: 'completed' });
+    print('● first half. second half.\n❯ ');
+    return;
+  }
   const answer = line === 'SECRET' ? `the key is ${process.env.FAKE_SECRET}` : `echo: ${line}`;
-  record('context.append_loop_event', { event: { type: 'content.part', turnId: String(turnId), step: 1, part: { type: 'text', text: answer } } });
+  loop({ type: 'content.part', step: 1, part: { type: 'text', text: answer } });
   record('turn.ended', { turnId, reason: 'completed' });
   print(`● ${answer}\n❯ `);
 }

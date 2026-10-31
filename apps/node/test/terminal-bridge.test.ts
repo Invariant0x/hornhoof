@@ -96,6 +96,19 @@ describe("the node's bridge to Hornhoof's tools", () => {
     expect(up.seen).toHaveLength(1);
   });
 
+  it('never holds a tool call from between turns for the next turn, which would run it under that turn', async () => {
+    const up = await upstream();
+    const bridge = new Bridge(up.url, () => {});
+    await bridge.start();
+    closers.push(() => bridge.stop(), () => up.server.close());
+    const a = bridge.agent('agent-1');
+    bridge.waitForTurns('agent-1', 2000);
+    const call = fetch(a.mcpUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"report"}}' });
+    setTimeout(() => bridge.setToken('agent-1', 'tok-next'), 50);
+    expect(await (await call).json()).toMatchObject({ id: 3, error: { message: expect.stringContaining('No Hornhoof turn') } });
+    expect(up.seen).toEqual([]);
+  });
+
   it("takes an agent's hook calls, and refuses a wrong secret", async () => {
     const up = await upstream();
     const heard: [string, string, unknown][] = [];
