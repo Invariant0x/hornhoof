@@ -7,6 +7,15 @@ import type { EventView, Org } from '../src/types';
 import { CARD, DEV_ORG, ME, mockApi, ORG, ROSTER, SUBS } from './api-mock';
 import { fakeStream } from './fake-stream';
 
+/* xterm needs a real canvas; the window only has to know the terminal is there. */
+vi.mock('../src/ui/AgentTerminal', () => ({
+  AgentTerminal: () => (
+    <div data-testid="live-terminal">
+      <textarea className="xterm-helper-textarea" aria-label="Terminal input" />
+    </div>
+  ),
+}));
+
 const EVENTS = '/api/agents/orchestrator/events';
 const READY = { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 };
 const BUSY = { ...READY, busy: true, runningJobId: 'j1' };
@@ -42,6 +51,25 @@ function open(routes: Record<string, unknown> = {}, org: Org = ORG) {
 }
 
 describe('AgentWindow', () => {
+  it("sends a correction of the orchestrator's card to the live terminal's own line", async () => {
+    const user = userEvent.setup();
+    const card = ev(1, 'proposal', { proposalId: 'pr1', brief: 'Acme.', items: [{ template: 'operations', checked: true, note: '' }] });
+    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [card], state: { ...READY, terminal: true } }] });
+    await user.click(await screen.findByRole('button', { name: 'Correct in words' }));
+    expect(screen.getByRole('textbox', { name: 'Terminal input' })).toHaveFocus();
+  });
+
+  it('leaves typing to the live terminal, which has its own line, and keeps the line in the log', async () => {
+    const user = userEvent.setup();
+    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, terminal: true } }] });
+    expect(await screen.findByTestId('live-terminal')).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: 'Write to the orchestrator' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Enter to send, Shift+Enter for a new line')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Log' }));
+    expect(screen.getByRole('textbox', { name: 'Write to the orchestrator' })).toBeInTheDocument();
+    expect(screen.queryByTestId('live-terminal')).not.toBeInTheDocument();
+  });
+
   it('shows each kind of line the way a terminal would', async () => {
     const { container } = open({ [`GET ${EVENTS}?after=0`]: [200, { events: LOG, state: READY }] });
     expect(await screen.findByText('What matters most right now?')).toBeInTheDocument();
