@@ -122,8 +122,12 @@ describe('templates', () => {
     }
     expect(rules).toContain('crapper, dryer and mutator are installed on your machine');
     expect(rules).toContain('Push your branch, not the main line');
-    expect(templates.skills.get('dev-review-diff')!.body).toContain('crapper --changed');
-    expect(templates.skills.get('dev-test-gaps')!.body).toContain('mutator --changed');
+    /* A submitted branch is committed, and --changed sees only what is not: the gates check what the branch changed. */
+    const changed = 'git diff --name-only --diff-filter=d';
+    for (const id of ['dev-engineering-rules', 'dev-review-diff', 'dev-test-gaps']) expect(templates.skills.get(id)!.body, id).toContain(changed);
+    expect(templates.skills.get('dev-review-diff')!.body).toMatch(/crapper[\s\S]*dryer/);
+    expect(templates.skills.get('dev-test-gaps')!.body).toContain('mutator');
+    for (const s of skills.filter(x => x.id.startsWith('dev-'))) expect(s.body, s.id).not.toMatch(/(crapper|dryer|mutator) --changed/);
     for (const id of ['DEV-BE', 'DEV-FE', 'DEV-REV', 'DEV-TEST', 'DEV-SEC', 'DEV-PERF']) expect(templates.roles.get(id)!.skills.find(s => s.id === 'dev-language-rules')?.on, id).toBe(true);
     for (const id of ['DEV-BE', 'DEV-FE', 'DEV-ARCH', 'DEV-REV', 'DEV-TEST', 'DEV-PERF']) expect(templates.roles.get(id)!.skills.find(s => s.id === 'dev-engineering-rules')?.on, id).toBe(true);
   });

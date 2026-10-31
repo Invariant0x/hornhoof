@@ -150,5 +150,5 @@ Every time you are asked to make a change follow:
 
 ### In Hornhoof
 
-* crapper, dryer and mutator are installed on your machine. Run them from the repository root: `--changed` checks what you changed, `--help` lists the rest. Their coverage comes from the project's own test tools; install what is missing in your home folder.
+* crapper, dryer and mutator are installed on your machine. Run them from the repository root on the files your branch changed, `git diff --name-only --diff-filter=d <main line>...HEAD`: `--changed` sees only uncommitted files. Their coverage comes from the project's own test tools; install what is missing in your home folder.
 * Push your branch, not the main line: the main line takes it after the gates and the CEO's approval.

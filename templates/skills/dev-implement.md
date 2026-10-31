@@ -10,6 +10,6 @@ sources: [obra/superpowers skills/subagent-driven-development/implementer-prompt
 3. **Work in increments.** Each increment is a test and the code that passes it, small enough to undo. Keep the build green between increments.
 4. **Stay inside the brief.** No drive-by refactors or new features. Write down what you noticed for the report.
 5. **Commit** each finished increment on your branch with a message that says why and how it was proved. Never push to the main branch; releases reach it after the gates.
-6. **Finish**: run the formatter, the linter and the type checker (dev-language-rules), crapper, dryer and mutator on what you changed (dev-engineering-rules), the full test suite and the brief's check, then report with hh-report-to-head: files changed, commands and results, and concerns.
+6. **Finish**: run the formatter, the linter and the type checker (dev-language-rules), crapper, dryer and mutator on your branch's files (dev-engineering-rules), the full test suite and the brief's check, then report with hh-report-to-head: files changed, commands and results, and concerns.
 
 If you are stuck for more than a few attempts, stop and report BLOCKED with what you tried; do not keep guessing.

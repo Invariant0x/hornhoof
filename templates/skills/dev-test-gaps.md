@@ -6,7 +6,7 @@ kind: procedure
 sources: [anthropics/claude-plugins-official plugins/pr-review-toolkit/agents/pr-test-analyzer.md, garrytan/gstack review/specialists/testing.md, anthropics/knowledge-work-plugins engineering/skills/testing-strategy/SKILL.md]
 ---
 1. List the behaviours the change adds or alters: inputs, outputs, errors, side effects, states.
-2. For each one, find the test that would fail if it broke. Run `mutator --changed` from the repository root: every mutant that survives is a gap, and so is every uncovered site in the change. Where mutator cannot run the language, break the code on purpose (flip a condition, drop a line) and run the tests; if nothing fails, that is a gap. Put the code back.
+2. For each one, find the test that would fail if it broke. Run `mutator` from the repository root on the files the branch changed (`git diff --name-only --diff-filter=d <main line>...HEAD`): every mutant that survives is a gap, and so is every uncovered site in the change. Where mutator cannot run the language, break the code on purpose (flip a condition, drop a line) and run the tests; if nothing fails, that is a gap. Put the code back.
 3. Look first where bugs live: boundaries (empty, one, many, the maximum), error paths, retries, concurrency, time, permissions, migrations of existing data.
 4. Check that the tests are honest: they would fail without the change, they assert on results, they do not depend on order or the clock.
 5. Write the missing tests yourself when your brief allows it, smallest first, each failing before the fix it pins. Otherwise list them for the author, each with the input and the expected result.
