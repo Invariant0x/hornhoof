@@ -186,6 +186,8 @@ export class Tmux {
       const number = integer(signal) || null;
       /* EOF can mark the pane dead before tmux reaps the process and fills in its native status. */
       if (code !== null || number !== null || Date.now() >= deadline) return { code, signal: number, at: endedAt(time, observed) };
+      /* Some tmux builds leave a zombie until another child exits. Let tmux reap it before reading its status again. */
+      await this.run(['run-shell', 'true']).catch(() => {});
       await new Promise(resolve => setTimeout(resolve, 10));
     }
   }
