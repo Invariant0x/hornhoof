@@ -41,6 +41,23 @@ describe("the company's notebook", () => {
     expect([gone.statusCode, gone.json().error.reason]).toEqual([404, 'note_unknown']);
   });
 
+  it('never gives a removed note\'s number to another note, so a late change cannot hit the wrong one', async () => {
+    const { app, ceo } = await company();
+    await write(app, ceo, 'First.');
+    await app.inject({ method: 'DELETE', url: '/api/notebook/1', ...as(ceo) });
+    expect((await write(app, ceo, 'Second.')).json().note.number).toBe(2);
+    const late = await app.inject({ method: 'PATCH', url: '/api/notebook/1', payload: { text: 'Late.' }, ...as(ceo) });
+    expect([late.statusCode, late.json().error.reason]).toEqual([404, 'note_unknown']);
+    expect((await notes(app, ceo)).map((n: { number: number }) => n.number)).toEqual([2]);
+  });
+
+  it('takes notes written at the same moment, each with its own number', async () => {
+    const { app, ceo } = await company();
+    const all = await Promise.all(['One.', 'Two.', 'Three.'].map(text => write(app, ceo, text)));
+    expect(all.map(r => r.statusCode)).toEqual([201, 201, 201]);
+    expect(all.map(r => r.json().note.number).sort()).toEqual([1, 2, 3]);
+  });
+
   it('is only for people who see the whole company', async () => {
     const { app, db, ceo } = await company();
     const [acme] = await db.select().from(companies);
@@ -87,8 +104,12 @@ describe("the company's notebook", () => {
     expect((await call('rewrite_note', { note: 1, text: 'The CEO wants small turns.' })).isError).toBeFalsy();
     expect((await call('forget', { note: 2 })).isError).toBeFalsy();
     expect((await call('forget', { note: 2 })).isError).toBe(true);
-    const rows = await db.select().from(notebookNotes);
-    expect(rows.map(r => [r.number, r.text, r.byOrchestrator, r.personId])).toEqual([[1, 'The CEO wants small turns.', true, null]]);
+    const rows = await db.select().from(notebookNotes).orderBy(notebookNotes.number);
+    /* A removed note stays behind with its number, so the number is never given again. */
+    expect(rows.map(r => [r.number, r.text, r.byOrchestrator, r.personId, Boolean(r.removedAt)])).toEqual([
+      [1, 'The CEO wants small turns.', true, null, false],
+      [2, 'Design reviews go to Oleg.', true, null, true],
+    ]);
     expect(await notes(app, ceo)).toMatchObject([{ number: 1, by: { kind: 'orchestrator' } }]);
   });
 });
