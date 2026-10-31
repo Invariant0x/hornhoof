@@ -1,11 +1,13 @@
 import { execFile, spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { closeSync, constants, fstatSync, openSync, readSync, rmSync, writeFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { JobUser } from '../isolation.js';
 import { programEnded, type ProgramExit } from '../program-exit.js';
-import { KEEP_BYTES, writePrivate } from '../providers/process.js';
+import { KEEP_BYTES } from '../providers/process.js';
+import { Recordings, type ExitSnapshot } from './recordings.js';
 
 /* How agent sessions look and behave: no tmux bar, the wheel scrolls, the size follows the person who looks last, colours
    pass through, and a finished program leaves its last screen. */
@@ -39,6 +41,9 @@ type Options = {
   /* The env tmux and every program in it start from: never the node's own, which holds its key. */
   env: NodeJS.ProcessEnv;
   user?: JobUser | null;
+  /* Persistent node-owned metadata, kept on the same volume as the agent workspaces. */
+  recordingsDir?: string;
+  flushTimeoutMs?: number;
 };
 
 /* Writes the env a program starts with into a file only its owner reads; the program's shell reads it and removes it, so the
@@ -53,24 +58,6 @@ const FROM_ENV_FILE = 'set -a; . "$0"; set +a; rm -f "$0"; exec "$@"';
 const WAIT_FOR_CAPTURE = 'IFS= read -r ready; exec "$@"';
 const CAPTURE = fileURLToPath(new URL('../../hh-capture.cjs', import.meta.url));
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
-type Recording = { file: string; ready: string; ended: Promise<string | null> | null };
-
-/* Even a damaged or replaced recording cannot make the host read an unbounded file or follow a link. */
-function recorded(file: string): string | null {
-  let fd: number | undefined;
-  try {
-    fd = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-    const stat = fstatSync(fd);
-    if (!stat.isFile()) return null;
-    const bytes = Math.min(stat.size, KEEP_BYTES);
-    const buffer = Buffer.alloc(bytes);
-    return buffer.subarray(0, readSync(fd, buffer, 0, bytes, stat.size - bytes)).toString('utf8');
-  } catch {
-    return null;
-  } finally {
-    if (fd !== undefined) closeSync(fd);
-  }
-}
 
 const integer = (value: string | undefined): number | null => value && /^-?\d+$/.test(value) ? Number(value) : null;
 const endedAt = (value: string | undefined, observed: string): string => {
@@ -83,12 +70,15 @@ export class Tmux {
   readonly socket: string;
   private readonly env: NodeJS.ProcessEnv;
   private readonly user: JobUser | null;
-  private readonly recordings = new Map<string, Recording>();
+  private readonly recordings: Recordings;
+  private readonly flushTimeoutMs: number;
 
-  constructor({ socket = 'hh', env, user = null }: Options) {
+  constructor({ socket = 'hh', env, user = null, recordingsDir = join(env.HOME ?? homedir(), '.hh-recordings'), flushTimeoutMs = 5000 }: Options) {
     this.socket = socket;
     this.env = { LANG: 'C.UTF-8', ...withoutNodeSecrets(env) };
     this.user = user;
+    this.recordings = new Recordings(recordingsDir, socket, user);
+    this.flushTimeoutMs = flushTimeoutMs;
   }
 
   /* The arguments that reach this server; viewers attach with them too. */
@@ -133,8 +123,8 @@ export class Tmux {
     /* A command that fails ends the line, so the keys come after the program has started. */
     const keys = KEYS.flatMap(c => [';', ...c]);
     await this.run(['start-server', ';', ...options, 'set-option', '-g', 'terminal-features', 'xterm-256color:RGB', ';', ...start, ...keys]);
-    if (this.recordings.has(name)) await this.run(['pipe-pane', '-t', name]).catch(() => {});
-    this.removeRecording(name);
+    if (this.recordings.get(name)) await this.run(['pipe-pane', '-t', name]).catch(() => {});
+    this.recordings.remove(name);
     if (outputDir) {
       await this.capture(name, outputDir);
       await this.keys(name, 'Enter');
@@ -142,36 +132,26 @@ export class Tmux {
   }
 
   private async capture(name: string, dir: string): Promise<void> {
-    const file = join(dir, `.hh-output-${randomBytes(8).toString('hex')}.log`);
-    const ready = `${file}.ready`;
-    writePrivate(file, '', this.user);
-    writePrivate(ready, '', this.user);
-    this.recordings.set(name, { file, ready, ended: null });
-    const command = [process.execPath, CAPTURE, file, ready, String(KEEP_BYTES), this.socket, name].map(quote).join(' ');
+    const recording = this.recordings.create(name, dir);
+    const command = [process.execPath, CAPTURE, recording.file, recording.ready, recording.flush, String(KEEP_BYTES), this.socket, name].map(quote).join(' ');
     await this.run(['pipe-pane', '-t', name, `exec ${command}`]);
-    for (const end = Date.now() + 5000; recorded(ready) !== 'ready';) {
-      if (Date.now() >= end) throw new Error('The terminal output recorder did not start.');
-      await new Promise(resolve => setTimeout(resolve, 10));
-    }
+    if (!(await this.recordings.wait(recording, 'ready', 5000))) throw new Error('The terminal output recorder did not start.');
   }
 
   /* Read before a pane can be respawned or removed. Keep the first observation time on tmux versions without one. */
   async ended(name: string): Promise<string | null> {
-    const recording = this.recordings.get(name);
-    if (recording?.ended) return recording.ended;
-    const reading = this.readEnd(name);
-    if (recording) recording.ended = reading;
-    const output = await reading;
-    if (recording && output === null) recording.ended = null;
-    return output;
+    return (await this.recordings.snapshot(name, () => this.readEnd(name)))?.output ?? null;
   }
 
-  private async readEnd(name: string): Promise<string | null> {
+  private async readEnd(name: string): Promise<ExitSnapshot | null> {
     const exit = await this.paneExit(name);
     if (!exit) return null;
-    const file = this.recordings.get(name)?.file;
-    const output = (file ? recorded(file) : null) ?? await this.screen(name);
-    return programEnded(output, exit);
+    const recording = this.recordings.get(name);
+    const snapshot = recording ? await this.recordings.finish(recording, this.flushTimeoutMs) : null;
+    const complete = snapshot?.complete ?? !recording;
+    const text = snapshot?.output ?? await this.screen(name);
+    const output = complete ? text : `Output capture did not finish before the wait expired.\n${text}`;
+    return { output: programEnded(output, exit), complete };
   }
 
   private async paneExit(name: string): Promise<ProgramExit | null> {
@@ -190,14 +170,6 @@ export class Tmux {
       await this.run(['run-shell', 'true']).catch(() => {});
       await new Promise(resolve => setTimeout(resolve, 10));
     }
-  }
-
-  private removeRecording(name: string): void {
-    const recording = this.recordings.get(name);
-    if (!recording) return;
-    this.recordings.delete(name);
-    rmSync(recording.file, { force: true });
-    rmSync(recording.ready, { force: true });
   }
 
   /* Pastes text the way a terminal does, bracketed when the program asked for it, so a long prompt arrives as one paste. */
@@ -237,13 +209,13 @@ export class Tmux {
   async kill(name: string): Promise<void> {
     await this.ended(name);
     await this.run(['kill-session', '-t', `=${name}`]).catch(() => {});
-    this.removeRecording(name);
+    this.recordings.remove(name);
   }
 
   async stopAll(): Promise<void> {
-    for (const name of this.recordings.keys()) await this.ended(name);
+    for (const recording of this.recordings.all()) await this.ended(recording.name);
     await this.run(['kill-server']).catch(() => {});
-    for (const name of this.recordings.keys()) this.removeRecording(name);
+    for (const recording of this.recordings.all()) this.recordings.remove(recording.name);
   }
 
   /* A viewer: a terminal of its own size attached to the session, read-only unless the person may type. */

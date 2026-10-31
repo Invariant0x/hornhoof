@@ -1,0 +1,173 @@
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { basename, join } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
+import { Tmux } from '../src/terminal/tmux.js';
+
+const hasTmux = (() => {
+  try { execFileSync('tmux', ['-V']); return true; } catch { return false; }
+})();
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+const until = async (check: () => boolean | Promise<boolean>, ms = 5000) => {
+  for (const end = Date.now() + ms; Date.now() < end; await sleep(10)) if (await check()) return;
+  throw new Error('timed out');
+};
+
+describe.skipIf(!hasTmux)('terminal output recording lifecycle', () => {
+  const instances: Tmux[] = [];
+  const paused = new Set<number>();
+  const recordingFiles = (dir: string) => readdirSync(dir).filter(name => name.startsWith('.hh-output-')).map(name => join(dir, name));
+
+  function fixture(flushTimeoutMs = 1000, home = mkdtempSync(join(tmpdir(), 'hh-recording-'))) {
+    const socket = `hh-recording-${process.pid}-${Math.random().toString(16).slice(2, 10)}`;
+    const env = { PATH: process.env.PATH ?? '', HOME: home, ...(process.env.NODE_V8_COVERAGE ? { NODE_V8_COVERAGE: process.env.NODE_V8_COVERAGE } : {}) };
+    const options = { socket, env, flushTimeoutMs };
+    const replacement = () => {
+      const tmux = new Tmux(options);
+      instances.push(tmux);
+      return tmux;
+    };
+    const tmux = replacement();
+    const dir = join(home, socket);
+    mkdirSync(dir);
+    return { tmux, replacement, dir, home };
+  }
+
+  async function launch(tmux: Tmux, dir: string, name = 'agent') {
+    await tmux.launch(name, {
+      cwd: dir, outputDir: dir, cols: 80, rows: 24,
+      command: ['sh', '-c', 'printf "running\\n"; IFS= read -r line; printf "\\033[?1049hboom-final-output\\n\\033[?1049l" >&2; exit 3'],
+    });
+    await until(async () => (await tmux.screen(name)).includes('running'));
+  }
+
+  async function recorders(tmux: Tmux, name = 'agent') {
+    const parent = Number((await tmux.run(['display-message', '-p', '-t', name, '#{pid}'])).trim());
+    const ownChildren = execFileSync('ps', ['-axo', 'pid=,ppid=,comm='], { encoding: 'utf8' }).trim().split('\n')
+      .map(line => line.trim().split(/\s+/))
+      .filter(([, ppid, command]) => Number(ppid) === parent && basename(command ?? '') === basename(process.execPath));
+    return ownChildren.map(([pid]) => Number(pid));
+  }
+
+  async function recorderPid(tmux: Tmux, name = 'agent') {
+    const ownChildren = await recorders(tmux, name);
+    expect(ownChildren).toHaveLength(1);
+    return ownChildren[0]!;
+  }
+
+  async function exitProgram(tmux: Tmux, name = 'agent') {
+    await tmux.keys(name, 'Enter');
+    await until(async () => !(await tmux.alive(name)));
+    await tmux.run(['run-shell', 'true']);
+    await until(async () => (await tmux.run(['display-message', '-p', '-t', name, '#{pane_dead_status}'])).trim() === '3');
+  }
+
+  const resume = (pid: number) => { process.kill(pid, 'SIGCONT'); paused.delete(pid); };
+  afterEach(async () => {
+    for (const pid of paused) resume(pid);
+    for (const tmux of instances.splice(0)) await tmux.stopAll();
+  });
+
+  it('waits for a delayed recorder before returning and caching the final output', async () => {
+    const { tmux, dir } = fixture();
+    await launch(tmux, dir);
+    const pid = await recorderPid(tmux);
+    process.kill(pid, 'SIGSTOP');
+    paused.add(pid);
+    await exitProgram(tmux);
+    const result = tmux.ended('agent');
+    expect(await Promise.race([result.then(() => 'finished'), sleep(100).then(() => 'waiting')])).toBe('waiting');
+    resume(pid);
+    expect(await result).toMatch(/boom-final-output\nProgram ended: code 3, signal none, at /);
+    expect(await tmux.ended('agent')).toContain('boom-final-output');
+  });
+
+  it('bounds the wait for a stopped recorder and retries an incomplete snapshot', async () => {
+    const { tmux, dir } = fixture(100);
+    await launch(tmux, dir);
+    const pid = await recorderPid(tmux);
+    process.kill(pid, 'SIGSTOP');
+    paused.add(pid);
+    await exitProgram(tmux);
+    const first = await Promise.race([tmux.ended('agent'), sleep(1500).then(() => 'timed out')]);
+    expect(first).toContain('Program ended: code 3');
+    resume(pid);
+    const raw = recordingFiles(dir).find(file => file.endsWith('.log'))!;
+    await until(() => readFileSync(raw, 'utf8').includes('boom-final-output'));
+    expect(await tmux.ended('agent')).toContain('boom-final-output');
+  });
+
+  it('removes recordings left by an exited recorder when a new controller stops the server', async () => {
+    const { tmux, replacement, dir } = fixture();
+    await launch(tmux, dir);
+    const pid = await recorderPid(tmux);
+    await exitProgram(tmux);
+    expect(await tmux.ended('agent')).toContain('boom-final-output');
+    if ((await recorders(tmux)).includes(pid)) process.kill(pid, 'SIGTERM');
+    await until(async () => {
+      await tmux.run(['run-shell', 'true']);
+      return !(await recorders(tmux)).includes(pid);
+    });
+    expect(recordingFiles(dir).length).toBeGreaterThanOrEqual(2);
+    const next = replacement();
+    await next.stopAll();
+    expect(await next.has('agent')).toBe(false);
+    expect(recordingFiles(dir)).toEqual([]);
+    await next.stopAll();
+    expect(recordingFiles(dir)).toEqual([]);
+  });
+
+  it('recovers cleanup after both the recorder and tmux were killed', async () => {
+    const { tmux, replacement, dir } = fixture();
+    await launch(tmux, dir);
+    const raw = recordingFiles(dir).find(file => file.endsWith('.log'))!;
+    await until(() => readFileSync(raw, 'utf8').includes('running'));
+    const keep = join(dir, 'keep.log');
+    writeFileSync(keep, 'unrelated file');
+    process.kill(await recorderPid(tmux), 'SIGKILL');
+    await tmux.run(['kill-server']);
+    await replacement().stopAll();
+    expect(recordingFiles(dir)).toEqual([]);
+    expect(readFileSync(keep, 'utf8')).toBe('unrelated file');
+  });
+
+  it('removes the previous recording when a new controller relaunches the session', async () => {
+    const { tmux, replacement, dir, home } = fixture();
+    await launch(tmux, dir);
+    await exitProgram(tmux);
+    const oldFiles = recordingFiles(dir);
+    const nextDir = join(home, 'next');
+    mkdirSync(nextDir);
+    const next = replacement();
+    await launch(next, nextDir);
+    expect(oldFiles.some(existsSync)).toBe(false);
+    expect(recordingFiles(nextDir).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('recovers one session without removing another session on the same server', async () => {
+    const { tmux, replacement, dir, home } = fixture();
+    const other = join(home, 'other-agent');
+    mkdirSync(other);
+    await launch(tmux, dir);
+    await launch(tmux, other, 'other');
+    await exitProgram(tmux);
+    await replacement().kill('agent');
+    expect(recordingFiles(dir)).toEqual([]);
+    expect(await tmux.alive('other')).toBe(true);
+    expect(recordingFiles(other).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('limits restart cleanup to the owning tmux socket', async () => {
+    const first = fixture();
+    const other = fixture(1000, first.home);
+    await launch(first.tmux, first.dir);
+    await launch(other.tmux, other.dir);
+    process.kill(await recorderPid(first.tmux), 'SIGKILL');
+    await first.tmux.run(['kill-server']);
+    await first.replacement().stopAll();
+    expect(recordingFiles(first.dir)).toEqual([]);
+    expect(await other.tmux.alive('agent')).toBe(true);
+    expect(recordingFiles(other.dir).length).toBeGreaterThanOrEqual(2);
+  });
+});
