@@ -6,6 +6,7 @@
 // program, SECRET prints the value of FAKE_SECRET. INTERRUPT logs what Claude Code logs when a person stops a turn with
 // Escape, and calls no stop hook. CLEAR starts a new session, as /clear does. FAKE_MCP_LIST_MS makes it list its Hornhoof
 // tools that long after it started, as Claude Code connects to its MCP servers, and show "tools: ok" or "tools: failed".
+// FAKE_LOSE_ENTER misses the first Enter, as Claude Code just started can: the line stays in its input until the next one.
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -31,9 +32,17 @@ if (process.env.FAKE_MCP_LIST_MS) {
     process.stdout.write(`tools: ${listed?.result ? 'ok' : 'failed'}\n❯ `);
   }, Number(process.env.FAKE_MCP_LIST_MS));
 }
+let kept = process.env.FAKE_LOSE_ENTER ? '' : null;
 for await (const typed of createInterface({ input: process.stdin })) {
+  if (kept === '') {
+    kept = typed;
+    continue;
+  }
   // Escape stops an answer; it is not part of the next line.
-  const line = typed.replaceAll('\u001b', '');
+  const line = `${kept ?? ''}${typed}`.replaceAll('\u001b', '');
+  kept = null;
+  // An Enter into an empty input does nothing.
+  if (!line) continue;
   if (line === 'EXIT') process.exit(3);
   if (line === 'CLEAR') {
     session = randomUUID();
