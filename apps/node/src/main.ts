@@ -46,12 +46,15 @@ type RunOptions = {
 };
 
 /* A complete list of the plan's windows replaces what the node knew. A partial one, such as the single window a turn
-   tells, updates the windows it names and leaves the others as they were. */
+   tells, updates the windows it names and leaves the others as they were; one of those still full keeps the plan at
+   its limit until it starts over. */
 function merged(known: Limits | null, news: Limits): Limits {
   if (news.complete || !known) return news;
   const fresh = new Map(news.windows.map(w => [w.name, w]));
+  const kept = known.windows.filter(w => !fresh.has(w.name));
   const windows = [...known.windows.map(w => fresh.get(w.name) ?? w), ...news.windows.filter(w => !known.windows.some(k => k.name === w.name))];
-  return { status: news.status, windows: windows.slice(0, 8), ...(known.complete ? { complete: true } : {}) };
+  const full = kept.some(w => (w.utilization ?? 0) >= 1 && (w.resetsAt === null || Date.parse(w.resetsAt) > Date.now()));
+  return { status: full ? 'rejected' : news.status, windows: windows.slice(0, 8), ...(known.complete ? { complete: true } : {}) };
 }
 
 /* The node's life: stay connected, run jobs, report the sign-in state and the limits, clean up when removed. */

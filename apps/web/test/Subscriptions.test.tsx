@@ -99,6 +99,16 @@ describe('Subscriptions', () => {
     expect(within(row).queryByText(/^Limit reached/)).not.toBeInTheDocument();
   });
 
+  it('still says a plan reached its limit when a window without a share stops it, though another full one started over', async () => {
+    const limits = {
+      status: 'rejected' as const,
+      windows: [{ name: 'five_hour', utilization: 1, resetsAt: '2026-10-29T18:00:00.000Z' }, { name: 'seven_day', utilization: null, resetsAt: '2099-11-04T00:00:00.000Z' }],
+    };
+    mockApi({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, limits }] }], 'GET /api/machines': [200, { machines: MACHINES }] });
+    render(<Subscriptions me={ME} />);
+    expect(within(await screen.findByRole('row', { name: /^Claude\b/ })).getByText(/^Limit reached, resets at /)).toBeInTheDocument();
+  });
+
   it('says Built-in node offline for an API key whose node is down', async () => {
     mockApi({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[3]!, online: false }] }], 'GET /api/machines': [200, { machines: [] }] });
     render(<Subscriptions me={ME} />);
