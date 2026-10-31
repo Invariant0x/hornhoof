@@ -114,6 +114,16 @@ describe('a node that runs agents in terminals', () => {
     server.send({ type: 'term.open', termId: 't9', agentKey: 'agent-1', cols: 90, rows: 30, write: true });
     await server.wait(() => server.received.some(m => m.type === 'term.exit' && m.termId === 't9'));
   });
+
+  it('says words for a running turn did not go in when it runs no terminals', async () => {
+    const server = await fakeServer();
+    const node = await runNode({ dir: nodeDir(server.url), adapter, log: () => {} });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    server.send({ type: 'agent.say', agentKey: 'agent-1', text: 'Use the new schema.', ref: 'r-1' });
+    await server.wait(() => server.received.some(m => m.type === 'agent.said'));
+    expect(server.received.find(m => m.type === 'agent.said')).toEqual({ type: 'agent.said', ref: 'r-1', ok: false });
+  });
 });
 
 describe('runNode', () => {

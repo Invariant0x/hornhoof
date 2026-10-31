@@ -120,7 +120,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
     server.registerTool(
       'message_employee',
       {
-        description: `Writes to another employee, as you, into its window; it reads the message in its next turn. Use it to nudge a stuck agent or to tell a head. One turn sends at most ${TURN_NUDGES}.`,
+        description: `Writes to another employee, as you, into its window: one at work gets it at once in the turn it runs, one that is not in its next turn. Use it to nudge a stuck agent or to tell a head. One turn sends at most ${TURN_NUDGES}.`,
         inputSchema: { employee: z.uuid().describe("The employee's id, from agents or company."), text: z.string().trim().min(1).max(4000) },
       },
       async ({ employee, text }) => {

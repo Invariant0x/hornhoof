@@ -160,6 +160,18 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     expect(await running).toMatchObject({ ok: false, error: 'cancelled' });
   });
 
+  it("types Hornhoof's words into a running turn, which takes them in, and says when no turn runs", async () => {
+    await setUp();
+    await host.run(job('a7', 'warm up'));
+    const running = host.run(job('a7', 'HANG'));
+    await until(async () => (await host.screen('a7')).includes('HANG'));
+    expect(await host.say('a7', 'Use the new schema.')).toBe(true);
+    expect(await running).toMatchObject({ ok: true, result: 'echo: Use the new schema.' });
+    expect(sent.filter(m => m.type === 'turn.open')).toEqual([]);
+    expect(await host.say('a7', 'Nobody works now.')).toBe(false);
+    expect(await host.say('nobody', 'Hello.')).toBe(false);
+  });
+
   it('keeps the program running after its turn, however long nobody needs it', async () => {
     await setUp();
     await host.run(job('a6', 'one'));

@@ -71,6 +71,8 @@ type Agent = {
   viewers: number;
   /* Reads the log and looks at the program while it runs. */
   watch: NodeJS.Timeout | null;
+  /* Words Hornhoof types into running turns, one after another. */
+  saying: Promise<unknown>;
   /* Hornhoof's turns, one after another. */
   queue: Promise<unknown>;
   /* Typed turns Hornhoof has not answered yet, oldest first. */
@@ -204,7 +206,7 @@ export class TerminalHost {
   private agent(key: string): Agent {
     let a = this.agents.get(key);
     if (!a) {
-      a = { key, name: `a-${key}`, program: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, viewers: 0, watch: null, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null };
+      a = { key, name: `a-${key}`, program: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, viewers: 0, watch: null, saying: Promise.resolve(), queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null };
       this.agents.set(key, a);
     }
     return a;
@@ -671,6 +673,26 @@ export class TerminalHost {
   /* Turns people typed that run now: they count as running when the node says hello again. */
   typedJobs(): string[] {
     return [...this.agents.values()].flatMap(a => (a.turn?.typed && a.turn.jobId ? [a.turn.jobId] : []));
+  }
+
+  /* Words for the agent while its turn runs, typed into the program as a person types: Claude Code, Codex and Kimi Code
+     take them into the turn at its next step. False when no turn runs, so Hornhoof gives them the next turn instead. */
+  say(key: string, text: string): Promise<boolean> {
+    const a = this.agents.get(key);
+    if (!a) return Promise.resolve(false);
+    const said = a.saying.then(() => this.sayIn(a, text));
+    a.saying = said.catch(() => {});
+    return said;
+  }
+
+  private async sayIn(a: Agent, text: string): Promise<boolean> {
+    /* Hornhoof's own prompt goes in first, or the words would join it in the program's input. */
+    for (const end = Date.now() + ENTER_TRIES * this.enterWaitMs; a.turn && !a.turn.typed && !a.took && Date.now() < end; ) await sleep(this.pollMs);
+    if (!a.turn || a.turn.starting || !(await this.opts.tmux.alive(a.name))) return false;
+    await this.opts.tmux.paste(a.name, text);
+    await sleep(Math.min(3000, 300 + text.length / 20));
+    await this.opts.tmux.keys(a.name, 'Enter');
+    return true;
   }
 
   /* Hornhoof calls off a turn a person typed: the program stops as on Escape, and the turn ends as stopped. */

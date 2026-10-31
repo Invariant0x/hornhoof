@@ -5,6 +5,7 @@ import type { Ctx } from '../../app.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
 import { agents, jobs, subscriptions } from '../../db/schema.js';
 import { dispatchJob } from '../jobs/dispatch.js';
+import { sayLive } from './live.js';
 import { identityOf, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { appendEvent, earlierTalk, publishWorking } from '../events/store.js';
 import { instructionsOf } from '../agents/instructions.js';
@@ -76,16 +77,24 @@ export async function insertTurn(ctx: Ctx, t: Turn): Promise<string> {
       taskId: t.taskId ?? null,
     })
     .returning({ id: jobs.id });
-  if (t.message) {
-    /* An employee's message carries its name for the window and its id in by. */
-    const { personId, ...data } = t.message;
-    await appendEvent(ctx, { companyId: t.companyId, agentId: t.agentId, jobId: job!.id, kind: 'message', data, personId });
-  }
+  await showMessage(ctx, t, job!.id);
   return job!.id;
 }
 
-/* Stores the turn, then sends it if he is free. */
+/* An employee's message carries its name for the window and its id in by. */
+async function showMessage(ctx: Ctx, t: Turn, jobId: string): Promise<void> {
+  if (!t.message) return;
+  const { personId, ...data } = t.message;
+  await appendEvent(ctx, { companyId: t.companyId, agentId: t.agentId, jobId, kind: 'message', data, personId });
+}
+
+/* Stores the turn, then sends it if he is free. A message for an agent at work goes into the turn it runs instead. */
 export async function enqueueTurn(ctx: Ctx, t: Turn): Promise<string> {
+  const into = t.message && !t.taskId ? await sayLive(ctx, t.agentId, t.prompt) : null;
+  if (into) {
+    await showMessage(ctx, t, into);
+    return into;
+  }
   const jobId = await insertTurn(ctx, t);
   await pump(ctx, t.agentId);
   return jobId;

@@ -165,6 +165,10 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
         return host?.close(m);
       case 'turn.opened':
         return host?.opened(m);
+      case 'agent.say': {
+        const ok = host ? await host.say(m.agentKey, m.text).catch(() => false) : false;
+        return void send?.({ type: 'agent.said', ref: m.ref, ok });
+      }
     }
     if (stopped || running.has(m.jobId)) return;
     const controller = new AbortController();

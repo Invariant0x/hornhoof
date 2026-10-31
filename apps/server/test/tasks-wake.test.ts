@@ -1,7 +1,8 @@
 import { and, asc, eq } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
-import { agents, companies, departments, jobs, people, personAccess, requests, subscriptions, tasks } from '../src/db/schema.js';
-import { afterJob, agentState, openTypedTurn } from '../src/modules/conversation/queue.js';
+import { describe, expect, it, vi } from 'vitest';
+import { agentEvents, agents, companies, departments, jobs, people, personAccess, requests, subscriptions, tasks } from '../src/db/schema.js';
+import { afterJob, agentState, enqueueTurn, openTypedTurn } from '../src/modules/conversation/queue.js';
+import { said } from '../src/modules/conversation/live.js';
 import { identityOf } from '../src/modules/nodes/hub.js';
 import { answer, ask, comment, createTask, GOING_ON_TURNS, report, submit, updateTask } from '../src/modules/tasks/engine.js';
 import { SILENT_TURNS, startWork, wakeAll, wakePrompt } from '../src/modules/tasks/wake.js';
@@ -86,6 +87,53 @@ describe('a person who speaks to an agent directly', () => {
     ]);
     /* The message's own turn, and the task's after it. */
     expect((await db.select({ taskId: jobs.taskId }).from(jobs).where(eq(jobs.agentId, bruno.id)).orderBy(asc(jobs.createdAt))).map(j => j.taskId)).toEqual([null, mine.id]);
+  });
+});
+
+describe('words for an agent at work', () => {
+  /* Bruno runs a turn in his live terminal; his node answers each word Hornhoof sends with ok. */
+  async function atWork(ok = true, onTask = false) {
+    const c = await company();
+    const task = onTask ? await c.memberTask() : null;
+    const [run] = await c.db.insert(jobs).values({ companyId: c.dev.companyId, subscriptionId: c.sub.id, agentId: c.bruno.id, taskId: task?.id ?? null, kind: 'conversation', prompt: 'work', timeoutMs: 1000, status: 'running', startedAt: new Date() }).returning();
+    const says: { agentKey: string; text: string }[] = [];
+    vi.spyOn(c.ctx.hub, 'hasTerminals').mockReturnValue(true);
+    vi.spyOn(c.ctx.hub, 'send').mockImplementation((node, m) => {
+      if (m.type !== 'agent.say') return true;
+      says.push({ agentKey: m.agentKey, text: m.text });
+      setTimeout(() => said(c.ctx, node, m.ref, ok), 10);
+      return true;
+    });
+    return { ...c, run: run!, says, task };
+  }
+  const queuedOf = (c: Awaited<ReturnType<typeof company>>, agentId: string) => c.db.select().from(jobs).where(and(eq(jobs.agentId, agentId), eq(jobs.status, 'queued')));
+  const message = (c: Awaited<ReturnType<typeof company>>) => ({ companyId: c.dev.companyId, agentId: c.bruno.id, prompt: 'Hana (Head of development): Use the new schema.', createdBy: null, message: { personId: null, text: 'Use the new schema.', from: 'agent' as const, name: 'Hana', by: c.head.id } });
+
+  it('types a message into the turn that runs, and opens no turn for it', async () => {
+    const c = await atWork();
+    expect(await enqueueTurn(c.ctx, message(c))).toBe(c.run.id);
+    expect(c.says).toEqual([{ agentKey: c.bruno.id, text: 'Hana (Head of development): Use the new schema.' }]);
+    expect(await queuedOf(c, c.bruno.id)).toEqual([]);
+    const [shown] = await c.db.select().from(agentEvents).where(and(eq(agentEvents.agentId, c.bruno.id), eq(agentEvents.kind, 'message')));
+    expect(shown).toMatchObject({ jobId: c.run.id, data: { text: 'Use the new schema.', name: 'Hana' } });
+  });
+
+  it('gives a message its own turn when it could not go into the one that runs', async () => {
+    const c = await atWork(false);
+    const jobId = await enqueueTurn(c.ctx, message(c));
+    expect(jobId).not.toBe(c.run.id);
+    expect((await queuedOf(c, c.bruno.id)).map(j => j.prompt)).toEqual(['Hana (Head of development): Use the new schema.']);
+  });
+
+  it("types a person's comment into the turn on that task, and a comment on another task waits for its own turn", async () => {
+    const w = await atWork(true, true);
+    const other = (await createTask(w.ctx, { agentId: w.head.id }, { title: 'Refunds', brief: '', body: 'POST /refunds.', departmentId: w.dev.id, assigneeAgentId: w.bruno.id, executor: true, gates: [w.rita.id] })).task;
+    await wakeAll(w.ctx, (await comment(w.ctx, { personId: w.ceo.id }, w.task!.id, 'EUR only.')).wakes);
+    expect(w.says.map(s => s.text)).toEqual([expect.stringContaining('EUR only.')]);
+    expect(await queuedOf(w, w.bruno.id)).toEqual([]);
+    await wakeAll(w.ctx, (await comment(w.ctx, { personId: w.ceo.id }, other.id, 'USD too.')).wakes);
+    expect(w.says).toHaveLength(1);
+    expect((await queuedOf(w, w.bruno.id)).map(j => j.taskId)).toEqual([other.id]);
   });
 });
 

@@ -248,6 +248,15 @@ describe('live terminals', () => {
     expect(parseNodeMessage(JSON.stringify({ type: 'turn.open', agentKey: 'a/b', text: 'x' }))).toBeNull();
   });
 
+  it("carry Hornhoof's words for a running turn and whether they went into it", () => {
+    const say: ServerMessage = { type: 'agent.say', agentKey: 'agent-1', text: 'Use the new schema.', ref: 'r-2' };
+    const said: NodeMessage = { type: 'agent.said', ref: 'r-2', ok: true };
+    expect(parseServerMessage(JSON.stringify(say))).toEqual(say);
+    expect(parseNodeMessage(JSON.stringify(said))).toEqual(said);
+    expect(parseServerMessage(JSON.stringify({ ...say, agentKey: '../x' }))).toBeNull();
+    expect(parseServerMessage(JSON.stringify({ ...say, text: 'x'.repeat(100_001) }))).toBeNull();
+  });
+
   it("carry how full an agent's context is, as a share", () => {
     const m: NodeMessage = { type: 'agent.context', agentKey: 'agent-1', used: 0.42 };
     expect(parseNodeMessage(JSON.stringify(m))).toEqual(m);

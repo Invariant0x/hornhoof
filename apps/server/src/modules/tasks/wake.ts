@@ -2,8 +2,9 @@ import { and, count, desc, eq, gte, inArray, isNull, notInArray, or, sql } from 
 import type { Ctx } from '../../app.js';
 import { agentChanges, agents, jobs, requests, taskEvents, tasks } from '../../db/schema.js';
 import { afterJob, cancelJob, insertTurn, liveSubscription, onAgent, orchestratorOf, pump } from '../conversation/queue.js';
+import { sayLive } from '../conversation/live.js';
 import { appendEvent } from '../events/store.js';
-import { CLOSED, GATE_ROUNDS, leaveWork, NOT_A_MOVE, published, rejoin, silentTurn, wentOn, type Actor, type Task, type Wake } from './engine.js';
+import { CLOSED, GATE_ROUNDS, leaveWork, NOT_A_MOVE, published, rejoin, silentTurn, wentOn, type Actor, type Task, type Wake, type WakeWhy } from './engine.js';
 import { settle, tell } from './turns.js';
 
 export { SILENT_TURNS } from './engine.js';
@@ -156,12 +157,24 @@ export async function stopTurns(ctx: Ctx, taskIds: string[], keep?: string): Pro
   }
 }
 
+/* Wakes that bring the agent new words on its task, which a turn on that task takes in while it runs. */
+const LIVE_WAKES: WakeWhy[] = ['comment', 'answered', 'updated'];
+
 async function queueWake(ctx: Ctx, w: Wake): Promise<boolean> {
   const { db } = ctx;
   const [agent] = await db.select().from(agents).where(and(eq(agents.id, w.agentId), isNull(agents.removedAt)));
   if (!agent || !(await liveSubscription(ctx, agent.id))) return false;
   const [task] = await db.select().from(tasks).where(eq(tasks.id, w.taskId));
   if (!task) return false;
+  /* New words on the task the agent works on right now go into that turn. */
+  if (LIVE_WAKES.includes(w.why)) {
+    const text = wakePrompt(agent, task, w);
+    const into = await sayLive(ctx, agent.id, text, task.id);
+    if (into) {
+      await appendEvent(ctx, { companyId: agent.companyId, agentId: agent.id, jobId: into, kind: 'message', data: { text, task: { id: task.id, number: task.number } } });
+      return false;
+    }
+  }
   /* One at a time per agent, so two moves at once still queue one turn. */
   return onAgent(ctx, agent.id, async () => {
     const [waiting] = await db
