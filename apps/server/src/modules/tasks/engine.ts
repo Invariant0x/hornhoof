@@ -92,6 +92,19 @@ async function letStuckGo(tx: Tx, taskId: string): Promise<boolean> {
   return gone.length > 0;
 }
 
+/* The notes go with the move, and people hear of it once the move is in. */
+function stuckGoes(ctx: Live, task: Task): { also: (tx: Tx) => Promise<void>; tell: () => void } {
+  let gone = false;
+  return {
+    also: async tx => {
+      gone = await letStuckGo(tx, task.id);
+    },
+    tell: () => {
+      if (gone) ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
+    },
+  };
+}
+
 export type NewTask = {
   title: string;
   brief: string;
@@ -179,14 +192,15 @@ export async function submit(ctx: Live, agentId: string, taskId: string, r: { su
   if (task.executorAgentId !== agentId || task.stage !== 0) throw notYours(task, 'is not waiting for your work');
   if (task.status === 'waiting' && (await waitsForPerson(ctx.db, task.id))) throw refuse(409, 'task_invalid', `#${task.number} waits for a person's answer first.`);
   const n: Note = { kind: 'submitted', actor: { agentId }, text: r.summary, data: { evidence: r.evidence } };
-  const unstuck = async (tx: Tx) => {
-    if (await letStuckGo(tx, task.id)) ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
-  };
+  const unstuck = stuckGoes(ctx, task);
   if (task.gates.length) {
     const gate = await atGate(ctx.db, task, 1);
-    return { task: await move(ctx, task, gate.set, n, unstuck), wakes: gate.wakes };
+    const row = await move(ctx, task, gate.set, n, unstuck.also);
+    unstuck.tell();
+    return { task: row, wakes: gate.wakes };
   }
-  const row = await move(ctx, task, closing(), n, unstuck);
+  const row = await move(ctx, task, closing(), n, unstuck.also);
+  unstuck.tell();
   return { task: row, wakes: giver(task, 'done', agentId) };
 }
 
@@ -305,11 +319,12 @@ export async function report(ctx: Live, agentId: string, taskId: string, r: { do
   if (task.executorAgentId) throw refuse(400, 'task_invalid', `#${task.number} is a member task: submit it, or say it is blocked.`);
   if (task.assigneeAgentId !== agentId) throw notYours(task, 'is not yours to report');
   const n: Note = { kind: 'report', actor: { agentId }, text: r.summary, data: { done: r.done } };
-  const unstuck = async (tx: Tx) => {
-    if (await letStuckGo(tx, task.id)) ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
-  };
-  if (r.done) return { task: await move(ctx, task, closing(), n, unstuck), wakes: giver(task, 'reported', agentId, r.summary) };
-  if (task.createdByAgentId) return { task: await move(ctx, task, { status: 'blocked' }, n, unstuck), wakes: giver(task, 'blocked', agentId, r.summary) };
+  const unstuck = stuckGoes(ctx, task);
+  if (r.done || task.createdByAgentId) {
+    const row = await move(ctx, task, r.done ? closing() : { status: 'blocked' }, n, unstuck.also);
+    unstuck.tell();
+    return { task: row, wakes: giver(task, r.done ? 'reported' : 'blocked', agentId, r.summary) };
+  }
   /* A person gave it, so a person has to unblock it. */
   const row = await move(ctx, task, { status: 'waiting' }, n, async tx => {
     await letStuckGo(tx, task.id);
@@ -505,9 +520,9 @@ export async function updateTask(ctx: Live, agentId: string, taskId: string, c: 
     set.silent = 0;
     if (task.status === 'waiting' && !(await waitsForPerson(ctx.db, task.id))) set.status = 'open';
   }
-  const row = await move(ctx, task, set, { kind: 'updated', actor: { agentId }, data: { fields } }, async tx => {
-    if (handedOn && (await letStuckGo(tx, task.id))) ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
-  });
+  const unstuck = stuckGoes(ctx, task);
+  const row = await move(ctx, task, set, { kind: 'updated', actor: { agentId }, data: { fields } }, handedOn ? unstuck.also : undefined);
+  unstuck.tell();
   const wakes: Wake[] = [];
   if (set.assigneeAgentId) wakes.push({ agentId: set.assigneeAgentId, taskId, why: 'assigned' });
   else if (row.assigneeAgentId && row.assigneeAgentId !== agentId) wakes.push({ agentId: row.assigneeAgentId, taskId, why: 'updated' });
