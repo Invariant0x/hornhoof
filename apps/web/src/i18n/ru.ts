@@ -91,11 +91,11 @@ export const ru: Messages = {
     zoomIn: 'Увеличить',
     showAll: 'Показать все',
     needsSubscription: 'Чтобы начать, нужна подписка',
-    runsOnKey: (provider, last4) => `Работает на ключе ${provider}, последние символы ${last4}`,
+    runsOnKey: (provider, last4) => `На связи, ключ ${provider}, последние символы ${last4}`,
     waitingMachine: owner => `Ждет машину, владелец ${owner}`,
     waitingLogin: provider => `Ждет входа в ${provider}`,
     machineOffline: owner => `Машина не в сети, владелец ${owner}`,
-    runsOnPersonal: (owner, provider) => `Работает на подписке ${provider}, владелец ${owner}`,
+    runsOnPersonal: (owner, provider) => `На связи, подписка ${provider}, владелец ${owner}`,
   },
   people: {
     heading: 'Люди',

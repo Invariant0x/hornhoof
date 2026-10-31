@@ -101,11 +101,11 @@ export const en = {
     zoomIn: 'Zoom in',
     showAll: 'Show everything',
     needsSubscription: 'Needs a subscription to start',
-    runsOnKey: (provider: string, last4: string) => `Runs on ${provider} key ending ${last4}`,
+    runsOnKey: (provider: string, last4: string) => `Ready, on the ${provider} key ending ${last4}`,
     waitingMachine: (owner: string) => `Waiting for ${owner}'s machine`,
     waitingLogin: (provider: string) => `Waiting for the ${provider} login`,
     machineOffline: (owner: string) => `${owner}'s machine is offline`,
-    runsOnPersonal: (owner: string, provider: string) => `Runs on ${owner}'s ${provider} subscription`,
+    runsOnPersonal: (owner: string, provider: string) => `Ready, on ${owner}'s ${provider} subscription`,
   },
   people: {
     heading: 'People',
