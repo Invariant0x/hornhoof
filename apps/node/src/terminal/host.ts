@@ -105,6 +105,7 @@ type Options = {
   secrets(): string[];
   /* A session a person started by typing, kept with its folder so Hornhoof's next turn can go on with it. */
   remember?(sessionId: string, workDir: string): void;
+  /* How long a program may take to show its prompt. Kimi Code takes most of a minute on a busy machine. */
   readyMs?: number;
   pollMs?: number;
   /* A program idle this long with nobody watching ends; its next turn resumes the session. */
@@ -181,7 +182,7 @@ export class TerminalHost {
 
   constructor(private readonly opts: Options) {
     this.bridge = new Bridge(opts.hornhoof, (key, event, body) => this.hook(key, event, body));
-    this.readyMs = opts.readyMs ?? 45_000;
+    this.readyMs = opts.readyMs ?? 120_000;
     this.pollMs = opts.pollMs ?? 500;
     this.idleMs = opts.idleMs ?? 10 * 60_000;
     this.openMs = opts.openMs ?? 8000;

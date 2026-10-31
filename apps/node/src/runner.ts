@@ -63,11 +63,12 @@ function lastBytes(text: string, bytes: number): string {
   return buf.length <= bytes ? text : buf.subarray(buf.length - bytes).toString();
 }
 
-/* The adapter stops its own program at the timeout; this only makes sure the job always ends. */
+/* The adapter stops its own program at the timeout and says which session it was in, so the next turn goes on in it.
+   This only makes sure the job always ends, a while after that. */
 function withTimeout(run: Promise<RunResult>, ms: number): Promise<RunResult> {
   let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise<RunResult>(done => {
-    timer = setTimeout(() => done(failed(`The agent did not finish within ${Math.round(ms / 1000)} s.`, 'timeout')), ms);
+    timer = setTimeout(() => done(failed(`The agent did not finish within ${Math.round(ms / 1000)} s.`, 'timeout')), ms + Math.min(30_000, ms / 10));
   });
   return Promise.race([run, timeout]).finally(() => clearTimeout(timer));
 }

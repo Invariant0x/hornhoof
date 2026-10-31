@@ -106,6 +106,23 @@ describe('the orchestrator\'s conversation', () => {
     expect(log.find((e: { kind: string }) => e.kind === 'message')).toMatchObject({ person: { name: 'Ivan' }, data: { text: 'We make characters for schools' }, jobId: second.jobId });
   });
 
+  it('goes on in the session of a turn that ran out of time or was stopped, and not of one that broke', async () => {
+    const { app, ceo, builtin } = await live();
+    await start(app, ceo);
+    const first = await nextRun(builtin);
+    builtin.send({ type: 'job.done', jobId: first.jobId, ok: false, sessionId: 'sess-1', result: '', tail: '', error: 'timeout' });
+    await say(app, ceo, 'Go on');
+    const second = await nextRun(builtin);
+    expect(second.sessionId).toBe('sess-1');
+    builtin.send({ type: 'job.done', jobId: second.jobId, ok: false, sessionId: 'sess-2', result: 'Stopped.', tail: '', error: 'cancelled' });
+    await say(app, ceo, 'And on');
+    const third = await nextRun(builtin);
+    expect(third.sessionId).toBe('sess-2');
+    builtin.send({ type: 'job.done', jobId: third.jobId, ok: false, sessionId: 'sess-3', result: '', tail: 'broken', error: 'agent_failed' });
+    await say(app, ceo, 'Again');
+    expect((await nextRun(builtin)).sessionId).toBe('sess-2');
+  });
+
   it('sends two people\'s messages in the order they wrote', async () => {
     const { app, db, ceo, builtin } = await live();
     const olga = await invitePerson(app, ceo, { name: 'Olga', email: 'olga@acme.com', access: { whole: true } });
