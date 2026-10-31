@@ -366,7 +366,7 @@ export const tasks = pgTable(
   t => [unique('tasks_company_number').on(t.companyId, t.number), index('tasks_department_id').on(t.departmentId), index('tasks_assignee').on(t.assigneeAgentId), index('tasks_parent_id').on(t.parentId)],
 );
 
-export const TASK_EVENT_KINDS = ['created', 'assigned', 'updated', 'comment', 'submitted', 'verdict', 'report', 'blocked', 'asked', 'answered', 'reminded', 'stuck', 'cancelled', 'done'] as const;
+export const TASK_EVENT_KINDS = ['created', 'assigned', 'updated', 'comment', 'submitted', 'verdict', 'report', 'blocked', 'asked', 'answered', 'reminded', 'continued', 'stuck', 'cancelled', 'done'] as const;
 export type TaskEventKind = (typeof TASK_EVENT_KINDS)[number];
 
 /* Everything that happened to a task, with the person or agent who did it. */

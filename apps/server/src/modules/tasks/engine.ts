@@ -1,4 +1,4 @@
-import { and, asc, count, eq, inArray, isNull, max, notInArray, sql } from 'drizzle-orm';
+import { and, asc, count, eq, gt, inArray, isNull, max, notInArray, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { accessOf, canReach, type Spot } from '../../auth/access.js';
 import type { Db } from '../../db/client.js';
@@ -10,7 +10,7 @@ export type Task = typeof tasks.$inferSelect;
 export type Request = typeof requests.$inferSelect;
 /* Who moves a task: a person from the web app, or an agent from its tools. */
 export type Actor = { personId: string; agentId?: undefined } | { agentId: string; personId?: undefined };
-export type WakeWhy = 'assigned' | 'review' | 'changes' | 'stuck_at_gate' | 'done' | 'reported' | 'blocked' | 'cancelled' | 'answered' | 'comment' | 'updated' | 'reminder' | 'turn' | 'switched';
+export type WakeWhy = 'assigned' | 'review' | 'changes' | 'stuck_at_gate' | 'done' | 'reported' | 'blocked' | 'cancelled' | 'answered' | 'comment' | 'updated' | 'reminder' | 'go_on' | 'turn' | 'switched';
 /* An agent that has to act on a task now; Hornhoof queues a turn for it. note: what else it should know, after the rest. */
 export type Wake = { agentId: string; taskId: string; why: WakeWhy; text?: string; note?: string };
 export type Moved = { task: Task; wakes: Wake[] };
@@ -23,6 +23,9 @@ export const CLOSED: readonly Task['status'][] = ['done', 'cancelled'];
 export const GATE_ROUNDS = 3;
 /* Turns in a row that end without moving the task before a person is asked to step in. */
 export const SILENT_TURNS = 3;
+/* Turns in a row an agent may go on in, saying how far it got or working until its time runs out, before a person is asked:
+   about six hours of work without handing anything in. */
+export const GOING_ON_TURNS = 8;
 const COMMIT = /^[0-9a-f]{40}$/;
 
 const STATUS_CODES = { 400: 'validation', 403: 'forbidden', 404: 'not_found', 409: 'conflict' } as const;
@@ -581,12 +584,36 @@ export async function silentTurn(ctx: Live, agentId: string, task: Task): Promis
     const row = await move(ctx, task, { silent }, { kind: 'reminded', actor: { agentId }, data: { silent } });
     return { task: row, wakes: [{ agentId, taskId: task.id, why: 'reminder' }] };
   }
-  const text = `Ended ${silent} turns in a row on #${task.number} without moving it. Tell it how to go on, or cancel the task.`;
+  return askAboutStill(ctx, agentId, task, silent, `Ended ${silent} turns in a row on #${task.number} without moving it. Tell it how to go on, or cancel the task.`);
+}
+
+/* Hornhoof stops waking the agent on the task and asks a person how it should go on. */
+async function askAboutStill(ctx: Live, agentId: string, task: Task, silent: number, text: string): Promise<Moved> {
   const row = await move(ctx, task, { silent, status: 'waiting' }, { kind: 'stuck', actor: { agentId }, text }, async tx => {
     await tx.insert(requests).values({ companyId: task.companyId, taskId: task.id, agentId, kind: 'stuck', text });
   });
   ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
   return { task: row, wakes: [] };
+}
+
+/* Events that do not move a task: what an agent says in it and Hornhoof's own notes about its turns. */
+export const NOT_A_MOVE = ['comment', 'reminded', 'continued', 'stuck'] as const;
+
+/* The agent holding the task worked through a turn without handing anything in, but said in the task how far it got or
+   worked until its time ran out: it goes on in another turn, from GOING_ON_TURNS such turns in a row a person is asked. */
+export async function wentOn(ctx: Live, agentId: string, task: Task): Promise<Moved> {
+  const [last] = await ctx.db
+    .select({ at: max(taskEvents.createdAt) })
+    .from(taskEvents)
+    .where(and(eq(taskEvents.taskId, task.id), notInArray(taskEvents.kind, [...NOT_A_MOVE])));
+  const [before] = await ctx.db
+    .select({ n: count() })
+    .from(taskEvents)
+    .where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.agentId, agentId), eq(taskEvents.kind, 'continued'), ...(last?.at ? [gt(taskEvents.createdAt, last.at)] : [])));
+  const turns = Number(before?.n ?? 0) + 1;
+  if (turns >= GOING_ON_TURNS) return askAboutStill(ctx, agentId, task, 0, `Went on for ${turns} turns in a row on #${task.number} without handing anything in. Tell it how to go on, or cancel the task.`);
+  const row = await move(ctx, task, { silent: 0 }, { kind: 'continued', actor: { agentId }, data: { turns } });
+  return { task: row, wakes: [{ agentId, taskId: task.id, why: 'go_on' }] };
 }
 
 /* pick: the way a person took, from 0, in a choice. */

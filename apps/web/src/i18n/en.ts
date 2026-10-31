@@ -471,6 +471,7 @@ export const en = {
       asked: (by: string) => `${by} asked a person`,
       answered: (by: string) => `${by} answered`,
       reminded: (by: string) => `${by} ended a turn without moving it`,
+      continued: (by: string) => `${by} goes on in another turn`,
       stuck: (by: string) => `${by} is stuck, a person is asked`,
       cancelled: (by: string) => `${by} cancelled it`,
       done: (by: string) => `${by} closed it`,

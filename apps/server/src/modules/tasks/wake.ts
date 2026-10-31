@@ -3,7 +3,7 @@ import type { Ctx } from '../../app.js';
 import { agentChanges, agents, jobs, requests, taskEvents, tasks } from '../../db/schema.js';
 import { afterJob, cancelJob, insertTurn, liveSubscription, onAgent, orchestratorOf, pump } from '../conversation/queue.js';
 import { appendEvent } from '../events/store.js';
-import { CLOSED, GATE_ROUNDS, leaveWork, published, rejoin, silentTurn, type Actor, type Task, type Wake } from './engine.js';
+import { CLOSED, GATE_ROUNDS, leaveWork, NOT_A_MOVE, published, rejoin, silentTurn, wentOn, type Actor, type Task, type Wake } from './engine.js';
 import { settle, tell } from './turns.js';
 
 export { SILENT_TURNS } from './engine.js';
@@ -64,6 +64,8 @@ function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string {
       return `${ref} was rewritten. Read it again with the task tool and go on from its new body.`;
     case 'reminder':
       return `You ended your last turn on ${ref} without moving it. Go on with the work, then ${finish}. If you cannot go on, ${stuck}.`;
+    case 'go_on':
+      return `Your last turn on ${ref} ended before the work did. Go on with the work from where you left off, then ${finish}. If you cannot go on, ${stuck}.`;
     case 'turn':
       return `${ref} is closed.`;
     case 'switched':
@@ -198,10 +200,9 @@ async function heldTask(ctx: Ctx, agentId: string, taskId: string): Promise<Task
   return holds(parent);
 }
 
-const NOT_A_MOVE = ['comment', 'reminded', 'stuck'] as const;
-
 /* After a turn on a task: an agent that went idle holding the task without moving it is reminded, and after
-   SILENT_TURNS such turns a person is asked. A failed turn counts as silent; a turn a person stopped does not count.
+   SILENT_TURNS such turns a person is asked. A failed turn counts as silent; a turn a person stopped does not count. One
+   that worked until its time ran out, or said in the task how far it got, goes on, up to GOING_ON_TURNS in a row.
    Nothing is checked while the agent has another turn waiting on the task, or while the task waits on its subtasks or on people. */
 export async function checkLiveness(ctx: Ctx, jobId: string): Promise<void> {
   const { db } = ctx;
@@ -229,7 +230,13 @@ export async function checkLiveness(ctx: Ctx, jobId: string): Promise<void> {
     if (task.silent) await db.update(tasks).set({ silent: 0 }).where(eq(tasks.id, task.id));
     return;
   }
-  const moved = await silentTurn(ctx, agentId, task).catch((err: { reason?: string }) => {
+  /* A turn that worked until its time ran out, or that said in the task how far it got, did not stand still. */
+  const [told] = await db
+    .select({ n: count() })
+    .from(taskEvents)
+    .where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.agentId, agentId), gte(taskEvents.createdAt, job.startedAt), eq(taskEvents.kind, 'comment')));
+  const working = job.error === 'timeout' || Number(told?.n ?? 0) > 0;
+  const moved = await (working ? wentOn : silentTurn)(ctx, agentId, task).catch((err: { reason?: string }) => {
     /* Someone moved the task meanwhile: that answers the question. */
     if (err.reason === 'task_changed') return null;
     throw err;

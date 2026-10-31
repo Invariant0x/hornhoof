@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { agents, companies, departments, jobs, people, personAccess, requests, subscriptions, tasks } from '../src/db/schema.js';
 import { afterJob, agentState, openTypedTurn } from '../src/modules/conversation/queue.js';
 import { identityOf } from '../src/modules/nodes/hub.js';
-import { answer, ask, createTask, report, submit, updateTask } from '../src/modules/tasks/engine.js';
+import { answer, ask, comment, createTask, GOING_ON_TURNS, report, submit, updateTask } from '../src/modules/tasks/engine.js';
 import { SILENT_TURNS, startWork, wakeAll, wakePrompt } from '../src/modules/tasks/wake.js';
 import { as, connectNode, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
@@ -181,6 +181,37 @@ describe('waking agents for their tasks', () => {
     expect((await turnsOf(bruno.id)).filter(j => j.status === 'queued')).toEqual([]);
     expect((await db.select().from(tasks).where(eq(tasks.id, task.id)))[0]).toMatchObject({ status: 'waiting', silent: SILENT_TURNS });
     expect(await db.select({ kind: requests.kind, agentId: requests.agentId }).from(requests)).toEqual([{ kind: 'stuck', agentId: bruno.id }]);
+  });
+
+  it('lets an agent that told in the task how far it got go on in another turn, not counted as standing still', async () => {
+    const { ctx, db, bruno, memberTask, turnsOf, finish } = await company();
+    const task = await memberTask();
+    await wakeAll(ctx, [{ agentId: bruno.id, taskId: task.id, why: 'assigned' }]);
+    for (let i = 0; i < SILENT_TURNS + 1; i++) await finish(bruno.id, () => comment(ctx, { agentId: bruno.id }, task.id, `Part ${i} pushed.`));
+    const queued = (await turnsOf(bruno.id)).filter(j => j.status === 'queued');
+    expect(queued).toHaveLength(1);
+    expect(queued[0]!.prompt).toContain('Go on with the work from where you left off');
+    expect((await db.select().from(tasks).where(eq(tasks.id, task.id)))[0]).toMatchObject({ status: 'open', silent: 0 });
+    expect(await db.select().from(requests)).toEqual([]);
+  });
+
+  it('lets an agent whose turn ran out of time while it worked go on', async () => {
+    const { ctx, db, bruno, memberTask, turnsOf, finish } = await company();
+    const task = await memberTask();
+    await wakeAll(ctx, [{ agentId: bruno.id, taskId: task.id, why: 'assigned' }]);
+    const outOfTime = () => db.update(jobs).set({ error: 'timeout' }).where(and(eq(jobs.agentId, bruno.id), eq(jobs.status, 'running')));
+    for (let i = 0; i < SILENT_TURNS; i++) await finish(bruno.id, outOfTime, 'failed');
+    expect((await turnsOf(bruno.id)).filter(j => j.status === 'queued')).toHaveLength(1);
+    expect((await db.select().from(tasks).where(eq(tasks.id, task.id)))[0]!.silent).toBe(0);
+  });
+
+  it('asks a person once an agent went on for many turns without handing anything in', async () => {
+    const { ctx, db, bruno, memberTask, turnsOf, finish } = await company();
+    const task = await memberTask();
+    await wakeAll(ctx, [{ agentId: bruno.id, taskId: task.id, why: 'assigned' }]);
+    for (let i = 0; i < GOING_ON_TURNS; i++) await finish(bruno.id, () => comment(ctx, { agentId: bruno.id }, task.id, `Part ${i} pushed.`));
+    expect((await turnsOf(bruno.id)).filter(j => j.status === 'queued')).toEqual([]);
+    expect(await db.select({ kind: requests.kind, status: requests.status }).from(requests)).toEqual([{ kind: 'stuck', status: 'open' }]);
   });
 
   it('counts a failed turn as silent', async () => {

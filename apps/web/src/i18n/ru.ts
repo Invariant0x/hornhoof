@@ -470,6 +470,7 @@ export const ru: Messages = {
       asked: by => `${by} спросил человека`,
       answered: by => `${by} ответил`,
       reminded: by => `${by} закончил ход, не сдвинув задачу`,
+      continued: by => `${by} продолжает в следующем ходе`,
       stuck: by => `${by} застрял, спрошен человек`,
       cancelled: by => `${by} отменил ее`,
       done: by => `${by} закрыл ее`,
