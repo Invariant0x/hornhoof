@@ -24,6 +24,9 @@ function header(agent: AgentRow, role: string, place: Place): string {
   ].join('\n\n');
 }
 
+/* A skill as instructions carry it, between markers the card finds it by. */
+const skillBlock = (id: string, title: string, body: string) => `<!-- hh:skill ${id} -->\n## ${title}\n\n${body}\n<!-- /hh:skill -->`;
+
 /* The header, the role's text and each enabled skill between markers; the employee's own text replaces a template's. */
 export function renderInstructions(t: Templates, agent: AgentRow, place: Place): { parts: Part[]; text: string; hash: string } {
   const role = agent.roleKey ? t.roles.get(agent.roleKey) : undefined;
@@ -53,7 +56,7 @@ export function renderInstructions(t: Templates, agent: AgentRow, place: Place):
       kind: 'skill',
       id,
       title: skill?.title ?? null,
-      text: `<!-- hh:skill ${id} -->\n## ${skill?.title.en ?? id}\n\n${body}\n<!-- /hh:skill -->`,
+      text: skillBlock(id, skill?.title.en ?? id, body),
       overridden: own !== undefined,
       templateChanged: skill ? moved(id, skill.hash) : false,
     });
@@ -75,6 +78,18 @@ export async function placeOf(db: Ctx['db'], agent: AgentRow): Promise<Place> {
   return { company: company?.name ?? '', department: nameOf(agent.departmentId) ?? '', product: nameOf(agent.productId) };
 }
 
+/* The orchestrator's own skills, always on after his standing role. */
+export const ORCHESTRATOR_SKILLS = ['orch-interview', 'orch-plan-turn', 'orch-verify', 'orch-trouble'] as const;
+
+/* The orchestrator's instructions apart from the notebook: his standing role and his skills. */
+export function orchestratorSteady(t: Templates): string {
+  const skills = ORCHESTRATOR_SKILLS.flatMap(id => {
+    const skill = t.skills.get(id);
+    return skill ? [skillBlock(id, skill.title.en, skill.body)] : [];
+  });
+  return [ORCHESTRATOR_INSTRUCTIONS, ...skills].join('\n\n');
+}
+
 /* The company notebook as the orchestrator reads it, each note with its number. */
 export async function notebookPart(db: Ctx['db'], companyId: string): Promise<string> {
   const notes = await listNotes(db, companyId);
@@ -86,10 +101,15 @@ export async function notebookPart(db: Ctx['db'], companyId: string): Promise<st
    instructions. The hash leaves the notebook out: a new note reaches the program as it starts again in the same session. */
 export async function instructionsOf(ctx: Pick<Ctx, 'db' | 'templates'>, agent: AgentRow): Promise<{ parts: Part[]; text: string; hash: string }> {
   if (agent.kind === 'orchestrator') {
-    const steady = ORCHESTRATOR_INSTRUCTIONS;
+    const steady = orchestratorSteady(ctx.templates);
     const notebook = await notebookPart(ctx.db, agent.companyId);
+    const skills = ORCHESTRATOR_SKILLS.flatMap(id => {
+      const skill = ctx.templates.skills.get(id);
+      return skill ? [{ kind: 'skill' as const, id, title: skill.title, text: skillBlock(id, skill.title.en, skill.body), overridden: false, templateChanged: false }] : [];
+    });
     const parts: Part[] = [
-      { kind: 'base', id: null, title: null, text: steady, overridden: false, templateChanged: false },
+      { kind: 'base', id: null, title: null, text: ORCHESTRATOR_INSTRUCTIONS, overridden: false, templateChanged: false },
+      ...skills,
       { kind: 'notebook', id: null, title: null, text: notebook, overridden: false, templateChanged: false },
     ];
     return { parts, text: `${steady}\n\n${notebook}`, hash: textHash(steady) };

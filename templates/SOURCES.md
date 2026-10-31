@@ -4,7 +4,7 @@ Every role and skill text in this folder is written for Hornhoof, with one excep
 
 | Source | Licence | What we learned from it |
 |---|---|---|
-| obra/superpowers | MIT | The development process: brainstorming, plans, test-driven development, verification before completion, subagent-driven work and the head's protocol for briefs, reports and fix loops. |
+| obra/superpowers | MIT | The development process: brainstorming, plans, test-driven development, verification before completion, subagent-driven work and the head's protocol for briefs, reports and fix loops. The orchestrator's own skills: asking before laying out, turns of checkable tasks, done only when proven, finding the cause when work goes wrong. |
 | unclebob/ub-mode | none; its README asks to copy SKILL.md | The engineering rules for development roles, word for word: make it work, then make it right, then follow practice. |
 | unclebob/crapper, unclebob/dryer, unclebob/mutator | 0BSD | Installed on every node: CRAP scores, structural duplicates and mutation testing for Clojure, Java, Go, TypeScript, Rust and Python. The review gate holds CRAP under 10 and duplicates under 0.8; the tests gate kills surviving mutants. |
 | affaan-m/ECC | MIT | Reviewer and security reviewer checklists, agent hardening, safety guard, cross-checks with several reviewers. Its rules for each language (style, patterns, security, testing) come with every node in /opt/hornhoof/rules, with its licence. |
