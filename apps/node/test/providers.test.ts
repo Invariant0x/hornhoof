@@ -329,6 +329,7 @@ describe('models', () => {
         { name: 'five_hour', utilization: 0.12, resetsAt: '2026-10-31T03:00:00.000Z' },
         { name: 'seven_day', utilization: 0.73, resetsAt: '2026-11-04T10:00:00.000Z' },
       ],
+      complete: true,
     });
     expect(lastRun().argv).toEqual(['app-server']);
     process.env.FAKE_MODE = 'signed_out';
@@ -340,6 +341,7 @@ describe('models', () => {
     expect(codexRateLimits({ rateLimits: { primary: weekly, secondary: null, rateLimitReachedType: null } })).toEqual({
       status: 'allowed',
       windows: [{ name: 'seven_day', utilization: 0.73, resetsAt: new Date(1793774136 * 1000).toISOString() }],
+      complete: true,
     });
     expect(codexRateLimits({ rateLimits: { primary: { usedPercent: 100, windowDurationMins: 300, resetsAt: null }, secondary: { usedPercent: 5, windowDurationMins: 1440, resetsAt: null }, rateLimitReachedType: 'primary' } })).toEqual({
       status: 'rejected',
@@ -347,12 +349,23 @@ describe('models', () => {
         { name: 'five_hour', utilization: 1, resetsAt: null },
         { name: 'one_day', utilization: 0.05, resetsAt: null },
       ],
+      complete: true,
     });
     /* Codex can say the plan takes no ordinary work while no window is full. */
     expect(codexRateLimits({ rateLimits: { primary: weekly, secondary: null, rateLimitReachedType: null }, ordinaryUsageAllowed: false })?.status).toBe('rejected');
     expect(codexRateLimits({ rateLimits: { primary: weekly, secondary: null, rateLimitReachedType: null }, ordinaryUsageAllowed: null })?.status).toBe('allowed');
     expect(codexRateLimits({ rateLimits: { primary: null, secondary: null } })).toBeNull();
     expect(codexRateLimits('nonsense')).toBeNull();
+  });
+
+  it("asks Claude's plan limits with no turn, and nothing for a key or a home not signed in", async () => {
+    const claude = adapter('claude');
+    expect(claude.limits).toBeTypeOf('function');
+    expect(await claude.limits!()).toBeNull();
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(home, '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'claude-access', expiresAt: Date.now() - 60_000 } }));
+    expect(await claude.limits!()).toBeNull();
+    expect(await adapter('anthropic_api', 'sk-ant-api03-key').limits!()).toBeNull();
   });
 
   it("lists Claude's aliases, and nothing for programs that do not say", async () => {

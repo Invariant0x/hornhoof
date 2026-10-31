@@ -2,7 +2,7 @@ import { appendFileSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { claudeStatusContext, claudeStatusLimits, codexRollout, kimiUsageLimits, kimiWire, LineTail } from '../src/terminal/transcripts.js';
+import { claudeStatusContext, claudeStatusLimits, claudeUsageLimits, codexRollout, kimiUsageLimits, kimiWire, LineTail } from '../src/terminal/transcripts.js';
 
 const item = (it: object) => ({ type: 'event_msg', payload: { type: 'item_completed', item: it } });
 const loop = (event: object) => ({ type: 'context.append_loop_event', agentId: 'main', event, time: 1 });
@@ -43,6 +43,7 @@ describe("Codex's session log", () => {
         { name: 'seven_day', utilization: 0.72, resetsAt: new Date(1793774136000).toISOString() },
         { name: 'five_hour', utilization: 0.1, resetsAt: new Date(1793380000000).toISOString() },
       ],
+      complete: true,
     });
     expect(codexRollout({ type: 'event_msg', payload: { type: 'token_count', rate_limits: { ...rate, rate_limit_reached_type: 'primary' } } }).limits?.status).toBe('rejected');
   });
@@ -106,8 +107,9 @@ describe("Kimi Code's session log", () => {
         { name: 'five_hour', utilization: 0.25, resetsAt: '2026-10-31T03:00:00.000Z' },
         { name: 'seven_day', utilization: 1, resetsAt: '2026-11-04T00:00:00.000Z' },
       ],
+      complete: true,
     });
-    expect(kimiUsageLimits({ usages: { limit_5h: { used_ratio: 0.1 } } })).toEqual({ status: 'allowed', windows: [{ name: 'five_hour', utilization: 0.1, resetsAt: null }] });
+    expect(kimiUsageLimits({ usages: { limit_5h: { used_ratio: 0.1 } } })).toEqual({ status: 'allowed', windows: [{ name: 'five_hour', utilization: 0.1, resetsAt: null }], complete: true });
     /* A plan with monthly limits, as Kimi's page answers for one: the fuller month speaks for both. */
     const monthly = {
       limit_5h: { used_ratio: 0.8923, reset_time: '2026-10-31T03:12:51Z' },
@@ -120,8 +122,47 @@ describe("Kimi Code's session log", () => {
         { name: 'five_hour', utilization: 0.8923, resetsAt: '2026-10-31T03:12:51.000Z' },
         { name: 'month', utilization: 0.055, resetsAt: '2026-12-01T00:00:00.000Z' },
       ],
+      complete: true,
     });
     expect(kimiUsageLimits({ error: 'nope' })).toBeNull();
+  });
+
+  it("reads the plan's limits Claude's usage page gives, in percent", () => {
+    const page = {
+      five_hour: { utilization: 16, resets_at: '2026-10-31T02:50:00.895244+00:00', limit_dollars: null },
+      seven_day: { utilization: 100, resets_at: '2026-11-01T07:00:00.895267+00:00' },
+      seven_day_opus: null,
+      extra_usage: { is_enabled: false, utilization: null },
+    };
+    expect(claudeUsageLimits(page)).toEqual({
+      status: 'rejected',
+      windows: [
+        { name: 'five_hour', utilization: 0.16, resetsAt: '2026-10-31T02:50:00.895Z' },
+        { name: 'seven_day', utilization: 1, resetsAt: '2026-11-01T07:00:00.895Z' },
+      ],
+      complete: true,
+    });
+    expect(claudeUsageLimits({ five_hour: { utilization: 3, resets_at: null }, seven_day: null })).toEqual({ status: 'allowed', windows: [{ name: 'five_hour', utilization: 0.03, resetsAt: null }], complete: true });
+    expect(claudeUsageLimits({ error: { type: 'authentication_error' } })).toBeNull();
+  });
+
+  it("keeps a model's own week, which can run out while the plan's week has room", () => {
+    const page = {
+      five_hour: { utilization: 20, resets_at: null },
+      seven_day: { utilization: 60, resets_at: null },
+      seven_day_opus: { utilization: 100, resets_at: '2026-11-01T07:00:00+00:00' },
+      seven_day_sonnet: null,
+      seven_day_oauth_apps: { utilization: null, resets_at: null },
+    };
+    expect(claudeUsageLimits(page)).toEqual({
+      status: 'rejected',
+      windows: [
+        { name: 'five_hour', utilization: 0.2, resetsAt: null },
+        { name: 'seven_day', utilization: 0.6, resetsAt: null },
+        { name: 'seven_day_opus', utilization: 1, resetsAt: '2026-11-01T07:00:00.000Z' },
+      ],
+      complete: true,
+    });
   });
 });
 

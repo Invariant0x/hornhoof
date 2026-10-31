@@ -19,10 +19,12 @@ const LimitWindow = z.object({
   resetsAt: z.string().max(40).nullable(),
 });
 
-/* Usage windows as the provider reports them, for example five hours and seven days. */
+/* Usage windows as the provider reports them, for example five hours and seven days. A complete list names every window
+   the plan has, so one it leaves out is not on the plan; otherwise it tells only what the program said this time. */
 const Limits = z.object({
   status: z.enum(['allowed', 'warning', 'rejected']),
   windows: z.array(LimitWindow).max(8),
+  complete: z.boolean().optional(),
 });
 export type Limits = z.infer<typeof Limits>;
 

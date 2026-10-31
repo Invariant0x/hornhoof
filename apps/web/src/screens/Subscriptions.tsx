@@ -41,37 +41,65 @@ const WINDOW_MINUTES: Record<string, number> = { five_hour: 300, one_day: 1440, 
 
 function windowName(t: Messages, name: string): string {
   if (name === 'month') return t.subs.month;
+  /* A week the plan counts for one model apart, such as Opus. */
+  const model = /^seven_day_([a-z]+)$/.exec(name)?.[1];
+  if (model) return `${t.subs.days(7)}, ${model[0]!.toUpperCase()}${model.slice(1)}`;
   const minutes = WINDOW_MINUTES[name] ?? Number(/^(\d+)_minutes$/.exec(name)?.[1]);
   if (!minutes) return name.replaceAll('_', ' ');
   if (minutes % 1440 === 0) return t.subs.days(minutes / 1440);
   return minutes % 60 === 0 ? t.subs.hours(minutes / 60) : t.subs.minutes(minutes);
 }
 
-/* Each window of the plan's limits as a bar with its share; a plan that reached one says when the fullest resets. */
-function LimitBars({ limits }: { limits: Limits | null }) {
+/* The windows every plan shows, so plans read alike; a plan's other windows follow them. */
+const MAIN_WINDOWS = ['five_hour', 'seven_day'];
+
+/* A window that started over since the plan last spoke: its share is not known again until the plan speaks. */
+const startedOver = (w: Limits['windows'][number]) => w.resetsAt !== null && Date.parse(w.resetsAt) <= Date.now();
+const until = (w: Limits['windows'][number]) => (w.resetsAt ? Date.parse(w.resetsAt) : Infinity);
+
+/* Each window of the plan's limits as a bar with its share: five hours and seven days always, empty when the plan has
+   no such window or has not said yet. Only a complete list says the plan has none. A plan that reached one says when
+   the fullest resets. A key pays as it goes. */
+function LimitBars({ sub }: { sub: SubView }) {
   const t = useT();
   const { language } = useLanguage();
-  if (!limits) return null;
-  const top = [...limits.windows].sort((a, b) => (b.utilization ?? -1) - (a.utilization ?? -1))[0];
-  const known = limits.windows.flatMap(w => (w.utilization === null ? [] : [{ ...w, utilization: w.utilization }]));
+  if (sub.kind === 'api_key') return <small className="limits">{t.subs.noPlanLimits}</small>;
+  const limits: Limits | null = sub.limits;
+  /* A plan stops at a full window, or at one it names without a share. It stays at its limit until each such window
+     starts over, and says when the last one does; with no such window it stays until it says otherwise. */
+  const causes = (limits?.windows ?? []).filter(w => w.utilization === null || w.utilization >= 1);
+  const open = causes.filter(w => !startedOver(w)).sort((a, b) => until(b) - until(a));
+  const reached = limits?.status === 'rejected' && (!causes.length || open.length > 0);
+  const top = open[0] ?? [...(limits?.windows ?? [])].sort((a, b) => (b.utilization ?? -1) - (a.utilization ?? -1))[0];
+  const rows = [
+    ...MAIN_WINDOWS.map(name => ({ name, window: limits?.windows.find(w => w.name === name) })),
+    ...(limits?.windows ?? []).filter(w => !MAIN_WINDOWS.includes(w.name) && w.utilization !== null).map(w => ({ name: w.name, window: w })),
+  ];
   return (
     <>
-      {limits.status === 'rejected' && <small className="limits">{t.subs.limitReached(clock(language, top?.resetsAt ?? null))}</small>}
-      {known.length > 0 && (
-        <ul className="limit-bars" aria-label={t.subs.limits}>
-          {known.map(w => {
-            const at = clock(language, w.resetsAt);
+      {reached && <small className="limits">{t.subs.limitReached(clock(language, top?.resetsAt ?? null))}</small>}
+      <ul className="limit-bars" aria-label={t.subs.limits}>
+        {rows.map(({ name, window: w }) => {
+          if (!w || w.utilization === null || startedOver(w)) {
             return (
-              <li key={w.name}>
-                <span>{windowName(t, w.name)}</span>
-                <Bar used={w.utilization} />
-                <b>{percent(w.utilization)}%</b>
-                {at && <span>{t.subs.resetsAt(at)}</span>}
+              <li key={name}>
+                <span>{windowName(t, name)}</span>
+                <span className="bar none" />
+                <em>{limits?.complete && !w ? t.subs.notOnPlan : t.subs.noDataYet}</em>
               </li>
             );
-          })}
-        </ul>
-      )}
+          }
+          const at = clock(language, w.resetsAt);
+          return (
+            <li key={name}>
+              <span>{windowName(t, name)}</span>
+              <Bar used={w.utilization} />
+              <b>{percent(w.utilization)}%</b>
+              {at && <span>{t.subs.resetsAt(at)}</span>}
+            </li>
+          );
+        })}
+      </ul>
     </>
   );
 }
@@ -280,7 +308,7 @@ export function Subscriptions({ me }: { me: Me }) {
                     <td>{s.kind === 'api_key' ? t.subs.builtin : (s.machine?.hostname ?? <span className="muted">{t.subs.noMachine}</span>)}</td>
                     <td>
                       <span className={`status ${state}`}>{t.subs.states[state]}</span>
-                      <LimitBars limits={s.limits} />
+                      <LimitBars sub={s} />
                     </td>
                     <td className="row-actions">
                       {s.status === 'ready' && s.online && (

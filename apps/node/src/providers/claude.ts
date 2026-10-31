@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { API_MODELS, CLAUDE_ALIASES, type AgentEvent, type Limits } from '@hornhoof/protocol';
 import type { JobUser } from '../isolation.js';
 import type { ProviderAdapter, RunInput, RunResult } from '../runner.js';
+import { claudePlanLimits } from '../terminal/programs.js';
 import { contentText, inputText, isRecord, toolName } from './events.js';
 import { askHidden, childEnv, ensureDir, exitsCleanly, installPackage, interactiveLogin, runProgram, tokensIn, writePrivate } from './process.js';
 
@@ -94,6 +95,11 @@ export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'),
     /* Z.ai maps the aliases to its GLM models, so a GLM plan offers only the default. */
     async models() {
       return mode === 'plan' ? CLAUDE_ALIASES : mode === 'api_key' ? API_MODELS.anthropic_api : [];
+    },
+
+    /* A company key and a GLM plan have no Claude plan limits. */
+    async limits() {
+      return mode === 'plan' ? claudePlanLimits(home) : null;
     },
 
     async loggedIn() {

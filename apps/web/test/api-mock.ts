@@ -65,7 +65,7 @@ export const MACHINE = { id: 'm1', hostname: 'ivan-mbp' };
 export const SUBS: SubView[] = [
   {
     ...SUB_BASE, id: 's-claude', provider: 'claude', label: 'Claude', status: 'ready', online: true, machine: MACHINE,
-    limits: { status: 'allowed', windows: [{ name: 'five_hour', utilization: 0.42, resetsAt: '2026-10-29T18:00:00.000Z' }, { name: 'seven_day', utilization: 0.1, resetsAt: null }] },
+    limits: { status: 'allowed', windows: [{ name: 'five_hour', utilization: 0.42, resetsAt: '2099-10-29T18:00:00.000Z' }, { name: 'seven_day', utilization: 0.1, resetsAt: null }] },
   },
   { ...SUB_BASE, id: 's-codex', provider: 'codex', label: 'Codex', status: 'needs_login', online: true, machine: MACHINE },
   { ...SUB_BASE, id: 's-kimi', provider: 'kimi', label: 'Kimi', status: 'waiting_machine', online: false, machine: null },
