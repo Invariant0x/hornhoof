@@ -185,3 +185,10 @@ export async function installPackage(tools: string, pkg: string): Promise<void> 
   const last = stripEscapes(done.output).trim().split('\n').slice(-5).join('\n');
   throw new Error(done.timedOut ? 'npm did not finish within 10 minutes.' : last || `npm ended with code ${done.code}.`);
 }
+
+/* The thinking levels a program lists for a model, as Hornhoof can pass them on, and its default when it is one of them. */
+export function withEfforts(levels: unknown[], fallback: unknown): { efforts?: string[]; defaultEffort?: string } {
+  const efforts = levels.filter((l): l is string => typeof l === 'string' && /^[a-z]{1,16}$/.test(l)).slice(0, 8);
+  if (!efforts.length) return {};
+  return typeof fallback === 'string' && efforts.includes(fallback) ? { efforts, defaultEffort: fallback } : { efforts };
+}

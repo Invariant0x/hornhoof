@@ -41,6 +41,7 @@ export const ORG: Org = {
     id: 'a1',
     name: 'Orchestrator',
     model: 'claude-opus-5-5',
+    effort: null,
     subscription: { id: 's1', provider: 'anthropic_api', kind: 'api_key', label: 'Orchestrator', status: 'ready', online: false, last4: '9f3a', owner: { id: 'p1', name: 'Ivan' }, place: { kind: 'company', id: null, name: 'Whole company' }, machine: null, limits: null, isOrchestrator: true },
     context: null,
   },
@@ -77,7 +78,7 @@ export const MACHINES: MachineView[] = [
 ];
 
 const OPUS = { id: 'claude-opus-5-5', name: 'Claude Opus 5.5' };
-const SONNET = { id: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5' };
+const SONNET = { id: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5', efforts: ['low', 'high', 'max'] };
 const SOL = { id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol' };
 const HEAD_TITLE = { en: 'Head of development', ru: 'Руководитель разработки' };
 const BE_TITLE = { en: 'Backend engineer', ru: 'Бэкенд-разработчик' };
@@ -98,8 +99,8 @@ export const DEV_ORG: Org = {
       teams: [],
       people: [PEOPLE[2]!],
       employees: [
-        { id: 'b0', name: 'Dana', roleId: 'DEV-HEAD', title: HEAD_TITLE, kind: 'head', model: '', modelName: null, provider: 'claude', state: 'working', status: 'working', on: true, task: null, context: null },
-        { id: 'b1', name: 'Bruno', roleId: 'DEV-BE', title: BE_TITLE, kind: 'worker', model: 'claude-sonnet-5-5', modelName: 'Claude Sonnet 5.5', provider: 'anthropic_api', state: 'sleeping', status: 'idle', on: true, task: null, context: null },
+        { id: 'b0', name: 'Dana', roleId: 'DEV-HEAD', title: HEAD_TITLE, kind: 'head', model: '', modelName: null, provider: 'claude', effort: null, state: 'working', status: 'working', on: true, task: null, context: null },
+        { id: 'b1', name: 'Bruno', roleId: 'DEV-BE', title: BE_TITLE, kind: 'worker', model: 'claude-sonnet-5-5', modelName: 'Claude Sonnet 5.5', provider: 'anthropic_api', effort: null, state: 'sleeping', status: 'idle', on: true, task: null, context: null },
       ],
       roles: [
         { id: 'DEV-HEAD', title: HEAD_TITLE, description: { en: 'Leads development.', ru: 'Ведет разработку.' }, kind: 'head', gate: null },
@@ -156,6 +157,7 @@ export const CARD: AgentCardView = {
   department: { id: 'd2', name: 'Development' },
   product: null,
   model: 'claude-sonnet-5-5',
+  effort: null,
   subscription: TEAM_KEY,
   state: 'sleeping',
   skills: [

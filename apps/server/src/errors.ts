@@ -36,6 +36,7 @@ export type ErrorReason =
   | 'orchestrator_locked'
   | 'subscription_cannot_serve'
   | 'model_unknown'
+  | 'effort_unknown'
   | 'skill_unknown'
   | 'skill_locked'
   | 'instructions_too_long'

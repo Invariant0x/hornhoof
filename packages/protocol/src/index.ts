@@ -26,35 +26,58 @@ const Limits = z.object({
 });
 export type Limits = z.infer<typeof Limits>;
 
-/* A model a subscription can run, as its program names it. */
-const ModelOption = z.object({ id: z.string().min(1).max(80), name: z.string().min(1).max(80) });
+/* How hard a model thinks, as its program names the level: low, high, max and the like. */
+const Effort = z.string().regex(/^[a-z]{1,16}$/);
+
+/* A model a subscription can run, as its program names it, with the efforts it takes and the one it thinks at by default. */
+const ModelOption = z.object({ id: z.string().min(1).max(80), name: z.string().min(1).max(80), efforts: z.array(Effort).max(8).optional(), defaultEffort: Effort.optional() });
 export type ModelOption = z.infer<typeof ModelOption>;
 const Models = z.array(ModelOption).max(60);
+
+/* The levels Claude Code's --effort and Codex's reasoning effort take for the models Hornhoof knows itself. */
+const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 
 /* API keys run these; a node never needs to report them. */
 export const API_MODELS: { anthropic_api: ModelOption[]; openai_api: ModelOption[] } = {
   anthropic_api: [
-    { id: 'claude-fable-5-1', name: 'Claude Fable 5.1' },
-    { id: 'claude-opus-5-5', name: 'Claude Opus 5.5' },
-    { id: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5' },
-    { id: 'claude-haiku-5-5', name: 'Claude Haiku 5.5' },
+    { id: 'claude-fable-5-1', name: 'Claude Fable 5.1', efforts: EFFORTS },
+    { id: 'claude-opus-5-5', name: 'Claude Opus 5.5', efforts: EFFORTS },
+    { id: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5', efforts: EFFORTS },
+    { id: 'claude-haiku-5-5', name: 'Claude Haiku 5.5', efforts: EFFORTS },
   ],
   openai_api: [
-    { id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol' },
-    { id: 'gpt-6-astra', name: 'GPT-6 Astra' },
-    { id: 'gpt-6.1-terra', name: 'GPT-6.1 Terra' },
-    { id: 'gpt-6-sol', name: 'GPT-6 Sol' },
-    { id: 'gpt-6-luna', name: 'GPT-6 Luna' },
+    { id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol', efforts: EFFORTS },
+    { id: 'gpt-6-astra', name: 'GPT-6 Astra', efforts: EFFORTS },
+    { id: 'gpt-6.1-terra', name: 'GPT-6.1 Terra', efforts: EFFORTS },
+    { id: 'gpt-6-sol', name: 'GPT-6 Sol', efforts: EFFORTS },
+    { id: 'gpt-6-luna', name: 'GPT-6 Luna', efforts: EFFORTS },
   ],
 };
 
 /* Claude Code takes these and moves each to the newest model of its family. */
 export const CLAUDE_ALIASES: ModelOption[] = [
-  { id: 'fable', name: 'Fable' },
-  { id: 'opus', name: 'Opus' },
-  { id: 'sonnet', name: 'Sonnet' },
-  { id: 'haiku', name: 'Haiku' },
+  { id: 'fable', name: 'Fable', efforts: EFFORTS },
+  { id: 'opus', name: 'Opus', efforts: EFFORTS },
+  { id: 'sonnet', name: 'Sonnet', efforts: EFFORTS },
+  { id: 'haiku', name: 'Haiku', efforts: EFFORTS },
 ];
+
+/* The effort an agent runs at: what a person picked while its model takes it, else Kimi at the most its model takes and
+   the others at their program's default. No efforts known takes what was picked, and Kimi's max. */
+export function effortFor(provider: ProviderId, chosen: string | null, efforts: string[] = []): string | null {
+  const kept = chosen && (!efforts.length || efforts.includes(chosen)) ? chosen : null;
+  if (kept || provider !== 'kimi') return kept;
+  return efforts.length && !efforts.includes('max') ? efforts[efforts.length - 1]! : 'max';
+}
+
+/* The efforts a model takes. The program picks the Default model itself, and a model the subscription does not run runs
+   on it, so they take only the levels every model that names some takes. */
+export function effortsOf(models: ModelOption[], model: string | null): string[] {
+  const found = model ? models.find(m => m.id === model) : undefined;
+  if (found) return found.efforts ?? [];
+  const named = models.flatMap(m => (m.efforts?.length ? [m.efforts] : []));
+  return named.length ? named[0]!.filter(level => named.every(list => list.includes(level))) : [];
+}
 
 /* What a subscription can run: what its node reported, else what Hornhoof knows for the provider. The web adds "Default" on top. */
 export function modelsFor(provider: ProviderId, reported: ModelOption[] | null): ModelOption[] {
@@ -170,6 +193,8 @@ const ServerMessage = z.discriminatedUnion('type', [
     prompt: z.string(),
     sessionId: z.string().nullable(),
     model: z.string().nullable(),
+    /* How hard the program thinks; null leaves it at its own default. */
+    effort: Effort.nullable().optional(),
     timeoutMs: z.number().int().positive(),
     secret: z.string().nullable(),
     /* The agent's standing instructions for this job, and the token its Hornhoof tools present. */

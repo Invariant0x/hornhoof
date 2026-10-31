@@ -1,7 +1,7 @@
 import { useEffect, useId, useState } from 'react';
 import { api } from '../api';
 import { errorText, useLanguage, useT } from '../i18n';
-import { PROVIDER_NAMES } from '../providers';
+import { defaultEffort, effortsOf, PROVIDER_NAMES } from '../providers';
 import type { AgentCardView, Me, Part, SubView } from '../types';
 import { Ask } from './Ask';
 import { byProvider, servingLabel } from './StaffCard';
@@ -176,6 +176,9 @@ export function AgentCard({ me, agentId, onClose, onTerminal }: Props) {
   const runs = card.runsOn.find(r => r.subscription.id === card.subscription?.id);
   const subs = card.subscription && !runs ? [{ subscription: card.subscription, models: [] }, ...card.runsOn] : card.runsOn;
   const models = runs?.models ?? [];
+  const efforts = effortsOf(models, card.model);
+  const usual = card.subscription && defaultEffort(card.subscription.provider, models, card.model);
+  const effortName = (level: string) => t.agent.efforts[level] ?? level;
   const where = [card.department?.name, card.product?.name].filter(Boolean).join(', ');
   const dirty = rawDraft !== null ? rawDraft !== card.raw : Object.keys(drafts).length > 0;
   const when = (at: string) => new Date(at).toLocaleString(language === 'ru' ? 'ru-RU' : 'en-GB', { dateStyle: 'short', timeStyle: 'short' });
@@ -239,6 +242,18 @@ export function AgentCard({ me, agentId, onClose, onTerminal }: Props) {
               {models.map(m => (
                 <option key={m.id} value={m.id}>
                   {m.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor={`${id}-effort`}>{t.agent.effort}</label>
+            <select id={`${id}-effort`} value={card.effort ?? ''} disabled={!editable || (!efforts.length && !card.effort)} onChange={e => void change({ effort: e.target.value || null })}>
+              <option value="">{usual ? t.agent.defaultEffort(effortName(usual)) : t.agent.default}</option>
+              {card.effort && !efforts.includes(card.effort) && <option value={card.effort}>{effortName(card.effort)}</option>}
+              {efforts.map(level => (
+                <option key={level} value={level}>
+                  {effortName(level)}
                 </option>
               ))}
             </select>

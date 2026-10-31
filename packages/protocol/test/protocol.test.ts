@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { API_MODELS, CLAUDE_ALIASES, cut, DEPARTMENT_TEMPLATES, modelsFor, parseNodeMessage, parseServerMessage, repoFolder, type AgentEvent, type NodeMessage, type ServerMessage } from '../src/index.js';
+import { API_MODELS, CLAUDE_ALIASES, cut, DEPARTMENT_TEMPLATES, effortFor, effortsOf, modelsFor, parseNodeMessage, parseServerMessage, repoFolder, type AgentEvent, type NodeMessage, type ServerMessage } from '../src/index.js';
 
 const LIMITS = { status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0.38, resetsAt: '2026-10-29T21:30:00.000Z' }] };
 
@@ -87,6 +87,13 @@ describe('calling a job off', () => {
 });
 
 describe('job.run', () => {
+  it('carries the effort the agent thinks at, only as a plain level name', () => {
+    const run = { ...(SERVER[0] as Extract<ServerMessage, { type: 'job.run' }>), effort: 'max' };
+    expect(parseServerMessage(JSON.stringify(run))).toEqual(run);
+    expect(parseServerMessage(JSON.stringify({ ...run, effort: null }))).toEqual({ ...run, effort: null });
+    expect(parseServerMessage(JSON.stringify({ ...run, effort: '--dangerously' }))).toBeNull();
+  });
+
   it('needs instructions and a tool token, even when they are null', () => {
     const { instructions: _, ...noInstructions } = SERVER[0] as Extract<ServerMessage, { type: 'job.run' }>;
     const { toolToken: __, ...noToken } = SERVER[0] as Extract<ServerMessage, { type: 'job.run' }>;
@@ -160,6 +167,44 @@ describe('models', () => {
     expect(modelsFor('claude', null)).toEqual(CLAUDE_ALIASES);
     expect(modelsFor('kimi', null)).toEqual([]);
     expect(modelsFor('codex', [])).toEqual([]);
+  });
+
+  it('carry how hard each model can think, and the level it thinks at by default', () => {
+    const kimi = { id: 'kimi-code/k3.1-pro', name: 'K3.1 Pro', efforts: ['low', 'high', 'max'], defaultEffort: 'high' };
+    expect(parseNodeMessage(JSON.stringify({ type: 'status', loggedIn: true, limits: null, models: [kimi] }))).toEqual({ type: 'status', loggedIn: true, limits: null, models: [kimi] });
+    expect(parseNodeMessage(JSON.stringify({ type: 'status', loggedIn: true, limits: null, models: [{ ...kimi, efforts: ['max; rm -rf'] }] }))).toBeNull();
+    for (const m of [...CLAUDE_ALIASES, ...API_MODELS.anthropic_api]) expect(m.efforts).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+    for (const m of API_MODELS.openai_api) expect(m.efforts).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+  });
+
+  it('runs Kimi at its most unless a person picked less, and the others at their own default', () => {
+    expect(effortFor('kimi', null)).toBe('max');
+    expect(effortFor('kimi', 'low')).toBe('low');
+    expect(effortFor('codex', null)).toBeNull();
+    expect(effortFor('claude', 'xhigh')).toBe('xhigh');
+  });
+
+  it('keeps a picked effort only while the model takes it, and runs Kimi at the most its model takes', () => {
+    expect(effortFor('kimi', 'xhigh', ['low', 'high', 'max'])).toBe('max');
+    expect(effortFor('kimi', null, ['low', 'high'])).toBe('high');
+    expect(effortFor('codex', 'ultra', ['low', 'medium'])).toBeNull();
+    expect(effortFor('codex', 'medium', ['low', 'medium'])).toBe('medium');
+  });
+
+  it("lists a model's efforts, and for the Default model the levels every model that names some takes", () => {
+    const models = [
+      { id: 'a', name: 'A', efforts: ['low', 'high'] },
+      { id: 'b', name: 'B', efforts: ['low', 'max'] },
+      { id: 'c', name: 'C' },
+    ];
+    expect(effortsOf(models, 'b')).toEqual(['low', 'max']);
+    expect(effortsOf(models, 'c')).toEqual([]);
+    /* The program picks the Default model itself, so only a level every model takes is safe for it. */
+    expect(effortsOf(models, '')).toEqual(['low']);
+    expect(effortsOf(models, null)).toEqual(['low']);
+    /* A model the subscription does not run runs on its Default. */
+    expect(effortsOf(models, 'gone')).toEqual(['low']);
+    expect(effortsOf([{ id: 'c', name: 'C' }], '')).toEqual([]);
   });
 });
 

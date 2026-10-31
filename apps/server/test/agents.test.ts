@@ -91,6 +91,37 @@ describe('the employee card', () => {
     expect(bruno).toMatchObject({ subscriptionId: codex, model: 'gpt-6.1-sol' });
   });
 
+  it('sets how hard an employee thinks, from the levels its model takes, and keeps who changed it', async () => {
+    const { app, db, ceo, brunoId } = await company();
+    expect((await open(app, ceo, brunoId)).json().effort).toBeNull();
+    const res = await patch(app, ceo, brunoId, { effort: 'max' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().effort).toBe('max');
+    const refused = await patch(app, ceo, brunoId, { effort: 'ultra' });
+    expect(refused.statusCode).toBe(400);
+    expect(refused.json().error.reason).toBe('effort_unknown');
+    const [bruno] = await db.select().from(agents).where(eq(agents.id, brunoId));
+    expect(bruno!.effort).toBe('max');
+    const rows = await db.select().from(agentChanges).where(eq(agentChanges.agentId, brunoId));
+    expect(rows.find(r => r.field === 'effort')).toMatchObject({ before: null, after: 'max' });
+    expect((await patch(app, ceo, brunoId, { effort: null })).json().effort).toBeNull();
+  });
+
+  it('shows the effort each employee runs at on the map: Kimi at its most unless set, the others as set', async () => {
+    const { app, db, ceo, oleg, brunoId } = await company();
+    const kimi = (await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['kimi'] }, ...as(oleg) })).json().subscriptions[0].id as string;
+    await db.update(subscriptions).set({ status: 'ready', models: [{ id: 'kimi-code/k3', name: 'K3', efforts: ['low', 'high', 'max'], defaultEffort: 'high' }] }).where(eq(subscriptions.id, kimi));
+    const effortOnMap = async () => (await app.inject({ url: '/api/org', ...as(ceo) })).json().departments[0].employees[0].effort;
+    await patch(app, ceo, brunoId, { effort: 'high' });
+    expect(await effortOnMap()).toBe('high');
+    /* Another provider's levels may differ, so a move goes back to its default. */
+    const moved = (await patch(app, ceo, brunoId, { subscription: kimi })).json();
+    expect(moved).toMatchObject({ effort: null, model: '' });
+    expect(await effortOnMap()).toBe('max');
+    await patch(app, ceo, brunoId, { model: 'kimi-code/k3', effort: 'low' });
+    expect(await effortOnMap()).toBe('low');
+  });
+
   it('refuses a model the subscription cannot run, and a subscription that cannot serve the department', async () => {
     const { app, db, ceo, sales, brunoId } = await company();
     const res = await patch(app, ceo, brunoId, { model: 'gpt-6.1-sol' });
@@ -260,6 +291,7 @@ describe('the employee card', () => {
     const res = await patch(app, ceo, 'orchestrator', { model: 'claude-sonnet-5-5' });
     expect(res.statusCode).toBe(200);
     expect(res.json().model).toBe('claude-sonnet-5-5');
+    expect((await patch(app, ceo, 'orchestrator', { effort: 'high' })).json().effort).toBe('high');
     expect((await patch(app, ceo, 'orchestrator', { name: 'Boss' })).json().error.reason).toBe('orchestrator_card');
     const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
     expect(orchestrator!.model).toBe('claude-sonnet-5-5');
@@ -269,7 +301,7 @@ describe('the employee card', () => {
     const { app, ceo, brunoId, role } = await company();
     const org = (await app.inject({ url: '/api/org', ...as(ceo) })).json();
     expect(org.departments[0].employees).toEqual([
-      { id: brunoId, name: 'Bruno', roleId: 'DEV-BE', title: role.title, kind: 'worker', model: 'claude-sonnet-5-5', modelName: 'Claude Sonnet 5.5', provider: 'anthropic_api', state: 'sleeping', status: 'idle', on: true, task: null, context: null },
+      { id: brunoId, name: 'Bruno', roleId: 'DEV-BE', title: role.title, kind: 'worker', model: 'claude-sonnet-5-5', modelName: 'Claude Sonnet 5.5', provider: 'anthropic_api', effort: null, state: 'sleeping', status: 'idle', on: true, task: null, context: null },
     ]);
   });
 

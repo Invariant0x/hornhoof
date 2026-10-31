@@ -1,4 +1,4 @@
-import { MAX_INSTRUCTIONS, modelsFor, type ModelOption } from '@hornhoof/protocol';
+import { effortsOf, MAX_INSTRUCTIONS, modelsFor, type ModelOption } from '@hornhoof/protocol';
 import { and, asc, desc, eq, inArray, isNull, notInArray, or, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -26,6 +26,8 @@ export type AgentCard = {
   department: { id: string; name: string } | null;
   product: { id: string; name: string } | null;
   model: string;
+  /* The level a person picked, or null for the program's default (Kimi's most). */
+  effort: string | null;
   subscription: SubView | null;
   state: 'working' | 'sleeping' | 'needs_subscription';
   skills: { id: string; title: Lang; description: Lang; on: boolean; locked: boolean; overridden: boolean; templateChanged: boolean }[];
@@ -44,6 +46,7 @@ export const AgentPatch = z
   .object({
     name: z.string().trim().min(1).max(60).optional(),
     model: z.string().max(80).optional(),
+    effort: z.string().regex(/^[a-z]{1,16}$/).nullable().optional(),
     subscription: z.uuid().nullable().optional(),
     skills: z.record(z.string().max(80), z.boolean()).optional(),
     base: Text.nullable().optional(),
@@ -114,6 +117,7 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
       department: named(agent.departmentId),
       product: named(agent.productId),
       model: agent.model,
+      effort: agent.effort,
       subscription: agent.subscriptionId ? (views.get(agent.subscriptionId) ?? null) : null,
       state: running ? 'working' : agent.subscriptionId ? 'sleeping' : 'needs_subscription',
       skills: offered.flatMap(s => {
@@ -173,7 +177,7 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
   async function patched(me: Person, agent: AgentRow, body: z.infer<typeof AgentPatch>): Promise<{ agent: AgentRow; next: AgentRow; changed: boolean }> {
     const orchestrator = agent.kind === 'orchestrator';
     if (orchestrator && (body.name !== undefined || body.skills || body.base !== undefined || body.skillText || body.on !== undefined)) {
-      throw invalid("The orchestrator's card changes only his model and the subscription he runs on.", 'orchestrator_card');
+      throw invalid("The orchestrator's card changes only his model, his effort and the subscription he runs on.", 'orchestrator_card');
     }
     const next: AgentRow = { ...agent, skills: [...agent.skills], overrides: { ...agent.overrides, skills: { ...agent.overrides.skills } }, templateHashes: { ...agent.templateHashes } };
     if (body.name !== undefined) next.name = body.name;
@@ -200,6 +204,15 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
       if (!models.some(m => m.id === body.model)) throw invalid(`${after.label} cannot run ${body.model}.`, 'model_unknown');
     }
     if (body.model !== undefined) next.model = body.model;
+    /* Another provider names its levels its own way, and a level the new model does not take goes back to the default. */
+    const efforts = after ? effortsOf(modelsFor(after.provider, after.models), next.model) : [];
+    if (next.subscriptionId !== agent.subscriptionId && before?.provider !== after?.provider) next.effort = null;
+    if (body.effort) {
+      if (!after) throw invalid('Pick a subscription before an effort.', 'effort_unknown');
+      if (!efforts.includes(body.effort)) throw invalid(`${after.label} cannot run ${next.model || 'its default model'} at ${body.effort}.`, 'effort_unknown');
+    }
+    if (body.effort !== undefined) next.effort = body.effort;
+    else if (next.effort && !efforts.includes(next.effort)) next.effort = null;
 
     const role = agent.roleKey ? ctx.templates.roles.get(agent.roleKey) : undefined;
     for (const [id, on] of Object.entries(body.skills ?? {})) {
@@ -231,6 +244,7 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
     const changed: { field: Field; before: unknown; after: unknown }[] = [];
     if (next.name !== agent.name) changed.push({ field: 'name', before: agent.name, after: next.name });
     if (next.model !== agent.model) changed.push({ field: 'model', before: agent.model, after: next.model });
+    if (next.effort !== agent.effort) changed.push({ field: 'effort', before: agent.effort, after: next.effort });
     if (next.subscriptionId !== agent.subscriptionId) changed.push({ field: 'subscription', before: agent.subscriptionId, after: next.subscriptionId });
     if (!same(next.skills, agent.skills)) changed.push({ field: 'skills', before: agent.skills, after: next.skills });
     if (!same(next.overrides, agent.overrides)) changed.push({ field: 'prompt', before: agent.overrides, after: next.overrides });
@@ -239,7 +253,7 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
       await db.transaction(async tx => {
         await tx
           .update(agents)
-          .set({ name: next.name, model: next.model, subscriptionId: next.subscriptionId, skills: next.skills, overrides: next.overrides, templateHashes: next.templateHashes, switchedOffAt: next.switchedOffAt })
+          .set({ name: next.name, model: next.model, effort: next.effort, subscriptionId: next.subscriptionId, skills: next.skills, overrides: next.overrides, templateHashes: next.templateHashes, switchedOffAt: next.switchedOffAt })
           .where(eq(agents.id, agent.id));
         await tx.insert(agentChanges).values(changed.map(c => ({ companyId: agent.companyId, agentId: agent.id, ...changedBy(me), ...c })));
       });

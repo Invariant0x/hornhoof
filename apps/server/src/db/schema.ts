@@ -179,13 +179,15 @@ export const agents = pgTable('agents', {
   switchedOffAt: timestamp('switched_off_at', { withTimezone: true }),
   /* How full its context was when its node last said, as a share from 0 to 1. */
   contextUsed: real('context_used'),
+  /* How hard its model thinks, as its program names the level; none runs at the program's default, Kimi at its most. */
+  effort: text('effort'),
   removedAt: timestamp('removed_at', { withTimezone: true }),
   createdAt: createdAt(),
 });
 
 export type AgentOverrides = { base?: string; skills?: Record<string, string> };
 
-export const AGENT_CHANGE_FIELDS = ['name', 'model', 'subscription', 'skills', 'prompt', 'reset', 'hired', 'removed', 'switch'] as const;
+export const AGENT_CHANGE_FIELDS = ['name', 'model', 'effort', 'subscription', 'skills', 'prompt', 'reset', 'hired', 'removed', 'switch'] as const;
 
 /* Every change to an employee's card: who, when, what, before and after. */
 export const agentChanges = pgTable(

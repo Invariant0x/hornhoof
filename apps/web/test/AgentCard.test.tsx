@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import type { AgentCardView, Me } from '../src/types';
 import { AgentCard } from '../src/ui/AgentCard';
-import { CARD, ME, mockApi } from './api-mock';
+import { CARD, ME, mockApi, TEAM_KEY } from './api-mock';
 
 function open(routes: Record<string, unknown> = {}, me: Me = ME) {
   const calls = mockApi({ 'GET /api/agents/b1': [200, CARD], ...(routes as Record<string, [number, unknown]>) });
@@ -70,6 +70,43 @@ describe('AgentCard', () => {
     expect(await screen.findByText('Applies from the next turn.')).toBeInTheDocument();
     expect(calls.find(c => c.method === 'PATCH')?.body).toEqual({ model: 'claude-opus-5-5' });
     expect(screen.getByRole('combobox', { name: 'Model' })).toHaveValue('claude-opus-5-5');
+  });
+
+  it('saves how hard the employee thinks, from the levels its model takes', async () => {
+    const user = userEvent.setup();
+    const { calls } = open({ 'PATCH /api/agents/b1': patched });
+    const effort = await screen.findByRole('combobox', { name: 'Effort' });
+    expect(effort).toHaveValue('');
+    expect(within(effort).getAllByRole('option').map(o => o.textContent)).toEqual(['Default', 'Low', 'High', 'Max']);
+    await user.selectOptions(effort, 'max');
+    await vi.waitFor(() => expect(calls.find(c => c.method === 'PATCH')?.body).toEqual({ effort: 'max' }));
+    expect(screen.getByRole('combobox', { name: 'Effort' })).toHaveValue('max');
+  });
+
+  it('names the level the Default runs at: Kimi at its most', async () => {
+    const kimi = { ...TEAM_KEY, id: 's-kimi', provider: 'kimi' as const };
+    const k3 = { id: 'k3', name: 'K3', efforts: ['low', 'high', 'max'], defaultEffort: 'high' };
+    open({ 'GET /api/agents/b1': [200, { ...CARD, model: '', subscription: kimi, runsOn: [{ subscription: kimi, models: [k3] }] }] });
+    expect(await screen.findByRole('option', { name: 'Default (Max)' })).toBeInTheDocument();
+  });
+
+  it("names the Default by its model's own level when the program has one", async () => {
+    const codex = { ...TEAM_KEY, id: 's-cx', provider: 'codex' as const };
+    const sol = { id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol', efforts: ['low', 'xhigh', 'ultra'], defaultEffort: 'low' };
+    open({ 'GET /api/agents/b1': [200, { ...CARD, model: 'gpt-6.1-sol', subscription: codex, runsOn: [{ subscription: codex, models: [sol] }] }] });
+    const effort = await screen.findByRole('combobox', { name: 'Effort' });
+    expect(within(effort).getAllByRole('option').map(o => o.textContent)).toEqual(['Default (Low)', 'Low', 'Extra high', 'Ultra']);
+  });
+
+  it('lets a person go back to Default when the program no longer says which levels its model takes', async () => {
+    const user = userEvent.setup();
+    const bare = { ...CARD, effort: 'max', runsOn: [{ subscription: TEAM_KEY, models: [{ id: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5' }] }] };
+    const { calls } = open({ 'GET /api/agents/b1': [200, bare], 'PATCH /api/agents/b1': [200, { ...bare, effort: null }] });
+    const effort = await screen.findByRole('combobox', { name: 'Effort' });
+    expect(effort).toBeEnabled();
+    expect(within(effort).getAllByRole('option').map(o => o.textContent)).toEqual(['Default', 'Max']);
+    await user.selectOptions(effort, '');
+    await vi.waitFor(() => expect(calls.find(c => c.method === 'PATCH')?.body).toEqual({ effort: null }));
   });
 
   it('moves the employee to another subscription', async () => {

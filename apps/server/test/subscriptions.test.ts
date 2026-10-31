@@ -128,6 +128,21 @@ describe('POST /api/subscriptions/:id/orchestrator', () => {
     expect((await list(app, ceo)).filter((s: { isOrchestrator: boolean }) => s.isOrchestrator).map((s: { id: string }) => s.id)).toEqual([id]);
   });
 
+  it("keeps the orchestrator's effort on the same provider and starts another provider at its default, as his card does", async () => {
+    const { app, db, ceo } = await companyWithMaria();
+    const effort = async () => (await db.select().from(agents).where(eq(agents.kind, 'orchestrator')))[0]!.effort;
+    expect((await app.inject({ method: 'PATCH', url: '/api/agents/orchestrator', payload: { effort: 'high' }, ...as(ceo) })).statusCode).toBe(200);
+    const sameKey = await addKey(app, ceo, { kind: 'api_key', provider: 'anthropic_api', label: 'Second key', apiKey: TEST_API_KEY, target: { kind: 'orchestrator' } });
+    expect(sameKey.statusCode).toBe(201);
+    expect(await effort()).toBe('high');
+    const claude = (await connect(app, ceo, ['claude'])).json().subscriptions[0].id;
+    expect((await post(app, ceo, `/api/subscriptions/${claude}/orchestrator`)).statusCode).toBe(200);
+    expect(await effort()).toBeNull();
+    await db.update(agents).set({ effort: 'low' }).where(eq(agents.kind, 'orchestrator'));
+    await addKey(app, ceo, { kind: 'api_key', provider: 'openai_api', label: 'OpenAI', apiKey: 'sk-proj-test-key-4321', target: { kind: 'orchestrator' } });
+    expect(await effort()).toBeNull();
+  });
+
   it('no longer answers at the old chief address', async () => {
     const { app, ceo } = await companyWithMaria();
     const id = (await connect(app, ceo, ['claude'])).json().subscriptions[0].id;

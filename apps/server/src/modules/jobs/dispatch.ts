@@ -15,6 +15,7 @@ type JobToSend = {
   prompt: string;
   sessionId: string | null;
   model?: string | null;
+  effort?: string | null;
   timeoutMs: number;
   instructions: string | null;
   toolToken: string | null;
@@ -38,6 +39,7 @@ export async function dispatchJob(ctx: Ctx, job: JobToSend): Promise<boolean> {
     prompt: job.prompt,
     sessionId: job.sessionId,
     model: job.model ?? null,
+    effort: job.effort ?? null,
     timeoutMs: job.timeoutMs,
     secret,
     instructions: job.instructions,

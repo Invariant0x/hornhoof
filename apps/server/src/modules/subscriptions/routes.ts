@@ -1,4 +1,5 @@
-import { and, eq, inArray, isNull } from 'drizzle-orm';
+import type { ProviderId } from '@hornhoof/protocol';
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -61,6 +62,13 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   const ownsOrCompany = (me: Person, ownerId: string) => me.id === ownerId || me.scopeKind === 'company';
 
+  /* The orchestrator moves to a subscription. Another provider names its levels its own way, so he starts at its default,
+     as a move on his card does. */
+  const orchestratorOn = (sub: { id: string; provider: ProviderId }) => ({
+    subscriptionId: sub.id,
+    effort: sql<string | null>`case when (select ${subscriptions.provider} from ${subscriptions} where ${subscriptions.id} = ${agents.subscriptionId}) = ${sub.provider} then ${agents.effort} end`,
+  });
+
   /* The orchestrator on a new subscription: his waiting turns go out on it, and when he had none, the tasks he missed. */
   async function orchestratorBack(before: { id: string; subscriptionId: string | null } | null) {
     if (before && !before.subscriptionId) await resumeAgent(ctx, before.id);
@@ -99,7 +107,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
         targetKind: target.kind,
         targetId: 'id' in target ? target.id : null,
       }).returning({ id: subscriptions.id });
-      if (target.kind === 'orchestrator') await tx.update(agents).set({ subscriptionId: sub!.id }).where(eq(agents.kind, 'orchestrator'));
+      if (target.kind === 'orchestrator') await tx.update(agents).set(orchestratorOn({ id: sub!.id, provider: body.provider })).where(eq(agents.kind, 'orchestrator'));
       return sub!.id;
     });
     if (target.kind === 'orchestrator') await orchestratorBack(orchestratorBefore);
@@ -154,7 +162,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
     const [owner] = await db.select({ scopeKind: people.scopeKind }).from(people).where(eq(people.id, sub.ownerPersonId));
     if (!servesWholeCompany(sub, owner?.scopeKind)) throw notCompanyLevel();
     const before = await orchestratorOf(ctx, me.companyId);
-    await db.update(agents).set({ subscriptionId: sub.id }).where(eq(agents.kind, 'orchestrator'));
+    await db.update(agents).set(orchestratorOn(sub)).where(eq(agents.kind, 'orchestrator'));
     await orchestratorBack(before);
     return { subscription: await subView(db, online, sub.id) };
   });

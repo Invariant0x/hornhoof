@@ -16,11 +16,11 @@ const DEPUTY: Me = { ...ME, person: { ...ME.person, scopeKind: 'listed', isOwner
 const dept = (d: Partial<Department> & { id: string }): Department => ({ name: null, templateKey: null, roleCode: 'SAL', about: '', agents: { total: 0, working: 0 }, products: [], teams: [], people: [], employees: [], roles: [], ...d });
 const STATES: [string, SubView | null, string, string][] = [
   ['none', null, 'Needs a subscription to start', 'Чтобы начать, нужна подписка'],
-  ['API key', SUBS[3]!, 'Runs on Anthropic key ending 9f3a', 'Работает на ключе Anthropic, последние символы 9f3a'],
+  ['API key', SUBS[3]!, 'Ready, on the Anthropic key ending 9f3a', 'На связи, ключ Anthropic, последние символы 9f3a'],
   ['waiting for the machine', { ...claude, status: 'waiting_machine', online: false, machine: null }, "Waiting for Ivan's machine", 'Ждет машину, владелец Ivan'],
   ['needs login', { ...claude, status: 'needs_login' }, 'Waiting for the Claude login', 'Ждет входа в Claude'],
   ['ready and offline', { ...claude, online: false }, "Ivan's machine is offline", 'Машина не в сети, владелец Ivan'],
-  ['ready and online', claude, "Runs on Ivan's Claude subscription", 'Работает на подписке Claude, владелец Ivan'],
+  ['ready and online', claude, "Ready, on Ivan's Claude subscription", 'На связи, подписка Claude, владелец Ivan'],
 ];
 
 describe('orchestratorStatus', () => {
@@ -39,7 +39,7 @@ describe('Map', () => {
     expect(screen.getByText('agents working')).toHaveClass('hub-lbl');
     expect(screen.getByText('Ivan')).toBeInTheDocument();
     expect(screen.getByText('Maria')).toBeInTheDocument();
-    expect(container.querySelector('.ticker')).toHaveTextContent('OrchestratorRuns on Anthropic key ending 9f3a');
+    expect(container.querySelector('.ticker')).toHaveTextContent('OrchestratorReady, on the Anthropic key ending 9f3a');
   });
 
   it("shows how full the orchestrator's context is in the line at the bottom, and follows it live", async () => {
@@ -48,9 +48,16 @@ describe('Map', () => {
     const { container } = render(<MapScreen {...PROPS} />);
     await screen.findByText('Ivan');
     const ticker = container.querySelector<HTMLElement>('.ticker')!;
-    expect(within(ticker).getByTitle('Context 34%')).toHaveTextContent('34%');
+    expect(within(ticker).getByTitle('Context 34%')).toHaveTextContent('Context34%');
     stream.send({ type: 'context', agentId: 'a1', used: 0.71 });
     expect(within(ticker).getByTitle('Context 71%').querySelector('.bar')).toHaveClass('hi');
+  });
+
+  it('shows how hard the orchestrator thinks in the line at the bottom', async () => {
+    mockApi({ 'GET /api/org': [200, { ...ORG, orchestrator: { ...ORG.orchestrator!, effort: 'xhigh' } }] });
+    const { container } = render(<MapScreen {...PROPS} />);
+    await screen.findByText('Ivan');
+    expect(container.querySelector('.ticker')).toHaveTextContent('extra high effort');
   });
 
   it('shows the map again once the server answers after a failure', async () => {
@@ -125,7 +132,7 @@ describe('Map', () => {
     mockApi({ 'GET /api/org': [200, ORG_WITH_TEAMS] });
     const { container, rerender } = render(<MapScreen {...PROPS} />);
     await screen.findByText('Marketing');
-    expect(container.querySelector('.ticker')).toHaveTextContent('OrchestratorRuns on Anthropic key ending 9f3a');
+    expect(container.querySelector('.ticker')).toHaveTextContent('OrchestratorReady, on the Anthropic key ending 9f3a');
     expect(container.querySelector('.hub-orchestrator')).not.toBeInTheDocument();
     rerender(<MapScreen {...PROPS} windowOpen />);
     expect(container.querySelector('.ticker')).not.toBeInTheDocument();
