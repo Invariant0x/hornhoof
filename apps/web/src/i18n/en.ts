@@ -539,6 +539,7 @@ export const en = {
     self_locked: 'You cannot do this to yourself.',
     unknown_place: 'This department or team no longer exists. Reload the page and pick again.',
     not_owner: 'Only the owner can do this.',
+    orchestrator_only: 'Only the orchestrator writes this.',
     already_connected: 'This subscription is already connected to a machine.',
     not_company_level: 'The orchestrator can only run on a subscription that serves the whole company.',
     subscription_unknown: 'This subscription no longer exists. Reload the page.',

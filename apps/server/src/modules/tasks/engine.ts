@@ -10,7 +10,7 @@ export type Task = typeof tasks.$inferSelect;
 export type Request = typeof requests.$inferSelect;
 /* Who moves a task: a person from the web app, or an agent from its tools. */
 export type Actor = { personId: string; agentId?: undefined } | { agentId: string; personId?: undefined };
-export type WakeWhy = 'assigned' | 'review' | 'changes' | 'stuck_at_gate' | 'done' | 'reported' | 'blocked' | 'cancelled' | 'answered' | 'comment' | 'updated' | 'reminder' | 'go_on' | 'turn' | 'switched';
+export type WakeWhy = 'assigned' | 'review' | 'changes' | 'stuck_at_gate' | 'done' | 'reported' | 'blocked' | 'cancelled' | 'answered' | 'comment' | 'updated' | 'reminder' | 'go_on' | 'turn' | 'switched' | 'explain';
 /* An agent that has to act on a task now; Hornhoof queues a turn for it. note: what else it should know, after the rest. */
 export type Wake = { agentId: string; taskId: string; why: WakeWhy; text?: string; note?: string };
 export type Moved = { task: Task; wakes: Wake[] };
@@ -329,12 +329,13 @@ export async function report(ctx: Live, agentId: string, taskId: string, r: { do
     return { task: row, wakes: giver(task, r.done ? 'reported' : 'blocked', agentId, r.summary) };
   }
   /* A person gave it, so a person has to unblock it. */
+  let note: Request | undefined;
   const row = await move(ctx, task, { status: 'waiting' }, n, async tx => {
     await letStuckGo(tx, task.id);
-    await tx.insert(requests).values({ companyId: task.companyId, taskId, agentId, kind: 'stuck', text: r.summary });
+    [note] = await tx.insert(requests).values({ companyId: task.companyId, taskId, agentId, kind: 'stuck', text: r.summary }).returning();
   });
   ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
-  return { task: row, wakes: [] };
+  return { task: row, wakes: await explaining(ctx.db, task, agentId, note!.id) };
 }
 
 /* The executor cannot go on without its head. */
@@ -574,7 +575,16 @@ export async function ask(ctx: Live, agentId: string, taskId: string, q: Ask): P
     if (shown.length !== pictures.length) throw refuse(409, 'task_changed', 'A picture was shown meanwhile. Send it again with hh-attach.');
   });
   ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
-  return { task: row, request: request!, wakes: [] };
+  return { task: row, request: request!, wakes: await explaining(ctx.db, task, agentId, request!.id) };
+}
+
+/* What an employee asks people reaches the orchestrator first, to put into plain words for them; not what it asks itself. */
+async function explaining(db: Db | Tx, task: Task, agentId: string, requestId: string): Promise<Wake[]> {
+  const [orchestrator] = await db
+    .select({ id: agents.id })
+    .from(agents)
+    .where(and(eq(agents.companyId, task.companyId), eq(agents.kind, 'orchestrator'), isNull(agents.removedAt)));
+  return orchestrator && orchestrator.id !== agentId ? [{ agentId: orchestrator.id, taskId: task.id, why: 'explain', text: requestId }] : [];
 }
 
 /* The agent holding the task ended a turn without moving it: a reminder, and from SILENT_TURNS on a person is asked. */
@@ -589,11 +599,12 @@ export async function silentTurn(ctx: Live, agentId: string, task: Task): Promis
 
 /* Hornhoof stops waking the agent on the task and asks a person how it should go on. */
 async function askAboutStill(ctx: Live, agentId: string, task: Task, silent: number, text: string): Promise<Moved> {
+  let note: Request | undefined;
   const row = await move(ctx, task, { silent, status: 'waiting' }, { kind: 'stuck', actor: { agentId }, text }, async tx => {
-    await tx.insert(requests).values({ companyId: task.companyId, taskId: task.id, agentId, kind: 'stuck', text });
+    [note] = await tx.insert(requests).values({ companyId: task.companyId, taskId: task.id, agentId, kind: 'stuck', text }).returning();
   });
   ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
-  return { task: row, wakes: [] };
+  return { task: row, wakes: await explaining(ctx.db, task, agentId, note!.id) };
 }
 
 /* Events that do not move a task: what an agent says in it and Hornhoof's own notes about its turns. */

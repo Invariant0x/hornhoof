@@ -197,6 +197,14 @@ describe("Hornhoof's note that a task stands still", () => {
     await expect(submit(c.ctx, c.bruno.id, c.task.id, { summary: 'Done.', evidence: 'npm test' })).rejects.toThrow(/waits for a person's answer/);
   });
 
+  it('asks the orchestrator to put the note into plain words for people', async () => {
+    const c = await stuck();
+    const [note] = await c.db.select({ id: requests.id }).from(requests);
+    const asked = (await c.turnsOf(c.orchestrator.id)).filter(j => j.prompt.includes(note!.id));
+    expect(asked).toHaveLength(1);
+    expect(asked[0]!.prompt).toContain('explain_request');
+  });
+
   it('wakes whoever holds the task now when a person says try again', async () => {
     const c = await stuck();
     /* Handed on before Hornhoof let such notes go. */

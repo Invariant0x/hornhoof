@@ -8,6 +8,7 @@ import { hashToken } from '../src/crypto/tokens.js';
 import { agentChanges, agentEvents, agents, companies, departments, jobs, people, proposals, requests, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
 import { identityOf } from '../src/modules/nodes/hub.js';
 import { ask, createTask } from '../src/modules/tasks/engine.js';
+import { wakeAll } from '../src/modules/tasks/wake.js';
 import { as, connectNode, listen, setUpCompany, testApp, until } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
@@ -160,6 +161,25 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
     expect(await db.select().from(jobs).where(and(eq(jobs.agentId, orchestrator.id), like(jobs.prompt, 'Hornhoof applied%')))).toEqual([]);
     const [applied] = await db.select().from(agentEvents).where(and(eq(agentEvents.agentId, orchestrator.id), eq(agentEvents.kind, 'applied')));
     expect(applied!.personId).toBeNull();
+  });
+
+  it('is asked to put what an employee asks a person into plain words, and its words show with the request', async () => {
+    const { app, db, ceo, orchestrator, bruno, task, running } = await company();
+    await db.delete(jobs).where(eq(jobs.agentId, orchestrator.id));
+    const { request, wakes } = await ask(app.ctx, bruno.id, task.id, { kind: 'question', text: 'JWT or sessions for /checkout?' });
+    await wakeAll(app.ctx, wakes);
+    const [asked] = await db.select().from(jobs).where(eq(jobs.agentId, orchestrator.id));
+    expect(asked!.prompt).toContain(request.id);
+    expect(asked!.prompt).toContain('JWT or sessions for /checkout?');
+    expect(asked!.prompt).toContain('explain_request');
+    await running(orchestrator.id, TOKEN);
+    const plain = 'Бруно спрашивает, как входить в оплату. Нужно выбрать: проще (сессии) или для приложений тоже (JWT).';
+    expect((await call(await mcp(app), 'explain_request', { request: request.id, text: plain })).isError).toBeFalsy();
+    const listed = (await app.inject({ url: '/api/requests', ...as(ceo) })).json().requests;
+    expect(listed).toMatchObject([{ id: request.id, explained: plain }]);
+    /* People answer; only the orchestrator puts a request into words. */
+    const byPerson = await app.inject({ method: 'POST', url: `/api/requests/${request.id}/explained`, payload: { text: 'x' }, ...as(ceo) });
+    expect(byPerson.statusCode).toBe(403);
   });
 
   it('answers an employee\'s question as itself', async () => {

@@ -72,6 +72,9 @@ function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string {
     case 'switched':
       /* Its text says what to do. */
       return `${ref}, which you gave out, has nobody on to go on with it${w.text ? `:\n\n${w.text}` : '. Give it to someone who is on with update_task, or tell the CEO it waits.'}`;
+    case 'explain':
+      /* Hornhoof writes this turn itself, from the request. */
+      return `${ref} waits for people. See /api/requests and put what is asked into plain words with explain_request.`;
   }
 }
 
@@ -119,11 +122,41 @@ export async function backOn(ctx: Ctx, actor: Actor, agentId: string): Promise<v
 export async function wakeAll(ctx: Ctx, wakes: Wake[]): Promise<void> {
   const seen = new Set<string>();
   for (const w of wakes) {
+    if (w.why === 'explain') {
+      await explainRequest(ctx, w);
+      continue;
+    }
     const key = `${w.agentId}:${w.taskId}`;
     if (seen.has(key)) continue;
     seen.add(key);
     if (await queueWake(ctx, w)) await pump(ctx, w.agentId);
   }
+}
+
+/* An employee waits for people: the orchestrator finds out what it needs and puts it into plain words for them, which
+   people read above their answer. Typed into the orchestrator's turn when it works, else its own turn, one per request. */
+async function explainRequest(ctx: Ctx, w: Wake): Promise<void> {
+  const [found] = await ctx.db
+    .select({ request: requests, asker: agents.name, task: tasks })
+    .from(requests)
+    .innerJoin(agents, eq(agents.id, requests.agentId))
+    .innerJoin(tasks, eq(tasks.id, requests.taskId))
+    .where(eq(requests.id, w.text ?? ''));
+  if (!found || found.request.status !== 'open' || !(await liveSubscription(ctx, w.agentId))) return;
+  const { request, asker, task } = found;
+  const ref = `#${task.number} "${task.title}"`;
+  const what =
+    request.kind === 'stuck'
+      ? `Hornhoof stopped waking ${asker} on ${ref} and waits for people to say how it goes on (request ${request.id}). Hornhoof noted: ${request.text}`
+      : `${asker} asks people on ${ref} (request ${request.id}, a ${request.kind}):\n\n${request.text}`;
+  const text =
+    `${what}\n\nBefore a person answers, find out what it needs: read the task with "task", and ask ${asker} with "message_employee" when its words are not enough. ` +
+    `Then call "explain_request" with request ${request.id} and a few lines for the person, in the CEO's language and plain words without IT terms: ` +
+    'which task and what for, what is needed from them and why, and the ways to go with what each leads to. Do not answer it yourself unless the CEO told you how.';
+  const into = await sayLive(ctx, w.agentId, text);
+  const jobId = into ?? (await insertTurn(ctx, { companyId: task.companyId, agentId: w.agentId, prompt: text, createdBy: null }));
+  await appendEvent(ctx, { companyId: task.companyId, agentId: w.agentId, jobId, kind: 'message', data: { text, task: { id: task.id, number: task.number } } });
+  if (!into) await pump(ctx, w.agentId);
 }
 
 /* An agent back on a subscription: the wakes it missed without one were left out, so every task waiting on it gets a turn. */

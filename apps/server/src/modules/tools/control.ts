@@ -131,6 +131,13 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
   );
 
   tool(
+    'explain_request',
+    'Puts what an employee asks people into plain words for them, shown above their answer: which task and what for, what is needed from them and why, and the ways to go. In the CEO\'s language, without IT terms.',
+    { request: Id('request'), text: z.string().min(1).max(3000) },
+    ({ request, text }) => ({ method: 'POST', url: `/api/requests/${request}/explained`, payload: { text } }),
+  );
+
+  tool(
     'invite_person',
     'Invites a person: name, email, title, and access { whole: true } or { departments: [ids], teams: [ids] }. Returns the invite link for the CEO to send them.',
     InviteBody.shape,

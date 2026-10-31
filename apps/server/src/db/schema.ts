@@ -410,6 +410,8 @@ export const requests = pgTable(
     status: text('status', { enum: REQUEST_STATUSES }).notNull().default('open'),
     answer: text('answer'),
     answeredBy: uuid('answered_by').references(() => people.id),
+    /* The orchestrator's words for people: what is needed from them, why, and the ways to go, in plain words. */
+    explained: text('explained'),
     createdAt: createdAt(),
     answeredAt: timestamp('answered_at', { withTimezone: true }),
   },
