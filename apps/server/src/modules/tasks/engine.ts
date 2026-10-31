@@ -80,6 +80,18 @@ const giver = (task: Task, why: WakeWhy, actorId?: string, text?: string): Wake[
 
 const closing = () => ({ status: 'done' as const, closedAt: new Date(), assigneeAgentId: null, silent: 0 });
 
+/* Whether the task waits for a person's word other than Hornhoof's note that it stood still. */
+async function waitsForPerson(db: Db | Tx, taskId: string): Promise<boolean> {
+  const [open] = await db.select({ id: requests.id }).from(requests).where(and(eq(requests.taskId, taskId), eq(requests.status, 'open'), notInArray(requests.kind, ['stuck']))).limit(1);
+  return !!open;
+}
+
+/* Hornhoof's notes that the task stood still are over once it moves again: handed on, handed in or reported. */
+async function letStuckGo(tx: Tx, taskId: string): Promise<boolean> {
+  const gone = await tx.update(requests).set({ status: 'withdrawn', answeredAt: new Date() }).where(and(eq(requests.taskId, taskId), eq(requests.status, 'open'), eq(requests.kind, 'stuck'))).returning({ id: requests.id });
+  return gone.length > 0;
+}
+
 export type NewTask = {
   title: string;
   brief: string;
@@ -165,13 +177,16 @@ export async function submit(ctx: Live, agentId: string, taskId: string, r: { su
   stillOpen(task);
   if (!task.executorAgentId) throw refuse(400, 'task_invalid', `#${task.number} has no executor; its owner closes it with report.`);
   if (task.executorAgentId !== agentId || task.stage !== 0) throw notYours(task, 'is not waiting for your work');
-  if (task.status === 'waiting') throw refuse(409, 'task_invalid', `#${task.number} waits for a person's answer first.`);
+  if (task.status === 'waiting' && (await waitsForPerson(ctx.db, task.id))) throw refuse(409, 'task_invalid', `#${task.number} waits for a person's answer first.`);
   const n: Note = { kind: 'submitted', actor: { agentId }, text: r.summary, data: { evidence: r.evidence } };
+  const unstuck = async (tx: Tx) => {
+    if (await letStuckGo(tx, task.id)) ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
+  };
   if (task.gates.length) {
     const gate = await atGate(ctx.db, task, 1);
-    return { task: await move(ctx, task, gate.set, n), wakes: gate.wakes };
+    return { task: await move(ctx, task, gate.set, n, unstuck), wakes: gate.wakes };
   }
-  const row = await move(ctx, task, closing(), n);
+  const row = await move(ctx, task, closing(), n, unstuck);
   return { task: row, wakes: giver(task, 'done', agentId) };
 }
 
@@ -290,10 +305,14 @@ export async function report(ctx: Live, agentId: string, taskId: string, r: { do
   if (task.executorAgentId) throw refuse(400, 'task_invalid', `#${task.number} is a member task: submit it, or say it is blocked.`);
   if (task.assigneeAgentId !== agentId) throw notYours(task, 'is not yours to report');
   const n: Note = { kind: 'report', actor: { agentId }, text: r.summary, data: { done: r.done } };
-  if (r.done) return { task: await move(ctx, task, closing(), n), wakes: giver(task, 'reported', agentId, r.summary) };
-  if (task.createdByAgentId) return { task: await move(ctx, task, { status: 'blocked' }, n), wakes: giver(task, 'blocked', agentId, r.summary) };
+  const unstuck = async (tx: Tx) => {
+    if (await letStuckGo(tx, task.id)) ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
+  };
+  if (r.done) return { task: await move(ctx, task, closing(), n, unstuck), wakes: giver(task, 'reported', agentId, r.summary) };
+  if (task.createdByAgentId) return { task: await move(ctx, task, { status: 'blocked' }, n, unstuck), wakes: giver(task, 'blocked', agentId, r.summary) };
   /* A person gave it, so a person has to unblock it. */
   const row = await move(ctx, task, { status: 'waiting' }, n, async tx => {
+    await letStuckGo(tx, task.id);
     await tx.insert(requests).values({ companyId: task.companyId, taskId, agentId, kind: 'stuck', text: r.summary });
   });
   ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
@@ -480,7 +499,15 @@ export async function updateTask(ctx: Live, agentId: string, taskId: string, c: 
   if (!fields.length) return { task, wakes: [] };
   /* A rewrite answers a blocked executor. A task nobody holds stays blocked until someone can take it. */
   if (task.status === 'blocked' && (set.assigneeAgentId ?? task.assigneeAgentId)) set.status = 'open';
-  const row = await move(ctx, task, set, { kind: 'updated', actor: { agentId }, data: { fields } });
+  /* Another one takes it up, so Hornhoof's note that it stood still is over; a person's word asked for still waits. */
+  const handedOn = !!set.assigneeAgentId && set.assigneeAgentId !== task.assigneeAgentId;
+  if (handedOn) {
+    set.silent = 0;
+    if (task.status === 'waiting' && !(await waitsForPerson(ctx.db, task.id))) set.status = 'open';
+  }
+  const row = await move(ctx, task, set, { kind: 'updated', actor: { agentId }, data: { fields } }, async tx => {
+    if (handedOn && (await letStuckGo(tx, task.id))) ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
+  });
   const wakes: Wake[] = [];
   if (set.assigneeAgentId) wakes.push({ agentId: set.assigneeAgentId, taskId, why: 'assigned' });
   else if (row.assigneeAgentId && row.assigneeAgentId !== agentId) wakes.push({ agentId: row.assigneeAgentId, taskId, why: 'updated' });
@@ -610,7 +637,9 @@ export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answ
   published(ctx, now);
   await handOff(ctx, actor, now);
   ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
-  const wakes: Wake[] = CLOSED.includes(now.status) ? [] : [{ agentId: found.agentId, taskId: task.id, why: 'answered', text: said }];
+  /* A task that stood still goes on with whoever holds it now. */
+  const goesOn = found.kind === 'stuck' && now.stage === 0 && now.assigneeAgentId ? now.assigneeAgentId : found.agentId;
+  const wakes: Wake[] = CLOSED.includes(now.status) ? [] : [{ agentId: goesOn, taskId: task.id, why: 'answered', text: said }];
   /* The last answer at a gate: everyone else still to give a verdict there goes on too, also after a turn spent waiting. */
   if (task.status === 'waiting' && now.status === 'review') wakes.push(...now.panel.filter(id => id !== found.agentId).map(agentId => ({ agentId, taskId: task.id, why: 'review' as const })));
   return { request: row, task: now, wakes };
