@@ -181,13 +181,18 @@ export const agents = pgTable('agents', {
   contextUsed: real('context_used'),
   /* How hard its model thinks, as its program names the level; none runs at the program's default, Kimi at its most. */
   effort: text('effort'),
+  /* Wakes on its own every so many minutes, outside any task, to do what its order says; none means it does not. The
+     last round started at timer_at. */
+  timerMinutes: integer('timer_minutes'),
+  timerOrder: text('timer_order'),
+  timerAt: timestamp('timer_at', { withTimezone: true }),
   removedAt: timestamp('removed_at', { withTimezone: true }),
   createdAt: createdAt(),
 });
 
 export type AgentOverrides = { base?: string; skills?: Record<string, string> };
 
-export const AGENT_CHANGE_FIELDS = ['name', 'model', 'effort', 'subscription', 'skills', 'prompt', 'reset', 'hired', 'removed', 'switch'] as const;
+export const AGENT_CHANGE_FIELDS = ['name', 'model', 'effort', 'timer', 'subscription', 'skills', 'prompt', 'reset', 'hired', 'removed', 'switch'] as const;
 
 /* Every change to an employee's card: who, when, what, before and after. */
 export const agentChanges = pgTable(
@@ -425,4 +430,21 @@ export const attachments = pgTable(
     createdAt: createdAt(),
   },
   t => [index('attachments_request_id').on(t.requestId), index('attachments_job_id').on(t.jobId)],
+);
+
+/* The company's notebook: short notes the orchestrator keeps across conversations, such as the CEO's decisions, rules
+   and agreements. People who see the whole company read and change it too. */
+export const notebookNotes = pgTable(
+  'notebook_notes',
+  {
+    id: id(),
+    companyId: companyId(),
+    number: integer('number').notNull(),
+    text: text('text').notNull(),
+    personId: uuid('person_id').references(() => people.id),
+    byOrchestrator: boolean('by_orchestrator').notNull().default(false),
+    createdAt: createdAt(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  t => [unique('notebook_notes_company_number').on(t.companyId, t.number)],
 );

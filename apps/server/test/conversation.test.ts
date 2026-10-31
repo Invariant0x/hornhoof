@@ -46,7 +46,8 @@ describe('the orchestrator\'s conversation', () => {
     const { app, ceo, builtin } = await live();
     expect((await start(app, ceo)).json()).toEqual({ started: true });
     const run = await nextRun(builtin);
-    expect(run).toMatchObject({ prompt: FIRST_TURN, instructions: ORCHESTRATOR_INSTRUCTIONS, sessionId: null, timeoutMs: 900000 });
+    expect(run).toMatchObject({ prompt: FIRST_TURN, sessionId: null, timeoutMs: 900000 });
+    expect(run.instructions?.startsWith(ORCHESTRATOR_INSTRUCTIONS)).toBe(true);
     expect(run.toolToken).toMatch(/^[A-Za-z0-9_-]{40,}$/);
     expect((await start(app, ceo)).json()).toEqual({ started: false });
   });
@@ -74,6 +75,21 @@ describe('the orchestrator\'s conversation', () => {
     expect(log[1].seq).toBeGreaterThan(log[0].seq);
     expect((await events(app, ceo, log[0].seq)).map((e: { kind: string }) => e.kind)).toEqual(['tool']);
     await until(() => stream.messages.filter(m => m.type === 'agent_event').length === 2);
+  });
+
+  it('carries the company notebook in his instructions, and a new note keeps his session', async () => {
+    const { app, ceo, builtin } = await live();
+    await start(app, ceo);
+    const first = await nextRun(builtin);
+    expect(first.instructions).toContain('## Company notebook');
+    expect(first.instructions).toContain('The notebook is empty.');
+    await finish(builtin, first, 'sess-1');
+    await app.inject({ method: 'POST', url: '/api/notebook', payload: { text: 'Commits are made by Ivan only.' }, ...as(ceo) });
+    await say(app, ceo, 'Hi');
+    const second = await nextRun(builtin);
+    expect(second.sessionId).toBe('sess-1');
+    expect(second.instructions).toContain('[#1] Commits are made by Ivan only.');
+    expect(second.instructions).not.toContain('The notebook is empty.');
   });
 
   it('queues a message while he works and sends it after, in the same session', async () => {
@@ -389,6 +405,8 @@ describe("an employee's conversation", () => {
     const { app, db, ceo, builtin } = await withEmployee();
     const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
     expect((await sayTo(app, ceo, orchestrator!.id, 'Hello')).statusCode).toBe(202);
-    expect(await nextRun(builtin)).toMatchObject({ prompt: 'Ivan (CEO): Hello', instructions: ORCHESTRATOR_INSTRUCTIONS });
+    const run = await nextRun(builtin);
+    expect(run.prompt).toBe('Ivan (CEO): Hello');
+    expect(run.instructions?.startsWith(ORCHESTRATOR_INSTRUCTIONS)).toBe(true);
   });
 });

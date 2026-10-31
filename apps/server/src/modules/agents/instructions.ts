@@ -2,11 +2,12 @@ import { eq, inArray } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { companies, departments, type agents } from '../../db/schema.js';
 import { ORCHESTRATOR_INSTRUCTIONS } from '../conversation/prompt.js';
+import { listNotes } from '../notebook/routes.js';
 import { deptName } from '../departments/templates.js';
 import { textHash, type Lang, type Templates } from '../templates/load.js';
 
 /* One piece of an employee's instructions, as the card shows it. */
-export type Part = { kind: 'header' | 'base' | 'skill'; id: string | null; title: Lang | null; text: string; overridden: boolean; templateChanged: boolean };
+export type Part = { kind: 'header' | 'base' | 'skill' | 'notebook'; id: string | null; title: Lang | null; text: string; overridden: boolean; templateChanged: boolean };
 
 type AgentRow = typeof agents.$inferSelect;
 type Place = { company: string; department: string; product: string | null };
@@ -18,6 +19,7 @@ function header(agent: AgentRow, role: string, place: Place): string {
     `You are ${agent.name}, ${where}.`,
     'You work in Hornhoof, where people and AI agents work together. People talk to you through this conversation; each message starts with who wrote it, like "Ivan (CEO): ...". Hornhoof\'s tool "company" shows you the company as it is.',
     'Work comes to you as tasks: Hornhoof wakes you with a task\'s number and why, and its tools "tasks" and "task" show what you hold. People may also write to you; answer questions about your work, and never claim work that is not done.',
+    'When your conversation was compacted and you see a summary instead of it, read "tasks" and the task you were on with "task" before you go on.',
     'Answer in the language the person writes in. Keep answers short and plain.',
   ].join('\n\n');
 }
@@ -73,11 +75,24 @@ export async function placeOf(db: Ctx['db'], agent: AgentRow): Promise<Place> {
   return { company: company?.name ?? '', department: nameOf(agent.departmentId) ?? '', product: nameOf(agent.productId) };
 }
 
-/* What an agent runs with now: the orchestrator's standing role, or an employee's rendered instructions. */
+/* The company notebook as the orchestrator reads it, each note with its number. */
+export async function notebookPart(db: Ctx['db'], companyId: string): Promise<string> {
+  const notes = await listNotes(db, companyId);
+  const lines = notes.length ? notes.map(n => `[#${n.number}] ${n.text}`).join('\n') : 'The notebook is empty.';
+  return `## Company notebook\n\nWhat you and the people who run the company keep across conversations. Change it with remember, rewrite_note and forget.\n\n${lines}`;
+}
+
+/* What an agent runs with now: the orchestrator's standing role with the company notebook, or an employee's rendered
+   instructions. The hash leaves the notebook out: a new note reaches the program as it starts again in the same session. */
 export async function instructionsOf(ctx: Pick<Ctx, 'db' | 'templates'>, agent: AgentRow): Promise<{ parts: Part[]; text: string; hash: string }> {
   if (agent.kind === 'orchestrator') {
-    const text = ORCHESTRATOR_INSTRUCTIONS;
-    return { parts: [{ kind: 'base', id: null, title: null, text, overridden: false, templateChanged: false }], text, hash: textHash(text) };
+    const steady = ORCHESTRATOR_INSTRUCTIONS;
+    const notebook = await notebookPart(ctx.db, agent.companyId);
+    const parts: Part[] = [
+      { kind: 'base', id: null, title: null, text: steady, overridden: false, templateChanged: false },
+      { kind: 'notebook', id: null, title: null, text: notebook, overridden: false, templateChanged: false },
+    ];
+    return { parts, text: `${steady}\n\n${notebook}`, hash: textHash(steady) };
   }
   return renderInstructions(ctx.templates, agent, await placeOf(ctx.db, agent));
 }

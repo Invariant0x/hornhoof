@@ -6,6 +6,7 @@ import { registerErrorHandling } from './errors.js';
 import { authRoutes } from './modules/auth/routes.js';
 import { agentRoutes } from './modules/agents/routes.js';
 import { conversationRoutes } from './modules/conversation/routes.js';
+import { notebookRoutes } from './modules/notebook/routes.js';
 import { departmentRoutes } from './modules/departments/routes.js';
 import { EventBus } from './modules/events/bus.js';
 import { streamRoutes } from './modules/events/stream.js';
@@ -88,6 +89,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   streamRoutes(app, ctx);
   mcpRoutes(app, ctx);
   conversationRoutes(app, ctx);
+  notebookRoutes(app, ctx);
   terminalRoutes(app, ctx);
   agentRoutes(app, ctx);
   departmentRoutes(app, ctx);

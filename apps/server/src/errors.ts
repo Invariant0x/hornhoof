@@ -37,6 +37,8 @@ export type ErrorReason =
   | 'subscription_cannot_serve'
   | 'model_unknown'
   | 'effort_unknown'
+  | 'notebook_full'
+  | 'note_unknown'
   | 'skill_unknown'
   | 'skill_locked'
   | 'instructions_too_long'

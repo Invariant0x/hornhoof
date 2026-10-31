@@ -8,6 +8,7 @@ import { departments, people } from '../../db/schema.js';
 import { AgentPatch } from '../agents/routes.js';
 import { deptName } from '../departments/templates.js';
 import { BuildBody, RepoBody } from '../departments/routes.js';
+import { NOTE_MAX, NoteBody } from '../notebook/routes.js';
 import { InviteBody, PersonPatch } from '../people/routes.js';
 import { ConnectBody, SubscriptionBody } from '../subscriptions/routes.js';
 import { UpdateBody } from '../updates/routes.js';
@@ -182,6 +183,17 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
     body => ({ method: 'POST', url: '/api/updates', payload: body }),
   );
   tool('cancel_update', 'Calls off an update that waits for the agents to finish.', {}, () => ({ method: 'DELETE', url: '/api/updates' }));
+
+  const Note = z.number().int().positive().describe('The note\'s number, as your notebook shows it, like 3 for [#3].');
+  tool(
+    'remember',
+    'Writes a note into the company notebook, which your instructions carry into every conversation: a decision, rule, preference or agreement that must outlive this one. One fact per note, ' +
+      `${NOTE_MAX} characters at most. People who see the whole company read and change it too.`,
+    NoteBody.shape,
+    body => ({ method: 'POST', url: '/api/notebook', payload: body }),
+  );
+  tool('rewrite_note', 'Rewrites a note of the company notebook when what it says changed.', { note: Note, ...NoteBody.shape }, ({ note, text }) => ({ method: 'PATCH', url: `/api/notebook/${note}`, payload: { text } }));
+  tool('forget', 'Removes a note from the company notebook that no longer holds.', { note: Note }, ({ note }) => ({ method: 'DELETE', url: `/api/notebook/${note}` }));
 }
 
 /* The staff card's lines from the orchestrator's: what it leaves out is what the card starts with. A role the department

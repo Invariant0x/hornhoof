@@ -15,6 +15,8 @@ export type StreamMessage =
   | { type: 'task'; id: string; spot: Spot }
   /* What waits for people changed in this place. */
   | { type: 'requests'; spot: Spot }
+  /* The company's notebook changed; it goes to people who see the whole company. */
+  | { type: 'notebook'; spot: Spot }
   /* How full an agent's context is now, for the bar on the map, which everyone sees. */
   | { type: 'context'; agentId: string; used: number };
 
