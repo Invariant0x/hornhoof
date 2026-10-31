@@ -532,6 +532,12 @@ button.dept.flash > .edge { animation: eflash 1.4s ease-out; }
 .wires .gd { fill: var(--bg); stroke: var(--cyan); stroke-width: 1.8; vector-effect: non-scaling-stroke; }
 .pt.c { fill: var(--cyan); }
 .pt.a { fill: var(--amber); }
+/* A way a message went in the last ten minutes: dashes run toward whoever got it. */
+.wires .tr.live { stroke-width: 2; stroke-dasharray: 3 9; stroke-linecap: round; pointer-events: none; animation: way-run 0.9s linear infinite; }
+.wires .tr.live.c { stroke: var(--cyan); }
+.wires .tr.live.a { stroke: var(--amber); }
+@keyframes way-run { to { stroke-dashoffset: -12; } }
+@media (prefers-reduced-motion: reduce) { .wires .tr.live { animation: none; } }
 .llab { z-index: 1; transform: translate(-50%, -50%) scale(var(--k, 1)); padding: 0 7px; background: var(--bg); color: var(--muted); font-size: 12px; line-height: 18px; white-space: nowrap; pointer-events: none; }
 .llab.ret { color: var(--amber-ink); }
 .gl { z-index: 1; transform: translate(-50%, 0) scale(var(--k, 1)); transform-origin: 50% 0; padding: 0 6px; background: var(--bg); font-family: var(--f-display); font-size: 12px; font-weight: 600; color: var(--cyan-ink); white-space: nowrap; pointer-events: none; }

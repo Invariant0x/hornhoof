@@ -74,6 +74,11 @@ describe('tools a skill grants', () => {
     expect(turn!.prompt).toBe('Wendy (Reliability engineer): Task #1 has had no report for an hour. Report or say what blocks you.');
     const [said] = await db.select().from(agentEvents).where(and(eq(agentEvents.agentId, bruno.id), eq(agentEvents.kind, 'message')));
     expect(said!.data).toMatchObject({ text: 'Task #1 has had no report for an hour. Report or say what blocks you.', from: 'agent', name: 'Wendy' });
+    /* The map runs it from Operations to Development. */
+    expect(app.ctx.bus.channels(wendy.companyId).map(c => [c.from, c.to])).toContainEqual([
+      { kind: 'department', id: wendy.departmentId },
+      { kind: 'department', id: bruno.departmentId },
+    ]);
     expect((await call(client, 'message_employee', { employee: wendy.id, text: 'Hi me.' })).isError).toBe(true);
   });
 

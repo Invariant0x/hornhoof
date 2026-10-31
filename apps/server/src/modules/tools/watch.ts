@@ -145,6 +145,15 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
           createdBy: null,
           message: { personId: null, text, from: 'agent', name: me.name, by: me.id },
         });
+        /* The map runs it between the two departments, or the card between the two agents of one. */
+        if (me.departmentId && target.departmentId) {
+          const same = me.departmentId === target.departmentId;
+          ctx.bus.publish(job.companyId, {
+            type: 'pulse',
+            from: same ? { kind: 'agent', id: me.id, departmentId: me.departmentId } : { kind: 'department', id: me.departmentId },
+            to: same ? { kind: 'agent', id: target.id, departmentId: target.departmentId } : { kind: 'department', id: target.departmentId },
+          });
+        }
         return say(`Sent to ${target.name}.`);
       },
     );

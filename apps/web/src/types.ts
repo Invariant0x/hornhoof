@@ -95,6 +95,8 @@ export type DeptRole = { id: string; title: Lang; description: Lang; kind: 'head
    only this department. */
 export type Department = {
   id: string;
+  /* The ways messages went between its agents in the last minutes. */
+  live?: { from: string; to: string; at: string }[];
   name: string | null;
   templateKey: TemplateKey | null;
   roleCode: string;
@@ -121,6 +123,8 @@ export type Org = {
   people: (PersonView & { deputy?: boolean })[];
   departments: Department[];
   turn?: { id: string; number: number; goal: string } | null;
+  /* The ways messages went between places on the map in the last minutes. */
+  live?: Channel[];
 };
 
 /* Whether the orchestrator can take a turn now, and what he is doing. */
@@ -182,7 +186,9 @@ export type ChangeItem = { department: string; checked: boolean; note: string; p
 export type StructureItem = NewItem | ChangeItem;
 
 /* Who a pulse on the map runs between. */
-export type Endpoint = { kind: 'person'; id: string } | { kind: 'orchestrator' } | { kind: 'department'; id: string };
+export type Endpoint = { kind: 'person'; id: string } | { kind: 'orchestrator' } | { kind: 'department'; id: string } | { kind: 'agent'; id: string; departmentId: string };
+/* A way a message went in the last minutes, with when the last one did. */
+export type Channel = { from: Endpoint; to: Endpoint; at: string };
 
 export type AgentEventKind = 'message' | 'text' | 'tool' | 'tool_result' | 'todo' | 'proposal' | 'applied' | 'stopped' | 'failed';
 

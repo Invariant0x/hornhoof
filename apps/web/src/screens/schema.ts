@@ -153,27 +153,46 @@ export function stepPaths(s: Schema) {
     }
     return null;
   };
+  function toMember(id: string): Point[] | null {
+    const at = spot(id);
+    if (!at) return null;
+    const sx = at.f.x + 10;
+    return [[s.hx, HH - 30], [s.hx, BUS], [sx, BUS], [sx, at.m.cy], [at.m.x + 14, at.m.cy]];
+  }
+  function onward(id: string): Point[] | null {
+    const at = spot(id);
+    if (!at) return null;
+    const next = s.stages[at.f.stage + 1];
+    if (next) return [[outX(at.f), FT], [outX(at.f), CY], [inX(next[0]!), CY], [inX(next[0]!), FT]];
+    return s.report?.pts ?? null;
+  }
+  function back(from: string, to: string): Point[] | null {
+    const a = spot(from), b = spot(to);
+    if (!a || !b) return null;
+    return [[midX(a.f), FT], [midX(a.f), RY], [midX(b.f), RY], [midX(b.f), FT]];
+  }
   return {
     /* The head hands an employee a task. */
-    toMember(id: string): Point[] | null {
-      const at = spot(id);
-      if (!at) return null;
-      const sx = at.f.x + 10;
-      return [[s.hx, HH - 30], [s.hx, BUS], [sx, BUS], [sx, at.m.cy], [at.m.x + 14, at.m.cy]];
-    },
+    toMember,
     /* An employee hands its work on: to the next stage, or from the last one to the head. */
-    onward(id: string): Point[] | null {
-      const at = spot(id);
-      if (!at) return null;
-      const next = s.stages[at.f.stage + 1];
-      if (next) return [[outX(at.f), FT], [outX(at.f), CY], [inX(next[0]!), CY], [inX(next[0]!), FT]];
-      return s.report?.pts ?? null;
-    },
+    onward,
     /* A gate sends work back to the employee who made it. */
-    back(from: string, to: string): Point[] | null {
-      const a = spot(from), b = spot(to);
-      if (!a || !b) return null;
-      return [[midX(a.f), FT], [midX(a.f), RY], [midX(b.f), RY], [midX(b.f), FT]];
+    back,
+    /* Where a message between two of its agents runs: down from the head, up to it (along the report line from the last
+       stage), on to a later stage or back to an earlier one. */
+    way(from: string, to: string): Point[] | null {
+      const head = s.head?.id;
+      if (from === head) return toMember(to);
+      const a = spot(from);
+      if (!a) return null;
+      if (to === head) {
+        if (!s.stages[a.f.stage + 1]) return s.report?.pts ?? null;
+        const down = toMember(from);
+        return down && [...down].reverse();
+      }
+      const b = spot(to);
+      if (!b || b.f.stage === a.f.stage) return null;
+      return b.f.stage > a.f.stage ? onward(from) : back(from, to);
     },
   };
 }

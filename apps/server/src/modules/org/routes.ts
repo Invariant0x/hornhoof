@@ -19,7 +19,7 @@ function effortShown(sub: { provider: ProviderId; models: ModelOption[] | null }
   return effortFor(sub.provider, agent.effort, effortsOf(models, agent.model)) ?? defaultEffortOf(sub.provider, models, agent.model);
 }
 
-export function orgRoutes(app: FastifyInstance, { db, hub, templates }: Ctx): void {
+export function orgRoutes(app: FastifyInstance, { db, hub, templates, bus }: Ctx): void {
   app.get('/api/org', async req => {
     const me = await requirePerson(req, db);
     const [company] = await db.select({ id: companies.id, name: companies.name }).from(companies).where(eq(companies.id, me.companyId));
@@ -138,8 +138,14 @@ export function orgRoutes(app: FastifyInstance, { db, hub, templates }: Ctx): vo
         });
     };
 
+    /* The ways messages went in the last minutes: between places on the map, and between agents on a department's card. */
+    const ways = bus.channels(me.companyId);
+    const inside = (id: string) =>
+      ways.flatMap(w => (w.from.kind === 'agent' && w.to.kind === 'agent' && w.from.departmentId === id ? [{ from: w.from.id, to: w.to.id, at: w.at }] : []));
+
     return {
       company,
+      live: ways.filter(w => w.from.kind !== 'agent' && w.to.kind !== 'agent'),
       orchestrator: orchestrator && {
         id: orchestrator.id,
         name: orchestrator.name,
@@ -170,6 +176,7 @@ export function orgRoutes(app: FastifyInstance, { db, hub, templates }: Ctx): vo
           teams: allTeams
             .filter(t => t.departmentId === d.id)
             .map(t => ({ id: t.id, name: t.name, about: t.about, stage: t.stage, gate: t.gate })),
+          live: inside(d.id),
         })),
     };
   });

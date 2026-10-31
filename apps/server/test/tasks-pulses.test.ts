@@ -45,14 +45,14 @@ describe('pulses on the map for tasks', () => {
     expect(pulses()).toEqual([`person:${ceo.id} -> department:${dev.id}`, `person:${ceo.id} -> orchestrator`]);
   });
 
-  it('keeps moves inside one department off the map', async () => {
+  it('runs moves inside one department from agent to agent, for its card and not the map', async () => {
     const { ctx, CEO, dev, head, bruno, rita, pulses } = await company();
     const parent = (await createTask(ctx, CEO, { title: 'Icons', brief: '', body: '', departmentId: dev.id, assigneeAgentId: head.id })).task;
     pulses();
     const { task } = await createTask(ctx, { agentId: head.id }, { title: 'Chips', brief: '', body: '', departmentId: dev.id, parentId: parent.id, assigneeAgentId: bruno.id, executor: true, gates: [rita.id] });
     await submit(ctx, bruno.id, task.id, { summary: 'Done.', evidence: 'npm test' });
     await cancel(ctx, { agentId: head.id }, task.id, 'Not needed.');
-    expect(pulses()).toEqual([]);
+    expect(pulses()).toEqual([`agent:${head.id} -> agent:${bruno.id}`, `agent:${bruno.id} -> agent:${rita.id}`]);
   });
 
   it('runs to the owner when an employee waits for people, and back with the answer', async () => {

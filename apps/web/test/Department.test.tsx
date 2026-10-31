@@ -121,6 +121,21 @@ describe('Department view', () => {
     expect(within(members).getByTitle('Context 20%')).not.toHaveClass('hi');
   });
 
+  it('keeps the way between two agents running for ten minutes after their last message, also when it opens later', async () => {
+    const user = userEvent.setup();
+    const stream = fakeStream();
+    const [dev] = DEV_ORG.departments;
+    shell({}, { ...DEV_ORG, departments: [{ ...dev!, live: [{ from: 'b1', to: 'b0', at: new Date(Date.now() - 3 * 60_000).toISOString() }] }] });
+    await flyIn(user);
+    const live = () => document.querySelectorAll('path.live');
+    expect(live()).toHaveLength(1);
+    stream.send({ type: 'pulse', from: { kind: 'agent', id: 'b0', departmentId: dev!.id }, to: { kind: 'agent', id: 'b1', departmentId: dev!.id } });
+    await vi.waitFor(() => expect(live()).toHaveLength(2));
+    /* Another department's agents are not this one's. */
+    stream.send({ type: 'pulse', from: { kind: 'agent', id: 'x0', departmentId: 'other' }, to: { kind: 'agent', id: 'x1', departmentId: 'other' } });
+    expect(live()).toHaveLength(2);
+  });
+
   it('shows how hard each employee thinks next to its model', async () => {
     const user = userEvent.setup();
     const [dev] = DEV_ORG.departments;
