@@ -54,6 +54,27 @@ describe('Subscriptions', () => {
     expect(rest).toEqual([]);
   });
 
+  it('shows five hours and seven days for every plan, saying which the plan does not have and which are not known yet', async () => {
+    const codex = { status: 'allowed' as const, windows: [{ name: 'seven_day', utilization: 0.73, resetsAt: null }] };
+    const kimi = { status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0.88, resetsAt: null }, { name: 'month', utilization: 0.06, resetsAt: null }] };
+    const subs = [{ ...SUBS[0]!, limits: null }, { ...SUBS[1]!, limits: codex }, { ...SUBS[2]!, limits: kimi }, SUBS[3]!];
+    mockApi({ 'GET /api/subscriptions': [200, { subscriptions: subs }], 'GET /api/machines': [200, { machines: MACHINES }] });
+    render(<Subscriptions me={ME} />);
+    const rows = async (name: string) => within(within(await screen.findByRole('row', { name: new RegExp(`^${name}\\b`) })).getByRole('list', { name: 'Limits' })).getAllByRole('listitem');
+    const [claudeFive, claudeSeven, ...claudeMore] = await rows('Claude');
+    expect(claudeFive).toHaveTextContent(/^5 hoursNo data yet$/);
+    expect(claudeSeven).toHaveTextContent(/^7 daysNo data yet$/);
+    expect(claudeFive!.querySelector('.bar')).toHaveClass('none');
+    expect(claudeMore).toEqual([]);
+    const [codexFive, codexSeven] = await rows('Codex');
+    expect(codexFive).toHaveTextContent(/^5 hoursNot on this plan$/);
+    expect(codexSeven).toHaveTextContent(/^7 days73%$/);
+    expect((await rows('Kimi')).map(r => r.textContent)).toEqual(['5 hours88%', '7 daysNot on this plan', 'Month6%']);
+    const key = rowOf('Anthropic key ending 9f3a');
+    expect(within(key).getByText('Pay as you go, no plan limits')).toBeInTheDocument();
+    expect(within(key).queryByRole('list', { name: 'Limits' })).not.toBeInTheDocument();
+  });
+
   it('says when a plan reached its limit', async () => {
     const limits = { status: 'rejected' as const, windows: [{ name: 'five_hour', utilization: 1, resetsAt: '2026-10-29T18:00:00.000Z' }] };
     mockApi({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, limits }] }], 'GET /api/machines': [200, { machines: MACHINES }] });
@@ -201,8 +222,11 @@ describe('Subscriptions', () => {
     expect(await screen.findAllByText('Готова')).toHaveLength(2);
     expect(screen.getByText('Ждет входа')).toBeInTheDocument();
     expect(screen.getByText('Ждет машину')).toBeInTheDocument();
-    const [five, seven] = within(screen.getByRole('list', { name: 'Лимиты' })).getAllByRole('listitem');
+    const [five, seven] = within(within(rowOf('Claude')).getByRole('list', { name: 'Лимиты' })).getAllByRole('listitem');
     expect(five).toHaveTextContent(/^5 часов42%сброс в /);
     expect(seven).toHaveTextContent(/^7 дней10%$/);
+    const [codexFive] = within(within(rowOf('Codex')).getByRole('list', { name: 'Лимиты' })).getAllByRole('listitem');
+    expect(codexFive).toHaveTextContent(/^5 часовПока нет данных$/);
+    expect(within(rowOf('Ключ Anthropic')).getByText('Оплата по факту, без лимитов плана')).toBeInTheDocument();
   });
 });
