@@ -29,13 +29,15 @@ async function openTask(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe('a task', () => {
-  it('puts what waits for the person at the top, with a field to answer, and says that writing to the agent counts too', async () => {
+  it("puts what waits for the person at the top, the orchestrator's plain question above the answer, and says that writing to the agent counts too", async () => {
     const user = userEvent.setup();
+    const plain = 'Bruno cannot finish the checkout because the tests fail on the payment provider. Tell him to skip those tests for now, or to wait for the keys.';
     const stuck = {
       ...REQUESTS[0]!,
       id: 'r3',
       kind: 'stuck' as const,
       text: 'Ended 3 turns in a row on #12 without moving it. Tell it how to go on, or cancel the task.',
+      explained: plain,
       agent: { id: 'b1', name: 'Bruno' },
       task: { ...REQUESTS[0]!.task, id: 't12', number: 12, title: 'Checkout API' },
     };
@@ -47,16 +49,21 @@ describe('a task', () => {
     const waiting = await within(panel).findByRole('region', { name: 'Waiting for your answer' });
     /* Only this task's. */
     expect(within(waiting).getAllByRole('article')).toHaveLength(1);
-    expect(waiting).toHaveTextContent(
-      'Bruno ended several turns in a row without moving #12, so Hornhoof stopped waking it. Let it go on as it is, or first tell it what it needs. If the task is not needed anymore, cancel it.',
-    );
+    const question = within(waiting).getByText(plain);
+    const answer = within(waiting).getByLabelText('Your answer');
+    expect(question.compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    /* What Hornhoof noted stays at hand, in the person's language. */
+    const more = within(waiting).getByText('In more detail');
+    expect(more.closest('details')).toHaveTextContent('Bruno ended several turns in a row without moving #12, so Hornhoof stopped waking it.');
     expect(waiting).not.toHaveTextContent('Ended 3 turns');
     expect(waiting).toHaveTextContent("A question can be answered in the agent's window or terminal too: what you write there counts.");
-    /* Nothing to write is fine: it goes on as it is. */
-    expect(within(waiting).getByRole('button', { name: 'Let it go on' })).toBeEnabled();
-    await user.type(within(waiting).getByLabelText('What it should do, if you know (may stay empty)'), 'Run the tests first.');
-    await user.click(within(waiting).getByRole('button', { name: 'Send and let it go on' }));
-    expect(calls.find(c => c.path === '/api/requests/r3')?.body).toEqual({ answer: 'Run the tests first.' });
+    /* One way to answer: write it and send it. */
+    expect(within(waiting).queryByRole('button', { name: 'Let it go on' })).toBeNull();
+    const send = within(waiting).getByRole('button', { name: 'Send answer' });
+    expect(send).toBeDisabled();
+    await user.type(answer, 'Skip them for now.');
+    await user.click(send);
+    expect(calls.find(c => c.path === '/api/requests/r3')?.body).toEqual({ answer: 'Skip them for now.' });
   });
 
   it('opens with where it stands at its gates, its brief, body, subtasks and log', async () => {

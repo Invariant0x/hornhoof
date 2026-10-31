@@ -259,6 +259,8 @@ export type WaitingRequest = {
   options: { label: string; image: string | null }[];
   /* Where to see the work. */
   link: string | null;
+  /* The orchestrator's words for people: what is needed from them, why, and the ways to go; null until it writes them. */
+  explained: string | null;
   at: string;
   agent: { id: string; name: string };
   task: { id: string; number: number; title: string; department: TaskPlace };

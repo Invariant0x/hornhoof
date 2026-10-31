@@ -788,6 +788,10 @@ summary.turn-head:focus-visible { outline: 2px solid var(--cyan); outline-offset
 .req header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
 .req header small { font-size: 12.5px; color: var(--muted); }
 .req-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.req-explained { font-size: 15px; line-height: 1.55; overflow-wrap: anywhere; }
+.req-explained .md { display: grid; gap: 8px; }
+.req-more summary { cursor: pointer; width: fit-content; font-size: 12.5px; color: var(--muted); }
+.req-more .req-text { margin: 6px 0 0; color: var(--muted); }
 .req-form { display: grid; gap: 8px; }
 .req-form textarea, .tp-comment textarea { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--line2); background: var(--surface2); color: var(--ink); font: inherit; resize: vertical; }
 .req-form textarea:focus, .tp-comment textarea:focus { outline: none; border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow); }

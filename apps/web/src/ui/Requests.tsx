@@ -3,6 +3,7 @@ import { api } from '../api';
 import { errorText, useT } from '../i18n';
 import type { TaskPlace, WaitingRequest } from '../types';
 import { Field } from './Field';
+import { Markdown } from './Markdown';
 
 /* Whether words to the agent in its window or terminal answer any of these: a question and a stuck task take them, a pick
    and a commit to approve do not. */
@@ -53,7 +54,19 @@ function RequestItem({ request, onDone, company, onOpenTask, placeName }: Shared
         </button>
         {task.department && <small>{placeName(task.department)}</small>}
       </header>
-      <p className="req-text">{said}</p>
+      {request.explained ? (
+        <>
+          <div className="req-explained">
+            <Markdown text={request.explained} />
+          </div>
+          <details className="req-more">
+            <summary>{t.tasks.inDetail}</summary>
+            <p className="req-text">{said}</p>
+          </details>
+        </>
+      ) : (
+        <p className="req-text">{said}</p>
+      )}
       {request.images.length > 0 && (
         <div className="req-pics">
           {request.images.map((id, i) => (
@@ -81,10 +94,19 @@ function RequestItem({ request, onDone, company, onOpenTask, placeName }: Shared
           <Field label={t.tasks.note}>{p => <input {...p} value={text} maxLength={4000} onChange={e => setText(e.target.value)} />}</Field>
         </div>
       )}
-      {request.kind === 'question' && (
+      {(request.kind === 'question' || request.kind === 'stuck') && (
         <form className="req-form" onSubmit={answer}>
-          <Field label={t.tasks.yourAnswer}>{p => <textarea {...p} rows={2} value={text} maxLength={4000} onChange={e => setText(e.target.value)} />}</Field>
-          <button className="btn small" type="submit" disabled={busy || !text.trim()}>{t.tasks.answer}</button>
+          <Field label={t.tasks.yourAnswer}>{p => <textarea {...p} rows={3} value={text} maxLength={4000} onChange={e => setText(e.target.value)} />}</Field>
+          <div className="req-actions">
+            <button className="btn small" type="submit" disabled={busy || !text.trim()}>
+              {t.tasks.sendAnswer}
+            </button>
+            {request.kind === 'stuck' && (
+              <button className="btn small ghost" type="button" disabled={busy} onClick={() => void send(`/api/tasks/${task.id}/cancel`, {})}>
+                {t.tasks.cancelTask}
+              </button>
+            )}
+          </div>
         </form>
       )}
       {request.kind === 'approval' && !company && (
@@ -103,19 +125,6 @@ function RequestItem({ request, onDone, company, onOpenTask, placeName }: Shared
             </button>
             <button className="btn small ghost" type="button" disabled={busy} onClick={() => void reply(text.trim() ? { approve: false, answer: text.trim() } : { approve: false })}>
               {t.tasks.decline}
-            </button>
-          </div>
-        </div>
-      )}
-      {request.kind === 'stuck' && (
-        <div className="req-form">
-          <Field label={t.tasks.stuckNote}>{p => <textarea {...p} rows={2} value={text} maxLength={4000} onChange={e => setText(e.target.value)} />}</Field>
-          <div className="req-actions">
-            <button className="btn small" type="button" disabled={busy} onClick={() => void reply(text.trim() ? { answer: text.trim() } : { retry: true })}>
-              {text.trim() ? t.tasks.tellAndGoOn : t.tasks.retry}
-            </button>
-            <button className="btn small ghost" type="button" disabled={busy} onClick={() => void send(`/api/tasks/${task.id}/cancel`, {})}>
-              {t.tasks.cancelTask}
             </button>
           </div>
         </div>
