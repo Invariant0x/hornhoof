@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-// hh-hook EVENT [JSON]: Claude Code's hooks and status line, and Codex's notify, call this to tell the node how the agent's
-// turn goes: start, prompt, stop, status. It reads the program's JSON from the last argument or from stdin, posts it to the
-// node's bridge in HH_BRIDGE and prints nothing, so a status line stays empty. It never fails the program's turn.
+// hh-hook EVENT [JSON]: Claude Code's hooks and status line, Codex's notify and Kimi Code's hooks call this to tell the
+// node how the agent's turn goes: start, prompt, stop, status. It reads the program's JSON from the last argument or from
+// stdin, posts it to the node's bridge in HH_BRIDGE and prints nothing, so a status line stays empty and Kimi adds nothing
+// to the prompt. It never fails the program's turn.
 'use strict';
 
 const WAIT_MS = { prompt: 12000 };

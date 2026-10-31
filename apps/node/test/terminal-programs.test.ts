@@ -1,8 +1,10 @@
 import { mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { acceptClaudeDialogs, claudeProgram, claudeTranscript, codexProgram, findRollout } from '../src/terminal/programs.js';
+import { acceptClaudeDialogs, claudeProgram, claudeTranscript, codexProgram, findKimiWire, findRollout, kimiPlanLimits, kimiProgram, prepareKimi } from '../src/terminal/programs.js';
 
 const URLS = { mcpUrl: 'http://127.0.0.1:5000/mcp/s3cr3t', attachUrl: 'http://127.0.0.1:5000/attach/s3cr3t', hookUrl: 'http://127.0.0.1:5000/hook/s3cr3t' };
 const arg = (cmd: string[], flag: string) => cmd[cmd.indexOf(flag) + 1];
@@ -81,5 +83,77 @@ describe('Codex in a terminal', () => {
     writeFileSync(join(day, 'rollout-c.jsonl'), meta('th-new', '/w/a2'));
     expect(findRollout(home, '/w/a2', Date.now() - 60_000)).toEqual({ file: join(day, 'rollout-c.jsonl'), sessionId: 'th-new' });
     expect(findRollout(home, '/w/zzz', 0)).toBeNull();
+  });
+});
+
+describe('Kimi Code in a terminal', () => {
+  it('starts deciding on its own in the agent folder, or resumes its session', () => {
+    const first = kimiProgram.launch({ bin: '/t/kimi', home: '/h', workDir: '/w/a3', sessionId: null, model: 'kimi-k3', instructionsFile: null, urls: URLS });
+    expect(first.command).toEqual(['/t/kimi', '--auto', '-m', 'kimi-k3']);
+    /* Kimi names a new session when the first message starts it. */
+    expect(first.sessionId).toBeNull();
+    expect(first.env).toMatchObject({ KIMI_CODE_HOME: '/h', KIMI_CODE_TRUST_WORKSPACE: '1', HH_BRIDGE: URLS.hookUrl, HH_ATTACH_URL: URLS.attachUrl });
+    const again = kimiProgram.launch({ bin: '/t/kimi', home: '/h', workDir: '/w/a3', sessionId: 'session_9', model: null, instructionsFile: null, urls: URLS });
+    expect(again.command).toEqual(['/t/kimi', '--auto', '-S', 'session_9']);
+    expect(again.sessionId).toBe('session_9');
+  });
+
+  it("gives the agent folder the bridge for tools, and adds Hornhoof's hooks to the person's settings once", () => {
+    const home = mkdtempSync(join(tmpdir(), 'hh-kimi-'));
+    const work = mkdtempSync(join(tmpdir(), 'hh-kimi-work-'));
+    const own = 'default_model = "kimi-code/k3"\n\n[providers."managed:kimi-code"]\ntype = "kimi"\n';
+    writeFileSync(join(home, 'config.toml'), own);
+    prepareKimi(home, work, URLS.mcpUrl);
+    prepareKimi(home, work, URLS.mcpUrl);
+    expect(JSON.parse(readFileSync(join(work, '.kimi-code', 'mcp.json'), 'utf8'))).toEqual({ mcpServers: { hornhoof: { transport: 'http', url: URLS.mcpUrl } } });
+    const config = readFileSync(join(home, 'config.toml'), 'utf8');
+    expect(config.startsWith(own)).toBe(true);
+    expect(config.match(/\[\[hooks\]\]/g)).toHaveLength(2);
+    expect(config).toContain('event = "SessionStart"\ncommand = "hh-hook start"');
+    expect(config).toContain('event = "UserPromptSubmit"\ncommand = "hh-hook prompt"');
+  });
+
+  it('adds the hooks to a fresh home, and leaves settings alone that list hooks in a way more could not be added to', () => {
+    const fresh = mkdtempSync(join(tmpdir(), 'hh-kimi-'));
+    prepareKimi(fresh, mkdtempSync(join(tmpdir(), 'hh-kimi-work-')), URLS.mcpUrl);
+    expect(readFileSync(join(fresh, 'config.toml'), 'utf8')).toContain('command = "hh-hook prompt"');
+    const home = mkdtempSync(join(tmpdir(), 'hh-kimi-'));
+    const own = 'hooks = [{ event = "Stop", command = "say done" }]\n';
+    writeFileSync(join(home, 'config.toml'), own);
+    prepareKimi(home, mkdtempSync(join(tmpdir(), 'hh-kimi-work-')), URLS.mcpUrl);
+    expect(readFileSync(join(home, 'config.toml'), 'utf8')).toBe(own);
+  });
+
+  it("asks Kimi's usage page for the plan's limits with the token Kimi keeps, and gives nothing without one", async () => {
+    const home = mkdtempSync(join(tmpdir(), 'hh-kimi-'));
+    expect(await kimiPlanLimits(home)).toBeNull();
+    const auths: string[] = [];
+    const server = createServer((req, res) => {
+      auths.push(`${req.url} ${req.headers.authorization}`);
+      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ usages: { limit_5h: { used_ratio: 0.5, reset_time: '2026-10-31T03:00:00Z' } } }));
+    });
+    await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+    const before = process.env.KIMI_CODE_BASE_URL;
+    process.env.KIMI_CODE_BASE_URL = `http://127.0.0.1:${(server.address() as AddressInfo).port}/coding/v1`;
+    try {
+      mkdirSync(join(home, 'credentials'));
+      writeFileSync(join(home, 'credentials', 'kimi-code.json'), JSON.stringify({ access_token: 'kimi-access-1', refresh_token: 'kimi-refresh-1' }));
+      expect(await kimiPlanLimits(home)).toEqual({ status: 'allowed', windows: [{ name: 'five_hour', utilization: 0.5, resetsAt: '2026-10-31T03:00:00.000Z' }] });
+      expect(auths).toEqual(['/coding/v1/usages Bearer kimi-access-1']);
+    } finally {
+      if (before === undefined) delete process.env.KIMI_CODE_BASE_URL;
+      else process.env.KIMI_CODE_BASE_URL = before;
+      server.close();
+    }
+  });
+
+  it('finds the log of a session in whichever workspace Kimi keeps it', () => {
+    const home = mkdtempSync(join(tmpdir(), 'hh-kimi-'));
+    const dir = join(home, 'sessions', 'wd_a3_0123456789ab', 'session_1', 'agents', 'main');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'wire.jsonl'), '{"type":"metadata"}\n');
+    expect(findKimiWire(home, 'session_1')).toBe(join(dir, 'wire.jsonl'));
+    expect(findKimiWire(home, 'session_2')).toBeNull();
+    expect(findKimiWire(home, '../x')).toBeNull();
   });
 });

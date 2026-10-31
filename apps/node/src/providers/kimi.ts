@@ -9,6 +9,9 @@ import { childEnv, ensureDir, installPackage, interactiveLogin, runProgram, toke
 type Options = { home: string; tools: string; bin?: string; user?: JobUser | null };
 
 const SIGNED_OUT = /no model configured|\/login|not logged in/i;
+/* What Kimi Code's own screen says when it is not signed in. Narrower than the words above, since a screen also shows
+   what the agent did, which can name a /login page. */
+export const SCREEN_SIGNED_OUT = /Run \/login or \/provider to get started|"\/login" to login|Send \/login to login|not set, run \/login|try \/login/;
 
 const files = (dir: string) => {
   try {

@@ -2,9 +2,10 @@ import { appendFileSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { claudeStatusLimits, codexRollout, LineTail } from '../src/terminal/transcripts.js';
+import { claudeStatusLimits, codexRollout, kimiUsageLimits, kimiWire, LineTail } from '../src/terminal/transcripts.js';
 
 const item = (it: object) => ({ type: 'event_msg', payload: { type: 'item_completed', item: it } });
+const loop = (event: object) => ({ type: 'context.append_loop_event', agentId: 'main', event, time: 1 });
 
 describe("Codex's session log", () => {
   it('shows its messages, commands, file changes and Hornhoof tool calls', () => {
@@ -49,6 +50,49 @@ describe("Codex's session log", () => {
   it('leaves out what people need not see', () => {
     expect(codexRollout({ type: 'response_item', payload: { type: 'message', role: 'developer' } })).toEqual({ events: [] });
     expect(codexRollout('nonsense')).toEqual({ events: [] });
+  });
+});
+
+describe("Kimi Code's session log", () => {
+  it('shows its text, tool calls and their results, without its thinking', () => {
+    expect(kimiWire(loop({ type: 'content.part', turnId: '0', step: 1, part: { type: 'text', text: 'Fixing the build.' } }))).toEqual({ events: [{ kind: 'text', text: 'Fixing the build.' }] });
+    expect(kimiWire(loop({ type: 'content.part', turnId: '0', step: 1, part: { type: 'think', think: 'Hmm.' } }))).toEqual({ events: [] });
+    expect(kimiWire(loop({ type: 'tool.call', toolCallId: 'c1', name: 'Bash', args: { command: 'npm test' } })).events).toEqual([{ kind: 'tool', name: 'Bash', input: 'npm test' }]);
+    expect(kimiWire(loop({ type: 'tool.call', toolCallId: 'c2', name: 'mcp__hornhoof__move_task', args: { task: 4 } })).events).toEqual([{ kind: 'tool', name: 'hornhoof.move_task', input: '{"task":4}' }]);
+    expect(kimiWire(loop({ type: 'tool.result', toolCallId: 'c1', result: { output: '12 passed', isError: false } })).events).toEqual([{ kind: 'tool_result', ok: true, summary: '12 passed' }]);
+    expect(kimiWire(loop({ type: 'tool.result', toolCallId: 'c2', result: { output: [{ type: 'text', text: 'No such task.' }], isError: true } })).events).toEqual([
+      { kind: 'tool_result', ok: false, summary: 'No such task.' },
+    ]);
+  });
+
+  it('tells when a turn starts, ends, was stopped or failed', () => {
+    expect(kimiWire({ type: 'turn.prompt', agentId: 'main', input: [{ type: 'text', text: 'hi' }], origin: { kind: 'user' } })).toEqual({ events: [], started: true });
+    expect(kimiWire({ type: 'turn.ended', agentId: 'main', turnId: 0, reason: 'completed' })).toEqual({ events: [], ended: true });
+    expect(kimiWire({ type: 'turn.ended', agentId: 'main', turnId: 1, reason: 'cancelled' })).toEqual({ events: [], aborted: true });
+    expect(kimiWire(loop({ type: 'step.begin', turnId: '1', step: 2 }))).toEqual({ events: [], step: true });
+    expect(kimiWire({ type: 'prompt.completed', agentId: 'main', promptId: 'p1', reason: 'completed' })).toEqual({ events: [] });
+    expect(kimiWire({ type: 'prompt.completed', agentId: 'main', promptId: 'p2', reason: 'blocked' })).toEqual({ events: [], failed: 'A hook in Kimi Code blocked this message.', blocked: true });
+    expect(kimiWire({ type: 'turn.ended', agentId: 'main', turnId: 2, reason: 'failed', error: { name: 'APIError', message: 'Quota exceeded.' } })).toEqual({ events: [], failed: 'Quota exceeded.' });
+    expect(kimiWire({ type: 'turn.ended', agentId: 'main', turnId: 3, reason: 'blocked' })).toEqual({ events: [], failed: 'blocked' });
+  });
+
+  it("leaves out bookkeeping and other agents' turns", () => {
+    expect(kimiWire({ type: 'metadata', protocol_version: '1.5' })).toEqual({ events: [] });
+    expect(kimiWire({ type: 'usage.record', agentId: 'main' })).toEqual({ events: [] });
+    expect(kimiWire({ type: 'turn.ended', agentId: 'sub-1', turnId: 0, reason: 'completed' })).toEqual({ events: [] });
+    expect(kimiWire('nonsense')).toEqual({ events: [] });
+  });
+
+  it("reads the plan's limits Kimi's usage page gives", () => {
+    expect(kimiUsageLimits({ usages: { limit_5h: { used_ratio: 0.25, reset_time: '2026-10-31T03:00:00Z' }, limit_7d: { used_ratio: '1', reset_time: '2026-11-04T00:00:00Z' } } })).toEqual({
+      status: 'rejected',
+      windows: [
+        { name: 'five_hour', utilization: 0.25, resetsAt: '2026-10-31T03:00:00.000Z' },
+        { name: 'seven_day', utilization: 1, resetsAt: '2026-11-04T00:00:00.000Z' },
+      ],
+    });
+    expect(kimiUsageLimits({ usages: { limit_5h: { used_ratio: 0.1 } } })).toEqual({ status: 'allowed', windows: [{ name: 'five_hour', utilization: 0.1, resetsAt: null }] });
+    expect(kimiUsageLimits({ error: 'nope' })).toBeNull();
   });
 });
 

@@ -11,9 +11,10 @@ import { runJob, type ProviderAdapter, type RunResult } from './runner.js';
 import { dataDir, isRemoved, markRemoved, readState, rememberSession, writeState, type NodeState } from './state.js';
 import { SIGNED_OUT as CLAUDE_SIGNED_OUT } from './providers/claude.js';
 import { SIGNED_OUT as CODEX_SIGNED_OUT } from './providers/codex.js';
+import { SCREEN_SIGNED_OUT as KIMI_SIGNED_OUT } from './providers/kimi.js';
 import { childEnv } from './providers/process.js';
 import { TerminalHost } from './terminal/host.js';
-import { claudeProgram, codexProgram, type TermProgram } from './terminal/programs.js';
+import { claudeProgram, codexProgram, kimiProgram, type TermProgram } from './terminal/programs.js';
 import { Tmux } from './terminal/tmux.js';
 
 export const VERSION: string = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
@@ -26,7 +27,7 @@ const STOP_WAIT_MS = 5_000;
 
 type JobRun = Extract<ServerMessage, { type: 'job.run' }>;
 
-/* Agents of a personal Claude Code or Codex plan run in tmux sessions people can watch and type into. */
+/* Agents of a personal Claude Code, Codex or Kimi Code plan run in tmux sessions people can watch and type into. */
 export type TerminalSetup = { tmux: Tmux; program: TermProgram; bin: string; home: string; signedOut: RegExp };
 
 type RunOptions = {
@@ -322,19 +323,26 @@ async function login(dir: string, io: Io): Promise<number> {
   return 0;
 }
 
-/* A personal Claude Code or Codex plan runs its agents in tmux when the machine has it; the rest run as before. */
+/* The program a personal plan's agents run in their terminals, and what its screen says when it is not signed in. */
+const TERMINALS: Partial<Record<ProviderId, { program: TermProgram; signedOut: RegExp }>> = {
+  claude: { program: claudeProgram, signedOut: CLAUDE_SIGNED_OUT },
+  codex: { program: codexProgram, signedOut: CODEX_SIGNED_OUT },
+  kimi: { program: kimiProgram, signedOut: KIMI_SIGNED_OUT },
+};
+
+/* A personal Claude Code, Codex or Kimi Code plan runs its agents in tmux when the machine has it; the rest run as before. */
 function terminalFor(dir: string, provider: ProviderId): { terminal?: TerminalSetup } {
-  if (provider !== 'claude' && provider !== 'codex') return {};
+  const known = TERMINALS[provider];
+  if (!known) return {};
   try {
     execFileSync('tmux', ['-V'], { stdio: 'ignore' });
   } catch {
     return {};
   }
   const tools = join(dir, 'tools');
-  const program = provider === 'claude' ? claudeProgram : codexProgram;
   const home = join(dir, 'home');
   const tmux = new Tmux({ env: childEnv(tools, { HOME: process.env.HOME ?? home }) });
-  return { terminal: { tmux, program, bin: join(tools, 'bin', programFor(provider).bin), home, signedOut: provider === 'claude' ? CLAUDE_SIGNED_OUT : CODEX_SIGNED_OUT } };
+  return { terminal: { tmux, ...known, bin: join(tools, 'bin', programFor(provider).bin), home } };
 }
 
 async function run(dir: string, builtinMode: boolean, io: Io): Promise<number | { stop(): void }> {

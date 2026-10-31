@@ -73,6 +73,42 @@ describe("the node's bridge to Hornhoof's tools", () => {
     expect(up.seen).toEqual([]);
   });
 
+  it('lets the tool calls of an agent whose program connects as a turn opens wait for its token, for a while', async () => {
+    const up = await upstream();
+    const bridge = new Bridge(up.url, () => {});
+    await bridge.start();
+    closers.push(() => bridge.stop(), () => up.server.close());
+    const a = bridge.agent('agent-1');
+    bridge.waitForTurns('agent-1', 2000);
+    const post = (id: number) => fetch(a.mcpUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id, method: 'initialize' }) });
+    const waiting = post(1);
+    await new Promise(r => setTimeout(r, 100));
+    expect(up.seen).toEqual([]);
+    bridge.setToken('agent-1', 'tok-typed');
+    expect((await waiting).status).toBe(200);
+    expect(up.seen[0]).toMatchObject({ auth: 'Bearer tok-typed' });
+
+    bridge.setToken('agent-1', null);
+    bridge.waitForTurns('agent-1', 100);
+    const started = Date.now();
+    expect(await (await post(2)).json()).toMatchObject({ id: 2, error: { message: expect.stringContaining('No Hornhoof turn') } });
+    expect(Date.now() - started).toBeGreaterThanOrEqual(90);
+    expect(up.seen).toHaveLength(1);
+  });
+
+  it('never holds a tool call from between turns for the next turn, which would run it under that turn', async () => {
+    const up = await upstream();
+    const bridge = new Bridge(up.url, () => {});
+    await bridge.start();
+    closers.push(() => bridge.stop(), () => up.server.close());
+    const a = bridge.agent('agent-1');
+    bridge.waitForTurns('agent-1', 2000);
+    const call = fetch(a.mcpUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"report"}}' });
+    setTimeout(() => bridge.setToken('agent-1', 'tok-next'), 50);
+    expect(await (await call).json()).toMatchObject({ id: 3, error: { message: expect.stringContaining('No Hornhoof turn') } });
+    expect(up.seen).toEqual([]);
+  });
+
   it("takes an agent's hook calls, and refuses a wrong secret", async () => {
     const up = await upstream();
     const heard: [string, string, unknown][] = [];

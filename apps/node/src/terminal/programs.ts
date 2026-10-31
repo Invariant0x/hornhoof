@@ -1,7 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { Limits } from '@hornhoof/protocol';
+import { writePrivate } from '../providers/process.js';
 import type { AgentUrls } from './bridge.js';
+import { kimiUsageLimits } from './transcripts.js';
 
 export type LaunchInput = {
   bin: string;
@@ -18,8 +21,10 @@ export type LaunchInput = {
 export type LaunchSpec = { command: string[]; env: Record<string, string>; sessionId: string | null };
 
 export type TermProgram = {
-  kind: 'claude' | 'codex';
+  kind: 'claude' | 'codex' | 'kimi';
   launch(input: LaunchInput): LaunchSpec;
+  /* The plan's limits, for a program that does not write them where the host reads. */
+  limits?(home: string): Promise<Limits | null>;
 };
 
 const bridgeEnv = (urls: AgentUrls) => ({
@@ -67,6 +72,84 @@ export const codexProgram: TermProgram = {
     return { command, env: { CODEX_HOME: home, ...bridgeEnv(urls) }, sessionId };
   },
 };
+
+/* Kimi Code's plan page, on its own servers only: the sign-in token goes nowhere else. KIMI_CODE_BASE_URL is Kimi's own
+   way to point it elsewhere. */
+const KIMI_BASE = 'https://api.kimi.com/coding/v1';
+const KIMI_GLOBAL_BASE = 'https://api.kimi.ai/coding/v1';
+
+export const kimiProgram: TermProgram = {
+  kind: 'kimi',
+  launch({ bin, home, sessionId, model, urls }) {
+    /* --auto decides everything on its own, as the others run without approvals. Kimi names a new session only when the
+       first message starts it, and its start hook tells the host. */
+    const command = [bin, '--auto', ...(sessionId ? ['-S', sessionId] : []), ...(model ? ['-m', model] : [])];
+    /* The agent's folder is trusted, so Kimi reads the tools and instructions Hornhoof leaves there without asking. */
+    return { command, env: { KIMI_CODE_HOME: home, KIMI_CODE_TRUST_WORKSPACE: '1', ...bridgeEnv(urls) }, sessionId };
+  },
+  limits: kimiPlanLimits,
+};
+
+/* Hornhoof's hooks in Kimi's settings: the start names the session, the prompt opens a person's turn before Kimi goes on. */
+const KIMI_HOOKS = [
+  ['SessionStart', 'start'],
+  ['UserPromptSubmit', 'prompt'],
+] as const;
+
+/* Kimi has no flags for tools or hooks. Its tools come from the agent folder's .kimi-code/mcp.json, through the bridge,
+   and its hooks from config.toml in its home, which the person's own settings share: Hornhoof's are added at the end
+   once. Settings that list their hooks on one line could take no more, and are left alone. */
+export function prepareKimi(home: string, workDir: string, mcpUrl: string): void {
+  const dir = join(workDir, '.kimi-code');
+  mkdirSync(dir, { recursive: true });
+  writePrivate(join(dir, 'mcp.json'), JSON.stringify({ mcpServers: { hornhoof: { transport: 'http', url: mcpUrl } } }, null, 2), null);
+  const file = join(home, 'config.toml');
+  let config = '';
+  try {
+    config = readFileSync(file, 'utf8');
+  } catch {
+    /* A home that was never signed in has none yet. */
+  }
+  const missing = KIMI_HOOKS.filter(([, event]) => !new RegExp(`hh-hook ${event}\\b`).test(config));
+  if (!missing.length || /^\s*hooks\s*=/m.test(config)) return;
+  const added = missing.map(([name, event]) => `[[hooks]]\nevent = "${name}"\ncommand = "hh-hook ${event}"\n`).join('\n');
+  mkdirSync(home, { recursive: true });
+  const temp = `${file}.hh-${process.pid}`;
+  writeFileSync(temp, `${config}${config && !config.endsWith('\n') ? '\n' : ''}${config ? '\n' : ''}${added}`, { mode: 0o600 });
+  renameSync(temp, file);
+}
+
+/* Kimi Code keeps a session's log by the folder's workspace and the session's id; the main agent has its own log. */
+export function findKimiWire(home: string, sessionId: string): string | null {
+  if (!/^[\w-]+$/.test(sessionId)) return null;
+  const root = join(home, 'sessions');
+  if (!existsSync(root)) return null;
+  for (const workspace of readdirSync(root)) {
+    const file = join(root, workspace, sessionId, 'agents', 'main', 'wire.jsonl');
+    if (existsSync(file)) return file;
+  }
+  return null;
+}
+
+/* What Kimi's /usage shows, asked with the token Kimi keeps fresh while it runs. A token that went stale gives nothing,
+   and the host keeps what it knew. */
+export async function kimiPlanLimits(home: string): Promise<Limits | null> {
+  const token = readJson(join(home, 'credentials', 'kimi-code.json')).access_token;
+  if (typeof token !== 'string' || !token) return null;
+  let config = '';
+  try {
+    config = readFileSync(join(home, 'config.toml'), 'utf8');
+  } catch {
+    /* Signed in without settings: the default servers. */
+  }
+  const base = process.env.KIMI_CODE_BASE_URL ?? (config.includes(KIMI_GLOBAL_BASE) ? KIMI_GLOBAL_BASE : KIMI_BASE);
+  try {
+    const res = await fetch(`${base.replace(/\/+$/, '')}/usages`, { headers: { authorization: `Bearer ${token}`, accept: 'application/json' }, signal: AbortSignal.timeout(5000) });
+    return res.ok ? kimiUsageLimits(await res.json()) : null;
+  } catch {
+    return null;
+  }
+}
 
 function readJson(file: string): Record<string, unknown> {
   try {
