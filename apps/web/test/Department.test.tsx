@@ -128,7 +128,7 @@ describe('Department view', () => {
     shell({}, { ...DEV_ORG, departments: [{ ...dev!, live: [{ from: 'b1', to: 'b0', at: new Date(Date.now() - 3 * 60_000).toISOString() }] }] });
     await flyIn(user);
     const live = () => document.querySelectorAll('path.live');
-    expect(live()).toHaveLength(1);
+    await vi.waitFor(() => expect(live()).toHaveLength(1));
     stream.send({ type: 'pulse', from: { kind: 'agent', id: 'b0', departmentId: dev!.id }, to: { kind: 'agent', id: 'b1', departmentId: dev!.id } });
     await vi.waitFor(() => expect(live()).toHaveLength(2));
     /* Another department's agents are not this one's. */

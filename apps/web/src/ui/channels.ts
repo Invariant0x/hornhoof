@@ -20,11 +20,11 @@ export function useChannels<T>(seed: Way<T>[]): { live: T[]; touch(key: string, 
     });
   }, [seeded]);
 
-  /* Wakes when the next way goes quiet. */
+  /* Wakes when the next way goes quiet, counted from the clock: the ways change on every fetch, not only on a message. */
   useEffect(() => {
     const ends = [...ways.values()].map(w => w.at + CHANNEL_MS).filter(end => end > now);
     if (!ends.length) return;
-    const id = setTimeout(() => setNow(Date.now()), Math.min(...ends) - now + 1);
+    const id = setTimeout(() => setNow(Date.now()), Math.max(0, Math.min(...ends) - Date.now()) + 1);
     return () => clearTimeout(id);
   }, [ways, now]);
 

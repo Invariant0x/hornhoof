@@ -272,7 +272,8 @@ describe('Map', () => {
     mockApi({ 'GET /api/org': [200, { ...ORG, live, departments: [dept({ id: 'd1', templateKey: 'sales' })] }] });
     const { container } = render(<MapScreen {...PROPS} />);
     await screen.findByText('Sales');
-    expect(container.querySelectorAll('path.live')).toHaveLength(1);
+    /* The ways come in a moment after the card. */
+    await vi.waitFor(() => expect(container.querySelectorAll('path.live')).toHaveLength(1));
     expect(container.querySelector('path.live')).toHaveClass('a');
   });
 
