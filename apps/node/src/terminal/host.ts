@@ -243,8 +243,8 @@ export class TerminalHost {
     }
     /* Codex and Kimi Code read AGENTS.md in the folder they start in. */
     if (told && program.kind !== 'claude') writeFileSync(join(input.workDir, 'AGENTS.md'), told + '\n', { mode: 0o600 });
-    const spec = program.launch({ bin: job.bin, home: job.home, workDir: input.workDir, sessionId: input.sessionId, model: input.model, instructionsFile, urls });
-    const hash = hashOf({ kind: program.kind, bin: job.bin, model: input.model, instructions: input.instructions, env: lasting(input.env) });
+    const spec = program.launch({ bin: job.bin, home: job.home, workDir: input.workDir, sessionId: input.sessionId, model: input.model, effort: input.effort, instructionsFile, urls });
+    const hash = hashOf({ kind: program.kind, bin: job.bin, model: input.model, effort: input.effort ?? null, instructions: input.instructions, env: lasting(input.env) });
     /* A new session asked for goes on in a program started for a person that nothing was said in yet. */
     const sameSession = input.sessionId === null ? a.fresh : input.sessionId === a.sessionId || a.cleared.has(input.sessionId);
     const goesOn = sameSession && a.hash === hash && (await this.opts.tmux.alive(a.name));

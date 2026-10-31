@@ -14,6 +14,8 @@ export type LaunchInput = {
   /* The session to go on with, or null for a new one. */
   sessionId: string | null;
   model: string | null;
+  /* How hard the model thinks, as the program names it; none leaves it at the program's default. */
+  effort?: string | null;
   instructionsFile: string | null;
   urls: AgentUrls;
 };
@@ -39,7 +41,7 @@ const hook = (event: string) => [{ hooks: [{ type: 'command', command: `hh-hook 
 
 export const claudeProgram: TermProgram = {
   kind: 'claude',
-  launch({ bin, home, sessionId, model, instructionsFile, urls }) {
+  launch({ bin, home, sessionId, model, effort, instructionsFile, urls }) {
     const id = sessionId ?? randomUUID();
     const settings = {
       hooks: { SessionStart: hook('start'), UserPromptSubmit: hook('prompt'), Stop: hook('stop') },
@@ -57,6 +59,7 @@ export const claudeProgram: TermProgram = {
       JSON.stringify(settings),
       ...(instructionsFile ? ['--append-system-prompt-file', instructionsFile] : []),
       ...(model ? ['--model', model] : []),
+      ...(effort ? ['--effort', effort] : []),
     ];
     return { command, env: { CLAUDE_CONFIG_DIR: home, ...bridgeEnv(urls) }, sessionId: id };
   },
@@ -64,8 +67,8 @@ export const claudeProgram: TermProgram = {
 
 export const codexProgram: TermProgram = {
   kind: 'codex',
-  launch({ bin, home, workDir, sessionId, model, urls }) {
-    const config = ['-c', `mcp_servers.hornhoof.url=${JSON.stringify(urls.mcpUrl)}`];
+  launch({ bin, home, workDir, sessionId, model, effort, urls }) {
+    const config = ['-c', `mcp_servers.hornhoof.url=${JSON.stringify(urls.mcpUrl)}`, ...(effort ? ['-c', `model_reasoning_effort=${JSON.stringify(effort)}`] : [])];
     const rest = ['--dangerously-bypass-approvals-and-sandbox', ...config, ...(model ? ['-m', model] : [])];
     /* A resumed session works in the folder it started in, which is the pane's. */
     const command = sessionId ? [bin, 'resume', sessionId, ...rest] : [bin, rest[0]!, '-C', workDir, ...rest.slice(1)];
@@ -80,12 +83,14 @@ const KIMI_GLOBAL_BASE = 'https://api.kimi.ai/coding/v1';
 
 export const kimiProgram: TermProgram = {
   kind: 'kimi',
-  launch({ bin, home, sessionId, model, urls }) {
+  launch({ bin, home, sessionId, model, effort, urls }) {
     /* --auto decides everything on its own, as the others run without approvals. Kimi names a new session only when the
        first message starts it, and its start hook tells the host. */
     const command = [bin, '--auto', ...(sessionId ? ['-S', sessionId] : []), ...(model ? ['-m', model] : [])];
-    /* The agent's folder is trusted, so Kimi reads the tools and instructions Hornhoof leaves there without asking. */
-    return { command, env: { KIMI_CODE_HOME: home, KIMI_CODE_TRUST_WORKSPACE: '1', ...bridgeEnv(urls) }, sessionId };
+    /* The agent's folder is trusted, so Kimi reads the tools and instructions Hornhoof leaves there without asking. Kimi
+       has no flag for effort; it reads this setting over its own. */
+    const thinking: Record<string, string> = effort ? { KIMI_MODEL_THINKING_EFFORT: effort } : {};
+    return { command, env: { KIMI_CODE_HOME: home, KIMI_CODE_TRUST_WORKSPACE: '1', ...thinking, ...bridgeEnv(urls) }, sessionId };
   },
   limits: kimiPlanLimits,
 };

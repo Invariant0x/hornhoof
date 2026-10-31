@@ -39,6 +39,14 @@ describe('runJob', () => {
     expect(adapter.inputs[0]!.workDir).toBe(join(dir, 'work', 'job-1'));
   });
 
+  it('passes on how hard the agent thinks, and nothing when Hornhoof leaves it to the program', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
+    const adapter = fakeAdapter(async () => ok());
+    await runJob(adapter, job({ effort: 'max' }), dir);
+    await runJob(adapter, job({ jobId: 'job-2' }), dir);
+    expect(adapter.inputs.map(i => i.effort)).toEqual(['max', null]);
+  });
+
   it('gives up with a timeout when the agent does not finish in time', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
     const adapter = fakeAdapter(() => new Promise(() => {}));

@@ -91,6 +91,15 @@ describe('Claude Code', () => {
     expect(res).toMatchObject({ ok: true, result: 'ready', sessionId: CLAUDE_SESSION });
   });
 
+  it('thinks as hard as the agent was set to', async () => {
+    await adapter('claude').run(input({ effort: 'high' }));
+    const { argv } = lastRun();
+    expect(argv.slice(argv.indexOf('--effort'), argv.indexOf('--effort') + 2)).toEqual(['--effort', 'high']);
+    expect(argv.indexOf('--effort')).toBeLessThan(argv.indexOf('--'));
+    await adapter('claude').run(input());
+    expect(lastRun().argv).not.toContain('--effort');
+  });
+
   it('reads the plan limits from the rate limit event', async () => {
     const res = await adapter('claude').run(input());
     expect(res.limits).toEqual({
@@ -243,6 +252,13 @@ describe('Codex', () => {
     expect(res).toMatchObject({ ok: true, result: 'ready', sessionId: CODEX_THREAD });
   });
 
+  it('thinks as hard as the agent was set to', async () => {
+    await adapter('codex').run(input({ effort: 'xhigh' }));
+    const { argv } = lastRun();
+    expect(argv[argv.indexOf('model_reasoning_effort="xhigh"') - 1]).toBe('-c');
+    expect(argv.indexOf('model_reasoning_effort="xhigh"')).toBeLessThan(argv.indexOf('--'));
+  });
+
   it('reports a failed turn as agent_failed', async () => {
     process.env.FAKE_MODE = 'fail';
     expect(await adapter('codex').run(input())).toMatchObject({ ok: false, error: 'agent_failed' });
@@ -287,13 +303,19 @@ describe('models', () => {
     writeFileSync(join(home, 'models_cache.json'), JSON.stringify({
       fetched_at: '2026-10-30T00:00:00Z',
       models: [
-        { slug: 'gpt-6.1-sol', display_name: 'GPT-6.1 Sol', visibility: 'list' },
+        {
+          slug: 'gpt-6.1-sol',
+          display_name: 'GPT-6.1 Sol',
+          visibility: 'list',
+          default_reasoning_level: 'low',
+          supported_reasoning_levels: [{ effort: 'low', description: 'Fast' }, { effort: 'xhigh', description: 'Extra' }, { effort: 'ultra', description: 'Most' }],
+        },
         { slug: 'gpt-6-internal', display_name: 'Internal', visibility: 'hide' },
-        { slug: 'gpt-6-luna', display_name: 'GPT-6 Luna', visibility: 'list' },
+        { slug: 'gpt-6-luna', display_name: 'GPT-6 Luna', visibility: 'list', supported_reasoning_levels: [{ effort: 'Not A Level' }, 'medium'] },
       ],
     }));
     expect(await adapter('codex').models!()).toEqual([
-      { id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol' },
+      { id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol', efforts: ['low', 'xhigh', 'ultra'], defaultEffort: 'low' },
       { id: 'gpt-6-luna', name: 'GPT-6 Luna' },
     ]);
     writeFileSync(join(home, 'models_cache.json'), '{ not json');
@@ -353,10 +375,14 @@ describe('models', () => {
         'provider = "managed:kimi-code"',
         'model = "kimi-for-coding"',
         'display_name = "K2.8 Preview"',
+        'support_efforts = [ "low", "high", "max" ]',
+        'default_effort = "max"',
         '',
         '[models."kimi-code/k3.1-pro"]',
         'model = "k3.1-pro"',
         'display_name = "K3.1 Pro"',
+        "support_efforts = ['low', 'high']",
+        'default_effort = "high"',
         '',
         '[models.local]',
         'model = "local"',
@@ -366,8 +392,8 @@ describe('models', () => {
       ].join('\n'),
     );
     expect(await adapter('kimi').models!()).toEqual([
-      { id: 'kimi-code/kimi-for-coding', name: 'K2.8 Preview' },
-      { id: 'kimi-code/k3.1-pro', name: 'K3.1 Pro' },
+      { id: 'kimi-code/kimi-for-coding', name: 'K2.8 Preview', efforts: ['low', 'high', 'max'], defaultEffort: 'max' },
+      { id: 'kimi-code/k3.1-pro', name: 'K3.1 Pro', efforts: ['low', 'high'], defaultEffort: 'high' },
       { id: 'local', name: 'local' },
     ]);
   });
@@ -435,6 +461,12 @@ describe('Kimi Code', () => {
 
     await a.run(input({ sessionId: KIMI_SESSION, model: 'kimi-k3' }));
     expect(lastRun().argv).toEqual(['--prompt=say ready', '--output-format', 'stream-json', '--session', KIMI_SESSION, '-m', 'kimi-k3']);
+    expect(lastRun().env).not.toHaveProperty('KIMI_MODEL_THINKING_EFFORT');
+  });
+
+  it('thinks as hard as the agent was set to, through the setting Kimi reads from its env', async () => {
+    await adapter('kimi').run(input({ effort: 'max' }));
+    expect(lastRun().env.KIMI_MODEL_THINKING_EFFORT).toBe('max');
   });
 
   it('reports a failed run as agent_failed and a signed-out one as not_logged_in', async () => {

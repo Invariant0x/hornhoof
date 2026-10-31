@@ -37,6 +37,13 @@ describe('Claude Code in a terminal', () => {
     expect(command).not.toContain('--append-system-prompt-file');
   });
 
+  it('thinks as hard as the agent was set to, or at the plan default when nothing is set', () => {
+    const set = claudeProgram.launch({ bin: 'claude', home: '/h', workDir: '/w', sessionId: null, model: null, effort: 'max', instructionsFile: null, urls: URLS });
+    expect(arg(set.command, '--effort')).toBe('max');
+    const unset = claudeProgram.launch({ bin: 'claude', home: '/h', workDir: '/w', sessionId: null, model: null, effort: null, instructionsFile: null, urls: URLS });
+    expect(unset.command).not.toContain('--effort');
+  });
+
   it("answers the first-run questions before they are asked, keeping the person's own settings", () => {
     const home = mkdtempSync(join(tmpdir(), 'hh-claude-'));
     writeFileSync(join(home, '.claude.json'), JSON.stringify({ oauthAccount: { a: 1 }, projects: { '/other': { allowedTools: ['x'] } } }));
@@ -72,6 +79,16 @@ describe('Codex in a terminal', () => {
     expect(again.command).not.toContain('-C');
   });
 
+  it('thinks as hard as the agent was set to, in a new session and a resumed one', () => {
+    const first = codexProgram.launch({ bin: 'codex', home: '/h', workDir: '/w', sessionId: null, model: null, effort: 'xhigh', instructionsFile: null, urls: URLS });
+    expect(first.command).toContain('model_reasoning_effort="xhigh"');
+    expect(first.command[first.command.indexOf('model_reasoning_effort="xhigh"') - 1]).toBe('-c');
+    const again = codexProgram.launch({ bin: 'codex', home: '/h', workDir: '/w', sessionId: 'th-9', model: null, effort: 'low', instructionsFile: null, urls: URLS });
+    expect(again.command).toContain('model_reasoning_effort="low"');
+    const unset = codexProgram.launch({ bin: 'codex', home: '/h', workDir: '/w', sessionId: null, model: null, effort: null, instructionsFile: null, urls: URLS });
+    expect(unset.command.join(' ')).not.toContain('model_reasoning_effort');
+  });
+
   it("finds the log of the session it started in the agent's folder", () => {
     const home = mkdtempSync(join(tmpdir(), 'hh-codex-'));
     const day = join(home, 'sessions', '2026', '10', '30');
@@ -96,6 +113,14 @@ describe('Kimi Code in a terminal', () => {
     const again = kimiProgram.launch({ bin: '/t/kimi', home: '/h', workDir: '/w/a3', sessionId: 'session_9', model: null, instructionsFile: null, urls: URLS });
     expect(again.command).toEqual(['/t/kimi', '--auto', '-S', 'session_9']);
     expect(again.sessionId).toBe('session_9');
+  });
+
+  it('thinks as hard as the agent was set to through the setting Kimi reads from its env', () => {
+    const set = kimiProgram.launch({ bin: 'kimi', home: '/h', workDir: '/w', sessionId: null, model: null, effort: 'max', instructionsFile: null, urls: URLS });
+    expect(set.env.KIMI_MODEL_THINKING_EFFORT).toBe('max');
+    expect(set.command).toEqual(['kimi', '--auto']);
+    const unset = kimiProgram.launch({ bin: 'kimi', home: '/h', workDir: '/w', sessionId: null, model: null, effort: null, instructionsFile: null, urls: URLS });
+    expect(unset.env).not.toHaveProperty('KIMI_MODEL_THINKING_EFFORT');
   });
 
   it("gives the agent folder the bridge for tools, and adds Hornhoof's hooks to the person's settings once", () => {

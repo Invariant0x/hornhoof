@@ -5,7 +5,7 @@ import { API_MODELS, type AgentEvent, type Limits, type ModelOption } from '@hor
 import type { JobUser } from '../isolation.js';
 import type { ProviderAdapter, RunInput, RunResult } from '../runner.js';
 import { contentText, inputText, isRecord } from './events.js';
-import { childEnv, ensureDir, exitsCleanly, installPackage, interactiveLogin, runProgram, tokensIn, writePrivate } from './process.js';
+import { childEnv, ensureDir, exitsCleanly, installPackage, interactiveLogin, runProgram, tokensIn, withEfforts, writePrivate } from './process.js';
 
 /* Codex serves a ChatGPT plan, or a company OpenAI key on the built-in node. */
 type Options = { home: string; tools: string; bin?: string; secret?: string | null; mode: 'plan' | 'api_key'; user?: JobUser | null };
@@ -97,19 +97,22 @@ function askLimits(bin: string, env: NodeJS.ProcessEnv): Promise<Limits | null> 
   });
 }
 
-type CachedModel = { slug?: unknown; display_name?: unknown; visibility?: unknown };
+type CachedModel = { slug?: unknown; display_name?: unknown; visibility?: unknown; supported_reasoning_levels?: unknown; default_reasoning_level?: unknown };
 
 function cachedModels(file: string): ModelOption[] {
   try {
     const { models } = JSON.parse(readFileSync(file, 'utf8')) as { models?: CachedModel[] };
     return (models ?? [])
-      .filter((m): m is { slug: string; display_name: string } => m.visibility === 'list' && typeof m.slug === 'string' && typeof m.display_name === 'string')
-      .map(m => ({ id: m.slug.slice(0, 80), name: m.display_name.slice(0, 80) }))
+      .filter((m): m is CachedModel & { slug: string; display_name: string } => m.visibility === 'list' && typeof m.slug === 'string' && typeof m.display_name === 'string')
+      .map(m => ({ id: m.slug.slice(0, 80), name: m.display_name.slice(0, 80), ...withEfforts(levels(m.supported_reasoning_levels), m.default_reasoning_level) }))
       .slice(0, 60);
   } catch {
     return [];
   }
 }
+
+/* Codex lists each level as an object with its name and a description for its picker. */
+const levels = (value: unknown) => (Array.isArray(value) ? value.map(l => (isRecord(l) ? l.effort : null)) : []);
 
 export function codexAdapter({ home, tools, bin = join(tools, 'bin', 'codex'), secret = null, mode, user = null }: Options): ProviderAdapter {
   function env(jobSecret: string | null, toolToken: string | null = null): NodeJS.ProcessEnv {
@@ -149,7 +152,7 @@ export function codexAdapter({ home, tools, bin = join(tools, 'bin', 'codex'), s
     },
 
     async run(input: RunInput): Promise<RunResult> {
-      const model = input.model ? ['-m', input.model] : [];
+      const model = [...(input.model ? ['-m', input.model] : []), ...(input.effort ? ['-c', `model_reasoning_effort=${JSON.stringify(input.effort)}`] : [])];
       /* Codex reads the token from the env variable the config names, so it never shows in the process list. */
       const mcp = input.tools ? ['-c', `mcp_servers.hornhoof.url=${JSON.stringify(input.tools.url)}`, '-c', 'mcp_servers.hornhoof.bearer_token_env_var="HH_TOOL_TOKEN"'] : [];
       if (input.instructions) writePrivate(join(input.workDir, 'AGENTS.md'), input.instructions + '\n', user);

@@ -127,6 +127,7 @@ export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'),
         args.push('--mcp-config', mcpFile, '--strict-mcp-config');
       }
       if (input.model) args.push('--model', input.model);
+      if (input.effort) args.push('--effort', input.effort);
       args.push('--', input.prompt);
 
       let result: Outcome | null = null;

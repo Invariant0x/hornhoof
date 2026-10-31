@@ -117,6 +117,14 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     expect(await host.screen('a2')).toContain(`fake claude resumed ${first.sessionId}`);
   });
 
+  it('starts the program again in the same session when the agent was set to think harder', async () => {
+    await setUp();
+    const first = await host.run(job('a50', 'one', { effort: 'low' }));
+    const second = await host.run(job('a50', 'two', { sessionId: first.sessionId, effort: 'max' }));
+    expect(second).toMatchObject({ ok: true, result: 'echo: two', sessionId: first.sessionId });
+    expect(await host.screen('a50')).toContain(`fake claude resumed ${first.sessionId}`);
+  });
+
   it('starts a new session when Hornhoof asks for one', async () => {
     await setUp();
     const first = await host.run(job('a3', 'one'));

@@ -5,7 +5,7 @@ import type { JobUser } from '../isolation.js';
 import type { ProviderAdapter, RunInput, RunResult } from '../runner.js';
 import { kimiPlanLimits } from '../terminal/programs.js';
 import { contentText, inputText, isRecord, toolName } from './events.js';
-import { childEnv, ensureDir, installPackage, interactiveLogin, runProgram, tokensIn, writePrivate } from './process.js';
+import { childEnv, ensureDir, installPackage, interactiveLogin, runProgram, tokensIn, withEfforts, writePrivate } from './process.js';
 
 type Options = { home: string; tools: string; bin?: string; user?: JobUser | null };
 
@@ -62,8 +62,8 @@ function modelTables(config: string): { id: string; values: Map<string, string> 
       continue;
     }
     if (/^\s*\[/.test(line)) current = null;
-    const pair = current && /^\s*(\w+)\s*=\s*(?:"([^"]*)"|(\S+))/.exec(line);
-    if (current && pair) current.set(pair[1]!, pair[2] ?? pair[3]!);
+    const pair = current && /^\s*(\w+)\s*=\s*(?:"([^"]*)"|(\[[^\]]*\])|(\S+))/.exec(line);
+    if (current && pair) current.set(pair[1]!, pair[2] ?? pair[3] ?? pair[4]!);
   }
   return [...tables].map(([id, t]) => ({ id, values: new Map([...t.base, ...t.overrides]) }));
 }
@@ -72,8 +72,11 @@ function modelTables(config: string): { id: string; values: Map<string, string> 
 export function kimiModels(config: string): ModelOption[] {
   return modelTables(config)
     .slice(0, 60)
-    .map(t => ({ id: t.id, name: (t.values.get('display_name') || t.id).slice(0, 80) }));
+    .map(t => ({ id: t.id, name: (t.values.get('display_name') || t.id).slice(0, 80), ...withEfforts(strings(t.values.get('support_efforts')), t.values.get('default_effort')) }));
 }
+
+/* The strings of a one-line TOML list, as Kimi writes support_efforts. */
+const strings = (list: string | undefined) => [...(list ?? '').matchAll(/"([^"]*)"|'([^']*)'/g)].map(m => m[1] ?? m[2]);
 
 /* How many tokens a model's context takes, as Kimi counts it for its screen: what it may send, else its whole context.
    No model named is the default one. */
@@ -132,7 +135,7 @@ export function kimiAdapter({ home, tools, bin = join(tools, 'bin', 'kimi'), use
       const done = await runProgram({
         bin,
         args,
-        env: { ...env(input.tools?.token ?? null), ...input.env },
+        env: { ...env(input.tools?.token ?? null), ...(input.effort ? { KIMI_MODEL_THINKING_EFFORT: input.effort } : {}), ...input.env },
         user,
         cwd: input.workDir,
         timeoutMs: input.timeoutMs,
