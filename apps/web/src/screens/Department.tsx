@@ -475,7 +475,12 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
             <path d="M15 5l-7 7 7 7" />
           </svg>
         </button>
-        <h2>{deptLabel(t, d)}</h2>
+        {/* The name goes back too, so nobody has to aim at the small arrow. */}
+        <h2>
+          <button className="crumb-name" type="button" title={t.dept.back} onClick={onBack}>
+            {deptLabel(t, d)}
+          </button>
+        </h2>
         <span className="role">{d.roleCode}</span>
       </nav>
 

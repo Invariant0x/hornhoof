@@ -64,6 +64,14 @@ describe('Department view', () => {
     expect(screen.queryByRole('heading', { level: 2, name: 'Development' })).not.toBeInTheDocument();
   });
 
+  it('goes back to the map from the department name too, not only from the small arrow', async () => {
+    const user = userEvent.setup();
+    shell();
+    const title = await flyIn(user);
+    await user.click(within(title).getByRole('button', { name: 'Development' }));
+    expect(screen.queryByRole('heading', { level: 2, name: 'Development' })).not.toBeInTheDocument();
+  });
+
   it('names an employee once when it is called after its role', async () => {
     const user = userEvent.setup();
     const [dev] = DEV_ORG.departments;
