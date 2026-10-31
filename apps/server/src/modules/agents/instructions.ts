@@ -1,3 +1,4 @@
+import { MAX_INSTRUCTIONS } from '@hornhoof/protocol';
 import { eq, inArray } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { companies, departments, type agents } from '../../db/schema.js';
@@ -104,6 +105,20 @@ export async function notebookPart(db: Ctx['db'], book: Book): Promise<string> {
 
 const notebookOf = (text: string): Part => ({ kind: 'notebook', id: null, title: null, text, overridden: false, templateChanged: false });
 
+const CUT = '\n\nThe rest of the notebook did not fit here. Read it whole with the notebook tool.';
+
+/* A notebook in the room a turn has left, cut after a whole note, with where to read the rest; none when not even that fits. */
+function fitted(notebook: string, room: number): string {
+  if (notebook.length <= room) return notebook;
+  let kept = '';
+  for (const line of notebook.split('\n')) {
+    const next = kept ? `${kept}\n${line}` : line;
+    if (next.length + CUT.length > room) break;
+    kept = next;
+  }
+  return kept ? kept + CUT : '';
+}
+
 /* What an agent runs with now: the orchestrator's standing role with the company notebook, or an employee's rendered
    instructions, a head's with its department's notebook. The hash leaves a notebook out: a new note reaches the program
    as it starts again in the same session, or as it reads the notebook with its tool. */
@@ -125,6 +140,8 @@ export async function instructionsOf(ctx: Pick<Ctx, 'db' | 'templates'>, agent: 
   const rendered = renderInstructions(ctx.templates, agent, await placeOf(ctx.db, agent));
   const [dept] = agent.kind === 'head' && agent.departmentId ? await ctx.db.select().from(departments).where(eq(departments.id, agent.departmentId)) : [];
   if (!dept) return rendered;
-  const notebook = await notebookPart(ctx.db, departmentBook(dept));
+  /* A turn carries MAX_INSTRUCTIONS at most, the notebook included. */
+  const notebook = fitted(await notebookPart(ctx.db, departmentBook(dept)), MAX_INSTRUCTIONS - rendered.text.length - 2);
+  if (!notebook) return rendered;
   return { parts: [...rendered.parts, notebookOf(notebook)], text: `${rendered.text}\n\n${notebook}`, hash: rendered.hash };
 }

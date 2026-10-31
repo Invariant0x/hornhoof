@@ -109,7 +109,8 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
     };
     const views = new Map((await subViews(db, online)).map(v => [v.id, v]));
     const [running] = await db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, agent.id), eq(jobs.status, 'running'))).limit(1);
-    const { parts, text } = await instructionsOf(ctx, agent);
+    /* An employee's card shows what people edit. A head's department notebook has its own window and its own access. */
+    const { parts, text } = agent.kind === 'orchestrator' ? await instructionsOf(ctx, agent) : renderInstructions(ctx.templates, agent, await placeOf(db, agent));
     const offered = [...(role?.skills ?? []), ...agent.skills.filter(id => !role?.skills.some(s => s.id === id)).map(id => ({ id, on: true, locked: false }))];
     const changes = await db
       .select({ field: agentChanges.field, personName: people.name, byOrchestrator: agentChanges.byOrchestrator, at: agentChanges.createdAt, before: agentChanges.before, after: agentChanges.after })

@@ -153,7 +153,7 @@ describe("a department's notebook", () => {
     expect((await app.inject({ url: book('00000000-0000-4000-8000-000000000000'), ...as(ceo) })).statusCode).toBe(404);
   });
 
-  it('leaves room in a turn for a full notebook on top of what a head may be given', async () => {
+  it('gives a head as much of a full notebook as a turn takes, and its tool for the rest', async () => {
     const { app, db, ceo, acme } = await withDepartments();
     const [mkt] = await db.insert(departments).values({ companyId: acme.id, templateKey: 'marketing', roleCode: 'MKT' }).returning();
     for (let i = 0; i < 13; i++) expect((await add(app, ceo, mkt!.id, `${i} `.padEnd(NOTE_MAX, 'x'))).statusCode).toBe(201);
@@ -182,9 +182,25 @@ describe("a department's notebook", () => {
     expect(hired.statusCode).toBe(201);
     const [mira] = await db.select().from(agents).where(eq(agents.name, 'Mira'));
     const { text } = await instructionsOf(app.ctx, mira!);
-    expect(text.length).toBeGreaterThan(MAX_INSTRUCTIONS);
+    expect(text.length).toBeLessThanOrEqual(MAX_INSTRUCTIONS);
+    expect(text).toContain(`[#1] 0 `);
+    expect(text).not.toContain(`[#13] 12 `);
+    expect(text).toContain('The rest of the notebook did not fit here. Read it whole with the notebook tool.');
+    /* Any node takes the turn. */
     const run = { type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 1000, secret: null, instructions: text, toolToken: null };
     expect(parseServerMessage(JSON.stringify(run))).toMatchObject({ instructions: text });
+  });
+
+  it("stays out of the head's card, which people edit and people of a product may read", async () => {
+    const { app, db, ceo, acme, dev } = await withDepartments();
+    const [sub] = await db.select().from(subscriptions);
+    const [head] = await db.insert(agents).values({ companyId: acme.id, kind: 'head', name: 'Hana', roleKey: 'DEV-HEAD', departmentId: dev.id, model: '', subscriptionId: sub!.id }).returning();
+    await add(app, ceo, dev.id, 'Deploy on Fridays never.');
+    const card = (await app.inject({ url: `/api/agents/${head!.id}`, ...as(ceo) })).json();
+    expect(card.parts.map((p: { kind: string }) => p.kind)).not.toContain('notebook');
+    expect(card.raw).not.toContain('Deploy on Fridays never.');
+    /* The program carries it all the same. */
+    expect((await instructionsOf(app.ctx, head!)).text).toContain('Deploy on Fridays never.');
   });
 
   it("goes into its head's instructions, which say to read it again after a compaction", async () => {
@@ -196,14 +212,14 @@ describe("a department's notebook", () => {
     const bruno = await hire('Bruno', 'worker', 'DEV-BE');
     const before = await instructionsOf(app.ctx, hana);
     await add(app, ceo, dev.id, 'Tests first.');
-    const card = (await app.inject({ url: `/api/agents/${hana.id}`, ...as(ceo) })).json();
-    expect(card.parts.at(-1)).toMatchObject({ kind: 'notebook' });
-    expect(card.raw).toContain('## Department notebook');
-    expect(card.raw).toContain('[#1] Tests first.');
-    expect(card.raw).toContain('your department notebook again with "notebook"');
+    const now = await instructionsOf(app.ctx, hana);
+    expect(now.parts.at(-1)).toMatchObject({ kind: 'notebook' });
+    expect(now.text).toContain('## Department notebook');
+    expect(now.text).toContain('[#1] Tests first.');
+    expect(now.text).toContain('your department notebook again with "notebook"');
     /* A note does not start its program again: it reads the notebook with its tool. */
-    expect((await instructionsOf(app.ctx, hana)).hash).toBe(before.hash);
-    expect((await app.inject({ url: `/api/agents/${bruno.id}`, ...as(ceo) })).json().raw).not.toContain('notebook');
+    expect(now.hash).toBe(before.hash);
+    expect((await instructionsOf(app.ctx, bruno)).text).not.toContain('notebook');
   });
 
   it('says on the stream that it changed, only to people who reach the department', async () => {

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { MAX_INSTRUCTIONS, NOTEBOOK_ROOM, TEMPLATE_KEYS } from '@hornhoof/protocol';
+import { MAX_INSTRUCTIONS, TEMPLATE_KEYS } from '@hornhoof/protocol';
 import { describe, expect, it } from 'vitest';
 import { ORCHESTRATOR_SKILLS, orchestratorSteady } from '../src/modules/agents/instructions.js';
 import { NOTEBOOK_MAX, NOTES_MAX } from '../src/modules/notebook/book.js';
@@ -41,8 +41,6 @@ describe('templates', () => {
     for (const id of ORCHESTRATOR_SKILLS) expect(steady).toContain(`<!-- hh:skill ${id} -->`);
     /* The notebook's heading and a "[#30] " before each note come on top of its text. */
     expect(steady.length + NOTEBOOK_MAX + NOTES_MAX * 8 + 300).toBeLessThanOrEqual(MAX_INSTRUCTIONS);
-    /* A head's notebook comes on top of what people may give it, in room of its own. */
-    expect(NOTEBOOK_MAX + NOTES_MAX * 8 + 300).toBeLessThanOrEqual(NOTEBOOK_ROOM);
     for (const r of roles) expect(r.skills.map(s => s.id).some(id => id.startsWith('orch-')), r.id).toBe(false);
   });
 
