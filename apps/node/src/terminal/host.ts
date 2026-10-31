@@ -302,9 +302,16 @@ export class TerminalHost {
       await sleep(Math.min(3000, 300 + input.prompt.length / 20));
       await this.opts.tmux.keys(a.name, 'Enter');
       a.busy = true;
-      /* A program that just started can miss the Enter and keep the prompt in its input: Enter again until it takes it.
-         An Enter into an empty input does nothing. */
-      for (let i = 0; i < ENTER_TRIES && !(await this.tookPrompt(a, input.signal)); i++) await this.opts.tmux.keys(a.name, 'Enter');
+      /* A program that just started, or that still loads a long session it resumed, can miss the Enter and keep the prompt
+         in its input: Enter again until it takes it. An Enter into an empty input does nothing. One that never takes it
+         ends the turn with its screen, which says why, rather than leave the turn waiting for nothing. */
+      for (const end = Date.now() + this.readyMs; !(await this.tookPrompt(a, input.signal)); ) {
+        if (Date.now() >= end) {
+          a.busy = false;
+          return await fail('agent_failed', `The program did not take Hornhoof's prompt within ${Math.round(this.readyMs / 1000)} s.\n\n${await this.screen(job.key)}`);
+        }
+        await this.opts.tmux.keys(a.name, 'Enter');
+      }
 
       for (;;) {
         this.drain(a);

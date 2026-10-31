@@ -180,6 +180,22 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     expect(await running).toMatchObject({ ok: true, result: 'echo: hello' });
   });
 
+  it('presses Enter until the program takes the prompt, though it takes no keys for a while after it starts', async () => {
+    await setUp({ enterWaitMs: 200 });
+    const turn = host.run(job('a13', 'hello', { env: { FAKE_SECRET: SECRET, FAKE_DEAF_MS: '2500' } }));
+    const late = new Promise(r => setTimeout(() => r('still waiting'), 8000));
+    expect(await Promise.race([turn, late])).toMatchObject({ ok: true, result: 'echo: hello' });
+  });
+
+  it('ends a turn whose program never takes the prompt, with its screen, instead of waiting forever', async () => {
+    await setUp({ enterWaitMs: 200, readyMs: 2000 });
+    const turn = host.run(job('a14', 'hello', { env: { FAKE_SECRET: SECRET, FAKE_DEAF_MS: '60000' } }));
+    const late = new Promise(r => setTimeout(() => r('still waiting'), 8000));
+    const res = await Promise.race([turn, late]);
+    expect(res).toMatchObject({ ok: false, error: 'agent_failed' });
+    expect((res as { output: string }).output).toContain('did not take');
+  });
+
   it('keeps the program running after its turn, however long nobody needs it', async () => {
     await setUp();
     await host.run(job('a6', 'one'));

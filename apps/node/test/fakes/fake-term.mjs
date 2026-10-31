@@ -7,7 +7,9 @@
 // Escape, and calls no stop hook. CLEAR starts a new session, as /clear does. FAKE_MCP_LIST_MS makes it list its Hornhoof
 // tools that long after it started, as Claude Code connects to its MCP servers, and show "tools: ok" or "tools: failed".
 // FAKE_LOSE_ENTER misses the first Enter, as Claude Code just started can: the line stays in its input until the next one.
-// FAKE_START_MS makes it say it started that long after it shows, as Claude Code can while it loads.
+// FAKE_START_MS makes it say it started that long after it shows, as Claude Code can while it loads. FAKE_DEAF_MS makes
+// it keep what is typed in its input without taking Enter for that long after it started, as Claude Code does while it
+// loads a long session it resumed.
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -35,7 +37,12 @@ if (process.env.FAKE_MCP_LIST_MS) {
   }, Number(process.env.FAKE_MCP_LIST_MS));
 }
 let kept = process.env.FAKE_LOSE_ENTER ? '' : null;
+const deafUntil = Date.now() + Number(process.env.FAKE_DEAF_MS ?? 0);
 for await (const typed of createInterface({ input: process.stdin })) {
+  if (Date.now() < deafUntil) {
+    kept = `${kept ?? ''}${typed}`;
+    continue;
+  }
   if (kept === '') {
     kept = typed;
     continue;
