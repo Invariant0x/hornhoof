@@ -112,7 +112,7 @@ describe('the task engine', () => {
     expect(['review', 'cancelled']).toContain((await read(task.id)).status);
   });
 
-  it('tells whoever gave a department task when its head reports, and asks a person when a head is blocked on theirs', async () => {
+  it('tells whoever gave a department task when its head reports, and asks a person when a head is blocked on theirs, whose question the orchestrator puts into plain words', async () => {
     const { ctx, db, CEO, orchestrator, dev, head, deptTask } = await company();
     const given = await createTask(ctx, { agentId: orchestrator.id }, { title: 'Pricing page', brief: '', body: '', departmentId: dev.id, assigneeAgentId: head.id });
     const done = await report(ctx, head.id, given.task.id, { done: true, summary: 'Shipped behind a flag.' });
@@ -121,7 +121,7 @@ describe('the task engine', () => {
     const mine = await deptTask();
     const stuck = await report(ctx, head.id, mine.id, { done: false, summary: 'Need a Stripe account.' });
     expect(stuck.task.status).toBe('waiting');
-    expect(woken(stuck)).toEqual([]);
+    expect(woken(stuck)).toEqual([[orchestrator.id, 'explain']]);
     expect(await db.select({ kind: requests.kind, text: requests.text, status: requests.status }).from(requests)).toEqual([{ kind: 'stuck', text: 'Need a Stripe account.', status: 'open' }]);
   });
 
