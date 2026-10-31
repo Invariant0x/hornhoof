@@ -5,7 +5,7 @@ import { and, eq, inArray } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agentEvents, agents, companies, departments, jobs, subscriptions } from '../src/db/schema.js';
+import { agentEvents, agents, companies, departments, jobs, requests, subscriptions } from '../src/db/schema.js';
 import { createTask } from '../src/modules/tasks/engine.js';
 import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until } from './helpers.js';
 import { agentState, enqueueTurn } from '../src/modules/conversation/queue.js';
@@ -139,5 +139,46 @@ describe('tools a skill grants', () => {
     const recent = JSON.parse((await call(client, 'failures', { hours: 6 })).content[0]!.text) as { failed: { agent: string; error: string; tail: string }[]; blocked: unknown[] };
     expect(recent.failed).toEqual([expect.objectContaining({ agent: 'Bruno', error: 'timeout', tail: 'npm test hung' })]);
     expect(recent.blocked).toEqual([]);
+  });
+
+  it('let a failure collector see where agents stumbled: programs they lacked, what they installed by hand, and where they stopped for people', async () => {
+    const { app, db, acme, sub, hana, bruno, task } = await company(['ops-failure-review']);
+    const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000);
+    const event = (agentId: string, kind: 'tool' | 'tool_result', data: object, minutes = 30) => ({ companyId: acme.id, agentId, kind, data, createdAt: ago(minutes) });
+    await db.insert(agentEvents).values([
+      event(bruno.id, 'tool_result', { ok: false, summary: '/bin/bash: line 1: ps: command not found\n' }),
+      event(hana.id, 'tool_result', { ok: false, summary: 'load average 0.4\nbash: line 3: ps: command not found' }),
+      event(hana.id, 'tool_result', { ok: false, summary: '/usr/bin/env: ‘python’: No such file or directory' }),
+      event(bruno.id, 'tool_result', { ok: false, summary: "Traceback (most recent call last):\nModuleNotFoundError: No module named 'yaml.loader'" }),
+      event(bruno.id, 'tool_result', { ok: false, summary: "Error: Cannot find module 'left-pad/index.js'" }),
+      /* Its own script that is not there: nothing to install. */
+      event(bruno.id, 'tool_result', { ok: false, summary: "Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/tmp/check/run.mjs'" }),
+      event(bruno.id, 'tool_result', { ok: false, summary: 'bash: line 1: jq: command not found' }, 600),
+      event(bruno.id, 'tool', { name: 'Bash', input: 'pip install --user pyyaml && python3 run.py' }),
+      event(hana.id, 'tool', { name: 'exec_command', input: '/bin/bash,-lc,npm i -g pnpm; pnpm -v' }),
+      event(bruno.id, 'tool', { name: 'Bash', input: 'npm install && npm test' }),
+    ]);
+    await db.insert(jobs).values({ companyId: acme.id, subscriptionId: sub.id, agentId: bruno.id, taskId: task.id, kind: 'conversation', prompt: 'x', timeoutMs: 1, status: 'done', result: '', tail: 'This content can’t be shown.', startedAt: ago(50), finishedAt: ago(45) });
+    await db.insert(requests).values([
+      { companyId: acme.id, taskId: task.id, agentId: bruno.id, kind: 'stuck', text: 'Ended 3 turns in a row on #1 without moving it.', createdAt: ago(44) },
+      { companyId: acme.id, taskId: task.id, agentId: bruno.id, kind: 'question', text: 'Which payment provider?', status: 'answered', answer: 'Stripe', createdAt: ago(120) },
+      { companyId: acme.id, taskId: task.id, agentId: bruno.id, kind: 'approval', text: 'Approve the commit.', createdAt: ago(10) },
+    ]);
+    const recent = JSON.parse((await call(await mcp(app), 'failures', { hours: 6 })).content[0]!.text);
+    /* The most frequent first, then the newest, with the newest line that said it. */
+    expect(recent.missing).toEqual([
+      { what: 'ps', kind: 'command', times: 2, agents: ['Bruno', 'Hana'], example: 'bash: line 3: ps: command not found' },
+      expect.objectContaining({ what: 'left-pad', kind: 'node module', agents: ['Bruno'] }),
+      expect.objectContaining({ what: 'yaml', kind: 'python module', agents: ['Bruno'] }),
+      expect.objectContaining({ what: 'python', kind: 'command', times: 1, agents: ['Hana'] }),
+    ]);
+    expect(recent.installed).toEqual([
+      { command: 'npm i -g pnpm', times: 1, agents: ['Hana'] },
+      { command: 'pip install --user pyyaml', times: 1, agents: ['Bruno'] },
+    ]);
+    expect(recent.stops).toEqual([
+      { kind: 'stuck', agent: 'Bruno', task: task.number, text: 'Ended 3 turns in a row on #1 without moving it.', status: 'open', answer: null, lastTurn: 'This content can’t be shown.' },
+      { kind: 'question', agent: 'Bruno', task: task.number, text: 'Which payment provider?', status: 'answered', answer: 'Stripe', lastTurn: null },
+    ]);
   });
 });

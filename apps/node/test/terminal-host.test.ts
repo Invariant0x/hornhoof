@@ -196,6 +196,13 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     expect((res as { output: string }).output).toContain('did not take');
   });
 
+  it("keeps the screen of a turn that ended with no answer, which says why, as when the provider refused the work", async () => {
+    await setUp();
+    const res = await host.run(job('a15', 'MUTE please'));
+    expect(res).toMatchObject({ ok: true, result: '' });
+    expect(res.output).toContain("This content can't be shown.");
+  });
+
   it('keeps the program running after its turn, however long nobody needs it', async () => {
     await setUp();
     await host.run(job('a6', 'one'));

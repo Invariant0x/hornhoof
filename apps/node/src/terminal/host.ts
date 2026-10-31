@@ -327,7 +327,9 @@ export class TerminalHost {
           }
           await this.settle(a, message);
           await this.planLimits(a);
-          return { ok: true, sessionId: a.sessionId, result: message, output: '', error: null, limits: a.limits };
+          /* A turn that ended with no answer keeps its screen, which says why, as when the provider refused the work. */
+          const output = message.trim() ? '' : await this.screen(job.key);
+          return { ok: true, sessionId: a.sessionId, result: message, output, error: null, limits: a.limits };
         }
         /* A program stopped with Escape does not say its turn ended: it waits for the next prompt. */
         if (input.signal?.aborted) {

@@ -3,7 +3,8 @@
 // "echo: LINE" on the screen and in its session log, and calls the prompt and stop hooks around each answer.
 // SLOW makes an answer take 2 s, LAG writes the answer to the log only after the stop hook, as Claude Code can, HANG never
 // answers (as when a person stops it with Escape: no stop hook), EXIT ends the
-// program, SECRET prints the value of FAKE_SECRET. INTERRUPT logs what Claude Code logs when a person stops a turn with
+// program, SECRET prints the value of FAKE_SECRET, MUTE says on the screen only that it will not answer and ends the turn with
+// no answer, as Codex does when its provider refuses the work. INTERRUPT logs what Claude Code logs when a person stops a turn with
 // Escape, and calls no stop hook. CLEAR starts a new session, as /clear does. FAKE_MCP_LIST_MS makes it list its Hornhoof
 // tools that long after it started, as Claude Code connects to its MCP servers, and show "tools: ok" or "tools: failed".
 // FAKE_LOSE_ENTER misses the first Enter, as Claude Code just started can: the line stays in its input until the next one.
@@ -65,6 +66,11 @@ for await (const typed of createInterface({ input: process.stdin })) {
   if (line.includes('INTERRUPT')) {
     appendFileSync(log, JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: '[Request interrupted by user]' }] } }) + '\n');
     process.stdout.write('  ⎿  Interrupted\n❯ ');
+    continue;
+  }
+  if (line.includes('MUTE')) {
+    process.stdout.write("■ This content can't be shown.\n❯ ");
+    await hook('stop', { last_assistant_message: '', transcript_path: log });
     continue;
   }
   if (line.includes('SLOW')) await new Promise(r => setTimeout(r, 2000));
