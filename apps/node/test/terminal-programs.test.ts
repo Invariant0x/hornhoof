@@ -22,6 +22,8 @@ describe('Claude Code in a terminal', () => {
     expect(settings.hooks.Stop[0].hooks[0].command).toBe('hh-hook stop');
     expect(settings.hooks.UserPromptSubmit[0].hooks[0].command).toBe('hh-hook prompt');
     expect(settings.hooks.SessionStart[0].hooks[0].command).toBe('hh-hook start');
+    /* After compacting its conversation it hears to read the company again. */
+    expect(settings.hooks.SessionStart[1]).toEqual({ matcher: 'compact', hooks: [{ type: 'command', command: 'hh-hook compact' }] });
     expect(settings.statusLine).toEqual({ type: 'command', command: 'hh-hook status' });
     expect(arg(command, '--append-system-prompt-file')).toBe('/w/a1/.hh-instructions.md');
     expect(arg(command, '--model')).toBe('opus');
