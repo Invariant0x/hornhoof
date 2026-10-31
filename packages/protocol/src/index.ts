@@ -168,6 +168,8 @@ const NodeMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('removed') }),
   z.object({ type: z.literal('term.data'), termId: TermId, data: z.string().max(4 * TERM_CHUNK) }),
   z.object({ type: z.literal('term.exit'), termId: TermId }),
+  /* Whether the agent's program runs in the view's session yet: while it starts, the window shows a loader. */
+  z.object({ type: z.literal('term.program'), termId: TermId, running: z.boolean() }),
   /* A person typed to an agent that had no turn running: Hornhoof opens one so the agent has its tools. ref names the
      typed turn, and Hornhoof's answer carries it back. */
   z.object({ type: z.literal('turn.open'), agentKey: z.string().regex(/^[A-Za-z0-9-]{1,64}$/), text: z.string().max(100_000), ref: z.string().max(64).optional() }),

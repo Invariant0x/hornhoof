@@ -78,6 +78,9 @@ class FakeSocket {
   screen(data: string) {
     this.onmessage?.({ data: JSON.stringify({ type: 'data', data }) });
   }
+  program(running: boolean) {
+    this.onmessage?.({ data: JSON.stringify({ type: 'program', running }) });
+  }
   ended(code: number, reason: string) {
     this.readyState = 3;
     this.onclose?.({ code, reason });
@@ -126,6 +129,17 @@ describe("an agent's live terminal in its window", () => {
     ws.screen('\u001b[1m✻ Welcome to Claude Code\u001b[0m');
     expect(terms[0]!.written).toEqual(['\u001b[1m✻ Welcome to Claude Code\u001b[0m']);
     expect(screen.queryByText('Hello from the log')).not.toBeInTheDocument();
+  });
+
+  it('shows one big loader naming the program until it is up, over whatever the session shows meanwhile', async () => {
+    open();
+    const ws = await socket();
+    expect(screen.getByRole('status')).toHaveTextContent('Opening the Claude terminal…');
+    ws.opened();
+    ws.program(false);
+    expect(screen.getByRole('status')).toHaveTextContent('Opening the Claude terminal…');
+    ws.program(true);
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
   });
 
   it("looks like Ivan's iTerm2 in dark mode, on a light page too, since the programs inside run their dark theme", async () => {

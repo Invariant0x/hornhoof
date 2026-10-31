@@ -228,6 +228,7 @@ describe('live terminals', () => {
       { type: 'term.data', termId: 't-1', data: '\u001b[1mhi\u001b[0m ❯' },
       { type: 'term.exit', termId: 't-1' },
       { type: 'turn.open', agentKey: 'agent-1', text: 'Look at the build', ref: 'r-1' },
+      { type: 'term.program', termId: 't-1', running: false },
     ];
     const server: ServerMessage[] = [
       { type: 'term.open', termId: 't-1', agentKey: 'agent-1', cols: 120, rows: 36, write: true },

@@ -275,12 +275,28 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     await until(() => sent.some(m => m.type === 'term.exit' && m.termId === 't3'));
   });
 
+  it("tells a view while the agent's program is starting, and once it is up", async () => {
+    await setUp();
+    const states = (termId: string) => sent.flatMap(m => (m.type === 'term.program' && m.termId === termId ? [m.running] : []));
+    await host.open({ type: 'term.open', termId: 't40', agentKey: 'a40', cols: 80, rows: 24, write: true });
+    await until(() => states('t40').length > 0);
+    expect(states('t40')).toEqual([false]);
+    const screen = () => sent.flatMap(m => (m.type === 'term.data' && m.termId === 't40' ? [m.data] : [])).join('');
+    expect(screen()).not.toContain('Starting');
+    await host.run(job('a40', ''));
+    await until(() => states('t40').length > 1);
+    expect(states('t40')).toEqual([false, true]);
+    /* A view opened on a program that runs hears so at once. */
+    await host.open({ type: 'term.open', termId: 't41', agentKey: 'a40', cols: 80, rows: 24, write: true });
+    await until(() => states('t41').length > 0);
+    expect(states('t41')).toEqual([true]);
+  });
+
   it('asks Hornhoof to start an agent that does not run when someone who may type opens it', async () => {
     await setUp();
     const starts = (key: string) => sent.filter(m => m.type === 'agent.start' && m.agentKey === key).length;
     await host.open({ type: 'term.open', termId: 't30', agentKey: 'a30', cols: 80, rows: 24, write: true });
-    const screen = () => sent.flatMap(m => (m.type === 'term.data' && m.termId === 't30' ? [m.data] : [])).join('');
-    await until(() => screen().includes('Starting'));
+    await until(() => starts('a30') > 0);
     expect(starts('a30')).toBe(1);
     /* A watcher who may not type starts nothing, and a running program needs no start. */
     await host.open({ type: 'term.open', termId: 't31', agentKey: 'a31', cols: 80, rows: 24, write: false });
@@ -667,6 +683,14 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     expect(failed).toMatchObject({ ok: false, error: 'agent_failed' });
     expect(failed.output).toContain('The plan ran out.');
     expect(await host.run(kimiJob('k5', 'hello', { env: { FAKE_SIGNED_OUT: '1' } }))).toMatchObject({ ok: false, error: 'not_logged_in' });
+  });
+
+  it('ends the loader of a view whose program could not start, so the person sees why on its screen', async () => {
+    await setUp();
+    await host.open({ type: 'term.open', termId: 't50', agentKey: 'k6', cols: 80, rows: 24, write: true });
+    await until(() => sent.some(m => m.type === 'term.program' && m.termId === 't50'));
+    expect(await host.run(kimiJob('k6', 'hello', { env: { FAKE_SIGNED_OUT: '1' } }))).toMatchObject({ ok: false, error: 'not_logged_in' });
+    expect(sent.flatMap(m => (m.type === 'term.program' && m.termId === 't50' ? [m.running] : []))).toEqual([false, true]);
   });
 
   it('starts Kimi for a person at once, and gives their first message its tools once Hornhoof opened their turn', () =>

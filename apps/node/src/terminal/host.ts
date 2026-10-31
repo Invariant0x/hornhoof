@@ -69,6 +69,8 @@ type Agent = {
   contextUsed: number | null;
   contextSize: number | null;
   viewers: number;
+  /* Its program runs and showed its prompt; until then its views show a loader. */
+  up: boolean;
   /* Reads the log and looks at the program while it runs. */
   watch: NodeJS.Timeout | null;
   /* Words Hornhoof types into running turns, one after another. */
@@ -119,7 +121,6 @@ type Options = {
 };
 
 const WAITING = 'This agent starts with its next turn.';
-const STARTING = 'Starting this agent...';
 const STOP_WAIT_MS = 5000;
 /* How often the host presses Enter again for a prompt the program did not take. */
 const ENTER_TRIES = 3;
@@ -206,7 +207,7 @@ export class TerminalHost {
   private agent(key: string): Agent {
     let a = this.agents.get(key);
     if (!a) {
-      a = { key, name: `a-${key}`, program: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, viewers: 0, watch: null, saying: Promise.resolve(), queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null };
+      a = { key, name: `a-${key}`, program: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, viewers: 0, up: false, watch: null, saying: Promise.resolve(), queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null };
       this.agents.set(key, a);
     }
     return a;
@@ -268,6 +269,7 @@ export class TerminalHost {
     a.failure = null;
     try {
       if (!goesOn) {
+        this.programIs(a, false);
         if (program.kind === 'claude') acceptClaudeDialogs(job.home, input.workDir);
         if (program.kind === 'kimi') prepareKimi(job.home, input.workDir, urls.mcpUrl);
         /* A person's first message into a new Kimi session reaches its tools a moment before Hornhoof opens their turn. */
@@ -280,8 +282,11 @@ export class TerminalHost {
         this.watch(a);
         if (!(await this.ready(a, job))) {
           const screen = await this.screen(job.key);
+          /* Its screen says why, which the loader would hide. */
+          this.showViews(a);
           return await fail(job.signedOut.test(screen) ? 'not_logged_in' : 'agent_failed', screen);
         }
+        this.programIs(a, true);
       }
       /* Nothing to type: the turn only starts the program for the person who opened its window. */
       if (!input.prompt) {
@@ -326,6 +331,7 @@ export class TerminalHost {
         }
         if (!(await this.opts.tmux.alive(a.name))) {
           a.busy = false;
+          this.programIs(a, false);
           const screen = await this.screen(job.key);
           return await fail(job.signedOut.test(screen) ? 'not_logged_in' : 'agent_failed', screen);
         }
@@ -360,6 +366,7 @@ export class TerminalHost {
     if (a.turn && !a.turn.typed) return;
     if (!alive) {
       a.busy = false;
+      this.programIs(a, false);
       this.finishTyped(a, '', 'agent_failed');
       if (a.watch) clearInterval(a.watch);
       a.watch = null;
@@ -704,6 +711,17 @@ export class TerminalHost {
     this.finishTyped(a, '', 'cancelled');
   }
 
+  /* The agent's views hear when its program comes up or goes. */
+  private programIs(a: Agent, up: boolean): void {
+    if (a.up === up) return;
+    a.up = up;
+    this.showViews(a, up);
+  }
+
+  private showViews(a: Agent, running = true): void {
+    for (const [termId, view] of this.views) if (view.key === a.key) this.opts.send({ type: 'term.program', termId, running });
+  }
+
   /* Views belong to one connection to Hornhoof; after it came back, people open them again. */
   closeViews(): void {
     for (const view of this.views.values()) view.child.kill();
@@ -716,7 +734,9 @@ export class TerminalHost {
     const starts = m.write && !a.turn && !(a.hash && (await this.opts.tmux.alive(a.name)));
     try {
       if (!(await this.opts.tmux.has(a.name))) {
-        await this.opts.tmux.launch(a.name, { cwd: '/', command: ['sh', '-c', `printf '\\n  %s\\n' '${starts ? STARTING : WAITING}'; exec sleep 2147483647`], cols: m.cols, rows: m.rows });
+        /* The window shows a loader over the empty session while the program starts. */
+        const waiting = starts ? '' : `printf '\\n  %s\\n' '${WAITING}'; `;
+        await this.opts.tmux.launch(a.name, { cwd: '/', command: ['sh', '-c', `${waiting}exec sleep 2147483647`], cols: m.cols, rows: m.rows });
         /* The waiting screen is no program of the agent's: the next turn starts one in its place. A turn that runs now is
            starting its own. */
         if (!a.turn) a.hash = null;
@@ -729,6 +749,8 @@ export class TerminalHost {
     const view: View = { child, key: m.agentKey, write: m.write, mask: new StreamMask(this.opts.secrets), decoder: new StringDecoder('utf8'), pending: '', timer: null, quiet: null };
     this.views.set(m.termId, view);
     a.viewers++;
+    /* A watcher of an agent that sleeps sees the waiting screen; anyone else, a loader until the program is up. */
+    if (starts || a.turn || a.up) this.opts.send({ type: 'term.program', termId: m.termId, running: a.up && !starts });
     const flush = () => {
       view.timer = null;
       while (view.pending) {

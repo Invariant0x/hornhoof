@@ -226,6 +226,7 @@ export const en = {
     placeholder: 'Write to the orchestrator',
     hint: 'Enter to send, Shift+Enter for a new line',
     working: 'Working…',
+    opening: (program: string) => `Opening the ${program} terminal…`,
     escToStop: 'esc to stop',
     stop: 'Stop',
     waiting: (n: number) => `${n} waiting`,

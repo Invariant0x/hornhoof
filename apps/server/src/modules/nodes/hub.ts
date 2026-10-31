@@ -20,7 +20,7 @@ const MISSED_PINGS = 3;
    terminals: the node said it runs agents in sessions people can watch. */
 type Entry = { socket: WebSocket; missed: number; greeted: boolean; terminals: boolean };
 
-export type TerminalMessage = Extract<NodeMessage, { type: 'term.data' | 'term.exit' }>;
+export type TerminalMessage = Extract<NodeMessage, { type: 'term.data' | 'term.exit' | 'term.program' }>;
 
 type HubOptions = {
   pingMs: number;
@@ -54,7 +54,7 @@ export class NodeHub {
     });
     socket.on('message', data => {
       const msg = parseNodeMessage(String(data));
-      if (msg?.type === 'term.data' || msg?.type === 'term.exit') {
+      if (msg?.type === 'term.data' || msg?.type === 'term.exit' || msg?.type === 'term.program') {
         try {
           this.opts.onTerminal?.(id, msg);
         } catch (err) {

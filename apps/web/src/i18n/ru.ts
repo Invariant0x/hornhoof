@@ -216,6 +216,7 @@ export const ru: Messages = {
     placeholder: 'Напишите оркестратору',
     hint: 'Enter отправить, Shift+Enter новая строка',
     working: 'Работает…',
+    opening: program => `Открывается терминал ${program}…`,
     escToStop: 'esc, чтобы прервать',
     stop: 'Остановить',
     waiting: n => `${n} в очереди`,

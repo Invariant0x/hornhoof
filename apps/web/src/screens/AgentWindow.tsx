@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type Keyboar
 import { api } from '../api';
 import { deptLabel, errorText, useLanguage, useT, type Messages } from '../i18n';
 import { useStream } from '../live';
-import { PROVIDER_NAMES } from '../providers';
+import { PROGRAM_NAMES, PROVIDER_NAMES } from '../providers';
 import type { AgentCardView, EventView, Me, OrchestratorState, Org, StaffLine, StructureItem, SubView, TemplateKey } from '../types';
 import { AgentTerminal } from '../ui/AgentTerminal';
 import { Markdown } from '../ui/Markdown';
@@ -432,7 +432,7 @@ export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Pro
         </button>
       </div>
       {notebook && <Notebook departmentId={orchestrator ? null : headOf} />}
-      {!notebook && terminal && <AgentTerminal agentId={agentId} onGone={() => setNoTerminal(true)} />}
+      {!notebook && terminal && <AgentTerminal agentId={agentId} program={sub ? PROGRAM_NAMES[sub.provider] : 'Claude'} onGone={() => setNoTerminal(true)} />}
       {!notebook && terminal && hasCards && (
         <div className="t-cards">
           {cards}

@@ -1,7 +1,8 @@
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal, type ITerminalOptions, type ITheme } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useT } from '../i18n';
 
 /* Ivan's iTerm2 profile in dark mode, which the terminal repeats on any page: Claude Code and Codex run their dark theme,
    which a light background would wash out. */
@@ -32,11 +33,14 @@ const RETRY_MAX_MS = 10_000;
 const NO_TERMINAL = 4404;
 const NO_ACCESS = 4403;
 
-type Props = { agentId: string; onGone(): void };
+type Props = { agentId: string; program: string; onGone(): void };
 
 /* An agent's live terminal: its session on the node, as it is, with the person's keys going back to it. */
-export function AgentTerminal({ agentId, onGone }: Props) {
+export function AgentTerminal({ agentId, program, onGone }: Props) {
+  const t = useT();
   const box = useRef<HTMLDivElement>(null);
+  /* Until the view is open and the program is up, a loader hides what the session shows meanwhile. */
+  const [up, setUp] = useState(false);
   const gone = useRef(onGone);
   gone.current = onGone;
 
@@ -50,6 +54,7 @@ export function AgentTerminal({ agentId, onGone }: Props) {
     let ended = false;
     let retry: ReturnType<typeof setTimeout> | null = null;
     let tries = 0;
+    let told = false;
     const send = (m: unknown) => socket?.readyState === 1 && socket.send(JSON.stringify(m));
 
     const connect = () => {
@@ -57,17 +62,28 @@ export function AgentTerminal({ agentId, onGone }: Props) {
       const ws = new WebSocket(`${scheme}://${location.host}/api/agents/${agentId}/terminal?cols=${term.cols}&rows=${term.rows}`);
       socket = ws;
       ws.onmessage = e => {
-        const m = JSON.parse(String(e.data)) as { type: string; data?: string; write?: boolean };
-        /* The session draws its whole screen for each new view. Only its subscription's owner types into it. */
+        const m = JSON.parse(String(e.data)) as { type: string; data?: string; write?: boolean; running?: boolean };
+        /* The session draws its whole screen for each new view. Only its subscription's owner types into it. The node says
+           whether the program is up before it sends the screen; one that says nothing, as for a watcher of an agent that
+           sleeps or a node from before, shows its screen as it comes. */
         if (m.type === 'ready') {
           tries = 0;
+          told = false;
           term.reset();
           term.options.disableStdin = !m.write;
         }
-        if (m.type === 'data' && m.data) term.write(m.data);
+        if (m.type === 'program') {
+          told = true;
+          setUp(Boolean(m.running));
+        }
+        if (m.type === 'data' && m.data) {
+          if (!told) setUp(true);
+          term.write(m.data);
+        }
       };
       ws.onclose = e => {
         if (ended || socket !== ws) return;
+        setUp(false);
         if (e.code === NO_TERMINAL || e.code === NO_ACCESS) return gone.current();
         retry = setTimeout(connect, Math.min(RETRY_MAX_MS, RETRY_MS * 2 ** tries++));
       };
@@ -92,5 +108,15 @@ export function AgentTerminal({ agentId, onGone }: Props) {
     };
   }, [agentId]);
 
-  return <div className="t-term" ref={box} />;
+  return (
+    <div className="t-term">
+      <div className="t-xterm" ref={box} />
+      {!up && (
+        <div className="t-load" role="status">
+          <span className="spinner" aria-hidden="true" />
+          <span>{t.window.opening(program)}</span>
+        </div>
+      )}
+    </div>
+  );
 }
