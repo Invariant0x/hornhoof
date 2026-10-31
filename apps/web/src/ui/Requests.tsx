@@ -109,10 +109,10 @@ function RequestItem({ request, onDone, company, onOpenTask, placeName }: Shared
       )}
       {request.kind === 'stuck' && (
         <div className="req-form">
-          <Field label={t.tasks.yourAnswer}>{p => <textarea {...p} rows={2} value={text} maxLength={4000} onChange={e => setText(e.target.value)} />}</Field>
+          <Field label={t.tasks.stuckNote}>{p => <textarea {...p} rows={2} value={text} maxLength={4000} onChange={e => setText(e.target.value)} />}</Field>
           <div className="req-actions">
             <button className="btn small" type="button" disabled={busy} onClick={() => void reply(text.trim() ? { answer: text.trim() } : { retry: true })}>
-              {text.trim() ? t.tasks.answer : t.tasks.retry}
+              {text.trim() ? t.tasks.tellAndGoOn : t.tasks.retry}
             </button>
             <button className="btn small ghost" type="button" disabled={busy} onClick={() => void send(`/api/tasks/${task.id}/cancel`, {})}>
               {t.tasks.cancelTask}

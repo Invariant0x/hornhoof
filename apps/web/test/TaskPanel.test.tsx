@@ -47,11 +47,15 @@ describe('a task', () => {
     const waiting = await within(panel).findByRole('region', { name: 'Waiting for your answer' });
     /* Only this task's. */
     expect(within(waiting).getAllByRole('article')).toHaveLength(1);
-    expect(waiting).toHaveTextContent('Bruno ended several turns in a row without moving #12. Write how it should go on, or cancel the task.');
+    expect(waiting).toHaveTextContent(
+      'Bruno ended several turns in a row without moving #12, so Hornhoof stopped waking it. Let it go on as it is, or first tell it what it needs. If the task is not needed anymore, cancel it.',
+    );
     expect(waiting).not.toHaveTextContent('Ended 3 turns');
     expect(waiting).toHaveTextContent("A question can be answered in the agent's window or terminal too: what you write there counts.");
-    await user.type(within(waiting).getByLabelText('Your answer'), 'Run the tests first.');
-    await user.click(within(waiting).getByRole('button', { name: 'Answer' }));
+    /* Nothing to write is fine: it goes on as it is. */
+    expect(within(waiting).getByRole('button', { name: 'Let it go on' })).toBeEnabled();
+    await user.type(within(waiting).getByLabelText('What it should do, if you know (may stay empty)'), 'Run the tests first.');
+    await user.click(within(waiting).getByRole('button', { name: 'Send and let it go on' }));
     expect(calls.find(c => c.path === '/api/requests/r3')?.body).toEqual({ answer: 'Run the tests first.' });
   });
 
