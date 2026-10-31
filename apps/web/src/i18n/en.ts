@@ -207,7 +207,7 @@ export const en = {
     intro: 'What the orchestrator remembers between conversations: decisions, rules and agreements. He reads it before every answer and writes to it himself.',
     empty: 'The notebook is empty so far.',
     newNote: 'New note',
-    placeholder: 'One fact, like "Commits are made by Ivan only"',
+    placeholder: 'One fact, like "Every release waits for a yes from the CEO"',
     add: 'Add',
     save: 'Save',
     cancel: 'Cancel',
