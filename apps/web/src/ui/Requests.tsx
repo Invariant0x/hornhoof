@@ -12,11 +12,12 @@ export const wordsAnswer = (requests: WaitingRequest[]) => requests.some(r => r.
 /* A picture an agent showed, as people who reach its task load it. */
 const picture = (id: string) => `/api/attachments/${id}`;
 
-/* company: whether the person sees the whole company, the only people who approve a commit. */
-type Shared = { company: boolean; onOpenTask: (id: string) => void; placeName: (p: TaskPlace) => string };
+/* company: whether the person sees the whole company, the only people who approve a commit. onOpenAgent opens the asking
+   agent's window, to see in its terminal what it did. */
+type Shared = { company: boolean; onOpenTask: (id: string) => void; onOpenAgent: (id: string) => void; placeName: (p: TaskPlace) => string };
 
 /* One thing an agent waits for: a question to answer, a commit to approve, or a task it is stuck on. */
-function RequestItem({ request, onDone, company, onOpenTask, placeName }: Shared & { request: WaitingRequest; onDone: () => void }) {
+function RequestItem({ request, onDone, company, onOpenTask, onOpenAgent, placeName }: Shared & { request: WaitingRequest; onDone: () => void }) {
   const t = useT();
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
@@ -53,6 +54,9 @@ function RequestItem({ request, onDone, company, onOpenTask, placeName }: Shared
           #{task.number} {task.title}
         </button>
         {task.department && <small>{placeName(task.department)}</small>}
+        <button className="btn small ghost req-term" type="button" onClick={() => onOpenAgent(agent.id)}>
+          {t.tasks.openTerminal(agent.name)}
+        </button>
       </header>
       {request.explained ? (
         <>
@@ -65,7 +69,10 @@ function RequestItem({ request, onDone, company, onOpenTask, placeName }: Shared
           </details>
         </>
       ) : (
-        <p className="req-text">{said}</p>
+        <>
+          <p className="req-text">{said}</p>
+          {request.explaining && <p className="muted">{t.tasks.explaining}</p>}
+        </>
       )}
       {request.images.length > 0 && (
         <div className="req-pics">

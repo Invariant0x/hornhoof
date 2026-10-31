@@ -144,6 +144,15 @@ describe('the tracker', () => {
     expect(screen.getByRole('button', { name: 'Tasks, 1 waiting for you' })).toBeInTheDocument();
   });
 
+  it('says the orchestrator is putting a question into plain words while it is on it', async () => {
+    const user = userEvent.setup();
+    shell({ 'GET /api/requests': [200, { requests: [{ ...REQUESTS[0]!, explaining: true }, REQUESTS[1]] }] });
+    await openTasks(user);
+    const waiting = screen.getByRole('region', { name: 'Waiting for you' });
+    expect(within(waiting).getByRole('article', { name: /#9/ })).toHaveTextContent('The orchestrator is writing this up in plain words.');
+    expect(within(waiting).getByRole('article', { name: /#10/ })).not.toHaveTextContent('plain words');
+  });
+
   it('offers the ways an agent gives to pick from, with their pictures and a link to the work, and sends the pick', async () => {
     const user = userEvent.setup();
     const choice = {

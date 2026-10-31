@@ -202,6 +202,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
             onRequestsChanged={loadRequests}
             selected={panel?.kind === 'task' ? panel.taskId : null}
             onOpenTask={taskId => setPanel({ kind: 'task', taskId })}
+            onOpenAgent={agentId => setPanel({ kind: 'window', agentId })}
             onOpenOrchestrator={company ? () => setPanel({ kind: 'window', agentId: 'orchestrator' }) : undefined}
           />
         )}
@@ -228,6 +229,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
           requests={(requests ?? []).filter(r => r.task.id === panel.taskId)}
           company={company}
           onRequestsChanged={loadRequests}
+          onOpenAgent={agentId => setPanel({ kind: 'window', agentId })}
         />
       )}
       {panel?.kind === 'card' && (

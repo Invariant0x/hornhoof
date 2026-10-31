@@ -424,6 +424,8 @@ export const en = {
     stuckText: (agent: string, n: number) =>
       `${agent} ended several turns in a row without moving #${n}, so Hornhoof stopped waking it. Write what it needs to go on, or cancel the task if it is not needed anymore.`,
     inDetail: 'In more detail',
+    explaining: 'The orchestrator is writing this up in plain words.',
+    openTerminal: (agent: string) => `Open ${agent}'s terminal`,
     picture: (n: number) => `Picture ${n}`,
     seeWork: 'See the work',
     waitingHere: 'Waiting for your answer',

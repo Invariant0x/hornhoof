@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Shell } from '../src/screens/Shell';
-import { DEV_ORG, ME, mockApi, REQUESTS, TASK_DETAIL, TASKS, TURN } from './api-mock';
+import { CARD, DEV_ORG, ME, mockApi, REQUESTS, TASK_DETAIL, TASKS, TURN } from './api-mock';
 
 function shell(routes: Record<string, unknown> = {}) {
   const calls = mockApi({
@@ -64,6 +64,22 @@ describe('a task', () => {
     await user.type(answer, 'Skip them for now.');
     await user.click(send);
     expect(calls.find(c => c.path === '/api/requests/r3')?.body).toEqual({ answer: 'Skip them for now.' });
+  });
+
+  it("opens the asking agent's terminal from what waits for the person, to see what it did", async () => {
+    const user = userEvent.setup();
+    const asked = { ...REQUESTS[0]!, id: 'r5', agent: { id: 'b1', name: 'Bruno' }, task: { ...REQUESTS[0]!.task, id: 't12', number: 12, title: 'Checkout API' } };
+    shell({
+      'GET /api/requests': [200, { requests: [asked] }],
+      'GET /api/agents/b1': [200, CARD],
+      'GET /api/agents/b1/events?after=0': [200, { events: [], state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 } }],
+    });
+    await user.click(await screen.findByRole('button', { name: /^Tasks/ }));
+    await user.click(within(await screen.findByRole('region', { name: 'Waiting for you' })).getByRole('button', { name: /#12/ }));
+    const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
+    const waiting = await within(panel).findByRole('region', { name: 'Waiting for your answer' });
+    await user.click(within(waiting).getByRole('button', { name: "Open Bruno's terminal" }));
+    expect(await screen.findByRole('complementary', { name: 'Bruno, Backend engineer' })).toBeInTheDocument();
   });
 
   it('opens with where it stands at its gates, its brief, body, subtasks and log', async () => {

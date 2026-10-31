@@ -13,6 +13,7 @@ type Props = {
   onRequestsChanged: () => void;
   selected: string | null;
   onOpenTask: (id: string) => void;
+  onOpenAgent: (id: string) => void;
   /* Only for people who see the whole company: they are the ones who write to him. */
   onOpenOrchestrator?: () => void;
 };
@@ -98,7 +99,7 @@ function Turn({ turn, tasks, rows }: { turn: TurnView; tasks: TaskLine[]; rows: 
 
 /* The tracker shows the work and changes nothing by itself: what waits for the person, then the turns as the orchestrator
    laid them out, the running one first, the planned ones in order and the finished ones folded away. */
-export function Tasks({ me, requests, onRequestsChanged, selected, onOpenTask, onOpenOrchestrator }: Props) {
+export function Tasks({ me, requests, onRequestsChanged, selected, onOpenTask, onOpenAgent, onOpenOrchestrator }: Props) {
   const t = useT();
   const { org } = useOrg();
   const [department, setDepartment] = useState<string | null>(null);
@@ -132,7 +133,7 @@ export function Tasks({ me, requests, onRequestsChanged, selected, onOpenTask, o
         <h2>{t.tasks.waiting}</h2>
         {requests?.length ? (
           <>
-            <Requests requests={requests} onChanged={onRequestsChanged} company={me.person.scopeKind === 'company'} onOpenTask={onOpenTask} placeName={place} />
+            <Requests requests={requests} onChanged={onRequestsChanged} company={me.person.scopeKind === 'company'} onOpenTask={onOpenTask} onOpenAgent={onOpenAgent} placeName={place} />
             {wordsAnswer(requests) && <p className="muted">{t.tasks.answerElsewhere}</p>}
           </>
         ) : (

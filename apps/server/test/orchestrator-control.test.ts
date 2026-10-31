@@ -172,11 +172,13 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
     expect(asked!.prompt).toContain(request.id);
     expect(asked!.prompt).toContain('JWT or sessions for /checkout?');
     expect(asked!.prompt).toContain('explain_request');
+    /* People see that the orchestrator is on it while its turn waits or runs. */
+    expect((await app.inject({ url: '/api/requests', ...as(ceo) })).json().requests).toMatchObject([{ id: request.id, explained: null, explaining: true }]);
     await running(orchestrator.id, TOKEN);
     const plain = 'Бруно спрашивает, как входить в оплату. Нужно выбрать: проще (сессии) или для приложений тоже (JWT).';
     expect((await call(await mcp(app), 'explain_request', { request: request.id, text: plain })).isError).toBeFalsy();
     const listed = (await app.inject({ url: '/api/requests', ...as(ceo) })).json().requests;
-    expect(listed).toMatchObject([{ id: request.id, explained: plain }]);
+    expect(listed).toMatchObject([{ id: request.id, explained: plain, explaining: false }]);
     /* People answer; only the orchestrator puts a request into words. */
     const byPerson = await app.inject({ method: 'POST', url: `/api/requests/${request.id}/explained`, payload: { text: 'x' }, ...as(ceo) });
     expect(byPerson.statusCode).toBe(403);

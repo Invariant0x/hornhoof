@@ -261,6 +261,8 @@ export type WaitingRequest = {
   link: string | null;
   /* The orchestrator's words for people: what is needed from them, why, and the ways to go; null until it writes them. */
   explained: string | null;
+  /* The orchestrator was asked to, in a turn that waits or runs now. */
+  explaining: boolean;
   at: string;
   agent: { id: string; name: string };
   task: { id: string; number: number; title: string; department: TaskPlace };

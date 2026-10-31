@@ -216,8 +216,8 @@ export const TASK_DETAIL: TaskDetail = {
 };
 
 export const REQUESTS: WaitingRequest[] = [
-  { id: 'r1', kind: 'question', text: 'Stripe or Adyen?', commit: null, commitUrl: null, images: [], options: [], link: null, explained: null, at: '2026-10-30T09:10:00.000Z', agent: { id: 'b0', name: 'Dana' }, task: { id: 't9', number: 9, title: 'Pick a payment provider', department: DEV } },
-  { id: 'r2', kind: 'approval', text: 'Release 0.5.0 to main.', commit: 'a'.repeat(40), commitUrl: null, images: [], options: [], link: null, explained: null, at: '2026-10-30T09:20:00.000Z', agent: { id: 'b0', name: 'Dana' }, task: { id: 't10', number: 10, title: 'Payments', department: DEV } },
+  { id: 'r1', kind: 'question', text: 'Stripe or Adyen?', commit: null, commitUrl: null, images: [], options: [], link: null, explained: null, explaining: false, at: '2026-10-30T09:10:00.000Z', agent: { id: 'b0', name: 'Dana' }, task: { id: 't9', number: 9, title: 'Pick a payment provider', department: DEV } },
+  { id: 'r2', kind: 'approval', text: 'Release 0.5.0 to main.', commit: 'a'.repeat(40), commitUrl: null, images: [], options: [], link: null, explained: null, explaining: false, at: '2026-10-30T09:20:00.000Z', agent: { id: 'b0', name: 'Dana' }, task: { id: 't10', number: 10, title: 'Payments', department: DEV } },
 ];
 
 export const TURN: TurnView = {

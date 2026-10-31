@@ -1,10 +1,10 @@
-import { and, asc, count, desc, eq, inArray, isNull, notInArray, type SQL } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray, isNull, notInArray, sql, type SQL } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { accessOf, canReach, type Access } from '../../auth/access.js';
 import { actorOf, requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
-import { agents, departments, requests, tasks, turns } from '../../db/schema.js';
+import { agentEvents, agents, departments, jobs, requests, tasks, turns } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { orchestratorOf } from '../conversation/queue.js';
 import { answer, cancel, CLOSED, comment, createTask, refuse, taskSpot, type Task } from './engine.js';
@@ -133,6 +133,20 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const names = new Map((mine.length ? await db.select({ id: agents.id, name: agents.name }).from(agents).where(inArray(agents.id, mine.map(r => r.request.agentId))) : []).map(a => [a.id, a.name]));
     const pictures = await picturesOf(db, mine.map(r => r.request));
     const commits = await Promise.all(mine.map(r => commitUrl(db, r.task, r.request.commit)));
+    /* Requests the orchestrator was asked to put into words, in a turn that waits or runs now. */
+    const unexplained = mine.filter(r => !r.request.explained).map(r => r.request.id);
+    const asked = sql<string>`${agentEvents.data}->>'request'`;
+    const explaining = new Set(
+      unexplained.length
+        ? (
+            await db
+              .select({ id: asked })
+              .from(agentEvents)
+              .innerJoin(jobs, eq(jobs.id, agentEvents.jobId))
+              .where(and(eq(agentEvents.companyId, me.companyId), eq(agentEvents.kind, 'message'), inArray(jobs.status, ['queued', 'running']), inArray(asked, unexplained)))
+          ).map(r => r.id)
+        : [],
+    );
     return {
       requests: mine.map((r, i) => ({
         id: r.request.id,
@@ -144,6 +158,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
         options: r.request.options,
         link: r.request.link,
         explained: r.request.explained,
+        explaining: explaining.has(r.request.id),
         at: r.request.createdAt.toISOString(),
         agent: { id: r.request.agentId, name: names.get(r.request.agentId) ?? '' },
         task: { id: lines[i]!.id, number: lines[i]!.number, title: lines[i]!.title, department: lines[i]!.department },

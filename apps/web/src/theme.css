@@ -787,6 +787,7 @@ summary.turn-head:focus-visible { outline: 2px solid var(--cyan); outline-offset
 .req-approval { border-left-color: var(--pink); }
 .req header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
 .req header small { font-size: 12.5px; color: var(--muted); }
+.req header .req-term { margin-left: auto; }
 .req-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 .req-explained { font-size: 15px; line-height: 1.55; overflow-wrap: anywhere; }
 .req-explained .md { display: grid; gap: 8px; }

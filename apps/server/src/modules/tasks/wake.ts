@@ -4,7 +4,7 @@ import { agentChanges, agents, jobs, requests, subscriptions, taskEvents, tasks 
 import { afterJob, cancelJob, insertTurn, limitUntil, liveSubscription, onAgent, orchestratorOf, pump } from '../conversation/queue.js';
 import { sayLive } from '../conversation/live.js';
 import { appendEvent } from '../events/store.js';
-import { CLOSED, GATE_ROUNDS, leaveWork, NOT_A_MOVE, published, rejoin, silentTurn, wentOn, type Actor, type Task, type Wake, type WakeWhy } from './engine.js';
+import { CLOSED, GATE_ROUNDS, leaveWork, NOT_A_MOVE, published, rejoin, silentTurn, taskSpot, wentOn, type Actor, type Task, type Wake, type WakeWhy } from './engine.js';
 import { settle, tell } from './turns.js';
 
 export { SILENT_TURNS } from './engine.js';
@@ -155,7 +155,9 @@ async function explainRequest(ctx: Ctx, w: Wake): Promise<void> {
     'which task and what for, what is needed from them and why, and the ways to go with what each leads to. Do not answer it yourself unless the CEO told you how.';
   const into = await sayLive(ctx, w.agentId, text);
   const jobId = into ?? (await insertTurn(ctx, { companyId: task.companyId, agentId: w.agentId, prompt: text, createdBy: null }));
-  await appendEvent(ctx, { companyId: task.companyId, agentId: w.agentId, jobId, kind: 'message', data: { text, task: { id: task.id, number: task.number } } });
+  /* The request names the turn that explains it, so people see the orchestrator is on it. */
+  await appendEvent(ctx, { companyId: task.companyId, agentId: w.agentId, jobId, kind: 'message', data: { text, task: { id: task.id, number: task.number }, request: request.id } });
+  ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
   if (!into) await pump(ctx, w.agentId);
 }
 
