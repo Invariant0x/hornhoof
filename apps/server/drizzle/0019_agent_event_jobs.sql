@@ -1,0 +1,1 @@
+CREATE INDEX "agent_events_job_id" ON "agent_events" USING btree ("job_id");

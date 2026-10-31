@@ -77,7 +77,7 @@ describe('indexes', () => {
     const db = await createTestDb();
     const res = await db.execute<{ indexdef: string }>(sql`select indexdef from pg_indexes where schemaname = 'public'`);
     const defs = res.rows.map(r => r.indexdef);
-    for (const [table, column] of [['sessions', 'person_id'], ['invites', 'person_id'], ['people', 'company_id'], ['subscriptions', 'owner_person_id'], ['jobs', 'subscription_id']]) {
+    for (const [table, column] of [['sessions', 'person_id'], ['invites', 'person_id'], ['people', 'company_id'], ['subscriptions', 'owner_person_id'], ['jobs', 'subscription_id'], ['agent_events', 'job_id']]) {
       expect(defs.some(d => d.includes(`ON public.${table} USING btree (${column})`)), `${table}.${column}`).toBe(true);
     }
   });

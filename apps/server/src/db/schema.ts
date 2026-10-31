@@ -277,7 +277,7 @@ export const agentEvents = pgTable(
     personId: uuid('person_id').references(() => people.id),
     createdAt: createdAt(),
   },
-  t => [index('agent_events_agent_id_seq').on(t.agentId, t.seq)],
+  t => [index('agent_events_agent_id_seq').on(t.agentId, t.seq), index('agent_events_job_id').on(t.jobId)],
 );
 
 export const proposals = pgTable('proposals', {

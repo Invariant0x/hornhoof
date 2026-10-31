@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, or, sql } from 'drizzle-orm';
 import type { PgUpdateSetSource } from 'drizzle-orm/pg-core';
 import type { Ctx } from '../../app.js';
 import { agents, departments, improvements, IMPROVEMENT_STATUSES, people } from '../../db/schema.js';
@@ -12,20 +12,19 @@ const ACTIVE: readonly ImprovementStatus[] = ['open', 'taken'];
 
 /* Improvements as people and the orchestrator read them, the latest changed first, each with who found it and where. */
 export async function listImprovements(ctx: Pick<Ctx, 'db'>, companyId: string, statuses: readonly ImprovementStatus[] = IMPROVEMENT_STATUSES) {
-  const read = (of: readonly ImprovementStatus[], limit?: number) => {
-    const q = ctx.db
-      .select({ i: improvements, agent: { id: agents.id, name: agents.name }, department: departments, decidedBy: people.name })
-      .from(improvements)
-      .innerJoin(agents, eq(agents.id, improvements.agentId))
-      .leftJoin(departments, eq(departments.id, agents.departmentId))
-      .leftJoin(people, eq(people.id, improvements.decidedBy))
-      .where(and(eq(improvements.companyId, companyId), inArray(improvements.status, [...of])))
-      .orderBy(desc(improvements.updatedAt));
-    return limit ? q.limit(limit) : q;
-  };
   const active = statuses.filter(s => ACTIVE.includes(s));
   const closed = statuses.filter(s => !ACTIVE.includes(s));
-  const rows = [...(active.length ? await read(active) : []), ...(closed.length ? await read(closed, CLOSED_LISTED) : [])].sort((a, b) => b.i.updatedAt.getTime() - a.i.updatedAt.getTime());
+  const ofCompany = eq(improvements.companyId, companyId);
+  const latestClosed = ctx.db.select({ id: improvements.id }).from(improvements).where(and(ofCompany, inArray(improvements.status, closed))).orderBy(desc(improvements.updatedAt)).limit(CLOSED_LISTED);
+  /* One read, so one that changes meanwhile is listed once. */
+  const rows = await ctx.db
+    .select({ i: improvements, agent: { id: agents.id, name: agents.name }, department: departments, decidedBy: people.name })
+    .from(improvements)
+    .innerJoin(agents, eq(agents.id, improvements.agentId))
+    .leftJoin(departments, eq(departments.id, agents.departmentId))
+    .leftJoin(people, eq(people.id, improvements.decidedBy))
+    .where(and(ofCompany, or(active.length ? inArray(improvements.status, active) : undefined, closed.length ? inArray(improvements.id, latestClosed) : undefined) ?? sql`false`))
+    .orderBy(desc(improvements.updatedAt));
   return rows.map(({ i, agent, department, decidedBy }) => ({
     id: i.id,
     title: i.title,

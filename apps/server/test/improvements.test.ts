@@ -124,6 +124,20 @@ describe('improvements', () => {
     expect((await db.select().from(improvements).where(eq(improvements.id, id)))[0]!.status).toBe('open');
   });
 
+  it('stay taken once the turn is stored, though showing it in the window failed', async () => {
+    const { app, db, ceo, orchestrator } = await company();
+    const { improvement: id } = JSON.parse((await call(await mcp(app, TOKENS.wendy), 'propose_improvement', { title: 'Install jq', text: 'Looked for jq.' })).content[0]!.text);
+    const publish = app.ctx.bus.publish.bind(app.ctx.bus);
+    app.ctx.bus.publish = (companyId, message) => {
+      if (message.type === 'agent_event') throw new Error('The window is gone.');
+      publish(companyId, message);
+    };
+    await app.inject({ method: 'POST', url: `/api/improvements/${id}/take`, ...as(ceo) });
+    app.ctx.bus.publish = publish;
+    expect((await waiting(db, orchestrator.id)).filter(j => j.prompt !== 'round')).toHaveLength(1);
+    expect((await db.select().from(improvements).where(eq(improvements.id, id)))[0]!.status).toBe('taken');
+  });
+
   it('list all that wait or are in work, however many are closed', async () => {
     const { app, db, ceo, acme, wendy } = await company();
     const long = new Date(Date.now() - 86_400_000);

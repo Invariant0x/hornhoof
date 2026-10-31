@@ -88,10 +88,17 @@ export async function liveSubscription(ctx: Ctx, agentId: string) {
   return row && !row.sub.removedAt ? row.sub : null;
 }
 
+/* Thrown before anything is stored, so the caller may undo what it did for the turn. */
+export class NoSubscription extends Error {
+  constructor() {
+    super('The agent has no subscription.');
+  }
+}
+
 /* Stores the turn and, when it carries a person's message, the message under the same job. */
 export async function insertTurn(ctx: Ctx, t: Turn): Promise<string> {
   const sub = await liveSubscription(ctx, t.agentId);
-  if (!sub) throw new Error('The agent has no subscription.');
+  if (!sub) throw new NoSubscription();
   const [job] = await ctx.db
     .insert(jobs)
     .values({

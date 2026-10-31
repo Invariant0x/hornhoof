@@ -134,6 +134,13 @@
       "when": 1793471370574,
       "tag": "0018_improvements",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1793474698289,
+      "tag": "0019_agent_event_jobs",
+      "breakpoints": true
     }
   ]
 }

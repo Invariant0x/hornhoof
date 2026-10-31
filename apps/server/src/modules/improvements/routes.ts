@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { requireCompanyScope, requirePerson } from '../../auth/session.js';
 import { ApiError } from '../../errors.js';
-import { enqueueTurn, liveSubscription, orchestratorOf } from '../conversation/queue.js';
+import { enqueueTurn, liveSubscription, NoSubscription, orchestratorOf } from '../conversation/queue.js';
 import { listImprovements, moveImprovement } from './store.js';
 
 const Params = z.object({ id: z.uuid() });
@@ -33,16 +33,17 @@ export function improvementRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { id } = Params.parse(req.params);
     /* Taken means the orchestrator has it, so it stays waiting while the orchestrator has nothing to run on. */
     const orchestrator = await orchestratorOf(ctx, me.companyId);
-    if (!orchestrator || !(await liveSubscription(ctx, orchestrator.id))) {
-      throw new ApiError(409, 'conflict', 'The orchestrator has no subscription to run on. Pick one on its card first.', 'no_subscription');
-    }
+    const unable = () => new ApiError(409, 'conflict', 'The orchestrator has no subscription to run on. Pick one on its card first.', 'no_subscription');
+    if (!orchestrator || !(await liveSubscription(ctx, orchestrator.id))) throw unable();
     const taken = await moveImprovement(ctx, me.companyId, id, 'open', { status: 'taken', decidedBy: me.id, result: null });
     const prompt = takenPrompt(me.name, taken);
     try {
       await enqueueTurn(ctx, { companyId: me.companyId, agentId: orchestrator.id, prompt, createdBy: me.id, message: { personId: null, text: prompt } });
     } catch (err) {
+      /* Undone only when no turn was stored: a stored one is the orchestrator's to finish and close. */
+      if (!(err instanceof NoSubscription)) throw err;
       await moveImprovement(ctx, me.companyId, id, 'taken', { status: 'open', decidedBy: null });
-      throw err;
+      throw unable();
     }
     return { improvement: { id, status: taken.status } };
   });
