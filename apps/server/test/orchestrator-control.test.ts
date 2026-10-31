@@ -64,6 +64,16 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
     expect((await db.select().from(agents).where(eq(agents.id, bruno.id)))[0]!.timerMinutes).toBeNull();
   });
 
+  it('changes its own effort as its card does, and keeps to what the card changes', async () => {
+    const { app, db, orchestrator } = await company();
+    const client = await mcp(app);
+    expect((await call(client, 'change_orchestrator', { effort: 'high' })).isError).toBeFalsy();
+    expect((await db.select().from(agents).where(eq(agents.id, orchestrator.id)))[0]!.effort).toBe('high');
+    const changes = await db.select().from(agentChanges).where(eq(agentChanges.agentId, orchestrator.id));
+    expect(changes.map(c => [c.field, c.after, c.byOrchestrator])).toEqual([['effort', 'high', true]]);
+    expect((await call(client, 'change_orchestrator', { effort: 'loud' })).isError).toBe(true);
+  });
+
   it('switches an employee off and on, and the card says the orchestrator did it', async () => {
     const { app, db, ceo, bruno } = await company();
     const client = await mcp(app);
