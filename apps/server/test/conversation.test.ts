@@ -46,7 +46,7 @@ describe('the orchestrator\'s conversation', () => {
     const { app, ceo, builtin } = await live();
     expect((await start(app, ceo)).json()).toEqual({ started: true });
     const run = await nextRun(builtin);
-    expect(run).toMatchObject({ prompt: FIRST_TURN, sessionId: null, timeoutMs: 900000 });
+    expect(run).toMatchObject({ prompt: FIRST_TURN, sessionId: null, timeoutMs: 2 * 3_600_000 });
     expect(run.instructions?.startsWith(ORCHESTRATOR_INSTRUCTIONS)).toBe(true);
     expect(run.toolToken).toMatch(/^[A-Za-z0-9_-]{40,}$/);
     expect((await start(app, ceo)).json()).toEqual({ started: false });
@@ -282,6 +282,19 @@ describe('the orchestrator\'s conversation', () => {
     await until(async () => (await state(app, ceo)).reason === 'needs_login');
     expect(await quiet(mac)).toBe(0);
     expect((await state(app, ceo)).queued).toBe(1);
+  });
+
+  it("holds turns while the plan is at its limit, says until when, and sends them once the limit starts over", async () => {
+    const { app, ceo, mac } = await onMac('0.3.0');
+    await until(async () => (await state(app, ceo)).ready);
+    const resetsAt = new Date(Date.now() + 1500).toISOString();
+    mac.send({ type: 'status', loggedIn: true, limits: { status: 'rejected', windows: [{ name: 'five_hour', utilization: 1, resetsAt }] } });
+    await until(async () => (await state(app, ceo)).limitUntil === resetsAt);
+    expect((await say(app, ceo, 'Go on')).statusCode).toBe(202);
+    expect(await quiet(mac)).toBe(0);
+    expect((await state(app, ceo)).queued).toBe(1);
+    expect((await nextRun(mac)).prompt).toBe('Ivan (CEO): Go on');
+    expect((await state(app, ceo)).limitUntil).toBeNull();
   });
 
   it('waits for a machine that connected until it said hello', async () => {

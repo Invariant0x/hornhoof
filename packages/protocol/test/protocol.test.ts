@@ -228,6 +228,7 @@ describe('live terminals', () => {
       { type: 'term.data', termId: 't-1', data: '\u001b[1mhi\u001b[0m ❯' },
       { type: 'term.exit', termId: 't-1' },
       { type: 'turn.open', agentKey: 'agent-1', text: 'Look at the build', ref: 'r-1' },
+      { type: 'term.program', termId: 't-1', running: false },
     ];
     const server: ServerMessage[] = [
       { type: 'term.open', termId: 't-1', agentKey: 'agent-1', cols: 120, rows: 36, write: true },
@@ -246,6 +247,15 @@ describe('live terminals', () => {
     expect(parseServerMessage(JSON.stringify({ type: 'term.open', termId: 't-1', agentKey: '../x', cols: 80, rows: 24, write: false }))).toBeNull();
     expect(parseServerMessage(JSON.stringify({ type: 'term.input', termId: 't-1', data: 'x'.repeat(70_000) }))).toBeNull();
     expect(parseNodeMessage(JSON.stringify({ type: 'turn.open', agentKey: 'a/b', text: 'x' }))).toBeNull();
+  });
+
+  it("carry Hornhoof's words for a running turn and whether they went into it", () => {
+    const say: ServerMessage = { type: 'agent.say', agentKey: 'agent-1', text: 'Use the new schema.', ref: 'r-2' };
+    const said: NodeMessage = { type: 'agent.said', ref: 'r-2', ok: true };
+    expect(parseServerMessage(JSON.stringify(say))).toEqual(say);
+    expect(parseNodeMessage(JSON.stringify(said))).toEqual(said);
+    expect(parseServerMessage(JSON.stringify({ ...say, agentKey: '../x' }))).toBeNull();
+    expect(parseServerMessage(JSON.stringify({ ...say, text: 'x'.repeat(100_001) }))).toBeNull();
   });
 
   it("carry how full an agent's context is, as a share", () => {

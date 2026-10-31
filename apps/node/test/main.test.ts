@@ -114,19 +114,44 @@ describe('a node that runs agents in terminals', () => {
     server.send({ type: 'term.open', termId: 't9', agentKey: 'agent-1', cols: 90, rows: 30, write: true });
     await server.wait(() => server.received.some(m => m.type === 'term.exit' && m.termId === 't9'));
   });
+
+  it('says words for a running turn did not go in when it runs no terminals', async () => {
+    const server = await fakeServer();
+    const node = await runNode({ dir: nodeDir(server.url), adapter, log: () => {} });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    server.send({ type: 'agent.say', agentKey: 'agent-1', text: 'Use the new schema.', ref: 'r-1' });
+    await server.wait(() => server.received.some(m => m.type === 'agent.said'));
+    expect(server.received.find(m => m.type === 'agent.said')).toEqual({ type: 'agent.said', ref: 'r-1', ok: false });
+  });
 });
 
 describe('runNode', () => {
-  it('runs a job and reports it, then the limits', async () => {
+  it('runs a job and reports the limits it brought, then the job, so Hornhoof knows of a plan at its limit as the job ends', async () => {
     const server = await fakeServer();
     const node = await runNode({ dir: nodeDir(server.url), adapter, log: () => {} });
     onTestFinished(() => node.stop());
     await server.wait(() => server.received.some(m => m.type === 'hello'));
     server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
-    await server.wait(() => server.received.some(m => m.type === 'status'));
-    expect(server.received.map(m => m.type)).toEqual(['hello', 'job.started', 'job.done', 'status']);
-    expect(server.received[2]).toMatchObject({ jobId: 'j1', ok: true, result: 'ready', sessionId: 'sess-9' });
-    expect(server.received[3]).toMatchObject({ loggedIn: true, limits: { status: 'allowed', windows: [] } });
+    await server.wait(() => server.received.some(m => m.type === 'job.done'));
+    expect(server.received.map(m => m.type)).toEqual(['hello', 'job.started', 'status', 'job.done']);
+    expect(server.received[2]).toMatchObject({ loggedIn: true, limits: { status: 'allowed', windows: [] } });
+    expect(server.received[3]).toMatchObject({ jobId: 'j1', ok: true, result: 'ready', sessionId: 'sess-9' });
+  });
+
+  it('ends a job even when its program cannot list its models then, and keeps the models it listed before', async () => {
+    const server = await fakeServer();
+    let asked = 0;
+    const models = async () => {
+      if (asked++ > 0) throw new Error('models unreachable');
+      return [{ id: 'opus', name: 'Opus' }];
+    };
+    const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, models }, log: () => {} });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
+    await server.wait(() => server.received.some(m => m.type === 'job.done'));
+    expect(server.received.find(m => m.type === 'status')).toMatchObject({ models: [{ id: 'opus', name: 'Opus' }] });
   });
 
   it("asks its program for the plan's limits on its own, now and then, and says when they change", async () => {

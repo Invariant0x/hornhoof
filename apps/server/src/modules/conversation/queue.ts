@@ -1,10 +1,11 @@
-import { effortFor, effortsOf, modelsFor } from '@hornhoof/protocol';
+import { effortFor, effortsOf, modelsFor, type Limits } from '@hornhoof/protocol';
 import { and, asc, count, desc, eq, inArray, isNotNull, isNull, or } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
 import { agents, jobs, subscriptions } from '../../db/schema.js';
 import { dispatchJob } from '../jobs/dispatch.js';
+import { sayLive } from './live.js';
 import { identityOf, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { appendEvent, earlierTalk, publishWorking } from '../events/store.js';
 import { instructionsOf } from '../agents/instructions.js';
@@ -18,12 +19,14 @@ import { preface } from './prompt.js';
    keep the whole window, since they hold the department's and the company's picture. */
 export const WORKER_COMPACT_WINDOW = 500_000;
 
-export const CONVERSATION_TIMEOUT_MS = 15 * 60_000;
-/* A turn on a task may run long: the work, its tests and a review fit in one. */
-export const TASK_TURN_TIMEOUT_MS = 45 * 60_000;
+/* Any turn may run as long as its work takes. This only ends one that hangs, a program frozen or waiting for input
+   nobody gives, so the agent's next turns are not stuck behind it; the agent goes on in the same session. */
+export const TURN_TIMEOUT_MS = 2 * 3_600_000;
 
 export type AgentState = {
   ready: boolean;
+  /* Its plan is at its limit until then: its turns wait in line, and people may still write to it. */
+  limitUntil: string | null;
   reason: 'no_subscription' | 'waiting_machine' | 'needs_login' | 'node_outdated' | 'machine_offline' | null;
   busy: boolean;
   runningJobId: string | null;
@@ -31,6 +34,32 @@ export type AgentState = {
   /* Its node shows the agent's live terminal. */
   terminal: boolean;
 };
+
+/* How long after a plan's limit starts over its waiting turns go out, so the program sees the new limit. */
+const LIMIT_GRACE_MS = 5_000;
+
+/* When the plan's limit starts over, while the plan is at it: the latest reset of a full window still to come. A plan at
+   its limit that says no reset holds nothing, so its turns go out and fail as before rather than wait forever. */
+export function limitUntil(limits: Limits | null, now = Date.now()): string | null {
+  if (limits?.status !== 'rejected') return null;
+  const resets = limits.windows.filter(w => (w.utilization === null || w.utilization >= 1) && w.resetsAt && Date.parse(w.resetsAt) > now).map(w => w.resetsAt!);
+  return resets.length ? resets.reduce((a, b) => (Date.parse(a) >= Date.parse(b) ? a : b)) : null;
+}
+
+/* Wakes the agent's line once its plan's limit starts over. */
+const resets = new WeakMap<Ctx, Map<string, { at: string; timer: NodeJS.Timeout }>>();
+function pumpAt(ctx: Ctx, agentId: string, at: string): void {
+  const timers = resets.get(ctx) ?? new Map<string, { at: string; timer: NodeJS.Timeout }>();
+  resets.set(ctx, timers);
+  if (timers.get(agentId)?.at === at) return;
+  clearTimeout(timers.get(agentId)?.timer);
+  const timer = setTimeout(() => {
+    timers.delete(agentId);
+    void pump(ctx, agentId).catch(() => {});
+  }, Date.parse(at) - Date.now() + LIMIT_GRACE_MS);
+  timer.unref();
+  timers.set(agentId, { at, timer });
+}
 
 /* What a turn ends with when a person or Hornhoof stopped it on purpose; none of these is a failure. */
 export const STOPPED_ON_PURPOSE = ['cancelled', 'removed', 'switched_off'];
@@ -71,21 +100,29 @@ export async function insertTurn(ctx: Ctx, t: Turn): Promise<string> {
       agentId: t.agentId,
       kind: 'conversation',
       prompt: t.prompt,
-      timeoutMs: t.taskId ? TASK_TURN_TIMEOUT_MS : CONVERSATION_TIMEOUT_MS,
+      timeoutMs: TURN_TIMEOUT_MS,
       createdBy: t.createdBy,
       taskId: t.taskId ?? null,
     })
     .returning({ id: jobs.id });
-  if (t.message) {
-    /* An employee's message carries its name for the window and its id in by. */
-    const { personId, ...data } = t.message;
-    await appendEvent(ctx, { companyId: t.companyId, agentId: t.agentId, jobId: job!.id, kind: 'message', data, personId });
-  }
+  await showMessage(ctx, t, job!.id);
   return job!.id;
 }
 
-/* Stores the turn, then sends it if he is free. */
+/* An employee's message carries its name for the window and its id in by. */
+async function showMessage(ctx: Ctx, t: Turn, jobId: string): Promise<void> {
+  if (!t.message) return;
+  const { personId, ...data } = t.message;
+  await appendEvent(ctx, { companyId: t.companyId, agentId: t.agentId, jobId, kind: 'message', data, personId });
+}
+
+/* Stores the turn, then sends it if he is free. A message for an agent at work goes into the turn it runs instead. */
 export async function enqueueTurn(ctx: Ctx, t: Turn): Promise<string> {
+  const into = t.message && !t.taskId ? await sayLive(ctx, t.agentId, t.prompt) : null;
+  if (into) {
+    await showMessage(ctx, t, into);
+    return into;
+  }
   const jobId = await insertTurn(ctx, t);
   await pump(ctx, t.agentId);
   return jobId;
@@ -125,7 +162,7 @@ export async function openTypedTurn(ctx: Ctx, node: NodeIdentity, agentId: strin
         status: 'running',
         startedAt: new Date(),
         prompt: text,
-        timeoutMs: CONVERSATION_TIMEOUT_MS,
+        timeoutMs: TURN_TIMEOUT_MS,
         createdBy: personId,
         toolTokenHash: hashToken(token),
         instructionsHash: last?.hash ?? null,
@@ -193,6 +230,9 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   if (running) return;
   const sub = await liveSubscription(ctx, agentId);
   if (!sub || sub.status !== 'ready' || outdated(sub) || !hub.isReady(identityOf(sub))) return;
+  /* A turn sent now would end at once: it waits until the limit starts over. */
+  const until = limitUntil(sub.limits);
+  if (until) return pumpAt(ctx, agentId, until);
   const [agent] = await db.select().from(agents).where(eq(agents.id, agentId));
   if (!agent) return;
   /* Switched off, it still answers people who write to it; its task turns wait until it is on. */
@@ -299,7 +339,7 @@ export async function orchestratorOf(ctx: Ctx, companyId: string) {
 
 export async function orchestratorState(ctx: Ctx, companyId: string): Promise<AgentState> {
   const agent = await orchestratorOf(ctx, companyId);
-  if (!agent) return { ready: false, reason: 'no_subscription', busy: false, runningJobId: null, queued: 0, terminal: false };
+  if (!agent) return { ready: false, limitUntil: null, reason: 'no_subscription', busy: false, runningJobId: null, queued: 0, terminal: false };
   return agentState(ctx, agent.id);
 }
 
@@ -321,5 +361,5 @@ export async function agentState(ctx: Ctx, agentId: string): Promise<AgentState>
             ? 'machine_offline'
             : null;
   const terminal = Boolean(sub && ctx.hub.hasTerminals(identityOf(sub)));
-  return { ready: reason === null, reason, busy: Boolean(running), runningJobId: running?.id ?? null, queued: Number(waiting?.n ?? 0), terminal };
+  return { ready: reason === null, limitUntil: sub ? limitUntil(sub.limits) : null, reason, busy: Boolean(running), runningJobId: running?.id ?? null, queued: Number(waiting?.n ?? 0), terminal };
 }

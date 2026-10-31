@@ -168,6 +168,8 @@ const NodeMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('removed') }),
   z.object({ type: z.literal('term.data'), termId: TermId, data: z.string().max(4 * TERM_CHUNK) }),
   z.object({ type: z.literal('term.exit'), termId: TermId }),
+  /* Whether the agent's program runs in the view's session yet: while it starts, the window shows a loader. */
+  z.object({ type: z.literal('term.program'), termId: TermId, running: z.boolean() }),
   /* A person typed to an agent that had no turn running: Hornhoof opens one so the agent has its tools. ref names the
      typed turn, and Hornhoof's answer carries it back. */
   z.object({ type: z.literal('turn.open'), agentKey: z.string().regex(/^[A-Za-z0-9-]{1,64}$/), text: z.string().max(100_000), ref: z.string().max(64).optional() }),
@@ -176,6 +178,8 @@ const NodeMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('agent.start'), agentKey: z.string().regex(/^[A-Za-z0-9-]{1,64}$/) }),
   /* How full the agent's context is now, as its program counts it: a share from 0 to 1. */
   z.object({ type: z.literal('agent.context'), agentKey: z.string().regex(/^[A-Za-z0-9-]{1,64}$/), used: z.number().min(0).max(1) }),
+  /* Whether Hornhoof's words named by ref went into the agent's running turn; if not, they wait for its next one. */
+  z.object({ type: z.literal('agent.said'), ref: z.string().max(64), ok: z.boolean() }),
 ]);
 export type NodeMessage = z.infer<typeof NodeMessage>;
 
@@ -240,6 +244,9 @@ const ServerMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('term.close'), termId: TermId }),
   /* The turn Hornhoof opened for what a person typed, or none when it could not. */
   z.object({ type: z.literal('turn.opened'), agentKey: Id, jobId: Id.nullable(), toolToken: z.string().max(200).nullable(), ref: z.string().max(64).optional() }),
+  /* Words for an agent whose turn runs, from its head, another agent, the orchestrator or a person's window: typed into
+     the program as a person types, so the turn takes them in. */
+  z.object({ type: z.literal('agent.say'), agentKey: Id, text: z.string().max(100_000), ref: z.string().max(64) }),
 ]);
 export type ServerMessage = z.infer<typeof ServerMessage>;
 

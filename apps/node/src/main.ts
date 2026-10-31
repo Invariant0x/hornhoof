@@ -111,7 +111,8 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
   const readModels = async () => (single?.models ? await single.models() : undefined);
   let models = await readModels();
   const status = async () => {
-    models = await readModels();
+    /* A program that cannot list its models now keeps those it listed before. */
+    models = await readModels().catch(() => models);
     emit({ type: 'status', loggedIn, limits, ...(models ? { models } : {}) });
   };
 
@@ -165,6 +166,10 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
         return host?.close(m);
       case 'turn.opened':
         return host?.opened(m);
+      case 'agent.say': {
+        const ok = host ? await host.say(m.agentKey, m.text).catch(() => false) : false;
+        return void send?.({ type: 'agent.said', ref: m.ref, ok });
+      }
     }
     if (stopped || running.has(m.jobId)) return;
     const controller = new AbortController();
@@ -192,14 +197,18 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
       };
       let seq = 0;
       const onEvent = (event: AgentEvent) => emit({ type: 'job.event', jobId: m.jobId, seq: seq++, event });
-      done = await runJob(tracked, m, dir, { hidden, signal, toolsUrl, onEvent });
+      done = await runJob(tracked, m, dir, { hidden, signal, toolsUrl, onEvent, untimed: Boolean(host && terminal && m.workspace?.key) });
     } catch (err) {
       done = { type: 'job.done', jobId: m.jobId, ok: false, sessionId: null, result: '', tail: message(err), error: 'agent_failed' };
     }
     running.delete(m.jobId);
+    /* The limits the turn brought go first, so Hornhoof knows of a plan at its limit when it hears the job ended. */
+    await status();
     emit(done);
-    if (done.error === 'not_logged_in') loggedIn = false;
-    void status();
+    if (done.error === 'not_logged_in') {
+      loggedIn = false;
+      void status();
+    }
   }
 
   /* While signed out, look again now and then, so the person sees Ready soon after signing in. */

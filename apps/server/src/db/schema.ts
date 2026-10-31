@@ -366,7 +366,7 @@ export const tasks = pgTable(
   t => [unique('tasks_company_number').on(t.companyId, t.number), index('tasks_department_id').on(t.departmentId), index('tasks_assignee').on(t.assigneeAgentId), index('tasks_parent_id').on(t.parentId)],
 );
 
-export const TASK_EVENT_KINDS = ['created', 'assigned', 'updated', 'comment', 'submitted', 'verdict', 'report', 'blocked', 'asked', 'answered', 'reminded', 'stuck', 'cancelled', 'done'] as const;
+export const TASK_EVENT_KINDS = ['created', 'assigned', 'updated', 'comment', 'submitted', 'verdict', 'report', 'blocked', 'asked', 'answered', 'reminded', 'continued', 'stuck', 'cancelled', 'done'] as const;
 export type TaskEventKind = (typeof TASK_EVENT_KINDS)[number];
 
 /* Everything that happened to a task, with the person or agent who did it. */
@@ -410,6 +410,8 @@ export const requests = pgTable(
     status: text('status', { enum: REQUEST_STATUSES }).notNull().default('open'),
     answer: text('answer'),
     answeredBy: uuid('answered_by').references(() => people.id),
+    /* The orchestrator's words for people: what is needed from them, why, and the ways to go, in plain words. */
+    explained: text('explained'),
     createdAt: createdAt(),
     answeredAt: timestamp('answered_at', { withTimezone: true }),
   },

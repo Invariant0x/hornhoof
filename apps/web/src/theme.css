@@ -481,8 +481,12 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 /* The live terminal takes the window, wider, in its own colors; cards wait below it. */
 .orch.term { width: min(980px, calc(100vw - 32px)); }
 /* The padding sits on the terminal itself, which is what its fit leaves out when it counts rows. */
-.t-term { flex: 1 1 auto; min-height: 0; background: #15191F; overflow: hidden; }
+.t-term { position: relative; flex: 1 1 auto; min-height: 0; background: #15191F; overflow: hidden; }
+.t-xterm { height: 100%; }
 .t-term .xterm { height: 100%; padding: 6px 4px 4px 10px; }
+.t-load { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; background: #15191F; color: #dcdcdc; font-family: var(--f-body); font-size: 15px; }
+.t-load .spinner { width: 44px; height: 44px; border-width: 3px; border-color: #2b323b; border-top-color: #dcdcdc; }
+@media (prefers-reduced-motion: reduce) { .t-load .spinner { animation-duration: 3s; } }
 .t-cards { flex: none; max-height: 45%; overflow: auto; padding: 10px 16px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 12px; }
 .notebook { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; font-family: var(--f-body); }
 .notebook ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
@@ -784,6 +788,10 @@ summary.turn-head:focus-visible { outline: 2px solid var(--cyan); outline-offset
 .req header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
 .req header small { font-size: 12.5px; color: var(--muted); }
 .req-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.req-explained { font-size: 15px; line-height: 1.55; overflow-wrap: anywhere; }
+.req-explained .md { display: grid; gap: 8px; }
+.req-more summary { cursor: pointer; width: fit-content; font-size: 12.5px; color: var(--muted); }
+.req-more .req-text { margin: 6px 0 0; color: var(--muted); }
 .req-form { display: grid; gap: 8px; }
 .req-form textarea, .tp-comment textarea { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--line2); background: var(--surface2); color: var(--ink); font: inherit; resize: vertical; }
 .req-form textarea:focus, .tp-comment textarea:focus { outline: none; border-color: var(--cyan); box-shadow: 0 0 0 3px var(--glow); }

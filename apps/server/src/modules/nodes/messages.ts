@@ -3,6 +3,7 @@ import { and, eq, inArray, isNull, notInArray, or, type SQL } from 'drizzle-orm'
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, subscriptions } from '../../db/schema.js';
+import { said } from '../conversation/live.js';
 import { afterJob, liveSubscription, openTypedTurn, pumpWaiting, startProgram } from '../conversation/queue.js';
 import { appendEvent, publishWorking } from '../events/store.js';
 import { identityOf, sameNode, type NodeIdentity } from './hub.js';
@@ -124,6 +125,9 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
     }
     case 'agent.start':
       await startProgram(ctx, id, msg.agentKey);
+      return;
+    case 'agent.said':
+      said(ctx, id, msg.ref, msg.ok);
       return;
     /* Only the node that runs the agent's subscription tells how full its context is. */
     case 'agent.context': {

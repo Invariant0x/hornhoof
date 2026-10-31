@@ -28,7 +28,7 @@ function stateOf(s: SubView): State {
   return s.status;
 }
 
-function clock(language: Language, iso: string | null): string | null {
+export function clock(language: Language, iso: string | null): string | null {
   if (!iso) return null;
   const at = new Date(iso);
   const today = at.toDateString() === new Date().toDateString();

@@ -36,7 +36,6 @@ type Turn = {
   onEvent(e: AgentEvent): void;
   typed: boolean;
   seq: number;
-  deadline: number;
   ref?: string;
   early?: AgentEvent[] | null;
   over?: { message: string; error: JobError; sessionId: string | null } | null;
@@ -70,9 +69,12 @@ type Agent = {
   contextUsed: number | null;
   contextSize: number | null;
   viewers: number;
-  idle: NodeJS.Timeout | null;
+  /* Its program runs and showed its prompt; until then its views show a loader. */
+  up: boolean;
   /* Reads the log and looks at the program while it runs. */
   watch: NodeJS.Timeout | null;
+  /* Words Hornhoof types into running turns, one after another. */
+  saying: Promise<unknown>;
   /* Hornhoof's turns, one after another. */
   queue: Promise<unknown>;
   /* Typed turns Hornhoof has not answered yet, oldest first. */
@@ -108,11 +110,8 @@ type Options = {
   /* How long a program may take to show its prompt. Kimi Code takes most of a minute on a busy machine. */
   readyMs?: number;
   pollMs?: number;
-  /* A program idle this long with nobody watching ends; its next turn resumes the session. */
-  idleMs?: number;
-  /* How long a typed turn waits for Hornhoof to open it, and how long it may run. */
+  /* How long a typed turn waits for Hornhoof to open it. */
   openMs?: number;
-  typedMs?: number;
   /* How long a program started with nothing to type gets to connect to its tools. */
   toolsMs?: number;
   /* How long the host waits for the program to take a prompt before it presses Enter again. */
@@ -122,7 +121,6 @@ type Options = {
 };
 
 const WAITING = 'This agent starts with its next turn.';
-const STARTING = 'Starting this agent...';
 const STOP_WAIT_MS = 5000;
 /* How often the host presses Enter again for a prompt the program did not take. */
 const ENTER_TRIES = 3;
@@ -169,9 +167,7 @@ export class TerminalHost {
   private readonly bridge: Bridge;
   private readonly readyMs: number;
   private readonly pollMs: number;
-  private readonly idleMs: number;
   private readonly openMs: number;
-  private readonly typedMs: number;
   private readonly toolsMs: number;
   private readonly enterWaitMs: number;
   /* Views being opened, and those Hornhoof closed meanwhile. */
@@ -184,9 +180,7 @@ export class TerminalHost {
     this.bridge = new Bridge(opts.hornhoof, (key, event, body) => this.hook(key, event, body));
     this.readyMs = opts.readyMs ?? 120_000;
     this.pollMs = opts.pollMs ?? 500;
-    this.idleMs = opts.idleMs ?? 10 * 60_000;
     this.openMs = opts.openMs ?? 8000;
-    this.typedMs = opts.typedMs ?? 60 * 60_000;
     this.toolsMs = opts.toolsMs ?? 15_000;
     this.enterWaitMs = opts.enterWaitMs ?? 4000;
     this.cols = opts.cols ?? 160;
@@ -200,7 +194,6 @@ export class TerminalHost {
   async stop(): Promise<void> {
     this.closeViews();
     for (const a of this.agents.values()) {
-      if (a.idle) clearTimeout(a.idle);
       if (a.watch) clearInterval(a.watch);
     }
     this.bridge.stop();
@@ -214,7 +207,7 @@ export class TerminalHost {
   private agent(key: string): Agent {
     let a = this.agents.get(key);
     if (!a) {
-      a = { key, name: `a-${key}`, program: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, viewers: 0, idle: null, watch: null, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null };
+      a = { key, name: `a-${key}`, program: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, viewers: 0, up: false, watch: null, saying: Promise.resolve(), queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null };
       this.agents.set(key, a);
     }
     return a;
@@ -230,10 +223,10 @@ export class TerminalHost {
 
   private async turnIn(a: Agent, job: TermJob): Promise<RunResult> {
     const { input, program } = job;
-    if (a.idle) clearTimeout(a.idle);
     const fail = async (error: RunResult['error'], output?: string): Promise<RunResult> => ({ ok: false, sessionId: a.sessionId, result: '', output: output ?? (await this.screen(job.key)), error, limits: a.limits });
+    /* A turn a person typed may still run, or wait for the rest of its log; Hornhoof's turn goes in after it, or into it
+       once the time Hornhoof gave this turn is over. Nothing stops the program: only its own end or a person does. */
     const deadline = Date.now() + input.timeoutMs;
-    /* A turn a person typed may still run, or wait for the rest of its log; Hornhoof's turn goes in after it. */
     for (this.drain(a); a.busy && Date.now() < deadline; this.drain(a)) await sleep(this.pollMs);
     await a.settling;
 
@@ -268,7 +261,7 @@ export class TerminalHost {
     a.stepSaid = false;
     this.bridge.setToken(job.key, input.tools?.token ?? null);
     const starting = input.prompt ? null : (tools ?? Promise.resolve());
-    const turn: Turn = { jobId: null, onEvent: input.onEvent ?? (() => {}), typed: false, seq: 0, deadline, ...(starting ? { starting: true } : {}) };
+    const turn: Turn = { jobId: null, onEvent: input.onEvent ?? (() => {}), typed: false, seq: 0, ...(starting ? { starting: true } : {}) };
     if (starting) a.starting = starting;
     a.turn = turn;
     a.ended = deferred();
@@ -276,6 +269,7 @@ export class TerminalHost {
     a.failure = null;
     try {
       if (!goesOn) {
+        this.programIs(a, false);
         if (program.kind === 'claude') acceptClaudeDialogs(job.home, input.workDir);
         if (program.kind === 'kimi') prepareKimi(job.home, input.workDir, urls.mcpUrl);
         /* A person's first message into a new Kimi session reaches its tools a moment before Hornhoof opens their turn. */
@@ -288,8 +282,11 @@ export class TerminalHost {
         this.watch(a);
         if (!(await this.ready(a, job))) {
           const screen = await this.screen(job.key);
+          /* Its screen says why, which the loader would hide. */
+          this.showViews(a);
           return await fail(job.signedOut.test(screen) ? 'not_logged_in' : 'agent_failed', screen);
         }
+        this.programIs(a, true);
       }
       /* Nothing to type: the turn only starts the program for the person who opened its window. */
       if (!input.prompt) {
@@ -334,13 +331,9 @@ export class TerminalHost {
         }
         if (!(await this.opts.tmux.alive(a.name))) {
           a.busy = false;
+          this.programEnded(a);
           const screen = await this.screen(job.key);
           return await fail(job.signedOut.test(screen) ? 'not_logged_in' : 'agent_failed', screen);
-        }
-        if (Date.now() > deadline) {
-          await this.opts.tmux.keys(a.name, 'Escape');
-          a.busy = false;
-          return await fail('timeout');
         }
       }
     } finally {
@@ -350,7 +343,6 @@ export class TerminalHost {
         a.turn = null;
         a.ended = null;
       }
-      this.restLater(a);
     }
   }
 
@@ -374,15 +366,11 @@ export class TerminalHost {
     if (a.turn && !a.turn.typed) return;
     if (!alive) {
       a.busy = false;
+      this.programEnded(a);
       this.finishTyped(a, '', 'agent_failed');
       if (a.watch) clearInterval(a.watch);
       a.watch = null;
       return;
-    }
-    if (a.turn?.typed && Date.now() > a.turn.deadline) {
-      await this.opts.tmux.keys(a.name, 'Escape');
-      a.busy = false;
-      this.finishTyped(a, '', 'timeout');
     }
   }
 
@@ -625,12 +613,11 @@ export class TerminalHost {
      being read now. */
   private async openTyped(a: Agent, text: string, fromLog = false): Promise<void> {
     const start = a.starting;
-    if (a.idle) clearTimeout(a.idle);
     a.fresh = false;
     if (!fromLog) this.drain(a);
     a.lastText = null;
     a.stepSaid = false;
-    const turn: Turn = { jobId: null, onEvent: () => {}, typed: true, seq: 0, deadline: Date.now() + this.typedMs, ref: randomUUID(), early: [], over: null, opened: deferred() };
+    const turn: Turn = { jobId: null, onEvent: () => {}, typed: true, seq: 0, ref: randomUUID(), early: [], over: null, opened: deferred() };
     a.turn = turn;
     a.unopened.push(turn);
     this.watch(a);
@@ -682,7 +669,6 @@ export class TerminalHost {
     /* Hornhoof has not answered yet: the end goes out with its answer. */
     if (turn.early) turn.over = { message, error, sessionId: a.sessionId };
     else this.typedDone(turn, message, error, a.sessionId);
-    this.restLater(a);
   }
 
   private typedDone(turn: Turn, message: string, error: JobError, sessionId: string | null): void {
@@ -696,6 +682,26 @@ export class TerminalHost {
     return [...this.agents.values()].flatMap(a => (a.turn?.typed && a.turn.jobId ? [a.turn.jobId] : []));
   }
 
+  /* Words for the agent while its turn runs, typed into the program as a person types: Claude Code, Codex and Kimi Code
+     take them into the turn at its next step. False when no turn runs, so Hornhoof gives them the next turn instead. */
+  say(key: string, text: string): Promise<boolean> {
+    const a = this.agents.get(key);
+    if (!a) return Promise.resolve(false);
+    const said = a.saying.then(() => this.sayIn(a, text));
+    a.saying = said.catch(() => {});
+    return said;
+  }
+
+  private async sayIn(a: Agent, text: string): Promise<boolean> {
+    /* Hornhoof's own prompt goes in first, or the words would join it in the program's input. */
+    for (const end = Date.now() + ENTER_TRIES * this.enterWaitMs; a.turn && !a.turn.typed && !a.took && Date.now() < end; ) await sleep(this.pollMs);
+    if (!a.turn || a.turn.starting || (!a.turn.typed && !a.took) || !(await this.opts.tmux.alive(a.name))) return false;
+    await this.opts.tmux.paste(a.name, text);
+    await sleep(Math.min(3000, 300 + text.length / 20));
+    await this.opts.tmux.keys(a.name, 'Enter');
+    return true;
+  }
+
   /* Hornhoof calls off a turn a person typed: the program stops as on Escape, and the turn ends as stopped. */
   async cancel(jobId: string): Promise<void> {
     const a = [...this.agents.values()].find(x => x.turn?.typed && x.turn.jobId === jobId);
@@ -705,20 +711,26 @@ export class TerminalHost {
     this.finishTyped(a, '', 'cancelled');
   }
 
+  /* The agent's views hear when its program comes up or goes. */
+  private programIs(a: Agent, up: boolean): void {
+    if (a.up === up) return;
+    a.up = up;
+    this.showViews(a, up);
+  }
+
+  /* A program that ended keeps its last screen on show, which says why; the loader is for a program that starts. */
+  private programEnded(a: Agent): void {
+    a.up = false;
+    this.showViews(a);
+  }
+
+  private showViews(a: Agent, running = true): void {
+    for (const [termId, view] of this.views) if (view.key === a.key) this.opts.send({ type: 'term.program', termId, running });
+  }
+
   /* Views belong to one connection to Hornhoof; after it came back, people open them again. */
   closeViews(): void {
     for (const view of this.views.values()) view.child.kill();
-  }
-
-  /* Ends a program nobody needs for a while; the pane keeps its last screen and the next turn resumes the session. */
-  private restLater(a: Agent): void {
-    if (a.idle) clearTimeout(a.idle);
-    a.idle = setTimeout(async () => {
-      if (a.turn || a.busy || a.viewers > 0) return;
-      const pid = await this.opts.tmux.programPid(a.name);
-      if (pid) process.kill(pid, 'SIGTERM');
-    }, this.idleMs);
-    a.idle.unref();
   }
 
   async open(m: Msg<'term.open'>): Promise<void> {
@@ -728,7 +740,9 @@ export class TerminalHost {
     const starts = m.write && !a.turn && !(a.hash && (await this.opts.tmux.alive(a.name)));
     try {
       if (!(await this.opts.tmux.has(a.name))) {
-        await this.opts.tmux.launch(a.name, { cwd: '/', command: ['sh', '-c', `printf '\\n  %s\\n' '${starts ? STARTING : WAITING}'; exec sleep 2147483647`], cols: m.cols, rows: m.rows });
+        /* The window shows a loader over the empty session while the program starts. */
+        const waiting = starts ? '' : `printf '\\n  %s\\n' '${WAITING}'; `;
+        await this.opts.tmux.launch(a.name, { cwd: '/', command: ['sh', '-c', `${waiting}exec sleep 2147483647`], cols: m.cols, rows: m.rows });
         /* The waiting screen is no program of the agent's: the next turn starts one in its place. A turn that runs now is
            starting its own. */
         if (!a.turn) a.hash = null;
@@ -741,7 +755,8 @@ export class TerminalHost {
     const view: View = { child, key: m.agentKey, write: m.write, mask: new StreamMask(this.opts.secrets), decoder: new StringDecoder('utf8'), pending: '', timer: null, quiet: null };
     this.views.set(m.termId, view);
     a.viewers++;
-    if (a.idle) clearTimeout(a.idle);
+    /* A watcher of an agent that sleeps sees the waiting screen; anyone else, a loader until the program is up. */
+    if (starts || a.turn || a.up) this.opts.send({ type: 'term.program', termId: m.termId, running: a.up && !starts });
     const flush = () => {
       view.timer = null;
       while (view.pending) {
@@ -767,7 +782,6 @@ export class TerminalHost {
       this.views.delete(m.termId);
       a.viewers = Math.max(0, a.viewers - 1);
       this.opts.send({ type: 'term.exit', termId: m.termId });
-      this.restLater(a);
     });
     if (starts) this.opts.send({ type: 'agent.start', agentKey: m.agentKey });
   }

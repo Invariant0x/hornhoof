@@ -42,6 +42,10 @@ export class TerminalRelay {
       view.socket.send(JSON.stringify({ type: 'data', data: msg.data }));
       return;
     }
+    if (msg.type === 'term.program') {
+      view.socket.send(JSON.stringify({ type: 'program', running: msg.running }));
+      return;
+    }
     this.views.delete(msg.termId);
     end(view.socket, CLOSE.exit);
   }

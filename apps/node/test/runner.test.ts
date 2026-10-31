@@ -63,6 +63,13 @@ describe('runJob', () => {
     expect(done).toMatchObject({ ok: false, error: 'timeout' });
   });
 
+  it('lets a turn in a live program run past its time, until the program ends it', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
+    const adapter = fakeAdapter(() => new Promise(done => setTimeout(() => done(ok()), 300)));
+    const done = await runJob(adapter, job({ timeoutMs: 50 }), dir, { untimed: true });
+    expect(done).toMatchObject({ ok: true, result: 'ready' });
+  });
+
   it('keeps the session of a turn that ran out of time as its program ends it, so the next turn goes on in it', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
     /* The program is stopped at the time and says so a moment later, with its session. */

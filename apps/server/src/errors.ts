@@ -17,6 +17,7 @@ export type ErrorReason =
   | 'self_locked'
   | 'unknown_place'
   | 'not_owner'
+  | 'orchestrator_only'
   | 'already_connected'
   | 'not_company_level'
   | 'subscription_unknown'

@@ -148,6 +148,45 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     expect(await running).toMatchObject({ ok: false, error: 'cancelled' });
   });
 
+  it('lets a turn run past the time it was given, until it is called off', async () => {
+    await setUp();
+    await host.run(job('a5', 'warm up'));
+    const stop = new AbortController();
+    let over = false;
+    const running = host.run(job('a5', 'HANG', { timeoutMs: 300, signal: stop.signal })).finally(() => (over = true));
+    await new Promise(r => setTimeout(r, 1500));
+    expect(over).toBe(false);
+    stop.abort();
+    expect(await running).toMatchObject({ ok: false, error: 'cancelled' });
+  });
+
+  it("types Hornhoof's words into a running turn, which takes them in, and says when no turn runs", async () => {
+    await setUp();
+    await host.run(job('a7', 'warm up'));
+    const running = host.run(job('a7', 'HANG'));
+    await until(async () => (await host.screen('a7')).includes('HANG'));
+    expect(await host.say('a7', 'Use the new schema.')).toBe(true);
+    expect(await running).toMatchObject({ ok: true, result: 'echo: Use the new schema.' });
+    expect(sent.filter(m => m.type === 'turn.open')).toEqual([]);
+    expect(await host.say('a7', 'Nobody works now.')).toBe(false);
+    expect(await host.say('nobody', 'Hello.')).toBe(false);
+  });
+
+  it("does not type Hornhoof's words before the turn's own prompt went in, so they get the next turn", async () => {
+    await setUp({ enterWaitMs: 200 });
+    const running = host.run(job('a12', 'hello', { env: { FAKE_SECRET: SECRET, FAKE_START_MS: '2500' } }));
+    await new Promise(r => setTimeout(r, 300));
+    expect(await host.say('a12', 'Use the new schema.')).toBe(false);
+    expect(await running).toMatchObject({ ok: true, result: 'echo: hello' });
+  });
+
+  it('keeps the program running after its turn, however long nobody needs it', async () => {
+    await setUp();
+    await host.run(job('a6', 'one'));
+    await new Promise(r => setTimeout(r, 1000));
+    expect(await tmux.alive('a-a6')).toBe(true);
+  });
+
   it('takes the next turn at once after one was stopped, though the program says nothing when stopped', async () => {
     await setUp();
     const first = await host.run(job('a11', 'warm up'));
@@ -244,12 +283,38 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     await until(() => sent.some(m => m.type === 'term.exit' && m.termId === 't3'));
   });
 
+  it("tells a view while the agent's program is starting, and once it is up", async () => {
+    await setUp();
+    const states = (termId: string) => sent.flatMap(m => (m.type === 'term.program' && m.termId === termId ? [m.running] : []));
+    await host.open({ type: 'term.open', termId: 't40', agentKey: 'a40', cols: 80, rows: 24, write: true });
+    await until(() => states('t40').length > 0);
+    expect(states('t40')).toEqual([false]);
+    const screen = () => sent.flatMap(m => (m.type === 'term.data' && m.termId === 't40' ? [m.data] : [])).join('');
+    expect(screen()).not.toContain('Starting');
+    await host.run(job('a40', ''));
+    await until(() => states('t40').length > 1);
+    expect(states('t40')).toEqual([false, true]);
+    /* A view opened on a program that runs hears so at once. */
+    await host.open({ type: 'term.open', termId: 't41', agentKey: 'a40', cols: 80, rows: 24, write: true });
+    await until(() => states('t41').length > 0);
+    expect(states('t41')).toEqual([true]);
+  });
+
+  it('shows the last screen of a program that ended, which says why, instead of the loader', async () => {
+    await setUp();
+    const states = () => sent.flatMap(m => (m.type === 'term.program' && m.termId === 't42' ? [m.running] : []));
+    await host.open({ type: 'term.open', termId: 't42', agentKey: 'a42', cols: 80, rows: 24, write: true });
+    await host.run(job('a42', 'warm up'));
+    expect(await host.run(job('a42', 'EXIT'))).toMatchObject({ ok: false, error: 'agent_failed' });
+    expect(states()[0]).toBe(false);
+    expect(states().at(-1)).toBe(true);
+  });
+
   it('asks Hornhoof to start an agent that does not run when someone who may type opens it', async () => {
     await setUp();
     const starts = (key: string) => sent.filter(m => m.type === 'agent.start' && m.agentKey === key).length;
     await host.open({ type: 'term.open', termId: 't30', agentKey: 'a30', cols: 80, rows: 24, write: true });
-    const screen = () => sent.flatMap(m => (m.type === 'term.data' && m.termId === 't30' ? [m.data] : [])).join('');
-    await until(() => screen().includes('Starting'));
+    await until(() => starts('a30') > 0);
     expect(starts('a30')).toBe(1);
     /* A watcher who may not type starts nothing, and a running program needs no start. */
     await host.open({ type: 'term.open', termId: 't31', agentKey: 'a31', cols: 80, rows: 24, write: false });
@@ -439,15 +504,6 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     expect(host.typedJobs()).toEqual([]);
     expect(await host.run(job('b3', 'next', { sessionId: first.sessionId }))).toMatchObject({ ok: true, result: 'echo: next' });
   }, 30_000);
-
-  it('ends a typed turn that runs too long', async () => {
-    await setUp({ typedMs: 1000 });
-    await host.run(job('b4', 'hello'));
-    await typeTurn('b4', 'u3', 'HANG typed', 'job-long');
-    await until(() => Boolean(done('job-long')));
-    expect(done('job-long')).toMatchObject({ ok: false, error: 'timeout' });
-    expect(host.typedJobs()).toEqual([]);
-  });
 
   it("takes Hornhoof's late answer for a typed turn that still runs", async () => {
     await setUp({ openMs: 300 });
@@ -645,6 +701,14 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     expect(failed).toMatchObject({ ok: false, error: 'agent_failed' });
     expect(failed.output).toContain('The plan ran out.');
     expect(await host.run(kimiJob('k5', 'hello', { env: { FAKE_SIGNED_OUT: '1' } }))).toMatchObject({ ok: false, error: 'not_logged_in' });
+  });
+
+  it('ends the loader of a view whose program could not start, so the person sees why on its screen', async () => {
+    await setUp();
+    await host.open({ type: 'term.open', termId: 't50', agentKey: 'k6', cols: 80, rows: 24, write: true });
+    await until(() => sent.some(m => m.type === 'term.program' && m.termId === 't50'));
+    expect(await host.run(kimiJob('k6', 'hello', { env: { FAKE_SIGNED_OUT: '1' } }))).toMatchObject({ ok: false, error: 'not_logged_in' });
+    expect(sent.flatMap(m => (m.type === 'term.program' && m.termId === 't50' ? [m.running] : []))).toEqual([false, true]);
   });
 
   it('starts Kimi for a person at once, and gives their first message its tools once Hornhoof opened their turn', () =>

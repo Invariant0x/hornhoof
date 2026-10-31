@@ -37,7 +37,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
       'agents',
       {
         description:
-          'Every agent of the company as it is now: department, role, whether it is on and ready (and why not), whether a turn runs and since when, ' +
+          'Every agent of the company as it is now: department, role, whether it is on and ready (and why not), until when its plan is at its limit, whether a turn runs and since when, ' +
           'turns waiting, the open tasks it holds with when each last moved, its last activity and how its last turn ended.',
       },
       async () => {
@@ -70,6 +70,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
             on: !a.switchedOffAt,
             ready: state.ready,
             reason: state.reason,
+            limitUntil: state.limitUntil,
             busy: state.busy,
             runningSince: running?.at ?? null,
             queued: state.queued,
@@ -120,7 +121,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
     server.registerTool(
       'message_employee',
       {
-        description: `Writes to another employee, as you, into its window; it reads the message in its next turn. Use it to nudge a stuck agent or to tell a head. One turn sends at most ${TURN_NUDGES}.`,
+        description: `Writes to another employee, as you, into its window: one at work gets it at once in the turn it runs, one that is not in its next turn. Use it to nudge a stuck agent or to tell a head. One turn sends at most ${TURN_NUDGES}.`,
         inputSchema: { employee: z.uuid().describe("The employee's id, from agents or company."), text: z.string().trim().min(1).max(4000) },
       },
       async ({ employee, text }) => {

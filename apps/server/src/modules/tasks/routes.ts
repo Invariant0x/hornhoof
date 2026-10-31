@@ -5,6 +5,7 @@ import type { Ctx } from '../../app.js';
 import { accessOf, canReach, type Access } from '../../auth/access.js';
 import { actorOf, requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
 import { agents, departments, requests, tasks, turns } from '../../db/schema.js';
+import { ApiError } from '../../errors.js';
 import { orchestratorOf } from '../conversation/queue.js';
 import { answer, cancel, CLOSED, comment, createTask, refuse, taskSpot, type Task } from './engine.js';
 import { commitUrl, picturesOf } from './attachments.js';
@@ -142,6 +143,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
         images: pictures.get(r.request.id) ?? [],
         options: r.request.options,
         link: r.request.link,
+        explained: r.request.explained,
         at: r.request.createdAt.toISOString(),
         agent: { id: r.request.agentId, name: names.get(r.request.agentId) ?? '' },
         task: { id: lines[i]!.id, number: lines[i]!.number, title: lines[i]!.title, department: lines[i]!.department },
@@ -165,6 +167,23 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     /* An agent switched off while it waited for this answer leaves the work now. */
     await leaveIfOff(ctx, done.request.agentId);
     return { request: { id: done.request.id, status: done.request.status } };
+  });
+
+  /* The orchestrator puts what an employee asks into plain words for the people who answer it. */
+  app.post('/api/requests/:id/explained', async req => {
+    const me = await requirePerson(req, db);
+    if (!me.via) throw new ApiError(403, 'forbidden', 'Only the orchestrator puts a request into words for people. Answer it instead.', 'orchestrator_only');
+    const { id } = IdParams.parse(req.params);
+    const { text } = z.object({ text: z.string().trim().min(1).max(3000) }).parse(req.body);
+    const [row] = await db
+      .update(requests)
+      .set({ explained: text })
+      .where(and(eq(requests.id, id), eq(requests.companyId, me.companyId), eq(requests.status, 'open')))
+      .returning();
+    if (!row) throw refuse(404, 'request_unknown', 'There is no such open request.');
+    const [task] = await db.select().from(tasks).where(eq(tasks.id, row.taskId));
+    ctx.bus.publish(me.companyId, { type: 'requests', spot: taskSpot(task!) });
+    return { request: { id: row.id, explained: row.explained } };
   });
 
   /* Turns belong to the whole company. The words they were laid out from only reach people who see all of it. */

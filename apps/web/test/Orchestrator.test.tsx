@@ -174,6 +174,12 @@ describe('AgentWindow', () => {
     expect(screen.getAllByRole('checkbox')).toHaveLength(8);
   });
 
+  it('says that his plan is at its limit and that his turns wait until it starts over', async () => {
+    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, limitUntil: '2026-10-31T19:20:00Z' } }] });
+    expect(await screen.findByText(/^The plan is at its limit\. Turns wait until .+ and go on by themselves then\.$/)).toBeInTheDocument();
+    expect(screen.getByLabelText('Write to the orchestrator')).not.toBeDisabled();
+  });
+
   it('tells to update Hornhoof on a machine too old to run his turns', async () => {
     const mac = { ...SUBS[1]!, kind: 'personal' as const, owner: { id: 'p1', name: 'Ivan' } };
     open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, ready: false, reason: 'node_outdated' } }] }, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: mac } });

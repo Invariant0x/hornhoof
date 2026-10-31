@@ -1,4 +1,4 @@
-import { and, asc, count, eq, inArray, isNull, max, notInArray, sql } from 'drizzle-orm';
+import { and, asc, count, eq, gt, inArray, isNull, max, notInArray, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { accessOf, canReach, type Spot } from '../../auth/access.js';
 import type { Db } from '../../db/client.js';
@@ -10,7 +10,7 @@ export type Task = typeof tasks.$inferSelect;
 export type Request = typeof requests.$inferSelect;
 /* Who moves a task: a person from the web app, or an agent from its tools. */
 export type Actor = { personId: string; agentId?: undefined } | { agentId: string; personId?: undefined };
-export type WakeWhy = 'assigned' | 'review' | 'changes' | 'stuck_at_gate' | 'done' | 'reported' | 'blocked' | 'cancelled' | 'answered' | 'comment' | 'updated' | 'reminder' | 'turn' | 'switched';
+export type WakeWhy = 'assigned' | 'review' | 'changes' | 'stuck_at_gate' | 'done' | 'reported' | 'blocked' | 'cancelled' | 'answered' | 'comment' | 'updated' | 'reminder' | 'go_on' | 'turn' | 'switched' | 'explain';
 /* An agent that has to act on a task now; Hornhoof queues a turn for it. note: what else it should know, after the rest. */
 export type Wake = { agentId: string; taskId: string; why: WakeWhy; text?: string; note?: string };
 export type Moved = { task: Task; wakes: Wake[] };
@@ -23,6 +23,9 @@ export const CLOSED: readonly Task['status'][] = ['done', 'cancelled'];
 export const GATE_ROUNDS = 3;
 /* Turns in a row that end without moving the task before a person is asked to step in. */
 export const SILENT_TURNS = 3;
+/* Turns in a row an agent may go on in, saying how far it got or working until its time runs out, before a person is asked:
+   about six hours of work without handing anything in. */
+export const GOING_ON_TURNS = 8;
 const COMMIT = /^[0-9a-f]{40}$/;
 
 const STATUS_CODES = { 400: 'validation', 403: 'forbidden', 404: 'not_found', 409: 'conflict' } as const;
@@ -79,6 +82,31 @@ const giver = (task: Task, why: WakeWhy, actorId?: string, text?: string): Wake[
   task.createdByAgentId && task.createdByAgentId !== actorId ? [{ agentId: task.createdByAgentId, taskId: task.id, why, ...(text ? { text } : {}) }] : [];
 
 const closing = () => ({ status: 'done' as const, closedAt: new Date(), assigneeAgentId: null, silent: 0 });
+
+/* Whether the task waits for a person's word other than Hornhoof's note that it stood still. */
+async function waitsForPerson(db: Db | Tx, taskId: string): Promise<boolean> {
+  const [open] = await db.select({ id: requests.id }).from(requests).where(and(eq(requests.taskId, taskId), eq(requests.status, 'open'), notInArray(requests.kind, ['stuck']))).limit(1);
+  return !!open;
+}
+
+/* Hornhoof's notes that the task stood still are over once it moves again: handed on, handed in or reported. */
+async function letStuckGo(tx: Tx, taskId: string): Promise<boolean> {
+  const gone = await tx.update(requests).set({ status: 'withdrawn', answeredAt: new Date() }).where(and(eq(requests.taskId, taskId), eq(requests.status, 'open'), eq(requests.kind, 'stuck'))).returning({ id: requests.id });
+  return gone.length > 0;
+}
+
+/* The notes go with the move, and people hear of it once the move is in. */
+function stuckGoes(ctx: Live, task: Task): { also: (tx: Tx) => Promise<void>; tell: () => void } {
+  let gone = false;
+  return {
+    also: async tx => {
+      gone = await letStuckGo(tx, task.id);
+    },
+    tell: () => {
+      if (gone) ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
+    },
+  };
+}
 
 export type NewTask = {
   title: string;
@@ -165,13 +193,17 @@ export async function submit(ctx: Live, agentId: string, taskId: string, r: { su
   stillOpen(task);
   if (!task.executorAgentId) throw refuse(400, 'task_invalid', `#${task.number} has no executor; its owner closes it with report.`);
   if (task.executorAgentId !== agentId || task.stage !== 0) throw notYours(task, 'is not waiting for your work');
-  if (task.status === 'waiting') throw refuse(409, 'task_invalid', `#${task.number} waits for a person's answer first.`);
+  if (task.status === 'waiting' && (await waitsForPerson(ctx.db, task.id))) throw refuse(409, 'task_invalid', `#${task.number} waits for a person's answer first.`);
   const n: Note = { kind: 'submitted', actor: { agentId }, text: r.summary, data: { evidence: r.evidence } };
+  const unstuck = stuckGoes(ctx, task);
   if (task.gates.length) {
     const gate = await atGate(ctx.db, task, 1);
-    return { task: await move(ctx, task, gate.set, n), wakes: gate.wakes };
+    const row = await move(ctx, task, gate.set, n, unstuck.also);
+    unstuck.tell();
+    return { task: row, wakes: gate.wakes };
   }
-  const row = await move(ctx, task, closing(), n);
+  const row = await move(ctx, task, closing(), n, unstuck.also);
+  unstuck.tell();
   return { task: row, wakes: giver(task, 'done', agentId) };
 }
 
@@ -290,14 +322,20 @@ export async function report(ctx: Live, agentId: string, taskId: string, r: { do
   if (task.executorAgentId) throw refuse(400, 'task_invalid', `#${task.number} is a member task: submit it, or say it is blocked.`);
   if (task.assigneeAgentId !== agentId) throw notYours(task, 'is not yours to report');
   const n: Note = { kind: 'report', actor: { agentId }, text: r.summary, data: { done: r.done } };
-  if (r.done) return { task: await move(ctx, task, closing(), n), wakes: giver(task, 'reported', agentId, r.summary) };
-  if (task.createdByAgentId) return { task: await move(ctx, task, { status: 'blocked' }, n), wakes: giver(task, 'blocked', agentId, r.summary) };
+  const unstuck = stuckGoes(ctx, task);
+  if (r.done || task.createdByAgentId) {
+    const row = await move(ctx, task, r.done ? closing() : { status: 'blocked' }, n, unstuck.also);
+    unstuck.tell();
+    return { task: row, wakes: giver(task, r.done ? 'reported' : 'blocked', agentId, r.summary) };
+  }
   /* A person gave it, so a person has to unblock it. */
+  let note: Request | undefined;
   const row = await move(ctx, task, { status: 'waiting' }, n, async tx => {
-    await tx.insert(requests).values({ companyId: task.companyId, taskId, agentId, kind: 'stuck', text: r.summary });
+    await letStuckGo(tx, task.id);
+    [note] = await tx.insert(requests).values({ companyId: task.companyId, taskId, agentId, kind: 'stuck', text: r.summary }).returning();
   });
   ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
-  return { task: row, wakes: [] };
+  return { task: row, wakes: await explaining(ctx.db, task, agentId, note!.id) };
 }
 
 /* The executor cannot go on without its head. */
@@ -480,7 +518,15 @@ export async function updateTask(ctx: Live, agentId: string, taskId: string, c: 
   if (!fields.length) return { task, wakes: [] };
   /* A rewrite answers a blocked executor. A task nobody holds stays blocked until someone can take it. */
   if (task.status === 'blocked' && (set.assigneeAgentId ?? task.assigneeAgentId)) set.status = 'open';
-  const row = await move(ctx, task, set, { kind: 'updated', actor: { agentId }, data: { fields } });
+  /* Another one takes it up, so Hornhoof's note that it stood still is over; a person's word asked for still waits. */
+  const handedOn = !!set.assigneeAgentId && set.assigneeAgentId !== task.assigneeAgentId;
+  if (handedOn) {
+    set.silent = 0;
+    if (task.status === 'waiting' && !(await waitsForPerson(ctx.db, task.id))) set.status = 'open';
+  }
+  const unstuck = stuckGoes(ctx, task);
+  const row = await move(ctx, task, set, { kind: 'updated', actor: { agentId }, data: { fields } }, handedOn ? unstuck.also : undefined);
+  unstuck.tell();
   const wakes: Wake[] = [];
   if (set.assigneeAgentId) wakes.push({ agentId: set.assigneeAgentId, taskId, why: 'assigned' });
   else if (row.assigneeAgentId && row.assigneeAgentId !== agentId) wakes.push({ agentId: row.assigneeAgentId, taskId, why: 'updated' });
@@ -529,7 +575,16 @@ export async function ask(ctx: Live, agentId: string, taskId: string, q: Ask): P
     if (shown.length !== pictures.length) throw refuse(409, 'task_changed', 'A picture was shown meanwhile. Send it again with hh-attach.');
   });
   ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
-  return { task: row, request: request!, wakes: [] };
+  return { task: row, request: request!, wakes: await explaining(ctx.db, task, agentId, request!.id) };
+}
+
+/* What an employee asks people reaches the orchestrator first, to put into plain words for them; not what it asks itself. */
+async function explaining(db: Db | Tx, task: Task, agentId: string, requestId: string): Promise<Wake[]> {
+  const [orchestrator] = await db
+    .select({ id: agents.id })
+    .from(agents)
+    .where(and(eq(agents.companyId, task.companyId), eq(agents.kind, 'orchestrator'), isNull(agents.removedAt)));
+  return orchestrator && orchestrator.id !== agentId ? [{ agentId: orchestrator.id, taskId: task.id, why: 'explain', text: requestId }] : [];
 }
 
 /* The agent holding the task ended a turn without moving it: a reminder, and from SILENT_TURNS on a person is asked. */
@@ -539,12 +594,37 @@ export async function silentTurn(ctx: Live, agentId: string, task: Task): Promis
     const row = await move(ctx, task, { silent }, { kind: 'reminded', actor: { agentId }, data: { silent } });
     return { task: row, wakes: [{ agentId, taskId: task.id, why: 'reminder' }] };
   }
-  const text = `Ended ${silent} turns in a row on #${task.number} without moving it. Tell it how to go on, or cancel the task.`;
+  return askAboutStill(ctx, agentId, task, silent, `Ended ${silent} turns in a row on #${task.number} without moving it. Tell it how to go on, or cancel the task.`);
+}
+
+/* Hornhoof stops waking the agent on the task and asks a person how it should go on. */
+async function askAboutStill(ctx: Live, agentId: string, task: Task, silent: number, text: string): Promise<Moved> {
+  let note: Request | undefined;
   const row = await move(ctx, task, { silent, status: 'waiting' }, { kind: 'stuck', actor: { agentId }, text }, async tx => {
-    await tx.insert(requests).values({ companyId: task.companyId, taskId: task.id, agentId, kind: 'stuck', text });
+    [note] = await tx.insert(requests).values({ companyId: task.companyId, taskId: task.id, agentId, kind: 'stuck', text }).returning();
   });
   ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
-  return { task: row, wakes: [] };
+  return { task: row, wakes: await explaining(ctx.db, task, agentId, note!.id) };
+}
+
+/* Events that do not move a task: what an agent says in it and Hornhoof's own notes about its turns. */
+export const NOT_A_MOVE = ['comment', 'reminded', 'continued', 'stuck'] as const;
+
+/* The agent holding the task worked through a turn without handing anything in, but said in the task how far it got or
+   worked until its time ran out: it goes on in another turn, from GOING_ON_TURNS such turns in a row a person is asked. */
+export async function wentOn(ctx: Live, agentId: string, task: Task): Promise<Moved> {
+  const [last] = await ctx.db
+    .select({ at: max(taskEvents.createdAt) })
+    .from(taskEvents)
+    .where(and(eq(taskEvents.taskId, task.id), notInArray(taskEvents.kind, [...NOT_A_MOVE])));
+  const [before] = await ctx.db
+    .select({ n: count() })
+    .from(taskEvents)
+    .where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.agentId, agentId), eq(taskEvents.kind, 'continued'), ...(last?.at ? [gt(taskEvents.createdAt, last.at)] : [])));
+  const turns = Number(before?.n ?? 0) + 1;
+  if (turns >= GOING_ON_TURNS) return askAboutStill(ctx, agentId, task, 0, `Went on for ${turns} turns in a row on #${task.number} without handing anything in. Tell it how to go on, or cancel the task.`);
+  const row = await move(ctx, task, { silent: 0 }, { kind: 'continued', actor: { agentId }, data: { turns } });
+  return { task: row, wakes: [{ agentId, taskId: task.id, why: 'go_on' }] };
 }
 
 /* pick: the way a person took, from 0, in a choice. */
@@ -610,7 +690,9 @@ export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answ
   published(ctx, now);
   await handOff(ctx, actor, now);
   ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
-  const wakes: Wake[] = CLOSED.includes(now.status) ? [] : [{ agentId: found.agentId, taskId: task.id, why: 'answered', text: said }];
+  /* A task that stood still goes on with whoever holds it now. */
+  const goesOn = found.kind === 'stuck' && now.stage === 0 && now.assigneeAgentId ? now.assigneeAgentId : found.agentId;
+  const wakes: Wake[] = CLOSED.includes(now.status) ? [] : [{ agentId: goesOn, taskId: task.id, why: 'answered', text: said }];
   /* The last answer at a gate: everyone else still to give a verdict there goes on too, also after a turn spent waiting. */
   if (task.status === 'waiting' && now.status === 'review') wakes.push(...now.panel.filter(id => id !== found.agentId).map(agentId => ({ agentId, taskId: task.id, why: 'review' as const })));
   return { request: row, task: now, wakes };

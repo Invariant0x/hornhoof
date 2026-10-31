@@ -133,10 +133,12 @@ describe('the tracker', () => {
     await openTasks(user);
     const waiting = screen.getByRole('region', { name: 'Waiting for you' });
     const question = within(waiting).getByRole('article', { name: /#9/ });
+    /* Until the orchestrator puts it into plain words, the agent's own words stand. */
     expect(question).toHaveTextContent('Stripe or Adyen?');
     expect(question).toHaveTextContent('Dana');
+    expect(within(question).queryByText('In more detail')).toBeNull();
     await user.type(within(question).getByLabelText('Your answer'), 'Stripe');
-    await user.click(within(question).getByRole('button', { name: 'Answer' }));
+    await user.click(within(question).getByRole('button', { name: 'Send answer' }));
     expect(calls.find(c => c.path === '/api/requests/r1')?.body).toEqual({ answer: 'Stripe' });
     await waitFor(() => expect(within(waiting).queryByRole('article', { name: /#9/ })).not.toBeInTheDocument());
     expect(screen.getByRole('button', { name: 'Tasks, 1 waiting for you' })).toBeInTheDocument();

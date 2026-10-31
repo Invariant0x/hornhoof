@@ -1,9 +1,10 @@
 import { and, count, desc, eq, gte, inArray, isNull, notInArray, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { agentChanges, agents, jobs, requests, taskEvents, tasks } from '../../db/schema.js';
-import { afterJob, cancelJob, insertTurn, liveSubscription, onAgent, orchestratorOf, pump } from '../conversation/queue.js';
+import { agentChanges, agents, jobs, requests, subscriptions, taskEvents, tasks } from '../../db/schema.js';
+import { afterJob, cancelJob, insertTurn, limitUntil, liveSubscription, onAgent, orchestratorOf, pump } from '../conversation/queue.js';
+import { sayLive } from '../conversation/live.js';
 import { appendEvent } from '../events/store.js';
-import { CLOSED, GATE_ROUNDS, leaveWork, published, rejoin, silentTurn, type Actor, type Task, type Wake } from './engine.js';
+import { CLOSED, GATE_ROUNDS, leaveWork, NOT_A_MOVE, published, rejoin, silentTurn, wentOn, type Actor, type Task, type Wake, type WakeWhy } from './engine.js';
 import { settle, tell } from './turns.js';
 
 export { SILENT_TURNS } from './engine.js';
@@ -64,11 +65,16 @@ function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string {
       return `${ref} was rewritten. Read it again with the task tool and go on from its new body.`;
     case 'reminder':
       return `You ended your last turn on ${ref} without moving it. Go on with the work, then ${finish}. If you cannot go on, ${stuck}.`;
+    case 'go_on':
+      return `Your last turn on ${ref} ended before the work did. Go on with the work from where you left off, then ${finish}. If you cannot go on, ${stuck}.`;
     case 'turn':
       return `${ref} is closed.`;
     case 'switched':
       /* Its text says what to do. */
       return `${ref}, which you gave out, has nobody on to go on with it${w.text ? `:\n\n${w.text}` : '. Give it to someone who is on with update_task, or tell the CEO it waits.'}`;
+    case 'explain':
+      /* Hornhoof writes this turn itself, from the request. */
+      return `${ref} waits for people. See /api/requests and put what is asked into plain words with explain_request.`;
   }
 }
 
@@ -116,11 +122,41 @@ export async function backOn(ctx: Ctx, actor: Actor, agentId: string): Promise<v
 export async function wakeAll(ctx: Ctx, wakes: Wake[]): Promise<void> {
   const seen = new Set<string>();
   for (const w of wakes) {
+    if (w.why === 'explain') {
+      await explainRequest(ctx, w);
+      continue;
+    }
     const key = `${w.agentId}:${w.taskId}`;
     if (seen.has(key)) continue;
     seen.add(key);
     if (await queueWake(ctx, w)) await pump(ctx, w.agentId);
   }
+}
+
+/* An employee waits for people: the orchestrator finds out what it needs and puts it into plain words for them, which
+   people read above their answer. Typed into the orchestrator's turn when it works, else its own turn, one per request. */
+async function explainRequest(ctx: Ctx, w: Wake): Promise<void> {
+  const [found] = await ctx.db
+    .select({ request: requests, asker: agents.name, task: tasks })
+    .from(requests)
+    .innerJoin(agents, eq(agents.id, requests.agentId))
+    .innerJoin(tasks, eq(tasks.id, requests.taskId))
+    .where(eq(requests.id, w.text ?? ''));
+  if (!found || found.request.status !== 'open' || !(await liveSubscription(ctx, w.agentId))) return;
+  const { request, asker, task } = found;
+  const ref = `#${task.number} "${task.title}"`;
+  const what =
+    request.kind === 'stuck'
+      ? `Hornhoof stopped waking ${asker} on ${ref} and waits for people to say how it goes on (request ${request.id}). Hornhoof noted: ${request.text}`
+      : `${asker} asks people on ${ref} (request ${request.id}, a ${request.kind}):\n\n${request.text}`;
+  const text =
+    `${what}\n\nBefore a person answers, find out what it needs: read the task with "task", and ask ${asker} with "message_employee" when its words are not enough. ` +
+    `Then call "explain_request" with request ${request.id} and a few lines for the person, in the CEO's language and plain words without IT terms: ` +
+    'which task and what for, what is needed from them and why, and the ways to go with what each leads to. Do not answer it yourself unless the CEO told you how.';
+  const into = await sayLive(ctx, w.agentId, text);
+  const jobId = into ?? (await insertTurn(ctx, { companyId: task.companyId, agentId: w.agentId, prompt: text, createdBy: null }));
+  await appendEvent(ctx, { companyId: task.companyId, agentId: w.agentId, jobId, kind: 'message', data: { text, task: { id: task.id, number: task.number } } });
+  if (!into) await pump(ctx, w.agentId);
 }
 
 /* An agent back on a subscription: the wakes it missed without one were left out, so every task waiting on it gets a turn. */
@@ -154,12 +190,24 @@ export async function stopTurns(ctx: Ctx, taskIds: string[], keep?: string): Pro
   }
 }
 
+/* Wakes that bring the agent new words on its task, which a turn on that task takes in while it runs. */
+const LIVE_WAKES: WakeWhy[] = ['comment', 'answered', 'updated'];
+
 async function queueWake(ctx: Ctx, w: Wake): Promise<boolean> {
   const { db } = ctx;
   const [agent] = await db.select().from(agents).where(and(eq(agents.id, w.agentId), isNull(agents.removedAt)));
   if (!agent || !(await liveSubscription(ctx, agent.id))) return false;
   const [task] = await db.select().from(tasks).where(eq(tasks.id, w.taskId));
   if (!task) return false;
+  /* New words on the task the agent works on right now go into that turn. */
+  if (LIVE_WAKES.includes(w.why)) {
+    const text = wakePrompt(agent, task, w);
+    const into = await sayLive(ctx, agent.id, text, task.id);
+    if (into) {
+      await appendEvent(ctx, { companyId: agent.companyId, agentId: agent.id, jobId: into, kind: 'message', data: { text, task: { id: task.id, number: task.number } } });
+      return false;
+    }
+  }
   /* One at a time per agent, so two moves at once still queue one turn. */
   return onAgent(ctx, agent.id, async () => {
     const [waiting] = await db
@@ -198,10 +246,9 @@ async function heldTask(ctx: Ctx, agentId: string, taskId: string): Promise<Task
   return holds(parent);
 }
 
-const NOT_A_MOVE = ['comment', 'reminded', 'stuck'] as const;
-
 /* After a turn on a task: an agent that went idle holding the task without moving it is reminded, and after
-   SILENT_TURNS such turns a person is asked. A failed turn counts as silent; a turn a person stopped does not count.
+   SILENT_TURNS such turns a person is asked. A failed turn counts as silent; a turn a person stopped does not count. One
+   that worked until its time ran out, or said in the task how far it got, goes on, up to GOING_ON_TURNS in a row.
    Nothing is checked while the agent has another turn waiting on the task, or while the task waits on its subtasks or on people. */
 export async function checkLiveness(ctx: Ctx, jobId: string): Promise<void> {
   const { db } = ctx;
@@ -229,7 +276,16 @@ export async function checkLiveness(ctx: Ctx, jobId: string): Promise<void> {
     if (task.silent) await db.update(tasks).set({ silent: 0 }).where(eq(tasks.id, task.id));
     return;
   }
-  const moved = await silentTurn(ctx, agentId, task).catch((err: { reason?: string }) => {
+  /* A turn that ended at the plan's limit did not stand still: the agent goes on once the limit starts over. */
+  const [sub] = job.subscriptionId ? await db.select({ limits: subscriptions.limits }).from(subscriptions).where(eq(subscriptions.id, job.subscriptionId)) : [];
+  if (limitUntil(sub?.limits ?? null)) return wakeAll(ctx, [{ agentId, taskId: task.id, why: 'go_on' }]);
+    /* A turn that worked until its time ran out, or that said in the task how far it got, did not stand still. */
+  const [told] = await db
+    .select({ n: count() })
+    .from(taskEvents)
+    .where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.agentId, agentId), gte(taskEvents.createdAt, job.startedAt), eq(taskEvents.kind, 'comment')));
+  const working = job.error === 'timeout' || Number(told?.n ?? 0) > 0;
+  const moved = await (working ? wentOn : silentTurn)(ctx, agentId, task).catch((err: { reason?: string }) => {
     /* Someone moved the task meanwhile: that answers the question. */
     if (err.reason === 'task_changed') return null;
     throw err;

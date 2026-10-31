@@ -130,6 +130,8 @@ export type Org = {
 /* Whether the orchestrator can take a turn now, and what he is doing. */
 export type OrchestratorState = {
   ready: boolean;
+  /* The plan is at its limit until then; its turns wait, and people may still write. */
+  limitUntil?: string | null;
   reason: 'no_subscription' | 'waiting_machine' | 'needs_login' | 'node_outdated' | 'machine_offline' | null;
   busy: boolean;
   runningJobId: string | null;
@@ -257,6 +259,8 @@ export type WaitingRequest = {
   options: { label: string; image: string | null }[];
   /* Where to see the work. */
   link: string | null;
+  /* The orchestrator's words for people: what is needed from them, why, and the ways to go; null until it writes them. */
+  explained: string | null;
   at: string;
   agent: { id: string; name: string };
   task: { id: string; number: number; title: string; department: TaskPlace };
