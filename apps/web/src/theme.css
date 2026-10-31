@@ -484,6 +484,13 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .t-term { flex: 1 1 auto; min-height: 0; background: #15191F; overflow: hidden; }
 .t-term .xterm { height: 100%; padding: 6px 4px 4px 10px; }
 .t-cards { flex: none; max-height: 45%; overflow: auto; padding: 10px 16px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 12px; }
+.notebook { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; font-family: var(--f-body); }
+.notebook ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.notebook li { display: grid; grid-template-columns: auto 1fr auto auto auto; gap: 4px 10px; align-items: baseline; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.notebook li form { grid-column: 2 / -1; display: flex; flex-wrap: wrap; gap: 8px; }
+.notebook li small { color: var(--muted); }
+.notebook textarea { width: 100%; box-sizing: border-box; font: inherit; resize: vertical; }
+.notebook-add { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
 .t-st { flex: none; display: flex; justify-content: space-between; gap: 12px; padding: 6px 16px 10px; font-size: 11.5px; color: var(--muted); white-space: nowrap; }
 .t-st > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 760px) { .orch { left: 0; right: 0; top: 56px; bottom: 0; width: auto; border-left: 0; border-right: 0; } }

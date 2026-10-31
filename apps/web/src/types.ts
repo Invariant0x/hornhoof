@@ -133,7 +133,7 @@ export type OrchestratorState = {
 };
 
 /* One part of an agent's instructions: who it is (written by Hornhoof), its role, or a skill between markers. */
-export type Part = { kind: 'header' | 'base' | 'skill'; id: string | null; title: Lang | null; text: string; overridden: boolean; templateChanged: boolean };
+export type Part = { kind: 'header' | 'base' | 'skill' | 'notebook'; id: string | null; title: Lang | null; text: string; overridden: boolean; templateChanged: boolean };
 
 export type CardSkill = { id: string; title: Lang; description: Lang; on: boolean; locked: boolean; overridden: boolean; templateChanged: boolean };
 
@@ -189,6 +189,7 @@ export type StreamMessage =
   | { type: 'agent_event'; agentId: string; event: EventView }
   | { type: 'working'; working: number }
   | { type: 'org' }
+  | { type: 'notebook' }
   | { type: 'pulse'; from: Endpoint; to: Endpoint }
   | { type: 'task'; id: string }
   | { type: 'requests' }
@@ -294,3 +295,6 @@ export type UpdatesView = {
   error: string | null;
   updater: { present: boolean; status: UpdaterStatus | null; waiting: { version: string } | null };
 };
+
+/* A note of the company notebook and who wrote it last. */
+export type NoteView = { number: number; text: string; by: { kind: 'orchestrator' } | { kind: 'person'; id: string; name: string } | null; updatedAt: string };
