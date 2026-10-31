@@ -145,6 +145,7 @@ export const ru: Messages = {
     minutes: n => `${n} ${plural('ru', n, { one: 'минута', few: 'минуты', many: 'минут', other: 'минуты' })}`,
     hours: n => `${n} ${plural('ru', n, { one: 'час', few: 'часа', many: 'часов', other: 'часа' })}`,
     days: n => `${n} ${plural('ru', n, { one: 'день', few: 'дня', many: 'дней', other: 'дня' })}`,
+    month: 'Месяц',
     resetsAt: at => `сброс в ${at}`,
     limitReached: at => (at ? `Лимит исчерпан, сброс в ${at}` : 'Лимит исчерпан'),
     runTest: 'Проверить',

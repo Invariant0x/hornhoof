@@ -40,6 +40,7 @@ function clock(language: Language, iso: string | null): string | null {
 const WINDOW_MINUTES: Record<string, number> = { five_hour: 300, one_day: 1440, seven_day: 10080 };
 
 function windowName(t: Messages, name: string): string {
+  if (name === 'month') return t.subs.month;
   const minutes = WINDOW_MINUTES[name] ?? Number(/^(\d+)_minutes$/.exec(name)?.[1]);
   if (!minutes) return name.replaceAll('_', ' ');
   if (minutes % 1440 === 0) return t.subs.days(minutes / 1440);

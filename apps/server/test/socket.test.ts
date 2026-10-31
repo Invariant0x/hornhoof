@@ -41,6 +41,12 @@ describe('node socket', () => {
     node.send({ type: 'status', loggedIn: true, limits });
     await until(async () => (await subOf(app, ceo, subId)).status === 'ready');
     expect((await subOf(app, ceo, subId)).limits).toEqual(limits);
+    /* A node that started again does not know the limits until its program says; the last ones stay. */
+    node.send({ type: 'status', loggedIn: false, limits: null });
+    await until(async () => (await subOf(app, ceo, subId)).status === 'needs_login');
+    expect((await subOf(app, ceo, subId)).limits).toEqual(limits);
+    node.send({ type: 'status', loggedIn: true, limits });
+    await until(async () => (await subOf(app, ceo, subId)).status === 'ready');
     const machines = (await app.inject({ url: '/api/machines', ...as(ceo) })).json().machines;
     expect(machines[0].online).toBe(true);
     node.close();

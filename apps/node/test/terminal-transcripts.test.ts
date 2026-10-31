@@ -108,6 +108,19 @@ describe("Kimi Code's session log", () => {
       ],
     });
     expect(kimiUsageLimits({ usages: { limit_5h: { used_ratio: 0.1 } } })).toEqual({ status: 'allowed', windows: [{ name: 'five_hour', utilization: 0.1, resetsAt: null }] });
+    /* A plan with monthly limits, as Kimi's page answers for one: the fuller month speaks for both. */
+    const monthly = {
+      limit_5h: { used_ratio: 0.8923, reset_time: '2026-10-31T03:12:51Z' },
+      limit_month_total: { used_ratio: 0.055, reset_time: '2026-12-01T00:00:00Z' },
+      limit_month_code: { used_ratio: 0.0543, reset_time: '2026-12-01T00:00:00Z' },
+    };
+    expect(kimiUsageLimits({ usages: monthly })).toEqual({
+      status: 'allowed',
+      windows: [
+        { name: 'five_hour', utilization: 0.8923, resetsAt: '2026-10-31T03:12:51.000Z' },
+        { name: 'month', utilization: 0.055, resetsAt: '2026-12-01T00:00:00.000Z' },
+      ],
+    });
     expect(kimiUsageLimits({ error: 'nope' })).toBeNull();
   });
 });

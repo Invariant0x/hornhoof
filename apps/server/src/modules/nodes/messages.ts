@@ -69,9 +69,10 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
     }
     case 'status': {
       if (id.kind !== 'node') return;
+      /* A node that started again knows no limits until its program says them; the last ones stay until then. */
       await db
         .update(subscriptions)
-        .set({ status: msg.loggedIn ? 'ready' : 'needs_login', limits: msg.limits, lastSeenAt: now, ...(msg.models ? { models: msg.models } : {}) })
+        .set({ status: msg.loggedIn ? 'ready' : 'needs_login', lastSeenAt: now, ...(msg.limits ? { limits: msg.limits } : {}), ...(msg.models ? { models: msg.models } : {}) })
         .where(and(eq(subscriptions.id, id.subscriptionId), isNull(subscriptions.removedAt)));
       /* A signed-in subscription may have turns waiting for it. */
       if (msg.loggedIn) await pumpWaiting(ctx);

@@ -155,6 +155,7 @@ export const en = {
     minutes: (n: number) => `${n} ${plural('en', n, { one: 'minute', other: 'minutes' })}`,
     hours: (n: number) => `${n} ${plural('en', n, { one: 'hour', other: 'hours' })}`,
     days: (n: number) => `${n} ${plural('en', n, { one: 'day', other: 'days' })}`,
+    month: 'Month',
     resetsAt: (at: string) => `resets at ${at}`,
     limitReached: (at: string | null) => (at ? `Limit reached, resets at ${at}` : 'Limit reached'),
     runTest: 'Run a test',

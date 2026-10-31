@@ -37,18 +37,20 @@ describe('Subscriptions', () => {
         { name: 'five_hour', utilization: 0.42, resetsAt: '2026-10-29T18:00:00.000Z' },
         { name: 'seven_day', utilization: 0.93, resetsAt: null },
         { name: '120_minutes', utilization: 0.05, resetsAt: null },
+        { name: 'month', utilization: 0.06, resetsAt: null },
         { name: 'one_day', utilization: null, resetsAt: null },
       ],
     };
     mockApi({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, limits }] }], 'GET /api/machines': [200, { machines: MACHINES }] });
     render(<Subscriptions me={ME} />);
     const list = within(await screen.findByRole('row', { name: /^Claude\b/ })).getByRole('list', { name: 'Limits' });
-    const [five, seven, two, ...rest] = within(list).getAllByRole('listitem');
+    const [five, seven, two, month, ...rest] = within(list).getAllByRole('listitem');
     expect(five).toHaveTextContent(/^5 hours42%resets at /);
     expect(five!.querySelector('.bar')).not.toHaveClass('hi');
     expect(seven).toHaveTextContent(/^7 days93%$/);
     expect(seven!.querySelector('.bar')).toHaveClass('max');
     expect(two).toHaveTextContent(/^2 hours5%$/);
+    expect(month).toHaveTextContent(/^Month6%$/);
     expect(rest).toEqual([]);
   });
 
