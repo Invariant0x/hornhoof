@@ -62,6 +62,8 @@ export class NodeHub {
         }
         return;
       }
+      /* A message before it may wait for this word, as a finished job waits for words typed into another agent's turn. */
+      if (msg?.type === 'agent.said') return void this.opts.onMessage(id, msg).catch(report);
       if (msg) chain = chain.then(() => this.opts.onMessage(id, msg)).catch(report);
     });
     socket.on('close', () => {
