@@ -211,6 +211,32 @@ describe('job metadata export', () => {
     expect(await metadataState(c)).toEqual(before);
   });
 
+  it.each(['started_at', 'finished_at'])('selects jobs independently by %s with inclusive microsecond bounds and preserves state', async column => {
+    const c = await company();
+    const times = [
+      '2026-11-01T00:17:00.123455Z',
+      FROM,
+      '2026-11-01T00:17:00.123457Z',
+      '2026-11-01T00:30:03.654320Z',
+      TO,
+      '2026-11-01T00:30:03.654322Z',
+    ];
+    const ids: string[] = [];
+    for (const [index, time] of times.entries()) {
+      const [job] = await c.db.insert(jobs).values({ companyId: c.acme.id, subscriptionId: c.sub.id, agentId: c.target.id, kind: 'test', prompt: `edge-${column}-${index}`, status: 'done', createdAt: new Date(Date.parse('2026-10-31T00:00:00Z') + index * 1000), startedAt: null, finishedAt: null, timeoutMs: 1000 }).returning({ id: jobs.id });
+      ids.push(job!.id);
+      await c.db.execute(sql`update jobs set ${sql.identifier(column)} = ${time}::timestamptz where id = ${job!.id}`);
+    }
+    const before = await metadataState(c);
+    const response = await c.app.inject({ url: metadataPath(c.target.id), ...as(c.ceo) });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().complete).toBe(true);
+    expect(response.json().jobs.map((j: { id: string }) => j.id)).toEqual(ids.slice(1, 5));
+    expect(response.json().jobs.map((j: Record<string, string>) => j[column])).toEqual(times.slice(1, 5));
+    expect(response.json().jobs.map((j: { predecessor_before_window: boolean }) => j.predecessor_before_window)).toEqual([false, false, false, false]);
+    expect(await metadataState(c)).toEqual(before);
+  });
+
   it('allows instant, exactly fifteen minute and supported boundary-year windows', async () => {
     const c = await company();
     const instant = new URLSearchParams({ from: FROM, to: FROM }).toString();
