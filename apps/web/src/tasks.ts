@@ -12,16 +12,25 @@ function useLive<T>(path: string | null, pick: (body: never) => T, refresh: (m: 
   latest.current = path;
   const pickRef = useRef(pick);
   pickRef.current = pick;
+  /* Answers can come back out of order; one older than the answer on screen is dropped. */
+  const asked = useRef(0);
+  const shown = useRef(0);
 
   const load = useCallback(() => {
     if (!path) return;
+    const n = ++asked.current;
+    const fresh = () => {
+      if (latest.current !== path || n < shown.current) return false;
+      shown.current = n;
+      return true;
+    };
     api.get<never>(path).then(
       body => {
-        if (latest.current !== path) return;
+        if (!fresh()) return;
         setData(pickRef.current(body));
         setFailure(null);
       },
-      err => latest.current === path && setFailure(err),
+      err => fresh() && setFailure(err),
     );
   }, [path]);
 

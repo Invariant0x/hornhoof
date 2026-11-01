@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
@@ -226,5 +226,32 @@ describe('the tracker', () => {
     stream.send({ type: 'task', id: 't11' });
     await waitFor(() => expect(screen.getByRole('button', { name: /#11/ })).toHaveTextContent('Gate 1 of 3'));
     expect(screen.getByRole('button', { name: /#11/ })).toHaveTextContent('In review');
+  });
+
+  it('keeps the newest list when an older answer comes after it', async () => {
+    const user = userEvent.setup();
+    const stream = fakeStream();
+    let moved = false;
+    let hold = false;
+    let late = () => {};
+    shell({
+      [`GET ${ALL}`]: () => {
+        const reply: [number, unknown] = [200, { tasks: moved ? [{ ...TASKS[1]!, status: 'review', stage: 1, gateCount: 3 }] : TASKS }];
+        if (!hold) return reply;
+        hold = false;
+        return new Promise(resolve => (late = () => resolve(reply)));
+      },
+    });
+    await openTasks(user);
+    hold = true;
+    stream.send({ type: 'task', id: 't11' });
+    moved = true;
+    stream.send({ type: 'task', id: 't11' });
+    await waitFor(() => expect(screen.getByRole('button', { name: /#11/ })).toHaveTextContent('Gate 1 of 3'));
+    await act(async () => {
+      late();
+      await new Promise(r => setTimeout(r, 50));
+    });
+    expect(screen.getByRole('button', { name: /#11/ })).toHaveTextContent('Gate 1 of 3');
   });
 });

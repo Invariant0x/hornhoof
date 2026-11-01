@@ -381,6 +381,33 @@ describe('Map', () => {
     expect(container.querySelector('.hub-num')).toHaveTextContent('1/1');
   });
 
+  it('keeps the newest company when an older answer comes after it', async () => {
+    const stream = fakeStream();
+    let working = 0;
+    let hold = false;
+    let late = () => {};
+    mockApi({
+      'GET /api/org': () => {
+        const reply: [number, unknown] = [200, { ...ORG, agents: { ...ORG.agents, working } }];
+        if (!hold) return reply;
+        hold = false;
+        return new Promise(resolve => (late = () => resolve(reply)));
+      },
+    });
+    const { container } = render(<MapScreen {...PROPS} />);
+    await screen.findByText('agents working');
+    hold = true;
+    stream.send({ type: 'org' });
+    working = 1;
+    stream.send({ type: 'org' });
+    await vi.waitFor(() => expect(container.querySelector('.hub-num')).toHaveTextContent('1/1'));
+    await act(async () => {
+      late();
+      await new Promise(r => setTimeout(r, 50));
+    });
+    expect(container.querySelector('.hub-num')).toHaveTextContent('1/1');
+  });
+
   it('shows what a department works on now where it would say it has no agents', async () => {
     mockApi({ 'GET /api/org': [200, { ...ORG, departments: [dept({ id: 'd1', name: 'Sales', current: { id: 't5', number: 5, title: 'Call ten shops' } }), dept({ id: 'd2', name: 'Support' })] }] });
     render(<MapScreen {...PROPS} />);

@@ -18,15 +18,24 @@ export function useOrg(enabled = true): { org: Org | null; failure: unknown } {
   const [org, setOrg] = useState<Org | null>(null);
   const [failure, setFailure] = useState<unknown>(null);
   const mounted = useRef(true);
+  /* Answers can come back out of order; one older than the answer on screen is dropped. */
+  const asked = useRef(0);
+  const shown = useRef(0);
 
   const load = useCallback(() => {
+    const n = ++asked.current;
+    const fresh = () => {
+      if (!mounted.current || n < shown.current) return false;
+      shown.current = n;
+      return true;
+    };
     api.get<Org>('/api/org').then(
       data => {
-        if (!mounted.current) return;
+        if (!fresh()) return;
         setOrg(data);
         setFailure(null);
       },
-      err => mounted.current && setFailure(err),
+      err => fresh() && setFailure(err),
     );
   }, []);
 
