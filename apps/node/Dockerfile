@@ -87,6 +87,8 @@ WORKDIR /app
 COPY --from=deps /app /app
 COPY --from=build /app/packages/protocol/dist packages/protocol/dist
 COPY --from=build /app/apps/node/dist apps/node/dist
+# The fixed task43 file boundary runs only through the node adapter, with no remote exec interface.
+COPY --chmod=755 apps/node/task43-file.py /app/task43-file.py
 # git asks this for a repository's password; the node gives each turn its token in HH_GIT_PASSWORD.
 COPY --chmod=755 apps/node/git-askpass /app/git-askpass
 # Agents send screenshots for people with hh-attach; the node gives each turn its address and token.

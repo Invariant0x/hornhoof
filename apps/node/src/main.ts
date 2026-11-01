@@ -3,7 +3,8 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { AgentEvent, Limits, NodeMessage, ProviderId, ServerMessage } from '@hornhoof/protocol';
+import { TASK43_CAPABILITY, type AgentEvent, type Limits, type NodeMessage, type ProviderId, type ServerMessage, type Task43ServerMessage } from '@hornhoof/protocol';
+import { createTask43Node } from './task43-transfer.js';
 import { connect } from './connection.js';
 import { builtinAdapters } from './isolation.js';
 import { adapterFor, programFor } from './providers/index.js';
@@ -116,23 +117,31 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
     emit({ type: 'status', loggedIn, limits, ...(models ? { models } : {}) });
   };
 
+  let connectionGeneration = 0;
+  const task43 = await createTask43Node({ dir, send: message => void send?.(message) });
   const conn = connect({
     url: state.server.replace(/^http/, 'ws') + '/api/nodes/socket',
     key: state.key,
-    onOpen(next) {
+    onOpen(next, generation) {
+      connectionGeneration = generation;
+      task43.close();
       send = next;
       host?.closeViews();
       /* Finished jobs waiting in the outbox still count as running, so the server does not give up on them. */
       const pending = outbox.flatMap(m => (m.type === 'job.done' ? [m.jobId] : []));
       const typed = host?.typedJobs() ?? [];
-      next({ type: 'hello', version: VERSION, loggedIn, running: [...running.keys(), ...typed, ...pending], ...(models ? { models } : {}), terminals: Boolean(host) });
+      next({ type: 'hello', version: VERSION, loggedIn, running: [...running.keys(), ...typed, ...pending], ...(models ? { models } : {}), terminals: Boolean(host), capabilities: task43.capability ? [TASK43_CAPABILITY] : [] });
       for (const m of outbox.splice(0)) emit(m);
     },
     onMessage: m => void handle(m),
+    onClose: generation => {
+      if (generation === connectionGeneration) task43.close();
+    },
     onRefused: () => log('Hornhoof does not know this machine any more. Run the install command from Hornhoof again to reconnect.'),
   });
 
   async function handle(m: ServerMessage) {
+    if (m.type.startsWith('task43.')) return task43.handle(m as Task43ServerMessage);
     if (m.type === 'remove') {
       /* Only personal subscriptions are removed this way; the built-in node stays. */
       if (builtin || stopped) return;
@@ -171,6 +180,7 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
         return void send?.({ type: 'agent.said', ref: m.ref, ok });
       }
     }
+    if (m.type !== 'job.run') return;
     if (stopped || running.has(m.jobId)) return;
     const controller = new AbortController();
     const done = runOne(m, controller.signal);
@@ -238,6 +248,7 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
     clearInterval(timer);
     if (learning) clearInterval(learning);
     clearInterval(asking);
+    task43.close();
     void host?.stop();
     /* Let the last message leave before the socket closes. */
     setTimeout(() => conn.close(), 50);

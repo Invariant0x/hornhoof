@@ -102,7 +102,9 @@ export class NodeHub {
     if (!entry) return;
     entry.greeted = true;
     entry.terminals = terminals;
-    entry.task43 = capabilities.includes(TASK43_CAPABILITY);
+    const task43 = capabilities.includes(TASK43_CAPABILITY);
+    if (entry.task43 && !task43) this.opts.onTask43Close?.(entry.ref);
+    entry.task43 = task43;
   }
 
   /* Online and past its hello: ready for an agent's turn. */

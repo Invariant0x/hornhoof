@@ -4,8 +4,9 @@ import WebSocket from 'ws';
 type Options = {
   url: string;
   key: string;
-  onOpen(send: (m: NodeMessage) => boolean): void;
+  onOpen(send: (m: NodeMessage) => boolean, generation: number): void;
   onMessage(m: ServerMessage): void;
+  onClose?(generation: number): void;
   /* Hornhoof does not know this key any more: the machine was disconnected there. */
   onRefused?(): void;
   backoff?: { firstMs: number; maxMs: number };
@@ -18,6 +19,7 @@ export function connect(opts: Options): { close(): void } {
   let stopped = false;
   let socket: WebSocket | null = null;
   let timer: NodeJS.Timeout | undefined;
+  let generation = 0;
 
   const retry = () => {
     if (stopped) return;
@@ -26,6 +28,7 @@ export function connect(opts: Options): { close(): void } {
   };
 
   function open() {
+    const current = ++generation;
     const ws = new WebSocket(opts.url, { headers: { authorization: `Bearer ${opts.key}` } });
     socket = ws;
     ws.on('open', () => {
@@ -34,7 +37,7 @@ export function connect(opts: Options): { close(): void } {
         if (ws.readyState !== WebSocket.OPEN) return false;
         ws.send(JSON.stringify(m));
         return true;
-      });
+      }, current);
     });
     ws.on('message', data => {
       const msg = parseServerMessage(String(data));
@@ -47,6 +50,7 @@ export function connect(opts: Options): { close(): void } {
       }
     });
     ws.on('close', code => {
+      opts.onClose?.(current);
       if (code === 4001) {
         delay = maxMs;
         opts.onRefused?.();
