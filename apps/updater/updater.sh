@@ -10,11 +10,12 @@
 # digests too, while the old server keeps working. Only then it saves the database, runs that build's own installer,
 # which starts exactly these images, and waits for the new server to answer with the build's commit. If it does not,
 # the images that ran before go back, and the database goes back to the saved copy first when the new build added
-# migrations to it, since the old build does not know them. After each install, containers of services the build's
-# compose file does not name go. An updater stopped during an update goes on with it when it starts again. The
-# updater holds the Docker socket, so it takes nothing from the request but the tag, which must be a plain image tag,
-# and the digests, and only runs images of HORNHOOF_IMAGE and of its -node and -updater repositories. It runs on the
-# bash that ships with macOS (3.2) for the tests, and on Alpine's in its image.
+# migrations to it, since the old build does not know them, with the public link's settings kept next to the copy.
+# After each install, containers of services the build's compose file does not name go. An updater stopped during an
+# update goes on with it when it starts again. The updater holds the Docker socket, so it takes nothing from the
+# request but the tag, which must be a plain image tag, and the digests, and only runs images of HORNHOOF_IMAGE and of
+# its -node and -updater repositories. It runs on the bash that ships with macOS (3.2) for the tests, and on Alpine's
+# in its image.
 set -euo pipefail
 
 CONTROL="${HORNHOOF_CONTROL_DIR:-/control}"
@@ -169,8 +170,9 @@ backup() {
     return 1
   }
   BACKUP=$file
+  # A copy of the link's settings kept with an old database copy goes with it.
   # shellcheck disable=SC2012 # the names are ours: hornhoof-<stamp>-<id>.sql.gz
-  ls -1t "$SERVER_DIR"/backups/hornhoof-*.sql.gz | tail -n +$((KEEP_BACKUPS + 1)) | while read -r old; do rm -f "$old"; done
+  ls -1t "$SERVER_DIR"/backups/hornhoof-*.sql.gz | tail -n +$((KEEP_BACKUPS + 1)) | while read -r old; do rm -f "$old" "${old%.sql.gz}.tunnel.json"; done
   say "Saved the database to backups/$(basename "$file")."
 }
 
@@ -187,6 +189,20 @@ applied() {
     i=$((i + 1))
     sleep 1
   done
+}
+
+# The public link's settings as they are now, next to the database copy, readable by the owner only. A link the
+# company took on the new build is not in that copy, while its name stays taken at hornhoof.org and its key is only
+# here.
+keep_link() {
+  local file="${BACKUP%.sql.gz}.tunnel.json"
+  if [ -z "$BACKUP" ] || [ ! -f "$CONTROL/tunnel.json" ]; then return 0; fi
+  if (umask 077 && cp "$CONTROL/tunnel.json" "$file.new" && chmod 600 "$file.new" && mv "$file.new" "$file"); then
+    say "The public link's settings are in backups/$(basename "$file"). A link taken after the database was saved is not in it; the README says how to take it back."
+  else
+    rm -f "$file.new"
+    say "Could not keep a copy of the public link's settings."
+  fi
 }
 
 # The database goes back to the copy saved before the update. The copy goes into a database of its own first and only
@@ -362,6 +378,7 @@ go_back() {
   step rollback "Going back to $PREVIOUS."
   if [ "$(applied)" != "$BEFORE" ]; then
     say "$VERSION changed the database, so it goes back to the copy saved before the update."
+    keep_link
     restore || {
       stop_with failed "Could not put the database back from backups/$(basename "$BACKUP"). Run install.sh server in $SERVER_DIR, and see docker compose logs app." finished
       return 0

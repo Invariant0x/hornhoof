@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -156,6 +156,42 @@ describe('updater', () => {
     expect(load).toBeLessThan(swap);
     expect(swap).toBeLessThan(old);
     expect(r.status.log).toContain('0.4.1 changed the database, so it goes back to the copy saved before the update.');
+  });
+
+  /* A link the company took on the new build is not in the saved database, while its name stays taken at hornhoof.org
+     and its key is only in the tunnel's settings. */
+  it("keeps the public link's settings next to the saved database before putting the database back", () => {
+    const s = stand();
+    const settings = JSON.stringify({ url: 'https://acme.hornhoof.org', name: 'acme', key: 'k'.repeat(32), tunnel: {} });
+    writeFileSync(join(s.control, 'tunnel.json'), settings, { mode: 0o600 });
+    const r = runOnce(s, ask('t1'), { STUB_BROKEN: '0.4.1', STUB_MIGRATIONS: '0.4.0=20 0.4.1=21' });
+    expect(r.status).toMatchObject({ id: 't1', state: 'rolled_back', step: 'finished' });
+    const kept = readdirSync(join(s.server, 'backups')).filter(f => f.endsWith('.tunnel.json'));
+    expect(kept).toHaveLength(1);
+    expect(kept[0]).toMatch(/^hornhoof-\d{8}T\d{6}Z-t1\.tunnel\.json$/);
+    expect(readFileSync(join(s.server, 'backups', kept[0]!), 'utf8')).toBe(settings);
+    expect(statSync(join(s.server, 'backups', kept[0]!)).mode & 0o777).toBe(0o600);
+    expect(r.status.log).toContain(`backups/${kept[0]}`);
+  });
+
+  it("keeps no copy of the link's settings when the database stays as it is", () => {
+    const s = stand();
+    writeFileSync(join(s.control, 'tunnel.json'), '{}', { mode: 0o600 });
+    const r = runOnce(s, ask('t2'), { STUB_BROKEN: '0.4.1' });
+    expect(r.status.state).toBe('rolled_back');
+    expect(readdirSync(join(s.server, 'backups')).filter(f => f.endsWith('.tunnel.json'))).toEqual([]);
+  });
+
+  it("lets a kept copy of the link's settings go with its database copy", () => {
+    const s = stand();
+    writeFileSync(join(s.control, 'tunnel.json'), '{}', { mode: 0o600 });
+    runOnce(s, ask('t3'), { STUB_BROKEN: '0.4.1', STUB_MIGRATIONS: '0.4.0=20 0.4.1=21' });
+    const backups = join(s.server, 'backups');
+    const first = readdirSync(backups).find(f => f.endsWith('.sql.gz'))!;
+    utimesSync(join(backups, first), new Date(2026, 0, 1), new Date(2026, 0, 1));
+    for (const id of ['t4', 't5', 't6']) expect(runOnce(s, ask(id)).status.state).toBe('done');
+    expect(readdirSync(backups).filter(f => f.includes('-t3.'))).toEqual([]);
+    expect(readdirSync(backups)).toHaveLength(3);
   });
 
   /* The build from before may not know a service of the new one, as the tunnel, which would carry the public link
