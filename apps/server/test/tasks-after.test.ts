@@ -152,6 +152,19 @@ describe('a task that comes after others', () => {
     expect(text(again)).toContain(`It starts once #${api.number} is done.`);
   });
 
+  it('ends the turn its holder has waiting on it once it comes to wait, and wakes the holder again once it can start', async () => {
+    const { ctx, head, bruno, rita, tess, member, turnsOf } = await company();
+    const api = (await member('Checkout API', bruno.id)).task;
+    const tests = await member('End-to-end tests', tess.id);
+    await wakeAll(ctx, tests.wakes);
+    expect((await turnsOf(tess.id)).map(j => j.status)).toEqual(['queued']);
+    expect(woken(await updateTask(ctx, head.id, tests.task.id, { after: [api.id] }))).toEqual([]);
+    expect((await turnsOf(tess.id)).map(j => [j.status, j.error])).toEqual([['failed', 'waiting']]);
+    await submit(ctx, bruno.id, api.id, { summary: 'Done.', evidence: 'npm test' });
+    await wakeAll(ctx, (await verdict(ctx, rita.id, api.id, { pass: true, comment: 'Good.' })).wakes);
+    expect((await turnsOf(tess.id)).filter(j => j.status === 'queued').map(j => j.taskId)).toEqual([tests.task.id]);
+  });
+
   it('tells whoever made a waiting task once a task it comes after is cancelled, and it keeps waiting', async () => {
     const { ctx, db, ceo, head, bruno, tess, member, read, turnsOf } = await company();
     const api = (await member('Checkout API', bruno.id)).task;

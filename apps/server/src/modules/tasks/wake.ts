@@ -346,7 +346,7 @@ type Ended = Pick<typeof jobs.$inferSelect, 'status' | 'error' | 'startedAt' | '
 /* A turn that broke as it started: not one stopped on purpose or out of time, nor one the plan refused for its limit. */
 const crashed = (j: Ended) =>
   j.status === 'failed' &&
-  !['timeout', 'cancelled', 'removed', 'switched_off', 'handed_on'].includes(j.error ?? '') &&
+  !['timeout', 'cancelled', 'removed', 'switched_off', 'handed_on', 'waiting'].includes(j.error ?? '') &&
   !!j.startedAt &&
   !!j.finishedAt &&
   j.finishedAt.getTime() - j.startedAt.getTime() < QUICK_CRASH_MS &&

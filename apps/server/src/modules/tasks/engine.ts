@@ -818,6 +818,10 @@ export async function updateTask(ctx: Live, agentId: string, taskId: string, c: 
     if (before) await tx.update(jobs).set({ status: 'failed', error: 'handed_on', finishedAt: new Date() }).where(and(eq(jobs.agentId, before), eq(jobs.taskId, task.id), eq(jobs.status, 'queued')));
   };
   const holder = set.assigneeAgentId ?? task.assigneeAgentId;
+  /* A turn its holder has waiting on it would set to work on it anyway; the holder is woken again once it can start. */
+  const holdBack = async (tx: Tx) => {
+    if (holder) await tx.update(jobs).set({ status: 'failed', error: 'waiting', finishedAt: new Date() }).where(and(eq(jobs.agentId, holder), eq(jobs.taskId, task.id), eq(jobs.status, 'queued')));
+  };
   const wakes: Wake[] = waits
     ? []
     : set.assigneeAgentId || (waited && holder)
@@ -825,7 +829,13 @@ export async function updateTask(ctx: Live, agentId: string, taskId: string, c: 
       : holder && holder !== agentId
         ? [{ agentId: holder, taskId, why: 'updated' }]
         : [];
-  const row = await move(ctx, task, set, { kind: 'updated', actor: { agentId }, data: { fields } }, handedOn ? handOver : undefined, wakes);
+  const also = handedOn || waits
+    ? async (tx: Tx) => {
+        if (handedOn) await handOver(tx);
+        if (waits) await holdBack(tx);
+      }
+    : undefined;
+  const row = await move(ctx, task, set, { kind: 'updated', actor: { agentId }, data: { fields } }, also, wakes);
   unstuck.tell();
   return { task: row, wakes };
 }
