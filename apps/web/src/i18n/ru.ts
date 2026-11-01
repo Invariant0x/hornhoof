@@ -494,6 +494,7 @@ export const ru: Messages = {
     noneOpen: 'Решения ничего не ждет.',
     seen: n => `Найдено раз: ${n}`,
     takenBy: name => `Взял в работу: ${name}`,
+    relatedTasks: 'Связанные задачи',
     orchestrator: 'Оркестратор',
     take: 'Взять в работу',
     dismiss: 'Отложить',
