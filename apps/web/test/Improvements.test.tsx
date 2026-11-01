@@ -250,11 +250,14 @@ describe('improvements', () => {
     await user.keyboard('{Enter}');
     const improvements = await screen.findByRole('button', { name: 'Improvements, 1 to decide' });
     const versions = screen.getByRole('button', { name: 'Versions' });
+    const settings = screen.getByRole('button', { name: 'Settings' });
     const logout = screen.getByRole('button', { name: 'Log out' });
     for (let i = 0; i < 5; i += 1) await user.tab();
     expect(improvements).toHaveFocus();
     await user.tab();
     expect(versions).toHaveFocus();
+    await user.tab();
+    expect(settings).toHaveFocus();
     await user.tab();
     expect(logout).toHaveFocus();
     await user.keyboard('{Escape}');
