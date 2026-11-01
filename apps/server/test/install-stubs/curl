@@ -18,10 +18,11 @@ case "$url" in
   */api/nodes/join)
     reply "${STUB_JOIN_BODY:-}"
     [ -n "$fmt" ] && printf '%s' "${STUB_JOIN_STATUS:-200}" ;;
-  *Homebrew/install*)
-    reply 'cp "$STUB_SRC/brew" "$STUB_BIN/brew"\necho "homebrew-install" >> "$STUB_LOG"\n' ;;
-  *get.docker.com*)
-    reply 'cp "$STUB_SRC/docker" "$STUB_BIN/docker"\necho "get-docker" >> "$STUB_LOG"\n' ;;
+  # The install scripts of Homebrew and Docker; the tests give the installer their SHA-256.
+  https://raw.githubusercontent.com/Homebrew/install/*/install.sh)
+    if [ -n "$out" ]; then cat "$STUB_SRC/_brew-install.sh" > "$out"; else cat "$STUB_SRC/_brew-install.sh"; fi ;;
+  https://raw.githubusercontent.com/docker/docker-install/*/install.sh)
+    if [ -n "$out" ]; then cat "$STUB_SRC/_docker-install.sh" > "$out"; else cat "$STUB_SRC/_docker-install.sh"; fi ;;
   *compose.yaml)
     reply 'services: {}\n' ;;
   # A port probe: STUB_PORTS_TAKEN lists the ports something answers on.

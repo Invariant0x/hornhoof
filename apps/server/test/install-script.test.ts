@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -15,7 +16,9 @@ const SUB_B = '9f1e2d3c-0000-4000-8000-000000000002';
 const TWO_LINES = `${SUB_A} claude node-key-aaaaaaaaaaaaaaaa\\n${SUB_B} codex node-key-bbbbbbbbbbbbbbbb\\n`;
 
 /* System tools the script and the stubs may use. Real docker, brew, curl and sudo are never reachable. */
-const TOOLS = ['bash', 'sh', 'env', 'cat', 'od', 'tr', 'head', 'base64', 'sleep', 'mkdir', 'rm', 'chmod', 'grep', 'sed', 'cut', 'cp', 'mv', 'touch', 'basename', 'dirname', 'wc', 'mktemp', 'date', 'sort', 'kill', 'printf', 'tail', 'awk'];
+const TOOLS = ['bash', 'sh', 'env', 'cat', 'od', 'tr', 'head', 'base64', 'sleep', 'mkdir', 'rm', 'chmod', 'grep', 'sed', 'cut', 'cp', 'mv', 'touch', 'basename', 'dirname', 'wc', 'mktemp', 'date', 'sort', 'kill', 'printf', 'tail', 'awk', 'sha256sum', 'shasum'];
+/* The installer runs Docker's and Homebrew's install scripts only when their SHA-256 is the one it pins. */
+const sha256 = (stub: string) => createHash('sha256').update(readFileSync(join(STUBS, stub))).digest('hex');
 
 type Options = { args?: string[]; omit?: string[]; env?: Record<string, string>; tty?: string };
 
@@ -49,6 +52,8 @@ function install({ args = ['--join', CODE], omit = [], env = {}, tty = 'typed-an
       HORNHOOF_HOME: join(dir, 'home', '.hornhoof'),
       HORNHOOF_DIR: join(dir, 'home', 'hornhoof'),
       STUB_JOIN_BODY: TWO_LINES,
+      HORNHOOF_DOCKER_SCRIPT_SHA256: sha256('_docker-install.sh'),
+      HORNHOOF_BREW_SCRIPT_SHA256: sha256('_brew-install.sh'),
       ...env,
     },
   });
@@ -125,6 +130,27 @@ describe('install.sh', () => {
     expect(r.code).toBe(0);
     expect(r.calls).toContain('get-docker');
     expect(r.calls).toContain('sudo systemctl enable --now docker');
+  });
+
+  it("runs Docker's install script from a pinned commit, and not at all when it is not the one pinned", () => {
+    const ok = install({ omit: ['docker'], env: { STUB_DOCKER: 'after_start' } });
+    expect(ok.code).toBe(0);
+    expect(ok.calls.find(c => c.includes('docker-install'))).toMatch(/^curl .*https:\/\/raw\.githubusercontent\.com\/docker\/docker-install\/[0-9a-f]{40}\/install\.sh/);
+    const changed = install({ omit: ['docker'], env: { STUB_DOCKER: 'after_start', HORNHOOF_DOCKER_SCRIPT_SHA256: '0'.repeat(64) } });
+    expect(changed.code).toBe(1);
+    expect(changed.calls).not.toContain('get-docker');
+    expect(changed.out).toContain("Docker's install script did not download, or it is not the one Hornhoof checked, so it did not run.");
+  });
+
+  it("runs Homebrew's install script from a pinned commit, and not at all when it is not the one pinned", () => {
+    const mac = { STUB_OS: 'Darwin', STUB_ARCH: 'arm64', STUB_DOCKER: 'after_start' };
+    const ok = install({ omit: ['docker', 'brew'], env: mac });
+    expect(ok.code).toBe(0);
+    expect(ok.calls.find(c => c.includes('Homebrew/install'))).toMatch(/^curl .*https:\/\/raw\.githubusercontent\.com\/Homebrew\/install\/[0-9a-f]{40}\/install\.sh/);
+    const changed = install({ omit: ['docker', 'brew'], env: { ...mac, HORNHOOF_BREW_SCRIPT_SHA256: '0'.repeat(64) } });
+    expect(changed.code).toBe(1);
+    expect(changed.calls).not.toContain('homebrew-install');
+    expect(changed.out).toContain("Homebrew's install script did not download, or it is not the one Hornhoof checked, so it did not run.");
   });
 
   it('runs everything directly as root, without sudo', () => {

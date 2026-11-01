@@ -32,6 +32,13 @@ PIN="${HORNHOOF_VERSION:-}"
 FROM_UPDATER="${HORNHOOF_FROM_UPDATER:-}"
 COMPOSE_SRC="${HORNHOOF_COMPOSE_FILE:-}"
 
+# Docker's and Homebrew's install scripts at the commits Hornhoof was tested with. They run as root or ask for the
+# password, so each runs only when its SHA-256 is the one written here.
+DOCKER_SCRIPT_URL=https://raw.githubusercontent.com/docker/docker-install/ada7a567e59b3935bd601bb21e422da50e80e376/install.sh
+DOCKER_SCRIPT_SHA256="${HORNHOOF_DOCKER_SCRIPT_SHA256:-2b102d809152ea157a59f171319f489d971273b2d26dd7e9a6d1d737ce89289d}"
+BREW_SCRIPT_URL=https://raw.githubusercontent.com/Homebrew/install/8c82c081753d4263da0cfe615ef8d9433425f22b/install.sh
+BREW_SCRIPT_SHA256="${HORNHOOF_BREW_SCRIPT_SHA256:-5f333bbe53bc490e51e7ccb1df8779b3dd6ee73a1a7379efda216edb08ccb148}"
+
 LABEL=hornhoof.subscription
 SERVER_LABEL=hornhoof.server
 NODE_MAIN=/app/apps/node/dist/main.js
@@ -76,6 +83,27 @@ detect_system() {
 
 # --- Docker -------------------------------------------------------------------------------------
 
+sha256_of() {
+  if command -v sha256sum > /dev/null 2>&1; then
+    sha256sum "$1" | cut -d' ' -f1
+  else
+    shasum -a 256 "$1" | cut -d' ' -f1
+  fi
+}
+
+# checked_script <url> <sha256>: downloads a script into a file of its own and prints the file's path, or fails when
+# the script is not exactly the one pinned.
+checked_script() {
+  local file
+  file=$(mktemp)
+  if curl -fsSL "$1" -o "$file" && [ "$(sha256_of "$file" 2> /dev/null || true)" = "$2" ]; then
+    printf '%s' "$file"
+    return 0
+  fi
+  rm -f "$file"
+  return 1
+}
+
 docker_works() {
   if docker info > /dev/null 2>&1; then
     DOCKER=(docker)
@@ -108,10 +136,13 @@ wait_for_docker() {
 }
 
 install_colima() {
+  local script
   if ! command -v brew > /dev/null 2>&1; then
     say "Installing Homebrew, which Hornhoof uses to install Docker. Homebrew asks for your Mac password."
-    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" < "$TTY" ||
-      fail "Homebrew did not install. Install it from https://brew.sh, then run this command again."
+    script=$(checked_script "$BREW_SCRIPT_URL" "$BREW_SCRIPT_SHA256") ||
+      fail "Homebrew's install script did not download, or it is not the one Hornhoof checked, so it did not run. Install Homebrew from https://brew.sh, then run this command again."
+    /bin/bash "$script" < "$TTY" || fail "Homebrew did not install. Install it from https://brew.sh, then run this command again."
+    rm -f "$script"
     if ! command -v brew > /dev/null 2>&1; then
       for b in /opt/homebrew/bin/brew /usr/local/bin/brew; do
         if [ -x "$b" ]; then
@@ -145,9 +176,14 @@ size_colima() {
 }
 
 install_docker_engine() {
+  local script
   say "Installing Docker Engine with Docker's official script. This needs admin rights, so sudo may ask for your password."
-  curl -fsSL https://get.docker.com | as_root sh ||
+  script=$(checked_script "$DOCKER_SCRIPT_URL" "$DOCKER_SCRIPT_SHA256") ||
+    fail "Docker's install script did not download, or it is not the one Hornhoof checked, so it did not run. Install Docker as described at https://docs.docker.com/engine/install/, then run this command again."
+  # This installer may itself arrive through a pipe, so the script gets no input of its own.
+  as_root sh "$script" < /dev/null ||
     fail "Docker did not install. Install it as described at https://docs.docker.com/engine/install/, then run this command again."
+  rm -f "$script"
 }
 
 ensure_docker() {
