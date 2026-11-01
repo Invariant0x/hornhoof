@@ -201,7 +201,9 @@ async function passedGates(db: Db | Tx, task: Task, done: Wake[]): Promise<{ set
     const text = `${executor.name} does it and is switched off, and it passed its gates: its branch waits to be merged into the turn's branch. Give it to someone who is on with update_task, or tell the CEO it waits for ${executor.name}.`;
     return { set: { ...merging, assigneeAgentId: task.createdByAgentId }, wakes: [{ agentId: task.createdByAgentId, taskId: task.id, why: 'switched', text }] };
   }
-  return { set: { ...merging, assigneeAgentId: task.executorAgentId }, wakes: [{ agentId: task.executorAgentId, taskId: task.id, why: 'merge' }] };
+  /* The turn's branch is named after the turn's number. */
+  const [turn] = task.turnId ? await db.select({ number: turns.number }).from(turns).where(eq(turns.id, task.turnId)) : [];
+  return { set: { ...merging, assigneeAgentId: task.executorAgentId }, wakes: [{ agentId: task.executorAgentId, taskId: task.id, why: 'merge', ...(turn ? { text: `turn-${turn.number}` } : {}) }] };
 }
 
 /* Whether the task waits for a person's word other than Hornhoof's note that it stood still. */

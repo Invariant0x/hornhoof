@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agents, companies, departments, people, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
+import { agents, companies, departments, people, subscriptions, taskEvents, tasks, turns } from '../src/db/schema.js';
 import { blocked, createTask, submit, updateTask, verdict } from '../src/modules/tasks/engine.js';
 import { taskDetail } from '../src/modules/tasks/views.js';
 import { wakePrompt } from '../src/modules/tasks/wake.js';
@@ -49,6 +49,15 @@ describe('a task that passed its last gate', () => {
     expect(merged.task).toMatchObject({ status: 'done', assigneeAgentId: null });
     const [handedIn] = await db.select({ kind: taskEvents.kind, data: taskEvents.data }).from(taskEvents).where(eq(taskEvents.taskId, task.id)).orderBy(taskEvents.id).then(r => r.slice(-1));
     expect(handedIn).toEqual({ kind: 'submitted', data: { evidence: 'git log: 1a2b3c4', merged: true } });
+  });
+
+  it("names the turn's branch to merge into", async () => {
+    const { db, bruno, task, read, passed } = await company();
+    const [turn] = await db.insert(turns).values({ companyId: task.companyId, number: 3, title: 'Payments', goal: 'Card payments.' }).returning();
+    await db.update(tasks).set({ turnId: turn!.id }).where(eq(tasks.id, task.id));
+    const last = await passed();
+    const [me] = await db.select().from(agents).where(eq(agents.id, bruno.id));
+    expect(wakePrompt(me!, await read(task.id), last.wakes[0]!)).toContain("Merge your branch into turn-3, the turn's branch, and report");
   });
 
   it('shows its gates passed while its executor merges it', async () => {

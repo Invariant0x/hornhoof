@@ -60,7 +60,8 @@ function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string {
     case 'changes':
       return `${ref} came back to you with changes requested${said}Make them, then submit it again.`;
     case 'merge':
-      return `${ref} passed its gates. Merge your branch into the turn's branch and report: submit it with what you merged and the commit. If the merge fails, report what blocks it with blocked.`;
+      /* Its text names the turn's branch. */
+      return `${ref} passed its gates. Merge your branch into ${w.text ? `${w.text}, the turn's branch,` : "the turn's branch"} and report: submit it with what you merged and the commit. If the merge fails, report what blocks it with blocked.`;
     case 'stuck_at_gate':
       return `${ref}, which you gave out, went back from the same gate ${GATE_ROUNDS} times. Read its log, then step in: rewrite it with update_task, give it another executor or other gates, or cancel it.`;
     case 'done':
