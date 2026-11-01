@@ -310,7 +310,18 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
 export type Io = { stdin: NodeJS.ReadableStream; stdout: NodeJS.WritableStream; stderr: NodeJS.WritableStream };
 
 const USAGE = 'Usage: hornhoof-node run [--builtin] | login | status | set-key';
-const SET_KEY_LINE = 'set-key expects one line: <server> <subscriptionId> <provider> <key>';
+const SET_KEY_LINE = 'set-key expects one line: <server> <id> <provider or machine> <key>';
+/* A machine joined without a plan has a node of its own: it runs no agent program and has nothing to sign in to. */
+const MACHINE = 'machine';
+const NO_PLAN = 'This machine has no plan to sign in to.';
+
+const machineOnly: ProviderAdapter = {
+  install: async () => {},
+  loggedIn: async () => true,
+  login: async () => {},
+  run: async () => ({ ok: false, sessionId: null, result: '', output: 'This machine has no plan to run agents with.', error: 'agent_failed', limits: null }),
+  secrets: async () => [],
+};
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
@@ -355,7 +366,7 @@ async function setKey(dir: string, io: Io): Promise<number> {
   try {
     if (rest.length) throw new Error('extra words');
     mkdirSync(dir, { recursive: true });
-    writeState(dir, { server, subscriptionId, provider, key } as NodeState);
+    writeState(dir, { server, subscriptionId, provider: provider === MACHINE ? null : provider, key } as NodeState);
   } catch {
     io.stderr.write(`${SET_KEY_LINE}.\n`);
     return 1;
@@ -367,7 +378,7 @@ async function setKey(dir: string, io: Io): Promise<number> {
 
 async function status(dir: string, io: Io): Promise<number> {
   const state = readState(dir);
-  const word = isRemoved(dir) ? 'removed' : !state ? 'no_key' : (await personal(dir, state.provider, agentUser()).loggedIn()) ? 'ready' : 'needs_login';
+  const word = isRemoved(dir) ? 'removed' : !state ? 'no_key' : !state.provider || (await personal(dir, state.provider, agentUser()).loggedIn()) ? 'ready' : 'needs_login';
   io.stdout.write(word + '\n');
   return 0;
 }
@@ -377,6 +388,10 @@ async function login(dir: string, io: Io): Promise<number> {
   if (!state) {
     io.stderr.write('This machine has no key yet. Run the install command from Hornhoof.\n');
     return 1;
+  }
+  if (!state.provider) {
+    io.stdout.write(`${NO_PLAN}\n`);
+    return 0;
   }
   const adapter = personal(dir, state.provider, agentUser());
   const { name, bin } = programFor(state.provider);
@@ -441,9 +456,10 @@ async function run(dir: string, builtinMode: boolean, io: Io): Promise<number | 
       io.stderr.write('This machine has no key yet. Run the install command from Hornhoof.\n');
       return 1;
     }
-    const provider = state?.provider ?? 'claude';
     const user = agentUser();
     if (user) secureNode(dir, user);
+    if (state && !state.provider) return runNode({ dir, adapter: machineOnly, log });
+    const provider = state?.provider ?? 'claude';
     const fs = user ? agentFs(user) : ownFs;
     /* Test runs get a user of their own, apart from the agents' sign-in and folders. */
     const testUser = user ? userFor(dir, 'tests', true) : null;

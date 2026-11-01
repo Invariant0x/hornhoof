@@ -3,10 +3,11 @@ import { join } from 'node:path';
 import { PROVIDER_IDS, type ProviderId } from '@hornhoof/protocol';
 import { z } from 'zod';
 
-/* What the installer wrote: where Hornhoof is, which subscription this node serves and its key. */
-export type NodeState = { server: string; subscriptionId: string; provider: ProviderId; key: string };
+/* What the installer wrote: where Hornhoof is, the id it named this node by, the plan's program and the node's key. No
+   provider: the machine's own node, which has no plan. */
+export type NodeState = { server: string; subscriptionId: string; provider: ProviderId | null; key: string };
 
-const State = z.object({ server: z.string().url(), subscriptionId: z.string().min(1), provider: z.enum(PROVIDER_IDS), key: z.string().min(16) });
+const State = z.object({ server: z.string().url(), subscriptionId: z.string().min(1), provider: z.enum(PROVIDER_IDS).nullable(), key: z.string().min(16) });
 
 export const dataDir = (): string => process.env.HORNHOOF_DATA || '/data';
 
