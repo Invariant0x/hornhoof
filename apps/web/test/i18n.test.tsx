@@ -53,8 +53,9 @@ describe('errorText', () => {
 
   it('tells a person who tried too often to wait, in both languages', () => {
     const err = new ApiFailure(429, 'too_many', 'Too many attempts. Wait up to 15 minutes, then try again.', 'too_many_attempts');
-    expect(errorText(en, err)).toBe('Too many attempts. Wait up to 15 minutes, then try again.');
-    expect(errorText(ru, err)).toBe('Слишком много попыток. Подождите до 15 минут и попробуйте снова.');
+    /* A sign-in past the softer cap per email waits up to an hour. */
+    expect(errorText(en, err)).toBe('Too many attempts. Wait up to an hour, then try again.');
+    expect(errorText(ru, err)).toBe('Слишком много попыток. Подождите до часа и попробуйте снова.');
     expect(errorText(ru, new ApiFailure(429, 'too_many', 'x'))).toBe('Слишком много попыток. Подождите немного и попробуйте снова.');
   });
 

@@ -58,6 +58,40 @@ describe('POST /api/auth/login', () => {
     expect((await app.inject(login('maria@acme.com', SETUP.password))).statusCode).toBe(401);
   });
 
+  it('counts per email and address, so failures from elsewhere never lock the owner out', async () => {
+    const { app } = await testApp();
+    await setUpCompany(app);
+    const from = (remoteAddress: string, password = 'wrong password!') => app.inject({ ...login('ivan@acme.com', password), remoteAddress });
+    for (let i = 0; i < 10; i++) expect((await from('203.0.113.5')).statusCode).toBe(401);
+    expect((await from('203.0.113.5', SETUP.password)).statusCode).toBe(429);
+    expect((await from('198.51.100.20', SETUP.password)).statusCode).toBe(200);
+  });
+
+  it("takes the visitor's address from X-Forwarded-For only from the tunnel", async () => {
+    const { app } = await testApp({ TUNNEL_HOST: '192.0.2.10' });
+    await setUpCompany(app);
+    const via = (remoteAddress: string, forwarded: string, password = 'wrong password!') =>
+      app.inject({ ...login('ivan@acme.com', password), remoteAddress, headers: { 'x-forwarded-proto': 'https', 'x-forwarded-for': forwarded } });
+    /* The relay puts the visitor first and its own hop after. */
+    for (let i = 0; i < 10; i++) expect((await via('192.0.2.10', '203.0.113.5, 10.0.0.2')).statusCode).toBe(401);
+    expect((await via('192.0.2.10', '203.0.113.5, 10.0.0.2', SETUP.password)).statusCode).toBe(429);
+    expect((await via('::ffff:192.0.2.10', '198.51.100.20, 10.0.0.2', SETUP.password)).statusCode).toBe(200);
+    /* Anyone else can write the header, so it changes nothing for them. */
+    for (let i = 0; i < 10; i++) expect((await via('203.0.113.9', `198.51.100.${i}`)).statusCode).toBe(401);
+    expect((await via('203.0.113.9', '198.51.100.99', SETUP.password)).statusCode).toBe(429);
+  });
+
+  it('stops one email after 50 attempts in an hour from any addresses, and other emails go on', async () => {
+    const { app } = await testApp();
+    await setUpCompany(app);
+    const from = (remoteAddress: string, email = 'ivan@acme.com', password = 'wrong password!') => app.inject({ ...login(email, password), remoteAddress });
+    for (let i = 0; i < 50; i++) expect((await from(`203.0.113.${Math.floor(i / 10)}`)).statusCode).toBe(401);
+    const blocked = await from('198.51.100.20', 'ivan@acme.com', SETUP.password);
+    expect(blocked.statusCode).toBe(429);
+    expect(Number(blocked.headers['retry-after'])).toBeGreaterThan(15 * 60);
+    expect((await from('198.51.100.20', 'maria@acme.com')).statusCode).toBe(401);
+  });
+
   it('deletes expired sessions when someone signs in', async () => {
     const { app, db } = await testApp();
     const ceo = await setUpCompany(app);

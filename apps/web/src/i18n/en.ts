@@ -618,7 +618,7 @@ export const en = {
     machine_offline: 'The machine for this subscription is offline. Start it and try again.',
     needs_login: 'Sign in to this subscription on its machine first.',
     job_unknown: 'This check no longer exists.',
-    too_many_attempts: 'Too many attempts. Wait up to 15 minutes, then try again.',
+    too_many_attempts: 'Too many attempts. Wait up to an hour, then try again.',
     orchestrator_not_ready: 'The orchestrator cannot answer right now.',
     nothing_running: 'Nothing is running now.',
     proposal_closed: 'This card was already applied or replaced by a newer one.',
