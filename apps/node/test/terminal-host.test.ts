@@ -706,6 +706,7 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     expect(Date.now() - started).toBeLessThan(5000);
     expect(await host.run(kimiJob('k3', 'next', { sessionId: first.sessionId }))).toMatchObject({ ok: true, result: 'echo: next' });
     await typeTurn('k3', 'w3', 'HANG typed', 'job-k3');
+    await until(async () => (await host.screen('k3')).includes('waiting: HANG typed'));
     host.input({ type: 'term.input', termId: 'w3', data: '\u001b' });
     await until(() => Boolean(done('job-k3')));
     expect(done('job-k3')).toMatchObject({ ok: false, error: 'cancelled' });
