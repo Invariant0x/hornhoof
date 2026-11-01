@@ -86,13 +86,17 @@ export async function subViews(db: Db, isOnline: IsOnline, id?: string): Promise
   const allNodes = await planNodes(db, rows.filter(r => r.kind === 'personal').map(r => r.id));
   return rows.map(r => {
     const mine = allNodes.filter(n => n.subscriptionId === r.id);
+    /* A plan's state is of one machine: one online and signed in, else one online, else what the plan was last. So it
+       never shows signed in on one machine and online on another, which can take no turn. */
+    const up = mine.filter(n => isOnline(nodeIdentity(n.id)));
+    const shown = up.find(n => n.status === 'ready') ?? up[0];
     return {
     id: r.id,
     provider: r.provider,
     kind: r.kind,
     label: r.label,
-    status: r.status,
-    online: r.kind === 'api_key' ? isOnline(BUILTIN) : mine.some(n => isOnline(nodeIdentity(n.id))),
+    status: shown?.status ?? r.status,
+    online: r.kind === 'api_key' ? isOnline(BUILTIN) : Boolean(shown),
     last4: r.last4,
     owner: { id: r.ownerId, name: r.ownerName },
     place: r.kind === 'api_key' ? placeOf(r.targetKind, r.targetId, depts, teamDept) : r.ownerScopeKind === 'company' ? COMPANY : ownerPlace(ownerDepts(r.ownerId), depts),

@@ -316,6 +316,27 @@ describe('one plan on several machines', () => {
     await app.inject({ method: 'POST', url: `/api/machines/${laptop.machine.id}/disconnect`, ...as(ceo) });
     expect(await status()).toBe('waiting_machine');
   });
+
+  it('shows the plan ready and online only when one machine of it is both, and otherwise as the machine that is online', async () => {
+    const { app, ceo, plan, mac, laptop } = await twoMachines();
+    const url = await listen(app);
+    const onLaptop = (await join(app, codeOf((await addPlan(app, ceo, laptop.machine.id, plan)).json().command), LAPTOP)).json().nodes[0];
+    const shown = async () => (await app.inject({ url: '/api/subscriptions', ...as(ceo) })).json().subscriptions.find((s: { id: string }) => s.id === plan);
+    const signedIn = await connectNode(url, mac.nodes[0].key);
+    signedIn.send({ type: 'hello', version: '0.9.0', loggedIn: true, running: [] });
+    const signedOut = await connectNode(url, onLaptop.key);
+    signedOut.send({ type: 'hello', version: '0.9.0', loggedIn: false, running: [] });
+    await until(async () => (await shown()).status === 'ready');
+    expect(await shown()).toMatchObject({ status: 'ready', online: true });
+    signedIn.close();
+    await signedIn.closed;
+    await until(async () => (await shown()).machines.every((m: { online: boolean; status: string }) => m.online === (m.status === 'needs_login')));
+    expect(await shown()).toMatchObject({ status: 'needs_login', online: true });
+    signedOut.close();
+    await signedOut.closed;
+    await until(async () => !(await shown()).online);
+    expect((await shown()).status).toBe('ready');
+  });
 });
 
 describe('POST /api/machines/:id/disconnect', () => {
