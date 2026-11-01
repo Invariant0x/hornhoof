@@ -106,4 +106,12 @@ describe('agents of one plan on several machines', () => {
     await until(async () => (await card()).machine !== null);
     expect((await card()).machine).toMatchObject({ hostname: 'ivan-mac' });
   });
+
+  it('shows the orchestrator the machine it runs on', async () => {
+    const { app, db, ceo, plan, nodes } = await planOnTwoMachines();
+    const org = async () => (await app.inject({ url: '/api/org', ...as(ceo) })).json().orchestrator;
+    expect((await org()).machine).toBeNull();
+    await db.update(agents).set({ subscriptionId: plan, nodeId: nodes.laptop.nodeId }).where(eq(agents.kind, 'orchestrator'));
+    expect((await org()).machine).toMatchObject({ hostname: 'ivan-laptop' });
+  });
 });

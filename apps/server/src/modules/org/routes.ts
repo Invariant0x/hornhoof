@@ -6,11 +6,12 @@ import { accessOf, canReach } from '../../auth/access.js';
 import { personColumns, requirePerson } from '../../auth/session.js';
 import { agents, companies, departments, jobs, people, personAccess, requests, subscriptions, tasks, teams, turns } from '../../db/schema.js';
 import { employeeOrder } from '../agents/order.js';
-import { limitUntil } from '../conversation/queue.js';
+import { limitUntil, programNode } from '../conversation/queue.js';
 import { repoView } from '../departments/repository.js';
 import { deptName } from '../departments/templates.js';
 import { CHANNEL_MS, type Endpoint } from '../events/bus.js';
 import { workingCount } from '../events/store.js';
+import { machineOf } from '../nodes/nodes.js';
 import { personViews } from '../people/views.js';
 import { subView } from '../subscriptions/views.js';
 
@@ -21,7 +22,8 @@ function effortShown(sub: { provider: ProviderId; models: ModelOption[] | null }
   return effortFor(sub.provider, agent.effort, effortsOf(models, agent.model)) ?? defaultEffortOf(sub.provider, models, agent.model);
 }
 
-export function orgRoutes(app: FastifyInstance, { db, hub, templates, bus }: Ctx): void {
+export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
+  const { db, hub, templates, bus } = ctx;
   app.get('/api/org', async req => {
     const me = await requirePerson(req, db);
     const [company] = await db.select({ id: companies.id, name: companies.name }).from(companies).where(eq(companies.id, me.companyId));
@@ -178,6 +180,7 @@ export function orgRoutes(app: FastifyInstance, { db, hub, templates, bus }: Ctx
         /* His plan is at its limit until then: he waits for the reset on it, and the CEO decides whether he moves. */
         limitUntil: limitUntil((orchestrator.subscriptionId && subs.get(orchestrator.subscriptionId)?.limits) || null),
         subscription: orchestrator.subscriptionId ? await subView(db, node => hub.isOnline(node), orchestrator.subscriptionId) : null,
+        machine: await machineOf(db, (await programNode(ctx, orchestrator.id))?.node ?? null),
       },
       agents: { total: allAgents.length, working: await workingCount(db, me.companyId) },
       turn: turn ?? null,
