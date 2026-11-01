@@ -1,0 +1,77 @@
+{
+  "kind": "SOURCE_ONLY_SYNTHETIC_NOT_RUNTIME_PROOF",
+  "sourceCommit": "2c73f3f50af4fa7f2540ca0d2e33b07a1408e3a7",
+  "serializerEvidenceSha256": "bbfcbe1a5b71e6fe0703d5c766e0a10396f2a15465ae580037e271fe503a4362",
+  "cases": [
+    {
+      "name": "quota",
+      "payload": {
+        "code": "provider.api_error",
+        "message": "synthetic quota",
+        "name": "APIProviderQuotaExhaustedError",
+        "details": {
+          "statusCode": 429,
+          "requestId": null,
+          "traceId": "synthetic-trace-72"
+        },
+        "retryable": false
+      },
+      "kind": "SERIALIZER_EXECUTED_ERROR_PAYLOAD_ONLY"
+    },
+    {
+      "name": "ordinary429",
+      "payload": {
+        "code": "provider.rate_limit",
+        "message": "synthetic throttle",
+        "name": "APIStatusError",
+        "details": {
+          "statusCode": 429,
+          "requestId": null,
+          "traceId": null
+        },
+        "retryable": true
+      },
+      "kind": "SERIALIZER_EXECUTED_ERROR_PAYLOAD_ONLY"
+    },
+    {
+      "name": "auth401",
+      "payload": {
+        "code": "provider.auth_error",
+        "message": "synthetic authentication failure",
+        "name": "APIStatusError",
+        "details": {
+          "statusCode": 401,
+          "requestId": null,
+          "traceId": null
+        },
+        "retryable": false
+      },
+      "kind": "SERIALIZER_EXECUTED_ERROR_PAYLOAD_ONLY"
+    },
+    {
+      "name": "context_overflow_compaction_trigger",
+      "payload": {
+        "code": "context.overflow",
+        "message": "synthetic context overflow",
+        "name": "APIContextOverflowError",
+        "details": {
+          "statusCode": 400,
+          "requestId": null,
+          "traceId": null
+        },
+        "retryable": true
+      },
+      "kind": "SERIALIZER_EXECUTED_ERROR_PAYLOAD_ONLY"
+    },
+    {
+      "name": "compaction_prose_is_not_quota",
+      "payload": {
+        "code": "internal",
+        "message": "synthetic full_compaction text only",
+        "name": "Error2",
+        "retryable": false
+      },
+      "kind": "SERIALIZER_EXECUTED_ERROR_PAYLOAD_ONLY"
+    }
+  ]
+}
