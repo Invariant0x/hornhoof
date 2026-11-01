@@ -1,12 +1,16 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 
 const SCRIPT = fileURLToPath(new URL('../../updater/updater.sh', import.meta.url));
 const STUBS = fileURLToPath(new URL('./updater-stubs/', import.meta.url));
+/* The updater reads and writes its files with jq, so these tests take the jq of this machine, wherever it is. */
+const JQ = spawnSync('sh', ['-c', 'command -v jq'], { encoding: 'utf8' }).stdout.trim();
+const TOOLS = mkdtempSync(join(tmpdir(), 'hh-updater-tools-'));
+if (JQ) symlinkSync(JQ, join(TOOLS, 'jq'));
 
 type Stand = { dir: string; control: string; server: string; log: string };
 
@@ -30,7 +34,7 @@ function runOnce(s: Stand, request: object | null, env: Record<string, string> =
     encoding: 'utf8',
     timeout: 30_000,
     env: {
-      PATH: `${STUBS}:/usr/bin:/bin`,
+      PATH: `${STUBS}:${TOOLS}:/usr/bin:/bin`,
       HOME: s.dir,
       STUB_LOG: s.log,
       STUB_STATE: s.dir,
@@ -50,6 +54,10 @@ function runOnce(s: Stand, request: object | null, env: Record<string, string> =
 const at = (calls: string[], start: string) => calls.findIndex(c => c.startsWith(start));
 
 describe('updater', () => {
+  beforeAll(() => {
+    if (!JQ) throw new Error('The updater tests need jq. Install it (brew install jq on a Mac, apt install jq on Debian or Ubuntu), then run them again.');
+  });
+
   it('updates to the asked version after saving the database', () => {
     const s = stand();
     const r = runOnce(s, { id: 'u1', version: '0.4.1', tag: '0.4.1' });

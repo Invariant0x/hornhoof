@@ -104,7 +104,7 @@ The updater runs next to the server. It saves the database, starts the new build
 
 ## Development
 
-You need Node 22.
+You need Node 22, and bash and jq for the tests of the installer and the updater (`brew install jq` on a Mac, `apt install jq` on Debian or Ubuntu).
 
 ```sh
 npm install
