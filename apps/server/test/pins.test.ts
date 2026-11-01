@@ -22,4 +22,15 @@ describe('what the build runs', () => {
   it('runs the database from an image pinned by digest', () => {
     expect(read('compose.yaml')).toMatch(/^ {4}image: postgres:17\.\d+@sha256:[0-9a-f]{64}$/m);
   });
+
+  /* install.sh writes them into .env: by digest from the updater, which checked them, or by the build's tag. */
+  it("runs Hornhoof's own images as .env names them", () => {
+    const images = read('compose.yaml').split('\n').filter(l => /^ {4}image: /.test(l)).map(l => l.trim());
+    expect(images).toEqual([
+      'image: ${HORNHOOF_APP_REF:-ghcr.io/invariant0x/hornhoof:latest}',
+      expect.stringMatching(/^image: postgres:/),
+      'image: ${HORNHOOF_NODE_REF:-ghcr.io/invariant0x/hornhoof-node:latest}',
+      'image: ${HORNHOOF_UPDATER_REF:-ghcr.io/invariant0x/hornhoof-updater:latest}',
+    ]);
+  });
 });

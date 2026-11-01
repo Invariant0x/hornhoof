@@ -8,10 +8,11 @@
 #   install.sh --uninstall                                       remove this machine's nodes
 #
 # Server installs pin the build in .env as HORNHOOF_VERSION (HORNHOOF_VERSION=<tag> picks one, latest otherwise) and
-# take compose.yaml from that build of the image. The updater service runs the installer of the build it moves to
-# with HORNHOOF_FROM_UPDATER=1: no questions and no Docker setup, the compose file it brings, and this server's nodes
-# on this machine move to the same build. HORNHOOF_PULLED=1 says the images are on this computer already, so it
-# downloads none of them.
+# take compose.yaml from that build of the image. .env also names the exact app, node and updater images compose
+# starts: by the build's tag, or as HORNHOOF_APP_REF, HORNHOOF_NODE_REF and HORNHOOF_UPDATER_REF give them. The updater
+# service runs the installer of the build it moves to with HORNHOOF_FROM_UPDATER=1: no questions and no Docker setup,
+# the compose file it brings, the images it checked by digest, and this server's nodes on this machine move to the
+# same build. HORNHOOF_PULLED=1 says the images are on this computer already, so it downloads none of them.
 #
 # Several companies can share a computer: each node carries the address of the server it works for, and an
 # update or an uninstall touches only that server's nodes.
@@ -33,6 +34,9 @@ PIN="${HORNHOOF_VERSION:-}"
 FROM_UPDATER="${HORNHOOF_FROM_UPDATER:-}"
 COMPOSE_SRC="${HORNHOOF_COMPOSE_FILE:-}"
 PULLED="${HORNHOOF_PULLED:-}"
+APP_REF="${HORNHOOF_APP_REF:-}"
+NODE_REF="${HORNHOOF_NODE_REF:-}"
+UPDATER_REF="${HORNHOOF_UPDATER_REF:-}"
 
 # Docker's and Homebrew's install scripts at the commits Hornhoof was tested with. They run as root or ask for the
 # password, so each runs only when its SHA-256 is the one written here.
@@ -567,7 +571,7 @@ compose_from_image() {
 # This server's nodes on this machine move to the node image of the same build, with their volumes.
 sweep_nodes() {
   local public port entry name id provider seen=' ' pulled=$PULLED
-  IMAGE="${HORNHOOF_NODE_IMAGE:-ghcr.io/invariant0x/hornhoof-node:${PIN:-latest}}"
+  IMAGE="${HORNHOOF_NODE_IMAGE:-$NODE_REF}"
   public=$(env_value PUBLIC_URL)
   port=$(port_of "$SERVER_DIR/.env")
   for SERVER in $public "http://localhost:$port"; do
@@ -642,6 +646,13 @@ server_mode() {
   set_env COMPOSE_PROJECT_NAME "$project"
   set_env HORNHOOF_SERVER_DIR "$SERVER_DIR"
   set_env HORNHOOF_VERSION "${PIN:-latest}"
+  # The exact images compose starts.
+  [ -n "$APP_REF" ] || APP_REF="$APP_IMAGE:${PIN:-latest}"
+  [ -n "$NODE_REF" ] || NODE_REF="ghcr.io/invariant0x/hornhoof-node:${PIN:-latest}"
+  [ -n "$UPDATER_REF" ] || UPDATER_REF="ghcr.io/invariant0x/hornhoof-updater:${PIN:-latest}"
+  set_env HORNHOOF_APP_REF "$APP_REF"
+  set_env HORNHOOF_NODE_REF "$NODE_REF"
+  set_env HORNHOOF_UPDATER_REF "$UPDATER_REF"
   local_url="http://localhost:$(port_of "$env_file")"
   public=$(env_value PUBLIC_URL)
   [ -n "$public" ] || public=$local_url

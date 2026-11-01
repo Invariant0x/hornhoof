@@ -14,9 +14,15 @@ if (JQ) symlinkSync(JQ, join(TOOLS, 'jq'));
 
 type Stand = { dir: string; control: string; server: string; log: string };
 
-/* The digest of each build as the registry has it now, and what the app asks for: the build it read, by digest. */
+/* The digest of each build as the registry has it now, and of the node and updater images made with it. The app asks
+   for the build it read and for those images, by digest. */
+const APP = 'ghcr.io/invariant0x/hornhoof';
 const DIGESTS: Record<string, string> = { '0.4.0': `sha256:${'a'.repeat(64)}`, '0.4.1': `sha256:${'b'.repeat(64)}` };
-const ask = (id: string) => ({ id, version: '0.4.1', tag: '0.4.1', digest: DIGESTS['0.4.1'] });
+const NODE_DIGESTS: Record<string, string> = { '0.4.0': `sha256:${'c'.repeat(64)}`, '0.4.1': `sha256:${'d'.repeat(64)}` };
+const UPDATER_DIGESTS: Record<string, string> = { '0.4.0': `sha256:${'e'.repeat(64)}`, '0.4.1': `sha256:${'f'.repeat(64)}` };
+const ask = (id: string) => ({ id, version: '0.4.1', tag: '0.4.1', digest: DIGESTS['0.4.1'], nodeDigest: NODE_DIGESTS['0.4.1'], updaterDigest: UPDATER_DIGESTS['0.4.1'] });
+/* The exact images of a build, as compose and the installer get them. */
+const refs = (tag: string) => `HORNHOOF_APP_REF=${APP}@${DIGESTS[tag]} HORNHOOF_NODE_REF=${APP}-node@${NODE_DIGESTS[tag]} HORNHOOF_UPDATER_REF=${APP}-updater@${UPDATER_DIGESTS[tag]}`;
 
 function stand(env = 'HORNHOOF_SECRET=s\nHORNHOOF_VERSION=0.4.0\n'): Stand {
   const dir = mkdtempSync(join(tmpdir(), 'hh-updater-'));
@@ -46,6 +52,7 @@ function runOnce(s: Stand, request: object | null, env: Record<string, string> =
       STUB_COMMITS: '0.4.0=aaa 0.4.1=bbb',
       STUB_MIGRATIONS: '0.4.0=20 0.4.1=20',
       STUB_DIGESTS: Object.entries(DIGESTS).map(([tag, digest]) => `${tag}=${digest}`).join(' '),
+      STUB_RUNNING_IMAGES: `app=${APP}@${DIGESTS['0.4.0']} node=${APP}-node@${NODE_DIGESTS['0.4.0']} updater=${APP}-updater@${UPDATER_DIGESTS['0.4.0']}`,
       HORNHOOF_CONTROL_DIR: s.control,
       HORNHOOF_SERVER_DIR: s.server,
       HORNHOOF_IMAGE: 'ghcr.io/invariant0x/hornhoof',
@@ -80,12 +87,14 @@ describe('updater', () => {
     expect([exact, create, images, dump, install].every(i => i >= 0)).toBe(true);
     expect(exact).toBeLessThan(create);
     expect(create).toBeLessThan(images);
-    expect(r.calls[images + 1]).toBe('pull with HORNHOOF_VERSION=0.4.1');
+    /* Compose gets the exact images Hornhoof read, so a tag that moves meanwhile changes nothing. */
+    expect(r.calls[images + 1]).toBe(`pull with HORNHOOF_VERSION=0.4.1 ${refs('0.4.1')}`);
     /* The old server keeps working through the downloads; what it does then is in the copy. */
     expect(images).toBeLessThan(dump);
     expect(dump).toBeLessThan(install);
     /* The installer starts the images the updater downloaded and downloads none again. */
-    expect(r.calls[install]).toMatch(/ HORNHOOF_PULLED=1$/);
+    expect(r.calls[install]).toContain(`HORNHOOF_PULLED=1 ${refs('0.4.1')}`);
+    expect(r.calls.filter(c => /hornhoof(-node|-updater)?:0\.4\.1/.test(c))).toEqual([]);
     expect(r.calls).toContain('docker cp cid-0.4.1:/app/scripts/install.sh ' + r.calls.find(c => c.includes(':/app/scripts/install.sh'))!.split(' ').pop());
     expect(r.calls.some(c => c.startsWith('docker cp cid-0.4.1:/app/compose.yaml '))).toBe(true);
     expect(r.calls.find(c => c.startsWith('installer'))).toContain(`HORNHOOF_SERVER_DIR=${s.server} HORNHOOF_COMPOSE_FILE=compose.yaml`);
@@ -96,7 +105,7 @@ describe('updater', () => {
     // The updater swaps itself last, from a helper container that outlives it.
     const swap = r.calls.findIndex(c => c.startsWith('docker run') && c.includes('compose up -d --no-build updater'));
     expect(swap).toBeGreaterThan(install);
-    expect(r.calls[swap]).toContain('hornhoof-updater:0.4.1');
+    expect(r.calls[swap]).toContain(`--entrypoint docker ${APP}-updater@${UPDATER_DIGESTS['0.4.1']} compose up -d --no-build updater`);
     expect(existsSync(join(s.control, 'alive'))).toBe(true);
   });
 
@@ -108,9 +117,19 @@ describe('updater', () => {
     expect(installs).toHaveLength(2);
     expect(installs[0]).toContain('HORNHOOF_VERSION=0.4.1');
     expect(installs[1]).toContain('HORNHOOF_VERSION=0.4.0');
+    /* The images that ran before, as Docker keeps them by digest. */
+    expect(installs[1]).toContain(`HORNHOOF_PULLED=1 ${refs('0.4.0')}`);
+    expect(r.calls).toContain(`docker create ${APP}@${DIGESTS['0.4.0']}`);
     expect(readFileSync(join(s.server, '.env'), 'utf8')).toContain('HORNHOOF_VERSION=0.4.0');
     expect(r.status.log).toMatch(/0\.4\.1 did not answer/);
     expect(r.calls.some(c => c.includes('compose up -d --no-build updater'))).toBe(false);
+  });
+
+  it('goes back to the images of the build from before by its tag when Docker keeps no digest of them', () => {
+    const s = stand();
+    const r = runOnce(s, ask('u11'), { STUB_BROKEN: '0.4.1', STUB_RUNNING_IMAGES: '' });
+    expect(r.status).toMatchObject({ id: 'u11', state: 'rolled_back', step: 'finished' });
+    expect(r.calls.filter(c => c.startsWith('installer'))[1]).toContain(`HORNHOOF_APP_REF=${APP}:0.4.0 HORNHOOF_NODE_REF=${APP}-node:0.4.0 HORNHOOF_UPDATER_REF=${APP}-updater:0.4.0`);
   });
 
   it('says what to do by hand when neither the new build nor the one before it answers', () => {
@@ -179,12 +198,33 @@ describe('updater', () => {
     expect(readFileSync(s.log, 'utf8')).not.toMatch(/^docker /m);
   });
 
-  it('changes nothing when the version now points at another build than the one Hornhoof read', () => {
+  it('refuses a request whose node or updater image is not named by a digest', () => {
     const s = stand();
-    const r = runOnce(s, ask('d4'), { STUB_DIGESTS: `0.4.0=${DIGESTS['0.4.0']} 0.4.1=sha256:${'c'.repeat(64)}` });
-    expect(r.status).toMatchObject({ id: 'd4', state: 'failed', step: 'pull' });
-    expect(r.status.log).toContain('0.4.1 in the registry is not the build Hornhoof checked, so nothing changed. Check for updates again, then update.');
-    expect(r.calls.some(c => c.startsWith('docker create') || c.startsWith('installer'))).toBe(false);
+    for (const [id, extra] of [['d4', { nodeDigest: 'latest' }], ['d5', { updaterDigest: `sha256:${'f'.repeat(63)};` }]] as const) {
+      const r = runOnce(s, { ...ask(id), ...extra });
+      expect(r.status).toMatchObject({ id, state: 'failed', step: 'finished' });
+      expect(r.status.log).toContain('The request does not name the exact build to install, so nothing changed.');
+    }
+    expect(readFileSync(s.log, 'utf8')).not.toMatch(/^docker /m);
+  });
+
+  it('installs the build Hornhoof read when its version points at another build by now', () => {
+    const s = stand();
+    const moved = `sha256:${'9'.repeat(64)}`;
+    const r = runOnce(s, ask('d6'), { STUB_DIGESTS: `0.4.0=${DIGESTS['0.4.0']} 0.4.1=${moved} 0.4.1=${DIGESTS['0.4.1']}` });
+    expect(r.status).toMatchObject({ id: 'd6', state: 'done', step: 'finished' });
+    expect(r.calls.find(c => c.startsWith('installer'))).toContain(`HORNHOOF_APP_REF=${APP}@${DIGESTS['0.4.1']} `);
+    expect(r.calls.some(c => c.includes(moved))).toBe(false);
+  });
+
+  it('takes the node and updater images by their tag for a build that has none by digest', () => {
+    const s = stand();
+    const r = runOnce(s, { ...ask('d7'), nodeDigest: '', updaterDigest: '' });
+    expect(r.status).toMatchObject({ id: 'd7', state: 'done', step: 'finished' });
+    const pinned = `HORNHOOF_APP_REF=${APP}@${DIGESTS['0.4.1']} HORNHOOF_NODE_REF=${APP}-node:0.4.1 HORNHOOF_UPDATER_REF=${APP}-updater:0.4.1`;
+    expect(r.calls).toContain(`pull with HORNHOOF_VERSION=0.4.1 ${pinned}`);
+    expect(r.calls.find(c => c.startsWith('installer'))).toContain(pinned);
+    expect(r.calls.some(c => c.startsWith('docker run') && c.includes(`${APP}-updater:0.4.1 compose up -d --no-build updater`))).toBe(true);
   });
 
   it('changes nothing when the new build cannot be downloaded', () => {
@@ -223,7 +263,7 @@ describe('updater', () => {
     const r = runOnce(s, null);
     expect(r.status).toMatchObject({ id: 'r1', version: '0.4.1', state: 'done', step: 'finished' });
     expect(r.calls.filter(c => c.startsWith('installer')).map(c => c.match(/HORNHOOF_VERSION=(\S+)/)![1])).toEqual(['0.4.1']);
-    expect(r.calls.some(c => c.includes('compose up -d --no-build updater') && c.includes('hornhoof-updater:0.4.1'))).toBe(true);
+    expect(r.calls.some(c => c.includes('compose up -d --no-build updater') && c.includes(`hornhoof-updater@${UPDATER_DIGESTS['0.4.1']}`))).toBe(true);
     expect(r.status.log).toContain('The updater stopped during the update and goes on with it.');
     /* The stub log keeps the calls of every run on this stand. */
     expect(runOnce(s, null).calls.filter(c => c.startsWith('installer'))).toHaveLength(1);
@@ -250,6 +290,8 @@ describe('updater', () => {
     expect(r.status).toMatchObject({ id: 'r2', state: 'rolled_back', step: 'finished' });
     expect(readFileSync(join(s.dir, 'migrations'), 'utf8')).toBe('20');
     expect(r.calls.filter(c => c.startsWith('installer')).map(c => c.match(/HORNHOOF_VERSION=(\S+)/)![1])).toEqual(['0.4.1', '0.4.0']);
+    /* Its note keeps the images that ran before, since they run no more by now. */
+    expect(r.calls.filter(c => c.startsWith('installer'))[1]).toContain(refs('0.4.0'));
   });
 
   it('finishes going back when it was stopped on the way back', () => {

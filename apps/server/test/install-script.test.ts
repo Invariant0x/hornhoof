@@ -304,6 +304,10 @@ describe('install.sh', () => {
     expect(env).toContain('PUBLIC_URL=https://hornhoof.my.test');
     /* It goes into the database address, so it keeps to characters an address takes as they are. */
     expect(env).toMatch(/^POSTGRES_PASSWORD=[0-9a-f]{48}$/m);
+    /* compose starts the images .env names; set up by hand, they are the build's tag. */
+    expect(env).toMatch(/^HORNHOOF_APP_REF=ghcr\.io\/invariant0x\/hornhoof:latest$/m);
+    expect(env).toMatch(/^HORNHOOF_NODE_REF=ghcr\.io\/invariant0x\/hornhoof-node:latest$/m);
+    expect(env).toMatch(/^HORNHOOF_UPDATER_REF=ghcr\.io\/invariant0x\/hornhoof-updater:latest$/m);
     expect(existsSync(join(r.dir, 'home', 'hornhoof', 'compose.yaml'))).toBe(true);
     expect(r.calls).toContain('docker compose pull');
     expect(r.calls).toContain('docker compose up -d --no-build');
@@ -493,6 +497,9 @@ describe('install.sh', () => {
         HORNHOOF_SERVER_DIR: dir,
         HORNHOOF_VERSION: '0.4.1',
         HORNHOOF_COMPOSE_FILE: compose,
+        HORNHOOF_APP_REF: `ghcr.io/invariant0x/hornhoof@sha256:${'b'.repeat(64)}`,
+        HORNHOOF_NODE_REF: `ghcr.io/invariant0x/hornhoof-node@sha256:${'d'.repeat(64)}`,
+        HORNHOOF_UPDATER_REF: `ghcr.io/invariant0x/hornhoof-updater@sha256:${'f'.repeat(64)}`,
         STUB_CONTAINERS: 'hornhoof-claude-1c07dac4=http://localhost:8080',
       },
     });
@@ -501,16 +508,21 @@ describe('install.sh', () => {
     const env = readFileSync(join(dir, '.env'), 'utf8');
     expect(env).toMatch(/^HORNHOOF_VERSION=0\.4\.1$/m);
     expect(env).toContain('HORNHOOF_SECRET=keep-me');
+    /* compose starts exactly the images the updater checked. */
+    expect(env).toMatch(new RegExp(`^HORNHOOF_APP_REF=ghcr\\.io/invariant0x/hornhoof@sha256:${'b'.repeat(64)}$`, 'm'));
+    expect(env).toMatch(new RegExp(`^HORNHOOF_NODE_REF=ghcr\\.io/invariant0x/hornhoof-node@sha256:${'d'.repeat(64)}$`, 'm'));
+    expect(env).toMatch(new RegExp(`^HORNHOOF_UPDATER_REF=ghcr\\.io/invariant0x/hornhoof-updater@sha256:${'f'.repeat(64)}$`, 'm'));
     expect(r.calls.some(c => c.startsWith('curl'))).toBe(false);
     expect(r.calls.some(c => c.startsWith('docker create') || c.startsWith('docker info'))).toBe(false);
     /* The updater downloaded every image before it saved the database, so this only starts them. */
     expect(r.calls.some(c => c.startsWith('docker pull') || c.startsWith('docker compose pull'))).toBe(false);
     expect(r.calls).toContain('docker compose up -d --no-build db app node');
     expect(r.calls).not.toContain('docker compose up -d --no-build');
-    expect(r.calls.some(c => c.startsWith('docker run -d --name hornhoof-claude-1c07dac4'))).toBe(true);
+    expect(r.calls.find(c => c.startsWith('docker run -d --name hornhoof-claude-1c07dac4'))).toMatch(new RegExp(` ghcr\\.io/invariant0x/hornhoof-node@sha256:${'d'.repeat(64)}$`));
   });
 
-  /* The first update of a server from before runs through the updater it has, which downloads nothing. */
+  /* The first update of a server from before runs through the updater it has, which downloads nothing and names the
+     build by its tag only. */
   it('downloads the images itself for an updater that did not', () => {
     const dir = mkdtempSync(join(tmpdir(), 'hh-server-'));
     writeFileSync(join(dir, '.env'), 'HORNHOOF_SECRET=keep-me\nNODE_KEY=k\nPUBLIC_URL=http://localhost:8080\nHORNHOOF_VERSION=0.4.0\n');
@@ -520,6 +532,10 @@ describe('install.sh', () => {
     expect(r.code).toBe(0);
     expect(indexOf(r.calls, 'docker compose pull')).toBeGreaterThanOrEqual(0);
     expect(indexOf(r.calls, 'docker compose pull')).toBeLessThan(indexOf(r.calls, 'docker compose up -d --no-build db app node'));
+    const env = readFileSync(join(dir, '.env'), 'utf8');
+    expect(env).toMatch(/^HORNHOOF_APP_REF=ghcr\.io\/invariant0x\/hornhoof:0\.4\.1$/m);
+    expect(env).toMatch(/^HORNHOOF_NODE_REF=ghcr\.io\/invariant0x\/hornhoof-node:0\.4\.1$/m);
+    expect(env).toMatch(/^HORNHOOF_UPDATER_REF=ghcr\.io\/invariant0x\/hornhoof-updater:0\.4\.1$/m);
   });
 
   it("moves this server's nodes on this machine to the new build from the updater", () => {

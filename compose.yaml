@@ -1,8 +1,8 @@
 services:
   app:
     build: .
-    # install.sh and the updater pin the build in .env as HORNHOOF_VERSION.
-    image: ghcr.io/invariant0x/hornhoof:${HORNHOOF_VERSION:-latest}
+    # install.sh names the exact image in .env: by the digest the updater checked, or by the build's tag.
+    image: ${HORNHOOF_APP_REF:-ghcr.io/invariant0x/hornhoof:latest}
     restart: unless-stopped
     # install.sh picks a free port for each company's server on one computer and keeps it in .env.
     ports:
@@ -50,7 +50,7 @@ services:
   # Runs checks and jobs for the company's API keys. Agents run whatever their prompt asks, so it has no
   # capabilities and cannot reach the database.
   node:
-    image: ghcr.io/invariant0x/hornhoof-node:${HORNHOOF_VERSION:-latest}
+    image: ${HORNHOOF_NODE_REF:-ghcr.io/invariant0x/hornhoof-node:latest}
     build:
       context: .
       dockerfile: apps/node/Dockerfile
@@ -82,12 +82,12 @@ services:
     networks:
       - default
 
-  # Moves this server to another build when someone updates from the web app: it saves the database, runs the
-  # installer that comes inside that build, and goes back if the new server does not answer. It holds the Docker
-  # socket, so it reads nothing from the app but the tag of a Hornhoof image. The server folder is mounted at the
-  # same path as on the host, so compose finds the same files from inside.
+  # Moves this server to another build when someone updates from the web app: it downloads the build's images, saves
+  # the database, runs the installer that comes inside that build, and goes back if the new server does not answer.
+  # It holds the Docker socket, so it reads nothing from the app but the tag and the digests of Hornhoof's images.
+  # The server folder is mounted at the same path as on the host, so compose finds the same files from inside.
   updater:
-    image: ghcr.io/invariant0x/hornhoof-updater:${HORNHOOF_VERSION:-latest}
+    image: ${HORNHOOF_UPDATER_REF:-ghcr.io/invariant0x/hornhoof-updater:latest}
     build:
       context: .
       dockerfile: apps/updater/Dockerfile
