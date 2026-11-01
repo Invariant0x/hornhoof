@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { agentEvents, agents, companies, departments, jobs, people, personAccess, requests, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
 import { agentState, enqueueTurn } from '../src/modules/conversation/queue.js';
 import { said } from '../src/modules/conversation/live.js';
-import { identityOf } from '../src/modules/nodes/hub.js';
+import { identityOf, type NodeIdentity } from '../src/modules/nodes/hub.js';
 import { answer, ask, cancel, comment, createTask, GOING_ON_TURNS, report, submit, updateTask } from '../src/modules/tasks/engine.js';
 import { afterJob, SILENT_TURNS, startWork, typedTurn, wakeAll, wakeLeftBehind, wakePrompt } from '../src/modules/tasks/wake.js';
 import { as, connectNode, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
@@ -154,18 +154,25 @@ describe('a plan at its limit', () => {
 });
 
 describe('a plan at its limit, with others of the role on other plans', () => {
-  /* Rex is a backend engineer too, on a Codex plan; Bruno's plan is at its limit for an hour. */
-  async function withPeer(rexLimited = false) {
+  /* Rex is a backend engineer too, on a Codex plan whose machine is on; Bruno's plan is at its limit for an hour. */
+  async function withPeer(rex: { limited?: boolean; status?: 'ready' | 'needs_login'; online?: boolean; nodeVersion?: string } = {}) {
     const c = await company();
     const resetsAt = new Date(Date.now() + 3_600_000).toISOString();
     const rejected = { status: 'rejected' as const, windows: [{ name: 'five_hour', utilization: 1, resetsAt }] };
-    const [codex] = await c.db.insert(subscriptions).values({ companyId: c.dev.companyId, provider: 'codex', kind: 'personal', label: 'Codex', ownerPersonId: c.ceo.id, status: 'ready', limits: rexLimited ? rejected : null }).returning();
-    const [rex] = await c.db.insert(agents).values({ companyId: c.dev.companyId, kind: 'worker', name: 'Rex', roleKey: 'DEV-BE', departmentId: c.dev.id, model: '', subscriptionId: codex!.id }).returning();
+    const [codex] = await c.db
+      .insert(subscriptions)
+      .values({ companyId: c.dev.companyId, provider: 'codex', kind: 'personal', label: 'Codex', ownerPersonId: c.ceo.id, status: rex.status ?? 'ready', nodeVersion: rex.nodeVersion ?? '0.5.0', limits: rex.limited ? rejected : null })
+      .returning();
+    const { isReady, hasTerminals } = { isReady: c.ctx.hub.isReady.bind(c.ctx.hub), hasTerminals: c.ctx.hub.hasTerminals.bind(c.ctx.hub) };
+    const rexs = (id: NodeIdentity) => id.kind === 'node' && id.subscriptionId === codex!.id;
+    vi.spyOn(c.ctx.hub, 'isReady').mockImplementation(id => (rexs(id) ? rex.online ?? true : isReady(id)));
+    vi.spyOn(c.ctx.hub, 'hasTerminals').mockImplementation(id => !rexs(id) && hasTerminals(id));
+    const [peer] = await c.db.insert(agents).values({ companyId: c.dev.companyId, kind: 'worker', name: 'Rex', roleKey: 'DEV-BE', departmentId: c.dev.id, model: '', subscriptionId: codex!.id }).returning();
     const task = await c.memberTask();
     await wakeAll(c.ctx, [{ agentId: c.bruno.id, taskId: task.id, why: 'assigned' }]);
     await c.db.update(subscriptions).set({ limits: rejected }).where(eq(subscriptions.id, c.sub.id));
     await c.finish(c.bruno.id, async () => {}, 'failed');
-    return { ...c, rex: rex!, task };
+    return { ...c, rex: peer!, task };
   }
 
   it('gives the work to one of them who is on, with one note in the task', async () => {
@@ -180,9 +187,18 @@ describe('a plan at its limit, with others of the role on other plans', () => {
   });
 
   it('waits for the reset when their plans are at their limits too', async () => {
-    const { db, bruno, task, turnsOf } = await withPeer(true);
+    const { db, bruno, task, turnsOf } = await withPeer({ limited: true });
     expect((await db.select().from(tasks).where(eq(tasks.id, task.id)))[0]).toMatchObject({ executorAgentId: bruno.id });
     expect((await turnsOf(bruno.id)).filter(j => j.status === 'queued')).toHaveLength(1);
+  });
+
+  it('waits for the reset when none of them could start now: signed out, its machine off or its node too old', async () => {
+    for (const rex of [{ status: 'needs_login' as const }, { online: false }, { nodeVersion: '0.2.0' }]) {
+      const { db, bruno, rex: peer, task, turnsOf } = await withPeer(rex);
+      expect((await db.select().from(tasks).where(eq(tasks.id, task.id)))[0], JSON.stringify(rex)).toMatchObject({ executorAgentId: bruno.id, assigneeAgentId: bruno.id });
+      expect((await turnsOf(bruno.id)).filter(j => j.status === 'queued'), JSON.stringify(rex)).toHaveLength(1);
+      expect(await turnsOf(peer.id), JSON.stringify(rex)).toEqual([]);
+    }
   });
 });
 

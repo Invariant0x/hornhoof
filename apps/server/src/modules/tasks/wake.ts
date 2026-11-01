@@ -2,7 +2,7 @@ import { and, asc, count, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, ma
 import type { Ctx } from '../../app.js';
 import { loggable } from '../../errors.js';
 import { agentChanges, agentEvents, agents, jobs, requests, subscriptions, taskEvents, tasks } from '../../db/schema.js';
-import { conversationOf, GONE_ALONG, insertTurn, limitUntil, liveSubscription, onAgent, openTypedTurn, orchestratorOf, pump, refusedLimits } from '../conversation/queue.js';
+import { agentState, conversationOf, GONE_ALONG, insertTurn, limitUntil, liveSubscription, onAgent, openTypedTurn, orchestratorOf, pump, refusedLimits } from '../conversation/queue.js';
 import { sayLive } from '../conversation/live.js';
 import { quote } from '../conversation/prompt.js';
 import { appendEvent, publishWorking } from '../events/store.js';
@@ -384,13 +384,19 @@ async function standIn(ctx: Ctx, agentId: string, task: Task): Promise<{ id: str
   const [me] = await ctx.db.select({ agent: agents, provider: subscriptions.provider }).from(agents).innerJoin(subscriptions, eq(subscriptions.id, agents.subscriptionId)).where(eq(agents.id, agentId));
   if (!me || me.agent.kind !== 'worker' || !me.agent.roleKey || !me.agent.departmentId) return null;
   const peers = await ctx.db
-    .select({ id: agents.id, name: agents.name, productId: agents.productId, provider: subscriptions.provider, limits: subscriptions.limits })
+    .select({ id: agents.id, name: agents.name, productId: agents.productId, provider: subscriptions.provider })
     .from(agents)
     .innerJoin(subscriptions, and(eq(subscriptions.id, agents.subscriptionId), isNull(subscriptions.removedAt)))
     .where(and(eq(agents.departmentId, me.agent.departmentId), eq(agents.roleKey, me.agent.roleKey), eq(agents.kind, 'worker'), isNull(agents.removedAt), isNull(agents.switchedOffAt), ne(agents.id, agentId), ne(subscriptions.provider, me.provider)))
     .orderBy(asc(agents.createdAt));
-  const fit = peers.find(p => (!p.productId || p.productId === task.productId) && !task.gates.includes(p.id) && !limitUntil(p.limits));
-  return fit ? { id: fit.id, name: fit.name, provider: fit.provider } : null;
+  /* Only one whose turn would go out now: signed in, on a machine that is on, and with plan left for tasks. Anyone else
+     would only wait in the agent's place. */
+  for (const p of peers) {
+    if ((p.productId && p.productId !== task.productId) || task.gates.includes(p.id)) continue;
+    const state = await agentState(ctx, p.id);
+    if (state.ready && !state.limitUntil && !state.budgetUntil) return { id: p.id, name: p.name, provider: p.provider };
+  }
+  return null;
 }
 
 async function checkHeld(ctx: Ctx, job: typeof jobs.$inferSelect & { agentId: string; startedAt: Date }, task: Task): Promise<void> {
