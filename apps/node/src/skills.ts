@@ -35,15 +35,15 @@ function versionOf(superpowers: string): string {
 }
 
 /* The exclude file of the repository the agent's folder is part of, the nearest .git above it as programs find a
-   project's root, and where the folder is in it. A worktree's .git is a file that names its git folder, and that one the
-   common folder whose excludes git reads. */
-function repoOf(workDir: string): { exclude: string; at: string } | null {
+   project's root, where the folder is in it, and the git folder of its checkout. A worktree's .git is a file that names
+   its git folder, and that one the common folder whose excludes git reads for every worktree. */
+function repoOf(workDir: string): { exclude: string; at: string; gitDir: string } | null {
   for (let dir = workDir; ; dir = dirname(dir)) {
     const dotGit = join(dir, '.git');
     if (existsSync(dotGit)) {
       const gitDir = statSync(dotGit).isDirectory() ? dotGit : resolve(dir, /^gitdir: (.+)$/m.exec(readFileSync(dotGit, 'utf8'))?.[1] ?? '.git');
       const common = existsSync(join(gitDir, 'commondir')) ? resolve(gitDir, readFileSync(join(gitDir, 'commondir'), 'utf8').trim()) : gitDir;
-      return { exclude: join(common, 'info', 'exclude'), at: relative(dir, workDir).split(sep).join('/') };
+      return { exclude: join(common, 'info', 'exclude'), at: relative(dir, workDir).split(sep).join('/'), gitDir };
     }
     if (dirname(dir) === dir) return null;
   }
@@ -67,12 +67,12 @@ function inTurn<T>(path: string, fn: () => Promise<T>): Promise<T> {
   return run;
 }
 
-/* Names what the node writes in the agent's folder in its repository's excludes, one block for each folder, so git add
-   in that repository takes none of it in; an agent's own files there stay seen. */
+/* Names what the node writes in the agent's folder in its repository's excludes, one block for each folder of each
+   checkout, so git add in that repository takes none of it in; an agent's own files there stay seen. */
 async function exclude(fs: AgentFs, workDir: string, paths: string[]): Promise<void> {
   const repo = repoOf(workDir);
   if (!repo) return;
-  const head = `# Hornhoof's skill files in /${repo.at}`;
+  const head = `# Hornhoof's skill files in /${repo.at} of the checkout ${repo.gitDir}`;
   await inTurn(repo.exclude, async () => {
     const lines = ((await fs.read(repo.exclude)) ?? '').split('\n');
     const from = lines.indexOf(head);

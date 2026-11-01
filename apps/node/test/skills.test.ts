@@ -114,6 +114,18 @@ describe('skills as files', () => {
     expect(added(tree)).toEqual([]);
   });
 
+  it('keeps the block of each worktree of a repository, as they share its excludes', async () => {
+    const dir = work();
+    git(dir, 'init', '-q');
+    git(dir, 'commit', '-q', '--allow-empty', '-m', 'start');
+    const tree = join(work(), 'tree');
+    git(dir, 'worktree', 'add', '-q', tree);
+    await placeSkills(ownFs, dir, 'codex', [TDD], null);
+    await placeSkills(ownFs, tree, 'codex', [DOCS], null);
+    expect(added(dir)).toEqual([]);
+    expect(added(tree)).toEqual([]);
+  });
+
   it('copies superpowers again only when the image brings another version', async () => {
     const dir = work();
     const sp = superpowers();
