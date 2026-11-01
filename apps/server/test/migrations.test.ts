@@ -156,3 +156,28 @@ describe('migration 0011', () => {
     ]);
   });
 });
+
+describe('migration 0020', () => {
+  const C = '00000000-0000-4000-8000-000000000001';
+
+  it('takes the threat model off the red team and leaves it with security', async () => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0019_agent_event_jobs') });
+    await db.execute(sql`insert into companies (id, name) values (${C}, 'Acme')`);
+    const red = JSON.stringify(['hh-task-flow', 'dev-adversarial', 'dev-threat-model']);
+    const sec = JSON.stringify(['hh-task-flow', 'dev-security-review', 'dev-threat-model']);
+    await db.execute(sql`insert into agents (company_id, kind, name, model, role_key, skills) values
+      (${C}, 'worker', 'Red team', '', 'DEV-RED', ${red}::jsonb),
+      (${C}, 'worker', 'Security engineer', '', 'DEV-SEC', ${sec}::jsonb)`);
+
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+
+    const rows = await db.execute<{ name: string; skills: string[] }>(sql`select name, skills from agents order by name`);
+    expect(rows.rows).toEqual([
+      { name: 'Red team', skills: ['hh-task-flow', 'dev-adversarial'] },
+      { name: 'Security engineer', skills: ['hh-task-flow', 'dev-security-review', 'dev-threat-model'] },
+    ]);
+  });
+});
