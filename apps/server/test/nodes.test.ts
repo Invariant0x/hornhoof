@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import { agents, departments, companies, jobs, nodeCodes, nodes, people, subscriptions, tasks, testParts, testRuns } from '../src/db/schema.js';
+import { hashToken } from '../src/crypto/tokens.js';
 import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until } from './helpers.js';
 
 const MACHINE = { machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' };
@@ -138,13 +139,20 @@ describe('a machine without a plan', () => {
     expect(await machinesOf(app, ceo)).toEqual([]);
   });
 
-  it('keeps its node when it joins again, with a new key', async () => {
+  it('never gives its node a new key while it has one, so a second command cannot take the machine over', async () => {
     const { app, db } = await testApp();
+    const url = await listen(app);
     const ceo = await setUpCompany(app);
-    const first = (await join(app, await machineCommand(app, ceo))).json().nodes[0];
-    const again = (await join(app, await machineCommand(app, ceo))).json().nodes[0];
-    expect(again.nodeId).toBe(first.nodeId);
-    expect(again.key).not.toBe(first.key);
+    const first = (await join(app, await machineCommand(app, ceo))).json();
+    const again = await join(app, await machineCommand(app, ceo));
+    expect(again.statusCode).toBe(409);
+    expect(again.json().error.reason).toBe('already_on_machine');
+    const node = await connectNode(url, first.nodes[0].key);
+    node.send({ type: 'hello', version: '0.9.0', loggedIn: true, running: [] });
+    await until(async () => (await machinesOf(app, ceo))[0].online === true);
+    await app.inject({ method: 'POST', url: `/api/machines/${first.machine.id}/disconnect`, ...as(ceo) });
+    const back = (await join(app, await machineCommand(app, ceo))).json();
+    expect(back.nodes[0].nodeId).toBe(first.nodes[0].nodeId);
     expect(await db.select().from(nodes)).toHaveLength(1);
   });
 
@@ -274,12 +282,16 @@ describe('one plan on several machines', () => {
     expect((await app.inject({ url: '/api/machines', ...as(ceo) })).json().builtin.running.parts).toMatchObject([{ run: 3, part: 1 }]);
   });
 
-  it('gives a plan a new key on a machine it is on already, and keeps the node', async () => {
-    const { app, db, ceo, plan, mac } = await twoMachines();
-    const again = (await join(app, codeOf((await app.inject({ method: 'POST', url: `/api/subscriptions/${plan}/command`, ...as(ceo) })).json().command))).json();
-    expect(again.nodes[0].nodeId).toBe(mac.nodes[0].nodeId);
-    expect(again.nodes[0].key).not.toBe(mac.nodes[0].key);
-    expect(await db.select().from(nodes).where(eq(nodes.subscriptionId, plan))).toHaveLength(1);
+  it('never gives a plan a new key on a machine it runs on, so a second command cannot take its node over', async () => {
+    const { app, db, ceo, plan, laptop } = await twoMachines();
+    const one = codeOf((await addPlan(app, ceo, laptop.machine.id, plan)).json().command);
+    const two = codeOf((await addPlan(app, ceo, laptop.machine.id, plan)).json().command);
+    const added = (await join(app, one, LAPTOP)).json().nodes[0];
+    const again = await join(app, two, LAPTOP);
+    expect(again.statusCode).toBe(409);
+    expect(again.json().error.reason).toBe('already_on_machine');
+    const [node] = await db.select().from(nodes).where(eq(nodes.id, added.nodeId));
+    expect(node!.keyHash).toBe(hashToken(added.key));
   });
 
   it('keeps the plan ready while one of its machines is signed in, and waiting once none is left', async () => {

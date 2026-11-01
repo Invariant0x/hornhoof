@@ -290,8 +290,13 @@ join_machine() {
       fail "This command is not valid. Copy it again from Hornhoof."
       ;;
     409)
+      # A node that has a key keeps it: a second command never takes a working node over.
+      if grep -q already_on_machine "$body"; then
+        rm -f "$body"
+        fail "This machine already runs what this command connects, and keeps it as it is. To update its nodes, run: curl -fsSL $SERVER/install.sh | bash"
+      fi
       rm -f "$body"
-      fail "This command is for another of your machines. Run it on the machine you got it for: Hornhoof shows which one under Subscriptions."
+      fail "This command is for another of your machines. Run it on the machine you got it for: Hornhoof shows which one under Machines."
       ;;
     000)
       rm -f "$body"

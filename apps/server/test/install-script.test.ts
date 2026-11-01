@@ -239,9 +239,18 @@ describe('install.sh', () => {
   });
 
   it('says to run a command made for another machine there, and starts nothing', () => {
-    const r = install({ env: { STUB_JOIN_STATUS: '409', STUB_JOIN_BODY: '{"error":"conflict"}' } });
+    const r = install({ env: { STUB_JOIN_STATUS: '409', STUB_JOIN_BODY: '{"error":{"code":"conflict","reason":"other_machine"}}' } });
     expect(r.code).toBe(1);
-    expect(r.out).toContain('This command is for another of your machines. Run it on the machine you got it for: Hornhoof shows which one under Subscriptions.');
+    expect(r.out).toContain('This command is for another of your machines. Run it on the machine you got it for: Hornhoof shows which one under Machines.');
+    expect(r.calls.some(c => c.startsWith('docker run -d'))).toBe(false);
+  });
+
+  it('says a machine that runs what the command brings already keeps it, and how to update it instead', () => {
+    const r = install({ env: { STUB_JOIN_STATUS: '409', STUB_JOIN_BODY: '{"error":{"code":"conflict","reason":"already_on_machine"}}' } });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('This machine already runs what this command connects, and keeps it as it is.');
+    expect(r.out).toContain(`curl -fsSL ${SERVER}/install.sh | bash`);
+    expect(r.out).not.toContain('another of your machines');
     expect(r.calls.some(c => c.startsWith('docker run -d'))).toBe(false);
   });
 

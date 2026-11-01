@@ -30,18 +30,20 @@ export const LendBody = z.object({ lendsTests: z.boolean() }).strict();
 export const PlanBody = z.object({ subscription: z.uuid() }).strict();
 
 const codeUsed = () => new ApiError(410, 'gone', 'This install command was already used or has expired. Get a new one in Hornhoof.', 'code_used');
+const alreadyThere = () => new ApiError(409, 'conflict', 'This machine runs it already.', 'already_on_machine');
 
 /* The node of this plan, or this machine's own, on this machine with a new key. One that was here before keeps its id,
    so the installer finds its container and sign-in again. A plan's first node takes the plan's id, as nodes had before
-   they had rows of their own. */
-async function keyNode(tx: Db, at: { companyId: string; machineId: string; subscriptionId: string | null }, keyHash: string): Promise<string> {
+   they had rows of their own. None while the node has a key: a machine key and a command are all a join shows, so a
+   second command must not take a working node over. */
+async function keyNode(tx: Db, at: { companyId: string; machineId: string; subscriptionId: string | null }, keyHash: string): Promise<string | null> {
   const [had] = at.subscriptionId ? await tx.select({ id: nodes.id }).from(nodes).where(eq(nodes.subscriptionId, at.subscriptionId)).limit(1) : [];
   const [node] = await tx
     .insert(nodes)
     .values({ ...(at.subscriptionId && !had ? { id: at.subscriptionId } : {}), ...at, keyHash, status: 'needs_login' })
-    .onConflictDoUpdate({ target: [nodes.machineId, nodes.subscriptionId], set: { keyHash, status: 'needs_login' } })
+    .onConflictDoUpdate({ target: [nodes.machineId, nodes.subscriptionId], set: { keyHash, status: 'needs_login' }, setWhere: isNull(nodes.keyHash) })
     .returning({ id: nodes.id });
-  return node!.id;
+  return node?.id ?? null;
 }
 
 export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
@@ -98,16 +100,18 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
       if (alone) {
         const key = newToken();
         const nodeId = await keyNode(tx, { companyId: code.companyId, machineId: machine!.id, subscriptionId: null }, hashToken(key));
+        if (!nodeId) throw alreadyThere();
         return { machine: { id: machine!.id }, nodes: [{ nodeId, subscriptionId: null, provider: 'machine' as const, key }] };
       }
 
-      /* Each plan signs in on this machine by itself, with a key of its own. */
+      /* Each plan signs in on this machine by itself, with a key of its own; one that runs here already is left as it is. */
       const made: { nodeId: string; subscriptionId: string | null; provider: Provider | 'machine'; key: string }[] = [];
       for (const sub of subs) {
         const key = newToken();
         const nodeId = await keyNode(tx, { companyId: code.companyId, machineId: machine!.id, subscriptionId: sub.id }, hashToken(key));
-        made.push({ nodeId, subscriptionId: sub.id, provider: sub.provider, key });
+        if (nodeId) made.push({ nodeId, subscriptionId: sub.id, provider: sub.provider, key });
       }
+      if (!made.length) throw alreadyThere();
       await settlePlans(tx, made.map(n => n.subscriptionId));
       return { machine: { id: machine!.id }, nodes: made };
     });
