@@ -3,7 +3,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { requireCompanyScope, requirePerson } from '../../auth/session.js';
-import { ApiError } from '../../errors.js';
+import { ApiError, loggable } from '../../errors.js';
 import { workingCount } from '../events/store.js';
 import type { UpdateRequest, UpdaterView } from './control.js';
 import type { Build } from './registry.js';
@@ -52,21 +52,24 @@ export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
     ctx.updater.request(rest, id);
   }
 
-  /* The request is still the one waiting after the count, since a person may call it off or ask for another meanwhile. */
+  /* The request is still the one waiting after the count, since a person may call it off or ask for another meanwhile.
+     It stops waiting only once the updater has it: a request that could not be written is tried again on the next
+     check, and the failure goes to the log instead of taking the server down. */
   async function sendWhenIdle(companyId: string, request: UpdateRequest) {
     let done = false;
     const wanted = () => !done && waiting?.request.id === request.id;
     const check = async () => {
       if (!wanted() || (await workingCount(ctx.db, companyId)) > 0 || !wanted()) return;
+      send(request);
       done = true;
       callOff();
-      send(request);
     };
-    const unsubscribe = ctx.bus.subscribe(companyId, m => m.type === 'working' && m.working === 0 && void check());
-    const timer = setInterval(() => void check(), IDLE_CHECK_MS);
+    const tryCheck = () => check().catch(err => app.log.error({ error: loggable(err) }, 'Could not hand the waiting update to the updater.'));
+    const unsubscribe = ctx.bus.subscribe(companyId, m => m.type === 'working' && m.working === 0 && void tryCheck());
+    const timer = setInterval(() => void tryCheck(), IDLE_CHECK_MS);
     timer.unref();
     waiting = { companyId, request, stop: () => (unsubscribe(), clearInterval(timer)) };
-    await check();
+    await tryCheck();
   }
 
   app.addHook('onClose', async () => callOff());

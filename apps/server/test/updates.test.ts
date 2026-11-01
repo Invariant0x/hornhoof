@@ -1,5 +1,5 @@
 import Fastify, { type FastifyInstance } from 'fastify';
-import { existsSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmdirSync, utimesSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -250,6 +250,31 @@ describe('updates', () => {
     hold.resume();
     await settled();
     expect(request(control)).toBeNull();
+  });
+
+  it('keeps an update waiting while the updater cannot be told, and hands it over once it can', async () => {
+    const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' } });
+    const { app, db, ceo, control } = await company(registry);
+    updaterAlive(control);
+    const [acme] = await db.select().from(companies);
+    const [sub] = await db.select().from(subscriptions);
+    const [job] = await db.insert(jobs).values({ companyId: acme!.id, subscriptionId: sub!.id, agentId: (await db.select().from(agents))[0]!.id, prompt: 'x', status: 'running', timeoutMs: 1000 }).returning();
+    const res = await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: true }, ...as(ceo) });
+    /* A folder where the request file goes makes writing it fail. */
+    mkdirSync(join(control, 'request.json.new'));
+    await db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, job!.id));
+    const hold = holdNextCount();
+    await publishWorking(app.ctx, acme!.id);
+    await hold.counted;
+    hold.resume();
+    await settled();
+    expect(request(control)).toBeNull();
+    expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.waiting).toEqual({ version: '0.4.1' });
+
+    rmdirSync(join(control, 'request.json.new'));
+    await publishWorking(app.ctx, acme!.id);
+    await expect.poll(() => request(control)).toEqual({ id: res.json().id, version: '0.4.1', tag: SHA });
+    expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.waiting).toBeNull();
   });
 
   it('says when no updater runs', async () => {
