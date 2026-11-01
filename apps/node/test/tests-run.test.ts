@@ -6,7 +6,7 @@ import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { MAX_RUN_FILES, TEST_LOG_BYTES, type ServerMessage } from '@hornhoof/protocol';
 import { describe, expect, it, onTestFinished } from 'vitest';
-import { partFiles, runTests, type PartFiles } from '../src/tests.js';
+import { partFiles, partFolders, putOutputs, runTests, type PartFiles } from '../src/tests.js';
 
 type TestRun = Extract<ServerMessage, { type: 'tests.run' }>;
 
@@ -165,7 +165,7 @@ describe('a part of other work on a node', () => {
     const { files, put } = taskFiles();
     const done = await runTests(work({ command: `rmdir "$HH_OUT"; ln -s ${elsewhere} "$HH_OUT"` }), { dir: nodeDir(), user: null, hidden: [], files });
     expect(put).toEqual([]);
-    expect(done.log).toMatch(/output folder is no longer a folder/);
+    expect(done.log).toMatch(/output folder is no longer the part's own/);
   });
 
   it("stops waiting for a task's file when the part is stopped or its time is up, and removes its folder", async () => {
@@ -189,6 +189,26 @@ describe('a part of other work on a node', () => {
     expect(result.log).toMatch(/Stopped before a\.txt went on the task\./);
     expect(result.log).not.toMatch(/Put on the task|b\.txt (went|could)/);
     expect(readdirSync(join(dir, 'tests'))).toEqual([]);
+  });
+
+  it("keeps the part's folder the node's, and gives its user only the folders inside it", () => {
+    const root = '/n/tests/part-1';
+    expect(partFolders(root, work())).toEqual({ own: root, user: ['home', 'tmp', 'out', 'work'].map(f => join(root, f)) });
+    expect(partFolders(root, work({ repo: { url: 'https://x/y.git', token: '' } }))).toEqual({ own: root, user: ['home', 'tmp', 'out', 'in', 'repo'].map(f => join(root, f)) });
+    expect(partFolders(root, work({ kind: undefined, repo: { url: 'https://x/y.git', token: '' } }))).toEqual({ own: root, user: ['home', 'tmp', 'repo'].map(f => join(root, f)) });
+  });
+
+  it("puts nothing on the task from an output folder its user does not own", async () => {
+    const folder = nodeDir();
+    writeFileSync(join(folder, 'made.txt'), 'made\n');
+    const { files, put } = taskFiles();
+    const lines: string[] = [];
+    const me = { uid: process.getuid!(), gid: process.getgid!() };
+    await putOutputs(work(), folder, { ...me, uid: me.uid + 1 }, files, { line: (l: string) => void lines.push(l) } as never, AbortSignal.timeout(5000));
+    expect(put).toEqual([]);
+    expect(lines.join('\n')).toMatch(/output folder is no longer the part's own/);
+    await putOutputs(work(), folder, me, files, { line: (l: string) => void lines.push(l) } as never, AbortSignal.timeout(5000));
+    expect(put).toEqual([{ partId: 'part-1', name: 'made.txt', text: 'made\n' }]);
   });
 
   it("clones a branch first when it has one, with the task's files beside it", async () => {

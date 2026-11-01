@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process';
-import { chownSync, closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, chownSync, closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { MAX_RUN_FILES, RUN_FILE_BYTES, TEST_LOG_BYTES, type NodeMessage, type ServerMessage, type TestError } from '@hornhoof/protocol';
 import { ensurePasswd, prepareFolder, type JobUser } from './isolation.js';
@@ -209,10 +209,11 @@ export function partFiles(server: string, key: string): PartFiles {
 /* The files a part of work left in its output folder that go on the task: plain files only, made by the part's own user
    when it has one, at most MAX_RUN_FILES of them, each at most RUN_FILE_BYTES. Opened without following a link, so a
    link to the node's key never leaves the machine. */
-async function putOutputs(msg: TestRun, folder: string, user: JobUser | null, files: PartFiles, out: Output, signal: AbortSignal): Promise<void> {
-  /* The command may have put a link to another folder in its place: then nothing goes. */
-  if (!lstatSync(folder).isDirectory()) {
-    out.line('The output folder is no longer a folder, so nothing goes on the task.');
+export async function putOutputs(msg: TestRun, folder: string, user: JobUser | null, files: PartFiles, out: Output, signal: AbortSignal): Promise<void> {
+  /* Something else in its place, such as a link to another folder: then nothing goes. */
+  const own = lstatSync(folder);
+  if (!own.isDirectory() || (user && own.uid !== user.uid)) {
+    out.line("The output folder is no longer the part's own, so nothing goes on the task.");
     return;
   }
   const names = readdirSync(folder).sort();
@@ -250,6 +251,13 @@ async function putOutputs(msg: TestRun, folder: string, user: JobUser | null, fi
   if (left.length) out.line(`Only plain files up to ${RUN_FILE_BYTES / 1024 / 1024} MB go on the task, ${MAX_RUN_FILES} at most; left out: ${left.join(', ')}.`);
 }
 
+/* A part's folders: its own, which stays the node's so its user cannot put anything else in place of the rest, and the
+   ones inside it that its user writes in. */
+export function partFolders(root: string, msg: TestRun): { own: string; user: string[] } {
+  const subs = ['home', 'tmp', ...(msg.kind === 'work' ? ['out', msg.repo ? 'in' : 'work'] : []), ...(msg.repo ? ['repo'] : [])];
+  return { own: root, user: subs.map(sub => join(root, sub)) };
+}
+
 /* One part of a run, which always ends with a tests.done: the branch, if there is one, is cloned into a fresh folder,
    a part of work gets the task's files it names, the command runs within the time with a home and a temporary folder
    of its own, what a part of work leaves in its output folder goes on the task, and the folder goes, whatever
@@ -277,7 +285,10 @@ export async function runTests(msg: TestRun, { dir, user, hidden, signal, proc =
   try {
     mkdirSync(join(dir, 'tests'), { recursive: true });
     remove(root);
-    for (const sub of ['', 'home', 'tmp', ...(work ? ['out', ...(msg.repo ? ['in'] : ['work'])] : [])]) prepareFolder(join(root, sub), user);
+    const folders = partFolders(root, msg);
+    prepareFolder(folders.own, null);
+    chmodSync(folders.own, 0o755);
+    for (const folder of folders.user) prepareFolder(folder, user);
     if (user) ensurePasswd(user, join(dir, 'tests'));
     const base = { PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin', HOME: join(root, 'home'), TMPDIR: join(root, 'tmp'), LANG: 'C.UTF-8' };
     const source = msg.repo;
