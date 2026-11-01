@@ -158,6 +158,17 @@ button, input, select { font: inherit; color: inherit; }
 .segments label:first-of-type { margin-left: 0; }
 .segments label.on { position: relative; border-color: var(--cyan); background: var(--glow); color: var(--cyan-ink); }
 .segments input { position: absolute; opacity: 0; pointer-events: none; }
+/* A switch with its line and a hint under it, like opening Hornhoof on the internet. */
+.card label.check { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: start; cursor: pointer; }
+.card label.check input { width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--cyan-ink); }
+.card label.check span { display: grid; gap: 2px; }
+.card label.check b { font-weight: 600; }
+.card label.check small { font-size: 12px; color: var(--muted); }
+/* A public link's name, with what its address ends in after it. */
+.link-name > .btn { justify-self: start; }
+.link-input { display: flex; align-items: stretch; }
+.link-input input { flex: 1; min-width: 0; }
+.link-input .link-domain { display: flex; align-items: center; padding: 0 10px; border: 1px solid var(--line2); border-left: 0; background: var(--surface); color: var(--muted); font-size: 14px; white-space: nowrap; }
 .segments label:has(input:focus-visible) { outline: 2px solid var(--cyan); outline-offset: 2px; }
 .command { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: start; padding: 12px; background: var(--surface2); border: 1px solid var(--line); }
 .command code { font-family: var(--f-mono); font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; }

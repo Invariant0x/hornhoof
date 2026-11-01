@@ -1,3 +1,4 @@
+import { linkNameOf } from '@hornhoof/protocol/link';
 import { useId, useState, type FormEvent } from 'react';
 import { api, ApiFailure } from '../api';
 import { errorText, useT } from '../i18n';
@@ -5,6 +6,7 @@ import { PLAN_PROVIDERS, PROVIDER_NAMES, type PlanProvider } from '../providers'
 import { Card } from '../ui/Card';
 import { CommandBox } from '../ui/CommandBox';
 import { Field } from '../ui/Field';
+import { blocks, LinkName, type NameCheck, type NameState } from '../ui/LinkName';
 
 type Mode = 'api_key' | 'personal' | 'later';
 type KeyProvider = 'anthropic_api' | 'openai_api';
@@ -15,7 +17,10 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 /* The setup link the server logs carries the code that lets this browser create the company. */
 const linkCode = () => new URLSearchParams(window.location.search).get('code')?.trim() ?? '';
 
-export function Setup({ onDone }: { onDone: (done: { welcome: boolean }) => void }) {
+const LINK_REFUSED = new Set(['link_taken', 'link_reserved', 'link_invalid']);
+
+/* linkDomain: what public links end in, as the server says. */
+export function Setup({ onDone, linkDomain = 'hornhoof.org' }: { onDone: (done: { welcome: boolean }) => void; linkDomain?: string }) {
   const t = useT();
   const steps = t.setup.steps;
   const uid = useId();
@@ -23,6 +28,11 @@ export function Setup({ onDone }: { onDone: (done: { welcome: boolean }) => void
   const [code, setCode] = useState(linkCode);
   const [askCode, setAskCode] = useState(() => !linkCode());
   const [companyName, setCompanyName] = useState('');
+  /* The public link: on unless the person turns it off, named after the company until they write a name themselves. */
+  const [linkOn, setLinkOn] = useState(true);
+  const [linkName, setLinkName] = useState('');
+  const [linkOwn, setLinkOwn] = useState(false);
+  const [linkState, setLinkState] = useState<NameState>('empty');
   const [name, setName] = useState('');
   const [title, setTitle] = useState('CEO');
   const [email, setEmail] = useState('');
@@ -33,6 +43,7 @@ export function Setup({ onDone }: { onDone: (done: { welcome: boolean }) => void
   const [plan, setPlan] = useState<PlanProvider>('claude');
   const [problems, setProblems] = useState<Record<string, string>>({});
   const [failure, setFailure] = useState('');
+  const [skipLink, setSkipLink] = useState(false);
   const [busy, setBusy] = useState(false);
   const [command, setCommand] = useState<string | null>(null);
 
@@ -49,6 +60,13 @@ export function Setup({ onDone }: { onDone: (done: { welcome: boolean }) => void
     setStep(step + 1);
   }
 
+  function nameCompany(value: string) {
+    setCompanyName(value);
+    if (!linkOwn) setLinkName(linkNameOf(value));
+  }
+
+  const checkName = (name: string) => api.get<NameCheck>(`/api/setup/names/${encodeURIComponent(name)}?code=${encodeURIComponent(code.trim())}`);
+
   async function finish(e: FormEvent) {
     e.preventDefault();
     if (mode === 'api_key' && apiKey.trim().length < 8) {
@@ -59,6 +77,7 @@ export function Setup({ onDone }: { onDone: (done: { welcome: boolean }) => void
       mode === 'api_key' ? { mode, provider: keyProvider, apiKey: apiKey.trim() } : mode === 'personal' ? { mode, provider: plan } : { mode };
     setBusy(true);
     setFailure('');
+    setSkipLink(false);
     try {
       const res = await api.post<{ command?: string }>('/api/setup', {
         code: code.trim(),
@@ -68,6 +87,7 @@ export function Setup({ onDone }: { onDone: (done: { welcome: boolean }) => void
         password,
         title: title.trim(),
         orchestrator,
+        ...(linkOn ? { link: { name: linkName } } : {}),
       });
       if (res.command) setCommand(res.command);
       else onDone({ welcome: true });
@@ -76,7 +96,13 @@ export function Setup({ onDone }: { onDone: (done: { welcome: boolean }) => void
         setAskCode(true);
         setProblems({ code: errorText(t, err) });
         setStep(0);
-      } else setFailure(errorText(t, err));
+      } else if (err instanceof ApiFailure && err.reason && LINK_REFUSED.has(err.reason)) {
+        setProblems({ link: errorText(t, err) });
+        setStep(0);
+      } else {
+        setFailure(errorText(t, err));
+        setSkipLink(err instanceof ApiFailure && err.reason === 'relay_unreachable');
+      }
     } finally {
       setBusy(false);
     }
@@ -113,15 +139,36 @@ export function Setup({ onDone }: { onDone: (done: { welcome: boolean }) => void
       {step === 0 && (
         <form onSubmit={next}>
           <Field label={t.setup.companyName}>
-            {p => <input {...p} value={companyName} onChange={e => setCompanyName(e.target.value)} maxLength={80} autoFocus autoComplete="organization" />}
+            {p => <input {...p} value={companyName} onChange={e => nameCompany(e.target.value)} maxLength={80} autoFocus autoComplete="organization" />}
           </Field>
+          <label className="check">
+            <input type="checkbox" checked={linkOn} onChange={e => setLinkOn(e.target.checked)} aria-labelledby={`${uid}-link`} aria-describedby={`${uid}-link-hint`} />
+            <span>
+              <b id={`${uid}-link`}>{t.link.open}</b>
+              <small id={`${uid}-link-hint`}>{t.link.openHint}</small>
+            </span>
+          </label>
+          {linkOn && (
+            <LinkName
+              name={linkName}
+              onName={name => {
+                setLinkName(name);
+                setLinkOwn(true);
+                setProblems(({ link: _, ...rest }) => rest);
+              }}
+              domain={linkDomain}
+              check={checkName}
+              onState={setLinkState}
+              problem={problems.link}
+            />
+          )}
           {askCode && (
             <Field label={t.setup.code} problem={problems.code} hint={t.setup.codeHint}>
               {p => <input {...p} value={code} onChange={e => setCode(e.target.value)} maxLength={200} autoComplete="off" spellCheck={false} />}
             </Field>
           )}
           <div className="actions">
-            <button className="btn" type="submit" disabled={!companyName.trim() || (askCode && !code.trim())}>{t.common.next}</button>
+            <button className="btn" type="submit" disabled={!companyName.trim() || (askCode && !code.trim()) || (linkOn && (blocks(linkState) || !!problems.link))}>{t.common.next}</button>
           </div>
         </form>
       )}
@@ -199,6 +246,7 @@ export function Setup({ onDone }: { onDone: (done: { welcome: boolean }) => void
           )}
 
           {failure && <p className="alert" role="alert">{failure}</p>}
+          {failure && skipLink && <p className="muted">{t.link.skipHint}</p>}
           <div className="actions">
             <button className="btn ghost" type="button" onClick={() => setStep(1)}>{t.common.back}</button>
             <button className="btn" type="submit" disabled={busy}>{t.setup.finish}</button>
