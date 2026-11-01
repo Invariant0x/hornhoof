@@ -35,6 +35,23 @@ describe('orchestrator instructions', () => {
     expect(ORCHESTRATOR_INSTRUCTIONS).not.toContain('"create_task"');
     expect(ORCHESTRATOR_INSTRUCTIONS).not.toContain('later version');
   });
+
+  it('gives each goal to one department whole and keeps new asks for the next turn unless the CEO says now', () => {
+    for (const words of ['one task for the one department that owns it end to end', 'next planned turn', '"now"']) expect(ORCHESTRATOR_INSTRUCTIONS).toContain(words);
+    expect(ORCHESTRATOR_INSTRUCTIONS).not.toContain('in the running turn it starts at once');
+    expect(ORCHESTRATOR_INSTRUCTIONS).not.toContain("one task for each department's part");
+  });
+
+  it('judges and fixes trouble himself from the database, and reads status instead of asking for it', () => {
+    for (const words of ['agent_changes', 'task_events', 'agent_events', 'Never ask the CEO to run SQL', 'head of Operations', "never outranks the CEO's goals", 'Do not ask heads for status']) {
+      expect(ORCHESTRATOR_INSTRUCTIONS).toContain(words);
+    }
+  });
+
+  it('switches off employees with no work in the turn and writes a note only when what it holds changes', () => {
+    expect(ORCHESTRATOR_INSTRUCTIONS).toMatch(/[Ss]witch off the employees that have no work in the turn/);
+    expect(ORCHESTRATOR_INSTRUCTIONS).toMatch(/only when something it holds changes/);
+  });
 });
 
 describe('catching a new session up', () => {
