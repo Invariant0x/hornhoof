@@ -12,7 +12,7 @@ import { dispatchJob, TEST_PROMPT, TEST_TIMEOUT_MS } from './dispatch.js';
 import { jobMetadata, jobView, JOB_METADATA_MAX_ROWS, publicJob } from './views.js';
 
 const IdParams = z.object({ id: z.uuid() });
-const Utc = z.iso.datetime().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/).max(27);
+const Utc = z.iso.datetime().regex(/^(?!0000)\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/).max(27);
 const MetadataWindow = z.object({ from: Utc, to: Utc });
 const utcMicros = (value: string): bigint => {
   const [seconds, fraction = ''] = value.slice(0, -1).split('.');
@@ -68,7 +68,9 @@ export function jobRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { me, agent } = await agentFor(ctx, req);
     requireCompanyScope(me);
     const { from, to } = metadataWindow(req.query);
-    const rows = await jobMetadata(db, agent.id, from, to);
+    const rows = await jobMetadata(db, agent.id, from, to).catch(() => {
+      throw new ApiError(503, 'unavailable', 'Job metadata is temporarily unavailable. Try again later.');
+    });
     if (rows.length > JOB_METADATA_MAX_ROWS) throw metadataOverflow();
     const body = { jobs: rows, complete: true };
     if (JSON.stringify(body).length > 28_000) throw metadataOverflow();

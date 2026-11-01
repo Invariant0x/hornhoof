@@ -133,8 +133,36 @@ describe('job metadata export', () => {
       metadataPath(c.target.id, new URLSearchParams({ from: '2026-11-01T00:00:00Z', to: '2026-11-01T00:16:00Z' }).toString()),
       metadataPath(c.target.id, new URLSearchParams({ from: '2026-11-01T00:17:00.1234567Z', to: TO }).toString()),
       metadataPath(c.target.id, new URLSearchParams({ from: '2026-02-30T00:00:00Z', to: TO }).toString()),
+      metadataPath(c.target.id, new URLSearchParams({ from: '0000-01-01T00:00:00Z', to: '0000-01-01T00:01:00Z' }).toString()),
     ];
     for (const path of paths) expect((await c.app.inject({ url: path, ...as(c.ceo) })).statusCode).toBe(400);
+  });
+
+  it('does not expose a database failure in the response or server log and preserves state', async () => {
+    const c = await company();
+    await seed(c);
+    const state = async () => c.db.select().from(jobs).orderBy(asc(jobs.id));
+    const before = await state();
+    const logged: string[] = [];
+    const logError = c.app.log.error;
+    const execute = c.db.execute;
+    c.app.log.error = (...args: unknown[]) => {
+      logged.push(args.map(String).join(' '));
+    };
+    const canary = 'postgres://fake-user:fake-password@fake-host/fake-db';
+    c.db.execute = async () => {
+      throw new Error(canary);
+    };
+    onTestFinished(() => {
+      c.app.log.error = logError;
+      c.db.execute = execute;
+    });
+    const response = await c.app.inject({ url: metadataPath(c.target.id), ...as(c.ceo) });
+    expect(logged.join('\n')).not.toContain(canary);
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toEqual({ error: { code: 'unavailable', message: 'Job metadata is temporarily unavailable. Try again later.' } });
+    expect(response.body).not.toContain(canary);
+    expect(await state()).toEqual(before);
   });
 
   it('allows instant and exactly fifteen minute inclusive windows', async () => {
