@@ -1,0 +1,47 @@
+name: Bug report
+description: Something in Hornhoof does not work as it should.
+labels: ["bug", "needs triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting. A security problem goes to the Security tab instead, never here.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you saw. Screenshots help.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to make it happen again
+      placeholder: |
+        1. Open Machines
+        2. Click Connect a machine
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The build under Versions in the account menu, or the commit you run.
+  - type: input
+    id: system
+    attributes:
+      label: System
+      description: The server's and the machine's system, like "macOS 15 with Colima" or "Ubuntu 24.04".
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: For example `docker compose logs app` in the ~/hornhoof folder. Remove keys, passwords and links with codes first.
+      render: text

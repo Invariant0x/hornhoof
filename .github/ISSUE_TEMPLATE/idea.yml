@@ -1,0 +1,26 @@
+name: Idea
+description: Something Hornhoof should do, or do better.
+labels: ["enhancement", "needs triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What gets in your way
+      description: The problem you have today, in your own words. "I lose track of which agent waits for me" tells us more than "add a button".
+    validations:
+      required: true
+  - type: textarea
+    id: wish
+    attributes:
+      label: What you would like
+      description: How it could work. Rough is fine.
+  - type: textarea
+    id: now
+    attributes:
+      label: What you do now instead
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Helping
+      options:
+        - label: I would like to build this myself.

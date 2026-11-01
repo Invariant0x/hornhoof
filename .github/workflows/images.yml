@@ -3,6 +3,8 @@ name: Images
 on:
   push:
     branches: [main]
+  # Pull requests run the tests only; images are built and pushed from main.
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -24,6 +26,7 @@ jobs:
 
   images:
     needs: test
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
