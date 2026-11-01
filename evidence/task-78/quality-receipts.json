@@ -1,0 +1,163 @@
+[
+  {
+    "argv": [
+      "crapper",
+      "--root",
+      "/data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-evidence",
+      "--no-coverage",
+      "evidence/task-78/fetch-artifact.py",
+      "evidence/task-78/inspect-layout.py",
+      "evidence/task-78/inspect-native.py",
+      "evidence/task-78/inspect-pcln.py",
+      "evidence/task-78/inspect-schema.py",
+      "evidence/task-78/run-checks.py",
+      "evidence/task-78/verify-evidence.py",
+      "evidence/task-78/verify-package.py"
+    ],
+    "cwd": "/data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-antigravity-engine-proof",
+    "startedAt": "2026-11-01T12:43:35.647538+00:00",
+    "endedAt": "2026-11-01T12:43:35.712371+00:00",
+    "pid": 5906,
+    "exit": 0,
+    "stdout": "No source files to analyze.\n",
+    "stderr": ""
+  },
+  {
+    "argv": [
+      "dryer",
+      "--root",
+      "/data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-evidence",
+      "--threshold",
+      "0.8",
+      "evidence/task-78/fetch-artifact.py",
+      "evidence/task-78/inspect-layout.py",
+      "evidence/task-78/inspect-native.py",
+      "evidence/task-78/inspect-pcln.py",
+      "evidence/task-78/inspect-schema.py",
+      "evidence/task-78/run-checks.py",
+      "evidence/task-78/verify-evidence.py",
+      "evidence/task-78/verify-package.py"
+    ],
+    "cwd": "/data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-antigravity-engine-proof",
+    "startedAt": "2026-11-01T12:43:35.712759+00:00",
+    "endedAt": "2026-11-01T12:43:35.754468+00:00",
+    "pid": 5909,
+    "exit": 0,
+    "stdout": "No source files to analyze.\n",
+    "stderr": ""
+  },
+  {
+    "argv": [
+      "mutator",
+      "--root",
+      "/data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-evidence",
+      "--scan",
+      "evidence/task-78/fetch-artifact.py",
+      "evidence/task-78/inspect-layout.py",
+      "evidence/task-78/inspect-native.py",
+      "evidence/task-78/inspect-pcln.py",
+      "evidence/task-78/inspect-schema.py",
+      "evidence/task-78/run-checks.py",
+      "evidence/task-78/verify-evidence.py",
+      "evidence/task-78/verify-package.py"
+    ],
+    "cwd": "/data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-antigravity-engine-proof",
+    "startedAt": "2026-11-01T12:43:35.754820+00:00",
+    "endedAt": "2026-11-01T12:43:35.812591+00:00",
+    "pid": 5913,
+    "exit": 0,
+    "stdout": "No source files to mutate.\n",
+    "stderr": ""
+  },
+  {
+    "argv": [
+      "crapper",
+      "--root",
+      "/data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-evidence",
+      "--no-coverage",
+      "/data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-antigravity-engine-proof/evidence/task-78/fetch-artifact.py",
+      "/data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-antigravity-engine-proof/evidence/task-78/inspect-layout.py",
+      "/data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-antigravity-engine-proof/evidence/task-78/inspect-native.py",
+      "/data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-antigravity-engine-proof/evidence/task-78/inspect-pcln.py",
+      "/data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-antigravity-engine-proof/evidence/task-78/inspect-schema.py",
+      "/data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-antigravity-engine-proof/evidence/task-78/run-checks.py",
+      "/data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-antigravity-engine-proof/evidence/task-78/verify-evidence.py",
+      "/data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-antigravity-engine-proof/evidence/task-78/verify-package.py"
+    ],
+    "cwd": "/data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-antigravity-engine-proof",
+    "startedAt": "2026-11-01T12:44:03.834570+00:00",
+    "endedAt": "2026-11-01T12:44:03.924316+00:00",
+    "pid": 6206,
+    "exit": 0,
+    "stdout": "CRAP Report\n===========\nLanguages: python\n\nFunction                       Namespace                                                                  CC    Cov%     CRAP\n-----------------------------------------------------------------------------------------------------------------------------\nfield                          .data.work.agents.9d703c07-d008-4791-8838-2f711cf3758a.task-78-antigravity-engine-proof.evidence.task-78.inspect-schema    5   N/A       N/A\nmessage                        .data.work.agents.9d703c07-d008-4791-8838-2f711cf3758a.task-78-antigravity-engine-proof.evidence.task-78.inspect-schema    5   N/A       N/A\nvarint                         .data.work.agents.9d703c07-d008-4791-8838-2f711cf3758a.task-78-antigravity-engine-proof.evidence.task-78.inspect-schema    3   N/A       N/A\ncalls                          .data.work.agents.9d703c07-d008-4791-8838-2f711cf3758a.task-78-antigravity-engine-proof.evidence.task-78.verify-evidence    3   N/A       N/A\nfields                         .data.work.agents.9d703c07-d008-4791-8838-2f711cf3758a.task-78-antigravity-engine-proof.evidence.task-78.inspect-schema    2   N/A       N/A\ntext_value                     .data.work.agents.9d703c07-d008-4791-8838-2f711cf3758a.task-78-antigravity-engine-proof.evidence.task-78.inspect-schema    2   N/A       N/A\nutc                            .data.work.agents.9d703c07-d008-4791-8838-2f711cf3758a.task-78-antigravity-engine-proof.evidence.task-78.fetch-artifact    1   N/A       N/A\nload                           .data.work.agents.9d703c07-d008-4791-8838-2f711cf3758a.task-78-antigravity-engine-proof.evidence.task-78.verify-evidence    1   N/A       N/A\nnames                          .data.work.agents.9d703c07-d008-4791-8838-2f711cf3758a.task-78-antigravity-engine-proof.evidence.task-78.verify-evidence    1   N/A       N/A\nsha                            .data.work.agents.9d703c07-d008-4791-8838-2f711cf3758a.task-78-antigravity-engine-proof.evidence.task-78.verify-evidence    1   N/A       N/A\n",
+    "stderr": "Wrote /data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-evidence/.metrics/crap.edn\n"
+  },
+  {
+    "argv": [
+      "dryer",
+      "--root",
+      "/data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-evidence",
+      "--threshold",
+      "0.8",
+      "/data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-antigravity-engine-proof/evidence/task-78/fetch-artifact.py",
+      "/data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-antigravity-engine-proof/evidence/task-78/inspect-layout.py",
+      "/data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-antigravity-engine-proof/evidence/task-78/inspect-native.py",
+      "/data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-antigravity-engine-proof/evidence/task-78/inspect-pcln.py",
+      "/data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-antigravity-engine-proof/evidence/task-78/inspect-schema.py",
+      "/data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-antigravity-engine-proof/evidence/task-78/run-checks.py",
+      "/data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-antigravity-engine-proof/evidence/task-78/verify-evidence.py",
+      "/data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-antigravity-engine-proof/evidence/task-78/verify-package.py"
+    ],
+    "cwd": "/data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-antigravity-engine-proof",
+    "startedAt": "2026-11-01T12:44:03.924852+00:00",
+    "endedAt": "2026-11-01T12:44:03.970381+00:00",
+    "pid": 6209,
+    "exit": 0,
+    "stdout": "No duplicate candidates found.\n",
+    "stderr": "Wrote /data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-evidence/.metrics/dry.edn\n"
+  },
+  {
+    "argv": [
+      "mutator",
+      "--root",
+      "/data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-evidence",
+      "--scan",
+      "/data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-antigravity-engine-proof/evidence/task-78/fetch-artifact.py",
+      "/data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-antigravity-engine-proof/evidence/task-78/inspect-layout.py",
+      "/data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-antigravity-engine-proof/evidence/task-78/inspect-native.py",
+      "/data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-antigravity-engine-proof/evidence/task-78/inspect-pcln.py",
+      "/data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-antigravity-engine-proof/evidence/task-78/inspect-schema.py",
+      "/data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-antigravity-engine-proof/evidence/task-78/run-checks.py",
+      "/data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-antigravity-engine-proof/evidence/task-78/verify-evidence.py",
+      "/data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-antigravity-engine-proof/evidence/task-78/verify-package.py"
+    ],
+    "cwd": "/data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-antigravity-engine-proof",
+    "startedAt": "2026-11-01T12:44:03.970533+00:00",
+    "endedAt": "2026-11-01T12:44:04.019486+00:00",
+    "pid": 6213,
+    "exit": 0,
+    "stdout": "No source files to mutate.\n",
+    "stderr": "Skipping /data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-antigravity-engine-proof/evidence/task-78/fetch-artifact.py; it is outside /data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-evidence\nSkipping /data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-antigravity-engine-proof/evidence/task-78/inspect-layout.py; it is outside /data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-evidence\nSkipping /data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-antigravity-engine-proof/evidence/task-78/inspect-native.py; it is outside /data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-evidence\nSkipping /data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-antigravity-engine-proof/evidence/task-78/inspect-pcln.py; it is outside /data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-evidence\nSkipping /data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-antigravity-engine-proof/evidence/task-78/inspect-schema.py; it is outside /data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-evidence\nSkipping /data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-antigravity-engine-proof/evidence/task-78/run-checks.py; it is outside /data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-evidence\nSkipping /data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-antigravity-engine-proof/evidence/task-78/verify-evidence.py; it is outside /data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-evidence\nSkipping /data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-antigravity-engine-proof/evidence/task-78/verify-package.py; it is outside /data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-evidence\n"
+  },
+  {
+    "argv": [
+      "mutator",
+      "--scan",
+      "evidence/task-78/fetch-artifact.py",
+      "evidence/task-78/inspect-layout.py",
+      "evidence/task-78/inspect-native.py",
+      "evidence/task-78/inspect-pcln.py",
+      "evidence/task-78/inspect-schema.py",
+      "evidence/task-78/run-checks.py",
+      "evidence/task-78/verify-evidence.py",
+      "evidence/task-78/verify-package.py"
+    ],
+    "cwd": "/data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-antigravity-engine-proof",
+    "startedAt": "2026-11-01T12:44:22.354667+00:00",
+    "endedAt": "2026-11-01T12:44:22.470908+00:00",
+    "pid": 6429,
+    "exit": 0,
+    "stdout": "Scan: 0 mutation sites in evidence/task-78/fetch-artifact.py\nScan: 0 mutation sites in evidence/task-78/inspect-layout.py\nScan: 0 mutation sites in evidence/task-78/inspect-native.py\nScan: 0 mutation sites in evidence/task-78/inspect-pcln.py\nScan: 25 mutation sites in evidence/task-78/inspect-schema.py\n  evidence/task-78/inspect-schema.py:15 0 -> 1  [defn/varint]\n  evidence/task-78/inspect-schema.py:16 0 -> 1  [defn/varint]\n  evidence/task-78/inspect-schema.py:18 1 -> 0  [defn/varint]\n  evidence/task-78/inspect-schema.py:20 < -> <=  [defn/varint]\n  evidence/task-78/inspect-schema.py:28 > -> >=  [defn/field]\n  evidence/task-78/inspect-schema.py:28 0 -> 1  [defn/field]\n  evidence/task-78/inspect-schema.py:29 == -> !=  [defn/field]\n  evidence/task-78/inspect-schema.py:29 0 -> 1  [defn/field]\n  evidence/task-78/inspect-schema.py:31 == -> !=  [defn/field]\n  evidence/task-78/inspect-schema.py:33 + -> -  [defn/field]\n  evidence/task-78/inspect-schema.py:33 + -> -  [defn/field]\n  evidence/task-78/inspect-schema.py:34 1 -> 0  [defn/field]\n  evidence/task-78/inspect-schema.py:35 == -> !=  [defn/field]\n  evidence/task-78/inspect-schema.py:35 1 -> 0  [defn/field]\n  evidence/task-78/inspect-schema.py:36 + -> -  [defn/field]\n  evidence/task-78/inspect-schema.py:36 + -> -  [defn/field]\n  evidence/task-78/inspect-schema.py:39 <= -> <  [defn/field]\n  evidence/task-78/inspect-schema.py:44 0 -> 1  [defn/fields]\n  evidence/task-78/inspect-schema.py:45 < -> <=  [defn/fields]\n  evidence/task-78/inspect-schema.py:52 == -> !=  [defn/text_value]\n  evidence/task-78/inspect-schema.py:57 1 -> 0  [defn/message]\n  evidence/task-78/inspect-schema.py:59 == -> !=  [defn/message]\n  evidence/task-78/inspect-schema.py:61 1 -> 0  [defn/message]\n  evidence/task-78/inspect-schema.py:61 == -> !=  [defn/message]\n  evidence/task-78/inspect-schema.py:62 == -> !=  [defn/message]\nScan: 0 mutation sites in evidence/task-78/run-checks.py\nScan: 2 mutation sites in evidence/task-78/verify-evidence.py\n  evidence/task-78/verify-evidence.py:14 / -> *  [defn/load]\n  evidence/task-78/verify-evidence.py:71 or -> and  [defn/calls]\nScan: 0 mutation sites in evidence/task-78/verify-package.py\n",
+    "stderr": ""
+  }
+]

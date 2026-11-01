@@ -1,0 +1,3173 @@
+{
+  "task": 78,
+  "startedAt": "2026-11-01T12:42:30.235887+00:00",
+  "endedAt": "2026-11-01T12:42:30.878786+00:00",
+  "pid": 4966,
+  "binarySha256": "946f014d9bd4352f09f4e88377f7957264d663437de6ad239a31247a6fc9a352",
+  "textBase": 108531904,
+  "textEnd": 156943745,
+  "textFileBase": 108531904,
+  "moduleRelocations": {
+    "0": {
+      "offset": 23159568,
+      "addend": 23240328
+    },
+    "160": {
+      "offset": 23159760,
+      "addend": 108531904
+    },
+    "168": {
+      "offset": 23159784,
+      "addend": 156943745
+    }
+  },
+  "method": "Primary Go metadata, moduledata RELATIVE relocations, direct AArch64 BL imm26 only",
+  "functions": [
+    {
+      "name": "google3/third_party/jetski/tokenizer/tokenizer.(*EstimateTokenCounter).GetTokenCount",
+      "nameByteOffset": 30493378,
+      "fileOffset": 126253888,
+      "bytes": 48,
+      "sha256": "d8122f29211aae683dbd537c3270f0770d2c8df12f81222939de3308a090c72d",
+      "hex": "e10b00f94000629e010040fd0018611e00c0641e0000789ee1031faae2031faac0035fd6000000000000000000000000",
+      "directCalls": [],
+      "indirectCalls": []
+    },
+    {
+      "name": "google3/third_party/jetski/tokenizer/tokenizer.createDefaultTokenCounter",
+      "nameByteOffset": 30493719,
+      "fileOffset": 126254576,
+      "bytes": 144,
+      "sha256": "7a6b82108aaa71f0c94a14f6872527c00e3342a42909e9ee605e40ac33e5846c",
+      "hex": "900b40f9ff6330eba9030054fe0f1cf8fd831ff8fd2300d1e0037db281a001f021603291e20340b20af7bc970010611e000000fd43e301b063800b911b1602d0634302f93b2203b0635348b9a30000341b1602d0624742f912b7be97200b00a91b1602d0604702f9e0031faae1031faafd835ff8fe0744f8c0035fd6e3031eaa30afbe97dfffff170000000000000000",
+      "directCalls": [
+        {
+          "fileOffset": 126254616,
+          "word": "97bcf70a",
+          "targetRelative": 149888,
+          "callee": "runtime.mallocgcTinySC2"
+        },
+        {
+          "fileOffset": 126254664,
+          "word": "97beb712",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 126254704,
+          "word": "97beaf30",
+          "targetRelative": 600688,
+          "callee": "runtime.morestack_noctxt"
+        }
+      ],
+      "indirectCalls": []
+    },
+    {
+      "name": "google3/third_party/jetski/tokenizer/tokenizer.GetDefaultTokenCounter",
+      "nameByteOffset": 30493863,
+      "fileOffset": 126254720,
+      "bytes": 128,
+      "sha256": "34cc79b1782fd4c72333b6cdb4adf677c2043b1ffe77bbb8c556c372532e6a22",
+      "hex": "900b40f9ff6330eb69030054fe0f1ef8fd831ff8fd2300d11f2003d52222039042803e9142fcdf88c20000352022039000803e91e1e4019021000391d5dbbe971b1602d07b031291600740a9800000b4fd835ff8fe0742f8c0035fd6609001f000803091412a01f021a01e91bd95be971f2003d5e3031eaa0eafbe97e1ffff17",
+      "directCalls": [
+        {
+          "fileOffset": 126254780,
+          "word": "97bedbd5",
+          "targetRelative": 646480,
+          "callee": "sync.(*Once).doSlow"
+        },
+        {
+          "fileOffset": 126254828,
+          "word": "97be95bd",
+          "targetRelative": 574752,
+          "callee": "runtime.gopanic"
+        },
+        {
+          "fileOffset": 126254840,
+          "word": "97beaf0e",
+          "targetRelative": 600688,
+          "callee": "runtime.morestack_noctxt"
+        }
+      ],
+      "indirectCalls": []
+    },
+    {
+      "name": "google3/third_party/jetski/cortex/tokens/tokens.ComputeCustomizationBreakdown",
+      "nameByteOffset": 33895154,
+      "fileOffset": 130834816,
+      "bytes": 1872,
+      "sha256": "b6fdab788a6bbe49247dcc8f18cb940564d9b0feda6c049fa5038bdd782d7d9a",
+      "hex": "900b40f9f1c309d13f0210eb69390054f4c30bd19dfa3fa99f020091fd2300d1e07f01f93787ee97e03300f9e15f00f9e06309911f7c00a91f7c01a91f7c02a9e0c307911f7c00a91f7c01a91f7c02a91f7c03a91f7c04a91f7c05a91f3000f9e1c301b2e1fb00f9e03701f95921ad97e03301f9ff7f0ea9ff7b00f9ff5700b91f2003d560c20010e13340f9e0071ca9e05f40f9e1630991e0071da9e0830391e1530191e0071ea9e07f41f9010840a9e25300f9e16301f9e3031faa02000014630400917f0002eb6a040054257863f8650000b4a61c44a903000014e6031faae7031faa88bd01f008210b91df0008eb40000054e7031faa41feff54e60040f9c69c40a9e7fdffb4e34f00f9650000b4a52445a903000014e9031faae5031faae8e340f9e00305aae10309aae20306aae30307aae40740b2fa03079100013fd6e16341f9e38b49a988bd01f008210b91dcffff17e04306911f7c00a91f7c01a91f7c02a9e00304911f7c00a91f7c01a91f7c02a91f7c03a91f7c04a91f7c05a91f7c06a91f7c07a91f7c08a9e1c301b2e18300f9e0d300f90e21ad97e0cf00f9e07f41f9010849a90e000014e25300f9e15f01f9220c40a9805901f000000191e1430691af12ab97e40340b204000039e45f41f981400091e45340f9820400d15f0000f14cfeff54e77f41f9e8a441a9e95300f9e85b01f9e2031faa02000014420400915f0009ebca0500540a7962f84ba141396bff0737e24f00f9ea6300f9418941a9439140a9459942a9e0031faab8a4ac97e07f00f9e14700f9e76340f9e28c41a9805901f000000191e14306914c11ab970700403987000037e14740f9e07f40f908000014e96340f9218941a9239140a9259942a927a143a9e0031faac4a4ac97e5e340f9e66340f9c69c41a9e20300aae30301aaa40080d2fa030791e00306aae10307aaa0003fd6e24f40f9e77f41f9e85b41f9e95340f9d1ffff17e51843a9e65300f9e55b01f9e2031faa02000014420400915f0006eb0a030054a87862f80921413969ff0737e24f00f9018941a9e24b00f9e15701f9039142a9e0031faa67a4ac97e5e340f9e20300aae30301aae4037db2fa030791e05741f9e14b40f9a0003fd6e24f40f9e55b41f9e65340f9e77f41f9e7ffff17e59844a9e65300f9e55301f9e2031faa02000014420400915f0006eb8a060054a87862f8680000b409a5413949ff0737680000b401a541a903000014e9031faae1031faae24f00f9e85b00f9680000b4039142a903000014e4031faae3031faae0031faae20309aa3fa4ac97e25b40f9620000b445a0413965010037620000b4439045a903000014e4031faae3031faae20301aae10300aae0031faa32a4ac97e25b40f9620000b4459841a903000014e6031faae5031faae7e340f9e20300aae30301aa440180d2fa030791e00305aae10306aae0003fd6e24f40f9e55341f9e65340f9e77f41f9cbffff17e51846a9e65300f9e54f01f9e2031faa02000014420400915f0006eb4a050054a87862f8680000b409a1403949ff0737680000b409a54039e9fe0737680000b409a940a903000014ea031faae9031faa680000b401ad40a903000014eb031faae1031faae24f00f9ea2f00f9e95700f9680000b4039141a903000014e4031faae3031faae0031faae2030baafba3ac97e5e340f9e20300aae30301aae4077fb2fa030791e05740f9e12f40f9a0003fd6e24f40f9e54f41f9e65340f9e77f41f9d5ffff17e08447a9e24440f943020094e3031faa05000014e65780b9c500058be55700b9630400913f0003ebed000054057863f8650000b4a52080b9f7ffff17e5031faaf5ffff17e06b00f9e13f00f9e51b4ea9e64300f9e56f00f9e2031faae3031faae4031faae7031faae8031faa0a000014447825f8e95340f929050091e56f40f9e64340f9e40302aae70300aae80301aae20309aa5f0006eb4a060054e89f06a9e46700f9e25300f9e34f0139a278a2b8a05801b000c00c91e1630991c60aab97e33740f961040091040040f9e23b40f95f0001eba3000054e26740f9e03b40f9e34f413917000014e44b01f93f1000f14c010054e04f413900010037e30000b5e2230b915f7c00a95f7c01a9e0037eb2e30340b20b000014e06740f9e30340b2c4360190842016919327ad97e44b41f9e34f4139e50302aae20300aae00305aa250400d13bff02d0665348b926f9ff34467865f8b43cad97241b00a9c5ffff17e5c30b91e6030091a50006cbe00304aa890006cb3f0105eb02010054e10300aae20308aac0360190002016912a96ac97e70302aae80301aae33f40f90101038bff0001eb22010054e83700f9e20307aac4360190842016916f27ad97e33f40f9e83740f9e70302aae19f09a9e04701f9050107cb05fd858a050c058b220008cbc036019000201691e10305aae40303aae36b40f99414ad97e00b7db2019e019021201b91e20340b2af7aab97e59b49a9051801a93bff02d0655348b965000035e14741f9040000147b3cad97e14741f9210300f9010400f9e15780b9012000b9fdfb7fa9ffc30b91c0035fd6e00700f9e3031eaa9c34ad97e00740f92efeff1700000000",
+      "directCalls": [
+        {
+          "fileOffset": 130834852,
+          "word": "97ee8737",
+          "targetRelative": 17722816,
+          "callee": "google3/third_party/jetski/tokenizer/tokenizer.GetDefaultTokenCounter"
+        },
+        {
+          "fileOffset": 130834924,
+          "word": "97ad2159",
+          "targetRelative": 579216,
+          "callee": "runtime.rand"
+        },
+        {
+          "fileOffset": 130835224,
+          "word": "97ad210e",
+          "targetRelative": 579216,
+          "callee": "runtime.rand"
+        },
+        {
+          "fileOffset": 130835268,
+          "word": "97ab12af",
+          "targetRelative": 40256,
+          "callee": "runtime.mapassign_faststr"
+        },
+        {
+          "fileOffset": 130835376,
+          "word": "97aca4b8",
+          "targetRelative": 452048,
+          "callee": "runtime.concatstring3"
+        },
+        {
+          "fileOffset": 130835408,
+          "word": "97ab114c",
+          "targetRelative": 38976,
+          "callee": "runtime.mapaccess1_faststr"
+        },
+        {
+          "fileOffset": 130835456,
+          "word": "97aca4c4",
+          "targetRelative": 452176,
+          "callee": "runtime.concatstring4"
+        },
+        {
+          "fileOffset": 130835588,
+          "word": "97aca467",
+          "targetRelative": 451936,
+          "callee": "runtime.concatstring2"
+        },
+        {
+          "fileOffset": 130835748,
+          "word": "97aca43f",
+          "targetRelative": 451936,
+          "callee": "runtime.concatstring2"
+        },
+        {
+          "fileOffset": 130835800,
+          "word": "97aca432",
+          "targetRelative": 451936,
+          "callee": "runtime.concatstring2"
+        },
+        {
+          "fileOffset": 130836020,
+          "word": "97aca3fb",
+          "targetRelative": 451936,
+          "callee": "runtime.concatstring2"
+        },
+        {
+          "fileOffset": 130836084,
+          "word": "94000243",
+          "targetRelative": 22306496,
+          "callee": "google3/third_party/jetski/cortex/tokens/tokens.GetToolTokenGroups"
+        },
+        {
+          "fileOffset": 130836264,
+          "word": "97ab0ac6",
+          "targetRelative": 33152,
+          "callee": "runtime.mapaccess1_fast32"
+        },
+        {
+          "fileOffset": 130836372,
+          "word": "97ad2793",
+          "targetRelative": 587040,
+          "callee": "runtime.growslice"
+        },
+        {
+          "fileOffset": 130836416,
+          "word": "97ad3cb4",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 130836472,
+          "word": "97ac962a",
+          "targetRelative": 438240,
+          "callee": "runtime.moveSliceNoCap"
+        },
+        {
+          "fileOffset": 130836516,
+          "word": "97ad276f",
+          "targetRelative": 587040,
+          "callee": "runtime.growslice"
+        },
+        {
+          "fileOffset": 130836576,
+          "word": "97ad1494",
+          "targetRelative": 567792,
+          "callee": "runtime.typedslicecopy"
+        },
+        {
+          "fileOffset": 130836596,
+          "word": "97ab7aaf",
+          "targetRelative": 148080,
+          "callee": "runtime.mallocgcSmallScanNoHeaderSC6"
+        },
+        {
+          "fileOffset": 130836628,
+          "word": "97ad3c7b",
+          "targetRelative": 608704,
+          "callee": "runtime.gcWriteBarrier1"
+        },
+        {
+          "fileOffset": 130836672,
+          "word": "97ad349c",
+          "targetRelative": 600688,
+          "callee": "runtime.morestack_noctxt"
+        }
+      ],
+      "indirectCalls": [
+        {
+          "fileOffset": 130835132,
+          "register": 8,
+          "word": "d63f0100"
+        },
+        {
+          "fileOffset": 130835496,
+          "register": 5,
+          "word": "d63f00a0"
+        },
+        {
+          "fileOffset": 130835620,
+          "register": 5,
+          "word": "d63f00a0"
+        },
+        {
+          "fileOffset": 130835856,
+          "register": 7,
+          "word": "d63f00e0"
+        },
+        {
+          "fileOffset": 130836052,
+          "register": 5,
+          "word": "d63f00a0"
+        }
+      ]
+    },
+    {
+      "name": "google3/third_party/jetski/cortex/tokens/tokens.ComputeTokenBase",
+      "nameByteOffset": 33895633,
+      "fileOffset": 130840784,
+      "bytes": 384,
+      "sha256": "0008ed6436ba391c3bbe5cb65d02d664473929fcb0665edf0d1285a5f7166a26",
+      "hex": "900b40f9ff6330eb690a0054fe0f19f8fd831ff8fd2300d1e03f00f9e31309a9e55300f9bbfcff97e10b04a9e02f00f9e00749a9e25340f99efdff97e32340f96400018be22740f95f0004eb63000054e52f40f90e000014e12b00f9e03300f9e02f40f9e30301aae10304aaa43601f0842016912723ad97e32340f9e50300aae40301aae03340f9e12b40f9e52f00f9e40b04a9860003cb670002cb67fc878aa50c078be20306aae30300aae40301aaa03601f000201691e10305aa4910ad97e5031faae6031faae72340f9e82f40f903000014c600038ba5040091bf0007ebea000054037965f8630000b4632080b9f9ffff17e3031faaf7ffff17e63f00b9e00b7db2e19d01f021201b91e20340b25476ab97e31344a9031001a93bff02b0635348b963000035e12f40f9040000142038ad97e12f40f9210300f9010400f9e13f80b9012000b9fd835ff8fe0747f8c0035fd6e08700a9e28f01a9e49702a9e3031eaa3f30ad97e08740a9e28f41a9e49742a9a3ffff170000000000000000",
+      "directCalls": [
+        {
+          "fileOffset": 130840820,
+          "word": "97fffcbb",
+          "targetRelative": 22305568,
+          "callee": "google3/third_party/jetski/cortex/tokens/tokens.GetSystemPromptTokenGroups"
+        },
+        {
+          "fileOffset": 130840840,
+          "word": "97fffd9e",
+          "targetRelative": 22306496,
+          "callee": "google3/third_party/jetski/cortex/tokens/tokens.GetToolTokenGroups"
+        },
+        {
+          "fileOffset": 130840900,
+          "word": "97ad2327",
+          "targetRelative": 587040,
+          "callee": "runtime.growslice"
+        },
+        {
+          "fileOffset": 130840972,
+          "word": "97ad1049",
+          "targetRelative": 567792,
+          "callee": "runtime.typedslicecopy"
+        },
+        {
+          "fileOffset": 130841056,
+          "word": "97ab7654",
+          "targetRelative": 148080,
+          "callee": "runtime.mallocgcSmallScanNoHeaderSC6"
+        },
+        {
+          "fileOffset": 130841088,
+          "word": "97ad3820",
+          "targetRelative": 608704,
+          "callee": "runtime.gcWriteBarrier1"
+        },
+        {
+          "fileOffset": 130841140,
+          "word": "97ad303f",
+          "targetRelative": 600688,
+          "callee": "runtime.morestack_noctxt"
+        }
+      ],
+      "indirectCalls": []
+    },
+    {
+      "name": "google3/third_party/jetski/cortex/mixins/mixins.NewUserRulesSection",
+      "nameByteOffset": 39002073,
+      "fileOffset": 139578752,
+      "bytes": 368,
+      "sha256": "e28fac7e598fe55e6d07266ac22d1f8182ecaf14e48157d206a450c362a71de7",
+      "hex": "900b40f9f18305d13f0210eb690a0054f48307d19dfa3fa99f020091fd2300d1010100b4218842a943f4009063c03b913f0003eb80000054e2031faa02000014e2031faae1830091e30740b23f7c81a83f7c81a83f7c81a83f7c81a8630400d163ffffb53f7c00a93f0800f9e20100b441200091e2830091f80740b23044c1ac504481ac3044c1ac504481ac180700d178ffffb53000c03d5000803d390840f9590800f901000014e1e30391e2830091f80740b25044c1ac304481ac5044c1ac304481ac180700d178ffffb55000c03d3000803d590840f9390800f9603b019000c03f91731b8a979bbc0290615348b901010034e0eb00f9e10300aae2e30391407101d000a03f91b22a8a97e0eb40f9e2e30391e10300aaf80740b25044c1ac104481ac5044c1ac104481ac180700d178ffffb55000c03d1000803d590840f9190800f9407d019000200591fdfb7fa9ff830791c0035fd6e08700a9e3031eaa14db8b97e08740a9a6ffff1700000000",
+      "directCalls": [
+        {
+          "fileOffset": 139578980,
+          "word": "978a1b73",
+          "targetRelative": 142192,
+          "callee": "runtime.newobject"
+        },
+        {
+          "fileOffset": 139579016,
+          "word": "978a2ab2",
+          "targetRelative": 157840,
+          "callee": "runtime.wbMove"
+        },
+        {
+          "fileOffset": 139579104,
+          "word": "978bdb14",
+          "targetRelative": 600688,
+          "callee": "runtime.morestack_noctxt"
+        }
+      ],
+      "indirectCalls": []
+    },
+    {
+      "name": "google3/third_party/jetski/cortex/mixins/mixins.(*UserRulesSection).Content",
+      "nameByteOffset": 39004659,
+      "fileOffset": 139579216,
+      "bytes": 1520,
+      "sha256": "dc0a304ddd80554b7afbd0633c04fff18184711532f0d57587a7df872e45c03f",
+      "hex": "900b40f9f18303d13f0210ebe92d0054f48305d19dfa3fa99f020091fd2300d1053040f9e50000b4a61c46a9a31040a9a8a441a9a23840f9a51440f909000014e7031faae2031faae4031faae9031faae6031faae5031faae8031faae3031faae0b700f9e86b00f9e91707a9e100048b5f0001eba2010054e74b00f9e37700f9e45700f9e00306aae30304aa44f300b084a038917fcd8b97e37740f9e45740f9e74b40f9e60300aae15f00f9e67f00f9250007cbe80002cbe7fc888ac10c078b40f3009000a03891e20305aaa5ba8b97e0031faae1031faae2031faae3031faae4031faae5031faae6031faae7031faae8031faa09000014e95b40f929050091e60302aae20300aae00309aaea0301aae10305aae5030aaae54f00f9e87300f9e65300f9e95f40f93f0100ebad0d0054e05b00f9e40f08a9e76f00f9e17f0139e27b0139ea7f40f94b7960f8eb6300f96b0000b46c3545a903000014ed031faaec031faae3b740f9615c40f9e30340b2e34301b9ecb714a9207001d000601e91e20305916fae899741050036e54f40f9a1040091e25340f95f0001eb83000054e87340f9e07b4139130000143f1000f14c010054e07b413900010037e50000b5e88304911f7d00a91f7d01a9e2037eb2e00340b208000014e07340f9e30340b244f3009084a038912acd8b97e80300aae07b4139250400d17bbc02f0665348b966000035e76340f905000014067965f84ce28b97e76340f9271b00a9077925f8e40f48a9e57f4139e76f40f9b3ffff17e54340f9a1040091e24740f95f0001eb83000054e76f40f9e07f4139130000143f1000f14c010054e07f413900010037e50000b5e7030491ff7c00a9ff7c01a9e2037eb2e00340b208000014e06f40f9e30340b244f3009084a0389101cd8b97e70300aae07f4139250400d17bbc02f0665348b966000035e86340f905000014e67865f823e28b97e86340f9281b00a9e87825f8e30302aae40301aae18b49a9e50300aae07b4139e87340f987ffff17a40000b5e2031faae0031faae1031faa28000014e0b740f9e10307aae20304aabc000094e07b00f9e15f00f9e0031faae10740b2e2031faae30301aac42a01b084803091dbcc8b97041280d2040400f97bbc02f0645348b964000035e57b40f908000014050040f9060840f9071040f904e28b97251b00a9e57b40f9251f01a9e6bdfe90c6481091060000f9e6bcfef0c6a42391a70b80d2061c01a9e65f40f9051802a9e59b49a9e87340f9e10740b2c50500b4e23700f9e06700f9e13300f9e0b740f9e10308aae20305aae30306aa30010094e43340f984080091e23740f95f0004eb63000054e36740f90d000014e07b00f9e15f00f9e06740f9e10304aae3037fb2c42a01b084803091a9cc8b97e40301aae30300aae07b40f9e15f40f9850800d16510058be61380d2a60400f97bbc02f0665348b9c6000034a60040f9a70840f9cbe18b97260300a9270b00f9e6bdfef0c6bc3891a60000f9a00401a9e00303aae10304aae33b40f9030a00b4210400915f0001ebc2000054e30340b2c42a01b0848030918acc8b97e33b40f9250400d10510058b860a80d2a60400f97bbc02f0665348b986000034a60040f9a8e18b97260300f9a6bcfef0c63c0f91a60000f9210400915f0001ebc2000054e30340b2c42a01b08480309175cc8b97e33b40f9e06700f9e10b06a9240400d10410048ba51180d2850400f97bbc02f0655348b985000034850040f991e18b97250300f9c5bdfef0a5a81891850000f9e0b740f9e16b40f9e20303aae33f40f9a4010094e43340f984040091e23740f95f0004eb63000054e36740f90d000014e15f00f9e07b00f9e06740f9e10304aae30340b2c42a01b08480309151cc8b97e40301aae30300aae07b40f9e15f40f9850400d16510058ba10400f97bbc02f0665348b986000034a60040f971e18b97201b00a9a00000f903000014e40301aae30300aae00303aae10304aaa3f7fef063c02991e40340b2a64e8e9731b68b97e10300aa407c019000202391fdfb7fa9ff830591c0035fd6e08700a9e28f01a9e3031eaa83d98b97e08740a9e28f41a988feff17000000000000000000000000",
+      "directCalls": [
+        {
+          "fileOffset": 139579364,
+          "word": "978bcd7f",
+          "targetRelative": 587040,
+          "callee": "runtime.growslice"
+        },
+        {
+          "fileOffset": 139579420,
+          "word": "978bbaa5",
+          "targetRelative": 567792,
+          "callee": "runtime.typedslicecopy"
+        },
+        {
+          "fileOffset": 139579604,
+          "word": "9789ae6f",
+          "targetRelative": 31184,
+          "callee": "runtime.mapaccess2"
+        },
+        {
+          "fileOffset": 139579704,
+          "word": "978bcd2a",
+          "targetRelative": 587040,
+          "callee": "runtime.growslice"
+        },
+        {
+          "fileOffset": 139579744,
+          "word": "978be24c",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 139579868,
+          "word": "978bcd01",
+          "targetRelative": 587040,
+          "callee": "runtime.growslice"
+        },
+        {
+          "fileOffset": 139579908,
+          "word": "978be223",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 139579984,
+          "word": "940000bc",
+          "targetRelative": 31048832,
+          "callee": "google3/third_party/jetski/cortex/mixins/mixins.(*UserRulesSection).formatMemoriesAsPrompt"
+        },
+        {
+          "fileOffset": 139580020,
+          "word": "978bccdb",
+          "targetRelative": 587040,
+          "callee": "runtime.growslice"
+        },
+        {
+          "fileOffset": 139580064,
+          "word": "978be204",
+          "targetRelative": 608752,
+          "callee": "runtime.gcWriteBarrier4"
+        },
+        {
+          "fileOffset": 139580160,
+          "word": "94000130",
+          "targetRelative": 31049472,
+          "callee": "google3/third_party/jetski/cortex/mixins/mixins.(*UserRulesSection).formatDemotedMemoriesAsPrompt"
+        },
+        {
+          "fileOffset": 139580220,
+          "word": "978bcca9",
+          "targetRelative": 587040,
+          "callee": "runtime.growslice"
+        },
+        {
+          "fileOffset": 139580276,
+          "word": "978be1cb",
+          "targetRelative": 608736,
+          "callee": "runtime.gcWriteBarrier3"
+        },
+        {
+          "fileOffset": 139580344,
+          "word": "978bcc8a",
+          "targetRelative": 587040,
+          "callee": "runtime.growslice"
+        },
+        {
+          "fileOffset": 139580384,
+          "word": "978be1a8",
+          "targetRelative": 608704,
+          "callee": "runtime.gcWriteBarrier1"
+        },
+        {
+          "fileOffset": 139580428,
+          "word": "978bcc75",
+          "targetRelative": 587040,
+          "callee": "runtime.growslice"
+        },
+        {
+          "fileOffset": 139580476,
+          "word": "978be191",
+          "targetRelative": 608704,
+          "callee": "runtime.gcWriteBarrier1"
+        },
+        {
+          "fileOffset": 139580512,
+          "word": "940001a4",
+          "targetRelative": 31050288,
+          "callee": "google3/third_party/jetski/cortex/mixins/mixins.(*UserRulesSection).formatConditionalMemoriesAsPrompt"
+        },
+        {
+          "fileOffset": 139580572,
+          "word": "978bcc51",
+          "targetRelative": 587040,
+          "callee": "runtime.growslice"
+        },
+        {
+          "fileOffset": 139580620,
+          "word": "978be171",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 139580664,
+          "word": "978e4ea6",
+          "targetRelative": 1244880,
+          "callee": "strings.Join"
+        },
+        {
+          "fileOffset": 139580668,
+          "word": "978bb631",
+          "targetRelative": 564480,
+          "callee": "runtime.convTstring"
+        },
+        {
+          "fileOffset": 139580708,
+          "word": "978bd983",
+          "targetRelative": 600688,
+          "callee": "runtime.morestack_noctxt"
+        }
+      ],
+      "indirectCalls": []
+    },
+    {
+      "name": "google3/third_party/jetski/cortex/mixins/mixins.(*UserRulesSection).formatMemoriesAsPrompt",
+      "nameByteOffset": 39004820,
+      "fileOffset": 139580736,
+      "bytes": 640,
+      "sha256": "074b5fd82039cf007333e0d7bf6dad0c8205be5f472654936950e7aa128e558a",
+      "hex": "900b40f9f10301d13f0210eb89120054fe0f14f8fd831ff8fd2300d1e10b0da9ffff05a9ffff06a9e3031faa84e291d244b7adf202000014630400915f0003ebcd0d0054257863f8650000b4a61c44a903000014e6031faae7031faa860c00b4c81040b91f01042bc10b0054e87a019008210b91df0008eb01feff54e60040f9c69c40a9a7fdffb4e32b00f9e53f00f9e64700f9e71f00f9650000b4a0a440a903000014e9031faae0031faae26302915f7c00a95f7c01a9e10309aaf1b58b97c22a01b042803091e28309a9e04740f9e11f40f9ebb58b97c22a01b042803091e2830aa900b7feb000881991610480d2e2630291e3037fb2e40303aae5f38d97e23f40f9620000b4453080b902000014e5031faabf040071610500541f2003d51f2003d5e52f40f9a50000b4e6630191bf0006eb8000005443000014e5630191e52f00f9e23b40f9e51b46a9c700018b5f0007ebe2010054e62700f9e11b00f9e04300f9e00305aae30301aac42a01b084803291e10307aacacb8b97e62740f9e50300aae70301aae04340f9e11b40f9e72700f9e54b00f9e22300f9a300068be20301aae10300aae00303aa25e28b97e32340f9e33b00f9e34b40f9e42740f9e31306a9e10b4da9e32b40f984e291d244b7adf2e87a019008210b9197ffff17e87a019008210b9194ffff17e87a019008210b9191ffff17e00746a9e20300aae20302cb3f0002eb880100541f2003d5e10000b4220400d10368a238631c40d37f28007141000054e10302aafd835ff8fe074cf8c0035fd6400000b41d8d8b972c8d8b97c02a01b000803091a1c400b02100349193bf8b971f2003d5e08700a9e28f01a9e3031eaae2d88b97e08740a9e28f41a963ffff170000000000000000",
+      "directCalls": [
+        {
+          "fileOffset": 139580924,
+          "word": "978bb5f1",
+          "targetRelative": 564480,
+          "callee": "runtime.convTstring"
+        },
+        {
+          "fileOffset": 139580948,
+          "word": "978bb5eb",
+          "targetRelative": 564480,
+          "callee": "runtime.convTstring"
+        },
+        {
+          "fileOffset": 139580988,
+          "word": "978df3e5",
+          "targetRelative": 1152272,
+          "callee": "fmt.Sprintf"
+        },
+        {
+          "fileOffset": 139581112,
+          "word": "978bcbca",
+          "targetRelative": 587040,
+          "callee": "runtime.growslice"
+        },
+        {
+          "fileOffset": 139581164,
+          "word": "978be225",
+          "targetRelative": 609984,
+          "callee": "runtime.memmove"
+        },
+        {
+          "fileOffset": 139581308,
+          "word": "978b8d1d",
+          "targetRelative": 523056,
+          "callee": "runtime.panicunsafestringlen"
+        },
+        {
+          "fileOffset": 139581312,
+          "word": "978b8d2c",
+          "targetRelative": 523120,
+          "callee": "runtime.panicunsafestringnilptr"
+        },
+        {
+          "fileOffset": 139581332,
+          "word": "978bbf93",
+          "targetRelative": 574752,
+          "callee": "runtime.gopanic"
+        },
+        {
+          "fileOffset": 139581352,
+          "word": "978bd8e2",
+          "targetRelative": 600688,
+          "callee": "runtime.morestack_noctxt"
+        }
+      ],
+      "indirectCalls": []
+    },
+    {
+      "name": "google3/third_party/jetski/cortex/mixins/mixins.(*UserRulesSection).formatDemotedMemoriesAsPrompt",
+      "nameByteOffset": 39004911,
+      "fileOffset": 139581376,
+      "bytes": 816,
+      "sha256": "089f7e201ff38bf96aa91440c11482aba69f3f52f2fc1a864000cbc86d208fe4",
+      "hex": "900b40f9f18301d13f0210eb49180054fe0f12f8fd831ff8fd2300d1e10b0fa9ff7f08a9ff7f09a9e0031faa04000014e33340f960040091e10b4fa95f0000ebed120054237860f8630000b4641445a903000014e5031faae4031faa630000b4631c40f902000014e3031faa430100b4639840a9c77a01f0e7201f917f0007eb40000054e6031faaa1000054c30040f904000014c77a01f0e7201f91e3031faa630000b4631846a903000014e6031faae3031faae03300f9460800b4e61f00f9e33700f9e2c302915f7c00a95f7c01a9e00304aae10305aa4ab58b97c22a01b042803091e2030ba9e03740f9e11f40f944b58b97c22a01b042803091e2030ca980a9feb000581991210180d2e2c30291e3037fb2e40303aa3ef38d971f2003d5e24340f9a20000b4e50302915f0005eb8000005472000014e5030291e54300f9e24f40f9e59b48a92700068b5f0007ebe2010054e03f00f9e62f00f9e12700f9e00305aae30301aac42a01b084803291e10307aa2bcb8b97e62f40f9e50300aae70301aae03f40f9e12740f9e70b05a9e56b00f9a300068be20301aae10300aae00303aa87e18b97e32f40f9e34f00f9e36b40f9e42b40f9e39308a99dffff17ff7f0aa9e00304aae10305aa0db58b97c22a01b042803091e2030aa900a7fed000700191a10080d2e2830291e30340b2e40303aa07f38d971f2003d5e24340f9a20000b4e50302915f0005eb8000005436000014e5030291e54300f9e24f40f9e59b48a92700068b5f0007ebe2010054e12300f9e03b00f9e62f00f9e00305aae30301aac42a01b084803291e10307aaf4ca8b97e62f40f9e50300aae70301aae03b40f9e12340f9e70b05a9e56b00f9a300068be20301aae10300aae00303aa50e18b97e32f40f9e34f00f9e36b40f9e42b40f9e39308a966ffff17e08748a9e20300aae20302cb3f0002eb880100541f2003d5e10000b4220400d10368a238631c40d37f28007141000054e10302aafd835ff8fe074ef8c0035fd6400000b4548c8b97638c8b97c02a01b000803091a1c400b021003491cabe8b97c02a01b000803091a1c400b021003491c5be8b971f2003d5e08700a9e28f01a9e3031eaa14d88b97e08740a9e28f41a935ffff17",
+      "directCalls": [
+        {
+          "fileOffset": 139581592,
+          "word": "978bb54a",
+          "targetRelative": 564480,
+          "callee": "runtime.convTstring"
+        },
+        {
+          "fileOffset": 139581616,
+          "word": "978bb544",
+          "targetRelative": 564480,
+          "callee": "runtime.convTstring"
+        },
+        {
+          "fileOffset": 139581656,
+          "word": "978df33e",
+          "targetRelative": 1152272,
+          "callee": "fmt.Sprintf"
+        },
+        {
+          "fileOffset": 139581748,
+          "word": "978bcb2b",
+          "targetRelative": 587040,
+          "callee": "runtime.growslice"
+        },
+        {
+          "fileOffset": 139581796,
+          "word": "978be187",
+          "targetRelative": 609984,
+          "callee": "runtime.memmove"
+        },
+        {
+          "fileOffset": 139581836,
+          "word": "978bb50d",
+          "targetRelative": 564480,
+          "callee": "runtime.convTstring"
+        },
+        {
+          "fileOffset": 139581876,
+          "word": "978df307",
+          "targetRelative": 1152272,
+          "callee": "fmt.Sprintf"
+        },
+        {
+          "fileOffset": 139581968,
+          "word": "978bcaf4",
+          "targetRelative": 587040,
+          "callee": "runtime.growslice"
+        },
+        {
+          "fileOffset": 139582016,
+          "word": "978be150",
+          "targetRelative": 609984,
+          "callee": "runtime.memmove"
+        },
+        {
+          "fileOffset": 139582112,
+          "word": "978b8c54",
+          "targetRelative": 523056,
+          "callee": "runtime.panicunsafestringlen"
+        },
+        {
+          "fileOffset": 139582116,
+          "word": "978b8c63",
+          "targetRelative": 523120,
+          "callee": "runtime.panicunsafestringnilptr"
+        },
+        {
+          "fileOffset": 139582136,
+          "word": "978bbeca",
+          "targetRelative": 574752,
+          "callee": "runtime.gopanic"
+        },
+        {
+          "fileOffset": 139582156,
+          "word": "978bbec5",
+          "targetRelative": 574752,
+          "callee": "runtime.gopanic"
+        },
+        {
+          "fileOffset": 139582176,
+          "word": "978bd814",
+          "targetRelative": 600688,
+          "callee": "runtime.morestack_noctxt"
+        }
+      ],
+      "indirectCalls": []
+    },
+    {
+      "name": "google3/third_party/jetski/cortex/customizations/customizations.(*Manager).getRules",
+      "nameByteOffset": 34265063,
+      "fileOffset": 131882352,
+      "bytes": 7888,
+      "sha256": "7100ddaa531b3590405c0518f72356456556bf00cd0c5754fd33faf37ed7f651",
+      "hex": "900b40f9f14320d13f0210ebe9f40054f44322d19dfa3fa99f020091fd2300d1e04f04f9e35b04f9fb832291610b00a9013840f93be201d0633343f9630040f9621480b9a05001b000e01b91210da79703004039231c0037fb832291630340a9631840f9816501f0218012910237ff9042803e9160003fd6c00000b4032f01b0632024911f0003eb6000005482070014e1031faa810200b5fb832291610b40a9e1bf00f9e25f02f940ab019000e01e918477a797e15f42f9826501f0428012910337ff9063803e91042f01b084202491e50300aae0bf40f966f9a997fb832291600700a9c0960190006021917577a797e03f04f9e1e31c913f7c00a93f7c01a93f7c02a9e1a31a913f7c00a93f7c01a93f7c02a93f7c03a93f7c04a93f7c05a93f7c06a93f7c07a93f7c08a9e2c301b2e25703f9e1a703f92a22a997e0a303f9e1e319913f7c00a93f7c01a93f7c02a9e1c31691e20740b23f7c81a83f7c81a83f7c81a83f7c81a8420400d162ffffb53f0000f9e1c301b2e1db02f9e1c31691e14703f91722a997e04303f9e14f44f9224c40f9620000b4431840f902000014e3031faae31701f9e30000b4640440f9640000b48400403904000014e40340b202000014e40340b2e4bb0339e0037bb2a17e01d021600091e20340b2357ba797e04304f9fb832291610b40a93be201d0643343f943b9019063803091e5bb4339e60300aae04f44f9d2a0ff971f2003d51f2003d53bf70290655f633905010036e50340b2e64344f9fb031f2ac5fcfb887f031f6be7179f9a09000014e50340b2e64344f9dbfc5f887f031f6b61000054c5fc1b889bffffb5e7179f9ae39700f9e4c301f9e19b00f9e0c701f987000037e00306aa4b60a997e64344f9c59c40a9870000b5e2031faae8031faa0e000014e7ef00f9e59702f9e0031faae10307aae2031faae30301aa84650190848030917029a997e59742f9e7ef40f9e20301aae80300aae2a300f9e8db01f98065019000803091e10308aae30305aae40307aa9816a9971f2003d51f2003d51bf702f0655f6339c500003605008092e04344f90100e5b82100058b0700001405008092e04344f901fc5f882100058b01fc1b88bbffffb541000034fa60a997fb832291610b40a9e04f44f9e3bb4339e45b44f96cfaff97e0bf01f9e38711a9e4bb01f9650201f0a50030912610c0dae7037ab2e60006cb1f2003d5e30302aae4031faac7b901d0e7800491e20301aae10300aae00305aae50302aa0e14ac97e01741f9800000b4031041a9051040f904000014e5031faae4031faae3031faafb832291610b40a9e04f44f9c6060094e0d701f9e19f00f9e7031faae8031faae9031faae3031faa0b000014e0031faae1031faae2031faafdfb7fa9ff432291c0035fd6cbb100a900a00191210400d1e30305aa3f0000f16d060054650400910a2c40a90c3441a9ff0005eb42040054e1ef00f9e09302f9edeb00f9ec8f02f9eb8b02f9eae700f9e8bf0339bf0400f10c010054e8000037e94315913f7d00a93f7d01a9e70340b2e80340b212000014e00309aae10305aae20307aae30340b204b201f084201391ff28a997eae740f9eb8b42f9ec8f42f9edeb40f9e50301aae90300aae70302aae8bf4339e09342f9e1ef40f9ae0400d12e150e8bca0100f9cd0d00f93bf702d06a5348b9caf9ff34cab540a9203ea9972b2b00a92c3701a9c9ffff17e8c741f9e19b40f9eba340f9ecdb41f909000014e59342f9a8a00191e5ef40f9a50400d1e70302aae90300aae30301aae10305aae39f10a9e9b701f93f0000f1cd0c0054e1ef00f9e89302f9e5431f91104540adb04400ad104541adb04401ad104542adb04402ad193140f9b93000f9ed231191b04440adb04500adb04441adb04501adb04442adb04502adb93040f9b93100f9e4031faa05000014e58340f9a4040091eba340f9ecdb41f99f000bebca030054e48300f98411048b841440a9e5a700f9e4df01f9fb231191600740a9fb631191620f40a9ca1300943be201b0643343f9e5df41f9e6a740f9e70300aae00304aae80301aae10307aae90302aae20308aaea0303aae30309aae4030aaa546aff9740fc0736eba340f9ecdb41f9e08340f902000014000080928000f8b7e18b50a9e0b741f9b7ffff17e58740f9a1040091fb231191651f40a9fb631191682740a9e28b40f95f0001eb63000054e0b741f910000014e9eb00f9e88f02f9e78b02f9e5e700f9e0b741f9e30340b204b201f0842013918628a997e5e740f9e78b42f9e88f42f9e9eb40f9eba340f9ecdb41f92a0400d10a140a8b450100f9490d00f93bf702d0655348b9a500003445a540a9ab3da997271700a9282701a947a100a990ffff17e1bb4339c12a0036fb832291610b40a9e04f44f96592ff97e2031faae3031faae4031faa14000014e40b18a9e56302f9860003cb670002cb67fc878aa514078be20306aae30300aae40301aa00b201f000201391e10305aa9015a997e59342f9a0a00291e5ef40f9a10400d1e20f58a9e46342f9e46302f9e20f18a93f0000f1cd060054e1ef00f9e09302f9e3431f91104440ad704400ad104441ad704401ad104442ad704402ad104443ad704403ad104444ad704404ad195040f9795000f9fb832291610b40a9e4230091704440ad904400ad704441ad904401ad704442ad904402ad704443ad904403ad704444ad904404ad795040f9995000f9e04f44f9fe120094e3c340f96400018be2c740f95f0004eb63000054e56342f9c3ffff17e1eb00f9e08702f9e06342f9e30301aae10304aa04b201f0842013912328a997e3c340f9e40301aae50300aae08742f9e1eb40f9b5ffff17e24f44f9400440a99a47c697840000b4ea1758a9e66342f957000014e3ef00f9e28f02f9e18b02f9e0e700f9e74f44f9e82444a9e4031faae5c740f9e66342f9eac340f90d000014218900a9eb9342f96b410091eceb40f9890500d1e0e740f9e18b42f9e28f42f9e3ef40f9e50307aaea0308aae8030baa3f0100f1cd070054e9eb00f9e68302f9e5e300f9e4bf0339e89302f9072140a949050091e9df00f9fb031f91672300a9e4031f91e50340b2e60305aa2f31c697e89f5ba9ff0008eb83000054e68342f9e4bf43391e000014e27f02f9e3db00f9e17b02f9e0d700f91f0500f12c010054e4bf4339e4000037e6c31491df7c00a9df7c01a9e70340b2e40340b210000014e08342f9e10308aae20307aae30340b204b201f084201391d427a997e3db40f9e80301aae60300aae70302aae4bf4339e0d740f9e17b42f9e27f42f9090500d1c914098b200100f9230d00f93bf702d06a5348b96af7ff342aad40a9f73ca997212b00a9222f01a9b6ffff17ea1718a9e66302f9e14f44f9210040a9211040f920003fd6a40000b4e6c340f9e56342f9e4c740f94b000014e3ef00f9e28f02f9e18b02f9e0e700f9e74f44f9e82444a9e4c740f9e56342f9e6c340f90e000014218900a9ea9342f94a410091ebeb40f9690500d1e0e740f9e18b42f9e28f42f9e3ef40f9e50304aae60308aae8030aaae40307aa3f0100f14d060054e9eb00f9e4d300f9e57702f9e89302f9072140a9c9040091e9e300f9fb031f91672300a9e4031f91e50340b2e60305aacf30c697e7d340f9e8e340f9ff0008eb63000054e47742f913000014e3e300f9e27f02f9e17b02f9e0d700f9e07742f9e10308aae20307aae30340b204b201f0842013917e27a997e3e340f9e80301aae40300aae70302aae0d740f9e17b42f9e27f42f9090500d18914098b200100f9230d00f93bf702d06a5348b9caf8ff342aad40a9a23ca997212b00a9222f01a9c1ffff17e6c300f9e56302f9fb832291610b40a960ff009000c00591e30305aae50304aae40306aac6b901d0c6600891af610094e76342f9e0c340f9e18b40f9e2b741f9e38740f909000014e49342f987800091e4ef40f9840400d1e30301aae10302aae20300aae00304aa1f0000f14d060054e0ef00f9e30719a9e27302f9e79302f9e20c40a9e38f02f9e2e700f9e41441a9e48b02f9e5eb00f9fb832291600740a97a4dff97820000b4e10b59a9e07342f9e6ffff17e5cb40f9a1040091e2cf40f95f0001eb63000054e07342f906000014e07342f9e30340b204b201f0842013913227a997230400d10314038be4e740f9640000f9e4eb40f9640c00f93bf702d0645348b984000035e48b42f9e78f42f907000014649440a9583ca997e78f42f9271300a9e48b42f9241701a9679000a9c6ffff17e70301aae90302aafb832291610b40a960ff009000e00591e40303aae50307aac6b901d0c6e00791e30309aab6610094e7d741f9e09f40f905000014e49342f987a00191e4ef40f9800400d11f0000f12d180054e0ef00f9e79302f9e00440a9e20c41a9e4630b91f04440ad904400adf04441ad904401adf04442ad904402adf93040f9993000f913120094e0e700f9e18f02f9e28b02f9e3eb00f91641c697e20300aae30301aaa05001f000603091e1e31c91b80fa7970400403904fc0737e0e740f9e18f42f9e28b42f9e3eb40f90941c697e20300aae30301aaa05001f000603091e1e31c91eb10a797e40340b204000039e04f44f9e1e740f9e28f42f9e38b42f9e4eb40f9a7bdff97fb431f91600700a9fb831f91620f00a9fbc31f91641700a9fb032091661f00a9e80b04f9fb832291610b40a9fb630b91631340a9fba30b91651b40a9fb230c91692b40a9fbe30b91672340a9eb230091ec431f91904540ad704500ad904541ad704501ad992140f9792100f9e04f44f9eb031faac1090094810700b5600000b4021c40f902000014e2031faae0b301f9420100b4428c40a984b501d084201f915f0004eb40000054e3031faa61000054620040f902000014e2031faae30340b2435800b9fba30c91600740a9e23b83b9e2ff00b9dd73ff97e2b341f9413400f93bf702d0635348b983000034443040f9ca3ba997201300a9403000f9e4ff80b9447000b9e0e740f9e18f42f9e28b42f9e3eb40f9b540c697e20300aae30301aaa05001f000601f91e1e319919710a7973bf702d0645348b964000035e2b341f905000014030040f9b43ba997e2b341f9220f00a9020000f9e04f44f9e13f44f98607009473ffff17e2ef01f9e1b700f9fb832291631340a9e3bb00f9e45b02f9e0037bb20145019021801491e20340b20678a797e06f02f900b201f000201391e1630b917d65a79703b201f063201391e86f42f9030100f93bf702d0635348b9830000340b0540f9943ba997202f00a9000500f9e0b740f9600000b4010440f902000014e10300aa010900f93bf702d06b5348b96b000035ecef41f9050000140b0d40f9853ba997ecef41f92c2f00a90c0d00f9e0bb40f9e15b42f9e20340b2e3037fb2e4031faae5031faac6f0fef0c60c0291e7037bb2e9037fb2ea0309aaa6c6b0973bffff17e4c741f9e09b40f905000014e59342f9a4a00191e5ef40f9a00400d11f0000f1cd1d0054e0ef00f9e49302f9800440a9820c41a9e5830f91904440adb04400ad904441adb04401ad904442adb04402ad993040f9b93000f94a110094e0e700f9e18f02f9e28b02f9e3eb00f94d40c697e20300aae30301aaa05001f000603091e1e31c91ef0ea7970400403904fc0737e7db41f9e0a340f905000014e86742f908410091e00400d1e70308aa1f0000f1cd010054e0e300f9e76702f9e51840a93be201b0603343f9e1e740f9e28f42f9e38b42f9e4eb40f9c267ff97e7e340f9ff0000f1c0fd07362cf9ff54e0e740f9e18f42f9e28b42f9e3eb40f92940c697e20300aae30301aaa05001f000603091e1e31c910b10a797e40340b204000039e483503904030036e3431f917f7c00a97f7c01a97f7c02a97f7c03a97f2000f9e34f44f9600441a9621040f98195f397a15900b4013040a9ece300f9e17f02f9e04f44f90d3841a9ef830791ff7d00a9ff7d01a9ff7d02a9ff7d03a9ff2100f941030014e04f44f9e1e740f9e28f42f9e38b42f9e4eb40f9aebcff97fb431f91600700a9fb831f91620f00a9fbc31f91641700a9fb032091661f00a9e80b04f9fb832291610b40a9fb830f91631340a9fbc30f91651b40a9fb031091672340a9fb431091692b40a9eb230091ec431f91904540ad704500ad904541ad704501ad992140f9792100f9e04f44f9eb031faac8080094e10800b4e1af00f9e2e701f91beb01b07bc33791640f40a9e00301aae10302aae20304aa1e68b79760060037e0037bb20145019021801491e20340b24477a797e06f02f900b201f000201391e1830f91bb64a79703b201f063201391e86f42f9030100f93bf702d0635348b9830000340b0540f9d23aa997202f00a9000500f9e0af40f9600000b4010440f902000014e10300aa010900f93bf702d06b5348b96b000035ece741f9050000140b0d40f9c33aa997ece741f92c2f00a90c0d00f91f2003d5e0031faae1031faae2037fb2e3037fb2e4031faae5031faac6f0fef0c60c0291e7037bb2e90302aaea0302aae3c5b097fb830f91610b40a9fbc30f91631340a9e05b44f9e5031faae6af40f9e7e741f9eab6ff9738ffff17e0af01f9fbc31091600740a9e24384b9e2f700b9af72ff97e2af41f9413400f93bf702b0635348b983000034443040f99c3aa997201300a9403000f9e4f780b9447000b9e0e740f9e18f42f9e28b42f9e3eb40f9873fc697e20300aae30301aaa05001d000601f91e1e31991690fa7973bf702b0645348b964000035e2af41f905000014030040f9863aa997e2af41f9220f00a9020000f9e04f44f9e13f44f9580600940effff17e0bb4339a02b0036fb832291610b40a9e04f44f9458fff9705000014e79342f9e0a00291e7ef40f9e10400d13f0000f1ad200054e1ef00f9e09302f9e7431f91104440adf04400ad104441adf04401ad104442adf04402ad104443adf04403ad104444adf04404ad195040f9f95000f9fb430e917f7f00a9ffd301f91f2003d5c82b0710e9832291fba31e91682700a9e8430e91e8df03f9fb832291610b40a9e04f44f9031044a9052840f9e8230091f04440ad104500adf04441ad104501adf04442ad104502adf04443ad104503adf04444ad104504adf95040f9195100f9e6a31e91a592ff97fb430e91672340a903000014e7800091080500d11f0100f1edf8ff54e8eb00f9e76702f9e00440a9e0e700f9e18f02f9e20c41a9e3e300f9e28b02f9fa2f44f97a0000b5e6031faa0e000014460340f93be20190653343f924b901d084803091c0003fd6060040d2e0e740f9e18f42f9e28b42f9e3e340f9e76742f9e8eb40f966fc07370f100094e0d700f9e17f02f9e27b02f9e3df00f9123fc697e20300aae30301aaa05001d000603091e1e31c91b40da7970400403984000036e76742f9e8eb40f9d2ffff17e0d740f9e17f42f9e27b42f9e3df40f9023fc697e20300aae30301aaa05001d000603091e1e31c91e40ea797e40340b204000039fb832291610b40a9fbc31f91672340a9fb032091692b40a9e4230091e5432091b04440ad904400adb04441ad904401adb92040f9992000f9e04f44f9e3e740f9e48f42f9e58b42f9e6e340f9eb031faac9070094210a00b4e2e301f9e1ab00f91beb01907bc33791640f40a9e00301aae10302aae20304aa1f67b79760070037e0037bb2e14401f021801491e20340b24576a797e06f02f9e3e740f9e48f42f9fb431691631300a9e38b42f9e4e340f9fb831691631300a900b201d000201391e1431691b463a79703b201d063201391e86f42f9030100f93bf702b0635348b9830000340b0540f9cb39a997202f00a9000500f9e0ab40f9600000b4010440f902000014e10300aa010900f93bf702b06b5348b96b000035ece341f9050000140b0d40f9bc39a997ece341f92c2f00a90c0d00f91f2003d5e0031faae1031faae2037fb2e3037fb2e4031faae5031faac6f0fed0c60c0291e7037bb2e90302aaea0302aadcc4b097e05b44f9e1e740f9e28f42f9e38b42f9e4e340f9e5031faae6ab40f9e7e341f9e3b5ff97e76742f9e8eb40f95fffff17e0ab01f9e0e740f9e18f42f9e28b42f9e3e340f9de29c697e46f88b9e4f300b9a371ff97e4ab41f9813400f9e5f380b9bf000071a60080d2c500859a3bf702b0665348b986000034863040f98c39a997201b00a9803000f9857000b9e0d740f9e17f42f9e27b42f9e3df40f9783ec697e20300aae30301aaa05001d000601f91e1e319915a0ea7973bf702b0645348b964000035e2ab41f905000014030040f97739a997e2ab41f9220f00a9020000f9e04f44f9e13f44f949050094e76742f9e8eb40f92dffff17fb832291610b40a9e04f44f9368eff9747000014e1ef00f9e09302f9eb431f91104440ad704500ad104441ad704501ad104442ad704502ad104443ad704503ad104444ad704504ad195040f9795100f9ecc30891704540ad904500ad704541ad904501ad704542ad904502ad704543ad904503ad704544ad904504ad795140f9995100f9ebc36139fb431f916d3b40a9fb831f916f4340a9fbc31f91714f40a9fb032091745740a91f2003d556e50610f74f44f9fba31d91765f00a9f6832291fbe31d91763300a9ece31c91f65b44f9fb231e916c5b00a9ece31991f63f44f9fb631e916c5b00a9fb832291600740a9fb030991641740a9fbc30891620f40a97f0100720912959aa611919ae811949ac711939aeaa31d910393ff97eb9342f960a10291ebef40f9610500d13f0000f12cf7ff54e1031faae49340f9e5bf41f9e64f44f905000014e7ef40f9e1040091e49340f9e5bf41f99f0001ebcd0c0054e1ef00f9a77861f8e7a047a9e8eb00f9e76b02f9e2031faa06000014e4e340f982040091e64f44f9e76b42f9e8eb40f95f0008ebaafdff54e2e300f9e47862f8e4a701f9640000b4800445a903000014e1031faae0031faac20c40a96a38c697640000b4e2a741f947000014e60e0094ed3dc697e08f02f9e1df00f9e20300aae30301aaa05001d000603091e1e31c918d0ca7970400403964040036a05001d000601f91e1e31991e28f42f9e3df40f9850ca797040040f924fbffb4851c40f9450100b4a59840a987b501b0e7201f91bf0007eb40000054e6031faa61000054c50040f902000014e5031faa850000b4a68880b94600f836bf8800b9e0a741f9600000b4057080b902000014e5031faabf04007141f8ff54e50340b2857000b9bfffff17a05001d000603091e1e31c91e28f42f9e3df40f9a30da797e40340b204000039a05001d000601f91e1e31991e28f42f9e3df40f99b0da7973bf702b0645348b964000035e2a741f905000014030040f9b838a997e2a741f9220f00a9020000f9e04f44f9e13f44f98a040094a3ffff17e33f44f9600440a9620840f91d060094e33f44f9608441a9621440f919060094e33f44f9600443a9622040f915060094e33f44f9608444a9622c40f911060094e0bb433960000037e73f44f934000014fb832291610b40a9e04f44f9e35b44f9ac010094e43f44f9823840f9851846a9c700018b5f0007ebe2010054e1ef00f9e06b02f9e6eb00f9e00305aae30301aae42d01d084a03891e10307aa5d23a997e6eb40f9e50300aae70301aae06b42f9e1ef40f9e70b1da9e56b02f9e70006cbc80002cbc6fc888aa50c068be20307aae30300aae40301aae02d01d000a03891e10305aa7f10a997e51b5da9e73f44f9e59806a93bf702b0655348b965000035e46b42f905000014e33040f96d38a997e46b42f9240f00a9e43000f9e00446a9e23840f9d7050094e39740f9e4c341f9fbc31591631300a9e38f40f9e4bb41f9fb031691631300a9e00340b2e1c31591e2037fb2e30302aa36efbd97e20301aae10300aae03f44f9fdfb7fa9ff432291c0035fd6fb832291610b40a9fb830f91631340a9fbc30f91651b40a9fb031091672340a9fb431091692b40a9ec230091ed431f91b04540ad904500adb04541ad904501adb92140f9992100f9e04f44f9eb0340b217060094e10700b4e2eb01f9e1b300f9e0037bb2e14401f021801491e20340b29b74a797e06f02f900b201d000201391e1830f911262a79703b201d063201391e86f42f9030100f93bf702b0635348b9830000340b0540f92938a997202f00a9000500f9e0b340f9600000b4010440f902000014e10300aa010900f93bf702b06b5348b96b000035eceb41f9050000140b0d40f91a38a997eceb41f92c2f00a90c0d00f91f2003d5e0031faae1031faae2037fb2e3037fb2e4031faae5031faa66f2fef0c6f83891e70480d2e90302aaea0302aa3ac3b097fb830f91610b40a9fbc30f91631340a9e05b44f9e50340b2e6b340f9e7eb41f941b4ff978ffcff17e0a301f9fbc31091600740a9e24384b9e2fb00b90670ff97e2a341f9413400f93bf702b0635348b983000034443040f9f337a997201300a9403000f9e4fb80b9447000b9e0e740f9e18f42f9e28b42f9e3eb40f9de3cc697e20300aae30301aaa05001d000601f91e1e31991c00ca7973bf702b0645348b964000035e2a341f905000014030040f9dd37a997e2a341f9220f00a9020000f9e04f44f9e13f44f9af03009465fcff17ad610191ce0500d1df0100f14d040054b00940a9f1431f91b04540ad304600adb04541ad304601adb011c03d3012803db92940f9392a00f95f000ceb21feff54eedf00f9ed6702f9e00310aa1612a797e0000037e17f42f9ece340f9ed6742f9eedf40f9ef830791e6ffff17ec830791ed831f91b04540ad904500adb04541ad904501adb92140f9992100f9ef83079106000014ff7d00a9ff7d01a9ff7d02a9ff7d03a9ff2100f9ec431f91f04540ad904500adf04541ad904501adf92140f9992100f951ffff17e10303aa626a01b042202c910c61a7971f2003d5e08700a9e28f01a9e3031eaac32fa997e08740a9e28f41a950f8ff17000000000000000000000000",
+      "directCalls": [
+        {
+          "fileOffset": 131882428,
+          "word": "97a70d21",
+          "targetRelative": 33152,
+          "callee": "runtime.mapaccess1_fast32"
+        },
+        {
+          "fileOffset": 131882528,
+          "word": "97a77784",
+          "targetRelative": 142192,
+          "callee": "runtime.newobject"
+        },
+        {
+          "fileOffset": 131882568,
+          "word": "97a9f966",
+          "targetRelative": 799520,
+          "callee": "context.WithValue"
+        },
+        {
+          "fileOffset": 131882588,
+          "word": "97a77775",
+          "targetRelative": 142192,
+          "callee": "runtime.newobject"
+        },
+        {
+          "fileOffset": 131882664,
+          "word": "97a9222a",
+          "targetRelative": 579216,
+          "callee": "runtime.rand"
+        },
+        {
+          "fileOffset": 131882740,
+          "word": "97a92217",
+          "targetRelative": 579216,
+          "callee": "runtime.rand"
+        },
+        {
+          "fileOffset": 131882828,
+          "word": "97a77b35",
+          "targetRelative": 146272,
+          "callee": "runtime.mallocgcSmallScanNoHeaderSC4"
+        },
+        {
+          "fileOffset": 131882872,
+          "word": "97ffa0d2",
+          "targetRelative": 23253504,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.(*Manager).discoverPathsForScope"
+        },
+        {
+          "fileOffset": 131882980,
+          "word": "97a9604b",
+          "targetRelative": 643152,
+          "callee": "internal/sync.(*Mutex).lockSlow"
+        },
+        {
+          "fileOffset": 131883040,
+          "word": "97a92970",
+          "targetRelative": 587040,
+          "callee": "runtime.growslice"
+        },
+        {
+          "fileOffset": 131883088,
+          "word": "97a91698",
+          "targetRelative": 567792,
+          "callee": "runtime.typedslicecopy"
+        },
+        {
+          "fileOffset": 131883160,
+          "word": "97a960fa",
+          "targetRelative": 644032,
+          "callee": "internal/sync.(*Mutex).unlockSlow"
+        },
+        {
+          "fileOffset": 131883184,
+          "word": "97fffa6c",
+          "targetRelative": 23345568,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.(*Manager).pluginsForKind"
+        },
+        {
+          "fileOffset": 131883256,
+          "word": "97ac140e",
+          "targetRelative": 1351792,
+          "callee": "slices.pdqsortCmpFunc[go.shape.*uint8]"
+        },
+        {
+          "fileOffset": 131883304,
+          "word": "940006c6",
+          "targetRelative": 23358336,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.(*Manager).explicitRulePaths"
+        },
+        {
+          "fileOffset": 131883492,
+          "word": "97a928ff",
+          "targetRelative": 587040,
+          "callee": "runtime.growslice"
+        },
+        {
+          "fileOffset": 131883568,
+          "word": "97a93e20",
+          "targetRelative": 608752,
+          "callee": "runtime.gcWriteBarrier4"
+        },
+        {
+          "fileOffset": 131883800,
+          "word": "940013ca",
+          "targetRelative": 23372160,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.canonicalizePath"
+        },
+        {
+          "fileOffset": 131883856,
+          "word": "97ff6a54",
+          "targetRelative": 23198688,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.(*fileCustomization).matchesPattern"
+        },
+        {
+          "fileOffset": 131883976,
+          "word": "97a92886",
+          "targetRelative": 587040,
+          "callee": "runtime.growslice"
+        },
+        {
+          "fileOffset": 131884036,
+          "word": "97a93dab",
+          "targetRelative": 608752,
+          "callee": "runtime.gcWriteBarrier4"
+        },
+        {
+          "fileOffset": 131884076,
+          "word": "97ff9265",
+          "targetRelative": 23239936,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.(*Manager).getWorkingDirContexts"
+        },
+        {
+          "fileOffset": 131884144,
+          "word": "97a91590",
+          "targetRelative": 567792,
+          "callee": "runtime.typedslicecopy"
+        },
+        {
+          "fileOffset": 131884312,
+          "word": "940012fe",
+          "targetRelative": 23371856,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.(*Manager).markdownRuleCandidates"
+        },
+        {
+          "fileOffset": 131884372,
+          "word": "97a92823",
+          "targetRelative": 587040,
+          "callee": "runtime.growslice"
+        },
+        {
+          "fileOffset": 131884408,
+          "word": "97c6479a",
+          "targetRelative": 8221472,
+          "callee": "google3/third_party/jetski/fs/fs.ConfigDir"
+        },
+        {
+          "fileOffset": 131884580,
+          "word": "97c6312f",
+          "targetRelative": 8198688,
+          "callee": "google3/third_party/jetski/fs/fs.Path.Join"
+        },
+        {
+          "fileOffset": 131884688,
+          "word": "97a927d4",
+          "targetRelative": 587040,
+          "callee": "runtime.growslice"
+        },
+        {
+          "fileOffset": 131884756,
+          "word": "97a93cf7",
+          "targetRelative": 608752,
+          "callee": "runtime.gcWriteBarrier4"
+        },
+        {
+          "fileOffset": 131884964,
+          "word": "97c630cf",
+          "targetRelative": 8198688,
+          "callee": "google3/third_party/jetski/fs/fs.Path.Join"
+        },
+        {
+          "fileOffset": 131885032,
+          "word": "97a9277e",
+          "targetRelative": 587040,
+          "callee": "runtime.growslice"
+        },
+        {
+          "fileOffset": 131885096,
+          "word": "97a93ca2",
+          "targetRelative": 608752,
+          "callee": "runtime.gcWriteBarrier4"
+        },
+        {
+          "fileOffset": 131885156,
+          "word": "940061af",
+          "targetRelative": 23453280,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.warmCache[go.shape.interface { IsDir() bool; ModTime() time.Time; Mode() io/fs.FileMode; Name() string; Size() int64; Sys() interface {} }]"
+        },
+        {
+          "fileOffset": 131885272,
+          "word": "97ff4d7a",
+          "targetRelative": 23170560,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.statCached"
+        },
+        {
+          "fileOffset": 131885336,
+          "word": "97a92732",
+          "targetRelative": 587040,
+          "callee": "runtime.growslice"
+        },
+        {
+          "fileOffset": 131885392,
+          "word": "97a93c58",
+          "targetRelative": 608752,
+          "callee": "runtime.gcWriteBarrier4"
+        },
+        {
+          "fileOffset": 131885464,
+          "word": "940061b6",
+          "targetRelative": 23453616,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.warmCache[go.shape.[]uint8]"
+        },
+        {
+          "fileOffset": 131885556,
+          "word": "94001213",
+          "targetRelative": 23372160,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.canonicalizePath"
+        },
+        {
+          "fileOffset": 131885576,
+          "word": "97c64116",
+          "targetRelative": 8215968,
+          "callee": "google3/third_party/jetski/fs/fs.Path.Uri"
+        },
+        {
+          "fileOffset": 131885600,
+          "word": "97a70fb8",
+          "targetRelative": 38976,
+          "callee": "runtime.mapaccess1_faststr"
+        },
+        {
+          "fileOffset": 131885628,
+          "word": "97c64109",
+          "targetRelative": 8215968,
+          "callee": "google3/third_party/jetski/fs/fs.Path.Uri"
+        },
+        {
+          "fileOffset": 131885652,
+          "word": "97a710eb",
+          "targetRelative": 40256,
+          "callee": "runtime.mapassign_faststr"
+        },
+        {
+          "fileOffset": 131885684,
+          "word": "97ffbda7",
+          "targetRelative": 23285840,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.(*Manager).getWorkspaceInfoForPath"
+        },
+        {
+          "fileOffset": 131885804,
+          "word": "940009c1",
+          "targetRelative": 23363888,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.(*Manager).parseRuleFile"
+        },
+        {
+          "fileOffset": 131885900,
+          "word": "97ff73dd",
+          "targetRelative": 23210496,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.displaySourcePath"
+        },
+        {
+          "fileOffset": 131885928,
+          "word": "97a93bca",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 131885964,
+          "word": "97c640b5",
+          "targetRelative": 8215968,
+          "callee": "google3/third_party/jetski/fs/fs.Path.Uri"
+        },
+        {
+          "fileOffset": 131885988,
+          "word": "97a71097",
+          "targetRelative": 40256,
+          "callee": "runtime.mapassign_faststr"
+        },
+        {
+          "fileOffset": 131886016,
+          "word": "97a93bb4",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 131886040,
+          "word": "94000786",
+          "targetRelative": 23361840,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.(*Manager).categorizeRule"
+        },
+        {
+          "fileOffset": 131886088,
+          "word": "97a77806",
+          "targetRelative": 146272,
+          "callee": "runtime.mallocgcSmallScanNoHeaderSC4"
+        },
+        {
+          "fileOffset": 131886108,
+          "word": "97a7657d",
+          "targetRelative": 127312,
+          "callee": "runtime.convT"
+        },
+        {
+          "fileOffset": 131886144,
+          "word": "97a93b94",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 131886204,
+          "word": "97a93b85",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 131886264,
+          "word": "97b0c6a6",
+          "targetRelative": 2586256,
+          "callee": "google3/base/go/log.ctxlogf"
+        },
+        {
+          "fileOffset": 131886360,
+          "word": "9400114a",
+          "targetRelative": 23372160,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.canonicalizePath"
+        },
+        {
+          "fileOffset": 131886380,
+          "word": "97c6404d",
+          "targetRelative": 8215968,
+          "callee": "google3/third_party/jetski/fs/fs.Path.Uri"
+        },
+        {
+          "fileOffset": 131886404,
+          "word": "97a70eef",
+          "targetRelative": 38976,
+          "callee": "runtime.mapaccess1_faststr"
+        },
+        {
+          "fileOffset": 131886488,
+          "word": "97ff67c2",
+          "targetRelative": 23198688,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.(*fileCustomization).matchesPattern"
+        },
+        {
+          "fileOffset": 131886524,
+          "word": "97c64029",
+          "targetRelative": 8215968,
+          "callee": "google3/third_party/jetski/fs/fs.Path.Uri"
+        },
+        {
+          "fileOffset": 131886548,
+          "word": "97a7100b",
+          "targetRelative": 40256,
+          "callee": "runtime.mapassign_faststr"
+        },
+        {
+          "fileOffset": 131886604,
+          "word": "97f39581",
+          "targetRelative": 20099920,
+          "callee": "google3/third_party/jetski/cortex/utils/utils.SortedWorkspaceURIs"
+        },
+        {
+          "fileOffset": 131886680,
+          "word": "97ffbcae",
+          "targetRelative": 23285840,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.(*Manager).getWorkspaceInfoForPath"
+        },
+        {
+          "fileOffset": 131886800,
+          "word": "940008c8",
+          "targetRelative": 23363888,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.(*Manager).parseRuleFile"
+        },
+        {
+          "fileOffset": 131886840,
+          "word": "97b7681e",
+          "targetRelative": 4325040,
+          "callee": "google3/third_party/golang/github_com/cockroachdb/errors/v/v1/markers/markers.Is"
+        },
+        {
+          "fileOffset": 131886864,
+          "word": "97a77744",
+          "targetRelative": 146272,
+          "callee": "runtime.mallocgcSmallScanNoHeaderSC4"
+        },
+        {
+          "fileOffset": 131886884,
+          "word": "97a764bb",
+          "targetRelative": 127312,
+          "callee": "runtime.convT"
+        },
+        {
+          "fileOffset": 131886920,
+          "word": "97a93ad2",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 131886980,
+          "word": "97a93ac3",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 131887044,
+          "word": "97b0c5e3",
+          "targetRelative": 2586256,
+          "callee": "google3/base/go/log.ctxlogf"
+        },
+        {
+          "fileOffset": 131887080,
+          "word": "97ffb6ea",
+          "targetRelative": 23280336,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.(*loadErrorCollector).recordRule"
+        },
+        {
+          "fileOffset": 131887108,
+          "word": "97ff72af",
+          "targetRelative": 23210496,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.displaySourcePath"
+        },
+        {
+          "fileOffset": 131887136,
+          "word": "97a93a9c",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 131887172,
+          "word": "97c63f87",
+          "targetRelative": 8215968,
+          "callee": "google3/third_party/jetski/fs/fs.Path.Uri"
+        },
+        {
+          "fileOffset": 131887196,
+          "word": "97a70f69",
+          "targetRelative": 40256,
+          "callee": "runtime.mapassign_faststr"
+        },
+        {
+          "fileOffset": 131887224,
+          "word": "97a93a86",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 131887248,
+          "word": "94000658",
+          "targetRelative": 23361840,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.(*Manager).categorizeRule"
+        },
+        {
+          "fileOffset": 131887276,
+          "word": "97ff8f45",
+          "targetRelative": 23239936,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.(*Manager).getWorkingDirContexts"
+        },
+        {
+          "fileOffset": 131887484,
+          "word": "97ff92a5",
+          "targetRelative": 23243600,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.(*Manager).visitParentCustomizationFiles"
+        },
+        {
+          "fileOffset": 131887620,
+          "word": "9400100f",
+          "targetRelative": 23372160,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.canonicalizePath"
+        },
+        {
+          "fileOffset": 131887640,
+          "word": "97c63f12",
+          "targetRelative": 8215968,
+          "callee": "google3/third_party/jetski/fs/fs.Path.Uri"
+        },
+        {
+          "fileOffset": 131887664,
+          "word": "97a70db4",
+          "targetRelative": 38976,
+          "callee": "runtime.mapaccess1_faststr"
+        },
+        {
+          "fileOffset": 131887704,
+          "word": "97c63f02",
+          "targetRelative": 8215968,
+          "callee": "google3/third_party/jetski/fs/fs.Path.Uri"
+        },
+        {
+          "fileOffset": 131887728,
+          "word": "97a70ee4",
+          "targetRelative": 40256,
+          "callee": "runtime.mapassign_faststr"
+        },
+        {
+          "fileOffset": 131887820,
+          "word": "940007c9",
+          "targetRelative": 23363888,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.(*Manager).parseRuleFile"
+        },
+        {
+          "fileOffset": 131887860,
+          "word": "97b7671f",
+          "targetRelative": 4325040,
+          "callee": "google3/third_party/golang/github_com/cockroachdb/errors/v/v1/markers/markers.Is"
+        },
+        {
+          "fileOffset": 131887884,
+          "word": "97a77645",
+          "targetRelative": 146272,
+          "callee": "runtime.mallocgcSmallScanNoHeaderSC4"
+        },
+        {
+          "fileOffset": 131887936,
+          "word": "97a763b4",
+          "targetRelative": 127312,
+          "callee": "runtime.convT"
+        },
+        {
+          "fileOffset": 131887972,
+          "word": "97a939cb",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 131888032,
+          "word": "97a939bc",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 131888096,
+          "word": "97b0c4dc",
+          "targetRelative": 2586256,
+          "callee": "google3/base/go/log.ctxlogf"
+        },
+        {
+          "fileOffset": 131888132,
+          "word": "97ffb5e3",
+          "targetRelative": 23280336,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.(*loadErrorCollector).recordRule"
+        },
+        {
+          "fileOffset": 131888168,
+          "word": "97c629de",
+          "targetRelative": 8194784,
+          "callee": "google3/third_party/jetski/fs/fs.Path.DisplayString"
+        },
+        {
+          "fileOffset": 131888180,
+          "word": "97ff71a3",
+          "targetRelative": 23210496,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.displaySourcePath"
+        },
+        {
+          "fileOffset": 131888224,
+          "word": "97a9398c",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 131888256,
+          "word": "97c63e78",
+          "targetRelative": 8215968,
+          "callee": "google3/third_party/jetski/fs/fs.Path.Uri"
+        },
+        {
+          "fileOffset": 131888280,
+          "word": "97a70e5a",
+          "targetRelative": 40256,
+          "callee": "runtime.mapassign_faststr"
+        },
+        {
+          "fileOffset": 131888308,
+          "word": "97a93977",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 131888332,
+          "word": "94000549",
+          "targetRelative": 23361840,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.(*Manager).categorizeRule"
+        },
+        {
+          "fileOffset": 131888360,
+          "word": "97ff8e36",
+          "targetRelative": 23239936,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.(*Manager).getWorkingDirContexts"
+        },
+        {
+          "fileOffset": 131888628,
+          "word": "97ff9303",
+          "targetRelative": 23245120,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.visitParentDirs"
+        },
+        {
+          "fileOffset": 131888792,
+          "word": "97c6386a",
+          "targetRelative": 8210304,
+          "callee": "google3/third_party/jetski/fs/fs.AbsolutePath"
+        },
+        {
+          "fileOffset": 131888808,
+          "word": "94000ee6",
+          "targetRelative": 23372160,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.canonicalizePath"
+        },
+        {
+          "fileOffset": 131888812,
+          "word": "97c63ded",
+          "targetRelative": 8215968,
+          "callee": "google3/third_party/jetski/fs/fs.Path.Uri"
+        },
+        {
+          "fileOffset": 131888844,
+          "word": "97a70c8d",
+          "targetRelative": 38976,
+          "callee": "runtime.mapaccess1_faststr"
+        },
+        {
+          "fileOffset": 131888876,
+          "word": "97a70c85",
+          "targetRelative": 38976,
+          "callee": "runtime.mapaccess1_faststr"
+        },
+        {
+          "fileOffset": 131889012,
+          "word": "97a70da3",
+          "targetRelative": 40256,
+          "callee": "runtime.mapassign_faststr"
+        },
+        {
+          "fileOffset": 131889044,
+          "word": "97a70d9b",
+          "targetRelative": 40256,
+          "callee": "runtime.mapassign_faststr"
+        },
+        {
+          "fileOffset": 131889072,
+          "word": "97a938b8",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 131889096,
+          "word": "9400048a",
+          "targetRelative": 23361840,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.(*Manager).categorizeRule"
+        },
+        {
+          "fileOffset": 131889116,
+          "word": "9400061d",
+          "targetRelative": 23363472,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.sortRules"
+        },
+        {
+          "fileOffset": 131889132,
+          "word": "94000619",
+          "targetRelative": 23363472,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.sortRules"
+        },
+        {
+          "fileOffset": 131889148,
+          "word": "94000615",
+          "targetRelative": 23363472,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.sortRules"
+        },
+        {
+          "fileOffset": 131889164,
+          "word": "94000611",
+          "targetRelative": 23363472,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.sortRules"
+        },
+        {
+          "fileOffset": 131889200,
+          "word": "940001ac",
+          "targetRelative": 23359008,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.(*Manager).readGlobalRules"
+        },
+        {
+          "fileOffset": 131889260,
+          "word": "97a9235d",
+          "targetRelative": 587040,
+          "callee": "runtime.growslice"
+        },
+        {
+          "fileOffset": 131889332,
+          "word": "97a9107f",
+          "targetRelative": 567792,
+          "callee": "runtime.typedslicecopy"
+        },
+        {
+          "fileOffset": 131889372,
+          "word": "97a9386d",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 131889396,
+          "word": "940005d7",
+          "targetRelative": 23363472,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.sortRules"
+        },
+        {
+          "fileOffset": 131889448,
+          "word": "97bdef36",
+          "targetRelative": 6038848,
+          "callee": "google3/third_party/golang/github_com/cockroachdb/errors/v/v1/errutil/errutil.JoinWithDepth"
+        },
+        {
+          "fileOffset": 131889556,
+          "word": "94000617",
+          "targetRelative": 23363888,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.(*Manager).parseRuleFile"
+        },
+        {
+          "fileOffset": 131889588,
+          "word": "97a7749b",
+          "targetRelative": 146272,
+          "callee": "runtime.mallocgcSmallScanNoHeaderSC4"
+        },
+        {
+          "fileOffset": 131889608,
+          "word": "97a76212",
+          "targetRelative": 127312,
+          "callee": "runtime.convT"
+        },
+        {
+          "fileOffset": 131889644,
+          "word": "97a93829",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 131889704,
+          "word": "97a9381a",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 131889768,
+          "word": "97b0c33a",
+          "targetRelative": 2586256,
+          "callee": "google3/base/go/log.ctxlogf"
+        },
+        {
+          "fileOffset": 131889804,
+          "word": "97ffb441",
+          "targetRelative": 23280336,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.(*loadErrorCollector).recordRule"
+        },
+        {
+          "fileOffset": 131889832,
+          "word": "97ff7006",
+          "targetRelative": 23210496,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.displaySourcePath"
+        },
+        {
+          "fileOffset": 131889860,
+          "word": "97a937f3",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 131889896,
+          "word": "97c63cde",
+          "targetRelative": 8215968,
+          "callee": "google3/third_party/jetski/fs/fs.Path.Uri"
+        },
+        {
+          "fileOffset": 131889920,
+          "word": "97a70cc0",
+          "targetRelative": 40256,
+          "callee": "runtime.mapassign_faststr"
+        },
+        {
+          "fileOffset": 131889948,
+          "word": "97a937dd",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 131889972,
+          "word": "940003af",
+          "targetRelative": 23361840,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.(*Manager).categorizeRule"
+        },
+        {
+          "fileOffset": 131890056,
+          "word": "97a71216",
+          "targetRelative": 45856,
+          "callee": "runtime.memequal"
+        },
+        {
+          "fileOffset": 131890192,
+          "word": "97a7610c",
+          "targetRelative": 126848,
+          "callee": "runtime.panicdottypeE"
+        },
+        {
+          "fileOffset": 131890212,
+          "word": "97a92fc3",
+          "targetRelative": 600688,
+          "callee": "runtime.morestack_noctxt"
+        }
+      ],
+      "indirectCalls": [
+        {
+          "fileOffset": 131882468,
+          "register": 3,
+          "word": "d63f0060"
+        },
+        {
+          "fileOffset": 131884792,
+          "register": 1,
+          "word": "d63f0020"
+        },
+        {
+          "fileOffset": 131887584,
+          "register": 6,
+          "word": "d63f00c0"
+        }
+      ]
+    },
+    {
+      "name": "google3/third_party/jetski/cortex/customizations/customizations.(*Manager).parseRuleFile",
+      "nameByteOffset": 34266164,
+      "fileOffset": 131895792,
+      "bytes": 2256,
+      "sha256": "981eba3748145ceec663766fef7999ebdd7ec28c19325f8302bb1ec5146092f1",
+      "hex": "900b40f9f18305d13f0210eba9430054f48307d19dfa3fa99f020091fd2300d1e32701f9e42b01f9e52f01f9e73701f9e83b01f9e93f01f9e01b01f9eb230a39ea8700f9e8eb00f9e69f0fa9e4171ca9e37b00f9e9df00f9e22301f9e11f01f91c020094014000b5e09300f9e07b40f9e10b5ca9e37f40f9be2ec697e49340f9872043a9e40301aae50302aae60303aae9a30791e11f41f9e22341f9e30300aae01b41f947030094e49340f9811c00f91bf702f0655348b985000034861840f9f831a997201b00a9801800f91f2003d5268cffd0c6c01291e6ff0ca9e6230391a7b901b0e7200591e69f16a9800443a902b88bd2e3a30591e4037fb2e50304aa4016c697e08f00f94e15c697e09b00f9e15b00f9e68f40f9c71040f9ff0000f18d090054e07b40f9e10b5ca9e37f40f92022c697e0db00f9e17700f9e49340f9841c40f9e47300f9e0037ab2616701d021400491e20340b2fa6fa797e0d700f9e0db40f9e17740f99a06a997646501b084803091e5d740f9a40000f91bf702f0645348b984000034a10440f9c531a997200700a9a00400f9e18f40f9201040f97006a997616501b021803991e2d740f9410800f91bf702f0615348b981000034410c40f9b731a997200700a9400c00f9e07340f96306a997616501b021803991e8d740f9011100f91bf702f0625348b9c20000340b1540f90c1d40f9ad31a997202f00a92c0b00f9008502a9eb32ffd06ba119910b1d00f9e01f41f9e12341f9e20340b2e30340b2e4031faae5031faa86f6feb0c6203091c70880d2e9037eb2ea0309aac7bcb097e09b40f9e15b40f9e2234a39e2020037e07b40f9e10b5ca9e37f40f9432ec697e7a35ea9e9ab5fa9fb2308916b3340a9fb6308916d3b40a9ef1741f9e49b40f9e55b40f9e49700a9e40301aae50302aae60303aae11f41f9e22341f9e30300aae01b41f9fd020094e0a300f9e16300f9e0037db24174019021e03891e20340b2866ba797e0d300f9000580d2a18f01d021202391e20340b2a46ea797e36340f9030800f91bf702f0635348b983000035e4d340f9e6a340f907000014e4d340f9850040f96931a997e6a340f9260300a9250b00f9060400f9800000f9e07b40f9e10b5ca9e37f40f9a021c697e0db00f9e17700f9e0e740f9e17f40f94232fff042a02991e30340b2749aab9704040091e57f40f9bf0004ebc3280054e22305915f7c00a95f7c01a9a20000cb410400d1e20301cb82fc828ae3e740f96000028b1206a997626501b042803091e28314a9e29340f9400441a90c06a997626501b042803091e28315a900e2fed000a82391e1077fb2e2230591e3037fb2e40303aa0644ab97e0cf00f9e17300f9e07b40f9e10b5ca9e37f40f97421c697e0cb00f9e16f00f900ab01b000602c919369a79782b5019042200b91022000f91bf702f0625348b9a2000035e9d340f9eadb40f9ec2f59a9070000142831a997e9d340f9eadb40f9292b00a9ec2f59a92b3301a9e09700f909b004a9e97740f90aa400a9e97340f90ba401a9e90340b2093000b9e96f40f9092c00f9e98f40f9291140f9097400b9e9875ea9890400b4c10000b5ea0741f98a0000b5e1031faae2031faa20000014e28f5fa9fb230891641740a9fb630891661f40a9e81741f9e00309aa1ea5e797e17700f9e0db00f9e0037cb2c14401f021a03291e20340b29b6ba797e97740f9090400f91bf702f0695348b969000035e4db40f904000014eb30a997e4db40f9240300f9040000f9e10340b2e20300aa03000014e1031faae2031faae29f00f9e15f00f9e0e740f9e17f40f94232fff042a02991e30340b2ff99ab9704040091e37f40f97f0004eb031a0054650000cba50400d1e55700f9e50305cb84fc858ae47700f9e07b40f9e10b5ca9c635c697e0db00f9e17300f9e08340f9e1eb40f9e2df40f9e38740f9bf35c697e0eb00f9e18700f9e49340f9851840a9e7e740f9e87740f9e800088be88b00f9df1800f1ec020054df1000f101010054a20040b9e38c8dd2e34dacf25f00036b41060054e2037eb231000014df1800f1c1050054a20040b9a32d8cd2c3adaef25f00036b21050054a2084079238c8dd25f00036ba1040054e20740b224000014df2400f1a1010054a20040f9238c8dd2e32eacf2236fcef2e3ebedf25f0003eb41030054a22040395fb80171e1020054e20340b216000014df3800f161020054a20040f9a3ed8dd283acacf283edcbf283acecf25f0003eb81010054a20840b9632c8dd2632eadf25f00036be1000054a2184079e3cd8dd25f00036b61000054e2037fb202000014e2031faae2a700b9800442a92dfeff97e0c700f9e17700f9e26f00f9e07b40f9e10b5ca9e37f40f90afeff97e07f00f9e0037db24174019021003791e20340b2886aa797e0c300f960a901f000c00691dc68a797e25740f9020800f91bf702f0625348b982000035e38b40f9e4db40f9050000146b30a997e38b40f9e4db40f9231300a9e0bf00f9030400f9e37340f9048c01a9e0037cb2c14401f021a03291e20340b2036ba797e38740f9030400f91bf702f0635348b9a3000035e3bf40f9e6eb40f9e79f40f90a000014e3bf40f9641440f9652040f95e30a997e6eb40f9260300a9e79f40f9241f01a9251300f9060000f9e40340b2649c03a9609002a9e45f40f9649004a9e4a780b9645800b9e49340f9841441a9653400f91bf702f0655348b965000035e51f58a90a000014e5c340f9a60040f9673040f9683840f94830a997241f00a9e7c740f9272301a9231b02a9643000f9e46f40f9644000f9e47740f9671007a9e47f40f9648800b9a30000f9000580d2a18f01d021202091e20340b25b6da79763b501f063201f91030400f91bf702f0635348b983000035e39740f9e5c340f907000014e39740f9641c40f91f30a997e5c340f9250300a9240b00f9050800f9601c00f9e00303aae1031faae2031faafdfb7fa9ff830791c0035fd6e0031faafdfb7fa9ff830791c0035fd6bf30a997be30a9971f2003d5e00705a9e20f06a9e41707a9e61f08a9e82709a9ea5300f9eba30239e3031eaa2828a997e00745a9e20f46a9e41747a9e61f48a9e82749a9ea5340f9eba34239d0fdff17000000000000000000000000",
+      "directCalls": [
+        {
+          "fileOffset": 131895888,
+          "word": "9400021c",
+          "targetRelative": 23366144,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.(*Manager).parseRuleInfo"
+        },
+        {
+          "fileOffset": 131895912,
+          "word": "97c62ebe",
+          "targetRelative": 8207520,
+          "callee": "google3/third_party/jetski/fs/fs.Path.Dir"
+        },
+        {
+          "fileOffset": 131895956,
+          "word": "94000347",
+          "targetRelative": 23367408,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.(*Manager).resolveFileIncludes"
+        },
+        {
+          "fileOffset": 131895984,
+          "word": "97a931f8",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 131896048,
+          "word": "97c61640",
+          "targetRelative": 8182576,
+          "callee": "google3/third_party/jetski/go_utils/go_utils.Truncate"
+        },
+        {
+          "fileOffset": 131896056,
+          "word": "97c6154e",
+          "targetRelative": 8181616,
+          "callee": "google3/third_party/jetski/go_utils/go_utils.(*TruncationOutput).ToTruncatedBytesString"
+        },
+        {
+          "fileOffset": 131896096,
+          "word": "97c62220",
+          "targetRelative": 8194784,
+          "callee": "google3/third_party/jetski/fs/fs.Path.DisplayString"
+        },
+        {
+          "fileOffset": 131896136,
+          "word": "97a76ffa",
+          "targetRelative": 148080,
+          "callee": "runtime.mallocgcSmallScanNoHeaderSC6"
+        },
+        {
+          "fileOffset": 131896152,
+          "word": "97a9069a",
+          "targetRelative": 564480,
+          "callee": "runtime.convTstring"
+        },
+        {
+          "fileOffset": 131896188,
+          "word": "97a931c5",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 131896208,
+          "word": "97a90670",
+          "targetRelative": 564368,
+          "callee": "runtime.convT64"
+        },
+        {
+          "fileOffset": 131896244,
+          "word": "97a931b7",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 131896260,
+          "word": "97a90663",
+          "targetRelative": 564368,
+          "callee": "runtime.convT64"
+        },
+        {
+          "fileOffset": 131896300,
+          "word": "97a931ad",
+          "targetRelative": 608736,
+          "callee": "runtime.gcWriteBarrier3"
+        },
+        {
+          "fileOffset": 131896372,
+          "word": "97b0bcc7",
+          "targetRelative": 2586256,
+          "callee": "google3/base/go/log.ctxlogf"
+        },
+        {
+          "fileOffset": 131896404,
+          "word": "97c62e43",
+          "targetRelative": 8207520,
+          "callee": "google3/third_party/jetski/fs/fs.Path.Dir"
+        },
+        {
+          "fileOffset": 131896476,
+          "word": "940002fd",
+          "targetRelative": 23367632,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.(*Manager).parseAtMentions"
+        },
+        {
+          "fileOffset": 131896504,
+          "word": "97a76b86",
+          "targetRelative": 143888,
+          "callee": "runtime.mallocgcSmallScanNoHeaderSC1"
+        },
+        {
+          "fileOffset": 131896528,
+          "word": "97a76ea4",
+          "targetRelative": 147104,
+          "callee": "runtime.mallocgcSmallScanNoHeaderSC5"
+        },
+        {
+          "fileOffset": 131896572,
+          "word": "97a93169",
+          "targetRelative": 608736,
+          "callee": "runtime.gcWriteBarrier3"
+        },
+        {
+          "fileOffset": 131896608,
+          "word": "97c621a0",
+          "targetRelative": 8194784,
+          "callee": "google3/third_party/jetski/fs/fs.Path.DisplayString"
+        },
+        {
+          "fileOffset": 131896640,
+          "word": "97ab9a74",
+          "targetRelative": 1240656,
+          "callee": "strings.LastIndex"
+        },
+        {
+          "fileOffset": 131896696,
+          "word": "97a90612",
+          "targetRelative": 564480,
+          "callee": "runtime.convTstring"
+        },
+        {
+          "fileOffset": 131896720,
+          "word": "97a9060c",
+          "targetRelative": 564480,
+          "callee": "runtime.convTstring"
+        },
+        {
+          "fileOffset": 131896760,
+          "word": "97ab4406",
+          "targetRelative": 1152272,
+          "callee": "fmt.Sprintf"
+        },
+        {
+          "fileOffset": 131896784,
+          "word": "97c62174",
+          "targetRelative": 8194784,
+          "callee": "google3/third_party/jetski/fs/fs.Path.DisplayString"
+        },
+        {
+          "fileOffset": 131896804,
+          "word": "97a76993",
+          "targetRelative": 142192,
+          "callee": "runtime.newobject"
+        },
+        {
+          "fileOffset": 131896848,
+          "word": "97a93128",
+          "targetRelative": 608752,
+          "callee": "runtime.gcWriteBarrier4"
+        },
+        {
+          "fileOffset": 131896984,
+          "word": "97e7a51e",
+          "targetRelative": 16980560,
+          "callee": "google3/third_party/jetski/fs/workspace_manager/workspace_manager.WorkspaceInfo.GetCorpusName"
+        },
+        {
+          "fileOffset": 131897012,
+          "word": "97a76b9b",
+          "targetRelative": 144480,
+          "callee": "runtime.mallocgcSmallScanNoHeaderSC2"
+        },
+        {
+          "fileOffset": 131897044,
+          "word": "97a930eb",
+          "targetRelative": 608704,
+          "callee": "runtime.gcWriteBarrier1"
+        },
+        {
+          "fileOffset": 131897108,
+          "word": "97ab99ff",
+          "targetRelative": 1240656,
+          "callee": "strings.LastIndex"
+        },
+        {
+          "fileOffset": 131897160,
+          "word": "97c635c6",
+          "targetRelative": 8215968,
+          "callee": "google3/third_party/jetski/fs/fs.Path.Uri"
+        },
+        {
+          "fileOffset": 131897188,
+          "word": "97c635bf",
+          "targetRelative": 8215968,
+          "callee": "google3/third_party/jetski/fs/fs.Path.Uri"
+        },
+        {
+          "fileOffset": 131897468,
+          "word": "97fffe2d",
+          "targetRelative": 23363696,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.globStringToGlobList"
+        },
+        {
+          "fileOffset": 131897496,
+          "word": "97fffe0a",
+          "targetRelative": 23363584,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.computeRulePriority"
+        },
+        {
+          "fileOffset": 131897520,
+          "word": "97a76a88",
+          "targetRelative": 143888,
+          "callee": "runtime.mallocgcSmallScanNoHeaderSC1"
+        },
+        {
+          "fileOffset": 131897536,
+          "word": "97a768dc",
+          "targetRelative": 142192,
+          "callee": "runtime.newobject"
+        },
+        {
+          "fileOffset": 131897572,
+          "word": "97a9306b",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 131897620,
+          "word": "97a76b03",
+          "targetRelative": 144480,
+          "callee": "runtime.mallocgcSmallScanNoHeaderSC2"
+        },
+        {
+          "fileOffset": 131897672,
+          "word": "97a9305e",
+          "targetRelative": 608768,
+          "callee": "runtime.gcWriteBarrier5"
+        },
+        {
+          "fileOffset": 131897776,
+          "word": "97a93048",
+          "targetRelative": 608784,
+          "callee": "runtime.gcWriteBarrier6"
+        },
+        {
+          "fileOffset": 131897844,
+          "word": "97a76d5b",
+          "targetRelative": 147104,
+          "callee": "runtime.mallocgcSmallScanNoHeaderSC5"
+        },
+        {
+          "fileOffset": 131897892,
+          "word": "97a9301f",
+          "targetRelative": 608736,
+          "callee": "runtime.gcWriteBarrier3"
+        },
+        {
+          "fileOffset": 131897956,
+          "word": "97a930bf",
+          "targetRelative": 609440,
+          "callee": "runtime.panicBounds"
+        },
+        {
+          "fileOffset": 131897960,
+          "word": "97a930be",
+          "targetRelative": 609440,
+          "callee": "runtime.panicBounds"
+        },
+        {
+          "fileOffset": 131898000,
+          "word": "97a92828",
+          "targetRelative": 600688,
+          "callee": "runtime.morestack_noctxt"
+        }
+      ],
+      "indirectCalls": []
+    },
+    {
+      "name": "google3/third_party/jetski/cortex/customizations/customizations.(*Manager).resolveFileIncludes",
+      "nameByteOffset": 34266441,
+      "fileOffset": 131899312,
+      "bytes": 224,
+      "sha256": "ea5568b1c84d4ae6c78107f60f560741086c5e602c696d3e777dc4d532cbef53",
+      "hex": "900b40f9f18300d13f0210ebe9040054fe0f16f8fd831ff8fd2300d1e3130ca9e56b00f9e87700f9e05700f9e97b00f9e77300f9e15b00f9e61b00f9e49708a9e25f00f9e31700f9e0edfed000dc3291e1077db28f78ac971f2003d522be0510e28303a9e27b40f9e35740f9e28f04a9e21740f9e34740f9e28f05a9e24b40f9e31b40f9e28f06a9e20f4ba9e28f07a9e10b4ea9e3e30091927bac97fd835ff8fe074af8c0035fd6e08700a9e28f01a9e49702a9e69f03a9e8a704a9e3031eaab026a997e08740a9e28f41a9e49742a9e69f43a9e8a744a9caffff1700000000",
+      "directCalls": [
+        {
+          "fileOffset": 131899396,
+          "word": "97ac788f",
+          "targetRelative": 1470848,
+          "callee": "regexp.MustCompile"
+        },
+        {
+          "fileOffset": 131899464,
+          "word": "97ac7b92",
+          "targetRelative": 1474000,
+          "callee": "regexp.(*Regexp).ReplaceAllStringFunc"
+        },
+        {
+          "fileOffset": 131899504,
+          "word": "97a926b0",
+          "targetRelative": 600688,
+          "callee": "runtime.morestack_noctxt"
+        }
+      ],
+      "indirectCalls": []
+    },
+    {
+      "name": "google3/third_party/jetski/cortex/customizations/customizations.(*Manager).resolveFileIncludes.func1",
+      "nameByteOffset": 34278963,
+      "fileOffset": 131946448,
+      "bytes": 1696,
+      "sha256": "ebaa2b774dadc1f645de7a49590f177a5ee7d33d3e79844344abb655c039d00f",
+      "hex": "900b40f9f1c304d13f0210eb09340054f4c306d19dfa3fa99f020091fd2300d1e0871ba9439341a9e45300f9e38f00f9439342a9e39314a9439343a9e40f09a9439340a9e45700f9442740f9e49f00f9e20301aae10300aae00303aab951ac973f0c00f18b300054000442a91f2003d53f0800f1eb07005407008079e73c40d3c8ef85d2ff00086b41070054e08b00f9e13b00f9a3d6aa97220500b4e24700f9e39b00f9e0037cb2016701b021002791e20340b2273ba797e14740f9610000b4220440f902000014e20301aa020000f9bbf602f06b5348b96b000035eb9b40f9040000147300a997eb9b40f92b0300f90b0400f91f2003d5e1031faae2037fb2e3037fb2e4031faae5031faa86f3feb0c6940391e70580d2e80300aae90340b2ea0309aae0031faa968bb097e0875ba9fdfb7fa9ffc30691c0035fd6e08717a9e33b40f9630800d1e40303cb84fc7f9384007f92e58b40f98400058be48f18a9e0e30591e1037fb2e20301aacde2ab97e10100b407008039e71c40d3ffbc007161010054270400d1e80307cb08fd7f93080140920800088be20301aae30300aae10307aae00308aa03000014e20301aae30300aa1f2003d53f2000f12b060054070040f9e8ec8dd2e8edacf288adccf268e6e5f2ff0008ebe1040054e45740f9640400b4872040f9881440f9e9c30291904440ad304500ad904441ad304501ad992040f9392100f9280200b5070200b5e76b40f9e8274ba9480100b4080140f91f2003d50a1140f9080540f9280100b50a0100b5ea0307aae80309aa05000014ea0307aae80309aa02000014ea0307aa680000b4e7031faa030000145f0100f1e7179f9ae70040d208000014e7031faa06000014e45740f9e7031faa03000014e45740f9e7031faae70500369b008039828c43a987a042a9e9c30291904440ad304500ad904441ad304501ad992040f9392100f9c70200b5a30200b5e70b4ca9e36b40f9e8274ba9880100b4080140f90aad41a91f2003d508b140a9080200b5eb0100b5eb0303aae80309aaea0302aaec0307aa0a000014eb0303aae80309aaea0302aaec0307aa05000014eb0303aaea0302aaec0308aae80307aae08719a9e00308aae1030caae2030aaae3030baae4630691e50340b2e60305aaf5f3c597510000141f2003d51f2003d5c20800b467008039e71c40d3ffbc007141080054e24f00f9e3ab00f9e48f40f9841440a9e00303aae10302aae20304aae30305aa3cffc597040800b4e44300f9e59700f9e0037bb2814401b021801491e20340b22c3ca797e0a300f9e0ab40f9e14f40f990d4a897036501b063803091e8a340f9030100f9bbf602f0635348b9830000340b0540f9bbffa897202f00a9000500f9e04340f9600000b4040440f902000014e40300aa040900f9bbf602f06b5348b96b000035ec9740f9050000140b0d40f9acffa897ec9740f92c2f00a90c0d00f91f2003d5e0031faae1031faae2037fb2e3037fb2e4031faae5031faa06f5fef0c6b02e91670780d2e90302aaea0302aacc8ab097e0875ba9fdfb7fa9ffc30691c0035fd6e38b19a9e05340f9e18b54a9e34f40f9e4630691e50340b2e60305aaa4f3c597e30306a9e20710a9e44b40f9e59f40f97bf1c597e20700b4e39700f9e24300f9e0037bb2814401b021801491e20340b2e73ba797e0a300f9e33740f9e48740f9e39315a9e38340f9e43340f9e39316a9a0b1019000201391e16305915829a797a3b1019063201391e8a340f9030100f9bbf602f0635348b9830000340b0540f96fffa897202f00a9000500f9e04340f9600000b4020440f902000014e20300aa020900f9bbf602f06b5348b96b000035ec9740f9050000140b0d40f960ffa897ec9740f92c2f00a90c0d00f91f2003d5e0031faae1031faae2037fb2e3037fb2e4031faae5031faa86f3feb0c6500491e70580d2e90302aaea0302aa808ab097e0875ba9fdfb7fa9ffc30691c0035fd6e13f00f9e09300f9f575ab971f2003d53f0c00f1ab0500540400807905088039a51c40d3843c40d3a6a585d29f00066be4179f9abfb40071e5179f9a8400058a84000037e13f40f9e09340f921000014e12b00f9210c00d1e12f00f9e40301cb84fc7f93840440928000008be07f00f91f2003d5a2e0fed042b82091e30740b203fca6971f0400b1a0010054020c0091e32f40f97f0002ebc3020054e32b40f9630000cb611800d1e30301cb42fc838ae37f40f94000038b06000014e13f40f9e09340f903000014e13f40f9e09340f9c375ab97fdfb7fa9ffc30691c0035fd6e0875ba9fdfb7fa9ffc30691c0035fd6c3ffa8971f2003d5e08700a9e3031eaa13f7a897e08740a959feff17",
+      "directCalls": [
+        {
+          "fileOffset": 131946540,
+          "word": "97ac51b9",
+          "targetRelative": 1478224,
+          "callee": "regexp.(*Regexp).FindStringSubmatch"
+        },
+        {
+          "fileOffset": 131946596,
+          "word": "97aad6a3",
+          "targetRelative": 1090096,
+          "callee": "os.UserHomeDir"
+        },
+        {
+          "fileOffset": 131946628,
+          "word": "97a73b27",
+          "targetRelative": 144480,
+          "callee": "runtime.mallocgcSmallScanNoHeaderSC2"
+        },
+        {
+          "fileOffset": 131946676,
+          "word": "97a90073",
+          "targetRelative": 608704,
+          "callee": "runtime.gcWriteBarrier1"
+        },
+        {
+          "fileOffset": 131946744,
+          "word": "97b08b96",
+          "targetRelative": 2586256,
+          "callee": "google3/base/go/log.ctxlogf"
+        },
+        {
+          "fileOffset": 131946812,
+          "word": "97abe2cd",
+          "targetRelative": 1364912,
+          "callee": "path/filepath.join"
+        },
+        {
+          "fileOffset": 131947276,
+          "word": "97c5f3f5",
+          "targetRelative": 8198688,
+          "callee": "google3/third_party/jetski/fs/fs.Path.Join"
+        },
+        {
+          "fileOffset": 131947344,
+          "word": "97c5ff3c",
+          "targetRelative": 8210304,
+          "callee": "google3/third_party/jetski/fs/fs.AbsolutePath"
+        },
+        {
+          "fileOffset": 131947376,
+          "word": "97a73c2c",
+          "targetRelative": 146272,
+          "callee": "runtime.mallocgcSmallScanNoHeaderSC4"
+        },
+        {
+          "fileOffset": 131947392,
+          "word": "97a8d490",
+          "targetRelative": 564480,
+          "callee": "runtime.convTstring"
+        },
+        {
+          "fileOffset": 131947428,
+          "word": "97a8ffbb",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 131947488,
+          "word": "97a8ffac",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 131947552,
+          "word": "97b08acc",
+          "targetRelative": 2586256,
+          "callee": "google3/base/go/log.ctxlogf"
+        },
+        {
+          "fileOffset": 131947600,
+          "word": "97c5f3a4",
+          "targetRelative": 8198688,
+          "callee": "google3/third_party/jetski/fs/fs.Path.Join"
+        },
+        {
+          "fileOffset": 131947620,
+          "word": "97c5f17b",
+          "targetRelative": 8196496,
+          "callee": "google3/third_party/jetski/fs/fs.Path.ReadFileAsUTF8NoBom"
+        },
+        {
+          "fileOffset": 131947652,
+          "word": "97a73be7",
+          "targetRelative": 146272,
+          "callee": "runtime.mallocgcSmallScanNoHeaderSC4"
+        },
+        {
+          "fileOffset": 131947696,
+          "word": "97a72958",
+          "targetRelative": 127312,
+          "callee": "runtime.convT"
+        },
+        {
+          "fileOffset": 131947732,
+          "word": "97a8ff6f",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 131947792,
+          "word": "97a8ff60",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 131947856,
+          "word": "97b08a80",
+          "targetRelative": 2586256,
+          "callee": "google3/base/go/log.ctxlogf"
+        },
+        {
+          "fileOffset": 131947884,
+          "word": "97ab75f5",
+          "targetRelative": 1254528,
+          "callee": "strings.TrimSpace"
+        },
+        {
+          "fileOffset": 131948004,
+          "word": "97a6fc03",
+          "targetRelative": 81200,
+          "callee": "internal/stringslite.Index"
+        },
+        {
+          "fileOffset": 131948084,
+          "word": "97ab75c3",
+          "targetRelative": 1254528,
+          "callee": "strings.TrimSpace"
+        },
+        {
+          "fileOffset": 131948116,
+          "word": "97a8ffc3",
+          "targetRelative": 609440,
+          "callee": "runtime.panicBounds"
+        },
+        {
+          "fileOffset": 131948132,
+          "word": "97a8f713",
+          "targetRelative": 600560,
+          "callee": "runtime.morestack"
+        }
+      ],
+      "indirectCalls": []
+    },
+    {
+      "name": "google3/third_party/jetski/cortex/customizations/customizations.sortRules",
+      "nameByteOffset": 34265804,
+      "fileOffset": 131895376,
+      "bytes": 112,
+      "sha256": "dee789469f914c275b03b49332199a589f3bacc02857eedf0118d1a391c6b542",
+      "hex": "900b40f9ff6330eb49020054fe0f1cf8fd831ff8fd2300d1e02700f9460001d0c6000991e30302aae40301aaa5b901f0a5000891e10300aae20304aae00306aa2c510094fd835ff8fe0744f8c0035fd6e08700a9e20f00f9e3031eaaa12aa997e08740a9e20f40f9e6ffff1700000000",
+      "directCalls": [
+        {
+          "fileOffset": 131895440,
+          "word": "9400512c",
+          "targetRelative": 23446656,
+          "callee": "slices.stableCmpFunc[go.shape.*uint8]"
+        },
+        {
+          "fileOffset": 131895468,
+          "word": "97a92aa1",
+          "targetRelative": 600688,
+          "callee": "runtime.morestack_noctxt"
+        }
+      ],
+      "indirectCalls": []
+    },
+    {
+      "name": "google3/third_party/jetski/cortex/customizations/customizations.sortRules.func1",
+      "nameByteOffset": 34280239,
+      "fileOffset": 131952672,
+      "bytes": 544,
+      "sha256": "be0e85bc08b4cd88c5b6638b7d1a70709572859b12ce0c82e128691c57a4b12f",
+      "hex": "900b40f9ff6330eb09100054fe0f1cf8fd831ff8fd2300d1600000b4041c40f902000014e4031faa440100b4849440a906b501b0c6201f919f0006eb40000054e5031faaa1000054a40040f90400001406b501b0c6201f91e4031faa610000b4251c40f902000014e5031faa050100b4a59c40a9bf0006eb40000054e7031faa61000054e50040f902000014e5031faa640000b4868880b902000014e6031faa650000b4a78880b902000014e7031faadf00076b80020054650000b4a18880b902000014e1031faa640000b4828880b902000014e2031faa3f00026b6a00005400008092050000146d000054e00340b202000014e0031faafd835ff8fe0744f8c0035fd6640000b4868841a903000014e2031faae6031faa650000b4a7a041a903000014e8031faae7031faa5f0008eb01040054e08704a9e59302a9e00307aae10306aa9fd4a69720030036e02740f9600000b4000445a903000014e1031faae0031faae22b40f9620000b4420c45a903000014e3031faae2031faa51d4a6976000f8b600008092060000141f0000f16d000054e00340b202000014e0031faafd835ff8fe0744f8c0035fd6e59342a9640000b4808441a903000014e1031faae0031faa650000b4a28c41a903000014e3031faae2031faa3ad4a6976000f8b600008092060000141f0000f16d000054e00340b202000014e0031faafd835ff8fe0744f8c0035fd6e08700a9e3031eaa40f2a897e08740a97affff1700000000",
+      "directCalls": [
+        {
+          "fileOffset": 131952996,
+          "word": "97a6d49f",
+          "targetRelative": 45856,
+          "callee": "runtime.memequal"
+        },
+        {
+          "fileOffset": 131953052,
+          "word": "97a6d451",
+          "targetRelative": 45600,
+          "callee": "runtime.cmpstring"
+        },
+        {
+          "fileOffset": 131953144,
+          "word": "97a6d43a",
+          "targetRelative": 45600,
+          "callee": "runtime.cmpstring"
+        },
+        {
+          "fileOffset": 131953200,
+          "word": "97a8f240",
+          "targetRelative": 600688,
+          "callee": "runtime.morestack_noctxt"
+        }
+      ],
+      "indirectCalls": []
+    },
+    {
+      "name": "google3/third_party/jetski/cortex/customizations/customizations.(*Manager).computeTruncatedCustomizations",
+      "nameByteOffset": 34269366,
+      "fileOffset": 131918304,
+      "bytes": 944,
+      "sha256": "e99639392351288e72c1ac63998d150774cb25a2c0df36dd6e2079d0d59534b8",
+      "hex": "900b40f9f10307d13f0210ebc91b0054f40309d19dfa3fa99f020091fd2300d1e39f01f9066040f9660000b4c70440f902000014e7031faaa70000b4e78040f9670000b4e70080b902000014e7031faaff0000718d010054660000b4c70440f902000014e7031faaa70000b4e78040f9670000b4e70080b904000014e7031faa0200001407c489d2660000b4c80440f902000014e8031faaa80000b4088540f9680000b4080180b902000014e8031faa1f0100718d010054660000b4c60440f902000014e6031faaa60000b4c68440f9660000b4c60080b904000014e6031faa0200001406c489d2e7ef00b9e5a701f9e4a301f9e39f01f9e6eb00b9e85741f9a80200b4e92308913f7d00a93f7d01a93f7d02a90a2d46a90c3940f9ec0f01f9fb2308916a2f00a90a2d40a9080940f9e81b01f9fb8308916a2f00a9e0031faae2031faae8031faae1031faaea031faa4a000014e0031faae1031faae2031faae1030fa9e29300f9e0230091e1230991f80740b23044c1ac104481ac3044c1ac104481ac180700d178ffffb53000c03d1000803d390840f9190800f9fd55ff97e38305917f7c00a97f7c01a97f7c02a97f7c03a97f7c04a97f7c05a97f7c06a97f7c07a97f7c08a97f7c09a97f5000f9e47f40f9e4bb00f9e49340f9e57b40f9e41716a9fb230991641740a9e62f41f9e6c700f9e49717a9fb830991641740a9e63b41f9e6d300f9e41719a9fbe30991641740a9e64741f9e6831ba9e4971aa9e18b1ca9e0a741f9e0f700f9e09f41f9e1a341f9e0871da9fba30b91600740a9e27f41f9e20301f9e0071fa9e00303aa54ddfb97e1eb80b9e20300aae0ef80b9d4000094fdfb7fa9ff030991c0035fd629610091420400915f0800f1ca070054e28f00f9e99f00f92b3140a9ec8300f9eb9b00f9ed031faa03000014ad050091ea030faabf010ceb4afeff546e796df86e0000b4cf7180b902000014ef031faaff05007161000054ef030aaaf4ffff174f0500913f000feb82030054ed8b00f9ee9700f9e89f0339ff1100f12c01005408010037ea0000b5e00305911f7c00a91f7c01a9e1037eb2e80340b20f000014e20301aae30340b2a42d01f084a03891e1030faa3706a997eb2753a9ec8340f9ed8b40f9ee9740f9ef0301aae10302aae89f4339e28f40f9ea0500d1fbf602d0705348b9d000003410786af8f08700f9541ba997f08740f92e4300a90e782af8cbffff17e20300aae00301aae1030aaa78ffff17e0070ea9e20f0fa9e41710a9e3031eaa6f13a997e0074ea9e20f4fa9e41750a917ffff170000000000000000",
+      "directCalls": [
+        {
+          "fileOffset": 131918716,
+          "word": "97ff55fd",
+          "targetRelative": 23212720,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.CustomizationSet.GetAllAgents"
+        },
+        {
+          "fileOffset": 131918896,
+          "word": "97fbdd54",
+          "targetRelative": 22302912,
+          "callee": "google3/third_party/jetski/cortex/tokens/tokens.ComputeCustomizationBreakdown"
+        },
+        {
+          "fileOffset": 131918912,
+          "word": "940000d4",
+          "targetRelative": 23387856,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.truncateFromBreakdown"
+        },
+        {
+          "fileOffset": 131919108,
+          "word": "97a90637",
+          "targetRelative": 587040,
+          "callee": "runtime.growslice"
+        },
+        {
+          "fileOffset": 131919168,
+          "word": "97a91b54",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 131919220,
+          "word": "97a9136f",
+          "targetRelative": 600688,
+          "callee": "runtime.morestack_noctxt"
+        }
+      ],
+      "indirectCalls": []
+    },
+    {
+      "name": "google3/third_party/jetski/cortex/customizations/customizations.TruncateFromBreakdown",
+      "nameByteOffset": 34269684,
+      "fileOffset": 131919248,
+      "bytes": 240,
+      "sha256": "fc7d6626dc63adc6d56e7cae221d1275c7daea3f00c455a2bc04fcf58dfcf480",
+      "hex": "900b40f9ff6330eb09060054fe0f1af8fd831ff8fd2300d1e23b00f979000094e01b00f960b501d000201291e13b40f9dc46b19763b501d0632012911f0003eb81030054e12b00f93f2000b91f2003d505f30310e61b40f9e59b03a9e12700f9258840a9230c40f9200001b000000891e10305aae4e300915e390094e52b40f9a10801a9fbf602d0665348b986000034a10440f91b1ba997200700a9a00400f9e00305aafd835ff8fe0746f8c0035fd6612e01f021803d91626f01f042402191a444a7971f2003d5e0070129e20b00f9e3031eaa3313a997e0074129e20b40f9c8ffff17000000000000000000000000",
+      "directCalls": [
+        {
+          "fileOffset": 131919276,
+          "word": "94000079",
+          "targetRelative": 23387856,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.truncateFromBreakdown"
+        },
+        {
+          "fileOffset": 131919296,
+          "word": "97b146dc",
+          "targetRelative": 2750576,
+          "callee": "google3/third_party/golang/protobuf/v2/proto/proto.Clone"
+        },
+        {
+          "fileOffset": 131919368,
+          "word": "9400395e",
+          "targetRelative": 23446208,
+          "callee": "slices.DeleteFunc[go.shape.[]*google3/third_party/jetski/cortex_pb/cortex_go_proto.TopLevelTokenGroup,go.shape.*uint8]"
+        },
+        {
+          "fileOffset": 131919396,
+          "word": "97a91b1b",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 131919440,
+          "word": "97a744a4",
+          "targetRelative": 127008,
+          "callee": "runtime.panicdottypeI"
+        },
+        {
+          "fileOffset": 131919460,
+          "word": "97a91333",
+          "targetRelative": 600688,
+          "callee": "runtime.morestack_noctxt"
+        }
+      ],
+      "indirectCalls": []
+    },
+    {
+      "name": "google3/third_party/jetski/cortex/customizations/customizations.TruncateFromBreakdown.func1",
+      "nameByteOffset": 34279852,
+      "fileOffset": 131951680,
+      "bytes": 208,
+      "sha256": "831b965ab0c58fb252071875b9d5e0e1c0dbd704dcaa0cf5fa6926f2bd767d19",
+      "hex": "900b40f9ff6330eb49050054fe0f1bf8fd831ff8fd2300d1469f40a9600000b4081880b902000014e8031faae02f00f9e72300f9800000b4018842a9031c40f904000014e2031faae3031faae1031faae00308aae4031faae5031faa79e0ff97e72f40f9e10803a9bbf602d0685348b988000034e11440f976fba897200700a9e01400f9e32000b9e12340f9222080b94200038b222000b9e11840f93f0000f1e0179f9afd835ff8fe0745f8c0035fd6e00700f9e3031eaa6ef3a897e00740f9d0ffff17000000000000000000000000",
+      "directCalls": [
+        {
+          "fileOffset": 131951772,
+          "word": "97ffe079",
+          "targetRelative": 23387584,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.pruneUntruncatedLeaves"
+        },
+        {
+          "fileOffset": 131951800,
+          "word": "97a8fb76",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 131951864,
+          "word": "97a8f36e",
+          "targetRelative": 600560,
+          "callee": "runtime.morestack"
+        }
+      ],
+      "indirectCalls": []
+    },
+    {
+      "name": "google3/third_party/jetski/cortex/customization/hooks/hooks.NewPreInvocationHook.func1",
+      "nameByteOffset": 34216265,
+      "fileOffset": 131633216,
+      "bytes": 896,
+      "sha256": "84e686c12a73de9f69ac7c3139dddeaa0b2d9336082177d9de415436c1f85461",
+      "hex": "900b40f9f10304d13f0210eba91a0054f40306d19dfa3fa99f020091fd2300d1e10b19a9e0c700f9431344a9e45300f9e38300f9459b41a9e69f00f9e59300f947a342a9e84b00f9e77b00f9492b40f9e95700f94aaf40a9ea6700f96a0000b44c0540f902000014ec030aaaeba300f9e0030caae1030baa320cc79740020037e1cf40f9210040a9e14700f9e07700f9212440f920003fd6e09700f9e16300f9e24740f9a20100b4460440f9a7e501b0e7001b91e8fcdfc8090140f94a1040b995000014e0031faae1031faafdfb7fa9ff030691c0035fd6e39f40f9e40302aae57740f9e20301aae10300aae09340f914f2ff97e09b00f9e0037bb2e19801d021602991e20340b2b66ea897e0a700f9e6cf40f9c70840f9070800b9c60c40f9060c00b9e67b40f9e14b40f906000014eab340f946410091ea7340f9410500d1e0a740f93f0000f1cd0d0054e17300f9e6b300f9c72040a9e84f00f9e77f00f9e1cb40f9e26740f9e3a340f9e49740f9e56340f9e69b40f9e90300aae0c740f9b0dbff97e10500b4e15f00f9e28f00f9e0037bb2e14601b021801491e20340b2906ea897e0af00f9e07f40f9e14f40f9f406aa97636701b063803091e4af40f9830000f91bf902f0635348b983000034870440f91f32aa97201f00a9800400f9e05f40f9600000b4010440f902000014e10300aa810800f91bf902f0675348b967000035e88f40f905000014870c40f91032aa97e88f40f9281f00a9880c00f9e08758a902f6fed042402191e3077cb2e5037fb2e60305aabec0b197bdffff17e08700f9174acc9741f7ffb4e08740f9144acc97e0ab00f9e2070da9e16740f9211040f9e0a340f920003fd6e24740f9e37740f9e4ab40f9e6174da9e78340f9e8274aa9ea0300aaeb0301aa4ce9fef08ca50d91ad0180d2ee9f40f9ef9340f9e08758a99ff2ff9740f4ffb4e18b00f9e05b00f9ffff16a9e07f40f9e14f40f9b006aa97626701b042803091e28316a9e05b40f9e18b40f982f3fed042c03891630480d2e4a30591e50340b2e60305aae4f1be97fdfb7fa9ff030691c0035fd6e0031faae1031faafdfb7fa9ff030691c0035fd64b01098a6bed7cd36b2100910c696bf80b010b8b9f0106eb400100544a0500910cffffb5e00307aae10306aa585ca897e16340f9e20300aae09740f962ffff17640540f9e20304aa5fffff17e08700a9e20f00f9e3031eaac129aa97e08740a9e20f40f922ffff1700000000",
+      "directCalls": [
+        {
+          "fileOffset": 131633336,
+          "word": "97c70c32",
+          "targetRelative": 8171712,
+          "callee": "google3/third_party/jetski/go_utils/go_utils.IsNil"
+        },
+        {
+          "fileOffset": 131633456,
+          "word": "97fff214",
+          "targetRelative": 23087296,
+          "callee": "google3/third_party/jetski/cortex/customization/hooks/hooks.BuildHookArgsCommon"
+        },
+        {
+          "fileOffset": 131633480,
+          "word": "97a86eb6",
+          "targetRelative": 146272,
+          "callee": "runtime.mallocgcSmallScanNoHeaderSC4"
+        },
+        {
+          "fileOffset": 131633600,
+          "word": "97ffdbb0",
+          "targetRelative": 23064512,
+          "callee": "google3/third_party/jetski/cortex/customization/hooks/hookcaller/hookcaller.CallPreInvocationHook"
+        },
+        {
+          "fileOffset": 131633632,
+          "word": "97a86e90",
+          "targetRelative": 146272,
+          "callee": "runtime.mallocgcSmallScanNoHeaderSC4"
+        },
+        {
+          "fileOffset": 131633648,
+          "word": "97aa06f4",
+          "targetRelative": 564480,
+          "callee": "runtime.convTstring"
+        },
+        {
+          "fileOffset": 131633684,
+          "word": "97aa321f",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 131633744,
+          "word": "97aa3210",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 131633784,
+          "word": "97b1c0be",
+          "targetRelative": 2589872,
+          "callee": "google3/base/go/log.ErrorContextf"
+        },
+        {
+          "fileOffset": 131633796,
+          "word": "97cc4a17",
+          "targetRelative": 9546272,
+          "callee": "google3/third_party/jetski/hooks_pb/hooks_go_proto.(*PreInvocationHookResult).GetInjectSteps"
+        },
+        {
+          "fileOffset": 131633808,
+          "word": "97cc4a14",
+          "targetRelative": 9546272,
+          "callee": "google3/third_party/jetski/hooks_pb/hooks_go_proto.(*PreInvocationHookResult).GetInjectSteps"
+        },
+        {
+          "fileOffset": 131633892,
+          "word": "97fff29f",
+          "targetRelative": 23088288,
+          "callee": "google3/third_party/jetski/cortex/customization/hooks/hooks.InjectSteps"
+        },
+        {
+          "fileOffset": 131633920,
+          "word": "97aa06b0",
+          "targetRelative": 564480,
+          "callee": "runtime.convTstring"
+        },
+        {
+          "fileOffset": 131633968,
+          "word": "97bef1e4",
+          "targetRelative": 6048256,
+          "callee": "google3/third_party/golang/github_com/cockroachdb/errors/v/v1/errors.Wrapf"
+        },
+        {
+          "fileOffset": 131634048,
+          "word": "97a85c58",
+          "targetRelative": 128032,
+          "callee": "runtime.typeAssert"
+        },
+        {
+          "fileOffset": 131634092,
+          "word": "97aa29c1",
+          "targetRelative": 600560,
+          "callee": "runtime.morestack"
+        }
+      ],
+      "indirectCalls": [
+        {
+          "fileOffset": 131633364,
+          "register": 1,
+          "word": "d63f0020"
+        },
+        {
+          "fileOffset": 131633832,
+          "register": 1,
+          "word": "d63f0020"
+        }
+      ]
+    },
+    {
+      "name": "google3/third_party/jetski/cortex/customization/hooks/hooks.(*HookMixinWrapper).PreInvocationHooks",
+      "nameByteOffset": 34213997,
+      "fileOffset": 131616800,
+      "bytes": 992,
+      "sha256": "e55063775d53dce8a457423c424847854835f07b7e1d6a923aa9e15a539485d2",
+      "hex": "900b40f9f1c302d13f0210ebc91d0054f4c304d19dfa3fa99f020091fd2300d1e09f00f9028441a9420000b4420440f9e00302aa4b1cc797c0000036e29f40f9e0031faae1031faae3031faa52000014e29f40f9435840f9a30000b5e0031faae1031faae3031faa4b000014410040a9211840f920003fd6e06f00f9e13f00f9e24700f9e19f40f9220c41a9e35700f9e27b00f9220c42a9e38300f9e28b00f9228c4aa9e26700f9e32f00f9215c40f9e13700f9609d01d000600c91d57aa8971f2003d5e1160210e25740f9010800a93bf902f0615348b9e1000035e58b40f9e67b40f9e78340f9e86740f9e96f40f90a0000146b42aa97e58b40f9e67b40f9251b00a9e78340f9e86740f9272301a9e96f40f9291300f9e09300f9051801a9072002a9e52f40f9e63740f9051803a9e54740f9052800f9e53f40f9091404a9e0031faae10340b2e2031faae30301aa646f019084c015911a2daa973bf902f0655348b965000035e49340f905000014030040f93f42aa97e49340f9240f00a9040000f9e10300aae30340b2e00302aae29f40f9e30309a9e17300f9449441a9440000b4840440f9e00304aae10305aaec1bc79780000036e10b49a9e37340f952000014e19f40f9221c40f9820000b5e10b49a9e37340f94c000014210040a9211840f920003fd6e06b00f9e13b00f9e24300f9e19f40f9220c41a9e35300f9e27700f9220c42a9e37f00f9e28700f9220c43a9e26300f9e32b00f9212040f9e13300f9609d01d000600c91797aa8971f2003d561ef0110e25340f9010800a93bf902f0615348b9e1000035e58740f9e67740f9e77f40f9e86340f9e96b40f90a0000140f42aa97e58740f9e67740f9251b00a9e77f40f9e86340f9272301a9e96b40f9291300f9051801a9072002a9e52b40f9e63340f9051803a9e54340f9052800f9e53b40f9091404a9e54b40f9a1040091e24f40f95f0001eb63000054e37340f909000014e09300f9e07340f9e30340b2646f019084c01591b92caa97e30300aae09340f9240400d13bf902f0655348b985000034657864f8dd41aa97201700a9607824f8e10b09a9e37300f9e19f40f9210040a9212840f920003fd6e24b40f94300018be44f40f99f0003eb63000054e57340f911000014e15f00f9e08f00f9e07340f9e20304aa646f019084c01591e50301aae10303aae30305aa982caa97e40302aae30301aae50300aae08f40f9e15f40f9e24b40f9e3130ba9e58f00f9460004cb670002cb46fc868aa50c068be20307aae30300aae40301aa606f019000c01591e10305aab919aa97e08f40f9e10b4ba9fdfb7fa9ffc30491c0035fd6e00700f9e3031eaad139aa97e00740f90bffff170000000000000000",
+      "directCalls": [
+        {
+          "fileOffset": 131616852,
+          "word": "97c71c4b",
+          "targetRelative": 8171712,
+          "callee": "google3/third_party/jetski/go_utils/go_utils.IsNil"
+        },
+        {
+          "fileOffset": 131616988,
+          "word": "97a87ad5",
+          "targetRelative": 142192,
+          "callee": "runtime.newobject"
+        },
+        {
+          "fileOffset": 131617044,
+          "word": "97aa426b",
+          "targetRelative": 608768,
+          "callee": "runtime.gcWriteBarrier5"
+        },
+        {
+          "fileOffset": 131617144,
+          "word": "97aa2d1a",
+          "targetRelative": 587040,
+          "callee": "runtime.growslice"
+        },
+        {
+          "fileOffset": 131617172,
+          "word": "97aa423f",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 131617232,
+          "word": "97c71bec",
+          "targetRelative": 8171712,
+          "callee": "google3/third_party/jetski/go_utils/go_utils.IsNil"
+        },
+        {
+          "fileOffset": 131617356,
+          "word": "97a87a79",
+          "targetRelative": 142192,
+          "callee": "runtime.newobject"
+        },
+        {
+          "fileOffset": 131617412,
+          "word": "97aa420f",
+          "targetRelative": 608768,
+          "callee": "runtime.gcWriteBarrier5"
+        },
+        {
+          "fileOffset": 131617532,
+          "word": "97aa2cb9",
+          "targetRelative": 587040,
+          "callee": "runtime.growslice"
+        },
+        {
+          "fileOffset": 131617564,
+          "word": "97aa41dd",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 131617664,
+          "word": "97aa2c98",
+          "targetRelative": 587040,
+          "callee": "runtime.growslice"
+        },
+        {
+          "fileOffset": 131617740,
+          "word": "97aa19b9",
+          "targetRelative": 567792,
+          "callee": "runtime.typedslicecopy"
+        },
+        {
+          "fileOffset": 131617772,
+          "word": "97aa39d1",
+          "targetRelative": 600688,
+          "callee": "runtime.morestack_noctxt"
+        }
+      ],
+      "indirectCalls": [
+        {
+          "fileOffset": 131616916,
+          "register": 1,
+          "word": "d63f0020"
+        },
+        {
+          "fileOffset": 131617284,
+          "register": 1,
+          "word": "d63f0020"
+        },
+        {
+          "fileOffset": 131617596,
+          "register": 1,
+          "word": "d63f0020"
+        }
+      ]
+    },
+    {
+      "name": "google3/third_party/jetski/cortex/customization/hooks/hookcaller/hookcaller.CallPreInvocationHook",
+      "nameByteOffset": 34203464,
+      "fileOffset": 131596416,
+      "bytes": 288,
+      "sha256": "11ab8677662b1d4bd51385c15b3944f0c31ad273590c39a44e03af08eafbfcc4",
+      "hex": "900b40f9ff6330ebe9060054fe0f19f8fd831ff8fd2300d1e7230ba9e51b0aa9e96300f9e31309a9e08707a9e24700f9e0037db2817701f021c03991e20340b28490a8977bf90290635348b963000035e36340f9040000146a56aa97e36340f9230300f9e03300f9030000f9e0077cb2219901f021c01191e20340b29993a8977bf90290635348b983000035ea5740f9eb3340f9050000145e56aa97ea5740f9eb3340f92a2f00a9acb801b08ca104910ab000a90b0c00f9e18b47a9e39348a9e59b49a9e7234ba9e90300aa000301f000000f91d7090094fd835ff8fe0747f8c0035fd6e08700a9e28f01a9e49702a9e69f03a9e8a704a9e3031eaa6d4eaa97e08740a9e28f41a9e49742a9e69f43a9e8a744a9bbffff170000000000000000",
+      "directCalls": [
+        {
+          "fileOffset": 131596480,
+          "word": "97a89084",
+          "targetRelative": 143888,
+          "callee": "runtime.mallocgcSmallScanNoHeaderSC1"
+        },
+        {
+          "fileOffset": 131596504,
+          "word": "97aa566a",
+          "targetRelative": 608704,
+          "callee": "runtime.gcWriteBarrier1"
+        },
+        {
+          "fileOffset": 131596540,
+          "word": "97a89399",
+          "targetRelative": 147104,
+          "callee": "runtime.mallocgcSmallScanNoHeaderSC5"
+        },
+        {
+          "fileOffset": 131596568,
+          "word": "97aa565e",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 131596628,
+          "word": "940009d7",
+          "targetRelative": 23074800,
+          "callee": "google3/third_party/jetski/cortex/customization/hooks/hookcaller/hookcaller.callHookAs[go.shape.2a871265a6c61381f20a67b815ec091b7b8e81176759dfc95682cdb624ad4aac,go.shape.*google3/third_party/jetski/hooks_pb/hooks_go_proto.PreInvocationHookResult]"
+        },
+        {
+          "fileOffset": 131596668,
+          "word": "97aa4e6d",
+          "targetRelative": 600688,
+          "callee": "runtime.morestack_noctxt"
+        }
+      ],
+      "indirectCalls": []
+    },
+    {
+      "name": "google3/third_party/jetski/cortex/customization/hooks/jsonhook/jsonhook.executeCommandModeHook",
+      "nameByteOffset": 34218288,
+      "fileOffset": 131638896,
+      "bytes": 1712,
+      "sha256": "7c41d40feb4515425924f964c1f166ccd8dc42ae1191b39c505fd49c34b4db8b",
+      "hex": "900b40f9f10304d13f0210eb69330054f40306d19dfa3fa99f020091fd2300d1e08718a9e2cf00f9ffbb00f9ff7f0139ffff0ba9ff6700f9ff7f0aa9870040f9470100b4e72041a969b701d029a11f91ff0009eb40000054e8031faaa1000054070140f90400001469b701d029a11f91e7031faa670000b4e70840f902000014e7031faa272d00b4870040f9070100b4e72041a9ff0009eb40000054e8031faa61000054070140f902000014e7031faae4971aa9e6e30639e28f19a9e08718a9670000b4e7a040a903000014e8031faae7031faae00307aae10308aa1d180094e07300f9e14300f9e2d740f9430040f9630000b4630880b902000014e3031faa637c4093044099d24473a7f2627c049be08758a9d7e6aa97e2bb00f9e30340b2e37f0139e3e2fef063902f91e6037fb2e39b12a9e37340f9e44340f9e39313a9e2e2fef042303191e30306aae4a30491e50303aa337bb897ff830439e08f00f9034099d24373a7f2036c00f9e3d740f9639040a9240100b4042400f91bf902d0615348b981000034012040f9a52caa97230700a9032000f9a267aa97e38f40f9610803a91bf902d0615348b981000034641440f99b2caa97201300a9601400f9e0d340f9000700b4ffff14a9e10300aae0cf40f95f01aa976267019042803091e28314a920f2feb000283191e10f7fb2e2230591e30340b2e40303aa593fac97e28f40f9439042a9451c40f984040091bf0004eb22030054e2b700f9e14f00f9e0b300f9e00303aae10304aae20305aae30340b264670190848030914d17aa97e5b740f9a21c00f91bf902d0665348b986000034a31440f9722caa97200f00a9a01400f9e20305aae40301aae30300aae0b340f9e14f40f9441800f9840400d16310048b610400f91bf902d0645348b984000034640040f9622caa97201300a9600000f9e0db40f9a00400b4e1e34639280c0094031a00b5210400b4e14700f9e07b00f9e24b00f9000580d2218a019021802b91e20340b28669a897e39348a9039000a91bf902d0635348b963000035e37b40f904000014462caa97e37b40f9230300f9030000f9030080921f8c01a9e38f40f944b7019084201591642800f91bf902d0645348b984000034642c40f93c2caa97201300a9602c00f9000580d2218a019021e02891e20340b26969a897e38f40f944b7019084200d91643800f91bf902d0645348b984000034613c40f92c2caa97200700a9e07700f9603c00f9e06304910bd5ff97e33f00f9e46f00f9e57740f9a61c40a9a82441a9ea0009cb5f0100f14d070054e18b06a9e06b00f9850100b4ff0009ebe3140054230108cb23fd838ac100038be0031faae2030aaa4494a997e60301aae70300aa04000014a60080d287e3fef0e7fc1891e63300f9e75b00f9e0037cb26169019021002791e20340b2ab66a897e0af00f9e05b40f9e13340f9cf00aa976367019063803091e8af40f9030100f91bf902d0635348b9830000340b0540f9fa2baa97202f00a9000500f91f2003d5e0031faae1031faae2037fb2e3031faae4031faae5031faa86f1fe90c6983991e70b7eb2e90340b2ea0309aa1bb7b197e06b40f9e18b46a9e33f40f9e46f40f9e57740f9c30700b4c50100b4a61c40a9a52041a91f0107eb880d0054e20008cb030105cb03fd838a6100068be0031faa0a94a997e33f40f9e46f40f904000014a10080d280e3fef000fc1891e2e303915f7c00a95f7c01a9430000b4630440f9e3930fa99900aa976267019042803091e28310a920f2feb000a03191e10f7fb2e2e30391e3037fb2e40303aac733ac97c00100b51f2003d5e0037cb2217601b021e01391e20340b26066a89723f2feb063a03191e40f7fb2031000a9e10300aa40b7019000a00491ffff0ba9ff6700f9e0070aa9ff7f0139fabb40f9400340f900003fd6e3134aa9e0874ba9e26740f9fdfb7fa9ff030691c0035fd67f7fac97c10100b5ffff0ba9ff6700f9ff7f0aa9ff7f0139fabb40f9400340f900003fd6e3134aa9e26740f9e0874ba9fdfb7fa9ff030691c0035fd6e0870ba9e26700f9ff7f0aa9ff7f0139fabb40f9400340f900003fd6e3134aa9e26740f9e0874ba9fdfb7fa9ff030691c0035fd6ffff0ba9ff6700f9e3130aa9ff7f0139fabb40f9400340f900003fd6e3134aa9e26740f9e0874ba9fdfb7fa9ff030691c0035fd6ffff0ba9ff6700f9ff7f0aa9e26740f9e0874ba9e3031faae4031faafdfb7fa9ff030691c0035fd6282caa97272caa971f2003d5dd15a997e0874ba9e26740f9e3134aa9fdfb7fa9ff030691c0035fd6e08700a9e28f01a9e49702a9e6e30039e3031eaa8d23aa97e08740a9e28f41a9e49742a9e6e3403958feff17000000000000000000000000",
+      "directCalls": [
+        {
+          "fileOffset": 131639116,
+          "word": "9400181d",
+          "targetRelative": 23131904,
+          "callee": "google3/third_party/jetski/cortex/customization/hooks/jsonhook/jsonhook.expandHome"
+        },
+        {
+          "fileOffset": 131639172,
+          "word": "97aae6d7",
+          "targetRelative": 799264,
+          "callee": "context.WithTimeout"
+        },
+        {
+          "fileOffset": 131639236,
+          "word": "97b87b33",
+          "targetRelative": 4359120,
+          "callee": "os/exec.CommandContext"
+        },
+        {
+          "fileOffset": 131639292,
+          "word": "97aa2ca5",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 131639304,
+          "word": "97aa67a2",
+          "targetRelative": 669136,
+          "callee": "syscall.Environ"
+        },
+        {
+          "fileOffset": 131639332,
+          "word": "97aa2c9b",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 131639364,
+          "word": "97aa015f",
+          "targetRelative": 564480,
+          "callee": "runtime.convTstring"
+        },
+        {
+          "fileOffset": 131639404,
+          "word": "97ac3f59",
+          "targetRelative": 1152272,
+          "callee": "fmt.Sprintf"
+        },
+        {
+          "fileOffset": 131639468,
+          "word": "97aa174d",
+          "targetRelative": 587040,
+          "callee": "runtime.growslice"
+        },
+        {
+          "fileOffset": 131639496,
+          "word": "97aa2c72",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 131639560,
+          "word": "97aa2c62",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 131639584,
+          "word": "94000c28",
+          "targetRelative": 23120128,
+          "callee": "google3/third_party/jetski/cortex/customization/hooks/jsonhook/jsonhook.marshalHookArgs"
+        },
+        {
+          "fileOffset": 131639624,
+          "word": "97a86986",
+          "targetRelative": 147104,
+          "callee": "runtime.mallocgcSmallScanNoHeaderSC5"
+        },
+        {
+          "fileOffset": 131639656,
+          "word": "97aa2c46",
+          "targetRelative": 608704,
+          "callee": "runtime.gcWriteBarrier1"
+        },
+        {
+          "fileOffset": 131639712,
+          "word": "97aa2c3c",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 131639740,
+          "word": "97a86969",
+          "targetRelative": 147104,
+          "callee": "runtime.mallocgcSmallScanNoHeaderSC5"
+        },
+        {
+          "fileOffset": 131639776,
+          "word": "97aa2c2c",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 131639796,
+          "word": "97ffd50b",
+          "targetRelative": 23063904,
+          "callee": "google3/third_party/jetski/go_utils/jexec/jexec.(*Cmd).Output"
+        },
+        {
+          "fileOffset": 131639872,
+          "word": "97a99444",
+          "targetRelative": 453264,
+          "callee": "runtime.slicebytetostring"
+        },
+        {
+          "fileOffset": 131639924,
+          "word": "97a866ab",
+          "targetRelative": 144480,
+          "callee": "runtime.mallocgcSmallScanNoHeaderSC2"
+        },
+        {
+          "fileOffset": 131639940,
+          "word": "97aa00cf",
+          "targetRelative": 564480,
+          "callee": "runtime.convTstring"
+        },
+        {
+          "fileOffset": 131639976,
+          "word": "97aa2bfa",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 131640036,
+          "word": "97b1b71b",
+          "targetRelative": 2586256,
+          "callee": "google3/base/go/log.ctxlogf"
+        },
+        {
+          "fileOffset": 131640104,
+          "word": "97a9940a",
+          "targetRelative": 453264,
+          "callee": "runtime.slicebytetostring"
+        },
+        {
+          "fileOffset": 131640156,
+          "word": "97aa0099",
+          "targetRelative": 564480,
+          "callee": "runtime.convTstring"
+        },
+        {
+          "fileOffset": 131640196,
+          "word": "97ac33c7",
+          "targetRelative": 1141216,
+          "callee": "fmt.errorf"
+        },
+        {
+          "fileOffset": 131640224,
+          "word": "97a86660",
+          "targetRelative": 144480,
+          "callee": "runtime.mallocgcSmallScanNoHeaderSC2"
+        },
+        {
+          "fileOffset": 131640308,
+          "word": "97ac7f7f",
+          "targetRelative": 1218864,
+          "callee": "bytes.TrimSpace"
+        },
+        {
+          "fileOffset": 131640512,
+          "word": "97aa2c28",
+          "targetRelative": 609440,
+          "callee": "runtime.panicBounds"
+        },
+        {
+          "fileOffset": 131640516,
+          "word": "97aa2c27",
+          "targetRelative": 609440,
+          "callee": "runtime.panicBounds"
+        },
+        {
+          "fileOffset": 131640524,
+          "word": "97a915dd",
+          "targetRelative": 324480,
+          "callee": "runtime.deferreturn"
+        },
+        {
+          "fileOffset": 131640572,
+          "word": "97aa238d",
+          "targetRelative": 600688,
+          "callee": "runtime.morestack_noctxt"
+        }
+      ],
+      "indirectCalls": [
+        {
+          "fileOffset": 131640280,
+          "register": 0,
+          "word": "d63f0000"
+        },
+        {
+          "fileOffset": 131640340,
+          "register": 0,
+          "word": "d63f0000"
+        },
+        {
+          "fileOffset": 131640392,
+          "register": 0,
+          "word": "d63f0000"
+        },
+        {
+          "fileOffset": 131640444,
+          "register": 0,
+          "word": "d63f0000"
+        }
+      ]
+    },
+    {
+      "name": "google3/third_party/jetski/cortex/customization/hooks/jsonhook/jsonhook.dropUnsupportedFields",
+      "nameByteOffset": 34220912,
+      "fileOffset": 131644976,
+      "bytes": 656,
+      "sha256": "64112213d71542075e652f0096ff2709ff8ff027d55de30ae86a76b5ef382d65",
+      "hex": "900b40f9ff6330eba9130054fe0f18f8fd831ff8fd2300d1e08708a9a01200b4e14b00f9031040b924c483d2246daff29f00032b6108005443b801d0632009911f0003eb61110054610000b4231042a903000014e4031faae3031faaa41000b4e42f00f9e33700f99f2400f161010054650040f986ae8cd246aeadf226cdcdf2268ceef2bf0006eb8100005465204039bf940171e00e0054e0037cb2416901f021002791e20340b29261a897e03b00f9e03740f9e12f40f9b6fba997436701f063803091e83b40f9030100f91bf902b0635348b9830000340b0540f9e126aa97202f00a9000500f9e0031faae1031faae2037fb2e30340b2e4031faae5031faaa6f7feb0c67c0691a70780d2e90340b2ea0309aa03b2b197eb4b40f97f1500f91bf902b06c5348b98c000034601140f9c826aa97200300f97f1100f94d00001484129ed28490a6f29f00032b2109005443b801d063a009911f0003eba1080054610000b4231042a903000014e3031faae4031faae40700b4e42b00f9e33300f99f3800f121020054650040f9c6ec8dd2466eacf2a6eccbf266ecedf2bf0006eb41010054650840b9c68d8ed226cdadf2bf00066ba100005465184079a6ae8cd2bf00066b60050054e0037cb2416901f021002791e20340b24661a897e03b00f9e03340f9e12b40f96afba997436701d063803091e83b40f9030100f91bf90290635348b9830000340b0540f99526aa97202f00a9000500f91f2003d5e0031faae1031faae2037fb2e30340b2e4031faae5031faaa6f7fe90c67c0691a70780d2e90340b2ea0309aab6b1b197eb4b40f97f1500f91bf902906c5348b98c000034601140f97b26aa97200300f97f1100f9fd835ff8fe0748f8c0035fd6e08700a9e3031eaa9f1eaa97e08740a95dffff17",
+      "directCalls": [
+        {
+          "fileOffset": 131645144,
+          "word": "97a86192",
+          "targetRelative": 144480,
+          "callee": "runtime.mallocgcSmallScanNoHeaderSC2"
+        },
+        {
+          "fileOffset": 131645160,
+          "word": "97a9fbb6",
+          "targetRelative": 564480,
+          "callee": "runtime.convTstring"
+        },
+        {
+          "fileOffset": 131645196,
+          "word": "97aa26e1",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 131645252,
+          "word": "97b1b203",
+          "targetRelative": 2586256,
+          "callee": "google3/base/go/log.ctxlogf"
+        },
+        {
+          "fileOffset": 131645280,
+          "word": "97aa26c8",
+          "targetRelative": 608704,
+          "callee": "runtime.gcWriteBarrier1"
+        },
+        {
+          "fileOffset": 131645448,
+          "word": "97a86146",
+          "targetRelative": 144480,
+          "callee": "runtime.mallocgcSmallScanNoHeaderSC2"
+        },
+        {
+          "fileOffset": 131645464,
+          "word": "97a9fb6a",
+          "targetRelative": 564480,
+          "callee": "runtime.convTstring"
+        },
+        {
+          "fileOffset": 131645500,
+          "word": "97aa2695",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 131645560,
+          "word": "97b1b1b6",
+          "targetRelative": 2586256,
+          "callee": "google3/base/go/log.ctxlogf"
+        },
+        {
+          "fileOffset": 131645588,
+          "word": "97aa267b",
+          "targetRelative": 608704,
+          "callee": "runtime.gcWriteBarrier1"
+        },
+        {
+          "fileOffset": 131645620,
+          "word": "97aa1e9f",
+          "targetRelative": 600688,
+          "callee": "runtime.morestack_noctxt"
+        }
+      ],
+      "indirectCalls": []
+    },
+    {
+      "name": "google3/third_party/jetski/cortex/customization/hooks/jsonhook/jsonhook.(*Caller).CallHook",
+      "nameByteOffset": 34221285,
+      "fileOffset": 131645888,
+      "bytes": 848,
+      "sha256": "8b6cbae690393b18189d082c56617e053db4bbe65704f8c96a73f1e11ae0b4b2",
+      "hex": "900b40f9f14302d13f0210eb89180054f44304d19dfa3fa99f020091fd2300d1e08f00f9e69f14a9e10b12a9e49713a9e39b00f9e46303919f7c00a99f7c01a99f7c02a9010040f9805301b000000091e20305aae30306aa52faa797000440ad0208c03dfb630391600700ade2838f3cfb630391600740ade283cf3ce0934da9e08703ade227803d41100036e1ab40f9610000b42b3041a903000014eb031faaec031faaab0700b46d1140b9ce9994d22ec3a4f2bf010e6b810300544db801b0ada102917f010deb81060054850140f9650000b4a50440f902000014e5031faa650000b4a28c40a903000014e3031faae2031faae10304aae210009460000036e1ab40f925000014e0031faae1031faae2031faae3031faae4031faafdfb7fa9ff430491c0035fd64ec79ed20eeaa4f2bf010e6b210300544db801b0ada103917f010deba10200548b0140f96b0000b46b0940f902000014eb031faaeb0100b4628d40a9e10304aac610009460000036e1ab40f909000014e0031faae1031faae2031faae3031faae4031faafdfb7fa9ff430491c0035fd6eb8f40f9661d41a9682542a96a214039e0030291e28f52a9e49f40f9e50301aae19340f9e5040094e30500b4e45300f9e33700f9e2a302915f7c00a95f7c01a9e00754a989faa997426701d042803091e2830aa9e03740f9600000b4030440f902000014e30300aae55340f9e3970ba960effed000f43791e10280d2e2a30291e3037fb2e40303aab02dac97c00100b51f2003d5e0037cb2017601f021e01391e20340b24960a89763effed063f43791e40280d2031000a9e10300aa20b701d000a00491e2031faae30300aae40301aae0031faae1031faafdfb7fa9ff430491c0035fd6e3031faae4031faafdfb7fa9ff430491c0035fd6ffff0ca9e00754a95afaa997426701d042803091e2830ca920f4feb000fc2591c10480d2e2230391e30340b2e40303aa882dac97c00100b51f2003d5e0037cb2017601f021e01391e20340b22160a89723f4feb063fc2591c40480d2031000a9e10300aa20b701d000a00491e2031faae30300aae40301aae0031faae1031faafdfb7fa9ff430491c0035fd6e08700a9e28f01a9e49702a9e69f03a9e3031eaa901daa97e08740a9e28f41a9e49742a9e69f43a92fffff170000000000000000",
+      "directCalls": [
+        {
+          "fileOffset": 131645976,
+          "word": "97a7fa52",
+          "targetRelative": 39584,
+          "callee": "runtime.mapaccess2_faststr"
+        },
+        {
+          "fileOffset": 131646136,
+          "word": "940010e2",
+          "targetRelative": 23131520,
+          "callee": "google3/third_party/jetski/cortex/customization/hooks/jsonhook/jsonhook.MatchesToolName"
+        },
+        {
+          "fileOffset": 131646248,
+          "word": "940010c6",
+          "targetRelative": 23131520,
+          "callee": "google3/third_party/jetski/cortex/customization/hooks/jsonhook/jsonhook.MatchesToolName"
+        },
+        {
+          "fileOffset": 131646332,
+          "word": "940004e5",
+          "targetRelative": 23119440,
+          "callee": "google3/third_party/jetski/cortex/customization/hooks/jsonhook/jsonhook.(*HookHandler).Execute"
+        },
+        {
+          "fileOffset": 131646364,
+          "word": "97a9fa89",
+          "targetRelative": 564480,
+          "callee": "runtime.convTstring"
+        },
+        {
+          "fileOffset": 131646432,
+          "word": "97ac2db0",
+          "targetRelative": 1141216,
+          "callee": "fmt.errorf"
+        },
+        {
+          "fileOffset": 131646460,
+          "word": "97a86049",
+          "targetRelative": 144480,
+          "callee": "runtime.mallocgcSmallScanNoHeaderSC2"
+        },
+        {
+          "fileOffset": 131646552,
+          "word": "97a9fa5a",
+          "targetRelative": 564480,
+          "callee": "runtime.convTstring"
+        },
+        {
+          "fileOffset": 131646592,
+          "word": "97ac2d88",
+          "targetRelative": 1141216,
+          "callee": "fmt.errorf"
+        },
+        {
+          "fileOffset": 131646620,
+          "word": "97a86021",
+          "targetRelative": 144480,
+          "callee": "runtime.mallocgcSmallScanNoHeaderSC2"
+        },
+        {
+          "fileOffset": 131646704,
+          "word": "97aa1d90",
+          "targetRelative": 600688,
+          "callee": "runtime.morestack_noctxt"
+        }
+      ],
+      "indirectCalls": []
+    },
+    {
+      "name": "google3/third_party/jetski/cortex/customization/hooks/jsonhook/jsonhook.marshalHookArgs",
+      "nameByteOffset": 34222007,
+      "fileOffset": 131652032,
+      "bytes": 1792,
+      "sha256": "a68b8c7d4fa680140cb20c19fcecf2f40b53bd7774e8a634a2d322bf9732c42a",
+      "hex": "900b40f9f1c304d13f0210eb89360054f4c306d19dfa3fa99f020091fd2300d1402800b4e1030739a1000037e10300aa200201d000803c91d6ceff97e04f00f9e0037db2615301f021603591e20340b2305aa897e0d300f9e34f40f9640440f9e40100b5a7f6a997fbf802f0615348b961000035efd340f907000014efd340f9f00140f9f04300f91220aa97f04340f9204300a9e00100f947000014ef830291ff7d00a9ff7d01a9ff7d02a9e15740f9e96740f9e60340b2e6ef02396e0440f9e0031faae2031faae3031faae4031faae5031faae7031faae8031faaea031faaeb031faaec031faa4db80190ada108915814b397430400b4ffff18a9430000b4630440f9e39318a920f4fe9000942691c10480d2e2230691e30340b2e40303aaf027ac97c00100b51f2003d5e0037cb2017601d021e01391e20340b2895aa89723f4fe9063942691c40480d2031000a9e10300aa20b701b000a00491e2031faae30300aae40301aae0031faae1031faafdfb7fa9ffc30691c0035fd628b701b008210591a9e701b029010d91e82713a9433901f063e03891e4d340f9e5c30491e60340b2e70306aa12b4b097c01700b5efd340f9e14f40f9300840f9900700b4304441a9f00600b4131240b9734e51d3a00201f0008033911b7873f860031fd653b8019073a203911f0213eba10500542e0240f940b80190002004912e00001453b8019073a206911f0213eba10400542e0240f940b80190002007912600001453b8019073a204911f0213eba10300542e0240f940b80190002005911e00001453b8019073a202911f0213eba10200542e0240f940b80190002003911600001453b8019073a207911f0213eba10100542e0240f940b80190002008910e00001453b8019073a205911f0213eba10000542e0240f940b801900020069106000014e0031faaee031faa03000014e0031faaee031faa201800b4ef830291ff7d00a9ff7d01a9ff7d02a9e15740f9e96740f9e60340b2e6ef0239e2031faae3031faae4031faae5031faae7031faae8031faaea031faaeb031faaec031faaed0300aae0031faad313b397430400b4ffff16a9430000b4630440f9e39316a9e0f3feb000583091a10480d2e2a30591e30340b2e40303aa6b27ac97c00100b51f2003d5e0037cb2017601d021e01391e20340b2045aa897e3f3feb063583091a40480d2031000a9e10300aa20b701b000a00491e2031faae30300aae40301aae0031faae1031faafdfb7fa9ffc30691c0035fd6e10b06a9e04700f9e0037db2615301f021603591e20340b25a59a897e0cf00f923b701b063200591a4e701b084000d91e31313a9e10b46a9433901f063e03891e40300aae5c30491e60340b2e70306aae04740f983b3b097c00100b5e3cf40f9610040f9e24303915f7c00a95f7c01a95f7c02a95f7c03a95f7c04a95f7c05a9605301f0006035919266a8974e000014ffff15a9400000b4000440f9e08715a940f4fef000180291e10480d2e2630591e30340b2e40303aa2627ac97c00100b51f2003d5e0037cb2017601d021e01391e20340b2bf59a89743f4fef063180291e40480d2031000a9e10300aa20b701b000a00491e2031faae30300aae40301aae0031faae1031faafdfb7fa9ffc30691c0035fd6ffff17a9400000b4000440f9e08717a980f4feb000301e91010580d2e2e30591e30340b2e40303aa0527ac97c00100b51f2003d5e0037cb2017601d021e01391e20340b29e59a89783f4feb063301e91040580d2031000a9e10300aa20b701b000a00491e2031faae30300aae40301aae0031faae1031faafdfb7fa9ffc30691c0035fd6e0031faae1031faae2031faae3031faae4031faafdfb7fa9ffc30691c0035fd6020400f9e04303916066a897e51b4da9c50200b4c41840a9e43b00f9e64b00f9a20c40a9e4d340f9810040f9605301f000603591b1f3a797e43b40f9040000f9fbf802f0645348b964000035e24b40f9ecffff17010440f9cc1eaa97e24b40f9220700a9e7ffff17e14f40f9efd340f9e0034739a0000037a0b701f000a032915a8af49740000014e10140f925b701b0a5200591a6e701b0c6000d91e51b13a9605301f000603591e2c30491e30340b2e40303aae9b0b097430400b4ffff14a9430000b4630440f9e39314a9c0f4fe90009c0191210580d2e2230591e30340b2e40303aaad26ac97c00100b51f2003d5e0037cb2017601d021e01391e20340b24659a897a3f4fef0639c0191240580d2031000a9e10300aa20b7019000a00491e2031faae30300aae40301aae0031faae1031faafdfb7fa9ffc30691c0035fd6e3031faae4031faafdfb7fa9ffc30691c0035fd6e13f00f9e0a300f9020c40a9e4d340f9810040f9605301d0006035918ef4a797e4a340f980400091e43f40f9810400d13f0000f16cfeff54efd340f9beffff17e00700f9e1430039e3031eaaa216aa97e00740f9e143403943feff170000000000000000",
+      "directCalls": [
+        {
+          "fileOffset": 131652088,
+          "word": "97ffced6",
+          "targetRelative": 23069840,
+          "callee": "google3/third_party/jetski/cortex/utils/utils.ScrubInternalFields[go.shape.*uint8]"
+        },
+        {
+          "fileOffset": 131652112,
+          "word": "97a85a30",
+          "targetRelative": 143888,
+          "callee": "runtime.mallocgcSmallScanNoHeaderSC1"
+        },
+        {
+          "fileOffset": 131652132,
+          "word": "97a9f6a7",
+          "targetRelative": 566272,
+          "callee": "runtime.makemap_small"
+        },
+        {
+          "fileOffset": 131652168,
+          "word": "97aa2012",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 131652272,
+          "word": "97b31458",
+          "targetRelative": 2956112,
+          "callee": "google3/third_party/golang/protobuf/v2/encoding/protojson/protojson.MarshalOptions.marshal"
+        },
+        {
+          "fileOffset": 131652320,
+          "word": "97ac27f0",
+          "targetRelative": 1141216,
+          "callee": "fmt.errorf"
+        },
+        {
+          "fileOffset": 131652348,
+          "word": "97a85a89",
+          "targetRelative": 144480,
+          "callee": "runtime.mallocgcSmallScanNoHeaderSC2"
+        },
+        {
+          "fileOffset": 131652456,
+          "word": "97b0b412",
+          "targetRelative": 2333424,
+          "callee": "encoding/json/v2.Unmarshal"
+        },
+        {
+          "fileOffset": 131652804,
+          "word": "97b313d3",
+          "targetRelative": 2956112,
+          "callee": "google3/third_party/golang/protobuf/v2/encoding/protojson/protojson.MarshalOptions.marshal"
+        },
+        {
+          "fileOffset": 131652852,
+          "word": "97ac276b",
+          "targetRelative": 1141216,
+          "callee": "fmt.errorf"
+        },
+        {
+          "fileOffset": 131652880,
+          "word": "97a85a04",
+          "targetRelative": 144480,
+          "callee": "runtime.mallocgcSmallScanNoHeaderSC2"
+        },
+        {
+          "fileOffset": 131652968,
+          "word": "97a8595a",
+          "targetRelative": 143888,
+          "callee": "runtime.mallocgcSmallScanNoHeaderSC1"
+        },
+        {
+          "fileOffset": 131653028,
+          "word": "97b0b383",
+          "targetRelative": 2333424,
+          "callee": "encoding/json/v2.Unmarshal"
+        },
+        {
+          "fileOffset": 131653080,
+          "word": "97a86692",
+          "targetRelative": 157536,
+          "callee": "runtime.mapIterStart"
+        },
+        {
+          "fileOffset": 131653128,
+          "word": "97ac2726",
+          "targetRelative": 1141216,
+          "callee": "fmt.errorf"
+        },
+        {
+          "fileOffset": 131653156,
+          "word": "97a859bf",
+          "targetRelative": 144480,
+          "callee": "runtime.mallocgcSmallScanNoHeaderSC2"
+        },
+        {
+          "fileOffset": 131653260,
+          "word": "97ac2705",
+          "targetRelative": 1141216,
+          "callee": "fmt.errorf"
+        },
+        {
+          "fileOffset": 131653288,
+          "word": "97a8599e",
+          "targetRelative": 144480,
+          "callee": "runtime.mallocgcSmallScanNoHeaderSC2"
+        },
+        {
+          "fileOffset": 131653392,
+          "word": "97a86660",
+          "targetRelative": 157648,
+          "callee": "runtime.mapIterNext"
+        },
+        {
+          "fileOffset": 131653436,
+          "word": "97a7f3b1",
+          "targetRelative": 40256,
+          "callee": "runtime.mapassign_faststr"
+        },
+        {
+          "fileOffset": 131653472,
+          "word": "97aa1ecc",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 131653512,
+          "word": "97f48a5a",
+          "targetRelative": 20117552,
+          "callee": "google3/third_party/jetski/cortex/utils/utils.GetInternalFieldsJSONNames"
+        },
+        {
+          "fileOffset": 131653564,
+          "word": "97b0b0e9",
+          "targetRelative": 2331296,
+          "callee": "encoding/json/v2.Marshal"
+        },
+        {
+          "fileOffset": 131653612,
+          "word": "97ac26ad",
+          "targetRelative": 1141216,
+          "callee": "fmt.errorf"
+        },
+        {
+          "fileOffset": 131653640,
+          "word": "97a85946",
+          "targetRelative": 144480,
+          "callee": "runtime.mallocgcSmallScanNoHeaderSC2"
+        },
+        {
+          "fileOffset": 131653752,
+          "word": "97a7f48e",
+          "targetRelative": 41456,
+          "callee": "runtime.mapdelete_faststr"
+        },
+        {
+          "fileOffset": 131653800,
+          "word": "97aa16a2",
+          "targetRelative": 600688,
+          "callee": "runtime.morestack_noctxt"
+        }
+      ],
+      "indirectCalls": []
+    },
+    {
+      "name": "google3/third_party/jetski/language_server/language_server.(*Server).GetTokenBase",
+      "nameByteOffset": 43195730,
+      "fileOffset": 149112176,
+      "bytes": 2128,
+      "sha256": "9254e948d1bd15c3c5db07bf613f953d1b13d67718091eb0ed91b931a8329134",
+      "hex": "900b40f9f18311d13f0210eb29410054f48313d19dfa3fa99f020091fd2300d1e17b02f9e27f02f96b0040f9ebe300f98b0000b4631141a9651140f904000014e4031faae5031faae3031faae07702f9e27f02f9e17b02f9eb830b917f7d00a97f7d01a97f7d02a97f7d03a9e67f41f9e88741f9fb830b91631300a9e57b01f9e7031faae9031faaea031faa15300094810400b5e06301f9e07b42f9e17f42f9b097bd97e0b300f9e16701f9e20301aae10300aae06341f99645be97a00200b4e5a31291bf7c00a9bf7c01a9bf7c02a9061c46a9083840f9e85f02f9fba31291661f00a9061c40a9080840f9e86b02f9fb031391661f00a9e2031faae6031faae0031faae1031faae3031faa88010014e0031faae1031faae2031faa20000014e2f300f9e1af00f91f2003d5e0037fb2b42c7c97e0ef01f9e0077db2010301f021401591e20340b266c06597e1af40f9010000f9db730290615348b981000035e3f340f9e4ef41f905000014ed846797e3f340f9e4ef41f9231300a9039000a9e13101d021200691e20300aae0031faafdfb7fa9ff831391c0035fd6e10313a9e2d700f9e17742f9204841f95108ba97e045ba97e0eb00f9e10b14a9e1830b91e20740b23f7c81a83f7c81a83f7c81a83f7c81a8420400d162ffffb53f7c00a93f0800f9e06341f9e1b340f9e26741f9e3031faae4031faae5031faa2d0abe97e2830b91e3230091f80740b27044c1ac504481ac7044c1ac504481ac180700d178ffffb57000c03d5000803d790840f9590800f9e2a30791e3830b91f80740b27044c1ac504481ac7044c1ac504481ac180700d178ffffb57000c03d5000803d790840f9590800f9800400b4e1f300f9e0af00f9e0037cb201e400d021002791e20340b24bbf6597e1af40f9610000b42b0440f902000014eb0301aa0b0000f9db7302906b5348b96b000035ebf340f90400001497846797ebf340f92b0300f90b0400f9e16741f9e20340b2e30340b2e4031faae5031faa2671fef0c6f83891870680d2e80300aae90302aaea0302aae0b340f9bb0f6f97e06341f9e1b340f9e26741f9835bbe97e0eb01f9e28717a9e06341f9e1b340f9e26741f9816dbe97e0e701f9e28716a9237dff9063401a91e3cf00f9e30340b2e3830639237dff9063801a91e4037fb2e39318a9e3630691e4230691fb430b91631300a9e06341f9e1b340f9e26741f9e3430b91e4037fb2e50304aac780bd97e30310917f7c00a97f7c01a97f7c02a97f7c03a97f7c04a97f7c05a97f7c06a97f7c07a97f7c08a97f7c09a97f5000f9e49f40f9e5eb41f9fb431091641700a9e4d740f9e59b40f9fb031091641700a9e59357a9fb831091641700a9e4b740f9e42302f9e4e741f9e5bb40f9fbc31091641700a9fb630891641740a9e61741f9fb631191660300a9fb231191641700a9fba31191610b00a9e4a740f9e44702f9e4eb40f9e5a340f9fbe31191641700a9fb230a91641740a9e64f41f9e65302f9fb431291641700a9e00303aaf345ba97e0db00f9e1e340f9610000b4230440f902000014e3031faae67742f9c0cc40f9e1b340f9e26741f9e4031faae5031faa02d2e297010500b4e2f300f9e1af00f9e0037cb201e400d021002791e20340b2c6be6597e1af40f9410000b4210440f9010000f9db7302906b5348b96b000035ebf340f90400001414846797ebf340f92b0300f90b0400f9e16741f9e20340b2e30340b2e4031faae5031faa666efe90c6d81891870480d2e80300aae90302aaea0302aae0b340f9380f6f97e0e340f9600000b4030440f902000014e3031faae00303aa600000b4030440f902000014e3031faaa30000b4638040f9630000b4630080b902000014e3031faa7f0000718d010054600000b4030440f902000014e3031faaa30000b4638040f9630000b4630080b904000014e3031faa0200001403c489d2600000b4040440f902000014e4031faaa40000b4848440f9640000b4840080b902000014e4031faa9f0000718d010054600000b4040440f902000014e4031faaa40000b4848440f9640000b4810080b904000014e1031faa0200001401c489d2e32701b9e12f01b9e00303aae2db40f98d68be97e1db40f9610000b4239040a903000014e4031faae3031faae5031faae6031faa02000014a50400919f0005ebcd010054677865f8670000b4e81880b902000014e8031faa1f0d0071e1feff54670000b4e72080b902000014e7031faac600078bf1ffff17e0df00f9e62b01b9610000b4232080b902000014e3031faae32301b9000980d2212601d021800291e20340b2a0c26597e32b81b9e42781b96500048be62381b9a50006cbe62f81b9c30003cbdb730290675348b967000035e7235ba9040000149b836797e7235ba9272300a9e0e301f9070400f9080c00f905100229060c0429e0077db2c10701d021a01791e20340b2ffbe6597db730290635348b963000035e3e341f90400001485836797e3e341f9230300f9030000f91ffc00a9e1031faae2031faafdfb7fa9ff831391c0035fd6a5600091420400915f0800f1aa070054e2c300f9e5df01f9a72040a9e8ab00f9e7ef00f9e9031faa0300001429050091e1030baa3f0108eb4afeff54ea7869f86a0000b44b7180b902000014eb031faa7f05007161000054eb0301aaf4ffff172b0400917f000beba2030054e9bf00f9eae700f9e67f04397f1100f12c01005406010037e10000b5e0830f911f7c00a91f7c01a9e3037eb2e60340b210000014e1030baae20303aae30340b284aa00b084a03891266e6797e5df41f9e7ef40f9e8ab40f9e9bf40f9eae740f9eb0301aae30302aae67f4439e2c340f96c0500d1db7302906d5348b98d0000340d786cf8438367972a3700a90a782cf8ccffff17e20300aae00303aa5cfeff17e08700a9e28f01a9e3031eaa617b6797e08740a9e28f41a9eefdff1700000000",
+      "directCalls": [
+        {
+          "fileOffset": 149112316,
+          "word": "94003015",
+          "targetRelative": 40629648,
+          "callee": "google3/third_party/jetski/language_server/language_server.(*Server).createCustomizationManager"
+        },
+        {
+          "fileOffset": 149112336,
+          "word": "97bd97b0",
+          "targetRelative": 23172112,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.WithCustomizationCache"
+        },
+        {
+          "fileOffset": 149112360,
+          "word": "97be4596",
+          "targetRelative": 23350208,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.(*Manager).GetRules"
+        },
+        {
+          "fileOffset": 149112480,
+          "word": "977c2cb4",
+          "targetRelative": 6023344,
+          "callee": "google3/third_party/golang/github_com/cockroachdb/errors/v/v1/withstack/withstack.callers"
+        },
+        {
+          "fileOffset": 149112504,
+          "word": "9765c066",
+          "targetRelative": 145296,
+          "callee": "runtime.mallocgcSmallScanNoHeaderSC3"
+        },
+        {
+          "fileOffset": 149112540,
+          "word": "976784ed",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 149112604,
+          "word": "97ba0851",
+          "targetRelative": 22239136,
+          "callee": "google3/third_party/jetski/cortex/utils/mcp/mcp.(*McpManager).GetReadyServerStates"
+        },
+        {
+          "fileOffset": 149112608,
+          "word": "97ba45e0",
+          "targetRelative": 22302176,
+          "callee": "google3/third_party/jetski/cortex/tokens/tokens.GetMcpToolsForTokenCounting"
+        },
+        {
+          "fileOffset": 149112684,
+          "word": "97be0a2d",
+          "targetRelative": 23289696,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.(*Manager).GetCustomizations"
+        },
+        {
+          "fileOffset": 149112820,
+          "word": "9765bf4b",
+          "targetRelative": 144480,
+          "callee": "runtime.mallocgcSmallScanNoHeaderSC2"
+        },
+        {
+          "fileOffset": 149112868,
+          "word": "97678497",
+          "targetRelative": 608704,
+          "callee": "runtime.gcWriteBarrier1"
+        },
+        {
+          "fileOffset": 149112932,
+          "word": "976f0fbb",
+          "targetRelative": 2586256,
+          "callee": "google3/base/go/log.ctxlogf"
+        },
+        {
+          "fileOffset": 149112948,
+          "word": "97be5b83",
+          "targetRelative": 23373248,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.(*Manager).GetSkills"
+        },
+        {
+          "fileOffset": 149112972,
+          "word": "97be6d81",
+          "targetRelative": 23391696,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.(*Manager).GetWorkflows"
+        },
+        {
+          "fileOffset": 149113060,
+          "word": "97bd80c7",
+          "targetRelative": 23149376,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.(*Manager).GetAgentScriptItems"
+        },
+        {
+          "fileOffset": 149113268,
+          "word": "97ba45f3",
+          "targetRelative": 22302912,
+          "callee": "google3/third_party/jetski/cortex/tokens/tokens.ComputeCustomizationBreakdown"
+        },
+        {
+          "fileOffset": 149113320,
+          "word": "97e2d202",
+          "targetRelative": 32932144,
+          "callee": "google3/third_party/jetski/cortex/cortex.(*CascadeManager).GetResolvedCascadeConfig"
+        },
+        {
+          "fileOffset": 149113352,
+          "word": "9765bec6",
+          "targetRelative": 144480,
+          "callee": "runtime.mallocgcSmallScanNoHeaderSC2"
+        },
+        {
+          "fileOffset": 149113392,
+          "word": "97678414",
+          "targetRelative": 608704,
+          "callee": "runtime.gcWriteBarrier1"
+        },
+        {
+          "fileOffset": 149113456,
+          "word": "976f0f38",
+          "targetRelative": 2586256,
+          "callee": "google3/base/go/log.ctxlogf"
+        },
+        {
+          "fileOffset": 149113692,
+          "word": "97be688d",
+          "targetRelative": 23387344,
+          "callee": "google3/third_party/jetski/cortex/customizations/customizations.TruncateFromBreakdown"
+        },
+        {
+          "fileOffset": 149113840,
+          "word": "9765c2a0",
+          "targetRelative": 148912,
+          "callee": "runtime.mallocgcSmallScanNoHeaderSC7"
+        },
+        {
+          "fileOffset": 149113892,
+          "word": "9767839b",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 149113940,
+          "word": "9765beff",
+          "targetRelative": 145296,
+          "callee": "runtime.mallocgcSmallScanNoHeaderSC3"
+        },
+        {
+          "fileOffset": 149113964,
+          "word": "97678385",
+          "targetRelative": 608704,
+          "callee": "runtime.gcWriteBarrier1"
+        },
+        {
+          "fileOffset": 149114184,
+          "word": "97676e26",
+          "targetRelative": 587040,
+          "callee": "runtime.growslice"
+        },
+        {
+          "fileOffset": 149114244,
+          "word": "97678343",
+          "targetRelative": 608720,
+          "callee": "runtime.gcWriteBarrier2"
+        },
+        {
+          "fileOffset": 149114284,
+          "word": "97677b61",
+          "targetRelative": 600688,
+          "callee": "runtime.morestack_noctxt"
+        }
+      ],
+      "indirectCalls": []
+    }
+  ],
+  "schemaSymbols": [
+    {
+      "name": "google3/third_party/jetski/cortex/utils/utils.ToJSONSchemaString[go.shape.struct { InjectSteps []google3/third_party/jetski/cortex/customization/hooks/jsonhook/jsonhook.hookInjectedStepResponse \"json:\\\"inject_steps\\\" jsonschema:\\\"description=List of steps to inject into the conversation. Return an empty list if there is nothing to inject.\\\"\"; TerminationBehavior string \"json:\\\"termination_behavior,omitempty\\\" jsonschema:\\\"enum=terminate,description=Set to 'terminate' to stop the turn before calling the model. Omit to proceed to the model call.\\\"\" }]",
+      "offset": 34224701
+    }
+  ],
+  "configLiterals": [
+    {
+      "offset": 191869104,
+      "value": "\"rules-token-budget\": 20000,"
+    },
+    {
+      "offset": 191867429,
+      "value": "\"customization-token-budget\": 20000,"
+    }
+  ],
+  "limitation": "Direct references and bytes only; no control-flow completeness, indirect-call resolution or execution proof"
+}

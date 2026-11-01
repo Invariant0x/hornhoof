@@ -1,0 +1,27 @@
+{
+  "task": 78,
+  "command": "python3 task-78-evidence/fetch-artifact.py",
+  "pid": 6931,
+  "startedAt": "2026-11-01T12:17:33.066099+00:00",
+  "url": "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.4.12-4768735748292608/linux-arm/cli_linux_arm64.tar.gz",
+  "artifactVersion": "1.4.12",
+  "cpu": "aarch64",
+  "mode": "PUBLIC_PINNED_ARTIFACT_READ_ONLY_NO_INSTALL_OR_EXECUTION",
+  "archiveMembers": [
+    {
+      "name": "antigravity",
+      "bytes": 223433080,
+      "regular": true
+    }
+  ],
+  "archiveBytes": 64371567,
+  "archiveSHA512": "7cae317fb6a02eb387982f06bfb234b366879cf9a80ad8969b571e5a55d1e37a6a5a49cd6b703c0443bb417937cf5e3b14a8c80cb26917ad79eef723a9f374c7",
+  "binaryBytes": 223433080,
+  "binarySHA256": "946f014d9bd4352f09f4e88377f7957264d663437de6ad239a31247a6fc9a352",
+  "binaryPath": "/data/work/agents/9d703c07-d008-4791-8838-2f711cf3758a/task-78-evidence/cache/antigravity-1.4.12-linux-arm64",
+  "elfMachine": 183,
+  "executableBit": false,
+  "binaryExecuted": false,
+  "endedAt": "2026-11-01T12:17:38.661883+00:00",
+  "exit": 0
+}

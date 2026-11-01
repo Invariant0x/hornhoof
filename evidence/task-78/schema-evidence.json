@@ -1,0 +1,415 @@
+{
+  "task": 78,
+  "startedAt": "2026-11-01T12:42:29.912877+00:00",
+  "endedAt": "2026-11-01T12:42:30.219588+00:00",
+  "pid": 4961,
+  "method": "Read FileDescriptorProto wire fields through syntax=proto3; no native execution",
+  "selected": [
+    {
+      "path": "third_party/jetski/hooks_pb/hooks.proto",
+      "package": "exa.hooks_pb",
+      "offset": 98972383,
+      "bytes": 5276,
+      "sha256": "7396b2f35b0e223a34977eefd165414d7a7492cdf6ea10133e5b47d80e260474",
+      "syntax": "proto3",
+      "messages": [
+        {
+          "name": "HookArgsCommon",
+          "fields": [
+            {
+              "name": "conversation_id",
+              "number": 1,
+              "type": 9,
+              "typeName": null,
+              "jsonName": "conversationId"
+            },
+            {
+              "name": "workspace_paths",
+              "number": 2,
+              "type": 9,
+              "typeName": null,
+              "jsonName": "workspacePaths"
+            },
+            {
+              "name": "transcript_path",
+              "number": 3,
+              "type": 9,
+              "typeName": null,
+              "jsonName": "transcriptPath"
+            },
+            {
+              "name": "artifact_directory_path",
+              "number": 4,
+              "type": 9,
+              "typeName": null,
+              "jsonName": "artifactDirectoryPath"
+            },
+            {
+              "name": "execution_id",
+              "number": 5,
+              "type": 9,
+              "typeName": null,
+              "jsonName": "executionId"
+            },
+            {
+              "name": "model_name",
+              "number": 6,
+              "type": 9,
+              "typeName": null,
+              "jsonName": "modelName"
+            },
+            {
+              "name": "is_battle_mode",
+              "number": 7,
+              "type": 8,
+              "typeName": null,
+              "jsonName": "isBattleMode"
+            },
+            {
+              "name": "last_user_input",
+              "number": 8,
+              "type": 9,
+              "typeName": null,
+              "jsonName": "lastUserInput"
+            },
+            {
+              "name": "agent_name",
+              "number": 9,
+              "type": 9,
+              "typeName": null,
+              "jsonName": "agentName"
+            },
+            {
+              "name": "parent_conversation_id",
+              "number": 10,
+              "type": 9,
+              "typeName": null,
+              "jsonName": "parentConversationId"
+            },
+            {
+              "name": "caller_context",
+              "number": 11,
+              "type": 9,
+              "typeName": null,
+              "jsonName": "callerContext"
+            },
+            {
+              "name": "root_conversation_id",
+              "number": 12,
+              "type": 9,
+              "typeName": null,
+              "jsonName": "rootConversationId"
+            }
+          ]
+        },
+        {
+          "name": "HookArgs",
+          "fields": [
+            {
+              "name": "common",
+              "number": 6,
+              "type": 11,
+              "typeName": ".exa.hooks_pb.HookArgsCommon",
+              "jsonName": "common"
+            },
+            {
+              "name": "pre_tool_hook_args",
+              "number": 2,
+              "type": 11,
+              "typeName": ".exa.hooks_pb.PreToolHookArgs",
+              "jsonName": "preToolHookArgs"
+            },
+            {
+              "name": "post_tool_hook_args",
+              "number": 3,
+              "type": 11,
+              "typeName": ".exa.hooks_pb.PostToolHookArgs",
+              "jsonName": "postToolHookArgs"
+            },
+            {
+              "name": "pre_invocation_hook_args",
+              "number": 1,
+              "type": 11,
+              "typeName": ".exa.hooks_pb.PreInvocationHookArgs",
+              "jsonName": "preInvocationHookArgs"
+            },
+            {
+              "name": "post_invocation_hook_args",
+              "number": 5,
+              "type": 11,
+              "typeName": ".exa.hooks_pb.PostInvocationHookArgs",
+              "jsonName": "postInvocationHookArgs"
+            },
+            {
+              "name": "stop_hook_args",
+              "number": 4,
+              "type": 11,
+              "typeName": ".exa.hooks_pb.StopHookArgs",
+              "jsonName": "stopHookArgs"
+            },
+            {
+              "name": "session_start_hook_args",
+              "number": 7,
+              "type": 11,
+              "typeName": ".exa.hooks_pb.SessionStartHookArgs",
+              "jsonName": "sessionStartHookArgs"
+            }
+          ]
+        },
+        {
+          "name": "PreInvocationHookArgs",
+          "fields": [
+            {
+              "name": "invocation_num",
+              "number": 1,
+              "type": 5,
+              "typeName": null,
+              "jsonName": "invocationNum"
+            },
+            {
+              "name": "initial_num_steps",
+              "number": 2,
+              "type": 5,
+              "typeName": null,
+              "jsonName": "initialNumSteps"
+            }
+          ]
+        },
+        {
+          "name": "PreInvocationHookResult",
+          "fields": [
+            {
+              "name": "inject_steps",
+              "number": 1,
+              "type": 11,
+              "typeName": ".exa.hooks_pb.HookInjectedStep",
+              "jsonName": "injectSteps"
+            },
+            {
+              "name": "termination_behavior",
+              "number": 2,
+              "type": 9,
+              "typeName": null,
+              "jsonName": "terminationBehavior"
+            }
+          ]
+        },
+        {
+          "name": "PostInvocationHookResult",
+          "fields": [
+            {
+              "name": "inject_steps",
+              "number": 1,
+              "type": 11,
+              "typeName": ".exa.hooks_pb.HookInjectedStep",
+              "jsonName": "injectSteps"
+            },
+            {
+              "name": "termination_behavior",
+              "number": 2,
+              "type": 9,
+              "typeName": null,
+              "jsonName": "terminationBehavior"
+            }
+          ]
+        }
+      ],
+      "enums": []
+    },
+    {
+      "path": "third_party/jetski/language_server_pb/language_server.proto",
+      "package": "exa.language_server_pb",
+      "offset": 103546320,
+      "bytes": 170155,
+      "sha256": "473c4ecac5df0acfe28ffe8003f121dddd62f390e46e1500538053574c84316a",
+      "syntax": "proto3",
+      "messages": [
+        {
+          "name": "GetTokenBaseRequest",
+          "fields": [
+            {
+              "name": "cascade_config",
+              "number": 1,
+              "type": 11,
+              "typeName": ".exa.cortex_pb.CascadeConfig",
+              "jsonName": "cascadeConfig"
+            },
+            {
+              "name": "workspace_uris",
+              "number": 2,
+              "type": 9,
+              "typeName": null,
+              "jsonName": "workspaceUris"
+            },
+            {
+              "name": "active_profile",
+              "number": 3,
+              "type": 9,
+              "typeName": null,
+              "jsonName": "activeProfile"
+            }
+          ]
+        },
+        {
+          "name": "GetTokenBaseResponse",
+          "fields": [
+            {
+              "name": "customization_token_base",
+              "number": 3,
+              "type": 11,
+              "typeName": ".exa.cortex_pb.TokenBreakdown",
+              "jsonName": "customizationTokenBase"
+            },
+            {
+              "name": "remaining_budget",
+              "number": 4,
+              "type": 5,
+              "typeName": null,
+              "jsonName": "remainingBudget"
+            },
+            {
+              "name": "customization_budget",
+              "number": 5,
+              "type": 5,
+              "typeName": null,
+              "jsonName": "customizationBudget"
+            },
+            {
+              "name": "truncated_customization_token_base",
+              "number": 6,
+              "type": 11,
+              "typeName": ".exa.cortex_pb.TokenBreakdown",
+              "jsonName": "truncatedCustomizationTokenBase"
+            },
+            {
+              "name": "rules_budget",
+              "number": 7,
+              "type": 5,
+              "typeName": null,
+              "jsonName": "rulesBudget"
+            },
+            {
+              "name": "remaining_rules_budget",
+              "number": 8,
+              "type": 5,
+              "typeName": null,
+              "jsonName": "remainingRulesBudget"
+            },
+            {
+              "name": "token_base",
+              "number": 1,
+              "type": 11,
+              "typeName": ".exa.cortex_pb.TokenBreakdown",
+              "jsonName": "tokenBase"
+            },
+            {
+              "name": "max_token_base",
+              "number": 2,
+              "type": 5,
+              "typeName": null,
+              "jsonName": "maxTokenBase"
+            }
+          ]
+        }
+      ],
+      "enums": []
+    },
+    {
+      "path": "third_party/jetski/cortex_pb/cortex.proto",
+      "package": "exa.cortex_pb",
+      "offset": 104090274,
+      "bytes": 209821,
+      "sha256": "da744c4a5c398581560b190a316d8654ff4db0ec0a9dfb7408b8f54675a69469",
+      "syntax": "proto3",
+      "messages": [
+        {
+          "name": "TopLevelTokenGroup",
+          "fields": [
+            {
+              "name": "name",
+              "number": 1,
+              "type": 9,
+              "typeName": null,
+              "jsonName": "name"
+            },
+            {
+              "name": "type",
+              "number": 2,
+              "type": 14,
+              "typeName": ".exa.cortex_pb.TokenType",
+              "jsonName": "type"
+            },
+            {
+              "name": "source",
+              "number": 3,
+              "type": 14,
+              "typeName": ".exa.cortex_pb.TokenSource",
+              "jsonName": "source"
+            },
+            {
+              "name": "num_tokens",
+              "number": 4,
+              "type": 5,
+              "typeName": null,
+              "jsonName": "numTokens"
+            },
+            {
+              "name": "children",
+              "number": 5,
+              "type": 11,
+              "typeName": ".exa.cortex_pb.TokenGroup",
+              "jsonName": "children"
+            }
+          ]
+        },
+        {
+          "name": "TokenGroup",
+          "fields": [
+            {
+              "name": "name",
+              "number": 1,
+              "type": 9,
+              "typeName": null,
+              "jsonName": "name"
+            },
+            {
+              "name": "children",
+              "number": 2,
+              "type": 11,
+              "typeName": ".exa.cortex_pb.TokenGroup",
+              "jsonName": "children"
+            },
+            {
+              "name": "num_tokens",
+              "number": 3,
+              "type": 5,
+              "typeName": null,
+              "jsonName": "numTokens"
+            }
+          ]
+        },
+        {
+          "name": "TokenBreakdown",
+          "fields": [
+            {
+              "name": "groups",
+              "number": 1,
+              "type": 11,
+              "typeName": ".exa.cortex_pb.TopLevelTokenGroup",
+              "jsonName": "groups"
+            },
+            {
+              "name": "total_tokens",
+              "number": 2,
+              "type": 5,
+              "typeName": null,
+              "jsonName": "totalTokens"
+            }
+          ]
+        }
+      ],
+      "enums": []
+    }
+  ],
+  "limitation": "Embedded schemas establish fields, not supported entrypoints or runtime enforcement"
+}

@@ -1,0 +1,2401 @@
+{
+  "task": 78,
+  "startedAt": "2026-11-01T12:42:27.738132+00:00",
+  "endedAt": "2026-11-01T12:42:29.846604+00:00",
+  "pid": 4944,
+  "method": "Go1.20+ pcln metadata; entry/end are relative when textBase=0; read only",
+  "formatReference": "https://raw.githubusercontent.com/golang/go/go1.24.0/src/debug/gosym/pclntab.go",
+  "tables": [
+    {
+      "index": 0,
+      "headerOffset": 23240328,
+      "count": 174388,
+      "textBase": 0,
+      "relocation": null
+    },
+    {
+      "index": 1,
+      "headerOffset": 213417927,
+      "count": 19312,
+      "textBase": 0,
+      "relocation": null
+    }
+  ],
+  "groups": {
+    "rules_budget": [
+      {
+        "table": 0,
+        "name": "google3/google/api/annotations_go_proto.(*HttpRule).GetMediaUpload",
+        "nameByteOffset": 24523899,
+        "entry": 6341520,
+        "end": 6341552,
+        "funcMetadataOffset": 58752600
+      },
+      {
+        "table": 0,
+        "name": "google3/google/api/annotations_go_proto.(*HttpRule).GetMediaDownload",
+        "nameByteOffset": 24523966,
+        "entry": 6341552,
+        "end": 6341584,
+        "funcMetadataOffset": 58752688
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex_pb/cortex_go_proto.(*CascadePlannerConfig).GetRulesTokenBudget",
+        "nameByteOffset": 27014600,
+        "entry": 9917024,
+        "end": 9917056,
+        "funcMetadataOffset": 61047048
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/language_server_pb/language_server_go_proto.(*GetTokenBaseResponse).GetRulesBudget",
+        "nameByteOffset": 28323478,
+        "entry": 11222656,
+        "end": 11222688,
+        "funcMetadataOffset": 62176632
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/language_server_pb/language_server_go_proto.(*GetTokenBaseResponse).GetRemainingRulesBudget",
+        "nameByteOffset": 28323588,
+        "entry": 11222688,
+        "end": 11222720,
+        "funcMetadataOffset": 62176720
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/github_com/antlr4_go/antlr/v/v4/antlr.(*BaseATNState).GetNextTokenWithinRule",
+        "nameByteOffset": 29163689,
+        "entry": 12477232,
+        "end": 12477248,
+        "funcMetadataOffset": 62783992
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/github_com/antlr4_go/antlr/v/v4/antlr.(*BaseATNState).SetNextTokenWithinRule",
+        "nameByteOffset": 29163793,
+        "entry": 12477248,
+        "end": 12477344,
+        "funcMetadataOffset": 62784080
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/github_com/antlr4_go/antlr/v/v4/antlr.(*CommonTokenStream).GetTextFromRuleContext",
+        "nameByteOffset": 29167556,
+        "entry": 12482704,
+        "end": 12482816,
+        "funcMetadataOffset": 62787208
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/github_com/antlr4_go/antlr/v/v4/antlr.(*BaseParser).GetExpectedTokensWithinCurrentRule",
+        "nameByteOffset": 29201550,
+        "entry": 12571296,
+        "end": 12571408,
+        "funcMetadataOffset": 62810560
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/github_com/antlr4_go/antlr/v/v4/antlr.(*BaseParserRuleContext).AddTokenNode",
+        "nameByteOffset": 29203406,
+        "entry": 12574912,
+        "end": 12575360,
+        "funcMetadataOffset": 62811904
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/github_com/antlr4_go/antlr/v/v4/antlr.(*BaseParserRuleContext).GetToken",
+        "nameByteOffset": 29204793,
+        "entry": 12576944,
+        "end": 12577264,
+        "funcMetadataOffset": 62812888
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/github_com/antlr4_go/antlr/v/v4/antlr.(*BaseParserRuleContext).GetTokens",
+        "nameByteOffset": 29204892,
+        "entry": 12577264,
+        "end": 12577744,
+        "funcMetadataOffset": 62812976
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/github_com/antlr4_go/antlr/v/v4/antlr.(*BaseParserRuleContext).GetPayload",
+        "nameByteOffset": 29204992,
+        "entry": 12577744,
+        "end": 12577760,
+        "funcMetadataOffset": 62813064
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/github_com/antlr4_go/antlr/v/v4/antlr..embed.1.0.google3/third_party/golang/github_com/antlr4_go/antlr/v/v4/antlr.(*BaseATNState).GetNextTokenWithinRule",
+        "nameByteOffset": 29275380,
+        "entry": 12641184,
+        "end": 12641200,
+        "funcMetadataOffset": 62846936
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/github_com/antlr4_go/antlr/v/v4/antlr..embed.1.0.google3/third_party/golang/github_com/antlr4_go/antlr/v/v4/antlr.(*BaseATNState).SetNextTokenWithinRule",
+        "nameByteOffset": 29276570,
+        "entry": 12641376,
+        "end": 12641472,
+        "funcMetadataOffset": 62847552
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/cel/go/parser/gen/gen.CELParser.GetExpectedTokensWithinCurrentRule",
+        "nameByteOffset": 29338639,
+        "entry": 12764032,
+        "end": 12764144,
+        "funcMetadataOffset": 62915160
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/cel/go/parser/gen/gen.(*CELParser).GetExpectedTokensWithinCurrentRule",
+        "nameByteOffset": 29338726,
+        "entry": 12764144,
+        "end": 12764256,
+        "funcMetadataOffset": 62915256
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/github_com/antlr4_go/antlr/v/v4/antlr..embed.1.0.google3/third_party/golang/github_com/antlr4_go/antlr/v/v4/antlr.(*BaseParserRuleContext).AddTokenNode",
+        "nameByteOffset": 29344691,
+        "entry": 12770624,
+        "end": 12771088,
+        "funcMetadataOffset": 62922424
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/github_com/antlr4_go/antlr/v/v4/antlr..embed.1.0.google3/third_party/golang/github_com/antlr4_go/antlr/v/v4/antlr.(*BaseParserRuleContext).GetPayload",
+        "nameByteOffset": 29346648,
+        "entry": 12771696,
+        "end": 12771728,
+        "funcMetadataOffset": 62923400
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/github_com/antlr4_go/antlr/v/v4/antlr..embed.1.0.google3/third_party/golang/github_com/antlr4_go/antlr/v/v4/antlr.(*BaseParserRuleContext).GetToken",
+        "nameByteOffset": 29347711,
+        "entry": 12771808,
+        "end": 12771824,
+        "funcMetadataOffset": 62923928
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/github_com/antlr4_go/antlr/v/v4/antlr..embed.1.0.google3/third_party/golang/github_com/antlr4_go/antlr/v/v4/antlr.(*BaseParserRuleContext).GetTokens",
+        "nameByteOffset": 29347886,
+        "entry": 12771824,
+        "end": 12771840,
+        "funcMetadataOffset": 62924016
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/chatconverters/chatconverters.(*DirectoryRulesStringConverter).GetPayloadCase",
+        "nameByteOffset": 33897005,
+        "entry": 22322560,
+        "end": 22322576,
+        "funcMetadataOffset": 65310416
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/mixins/mixins.(*UserRulesSection).TokenType",
+        "nameByteOffset": 39004423,
+        "entry": 31047216,
+        "end": 31047232,
+        "funcMetadataOffset": 68586448
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/mixins/mixins.(*UserRulesSection).ShouldInclude",
+        "nameByteOffset": 39004577,
+        "entry": 31047248,
+        "end": 31047312,
+        "funcMetadataOffset": 68586624
+      }
+    ],
+    "invocation_hooks": [
+      {
+        "table": 0,
+        "name": "internal/runtime/exithook.Add",
+        "nameByteOffset": 23254953,
+        "entry": 79792,
+        "end": 80144,
+        "funcMetadataOffset": 57047368
+      },
+      {
+        "table": 0,
+        "name": "internal/runtime/exithook.Run",
+        "nameByteOffset": 23254983,
+        "entry": 80144,
+        "end": 80640,
+        "funcMetadataOffset": 57047456
+      },
+      {
+        "table": 0,
+        "name": "internal/runtime/exithook.Run.deferwrap2",
+        "nameByteOffset": 23255013,
+        "entry": 80640,
+        "end": 80656,
+        "funcMetadataOffset": 57047544
+      },
+      {
+        "table": 0,
+        "name": "internal/runtime/exithook.Run.deferwrap1",
+        "nameByteOffset": 23255054,
+        "entry": 80656,
+        "end": 80672,
+        "funcMetadataOffset": 57047632
+      },
+      {
+        "table": 0,
+        "name": "internal/runtime/exithook.Run.func1",
+        "nameByteOffset": 23255095,
+        "entry": 80672,
+        "end": 80768,
+        "funcMetadataOffset": 57047720
+      },
+      {
+        "table": 0,
+        "name": "net/http.(*ClientConn).shouldRunStateHook",
+        "nameByteOffset": 24328518,
+        "entry": 5575168,
+        "end": 5575712,
+        "funcMetadataOffset": 58519960
+      },
+      {
+        "table": 0,
+        "name": "net/http.(*ClientConn).maybeRunStateHook",
+        "nameByteOffset": 24328560,
+        "entry": 5575712,
+        "end": 5576016,
+        "funcMetadataOffset": 58520048
+      },
+      {
+        "table": 0,
+        "name": "net/http.(*ClientConn).shouldRunStateHook.deferwrap1",
+        "nameByteOffset": 24348683,
+        "entry": 5800576,
+        "end": 5800688,
+        "funcMetadataOffset": 58560232
+      },
+      {
+        "table": 0,
+        "name": "net/http.(*ClientConn).maybeRunStateHook.func1",
+        "nameByteOffset": 24348736,
+        "entry": 5800688,
+        "end": 5800832,
+        "funcMetadataOffset": 58560320
+      },
+      {
+        "table": 0,
+        "name": "net/http.(*ClientConn).maybeRunStateHook-fm",
+        "nameByteOffset": 24367812,
+        "entry": 5863264,
+        "end": 5863328,
+        "funcMetadataOffset": 58595160
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/hooks_pb/hooks_go_proto.(*HookArgs).GetPreInvocationHookArgs",
+        "nameByteOffset": 26630155,
+        "entry": 9542096,
+        "end": 9542144,
+        "funcMetadataOffset": 60676080
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/hooks_pb/hooks_go_proto.(*HookArgs).GetPostInvocationHookArgs",
+        "nameByteOffset": 26630243,
+        "entry": 9542144,
+        "end": 9542192,
+        "funcMetadataOffset": 60676168
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/hooks_pb/hooks_go_proto.(*PreInvocationHookArgs).Reset",
+        "nameByteOffset": 26633398,
+        "entry": 9545104,
+        "end": 9545264,
+        "funcMetadataOffset": 60679576
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/hooks_pb/hooks_go_proto.(*PreInvocationHookArgs).String",
+        "nameByteOffset": 26633480,
+        "entry": 9545264,
+        "end": 9545344,
+        "funcMetadataOffset": 60679672
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/hooks_pb/hooks_go_proto.(*PreInvocationHookArgs).ProtoMessage",
+        "nameByteOffset": 26633563,
+        "entry": 9545344,
+        "end": 9545360,
+        "funcMetadataOffset": 60679760
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/hooks_pb/hooks_go_proto.(*PreInvocationHookArgs).ProtoReflect",
+        "nameByteOffset": 26633652,
+        "entry": 9545360,
+        "end": 9545536,
+        "funcMetadataOffset": 60679848
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/hooks_pb/hooks_go_proto.(*PreInvocationHookArgs).Descriptor",
+        "nameByteOffset": 26633741,
+        "entry": 9545536,
+        "end": 9545648,
+        "funcMetadataOffset": 60679944
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/hooks_pb/hooks_go_proto.(*PreInvocationHookArgs).GetInvocationNum",
+        "nameByteOffset": 26633828,
+        "entry": 9545648,
+        "end": 9545680,
+        "funcMetadataOffset": 60680032
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/hooks_pb/hooks_go_proto.(*PreInvocationHookArgs).GetInitialNumSteps",
+        "nameByteOffset": 26633921,
+        "entry": 9545680,
+        "end": 9545712,
+        "funcMetadataOffset": 60680120
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/hooks_pb/hooks_go_proto.(*PreInvocationHookResult).Reset",
+        "nameByteOffset": 26634016,
+        "entry": 9545712,
+        "end": 9545888,
+        "funcMetadataOffset": 60680208
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/hooks_pb/hooks_go_proto.(*PreInvocationHookResult).String",
+        "nameByteOffset": 26634100,
+        "entry": 9545888,
+        "end": 9545968,
+        "funcMetadataOffset": 60680304
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/hooks_pb/hooks_go_proto.(*PreInvocationHookResult).ProtoMessage",
+        "nameByteOffset": 26634185,
+        "entry": 9545968,
+        "end": 9545984,
+        "funcMetadataOffset": 60680392
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/hooks_pb/hooks_go_proto.(*PreInvocationHookResult).ProtoReflect",
+        "nameByteOffset": 26634276,
+        "entry": 9545984,
+        "end": 9546160,
+        "funcMetadataOffset": 60680480
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/hooks_pb/hooks_go_proto.(*PreInvocationHookResult).Descriptor",
+        "nameByteOffset": 26634367,
+        "entry": 9546160,
+        "end": 9546272,
+        "funcMetadataOffset": 60680576
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/hooks_pb/hooks_go_proto.(*PreInvocationHookResult).GetInjectSteps",
+        "nameByteOffset": 26634456,
+        "entry": 9546272,
+        "end": 9546320,
+        "funcMetadataOffset": 60680664
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/hooks_pb/hooks_go_proto.(*PreInvocationHookResult).GetTerminationBehavior",
+        "nameByteOffset": 26634549,
+        "entry": 9546320,
+        "end": 9546352,
+        "funcMetadataOffset": 60680752
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/hooks_pb/hooks_go_proto.(*PostInvocationHookArgs).Reset",
+        "nameByteOffset": 26634650,
+        "entry": 9546352,
+        "end": 9546528,
+        "funcMetadataOffset": 60680840
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/hooks_pb/hooks_go_proto.(*PostInvocationHookArgs).String",
+        "nameByteOffset": 26634733,
+        "entry": 9546528,
+        "end": 9546608,
+        "funcMetadataOffset": 60680936
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/hooks_pb/hooks_go_proto.(*PostInvocationHookArgs).ProtoMessage",
+        "nameByteOffset": 26634817,
+        "entry": 9546608,
+        "end": 9546624,
+        "funcMetadataOffset": 60681024
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/hooks_pb/hooks_go_proto.(*PostInvocationHookArgs).ProtoReflect",
+        "nameByteOffset": 26634907,
+        "entry": 9546624,
+        "end": 9546800,
+        "funcMetadataOffset": 60681112
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/hooks_pb/hooks_go_proto.(*PostInvocationHookArgs).Descriptor",
+        "nameByteOffset": 26634997,
+        "entry": 9546800,
+        "end": 9546912,
+        "funcMetadataOffset": 60681208
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/hooks_pb/hooks_go_proto.(*PostInvocationHookArgs).GetInvocationNum",
+        "nameByteOffset": 26635085,
+        "entry": 9546912,
+        "end": 9546944,
+        "funcMetadataOffset": 60681296
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/hooks_pb/hooks_go_proto.(*PostInvocationHookArgs).GetInitialNumSteps",
+        "nameByteOffset": 26635179,
+        "entry": 9546944,
+        "end": 9546976,
+        "funcMetadataOffset": 60681384
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/hooks_pb/hooks_go_proto.(*PostInvocationHookArgs).GetModelOutput",
+        "nameByteOffset": 26635275,
+        "entry": 9546976,
+        "end": 9547008,
+        "funcMetadataOffset": 60681472
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/hooks_pb/hooks_go_proto.(*PostInvocationHookArgs).GetModelThinking",
+        "nameByteOffset": 26635367,
+        "entry": 9547008,
+        "end": 9547040,
+        "funcMetadataOffset": 60681560
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/hooks_pb/hooks_go_proto.(*PostInvocationHookResult).Reset",
+        "nameByteOffset": 26635461,
+        "entry": 9547040,
+        "end": 9547216,
+        "funcMetadataOffset": 60681648
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/hooks_pb/hooks_go_proto.(*PostInvocationHookResult).String",
+        "nameByteOffset": 26635546,
+        "entry": 9547216,
+        "end": 9547296,
+        "funcMetadataOffset": 60681744
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/hooks_pb/hooks_go_proto.(*PostInvocationHookResult).ProtoMessage",
+        "nameByteOffset": 26635632,
+        "entry": 9547296,
+        "end": 9547312,
+        "funcMetadataOffset": 60681832
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/hooks_pb/hooks_go_proto.(*PostInvocationHookResult).ProtoReflect",
+        "nameByteOffset": 26635724,
+        "entry": 9547312,
+        "end": 9547488,
+        "funcMetadataOffset": 60681920
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/hooks_pb/hooks_go_proto.(*PostInvocationHookResult).Descriptor",
+        "nameByteOffset": 26635816,
+        "entry": 9547488,
+        "end": 9547600,
+        "funcMetadataOffset": 60682016
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/hooks_pb/hooks_go_proto.(*PostInvocationHookResult).GetInjectSteps",
+        "nameByteOffset": 26635906,
+        "entry": 9547600,
+        "end": 9547648,
+        "funcMetadataOffset": 60682104
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/hooks_pb/hooks_go_proto.(*PostInvocationHookResult).GetTerminationBehavior",
+        "nameByteOffset": 26636000,
+        "entry": 9547648,
+        "end": 9547680,
+        "funcMetadataOffset": 60682192
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/hooks_pb/hooks_go_proto.(*StopHookArgs).GetFinalModelOutput",
+        "nameByteOffset": 26636814,
+        "entry": 9548368,
+        "end": 9548400,
+        "funcMetadataOffset": 60683088
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/opensearch_clients_pb/opensearch_clients_go_proto.(*GetKnowledgeBaseWebhookUrlResponse).Reset",
+        "nameByteOffset": 26748188,
+        "entry": 9671872,
+        "end": 9672048,
+        "funcMetadataOffset": 60783312
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/opensearch_clients_pb/opensearch_clients_go_proto.(*GetKnowledgeBaseWebhookUrlResponse).String",
+        "nameByteOffset": 26748309,
+        "entry": 9672048,
+        "end": 9672128,
+        "funcMetadataOffset": 60783408
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/opensearch_clients_pb/opensearch_clients_go_proto.(*GetKnowledgeBaseWebhookUrlResponse).ProtoMessage",
+        "nameByteOffset": 26748431,
+        "entry": 9672128,
+        "end": 9672144,
+        "funcMetadataOffset": 60783496
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/opensearch_clients_pb/opensearch_clients_go_proto.(*GetKnowledgeBaseWebhookUrlResponse).ProtoReflect",
+        "nameByteOffset": 26748559,
+        "entry": 9672144,
+        "end": 9672320,
+        "funcMetadataOffset": 60783584
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/opensearch_clients_pb/opensearch_clients_go_proto.(*GetKnowledgeBaseWebhookUrlResponse).GetWebhookUrl",
+        "nameByteOffset": 26748687,
+        "entry": 9672320,
+        "end": 9672352,
+        "funcMetadataOffset": 60783680
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex_pb/cortex_go_proto.(*CustomAgentConfig).GetPreInvocationHooks",
+        "nameByteOffset": 26992294,
+        "entry": 9900112,
+        "end": 9900160,
+        "funcMetadataOffset": 61025176
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex_pb/cortex_go_proto.(*CustomAgentConfig).GetPostInvocationHooks",
+        "nameByteOffset": 26992390,
+        "entry": 9900160,
+        "end": 9900208,
+        "funcMetadataOffset": 61025264
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex_pb/cortex_go_proto.(*DeclarativeComponentConfig).GetPreInvocationHooks",
+        "nameByteOffset": 26998799,
+        "entry": 9905632,
+        "end": 9905680,
+        "funcMetadataOffset": 61031904
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex_pb/cortex_go_proto.(*DeclarativeComponentConfig).GetPostInvocationHooks",
+        "nameByteOffset": 26998904,
+        "entry": 9905680,
+        "end": 9905728,
+        "funcMetadataOffset": 61031992
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex_pb/cortex_go_proto.(*CustomizationConfig).GetPreInvocationHookNames",
+        "nameByteOffset": 27007684,
+        "entry": 9913264,
+        "end": 9913312,
+        "funcMetadataOffset": 61040576
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex_pb/cortex_go_proto.(*CustomizationConfig).GetPostInvocationHookNames",
+        "nameByteOffset": 27007786,
+        "entry": 9913312,
+        "end": 9913360,
+        "funcMetadataOffset": 61040664
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/google_golang_org/genai/v/v0/google/genai/interactions/models/webhooks/webhooks.WebhookListResponse.MarshalJSON",
+        "nameByteOffset": 30906822,
+        "entry": 18696272,
+        "end": 18696400,
+        "funcMetadataOffset": 64263384
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/google_golang_org/genai/v/v0/google/genai/interactions/models/webhooks/webhooks.(*WebhookListResponse).UnmarshalJSON",
+        "nameByteOffset": 30906961,
+        "entry": 18696400,
+        "end": 18696624,
+        "funcMetadataOffset": 64263464
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/google_golang_org/genai/v/v0/google/genai/interactions/models/webhooks/webhooks.(*WebhookListResponse).GetNextPageToken",
+        "nameByteOffset": 30907105,
+        "entry": 18696624,
+        "end": 18696656,
+        "funcMetadataOffset": 64263552
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/google_golang_org/genai/v/v0/google/genai/interactions/models/webhooks/webhooks.(*WebhookListResponse).GetWebhooks",
+        "nameByteOffset": 30907252,
+        "entry": 18696656,
+        "end": 18696704,
+        "funcMetadataOffset": 64263640
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/google_golang_org/genai/v/v0/google/genai/interactions/models/webhooks/webhooks.(*WebhookRotateSigningSecretResponse).GetSecret",
+        "nameByteOffset": 30907394,
+        "entry": 18696704,
+        "end": 18696736,
+        "funcMetadataOffset": 64263728
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/google_golang_org/genai/v/v0/google/genai/interactions/models/webhooks/webhooks.(*WebhookListResponse).MarshalJSON",
+        "nameByteOffset": 30909613,
+        "entry": 18699312,
+        "end": 18699440,
+        "funcMetadataOffset": 64265112
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/google_golang_org/genai/v/v0/google/genai/interactions/models/operations/operations.CreateWebhookResponse.MarshalJSON",
+        "nameByteOffset": 30918903,
+        "entry": 18706256,
+        "end": 18706384,
+        "funcMetadataOffset": 64270496
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/google_golang_org/genai/v/v0/google/genai/interactions/models/operations/operations.(*CreateWebhookResponse).UnmarshalJSON",
+        "nameByteOffset": 30919048,
+        "entry": 18706384,
+        "end": 18706608,
+        "funcMetadataOffset": 64270576
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/google_golang_org/genai/v/v0/google/genai/interactions/models/operations/operations.(*CreateWebhookResponse).GetHTTPMeta",
+        "nameByteOffset": 30919198,
+        "entry": 18706608,
+        "end": 18706640,
+        "funcMetadataOffset": 64270664
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/google_golang_org/genai/v/v0/google/genai/interactions/models/operations/operations.(*CreateWebhookResponse).GetWebhook",
+        "nameByteOffset": 30919346,
+        "entry": 18706640,
+        "end": 18706672,
+        "funcMetadataOffset": 64270752
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/google_golang_org/genai/v/v0/google/genai/interactions/models/operations/operations.DeleteWebhookResponse.MarshalJSON",
+        "nameByteOffset": 30925705,
+        "entry": 18709456,
+        "end": 18709584,
+        "funcMetadataOffset": 64274496
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/google_golang_org/genai/v/v0/google/genai/interactions/models/operations/operations.(*DeleteWebhookResponse).UnmarshalJSON",
+        "nameByteOffset": 30925850,
+        "entry": 18709584,
+        "end": 18709808,
+        "funcMetadataOffset": 64274576
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/google_golang_org/genai/v/v0/google/genai/interactions/models/operations/operations.(*DeleteWebhookResponse).GetHTTPMeta",
+        "nameByteOffset": 30926000,
+        "entry": 18709808,
+        "end": 18709840,
+        "funcMetadataOffset": 64274664
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/google_golang_org/genai/v/v0/google/genai/interactions/models/operations/operations.(*DeleteWebhookResponse).GetEmpty",
+        "nameByteOffset": 30926148,
+        "entry": 18709840,
+        "end": 18709872,
+        "funcMetadataOffset": 64274752
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/google_golang_org/genai/v/v0/google/genai/interactions/models/operations/operations.GetWebhookResponse.MarshalJSON",
+        "nameByteOffset": 30935196,
+        "entry": 18713808,
+        "end": 18713936,
+        "funcMetadataOffset": 64280064
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/google_golang_org/genai/v/v0/google/genai/interactions/models/operations/operations.(*GetWebhookResponse).UnmarshalJSON",
+        "nameByteOffset": 30935338,
+        "entry": 18713936,
+        "end": 18714160,
+        "funcMetadataOffset": 64280144
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/google_golang_org/genai/v/v0/google/genai/interactions/models/operations/operations.(*GetWebhookResponse).GetHTTPMeta",
+        "nameByteOffset": 30935485,
+        "entry": 18714160,
+        "end": 18714192,
+        "funcMetadataOffset": 64280232
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/google_golang_org/genai/v/v0/google/genai/interactions/models/operations/operations.(*GetWebhookResponse).GetWebhook",
+        "nameByteOffset": 30935630,
+        "entry": 18714192,
+        "end": 18714224,
+        "funcMetadataOffset": 64280320
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/google_golang_org/genai/v/v0/google/genai/interactions/models/operations/operations.ListWebhooksResponse.MarshalJSON",
+        "nameByteOffset": 30945614,
+        "entry": 18718448,
+        "end": 18718576,
+        "funcMetadataOffset": 64286160
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/google_golang_org/genai/v/v0/google/genai/interactions/models/operations/operations.(*ListWebhooksResponse).UnmarshalJSON",
+        "nameByteOffset": 30945758,
+        "entry": 18718576,
+        "end": 18718800,
+        "funcMetadataOffset": 64286240
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/google_golang_org/genai/v/v0/google/genai/interactions/models/operations/operations.(*ListWebhooksResponse).GetHTTPMeta",
+        "nameByteOffset": 30945907,
+        "entry": 18718800,
+        "end": 18718832,
+        "funcMetadataOffset": 64286328
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/google_golang_org/genai/v/v0/google/genai/interactions/models/operations/operations.(*ListWebhooksResponse).GetWebhookListResponse",
+        "nameByteOffset": 30946054,
+        "entry": 18718832,
+        "end": 18718864,
+        "funcMetadataOffset": 64286416
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/google_golang_org/genai/v/v0/google/genai/interactions/models/operations/operations.PingWebhookResponse.MarshalJSON",
+        "nameByteOffset": 30947213,
+        "entry": 18719472,
+        "end": 18719600,
+        "funcMetadataOffset": 64287104
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/google_golang_org/genai/v/v0/google/genai/interactions/models/operations/operations.(*PingWebhookResponse).UnmarshalJSON",
+        "nameByteOffset": 30947356,
+        "entry": 18719600,
+        "end": 18719824,
+        "funcMetadataOffset": 64287184
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/google_golang_org/genai/v/v0/google/genai/interactions/models/operations/operations.(*PingWebhookResponse).GetHTTPMeta",
+        "nameByteOffset": 30947504,
+        "entry": 18719824,
+        "end": 18719856,
+        "funcMetadataOffset": 64287272
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/google_golang_org/genai/v/v0/google/genai/interactions/models/operations/operations.(*PingWebhookResponse).GetWebhookPingResponse",
+        "nameByteOffset": 30947650,
+        "entry": 18719856,
+        "end": 18719888,
+        "funcMetadataOffset": 64287360
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/google_golang_org/genai/v/v0/google/genai/interactions/models/operations/operations.(*RotateSigningSecretResponse).GetWebhookRotateSigningSecretResponse",
+        "nameByteOffset": 30948874,
+        "entry": 18720400,
+        "end": 18720432,
+        "funcMetadataOffset": 64288056
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/google_golang_org/genai/v/v0/google/genai/interactions/models/operations/operations.UpdateWebhookResponse.MarshalJSON",
+        "nameByteOffset": 30956112,
+        "entry": 18723424,
+        "end": 18723552,
+        "funcMetadataOffset": 64292160
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/google_golang_org/genai/v/v0/google/genai/interactions/models/operations/operations.(*UpdateWebhookResponse).UnmarshalJSON",
+        "nameByteOffset": 30956257,
+        "entry": 18723552,
+        "end": 18723776,
+        "funcMetadataOffset": 64292240
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/google_golang_org/genai/v/v0/google/genai/interactions/models/operations/operations.(*UpdateWebhookResponse).GetHTTPMeta",
+        "nameByteOffset": 30956407,
+        "entry": 18723776,
+        "end": 18723808,
+        "funcMetadataOffset": 64292328
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/google_golang_org/genai/v/v0/google/genai/interactions/models/operations/operations.(*UpdateWebhookResponse).GetWebhook",
+        "nameByteOffset": 30956555,
+        "entry": 18723808,
+        "end": 18723840,
+        "funcMetadataOffset": 64292416
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/google_golang_org/genai/v/v0/google/genai/interactions/models/operations/operations.(*CreateWebhookResponse).MarshalJSON",
+        "nameByteOffset": 30964295,
+        "entry": 18730496,
+        "end": 18730624,
+        "funcMetadataOffset": 64295416
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/google_golang_org/genai/v/v0/google/genai/interactions/models/operations/operations.(*DeleteWebhookResponse).MarshalJSON",
+        "nameByteOffset": 30965186,
+        "entry": 18731264,
+        "end": 18731392,
+        "funcMetadataOffset": 64295944
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/google_golang_org/genai/v/v0/google/genai/interactions/models/operations/operations.(*GetWebhookResponse).MarshalJSON",
+        "nameByteOffset": 30966369,
+        "entry": 18732288,
+        "end": 18732416,
+        "funcMetadataOffset": 64296648
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/google_golang_org/genai/v/v0/google/genai/interactions/models/operations/operations.(*ListWebhooksResponse).MarshalJSON",
+        "nameByteOffset": 30967552,
+        "entry": 18733344,
+        "end": 18733472,
+        "funcMetadataOffset": 64297352
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/google_golang_org/genai/v/v0/google/genai/interactions/models/operations/operations.(*PingWebhookResponse).MarshalJSON",
+        "nameByteOffset": 30967985,
+        "entry": 18733728,
+        "end": 18733856,
+        "funcMetadataOffset": 64297616
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/google_golang_org/genai/v/v0/google/genai/interactions/models/operations/operations.(*UpdateWebhookResponse).MarshalJSON",
+        "nameByteOffset": 30968889,
+        "entry": 18734528,
+        "end": 18734656,
+        "funcMetadataOffset": 64298144
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/oneharness/internal/core/core.(*Machine).stepPreInvocation",
+        "nameByteOffset": 31416948,
+        "entry": 20469632,
+        "end": 20470768,
+        "funcMetadataOffset": 64631808
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/oneharness/internal/core/core.(*Machine).stepPostInvocation",
+        "nameByteOffset": 31417579,
+        "entry": 20474352,
+        "end": 20475344,
+        "funcMetadataOffset": 64632336
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/oneharness/internal/core/core.runInvocationHooks",
+        "nameByteOffset": 31419613,
+        "entry": 20490720,
+        "end": 20491600,
+        "funcMetadataOffset": 64634280
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/oneharness/internal/core/core.runStopHooks",
+        "nameByteOffset": 31419682,
+        "entry": 20491600,
+        "end": 20492032,
+        "funcMetadataOffset": 64634368
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/oneharness/internal/core/core.runPreToolHooks",
+        "nameByteOffset": 31419745,
+        "entry": 20492032,
+        "end": 20493376,
+        "funcMetadataOffset": 64634456
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/oneharness/internal/core/core.runPostToolHooks",
+        "nameByteOffset": 31420152,
+        "entry": 20496000,
+        "end": 20497760,
+        "funcMetadataOffset": 64634896
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/oneharness/internal/core/core.runInvocationHooks.func1",
+        "nameByteOffset": 31423403,
+        "entry": 20520144,
+        "end": 20520336,
+        "funcMetadataOffset": 64638192
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/oneharness/internal/core/core.runStopHooks.func1",
+        "nameByteOffset": 31423478,
+        "entry": 20520336,
+        "end": 20520528,
+        "funcMetadataOffset": 64638256
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/oneharness/internal/core/core.runPreToolHooks.func1",
+        "nameByteOffset": 31423547,
+        "entry": 20520528,
+        "end": 20520720,
+        "funcMetadataOffset": 64638320
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/oneharness/internal/core/core.runPostToolHooks.func1",
+        "nameByteOffset": 31423619,
+        "entry": 20520720,
+        "end": 20520912,
+        "funcMetadataOffset": 64638384
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/ext/plugins/browser/agentbrowser/agentbrowser.NewSandboxReadFilePreInvocationHook",
+        "nameByteOffset": 33970892,
+        "entry": 22685936,
+        "end": 22686080,
+        "funcMetadataOffset": 65365824
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/ext/plugins/browser/agentbrowser/agentbrowser.NewSandboxReadFilePreInvocationHook.func1",
+        "nameByteOffset": 33972393,
+        "entry": 22697008,
+        "end": 22701200,
+        "funcMetadataOffset": 65366920
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/customizations/builtin/agents/agents.appendMissingPreInvocationHooks",
+        "nameByteOffset": 33987724,
+        "entry": 22769072,
+        "end": 22770032,
+        "funcMetadataOffset": 65378272
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/customization/hooks/hookcaller/hookcaller.CallPreInvocationHook",
+        "nameByteOffset": 34203464,
+        "entry": 23064512,
+        "end": 23064800,
+        "funcMetadataOffset": 65549752
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/customization/hooks/hookcaller/hookcaller.CallPostInvocationHook",
+        "nameByteOffset": 34203562,
+        "entry": 23064800,
+        "end": 23065088,
+        "funcMetadataOffset": 65549840
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/customization/hooks/hookcaller/hookcaller.callHookAs[go.shape.2a871265a6c61381f20a67b815ec091b7b8e81176759dfc95682cdb624ad4aac,go.shape.*google3/third_party/jetski/hooks_pb/hooks_go_proto.PostInvocationHookResult].func1",
+        "nameByteOffset": 34206252,
+        "entry": 23068096,
+        "end": 23068560,
+        "funcMetadataOffset": 65550568
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/customization/hooks/hookcaller/hookcaller.callHookAs[go.shape.2a871265a6c61381f20a67b815ec091b7b8e81176759dfc95682cdb624ad4aac,go.shape.*google3/third_party/jetski/hooks_pb/hooks_go_proto.PreInvocationHookResult].func1",
+        "nameByteOffset": 34206506,
+        "entry": 23068560,
+        "end": 23069024,
+        "funcMetadataOffset": 65550640
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/customization/hooks/hookcaller/hookcaller.callHookAs[go.shape.2a871265a6c61381f20a67b815ec091b7b8e81176759dfc95682cdb624ad4aac,go.shape.*google3/third_party/jetski/hooks_pb/hooks_go_proto.PostInvocationHookResult]",
+        "nameByteOffset": 34211274,
+        "entry": 23073696,
+        "end": 23074512,
+        "funcMetadataOffset": 65551504
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/customization/hooks/hookcaller/hookcaller.maybeParseProtoBytes[go.shape.2a871265a6c61381f20a67b815ec091b7b8e81176759dfc95682cdb624ad4aac,go.shape.*google3/third_party/jetski/hooks_pb/hooks_go_proto.PostInvocationHookResult]",
+        "nameByteOffset": 34211522,
+        "entry": 23074512,
+        "end": 23074800,
+        "funcMetadataOffset": 65551592
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/customization/hooks/hookcaller/hookcaller.callHookAs[go.shape.2a871265a6c61381f20a67b815ec091b7b8e81176759dfc95682cdb624ad4aac,go.shape.*google3/third_party/jetski/hooks_pb/hooks_go_proto.PreInvocationHookResult]",
+        "nameByteOffset": 34211780,
+        "entry": 23074800,
+        "end": 23075616,
+        "funcMetadataOffset": 65551680
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/customization/hooks/hookcaller/hookcaller.maybeParseProtoBytes[go.shape.2a871265a6c61381f20a67b815ec091b7b8e81176759dfc95682cdb624ad4aac,go.shape.*google3/third_party/jetski/hooks_pb/hooks_go_proto.PreInvocationHookResult]",
+        "nameByteOffset": 34212027,
+        "entry": 23075616,
+        "end": 23075904,
+        "funcMetadataOffset": 65551768
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/hookutils/hookutils.GetToolOutputFromStep",
+        "nameByteOffset": 34212479,
+        "entry": 23076784,
+        "end": 23076880,
+        "funcMetadataOffset": 65552072
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/hookutils/hookutils.GetLastModelOutputAndThinking",
+        "nameByteOffset": 34212555,
+        "entry": 23076880,
+        "end": 23077040,
+        "funcMetadataOffset": 65552160
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/customization/hooks/hooks.(*HookMixinWrapper).PreInvocationHooks",
+        "nameByteOffset": 34213997,
+        "entry": 23084896,
+        "end": 23085888,
+        "funcMetadataOffset": 65553288
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/customization/hooks/hooks.(*HookMixinWrapper).PostInvocationHooks",
+        "nameByteOffset": 34214257,
+        "entry": 23085888,
+        "end": 23086560,
+        "funcMetadataOffset": 65553376
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/customization/hooks/hooks.injectedResponseTerminationHook",
+        "nameByteOffset": 34214601,
+        "entry": 23087104,
+        "end": 23087296,
+        "funcMetadataOffset": 65553552
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/customization/hooks/hooks.NewPreInvocationHook.func1",
+        "nameByteOffset": 34216265,
+        "entry": 23101312,
+        "end": 23102208,
+        "funcMetadataOffset": 65555224
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/customization/hooks/hooks.NewPostInvocationHook.func1",
+        "nameByteOffset": 34216438,
+        "entry": 23103152,
+        "end": 23104512,
+        "funcMetadataOffset": 65555400
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/customization/hooks/jsonhook/jsonhook.executeCommandModeHook",
+        "nameByteOffset": 34218288,
+        "entry": 23106992,
+        "end": 23108704,
+        "funcMetadataOffset": 65557024
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/customization/hooks/jsonhook/jsonhook.executePromptModeHook",
+        "nameByteOffset": 34218634,
+        "entry": 23108704,
+        "end": 23113072,
+        "funcMetadataOffset": 65557120
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/utils/utils.ToJSONSchemaString[go.shape.struct { InjectSteps []google3/third_party/jetski/cortex/customization/hooks/jsonhook/jsonhook.hookInjectedStepResponse \"json:\\\"inject_steps\\\" jsonschema:\\\"description=List of steps to inject into the conversation.\\\"\" }]",
+        "nameByteOffset": 34222972,
+        "entry": 23132528,
+        "end": 23132688,
+        "funcMetadataOffset": 65559400
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/utils/utils.ToJSONSchemaString[go.shape.struct { InjectSteps []google3/third_party/jetski/cortex/customization/hooks/jsonhook/jsonhook.hookInjectedStepResponse \"json:\\\"inject_steps\\\" jsonschema:\\\"description=List of steps to inject into the conversation. Return an empty list if there is nothing to inject.\\\"\"; TerminationBehavior string \"json:\\\"termination_behavior,omitempty\\\" jsonschema:\\\"enum=terminate,description=Set to 'terminate' to stop the turn before calling the model. Omit to proceed to the model call.\\\"\" }]",
+        "nameByteOffset": 34224701,
+        "entry": 23133008,
+        "end": 23133168,
+        "funcMetadataOffset": 65559664
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/gemini_coder/framework/registry/registry.(*HookRegistry).RegisterPreInvocationHook",
+        "nameByteOffset": 34779060,
+        "entry": 24570176,
+        "end": 24570480,
+        "funcMetadataOffset": 65936400
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/gemini_coder/framework/registry/registry.(*HookRegistry).RegisterPostInvocationHook",
+        "nameByteOffset": 34779163,
+        "entry": 24570480,
+        "end": 24570784,
+        "funcMetadataOffset": 65936488
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/gemini_coder/framework/registry/registry.(*HookRegistry).ConstructPreInvocationHook",
+        "nameByteOffset": 34779753,
+        "entry": 24572656,
+        "end": 24573136,
+        "funcMetadataOffset": 65937016
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/gemini_coder/framework/registry/registry.(*HookRegistry).ConstructPostInvocationHook",
+        "nameByteOffset": 34779857,
+        "entry": 24573136,
+        "end": 24573616,
+        "funcMetadataOffset": 65937104
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/gemini_coder/framework/registry/registry.(*Registry).ConstructPreInvocationHooks",
+        "nameByteOffset": 34781137,
+        "entry": 24578096,
+        "end": 24578576,
+        "funcMetadataOffset": 65937984
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/gemini_coder/framework/registry/registry.(*Registry).ConstructPostInvocationHooks",
+        "nameByteOffset": 34781238,
+        "entry": 24578576,
+        "end": 24579056,
+        "funcMetadataOffset": 65938072
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/gemini_coder/framework/registry/registry.(*HookRegistry).RegisterPreInvocationHook.deferwrap1",
+        "nameByteOffset": 34783027,
+        "entry": 24584912,
+        "end": 24585024,
+        "funcMetadataOffset": 65939568
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/gemini_coder/framework/registry/registry.(*HookRegistry).RegisterPostInvocationHook.deferwrap1",
+        "nameByteOffset": 34783141,
+        "entry": 24585024,
+        "end": 24585136,
+        "funcMetadataOffset": 65939656
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/gemini_coder/framework/registry/registry.(*HookRegistry).ConstructPreInvocationHook.deferwrap1",
+        "nameByteOffset": 34783797,
+        "entry": 24585696,
+        "end": 24585808,
+        "funcMetadataOffset": 65940184
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/gemini_coder/framework/registry/registry.(*HookRegistry).ConstructPostInvocationHook.deferwrap1",
+        "nameByteOffset": 34783912,
+        "entry": 24585808,
+        "end": 24585920,
+        "funcMetadataOffset": 65940272
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/gemini_coder/framework/registry/registry.Registry.ConstructPostInvocationHook",
+        "nameByteOffset": 34787569,
+        "entry": 24592608,
+        "end": 24592736,
+        "funcMetadataOffset": 65942624
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/gemini_coder/framework/registry/registry.(*Registry).ConstructPostInvocationHook",
+        "nameByteOffset": 34787667,
+        "entry": 24592736,
+        "end": 24592752,
+        "funcMetadataOffset": 65942712
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/gemini_coder/framework/registry/registry.Registry.ConstructPreInvocationHook",
+        "nameByteOffset": 34787955,
+        "entry": 24592896,
+        "end": 24593024,
+        "funcMetadataOffset": 65942976
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/gemini_coder/framework/registry/registry.(*Registry).ConstructPreInvocationHook",
+        "nameByteOffset": 34788052,
+        "entry": 24593024,
+        "end": 24593040,
+        "funcMetadataOffset": 65943064
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/gemini_coder/framework/registry/registry.Registry.RegisterPostInvocationHook",
+        "nameByteOffset": 34789465,
+        "entry": 24593920,
+        "end": 24594032,
+        "funcMetadataOffset": 65944384
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/gemini_coder/framework/registry/registry.(*Registry).RegisterPostInvocationHook",
+        "nameByteOffset": 34789562,
+        "entry": 24594032,
+        "end": 24594048,
+        "funcMetadataOffset": 65944472
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/gemini_coder/framework/registry/registry.Registry.RegisterPreInvocationHook",
+        "nameByteOffset": 34789847,
+        "entry": 24594176,
+        "end": 24594288,
+        "funcMetadataOffset": 65944736
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/gemini_coder/framework/registry/registry.(*Registry).RegisterPreInvocationHook",
+        "nameByteOffset": 34789943,
+        "entry": 24594288,
+        "end": 24594304,
+        "funcMetadataOffset": 65944824
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/gemini_coder/framework/executor/executor.(*Executor).runStopHooks",
+        "nameByteOffset": 38364426,
+        "entry": 29089424,
+        "end": 29090128,
+        "funcMetadataOffset": 68153368
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/executors/posthooks/posthooks.NewCommandAssessorPostInvocationHook",
+        "nameByteOffset": 38451492,
+        "entry": 29266048,
+        "end": 29266064,
+        "funcMetadataOffset": 68219664
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/executors/posthooks/posthooks.NewEmptyOutputContinuationCheckHook",
+        "nameByteOffset": 38451680,
+        "entry": 29266080,
+        "end": 29266320,
+        "funcMetadataOffset": 68219840
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/executors/posthooks/posthooks.NoOpPostInvocationHook",
+        "nameByteOffset": 38452607,
+        "entry": 29268208,
+        "end": 29268224,
+        "funcMetadataOffset": 68220544
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/executors/posthooks/posthooks.NewDeprecatedNoOpPostInvocationHook",
+        "nameByteOffset": 38452694,
+        "entry": 29268224,
+        "end": 29268240,
+        "funcMetadataOffset": 68220632
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/executors/posthooks/posthooks.NewEmptyOutputContinuationCheckHookWithMaxRetries.func1",
+        "nameByteOffset": 38453494,
+        "entry": 29270192,
+        "end": 29271264,
+        "funcMetadataOffset": 68221424
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/executors/posthooks/posthooks.NewCommandAssessorPostInvocationHook.func1",
+        "nameByteOffset": 38454454,
+        "entry": 29274944,
+        "end": 29274960,
+        "funcMetadataOffset": 68222216
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/customization/hooks/hooks.NewPostInvocationHook.func1",
+        "nameByteOffset": 38459864,
+        "entry": 29282864,
+        "end": 29284224,
+        "funcMetadataOffset": 68225456
+      },
+      {
+        "table": 0,
+        "name": "google3/gdm/security/agi_control/agent_monitoring/jetski/jetski.NewMonitoringPostInvocationHook",
+        "nameByteOffset": 38650680,
+        "entry": 30100320,
+        "end": 30100896,
+        "funcMetadataOffset": 68365832
+      },
+      {
+        "table": 0,
+        "name": "google3/gdm/security/agi_control/agent_monitoring/jetski/jetski.handlePostInvocationIntervention",
+        "nameByteOffset": 38651291,
+        "entry": 30101440,
+        "end": 30102224,
+        "funcMetadataOffset": 68366008
+      },
+      {
+        "table": 0,
+        "name": "google3/gdm/security/agi_control/agent_monitoring/jetski/jetski.NewMonitoringPostInvocationHook.func1",
+        "nameByteOffset": 38657425,
+        "entry": 30125104,
+        "end": 30126384,
+        "funcMetadataOffset": 68369704
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/autorun/autorun.(*verdictRecorder).terminationHook.func1",
+        "nameByteOffset": 38675219,
+        "entry": 30189600,
+        "end": 30190240,
+        "funcMetadataOffset": 68382352
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/customizations/builtin/search/hooks/hooks.NewTimeoutLongRunningSearchCommandHook",
+        "nameByteOffset": 38677227,
+        "entry": 30192352,
+        "end": 30192480,
+        "funcMetadataOffset": 68383728
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/customizations/builtin/search/hooks/hooks.NewTimeoutLongRunningSearchCommandHook.func1",
+        "nameByteOffset": 38677443,
+        "entry": 30192976,
+        "end": 30193984,
+        "funcMetadataOffset": 68383904
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/core/pretoolhooks/pretoolhooks.newAutoRunSafetyGateHook",
+        "nameByteOffset": 38679527,
+        "entry": 30202544,
+        "end": 30202880,
+        "funcMetadataOffset": 68385392
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/core/pretoolhooks/pretoolhooks.newAutoRunSafetyGateHook.func1",
+        "nameByteOffset": 38680603,
+        "entry": 30204880,
+        "end": 30205520,
+        "funcMetadataOffset": 68386488
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/language_server_pb/language_server_go_grpc.(*LanguageServerServiceHandlerHook)._LanguageServerService_StreamTerminalOutput_Handler",
+        "nameByteOffset": 38806678,
+        "entry": 30705472,
+        "end": 30705840,
+        "funcMetadataOffset": 68470632
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/language_server_pb/language_server_go_grpc.(*LanguageServerServiceHandlerHook)._LanguageServerService_GetModelResponse_Handler",
+        "nameByteOffset": 38807450,
+        "entry": 30708208,
+        "end": 30708800,
+        "funcMetadataOffset": 68471072
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/language_server_pb/language_server_go_grpc.(*LanguageServerServiceHandlerHook)._LanguageServerService_GetModelResponse_Handler.func1",
+        "nameByteOffset": 38863267,
+        "entry": 30890608,
+        "end": 30890896,
+        "funcMetadataOffset": 68501968
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/language_server_pb/language_server_go_grpc.(*LanguageServerServiceHandlerHook)._LanguageServerService_GetModelResponse_Handler-fm",
+        "nameByteOffset": 38966831,
+        "entry": 30993408,
+        "end": 30993536,
+        "funcMetadataOffset": 68563568
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/language_server_pb/language_server_go_grpc.(*LanguageServerServiceHandlerHook)._LanguageServerService_StreamTerminalOutput_Handler-fm",
+        "nameByteOffset": 38993796,
+        "entry": 31014752,
+        "end": 31014864,
+        "funcMetadataOffset": 68578264
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/mixins/mixins.(*BaseConversationalMixin).PreInvocationHooks",
+        "nameByteOffset": 39000264,
+        "entry": 31035664,
+        "end": 31035680,
+        "funcMetadataOffset": 68582928
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/mixins/mixins.(*BaseConversationalMixin).PostInvocationHooks",
+        "nameByteOffset": 39000358,
+        "entry": 31035680,
+        "end": 31035696,
+        "funcMetadataOffset": 68583016
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/mixins/mixins.(*CustomAgentMixin).PreInvocationHooks",
+        "nameByteOffset": 39012204,
+        "entry": 31068896,
+        "end": 31070000,
+        "funcMetadataOffset": 68594896
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/mixins/mixins.(*CustomAgentMixin).PostInvocationHooks",
+        "nameByteOffset": 39012291,
+        "entry": 31070000,
+        "end": 31071536,
+        "funcMetadataOffset": 68594984
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/mixins/mixins.resolvePreInvocationHooks",
+        "nameByteOffset": 39012872,
+        "entry": 31075216,
+        "end": 31075472,
+        "funcMetadataOffset": 68595424
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/mixins/mixins.resolvePostInvocationHooks",
+        "nameByteOffset": 39012946,
+        "entry": 31075472,
+        "end": 31075728,
+        "funcMetadataOffset": 68595512
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/mixins/mixins.(*DeclarativeAgentMixin).PreInvocationHooks",
+        "nameByteOffset": 39013430,
+        "entry": 31077456,
+        "end": 31077472,
+        "funcMetadataOffset": 68596040
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/mixins/mixins.(*DeclarativeAgentMixin).PostInvocationHooks",
+        "nameByteOffset": 39013522,
+        "entry": 31077472,
+        "end": 31077488,
+        "funcMetadataOffset": 68596128
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/mixins/mixins.resolvePreInvocationHooks.func1",
+        "nameByteOffset": 39019389,
+        "entry": 31102208,
+        "end": 31102528,
+        "funcMetadataOffset": 68602064
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/customization/hooks/hooks.NewPreInvocationHook.1",
+        "nameByteOffset": 39019469,
+        "entry": 31102528,
+        "end": 31103424,
+        "funcMetadataOffset": 68602152
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/mixins/mixins.resolvePostInvocationHooks.func1",
+        "nameByteOffset": 39019552,
+        "entry": 31103424,
+        "end": 31103744,
+        "funcMetadataOffset": 68602240
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/customization/hooks/hooks.NewPostInvocationHook.1",
+        "nameByteOffset": 39019633,
+        "entry": 31103744,
+        "end": 31105104,
+        "funcMetadataOffset": 68602328
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/mixins/mixins.CascadeConversationalMixin.PostInvocationHooks",
+        "nameByteOffset": 39032410,
+        "entry": 31139392,
+        "end": 31139424,
+        "funcMetadataOffset": 68608896
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/mixins/mixins.(*CascadeConversationalMixin).PostInvocationHooks",
+        "nameByteOffset": 39032505,
+        "entry": 31139424,
+        "end": 31139440,
+        "funcMetadataOffset": 68608984
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/mixins/mixins.CascadeConversationalMixin.PreInvocationHooks",
+        "nameByteOffset": 39032603,
+        "entry": 31139440,
+        "end": 31139472,
+        "funcMetadataOffset": 68609072
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/mixins/mixins.(*CascadeConversationalMixin).PreInvocationHooks",
+        "nameByteOffset": 39032697,
+        "entry": 31139472,
+        "end": 31139488,
+        "funcMetadataOffset": 68609160
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/gemini_coder/framework/registry/registry.(*HookRegistry).ConstructPostInvocationHook-fm",
+        "nameByteOffset": 39035803,
+        "entry": 31141280,
+        "end": 31141376,
+        "funcMetadataOffset": 68612416
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/gemini_coder/framework/registry/registry.(*HookRegistry).ConstructPreInvocationHook-fm",
+        "nameByteOffset": 39035911,
+        "entry": 31141376,
+        "end": 31141472,
+        "funcMetadataOffset": 68612504
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/core/contrib/variants/model_router/modelrouter.baselineSnapshot.judgePreInvocationHooks",
+        "nameByteOffset": 39123695,
+        "entry": 31594160,
+        "end": 31594704,
+        "funcMetadataOffset": 68677520
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/core/contrib/variants/model_router_advisor/modelrouteradvisor.baselineSnapshot.advisorPreInvocationHooks",
+        "nameByteOffset": 39126205,
+        "entry": 31604288,
+        "end": 31604832,
+        "funcMetadataOffset": 68678776
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/sdk/sdk.CustomizationMixinWrapper.PostInvocationHooks",
+        "nameByteOffset": 39141878,
+        "entry": 31708080,
+        "end": 31708224,
+        "funcMetadataOffset": 68688816
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/sdk/sdk.(*CustomizationMixinWrapper).PostInvocationHooks",
+        "nameByteOffset": 39141966,
+        "entry": 31708224,
+        "end": 31708240,
+        "funcMetadataOffset": 68688896
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/sdk/sdk.CustomizationMixinWrapper.PreInvocationHooks",
+        "nameByteOffset": 39142057,
+        "entry": 31708240,
+        "end": 31708384,
+        "funcMetadataOffset": 68688984
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/sdk/sdk.(*CustomizationMixinWrapper).PreInvocationHooks",
+        "nameByteOffset": 39142144,
+        "entry": 31708384,
+        "end": 31708400,
+        "funcMetadataOffset": 68689064
+      },
+      {
+        "table": 0,
+        "name": "google3/learning/genai/api/interactions/proto/hooks_go_proto.(*CallHookResponse).Reset",
+        "nameByteOffset": 39478821,
+        "entry": 33136096,
+        "end": 33136256,
+        "funcMetadataOffset": 68948464
+      },
+      {
+        "table": 0,
+        "name": "google3/learning/genai/api/interactions/proto/hooks_go_proto.(*CallHookResponse).String",
+        "nameByteOffset": 39478908,
+        "entry": 33136256,
+        "end": 33136336,
+        "funcMetadataOffset": 68948560
+      },
+      {
+        "table": 0,
+        "name": "google3/learning/genai/api/interactions/proto/hooks_go_proto.(*CallHookResponse).ProtoMessage",
+        "nameByteOffset": 39478996,
+        "entry": 33136336,
+        "end": 33136352,
+        "funcMetadataOffset": 68948648
+      },
+      {
+        "table": 0,
+        "name": "google3/learning/genai/api/interactions/proto/hooks_go_proto.(*CallHookResponse).ProtoReflect",
+        "nameByteOffset": 39479090,
+        "entry": 33136352,
+        "end": 33136528,
+        "funcMetadataOffset": 68948736
+      },
+      {
+        "table": 0,
+        "name": "google3/learning/genai/api/interactions/proto/hooks_go_proto.(*CallHookResponse).GetRequestId",
+        "nameByteOffset": 39479184,
+        "entry": 33136528,
+        "end": 33136560,
+        "funcMetadataOffset": 68948832
+      },
+      {
+        "table": 0,
+        "name": "google3/learning/genai/api/interactions/proto/hooks_go_proto.(*CallHookResponse).GetPreTurnResult",
+        "nameByteOffset": 39479278,
+        "entry": 33136560,
+        "end": 33136608,
+        "funcMetadataOffset": 68948920
+      },
+      {
+        "table": 0,
+        "name": "google3/learning/genai/api/interactions/proto/hooks_go_proto.(*CallHookResponse).GetPreToolResult",
+        "nameByteOffset": 39479376,
+        "entry": 33136608,
+        "end": 33136656,
+        "funcMetadataOffset": 68949008
+      },
+      {
+        "table": 0,
+        "name": "google3/learning/genai/api/interactions/proto/hooks_go_proto.(*CallHookResponse).GetEmptyResult",
+        "nameByteOffset": 39479474,
+        "entry": 33136656,
+        "end": 33136704,
+        "funcMetadataOffset": 68949096
+      },
+      {
+        "table": 0,
+        "name": "google3/learning/genai/api/interactions/proto/hooks_go_proto.(*CallHookResponse).GetErrorMessage",
+        "nameByteOffset": 39479570,
+        "entry": 33136704,
+        "end": 33136752,
+        "funcMetadataOffset": 68949184
+      },
+      {
+        "table": 0,
+        "name": "google3/learning/genai/api/interactions/proto/hooks_go_proto.(*CallHookResponse).GetOnToolErrorResult",
+        "nameByteOffset": 39479667,
+        "entry": 33136752,
+        "end": 33136800,
+        "funcMetadataOffset": 68949272
+      },
+      {
+        "table": 0,
+        "name": "google3/learning/genai/api/interactions/proto/hooks_go_proto.(*CallHookResponse).GetStopResult",
+        "nameByteOffset": 39479769,
+        "entry": 33136800,
+        "end": 33136848,
+        "funcMetadataOffset": 68949360
+      },
+      {
+        "table": 0,
+        "name": "google3/learning/genai/api/interactions/proto/hooks_go_proto.(*CallHookResponse).XXX_OneofWrappers",
+        "nameByteOffset": 39479864,
+        "entry": 33136848,
+        "end": 33136992,
+        "funcMetadataOffset": 68949448
+      },
+      {
+        "table": 0,
+        "name": "google3/learning/genai/api/interactions/proto/hooks_go_proto.(*PostTurnArgs).GetResponseText",
+        "nameByteOffset": 39480742,
+        "entry": 33137888,
+        "end": 33137920,
+        "funcMetadataOffset": 68950360
+      },
+      {
+        "table": 0,
+        "name": "google3/learning/genai/api/interactions/proto/hooks_go_proto.(*StopArgs).GetResponseText",
+        "nameByteOffset": 39485911,
+        "entry": 33142544,
+        "end": 33142576,
+        "funcMetadataOffset": 68955608
+      },
+      {
+        "table": 0,
+        "name": "google3/learning/genai/api/interactions/proto/events_go_proto.(*Payload).GetCallHookResponse",
+        "nameByteOffset": 39608180,
+        "entry": 33259344,
+        "end": 33259392,
+        "funcMetadataOffset": 69062432
+      },
+      {
+        "table": 0,
+        "name": "google3/learning/genai/api/localharness/localharness_go_proto.(*InputEvent).GetCallHookResponse",
+        "nameByteOffset": 39692306,
+        "entry": 33334720,
+        "end": 33334768,
+        "funcMetadataOffset": 69131256
+      },
+      {
+        "table": 0,
+        "name": "google3/learning/genai/api/localharness/localharness_go_proto.(*CallHookResponse).Reset",
+        "nameByteOffset": 39708970,
+        "entry": 33349120,
+        "end": 33349296,
+        "funcMetadataOffset": 69147248
+      },
+      {
+        "table": 0,
+        "name": "google3/learning/genai/api/localharness/localharness_go_proto.(*CallHookResponse).String",
+        "nameByteOffset": 39709058,
+        "entry": 33349296,
+        "end": 33349376,
+        "funcMetadataOffset": 69147344
+      },
+      {
+        "table": 0,
+        "name": "google3/learning/genai/api/localharness/localharness_go_proto.(*CallHookResponse).ProtoMessage",
+        "nameByteOffset": 39709147,
+        "entry": 33349376,
+        "end": 33349392,
+        "funcMetadataOffset": 69147432
+      },
+      {
+        "table": 0,
+        "name": "google3/learning/genai/api/localharness/localharness_go_proto.(*CallHookResponse).ProtoReflect",
+        "nameByteOffset": 39709242,
+        "entry": 33349392,
+        "end": 33349568,
+        "funcMetadataOffset": 69147520
+      },
+      {
+        "table": 0,
+        "name": "google3/learning/genai/api/localharness/localharness_go_proto.(*CallHookResponse).GetRequestId",
+        "nameByteOffset": 39709337,
+        "entry": 33349568,
+        "end": 33349616,
+        "funcMetadataOffset": 69147616
+      },
+      {
+        "table": 0,
+        "name": "google3/learning/genai/api/localharness/localharness_go_proto.(*CallHookResponse).GetPreTurnResult",
+        "nameByteOffset": 39709432,
+        "entry": 33349616,
+        "end": 33349664,
+        "funcMetadataOffset": 69147704
+      },
+      {
+        "table": 0,
+        "name": "google3/learning/genai/api/localharness/localharness_go_proto.(*CallHookResponse).GetPreToolResult",
+        "nameByteOffset": 39709531,
+        "entry": 33349664,
+        "end": 33349712,
+        "funcMetadataOffset": 69147792
+      },
+      {
+        "table": 0,
+        "name": "google3/learning/genai/api/localharness/localharness_go_proto.(*CallHookResponse).GetEmptyResult",
+        "nameByteOffset": 39709630,
+        "entry": 33349712,
+        "end": 33349760,
+        "funcMetadataOffset": 69147880
+      },
+      {
+        "table": 0,
+        "name": "google3/learning/genai/api/localharness/localharness_go_proto.(*CallHookResponse).GetErrorMessage",
+        "nameByteOffset": 39709727,
+        "entry": 33349760,
+        "end": 33349808,
+        "funcMetadataOffset": 69147968
+      },
+      {
+        "table": 0,
+        "name": "google3/learning/genai/api/localharness/localharness_go_proto.(*CallHookResponse).GetOnToolErrorResult",
+        "nameByteOffset": 39709825,
+        "entry": 33349808,
+        "end": 33349856,
+        "funcMetadataOffset": 69148056
+      },
+      {
+        "table": 0,
+        "name": "google3/learning/genai/api/localharness/localharness_go_proto.(*CallHookResponse).GetStopResult",
+        "nameByteOffset": 39709928,
+        "entry": 33349856,
+        "end": 33349904,
+        "funcMetadataOffset": 69148144
+      },
+      {
+        "table": 0,
+        "name": "google3/learning/genai/api/localharness/localharness_go_proto.(*CallHookResponse).XXX_OneofWrappers",
+        "nameByteOffset": 39710024,
+        "entry": 33349904,
+        "end": 33350048,
+        "funcMetadataOffset": 69148232
+      },
+      {
+        "table": 0,
+        "name": "google3/learning/genai/api/localharness/localharness_go_proto.CallHookResponse_builder.Build",
+        "nameByteOffset": 39710124,
+        "entry": 33350048,
+        "end": 33350800,
+        "funcMetadataOffset": 69148320
+      },
+      {
+        "table": 0,
+        "name": "google3/learning/genai/api/interactions/proto/external_events_go_proto.(*ExternalClientEvent).GetCallHookResponse",
+        "nameByteOffset": 39751546,
+        "entry": 33423488,
+        "end": 33423536,
+        "funcMetadataOffset": 69187344
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski_prod/localharness/interactionstranslate.translateCallHookResponse",
+        "nameByteOffset": 39758646,
+        "entry": 33448528,
+        "end": 33450048,
+        "funcMetadataOffset": 69190856
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/executors/prehooks/prehooks.NoOpPreInvocationHook",
+        "nameByteOffset": 42210813,
+        "entry": 37689760,
+        "end": 37689776,
+        "funcMetadataOffset": 70348824
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/executors/prehooks/prehooks.NewDeprecatedNoOpPreInvocationHook",
+        "nameByteOffset": 42210897,
+        "entry": 37689776,
+        "end": 37689792,
+        "funcMetadataOffset": 70348912
+      },
+      {
+        "table": 1,
+        "name": "internal/runtime/exithook.Add",
+        "nameByteOffset": 213495409,
+        "entry": 1137568,
+        "end": 1137920,
+        "funcMetadataOffset": 216318495
+      },
+      {
+        "table": 1,
+        "name": "internal/runtime/exithook.Run",
+        "nameByteOffset": 213495439,
+        "entry": 1137920,
+        "end": 1138416,
+        "funcMetadataOffset": 216318583
+      },
+      {
+        "table": 1,
+        "name": "internal/runtime/exithook.Run.deferwrap2",
+        "nameByteOffset": 213495469,
+        "entry": 1138416,
+        "end": 1138432,
+        "funcMetadataOffset": 216318671
+      },
+      {
+        "table": 1,
+        "name": "internal/runtime/exithook.Run.deferwrap1",
+        "nameByteOffset": 213495510,
+        "entry": 1138432,
+        "end": 1138448,
+        "funcMetadataOffset": 216318759
+      },
+      {
+        "table": 1,
+        "name": "internal/runtime/exithook.Run.func1",
+        "nameByteOffset": 213495551,
+        "entry": 1138448,
+        "end": 1138544,
+        "funcMetadataOffset": 216318847
+      }
+    ],
+    "export_count_commands": [
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/oauth2/google/externalaccount/externalaccount.executableCredentialSource.getTokenFromExecutableCommand",
+        "nameByteOffset": 25929661,
+        "entry": 8855552,
+        "end": 8856208,
+        "funcMetadataOffset": 60091208
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex_pb/cortex_go_proto.(*CortexStepCommandStatus).GetOutputCharacterCount",
+        "nameByteOffset": 27146800,
+        "entry": 10019920,
+        "end": 10019952,
+        "funcMetadataOffset": 61175256
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/command/sandboxproxy/sandboxproxy.splitAccountKey",
+        "nameByteOffset": 29595423,
+        "entry": 13835728,
+        "end": 13835904,
+        "funcMetadataOffset": 63191160
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/command/sandboxproxy/sandboxproxy.listAccountIDs",
+        "nameByteOffset": 29595507,
+        "entry": 13835904,
+        "end": 13836192,
+        "funcMetadataOffset": 63191256
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/command/sandboxproxy/sandboxproxy.saveAccountIDs",
+        "nameByteOffset": 29595673,
+        "entry": 13836384,
+        "end": 13836704,
+        "funcMetadataOffset": 63191432
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/command/sandboxproxy/sandboxproxy.registerAccountID",
+        "nameByteOffset": 29595756,
+        "entry": 13836704,
+        "end": 13837040,
+        "funcMetadataOffset": 63191520
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/command/sandboxproxy/sandboxproxy.removeAccountID",
+        "nameByteOffset": 29595842,
+        "entry": 13837040,
+        "end": 13837664,
+        "funcMetadataOffset": 63191608
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/command/sandboxproxy/sandboxproxy.adoptAccountIdentity",
+        "nameByteOffset": 29596010,
+        "entry": 13837664,
+        "end": 13838880,
+        "funcMetadataOffset": 63191696
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/command/sandboxproxy/sandboxproxy.commitAccount",
+        "nameByteOffset": 29596335,
+        "entry": 13838880,
+        "end": 13839056,
+        "funcMetadataOffset": 63191784
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/command/sandboxproxy/sandboxproxy.newAccountID",
+        "nameByteOffset": 29596417,
+        "entry": 13839056,
+        "end": 13839408,
+        "funcMetadataOffset": 63191872
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/command/sandboxproxy/sandboxproxy.NewAccountID",
+        "nameByteOffset": 29596498,
+        "entry": 13839408,
+        "end": 13839616,
+        "funcMetadataOffset": 63191960
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/command/sandboxproxy/sandboxproxy.ListAccounts",
+        "nameByteOffset": 29596740,
+        "entry": 13839616,
+        "end": 13839824,
+        "funcMetadataOffset": 63192048
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/command/sandboxproxy/sandboxproxy.storedAccounts",
+        "nameByteOffset": 29596821,
+        "entry": 13839824,
+        "end": 13840768,
+        "funcMetadataOffset": 63192136
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/command/sandboxproxy/sandboxproxy.defaultAccountID",
+        "nameByteOffset": 29597287,
+        "entry": 13840768,
+        "end": 13841056,
+        "funcMetadataOffset": 63192232
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/command/sandboxproxy/sandboxproxy.SetDefaultAccount",
+        "nameByteOffset": 29597544,
+        "entry": 13841056,
+        "end": 13841248,
+        "funcMetadataOffset": 63192328
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/command/sandboxproxy/sandboxproxy.setDefaultAccount",
+        "nameByteOffset": 29597630,
+        "entry": 13841248,
+        "end": 13841408,
+        "funcMetadataOffset": 63192416
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/command/sandboxproxy/sandboxproxy.checkAccount",
+        "nameByteOffset": 29597716,
+        "entry": 13841408,
+        "end": 13842080,
+        "funcMetadataOffset": 63192504
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/command/sandboxproxy/sandboxproxy.SetAccountLabel",
+        "nameByteOffset": 29597797,
+        "entry": 13842080,
+        "end": 13842288,
+        "funcMetadataOffset": 63192592
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/command/sandboxproxy/sandboxproxy.setAccountLabel",
+        "nameByteOffset": 29597881,
+        "entry": 13842288,
+        "end": 13843072,
+        "funcMetadataOffset": 63192680
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/command/sandboxproxy/sandboxproxy.accountMatches",
+        "nameByteOffset": 29597983,
+        "entry": 13843072,
+        "end": 13843312,
+        "funcMetadataOffset": 63192768
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/command/sandboxproxy/sandboxproxy.resolveAccounts",
+        "nameByteOffset": 29598066,
+        "entry": 13843312,
+        "end": 13846128,
+        "funcMetadataOffset": 63192848
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/command/sandboxproxy/sandboxproxy.DefaultAccountTokenSource",
+        "nameByteOffset": 29601428,
+        "entry": 13857104,
+        "end": 13857648,
+        "funcMetadataOffset": 63194952
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/command/sandboxproxy/sandboxproxy.(*accountTokenSource).Token",
+        "nameByteOffset": 29601522,
+        "entry": 13857648,
+        "end": 13857824,
+        "funcMetadataOffset": 63195040
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/command/sandboxproxy/sandboxproxy.DefaultAccountHeader",
+        "nameByteOffset": 29601618,
+        "entry": 13857824,
+        "end": 13858368,
+        "funcMetadataOffset": 63195128
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/command/sandboxproxy/sandboxproxy.DefaultAccountRejectionMarker",
+        "nameByteOffset": 29601789,
+        "entry": 13859648,
+        "end": 13859856,
+        "funcMetadataOffset": 63195304
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/command/sandboxproxy/sandboxproxy.defaultAccountKey",
+        "nameByteOffset": 29601887,
+        "entry": 13859856,
+        "end": 13860240,
+        "funcMetadataOffset": 63195392
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/command/sandboxproxy/sandboxproxy.DefaultAccountRejectionMarker.func1",
+        "nameByteOffset": 29615998,
+        "entry": 13942400,
+        "end": 13942624,
+        "funcMetadataOffset": 63205896
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/cloud_google_com/go/auth/v/v0/credentials/internal/externalaccount/externalaccount.(*executableSubjectProvider).getTokenFromExecutableCommand",
+        "nameByteOffset": 30310454,
+        "entry": 17235408,
+        "end": 17235984,
+        "funcMetadataOffset": 63831184
+      },
+      {
+        "table": 0,
+        "name": "slices.pdqsortCmpFunc[go.shape.struct { Plugin string; Provider string; Type string; Domains []string; Scopes []string; StorageKey string; Connected bool; CLIs []string; Accounts []google3/third_party/jetski/cortex/command/sandboxproxy/sandboxproxy.Account; Optional bool }]",
+        "nameByteOffset": 31258974,
+        "entry": 20229824,
+        "end": 20231840,
+        "funcMetadataOffset": 64517440
+      },
+      {
+        "table": 0,
+        "name": "slices.partitionCmpFunc[go.shape.struct { Plugin string; Provider string; Type string; Domains []string; Scopes []string; StorageKey string; Connected bool; CLIs []string; Accounts []google3/third_party/jetski/cortex/command/sandboxproxy/sandboxproxy.Account; Optional bool }]",
+        "nameByteOffset": 31259810,
+        "entry": 20231840,
+        "end": 20234560,
+        "funcMetadataOffset": 64517536
+      },
+      {
+        "table": 0,
+        "name": "slices.partitionEqualCmpFunc[go.shape.struct { Plugin string; Provider string; Type string; Domains []string; Scopes []string; StorageKey string; Connected bool; CLIs []string; Accounts []google3/third_party/jetski/cortex/command/sandboxproxy/sandboxproxy.Account; Optional bool }]",
+        "nameByteOffset": 31260087,
+        "entry": 20234560,
+        "end": 20235888,
+        "funcMetadataOffset": 64517632
+      },
+      {
+        "table": 0,
+        "name": "slices.partialInsertionSortCmpFunc[go.shape.struct { Plugin string; Provider string; Type string; Domains []string; Scopes []string; StorageKey string; Connected bool; CLIs []string; Accounts []google3/third_party/jetski/cortex/command/sandboxproxy/sandboxproxy.Account; Optional bool }]",
+        "nameByteOffset": 31260369,
+        "entry": 20235888,
+        "end": 20237856,
+        "funcMetadataOffset": 64517728
+      },
+      {
+        "table": 0,
+        "name": "slices.choosePivotCmpFunc[go.shape.struct { Plugin string; Provider string; Type string; Domains []string; Scopes []string; StorageKey string; Connected bool; CLIs []string; Accounts []google3/third_party/jetski/cortex/command/sandboxproxy/sandboxproxy.Account; Optional bool }]",
+        "nameByteOffset": 31260657,
+        "entry": 20237856,
+        "end": 20238288,
+        "funcMetadataOffset": 64517824
+      },
+      {
+        "table": 0,
+        "name": "slices.medianCmpFunc[go.shape.struct { Plugin string; Provider string; Type string; Domains []string; Scopes []string; StorageKey string; Connected bool; CLIs []string; Accounts []google3/third_party/jetski/cortex/command/sandboxproxy/sandboxproxy.Account; Optional bool }]",
+        "nameByteOffset": 31261218,
+        "entry": 20238288,
+        "end": 20239328,
+        "funcMetadataOffset": 64517912
+      },
+      {
+        "table": 0,
+        "name": "slices.breakPatternsCmpFunc[go.shape.struct { Plugin string; Provider string; Type string; Domains []string; Scopes []string; StorageKey string; Connected bool; CLIs []string; Accounts []google3/third_party/jetski/cortex/command/sandboxproxy/sandboxproxy.Account; Optional bool }]",
+        "nameByteOffset": 31261766,
+        "entry": 20239328,
+        "end": 20239856,
+        "funcMetadataOffset": 64518008
+      },
+      {
+        "table": 0,
+        "name": "slices.heapSortCmpFunc[go.shape.struct { Plugin string; Provider string; Type string; Domains []string; Scopes []string; StorageKey string; Connected bool; CLIs []string; Accounts []google3/third_party/jetski/cortex/command/sandboxproxy/sandboxproxy.Account; Optional bool }]",
+        "nameByteOffset": 31262047,
+        "entry": 20239856,
+        "end": 20240400,
+        "funcMetadataOffset": 64518104
+      },
+      {
+        "table": 0,
+        "name": "slices.siftDownCmpFunc[go.shape.struct { Plugin string; Provider string; Type string; Domains []string; Scopes []string; StorageKey string; Connected bool; CLIs []string; Accounts []google3/third_party/jetski/cortex/command/sandboxproxy/sandboxproxy.Account; Optional bool }]",
+        "nameByteOffset": 31262323,
+        "entry": 20240400,
+        "end": 20241424,
+        "funcMetadataOffset": 64518200
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/command/command.commandAccountHint",
+        "nameByteOffset": 33934465,
+        "entry": 22450224,
+        "end": 22450448,
+        "funcMetadataOffset": 65336016
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/jetski/cortex/command/command.commandAccountHint.func1",
+        "nameByteOffset": 33943598,
+        "entry": 22502000,
+        "end": 22502256,
+        "funcMetadataOffset": 65344760
+      },
+      {
+        "table": 0,
+        "name": "google3/devtools/jetski/telemetry/extensions/jetski_telemetry_extensions_go_proto.(*RemoteControlEvent).GetCommandCount",
+        "nameByteOffset": 42032179,
+        "entry": 37351168,
+        "end": 37351200,
+        "funcMetadataOffset": 70224848
+      },
+      {
+        "table": 0,
+        "name": "google3/devtools/jetski/telemetry/extensions/jetski_telemetry_extensions_go_proto.(*RemoteControlEvent).GetWebrtcCommandErrorCount",
+        "nameByteOffset": 42032427,
+        "entry": 37351248,
+        "end": 37351280,
+        "funcMetadataOffset": 70225024
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/connectrpc_com/connect/v/v1/connect.NewUnaryHandler[go.shape.struct { google3/third_party/jetski/dev_pb/dev_go_proto.state google3/third_party/golang/protobuf/v2/internal/impl/impl.MessageState \"protogen:\\\"hybrid.v1\\\"\"; Command string \"protobuf:\\\"bytes,1,opt,name=command,proto3\\\" json:\\\"command,omitempty\\\" reflect:\\\"unexport\\\"\"; google3/third_party/jetski/dev_pb/dev_go_proto.unknownFields *[]uint8; google3/third_party/jetski/dev_pb/dev_go_proto.sizeCache int32 },go.shape.struct { google3/third_party/jetski/dev_pb/dev_go_proto.state google3/third_party/golang/protobuf/v2/internal/impl/impl.MessageState \"protogen:\\\"hybrid.v1\\\"\"; google3/third_party/jetski/dev_pb/dev_go_proto.unknownFields *[]uint8; google3/third_party/jetski/dev_pb/dev_go_proto.sizeCache int32 }].func2",
+        "nameByteOffset": 42213588,
+        "entry": 37706480,
+        "end": 37708528,
+        "funcMetadataOffset": 70351176
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/connectrpc_com/connect/v/v1/connect.NewUnaryHandler[go.shape.struct { google3/third_party/jetski/dev_pb/dev_go_proto.state google3/third_party/golang/protobuf/v2/internal/impl/impl.MessageState \"protogen:\\\"hybrid.v1\\\"\"; Command string \"protobuf:\\\"bytes,1,opt,name=command,proto3\\\" json:\\\"command,omitempty\\\" reflect:\\\"unexport\\\"\"; google3/third_party/jetski/dev_pb/dev_go_proto.unknownFields *[]uint8; google3/third_party/jetski/dev_pb/dev_go_proto.sizeCache int32 },go.shape.struct { google3/third_party/jetski/dev_pb/dev_go_proto.state google3/third_party/golang/protobuf/v2/internal/impl/impl.MessageState \"protogen:\\\"hybrid.v1\\\"\"; google3/third_party/jetski/dev_pb/dev_go_proto.unknownFields *[]uint8; google3/third_party/jetski/dev_pb/dev_go_proto.sizeCache int32 }].func1",
+        "nameByteOffset": 42215886,
+        "entry": 37708528,
+        "end": 37708944,
+        "funcMetadataOffset": 70351264
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/connectrpc_com/connect/v/v1/connect.NewUnaryHandler[go.shape.struct { google3/third_party/jetski/dev_pb/dev_go_proto.state google3/third_party/golang/protobuf/v2/internal/impl/impl.MessageState \"protogen:\\\"hybrid.v1\\\"\"; Command string \"protobuf:\\\"bytes,1,opt,name=command,proto3\\\" json:\\\"command,omitempty\\\" reflect:\\\"unexport\\\"\"; google3/third_party/jetski/dev_pb/dev_go_proto.unknownFields *[]uint8; google3/third_party/jetski/dev_pb/dev_go_proto.sizeCache int32 },go.shape.struct { google3/third_party/jetski/dev_pb/dev_go_proto.state google3/third_party/golang/protobuf/v2/internal/impl/impl.MessageState \"protogen:\\\"hybrid.v1\\\"\"; google3/third_party/jetski/dev_pb/dev_go_proto.unknownFields *[]uint8; google3/third_party/jetski/dev_pb/dev_go_proto.sizeCache int32 }]",
+        "nameByteOffset": 42216691,
+        "entry": 37708944,
+        "end": 37709632,
+        "funcMetadataOffset": 70351352
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/connectrpc_com/connect/v/v1/connect.receiveUnaryRequest[go.shape.struct { google3/third_party/jetski/dev_pb/dev_go_proto.state google3/third_party/golang/protobuf/v2/internal/impl/impl.MessageState \"protogen:\\\"hybrid.v1\\\"\"; Command string \"protobuf:\\\"bytes,1,opt,name=command,proto3\\\" json:\\\"command,omitempty\\\" reflect:\\\"unexport\\\"\"; google3/third_party/jetski/dev_pb/dev_go_proto.unknownFields *[]uint8; google3/third_party/jetski/dev_pb/dev_go_proto.sizeCache int32 }]",
+        "nameByteOffset": 42217490,
+        "entry": 37709632,
+        "end": 37710368,
+        "funcMetadataOffset": 70351440
+      },
+      {
+        "table": 0,
+        "name": "google3/third_party/golang/connectrpc_com/connect/v/v1/connect.receiveUnaryMessage[go.shape.struct { google3/third_party/jetski/dev_pb/dev_go_proto.state google3/third_party/golang/protobuf/v2/internal/impl/impl.MessageState \"protogen:\\\"hybrid.v1\\\"\"; Command string \"protobuf:\\\"bytes,1,opt,name=command,proto3\\\" json:\\\"command,omitempty\\\" reflect:\\\"unexport\\\"\"; google3/third_party/jetski/dev_pb/dev_go_proto.unknownFields *[]uint8; google3/third_party/jetski/dev_pb/dev_go_proto.sizeCache int32 }]",
+        "nameByteOffset": 42217989,
+        "entry": 37710368,
+        "end": 37711376,
+        "funcMetadataOffset": 70351528
+      },
+      {
+        "table": 0,
+        "name": "google3/devtools/jetski/boq/api/proto/api_go_proto.(*RecordClientEventRequest).GetCommandCount",
+        "nameByteOffset": 42834057,
+        "entry": 39794608,
+        "end": 39794640,
+        "funcMetadataOffset": 70855688
+      },
+      {
+        "table": 0,
+        "name": "google3/devtools/jetski/boq/api/proto/api_go_proto.(*RecordClientEventRequest).GetWebrtcCommandErrorCount",
+        "nameByteOffset": 42834255,
+        "entry": 39794672,
+        "end": 39794704,
+        "funcMetadataOffset": 70855864
+      }
+    ]
+  },
+  "limitation": "Names are metadata,not supported entrypoints or behavior proof; table1 is not mapped to primary executable text; inspect-native.py resolves primary moduledata"
+}

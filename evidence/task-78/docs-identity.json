@@ -1,0 +1,24 @@
+[
+  {
+    "label": "hooks",
+    "url": "https://antigravity.google/docs/hooks?tab=cli",
+    "finalUrl": "https://antigravity.google/docs/hooks?tab=cli",
+    "httpStatus": 200,
+    "startedAt": "2026-11-01T12:32:51.388782+00:00",
+    "endedAt": "2026-11-01T12:32:52.202996+00:00",
+    "bytes": 200106,
+    "sha256": "3f40a1ccb254e5c11553a275f41c79ec106c94bd3b5fe6c5c56cb9d36a71bf93",
+    "use": "Corroboration of documented schema/failure semantics only; not new pinned runtime proof"
+  },
+  {
+    "label": "plugins",
+    "url": "https://antigravity.google/docs/build-plugins",
+    "finalUrl": "https://antigravity.google/docs/build-plugins",
+    "httpStatus": 200,
+    "startedAt": "2026-11-01T12:32:52.203525+00:00",
+    "endedAt": "2026-11-01T12:32:52.842231+00:00",
+    "bytes": 223349,
+    "sha256": "b5e08bb4cb4e0e09be187b939f790933b62df142faacb2a2ee7fcb05ebfdcb04",
+    "use": "Corroboration of documented schema/failure semantics only; not new pinned runtime proof"
+  }
+]

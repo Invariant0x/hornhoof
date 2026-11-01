@@ -1,0 +1,131 @@
+{
+  "task": 78,
+  "kind": "SAFE_STATIC_EVIDENCE_NOT_ENGINE_PROFILE",
+  "createdAt": "2026-11-01T12:45:17.072264+00:00",
+  "sourceBase": "bd696b0724385b6b11da53a24ada2f188b031217",
+  "branch": "task-78-antigravity-engine-proof",
+  "files": [
+    {
+      "name": ".gitignore",
+      "bytes": 30,
+      "sha256": "d8b0de3c134c213f2b1052651b2492d8614db9043b4515b652d51b5f08bd926c"
+    },
+    {
+      "name": "action-log.txt",
+      "bytes": 2925,
+      "sha256": "d36d4dc0690e63f238071cb12a109883e25a0dda090d87fb19148222589997ab"
+    },
+    {
+      "name": "artifact-identity.json",
+      "bytes": 1071,
+      "sha256": "c4871ba179c0a54c6ca5cc01d1b3646af9d5a5ea48b7aca653c23267e8928dae"
+    },
+    {
+      "name": "branch-proof.json",
+      "bytes": 2357,
+      "sha256": "6c343bef00480711db55b563193096e32af4628d64372dc55f110e3b904e568c"
+    },
+    {
+      "name": "command-receipts.json",
+      "bytes": 21224,
+      "sha256": "669fce626b95f3f2abab7a9c70c975e339b012c7592180501f37998ddf8dd32e"
+    },
+    {
+      "name": "docs-identity.json",
+      "bytes": 979,
+      "sha256": "f44f1cf6b74d89bfba3b5ea94cffb4021e0830f02973b117258ae6d3d33c7f93"
+    },
+    {
+      "name": "elf-sections.json",
+      "bytes": 7238,
+      "sha256": "310bb7ee8d1194467dcefbed5a5bbefb8bdee697e47f0d5d06ac979e5ef266c2"
+    },
+    {
+      "name": "fetch-artifact.py",
+      "bytes": 3520,
+      "sha256": "cdc83452efea0af41a0c5ed4fe195442f1bfeae6e26d62de719ee74748c0f792"
+    },
+    {
+      "name": "findings.json",
+      "bytes": 1889,
+      "sha256": "16d7cbdcb6628ffefcf0642b6946b11e92c0a96a98f3d751e5eca3f7b7655c58"
+    },
+    {
+      "name": "inspect-layout.py",
+      "bytes": 1847,
+      "sha256": "f4be17e315ccb0f5878ae1bb92069095c231e2b758f0f4c5ae067e18c0d2d41e"
+    },
+    {
+      "name": "inspect-native.py",
+      "bytes": 6261,
+      "sha256": "77ce5579d27b65a9104fc9d227d2c8f1095756bb914ffd34f1f2a689f447b6f3"
+    },
+    {
+      "name": "inspect-pcln.py",
+      "bytes": 3935,
+      "sha256": "2d64480ba600d42aa6906dee1e0760ab1a62903ce1522f1a1fa224dd72498c87"
+    },
+    {
+      "name": "inspect-schema.py",
+      "bytes": 4699,
+      "sha256": "d39013318b918e0248b7991c69513ef2ee33f8bdcbd9cdcdf8b551985bd30e8e"
+    },
+    {
+      "name": "native-evidence.json",
+      "bytes": 155962,
+      "sha256": "8dca90b29927c451dfff78984636586e54004b509d843c429343797700e22af4"
+    },
+    {
+      "name": "pcln-headers.json",
+      "bytes": 285,
+      "sha256": "ff96d60ea6a35e19b5e6456e5c1545f39df1af25afa0e4951d5936ab6cdd4878"
+    },
+    {
+      "name": "quality-receipts.json",
+      "bytes": 13855,
+      "sha256": "8e8adfb6a21232c4702f1773ea36bfdb2e2f8fc703d0f09cfd181050f046ca1c"
+    },
+    {
+      "name": "report.txt",
+      "bytes": 10257,
+      "sha256": "193c68fa8b8d23f9a5b9b46aa645a67cd28f9bb903abe01594ecd27caf026442"
+    },
+    {
+      "name": "run-checks.py",
+      "bytes": 1604,
+      "sha256": "1c946e294f6170940466eb658283ee725db97cf3e334ed94a5c362ca59fa3531"
+    },
+    {
+      "name": "schema-evidence.json",
+      "bytes": 11767,
+      "sha256": "9d75a37e0e5940949ed9be563020f30e99922e9f84f398aaa2ac38db47ebe9a5"
+    },
+    {
+      "name": "symbol-evidence.json",
+      "bytes": 91297,
+      "sha256": "08a9cd1de46000bcffb9122bb57411d2722db9d499548c873501629a2e6c61cd"
+    },
+    {
+      "name": "verification.txt",
+      "bytes": 19082,
+      "sha256": "5dad0ee316fc13bc4992a5fdb5f682f3a1cb49cc0eb660786af384ae8eb6193f"
+    },
+    {
+      "name": "verify-evidence.py",
+      "bytes": 6274,
+      "sha256": "bbabf675fac002343803ff6f4dbfa18c346c9a56b608cbc4fe6fadf7d238a4c7"
+    },
+    {
+      "name": "verify-package.py",
+      "bytes": 873,
+      "sha256": "a6dca9aebe3ed993bfa83afac933824ed622bf20beacc6c53aa68076077cd128"
+    }
+  ],
+  "excluded": [
+    "pinned archive/binary",
+    "function-index.json",
+    "raw official HTML",
+    "auth/session/user data"
+  ],
+  "replay": "verify-package.py first, then fresh authorized cache fetch and five inspectors in report order; never execute Antigravity"
+}

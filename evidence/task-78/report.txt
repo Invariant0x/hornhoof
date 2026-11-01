@@ -1,0 +1,152 @@
+Task 78: pinned Antigravity count/export/deny inspection
+Status: DONE_WITH_CONCERNS. Static evidence delivered; no qualified engine profile.
+
+Result
+G1 counter/resolver: SOURCE_ONLY. Actual internal functions and call references
+were recovered from the pinned executable, but no supported no-inference caller,
+complete counter input, or native 19999/20000/20001 result was established.
+G2 complete model-bound export: UNAVAILABLE through the inspected GetTokenBase
+and PreInvocation schemas. These contracts lack the required bytes and binding.
+G3 synchronous hard denial: SOURCE_ONLY. A previously unrecorded termination
+field exists, but the inspected hook-error path logs and continues. A fail-closed
+barrier covering every invocation has not been qualified.
+No row is QUALIFIED. UNAVAILABLE is bounded to these inspected interfaces;
+this report does not claim that all vendor/private interfaces are impossible.
+
+Identity and method
+Artifact: Antigravity 1.4.12, Linux ARM64 glibc, downloaded only into owned cache.
+URL: https://storage.googleapis.com/antigravity-public/antigravity-cli/1.4.12-4768735748292608/linux-arm/cli_linux_arm64.tar.gz
+Archive: 64371567 bytes, SHA512
+7cae317fb6a02eb387982f06bfb234b366879cf9a80ad8969b571e5a55d1e37a6a5a49cd6b703c0443bb417937cf5e3b14a8c80cb26917ad79eef723a9f374c7
+Binary: 223433080 bytes, SHA256
+946f014d9bd4352f09f4e88377f7957264d663437de6ad239a31247a6fc9a352
+The archive contained one regular file, antigravity. Paths and entry types were
+checked before extraction. Cache binary mode is 0600; it was never executed.
+The current CPU is Linux/aarch64. No package, profile, PATH or permission change.
+Input contract: #61 R2, 16821 bytes, SHA256
+0745389d3f2dd9f65855db0504ff599c1a088abf945ac9bd6609fc562c172d03.
+
+Read ELF sections, Go pcln metadata, RELATIVE module relocations, protobuf wire
+descriptors, and selected AArch64 instruction words as data using Python stdlib.
+The primary Go table has 174388 entries; a second embedded table has 19312.
+Only the primary table is mapped to executable text: [108531904,156943745).
+The module's pcHeader relocation points to 23240328; text/etext relocations at
+23159760/23159784 establish that mapping. Direct BL references were resolved
+only when the target equals a function start. Names alone are not behavior proof.
+26 complete selected function byte ranges and three descriptor digests are saved.
+Indirect calls and the complete dispatch graph were not resolved.
+
+New G1 evidence after #61
+All offsets here are decimal file offsets in the exact binary above.
+GetTokenBase at 149112176 (2128 bytes) directly references GetRules, GetSkills,
+GetCustomizations, ComputeCustomizationBreakdown and TruncateFromBreakdown.
+ComputeCustomizationBreakdown at 130834816 (1872 bytes) directly references
+tokenizer.GetDefaultTokenCounter. An EstimateTokenCounter.GetTokenCount body
+exists at 126253888 (48 bytes); neither its name nor this reference qualifies
+the whole rule-budget algorithm or the count input used by the imminent turn.
+Manager.getRules at 131882352 references parseRuleFile and sortRules.
+parseRuleFile at 131895792 references resolveFileIncludes, parseRuleInfo,
+computeRulePriority, go_utils.Truncate and ToTruncatedBytesString.
+resolveFileIncludes.func1 at 131946448 references ReadFileAsUTF8NoBom.
+UserRulesSection.Content at 139579216 references the ordinary, conditional and
+demoted formatting functions. This is a concrete internal resolver/formatting
+surface, not an exported CLI count/dry-run contract.
+Literal rules-token-budget=20000 occurs at 191869104 and the separate
+customization-token-budget=20000 at 191867429. Literals do not establish the
+effective runtime settings or boundary comparisons.
+Still missing: exact discovery scope and order, include/error semantics,
+frontmatter/headers/wrappers/framing, active model/settings identity, complete
+pre-demotion counter input, and measurements at 19999/20000/20001.
+GetTokenBase also references MCP ready-server states; do not assume that starting
+an undocumented internal server or calling this RPC is a side-effect-free probe.
+
+New G2 evidence after #61
+Decoded language_server.proto at 103546320 (170155 bytes).
+GetTokenBaseRequest fields: cascade_config, workspace_uris, active_profile.
+GetTokenBaseResponse fields: token_base, max_token_base,
+customization_token_base, remaining_budget, customization_budget,
+truncated_customization_token_base, rules_budget, remaining_rules_budget.
+Decoded cortex.proto at 104090274 (209821 bytes).
+TokenBreakdown={groups,total_tokens}; TokenGroup={name,children,num_tokens};
+TopLevelTokenGroup={name,type,source,num_tokens,children}. source is an enum,
+not source bytes. The response provides breakdowns, not serialized/expanded
+rules, complete request contents or a native binding to one imminent invocation.
+Decoded hooks.proto at 98972383 (5276 bytes).
+PreInvocationHookArgs={invocation_num,initial_num_steps}. Common args contain
+conversation/workspace/transcript/artifact/execution/model/agent metadata,
+last_user_input and parent/root/caller context. No defined field carries full
+system/rule bytes, ordered countInputUtf8, source/inventory/candidate digests,
+or a proof that immutable bytes are those about to be dispatched.
+This is a precise schema gap, not an argument from a failed text search.
+A transcript path, execution id, arbitrary caller_context string or model_name
+does not supply the missing content or the #61 R2 byte binding by itself.
+
+New G3 evidence after #61
+PreInvocationHookResult defines inject_steps and termination_behavior.
+A JSON-schema instantiation at 34224701 has the snake_case field
+termination_behavior, an enum value terminate, and a description of stopping
+before a model call. This is new pinned-artifact schema evidence. Current Hooks
+documentation lists only injectSteps for PreInvocation and terminationBehavior
+for PostInvocation. Do not silently promote either spelling into a proven CLI
+pre-request contract. Schema presence does not prove dispatch enforcement.
+The inspected NewPreInvocationHook.func1 body starts at 131633216 (896 bytes).
+It calls CallPreInvocationHook at 131633600. The next word b40005e1 is
+CBZ X1 -> 131633792 (the result/inject-steps path). The nonzero-return path
+calls log.ErrorContextf at 131633784, then word 17ffffbd branches to 131633520.
+That loop advances its cursor and decrements the remaining count, checks it at
+131633540, and word 54000dcd branches to the nil return at 131633984 on exhaustion.
+Thus this inspected closure has a log-and-continue path rather than a mandatory
+propagated hook error. The register/error interpretation follows the Go result
+layout and logging path; it is static analysis, not an executed CLI result.
+The official plugin-hook contract independently describes nonzero command-hook
+errors as ignored. A hook exit code is therefore not a qualified hard barrier.
+The success path has indirect calls; consumption of termination_behavior by the
+complete CLI dispatch path, timeouts/malformed output/missing proof, and zero
+model/tool effects have not been proved. No decision:deny response was invented.
+
+One minimal next technical step
+Obtain a vendor-supported, 1.4.12-matched no-inference pre-request interface
+contract (or the matching request-assembly/dispatch source establishing it).
+It must expose the full ordered serialized and expanded generated+ambient rule
+bytes and exact count framing before demotion, the full imminent request, and
+an engine-owned immutable binding consumed at dispatch. It must specify the
+actual counter identity/scope and synchronous fail-closed behavior for absent,
+malformed, timed-out or changed proof. In particular, ask which supported CLI
+entrypoint binds GetTokenBase/PreInvocation to those exact bytes and rejects
+before dispatch. None was established here. This is a request for one missing
+vendor contract, not a claim that this API exists or authorization to build it.
+An account login or a full-turn experiment would not repair these schema and
+binding gaps. No speculative CLI/model call is the next step.
+
+Verification and replay
+python3 task-78-evidence/run-checks.py: 11/11 commands exited 0, complete stdout
+and stderr in command-receipts.json; PASS_STATIC_EVIDENCE_ONLY. The independent
+verifier recomputes the archive/binary hashes, descriptor hashes, every selected
+function byte range and saved direct-call words against the actual pinned file.
+It also checks exact field sets and selected branch words.
+To replay the safe package, verify manifest hashes first, use a fresh owned
+directory, run fetch-artifact.py only under the same authorized download scope,
+then inspect-layout.py, inspect-pcln.py, inspect-schema.py, inspect-native.py,
+verify-evidence.py in that order. These commands do not run Antigravity. Saved
+observations contain timestamps/pids; regenerated files are new observations.
+No engine boundary fixture, product test or engine-profile qualification is
+claimed. Source inspection, byte verification and a model invocation are distinct.
+
+Concerns and unchanged constraints
+G0 full-notebook producer proof, G1-G3 qualifications, all 17 product/native
+acceptance cases, and the account profile remain open. Boundary cases are NOT_RUN.
+AGY15 mandatory base/selected+locked skills/full notebook/context/guidance,
+always_on, optional=[], 24000 UTF-8 bytes/file and 20000 rules tokens still apply.
+#61 R2 candidateDigest must cover exact bytes, order, paths, expansion, wrappers,
+framing and trusted engine/scope identities. No claimed hash can replace them.
+No qualified profile is issued; no production launch is approved by this work.
+No product source, schema, provider, job error, database, live configuration,
+Images workflow, OAuth, model call, new service, namespace or CI run was changed.
+Root suites and mutation runs are outside this task's explicitly bounded scope.
+
+Official references (corroboration, not pinned runtime qualification)
+https://antigravity.google/docs/hooks?tab=cli
+https://antigravity.google/docs/build-plugins
+https://raw.githubusercontent.com/golang/go/go1.24.0/src/debug/gosym/pclntab.go
+Documentation snapshot identities are in docs-identity.json; full raw snapshots
+remain only in owned cache. The safe package contains no auth/session/user data.

@@ -1,0 +1,426 @@
+[
+  {
+    "name": "",
+    "type": 0,
+    "vaddr": 0,
+    "offset": 0,
+    "bytes": 0,
+    "entrySize": 0
+  },
+  {
+    "name": ".gnu.version",
+    "type": 1879048191,
+    "vaddr": 21712,
+    "offset": 21712,
+    "bytes": 1730,
+    "entrySize": 2
+  },
+  {
+    "name": ".gnu.version_r",
+    "type": 1879048190,
+    "vaddr": 23444,
+    "offset": 23444,
+    "bytes": 240,
+    "entrySize": 0
+  },
+  {
+    "name": ".gnu.hash",
+    "type": 1879048182,
+    "vaddr": 23688,
+    "offset": 23688,
+    "bytes": 3828,
+    "entrySize": 0
+  },
+  {
+    "name": ".dynstr",
+    "type": 3,
+    "vaddr": 27516,
+    "offset": 27516,
+    "bytes": 12870,
+    "entrySize": 0
+  },
+  {
+    "name": ".rela.dyn",
+    "type": 4,
+    "vaddr": 40392,
+    "offset": 40392,
+    "bytes": 23193576,
+    "entrySize": 24
+  },
+  {
+    "name": ".rela.plt",
+    "type": 4,
+    "vaddr": 23233968,
+    "offset": 23233968,
+    "bytes": 6360,
+    "entrySize": 24
+  },
+  {
+    "name": ".lrodata",
+    "type": 1,
+    "vaddr": 23240328,
+    "offset": 23240328,
+    "bytes": 71018221,
+    "entrySize": 0
+  },
+  {
+    "name": "flags_help_cold",
+    "type": 1,
+    "vaddr": 94258549,
+    "offset": 94258549,
+    "bytes": 22015,
+    "entrySize": 0
+  },
+  {
+    "name": ".rodata",
+    "type": 1,
+    "vaddr": 94280576,
+    "offset": 94280576,
+    "bytes": 14219184,
+    "entrySize": 0
+  },
+  {
+    "name": ".text.hot",
+    "type": 1,
+    "vaddr": 108499760,
+    "offset": 108499760,
+    "bytes": 0,
+    "entrySize": 0
+  },
+  {
+    "name": "google_malloc",
+    "type": 1,
+    "vaddr": 108499776,
+    "offset": 108499776,
+    "bytes": 28704,
+    "entrySize": 0
+  },
+  {
+    "name": ".text",
+    "type": 1,
+    "vaddr": 108531712,
+    "offset": 108531712,
+    "bytes": 54667856,
+    "entrySize": 0
+  },
+  {
+    "name": ".text.split",
+    "type": 1,
+    "vaddr": 163199568,
+    "offset": 163199568,
+    "bytes": 0,
+    "entrySize": 0
+  },
+  {
+    "name": ".text.unlikely",
+    "type": 1,
+    "vaddr": 163199584,
+    "offset": 163199584,
+    "bytes": 18624,
+    "entrySize": 0
+  },
+  {
+    "name": ".init",
+    "type": 1,
+    "vaddr": 163218208,
+    "offset": 163218208,
+    "bytes": 20,
+    "entrySize": 0
+  },
+  {
+    "name": ".fini",
+    "type": 1,
+    "vaddr": 163218228,
+    "offset": 163218228,
+    "bytes": 16,
+    "entrySize": 0
+  },
+  {
+    "name": ".text.startup",
+    "type": 1,
+    "vaddr": 163218272,
+    "offset": 163218272,
+    "bytes": 16828,
+    "entrySize": 0
+  },
+  {
+    "name": "google_init_cold",
+    "type": 1,
+    "vaddr": 163235104,
+    "offset": 163235104,
+    "bytes": 1492,
+    "entrySize": 0
+  },
+  {
+    "name": "malloc_hook",
+    "type": 1,
+    "vaddr": 163236608,
+    "offset": 163236608,
+    "bytes": 2356,
+    "entrySize": 0
+  },
+  {
+    "name": ".plt",
+    "type": 1,
+    "vaddr": 163238976,
+    "offset": 163238976,
+    "bytes": 4272,
+    "entrySize": 0
+  },
+  {
+    "name": ".tdata",
+    "type": 1,
+    "vaddr": 165340416,
+    "offset": 163243264,
+    "bytes": 176,
+    "entrySize": 0
+  },
+  {
+    "name": ".tbss",
+    "type": 8,
+    "vaddr": 165340592,
+    "offset": 163243440,
+    "bytes": 1000,
+    "entrySize": 0
+  },
+  {
+    "name": ".init_array",
+    "type": 14,
+    "vaddr": 165340592,
+    "offset": 163243440,
+    "bytes": 1008,
+    "entrySize": 8
+  },
+  {
+    "name": ".fini_array",
+    "type": 15,
+    "vaddr": 165341600,
+    "offset": 163244448,
+    "bytes": 16,
+    "entrySize": 8
+  },
+  {
+    "name": ".preinit_array",
+    "type": 16,
+    "vaddr": 165341616,
+    "offset": 163244464,
+    "bytes": 16,
+    "entrySize": 8
+  },
+  {
+    "name": ".dynamic",
+    "type": 6,
+    "vaddr": 165341632,
+    "offset": 163244480,
+    "bytes": 544,
+    "entrySize": 16
+  },
+  {
+    "name": ".got",
+    "type": 1,
+    "vaddr": 165342176,
+    "offset": 163245024,
+    "bytes": 11048,
+    "entrySize": 0
+  },
+  {
+    "name": ".got.plt",
+    "type": 1,
+    "vaddr": 165353224,
+    "offset": 163256072,
+    "bytes": 2144,
+    "entrySize": 0
+  },
+  {
+    "name": ".data.rel.ro",
+    "type": 1,
+    "vaddr": 165355392,
+    "offset": 163258240,
+    "bytes": 24640936,
+    "entrySize": 0
+  },
+  {
+    "name": ".relro_padding",
+    "type": 8,
+    "vaddr": 189996328,
+    "offset": 187899176,
+    "bytes": 728,
+    "entrySize": 0
+  },
+  {
+    "name": ".eh_frame",
+    "type": 1,
+    "vaddr": 192093480,
+    "offset": 187899176,
+    "bytes": 737980,
+    "entrySize": 0
+  },
+  {
+    "name": ".eh_frame_hdr",
+    "type": 1,
+    "vaddr": 192831460,
+    "offset": 188637156,
+    "bytes": 125324,
+    "entrySize": 0
+  },
+  {
+    "name": ".gcc_except_table",
+    "type": 1,
+    "vaddr": 192956784,
+    "offset": 188762480,
+    "bytes": 26484,
+    "entrySize": 0
+  },
+  {
+    "name": ".data",
+    "type": 1,
+    "vaddr": 195080448,
+    "offset": 188788992,
+    "bytes": 1114808,
+    "entrySize": 0
+  },
+  {
+    "name": "google_malloc_data",
+    "type": 1,
+    "vaddr": 196195256,
+    "offset": 189903800,
+    "bytes": 72,
+    "entrySize": 0
+  },
+  {
+    "name": "google_malloc_bss",
+    "type": 8,
+    "vaddr": 196195328,
+    "offset": 189903872,
+    "bytes": 20732,
+    "entrySize": 0
+  },
+  {
+    "name": ".bss",
+    "type": 8,
+    "vaddr": 196216064,
+    "offset": 189903872,
+    "bytes": 730384,
+    "entrySize": 0
+  },
+  {
+    "name": ".go.buildinfo",
+    "type": 1,
+    "vaddr": 199043600,
+    "offset": 190654992,
+    "bytes": 144,
+    "entrySize": 0
+  },
+  {
+    "name": ".go.module",
+    "type": 1,
+    "vaddr": 199043744,
+    "offset": 190655136,
+    "bytes": 568,
+    "entrySize": 0
+  },
+  {
+    "name": ".noptrdata",
+    "type": 1,
+    "vaddr": 199044320,
+    "offset": 190655712,
+    "bytes": 32336609,
+    "entrySize": 0
+  },
+  {
+    "name": "pb_defaults",
+    "type": 1,
+    "vaddr": 231380936,
+    "offset": 222992328,
+    "bytes": 8,
+    "entrySize": 0
+  },
+  {
+    "name": "filewrapper_toc",
+    "type": 1,
+    "vaddr": 231380944,
+    "offset": 222992336,
+    "bytes": 8,
+    "entrySize": 0
+  },
+  {
+    "name": "__rseq_cs",
+    "type": 1,
+    "vaddr": 231380960,
+    "offset": 222992352,
+    "bytes": 160,
+    "entrySize": 0
+  },
+  {
+    "name": "__rseq_cs_ptr_array",
+    "type": 1,
+    "vaddr": 231381120,
+    "offset": 222992512,
+    "bytes": 40,
+    "entrySize": 0
+  },
+  {
+    "name": ".noptrbss",
+    "type": 8,
+    "vaddr": 231381184,
+    "offset": 222992552,
+    "bytes": 35963648,
+    "entrySize": 0
+  },
+  {
+    "name": "protodesc_cold",
+    "type": 1,
+    "vaddr": 269441984,
+    "offset": 223304640,
+    "bytes": 79276,
+    "entrySize": 0
+  },
+  {
+    "name": ".comment",
+    "type": 1,
+    "vaddr": 0,
+    "offset": 223383916,
+    "bytes": 255,
+    "entrySize": 1
+  },
+  {
+    "name": ".shstrtab",
+    "type": 3,
+    "vaddr": 0,
+    "offset": 223384171,
+    "bytes": 597,
+    "entrySize": 0
+  },
+  {
+    "name": ".dynsym",
+    "type": 11,
+    "vaddr": 269549568,
+    "offset": 223412224,
+    "bytes": 20760,
+    "entrySize": 24
+  },
+  {
+    "name": ".interp",
+    "type": 1,
+    "vaddr": 269570328,
+    "offset": 223432984,
+    "bytes": 27,
+    "entrySize": 0
+  },
+  {
+    "name": ".note.ABI-tag",
+    "type": 7,
+    "vaddr": 269570360,
+    "offset": 223433016,
+    "bytes": 32,
+    "entrySize": 0
+  },
+  {
+    "name": ".note.gnu.build-id",
+    "type": 7,
+    "vaddr": 269570392,
+    "offset": 223433048,
+    "bytes": 32,
+    "entrySize": 0
+  }
+]

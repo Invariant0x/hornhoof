@@ -1,0 +1,87 @@
+{
+  "task": 78,
+  "binarySHA256": "946f014d9bd4352f09f4e88377f7957264d663437de6ad239a31247a6fc9a352",
+  "method": "Selected fixed AArch64 words and signed PC-relative immediates; no execution",
+  "words": [
+    {
+      "fileOffset": 131633520,
+      "word": "f940b3ea",
+      "operation": "load current hook cursor",
+      "targetFileOffset": null
+    },
+    {
+      "fileOffset": 131633524,
+      "word": "91004146",
+      "operation": "advance hook cursor by 16 bytes",
+      "targetFileOffset": null
+    },
+    {
+      "fileOffset": 131633528,
+      "word": "f94073ea",
+      "operation": "load remaining count",
+      "targetFileOffset": null
+    },
+    {
+      "fileOffset": 131633532,
+      "word": "d1000541",
+      "operation": "decrement remaining count",
+      "targetFileOffset": null
+    },
+    {
+      "fileOffset": 131633540,
+      "word": "f100003f",
+      "operation": "compare remaining count with zero",
+      "targetFileOffset": null
+    },
+    {
+      "fileOffset": 131633544,
+      "word": "54000dcd",
+      "operation": "B.LE to nil return",
+      "targetFileOffset": 131633984
+    },
+    {
+      "fileOffset": 131633600,
+      "word": "97ffdbb0",
+      "operation": "BL CallPreInvocationHook",
+      "targetFileOffset": 131596416
+    },
+    {
+      "fileOffset": 131633604,
+      "word": "b40005e1",
+      "operation": "CBZ X1 to result handling",
+      "targetFileOffset": 131633792
+    },
+    {
+      "fileOffset": 131633784,
+      "word": "97b1c0be",
+      "operation": "BL log.ErrorContextf",
+      "targetFileOffset": 111121776
+    },
+    {
+      "fileOffset": 131633788,
+      "word": "17ffffbd",
+      "operation": "B to loop increment",
+      "targetFileOffset": 131633520
+    },
+    {
+      "fileOffset": 131633984,
+      "word": "aa1f03e0",
+      "operation": "MOV X0, XZR",
+      "targetFileOffset": null
+    },
+    {
+      "fileOffset": 131633988,
+      "word": "aa1f03e1",
+      "operation": "MOV X1, XZR",
+      "targetFileOffset": null
+    },
+    {
+      "fileOffset": 131634000,
+      "word": "d65f03c0",
+      "operation": "RET",
+      "targetFileOffset": null
+    }
+  ],
+  "conclusion": "In this closure the logged nonzero return path goes to the next hook, then nil return on exhaustion.",
+  "limitation": "Register/error interpretation is static Go-ABI analysis; no complete dispatch or all-failure-path proof."
+}

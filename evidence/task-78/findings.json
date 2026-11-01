@@ -1,0 +1,52 @@
+{
+  "task": 78,
+  "status": "DONE_WITH_CONCERNS",
+  "qualifiedProfile": null,
+  "contract61R2": {
+    "bytes": 16821,
+    "sha256": "0745389d3f2dd9f65855db0504ff599c1a088abf945ac9bd6609fc562c172d03"
+  },
+  "G1": {
+    "status": "SOURCE_ONLY",
+    "newEvidence": [
+      "GetTokenBase+actual resolver/counter/formatting references in pinned native text",
+      "20000 rules/customization config literals"
+    ],
+    "missing": [
+      "supported no-inference entrypoint",
+      "complete scope/order/includes/frontmatter/framing/identity semantics",
+      "19999/20000/20001 native measurements"
+    ]
+  },
+  "G2": {
+    "status": "UNAVAILABLE",
+    "scope": "selected GetTokenBase and PreInvocation typed schemas only",
+    "missing": [
+      "full ordered serialized and expanded candidate bytes",
+      "exact countInputUtf8",
+      "full imminent system/rule/request bytes",
+      "trusted immutable candidate-to-invocation binding"
+    ]
+  },
+  "G3": {
+    "status": "SOURCE_ONLY",
+    "newEvidence": [
+      "PreInvocationHookResult termination_behavior field",
+      "JSON-schema termination enum at 34224701",
+      "hook-error branch returns to loop in native closure"
+    ],
+    "missing": [
+      "verified terminate consumption at actual dispatch",
+      "fail-closed missing/malformed/timeout/drift semantics",
+      "zero model requests and tool effects at every invocation"
+    ]
+  },
+  "boundary19999_20000_20001": "NOT_RUN",
+  "nativeCliExecutions": 0,
+  "modelCalls": 0,
+  "productAcceptanceCases": "17_PLANNED_NOT_RUN",
+  "G0": "OPEN",
+  "accountProfile": "UNQUALIFIED",
+  "nextStep": "Obtain one version-matched vendor no-inference pre-request/binding contract or matching request-assembly/dispatch source; see report.txt.",
+  "caution": "SOURCE_ONLY includes mapped pinned artifact bytes, not executed runtime proof; UNAVAILABLE is not a global impossibility claim."
+}
