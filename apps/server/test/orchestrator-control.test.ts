@@ -384,6 +384,8 @@ describe('the orchestrator reads and changes the database itself', () => {
       [`UPDATE subscriptions SET node_key_hash = 'forged'`, /node_key_hash/],
       ['UPDATE subscriptions SET budget = 10', /only the CEO/],
       ['UPDATE machines SET revoked_at = now()', /only the CEO/],
+      ['UPDATE machines SET lends_tests = false', /only the CEO/],
+      ['DELETE FROM test_parts', /run_tests/],
       [`UPDATE departments SET repo_url = 'https://evil.test/acme.git' WHERE id = '${dev.id}'`, /only the CEO/],
       [`UPDATE agents SET subscription_id = NULL WHERE id = '${orchestrator.id}'`, /change_employee/],
     ];
@@ -499,6 +501,7 @@ describe('what only the CEO may ask for', () => {
       ['remove_public_link', {}],
       ['set_repository', { department: (await db.select().from(departments))[0]!.id, url: 'https://github.com/evil/acme.git', token: 'ghp_x' }],
       ['update_hornhoof', { version: 'latest' }],
+      ['lend_machine', { machine: '00000000-0000-4000-8000-0000000000aa', lendsTests: true }],
     ] as const) {
       expect(text(await call(client, name, args)), name).toBe(ONLY_CEO);
     }

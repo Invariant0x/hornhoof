@@ -44,6 +44,7 @@ export const CEO_ONLY = new Set([
   'move_orchestrator',
   'remove_subscription',
   'disconnect_machine',
+  'lend_machine',
   'set_repository',
   'remove_repository',
   'set_public_link',
