@@ -44,6 +44,14 @@ export function runProgram({ bin, args, env, cwd, timeoutMs, signal, onLine, use
     let output = '';
     let partial = '';
     let timedOut = false;
+    /* A line the reader cannot take is left out; it never ends the node with all its runs. */
+    const take = (line: string) => {
+      try {
+        onLine?.(line);
+      } catch {
+        /* Left out. */
+      }
+    };
     const keep = (chunk: string) => {
       output += chunk;
       if (output.length > KEEP_BYTES) output = output.slice(-KEEP_BYTES);
@@ -52,7 +60,7 @@ export function runProgram({ bin, args, env, cwd, timeoutMs, signal, onLine, use
       keep(chunk);
       const lines = (partial + chunk).split('\n');
       partial = lines.pop() ?? '';
-      for (const line of lines) onLine?.(line);
+      for (const line of lines) take(line);
     });
     child.stderr!.setEncoding('utf8').on('data', keep);
     const killGroup = (sig: NodeJS.Signals) => {
@@ -79,7 +87,7 @@ export function runProgram({ bin, args, env, cwd, timeoutMs, signal, onLine, use
     };
     child.on('error', err => finish({ code: null, signal: null, at: new Date().toISOString(), output: `${output}\n${err.message}`, timedOut }));
     child.on('close', (code, signal) => {
-      if (partial) onLine?.(partial);
+      if (partial) take(partial);
       finish({ code, signal, at: new Date().toISOString(), output, timedOut });
     });
   });

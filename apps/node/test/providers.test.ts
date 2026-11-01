@@ -63,6 +63,21 @@ const alive = (pid: number) => {
   }
 };
 
+describe('output a program should not print', () => {
+  it.each(['claude', 'codex', 'kimi'] as const)('%s goes on past lines that are JSON but no object', async provider => {
+    process.env.FAKE_MODE = 'odd-lines';
+    const res = await adapter(provider).run(input());
+    expect(res.ok).toBe(true);
+  });
+
+  it('reads a limit whose reset no date can hold as unknown', () => {
+    const far = 1e20;
+    expect(limitsFrom({ status: 'allowed', unifiedWindows: { five_hour: { utilization: 0.5, resetsAt: far } } }).windows).toEqual([{ name: 'five_hour', utilization: 0.5, resetsAt: null }]);
+    expect(limitsFrom({ status: 'allowed', rateLimitType: 'five_hour', resetsAt: Number.NaN }).windows[0]!.resetsAt).toBeNull();
+    expect(codexRateLimits({ rateLimits: { primary: { usedPercent: 10, windowDurationMins: 300, resetsAt: far } } })!.windows[0]!.resetsAt).toBeNull();
+  });
+});
+
 describe('failed program diagnostics', () => {
   it.each(['claude', 'codex', 'kimi'] as const)('%s ends failed output with its observed exit code and UTC time', async provider => {
     process.env.FAKE_MODE = 'fail';

@@ -6,7 +6,7 @@ import { API_MODELS, type AgentEvent, type Limits, type ModelOption } from '@hor
 import type { JobUser } from '../isolation.js';
 import type { ProviderAdapter, RunInput, RunResult } from '../runner.js';
 import { withProgramExit } from '../program-exit.js';
-import { contentText, inputText, isRecord } from './events.js';
+import { contentText, inputText, isoFrom, isRecord, objectLine } from './events.js';
 import { childEnv, ensureDir, exitsCleanly, installPackage, interactiveLogin, runProgram, tokensIn, withEfforts, writePrivate } from './process.js';
 
 /* Codex serves a ChatGPT plan, or a company OpenAI key on the built-in node. */
@@ -52,7 +52,7 @@ export function codexRateLimits(result: unknown): Limits | null {
     const used = Number(w.usedPercent);
     const mins = Number(w.windowDurationMins);
     if (!Number.isFinite(used) || !Number.isFinite(mins)) return [];
-    const reset = typeof w.resetsAt === 'number' ? new Date(w.resetsAt * 1000).toISOString() : null;
+    const reset = isoFrom(w.resetsAt);
     return [{ name: WINDOW_NAMES[mins] ?? `${mins}_minutes`, utilization: Math.min(1, Math.max(0, used / 100)), resetsAt: reset }];
   });
   if (!windows.length) return null;
@@ -181,12 +181,8 @@ export function codexAdapter({ home, tools, bin = join(tools, 'bin', 'codex'), s
         signal: input.signal,
         user,
         onLine(line) {
-          let ev: { type?: string; thread_id?: string; item?: { type?: string; text?: string }; error?: { message?: string }; message?: string };
-          try {
-            ev = JSON.parse(line);
-          } catch {
-            return;
-          }
+          const ev = objectLine(line) as { type?: string; thread_id?: string; item?: { type?: string; text?: string }; error?: { message?: string }; message?: string } | null;
+          if (!ev) return;
           for (const event of codexEvents(ev)) input.onEvent?.(event);
           if (ev.type === 'thread.started' && ev.thread_id) sessionId = ev.thread_id;
           if (ev.type === 'item.completed' && ev.item?.type === 'agent_message') answer = ev.item.text ?? '';

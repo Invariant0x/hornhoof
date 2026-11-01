@@ -6,7 +6,7 @@ import type { JobUser } from '../isolation.js';
 import type { ProviderAdapter, RunInput, RunResult } from '../runner.js';
 import { withProgramExit } from '../program-exit.js';
 import { claudePlanLimits } from '../terminal/programs.js';
-import { contentText, inputText, isRecord, toolName } from './events.js';
+import { contentText, inputText, isoFrom, isRecord, objectLine, toolName } from './events.js';
 import { askHidden, childEnv, ensureDir, exitsCleanly, installPackage, interactiveLogin, runProgram, tokensIn, writePrivate } from './process.js';
 
 /* Claude Code serves three kinds of subscription: a personal plan, a company Anthropic key, and a GLM Coding Plan through Z.ai's Anthropic-compatible endpoint. */
@@ -29,16 +29,15 @@ type RateInfo = {
   unifiedWindows?: Record<string, { utilization?: number; resetsAt?: number }>;
 };
 
-const iso = (epochSeconds?: number) => (typeof epochSeconds === 'number' ? new Date(epochSeconds * 1000).toISOString() : null);
 
 export function limitsFrom(info: RateInfo): Limits {
   const status = info.status === 'rejected' ? 'rejected' : info.status === 'allowed_warning' ? 'warning' : 'allowed';
   const windows = Object.entries(info.unifiedWindows ?? {}).map(([name, w]) => ({
     name,
     utilization: typeof w.utilization === 'number' ? Math.min(1, Math.max(0, w.utilization)) : null,
-    resetsAt: iso(w.resetsAt),
+    resetsAt: isoFrom(w.resetsAt),
   }));
-  if (!windows.length && info.rateLimitType) windows.push({ name: info.rateLimitType, utilization: null, resetsAt: iso(info.resetsAt) });
+  if (!windows.length && info.rateLimitType) windows.push({ name: info.rateLimitType, utilization: null, resetsAt: isoFrom(info.resetsAt) });
   return { status, windows: windows.slice(0, 8) };
 }
 
@@ -152,12 +151,8 @@ export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'),
         signal: input.signal,
         user,
         onLine(line) {
-          let ev: Record<string, unknown>;
-          try {
-            ev = JSON.parse(line);
-          } catch {
-            return;
-          }
+          const ev = objectLine(line);
+          if (!ev) return;
           if (typeof ev.session_id === 'string') sessionId = ev.session_id;
           if (ev.type === 'assistant' && ev.error === 'authentication_failed') signedOut = true;
           if (ev.type === 'rate_limit_event' && ev.rate_limit_info) limits = limitsFrom(ev.rate_limit_info as RateInfo);

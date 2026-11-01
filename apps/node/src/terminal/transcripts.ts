@@ -1,6 +1,6 @@
 import { closeSync, openSync, readSync, statSync } from 'node:fs';
 import type { AgentEvent, Limits } from '@hornhoof/protocol';
-import { contentText, inputText, isRecord, toolName } from '../providers/events.js';
+import { contentText, inputText, isoFrom, isRecord, toolName } from '../providers/events.js';
 
 /* Follows a log file a program appends to, a whole line at a time. */
 export class LineTail {
@@ -39,7 +39,6 @@ function sizeOf(file: string): number {
   }
 }
 
-const iso = (epochSeconds: unknown) => (typeof epochSeconds === 'number' ? new Date(epochSeconds * 1000).toISOString() : null);
 const share = (percent: unknown) => (typeof percent === 'number' ? Math.min(1, Math.max(0, percent / 100)) : null);
 
 /* Codex names its windows by minutes; Hornhoof by the names Claude Code uses. */
@@ -122,7 +121,7 @@ export function codexRollout(line: unknown): RolloutNews {
       if (context !== null) news.context = context;
       const rate = isRecord(p.rate_limits) ? p.rate_limits : null;
       if (!rate) return news;
-      const windows = [rate.primary, rate.secondary].filter(isRecord).map(w => ({ name: windowName(w.window_minutes), utilization: share(w.used_percent), resetsAt: iso(w.resets_at) }));
+      const windows = [rate.primary, rate.secondary].filter(isRecord).map(w => ({ name: windowName(w.window_minutes), utilization: share(w.used_percent), resetsAt: isoFrom(w.resets_at) }));
       return { ...news, limits: { status: rate.rate_limit_reached_type ? 'rejected' : 'allowed', windows, complete: true } };
     }
     default:
@@ -226,6 +225,6 @@ export function claudeStatusLimits(status: unknown): Limits | null {
   if (!isRecord(status) || !isRecord(status.rate_limits)) return null;
   const windows = Object.entries(status.rate_limits)
     .filter((e): e is [string, Record<string, unknown>] => isRecord(e[1]))
-    .map(([name, w]) => ({ name, utilization: share(w.used_percentage), resetsAt: iso(w.resets_at) }));
+    .map(([name, w]) => ({ name, utilization: share(w.used_percentage), resetsAt: isoFrom(w.resets_at) }));
   return { status: 'allowed', windows: windows.slice(0, 8) };
 }

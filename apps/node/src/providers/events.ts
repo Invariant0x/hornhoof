@@ -2,6 +2,23 @@
 
 export const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
+/* One output line as a JSON object, or null for anything else: broken JSON, null, a list or a bare value. */
+export function objectLine(line: string): Record<string, unknown> | null {
+  try {
+    const value: unknown = JSON.parse(line);
+    return isRecord(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+/* A moment given in seconds since 1970, as ISO text, or null when it is no moment a date can hold. */
+export function isoFrom(epochSeconds: unknown): string | null {
+  if (typeof epochSeconds !== 'number') return null;
+  const at = new Date(epochSeconds * 1000);
+  return Number.isNaN(at.getTime()) ? null : at.toISOString();
+}
+
 /* MCP tools arrive as mcp__<server>__<tool>; people see <server>.<tool>. Built-in tools keep their names. */
 export function toolName(name: string): string {
   const mcp = /^mcp__(.+?)__(.+)$/.exec(name);

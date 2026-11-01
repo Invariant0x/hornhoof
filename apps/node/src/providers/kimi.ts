@@ -5,7 +5,7 @@ import type { JobUser } from '../isolation.js';
 import type { ProviderAdapter, RunInput, RunResult } from '../runner.js';
 import { withProgramExit } from '../program-exit.js';
 import { kimiPlanLimits } from '../terminal/programs.js';
-import { contentText, inputText, isRecord, toolName } from './events.js';
+import { contentText, inputText, isRecord, objectLine, toolName } from './events.js';
 import { childEnv, ensureDir, installPackage, interactiveLogin, runProgram, tokensIn, withEfforts, writePrivate } from './process.js';
 
 type Options = { home: string; tools: string; bin?: string; user?: JobUser | null };
@@ -142,12 +142,8 @@ export function kimiAdapter({ home, tools, bin = join(tools, 'bin', 'kimi'), use
         timeoutMs: input.timeoutMs,
         signal: input.signal,
         onLine(line) {
-          let ev: KimiEvent;
-          try {
-            ev = JSON.parse(line);
-          } catch {
-            return;
-          }
+          const ev = objectLine(line) as KimiEvent | null;
+          if (!ev) return;
           for (const event of kimiEvents(ev)) input.onEvent?.(event);
           const id = ev.session_id ?? ev.sessionId;
           if (typeof id === 'string') sessionId = id;

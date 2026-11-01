@@ -205,3 +205,12 @@ describe('following a log file', () => {
     expect(tail.read()).toEqual(['{"new":1}']);
   });
 });
+
+describe('limits whose reset no date can hold', () => {
+  it('reads them as unknown instead of failing', () => {
+    const far = 1e20;
+    expect(claudeStatusLimits({ rate_limits: { five_hour: { used_percentage: 50, resets_at: far } } })!.windows).toEqual([{ name: 'five_hour', utilization: 0.5, resetsAt: null }]);
+    const rate = { primary: { used_percent: 10, window_minutes: 300, resets_at: far } };
+    expect(codexRollout({ type: 'event_msg', payload: { type: 'token_count', rate_limits: rate } }).limits!.windows[0]!.resetsAt).toBeNull();
+  });
+});

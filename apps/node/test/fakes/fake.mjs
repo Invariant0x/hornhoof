@@ -82,6 +82,11 @@ export function run(name) {
     process.exit(1);
   }
   if (mode === 'tools') return void print(`${name}-tools`);
+  if (mode === 'odd-lines') {
+    /* Valid JSON that is no event: the node goes on to the real output after it. */
+    process.stdout.write('null\n[]\n"text"\n42\n');
+    return void print(`${name}-new`);
+  }
   if (mode === 'background' && name === 'claude') {
     /* A background shell task that ends after the answer adds an empty zero-turn result. */
     print('claude-new');
