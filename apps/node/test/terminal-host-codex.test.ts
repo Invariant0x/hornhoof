@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { hasTmux, until, host, sent, setUp, job, codexJob, done, ack, typeTurn } from './terminal-host-helpers.js';
+import { hasTmux, until, host, tmux, sent, setUp, job, codexJob, done, ack, typeTurn } from './terminal-host-helpers.js';
 
 describe.skipIf(!hasTmux)('agents in live terminals', () => {
   afterEach(async () => host?.stop());
@@ -58,5 +58,26 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     expect(done('job-2')).toMatchObject({ ok: true, result: 'echo: second typed' });
     expect(sent).toContainEqual({ type: 'job.event', jobId: 'job-2', seq: 0, event: { kind: 'text', text: 'echo: second typed' } });
     expect(sent.filter(m => m.type === 'job.event' && m.jobId === 'job-1')).toHaveLength(1);
+  });
+
+  it('opens a turn for what a person typed into Codex just before it ended, though the host saw it end first', async () => {
+    await setUp({ openMs: 100 });
+    await host.run(codexJob('c5', 'warm up'));
+    await host.open({ type: 'term.open', termId: 'v5', agentKey: 'c5', cols: 80, rows: 24, write: true });
+    /* The host read the log and then asks whether the program lives; meanwhile it logs the words and ends. */
+    const alive = tmux.alive.bind(tmux);
+    let asked!: () => void;
+    const asking = new Promise<void>(r => (asked = r));
+    tmux.alive = async name => {
+      asked();
+      await until(async () => !(await alive(name)));
+      return false;
+    };
+    await asking;
+    host.input({ type: 'term.input', termId: 'v5', data: 'CRASH\r' });
+    await until(() => sent.some(m => m.type === 'turn.open' && m.agentKey === 'c5'));
+    ack('c5', 'job-c5');
+    await until(() => Boolean(done('job-c5')));
+    expect(done('job-c5')).toMatchObject({ ok: false, error: 'agent_failed' });
   });
 });

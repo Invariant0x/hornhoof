@@ -420,6 +420,8 @@ export class TerminalHost {
     const alive = await this.opts.tmux.alive(a.name);
     if (a.turn && !a.turn.typed) return;
     if (!alive) {
+      /* What the program logged before it ended, as words a person typed into Codex, comes first. */
+      this.drain(a);
       await this.endedTyped(a);
     }
   }
