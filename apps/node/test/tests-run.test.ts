@@ -126,6 +126,12 @@ function taskFiles(have: Record<string, string> = {}) {
   return { files, put };
 }
 
+/* Task files that never come and never go, until the part's signal ends the wait. */
+const stalled: PartFiles = {
+  get: (_partId, _name, signal) => new Promise((_, reject) => signal?.addEventListener('abort', () => reject(new Error('aborted')))),
+  put: (_partId, _name, _bytes, signal) => new Promise((_, reject) => signal?.addEventListener('abort', () => reject(new Error('aborted')))),
+};
+
 describe('a part of other work on a node', () => {
   const work = (over: Partial<TestRun> = {}): TestRun => ({
     type: 'tests.run', kind: 'work', partId: 'part-1', repo: null, branch: null, task: 12, command: 'true', part: 1, parts: 1, timeoutMs: 60_000, ...over,
@@ -160,6 +166,29 @@ describe('a part of other work on a node', () => {
     const done = await runTests(work({ command: `rmdir "$HH_OUT"; ln -s ${elsewhere} "$HH_OUT"` }), { dir: nodeDir(), user: null, hidden: [], files });
     expect(put).toEqual([]);
     expect(done.log).toMatch(/output folder is no longer a folder/);
+  });
+
+  it("stops waiting for a task's file when the part is stopped or its time is up, and removes its folder", async () => {
+    const dir = nodeDir();
+    const stop = new AbortController();
+    setTimeout(() => stop.abort(), 100);
+    const stopped = await runTests(work({ files: ['data.csv'], command: 'echo RAN' }), { dir, user: null, hidden: [], files: stalled, signal: stop.signal });
+    expect(stopped).toMatchObject({ ok: false, error: 'cancelled' });
+    expect(stopped.log).not.toContain('RAN');
+    const late = await runTests(work({ files: ['data.csv'], command: 'echo RAN', timeoutMs: 300 }), { dir, user: null, hidden: [], files: stalled });
+    expect(late).toMatchObject({ ok: false, error: 'timeout' });
+    expect(readdirSync(join(dir, 'tests'))).toEqual([]);
+  });
+
+  it('stops putting what it made on the task when the part is stopped meanwhile', async () => {
+    const dir = nodeDir();
+    const stop = new AbortController();
+    const done = runTests(work({ command: 'echo made > "$HH_OUT/a.txt"; echo made > "$HH_OUT/b.txt"' }), { dir, user: null, hidden: [], files: stalled, signal: stop.signal });
+    setTimeout(() => stop.abort(), 500);
+    const result = await done;
+    expect(result.log).toMatch(/Stopped before a\.txt went on the task\./);
+    expect(result.log).not.toMatch(/Put on the task|b\.txt (went|could)/);
+    expect(readdirSync(join(dir, 'tests'))).toEqual([]);
   });
 
   it("clones a branch first when it has one, with the task's files beside it", async () => {
@@ -232,5 +261,23 @@ describe("a part's files through Hornhoof", () => {
     await files.put('part-1', 'out.txt', Buffer.from('made'));
     await expect(files.get('part-1', 'gone.csv')).rejects.toThrow('Hornhoof answered 404: Task 12 has no file gone.csv.');
     expect(seen.slice(0, 2)).toEqual(['GET /api/parts/part-1/files/data%201.csv Bearer node-key-1234567890 ', 'PUT /api/parts/part-1/files/out.txt Bearer node-key-1234567890 made']);
+  });
+
+  it("gives up on a file Hornhoof is slow to answer or to send once the part's signal ends", async () => {
+    const server = createServer((req, res) => {
+      if (req.url?.endsWith('/half.csv')) {
+        res.writeHead(200);
+        res.write('a,');
+      }
+    });
+    await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+    onTestFinished(() => {
+      server.closeAllConnections();
+      server.close();
+    });
+    const files = partFiles(`http://127.0.0.1:${(server.address() as AddressInfo).port}`, 'node-key-1234567890');
+    await expect(files.get('part-1', 'silent.csv', AbortSignal.timeout(100))).rejects.toThrow();
+    await expect(files.get('part-1', 'half.csv', AbortSignal.timeout(100))).rejects.toThrow();
+    await expect(files.put('part-1', 'out.txt', Buffer.from('made'), AbortSignal.timeout(100))).rejects.toThrow();
   });
 });

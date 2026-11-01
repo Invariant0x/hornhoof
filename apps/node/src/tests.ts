@@ -14,6 +14,9 @@ export type TestsDone = Extract<NodeMessage, { type: 'tests.done' }>;
 const KILL_AFTER_MS = 5_000;
 /* How long one git command may take, within the run's own time. */
 const GIT_TIMEOUT_MS = 5 * 60_000;
+/* What a part of work made may still go on the task this long after its time is up: Hornhoof waits two minutes past it
+   for the part's end. */
+const PUT_GRACE_MS = 60_000;
 /* How long the output may keep coming after the command ended. */
 const DRAIN_MS = 2_000;
 
@@ -175,9 +178,10 @@ export function taskBranch(heads: string, task: number): { branch: string } | { 
 }
 
 /* The task's files a part of work takes in, through Hornhoof with the node's key, and the files it puts on the task. */
+/* signal: gives up on the request, and on its body, when the part is stopped or its time is up. */
 export type PartFiles = {
-  get(partId: string, name: string): Promise<Buffer>;
-  put(partId: string, name: string, bytes: Buffer): Promise<void>;
+  get(partId: string, name: string, signal?: AbortSignal): Promise<Buffer>;
+  put(partId: string, name: string, bytes: Buffer, signal?: AbortSignal): Promise<void>;
 };
 
 /* A part's files through Hornhoof, with the node's key: Hornhoof hands out only the task files the part names, and only
@@ -190,13 +194,13 @@ export function partFiles(server: string, key: string): PartFiles {
     return new Error(`Hornhoof answered ${res.status}${body?.error?.message ? `: ${body.error.message}` : '.'}`);
   };
   return {
-    async get(partId, name) {
-      const res = await fetch(at(partId, name), { headers });
+    async get(partId, name, signal) {
+      const res = await fetch(at(partId, name), { headers, signal });
       if (!res.ok) throw await refused(res);
       return Buffer.from(await res.arrayBuffer());
     },
-    async put(partId, name, bytes) {
-      const res = await fetch(at(partId, name), { method: 'PUT', headers: { ...headers, 'content-type': 'application/octet-stream' }, body: new Uint8Array(bytes) });
+    async put(partId, name, bytes, signal) {
+      const res = await fetch(at(partId, name), { method: 'PUT', headers: { ...headers, 'content-type': 'application/octet-stream' }, body: new Uint8Array(bytes), signal });
       if (!res.ok) throw await refused(res);
     },
   };
@@ -205,7 +209,7 @@ export function partFiles(server: string, key: string): PartFiles {
 /* The files a part of work left in its output folder that go on the task: plain files only, made by the part's own user
    when it has one, at most MAX_RUN_FILES of them, each at most RUN_FILE_BYTES. Opened without following a link, so a
    link to the node's key never leaves the machine. */
-async function putOutputs(msg: TestRun, folder: string, user: JobUser | null, files: PartFiles, out: Output): Promise<void> {
+async function putOutputs(msg: TestRun, folder: string, user: JobUser | null, files: PartFiles, out: Output, signal: AbortSignal): Promise<void> {
   /* The command may have put a link to another folder in its place: then nothing goes. */
   if (!lstatSync(folder).isDirectory()) {
     out.line('The output folder is no longer a folder, so nothing goes on the task.');
@@ -229,9 +233,13 @@ async function putOutputs(msg: TestRun, folder: string, user: JobUser | null, fi
         left.push(name);
         continue;
       }
-      await files.put(msg.partId, name, readFileSync(fd));
+      await files.put(msg.partId, name, readFileSync(fd), signal);
       put.push(name);
     } catch (err) {
+      if (signal.aborted) {
+        out.line(`Stopped before ${name} went on the task.`);
+        break;
+      }
       if (fd === null) left.push(name);
       else out.line(`${name} could not go on the task: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
@@ -255,6 +263,8 @@ export async function runTests(msg: TestRun, { dir, user, hidden, signal, proc =
   const inbox = msg.repo ? join(root, 'in') : repo;
   const outbox = join(root, 'out');
   const out = new Output();
+  /* Ends a wait on Hornhoof when the part is stopped or this moment passes. */
+  const until = (end: number) => AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(Math.max(0, end - Date.now()))]);
   let commit: string | null = null;
   let exitCode: number | null = null;
   let error: TestError | null = null;
@@ -317,11 +327,19 @@ export async function runTests(msg: TestRun, { dir, user, hidden, signal, proc =
         try {
           if (!files) throw new Error('This node has no way to fetch task files.');
           const path = join(inbox, name);
-          writeFileSync(path, await files.get(msg.partId, name), { mode: 0o600, flag: 'wx' });
+          writeFileSync(path, await files.get(msg.partId, name, until(deadline)), { mode: 0o600, flag: 'wx' });
           if (user) chownSync(path, user.uid, user.gid);
         } catch (err) {
-          out.line(`The task's file ${name} could not be fetched: ${err instanceof Error ? err.message : String(err)}`);
-          error = 'files_failed';
+          if (signal?.aborted) {
+            out.line('Stopped.');
+            error = 'cancelled';
+          } else if (Date.now() >= deadline) {
+            out.line(`The task's files did not come within ${within(msg.timeoutMs)}.`);
+            error = 'timeout';
+          } else {
+            out.line(`The task's file ${name} could not be fetched: ${err instanceof Error ? err.message : String(err)}`);
+            error = 'files_failed';
+          }
           break;
         }
       }
@@ -348,7 +366,7 @@ export async function runTests(msg: TestRun, { dir, user, hidden, signal, proc =
   } finally {
     if (user) killUser(user.uid, proc);
     try {
-      if (work && ran && files && error !== 'cancelled') await putOutputs(msg, outbox, user, files, out);
+      if (work && ran && files && error !== 'cancelled') await putOutputs(msg, outbox, user, files, out, until(deadline + PUT_GRACE_MS));
     } catch (err) {
       out.line(`The output folder could not be read: ${err instanceof Error ? err.message : String(err)}`);
     }
