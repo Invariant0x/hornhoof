@@ -13,7 +13,7 @@ import { enqueueTurn, orchestratorOf, orchestratorState } from '../conversation/
 import { appendEvent } from '../events/store.js';
 import { checkStaff, departmentOf, HireLine, runsTier, servingSubscriptions, spotIn } from '../tools/staff.js';
 import { BuildItem, checkItems, isNew } from '../tools/structure.js';
-import { authorOf } from './repository.js';
+import { repoView } from './repository.js';
 import { deptName, TEMPLATE_TEXT } from './templates.js';
 
 const IdParams = z.object({ id: z.uuid() });
@@ -21,7 +21,16 @@ export const StaffBody = z.object({ proposalId: z.uuid().optional(), people: z.a
 
 export const BuildBody = z.object({ proposalId: z.uuid().optional(), brief: z.string().trim().max(1500).optional(), items: z.array(BuildItem).min(1).max(20) });
 
-export const RepoBody = z.object({ url: z.string(), branch: z.string().default('main'), token: z.string().trim().max(500).optional(), author: z.unknown().optional() }).strict();
+export const RepoBody = z
+  .object({
+    url: z.string(),
+    branch: z.string().default('main'),
+    token: z.string().trim().max(500).optional(),
+    author: z.unknown().optional(),
+    /* The free memory, in GB, a machine needs to take a test run of it; null takes the default again. */
+    testMemoryGb: z.number().int().min(1).max(512).nullable().optional(),
+  })
+  .strict();
 
 type Created = { id: string; template: TemplateKey | null; name: string | null; products: string[] };
 type Removed = { id: string; template: TemplateKey | null; name: string | null };
@@ -155,8 +164,6 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
      subscription that serves the department and runs the role's tier, with the program's Default model. Every staff card
      picks from its roles, products and subscriptions. */
   /* The git repository the department's agents work in. Only the whole company sets it; the token never comes back. */
-  const repoView = (d: typeof departments.$inferSelect) => (d.repoUrl ? { url: d.repoUrl, branch: d.repoBranch ?? 'main', tokenLast4: d.repoTokenLast4, author: authorOf(d) } : null);
-
   app.put('/api/departments/:id/repository', async req => {
     const me = await requirePerson(req, db);
     requireCompanyScope(me);
@@ -176,9 +183,10 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     /* Left out, the saved author stays; null takes it away. */
     const given = checked.data.author;
     const author = given === undefined ? {} : { repoAuthorName: given?.name ?? null, repoAuthorEmail: given?.email ?? null };
+    const memory = body.testMemoryGb === undefined ? {} : { repoTestMemoryGb: body.testMemoryGb };
     const [row] = await db
       .update(departments)
-      .set({ repoUrl: checked.data.url, repoBranch: checked.data.branch, ...token, ...author })
+      .set({ repoUrl: checked.data.url, repoBranch: checked.data.branch, ...token, ...author, ...memory })
       .where(eq(departments.id, id))
       .returning();
     ctx.bus.publish(me.companyId, { type: 'org' });
@@ -191,7 +199,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { id } = IdParams.parse(req.params);
     await db
       .update(departments)
-      .set({ repoUrl: null, repoBranch: null, repoTokenEnc: null, repoTokenLast4: null, repoAuthorName: null, repoAuthorEmail: null })
+      .set({ repoUrl: null, repoBranch: null, repoTokenEnc: null, repoTokenLast4: null, repoAuthorName: null, repoAuthorEmail: null, repoTestMemoryGb: null })
       .where(and(eq(departments.id, id), eq(departments.companyId, me.companyId)));
     ctx.bus.publish(me.companyId, { type: 'org' });
     return reply.code(204).send();

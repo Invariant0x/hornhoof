@@ -252,6 +252,12 @@ export function Subscriptions({ me }: { me: Me }) {
       await load();
     });
 
+  const lend = (m: MachineView, lendsTests: boolean) =>
+    run(async () => {
+      await api.patch(`/api/machines/${m.id}`, { lendsTests });
+      setMachines(list => list.map(x => (x.id === m.id ? { ...x, lendsTests } : x)));
+    });
+
   const disconnect = (m: MachineView) =>
     run(async () => {
       setConfirm(null);
@@ -409,8 +415,16 @@ export function Subscriptions({ me }: { me: Me }) {
                     <td>{m.owner.name}</td>
                     <td>{m.online ? <span className="status ready">{t.subs.online}</span> : <span className="muted">{lastSeen(t, language, m.lastSeenAt)}</span>}</td>
                     <td className="row-actions">
-                      {(company || m.owner.id === me.person.id) && (
-                        <button className="act danger" type="button" aria-label={t.subs.disconnectLabel(m.hostname)} onClick={() => setConfirm({ kind: 'machine', id: m.id })}>{t.subs.disconnect}</button>
+                      {company || m.owner.id === me.person.id ? (
+                        <>
+                          <label className="lend">
+                            <input type="checkbox" aria-label={t.subs.lendLabel(m.hostname)} checked={m.lendsTests} onChange={e => lend(m, e.target.checked)} />
+                            <span aria-hidden="true">{t.subs.lend}</span>
+                          </label>
+                          <button className="act danger" type="button" aria-label={t.subs.disconnectLabel(m.hostname)} onClick={() => setConfirm({ kind: 'machine', id: m.id })}>{t.subs.disconnect}</button>
+                        </>
+                      ) : (
+                        <span className="muted">{m.lendsTests ? t.subs.lent : t.subs.notLent}</span>
                       )}
                     </td>
                   </tr>

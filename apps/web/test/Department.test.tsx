@@ -459,6 +459,26 @@ describe('Department view', () => {
     await vi.waitFor(() => expect(calls.some(c => c.method === 'DELETE' && c.path === '/api/departments/d2/repository')).toBe(true));
   });
 
+  it('says how much free memory a test run of the repository needs, and changes it', async () => {
+    const user = userEvent.setup();
+    const [dev] = DEV_ORG.departments;
+    const calls = shell(
+      { [DEV_TASKS]: [200, { tasks: [] }], 'PUT /api/departments/d2/repository': [200, { repository: { ...REPO, testMemoryGb: 8 } }] },
+      { ...DEV_ORG, departments: [{ ...dev!, repository: { ...REPO, testMemoryGb: 4 } }] },
+    );
+    await flyIn(user);
+    await drawer(user, 'About the department');
+    const repo = screen.getByRole('region', { name: 'Repository' });
+    expect(repo).toHaveTextContent('A test run needs a machine with 4 GB of free memory');
+    await user.click(within(repo).getByRole('button', { name: 'Change' }));
+    const memory = within(repo).getByLabelText('Free memory for a test run, GB');
+    expect(memory).toHaveValue(4);
+    await user.clear(memory);
+    await user.type(memory, '8');
+    await user.click(within(repo).getByRole('button', { name: 'Save' }));
+    await vi.waitFor(() => expect(calls.find(c => c.method === 'PUT')?.body).toEqual({ url: 'https://github.com/acme/app.git', branch: 'main', testMemoryGb: 8 }));
+  });
+
   it("suggests a commit author's name in the person's language", async () => {
     const user = userEvent.setup();
     localStorage.setItem('hh-lang', 'ru');

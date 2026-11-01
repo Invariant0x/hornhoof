@@ -21,6 +21,7 @@ const JoinBody = z.object({
 });
 
 const IdParams = z.object({ id: z.uuid() });
+export const LendBody = z.object({ lendsTests: z.boolean() }).strict();
 
 const codeUsed = () => new ApiError(410, 'gone', 'This install command was already used or has expired. Get a new one in Hornhoof.', 'code_used');
 
@@ -90,7 +91,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const live = isNull(machines.revokedAt);
     const rows = await db
-      .select({ id: machines.id, hostname: machines.hostname, os: machines.os, arch: machines.arch, ownerId: people.id, ownerName: people.name })
+      .select({ id: machines.id, hostname: machines.hostname, os: machines.os, arch: machines.arch, lendsTests: machines.lendsTests, ownerId: people.id, ownerName: people.name })
       .from(machines)
       .innerJoin(people, eq(people.id, machines.personId))
       .where(me.scopeKind === 'company' ? live : and(live, eq(machines.personId, me.id)))
@@ -117,18 +118,35 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
         lastSeenAt: byMachine.get(m.id)?.lastSeenAt ?? null,
         subscriptions: byMachine.get(m.id)?.total ?? 0,
         load: loadOf(m.id),
+        lendsTests: m.lendsTests,
       })),
     };
   });
 
-  app.post('/api/machines/:id/disconnect', async (req, reply) => {
-    const me = await requirePerson(req, db);
-    const { id } = IdParams.parse(req.params);
+  /* A live machine its owner, or someone who sees the whole company, may change. */
+  async function ownMachine(me: Awaited<ReturnType<typeof requirePerson>>, id: string) {
     const [machine] = await db.select().from(machines).where(and(eq(machines.id, id), isNull(machines.revokedAt)));
     if (!machine) throw new ApiError(404, 'not_found', 'This machine does not exist.', 'machine_unknown');
     if (machine.personId !== me.id && me.scopeKind !== 'company') throw new ApiError(403, 'forbidden', 'Only the owner of this machine can do this.', 'not_owner');
+    return machine;
+  }
+
+  app.post('/api/machines/:id/disconnect', async (req, reply) => {
+    const me = await requirePerson(req, db);
+    const { id } = IdParams.parse(req.params);
+    await ownMachine(me, id);
     await disconnectMachines(ctx, [id]);
     return reply.code(204).send();
+  });
+
+  /* Whether the machine takes the company's test runs. A machine lent again may take a run that waits. */
+  app.patch('/api/machines/:id', async req => {
+    const me = await requirePerson(req, db);
+    const { id } = IdParams.parse(req.params);
+    const { lendsTests } = LendBody.parse(req.body);
+    await ownMachine(me, id);
+    await db.update(machines).set({ lendsTests }).where(eq(machines.id, id));
+    return { lendsTests };
   });
 
   app.get('/install.sh', async (_req, reply) => {

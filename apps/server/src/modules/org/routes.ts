@@ -7,7 +7,7 @@ import { personColumns, requirePerson } from '../../auth/session.js';
 import { agents, companies, departments, jobs, people, personAccess, requests, subscriptions, tasks, teams, turns } from '../../db/schema.js';
 import { employeeOrder } from '../agents/order.js';
 import { limitUntil } from '../conversation/queue.js';
-import { authorOf } from '../departments/repository.js';
+import { repoView } from '../departments/repository.js';
 import { deptName } from '../departments/templates.js';
 import { CHANNEL_MS, type Endpoint } from '../events/bus.js';
 import { workingCount } from '../events/store.js';
@@ -46,7 +46,7 @@ export function orgRoutes(app: FastifyInstance, { db, hub, templates, bus }: Ctx
       return t ? { id: t.id, number: t.number, title: t.title } : null;
     };
     /* Only people who see the whole company set repositories, so only they read where they are. */
-    const repositoryOf = (d: (typeof depts)[number]) => (reach.whole && d.repoUrl ? { url: d.repoUrl, branch: d.repoBranch ?? 'main', tokenLast4: d.repoTokenLast4, author: authorOf(d) } : null);
+    const repositoryOf = (d: (typeof depts)[number]) => (reach.whole ? repoView(d) : null);
     const [open] = await db.select({ id: turns.id, number: turns.number, title: turns.title, goal: turns.goal }).from(turns).where(and(eq(turns.companyId, me.companyId), eq(turns.status, 'open')));
     /* The map shows the turn's short name. */
     const turn = open && { id: open.id, number: open.number, goal: open.title || open.goal };

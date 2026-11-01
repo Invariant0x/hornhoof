@@ -73,8 +73,8 @@ export const SUBS: SubView[] = [
 ];
 
 export const MACHINES: MachineView[] = [
-  { id: 'm1', hostname: 'ivan-mbp', os: 'darwin', arch: 'arm64', owner: { id: 'p1', name: 'Ivan' }, online: true, lastSeenAt: null, subscriptions: 2, load: { cpus: 8, load: 2, memFree: 6 * 1024 ** 3, memTotal: 16 * 1024 ** 3, tests: 1, jobs: 2 } },
-  { id: 'm2', hostname: 'build-box', os: 'linux', arch: 'x86_64', owner: { id: 'p2', name: 'Maria' }, online: false, lastSeenAt: new Date(Date.now() - 5 * 60_000).toISOString(), subscriptions: 1, load: null },
+  { id: 'm1', hostname: 'ivan-mbp', os: 'darwin', arch: 'arm64', owner: { id: 'p1', name: 'Ivan' }, online: true, lastSeenAt: null, subscriptions: 2, load: { cpus: 8, load: 2, memFree: 6 * 1024 ** 3, memTotal: 16 * 1024 ** 3, tests: 1, jobs: 2 }, lendsTests: true },
+  { id: 'm2', hostname: 'build-box', os: 'linux', arch: 'x86_64', owner: { id: 'p2', name: 'Maria' }, online: false, lastSeenAt: new Date(Date.now() - 5 * 60_000).toISOString(), subscriptions: 1, load: null, lendsTests: false },
 ];
 
 const OPUS = { id: 'claude-opus-5-5', name: 'Claude Opus 5.5' };

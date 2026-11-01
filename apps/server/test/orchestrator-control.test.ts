@@ -8,7 +8,7 @@ import { and, desc, eq, isNull, like } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agentChanges, agentEvents, agents, companies, departments, jobs, people, proposals, publicLinks, requests, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
+import { agentChanges, agentEvents, agents, companies, departments, jobs, machines, people, proposals, publicLinks, requests, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
 import { afterJob } from '../src/modules/tasks/wake.js';
 import { identityOf } from '../src/modules/nodes/hub.js';
 import { ask, createTask } from '../src/modules/tasks/engine.js';
@@ -115,6 +115,16 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
     expect(turn!.createdBy).toBeNull();
     const [said] = await db.select().from(agentEvents).where(eq(agentEvents.agentId, bruno.id));
     expect(said).toMatchObject({ kind: 'message', personId: null, data: { text: 'Please look at the checkout bug first.', from: 'orchestrator' } });
+  });
+
+  it("lends one of the company's machines to test runs or takes it back, as the machines screen does", async () => {
+    const { app, db } = await company();
+    const [acme] = await db.select().from(companies);
+    const [ivan] = await db.select().from(people);
+    const [machine] = await db.insert(machines).values({ companyId: acme!.id, personId: ivan!.id, machineKey: 'mac-0001-abcd', hostname: 'ivan-mac' }).returning();
+    const client = await mcp(app);
+    expect(text(await call(client, 'lend_machine', { machine: machine!.id, lendsTests: false }))).toContain('"lendsTests":false');
+    expect((await db.select().from(machines))[0]!.lendsTests).toBe(false);
   });
 
   it('reads any page the CEO can open', async () => {

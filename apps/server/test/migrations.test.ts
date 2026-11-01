@@ -126,7 +126,7 @@ describe('migration 0007', () => {
     await db.execute(sql`insert into tasks (company_id, number, title) values (${C}, 1, 'Build the payment page')`);
     await expect(db.execute(sql`insert into tasks (company_id, number, title) values (${C}, 1, 'Again')`)).rejects.toThrow();
     const cols = await db.execute<{ column_name: string }>(sql`select column_name from information_schema.columns where table_name = 'departments' and column_name like 'repo_%' order by column_name`);
-    expect(cols.rows.map(r => r.column_name)).toEqual(['repo_author_email', 'repo_author_name', 'repo_branch', 'repo_token_enc', 'repo_token_last4', 'repo_url']);
+    expect(cols.rows.map(r => r.column_name)).toEqual(['repo_author_email', 'repo_author_name', 'repo_branch', 'repo_test_memory_gb', 'repo_token_enc', 'repo_token_last4', 'repo_url']);
   });
 });
 
@@ -275,5 +275,27 @@ describe('migration 0024', () => {
       { subscription_id: KEY, session_id: null },
       { subscription_id: PLAN, session_id: 'plan-session' },
     ]);
+  });
+});
+
+describe('migration 0031', () => {
+  const C = '00000000-0000-4000-8000-000000000001';
+  const P = '00000000-0000-4000-8000-000000000002';
+
+  it('lends the machines of an older install to test runs, and its repositories need the default memory', async () => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0030_job_answers_ceo') });
+    await db.execute(sql`insert into companies (id, name) values (${C}, 'Acme')`);
+    await db.execute(sql`insert into people (id, company_id, name, email, status, scope_kind) values (${P}, ${C}, 'Ivan', 'ivan@acme.com', 'active', 'company')`);
+    await db.execute(sql`insert into machines (company_id, person_id, machine_key, hostname) values (${C}, ${P}, 'mac-0001-abcd', 'ivan-mac')`);
+    await db.execute(sql`insert into departments (company_id, role_code, repo_url) values (${C}, 'DEV', 'https://github.com/acme/shop.git')`);
+
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+
+    expect((await db.execute<{ lends_tests: boolean }>(sql`select lends_tests from machines`)).rows).toEqual([{ lends_tests: true }]);
+    expect((await db.execute<{ repo_test_memory_gb: number | null }>(sql`select repo_test_memory_gb from departments`)).rows).toEqual([{ repo_test_memory_gb: null }]);
+    expect((await db.execute<{ n: number }>(sql`select count(*)::int as n from test_runs`)).rows).toEqual([{ n: 0 }]);
   });
 });

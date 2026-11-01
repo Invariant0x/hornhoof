@@ -50,4 +50,20 @@ describe("a machine's load", () => {
     const ann = await invitePerson(app, ceo, { name: 'Ann', email: 'ann@acme.com', access: { departments: [sales!.id] } });
     expect((await machinesOf(app, ann)).builtin).toBeNull();
   });
+
+  it('is lent to test runs by default, and its owner or someone who sees the whole company takes it back', async () => {
+    const { app, db, ceo, machineId } = await liveCompany();
+    const lend = (token: string, lendsTests: unknown) => app.inject({ method: 'PATCH', url: `/api/machines/${machineId}`, payload: { lendsTests }, ...as(token) });
+    expect((await machinesOf(app, ceo)).machines[0].lendsTests).toBe(true);
+    const [acme] = await db.select().from(companies);
+    const [sales] = await db.insert(departments).values({ companyId: acme!.id, templateKey: 'sales', roleCode: 'SAL' }).returning();
+    const ann = await invitePerson(app, ceo, { name: 'Ann', email: 'ann@acme.com', access: { departments: [sales!.id] } });
+    expect((await lend(ann, false)).json().error.reason).toBe('not_owner');
+    expect((await lend(ceo, 'no')).statusCode).toBe(400);
+    const off = await lend(ceo, false);
+    expect(off.statusCode).toBe(200);
+    expect(off.json()).toEqual({ lendsTests: false });
+    expect((await machinesOf(app, ceo)).machines[0].lendsTests).toBe(false);
+    expect((await app.inject({ method: 'PATCH', url: '/api/machines/00000000-0000-4000-8000-000000000000', payload: { lendsTests: true }, ...as(ceo) })).statusCode).toBe(404);
+  });
 });

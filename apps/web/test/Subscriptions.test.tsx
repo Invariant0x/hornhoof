@@ -275,6 +275,28 @@ describe('Subscriptions', () => {
     expect(within(own).queryByRole('button')).not.toBeInTheDocument();
   });
 
+  it("lends a machine to the company's test runs, or takes it back, for its owner or someone who sees the whole company", async () => {
+    const calls = lists({ 'PATCH /api/machines/m1': [200, { lendsTests: false }] });
+    const user = userEvent.setup();
+    render(<Subscriptions me={ME} />);
+    const ivan = await screen.findByRole('row', { name: /^ivan-mbp\b/ });
+    const lend = within(ivan).getByRole('checkbox', { name: "Lend ivan-mbp to the company's test runs" });
+    expect(lend).toBeChecked();
+    expect(within(screen.getByRole('row', { name: /^build-box\b/ })).getByRole('checkbox')).not.toBeChecked();
+    await user.click(lend);
+    await vi.waitFor(() => expect(calls.find(c => c.method === 'PATCH')).toEqual({ method: 'PATCH', path: '/api/machines/m1', body: { lendsTests: false } }));
+  });
+
+  it("shows another person's machine as lent or not, without the switch", async () => {
+    lists();
+    const lead: Me = { ...ME, person: { ...ME.person, scopeKind: 'listed', isOwner: false } };
+    render(<Subscriptions me={lead} />);
+    const maria = await screen.findByRole('row', { name: /^build-box\b/ });
+    expect(within(maria).queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(within(maria).getByText('Not lent to test runs')).toBeInTheDocument();
+    expect(within(screen.getByRole('row', { name: /^ivan-mbp\b/ })).getByRole('checkbox')).toBeChecked();
+  });
+
   it('shows the states in Russian', async () => {
     localStorage.setItem('hh-lang', 'ru');
     lists();
@@ -292,6 +314,7 @@ describe('Subscriptions', () => {
     const [codexFive] = within(within(rowOf('Codex')).getByRole('list', { name: 'Лимиты' })).getAllByRole('listitem');
     expect(codexFive).toHaveTextContent(/^5 часовПока нет данных$/);
     expect(within(rowOf('Ключ Anthropic')).getByText('Оплата по факту, без лимитов плана')).toBeInTheDocument();
+    expect(within(rowOf('ivan-mbp')).getByRole('checkbox', { name: 'Отдавать ivan-mbp под прогоны тестов компании' })).toBeChecked();
     expect(within(rowOf('ivan-mbp')).getByText('8 процессоров, загрузка 25%. Свободно 6 из 16 ГБ памяти. Сейчас идут: 1 прогон тестов, 2 хода агентов.')).toBeInTheDocument();
   });
 });

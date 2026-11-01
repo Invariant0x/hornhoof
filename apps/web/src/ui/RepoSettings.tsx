@@ -21,6 +21,7 @@ export function RepoSettings({ placeId, repository, compact = false }: Props) {
   const [token, setToken] = useState('');
   const [authorName, setAuthorName] = useState('');
   const [authorEmail, setAuthorEmail] = useState('');
+  const [memory, setMemory] = useState('');
   const [asking, setAsking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<unknown>(null);
@@ -47,6 +48,7 @@ export function RepoSettings({ placeId, repository, compact = false }: Props) {
     setToken('');
     setAuthorName(repository?.author?.name ?? '');
     setAuthorEmail(repository?.author?.email ?? '');
+    setMemory(repository?.testMemoryGb ? String(repository.testMemoryGb) : '');
     setFailure(null);
     setEditing(true);
   }
@@ -55,7 +57,10 @@ export function RepoSettings({ placeId, repository, compact = false }: Props) {
     e.preventDefault();
     /* Both fields name the author; both empty take a saved one away. */
     const author = authorName.trim() ? { author: { name: authorName.trim(), email: authorEmail.trim() } } : repository?.author ? { author: null } : {};
-    const body = { url: url.trim(), branch: branch.trim() || 'main', ...(token.trim() ? { token: token.trim() } : {}), ...author };
+    /* Sent only when it changed; an empty field takes the default again. */
+    const gb = memory.trim() ? Number(memory) : null;
+    const testMemory = gb !== (repository?.testMemoryGb ?? null) ? { testMemoryGb: gb } : {};
+    const body = { url: url.trim(), branch: branch.trim() || 'main', ...(token.trim() ? { token: token.trim() } : {}), ...author, ...testMemory };
     void run(() => api.put(path, body));
   }
 
@@ -71,6 +76,7 @@ export function RepoSettings({ placeId, repository, compact = false }: Props) {
         </Field>
         <Field label={t.dept.authorName} hint={t.dept.authorHint}>{p => <input {...p} value={authorName} onChange={e => setAuthorName(e.target.value)} maxLength={100} placeholder={t.dept.authorPlaceholder} />}</Field>
         <Field label={t.dept.authorEmail}>{p => <input {...p} type="email" value={authorEmail} onChange={e => setAuthorEmail(e.target.value)} maxLength={200} />}</Field>
+        <Field label={t.dept.testMemory} hint={t.dept.testMemoryHint}>{p => <input {...p} type="number" min={1} max={512} step={1} value={memory} onChange={e => setMemory(e.target.value)} />}</Field>
         <div className="repo-actions">
           <button className="btn small" type="submit" disabled={busy || !url.trim() || !authorName.trim() !== !authorEmail.trim()}>{t.common.save}</button>
           <button className="btn small ghost" type="button" onClick={() => setEditing(false)}>{t.common.cancel}</button>
@@ -96,6 +102,7 @@ export function RepoSettings({ placeId, repository, compact = false }: Props) {
       <small>{t.dept.branchIs(repository.branch)}</small>
       <small>{repository.tokenLast4 ? t.dept.tokenEnding(repository.tokenLast4) : t.dept.noToken}</small>
       {repository.author && <small>{t.dept.commitsAs(repository.author.name, repository.author.email)}</small>}
+      {repository.testMemoryGb !== undefined && <small>{t.dept.testMemoryIs(repository.testMemoryGb)}</small>}
       {asking ? (
         <div className="repo-actions">
           <span>{t.dept.removeAsk}</span>

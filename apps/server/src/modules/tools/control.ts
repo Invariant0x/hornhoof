@@ -9,6 +9,7 @@ import { AgentPatch } from '../agents/routes.js';
 import { deptName } from '../departments/templates.js';
 import { BuildBody, RepoBody } from '../departments/routes.js';
 import { LinkBody } from '../link/routes.js';
+import { LendBody } from '../nodes/routes.js';
 import { NOTE_MAX, NoteBody } from '../notebook/book.js';
 import { carriesFile, encodedHint } from '../tasks/attachments.js';
 import { InviteBody, PersonPatch } from '../people/routes.js';
@@ -113,7 +114,8 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
 
   tool(
     'set_repository',
-    'Connects the git repository a department\'s agents work in: an https address, the branch (main by default), a token that may push, and author { name, email } for their commits.',
+    'Connects the git repository a department\'s agents work in: an https address, the branch (main by default), a token that may push, author { name, email } for their commits, ' +
+      'and testMemoryGb, the free memory a machine needs to take a test run of it (4 by default).',
     { department: Id('department'), ...RepoBody.shape },
     ({ department, ...body }) => ({ method: 'PUT', url: `/api/departments/${department}/repository`, payload: body }),
   );
@@ -225,6 +227,12 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
     method: 'POST',
     url: `/api/machines/${machine}/disconnect`,
   }));
+  tool(
+    'lend_machine',
+    "Lends a machine to the company's test runs (lendsTests true), which go to whichever lent machine is freest, or takes it back.",
+    { machine: Id('machine'), ...LendBody.shape },
+    ({ machine, ...body }) => ({ method: 'PATCH', url: `/api/machines/${machine}`, payload: body }),
+  );
 
   tool('check_updates', 'Looks for a newer Hornhoof now.', {}, () => ({ method: 'POST', url: '/api/updates/check' }));
   tool(

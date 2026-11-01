@@ -244,6 +244,10 @@ export const en = {
     disconnectAsk: (host: string) => `Disconnect ${host}? Its nodes stop, and its subscriptions wait for a machine again.`,
     yesDisconnect: 'Yes, disconnect',
     noMachines: 'No machines yet.',
+    lendLabel: (host: string) => `Lend ${host} to the company's test runs`,
+    lend: 'Lend to test runs',
+    lent: 'Lent to test runs',
+    notLent: 'Not lent to test runs',
     loadLine: (l: LoadWords) =>
       `${l.cpus} ${l.cpus === 1 ? 'processor' : 'processors'}, ${l.busy}% busy. ${l.free} of ${l.total} GB of memory free. ` +
       `Running now: ${l.tests} ${l.tests === 1 ? 'test run' : 'test runs'}, ${l.jobs} ${l.jobs === 1 ? 'agent turn' : 'agent turns'}.`,
@@ -357,6 +361,9 @@ export const en = {
     authorEmail: 'Author email',
     authorHint: "Every agent's commits carry this name and address. Leave both empty to let each agent's program pick its own.",
     commitsAs: (name: string, email: string) => `Commits as ${name} <${email}>`,
+    testMemory: 'Free memory for a test run, GB',
+    testMemoryHint: 'The full test suite runs on whichever machine of the company is freest. It goes only to a machine with this much free memory.',
+    testMemoryIs: (gb: number) => `A test run needs a machine with ${gb} GB of free memory`,
     remove: 'Remove',
     removeAsk: 'Remove the repository? Agents keep their clones and the token is deleted.',
     yesRemove: 'Yes, remove',

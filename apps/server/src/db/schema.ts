@@ -81,6 +81,8 @@ export const departments = pgTable('departments', {
   /* Who the agents' commits are by; without one each agent's program sets its own. */
   repoAuthorName: text('repo_author_name'),
   repoAuthorEmail: text('repo_author_email'),
+  /* The free memory, in GB, a machine needs to take one of the repository's test runs; none takes the default. */
+  repoTestMemoryGb: integer('repo_test_memory_gb'),
   createdAt: createdAt(),
 });
 
@@ -110,6 +112,8 @@ export const machines = pgTable(
     hostname: text('hostname').notNull().default(''),
     os: text('os').notNull().default(''),
     arch: text('arch').notNull().default(''),
+    /* Lends itself to the company's test runs; its owner, or someone who sees the whole company, can take it back. */
+    lendsTests: boolean('lends_tests').notNull().default(true),
     createdAt: createdAt(),
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
   },
@@ -484,6 +488,66 @@ export const attachments = pgTable(
     createdAt: createdAt(),
   },
   t => [index('attachments_request_id').on(t.requestId), index('attachments_job_id').on(t.jobId), index('attachments_task_id').on(t.taskId)],
+);
+
+export const TEST_RUN_STATUSES = ['running', 'passed', 'failed', 'stopped'] as const;
+
+/* The full test suite of a task's branch, which an agent runs on whichever machines of the company are free, in parts
+   when its runner splits. The agent hears the result on its task, and each part's log goes on the task as a file. */
+export const testRuns = pgTable(
+  'test_runs',
+  {
+    id: id(),
+    companyId: companyId(),
+    number: integer('number').notNull(),
+    taskId: uuid('task_id').notNull().references(() => tasks.id),
+    agentId: uuid('agent_id').notNull().references(() => agents.id),
+    /* The turn that asked for it: the logs go on the task as that turn's files. */
+    jobId: uuid('job_id').notNull().references(() => jobs.id),
+    /* The department or product whose repository it clones; a removed one takes its repository along. */
+    departmentId: uuid('department_id').references(() => departments.id, { onDelete: 'set null' }),
+    /* None: the task's own branch, task-<number> or the one that starts with task-<number>-. */
+    branch: text('branch'),
+    command: text('command').notNull(),
+    parts: integer('parts').notNull().default(1),
+    timeoutMs: integer('timeout_ms').notNull(),
+    status: text('status', { enum: TEST_RUN_STATUSES }).notNull().default('running'),
+    /* An agent other than the one that asked for it stopped it. */
+    stoppedByAgentId: uuid('stopped_by_agent_id').references(() => agents.id),
+    createdAt: createdAt(),
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+  },
+  t => [unique('test_runs_company_number').on(t.companyId, t.number), index('test_runs_task_id').on(t.taskId)],
+);
+
+export const TEST_PART_STATUSES = ['queued', 'running', 'passed', 'failed', 'stopped'] as const;
+
+/* One part of a test run: it waits for a free machine, then runs on one node, a subscription's node on a machine or the
+   built-in node. */
+export const testParts = pgTable(
+  'test_parts',
+  {
+    id: id(),
+    companyId: companyId(),
+    runId: uuid('run_id').notNull().references(() => testRuns.id),
+    part: integer('part').notNull(),
+    status: text('status', { enum: TEST_PART_STATUSES }).notNull().default('queued'),
+    subscriptionId: uuid('subscription_id').references(() => subscriptions.id),
+    builtin: boolean('builtin').notNull().default(false),
+    machineId: uuid('machine_id').references(() => machines.id),
+    /* The machine's name as it ran, for the result. */
+    machineName: text('machine_name'),
+    /* The commit it tested, the command's exit code, and why it ended when that was not the tests themselves. */
+    commit: text('commit'),
+    exitCode: integer('exit_code'),
+    error: text('error'),
+    /* The last lines of what it printed. */
+    tail: text('tail').notNull().default(''),
+    createdAt: createdAt(),
+    startedAt: timestamp('started_at', { withTimezone: true }),
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+  },
+  t => [unique('test_parts_run_part').on(t.runId, t.part), index('test_parts_status').on(t.status)],
 );
 
 /* The company's notebook: short notes the orchestrator keeps across conversations, such as the CEO's decisions, rules
