@@ -201,6 +201,84 @@ describe('templates', () => {
     expect(templates.roles.get('DEV-OPS')!.body).toContain('final check');
   });
 
+  it('lays each goal out whole, for one department, with new asks in the next turn', () => {
+    const body = (id: string) => templates.skills.get(id)!.body;
+    expect(body('orch-plan-turn')).toMatch(/one task for the one department that owns it end to end/);
+    expect(body('orch-plan-turn')).toMatch(/next turn[\s\S]*"now"/);
+    for (const id of ['orch-plan-turn', 'hh-break-down']) expect(body(id), id).toMatch(/plans, contracts or proofs/);
+    expect(body('hh-break-down')).toMatch(/two to four/);
+    expect(body('hh-break-down')).not.toMatch(/a few hours of work/);
+  });
+
+  it('has heads give out big pieces at once, answer without rewriting briefs and leave the work and the status to others', () => {
+    const body = (id: string) => templates.skills.get(id)!.body;
+    for (const id of ['hh-lead-tasks', 'hh-break-down']) expect(body(id), id).toMatch(/two to four/);
+    for (const id of ['hh-lead-tasks', 'hh-brief-members']) expect(body(id), id).toMatch(/once/);
+    for (const id of ['hh-lead-tasks', 'hh-brief-members', 'hh-handle-reports']) expect(body(id), id).toMatch(/leaving the rest as written/);
+    expect(body('hh-lead-tasks')).not.toMatch(/rewrite the body as the current truth/);
+    expect(body('hh-lead-tasks')).toMatch(/switches off members with no work in the turn/);
+    expect(body('hh-lead-tasks')).toMatch(/notebook only when something it holds changes/);
+    expect(body('hh-status-update')).toMatch(/one line/);
+    for (const r of roles.filter(x => x.kind === 'head')) expect(r.body, r.id).not.toMatch(/status to the orchestrator|keep the orchestrator informed/);
+    expect(templates.roles.get('DEV-HEAD')!.body).toMatch(/all at once/);
+  });
+
+  it('gives each builder a whole piece of its own layer, both sides agreeing the interface directly, and keeps reviewers off building', () => {
+    const head = templates.roles.get('DEV-HEAD')!.body;
+    expect(head).toMatch(/whole piece of its own layer/);
+    expect(head).toMatch(/in parallel/);
+    for (const id of ['DEV-HEAD', 'DEV-BE', 'DEV-FE']) expect(templates.roles.get(id)!.body, id).toMatch(/agree the interface directly/);
+    expect(templates.skills.get('hh-break-down')!.body).toMatch(/agree (it|how they fit) directly/);
+    for (const id of ['hh-break-down', 'DEV-HEAD']) expect(id.startsWith('hh') ? templates.skills.get(id)!.body : templates.roles.get(id)!.body, id).toMatch(/no separate task for/);
+    expect(templates.skills.get('hh-lead-tasks')!.body).toMatch(/[Bb]uilders build and reviewers review/);
+    for (const x of [...roles, ...skills]) expect(x.body, x.id).not.toMatch(/not by layer/);
+  });
+
+  it('gates work by its size and risk, and fails it only for what blocks', () => {
+    const body = (id: string) => templates.skills.get(id)!.body;
+    const gates = body('dev-gates');
+    expect(gates).toMatch(/[Rr]esearch, reports, plans and docs get no gates/);
+    expect(gates).toMatch(/one review/);
+    expect(gates).toMatch(/access, sign-in, secrets, permissions or running untrusted input/);
+    expect(gates).toMatch(/behavio(u)?r people use/);
+    expect(gates).not.toMatch(/doubled/i);
+    for (const id of ['dev-gates', 'dev-review-verdict', 'dev-review-diff']) expect(body(id), id).toMatch(/only the fixes/);
+    const verdict = body('dev-review-verdict');
+    expect(verdict).toMatch(/a failing test, an unmet requirement of the task, a security hole or data loss/);
+    expect(verdict).toMatch(/every blocking finding/);
+    expect(verdict).toMatch(/notes? under (a|the) pass/);
+    expect(verdict).not.toMatch(/Important/);
+    for (const id of ['DEV-REV', 'DEV-SEC', 'DEV-TEST', 'DEV-QA', 'DEV-RED']) expect(templates.roles.get(id)!.body, id).toMatch(/blocking/);
+  });
+
+  it('has Operations lead a problem: diagnosis split at once, the database read by the head, one message back', () => {
+    const head = templates.roles.get('OPS-HEAD')!.body;
+    expect(head).toMatch(/"database"/);
+    expect(head).toMatch(/one message/);
+    expect(templates.skills.get('ops-intake')!.body).toMatch(/two or three members at once/);
+    for (const id of ['ops-intake', 'ops-incident-response']) expect(templates.skills.get(id)!.body, id).toMatch(/[Rr]ead-only diagnosis and small fixes need no gates/);
+    expect(templates.skills.get('ops-incident-response')!.body).not.toMatch(/every hour/);
+  });
+
+  it('has the orchestrator look in the database before it asks anyone why work went wrong', () => {
+    const trouble = templates.skills.get('orch-trouble')!.body;
+    for (const words of ['"database"', 'agent_changes', 'jobs', 'task_events', 'agent_events', 'head of Operations']) expect(trouble, words).toContain(words);
+    expect(trouble).toMatch(/never outranks the CEO's goals/);
+  });
+
+  it('passes files as task attachments, never pasted into comments', () => {
+    for (const id of ['hh-task-flow', 'hh-brief-members']) expect(templates.skills.get(id)!.body, id).toContain('hh-attach --task N FILE');
+    expect(templates.skills.get('hh-task-flow')!.body).toContain('hh-fetch N NAME');
+    expect(skills.map(s => s.body).join('\n')).not.toMatch(/base64/i);
+  });
+
+  it('starts work that waits for another by itself, and has each executor merge into the turn branch', () => {
+    for (const id of ['hh-lead-tasks', 'hh-break-down']) expect(templates.skills.get(id)!.body, id).toContain('`after`');
+    for (const id of ['dev-gates', 'dev-ci-release', 'dev-worktrees']) expect(templates.skills.get(id)!.body, id).toContain("the turn's branch");
+    expect(templates.roles.get('DEV-OPS')!.body).toContain("the turn's branch");
+    expect([...roles, ...skills].map(x => x.body).join('\n')).not.toMatch(/merge the turn's task branches/);
+  });
+
   it('credits every source a skill names in SOURCES.md', () => {
     const credits = readFileSync(`${DIR}/SOURCES.md`, 'utf8');
     for (const s of skills) for (const src of s.sources) expect(credits, `${s.id} ${src}`).toContain(src.split(' ')[0]);

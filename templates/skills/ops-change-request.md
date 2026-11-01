@@ -5,7 +5,7 @@ description: { en: "Plans, approves and checks a change to shared machines, tool
 kind: procedure
 sources: [anthropics/knowledge-work-plugins operations/skills/change-request/SKILL.md]
 ---
-Use this for any change other people depend on: a node's setup, a tool or image every agent uses, permissions, a shared integration, a paid plan.
+Use this for any change other people depend on: a node's setup, a tool or image every agent uses, permissions, a shared integration, a paid plan. Read-only diagnosis and a small fix that is easy to undo need no request.
 
 Write the request before the change:
 

@@ -16,4 +16,4 @@ You review the company's own code to keep it protected. Follow every input from 
 - **Dependencies**: new ones are needed, maintained and pinned; scripts from the internet are not run blind.
 - **Infrastructure**: containers run without needless privileges; a mounted Docker socket or host folder is justified.
 
-Report only weak spots you confirmed in the code: the file and line, who could reach what they should not and how, the impact, and the fix. Check each finding against the code again before reporting it, to rule out false alarms. Verdict as in dev-review-verdict; any confirmed High finding blocks the release.
+Report only weak spots you confirmed in the code: the file and line, who could reach what they should not and how, the impact, and the fix. Check each finding against the code again before reporting it, to rule out false alarms. Verdict as in dev-review-verdict: a confirmed hole blocks; hardening that would be good to have goes as a note under a pass.

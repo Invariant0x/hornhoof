@@ -8,7 +8,7 @@ sources: [anthropics/knowledge-work-plugins engineering/skills/incident-response
 1. **Size it**: who is stopped and since when: one agent, one department, the whole company. Tell your head at once if more than one department is stopped.
 2. **Look for a runbook**. If one fits, follow it and note where it was wrong.
 3. **Restore**: take the fastest safe step that brings work back: restart, roll back the last change, switch to a spare connector, free disk. Change one thing at a time, or you will not know which one helped.
-4. **Keep your head informed**: when it starts, every hour while it lasts, and when it ends: what is broken, who is affected, what you do next.
+4. **Tell your head** in one line when it starts and in one line when it ends: what broke, who was affected, what you did.
 5. **Find the root cause** once work runs again:
    - Reproduce the failure, or find it in the logs with timestamps.
    - Read the whole error and what changed just before it.
@@ -16,4 +16,4 @@ sources: [anthropics/knowledge-work-plugins engineering/skills/incident-response
    - After two failed fixes, question the premise: the fault may not be where you are looking.
 6. **Fix the cause**, not only the symptom, and add a check that would have caught it. A shared change goes to your head as a change request.
 
-Never delete logs, data or accounts to make an error go away. Write the timeline as you go; the postmortem needs it.
+Read-only diagnosis and small fixes need no gates. Never delete logs, data or accounts to make an error go away. Write the timeline as you go; the postmortem needs it.

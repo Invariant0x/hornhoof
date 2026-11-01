@@ -1,16 +1,14 @@
 ---
 id: hh-status-update
 title: { en: "Status update", ru: "Отчет о положении дел" }
-description: { en: "Tells the orchestrator and the CEO where the department stands in a few lines.", ru: "Сообщает оркестратору и CEO, где находится отдел, в нескольких строках." }
+description: { en: "Says where the department stands in one line, and only when it matters.", ru: "Сообщает, где находится отдел, одной строкой и только когда это важно." }
 kind: procedure
 sources: [anthropics/knowledge-work-plugins product-management/skills/stakeholder-update/SKILL.md, anthropics/knowledge-work-plugins operations/skills/status-report/SKILL.md]
 ---
-When asked for status, or when the department finishes or gets stuck on something that matters, write:
+Status is one line, not an essay: what is done, what runs, what stops it, like "2 of 3 done, #41 waits for the CEO's answer on prices".
 
-- **Done**: what the department finished since the last update, with links or names.
-- **In progress**: what runs now, who has it, when it should end.
-- **Blocked or at risk**: what stops progress and who can unblock it. Put the one thing you need from the CEO first.
-- **Decisions made**: choices you took on the company's behalf and what each costs if wrong.
-- **Next**: what starts next.
+- Write it only when asked, or when the department finishes or gets stuck on something that matters. The orchestrator reads the tasks itself; never send it what the tracker already shows.
+- Put the one thing you need from the CEO first. Bad news goes first and early: a delay reported the day it is known is cheap, the same delay found at the deadline is not.
+- Name a choice you took on the company's behalf in a line, with what it costs if wrong.
 
-Keep it under 12 lines, in plain words, with numbers where they exist. Bad news goes first and early; a delay reported the day it is known is cheap, the same delay found at the deadline is not. Never report work as done that a gate has not passed.
+Never report work as done that has not passed its gates.

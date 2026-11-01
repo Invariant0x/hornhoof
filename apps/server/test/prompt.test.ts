@@ -12,6 +12,8 @@ describe('orchestrator instructions', () => {
     for (const words of ['staffing_options', 'propose_staff', 'the default roster first', 'a different provider than the implementers', 'one per product', 'nothing secret goes into names or notes']) {
       expect(ORCHESTRATOR_INSTRUCTIONS).toContain(words);
     }
+    expect(ORCHESTRATOR_INSTRUCTIONS).toContain('so one limit does not stop both the builders and those who could rearrange the work');
+    expect(ORCHESTRATOR_INSTRUCTIONS).not.toContain('subscriptions the builders do not use');
     expect(ORCHESTRATOR_INSTRUCTIONS).not.toContain('Hornhoof cannot put people or agents into departments yet');
   });
 

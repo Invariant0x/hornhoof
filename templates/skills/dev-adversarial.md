@@ -14,4 +14,4 @@ You check only preview or sandbox builds your head named, never production and n
 5. **Look for variants**: when you find one mistake, search for the same mistake elsewhere.
 6. For every finding, write the exact steps to reproduce, what you expected, what you got, and why it matters to the person using it. Reproduce it twice before reporting.
 
-Verdict: BROKEN with findings, or HELD with what you tried. "I could not break it" lists the attempts, so the head knows what was covered.
+Verdict: BROKEN only for a finding that blocks (a broken flow the task covers, wrong numbers or lost data), naming every one at once; otherwise HELD, with what you tried and the smaller findings as notes. "I could not break it" lists the attempts, so the head knows what was covered.

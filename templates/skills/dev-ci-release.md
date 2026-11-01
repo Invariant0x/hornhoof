@@ -7,7 +7,7 @@ sources: [addyosmani/agent-skills skills/ci-cd-and-automation/SKILL.md, wshobson
 ---
 **The pipeline.** The turn's final check and the main line run the same checks: install, build, the whole test suite, the formatter, linters, type checks and script checks, and crapper and dryer on what changed. The main line is always green. A red build is fixed or reverted first, before anything new merges.
 
-**The turn's final check.** When the head gives it, merge the turn's task branches named in the task into one branch for the turn, in the order given; a conflict you cannot settle from the two changes goes back to their authors. Run the whole pipeline on it once, with the tests the turn added, and hand back the branch, the commit and, for each failure, the test and the change that broke it.
+**The turn's final check.** When the head gives it, run the whole pipeline once on the turn's branch, into which each executor merged its own work, with the tests the turn added, and hand back the commit and, for each failure, the test and the change that broke it.
 
 **Fixing CI.** Read the failing job's log from the top of the first error. Reproduce it locally with the same command. Fix the cause; never skip, mute or retry a check to get green. Note flaky jobs and hand them to tests.
 
