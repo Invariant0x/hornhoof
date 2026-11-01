@@ -1,9 +1,10 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { and, eq } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, companies, departments, jobs, pendingWakes, people, subscriptions, taskEvents, tasks, turns } from '../src/db/schema.js';
-import { cancel, comment, createTask, submit, updateTask, verdict } from '../src/modules/tasks/engine.js';
+import { pump } from '../src/modules/conversation/queue.js';
+import { cancel, comment, createTask, startWork, submit, updateTask, verdict } from '../src/modules/tasks/engine.js';
 import { wakeAll, wakePrompt } from '../src/modules/tasks/wake.js';
 import { as, invitePerson, listen, mcp, setUpCompany, statements, testApp } from './helpers.js';
 
@@ -163,6 +164,44 @@ describe('a task that comes after others', () => {
     await submit(ctx, bruno.id, api.id, { summary: 'Done.', evidence: 'npm test' });
     await wakeAll(ctx, (await verdict(ctx, rita.id, api.id, { pass: true, comment: 'Good.' })).wakes);
     expect((await turnsOf(tess.id)).filter(j => j.status === 'queued').map(j => j.taskId)).toEqual([tests.task.id]);
+  });
+
+  it('sends no turn of its holder that was left waiting on it, nor sets it to work by one', async () => {
+    const { ctx, db, companyId, bruno, tess, member, read, turnsOf } = await company();
+    const api = (await member('Checkout API', bruno.id)).task;
+    const tests = (await member('End-to-end tests', tess.id, [api.id])).task;
+    /* As a wake that raced the change to what it comes after would leave one. */
+    const [sub] = await db.select().from(subscriptions);
+    const [left] = await db.insert(jobs).values({ companyId, subscriptionId: sub!.id, agentId: tess.id, kind: 'conversation', prompt: 'Go on.', timeoutMs: 900000, taskId: tests.id }).returning();
+    await startWork(ctx, left!.id);
+    expect((await read(tests.id)).status).toBe('open');
+    vi.spyOn(ctx.hub, 'isReady').mockReturnValue(true);
+    vi.spyOn(ctx.hub, 'hasTerminals').mockReturnValue(false);
+    const send = vi.spyOn(ctx.hub, 'send').mockReturnValue(true);
+    await pump(ctx, tess.id);
+    expect(send).not.toHaveBeenCalled();
+    expect((await turnsOf(tess.id)).map(j => [j.status, j.error])).toEqual([['failed', 'waiting']]);
+    expect((await read(tests.id)).status).toBe('open');
+  });
+
+  it("leaves such a turn out of the head's turn that takes in the others waiting for it", async () => {
+    const { ctx, db, companyId, ceo, dev, head, bruno, parent, member, turnsOf } = await company();
+    const api = (await member('Checkout API', bruno.id)).task;
+    const launch = (await createTask(ctx, { personId: ceo.id }, { title: 'Launch', brief: '', body: '', departmentId: dev.id, assigneeAgentId: head.id, after: [api.id] })).task;
+    const [sub] = await db.select().from(subscriptions);
+    const turn = (taskId: string, prompt: string) => ({ companyId, subscriptionId: sub!.id, agentId: head.id, kind: 'conversation' as const, prompt, timeoutMs: 900000, taskId });
+    await db.delete(jobs).where(eq(jobs.agentId, head.id));
+    await db.insert(jobs).values(turn(parent.id, 'Payments moved.'));
+    await db.insert(jobs).values({ ...turn(launch.id, 'Launch moved.'), createdAt: new Date(Date.now() + 1000) });
+    vi.spyOn(ctx.hub, 'isReady').mockReturnValue(true);
+    vi.spyOn(ctx.hub, 'hasTerminals').mockReturnValue(false);
+    const sent: string[] = [];
+    vi.spyOn(ctx.hub, 'send').mockImplementation((_, m) => Boolean(m.type === 'job.run' && sent.push(m.prompt)));
+    await pump(ctx, head.id);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toContain('Payments moved.');
+    expect(sent[0]).not.toContain('Launch moved.');
+    expect((await turnsOf(head.id)).filter(j => j.taskId === launch.id).map(j => [j.status, j.error])).toEqual([['failed', 'waiting']]);
   });
 
   it('tells whoever made a waiting task once a task it comes after is cancelled, and it keeps waiting', async () => {

@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { loggable } from '../../errors.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
-import { agents, jobs, subscriptions } from '../../db/schema.js';
+import { agents, jobs, subscriptions, tasks } from '../../db/schema.js';
 import { dispatchJob } from '../jobs/dispatch.js';
 import { sayLive } from './live.js';
 import { identityOf, sameNode, type NodeIdentity } from '../nodes/hub.js';
@@ -12,7 +12,7 @@ import { appendEvent, earlierTalk, publishWorking } from '../events/store.js';
 import { instructionsOf } from '../agents/instructions.js';
 import { repoFor, repoLine } from '../departments/repository.js';
 import { textHash } from '../templates/load.js';
-import { startWork } from '../tasks/engine.js';
+import { openAfter, startWork } from '../tasks/engine.js';
 import { preface } from './prompt.js';
 
 /* Workers compact their conversation at half a million tokens, which keeps their turns quick; heads and the orchestrator
@@ -285,7 +285,7 @@ export const GONE_ALONG = 'Went out with the turn before it.';
 /* The other task turns waiting for the agent, oldest first. */
 function alongWith(ctx: Ctx, agentId: string, jobId: string) {
   return ctx.db
-    .select({ id: jobs.id, prompt: jobs.prompt })
+    .select({ id: jobs.id, prompt: jobs.prompt, taskId: jobs.taskId })
     .from(jobs)
     .where(and(conversationOf(agentId), eq(jobs.status, 'queued'), isNotNull(jobs.taskId), ne(jobs.id, jobId)))
     .orderBy(asc(jobs.createdAt));
@@ -300,6 +300,16 @@ async function goneAlong(ctx: Ctx, jobId: string): Promise<void> {
     .where(and(eq(jobs.id, jobId), eq(jobs.status, 'queued')))
     .returning({ id: jobs.id });
   if (gone) await startWork(ctx, jobId);
+}
+
+/* A task turn of the task's holder left waiting from before the task came to wait for the tasks it comes after: it would
+   set to work on it anyway, so it ends unsent. The holder is woken again once the task can start. */
+async function heldBack(ctx: Ctx, job: { id: string; agentId: string | null; taskId: string | null }): Promise<boolean> {
+  if (!job.taskId) return false;
+  const [task] = await ctx.db.select({ after: tasks.after, assigneeAgentId: tasks.assigneeAgentId }).from(tasks).where(eq(tasks.id, job.taskId));
+  if (!task || task.assigneeAgentId !== job.agentId || !(await openAfter(ctx.db, task)).length) return false;
+  await ctx.db.update(jobs).set({ status: 'failed', error: 'waiting', finishedAt: new Date() }).where(and(eq(jobs.id, job.id), eq(jobs.status, 'queued')));
+  return true;
 }
 
 async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
@@ -323,10 +333,12 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
     .orderBy(asc(jobs.createdAt))
     .limit(1);
   if (!job) return;
+  if (await heldBack(ctx, job)) return sendNext(ctx, agentId);
   const repo = await repoFor(ctx, agent);
   if (repo && outdated(sub, REPOSITORY_NODE)) return;
   /* A head reads everything that moved on its tasks while it was busy in one turn, instead of one turn per task. */
-  const along = agent.kind === 'head' && job.taskId ? await alongWith(ctx, agentId, job.id) : [];
+  const along: { id: string; prompt: string }[] = [];
+  for (const j of agent.kind === 'head' && job.taskId ? await alongWith(ctx, agentId, job.id) : []) if (!(await heldBack(ctx, { ...j, agentId }))) along.push(j);
   const asked = along.length ? [ALONG, job.prompt, ...along.map(j => j.prompt)].join('\n\n---\n\n') : job.prompt;
 
   const instructions = await instructionsOf(ctx, agent);
