@@ -16,6 +16,7 @@ import { DepartmentView } from './Department';
 import { Improvements } from './Improvements';
 import { MapScreen } from './Map';
 import { People } from './People';
+import { Settings } from './Settings';
 import { Subscriptions } from './Subscriptions';
 import { Tasks } from './Tasks';
 import { Versions } from './Versions';
@@ -26,8 +27,24 @@ type Panel = { kind: 'window' | 'card'; agentId: string } | { kind: 'task'; task
 const TABS: Tab[] = ['map', 'tasks', 'people', 'subscriptions'];
 const THEMES: Theme[] = ['light', 'dark'];
 
-/* onImprovements and onVersions: only for people who see the whole company. */
-function AccountMenu({ me, onClose, onSignOut, onImprovements, onVersions, toDecide }: { me: Me; onClose: () => void; onSignOut: () => void; onImprovements?: () => void; onVersions?: () => void; toDecide: number }) {
+/* onImprovements, onVersions and onSettings: only for people who see the whole company. */
+function AccountMenu({
+  me,
+  onClose,
+  onSignOut,
+  onImprovements,
+  onVersions,
+  onSettings,
+  toDecide,
+}: {
+  me: Me;
+  onClose: () => void;
+  onSignOut: () => void;
+  onImprovements?: () => void;
+  onVersions?: () => void;
+  onSettings?: () => void;
+  toDecide: number;
+}) {
   const t = useT();
   const { language, setLanguage } = useLanguage();
   const [theme, setThemeState] = useState<Theme>(currentTheme);
@@ -91,6 +108,18 @@ function AccountMenu({ me, onClose, onSignOut, onImprovements, onVersions, toDec
           {t.updates.menu}
         </button>
       )}
+      {onSettings && (
+        <button
+          className="btn small ghost"
+          type="button"
+          onClick={() => {
+            onClose();
+            onSettings();
+          }}
+        >
+          {t.settings.menu}
+        </button>
+      )}
       <button
         className="btn small ghost"
         type="button"
@@ -129,6 +158,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   const toDecide = improvements?.filter(i => i.status === 'open').length ?? 0;
   const agentPanel = panel && panel.kind !== 'task' ? panel : null;
   const [versionsOpen, setVersionsOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const account = useRef<HTMLDivElement>(null);
   const accountButton = useRef<HTMLButtonElement>(null);
 
@@ -188,7 +218,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
             <button ref={accountButton} className="avatar glass" type="button" aria-label={t.shell.account} aria-expanded={menu} onClick={() => setMenu(!menu)}>
               {me.person.name.trim().charAt(0).toUpperCase()}
             </button>
-            {menu && <AccountMenu me={me} onClose={() => setMenu(false)} onSignOut={signOut} onImprovements={company ? () => setTab('improvements') : undefined} onVersions={company ? () => setVersionsOpen(true) : undefined} toDecide={toDecide} />}
+            {menu && <AccountMenu me={me} onClose={() => setMenu(false)} onSignOut={signOut} onImprovements={company ? () => setTab('improvements') : undefined} onVersions={company ? () => setVersionsOpen(true) : undefined} onSettings={company ? () => setSettingsOpen(true) : undefined} toDecide={toDecide} />}
           </div>
         </div>
       </header>
@@ -262,6 +292,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
         <AgentCard key={panel.agentId} me={me} agentId={panel.agentId} onClose={() => setPanel(null)} onTerminal={() => setPanel({ kind: 'window', agentId: panel.agentId })} />
       )}
       {versionsOpen && <Versions updates={updates} onClose={() => setVersionsOpen(false)} />}
+      {settingsOpen && <Settings me={me} onClose={() => setSettingsOpen(false)} />}
     </div>
   );
 }

@@ -72,6 +72,7 @@ export const en = {
     random: 'Random name',
     empty: 'Type a name, or take a random one.',
     invalid: 'Use Latin letters a to z, digits and hyphens, with no hyphen at the start or the end.',
+    current: 'This is the link now.',
     checking: 'Checking the name.',
     free: (address: string) => `${address} is free.`,
     taken: 'This name is taken. Pick another one.',

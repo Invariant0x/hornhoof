@@ -225,6 +225,14 @@ button, input, select { font: inherit; color: inherit; }
 .versions-check { display: flex; align-items: center; gap: 10px; font-size: 13px; }
 .update-note { padding: 10px 12px; border-left: 3px solid var(--amber); background: var(--surface2); font-size: 13px; }
 .update-progress { display: grid; gap: 8px; }
+/* Settings: each part with its heading; the public link with its copy button, and its actions in a row. */
+.settings-part { display: grid; gap: 10px; }
+.settings-part h3 { margin: 0; font-size: 15px; }
+.settings-part p { margin: 0; }
+.settings-form { display: grid; gap: 12px; }
+.settings-link { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.settings-link a { color: var(--cyan-ink); font-weight: 600; word-break: break-all; }
+.settings-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; }
 /* An update under way: a turning ring, the version, four steps with the current one moving, and what it does now. */
 .uprog { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; font-size: 13px; }
 .uprog > b { font-weight: 600; }

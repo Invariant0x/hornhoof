@@ -4,12 +4,12 @@ import { useT } from '../i18n';
 
 export type NameCheck = { name: string; free: boolean; reason?: 'taken' | 'reserved' | 'invalid' };
 
-/* What is known about the name typed: nothing yet, not a name a link can have, being checked, free, taken or kept
-   for Hornhoof, or not known because the check failed. */
-export type NameState = 'empty' | 'invalid' | 'checking' | 'free' | 'taken' | 'reserved' | 'unknown';
+/* What is known about the name typed: nothing yet, not a name a link can have, the link the company has now, being
+   checked, free, taken or kept for Hornhoof, or not known because the check failed. */
+export type NameState = 'empty' | 'invalid' | 'current' | 'checking' | 'free' | 'taken' | 'reserved' | 'unknown';
 
 /* A name the person may not go on with. */
-export const blocks = (state: NameState) => state === 'empty' || state === 'invalid' || state === 'taken' || state === 'reserved';
+export const blocks = (state: NameState) => state === 'empty' || state === 'invalid' || state === 'current' || state === 'taken' || state === 'reserved';
 
 type Props = {
   name: string;
@@ -20,6 +20,8 @@ type Props = {
   check: (name: string) => Promise<NameCheck>;
   onState?: (state: NameState) => void;
   problem?: string;
+  /* The name of the link the company has now, which is not asked about. */
+  current?: string;
 };
 
 /* Waits this long after the last key before asking, so typing a name asks once. */
@@ -27,7 +29,7 @@ const PAUSE_MS = 350;
 
 /* The name of a public link like acme.hornhoof.org: the field, a button for a long random name, and whether the name is
    free, asked while it is typed. */
-export function LinkName({ name, onName, domain, check, onState, problem }: Props) {
+export function LinkName({ name, onName, domain, check, onState, problem, current }: Props) {
   const t = useT();
   const id = useId();
   const [state, setState] = useState<NameState>('empty');
@@ -38,38 +40,39 @@ export function LinkName({ name, onName, domain, check, onState, problem }: Prop
   told.current = onState;
 
   useEffect(() => {
-    const now: NameState = !name ? 'empty' : isLinkName(name) ? 'checking' : 'invalid';
+    const now: NameState = !name ? 'empty' : name === current ? 'current' : isLinkName(name) ? 'checking' : 'invalid';
     setState(now);
     told.current?.(now);
     if (now !== 'checking') return;
-    let current = true;
+    let live = true;
     const timer = setTimeout(() => {
       asking
         .current(name)
         .then(found => (found.free ? 'free' : (found.reason ?? 'taken')) as NameState)
         .catch((): NameState => 'unknown')
         .then(next => {
-          if (!current) return;
+          if (!live) return;
           setState(next === 'invalid' ? 'invalid' : next);
           told.current?.(next);
         });
     }, PAUSE_MS);
     return () => {
-      current = false;
+      live = false;
       clearTimeout(timer);
     };
-  }, [name]);
+  }, [name, current]);
 
   const said = {
     empty: t.link.empty,
     invalid: t.link.invalid,
+    current: t.link.current,
     checking: t.link.checking,
     free: t.link.free(`${name}.${domain}`),
     taken: t.link.taken,
     reserved: t.link.reserved,
     unknown: t.link.unknown,
   }[state];
-  const bad = problem || (blocks(state) && state !== 'empty' ? said : '');
+  const bad = problem || (blocks(state) && state !== 'empty' && state !== 'current' ? said : '');
 
   return (
     <div className="field link-name">
