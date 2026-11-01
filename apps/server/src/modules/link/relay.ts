@@ -9,13 +9,16 @@ export type NameCheck = { name: string; free: boolean; reason?: 'taken' | 'reser
 
 const Check = z.object({ name: z.string(), free: z.boolean(), reason: z.enum(['taken', 'reserved', 'invalid']).optional() });
 
-/* What the relay gives for a new link: its name and address, the key that removes it, and what the tunnel needs. */
-const Bound = z.object({
-  name: z.string().refine(isLinkName),
-  url: z.url({ protocol: /^https$/ }),
-  key: z.string().min(16).max(1000),
-  tunnel: z.record(z.string(), z.unknown()),
-});
+/* What the relay gives for a new link: its name and an https address that starts with it, the key that removes it,
+   and what the tunnel needs. */
+const Bound = z
+  .object({
+    name: z.string().refine(isLinkName),
+    url: z.url({ protocol: /^https$/ }).transform(url => url.replace(/\/+$/, '')),
+    key: z.string().min(16).max(1000),
+    tunnel: z.record(z.string(), z.unknown()),
+  })
+  .refine(b => new URL(b.url).hostname.startsWith(`${b.name}.`) && new URL(b.url).pathname === '/');
 export type Bound = z.infer<typeof Bound>;
 
 const unreachable = () => new ApiError(503, 'unavailable', 'hornhoof.org does not answer now. Try again in a few minutes.', 'relay_unreachable');

@@ -13,6 +13,8 @@ export type FakeRelay = {
   calls: string[];
   /* While set, it answers 502 to everything, as its proxy does when the service is down. */
   down: boolean;
+  /* The address it gives a new link. */
+  urlFor: (name: string) => string;
 };
 
 const NAME = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
@@ -20,7 +22,7 @@ const NAME = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 /* A stand-in for the relay at hornhoof.org, with its API as the relay offers it. */
 export async function fakeRelay(): Promise<FakeRelay> {
   const app = Fastify();
-  const relay: FakeRelay = { url: '', bindings: new Map(), reserved: new Set(['www', 'api']), calls: [], down: false };
+  const relay: FakeRelay = { url: '', bindings: new Map(), reserved: new Set(['www', 'api']), calls: [], down: false, urlFor: name => `https://${name}.hornhoof.test` };
   const check = (name: string) =>
     !NAME.test(name) ? { name, free: false, reason: 'invalid' } : relay.reserved.has(name) ? { name, free: false, reason: 'reserved' } : relay.bindings.has(name) ? { name, free: false, reason: 'taken' } : { name, free: true };
 
@@ -35,7 +37,7 @@ export async function fakeRelay(): Promise<FakeRelay> {
     if (!found.free) return reply.code(found.reason === 'taken' ? 409 : 400).send({ error: found.reason });
     const key = randomBytes(24).toString('base64url');
     relay.bindings.set(name, { key });
-    return reply.code(201).send({ name, url: `https://${name}.hornhoof.test`, key, tunnel: { server: 'hornhoof.test:7000', token: `tunnel-${name}`, name } });
+    return reply.code(201).send({ name, url: relay.urlFor(name), key, tunnel: { server: 'hornhoof.test:7000', token: `tunnel-${name}`, name } });
   });
   app.delete<{ Params: { name: string } }>('/api/v1/bindings/:name', async (req, reply) => {
     const binding = relay.bindings.get(req.params.name);

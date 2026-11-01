@@ -106,6 +106,19 @@ describe('binding the company to a public link', () => {
     expect(existsSync(tunnelFile)).toBe(false);
   });
 
+  it('takes no address from the relay that is not the link it asked for', async () => {
+    const { db, relay, put } = await company();
+    for (const url of ['https://evil.test', 'http://acme.hornhoof.test', 'https://acme.hornhoof.test/elsewhere']) {
+      relay.urlFor = () => url;
+      const res = await put({ name: 'acme' });
+      expect(res.statusCode, url).toBe(503);
+      relay.bindings.clear();
+    }
+    expect(await db.select().from(publicLinks)).toEqual([]);
+    relay.urlFor = name => `https://${name}.hornhoof.test/`;
+    expect((await put({ name: 'acme' })).json().link.url).toBe('https://acme.hornhoof.test');
+  });
+
   it('moves to a new name: the new link comes first, then the old one goes', async () => {
     const { db, relay, put, tunnelFile } = await company();
     await put({ name: 'acme' });
