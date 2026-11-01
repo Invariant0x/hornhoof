@@ -28,6 +28,7 @@ import { UpdaterControl } from './modules/updates/control.js';
 import { archOf, registry } from './modules/updates/registry.js';
 import { updateRoutes } from './modules/updates/routes.js';
 import { attachmentRoutes } from './modules/tasks/attachments.js';
+import { Task43Transfer } from './modules/task43-transfer/relay.js';
 import { taskRoutes } from './modules/tasks/routes.js';
 import { TerminalRelay } from './modules/terminals/relay.js';
 import { terminalRoutes } from './modules/terminals/routes.js';
@@ -41,7 +42,7 @@ export type Deps = { db: Db; config: Config; logger?: FastifyServerOptions['logg
 
 /* What routes get: the deps, the live node connections, the live stream to browsers, the terminals people watch and the
    check for newer builds. */
-export type Ctx = Deps & { hub: NodeHub; bus: EventBus; terminals: TerminalRelay; updates: UpdateCheck; updater: UpdaterControl; templates: Templates };
+export type Ctx = Deps & { hub: NodeHub; bus: EventBus; terminals: TerminalRelay; updates: UpdateCheck; updater: UpdaterControl; templates: Templates; task43: Task43Transfer };
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -60,10 +61,16 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
     pingMs: deps.config.nodePingMs,
     onMessage: (id, msg) => handleNodeMessage(ctx, id, msg),
     onTerminal: (id, msg) => ctx.terminals.fromNode(id, msg),
+    onTask43: (connection, msg) => ctx.task43.fromNode(connection, msg),
+    onTask43Close: connection => ctx.task43.abortConnection(connection),
     onClose: id => handleNodeClose(ctx, id),
     onError: err => app.log.error(err),
   });
-  app.addHook('onClose', async () => ctx.hub.stop());
+  ctx.task43 = new Task43Transfer(ctx);
+  app.addHook('onClose', async () => {
+    ctx.task43.stop();
+    ctx.hub.stop();
+  });
   const { config } = deps;
   ctx.updates = new UpdateCheck({
     registry: registry({ image: config.image, arch: archOf(), base: config.registryUrl }),

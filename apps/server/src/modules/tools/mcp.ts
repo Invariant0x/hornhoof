@@ -16,6 +16,7 @@ import { registerTaskTools } from '../tasks/tools.js';
 import { registerWatchTools } from './watch.js';
 import { registerHeadNotebookTools } from '../notebook/tools.js';
 import { registerImprovementTools, registerOrchestratorImprovementTools } from '../improvements/tools.js';
+import { registerTask43TransferTool } from '../task43-transfer/tools.js';
 
 type ToolJob = { id: string; companyId: string; agentId: string; agentKind: (typeof agents.$inferSelect)['kind']; departmentId: string | null; skills: string[] };
 
@@ -38,7 +39,7 @@ const say = (text: string, isError = false) => ({ content: [{ type: 'text' as co
 /* Hornhoof's tools as one agent's job sees them: every agent reads the company, an employee gets the tools its skills
    grant, a head keeps its department notebook, tells the orchestrator and puts what to improve under Improvements, and the
    orchestrator also proposes cards and does whatever the CEO can do in the screens. */
-function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob): McpServer {
+function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob, signal: AbortSignal): McpServer {
   const server = new McpServer({ name: 'hornhoof', version: '0.5.0' });
   server.registerTool(
     'company',
@@ -47,6 +48,7 @@ function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob): McpServer {
   );
   registerTaskTools(server, ctx, job);
   if (job.agentKind !== 'orchestrator') {
+    registerTask43TransferTool(server, ctx, job, signal);
     const grants = new Set(job.skills.flatMap(id => ctx.templates.skills.get(id)?.grants ?? []));
     registerWatchTools(server, ctx, job, grants);
     if (job.agentKind === 'head') registerHeadNotebookTools(server, ctx, job);
@@ -126,10 +128,12 @@ function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob): McpServer {
 export function mcpRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/mcp', async (req, reply) => {
     const job = await jobOf(ctx, req);
-    const server = toolsFor(ctx, app, job);
+    const abort = new AbortController();
+    const server = toolsFor(ctx, app, job, abort.signal);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     reply.hijack();
     reply.raw.on('close', () => {
+      abort.abort();
       void transport.close();
       void server.close();
     });

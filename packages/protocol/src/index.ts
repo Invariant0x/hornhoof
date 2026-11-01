@@ -1,4 +1,7 @@
 import { z } from 'zod';
+import { isTask43Type, TASK43_TRANSFER_V1, Task43NodeMessage, Task43ServerMessage } from './task43-transfer.js';
+
+export * from './task43-transfer.js';
 
 /* Messages between the Hornhoof server and its nodes, one JSON object per WebSocket frame. */
 
@@ -152,7 +155,7 @@ export const TERM_CHUNK = 64 * 1024;
 
 const NodeMessage = z.discriminatedUnion('type', [
   /* terminals: the node runs agents in sessions people can watch and type into. */
-  z.object({ type: z.literal('hello'), version: z.string().max(40), loggedIn: z.boolean(), running: z.array(z.string()).max(100), models: Models.optional(), terminals: z.boolean().optional() }),
+  z.object({ type: z.literal('hello'), version: z.string().max(40), loggedIn: z.boolean(), running: z.array(z.string()).max(100), models: Models.optional(), terminals: z.boolean().optional(), capabilities: z.array(z.string().max(40)).max(8).optional() }),
   z.object({ type: z.literal('status'), loggedIn: z.boolean(), limits: Limits.nullable(), models: Models.optional() }),
   z.object({ type: z.literal('job.started'), jobId: z.string() }),
   z.object({
@@ -180,6 +183,7 @@ const NodeMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('agent.context'), agentKey: z.string().regex(/^[A-Za-z0-9-]{1,64}$/), used: z.number().min(0).max(1) }),
   /* Whether Hornhoof's words named by ref went into the agent's running turn; if not, they wait for its next one. */
   z.object({ type: z.literal('agent.said'), ref: z.string().max(64), ok: z.boolean() }),
+  ...Task43NodeMessage.options,
 ]);
 export type NodeMessage = z.infer<typeof NodeMessage>;
 
@@ -247,6 +251,7 @@ const ServerMessage = z.discriminatedUnion('type', [
   /* Words for an agent whose turn runs, from its head, another agent, the orchestrator or a person's window: typed into
      the program as a person types, so the turn takes them in. */
   z.object({ type: z.literal('agent.say'), agentKey: Id, text: z.string().max(100_000), ref: z.string().max(64) }),
+  ...Task43ServerMessage.options,
 ]);
 export type ServerMessage = z.infer<typeof ServerMessage>;
 
@@ -258,7 +263,10 @@ function parse<T>(schema: z.ZodType<T>, raw: string): T | null {
     return null;
   }
   const result = schema.safeParse(data);
-  return result.success ? result.data : null;
+  if (!result.success) return null;
+  const type = (result.data as { type?: unknown }).type;
+  if (typeof type === 'string' && isTask43Type(type) && new TextEncoder().encode(raw).length > TASK43_TRANSFER_V1.frameBytes) return null;
+  return result.data;
 }
 
 export const parseNodeMessage = (raw: string): NodeMessage | null => parse(NodeMessage, raw);

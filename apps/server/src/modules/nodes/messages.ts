@@ -58,7 +58,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
           .where(eq(subscriptions.id, sub.id));
       }
       await failOpenJobs(ctx, jobsOf(id, ctx), 'machine_restarted', msg.running);
-      ctx.hub.greet(id, msg.terminals === true);
+      ctx.hub.greet(id, msg.terminals === true, msg.capabilities ?? []);
       /* Hornhoof ended these while the node was away, with a stop or a removed subscription; the node stops them now. */
       if (msg.running.length) {
         const open = await db.select({ id: jobs.id }).from(jobs).where(and(inArray(jobs.id, msg.running), inArray(jobs.status, OPEN_JOBS), jobsOf(id, ctx)));
