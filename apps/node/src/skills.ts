@@ -53,20 +53,36 @@ const END = "# end of Hornhoof's skill files";
 /* A path from the repository's root, its wildcards taken as plain characters. */
 const pattern = (path: string) => `/${path.replace(/[\\*?[\]!#]/g, c => `\\${c}`)}`;
 
+/* One change at a time to each exclude file, as agents in one repository place their skills at the same time and each
+   would write back the file it read before the other's block was in. */
+const editing = new Map<string, Promise<unknown>>();
+
+function inTurn<T>(path: string, fn: () => Promise<T>): Promise<T> {
+  const run = (editing.get(path) ?? Promise.resolve()).then(fn);
+  const settled = run.catch(() => undefined);
+  editing.set(path, settled);
+  void settled.then(() => {
+    if (editing.get(path) === settled) editing.delete(path);
+  });
+  return run;
+}
+
 /* Names what the node writes in the agent's folder in its repository's excludes, one block for each folder, so git add
    in that repository takes none of it in; an agent's own files there stay seen. */
 async function exclude(fs: AgentFs, workDir: string, paths: string[]): Promise<void> {
   const repo = repoOf(workDir);
   if (!repo) return;
   const head = `# Hornhoof's skill files in /${repo.at}`;
-  const lines = ((await fs.read(repo.exclude)) ?? '').split('\n');
-  const from = lines.indexOf(head);
-  const to = from < 0 ? -1 : lines.indexOf(END, from);
-  const kept = to < 0 ? lines : [...lines.slice(0, from), ...lines.slice(to + 1)];
-  while (kept.length && !kept[kept.length - 1]) kept.pop();
-  const block = paths.length ? [head, ...paths.map(p => pattern(repo.at ? `${repo.at}/${p}` : p)), END] : [];
-  await fs.mkdir(dirname(repo.exclude));
-  await fs.write(repo.exclude, `${[...kept, ...block].join('\n')}\n`);
+  await inTurn(repo.exclude, async () => {
+    const lines = ((await fs.read(repo.exclude)) ?? '').split('\n');
+    const from = lines.indexOf(head);
+    const to = from < 0 ? -1 : lines.indexOf(END, from);
+    const kept = to < 0 ? lines : [...lines.slice(0, from), ...lines.slice(to + 1)];
+    while (kept.length && !kept[kept.length - 1]) kept.pop();
+    const block = paths.length ? [head, ...paths.map(p => pattern(repo.at ? `${repo.at}/${p}` : p)), END] : [];
+    await fs.mkdir(dirname(repo.exclude));
+    await fs.write(repo.exclude, `${[...kept, ...block].join('\n')}\n`);
+  });
 }
 
 async function placed(fs: AgentFs, workDir: string): Promise<Placed> {

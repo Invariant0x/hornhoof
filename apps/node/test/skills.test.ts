@@ -93,6 +93,15 @@ describe('skills as files', () => {
     expect(added(repo)).toEqual(['work/agents/a [1]/.agents/skills/own/SKILL.md']);
   });
 
+  it('keeps the block of each agent that places its skills in one repository at the same time', async () => {
+    const repo = work();
+    git(repo, 'init', '-q');
+    const dirs = ['a1', 'a2', 'a3'].map(key => join(repo, 'work', key));
+    for (const dir of dirs) mkdirSync(dir, { recursive: true });
+    await Promise.all(dirs.map(dir => placeSkills(ownFs, dir, 'codex', [TDD], null)));
+    expect(added(repo)).toEqual([]);
+  });
+
   it('keeps them out of the agent folder made a repository, and of a worktree', async () => {
     const dir = work();
     git(dir, 'init', '-q');
