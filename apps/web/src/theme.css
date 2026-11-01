@@ -603,6 +603,8 @@ button.shead:focus-visible, button.schip:focus-visible { outline: none; }
 .sslot > .shead ~ .sw { top: 17px; right: 20px; }
 .sslot.has-sw .schip .r1 { padding-right: 22px; }
 .sslot.has-sw .shead .hr { padding-right: 24px; }
+.frame > .sw { position: absolute; top: 20px; right: 22px; width: 14px; height: 14px; margin: 0; accent-color: var(--cyan-ink); cursor: pointer; }
+.fh.has-sw .fn { padding-right: 24px; }
 .sslot.off > .schip, .sslot.off > .shead { opacity: 0.55; }
 @keyframes eflash { 0% { background: var(--cyan); } }
 .far .schip .r2, .far .schip .r3, .far .schip .st { visibility: hidden; }

@@ -227,8 +227,22 @@ async function panelFor(db: Db | Tx, task: Task, stage: number): Promise<string[
   return [...ids.filter(id => id === named), ...ids.filter(id => id !== named)];
 }
 
-/* The task reaches a gate: its whole panel checks it at once. With nobody on to check it, it waits with whoever gave it out. */
-async function atGate(db: Db | Tx, task: Task, stage: number): Promise<{ set: Partial<Task>; wakes: Wake[] }> {
+/* Whether anyone of the role behind a gate is switched on. A reviewer without a role stands for itself. */
+async function roleOn(db: Db | Tx, named: string): Promise<boolean> {
+  const [lead] = await db.select().from(agents).where(eq(agents.id, named));
+  if (!lead) return false;
+  const same = lead.roleKey && lead.departmentId ? and(eq(agents.departmentId, lead.departmentId), eq(agents.roleKey, lead.roleKey)) : eq(agents.id, lead.id);
+  const [on] = await db.select({ id: agents.id }).from(agents).where(and(same, isNull(agents.removedAt), isNull(agents.switchedOffAt))).limit(1);
+  return Boolean(on);
+}
+
+/* The task reaches a gate: its whole panel checks it at once. A gate whose role has nobody switched on takes no part,
+   so the task goes on to the next one, and past the last it is done. With people of the role on but none able to check
+   it, it waits with whoever gave it out. */
+async function atGate(db: Db | Tx, task: Task, from: number): Promise<{ set: Partial<Task>; wakes: Wake[] }> {
+  let stage = from;
+  while (task.gates[stage - 1] && !(await roleOn(db, task.gates[stage - 1]!))) stage++;
+  if (!task.gates[stage - 1]) return { set: { ...closing(), stage: task.gates.length, panel: [] }, wakes: giver(task, 'done') };
   const panel = await panelFor(db, task, stage);
   const at = { status: 'review' as const, stage, panel, silent: 0 };
   if (panel.length) return { set: { ...at, assigneeAgentId: panel[0]! }, wakes: panel.map(agentId => ({ agentId, taskId: task.id, why: 'review' as const })) };
@@ -439,31 +453,34 @@ async function leaveTask(ctx: Live, n: Note, agent: Leaver, task: Task): Promise
     const moved = await closeGate(ctx, task, n, given);
     return { wakes: moved.wakes, closed: CLOSED.includes(moved.task.status) ? moved.task : null };
   }
-  await move(ctx, task, { panel: [], assigneeAgentId: task.createdByAgentId }, n);
-  const text = `Nobody who can check it at gate ${task.stage} is on now that ${agent.name} was switched off. Give it other gates with update_task, or tell the CEO it waits for one of them.`;
-  return { wakes: giver(task, 'switched', agent.id, text), closed: null };
+  /* Nobody left at the gate: it goes on without its role when nobody of it is on, else waits with whoever gave the work. */
+  const gate = await atGate(ctx.db, task, task.stage);
+  const row = await move(ctx, task, gate.set, n);
+  return { wakes: gate.wakes, closed: CLOSED.includes(row.status) ? row : null };
 }
 
-/* An agent switched on again: a task that waits at a gate with nobody on to check it starts that gate again once someone
-   can. */
-export async function rejoin(ctx: Live, actor: Actor, agent: Leaver): Promise<Wake[]> {
+/* Tasks that wait at a gate with nobody able to check them go on once that changes: someone of its role was switched on,
+   or the whole role was switched off, which takes the gate out of the way. closed: the ones that finished. */
+export async function regateWaiting(ctx: Live, actor: Actor, agent: Leaver, text: string): Promise<{ wakes: Wake[]; closed: Task[] }> {
   const held = await ctx.db
     .select()
     .from(tasks)
     .where(and(eq(tasks.companyId, agent.companyId), eq(tasks.status, 'review'), sql`${tasks.stage} > 0`, sql`${tasks.panel} = '[]'::jsonb`))
     .orderBy(asc(tasks.number));
   const wakes: Wake[] = [];
+  const closed: Task[] = [];
   for (const found of held) {
-    const started = await onFresh(ctx, found, async task => {
-      if (task.status !== 'review' || task.stage < 1 || task.panel.length) return [];
+    await onFresh(ctx, found, async task => {
+      if (task.status !== 'review' || task.stage < 1 || task.panel.length) return null;
       const gate = await atGate(ctx.db, task, task.stage);
-      if (!gate.set.panel?.length) return [];
-      await move(ctx, task, gate.set, { kind: 'updated', actor, text: `${agent.name} was switched on.`, data: { fields: ['assignee'] } });
-      return gate.wakes;
+      if (!gate.set.panel?.length && gate.set.stage === task.stage && gate.set.status === 'review') return null;
+      const row = await move(ctx, task, gate.set, { kind: 'updated', actor, text, data: { fields: ['assignee'] } });
+      wakes.push(...gate.wakes);
+      if (CLOSED.includes(row.status)) closed.push(row);
+      return row;
     });
-    wakes.push(...(started ?? []));
   }
-  return wakes;
+  return { wakes, closed };
 }
 
 /* A task waits at a gate with nobody on to check it: the gates from there on are the given ones, and the first of them

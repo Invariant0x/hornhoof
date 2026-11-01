@@ -4,7 +4,7 @@ import { agentChanges, agentEvents, agents, jobs, requests, subscriptions, taskE
 import { afterJob, cancelJob, insertTurn, limitUntil, liveSubscription, onAgent, orchestratorOf, pump } from '../conversation/queue.js';
 import { sayLive } from '../conversation/live.js';
 import { appendEvent } from '../events/store.js';
-import { CLOSED, GATE_ROUNDS, leaveWork, NOT_A_MOVE, published, rejoin, silentTurn, taskSpot, wentOn, type Actor, type Task, type Wake, type WakeWhy } from './engine.js';
+import { CLOSED, GATE_ROUNDS, leaveWork, NOT_A_MOVE, published, regateWaiting, silentTurn, taskSpot, wentOn, type Actor, type Task, type Wake, type WakeWhy } from './engine.js';
 import { settle, tell } from './turns.js';
 
 export { SILENT_TURNS } from './engine.js';
@@ -92,7 +92,12 @@ export async function leaveIfOff(ctx: Ctx, agentId: string): Promise<void> {
     .limit(1);
   const orchestrator = change?.byOrchestrator ? await orchestratorOf(ctx, agent.companyId) : null;
   const actor = change?.personId ? { personId: change.personId } : { agentId: orchestrator?.id ?? agentId };
-  const { wakes, handed, closed } = await leaveWork(ctx, actor, agent);
+  const left = await leaveWork(ctx, actor, agent);
+  const { handed } = left;
+  /* With it the last of its role may be off, which takes that role's gates out of the way of the work waiting at them. */
+  const regated = await regateWaiting(ctx, actor, agent, `${agent.name} was switched off.`);
+  const wakes = [...left.wakes, ...regated.wakes];
+  const closed = [...left.closed, ...regated.closed];
   /* Turns it would have taken on work it no longer holds would only confuse it once it is on again. */
   if (handed.length) {
     await ctx.db
@@ -100,20 +105,25 @@ export async function leaveIfOff(ctx: Ctx, agentId: string): Promise<void> {
       .set({ status: 'failed', error: 'switched_off', finishedAt: new Date() })
       .where(and(eq(jobs.agentId, agentId), eq(jobs.status, 'queued'), inArray(jobs.taskId, handed)));
   }
-  /* A gate it left may have finished the last task of the open turn. */
+  await wakeAll(ctx, await settled(ctx, agent.companyId, wakes, closed));
+}
+
+/* A gate an agent left or that went out of the way may have finished the last task of the open turn. */
+async function settled(ctx: Ctx, companyId: string, wakes: Wake[], closed: Task[]): Promise<Wake[]> {
   let all = wakes;
   for (const task of closed) {
-    const settled = await settle(ctx, task);
-    if (settled) all = tell(all, settled, (await orchestratorOf(ctx, agent.companyId))?.id ?? null, task.id);
+    const done = await settle(ctx, task);
+    if (done) all = tell(all, done, (await orchestratorOf(ctx, companyId))?.id ?? null, task.id);
   }
-  await wakeAll(ctx, all);
+  return all;
 }
 
 /* An agent switched on again picks up the gates that waited for someone of its role, and the turns it missed go out. */
 export async function backOn(ctx: Ctx, actor: Actor, agentId: string): Promise<void> {
   const [agent] = await ctx.db.select().from(agents).where(eq(agents.id, agentId));
   if (!agent || agent.switchedOffAt) return;
-  await wakeAll(ctx, await rejoin(ctx, actor, agent));
+  const regated = await regateWaiting(ctx, actor, agent, `${agent.name} was switched on.`);
+  await wakeAll(ctx, await settled(ctx, agent.companyId, regated.wakes, regated.closed));
   await pump(ctx, agentId);
 }
 

@@ -48,7 +48,9 @@ async function company() {
     return mcp(app, token);
   };
   const off = (...ids: string[]) => Promise.all(ids.map(id => db.update(agents).set({ switchedOffAt: new Date() }).where(eq(agents.id, id))));
-  return { app, db, ctx, ceo, builtin, companyId, sub: sub!, dev: dev!, orchestrator: orchestrator!, hana, bruno, bea, rita, rex, patch, memberTask, jobsOf, tools, off };
+  /* On, but without a subscription to check anything with. */
+  const unable = (...ids: string[]) => Promise.all(ids.map(id => db.update(agents).set({ subscriptionId: null }).where(eq(agents.id, id))));
+  return { app, db, ctx, ceo, builtin, companyId, sub: sub!, dev: dev!, orchestrator: orchestrator!, hana, bruno, bea, rita, rex, patch, memberTask, jobsOf, tools, off, unable };
 }
 
 async function mcp(app: FastifyInstance, token: string): Promise<Client> {
@@ -233,10 +235,31 @@ describe('reviewers of one role checking the same work', () => {
     await expect(verdict(ctx, rita.id, task.id, { pass: false, comment: 'Wait.' })).rejects.toMatchObject({ reason: 'task_not_yours' });
   });
 
-  it('gives the work to the head when nobody of the gate role is on', async () => {
+  it('takes a gate whose whole role is switched off out of the way, on to the next gate', async () => {
+    const { ctx, db, bruno, rita, rex, hana, off, memberTask, companyId, dev, sub } = await company();
+    const [sam] = await db.insert(agents).values({ companyId, kind: 'worker', name: 'Sam', roleKey: 'DEV-SEC', departmentId: dev.id, model: '', subscriptionId: sub.id }).returning();
+    const task = await memberTask(bruno.id, [rita.id, sam!.id]);
+    await off(rita.id, rex.id);
+    const sent = await submit(ctx, bruno.id, task.id, done);
+    expect(sent.task).toMatchObject({ status: 'review', stage: 2, panel: [sam!.id], assigneeAgentId: sam!.id });
+    expect(sent.wakes).toEqual([expect.objectContaining({ agentId: sam!.id, why: 'review' })]);
+    expect(sent.wakes.some(w => w.agentId === hana.id)).toBe(false);
+  });
+
+  it('finishes a task whose gates left all have their whole role switched off', async () => {
     const { ctx, bruno, rita, rex, hana, off, memberTask } = await company();
     const task = await memberTask();
     await off(rita.id, rex.id);
+    const sent = await submit(ctx, bruno.id, task.id, done);
+    expect(sent.task).toMatchObject({ status: 'done', panel: [] });
+    expect(sent.wakes).toEqual([expect.objectContaining({ agentId: hana.id, why: 'done' })]);
+  });
+
+  it('gives the work to the head when people of the gate role are on but none of them can check it', async () => {
+    const { ctx, bruno, rita, rex, hana, off, unable, memberTask } = await company();
+    const task = await memberTask();
+    await off(rex.id);
+    await unable(rita.id);
     const sent = await submit(ctx, bruno.id, task.id, done);
     expect(sent.task).toMatchObject({ status: 'review', stage: 1, panel: [], assigneeAgentId: hana.id });
     expect(sent.wakes).toHaveLength(1);
@@ -245,10 +268,11 @@ describe('reviewers of one role checking the same work', () => {
   });
 
   it('lets the head give such a task other gates, which start at once', async () => {
-    const { ctx, db, bruno, rita, rex, hana, off, tools, memberTask, companyId, dev, sub } = await company();
+    const { ctx, db, bruno, rita, rex, hana, off, unable, tools, memberTask, companyId, dev, sub } = await company();
     const [sec] = await db.insert(agents).values({ companyId, kind: 'worker', name: 'Sam', roleKey: 'DEV-SEC', departmentId: dev.id, model: '', subscriptionId: sub.id }).returning();
     const task = await memberTask();
-    await off(rita.id, rex.id);
+    await off(rex.id);
+    await unable(rita.id);
     await submit(ctx, bruno.id, task.id, done);
     const res = await call(await tools(hana), 'update_task', { task: task.number, gates: ['DEV-SEC'] });
     expect(res.isError).toBeFalsy();
@@ -258,10 +282,11 @@ describe('reviewers of one role checking the same work', () => {
   });
 
   it('keeps the words the head rewrites while giving such a task other gates', async () => {
-    const { ctx, db, bruno, rita, rex, hana, off, tools, memberTask, companyId, dev, sub } = await company();
+    const { ctx, db, bruno, rita, rex, hana, off, unable, tools, memberTask, companyId, dev, sub } = await company();
     await db.insert(agents).values({ companyId, kind: 'worker', name: 'Sam', roleKey: 'DEV-SEC', departmentId: dev.id, model: '', subscriptionId: sub.id });
     const task = await memberTask();
-    await off(rita.id, rex.id);
+    await off(rex.id);
+    await unable(rita.id);
     await submit(ctx, bruno.id, task.id, done);
     const res = await call(await tools(hana), 'update_task', { task: task.number, gates: ['DEV-SEC'], title: 'Checkout API with tax', body: 'POST /checkout, tax included.' });
     expect(res.isError).toBeFalsy();
@@ -390,14 +415,24 @@ describe('work an agent held when it was switched off', () => {
     expect(await told(db, bruno.id, 'No test for an empty cart.')).toBe(true);
   });
 
-  it('waits with the head when the only reviewer at the gate is switched off', async () => {
-    const { ctx, db, bruno, rita, rex, hana, off, patch, memberTask } = await company();
+  it('moves the work on when the last reviewer of the gate role at the gate is switched off', async () => {
+    const { ctx, db, bruno, rita, rex, off, patch, memberTask } = await company();
     const task = await memberTask();
     await off(rex.id);
     await submit(ctx, bruno.id, task.id, done);
     await patch(rita.id, { on: false });
-    expect(await row(db, task.id)).toMatchObject({ status: 'review', stage: 1, panel: [], assigneeAgentId: hana.id });
-    expect(await told(db, hana.id, 'Nobody who can check it at gate 1')).toBe(true);
+    expect(await row(db, task.id)).toMatchObject({ status: 'done', panel: [] });
+  });
+
+  it('moves work that waits with the head at a gate on once its whole role is switched off', async () => {
+    const { ctx, db, bruno, rita, rex, hana, off, unable, patch, memberTask } = await company();
+    const task = await memberTask();
+    await off(rex.id);
+    await unable(rita.id);
+    await submit(ctx, bruno.id, task.id, done);
+    expect(await row(db, task.id)).toMatchObject({ status: 'review', panel: [], assigneeAgentId: hana.id });
+    await patch(rita.id, { on: false });
+    expect(await row(db, task.id)).toMatchObject({ status: 'done', panel: [] });
   });
 
   it('leaves a gate that waits for a person to the reviewer who asked', async () => {
@@ -463,10 +498,11 @@ describe('work an agent held when it was switched off', () => {
   };
 
   it('starts every waiting gate when a reviewer is switched on while someone moves one of them', async () => {
-    const { ctx, db, bruno, bea, rita, rex, off, patch, memberTask } = await company();
+    const { ctx, db, bruno, bea, rita, rex, off, unable, patch, memberTask } = await company();
     const one = await memberTask(bruno.id);
     const two = await memberTask(bea.id);
-    await off(rita.id, rex.id);
+    await off(rex.id);
+    await unable(rita.id);
     await submit(ctx, bruno.id, one.id, done);
     await submit(ctx, bea.id, two.id, done);
     meddle(ctx, db, [one.id, two.id]);
@@ -501,9 +537,10 @@ describe('work an agent held when it was switched off', () => {
   });
 
   it('starts the gate again when a reviewer of its role is switched on', async () => {
-    const { ctx, db, bruno, rita, rex, off, patch, memberTask } = await company();
+    const { ctx, db, bruno, rita, rex, off, unable, patch, memberTask } = await company();
     const task = await memberTask();
-    await off(rita.id, rex.id);
+    await off(rex.id);
+    await unable(rita.id);
     await submit(ctx, bruno.id, task.id, done);
     await patch(rex.id, { on: true });
     expect(await row(db, task.id)).toMatchObject({ status: 'review', stage: 1, panel: [rex.id], assigneeAgentId: rex.id });

@@ -359,6 +359,19 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
     );
   };
 
+  /* The tick on a role's frame switches all its people at once: a role with nobody on takes no part, and its gate is
+     passed by. Each refusal puts that one back. */
+  const flipRole = (title: string, members: Employee[]) => (on: boolean) => {
+    const changed = members.filter(e => shown(e).on !== on);
+    setSwitched(x => ({ ...x, ...Object.fromEntries(changed.map(e => [e.id, on])) }));
+    void Promise.allSettled(changed.map(e => api.patch(`/api/agents/${e.id}`, { on }))).then(results => {
+      const failed = changed.filter((_, i) => results[i]!.status === 'rejected');
+      if (failed.length) setSwitched(x => Object.fromEntries(Object.entries(x).filter(([id]) => !failed.some(e => e.id === id))));
+      const refused = results.find((r): r is PromiseRejectedResult => r.status === 'rejected');
+      setSaid({ key: Date.now(), at: hhmm(new Date()), text: refused ? errorText(t, refused.reason) : t.dept.roleSwitchedLine(title, on) });
+    });
+  };
+
   const working = d.employees.filter(e => e.status === 'working').length;
   const stats = t.dept.stats(working, d.employees.length, s.frames.length, s.gates.length);
   const far = view.k < FAR_K;
@@ -378,12 +391,23 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
           {s.frames.map(f => (
             <div key={f.key || 'others'} className={`frame${f.role?.gate != null ? ' gt' : ''}`} style={{ left: f.x, top: FT, width: FW, height: f.h }}>
               <Edge cut={14} corner>
-                <span className="fh">
+                <span className={`fh${f.role && canGive ? ' has-sw' : ''}`}>
                   <span className="fn">{f.role ? f.role.title[language] : t.dept.others}</span>
                   {f.role && <span className="fa">{f.role.description[language]}</span>}
                   <span className="fc">{t.dept.agents(f.members.length)}</span>
                 </span>
               </Edge>
+              {f.role && canGive && (
+                <input
+                  type="checkbox"
+                  className="sw"
+                  checked={f.members.some(m => shown(m.e).on)}
+                  aria-label={t.dept.roleOn(f.role.title[language])}
+                  title={t.dept.roleOn(f.role.title[language])}
+                  onPointerDown={ev => ev.stopPropagation()}
+                  onChange={ev => flipRole(f.role!.title[language], f.members.map(m => m.e))(ev.target.checked)}
+                />
+              )}
             </div>
           ))}
           <svg className="wires" width={s.right} height={s.h} viewBox={`0 0 ${s.right} ${s.h}`} aria-hidden="true">

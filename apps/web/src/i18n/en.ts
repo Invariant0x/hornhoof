@@ -321,6 +321,8 @@ export const en = {
     switchedOff: 'Switched off',
     isOn: (name: string) => `${name} is on`,
     switchedLine: (name: string, on: boolean) => `${name}: ${on ? 'on' : 'switched off'}`,
+    roleOn: (role: string) => `${role} takes part in the work`,
+    roleSwitchedLine: (role: string, on: boolean) => `${role}: ${on ? 'everyone on' : 'everyone switched off'}`,
     needsSubscription: 'Needs a subscription to work',
     gate: (n: number) => `gate ${n}`,
     lastGate: 'last gate',

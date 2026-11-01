@@ -278,6 +278,42 @@ describe('Department view', () => {
     expect(screen.getByText('Bruno: switched off')).toBeInTheDocument();
   });
 
+  it("switches a whole role off from its frame, so its people get no work", async () => {
+    const user = userEvent.setup();
+    const [dev] = DEV_ORG.departments;
+    const boris = { ...dev!.employees[1]!, id: 'b2', name: 'Boris', on: false };
+    const two: Org = { ...DEV_ORG, departments: [{ ...dev!, employees: [...dev!.employees, boris] }] };
+    const calls = shell({ 'PATCH /api/agents/b1': [200, { ...CARD, on: false }] }, two);
+    await flyIn(user);
+    const role = screen.getByRole('checkbox', { name: 'Backend engineer takes part in the work' });
+    expect(role).toBeChecked();
+    await user.click(role);
+    await vi.waitFor(() => expect(calls.find(c => c.method === 'PATCH' && c.path === '/api/agents/b1')?.body).toEqual({ on: false }));
+    /* Boris was off already. */
+    expect(calls.some(c => c.method === 'PATCH' && c.path === '/api/agents/b2')).toBe(false);
+    expect(role).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Bruno is on' })).not.toBeChecked();
+    expect(screen.getByText('Backend engineer: everyone switched off')).toBeInTheDocument();
+  });
+
+  it('switches every one of a role on from its frame', async () => {
+    const user = userEvent.setup();
+    const [dev] = DEV_ORG.departments;
+    const boris = { ...dev!.employees[1]!, id: 'b2', name: 'Boris', on: false };
+    const off: Org = { ...DEV_ORG, departments: [{ ...dev!, employees: [dev!.employees[0]!, { ...dev!.employees[1]!, on: false }, boris] }] };
+    const calls = shell({ 'PATCH /api/agents/b1': [200, CARD], 'PATCH /api/agents/b2': [200, CARD] }, off);
+    await flyIn(user);
+    const role = screen.getByRole('checkbox', { name: 'Backend engineer takes part in the work' });
+    expect(role).not.toBeChecked();
+    await user.click(role);
+    await vi.waitFor(() => expect(calls.filter(c => c.method === 'PATCH').map(c => [c.path, c.body])).toEqual([
+      ['/api/agents/b1', { on: true }],
+      ['/api/agents/b2', { on: true }],
+    ]));
+    expect(role).toBeChecked();
+    expect(await screen.findByText('Backend engineer: everyone on')).toBeInTheDocument();
+  });
+
   it('shows an employee that is off as switched off', async () => {
     const user = userEvent.setup();
     const [dev] = DEV_ORG.departments;

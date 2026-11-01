@@ -311,6 +311,8 @@ export const ru: Messages = {
     switchedOff: 'Выключен',
     isOn: (name: string) => `${name} включен`,
     switchedLine: (name: string, on: boolean) => `${name}: ${on ? 'включен' : 'выключен'}`,
+    roleOn: (role: string) => `${role}: участвует в работе`,
+    roleSwitchedLine: (role: string, on: boolean) => `${role}: ${on ? 'все включены' : 'все выключены'}`,
     needsSubscription: 'Чтобы работать, нужна подписка',
     gate: n => `рубеж ${n}`,
     lastGate: 'последний рубеж',
