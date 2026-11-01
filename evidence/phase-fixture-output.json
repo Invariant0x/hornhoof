@@ -1,0 +1,57 @@
+{
+  "sourceCommit": "bd696b0724385b6b11da53a24ada2f188b031217",
+  "sourceSha256": {
+    "apps/node/src/terminal/host.ts": "261ac7a08bff361a0c0bad380e467954747fb128d2d6ecc9c236ae82a39a0495",
+    "apps/node/src/terminal/tmux.ts": "ef9249fc8056397738be263231a57b1510a9876f140e5b980c1057a25a84ee23",
+    "apps/node/src/terminal/transcripts.ts": "ace030effc74c89036cd5fe74beddcc15a42873c371bba755e2c0f957643eb0a",
+    "apps/node/src/terminal/programs.ts": "726f5b03cfe9106fdd7adbab74a79f7a7fcd181641c2d8b46e712e858f8b8bf4"
+  },
+  "clock": "node:test mock.timers Date/setTimeout/setInterval",
+  "pane": "actual Tmux methods with isolated run() stub returning pane_dead and screen values",
+  "wire": "actual LineTail/findKimiWire with one synthetic turn.prompt record",
+  "modelCalls": 0,
+  "networkCalls": 0,
+  "realTmux": false,
+  "historicalReproduction": false,
+  "scenarios": [
+    {
+      "name": "READY wait, live pane, no prompt sent",
+      "ok": false,
+      "error": "agent_failed",
+      "output": "starting without a READY footer",
+      "acceptDiagnostic": false,
+      "launchCount": 1,
+      "promptPasteCount": 0,
+      "enterCount": 0,
+      "paneProbeCount": 83,
+      "tookBeforeDead": false,
+      "paneDead": false
+    },
+    {
+      "name": "prompt accept wait, live pane, no wire start",
+      "ok": false,
+      "error": "agent_failed",
+      "output": "The program did not take Hornhoof's prompt within 2 s.\n\ncontext: 42%",
+      "acceptDiagnostic": true,
+      "launchCount": 1,
+      "promptPasteCount": 1,
+      "enterCount": 20,
+      "paneProbeCount": 107,
+      "tookBeforeDead": false,
+      "paneDead": false
+    },
+    {
+      "name": "done loop, wire prompt accepted, pane_dead=1",
+      "ok": false,
+      "error": "agent_failed",
+      "output": "context: 42%",
+      "acceptDiagnostic": false,
+      "launchCount": 1,
+      "promptPasteCount": 1,
+      "enterCount": 1,
+      "paneProbeCount": 17,
+      "tookBeforeDead": true,
+      "paneDead": true
+    }
+  ]
+}

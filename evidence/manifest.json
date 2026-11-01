@@ -1,0 +1,58 @@
+{
+  "schema": "task64-evidence-v1",
+  "generatedAtUtc": "2026-11-01T06:50:13.544238+00:00",
+  "sourceCommit": "bd696b0724385b6b11da53a24ada2f188b031217",
+  "branch": "t12-phase-correlation",
+  "status": "DONE_WITH_CONCERNS",
+  "historicalServerPhase": "UNKNOWN for all six",
+  "fixture": "actual source isolated synthetic differential; no historical reproduction",
+  "node": "v22.23.4",
+  "python": "3.11.2",
+  "payload": [
+    {
+      "file": "actions.log",
+      "bytes": 5356,
+      "sha256": "9c7ec5aa9ec75952a83fafcc742074477835e5eeab93b7b8ecbde3c7ac703548"
+    },
+    {
+      "file": "cases.json",
+      "bytes": 6311,
+      "sha256": "b5cf6885faaabc34b61ae2d456981da78054ef0126c15461af5871e465a155d7"
+    },
+    {
+      "file": "phase-fixture-output.json",
+      "bytes": 1997,
+      "sha256": "58260033ffe06d316a7e587db279c67ae7b5a3b24b2fcded0f2c136fc10693ba"
+    },
+    {
+      "file": "phase-fixture.mjs",
+      "bytes": 7252,
+      "sha256": "313044c38fe21f1e6a8dc01e1a2131d17d7a390e35bfe22a79a01e8e96de846d"
+    },
+    {
+      "file": "protocol-stub.mjs",
+      "bytes": 509,
+      "sha256": "bbeed85984fbedd03d9ee52625d07d178a6d1219030274ff753078ea8c811738"
+    },
+    {
+      "file": "report.md",
+      "bytes": 13032,
+      "sha256": "5f979bcdb999905ad6c192f57e7b739a3bc672f8a328315c8e2bc4578eb9bcb8"
+    },
+    {
+      "file": "source-loader.mjs",
+      "bytes": 657,
+      "sha256": "ce528a74cc78d3bedbfdbcd31df829492f978ff21a79f8ade35c3dc4b03b7f62"
+    },
+    {
+      "file": "verify.py",
+      "bytes": 2751,
+      "sha256": "57ae25380fba09e4e4addc899bf39c0acd88e58690cdeeeb83594b5e8cfa28f8"
+    },
+    {
+      "file": "zod-stub.mjs",
+      "bytes": 280,
+      "sha256": "7f80daccf8fe6ac08638eebd8d7826f900ab0e17e3fb1e825520088cf4dd3483"
+    }
+  ]
+}

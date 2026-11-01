@@ -1,0 +1,141 @@
+{
+  "schema": "task64-six-cases-v1",
+  "date": "2026-11-01",
+  "timezone": "UTC",
+  "cohort": {
+    "file": "kimi-observed-11-job-joins-20261101.json",
+    "reportedBytes": 13282,
+    "reportedSha256": "0100cd82f867d0d2c536c2ba66028d5e4bcdb8f1702beb0268186bddfdef9d5c",
+    "localRead": "unavailable at the named Codex path; no repeated filesystem search",
+    "authority": "safe values published in task12 and task64",
+    "selection": "six compaction-timing-associated jobs from a selected non-exhaustive eleven-job projection"
+  },
+  "commonMissingTelemetry": [
+    "per-job host phase and goesOn decision",
+    "READY wait start/end and result",
+    "prompt paste/Enter and accept wait start/end/source",
+    "pane probe value and query result",
+    "wire cursor/session/native turn correlation",
+    "historical deployed node and CLI versions"
+  ],
+  "cases": [
+    {
+      "label": "F4ec",
+      "jobId": "4ecda2c7-6620-4cff-8be3-ee701329abb1",
+      "agentId": "2e1c0f89-4419-4a89-a329-7e59f0943ae2",
+      "agentName": "Frontend engineer (Kimi)",
+      "startedAt": "2026-11-01T03:16:24.745Z",
+      "finishedAt": "2026-11-01T03:18:26.925Z",
+      "durationSeconds": 122.18,
+      "publicOutcome": "failed/agent_failed",
+      "nativeSourceJoin": "selected11 HH job/event join plus Ops Frontend compaction timing association",
+      "native": {
+        "requestAt": "2026-11-01T03:16:29.400Z",
+        "requestToHhFailureSeconds": 117.525,
+        "response": "not_observed in the bounded log",
+        "nextObservedRecord": "config turn6.1 at 2026-11-01T03:18:33.382Z",
+        "structuredQuotaJoin": "not published for this job"
+      },
+      "serverPhase": "UNKNOWN",
+      "missing": "commonMissingTelemetry; no retained phase evidence distinguishes READY, accept, done or pane death"
+    },
+    {
+      "label": "F8c",
+      "jobId": "8c716fba-0f20-4244-a247-88a84a656534",
+      "agentId": "2e1c0f89-4419-4a89-a329-7e59f0943ae2",
+      "agentName": "Frontend engineer (Kimi)",
+      "startedAt": "2026-11-01T04:12:56.009Z",
+      "finishedAt": "2026-11-01T04:14:58.164Z",
+      "durationSeconds": 122.155,
+      "publicOutcome": "failed/agent_failed",
+      "nativeSourceJoin": "selected11 HH job/event join plus Ops Frontend compaction request/response",
+      "native": {
+        "requestAt": "2026-11-01T04:13:00.675Z",
+        "responseAt": "2026-11-01T04:15:03.186Z",
+        "requestResponseSeconds": 122.511,
+        "reportedStreamSeconds": 102.7,
+        "hhFailureToResponseSeconds": 5.022,
+        "structuredQuotaJoin": "not published for this job"
+      },
+      "serverPhase": "UNKNOWN",
+      "missing": "commonMissingTelemetry; compaction response timing does not identify the host phase at HH failure"
+    },
+    {
+      "label": "A",
+      "jobId": "d6b23636-3d86-44d4-a722-ae86de819284",
+      "agentId": "9be8a973-8c8f-4f7f-ba04-12066e05e812",
+      "agentName": "Architect (Kimi)",
+      "startedAt": "2026-11-01T04:12:56.010Z",
+      "finishedAt": "2026-11-01T04:14:58.276Z",
+      "durationSeconds": 122.266,
+      "publicOutcome": "failed/agent_failed",
+      "nativeSourceJoin": "selected11 HH job/event join plus Ops bounded compaction timing association",
+      "native": {
+        "response": "not_observed in the bounded log",
+        "exactRequestAt": "not published in the safe journal",
+        "exactNativeTurnId": "not published",
+        "structuredQuotaJoin": "not published for this job"
+      },
+      "serverPhase": "UNKNOWN",
+      "missing": "commonMissingTelemetry plus exact native request/turn correlation; response_not_observed is not evidence of a kill"
+    },
+    {
+      "label": "R",
+      "jobId": "33f7c99d-5204-4b98-a3f4-1a98c2629919",
+      "agentId": "100edb09-da27-4868-9646-5c0118b9934e",
+      "agentName": "Code reviewer (Kimi)",
+      "startedAt": "2026-11-01T04:12:56.019Z",
+      "finishedAt": "2026-11-01T04:14:58.375Z",
+      "durationSeconds": 122.356,
+      "publicOutcome": "failed/agent_failed",
+      "nativeSourceJoin": "selected11 HH job/event join plus Ops bounded compaction timing association",
+      "native": {
+        "response": "not_observed in the bounded log",
+        "exactRequestAt": "not published in the safe journal",
+        "exactNativeTurnId": "not published",
+        "structuredQuotaJoin": "not published for this job"
+      },
+      "serverPhase": "UNKNOWN",
+      "missing": "commonMissingTelemetry plus exact native request/turn correlation; response_not_observed is not evidence of a kill"
+    },
+    {
+      "label": "H",
+      "jobId": "976d9002-e947-4394-8d19-a145b35d3bba",
+      "agentId": "658c7274-0cc3-44a7-af27-71eb7ef9dee5",
+      "agentName": "Head of operations",
+      "startedAt": "2026-11-01T04:12:56.021Z",
+      "finishedAt": "2026-11-01T04:15:01.866Z",
+      "durationSeconds": 125.845,
+      "publicOutcome": "failed/agent_failed",
+      "nativeSourceJoin": "selected11 HH job/event join plus Ops compaction response timing",
+      "native": {
+        "responseAt": "2026-11-01T04:14:16.522Z",
+        "responseToHhFailureSeconds": 45.344,
+        "exactRequestAt": "not published in the safe journal",
+        "exactNativeTurnId": "not published",
+        "structuredQuotaJoin": "not published for this job"
+      },
+      "serverPhase": "UNKNOWN",
+      "missing": "commonMissingTelemetry; a completed compaction 45.344 seconds before HH failure does not select the failure phase"
+    },
+    {
+      "label": "D",
+      "jobId": "4a7d01d1-9509-428d-be46-e477b17232a0",
+      "agentId": "fbb993b2-da33-4b5d-8304-a3e5ebf15d61",
+      "agentName": "DevOps engineer (Kimi)",
+      "startedAt": "2026-11-01T04:51:15.992Z",
+      "finishedAt": "2026-11-01T04:53:17.559Z",
+      "durationSeconds": 121.567,
+      "publicOutcome": "failed/agent_failed",
+      "nativeSourceJoin": "selected11 HH job/event join plus Ops bounded compaction timing association",
+      "native": {
+        "response": "not_observed in the bounded log",
+        "exactRequestAt": "not published in the safe journal",
+        "exactNativeTurnId": "not published",
+        "structuredQuotaJoin": "not published for this job"
+      },
+      "serverPhase": "UNKNOWN",
+      "missing": "commonMissingTelemetry plus exact native request/turn correlation; response_not_observed is not evidence of a kill"
+    }
+  ]
+}
