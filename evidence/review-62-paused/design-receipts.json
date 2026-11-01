@@ -1,0 +1,36 @@
+[
+  {
+    "label": "design-tests",
+    "argv": [
+      "node",
+      "--experimental-strip-types",
+      "--test",
+      "--test-concurrency=1",
+      "$REVIEW_WORKSPACE/.review-62/evidence/design-fence.test.mts"
+    ],
+    "cwd": "$REVIEW_WORKSPACE/.review-62/evidence",
+    "startedAt": "2026-11-01T13:49:21.115718+00:00",
+    "endedAt": "2026-11-01T13:49:21.329612+00:00",
+    "pid": 71632,
+    "exit": 0,
+    "log": "$REVIEW_WORKSPACE/.review-62/design-tests.log"
+  },
+  {
+    "label": "design-types",
+    "argv": [
+      "node",
+      "$REVIEW_WORKSPACE/.review-14-r3/source/node_modules/typescript/bin/tsc",
+      "-p",
+      "$REVIEW_WORKSPACE/.review-62/evidence/tsconfig.json",
+      "--noEmit",
+      "--typeRoots",
+      "$REVIEW_WORKSPACE/.review-14-r3/source/node_modules/@types"
+    ],
+    "cwd": "$REVIEW_WORKSPACE/.review-62/evidence",
+    "startedAt": "2026-11-01T13:49:21.329843+00:00",
+    "endedAt": "2026-11-01T13:49:23.802962+00:00",
+    "pid": 71649,
+    "exit": 0,
+    "log": "$REVIEW_WORKSPACE/.review-62/design-types.log"
+  }
+]

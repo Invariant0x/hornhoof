@@ -1,0 +1,160 @@
+TAP version 13
+# Subtest: synthetic valid vector is sufficient for design only
+ok 1 - synthetic valid vector is sufficient for design only
+  ---
+  duration_ms: 0.575459
+  type: 'test'
+  ...
+# Subtest: original 75 design negative: unknown_version
+ok 2 - original 75 design negative: unknown_version
+  ---
+  duration_ms: 0.052541
+  type: 'test'
+  ...
+# Subtest: original 75 design negative: unverified_running_artifact
+ok 3 - original 75 design negative: unverified_running_artifact
+  ---
+  duration_ms: 0.036209
+  type: 'test'
+  ...
+# Subtest: original 75 design negative: unknown_runtime_version
+ok 4 - original 75 design negative: unknown_runtime_version
+  ---
+  duration_ms: 0.042041
+  type: 'test'
+  ...
+# Subtest: original 75 design negative: interactive_terminal
+ok 5 - original 75 design negative: interactive_terminal
+  ---
+  duration_ms: 0.037458
+  type: 'test'
+  ...
+# Subtest: original 75 design negative: resume_requires_a_separate_fence
+ok 6 - original 75 design negative: resume_requires_a_separate_fence
+  ---
+  duration_ms: 0.040083
+  type: 'test'
+  ...
+# Subtest: original 75 design negative: wrong_process_generation
+ok 7 - original 75 design negative: wrong_process_generation
+  ---
+  duration_ms: 0.041583
+  type: 'test'
+  ...
+# Subtest: original 75 design negative: unbound_input
+ok 8 - original 75 design negative: unbound_input
+  ---
+  duration_ms: 0.029584
+  type: 'test'
+  ...
+# Subtest: original 75 design negative: wrong_session
+ok 9 - original 75 design negative: wrong_session
+  ---
+  duration_ms: 0.223334
+  type: 'test'
+  ...
+# Subtest: original 75 design negative: file_replacement_or_truncation
+ok 10 - original 75 design negative: file_replacement_or_truncation
+  ---
+  duration_ms: 0.260417
+  type: 'test'
+  ...
+# Subtest: original 75 design negative: missing_before_cursor
+ok 11 - original 75 design negative: missing_before_cursor
+  ---
+  duration_ms: 0.081083
+  type: 'test'
+  ...
+# Subtest: original 75 design negative: out_of_order_records
+ok 12 - original 75 design negative: out_of_order_records
+  ---
+  duration_ms: 0.572125
+  type: 'test'
+  ...
+# Subtest: original 75 design negative: typed_before_ack
+ok 13 - original 75 design negative: typed_before_ack
+  ---
+  duration_ms: 0.037292
+  type: 'test'
+  ...
+# Subtest: original 75 design negative: multiple_native_prompts
+ok 14 - original 75 design negative: multiple_native_prompts
+  ---
+  duration_ms: 0.029417
+  type: 'test'
+  ...
+# Subtest: original 75 design negative: wrong_turn
+ok 15 - original 75 design negative: wrong_turn
+  ---
+  duration_ms: 0.019375
+  type: 'test'
+  ...
+# Subtest: original 75 design negative: ordinary_error_shape
+ok 16 - original 75 design negative: ordinary_error_shape
+  ---
+  duration_ms: 0.022583
+  type: 'test'
+  ...
+# Subtest: original 75 design negative: goal_background_or_reload
+ok 17 - original 75 design negative: goal_background_or_reload
+  ---
+  duration_ms: 0.024292
+  type: 'test'
+  ...
+# Subtest: missing goal_or_background_or_reload is unknown
+ok 18 - missing goal_or_background_or_reload is unknown
+  ---
+  duration_ms: 0.034625
+  type: 'test'
+  ...
+# Subtest: goal_or_background_or_reload=null is unknown
+ok 19 - goal_or_background_or_reload=null is unknown
+  ---
+  duration_ms: 0.033875
+  type: 'test'
+  ...
+# Subtest: goal_or_background_or_reload=0 is unknown
+ok 20 - goal_or_background_or_reload=0 is unknown
+  ---
+  duration_ms: 0.055375
+  type: 'test'
+  ...
+# Subtest: goal_or_background_or_reload="" is unknown
+ok 21 - goal_or_background_or_reload="" is unknown
+  ---
+  duration_ms: 0.034458
+  type: 'test'
+  ...
+# Subtest: missing typed_before_ack is unknown
+ok 22 - missing typed_before_ack is unknown
+  ---
+  duration_ms: 0.036959
+  type: 'test'
+  ...
+# Subtest: typed_before_ack=null is unknown
+ok 23 - typed_before_ack=null is unknown
+  ---
+  duration_ms: 0.035084
+  type: 'test'
+  ...
+# Subtest: typed_before_ack=0 is unknown
+ok 24 - typed_before_ack=0 is unknown
+  ---
+  duration_ms: 0.039209
+  type: 'test'
+  ...
+# Subtest: typed_before_ack="" is unknown
+ok 25 - typed_before_ack="" is unknown
+  ---
+  duration_ms: 0.034125
+  type: 'test'
+  ...
+1..25
+# tests 25
+# suites 0
+# pass 25
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 164.532666

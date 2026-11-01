@@ -1,0 +1,299 @@
+{
+  "source": "Accepted task72 binding-contract.json",
+  "actualProducerEnabled": false,
+  "runtimeIdentity": "UNKNOWN_LOADED_ARTIFACT_75_ACCEPTED",
+  "causalInputReceipt": "GAP_CURRENT_INTERACTIVE_INPUT_75_ACCEPTED",
+  "caseCount": 17,
+  "cases": [
+    {
+      "case": 1,
+      "scenario": "qualified exact binary and causal current native start then quota end",
+      "expectedProducerBehavior": "one bounded refusal,original result/session/error preserved",
+      "helperEvidence": "EXECUTED_PARTIAL_ONLY",
+      "helperCheck": "exact metadata/ranges and source-shaped synthetic pair",
+      "actualProducerStatus": "NOT_RUN_GAP",
+      "remaining": "Runtime/source equivalence and causal acceptance absent; no emission or real job result exercised. Accepted75 distinguishes installed official byte match from loaded artifact UNKNOWN; interactive causal receipt/fence absent; headless design is not a product-path authorization.",
+      "receipts": [
+        "native-boundary-final.meta.json",
+        "native-boundary-final.log"
+      ],
+      "qualification75": "READ_ONLY_ACCEPTED; current interactive causal binding and loaded runtime UNKNOWN; actual producer remains NOT_RUN_GAP",
+      "qualification75Receipt": "handoff75-r2/task75-corrected-handoff.txt and task75-verdicts.txt"
+    },
+    {
+      "case": 2,
+      "scenario": "source profile only or arbitrary version string",
+      "expectedProducerBehavior": "ordinary unknown,no quotaRefusal",
+      "helperEvidence": "EXECUTED_PARTIAL_ONLY",
+      "helperCheck": "unknown protocol metadata and supplied authority stripped",
+      "actualProducerStatus": "NOT_RUN_GAP",
+      "remaining": "No active producer; actual version/profile rejection remains unqualified. Accepted75 distinguishes installed official byte match from loaded artifact UNKNOWN; interactive causal receipt/fence absent; headless design is not a product-path authorization.",
+      "receipts": [
+        "native-boundary-final.meta.json",
+        "native-boundary-final.log"
+      ],
+      "qualification75": "READ_ONLY_ACCEPTED; current interactive causal binding and loaded runtime UNKNOWN; actual producer remains NOT_RUN_GAP",
+      "qualification75Receipt": "handoff75-r2/task75-corrected-handoff.txt and task75-verdicts.txt"
+    },
+    {
+      "case": 3,
+      "scenario": "historical Ops record without runtime/source proof",
+      "expectedProducerBehavior": "no activation or replay as current",
+      "helperEvidence": "EXECUTED_PARTIAL_ONLY",
+      "helperCheck": "fixture explicitly marked SOURCE_ONLY, not historical Ops",
+      "actualProducerStatus": "NOT_RUN_GAP",
+      "remaining": "Historical replay/attribution NOT_RUN; original runtime/source unknown.",
+      "receipts": [
+        "native-boundary-final.meta.json",
+        "native-boundary-final.log"
+      ],
+      "qualification75": "READ_ONLY_ACCEPTED; current interactive causal binding and loaded runtime UNKNOWN; actual producer remains NOT_RUN_GAP",
+      "qualification75Receipt": "handoff75-r2/task75-corrected-handoff.txt and task75-verdicts.txt"
+    },
+    {
+      "case": 4,
+      "scenario": "old process generation with same tmux name/session",
+      "expectedProducerBehavior": "reject stale binding",
+      "helperEvidence": "EXECUTED_PARTIAL_ONLY",
+      "helperCheck": "new reader gets distinct local generation; claimed process stripped",
+      "actualProducerStatus": "NOT_RUN_GAP",
+      "remaining": "No node-created native process generation is bound by this API. Accepted75 distinguishes installed official byte match from loaded artifact UNKNOWN; interactive causal receipt/fence absent; headless design is not a product-path authorization.",
+      "receipts": [
+        "native-boundary-final.meta.json",
+        "native-boundary-final.log"
+      ],
+      "qualification75": "READ_ONLY_ACCEPTED; current interactive causal binding and loaded runtime UNKNOWN; actual producer remains NOT_RUN_GAP",
+      "qualification75Receipt": "handoff75-r2/task75-corrected-handoff.txt and task75-verdicts.txt"
+    },
+    {
+      "case": 5,
+      "scenario": "session switch or non-main agent",
+      "expectedProducerBehavior": "invalidate binding and reject record",
+      "helperEvidence": "EXECUTED_PARTIAL_ONLY",
+      "helperCheck": "other-agent ID retained; claimed session stripped; file replacement resets",
+      "actualProducerStatus": "NOT_RUN_GAP",
+      "remaining": "Actual verified session/main/process binding not implemented; no assumed rejection by missing context. Accepted75 distinguishes installed official byte match from loaded artifact UNKNOWN; interactive causal receipt/fence absent; headless design is not a product-path authorization.",
+      "receipts": [
+        "native-boundary-final.meta.json",
+        "native-boundary-final.log"
+      ],
+      "qualification75": "READ_ONLY_ACCEPTED; current interactive causal binding and loaded runtime UNKNOWN; actual producer remains NOT_RUN_GAP",
+      "qualification75Receipt": "handoff75-r2/task75-corrected-handoff.txt and task75-verdicts.txt",
+      "sessionFailureGap": "No session.resume_hint on refused direct-spawn failure; independent process/session-created/file-generation receipt still required."
+    },
+    {
+      "case": 6,
+      "scenario": "file replacement/truncation or partial unterminated record",
+      "expectedProducerBehavior": "no cursor-based claim until new generation/complete record qualified",
+      "helperEvidence": "EXECUTED_PARTIAL_ONLY",
+      "helperCheck": "partial UTF8/newline cursor, replacement, shrink/regrowth and concurrent mutations",
+      "actualProducerStatus": "NOT_RUN_GAP",
+      "remaining": "Reader-local observed generation is not an authoritative writer fence; invisible rewrites remain unknown.",
+      "receipts": [
+        "native-boundary-final.meta.json",
+        "native-boundary-final.log"
+      ],
+      "qualification75": "READ_ONLY_ACCEPTED; current interactive causal binding and loaded runtime UNKNOWN; actual producer remains NOT_RUN_GAP",
+      "qualification75Receipt": "handoff75-r2/task75-corrected-handoff.txt and task75-verdicts.txt"
+    },
+    {
+      "case": 7,
+      "scenario": "delayed previous turn timestamp in current job interval",
+      "expectedProducerBehavior": "reject despite timestamp;requires correct start binding",
+      "helperEvidence": "EXECUTED_PARTIAL_ONLY",
+      "helperCheck": "late/out-of-order original IDs/times retained",
+      "actualProducerStatus": "NOT_RUN_GAP",
+      "remaining": "No current HH start context; timestamp-based reassignment deliberately not implemented.",
+      "receipts": [
+        "native-boundary-final.meta.json",
+        "native-boundary-final.log"
+      ],
+      "qualification75": "READ_ONLY_ACCEPTED; current interactive causal binding and loaded runtime UNKNOWN; actual producer remains NOT_RUN_GAP",
+      "qualification75Receipt": "handoff75-r2/task75-corrected-handoff.txt and task75-verdicts.txt"
+    },
+    {
+      "case": 8,
+      "scenario": "different native turn or concurrent owner input accepted first",
+      "expectedProducerBehavior": "no first-next-turn reassignment to HH job",
+      "helperEvidence": "EXECUTED_PARTIAL_ONLY",
+      "helperCheck": "prompt/turn IDs preserved exactly and supplied job authority stripped",
+      "actualProducerStatus": "NOT_RUN_GAP",
+      "remaining": "Owner-input ordering and HH input acknowledgement still missing. Accepted75 distinguishes installed official byte match from loaded artifact UNKNOWN; interactive causal receipt/fence absent; headless design is not a product-path authorization.",
+      "receipts": [
+        "native-boundary-final.meta.json",
+        "native-boundary-final.log"
+      ],
+      "qualification75": "READ_ONLY_ACCEPTED; current interactive causal binding and loaded runtime UNKNOWN; actual producer remains NOT_RUN_GAP",
+      "qualification75Receipt": "handoff75-r2/task75-corrected-handoff.txt and task75-verdicts.txt",
+      "syntheticNegatives": "r2-design-green: typed_before_ack missing/null/0/empty-string => UNKNOWN; goal/background/reload flags require exactly false too. No causal native execution."
+    },
+    {
+      "case": 9,
+      "scenario": "end arrives before start or start is missing",
+      "expectedProducerBehavior": "ordinary unknown,no inferred start",
+      "helperEvidence": "EXECUTED_PARTIAL_ONLY",
+      "helperCheck": "end-before-start sequence preserved without inferred start",
+      "actualProducerStatus": "NOT_RUN_GAP",
+      "remaining": "No causal-start tracker or quota decision claimed. Accepted75 distinguishes installed official byte match from loaded artifact UNKNOWN; interactive causal receipt/fence absent; headless design is not a product-path authorization.",
+      "receipts": [
+        "native-boundary-final.meta.json",
+        "native-boundary-final.log"
+      ],
+      "qualification75": "READ_ONLY_ACCEPTED; current interactive causal binding and loaded runtime UNKNOWN; actual producer remains NOT_RUN_GAP",
+      "qualification75Receipt": "handoff75-r2/task75-corrected-handoff.txt and task75-verdicts.txt",
+      "sessionFailureGap": "No session.resume_hint on refused direct-spawn failure; independent process/session-created/file-generation receipt still required."
+    },
+    {
+      "case": 10,
+      "scenario": "same end byte range delivered twice or out of order",
+      "expectedProducerBehavior": "no duplicate refusal or extra HH failure count",
+      "helperEvidence": "EXECUTED_PARTIAL_ONLY",
+      "helperCheck": "consumed range once; repeated physical records get distinct ranges; restart gets new generation",
+      "actualProducerStatus": "NOT_RUN_GAP",
+      "remaining": "Cross-reader semantic replay/dedup and HH failure counting NOT_RUN.",
+      "receipts": [
+        "native-boundary-final.meta.json",
+        "native-boundary-final.log"
+      ],
+      "qualification75": "READ_ONLY_ACCEPTED; current interactive causal binding and loaded runtime UNKNOWN; actual producer remains NOT_RUN_GAP",
+      "qualification75Receipt": "handoff75-r2/task75-corrected-handoff.txt and task75-verdicts.txt"
+    },
+    {
+      "case": 11,
+      "scenario": "native turns7/8 share one bound HH job",
+      "expectedProducerBehavior": "not two HH retries;only causally terminal refusal represented",
+      "helperEvidence": "EXECUTED_PARTIAL_ONLY",
+      "helperCheck": "repeated physical records are metadata only, no job/counter fields",
+      "actualProducerStatus": "NOT_RUN_GAP",
+      "remaining": "No bound HH job or terminal native attempt proof; turns7/8 attribution NOT_RUN. Accepted75 distinguishes installed official byte match from loaded artifact UNKNOWN; interactive causal receipt/fence absent; headless design is not a product-path authorization.",
+      "receipts": [
+        "native-boundary-final.meta.json",
+        "native-boundary-final.log"
+      ],
+      "qualification75": "READ_ONLY_ACCEPTED; current interactive causal binding and loaded runtime UNKNOWN; actual producer remains NOT_RUN_GAP",
+      "qualification75Receipt": "handoff75-r2/task75-corrected-handoff.txt and task75-verdicts.txt"
+    },
+    {
+      "case": 12,
+      "scenario": "ordinary429/auth401/context overflow/generic agent_failed",
+      "expectedProducerBehavior": "ordinary non-quota processing preserved",
+      "helperEvidence": "EXECUTED_PARTIAL_ONLY",
+      "helperCheck": "all five accepted serializer payloads retain distinct name/code/status/retryable",
+      "actualProducerStatus": "NOT_RUN_GAP",
+      "remaining": "Existing ordinary job/error behavior is untouched; active classifier/end-to-end negatives NOT_RUN.",
+      "receipts": [
+        "native-boundary-final.meta.json",
+        "native-boundary-final.log"
+      ],
+      "qualification75": "READ_ONLY_ACCEPTED; current interactive causal binding and loaded runtime UNKNOWN; actual producer remains NOT_RUN_GAP",
+      "qualification75Receipt": "handoff75-r2/task75-corrected-handoff.txt and task75-verdicts.txt"
+    },
+    {
+      "case": 13,
+      "scenario": "full_compaction log success without failed wire event",
+      "expectedProducerBehavior": "no quota and no fabricated failure",
+      "helperEvidence": "EXECUTED_PARTIAL_ONLY",
+      "helperCheck": "full_compaction/content wrapper unsupported; synthetic compaction prose remains internal error",
+      "actualProducerStatus": "NOT_RUN_GAP",
+      "remaining": "Actual compaction runtime NOT_RUN; no fabricated wire failure.",
+      "receipts": [
+        "native-boundary-final.meta.json",
+        "native-boundary-final.log"
+      ],
+      "qualification75": "READ_ONLY_ACCEPTED; current interactive causal binding and loaded runtime UNKNOWN; actual producer remains NOT_RUN_GAP",
+      "qualification75Receipt": "handoff75-r2/task75-corrected-handoff.txt and task75-verdicts.txt"
+    },
+    {
+      "case": 14,
+      "scenario": "root retryable false but nested error.retryable absent",
+      "expectedProducerBehavior": "reject wrong shape for2.4.1 profile",
+      "helperEvidence": "EXECUTED_PARTIAL_ONLY",
+      "helperCheck": "wrong nested retryable/root alias test rejects malformed projection",
+      "actualProducerStatus": "NOT_RUN_GAP",
+      "remaining": "Active qualified-runtime producer NOT_RUN.",
+      "receipts": [
+        "native-boundary-final.meta.json",
+        "native-boundary-final.log"
+      ],
+      "qualification75": "READ_ONLY_ACCEPTED; current interactive causal binding and loaded runtime UNKNOWN; actual producer remains NOT_RUN_GAP",
+      "qualification75Receipt": "handoff75-r2/task75-corrected-handoff.txt and task75-verdicts.txt"
+    },
+    {
+      "case": 15,
+      "scenario": "requestId null or trace ID reused without causal start",
+      "expectedProducerBehavior": "no invented identity/join",
+      "helperEvidence": "EXECUTED_PARTIAL_ONLY",
+      "helperCheck": "explicit null/absent IDs, separate root trace and reused trace preserved",
+      "actualProducerStatus": "NOT_RUN_GAP",
+      "remaining": "No request/trace-to-job association is inferred; causal binding NOT_RUN.",
+      "receipts": [
+        "native-boundary-final.meta.json",
+        "native-boundary-final.log"
+      ],
+      "qualification75": "READ_ONLY_ACCEPTED; current interactive causal binding and loaded runtime UNKNOWN; actual producer remains NOT_RUN_GAP",
+      "qualification75Receipt": "handoff75-r2/task75-corrected-handoff.txt and task75-verdicts.txt"
+    },
+    {
+      "case": 16,
+      "scenario": "reconnect/outbox carries previously captured refusal",
+      "expectedProducerBehavior": "same original job and event time;no re-age/rebind;never recovery",
+      "helperEvidence": "EXECUTED_PARTIAL_ONLY",
+      "helperCheck": "capturedAt immutable, event time not re-aged, fresh reader gets new local generation",
+      "actualProducerStatus": "NOT_RUN_GAP",
+      "remaining": "No active producer/outbox delivery; existing frozen receiver not repeated. Accepted75 distinguishes installed official byte match from loaded artifact UNKNOWN; interactive causal receipt/fence absent; headless design is not a product-path authorization.",
+      "receipts": [
+        "native-boundary-final.meta.json",
+        "native-boundary-final.log"
+      ],
+      "qualification75": "READ_ONLY_ACCEPTED; current interactive causal binding and loaded runtime UNKNOWN; actual producer remains NOT_RUN_GAP",
+      "qualification75Receipt": "handoff75-r2/task75-corrected-handoff.txt and task75-verdicts.txt",
+      "sessionFailureGap": "No session.resume_hint on refused direct-spawn failure; independent process/session-created/file-generation receipt still required."
+    },
+    {
+      "case": 17,
+      "scenario": "old node/server completion without valid optional evidence",
+      "expectedProducerBehavior": "result/session/error retained;no new unsupported JobError",
+      "helperEvidence": "EXECUTED_PARTIAL_ONLY",
+      "helperCheck": "legacy LineTail string[]/fromEnd behavior directly checked, old production paths unchanged",
+      "actualProducerStatus": "NOT_RUN_GAP",
+      "remaining": "Old node/server full completion compatibility not re-executed in this increment.",
+      "receipts": [
+        "native-boundary-final.meta.json",
+        "native-boundary-final.log"
+      ],
+      "qualification75": "READ_ONLY_ACCEPTED; current interactive causal binding and loaded runtime UNKNOWN; actual producer remains NOT_RUN_GAP",
+      "qualification75Receipt": "handoff75-r2/task75-corrected-handoff.txt and task75-verdicts.txt"
+    }
+  ],
+  "schemaVersion": 2,
+  "qualification75": {
+    "archiveBytes": 28327,
+    "archiveSha256": "6c7a47cfde33df6f58f7f1d23992279c00b0d883ae56c2a60fb8ce375114ac5f",
+    "correctedHandoffSha256": "4720d067a93fe663e37e4bbf5ecf9a25128bbb4de37065d451c43aa250e93871",
+    "reviewAcceptedUtc": [
+      "2026-11-01T11:36:39.737Z",
+      "2026-11-01T11:41:21.585Z"
+    ],
+    "installedMainVersion": "2.4.1",
+    "installedMainSha256": "fd15d5c9b48892bb4f1d5fe82df9f790c8c19a44ca9a81054cc592b6fb9e2c90",
+    "installedOfficialByteMatch": true,
+    "sigstoreChainVerified": false,
+    "loadedArtifactSourceEquivalence": "UNKNOWN",
+    "loadedRuntimeVersion": null,
+    "interactiveInputRefOrFence": "GAP",
+    "headlessAlternative": "SOURCE_DESIGN_ONLY_NOT_AUTHORIZED_OR_IMPLEMENTED"
+  },
+  "minorResolutions": {
+    "strictFalse": "Both goal_or_background_or_reload and typed_before_ack must be exactly false; missing/null/0/empty-string remain UNKNOWN. Own synthetic model only.",
+    "negativeReceipt": "r2-design-green.meta.json / r2-design-green.log: 25 tests, 16 original and 8 additional negatives, 1 valid design vector",
+    "resumeHint": "session.resume_hint absent on refusal path: native failed result throws at installed bundle 482543, rethrows at 482317 before writeResumeHint 482321. Requires separate child/session-created/file-generation binding.",
+    "reader": "Reuse exact054 NativeRecordReader; no second cursor or LineTail rewrite."
+  },
+  "sourceBundle": {
+    "manifest": "handoff75-r2/source-manifest.json",
+    "bytes": 38758,
+    "sha256": "eee319c405f1544b0997270499bc5259d6188ef14a361abfcbaf272efe8ce984",
+    "prerequisite": "bd696b0724385b6b11da53a24ada2f188b031217",
+    "head": "054913b9b36455e6a5fcd98ae68335a5cd1f199b"
+  }
+}

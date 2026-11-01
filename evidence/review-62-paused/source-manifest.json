@@ -1,0 +1,179 @@
+{
+  "schemaVersion": 2,
+  "task": 62,
+  "kind": "SOURCE_HANDOFF_NOT_PRODUCT_ACTIVATION",
+  "file": "source-054-from-bd.bundle",
+  "bytes": 38758,
+  "sha256": "eee319c405f1544b0997270499bc5259d6188ef14a361abfcbaf272efe8ce984",
+  "refs": {
+    "HEAD": "054913b9b36455e6a5fcd98ae68335a5cd1f199b"
+  },
+  "prerequisites": [
+    "bd696b0724385b6b11da53a24ada2f188b031217"
+  ],
+  "commits": [
+    {
+      "commit": "c66c3ce5829fb0ab2c89af2784a3e67e2d587d49",
+      "parents": [
+        "bd696b0724385b6b11da53a24ada2f188b031217"
+      ],
+      "tree": "d56f66f4ed4ca01b5e1b6bd2622ca4d21e81c4d5"
+    },
+    {
+      "commit": "165d05a8995ba2bbc12442c784e22c397633d386",
+      "parents": [
+        "c66c3ce5829fb0ab2c89af2784a3e67e2d587d49"
+      ],
+      "tree": "ee9911c9c217906d2ca9fb5caa31901e19eeaeac"
+    },
+    {
+      "commit": "179bac71e830893b43cbdcc4900d538c2d0768db",
+      "parents": [
+        "165d05a8995ba2bbc12442c784e22c397633d386"
+      ],
+      "tree": "2c2ee8ba8a76448222dfe0b24e6316056442dfbb"
+    },
+    {
+      "commit": "1126893370b95b79f7d8ce8167fb32fd59be2a53",
+      "parents": [
+        "179bac71e830893b43cbdcc4900d538c2d0768db"
+      ],
+      "tree": "9e61b8bddf5dd5ce25089304e2d0735276ad0e3c"
+    },
+    {
+      "commit": "054913b9b36455e6a5fcd98ae68335a5cd1f199b",
+      "parents": [
+        "1126893370b95b79f7d8ce8167fb32fd59be2a53"
+      ],
+      "tree": "d82120788e5e28c1d5cb4926c85b4bca0502c6bb"
+    }
+  ],
+  "tree": "d82120788e5e28c1d5cb4926c85b4bca0502c6bb",
+  "sourceFilesChangedFromBd": 29,
+  "readerNewFilesFromFrozen165": 7,
+  "partCount": 18,
+  "encoding": "base64, concatenate numbered payloads without whitespace",
+  "parts": [
+    {
+      "part": 1,
+      "file": "source-part-01.b64",
+      "encodedChars": 3000,
+      "encodedSha256": "1bb9a395745d360c8bf96fb8132897cba600787f2319194d7331045edd69ad80"
+    },
+    {
+      "part": 2,
+      "file": "source-part-02.b64",
+      "encodedChars": 3000,
+      "encodedSha256": "d1e6f929965980b2071f068a81ec393130942a9e736b79fdea293ad873ea589f"
+    },
+    {
+      "part": 3,
+      "file": "source-part-03.b64",
+      "encodedChars": 3000,
+      "encodedSha256": "a1697d47ee8b8e56cef9c7a334820d32dc684c9c503fc49b54decb631e4cc6b5"
+    },
+    {
+      "part": 4,
+      "file": "source-part-04.b64",
+      "encodedChars": 3000,
+      "encodedSha256": "a42c7f8e6dfacd356ec097153fcdbc956dbfda238dcbd4ddee9633194c63b240"
+    },
+    {
+      "part": 5,
+      "file": "source-part-05.b64",
+      "encodedChars": 3000,
+      "encodedSha256": "5c00480e257487f0932a1ad82d12b017e4cb62a09f04615ce09415aab35f2101"
+    },
+    {
+      "part": 6,
+      "file": "source-part-06.b64",
+      "encodedChars": 3000,
+      "encodedSha256": "f9b26156e90adda39a108cc847e89c76a2f0cba97ea91c9d20223c3de3a6a8b4"
+    },
+    {
+      "part": 7,
+      "file": "source-part-07.b64",
+      "encodedChars": 3000,
+      "encodedSha256": "131dec65071be13d6c1d11711eea207a72b57b4b679ec9ecb6a6807b5233ff86"
+    },
+    {
+      "part": 8,
+      "file": "source-part-08.b64",
+      "encodedChars": 3000,
+      "encodedSha256": "629e00d251ede49849c20156fcf6347d77649cd5a943969ce68936c416dae87a"
+    },
+    {
+      "part": 9,
+      "file": "source-part-09.b64",
+      "encodedChars": 3000,
+      "encodedSha256": "8dd9fa6f2e4303245ec8a89ad62856de85d5f446e85873166d3b5b7c67d068b0"
+    },
+    {
+      "part": 10,
+      "file": "source-part-10.b64",
+      "encodedChars": 3000,
+      "encodedSha256": "1a81948b667e7c1ccd765eb87e0b43b44353666db5d2822ef8e276bd188c167a"
+    },
+    {
+      "part": 11,
+      "file": "source-part-11.b64",
+      "encodedChars": 3000,
+      "encodedSha256": "ac0a1b94514be78f2632f9f2a840529ee0d9de4b2fa69da04fc2494c298f0c1b"
+    },
+    {
+      "part": 12,
+      "file": "source-part-12.b64",
+      "encodedChars": 3000,
+      "encodedSha256": "58d0b0f982e8c28b446e6f600a168fb8ed784e571e2bf3c2450e272b910f1a5f"
+    },
+    {
+      "part": 13,
+      "file": "source-part-13.b64",
+      "encodedChars": 3000,
+      "encodedSha256": "c6406b41009de4d6fd99eda5671c775f271a496acb32a3a43610fbbc226d5465"
+    },
+    {
+      "part": 14,
+      "file": "source-part-14.b64",
+      "encodedChars": 3000,
+      "encodedSha256": "7df575202863d35f533f81980609b8c1f5e23a25be88b23cbeb6f1d1f198e3ee"
+    },
+    {
+      "part": 15,
+      "file": "source-part-15.b64",
+      "encodedChars": 3000,
+      "encodedSha256": "aa642b477df4a3e032694844526018b0a53d242b3919ff6f4c12117c906b7d11"
+    },
+    {
+      "part": 16,
+      "file": "source-part-16.b64",
+      "encodedChars": 3000,
+      "encodedSha256": "cd910ac7a95aabd375940edd1844e1d7d3fa54d2550e6ad1005d34065367a208"
+    },
+    {
+      "part": 17,
+      "file": "source-part-17.b64",
+      "encodedChars": 3000,
+      "encodedSha256": "323a3eb47e1a38c01ffb4aa07705e709c239bfd44a07dc63f8da48e6be693182"
+    },
+    {
+      "part": 18,
+      "file": "source-part-18.b64",
+      "encodedChars": 680,
+      "encodedSha256": "8638c0a0bad0c071ba85d75d8b82844b236d25203fd3b832c95bc2ea583b773b"
+    }
+  ],
+  "actualProducerEnabled": false,
+  "root": "NOT_RUN",
+  "push": "NOT_RUN",
+  "migration": "0021_quota_wait provisional, preserved unchanged; final combined journal belongs to head/DevOps",
+  "localReadback": {
+    "file": "source-readback.json",
+    "bytes": 553,
+    "sha256": "da5087e1dbe11becdba3f981136974c00bd11c620c192cbae8f994c8df3564af",
+    "result": "SOURCE_HANDOFF_VERIFIED",
+    "baseOnlyBeforeImport": true,
+    "headTreeParentsAuthorTrailersVerified": true
+  },
+  "publicationPrefix": "TASK62_SOURCE_R2"
+}

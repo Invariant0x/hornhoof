@@ -1,0 +1,45 @@
+{
+  "bundleBytes": 38758,
+  "bundleSha256": "eee319c405f1544b0997270499bc5259d6188ef14a361abfcbaf272efe8ce984",
+  "bundleParts": 18,
+  "textParts": 18,
+  "files": [
+    {
+      "name": "source-manifest.json",
+      "bytes": 5510,
+      "sha256": "c9088ccff79c0e2552c18f691437df2becce9744f9035cec6df425094c2963ff",
+      "parts": 2
+    },
+    {
+      "name": "producer-handoff.md",
+      "bytes": 17288,
+      "sha256": "3902e9b1362759e2654deeeacfdc0d46fea3c9bccb40794670475f7dab3f4937",
+      "parts": 6
+    },
+    {
+      "name": "producer-cases.json",
+      "bytes": 18217,
+      "sha256": "83239213944bfbb9fabaff96c53e07b5f06a6023211c134077b427dab9e667d3",
+      "parts": 7
+    },
+    {
+      "name": "design-fence.mts",
+      "bytes": 1028,
+      "sha256": "a4e2b182d1caca3a3021d5733213945e0f0e322e6f86d3864528a9889cdf95de",
+      "parts": 1
+    },
+    {
+      "name": "design-fence.test.mts",
+      "bytes": 2538,
+      "sha256": "bc6d56820d79f34d29f0142f7011cf0751ebdc56dbf0819c3d0319d325ca4c1a",
+      "parts": 1
+    },
+    {
+      "name": "tsconfig.json",
+      "bytes": 313,
+      "sha256": "d45e9870bafbeec62ab07a85a5b1d340a58f33af39db6c9d4b78aa791dfc5392",
+      "parts": 1
+    }
+  ],
+  "result": "REVIEW62_TRANSPORT_VALID"
+}
