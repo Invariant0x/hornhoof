@@ -332,9 +332,12 @@ describe('the orchestrator\'s conversation', () => {
     expect(sub!.limits).toMatchObject({ status: 'rejected', windows: [{ name: 'five_hour', utilization: 1 }] });
   });
 
-  it('takes the time a program names for its usage limit to start over', async () => {
+  it('takes the time a program names for its usage limit to start over, and the map hears of it', async () => {
     const { app, ceo, mac } = await onMac('0.3.0', 'codex');
     await until(async () => (await state(app, ceo)).ready);
+    const [company] = await app.ctx.db.select({ id: companies.id }).from(companies);
+    const heard: string[] = [];
+    app.ctx.bus.subscribe(company!.id, m => heard.push(m.type));
     await say(app, ceo, 'First');
     const first = await nextRun(mac);
     const tail = "ERROR: You've hit your usage limit. Upgrade to Pro or try again in 2 hours 5 minutes.";
@@ -343,6 +346,7 @@ describe('the orchestrator\'s conversation', () => {
     const wait = Date.parse((await state(app, ceo)).limitUntil!) - Date.now();
     expect(wait).toBeGreaterThan(124 * 60_000);
     expect(wait).toBeLessThanOrEqual(125 * 60_000);
+    expect(heard).toContain('org');
   });
 
   it('does not hold turns for an agent that only spoke about usage limits in its work', async () => {

@@ -113,11 +113,15 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       if (finished.length && msg.error === 'not_logged_in' && id.kind === 'node') {
         await db.update(subscriptions).set({ status: 'needs_login' }).where(eq(subscriptions.id, id.subscriptionId));
       }
-      /* A program that stopped at the plan's usage limit holds the plan's turns, as a plan that says so itself does. */
+      /* A program that stopped at the plan's usage limit holds the plan's turns, as a plan that says so itself does, and the
+         map says until when. */
       if (finished.length && msg.error === 'agent_failed' && id.kind === 'node') {
         const [sub] = await db.select({ limits: subscriptions.limits }).from(subscriptions).where(eq(subscriptions.id, id.subscriptionId));
         const held = refusedLimits(`${msg.result}\n${msg.tail}`, sub?.limits ?? null, now.getTime());
-        if (held) await db.update(subscriptions).set({ limits: held }).where(eq(subscriptions.id, id.subscriptionId));
+        if (held) {
+          await db.update(subscriptions).set({ limits: held }).where(eq(subscriptions.id, id.subscriptionId));
+          for (const { companyId } of finished) ctx.bus.publish(companyId, { type: 'org' });
+        }
       }
       if (finished.length) await afterJob(ctx, msg.jobId);
       /* The node keeps the end until it hears this, and sends it again after a reconnect; a second one changes nothing. */
