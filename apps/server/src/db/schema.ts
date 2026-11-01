@@ -1,6 +1,6 @@
 import { TEMPLATE_KEYS, type Limits, type ModelOption } from '@hornhoof/protocol';
 import { sql } from 'drizzle-orm';
-import { bigserial, boolean, customType, index, integer, jsonb, pgTable, real, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
+import { bigserial, boolean, check, customType, index, integer, jsonb, pgTable, real, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
 
 const id = () => uuid('id').primaryKey().defaultRandom();
 const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow();
@@ -160,39 +160,47 @@ export const subscriptions = pgTable(
   t => [index('subscriptions_owner_person_id').on(t.ownerPersonId)],
 );
 
-export const agents = pgTable('agents', {
-  id: id(),
-  companyId: companyId(),
-  kind: text('kind', { enum: ['orchestrator', 'head', 'worker'] }).notNull(),
-  name: text('name').notNull(),
-  model: text('model').notNull(),
-  departmentId: uuid('department_id').references(() => departments.id),
-  teamId: uuid('team_id').references(() => teams.id),
-  subscriptionId: uuid('subscription_id').references(() => subscriptions.id),
-  /* The role template it was hired from, its enabled skills, its own text over the template's, and the template
-     hashes it was hired with, so the card can say a template moved on. */
-  roleKey: text('role_key'),
-  skills: jsonb('skills').$type<string[]>().notNull().default([]),
-  overrides: jsonb('overrides').$type<AgentOverrides>().notNull().default({}),
-  templateHashes: jsonb('template_hashes').$type<Record<string, string>>().notNull().default({}),
-  /* A product department the employee works for, inside its department. */
-  productId: uuid('product_id').references((): AnyPgColumn => departments.id),
-  createdBy: uuid('created_by').references(() => people.id),
-  /* Switched off for now: it ends the turn it runs and takes no task turns until it is on again. */
-  switchedOffAt: timestamp('switched_off_at', { withTimezone: true }),
-  /* How full its context was when its node last said, as a share from 0 to 1. */
-  contextUsed: real('context_used'),
-  /* How hard its model thinks, as its program names the level; none runs at the program's default, Kimi at its most. */
-  effort: text('effort'),
-  /* Wakes on its own every so many minutes, outside any task, to do what its order says; none means it does not. The
-     last round started, or was skipped, at timer_at. A timer for work skips its round while nothing is open or failed. */
-  timerMinutes: integer('timer_minutes'),
-  timerOrder: text('timer_order'),
-  timerAt: timestamp('timer_at', { withTimezone: true }),
-  timerForWork: boolean('timer_for_work').notNull().default(false),
-  removedAt: timestamp('removed_at', { withTimezone: true }),
-  createdAt: createdAt(),
-});
+export const agents = pgTable(
+  'agents',
+  {
+    id: id(),
+    companyId: companyId(),
+    kind: text('kind', { enum: ['orchestrator', 'head', 'worker'] }).notNull(),
+    name: text('name').notNull(),
+    model: text('model').notNull(),
+    departmentId: uuid('department_id').references(() => departments.id),
+    teamId: uuid('team_id').references(() => teams.id),
+    subscriptionId: uuid('subscription_id').references(() => subscriptions.id),
+    /* The role template it was hired from, its enabled skills, its own text over the template's, and the template
+       hashes it was hired with, so the card can say a template moved on. */
+    roleKey: text('role_key'),
+    skills: jsonb('skills').$type<string[]>().notNull().default([]),
+    overrides: jsonb('overrides').$type<AgentOverrides>().notNull().default({}),
+    templateHashes: jsonb('template_hashes').$type<Record<string, string>>().notNull().default({}),
+    /* A product department the employee works for, inside its department. */
+    productId: uuid('product_id').references((): AnyPgColumn => departments.id),
+    createdBy: uuid('created_by').references(() => people.id),
+    /* Switched off for now: it ends the turn it runs and takes no task turns until it is on again. */
+    switchedOffAt: timestamp('switched_off_at', { withTimezone: true }),
+    /* How full its context was when its node last said, as a share from 0 to 1. */
+    contextUsed: real('context_used'),
+    /* How hard its model thinks, as its program names the level; none runs at the program's default, Kimi at its most. */
+    effort: text('effort'),
+    /* Wakes on its own every so many minutes, outside any task, to do what its order says; none means it does not. The
+       last round started, or was skipped, at timer_at. A timer for work skips its round while nothing is open or failed. */
+    timerMinutes: integer('timer_minutes'),
+    timerOrder: text('timer_order'),
+    timerAt: timestamp('timer_at', { withTimezone: true }),
+    timerForWork: boolean('timer_for_work').notNull().default(false),
+    removedAt: timestamp('removed_at', { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  /* One head per department and one orchestrator per company, among those still employed. */
+  t => [
+    uniqueIndex('agents_one_head').on(t.departmentId).where(sql`kind = 'head' AND removed_at IS NULL`),
+    uniqueIndex('agents_one_orchestrator').on(t.companyId).where(sql`kind = 'orchestrator' AND removed_at IS NULL`),
+  ],
+);
 
 export type AgentOverrides = { base?: string; skills?: Record<string, string> };
 
@@ -366,7 +374,19 @@ export const tasks = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
     closedAt: timestamp('closed_at', { withTimezone: true }),
   },
-  t => [unique('tasks_company_number').on(t.companyId, t.number), index('tasks_department_id').on(t.departmentId), index('tasks_assignee').on(t.assigneeAgentId), index('tasks_parent_id').on(t.parentId)],
+  t => [
+    unique('tasks_company_number').on(t.companyId, t.number),
+    index('tasks_department_id').on(t.departmentId),
+    index('tasks_assignee').on(t.assigneeAgentId),
+    index('tasks_parent_id').on(t.parentId),
+    /* What no move makes: a gate with no executor behind it, counts below zero, a closed task without its time, a task
+       under itself, gates that are not lists. */
+    check('tasks_review_has_executor', sql`${t.status} <> 'review' OR ${t.executorAgentId} IS NOT NULL`),
+    check('tasks_counts', sql`${t.stage} >= 0 AND ${t.bounces} >= 0 AND ${t.silent} >= 0`),
+    check('tasks_closed_at', sql`${t.status} NOT IN ('done', 'cancelled') OR ${t.closedAt} IS NOT NULL`),
+    check('tasks_not_own_parent', sql`${t.parentId} IS NULL OR ${t.parentId} <> ${t.id}`),
+    check('tasks_gates_lists', sql`jsonb_typeof(${t.gates}) = 'array' AND jsonb_typeof(${t.panel}) = 'array'`),
+  ],
 );
 
 export const TASK_EVENT_KINDS = ['created', 'assigned', 'updated', 'comment', 'submitted', 'verdict', 'report', 'blocked', 'asked', 'answered', 'reminded', 'continued', 'stuck', 'cancelled', 'done'] as const;
@@ -435,7 +455,7 @@ export const requests = pgTable(
     createdAt: createdAt(),
     answeredAt: timestamp('answered_at', { withTimezone: true }),
   },
-  t => [index('requests_task_id').on(t.taskId)],
+  t => [index('requests_task_id').on(t.taskId), check('requests_approval_commit', sql`${t.kind} <> 'approval' OR ${t.commit} IS NOT NULL`)],
 );
 
 /* A picture an agent sent from its turn to show its work. People see it once a request of that agent shows it. */

@@ -558,7 +558,7 @@ describe('a head', () => {
     const bruno = await staff('Bruno', 'worker', 'DEV-BE');
     const part = async (title: string) => (await createTask(ctx, { agentId: head.id }, { title, brief: '', body: '', departmentId: dev.id, parentId: payments.id, assigneeAgentId: bruno.id, executor: true })).task;
     const [checkout, refund] = [await part('Checkout API'), await part('Refund email')];
-    await db.update(tasks).set({ status: 'done' }).where(inArray(tasks.id, [checkout.id, refund.id]));
+    await db.update(tasks).set({ status: 'done', closedAt: new Date() }).where(inArray(tasks.id, [checkout.id, refund.id]));
     await together([checkout.id, refund.id], { status: 'done' });
     expect(await reminded(payments.id)).toBe(1);
   });

@@ -1,7 +1,7 @@
-import { sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { isUniqueViolation } from '../src/db/errors.js';
-import { agentChanges, agentEvents, agents, companies, departments, machines, people, personAccess, subscriptions } from '../src/db/schema.js';
+import { agentChanges, agentEvents, agents, companies, departments, machines, people, personAccess, requests, subscriptions, tasks } from '../src/db/schema.js';
 import { createTestDb } from './helpers.js';
 
 describe('database', () => {
@@ -10,6 +10,30 @@ describe('database', () => {
     await db.insert(companies).values({ name: 'Acme' });
     const rows = await db.select().from(companies);
     expect(rows.map(r => r.name)).toEqual(['Acme']);
+  });
+
+  it('refuses rows that cannot happen: a second head, a task in review without its executor, a task under itself', async () => {
+    const db = await createTestDb();
+    const [company] = await db.insert(companies).values({ name: 'Acme' }).returning();
+    const companyId = company!.id;
+    const [dev] = await db.insert(departments).values({ companyId, name: 'Dev', roleCode: 'DEV' }).returning();
+    const head = { companyId, kind: 'head' as const, name: 'Hana', model: '', departmentId: dev!.id };
+    await db.insert(agents).values(head);
+    expect(isUniqueViolation(await db.insert(agents).values({ ...head, name: 'Hugo' }).catch((e: unknown) => e))).toBe(true);
+    const [bruno] = await db.insert(agents).values({ companyId, kind: 'worker', name: 'Bruno', model: '', departmentId: dev!.id }).returning();
+    let n = 0;
+    const kept = (p: Promise<unknown>) => p.then(() => 'kept', () => 'refused');
+    const task = (row: Partial<typeof tasks.$inferInsert>) => kept(db.insert(tasks).values({ companyId, number: ++n, title: 'Checkout', ...row }));
+    expect(await task({ status: 'review', stage: 1 })).toBe('refused');
+    expect(await task({ stage: -1 })).toBe('refused');
+    expect(await task({ silent: -1 })).toBe('refused');
+    expect(await task({ status: 'done' })).toBe('refused');
+    const [mine] = await db.insert(tasks).values({ companyId, number: ++n, title: 'Checkout', executorAgentId: bruno!.id, assigneeAgentId: bruno!.id }).returning();
+    expect(await kept(db.update(tasks).set({ parentId: mine!.id }).where(eq(tasks.id, mine!.id)))).toBe('refused');
+    expect(await kept(db.insert(requests).values({ companyId, taskId: mine!.id, agentId: bruno!.id, kind: 'approval', text: 'Merge it?' }))).toBe('refused');
+    /* A head who left makes room for the next one. */
+    await db.update(agents).set({ removedAt: new Date() }).where(eq(agents.name, 'Hana'));
+    expect(await kept(db.insert(agents).values({ ...head, name: 'Hugo' }))).toBe('kept');
   });
 
   it('refuses a second company in one deployment', async () => {

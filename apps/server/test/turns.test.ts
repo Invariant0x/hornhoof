@@ -232,7 +232,7 @@ describe('turns', () => {
   });
 
   it('does not treat blocked or review tasks as empty history', async () => {
-    const { db, ctx, orchestrator, dev, hana, tools, queued } = await company();
+    const { db, ctx, orchestrator, dev, hana, bruno, tools, queued } = await company();
     const boss = await tools(orchestrator);
     await call(boss, 'plan_turn', { title: 'Target', goal: 'Current work.', tasks: [work(dev.id, 'Current task')] });
     await call(boss, 'plan_turn', { title: 'Source', goal: 'Unfinished work.', tasks: [work(dev.id, 'Finished'), work(dev.id, 'Blocked'), work(dev.id, 'Review')] });
@@ -240,7 +240,7 @@ describe('turns', () => {
     const [source] = await db.select().from(turns).where(eq(turns.number, 2));
     await db.update(tasks).set({ status: 'done', closedAt: new Date() }).where(eq(tasks.number, 2));
     await db.update(tasks).set({ status: 'blocked', assigneeAgentId: hana.id }).where(eq(tasks.number, 3));
-    await db.update(tasks).set({ status: 'review', stage: 1, panel: [hana.id], assigneeAgentId: hana.id }).where(eq(tasks.number, 4));
+    await db.update(tasks).set({ status: 'review', stage: 1, gates: [hana.id], panel: [hana.id], executorAgentId: bruno.id, assigneeAgentId: hana.id }).where(eq(tasks.number, 4));
     const [finished] = await db.select().from(tasks).where(eq(tasks.number, 2));
 
     expect(await settle(ctx, finished!)).toBeNull();
@@ -445,7 +445,7 @@ describe('turns', () => {
   it('closes a turn from before, whose tasks are all done, when he lays out the next one', async () => {
     const { db, companyId, ceo, orchestrator, dev, hana, tools } = await company();
     const [old] = await db.insert(turns).values({ companyId, number: 1, goal: 'Old goal', status: 'open', startedBy: ceo.id, openedAt: new Date() }).returning();
-    await db.insert(tasks).values({ companyId, number: 1, turnId: old!.id, title: 'Turn 1: Old goal', status: 'done', createdByPersonId: ceo.id });
+    await db.insert(tasks).values({ companyId, number: 1, turnId: old!.id, title: 'Turn 1: Old goal', status: 'done', closedAt: new Date(), createdByPersonId: ceo.id });
     const res = await call(await tools(orchestrator), 'plan_turn', { title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
     expect(text(res)).toContain('started');
     expect((await db.select({ n: turns.number, s: turns.status }).from(turns).orderBy(asc(turns.number))).map(t => [t.n, t.s])).toEqual([
@@ -458,7 +458,7 @@ describe('turns', () => {
   it('lists every open task for the tracker even after many newer closed ones', async () => {
     const { db, companyId, orchestrator, dev, tools, ceoToken, get } = await company();
     await call(await tools(orchestrator), 'plan_turn', { title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
-    await db.insert(tasks).values(Array.from({ length: 500 }, (_, i) => ({ companyId, number: i + 2, title: `Old ${i}`, status: 'done' as const })));
+    await db.insert(tasks).values(Array.from({ length: 500 }, (_, i) => ({ companyId, number: i + 2, title: `Old ${i}`, status: 'done' as const, closedAt: new Date() })));
     const all = (await get(ceoToken, '/api/tasks?status=all')).json().tasks as { number: number }[];
     expect(all.some(t => t.number === 1)).toBe(true);
   });

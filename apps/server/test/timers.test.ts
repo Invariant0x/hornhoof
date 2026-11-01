@@ -101,7 +101,7 @@ describe('timers', () => {
     const [task] = await db.insert(tasks).values({ companyId: orchestrator.companyId, number: 1, title: 'Checkout', status: 'open' }).returning();
     expect(await timerTick(app.ctx, at(20))).toBe(1);
     await db.update(jobs).set({ status: 'done', finishedAt: at(21) }).where(eq(jobs.agentId, wandaId));
-    await db.update(tasks).set({ status: 'done' }).where(eq(tasks.id, task!.id));
+    await db.update(tasks).set({ status: 'done', closedAt: new Date() }).where(eq(tasks.id, task!.id));
     /* A stop by a person is no failure; a timeout is. */
     const failed = (minute: number, error: string) => ({ companyId: orchestrator.companyId, subscriptionId: orchestrator.subscriptionId!, agentId: orchestrator.id, kind: 'conversation' as const, prompt: 'x', timeoutMs: 1, status: 'failed' as const, error, finishedAt: at(minute) });
     await db.insert(jobs).values(failed(25, 'cancelled'));
