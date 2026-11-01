@@ -1,4 +1,4 @@
-import { TEMPLATE_KEYS, type Limits, type ModelOption } from '@hornhoof/protocol';
+import { COMPANY_TEMPLATE_KEYS, TEMPLATE_KEYS, type Limits, type ModelOption } from '@hornhoof/protocol';
 import { sql } from 'drizzle-orm';
 import { bigserial, boolean, check, customType, index, integer, jsonb, pgTable, real, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
 
@@ -13,6 +13,8 @@ export const companies = pgTable('companies', {
   name: text('name').notNull(),
   /* What the orchestrator learned about the company, saved when the CEO creates the structure. */
   brief: text('brief').notNull().default(''),
+  /* The ready-made template the CEO started from, so the orchestrator's greeting can offer to staff it. Null when the CEO started empty. */
+  template: text('template', { enum: COMPANY_TEMPLATE_KEYS }),
   singleton: boolean('singleton').notNull().default(true).unique(),
   createdAt: createdAt(),
 });

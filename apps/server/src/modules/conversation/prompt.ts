@@ -22,6 +22,11 @@ Answer in the language the person writes in. Keep answers short and plain. Call 
 
 export const FIRST_TURN = 'The CEO opened your window for the first time. Greet them by name and ask your first question.';
 
+/* The greeting when the CEO started from a ready-made template: its departments already exist, so skip the interview
+   and the structure card and go to staffing. */
+export const FIRST_TURN_TEMPLATE =
+  'The CEO set the company up from a ready-made template, so its departments already exist. Greet the CEO by name, say in one line that the company started from a template and that you can change its departments any time, call "company" to see them, and offer to staff them one at a time, beginning with the first. Do not propose a structure card; the departments are already there.';
+
 /* A person's message as he reads it, with who wrote it. */
 export function turnPrompt(author: { name: string; title: string }, text: string): string {
   return author.title ? `${author.name} (${author.title}): ${text}` : `${author.name}: ${text}`;

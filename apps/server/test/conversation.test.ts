@@ -3,7 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, vi } from 'vitest';
 import { agents, companies, departments, jobs, people, subscriptions } from '../src/db/schema.js';
 import { renderInstructions } from '../src/modules/agents/instructions.js';
-import { FIRST_TURN, ORCHESTRATOR_INSTRUCTIONS } from '../src/modules/conversation/prompt.js';
+import { FIRST_TURN, FIRST_TURN_TEMPLATE, ORCHESTRATOR_INSTRUCTIONS } from '../src/modules/conversation/prompt.js';
 import { as, connectNode, invitePerson, listen, openStream, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
@@ -58,6 +58,16 @@ describe('the orchestrator\'s conversation', () => {
     await db.insert(departments).values({ companyId: acme!.id, name: null, templateKey: 'operations', roleCode: 'OPS' });
     expect((await start(app, ceo)).json()).toEqual({ started: false });
     expect(await quiet(builtin)).toBe(0);
+  });
+
+  it('greets a company started from a template, so he offers to staff its departments', async () => {
+    const { app, db, ceo, builtin } = await live();
+    const [acme] = await db.select().from(companies);
+    await db.update(companies).set({ template: 'studio' }).where(eq(companies.id, acme!.id));
+    await db.insert(departments).values({ companyId: acme!.id, name: null, templateKey: 'development', roleCode: 'DEV' });
+    expect((await start(app, ceo)).json()).toEqual({ started: true });
+    expect((await nextRun(builtin)).prompt).toBe(FIRST_TURN_TEMPLATE);
+    expect((await start(app, ceo)).json()).toEqual({ started: false });
   });
 
   it('keeps what the agent does, in order, and streams it to the CEO', async () => {

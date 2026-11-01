@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { decryptSecret } from '../src/crypto/secrets.js';
-import { agents, companies, nodeCodes, people, publicLinks, subscriptions } from '../src/db/schema.js';
+import { eq } from 'drizzle-orm';
+import { agents, companies, departments, nodeCodes, people, publicLinks, subscriptions } from '../src/db/schema.js';
 import { setupCode } from '../src/modules/setup/code.js';
 import { fakeRelay } from './fake-relay.js';
 import { SETUP, TEST_API_KEY as KEY, TEST_SECRET, testApp } from './helpers.js';
@@ -47,6 +48,38 @@ describe('GET /api/setup/names/:name', () => {
     expect(relay.calls).toEqual(['GET /api/v1/names/acme', 'GET /api/v1/names/globex']);
     await app.inject({ method: 'POST', url: '/api/setup', payload: SETUP });
     expect((await app.inject({ url: `/api/setup/names/acme?code=${SETUP.code}` })).statusCode).toBe(409);
+  });
+});
+
+describe('POST /api/setup with a company template', () => {
+  it('creates the template departments and products with the company, and staffs none', async () => {
+    const { app, db } = await fresh();
+    const res = await app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, template: 'studio' } });
+    expect(res.statusCode).toBe(201);
+    const [company] = await db.select().from(companies);
+    expect(company!.template).toBe('studio');
+    const depts = await db.select().from(departments).where(eq(departments.companyId, company!.id));
+    /* Studio: operations, development, and development's three products under it. */
+    const top = depts.filter(d => !d.parentId);
+    expect(top.map(d => d.templateKey).sort()).toEqual(['development', 'operations']);
+    const dev = top.find(d => d.templateKey === 'development')!;
+    expect(depts.filter(d => d.parentId === dev.id).map(d => d.name).sort()).toEqual(['Product 1', 'Product 2', 'Product 3']);
+    /* A template brings no one, so the only agent is the orchestrator. */
+    expect((await db.select().from(agents).where(eq(agents.companyId, company!.id))).map(a => a.kind)).toEqual(['orchestrator']);
+  });
+
+  it('starts empty and stores no template when none is picked', async () => {
+    const { app, db } = await fresh();
+    await app.inject({ method: 'POST', url: '/api/setup', payload: SETUP });
+    const [company] = await db.select().from(companies);
+    expect(company!.template).toBeNull();
+    expect(await db.select().from(departments).where(eq(departments.companyId, company!.id))).toEqual([]);
+  });
+
+  it('refuses a template that is not one of the ready-made ones', async () => {
+    const { app } = await fresh();
+    const res = await app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, template: 'cafe' } });
+    expect(res.statusCode).toBe(400);
   });
 });
 

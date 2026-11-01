@@ -2,13 +2,13 @@ import { and, eq, inArray } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { departments, jobs } from '../../db/schema.js';
+import { companies, departments, jobs } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { agentFor } from '../agents/find.js';
 import { answerDirectly } from '../tasks/engine.js';
 import { wakeAll } from '../tasks/wake.js';
 import { listEvents } from '../events/store.js';
-import { FIRST_TURN, turnPrompt } from './prompt.js';
+import { FIRST_TURN, FIRST_TURN_TEMPLATE, turnPrompt } from './prompt.js';
 import { agentState, enqueueTurn, insertTurn, onAgent, pump } from './queue.js';
 import { cancelJob } from '../tasks/wake.js';
 
@@ -61,9 +61,11 @@ export function conversationRoutes(app: FastifyInstance, ctx: Ctx): void {
       if ((await listEvents(db, agent.id, 0, 1)).length) return false;
       const [open] = await db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, agent.id), eq(jobs.kind, 'conversation'), inArray(jobs.status, ['queued', 'running']))).limit(1);
       if (open) return false;
+      const [company] = await db.select({ template: companies.template }).from(companies).where(eq(companies.id, me.companyId)).limit(1);
       const [dept] = await db.select({ id: departments.id }).from(departments).where(eq(departments.companyId, me.companyId)).limit(1);
-      if (dept) return false;
-      await insertTurn(ctx, { companyId: me.companyId, agentId: agent.id, prompt: FIRST_TURN, createdBy: me.id });
+      /* A company built by hand gets no greeting (its build already enqueued a turn); one from a template is greeted so he offers to staff it. */
+      if (dept && !company?.template) return false;
+      await insertTurn(ctx, { companyId: me.companyId, agentId: agent.id, prompt: company?.template ? FIRST_TURN_TEMPLATE : FIRST_TURN, createdBy: me.id });
       return true;
     });
     /* Outside the agent's line, which the pump waits on. */

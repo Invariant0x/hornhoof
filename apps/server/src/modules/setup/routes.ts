@@ -1,3 +1,4 @@
+import { COMPANY_TEMPLATES, COMPANY_TEMPLATE_KEYS, DEPARTMENT_TEMPLATES } from '@hornhoof/protocol';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -5,13 +6,15 @@ import { hashPassword } from '../../auth/password.js';
 import { startSession } from '../../auth/session.js';
 import { encryptSecret } from '../../crypto/secrets.js';
 import { isUniqueViolation } from '../../db/errors.js';
-import { agents, companies, people, subscriptions } from '../../db/schema.js';
+import { agents, companies, departments, people, subscriptions } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { saveLink } from '../link/link.js';
 import { LinkBody } from '../link/routes.js';
 import { createNodeCode } from '../nodes/codes.js';
 import { installCommand } from '../nodes/command.js';
 import { isSetupCode, setupNeeded } from './code.js';
+
+const roleCodeOf = (template: string) => DEPARTMENT_TEMPLATES.find(t => t.key === template)!.roleCode;
 
 const DEFAULT_MODEL = 'claude-opus-5-5';
 const PLAN_LABELS = { claude: 'Claude', codex: 'Codex', kimi: 'Kimi', glm: 'GLM', antigravity: 'Antigravity' } as const;
@@ -32,6 +35,8 @@ const SetupBody = z.object({
   ]),
   /* The public link at hornhoof.org the company opens at, with a name or a random one; left out, none. */
   link: LinkBody.optional(),
+  /* A ready-made company to start from, which creates its departments right away; left out, the company starts empty. */
+  template: z.enum(COMPANY_TEMPLATE_KEYS).optional(),
 });
 const CodeQuery = z.object({ code: z.string().max(200).default('') });
 
@@ -74,7 +79,7 @@ export function setupRoutes(app: FastifyInstance, ctx: Ctx): void {
     let result;
     try {
       result = await db.transaction(async tx => {
-        const [company] = await tx.insert(companies).values({ name: body.companyName }).returning();
+        const [company] = await tx.insert(companies).values({ name: body.companyName, template: body.template ?? null }).returning();
         const [person] = await tx.insert(people).values({
           companyId: company!.id,
           name: body.name,
@@ -123,6 +128,23 @@ export function setupRoutes(app: FastifyInstance, ctx: Ctx): void {
           model: orchestratorModel(orchestrator),
           subscriptionId,
         });
+
+        /* A ready-made company starts with its departments and their products, so the CEO sees the scheme at once; the
+           orchestrator offers to staff them in its greeting. It brings no people, so no subscription is needed. */
+        const chosen = COMPANY_TEMPLATES.find(t => t.key === body.template);
+        if (chosen) {
+          let position = 0;
+          for (const dept of chosen.departments) {
+            const roleCode = roleCodeOf(dept.template);
+            const [row] = await tx
+              .insert(departments)
+              .values({ companyId: company!.id, templateKey: dept.template, name: dept.name ?? null, roleCode, position: position++ })
+              .returning({ id: departments.id });
+            for (const product of dept.products ?? []) {
+              await tx.insert(departments).values({ companyId: company!.id, name: product, parentId: row!.id, roleCode, position: position++ });
+            }
+          }
+        }
         if (bound) await saveLink(tx, config, company!.id, bound);
         return { company: company!, person: person!, code };
       });
