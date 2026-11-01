@@ -9,6 +9,7 @@ import { agents, companies, people, subscriptions } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { createNodeCode } from '../nodes/codes.js';
 import { installCommand } from '../nodes/command.js';
+import { isSetupCode, setupNeeded } from './code.js';
 
 const DEFAULT_MODEL = 'claude-opus-5-5';
 const PLAN_LABELS = { claude: 'Claude', codex: 'Codex', kimi: 'Kimi', glm: 'GLM' } as const;
@@ -16,6 +17,7 @@ const PLAN_LABELS = { claude: 'Claude', codex: 'Codex', kimi: 'Kimi', glm: 'GLM'
 const GLM_MODEL = 'glm-5.3';
 
 const SetupBody = z.object({
+  code: z.string().max(200).default(''),
   companyName: z.string().trim().min(1).max(80),
   name: z.string().trim().min(1).max(80),
   email: z.string().trim().toLowerCase().email(),
@@ -39,15 +41,14 @@ function orchestratorModel(orchestrator: Orchestrator): string {
 const alreadySetUp = () => new ApiError(409, 'conflict', 'This Hornhoof is already set up.', 'already_set_up');
 
 export function setupRoutes(app: FastifyInstance, { db, config }: Deps): void {
-  app.get('/api/setup', async () => {
-    const [company] = await db.select({ id: companies.id }).from(companies).limit(1);
-    return { needed: !company };
-  });
+  app.get('/api/setup', async () => ({ needed: await setupNeeded(db) }));
 
   app.post('/api/setup', async (req, reply) => {
     const body = SetupBody.parse(req.body);
-    const [existing] = await db.select({ id: companies.id }).from(companies).limit(1);
-    if (existing) throw alreadySetUp();
+    if (!(await setupNeeded(db))) throw alreadySetUp();
+    if (!isSetupCode(config.secret, body.code)) {
+      throw new ApiError(403, 'forbidden', 'This setup code is not right. Open the setup link from the server log.', 'setup_code');
+    }
 
     const passwordHash = await hashPassword(body.password);
     const { orchestrator } = body;

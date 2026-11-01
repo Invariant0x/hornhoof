@@ -588,7 +588,7 @@ sweep_nodes() {
 }
 
 server_mode() {
-  local env_file url public port local_url project i=0
+  local env_file url public port local_url project link i=0
   local -a compose
   detect_system
   if [ -z "$FROM_UPDATER" ]; then ensure_docker; fi
@@ -670,7 +670,14 @@ server_mode() {
     [ "$i" -lt 60 ] || fail "Hornhoof did not answer within 2 minutes. Run docker compose logs app in $SERVER_DIR to see why."
     sleep 2
   done
-  say "Hornhoof is running. Open $public to set it up."
+  # Whoever opens a new server first would become its owner, so it sets up only through the link with its setup code,
+  # which only the server can tell. A server set up already, or one from before setup codes, gives no link.
+  link=$(cd "$SERVER_DIR" && "${compose[@]}" exec -T app node apps/server/dist/cli.js setup-link 2> /dev/null | tail -n 1 || true)
+  case "$link" in
+    *[[:space:]]*) say "Hornhoof is running at $public." ;;
+    http://*/setup\?code=* | https://*/setup\?code=*) say "Hornhoof is running. Open this link to set it up: $link" ;;
+    *) say "Hornhoof is running at $public." ;;
+  esac
 }
 
 # --- Start --------------------------------------------------------------------------------------

@@ -13,10 +13,13 @@ import { loadConfig, type Config } from '../src/config.js';
 import { agentRole, grantsFor, type AgentSql } from '../src/db/agent-sql.js';
 import { MIGRATIONS, type Db } from '../src/db/client.js';
 import * as schema from '../src/db/schema.js';
+import { setupCode } from '../src/modules/setup/code.js';
 
 export const TEST_SECRET = Buffer.alloc(32, 7).toString('base64');
 export const TEST_API_KEY = 'sk-ant-api03-test-key-9f3a';
 export const SETUP = {
+  /* The code from the setup link the server logs while no company exists. */
+  code: setupCode(Buffer.from(TEST_SECRET, 'base64')),
   companyName: 'Acme',
   name: 'Ivan',
   email: ' Ivan@Acme.com ',

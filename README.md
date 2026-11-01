@@ -19,7 +19,7 @@ echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)" >> .env
 docker compose up -d --build
 ```
 
-Open http://localhost:8080 and follow the setup: name your company, create your account and connect the orchestrator's subscription.
+Hornhoof writes a setup link to its log, like `http://localhost:8080/setup?code=...`. Find it with `docker compose logs app` (or print it with `docker compose exec app node apps/server/dist/cli.js setup-link`), open it and follow the setup: name your company, create your account and connect the orchestrator's subscription. Until a company is set up, only that link sets it up, so nobody else who reaches the port first can make the company their own.
 
 Keep `.env` safe. `HORNHOOF_SECRET` encrypts the API keys stored in the database, and without it they cannot be read back. `NODE_KEY` lets the built-in node, which runs the company's API keys, connect to Hornhoof. `POSTGRES_PASSWORD` becomes the database's password when the database is first made, so keep it as it is afterwards.
 
@@ -37,7 +37,7 @@ On a Linux or macOS server:
 curl -fsSL https://raw.githubusercontent.com/Invariant0x/hornhoof/main/scripts/install.sh | bash -s -- server
 ```
 
-It installs Docker if it is missing (Colima through Homebrew on macOS), puts `compose.yaml` and a `.env` with fresh secrets into `~/hornhoof`, asks for the address people will open Hornhoof at, then downloads the images and starts them. Run it again to update; it keeps the existing `.env`. A Colima it sets up gets all of the Mac's processors and three quarters of its memory, and every node gets 2 GB of shared memory for the browsers agents run.
+It installs Docker if it is missing (Colima through Homebrew on macOS), puts `compose.yaml` and a `.env` with fresh secrets into `~/hornhoof`, asks for the address people will open Hornhoof at, then downloads the images, starts them and shows the link that sets Hornhoof up. Run it again to update; it keeps the existing `.env`. A Colima it sets up gets all of the Mac's processors and three quarters of its memory, and every node gets 2 GB of shared memory for the browsers agents run.
 
 ### Several companies on one computer
 

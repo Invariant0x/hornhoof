@@ -1,7 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { decryptSecret } from '../src/crypto/secrets.js';
 import { agents, companies, nodeCodes, people, subscriptions } from '../src/db/schema.js';
-import { SETUP, TEST_API_KEY as KEY, testApp } from './helpers.js';
+import { setupCode } from '../src/modules/setup/code.js';
+import { SETUP, TEST_API_KEY as KEY, TEST_SECRET, testApp } from './helpers.js';
+
+describe('setup code', () => {
+  it('stays the same for a server across restarts and differs between servers', () => {
+    const secret = Buffer.from(TEST_SECRET, 'base64');
+    expect(setupCode(secret)).toMatch(/^[A-Za-z0-9_-]{24}$/);
+    expect(setupCode(Buffer.from(TEST_SECRET, 'base64'))).toBe(setupCode(secret));
+    expect(setupCode(Buffer.alloc(32, 8))).not.toBe(setupCode(secret));
+    /* It says nothing about the secret it comes from. */
+    expect(setupCode(secret)).not.toContain(TEST_SECRET.slice(0, 8));
+  });
+});
 
 describe('GET /api/setup', () => {
   it('says setup is needed until a company exists', async () => {
@@ -106,6 +118,23 @@ describe('POST /api/setup', () => {
     const res = await app.inject({ method: 'POST', url: '/api/setup', payload: SETUP });
     expect(res.statusCode).toBe(409);
     expect(res.json().error.code).toBe('conflict');
+    const { code: _, ...withoutCode } = SETUP;
+    expect((await app.inject({ method: 'POST', url: '/api/setup', payload: withoutCode })).statusCode).toBe(409);
+  });
+
+  /* The port is open to everyone, so whoever opens a fresh Hornhoof first must not become its owner. */
+  it('sets up only with the code from the setup link', async () => {
+    const { app, db } = await testApp();
+    const { code, ...withoutCode } = SETUP;
+    for (const payload of [withoutCode, { ...SETUP, code: '' }, { ...SETUP, code: 'x'.repeat(code.length) }, { ...SETUP, code: `${code}x` }]) {
+      const res = await app.inject({ method: 'POST', url: '/api/setup', payload });
+      expect(res.statusCode).toBe(403);
+      expect(res.json().error).toMatchObject({ code: 'forbidden', reason: 'setup_code' });
+      expect(res.headers['set-cookie']).toBeUndefined();
+    }
+    expect(await db.select().from(companies)).toEqual([]);
+    expect(await db.select().from(people)).toEqual([]);
+    expect((await app.inject({ method: 'POST', url: '/api/setup', payload: SETUP })).statusCode).toBe(201);
   });
 
   it('creates one company when two setups race', async () => {

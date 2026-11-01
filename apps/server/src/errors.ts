@@ -11,6 +11,7 @@ export type ErrorReason =
   | 'company_scope_only'
   | 'wrong_password'
   | 'already_set_up'
+  | 'setup_code'
   | 'invite_unknown'
   | 'invite_used'
   | 'email_taken'

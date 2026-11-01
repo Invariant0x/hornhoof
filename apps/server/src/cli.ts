@@ -5,8 +5,9 @@ import { loadConfig, type Config } from './config.js';
 import { createDb, type Db } from './db/client.js';
 import { people } from './db/schema.js';
 import { reinvite } from './modules/people/routes.js';
+import { setupLink } from './modules/setup/code.js';
 
-const USAGE = 'Usage: node apps/server/dist/cli.js owner-link';
+const USAGE = 'Usage: node apps/server/dist/cli.js owner-link | setup-link';
 
 type Deps = { db: Db; config: Config; print: (line: string) => void };
 
@@ -24,8 +25,16 @@ async function ownerLink({ db, config, print }: Deps): Promise<number> {
   return 0;
 }
 
+/* The link with the code that sets a fresh Hornhoof up, alone on its line so install.sh can show it. */
+async function printSetupLink({ db, config, print }: Deps): Promise<number> {
+  const link = await setupLink(db, config);
+  print(link ?? 'Hornhoof is set up already.');
+  return link ? 0 : 1;
+}
+
 export async function runCli(args: string[], deps: Deps): Promise<number> {
   if (args[0] === 'owner-link') return ownerLink(deps);
+  if (args[0] === 'setup-link') return printSetupLink(deps);
   deps.print(USAGE);
   return 1;
 }

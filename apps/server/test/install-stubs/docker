@@ -16,6 +16,11 @@ case "$1" in
   cp) case "$2" in *:/app/compose.yaml) echo 'services: {}' > "$3" ;; esac ;;
   image) [ "${STUB_IMAGE_LOCAL:-0}" = 1 ] || exit 1 ;;
   # STUB_CONTAINERS words are "name" or "name=server", the server label of a node.
+  # The server's own command line in its container: STUB_SETUP_LINK is the setup link of a server not set up yet.
+  compose)
+    case "$*" in
+      *'/cli.js setup-link') if [ -n "${STUB_SETUP_LINK:-}" ]; then echo "$STUB_SETUP_LINK"; else echo 'Hornhoof is set up already.'; exit 1; fi ;;
+    esac ;;
   ps) for n in ${STUB_CONTAINERS:-}; do name=${n%%=*}; server=''; case "$n" in *=*) server=${n#*=} ;; esac; echo "$name id-of-$name $server"; done ;;
   run)
     WORD=set-key; if has "$@"; then IFS= read -r line; printf 'stdin %s\n' "$line" >> "$STUB_LOG"; fi

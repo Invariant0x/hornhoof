@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Setup } from '../src/screens/Setup';
 import { mockApi } from './api-mock';
 
@@ -16,6 +16,9 @@ async function fillFirstTwoSteps(user: ReturnType<typeof userEvent.setup>, passw
 }
 
 describe('Setup', () => {
+  /* The server logs the setup link, and the link carries the code. */
+  beforeEach(() => window.history.replaceState(null, '', '/setup?code=LINK-CODE-123'));
+
   it('keeps Next disabled until the company has a name', async () => {
     const user = userEvent.setup();
     render(<Setup onDone={() => {}} />);
@@ -50,6 +53,7 @@ describe('Setup', () => {
       method: 'POST',
       path: '/api/setup',
       body: {
+        code: 'LINK-CODE-123',
         companyName: 'Acme',
         name: 'Ivan',
         email: 'ivan@acme.com',
@@ -110,6 +114,24 @@ describe('Setup', () => {
     expect(calls[0]!.body).toMatchObject({ orchestrator: { mode: 'personal', provider: 'glm' } });
   });
 
+  it('takes the setup code from the link without asking for it', () => {
+    render(<Setup onDone={() => {}} />);
+    expect(screen.queryByLabelText('Setup code')).not.toBeInTheDocument();
+  });
+
+  it('goes back to the setup code when the server refuses it', async () => {
+    mockApi({ 'POST /api/setup': [403, { error: { code: 'forbidden', message: 'This setup code is not right.', reason: 'setup_code' } }] });
+    const user = userEvent.setup();
+    render(<Setup onDone={() => {}} />);
+    await fillFirstTwoSteps(user);
+    await user.click(screen.getByRole('radio', { name: 'Later' }));
+    await user.click(screen.getByRole('button', { name: 'Finish setup' }));
+    expect(await screen.findByRole('heading', { name: 'Name your company' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Setup code')).toHaveValue('LINK-CODE-123');
+    expect(screen.getByText('This setup code is not right. Open the setup link the installer showed, or take the code from the server log.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Company name')).toHaveValue('Acme');
+  });
+
   it('shows the server message when setup fails', async () => {
     mockApi({ 'POST /api/setup': [409, { error: { code: 'conflict', message: 'This Hornhoof is already set up.' } }] });
     const user = userEvent.setup();
@@ -118,5 +140,25 @@ describe('Setup', () => {
     await user.click(screen.getByRole('radio', { name: 'Later' }));
     await user.click(screen.getByRole('button', { name: 'Finish setup' }));
     expect(await screen.findByText('This Hornhoof is already set up.')).toBeInTheDocument();
+  });
+});
+
+describe('Setup without the setup link', () => {
+  it('asks for the setup code before anything else and sends it', async () => {
+    const calls = mockApi({ 'POST /api/setup': [201, CREATED] });
+    const user = userEvent.setup();
+    render(<Setup onDone={() => {}} />);
+    expect(screen.getByText(/The code is also in the server log/)).toBeInTheDocument();
+    await user.type(screen.getByLabelText('Company name'), 'Acme');
+    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
+    await user.type(screen.getByLabelText('Setup code'), ' TYPED-CODE ');
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    await user.type(screen.getByLabelText('Your name'), 'Ivan');
+    await user.type(screen.getByLabelText('Email'), 'ivan@acme.com');
+    await user.type(screen.getByLabelText('Password'), 'correct horse battery');
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    await user.click(screen.getByRole('radio', { name: 'Later' }));
+    await user.click(screen.getByRole('button', { name: 'Finish setup' }));
+    expect(calls[0]!.body).toMatchObject({ code: 'TYPED-CODE', companyName: 'Acme' });
   });
 });

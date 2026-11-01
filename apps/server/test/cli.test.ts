@@ -31,6 +31,17 @@ describe('cli', () => {
     expect((await login(SETUP.password)).statusCode).toBe(401);
   });
 
+  it('setup-link prints the link that sets a fresh Hornhoof up, and only until it is set up', async () => {
+    const { app, db, config } = await testApp({ PUBLIC_URL: 'https://hq.acme.com' });
+    const res = await cli(['setup-link'], { db, config });
+    expect(res.code).toBe(0);
+    expect(res.out).toBe(`https://hq.acme.com/setup?code=${SETUP.code}`);
+    await setUpCompany(app);
+    const after = await cli(['setup-link'], { db, config });
+    expect(after.code).toBe(1);
+    expect(after.out).toBe('Hornhoof is set up already.');
+  });
+
   it('owner-link explains that a fresh Hornhoof has no owner yet', async () => {
     const { db, config } = await testApp();
     const res = await cli(['owner-link'], { db, config });

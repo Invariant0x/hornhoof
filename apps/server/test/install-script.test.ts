@@ -344,7 +344,22 @@ describe('install.sh', () => {
     writeFileSync(join(dir, '.env'), 'HORNHOOF_SECRET=keep-me\n');
     const r = install({ args: ['server'], env: { HORNHOOF_DIR: dir } });
     expect(r.code).toBe(0);
-    expect(r.out).toContain('Hornhoof is running. Open http://localhost:8080 to set it up.');
+    expect(r.out).toContain('Hornhoof is running at http://localhost:8080.');
+  });
+
+  /* Whoever opens a new server first would become its owner, so only the link with its setup code sets it up. */
+  it('shows the setup link the new server gives, once it answers', () => {
+    const link = 'https://hornhoof.my.test/setup?code=Ab3_d-Ef0123456789abcdef';
+    const r = install({ args: ['server', '--name', 'acme'], tty: 'https://hornhoof.my.test\n', env: { STUB_SETUP_LINK: link } });
+    expect(r.code).toBe(0);
+    const ask = indexOf(r.calls, 'docker compose -p hornhoof-acme exec -T app node apps/server/dist/cli.js setup-link');
+    expect(ask).toBeGreaterThan(r.calls.findIndex(c => c.startsWith('curl') && c.includes('/api/health')));
+    expect(r.out).toContain(`Hornhoof is running. Open this link to set it up: ${link}`);
+    for (const other of ['Usage: node apps/server/dist/cli.js owner-link', 'https://evil.test/ x/setup?code=1']) {
+      const odd = install({ args: ['server'], tty: '\n', env: { STUB_SETUP_LINK: other } });
+      expect(odd.out).not.toContain('Open this link');
+      expect(odd.out).toContain('Hornhoof is running at http://localhost:8080.');
+    }
   });
 
   it('takes localhost when Enter is pressed for the address', () => {
@@ -417,7 +432,7 @@ describe('install.sh', () => {
     expect(existsSync(join(r.dir, 'home', 'hornhoof', '.env'))).toBe(false);
     expect(r.calls).toContain('docker compose -p hornhoof-acme pull');
     expect(r.calls).toContain('docker compose -p hornhoof-acme up -d --no-build');
-    expect(r.out).toContain('Open http://localhost:8081 to set it up.');
+    expect(r.out).toContain('Hornhoof is running at http://localhost:8081.');
   });
 
   it('keeps the folder and port of a named server on the next run', () => {
@@ -427,7 +442,7 @@ describe('install.sh', () => {
     expect(again.code).toBe(0);
     expect(again.out).toContain('Keeping the settings');
     expect(readFileSync(join(home, 'hornhoof-acme', '.env'), 'utf8')).toContain('HORNHOOF_PORT=8081');
-    expect(again.out).toContain('Open http://localhost:8081 to set it up.');
+    expect(again.out).toContain('Hornhoof is running at http://localhost:8081.');
   });
 
   it('leaves the port of another Hornhoof on this computer to it, even while it is stopped', () => {

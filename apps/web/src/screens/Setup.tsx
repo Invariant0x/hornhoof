@@ -1,5 +1,5 @@
 import { useId, useState, type FormEvent } from 'react';
-import { api } from '../api';
+import { api, ApiFailure } from '../api';
 import { errorText, useT } from '../i18n';
 import { PLAN_PROVIDERS, PROVIDER_NAMES, type PlanProvider } from '../providers';
 import { Card } from '../ui/Card';
@@ -12,11 +12,16 @@ type KeyProvider = 'anthropic_api' | 'openai_api';
 const MODES: Mode[] = ['api_key', 'personal', 'later'];
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+/* The setup link the server logs carries the code that lets this browser create the company. */
+const linkCode = () => new URLSearchParams(window.location.search).get('code')?.trim() ?? '';
+
 export function Setup({ onDone }: { onDone: (done: { welcome: boolean }) => void }) {
   const t = useT();
   const steps = t.setup.steps;
   const uid = useId();
   const [step, setStep] = useState(0);
+  const [code, setCode] = useState(linkCode);
+  const [askCode, setAskCode] = useState(() => !linkCode());
   const [companyName, setCompanyName] = useState('');
   const [name, setName] = useState('');
   const [title, setTitle] = useState('CEO');
@@ -33,6 +38,7 @@ export function Setup({ onDone }: { onDone: (done: { welcome: boolean }) => void
 
   function next(e: FormEvent) {
     e.preventDefault();
+    if (step === 0) setProblems({});
     if (step === 1) {
       const found: Record<string, string> = {};
       if (!EMAIL.test(email.trim())) found.email = t.setup.emailProblem;
@@ -55,6 +61,7 @@ export function Setup({ onDone }: { onDone: (done: { welcome: boolean }) => void
     setFailure('');
     try {
       const res = await api.post<{ command?: string }>('/api/setup', {
+        code: code.trim(),
         companyName: companyName.trim(),
         name: name.trim(),
         email: email.trim(),
@@ -65,7 +72,11 @@ export function Setup({ onDone }: { onDone: (done: { welcome: boolean }) => void
       if (res.command) setCommand(res.command);
       else onDone({ welcome: true });
     } catch (err) {
-      setFailure(errorText(t, err));
+      if (err instanceof ApiFailure && err.reason === 'setup_code') {
+        setAskCode(true);
+        setProblems({ code: errorText(t, err) });
+        setStep(0);
+      } else setFailure(errorText(t, err));
     } finally {
       setBusy(false);
     }
@@ -104,8 +115,13 @@ export function Setup({ onDone }: { onDone: (done: { welcome: boolean }) => void
           <Field label={t.setup.companyName}>
             {p => <input {...p} value={companyName} onChange={e => setCompanyName(e.target.value)} maxLength={80} autoFocus autoComplete="organization" />}
           </Field>
+          {askCode && (
+            <Field label={t.setup.code} problem={problems.code} hint={t.setup.codeHint}>
+              {p => <input {...p} value={code} onChange={e => setCode(e.target.value)} maxLength={200} autoComplete="off" spellCheck={false} />}
+            </Field>
+          )}
           <div className="actions">
-            <button className="btn" type="submit" disabled={!companyName.trim()}>{t.common.next}</button>
+            <button className="btn" type="submit" disabled={!companyName.trim() || (askCode && !code.trim())}>{t.common.next}</button>
           </div>
         </form>
       )}
