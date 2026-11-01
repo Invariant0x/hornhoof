@@ -31,7 +31,7 @@ import { attachmentRoutes } from './modules/tasks/attachments.js';
 import { taskRoutes } from './modules/tasks/routes.js';
 import { TerminalRelay } from './modules/terminals/relay.js';
 import { terminalRoutes } from './modules/terminals/routes.js';
-import { hasWebApp, serveWebApp, webAppRoutes } from './web.js';
+import { addSecurityHeaders, hasWebApp, serveWebApp, webAppRoutes } from './web.js';
 
 export type { Db } from './db/client.js';
 import { fromOwnPages } from './auth/origin.js';
@@ -55,6 +55,7 @@ declare module 'fastify' {
 export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   const app = Fastify({ logger: deps.logger ?? false, disableRequestLogging: true });
   const web = hasWebApp(deps.config.webDist);
+  addSecurityHeaders(app);
   registerErrorHandling(app, web ? webAppRoutes : undefined);
   const ctx = { ...deps, log: app.log, bus: new EventBus(), terminals: new TerminalRelay() } as Ctx;
   app.decorate('ctx', ctx);

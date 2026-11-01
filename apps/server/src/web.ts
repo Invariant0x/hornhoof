@@ -8,6 +8,33 @@ const LONG_CACHE = 'public, max-age=31536000, immutable';
 
 export const hasWebApp = (dir: string): boolean => existsSync(join(dir, 'index.html'));
 
+/* No other site may show Hornhoof inside its own page, where a person could be tricked into clicking, and browsers take
+   every response as the type it is sent with instead of guessing. The built app runs only its own script files, so an
+   injected script does not run. Styles may be inline because the terminal adds its own style tags, the bundled fonts
+   and the tab icon are data: addresses, and the terminal's live line is a WebSocket to this same server. */
+const SECURITY_HEADERS = {
+  'x-frame-options': 'DENY',
+  'content-security-policy': [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data:",
+    "font-src 'self' data:",
+    "connect-src 'self' ws: wss:",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+  ].join('; '),
+  'x-content-type-options': 'nosniff',
+};
+
+export function addSecurityHeaders(app: FastifyInstance): void {
+  app.addHook('onRequest', async (_req, reply) => {
+    reply.headers(SECURITY_HEADERS);
+  });
+}
+
 /* Serves the built web app. Vite puts hashed files in assets/, so those can be cached for a year. */
 export async function serveWebApp(app: FastifyInstance, dir: string): Promise<void> {
   await app.register(fastifyStatic, {

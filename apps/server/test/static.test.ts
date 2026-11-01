@@ -42,6 +42,17 @@ describe('web app serving', () => {
     expect((await app.inject({ method: 'POST', url: '/people' })).statusCode).toBe(404);
   });
 
+  it('tells browsers not to show Hornhoof inside another page or guess what a file is', async () => {
+    const { app } = await testApp({ WEB_DIST: fakeDist() });
+    for (const url of ['/', '/people', '/assets/app-1a2b.js', '/api/health', '/api/nope']) {
+      const res = await app.inject({ url, headers: { accept: 'text/html' } });
+      expect(res.headers['x-frame-options']).toBe('DENY');
+      expect(res.headers['content-security-policy']).toContain("frame-ancestors 'none'");
+      expect(res.headers['content-security-policy']).toContain("script-src 'self';");
+      expect(res.headers['x-content-type-options']).toBe('nosniff');
+    }
+  });
+
   it('works without a built web app', async () => {
     const { app } = await testApp({ WEB_DIST: join(tmpdir(), 'hornhoof-no-such-dir') });
     const res = await app.inject({ url: '/people', headers: { accept: 'text/html' } });
