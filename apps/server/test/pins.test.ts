@@ -36,6 +36,8 @@ describe('what the build runs', () => {
       'image: ${HORNHOOF_APP_REF:-ghcr.io/invariant0x/hornhoof:latest}',
       expect.stringMatching(/^image: postgres:/),
       'image: ${HORNHOOF_NODE_REF:-ghcr.io/invariant0x/hornhoof-node:latest}',
+      /* The tunnel runs the app's own image, so it moves with the app. */
+      'image: ${HORNHOOF_APP_REF:-ghcr.io/invariant0x/hornhoof:latest}',
       'image: ${HORNHOOF_UPDATER_REF:-ghcr.io/invariant0x/hornhoof-updater:latest}',
     ]);
   });
