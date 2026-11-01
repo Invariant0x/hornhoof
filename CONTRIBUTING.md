@@ -98,6 +98,10 @@ git commit -s -m "Show the machine an employee runs on"
 
 It uses the name and email in your git settings. Forgot it? `git commit --amend -s` fixes the last commit, and `git rebase --signoff main` fixes all of them on your branch, before review starts.
 
+## Your contribution's licence
+
+Hornhoof is under the [MIT License](LICENSE). By sending a pull request you agree that your change is published under it too.
+
 ## Working with AI agents
 
 Using an AI agent to write your change is fine; Hornhoof itself is built with many. Point your agent to [AGENTS.md](AGENTS.md). You still answer for the pull request: read every line, run it, and make sure the tests prove what it claims. Leave the agent's "Generated with" and co-author lines out of commits.

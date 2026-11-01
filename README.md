@@ -290,3 +290,9 @@ If people will open Hornhoof from other machines, the simplest way is a link at 
 Errors go to the container log: `docker compose logs app`.
 
 If the owner forgets the password, run `docker compose exec app node apps/server/dist/cli.js owner-link` next to `compose.yaml`. It prints a one-time link that works for 7 days and sets a new password. The old password and open sessions stop working at once.
+
+## License
+
+Hornhoof is free and open source under the [MIT License](LICENSE). Copyright (c) 2026 Ivan Korol.
+
+The templates in `templates/` and the programs every node carries come from projects with their own licences, which `templates/SOURCES.md` lists.

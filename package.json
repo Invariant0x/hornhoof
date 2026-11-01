@@ -1,6 +1,8 @@
 {
   "name": "hornhoof",
   "version": "0.5.0",
+  "license": "MIT",
+  "author": "Ivan Korol",
   "private": true,
   "type": "module",
   "workspaces": [

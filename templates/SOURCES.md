@@ -2,7 +2,7 @@
 
 Every role and skill text in this folder is written for Hornhoof, with one exception: dev-engineering-rules is unclebob/ub-mode's SKILL.md word for word, as its README asks people to copy it, with a short note on how Hornhoof runs its tools. No other text in this folder is copied from the sources below; they taught us what a role does and which steps a procedure needs. Outside this folder, every node also carries obra/superpowers whole, word for word with its licence, as its row says. Each skill names its sources in its `sources` field as `<repo> <path>`.
 
-The list at the end names every template, what it learned from and its licence. Hornhoof in the licence column means the text is Hornhoof's own and falls under this repository's licence. A skill that names no source is a procedure of Hornhoof itself, such as its task flow, an approval step or work in a second language. A role is a short prompt in the shape paperclipai/paperclip uses, and its skills carry the sources of what it does.
+The list at the end names every template, what it learned from and its licence. Hornhoof in the licence column means the text is Hornhoof's own and falls under this repository's licence, MIT. A skill that names no source is a procedure of Hornhoof itself, such as its task flow, an approval step or work in a second language. A role is a short prompt in the shape paperclipai/paperclip uses, and its skills carry the sources of what it does.
 
 | Source | Licence | What we learned from it |
 |---|---|---|
