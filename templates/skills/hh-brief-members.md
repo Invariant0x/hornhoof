@@ -15,4 +15,4 @@ A member knows only what your brief says. Write it once, so they need nothing el
 - **Already ruled out**: what you tried or decided, so they do not redo it.
 - **Neighbours**: who works on the other pieces, so they ask each other directly.
 
-Do not rewrite it later: answer questions with message_employee, and add an answer that unblocks the task to its body, leaving the rest as written. Pick the member whose role fits; do not hand review to the author or a gate to the one who did the work. Give hard thinking (plans, security, money) to deep-tier employees and routine work to fast ones. Do not pass along your own guess as a fact; if you have a hypothesis, label it as one.
+Answer later questions with "comment" on the task, which opens a blocked one again; change the body only when the goal itself changes. Pick the member whose role fits; do not hand review to the author or a gate to the one who did the work. Give hard thinking (plans, security, money) to deep-tier employees and routine work to fast ones. Do not pass along your own guess as a fact; if you have a hypothesis, label it as one.

@@ -214,11 +214,13 @@ describe('templates', () => {
     expect(body('hh-break-down')).not.toMatch(/a few hours of work/);
   });
 
-  it('has heads give out big pieces at once, answer without rewriting briefs and leave the work and the status to others', () => {
+  it('has heads give out big pieces at once, answer in comments and leave the work and the status to others', () => {
     const body = (id: string) => templates.skills.get(id)!.body;
     for (const id of ['hh-lead-tasks', 'hh-break-down']) expect(body(id), id).toMatch(/two to four/);
     for (const id of ['hh-lead-tasks', 'hh-brief-members']) expect(body(id), id).toMatch(/once/);
-    for (const id of ['hh-lead-tasks', 'hh-brief-members', 'hh-handle-reports']) expect(body(id), id).toMatch(/leaving the rest as written/);
+    /* A comment by whoever gave a blocked task out opens it again and wakes its executor, so a body is written once. */
+    for (const id of ['hh-lead-tasks', 'hh-brief-members', 'hh-handle-reports']) expect(body(id), id).toMatch(/"comment"/);
+    for (const id of ['hh-lead-tasks', 'hh-brief-members']) expect(body(id), id).toMatch(/only when the goal (itself )?changes/);
     expect(body('hh-lead-tasks')).not.toMatch(/rewrite the body as the current truth/);
     expect(body('hh-lead-tasks')).toMatch(/switches off members with no work in the turn/);
     expect(body('hh-lead-tasks')).toMatch(/notebook only when something it holds changes/);
