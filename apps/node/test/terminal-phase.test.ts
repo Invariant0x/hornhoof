@@ -23,9 +23,23 @@ const AGENT = '00000000-0000-4000-8000-000000000075';
 const SESSION = 'synthetic-phase-session';
 const CANARY = 'synthetic-phase-secret-0123456789';
 const fixtures: { host: TerminalHost; root: string }[] = [];
+type Pane = { dead: boolean; queryFails: boolean; screen: string; paste: number; enter: number };
 
 async function advance(ms: number): Promise<void> {
   for (let elapsed = 0; elapsed < ms; elapsed += 25) await vi.advanceTimersByTimeAsync(Math.min(25, ms - elapsed));
+}
+
+function mockPane(tmux: Tmux, pane: Pane): void {
+  vi.spyOn(tmux, 'run').mockImplementation(async (args: string[]) => {
+    if (args[0] === 'display-message' && args.includes('#{pane_dead}')) {
+      if (pane.queryFails) throw new Error(CANARY);
+      return pane.dead ? '1\n' : '0\n';
+    }
+    if (args[0] === 'capture-pane') return pane.screen;
+    if (args[0] === 'paste-buffer') pane.paste++;
+    if (args[0] === 'send-keys' && args.includes('Enter')) pane.enter++;
+    return '';
+  });
 }
 
 function fixture(screen: string, kind: 'kimi' | 'codex' = 'kimi') {
@@ -41,16 +55,7 @@ function fixture(screen: string, kind: 'kimi' | 'codex' = 'kimi') {
   rememberSession(root, SESSION, workDir);
   const pane = { dead: false, queryFails: false, screen, paste: 0, enter: 0 };
   const tmux = new Tmux({ socket: 'isolated-phase-run-stub', env: { PATH: 'fixture-only' } });
-  vi.spyOn(tmux, 'run').mockImplementation(async (args: string[]) => {
-    if (args[0] === 'display-message' && args.includes('#{pane_dead}')) {
-      if (pane.queryFails) throw new Error(CANARY);
-      return pane.dead ? '1\n' : '0\n';
-    }
-    if (args[0] === 'capture-pane') return pane.screen;
-    if (args[0] === 'paste-buffer') pane.paste++;
-    if (args[0] === 'send-keys' && args.includes('Enter')) pane.enter++;
-    return '';
-  });
+  mockPane(tmux, pane);
   const events: AgentEvent[] = [];
   const messages: NodeMessage[] = [];
   const host = new TerminalHost({ tmux, hornhoof: 'http://127.0.0.1:9', send: m => messages.push(m), secrets: () => [CANARY], readyMs: 2000, pollMs: 25, enterWaitMs: 100, toolsMs: 100 });
@@ -65,9 +70,9 @@ function fixture(screen: string, kind: 'kimi' | 'codex' = 'kimi') {
   const job: Extract<ServerMessage, { type: 'job.run' }> = {
     type: 'job.run', jobId: JOB, subscriptionId: 'synthetic', provider: kind, prompt: 'synthetic prompt', sessionId: SESSION, model: null, timeoutMs: 60_000, secret: null, instructions: null, toolToken: null, workspace: { key: AGENT, repo: null },
   };
-  const run = (over: Partial<typeof job> = {}) => {
+  const run = (over: Partial<typeof job> = {}, signal?: AbortSignal) => {
     const message = { ...job, ...over };
-    return runJob(adapter(message.jobId), message, root, { untimed: true, onEvent: e => events.push(e) });
+    return runJob(adapter(message.jobId), message, root, { untimed: true, signal, onEvent: e => events.push(e) });
   };
   const appendWire = (value: unknown) => appendFileSync(wire, `${JSON.stringify(value)}\n`);
   return { root, home, host, pane, job, events, messages, wire, run, appendWire };
@@ -332,5 +337,42 @@ describe('durable current terminal attempt', () => {
     expect(await pending).toMatchObject({ ok: false, error: 'agent_failed' });
     expect(test.pane).toMatchObject({ paste: 0, enter: 0 });
     expect(snapshots(test.root).at(-1)).toMatchObject({ finish: 'ready_deadline', waits: { ready: { budgetMs: 2000, result: 'deadline', startedAtUtc: '2026-11-01T00:00:00.000Z', endedAtUtc: '2026-11-01T00:00:02.500Z' } } });
+  });
+
+  it('keeps the original accept deadline and Enter count when persistence exhausts its budget', async () => {
+    const test = fixture('context: 42%');
+    let delayed = false;
+    vi.mocked(writeSync).mockImplementation((fd: number, data: unknown) => {
+      if (!Buffer.isBuffer(data)) throw new Error('Expected bounded record bytes.');
+      const record: unknown = JSON.parse(data.toString());
+      if (!delayed && isRecord(record) && record.phase === 'accept' && record.event === 'wait_start') {
+        delayed = true; vi.setSystemTime(Date.now() + 2500);
+      }
+      return nativeFs.writeSync(fd, data);
+    });
+    let finished = false;
+    const pending = test.run().then(done => { finished = true; return done; });
+    for (let tick = 0; tick < 100 && !finished; tick++) await advance(25);
+    expect(delayed && finished).toBe(true);
+    expect(await pending).toMatchObject({ ok: false, error: 'agent_failed' });
+    expect(test.pane).toMatchObject({ paste: 1, enter: 1 });
+    const record = snapshots(test.root).at(-1);
+    expect(record).toMatchObject({ finish: 'accept_deadline', waits: { accept: { budgetMs: 2000, result: 'deadline' } } });
+    if (!isRecord(record) || !isRecord(record.waits) || !isRecord(record.waits.accept)) throw new Error('Expected the actual accept wait.');
+    const wait = record.waits.accept;
+    const elapsed = Date.parse(String(wait.endedAtUtc)) - Date.parse(String(wait.startedAtUtc));
+    expect(elapsed).toBeGreaterThanOrEqual(2500);
+    expect(elapsed).toBeLessThanOrEqual(2700);
+  });
+
+  it('preserves cancellation after accept and saves its branch before completion', async () => {
+    const test = fixture('context: 42%');
+    const controller = new AbortController();
+    const pending = test.run({}, controller.signal);
+    await acceptWire(test); controller.abort();
+    await advance(5300);
+    expect(await pending).toMatchObject({ ok: false, error: 'cancelled', result: 'Stopped.' });
+    expect(test.pane).toMatchObject({ paste: 1, enter: 1 });
+    expect(snapshots(test.root).at(-1)).toMatchObject({ phase: 'done', finish: 'cancelled', outcome: 'cancelled', waits: { done: { result: 'aborted' } } });
   });
 });

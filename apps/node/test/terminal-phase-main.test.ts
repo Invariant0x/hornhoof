@@ -82,6 +82,7 @@ describe('phase evidence through the existing node diagnostic path', () => {
     if (evidence) {
       mkdirSync(evidence, { recursive: true, mode: 0o700 });
       const files: Record<string, string> = { 'synthetic-record.json': records.at(-1)!, 'synthetic-delivery.json': JSON.stringify({ diagnostic, done, diagnosticBeforeDone: true, protocolAccepted: true, networkCalls: 0, fallbackCalls: 0 }, null, 2) + '\n' };
+      records.forEach((bytes, i) => { files[`synthetic-chain-${String(i + 1).padStart(4, '0')}.json`] = bytes; });
       const hashes: Record<string, string> = {};
       for (const [name, bytes] of Object.entries(files)) {
         writeFileSync(join(evidence, name), bytes, { mode: 0o600, flag: 'wx' });

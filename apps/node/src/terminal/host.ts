@@ -126,6 +126,11 @@ type Options = {
 
 const WAITING = 'This agent starts with its next turn.';
 const HOST_SOURCE_HASH = sourceHash(import.meta.url);
+
+function kimiChild(data: unknown): boolean {
+  return data !== null && typeof data === 'object' && 'agentId' in data && data.agentId !== 'main';
+}
+
 const STOP_WAIT_MS = 5000;
 /* How often the host presses Enter again for a prompt the program did not take. */
 const ENTER_TRIES = 3;
@@ -535,7 +540,7 @@ export class TerminalHost {
   private observeWire(a: Agent, phase: PhaseAttempt | undefined, before: number | null, after: number | null, data: unknown = null): boolean {
     const wire = a.phaseWire;
     if (!phase || !wire) return false;
-    if (a.program?.kind === 'kimi' && data && typeof data === 'object' && 'agentId' in data && data.agentId !== 'main') return false;
+    if (a.program?.kind === 'kimi' && kimiChild(data)) return false;
     return phase.wire({ source: wire.source, pathHash: phaseHash(wire.file), sessionHash: phaseHash(a.sessionId), sizeBefore: before, sizeAfter: after, recordType: data === null ? null : wireRecordType(data) });
   }
 

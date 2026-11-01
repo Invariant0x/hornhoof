@@ -233,6 +233,27 @@ describe('bounded durable terminal phase storage', () => {
     expect(JSON.stringify(phase)).toBe(closed);
   });
 
+  it('binds the first observed session without changing it or its age when another session arrives', () => {
+    const phase = attempt(root());
+    phase.launch(null, null, { goesOn: false, sameSession: false, hashMatch: false });
+    const started = phase.toJSON().startedAtUtc;
+    phase.session(null);
+    expect(phase.matchesSession('synthetic-session')).toBe(false);
+    phase.session('synthetic-session');
+    expect(phase.matchesSession('synthetic-session')).toBe(true);
+    phase.session('different-session');
+    expect(phase.matchesSession('different-session')).toBe(false);
+    expect(phase.toJSON()).toMatchObject({ startedAtUtc: started, sessionHash: phaseHash('synthetic-session'), gaps: { session: 'changed' } });
+  });
+
+  it.each(['wire', 'hook', null] as const)('keeps the observed %s completion branch distinct', source => {
+    const dir = root(); const phase = attempt(dir);
+    phase.waitStart('done', Date.now(), null);
+    if (source) phase.end(source, 'completed');
+    phase.completed(); phase.complete(true, false);
+    expect(JSON.parse(readFileSync(records(dir).at(-1)!, 'utf8'))).toMatchObject({ outcome: 'ok', finish: source === 'wire' ? 'wire_completed' : source === 'hook' ? 'hook_completed' : 'done_completed', endSource: source, waits: { done: { result: 'completed' } } });
+  });
+
   it('keeps a successful job successful and exposes a bounded gap when persistence fails', async () => {
     const dir = root();
     vi.mocked(fsyncSync).mockImplementation(() => { throw new Error(CANARY); });

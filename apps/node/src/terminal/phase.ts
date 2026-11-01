@@ -40,10 +40,8 @@ export function wireSize(file: string): number | null {
 
 export function wireRecordType(data: unknown): WireObservation['recordType'] {
   const value = data && typeof data === 'object' && 'type' in data ? data.type : null;
-  switch (value) {
-    case 'turn.prompt': case 'turn.ended': case 'prompt.completed': case 'context.append_loop_event': case 'event_msg': case 'session_meta': return value;
-    default: return 'other';
-  }
+  const known = ['turn.prompt', 'turn.ended', 'prompt.completed', 'context.append_loop_event', 'event_msg', 'session_meta'] as const;
+  return known.find(type => type === value) ?? 'other';
 }
 
 function nodeVersion(): string | null {
@@ -145,6 +143,14 @@ function linkOnce(stage: string, file: string, bytes: Buffer): void {
   }
 }
 
+function recordBytes(record: PhaseRecord): Buffer {
+  if (!record.attemptId || !UUID.test(record.attemptId)) throw new StoreFailure('identity_unavailable');
+  if (!Number.isSafeInteger(record.seq) || record.seq < 1 || record.seq > PHASE_RECORDS) throw new StoreFailure('record_limit');
+  const bytes = Buffer.from(JSON.stringify(record) + '\n');
+  if (bytes.length > PHASE_BYTES) throw new StoreFailure('size_limit');
+  return bytes;
+}
+
 /* Immutable snapshots: a complete file is fsynced before its name becomes visible. No record is overwritten. */
 export class PhaseStore {
   private readonly root: string;
@@ -158,10 +164,7 @@ export class PhaseStore {
     const fds: number[] = [];
     let ownStage: string | null = null;
     try {
-      if (!record.attemptId || !UUID.test(record.attemptId)) throw new StoreFailure('identity_unavailable');
-      if (!Number.isSafeInteger(record.seq) || record.seq < 1 || record.seq > PHASE_RECORDS) throw new StoreFailure('record_limit');
-      const bytes = Buffer.from(JSON.stringify(record) + '\n');
-      if (bytes.length > PHASE_BYTES) throw new StoreFailure('size_limit');
+      const bytes = recordBytes(record);
       const flags = constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW;
       const root = openSync(this.root, flags); fds.push(root);
       privateDirectory(root, false);
@@ -275,10 +278,14 @@ export class PhaseAttempt {
   }
 
   wire(observation: WireObservation): boolean {
-    if (this.record.finish || !this.record.sessionHash || observation.sessionHash !== this.record.sessionHash) return false;
-    if (!observation.pathHash || (this.record.wire && this.record.wire.pathHash !== observation.pathHash)) return false;
+    if (!this.acceptsWire(observation)) return false;
     this.record.wire = { source: observation.source, pathHash: observation.pathHash, sessionHash: observation.sessionHash, sizeBefore: count(observation.sizeBefore ?? -1), sizeAfter: count(observation.sizeAfter ?? -1), recordType: observation.recordType ?? this.record.wire?.recordType ?? null, cursorBefore: null, cursorAfter: null, cursorReason: 'not_exposed', nativeTurnHash: null, nativeTurnReason: 'not_exposed' };
     return true;
+  }
+
+  private acceptsWire(observation: WireObservation): boolean {
+    if (this.record.finish || !this.record.sessionHash || observation.sessionHash !== this.record.sessionHash) return false;
+    return Boolean(observation.pathHash) && (!this.record.wire || this.record.wire.pathHash === observation.pathHash);
   }
 
   pasted(): void { if (!this.record.finish) this.record.counts.paste = Math.min(1_000_000, this.record.counts.paste + 1); }
