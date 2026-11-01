@@ -1,13 +1,13 @@
-import { and, count, desc, eq, gte, inArray, isNull, lte, ne, notInArray, or, sql } from 'drizzle-orm';
+import { and, count, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, max, ne, notInArray, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { loggable } from '../../errors.js';
 import { agentChanges, agentEvents, agents, jobs, requests, subscriptions, taskEvents, tasks } from '../../db/schema.js';
-import { conversationOf, GONE_ALONG, insertTurn, limitUntil, liveSubscription, onAgent, openTypedTurn, orchestratorOf, pump } from '../conversation/queue.js';
+import { conversationOf, GONE_ALONG, insertTurn, limitUntil, liveSubscription, onAgent, openTypedTurn, orchestratorOf, pump, refusedLimits } from '../conversation/queue.js';
 import { sayLive } from '../conversation/live.js';
 import { quote } from '../conversation/prompt.js';
 import { appendEvent, publishWorking } from '../events/store.js';
 import { identityOf, type NodeIdentity } from '../nodes/hub.js';
-import { answerDirectly, CLOSED, GATE_ROUNDS, leaveWork, NOT_A_MOVE, openAfter, published, regateWaiting, silentTurn, taskSpot, wentOn, type Actor, type Task, type Wake, type WakeWhy } from './engine.js';
+import { answerDirectly, brokeDown, CLOSED, GATE_ROUNDS, leaveWork, NOT_A_MOVE, openAfter, published, regateWaiting, silentTurn, taskSpot, wentOn, type Actor, type Task, type Wake, type WakeWhy } from './engine.js';
 import { wakeQueued, wakesLeft } from './outbox.js';
 import { settle, tell } from './turns.js';
 
@@ -328,6 +328,43 @@ export async function checkLiveness(ctx: Ctx, jobId: string, carried: string[] =
   for (const task of held.values()) await checkHeld(ctx, { ...job, agentId: job.agentId, startedAt: job.startedAt }, task);
 }
 
+/* Turns that broke this soon after they started, this many in a row on one task, stop Hornhoof waking the agent there. */
+export const QUICK_CRASH_MS = 3 * 60_000;
+export const QUICK_CRASHES = 3;
+
+type Ended = Pick<typeof jobs.$inferSelect, 'status' | 'error' | 'startedAt' | 'finishedAt' | 'result' | 'tail'>;
+
+/* A turn that broke as it started: not one stopped on purpose or out of time, nor one the plan refused for its limit. */
+const crashed = (j: Ended) =>
+  j.status === 'failed' &&
+  !['timeout', 'cancelled', 'removed', 'switched_off', 'handed_on'].includes(j.error ?? '') &&
+  !!j.startedAt &&
+  !!j.finishedAt &&
+  j.finishedAt.getTime() - j.startedAt.getTime() < QUICK_CRASH_MS &&
+  !refusedLimits(`${j.result ?? ''}\n${j.tail}`, null);
+
+/* How many of the agent's last turns on the task broke as they started, in a row, of those that ended since the task last moved. */
+async function crashesInRow(ctx: Ctx, agentId: string, task: Task): Promise<number> {
+  const [moved] = await ctx.db
+    .select({ at: max(taskEvents.createdAt) })
+    .from(taskEvents)
+    .where(and(eq(taskEvents.taskId, task.id), notInArray(taskEvents.kind, [...NOT_A_MOVE])));
+  const rows = await ctx.db
+    .select({ status: jobs.status, error: jobs.error, startedAt: jobs.startedAt, finishedAt: jobs.finishedAt, result: jobs.result, tail: jobs.tail })
+    .from(jobs)
+    .where(and(conversationOf(agentId), eq(jobs.taskId, task.id), isNotNull(jobs.startedAt), inArray(jobs.status, ['done', 'failed']), moved?.at ? gt(jobs.finishedAt, moved.at) : undefined))
+    .orderBy(desc(jobs.startedAt))
+    .limit(QUICK_CRASHES);
+  const n = rows.findIndex(j => !crashed(j));
+  return n === -1 ? rows.length : n;
+}
+
+/* What Hornhoof notes on a task whose turns kept breaking: how, and the end of what the program said last. */
+function crashNote(job: Ended & { agentName: string }, task: Task): string {
+  const said = (job.tail || job.result || '').trim().slice(-600);
+  return `${QUICK_CRASHES} turns of ${job.agentName} in a row on #${task.number} broke within ${QUICK_CRASH_MS / 60_000} minutes of starting, so Hornhoof stopped waking it there. The last one ended with ${job.error ?? 'an error'}${said ? `:\n\n${said}` : '.'}`;
+}
+
 async function checkHeld(ctx: Ctx, job: typeof jobs.$inferSelect & { agentId: string; startedAt: Date }, task: Task): Promise<void> {
   const { db } = ctx;
   const { agentId } = job;
@@ -360,7 +397,11 @@ async function checkHeld(ctx: Ctx, job: typeof jobs.$inferSelect & { agentId: st
     .from(taskEvents)
     .where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.agentId, agentId), gte(taskEvents.createdAt, job.startedAt), eq(taskEvents.kind, 'comment')));
   const working = job.status === 'failed' || Number(told?.n ?? 0) > 0;
-  const moved = await (working ? wentOn : silentTurn)(ctx, agentId, task).catch((err: { reason?: string }) => {
+  /* Turns that keep breaking as they start would only break again: whoever gave the task out hears of it, once. */
+  const broke = crashed(job) && (await crashesInRow(ctx, agentId, task)) >= QUICK_CRASHES;
+  const [me] = broke ? await db.select({ name: agents.name }).from(agents).where(eq(agents.id, agentId)) : [];
+  const step = broke ? () => brokeDown(ctx, agentId, task, crashNote({ ...job, agentName: me?.name ?? 'the agent' }, task)) : () => (working ? wentOn : silentTurn)(ctx, agentId, task);
+  const moved = await step().catch((err: { reason?: string }) => {
     /* Someone moved the task meanwhile: that answers the question. */
     if (err.reason === 'task_changed') return null;
     throw err;

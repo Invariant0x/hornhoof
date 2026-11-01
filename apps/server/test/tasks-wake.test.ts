@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import { agentEvents, agents, companies, departments, jobs, people, personAccess, requests, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
 import { agentState, enqueueTurn } from '../src/modules/conversation/queue.js';
@@ -381,6 +381,32 @@ describe('waking agents for their tasks', () => {
     const queued = (await turnsOf(bruno.id)).filter(j => j.status === 'queued');
     expect(queued).toHaveLength(1);
     expect(queued[0]!.prompt).toContain('Go on with the work from where you left off');
+  });
+
+  it('blocks the task for its head once, with the error, after three turns on it in a row broke at once', async () => {
+    const { ctx, db, head, bruno, memberTask, turnsOf, finish } = await company();
+    const task = await memberTask();
+    await wakeAll(ctx, [{ agentId: bruno.id, taskId: task.id, why: 'assigned' }]);
+    const crash = () => db.update(jobs).set({ error: 'agent_failed', tail: 'Error: the program exited with code 1' }).where(and(eq(jobs.agentId, bruno.id), eq(jobs.status, 'running')));
+    const read = async () => (await db.select().from(tasks).where(eq(tasks.id, task.id)))[0]!;
+    for (let i = 0; i < 2; i++) await finish(bruno.id, crash, 'failed');
+    expect((await read()).status).toBe('open');
+    await finish(bruno.id, crash, 'failed');
+    expect((await read()).status).toBe('blocked');
+    const [note] = await db.select({ kind: taskEvents.kind, text: taskEvents.text }).from(taskEvents).where(eq(taskEvents.taskId, task.id)).orderBy(desc(taskEvents.id)).limit(1);
+    expect(note!.kind).toBe('blocked');
+    expect(note!.text).toContain('broke within');
+    expect(note!.text).toContain('the program exited with code 1');
+    expect((await turnsOf(bruno.id)).filter(j => j.status === 'queued')).toEqual([]);
+    const told = (await turnsOf(head.id)).filter(j => j.status === 'queued');
+    expect(told).toHaveLength(1);
+    expect(told[0]!.prompt).toContain('cannot go on');
+    expect(told[0]!.prompt).toContain('the program exited with code 1');
+    expect(await db.select().from(requests)).toEqual([]);
+    /* Once the head answers, the count starts again. */
+    await wakeAll(ctx, (await updateTask(ctx, head.id, task.id, { body: 'Use the other provider.' })).wakes);
+    await finish(bruno.id, crash, 'failed');
+    expect((await read()).status).toBe('open');
   });
 
   it('does not count a turn that broke because its machine started again', async () => {

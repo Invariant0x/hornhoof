@@ -834,6 +834,16 @@ export async function silentTurn(ctx: Live, agentId: string, task: Task): Promis
   return askAboutStill(ctx, agentId, task, silent, `Ended ${silent} turns in a row on #${task.number} without moving it. Tell it how to go on, or cancel the task.`);
 }
 
+/* The agent's turns on the task keep breaking as soon as they start: Hornhoof stops waking it there, and whoever gave the
+   task out hears why, or a person when nobody did or a gate's reviewer broke. */
+export async function brokeDown(ctx: Live, agentId: string, task: Task, text: string): Promise<Moved> {
+  if (task.stage === 0 && task.createdByAgentId && task.createdByAgentId !== agentId) {
+    const wakes = giver(task, 'blocked', agentId, text);
+    return { task: await move(ctx, task, { status: 'blocked', silent: 0 }, { kind: 'blocked', actor: { agentId }, text }, undefined, wakes), wakes };
+  }
+  return askAboutStill(ctx, agentId, task, task.silent, text);
+}
+
 /* Hornhoof stops waking the agent on the task and asks a person how it should go on. */
 async function askAboutStill(ctx: Live, agentId: string, task: Task, silent: number, text: string): Promise<Moved> {
   let wakes: Wake[] = [];
