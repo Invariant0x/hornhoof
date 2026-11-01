@@ -1,0 +1,116 @@
+{
+  "schema": "metadata-release-preflight-proposal-v1",
+  "task": 69,
+  "operation": "installation.metadata_release_preflight",
+  "status": "PROPOSED_NOT_IMPLEMENTED",
+  "currentlyCallable": false,
+  "currentExecutorVerified": false,
+  "readyForApproval": false,
+  "readyToApply": false,
+  "source": {
+    "currentLastObserved": "bd696b0724385b6b11da53a24ada2f188b031217",
+    "functional": "67e31f5da9fb4c728d8aea9e7d6f578b92fc83fe",
+    "packaging": "e7609f8031625ecbf356115d11e226ba36d4bc21",
+    "integration": "c252d188f33c1876aa19b3ae9d21a359fae460a7",
+    "version": "0.5.1",
+    "versionAvailability": "DRAFT_RECHECK_BEFORE_PUBLICATION",
+    "finalCandidate": "Record descendant commit after this contract is committed; no fabricated or self-referential SHA.",
+    "recovery": "NOT_SELECTED_NOT_BUILT"
+  },
+  "ownerAndExecutor": {
+    "owner": "Development head; DevOps prepares and qualifies the exact operation bundle.",
+    "authorizedCaller": "Company owner or company orchestrator in a valid current running job, for task 69 and the bound installation only.",
+    "requiredExecutor": "Current installation's trusted deployment maintainer runs one approved hash-pinned bundle in existing updater service context.",
+    "existingResources": "Compose updater defines Docker socket, server directory and control mounts. Source proves mounts, not current agent access or a callable operation.",
+    "newCapabilityRequired": "Invoke only this fixed operation for bound installation/task; no caller command, SQL, DSN, path, container or executable.",
+    "rights": [
+      "Resolve updater's configured Compose project/server directory and current app/db containers.",
+      "Inspect only those containers' identity/startup/configuration internally; never return raw inspect/environment.",
+      "Execute only reviewed reader in current app and fixed read-only identity/fingerprint probe in actual Compose db.",
+      "Write private evidence in existing control volume and read updater request/status.",
+      "No grants, migrations, DB writes, installer invocation, restart, deletion or generic host command."
+    ],
+    "authorizationRequired": "Preserve existing current-job/orchestrator and company-person scope checks; bind task, agent, company and installation before resolving resources. Ordinary employee/node key, foreign company, ended job and unrelated task refuse. New adapter must implement/test this; contract provides none."
+  },
+  "input": {
+    "callerMaySupply": ["taskNumber=69", "approvedReleaseReference"],
+    "resolvedFromTrustedContext": ["installation", "company", "currentJob", "callerAgent", "approvedCommit", "approvedSemver", "reviewedBundleSha256", "quietWindow", "testedRecoveryReference"],
+    "incident": {
+      "agent": "7f038470-9455-432f-a113-0d7f72bd87cd",
+      "from": "2026-11-01T00:17:00Z",
+      "to": "2026-11-01T00:30:03Z"
+    },
+    "additionalProperties": false,
+    "noCallerSqlOrShellOrCredentials": true
+  },
+  "readPointsInOrder": [
+    "Authenticate and bind task/installation before any service inspection.",
+    "Require agreed quiet window, zero working jobs, no pending request or waiting/running update, and exclusion of concurrent update/config writers.",
+    "Resolve actual app/db from updater's configured project; reject foreign project, extra overrides, external target or ambiguous mapping.",
+    "Privately bind current app container/image/revision, process start identity, command and deployed main/config/client module hashes. Proposed fixed startup reads inside the current app: /proc/1/environ, /proc/1/stat and /proc/1/cmdline, compared with private container startup configuration and exact image/module hashes. Require PID 1 to be the standard Node entry without injected preload or alternate config path. Unavailable or denied reads refuse; nothing raw is returned.",
+    "Verify exact deployed source constructs running app DB from anchored startup config without later rebinding. Compare effective startup and reader settings via private keyed fingerprint. A second loadConfig, label or container environment alone is insufficient.",
+    "Use deployed loadConfig/openPool for separate diagnostic connection with verified effective config and existing internal service credentials. Never import main/CLI or call createDb/migrate.",
+    "Run fixed bounded READ ONLY identity and incident metadata fingerprint probes on app target and actual Compose db used by pg_dump. Require physical target mapping, database/cluster identity and data fingerprints equal. Unknown identity or insufficient permission refuses without a grant.",
+    "Re-read process/config/image identity after probes; refuse drift. Roll back read transactions, release clients and close only diagnostic Pool on every path.",
+    "Preserve private Compose/env and safe update/job evidence. Verify target and previous installer compatibility with preserved DB/config. Require independent backup/restore/recovery proof before preflight success.",
+    "Persist safe receipt separately from request/status. Revalidate bound facts immediately before controlled workflow may dispatch."
+  ],
+  "fixedProbeContract": {
+    "databaseMode": "Bounded READ ONLY transactions; no SQL input, migrations, arbitrary functions or persistent DB mutation.",
+    "identity": "Private database/cluster identity plus actual app-to-Compose service/volume/endpoint mapping. Unavailable/ambiguous identity refuses; equal database names or cloned data alone are insufficient.",
+    "data": "Approved incident window, task 44 allowlisted metadata projection, count and deterministic ordered digest on both targets. No prompt/result/tail/token/env columns returned. Do not hash volatile sessions into an equality claim during active work.",
+    "limits": {
+      "status": "PROPOSED_CONSTANTS_NOT_IMPLEMENTED",
+      "connectionMilliseconds": 5000,
+      "statementMilliseconds": 5000,
+      "operationMilliseconds": 30000,
+      "maximumMetadataRows": 40,
+      "overflowSentinelRow": 41,
+      "maximumSafeOutputBytes": 4096,
+      "onLimit": "Refuse; no partial digest/success. Task 44 uses 40 rows plus one overflow sentinel. Narrow incident window in a reviewed subsequent operation if needed."
+    },
+    "errors": "Permission, connection, query, timeout and identity errors map to fixed refusal codes. No driver error, stack, cause, parameters, environment or DSN serialization."
+  },
+  "persistPoint": {
+    "root": "Existing control volume, fixed private release-preflight subdirectory resolved by trusted executor.",
+    "names": "Executor-generated receipt ID; directory 0700/files 0600; no caller path/symlink traversal; ownership stays in trusted service context.",
+    "safeReceipt": "Allowlisted decision/reason, receipt ID, UTC, source references, opaque keyed config/target/data fingerprints, counts and safe receipt hash.",
+    "privateEvidence": "Current Compose/env recovery copy and fingerprint key stay in private service directory. No raw config/archive, credentials or unkeyed secret-bearing config digest reaches agents.",
+    "neverWrite": ["request.json", "request.json.new", "status.json", "status.json.new", "app database", "existing evidence or backups"],
+    "receiptIsDispatchAuthorization": false
+  },
+  "output": {
+    "additionalProperties": false,
+    "fields": ["operation", "receiptId", "observedAtUtc", "decision", "reason", "currentCommit", "releaseCommit", "version", "opaqueConfigFingerprint", "opaqueTargetFingerprint", "opaqueDataFingerprint", "metadataRows", "safeReceiptSha256"],
+    "decision": ["REFUSE", "PREFLIGHT_PASSED_NOT_APPROVAL"],
+    "refusalReasons": ["NOT_AUTHORIZED", "EXECUTOR_UNAVAILABLE", "QUIET_WINDOW_MISSING", "UPDATE_PENDING", "APP_ANCHOR_UNAVAILABLE", "APP_CONFIG_MISMATCH", "TARGET_UNKNOWN", "TARGET_EXTERNAL", "TARGET_MISMATCH", "PERMISSION_DENIED", "PROBE_FAILED", "PROBE_LIMIT", "CONFIG_DRIFT", "RECOVERY_UNPROVEN", "EVIDENCE_PERSIST_FAILED"],
+    "onRefusal": "Only applicable fixed reason and safe actually observed fields; no invented IDs, hashes or counts.",
+    "forbidden": ["DSN", "credentials", "raw environment", "raw inspect", "SQL rows", "prompt", "result", "tail", "tool token", "driver error", "stack", "cause"]
+  },
+  "dispatchBoundary": {
+    "placement": "Before orchestrator update_hornhoof and before updates/routes.ts send()/UpdaterControl.request() creates this rollout's request.",
+    "requiredBehavior": "Any refusal/missing receipt stops workflow with no request. Receipt creation alone is insufficient. No pre-existing pending request.",
+    "existingRouteEnforcesThis": false,
+    "implementedRefusalVerified": false,
+    "raceLimit": "No global fence or atomic expected-SHA comparison. Head excludes other update/config writers through revalidation and dispatch.",
+    "oldUpdaterBeforeDispatch": "No delivered request means this operation invokes no old backup/installer/rollback. Existing outer-placement fixture proves condition only in isolation.",
+    "oldUpdaterAfterDispatch": "Unchanged; may run previous installer and replace Compose/env. Refuse unknown/incompatible previous/target config and untested recovery before dispatch."
+  },
+  "recovery": {
+    "automaticPrevious": "Current app revision/env pin; initially bd696b0 without task 44, not independently selected recovery artifact.",
+    "healthyOldRoute": "Second controlled update_hornhoof to approved immutable recovery semver, then full health/config/data/API acceptance.",
+    "unavailableOldRoute": "Stop. Require approved bounded maintainer restore and private config/backup; no generic agent exec or CEO technical commands.",
+    "tested": false,
+    "preservePermanentMetadataCapability": true
+  },
+  "qualificationRequiredNotExecuted": [
+    "Wrong/unknown/external DB, startup/reader config mismatch and drift refuse before dispatch.",
+    "Permission denial, timeout, row/byte limit and evidence persistence failure refuse without secret output.",
+    "Foreign company, employee/node key, ended job and unrelated task refuse before service/DB reads.",
+    "Refusal creates no request, invokes no old updater, changes no Compose/env/DB and overwrites no evidence.",
+    "Control old-source negative fixture, then prove actual implemented pre-dispatch guard. Placement-only fixture is not implementation proof.",
+    "Private storage ownership, no-secret output with logging sentinels, timeout/cleanup and read-only transaction assertions.",
+    "Actual deployment anchor/DB/config/backup proof and selected recovery test after isolated fixtures."
+  ],
+  "minimalRuntimeBlocker": "No verified bounded service executor supplies running-app anchor and app/Compose comparison with enforced refusal before dispatch. Head must name/authorize this fixed executor for implementation/qualification; no generic host access or new platform."
+}
