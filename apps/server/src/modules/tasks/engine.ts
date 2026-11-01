@@ -11,7 +11,7 @@ export type Task = typeof tasks.$inferSelect;
 export type Request = typeof requests.$inferSelect;
 /* Who moves a task: a person from the web app, or an agent from its tools. */
 export type Actor = { personId: string; agentId?: undefined } | { agentId: string; personId?: undefined };
-export type WakeWhy = 'assigned' | 'review' | 'changes' | 'stuck_at_gate' | 'done' | 'reported' | 'blocked' | 'cancelled' | 'answered' | 'comment' | 'updated' | 'reminder' | 'go_on' | 'turn' | 'switched' | 'explain';
+export type WakeWhy = 'assigned' | 'review' | 'changes' | 'stuck_at_gate' | 'done' | 'reported' | 'blocked' | 'cancelled' | 'answered' | 'comment' | 'updated' | 'reminder' | 'go_on' | 'turn' | 'switched' | 'explain' | 'subtasks';
 /* An agent that has to act on a task now; Hornhoof queues a turn for it. note: what else it should know, after the rest. */
 export type Wake = { agentId: string; taskId: string; why: WakeWhy; text?: string; note?: string };
 export type Moved = { task: Task; wakes: Wake[] };
@@ -44,6 +44,22 @@ function stillOpen(task: Task): void {
   if (CLOSED.includes(task.status)) throw refuse(409, 'task_closed', `#${task.number} is ${task.status} already.`);
 }
 
+/* Work under a task that is still open: a task is done only once all of it is. */
+async function refuseOpenUnder(db: Db | Tx, task: Task): Promise<void> {
+  const open = await db.select({ number: tasks.number }).from(tasks).where(and(eq(tasks.parentId, task.id), notInArray(tasks.status, [...CLOSED]))).orderBy(asc(tasks.number));
+  if (open.length) throw refuse(409, 'task_invalid', `#${task.number} still has open subtasks: ${open.map(t => `#${t.number}`).join(', ')}. Wait for them, or cancel them first.`);
+}
+
+/* The last work under a task closed: whoever holds the task hears it can go on, unless it gave that work out and hears
+   so already, or closed it itself. */
+async function workUnderDone(tx: Tx, closed: Task, actorId?: string): Promise<Wake[]> {
+  const [parent] = await tx.select().from(tasks).where(eq(tasks.id, closed.parentId!));
+  const holder = parent?.assigneeAgentId;
+  if (!parent || CLOSED.includes(parent.status) || !holder || holder === closed.createdByAgentId || holder === actorId) return [];
+  const [open] = await tx.select({ id: tasks.id }).from(tasks).where(and(eq(tasks.parentId, parent.id), notInArray(tasks.status, [...CLOSED]))).limit(1);
+  return open ? [] : [{ agentId: holder, taskId: parent.id, why: 'subtasks' }];
+}
+
 /* Where a task sits, for the stream: its product inside its department, or the department; none for the orchestrator's. */
 export const taskSpot = (t: Pick<Task, 'departmentId' | 'productId'>): Spot =>
   t.productId ? { departmentId: t.productId, parentId: t.departmentId } : { departmentId: t.departmentId, parentId: null };
@@ -67,13 +83,11 @@ async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, also?: (
       .returning();
     if (!row) throw refuse(409, 'task_changed', `#${task.number} changed meanwhile. Read it again.`);
     /* Done means all of it: work under it still open would go on under a finished task, and the turn with it. */
-    if (set.status === 'done') {
-      const open = await tx.select({ number: tasks.number }).from(tasks).where(and(eq(tasks.parentId, task.id), notInArray(tasks.status, [...CLOSED]))).orderBy(asc(tasks.number));
-      if (open.length) throw refuse(409, 'task_invalid', `#${task.number} still has open subtasks: ${open.map(t => `#${t.number}`).join(', ')}. Wait for them, or cancel them first.`);
-    }
+    if (set.status === 'done') await refuseOpenUnder(tx, task);
     await dropEarlierWakes(tx, task.id);
     await note(tx, row, n);
     await also?.(tx, row);
+    if (CLOSED.includes(row.status) && row.parentId) wakes.push(...(await workUnderDone(tx, row, n.actor.agentId)));
     await keepWakes(tx, task.companyId, wakes);
     return row;
   });
@@ -170,6 +184,8 @@ export async function createTask(ctx: Live, actor: Actor, input: NewTask): Promi
     if (parent) {
       const [now] = await tx.select().from(tasks).where(eq(tasks.id, parent.id)).for('update');
       stillOpen(now!);
+      /* Its gates check the work as handed in; more work under it starts once they send it back. */
+      if (now!.stage > 0) throw refuse(409, 'task_invalid', `#${now!.number} is being checked at its gates, so no work goes under it now. Give it once the gates send it back, or as a task of its own.`);
     }
     const [last] = await tx.select({ n: max(tasks.number) }).from(tasks).where(eq(tasks.companyId, assignee.companyId));
     const [turn] = parent ? [] : await tx.select({ id: turns.id }).from(turns).where(and(eq(turns.companyId, assignee.companyId), eq(turns.status, 'open')));
@@ -209,6 +225,7 @@ export async function submit(ctx: Live, agentId: string, taskId: string, r: { su
   if (!task.executorAgentId) throw refuse(400, 'task_invalid', `#${task.number} has no executor; its owner closes it with report.`);
   if (task.executorAgentId !== agentId || task.stage !== 0) throw notYours(task, 'is not waiting for your work');
   if (task.status === 'waiting' && (await waitsForPerson(ctx.db, task.id))) throw refuse(409, 'task_invalid', `#${task.number} waits for a person's answer first.`);
+  await refuseOpenUnder(ctx.db, task);
   const n: Note = { kind: 'submitted', actor: { agentId }, text: r.summary, data: { evidence: r.evidence } };
   const unstuck = stuckGoes(ctx, task);
   if (task.gates.length) {
@@ -426,6 +443,8 @@ async function onFresh<T>(ctx: Live, task: Task, fn: (task: Task) => Promise<T>)
     try {
       return await fn(task);
     } catch (err) {
+      /* A task that cannot move this way, such as one with work under it still open, stays where it is. */
+      if (err instanceof ApiError && err.reason === 'task_invalid') return null;
       if (!(err instanceof ApiError) || err.reason !== 'task_changed') throw err;
       task = await loadTask(ctx.db, task.id);
     }

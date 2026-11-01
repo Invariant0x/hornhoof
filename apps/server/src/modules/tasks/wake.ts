@@ -75,6 +75,8 @@ function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string {
       return `You ended your last turn on ${ref} without moving it. Go on with the work, then ${finish}. If you cannot go on, ${stuck}.`;
     case 'go_on':
       return `Your last turn on ${ref} ended before the work did. Go on with the work from where you left off, then ${finish}. If you cannot go on, ${stuck}.`;
+    case 'subtasks':
+      return `No work under ${ref} is open any more. ${read} Then go on with it and ${finish}.`;
     case 'turn':
       return `${ref} is closed.`;
     case 'switched':

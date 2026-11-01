@@ -425,6 +425,16 @@ describe('work an agent held when it was switched off', () => {
     expect(await row(db, task.id)).toMatchObject({ status: 'done', panel: [] });
   });
 
+  it('switches the last reviewer off even when work under the task, from an older Hornhoof, keeps it from finishing', async () => {
+    const { ctx, db, dev, bruno, rita, rex, off, patch, memberTask } = await company();
+    const task = await memberTask();
+    await off(rex.id);
+    await submit(ctx, bruno.id, task.id, done);
+    await db.insert(tasks).values({ companyId: dev.companyId, number: 99, title: 'Refunds', brief: '', body: '', departmentId: dev.id, parentId: task.id, assigneeAgentId: bruno.id, executorAgentId: bruno.id });
+    expect((await patch(rita.id, { on: false })).statusCode).toBe(200);
+    expect(await row(db, task.id)).toMatchObject({ status: 'review', stage: 1 });
+  });
+
   it('moves work that waits with the head at a gate on once its whole role is switched off', async () => {
     const { ctx, db, bruno, rita, rex, hana, off, unable, patch, memberTask } = await company();
     const task = await memberTask();
