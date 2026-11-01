@@ -1,13 +1,11 @@
-import type { AddressInfo } from 'node:net';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { and, asc, eq } from 'drizzle-orm';
-import type { FastifyInstance } from 'fastify';
-import { describe, expect, it, onTestFinished } from 'vitest';
+import { and, asc, eq, inArray } from 'drizzle-orm';
+import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, companies, departments, jobs, people, subscriptions, tasks, turns } from '../src/db/schema.js';
+import { agents, companies, departments, improvements, jobs, people, subscriptions, taskEvents, tasks, turns } from '../src/db/schema.js';
 import { appendEvent } from '../src/modules/events/store.js';
-import { invitePerson, listen, setUpCompany, testApp } from './helpers.js';
+import { settle } from '../src/modules/tasks/turns.js';
+import { invitePerson, listen, mcp, setUpCompany, testApp } from './helpers.js';
 
 async function company() {
   const { app, db } = await testApp();
@@ -62,14 +60,6 @@ async function company() {
   return { app, db, ctx: app.ctx, companyId, ceo: ceo!, ceoToken, orchestrator: orchestrator!, dev: dev!, sales: sales!, design: design!, hana, sara, bruno, tools, say, message, queued, get };
 }
 
-async function mcp(app: FastifyInstance, token: string): Promise<Client> {
-  const url = new URL(`http://127.0.0.1:${(app.server.address() as AddressInfo).port}/mcp`);
-  const client = new Client({ name: 'test', version: '0.0.0' });
-  await client.connect(new StreamableHTTPClientTransport(url, { requestInit: { headers: { Authorization: `Bearer ${token}` } } }));
-  onTestFinished(() => client.close());
-  return client;
-}
-
 type Res = { content: { text: string }[]; isError?: boolean };
 const call = async (c: Client, name: string, args: object) => (await c.callTool({ name, arguments: args })) as Res;
 const text = (r: Res) => r.content[0]!.text;
@@ -79,8 +69,9 @@ describe('turns', () => {
   it('gives the orchestrator turn tools instead of handing out single tasks', async () => {
     const { orchestrator, hana, tools } = await company();
     const names = async (agent: { id: string }) => (await (await tools(agent)).listTools()).tools.map(t => t.name).sort();
-    expect(await names(orchestrator)).toEqual(['add_api_key', 'add_tasks', 'answer_request', 'ask_person', 'build_structure', 'cancel_task', 'cancel_update', 'change_employee', 'change_orchestrator', 'change_person', 'check_updates', 'close_improvement', 'comment', 'company', 'connect_plans', 'disconnect_machine', 'edit_turn', 'explain_request', 'fire_employee', 'forget', 'hire', 'improvements', 'invite_again', 'invite_person', 'message_employee', 'move_orchestrator', 'notebook', 'plan_command', 'plan_turn', 'propose_staff', 'propose_structure', 'remember', 'remove_repository', 'remove_subscription', 'report', 'reset_employee', 'rewrite_note', 'set_repository', 'staffing_options', 'stop_employee', 'task', 'tasks', 'test_subscription', 'turns', 'update_hornhoof', 'update_task', 'view']);
+    expect(await names(orchestrator)).toEqual(['add_api_key', 'add_tasks', 'answer_request', 'ask_person', 'build_structure', 'cancel_task', 'cancel_update', 'change_employee', 'change_orchestrator', 'change_person', 'check_updates', 'close_improvement', 'comment', 'company', 'connect_plans', 'disconnect_machine', 'edit_turn', 'explain_request', 'fire_employee', 'forget', 'hire', 'improvements', 'invite_again', 'invite_person', 'merge_turn', 'message_employee', 'move_orchestrator', 'notebook', 'plan_command', 'plan_turn', 'propose_staff', 'propose_structure', 'remember', 'remove_repository', 'remove_subscription', 'report', 'reset_employee', 'rewrite_note', 'set_repository', 'staffing_options', 'stop_employee', 'task', 'tasks', 'test_subscription', 'turns', 'update_hornhoof', 'update_task', 'view']);
     expect(await names(hana)).toContain('create_task');
+    expect(await names(hana)).not.toContain('merge_turn');
   });
 
   it('starts the first turn at once and gives each task to its head', async () => {
@@ -121,6 +112,198 @@ describe('turns', () => {
       ['Totals', null, dev.id],
     ]);
     expect(await queued(hana.id)).toHaveLength(1);
+  });
+
+  it('merges a planned turn into the running one without recreating work or waking it twice', async () => {
+    const { db, orchestrator, dev, hana, tools, queued } = await company();
+    const boss = await tools(orchestrator);
+    await call(boss, 'plan_turn', { title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
+    await call(boss, 'plan_turn', { title: 'Refunds', goal: 'Money goes back.', tasks: [work(dev.id, 'Refund button')] });
+    const [checkout] = await db.select().from(tasks).where(eq(tasks.number, 1));
+    const [refund] = await db.select().from(tasks).where(eq(tasks.number, 2));
+    const [source] = await db.select().from(turns).where(eq(turns.number, 2));
+    const [target] = await db.select().from(turns).where(eq(turns.number, 1));
+    const [before] = await db.select().from(jobs).where(eq(jobs.taskId, checkout!.id));
+
+    const merged = await call(boss, 'merge_turn', { source: 2, target: 1 });
+    expect(merged.isError).toBeFalsy();
+    expect((await db.select().from(tasks).where(eq(tasks.id, refund!.id)))[0]).toMatchObject({ number: 2, turnId: target!.id, status: 'open', assigneeAgentId: hana.id });
+    expect((await db.select().from(turns).where(eq(turns.id, source!.id)))[0]).toMatchObject({ number: 2, status: 'closed' });
+    expect((await db.select().from(tasks).where(eq(tasks.id, checkout!.id)))[0]).toMatchObject({ turnId: target!.id, status: 'open' });
+    expect((await queued(hana.id)).map(j => j.taskId)).toEqual([checkout!.id, refund!.id]);
+    expect((await db.select().from(jobs).where(eq(jobs.id, before!.id)))[0]).toEqual(before);
+
+    const again = await call(boss, 'merge_turn', { source: 2, target: 1 });
+    expect(again.isError).toBeFalsy();
+    expect(await db.select().from(tasks)).toHaveLength(2);
+    expect(await queued(hana.id)).toHaveLength(2);
+  });
+
+  it('merges into a planned target without wakes and keeps the following turn order', async () => {
+    const { db, orchestrator, dev, hana, tools, queued } = await company();
+    const boss = await tools(orchestrator);
+    await call(boss, 'plan_turn', { title: 'One', goal: 'First.', tasks: [work(dev.id, 'First task')] });
+    await call(boss, 'plan_turn', { title: 'Two', goal: 'Second.', tasks: [work(dev.id, 'Target task')] });
+    await call(boss, 'plan_turn', { title: 'Three', goal: 'Third.', tasks: [work(dev.id, 'Source task')] });
+    await call(boss, 'plan_turn', { title: 'Four', goal: 'Fourth.', tasks: [work(dev.id, 'Next task')] });
+    const [target, source, next] = await db.select().from(turns).where(inArray(turns.number, [2, 3, 4])).orderBy(asc(turns.number));
+    const [sourceTask] = await db.select().from(tasks).where(eq(tasks.number, 3));
+
+    expect((await call(boss, 'merge_turn', { source: 3, target: 2 })).isError).toBeFalsy();
+    expect((await db.select().from(turns).orderBy(asc(turns.number))).map(t => [t.number, t.status])).toEqual([
+      [1, 'open'],
+      [2, 'planned'],
+      [3, 'closed'],
+      [4, 'planned'],
+    ]);
+    expect((await db.select().from(tasks).where(eq(tasks.id, sourceTask!.id)))[0]).toMatchObject({ turnId: target!.id, status: 'planned', assigneeAgentId: null });
+    expect(await queued(hana.id)).toHaveLength(1);
+
+    await call(await tools(hana), 'report', { task: 1, done: true, summary: 'First done.' });
+    expect((await db.select().from(turns).where(eq(turns.id, target!.id)))[0]).toMatchObject({ status: 'open' });
+    expect((await db.select().from(tasks).where(eq(tasks.id, sourceTask!.id)))[0]).toMatchObject({ status: 'open', assigneeAgentId: hana.id });
+    await call(await tools(hana), 'report', { task: 2, done: true, summary: 'Target done.' });
+    expect((await db.select().from(turns).where(eq(turns.id, next!.id)))[0]).toMatchObject({ status: 'planned' });
+    await call(await tools(hana), 'report', { task: 3, done: true, summary: 'Source done.' });
+    expect((await db.select().from(turns).where(eq(turns.id, source!.id)))[0]).toMatchObject({ status: 'closed' });
+    expect((await db.select().from(turns).where(eq(turns.id, next!.id)))[0]).toMatchObject({ status: 'open' });
+    expect((await queued(hana.id)).filter(j => j.taskId === sourceTask!.id)).toHaveLength(1);
+    expect((await queued(hana.id)).filter(j => j.prompt.includes('Next task'))).toHaveLength(1);
+  });
+
+  it('keeps task trees, results, jobs and improvement links when merging', async () => {
+    const { db, companyId, ceoToken, orchestrator, dev, hana, bruno, message, get } = await company();
+    const [idea] = await db.insert(improvements).values({ companyId, agentId: bruno.id, title: 'Keep links', text: 'Preserve the task link.' }).returning();
+    const boss = (await message('Take this improvement into work.')).tools!;
+    await call(boss, 'plan_turn', { title: 'Target', goal: 'Current work.', tasks: [work(dev.id, 'Current task')] });
+    await call(boss, 'plan_turn', { title: 'Source', goal: 'Linked work.', improvement: idea!.id, tasks: [work(dev.id, 'Improvement root')] });
+    const [target] = await db.select().from(turns).where(eq(turns.number, 1));
+    const [source] = await db.select().from(turns).where(eq(turns.number, 2));
+    const [root] = await db.select().from(tasks).where(eq(tasks.number, 2));
+    const [child] = await db
+      .insert(tasks)
+      .values({ companyId, number: 3, turnId: source!.id, parentId: root!.id, departmentId: dev.id, title: 'Open child', brief: 'Keep assignee.', body: 'Continue the same work.', status: 'open', assigneeAgentId: bruno.id, executorAgentId: bruno.id, gates: [hana.id], createdByAgentId: orchestrator.id })
+      .returning();
+    const [finished] = await db
+      .insert(tasks)
+      .values({ companyId, number: 4, turnId: source!.id, parentId: root!.id, departmentId: dev.id, title: 'Finished child', brief: 'Keep result.', body: 'Finished work.', status: 'done', closedAt: new Date(), executorAgentId: bruno.id, createdByAgentId: orchestrator.id })
+      .returning();
+    await db.insert(taskEvents).values({ companyId, taskId: finished!.id, kind: 'submitted', agentId: bruno.id, text: 'Child result.', data: { evidence: 'kept evidence' } });
+    const [sub] = await db.select().from(subscriptions);
+    const [running] = await db.insert(jobs).values({ companyId, subscriptionId: sub!.id, agentId: bruno.id, taskId: child!.id, kind: 'conversation', prompt: 'Child work', timeoutMs: 900000, status: 'running', startedAt: new Date() }).returning();
+
+    expect((await call(boss, 'merge_turn', { source: 2, target: 1 })).isError).toBeFalsy();
+    expect((await db.select().from(tasks).where(eq(tasks.id, root!.id)))[0]).toMatchObject({ turnId: target!.id, status: 'open', assigneeAgentId: hana.id });
+    expect((await db.select().from(tasks).where(eq(tasks.id, child!.id)))[0]).toMatchObject({ turnId: target!.id, parentId: root!.id, status: 'open', assigneeAgentId: bruno.id, executorAgentId: bruno.id, gates: [hana.id], body: 'Continue the same work.' });
+    expect((await db.select().from(tasks).where(eq(tasks.id, finished!.id)))[0]).toMatchObject({ turnId: target!.id, parentId: root!.id, status: 'done', closedAt: finished!.closedAt });
+    expect((await db.select().from(jobs).where(eq(jobs.id, running!.id)))[0]).toEqual(running);
+    expect((await db.select().from(taskEvents).where(eq(taskEvents.taskId, finished!.id)))[0]).toMatchObject({ kind: 'submitted', text: 'Child result.', data: { evidence: 'kept evidence' } });
+    const listed = (await get(ceoToken, '/api/improvements')).json().improvements.find((i: { id: string }) => i.id === idea!.id);
+    expect(listed).toMatchObject({ status: 'taken', decidedBy: 'Ivan', tasks: [{ id: root!.id, number: 2, title: 'Improvement root' }] });
+    expect(await db.select().from(tasks)).toHaveLength(4);
+  });
+
+  it('closes all-closed and truly empty sources without moving their history', async () => {
+    const { db, companyId, orchestrator, dev, tools } = await company();
+    const boss = await tools(orchestrator);
+    await call(boss, 'plan_turn', { title: 'Target', goal: 'Current work.', tasks: [work(dev.id, 'Current task')] });
+    await call(boss, 'plan_turn', { title: 'History', goal: 'Closed work.', tasks: [work(dev.id, 'Finished'), work(dev.id, 'Replaced')] });
+    const [target] = await db.select().from(turns).where(eq(turns.number, 1));
+    const [source] = await db.select().from(turns).where(eq(turns.number, 2));
+    const [checkout] = await db.select().from(tasks).where(eq(tasks.number, 1));
+    const at = new Date();
+    await db.update(tasks).set({ status: 'done', closedAt: at }).where(eq(tasks.number, 2));
+    await db.update(tasks).set({ status: 'cancelled', closedAt: at }).where(eq(tasks.number, 3));
+    await db.insert(taskEvents).values({ companyId, taskId: (await db.select().from(tasks).where(eq(tasks.number, 3)))[0]!.id, kind: 'cancelled', agentId: orchestrator.id, text: 'Replaced by #1.', data: { replacement: checkout!.id } });
+
+    expect((await call(boss, 'merge_turn', { source: 2, target: 1 })).isError).toBeFalsy();
+    expect((await db.select().from(turns).where(eq(turns.id, source!.id)))[0]).toMatchObject({ status: 'closed', openedAt: null });
+    expect((await db.select().from(tasks).where(eq(tasks.turnId, target!.id)))).toHaveLength(1);
+    expect((await db.select().from(tasks).where(eq(tasks.number, 2)))[0]).toMatchObject({ turnId: source!.id, status: 'done' });
+    const [replaced] = await db.select().from(tasks).where(eq(tasks.number, 3));
+    expect(replaced).toMatchObject({ turnId: source!.id, status: 'cancelled' });
+    expect((await db.select().from(taskEvents).where(and(eq(taskEvents.taskId, replaced!.id), eq(taskEvents.kind, 'cancelled'))))[0]).toMatchObject({ text: 'Replaced by #1.', data: { replacement: checkout!.id } });
+    expect((await db.select().from(taskEvents).where(and(eq(taskEvents.taskId, replaced!.id), eq(taskEvents.kind, 'updated'))))[0]).toMatchObject({ data: { fields: [], from: 2, to: 1, moved: false } });
+
+    const [empty] = await db.insert(turns).values({ companyId, number: 3, goal: 'No tasks remain.', status: 'planned', createdByAgentId: orchestrator.id }).returning();
+    expect((await call(boss, 'merge_turn', { source: 3, target: 1 })).isError).toBeFalsy();
+    expect((await db.select().from(turns).where(eq(turns.id, empty!.id)))[0]).toMatchObject({ status: 'closed', openedAt: null });
+    expect((await db.select().from(tasks).where(eq(tasks.turnId, target!.id)))).toHaveLength(1);
+  });
+
+  it('does not treat blocked or review tasks as empty history', async () => {
+    const { db, ctx, orchestrator, dev, hana, tools, queued } = await company();
+    const boss = await tools(orchestrator);
+    await call(boss, 'plan_turn', { title: 'Target', goal: 'Current work.', tasks: [work(dev.id, 'Current task')] });
+    await call(boss, 'plan_turn', { title: 'Source', goal: 'Unfinished work.', tasks: [work(dev.id, 'Finished'), work(dev.id, 'Blocked'), work(dev.id, 'Review')] });
+    const [target] = await db.select().from(turns).where(eq(turns.number, 1));
+    const [source] = await db.select().from(turns).where(eq(turns.number, 2));
+    await db.update(tasks).set({ status: 'done', closedAt: new Date() }).where(eq(tasks.number, 2));
+    await db.update(tasks).set({ status: 'blocked', assigneeAgentId: hana.id }).where(eq(tasks.number, 3));
+    await db.update(tasks).set({ status: 'review', stage: 1, panel: [hana.id], assigneeAgentId: hana.id }).where(eq(tasks.number, 4));
+    const [finished] = await db.select().from(tasks).where(eq(tasks.number, 2));
+
+    expect(await settle(ctx, finished!)).toBeNull();
+    expect((await db.select().from(turns).where(eq(turns.id, source!.id)))[0]).toMatchObject({ status: 'planned' });
+    expect((await call(boss, 'merge_turn', { source: 2, target: 1 })).isError).toBeFalsy();
+    expect((await db.select().from(tasks).where(eq(tasks.number, 3)))[0]).toMatchObject({ turnId: target!.id, status: 'blocked', assigneeAgentId: hana.id });
+    expect((await db.select().from(tasks).where(eq(tasks.number, 4)))[0]).toMatchObject({ turnId: target!.id, status: 'review', stage: 1, panel: [hana.id], assigneeAgentId: hana.id });
+    expect((await db.select().from(turns).where(eq(turns.id, source!.id)))[0]).toMatchObject({ status: 'closed' });
+    expect(await queued(hana.id)).toHaveLength(1);
+  });
+
+  it('rejects invalid merge directions and other companies without moving tasks', async () => {
+    const { db, orchestrator, dev, tools } = await company();
+    const boss = await tools(orchestrator);
+    await call(boss, 'plan_turn', { title: 'One', goal: 'First.', tasks: [work(dev.id, 'First task')] });
+    await call(boss, 'plan_turn', { title: 'Two', goal: 'Second.', tasks: [work(dev.id, 'Second task')] });
+    await call(boss, 'plan_turn', { title: 'Three', goal: 'Third.', tasks: [work(dev.id, 'Third task')] });
+    const before = await db.select().from(tasks).orderBy(asc(tasks.id));
+    expect((await call(boss, 'merge_turn', { source: 1, target: 1 })).isError).toBe(true);
+    expect((await call(boss, 'merge_turn', { source: 1, target: 2 })).isError).toBe(true);
+    expect((await call(boss, 'merge_turn', { source: 99, target: 1 })).isError).toBe(true);
+    const [other] = await db.insert(companies).values({ name: 'Other', singleton: false }).returning();
+    await db.insert(turns).values({ companyId: other!.id, number: 9, goal: 'Foreign work.', status: 'planned' });
+    expect((await call(boss, 'merge_turn', { source: 9, target: 1 })).isError).toBe(true);
+    expect((await call(boss, 'merge_turn', { source: 2, target: 9 })).isError).toBe(true);
+    await db.update(turns).set({ status: 'closed', closedAt: new Date() }).where(eq(turns.number, 2));
+    expect((await call(boss, 'merge_turn', { source: 3, target: 2 })).isError).toBe(true);
+    expect((await db.select().from(turns).where(eq(turns.number, 3)))[0]).toMatchObject({ status: 'planned' });
+    expect(await db.select().from(tasks).orderBy(asc(tasks.id))).toEqual(before);
+  });
+
+  it('merges only once when the same calls race', async () => {
+    const { db, orchestrator, dev, hana, tools, queued } = await company();
+    const boss = await tools(orchestrator);
+    await call(boss, 'plan_turn', { title: 'Target', goal: 'Current work.', tasks: [work(dev.id, 'Current task')] });
+    await call(boss, 'plan_turn', { title: 'Source', goal: 'Later work.', tasks: [work(dev.id, 'Source task')] });
+    const [root] = await db.select().from(tasks).where(eq(tasks.number, 2));
+    const results = await Promise.all([call(boss, 'merge_turn', { source: 2, target: 1 }), call(boss, 'merge_turn', { source: 2, target: 1 })]);
+    expect(results.map(r => !!r.isError)).toEqual([false, false]);
+    expect(await db.select().from(tasks)).toHaveLength(2);
+    expect(await queued(hana.id)).toHaveLength(2);
+    expect(await db.select().from(taskEvents).where(and(eq(taskEvents.taskId, root!.id), eq(taskEvents.kind, 'updated')))).toHaveLength(1);
+    expect((await db.select().from(turns).where(eq(turns.number, 2)))[0]).toMatchObject({ status: 'closed' });
+  });
+
+  it('closes empty planned turns as soon as their last task is cancelled', async () => {
+    const { db, orchestrator, dev, tools } = await company();
+    const boss = await tools(orchestrator);
+    await call(boss, 'plan_turn', { title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
+    await call(boss, 'plan_turn', { title: 'Refunds', goal: 'Money goes back.', tasks: [work(dev.id, 'Refund button')] });
+    await call(boss, 'plan_turn', { title: 'Reports', goal: 'Monthly totals.', tasks: [work(dev.id, 'Totals'), work(dev.id, 'Export')] });
+    const [cancelledSource, mixedSource] = await db.select().from(turns).where(inArray(turns.number, [2, 3])).orderBy(asc(turns.number));
+
+    expect((await call(boss, 'cancel_task', { task: 2, why: 'Replaced by Checkout.' })).isError).toBeFalsy();
+    expect((await db.select().from(turns).where(eq(turns.id, cancelledSource!.id)))[0]).toMatchObject({ status: 'closed' });
+    expect((await db.select().from(tasks).where(eq(tasks.number, 2)))[0]).toMatchObject({ status: 'cancelled', turnId: cancelledSource!.id });
+
+    await db.update(tasks).set({ status: 'done', closedAt: new Date() }).where(eq(tasks.number, 3));
+    expect((await call(boss, 'cancel_task', { task: 4, why: 'Not needed.' })).isError).toBeFalsy();
+    expect((await db.select().from(turns).where(eq(turns.id, mixedSource!.id)))[0]).toMatchObject({ status: 'closed' });
+    expect((await db.select().from(tasks).where(eq(tasks.number, 3)))[0]).toMatchObject({ status: 'done', turnId: mixedSource!.id });
+    expect((await db.select().from(tasks).where(eq(tasks.number, 4)))[0]).toMatchObject({ status: 'cancelled', turnId: mixedSource!.id });
+    expect((await db.select().from(turns).where(eq(turns.number, 1)))[0]).toMatchObject({ status: 'open' });
   });
 
   it('adds tasks to the running turn at once, and to a planned turn for later', async () => {
