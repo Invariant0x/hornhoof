@@ -588,8 +588,9 @@ export async function agentState(ctx: Ctx, agentId: string): Promise<AgentState>
   const sub = await liveSubscription(ctx, agentId);
   const [agent] = sub ? await ctx.db.select({ id: agents.id, productId: agents.productId, departmentId: agents.departmentId, nodeId: agents.nodeId }).from(agents).where(eq(agents.id, agentId)) : [];
   const reason: AgentState['reason'] = !sub || !agent ? 'no_subscription' : await waitsFor(ctx, agent, sub);
-  /* The terminal the window opens is of the machine the program is on. */
-  const shown = await programNode(ctx, agentId);
-  const terminal = Boolean(shown && ctx.hub.hasTerminals(shown.node));
+  /* The terminal the window opens is of the machine the program is on, or for one not on a machine yet, of the machine
+     its next turn would go to, where the window starts it. */
+  const shown = (await programNode(ctx, agentId))?.node ?? (sub && agent ? ((await placement(ctx, agent, sub))?.node ?? null) : null);
+  const terminal = Boolean(shown && ctx.hub.hasTerminals(shown));
   return { ready: reason === null, limitUntil: sub ? limitUntil(sub.limits) : null, budgetUntil: sub ? budgetUntil(sub.limits, sub.budget) : null, reason, busy: Boolean(running), runningJobId: running?.id ?? null, queued: Number(waiting?.n ?? 0), terminal };
 }

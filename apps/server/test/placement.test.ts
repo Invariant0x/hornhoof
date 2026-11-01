@@ -150,6 +150,14 @@ describe('agents of one plan on several machines', () => {
     expect((await nextRun(back)).prompt).toContain('Hi');
   });
 
+  it("opens a new employee's window on the live terminal of the machine its first turn would go to", async () => {
+    const { app, ceo, mac, lap, vera } = await planOnTwoMachines();
+    expect((await state(app, ceo, vera.id)).terminal).toBe(false);
+    mac.send({ ...hello, terminals: true });
+    lap.send({ ...hello, terminals: true });
+    await until(async () => (await state(app, ceo, vera.id)).terminal === true);
+  });
+
   it('shows the employee the machine it runs on', async () => {
     const { app, ceo, mac, bruno } = await planOnTwoMachines();
     const card = async () => (await app.inject({ url: `/api/agents/${bruno.id}`, ...as(ceo) })).json();
