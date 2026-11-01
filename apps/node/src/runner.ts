@@ -3,9 +3,12 @@ import { join } from 'node:path';
 import { cut, TAIL_BYTES, type AgentEvent, type JobError, type Limits, type ModelOption, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
 import type { JobUser } from './isolation.js';
 import { redact } from './redact.js';
+import { plainOutput, programEnded, type ProgramOutput } from './program-exit.js';
 import { readSessions, rememberSession } from './state.js';
 import { prepareRepo, type Git } from './workspace.js';
-import { PhaseStore, type PhaseAttempt } from './terminal/phase.js';
+import type { PhaseAttempt } from './terminal/phase.js';
+import { queuedPhase, completePhase, observePhase } from './terminal/phase-observer.js';
+import { phaseLine, type PhaseSummary } from './terminal/phase-summary.js';
 
 export type RunInput = {
   /* The agent whose turn this is, from its workspace; a test job has none. */
@@ -36,7 +39,7 @@ export type RunInput = {
   /* Local observation only; never part of a provider request or the node/server protocol. */
   terminalPhase?: PhaseAttempt;
 };
-export type RunResult = { ok: boolean; sessionId: string | null; result: string; output: string; error: JobError | null; limits: Limits | null };
+export type RunResult = { ok: boolean; sessionId: string | null; result: string; output: string; error: JobError | null; limits: Limits | null; programOutput?: ProgramOutput; phaseSummary?: PhaseSummary };
 export type LoginIo = { input: NodeJS.ReadableStream; output: NodeJS.WritableStream; urlFile: string };
 
 /* One agent program (Claude Code, Codex, Kimi) as the node drives it. */
@@ -64,6 +67,19 @@ const failed = (output: string, error: JobError): RunResult => ({ ok: false, ses
 function lastBytes(text: string, bytes: number): string {
   const buf = Buffer.from(text);
   return buf.length <= bytes ? text : buf.subarray(buf.length - bytes).toString();
+}
+
+/* Both dispatched and typed turns use the same redaction and tail boundary. */
+export function jobDone(jobId: string, res: RunResult, secrets: string[]): JobDone {
+  const program = res.programOutput;
+  /* A terminal inserts carriage returns; hide both the raw and normalized forms before any line is removed. */
+  const text = program ? redact(plainOutput(redact(program.text, secrets)), secrets) : res.output;
+  const diagnostic = phaseLine(res.phaseSummary, secrets);
+  const output = program ? programEnded(text, program, program.complete, diagnostic) : text;
+  return {
+    type: 'job.done', jobId, ok: res.ok, sessionId: res.sessionId,
+    result: redact(res.result, secrets), tail: lastBytes(redact(output, secrets), TAIL_BYTES), error: res.error,
+  };
 }
 
 /* The adapter stops its own program at the timeout and says which session it was in, so the next turn goes on in it.
@@ -138,7 +154,7 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
       .catch(() => {});
   };
   let res: RunResult;
-  const phase = untimed && msg.workspace?.key ? new PhaseStore(dir).begin(msg.workspace.key, msg.jobId, 'queued') : undefined;
+  const phase = queuedPhase(dir, untimed, msg);
   try {
     const { workDir, sessionId } = workDirFor(msg, dir);
     mkdirSync(workDir, { recursive: true });
@@ -164,13 +180,13 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
       tools,
       onEvent: emit,
       ...(env ? { env } : {}),
-      ...(phase ? { terminalPhase: phase } : {}),
+      terminalPhase: phase,
     };
     const run = adapter.run(input).catch((err: unknown) => failed(message(err), 'agent_failed'));
     res = await (untimed ? run : withTimeout(run, msg.timeoutMs));
     if (res.sessionId) rememberSession(dir, res.sessionId, workDir);
   } catch (err) {
-    phase?.finish('runner_exception');
+    observePhase(phase, value => value.finish('runner_exception'));
     res = failed(message(err), 'agent_failed');
   }
   await live;
@@ -178,21 +194,10 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
   if (signal?.aborted) res = { ...res, ok: false, result: 'Stopped.', error: 'cancelled' };
   const after = await adapter.secrets().catch(() => []);
   const secrets = [...before, ...after, ...given];
-  if (phase) {
-    phase.complete(res.ok, res.error === 'cancelled');
-    if (!res.ok || !phase.isDurable()) {
-      const summary = phase.summary();
-      if (!res.ok) res = { ...res, output: `${summary}\n\n${res.output}` };
-      try { onEvent?.(tidy({ kind: 'tool_result', ok: false, summary }, secrets)); } catch { /* Preserve the original failure. */ }
-    }
-  }
-  return {
-    type: 'job.done',
-    jobId: msg.jobId,
-    ok: res.ok,
-    sessionId: res.sessionId,
-    result: redact(res.result, secrets),
-    tail: lastBytes(redact(res.output, secrets), TAIL_BYTES),
-    error: res.error,
-  };
+  res = completePhase(phase, res, phaseEvents(onEvent, secrets));
+  return jobDone(msg.jobId, res, secrets);
+}
+
+function phaseEvents(onEvent: RunOptions['onEvent'], secrets: string[]): (event: AgentEvent) => void {
+  return event => onEvent?.(tidy(event, secrets));
 }

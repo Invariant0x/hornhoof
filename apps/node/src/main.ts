@@ -376,7 +376,7 @@ function terminalFor(dir: string, provider: ProviderId): { terminal?: TerminalSe
   }
   const tools = join(dir, 'tools');
   const home = join(dir, 'home');
-  const tmux = new Tmux({ env: childEnv(tools, { HOME: process.env.HOME ?? home }) });
+  const tmux = new Tmux({ env: childEnv(tools, { HOME: process.env.HOME ?? home }), recordingsDir: join(dir, '.hh-recordings') });
   return { terminal: { tmux, ...known, bin: join(tools, 'bin', programFor(provider).bin), home } };
 }
 

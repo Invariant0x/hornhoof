@@ -3,14 +3,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
-import { CLAUDE_ALIASES, type AgentEvent, type ProviderId } from '@hornhoof/protocol';
+import { CLAUDE_ALIASES, type AgentEvent, type ProviderId, type ServerMessage } from '@hornhoof/protocol';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { adapterFor } from '../src/providers/index.js';
 import { claudeEvents, claudeInterrupted, limitsFrom } from '../src/providers/claude.js';
 import { codexEvents, codexRateLimits } from '../src/providers/codex.js';
 import { kimiContextSize, kimiEvents, kimiModels } from '../src/providers/kimi.js';
 import { childEnv, lastUrl } from '../src/providers/process.js';
-import type { RunInput } from '../src/runner.js';
+import { runJob, type RunInput } from '../src/runner.js';
 
 const FAKES = fileURLToPath(new URL('./fakes/', import.meta.url));
 const FAKE_BIN: Record<ProviderId, string> = {
@@ -47,7 +47,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  for (const k of ['FAKE_LOG', 'FAKE_MODE', 'NODE_KEY', 'HORNHOOF_DATA']) delete process.env[k];
+  for (const k of ['FAKE_LOG', 'FAKE_MODE', 'FAKE_ERROR_SECRET', 'NODE_KEY', 'HORNHOOF_DATA']) delete process.env[k];
 });
 
 const adapter = (provider: ProviderId, secret: string | null = null) => adapterFor(provider, { home, tools, bin: join(FAKES, FAKE_BIN[provider]), secret });
@@ -62,6 +62,42 @@ const alive = (pid: number) => {
     return false;
   }
 };
+
+describe('failed program diagnostics', () => {
+  it.each(['claude', 'codex', 'kimi'] as const)('%s ends failed output with its observed exit code and UTC time', async provider => {
+    process.env.FAKE_MODE = 'fail';
+    const res = await adapter(provider).run(input());
+    expect(res).toMatchObject({ ok: false, error: 'agent_failed' });
+    const last = res.output.split('\n').at(-1)!;
+    expect(last).toMatch(/^Program ended: code 1, signal none, at \d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/);
+    expect(last.length).toBeLessThanOrEqual(400);
+  });
+
+  it.each(['claude', 'codex', 'kimi'] as const)('%s reports KILL with the output preceding it', async provider => {
+    process.env.FAKE_MODE = 'killed';
+    const res = await adapter(provider).run(input());
+    expect(res).toMatchObject({ ok: false, error: 'agent_failed' });
+    expect(res.output).toMatch(/boom\nProgram ended: code none, signal KILL \(9\), at /);
+  });
+
+  it.each(['claude', 'codex', 'kimi'] as const)('%s keeps 50 output lines and redacts them before producing the job tail', async provider => {
+    const secret = 'known-job-secret-0123456789abcdef';
+    process.env.FAKE_MODE = 'fail-long';
+    process.env.FAKE_ERROR_SECRET = secret;
+    const msg: Extract<ServerMessage, { type: 'job.run' }> = {
+      type: 'job.run', jobId: 'diagnostics', subscriptionId: 'test', provider, prompt: 'fail',
+      sessionId: null, model: null, timeoutMs: 5000, secret, instructions: null, toolToken: null,
+    };
+    const done = await runJob(adapter(provider), msg, dir);
+    expect(done).toMatchObject({ ok: false, error: 'agent_failed' });
+    expect(done.tail.split('\n').at(-1)).toMatch(/^Program ended: code 3, signal none, at /);
+    expect(done.tail.split('\n').slice(0, -1)).toEqual([
+      ...Array.from({ length: 49 }, (_, i) => `output ${i + 11}`), 'boom [hidden]',
+    ]);
+    expect(done.tail).not.toContain(secret);
+    expect(Buffer.byteLength(done.tail)).toBeLessThanOrEqual(4096);
+  });
+});
 
 function loginIo() {
   const output = new PassThrough();

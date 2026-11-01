@@ -1,4 +1,6 @@
 import type { AddressInfo } from 'node:net';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { NodeMessage, ServerMessage } from '@hornhoof/protocol';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
@@ -123,6 +125,14 @@ export async function until(check: () => Promise<boolean> | boolean, ms = 2000):
 export async function listen(app: FastifyInstance): Promise<string> {
   await app.listen({ host: '127.0.0.1', port: 0 });
   return `ws://127.0.0.1:${(app.server.address() as AddressInfo).port}/api/nodes/socket`;
+}
+
+export async function mcp(app: FastifyInstance, token: string): Promise<Client> {
+  const url = new URL(`http://127.0.0.1:${(app.server.address() as AddressInfo).port}/mcp`);
+  const client = new Client({ name: 'test', version: '0.0.0' });
+  await client.connect(new StreamableHTTPClientTransport(url, { requestInit: { headers: { Authorization: `Bearer ${token}` } } }));
+  onTestFinished(() => client.close());
+  return client;
 }
 
 export type StreamReader = { res: Response; messages: { type: string; [k: string]: unknown }[]; ended(): boolean; close(): void };

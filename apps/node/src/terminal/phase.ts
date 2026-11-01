@@ -2,14 +2,13 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { closeSync, constants, fstatSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, readSync, statSync, unlinkSync, writeSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { TermProgram } from './programs.js';
+import type { Phase, Finish, PersistCode, PhaseSummary } from './phase-summary.js';
+export type { Phase, Finish, PhaseSummary } from './phase-summary.js';
 
-export type Phase = 'launch' | 'ready' | 'accept' | 'done';
-export type Finish = 'ready_deadline' | 'ready_signed_out' | 'ready_pane_dead' | 'ready_query_failed' | 'ready_unknown' | 'accept_deadline' | 'wire_completed' | 'hook_completed' | 'done_completed' | 'wire_failed' | 'pane_dead' | 'pane_query_failed' | 'pane_unknown' | 'cancelled' | 'start_only' | 'superseded' | 'host_exception' | 'runner_exception' | 'runner_result';
 export type WaitResult = 'matched' | 'deadline' | 'signed_out' | 'pane_dead' | 'query_failed' | 'unknown' | 'accepted' | 'ended' | 'aborted' | 'completed' | 'failed';
 export type Ack = 'hook' | 'wire.turn.prompt' | 'rollout.task_started' | 'ended' | 'aborted' | 'pane_dead' | 'query_failed' | 'unknown';
 export type PaneObservation = { queryOk: boolean; paneDead: boolean | null; queryError: 'query_failed' | 'invalid_reply' | null };
 export type WireObservation = { source: 'kimi_wire' | 'codex_rollout' | 'claude_transcript'; pathHash: string | null; sessionHash: string | null; sizeBefore: number | null; sizeAfter: number | null; recordType: 'turn.prompt' | 'turn.ended' | 'prompt.completed' | 'context.append_loop_event' | 'event_msg' | 'session_meta' | 'other' | null };
-type PersistCode = 'ok' | 'not_saved' | 'identity_unavailable' | 'unsafe_path' | 'unsupported_fs' | 'io_error' | 'partial_write' | 'conflict' | 'size_limit' | 'record_limit';
 type Receipt = { durable: boolean; code: PersistCode; hash: string | null; seq: number };
 type Wait = { startedAtUtc: string; endedAtUtc: string | null; budgetMs: number | null; result: WaitResult | null };
 
@@ -337,10 +336,6 @@ export class PhaseAttempt {
   }
 
   private save(event: PhaseRecord['event']): void {
-    if (this.record.seq >= (event === 'finish' || event === 'bind' || event === 'completion' ? PHASE_RECORDS : PHASE_RECORDS - 3)) {
-      this.saved = { durable: false, code: 'record_limit', hash: null, seq: this.record.seq };
-      return;
-    }
     this.record.previousHash = this.saved.durable ? this.saved.hash : this.record.previousHash;
     this.record.seq++;
     this.record.event = event;
@@ -355,6 +350,10 @@ export class PhaseAttempt {
 
   summary(): string {
     return `hh-terminal-phase-v1 attempt=${this.record.attemptId ?? 'unknown'} seq=${this.saved.seq} phase=${this.record.phase} finish=${this.record.finish ?? 'unknown'} durable=${this.saved.durable} code=${this.saved.code} sha256=${this.saved.hash ?? 'none'} job=${this.record.jobId ? 'bound' : 'unbound'} native=unqualified`;
+  }
+
+  diagnostic(): PhaseSummary {
+    return { attemptId: this.record.attemptId, seq: this.saved.seq, phase: this.record.phase, finish: this.record.finish, durable: this.saved.durable, code: this.saved.code };
   }
 
   isDurable(): boolean { return this.saved.durable; }

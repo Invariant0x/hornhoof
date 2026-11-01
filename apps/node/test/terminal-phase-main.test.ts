@@ -11,6 +11,7 @@ import { Bridge } from '../src/terminal/bridge.js';
 import { kimiProgram } from '../src/terminal/programs.js';
 import { Tmux } from '../src/terminal/tmux.js';
 import { SCREEN_SIGNED_OUT } from '../src/providers/kimi.js';
+import { withProgramExit } from '../src/program-exit.js';
 
 const channel = vi.hoisted(() => ({ receive: null as ((message: ServerMessage) => void) | null, sent: [] as NodeMessage[] }));
 vi.mock('../src/connection.js', () => ({
@@ -37,7 +38,7 @@ afterEach(async () => {
 });
 
 describe('phase evidence through the existing node diagnostic path', () => {
-  it('keeps a supplied last line and last400 characters while phase survives as a correlated job.event', async () => {
+  it.each(['screen', 'recording'] as const)('keeps the %s final boundary and delivers correlated phase evidence', async mode => {
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'setInterval'] });
     vi.setSystemTime(Date.UTC(2026, 10, 1));
     const root = mkdtempSync(join(tmpdir(), 'hh-phase-node-'));
@@ -47,6 +48,10 @@ describe('phase evidence through the existing node diagnostic path', () => {
     const final400 = 'z'.repeat(400 - ending.length - 1) + '\n' + ending;
     const screen = (`untrusted old screen ${CANARIES.join(' ')}\n`).repeat(400) + final400;
     const tmux = new Tmux({ socket: 'isolated-main-phase-stub', env: { PATH: 'fixture-only' } });
+    /* Phase delivery uses a synthetic program, with no capture writer or CLI. */
+    vi.spyOn(tmux, 'launch').mockResolvedValue();
+    const exit = withProgramExit(screen, { code: 3, signal: null, at: '2026-11-01T00:00:00.000Z' }, false);
+    vi.spyOn(tmux, 'exitSnapshot').mockResolvedValue(mode === 'recording' ? { ...exit, complete: false } : null);
     vi.spyOn(tmux, 'run').mockImplementation(async args => {
       if (args[0] === 'display-message') return '0\n';
       if (args[0] === 'capture-pane') return screen;
@@ -66,10 +71,19 @@ describe('phase evidence through the existing node diagnostic path', () => {
     const done = completed();
     if (!done || done.type !== 'job.done') throw new Error('Expected a completed synthetic job.');
     expect(done).toMatchObject({ jobId: JOB, ok: false, error: 'agent_failed' });
-    expect(done.tail.endsWith(ending)).toBe(true);
-    expect(done.tail.slice(-400)).toBe(final400);
+    if (mode === 'screen') {
+      expect(done.tail.endsWith(ending)).toBe(true);
+      expect(done.tail.slice(-400)).toBe(final400);
+      expect(done.tail).not.toContain('hh-terminal-phase-v1');
+    } else {
+      const footer = done.tail.slice(-400);
+      expect(footer).toContain('hh-terminal-phase-v1');
+      expect(footer).toContain('phase=ready finish=ready_deadline');
+      expect(footer).toContain('Output capture did not finish before the wait expired.');
+      expect(footer.endsWith('Program ended: code 3, signal none, at 2026-11-01T00:00:00.000Z')).toBe(true);
+      expect(footer.indexOf('hh-terminal-phase-v1')).toBeLessThan(footer.indexOf('Output capture'));
+    }
     expect(Buffer.byteLength(done.tail)).toBeLessThanOrEqual(4096);
-    expect(done.tail).not.toContain('hh-terminal-phase-v1');
     const diagnostic = channel.sent.find(message => message.type === 'job.event' && message.event.kind === 'tool_result' && message.event.summary.includes('hh-terminal-phase-v1'));
     expect(diagnostic).toMatchObject({ type: 'job.event', jobId: JOB, event: { kind: 'tool_result', ok: false, summary: expect.stringContaining('phase=ready') } });
     expect(channel.sent.indexOf(diagnostic!)).toBeLessThan(channel.sent.indexOf(done));
@@ -78,7 +92,7 @@ describe('phase evidence through the existing node diagnostic path', () => {
     expect(JSON.parse(records.at(-1)!)).toMatchObject({ jobId: JOB, phase: 'ready', finish: 'ready_deadline', pane: { queryOk: true, paneDead: false }, waits: { ready: { budgetMs: 120_000, result: 'deadline' } } });
     for (const canary of CANARIES) expect(JSON.stringify(channel.sent) + records.join('')).not.toContain(canary);
     expect(fetch).not.toHaveBeenCalled(); expect(fallback).not.toHaveBeenCalled();
-    const evidence = process.env.HH_PHASE_TEST_EVIDENCE;
+    const evidence = process.env.HH_PHASE_TEST_EVIDENCE ? join(process.env.HH_PHASE_TEST_EVIDENCE, mode) : undefined;
     if (evidence) {
       mkdirSync(evidence, { recursive: true, mode: 0o700 });
       const files: Record<string, string> = { 'synthetic-record.json': records.at(-1)!, 'synthetic-delivery.json': JSON.stringify({ diagnostic, done, diagnosticBeforeDone: true, protocolAccepted: true, networkCalls: 0, fallbackCalls: 0 }, null, 2) + '\n' };

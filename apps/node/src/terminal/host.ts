@@ -7,14 +7,15 @@ import { TERM_CHUNK, type AgentEvent, type Limits, type NodeMessage, type Server
 import { claudeEvents, claudeInterrupted } from '../providers/claude.js';
 import { contentText } from '../providers/events.js';
 import { kimiContextSize } from '../providers/kimi.js';
-import { redact } from '../redact.js';
-import { tidy, type RunInput, type RunResult } from '../runner.js';
+import { jobDone, tidy, type RunInput, type RunResult } from '../runner.js';
+import type { ProgramOutput } from '../program-exit.js';
 import { Bridge } from './bridge.js';
 import { StreamMask } from './mask.js';
 import { acceptClaudeDialogs, claudeTranscript, findKimiWire, findRollout, prepareKimi, type TermProgram } from './programs.js';
 import { claudeStatusContext, claudeStatusLimits, codexRollout, kimiWire, LineTail, type WireNews } from './transcripts.js';
 import { envFile, type Tmux } from './tmux.js';
-import { phaseHash, sourceHash, wireRecordType, wireSize, type Finish, type PhaseAttempt, type PhaseStore, type WireObservation } from './phase.js';
+import { phaseHash, sourceHash, wireRecordType, wireSize, type Finish, type PhaseAttempt, type PhaseStore, type PhaseSummary, type WireObservation } from './phase.js';
+import { observePhase, turnPhase, jobPhase, launchPhase, hookPhase, wireEndPhase, wireFinish, typedPhase, completeTypedPhase, completePhase, bindTurnPhase, observedWireSize } from './phase-observer.js';
 
 /* An agent's turn in its terminal: which program, where it keeps its sign-in, and what the runner hands every program. */
 export type TermJob = { jobId?: string; key: string; program: TermProgram; bin: string; home: string; signedOut: RegExp; input: RunInput };
@@ -30,6 +31,10 @@ function deferred<T>(): Deferred<T> {
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
+function exitError(output: string | null, signedOut: RegExp | null, fallback: JobError): JobError {
+  return output && signedOut?.test(output) ? 'not_logged_in' : fallback;
+}
+
 /* A turn running now: one Hornhoof sent, or one a person typed, whose events the host sends itself. A typed turn keeps
    what happened until Hornhoof answers its turn.open (early), and how it ended if it ended before that (over). */
 type Turn = {
@@ -39,7 +44,8 @@ type Turn = {
   seq: number;
   ref?: string;
   early?: AgentEvent[] | null;
-  over?: { message: string; error: JobError; sessionId: string | null } | null;
+  over?: { message: string; error: JobError; sessionId: string | null; output: string; programOutput?: ProgramOutput; phaseSummary?: PhaseSummary } | null;
+  toolToken?: string;
   opened?: Deferred<void>;
   /* A turn that only starts the program, until the program has its tools. A person who types meanwhile takes its place. */
   starting?: boolean;
@@ -51,6 +57,7 @@ type Agent = {
   key: string;
   name: string;
   program: TermProgram | null;
+  signedOut: RegExp | null;
   home: string;
   workDir: string;
   /* What the running program was started with; a turn that needs anything else starts it again. */
@@ -203,9 +210,7 @@ export class TerminalHost {
 
   async stop(): Promise<void> {
     this.closeViews();
-    for (const a of this.agents.values()) {
-      if (a.watch) clearInterval(a.watch);
-    }
+    for (const a of this.agents.values()) this.unwatch(a);
     this.bridge.stop();
     await this.opts.tmux.stopAll();
   }
@@ -217,7 +222,7 @@ export class TerminalHost {
   private agent(key: string): Agent {
     let a = this.agents.get(key);
     if (!a) {
-      a = { key, name: `a-${key}`, program: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, viewers: 0, up: false, watch: null, saying: Promise.resolve(), queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null };
+      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, viewers: 0, up: false, watch: null, saying: Promise.resolve(), queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null };
       this.agents.set(key, a);
     }
     return a;
@@ -233,14 +238,14 @@ export class TerminalHost {
 
   private async turnIn(a: Agent, job: TermJob): Promise<RunResult> {
     const { input, program } = job;
-    const phase = input.terminalPhase?.matchesJob(job.jobId) ? input.terminalPhase : undefined;
-    if (phase) a.phaseStore = phase.store;
-    const fail = async (error: RunResult['error'], output?: string): Promise<RunResult> => ({ ok: false, sessionId: a.sessionId, result: '', output: output ?? (await this.screen(job.key)), error, limits: a.limits });
+    const phase = jobPhase(a, input, job.jobId);
+    const fail = (error: RunResult['error'], output?: string) => this.failedTurn(a, job, error, output);
     /* A turn a person typed may still run, or wait for the rest of its log; Hornhoof's turn goes in after it, or into it
        once the time Hornhoof gave this turn is over. Nothing stops the program: only its own end or a person does. */
     const deadline = Date.now() + input.timeoutMs;
     for (this.drain(a); a.busy && Date.now() < deadline; this.drain(a)) await sleep(this.pollMs);
     await a.settling;
+    a.signedOut = job.signedOut;
 
     mkdirSync(input.workDir, { recursive: true });
     const urls = this.bridge.agent(job.key);
@@ -263,7 +268,7 @@ export class TerminalHost {
     const sameSession = input.sessionId === null ? a.fresh : input.sessionId === a.sessionId || a.cleared.has(input.sessionId);
     const hashMatch = a.hash === hash;
     const goesOn = sameSession && hashMatch && (await this.alive(a, phase));
-    phase?.launch(goesOn ? a.sessionId : spec.sessionId, HOST_SOURCE_HASH, { goesOn, sameSession, hashMatch }, program.kind);
+    launchPhase(phase, goesOn, a.sessionId, spec.sessionId, HOST_SOURCE_HASH, { goesOn, sameSession, hashMatch }, program.kind);
     /* A program started with nothing to type gets its tools before its turn ends, while Hornhoof still answers for them.
        Kimi Code connects to its tools only once it has a session, which a new one gets with the first message. */
     const lazy = program.kind === 'kimi' && !input.sessionId;
@@ -293,10 +298,10 @@ export class TerminalHost {
         a.phaseWire = undefined;
         a.tail = this.tailFor(a);
         const env = { ...lasting(input.env), ...spec.env };
-        await this.opts.tmux.launch(a.name, { cwd: input.workDir, command: spec.command, cols: this.cols, rows: this.rows, envFile: envFile(input.workDir, env) });
+        await this.opts.tmux.launch(a.name, { cwd: input.workDir, command: spec.command, cols: this.cols, rows: this.rows, envFile: envFile(input.workDir, env), outputDir: input.workDir });
         this.watch(a);
         if (!(await this.ready(a, job))) {
-          phase?.readyFailed();
+          observePhase(phase, value => value.readyFailed());
           const screen = await this.screen(job.key);
           /* Its screen says why, which the loader would hide. */
           this.showViews(a);
@@ -309,54 +314,54 @@ export class TerminalHost {
         await tools;
         /* A person typed meanwhile: the program goes on with their turn, and the session is theirs to name. */
         if (a.turn !== turn) {
-          phase?.finish('superseded');
+          observePhase(phase, value => value.finish('superseded'));
           return { ok: true, sessionId: null, result: '', output: '', error: null, limits: a.limits };
         }
         if (!goesOn) a.fresh = input.sessionId === null;
-        phase?.finish('start_only');
+        observePhase(phase, value => value.finish('start_only'));
         return { ok: true, sessionId: a.fresh ? null : a.sessionId, result: '', output: '', error: null, limits: a.limits };
       }
       a.fresh = false;
       a.took = false;
-      phase?.pasted();
+      observePhase(phase, value => value.pasted());
       await this.opts.tmux.paste(a.name, input.prompt);
       await sleep(Math.min(3000, 300 + input.prompt.length / 20));
-      phase?.entered();
+      observePhase(phase, value => value.entered());
       await this.opts.tmux.keys(a.name, 'Enter');
       a.busy = true;
       /* A program that just started, or that still loads a long session it resumed, can miss the Enter and keep the prompt
          in its input: Enter again until it takes it. An Enter into an empty input does nothing. One that never takes it
          ends the turn with its screen, which says why, rather than leave the turn waiting for nothing. */
       const acceptEnd = Date.now() + this.readyMs;
-      phase?.waitStart('accept', acceptEnd - this.readyMs, this.readyMs);
+      observePhase(phase, value => value.waitStart('accept', acceptEnd - this.readyMs, this.readyMs));
       for (const end = acceptEnd; !(await this.tookPrompt(a, input.signal)); ) {
         if (Date.now() >= end) {
-          phase?.waitEnd('accept', 'deadline');
-          phase?.finish('accept_deadline');
+          observePhase(phase, value => value.waitEnd('accept', 'deadline'));
+          observePhase(phase, value => value.finish('accept_deadline'));
           a.busy = false;
           /* Its input still holds the prompt, so the next turn starts the program anew, resuming the session. */
           a.hash = null;
           return await fail('agent_failed', `The program did not take Hornhoof's prompt within ${Math.round(this.readyMs / 1000)} s.\n\n${await this.screen(job.key)}`);
         }
-        phase?.entered();
+        observePhase(phase, value => value.entered());
         await this.opts.tmux.keys(a.name, 'Enter');
       }
 
-      phase?.waitStart('done', Date.now(), null);
+      observePhase(phase, value => value.waitStart('done', Date.now(), null));
 
       for (;;) {
         this.drain(a);
         const message = await Promise.race([a.ended.promise, sleep(this.pollMs).then(() => null)]);
         if (message !== null) {
           if (a.stopped) {
-            phase?.waitEnd('done', 'aborted');
-            phase?.finish('cancelled');
+            observePhase(phase, value => value.waitEnd('done', 'aborted'));
+            observePhase(phase, value => value.finish('cancelled'));
             a.busy = false;
             return await fail('cancelled');
           }
           if (a.failure !== null) {
-            phase?.waitEnd('done', 'failed');
-            phase?.finish('wire_failed');
+            observePhase(phase, value => value.waitEnd('done', 'failed'));
+            observePhase(phase, value => value.finish('wire_failed'));
             const output = `${a.failure}\n\n${await this.screen(job.key)}`;
             return await fail(job.signedOut.test(a.failure) ? 'not_logged_in' : 'agent_failed', output);
           }
@@ -364,20 +369,20 @@ export class TerminalHost {
           await this.planLimits(a);
           /* A turn that ended with no answer keeps its screen, which says why, as when the provider refused the work. */
           const output = message.trim() ? '' : await this.screen(job.key);
-          phase?.completed();
+          observePhase(phase, value => value.completed());
           return { ok: true, sessionId: a.sessionId, result: message, output, error: null, limits: a.limits };
         }
         /* A program stopped with Escape does not say its turn ended: it waits for the next prompt. */
         if (input.signal?.aborted) {
           await this.opts.tmux.keys(a.name, 'Escape');
           await Promise.race([a.ended.promise, sleep(STOP_WAIT_MS)]);
-          phase?.waitEnd('done', 'aborted');
-          phase?.finish('cancelled');
+          observePhase(phase, value => value.waitEnd('done', 'aborted'));
+          observePhase(phase, value => value.finish('cancelled'));
           a.busy = false;
           return await fail('cancelled');
         }
         if (!(await this.alive(a, phase))) {
-          phase?.paneFailed();
+          observePhase(phase, value => value.paneFailed());
           a.busy = false;
           this.programEnded(a);
           const screen = await this.screen(job.key);
@@ -385,7 +390,7 @@ export class TerminalHost {
         }
       }
     } finally {
-      phase?.finish('host_exception');
+      observePhase(phase, value => value.finish('host_exception'));
       if (starting && a.starting === starting) a.starting = null;
       if (a.turn === turn) {
         this.bridge.setToken(job.key, null);
@@ -393,6 +398,12 @@ export class TerminalHost {
         a.ended = null;
       }
     }
+  }
+
+  private async failedTurn(a: Agent, job: TermJob, error: RunResult['error'], output?: string): Promise<RunResult> {
+    const ended = error === 'agent_failed' || error === 'not_logged_in' ? await this.opts.tmux.exitSnapshot(a.name) : null;
+    const details = ended?.output ?? output ?? await this.screen(job.key);
+    return { ok: false, sessionId: a.sessionId, result: '', output: details, programOutput: ended?.programOutput, error: exitError(ended?.output ?? null, job.signedOut, error), limits: a.limits };
   }
 
   /* While its program runs the host reads the agent's log, where a turn a person typed into Codex shows, and ends a typed
@@ -408,21 +419,31 @@ export class TerminalHost {
     a.watch.unref();
   }
 
+  private unwatch(a: Agent): void {
+    if (a.watch) clearInterval(a.watch);
+    a.watch = null;
+  }
+
   private async look(a: Agent): Promise<void> {
     this.drain(a);
     if (a.turn && !a.turn.typed) return;
-    const phase = a.turn?.phase;
+    const phase = turnPhase(a.turn);
     const alive = await this.alive(a, phase);
     if (a.turn && !a.turn.typed) return;
     if (!alive) {
-      phase?.paneFailed();
-      a.busy = false;
-      this.programEnded(a);
-      this.finishTyped(a, '', 'agent_failed', 'pane_unknown');
-      if (a.watch) clearInterval(a.watch);
-      a.watch = null;
-      return;
+      observePhase(phase, value => value.paneFailed());
+      await this.endedTyped(a);
     }
+  }
+
+  private async endedTyped(a: Agent): Promise<void> {
+    const turn = a.turn;
+    const ended = turn?.typed ? await this.opts.tmux.exitSnapshot(a.name) : null;
+    if (a.turn !== turn) return;
+    a.busy = false;
+    this.programEnded(a);
+    this.finishTyped(a, '', exitError(ended?.output ?? null, a.signedOut, 'agent_failed'), ended?.output ?? '', ended?.programOutput, 'pane_unknown');
+    this.unwatch(a);
   }
 
   /* A person cleared the conversation in Claude Code, which goes on in a new session with a log of its own; or Kimi Code
@@ -431,7 +452,7 @@ export class TerminalHost {
     if (sessionId === a.sessionId) return;
     if (a.sessionId) a.cleared.add(a.sessionId);
     a.sessionId = sessionId;
-    a.turn?.phase?.session(sessionId);
+    observePhase(turnPhase(a.turn), value => value.session(sessionId));
     if (a.program?.kind === 'claude') a.tail = this.newTail(a, claudeTranscript(a.home, realpathSync(a.workDir), sessionId));
     if (a.program?.kind === 'kimi') {
       a.tail = null;
@@ -456,7 +477,7 @@ export class TerminalHost {
   /* A person stopped the running turn with Escape. */
   private interrupted(a: Agent): void {
     a.busy = false;
-    if (a.turn?.typed) return this.finishTyped(a, '', 'cancelled', 'cancelled');
+    if (a.turn?.typed) return this.finishTyped(a, '', 'cancelled', '', undefined, 'cancelled');
     a.stopped = true;
     a.ended?.resolve('');
   }
@@ -464,15 +485,15 @@ export class TerminalHost {
   /* Whether within enterWaitMs the program took the prompt Hornhoof typed, ended its turn or ended itself, or the turn
      was called off: the turn goes on from there without another Enter. */
   private async tookPrompt(a: Agent, signal?: AbortSignal): Promise<boolean> {
-    const phase = a.turn?.phase;
+    const phase = turnPhase(a.turn);
     let ended = false;
     void a.ended?.promise.then(() => (ended = true));
     for (const end = Date.now() + this.enterWaitMs; Date.now() < end; await sleep(this.pollMs)) {
       this.drain(a);
-      if (a.took) { phase?.acceptEnd('accepted', 'unknown'); return true; }
-      if (ended) { phase?.acceptEnd('ended', 'ended'); return true; }
-      if (signal?.aborted) { phase?.acceptEnd('aborted', 'aborted'); return true; }
-      if (!(await this.alive(a, phase))) { phase?.acceptEnd(phase.paneOutcome(), phase.paneOutcome()); return true; }
+      if (a.took) { observePhase(phase, value => value.acceptEnd('accepted', 'unknown')); return true; }
+      if (ended) { observePhase(phase, value => value.acceptEnd('ended', 'ended')); return true; }
+      if (signal?.aborted) { observePhase(phase, value => value.acceptEnd('aborted', 'aborted')); return true; }
+      if (!(await this.alive(a, phase))) { observePhase(phase, value => value.acceptEnd(value.paneOutcome(), value.paneOutcome())); return true; }
     }
     return false;
   }
@@ -481,38 +502,38 @@ export class TerminalHost {
      prompt also when it is not signed in, with a word to sign in. */
   private async ready(a: Agent, job: TermJob): Promise<boolean> {
     const end = Date.now() + this.readyMs;
-    const phase = a.turn?.phase;
-    phase?.waitStart('ready', end - this.readyMs, this.readyMs);
+    const phase = turnPhase(a.turn);
+    observePhase(phase, value => value.waitStart('ready', end - this.readyMs, this.readyMs));
     while (Date.now() < end) {
       if (!(await this.alive(a, phase))) {
-        phase?.waitEnd('ready', phase.paneOutcome());
+        observePhase(phase, value => value.waitEnd('ready', value.paneOutcome()));
         return false;
       }
       const kind = job.program.kind;
       if (kind === 'claude') {
         if (await Promise.race([a.started!.promise.then(() => true), sleep(this.pollMs).then(() => false)])) {
-          phase?.waitEnd('ready', 'matched');
+          observePhase(phase, value => value.waitEnd('ready', 'matched'));
           return true;
         }
       } else {
         const screen = await this.screen(a.key);
         if (kind === 'kimi' && job.signedOut.test(screen)) {
-          phase?.waitEnd('ready', 'signed_out');
+          observePhase(phase, value => value.waitEnd('ready', 'signed_out'));
           return false;
         }
         if (READY[kind](screen)) {
           await sleep(500);
-          phase?.waitEnd('ready', 'matched');
+          observePhase(phase, value => value.waitEnd('ready', 'matched'));
           return true;
         }
         await sleep(this.pollMs);
       }
       if (job.signedOut.test(await this.screen(a.key))) {
-        phase?.waitEnd('ready', 'signed_out');
+        observePhase(phase, value => value.waitEnd('ready', 'signed_out'));
         return false;
       }
     }
-    phase?.waitEnd('ready', 'deadline');
+    observePhase(phase, value => value.waitEnd('ready', 'deadline'));
     return false;
   }
 
@@ -537,11 +558,13 @@ export class TerminalHost {
     return new LineTail(file, { fromEnd });
   }
 
-  private observeWire(a: Agent, phase: PhaseAttempt | undefined, before: number | null, after: number | null, data: unknown = null): boolean {
+  private observeWire(a: Agent, before: number | null, after: number | null, data: unknown = null): PhaseAttempt | undefined {
     const wire = a.phaseWire;
-    if (!phase || !wire) return false;
-    if (a.program?.kind === 'kimi' && kimiChild(data)) return false;
-    return phase.wire({ source: wire.source, pathHash: phaseHash(wire.file), sessionHash: phaseHash(a.sessionId), sizeBefore: before, sizeAfter: after, recordType: data === null ? null : wireRecordType(data) });
+    const phase = turnPhase(a.turn);
+    if (!phase || !wire) return undefined;
+    if (a.program?.kind === 'kimi' && kimiChild(data)) return undefined;
+    const accepted = phase.wire({ source: wire.source, pathHash: phaseHash(wire.file), sessionHash: phaseHash(a.sessionId), sizeBefore: before, sizeAfter: after, recordType: data === null ? null : wireRecordType(data) });
+    return accepted ? phase : undefined;
   }
 
   /* What the program wrote to its log since last time: events for the turn, Codex's limits, session and turn end. */
@@ -550,7 +573,7 @@ export class TerminalHost {
       const found = findRollout(a.home, a.workDir, a.startedAt - 2000);
       if (found) {
         a.sessionId = found.sessionId;
-        a.turn?.phase?.session(found.sessionId);
+        observePhase(turnPhase(a.turn), value => value.session(found.sessionId));
         a.tail = this.newTail(a, found.file);
       }
     }
@@ -559,10 +582,10 @@ export class TerminalHost {
       const wire = findKimiWire(a.home, a.sessionId);
       if (wire) a.tail = this.newTail(a, wire);
     }
-    const before = a.phaseWire ? wireSize(a.phaseWire.file) : null;
+    const before = observedWireSize(a.phaseWire, wireSize);
     const lines = a.tail?.read() ?? [];
-    const after = a.phaseWire ? wireSize(a.phaseWire.file) : null;
-    this.observeWire(a, a.turn?.phase, before, after);
+    const after = observedWireSize(a.phaseWire, wireSize);
+    this.observeWire(a, before, after);
     for (const line of lines) {
       let data: unknown;
       try {
@@ -571,30 +594,27 @@ export class TerminalHost {
         continue;
       }
       if (a.program?.kind === 'claude') {
-        this.observeWire(a, a.turn?.phase, before, after, data);
+        this.observeWire(a, before, after, data);
         if (this.stoppable(a) && claudeInterrupted(data)) this.interrupted(a);
         for (const e of claudeEvents(data)) this.emit(a, e);
         continue;
       }
       if (a.program?.kind === 'kimi') {
-        const phase = a.turn?.phase;
-        const observed = this.observeWire(a, phase, before, after, data);
-        this.kimiNews(a, kimiWire(data), observed ? phase : undefined);
+        this.kimiNews(a, kimiWire(data), this.observeWire(a, before, after, data));
         continue;
       }
       const news = codexRollout(data);
       if (news.typed !== undefined && (!a.turn || a.turn.starting)) void this.openTyped(a, news.typed, true);
-      const phase = a.turn?.phase;
-      const observed = this.observeWire(a, phase, before, after, data);
+      const phase = this.observeWire(a, before, after, data);
       for (const e of news.events) this.emit(a, e);
       if (news.limits) a.limits = news.limits;
       if (news.context !== undefined) this.context(a, news.context);
-      if (news.session) { a.sessionId = news.session.id; phase?.session(news.session.id); }
-      if (news.started) { if (observed) phase?.ack('rollout.task_started'); a.busy = a.took = true; }
+      if (news.session) { const sessionId = news.session.id; a.sessionId = sessionId; observePhase(phase, value => value.session(sessionId)); }
+      if (news.started) { observePhase(phase, value => value.ack('rollout.task_started')); a.busy = a.took = true; }
       /* A stop logged before the running turn's prompt went in belongs to the last turn. */
       if (news.aborted && !this.stoppable(a)) continue;
       if (news.ended || news.aborted) {
-        if (observed) phase?.end('wire', news.aborted ? 'aborted' : 'completed');
+        wireEndPhase(phase, news.aborted);
         const message = news.ended?.message ?? '';
         a.busy = false;
         if (news.aborted) this.interrupted(a);
@@ -617,7 +637,7 @@ export class TerminalHost {
       if (a.stepSaid) a.lastText = (before ?? '') + e.text;
       a.stepSaid = true;
     }
-    if (news.started) { phase?.ack('wire.turn.prompt'); a.busy = a.took = true; }
+    if (news.started) { observePhase(phase, value => value.ack('wire.turn.prompt')); a.busy = a.took = true; }
     if (!(news.ended || news.aborted || news.failed !== undefined)) return;
     /* An end logged before the running turn's prompt went in belongs to the last turn, but a blocked prompt is the running
        turn's own: it never starts. With no turn, the program is free. */
@@ -625,11 +645,11 @@ export class TerminalHost {
       if (!a.turn) a.busy = false;
       return;
     }
-    phase?.end('wire', news.aborted ? 'aborted' : news.failed !== undefined ? 'failed' : 'completed');
+    wireEndPhase(phase, news.aborted, news.failed !== undefined);
     a.busy = false;
     if (news.aborted) return this.interrupted(a);
     const message = a.lastText ?? '';
-    if (a.turn?.typed) return this.finishTyped(a, news.failed === undefined ? message : '', news.failed === undefined ? null : 'agent_failed', news.failed === undefined ? 'wire_completed' : 'wire_failed');
+    if (a.turn?.typed) return this.finishTyped(a, news.failed === undefined ? message : '', news.failed === undefined ? null : 'agent_failed', '', undefined, wireFinish(news.failed));
     if (news.failed !== undefined) a.failure = news.failed;
     a.ended?.resolve(news.failed === undefined ? message : '');
   }
@@ -684,16 +704,16 @@ export class TerminalHost {
         return;
       }
       case 'prompt':
-        if (typeof data.session_id === 'string' && a.turn?.phase?.matchesSession(data.session_id)) a.turn.phase.ack('hook');
+        hookPhase(turnPhase(a.turn), data.session_id, 'prompt');
         a.took = true;
         await a.settling;
         a.busy = true;
         /* Kimi Code hands the prompt as parts of a message. */
-        if (!a.turn || a.turn.starting) await this.openTyped(a, typeof data.prompt === 'string' ? data.prompt : contentText(data.prompt), false, typeof data.session_id === 'string' ? data.session_id : undefined);
+        if (!a.turn || a.turn.starting) await this.openTyped(a, typeof data.prompt === 'string' ? data.prompt : contentText(data.prompt), false, data.session_id);
         return;
       case 'stop': {
         this.drain(a);
-        if (typeof data.session_id === 'string' && a.turn?.phase?.matchesSession(data.session_id)) a.turn.phase.end('hook', 'completed');
+        hookPhase(turnPhase(a.turn), data.session_id, 'stop');
         a.busy = false;
         if (typeof data.session_id === 'string') this.follow(a, data.session_id);
         const message = String(data.last_assistant_message ?? '');
@@ -702,7 +722,7 @@ export class TerminalHost {
         if (turn?.typed) {
           a.settling = this.settle(a, message)
             .then(() => {
-              if (a.turn === turn) this.finishTyped(a, message, null, 'hook_completed');
+              if (a.turn === turn) this.finishTyped(a, message, null, '', undefined, 'hook_completed');
             })
             .finally(() => (a.settling = null));
         } else a.ended?.resolve(message);
@@ -715,17 +735,14 @@ export class TerminalHost {
      it, so the agent has its tools and the turn shows like any other. Claude Code waits in its hook for Hornhoof's answer,
      for a while; Codex goes on, and what it does waits in the turn. fromLog: the typing was read from the log, which is
      being read now. */
-  private async openTyped(a: Agent, text: string, fromLog = false, observedSession?: string): Promise<void> {
+  private async openTyped(a: Agent, text: string, fromLog = false, observedSession?: unknown): Promise<void> {
     const start = a.starting;
     a.fresh = false;
     if (!fromLog) this.drain(a);
     a.lastText = null;
     a.stepSaid = false;
     const ref = randomUUID();
-    const phase = a.phaseStore?.begin(a.key, null, 'typed', ref);
-    phase?.launch(a.sessionId, HOST_SOURCE_HASH, { goesOn: null, sameSession: null, hashMatch: null }, a.program?.kind ?? null);
-    phase?.waitStart('done', Date.now(), null);
-    if (!fromLog && observedSession && phase?.matchesSession(observedSession)) phase.ack('hook');
+    const phase = typedPhase(a.phaseStore, a.key, ref, a.sessionId, HOST_SOURCE_HASH, a.program, fromLog, observedSession);
     const turn: Turn = { jobId: null, onEvent: () => {}, typed: true, seq: 0, ref, early: [], over: null, opened: deferred(), phase };
     a.turn = turn;
     a.unopened.push(turn);
@@ -756,40 +773,39 @@ export class TerminalHost {
       if (m.jobId) this.opts.send({ type: 'job.done', jobId: m.jobId, ok: false, sessionId: a?.sessionId ?? null, result: 'Stopped.', tail: '', error: 'cancelled' });
       return;
     }
-    if (m.jobId && m.toolToken) turn.phase?.bind(m.jobId, m.ref);
+    bindTurnPhase(turn, m.jobId, m.toolToken, m.ref);
     a.unopened.splice(at, 1);
     const early = turn.early ?? [];
     turn.early = null;
     if (m.jobId && m.toolToken) {
       turn.jobId = m.jobId;
+      turn.toolToken = m.toolToken;
       if (a.turn === turn) this.bridge.setToken(a.key, m.toolToken);
       for (const e of early) this.typedEvent(turn, e);
     }
     turn.opened?.resolve();
-    if (turn.over) this.typedDone(turn, turn.over.message, turn.over.error, turn.over.sessionId);
+    if (turn.over) this.typedDone(turn, turn.over.message, turn.over.error, turn.over.sessionId, turn.over.output, turn.over.programOutput, turn.over.phaseSummary);
   }
 
-  private finishTyped(a: Agent, message: string, error: JobError = null, reason: Finish = 'wire_completed'): void {
+  private finishTyped(a: Agent, message: string, error: JobError = null, output = '', programOutput?: ProgramOutput, reason: Finish = 'wire_completed'): void {
     const turn = a.turn;
     if (!turn?.typed) return;
-    turn.phase?.waitEnd('done', error === 'cancelled' ? 'aborted' : error ? 'failed' : 'completed');
-    turn.phase?.finish(reason);
-    turn.phase?.complete(!error, error === 'cancelled');
+    const phaseSummary = completeTypedPhase(turn.phase, error, reason);
     a.turn = null;
     if (a.sessionId) this.opts.remember?.(a.sessionId, a.workDir);
     this.bridge.setToken(a.key, null);
     /* Hornhoof hears the limits with the next turn it runs. */
     void this.planLimits(a);
     /* Hornhoof has not answered yet: the end goes out with its answer. */
-    if (turn.early) turn.over = { message, error, sessionId: a.sessionId };
-    else this.typedDone(turn, message, error, a.sessionId);
+    if (turn.early) turn.over = { message, error, sessionId: a.sessionId, output, programOutput, phaseSummary };
+    else this.typedDone(turn, message, error, a.sessionId, output, programOutput, phaseSummary);
   }
 
-  private typedDone(turn: Turn, message: string, error: JobError, sessionId: string | null): void {
+  private typedDone(turn: Turn, message: string, error: JobError, sessionId: string | null, output: string, programOutput?: ProgramOutput, phaseSummary?: PhaseSummary): void {
     if (!turn.jobId) return;
-    const result = error === 'cancelled' ? 'Stopped.' : error ? '' : redact(message, this.opts.secrets());
-    if (turn.phase && (error || !turn.phase.isDurable())) this.typedEvent(turn, { kind: 'tool_result', ok: false, summary: turn.phase.summary() });
-    this.opts.send({ type: 'job.done', jobId: turn.jobId, ok: !error, sessionId, result, tail: error ? turn.phase?.summary() ?? '' : '', error });
+    const result = error === 'cancelled' ? 'Stopped.' : error ? '' : message;
+    const completed = completePhase(turn.phase, { ok: !error, sessionId, result, output, programOutput, error, limits: null }, event => this.typedEvent(turn, event), phaseSummary);
+    this.opts.send(jobDone(turn.jobId, completed, [...this.opts.secrets(), ...(turn.toolToken ? [turn.toolToken] : [])]));
   }
 
   /* Turns people typed that run now: they count as running when the node says hello again. */
@@ -810,12 +826,12 @@ export class TerminalHost {
   private async sayIn(a: Agent, text: string): Promise<boolean> {
     /* Hornhoof's own prompt goes in first, or the words would join it in the program's input. */
     for (const end = Date.now() + ENTER_TRIES * this.enterWaitMs; a.turn && !a.turn.typed && !a.took && Date.now() < end; ) await sleep(this.pollMs);
-    const phase = a.turn?.phase;
+    const phase = turnPhase(a.turn);
     if (!a.turn || a.turn.starting || (!a.turn.typed && !a.took) || !(await this.alive(a, phase))) return false;
-    phase?.pasted();
+    observePhase(phase, value => value.pasted());
     await this.opts.tmux.paste(a.name, text);
     await sleep(Math.min(3000, 300 + text.length / 20));
-    phase?.entered();
+    observePhase(phase, value => value.entered());
     await this.opts.tmux.keys(a.name, 'Enter');
     return true;
   }
@@ -826,7 +842,7 @@ export class TerminalHost {
     if (!a) return;
     await this.opts.tmux.keys(a.name, 'Escape');
     a.busy = false;
-    this.finishTyped(a, '', 'cancelled', 'cancelled');
+    this.finishTyped(a, '', 'cancelled', '', undefined, 'cancelled');
   }
 
   /* The agent's views hear when its program comes up or goes. */

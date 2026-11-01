@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { API_MODELS, CLAUDE_ALIASES, type AgentEvent, type Limits } from '@hornhoof/protocol';
 import type { JobUser } from '../isolation.js';
 import type { ProviderAdapter, RunInput, RunResult } from '../runner.js';
+import { withProgramExit } from '../program-exit.js';
 import { claudePlanLimits } from '../terminal/programs.js';
 import { contentText, inputText, isRecord, toolName } from './events.js';
 import { askHidden, childEnv, ensureDir, exitsCleanly, installPackage, interactiveLogin, runProgram, tokensIn, writePrivate } from './process.js';
@@ -171,12 +172,13 @@ export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'),
 
       /* Assigned in onLine, which TypeScript does not follow. */
       const final = result as Outcome | null;
-      if (done.timedOut) return { ok: false, sessionId, result: '', output: done.output, error: 'timeout', limits };
+      const ended = withProgramExit(done.output, done);
+      if (done.timedOut) return { ok: false, sessionId, result: '', ...ended, error: 'timeout', limits };
       if (final && !final.isError && done.code === 0) return { ok: true, sessionId, result: final.text, output: done.output, error: null, limits };
       const out = signedOut || SIGNED_OUT.test(final?.text ?? '');
       /* A GLM key Z.ai rejects is dropped, so the status says signed out and the next sign-in asks for a new key. */
       if (out && mode === 'glm') rmSync(keyFile, { force: true });
-      return { ok: false, sessionId, result: final?.text ?? '', output: done.output, error: out ? 'not_logged_in' : 'agent_failed', limits };
+      return { ok: false, sessionId, result: final?.text ?? '', ...ended, error: out ? 'not_logged_in' : 'agent_failed', limits };
     },
 
     async secrets() {

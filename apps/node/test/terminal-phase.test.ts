@@ -11,6 +11,8 @@ import { rememberSession } from '../src/state.js';
 import { TerminalHost } from '../src/terminal/host.js';
 import { codexProgram, kimiProgram } from '../src/terminal/programs.js';
 import { Tmux } from '../src/terminal/tmux.js';
+import { withProgramExit } from '../src/program-exit.js';
+import { Bridge } from '../src/terminal/bridge.js';
 
 vi.mock('node:fs', async importOriginal => {
   const actual = await importOriginal<typeof import('node:fs')>();
@@ -56,6 +58,8 @@ function fixture(screen: string, kind: 'kimi' | 'codex' = 'kimi') {
   const pane = { dead: false, queryFails: false, screen, paste: 0, enter: 0 };
   const tmux = new Tmux({ socket: 'isolated-phase-run-stub', env: { PATH: 'fixture-only' } });
   mockPane(tmux, pane);
+  /* The synthetic program is already available; no capture writer or CLI is started. */
+  vi.spyOn(tmux, 'launch').mockResolvedValue();
   const events: AgentEvent[] = [];
   const messages: NodeMessage[] = [];
   const host = new TerminalHost({ tmux, hornhoof: 'http://127.0.0.1:9', send: m => messages.push(m), secrets: () => [CANARY], readyMs: 2000, pollMs: 25, enterWaitMs: 100, toolsMs: 100 });
@@ -75,7 +79,7 @@ function fixture(screen: string, kind: 'kimi' | 'codex' = 'kimi') {
     return runJob(adapter(message.jobId), message, root, { untimed: true, signal, onEvent: e => events.push(e) });
   };
   const appendWire = (value: unknown) => appendFileSync(wire, `${JSON.stringify(value)}\n`);
-  return { root, home, host, pane, job, events, messages, wire, run, appendWire };
+  return { root, home, host, tmux, pane, job, events, messages, wire, run, appendWire };
 }
 
 function snapshots(root: string): unknown[] {
@@ -111,6 +115,97 @@ afterEach(async () => {
 });
 
 describe('durable current terminal attempt', () => {
+  it.each(['completed', 'failed'] as const)('observes a typed Kimi %s through the hook, wire and exact pre-ack binding', async reason => {
+    const test = fixture('context: 42%');
+    await test.host.start();
+    const starting = test.run({ prompt: '' });
+    await advance(800);
+    expect(await starting).toMatchObject({ ok: true });
+    const bridge: unknown = Reflect.get(test.host, 'bridge');
+    if (!(bridge instanceof Bridge)) throw new Error('Expected the local hook bridge.');
+    const request = fetch(`${bridge.agent(AGENT).hookUrl}/prompt`, { method: 'POST', body: JSON.stringify({ session_id: SESSION, prompt: 'synthetic typed request' }) });
+    for (let tick = 0; tick < 100 && !test.messages.some(message => message.type === 'turn.open'); tick++) await advance(25);
+    const opened = test.messages.find(message => message.type === 'turn.open');
+    if (!opened || opened.type !== 'turn.open' || !opened.ref) throw new Error('Expected the typed Kimi ref.');
+    const ref = opened.ref;
+    test.appendWire({ type: 'turn.ended', reason, error: { message: CANARY } });
+    const completed = () => recordsForRef(test.root, ref).some(record => isRecord(record) && record.outcome !== null);
+    for (let tick = 0; tick < 100 && !completed(); tick++) await advance(25);
+    expect(completed()).toBe(true);
+    expect(test.messages.some(message => message.type === 'job.done')).toBe(false);
+    const jobId = '00000000-0000-4000-8000-000000000076';
+    test.host.opened({ type: 'turn.opened', agentKey: AGENT, ref, jobId, toolToken: CANARY });
+    expect((await request).status).toBe(200);
+    expect(test.messages).toContainEqual(expect.objectContaining({ type: 'job.done', jobId, ok: reason === 'completed', error: reason === 'completed' ? null : 'agent_failed' }));
+    expect(recordsForRef(test.root, ref).at(-1)).toMatchObject({ jobId, ack: 'hook', finish: reason === 'completed' ? 'wire_completed' : 'wire_failed' });
+    expect(test.pane).toMatchObject({ paste: 0, enter: 0 });
+    expect(JSON.stringify(snapshots(test.root)) + JSON.stringify(test.messages)).not.toContain(CANARY);
+  });
+
+  it('observes hook acceptance and completion through the actual local Bridge without a provider call', async () => {
+    const test = fixture('context: 42%');
+    await test.host.start();
+    const bridge: unknown = Reflect.get(test.host, 'bridge');
+    if (!(bridge instanceof Bridge)) throw new Error('Expected the local hook bridge.');
+    const url = bridge.agent(AGENT).hookUrl;
+    const pending = test.run();
+    for (let tick = 0; tick < 100 && test.pane.enter < 1; tick++) await advance(25);
+    expect(test.pane.enter).toBe(1);
+    const prompt = await fetch(`${url}/prompt`, { method: 'POST', body: JSON.stringify({ session_id: SESSION, prompt: CANARY }) });
+    expect(prompt.status).toBe(200);
+    await advance(50);
+    const stop = await fetch(`${url}/stop`, { method: 'POST', body: JSON.stringify({ session_id: SESSION, last_assistant_message: 'synthetic hook answer' }) });
+    expect(stop.status).toBe(200);
+    await advance(50);
+    expect(await pending).toMatchObject({ ok: true, result: 'synthetic hook answer' });
+    expect(snapshots(test.root).at(-1)).toMatchObject({ ack: 'hook', endSource: 'hook', finish: 'hook_completed', outcome: 'ok' });
+    expect(test.pane).toMatchObject({ paste: 1, enter: 1 });
+    expect(JSON.stringify(snapshots(test.root))).not.toContain(CANARY);
+  });
+
+  it('relays a completed pre-ack typed phase and raw capture only to its matching job while a neighbor is active', async () => {
+    const test = fixture('OpenAI Codex\n›', 'codex');
+    const starting = test.run({ prompt: '' });
+    await advance(800);
+    expect(await starting).toMatchObject({ ok: true });
+    const typed = () => test.appendWire({ type: 'event_msg', payload: { type: 'item_completed', item: { type: 'UserMessage', content: [{ text: 'synthetic typed request' }] } } });
+    typed();
+    for (let tick = 0; tick < 50 && !test.messages.some(message => message.type === 'turn.open'); tick++) await advance(25);
+    const first = test.messages.find(message => message.type === 'turn.open');
+    if (!first || first.type !== 'turn.open' || !first.ref) throw new Error('Expected a typed turn ref.');
+    const original = recordsForRef(test.root, first.ref).at(-1);
+    if (!isRecord(original)) throw new Error('Expected an unbound durable typed attempt.');
+    const capture = `${CANARY}\n${Array.from({ length: 80 }, (_, i) => `raw-${i} ${'x'.repeat(100)}`).join('\n')}`;
+    const exit = withProgramExit(capture, { code: 3, signal: null, at: '2026-11-01T00:00:00.000Z' }, false);
+    vi.spyOn(test.tmux, 'exitSnapshot').mockResolvedValue({ ...exit, complete: false });
+    test.pane.dead = true;
+    const firstRef = first.ref;
+    const closed = () => recordsForRef(test.root, firstRef).some(record => isRecord(record) && record.outcome === 'failed');
+    for (let tick = 0; tick < 50 && !closed(); tick++) await advance(25);
+    expect(closed()).toBe(true);
+    expect(test.messages.some(message => message.type === 'job.done')).toBe(false);
+    expect(recordsForRef(test.root, first.ref).at(-1)).toMatchObject({ jobId: null, finish: 'pane_dead', outcome: 'failed' });
+    test.pane.dead = false;
+    typed();
+    for (let tick = 0; tick < 50 && test.messages.filter(message => message.type === 'turn.open').length < 2; tick++) await advance(25);
+    const opened = test.messages.filter(message => message.type === 'turn.open');
+    expect(opened).toHaveLength(2);
+    const neighbor = opened[1]!;
+    if (neighbor.type !== 'turn.open' || !neighbor.ref) throw new Error('Expected the neighboring typed ref.');
+    const typedJob = '00000000-0000-4000-8000-000000000076';
+    test.host.opened({ type: 'turn.opened', agentKey: AGENT, ref: first.ref, jobId: typedJob, toolToken: CANARY });
+    const done = test.messages.find(message => message.type === 'job.done' && message.jobId === typedJob);
+    if (!done || done.type !== 'job.done') throw new Error('Expected the old typed completion.');
+    expect(done).toMatchObject({ ok: false, error: 'agent_failed' });
+    expect(done.tail.slice(-400)).toContain(`attempt=${original.attemptId}`);
+    expect(done.tail.slice(-400)).toContain('finish=pane_dead');
+    expect(done.tail.endsWith('Program ended: code 3, signal none, at 2026-11-01T00:00:00.000Z')).toBe(true);
+    expect(done.tail).not.toContain(CANARY);
+    expect(recordsForRef(test.root, first.ref).at(-1)).toMatchObject({ jobId: typedJob, event: 'bind' });
+    expect(recordsForRef(test.root, neighbor.ref).at(-1)).toMatchObject({ jobId: null, finish: null });
+    expect(test.messages.filter(message => message.type === 'job.done')).toHaveLength(1);
+  });
+
   it('has a readable correlated READY failure before the runner completes the job', async () => {
     const test = fixture('still loading without a READY footer');
     const pending = test.run();

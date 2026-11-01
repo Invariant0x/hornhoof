@@ -6,7 +6,7 @@ import { basename, join } from 'node:path';
 import type { AgentEvent, ServerMessage } from '@hornhoof/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PHASE_BYTES, PHASE_RECORDS, PhaseStore, phaseHash, sourceHash } from '../src/terminal/phase.js';
-import { runJob, type ProviderAdapter, type RunResult } from '../src/runner.js';
+import { runJob, type ProviderAdapter, type RunInput, type RunResult } from '../src/runner.js';
 
 vi.mock('node:fs', async importOriginal => {
   const actual = await importOriginal<typeof import('node:fs')>();
@@ -43,8 +43,8 @@ function launch(phase: ReturnType<typeof attempt>): void {
   phase.launch('synthetic-session', sourceHash(import.meta.url), { goesOn: false, sameSession: false, hashMatch: false });
 }
 
-function runWithResult(dir: string, result: RunResult, events: AgentEvent[]) {
-  const run = vi.fn(async () => result);
+function runWithResult(dir: string, result: RunResult, events: AgentEvent[], observe?: (input: RunInput) => void) {
+  const run = vi.fn(async (input: RunInput) => { observe?.(input); return result; });
   const adapter: ProviderAdapter = { install: async () => {}, loggedIn: async () => true, login: async () => {}, secrets: async () => [CANARY], run };
   const message: Extract<ServerMessage, { type: 'job.run' }> = { type: 'job.run', jobId: JOB, provider: 'kimi', subscriptionId: 'synthetic', prompt: 'synthetic', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null, workspace: { key: AGENT, repo: null } };
   return { run, pending: runJob(adapter, message, dir, { untimed: true, onEvent: event => events.push(event) }) };
@@ -61,6 +61,52 @@ afterEach(() => {
 });
 
 describe('bounded durable terminal phase storage', () => {
+  it('never borrows another attempt summary from an adapter result for the current dispatched job', async () => {
+    const dir = root();
+    const foreign = new PhaseStore(dir).begin(AGENT, '00000000-0000-4000-8000-000000000076', 'queued');
+    foreign.complete(false, false);
+    const stale = foreign.diagnostic();
+    let current: string | null = null;
+    const result: RunResult = { ok: false, result: '', output: '', error: 'agent_failed', sessionId: null, limits: null,
+      programOutput: { text: 'original failure', complete: true, code: 3, signal: null, at: '2026-11-01T00:00:00.000Z' }, phaseSummary: stale };
+    const test = runWithResult(dir, result, [], input => { current = input.terminalPhase?.diagnostic().attemptId ?? null; });
+    const done = await test.pending;
+    expect(current).not.toBe(null);
+    expect(done.tail).toContain(`attempt=${current}`);
+    expect(done.tail).not.toContain(`attempt=${stale.attemptId}`);
+    expect(done).toMatchObject({ ok: false, error: 'agent_failed' });
+  });
+
+  it('rejects a seventeenth immutable snapshot while preserving readable evidence and the original job failure', async () => {
+    const dir = root();
+    let kept: (readonly [string, Buffer])[] = [];
+    const events: AgentEvent[] = [];
+    const original: RunResult = { ok: false, result: '', output: 'original provider failure', error: 'agent_failed', sessionId: null, limits: null };
+    const test = runWithResult(dir, original, events, input => {
+      const phase = input.terminalPhase;
+      if (!phase) throw new Error('Expected the current job attempt.');
+      const record = phase.toJSON();
+      let previousHash = createHash('sha256').update(readFileSync(records(dir)[0]!)).digest('hex');
+      for (let seq = 2; seq <= PHASE_RECORDS; seq++) {
+        const receipt = phase.store.persist({ ...record, seq, previousHash, event: 'completion', finish: 'runner_result', outcome: 'failed' });
+        expect(receipt.durable).toBe(true);
+        if (!receipt.hash) throw new Error('Expected a verified durable hash.');
+        previousHash = receipt.hash;
+      }
+      kept = records(dir).map(file => [file, readFileSync(file)] as const);
+      const overflow = phase.store.persist({ ...record, seq: PHASE_RECORDS + 1, event: 'completion', outcome: 'failed' });
+      expect(overflow).toMatchObject({ durable: false, code: 'record_limit', hash: null });
+      expect(phase.store.persist({ ...record, seq: 0 })).toMatchObject({ durable: false, code: 'record_limit', hash: null });
+      expect(phase.store.persist({ ...record, seq: Number.NaN })).toMatchObject({ durable: false, code: 'record_limit', hash: null });
+      expect(records(dir)).toHaveLength(16);
+      expect(JSON.parse(kept.at(-1)![1].toString())).toMatchObject({ jobId: JOB, seq: 16, outcome: 'failed' });
+    });
+    expect(await test.pending).toMatchObject({ ok: false, error: 'agent_failed', tail: expect.stringContaining('original provider failure') });
+    expect(test.run).toHaveBeenCalledTimes(1);
+    expect(records(dir)).toHaveLength(16);
+    for (const [file, bytes] of kept) expect(readFileSync(file)).toEqual(bytes);
+  });
+
   it('publishes complete private JSON only after file fsync, then fsyncs the directory', () => {
     const dir = root();
     const order: string[] = [];

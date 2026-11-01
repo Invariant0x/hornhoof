@@ -9,6 +9,7 @@ import { agentEvents, agents, companies, departments, jobs, requests, subscripti
 import { createTask } from '../src/modules/tasks/engine.js';
 import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until } from './helpers.js';
 import { agentState, enqueueTurn } from '../src/modules/conversation/queue.js';
+import { jobDone } from '../../node/src/runner.js';
 
 const TOKEN = 'tool-token-watch-0123456789abcdef0123';
 const NODE_KEY = 'k'.repeat(40);
@@ -35,7 +36,7 @@ async function company(skills: string[]) {
   await until(async () => (await agentState(app.ctx, bruno.id)).ready);
   await db.insert(jobs).values({ companyId: acme!.id, subscriptionId: sub!.id, agentId: wendy.id, kind: 'conversation', prompt: 'round', timeoutMs: 900000, status: 'running', toolTokenHash: hashToken(TOKEN) });
   const task = (await createTask(app.ctx, { agentId: hana.id }, { title: 'Checkout API', brief: '', body: 'POST /checkout.', departmentId: dev!.id, assigneeAgentId: bruno.id, executor: true, gates: [] })).task;
-  return { app, db, ceo, dev: dev!, acme: acme!, sub: sub!, wendy, hana, bruno, task };
+  return { app, db, ceo, builtin, dev: dev!, acme: acme!, sub: sub!, wendy, hana, bruno, task };
 }
 
 async function mcp(app: FastifyInstance): Promise<Client> {
@@ -51,6 +52,27 @@ const call = async (client: Client, name: string, args: object = {}) => (await c
 const names = async (client: Client) => (await client.listTools()).tools.map(t => t.name);
 
 describe('tools a skill grants', () => {
+  it('keeps terminal phase, incomplete capture and trusted exit in the actual failure collector preview', async () => {
+    const { app, db, acme, sub, bruno, builtin } = await company(['ops-failure-review']);
+    const [running] = await db.insert(jobs).values({ companyId: acme.id, subscriptionId: sub.id, agentId: bruno.id,
+      kind: 'conversation', prompt: 'synthetic phase check', timeoutMs: 1000, status: 'running' }).returning();
+    const secret = 'synthetic-capture-secret\nsynthetic-secret-suffix';
+    const raw = `${secret}\n${Array.from({ length: 80 }, (_, i) => `raw-${i} ${'x'.repeat(100)}`).join('\n')}`;
+    const done = jobDone(running!.id, { ok: false, sessionId: null, result: '', output: '', error: 'agent_failed', limits: null,
+      programOutput: { text: raw, code: 3, signal: null, at: '2026-11-01T00:00:00.000Z', complete: false },
+      phaseSummary: { attemptId: '00000000-0000-4000-8000-000000000074', seq: 16, phase: 'done', finish: 'pane_query_failed', durable: false, code: 'record_limit' } }, [secret]);
+    builtin.send(done);
+    await until(async () => (await db.select().from(jobs).where(eq(jobs.id, running!.id)))[0]?.status === 'failed');
+    const recent = JSON.parse((await call(await mcp(app), 'failures', { hours: 6 })).content[0]!.text) as { failed: { agent: string; error: string; tail: string }[] };
+    const failure = recent.failed.find(item => item.agent === 'Bruno' && item.error === 'agent_failed');
+    expect(failure?.tail).toBe(done.tail.slice(-400));
+    expect(failure?.tail).toContain('hh-terminal-phase-v1');
+    expect(failure?.tail).toContain('finish=pane_query_failed');
+    expect(failure?.tail).toContain('Output capture did not finish before the wait expired.');
+    expect(failure?.tail.endsWith('Program ended: code 3, signal none, at 2026-11-01T00:00:00.000Z')).toBe(true);
+    expect(JSON.stringify(recent)).not.toContain('synthetic-secret-suffix');
+  });
+
   it('are not there for an employee without such a skill', async () => {
     const { app } = await company([]);
     const tools = await names(await mcp(app));
