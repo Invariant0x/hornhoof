@@ -387,10 +387,11 @@ export async function submit(ctx: Live, agentId: string, taskId: string, r: { su
     unstuck.tell();
     return { task: row, wakes: gate.wakes };
   }
-  const wakes = doneFor(task, agentId);
-  const row = await move(ctx, task, closing(), n, unstuck.also, wakes);
+  /* Without gates it is past them as it is handed in: work in a repository still goes back to be merged. */
+  const past = task.merging ? { set: closing(), wakes: doneFor(task, agentId) } : await passedGates(ctx.db, task, doneFor(task, agentId));
+  const row = await move(ctx, task, past.set, n, unstuck.also, past.wakes);
   unstuck.tell();
-  return { task: row, wakes };
+  return { task: row, wakes: past.wakes };
 }
 
 /* An API key runs the models of the maker whose plans it stands beside. */

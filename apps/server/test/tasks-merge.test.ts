@@ -79,6 +79,18 @@ describe('a task that passed its last gate', () => {
     expect((await submit(ctx, bruno.id, task.id, { summary: 'Merged.', evidence: 'git log' })).task.status).toBe('done');
   });
 
+  it('goes to its executor to merge too when it has no gates, or nobody is on at any of them', async () => {
+    const { ctx, db, head, bruno, rita, task } = await company();
+    const loose = (await createTask(ctx, { agentId: head.id }, { title: 'Docs', brief: '', body: '', departmentId: task.departmentId, parentId: task.parentId, assigneeAgentId: bruno.id, executor: true, gates: [] })).task;
+    const handed = await submit(ctx, bruno.id, loose.id, { summary: 'Written.', evidence: 'docs/checkout.md' });
+    expect(handed.task).toMatchObject({ status: 'open', merging: true, assigneeAgentId: bruno.id });
+    expect(woken(handed)).toEqual([[bruno.id, 'merge']]);
+    expect((await submit(ctx, bruno.id, loose.id, { summary: 'Merged.', evidence: 'git log' })).task.status).toBe('done');
+    await db.update(agents).set({ switchedOffAt: new Date() }).where(eq(agents.id, rita.id));
+    const skipped = await submit(ctx, bruno.id, task.id, { summary: 'Done.', evidence: 'npm test' });
+    expect(skipped.task).toMatchObject({ status: 'open', merging: true, assigneeAgentId: bruno.id });
+  });
+
   it('is done at once where no repository is set', async () => {
     const { passed } = await company(false);
     expect((await passed()).task).toMatchObject({ status: 'done', merging: false });
