@@ -15,7 +15,7 @@ sources: [obra/superpowers skills/subagent-driven-development/SKILL.md, affaan-m
 
 The turn ends with one final check, then the release with the CEO's approval of the exact commit.
 
-- **Checks in two sizes.** On a task, the executor and every gate run only what the change touches: the tests of the changed parts and the new tests, the formatter, the linter and the type checker on the changed files. Nobody needs anyone's permission to run them. The whole test suite runs once per turn, however many tasks the turn has, in the final check.
+- **Checks in two sizes.** On a task, the executor and every gate run only what the change touches: the tests of the changed parts and the new tests, the formatter, the linter and the type checker on the changed files. Nobody needs anyone's permission to run them. The whole test suite runs once per turn, in the final check, through run_tests: it goes to a free machine of the company, in parts when its runner can split.
 - **The final check.** Each executor merges its branch into the turn's branch once its gates pass. When every member task of the turn is done, the head gives one task to the DevOps engineer, or to a developer when there is none: run the whole test suite with the tests the turn added, the build and the end-to-end checks once on the turn's branch. The QA lead, when there is one, accepts the turn there. Each failure goes back as a task to the member whose change broke it.
 
 - **Never the author.** Whoever made a piece of work does not pass its gate.

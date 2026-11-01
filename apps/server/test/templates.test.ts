@@ -210,6 +210,15 @@ describe('templates', () => {
     expect(templates.roles.get('DEV-OPS')!.body).toContain('final check');
   });
 
+  it('runs the whole test suite through run_tests on a free machine, in parts when its runner can split', () => {
+    const texts = { 'dev-gates': templates.skills.get('dev-gates')!.body, 'dev-ci-release': templates.skills.get('dev-ci-release')!.body, 'hh-task-flow': templates.skills.get('hh-task-flow')!.body, 'DEV-ENG': templates.roles.get('DEV-ENG')!.body };
+    for (const [id, text] of Object.entries(texts)) {
+      expect(text, id).toContain('run_tests');
+      expect(text, id).toMatch(/free machine/);
+      expect(text, id).toMatch(/in parts/);
+    }
+  });
+
   it('lays each goal out whole, for one department, with new asks in the next turn', () => {
     const body = (id: string) => templates.skills.get(id)!.body;
     expect(body('orch-plan-turn')).toMatch(/one task for the one department that owns it end to end/);
