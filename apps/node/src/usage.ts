@@ -1,5 +1,13 @@
 import type { Limits, NodeMessage, UsageObservation } from '@hornhoof/protocol';
 
+/* A single fetch can preserve raw plan windows alongside the older display projection. Never send this internal field. */
+export type CollectedLimits = Limits & { observedWindows?: Limits['windows'] };
+
+export function legacyLimits(limits: CollectedLimits): Limits {
+  const { status, windows, complete } = limits;
+  return { status, windows, ...(complete !== undefined ? { complete } : {}) };
+}
+
 /* Epoch and order belong to the collection, never to a later heartbeat or reconnect. */
 export class UsageSampler {
   epoch: string | null = null;
@@ -24,17 +32,17 @@ export class UsageSampler {
     if (observation.epoch !== this.epoch) return null;
     if (this.observation && observation.seq <= this.observation.seq) return null;
     const previous = known();
-    const next = limits ? merge(previous, limits) : previous;
+    const next = limits ? merge(previous, legacyLimits(limits)) : previous;
     if (this.epoch === null && (!limits || JSON.stringify(next) === JSON.stringify(previous))) return null;
     if (this.epoch !== null) this.observation = observation;
     return { limits: next };
   }
 
-  async collect(read: () => Promise<Limits | null>): Promise<{ limits: Limits | null; observation: UsageObservation }> {
+  async collect(read: () => Promise<CollectedLimits | null>): Promise<{ limits: CollectedLimits | null; observation: UsageObservation }> {
     const order = { epoch: this.epoch, seq: ++this.seq, delivery: 'live' as const, source: 'usage_fetch' as const };
     const limits = await read().catch(() => null);
     const observation: UsageObservation = limits
-      ? { ...order, outcome: 'success', sampledAt: new Date().toISOString(), complete: limits.complete === true, status: limits.status, windows: structuredClone(limits.windows) }
+      ? { ...order, outcome: 'success', sampledAt: new Date().toISOString(), complete: limits.complete === true, status: limits.status, windows: structuredClone(limits.observedWindows ?? limits.windows) }
       : { ...order, outcome: 'unavailable', sampledAt: null, complete: false, status: null, windows: [] };
     return { limits, observation };
   }

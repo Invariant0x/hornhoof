@@ -4,7 +4,8 @@ import { join } from 'node:path';
 import type { Limits } from '@hornhoof/protocol';
 import { writePrivate } from '../providers/process.js';
 import type { AgentUrls } from './bridge.js';
-import { claudeUsageLimits, kimiUsageLimits } from './transcripts.js';
+import { claudeUsageLimits, kimiObservedLimits, kimiUsageLimits } from './transcripts.js';
+import type { CollectedLimits } from '../usage.js';
 
 export type LaunchInput = {
   bin: string;
@@ -160,7 +161,7 @@ export function findKimiWire(home: string, sessionId: string): string | null {
 
 /* What Kimi's /usage shows, asked with the token Kimi keeps fresh while it runs. A token that went stale gives nothing,
    and the host keeps what it knew. */
-export async function kimiPlanLimits(home: string): Promise<Limits | null> {
+export async function kimiPlanLimits(home: string, forObservation = false): Promise<CollectedLimits | null> {
   const { access_token: token, expires_at: expires } = readJson(join(home, 'credentials', 'kimi-code.json'));
   if (typeof token !== 'string' || !token) return null;
   /* Kimi alone renews its token, with a lock its own processes share; a token that ran out would only be refused. */
@@ -172,9 +173,15 @@ export async function kimiPlanLimits(home: string): Promise<Limits | null> {
     /* Signed in without settings: the default servers. */
   }
   const base = process.env.KIMI_CODE_BASE_URL ?? (config.includes(KIMI_GLOBAL_BASE) ? KIMI_GLOBAL_BASE : KIMI_BASE);
+  return readKimiPlan(base, token, forObservation);
+}
+
+async function readKimiPlan(base: string, token: string, forObservation: boolean): Promise<CollectedLimits | null> {
   try {
     const res = await fetch(`${base.replace(/\/+$/, '')}/usages`, { headers: { authorization: `Bearer ${token}`, accept: 'application/json' }, signal: AbortSignal.timeout(5000) });
-    return res.ok ? kimiUsageLimits(await res.json()) : null;
+    if (!res.ok) return null;
+    const page: unknown = await res.json();
+    return forObservation ? kimiObservedLimits(page) : kimiUsageLimits(page);
   } catch {
     return null;
   }

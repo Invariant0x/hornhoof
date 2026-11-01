@@ -20,24 +20,36 @@ function partialWindows(previous: WindowSample[], collected: WindowSample[]): Wi
   return [...windows.values()];
 }
 
+function boundedWindows(windows: WindowSample[]): WindowSample[] {
+  if (windows.length <= 8) return windows;
+  return [...windows].sort((a, b) => (b.utilization ?? -1) - (a.utilization ?? -1)).slice(0, 8);
+}
+
+function partialAuthority(before: BudgetUsage, windows: WindowSample[]): string[] | null {
+  const names = before.authoritativeNames;
+  if (!names || windows.length > 8) return null;
+  return windows.every(w => names.includes(w.name)) ? names : null;
+}
+
+function reportedStatus(before: BudgetUsage, observation: Extract<UsageObservation, { outcome: 'success' }>, complete: boolean, receivedAt: string): Partial<BudgetUsage> {
+  if (observation.status !== 'rejected' && !complete && before.providerStatus === 'rejected') return {};
+  return { providerStatus: observation.status, statusSampledAt: observation.sampledAt, statusReceivedAt: receivedAt };
+}
+
+function acceptedUsage(before: BudgetUsage, observation: Extract<UsageObservation, { outcome: 'success' }>, receivedAt: string): BudgetUsage {
+  const collected = collectedWindows(observation, receivedAt);
+  const complete = observation.complete && observation.source === 'usage_fetch' && observation.windows.length > 0;
+  if (complete) return { ...before, windows: collected, authoritativeNames: collected.map(w => w.name), lastCompleteSampledAt: observation.sampledAt, lastCompleteReceivedAt: receivedAt, ...reportedStatus(before, observation, true, receivedAt) };
+  const windows = partialWindows(before.windows, collected);
+  return { ...before, windows: boundedWindows(windows), authoritativeNames: partialAuthority(before, windows), ...reportedStatus(before, observation, false, receivedAt) };
+}
+
 /* Eligibility is decided once by observeQuota. This projector never grants a sample its own authority. */
 export function projectBudgetUsage(previous: BudgetUsage | undefined, observation: UsageObservation, accepted: boolean, receivedAt: string): BudgetUsage {
   const before = previous ?? emptyUsage();
   const refresh = { ...before, lastRefreshReceivedAt: receivedAt, lastRefreshOutcome: accepted ? 'success' as const : 'unavailable' as const };
   if (!accepted || observation.outcome !== 'success') return refresh;
-  const complete = observation.complete && observation.source === 'usage_fetch' && observation.windows.length > 0;
-  const collected = collectedWindows(observation, receivedAt);
-  const windows = complete ? collected : partialWindows(before.windows, collected);
-  const status = observation.status === 'rejected' || complete || before.providerStatus !== 'rejected';
-  const names = complete ? windows.map(w => w.name) : before.authoritativeNames;
-  return {
-    ...refresh,
-    windows: windows.slice(0, 8),
-    authoritativeNames: windows.length <= 8 ? names : null,
-    lastCompleteSampledAt: complete ? observation.sampledAt : before.lastCompleteSampledAt,
-    lastCompleteReceivedAt: complete ? receivedAt : before.lastCompleteReceivedAt,
-    ...(status ? { providerStatus: observation.status, statusSampledAt: observation.sampledAt, statusReceivedAt: receivedAt } : {}),
-  };
+  return acceptedUsage(refresh, observation, receivedAt);
 }
 
 export function projectBudgetRefusal(previous: BudgetUsage | undefined, refusal: QuotaRefusal, receivedAt: string): BudgetUsage {

@@ -1,4 +1,4 @@
-import type { QuotaRefusal, UsageObservation } from '@hornhoof/protocol';
+import type { Limits, QuotaRefusal, UsageObservation } from '@hornhoof/protocol';
 import { eq } from 'drizzle-orm';
 import type { Ctx, Db } from '../../app.js';
 import { subscriptions } from '../../db/schema.js';
@@ -12,6 +12,11 @@ export async function storeUsage(ctx: Ctx, subscriptionId: string, observation: 
 
 type Store = Pick<Db, 'select' | 'update'>;
 
+function limitsAfter(previous: Limits | null, observation: UsageObservation, accepted: boolean): Limits | null {
+  if (!accepted || observation.outcome !== 'success' || !observation.complete) return previous;
+  return { status: observation.status, windows: observation.windows, complete: true };
+}
+
 export async function mergeUsage(tx: Store, subscriptionId: string, observation: UsageObservation | undefined, connection: UsageConnection | undefined): Promise<void> {
   if (!observation || !connection) return;
   const [sub] = await tx.select().from(subscriptions).where(eq(subscriptions.id, subscriptionId)).for('update');
@@ -20,7 +25,7 @@ export async function mergeUsage(tx: Store, subscriptionId: string, observation:
   const next = observeQuota(sub.quotaState, observation, connection, now.getTime());
   const accepted = next !== sub.quotaState;
   const quotaState = { ...(next ?? { latest: null, blocked: null, recovered: null }), usage: projectBudgetUsage(sub.quotaState?.usage, observation, accepted, now.toISOString()) };
-  const limits = accepted && observation.outcome === 'success' && observation.complete ? { status: observation.status, windows: observation.windows, complete: true } : sub.limits;
+  const limits = limitsAfter(sub.limits, observation, accepted);
   await tx.update(subscriptions).set({ quotaState, limits }).where(eq(subscriptions.id, sub.id));
 }
 

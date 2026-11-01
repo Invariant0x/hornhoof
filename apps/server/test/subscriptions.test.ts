@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { Db } from '../src/db/client.js';
 import { agents, companies, departments, nodeCodes, subscriptions, teams } from '../src/db/schema.js';
 import { as, invitePerson, SETUP, setUpCompany, TEST_API_KEY, testApp } from './helpers.js';
@@ -47,6 +47,9 @@ describe('POST /api/subscriptions/connect', () => {
   });
 
   it('places a person plan in their department and follows them when they move', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2030-01-01T00:00:00Z'));
+    onTestFinished(() => { vi.useRealTimers(); });
     const { app, ceo, maria, marketing, development, backend } = await companyWithMaria();
     const res = await connect(app, maria, ['claude']);
     expect(res.statusCode).toBe(201);

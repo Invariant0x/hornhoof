@@ -73,5 +73,7 @@ describe('subscription budget decision', () => {
     expect(evaluate(usage([window(0.91)]), { control: 'unavailable' }).reason).toBe('budget_reached');
     const blocked = evaluate(usage([window(0.91)]));
     expect(JSON.stringify(blocked)).not.toMatch(/epoch|seq|admissionEligible|delivery/);
+    const legacy = evaluate(null, { limits: { status: 'allowed', windows: [window(0.91)] } });
+    expect(JSON.stringify(legacy)).not.toMatch(/epoch|seq|admissionEligible|delivery/);
   });
 });

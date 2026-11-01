@@ -1,6 +1,7 @@
 import { closeSync, openSync, readSync, statSync } from 'node:fs';
 import type { AgentEvent, Limits } from '@hornhoof/protocol';
 import { contentText, inputText, isRecord, toolName } from '../providers/events.js';
+import { legacyLimits, type CollectedLimits } from '../usage.js';
 
 /* Follows a log file a program appends to, a whole line at a time. */
 export class LineTail {
@@ -186,18 +187,31 @@ export function kimiWire(line: unknown): WireNews {
 /* The plan's limits from Kimi's usage page: five hours, and seven days or a month, each used as a share. A plan counts
    a month of all its work and of Kimi Code's alone; the fuller one runs out first and speaks for both. */
 export function kimiUsageLimits(page: unknown): Limits | null {
+  const collected = kimiObservedLimits(page);
+  return collected ? legacyLimits(collected) : null;
+}
+
+function kimiRatio(ratio: unknown): number | null {
+  const number = typeof ratio === 'number' || (typeof ratio === 'string' && ratio.trim() !== '') ? Number(ratio) : NaN;
+  return Number.isFinite(number) && number >= 0 ? Math.min(1, number) : null;
+}
+
+function kimiWindow(name: string, value: unknown): Limits['windows'] {
+  if (!isRecord(value)) return [];
+  const reset = typeof value.reset_time === 'string' ? new Date(value.reset_time) : null;
+  return [{ name, utilization: kimiRatio(value.used_ratio), resetsAt: reset && Number.isFinite(reset.getTime()) ? reset.toISOString() : null }];
+}
+
+export function kimiObservedLimits(page: unknown): CollectedLimits | null {
   if (!isRecord(page) || !isRecord(page.usages)) return null;
   const usages = page.usages;
-  const read = (name: string, w: unknown) => {
-    const used = isRecord(w) ? Number(w.used_ratio) : NaN;
-    if (!isRecord(w) || !Number.isFinite(used)) return [];
-    const reset = typeof w.reset_time === 'string' ? new Date(w.reset_time) : null;
-    return [{ name, utilization: Math.min(1, Math.max(0, used)), resetsAt: reset && !Number.isNaN(reset.getTime()) ? reset.toISOString() : null }];
-  };
-  const month = [...read('month', usages.limit_month_total), ...read('month', usages.limit_month_code)].sort((a, b) => b.utilization - a.utilization).slice(0, 1);
-  const windows = [...read('five_hour', usages.limit_5h), ...read('seven_day', usages.limit_7d), ...month];
-  if (!windows.length) return null;
-  return { status: windows.some(w => w.utilization >= 1) ? 'rejected' : 'allowed', windows, complete: true };
+  const sources = [['five_hour', usages.limit_5h], ['seven_day', usages.limit_7d], ['month_total', usages.limit_month_total], ['month_code', usages.limit_month_code]] as const;
+  const present = sources.filter(([, value]) => value !== null && value !== undefined);
+  const observedWindows = present.flatMap(([name, value]) => kimiWindow(name, value));
+  if (!observedWindows.length) return null;
+  const month = observedWindows.filter(w => w.name.startsWith('month_')).sort((a, b) => (b.utilization ?? -1) - (a.utilization ?? -1)).slice(0, 1).map(w => ({ ...w, name: 'month' }));
+  const windows = [...observedWindows.filter(w => !w.name.startsWith('month_')), ...month];
+  return { status: observedWindows.some(w => (w.utilization ?? 0) >= 1) ? 'rejected' : 'allowed', windows, observedWindows, complete: observedWindows.length === present.length };
 }
 
 /* The plan's limits from Claude's usage page, the one its /usage shows: five hours and seven days, used in percent, and

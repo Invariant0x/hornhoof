@@ -110,7 +110,7 @@ export function kimiAdapter({ home, tools, bin = join(tools, 'bin', 'kimi'), use
     },
 
     async limits() {
-      return kimiPlanLimits(home);
+      return kimiPlanLimits(home, true);
     },
 
     async login(io) {

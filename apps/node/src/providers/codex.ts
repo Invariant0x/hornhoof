@@ -42,21 +42,31 @@ export function codexEvents(line: unknown): AgentEvent[] {
 const WINDOW_NAMES: Record<number, string> = { 300: 'five_hour', 1440: 'one_day', 10080: 'seven_day' };
 const LIMITS_WAIT_MS = 15_000;
 
+function quotaReset(value: unknown): string | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  const date = new Date(value * 1000);
+  return Number.isFinite(date.getTime()) ? date.toISOString() : null;
+}
+
+function quotaWindow(value: unknown): Limits['windows'][number][] {
+  if (!isRecord(value)) return [];
+  const mins = value.windowDurationMins;
+  if (typeof mins !== 'number' || !Number.isFinite(mins) || mins <= 0) return [];
+  const used = value.usedPercent;
+  const utilization = typeof used === 'number' && Number.isFinite(used) && used >= 0 ? Math.min(1, used / 100) : null;
+  return [{ name: WINDOW_NAMES[mins] ?? `${mins}_minutes`, utilization, resetsAt: quotaReset(value.resetsAt) }];
+}
+
 /* The plan's limits as Codex's app server reads them: up to two windows, the used share and when each starts over. */
 export function codexRateLimits(result: unknown): Limits | null {
   const rate = isRecord(result) && isRecord(result.rateLimits) ? result.rateLimits : null;
   if (!rate) return null;
-  const windows = [rate.primary, rate.secondary].filter(isRecord).flatMap(w => {
-    const used = Number(w.usedPercent);
-    const mins = Number(w.windowDurationMins);
-    if (!Number.isFinite(used) || !Number.isFinite(mins)) return [];
-    const reset = typeof w.resetsAt === 'number' ? new Date(w.resetsAt * 1000).toISOString() : null;
-    return [{ name: WINDOW_NAMES[mins] ?? `${mins}_minutes`, utilization: Math.min(1, Math.max(0, used / 100)), resetsAt: reset }];
-  });
+  const sources = [rate.primary, rate.secondary].filter(w => w !== null && w !== undefined);
+  const windows = sources.flatMap(quotaWindow);
   if (!windows.length) return null;
   /* Codex can also say the plan takes no ordinary work at all now, while no window is full. */
   const blocked = rate.rateLimitReachedType || (isRecord(result) && result.ordinaryUsageAllowed === false);
-  return { status: blocked ? 'rejected' : 'allowed', windows, complete: true };
+  return { status: blocked ? 'rejected' : 'allowed', windows, complete: windows.length === sources.length };
 }
 
 /* Asks Codex's app server for the plan's limits over JSON-RPC. It keeps its own sign-in fresh, so no turn is needed. */
