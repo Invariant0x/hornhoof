@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
-import { CLAUDE_ALIASES, type AgentEvent, type ProviderId, type ServerMessage } from '@hornhoof/protocol';
+import { CLAUDE_ALIASES, MAX_INSTRUCTIONS, type AgentEvent, type ProviderId, type ServerMessage } from '@hornhoof/protocol';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { adapterFor } from '../src/providers/index.js';
 import { claudeEvents, claudeInterrupted, limitsFrom } from '../src/providers/claude.js';
@@ -30,7 +30,8 @@ const KIMI_SESSION = 'k1m1c0de-0000-4000-8000-000000000001';
 const AGY_NEW = 'c3b66b04-872b-4fbe-a3a4-058a026ef20a';
 const AGY_RESUMED = '9ec58bfd-4d67-4f5e-83a5-9d907e9c6b1f';
 const AGY_FLAGS = ['--output-format', 'stream-json', '--print-timeout', '0s', '--dangerously-skip-permissions'];
-const FLAGS = ['--json', '--skip-git-repo-check', '--dangerously-bypass-approvals-and-sandbox'];
+/* Codex reads AGENTS.md only up to project_doc_max_bytes, 32 KiB unless set. */
+const FLAGS = ['--json', '--skip-git-repo-check', '--dangerously-bypass-approvals-and-sandbox', '-c', 'project_doc_max_bytes=1048576'];
 
 type Logged = {
   name: string; argv: string[]; cwd: string; pid: number; env: Record<string, string>; grandchild?: number;
@@ -737,11 +738,22 @@ describe('Hornhoof tools and instructions', () => {
     expect(argv.indexOf('--plugin-dir')).toBeLessThan(argv.indexOf('--'));
   });
 
+  it('give Claude Code the instructions in a file of its folder, as one argument may hold only 128 KiB on Linux', async () => {
+    await adapter('claude').run(input({ instructions: 'x'.repeat(MAX_INSTRUCTIONS) }));
+    const { argv } = lastRun();
+    const file = argv[argv.indexOf('--append-system-prompt-file') + 1]!;
+    expect(file).toBe(join(work, '.hh-instructions.md'));
+    expect(readFileSync(file, 'utf8')).toBe(`${'x'.repeat(MAX_INSTRUCTIONS)}\n`);
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+    expect(argv).not.toContain('--append-system-prompt');
+    expect(Math.max(...argv.map(a => a.length))).toBeLessThan(1000);
+  });
+
   it('give Claude Code the instructions and a private MCP config it deletes after the run', async () => {
     const { events, run } = withTools('claude');
     await run();
     const { argv, mcpConfig } = lastRun();
-    expect(argv).toEqual(expect.arrayContaining(['--append-system-prompt', INSTRUCTIONS, '--mcp-config', mcpConfig!.path, '--strict-mcp-config']));
+    expect(argv).toEqual(expect.arrayContaining(['--append-system-prompt-file', join(work, '.hh-instructions.md'), '--mcp-config', mcpConfig!.path, '--strict-mcp-config']));
     expect(argv.indexOf('--')).toBe(argv.length - 2);
     expect(argv.join(' ')).not.toContain(TOOLS.token);
     expect(mcpConfig!.json).toEqual({ mcpServers: { hornhoof: { type: 'http', url: TOOLS.url, headers: { Authorization: `Bearer ${TOOLS.token}` } } } });

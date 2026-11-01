@@ -126,7 +126,12 @@ export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'),
     async run(input: RunInput): Promise<RunResult> {
       const session = input.sessionId ? ['--resume', input.sessionId] : ['--session-id', randomUUID()];
       const args = ['-p', '--output-format', 'stream-json', '--verbose', ...session, '--permission-mode', 'bypassPermissions'];
-      if (input.instructions) args.push('--append-system-prompt', input.instructions);
+      /* In a file of the agent's folder, as the live terminal gives them: Linux holds one argument to 128 KiB. */
+      if (input.instructions) {
+        const file = join(input.workDir, '.hh-instructions.md');
+        writePrivate(file, input.instructions + '\n', user);
+        args.push('--append-system-prompt-file', file);
+      }
       for (const dir of plugins) args.push('--plugin-dir', dir);
       /* The token sits in a file only the node reads, for this run alone, never on the command line. */
       const mcpFile = input.tools ? join(ensureDir(home), `mcp-${randomUUID()}.json`) : null;

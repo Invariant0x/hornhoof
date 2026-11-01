@@ -132,6 +132,13 @@ describe('Codex in a terminal', () => {
     expect(again.command).not.toContain('-C');
   });
 
+  it('reads all of AGENTS.md, which Codex cuts at 32 KiB unless told otherwise', () => {
+    for (const sessionId of [null, 'th-9']) {
+      const { command } = codexProgram.launch({ bin: 'codex', home: '/h', workDir: '/w', sessionId, model: null, instructionsFile: null, urls: URLS });
+      expect(command[command.indexOf('project_doc_max_bytes=1048576') - 1]).toBe('-c');
+    }
+  });
+
   it('thinks as hard as the agent was set to, in a new session and a resumed one', () => {
     const first = codexProgram.launch({ bin: 'codex', home: '/h', workDir: '/w', sessionId: null, model: null, effort: 'xhigh', instructionsFile: null, urls: URLS });
     expect(first.command).toContain('model_reasoning_effort="xhigh"');

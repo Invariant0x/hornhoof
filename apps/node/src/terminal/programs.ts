@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Limits } from '@hornhoof/protocol';
 import { ownFs, type AgentFs } from '../agent-fs.js';
+import { WHOLE_AGENTS_MD } from '../providers/codex.js';
 import type { AgentUrls } from './bridge.js';
 import { claudeUsageLimits, kimiUsageLimits } from './transcripts.js';
 
@@ -76,7 +77,7 @@ export const claudeProgram: TermProgram = {
 export const codexProgram: TermProgram = {
   kind: 'codex',
   launch({ bin, home, workDir, sessionId, model, effort, urls }) {
-    const config = ['-c', `mcp_servers.hornhoof.url=${JSON.stringify(urls.mcpUrl)}`, ...(effort ? ['-c', `model_reasoning_effort=${JSON.stringify(effort)}`] : [])];
+    const config = ['-c', `mcp_servers.hornhoof.url=${JSON.stringify(urls.mcpUrl)}`, ...WHOLE_AGENTS_MD, ...(effort ? ['-c', `model_reasoning_effort=${JSON.stringify(effort)}`] : [])];
     const rest = ['--dangerously-bypass-approvals-and-sandbox', ...config, ...(model ? ['-m', model] : [])];
     /* A resumed session works in the folder it started in, which is the pane's. */
     const command = sessionId ? [bin, 'resume', sessionId, ...rest] : [bin, rest[0]!, '-C', workDir, ...rest.slice(1)];

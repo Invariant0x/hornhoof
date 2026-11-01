@@ -12,8 +12,12 @@ import { childEnv, ensureDir, exitsCleanly, installPackage, interactiveLogin, ru
 /* Codex serves a ChatGPT plan, or a company OpenAI key on the built-in node. */
 type Options = { home: string; tools: string; bin?: string; secret?: string | null; mode: 'plan' | 'api_key'; user?: JobUser | null };
 
+/* Codex reads AGENTS.md only up to project_doc_max_bytes, 32 KiB unless set. A mebibyte holds the longest instructions
+   at four bytes a character, and the conversation from before that a live session's AGENTS.md carries too. */
+export const WHOLE_AGENTS_MD = ['-c', `project_doc_max_bytes=${1 << 20}`];
+
 /* The container is the sandbox, so Codex's own approvals and sandbox are off; resume takes no -C or -s. */
-const FLAGS = ['--json', '--skip-git-repo-check', '--dangerously-bypass-approvals-and-sandbox'];
+const FLAGS = ['--json', '--skip-git-repo-check', '--dangerously-bypass-approvals-and-sandbox', ...WHOLE_AGENTS_MD];
 export const SIGNED_OUT = /401 Unauthorized|Missing bearer|invalid_api_key|not logged in/i;
 
 /* What a --json line shows people: messages, MCP calls, shell commands with their results, and the plan. */
