@@ -233,7 +233,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
         )}
         {tab === 'people' && <People me={me} />}
         {tab === 'subscriptions' && <Subscriptions me={me} />}
-        {tab === 'improvements' && company && <Improvements improvements={improvements} failure={improvementsFailure} onChanged={loadImprovements} />}
+        {tab === 'improvements' && company && <Improvements improvements={improvements} failure={improvementsFailure} onChanged={loadImprovements} onTask={taskId => setPanel({ kind: 'task', taskId })} />}
       </main>
       {panel?.kind === 'window' && org && (
         <AgentWindow

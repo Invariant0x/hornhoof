@@ -262,6 +262,7 @@ export type Improvement = {
   agent: { id: string; name: string };
   department: { id: string; name: string } | null;
   decidedBy: string | null;
+  tasks?: { id: string; number: number; title: string }[];
 };
 
 export type WaitingRequest = {
