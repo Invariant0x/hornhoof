@@ -112,6 +112,17 @@ async function refuseAbove(db: Db | Tx, parentId: string | null, ids: string[]):
   }
 }
 
+/* Nor for work under it, however far down: that work is part of it. */
+async function refuseBelow(db: Db | Tx, task: Task, ids: string[]): Promise<void> {
+  let level = ids.length ? [task.id] : [];
+  while (level.length) {
+    const rows = await db.select({ id: tasks.id, number: tasks.number }).from(tasks).where(inArray(tasks.parentId, level));
+    const under = rows.find(r => ids.includes(r.id));
+    if (under) throw refuse(400, 'task_invalid', `#${under.number} is work under #${task.number}, so #${task.number} cannot come after it: the work under a task is part of it.`);
+    level = rows.map(r => r.id);
+  }
+}
+
 /* A task is done: each task that came after it and waits for nothing else any more goes on with whoever holds it, and
    its log says why. rows: the tasks that started. Two tasks it waits for done at once would each see the other still
    open, so the waiting tasks are taken first and the second to be done sees the first. */
@@ -795,6 +806,7 @@ export async function updateTask(ctx: Live, agentId: string, taskId: string, c: 
   if (c.after !== undefined && JSON.stringify(c.after) !== JSON.stringify(task.after)) {
     await checkAfter(ctx.db, task.companyId, task.turnId, c.after);
     await refuseAbove(ctx.db, task.parentId, c.after);
+    await refuseBelow(ctx.db, task, c.after);
     await refuseCircle(ctx.db, task, c.after);
     set.after = c.after;
     fields.push('after');
