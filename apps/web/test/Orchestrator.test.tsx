@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
@@ -310,6 +310,25 @@ describe('AgentWindow', () => {
     expect(screen.queryByText(/Needs a subscription/)).not.toBeInTheDocument();
     expect(await screen.findByTestId('live-terminal')).toBeInTheDocument();
     expect(screen.queryByRole('log')).not.toBeInTheDocument();
+  });
+
+  it("opens an employee's conversation at its newest line when its card comes after the conversation", async () => {
+    let giveCard!: (reply: [number, unknown]) => void;
+    const calls = mockApi({
+      'GET /api/agents/b1': () => new Promise(resolve => (giveCard = resolve)),
+      'GET /api/agents/b1/events?after=0': [200, { events: [ev(1, 'text', { kind: 'text', text: 'I build the API.' })], state: READY }],
+    });
+    const tall = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(480);
+    render(
+      <LanguageProvider>
+        <AgentWindow me={ME} org={DEV_ORG} agentId="b1" onClose={() => {}} />
+      </LanguageProvider>,
+    );
+    await vi.waitFor(() => expect(calls.some(c => c.path === '/api/agents/b1/events?after=0')).toBe(true));
+    await act(async () => {});
+    await act(async () => giveCard([200, CARD]));
+    expect((await screen.findByRole('log')).scrollTop).toBe(480);
+    tall.mockRestore();
   });
 
   it('titles an employee by its name alone when it is called after its role', async () => {

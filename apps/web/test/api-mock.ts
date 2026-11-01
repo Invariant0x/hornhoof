@@ -2,7 +2,7 @@ import { vi } from 'vitest';
 import type { AgentCardView, MachineView, Me, Org, PersonView, Roster, Serving, SubView, TaskDetail, TaskLine, TurnView, WaitingRequest } from '../src/types';
 
 type Reply = [status: number, body?: unknown];
-type Route = Reply | ((body: unknown) => Reply);
+type Route = Reply | ((body: unknown) => Reply | Promise<Reply>);
 
 export type Call = { method: string; path: string; body: unknown };
 
@@ -14,7 +14,7 @@ export function mockApi(routes: Record<string, Route>): Call[] {
     const body = typeof init.body === 'string' ? JSON.parse(init.body) : undefined;
     calls.push({ method, path, body });
     const route = routes[`${method} ${path}`];
-    const [status, data] = typeof route === 'function' ? route(body) : route ?? [404, { error: { code: 'not_found', message: 'Not found.' } }];
+    const [status, data] = typeof route === 'function' ? await route(body) : route ?? [404, { error: { code: 'not_found', message: 'Not found.' } }];
     return new Response(data === undefined ? null : JSON.stringify(data), { status, headers: { 'content-type': 'application/json' } });
   }));
   return calls;

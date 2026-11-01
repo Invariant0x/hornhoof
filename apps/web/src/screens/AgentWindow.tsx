@@ -221,10 +221,13 @@ export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Pro
     return () => document.removeEventListener('keydown', onKey);
   }, [state?.busy, stop]);
 
+  /* Until its state and card come, the window cannot tell a terminal from a conversation, nor whether the agent can work. */
+  const known = state !== null && (orchestrator || card !== null);
+
   useLayoutEffect(() => {
     const el = log.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [events.length, state?.busy, asLog]);
+  }, [events.length, state?.busy, asLog, known]);
 
   useLayoutEffect(() => {
     const el = input.current;
@@ -273,8 +276,6 @@ export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Pro
   const where = [model || t.agent.default, orchestratorStatus(t, sub), sub?.machine?.hostname].filter(Boolean).join(', ');
   const hasTerminal = Boolean(state?.terminal) && !noTerminal;
   const terminal = hasTerminal && !asLog;
-  /* Until its state and card come, the window cannot tell a terminal from a conversation, nor whether the agent can work. */
-  const known = state !== null && (orchestrator || card !== null);
 
   const cards = (
     <>
