@@ -59,6 +59,8 @@ hornhoof.org only passes the traffic on and has no accounts of its own. A small 
 
 People who see the whole company find the link under Settings in the account menu: they copy it, move it to another name or remove it. The orchestrator does the same when asked. When the name changes or the link goes, machines that were connected through it lose the connection; connect them again under Subscriptions.
 
+A link made earlier at hornhoof.org can be kept instead of getting a new one. Put its key in a file and run `docker compose exec -T app node apps/server/dist/cli.js link <name> < key-file` next to `compose.yaml`. hornhoof.org carries one tunnel per link, so stop any other tunnel for that link first.
+
 ## Connecting machines
 
 Agents run on machines that hold the subscriptions. Company API keys run on the built-in node that comes with the server. A personal plan runs on its owner's machine, and only on Linux or macOS.
