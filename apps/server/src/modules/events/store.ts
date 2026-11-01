@@ -20,6 +20,13 @@ const columns = {
 
 type Row = { seq: number; kind: AgentEventKind; data: unknown; jobId: string | null; personId: string | null; personName: string | null; createdAt: Date };
 
+/* A machine command's code stays with the person it was made for: a conversation keeps the command with its code hidden. */
+const JOIN_CODE = /--join [A-Za-z0-9_-]+/g;
+function hideCodes(data: unknown): unknown {
+  const text = JSON.stringify(data);
+  return text?.includes('--join ') ? JSON.parse(text.replace(JOIN_CODE, '--join [hidden]')) : data;
+}
+
 const view = (r: Row): EventView => ({
   seq: r.seq,
   kind: r.kind,
@@ -33,7 +40,7 @@ const view = (r: Row): EventView => ({
 export async function appendEvent(ctx: Pick<Ctx, 'db' | 'bus'>, e: NewEvent): Promise<EventView> {
   const [row] = await ctx.db
     .insert(agentEvents)
-    .values({ companyId: e.companyId, agentId: e.agentId, jobId: e.jobId ?? null, kind: e.kind, data: e.data, personId: e.personId ?? null })
+    .values({ companyId: e.companyId, agentId: e.agentId, jobId: e.jobId ?? null, kind: e.kind, data: hideCodes(e.data), personId: e.personId ?? null })
     .returning({ id: agentEvents.id });
   const [stored] = await ctx.db.select(columns).from(agentEvents).leftJoin(people, eq(people.id, agentEvents.personId)).where(eq(agentEvents.id, row!.id));
   const event = view(stored!);

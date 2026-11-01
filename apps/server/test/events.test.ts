@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agents, companies, departments, jobs, subscriptions } from '../src/db/schema.js';
+import { agentEvents, agents, companies, departments, jobs, subscriptions } from '../src/db/schema.js';
 import { appendEvent } from '../src/modules/events/store.js';
 import { as, connectNode, invitePerson, listen, openStream, setUpCompany, testApp, until } from './helpers.js';
 
@@ -34,6 +34,15 @@ describe('GET /api/stream', () => {
       event: { kind: 'text', data: { text: 'What does Acme sell?' }, jobId: null, person: null, seq: expect.any(Number) },
     });
     stream.close();
+  });
+
+  it('keeps no machine command in a conversation, only the command with its code hidden', async () => {
+    const { app, db, orchestrator, companyId } = await company();
+    const command = 'curl -fsSL https://hq.acme.com/install.sh | bash -s -- --join Ab3_x-9Zq';
+    const event = await appendEvent(app.ctx, { companyId, agentId: orchestrator.id, kind: 'tool_result', data: { text: `Run: ${command}`, nested: [{ line: command }] } });
+    const hidden = 'curl -fsSL https://hq.acme.com/install.sh | bash -s -- --join [hidden]';
+    expect(event.data).toEqual({ text: `Run: ${hidden}`, nested: [{ line: hidden }] });
+    expect(JSON.stringify((await db.select({ data: agentEvents.data }).from(agentEvents)).map(r => r.data))).not.toContain('Ab3_x-9Zq');
   });
 
   it('keeps the conversation from a department head but tells them the org changed', async () => {
