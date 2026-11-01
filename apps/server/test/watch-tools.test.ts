@@ -8,7 +8,7 @@ import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agents, companies, departments, jobs, requests, subscriptions } from '../src/db/schema.js';
 import { blocked, createTask } from '../src/modules/tasks/engine.js';
 import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until } from './helpers.js';
-import { agentState, enqueueTurn } from '../src/modules/conversation/queue.js';
+import { agentState, enqueueTurn, GONE_ALONG } from '../src/modules/conversation/queue.js';
 
 const TOKEN = 'tool-token-watch-0123456789abcdef0123';
 const NODE_KEY = 'k'.repeat(40);
@@ -162,6 +162,22 @@ describe('tools a skill grants', () => {
         lastTurn: { status: 'failed', error: 'timeout', at: hung.toISOString() },
       },
     ]);
+  });
+
+  it("tell a failure collector how the turn ended that a blocked task went out in along with another task", async () => {
+    const { app, db, ceo, dev, acme, sub, hana } = await company(['ops-failure-review']);
+    const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000);
+    const held = async (title: string) => (await createTask(app.ctx, { personId: ceo.id }, { title, brief: '', body: '', departmentId: dev.id, assigneeAgentId: hana.id, executor: true })).task;
+    const [payments, refunds] = [await held('Payments'), await held('Refunds')];
+    const restarted = ago(25);
+    await db.insert(jobs).values([
+      { companyId: acme.id, subscriptionId: sub.id, agentId: hana.id, taskId: refunds.id, kind: 'conversation', prompt: 'x', timeoutMs: 1, status: 'failed', error: 'machine_restarted', startedAt: ago(31), finishedAt: restarted },
+      { companyId: acme.id, subscriptionId: sub.id, agentId: hana.id, taskId: payments.id, kind: 'conversation', prompt: 'x', timeoutMs: 1, status: 'done', result: GONE_ALONG, startedAt: ago(30), finishedAt: ago(30) },
+    ]);
+    await blocked(app.ctx, hana.id, payments.id, 'Waits for the bank.');
+    const client = await mcp(app);
+    const recent = JSON.parse((await call(client, 'failures', { hours: 6 })).content[0]!.text) as { blocked: { title: string; lastTurn: unknown }[] };
+    expect(recent.blocked.find(b => b.title === 'Payments')?.lastTurn).toEqual({ status: 'failed', error: 'machine_restarted', at: restarted.toISOString() });
   });
 
   it('let a failure collector see where agents stumbled: programs they lacked, what they installed by hand, and where they stopped for people', async () => {

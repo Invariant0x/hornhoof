@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agentEvents, agents, departments, jobs, requests, taskEvents, tasks } from '../../db/schema.js';
 import { turnPrompt } from '../conversation/prompt.js';
-import { agentState, enqueueTurn, orchestratorOf, STOPPED_ON_PURPOSE } from '../conversation/queue.js';
+import { agentState, carrierOf, enqueueTurn, GONE_ALONG, orchestratorOf, STOPPED_ON_PURPOSE } from '../conversation/queue.js';
 import { deptName } from '../departments/templates.js';
 import { CLOSED } from '../tasks/engine.js';
 import type { Grant } from '../templates/load.js';
@@ -146,13 +146,15 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
             .limit(1);
           const [last] = holderId
             ? await db
-                .select({ status: jobs.status, error: jobs.error, at: jobs.finishedAt })
+                .select({ status: jobs.status, error: jobs.error, at: jobs.finishedAt, result: jobs.result, startedAt: jobs.startedAt })
                 .from(jobs)
                 .where(and(eq(jobs.agentId, holderId), eq(jobs.taskId, id), inArray(jobs.status, ['done', 'failed'])))
                 .orderBy(desc(jobs.finishedAt))
                 .limit(1)
             : [];
-          blocked.push({ ...task, why: said ? said.text.slice(0, TAIL) : null, lastTurn: last ?? null });
+          /* A turn that went out inside another one ended as that one did. */
+          const lastTurn = holderId && last?.result === GONE_ALONG && last.startedAt ? await carrierOf(ctx, { agentId: holderId, startedAt: last.startedAt }) : last && { status: last.status, error: last.error, at: last.at };
+          blocked.push({ ...task, why: said ? said.text.slice(0, TAIL) : null, lastTurn: lastTurn ?? null });
         }
         const since = hoursAgo(hours);
         const seen = (kind: 'tool' | 'tool_result', field: string, hint: string) =>

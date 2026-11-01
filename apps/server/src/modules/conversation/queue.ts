@@ -244,7 +244,8 @@ function outdated(sub: { kind: string; nodeVersion: string | null }, need = CONV
 }
 
 const ALONG = 'Several of your tasks moved while you were busy. Go through each of them in this turn:';
-const GONE_ALONG = 'Went out with the turn before it.';
+/* What a task's turn that went out inside another one ended with: its own result is the other turn's. */
+export const GONE_ALONG = 'Went out with the turn before it.';
 
 /* The other task turns waiting for the agent, oldest first. */
 function alongWith(ctx: Ctx, agentId: string, jobId: string) {
@@ -357,6 +358,17 @@ async function carriedTasks(ctx: Ctx, job: { agentId: string; taskId: string; st
     .from(jobs)
     .where(and(conversationOf(job.agentId), eq(jobs.status, 'done'), eq(jobs.result, GONE_ALONG), ne(jobs.taskId, job.taskId), gte(jobs.startedAt, job.startedAt), lte(jobs.startedAt, job.finishedAt ?? new Date())));
   return rows.flatMap(r => (r.taskId ? [r.taskId] : []));
+}
+
+/* The turn that a task's turn marked gone along went out inside: the agent's own turn that started last before it. */
+export async function carrierOf(ctx: Ctx, gone: { agentId: string; startedAt: Date }) {
+  const [carrier] = await ctx.db
+    .select({ status: jobs.status, error: jobs.error, at: jobs.finishedAt })
+    .from(jobs)
+    .where(and(conversationOf(gone.agentId), lte(jobs.startedAt, gone.startedAt), or(isNull(jobs.result), ne(jobs.result, GONE_ALONG))))
+    .orderBy(desc(jobs.startedAt))
+    .limit(1);
+  return carrier ?? null;
 }
 
 /* A finished turn: a failure or a stop goes into the conversation, a turn that left a task it carried where it was is
