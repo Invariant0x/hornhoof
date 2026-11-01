@@ -6,9 +6,24 @@ import { placeName } from '../tasks';
 import type { Improvement, Org } from '../types';
 import { Markdown } from '../ui/Markdown';
 
+function TaskLinks({ item, onTask }: { item: Improvement; onTask: (taskId: string) => void }) {
+  const t = useT();
+  if (!item.tasks?.length) return null;
+  return (
+    <div className="imp-tasks">
+      <b>{t.improvements.relatedTasks}</b>
+      <div className="imp-task-list">
+        {item.tasks.map(task => (
+          <button key={task.id} className="act" type="button" onClick={() => onTask(task.id)}>{`#${task.number} ${task.title}`}</button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /* One thing to improve: what it is, who found it and how often, the orchestrator's word on it, and for one that waits,
    taking it into work or setting it aside. */
-function Item({ item, org, onChanged }: { item: Improvement; org: Org | null; onChanged: () => void }) {
+function Item({ item, org, onChanged, onTask }: { item: Improvement; org: Org | null; onChanged: () => void; onTask: (taskId: string) => void }) {
   const t = useT();
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<unknown>(null);
@@ -44,6 +59,7 @@ function Item({ item, org, onChanged }: { item: Improvement; org: Org | null; on
           <b>{t.improvements.orchestrator}:</b> {item.result}
         </p>
       )}
+      <TaskLinks item={item} onTask={onTask} />
       {item.status === 'open' && (
         <div className="req-actions">
           <button className="btn small" type="button" disabled={busy} onClick={() => void decide('take')}>
@@ -61,14 +77,14 @@ function Item({ item, org, onChanged }: { item: Improvement; org: Org | null; on
 
 /* What employees found to improve in how the company works, for people who see the whole company: what waits for a
    decision first, then what the orchestrator does now, what was done, and what was set aside, folded away. */
-export function Improvements({ improvements, failure, onChanged }: { improvements: Improvement[] | undefined; failure: unknown; onChanged: () => void }) {
+export function Improvements({ improvements, failure, onChanged, onTask }: { improvements: Improvement[] | undefined; failure: unknown; onChanged: () => void; onTask: (taskId: string) => void }) {
   const t = useT();
   const { org } = useOrg();
   const of = (status: Improvement['status']) => improvements?.filter(i => i.status === status) ?? [];
   const list = (items: Improvement[]) => (
     <div className="imps">
       {items.map(i => (
-        <Item key={i.id} item={i} org={org} onChanged={onChanged} />
+        <Item key={i.id} item={i} org={org} onChanged={onChanged} onTask={onTask} />
       ))}
     </div>
   );

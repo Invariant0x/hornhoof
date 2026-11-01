@@ -491,6 +491,7 @@ export const en = {
     noneOpen: 'Nothing waits for a decision.',
     seen: (n: number) => `Found ${n} times`,
     takenBy: (name: string) => `Taken by ${name}`,
+    relatedTasks: 'Related tasks',
     orchestrator: 'The orchestrator',
     take: 'Take into work',
     dismiss: 'Set aside',
