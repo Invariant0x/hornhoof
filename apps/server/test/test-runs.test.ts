@@ -449,6 +449,25 @@ describe('a run of other work', () => {
     });
   });
 
+  it('drops what a lost attempt put on the task, so the part that runs again makes its own files', async () => {
+    const c = await company();
+    const ivan = await c.machine(c.ceo, 'ivan-mac');
+    const { call } = await c.turn(c.bruno);
+    await call('run_work', { command: 'make report' });
+    const first = await nextOf(ivan.node, 'tests.run');
+    const node = { authorization: `Bearer ${ivan.key}`, 'content-type': 'application/octet-stream' };
+    const put = (partId: string, name: string) => c.app.inject({ method: 'PUT', url: `/api/parts/${partId}/files/${name}`, headers: node, payload: Buffer.from(name) });
+    for (let i = 1; i <= 20; i++) expect((await put(first.partId, `old-${i}.txt`)).statusCode).toBe(201);
+    ivan.node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], load: idle(), tests: [], work: true });
+    const again = await nextOf(ivan.node, 'tests.run');
+    expect(await c.filesOn()).toEqual([]);
+    expect((await put(again.partId, 'new.txt')).statusCode).toBe(201);
+    ivan.node.send(done(again, { commit: null }));
+    await nextOf(ivan.node, 'tests.ack');
+    await until(async () => (await c.wokeWith(c.bruno.id)) !== null);
+    expect(await c.wokeWith(c.bruno.id)).toMatch(/What it made is on #1: work-1-1-new\.txt\./);
+  });
+
   it('clones a branch first when one is named, and splits into parts like a test run', async () => {
     const c = await company();
     const ivan = await c.machine(c.ceo, 'ivan-mac');

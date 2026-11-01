@@ -306,18 +306,27 @@ async function endParts(ctx: Ctx, which: SQL, error: string, tail = ''): Promise
    node ran for: each waits for another machine under a new id, so its lost run, should that come back, is told apart.
    One lost RERUNS times already fails with why. */
 export async function loseParts(ctx: Ctx, which: SQL, why: string): Promise<void> {
-  const lost = await ctx.db.select().from(testParts).where(and(which, eq(testParts.status, 'running')));
-  for (const p of lost) {
+  const lost = await ctx.db
+    .select({ part: testParts, run: testRuns })
+    .from(testParts)
+    .innerJoin(testRuns, eq(testRuns.id, testParts.runId))
+    .where(and(which, eq(testParts.status, 'running')));
+  for (const { part: p, run } of lost) {
     const running = and(eq(testParts.id, p.id), eq(testParts.status, 'running'))!;
     if (p.lost.length >= RERUNS) {
       await endParts(ctx, running, why);
       continue;
     }
     const where: LostRun = { key: p.builtin ? 'builtin' : (p.machineId ?? ''), machine: p.machineName ?? 'a machine', why };
-    await ctx.db
+    const [again] = await ctx.db
       .update(testParts)
       .set({ id: sql`gen_random_uuid()`, status: 'queued', lost: [...p.lost, where], nodeId: null, builtin: false, machineId: null, machineName: null, startedAt: null, queuedAt: new Date() })
-      .where(running);
+      .where(running)
+      .returning({ id: testParts.id });
+    /* What the lost attempt put on the task goes: the part makes it again, and the old id takes no more. */
+    if (again && run.kind === 'work') {
+      await ctx.db.delete(attachments).where(and(eq(attachments.taskId, run.taskId), like(attachments.name, `${madeName(run, p.part, '')}%`)));
+    }
   }
   await pumpTests(ctx);
 }
