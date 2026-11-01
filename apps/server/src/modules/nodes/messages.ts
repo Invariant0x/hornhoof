@@ -1,5 +1,5 @@
 import { lastBytes, type NodeMessage } from '@hornhoof/protocol';
-import { and, eq, inArray, isNull, notInArray, or, type SQL } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, isNull, notInArray, or, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, subscriptions } from '../../db/schema.js';
@@ -47,10 +47,12 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
           ctx.hub.send(id, { type: 'remove' });
           return;
         }
+        /* A machine disconnected in Hornhoof has no key any more; what its socket still says changes nothing. */
+        if (!sub.nodeKeyHash) return;
         await db
           .update(subscriptions)
           .set({ nodeVersion: msg.version, lastSeenAt: now, status: msg.loggedIn ? 'ready' : 'needs_login', ...(msg.models ? { models: msg.models } : {}) })
-          .where(eq(subscriptions.id, sub.id));
+          .where(and(eq(subscriptions.id, sub.id), isNotNull(subscriptions.nodeKeyHash)));
       }
       await failOpenJobs(ctx, jobsOf(id, ctx), 'machine_restarted', msg.running);
       ctx.hub.greet(id, msg.terminals === true);
@@ -69,7 +71,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       await db
         .update(subscriptions)
         .set({ status: msg.loggedIn ? 'ready' : 'needs_login', lastSeenAt: now, ...(msg.limits ? { limits: msg.limits } : {}), ...(msg.models ? { models: msg.models } : {}) })
-        .where(and(eq(subscriptions.id, id.subscriptionId), isNull(subscriptions.removedAt)));
+        .where(and(eq(subscriptions.id, id.subscriptionId), isNull(subscriptions.removedAt), isNotNull(subscriptions.nodeKeyHash)));
       /* A signed-in subscription may have turns waiting for it. */
       if (msg.loggedIn) await pumpWaiting(ctx);
       return;

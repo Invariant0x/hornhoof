@@ -7,12 +7,11 @@ import { failOpenJobs } from './messages.js';
 export async function disconnectMachines(ctx: Ctx, machineIds: string[]): Promise<void> {
   if (machineIds.length === 0) return;
   const served = and(inArray(subscriptions.machineId, machineIds), isNull(subscriptions.removedAt));
-  const ids = (await ctx.db.select({ id: subscriptions.id }).from(subscriptions).where(served)).map(s => s.id);
-  if (ids.length) await failOpenJobs(ctx, inArray(jobs.subscriptionId, ids), 'machine_disconnected');
-  await ctx.db.transaction(async tx => {
+  const ids = await ctx.db.transaction(async tx => {
     await tx.update(machines).set({ revokedAt: new Date() }).where(inArray(machines.id, machineIds));
-    await tx.update(subscriptions).set({ machineId: null, nodeKeyHash: null, status: 'waiting_machine' }).where(served);
+    return (await tx.update(subscriptions).set({ machineId: null, nodeKeyHash: null, status: 'waiting_machine' }).where(served).returning({ id: subscriptions.id })).map(s => s.id);
   });
-  /* After the update, so a status message still in flight cannot mark the subscription ready again. */
+  /* The subscriptions wait for a machine first, so the turns that end here send no next turn to the leaving one. */
   for (const id of ids) ctx.hub.close(id, 4001);
+  if (ids.length) await failOpenJobs(ctx, inArray(jobs.subscriptionId, ids), 'machine_disconnected');
 }

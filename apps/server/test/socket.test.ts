@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { agentEvents, agents, departments, jobs, subscriptions } from '../src/db/schema.js';
+import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { as, connectNode, listen, openStream, setUpCompany, testApp, until } from './helpers.js';
 
 async function liveCompany() {
@@ -169,6 +170,41 @@ describe('node socket', () => {
     expect(await node.closed).toBe(4001);
     expect((await db.select().from(jobs).where(eq(jobs.id, job!.id)))[0]).toMatchObject({ status: 'failed', error: 'machine_disconnected' });
     await expect(connectNode(url, key)).rejects.toThrow(/401/);
+  });
+
+  it("sends no agent's next turn to a machine while it is being disconnected", async () => {
+    const { app, db, url, ceo, machineId, subId, key } = await liveCompany();
+    const [company] = await db.select({ companyId: subscriptions.companyId }).from(subscriptions).where(eq(subscriptions.id, subId));
+    const companyId = company!.companyId;
+    const [dept] = await db.insert(departments).values({ companyId, templateKey: 'development', roleCode: 'DEV' }).returning();
+    const [bruno] = await db.insert(agents).values({ companyId, kind: 'worker', name: 'Bruno', roleKey: 'DEV-BE', departmentId: dept!.id, model: '', subscriptionId: subId }).returning();
+    const node = await connectNode(url, key);
+    node.send({ ...hello([]), version: '0.5.0' });
+    await until(async () => (await subOf(app, ceo, subId)).status === 'ready');
+    const turn = { companyId, subscriptionId: subId, agentId: bruno!.id, kind: 'conversation' as const, timeoutMs: 900000 };
+    await db.insert(jobs).values({ ...turn, prompt: 'first', status: 'running', startedAt: new Date() });
+    const [next] = await db.insert(jobs).values({ ...turn, prompt: 'second', status: 'queued' }).returning();
+    await app.inject({ method: 'POST', url: `/api/machines/${machineId}/disconnect`, ...as(ceo) });
+    expect(await node.closed).toBe(4001);
+    expect(node.queued()).toBe(0);
+    expect((await db.select().from(jobs).where(eq(jobs.id, next!.id)))[0]).toMatchObject({ status: 'queued', startedAt: null });
+  });
+
+  it('lets a status that comes in after the disconnect leave the subscription waiting for a machine', async () => {
+    const { app, db, url, ceo, machineId, subId, key } = await liveCompany();
+    const node = await connectNode(url, key);
+    node.send(hello([]));
+    await until(async () => (await subOf(app, ceo, subId)).status === 'ready');
+    await app.inject({ method: 'POST', url: `/api/machines/${machineId}/disconnect`, ...as(ceo) });
+    await node.closed;
+    const late = { kind: 'node' as const, subscriptionId: subId };
+    await handleNodeMessage(app.ctx, late, { type: 'status', loggedIn: true, limits: null });
+    await handleNodeMessage(app.ctx, late, hello([]));
+    expect((await db.select().from(subscriptions).where(eq(subscriptions.id, subId)))[0]).toMatchObject({ status: 'waiting_machine', machineId: null });
+    const connected = await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude'] }, ...as(ceo) });
+    const code = connected.json().command.split('--join ')[1];
+    const joined = await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' } });
+    expect(joined.statusCode).toBe(200);
   });
 
   it('tells an online node to clean up when its subscription is removed', async () => {
