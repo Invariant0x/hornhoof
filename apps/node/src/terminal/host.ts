@@ -1,11 +1,13 @@
 import { execFile, type ChildProcess } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { TERM_CHUNK, type AgentEvent, type Limits, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
 import { claudeEvents, claudeInterrupted } from '../providers/claude.js';
 import { contentText } from '../providers/events.js';
+import { agentFs, ownFs, type AgentFs } from '../agent-fs.js';
+import { asAgent, type JobUser } from '../isolation.js';
 import { kimiContextSize } from '../providers/kimi.js';
 import { jobDone, tidy, type RunInput, type RunResult } from '../runner.js';
 import type { ProgramOutput } from '../program-exit.js';
@@ -127,6 +129,9 @@ type Options = {
   rows?: number;
   /* Where Linux tells which process holds a connection, so the bridge takes tool calls only from the agent's own program. */
   proc?: string;
+  /* On a node that runs as root, the user the agents' programs run as, and how the node does file work in their folders. */
+  user?: JobUser | null;
+  fs?: AgentFs;
 };
 
 const WAITING = 'This agent starts with its next turn.';
@@ -150,20 +155,16 @@ const hashOf = (v: unknown) => createHash('sha256').update(JSON.stringify(v)).di
 /* What a session was told from before it started, kept in the agent's folder by the session's id. */
 const contextFile = (workDir: string, sessionId: string) => (/^[\w-]+$/.test(sessionId) ? join(workDir, '.hh-context', `${sessionId}.md`) : null);
 
-function keepContext(workDir: string, sessionId: string, context: string): void {
+async function keepContext(fs: AgentFs, workDir: string, sessionId: string, context: string): Promise<void> {
   const file = contextFile(workDir, sessionId);
   if (!file) return;
-  mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
-  writeFileSync(file, context, { mode: 0o600 });
+  await fs.mkdir(dirname(file));
+  await fs.write(file, context);
 }
 
-function keptContext(workDir: string, sessionId: string): string | null {
+async function keptContext(fs: AgentFs, workDir: string, sessionId: string): Promise<string | null> {
   const file = contextFile(workDir, sessionId);
-  try {
-    return file ? readFileSync(file, 'utf8') : null;
-  } catch {
-    return null;
-  }
+  return file ? fs.read(file).catch(() => null) : null;
 }
 
 /* The turn's own address and token for pictures change every turn; the bridge serves them instead. */
@@ -174,6 +175,7 @@ export class TerminalHost {
   private readonly agents = new Map<string, Agent>();
   private readonly views = new Map<string, View>();
   private readonly bridge: Bridge;
+  private readonly fs: AgentFs;
   private readonly readyMs: number;
   private readonly pollMs: number;
   private readonly openMs: number;
@@ -188,6 +190,7 @@ export class TerminalHost {
   constructor(private readonly opts: Options) {
     const owns = opts.proc ? fromAgent(key => this.panes(key), opts.proc) : null;
     this.bridge = new Bridge(opts.hornhoof, (key, event, body) => this.hook(key, event, body), owns);
+    this.fs = opts.fs ?? (opts.user ? agentFs(opts.user) : ownFs);
     this.readyMs = opts.readyMs ?? 120_000;
     this.pollMs = opts.pollMs ?? 500;
     this.openMs = opts.openMs ?? 8000;
@@ -205,7 +208,12 @@ export class TerminalHost {
     this.closeViews();
     for (const a of this.agents.values()) this.unwatch(a);
     this.bridge.stop();
+    this.fs.stop();
     await this.opts.tmux.stopAll();
+  }
+
+  private asAgent(argv: string[]): string[] {
+    return this.opts.user ? asAgent(argv, this.opts.user) : argv;
   }
 
   /* The processes an agent's session starts its program in. */
@@ -245,21 +253,21 @@ export class TerminalHost {
     await a.settling;
     a.signedOut = job.signedOut;
 
-    mkdirSync(input.workDir, { recursive: true });
+    await this.fs.mkdir(input.workDir);
     const urls = this.bridge.agent(job.key);
     let instructionsFile: string | null = null;
     /* The conversation from before reaches a program that starts now; it is not part of its instructions' hash. Claude Code
        keeps only what was said in its log, so what a new session was told from before goes with it to every resume. So it
        does for Kimi Code, which may read AGENTS.md afresh for a session it resumes. */
-    const kept = program.kind !== 'codex' && input.sessionId ? keptContext(input.workDir, input.sessionId) : null;
+    const kept = program.kind !== 'codex' && input.sessionId ? await keptContext(this.fs, input.workDir, input.sessionId) : null;
     const context = kept && input.context && !kept.includes(input.context) ? `${kept}\n\n${input.context}` : (kept ?? input.context);
     const told = [input.instructions, context, input.guidance].filter(Boolean).join('\n\n');
     if (told && program.kind === 'claude') {
       instructionsFile = join(input.workDir, '.hh-instructions.md');
-      writeFileSync(instructionsFile, told + '\n', { mode: 0o600 });
+      await this.fs.write(instructionsFile, told + '\n');
     }
     /* Codex and Kimi Code read AGENTS.md in the folder they start in. */
-    if (told && program.kind !== 'claude') writeFileSync(join(input.workDir, 'AGENTS.md'), told + '\n', { mode: 0o600 });
+    if (told && program.kind !== 'claude') await this.fs.write(join(input.workDir, 'AGENTS.md'), told + '\n');
     const spec = program.launch({ bin: job.bin, home: job.home, workDir: input.workDir, sessionId: input.sessionId, model: input.model, effort: input.effort, compactWindow: input.compactWindow, instructionsFile, urls });
     const hash = hashOf({ kind: program.kind, bin: job.bin, model: input.model, effort: input.effort ?? null, compactWindow: input.compactWindow ?? null, instructions: input.instructions, env: lasting(input.env) });
     /* A new session asked for goes on in a program started for a person that nothing was said in yet. */
@@ -285,15 +293,16 @@ export class TerminalHost {
     try {
       if (!goesOn) {
         this.programIs(a, false);
-        if (program.kind === 'claude') acceptClaudeDialogs(job.home, input.workDir);
-        if (program.kind === 'kimi') prepareKimi(job.home, input.workDir, urls.mcpUrl);
+        if (program.kind === 'claude') await acceptClaudeDialogs(job.home, input.workDir, this.fs);
+        if (program.kind === 'kimi') await prepareKimi(job.home, input.workDir, urls.mcpUrl, this.fs);
         /* A person's first message into a new Kimi session reaches its tools a moment before Hornhoof opens their turn. */
         this.bridge.waitForTurns(job.key, program.kind === 'kimi' ? this.openMs + 2000 : 0);
         Object.assign(a, { program, home: job.home, workDir: input.workDir, hash, sessionId: spec.sessionId, cleared: new Set(), startedAt: Date.now(), started: deferred<void>(), fresh: false, keep: lazy ? (input.context ?? null) : null, contextSize: program.kind === 'kimi' ? kimiWindow(job.home, input.model) : null });
-        if (program.kind === 'claude' && !input.sessionId && input.context && spec.sessionId) keepContext(input.workDir, spec.sessionId, input.context);
+        if (program.kind === 'claude' && !input.sessionId && input.context && spec.sessionId) await keepContext(this.fs, input.workDir, spec.sessionId, input.context);
         a.tail = this.tailFor(a);
         const env = { ...lasting(input.env), ...spec.env };
-        await this.opts.tmux.launch(a.name, { cwd: input.workDir, command: spec.command, cols: this.cols, rows: this.rows, envFile: envFile(input.workDir, env), outputDir: input.workDir });
+        const scratch = this.opts.tmux.scratch();
+        await this.opts.tmux.launch(a.name, { cwd: input.workDir, command: this.asAgent(spec.command), cols: this.cols, rows: this.rows, envFile: envFile(scratch, env), outputDir: scratch });
         this.watch(a);
         if (!(await this.ready(a, job))) {
           const screen = await this.screen(job.key);
@@ -425,7 +434,7 @@ export class TerminalHost {
     if (a.program?.kind === 'claude') a.tail = new LineTail(claudeTranscript(a.home, realpathSync(a.workDir), sessionId));
     if (a.program?.kind === 'kimi') {
       a.tail = null;
-      if (a.keep) keepContext(a.workDir, sessionId, a.keep);
+      if (a.keep) void keepContext(this.fs, a.workDir, sessionId, a.keep).catch(() => {});
       a.keep = null;
     }
   }
@@ -785,7 +794,7 @@ export class TerminalHost {
       if (!(await this.opts.tmux.has(a.name))) {
         /* The window shows a loader over the empty session while the program starts. */
         const waiting = starts ? '' : `printf '\\n  %s\\n' '${WAITING}'; `;
-        await this.opts.tmux.launch(a.name, { cwd: '/', command: ['sh', '-c', `${waiting}exec sleep 2147483647`], cols: m.cols, rows: m.rows });
+        await this.opts.tmux.launch(a.name, { cwd: '/', command: this.asAgent(['sh', '-c', `${waiting}exec sleep 2147483647`]), cols: m.cols, rows: m.rows });
         /* The waiting screen is no program of the agent's: the next turn starts one in its place. A turn that runs now is
            starting its own. */
         if (!a.turn) a.hash = null;

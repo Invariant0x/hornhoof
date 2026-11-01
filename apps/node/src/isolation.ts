@@ -36,7 +36,9 @@ export function userFor(dir: string, subscriptionId: string, isRoot = isRootUser
 
 export type FolderOps = {
   mkdir(path: string): void;
+  exists(path: string): boolean;
   owner(path: string): number;
+  chown(path: string, uid: number, gid: number): void;
   chownTree(path: string, uid: number, gid: number): void;
   chmod(path: string, mode: number): void;
 };
@@ -49,7 +51,9 @@ function chownTree(path: string, uid: number, gid: number): void {
 
 const REAL_OPS: FolderOps = {
   mkdir: path => void mkdirSync(path, { recursive: true }),
+  exists: path => existsSync(path),
   owner: path => statSync(path).uid,
+  chown: lchownSync,
   chownTree,
   chmod: chmodSync,
 };
@@ -62,6 +66,49 @@ export function prepareFolder(path: string, user: JobUser | null, ops: FolderOps
     ops.chmod(path, 0o700);
   }
   return path;
+}
+
+/* CHOWN, DAC_OVERRIDE, FOWNER, KILL, SETGID, SETUID and SYS_PTRACE: what a root node needs to run its agents as another
+   user, reach their files and tell which of them calls its bridge. */
+const AGENT_CAPS = [0, 1, 3, 5, 6, 7, 19].reduce((all, bit) => all | (1n << BigInt(bit)), 0n);
+
+const field = (text: string, name: string) => new RegExp(`^${name}:\\s*(\\S+)`, 'm').exec(text)?.[1];
+
+/* Agents of a personal plan share one sign-in, which their programs write for their own user only, so they all run as
+   one user: the image's node user, apart from a node that runs as root. Null keeps them as the node itself, as nodes did
+   before, when it is not root or may not do all that. */
+export function agentUser({ status = '/proc/self/status', passwd = '/etc/passwd' } = {}): JobUser | null {
+  let text = '';
+  try {
+    text = readFileSync(status, 'utf8');
+  } catch {
+    return null;
+  }
+  const caps = field(text, 'CapEff');
+  if (field(text, 'Uid') !== '0' || !caps || (BigInt(`0x${caps}`) & AGENT_CAPS) !== AGENT_CAPS) return null;
+  const entry = existsSync(passwd) ? readFileSync(passwd, 'utf8').split('\n').find(line => line.startsWith('node:')) : undefined;
+  const [, , uid, gid] = entry?.split(':') ?? [];
+  return uid && gid && /^\d+$/.test(uid) && /^\d+$/.test(gid) ? { uid: Number(uid), gid: Number(gid) } : null;
+}
+
+/* A command line that runs as the agents' user, from a node that runs as root. */
+export const asAgent = (argv: string[], user: JobUser): string[] => ['setpriv', `--reuid=${user.uid}`, `--regid=${user.gid}`, '--init-groups', '--', ...argv];
+
+/* A personal node that runs as root keeps its key, its records and the agent programs to itself: no agent can change
+   where the node connects, read its key or swap a program another agent starts. The agents get their homes and work
+   folders. */
+export function secureNode(dir: string, user: JobUser, ops: FolderOps = REAL_OPS): void {
+  if (ops.owner(dir) !== 0) ops.chown(dir, 0, 0);
+  ops.chmod(dir, 0o755);
+  for (const file of ['node.json', 'sessions.json', 'users.json', 'login-url', 'removed']) {
+    const path = join(dir, file);
+    if (ops.exists(path) && ops.owner(path) !== 0) ops.chown(path, 0, 0);
+  }
+  for (const tree of ['tools', '.hh-recordings']) {
+    const path = join(dir, tree);
+    if (ops.exists(path) && ops.owner(path) !== 0) ops.chownTree(path, 0, 0);
+  }
+  for (const sub of ['home', 'work']) prepareFolder(join(dir, sub), user, ops);
 }
 
 type SystemFiles = { passwd: string; group: string };

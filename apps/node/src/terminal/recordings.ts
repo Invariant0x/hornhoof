@@ -58,6 +58,13 @@ export class Recordings {
     this.dir = join(root, digest(socket));
   }
 
+  /* The node's own folder for what its sessions need, where no agent can put a link. */
+  privateDir(): string {
+    privateDirectory(this.root);
+    privateDirectory(this.dir);
+    return this.dir;
+  }
+
   private path(name: string): string {
     return join(this.dir, `${digest(name)}.json`);
   }

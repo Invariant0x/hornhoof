@@ -4,6 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { ownFs, type AgentFs } from '../src/agent-fs.js';
 import { acceptClaudeDialogs, claudePlanLimits, claudeProgram, claudeTranscript, codexProgram, findKimiWire, findRollout, kimiPlanLimits, kimiProgram, prepareKimi } from '../src/terminal/programs.js';
 
 const URLS = { mcpUrl: 'http://127.0.0.1:5000/mcp/s3cr3t', attachUrl: 'http://127.0.0.1:5000/attach/s3cr3t', hookUrl: 'http://127.0.0.1:5000/hook/s3cr3t' };
@@ -53,19 +54,19 @@ describe('Claude Code in a terminal', () => {
     expect(unset.env).not.toHaveProperty('CLAUDE_CODE_AUTO_COMPACT_WINDOW');
   });
 
-  it("answers the first-run questions before they are asked, keeping the person's own settings", () => {
+  it("answers the first-run questions before they are asked, keeping the person's own settings", async () => {
     const home = mkdtempSync(join(tmpdir(), 'hh-claude-'));
     writeFileSync(join(home, '.claude.json'), JSON.stringify({ oauthAccount: { a: 1 }, projects: { '/other': { allowedTools: ['x'] } } }));
     writeFileSync(join(home, 'settings.json'), JSON.stringify({ theme: 'light', env: { A: '1' } }));
-    acceptClaudeDialogs(home, '/w/a1');
+    await acceptClaudeDialogs(home, '/w/a1');
     const state = JSON.parse(readFileSync(join(home, '.claude.json'), 'utf8'));
     expect(state).toMatchObject({ oauthAccount: { a: 1 }, hasCompletedOnboarding: true, projects: { '/other': { allowedTools: ['x'] }, '/w/a1': { hasTrustDialogAccepted: true } } });
     expect(JSON.parse(readFileSync(join(home, 'settings.json'), 'utf8'))).toEqual({ theme: 'light', env: { A: '1' }, skipDangerousModePermissionPrompt: true });
   });
 
-  it('answers them on a fresh home too, in the dark theme a first run picks', () => {
+  it('answers them on a fresh home too, in the dark theme a first run picks', async () => {
     const home = mkdtempSync(join(tmpdir(), 'hh-claude-'));
-    acceptClaudeDialogs(home, '/w/a1');
+    await acceptClaudeDialogs(home, '/w/a1');
     expect(JSON.parse(readFileSync(join(home, 'settings.json'), 'utf8'))).toEqual({ theme: 'dark', skipDangerousModePermissionPrompt: true });
   });
 
@@ -162,13 +163,13 @@ describe('Kimi Code in a terminal', () => {
     expect(unset.env).not.toHaveProperty('KIMI_MODEL_THINKING_EFFORT');
   });
 
-  it("gives the agent folder the bridge for tools, and adds Hornhoof's hooks to the person's settings once", () => {
+  it("gives the agent folder the bridge for tools, and adds Hornhoof's hooks to the person's settings once", async () => {
     const home = mkdtempSync(join(tmpdir(), 'hh-kimi-'));
     const work = mkdtempSync(join(tmpdir(), 'hh-kimi-work-'));
     const own = 'default_model = "kimi-code/k3"\n\n[providers."managed:kimi-code"]\ntype = "kimi"\n';
     writeFileSync(join(home, 'config.toml'), own);
-    prepareKimi(home, work, URLS.mcpUrl);
-    prepareKimi(home, work, URLS.mcpUrl);
+    await prepareKimi(home, work, URLS.mcpUrl);
+    await prepareKimi(home, work, URLS.mcpUrl);
     expect(JSON.parse(readFileSync(join(work, '.kimi-code', 'mcp.json'), 'utf8'))).toEqual({ mcpServers: { hornhoof: { transport: 'http', url: URLS.mcpUrl } } });
     const config = readFileSync(join(home, 'config.toml'), 'utf8');
     expect(config.startsWith(own)).toBe(true);
@@ -177,15 +178,33 @@ describe('Kimi Code in a terminal', () => {
     expect(config).toContain('event = "UserPromptSubmit"\ncommand = "hh-hook prompt"');
   });
 
-  it('adds the hooks to a fresh home, and leaves settings alone that list hooks in a way more could not be added to', () => {
+  it('adds the hooks to a fresh home, and leaves settings alone that list hooks in a way more could not be added to', async () => {
     const fresh = mkdtempSync(join(tmpdir(), 'hh-kimi-'));
-    prepareKimi(fresh, mkdtempSync(join(tmpdir(), 'hh-kimi-work-')), URLS.mcpUrl);
+    await prepareKimi(fresh, mkdtempSync(join(tmpdir(), 'hh-kimi-work-')), URLS.mcpUrl);
     expect(readFileSync(join(fresh, 'config.toml'), 'utf8')).toContain('command = "hh-hook prompt"');
     const home = mkdtempSync(join(tmpdir(), 'hh-kimi-'));
     const own = 'hooks = [{ event = "Stop", command = "say done" }]\n';
     writeFileSync(join(home, 'config.toml'), own);
-    prepareKimi(home, mkdtempSync(join(tmpdir(), 'hh-kimi-work-')), URLS.mcpUrl);
+    await prepareKimi(home, mkdtempSync(join(tmpdir(), 'hh-kimi-work-')), URLS.mcpUrl);
     expect(readFileSync(join(home, 'config.toml'), 'utf8')).toBe(own);
+  });
+
+  it("does the first-run answers and Kimi's files through the agents' file helper", async () => {
+    const done: string[] = [];
+    const fs: AgentFs = {
+      mkdir: path => (done.push(`mkdir ${path}`), ownFs.mkdir(path)),
+      read: path => (done.push(`read ${path}`), ownFs.read(path)),
+      write: (path, data) => (done.push(`write ${path}`), ownFs.write(path, data)),
+      stop() {},
+    };
+    const home = mkdtempSync(join(tmpdir(), 'hh-claude-'));
+    await acceptClaudeDialogs(home, '/w/a1', fs);
+    expect(done).toEqual([`read ${join(home, '.claude.json')}`, `write ${join(home, '.claude.json')}`, `read ${join(home, 'settings.json')}`, `write ${join(home, 'settings.json')}`]);
+    done.length = 0;
+    const kimi = mkdtempSync(join(tmpdir(), 'hh-kimi-'));
+    const work = mkdtempSync(join(tmpdir(), 'hh-kimi-work-'));
+    await prepareKimi(kimi, work, URLS.mcpUrl, fs);
+    expect(done).toEqual([`mkdir ${join(work, '.kimi-code')}`, `write ${join(work, '.kimi-code', 'mcp.json')}`, `read ${join(kimi, 'config.toml')}`, `mkdir ${kimi}`, `write ${join(kimi, 'config.toml')}`]);
   });
 
   it("asks Kimi's usage page for the plan's limits with the token Kimi keeps, and gives nothing without one", async () => {

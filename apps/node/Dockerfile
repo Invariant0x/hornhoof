@@ -95,6 +95,7 @@ COPY --chmod=755 apps/node/hh-attach.cjs /usr/local/bin/hh-attach
 COPY --chmod=755 apps/node/hh-hook.cjs /usr/local/bin/hh-hook
 # The terminal's private, bounded raw output survives programs leaving their alternate screen.
 COPY apps/node/hh-capture.cjs /app/apps/node/hh-capture.cjs
+COPY apps/node/hh-fs.cjs /app/apps/node/hh-fs.cjs
 RUN mkdir -p /data && chown node:node /data
 # Agent programs are installed into /data/tools at first use and keep their sign-in in /data/home.
 # Set last, so nothing the build writes lands in /data.

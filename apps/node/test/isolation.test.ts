@@ -2,16 +2,18 @@ import { mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { builtinAdapters, ensurePasswd, FIRST_UID, prepareFolder, userFor, type FolderOps } from '../src/isolation.js';
+import { agentUser, builtinAdapters, ensurePasswd, FIRST_UID, prepareFolder, secureNode, userFor, type FolderOps } from '../src/isolation.js';
 import { runProgram } from '../src/providers/process.js';
 
 const tmp = () => mkdtempSync(join(tmpdir(), 'hh-iso-'));
 
-function fakeOps(owners: Record<string, number> = {}) {
+function fakeOps(owners: Record<string, number> = {}, missing: string[] = []) {
   const calls: string[] = [];
   const ops: FolderOps = {
     mkdir: path => void calls.push(`mkdir ${path}`),
+    exists: path => !missing.includes(path),
     owner: path => owners[path] ?? 0,
+    chown: (path, uid, gid) => void calls.push(`chown1 ${path} ${uid}:${gid}`),
     chownTree: (path, uid, gid) => void calls.push(`chown ${path} ${uid}:${gid}`),
     chmod: (path, mode) => void calls.push(`chmod ${path} ${mode.toString(8)}`),
   };
@@ -31,6 +33,48 @@ describe('userFor', () => {
 
   it('gives no user when the node does not run as root', () => {
     expect(userFor(tmp(), 'sub-a', false)).toBeNull();
+  });
+});
+
+describe('agentUser', () => {
+  /* CHOWN, DAC_OVERRIDE, FOWNER, KILL, SETGID, SETUID and SYS_PTRACE. */
+  const ALL = 0x800eb;
+  function system(uid: number, caps: number, passwd = 'root:x:0:0:root:/root:/bin/bash\nnode:x:1000:1000::/home/node:/bin/bash\n') {
+    const dir = tmp();
+    writeFileSync(join(dir, 'status'), `Name:\tnode\nUid:\t${uid}\t${uid}\t${uid}\t${uid}\nCapEff:\t${caps.toString(16).padStart(16, '0')}\n`);
+    writeFileSync(join(dir, 'passwd'), passwd);
+    return { status: join(dir, 'status'), passwd: join(dir, 'passwd') };
+  }
+
+  it("runs a root node's agents as the image's node user, when root may hand them over and check their calls", () => {
+    expect(agentUser(system(0, ALL))).toEqual({ uid: 1000, gid: 1000 });
+    expect(agentUser(system(0, 0x1ffffffffff))).toEqual({ uid: 1000, gid: 1000 });
+  });
+
+  it('keeps agents as the node itself when it is not root, lacks a power for that, or has no node user', () => {
+    expect(agentUser(system(1000, ALL))).toBeNull();
+    expect(agentUser(system(0, ALL & ~(1 << 19)))).toBeNull();
+    expect(agentUser(system(0, ALL & ~(1 << 7)))).toBeNull();
+    expect(agentUser(system(0, ALL, 'root:x:0:0:root:/root:/bin/bash\n'))).toBeNull();
+  });
+});
+
+describe('secureNode', () => {
+  it("keeps the node's own files and programs to root and gives the agents their homes and work folders", () => {
+    const user = { uid: 1000, gid: 1000 };
+    const { ops, calls } = fakeOps({ '/data': 1000, '/data/node.json': 1000, '/data/tools': 1000, '/data/sessions.json': 0, '/data/home': 1000 }, ['/data/users.json', '/data/login-url', '/data/removed', '/data/.hh-recordings']);
+    secureNode('/data', user, ops);
+    expect(calls).toEqual([
+      'chown1 /data 0:0',
+      'chmod /data 755',
+      'chown1 /data/node.json 0:0',
+      'chown /data/tools 0:0',
+      'mkdir /data/home',
+      'chmod /data/home 700',
+      'mkdir /data/work',
+      'chown /data/work 1000:1000',
+      'chmod /data/work 700',
+    ]);
   });
 });
 

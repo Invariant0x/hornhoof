@@ -12,6 +12,7 @@ import { TerminalHost, type TermJob } from '../src/terminal/host.js';
 import { claudeProgram, codexProgram, findKimiWire, kimiProgram } from '../src/terminal/programs.js';
 import { Tmux } from '../src/terminal/tmux.js';
 import { runJob, type ProviderAdapter } from '../src/runner.js';
+import { ownFs, type AgentFs } from '../src/agent-fs.js';
 
 const FAKE = fileURLToPath(new URL('./fakes/fake-term.mjs', import.meta.url));
 const FAKE_CODEX = fileURLToPath(new URL('./fakes/fake-codex-term.mjs', import.meta.url));
@@ -38,9 +39,9 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
   let sent: NodeMessage[];
   const home = mkdtempSync(join(tmpdir(), 'hh-home-'));
 
-  function setUp(more: Partial<ConstructorParameters<typeof TerminalHost>[0]> = {}) {
+  function setUp(more: Partial<ConstructorParameters<typeof TerminalHost>[0]> = {}, path = process.env.PATH ?? '') {
     sent = [];
-    tmux = new Tmux({ socket: `hh-host-${process.pid}-${Math.random().toString(36).slice(2, 8)}`, env: { PATH: process.env.PATH ?? '', HOME: home } });
+    tmux = new Tmux({ socket: `hh-host-${process.pid}-${Math.random().toString(36).slice(2, 8)}`, env: { PATH: path, HOME: home } });
     host = new TerminalHost({ tmux, hornhoof: 'http://127.0.0.1:9', send: m => sent.push(m), secrets: () => [SECRET], readyMs: 10_000, pollMs: 100, toolsMs: 300, ...more });
     return host.start();
   }
@@ -197,8 +198,7 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
       await setUp();
       const key = 'bounded-exit';
       const result = await runTail(job(key, 'CRASH LONG'));
-      const workDir = join(home, 'work', 'agents', key);
-      const files = readdirSync(workDir).filter(name => name.startsWith('.hh-output-')).map(name => join(workDir, name));
+      const files = readdirSync(tmux.scratch()).filter(name => /^\.hh-output-[a-f0-9]{16}\.log$/.test(name)).map(name => join(tmux.scratch(), name));
       expect(files.length).toBeGreaterThan(0);
       for (const file of files) {
         expect(statSync(file).mode & 0o777).toBe(0o600);
@@ -209,7 +209,7 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
       await tmux.kill('a-' + key);
       expect(files.some(existsSync)).toBe(false);
       expect((await runTail(job(key, 'warm up'))).ok).toBe(true);
-      const nextFiles = readdirSync(workDir).filter(name => name.startsWith('.hh-output-')).map(name => join(workDir, name));
+      const nextFiles = readdirSync(tmux.scratch()).filter(name => /^\.hh-output-[a-f0-9]{16}\.log$/.test(name)).map(name => join(tmux.scratch(), name));
       expect(nextFiles.length).toBeGreaterThan(0);
       await host.stop();
       expect(nextFiles.some(existsSync)).toBe(false);
@@ -224,6 +224,25 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     expect(res.sessionId).toMatch(/^[0-9a-f-]{36}$/);
     expect(res.limits?.windows[0]).toMatchObject({ name: 'five_hour', utilization: 0.4 });
     expect(j.events).toEqual([{ kind: 'text', text: 'echo: hello there' }]);
+  });
+
+  it("starts the agent's program as the agents' user on a root node, and writes what it needs through their file helper", async () => {
+    const bin = mkdtempSync(join(tmpdir(), 'hh-setpriv-'));
+    const seen = join(bin, 'seen');
+    writeFileSync(join(bin, 'setpriv'), `#!/bin/sh\necho "$@" > ${seen}\nwhile [ "$1" != "--" ]; do shift; done\nshift\nexec "$@"\n`, { mode: 0o755 });
+    const done: string[] = [];
+    const fs: AgentFs = {
+      mkdir: path => (done.push(`mkdir ${path}`), ownFs.mkdir(path)),
+      read: path => (done.push(`read ${path}`), ownFs.read(path)),
+      write: (path, data) => (done.push(`write ${path}`), ownFs.write(path, data)),
+      stop() {},
+    };
+    await setUp({ user: { uid: 4242, gid: 4343 }, fs }, `${bin}:${process.env.PATH ?? ''}`);
+    const j = job('as-agent', 'hello there');
+    expect(await host.run(j)).toMatchObject({ ok: true, result: 'echo: hello there' });
+    expect(readFileSync(seen, 'utf8')).toMatch(new RegExp(`^--reuid=4242 --regid=4343 --init-groups -- ${FAKE}`));
+    expect(done).toEqual(expect.arrayContaining([`mkdir ${j.input.workDir}`, `write ${join(j.input.workDir, '.hh-instructions.md')}`, `read ${join(home, '.claude.json')}`, `read ${join(home, 'settings.json')}`]));
+    expect(readdirSync(j.input.workDir).filter(name => name.startsWith('.hh-env-') || name.startsWith('.hh-output-'))).toEqual([]);
   });
 
   it('presses Enter again when the program did not take the prompt, as Claude Code that just started can miss it', async () => {

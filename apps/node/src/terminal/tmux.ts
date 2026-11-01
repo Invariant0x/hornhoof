@@ -86,6 +86,11 @@ export class Tmux {
     this.flushTimeoutMs = flushTimeoutMs;
   }
 
+  /* Where a session's settings and output go: the node's own folder, not the agent's. */
+  scratch(): string {
+    return this.recordings.privateDir();
+  }
+
   /* The arguments that reach this server; viewers attach with them too. */
   base(): string[] {
     return ['-u', '-f', '/dev/null', '-L', this.socket];

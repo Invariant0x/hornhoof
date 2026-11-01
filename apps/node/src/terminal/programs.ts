@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Limits } from '@hornhoof/protocol';
-import { writePrivate } from '../providers/process.js';
+import { ownFs, type AgentFs } from '../agent-fs.js';
 import type { AgentUrls } from './bridge.js';
 import { claudeUsageLimits, kimiUsageLimits } from './transcripts.js';
 
@@ -126,24 +126,18 @@ const KIMI_HOOKS = [
 /* Kimi has no flags for tools or hooks. Its tools come from the agent folder's .kimi-code/mcp.json, through the bridge,
    and its hooks from config.toml in its home, which the person's own settings share: Hornhoof's are added at the end
    once. Settings that list their hooks on one line could take no more, and are left alone. */
-export function prepareKimi(home: string, workDir: string, mcpUrl: string): void {
+export async function prepareKimi(home: string, workDir: string, mcpUrl: string, fs: AgentFs = ownFs): Promise<void> {
   const dir = join(workDir, '.kimi-code');
-  mkdirSync(dir, { recursive: true });
-  writePrivate(join(dir, 'mcp.json'), JSON.stringify({ mcpServers: { hornhoof: { transport: 'http', url: mcpUrl } } }, null, 2), null);
+  await fs.mkdir(dir);
+  await fs.write(join(dir, 'mcp.json'), JSON.stringify({ mcpServers: { hornhoof: { transport: 'http', url: mcpUrl } } }, null, 2));
   const file = join(home, 'config.toml');
-  let config = '';
-  try {
-    config = readFileSync(file, 'utf8');
-  } catch {
-    /* A home that was never signed in has none yet. */
-  }
+  /* A home that was never signed in has none yet. */
+  const config = (await fs.read(file)) ?? '';
   const missing = KIMI_HOOKS.filter(([, event]) => !new RegExp(`hh-hook ${event}\\b`).test(config));
   if (!missing.length || /^\s*hooks\s*=/m.test(config)) return;
   const added = missing.map(([name, event]) => `[[hooks]]\nevent = "${name}"\ncommand = "hh-hook ${event}"\n`).join('\n');
-  mkdirSync(home, { recursive: true });
-  const temp = `${file}.hh-${process.pid}`;
-  writeFileSync(temp, `${config}${config && !config.endsWith('\n') ? '\n' : ''}${config ? '\n' : ''}${added}`, { mode: 0o600 });
-  renameSync(temp, file);
+  await fs.mkdir(home);
+  await fs.write(file, `${config}${config && !config.endsWith('\n') ? '\n' : ''}${config ? '\n' : ''}${added}`);
 }
 
 /* Kimi Code keeps a session's log by the folder's workspace and the session's id; the main agent has its own log. */
@@ -189,26 +183,28 @@ function readJson(file: string): Record<string, unknown> {
   }
 }
 
-/* Written whole and moved into place, so a program reading it at the same moment sees the old file or the new one. */
-function writeJson(file: string, data: unknown): void {
-  const temp = `${file}.hh-${process.pid}`;
-  writeFileSync(temp, JSON.stringify(data, null, 2), { mode: 0o600 });
-  renameSync(temp, file);
-}
+const parsed = (text: string | null): Record<string, unknown> => {
+  try {
+    const data = JSON.parse(text ?? '');
+    return data && typeof data === 'object' ? data : {};
+  } catch {
+    return {};
+  }
+};
 
 /* A first run asks for a theme, shows notes, asks to trust the folder and to accept running without approvals. An agent
    cannot answer, so the answers are written first: the theme a first run picks, unless the person chose one. */
-export function acceptClaudeDialogs(home: string, workDir: string): void {
+export async function acceptClaudeDialogs(home: string, workDir: string, fs: AgentFs = ownFs): Promise<void> {
   const stateFile = join(home, '.claude.json');
-  const state = readJson(stateFile);
+  const state = parsed(await fs.read(stateFile));
   const projects = (state.projects && typeof state.projects === 'object' ? state.projects : {}) as Record<string, Record<string, unknown>>;
   if (state.hasCompletedOnboarding !== true || projects[workDir]?.hasTrustDialogAccepted !== true) {
-    writeJson(stateFile, { ...state, hasCompletedOnboarding: true, projects: { ...projects, [workDir]: { ...projects[workDir], hasTrustDialogAccepted: true } } });
+    await fs.write(stateFile, JSON.stringify({ ...state, hasCompletedOnboarding: true, projects: { ...projects, [workDir]: { ...projects[workDir], hasTrustDialogAccepted: true } } }, null, 2));
   }
   const settingsFile = join(home, 'settings.json');
-  const settings = readJson(settingsFile);
+  const settings = parsed(await fs.read(settingsFile));
   if (settings.skipDangerousModePermissionPrompt !== true || !settings.theme) {
-    writeJson(settingsFile, { theme: 'dark', ...settings, skipDangerousModePermissionPrompt: true });
+    await fs.write(settingsFile, JSON.stringify({ theme: 'dark', ...settings, skipDangerousModePermissionPrompt: true }, null, 2));
   }
 }
 
