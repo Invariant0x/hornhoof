@@ -218,3 +218,35 @@ describe('migration 0020', () => {
     ]);
   });
 });
+
+describe('migration 0024', () => {
+  const C = '00000000-0000-4000-8000-000000000001';
+  const P = '00000000-0000-4000-8000-000000000002';
+  const KEY = '00000000-0000-4000-8000-0000000000a1';
+  const PLAN = '00000000-0000-4000-8000-0000000000a2';
+  const A = '00000000-0000-4000-8000-0000000000b1';
+
+  it("starts the agents of company keys in new sessions, as the built-in node keeps their homes apart now", async () => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0023_impossible_rows') });
+    await db.execute(sql`insert into companies (id, name) values (${C}, 'Acme')`);
+    await db.execute(sql`insert into people (id, company_id, name, email, status, scope_kind) values (${P}, ${C}, 'Ivan', 'ivan@acme.com', 'active', 'company')`);
+    await db.execute(sql`insert into subscriptions (id, company_id, provider, kind, label, status, owner_person_id) values
+      (${KEY}, ${C}, 'anthropic_api', 'api_key', 'Key', 'ready', ${P}),
+      (${PLAN}, ${C}, 'claude', 'personal', 'Claude', 'ready', ${P})`);
+    await db.execute(sql`insert into agents (id, company_id, kind, name, model) values (${A}, ${C}, 'worker', 'Bruno', '')`);
+    await db.execute(sql`insert into jobs (company_id, subscription_id, agent_id, kind, prompt, timeout_ms, status, session_id) values
+      (${C}, ${KEY}, ${A}, 'conversation', 'hi', 900000, 'done', 'key-session'),
+      (${C}, ${PLAN}, ${A}, 'conversation', 'hi', 900000, 'done', 'plan-session')`);
+
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+
+    const rows = await db.execute<{ subscription_id: string; session_id: string | null }>(sql`select subscription_id, session_id from jobs order by subscription_id`);
+    expect(rows.rows).toEqual([
+      { subscription_id: KEY, session_id: null },
+      { subscription_id: PLAN, session_id: 'plan-session' },
+    ]);
+  });
+});

@@ -169,6 +169,13 @@
       "when": 1793551956709,
       "tag": "0023_impossible_rows",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1793554033146,
+      "tag": "0024_builtin_sessions",
+      "breakpoints": true
     }
   ]
 }
