@@ -249,6 +249,17 @@ describe('Department view', () => {
     expect(await screen.findByRole('button', { name: 'Open terminal' })).toBeInTheDocument();
   });
 
+  it("goes from an employee's card back to its window with Open terminal", async () => {
+    const user = userEvent.setup();
+    shell({ 'GET /api/agents/b1': [200, CARD], 'GET /api/agents/b1/events?after=0': [200, { events: [], state: READY }] });
+    await flyIn(user);
+    await user.click(screen.getByRole('button', { name: /Bruno/ }));
+    await user.click(await screen.findByRole('button', { name: 'Card' }));
+    await user.click(await screen.findByRole('button', { name: 'Open terminal' }));
+    expect(await screen.findByRole('complementary', { name: 'Bruno, Backend engineer' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open terminal' })).not.toBeInTheDocument();
+  });
+
   it("opens a head's department notebook from its window", async () => {
     const user = userEvent.setup();
     const DANA_CARD = { ...CARD, id: 'b0', name: 'Dana', kind: 'head' };
