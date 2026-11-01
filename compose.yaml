@@ -65,6 +65,10 @@ services:
     environment:
       HORNHOOF_SERVER: http://app:8080
       NODE_KEY: ${NODE_KEY:?Set NODE_KEY in .env}
+      # What the computer has, which install.sh writes on a Mac, where Docker runs in a smaller system.
+      HORNHOOF_HOST_CPU: ${HORNHOOF_HOST_CPU:-}
+      HORNHOOF_HOST_CPUS: ${HORNHOOF_HOST_CPUS:-}
+      HORNHOOF_HOST_MEMORY: ${HORNHOOF_HOST_MEMORY:-}
     volumes:
       - nodedata:/data
     # Browsers that agents run for checks need more shared memory than Docker's 64 MB.

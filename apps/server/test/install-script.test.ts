@@ -367,6 +367,21 @@ describe('install.sh', () => {
     expect(r.out).toContain('https://hornhoof.my.test');
   });
 
+  it("tells the built-in node of a server on a Mac the Mac's processor, cores and memory, through .env", () => {
+    const r = install({ args: ['server'], tty: '\n', env: { STUB_OS: 'Darwin', STUB_ARCH: 'arm64', STUB_NCPU: '10', STUB_MEMSIZE: String(32 * 1024 ** 3), STUB_CPU_BRAND: 'Apple M5' } });
+    expect(r.code).toBe(0);
+    const env = readFileSync(join(r.dir, 'home', 'hornhoof', '.env'), 'utf8');
+    expect(env).toMatch(/^HORNHOOF_HOST_CPU=Apple M5$/m);
+    expect(env).toMatch(/^HORNHOOF_HOST_CPUS=10$/m);
+    expect(env).toMatch(new RegExp(`^HORNHOOF_HOST_MEMORY=${32 * 1024 ** 3}$`, 'm'));
+  });
+
+  it('tells the built-in node of a server on Linux nothing of the machine, which it sees itself', () => {
+    const r = install({ args: ['server'], tty: '\n' });
+    expect(r.code).toBe(0);
+    expect(readFileSync(join(r.dir, 'home', 'hornhoof', '.env'), 'utf8')).not.toMatch(/^HORNHOOF_HOST_(CPU|CPUS|MEMORY)=/m);
+  });
+
   it('keeps an existing .env and adds a missing NODE_KEY', () => {
     const dir = mkdtempSync(join(tmpdir(), 'hh-server-'));
     writeFileSync(join(dir, '.env'), 'HORNHOOF_SECRET=keep-me\nPUBLIC_URL=http://localhost:8080\n');

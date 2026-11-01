@@ -19,3 +19,13 @@ describe('the tunnel service', () => {
     expect(compose.services.app!.environment!.TUNNEL_HOST).toBe('tunnel');
   });
 });
+
+describe('the built-in node', () => {
+  it("hears what the computer has from .env, as Docker on a Mac runs in a smaller system", () => {
+    expect(compose.services.node!.environment).toMatchObject({
+      HORNHOOF_HOST_CPU: '${HORNHOOF_HOST_CPU:-}',
+      HORNHOOF_HOST_CPUS: '${HORNHOOF_HOST_CPUS:-}',
+      HORNHOOF_HOST_MEMORY: '${HORNHOOF_HOST_MEMORY:-}',
+    });
+  });
+});

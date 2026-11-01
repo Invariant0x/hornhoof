@@ -319,18 +319,25 @@ join_machine() {
 node_name() { printf 'hornhoof-%s-%s' "$2" "${1:0:8}"; }
 
 # Docker on a Mac runs in a smaller system of its own, so each node hears what the Mac itself has, to show it next to
-# what the node can use. On Linux a node sees its machine.
-HOST_ENV=()
-host_env() {
+# what the node can use: "NAME=value" lines for its processor, cores and memory. On Linux a node sees its machine.
+host_facts() {
   local cpu cpus mem
-  HOST_ENV=()
   if [ "$OS" != darwin ]; then return 0; fi
   cpu=$(sysctl -n machdep.cpu.brand_string 2> /dev/null | tr -cd 'A-Za-z0-9 ()@.,_-' | cut -c1-200 || true)
   cpus=$(sysctl -n hw.ncpu 2> /dev/null || true)
   mem=$(sysctl -n hw.memsize 2> /dev/null || true)
-  if [ -n "$cpu" ]; then HOST_ENV+=(-e "HORNHOOF_HOST_CPU=$cpu"); fi
-  case "$cpus" in '' | *[!0-9]*) ;; *) HOST_ENV+=(-e "HORNHOOF_HOST_CPUS=$cpus") ;; esac
-  case "$mem" in '' | *[!0-9]*) ;; *) HOST_ENV+=(-e "HORNHOOF_HOST_MEMORY=$mem") ;; esac
+  if [ -n "$cpu" ]; then printf 'HORNHOOF_HOST_CPU=%s\n' "$cpu"; fi
+  case "$cpus" in '' | *[!0-9]*) ;; *) printf 'HORNHOOF_HOST_CPUS=%s\n' "$cpus" ;; esac
+  case "$mem" in '' | *[!0-9]*) ;; *) printf 'HORNHOOF_HOST_MEMORY=%s\n' "$mem" ;; esac
+}
+
+HOST_ENV=()
+host_env() {
+  local fact
+  HOST_ENV=()
+  while IFS= read -r fact; do
+    [ -n "$fact" ] && HOST_ENV+=(-e "$fact")
+  done < <(host_facts)
 }
 
 STARTED=''
@@ -643,7 +650,7 @@ sweep_nodes() {
 }
 
 server_mode() {
-  local env_file url public port local_url project link i=0
+  local env_file url public port local_url project link fact i=0
   local -a compose
   detect_system
   if [ -z "$FROM_UPDATER" ]; then ensure_docker; fi
@@ -702,6 +709,10 @@ server_mode() {
   set_env HORNHOOF_APP_REF "$APP_REF"
   set_env HORNHOOF_NODE_REF "$NODE_REF"
   set_env HORNHOOF_UPDATER_REF "$UPDATER_REF"
+  # The built-in node hears what the computer has, as the other nodes do; compose passes these on to it.
+  while IFS= read -r fact; do
+    [ -n "$fact" ] && set_env "${fact%%=*}" "${fact#*=}"
+  done < <(host_facts)
   local_url="http://localhost:$(port_of "$env_file")"
   public=$(env_value PUBLIC_URL)
   [ -n "$public" ] || public=$local_url
