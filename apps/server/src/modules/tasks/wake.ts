@@ -47,7 +47,7 @@ function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string {
     case 'assigned':
       if (task.executorAgentId) return `${ref} is yours to do. ${read} Do the work, then ${finish}. If you cannot go on, ${stuck}; if only a person can answer, use ask_person.`;
       if (agent.kind === 'orchestrator') return `${ref} is yours. ${read} Lay the work out as tasks for the departments with add_tasks or plan_turn, and report it when every part is done.`;
-      return `${ref} is your department's. ${read} Split it into member tasks with create_task, each with its executor and gates, and report it when they are done.`;
+      return `${ref} is your department's. ${read} Give it out in 2-4 large self-contained pieces to different members at once with create_task, each with its executor and only the gates its size and risk need, and report it when they are done.`;
     case 'review': {
       /* Its text is what this reviewer sent the work back for in the last round. */
       if (w.text) return `${ref} came back to your gate. You sent it back for${said}Check only the fixes for your own findings, then give your verdict: pass it, or send it back if one of them is still not fixed.`;

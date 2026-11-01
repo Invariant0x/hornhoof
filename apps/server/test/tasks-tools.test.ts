@@ -3,8 +3,9 @@ import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, companies, departments, jobs, people, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
-import { createTask } from '../src/modules/tasks/engine.js';
+import { createTask, type Task } from '../src/modules/tasks/engine.js';
 import { TASK_ANSWER } from '../src/modules/tasks/tools.js';
+import { wakePrompt } from '../src/modules/tasks/wake.js';
 import { listen, mcp, setUpCompany, testApp } from './helpers.js';
 
 async function company() {
@@ -59,6 +60,17 @@ describe('task tools', () => {
     expect(create.description).toContain('Gives work to a member of your department');
     expect(create.description).toContain('Name yourself only when no member can do it.');
     expect(create.description).not.toContain('(or yourself)');
+  });
+
+  it('tells the head to give work out in a few large pieces with only the gates they need, and the orchestrator one task per goal', async () => {
+    const { orchestrator, head, tools } = await company();
+    const said = async (agent: { id: string }, name: string) => (await (await tools(agent)).listTools()).tools.find(t => t.name === name)!.description!;
+    expect(await said(head, 'create_task')).toContain("name only the gates the work's size and risk need: [] for research, reports, plans and docs");
+    expect(await said(orchestrator, 'plan_turn')).toContain("one for each of the CEO's goals, for the one department that owns it end to end");
+    expect(await said(orchestrator, 'add_tasks')).toContain('A new ask goes into the next planned turn, into the running turn only when the CEO says now.');
+    expect(wakePrompt({ kind: 'head' }, { number: 1, title: 'Payments', executorAgentId: null, panel: [] } as unknown as Task, { agentId: head.id, taskId: 't', why: 'assigned' })).toContain(
+      'Give it out in 2-4 large self-contained pieces to different members at once with create_task, each with its executor and only the gates its size and risk need',
+    );
   });
 
   it('lets a head give a member task with gates named by role, only inside its department', async () => {

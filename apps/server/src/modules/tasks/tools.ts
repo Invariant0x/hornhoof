@@ -225,9 +225,9 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
       'plan_turn',
       {
         description:
-          "Lays out a new turn: a short title, the main point in one or two sentences, and its tasks, one for each department's part, each going to that department's head. " +
-          'When no turn runs it starts at once; otherwise it waits after the planned turns and starts by itself when the turn before it is done. ' +
-          'A turn is about one feature: split a bigger ask into several turns. department and product ids from company.',
+          "Lays out a new turn: a short title, the main point in one or two sentences, and its tasks: one for each of the CEO's goals, for the one department that owns it end to end, " +
+          "going to that department's head; no separate tasks for plans, contracts or proofs. " +
+          'When no turn runs it starts at once; otherwise it waits after the planned turns and starts by itself when the turn before it is done. department and product ids from company.',
         inputSchema: { title: z.string().trim().min(1).max(80), goal: z.string().trim().min(1).max(600), tasks: z.array(Item), words: Words, improvement: Improvement.optional() },
       },
       async input =>
@@ -241,8 +241,8 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
       'add_tasks',
       {
         description:
-          'Adds tasks to a turn that is not over, when people add to what it does: in the running turn they go to the heads at once, in a planned turn they wait for it to start. ' +
-          'Work that does not belong to any planned turn goes into a new one with plan_turn.',
+          'Adds tasks to a turn that is not over. A new ask goes into the next planned turn, into the running turn only when the CEO says now. ' +
+          'In the running turn they go to the heads at once, in a planned turn they wait for it to start. Work that does not belong to any planned turn goes into a new one with plan_turn.',
         inputSchema: { turn: Turn, tasks: z.array(Item), words: Words, improvement: Improvement.optional() },
       },
       async input =>
@@ -282,8 +282,8 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
       'create_task',
       {
         description:
-          'Gives work to a member of your department: executor is an employee id from company. Name yourself only when no member can do it. gates are the reviewers it passes in order, as role ids (DEV-REV) or employee ids; ' +
-          'left out, the department\'s usual gates that are hired; [] for none. The executor never reviews its own work. parent: the department task it serves.',
+          'Gives work to a member of your department: executor is an employee id from company. Name yourself only when no member can do it. gates are the reviewers it passes in order, as role ids (DEV-REV) or employee ids: ' +
+          "name only the gates the work's size and risk need: [] for research, reports, plans and docs. Left out, every gate role of the department that is hired. The executor never reviews its own work. parent: the department task it serves.",
         inputSchema: { title: Title, brief: Brief, body: Body, executor: z.uuid(), gates: z.array(z.string().max(40)).max(8).optional(), parent: Ref.optional(), product: z.uuid().optional(), after: After.optional() },
       },
       async input =>
