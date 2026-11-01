@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { API_MODELS, CLAUDE_ALIASES, cut, defaultEffortOf, lastBytes, MAX_TEST_PARTS, TAIL_BYTES, TEST_LOG_BYTES, COMPANY_TEMPLATES, COMPANY_TEMPLATE_KEYS, DEPARTMENT_TEMPLATES, TEMPLATE_KEYS, effortFor, effortsOf, modelsFor, parseNodeMessage, parseServerMessage, repoFolder, type AgentEvent, type NodeMessage, type ServerMessage } from '../src/index.js';
+import { API_MODELS, CLAUDE_ALIASES, cut, defaultEffortOf, lastBytes, MAX_INSTRUCTIONS, MAX_TEST_PARTS, OLD_NODE_INSTRUCTIONS, TAIL_BYTES, TEST_LOG_BYTES, COMPANY_TEMPLATES, COMPANY_TEMPLATE_KEYS, DEPARTMENT_TEMPLATES, TEMPLATE_KEYS, effortFor, effortsOf, modelsFor, parseNodeMessage, parseServerMessage, repoFolder, type AgentEvent, type NodeMessage, type ServerMessage } from '../src/index.js';
 import { effortsOf as light, topEffort as lightTop } from '../src/efforts.js';
 
 const LIMITS = { status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0.38, resetsAt: '2026-10-29T21:30:00.000Z' }] };
@@ -75,6 +75,12 @@ describe('server messages', () => {
     for (const name of ['../etc', 'a/b', '.hidden', 'Dev-Tdd', '', 'x'.repeat(65)]) {
       expect(parseServerMessage(JSON.stringify({ ...SERVER[0], skills: [{ ...skills[0], name }] })), name).toBeNull();
     }
+  });
+
+  it('carry up to 200,000 characters of instructions, ten times what nodes before skill files take', () => {
+    expect([MAX_INSTRUCTIONS, OLD_NODE_INSTRUCTIONS]).toEqual([200_000, 20_000]);
+    expect(parseServerMessage(JSON.stringify({ ...SERVER[0], instructions: 'x'.repeat(MAX_INSTRUCTIONS) }))).toMatchObject({ type: 'job.run' });
+    expect(parseServerMessage(JSON.stringify({ ...SERVER[0], instructions: 'x'.repeat(MAX_INSTRUCTIONS + 1) }))).toBeNull();
   });
 
   it('let a node say it writes skills as files, which nodes before it do not', () => {

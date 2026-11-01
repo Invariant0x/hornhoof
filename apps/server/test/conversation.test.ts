@@ -1,4 +1,4 @@
-import { MAX_INSTRUCTIONS } from '@hornhoof/protocol';
+import { MAX_INSTRUCTIONS, OLD_NODE_INSTRUCTIONS } from '@hornhoof/protocol';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, vi } from 'vitest';
@@ -324,6 +324,22 @@ describe('the orchestrator\'s conversation', () => {
     expect(run.skills?.map(s => s.name)).toContain('orch-plan-turn');
   });
 
+  it("ends a turn too long for a machine from before skill files at once, saying its node needs an update", async () => {
+    const { app, ceo, mac, node } = await onMac('0.5.0');
+    const { db } = app.ctx;
+    await until(async () => (await state(app, ceo)).ready);
+    const [acme] = await db.select().from(companies);
+    const [dev] = await db.insert(departments).values({ companyId: acme!.id, templateKey: 'development', roleCode: 'DEV' }).returning();
+    const base = 'x'.repeat(OLD_NODE_INSTRUCTIONS);
+    const [bruno] = await db.insert(agents).values({ companyId: acme!.id, kind: 'worker', name: 'Bruno', model: '', departmentId: dev!.id, subscriptionId: node.subscriptionId, roleKey: 'DEV-BE', overrides: { base } }).returning();
+    expect((await app.inject({ method: 'POST', url: `/api/agents/${bruno!.id}/messages`, payload: { text: 'Hello' }, ...as(ceo) })).statusCode).toBe(202);
+    await until(async () => (await db.select().from(jobs).where(eq(jobs.agentId, bruno!.id)))[0]?.status === 'failed');
+    const [job] = await db.select().from(jobs).where(eq(jobs.agentId, bruno!.id));
+    expect(job!.error).toBe('node_too_old');
+    expect(job!.result).toMatch(/^This machine's node is too old for these instructions; update it\./);
+    expect(await quiet(mac)).toBe(0);
+  });
+
   it('keeps the next message waiting when the machine says its login ran out', async () => {
     const { app, ceo, mac } = await onMac('0.3.0');
     await until(async () => (await state(app, ceo)).ready);
@@ -489,7 +505,7 @@ describe("an employee's conversation", () => {
     expect((await log()).at(-1)).toMatchObject({ kind: 'failed', data: { error: 'instructions_too_long' } });
     const [job] = await db.select().from(jobs).where(eq(jobs.agentId, bruno.id));
     expect(job).toMatchObject({ status: 'failed', error: 'instructions_too_long' });
-    expect(job!.result).toMatch(/^Bruno's instructions are \d+ characters, more than the 20000 a turn carries/);
+    expect(job!.result).toMatch(/^Bruno's instructions are \d+ characters, more than the 200000 a turn carries/);
     expect(await quiet(builtin)).toBe(0);
   });
 

@@ -1,4 +1,4 @@
-import { MAX_INSTRUCTIONS } from '@hornhoof/protocol';
+import { OLD_NODE_INSTRUCTIONS } from '@hornhoof/protocol';
 import { describe, expect, it } from 'vitest';
 import type { agents } from '../src/db/schema.js';
 import { renderInstructions } from '../src/modules/agents/instructions.js';
@@ -132,10 +132,11 @@ describe('renderInstructions', () => {
     expect(whole).not.toContain('## Skills');
   });
 
-  it('cuts that text to what a turn carries', () => {
-    const { whole } = renderInstructions(T, agent({ overrides: { skills: { 'dev-tdd': 'Test first. '.repeat(2000) } } }), PLACE);
-    expect(whole.length).toBe(MAX_INSTRUCTIONS);
-    expect(whole.endsWith('The rest of your skills did not fit here.')).toBe(true);
+  it('keeps that text whole however long it is, and a turn too long for the node does not go out', () => {
+    const long = 'Test first. '.repeat(2000);
+    const { whole } = renderInstructions(T, agent({ overrides: { skills: { 'dev-tdd': long } } }), PLACE);
+    expect(whole.length).toBeGreaterThan(OLD_NODE_INSTRUCTIONS);
+    expect(whole).toContain(`${long}\n<!-- /hh:skill -->`);
   });
 
   it("uses an override instead of the template's text and marks it", () => {

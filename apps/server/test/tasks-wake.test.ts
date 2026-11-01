@@ -447,12 +447,14 @@ describe('waking agents for their tasks', () => {
     expect(queued[0]!.prompt).toContain('Go on with the work from where you left off');
   });
 
-  it('blocks the task for its head at the first turn that could not go out for the length of its instructions', async () => {
+  it.each([
+    ['instructions_too_long', "Bruno's instructions are 200857 characters, more than the 200000 a turn carries, so this turn did not go out."],
+    ['node_too_old', "This machine's node is too old for these instructions; update it."],
+  ])('blocks the task for its head at the first turn that could not go out for the length of its instructions (%s)', async (error, why) => {
     const { ctx, db, head, bruno, memberTask, turnsOf, finish } = await company();
     const task = await memberTask();
     await wakeAll(ctx, [{ agentId: bruno.id, taskId: task.id, why: 'assigned' }]);
-    const why = "Bruno's instructions are 20857 characters, more than the 20000 a turn carries, so this turn did not go out.";
-    const refused = () => db.update(jobs).set({ error: 'instructions_too_long', result: why }).where(and(eq(jobs.agentId, bruno.id), eq(jobs.status, 'running')));
+    const refused = () => db.update(jobs).set({ error, result: why }).where(and(eq(jobs.agentId, bruno.id), eq(jobs.status, 'running')));
     await finish(bruno.id, refused, 'failed');
     expect((await db.select().from(tasks).where(eq(tasks.id, task.id)))[0]!.status).toBe('blocked');
     const [note] = await db.select({ kind: taskEvents.kind, text: taskEvents.text }).from(taskEvents).where(eq(taskEvents.taskId, task.id)).orderBy(desc(taskEvents.id)).limit(1);

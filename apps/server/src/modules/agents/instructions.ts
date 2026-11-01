@@ -1,4 +1,4 @@
-import { MAX_INSTRUCTIONS, type SkillFile } from '@hornhoof/protocol';
+import { MAX_INSTRUCTIONS, OLD_NODE_INSTRUCTIONS, type SkillFile } from '@hornhoof/protocol';
 import { eq, inArray } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { companies, departments, type agents } from '../../db/schema.js';
@@ -80,13 +80,9 @@ function told(kept: string[], files: SkillFile[]): string {
   return [...kept, ...(files.length ? [skillList(files)] : [])].join('\n\n');
 }
 
-const LEFT_OUT = '\n\nThe rest of your skills did not fit here.';
-
-/* Every skill in the text, as a node that writes no skill files gets them, cut to what a turn carries. */
-function whole(texts: string[]): string {
-  const text = texts.join('\n\n');
-  return text.length <= MAX_INSTRUCTIONS ? text : text.slice(0, MAX_INSTRUCTIONS - LEFT_OUT.length) + LEFT_OUT;
-}
+/* Every skill in the text, as a node that writes no skill files gets them. A turn longer than such a node takes does not
+   go out. */
+const whole = (texts: string[]) => texts.join('\n\n');
 
 /* The header, the role's text and each enabled skill between markers; the employee's own text replaces a template's. */
 export function renderInstructions(t: Templates, agent: AgentRow, place: Place): Rendered {
@@ -199,8 +195,8 @@ export async function instructionsOf(ctx: Pick<Ctx, 'db' | 'templates'>, agent: 
   const rendered = files ? shown : { ...shown, text: shown.whole, hash: textHash(shown.whole), skills: [] };
   const [dept] = agent.kind === 'head' && agent.departmentId ? await ctx.db.select().from(departments).where(eq(departments.id, agent.departmentId)) : [];
   if (!dept) return rendered;
-  /* A turn carries MAX_INSTRUCTIONS at most, the notebook included. */
-  const notebook = await notebookPart(ctx.db, departmentBook(dept), MAX_INSTRUCTIONS - rendered.text.length - 2);
+  /* A turn carries what its node takes at most, the notebook included. */
+  const notebook = await notebookPart(ctx.db, departmentBook(dept), (files ? MAX_INSTRUCTIONS : OLD_NODE_INSTRUCTIONS) - rendered.text.length - 2);
   if (!notebook) return rendered;
   return { ...rendered, parts: [...rendered.parts, notebookOf(notebook)], text: `${rendered.text}\n\n${notebook}` };
 }

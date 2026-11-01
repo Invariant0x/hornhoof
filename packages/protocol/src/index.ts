@@ -25,8 +25,11 @@ export function lastBytes(text: string, bytes = TAIL_BYTES): string {
   const buf = new TextEncoder().encode(text);
   return buf.length <= bytes ? text : new TextDecoder().decode(buf.subarray(buf.length - bytes));
 }
-/* The longest standing instructions a job may carry; Hornhoof refuses edits that would go past it. */
-export const MAX_INSTRUCTIONS = 20_000;
+/* The longest standing instructions a job may carry, now that skills go as files; Hornhoof refuses edits that would go
+   past it. */
+export const MAX_INSTRUCTIONS = 200_000;
+/* What a node from before skill files takes: it drops a job with longer instructions. */
+export const OLD_NODE_INSTRUCTIONS = 20_000;
 
 const LimitWindow = z.object({
   name: z.string().min(1).max(40),

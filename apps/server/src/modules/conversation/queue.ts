@@ -1,4 +1,4 @@
-import { effortFor, effortsOf, MAX_INSTRUCTIONS, modelsFor, type Limits } from '@hornhoof/protocol';
+import { effortFor, effortsOf, MAX_INSTRUCTIONS, modelsFor, OLD_NODE_INSTRUCTIONS, type Limits } from '@hornhoof/protocol';
 import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, lte, ne, or } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -324,18 +324,31 @@ async function heldBack(ctx: Ctx, job: { id: string; agentId: string | null; tas
   return true;
 }
 
-/* Why a turn ended unsent: its instructions are longer than a machine takes. */
+/* Why a turn ended unsent: its instructions are longer than any node takes, or than its node from before skill files
+   takes. */
 export const TOO_LONG = 'instructions_too_long';
+export const NODE_TOO_OLD = 'node_too_old';
+export const UNSENT: readonly string[] = [TOO_LONG, NODE_TOO_OLD];
 
-/* Instructions saved before the header around them grew can be longer than a machine takes, and a machine drops such a
-   turn unseen. The turn ends at once instead, saying why on the agent's card and its task. It ends after this send is
-   over, as its end sends the agent's next turn. */
-async function tooLong(ctx: Ctx, job: { id: string; companyId: string }, name: string, length: number): Promise<void> {
+/* Instructions longer than its node takes: the node would drop the turn unseen. */
+function unsendable(name: string, length: number, files: boolean): { error: string; result: string } | null {
+  if (files) {
+    return length > MAX_INSTRUCTIONS
+      ? { error: TOO_LONG, result: `${name}'s instructions are ${length} characters, more than the ${MAX_INSTRUCTIONS} a turn carries, so this turn did not go out. Shorten its role or a skill on its card.` }
+      : null;
+  }
+  return length > OLD_NODE_INSTRUCTIONS
+    ? { error: NODE_TOO_OLD, result: `This machine's node is too old for these instructions; update it. ${name}'s instructions are ${length} characters, more than the ${OLD_NODE_INSTRUCTIONS} it takes.` }
+    : null;
+}
+
+/* A turn its node would drop ends at once instead, saying why on the agent's card and its task. It ends after this send
+   is over, as its end sends the agent's next turn. */
+async function unsent(ctx: Ctx, job: { id: string; companyId: string }, why: { error: string; result: string }): Promise<void> {
   const at = new Date();
-  const result = `${name}'s instructions are ${length} characters, more than the ${MAX_INSTRUCTIONS} a turn carries, so this turn did not go out. Shorten its role or a skill on its card.`;
   const [ended] = await ctx.db
     .update(jobs)
-    .set({ status: 'failed', error: TOO_LONG, result, startedAt: at, finishedAt: at })
+    .set({ status: 'failed', ...why, startedAt: at, finishedAt: at })
     .where(and(eq(jobs.id, job.id), eq(jobs.status, 'queued')))
     .returning({ id: jobs.id });
   if (!ended) return;
@@ -378,7 +391,8 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   /* A node from before skill files gets every skill in the instructions. */
   const files = hub.takesSkillFiles(identityOf(sub));
   const instructions = await instructionsOf(ctx, agent, files);
-  if (instructions.text.length > MAX_INSTRUCTIONS) return tooLong(ctx, job, agent.name, instructions.text.length);
+  const refused = unsendable(agent.name, instructions.text.length, files);
+  if (refused) return unsent(ctx, job, refused);
   /* The program's flag only for a model this subscription can run; anything else runs on its Default. */
   const models = modelsFor(sub.provider, sub.models);
   const model = agent.model && models.some(m => m.id === agent.model) ? agent.model : null;

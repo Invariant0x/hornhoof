@@ -164,8 +164,7 @@ describe("a department's notebook", () => {
       payload: { provider: 'anthropic_api', kind: 'api_key', label: 'Team key', apiKey: 'sk-ant-api03-team-key-5678', target: { kind: 'any' } },
       ...as(ceo),
     });
-    /* Its own skills, and a role text that brings its instructions near the limit a person may write; the notebook comes
-       on top. */
+    /* Its own skills, and a role text saved near the limit; the notebook comes on top. */
     const { templates } = app.ctx;
     const role = templates.roles.get('MKT-HEAD')!;
     const skills = role.skills.map(s => s.id);
@@ -177,7 +176,7 @@ describe("a department's notebook", () => {
     });
     expect(hired.statusCode).toBe(201);
     const [hire] = await db.select().from(agents).where(eq(agents.name, 'Mira'));
-    const base = `${role.body} ${'x'.repeat(17_500 - (await instructionsOf(app.ctx, { ...hire!, kind: 'worker' })).text.length)}`;
+    const base = `${role.body} ${'x'.repeat(MAX_INSTRUCTIONS - 2_500 - (await instructionsOf(app.ctx, { ...hire!, kind: 'worker' })).text.length)}`;
     const [mira] = await db.update(agents).set({ overrides: { base } }).where(eq(agents.id, hire!.id)).returning();
     const { text } = await instructionsOf(app.ctx, mira!);
     expect(text.length).toBeLessThanOrEqual(MAX_INSTRUCTIONS);
@@ -186,7 +185,7 @@ describe("a department's notebook", () => {
     /* Only whole notes. */
     for (let i = 0; i < 13; i++) expect([i, text.includes(`[#${i + 1}] ${i} `)]).toEqual([i, text.includes(`end ${i}.`)]);
     expect(text).toContain('The rest of the notebook did not fit here. Read it whole with the notebook tool.');
-    /* Any node takes the turn. */
+    /* A node that writes skill files takes the turn. */
     const run = { type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 1000, secret: null, instructions: text, toolToken: null };
     expect(parseServerMessage(JSON.stringify(run))).toMatchObject({ instructions: text });
   });

@@ -308,6 +308,7 @@ export const en = {
       agent_failed: 'The orchestrator stopped with an error.',
       machine_restarted: 'The machine restarted during this turn. Write again.',
       instructions_too_long: 'The instructions are longer than one turn can carry. Shorten the role or a skill on the card.',
+      node_too_old: "This machine's node is too old for these instructions; update it.",
       machine_disconnected: 'The machine was disconnected during this turn.',
       subscription_removed: 'The subscription was removed during this turn.',
       other: 'This turn failed.',

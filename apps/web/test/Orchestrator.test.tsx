@@ -87,8 +87,9 @@ describe('AgentWindow', () => {
   });
 
   it('says plainly when a turn did not go out because the instructions are too long', async () => {
-    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [ev(1, 'failed', { error: 'instructions_too_long' })], state: READY }] });
+    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [ev(1, 'failed', { error: 'instructions_too_long' }), ev(2, 'failed', { error: 'node_too_old' })], state: READY }] });
     expect(await screen.findByText('The instructions are longer than one turn can carry. Shorten the role or a skill on the card.')).toBeInTheDocument();
+    expect(screen.getByText("This machine's node is too old for these instructions; update it.")).toBeInTheDocument();
   });
 
   it("names Hornhoof for the turns it starts on a task", async () => {
