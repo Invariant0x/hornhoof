@@ -288,6 +288,14 @@ describe('the orchestrator\'s conversation', () => {
     expect(await nextRun(mac)).toMatchObject({ effort: 'low', sessionId: 'sess-k' });
   });
 
+  it('runs him on a Codex plan at the most its model takes', async () => {
+    const models = [{ id: 'gpt-6.1-sol', name: 'Sol', efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: 'medium' }];
+    const { app, ceo, mac } = await onMac('0.3.0', 'codex', { models });
+    await until(async () => (await state(app, ceo)).ready);
+    await say(app, ceo, 'First');
+    expect((await nextRun(mac)).effort).toBe('xhigh');
+  });
+
   it('keeps the next message waiting when the machine says its login ran out', async () => {
     const { app, ceo, mac } = await onMac('0.3.0');
     await until(async () => (await state(app, ceo)).ready);

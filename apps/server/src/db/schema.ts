@@ -184,7 +184,7 @@ export const agents = pgTable(
     switchedOffAt: timestamp('switched_off_at', { withTimezone: true }),
     /* How full its context was when its node last said, as a share from 0 to 1. */
     contextUsed: real('context_used'),
-    /* How hard its model thinks, as its program names the level; none runs at the program's default, Kimi at its most. */
+    /* How hard its model thinks, as its program names the level; none runs at the program's default, Kimi and Codex at their most. */
     effort: text('effort'),
     /* Wakes on its own every so many minutes, outside any task, to do what its order says; none means it does not. The
        last round started, or was skipped, at timer_at. A timer for work skips its round while nothing is open or failed. */

@@ -15,7 +15,8 @@ import { personViews } from '../people/views.js';
 import { identityOf } from '../nodes/hub.js';
 import { subView } from '../subscriptions/views.js';
 
-/* The level an agent thinks at, as far as Hornhoof knows: the one it was set to or Kimi's most, else its model's default. */
+/* The level an agent thinks at, as far as Hornhoof knows: the one it was set to or Kimi's and Codex's most, else its
+   model's default. */
 function effortShown(sub: { provider: ProviderId; models: ModelOption[] | null }, agent: { model: string; effort: string | null }): string | null {
   const models = modelsFor(sub.provider, sub.models);
   return effortFor(sub.provider, agent.effort, effortsOf(models, agent.model)) ?? defaultEffortOf(sub.provider, models, agent.model);

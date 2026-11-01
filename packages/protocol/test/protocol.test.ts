@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { API_MODELS, CLAUDE_ALIASES, cut, defaultEffortOf, lastBytes, TAIL_BYTES, DEPARTMENT_TEMPLATES, effortFor, effortsOf, modelsFor, parseNodeMessage, parseServerMessage, repoFolder, type AgentEvent, type NodeMessage, type ServerMessage } from '../src/index.js';
-import { effortsOf as light } from '../src/efforts.js';
+import { effortsOf as light, topEffort as lightTop } from '../src/efforts.js';
 
 const LIMITS = { status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0.38, resetsAt: '2026-10-29T21:30:00.000Z' }] };
 
@@ -221,8 +221,22 @@ describe('models', () => {
   it('keeps a picked effort only while the model takes it, and runs Kimi at the most its model takes', () => {
     expect(effortFor('kimi', 'xhigh', ['low', 'high', 'max'])).toBe('max');
     expect(effortFor('kimi', null, ['low', 'high'])).toBe('high');
-    expect(effortFor('codex', 'ultra', ['low', 'medium'])).toBeNull();
+    expect(effortFor('codex', 'ultra', ['low', 'medium'])).toBe('medium');
     expect(effortFor('codex', 'medium', ['low', 'medium'])).toBe('medium');
+  });
+
+  it('runs Codex at the most its model takes unless a person picked a level, and at its own default while its levels are not known', () => {
+    const sol = { id: 'gpt-6.1-sol', name: 'Sol', efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: 'medium' };
+    expect(effortFor('codex', null, sol.efforts)).toBe('xhigh');
+    expect(effortFor('codex', 'low', sol.efforts)).toBe('low');
+    expect(defaultEffortOf('codex', [sol], 'gpt-6.1-sol')).toBe('xhigh');
+    /* The Default model takes only the levels every model takes. */
+    expect(defaultEffortOf('codex', [sol, { id: 'gpt-6-luna', name: 'Luna', efforts: ['low', 'high'] }], '')).toBe('high');
+    /* Codex may not take max, so a model that names no levels runs at the program's own. */
+    expect(effortFor('codex', null, [])).toBeNull();
+    /* Claude and an OpenAI key, which pays for each token, stay at their program's default. */
+    expect(effortFor('claude', null, ['low', 'medium', 'high', 'xhigh', 'max'])).toBeNull();
+    expect(effortFor('openai_api', null, ['low', 'medium', 'high', 'xhigh', 'max'])).toBeNull();
   });
 
   it("lists a model's efforts, and for the Default model the levels every model that names some takes", () => {
@@ -270,6 +284,7 @@ describe('models', () => {
 
   it('gives the web the same effort rule from a module without the message schemas', () => {
     expect(light).toBe(effortsOf);
+    expect(lightTop('codex', ['low', 'ultra'])).toBe(effortFor('codex', null, ['low', 'ultra']));
   });
 });
 

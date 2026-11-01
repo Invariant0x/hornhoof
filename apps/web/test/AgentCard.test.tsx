@@ -175,12 +175,19 @@ describe('AgentCard', () => {
     expect(await screen.findByRole('option', { name: 'Default (Medium)' })).toBeInTheDocument();
   });
 
-  it("names the Default by its model's own level when the program has one", async () => {
+  it('names the level the Default runs at: Codex at the most its model takes', async () => {
     const codex = { ...TEAM_KEY, id: 's-cx', provider: 'codex' as const };
     const sol = { id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol', efforts: ['low', 'xhigh', 'ultra'], defaultEffort: 'low' };
     open({ 'GET /api/agents/b1': [200, { ...CARD, model: 'gpt-6.1-sol', subscription: codex, runsOn: [{ subscription: codex, models: [sol] }] }] });
     const effort = await screen.findByRole('combobox', { name: 'Effort' });
-    expect(within(effort).getAllByRole('option').map(o => o.textContent)).toEqual(['Default (Low)', 'Low', 'Extra high', 'Ultra']);
+    expect(within(effort).getAllByRole('option').map(o => o.textContent)).toEqual(['Default (Ultra)', 'Low', 'Extra high', 'Ultra']);
+  });
+
+  it("names the Default by its model's own level when the program has one", async () => {
+    const plan = { ...TEAM_KEY, id: 's-cl', provider: 'claude' as const };
+    const fable = { id: 'fable', name: 'Fable', efforts: ['low', 'medium', 'high', 'xhigh', 'max'], defaultEffort: 'high' };
+    open({ 'GET /api/agents/b1': [200, { ...CARD, model: 'fable', subscription: plan, runsOn: [{ subscription: plan, models: [fable] }] }] });
+    expect(await screen.findByRole('option', { name: 'Default (High)' })).toBeInTheDocument();
   });
 
   it('lets a person go back to Default when the program no longer says which levels its model takes', async () => {

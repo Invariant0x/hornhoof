@@ -122,6 +122,16 @@ describe('the employee card', () => {
     expect(await effortOnMap()).toBe('low');
   });
 
+  it('shows a Codex employee on the map at the most its model takes unless set', async () => {
+    const { app, db, ceo, codex, brunoId } = await company();
+    await db.update(subscriptions).set({ models: [{ id: 'gpt-6.1-sol', name: 'Sol', efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: 'medium' }] }).where(eq(subscriptions.id, codex));
+    const effortOnMap = async () => (await app.inject({ url: '/api/org', ...as(ceo) })).json().departments[0].employees[0].effort;
+    expect((await patch(app, ceo, brunoId, { subscription: codex })).statusCode).toBe(200);
+    expect(await effortOnMap()).toBe('xhigh');
+    await patch(app, ceo, brunoId, { model: 'gpt-6.1-sol', effort: 'low' });
+    expect(await effortOnMap()).toBe('low');
+  });
+
   it('refuses a model the subscription cannot run, and a subscription that cannot serve the department', async () => {
     const { app, db, ceo, sales, brunoId } = await company();
     const res = await patch(app, ceo, brunoId, { model: 'gpt-6.1-sol' });

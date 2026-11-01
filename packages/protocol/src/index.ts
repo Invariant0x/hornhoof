@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { effortsOf } from './efforts.js';
+import { effortsOf, topEffort } from './efforts.js';
 
 /* Messages between the Hornhoof server and its nodes, one JSON object per WebSocket frame. */
 
@@ -73,12 +73,11 @@ export const CLAUDE_ALIASES: ModelOption[] = [
   { id: 'haiku', name: 'Haiku', efforts: EFFORTS, defaultEffort: 'medium' },
 ];
 
-/* The effort an agent runs at: what a person picked while its model takes it, else Kimi at the most its model takes and
-   the others at their program's default. No efforts known takes what was picked, and Kimi's max. */
+/* The effort an agent runs at: what a person picked while its model takes it, else Kimi and Codex at the most their model
+   takes and the others at their program's default. No efforts known takes what was picked, and Kimi's max. */
 export function effortFor(provider: ProviderId, chosen: string | null, efforts: string[] = []): string | null {
   const kept = chosen && (!efforts.length || efforts.includes(chosen)) ? chosen : null;
-  if (kept || provider !== 'kimi') return kept;
-  return efforts.length && !efforts.includes('max') ? efforts[efforts.length - 1]! : 'max';
+  return kept ?? topEffort(provider, efforts);
 }
 
 /* The efforts a model takes, from a module of its own that the web takes too. */
@@ -86,13 +85,11 @@ export { effortsOf };
 
 const pick = (defaultEffort: string | undefined) => (defaultEffort ? { defaultEffort } : {});
 
-/* The level an agent runs at when nobody picked one, when Hornhoof knows it: Kimi at the most its model takes, Claude Code
-   as its docs give it, even for a node's older list, and the others as their node reported. */
+/* The level an agent runs at when nobody picked one, when Hornhoof knows it: Kimi and Codex at the most their model takes,
+   Claude Code as its docs give it, even for a node's older list, and the others as their node reported. */
 export function defaultEffortOf(provider: ProviderId, models: ModelOption[], model: string | null): string | null {
-  if (provider === 'kimi') {
-    const efforts = effortsOf(models, model);
-    return efforts.length && !efforts.includes('max') ? efforts[efforts.length - 1]! : 'max';
-  }
+  const top = topEffort(provider, effortsOf(models, model));
+  if (top) return top;
   const claude = provider === 'claude' || provider === 'anthropic_api';
   if (!model) return claude ? CLAUDE_DEFAULT_EFFORT : null;
   const known = claude ? [...CLAUDE_ALIASES, ...API_MODELS.anthropic_api] : [];

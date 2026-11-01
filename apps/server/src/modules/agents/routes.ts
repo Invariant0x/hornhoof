@@ -27,7 +27,7 @@ export type AgentCard = {
   department: { id: string; name: string } | null;
   product: { id: string; name: string } | null;
   model: string;
-  /* The level a person picked, or null for the program's default (Kimi's most). */
+  /* The level a person picked, or null for the program's default (Kimi's and Codex's most). */
   effort: string | null;
   subscription: SubView | null;
   state: 'working' | 'sleeping' | 'needs_subscription';
