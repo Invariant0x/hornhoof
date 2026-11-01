@@ -352,6 +352,10 @@ const crashed = (j: Ended) =>
   j.finishedAt.getTime() - j.startedAt.getTime() < QUICK_CRASH_MS &&
   !refusedLimits(`${j.result ?? ''}\n${j.tail}`, null);
 
+/* A turn its plan refused for its limit as it started: it did no work. */
+const refusedAtStart = (j: Ended) =>
+  !!j.startedAt && !!j.finishedAt && j.finishedAt.getTime() - j.startedAt.getTime() < QUICK_CRASH_MS && !!refusedLimits(`${j.result ?? ''}\n${j.tail}`, null);
+
 /* How many of the agent's last turns on the task broke as they started, in a row, of those that ended since the task last moved. */
 async function crashesInRow(ctx: Ctx, agentId: string, task: Task): Promise<number> {
   const [moved] = await ctx.db
@@ -383,6 +387,13 @@ async function standIn(ctx: Ctx, agentId: string, task: Task): Promise<{ id: str
   if (task.executorAgentId !== agentId || task.assigneeAgentId !== agentId || task.stage !== 0 || !['open', 'working'].includes(task.status)) return null;
   const [me] = await ctx.db.select({ agent: agents, provider: subscriptions.provider }).from(agents).innerJoin(subscriptions, eq(subscriptions.id, agents.subscriptionId)).where(eq(agents.id, agentId));
   if (!me || me.agent.kind !== 'worker' || !me.agent.roleKey || !me.agent.departmentId) return null;
+  /* What its turns did so far is in its folder on its machine and maybe not pushed, so only work none of them did
+     anything on goes to another. */
+  const ran = await ctx.db
+    .select({ status: jobs.status, error: jobs.error, startedAt: jobs.startedAt, finishedAt: jobs.finishedAt, result: jobs.result, tail: jobs.tail })
+    .from(jobs)
+    .where(and(eq(jobs.agentId, agentId), eq(jobs.taskId, task.id), isNotNull(jobs.startedAt)));
+  if (ran.some(j => !refusedAtStart(j))) return null;
   const peers = await ctx.db
     .select({ id: agents.id, name: agents.name, productId: agents.productId, provider: subscriptions.provider })
     .from(agents)

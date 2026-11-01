@@ -154,8 +154,9 @@ describe('a plan at its limit', () => {
 });
 
 describe('a plan at its limit, with others of the role on other plans', () => {
-  /* Rex is a backend engineer too, on a Codex plan whose machine is on; Bruno's plan is at its limit for an hour. */
-  async function withPeer(rex: { limited?: boolean; status?: 'ready' | 'needs_login'; online?: boolean; nodeVersion?: string } = {}) {
+  /* Rex is a backend engineer too, on a Codex plan whose machine is on; Bruno's plan is at its limit for an hour, and
+     refuses his turn as it starts. before: what Bruno's turns did on the task until then. */
+  async function withPeer(rex: { limited?: boolean; status?: 'ready' | 'needs_login'; online?: boolean; nodeVersion?: string } = {}, before: 'nothing' | 'a turn' | 'a long refused turn' = 'nothing') {
     const c = await company();
     const resetsAt = new Date(Date.now() + 3_600_000).toISOString();
     const rejected = { status: 'rejected' as const, windows: [{ name: 'five_hour', utilization: 1, resetsAt }] };
@@ -170,8 +171,14 @@ describe('a plan at its limit, with others of the role on other plans', () => {
     const [peer] = await c.db.insert(agents).values({ companyId: c.dev.companyId, kind: 'worker', name: 'Rex', roleKey: 'DEV-BE', departmentId: c.dev.id, model: '', subscriptionId: codex!.id }).returning();
     const task = await c.memberTask();
     await wakeAll(c.ctx, [{ agentId: c.bruno.id, taskId: task.id, why: 'assigned' }]);
+    if (before === 'a turn') await c.finish(c.bruno.id, () => comment(c.ctx, { agentId: c.bruno.id }, task.id, 'The handler is half done.'));
     await c.db.update(subscriptions).set({ limits: rejected }).where(eq(subscriptions.id, c.sub.id));
-    await c.finish(c.bruno.id, async () => {}, 'failed');
+    const running = and(eq(jobs.agentId, c.bruno.id), eq(jobs.status, 'running'));
+    const refused = async () => {
+      await c.db.update(jobs).set({ tail: "You've hit your usage limit. Try again in 1 hour." }).where(running);
+      if (before === 'a long refused turn') await c.db.update(jobs).set({ startedAt: new Date(Date.now() - 20 * 60_000) }).where(running);
+    };
+    await c.finish(c.bruno.id, refused, 'failed');
     return { ...c, rex: peer!, task };
   }
 
@@ -184,6 +191,14 @@ describe('a plan at its limit, with others of the role on other plans', () => {
     expect(notes[0]!.text).toMatch(/Bruno's plan is at its limit until .*, so Rex takes the work over on Codex\./);
     expect((await turnsOf(rex.id)).map(j => [j.taskId, j.status])).toEqual([[task.id, 'queued']]);
     expect((await turnsOf(bruno.id)).filter(j => j.status === 'queued')).toEqual([]);
+  });
+
+  it("waits for the reset once Bruno's turns worked on it, as what he did may not be pushed yet", async () => {
+    for (const before of ['a turn', 'a long refused turn'] as const) {
+      const { db, bruno, rex, task, turnsOf } = await withPeer({}, before);
+      expect((await db.select().from(tasks).where(eq(tasks.id, task.id)))[0], before).toMatchObject({ executorAgentId: bruno.id, assigneeAgentId: bruno.id });
+      expect(await turnsOf(rex.id), before).toEqual([]);
+    }
   });
 
   it('waits for the reset when their plans are at their limits too', async () => {
