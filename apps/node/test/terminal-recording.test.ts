@@ -2,7 +2,9 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
+import { TAIL_BYTES } from '@hornhoof/protocol';
 import { afterEach, describe, expect, it } from 'vitest';
+import { jobDone } from '../src/runner.js';
 import { Tmux } from '../src/terminal/tmux.js';
 
 const hasTmux = (() => {
@@ -34,12 +36,13 @@ describe.skipIf(!hasTmux)('terminal output recording lifecycle', () => {
     return { tmux, replacement, dir, home };
   }
 
-  async function launch(tmux: Tmux, dir: string, name = 'agent') {
+  async function launch(tmux: Tmux, dir: string, name = 'agent', initial = 'running') {
+    writeFileSync(join(dir, 'initial-output'), `${initial}\n`);
     await tmux.launch(name, {
       cwd: dir, outputDir: dir, cols: 80, rows: 24,
-      command: ['sh', '-c', 'printf "running\\n"; IFS= read -r line; printf "\\033[?1049hboom-final-output\\n\\033[?1049l" >&2; exit 3'],
+      command: ['sh', '-c', 'cat initial-output; IFS= read -r line; printf "\\033[?1049hboom-final-output\\n\\033[?1049l" >&2; exit 3'],
     });
-    await until(async () => (await tmux.screen(name)).includes('running'));
+    await until(async () => (await tmux.screen(name)).includes(initial.split('\n').at(-1)!));
   }
 
   async function recorders(tmux: Tmux, name = 'agent') {
@@ -96,6 +99,32 @@ describe.skipIf(!hasTmux)('terminal output recording lifecycle', () => {
     const raw = recordingFiles(dir).find(file => file.endsWith('.log'))!;
     await until(() => readFileSync(raw, 'utf8').includes('boom-final-output'));
     expect(await tmux.ended('agent')).toContain('boom-final-output');
+  });
+
+  it.each([
+    { cap: '50 output lines', padding: 1, flushTimeoutMs: 100 },
+    { cap: '4096 tail bytes', padding: 256, flushTimeoutMs: 5000 },
+  ])('marks incomplete job.done output after limiting $cap and its 400-character preview', async ({ padding, flushTimeoutMs }) => {
+    const { tmux, dir } = fixture(flushTimeoutMs);
+    const initial = Array.from({ length: 60 }, (_, i) => `initial-${i}-${'x'.repeat(padding)}`);
+    await launch(tmux, dir, 'agent', initial.join('\n'));
+    const raw = recordingFiles(dir).find(file => file.endsWith('.log'))!;
+    await until(() => readFileSync(raw, 'utf8').includes(initial.at(-1)!));
+    const pid = await recorderPid(tmux);
+    process.kill(pid, 'SIGSTOP');
+    paused.add(pid);
+    await exitProgram(tmux);
+
+    const output = await tmux.ended('agent') ?? '';
+    const done = jobDone('incomplete-output', { ok: false, sessionId: null, result: '', output, error: 'agent_failed', limits: null }, []);
+    const warning = 'Output capture did not finish before the wait expired.';
+    expect(done).toMatchObject({ type: 'job.done', ok: false, error: 'agent_failed' });
+    expect(done.tail).not.toContain('boom-final-output');
+    expect(output.split('\n').filter(line => line.startsWith('initial-'))).toHaveLength(50);
+    expect(Buffer.byteLength(done.tail)).toBe(Math.min(Buffer.byteLength(output), TAIL_BYTES));
+    expect(done.tail.split('\n').at(-1)).toMatch(/^Program ended: code 3, signal none, at \d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/);
+    expect(done.tail.slice(-400)).toContain(warning);
+    expect(done.tail.split('\n').at(-2)).toBe(warning);
   });
 
   it('removes recordings left by an exited recorder when a new controller stops the server', async () => {

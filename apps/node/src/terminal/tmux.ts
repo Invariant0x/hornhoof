@@ -150,8 +150,7 @@ export class Tmux {
     const snapshot = recording ? await this.recordings.finish(recording, this.flushTimeoutMs) : null;
     const complete = snapshot?.complete ?? !recording;
     const text = snapshot?.output ?? await this.screen(name);
-    const output = complete ? text : `Output capture did not finish before the wait expired.\n${text}`;
-    return { output: programEnded(output, exit), complete };
+    return { output: programEnded(text, exit, complete), complete };
   }
 
   private async paneExit(name: string): Promise<ProgramExit | null> {

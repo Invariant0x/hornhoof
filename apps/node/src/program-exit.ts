@@ -10,9 +10,10 @@ function signalText(signal: ProgramExit['signal']): string {
   return `${name?.replace(/^SIG/, '') ?? 'UNKNOWN'} (${number})`;
 }
 
-/* Exit information goes last, so it survives the job tail and the failure collector's shorter preview. */
-export function programEnded(output: string, exit: ProgramExit): string {
+/* Capture and exit information go last, so both survive the job tail and the failure collector's shorter preview. */
+export function programEnded(output: string, exit: ProgramExit, complete = true): string {
   const lines = stripEscapes(output).replace(/\r/g, '').trimEnd().split('\n').slice(-50).join('\n');
-  const last = `Program ended: code ${exit.code ?? 'none'}, signal ${signalText(exit.signal)}, at ${exit.at}`;
+  const warning = complete ? '' : 'Output capture did not finish before the wait expired.\n';
+  const last = `${warning}Program ended: code ${exit.code ?? 'none'}, signal ${signalText(exit.signal)}, at ${exit.at}`;
   return lines ? `${lines}\n${last}` : last;
 }
