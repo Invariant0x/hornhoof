@@ -3,7 +3,7 @@ import { and, asc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { encryptSecret } from '../src/crypto/secrets.js';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, attachments, companies, departments, jobs, subscriptions, tasks } from '../src/db/schema.js';
+import { agents, attachments, companies, departments, jobs, subscriptions, tasks, testParts } from '../src/db/schema.js';
 import { createTask } from '../src/modules/tasks/engine.js';
 import { afterJob } from '../src/modules/tasks/wake.js';
 import { nodeIdentity } from '../src/modules/nodes/hub.js';
@@ -63,6 +63,16 @@ async function company() {
     await until(() => app.ctx.hub.loadOf(nodeIdentity(nodeId)) !== null);
     return { node, subscriptionId: subscriptionId as string, machineId: joined.machine.id as string };
   };
+  /* A machine of a person that joined without a plan, online with this load. */
+  const planless = async (token: string, hostname: string, load: object = idle()) => {
+    const code = (await app.inject({ method: 'POST', url: '/api/machines/command', ...as(token) })).json().command.split('--join ')[1];
+    const joined = (await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: `${hostname}-0001-abcd`, hostname, os: 'linux', arch: 'x86_64' } })).json();
+    const [{ nodeId, key }] = joined.nodes;
+    const node = await connectNode(url, key);
+    node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], load: load as ReturnType<typeof idle>, tests: [] });
+    await until(() => app.ctx.hub.loadOf(nodeIdentity(nodeId)) !== null);
+    return { node, nodeId: nodeId as string, machineId: joined.machine.id as string };
+  };
   const ann = await invitePerson(app, ceo, { name: 'Ann', email: 'ann@acme.com', access: { departments: [dev!.id] } });
   const bob = await invitePerson(app, ceo, { name: 'Bob', email: 'bob@acme.com', access: { departments: [sales!.id] } });
   /* The agent's newest turn waiting on the task. */
@@ -77,7 +87,7 @@ async function company() {
     await until(() => app.ctx.hub.loadOf({ kind: 'builtin' }) !== null);
     return node;
   };
-  return { app, db, url, ceo, ann, bob, builtin, dev: dev!, sales: sales!, head, bruno, sam, task, turn, machine, wokeWith, filesOn };
+  return { app, db, url, ceo, ann, bob, builtin, dev: dev!, sales: sales!, head, bruno, sam, task, turn, machine, planless, wokeWith, filesOn };
 }
 
 /* The next message of one kind a node gets, past the others. */
@@ -99,6 +109,20 @@ async function gets(node: FakeNode, type: ServerMessage['type'], ms = 300): Prom
 const done = (run: TestsRun, over: object = {}) => ({ type: 'tests.done' as const, partId: run.partId, ok: true, exitCode: 0, error: null, commit: 'a'.repeat(40), log: `part ${run.part} ok\n`, ...over });
 
 describe('a test run', () => {
+  it('runs on a machine that joined without a plan, as on any machine of the company', async () => {
+    const c = await company();
+    const box = await c.planless(c.ceo, 'build-box');
+    const { call } = await c.turn(c.bruno);
+    expect((await call('run_tests', { command: 'npm test' })).error).toBe(false);
+    const run = await nextOf(box.node, 'tests.run');
+    expect(run).toMatchObject({ command: 'npm test', part: 1, parts: 1 });
+    expect((await c.db.select().from(testParts))[0]).toMatchObject({ status: 'running', nodeId: box.nodeId, machineId: box.machineId, machineName: 'build-box' });
+    box.node.send(done(run));
+    await nextOf(box.node, 'tests.ack');
+    await until(async () => (await c.wokeWith(c.bruno.id)) !== null);
+    expect(await c.wokeWith(c.bruno.id)).toMatch(/part 1 of 1 passed on build-box|passed on build-box/i);
+  });
+
   it('splits into parts across the freest machines, puts each log on the task and wakes the agent with the result', async () => {
     const c = await company();
     const ivan = await c.machine(c.ceo, 'ivan-mac', idle({ load: 6 }));

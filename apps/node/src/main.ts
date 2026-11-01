@@ -458,11 +458,11 @@ async function run(dir: string, builtinMode: boolean, io: Io): Promise<number | 
     }
     const user = agentUser();
     if (user) secureNode(dir, user);
-    if (state && !state.provider) return runNode({ dir, adapter: machineOnly, log });
-    const provider = state?.provider ?? 'claude';
-    const fs = user ? agentFs(user) : ownFs;
     /* Test runs get a user of their own, apart from the agents' sign-in and folders. */
     const testUser = user ? userFor(dir, 'tests', true) : null;
+    if (state && !state.provider) return runNode({ dir, adapter: machineOnly, log, testUser });
+    const provider = state?.provider ?? 'claude';
+    const fs = user ? agentFs(user) : ownFs;
     return runNode({ dir, adapter: withInstall(personal(dir, provider, user, fs), tools, provider), log, testUser, ...terminalFor(dir, provider, user, fs) });
   }
 
