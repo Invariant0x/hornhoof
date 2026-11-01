@@ -171,6 +171,22 @@ describe('bounded native JSONL capture, without a quota producer', () => {
     expect(new NativeRecordReader(path).read().records).toHaveLength(3);
   });
 
+  it('keeps repeated physical records distinguishable without leaking their content or counting HH retries', () => {
+    const path = file();
+    const canary = 'SYNTHETIC-PRIVATE-DUPLICATE-62';
+    const duplicate = line({ ...ended, content: canary, reasoning: canary, error: { ...ended.error, message: canary, cause: { message: canary } } });
+    writeFileSync(path, duplicate + duplicate);
+    const reader = new NativeRecordReader(path);
+    const batch = reader.read();
+    expect(batch.records.map(c => c.record)).toEqual([projectNativeRecord(ended), projectNativeRecord(ended)]);
+    expect(batch.records.map(c => [c.byteStart, c.byteEnd])).toEqual([
+      [0, Buffer.byteLength(duplicate)], [Buffer.byteLength(duplicate), Buffer.byteLength(duplicate) * 2],
+    ]);
+    expect(JSON.stringify(batch)).not.toContain(canary);
+    expect(JSON.stringify(batch)).not.toContain('jobId');
+    expect(reader.read().records).toEqual([]);
+  });
+
   it('rejects symlinks and non-regular files and recovers without exposing their paths', () => {
     const target = file();
     writeFileSync(target, line(ended));
