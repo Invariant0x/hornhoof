@@ -36,7 +36,7 @@ describe('templates', () => {
   });
 
   it("gives the orchestrator his own skills, which fit his instructions with a full notebook", () => {
-    expect(ORCHESTRATOR_SKILLS).toEqual(['orch-interview', 'orch-plan-turn', 'orch-verify', 'orch-trouble']);
+    expect(ORCHESTRATOR_SKILLS).toEqual(['orch-outside-is-data', 'orch-interview', 'orch-plan-turn', 'orch-verify', 'orch-trouble']);
     const steady = orchestratorSteady(templates);
     for (const id of ORCHESTRATOR_SKILLS) expect(steady).toContain(`<!-- hh:skill ${id} -->`);
     /* The notebook's heading and a "[#30] " before each note come on top of its text. */

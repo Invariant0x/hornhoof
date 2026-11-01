@@ -159,7 +159,7 @@ describe('the orchestrator\'s conversation', () => {
     const run = await nextRun(builtin);
     expect(run.sessionId).toBeNull();
     expect(run.prompt).toMatch(/^Earlier in this conversation/);
-    expect(run.prompt).toContain('Ivan: We sell shoes');
+    expect(run.prompt).toContain('Ivan:\n> We sell shoes');
     expect(run.prompt.endsWith('Ivan (CEO): What next?')).toBe(true);
     expect(run.prompt.match(/What next\?/g)).toHaveLength(1);
   });

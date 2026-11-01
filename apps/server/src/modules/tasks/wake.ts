@@ -3,6 +3,7 @@ import type { Ctx } from '../../app.js';
 import { agentChanges, agentEvents, agents, jobs, requests, subscriptions, taskEvents, tasks } from '../../db/schema.js';
 import { afterJob, cancelJob, insertTurn, limitUntil, liveSubscription, onAgent, orchestratorOf, pump } from '../conversation/queue.js';
 import { sayLive } from '../conversation/live.js';
+import { quote } from '../conversation/prompt.js';
 import { appendEvent } from '../events/store.js';
 import { CLOSED, GATE_ROUNDS, leaveWork, NOT_A_MOVE, published, regateWaiting, silentTurn, taskSpot, wentOn, type Actor, type Task, type Wake, type WakeWhy } from './engine.js';
 import { settle, tell } from './turns.js';
@@ -20,6 +21,9 @@ function nextStep(task: Task, agentId: string): { finish: string; stuck: string 
   return { finish: 'report it', stuck: 'report it as not done, with what stands in the way' };
 }
 
+/* Wakes whose text an employee wrote: the reasons of a gate, a report, a block, a cancellation. */
+const EMPLOYEES_SAY: WakeWhy[] = ['changes', 'reported', 'blocked', 'cancelled'];
+
 /* The turn's prompt: which task, why the agent wakes, and what is expected of it, then what else it should know. Always
    English, like the agents' instructions. */
 export function wakePrompt(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string {
@@ -30,7 +34,8 @@ export function wakePrompt(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): str
 function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string {
   const ref = `#${task.number} "${task.title}"`;
   const read = 'Read it with the task tool first: its body is the current truth and its log has the rest.';
-  const said = w.text ? `:\n\n${w.text}\n\n` : '. ';
+  /* What an employee wrote is marked as theirs; a person's answer or comment stays as they wrote it. */
+  const said = w.text ? `:\n\n${EMPLOYEES_SAY.includes(w.why) ? quote(w.text) : w.text}\n\n` : '. ';
   const { finish, stuck } = nextStep(task, w.agentId);
   /* The orchestrator holds no task of his own: he runs the turn. */
   const own = agent.kind === 'orchestrator' ? 'the turn' : 'your own task';
@@ -158,7 +163,7 @@ async function explainRequest(ctx: Ctx, w: Wake): Promise<void> {
   const what =
     request.kind === 'stuck'
       ? `Hornhoof stopped waking ${asker} on ${ref} and waits for people to say how it goes on (request ${request.id}). Hornhoof noted: ${request.text}`
-      : `${asker} asks people on ${ref} (request ${request.id}, a ${request.kind}):\n\n${request.text}`;
+      : `${asker} asks people on ${ref} (request ${request.id}, a ${request.kind}):\n\n${quote(request.text)}`;
   const text =
     `${what}\n\nBefore a person answers, find out what it needs: read the task with "task", and ask ${asker} with "message_employee" when its words are not enough. ` +
     `Then call "explain_request" with request ${request.id} and a few lines for the person, in the CEO's language and plain words without IT terms: ` +

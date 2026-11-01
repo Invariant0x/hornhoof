@@ -3,7 +3,7 @@ import { and, desc, eq, gte, inArray, isNotNull, isNull, notInArray, or, sql } f
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agentEvents, agents, departments, jobs, requests, taskEvents, tasks } from '../../db/schema.js';
-import { turnPrompt } from '../conversation/prompt.js';
+import { wrote } from '../conversation/prompt.js';
 import { agentState, carrierOf, enqueueTurn, GONE_ALONG, orchestratorOf, STOPPED_ON_PURPOSE } from '../conversation/queue.js';
 import { deptName } from '../departments/templates.js';
 import { CLOSED } from '../tasks/engine.js';
@@ -238,7 +238,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
         await enqueueTurn(ctx, {
           companyId: job.companyId,
           agentId: orchestrator.id,
-          prompt: turnPrompt({ name: me.name, title: roleTitle(me.roleKey) ?? '' }, text),
+          prompt: wrote({ name: me.name, title: roleTitle(me.roleKey) ?? '' }, text),
           createdBy: null,
           message: { personId: null, text, from: 'agent', name: me.name, by: me.id },
         });
@@ -276,7 +276,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
       await enqueueTurn(ctx, {
         companyId: job.companyId,
         agentId: target.id,
-        prompt: turnPrompt({ name: me.name, title: roleTitle(me.roleKey) ?? '' }, text),
+        prompt: wrote({ name: me.name, title: roleTitle(me.roleKey) ?? '' }, text),
         createdBy: null,
         message: { personId: null, text, from: 'agent', name: me.name, by: me.id },
       });

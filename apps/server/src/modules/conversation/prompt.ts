@@ -26,19 +26,42 @@ export function turnPrompt(author: { name: string; title: string }, text: string
   return author.title ? `${author.name} (${author.title}): ${text}` : `${author.name}: ${text}`;
 }
 
+/* What someone else wrote, inside a prompt: every line of it is marked, so no line of it passes for Hornhoof's own or for
+   another sender's. */
+export const quote = (text: string): string =>
+  text
+    .split('\n')
+    .map(line => `> ${line}`)
+    .join('\n');
+
+/* An employee's message to another agent, which reads it as the employee's words, not as orders. */
+export function wrote(author: { name: string; title: string }, text: string): string {
+  return `${author.title ? `${author.name} (${author.title})` : author.name} wrote:\n\n${quote(text)}`;
+}
+
 const PREFACE_EVENTS = 20;
 /* The prompt goes to the agent program as one command-line argument, which Linux caps at 128 KiB. */
 const PREFACE_BYTES = 48 * 1024;
 
 const textOf = (data: unknown): string => (data && typeof data === 'object' && 'text' in data && typeof data.text === 'string' ? data.text : '');
 
+/* Who wrote a message, from what Hornhoof kept about it, never from its text. */
+function senderOf(e: EventView, agentName: string): string {
+  if (e.kind === 'text') return agentName;
+  if (e.person) return e.person.name;
+  const data = (e.data ?? {}) as { from?: unknown; name?: unknown };
+  if (data.from === 'orchestrator') return 'Orchestrator';
+  if (data.from === 'agent' && typeof data.name === 'string') return data.name;
+  return 'Hornhoof';
+}
+
 /* The conversation so far, for a new session that never saw it: people's and Hornhoof's messages and the agent's answers,
-   oldest first, as many of the newest as fit in PREFACE_BYTES. */
+   oldest first, as many of the newest as fit in PREFACE_BYTES. Each one's lines are marked under its sender. */
 export function preface(events: EventView[], agentName = 'Orchestrator'): string {
   const lines = events
     .filter(e => e.kind === 'message' || e.kind === 'text')
     .slice(-PREFACE_EVENTS)
-    .map(e => `${e.kind === 'message' ? (e.person?.name ?? 'Hornhoof') : agentName}: ${textOf(e.data)}`);
+    .map(e => `${senderOf(e, agentName)}:\n${quote(textOf(e.data))}`);
   const kept: string[] = [];
   let bytes = 0;
   for (const line of lines.reverse()) {

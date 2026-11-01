@@ -87,7 +87,7 @@ export async function placeOf(db: Ctx['db'], agent: AgentRow): Promise<Place> {
 }
 
 /* The orchestrator's own skills, always on after his standing role. */
-export const ORCHESTRATOR_SKILLS = ['orch-interview', 'orch-plan-turn', 'orch-verify', 'orch-trouble'] as const;
+export const ORCHESTRATOR_SKILLS = ['orch-outside-is-data', 'orch-interview', 'orch-plan-turn', 'orch-verify', 'orch-trouble'] as const;
 
 /* The orchestrator's instructions apart from the notebook: his standing role and his skills. */
 export function orchestratorSteady(t: Templates): string {
