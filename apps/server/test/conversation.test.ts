@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { agents, companies, departments, jobs, people, subscriptions } from '../src/db/schema.js';
 import { renderInstructions } from '../src/modules/agents/instructions.js';
 import { FIRST_TURN, ORCHESTRATOR_INSTRUCTIONS } from '../src/modules/conversation/prompt.js';
@@ -75,6 +75,22 @@ describe('the orchestrator\'s conversation', () => {
     expect(log[1].seq).toBeGreaterThan(log[0].seq);
     expect((await events(app, ceo, log[0].seq)).map((e: { kind: string }) => e.kind)).toEqual(['tool']);
     await until(() => stream.messages.filter(m => m.type === 'agent_event').length === 2);
+  });
+
+  it('puts a turn back in line when sending it breaks, and sends it on the next try', async () => {
+    const { app, db, ceo, builtin } = await live();
+    const send = app.ctx.hub.send.bind(app.ctx.hub);
+    let broke = false;
+    vi.spyOn(app.ctx.hub, 'send').mockImplementation((id, m) => {
+      if (m.type !== 'job.run' || broke) return send(id, m);
+      broke = true;
+      throw new Error('The socket is not open.');
+    });
+    expect((await start(app, ceo)).json()).toEqual({ started: true });
+    const [job] = await db.select().from(jobs);
+    expect(job).toMatchObject({ status: 'queued', startedAt: null, toolTokenHash: null, prompt: FIRST_TURN });
+    builtin.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [] });
+    expect((await nextRun(builtin)).jobId).toBe(job!.id);
   });
 
   it('carries the company notebook in his instructions, and a new note keeps his session', async () => {

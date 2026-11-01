@@ -1,6 +1,6 @@
 import cookie from '@fastify/cookie';
 import websocket from '@fastify/websocket';
-import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastify';
+import Fastify, { type FastifyBaseLogger, type FastifyInstance, type FastifyServerOptions } from 'fastify';
 import type { Config } from './config.js';
 import { loggable, registerErrorHandling } from './errors.js';
 import { authRoutes } from './modules/auth/routes.js';
@@ -43,7 +43,7 @@ export type Deps = { db: Db; config: Config; logger?: FastifyServerOptions['logg
 
 /* What routes get: the deps, the live node connections, the live stream to browsers, the terminals people watch and the
    check for newer builds. */
-export type Ctx = Deps & { hub: NodeHub; bus: EventBus; terminals: TerminalRelay; updates: UpdateCheck; updater: UpdaterControl; templates: Templates };
+export type Ctx = Deps & { log: FastifyBaseLogger; hub: NodeHub; bus: EventBus; terminals: TerminalRelay; updates: UpdateCheck; updater: UpdaterControl; templates: Templates };
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -56,7 +56,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   const app = Fastify({ logger: deps.logger ?? false, disableRequestLogging: true });
   const web = hasWebApp(deps.config.webDist);
   registerErrorHandling(app, web ? webAppRoutes : undefined);
-  const ctx = { ...deps, bus: new EventBus(), terminals: new TerminalRelay() } as Ctx;
+  const ctx = { ...deps, log: app.log, bus: new EventBus(), terminals: new TerminalRelay() } as Ctx;
   app.decorate('ctx', ctx);
   ctx.hub = new NodeHub({
     pingMs: deps.config.nodePingMs,

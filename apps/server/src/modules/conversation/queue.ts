@@ -2,6 +2,7 @@ import { effortFor, effortsOf, modelsFor, type Limits } from '@hornhoof/protocol
 import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, lte, ne, or } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
+import { loggable } from '../../errors.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
 import { agents, jobs, subscriptions } from '../../db/schema.js';
 import { dispatchJob } from '../jobs/dispatch.js';
@@ -352,29 +353,35 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
     .where(and(eq(jobs.id, job.id), eq(jobs.status, 'queued')))
     .returning({ id: jobs.id });
   if (!taken) return;
-  await publishWorking(ctx, job.companyId);
-  const sent = await dispatchJob(ctx, {
-    id: job.id,
-    subscriptionId: sub.id,
-    prompt,
-    sessionId,
-    model,
-    effort,
-    compactWindow: agent.kind === 'worker' ? WORKER_COMPACT_WINDOW : null,
-    timeoutMs: job.timeoutMs,
-    instructions: instructions.text,
-    toolToken: token,
-    context: job.prompt ? null : catchUp,
-    guidance: job.prompt || !repo ? null : repoLine(repo),
-    /* Each agent keeps one folder on the node, with its repository's clone inside. */
-    workspace: { key: agent.id, repo },
-  });
+  let sent = false;
+  try {
+    await publishWorking(ctx, job.companyId);
+    sent = await dispatchJob(ctx, {
+      id: job.id,
+      subscriptionId: sub.id,
+      prompt,
+      sessionId,
+      model,
+      effort,
+      compactWindow: agent.kind === 'worker' ? WORKER_COMPACT_WINDOW : null,
+      timeoutMs: job.timeoutMs,
+      instructions: instructions.text,
+      toolToken: token,
+      context: job.prompt ? null : catchUp,
+      guidance: job.prompt || !repo ? null : repoLine(repo),
+      /* Each agent keeps one folder on the node, with its repository's clone inside. */
+      workspace: { key: agent.id, repo },
+    });
+  } catch (err) {
+    /* A turn that broke on its way out was not sent: it waits for the next try instead of running forever. */
+    ctx.log.error({ error: loggable(err) }, 'A turn could not go out and waits for the next try.');
+  }
   if (sent) {
     if (job.taskId) await startWork(ctx, job.id);
     for (const j of along) await goneAlong(ctx, j.id);
     return;
   }
-  await db.update(jobs).set({ status: 'queued', startedAt: null, prompt: job.prompt, toolTokenHash: null, instructionsHash: null }).where(eq(jobs.id, job.id));
+  await db.update(jobs).set({ status: 'queued', startedAt: null, prompt: job.prompt, toolTokenHash: null, instructionsHash: null }).where(and(eq(jobs.id, job.id), eq(jobs.status, 'running')));
   await publishWorking(ctx, job.companyId);
 }
 
