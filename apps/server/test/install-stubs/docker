@@ -20,6 +20,8 @@ case "$1" in
   compose)
     case "$*" in
       *'/cli.js setup-link') if [ -n "${STUB_SETUP_LINK:-}" ]; then echo "$STUB_SETUP_LINK"; else echo 'Hornhoof is set up already.'; exit 1; fi ;;
+      # STUB_TUNNEL_SETTINGS: what the app wrote for the tunnel once the company has a public link.
+      *'cat /control/tunnel.json') if [ -n "${STUB_TUNNEL_SETTINGS:-}" ]; then echo "$STUB_TUNNEL_SETTINGS"; else echo "cat: can't open /control/tunnel.json" >&2; exit 1; fi ;;
     esac ;;
   ps) for n in ${STUB_CONTAINERS:-}; do name=${n%%=*}; server=''; case "$n" in *=*) server=${n#*=} ;; esac; echo "$name id-of-$name $server"; done ;;
   run)

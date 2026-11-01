@@ -14,6 +14,10 @@ services:
       HORNHOOF_SECRET: ${HORNHOOF_SECRET:?Set HORNHOOF_SECRET in .env}
       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8080}
       NODE_KEY: ${NODE_KEY:?Set NODE_KEY in .env}
+      # Where the company's public link comes from, and the one container whose word that a request came over https
+      # the app believes.
+      RELAY_URL: ${RELAY_URL:-}
+      TUNNEL_HOST: tunnel
     volumes:
       - control:/control
     healthcheck:
@@ -77,6 +81,20 @@ services:
       - KILL
     security_opt:
       - no-new-privileges:true
+    depends_on:
+      - app
+    networks:
+      - default
+
+  # Carries the company's public link at hornhoof.org to the app. The app writes the link's settings into the control
+  # folder; until it does, this waits. It reads nothing else, holds no Docker socket, and runs the app's own image.
+  tunnel:
+    build: .
+    image: ${HORNHOOF_APP_REF:-ghcr.io/invariant0x/hornhoof:latest}
+    command: ["node", "apps/server/dist/tunnel.js"]
+    restart: unless-stopped
+    volumes:
+      - control:/control:ro
     depends_on:
       - app
     networks:

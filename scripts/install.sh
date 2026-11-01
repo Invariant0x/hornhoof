@@ -568,13 +568,26 @@ compose_from_image() {
   "${DOCKER[@]}" rm "$cid" > /dev/null 2>&1 || true
 }
 
-# This server's nodes on this machine move to the node image of the same build, with their volumes.
+# The address of the server's public link at hornhoof.org, from the tunnel settings the app writes once the company
+# has one; empty without a link. Only a plain https address counts.
+public_link() {
+  local url
+  url=$("$@" exec -T app cat /control/tunnel.json 2> /dev/null | sed -n 's/^{"url":"\([^"]*\)".*/\1/p' || true)
+  case "$url" in
+    https://*[!A-Za-z0-9.:/-]*) ;;
+    https://?*) printf '%s' "$url" ;;
+  esac
+}
+
+# This server's nodes on this machine move to the node image of the same build, with their volumes: the ones that
+# joined through PUBLIC_URL, through the public link or through localhost.
 sweep_nodes() {
-  local public port entry name id provider seen=' ' pulled=$PULLED
+  local public linked port entry name id provider seen=' ' pulled=$PULLED
   IMAGE="${HORNHOOF_NODE_IMAGE:-$NODE_REF}"
   public=$(env_value PUBLIC_URL)
+  linked=$(cd "$SERVER_DIR" && public_link "$@")
   port=$(port_of "$SERVER_DIR/.env")
-  for SERVER in $public "http://localhost:$port"; do
+  for SERVER in $public $linked "http://localhost:$port"; do
     for entry in $(existing_nodes); do
       name=${entry%%:*}
       id=${entry#*:}
@@ -674,8 +687,8 @@ server_mode() {
   # The updater checks the new server's answer itself, and replaces itself once it comes.
   if [ -n "$FROM_UPDATER" ]; then
     say "Starting Hornhoof ${PIN:-latest}."
-    (cd "$SERVER_DIR" && "${compose[@]}" up -d --no-build db app node) || fail "Hornhoof did not start."
-    sweep_nodes
+    (cd "$SERVER_DIR" && "${compose[@]}" up -d --no-build db app node tunnel) || fail "Hornhoof did not start."
+    sweep_nodes "${compose[@]}"
     return 0
   fi
   say "Starting Hornhoof."

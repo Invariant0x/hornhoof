@@ -516,7 +516,7 @@ describe('install.sh', () => {
     expect(r.calls.some(c => c.startsWith('docker create') || c.startsWith('docker info'))).toBe(false);
     /* The updater downloaded every image before it saved the database, so this only starts them. */
     expect(r.calls.some(c => c.startsWith('docker pull') || c.startsWith('docker compose pull'))).toBe(false);
-    expect(r.calls).toContain('docker compose up -d --no-build db app node');
+    expect(r.calls).toContain('docker compose up -d --no-build db app node tunnel');
     expect(r.calls).not.toContain('docker compose up -d --no-build');
     expect(r.calls.find(c => c.startsWith('docker run -d --name hornhoof-claude-1c07dac4'))).toMatch(new RegExp(` ghcr\\.io/invariant0x/hornhoof-node@sha256:${'d'.repeat(64)}$`));
   });
@@ -531,11 +531,48 @@ describe('install.sh', () => {
     const r = install({ args: ['server'], tty: '', env: { HORNHOOF_FROM_UPDATER: '1', HORNHOOF_SERVER_DIR: dir, HORNHOOF_VERSION: '0.4.1', HORNHOOF_COMPOSE_FILE: compose } });
     expect(r.code).toBe(0);
     expect(indexOf(r.calls, 'docker compose pull')).toBeGreaterThanOrEqual(0);
-    expect(indexOf(r.calls, 'docker compose pull')).toBeLessThan(indexOf(r.calls, 'docker compose up -d --no-build db app node'));
+    expect(indexOf(r.calls, 'docker compose pull')).toBeLessThan(indexOf(r.calls, 'docker compose up -d --no-build db app node tunnel'));
     const env = readFileSync(join(dir, '.env'), 'utf8');
     expect(env).toMatch(/^HORNHOOF_APP_REF=ghcr\.io\/invariant0x\/hornhoof:0\.4\.1$/m);
     expect(env).toMatch(/^HORNHOOF_NODE_REF=ghcr\.io\/invariant0x\/hornhoof-node:0\.4\.1$/m);
     expect(env).toMatch(/^HORNHOOF_UPDATER_REF=ghcr\.io\/invariant0x\/hornhoof-updater:0\.4\.1$/m);
+  });
+
+  it('moves the nodes that joined through the public link to the new build too', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-server-'));
+    writeFileSync(join(dir, '.env'), 'HORNHOOF_SECRET=s\nNODE_KEY=k\nPUBLIC_URL=http://localhost:8081\nHORNHOOF_PORT=8081\n');
+    const r = install({
+      args: ['server'],
+      env: {
+        HORNHOOF_FROM_UPDATER: '1',
+        HORNHOOF_SERVER_DIR: dir,
+        HORNHOOF_VERSION: '0.4.1',
+        STUB_TUNNEL_SETTINGS: '{"url":"https://acme.hornhoof.test","name":"acme","key":"secret","tunnel":{"serverAddr":"hornhoof.test"}}',
+        STUB_CONTAINERS: 'hornhoof-claude-1c07dac4=http://localhost:8081 hornhoof-glm-33333333=https://acme.hornhoof.test hornhoof-codex-9f1e2d3c=https://other.hornhoof.test',
+      },
+    });
+    expect(r.code).toBe(0);
+    const runs = r.calls.filter(c => c.startsWith('docker run -d'));
+    expect(runs.map(c => c.match(/--name (\S+)/)![1]).sort()).toEqual(['hornhoof-claude-1c07dac4', 'hornhoof-glm-33333333']);
+    expect(runs.find(c => c.includes('--name hornhoof-glm-33333333'))).toMatch(/--label hornhoof\.server=https:\/\/acme\.hornhoof\.test .*hornhoof-node:0\.4\.1$/);
+    expect(r.out).not.toContain('secret');
+  });
+
+  it('moves only the nodes it knows when the tunnel settings say nothing usable', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-server-'));
+    writeFileSync(join(dir, '.env'), 'HORNHOOF_SECRET=s\nNODE_KEY=k\nPUBLIC_URL=http://localhost:8081\nHORNHOOF_PORT=8081\n');
+    const r = install({
+      args: ['server'],
+      env: {
+        HORNHOOF_FROM_UPDATER: '1',
+        HORNHOOF_SERVER_DIR: dir,
+        HORNHOOF_VERSION: '0.4.1',
+        STUB_TUNNEL_SETTINGS: '{"url":"https://a b.test; rm -rf /","tunnel":{}}',
+        STUB_CONTAINERS: 'hornhoof-claude-1c07dac4=http://localhost:8081',
+      },
+    });
+    expect(r.code).toBe(0);
+    expect(r.calls.filter(c => c.startsWith('docker run -d'))).toHaveLength(1);
   });
 
   it("moves this server's nodes on this machine to the new build from the updater", () => {
