@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
-import { agents, departments, jobs, subscriptions } from '../src/db/schema.js';
+import { agentEvents, agents, departments, jobs, subscriptions } from '../src/db/schema.js';
 import { as, connectNode, listen, openStream, setUpCompany, testApp, until } from './helpers.js';
 
 async function liveCompany() {
@@ -133,6 +133,28 @@ describe('node socket', () => {
     await until(() => node.acks.length === 2);
     expect(node.acks).toEqual([job!.id, job!.id]);
     expect((await db.select().from(jobs).where(eq(jobs.id, job!.id)))[0]).toMatchObject({ status: 'done', result: 'first' });
+    node.close();
+  });
+
+  it("lets a node touch only its own subscription's jobs", async () => {
+    const { app, db, url, ceo, subId, key } = await liveCompany();
+    const connected = await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['codex'] }, ...as(ceo) });
+    const code = connected.json().command.split('--join ')[1];
+    const joined = await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: 'pc-0002-abcd', hostname: 'maria-pc', os: 'linux', arch: 'x86_64' } });
+    const other = joined.json().nodes[0];
+    const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    const [theirs] = await db
+      .insert(jobs)
+      .values({ companyId: orchestrator!.companyId, subscriptionId: other.subscriptionId, agentId: orchestrator!.id, kind: 'conversation', prompt: 'x', status: 'running', timeoutMs: 900000, startedAt: new Date() })
+      .returning();
+    const node = await connectNode(url, key);
+    node.send(hello([theirs!.id]));
+    node.send({ type: 'job.event', jobId: theirs!.id, seq: 0, event: { kind: 'text', text: 'I finished it for them.' } });
+    node.send({ type: 'job.done', jobId: theirs!.id, ok: true, sessionId: 's', result: 'Done by another machine.', tail: '', error: null });
+    await until(() => node.acks.length === 1);
+    expect((await db.select().from(jobs).where(eq(jobs.id, theirs!.id)))[0]).toMatchObject({ status: 'running', result: null });
+    expect(await db.select().from(agentEvents).where(eq(agentEvents.jobId, theirs!.id))).toEqual([]);
+    expect(subId).not.toBe(other.subscriptionId);
     node.close();
   });
 
