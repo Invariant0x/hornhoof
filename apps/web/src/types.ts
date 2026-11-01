@@ -49,7 +49,8 @@ export type SubView = {
   last4: string | null;
   owner: { id: string; name: string };
   place: { kind: 'company' | 'department' | 'listed'; id: string | null; name: string };
-  machine: { id: string; hostname: string } | null;
+  /* The machines the plan runs on, oldest first, with its state on each. */
+  machines: { id: string; hostname: string; status: 'needs_login' | 'ready'; online: boolean }[];
   limits: Limits | null;
   /* The share of each limit window, in percent, that task turns may use; null: the whole limit. */
   budget: number | null;
@@ -120,7 +121,7 @@ export type Repository = { url: string; branch: string; tokenLast4: string | nul
 export type Org = {
   company: Company;
   /* limitUntil: his plan is at its limit until then, and he waits for the reset. */
-  orchestrator: { id: string; name: string; model: string; effort: string | null; subscription: SubView | null; context: number | null; limitUntil?: string | null } | null;
+  orchestrator: { id: string; name: string; model: string; effort: string | null; subscription: SubView | null; machine?: Machine | null; context: number | null; limitUntil?: string | null } | null;
   agents: { total: number; working: number };
   /* Next to the CEO: people who see the whole company, and deputies whose departments span more than one. */
   people: (PersonView & { deputy?: boolean })[];
@@ -162,6 +163,8 @@ export type AgentCardView = {
   /* The level a person picked, or null for the Default. */
   effort: string | null;
   subscription: SubView | null;
+  /* The machine its program runs on; none before its first turn, or on a key. */
+  machine: Machine | null;
   state: AgentState;
   skills: CardSkill[];
   parts: Part[];
@@ -328,6 +331,8 @@ export type TurnView = {
   tasks: { total: number; done: number };
 };
 
+export type Machine = { id: string; hostname: string };
+
 export type MachineView = {
   id: string;
   hostname: string;
@@ -336,7 +341,8 @@ export type MachineView = {
   owner: { id: string; name: string };
   online: boolean;
   lastSeenAt: string | null;
-  subscriptions: number;
+  /* The plans that run on it, with their state there; none: it only lends itself to test runs. */
+  plans: { id: string; provider: ProviderId; status: 'needs_login' | 'ready'; online: boolean }[];
   /* What its nodes said last about how busy it is; none while no node of it is connected. */
   load: NodeLoad | null;
   /* Takes the company's test runs when it is the freest machine. */

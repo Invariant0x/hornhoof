@@ -42,7 +42,7 @@ export const ORG: Org = {
     name: 'Orchestrator',
     model: 'claude-opus-5-5',
     effort: null,
-    subscription: { id: 's1', provider: 'anthropic_api', kind: 'api_key', label: 'Orchestrator', status: 'ready', online: false, last4: '9f3a', owner: { id: 'p1', name: 'Ivan' }, place: { kind: 'company', id: null, name: 'Whole company' }, machine: null, limits: null, budget: null, isOrchestrator: true },
+    subscription: { id: 's1', provider: 'anthropic_api', kind: 'api_key', label: 'Orchestrator', status: 'ready', online: false, last4: '9f3a', owner: { id: 'p1', name: 'Ivan' }, place: { kind: 'company', id: null, name: 'Whole company' }, machines: [], limits: null, budget: null, isOrchestrator: true },
     context: null,
   },
   agents: { total: 1, working: 0 },
@@ -60,21 +60,23 @@ export const ORG_WITH_TEAMS: Org = {
 
 const SUB_BASE = { kind: 'personal' as const, last4: null, owner: { id: 'p1', name: 'Ivan' }, place: { kind: 'company' as const, id: null, name: 'Whole company' }, limits: null, budget: null, isOrchestrator: false };
 
-export const MACHINE = { id: 'm1', hostname: 'ivan-mbp' };
+export const MACHINE = { id: 'm1', hostname: 'ivan-mbp', status: 'ready' as const, online: true };
 
 export const SUBS: SubView[] = [
   {
-    ...SUB_BASE, id: 's-claude', provider: 'claude', label: 'Claude', status: 'ready', online: true, machine: MACHINE,
+    ...SUB_BASE, id: 's-claude', provider: 'claude', label: 'Claude', status: 'ready', online: true, machines: [MACHINE],
     limits: { status: 'allowed', windows: [{ name: 'five_hour', utilization: 0.42, resetsAt: '2099-10-29T18:00:00.000Z' }, { name: 'seven_day', utilization: 0.1, resetsAt: null }] },
   },
-  { ...SUB_BASE, id: 's-codex', provider: 'codex', label: 'Codex', status: 'needs_login', online: true, machine: MACHINE },
-  { ...SUB_BASE, id: 's-kimi', provider: 'kimi', label: 'Kimi', status: 'waiting_machine', online: false, machine: null },
-  { ...SUB_BASE, id: 's-key', provider: 'anthropic_api', kind: 'api_key', label: 'Orchestrator', status: 'ready', online: true, last4: '9f3a', machine: null, isOrchestrator: true },
+  { ...SUB_BASE, id: 's-codex', provider: 'codex', label: 'Codex', status: 'needs_login', online: true, machines: [{ ...MACHINE, status: 'needs_login' }] },
+  { ...SUB_BASE, id: 's-kimi', provider: 'kimi', label: 'Kimi', status: 'waiting_machine', online: false, machines: [] },
+  { ...SUB_BASE, id: 's-key', provider: 'anthropic_api', kind: 'api_key', label: 'Orchestrator', status: 'ready', online: true, last4: '9f3a', machines: [], isOrchestrator: true },
 ];
 
 export const MACHINES: MachineView[] = [
-  { id: 'm1', hostname: 'ivan-mbp', os: 'darwin', arch: 'arm64', owner: { id: 'p1', name: 'Ivan' }, online: true, lastSeenAt: null, subscriptions: 2, load: { cpus: 8, load: 2, memFree: 6 * 1024 ** 3, memTotal: 16 * 1024 ** 3, tests: 1, jobs: 2 }, lendsTests: true },
-  { id: 'm2', hostname: 'build-box', os: 'linux', arch: 'x86_64', owner: { id: 'p2', name: 'Maria' }, online: false, lastSeenAt: new Date(Date.now() - 5 * 60_000).toISOString(), subscriptions: 1, load: null, lendsTests: false },
+  { id: 'm1', hostname: 'ivan-mbp', os: 'darwin', arch: 'arm64', owner: { id: 'p1', name: 'Ivan' }, online: true, lastSeenAt: null,
+    plans: [{ id: 's-claude', provider: 'claude', status: 'ready', online: true }, { id: 's-codex', provider: 'codex', status: 'needs_login', online: true }],
+    load: { cpus: 8, load: 2, memFree: 6 * 1024 ** 3, memTotal: 16 * 1024 ** 3, tests: 1, jobs: 2 }, lendsTests: true },
+  { id: 'm2', hostname: 'build-box', os: 'linux', arch: 'x86_64', owner: { id: 'p2', name: 'Maria' }, online: false, lastSeenAt: new Date(Date.now() - 5 * 60_000).toISOString(), plans: [], load: null, lendsTests: false },
 ];
 
 const OPUS = { id: 'claude-opus-5-5', name: 'Claude Opus 5.5' };
@@ -159,6 +161,7 @@ export const CARD: AgentCardView = {
   model: 'claude-sonnet-5-5',
   effort: null,
   subscription: TEAM_KEY,
+  machine: null,
   state: 'sleeping',
   skills: [
     { id: 'hh-report-to-head', title: about('Report to your head'), description: about('Tell the head what was done.'), on: true, locked: true, overridden: false, templateChanged: false },

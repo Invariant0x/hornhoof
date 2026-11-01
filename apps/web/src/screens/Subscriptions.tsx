@@ -16,13 +16,22 @@ const POLL_LIMIT_MS = 150_000;
 const REFRESH_MS = 5000;
 
 type Test = { phase: 'running' } | { phase: 'done'; text: string } | { phase: 'failed'; text: string; tail: string | null };
-type Panel = { kind: 'connect' } | { kind: 'command'; command: string } | null;
+/* machine: the command for a machine alone, with no plan. */
+type Panel = { kind: 'connect' } | { kind: 'command' | 'machine'; command: string } | null;
+/* A plan being added to a machine: first which one, then the command to run there. */
+type Adding = { machineId: string; command: string | null } | null;
 type Confirm = { kind: 'sub' | 'machine'; id: string } | null;
 type State = keyof Messages['subs']['states'];
 
 const sleep = (ms: number) => new Promise(done => setTimeout(done, ms));
 
 const subName = (t: Messages, s: SubView) => (s.kind === 'api_key' ? t.subs.keyEnding(PROVIDER_NAMES[s.provider], s.last4 ?? '') : PROVIDER_NAMES[s.provider]);
+
+/* What keeps a plan from working on one of its machines, if anything. */
+function waitsThere(t: Messages, on: { status: 'needs_login' | 'ready'; online: boolean }): string | null {
+  if (!on.online) return t.subs.waitsThere.offline;
+  return on.status === 'needs_login' ? t.subs.waitsThere.needs_login : null;
+}
 
 function stateOf(s: SubView): State {
   if (s.status === 'waiting_machine') return 'waiting_machine';
@@ -168,6 +177,7 @@ export function Subscriptions({ me }: { me: Me }) {
   const [builtin, setBuiltin] = useState<BuiltinView | null>(null);
   const [panel, setPanel] = useState<Panel>(null);
   const [confirm, setConfirm] = useState<Confirm>(null);
+  const [adding, setAdding] = useState<Adding>(null);
   const [tests, setTests] = useState<Record<string, Test>>({});
   const [failure, setFailure] = useState<unknown>(null);
   const live = useRef(true);
@@ -245,6 +255,18 @@ export function Subscriptions({ me }: { me: Me }) {
       setPanel({ kind: 'command', command });
     });
 
+  const machineCommand = () =>
+    run(async () => {
+      const { command } = await api.post<{ command: string }>('/api/machines/command');
+      setPanel({ kind: 'machine', command });
+    });
+
+  const addPlan = (m: MachineView, sub: SubView) =>
+    run(async () => {
+      const { command } = await api.post<{ command: string }>(`/api/machines/${m.id}/plans`, { subscription: sub.id });
+      setAdding({ machineId: m.id, command });
+    });
+
   const remove = (sub: SubView) =>
     run(async () => {
       setConfirm(null);
@@ -273,7 +295,10 @@ export function Subscriptions({ me }: { me: Me }) {
           <p className="muted">{t.subs.intro}</p>
         </div>
         {!panel && (
-          <button className="btn" type="button" onClick={() => setPanel({ kind: 'connect' })}>{t.subs.connect}</button>
+          <div className="head-actions">
+            <button className="btn ghost" type="button" onClick={machineCommand}>{t.subs.connectMachine}</button>
+            <button className="btn" type="button" onClick={() => setPanel({ kind: 'connect' })}>{t.subs.connect}</button>
+          </div>
         )}
       </header>
 
@@ -287,14 +312,23 @@ export function Subscriptions({ me }: { me: Me }) {
           skipLabel={t.common.cancel}
         />
       )}
-      {panel?.kind === 'command' && (
+      {(panel?.kind === 'command' || panel?.kind === 'machine') && (
         <Edge className="panel" cut={12}>
-          <h2>{t.subs.newCommand}</h2>
-          <p className="muted">{t.subs.runThis}</p>
-          <CommandBox command={panel.command} />
+          <h2>{panel.kind === 'machine' ? t.subs.machineHeading : t.subs.newCommand}</h2>
+          <p className="muted">{panel.kind === 'machine' ? t.subs.machineRunThis : t.subs.runThis}</p>
+          <CommandBox command={panel.command} trust={panel.kind === 'machine' ? t.subs.machineTrust : undefined} />
           <p className="muted">{t.subs.joinOnce}</p>
           <div className="actions">
-            <button className="btn" type="button" onClick={() => setPanel(null)}>{t.common.done}</button>
+            <button
+              className="btn"
+              type="button"
+              onClick={() => {
+                setPanel(null);
+                void load();
+              }}
+            >
+              {t.common.done}
+            </button>
           </div>
         </Edge>
       )}
@@ -334,7 +368,26 @@ export function Subscriptions({ me }: { me: Me }) {
                       </span>
                     </td>
                     <td>{s.place.kind === 'company' ? t.people.wholeCompany : s.place.name}</td>
-                    <td>{s.kind === 'api_key' ? t.subs.builtin : (s.machine?.hostname ?? <span className="muted">{t.subs.noMachine}</span>)}</td>
+                    <td>
+                      {s.kind === 'api_key' ? (
+                        t.subs.builtin
+                      ) : s.machines.length ? (
+                        <ul className="where-list" aria-label={t.subs.machinesOf(name)}>
+                          {s.machines.map(m => {
+                            /* With one machine the plan's state says it all. */
+                            const note = s.machines.length > 1 && waitsThere(t, m);
+                            return (
+                              <li key={m.id}>
+                                {m.hostname}
+                                {note && <span className="muted">, {note}</span>}
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      ) : (
+                        <span className="muted">{t.subs.noMachine}</span>
+                      )}
+                    </td>
                     <td>
                       <span className={`status ${state}`}>{t.subs.states[state]}</span>
                       <LimitBars sub={s} />
@@ -398,6 +451,7 @@ export function Subscriptions({ me }: { me: Me }) {
             <tr>
               <th scope="col">{t.subs.machineColumns.machine}</th>
               <th scope="col">{t.subs.machineColumns.owner}</th>
+              <th scope="col">{t.subs.machineColumns.plans}</th>
               <th scope="col">{t.subs.machineColumns.state}</th>
               <th scope="col"><span className="sr">{t.subs.machineColumns.actions}</span></th>
             </tr>
@@ -405,6 +459,9 @@ export function Subscriptions({ me }: { me: Me }) {
           <tbody>
             {machines.map(m => {
               const asking = confirm?.kind === 'machine' && confirm.id === m.id;
+              /* The person's own plans that do not run here yet, offered on their own machines only. */
+              const addable = m.owner.id === me.person.id ? (subs ?? []).filter(s => s.kind === 'personal' && s.owner.id === me.person.id && !m.plans.some(p => p.id === s.id)) : [];
+              const add = adding?.machineId === m.id ? adding : null;
               return (
                 <Fragment key={m.id}>
                   <tr>
@@ -413,8 +470,25 @@ export function Subscriptions({ me }: { me: Me }) {
                       <LoadLine load={m.load} />
                     </td>
                     <td>{m.owner.name}</td>
+                    <td>
+                      {m.plans.length ? (
+                        <ul className="where-list" aria-label={t.subs.plansOn(m.hostname)}>
+                          {m.plans.map(p => (
+                            <li key={p.id}>
+                              {PROVIDER_NAMES[p.provider]}
+                              {p.status === 'needs_login' && <span className="muted">, {t.subs.waitsThere.needs_login}</span>}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <span className="muted">{t.subs.testRunsOnly}</span>
+                      )}
+                    </td>
                     <td>{m.online ? <span className="status ready">{t.subs.online}</span> : <span className="muted">{lastSeen(t, language, m.lastSeenAt)}</span>}</td>
                     <td className="row-actions">
+                      {addable.length > 0 && !add && (
+                        <button className="act" type="button" aria-label={t.subs.addPlanLabel(m.hostname)} onClick={() => setAdding({ machineId: m.id, command: null })}>{t.subs.addPlan}</button>
+                      )}
                       {company || m.owner.id === me.person.id ? (
                         <>
                           <label className="lend">
@@ -428,10 +502,38 @@ export function Subscriptions({ me }: { me: Me }) {
                       )}
                     </td>
                   </tr>
-                  {asking && (
+                  {(asking || add) && (
                     <tr className="row-extra">
-                      <td colSpan={4}>
-                        <Ask text={t.subs.disconnectAsk(m.hostname)} yes={t.subs.yesDisconnect} onYes={() => disconnect(m)} onNo={() => setConfirm(null)} />
+                      <td colSpan={5}>
+                        {asking && <Ask text={t.subs.disconnectAsk(m.hostname)} yes={t.subs.yesDisconnect} onYes={() => disconnect(m)} onNo={() => setConfirm(null)} />}
+                        {add && !add.command && (
+                          <div className="ask">
+                            <span>{t.subs.addPlanAsk(m.hostname)}</span>
+                            {addable.map(s => (
+                              <button key={s.id} className="btn small" type="button" aria-label={t.subs.addPlanTo(subName(t, s), m.hostname)} onClick={() => addPlan(m, s)}>{subName(t, s)}</button>
+                            ))}
+                            <button className="btn small ghost" type="button" onClick={() => setAdding(null)}>{t.common.cancel}</button>
+                          </div>
+                        )}
+                        {add?.command && (
+                          <div className="add-plan">
+                            <p className="muted">{t.subs.runOn(m.hostname)}</p>
+                            <CommandBox command={add.command} />
+                            <p className="muted">{t.subs.joinOnce}</p>
+                            <div className="actions">
+                              <button
+                                className="btn small"
+                                type="button"
+                                onClick={() => {
+                                  setAdding(null);
+                                  void load();
+                                }}
+                              >
+                                {t.common.done}
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </td>
                     </tr>
                   )}
@@ -444,6 +546,7 @@ export function Subscriptions({ me }: { me: Me }) {
                   <span className="pname">{t.subs.builtin}</span>
                   <LoadLine load={builtin.load} />
                 </td>
+                <td />
                 <td />
                 <td>{builtin.online ? <span className="status ready">{t.subs.online}</span> : <span className="muted">{t.subs.states.builtin_offline}</span>}</td>
                 <td />

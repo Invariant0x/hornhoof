@@ -216,6 +216,11 @@ describe('AgentCard', () => {
     expect(await screen.findByRole('option', { name: 'GPT-6.1 Sol' })).toBeInTheDocument();
   });
 
+  it('says which machine the employee runs on', async () => {
+    open({ 'GET /api/agents/b1': [200, { ...CARD, subscription: CARD.runsOn[1]!.subscription, machine: { id: 'm2', hostname: 'oleg-tower' } }] });
+    expect(await screen.findByText('Works on the machine oleg-tower')).toBeInTheDocument();
+  });
+
   it('resets to the template after asking', async () => {
     const user = userEvent.setup();
     const { calls } = open({ 'POST /api/agents/b1/reset': [200, { ...CARD, changes: [{ field: 'reset', personName: 'Ivan', byOrchestrator: false, at: '2026-10-30T09:00:00.000Z' }, ...CARD.changes] }] });

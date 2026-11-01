@@ -222,6 +222,12 @@ describe('AgentWindow', () => {
     expect(await screen.findByText("Hornhoof on Ivan's machine is out of date. Run the install command there again.")).toBeInTheDocument();
   });
 
+  it('names the machine he runs on', async () => {
+    const plan = { ...SUBS[0]!, owner: { id: 'p1', name: 'Ivan' } };
+    open({}, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: plan, machine: { id: 'm3', hostname: 'ivan-laptop' } } });
+    expect((await screen.findAllByText(/, ivan-laptop$/)).length).toBeGreaterThan(0);
+  });
+
   it('shows a line once when the stream and a catch-up both bring it', async () => {
     const stream = fakeStream();
     open({

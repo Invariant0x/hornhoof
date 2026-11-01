@@ -242,6 +242,7 @@ export function AgentCard({ me, agentId, onClose, onTerminal }: Props) {
                 </optgroup>
               ))}
             </select>
+            {card.machine && <span className="hint">{t.agent.onMachine(card.machine.hostname)}</span>}
           </div>
           <div className="field">
             <label htmlFor={`${id}-model`}>{t.agent.model}</label>

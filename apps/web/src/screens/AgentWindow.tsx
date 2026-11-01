@@ -106,6 +106,7 @@ export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Pro
   const headOf = card?.kind === 'head' ? (card.department?.id ?? null) : null;
   const sub = orchestrator ? (org.orchestrator?.subscription ?? null) : (card?.subscription ?? null);
   const model = orchestrator ? org.orchestrator?.model : card?.model;
+  const machine = orchestrator ? org.orchestrator?.machine : card?.machine;
   const role = card?.role?.title[language];
   const title = orchestrator ? t.window.title : card ? [card.name, role !== card.name && role].filter(Boolean).join(', ') : '';
   const placeholder = orchestrator ? t.window.placeholder : t.window.writeTo(card?.name ?? '');
@@ -286,7 +287,7 @@ export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Pro
   const offerByHand = orchestrator && !open && !byHand && !staffByHand && !state?.busy && !state?.queued && empty;
   /* A company that has departments but no orchestrator yet waits for a subscription, so he can staff them. */
   const needsOrchestrator = orchestrator && !open && !staffByHand && !empty && state !== null && !ready && !state.busy && !state.queued;
-  const where = [model || t.agent.default, orchestratorStatus(t, sub), sub?.machine?.hostname].filter(Boolean).join(', ');
+  const where = [model || t.agent.default, orchestratorStatus(t, sub), machine?.hostname].filter(Boolean).join(', ');
   const hasTerminal = Boolean(state?.terminal) && !noTerminal;
   const terminal = hasTerminal && !asLog;
 
