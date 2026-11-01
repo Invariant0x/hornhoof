@@ -139,6 +139,7 @@ export const en = {
     waitingLogin: (provider: string) => `Waiting for the ${provider} login`,
     machineOffline: (owner: string) => `${owner}'s machine is offline`,
     runsOnPersonal: (owner: string, provider: string) => `Ready, on ${owner}'s ${provider} subscription`,
+    waitingLimit: (at: string) => `Waiting for the limit to reset at ${at}`,
   },
   people: {
     heading: 'People',

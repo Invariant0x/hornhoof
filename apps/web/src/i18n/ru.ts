@@ -129,6 +129,7 @@ export const ru: Messages = {
     waitingLogin: provider => `Ждет входа в ${provider}`,
     machineOffline: owner => `Машина не в сети, владелец ${owner}`,
     runsOnPersonal: (owner, provider) => `На связи, подписка ${provider}, владелец ${owner}`,
+    waitingLimit: at => `Ждет, пока лимит обновится в ${at}`,
   },
   people: {
     heading: 'Люди',

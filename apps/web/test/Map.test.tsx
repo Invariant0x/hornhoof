@@ -31,6 +31,13 @@ describe('orchestratorStatus', () => {
     expect(orchestratorStatus(en, sub)).toBe(english);
     expect(orchestratorStatus(ru, sub)).toBe(russian);
   });
+
+  it("says until when his plan is at its limit, once he could run otherwise", () => {
+    expect(orchestratorStatus(en, claude, '14:30')).toBe('Waiting for the limit to reset at 14:30');
+    expect(orchestratorStatus(ru, claude, '14:30')).toBe('Ждет, пока лимит обновится в 14:30');
+    expect(orchestratorStatus(en, SUBS[3]!, '14:30')).toBe('Waiting for the limit to reset at 14:30');
+    expect(orchestratorStatus(en, { ...claude, online: false }, '14:30')).toBe("Ivan's machine is offline");
+  });
 });
 
 describe('Map', () => {
@@ -54,6 +61,21 @@ describe('Map', () => {
     expect(within(ticker).getByTitle('Context 34%')).toHaveTextContent('Context34%');
     stream.send({ type: 'context', agentId: 'a1', used: 0.71 });
     expect(within(ticker).getByTitle('Context 71%').querySelector('.bar')).toHaveClass('hi');
+  });
+
+  it("shows in the line at the bottom that the orchestrator waits for his plan's limit to reset, and not after", async () => {
+    const at = new Date(Date.now() + 3_600_000);
+    mockApi({ 'GET /api/org': [200, { ...ORG, orchestrator: { ...ORG.orchestrator!, limitUntil: at.toISOString() } }] });
+    const { container, unmount } = render(<MapScreen {...PROPS} />);
+    await screen.findByText('Ivan');
+    const time = new Intl.DateTimeFormat('en', { hour: '2-digit', minute: '2-digit', ...(at.toDateString() === new Date().toDateString() ? {} : { weekday: 'short' }) }).format(at);
+    expect(container.querySelector('.ticker .tx')).toHaveTextContent(`Waiting for the limit to reset at ${time}`);
+    expect(container.querySelector('.ticker .live')).toHaveClass('off');
+    unmount();
+    mockApi({ 'GET /api/org': [200, { ...ORG, orchestrator: { ...ORG.orchestrator!, limitUntil: new Date(Date.now() - 60_000).toISOString() } }] });
+    const again = render(<MapScreen {...PROPS} />);
+    await screen.findByText('Ivan');
+    expect(again.container.querySelector('.ticker .tx')).toHaveTextContent('Ready, on the Anthropic key ending 9f3a');
   });
 
   it('shows how hard the orchestrator thinks in the line at the bottom', async () => {

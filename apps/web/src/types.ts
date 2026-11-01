@@ -119,7 +119,8 @@ export type Repository = { url: string; branch: string; tokenLast4: string | nul
 
 export type Org = {
   company: Company;
-  orchestrator: { id: string; name: string; model: string; effort: string | null; subscription: SubView | null; context: number | null } | null;
+  /* limitUntil: his plan is at its limit until then, and he waits for the reset. */
+  orchestrator: { id: string; name: string; model: string; effort: string | null; subscription: SubView | null; context: number | null; limitUntil?: string | null } | null;
   agents: { total: number; working: number };
   /* Next to the CEO: people who see the whole company, and deputies whose departments span more than one. */
   people: (PersonView & { deputy?: boolean })[];

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { deptLabel, errorText, useT, type Messages } from '../i18n';
+import { deptLabel, errorText, useLanguage, useT, type Messages } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
 import { useStream, type LiveMessage } from '../live';
 import { useOrg } from '../org';
@@ -11,6 +11,7 @@ import { usePanZoom, ZoomBar } from '../ui/canvas';
 import { Edge } from '../ui/Edge';
 import { LogoMark, PersonIcon } from '../ui/icons';
 import { Pulse, pulseSeconds, SIGNALS, toD, useReducedMotion, type Point } from '../ui/wires';
+import { clock } from './Subscriptions';
 
 /* World coordinates, laid out like the prototype: people on top, the orchestrator in the middle, departments in two columns around him. */
 const W = 1200, H = 900, CX = W / 2, CY = 420, HUB = 120;
@@ -38,13 +39,16 @@ const FLASH_MS = 1400;
 
 export type DeptSpot = { x: number; y: number; w: number; h: number; path: Point[] };
 
-export function orchestratorStatus(t: Messages, sub: SubView | null): string {
+/* limitAt: the time his plan's limit resets, while it is at it. */
+export function orchestratorStatus(t: Messages, sub: SubView | null, limitAt: string | null = null): string {
   if (!sub) return t.map.needsSubscription;
-  if (sub.kind === 'api_key') return t.map.runsOnKey(PROVIDER_NAMES[sub.provider], sub.last4 ?? '');
-  if (sub.status === 'waiting_machine') return t.map.waitingMachine(sub.owner.name);
-  if (sub.status === 'needs_login') return t.map.waitingLogin(PROVIDER_NAMES[sub.provider]);
-  if (!sub.online) return t.map.machineOffline(sub.owner.name);
-  return t.map.runsOnPersonal(sub.owner.name, PROVIDER_NAMES[sub.provider]);
+  if (sub.kind !== 'api_key') {
+    if (sub.status === 'waiting_machine') return t.map.waitingMachine(sub.owner.name);
+    if (sub.status === 'needs_login') return t.map.waitingLogin(PROVIDER_NAMES[sub.provider]);
+    if (!sub.online) return t.map.machineOffline(sub.owner.name);
+  }
+  if (limitAt) return t.map.waitingLimit(limitAt);
+  return sub.kind === 'api_key' ? t.map.runsOnKey(PROVIDER_NAMES[sub.provider], sub.last4 ?? '') : t.map.runsOnPersonal(sub.owner.name, PROVIDER_NAMES[sub.provider]);
 }
 
 /* How far above or below the hub each row's middle sits. */
@@ -199,6 +203,7 @@ type Props = { me: Me; windowOpen: boolean; onOpenOrchestrator(): void; inside?:
 /* inside: a department's view is open over the map, which stays flown into it until the view closes. */
 export function MapScreen({ me, windowOpen, onOpenOrchestrator, inside = false, onOpenDepartment }: Props) {
   const t = useT();
+  const { language } = useLanguage();
   const still = useReducedMotion();
   const company = me.person.scopeKind === 'company';
   const { org, failure } = useOrg();
@@ -321,7 +326,9 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator, inside = false, 
 
   const depts = org.departments;
   const sub = org.orchestrator?.subscription ?? null;
-  const status = orchestratorStatus(t, sub);
+  const limitUntil = org.orchestrator?.limitUntil ?? null;
+  const limitAt = limitUntil && Date.parse(limitUntil) > Date.now() ? clock(language, limitUntil) : null;
+  const status = orchestratorStatus(t, sub, limitAt);
   const spots = deptLayout(depts.length);
   const top = chipsTop(depts.length), bus = busY(depts.length);
   const chips = chipCenters(org.people.length);
@@ -477,7 +484,7 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator, inside = false, 
       {/* The orchestrator is the hub; this line says where he runs, until his window opens and says it there. */}
       {!windowOpen && (
         <div className="ticker glass" aria-live="polite" onPointerDown={e => e.stopPropagation()}>
-          <span className={`live${orchestratorReady(sub) ? '' : ' off'}`} />
+          <span className={`live${orchestratorReady(sub) && !limitAt ? '' : ' off'}`} />
           <span className="tt">{t.map.orchestrator}</span>
           <span className="tx" title={status}>{status}</span>
           {org.orchestrator?.effort && <span className="te">{t.agent.effortLine(t.agent.efforts[org.orchestrator.effort] ?? org.orchestrator.effort)}</span>}
