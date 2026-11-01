@@ -272,13 +272,16 @@ start_node() {
   local name=$1 id=$2 provider=$3 key=${4:-}
   if [ -n "$key" ]; then
     printf '%s %s %s %s\n' "$NODE_SERVER" "$id" "$provider" "$key" |
-      "${DOCKER[@]}" run --rm -i --network none --cap-drop ALL --security-opt no-new-privileges -v "$name:/data" "$IMAGE" set-key ||
+      "${DOCKER[@]}" run --rm -i --network none --user 0:0 --cap-drop ALL --cap-add DAC_OVERRIDE --security-opt no-new-privileges -v "$name:/data" "$IMAGE" set-key ||
       fail "Could not save the key for $name. $RETRY"
   fi
   say "Starting $name."
   "${DOCKER[@]}" rm -f "$name" > /dev/null 2>&1 || true
   # shellcheck disable=SC2086 # the two --add-host words appear only for a server on localhost
+  # Root inside the container only: the node runs its agents as a user of their own, keeps its key and programs from
+  # them and checks which agent calls its tools. Nothing from the host is mounted and no new privileges can be gained.
   "${DOCKER[@]}" run -d --name "$name" --label "$LABEL=$id" --label "$SERVER_LABEL=$SERVER" --restart unless-stopped --cap-drop ALL \
+    --user 0:0 --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add KILL --cap-add SETGID --cap-add SETUID --cap-add SYS_PTRACE \
     --security-opt no-new-privileges --shm-size 2g -v "$name:/data" ${LOCAL_SERVER:+--add-host} ${LOCAL_SERVER:+host.docker.internal:host-gateway} \
     "$IMAGE" > /dev/null || fail "Could not start $name (docker logs $name shows why). $RETRY"
   STARTED="$STARTED $name"

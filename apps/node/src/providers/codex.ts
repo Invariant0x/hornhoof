@@ -1,6 +1,7 @@
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { Readable, Writable } from 'node:stream';
 import { API_MODELS, type AgentEvent, type Limits, type ModelOption } from '@hornhoof/protocol';
 import type { JobUser } from '../isolation.js';
 import type { ProviderAdapter, RunInput, RunResult } from '../runner.js';
@@ -61,9 +62,15 @@ export function codexRateLimits(result: unknown): Limits | null {
 }
 
 /* Asks Codex's app server for the plan's limits over JSON-RPC. It keeps its own sign-in fresh, so no turn is needed. */
-function askLimits(bin: string, env: NodeJS.ProcessEnv): Promise<Limits | null> {
+function askLimits(bin: string, env: NodeJS.ProcessEnv, user: JobUser | null): Promise<Limits | null> {
   return new Promise(resolve => {
-    const child = spawn(bin, ['app-server'], { env, stdio: ['pipe', 'pipe', 'ignore'] });
+    /* Codex writes its state into its home as it starts, as the agents' user who run it. */
+    let child: ChildProcessByStdio<Writable, Readable, null>;
+    try {
+      child = spawn(bin, ['app-server'], { env, stdio: ['pipe', 'pipe', 'ignore'], uid: user?.uid, gid: user?.gid });
+    } catch {
+      return resolve(null);
+    }
     let buf = '';
     const done = (limits: Limits | null) => {
       clearTimeout(timer);
@@ -138,18 +145,18 @@ export function codexAdapter({ home, tools, bin = join(tools, 'bin', 'codex'), s
 
     async loggedIn() {
       if (mode === 'api_key') return true;
-      return exitsCleanly(bin, ['login', 'status'], env(null));
+      return exitsCleanly(bin, ['login', 'status'], env(null), user);
     },
 
     /* A company key has no plan limits. */
     async limits() {
-      return mode === 'api_key' ? null : askLimits(bin, env(null));
+      return mode === 'api_key' ? null : askLimits(bin, env(null), user);
     },
 
     async login(io) {
       if (mode === 'api_key') return;
       io.output.write('Codex signs in with a device code. If ChatGPT refuses the code, turn on device code sign-in in ChatGPT: Settings, Security.\n');
-      await interactiveLogin(bin, ['login', '--device-auth'], env(null), io);
+      await interactiveLogin(bin, ['login', '--device-auth'], env(null), io, user);
     },
 
     async run(input: RunInput): Promise<RunResult> {

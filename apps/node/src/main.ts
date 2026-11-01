@@ -4,8 +4,9 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AgentEvent, Limits, NodeMessage, ProviderId, ServerMessage } from '@hornhoof/protocol';
+import { agentFs, ownFs, type AgentFs } from './agent-fs.js';
 import { connect } from './connection.js';
-import { builtinAdapters } from './isolation.js';
+import { agentUser, builtinAdapters, secureNode, type JobUser } from './isolation.js';
 import { adapterFor, programFor } from './providers/index.js';
 import { runJob, type ProviderAdapter, type RunResult } from './runner.js';
 import { dataDir, isRemoved, markRemoved, readState, rememberSession, writeState, type NodeState } from './state.js';
@@ -32,7 +33,7 @@ const MAX_UNCONFIRMED = 50;
 type JobRun = Extract<ServerMessage, { type: 'job.run' }>;
 
 /* Agents of a personal Claude Code, Codex or Kimi Code plan run in tmux sessions people can watch and type into. */
-export type TerminalSetup = { tmux: Tmux; program: TermProgram; bin: string; home: string; signedOut: RegExp; proc?: string };
+export type TerminalSetup = { tmux: Tmux; program: TermProgram; bin: string; home: string; signedOut: RegExp; proc?: string; user?: JobUser | null; fs?: AgentFs };
 
 type RunOptions = {
   dir: string;
@@ -109,6 +110,8 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
         secrets: () => [...known],
         remember: (sessionId, workDir) => rememberSession(dir, sessionId, workDir),
         proc: terminal.proc,
+        user: terminal.user,
+        fs: terminal.fs,
       })
     : null;
   if (host && terminal) {
@@ -266,8 +269,13 @@ const SET_KEY_LINE = 'set-key expects one line: <server> <subscriptionId> <provi
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
-/* The agent program for a personal node lives in /data/tools, its sign-in in /data/home. */
-const personal = (dir: string, provider: ProviderId) => adapterFor(provider, { home: join(dir, 'home'), tools: join(dir, 'tools') });
+/* The agent program for a personal node lives in /data/tools, its sign-in in /data/home. On a node that runs as root the
+   program runs as the agents' user, who also make their folders and work in their repositories. */
+function personal(dir: string, provider: ProviderId, user: JobUser | null = null, fs: AgentFs = ownFs): ProviderAdapter {
+  const home = join(dir, 'home');
+  const adapter = adapterFor(provider, { home, tools: join(dir, 'tools'), user });
+  return user ? { ...adapter, owner: { user, home, prepare: () => {}, mkdir: path => fs.mkdir(path) } } : adapter;
+}
 
 /* Each program is installed the first time something needs it. A failed install is tried again next time. */
 const installing = new Map<string, Promise<void>>();
@@ -333,7 +341,7 @@ async function setKey(dir: string, io: Io): Promise<number> {
 
 async function status(dir: string, io: Io): Promise<number> {
   const state = readState(dir);
-  const word = isRemoved(dir) ? 'removed' : !state ? 'no_key' : (await personal(dir, state.provider).loggedIn()) ? 'ready' : 'needs_login';
+  const word = isRemoved(dir) ? 'removed' : !state ? 'no_key' : (await personal(dir, state.provider, agentUser()).loggedIn()) ? 'ready' : 'needs_login';
   io.stdout.write(word + '\n');
   return 0;
 }
@@ -344,7 +352,7 @@ async function login(dir: string, io: Io): Promise<number> {
     io.stderr.write('This machine has no key yet. Run the install command from Hornhoof.\n');
     return 1;
   }
-  const adapter = personal(dir, state.provider);
+  const adapter = personal(dir, state.provider, agentUser());
   const { name, bin } = programFor(state.provider);
   try {
     if (!existsSync(join(dir, 'tools', 'bin', bin))) io.stdout.write(`Installing ${name}.\n`);
@@ -380,7 +388,7 @@ const TERMINALS: Partial<Record<ProviderId, { program: TermProgram; signedOut: R
 };
 
 /* A personal Claude Code, Codex or Kimi Code plan runs its agents in tmux when the machine has it; the rest run as before. */
-function terminalFor(dir: string, provider: ProviderId): { terminal?: TerminalSetup } {
+function terminalFor(dir: string, provider: ProviderId, user: JobUser | null, fs: AgentFs): { terminal?: TerminalSetup } {
   const known = TERMINALS[provider];
   if (!known) return {};
   try {
@@ -393,7 +401,7 @@ function terminalFor(dir: string, provider: ProviderId): { terminal?: TerminalSe
   const tmux = new Tmux({ env: childEnv(tools, { HOME: process.env.HOME ?? home }), recordingsDir: join(dir, '.hh-recordings') });
   /* Nodes run on Linux, where the bridge can tell which agent's program calls it. */
   const proc = process.platform === 'linux' && existsSync('/proc/net/tcp') ? '/proc' : undefined;
-  return { terminal: { tmux, ...known, bin: join(tools, 'bin', programFor(provider).bin), home, proc } };
+  return { terminal: { tmux, ...known, bin: join(tools, 'bin', programFor(provider).bin), home, proc, user, fs } };
 }
 
 async function run(dir: string, builtinMode: boolean, io: Io): Promise<number | { stop(): void }> {
@@ -406,7 +414,10 @@ async function run(dir: string, builtinMode: boolean, io: Io): Promise<number | 
       return 1;
     }
     const provider = state?.provider ?? 'claude';
-    return runNode({ dir, adapter: withInstall(personal(dir, provider), tools, provider), log, ...terminalFor(dir, provider) });
+    const user = agentUser();
+    if (user) secureNode(dir, user);
+    const fs = user ? agentFs(user) : ownFs;
+    return runNode({ dir, adapter: withInstall(personal(dir, provider, user, fs), tools, provider), log, ...terminalFor(dir, provider, user, fs) });
   }
 
   const server = process.env.HORNHOOF_SERVER;

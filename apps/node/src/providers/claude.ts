@@ -106,7 +106,7 @@ export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'),
     async loggedIn() {
       if (mode === 'api_key') return true;
       if (mode === 'glm') return glmKey().length > 0;
-      return exitsCleanly(bin, ['auth', 'status'], env(null));
+      return exitsCleanly(bin, ['auth', 'status'], env(null), user);
     },
 
     async login(io) {
@@ -116,10 +116,10 @@ export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'),
         const key = await askHidden(io, 'GLM key: ');
         if (!key) throw new Error('No key was entered.');
         ensureDir(home);
-        writeFileSync(keyFile, key + '\n', { mode: 0o600 });
+        writePrivate(keyFile, key + '\n', user);
         return;
       }
-      await interactiveLogin(bin, ['auth', 'login'], env(null), io);
+      await interactiveLogin(bin, ['auth', 'login'], env(null), io, user);
     },
 
     async run(input: RunInput): Promise<RunResult> {

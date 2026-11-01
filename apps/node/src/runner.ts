@@ -51,7 +51,8 @@ export interface ProviderAdapter {
   limits?(): Promise<Limits | null>;
   /* On the built-in node, the user a key's program runs as and its home: the folder is handed to that user first,
      and the node's own git work in it runs as that user too. */
-  owner?: { user: JobUser | null; home: string; prepare(path: string): void };
+  /* mkdir: how a node that runs as root makes an agent's folders as the agents' own user. */
+  owner?: { user: JobUser | null; home: string; prepare(path: string): void; mkdir?(path: string): Promise<void> };
 }
 
 type JobRun = Extract<ServerMessage, { type: 'job.run' }>;
@@ -150,7 +151,8 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
   let res: RunResult;
   try {
     const { workDir, sessionId } = workDirFor(msg, dir);
-    mkdirSync(workDir, { recursive: true });
+    if (adapter.owner?.mkdir) await adapter.owner.mkdir(workDir);
+    else mkdirSync(workDir, { recursive: true });
     adapter.owner?.prepare(workDir);
     const repoEnv = repo ? await prepareRepo(workDir, repo, { user: adapter.owner?.user ?? null, home: adapter.owner?.home ?? null }, git) : undefined;
     /* hh-attach sends the turn's pictures with its token. The name has no KEY, SECRET or TOKEN in it, so Codex passes it on. */

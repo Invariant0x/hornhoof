@@ -154,6 +154,9 @@ describe('install.sh', () => {
       expect(run).toContain(`--label hornhoof.subscription=${id}`);
       expect(run).toContain('--restart unless-stopped');
       expect(run).toContain('--cap-drop ALL');
+      /* Root inside the container only, to run the agents as a user of their own and check which of them calls. */
+      expect(run).toContain('--user 0:0');
+      for (const cap of ['CHOWN', 'DAC_OVERRIDE', 'FOWNER', 'KILL', 'SETGID', 'SETUID', 'SYS_PTRACE']) expect(run).toContain(`--cap-add ${cap}`);
       expect(run).toContain('--security-opt no-new-privileges');
       expect(run).toContain('--shm-size 2g');
       expect(run).toContain(`-v ${name}:/data`);
@@ -161,6 +164,10 @@ describe('install.sh', () => {
       expect(run).not.toContain('node-key-');
     }
     expect(r.calls).toContain(`stdin ${SERVER} ${SUB_A} claude node-key-aaaaaaaaaaaaaaaa`);
+    /* The key goes into a file only root reads, through a container that may write the node's folder and nothing more. */
+    const keys = r.calls.filter(c => c.startsWith('docker run --rm -i') && c.endsWith('set-key'));
+    expect(keys).toHaveLength(2);
+    for (const key of keys) expect(key).toMatch(/--network none --user 0:0 --cap-drop ALL --cap-add DAC_OVERRIDE --security-opt no-new-privileges /);
     expect(r.calls.filter(c => c.startsWith('tty '))).toEqual(['tty typed-answer', 'tty typed-answer']);
     expect(r.calls.filter(c => c.startsWith('docker exec -it') && c.endsWith('login'))).toHaveLength(2);
     expect(r.out).toMatch(/Claude.*ready/);

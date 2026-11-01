@@ -115,7 +115,7 @@ export function kimiAdapter({ home, tools, bin = join(tools, 'bin', 'kimi'), use
     },
 
     async login(io) {
-      await interactiveLogin(bin, ['login'], env(), io);
+      await interactiveLogin(bin, ['login'], env(), io, user);
     },
 
     async run(input: RunInput): Promise<RunResult> {

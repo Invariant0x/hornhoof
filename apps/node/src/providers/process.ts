@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { closeSync, constants, fchownSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { JobUser } from '../isolation.js';
 import type { LoginIo } from '../runner.js';
 import type { ProgramExit } from '../program-exit.js';
@@ -33,7 +34,13 @@ type SpawnOptions = {
 /* Runs a program with no input, reads stdout line by line and stops the whole process group at the timeout or when the signal aborts. */
 export function runProgram({ bin, args, env, cwd, timeoutMs, signal, onLine, user }: SpawnOptions): Promise<Finished> {
   return new Promise(resolve => {
-    const child = spawn(bin, args, { env, cwd, stdio: ['ignore', 'pipe', 'pipe'], detached: true, uid: user?.uid, gid: user?.gid });
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(bin, args, { env, cwd, stdio: ['ignore', 'pipe', 'pipe'], detached: true, uid: user?.uid, gid: user?.gid });
+    } catch (err) {
+      /* A program that cannot start as its user ends at once, as one that cannot be found does. */
+      return resolve({ code: null, signal: null, at: new Date().toISOString(), output: err instanceof Error ? err.message : String(err), timedOut: false });
+    }
     let output = '';
     let partial = '';
     let timedOut = false;
@@ -41,13 +48,13 @@ export function runProgram({ bin, args, env, cwd, timeoutMs, signal, onLine, use
       output += chunk;
       if (output.length > KEEP_BYTES) output = output.slice(-KEEP_BYTES);
     };
-    child.stdout.setEncoding('utf8').on('data', (chunk: string) => {
+    child.stdout!.setEncoding('utf8').on('data', (chunk: string) => {
       keep(chunk);
       const lines = (partial + chunk).split('\n');
       partial = lines.pop() ?? '';
       for (const line of lines) onLine?.(line);
     });
-    child.stderr.setEncoding('utf8').on('data', keep);
+    child.stderr!.setEncoding('utf8').on('data', keep);
     const killGroup = (sig: NodeJS.Signals) => {
       try {
         process.kill(-child.pid!, sig);
@@ -78,9 +85,10 @@ export function runProgram({ bin, args, env, cwd, timeoutMs, signal, onLine, use
   });
 }
 
-/* True when the program exits 0, for "am I signed in" checks. */
-export async function exitsCleanly(bin: string, args: string[], env: NodeJS.ProcessEnv): Promise<boolean> {
-  const done = await runProgram({ bin, args, env, timeoutMs: 30_000 });
+/* True when the program exits 0, for "am I signed in" checks. They run as the agents' user, as the program may write
+   into their home. */
+export async function exitsCleanly(bin: string, args: string[], env: NodeJS.ProcessEnv, user: JobUser | null = null): Promise<boolean> {
+  const done = await runProgram({ bin, args, env, timeoutMs: 30_000, user });
   return done.code === 0;
 }
 
@@ -96,9 +104,10 @@ export function lastUrl(text: string): string | null {
 }
 
 /* Runs a login program with the person's terminal: their typing goes in, its output comes back, and the link is saved for the installer to open. */
-export function interactiveLogin(bin: string, args: string[], env: NodeJS.ProcessEnv, io: LoginIo): Promise<void> {
+export function interactiveLogin(bin: string, args: string[], env: NodeJS.ProcessEnv, io: LoginIo, user: JobUser | null = null): Promise<void> {
   return new Promise((resolve, reject) => {
-    const child = spawn(bin, args, { env, stdio: ['pipe', 'pipe', 'pipe'] });
+    /* The sign-in is written as the agents' user, who read it. */
+    const child = spawn(bin, args, { env, stdio: ['pipe', 'pipe', 'pipe'], uid: user?.uid, gid: user?.gid });
     let seen = '';
     const echo = (chunk: Buffer) => {
       io.output.write(chunk);
@@ -181,7 +190,8 @@ export function tokensIn(path: string): string[] {
 
 /* Installs an agent program into tools with npm; a failure carries the last lines npm printed. */
 export async function installPackage(tools: string, pkg: string): Promise<void> {
-  const done = await runProgram({ bin: 'npm', args: ['install', '-g', '--prefix', tools, pkg], env: childEnv(tools, {}), timeoutMs: 10 * 60_000 });
+  /* npm keeps its cache with the programs: in the agents' home it would leave files they cannot change. */
+  const done = await runProgram({ bin: 'npm', args: ['install', '-g', '--prefix', tools, pkg], env: childEnv(tools, { npm_config_cache: join(tools, '.npm-cache') }), timeoutMs: 10 * 60_000 });
   if (done.code === 0) return;
   const last = stripEscapes(done.output).trim().split('\n').slice(-5).join('\n');
   throw new Error(done.timedOut ? 'npm did not finish within 10 minutes.' : last || `npm ended with code ${done.code}.`);

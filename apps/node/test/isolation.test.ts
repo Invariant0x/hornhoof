@@ -1,9 +1,13 @@
-import { mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { agentUser, builtinAdapters, ensurePasswd, FIRST_UID, prepareFolder, secureNode, userFor, type FolderOps } from '../src/isolation.js';
-import { runProgram } from '../src/providers/process.js';
+import { claudeAdapter } from '../src/providers/claude.js';
+import { codexAdapter } from '../src/providers/codex.js';
+import { kimiAdapter } from '../src/providers/kimi.js';
+import { exitsCleanly, installPackage, interactiveLogin, runProgram } from '../src/providers/process.js';
+import { PassThrough } from 'node:stream';
 
 const tmp = () => mkdtempSync(join(tmpdir(), 'hh-iso-'));
 
@@ -148,3 +152,31 @@ describe('builtinAdapters', () => {
     expect(calls).toContain(`chown ${join(dir, 'work', 'agents', 'a1')} 20000:20000`);
   });
 });
+
+/* A user this test cannot become: a program started as that user fails, which shows the user was passed on. */
+describe.skipIf(process.getuid?.() === 0)("a root node's own runs of the agents' program", () => {
+  const other = { uid: process.getuid!() + 1, gid: process.getgid!() + 1 };
+  const io = () => ({ input: new PassThrough(), output: new PassThrough(), urlFile: join(tmp(), 'login-url') });
+
+  it("checks the sign-in and signs in as the agents' user, so the program leaves nothing in their home they cannot read", async () => {
+    expect(await exitsCleanly('/usr/bin/true', [], process.env)).toBe(true);
+    expect(await exitsCleanly('/usr/bin/true', [], process.env, other)).toBe(false);
+    await expect(interactiveLogin('/usr/bin/true', [], process.env, io())).resolves.toBeUndefined();
+    await expect(interactiveLogin('/usr/bin/true', [], process.env, io(), other)).rejects.toThrow();
+    const home = tmp();
+    expect(await claudeAdapter({ home, tools: home, bin: '/usr/bin/true', mode: 'plan', user: other }).loggedIn()).toBe(false);
+    expect(await codexAdapter({ home, tools: home, bin: '/usr/bin/true', mode: 'plan', user: other }).loggedIn()).toBe(false);
+    await expect(kimiAdapter({ home, tools: home, bin: '/usr/bin/true', user: other }).login(io())).rejects.toThrow();
+    await expect(claudeAdapter({ home, tools: home, bin: '/usr/bin/true', mode: 'plan', user: other }).login(io())).rejects.toThrow();
+    await expect(codexAdapter({ home, tools: home, bin: '/usr/bin/true', mode: 'plan', user: other }).login(io())).rejects.toThrow();
+  });
+
+  it("keeps npm's cache with the programs instead of in the agents' home", async () => {
+    const tools = tmp();
+    mkdirSync(join(tools, 'bin'));
+    writeFileSync(join(tools, 'bin', 'npm'), `#!/bin/sh\necho "$npm_config_cache" > ${join(tools, 'cache')}\n`, { mode: 0o755 });
+    await installPackage(tools, 'some-program');
+    expect(readFileSync(join(tools, 'cache'), 'utf8').trim()).toBe(join(tools, '.npm-cache'));
+  });
+});
+

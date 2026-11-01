@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentEvent, ServerMessage } from '@hornhoof/protocol';
@@ -124,6 +124,15 @@ describe('runJob', () => {
     await runJob(adapter, job({ jobId: 'j-y', sessionId: 'sess-elsewhere', workspace: { key: 'agent-1', repo: null } }), dir);
     expect(adapter.inputs[0]!.workDir).toBe(join(dir, 'work', 'agents', 'agent-1'));
     expect(adapter.inputs[0]!.sessionId).toBe(null);
+  });
+
+  it("makes the work folder as the agents' user when the program's owner says how, so a root node follows no link of theirs", async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
+    const made: string[] = [];
+    const adapter = { ...fakeAdapter(async () => ok()), owner: { user: null, home: dir, prepare: () => {}, mkdir: async (path: string) => void made.push(path) } };
+    await runJob(adapter, job({ workspace: { key: 'agent-1', repo: null } }), dir);
+    expect(made).toEqual([join(dir, 'work', 'agents', 'agent-1')]);
+    expect(existsSync(join(dir, 'work'))).toBe(false);
   });
 
   it('turns a work folder it cannot make into agent_failed', async () => {
