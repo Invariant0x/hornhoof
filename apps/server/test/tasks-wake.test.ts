@@ -404,6 +404,30 @@ async function withRepositories() {
   return { app, db, url, ceo, builtin, ctx: app.ctx, companyId, dev: dev!, shop: shop!, hire, repository, task };
 }
 
+describe('a head', () => {
+  it('reads everything that moved on its tasks while it was busy in one turn, not one turn per task', async () => {
+    const { ctx, db, builtin, dev, companyId } = await withRepositories();
+    const [sub] = await db.select().from(subscriptions);
+    const staff = async (name: string, kind: 'head' | 'worker', roleKey: string) =>
+      (await db.insert(agents).values({ companyId, kind, name, roleKey, departmentId: dev.id, model: '', subscriptionId: sub!.id }).returning())[0]!;
+    const head = await staff('Hana', 'head', 'DEV-HEAD');
+    const bruno = await staff('Bruno', 'worker', 'DEV-BE');
+    const given = async (title: string) => (await createTask(ctx, { agentId: head.id }, { title, brief: '', body: '', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true })).task;
+    const [busy] = await db.insert(jobs).values({ companyId, subscriptionId: sub!.id, agentId: head.id, kind: 'conversation', prompt: 'Plan the turn.', timeoutMs: 900000, status: 'running', startedAt: new Date() }).returning();
+    const [checkout, refund, invoice] = [await given('Checkout API'), await given('Refund email'), await given('Invoice PDF')];
+    await wakeAll(ctx, [
+      { agentId: head.id, taskId: checkout.id, why: 'blocked', text: 'The payment keys are missing.' },
+      { agentId: head.id, taskId: refund.id, why: 'done' },
+      { agentId: head.id, taskId: invoice.id, why: 'reported', text: 'Shipped.' },
+    ]);
+    await db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, busy!.id));
+    await afterJob(ctx, busy!.id);
+    const run = await nextRun(builtin);
+    for (const said of ['#1 "Checkout API"', 'The payment keys are missing.', '#2 "Refund email"', '#3 "Invoice PDF"', 'Shipped.']) expect(run.prompt).toContain(said);
+    expect((await db.select().from(jobs).where(and(eq(jobs.agentId, head.id), eq(jobs.status, 'queued'))))).toEqual([]);
+  });
+});
+
 describe("working in the product's repository", () => {
   it("sends an agent's turn with its product's repository, else its department's, and each agent its own folder", async () => {
     const { ctx, builtin, dev, shop, hire, repository, task } = await withRepositories();
