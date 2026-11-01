@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { API_MODELS, CLAUDE_ALIASES, cut, defaultEffortOf, lastBytes, MAX_TEST_PARTS, TAIL_BYTES, TEST_LOG_BYTES, DEPARTMENT_TEMPLATES, effortFor, effortsOf, modelsFor, parseNodeMessage, parseServerMessage, repoFolder, type AgentEvent, type NodeMessage, type ServerMessage } from '../src/index.js';
+import { API_MODELS, CLAUDE_ALIASES, cut, defaultEffortOf, lastBytes, MAX_TEST_PARTS, TAIL_BYTES, TEST_LOG_BYTES, COMPANY_TEMPLATES, COMPANY_TEMPLATE_KEYS, DEPARTMENT_TEMPLATES, TEMPLATE_KEYS, effortFor, effortsOf, modelsFor, parseNodeMessage, parseServerMessage, repoFolder, type AgentEvent, type NodeMessage, type ServerMessage } from '../src/index.js';
 import { effortsOf as light, topEffort as lightTop } from '../src/efforts.js';
 
 const LIMITS = { status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0.38, resetsAt: '2026-10-29T21:30:00.000Z' }] };
@@ -180,6 +180,39 @@ describe('department templates', () => {
     expect(DEPARTMENT_TEMPLATES.map(t => t.key)).toEqual(['operations', 'development', 'marketing', 'sales', 'business_development', 'design', 'support', 'finance']);
     expect(DEPARTMENT_TEMPLATES.filter(t => t.always).map(t => t.key)).toEqual(['operations']);
     expect(DEPARTMENT_TEMPLATES.filter(t => t.ticked).map(t => t.key)).toEqual(['operations', 'development', 'marketing', 'sales', 'business_development']);
+  });
+});
+
+describe('company templates', () => {
+  it('are eight, each with a distinct key from the list', () => {
+    expect(COMPANY_TEMPLATES.map(t => t.key)).toEqual([...COMPANY_TEMPLATE_KEYS]);
+    expect(new Set(COMPANY_TEMPLATES.map(t => t.key)).size).toBe(8);
+  });
+
+  it('build only from departments that exist, with sound nesting and staffing', () => {
+    for (const template of COMPANY_TEMPLATES) {
+      expect(template.departments.length, template.key).toBeGreaterThan(0);
+      const unnamed = new Set<string>();
+      let operations = 0;
+      for (const dept of template.departments) {
+        expect(TEMPLATE_KEYS, `${template.key}: ${dept.template}`).toContain(dept.template);
+        if (dept.template === 'operations') operations += 1;
+        /* A template used a second time in one company needs its own name, as the structure card requires. */
+        if (!dept.name) {
+          expect(unnamed.has(dept.template), `${template.key}: ${dept.template} twice without a name`).toBe(false);
+          unnamed.add(dept.template);
+        }
+        for (const product of dept.products ?? []) expect(product.trim().length, `${template.key} product`).toBeGreaterThan(0);
+        expect((dept.products ?? []).length, `${template.key} products`).toBeLessThanOrEqual(10);
+        expect(dept.staff.length, `${template.key}: ${dept.template} staff`).toBeGreaterThan(0);
+        for (const line of dept.staff) {
+          expect(line.role, `${template.key}: ${dept.template}`).toMatch(/^[A-Z]{3}-[A-Z0-9]+$/);
+          expect(line.count, `${template.key}: ${line.role}`).toBeGreaterThanOrEqual(1);
+          expect(line.count, `${template.key}: ${line.role}`).toBeLessThanOrEqual(30);
+        }
+      }
+      expect(operations, `${template.key} operations`).toBeLessThanOrEqual(1);
+    }
   });
 });
 

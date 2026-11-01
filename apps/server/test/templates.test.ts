@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { MAX_INSTRUCTIONS, TEMPLATE_KEYS } from '@hornhoof/protocol';
+import { COMPANY_TEMPLATES, MAX_INSTRUCTIONS, TEMPLATE_KEYS } from '@hornhoof/protocol';
 import { describe, expect, it } from 'vitest';
 import { ORCHESTRATOR_SKILLS, orchestratorSteady } from '../src/modules/agents/instructions.js';
 import { NOTEBOOK_MAX, NOTES_MAX } from '../src/modules/notebook/book.js';
@@ -56,6 +56,20 @@ describe('templates', () => {
       expect(roster.filter(r => r.kind === 'head'), key).toHaveLength(1);
       expect(roster[0]!.kind, key).toBe('head');
       for (const r of roster) expect(r.department).toBe(key);
+    }
+  });
+
+  it('staffs every company template with roles that exist, one head per department', () => {
+    for (const template of COMPANY_TEMPLATES) {
+      for (const dept of template.departments) {
+        const heads = dept.staff.filter(line => templates.roles.get(line.role)?.kind === 'head');
+        expect(heads.length, `${template.key}: ${dept.template}`).toBe(1);
+        for (const line of dept.staff) {
+          const role = templates.roles.get(line.role);
+          expect(role, `${template.key}: ${line.role}`).toBeDefined();
+          expect(role!.department, `${template.key}: ${line.role} in ${dept.template}`).toBe(dept.template);
+        }
+      }
     }
   });
 
