@@ -219,6 +219,7 @@ program_name() {
     codex) echo "Codex" ;;
     kimi) echo "Kimi" ;;
     glm) echo "GLM Coding Plan" ;;
+    antigravity) echo "Antigravity" ;;
     *) echo "$1" ;;
   esac
 }
@@ -297,7 +298,7 @@ join_machine() {
   esac
   while read -r id provider key; do
     case "$id$provider$key" in *[!A-Za-z0-9_-]*) fail "Hornhoof sent a line this installer cannot read. Update Hornhoof and get a new command." ;; esac
-    case "$provider" in claude | codex | kimi | glm) ;; *) continue ;; esac
+    case "$provider" in claude | codex | kimi | glm | antigravity) ;; *) continue ;; esac
     [ -n "$id" ] && [ -n "$key" ] && JOINED="$JOINED $id:$provider:$key"
   done < "$body"
   rm -f "$body"

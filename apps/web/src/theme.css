@@ -151,9 +151,10 @@ button, input, select { font: inherit; color: inherit; }
 .choice input { margin: 0; accent-color: var(--cyan-ink); }
 .choice b { font-weight: 600; }
 .choice span { grid-column: 2; font-size: 13px; color: var(--muted); }
-.segments { display: flex; }
+/* Five plans side by side, in rows on a narrow screen. */
+.segments { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); }
 .segments label {
-  flex: 1; display: flex; align-items: center; justify-content: center; min-height: 38px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; min-height: 38px; cursor: pointer;
   border: 1px solid var(--line2); margin-left: -1px; background: var(--surface2); font-weight: 500;
 }
 .segments label:first-of-type { margin-left: 0; }

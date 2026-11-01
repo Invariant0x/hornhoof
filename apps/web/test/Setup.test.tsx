@@ -118,6 +118,18 @@ describe('Setup', () => {
     expect(posted(calls)[0]!.body).toMatchObject({ orchestrator: { mode: 'personal', provider: 'glm' } });
   });
 
+  it('offers a Google AI plan, which Antigravity runs, as a personal plan for the orchestrator', async () => {
+    const calls = mockApi({ 'POST /api/setup': [201, { ...CREATED, command: 'curl x' }] });
+    const user = userEvent.setup();
+    render(<Setup onDone={() => {}} />);
+    await fillFirstTwoSteps(user);
+    await user.click(screen.getByRole('radio', { name: 'My subscription' }));
+    expect(screen.getByRole('radio', { name: 'My subscription' })).toHaveAccessibleDescription(/Google AI plan/);
+    await user.click(screen.getByRole('radio', { name: 'Antigravity' }));
+    await user.click(screen.getByRole('button', { name: 'Finish setup' }));
+    expect(calls[0]!.body).toMatchObject({ orchestrator: { mode: 'personal', provider: 'antigravity' } });
+  });
+
   it('takes the setup code from the link without asking for it', () => {
     render(<Setup onDone={() => {}} />);
     expect(screen.queryByLabelText('Setup code')).not.toBeInTheDocument();

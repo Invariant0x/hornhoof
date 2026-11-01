@@ -46,6 +46,14 @@ describe('POST /api/subscriptions/connect', () => {
     expect(code!.subscriptionIds.sort()).toEqual(body.subscriptions.map((s: { id: string }) => s.id).sort());
   });
 
+  it('connects a Google AI plan, which Antigravity CLI runs, with the other four in one command', async () => {
+    const { app } = await testApp();
+    const ceo = await setUpCompany(app);
+    const res = await connect(app, ceo, ['claude', 'codex', 'kimi', 'glm', 'antigravity']);
+    expect(res.statusCode).toBe(201);
+    expect(res.json().subscriptions.map((s: { label: string }) => s.label)).toEqual(['Claude', 'Codex', 'Kimi', 'GLM', 'Antigravity']);
+  });
+
   it('places a person plan in their department and follows them when they move', async () => {
     const { app, ceo, maria, marketing, development, backend } = await companyWithMaria();
     const res = await connect(app, maria, ['claude']);

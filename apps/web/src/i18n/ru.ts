@@ -42,7 +42,7 @@ export const ru: Messages = {
     howOrchestratorRuns: 'На чем работает оркестратор',
     modes: {
       api_key: { label: 'API-ключ', hint: 'Вставьте ключ компании. Он хранится в зашифрованном виде и больше не показывается.' },
-      personal: { label: 'Моя подписка', hint: 'Ваша подписка Claude, Codex, Kimi или GLM. Она работает на вашей машине через небольшую ноду в Docker.' },
+      personal: { label: 'Моя подписка', hint: 'Ваша подписка Claude, Codex, Kimi, GLM или Google AI. Она работает на вашей машине через небольшую ноду в Docker.' },
       later: { label: 'Позже', hint: 'Оркестратор подождет, пока вы не подключите подписку.' },
     },
     provider: 'Провайдер',
@@ -162,7 +162,7 @@ export const ru: Messages = {
     connect: 'Подключить подписку',
     connectHeading: 'Подключите свои подписки',
     connectIntro: 'Отметьте тарифы, которые у вас есть. Одна команда настроит их все на одной машине.',
-    plans: { claude: 'Тариф Pro или Max', codex: 'Тариф ChatGPT', kimi: 'Тариф Kimi Code', glm: 'Ключ Coding Plan с z.ai' },
+    plans: { claude: 'Тариф Pro или Max', codex: 'Тариф ChatGPT', kimi: 'Тариф Kimi Code', glm: 'Ключ Coding Plan с z.ai', antigravity: 'Тариф Google AI Pro или Ultra' },
     getCommand: 'Получить команду',
     runThis: 'Выполните это в терминале на машине, где будут работать агенты. Команда при необходимости поставит Docker, запустит ноду для каждого тарифа и откроет ссылки для входа.',
     trust: 'Агенты будут работать на этой машине с вашей подпиской. Люди с доступом к этому Hornhoof смогут давать им задачи.',

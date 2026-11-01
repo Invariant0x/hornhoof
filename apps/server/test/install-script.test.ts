@@ -201,6 +201,15 @@ describe('install.sh', () => {
     expect(existsSync(join(r.dir, 'home', '.hornhoof', 'machine'))).toBe(true);
   });
 
+  it('sets up a node for a Google AI plan and signs in to Antigravity on it', () => {
+    const r = install({ env: { STUB_JOIN_BODY: `${SUB_A} antigravity node-key-aaaaaaaaaaaaaaaa\\n` } });
+    expect(r.code).toBe(0);
+    expect(r.calls.some(c => c.startsWith(`docker run -d --name hornhoof-antigravity-${SUB_A.slice(0, 8)}`))).toBe(true);
+    expect(r.calls).toContain(`stdin ${SERVER} ${SUB_A} antigravity node-key-aaaaaaaaaaaaaaaa`);
+    expect(r.out).toContain('Signing in to Antigravity on');
+    expect(r.out).toMatch(/Antigravity.*ready/);
+  });
+
   it('keeps the same machine id on the next run', () => {
     const home = join(mkdtempSync(join(tmpdir(), 'hh-machine-')), '.hornhoof');
     const machineOf = (r: ReturnType<typeof install>) => r.calls.find(c => c.startsWith('curl-data'))!.match(/"machineId":"([0-9a-f]{32})"/)![1];

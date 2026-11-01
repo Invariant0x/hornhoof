@@ -12,7 +12,7 @@ export const PROGRAM_NAMES: Record<ProviderId, string> = {
 };
 
 /* Plans a person connects on their own machine. */
-export const PLAN_PROVIDERS = ['claude', 'codex', 'kimi', 'glm'] as const;
+export const PLAN_PROVIDERS = ['claude', 'codex', 'kimi', 'glm', 'antigravity'] as const;
 export type PlanProvider = (typeof PLAN_PROVIDERS)[number];
 
 /* The level the Default runs at, when Hornhoof knows it: Kimi at the most its model takes, Claude Code's Default model,

@@ -192,6 +192,16 @@ describe('POST /api/setup', () => {
     expect(orchestrator).toMatchObject({ subscriptionId: sub!.id, model: 'glm-5.3' });
   });
 
+  it('accepts a Google AI plan, which Antigravity CLI runs, as the personal orchestrator', async () => {
+    const { app, db } = await testApp();
+    const res = await app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, orchestrator: { mode: 'personal', provider: 'antigravity' } } });
+    expect(res.statusCode).toBe(201);
+    const [sub] = await db.select().from(subscriptions);
+    expect(sub).toMatchObject({ kind: 'personal', provider: 'antigravity', label: 'Antigravity', status: 'waiting_machine' });
+    const [orchestrator] = await db.select().from(agents);
+    expect(orchestrator).toMatchObject({ subscriptionId: sub!.id });
+  });
+
   it('lets the orchestrator wait for a subscription', async () => {
     const { app, db } = await testApp();
     const res = await app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, orchestrator: { mode: 'later' } } });

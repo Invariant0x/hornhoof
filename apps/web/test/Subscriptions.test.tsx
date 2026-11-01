@@ -157,6 +157,18 @@ describe('Subscriptions', () => {
     expect(screen.getByText(TRUST)).toBeInTheDocument();
   });
 
+  it('connects a Google AI plan, which Antigravity runs', async () => {
+    const calls = lists({ 'POST /api/subscriptions/connect': [201, { subscriptions: [], command: COMMAND }] });
+    const user = userEvent.setup();
+    render(<Subscriptions me={ME} />);
+    await user.click(await screen.findByRole('button', { name: 'Connect a subscription' }));
+    const google = screen.getByRole('checkbox', { name: 'Antigravity' });
+    expect(google).toHaveAccessibleDescription('Google AI Pro or Ultra plan');
+    await user.click(google);
+    await user.click(screen.getByRole('button', { name: 'Get the command' }));
+    expect(calls.find(c => c.method === 'POST')).toEqual({ method: 'POST', path: '/api/subscriptions/connect', body: { providers: ['antigravity'] } });
+  });
+
   it('runs a test and shows the answer', async () => {
     const job = { id: 'j1', status: 'queued', result: null, tail: '', error: null, machine: 'ivan-mbp', createdAt: '2026-10-29T10:00:00.000Z', startedAt: null, finishedAt: null };
     let polls = 0;

@@ -160,7 +160,7 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
   );
   tool(
     'connect_plans',
-    'Connects the CEO\'s own plans (claude, codex, kimi, glm): returns the command the CEO runs on their machine.',
+    'Connects the CEO\'s own plans (claude, codex, kimi, glm, antigravity for Google AI Pro or Ultra): returns the command the CEO runs on their machine.',
     ConnectBody.shape,
     body => ({ method: 'POST', url: '/api/subscriptions/connect', payload: body }),
   );

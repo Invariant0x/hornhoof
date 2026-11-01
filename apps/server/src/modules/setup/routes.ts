@@ -14,7 +14,7 @@ import { installCommand } from '../nodes/command.js';
 import { isSetupCode, setupNeeded } from './code.js';
 
 const DEFAULT_MODEL = 'claude-opus-5-5';
-const PLAN_LABELS = { claude: 'Claude', codex: 'Codex', kimi: 'Kimi', glm: 'GLM' } as const;
+const PLAN_LABELS = { claude: 'Claude', codex: 'Codex', kimi: 'Kimi', glm: 'GLM', antigravity: 'Antigravity' } as const;
 /* Claude Code passes it to Z.ai's endpoint as it is. */
 const GLM_MODEL = 'glm-5.3';
 
@@ -28,7 +28,7 @@ const SetupBody = z.object({
   orchestrator: z.discriminatedUnion('mode', [
     z.object({ mode: z.literal('later') }),
     z.object({ mode: z.literal('api_key'), provider: z.enum(['anthropic_api', 'openai_api']), apiKey: z.string().trim().min(8) }),
-    z.object({ mode: z.literal('personal'), provider: z.enum(['claude', 'codex', 'kimi', 'glm']) }),
+    z.object({ mode: z.literal('personal'), provider: z.enum(['claude', 'codex', 'kimi', 'glm', 'antigravity']) }),
   ]),
   /* The public link at hornhoof.org the company opens at, with a name or a random one; left out, none. */
   link: LinkBody.optional(),

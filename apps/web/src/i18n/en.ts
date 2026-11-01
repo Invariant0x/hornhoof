@@ -52,7 +52,7 @@ export const en = {
     howOrchestratorRuns: 'How the orchestrator runs',
     modes: {
       api_key: { label: 'API key', hint: 'Paste a company key. It is stored encrypted and never shown again.' },
-      personal: { label: 'My subscription', hint: 'Your own Claude, Codex, Kimi or GLM plan. It runs on your machine through a small Docker node.' },
+      personal: { label: 'My subscription', hint: 'Your own Claude, Codex, Kimi, GLM or Google AI plan. It runs on your machine through a small Docker node.' },
       later: { label: 'Later', hint: 'The orchestrator waits until you connect a subscription.' },
     },
     provider: 'Provider',
@@ -172,7 +172,7 @@ export const en = {
     connect: 'Connect a subscription',
     connectHeading: 'Connect your subscriptions',
     connectIntro: 'Tick the plans you have. One command sets up all of them on one machine.',
-    plans: { claude: 'Pro or Max plan', codex: 'ChatGPT plan', kimi: 'Kimi Code plan', glm: 'Coding Plan key from z.ai' },
+    plans: { claude: 'Pro or Max plan', codex: 'ChatGPT plan', kimi: 'Kimi Code plan', glm: 'Coding Plan key from z.ai', antigravity: 'Google AI Pro or Ultra plan' },
     getCommand: 'Get the command',
     runThis: 'Run this in a terminal on the machine the agents should use. It installs Docker if needed, starts a node for each plan and opens the sign-in links.',
     trust: 'Agents will run on this machine with your subscription. People with access to this Hornhoof can give them work.',

@@ -36,14 +36,14 @@ export const SubscriptionBody = z.object({
   target: Target,
 });
 
-const PLANS = { claude: 'Claude', codex: 'Codex', kimi: 'Kimi', glm: 'GLM' } as const;
+const PLANS = { claude: 'Claude', codex: 'Codex', kimi: 'Kimi', glm: 'GLM', antigravity: 'Antigravity' } as const;
 type Plan = keyof typeof PLANS;
 
 export const ConnectBody = z.object({
   providers: z
     .array(z.enum(Object.keys(PLANS) as [Plan, ...Plan[]]))
     .min(1)
-    .max(4)
+    .max(Object.keys(PLANS).length)
     .refine(list => new Set(list).size === list.length, 'Each subscription once.'),
 });
 

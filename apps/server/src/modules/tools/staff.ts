@@ -45,7 +45,7 @@ export type Serving = { id: string; provider: Provider; kind: 'personal' | 'api_
 type Dept = typeof departments.$inferSelect;
 
 /* Providers whose programs run a deep model; Kimi and GLM plans serve standard and fast roles. */
-const DEEP: readonly Provider[] = ['claude', 'codex', 'anthropic_api', 'openai_api'];
+const DEEP: readonly Provider[] = ['claude', 'codex', 'antigravity', 'anthropic_api', 'openai_api'];
 export const runsTier = (provider: Provider, tier: Role['tier']) => tier !== 'deep' || DEEP.includes(provider);
 
 /* Where an employee of the department works: its product inside it, or the department itself. */

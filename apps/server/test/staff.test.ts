@@ -6,6 +6,7 @@ import { and, asc, eq, isNull } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
+import { runsTier } from '../src/modules/tools/staff.js';
 import { agentChanges, agentEvents, agents, companies, departments, jobs, people, proposals, subscriptions } from '../src/db/schema.js';
 import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
@@ -69,6 +70,12 @@ const failed = (res: unknown) => Boolean((res as { isError?: boolean }).isError)
 const hire = (app: FastifyInstance, token: string, departmentId: string, body: object) => app.inject({ method: 'POST', url: `/api/departments/${departmentId}/staff`, payload: body, ...as(token) });
 
 describe('staffing', () => {
+  it('lets the plans of programs that run a deep model serve deep roles, and Kimi and GLM the others', () => {
+    for (const provider of ['claude', 'codex', 'antigravity', 'anthropic_api', 'openai_api'] as const) expect(runsTier(provider, 'deep')).toBe(true);
+    for (const provider of ['kimi', 'glm'] as const) expect(runsTier(provider, 'deep')).toBe(false);
+    expect(runsTier('kimi', 'standard')).toBe(true);
+  });
+
   it('lists what a department can be staffed with', async () => {
     const c = await company();
     const client = await tools(c);
