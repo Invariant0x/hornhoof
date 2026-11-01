@@ -153,6 +153,39 @@ describe('a plan at its limit', () => {
   });
 });
 
+describe('a plan at its limit, with others of the role on other plans', () => {
+  /* Rex is a backend engineer too, on a Codex plan; Bruno's plan is at its limit for an hour. */
+  async function withPeer(rexLimited = false) {
+    const c = await company();
+    const resetsAt = new Date(Date.now() + 3_600_000).toISOString();
+    const rejected = { status: 'rejected' as const, windows: [{ name: 'five_hour', utilization: 1, resetsAt }] };
+    const [codex] = await c.db.insert(subscriptions).values({ companyId: c.dev.companyId, provider: 'codex', kind: 'personal', label: 'Codex', ownerPersonId: c.ceo.id, status: 'ready', limits: rexLimited ? rejected : null }).returning();
+    const [rex] = await c.db.insert(agents).values({ companyId: c.dev.companyId, kind: 'worker', name: 'Rex', roleKey: 'DEV-BE', departmentId: c.dev.id, model: '', subscriptionId: codex!.id }).returning();
+    const task = await c.memberTask();
+    await wakeAll(c.ctx, [{ agentId: c.bruno.id, taskId: task.id, why: 'assigned' }]);
+    await c.db.update(subscriptions).set({ limits: rejected }).where(eq(subscriptions.id, c.sub.id));
+    await c.finish(c.bruno.id, async () => {}, 'failed');
+    return { ...c, rex: rex!, task };
+  }
+
+  it('gives the work to one of them who is on, with one note in the task', async () => {
+    const { db, bruno, rex, task, turnsOf } = await withPeer();
+    expect((await db.select().from(tasks).where(eq(tasks.id, task.id)))[0]).toMatchObject({ executorAgentId: rex.id, assigneeAgentId: rex.id, status: 'open', silent: 0 });
+    const notes = await db.select({ kind: taskEvents.kind, text: taskEvents.text }).from(taskEvents).where(and(eq(taskEvents.taskId, task.id), inArray(taskEvents.kind, ['assigned', 'continued', 'reminded'])));
+    expect(notes).toHaveLength(1);
+    expect(notes[0]!.kind).toBe('assigned');
+    expect(notes[0]!.text).toMatch(/Bruno's plan is at its limit until .*, so Rex takes the work over on Codex\./);
+    expect((await turnsOf(rex.id)).map(j => [j.taskId, j.status])).toEqual([[task.id, 'queued']]);
+    expect((await turnsOf(bruno.id)).filter(j => j.status === 'queued')).toEqual([]);
+  });
+
+  it('waits for the reset when their plans are at their limits too', async () => {
+    const { db, bruno, task, turnsOf } = await withPeer(true);
+    expect((await db.select().from(tasks).where(eq(tasks.id, task.id)))[0]).toMatchObject({ executorAgentId: bruno.id });
+    expect((await turnsOf(bruno.id)).filter(j => j.status === 'queued')).toHaveLength(1);
+  });
+});
+
 describe('the turns a task move needs', () => {
   const later = () => new Date(Date.now() + 60_000);
 

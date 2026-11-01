@@ -834,6 +834,24 @@ export async function silentTurn(ctx: Live, agentId: string, task: Task): Promis
   return askAboutStill(ctx, agentId, task, silent, `Ended ${silent} turns in a row on #${task.number} without moving it. Tell it how to go on, or cancel the task.`);
 }
 
+/* Hornhoof gives member work its executor has not handed in to another executor, as when the executor's plan is at its
+   limit: one note in the task says why, and the turns that waited for the one who did it are over. */
+export async function handOver(ctx: Live, task: Task, to: string, text: string): Promise<Moved> {
+  const from = task.executorAgentId!;
+  const wakes: Wake[] = [{ agentId: to, taskId: task.id, why: 'assigned' }];
+  const row = await move(
+    ctx,
+    task,
+    { executorAgentId: to, assigneeAgentId: to, status: 'open', silent: 0 },
+    { kind: 'assigned', actor: { agentId: from }, text, data: { assignee: to } },
+    async tx => {
+      await tx.update(jobs).set({ status: 'failed', error: 'handed_on', finishedAt: new Date() }).where(and(eq(jobs.agentId, from), eq(jobs.taskId, task.id), eq(jobs.status, 'queued')));
+    },
+    wakes,
+  );
+  return { task: row, wakes };
+}
+
 /* The agent's turns on the task keep breaking as soon as they start: Hornhoof stops waking it there, and whoever gave the
    task out hears why, or a person when nobody did or a gate's reviewer broke. */
 export async function brokeDown(ctx: Live, agentId: string, task: Task, text: string): Promise<Moved> {

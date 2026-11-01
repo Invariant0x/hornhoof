@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, max, ne, notInArray, or, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, max, ne, notInArray, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { loggable } from '../../errors.js';
 import { agentChanges, agentEvents, agents, jobs, requests, subscriptions, taskEvents, tasks } from '../../db/schema.js';
@@ -7,7 +7,7 @@ import { sayLive } from '../conversation/live.js';
 import { quote } from '../conversation/prompt.js';
 import { appendEvent, publishWorking } from '../events/store.js';
 import { identityOf, type NodeIdentity } from '../nodes/hub.js';
-import { answerDirectly, brokeDown, CLOSED, GATE_ROUNDS, leaveWork, NOT_A_MOVE, openAfter, published, regateWaiting, silentTurn, taskSpot, wentOn, type Actor, type Task, type Wake, type WakeWhy } from './engine.js';
+import { answerDirectly, brokeDown, CLOSED, GATE_ROUNDS, handOver, leaveWork, NOT_A_MOVE, openAfter, published, regateWaiting, silentTurn, taskSpot, wentOn, type Actor, type Task, type Wake, type WakeWhy } from './engine.js';
 import { wakeQueued, wakesLeft } from './outbox.js';
 import { settle, tell } from './turns.js';
 
@@ -365,6 +365,25 @@ function crashNote(job: Ended & { agentName: string }, task: Task): string {
   return `${QUICK_CRASHES} turns of ${job.agentName} in a row on #${task.number} broke within ${QUICK_CRASH_MS / 60_000} minutes of starting, so Hornhoof stopped waking it there. The last one ended with ${job.error ?? 'an error'}${said ? `:\n\n${said}` : '.'}`;
 }
 
+const PROVIDER_NAMES: Record<string, string> = { claude: 'Claude', codex: 'Codex', kimi: 'Kimi', glm: 'GLM', anthropic_api: 'an Anthropic key', openai_api: 'an OpenAI key' };
+
+/* Who takes member work over while its executor's plan is at its limit: another employee of its role and department who
+   is on, for the task's product or for none, on a plan of another provider that is not at its limit, and not one of the
+   task's gates. Only an employee's work moves: a head and the orchestrator keep theirs and wait for the reset. */
+async function standIn(ctx: Ctx, agentId: string, task: Task): Promise<{ id: string; name: string; provider: string } | null> {
+  if (task.executorAgentId !== agentId || task.assigneeAgentId !== agentId || task.stage !== 0 || !['open', 'working'].includes(task.status)) return null;
+  const [me] = await ctx.db.select({ agent: agents, provider: subscriptions.provider }).from(agents).innerJoin(subscriptions, eq(subscriptions.id, agents.subscriptionId)).where(eq(agents.id, agentId));
+  if (!me || me.agent.kind !== 'worker' || !me.agent.roleKey || !me.agent.departmentId) return null;
+  const peers = await ctx.db
+    .select({ id: agents.id, name: agents.name, productId: agents.productId, provider: subscriptions.provider, limits: subscriptions.limits })
+    .from(agents)
+    .innerJoin(subscriptions, and(eq(subscriptions.id, agents.subscriptionId), isNull(subscriptions.removedAt)))
+    .where(and(eq(agents.departmentId, me.agent.departmentId), eq(agents.roleKey, me.agent.roleKey), eq(agents.kind, 'worker'), isNull(agents.removedAt), isNull(agents.switchedOffAt), ne(agents.id, agentId), ne(subscriptions.provider, me.provider)))
+    .orderBy(asc(agents.createdAt));
+  const fit = peers.find(p => (!p.productId || p.productId === task.productId) && !task.gates.includes(p.id) && !limitUntil(p.limits));
+  return fit ? { id: fit.id, name: fit.name, provider: fit.provider } : null;
+}
+
 async function checkHeld(ctx: Ctx, job: typeof jobs.$inferSelect & { agentId: string; startedAt: Date }, task: Task): Promise<void> {
   const { db } = ctx;
   const { agentId } = job;
@@ -388,9 +407,22 @@ async function checkHeld(ctx: Ctx, job: typeof jobs.$inferSelect & { agentId: st
     if (task.silent) await db.update(tasks).set({ silent: 0 }).where(eq(tasks.id, task.id));
     return;
   }
-  /* A turn that ended at the plan's limit did not stand still: the agent goes on once the limit starts over. */
+  /* A turn that ended at the plan's limit did not stand still: another of its role on another plan takes the work over,
+     or the agent goes on once the limit starts over. */
   const [sub] = job.subscriptionId ? await db.select({ limits: subscriptions.limits }).from(subscriptions).where(eq(subscriptions.id, job.subscriptionId)) : [];
-  if (limitUntil(sub?.limits ?? null)) return wakeAll(ctx, [{ agentId, taskId: task.id, why: 'go_on' }]);
+  const until = limitUntil(sub?.limits ?? null);
+  if (until) {
+    const other = await standIn(ctx, agentId, task);
+    const [me] = other ? await db.select({ name: agents.name }).from(agents).where(eq(agents.id, agentId)) : [];
+    const at = `${until.slice(0, 16).replace('T', ' ')} UTC`;
+    const over = other
+      ? await handOver(ctx, task, other.id, `${me?.name ?? 'Its executor'}'s plan is at its limit until ${at}, so ${other.name} takes the work over on ${PROVIDER_NAMES[other.provider] ?? other.provider}.`).catch((err: { reason?: string }) => {
+          if (err.reason === 'task_changed') return null;
+          throw err;
+        })
+      : null;
+    return wakeAll(ctx, over ? over.wakes : [{ agentId, taskId: task.id, why: 'go_on' }]);
+  }
   /* A turn that broke, worked until its time ran out, or said in the task how far it got did not stand still. */
   const [told] = await db
     .select({ n: count() })
