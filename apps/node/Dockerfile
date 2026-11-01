@@ -2,7 +2,7 @@
 # The node: runs the agent programs (Claude Code, Codex, Kimi Code) for one subscription, or for the company's API keys with --builtin.
 # Every step that runs Node runs on the builder's own platform: what it makes is plain JavaScript or a download for the
 # target, and Node under the emulation that builds the other platform crashes. The image itself only copies and runs apt.
-FROM --platform=$BUILDPLATFORM node:22-bookworm-slim AS build
+FROM --platform=$BUILDPLATFORM node:22.23.4-bookworm-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da AS build
 WORKDIR /app
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY packages/protocol/package.json packages/protocol/
@@ -15,7 +15,7 @@ COPY apps/node apps/node
 RUN npm run build -w @hornhoof/protocol && npm run build -w @hornhoof/node
 
 # The node's production modules: no native code among them.
-FROM --platform=$BUILDPLATFORM node:22-bookworm-slim AS deps
+FROM --platform=$BUILDPLATFORM node:22.23.4-bookworm-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY packages/protocol/package.json packages/protocol/
@@ -26,7 +26,7 @@ RUN npm ci --omit=dev --workspace apps/node --workspace packages/protocol && npm
 
 # A browser for agents: Playwright with Chromium's headless shell for the target, and the Debian packages it needs.
 # Playwright picks the download by the machine it runs on; the override names the target instead.
-FROM --platform=$BUILDPLATFORM node:22-bookworm-slim AS browser
+FROM --platform=$BUILDPLATFORM node:22.23.4-bookworm-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da AS browser
 ARG TARGETARCH
 ARG PLAYWRIGHT_VERSION=1.64.1
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
@@ -41,7 +41,7 @@ RUN target="debian12-$(case "$TARGETARCH" in amd64) echo x64 ;; *) echo "$TARGET
 # its virtualenv next to it, as its launcher expects; mutator also gets crapper, whose names it uses. With them, ECC's
 # rules for each language (MIT), without its common layer and hooks, which assume ECC's own agents. All at pinned commits.
 # The grammars the tools parse with come along, so they run without fetching anything.
-FROM node:22-bookworm-slim AS quality
+FROM node:22.23.4-bookworm-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da AS quality
 ENV TREE_SITTER_LANGUAGE_PACK_CACHE_DIR=/opt/hornhoof/grammars
 ARG CRAPPER_COMMIT=6fd92c4c9bcc56efb64a2f8743d5a2993bcfd42d
 ARG DRYER_COMMIT=66ff6d21a42c04afcad89c78a80066176d1294b0
@@ -67,7 +67,7 @@ RUN set -e; ub=/opt/hornhoof/ub; mkdir -p $ub /opt/hornhoof/bin /opt/hornhoof/ru
   printf 'Rules for each language from affaan-m/ECC at %s, under its MIT license (LICENSE).\nHornhoof left out its common layer and hooks, which assume ECC agents, and its pointers to ECC skills.\n' $ECC_COMMIT > README.md; \
   chmod -R a+rX /opt/hornhoof
 
-FROM node:22-bookworm-slim
+FROM node:22.23.4-bookworm-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da
 COPY --from=browser /opt/browser-packages /opt/browser-packages
 # procps gives agents ps and free, and python-is-python3 the python that scripts call; agents looked for both.
 RUN apt-get update \

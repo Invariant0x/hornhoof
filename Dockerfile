@@ -1,7 +1,8 @@
 # syntax=docker/dockerfile:1
 # Every step that runs Node runs on the builder's own platform: what it makes is plain JavaScript, and Node under the
-# emulation that builds the other platform crashes. The image itself only copies.
-FROM --platform=$BUILDPLATFORM node:22-alpine AS build
+# emulation that builds the other platform crashes. The image itself only copies. Base images are pinned by digest, so a
+# build starts from the images it was tested with; the tag says which release that is.
+FROM --platform=$BUILDPLATFORM node:22.23.4-alpine@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914 AS build
 WORKDIR /app
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY packages/protocol/package.json packages/protocol/
@@ -15,7 +16,7 @@ COPY apps/web apps/web
 RUN npm run build -w @hornhoof/protocol && npm run build -w @hornhoof/server -w @hornhoof/web
 
 # The server's production modules: no native code among them, so they install on the builder's platform as well.
-FROM --platform=$BUILDPLATFORM node:22-alpine AS deps
+FROM --platform=$BUILDPLATFORM node:22.23.4-alpine@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914 AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY packages/protocol/package.json packages/protocol/
@@ -24,7 +25,7 @@ COPY apps/node/package.json apps/node/
 COPY apps/web/package.json apps/web/
 RUN npm ci --omit=dev --workspace apps/server --workspace packages/protocol && npm cache clean --force && mkdir /control
 
-FROM node:22-alpine
+FROM node:22.23.4-alpine@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914
 ENV NODE_ENV=production PORT=8080
 WORKDIR /app
 COPY --from=deps /app /app
