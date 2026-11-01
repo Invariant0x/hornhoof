@@ -7,18 +7,18 @@ sources: [obra/superpowers skills/subagent-driven-development/SKILL.md, affaan-m
 ---
 **Gates by size and risk.** The head names a task's gates when it gives it out:
 
-- **Research, reports, plans and docs get no gates.** The head reads them when they come back.
-- **Normal code gets one review**, by the code reviewer.
-- **Security** is a gate only when the change touches access, sign-in, secrets, permissions or running untrusted input.
-- **Tests or QA** is a gate only for behaviour people use: a screen, a command, an interface other programs call.
-- **Red team** only on a preview of a release people will use, when the head asks for it.
+- **Research, reports, plans and docs get no gates**, nor does the architect's design note. The head reads them when they come back.
+- **Code gets one review stage**: one reviewer per provider of the review role, the least busy of each, checks the same change at once, its code, its tests and obvious security problems in one pass.
+- **Security**, when it is switched on, is a gate only when the change touches access, sign-in, secrets or permissions.
+- **Tests**, when a test engineer is on, only for behaviour people use. **Red team**, when on, only on risky or public-facing changes, never small ones.
+- **Acceptance and QA** run once per turn, on the turn's branch, not on every task.
 
 The turn ends with one final check, then the release with the CEO's approval of the exact commit.
 
 - **Checks in two sizes.** On a task, the executor and every gate run only what the change touches: the tests of the changed parts and the new tests, the formatter, the linter and the type checker on the changed files. Nobody needs anyone's permission to run them. The whole test suite runs once per turn, however many tasks the turn has, in the final check.
-- **The final check.** Each executor merges its branch into the turn's branch once its gates pass. When every member task of the turn is done, the head gives the DevOps engineer one task: run the whole test suite with the tests the turn added, the build and the end-to-end checks once on the turn's branch. The head gives each failure back as a task to the member whose change broke it, who reruns the tests that failed and those of the fix.
+- **The final check.** Each executor merges its branch into the turn's branch once its gates pass. When every member task of the turn is done, the head gives one task to the DevOps engineer, or to a developer when there is none: run the whole test suite with the tests the turn added, the build and the end-to-end checks once on the turn's branch. The QA lead, when there is one, accepts the turn there. Each failure goes back as a task to the member whose change broke it.
 
 - **Never the author.** Whoever made a piece of work does not pass its gate.
-- **Another provider when you have one.** The reviewer, security and QA run on a different provider than the implementer (Claude writes, Codex reviews, or the other way round). With only one provider, use a fresh session on another tier and say "cross-check degraded" in your status.
-- **Only what blocks sends work back** to its author (dev-review-verdict, hh-fix-loop), every blocking finding in one verdict; the rest are notes under a pass, which the author may fix in passing. **A second round checks only the fixes.** The author asks the checker directly when a finding is unclear; the head is not between them.
-- **Do not double the builders.** Two implementers work on separate pieces, not on the same task.
+- **Other providers check.** Reviewers run on other providers than the developer when you have them. With only one provider, use a fresh session on another tier and say "cross-check degraded" in your status.
+- **Only what blocks sends work back** to its author (dev-review-verdict, hh-fix-loop), every blocking finding in one verdict; the rest are notes under a pass, which the author may fix in passing. **A second round checks only the fixes**, by the reviewers who sent it back, each for its own findings; one that passed is not asked again.
+- **Do not double the builders.** Two developers work on separate features, not on the same task.

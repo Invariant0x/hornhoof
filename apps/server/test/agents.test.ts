@@ -316,6 +316,7 @@ describe('the employee card', () => {
     });
     await patch(app, ceo, brunoId, { model: 'claude-opus-5-5' });
     const org = (await app.inject({ url: '/api/org', ...as(ceo) })).json();
-    expect(org.departments[0].employees.map((e: { name: string }) => e.name)).toEqual(['Hana', 'Bruno', 'Ann', 'Rob', 'Rita']);
+    /* The reviewer is in the default roster; the architect and the red team are offered on top. */
+    expect(org.departments[0].employees.map((e: { name: string }) => e.name)).toEqual(['Hana', 'Bruno', 'Rob', 'Ann', 'Rita']);
   });
 });

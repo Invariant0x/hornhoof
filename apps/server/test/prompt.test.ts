@@ -9,11 +9,11 @@ describe('orchestrator instructions', () => {
   });
 
   it('staffs a department through its options and a card, by the staffing guideline', () => {
-    for (const words of ['staffing_options', 'propose_staff', 'the default roster first', 'a different provider than the implementers', 'one per product', 'nothing secret goes into names or notes']) {
+    for (const words of ['staffing_options', 'propose_staff', 'the default roster first', 'a pool of developers', 'another provider than most developers', 'one security reviewer', 'one per product', 'nothing secret goes into names or notes']) {
       expect(ORCHESTRATOR_INSTRUCTIONS).toContain(words);
     }
-    expect(ORCHESTRATOR_INSTRUCTIONS).toContain('so one limit does not stop both the builders and those who could rearrange the work');
-    expect(ORCHESTRATOR_INSTRUCTIONS).not.toContain('subscriptions the builders do not use');
+    expect(ORCHESTRATOR_INSTRUCTIONS).toContain("so one subscription's limit does not stop both");
+    expect(ORCHESTRATOR_INSTRUCTIONS).not.toMatch(/heads on another provider/);
     expect(ORCHESTRATOR_INSTRUCTIONS).not.toContain('Hornhoof cannot put people or agents into departments yet');
   });
 

@@ -87,7 +87,7 @@ describe('templates', () => {
         .filter(r => r.gate !== null)
         .sort((a, b) => a.gate! - b.gate!)
         .map(r => r.id);
-    expect(gates('development')).toEqual(['DEV-REV', 'DEV-TEST', 'DEV-SEC', 'DEV-RED', 'DEV-QA']);
+    expect(gates('development')).toEqual(['DEV-REV', 'DEV-TEST', 'DEV-SEC', 'DEV-RED']);
     expect(gates('design')).toEqual(['DSN-QA']);
     expect(gates('finance')).toEqual(['FIN-AUDIT']);
     for (const r of roles) if (r.kind === 'head') expect(r.gate, r.id).toBeNull();
@@ -146,10 +146,10 @@ describe('templates', () => {
   it('has the full development roster', () => {
     const dev = templates.roster('development');
     const ids = dev.filter(r => r.inDefault).map(r => r.id);
-    expect(ids).toEqual(['DEV-HEAD', 'DEV-ARCH', 'DEV-BE', 'DEV-FE', 'DEV-REV', 'DEV-TEST', 'DEV-OPS', 'DEV-SEC', 'DEV-RED', 'DEV-QA']);
-    expect(dev.filter(r => !r.inDefault).map(r => r.id)).toEqual(['DEV-DOCS', 'DEV-PERF']);
+    expect(ids).toEqual(['DEV-HEAD', 'DEV-ENG', 'DEV-REV', 'DEV-SEC']);
+    expect(dev.filter(r => !r.inDefault).map(r => r.id)).toEqual(['DEV-ARCH', 'DEV-BE', 'DEV-FE', 'DEV-TEST', 'DEV-OPS', 'DEV-RED', 'DEV-QA', 'DEV-DOCS', 'DEV-PERF']);
     expect(templates.roles.get('DSN-UI')!.perProduct).toBe(true);
-    for (const id of ['DEV-BE', 'DEV-FE', 'DEV-ARCH', 'DEV-REV']) expect(templates.roles.get(id)!.skills.find(s => s.id === 'dev-engineering-rules')?.on, id).toBe(true);
+    for (const id of ['DEV-ENG', 'DEV-BE', 'DEV-FE', 'DEV-ARCH', 'DEV-REV']) expect(templates.roles.get(id)!.skills.find(s => s.id === 'dev-engineering-rules')?.on, id).toBe(true);
     for (const id of ['DEV-HEAD', 'DEV-ARCH', 'DEV-SEC']) expect(templates.roles.get(id)!.tier, id).toBe('deep');
   });
 
@@ -166,8 +166,8 @@ describe('templates', () => {
     expect(templates.skills.get('dev-review-diff')!.body).toMatch(/crapper[\s\S]*dryer/);
     expect(templates.skills.get('dev-test-gaps')!.body).toContain('mutator');
     for (const s of skills.filter(x => x.id.startsWith('dev-'))) expect(s.body, s.id).not.toMatch(/(crapper|dryer|mutator) --changed/);
-    for (const id of ['DEV-BE', 'DEV-FE', 'DEV-REV', 'DEV-TEST', 'DEV-SEC', 'DEV-PERF']) expect(templates.roles.get(id)!.skills.find(s => s.id === 'dev-language-rules')?.on, id).toBe(true);
-    for (const id of ['DEV-BE', 'DEV-FE', 'DEV-ARCH', 'DEV-REV', 'DEV-TEST', 'DEV-PERF']) expect(templates.roles.get(id)!.skills.find(s => s.id === 'dev-engineering-rules')?.on, id).toBe(true);
+    for (const id of ['DEV-ENG', 'DEV-BE', 'DEV-FE', 'DEV-REV', 'DEV-TEST', 'DEV-SEC', 'DEV-PERF']) expect(templates.roles.get(id)!.skills.find(s => s.id === 'dev-language-rules')?.on, id).toBe(true);
+    for (const id of ['DEV-ENG', 'DEV-BE', 'DEV-FE', 'DEV-ARCH', 'DEV-REV', 'DEV-TEST', 'DEV-PERF']) expect(templates.roles.get(id)!.skills.find(s => s.id === 'dev-engineering-rules')?.on, id).toBe(true);
   });
 
   it('writes development for any language and any kind of product', () => {
@@ -223,14 +223,19 @@ describe('templates', () => {
     expect(templates.roles.get('DEV-HEAD')!.body).toMatch(/all at once/);
   });
 
-  it('gives each builder a whole piece of its own layer, both sides agreeing the interface directly, and keeps reviewers off building', () => {
-    const head = templates.roles.get('DEV-HEAD')!.body;
-    expect(head).toMatch(/whole piece of its own layer/);
-    expect(head).toMatch(/in parallel/);
-    for (const id of ['DEV-HEAD', 'DEV-BE', 'DEV-FE']) expect(templates.roles.get(id)!.body, id).toMatch(/agree the interface directly/);
-    expect(templates.skills.get('hh-break-down')!.body).toMatch(/agree (it|how they fit) directly/);
-    for (const id of ['hh-break-down', 'DEV-HEAD']) expect(id.startsWith('hh') ? templates.skills.get(id)!.body : templates.roles.get(id)!.body, id).toMatch(/no separate task for/);
-    expect(templates.skills.get('hh-lead-tasks')!.body).toMatch(/[Bb]uilders build and reviewers review/);
+  it('runs developers as a pool that each own a whole feature, with a short architect step before large work', () => {
+    const role = (id: string) => templates.roles.get(id)!;
+    const body = (id: string) => templates.skills.get(id)!.body;
+    expect(role('DEV-ENG').body).toMatch(/whole feature: its plan, server, interface, tests and docs, on one branch/);
+    expect(role('DEV-ENG').body).toMatch(/write each test before the code/);
+    for (const id of ['dev-implement', 'dev-frontend-ui', 'dev-browser-check']) expect(role('DEV-ENG').skills.find(k => k.id === id)?.on, id).toBe(true);
+    expect(role('DEV-HEAD').body).toMatch(/different features to different developers all at once/);
+    for (const text of [role('DEV-HEAD').body, body('hh-break-down')]) expect(text).toMatch(/touch the same files/);
+    for (const text of [role('DEV-HEAD').body, role('DEV-ARCH').body, body('hh-break-down')]) expect(text).toMatch(/design note/);
+    expect(role('DEV-ARCH').body).toMatch(/no gates/);
+    expect(body('dev-plan-review')).toMatch(/where it goes, what changes, the interfaces and the risks/);
+    expect(templates.skills.get('dev-plan-review')!.kind).not.toBe('gate');
+    expect(body('hh-lead-tasks')).toMatch(/[Bb]uilders build and reviewers review/);
     for (const x of [...roles, ...skills]) expect(x.body, x.id).not.toMatch(/not by layer/);
   });
 
@@ -239,8 +244,15 @@ describe('templates', () => {
     const gates = body('dev-gates');
     expect(gates).toMatch(/[Rr]esearch, reports, plans and docs get no gates/);
     expect(gates).toMatch(/one review/);
-    expect(gates).toMatch(/access, sign-in, secrets, permissions or running untrusted input/);
-    expect(gates).toMatch(/behavio(u)?r people use/);
+    expect(gates).toMatch(/access, sign-in, secrets or permissions/);
+    expect(gates).toMatch(/one reviewer per provider/);
+    expect(gates).toMatch(/once per turn, on the turn's branch/);
+    expect(gates).toMatch(/risky or public-facing/);
+    expect(templates.roles.get('DEV-QA')!.gate).toBeNull();
+    expect(body('dev-review-diff')).toMatch(/[Oo]bvious security problems/);
+    expect(body('hh-task-flow')).toMatch(/only if you sent it back/);
+    expect(templates.roles.get('DEV-RED')!.body).toMatch(/risky or public-facing/);
+    expect([...roles, ...skills].map(x => x.body).join('\n')).not.toMatch(/[Ee]very (employee|one) of a gate's role/);
     expect(gates).not.toMatch(/doubled/i);
     for (const id of ['dev-gates', 'dev-review-verdict', 'dev-review-diff']) expect(body(id), id).toMatch(/only the fixes/);
     const verdict = body('dev-review-verdict');
@@ -249,6 +261,7 @@ describe('templates', () => {
     expect(verdict).toMatch(/notes? under (a|the) pass/);
     expect(verdict).not.toMatch(/Important/);
     for (const id of ['DEV-REV', 'DEV-SEC', 'DEV-TEST', 'DEV-QA', 'DEV-RED']) expect(templates.roles.get(id)!.body, id).toMatch(/blocking/);
+    expect(templates.roles.get('DEV-SEC')!.body).toMatch(/access, sign-in, secrets or permissions/);
   });
 
   it('has Operations lead a problem: diagnosis split at once, the database read by the head, one message back', () => {

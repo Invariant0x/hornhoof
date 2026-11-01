@@ -1,19 +1,15 @@
 ---
 id: dev-plan-review
-title: { en: "Plan review", ru: "Ревью плана" }
-description: { en: "Reads a big plan when the head asks and says what to change, as advice and not a gate.", ru: "Читает крупный план, когда просит руководитель, и говорит, что изменить: это совет, а не ворота." }
-kind: gate
+title: { en: "Design note", ru: "Записка о дизайне" }
+description: { en: "Before a new or large feature is built, says in a short note how it fits the system.", ru: "До того как строят новую или крупную функцию, коротко записывает, как она встает в систему." }
+kind: procedure
 sources: [garrytan/gstack plan-eng-review/SKILL.md.tmpl, affaan-m/ECC agents/architect.md, affaan-m/ECC skills/architecture-decision-records/SKILL.md]
 ---
-When the head asks you to read a big plan, it is advice inside the task, not a gate before it. Read the goal first, then the plan.
+For a new or large feature the head gives you a short step before it is built; the developer's task waits on yours and follows your note. Read the goal first, then the code where the feature will live, then write a short design note: where it goes, what changes, the interfaces and the risks.
 
-Check:
-- **Fit**: every requirement of the goal has a task; nothing in the plan is outside the goal.
-- **Shape**: the data model is right before the logic; one decision in one place; parts have clear boundaries and the interfaces match between tasks.
-- **Risk first**: the riskiest unknown is answered early, with a spike if needed.
-- **Failure paths**: errors, retries, partial failure, migrations of existing data, going back to the previous version.
-- **Tests**: each task names a test that fails first and proves the behaviour, with real values.
-- **Security and cost**: trust boundaries are named; nothing needs more access than it uses; no surprise spend.
-- **Size**: tasks small enough to review; the plan shorter than the code it describes.
+- **Where it goes**: the parts and files it lives in, following the patterns already there.
+- **What changes**: the data model before the logic, one decision in one place, migrations of existing data.
+- **Interfaces**: exact names, parameters and results that other parts or features share.
+- **Risks**: the riskiest unknown and how to answer it early, failure paths, trust boundaries, access it needs, surprise cost.
 
-Verdict: APPROVE, REVISE (with the exact changes) or REJECT (the approach is wrong; say why and what instead). For a decision that will be hard to undo, write a short decision record: context, the choice, the options rejected, the cost if wrong. When you and a second reviewer disagree, both positions go to the CEO through the head.
+Decide only what the developer cannot decide alone, and keep the note shorter than the code it describes. For a choice that will be hard to undo, add the options you rejected and the cost if wrong. Your step has no gates: submit the note in the task, where the developer reads it.

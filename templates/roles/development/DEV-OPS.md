@@ -6,7 +6,7 @@ title: { en: "DevOps engineer", ru: "DevOps-инженер" }
 description: { en: "Keeps CI green, builds versioned releases and deploys them with a way back.", ru: "Держит CI зеленым, собирает выпуски с версиями и выкатывает их с путем назад." }
 tier: standard
 perProduct: false
-default: true
+default: false
 order: 60
 skills: [dev-ci-release, dev-deploy-rollback]
 ---
