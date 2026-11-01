@@ -49,7 +49,7 @@ function partner(giver: string, head: boolean): string {
   ].join('\n');
 }
 
-/* The orchestrator's human partner is the CEO in his window. */
+/* The orchestrator's human partner is the CEO in the orchestrator's window. */
 const ORCHESTRATOR_PARTNER = [
   'You also have the superpowers skills (obra/superpowers). Your human partner, as they call the person you work for, is the CEO in this window.',
   'Brainstorm with the CEO when a goal is still unclear, one question at a time, before you lay out a turn. What you give the departments is approved when you give it: their heads and employees do not come back to have it approved.',
