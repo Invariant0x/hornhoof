@@ -10,6 +10,7 @@ import { claudeProgram } from '../src/terminal/programs.js';
 import { Tmux } from '../src/terminal/tmux.js';
 import type { ProviderAdapter, RunInput } from '../src/runner.js';
 import { isRemoved, writeState } from '../src/state.js';
+import type { runTests } from '../src/tests.js';
 
 const adapter: ProviderAdapter = {
   install: async () => {},
@@ -350,6 +351,44 @@ describe('runNode', () => {
     await server.wait(() => server.received.some(m => m.type === 'load' && m.jobs === 1));
     expect(server.received.find(m => m.type === 'load')).toMatchObject({ cpus: expect.any(Number), memTotal: expect.any(Number), tests: 0 });
     server.send({ type: 'job.cancel', jobId: 'j1' });
+  });
+
+  it('runs a part of a test run, counts it in its load, sends its end until Hornhoof confirms it, and stops a part when asked', async () => {
+    const server = await fakeServer();
+    const runPart: typeof runTests = async (m, { signal }) => {
+      await new Promise<void>(done => {
+        const timer = setTimeout(done, m.command === 'slow' ? 60_000 : 300);
+        signal?.addEventListener('abort', () => (clearTimeout(timer), done()));
+      });
+      const stopped = signal?.aborted ?? false;
+      return { type: 'tests.done', partId: m.partId, ok: !stopped, exitCode: stopped ? null : 0, error: stopped ? 'cancelled' : null, commit: null, log: stopped ? 'Stopped.' : 'all passed' };
+    };
+    const node = await runNode({ dir: nodeDir(server.url), adapter, log: () => {}, loadMs: 40, runPart });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    const part = { type: 'tests.run', repo: { url: 'https://github.com/acme/shop.git', token: '' }, branch: null, task: 3, part: 1, parts: 1, timeoutMs: 60000 };
+    server.send({ ...part, partId: 'p1', command: 'npm test' });
+    await server.wait(() => server.received.some(m => m.type === 'tests.started' && m.partId === 'p1'));
+    await server.wait(() => server.received.some(m => m.type === 'load' && m.tests === 1));
+    await server.wait(() => server.received.some(m => m.type === 'tests.done'));
+    expect(server.received.find(m => m.type === 'tests.done')).toMatchObject({ partId: 'p1', ok: true, exitCode: 0, error: null, log: 'all passed' });
+
+    const hellos = () => server.received.filter(m => m.type === 'hello');
+    server.drop();
+    await server.wait(() => hellos().length === 2, 5000);
+    expect(hellos()[1]).toMatchObject({ tests: ['p1'] });
+    await server.wait(() => server.received.filter(m => m.type === 'tests.done').length === 2);
+    server.send({ type: 'tests.ack', partId: 'p1' });
+    await new Promise(r => setTimeout(r, 50));
+    server.drop();
+    await server.wait(() => hellos().length === 3, 5000);
+    expect(hellos()[2]).toMatchObject({ tests: [] });
+
+    server.send({ ...part, partId: 'p2', command: 'slow' });
+    await server.wait(() => server.received.some(m => m.type === 'tests.started' && m.partId === 'p2'));
+    server.send({ type: 'tests.cancel', partId: 'p2' });
+    await server.wait(() => server.received.some(m => m.type === 'tests.done' && m.partId === 'p2'));
+    expect(server.received.find(m => m.type === 'tests.done' && m.partId === 'p2')).toMatchObject({ ok: false, error: 'cancelled' });
   });
 
   it('stays idle once removed', async () => {

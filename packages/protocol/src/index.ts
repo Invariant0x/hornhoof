@@ -9,6 +9,14 @@ export type ProviderId = (typeof PROVIDER_IDS)[number];
 export const JOB_ERRORS = ['timeout', 'agent_failed', 'not_logged_in', 'cancelled'] as const;
 export type JobError = (typeof JOB_ERRORS)[number];
 
+/* Why a part of a test run ended other than with its tests passing: they failed, ran out of time, were stopped, or the
+   branch could not be cloned. */
+export const TEST_ERRORS = ['failed', 'timeout', 'cancelled', 'clone_failed'] as const;
+export type TestError = (typeof TEST_ERRORS)[number];
+/* The most parts a test run splits into, and the most of each part's log a node sends: its start and its end. */
+export const MAX_TEST_PARTS = 10;
+export const TEST_LOG_BYTES = 1024 * 1024;
+
 /* The last bytes of a job's output kept for people to read when something fails. */
 export const TAIL_BYTES = 4096;
 
@@ -163,8 +171,29 @@ export const LOAD_MS = 20_000;
 
 const NodeMessage = z.discriminatedUnion('type', [
   /* terminals: the node runs agents in sessions people can watch and type into. */
-  z.object({ type: z.literal('hello'), version: z.string().max(40), loggedIn: z.boolean(), running: z.array(z.string()).max(100), models: Models.optional(), terminals: z.boolean().optional(), load: Load.optional() }),
+  /* tests: the parts of test runs it runs, or ran and Hornhoof has not confirmed. */
+  z.object({
+    type: z.literal('hello'),
+    version: z.string().max(40),
+    loggedIn: z.boolean(),
+    running: z.array(z.string()).max(100),
+    models: Models.optional(),
+    terminals: z.boolean().optional(),
+    load: Load.optional(),
+    tests: z.array(z.string()).max(100).optional(),
+  }),
   z.object({ type: z.literal('load'), ...Load.shape }),
+  z.object({ type: z.literal('tests.started'), partId: z.string() }),
+  /* exitCode: the command's, none when it never ran or was killed. commit: what the clone tested. */
+  z.object({
+    type: z.literal('tests.done'),
+    partId: z.string(),
+    ok: z.boolean(),
+    exitCode: z.number().int().nullable(),
+    error: z.enum(TEST_ERRORS).nullable(),
+    commit: z.string().regex(/^[0-9a-f]{40,64}$/).nullable(),
+    log: z.string().max(TEST_LOG_BYTES + 1024),
+  }),
   z.object({ type: z.literal('status'), loggedIn: z.boolean(), limits: Limits.nullable(), models: Models.optional() }),
   z.object({ type: z.literal('job.started'), jobId: z.string() }),
   z.object({
@@ -199,6 +228,7 @@ export type NodeMessage = z.infer<typeof NodeMessage>;
    field: an address with a name or password in it would put them on command lines and into the clone's settings. The
    address is read as a URL at the door, so what is saved is what the server and the node can read later. */
 const isHttps = (u: string) => URL.canParse(u) && new URL(u).protocol === 'https:' && new URL(u).hostname !== '';
+const Branch = z.string().min(1).max(200).regex(/^[A-Za-z0-9._\/-]+$/).refine(b => !b.startsWith('-') && !b.includes('..'), 'Not a branch name.');
 export const Repo = z.object({
   url: z
     .string()
@@ -206,7 +236,7 @@ export const Repo = z.object({
     .regex(/^https:\/\/[^\s]+$/)
     .refine(isHttps, 'Not an https address.')
     .refine(u => !/^https:\/\/[^/]*@/.test(u), 'Put the token in its own field, not in the address.'),
-  branch: z.string().min(1).max(200).regex(/^[A-Za-z0-9._\/-]+$/).refine(b => !b.startsWith('-') && !b.includes('..'), 'Not a branch name.'),
+  branch: Branch,
   token: z.string().max(500),
   /* Who the agents' commits are by: set in the clone, so a node from before it leaves the field out. */
   author: z
@@ -262,6 +292,23 @@ const ServerMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('term.close'), termId: TermId }),
   /* The turn Hornhoof opened for what a person typed, or none when it could not. */
   z.object({ type: z.literal('turn.opened'), agentKey: Id, jobId: Id.nullable(), toolToken: z.string().max(200).nullable(), ref: z.string().max(64).optional() }),
+  /* A part of a test run: the node clones the branch into a fresh folder, runs the command there as a user that reaches
+     none of the node's keys, within the time, and removes the folder. No agent program takes part. branch null: the
+     task's own, task-<task> or the only one that starts with task-<task>-. */
+  z.object({
+    type: z.literal('tests.run'),
+    partId: Id,
+    repo: Repo.pick({ url: true, token: true }),
+    branch: Branch.nullable(),
+    task: z.number().int().positive(),
+    command: z.string().min(1).max(4000),
+    part: z.number().int().min(1).max(MAX_TEST_PARTS),
+    parts: z.number().int().min(1).max(MAX_TEST_PARTS),
+    timeoutMs: z.number().int().positive().max(2 ** 31 - 1),
+  }),
+  z.object({ type: z.literal('tests.cancel'), partId: Id }),
+  /* Hornhoof has the part's end: the node stops sending it again after each reconnect. */
+  z.object({ type: z.literal('tests.ack'), partId: Id }),
   /* Words for an agent whose turn runs, from its head, another agent, the orchestrator or a person's window: typed into
      the program as a person types, so the turn takes them in. */
   z.object({ type: z.literal('agent.say'), agentKey: Id, text: z.string().max(100_000), ref: z.string().max(64) }),

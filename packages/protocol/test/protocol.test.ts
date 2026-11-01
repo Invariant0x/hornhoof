@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { API_MODELS, CLAUDE_ALIASES, cut, defaultEffortOf, lastBytes, TAIL_BYTES, DEPARTMENT_TEMPLATES, effortFor, effortsOf, modelsFor, parseNodeMessage, parseServerMessage, repoFolder, type AgentEvent, type NodeMessage, type ServerMessage } from '../src/index.js';
+import { API_MODELS, CLAUDE_ALIASES, cut, defaultEffortOf, lastBytes, MAX_TEST_PARTS, TAIL_BYTES, TEST_LOG_BYTES, DEPARTMENT_TEMPLATES, effortFor, effortsOf, modelsFor, parseNodeMessage, parseServerMessage, repoFolder, type AgentEvent, type NodeMessage, type ServerMessage } from '../src/index.js';
 import { effortsOf as light, topEffort as lightTop } from '../src/efforts.js';
 
 const LIMITS = { status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0.38, resetsAt: '2026-10-29T21:30:00.000Z' }] };
@@ -88,6 +88,36 @@ describe('live agent events', () => {
     const items = (n: number): AgentEvent => ({ kind: 'todo', items: Array.from({ length: n }, (_, i) => ({ text: `step ${i}`, state: 'todo' as const })) });
     expect(event(items(20))).not.toBeNull();
     expect(event(items(21))).toBeNull();
+  });
+});
+
+describe('test runs', () => {
+  const LOAD = { cpus: 8, load: 1.5, memFree: 4e9, memTotal: 16e9, tests: 0, jobs: 2 };
+  const RUN = { type: 'tests.run', partId: 'p-1', repo: { url: 'https://github.com/acme/shop.git', token: 'ghp_x' }, branch: 'task-12-checkout', task: 12, command: 'npm test', part: 1, parts: 2, timeoutMs: 1_800_000 };
+  const parse = (m: object) => parseServerMessage(JSON.stringify(m));
+
+  it("carry a node's load in its hello and on their own, with the parts it runs", () => {
+    expect(parseNodeMessage(JSON.stringify({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], load: LOAD, tests: ['p-1'] }))).toMatchObject({ load: LOAD, tests: ['p-1'] });
+    expect(parseNodeMessage(JSON.stringify({ type: 'load', ...LOAD }))).toEqual({ type: 'load', ...LOAD });
+    expect(parseNodeMessage(JSON.stringify({ type: 'load', ...LOAD, cpus: 0 }))).toBeNull();
+  });
+
+  it('send a part with an https repository, a plain branch or none, and at most the parts a run splits into', () => {
+    expect(parse(RUN)).toEqual(RUN);
+    expect(parse({ ...RUN, branch: null })).toMatchObject({ branch: null });
+    for (const bad of [{ repo: { url: 'http://github.com/acme/shop.git', token: '' } }, { repo: { url: 'https://me:pw@github.com/acme/shop.git', token: '' } }, { branch: '--upload-pack=x' }, { branch: 'a..b' }, { parts: MAX_TEST_PARTS + 1 }, { part: 0 }, { partId: '../x' }, { command: '' }]) {
+      expect(parse({ ...RUN, ...bad })).toBeNull();
+    }
+    expect(parse({ type: 'tests.cancel', partId: 'p-1' })).toEqual({ type: 'tests.cancel', partId: 'p-1' });
+    expect(parse({ type: 'tests.ack', partId: 'p-1' })).toEqual({ type: 'tests.ack', partId: 'p-1' });
+  });
+
+  it("end a part with how it went and its log, at most a megabyte of it", () => {
+    const done = { type: 'tests.done', partId: 'p-1', ok: false, exitCode: 1, error: 'failed', commit: 'a'.repeat(40), log: 'x'.repeat(TEST_LOG_BYTES) };
+    expect(parseNodeMessage(JSON.stringify(done))).toEqual(done);
+    expect(parseNodeMessage(JSON.stringify({ ...done, log: 'x'.repeat(TEST_LOG_BYTES + 2000) }))).toBeNull();
+    expect(parseNodeMessage(JSON.stringify({ ...done, error: 'exploded' }))).toBeNull();
+    expect(parseNodeMessage(JSON.stringify({ type: 'tests.started', partId: 'p-1' }))).toEqual({ type: 'tests.started', partId: 'p-1' });
   });
 });
 

@@ -6,11 +6,12 @@ import { fileURLToPath } from 'node:url';
 import { LOAD_MS, type AgentEvent, type Limits, type NodeLoad, type NodeMessage, type ProviderId, type ServerMessage } from '@hornhoof/protocol';
 import { agentFs, ownFs, type AgentFs } from './agent-fs.js';
 import { connect } from './connection.js';
-import { agentUser, builtinAdapters, secureNode, type JobUser } from './isolation.js';
+import { agentUser, builtinAdapters, secureNode, userFor, type JobUser } from './isolation.js';
 import { machineLoad } from './load.js';
 import { adapterFor, programFor } from './providers/index.js';
 import { runJob, type ProviderAdapter, type RunResult } from './runner.js';
 import { dataDir, isRemoved, markRemoved, readState, rememberSession, writeState, type NodeState } from './state.js';
+import { runTests } from './tests.js';
 import { SIGNED_OUT as AGY_SIGNED_OUT } from './providers/antigravity.js';
 import { SIGNED_OUT as CLAUDE_SIGNED_OUT } from './providers/claude.js';
 import { SIGNED_OUT as CODEX_SIGNED_OUT } from './providers/codex.js';
@@ -33,6 +34,7 @@ const STOP_WAIT_MS = 5_000;
 const MAX_UNCONFIRMED = 50;
 
 type JobRun = Extract<ServerMessage, { type: 'job.run' }>;
+type TestRun = Extract<ServerMessage, { type: 'tests.run' }>;
 
 /* Agents of a personal Claude Code, Codex or Kimi Code plan run in tmux sessions people can watch and type into. */
 export type TerminalSetup = { tmux: Tmux; program: TermProgram; bin: string; home: string; signedOut: RegExp; proc?: string; user?: JobUser | null; fs?: AgentFs };
@@ -50,6 +52,10 @@ type RunOptions = {
   limitsMs?: number;
   /* How often the node says how busy its machine is. */
   loadMs?: number;
+  /* The user test runs run as, on a node that runs as root; none runs them as the node, as its agents run there. */
+  testUser?: JobUser | null;
+  /* Runs a part of a test run; tests pass a fake. */
+  runPart?: typeof runTests;
 };
 
 /* A complete list of the plan's windows replaces what the node knew. A partial one, such as the single window a turn
@@ -65,7 +71,7 @@ function merged(known: Limits | null, news: Limits): Limits {
 }
 
 /* The node's life: stay connected, run jobs, report the sign-in state and the limits, clean up when removed. */
-export async function runNode({ dir, adapter, builtin, terminal, log = console.log, loginCheckMs = LOGIN_CHECK_MS, learnMs = LEARN_MS, limitsMs = LIMITS_MS, loadMs = LOAD_MS }: RunOptions): Promise<{ stop(): void }> {
+export async function runNode({ dir, adapter, builtin, terminal, log = console.log, loginCheckMs = LOGIN_CHECK_MS, learnMs = LEARN_MS, limitsMs = LIMITS_MS, loadMs = LOAD_MS, testUser = null, runPart = runTests }: RunOptions): Promise<{ stop(): void }> {
   if (!builtin && isRemoved(dir)) {
     log('This node was removed in Hornhoof.');
     return { stop() {} };
@@ -79,13 +85,15 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
   const single = typeof adapter === 'function' ? null : adapter;
   const pick = typeof adapter === 'function' ? adapter : () => adapter;
 
-  /* Each running job with the way to call it off and the promise of its end. */
+  /* Each running job with the way to call it off and the promise of its end, and the same for parts of test runs. */
   const running = new Map<string, { stop: AbortController; done: Promise<void> }>();
+  const testing = new Map<string, { stop: AbortController; done: Promise<void> }>();
   /* Messages that could not be sent while offline. They go out right after the next hello. */
   const outbox: NodeMessage[] = [];
   /* Ends of jobs Hornhoof has not confirmed: a socket can drop with one on its way. They count as running and go again
      after each hello. A server that never confirms keeps only the last few. */
   const unconfirmed = new Map<string, NodeMessage>();
+  const unconfirmedTests = new Map<string, NodeMessage>();
   let send: ((m: NodeMessage) => boolean) | null = null;
   let loggedIn = single ? await single.loggedIn() : true;
   let limits: Limits | null = null;
@@ -93,11 +101,16 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
 
   const emit = (m: NodeMessage) => {
     if (m.type === 'job.done') keep(m.jobId, m);
-    if (!send?.(m) && m.type !== 'job.done') outbox.push(m);
+    if (m.type === 'tests.done') keepTest(m.partId, m);
+    if (!send?.(m) && m.type !== 'job.done' && m.type !== 'tests.done') outbox.push(m);
   };
   const keep = (jobId: string, m: NodeMessage) => {
     unconfirmed.set(jobId, m);
     if (unconfirmed.size > MAX_UNCONFIRMED) unconfirmed.delete(unconfirmed.keys().next().value!);
+  };
+  const keepTest = (partId: string, m: NodeMessage) => {
+    unconfirmedTests.set(partId, m);
+    if (unconfirmedTests.size > MAX_UNCONFIRMED) unconfirmedTests.delete(unconfirmedTests.keys().next().value!);
   };
   /* Values no screen shows: the node's key, the programs' tokens and each turn's tokens. */
   const known = new Set(hidden);
@@ -135,7 +148,7 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
   };
 
   /* How busy the machine is, which Hornhoof weighs when it picks a machine for a test run. */
-  const load = (): NodeLoad => ({ ...machineLoad(), tests: 0, jobs: running.size });
+  const load = (): NodeLoad => ({ ...machineLoad(), tests: testing.size, jobs: running.size });
 
   const conn = connect({
     url: state.server.replace(/^http/, 'ws') + '/api/nodes/socket',
@@ -145,9 +158,11 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
       host?.closeViews();
       /* Finished jobs Hornhoof has not confirmed still count as running, so the server does not give up on them. */
       const typed = host?.typedJobs() ?? [];
-      next({ type: 'hello', version: VERSION, loggedIn, running: [...running.keys(), ...typed, ...unconfirmed.keys()], ...(models ? { models } : {}), terminals: Boolean(host), load: load() });
+      const tests = [...testing.keys(), ...unconfirmedTests.keys()];
+      next({ type: 'hello', version: VERSION, loggedIn, running: [...running.keys(), ...typed, ...unconfirmed.keys()], ...(models ? { models } : {}), terminals: Boolean(host), load: load(), tests });
       for (const m of outbox.splice(0)) emit(m);
       for (const m of unconfirmed.values()) next(m);
+      for (const m of unconfirmedTests.values()) next(m);
     },
     /* One message that fails is logged; it never ends the node with all its runs. */
     onMessage: m => void handle(m).catch(err => log(`A message from Hornhoof failed: ${message(err)}`)),
@@ -160,7 +175,7 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
       if (builtin || stopped) return;
       stopped = true;
       /* The agents stop first, so nothing writes into the folders while they go. */
-      const jobs = [...running.values()];
+      const jobs = [...running.values(), ...testing.values()];
       for (const job of jobs) job.stop.abort();
       await Promise.race([Promise.allSettled(jobs.map(j => j.done)), new Promise(r => setTimeout(r, STOP_WAIT_MS))]);
       await host?.stop();
@@ -172,6 +187,15 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
       return;
     }
     if (m.type === 'job.ack') return void unconfirmed.delete(m.jobId);
+    if (m.type === 'tests.ack') return void unconfirmedTests.delete(m.partId);
+    if (m.type === 'tests.cancel') return void testing.get(m.partId)?.stop.abort();
+    if (m.type === 'tests.run') {
+      if (stopped || testing.has(m.partId) || unconfirmedTests.has(m.partId)) return;
+      const controller = new AbortController();
+      const done = testOne(m, controller.signal);
+      testing.set(m.partId, { stop: controller, done });
+      return done;
+    }
     if (m.type === 'job.cancel') {
       running.get(m.jobId)?.stop.abort();
       await host?.cancel(m.jobId);
@@ -199,6 +223,15 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
     const done = runOne(m, controller.signal);
     running.set(m.jobId, { stop: controller, done });
     await done;
+  }
+
+  /* A part of a test run: no agent program takes part, and its user reaches none of the node's keys. */
+  async function testOne(m: TestRun, signal: AbortSignal) {
+    emit({ type: 'tests.started', partId: m.partId });
+    const done = await runPart(m, { dir, user: testUser, hidden: [...known], signal });
+    keepTest(m.partId, done);
+    testing.delete(m.partId);
+    emit(done);
   }
 
   async function runOne(m: JobRun, signal: AbortSignal) {
@@ -412,7 +445,9 @@ async function run(dir: string, builtinMode: boolean, io: Io): Promise<number | 
     const user = agentUser();
     if (user) secureNode(dir, user);
     const fs = user ? agentFs(user) : ownFs;
-    return runNode({ dir, adapter: withInstall(personal(dir, provider, user, fs), tools, provider), log, ...terminalFor(dir, provider, user, fs) });
+    /* Test runs get a user of their own, apart from the agents' sign-in and folders. */
+    const testUser = user ? userFor(dir, 'tests', true) : null;
+    return runNode({ dir, adapter: withInstall(personal(dir, provider, user, fs), tools, provider), log, testUser, ...terminalFor(dir, provider, user, fs) });
   }
 
   const server = process.env.HORNHOOF_SERVER;
@@ -428,7 +463,7 @@ async function run(dir: string, builtinMode: boolean, io: Io): Promise<number | 
   for (const provider of ['anthropic_api', 'openai_api'] as const) {
     ensureInstalled(tools, provider, adapterFor(provider, { home: dir, tools })).catch(err => log(`Could not install ${programFor(provider).name}: ${message(err)}`));
   }
-  return runNode({ dir, adapter: pick, builtin: { server, key }, log });
+  return runNode({ dir, adapter: pick, builtin: { server, key }, log, testUser: userFor(dir, 'tests') });
 }
 
 /* One command line. A running node answers its handle and keeps the process up; the others answer an exit code. */
