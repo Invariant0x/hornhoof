@@ -229,6 +229,33 @@ describe('AgentWindow', () => {
     await vi.waitFor(() => expect(starts()).toBe(2));
   });
 
+  it('keeps the line on when an older catch-up that found him unable to answer comes after a newer one', async () => {
+    const stream = fakeStream();
+    let ready = false;
+    let hold = false;
+    let late = () => {};
+    open({
+      [`GET ${EVENTS}?after=0`]: () => {
+        const reply: [number, unknown] = [200, { events: [], state: ready ? READY : { ...READY, ready: false, reason: 'waiting_machine' } }];
+        if (!hold) return reply;
+        hold = false;
+        return new Promise(resolve => (late = () => resolve(reply)));
+      },
+    });
+    const input = await screen.findByLabelText('Write to the orchestrator');
+    expect(input).toBeDisabled();
+    hold = true;
+    stream.send({ type: 'reconnected' });
+    ready = true;
+    stream.send({ type: 'reconnected' });
+    await vi.waitFor(() => expect(input).toBeEnabled());
+    await act(async () => {
+      late();
+      await new Promise(r => setTimeout(r, 50));
+    });
+    expect(input).toBeEnabled();
+  });
+
   it('keeps one card that changes with the newest proposal, under his latest line', async () => {
     const { container } = open({
       [`GET ${EVENTS}?after=0`]: [

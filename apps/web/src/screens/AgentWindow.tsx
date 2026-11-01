@@ -98,6 +98,9 @@ export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Pro
   const last = useRef(0);
   const mounted = useRef(true);
   const catchUpTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /* Catch-ups run side by side and can answer out of order; a state older than the one shown is dropped. */
+  const catchUps = useRef(0);
+  const stateFrom = useRef(0);
   const liveId = orchestrator ? org.orchestrator?.id : agentId;
   /* The department whose notebook a head keeps. */
   const headOf = card?.kind === 'head' ? (card.department?.id ?? null) : null;
@@ -130,10 +133,14 @@ export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Pro
   const catchUp = useCallback(async () => {
     try {
       for (;;) {
+        const n = ++catchUps.current;
         const res = await api.get<{ events: EventView[]; state: OrchestratorState }>(`${path}/events?after=${last.current}`);
         if (!mounted.current) return;
         merge(res.events);
-        setState(res.state);
+        if (n > stateFrom.current) {
+          stateFrom.current = n;
+          setState(res.state);
+        }
         if (res.events.length) last.current = Math.max(last.current, ...res.events.map(e => e.seq));
         if (res.events.length < PAGE) break;
       }
