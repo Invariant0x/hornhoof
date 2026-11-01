@@ -538,6 +538,8 @@ export const ru: Messages = {
     seen: n => `Найдено раз: ${n}`,
     takenBy: name => `Взял в работу: ${name}`,
     relatedTasks: 'Связанные задачи',
+    parts: { problem: 'Что не так', facts: 'Факты', guesses: 'Догадки, еще не проверены', why: 'Почему это важно', change: 'Что изменить', gain: 'Что это даст' },
+    source: where => `Источник: ${where}`,
     orchestrator: 'Оркестратор',
     take: 'Взять в работу',
     dismiss: 'Отложить',

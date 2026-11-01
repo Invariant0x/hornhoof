@@ -259,6 +259,17 @@ export type TaskDetail = TaskLine & {
 };
 
 /* What an agent asks of people, under "Waiting for you". */
+/* An improvement as a short case: what is wrong, the facts with where each comes from, the guesses kept apart, why it
+   matters, the change and what it gives. */
+export type ImprovementParts = {
+  problem: string | null;
+  facts: { text: string; source: string }[];
+  guesses: string[];
+  why: string | null;
+  change: string;
+  gain: string | null;
+};
+
 /* Something an employee found to improve in how the company works. open waits for the CEO, taken is with the
    orchestrator, done is done, dismissed was set aside. result: the orchestrator's word on what came of it. */
 export type Improvement = {
@@ -274,6 +285,8 @@ export type Improvement = {
   department: { id: string; name: string } | null;
   decidedBy: string | null;
   tasks?: { id: string; number: number; title: string }[];
+  /* null for one filed as one text; an older server sends none. */
+  parts?: ImprovementParts | null;
 };
 
 export type WaitingRequest = {

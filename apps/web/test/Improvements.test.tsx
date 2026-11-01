@@ -31,6 +31,22 @@ const IMPROVEMENTS: Improvement[] = [
     department: { id: 'd9', name: 'Operations' },
   },
 ];
+/* A case filed in parts, with the same case written out as its text. */
+const CASE: Improvement = {
+  ...IMPROVEMENTS[0]!,
+  text: 'What is wrong: Agents install jq by hand.\n\nChange: Add jq to the node image.',
+  parts: {
+    problem: 'Agents install **jq** by hand before they can read the test reports.',
+    facts: [
+      { text: 'jq was missing 7 times this week.', source: 'failures, 25 to 31 October' },
+      { text: 'Each install took about 2 minutes.', source: 'task #9, its log' },
+    ],
+    guesses: ['The reviewers may need yq as well.'],
+    why: 'Every review waits for the install.',
+    change: 'Add jq to the node image.',
+    gain: 'Reviews start about 2 minutes sooner.',
+  },
+};
 const listed = (id: string): Me => ({ ...ME, person: { ...ME.person, id, name: 'Lena', scopeKind: 'listed', isOwner: false } });
 
 function shell(routes: Record<string, unknown> = {}, me: Me = ME, onSignOut: () => void = () => {}) {
@@ -67,6 +83,54 @@ describe('improvements', () => {
     expect(within(screen.getByRole('region', { name: 'In work' })).getByRole('article', { name: 'Let reviewers run the tests without asking' })).toHaveTextContent('Taken by Ivan');
     const done = within(screen.getByRole('region', { name: 'Done' })).getByRole('article', { name: 'Move security to Kimi' });
     expect(done).toHaveTextContent('Moved Sam to the Kimi plan.');
+  });
+
+  it('shows a case in short sections, with the facts and their sources apart from the guesses', async () => {
+    const user = userEvent.setup();
+    shell({ 'GET /api/improvements': [200, { improvements: [CASE] }] });
+    await openImprovements(user);
+    const item = screen.getByRole('article', { name: 'Install jq on the nodes' });
+    expect(within(item).getAllByRole('heading', { level: 4 }).map(h => h.textContent)).toEqual(['What is wrong', 'Facts', 'Guesses, not checked yet', 'Why it matters', 'What to change', 'What it gives']);
+    expect(within(item).getByRole('region', { name: 'What is wrong' })).toHaveTextContent('Agents install jq by hand before they can read the test reports.');
+    expect(within(item).getByText('jq').tagName).toBe('STRONG');
+    const facts = within(item).getByRole('list', { name: 'Facts' });
+    expect(within(facts).getAllByRole('listitem').map(li => li.textContent)).toEqual([
+      'jq was missing 7 times this week.Source: failures, 25 to 31 October',
+      'Each install took about 2 minutes.Source: task #9, its log',
+    ]);
+    const guesses = within(item).getByRole('list', { name: 'Guesses, not checked yet' });
+    expect(within(guesses).getAllByRole('listitem').map(li => li.textContent)).toEqual(['The reviewers may need yq as well.']);
+    expect(facts).not.toHaveTextContent('yq');
+    expect(within(item).getByRole('region', { name: 'Why it matters' })).toHaveTextContent('Every review waits for the install.');
+    expect(within(item).getByRole('region', { name: 'What to change' })).toHaveTextContent('Add jq to the node image.');
+    expect(within(item).getByRole('region', { name: 'What it gives' })).toHaveTextContent('Reviews start about 2 minutes sooner.');
+    /* The written-out text is the same case, so it does not show twice. */
+    expect(item).not.toHaveTextContent('What is wrong: Agents install jq by hand.');
+  });
+
+  it('shows only the parts a case has', async () => {
+    const user = userEvent.setup();
+    const bare = { ...CASE, parts: { problem: null, facts: [], guesses: [], why: null, change: 'Add jq to the node image.', gain: null } };
+    shell({ 'GET /api/improvements': [200, { improvements: [bare] }] });
+    await openImprovements(user);
+    const item = screen.getByRole('article', { name: 'Install jq on the nodes' });
+    expect(within(item).getAllByRole('heading', { level: 4 }).map(h => h.textContent)).toEqual(['What to change']);
+    expect(within(item).queryByRole('list')).not.toBeInTheDocument();
+  });
+
+  it('shows a case with its headings in Russian', async () => {
+    localStorage.setItem('hh-lang', 'ru');
+    try {
+      const user = userEvent.setup();
+      shell({ 'GET /api/improvements': [200, { improvements: [CASE] }] });
+      await user.click(await screen.findByRole('button', { name: 'Аккаунт' }));
+      await user.click(await screen.findByRole('button', { name: 'Улучшения, ждут решения: 1' }));
+      const item = await screen.findByRole('article', { name: 'Install jq on the nodes' });
+      expect(within(item).getAllByRole('heading', { level: 4 }).map(h => h.textContent)).toEqual(['Что не так', 'Факты', 'Догадки, еще не проверены', 'Почему это важно', 'Что изменить', 'Что это даст']);
+      expect(within(within(item).getByRole('list', { name: 'Факты' })).getAllByRole('listitem')[0]).toHaveTextContent('Источник: failures, 25 to 31 October');
+    } finally {
+      localStorage.removeItem('hh-lang');
+    }
   });
 
   it('gives one to the orchestrator, or sets it aside', async () => {

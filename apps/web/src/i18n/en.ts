@@ -539,6 +539,8 @@ export const en = {
     seen: (n: number) => `Found ${n} times`,
     takenBy: (name: string) => `Taken by ${name}`,
     relatedTasks: 'Related tasks',
+    parts: { problem: 'What is wrong', facts: 'Facts', guesses: 'Guesses, not checked yet', why: 'Why it matters', change: 'What to change', gain: 'What it gives' },
+    source: (where: string) => `Source: ${where}`,
     orchestrator: 'The orchestrator',
     take: 'Take into work',
     dismiss: 'Set aside',

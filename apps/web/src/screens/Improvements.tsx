@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { api } from '../api';
 import { errorText, useT } from '../i18n';
 import { useOrg } from '../org';
 import { placeName } from '../tasks';
-import type { Improvement, Org } from '../types';
+import type { Improvement, ImprovementParts, Org } from '../types';
 import { Markdown } from '../ui/Markdown';
 
 function TaskLinks({ item, onTask }: { item: Improvement; onTask: (taskId: string) => void }) {
@@ -21,8 +21,47 @@ function TaskLinks({ item, onTask }: { item: Improvement; onTask: (taskId: strin
   );
 }
 
+/* A case in the order a person reads it, each part under its heading and the ones it lacks left out. The facts, each with
+   its source, and the guesses are lists of their own, so one is never taken for the other. */
+function Case({ parts }: { parts: ImprovementParts }) {
+  const t = useT();
+  const id = useId();
+  const words = t.improvements.parts;
+  const part = (key: 'problem' | 'why' | 'change' | 'gain') =>
+    parts[key] && (
+      <section className="imp-part" aria-labelledby={`${id}-${key}`}>
+        <h4 id={`${id}-${key}`}>{words[key]}</h4>
+        <Markdown text={parts[key]} />
+      </section>
+    );
+  const list = (key: 'facts' | 'guesses', items: { text: string; source?: string }[]) =>
+    items.length > 0 && (
+      <section className={`imp-part imp-${key}`} aria-labelledby={`${id}-${key}`}>
+        <h4 id={`${id}-${key}`}>{words[key]}</h4>
+        <ul aria-labelledby={`${id}-${key}`}>
+          {items.map((item, i) => (
+            <li key={i}>
+              <Markdown text={item.text} />
+              {item.source && <small className="imp-source">{t.improvements.source(item.source)}</small>}
+            </li>
+          ))}
+        </ul>
+      </section>
+    );
+  return (
+    <div className="imp-case">
+      {part('problem')}
+      {list('facts', parts.facts)}
+      {list('guesses', parts.guesses.map(text => ({ text })))}
+      {part('why')}
+      {part('change')}
+      {part('gain')}
+    </div>
+  );
+}
+
 /* One thing to improve: what it is, who found it and how often, the orchestrator's word on it, and for one that waits,
-   taking it into work or setting it aside. */
+   taking it into work or setting it aside. One filed as one text shows that text. */
 function Item({ item, org, onChanged, onTask }: { item: Improvement; org: Org | null; onChanged: () => void; onTask: (taskId: string) => void }) {
   const t = useT();
   const [busy, setBusy] = useState(false);
@@ -51,9 +90,13 @@ function Item({ item, org, onChanged, onTask }: { item: Improvement; org: Org | 
           {item.status === 'taken' && item.decidedBy && <span>{t.improvements.takenBy(item.decidedBy)}</span>}
         </p>
       </header>
-      <div className="imp-text">
-        <Markdown text={item.text} />
-      </div>
+      {item.parts ? (
+        <Case parts={item.parts} />
+      ) : (
+        <div className="imp-text">
+          <Markdown text={item.text} />
+        </div>
+      )}
       {item.result && (
         <p className="imp-result">
           <b>{t.improvements.orchestrator}:</b> {item.result}
