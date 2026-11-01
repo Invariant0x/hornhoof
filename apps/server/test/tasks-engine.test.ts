@@ -164,6 +164,19 @@ describe('the task engine', () => {
     expect(answered.wakes).toEqual([]);
   });
 
+  it('gives no subtask under a task cancelled while it was being made', async () => {
+    const { ctx, db, dev, head, bruno, deptTask } = await company();
+    const parent = await deptTask();
+    const begin = db.transaction.bind(db);
+    vi.spyOn(db, 'transaction').mockImplementationOnce(async (fn, config) => {
+      await db.update(tasks).set({ status: 'cancelled', closedAt: new Date(), assigneeAgentId: null }).where(eq(tasks.id, parent.id));
+      return begin(fn, config);
+    });
+    const made = createTask(ctx, { agentId: head.id }, { title: 'Checkout API', brief: '', body: '', departmentId: dev.id, parentId: parent.id, assigneeAgentId: bruno.id, executor: true });
+    expect(await reason(made)).toBe('task_closed');
+    expect((await db.select().from(tasks)).map(t => t.id)).toEqual([parent.id]);
+  });
+
   it("wakes the assignee for a person's comment but nobody for an agent's", async () => {
     const { ctx, CEO, head, bruno, memberTask } = await company();
     const task = await memberTask();

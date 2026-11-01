@@ -157,6 +157,11 @@ export async function createTask(ctx: Live, actor: Actor, input: NewTask): Promi
   const task = await ctx.db.transaction(async tx => {
     /* Numbers go up one by one per company, so creating tasks waits on the company row. */
     await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, assignee.companyId)).for('update');
+    /* A parent cancelled meanwhile takes no new work; one cancelled after this waits and cancels the new task with it. */
+    if (parent) {
+      const [now] = await tx.select().from(tasks).where(eq(tasks.id, parent.id)).for('update');
+      stillOpen(now!);
+    }
     const [last] = await tx.select({ n: max(tasks.number) }).from(tasks).where(eq(tasks.companyId, assignee.companyId));
     const [turn] = parent ? [] : await tx.select({ id: turns.id }).from(turns).where(and(eq(turns.companyId, assignee.companyId), eq(turns.status, 'open')));
     const [row] = await tx
