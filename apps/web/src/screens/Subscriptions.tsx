@@ -5,6 +5,8 @@ import { PROVIDER_NAMES } from '../providers';
 import type { JobView, Limits, MachineView, Me, SubView } from '../types';
 import { Ask } from '../ui/Ask';
 import { Bar, percent } from '../ui/Bar';
+import { BudgetControl } from '../ui/BudgetControl';
+import { BudgetStatus } from '../ui/BudgetStatus';
 import { CommandBox } from '../ui/CommandBox';
 import { ConnectPanel } from '../ui/ConnectPanel';
 import { Edge } from '../ui/Edge';
@@ -103,6 +105,19 @@ function LimitBars({ sub }: { sub: SubView }) {
       </ul>
     </>
   );
+}
+
+function SubscriptionBudget({ sub, mine, company, onConfirmed, windowName: name }: { sub: SubView; mine: boolean; company: boolean; onConfirmed: (budgetPercent: number) => void; windowName: (name: string) => string }) {
+  return (
+    <>
+      <BudgetControl subscriptionId={sub.id} budgetPercent={sub.budgetPercent ?? 100} canManage={mine || company} onConfirmed={onConfirmed} />
+      <BudgetStatus budget={sub.budget ?? null} windowName={name} />
+    </>
+  );
+}
+
+function updateBudget(list: SubView[] | null, id: string, budgetPercent: number): SubView[] | null {
+  return list?.map(sub => (sub.id === id ? { ...sub, budgetPercent } : sub)) ?? null;
 }
 
 function lastSeen(t: Messages, language: Language, iso: string | null): string {
@@ -309,6 +324,13 @@ export function Subscriptions({ me }: { me: Me }) {
                     <td>{s.kind === 'api_key' ? t.subs.builtin : (s.machine?.hostname ?? <span className="muted">{t.subs.noMachine}</span>)}</td>
                     <td>
                       <span className={`status ${state}`}>{t.subs.states[state]}</span>
+                      <SubscriptionBudget
+                        sub={s}
+                        mine={mine}
+                        company={company}
+                        onConfirmed={budgetPercent => setSubs(list => updateBudget(list, s.id, budgetPercent))}
+                        windowName={name => windowName(t, name)}
+                      />
                       <LimitBars sub={s} />
                     </td>
                     <td className="row-actions">

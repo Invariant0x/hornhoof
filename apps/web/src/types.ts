@@ -39,6 +39,33 @@ export type AccessView = { whole: boolean; departments: { id: string; name: stri
 /* What the People screen sends for a person's access. */
 export type AccessInput = { whole: true } | { departments: string[]; teams: string[] };
 
+export type BudgetReason = 'budget_disabled' | 'provider_limit' | 'budget_reached' | 'usage_unknown' | 'control_unavailable';
+export type BudgetQuality = 'complete' | 'partial' | 'missing' | 'stale' | 'unsupported' | 'legacy';
+export type ControlCoverage = 'complete' | 'server_only' | 'unavailable';
+export type WindowEvidence = {
+  name: string;
+  utilization: number | null;
+  resetsAt: string | null;
+  sampledAt: string | null;
+  receivedAt: string | null;
+  source: 'usage_fetch' | 'turn_report' | 'legacy';
+};
+export type BudgetDecision = {
+  allowed: boolean;
+  reason: BudgetReason | null;
+  quality: BudgetQuality;
+  blockingWindows: WindowEvidence[];
+  resetHintAt: string | null;
+  sampledAt: string | null;
+  receivedAt: string | null;
+};
+export type BudgetView = {
+  decision: BudgetDecision;
+  control: ControlCoverage;
+  checkedAt: string | null;
+  freshUntil: string | null;
+};
+
 export type SubView = {
   id: string;
   provider: ProviderId;
@@ -51,6 +78,8 @@ export type SubView = {
   place: { kind: 'company' | 'department' | 'listed'; id: string | null; name: string };
   machine: { id: string; hostname: string } | null;
   limits: Limits | null;
+  budgetPercent?: number;
+  budget?: BudgetView | null;
   isOrchestrator: boolean;
 };
 

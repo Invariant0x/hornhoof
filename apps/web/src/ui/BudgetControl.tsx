@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api } from '../api';
 import { errorText, useT } from '../i18n';
 
@@ -9,17 +9,24 @@ type Props = {
   onConfirmed?: (budgetPercent: number) => void;
 };
 
+type Identity = Pick<Props, 'subscriptionId' | 'budgetPercent'>;
+const sameBudget = (a: Identity, b: Identity) => a.subscriptionId === b.subscriptionId && a.budgetPercent === b.budgetPercent;
+
 export function BudgetControl({ subscriptionId, budgetPercent = 100, canManage, onConfirmed }: Props) {
   const t = useT();
   const [confirmed, setConfirmed] = useState(budgetPercent);
   const [draft, setDraft] = useState(budgetPercent);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<unknown>(null);
+  const previous = useRef({ subscriptionId, budgetPercent });
   const id = `budget-${subscriptionId}`;
 
   useEffect(() => {
-    setConfirmed(budgetPercent);
-    setDraft(budgetPercent);
+    if (!sameBudget(previous.current, { subscriptionId, budgetPercent })) {
+      setConfirmed(budgetPercent);
+      setDraft(budgetPercent);
+      previous.current = { subscriptionId, budgetPercent };
+    }
   }, [subscriptionId, budgetPercent]);
 
   async function save(e: FormEvent) {
