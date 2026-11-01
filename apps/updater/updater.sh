@@ -10,10 +10,11 @@
 # digests too, while the old server keeps working. Only then it saves the database, runs that build's own installer,
 # which starts exactly these images, and waits for the new server to answer with the build's commit. If it does not,
 # the images that ran before go back, and the database goes back to the saved copy first when the new build added
-# migrations to it, since the old build does not know them. An updater stopped during an update goes on with it when
-# it starts again. The updater holds the Docker socket, so it takes nothing from the request but the tag, which must
-# be a plain image tag, and the digests, and only runs images of HORNHOOF_IMAGE and of its -node and -updater
-# repositories. It runs on the bash that ships with macOS (3.2) for the tests, and on Alpine's in its image.
+# migrations to it, since the old build does not know them. After each install, containers of services the build's
+# compose file does not name go. An updater stopped during an update goes on with it when it starts again. The
+# updater holds the Docker socket, so it takes nothing from the request but the tag, which must be a plain image tag,
+# and the digests, and only runs images of HORNHOOF_IMAGE and of its -node and -updater repositories. It runs on the
+# bash that ships with macOS (3.2) for the tests, and on Alpine's in its image.
 set -euo pipefail
 
 CONTROL="${HORNHOOF_CONTROL_DIR:-/control}"
@@ -232,7 +233,18 @@ install() {
   local tag=$1 dir="$WORK/$1"
   unpack "$tag" "$2" || return 1
   HORNHOOF_SERVER_DIR="$SERVER_DIR" HORNHOOF_VERSION="$tag" HORNHOOF_FROM_UPDATER=1 HORNHOOF_COMPOSE_FILE="$dir/compose.yaml" HORNHOOF_PULLED=1 \
-    HORNHOOF_APP_REF="$2" HORNHOOF_NODE_REF="$3" HORNHOOF_UPDATER_REF="$4" bash "$dir/install.sh" server >> "$WORK/install.log" 2>&1
+    HORNHOOF_APP_REF="$2" HORNHOOF_NODE_REF="$3" HORNHOOF_UPDATER_REF="$4" bash "$dir/install.sh" server >> "$WORK/install.log" 2>&1 || return 1
+  drop_orphans
+}
+
+# The installer of a build starts only the services it knows, so after going back to a build from before a service,
+# as the tunnel, that service's container would run on, carrying the public link to a server that knows nothing of
+# it. compose removes the containers of services its file does not name; db runs already, so nothing else changes. A
+# file without the updater would take this updater for one of them, so then nothing goes.
+drop_orphans() {
+  case " $(compose config --services 2> /dev/null | tr '\n' ' ') " in
+    *' updater '*) compose up -d --no-build --remove-orphans db >> "$WORK/install.log" 2>&1 || say "Could not remove the containers that $SERVER_DIR/compose.yaml no longer names." ;;
+  esac
 }
 
 # healthy <commit>: the server answers with that commit within HEALTH_WAIT seconds; any answer for a build made by hand.

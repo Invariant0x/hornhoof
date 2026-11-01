@@ -46,6 +46,8 @@ case "$1 $2" in
           *' pull '*)
             printf 'pull with HORNHOOF_VERSION=%s HORNHOOF_APP_REF=%s HORNHOOF_NODE_REF=%s HORNHOOF_UPDATER_REF=%s\n' "${HORNHOOF_VERSION:-}" "${HORNHOOF_APP_REF:-}" "${HORNHOOF_NODE_REF:-}" "${HORNHOOF_UPDATER_REF:-}" >> "$STUB_LOG"
             [ "${STUB_PULL:-ok}" = images ] && { echo "manifest unknown" >&2; exit 1; } ;;
+          # STUB_SERVICES: the services the compose file in the server folder names.
+          *' config --services '*) for service in ${STUB_SERVICES:-db app node updater}; do echo "$service"; done ;;
         esac ;;
       pull)
         [ "${STUB_PULL:-ok}" = fail ] && { echo "pull access denied" >&2; exit 1; }

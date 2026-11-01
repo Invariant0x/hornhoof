@@ -158,6 +158,26 @@ describe('updater', () => {
     expect(r.status.log).toContain('0.4.1 changed the database, so it goes back to the copy saved before the update.');
   });
 
+  /* The build from before may not know a service of the new one, as the tunnel, which would carry the public link
+     on to a server that knows nothing of it. */
+  it('removes the containers of services the compose file of the build it went back to does not name', () => {
+    const s = stand();
+    const r = runOnce(s, ask('o1'), { STUB_BROKEN: '0.4.1' });
+    expect(r.status.state).toBe('rolled_back');
+    const old = r.calls.findIndex(c => c.startsWith('installer') && c.includes('HORNHOOF_VERSION=0.4.0'));
+    const orphans = r.calls.lastIndexOf('docker compose up -d --no-build --remove-orphans db');
+    expect(old).toBeGreaterThanOrEqual(0);
+    expect(orphans).toBeGreaterThan(old);
+  });
+
+  /* Without an updater in it, compose would take this updater for one of them. */
+  it('removes nothing when that compose file names no updater', () => {
+    const s = stand();
+    const r = runOnce(s, ask('o2'), { STUB_BROKEN: '0.4.1', STUB_SERVICES: 'db app node' });
+    expect(r.status.state).toBe('rolled_back');
+    expect(r.calls.some(c => c.includes('--remove-orphans'))).toBe(false);
+  });
+
   it('leaves the database as it is on the way back when the new build did not change it', () => {
     const s = stand();
     const r = runOnce(s, ask('m2'), { STUB_BROKEN: '0.4.1' });
