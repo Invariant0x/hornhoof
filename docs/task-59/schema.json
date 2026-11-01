@@ -1,0 +1,1053 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Task43 transfer v1: proposed schemas, not implemented",
+  "fixedOperation": {
+    "taskNumber": 56,
+    "sourceAgentId": "b8f2e7aa-1fb2-447e-9312-7dc1e12108a6",
+    "targetAgentId": "100edb09-da27-4868-9646-5c0118b9934e",
+    "relativeSource": "task-43-evidence/review-transfer-r1/task43-review-transfer-r1.tgz",
+    "destinationBasename": "task43-review-transfer-r1.tgz",
+    "size": 2012762,
+    "sha256": "c92e8a8c418dc7290a4296079e75a131d9a6ea5188a52264cda7267f67fe561c"
+  },
+  "invoke": {
+    "type": "object",
+    "properties": {
+      "task": {
+        "const": 56
+      },
+      "requestId": {
+        "type": "string",
+        "format": "uuid",
+        "maxLength": 36
+      }
+    },
+    "required": [
+      "task",
+      "requestId"
+    ],
+    "additionalProperties": false
+  },
+  "helloCapability": "task43_transfer_v1",
+  "frames": {
+    "prepare": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "task43.prepare"
+        },
+        "requestId": {
+          "type": "string",
+          "format": "uuid",
+          "maxLength": 36
+        },
+        "attemptId": {
+          "type": "string",
+          "format": "uuid",
+          "maxLength": 36
+        },
+        "role": {
+          "enum": [
+            "source",
+            "target"
+          ]
+        },
+        "taskId": {
+          "type": "string",
+          "format": "uuid",
+          "maxLength": 36
+        },
+        "companyId": {
+          "type": "string",
+          "format": "uuid",
+          "maxLength": 36
+        },
+        "jobId": {
+          "type": "string",
+          "format": "uuid",
+          "maxLength": 36
+        }
+      },
+      "required": [
+        "type",
+        "requestId",
+        "attemptId",
+        "role",
+        "taskId",
+        "companyId",
+        "jobId"
+      ],
+      "additionalProperties": false
+    },
+    "ready": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "task43.ready"
+        },
+        "requestId": {
+          "type": "string",
+          "format": "uuid",
+          "maxLength": 36
+        },
+        "attemptId": {
+          "type": "string",
+          "format": "uuid",
+          "maxLength": 36
+        },
+        "role": {
+          "enum": [
+            "source",
+            "target"
+          ]
+        },
+        "existing": {
+          "enum": [
+            "absent",
+            "matching"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "requestId",
+        "attemptId",
+        "role",
+        "existing"
+      ],
+      "additionalProperties": false
+    },
+    "read": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "task43.read"
+        },
+        "requestId": {
+          "type": "string",
+          "format": "uuid",
+          "maxLength": 36
+        },
+        "attemptId": {
+          "type": "string",
+          "format": "uuid",
+          "maxLength": 36
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2012762
+        }
+      },
+      "required": [
+        "type",
+        "requestId",
+        "attemptId",
+        "offset"
+      ],
+      "additionalProperties": false
+    },
+    "chunk": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "task43.chunk"
+        },
+        "requestId": {
+          "type": "string",
+          "format": "uuid",
+          "maxLength": 36
+        },
+        "attemptId": {
+          "type": "string",
+          "format": "uuid",
+          "maxLength": 36
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2012762
+        },
+        "data": {
+          "type": "string",
+          "maxLength": 43692,
+          "pattern": "^[A-Za-z0-9+/]*={0,2}$"
+        }
+      },
+      "required": [
+        "type",
+        "requestId",
+        "attemptId",
+        "offset",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    "write": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "task43.write"
+        },
+        "requestId": {
+          "type": "string",
+          "format": "uuid",
+          "maxLength": 36
+        },
+        "attemptId": {
+          "type": "string",
+          "format": "uuid",
+          "maxLength": 36
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2012762
+        },
+        "data": {
+          "type": "string",
+          "maxLength": 43692,
+          "pattern": "^[A-Za-z0-9+/]*={0,2}$"
+        }
+      },
+      "required": [
+        "type",
+        "requestId",
+        "attemptId",
+        "offset",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    "ack": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "task43.ack"
+        },
+        "requestId": {
+          "type": "string",
+          "format": "uuid",
+          "maxLength": 36
+        },
+        "attemptId": {
+          "type": "string",
+          "format": "uuid",
+          "maxLength": 36
+        },
+        "nextOffset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2012762
+        }
+      },
+      "required": [
+        "type",
+        "requestId",
+        "attemptId",
+        "nextOffset"
+      ],
+      "additionalProperties": false
+    },
+    "sourceFinish": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "task43.source_finish"
+        },
+        "requestId": {
+          "type": "string",
+          "format": "uuid",
+          "maxLength": 36
+        },
+        "attemptId": {
+          "type": "string",
+          "format": "uuid",
+          "maxLength": 36
+        }
+      },
+      "required": [
+        "type",
+        "requestId",
+        "attemptId"
+      ],
+      "additionalProperties": false
+    },
+    "sourceVerified": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "task43.source_verified"
+        },
+        "requestId": {
+          "type": "string",
+          "format": "uuid",
+          "maxLength": 36
+        },
+        "attemptId": {
+          "type": "string",
+          "format": "uuid",
+          "maxLength": 36
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2012762
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "maxLength": 64
+        },
+        "sourceReadAt": {
+          "type": "string",
+          "format": "date-time",
+          "maxLength": 40
+        }
+      },
+      "required": [
+        "type",
+        "requestId",
+        "attemptId",
+        "size",
+        "sha256",
+        "sourceReadAt"
+      ],
+      "additionalProperties": false
+    },
+    "verify": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "task43.verify"
+        },
+        "requestId": {
+          "type": "string",
+          "format": "uuid",
+          "maxLength": 36
+        },
+        "attemptId": {
+          "type": "string",
+          "format": "uuid",
+          "maxLength": 36
+        }
+      },
+      "required": [
+        "type",
+        "requestId",
+        "attemptId"
+      ],
+      "additionalProperties": false
+    },
+    "verified": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "task43.verified"
+        },
+        "requestId": {
+          "type": "string",
+          "format": "uuid",
+          "maxLength": 36
+        },
+        "attemptId": {
+          "type": "string",
+          "format": "uuid",
+          "maxLength": 36
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2012762
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "maxLength": 64
+        },
+        "targetVerifiedAt": {
+          "type": "string",
+          "format": "date-time",
+          "maxLength": 40
+        }
+      },
+      "required": [
+        "type",
+        "requestId",
+        "attemptId",
+        "size",
+        "sha256",
+        "targetVerifiedAt"
+      ],
+      "additionalProperties": false
+    },
+    "commit": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "task43.commit"
+        },
+        "requestId": {
+          "type": "string",
+          "format": "uuid",
+          "maxLength": 36
+        },
+        "attemptId": {
+          "type": "string",
+          "format": "uuid",
+          "maxLength": 36
+        }
+      },
+      "required": [
+        "type",
+        "requestId",
+        "attemptId"
+      ],
+      "additionalProperties": false
+    },
+    "stored": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "task43.stored"
+        },
+        "requestId": {
+          "type": "string",
+          "format": "uuid",
+          "maxLength": 36
+        },
+        "attemptId": {
+          "type": "string",
+          "format": "uuid",
+          "maxLength": 36
+        },
+        "mode": {
+          "enum": [
+            "copied",
+            "already_present"
+          ]
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2012762
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "maxLength": 64
+        },
+        "actualPath": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "targetVerifiedAt": {
+          "type": "string",
+          "format": "date-time",
+          "maxLength": 40
+        },
+        "storedAt": {
+          "type": "string",
+          "format": "date-time",
+          "maxLength": 40
+        }
+      },
+      "required": [
+        "type",
+        "requestId",
+        "attemptId",
+        "mode",
+        "size",
+        "sha256",
+        "actualPath",
+        "targetVerifiedAt",
+        "storedAt"
+      ],
+      "additionalProperties": false
+    },
+    "abort": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "task43.abort"
+        },
+        "requestId": {
+          "type": "string",
+          "format": "uuid",
+          "maxLength": 36
+        },
+        "attemptId": {
+          "type": "string",
+          "format": "uuid",
+          "maxLength": 36
+        },
+        "reason": {
+          "enum": [
+            "wrong_context",
+            "unsupported_node",
+            "node_offline",
+            "busy",
+            "unsafe_path",
+            "source_changed",
+            "size_mismatch",
+            "hash_mismatch",
+            "destination_conflict",
+            "backpressure",
+            "disconnected",
+            "timeout",
+            "commit_outcome_unknown",
+            "io_failed"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "requestId",
+        "attemptId",
+        "reason"
+      ],
+      "additionalProperties": false
+    },
+    "failed": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "task43.failed"
+        },
+        "requestId": {
+          "type": "string",
+          "format": "uuid",
+          "maxLength": 36
+        },
+        "attemptId": {
+          "type": "string",
+          "format": "uuid",
+          "maxLength": 36
+        },
+        "reason": {
+          "enum": [
+            "wrong_context",
+            "unsupported_node",
+            "node_offline",
+            "busy",
+            "unsafe_path",
+            "source_changed",
+            "size_mismatch",
+            "hash_mismatch",
+            "destination_conflict",
+            "backpressure",
+            "disconnected",
+            "timeout",
+            "commit_outcome_unknown",
+            "io_failed"
+          ]
+        },
+        "mayExist": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "type",
+        "requestId",
+        "attemptId",
+        "reason",
+        "mayExist"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "receipt": {
+    "type": "object",
+    "properties": {
+      "schema": {
+        "const": "task43-transfer-v1"
+      },
+      "requestId": {
+        "type": "string",
+        "format": "uuid",
+        "maxLength": 36
+      },
+      "attemptId": {
+        "type": "string",
+        "format": "uuid",
+        "maxLength": 36
+      },
+      "taskId": {
+        "type": "string",
+        "format": "uuid",
+        "maxLength": 36
+      },
+      "taskNumber": {
+        "const": 56
+      },
+      "companyId": {
+        "type": "string",
+        "format": "uuid",
+        "maxLength": 36
+      },
+      "jobId": {
+        "type": "string",
+        "format": "uuid",
+        "maxLength": 36
+      },
+      "sourceAgentId": {
+        "const": "b8f2e7aa-1fb2-447e-9312-7dc1e12108a6"
+      },
+      "targetAgentId": {
+        "const": "100edb09-da27-4868-9646-5c0118b9934e"
+      },
+      "sourceRelativePath": {
+        "const": "task-43-evidence/review-transfer-r1/task43-review-transfer-r1.tgz"
+      },
+      "destinationBasename": {
+        "const": "task43-review-transfer-r1.tgz"
+      },
+      "actualPath": {
+        "anyOf": [
+          {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "expectedSize": {
+        "const": 2012762
+      },
+      "expectedSha256": {
+        "const": "c92e8a8c418dc7290a4296079e75a131d9a6ea5188a52264cda7267f67fe561c"
+      },
+      "actualSize": {
+        "anyOf": [
+          {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "actualSha256": {
+        "anyOf": [
+          {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "maxLength": 64
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "sourceReadAt": {
+        "anyOf": [
+          {
+            "type": "string",
+            "format": "date-time",
+            "maxLength": 40
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "targetVerifiedAt": {
+        "anyOf": [
+          {
+            "type": "string",
+            "format": "date-time",
+            "maxLength": 40
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "storedAt": {
+        "anyOf": [
+          {
+            "type": "string",
+            "format": "date-time",
+            "maxLength": 40
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "serverReceivedAt": {
+        "type": "string",
+        "format": "date-time",
+        "maxLength": 40
+      },
+      "status": {
+        "enum": [
+          "started",
+          "server_complete",
+          "failed"
+        ]
+      },
+      "delivered": {
+        "const": false
+      },
+      "mode": {
+        "enum": [
+          "copied",
+          "already_present",
+          null
+        ]
+      },
+      "errorReason": {
+        "enum": [
+          "wrong_context",
+          "unsupported_node",
+          "node_offline",
+          "busy",
+          "unsafe_path",
+          "source_changed",
+          "size_mismatch",
+          "hash_mismatch",
+          "destination_conflict",
+          "backpressure",
+          "disconnected",
+          "timeout",
+          "commit_outcome_unknown",
+          "io_failed",
+          null
+        ]
+      },
+      "mayExist": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "schema",
+      "requestId",
+      "attemptId",
+      "taskId",
+      "taskNumber",
+      "companyId",
+      "jobId",
+      "sourceAgentId",
+      "targetAgentId",
+      "sourceRelativePath",
+      "destinationBasename",
+      "actualPath",
+      "expectedSize",
+      "expectedSha256",
+      "actualSize",
+      "actualSha256",
+      "sourceReadAt",
+      "targetVerifiedAt",
+      "storedAt",
+      "serverReceivedAt",
+      "status",
+      "delivered",
+      "mode",
+      "errorReason",
+      "mayExist"
+    ],
+    "additionalProperties": false,
+    "allOf": [
+      {
+        "if": {
+          "properties": {
+            "status": {
+              "const": "server_complete"
+            }
+          }
+        },
+        "then": {
+          "properties": {
+            "actualSize": {
+              "const": 2012762
+            },
+            "actualSha256": {
+              "const": "c92e8a8c418dc7290a4296079e75a131d9a6ea5188a52264cda7267f67fe561c"
+            },
+            "actualPath": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            },
+            "targetVerifiedAt": {
+              "type": "string",
+              "format": "date-time",
+              "maxLength": 40
+            },
+            "storedAt": {
+              "type": "string",
+              "format": "date-time",
+              "maxLength": 40
+            },
+            "mode": {
+              "enum": [
+                "copied",
+                "already_present"
+              ]
+            },
+            "errorReason": {
+              "type": "null"
+            },
+            "mayExist": {
+              "const": true
+            }
+          }
+        }
+      },
+      {
+        "if": {
+          "properties": {
+            "status": {
+              "const": "failed"
+            }
+          }
+        },
+        "then": {
+          "properties": {
+            "errorReason": {
+              "enum": [
+                "wrong_context",
+                "unsupported_node",
+                "node_offline",
+                "busy",
+                "unsafe_path",
+                "source_changed",
+                "size_mismatch",
+                "hash_mismatch",
+                "destination_conflict",
+                "backpressure",
+                "disconnected",
+                "timeout",
+                "commit_outcome_unknown",
+                "io_failed"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "if": {
+          "properties": {
+            "status": {
+              "const": "server_complete"
+            },
+            "mode": {
+              "const": "copied"
+            }
+          }
+        },
+        "then": {
+          "properties": {
+            "sourceReadAt": {
+              "type": "string",
+              "format": "date-time",
+              "maxLength": 40
+            }
+          }
+        }
+      }
+    ]
+  },
+  "bounds": {
+    "rawChunkBytes": 32768,
+    "base64Chars": 43692,
+    "frameUtf8Bytes": 49152,
+    "retainedPayloadBuffersBytes": 524288,
+    "socketBufferedAmountBytes": 262144,
+    "globalSocketParserBytesExisting": 4194304,
+    "inflightChunks": 1,
+    "globalAttempts": 1,
+    "totalMs": 60000,
+    "idleMs": 10000,
+    "chunks": 62,
+    "lastChunkBytes": 13914
+  },
+  "directions": {
+    "serverToNode": [
+      "prepare",
+      "read",
+      "write",
+      "sourceFinish",
+      "verify",
+      "commit",
+      "abort"
+    ],
+    "nodeToServer": [
+      "ready",
+      "chunk",
+      "ack",
+      "sourceVerified",
+      "verified",
+      "stored",
+      "failed"
+    ]
+  },
+  "semanticGuards": [
+    "All schemas strict;UUID/date-time formats checked by the implementation,not annotations alone.",
+    "Canonical base64 decode/reencode equality;decoded size=minimum(32768,2012762-offset),offset exactly the requested one.",
+    "Check sender pinned connection and phase on each callback;never accept frames from node outbox or a prior attempt.",
+    "Task auth and company come from the DB join in contract.md,not any message field.",
+    "already_present can skip source streaming;target FD is rechecked on authorized commit.",
+    "source role ready.existing must be absent. Source/target observations and hashes are compared to the fixed policy;unknown actual values stay null.",
+    "Node stored copied requires source/server/target checks;already_present requires current target size/hash. Server_complete is written only after pinned stored acknowledgment and receipt persistence.",
+    "No JSONSchema file is itself a runtime grant;helper instructions come only from the authorized node adapter over fixed local pipes."
+  ],
+  "method": "transfer_task_artifact",
+  "transportResult": "Existing /mcp: success text JSON receipt;operational failed receipt has isError=true. Authorization/validation errors return bounded error only,without foreign task/node/path data. Invalid bearer is rejected by existing jobOf before MCP handling.",
+  "error": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "error"
+    ],
+    "properties": {
+      "error": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "reason",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "enum": [
+              "unauthorized",
+              "forbidden",
+              "validation",
+              "conflict",
+              "unavailable"
+            ]
+          },
+          "reason": {
+            "enum": [
+              "wrong_context",
+              "unsupported_node",
+              "node_offline",
+              "busy",
+              "unsafe_path",
+              "source_changed",
+              "size_mismatch",
+              "hash_mismatch",
+              "destination_conflict",
+              "backpressure",
+              "disconnected",
+              "timeout",
+              "commit_outcome_unknown",
+              "io_failed"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      }
+    }
+  },
+  "authContext": {
+    "type": "object",
+    "properties": {
+      "companyId": {
+        "type": "string",
+        "format": "uuid",
+        "maxLength": 36
+      },
+      "jobId": {
+        "type": "string",
+        "format": "uuid",
+        "maxLength": 36
+      },
+      "actorAgentId": {
+        "type": "string",
+        "format": "uuid",
+        "maxLength": 36
+      },
+      "taskId": {
+        "type": "string",
+        "format": "uuid",
+        "maxLength": 36
+      },
+      "taskNumber": {
+        "const": 56
+      },
+      "taskVersion": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
+      },
+      "jobStatus": {
+        "const": "running"
+      },
+      "actorKind": {
+        "const": "head"
+      },
+      "actorRole": {
+        "const": "OPS-HEAD"
+      },
+      "departmentTemplate": {
+        "const": "operations"
+      },
+      "taskStatus": {
+        "const": "working"
+      },
+      "taskStage": {
+        "const": 0
+      },
+      "sourceSubscriptionId": {
+        "type": "string",
+        "format": "uuid",
+        "maxLength": 36
+      },
+      "targetSubscriptionId": {
+        "type": "string",
+        "format": "uuid",
+        "maxLength": 36
+      },
+      "sourceConnectionGeneration": {
+        "type": "string",
+        "format": "uuid",
+        "maxLength": 36
+      },
+      "targetConnectionGeneration": {
+        "type": "string",
+        "format": "uuid",
+        "maxLength": 36
+      }
+    },
+    "required": [
+      "companyId",
+      "jobId",
+      "actorAgentId",
+      "taskId",
+      "taskNumber",
+      "taskVersion",
+      "jobStatus",
+      "actorKind",
+      "actorRole",
+      "departmentTemplate",
+      "taskStatus",
+      "taskStage",
+      "sourceSubscriptionId",
+      "targetSubscriptionId",
+      "sourceConnectionGeneration",
+      "targetConnectionGeneration"
+    ],
+    "additionalProperties": false,
+    "description": "Server-only checked projection from current DB rows/pinned sockets;not accepted from MCP client or node frames. Company/assignment/turn/removal/version predicates in contract.md remain mandatory."
+  },
+  "internalSignatures": {
+    "authorize": "authorizeTask43(ctx,toolJobId):Promise<Task43AuthContext>",
+    "relay": "transferTask43(ctx,auth,requestId):Promise<Task43Receipt>",
+    "fromNode": "fromTask43Node(connectionRef,message):void",
+    "disconnect": "abortTask43Connection(connectionRef):void",
+    "helper": "fixed local read/receive helper over bounded pipes plus inherited rootFD3;no caller root/path/argv input"
+  }
+}

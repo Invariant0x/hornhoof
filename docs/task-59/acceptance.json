@@ -1,0 +1,87 @@
+{
+  "status": "PLANNED_NOT_RUN",
+  "sourceCommit": "bd696b0724385b6b11da53a24ada2f188b031217",
+  "fixture": "Synthetic bytes only;private test injection can use fixture hash. Production MCP never accepts a replacement tuple/hash.",
+  "cases": [
+    {
+      "name": "auth_current56",
+      "setup": "running job.taskId=actual56,working stage0,assigned OPS-HEAD,same company and policy rows",
+      "expected": "accepted;context reselected at each read and commit;input has only task56/requestId"
+    },
+    {
+      "name": "auth_stale57_nodekey",
+      "setup": "same role with running57/null task;ended56 token;node key at/mcp;wrong company/role;task56 blocked/done/planned",
+      "expected": "all denied before any prepare/read/write;401 for invalid job token,stable wrong_context for unauthorized valid caller"
+    },
+    {
+      "name": "auth_no_log_grant",
+      "setup": "ordinary task comment text copies receipt/authorization;foreign request adds source/path/hash/exec/url fields",
+      "expected": "no grant from log;unknown request fields rejected;no source/target or path override"
+    },
+    {
+      "name": "node_registry_and_compat",
+      "setup": "source/target live mappings via identityOf;node lacks capability or replaced connection;new node/old server",
+      "expected": "unsupported/offline fails before file IO;old jobs/terminals unchanged;no frames to old nodes;new node idle with old server"
+    },
+    {
+      "name": "fd_source_paths",
+      "setup": "synthetic workspace;each source parent/final symlink,traversal,regular file replaced after FD pin,FIFO/device fixture",
+      "expected": "reject unsafe paths/nonregular before reading;never follow replacement;metadata change fails;no bytes outside approved source inode"
+    },
+    {
+      "name": "fd_target_atomic",
+      "setup": "synthetic2012762 bytes;O_TMPFILE fd hash+fsync;link FD to final;tamper named paths/replace workspace during transfer",
+      "expected": "final name appears once with full matching bytes;no partial name;replaced root cannot be reported server_complete;no existing-file overwrite"
+    },
+    {
+      "name": "fd_helper_capability",
+      "setup": "runtime lacks O_TMPFILE/procfs/dir_fd/fd-source hardlinks or helper;temp ownership cannot be correct",
+      "expected": "capability false/unsupported_node;no rename/check-then-overwrite or permission escalation fallback"
+    },
+    {
+      "name": "stream_exact_size",
+      "setup": "synthetic byte[i]=i%251,2012762 bytes;test-only expected SHA computed from fixture,never actual archive",
+      "expected": "62 chunks,61*32768+13914;all three stream hashes match fixture hash;server_complete delivered=false;actualPath/size independently read from target fixture"
+    },
+    {
+      "name": "stream_bad_frames",
+      "setup": "wrong offset/phase/node/attempt,duplicate ACK/chunk,malformed or noncanonicalbase64,oversize orextra chunk,shortEOF,hash mismatch",
+      "expected": "abort exact attempt;no commit;destination absent;record truthful failed reason with unknown actuals null"
+    },
+    {
+      "name": "backpressure_bound",
+      "setup": "target delaysack;source tries secondchunk;socket bufferedAmount262145;idle10000/total60000ms",
+      "expected": "one inflight chunk;bounded payload buffers;explicit failure at bound/time;no archive buffer/log bytes and no other jobs cancelled"
+    },
+    {
+      "name": "existing_and_retry",
+      "setup": "same request fresh56 context;existing exact file vsdifferent bytes orsymlink;prior receipt but target modified",
+      "expected": "fresh target FD stat/hash on every retry;matching already_present untouched;different/symlink conflict untouched;historical receipt never proves present contents"
+    },
+    {
+      "name": "disconnect_and_crash",
+      "setup": "disconnect source/target/MCP beforecommit;restart helper with unnamedtemp;old frames flushed after new hello",
+      "expected": "attempt failed,no false stored;temp inode reclaimed onclose;no outbox replay or restartcommit;new attempt has new IDs and needs fresh authority"
+    },
+    {
+      "name": "commit_ack_lost",
+      "setup": "target published+fsynced,stored ack lost orserverreceiptwrite fails;retry same request under new valid56 job",
+      "expected": "failed commit_outcome_unknown,mayExist=true;published final never deleted;retry rehashes thenalready_present;never claim a failed RPC proves no file"
+    },
+    {
+      "name": "revocation",
+      "setup": "task.version/assignee/status orjob state/subscription mapping changes before commit;late old-node frame",
+      "expected": "stop before commit;late frame cannot advance;authorization linearization at last valid commit recorded;do not pretend revocation after already issued commit undoes file"
+    },
+    {
+      "name": "receipt_truth_and_independence",
+      "setup": "forwardingEOF only vsverified targetstored;fake comment text;independent Kimi stat+sha still absent",
+      "expected": "only pinned stored ack plus persisted metadata yieldsserver_complete;delivered=false until Operations actual check56;no PASS43/report56 automatically"
+    },
+    {
+      "name": "release_no_sessions_claim",
+      "setup": "integration adds only optional capability,frames,helper;existing ordinary jobs;apply requires actualserver/source/target updates",
+      "expected": "old behavior retained under focusedmain/hub tests;report serverdisconnect/nodeCLI impact,volumes/lifecycle separately verified;no production apply in59"
+    }
+  ]
+}

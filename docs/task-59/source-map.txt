@@ -1,0 +1,20 @@
+Inspected base: bd696b0724385b6b11da53a24ada2f188b031217. Source inspection only, no runtime/deployment claim.
+Input: task59 current body, task58 body and FULL ORIGINAL SPEC; direct capability-spec.txt4253 bytes, SHA256 dfbb929269cd7f77d43535265d35870bdafbf02b461e852c04a59d0be48fadad. Its old task57 is superseded by body58/59. task56 tool returned 'There is no task56 you can see'; no permission workaround or repeated route search.
+AGENTS.md:3-20 and README.md development/repositories: English,en/ru for UI,no em dash,TDD,root/types before product push,branch/gates/exact commit approval. Task59 explicitly prohibits heavy/product suites now.
+apps/server/src/modules/tools/mcp.ts:21-36,47-59,125-142: bearer hashes select a running job joined to an agent;ToolJob omits taskId/role;each MCP POST gets jobOf. Current department/skills registration is not a task56 file grant.
+apps/server/src/db/schema.ts:67-74,160-179,233-259,329-386: real company/department/templateKey/roleKey/assignment/job.taskId/task.version and task_events fields. No transfer grant/table exists in this model.
+apps/server/src/modules/tasks/views.ts:159-168: taskByRef resolves company+number or UUID,not global task number.
+apps/server/src/modules/tasks/wake.ts:246-254: started job moves its assigned open task to working. Fresh task-bound job is distinct from an old running57 context.
+apps/server/src/modules/tasks/engine.ts:54-55,76-78,537-542: note stores typed data in existing task_events,published refreshes task;ordinary comment takes text and does not accept arbitrary data. Receipt storage is not authorization.
+apps/server/drizzle/0007_tasks.sql:16-26: task_events kind/data already text/jsonb;the design reuses comment and requires no migration.
+apps/server/src/modules/nodes/socket.ts:10,19-43:4MiB max frame,personal subscription node key or builtin key identifies a peer only,then hub.attach. No person/task authority from node credentials.
+apps/server/src/modules/nodes/hub.ts:5-14,44-73,80-105: identityOf(subscription),one active socket per identity,replaced entries,serial job-message chain,and send. Transfer needs generation-pinned callback/send and its own bounded lifecycle,not a new socket URL.
+apps/server/src/modules/terminals/relay.ts:39-57: existing relay checks expected node identity before forwarding. It is a boundary pattern,not an artifact channel to reuse for files.
+apps/server/src/app.ts:44,57-66:ctx/hub callbacks and close lifecycle are the existing integration points;44 not an assumed base.
+packages/protocol/src/index.ts:154-184,203-210,212-250: hello/status and server/node message unions;Workspace key is UUID. Current unions have no task43 transfer frames/capability. Preserve existing/additive pending17 fields.
+apps/node/src/runner.ts:78-88,139-142 and apps/node/src/state.ts:11: configured dataDir/work/agents/key is workspace convention;repository clone/session paths must not become arbitrary file input.
+apps/node/src/main.ts:77-86,119-130 and apps/node/src/connection.ts:28-43:ordinary emit uses outbox and reconnect flush;direct send returns false when socket is closed. Transfer data/acks must not enter outbox or get rebound to a replacement connection.
+apps/node/Dockerfile:70-75,86-106:source image already includes python3,uses /app and normal node user,with configured /data convention. This is source evidence,not actual mounted paths/capabilities/live process state.
+templates/roles/operations/OPS-HEAD.md:2-5:canonical role id OPS-HEAD and department operations. Authorization uses actual DB template/role keys,not translated names.
+Primary filesystem references: https://docs.python.org/3.11/library/os.html#os.open and #os.link (dir_fd/no-follow interfaces); https://man7.org/linux/man-pages/man2/link.2.html (FD-source linkat and no-clobber). Runtime support must be qualified,not inferred.
+Exploratory absent names apps/node/src/admin.ts,server/modules/nodes/admin.ts,Dockerfile.node,docs and modules/requests/attachments.ts were not counted as evidence;rg --files and real integration paths above were used instead. No archive file stat/read/extract,CLI/provider,DB or deployment probe was run.
