@@ -223,23 +223,24 @@ export async function submit(ctx: Live, agentId: string, taskId: string, r: { su
 }
 
 /* Everyone who checks the work at a gate: each live employee of the named reviewer's role in its department, for the
-   task's product or for none, that is on and has a subscription, the named one first, never the executor. A reviewer
-   without a role checks alone. */
-async function panelFor(db: Db | Tx, task: Task, stage: number): Promise<string[]> {
+   task's product or for none, that is on, the named one first, never the executor. A reviewer without a role checks
+   alone. idle: the names of those among them without a subscription to run on. */
+async function panelFor(db: Db | Tx, task: Task, stage: number): Promise<{ panel: string[]; idle: string[] }> {
   const named = task.gates[stage - 1];
-  if (!named) return [];
+  if (!named) return { panel: [], idle: [] };
   const [lead] = await db.select().from(agents).where(eq(agents.id, named));
-  if (!lead || lead.removedAt) return [];
+  if (!lead || lead.removedAt) return { panel: [], idle: [] };
   const same = lead.roleKey && lead.departmentId ? and(eq(agents.departmentId, lead.departmentId), eq(agents.roleKey, lead.roleKey)) : eq(agents.id, lead.id);
   const rows = await db
-    .select({ id: agents.id, productId: agents.productId })
+    .select({ id: agents.id, name: agents.name, productId: agents.productId, sub: subscriptions.id })
     .from(agents)
-    .innerJoin(subscriptions, and(eq(subscriptions.id, agents.subscriptionId), isNull(subscriptions.removedAt)))
+    .leftJoin(subscriptions, and(eq(subscriptions.id, agents.subscriptionId), isNull(subscriptions.removedAt)))
     .where(and(same, isNull(agents.removedAt), isNull(agents.switchedOffAt)))
     .orderBy(asc(agents.createdAt));
   const product = task.productId ?? lead.productId;
-  const ids = rows.filter(a => a.id !== task.executorAgentId && (!a.productId || a.productId === product)).map(a => a.id);
-  return [...ids.filter(id => id === named), ...ids.filter(id => id !== named)];
+  const fit = rows.filter(a => a.id !== task.executorAgentId && (!a.productId || a.productId === product));
+  const ids = fit.filter(a => a.sub).map(a => a.id);
+  return { panel: [...ids.filter(id => id === named), ...ids.filter(id => id !== named)], idle: fit.filter(a => !a.sub).map(a => a.name) };
 }
 
 /* Whether anyone of the role behind a gate is switched on. A reviewer without a role stands for itself. */
@@ -252,19 +253,20 @@ async function roleOn(db: Db | Tx, named: string): Promise<boolean> {
 }
 
 /* The task reaches a gate: its whole panel checks it at once. A gate whose role has nobody switched on takes no part,
-   so the task goes on to the next one, and past the last it is done. With people of the role on but none able to check
-   it, it waits with whoever gave it out. */
+   so the task goes on to the next one, and past the last it is done. While anyone of the role who is on cannot check it,
+   it waits with whoever gave it out, as the gate passes only when all of them pass. */
 async function atGate(db: Db | Tx, task: Task, from: number): Promise<{ set: Partial<Task>; wakes: Wake[] }> {
   let stage = from;
   while (task.gates[stage - 1] && !(await roleOn(db, task.gates[stage - 1]!))) stage++;
   if (!task.gates[stage - 1]) return { set: { ...closing(), stage: task.gates.length, panel: [] }, wakes: giver(task, 'done') };
-  const panel = await panelFor(db, task, stage);
-  const at = { status: 'review' as const, stage, panel, silent: 0 };
-  if (panel.length) return { set: { ...at, assigneeAgentId: panel[0]! }, wakes: panel.map(agentId => ({ agentId, taskId: task.id, why: 'review' as const })) };
+  const { panel, idle } = await panelFor(db, task, stage);
+  if (panel.length && !idle.length) return { set: { status: 'review', stage, panel, silent: 0, assigneeAgentId: panel[0]! }, wakes: panel.map(agentId => ({ agentId, taskId: task.id, why: 'review' as const })) };
   const [lead] = await db.select({ name: agents.name, roleKey: agents.roleKey }).from(agents).where(eq(agents.id, task.gates[stage - 1]!));
   const who = lead?.roleKey ?? lead?.name ?? 'its reviewer';
-  const text = `Nobody who can check it at gate ${stage} (${who}) is on. Give it other gates with update_task, or tell the CEO it waits for one of them.`;
-  return { set: { ...at, assigneeAgentId: task.createdByAgentId }, wakes: giver(task, 'switched', undefined, text) };
+  const text = idle.length
+    ? `${idle.join(', ')} ${idle.length === 1 ? 'has' : 'have'} no subscription to run on, so gate ${stage} (${who}) cannot check it. Give them one on their card and then give the task its gates again with update_task, switch them off, or give it other gates.`
+    : `Nobody who can check it at gate ${stage} (${who}) is on. Give it other gates with update_task, or tell the CEO it waits for one of them.`;
+  return { set: { status: 'review', stage, panel: [], silent: 0, assigneeAgentId: task.createdByAgentId }, wakes: giver(task, 'switched', undefined, text) };
 }
 
 type Given = { agentId: string; name: string; pass: boolean; comment: string };
