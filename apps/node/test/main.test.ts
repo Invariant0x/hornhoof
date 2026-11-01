@@ -337,10 +337,10 @@ function commandBin(dir: string, commands: string[]) {
   }
 }
 
-function processAdapter(dir: string, commands: string[]) {
+function processAdapter(dir: string, commands: string[], bin?: string) {
   const tools = join(dir, 'tools');
   commandBin(join(tools, 'bin'), commands);
-  return adapterFor('claude', { home: join(dir, 'home'), tools });
+  return adapterFor('claude', { home: join(dir, 'home'), tools, bin });
 }
 
 async function withEmptyPath<T>(run: () => Promise<T>): Promise<T> {
@@ -354,10 +354,29 @@ async function withEmptyPath<T>(run: () => Promise<T>): Promise<T> {
   }
 }
 
+const REQUIRED_COMMANDS = ['ps', 'free', 'pgrep', 'uptime'] as const;
+
 describe('required commands', () => {
   it('does not report a failed check as an empty missing list', async () => {
     await expect(findMissingCommands({}, null, async () => ({ code: 1, output: '', timedOut: false }))).rejects.toThrow('Could not check the agent commands.');
     await expect(findMissingCommands({}, null, async () => ({ code: 0, output: '', timedOut: true }))).rejects.toThrow('Could not check the agent commands.');
+  });
+
+  it('checks commands as the user that will run the agent', async () => {
+    const current = process.getuid?.() ?? 1000;
+    const uid = current === 1001 ? 1002 : 1001;
+    const dir = nodeDir('http://127.0.0.1:9');
+    commandBin(join(dir, 'tools', 'bin'), [...REQUIRED_COMMANDS]);
+    const checking = adapterFor('claude', { home: join(dir, 'home'), tools: join(dir, 'tools'), user: { uid, gid: uid } });
+    const checked = checking.missingCommands!();
+    if (current === 0) await expect(checked).resolves.toEqual([...REQUIRED_COMMANDS]);
+    else await expect(checked).rejects.toThrow(/EPERM|operation not permitted|permission denied/i);
+  });
+
+  it.each(REQUIRED_COMMANDS)('reports %s when it is the only missing command', async missing => {
+    const dir = nodeDir('http://127.0.0.1:9');
+    const checking = processAdapter(dir, REQUIRED_COMMANDS.filter(command => command !== missing));
+    await withEmptyPath(() => expect(checking.missingCommands!()).resolves.toEqual([missing]));
   });
 
   it('does not scope a hello before any command check has reported', async () => {
@@ -374,13 +393,14 @@ describe('required commands', () => {
     const server = await fakeServer();
     const dir = nodeDir(server.url);
     await withEmptyPath(async () => {
-      const node = await runNode({ dir, adapter: processAdapter(dir, ['ps', 'free', 'pgrep']), log: () => {} });
+      const node = await runNode({ dir, adapter: processAdapter(dir, ['ps', 'free', 'pgrep'], new URL('./fakes/claude', import.meta.url).pathname), log: () => {} });
       onTestFinished(() => node.stop());
       await server.wait(() => server.received.some(m => m.type === 'status' && m.missing !== undefined));
     });
     expect(server.received.find(m => m.type === 'status' && m.missing !== undefined)).toMatchObject({ missing: [{ provider: 'claude', command: 'uptime' }] });
     server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
     await server.wait(() => server.received.some(m => m.type === 'job.done'));
+    expect(server.received.find(m => m.type === 'job.done' && m.jobId === 'j1')).toMatchObject({ ok: true, result: 'ready', error: null });
   });
 
   it('reports an empty list when every command is in the agent PATH', async () => {
@@ -431,11 +451,13 @@ describe('required commands', () => {
     const run = (jobId: string) => server.send({ type: 'job.run', jobId, subscriptionId: 's1', provider: 'anthropic_api', prompt: 'hi', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
     run('j1');
     await server.wait(() => server.received.some(m => m.type === 'job.done' && m.jobId === 'j1'));
+    expect(server.received.find(m => m.type === 'job.done' && m.jobId === 'j1')).toMatchObject({ ok: true, result: 'ready', error: null });
     expect(checks).toBe(1);
     release(['uptime']);
     await server.wait(() => server.received.some(m => m.type === 'status' && m.missing !== undefined));
     run('j2');
     await server.wait(() => server.received.some(m => m.type === 'job.done' && m.jobId === 'j2'));
+    expect(server.received.find(m => m.type === 'job.done' && m.jobId === 'j2')).toMatchObject({ ok: true, result: 'ready', error: null });
     expect(checks).toBe(1);
     expect(server.received.find(m => m.type === 'status' && m.missing !== undefined)).toMatchObject({ missing: [{ provider: 'anthropic_api', command: 'uptime' }] });
   });
