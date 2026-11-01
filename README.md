@@ -111,6 +111,14 @@ A department, or a product inside it, can name the git repository its agents wor
 
 Each agent gets its own clone in its own folder on the node before its first turn, keeps it between turns, and works in a branch per task. Nodes from 0.5.0 on take turns with a repository; an older node keeps them waiting until it is updated.
 
+### Test runs
+
+An agent runs the whole test suite of a branch with `run_tests`. The suite does not run on the agent's own machine: Hornhoof sends it to whichever machine of the company is freest at that moment, while the agents keep working where they are. A test runner that can split a suite runs it in parts, one part on each of several machines at once. Subscriptions shows how busy each machine is: its processors and their load, its free memory, and how many test runs and agent turns it has now.
+
+A machine takes a test run when it is online, is lent to test runs, runs no other test run and has enough free memory, and when its owner reaches the department whose repository is tested. Every machine is lent at first; its owner, or someone who sees the whole company, takes it back with the tick on the machine's card. The built-in node takes test runs too. A run needs 4 GB of free memory unless the repository's settings name another amount. When no machine is free, the run waits and starts on the first one that frees up; a part that finds none within 2 hours ends.
+
+There the branch is cloned into a fresh folder, the command runs in it as a user that reaches neither the node's key nor the agents' folders, for at most 30 minutes unless the agent asks for up to 120, and the folder is removed. When every part has ended, the agent is woken on its task with the result: passed or failed, which machine ran each part and for how long, and the last lines of what failed. The whole log of each part goes on the task as a file, like `tests-3-1.log`. `test_run` shows how a run goes and `stop_tests` stops it. The repository's token goes along to each machine that takes a run, so it reaches the lent machines of everyone who reaches the department. Nodes of an older build say nothing about their load and get no test runs until they are updated.
+
 ## Updates
 
 Hornhoof checks for a newer build every 30 minutes. People who see the whole company get a banner when one is out: "Update" moves to it now, "Update when agents finish" waits until no agent is working. Versions in the account menu lists the published builds with the one running now and goes back to an earlier one the same way.
