@@ -137,6 +137,15 @@ describe('job metadata export', () => {
     for (const path of paths) expect((await c.app.inject({ url: path, ...as(c.ceo) })).statusCode).toBe(400);
   });
 
+  it('marks empty start only for conversations', async () => {
+    const c = await company();
+    await c.db.insert(jobs).values({ companyId: c.acme.id, subscriptionId: c.sub.id, agentId: c.target.id, kind: 'test', prompt: '', status: 'queued', createdAt: new Date(Date.parse(FROM) + 1000), timeoutMs: 1000 });
+    const response = await c.app.inject({ url: metadataPath(c.target.id), ...as(c.ceo) });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().jobs).toHaveLength(1);
+    expect(response.json().jobs[0]).toMatchObject({ kind: 'test', empty_start: false });
+  });
+
   it('allows exactly forty rows', async () => {
     const c = await company();
     await c.db.insert(jobs).values(Array.from({ length: 40 }, (_, i) => ({ companyId: c.acme.id, subscriptionId: c.sub.id, agentId: c.target.id, kind: 'conversation' as const, prompt: 'hidden', status: 'queued' as const, createdAt: new Date(Date.parse(FROM) + 1000 + i * 1000), timeoutMs: 1000 })));

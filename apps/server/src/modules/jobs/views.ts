@@ -81,7 +81,7 @@ export async function jobMetadata(db: Db, agentId: string, from: string, to: str
              to_char(j.finished_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS finished_at,
              char_length(j.prompt) AS prompt_characters,
              md5(j.prompt) AS prompt_md5,
-             (j.prompt = '') AS empty_start,
+             (j.kind = 'conversation' AND j.prompt = '') AS empty_start,
              (j.prompt LIKE 'Earlier in this conversation, in another session you cannot see:%') AS recovery_prefix,
              (j.id IN (SELECT id FROM predecessor)) AS predecessor_before_window
       FROM public.jobs j CROSS JOIN bounds b
