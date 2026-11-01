@@ -60,6 +60,8 @@ export function AccessPicker({ org, value, onChange }: { org: Org | null; value:
                   <input type="checkbox" checked={on} onChange={e => pick(toggle(list.departments, d.id, e.target.checked), new Set(list.teams))} />
                   {deptLabel(t, d)}
                 </label>
+                {/* Its head reads Hornhoof's whole database, so this tick reaches more than the department. */}
+                {d.templateKey === 'operations' && <p className="hint">{t.people.opsReadsAll}</p>}
                 {d.teams.length > 0 && (
                   <ul>
                     {d.teams.map(team => (

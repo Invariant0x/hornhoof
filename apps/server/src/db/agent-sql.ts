@@ -4,57 +4,128 @@ import pg from 'pg';
 /* What one statement gave back: its rows, and how many rows it added, changed or removed. */
 export type SqlAnswer = { rows: Record<string, unknown>[]; changed: number };
 
-/* The orchestrator's own way into the database. Each call is one transaction under a role of its own. */
-export type AgentSql = { run: (text: string) => Promise<SqlAnswer[]>; close: () => Promise<void> };
+/* write: the orchestrator's, which reads and changes rows. read: the head of Operations', which only reads. */
+export type SqlMode = 'write' | 'read';
 
-/* Signing in, joining and installing a node stay out of reach, and so do passwords and the public link, whose address
-   goes into machine commands. */
-const HIDDEN = ['sessions', 'invites', 'node_codes', 'public_links'];
+/* Agents' own way into the database. Each call is one transaction under the role of its mode. */
+export type AgentSql = { run: (text: string, mode: SqlMode) => Promise<SqlAnswer[]>; close: () => Promise<void> };
+
+/* Signing in, joining and installing a node stay out of reach, and so does the public link, whose address goes into
+   machine commands. */
+export const HIDDEN = ['sessions', 'invites', 'node_codes', 'public_links'];
+/* Columns that hold a password, a token or a key: neither role reads or writes them. */
+export const SECRET: Record<string, string[]> = {
+  people: ['password_hash'],
+  jobs: ['tool_token_hash'],
+  subscriptions: ['node_key_hash', 'secret_enc'],
+  departments: ['repo_token_enc'],
+};
+/* An employee's fields that give it tools or a place: they change only by hiring and on its card, which make the CEO's
+   checks. A head's department is held by a trigger, as a column right cannot tell a head from a worker. */
+const AGENT_FIXED = ['kind', 'role_key', 'skills'];
+/* What of a turn the orchestrator may change, to close one that hangs. */
+const JOB_STATUS = ['status', 'error', 'finished_at'];
 const WRITES = new Set(['INSERT', 'UPDATE', 'DELETE', 'MERGE']);
 
-/* One role per database, so two Hornhoofs on one Postgres do not share it. */
-export const agentRole = (database: string) => `${database.toLowerCase().replace(/[^a-z0-9_]/g, '_')}_agent`.slice(0, 63);
+/* One pair of roles per database, so two Hornhoofs on one Postgres do not share them. */
+const roleOf = (database: string, suffix: string) => `${database.toLowerCase().replace(/[^a-z0-9_]/g, '_').slice(0, 63 - suffix.length)}${suffix}`;
+export const agentRole = (database: string) => roleOf(database, '_agent');
+export const readerRole = (database: string) => roleOf(database, '_reader');
 
-/* Makes the role or brings its rights up to date, for tables later updates added too: it reads and changes the rows of
-   every table but the hidden ones, and of people all but the password. It owns nothing, so it cannot change the tables
-   themselves, and as no superuser it reads no server files and runs no programs. A call may take 15 seconds and may not
-   sit in an open transaction. */
-export const grantsFor = (role: string) => `DO $grants$
-DECLARE t text; cols text;
+const quoted = (names: string[]) => `ARRAY[${names.map(n => `'${n}'`).join(', ')}]::text[]`;
+/* A table's columns but some, as SQL that lists them for a column grant. */
+const columns = (table: string, but: string[] = []) =>
+  `(SELECT string_agg(quote_ident(column_name), ', ') FROM information_schema.columns WHERE table_schema = 'public' AND table_name = '${table}' AND column_name <> ALL (${quoted(but)}))`;
+const visible = (table: string) => columns(table, SECRET[table] ?? []);
+
+/* Makes the role or brings its rights up to date, for tables later updates added too, starting from none. It owns
+   nothing, so it cannot change the tables themselves, and as no superuser it reads no server files and runs no programs.
+   A call may take 15 seconds and may not sit in an open transaction. */
+const role = (name: string, rights: string) => `DO $grants$
+DECLARE t text;
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${role}') THEN CREATE ROLE "${role}" NOLOGIN; END IF;
-  ALTER ROLE "${role}" SET statement_timeout = '15s';
-  ALTER ROLE "${role}" SET idle_in_transaction_session_timeout = '30s';
-  GRANT USAGE ON SCHEMA public TO "${role}";
-  FOR t IN SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename NOT IN (${[...HIDDEN, 'people'].map(t => `'${t}'`).join(', ')}) LOOP
-    EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON %I TO "${role}"', t);
-  END LOOP;
-  SELECT string_agg(quote_ident(column_name), ', ') INTO cols FROM information_schema.columns
-    WHERE table_schema = 'public' AND table_name = 'people' AND column_name <> 'password_hash';
-  EXECUTE format('GRANT SELECT (%s), INSERT (%s), UPDATE (%s), DELETE ON people TO "${role}"', cols, cols, cols);
-  GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO "${role}";
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${name}') THEN CREATE ROLE "${name}" NOLOGIN; END IF;
+  ALTER ROLE "${name}" SET statement_timeout = '15s';
+  ALTER ROLE "${name}" SET idle_in_transaction_session_timeout = '30s';
+  REVOKE ALL ON ALL TABLES IN SCHEMA public FROM "${name}";
+  REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM "${name}";
+  GRANT USAGE ON SCHEMA public TO "${name}";
+${rights}
 END $grants$`;
 
-/* The role signs in with a password made fresh at every start and kept only here, over its own small pool. Null, with a
+/* Every table but the hidden ones and those named, one by one. */
+const eachTable = (but: string[], grant: string) => `  FOR t IN SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename <> ALL (${quoted([...HIDDEN, ...but])}) LOOP
+    EXECUTE format('${grant}', t);
+  END LOOP;`;
+
+/* The orchestrator's role reads and changes the rows of every table but the hidden ones and the secrets, with these
+   exceptions. People and their access only change through the people tools, which make the CEO's checks. An employee
+   is added by hiring, keeps its kind, role and skills but by its card, and a head stays in its department. Of a turn
+   only its status changes, so no token is forged or swapped. */
+export const grantsFor = (name: string) =>
+  role(
+    name,
+    `${eachTable(['people', 'person_access', 'agents', 'jobs', ...Object.keys(SECRET)], `GRANT SELECT, INSERT, UPDATE, DELETE ON %I TO "${name}"`)}
+${['subscriptions', 'departments']
+  .map(table => `  EXECUTE format('GRANT SELECT (%1$s), INSERT (%1$s), UPDATE (%1$s), DELETE ON ${table} TO "${name}"', ${visible(table)});`)
+  .join('\n')}
+  EXECUTE format('GRANT SELECT (%s) ON people TO "${name}"', ${visible('people')});
+  GRANT SELECT ON person_access TO "${name}";
+  EXECUTE format('GRANT SELECT (%s), UPDATE (%s) ON agents TO "${name}"', ${visible('agents')}, ${columns('agents', AGENT_FIXED)});
+  EXECUTE format('GRANT SELECT (%s), UPDATE (${JOB_STATUS.join(', ')}) ON jobs TO "${name}"', ${visible('jobs')});
+  GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO "${name}";
+  EXECUTE $trigger$
+    CREATE OR REPLACE FUNCTION hornhoof_head_stays() RETURNS trigger LANGUAGE plpgsql AS $body$
+    BEGIN
+      RAISE EXCEPTION 'permission denied for table agents: a head stays in its department' USING ERRCODE = 'insufficient_privilege';
+    END $body$
+  $trigger$;
+  DROP TRIGGER IF EXISTS "${name}_head_stays" ON agents;
+  EXECUTE $trigger$
+    CREATE TRIGGER "${name}_head_stays" BEFORE UPDATE OF department_id ON agents FOR EACH ROW
+      WHEN (OLD.kind = 'head' AND OLD.department_id IS DISTINCT FROM NEW.department_id AND current_user = '${name}')
+      EXECUTE FUNCTION hornhoof_head_stays()
+  $trigger$;`,
+  );
+
+/* The head of Operations' role reads the rows of every table but the hidden ones and the secrets, and changes nothing:
+   it has no right to, and each of its transactions is read-only too, so a write is told apart from a closed table. */
+export const readerGrantsFor = (name: string) =>
+  role(
+    name,
+    `  ALTER ROLE "${name}" SET default_transaction_read_only = on;
+${eachTable(Object.keys(SECRET), `GRANT SELECT ON %I TO "${name}"`)}
+${Object.keys(SECRET)
+  .map(table => `  EXECUTE format('GRANT SELECT (%s) ON ${table} TO "${name}"', ${visible(table)});`)
+  .join('\n')}`,
+  );
+
+/* Each role signs in with a password made fresh at every start and kept only here, over its own small pool. Null, with a
    warning, when the database does not let Hornhoof make roles. */
 export async function openAgentSql(url: string): Promise<AgentSql | null> {
   const admin = new pg.Client({ connectionString: url });
-  try {
-    await admin.connect();
-    const role = agentRole((await admin.query<{ db: string }>('SELECT current_database() AS db')).rows[0]!.db);
+  const pools: pg.Pool[] = [];
+  const open = async (name: string, grants: string) => {
     const password = randomBytes(24).toString('hex');
-    await admin.query(grantsFor(role));
-    await admin.query(`ALTER ROLE "${role}" WITH LOGIN CONNECTION LIMIT 4 PASSWORD '${password}'`);
+    await admin.query(grants);
+    await admin.query(`ALTER ROLE "${name}" WITH LOGIN CONNECTION LIMIT 4 PASSWORD '${password}'`);
     const own = new URL(url);
-    own.username = role;
+    own.username = name;
     own.password = password;
     const pool = new pg.Pool({ connectionString: own.toString(), max: 2, idleTimeoutMillis: 60_000 });
-    pool.on('error', err => console.warn(`Lost the orchestrator's database connection, will open another: ${err.message}`));
+    pool.on('error', err => console.warn(`Lost an agent's database connection, will open another: ${err.message}`));
+    pools.push(pool);
+    return pool;
+  };
+  try {
+    await admin.connect();
+    const database = (await admin.query<{ db: string }>('SELECT current_database() AS db')).rows[0]!.db;
+    const byMode = { write: await open(agentRole(database), grantsFor(agentRole(database))), read: await open(readerRole(database), readerGrantsFor(readerRole(database))) };
     return {
-      run: async text => {
-        const client = await pool.connect();
+      run: async (text, mode) => {
+        const client = await byMode[mode].connect();
         try {
-          await client.query('BEGIN');
+          await client.query(mode === 'read' ? 'BEGIN READ ONLY' : 'BEGIN');
           const result = (await client.query(text)) as unknown as pg.QueryResult | pg.QueryResult[];
           await client.query('COMMIT');
           return (Array.isArray(result) ? result : [result]).map(r => ({ rows: r.rows ?? [], changed: WRITES.has(r.command) ? (r.rowCount ?? 0) : 0 }));
@@ -65,10 +136,13 @@ export async function openAgentSql(url: string): Promise<AgentSql | null> {
           client.release();
         }
       },
-      close: () => pool.end(),
+      close: async () => {
+        await Promise.all(pools.map(p => p.end()));
+      },
     };
   } catch (err) {
-    console.warn(`The orchestrator gets no database access: ${(err as Error).message}`);
+    await Promise.all(pools.map(p => p.end().catch(() => {})));
+    console.warn(`Agents get no database access: ${(err as Error).message}`);
     return null;
   } finally {
     await admin.end().catch(() => {});

@@ -67,6 +67,18 @@ describe('People', () => {
     expect(calls.find(c => c.method === 'POST')?.body).toMatchObject({ access: { departments: [], teams: ['t1'] } });
   });
 
+  it('warns next to the Operations tick that its head reads the whole company', async () => {
+    const ops = { ...ORG_WITH_TEAMS.departments[1]!, id: 'd9', name: null, templateKey: 'operations' as const, roleCode: 'OPS' };
+    mockApi({ 'GET /api/people': [200, { people: PEOPLE }], 'GET /api/org': [200, { ...ORG_WITH_TEAMS, departments: [...ORG_WITH_TEAMS.departments, ops] }] });
+    const user = userEvent.setup();
+    render(<People me={ME} />);
+    await user.click(await screen.findByRole('button', { name: 'Invite person' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Whole company' }));
+    const warning = /Operations reads all of Hornhoof's data/;
+    expect(screen.getByRole('checkbox', { name: 'Operations' }).closest('li')).toHaveTextContent(warning);
+    expect(screen.getByRole('checkbox', { name: 'Marketing' }).closest('li')).not.toHaveTextContent(warning);
+  });
+
   it('shows what each person can reach', async () => {
     const oleg: PersonView = { ...PEOPLE[2]!, id: 'p4', name: 'Oleg', email: 'oleg@acme.com', title: 'Product lead', access: { whole: false, departments: [{ id: 'd1', name: 'Marketing' }, { id: 'd2', name: 'Development' }], teams: [] } };
     mockApi({ 'GET /api/people': [200, { people: [...PEOPLE, oleg] }], 'GET /api/org': [200, ORG_WITH_TEAMS] });

@@ -325,6 +325,7 @@ describe('the orchestrator reads and changes the database itself', () => {
       expect(res.isError, sql).toBe(true);
       expect(text(res), sql).toMatch(/permission denied|must be owner/);
     }
+    expect(text(await call(client, 'database', { sql: 'SELECT * FROM sessions' }))).toContain('Sign-ins, invites, install codes and the public link are closed to this tool.');
     expect(JSON.parse(text(await call(client, 'database', { sql: 'SELECT name FROM people' })))[0].rows).toEqual([{ name: 'Ivan' }]);
   });
 
@@ -349,17 +350,91 @@ describe('the orchestrator reads and changes the database itself', () => {
     expect(text(res)).toContain('does not let Hornhoof');
   });
 
+  it("keeps people, their access, an employee's kind, role and skills, a head's department and turns' tokens out of its hands, and says why", async () => {
+    const { app, db, orchestrator, hana, bruno, dev, running } = await company();
+    const client = await mcp(app);
+    const [ivan] = await db.select().from(people);
+    const [design] = await db.insert(departments).values({ companyId: bruno.companyId, templateKey: 'design', roleCode: 'DES' }).returning();
+    await running(hana.id, 'tool-token-head-0123456789abcdef0123');
+    const refused: [string, RegExp][] = [
+      [`UPDATE people SET scope_kind = 'company', is_owner = true`, /people tools/],
+      [`INSERT INTO people (company_id, name, email, status, scope_kind) VALUES ('${ivan!.companyId}', 'Eve', 'eve@test', 'active', 'company')`, /people tools/],
+      [`INSERT INTO person_access (company_id, person_id, department_id) VALUES ('${ivan!.companyId}', '${ivan!.id}', '${dev.id}')`, /people tools/],
+      ['DELETE FROM person_access', /people tools/],
+      [`UPDATE agents SET kind = 'head' WHERE id = '${bruno.id}'`, /kind and role_key never change/],
+      [`UPDATE agents SET role_key = 'OPS-HEAD' WHERE id = '${hana.id}'`, /kind and role_key never change/],
+      [`UPDATE agents SET skills = '["ops-task-watch"]' WHERE id = '${bruno.id}'`, /change_employee/],
+      [`UPDATE agents SET department_id = '${design!.id}' WHERE id = '${hana.id}'`, /a head stays in its department/],
+      [`INSERT INTO agents (company_id, kind, name, model, role_key) VALUES ('${bruno.companyId}', 'head', 'Mole', '', 'OPS-HEAD')`, /hire/],
+      [`UPDATE jobs SET tool_token_hash = 'forged' WHERE agent_id = '${orchestrator.id}'`, /tool_token_hash/],
+      [`INSERT INTO jobs (company_id, subscription_id, agent_id, prompt, timeout_ms, status, tool_token_hash) SELECT company_id, subscription_id, agent_id, 'x', 1000, 'running', 'forged' FROM jobs LIMIT 1`, /tool_token_hash/],
+      ['SELECT tool_token_hash FROM jobs', /tool_token_hash/],
+      [`UPDATE subscriptions SET node_key_hash = 'forged'`, /node_key_hash/],
+    ];
+    for (const [sql, why] of refused) {
+      const res = await call(client, 'database', { sql });
+      expect(res.isError, sql).toBe(true);
+      expect(text(res), sql).toMatch(/permission denied/);
+      expect(text(res), sql).toMatch(why);
+    }
+    expect((await db.select().from(people)).map(p => [p.scopeKind, p.isOwner])).toEqual([[ivan!.scopeKind, ivan!.isOwner]]);
+    const [h, b] = [hana, bruno].map(async a => (await db.select().from(agents).where(eq(agents.id, a.id)))[0]!);
+    expect(await h).toMatchObject({ kind: 'head', roleKey: 'DEV-HEAD', departmentId: dev.id });
+    expect(await b).toMatchObject({ kind: 'worker', skills: bruno.skills });
+    const moved = await call(client, 'database', { sql: `UPDATE agents SET department_id = '${design!.id}' WHERE id = '${bruno.id}'` });
+    expect(JSON.parse(text(moved))).toEqual([{ rows: [], changed: 1 }]);
+    const failed = await call(client, 'database', { sql: `UPDATE jobs SET status = 'failed', error = 'Stuck.', finished_at = now() WHERE agent_id = '${hana.id}'` });
+    expect(JSON.parse(text(failed))).toEqual([{ rows: [], changed: 1 }]);
+  });
+
   it("is the orchestrator's and the head of Operations', no one else's", async () => {
     const { app, db, hana, bruno, running } = await company();
-    const [ops] = await db.insert(departments).values({ companyId: bruno.companyId, templateKey: 'operations', roleCode: 'OPS' }).returning();
-    const [wanda] = await db.insert(agents).values({ companyId: bruno.companyId, kind: 'head', name: 'Wanda', roleKey: 'OPS-HEAD', departmentId: ops!.id, model: '', subscriptionId: bruno.subscriptionId }).returning();
-    const tokens = { bruno: WORKER_TOKEN, hana: 'tool-token-head-0123456789abcdef0123', wanda: 'tool-token-ops-0123456789abcdef01234' };
+    const wanda = await opsHead(db, bruno);
+    const tokens = { bruno: WORKER_TOKEN, hana: 'tool-token-head-0123456789abcdef0123', wanda: OPS_TOKEN };
     await running(bruno.id, tokens.bruno);
     await running(hana.id, tokens.hana);
-    await running(wanda!.id, tokens.wanda);
+    await running(wanda.id, tokens.wanda);
     const has = async (token: string) => (await (await mcp(app, token)).listTools()).tools.some(t => t.name === 'database');
     expect([await has(tokens.bruno), await has(tokens.hana), await has(tokens.wanda)]).toEqual([false, false, true]);
     const read = await call(await mcp(app, tokens.wanda), 'database', { sql: `SELECT name FROM agents WHERE id = '${bruno.id}'` });
     expect(JSON.parse(text(read))).toEqual([{ rows: [{ name: 'Bruno' }], changed: 0 }]);
   });
+
+  it('lets the head of Operations read, but nothing hidden or secret, and change nothing', async () => {
+    const { app, db, bruno, task, running } = await company();
+    const wanda = await opsHead(db, bruno);
+    await running(wanda.id, OPS_TOKEN);
+    const client = await mcp(app, OPS_TOKEN);
+    const writes = [
+      `UPDATE agents SET name = 'Bruno Diaz' WHERE id = '${bruno.id}'`,
+      `UPDATE people SET scope_kind = 'company'`,
+      `DELETE FROM tasks WHERE id = '${task.id}'`,
+      `INSERT INTO companies (name) VALUES ('Other')`,
+      `SET TRANSACTION READ WRITE; UPDATE agents SET name = 'Bruno Diaz' WHERE id = '${bruno.id}'`,
+      'CREATE TABLE notes (id int)',
+    ];
+    for (const sql of writes) {
+      const res = await call(client, 'database', { sql });
+      expect(res.isError, sql).toBe(true);
+      expect(text(res), sql).toContain('Operations reads the database; a change goes to the orchestrator as one message with the SQL and why.');
+    }
+    for (const sql of ['SELECT * FROM sessions', 'SELECT * FROM invites', 'SELECT * FROM node_codes', 'SELECT * FROM public_links', 'SELECT password_hash FROM people', 'SELECT tool_token_hash FROM jobs', 'SELECT * FROM jobs']) {
+      const res = await call(client, 'database', { sql });
+      expect(res.isError, sql).toBe(true);
+      expect(text(res), sql).toMatch(/closed to this tool/);
+      expect(text(res), sql).not.toContain('Operations reads the database');
+    }
+    expect((await db.select().from(agents).where(eq(agents.id, bruno.id)))[0]!.name).toBe('Bruno');
+    expect((await db.select().from(tasks).where(eq(tasks.id, task.id))).length).toBe(1);
+    const read = await call(client, 'database', { sql: `SELECT status, error FROM jobs WHERE agent_id = '${wanda.id}'` });
+    expect(JSON.parse(text(read))).toEqual([{ rows: [{ status: 'running', error: null }], changed: 0 }]);
+  });
 });
+
+const OPS_TOKEN = 'tool-token-ops-0123456789abcdef01234';
+
+/* Wanda, the head of a new Operations department, on Bruno's subscription. */
+async function opsHead(db: Awaited<ReturnType<typeof company>>['db'], bruno: Awaited<ReturnType<typeof company>>['bruno']) {
+  const [ops] = await db.insert(departments).values({ companyId: bruno.companyId, templateKey: 'operations', roleCode: 'OPS' }).returning();
+  return (await db.insert(agents).values({ companyId: bruno.companyId, kind: 'head', name: 'Wanda', roleKey: 'OPS-HEAD', departmentId: ops!.id, model: '', subscriptionId: bruno.subscriptionId }).returning())[0]!;
+}

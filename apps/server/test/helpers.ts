@@ -10,7 +10,7 @@ import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import { inject, onTestFinished, vi } from 'vitest';
 import { buildApp, type Deps } from '../src/app.js';
 import { loadConfig, type Config } from '../src/config.js';
-import { agentRole, grantsFor, type AgentSql } from '../src/db/agent-sql.js';
+import { agentRole, grantsFor, readerGrantsFor, readerRole, type AgentSql } from '../src/db/agent-sql.js';
 import type { Db } from '../src/db/client.js';
 import * as schema from '../src/db/schema.js';
 import { setupCode } from '../src/modules/setup/code.js';
@@ -58,17 +58,18 @@ export async function createTestDb(): Promise<Db> {
   return db;
 }
 
-/* The orchestrator's database role on PGlite. PGlite has one user, a superuser, so the role is taken with SET LOCAL ROLE:
-   its rights hold, though a statement could take the superuser back, which on Postgres a separate sign-in rules out. */
+/* Agents' database roles on PGlite. PGlite has one user, a superuser, so a role is taken with SET LOCAL ROLE: its rights
+   hold, though a statement could take the superuser back, which on Postgres a separate sign-in rules out. */
 function agentSqlOn(client: PGlite): AgentSql {
-  const role = agentRole('postgres');
+  const roles = { write: agentRole('postgres'), read: readerRole('postgres') };
   let granted: Promise<unknown> | null = null;
   return {
-    run: async text => {
-      granted ??= client.exec(grantsFor(role));
+    run: async (text, mode) => {
+      granted ??= client.exec(`${grantsFor(roles.write)};\n${readerGrantsFor(roles.read)}`);
       await granted;
       return client.transaction(async tx => {
-        await tx.query(`SET LOCAL ROLE "${role}"`);
+        if (mode === 'read') await tx.query('SET TRANSACTION READ ONLY');
+        await tx.query(`SET LOCAL ROLE "${roles[mode]}"`);
         return (await tx.exec(text)).map(r => ({ rows: r.rows as Record<string, unknown>[], changed: r.affectedRows ?? 0 }));
       });
     },

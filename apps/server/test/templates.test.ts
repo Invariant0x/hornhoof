@@ -275,11 +275,13 @@ describe('templates', () => {
     expect(templates.roles.get('DEV-SEC')!.body).toMatch(/access, sign-in, secrets or permissions/);
   });
 
-  it('has Operations lead a problem: diagnosis split at once, the database read by the head, one message back', () => {
+  it('has Operations lead a problem: diagnosis split at once, the database only read by the head, one message back', () => {
     const head = templates.roles.get('OPS-HEAD')!.body;
     expect(head).toMatch(/"database"/);
     expect(head).toMatch(/one message/);
     expect(templates.skills.get('ops-intake')!.body).toMatch(/two or three members at once/);
+    /* Its tool only reads, so a change in the database goes to the orchestrator. */
+    for (const text of [head, templates.skills.get('ops-intake')!.body]) expect(text).toMatch(/only reads?[\s\S]*SQL and why/);
     for (const id of ['ops-intake', 'ops-incident-response']) expect(templates.skills.get(id)!.body, id).toMatch(/[Rr]ead-only diagnosis and small fixes need no gates/);
     expect(templates.skills.get('ops-incident-response')!.body).not.toMatch(/every hour/);
   });

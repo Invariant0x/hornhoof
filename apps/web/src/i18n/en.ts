@@ -149,6 +149,7 @@ export const en = {
     columns: { name: 'Name', title: 'Title', access: 'Access', status: 'Status', actions: 'Actions' },
     access: 'Access',
     accessHint: 'What they can see and who they can write to. A department includes its teams.',
+    opsReadsAll: "Operations reads all of Hornhoof's data, so a person with access to Operations can learn through its head what the other departments do.",
     accessEmpty: 'Tick at least one department or team.',
     wholeCompany: 'Whole company',
     linkFor: (name: string) => `Invite link for ${name}`,
