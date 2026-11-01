@@ -758,7 +758,8 @@ export class TerminalHost {
   async cancel(jobId: string): Promise<void> {
     const a = [...this.agents.values()].find(x => x.turn?.typed && x.turn.jobId === jobId);
     if (!a) return;
-    await this.opts.tmux.keys(a.name, 'Escape');
+    /* A session that is gone took its program with it; the turn ends all the same. */
+    await this.opts.tmux.keys(a.name, 'Escape').catch(() => {});
     a.busy = false;
     this.finishTyped(a, '', 'cancelled');
   }

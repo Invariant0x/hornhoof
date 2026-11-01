@@ -142,7 +142,8 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
       for (const m of outbox.splice(0)) emit(m);
       for (const m of unconfirmed.values()) next(m);
     },
-    onMessage: m => void handle(m),
+    /* One message that fails is logged; it never ends the node with all its runs. */
+    onMessage: m => void handle(m).catch(err => log(`A message from Hornhoof failed: ${message(err)}`)),
     onRefused: () => log('Hornhoof does not know this machine any more. Run the install command from Hornhoof again to reconnect.'),
   });
 

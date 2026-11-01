@@ -398,6 +398,22 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     expect(await host.run(job('a9', 'next', { sessionId: first.sessionId }))).toMatchObject({ ok: true, result: 'echo: next' });
   }, 30_000);
 
+  it('ends a typed turn it is asked to stop when its terminal is gone', async () => {
+    await setUp();
+    await host.run(job('a14', 'hello'));
+    await host.open({ type: 'term.open', termId: 't8', agentKey: 'a14', cols: 80, rows: 24, write: true });
+    host.input({ type: 'term.input', termId: 't8', data: 'HANG typed\r' });
+    await until(() => sent.some(m => m.type === 'turn.open'));
+    host.opened({ type: 'turn.opened', agentKey: 'a14', jobId: 'job-gone', toolToken: 'tok-gone' });
+    await until(() => host.typedJobs().includes('job-gone'));
+    tmux.keys = async () => {
+      throw new Error('no server running');
+    };
+    await host.cancel('job-gone');
+    expect(sent.find(m => m.type === 'job.done')).toMatchObject({ jobId: 'job-gone', ok: false, error: 'cancelled' });
+    expect(host.typedJobs()).toEqual([]);
+  }, 30_000);
+
   it('sends the answer of a typed turn before its end, though the program logs it late', async () => {
     await setUp();
     await host.run(job('a13', 'hello'));
