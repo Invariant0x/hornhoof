@@ -145,6 +145,18 @@ describe('a task that comes after others', () => {
     expect(launch.id).toBeTruthy();
   });
 
+  it('holds what it comes after as it is made, so one of them done at that moment still starts it', async () => {
+    const { bruno, tess, member } = await company();
+    const api = (await member('Checkout API', bruno.id)).task;
+    const seen = statements();
+    const tests = (await member('End-to-end tests', tess.id, [api.id])).task;
+    const held = seen.findIndex(s => /from "tasks" where "tasks"\."id" in \(\$1\).* for share$/.test(s.sql) && s.params[0] === api.id);
+    const made = seen.findIndex(s => s.sql.startsWith('insert into "tasks"'));
+    expect(held).toBeGreaterThanOrEqual(0);
+    expect(held).toBeLessThan(made);
+    expect(tests.after).toEqual([api.id]);
+  });
+
   it('starts at once when what it comes after is done already', async () => {
     const { ctx, bruno, rita, tess, member } = await company();
     const api = (await member('Checkout API', bruno.id)).task;

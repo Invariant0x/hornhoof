@@ -78,10 +78,12 @@ async function refuseWaiting(db: Db | Tx, task: Task): Promise<void> {
   if (open.length) throw refuse(409, 'task_invalid', `#${task.number} waits for ${listed(open)} first. You are woken once it can start.`);
 }
 
-/* What a task comes after: tasks of the company in its own turn, each once and none cancelled. */
-async function checkAfter(db: Db | Tx, companyId: string, turnId: string | null, ids: string[]): Promise<Task[]> {
+/* What a task comes after: tasks of the company in its own turn, each once and none cancelled. hold: they stay as read
+   until the transaction ends, so none is done meanwhile unseen. */
+async function checkAfter(db: Db | Tx, companyId: string, turnId: string | null, ids: string[], hold = false): Promise<Task[]> {
   if (new Set(ids).size !== ids.length) throw refuse(400, 'task_invalid', 'A task it comes after is listed twice.');
-  const rows = ids.length ? await db.select().from(tasks).where(inArray(tasks.id, ids)) : [];
+  const read = db.select().from(tasks).where(inArray(tasks.id, ids));
+  const rows = ids.length ? await (hold ? read.orderBy(asc(tasks.id)).for('share') : read) : [];
   for (const id of ids) {
     const t = rows.find(r => r.id === id);
     if (!t || t.companyId !== companyId) throw refuse(400, 'task_invalid', `There is no task ${id} to come after.`);
@@ -322,7 +324,9 @@ export async function createTask(ctx: Live, actor: Actor, input: NewTask): Promi
     const [last] = await tx.select({ n: max(tasks.number) }).from(tasks).where(eq(tasks.companyId, assignee.companyId));
     const [turn] = parent ? [] : await tx.select({ id: turns.id }).from(turns).where(and(eq(turns.companyId, assignee.companyId), eq(turns.status, 'open')));
     const turnId = parent ? parent.turnId : (turn?.id ?? null);
-    const after = await checkAfter(tx, assignee.companyId, turnId, input.after ?? []);
+    /* One of them done at this moment would not see the new task wait for it, so they are held while it is decided
+       whether it waits: that one is done after the task is made, and starts it. */
+    const after = await checkAfter(tx, assignee.companyId, turnId, input.after ?? [], true);
     await refuseAbove(tx, parent?.id ?? null, input.after ?? []);
     waits = after.some(t => t.status !== 'done');
     const [row] = await tx
