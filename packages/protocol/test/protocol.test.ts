@@ -237,6 +237,33 @@ describe('models', () => {
     expect(effortsOf([{ id: 'c', name: 'C' }], '')).toEqual([]);
   });
 
+  it('takes an empty list of efforts as none known, and an unknown model as the Default', () => {
+    /* No efforts known: a picked level goes through, Kimi runs at max. */
+    expect(effortFor('codex', 'high', [])).toBe('high');
+    expect(effortFor('kimi', null, [])).toBe('max');
+    expect(defaultEffortOf('kimi', [], 'k2')).toBe('max');
+    /* A model that names no levels does not narrow what the Default model takes. */
+    const models = [
+      { id: 'a', name: 'A', efforts: ['low', 'high'] },
+      { id: 'e', name: 'E', efforts: [] },
+    ];
+    expect(effortsOf(models, 'e')).toEqual([]);
+    expect(effortsOf(models, '')).toEqual(['low', 'high']);
+    /* A model the subscription does not run has no default of its own. */
+    expect(defaultEffortOf('codex', [{ id: 'gpt-6.1-sol', name: 'Sol', defaultEffort: 'low' }], 'gone')).toBeNull();
+    expect(defaultEffortOf('claude', [], 'gone')).toBeNull();
+    expect(defaultEffortOf('kimi', [{ id: 'k', name: 'K', efforts: ['low', 'high'] }], 'gone')).toBe('high');
+  });
+
+  it('keeps the shared levels of the Default model in the order the first model lists them', () => {
+    const models = [
+      { id: 'a', name: 'A', efforts: ['high', 'low', 'max'] },
+      { id: 'b', name: 'B', efforts: ['max', 'low', 'high', 'xhigh'] },
+    ];
+    expect(effortsOf(models, null)).toEqual(['high', 'low', 'max']);
+    expect(defaultEffortOf('kimi', [{ id: 'k', name: 'K', efforts: ['high', 'low'] }, { id: 'j', name: 'J', efforts: ['low', 'high'] }], '')).toBe('low');
+  });
+
   it('gives the web the same effort rule from a module without the message schemas', () => {
     expect(light).toBe(effortsOf);
   });
