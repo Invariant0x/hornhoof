@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import { agents, departments, companies, nodeCodes, nodes, people, subscriptions } from '../src/db/schema.js';
-import { as, invitePerson, setUpCompany, testApp } from './helpers.js';
+import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until } from './helpers.js';
 
 const MACHINE = { machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' };
 
@@ -94,6 +94,67 @@ describe('POST /api/nodes/join', () => {
     const late = await join(app, codeOf(extra.json().command), { machineId: 'other-machine-01' });
     expect(late.statusCode).toBe(410);
     expect(late.json().error.reason).toBe('code_used');
+  });
+});
+
+describe('a machine without a plan', () => {
+  const machineCommand = async (app: FastifyInstance, token: string) => {
+    const res = await app.inject({ method: 'POST', url: '/api/machines/command', ...as(token) });
+    expect(res.statusCode).toBe(201);
+    return codeOf(res.json().command);
+  };
+
+  it('joins with a command of its own and gets a node of its own, which no plan needs', async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    const res = await join(app, await machineCommand(app, ceo), {}, { accept: 'text/plain' });
+    expect(res.statusCode).toBe(200);
+    const [line] = res.body.trim().split('\n');
+    expect(res.body.trim().split('\n')).toHaveLength(1);
+    const [nodeId, word, key] = line!.split(' ');
+    expect(word).toBe('machine');
+    expect(key).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    const [node] = await db.select().from(nodes).where(eq(nodes.id, nodeId!));
+    expect(node).toMatchObject({ subscriptionId: null });
+    expect(await machinesOf(app, ceo)).toMatchObject([{ id: node!.machineId, hostname: 'ivan-mac', owner: { name: 'Ivan' }, online: false, subscriptions: 0 }]);
+    expect(await db.select().from(subscriptions).where(eq(subscriptions.kind, 'personal'))).toEqual([]);
+  });
+
+  it('shows the machine online while its node is connected, and disconnects it as any other', async () => {
+    const { app, db } = await testApp();
+    const url = await listen(app);
+    const ceo = await setUpCompany(app);
+    const { machine, nodes: made } = (await join(app, await machineCommand(app, ceo))).json();
+    expect(made).toMatchObject([{ subscriptionId: null, provider: 'machine' }]);
+    const node = await connectNode(url, made[0].key);
+    node.send({ type: 'hello', version: '0.9.0', loggedIn: true, running: [] });
+    await until(async () => (await db.select().from(nodes).where(eq(nodes.id, made[0].nodeId)))[0]!.version === '0.9.0');
+    expect((await db.select().from(nodes).where(eq(nodes.id, made[0].nodeId)))[0]).toMatchObject({ status: 'ready' });
+    expect((await machinesOf(app, ceo))[0].online).toBe(true);
+    expect((await app.inject({ method: 'POST', url: `/api/machines/${machine.id}/disconnect`, ...as(ceo) })).statusCode).toBe(204);
+    expect(await node.closed).toBe(4001);
+    expect(await machinesOf(app, ceo)).toEqual([]);
+  });
+
+  it('keeps its node when it joins again, with a new key', async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    const first = (await join(app, await machineCommand(app, ceo))).json().nodes[0];
+    const again = (await join(app, await machineCommand(app, ceo))).json().nodes[0];
+    expect(again.nodeId).toBe(first.nodeId);
+    expect(again.key).not.toBe(first.key);
+    expect(await db.select().from(nodes)).toHaveLength(1);
+  });
+
+  it('is made by anyone in the company for their own machine', async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    const [company] = await db.select().from(companies);
+    const [dept] = await db.insert(departments).values({ companyId: company!.id, name: 'Sales', roleCode: 'CSO' }).returning();
+    const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { departments: [dept!.id] } });
+    expect((await join(app, await machineCommand(app, maria))).statusCode).toBe(200);
+    expect(await machinesOf(app, maria)).toMatchObject([{ owner: { name: 'Maria' }, subscriptions: 0 }]);
+    expect((await app.inject({ method: 'POST', url: '/api/machines/command' })).statusCode).toBe(401);
   });
 });
 

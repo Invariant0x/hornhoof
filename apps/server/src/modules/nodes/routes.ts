@@ -6,11 +6,13 @@ import type { Ctx } from '../../app.js';
 import { requirePerson } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
-import { machines, nodeCodes, nodes, people, subscriptions } from '../../db/schema.js';
+import { machines, nodeCodes, nodes, people, subscriptions, type Provider } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { publicUrl } from '../link/link.js';
 import { together } from '../testruns/load.js';
 import { pumpTests } from '../testruns/runs.js';
+import { createNodeCode } from './codes.js';
+import { installCommand } from './command.js';
 import { disconnectMachines } from './disconnect.js';
 import { BUILTIN, nodeIdentity } from './hub.js';
 import { liveNode, settlePlans } from './nodes.js';
@@ -73,7 +75,9 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
             isNull(subscriptions.removedAt),
           ),
         );
-      if (subs.length === 0) throw codeUsed();
+      /* A code with no subscriptions connects the machine alone. */
+      const alone = code.subscriptionIds.length === 0;
+      if (!alone && subs.length === 0) throw codeUsed();
 
       const details = { hostname: body.hostname, os: body.os, arch: body.arch };
       const [machine] = await tx
@@ -82,8 +86,15 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
         .onConflictDoUpdate({ target: [machines.personId, machines.machineKey], set: { ...details, revokedAt: null } })
         .returning({ id: machines.id });
 
+      /* The machine's own node has no plan: it takes test runs, and the machine its owner's plans later. */
+      if (alone) {
+        const key = newToken();
+        const nodeId = await keyNode(tx, { companyId: code.companyId, machineId: machine!.id, subscriptionId: null }, hashToken(key));
+        return { machine: { id: machine!.id }, nodes: [{ nodeId, subscriptionId: null, provider: 'machine' as const, key }] };
+      }
+
       /* Claimed only while still waiting, so a second code for the same subscription cannot take it at the same time. */
-      const made = [];
+      const made: { nodeId: string; subscriptionId: string | null; provider: Provider | 'machine'; key: string }[] = [];
       for (const sub of subs) {
         const key = newToken();
         const claimed = await tx
@@ -105,6 +116,14 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
       return reply.type('text/plain; charset=utf-8').send(joined.nodes.map(n => `${n.nodeId} ${n.provider} ${n.key}\n`).join(''));
     }
     return joined;
+  });
+
+  /* A command for a machine of one's own that joins without a plan. */
+  app.post('/api/machines/command', async (req, reply) => {
+    const me = await requirePerson(req, db);
+    const code = await createNodeCode(db, { companyId: me.companyId, personId: me.id, subscriptionIds: [] });
+    reply.code(201);
+    return { command: installCommand(await publicUrl(db, config), code) };
   });
 
   app.get('/api/machines', async req => {
