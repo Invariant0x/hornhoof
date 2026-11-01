@@ -8,6 +8,7 @@ import { Bar, percent } from '../ui/Bar';
 import { CommandBox } from '../ui/CommandBox';
 import { ConnectPanel } from '../ui/ConnectPanel';
 import { Edge } from '../ui/Edge';
+import { ResetTime, resetDurationAt, useNow } from '../ui/reset';
 
 const POLL_MS = 1000;
 const POLL_LIMIT_MS = 150_000;
@@ -54,7 +55,7 @@ function windowName(t: Messages, name: string): string {
 const MAIN_WINDOWS = ['five_hour', 'seven_day'];
 
 /* A window that started over since the plan last spoke: its share is not known again until the plan speaks. */
-const startedOver = (w: Limits['windows'][number]) => w.resetsAt !== null && Date.parse(w.resetsAt) <= Date.now();
+const startedOver = (w: Limits['windows'][number], now: number) => w.resetsAt !== null && Date.parse(w.resetsAt) <= now;
 const until = (w: Limits['windows'][number]) => (w.resetsAt ? Date.parse(w.resetsAt) : Infinity);
 
 /* Each window of the plan's limits as a bar with its share: five hours and seven days always, empty when the plan has
@@ -62,13 +63,13 @@ const until = (w: Limits['windows'][number]) => (w.resetsAt ? Date.parse(w.reset
    the fullest resets. A key pays as it goes. */
 function LimitBars({ sub }: { sub: SubView }) {
   const t = useT();
-  const { language } = useLanguage();
+  const now = useNow();
   if (sub.kind === 'api_key') return <small className="limits">{t.subs.noPlanLimits}</small>;
   const limits: Limits | null = sub.limits;
   /* A plan stops at a full window, or at one it names without a share. It stays at its limit until each such window
      starts over, and says when the last one does; with no such window it stays until it says otherwise. */
   const causes = (limits?.windows ?? []).filter(w => w.utilization === null || w.utilization >= 1);
-  const open = causes.filter(w => !startedOver(w)).sort((a, b) => until(b) - until(a));
+  const open = causes.filter(w => !startedOver(w, now)).sort((a, b) => until(b) - until(a));
   const reached = limits?.status === 'rejected' && (!causes.length || open.length > 0);
   const top = open[0] ?? [...(limits?.windows ?? [])].sort((a, b) => (b.utilization ?? -1) - (a.utilization ?? -1))[0];
   const rows = [
@@ -77,25 +78,25 @@ function LimitBars({ sub }: { sub: SubView }) {
   ];
   return (
     <>
-      {reached && <small className="limits">{t.subs.limitReached(clock(language, top?.resetsAt ?? null))}</small>}
+      {reached && <small className="limits">{t.subs.limitReached(resetDurationAt(t, top?.resetsAt ?? null, now))}</small>}
       <ul className="limit-bars" aria-label={t.subs.limits}>
         {rows.map(({ name, window: w }) => {
-          if (!w || w.utilization === null || startedOver(w)) {
+          if (!w || w.utilization === null || startedOver(w, now)) {
             return (
               <li key={name}>
                 <span>{windowName(t, name)}</span>
                 <span className="bar none" />
                 <em>{limits?.complete && !w ? t.subs.notOnPlan : t.subs.noDataYet}</em>
+                {w && <ResetTime at={w.resetsAt} now={now} />}
               </li>
             );
           }
-          const at = clock(language, w.resetsAt);
           return (
             <li key={name}>
               <span>{windowName(t, name)}</span>
               <Bar used={w.utilization} />
               <b>{percent(w.utilization)}%</b>
-              {at && <span>{t.subs.resetsAt(at)}</span>}
+              <ResetTime at={w.resetsAt} now={now} />
             </li>
           );
         })}
