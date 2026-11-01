@@ -234,7 +234,7 @@ describe('install.sh', () => {
   });
 
   it('removes the nodes Hornhoof removed, with their volumes', () => {
-    const r = install({ env: { STUB_CONTAINERS: 'hornhoof-kimi-00000000', STUB_REMOVED: 'hornhoof-kimi-00000000' } });
+    const r = install({ env: { STUB_CONTAINERS: `hornhoof-kimi-00000000=${SERVER}`, STUB_REMOVED: 'hornhoof-kimi-00000000' } });
     expect(r.code).toBe(0);
     expect(r.calls).toContain('docker rm -f hornhoof-kimi-00000000');
     expect(r.calls).toContain('docker volume rm hornhoof-kimi-00000000');
@@ -261,7 +261,7 @@ describe('install.sh', () => {
   });
 
   it('updates the nodes on this machine when run without a code', () => {
-    const r = install({ args: [], env: { STUB_CONTAINERS: 'hornhoof-claude-1c07dac4', STUB_STATUS: 'needs_login' } });
+    const r = install({ args: [], env: { STUB_CONTAINERS: `hornhoof-claude-1c07dac4=${SERVER}`, STUB_STATUS: 'needs_login' } });
     expect(r.code).toBe(0);
     expect(r.calls.some(c => c.includes('/api/nodes/join'))).toBe(false);
     expect(r.calls).toContain('docker rm -f hornhoof-claude-1c07dac4');
@@ -321,7 +321,7 @@ describe('install.sh', () => {
   });
 
   it('removes the labelled containers on --uninstall after a y', () => {
-    const r = install({ args: ['--uninstall'], tty: 'y\n', env: { STUB_CONTAINERS: 'hornhoof-claude-1c07dac4 hornhoof-codex-9f1e2d3c' } });
+    const r = install({ args: ['--uninstall'], tty: 'y\n', env: { STUB_CONTAINERS: `hornhoof-claude-1c07dac4=${SERVER} hornhoof-codex-9f1e2d3c=${SERVER}` } });
     expect(r.code).toBe(0);
     expect(r.calls).toContain('docker rm -f hornhoof-claude-1c07dac4');
     expect(r.calls).toContain('docker rm -f hornhoof-codex-9f1e2d3c');
@@ -342,8 +342,23 @@ describe('install.sh', () => {
     expect(r.out).not.toContain('hornhoof-codex-9f1e2d3c');
   });
 
+  it('leaves a node alone on --uninstall when it cannot tell which server the node works for, and says so', () => {
+    const r = install({ args: ['--uninstall'], tty: 'y\ny\n', env: { STUB_CONTAINERS: `hornhoof-claude-1c07dac4=${SERVER} hornhoof-kimi-00000000` } });
+    expect(r.code).toBe(0);
+    expect(r.calls).toContain('docker rm -f hornhoof-claude-1c07dac4');
+    expect(r.calls).toContain('docker volume rm hornhoof-claude-1c07dac4');
+    expect(r.calls.some(c => c.includes('hornhoof-kimi-00000000') && /docker (rm|volume rm|run)/.test(c))).toBe(false);
+    expect(r.out).toContain('Leaving hornhoof-kimi-00000000 as it is: it does not say which Hornhoof it works for.');
+  });
+
   it('updates only this server\'s nodes, and the ones from before servers were named', () => {
-    const r = install({ args: [], env: { STUB_CONTAINERS: `hornhoof-claude-1c07dac4=${SERVER} hornhoof-codex-9f1e2d3c=https://other.example.test hornhoof-kimi-00000000` } });
+    const r = install({
+      args: [],
+      env: {
+        STUB_CONTAINERS: `hornhoof-claude-1c07dac4=${SERVER} hornhoof-codex-9f1e2d3c=https://other.example.test hornhoof-kimi-00000000`,
+        STUB_NODE_SERVERS: `hornhoof-kimi-00000000=${SERVER}`,
+      },
+    });
     expect(r.code).toBe(0);
     expect(r.calls.some(c => c.startsWith('docker run -d --name hornhoof-claude-1c07dac4'))).toBe(true);
     expect(r.calls.some(c => c.startsWith('docker run -d --name hornhoof-kimi-00000000') && c.includes(`--label hornhoof.server=${SERVER}`))).toBe(true);

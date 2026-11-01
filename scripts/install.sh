@@ -290,8 +290,8 @@ start_node() {
 node_status() { "${DOCKER[@]}" exec "$1" node "$NODE_MAIN" status 2> /dev/null || echo offline; }
 
 # This server's nodes on this machine as "name:id" words. A node from before nodes carried their server is this
-# server's unless its own settings name another one. A script that does not know its server (downloaded on its own)
-# sees every node.
+# server's when its own settings name this server. One whose settings cannot be read may work for another company on
+# this computer, so it is left alone. A script that does not know its server (downloaded on its own) sees every node.
 existing_nodes() {
   local known=1 own
   case "$SERVER" in __HORNHOOF_* | '') known='' ;; esac
@@ -302,7 +302,11 @@ existing_nodes() {
       if [ -n "$known" ] && [ -n "$server" ] && [ "$server" != "$SERVER" ]; then continue; fi
       if [ -n "$known" ] && [ -z "$server" ]; then
         own=$("${DOCKER[@]}" exec "$name" cat /data/node.json 2> /dev/null | sed -n 's/^ *"server": *"\([^"]*\)".*/\1/p')
-        if [ -n "$own" ] && [ "$own" != "$NODE_SERVER" ]; then continue; fi
+        if [ -z "$own" ]; then
+          say "Leaving $name as it is: it does not say which Hornhoof it works for. If it is stopped, start it with docker start $name and run this command again." >&2
+          continue
+        fi
+        if [ "$own" != "$NODE_SERVER" ]; then continue; fi
       fi
       printf '%s:%s ' "$name" "$id"
     done
