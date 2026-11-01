@@ -6,7 +6,7 @@ Status: PROPOSED, statically reviewable, not published and not run. This is a re
 
 Use one manual, tests-only GitHub Actions job on the existing repository's GitHub-hosted `ubuntu-24.04` runner. Start with the Codex lane because task 63 established package metadata for it. Fetch verified artifacts on the disposable host, then run the actual CLI and synthetic model stub together in one non-root container with `--network=none`. Docker creates only a loopback device in that network namespace, so the stub remains reachable while external egress is denied to the CLI and all descendants.
 
-The job does not push images or tags, use `latest`, update Hornhoof, mount company or agent credentials, mount a host home or socket, or mount the Docker socket inside the probe. It does not alter `images.yml`, production Dockerfiles or provider code. No self-hosted runner, host capability, coordinator or interception service is added.
+The B0 job itself does not push images or tags, use `latest`, update Hornhoof, mount company or agent credentials, mount a host home or socket, or mount the Docker socket inside the probe. It does not alter `images.yml`, production Dockerfiles or provider code. No self-hosted runner, host capability, coordinator or interception service is added. Publishing its workflow to main has a separate unavoidable Images effect, explicitly gated below.
 
 The first dispatch is `isolation`, then `codex-positive`, and only then `codex-d2`. Resource-ready is not B0-ready. All six native/API lanes and model counts remain as recorded in `coverage.json` until separate actual qualification.
 
@@ -53,6 +53,19 @@ The runbook therefore uses `ref=main` and a separate `approved_commit` input. Th
 
 This guards an ordinary approval-to-dispatch race. A workflow can always be changed by someone who controls the default branch, so a self-check is not a security boundary against a malicious writer. Protected main, reviewed workflow ownership and exact CEO commit approval are prerequisites; their current GitHub configuration is UNKNOWN and must be checked by Operations without changing it. Dispatching a SHA in the API `ref` field is not a supported substitute.
 
+## Bootstrap publication and Images side effect
+
+The required default-branch bootstrap is not isolated from the existing `Images` workflow. At the reviewed source, `.github/workflows/images.yml:3-5` triggers on every push to main. After its tests, `.github/workflows/images.yml:25-30,55-73` builds with `push: true` and publishes `latest`, package-version and commit-SHA tags using the existing Images job's `packages:write` permission. Adding `b0-probe.yml` to main therefore has an Images effect even though the B0 job itself never publishes anything.
+
+The exact publication route is therefore blocked by default and requires two explicit decisions before merge:
+
+1. The Head of Development presents the exact B0 bootstrap commit and, separately, the unavoidable Images run and its `latest`, version and SHA tags. The CEO must approve both the exact commit and this Images effect. Approval of B0 alone is not approval to publish Images.
+2. If the CEO approves B0 but not the Images effect, publication remains BLOCKED. Operations must not merge, use a Contents API workaround, disable Images or change its triggers in this task. A different repository or runner would require a new proposal and review.
+3. Only after both approvals may Operations use the normal exact-commit merge path. Before merge, Operations verifies that `images.yml` at the approved commit still has the reviewed behavior. After merge, Operations records the Images run ID, watches it to a natural result and verifies the resulting run and tags against that approval.
+4. B0 dispatch remains blocked until the Images result is observed and accepted under the separate approval. If Images fails or its behavior differs, stop; any revert, rerun or follow-up is another reviewed decision. No automatic B0 dispatch follows the main merge.
+
+This makes the Images effect an explicit release decision, not a hidden side effect of introducing a tests-only workflow. The proposal does not modify Images or request a new packages scope for the B0 runtime.
+
 ## CLI and runtime identity
 
 The initial lane uses `@openai/codex` package version `0.166.0` and native package version `0.166.0-linux-x64`. Registry SHA-512 integrity is checked before extraction. The launcher SHA-256 is `e14fc83739c13c1074b12bd1acce4010c893c7f6fbfc1593b4a31d74cabb57af`; the actual native executable SHA-256 is `b8a11fedf24b2dfb59a70c9e52b030f9a508dcd49cd2dd0d41956f4c785156b8`. These are different identities, not interchangeable package labels.
@@ -61,7 +74,7 @@ The Node container digest and all byte sizes are in `pins.json`. Runtime Node an
 
 ## Permissions and missing service capability
 
-`permissions.json` is the authoritative existing/required/unknown matrix. The runtime job receives only `contents:read` and `artifact-metadata:write`; all unspecified `GITHUB_TOKEN` scopes are none. No packages, administration, deployment, attestation, OIDC or runtime workflow-write scope is requested.
+`permissions.json` is the authoritative existing/required/unknown matrix. The B0 runtime job receives only `contents:read`; all unspecified `GITHUB_TOKEN` scopes are none. The pinned artifact upload uses the runner-provided `ACTIONS_RUNTIME_TOKEN` path, so no `artifact-metadata` scope is requested. No packages, administration, deployment, attestation, OIDC or runtime workflow-write scope is requested.
 
 Publication requires Contents write and Workflows write for the principal that updates the workflow. Dispatch and cancel require Actions write. Reading runs, logs and artifacts requires Actions read. These repository permissions are not limited to one workflow even when the credential is limited to this repository.
 
@@ -72,15 +85,15 @@ The one minimal future infrastructure step is for the technical GitHub repositor
 ## Runbook after this proposal is accepted
 
 1. **Implementation, Development native-harness author:** in a new task and branch, add the exact workflow and required harness files, write failing static/fixture tests first, review the output allowlist and complete the normal root and independent gates. Keep the workflow outside `.github/workflows` until that implementation is approved. Deliverable: exact candidate commit and checksum manifest.
-2. **Setup, Operations with the technical repository owner:** verify the service principal, effective permissions, hosted-runner Docker availability and protected-main/workflow review configuration using read-only metadata. Request only the missing repository-scoped permissions through the separate approval path. Do not add a host, capability, provider account or personal credential. Deliverable: allowlisted principal and permission evidence, with secrets omitted.
-3. **Approval, Head of Development and CEO:** the head presents the exact implementation commit and permission diff. The CEO approves or rejects the exact commit and any permission change. No server search, SQL, CLI or dispatch is delegated to the CEO. Deliverable: recorded exact-commit approval.
-4. **Dispatch, Operations:** after that exact commit reaches main through the normal approval path, call `POST /repos/Invariant0x/hornhoof/actions/workflows/b0-probe.yml/dispatches` with `ref: main` and inputs `approved_commit: <the same 40-character SHA>` and `suite: isolation`. Repeat later only with explicit authorization for `codex-positive`, then `codex-d2`. Read back run ID, `head_sha`, inputs and status; mismatch or timeout is a blocker. Deliverable: run identifiers and UTC, never tokens.
+2. **Setup, Operations with the technical repository owner:** verify the service principal, effective permissions, hosted-runner Docker availability and protected-main/workflow review configuration using read-only metadata. Read the exact `images.yml` at the candidate commit and record the expected Images side effect without running it. Request only the missing repository-scoped permissions through the separate approval path. Do not add a host, capability, provider account or personal credential. Deliverable: allowlisted principal, permission evidence and Images effect, with secrets omitted.
+3. **Approval, Head of Development and CEO:** the head presents two distinct decisions: the exact B0 implementation commit and permission diff, and the unavoidable Images run with `push: true` plus `latest`, version and SHA tags. The CEO must explicitly approve both before publication. If Images is not approved, the bootstrap remains blocked even when B0 is approved. No server search, SQL, CLI, merge or dispatch is delegated to the CEO. Deliverable: recorded separate exact-commit and Images approvals.
+4. **Dispatch, Operations:** only after both approvals, merge the exact commit through the normal path, record and watch the resulting Images run, and accept its observed behavior under that approval. Then call `POST /repos/Invariant0x/hornhoof/actions/workflows/b0-probe.yml/dispatches` with `ref: main` and inputs `approved_commit: <the same 40-character SHA>` and `suite: isolation`. Repeat later only with explicit authorization for `codex-positive`, then `codex-d2`. Read back run ID, `head_sha`, inputs and status; mismatch, unexpected Images behavior or timeout is a blocker. Deliverable: Images run and B0 run identifiers with UTC, never tokens.
 5. **Qualification, independent Architect and Security reviewers:** verify the run source, action and CLI hashes, fresh profile, isolation controls and allowlisted result. Require actual CLI positive count before interpreting denial. Keep every unexecuted lane and case `NOT_RUN` with null counts. Deliverable: a scoped PASS or precise GAP, not automatic closure of task 52 or D2.
-6. **Cleanup, Operations:** the job force-removes only its named container and disposable directories in `always()` cleanup. Let the one-day artifact expire; cancel only the identified run if it is stuck or unsafe. Reverting or disabling the workflow is a separate reviewed change, not an automatic deletion. Deliverable: observed container cleanup and artifact retention metadata.
+6. **Cleanup, Operations:** the job force-removes only its named container and disposable directories in `always()` cleanup. Let the one-day artifact expire; cancel only the identified run if it is stuck or unsafe. Reverting or disabling the workflow or Images is a separate reviewed change, not an automatic deletion. Deliverable: observed container cleanup and artifact retention metadata.
 
 ## PLANNED_NOT_RUN and real gaps
 
-No Docker, workflow dispatch, workflow run, provider CLI, model endpoint, OAuth, live setting, image publication, package installation or heavy suite was performed. Public registry artifacts were downloaded only for source hashing. The actual native harness and provider-supported blocking before-send point remain missing. Current GitHub service principal, repository visibility, effective permissions and branch protection remain unknown. The other five lanes still need their own pins and harnesses. No part of this proposal authorizes production enforcement or closes task 52.
+No Docker, workflow dispatch, workflow run, provider CLI, model endpoint, OAuth, live setting, image publication, package installation or heavy suite was performed. Public registry artifacts were downloaded only for source hashing. The actual native harness and provider-supported blocking before-send point remain missing. Current GitHub service principal, repository visibility, effective permissions and branch protection remain unknown. Bootstrap publication remains BLOCKED until the separate Images approval described above. The other five lanes still need their own pins and harnesses. No part of this proposal authorizes production enforcement or closes task 52.
 
 ## Official references
 
@@ -91,6 +104,6 @@ No Docker, workflow dispatch, workflow run, provider CLI, model endpoint, OAuth,
 - GitHub dispatch API and Actions write: https://docs.github.com/en/rest/actions/workflows?apiVersion=2022-11-28#create-a-workflow-dispatch-event
 - GitHub run read and cancel permissions: https://docs.github.com/en/rest/actions/workflow-runs?apiVersion=2022-11-28#cancel-a-workflow-run
 - GitHub workflow publication permissions: https://docs.github.com/en/rest/authentication/permissions-required-for-fine-grained-personal-access-tokens?apiVersion=2022-11-28#repository-permissions-for-workflows
-- Runtime token and artifact-metadata scopes: https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#defining-access-for-the-github_token-scopes
+- Runtime GITHUB_TOKEN scopes: https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#defining-access-for-the-github_token-scopes
 - Full-SHA action pinning: https://docs.github.com/en/actions/security-for-github-actions/security-guides/security-hardening-for-github-actions#pin-actions-to-a-full-length-commit-sha
 - Artifact retention and one-file upload: https://github.com/actions/upload-artifact

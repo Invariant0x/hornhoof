@@ -46,7 +46,14 @@
         "contents": "write",
         "workflows": "write"
       },
-      "notes": "Contents write is needed to update repository content. Workflows write is also required when the change updates .github/workflows. Branch protection and exact CEO commit approval still apply. Administration and packages are not required."
+      "notes": "Contents write is needed to update repository content. Workflows write is also required when the change updates .github/workflows. Branch protection and exact CEO commit approval still apply. Administration is not required. The existing Images packages:write effect is a separate approval below, not a B0 runtime scope."
+    },
+    {
+      "capability": "Publish bootstrap commit to main and its existing Images side effect",
+      "state": "REQUIRED_SEPARATE_HEAD_AND_CEO_APPROVAL",
+      "principal": "Head of Development presents the exact decision; CEO approves or rejects; Operations records the resulting run",
+      "repositoryPermissions": "The existing Images job already has contents:read and packages:write. No new B0 runtime scope is requested.",
+      "notes": "A main push triggers images.yml tests and then push=true image publication with latest, version and commit tags. B0 approval alone is not Images approval. Publication remains BLOCKED until separate explicit approval of the exact bootstrap commit and this Images effect. Do not change or disable Images in task73."
     },
     {
       "capability": "Dispatch the tests-only workflow",
@@ -87,18 +94,16 @@
     {
       "capability": "Upload one bounded result artifact",
       "state": "PROPOSED",
-      "principal": "Per-job GITHUB_TOKEN and the runner artifact capability injected into the pinned action",
-      "repositoryPermissions": {
-        "artifact-metadata": "write"
-      },
-      "notes": "Current GitHub workflow syntax describes artifact-metadata:write as creating storage records for a build artifact. The action receives no repository secret input. packages:write and actions:write are not granted to the runtime job."
+      "principal": "Runner-injected ACTIONS_RUNTIME_TOKEN through the pinned @actions/artifact path, not a repository secret supplied to the probe",
+      "repositoryPermissions": "none",
+      "notes": "The pinned upload source calls @actions/artifact uploadArtifact with the runner artifact capability. No artifact-metadata scope is requested. packages:write and actions:write are not granted to the B0 runtime job."
     },
     {
       "capability": "All other runtime repository scopes",
       "state": "PROPOSED",
       "principal": "Per-job GITHUB_TOKEN",
       "repositoryPermissions": "none",
-      "notes": "Listing contents:read and artifact-metadata:write sets unspecified scopes to none. No administration, packages, id-token, deployments, attestations or workflow write is requested."
+      "notes": "Listing only contents:read sets unspecified GITHUB_TOKEN scopes to none. No artifact-metadata, administration, packages, id-token, deployments, attestations or workflow write is requested."
     }
   ],
   "missingCapability": {

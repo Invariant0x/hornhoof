@@ -75,6 +75,8 @@
   ],
   "execution": {
     "workflowPublished": false,
+    "imagesPublicationApproved": false,
+    "imagesPublicationRunCompleted": false,
     "workflowDispatched": false,
     "dockerExecuted": false,
     "providerCliExecuted": false,

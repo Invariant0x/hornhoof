@@ -19,7 +19,6 @@ on:
 
 permissions:
   contents: read
-  artifact-metadata: write
 
 concurrency:
   group: b0-native-qualification
@@ -75,9 +74,9 @@ jobs:
           [[ "$(stat -c %s "$RUNNER_TEMP/codex-main.tgz")" == "4992" ]]
           [[ "$(stat -c %s "$RUNNER_TEMP/codex-native.tgz")" == "172325449" ]]
           node -e 'const fs=require("node:fs"),c=require("node:crypto");const [file,want]=process.argv.slice(1);const got="sha512-"+c.createHash("sha512").update(fs.readFileSync(file)).digest("base64");if(got!==want)throw new Error("Codex archive integrity mismatch")' \
-            "$RUNNER_TEMP/codex-main.tgz" '2Szlp1l1cz5TX1ccpX4Zok3DZrot9xeZe0km+6/1v8JmqxADwyJxKBJah4dBymkwtS25j/u6dipJusTOI97Z8Q=='
+            "$RUNNER_TEMP/codex-main.tgz" 'sha512-2Szlp1l1cz5TX1ccpX4Zok3DZrot9xeZe0km+6/1v8JmqxADwyJxKBJah4dBymkwtS25j/u6dipJusTOI97Z8Q=='
           node -e 'const fs=require("node:fs"),c=require("node:crypto");const [file,want]=process.argv.slice(1);const got="sha512-"+c.createHash("sha512").update(fs.readFileSync(file)).digest("base64");if(got!==want)throw new Error("Codex native archive integrity mismatch")' \
-            "$RUNNER_TEMP/codex-native.tgz" 'CxDm3+D1cpbGJeHrdzINoG+3wn9BVncP4qpZaaNYkxe8iPtRJOYyCJnnPoVjWRIBvI9vPKbRoifsMSA5xDaUpw=='
+            "$RUNNER_TEMP/codex-native.tgz" 'sha512-CxDm3+D1cpbGJeHrdzINoG+3wn9BVncP4qpZaaNYkxe8iPtRJOYyCJnnPoVjWRIBvI9vPKbRoifsMSA5xDaUpw=='
           tar -xzf "$RUNNER_TEMP/codex-main.tgz" -C "$CLI_ROOT/main" --no-same-owner --no-same-permissions
           tar -xzf "$RUNNER_TEMP/codex-native.tgz" -C "$CLI_ROOT/native" --no-same-owner --no-same-permissions
           mv "$CLI_ROOT/native/package/vendor" "$CLI_ROOT/main/package/vendor"
