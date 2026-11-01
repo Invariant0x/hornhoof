@@ -164,6 +164,10 @@ describe('templates', () => {
     const changed = 'git diff --name-only --diff-filter=d';
     for (const id of ['dev-engineering-rules', 'dev-review-diff', 'dev-test-gaps']) expect(templates.skills.get(id)!.body, id).toContain(changed);
     expect(templates.skills.get('dev-review-diff')!.body).toMatch(/crapper[\s\S]*dryer/);
+    /* They are as objective as a failing test, so they block; the developer runs them before submitting. */
+    expect(templates.skills.get('dev-review-diff')!.body).toMatch(/0\.8 or more, is blocking, like a failing test/);
+    expect(templates.skills.get('dev-review-diff')!.body).toMatch(/runs them before submitting/);
+    expect(templates.skills.get('dev-review-verdict')!.body).toMatch(/CRAP 10 or more[\s\S]*counts as a failing test/);
     expect(templates.skills.get('dev-test-gaps')!.body).toContain('mutator');
     for (const s of skills.filter(x => x.id.startsWith('dev-'))) expect(s.body, s.id).not.toMatch(/(crapper|dryer|mutator) --changed/);
     for (const id of ['DEV-ENG', 'DEV-BE', 'DEV-FE', 'DEV-REV', 'DEV-TEST', 'DEV-SEC', 'DEV-PERF']) expect(templates.roles.get(id)!.skills.find(s => s.id === 'dev-language-rules')?.on, id).toBe(true);
@@ -228,7 +232,7 @@ describe('templates', () => {
     const body = (id: string) => templates.skills.get(id)!.body;
     expect(role('DEV-ENG').body).toMatch(/whole feature: its plan, server, interface, tests and docs, on one branch/);
     expect(role('DEV-ENG').body).toMatch(/write each test before the code/);
-    for (const id of ['dev-implement', 'dev-frontend-ui', 'dev-browser-check']) expect(role('DEV-ENG').skills.find(k => k.id === id)?.on, id).toBe(true);
+    for (const id of ['dev-implement', 'dev-migrations', 'dev-frontend-ui', 'dev-browser-check']) expect(role('DEV-ENG').skills.find(k => k.id === id)?.on, id).toBe(true);
     expect(role('DEV-HEAD').body).toMatch(/different features to different developers all at once/);
     for (const text of [role('DEV-HEAD').body, body('hh-break-down')]) expect(text).toMatch(/touch the same files/);
     for (const text of [role('DEV-HEAD').body, role('DEV-ARCH').body, body('hh-break-down')]) expect(text).toMatch(/design note/);
