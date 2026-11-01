@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -23,6 +24,14 @@ function superpowers(): string {
 }
 
 const work = () => mkdtempSync(join(tmpdir(), 'hh-work-'));
+
+const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t', ...args], { cwd, encoding: 'utf8' });
+
+/* What git add -A in the repository would take in. */
+function added(repo: string): string[] {
+  git(repo, 'add', '-A');
+  return git(repo, 'diff', '--cached', '--name-only').split('\n').filter(Boolean);
+}
 
 describe('skills as files', () => {
   it('puts them where each program finds a project skill', () => {
@@ -69,6 +78,31 @@ describe('skills as files', () => {
     await placeSkills(ownFs, dir, 'claude', [TDD], sp);
     expect(existsSync(join(skills, 'brainstorming'))).toBe(false);
     expect(readdirSync(join(dir, '.claude', 'skills'))).toEqual(['dev-tdd']);
+  });
+
+  it('keeps them out of a repository the agent folder is part of, and only them', async () => {
+    const repo = work();
+    git(repo, 'init', '-q');
+    const dir = join(repo, 'work', 'agents', 'a [1]');
+    mkdirSync(join(dir, '.agents', 'skills', 'own'), { recursive: true });
+    writeFileSync(join(dir, '.agents', 'skills', 'own', 'SKILL.md'), 'mine');
+    await placeSkills(ownFs, dir, 'kimi', [TDD], superpowers());
+    expect(added(repo)).toEqual(['work/agents/a [1]/.agents/skills/own/SKILL.md']);
+    /* A turn later on another program, with other skills. */
+    await placeSkills(ownFs, dir, 'claude', [DOCS], null);
+    expect(added(repo)).toEqual(['work/agents/a [1]/.agents/skills/own/SKILL.md']);
+  });
+
+  it('keeps them out of the agent folder made a repository, and of a worktree', async () => {
+    const dir = work();
+    git(dir, 'init', '-q');
+    await placeSkills(ownFs, dir, 'codex', [TDD], superpowers());
+    expect(added(dir)).toEqual([]);
+    git(dir, 'commit', '-q', '--allow-empty', '-m', 'start');
+    const tree = join(work(), 'tree');
+    git(dir, 'worktree', 'add', '-q', tree);
+    await placeSkills(ownFs, tree, 'claude', [TDD], null);
+    expect(added(tree)).toEqual([]);
   });
 
   it('copies superpowers again only when the image brings another version', async () => {

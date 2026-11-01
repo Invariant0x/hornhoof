@@ -1,5 +1,5 @@
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import type { ProviderId, SkillFile } from '@hornhoof/protocol';
 import type { AgentFs } from './agent-fs.js';
 
@@ -34,6 +34,41 @@ function versionOf(superpowers: string): string {
   return String(version);
 }
 
+/* The exclude file of the repository the agent's folder is part of, the nearest .git above it as programs find a
+   project's root, and where the folder is in it. A worktree's .git is a file that names its git folder, and that one the
+   common folder whose excludes git reads. */
+function repoOf(workDir: string): { exclude: string; at: string } | null {
+  for (let dir = workDir; ; dir = dirname(dir)) {
+    const dotGit = join(dir, '.git');
+    if (existsSync(dotGit)) {
+      const gitDir = statSync(dotGit).isDirectory() ? dotGit : resolve(dir, /^gitdir: (.+)$/m.exec(readFileSync(dotGit, 'utf8'))?.[1] ?? '.git');
+      const common = existsSync(join(gitDir, 'commondir')) ? resolve(gitDir, readFileSync(join(gitDir, 'commondir'), 'utf8').trim()) : gitDir;
+      return { exclude: join(common, 'info', 'exclude'), at: relative(dir, workDir).split(sep).join('/') };
+    }
+    if (dirname(dir) === dir) return null;
+  }
+}
+
+const END = "# end of Hornhoof's skill files";
+/* A path from the repository's root, its wildcards taken as plain characters. */
+const pattern = (path: string) => `/${path.replace(/[\\*?[\]!#]/g, c => `\\${c}`)}`;
+
+/* Names what the node writes in the agent's folder in its repository's excludes, one block for each folder, so git add
+   in that repository takes none of it in; an agent's own files there stay seen. */
+async function exclude(fs: AgentFs, workDir: string, paths: string[]): Promise<void> {
+  const repo = repoOf(workDir);
+  if (!repo) return;
+  const head = `# Hornhoof's skill files in /${repo.at}`;
+  const lines = ((await fs.read(repo.exclude)) ?? '').split('\n');
+  const from = lines.indexOf(head);
+  const to = from < 0 ? -1 : lines.indexOf(END, from);
+  const kept = to < 0 ? lines : [...lines.slice(0, from), ...lines.slice(to + 1)];
+  while (kept.length && !kept[kept.length - 1]) kept.pop();
+  const block = paths.length ? [head, ...paths.map(p => pattern(repo.at ? `${repo.at}/${p}` : p)), END] : [];
+  await fs.mkdir(dirname(repo.exclude));
+  await fs.write(repo.exclude, `${[...kept, ...block].join('\n')}\n`);
+}
+
 async function placed(fs: AgentFs, workDir: string): Promise<Placed> {
   try {
     const data = JSON.parse((await fs.read(join(workDir, PLACED))) ?? '{}') as Partial<Placed>;
@@ -53,6 +88,7 @@ export async function placeSkills(fs: AgentFs, workDir: string, provider: Provid
   const version = copied.length ? versionOf(superpowers!) : null;
   const theirs = new Set(copied.map(name => `${folder}/${name}`));
   const fresh = version !== before.superpowers;
+  await exclude(fs, workDir, [...[...ours, ...theirs].map(p => `${p}/`), PLACED]);
 
   for (const path of before.paths) if (!ours.has(path) && (!theirs.has(path) || fresh)) await fs.remove(join(workDir, path));
   await fs.mkdir(join(workDir, folder));
