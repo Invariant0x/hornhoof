@@ -5,7 +5,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { JobUser } from '../isolation.js';
-import { programEnded, type ProgramExit } from '../program-exit.js';
+import { withProgramExit, type ProgramExit } from '../program-exit.js';
 import { KEEP_BYTES } from '../providers/process.js';
 import { Recordings, type ExitSnapshot } from './recordings.js';
 
@@ -140,7 +140,11 @@ export class Tmux {
 
   /* Read before a pane can be respawned or removed. Keep the first observation time on tmux versions without one. */
   async ended(name: string): Promise<string | null> {
-    return (await this.recordings.snapshot(name, () => this.readEnd(name)))?.output ?? null;
+    return (await this.exitSnapshot(name))?.output ?? null;
+  }
+
+  exitSnapshot(name: string): Promise<ExitSnapshot | null> {
+    return this.recordings.snapshot(name, () => this.readEnd(name));
   }
 
   private async readEnd(name: string): Promise<ExitSnapshot | null> {
@@ -150,7 +154,7 @@ export class Tmux {
     const snapshot = recording ? await this.recordings.finish(recording, this.flushTimeoutMs) : null;
     const complete = snapshot?.complete ?? !recording;
     const text = snapshot?.output ?? await this.screen(name);
-    return { output: programEnded(text, exit, complete), complete };
+    return { ...withProgramExit(text, exit, complete), complete };
   }
 
   private async paneExit(name: string): Promise<ProgramExit | null> {

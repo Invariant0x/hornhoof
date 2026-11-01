@@ -115,8 +115,10 @@ describe.skipIf(!hasTmux)('terminal output recording lifecycle', () => {
     paused.add(pid);
     await exitProgram(tmux);
 
-    const output = await tmux.ended('agent') ?? '';
-    const done = jobDone('incomplete-output', { ok: false, sessionId: null, result: '', output, error: 'agent_failed', limits: null }, []);
+    const snapshot = await tmux.exitSnapshot('agent');
+    const output = snapshot?.output ?? '';
+    expect(snapshot?.programOutput?.complete).toBe(false);
+    const done = jobDone('incomplete-output', { ok: false, sessionId: null, result: '', output, programOutput: snapshot?.programOutput, error: 'agent_failed', limits: null }, []);
     const warning = 'Output capture did not finish before the wait expired.';
     expect(done).toMatchObject({ type: 'job.done', ok: false, error: 'agent_failed' });
     expect(done.tail).not.toContain('boom-final-output');

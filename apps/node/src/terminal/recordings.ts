@@ -3,9 +3,10 @@ import { closeSync, constants, existsSync, fstatSync, linkSync, lstatSync, mkdir
 import { basename, isAbsolute, join, resolve } from 'node:path';
 import { z } from 'zod';
 import type { JobUser } from '../isolation.js';
+import type { ProgramOutput } from '../program-exit.js';
 import { KEEP_BYTES, writePrivate } from '../providers/process.js';
 
-export type ExitSnapshot = { output: string; complete: boolean };
+export type ExitSnapshot = { output: string; complete: boolean; programOutput?: ProgramOutput };
 export type Recording = { name: string; file: string; ready: string; flush: string; ended: Promise<ExitSnapshot | null> | null };
 
 const digest = (name: string): string => createHash('sha256').update(name).digest('hex');

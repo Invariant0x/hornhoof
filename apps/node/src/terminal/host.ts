@@ -8,6 +8,7 @@ import { claudeEvents, claudeInterrupted } from '../providers/claude.js';
 import { contentText } from '../providers/events.js';
 import { kimiContextSize } from '../providers/kimi.js';
 import { jobDone, tidy, type RunInput, type RunResult } from '../runner.js';
+import type { ProgramOutput } from '../program-exit.js';
 import { Bridge } from './bridge.js';
 import { StreamMask } from './mask.js';
 import { acceptClaudeDialogs, claudeTranscript, findKimiWire, findRollout, prepareKimi, type TermProgram } from './programs.js';
@@ -41,7 +42,7 @@ type Turn = {
   seq: number;
   ref?: string;
   early?: AgentEvent[] | null;
-  over?: { message: string; error: JobError; sessionId: string | null; output: string } | null;
+  over?: { message: string; error: JobError; sessionId: string | null; output: string; programOutput?: ProgramOutput } | null;
   toolToken?: string;
   opened?: Deferred<void>;
   /* A turn that only starts the program, until the program has its tools. A person who types meanwhile takes its place. */
@@ -362,9 +363,9 @@ export class TerminalHost {
   }
 
   private async failedTurn(a: Agent, job: TermJob, error: RunResult['error'], output?: string): Promise<RunResult> {
-    const ended = error === 'agent_failed' || error === 'not_logged_in' ? await this.opts.tmux.ended(a.name) : null;
-    const details = ended ?? output ?? await this.screen(job.key);
-    return { ok: false, sessionId: a.sessionId, result: '', output: details, error: exitError(ended, job.signedOut, error), limits: a.limits };
+    const ended = error === 'agent_failed' || error === 'not_logged_in' ? await this.opts.tmux.exitSnapshot(a.name) : null;
+    const details = ended?.output ?? output ?? await this.screen(job.key);
+    return { ok: false, sessionId: a.sessionId, result: '', output: details, programOutput: ended?.programOutput, error: exitError(ended?.output ?? null, job.signedOut, error), limits: a.limits };
   }
 
   /* While its program runs the host reads the agent's log, where a turn a person typed into Codex shows, and ends a typed
@@ -397,11 +398,11 @@ export class TerminalHost {
 
   private async endedTyped(a: Agent): Promise<void> {
     const turn = a.turn;
-    const output = turn?.typed ? await this.opts.tmux.ended(a.name) : null;
+    const ended = turn?.typed ? await this.opts.tmux.exitSnapshot(a.name) : null;
     if (a.turn !== turn) return;
     a.busy = false;
     this.programEnded(a);
-    this.finishTyped(a, '', exitError(output, a.signedOut, 'agent_failed'), output ?? '');
+    this.finishTyped(a, '', exitError(ended?.output ?? null, a.signedOut, 'agent_failed'), ended?.output ?? '', ended?.programOutput);
     this.unwatch(a);
   }
 
@@ -687,10 +688,10 @@ export class TerminalHost {
       for (const e of early) this.typedEvent(turn, e);
     }
     turn.opened?.resolve();
-    if (turn.over) this.typedDone(turn, turn.over.message, turn.over.error, turn.over.sessionId, turn.over.output);
+    if (turn.over) this.typedDone(turn, turn.over.message, turn.over.error, turn.over.sessionId, turn.over.output, turn.over.programOutput);
   }
 
-  private finishTyped(a: Agent, message: string, error: JobError = null, output = ''): void {
+  private finishTyped(a: Agent, message: string, error: JobError = null, output = '', programOutput?: ProgramOutput): void {
     const turn = a.turn;
     if (!turn?.typed) return;
     a.turn = null;
@@ -699,14 +700,14 @@ export class TerminalHost {
     /* Hornhoof hears the limits with the next turn it runs. */
     void this.planLimits(a);
     /* Hornhoof has not answered yet: the end goes out with its answer. */
-    if (turn.early) turn.over = { message, error, sessionId: a.sessionId, output };
-    else this.typedDone(turn, message, error, a.sessionId, output);
+    if (turn.early) turn.over = { message, error, sessionId: a.sessionId, output, programOutput };
+    else this.typedDone(turn, message, error, a.sessionId, output, programOutput);
   }
 
-  private typedDone(turn: Turn, message: string, error: JobError, sessionId: string | null, output: string): void {
+  private typedDone(turn: Turn, message: string, error: JobError, sessionId: string | null, output: string, programOutput?: ProgramOutput): void {
     if (!turn.jobId) return;
     const result = error === 'cancelled' ? 'Stopped.' : error ? '' : message;
-    this.opts.send(jobDone(turn.jobId, { ok: !error, sessionId, result, output, error, limits: null }, [...this.opts.secrets(), ...(turn.toolToken ? [turn.toolToken] : [])]));
+    this.opts.send(jobDone(turn.jobId, { ok: !error, sessionId, result, output, programOutput, error, limits: null }, [...this.opts.secrets(), ...(turn.toolToken ? [turn.toolToken] : [])]));
   }
 
   /* Turns people typed that run now: they count as running when the node says hello again. */
