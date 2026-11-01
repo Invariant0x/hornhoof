@@ -344,6 +344,10 @@ export const Repo = z.object({
 });
 export type RepoAuthor = NonNullable<z.infer<typeof Repo>['author']>;
 const Workspace = z.object({ key: Id, repo: Repo.nullable() });
+/* As many skills as an agent can have on, each a folder named after it with its SKILL.md. */
+export const MAX_SKILLS = 200;
+const SkillFile = z.object({ name: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/), description: z.string().min(1).max(1000), body: z.string().max(200_000) });
+export type SkillFile = z.infer<typeof SkillFile>;
 export type Workspace = z.infer<typeof Workspace>;
 
 /* The folder inside an agent's folder that holds a repository's clone: the last part of its address without .git. */
@@ -378,6 +382,8 @@ const ServerMessage = z.discriminatedUnion('type', [
     guidance: z.string().max(16 * 1024).nullable().optional(),
     /* The agent's own folder on the node and the repository it works in; a test job has none. */
     workspace: Workspace.nullable().optional(),
+    /* The agent's skills, which the node writes as files where its program finds them; each name becomes a folder. */
+    skills: z.array(SkillFile).max(MAX_SKILLS).optional(),
   }),
   z.object({ type: z.literal('job.cancel'), jobId: Id }),
   /* Hornhoof has the job's end: the node stops sending it again after each reconnect. */

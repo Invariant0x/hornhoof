@@ -68,6 +68,14 @@ describe('server messages', () => {
       expect(parseServerMessage(JSON.stringify({ ...SERVER[0], subscriptionId: id }))).toBeNull();
     }
   });
+
+  it("carry an agent's skills as files to write, each named so it stays a folder of the skills folder", () => {
+    const skills = [{ name: 'dev-tdd', description: 'Test-driven development: writes the failing test first.', body: 'x'.repeat(50_000) }];
+    expect(parseServerMessage(JSON.stringify({ ...SERVER[0], skills }))).toMatchObject({ type: 'job.run', skills });
+    for (const name of ['../etc', 'a/b', '.hidden', 'Dev-Tdd', '', 'x'.repeat(65)]) {
+      expect(parseServerMessage(JSON.stringify({ ...SERVER[0], skills: [{ ...skills[0], name }] })), name).toBeNull();
+    }
+  });
 });
 
 describe('live agent events', () => {
