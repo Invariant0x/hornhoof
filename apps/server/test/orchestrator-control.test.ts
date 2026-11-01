@@ -432,6 +432,8 @@ describe('the orchestrator reads and changes the database itself', () => {
       ['SELECT tool_token_hash FROM jobs', /tool_token_hash/],
       [`UPDATE nodes SET key_hash = 'forged'`, /key_hash/],
       ['SELECT key_hash FROM nodes', /key_hash/],
+      ['SELECT machine_key FROM machines', /machine_key/],
+      [`UPDATE machines SET machine_key = 'taken-0001-abcd'`, /machine_key/],
       [`UPDATE nodes SET status = 'ready'`, /only the CEO/],
       ['UPDATE subscriptions SET budget = 10', /only the CEO/],
       ['UPDATE machines SET revoked_at = now()', /only the CEO/],
@@ -488,7 +490,7 @@ describe('the orchestrator reads and changes the database itself', () => {
       expect(res.isError, sql).toBe(true);
       expect(text(res), sql).toContain('Operations reads the database; a change goes to the orchestrator as one message with the SQL and why.');
     }
-    for (const sql of ['SELECT * FROM sessions', 'SELECT * FROM invites', 'SELECT * FROM node_codes', 'SELECT * FROM public_links', 'SELECT password_hash FROM people', 'SELECT tool_token_hash FROM jobs', 'SELECT * FROM jobs']) {
+    for (const sql of ['SELECT * FROM sessions', 'SELECT * FROM invites', 'SELECT * FROM node_codes', 'SELECT * FROM public_links', 'SELECT password_hash FROM people', 'SELECT tool_token_hash FROM jobs', 'SELECT * FROM jobs', 'SELECT key_hash FROM nodes', 'SELECT machine_key FROM machines', 'SELECT * FROM machines']) {
       const res = await call(client, 'database', { sql });
       expect(res.isError, sql).toBe(true);
       expect(text(res), sql).toMatch(/closed to this tool/);

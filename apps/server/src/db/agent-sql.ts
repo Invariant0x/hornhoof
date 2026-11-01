@@ -13,12 +13,14 @@ export type AgentSql = { run: (text: string, mode: SqlMode) => Promise<SqlAnswer
 /* Signing in, joining and installing a node stay out of reach, and so does the public link, whose address goes into
    machine commands. */
 export const HIDDEN = ['sessions', 'invites', 'node_codes', 'public_links'];
-/* Columns that hold a password, a token or a key: neither role reads or writes them. */
+/* Columns that hold a password, a token or a key: neither role reads or writes them. A machine's key goes with
+   every join from it, so it is one too. */
 export const SECRET: Record<string, string[]> = {
   people: ['password_hash'],
   jobs: ['tool_token_hash'],
   subscriptions: ['secret_enc'],
   nodes: ['key_hash'],
+  machines: ['machine_key'],
   departments: ['repo_token_enc'],
 };
 /* Who people are and what they reach, and the subscriptions, machines and nodes the company runs on: the orchestrator's
