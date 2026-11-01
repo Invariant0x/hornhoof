@@ -4,7 +4,7 @@ import { agentEvents, agents, companies, departments, jobs, people, personAccess
 import { agentState, enqueueTurn } from '../src/modules/conversation/queue.js';
 import { said } from '../src/modules/conversation/live.js';
 import { identityOf } from '../src/modules/nodes/hub.js';
-import { answer, ask, comment, createTask, GOING_ON_TURNS, report, submit, updateTask } from '../src/modules/tasks/engine.js';
+import { answer, ask, cancel, comment, createTask, GOING_ON_TURNS, report, submit, updateTask } from '../src/modules/tasks/engine.js';
 import { afterJob, SILENT_TURNS, startWork, typedTurn, wakeAll, wakeLeftBehind, wakePrompt } from '../src/modules/tasks/wake.js';
 import { as, connectNode, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
@@ -190,6 +190,18 @@ describe('the turns a task move needs', () => {
     expect(await c.turnsOf(c.head.id)).toHaveLength(1);
     expect(await wakeLeftBehind(c.ctx, later())).toBe(1);
     expect((await c.turnsOf(c.bruno.id)).map(j => j.taskId)).toEqual([task.id]);
+  });
+
+  it('are left out once the task moves on: a later move keeps the turns it needs itself', async () => {
+    const c = await company();
+    const dropped = await c.memberTask();
+    await cancel(c.ctx, { agentId: c.head.id }, dropped.id, 'Not needed.');
+    const handed = await c.memberTask();
+    const [kai] = await c.db.insert(agents).values({ companyId: c.dev.companyId, kind: 'worker', name: 'Kai', roleKey: 'DEV-BE', departmentId: c.dev.id, model: '', subscriptionId: c.sub.id }).returning();
+    await updateTask(c.ctx, c.head.id, handed.id, { executor: kai!.id });
+    expect(await wakeLeftBehind(c.ctx, later())).toBe(1);
+    expect(await c.turnsOf(c.bruno.id)).toEqual([]);
+    expect((await c.turnsOf(kai!.id)).map(j => j.taskId)).toEqual([handed.id]);
   });
 });
 

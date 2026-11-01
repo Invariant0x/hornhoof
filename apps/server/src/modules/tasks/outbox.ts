@@ -1,4 +1,4 @@
-import { and, asc, eq, lt } from 'drizzle-orm';
+import { and, asc, eq, lt, ne } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import { pendingWakes } from '../../db/schema.js';
 import type { Tx, Wake, WakeWhy } from './engine.js';
@@ -10,6 +10,12 @@ const GIVE_UP_MS = 24 * 3_600_000;
 export async function keepWakes(tx: Tx | Db, companyId: string, wakes: Wake[]): Promise<void> {
   if (!wakes.length) return;
   await tx.insert(pendingWakes).values(wakes.map(w => ({ companyId, agentId: w.agentId, taskId: w.taskId, why: w.why, text: w.text ?? null, note: w.note ?? null })));
+}
+
+/* A move keeps the wakes its task needs now, so those an earlier move kept for it are dropped. A request still waiting to
+   be put into words keeps its wake, which reads the request again when it runs. */
+export async function dropEarlierWakes(tx: Tx, taskId: string): Promise<void> {
+  await tx.delete(pendingWakes).where(and(eq(pendingWakes.taskId, taskId), ne(pendingWakes.why, 'explain')));
 }
 
 /* The turn for this wake is queued, or another one for the same agent and task covers it. */

@@ -4,7 +4,7 @@ import { accessOf, canReach, type Spot } from '../../auth/access.js';
 import type { Db } from '../../db/client.js';
 import { agents, attachments, companies, jobs, people, requests, subscriptions, taskEvents, tasks, turns, type RequestOption, type TaskEventKind } from '../../db/schema.js';
 import { ApiError, type ErrorReason } from '../../errors.js';
-import { keepWakes } from './outbox.js';
+import { dropEarlierWakes, keepWakes } from './outbox.js';
 import { handOff } from './pulses.js';
 
 export type Task = typeof tasks.$inferSelect;
@@ -71,6 +71,7 @@ async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, also?: (
       const open = await tx.select({ number: tasks.number }).from(tasks).where(and(eq(tasks.parentId, task.id), notInArray(tasks.status, [...CLOSED]))).orderBy(asc(tasks.number));
       if (open.length) throw refuse(409, 'task_invalid', `#${task.number} still has open subtasks: ${open.map(t => `#${t.number}`).join(', ')}. Wait for them, or cancel them first.`);
     }
+    await dropEarlierWakes(tx, task.id);
     await note(tx, row, n);
     await also?.(tx, row);
     await keepWakes(tx, task.companyId, wakes);
