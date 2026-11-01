@@ -6,7 +6,7 @@ import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agents, companies, departments, jobs, requests, subscriptions } from '../src/db/schema.js';
-import { createTask } from '../src/modules/tasks/engine.js';
+import { blocked, createTask } from '../src/modules/tasks/engine.js';
 import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until } from './helpers.js';
 import { agentState, enqueueTurn } from '../src/modules/conversation/queue.js';
 
@@ -138,28 +138,43 @@ describe('tools a skill grants', () => {
     expect((await call(client, 'message_employee', { employee: hana.id, text: 'One more.' })).isError).toBe(true);
   });
 
-  it('let a failure collector read the failed turns and blocked tasks of the last hours', async () => {
-    const { app, db, acme, sub, bruno } = await company(['ops-failure-review']);
+  it('let a failure collector read the failed turns and blocked tasks of the last hours, with why each task stopped', async () => {
+    const { app, db, acme, sub, bruno, task } = await company(['ops-failure-review']);
     const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000);
+    const hung = ago(30);
     await db.insert(jobs).values([
-      { companyId: acme.id, subscriptionId: sub.id, agentId: bruno.id, kind: 'conversation', prompt: 'x', timeoutMs: 1, status: 'failed', error: 'timeout', tail: 'npm test hung', finishedAt: ago(30) },
+      { companyId: acme.id, subscriptionId: sub.id, agentId: bruno.id, taskId: task.id, kind: 'conversation', prompt: 'x', timeoutMs: 1, status: 'failed', error: 'timeout', tail: 'npm test hung', finishedAt: hung },
       { companyId: acme.id, subscriptionId: sub.id, agentId: bruno.id, kind: 'conversation', prompt: 'x', timeoutMs: 1, status: 'failed', error: 'agent_failed', tail: 'old', finishedAt: ago(600) },
       /* Stopped by a person: no failure of the system. */
       { companyId: acme.id, subscriptionId: sub.id, agentId: bruno.id, kind: 'conversation', prompt: 'x', timeoutMs: 1, status: 'failed', error: 'cancelled', tail: 'stopped', finishedAt: ago(20) },
     ]);
+    await blocked(app.ctx, bruno.id, task.id, 'Waits for #40: the staging database does not answer.');
     const client = await mcp(app);
     const recent = JSON.parse((await call(client, 'failures', { hours: 6 })).content[0]!.text) as { failed: { agent: string; error: string; tail: string }[]; blocked: unknown[] };
     expect(recent.failed).toEqual([expect.objectContaining({ agent: 'Bruno', error: 'timeout', tail: 'npm test hung' })]);
-    expect(recent.blocked).toEqual([]);
+    expect(recent.blocked).toEqual([
+      {
+        number: task.number,
+        title: 'Checkout API',
+        holder: 'Bruno',
+        since: expect.any(String),
+        why: 'Waits for #40: the staging database does not answer.',
+        lastTurn: { status: 'failed', error: 'timeout', at: hung.toISOString() },
+      },
+    ]);
   });
 
   it('let a failure collector see where agents stumbled: programs they lacked, what they installed by hand, and where they stopped for people', async () => {
     const { app, db, acme, sub, hana, bruno, task } = await company(['ops-failure-review']);
     const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000);
     const event = (agentId: string, kind: 'tool' | 'tool_result', data: object, minutes = 30) => ({ companyId: acme.id, agentId, kind, data, createdAt: ago(minutes) });
+    const [onTask] = await db.insert(jobs).values({ companyId: acme.id, subscriptionId: sub.id, agentId: hana.id, taskId: task.id, kind: 'conversation', prompt: 'x', timeoutMs: 1, status: 'done', finishedAt: ago(25) }).returning();
+    const newest = { ...event(hana.id, 'tool_result', { ok: false, summary: 'load average 0.4\nbash: line 3: ps: command not found' }, 29), jobId: onTask!.id };
     await db.insert(agentEvents).values([
       event(bruno.id, 'tool_result', { ok: false, summary: '/bin/bash: line 1: ps: command not found\n' }),
-      event(hana.id, 'tool_result', { ok: false, summary: 'load average 0.4\nbash: line 3: ps: command not found' }),
+      newest,
+      /* Read in a test file, not run. */
+      event(bruno.id, 'tool_result', { ok: true, summary: "apps/server/test/stumbles.test.ts-6-    expect(missingIn('bash: line 1: jq: command not found'))" }),
       event(hana.id, 'tool_result', { ok: false, summary: '/usr/bin/env: ‘python’: No such file or directory' }),
       event(bruno.id, 'tool_result', { ok: false, summary: "Traceback (most recent call last):\nModuleNotFoundError: No module named 'yaml.loader'" }),
       event(bruno.id, 'tool_result', { ok: false, summary: "Error: Cannot find module 'left-pad/index.js'" }),
@@ -179,14 +194,14 @@ describe('tools a skill grants', () => {
     const recent = JSON.parse((await call(await mcp(app), 'failures', { hours: 6 })).content[0]!.text);
     /* The most frequent first, then the newest, with the newest line that said it. */
     expect(recent.missing).toEqual([
-      { what: 'ps', kind: 'command', times: 2, agents: ['Bruno', 'Hana'], example: 'bash: line 3: ps: command not found' },
+      { what: 'ps', kind: 'command', times: 2, agents: ['Bruno', 'Hana'], example: 'bash: line 3: ps: command not found', at: newest.createdAt.toISOString(), task: task.number },
       expect.objectContaining({ what: 'left-pad', kind: 'node module', agents: ['Bruno'] }),
       expect.objectContaining({ what: 'yaml', kind: 'python module', agents: ['Bruno'] }),
       expect.objectContaining({ what: 'python', kind: 'command', times: 1, agents: ['Hana'] }),
     ]);
     expect(recent.installed).toEqual([
-      { command: 'npm i -g pnpm', times: 1, agents: ['Hana'] },
-      { command: 'pip install --user pyyaml', times: 1, agents: ['Bruno'] },
+      { command: 'npm i -g pnpm', times: 1, agents: ['Hana'], at: expect.any(String), task: null },
+      { command: 'pip install --user pyyaml', times: 1, agents: ['Bruno'], at: expect.any(String), task: null },
     ]);
     expect(recent.stops).toEqual([
       { kind: 'stuck', agent: 'Bruno', task: task.number, text: 'Ended 3 turns in a row on #1 without moving it.', status: 'open', answer: null, lastTurn: 'This content can’t be shown.' },

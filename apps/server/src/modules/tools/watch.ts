@@ -2,7 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { and, desc, eq, gte, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { agentEvents, agents, departments, jobs, requests, tasks } from '../../db/schema.js';
+import { agentEvents, agents, departments, jobs, requests, taskEvents, tasks } from '../../db/schema.js';
 import { turnPrompt } from '../conversation/prompt.js';
 import { agentState, enqueueTurn, orchestratorOf, STOPPED_ON_PURPOSE } from '../conversation/queue.js';
 import { deptName } from '../departments/templates.js';
@@ -30,16 +30,20 @@ const say = (text: string, isError = false) => ({ content: [{ type: 'text' as co
 const json = (value: unknown) => say(JSON.stringify(value));
 const hoursAgo = (hours: number) => new Date(Date.now() - hours * 3_600_000);
 
-/* The same thing found many times, with how often and by whom, the most frequent first and the rest left out. */
-function tally<T>(items: { key: string; value: T; agent: string; example?: string }[]) {
-  const all = new Map<string, { value: T; times: number; agents: Set<string>; example?: string }>();
-  for (const { key, value, agent, example } of items) {
-    const seen = all.get(key) ?? { value, times: 0, agents: new Set<string>(), example };
+/* The same thing found many times, with how often and by whom, the most frequent first and the rest left out. Items come
+   newest first, so each keeps its newest example, with when and on which task it was. */
+function tally<T>(items: { key: string; value: T; agent: string; example?: string; at: Date; task: number | null }[]) {
+  const all = new Map<string, { value: T; times: number; agents: Set<string>; example?: string; at: Date; task: number | null }>();
+  for (const { key, value, agent, example, at, task } of items) {
+    const seen = all.get(key) ?? { value, times: 0, agents: new Set<string>(), example, at, task };
     seen.times++;
     seen.agents.add(agent);
     all.set(key, seen);
   }
-  return [...all.values()].sort((a, b) => b.times - a.times).slice(0, GROUPS_MAX).map(({ value, times, agents, example }) => ({ value, times, agents: [...agents].sort(), example }));
+  return [...all.values()]
+    .sort((a, b) => b.times - a.times)
+    .slice(0, GROUPS_MAX)
+    .map(({ value, times, agents, example, at, task }) => ({ value, times, agents: [...agents].sort(), example, at, task }));
 }
 /* The line of a tool result that says what was missing. */
 const lineOf = (text: string, what: string) => text.split('\n').find(l => l.includes(what))?.trim().slice(0, TAIL) ?? '';
@@ -108,8 +112,10 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
       'failures',
       {
         description:
-          'What went wrong in the last hours: the turns that failed, newest first, with the agent, the error, the end of its output and the task, and the tasks blocked now. ' +
-          'Turns people or Hornhoof stopped on purpose are left out. Also where agents stumbled: commands and modules that were not installed, the tools they installed by hand, ' +
+          'What went wrong in the last hours: the turns that failed, newest first, with the agent, the error, the end of its output and the task, and the tasks blocked now, ' +
+          'with what their holder said when it stopped and how its last turn on the task ended. ' +
+          'Turns people or Hornhoof stopped on purpose are left out. Also where agents stumbled, each with when and on which task it was seen last: commands and modules ' +
+          'a shell or a program said were not installed (the same words read in a file count for nothing), the tools they installed by hand, ' +
           'and the questions and stuck tasks they stopped on for people, with the answer and how their last turn on the task ended.',
         inputSchema: { hours: z.number().int().min(1).max(72).default(6).describe('How many hours back to read, 1 to 72.') },
       },
@@ -123,23 +129,44 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
           .where(and(eq(jobs.companyId, job.companyId), eq(jobs.status, 'failed'), or(isNull(jobs.error), notInArray(jobs.error, STOPPED_ON_PURPOSE)), gte(jobs.finishedAt, hoursAgo(hours))))
           .orderBy(desc(jobs.finishedAt))
           .limit(FAILED_MAX);
-        const blocked = await db
-          .select({ number: tasks.number, title: tasks.title, holder: agents.name, since: tasks.updatedAt })
+        const stuck = await db
+          .select({ id: tasks.id, holderId: tasks.assigneeAgentId, number: tasks.number, title: tasks.title, holder: agents.name, since: tasks.updatedAt })
           .from(tasks)
           .leftJoin(agents, eq(agents.id, tasks.assigneeAgentId))
           .where(and(eq(tasks.companyId, job.companyId), eq(tasks.status, 'blocked')))
           .orderBy(tasks.updatedAt);
+        const blocked = [];
+        for (const { id, holderId, ...task } of stuck) {
+          /* What its holder said when it stopped, and how its last turn on it ended: enough to group causes without the task itself. */
+          const [said] = await db
+            .select({ text: taskEvents.text })
+            .from(taskEvents)
+            .where(and(eq(taskEvents.taskId, id), inArray(taskEvents.kind, ['blocked', 'report'])))
+            .orderBy(desc(taskEvents.id))
+            .limit(1);
+          const [last] = holderId
+            ? await db
+                .select({ status: jobs.status, error: jobs.error, at: jobs.finishedAt })
+                .from(jobs)
+                .where(and(eq(jobs.agentId, holderId), eq(jobs.taskId, id), inArray(jobs.status, ['done', 'failed'])))
+                .orderBy(desc(jobs.finishedAt))
+                .limit(1)
+            : [];
+          blocked.push({ ...task, why: said ? said.text.slice(0, TAIL) : null, lastTurn: last ?? null });
+        }
         const since = hoursAgo(hours);
         const seen = (kind: 'tool' | 'tool_result', field: string, hint: string) =>
           db
-            .select({ agent: agents.name, text: sql<string>`${agentEvents.data}->>${field}` })
+            .select({ agent: agents.name, text: sql<string>`${agentEvents.data}->>${field}`, at: agentEvents.createdAt, task: tasks.number })
             .from(agentEvents)
             .innerJoin(agents, eq(agents.id, agentEvents.agentId))
+            .leftJoin(jobs, eq(jobs.id, agentEvents.jobId))
+            .leftJoin(tasks, eq(tasks.id, jobs.taskId))
             .where(and(eq(agentEvents.companyId, job.companyId), eq(agentEvents.kind, kind), gte(agentEvents.createdAt, since), sql`${agentEvents.data}->>${field} ~* ${hint}`))
             .orderBy(desc(agentEvents.seq))
             .limit(STUMBLES_MAX);
-        const missing = tally<Missing>((await seen('tool_result', 'summary', MISSING_HINT)).flatMap(r => missingIn(r.text).map(m => ({ key: `${m.kind} ${m.what}`, value: m, agent: r.agent, example: lineOf(r.text, m.what) }))));
-        const installed = tally<string>((await seen('tool', 'input', INSTALL_HINT)).flatMap(r => installsIn(r.text).map(command => ({ key: command, value: command, agent: r.agent }))));
+        const missing = tally<Missing>((await seen('tool_result', 'summary', MISSING_HINT)).flatMap(r => missingIn(r.text).map(m => ({ ...r, key: `${m.kind} ${m.what}`, value: m, example: lineOf(r.text, m.what) }))));
+        const installed = tally<string>((await seen('tool', 'input', INSTALL_HINT)).flatMap(r => installsIn(r.text).map(command => ({ ...r, key: command, value: command }))));
         const stopped = await db
           .select({ kind: requests.kind, agentId: requests.agentId, taskId: requests.taskId, agent: agents.name, task: tasks.number, text: requests.text, status: requests.status, answer: requests.answer, at: requests.createdAt })
           .from(requests)
