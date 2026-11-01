@@ -688,7 +688,7 @@ server_mode() {
   done
   # Whoever opens a new server first would become its owner, so it sets up only through the link with its setup code,
   # which only the server can tell. A server set up already, or one from before setup codes, gives no link.
-  link=$(cd "$SERVER_DIR" && "${compose[@]}" exec -T app node apps/server/dist/cli.js setup-link 2> /dev/null | tail -n 1 || true)
+  link=$(cd "$SERVER_DIR" || exit 0; "${compose[@]}" exec -T app node apps/server/dist/cli.js setup-link 2> /dev/null | tail -n 1 || true)
   case "$link" in
     *[[:space:]]*) say "Hornhoof is running at $public." ;;
     http://*/setup\?code=* | https://*/setup\?code=*) say "Hornhoof is running. Open this link to set it up: $link" ;;
