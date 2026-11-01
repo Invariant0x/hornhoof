@@ -462,7 +462,8 @@ export const requests = pgTable(
   t => [index('requests_task_id').on(t.taskId), check('requests_approval_commit', sql`${t.kind} <> 'approval' OR ${t.commit} IS NOT NULL`)],
 );
 
-/* A picture an agent sent from its turn to show its work. People see it once a request of that agent shows it. */
+/* A picture an agent sent from its turn to show its work. People see it once a request of that agent shows it. Or a file
+   an agent on a task put on it, of any kind, which every agent of the company downloads by its name. */
 export const attachments = pgTable(
   'attachments',
   {
@@ -471,12 +472,15 @@ export const attachments = pgTable(
     jobId: uuid('job_id').notNull().references(() => jobs.id),
     agentId: uuid('agent_id').notNull().references(() => agents.id),
     requestId: uuid('request_id').references(() => requests.id),
+    /* The task a file was put on, and the file's name there; a picture has neither. */
+    taskId: uuid('task_id').references(() => tasks.id),
+    name: text('name'),
     mediaType: text('media_type').notNull(),
     bytes: bytea('bytes').notNull(),
     size: integer('size').notNull(),
     createdAt: createdAt(),
   },
-  t => [index('attachments_request_id').on(t.requestId), index('attachments_job_id').on(t.jobId)],
+  t => [index('attachments_request_id').on(t.requestId), index('attachments_job_id').on(t.jobId), index('attachments_task_id').on(t.taskId)],
 );
 
 /* The company's notebook: short notes the orchestrator keeps across conversations, such as the CEO's decisions, rules

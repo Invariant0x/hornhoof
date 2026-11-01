@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, departments, people, requests, taskEvents, tasks, turns, type RequestOption } from '../../db/schema.js';
-import { commitUrl, picturesOf } from './attachments.js';
+import { commitUrl, filesOf, picturesOf } from './attachments.js';
 import { deptName } from '../departments/templates.js';
 import type { Lang } from '../templates/load.js';
 import type { Task } from './engine.js';
@@ -49,6 +49,8 @@ export type RequestView = {
 };
 /* A task another one comes after, and where it stands. */
 export type AfterView = { id: string; number: number; title: string; status: Task['status'] };
+/* A file an agent put on the task, which any agent downloads by its name. */
+export type FileView = { id: string; name: string; size: number; by: { id: string; name: string } | null; at: string };
 export type TaskDetail = TaskLine & {
   body: string;
   parent: { id: string; number: number; title: string } | null;
@@ -59,6 +61,7 @@ export type TaskDetail = TaskLine & {
   subtasks: TaskLine[];
   log: LogLine[];
   requests: RequestView[];
+  files: FileView[];
 };
 
 type Names = { agent(id: string | null): AgentRef | null; place(id: string | null): Place; turn(id: string | null): number | null; after(t: Pick<Task, 'after'>): AfterView[] };
@@ -131,8 +134,9 @@ export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates'>, task: Task,
   const asks = await db.select().from(requests).where(eq(requests.taskId, task.id)).orderBy(asc(requests.createdAt));
   const pictures = await picturesOf(db, asks);
   const commits = await Promise.all(asks.map(r => commitUrl(db, task, r.commit)));
+  const files = await filesOf(db, task.id);
   const [creator] = task.createdByPersonId ? await db.select({ id: people.id, name: people.name }).from(people).where(eq(people.id, task.createdByPersonId)) : [];
-  const n = await names(ctx, [task, ...subs], [...events.map(e => e.agentId), ...asks.map(r => r.agentId)].filter((x): x is string => Boolean(x)));
+  const n = await names(ctx, [task, ...subs], [...events.map(e => e.agentId), ...asks.map(r => r.agentId), ...files.map(f => f.agentId)].filter((x): x is string => Boolean(x)));
   const by = (personId: string | null, personName: string | null, agentId: string | null): LogLine['by'] =>
     personId ? { kind: 'person', id: personId, name: personName ?? '' } : agentId ? { kind: 'agent', id: agentId, name: n.agent(agentId)?.name ?? '' } : null;
   return {
@@ -165,6 +169,10 @@ export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates'>, task: Task,
       agent: n.agent(r.agentId),
       at: r.createdAt.toISOString(),
     })),
+    files: files.map(f => {
+      const a = n.agent(f.agentId);
+      return { id: f.id, name: f.name, size: f.size, by: a && { id: a.id, name: a.name }, at: f.at.toISOString() };
+    }),
   };
 }
 
