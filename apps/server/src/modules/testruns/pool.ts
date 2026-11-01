@@ -2,10 +2,9 @@ import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import type { Ctx } from '../../app.js';
 import { requirePerson, type Person } from '../../auth/session.js';
-import { agents, machines, nodes, people, tasks, testParts, testRuns } from '../../db/schema.js';
+import { agents, machines, people, tasks, testParts, testRuns } from '../../db/schema.js';
 import { BUILTIN, nodeIdentity, type NodeIdentity } from '../nodes/hub.js';
-import { liveNode } from '../nodes/nodes.js';
-import { together } from './load.js';
+import { machineNodes, machineState, together } from './load.js';
 import { loaded } from './pick.js';
 import { commandFor, lostLine, needOf, placesOf, reaches, targetOf, type Place } from './runs.js';
 
@@ -74,10 +73,7 @@ export async function poolOf(ctx: Ctx, who: Pick<Person, 'id' | 'companyId' | 's
     .innerJoin(people, eq(people.id, machines.personId))
     .where(whole ? live : and(live, eq(machines.personId, who.id)))
     .orderBy(asc(machines.createdAt));
-  const served = await db
-    .select({ id: nodes.id, machineId: nodes.machineId })
-    .from(nodes)
-    .where(and(eq(nodes.companyId, who.companyId), liveNode));
+  const served = await machineNodes(db, who.companyId);
   const open: Row[] = await db
     .select({ part: testParts, run: testRuns, task: tasks.number, agent: agents.name })
     .from(testParts)
@@ -98,11 +94,12 @@ export async function poolOf(ctx: Ctx, who: Pick<Person, 'id' | 'companyId' | 's
   const builtinLoad = loadOf([BUILTIN]);
   return {
     machines: rows.map(m => {
-      const ids = served.filter(n => n.machineId === m.id).map(n => nodeIdentity(n.id));
-      const load = loadOf(ids);
+      const mine = served.filter(n => n.machineId === m.id).map(n => n.id);
+      const { online, load } = machineState(hub, mine);
+      const ids = mine.map(id => nodeIdentity(id));
       /* Why it takes no part of any run: what its nodes said, unless one of them takes parts. */
       const noRuns = ids.some(id => hub.isOnline(id) && hub.noRunsOf(id) === null) ? null : (ids.map(id => hub.noRunsOf(id)).find(Boolean) ?? null);
-      return { id: m.id, name: m.name || 'a machine', owner: m.owner, kind: m.kind, online: ids.some(id => hub.isOnline(id)), lent: m.lent, noRuns, load, loaded: load ? loaded(load) : false, parts: on(m.id) };
+      return { id: m.id, name: m.name || 'a machine', owner: m.owner, kind: m.kind, online, lent: m.lent, noRuns, load, loaded: load ? loaded(load) : false, parts: on(m.id) };
     }),
     /* The node that comes with the server takes parts too. */
     builtin: whole ? { online: hub.isOnline(BUILTIN), noRuns: hub.noRunsOf(BUILTIN), load: builtinLoad, loaded: builtinLoad ? loaded(builtinLoad) : false, parts: on(null, true) } : null,

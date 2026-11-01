@@ -620,6 +620,25 @@ describe('the pool of machines', () => {
     void part;
   });
 
+  it('shows each machine online and as busy as the machines screen does, a removed plan left out of both', async () => {
+    const c = await company();
+    const ivan = await c.machine(c.ceo, 'ivan-mac', idle({ load: 3 }));
+    const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    const boss = await c.turn(orchestrator!, null);
+    const both = async () => {
+      const pool = JSON.parse((await boss.call('pool')).text).machines[0];
+      const screen = (await c.app.inject({ url: '/api/machines', ...as(c.ceo) })).json().machines[0];
+      return { pool: { online: pool.online, load: pool.load }, screen: { online: screen.online, load: screen.load } };
+    };
+    const now = await both();
+    expect(now.pool).toEqual(now.screen);
+    expect(now.pool).toMatchObject({ online: true, load: { load: 3 } });
+    expect((await c.app.inject({ method: 'DELETE', url: `/api/subscriptions/${ivan.subscriptionId}`, ...as(c.ceo) })).statusCode).toBe(204);
+    const after = await both();
+    expect(after.pool).toEqual(after.screen);
+    expect(after.pool).toEqual({ online: false, load: null });
+  });
+
   it('gives no part to a machine whose node has no user of its own for runs, and shows why', async () => {
     const c = await company();
     const ivan = await c.machine(c.ceo, 'ivan-mac', idle(), { noRuns: 'This node runs without a user of its own for runs.' });

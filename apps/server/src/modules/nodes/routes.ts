@@ -11,7 +11,7 @@ import { hashToken, newToken } from '../../crypto/tokens.js';
 import { agents, jobs, machines, nodeCodes, nodes, people, subscriptions, tasks, testParts, testRuns, type Provider } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { publicUrl } from '../link/link.js';
-import { together } from '../testruns/load.js';
+import { machineNodes, machineState, together } from '../testruns/load.js';
 import { pumpTests } from '../testruns/runs.js';
 import { createNodeCode } from './codes.js';
 import { commandFor } from './command.js';
@@ -210,14 +210,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
       .innerJoin(people, eq(people.id, machines.personId))
       .where(me.scopeKind === 'company' ? live : and(live, eq(machines.personId, me.id)))
       .orderBy(machines.createdAt);
-    /* A removed plan's node is gone from its machine for people, though it keeps its key until it hears so. Plans that
-       joined with one command came at the same moment, so they go by name. */
-    const served = await db
-      .select({ id: nodes.id, machineId: nodes.machineId, subscriptionId: nodes.subscriptionId, provider: subscriptions.provider, status: nodes.status, lastSeenAt: nodes.lastSeenAt })
-      .from(nodes)
-      .leftJoin(subscriptions, eq(subscriptions.id, nodes.subscriptionId))
-      .where(and(liveNode, isNull(subscriptions.removedAt)))
-      .orderBy(asc(nodes.createdAt), asc(subscriptions.provider), asc(nodes.id));
+    const served = await machineNodes(db, me.companyId);
     const on = (machineId: string) => served.filter(n => n.machineId === machineId);
     const latest = (seen: (Date | null)[]) => seen.reduce<Date | null>((a, b) => (b && (!a || b > a) ? b : a), null);
     /* What runs on each machine now: the employees whose program lives there, busy while a turn of theirs runs, and the
@@ -259,10 +252,9 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
         arch: m.arch,
         kind: m.kind,
         owner: { id: m.ownerId, name: m.ownerName },
-        online: on(m.id).some(n => hub.isOnline(nodeIdentity(n.id))),
+        ...machineState(hub, on(m.id).map(n => n.id)),
         lastSeenAt: latest(on(m.id).map(n => n.lastSeenAt)),
         plans: on(m.id).flatMap(n => (n.subscriptionId && n.provider ? [{ id: n.subscriptionId, provider: n.provider, status: n.status, online: hub.isOnline(nodeIdentity(n.id)) }] : [])),
-        load: together(on(m.id).map(n => hub.loadOf(nodeIdentity(n.id)))),
         lendsTests: m.lendsTests,
         running: running(a => on(m.id).some(n => n.id === a.nodeId), p => p.machineId === m.id),
       })),
