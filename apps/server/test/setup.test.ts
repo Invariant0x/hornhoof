@@ -1,7 +1,11 @@
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { decryptSecret } from '../src/crypto/secrets.js';
-import { agents, companies, nodeCodes, people, subscriptions } from '../src/db/schema.js';
+import { agents, companies, nodeCodes, people, publicLinks, subscriptions } from '../src/db/schema.js';
 import { setupCode } from '../src/modules/setup/code.js';
+import { fakeRelay } from './fake-relay.js';
 import { SETUP, TEST_API_KEY as KEY, TEST_SECRET, testApp } from './helpers.js';
 
 describe('setup code', () => {
@@ -16,11 +20,96 @@ describe('setup code', () => {
 });
 
 describe('GET /api/setup', () => {
-  it('says setup is needed until a company exists', async () => {
+  it('says setup is needed until a company exists, and where public links live', async () => {
     const { app } = await testApp();
-    expect((await app.inject({ url: '/api/setup' })).json()).toEqual({ needed: true });
+    expect((await app.inject({ url: '/api/setup' })).json()).toEqual({ needed: true, linkDomain: 'hornhoof.org' });
     await app.inject({ method: 'POST', url: '/api/setup', payload: SETUP });
-    expect((await app.inject({ url: '/api/setup' })).json()).toEqual({ needed: false });
+    expect((await app.inject({ url: '/api/setup' })).json()).toEqual({ needed: false, linkDomain: 'hornhoof.org' });
+  });
+});
+
+/* A fresh Hornhoof with its own control folder, asking the fake relay for links. */
+async function fresh(env: NodeJS.ProcessEnv = {}) {
+  const relay = await fakeRelay();
+  const control = mkdtempSync(join(tmpdir(), 'hh-setup-'));
+  return { relay, control, ...(await testApp({ RELAY_URL: relay.url, HORNHOOF_CONTROL_DIR: control, ...env })) };
+}
+
+describe('GET /api/setup/names/:name', () => {
+  it('checks a name for the public link with the setup code, and only until the company is set up', async () => {
+    const { app, relay } = await fresh();
+    relay.bindings.set('globex', { key: 'k' });
+    expect((await app.inject({ url: `/api/setup/names/acme?code=${SETUP.code}` })).json()).toEqual({ name: 'acme', free: true });
+    expect((await app.inject({ url: `/api/setup/names/globex?code=${SETUP.code}` })).json()).toEqual({ name: 'globex', free: false, reason: 'taken' });
+    const wrong = await app.inject({ url: '/api/setup/names/acme?code=wrong' });
+    expect(wrong.statusCode).toBe(403);
+    expect(wrong.json().error.reason).toBe('setup_code');
+    expect(relay.calls).toEqual(['GET /api/v1/names/acme', 'GET /api/v1/names/globex']);
+    await app.inject({ method: 'POST', url: '/api/setup', payload: SETUP });
+    expect((await app.inject({ url: `/api/setup/names/acme?code=${SETUP.code}` })).statusCode).toBe(409);
+  });
+});
+
+describe('POST /api/setup with a public link', () => {
+  it('takes the link with the company and gives it as the address of the machine command', async () => {
+    const { app, db, config, relay, control } = await fresh();
+    const res = await app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, link: { name: 'acme' }, orchestrator: { mode: 'personal', provider: 'claude' } } });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().link).toEqual({ name: 'acme', url: 'https://acme.hornhoof.test' });
+    expect(res.json().command).toMatch(/^curl -fsSL https:\/\/acme\.hornhoof\.test\/install\.sh \| bash -s -- --join /);
+    const [row] = await db.select().from(publicLinks);
+    const [acme] = await db.select().from(companies);
+    expect(row).toMatchObject({ companyId: acme!.id, name: 'acme' });
+    expect(decryptSecret(row!.keyEnc, config.secret)).toBe(relay.bindings.get('acme')!.key);
+    expect(JSON.parse(readFileSync(join(control, 'tunnel.json'), 'utf8')).url).toBe('https://acme.hornhoof.test');
+  });
+
+  it('takes a long random link when no name is given', async () => {
+    const { app } = await fresh();
+    const res = await app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, link: {} } });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().link.name).toMatch(/^[a-z0-9]{20,}$/);
+  });
+
+  it('asks the relay for nothing without a link', async () => {
+    const { app, db, relay, control } = await fresh();
+    const res = await app.inject({ method: 'POST', url: '/api/setup', payload: SETUP });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().link).toBeUndefined();
+    expect(relay.calls).toEqual([]);
+    expect(await db.select().from(publicLinks)).toEqual([]);
+    expect(existsSync(join(control, 'tunnel.json'))).toBe(false);
+  });
+
+  it('sets nothing up when the name is taken or hornhoof.org does not answer', async () => {
+    const { app, db, relay } = await fresh();
+    relay.bindings.set('globex', { key: 'k' });
+    const taken = await app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, link: { name: 'globex' } } });
+    expect(taken.statusCode).toBe(409);
+    expect(taken.json().error.reason).toBe('link_taken');
+    relay.down = true;
+    const down = await app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, link: { name: 'acme' } } });
+    expect(down.statusCode).toBe(503);
+    expect(down.json().error.reason).toBe('relay_unreachable');
+    expect(await db.select().from(companies)).toEqual([]);
+    expect(down.headers['set-cookie']).toBeUndefined();
+  });
+
+  it('asks the relay for nothing without the setup code', async () => {
+    const { app, relay } = await fresh();
+    expect((await app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, code: 'wrong', link: { name: 'acme' } } })).statusCode).toBe(403);
+    expect(relay.calls).toEqual([]);
+  });
+
+  it('lets the link of a setup that lost a race go', async () => {
+    const { app, db, relay } = await fresh();
+    const results = await Promise.all([
+      app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, link: { name: 'acme' } } }),
+      app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, email: 'other@acme.com', link: { name: 'acme-two' } } }),
+    ]);
+    expect(results.map(r => r.statusCode).sort()).toEqual([201, 409]);
+    const [kept] = await db.select().from(publicLinks);
+    expect([...relay.bindings.keys()]).toEqual([kept!.name]);
   });
 });
 

@@ -1,12 +1,14 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import type { Deps } from '../../app.js';
+import type { Ctx } from '../../app.js';
 import { hashPassword } from '../../auth/password.js';
 import { startSession } from '../../auth/session.js';
 import { encryptSecret } from '../../crypto/secrets.js';
 import { isUniqueViolation } from '../../db/errors.js';
 import { agents, companies, people, subscriptions } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
+import { saveLink } from '../link/link.js';
+import { LinkBody } from '../link/routes.js';
 import { createNodeCode } from '../nodes/codes.js';
 import { installCommand } from '../nodes/command.js';
 import { isSetupCode, setupNeeded } from './code.js';
@@ -28,7 +30,10 @@ const SetupBody = z.object({
     z.object({ mode: z.literal('api_key'), provider: z.enum(['anthropic_api', 'openai_api']), apiKey: z.string().trim().min(8) }),
     z.object({ mode: z.literal('personal'), provider: z.enum(['claude', 'codex', 'kimi', 'glm']) }),
   ]),
+  /* The public link at hornhoof.org the company opens at, with a name or a random one; left out, none. */
+  link: LinkBody.optional(),
 });
+const CodeQuery = z.object({ code: z.string().max(200).default('') });
 
 type Orchestrator = z.infer<typeof SetupBody>['orchestrator'];
 
@@ -40,18 +45,32 @@ function orchestratorModel(orchestrator: Orchestrator): string {
 
 const alreadySetUp = () => new ApiError(409, 'conflict', 'This Hornhoof is already set up.', 'already_set_up');
 
-export function setupRoutes(app: FastifyInstance, { db, config }: Deps): void {
-  app.get('/api/setup', async () => ({ needed: await setupNeeded(db) }));
+export function setupRoutes(app: FastifyInstance, ctx: Ctx): void {
+  const { db, config } = ctx;
+
+  /* Until a company exists, only whoever has the code from the setup link gets anywhere. */
+  async function setupOnly(code: string) {
+    if (!(await setupNeeded(db))) throw alreadySetUp();
+    if (!isSetupCode(config.secret, code)) {
+      throw new ApiError(403, 'forbidden', 'This setup code is not right. Open the setup link from the server log.', 'setup_code');
+    }
+  }
+
+  app.get('/api/setup', async () => ({ needed: await setupNeeded(db), linkDomain: ctx.links.domain() }));
+
+  app.get('/api/setup/names/:name', async req => {
+    await setupOnly(CodeQuery.parse(req.query).code);
+    return ctx.links.check(z.object({ name: z.string().max(200) }).parse(req.params).name);
+  });
 
   app.post('/api/setup', async (req, reply) => {
     const body = SetupBody.parse(req.body);
-    if (!(await setupNeeded(db))) throw alreadySetUp();
-    if (!isSetupCode(config.secret, body.code)) {
-      throw new ApiError(403, 'forbidden', 'This setup code is not right. Open the setup link from the server log.', 'setup_code');
-    }
+    await setupOnly(body.code);
 
     const passwordHash = await hashPassword(body.password);
     const { orchestrator } = body;
+    /* The link comes first, so a name taken meanwhile sets nothing up and the person picks another. */
+    const bound = body.link ? await ctx.links.relay.bind(body.link.name) : null;
     let result;
     try {
       result = await db.transaction(async tx => {
@@ -104,20 +123,24 @@ export function setupRoutes(app: FastifyInstance, { db, config }: Deps): void {
           model: orchestratorModel(orchestrator),
           subscriptionId,
         });
+        if (bound) await saveLink(tx, config, company!.id, bound);
         return { company: company!, person: person!, code };
       });
     } catch (err) {
+      if (bound) await ctx.links.letGo(bound.name, bound.key);
       if (isUniqueViolation(err)) throw alreadySetUp();
       throw err;
     }
 
     const { company, person, code } = result;
+    if (bound) await ctx.links.sync();
     await startSession(reply, db, config, person.id, passwordHash);
     reply.code(201);
     return {
       company: { id: company.id, name: company.name },
       person: { id: person.id, name: person.name, email: person.email, title: person.title },
-      ...(code ? { command: installCommand(config.publicUrl, code) } : {}),
+      ...(bound ? { link: { name: bound.name, url: bound.url } } : {}),
+      ...(code ? { command: installCommand(bound?.url ?? config.publicUrl, code) } : {}),
     };
   });
 }

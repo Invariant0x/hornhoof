@@ -99,7 +99,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   const { version, commit, migrations } = deps.config;
   app.get('/api/health', async () => ({ ok: true, version, commit }));
   app.get('/api/version', async () => ({ version, commit, migrations }));
-  setupRoutes(app, deps);
+  setupRoutes(app, ctx);
   authRoutes(app, deps);
   peopleRoutes(app, ctx);
   orgRoutes(app, ctx);
