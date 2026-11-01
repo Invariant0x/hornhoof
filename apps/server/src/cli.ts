@@ -1,16 +1,19 @@
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { isLinkName } from '@hornhoof/protocol/link';
 import { eq } from 'drizzle-orm';
 import { loadConfig, type Config } from './config.js';
 import { createDb, type Db } from './db/client.js';
-import { people } from './db/schema.js';
-import { publicUrl } from './modules/link/link.js';
+import { companies, people } from './db/schema.js';
+import { ApiError } from './errors.js';
+import { linkOf, publicUrl, saveLink, writeTunnelSettings } from './modules/link/link.js';
+import { Relay } from './modules/link/relay.js';
 import { reinvite } from './modules/people/routes.js';
 import { setupLink } from './modules/setup/code.js';
 
-const USAGE = 'Usage: node apps/server/dist/cli.js owner-link | setup-link';
+const USAGE = 'Usage: node apps/server/dist/cli.js owner-link | setup-link | link <name> < key-file';
 
-type Deps = { db: Db; config: Config; print: (line: string) => void };
+type Deps = { db: Db; config: Config; print: (line: string) => void; read?: () => Promise<string> };
 
 /* The way back in for an owner who lost the password: a one-time link that sets a new one. */
 async function ownerLink({ db, config, print }: Deps): Promise<number> {
@@ -33,9 +36,52 @@ async function printSetupLink({ db, config, print }: Deps): Promise<number> {
   return link ? 0 : 1;
 }
 
+/* Takes over a link made before at hornhoof.org, by hand or by another install: its name comes as the argument and its
+   key on the input, so the key stays out of the shell history. The relay is only asked whether it holds the name. */
+async function takeLink(name: string | undefined, { db, config, print, read }: Deps): Promise<number> {
+  const [company] = await db.select({ id: companies.id }).from(companies).limit(1);
+  if (!company) {
+    print('Hornhoof is not set up yet. Open it in the browser to set it up.');
+    return 1;
+  }
+  const had = await linkOf(db);
+  if (had) {
+    print(`This Hornhoof has a link already: ${had.url}. Remove it in Settings first.`);
+    return 1;
+  }
+  if (!name || !isLinkName(name)) {
+    print(USAGE);
+    return 1;
+  }
+  const key = ((await read?.()) ?? '').trim();
+  if (key.length < 16) {
+    print(`Give the key of the link on the input: node apps/server/dist/cli.js link ${name} < key-file`);
+    return 1;
+  }
+  try {
+    const found = await new Relay(config.relayUrl).check(name);
+    if (found.reason !== 'taken') {
+      print(`hornhoof.org has no link ${name}${found.reason === 'reserved' ? ': the name is kept or blocked there' : ''}.`);
+      return 1;
+    }
+  } catch (err) {
+    if (!(err instanceof ApiError)) throw err;
+    print(err.message);
+    return 1;
+  }
+  const relay = new URL(config.relayUrl);
+  const url = `https://${name}.${relay.hostname}`;
+  await saveLink(db, config, company.id, { name, url, key, tunnel: { serverAddr: relay.hostname, serverPort: Number(relay.port) || 443, protocol: 'wss' } });
+  await writeTunnelSettings(db, config);
+  print(`Hornhoof keeps the link ${url}, and the tunnel opens it in a few seconds.`);
+  print('hornhoof.org carries one tunnel per link, so stop any other tunnel for this link first.');
+  return 0;
+}
+
 export async function runCli(args: string[], deps: Deps): Promise<number> {
   if (args[0] === 'owner-link') return ownerLink(deps);
   if (args[0] === 'setup-link') return printSetupLink(deps);
+  if (args[0] === 'link') return takeLink(args[1], deps);
   deps.print(USAGE);
   return 1;
 }
@@ -45,5 +91,10 @@ if (entry === fileURLToPath(import.meta.url)) {
   const config = loadConfig(process.env);
   if (!config.databaseUrl) throw new Error('DATABASE_URL is not set.');
   const db = await createDb(config.databaseUrl);
-  process.exit(await runCli(process.argv.slice(2), { db, config, print: line => console.log(line) }));
+  const read = async () => {
+    let text = '';
+    for await (const chunk of process.stdin) text += String(chunk);
+    return text;
+  };
+  process.exit(await runCli(process.argv.slice(2), { db, config, print: line => console.log(line), read }));
 }

@@ -237,6 +237,51 @@ describe('the public link as the address of this Hornhoof', () => {
   });
 });
 
+describe('taking over a link made before', () => {
+  const NAME = '5y32cnxttxtucl3hhwbnzq4q';
+  const KEY = 'a-key-the-relay-gave-for-this-link-0123456789';
+
+  it('keeps the name and key from the command line, without asking hornhoof.org for a new link', async () => {
+    const { app, db, config, relay, ceo, tunnelFile } = await company();
+    relay.bindings.set(NAME, { key: KEY });
+    const lines: string[] = [];
+    expect(await runCli(['link', NAME], { db, config, print: line => lines.push(line), read: async () => `${KEY}\n` })).toBe(0);
+    expect(relay.calls).toEqual([`GET /api/v1/names/${NAME}`]);
+    const { hostname, port } = new URL(relay.url);
+    const url = `https://${NAME}.${hostname}`;
+    expect(lines.join('\n')).toContain(url);
+    expect((await app.inject({ url: '/api/link', ...as(ceo) })).json().link).toEqual({ name: NAME, url });
+    expect(JSON.parse(readFileSync(tunnelFile, 'utf8'))).toEqual({ url, name: NAME, key: KEY, tunnel: { serverAddr: hostname, serverPort: Number(port), protocol: 'wss' } });
+    expect(statSync(tunnelFile).mode & 0o077).toBe(0);
+
+    /* The key it keeps is the one that frees the link. */
+    expect((await app.inject({ method: 'DELETE', url: '/api/link', ...as(ceo) })).statusCode).toBe(204);
+    expect(relay.bindings.has(NAME)).toBe(false);
+  });
+
+  it('refuses a link hornhoof.org does not hold, a missing key, and a second link', async () => {
+    const { db, config, relay, put } = await company();
+    const run = async (name: string, key: string) => {
+      const lines: string[] = [];
+      const code = await runCli(['link', name], { db, config, print: line => lines.push(line), read: async () => key });
+      return { code, out: lines.join('\n') };
+    };
+    const free = await run(NAME, KEY);
+    expect(free.code).toBe(1);
+    expect(free.out).toContain('has no link');
+    relay.bindings.set(NAME, { key: KEY });
+    expect((await run(NAME, '  \n')).code).toBe(1);
+    expect((await run('Not a name', KEY)).code).toBe(1);
+    expect(await db.select().from(publicLinks)).toEqual([]);
+
+    await put({ name: 'acme' });
+    const second = await run(NAME, KEY);
+    expect(second.code).toBe(1);
+    expect(second.out).toContain('https://acme.hornhoof.test');
+    expect((await db.select().from(publicLinks)).map(r => r.name)).toEqual(['acme']);
+  });
+});
+
 describe('the tunnel settings', () => {
   it('follow the database when Hornhoof starts', async () => {
     const { app, put, tunnelFile } = await company();

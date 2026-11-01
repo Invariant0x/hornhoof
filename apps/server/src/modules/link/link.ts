@@ -32,6 +32,18 @@ export async function saveLink(tx: Db | Tx, config: Config, companyId: string, b
   await tx.insert(publicLinks).values({ companyId, ...row }).onConflictDoUpdate({ target: publicLinks.companyId, set: { ...row, createdAt: new Date() } });
 }
 
+/* Writes the tunnel's settings for the link the database holds, or takes them away, written whole and then moved so
+   the tunnel never reads half a file. The link's key in them is for the tunnel container alone. */
+export async function writeTunnelSettings(db: Db, config: Config): Promise<void> {
+  const file = join(config.controlDir, TUNNEL_FILE);
+  const [row] = await db.select().from(publicLinks).limit(1);
+  if (!row) return rmSync(file, { force: true });
+  const settings = { url: row.url, name: row.name, key: decryptSecret(row.keyEnc, config.secret), tunnel: JSON.parse(decryptSecret(row.tunnelEnc, config.secret)) as unknown };
+  rmSync(`${file}.new`, { force: true });
+  writeFileSync(`${file}.new`, JSON.stringify(settings), { mode: 0o600 });
+  renameSync(`${file}.new`, file);
+}
+
 /* The company's link at hornhoof.org: asking the relay for it, changing and removing it, and the tunnel settings that
    follow it. Changes go one at a time, so two people renaming at once do not leave a link nobody keeps. */
 export class PublicLinks {
@@ -92,20 +104,11 @@ export class PublicLinks {
     await this.relay.unbind(name, key).catch(err => this.ctx.log.warn({ error: loggable(err), name }, 'Could not let the old public link go at the relay.'));
   }
 
-  /* Writes the tunnel's settings for the link the database holds, or takes them away, written whole and then moved so
-     the tunnel never reads half a file. The link's key in them is for the tunnel container alone. A control folder that
-     cannot be written, as when Hornhoof runs outside compose, goes to the log: the link works once the tunnel reads
-     the settings. */
+  /* The tunnel's settings for the link the database holds. A control folder that cannot be written, as when Hornhoof
+     runs outside compose, goes to the log: the link works once the tunnel reads the settings. */
   async sync(): Promise<void> {
-    const file = join(this.ctx.config.controlDir, TUNNEL_FILE);
     try {
-      const [row] = await this.ctx.db.select().from(publicLinks).limit(1);
-      if (!row) return rmSync(file, { force: true });
-      const { secret } = this.ctx.config;
-      const settings = { url: row.url, name: row.name, key: decryptSecret(row.keyEnc, secret), tunnel: JSON.parse(decryptSecret(row.tunnelEnc, secret)) as unknown };
-      rmSync(`${file}.new`, { force: true });
-      writeFileSync(`${file}.new`, JSON.stringify(settings), { mode: 0o600 });
-      renameSync(`${file}.new`, file);
+      await writeTunnelSettings(this.ctx.db, this.ctx.config);
     } catch (err) {
       this.ctx.log.error({ error: loggable(err) }, 'Could not write the tunnel settings for the public link.');
     }
