@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "task": 73,
+  "source": {
+    "commit": "bd696b0724385b6b11da53a24ada2f188b031217",
+    "acceptedDesign": "Task 54 r2",
+    "evidenceGap": "Task 63 r1, independently approved as evidence only"
+  },
+  "currentLanes": [
+    {"id": "claude", "driver": "Claude CLI plan", "state": "unavailable", "positiveModelRequests": null, "deniedModelRequests": null, "internalModelRequests": null},
+    {"id": "codex", "driver": "Codex CLI plan", "state": "proposed_resource_only", "positiveModelRequests": null, "deniedModelRequests": null, "internalModelRequests": null},
+    {"id": "kimi", "driver": "Kimi CLI plan", "state": "unavailable", "positiveModelRequests": null, "deniedModelRequests": null, "internalModelRequests": null},
+    {"id": "anthropic_api", "driver": "Claude CLI api_key mode", "state": "unavailable", "positiveModelRequests": null, "deniedModelRequests": null, "internalModelRequests": null},
+    {"id": "openai_api", "driver": "Codex CLI api_key mode", "state": "unavailable", "positiveModelRequests": null, "deniedModelRequests": null, "internalModelRequests": null},
+    {"id": "glm", "driver": "Claude CLI glm mode", "state": "unavailable", "positiveModelRequests": null, "deniedModelRequests": null, "internalModelRequests": null}
+  ],
+  "proposedSuites": [
+    {
+      "id": "isolation",
+      "state": "PLANNED_NOT_RUN",
+      "qualifies": "Only the disposable resource and kernel loopback boundary, not B0 or D2.",
+      "requiredCases": [
+        "only_loopback_interface",
+        "raw_loopback_positive_control",
+        "external_ipv4_denied_for_parent_and_descendant",
+        "external_dns_denied",
+        "no_host_home_credentials_or_docker_socket",
+        "fresh_writable_profile",
+        "read_only_root_and_no_new_privileges",
+        "timeout_pid_memory_and_output_bounds"
+      ]
+    },
+    {
+      "id": "codex-positive",
+      "state": "PLANNED_NOT_RUN",
+      "qualifies": "Only an actual pinned Codex CLI to synthetic loopback model path, not denial or D2.",
+      "requiredCases": [
+        "isolation_suite_passes_first",
+        "verified_launcher_and_native_executable",
+        "fresh_profile_without_personal_auth",
+        "actual_cli_reaches_synthetic_model_endpoint",
+        "synthetic_response_is_consumed",
+        "positive_model_request_count_at_least_one",
+        "runtime_version_recorded_separately"
+      ]
+    },
+    {
+      "id": "codex-d2",
+      "state": "PLANNED_NOT_RUN",
+      "qualifies": "Only the explicitly passed Codex request boundaries. Unsupported cases produce exit 2 and a GAP, never PASS.",
+      "requiredCases": [
+        "isolation_and_actual_positive_controls_pass_first",
+        "initial_prompt_budget_zero_denied_before_model_request",
+        "raw_stdin_live_paste_and_queued_entry_boundaries_separately",
+        "threshold_89_allowed_90_denied_91_denied_with_synthetic_fresh_observations",
+        "unknown_partial_stale_metrics_fail_closed_for_custom_threshold",
+        "hard_refusal_and_future_limit_until_deny",
+        "started_response_completes_without_a_new_model_start",
+        "internal_retry_denied_separately",
+        "tool_loop_continuation_denied_separately",
+        "compaction_request_denied_separately",
+        "duplicate_and_late_grant_do_not_release_a_request",
+        "control_timeout_and_unavailable_fail_closed",
+        "history_remains_readable_without_inference",
+        "current_request_identity_binding_and_no_replay"
+      ]
+    }
+  ],
+  "remainingRequiredResults": [
+    "Implement and independently review the native harness. It does not exist in this proposal.",
+    "Prove a provider-supported blocking before-send point for each claimed request. The existing hh-hook is observer-only and cannot supply it.",
+    "Add and qualify the other five lanes with their own verified artifacts and fresh profiles. This proposal does not reduce the six-lane D2 scope.",
+    "Keep model counts null for every unexecuted or unsupported case. A zero caused by startup, authentication or missing CLI is not a denied-model PASS.",
+    "Do not implement a coordinator, TLS interception, credential proxy or generic artifact service as a substitute for the missing native boundary."
+  ],
+  "execution": {
+    "workflowPublished": false,
+    "workflowDispatched": false,
+    "dockerExecuted": false,
+    "providerCliExecuted": false,
+    "modelEndpointCalled": false,
+    "b0Ready": false,
+    "d2Qualified": false
+  }
+}

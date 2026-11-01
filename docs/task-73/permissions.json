@@ -1,0 +1,118 @@
+{
+  "schemaVersion": 1,
+  "task": 73,
+  "observedAtUtc": "2026-11-01T10:02:24.763362Z",
+  "repository": {
+    "coordinate": "Invariant0x/hornhoof",
+    "technicalOwnerFromCoordinate": "Invariant0x",
+    "accountType": "UNKNOWN",
+    "visibility": "UNKNOWN",
+    "authenticatedServicePrincipal": "UNKNOWN",
+    "effectivePermissions": "UNKNOWN",
+    "unauthenticatedMetadataGet": {
+      "url": "https://api.github.com/repos/Invariant0x/hornhoof",
+      "status": 404,
+      "meaning": "No public metadata was returned. This does not distinguish a private repository from another 404 cause and proves no permission."
+    },
+    "serviceCli": "No gh executable was found in PATH at 2026-11-01T09:52:13Z. No configured Operations-owned GitHub service CLI was established.",
+    "credentialInspection": "No environment, credential helper, token, home, auth or personal login was inspected or used."
+  },
+  "existingProven": [
+    {
+      "capability": "Read source and create a local proposal branch",
+      "state": "EXISTING_PROVEN",
+      "evidence": "Exact source bd696b0724385b6b11da53a24ada2f188b031217 is available in the configured clone.",
+      "doesNotProve": "Actions dispatch, workflow publication or artifact access."
+    },
+    {
+      "capability": "Existing Images test job",
+      "state": "EXISTING_PROVEN",
+      "evidence": ".github/workflows/images.yml:8-23 grants contents:read and runs Node 22 npm test on ubuntu-latest.",
+      "doesNotProve": "Kernel egress denial, fresh CLI profiles, pinned CLI artifacts or a native probe harness."
+    },
+    {
+      "capability": "Existing Images publication job",
+      "state": "EXISTING_PROVEN",
+      "evidence": ".github/workflows/images.yml:25-76 grants packages:write only to the images job.",
+      "doesNotProve": "Permission to reuse publication credentials for this proposal. This job and Images are out of scope."
+    }
+  ],
+  "required": [
+    {
+      "capability": "Publish approved workflow and harness",
+      "state": "REQUIRED_PERMISSION",
+      "principal": "The reviewed service principal performing the branch push or exact approved merge, not the probe container",
+      "repositoryPermissions": {
+        "contents": "write",
+        "workflows": "write"
+      },
+      "notes": "Contents write is needed to update repository content. Workflows write is also required when the change updates .github/workflows. Branch protection and exact CEO commit approval still apply. Administration and packages are not required."
+    },
+    {
+      "capability": "Dispatch the tests-only workflow",
+      "state": "REQUIRED_PERMISSION",
+      "principal": "Operations-owned service principal restricted to this repository",
+      "repositoryPermissions": {
+        "actions": "write"
+      },
+      "notes": "The create-dispatch endpoint requires Actions write. Repository granularity is broader than one workflow: this permission can dispatch or cancel other workflows visible to the principal. It is not scoped to b0-probe.yml."
+    },
+    {
+      "capability": "Read run state, logs and artifacts",
+      "state": "REQUIRED_PERMISSION",
+      "principal": "Operations and independent reviewers",
+      "repositoryPermissions": {
+        "actions": "read"
+      },
+      "notes": "Actions write already includes the needed write operations for the dispatcher, but reviewers need only Actions read. No administration permission is requested."
+    },
+    {
+      "capability": "Cancel a stuck or unsafe run",
+      "state": "REQUIRED_PERMISSION",
+      "principal": "Operations-owned service principal",
+      "repositoryPermissions": {
+        "actions": "write"
+      },
+      "notes": "Cancellation is a planned emergency operation only. No run was dispatched or cancelled for this proposal."
+    },
+    {
+      "capability": "Check out approved source in the job",
+      "state": "PROPOSED",
+      "principal": "Per-job GITHUB_TOKEN",
+      "repositoryPermissions": {
+        "contents": "read"
+      },
+      "notes": "actions/checkout uses the token for a private repository but persist-credentials is false. The token is not passed to the probe container."
+    },
+    {
+      "capability": "Upload one bounded result artifact",
+      "state": "PROPOSED",
+      "principal": "Per-job GITHUB_TOKEN and the runner artifact capability injected into the pinned action",
+      "repositoryPermissions": {
+        "artifact-metadata": "write"
+      },
+      "notes": "Current GitHub workflow syntax describes artifact-metadata:write as creating storage records for a build artifact. The action receives no repository secret input. packages:write and actions:write are not granted to the runtime job."
+    },
+    {
+      "capability": "All other runtime repository scopes",
+      "state": "PROPOSED",
+      "principal": "Per-job GITHUB_TOKEN",
+      "repositoryPermissions": "none",
+      "notes": "Listing contents:read and artifact-metadata:write sets unspecified scopes to none. No administration, packages, id-token, deployments, attestations or workflow write is requested."
+    }
+  ],
+  "missingCapability": {
+    "state": "UNKNOWN_NOT_PROVEN_AVAILABLE",
+    "capability": "An Operations-owned, repository-scoped GitHub service principal with proven effective Actions read/write and the separate workflow publication path.",
+    "oneMinimalInfrastructureStep": "After separate approval, the technical GitHub repository owner, or the organization administrator if the coordinate is organization-owned, configures an Operations-owned fine-grained service credential or GitHub App installation for only Invariant0x/hornhoof with Actions read/write, Contents read/write and Workflows write. The credential remains in the existing Operations GitHub service context and is never mounted into Hornhoof or the probe. If publication and dispatch use different principals, publication needs Contents/Workflows and dispatch needs Actions only.",
+    "owner": "Technical GitHub repository owner or authorized organization administrator, routed by the Head of Development to Operations",
+    "notRequestedNow": "No account, credential, connection, permission or plugin is created or changed by task 73."
+  },
+  "officialSources": [
+    "https://docs.github.com/en/rest/actions/workflows?apiVersion=2022-11-28#create-a-workflow-dispatch-event",
+    "https://docs.github.com/en/rest/actions/workflow-runs?apiVersion=2022-11-28#cancel-a-workflow-run",
+    "https://docs.github.com/en/rest/authentication/permissions-required-for-fine-grained-personal-access-tokens?apiVersion=2022-11-28#repository-permissions-for-workflows",
+    "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#defining-access-for-the-github_token-scopes",
+    "https://github.com/actions/upload-artifact"
+  ]
+}

@@ -1,0 +1,162 @@
+# PROPOSAL ONLY. After approval, install this exact file as .github/workflows/b0-probe.yml.
+name: B0 native qualification
+
+on:
+  workflow_dispatch:
+    inputs:
+      approved_commit:
+        description: Full approved main commit containing this workflow and the harness
+        required: true
+        type: string
+      suite:
+        description: Bounded synthetic suite
+        required: true
+        type: choice
+        options:
+          - isolation
+          - codex-positive
+          - codex-d2
+
+permissions:
+  contents: read
+  artifact-metadata: write
+
+concurrency:
+  group: b0-native-qualification
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Bind dispatch to the approved bootstrap commit
+        env:
+          EXPECTED_COMMIT: ${{ inputs.approved_commit }}
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]
+          [[ "$GITHUB_REF" == "refs/heads/main" ]]
+          [[ "$GITHUB_SHA" == "$EXPECTED_COMMIT" ]]
+
+      - name: Check out the approved source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.approved_commit }}
+          fetch-depth: 1
+          persist-credentials: false
+          clean: true
+
+      - name: Verify approved harness identity
+        env:
+          EXPECTED_COMMIT: ${{ inputs.approved_commit }}
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$EXPECTED_COMMIT" ]]
+          test -f ci/b0-probe/run.mjs
+          test -f ci/b0-probe/validate-result.mjs
+          node --check ci/b0-probe/run.mjs
+          node --check ci/b0-probe/validate-result.mjs
+          sha256sum -c ci/b0-probe/SHA256SUMS
+
+      - name: Fetch and verify pinned Codex artifacts
+        env:
+          CLI_ROOT: ${{ runner.temp }}/b0-cli
+        run: |
+          set -euo pipefail
+          install -d -m 0700 "$CLI_ROOT/main" "$CLI_ROOT/native"
+          curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+            --max-time 180 --output "$RUNNER_TEMP/codex-main.tgz" \
+            https://registry.npmjs.org/@openai/codex/-/codex-0.166.0.tgz
+          curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+            --max-time 180 --output "$RUNNER_TEMP/codex-native.tgz" \
+            https://registry.npmjs.org/@openai/codex/-/codex-0.166.0-linux-x64.tgz
+          [[ "$(stat -c %s "$RUNNER_TEMP/codex-main.tgz")" == "4992" ]]
+          [[ "$(stat -c %s "$RUNNER_TEMP/codex-native.tgz")" == "172325449" ]]
+          node -e 'const fs=require("node:fs"),c=require("node:crypto");const [file,want]=process.argv.slice(1);const got="sha512-"+c.createHash("sha512").update(fs.readFileSync(file)).digest("base64");if(got!==want)throw new Error("Codex archive integrity mismatch")' \
+            "$RUNNER_TEMP/codex-main.tgz" '2Szlp1l1cz5TX1ccpX4Zok3DZrot9xeZe0km+6/1v8JmqxADwyJxKBJah4dBymkwtS25j/u6dipJusTOI97Z8Q=='
+          node -e 'const fs=require("node:fs"),c=require("node:crypto");const [file,want]=process.argv.slice(1);const got="sha512-"+c.createHash("sha512").update(fs.readFileSync(file)).digest("base64");if(got!==want)throw new Error("Codex native archive integrity mismatch")' \
+            "$RUNNER_TEMP/codex-native.tgz" 'CxDm3+D1cpbGJeHrdzINoG+3wn9BVncP4qpZaaNYkxe8iPtRJOYyCJnnPoVjWRIBvI9vPKbRoifsMSA5xDaUpw=='
+          tar -xzf "$RUNNER_TEMP/codex-main.tgz" -C "$CLI_ROOT/main" --no-same-owner --no-same-permissions
+          tar -xzf "$RUNNER_TEMP/codex-native.tgz" -C "$CLI_ROOT/native" --no-same-owner --no-same-permissions
+          mv "$CLI_ROOT/native/package/vendor" "$CLI_ROOT/main/package/vendor"
+          echo 'e14fc83739c13c1074b12bd1acce4010c893c7f6fbfc1593b4a31d74cabb57af  '"$CLI_ROOT/main/package/bin/codex.js" | sha256sum -c -
+          echo 'b8a11fedf24b2dfb59a70c9e52b030f9a508dcd49cd2dd0d41956f4c785156b8  '"$CLI_ROOT/main/package/vendor/x86_64-unknown-linux-musl/bin/codex" | sha256sum -c -
+          [[ "$(stat -c %s "$CLI_ROOT/main/package/vendor/x86_64-unknown-linux-musl/bin/codex")" == "319346888" ]]
+
+      - name: Run the bounded loopback-only probe
+        id: execute
+        env:
+          CLI_ROOT: ${{ runner.temp }}/b0-cli
+          B0_SUITE: ${{ inputs.suite }}
+        run: |
+          set -euo pipefail
+          install -d -m 0700 "$RUNNER_TEMP/b0-home" "$RUNNER_TEMP/b0-output"
+          set +e
+          timeout --signal=TERM --kill-after=10s 600s docker run --rm --init \
+            --name "b0-probe-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --platform linux/amd64 \
+            --network none \
+            --user "$(id -u):$(id -g)" \
+            --cap-drop ALL \
+            --security-opt no-new-privileges=true \
+            --read-only \
+            --pids-limit 128 \
+            --memory 1g \
+            --memory-swap 1g \
+            --cpus 1 \
+            --ulimit nofile=1024:1024 \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777 \
+            --mount "type=bind,src=$RUNNER_TEMP/b0-home,dst=/home/probe" \
+            --mount "type=bind,src=$RUNNER_TEMP/b0-output,dst=/output" \
+            --mount "type=bind,src=$CLI_ROOT/main/package,dst=/cli,readonly" \
+            --mount "type=bind,src=$GITHUB_WORKSPACE/ci/b0-probe,dst=/harness,readonly" \
+            --env HOME=/home/probe \
+            --env CODEX_HOME=/home/probe/codex \
+            --env XDG_CONFIG_HOME=/home/probe/config \
+            --env XDG_CACHE_HOME=/home/probe/cache \
+            --env XDG_DATA_HOME=/home/probe/data \
+            --env TMPDIR=/tmp \
+            --env CI=1 \
+            --env TERM=dumb \
+            --env NO_COLOR=1 \
+            --env B0_SUITE="$B0_SUITE" \
+            node:22-bookworm-slim@sha256:9f0dde62d10e7ff7a310ecaebd66225f6b46c17e6cb778449a77b05d3541bea2 \
+            node /harness/run.mjs --launcher /cli/bin/codex.js \
+              --native /cli/vendor/x86_64-unknown-linux-musl/bin/codex \
+              --output /output/result.json --suite "$B0_SUITE" \
+            >/dev/null 2>&1
+          rc=$?
+          set -e
+          if [[ ! -s "$RUNNER_TEMP/b0-output/result.json" ]]; then
+            printf '%s\n' '{"schemaVersion":1,"status":"infra_failure","failureClass":"no_result","modelCounts":null}' > "$RUNNER_TEMP/b0-output/result.json"
+            if [[ "$rc" == "0" ]]; then rc=1; fi
+          fi
+          exit "$rc"
+
+      - name: Validate the bounded result without printing it
+        id: validate
+        if: always()
+        run: |
+          set -euo pipefail
+          result="$RUNNER_TEMP/b0-output/result.json"
+          test -s "$result"
+          [[ "$(stat -c %s "$result")" -le 65536 ]]
+          node ci/b0-probe/validate-result.mjs "$result"
+
+      - name: Upload only the allowlisted result
+        if: always() && steps.validate.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          path: ${{ runner.temp }}/b0-output/result.json
+          if-no-files-found: error
+          retention-days: 1
+          archive: false
+
+      - name: Remove the probe container and disposable files
+        if: always()
+        run: |
+          docker rm --force "b0-probe-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >/dev/null 2>&1 || true
+          rm -rf -- "$RUNNER_TEMP/b0-home" "$RUNNER_TEMP/b0-output" "$RUNNER_TEMP/b0-cli"
+          rm -f -- "$RUNNER_TEMP/codex-main.tgz" "$RUNNER_TEMP/codex-native.tgz"

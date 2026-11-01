@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "task": 73,
+  "sourceCommit": "bd696b0724385b6b11da53a24ada2f188b031217",
+  "checkedThroughUtc": "2026-11-01T10:02:24Z",
+  "evidenceState": "PROPOSED_NOT_EXECUTED",
+  "actions": {
+    "checkout": {
+      "tag": "v7",
+      "commit": "3d3c42e5aac5ba805825da76410c181273ba90b1",
+      "source": "git ls-remote https://github.com/actions/checkout.git refs/tags/v7"
+    },
+    "uploadArtifact": {
+      "tag": "v7",
+      "commit": "cf430e030ddbb5b0abf93d22962f4752f3646cd9",
+      "source": "git ls-remote https://github.com/actions/upload-artifact.git refs/tags/v7"
+    }
+  },
+  "container": {
+    "reference": "node:22-bookworm-slim@sha256:9f0dde62d10e7ff7a310ecaebd66225f6b46c17e6cb778449a77b05d3541bea2",
+    "platform": "linux/amd64",
+    "tagIndexDigest": "sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da",
+    "metadataUrl": "https://hub.docker.com/v2/repositories/library/node/tags/22-bookworm-slim",
+    "tagLastPushedUtc": "2026-10-28T02:38:15.147469184Z",
+    "runtimeVersion": null,
+    "runtimeVersionStatus": "PLANNED_NOT_RUN"
+  },
+  "codex": {
+    "lane": "codex",
+    "packageVersion": "0.166.0",
+    "packageArchive": {
+      "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.166.0.tgz",
+      "bytes": 4992,
+      "integrity": "sha512-2Szlp1l1cz5TX1ccpX4Zok3DZrot9xeZe0km+6/1v8JmqxADwyJxKBJah4dBymkwtS25j/u6dipJusTOI97Z8Q==",
+      "sha256": "67ee6f4069d9328956401f54ac202c20369233159058af9f4ec1af731b87f5b7"
+    },
+    "launcher": {
+      "path": "package/bin/codex.js",
+      "bytes": 9154,
+      "sha256": "e14fc83739c13c1074b12bd1acce4010c893c7f6fbfc1593b4a31d74cabb57af"
+    },
+    "nativePackageVersion": "0.166.0-linux-x64",
+    "nativeArchive": {
+      "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.166.0-linux-x64.tgz",
+      "bytes": 172325449,
+      "integrity": "sha512-CxDm3+D1cpbGJeHrdzINoG+3wn9BVncP4qpZaaNYkxe8iPtRJOYyCJnnPoVjWRIBvI9vPKbRoifsMSA5xDaUpw==",
+      "sha256": "cbc00a26d3d0e2ceefc4be8891f8a81ef1e349b3b175bc0ae308762bc001fd93"
+    },
+    "nativeExecutable": {
+      "path": "package/vendor/x86_64-unknown-linux-musl/bin/codex",
+      "bytes": 319346888,
+      "sha256": "b8a11fedf24b2dfb59a70c9e52b030f9a508dcd49cd2dd0d41956f4c785156b8"
+    },
+    "runtimeVersion": null,
+    "runtimeVersionStatus": "PLANNED_NOT_RUN",
+    "actualCliExecuted": false,
+    "packageScriptsExecuted": false,
+    "packagesInstalled": false
+  },
+  "harness": {
+    "implemented": false,
+    "requiredTargetFiles": [
+      "ci/b0-probe/run.mjs",
+      "ci/b0-probe/validate-result.mjs",
+      "ci/b0-probe/SHA256SUMS",
+      "ci/b0-probe/fixtures/*"
+    ],
+    "note": "The task 63 helper is observer-only and is not a native model positive control or before-send gate."
+  },
+  "officialSemantics": [
+    "https://docs.docker.com/engine/network/drivers/none/",
+    "https://docs.docker.com/reference/cli/docker/container/run/",
+    "https://docs.docker.com/engine/security/",
+    "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_dispatch",
+    "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#defining-access-for-the-github_token-scopes",
+    "https://docs.github.com/en/actions/security-for-github-actions/security-guides/security-hardening-for-github-actions#pin-actions-to-a-full-length-commit-sha",
+    "https://github.com/actions/upload-artifact"
+  ]
+}
