@@ -89,8 +89,10 @@ COPY --from=build /app/packages/protocol/dist packages/protocol/dist
 COPY --from=build /app/apps/node/dist apps/node/dist
 # git asks this for a repository's password; the node gives each turn its token in HH_GIT_PASSWORD.
 COPY --chmod=755 apps/node/git-askpass /app/git-askpass
-# Agents send screenshots for people with hh-attach; the node gives each turn its address and token.
+# Agents send screenshots for people and files for a task with hh-attach, and download a task's files with hh-fetch; the
+# node gives each turn its address and token.
 COPY --chmod=755 apps/node/hh-attach.cjs /usr/local/bin/hh-attach
+COPY --chmod=755 apps/node/hh-fetch.cjs /usr/local/bin/hh-fetch
 # Agents run in tmux sessions; their hooks and status line tell the node how a turn goes through hh-hook.
 COPY --chmod=755 apps/node/hh-hook.cjs /usr/local/bin/hh-hook
 # The terminal's private, bounded raw output survives programs leaving their alternate screen.

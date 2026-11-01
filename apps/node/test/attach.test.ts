@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -8,15 +8,22 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it, onTestFinished } from 'vitest';
 
 const SCRIPT = fileURLToPath(new URL('../hh-attach.cjs', import.meta.url));
+const FETCH = fileURLToPath(new URL('../hh-fetch.cjs', import.meta.url));
 
-/* A Hornhoof that answers each picture with an id and remembers what it got. */
+/* A Hornhoof that answers each picture with an id and remembers what it got. It hands out one file of task 12. */
 async function hub(status = 201) {
-  const got: { auth: string | undefined; type: string | undefined; bytes: Buffer }[] = [];
+  const got: { url: string | undefined; auth: string | undefined; type: string | undefined; bytes: Buffer }[] = [];
   const server = createServer((req, res) => {
     const parts: Buffer[] = [];
     req.on('data', c => parts.push(c));
     req.on('end', () => {
-      got.push({ auth: req.headers.authorization, type: req.headers['content-type'], bytes: Buffer.concat(parts) });
+      got.push({ url: req.url, auth: req.headers.authorization, type: req.headers['content-type'], bytes: Buffer.concat(parts) });
+      if (req.method === 'GET') {
+        const found = req.url === '/api/attachments/file?task=12&file=build+log.txt';
+        res.writeHead(found ? 200 : 404, found ? { 'content-type': 'application/octet-stream', 'x-file-name': encodeURIComponent('../build log.txt') } : { 'content-type': 'application/json' });
+        res.end(found ? 'all green' : JSON.stringify({ error: { message: 'Task 12 has no file other.txt.' } }));
+        return;
+      }
       res.writeHead(status, { 'content-type': 'application/json' });
       res.end(JSON.stringify(status === 201 ? { id: `id-${got.length}` } : { error: { message: 'Send a PNG, JPEG or WebP picture.' } }));
     });
@@ -26,12 +33,14 @@ async function hub(status = 201) {
   return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/attachments`, got };
 }
 
-const attach = (args: string[], env: Record<string, string>) =>
+const run = (script: string) => (args: string[], env: Record<string, string>, cwd?: string) =>
   new Promise<{ code: number; out: string; err: string }>(resolve =>
-    execFile(process.execPath, [SCRIPT, ...args], { env: { PATH: process.env.PATH ?? '', ...env } }, (err, out, errOut) =>
+    execFile(process.execPath, [script, ...args], { env: { PATH: process.env.PATH ?? '', ...env }, cwd }, (err, out, errOut) =>
       resolve({ code: err ? ((err as { code?: number }).code ?? 1) : 0, out: String(out), err: String(errOut) }),
     ),
   );
+const attach = run(SCRIPT);
+const fetchFile = run(FETCH);
 
 describe('hh-attach', () => {
   it('sends each file with the turn token and prints the id to pass on', async () => {
@@ -59,5 +68,47 @@ describe('hh-attach', () => {
     const refused = await attach([join(dir, 'notes.txt')], { HH_ATTACH_URL: url, HH_ATTACH_PASS: 't' });
     expect(refused.code).toBe(1);
     expect(refused.err).toContain('Send a PNG, JPEG or WebP picture.');
+  });
+
+  it('puts files of any kind on a task under their own names', async () => {
+    const { url, got } = await hub();
+    const dir = mkdtempSync(join(tmpdir(), 'hh-attach-'));
+    writeFileSync(join(dir, 'build log.txt'), 'all green');
+    const r = await attach(['--task', '12', join(dir, 'build log.txt')], { HH_ATTACH_URL: url, HH_ATTACH_PASS: 't' });
+    expect(r.code).toBe(0);
+    expect(r.out.trim()).toBe(`${join(dir, 'build log.txt')} id-1`);
+    expect(got.map(g => [g.url, g.bytes.toString()])).toEqual([['/api/attachments?task=12&name=build+log.txt', 'all green']]);
+    expect((await attach(['--task'], { HH_ATTACH_URL: url, HH_ATTACH_PASS: 't' })).err).toContain('Usage');
+  });
+});
+
+describe('hh-fetch', () => {
+  it("downloads a task's file by its name into the folder it runs in, never above it", async () => {
+    const { url, got } = await hub();
+    const dir = mkdtempSync(join(tmpdir(), 'hh-fetch-'));
+    const r = await fetchFile(['12', 'build log.txt'], { HH_ATTACH_URL: url, HH_ATTACH_PASS: 'tool-token-0123456789' }, dir);
+    expect(r.code).toBe(0);
+    expect(r.out.trim()).toBe('build log.txt');
+    expect(readFileSync(join(dir, 'build log.txt'), 'utf8')).toBe('all green');
+    expect(got[0]).toMatchObject({ url: '/api/attachments/file?task=12&file=build+log.txt', auth: 'Bearer tool-token-0123456789' });
+  });
+
+  it('saves it where it is told, into a folder or as a file', async () => {
+    const { url } = await hub();
+    const dir = mkdtempSync(join(tmpdir(), 'hh-fetch-'));
+    mkdirSync(join(dir, 'in'));
+    const env = { HH_ATTACH_URL: url, HH_ATTACH_PASS: 't' };
+    expect((await fetchFile(['#12', 'build log.txt', join(dir, 'in')], env)).out.trim()).toBe(join(dir, 'in', 'build log.txt'));
+    expect((await fetchFile(['12', 'build log.txt', join(dir, 'log.txt')], env)).out.trim()).toBe(join(dir, 'log.txt'));
+    expect(readFileSync(join(dir, 'log.txt'), 'utf8')).toBe('all green');
+  });
+
+  it("says what went wrong: no turn, no task and file, or Hornhoof's refusal", async () => {
+    const { url } = await hub();
+    expect((await fetchFile(['12', 'a.txt'], {})).err).toContain('only inside a Hornhoof turn');
+    expect((await fetchFile(['12'], { HH_ATTACH_URL: url, HH_ATTACH_PASS: 't' })).err).toContain('Usage');
+    const refused = await fetchFile(['12', 'other.txt'], { HH_ATTACH_URL: url, HH_ATTACH_PASS: 't' });
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain('Task 12 has no file other.txt.');
   });
 });

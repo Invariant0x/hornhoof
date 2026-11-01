@@ -3,8 +3,9 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo, Socket } from 'node:net';
 import type { Owns } from './peer.js';
 
-/* Hook calls are short; a picture for people is the biggest thing that passes. */
+/* Hook and tool calls are short; a file an agent puts on a task is the biggest thing that passes, up to Hornhoof's 50 MB. */
 const MAX_BODY = 4 * 1024 * 1024;
+const MAX_FILE = 51 * 1024 * 1024;
 /* A person's prompt waits this long for Hornhoof to open its turn. */
 const HOOK_WAIT_MS = 10_000;
 
@@ -122,11 +123,14 @@ export class Bridge {
   }
 
   private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const [, kind, secret, event] = (req.url ?? '').split('?')[0]!.split('/');
+    const [path, query] = (req.url ?? '').split(/\?(.*)/s);
+    const [, kind, secret, event] = path!.split('/');
     const key = secret ? this.bySecret.get(secret) : undefined;
     if (!key || !kind) return reply(res, 404, '');
     if (!(await this.fromOwner(key, req.socket))) return reply(res, 403, '');
-    const body = await readBody(req);
+    /* Under the picture address: pictures and files sent, and a task's file downloaded at /file. */
+    if (kind === 'attach' && event !== undefined && event !== 'file') return reply(res, 404, '');
+    const body = await readBody(req, kind === 'attach' ? MAX_FILE : MAX_BODY);
     if (kind === 'hook' && event) {
       let data: unknown = null;
       try {
@@ -145,10 +149,10 @@ export class Bridge {
       const v = req.headers[h];
       if (typeof v === 'string') headers[h] = v;
     }
-    const target = `${this.hornhoof}${kind === 'mcp' ? '/mcp' : '/api/attachments'}`;
+    const target = `${this.hornhoof}${kind === 'mcp' ? '/mcp' : `/api/attachments${event ? `/${event}` : ''}${query ? `?${query}` : ''}`}`;
     const up = await fetch(target, { method: req.method, headers, ...(req.method === 'GET' || req.method === 'HEAD' ? {} : { body: new Uint8Array(body) }) });
     const out: Record<string, string> = {};
-    for (const h of ['content-type', 'mcp-session-id']) {
+    for (const h of ['content-type', 'mcp-session-id', 'x-file-name']) {
       const v = up.headers.get(h);
       if (v) out[h] = v;
     }
@@ -203,13 +207,13 @@ function only(body: Buffer, methods: Set<string>): boolean {
   return all.length > 0 && all.every(m => typeof m?.method === 'string' && methods.has(m.method));
 }
 
-function readBody(req: IncomingMessage): Promise<Buffer> {
+function readBody(req: IncomingMessage, max: number): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;
     req.on('data', (c: Buffer) => {
       size += c.length;
-      if (size > MAX_BODY) {
+      if (size > max) {
         reject(new Error('too big'));
         req.destroy();
         return;

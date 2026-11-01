@@ -12,7 +12,7 @@ async function upstream(): Promise<{ url: string; seen: Seen[]; server: Server }
     req.on('data', c => (body += c));
     req.on('end', () => {
       seen.push({ method: req.method!, url: req.url!, auth: req.headers.authorization ?? '', body });
-      res.writeHead(200, { 'content-type': 'application/json' });
+      res.writeHead(200, { 'content-type': 'application/json', 'x-file-name': 'build.tar.gz' });
       res.end(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { ok: true } }));
     });
   });
@@ -38,6 +38,24 @@ describe("the node's bridge to Hornhoof's tools", () => {
     bridge.setToken('agent-1', 'tok-turn-2');
     await fetch(a.attachUrl, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: Buffer.from('png') });
     expect(up.seen[1]).toMatchObject({ url: '/api/attachments', auth: 'Bearer tok-turn-2', body: 'png' });
+  });
+
+  it("hands on a task's files both ways, with their names and up to 50 MB, and nothing else under the picture address", async () => {
+    const up = await upstream();
+    const bridge = new Bridge(up.url, () => {});
+    await bridge.start();
+    closers.push(() => bridge.stop(), () => up.server.close());
+    const a = bridge.agent('agent-1');
+    bridge.setToken('agent-1', 'tok-turn-1');
+    const big = Buffer.alloc(20 * 1024 * 1024, 7);
+    expect((await fetch(`${a.attachUrl}?task=12&name=build.tar.gz`, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: big })).status).toBe(200);
+    expect(up.seen[0]).toMatchObject({ method: 'POST', url: '/api/attachments?task=12&name=build.tar.gz', auth: 'Bearer tok-turn-1' });
+    expect(up.seen[0]!.body.length).toBe(big.length);
+    const got = await fetch(`${a.attachUrl}/file?task=12&file=build.tar.gz`);
+    expect(got.headers.get('x-file-name')).toBe('build.tar.gz');
+    expect(up.seen[1]).toMatchObject({ method: 'GET', url: '/api/attachments/file?task=12&file=build.tar.gz', auth: 'Bearer tok-turn-1' });
+    expect((await fetch(`${a.attachUrl}/other`)).status).toBe(404);
+    expect(up.seen).toHaveLength(2);
   });
 
   it("says when the agent's program has listed its tools during a turn, and gives up after the time it was given", async () => {
