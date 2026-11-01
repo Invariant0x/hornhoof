@@ -10,6 +10,7 @@ import { deptName } from '../departments/templates.js';
 import { BuildBody, RepoBody } from '../departments/routes.js';
 import { LinkBody } from '../link/routes.js';
 import { NOTE_MAX, NoteBody } from '../notebook/book.js';
+import { carriesFile, encodedHint } from '../tasks/attachments.js';
 import { InviteBody, PersonPatch } from '../people/routes.js';
 import { BudgetBody, ConnectBody, SubscriptionBody } from '../subscriptions/routes.js';
 import { UpdateBody } from '../updates/routes.js';
@@ -114,7 +115,7 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
     'message_employee',
     'Writes to an employee in its own window, as yourself. It reads it in its next turn, or at once when it is free.',
     { employee: Id('employee'), text: z.string().trim().min(1).max(4000) },
-    ({ employee, text }) => ({ method: 'POST', url: `/api/agents/${employee}/messages`, payload: { text } }),
+    ({ employee, text }) => (carriesFile(text) ? encodedHint() : { method: 'POST', url: `/api/agents/${employee}/messages`, payload: { text } }),
   );
   tool('stop_employee', 'Stops the turn an employee runs now, as Esc in its window does.', { employee: Id('employee') }, ({ employee }) => ({ method: 'POST', url: `/api/agents/${employee}/stop` }));
 

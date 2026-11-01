@@ -6,6 +6,7 @@ import { agentEvents, agents, departments, jobs, requests, taskEvents, tasks } f
 import { wrote } from '../conversation/prompt.js';
 import { agentState, carrierOf, enqueueTurn, GONE_ALONG, orchestratorOf, STOPPED_ON_PURPOSE } from '../conversation/queue.js';
 import { deptName } from '../departments/templates.js';
+import { carriesFile, encodedHint } from '../tasks/attachments.js';
 import { CLOSED } from '../tasks/engine.js';
 import type { Grant } from '../templates/load.js';
 import { INSTALL_HINT, installsIn, MISSING_HINT, missingIn, type Missing } from './stumbles.js';
@@ -231,6 +232,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
         inputSchema: { text: z.string().trim().min(1).max(4000) },
       },
       async ({ text }) => {
+        if (carriesFile(text)) return say(encodedHint(), true);
         const [me] = await db.select().from(agents).where(eq(agents.id, job.agentId));
         const orchestrator = await orchestratorOf(ctx, job.companyId);
         if (!me || !orchestrator) return say('This company has no orchestrator.', true);
@@ -264,6 +266,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
       inputSchema: { employee: z.uuid().describe("The employee's id, from agents or company."), text: z.string().trim().min(1).max(4000) },
     },
     async ({ employee, text }) => {
+      if (carriesFile(text)) return say(encodedHint(), true);
       const [me] = await db.select().from(agents).where(eq(agents.id, job.agentId));
       const [target] = await db.select().from(agents).where(and(eq(agents.id, employee), eq(agents.companyId, job.companyId), isNull(agents.removedAt)));
       if (!me || !target || target.kind === 'orchestrator') return say(`There is no employee with id ${employee}. Call agents to see the current ids.`, true);

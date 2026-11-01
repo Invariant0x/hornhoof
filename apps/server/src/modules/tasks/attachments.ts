@@ -24,6 +24,27 @@ export function fileName(raw: string): string | null {
   return name && name !== '.' && name !== '..' ? name : null;
 }
 
+/* Text that carries a file instead of words: 1000 or more characters of base64 or hex in a row, on one line or wrapped in
+   lines of 60 or more, with letters and digits both, so a long line of dashes is no file. */
+const ENCODED_RUN = 1000;
+const ENCODED_LINE = 60;
+const CODE = /[A-Za-z0-9+/=_-]+/g;
+const mixed = (run: string) => /[0-9]/.test(run) && /[A-Za-z]/.test(run);
+export function carriesFile(text: string): boolean {
+  if ((text.match(CODE) ?? []).some(run => run.length >= ENCODED_RUN && mixed(run))) return true;
+  let wrapped = 0;
+  for (const line of text.split(/\r?\n/)) {
+    const t = line.trim();
+    wrapped = t.length >= ENCODED_LINE && t.match(CODE)?.[0] === t && mixed(t) ? wrapped + t.length : 0;
+    if (wrapped >= ENCODED_RUN) return true;
+  }
+  return false;
+}
+
+/* What an agent hears when it pastes a file into what it writes. */
+export const encodedHint = (task?: number) =>
+  `This text carries an encoded file. Put the file on ${task ? `the task with hh-attach --task ${task} FILE` : 'the task it is for with hh-attach --task <task number> FILE'} and write its name instead: anyone downloads it with hh-fetch.`;
+
 /* An agent works on a task when it runs the company, the task is its department's, or it holds, does, checks or made it. */
 const onTask = (job: ToolJob, t: Task) =>
   job.agentKind === 'orchestrator' || (job.departmentId !== null && t.departmentId === job.departmentId) || [t.assigneeAgentId, t.executorAgentId, t.createdByAgentId, ...t.gates, ...t.panel].includes(job.agentId);

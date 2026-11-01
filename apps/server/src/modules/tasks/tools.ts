@@ -5,6 +5,7 @@ import type { Ctx } from '../../app.js';
 import { agents, departments, jobs, requests, tasks } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { ask, blocked, cancel, CLOSED, comment, createTask, listed, openAfter, refuse, report, submit, updateTask, verdict, type Moved, type Task } from './engine.js';
+import { carriesFile, encodedHint } from './attachments.js';
 import { taskByRef, taskDetail, taskLines, type TaskDetail } from './views.js';
 import { addTasks, editTurn, mergeTurn, planTurn, settle, tell, TURN_MESSAGES, turnName, turnRows } from './turns.js';
 import { stopTurns, wakeAll } from './wake.js';
@@ -65,6 +66,11 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
     if (!task || !sees(agent, task)) throw refuse(404, 'task_unknown', `There is no task ${ref} you can see. Call tasks for yours.`);
     return { agent, task };
   }
+
+  /* What an agent writes on a task is words: a file goes on the task itself. */
+  const plain = (task: Task, ...texts: string[]) => {
+    if (texts.some(carriesFile)) throw refuse(400, 'task_invalid', encodedHint(task.number));
+  };
 
   /* Runs a move, wakes whoever it needs and answers in a line; a refused move comes back as a readable error. A move that
      closed the last task of the open turn moves the company on to the next turn. */
@@ -151,6 +157,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
     async ({ task: ref, text }) =>
       run(async () => {
         const { task } = await find(ref);
+        plain(task, text);
         return { text: `Noted on #${task.number}.`, moved: await comment(ctx, { agentId: job.agentId }, task.id, text) };
       }),
   );
@@ -175,6 +182,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
     async ({ task: ref, question, commit, images, options, link }) =>
       run(async () => {
         const { task } = await find(ref);
+        plain(task, question);
         const [asked] = await db
           .select({ n: count() })
           .from(requests)
@@ -323,6 +331,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
       async ({ task: ref, done, summary }) =>
         run(async () => {
           const { task } = await find(ref);
+          plain(task, summary);
           const moved = await report(ctx, job.agentId, task.id, { done, summary });
           return { text: `Reported. ${await where(moved.task)}`, moved };
         }),
@@ -354,6 +363,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
       async ({ task: ref, summary, evidence }) =>
         run(async () => {
           const { task } = await find(ref);
+          plain(task, summary, evidence);
           const moved = await submit(ctx, job.agentId, task.id, { summary, evidence });
           return { text: `Submitted. ${await where(moved.task)}`, moved };
         }),
@@ -364,6 +374,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
       async ({ task: ref, why }) =>
         run(async () => {
           const { task } = await find(ref);
+          plain(task, why);
           return { text: `Your head is told. ${task.title} waits.`, moved: await blocked(ctx, job.agentId, task.id, why) };
         }),
     );
@@ -376,6 +387,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
       async ({ task: ref, pass, comment: why }) =>
         run(async () => {
           const { task } = await find(ref);
+          plain(task, why);
           const moved = await verdict(ctx, job.agentId, task.id, { pass, comment: why });
           return { text: `Recorded. ${await where(moved.task)}`, moved };
         }),
