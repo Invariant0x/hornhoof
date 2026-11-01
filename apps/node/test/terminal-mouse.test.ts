@@ -30,12 +30,15 @@ const poll = { timeout: 5000, interval: 25 };
 
 describe.skipIf(!hasTmux)('terminal wheel bindings', () => {
   const fixtures: Fixture[] = [];
+  /* A server name for each test of its own: on a busy machine the server the last test killed can still be on its way
+     out when the next one starts, and takes that one's commands down with it. */
+  let servers = 0;
 
   async function fixture(start = ''): Promise<Fixture> {
     const dir = mkdtempSync(join(tmpdir(), 'hh-wheel-'));
     const input = join(dir, 'input');
     writeFileSync(input, '');
-    const tmux = new Tmux({ socket: `hh-wheel-${process.pid}-${fixtures.length}`, env: { PATH: process.env.PATH ?? '', HOME: dir } });
+    const tmux = new Tmux({ socket: `hh-wheel-${process.pid}-${servers++}`, env: { PATH: process.env.PATH ?? '', HOME: dir } });
     const value: Fixture = { dir, input, tmux, client: null };
     fixtures.push(value);
     await tmux.launch('agent', { cwd: dir, cols: 80, rows: 24, command: [process.execPath, '-e', program, input, start] });
