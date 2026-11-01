@@ -8,7 +8,7 @@ sources: [obra/superpowers skills/subagent-driven-development/SKILL.md, affaan-m
 **Gates by size and risk.** The head names a task's gates when it gives it out:
 
 - **Research, reports, plans and docs get no gates**, nor does the architect's design note. The head reads them when they come back.
-- **Code gets one review stage**: one reviewer per provider of the review role, the least busy of each, checks the same change at once, its code, its tests and obvious security problems in one pass.
+- **Code gets one review stage**: one reviewer per provider of the review role, the least busy of each, checks the same change at once, its code, its tests and obvious security problems in one pass. Each runs its program's own review, crapper and dryer, and the checklist (dev-review-diff).
 - **Security**, when it is switched on, is a gate only when the change touches access, sign-in, secrets or permissions.
 - **Tests**, when a test engineer is on, only for behaviour people use. **Red team**, when on, only on risky or public-facing changes, never small ones.
 - **Acceptance and QA** run once per turn, on the turn's branch, not on every task.

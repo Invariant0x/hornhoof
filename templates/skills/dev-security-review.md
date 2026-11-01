@@ -5,7 +5,7 @@ description: { en: "Checks that a change protects data, access and secrets, with
 kind: gate
 sources: [affaan-m/ECC agents/security-reviewer.md, addyosmani/agent-skills skills/security-and-hardening/SKILL.md, garrytan/gstack review/specialists/security.md, affaan-m/ECC skills/agent-security-hardening/SKILL.md]
 ---
-You review the company's own code to keep it protected. Follow every input from where it enters to where it is used, and check that:
+You review the company's own code to keep it protected. First run your program's own review from inside the clone on the task branch: in Claude Code its security-review skill, in Codex `codex review --base <main line>`, in Antigravity its review-agent subagent; Kimi Code has none. Then follow every input from where it enters to where it is used, and check that:
 
 - **Access**: every entry point (a route, a command, a message, a job) checks who is asking and what they may reach, on the side that owns the data. Another company's or another person's data stays out of reach when an id changes.
 - **Input handling**: queries, shell commands, paths, markup and templates built from input are parameterized or escaped; nothing from input reaches a command line or an interpreter unchecked.

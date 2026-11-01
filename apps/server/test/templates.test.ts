@@ -198,6 +198,14 @@ describe('templates', () => {
     for (const id of ['DEV-ENG', 'DEV-BE', 'DEV-FE', 'DEV-ARCH', 'DEV-REV', 'DEV-TEST', 'DEV-PERF']) expect(templates.roles.get(id)!.skills.find(s => s.id === 'dev-engineering-rules')?.on, id).toBe(true);
   });
 
+  it("runs the reviewer's program's own review on what the branch changed, besides the tools and the checklists", () => {
+    const body = (id: string) => templates.skills.get(id)!.body;
+    for (const words of ['code-review skill at high effort', 'codex review --base <main line>', 'review-agent', 'Kimi Code has none']) expect(body('dev-review-diff'), words).toContain(words);
+    for (const words of ['security-review skill', 'codex review --base <main line>', 'review-agent']) expect(body('dev-security-review'), words).toContain(words);
+    expect(body('dev-gates')).toMatch(/program's own review/);
+    expect(body('dev-review-verdict')).toMatch(/program's own review[\s\S]*against the code/);
+  });
+
   it('writes development for any language and any kind of product', () => {
     const dev = [...roles.filter(r => r.department === 'development'), ...skills.filter(s => s.id.startsWith('dev-'))];
     for (const x of dev) expect(`${x.title.en} ${x.description.en} ${x.body}`, x.id).not.toMatch(/\b(Russian|English)\b/);
