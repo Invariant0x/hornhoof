@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { companies, departments } from '../src/db/schema.js';
@@ -7,8 +8,8 @@ const NODE_KEY = 'builtin-node-key-0123456789abcdef';
 const GIB = 1024 ** 3;
 
 /* A company with one machine of the CEO that carries two subscriptions, each its own node. */
-async function liveCompany() {
-  const { app, db } = await testApp({ NODE_PING_MS: '50', NODE_KEY });
+async function liveCompany(env: NodeJS.ProcessEnv = {}) {
+  const { app, db } = await testApp({ NODE_PING_MS: '50', NODE_KEY, ...env });
   const url = await listen(app);
   onTestFinished(() => app.close());
   const ceo = await setUpCompany(app);
@@ -49,6 +50,24 @@ describe("a machine's load", () => {
     const [sales] = await db.insert(departments).values({ companyId: acme!.id, templateKey: 'sales', roleCode: 'SAL' }).returning();
     const ann = await invitePerson(app, ceo, { name: 'Ann', email: 'ann@acme.com', access: { departments: [sales!.id] } });
     expect((await machinesOf(app, ann)).builtin).toBeNull();
+  });
+
+  it('names the machine the built-in node runs on, when the server was installed on a machine that joined', async () => {
+    const hostId = (key: string) => createHash('sha256').update(`hornhoof-host:${key}`).digest('hex');
+    const { app, ceo, machineId } = await liveCompany({ HORNHOOF_HOST_ID: hostId('mac-0001-abcd') });
+    const shown = await machinesOf(app, ceo);
+    expect(shown.builtin.machine).toEqual({ id: machineId, hostname: 'ivan-mac' });
+    expect(JSON.stringify(shown)).not.toContain('mac-0001-abcd');
+    const pool = (await app.inject({ url: '/api/pool', ...as(ceo) })).json();
+    expect(pool.builtin.machine).toEqual({ id: machineId, name: 'ivan-mac' });
+    await app.inject({ method: 'POST', url: `/api/machines/${machineId}/disconnect`, ...as(ceo) });
+    expect((await machinesOf(app, ceo)).builtin.machine).toBeNull();
+
+    const other = await liveCompany({ HORNHOOF_HOST_ID: hostId('tower-0003-abcd') });
+    expect((await machinesOf(other.app, other.ceo)).builtin.machine).toBeNull();
+    const before = await liveCompany();
+    expect((await machinesOf(before.app, before.ceo)).builtin.machine).toBeNull();
+    expect((await before.app.inject({ url: '/api/pool', ...as(before.ceo) })).json().builtin.machine).toBeNull();
   });
 
   it('is lent to test runs by default, and its owner or someone who sees the whole company takes it back', async () => {

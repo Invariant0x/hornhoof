@@ -17,7 +17,7 @@ import { createNodeCode } from './codes.js';
 import { commandFor } from './command.js';
 import { disconnectMachines } from './disconnect.js';
 import { BUILTIN, nodeIdentity } from './hub.js';
-import { liveNode, settlePlans } from './nodes.js';
+import { builtinMachine, liveNode, settlePlans } from './nodes.js';
 
 const JoinBody = z.object({
   code: z.string().min(1).max(200),
@@ -240,10 +240,16 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
       parts: parts.filter(runs).map(({ machineId: _, builtin: __, ...p }) => p),
     });
     return {
-      /* The node that comes with the server runs the company's API keys and test runs too. */
+      /* The node that comes with the server runs the company's API keys and test runs too, and names the company's machine
+         it runs on, when the server is on one. */
       builtin:
         me.scopeKind === 'company'
-          ? { online: hub.isOnline(BUILTIN), load: together([hub.loadOf(BUILTIN)]), running: running(a => Boolean(a.builtin), p => p.builtin) }
+          ? {
+              online: hub.isOnline(BUILTIN),
+              load: together([hub.loadOf(BUILTIN)]),
+              running: running(a => Boolean(a.builtin), p => p.builtin),
+              machine: await builtinMachine(db, config.hostId, me.companyId),
+            }
           : null,
       machines: rows.map(m => ({
         id: m.id,

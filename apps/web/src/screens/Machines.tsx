@@ -187,8 +187,12 @@ export function Machines({ me }: { me: Me }) {
       await load();
     });
 
-  const loads = [...(machines ?? []).map(m => m.load), builtin?.load ?? null].filter((l): l is NodeLoad => l !== null);
-  const online = (machines ?? []).filter(m => m.online).length + (builtin?.online ? 1 : 0);
+  /* The built-in node on a machine that joined runs on that machine's computer, which the pool counts once: online while
+     either is, with what either says it has. */
+  const host = builtin?.machine ? ((machines ?? []).find(m => m.id === builtin.machine!.id) ?? null) : null;
+  const apart = host ? null : builtin;
+  const loads = [...(machines ?? []).map(m => (m === host ? (m.load ?? builtin!.load) : m.load)), apart?.load ?? null].filter((l): l is NodeLoad => l !== null);
+  const online = (machines ?? []).filter(m => m.online || (m === host && builtin!.online)).length + (apart?.online ? 1 : 0);
 
   return (
     <section className="people machines">
@@ -226,7 +230,7 @@ export function Machines({ me }: { me: Me }) {
       )}
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
 
-      {machines && <Pool loads={loads} online={online} all={machines.length + (builtin ? 1 : 0)} />}
+      {machines && <Pool loads={loads} online={online} all={machines.length + (apart ? 1 : 0)} />}
       {machines && machines.length === 0 && !builtin && <p className="muted">{t.machines.noMachines}</p>}
       {machines && (machines.length > 0 || builtin) && (
         <ul className="machine-list">
@@ -268,6 +272,7 @@ export function Machines({ me }: { me: Me }) {
                       ]}
                     />
                     {note && <p className="machine-note">{note}</p>}
+                    {m === host && <p className="machine-note">{t.machines.builtinHere}</p>}
                     <div className="machine-actions">
                       {company || mine ? (
                         <label className="lend">
@@ -328,6 +333,7 @@ export function Machines({ me }: { me: Me }) {
                   </header>
                   <p className="muted">{t.machines.builtinAbout}</p>
                   <Facts items={[...hardware(t, language, 'linux', builtin.load).items, [t.machines.runningNow, <RunningNow host={t.machines.builtin} running={builtin.running} />]]} />
+                  {host && <p className="machine-note">{t.machines.builtinOn(host.hostname)}</p>}
                 </Edge>
               </article>
             </li>

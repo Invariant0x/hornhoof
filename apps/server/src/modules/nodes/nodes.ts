@@ -1,4 +1,5 @@
-import { and, asc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
+import { hashToken } from '../../crypto/tokens.js';
 import type { Db } from '../../db/client.js';
 import { machines, nodes, subscriptions } from '../../db/schema.js';
 import type { NodeIdentity } from './hub.js';
@@ -28,6 +29,19 @@ export async function planNodes(db: Db, subscriptionIds: string[]): Promise<Node
     .innerJoin(machines, eq(machines.id, nodes.machineId))
     .where(and(inArray(nodes.subscriptionId, subscriptionIds), liveNode))
     .orderBy(asc(nodes.createdAt), asc(nodes.id));
+}
+
+/* The company's machine the server and its built-in node run on: the one whose key hashes to what install.sh gave the
+   server. The pool counts that computer once. None for a server installed before, or on a computer that never joined. */
+export async function builtinMachine(db: Db, hostId: string | null, companyId: string): Promise<{ id: string; hostname: string } | null> {
+  if (!hostId) return null;
+  const rows = await db
+    .select({ id: machines.id, hostname: machines.hostname, key: machines.machineKey })
+    .from(machines)
+    .where(and(eq(machines.companyId, companyId), isNull(machines.revokedAt)))
+    .orderBy(asc(machines.createdAt));
+  const same = rows.find(m => hashToken(`hornhoof-host:${m.key}`) === hostId);
+  return same ? { id: same.id, hostname: same.hostname } : null;
 }
 
 /* The machine a node is on; none for the built-in node. */

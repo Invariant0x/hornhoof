@@ -4,6 +4,7 @@ import type { Ctx } from '../../app.js';
 import { requirePerson, type Person } from '../../auth/session.js';
 import { agents, machines, people, tasks, testParts, testRuns } from '../../db/schema.js';
 import { BUILTIN, nodeIdentity, type NodeIdentity } from '../nodes/hub.js';
+import { builtinMachine } from '../nodes/nodes.js';
 import { machineNodes, machineState, together } from './load.js';
 import { loaded } from './pick.js';
 import { commandFor, lostLine, needOf, placesOf, reaches, targetOf, type Place } from './runs.js';
@@ -92,6 +93,7 @@ export async function poolOf(ctx: Ctx, who: Pick<Person, 'id' | 'companyId' | 's
     waiting.push({ ...view(row), waitingSince: row.part.queuedAt.toISOString(), why: await whyWaits(ctx, places, row.run, targets) });
   }
   const builtinLoad = loadOf([BUILTIN]);
+  const host = whole ? await builtinMachine(db, ctx.config.hostId, who.companyId) : null;
   return {
     machines: rows.map(m => {
       const mine = served.filter(n => n.machineId === m.id).map(n => n.id);
@@ -101,8 +103,18 @@ export async function poolOf(ctx: Ctx, who: Pick<Person, 'id' | 'companyId' | 's
       const noRuns = ids.some(id => hub.isOnline(id) && hub.noRunsOf(id) === null) ? null : (ids.map(id => hub.noRunsOf(id)).find(Boolean) ?? null);
       return { id: m.id, name: m.name || 'a machine', owner: m.owner, kind: m.kind, online, lent: m.lent, noRuns, load, loaded: load ? loaded(load) : false, parts: on(m.id) };
     }),
-    /* The node that comes with the server takes parts too. */
-    builtin: whole ? { online: hub.isOnline(BUILTIN), noRuns: hub.noRunsOf(BUILTIN), load: builtinLoad, loaded: builtinLoad ? loaded(builtinLoad) : false, parts: on(null, true) } : null,
+    /* The node that comes with the server takes parts too. machine: the company's machine it runs on, which the pool
+       counts once. */
+    builtin: whole
+      ? {
+          online: hub.isOnline(BUILTIN),
+          noRuns: hub.noRunsOf(BUILTIN),
+          load: builtinLoad,
+          loaded: builtinLoad ? loaded(builtinLoad) : false,
+          parts: on(null, true),
+          machine: host && { id: host.id, name: host.hostname },
+        }
+      : null,
     waiting,
   };
 }

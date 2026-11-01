@@ -75,6 +75,19 @@ describe('Machines', () => {
     expect(within(own).queryByRole('button')).not.toBeInTheDocument();
   });
 
+  it('counts once the machine the built-in node runs on, and says so on both cards', async () => {
+    lists({}, { ...BUILTIN, machine: { id: 'm1', hostname: 'ivan-mbp' } });
+    render(<Machines me={ME} />);
+    const pool = await screen.findByRole('region', { name: 'All machines together' });
+    expect(fact(pool, 'Machines online')).toBe('1 of 2');
+    expect(fact(pool, 'Processor cores')).toBe('8');
+    expect(fact(pool, 'Free memory')).toBe('6 of 12 GB');
+    expect(fact(pool, 'Busy now')).toBe('25%');
+    expect(within(card('ivan-mbp')).getByText('The built-in node runs on this machine too, so the pool counts it once.')).toBeInTheDocument();
+    expect(within(card('Built-in node')).getByText('Runs on ivan-mbp, so the pool counts that machine once.')).toBeInTheDocument();
+    expect(within(card('build-box')).queryByText(/built-in node/)).not.toBeInTheDocument();
+  });
+
   it('shows no built-in node and no pool part of it to those who do not see the whole company', async () => {
     lists({}, null);
     const lead: Me = { ...ME, person: { ...ME.person, scopeKind: 'listed', isOwner: false } };
@@ -170,5 +183,18 @@ describe('Machines', () => {
     expect(screen.getByRole('button', { name: 'Подключить машину' })).toBeInTheDocument();
     expect(within(mac).getByRole('button', { name: 'Добавить мою подписку на ivan-mbp' })).toBeInTheDocument();
     expect(within(mac).getByRole('checkbox', { name: 'Отдавать ivan-mbp под прогоны тестов компании' })).toBeChecked();
+  });
+
+  it('says in Russian that the built-in node runs on a machine that joined', async () => {
+    localStorage.setItem('hh-lang', 'ru');
+    lists({}, { ...BUILTIN, machine: { id: 'm1', hostname: 'ivan-mbp' } });
+    render(
+      <LanguageProvider>
+        <Machines me={ME} />
+      </LanguageProvider>,
+    );
+    expect(fact(await screen.findByRole('region', { name: 'Все машины вместе' }), 'Машин в сети')).toBe('1 из 2');
+    expect(within(card('ivan-mbp')).getByText('На этой машине работает и встроенная нода, поэтому в общем пуле машина считается один раз.')).toBeInTheDocument();
+    expect(within(card('Встроенная нода')).getByText('Работает на ivan-mbp, поэтому в общем пуле эта машина считается один раз.')).toBeInTheDocument();
   });
 });

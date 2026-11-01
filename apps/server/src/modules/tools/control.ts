@@ -250,7 +250,7 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
   tool(
     'pool',
     "Lists the company's machines: whose each is, whether it is online and lent to runs, how busy it is (a loaded one gets no new part), and the parts of test and work runs it runs; " +
-      'the built-in node; and every part that waits for a machine, with why it waits.',
+      'the built-in node, with the machine it runs on when the server is on one of them, which is then one computer; and every part that waits for a machine, with why it waits.',
     {},
     () => ({ method: 'GET', url: '/api/pool' }),
   );

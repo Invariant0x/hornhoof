@@ -362,7 +362,8 @@ export type Running = {
 export type ShownCommand = { id: string; kind: 'machine' | 'plans' | 'add'; plans: string[]; machine: string | null; command: string; expiresAt: string };
 
 /* The node that comes with the server, for those who see the whole company. */
-export type BuiltinView = { online: boolean; load: NodeLoad | null; running: Running };
+/* machine: the company's machine it runs on, when the server is on one; the pool counts that computer once. */
+export type BuiltinView = { online: boolean; load: NodeLoad | null; running: Running; machine?: Machine | null };
 
 export type JobView = {
   id: string;
