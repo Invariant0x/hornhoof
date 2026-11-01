@@ -15,6 +15,7 @@ import { repoFor, repoLine } from '../departments/repository.js';
 import { textHash } from '../templates/load.js';
 import { openAfter, startWork } from '../tasks/engine.js';
 import { preface } from './prompt.js';
+import { ABOUT_AS_FREE, freedom } from '../testruns/pick.js';
 
 /* Workers compact their conversation at half a million tokens, which keeps their turns quick; heads and the orchestrator
    keep the whole window, since they hold the department's and the company's picture. */
@@ -338,7 +339,8 @@ async function placement(ctx: Ctx, agent: { id: string; nodeId: string | null },
   return pick ? { node: nodeIdentity(pick.id), nodeId: pick.id, moves: pick.id !== agent.nodeId } : null;
 }
 
-/* The node on the machine that holds the fewest agents, the older of two alike. */
+/* The node on the machine its nodes say is freest, and of machines about as free the one that holds the fewest agents,
+   the older of two alike. */
 async function freest(ctx: Ctx, able: NodeRow[]): Promise<NodeRow | null> {
   if (able.length <= 1) return able[0] ?? null;
   const held = await ctx.db
@@ -348,7 +350,16 @@ async function freest(ctx: Ctx, able: NodeRow[]): Promise<NodeRow | null> {
     .where(and(isNull(agents.removedAt), inArray(nodes.machineId, able.map(n => n.machineId))))
     .groupBy(nodes.machineId);
   const on = (n: NodeRow) => Number(held.find(h => h.machineId === n.machineId)?.n ?? 0);
-  return able.reduce((best, n) => (on(n) < on(best) ? n : best));
+  const free = (n: NodeRow) => {
+    const load = ctx.hub.loadOf(nodeIdentity(n.id));
+    return load ? freedom(load) : null;
+  };
+  const better = (a: NodeRow, b: NodeRow) => {
+    const [x, y] = [free(a), free(b)];
+    if (x !== null && y !== null && Math.abs(x - y) >= ABOUT_AS_FREE) return x > y;
+    return on(a) < on(b);
+  };
+  return able.reduce((best, n) => (better(n, best) ? n : best));
 }
 
 const ALONG = 'Several of your tasks moved while you were busy. Go through each of them in this turn:';

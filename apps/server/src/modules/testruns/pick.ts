@@ -6,10 +6,10 @@ import type { NodeLoad } from '@hornhoof/protocol';
 export type Spot = { key: string; lent: boolean; reaches: boolean; busy: boolean; load: NodeLoad | null };
 
 /* Two machines whose free shares differ by less than this count as equally free, and the one running fewer jobs wins. */
-const ABOUT_AS_FREE = 0.1;
+export const ABOUT_AS_FREE = 0.1;
 
 /* The share of its processors a machine has free, and of its memory, together: 2 for one that does nothing. */
-const freedom = (load: NodeLoad) => Math.max(0, 1 - load.load / load.cpus) + (load.memTotal ? load.memFree / load.memTotal : 0);
+export const freedom = (load: NodeLoad) => Math.max(0, 1 - load.load / load.cpus) + (load.memTotal ? load.memFree / load.memTotal : 0);
 
 /* The freest machine that may take a run needing this much free memory, or none. */
 export function pickMachine(spots: Spot[], needBytes: number): Spot | null {

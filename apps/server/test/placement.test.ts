@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import { agents, companies, departments } from '../src/db/schema.js';
+import { nodeIdentity } from '../src/modules/nodes/hub.js';
 import { as, connectNode, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
 type Run = { type: 'job.run'; jobId: string; prompt: string; sessionId: string | null };
@@ -66,6 +67,20 @@ describe('agents of one plan on several machines', () => {
     await write(app, ceo, bruno.id, 'Again');
     expect((await nextRun(mac)).sessionId).toBe('bruno-on-mac');
     expect(lap.queued()).toBe(0);
+  });
+
+  it('starts a new employee on the machine of its plan that its nodes say is freer, though it holds more agents', async () => {
+    const { app, db, ceo, nodes, mac, lap, bruno, vera } = await planOnTwoMachines();
+    const GIB = 1024 ** 3;
+    mac.send({ type: 'load', cpus: 8, load: 7.6, memFree: 1 * GIB, memTotal: 16 * GIB, tests: 1, jobs: 3 });
+    lap.send({ type: 'load', cpus: 8, load: 0.4, memFree: 12 * GIB, memTotal: 16 * GIB, tests: 0, jobs: 1 });
+    await until(() => app.ctx.hub.loadOf(nodeIdentity(nodes.mac.nodeId))?.load === 7.6 && app.ctx.hub.loadOf(nodeIdentity(nodes.laptop.nodeId)) !== null);
+    await db.update(agents).set({ nodeId: nodes.laptop.nodeId }).where(eq(agents.id, bruno.id));
+    await write(app, ceo, vera.id, 'Hi');
+    finish(lap, await nextRun(lap), 'vera-on-laptop');
+    await until(async () => !(await state(app, ceo, vera.id)).busy);
+    expect((await db.select().from(agents).where(eq(agents.id, vera.id)))[0]!.nodeId).toBe(nodes.laptop.nodeId);
+    expect(mac.queued()).toBe(0);
   });
 
   it("moves an employee whose machine went away to another of its plan's machines, in a fresh session there", async () => {
