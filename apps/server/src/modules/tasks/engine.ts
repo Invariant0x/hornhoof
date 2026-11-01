@@ -2,7 +2,7 @@ import { and, asc, count, eq, gt, inArray, isNull, max, notInArray, sql } from '
 import type { Ctx } from '../../app.js';
 import { accessOf, canReach, type Spot } from '../../auth/access.js';
 import type { Db } from '../../db/client.js';
-import { agents, attachments, companies, people, requests, subscriptions, taskEvents, tasks, turns, type RequestOption, type TaskEventKind } from '../../db/schema.js';
+import { agents, attachments, companies, jobs, people, requests, subscriptions, taskEvents, tasks, turns, type RequestOption, type TaskEventKind } from '../../db/schema.js';
 import { ApiError, type ErrorReason } from '../../errors.js';
 import { handOff } from './pulses.js';
 
@@ -542,7 +542,13 @@ export async function updateTask(ctx: Live, agentId: string, taskId: string, c: 
     if (task.status === 'waiting' && !(await waitsForPerson(ctx.db, task.id))) set.status = 'open';
   }
   const unstuck = stuckGoes(ctx, task);
-  const row = await move(ctx, task, set, { kind: 'updated', actor: { agentId }, data: { fields } }, handedOn ? unstuck.also : undefined);
+  const before = task.assigneeAgentId;
+  const handOver = async (tx: Tx) => {
+    await unstuck.also(tx);
+    /* The one who held it would only start on work it no longer holds. */
+    if (before) await tx.update(jobs).set({ status: 'failed', error: 'handed_on', finishedAt: new Date() }).where(and(eq(jobs.agentId, before), eq(jobs.taskId, task.id), eq(jobs.status, 'queued')));
+  };
+  const row = await move(ctx, task, set, { kind: 'updated', actor: { agentId }, data: { fields } }, handedOn ? handOver : undefined);
   unstuck.tell();
   const wakes: Wake[] = [];
   if (set.assigneeAgentId) wakes.push({ agentId: set.assigneeAgentId, taskId, why: 'assigned' });

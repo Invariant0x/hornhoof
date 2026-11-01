@@ -153,6 +153,18 @@ describe('a plan at its limit', () => {
   });
 });
 
+describe('a task handed to another executor', () => {
+  it('takes away the turns that waited for the one who held it before', async () => {
+    const c = await company();
+    const task = await c.memberTask();
+    await wakeAll(c.ctx, [{ agentId: c.bruno.id, taskId: task.id, why: 'assigned' }]);
+    const [kai] = await c.db.insert(agents).values({ companyId: c.dev.companyId, kind: 'worker', name: 'Kai', roleKey: 'DEV-BE', departmentId: c.dev.id, model: '', subscriptionId: c.sub.id }).returning();
+    await wakeAll(c.ctx, (await updateTask(c.ctx, c.head.id, task.id, { executor: kai!.id })).wakes);
+    expect((await c.turnsOf(c.bruno.id)).map(j => ({ status: j.status, error: j.error }))).toEqual([{ status: 'failed', error: 'handed_on' }]);
+    expect((await c.turnsOf(kai!.id)).map(j => j.status)).toEqual(['queued']);
+  });
+});
+
 describe("Hornhoof's note that a task stands still", () => {
   async function stuck() {
     const c = await company();
