@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { and, eq, gt, inArray, isNull } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, isNull } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -157,10 +157,11 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
       .orderBy(machines.createdAt);
     /* A removed plan's node is gone from its machine for people, though it keeps its key until it hears so. */
     const served = await db
-      .select({ id: nodes.id, machineId: nodes.machineId, subscriptionId: nodes.subscriptionId, lastSeenAt: nodes.lastSeenAt })
+      .select({ id: nodes.id, machineId: nodes.machineId, subscriptionId: nodes.subscriptionId, provider: subscriptions.provider, status: nodes.status, lastSeenAt: nodes.lastSeenAt })
       .from(nodes)
       .leftJoin(subscriptions, eq(subscriptions.id, nodes.subscriptionId))
-      .where(and(liveNode, isNull(subscriptions.removedAt)));
+      .where(and(liveNode, isNull(subscriptions.removedAt)))
+      .orderBy(asc(nodes.createdAt), asc(nodes.id));
     const on = (machineId: string) => served.filter(n => n.machineId === machineId);
     const latest = (seen: (Date | null)[]) => seen.reduce<Date | null>((a, b) => (b && (!a || b > a) ? b : a), null);
     return {
@@ -174,7 +175,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
         owner: { id: m.ownerId, name: m.ownerName },
         online: on(m.id).some(n => hub.isOnline(nodeIdentity(n.id))),
         lastSeenAt: latest(on(m.id).map(n => n.lastSeenAt)),
-        subscriptions: on(m.id).filter(n => n.subscriptionId).length,
+        plans: on(m.id).flatMap(n => (n.subscriptionId && n.provider ? [{ id: n.subscriptionId, provider: n.provider, status: n.status, online: hub.isOnline(nodeIdentity(n.id)) }] : [])),
         load: together(on(m.id).map(n => hub.loadOf(nodeIdentity(n.id)))),
         lendsTests: m.lendsTests,
       })),

@@ -37,7 +37,7 @@ describe('POST /api/nodes/join', () => {
     }
     const list = await machinesOf(app, ceo);
     expect(list).toHaveLength(1);
-    expect(list[0]).toMatchObject({ id: machine.id, hostname: 'ivan-mac', os: 'darwin', arch: 'arm64', owner: { name: 'Ivan' }, online: false, subscriptions: 2 });
+    expect(list[0]).toMatchObject({ id: machine.id, hostname: 'ivan-mac', os: 'darwin', arch: 'arm64', owner: { name: 'Ivan' }, online: false, plans: [{ provider: 'claude' }, { provider: 'codex' }] });
     expect(JSON.stringify(await app.inject({ url: '/api/subscriptions', ...as(ceo) }).then(r => r.json()))).not.toContain(made[0].key);
   });
 
@@ -84,7 +84,7 @@ describe('POST /api/nodes/join', () => {
     expect((await join(app, codeOf(second.json().command))).statusCode).toBe(200);
     const list = await machinesOf(app, ceo);
     expect(list).toHaveLength(1);
-    expect(list[0].subscriptions).toBe(2);
+    expect(list[0].plans).toHaveLength(2);
   });
 
   it('puts a plan that joined a machine on one more machine with a second command', async () => {
@@ -118,7 +118,7 @@ describe('a machine without a plan', () => {
     expect(key).toMatch(/^[A-Za-z0-9_-]{43}$/);
     const [node] = await db.select().from(nodes).where(eq(nodes.id, nodeId!));
     expect(node).toMatchObject({ subscriptionId: null });
-    expect(await machinesOf(app, ceo)).toMatchObject([{ id: node!.machineId, hostname: 'ivan-mac', owner: { name: 'Ivan' }, online: false, subscriptions: 0 }]);
+    expect(await machinesOf(app, ceo)).toMatchObject([{ id: node!.machineId, hostname: 'ivan-mac', owner: { name: 'Ivan' }, online: false, plans: [] }]);
     expect(await db.select().from(subscriptions).where(eq(subscriptions.kind, 'personal'))).toEqual([]);
   });
 
@@ -155,7 +155,7 @@ describe('a machine without a plan', () => {
     const [dept] = await db.insert(departments).values({ companyId: company!.id, name: 'Sales', roleCode: 'CSO' }).returning();
     const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { departments: [dept!.id] } });
     expect((await join(app, await machineCommand(app, maria))).statusCode).toBe(200);
-    expect(await machinesOf(app, maria)).toMatchObject([{ owner: { name: 'Maria' }, subscriptions: 0 }]);
+    expect(await machinesOf(app, maria)).toMatchObject([{ owner: { name: 'Maria' }, plans: [] }]);
     expect((await app.inject({ method: 'POST', url: '/api/machines/command' })).statusCode).toBe(401);
   });
 });
@@ -187,7 +187,7 @@ describe('one plan on several machines', () => {
     expect(rows.map(n => n.machineId).sort()).toEqual([mac.machine.id, laptop.machine.id].sort());
     expect(new Set(rows.map(n => n.keyHash)).size).toBe(2);
     expect((await db.select().from(nodes).where(eq(nodes.id, nodeId!)))[0]).toMatchObject({ status: 'needs_login' });
-    expect(await machinesOf(app, ceo)).toMatchObject([{ hostname: 'ivan-mac', subscriptions: 1 }, { hostname: 'ivan-laptop', subscriptions: 1 }]);
+    expect(await machinesOf(app, ceo)).toMatchObject([{ hostname: 'ivan-mac', plans: [{ id: plan }] }, { hostname: 'ivan-laptop', plans: [{ id: plan }] }]);
   });
 
   it('works only on the machine it was made for, and stays unused there', async () => {
@@ -219,6 +219,26 @@ describe('one plan on several machines', () => {
     await db.update(subscriptions).set({ removedAt: new Date() }).where(eq(subscriptions.id, plan));
     expect((await addPlan(app, ceo, laptop.machine.id, plan)).json().error.reason).toBe('subscription_unknown');
     void tower;
+  });
+
+  it('lists every machine of a plan with its state there, and every plan of a machine', async () => {
+    const { app, ceo, plan, mac, laptop } = await twoMachines();
+    const url = await listen(app);
+    const onLaptop = (await join(app, codeOf((await addPlan(app, ceo, laptop.machine.id, plan)).json().command), LAPTOP)).json().nodes[0];
+    const node = await connectNode(url, onLaptop.key);
+    node.send({ type: 'hello', version: '0.9.0', loggedIn: true, running: [] });
+    const sub = async () => (await app.inject({ url: '/api/subscriptions', ...as(ceo) })).json().subscriptions.find((s: { id: string }) => s.id === plan);
+    await until(async () => (await sub()).status === 'ready');
+    expect((await sub()).machines).toEqual([
+      { id: mac.machine.id, hostname: 'ivan-mac', status: 'needs_login', online: false },
+      { id: laptop.machine.id, hostname: 'ivan-laptop', status: 'ready', online: true },
+    ]);
+    const tower = (await join(app, await machineCode(app, ceo), { machineId: 'tower-0003-abcd', hostname: 'ivan-tower' })).json();
+    expect(await machinesOf(app, ceo)).toMatchObject([
+      { id: mac.machine.id, plans: [{ id: plan, provider: 'claude', status: 'needs_login', online: false }] },
+      { id: laptop.machine.id, plans: [{ id: plan, provider: 'claude', status: 'ready', online: true }] },
+      { id: tower.machine.id, plans: [] },
+    ]);
   });
 
   it('gives a plan a new key on a machine it is on already, and keeps the node', async () => {

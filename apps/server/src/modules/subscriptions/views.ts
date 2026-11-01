@@ -20,7 +20,8 @@ export type SubView = {
   last4: string | null;
   owner: { id: string; name: string };
   place: Place;
-  machine: { id: string; hostname: string } | null;
+  /* The machines the plan runs on, oldest first, with its state on each. */
+  machines: { id: string; hostname: string; status: 'needs_login' | 'ready'; online: boolean }[];
   limits: Limits | null;
   budget: number | null;
   isOrchestrator: boolean;
@@ -95,7 +96,7 @@ export async function subViews(db: Db, isOnline: IsOnline, id?: string): Promise
     last4: r.last4,
     owner: { id: r.ownerId, name: r.ownerName },
     place: r.kind === 'api_key' ? placeOf(r.targetKind, r.targetId, depts, teamDept) : r.ownerScopeKind === 'company' ? COMPANY : ownerPlace(ownerDepts(r.ownerId), depts),
-    machine: mine[0] ? { id: mine[0].machineId, hostname: mine[0].hostname } : null,
+    machines: mine.map(n => ({ id: n.machineId, hostname: n.hostname, status: n.status, online: isOnline(nodeIdentity(n.id)) })),
     limits: r.limits ?? null,
     budget: r.budget,
     isOrchestrator: orchestrator?.subscriptionId === r.id,

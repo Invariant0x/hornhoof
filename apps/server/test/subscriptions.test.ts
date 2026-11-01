@@ -40,7 +40,7 @@ describe('POST /api/subscriptions/connect', () => {
     expect(body.command).toMatch(COMMAND);
     expect(body.subscriptions).toHaveLength(2);
     for (const [i, label] of ['Claude', 'Codex'].entries()) {
-      expect(body.subscriptions[i]).toMatchObject({ label, kind: 'personal', status: 'waiting_machine', online: false, owner: { name: 'Ivan' }, place: WHOLE, machine: null, limits: null, isOrchestrator: false });
+      expect(body.subscriptions[i]).toMatchObject({ label, kind: 'personal', status: 'waiting_machine', online: false, owner: { name: 'Ivan' }, place: WHOLE, machines: [], limits: null, isOrchestrator: false });
     }
     const [code] = await db.select().from(nodeCodes);
     expect(code!.subscriptionIds.sort()).toEqual(body.subscriptions.map((s: { id: string }) => s.id).sort());
