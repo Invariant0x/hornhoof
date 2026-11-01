@@ -6,7 +6,7 @@ import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { MAX_RUN_FILES, TEST_LOG_BYTES, type ServerMessage } from '@hornhoof/protocol';
 import { describe, expect, it, onTestFinished } from 'vitest';
-import { partFiles, partFolders, putOutputs, runTests, type PartFiles } from '../src/tests.js';
+import { clearShared, partFiles, partFolders, putOutputs, runTests, type PartFiles } from '../src/tests.js';
 
 type TestRun = Extract<ServerMessage, { type: 'tests.run' }>;
 
@@ -299,5 +299,26 @@ describe("a part's files through Hornhoof", () => {
     await expect(files.get('part-1', 'silent.csv', AbortSignal.timeout(100))).rejects.toThrow();
     await expect(files.get('part-1', 'half.csv', AbortSignal.timeout(100))).rejects.toThrow();
     await expect(files.put('part-1', 'out.txt', Buffer.from('made'), AbortSignal.timeout(100))).rejects.toThrow();
+  });
+});
+
+describe("the shared folders after a part", () => {
+  it("removes what the part's user left where every user writes, without following links, and nothing of others", () => {
+    const shared = nodeDir();
+    const elsewhere = nodeDir();
+    writeFileSync(join(elsewhere, 'keep.txt'), 'keep\n');
+    writeFileSync(join(shared, 'left.txt'), 'secret\n');
+    mkdirSync(join(shared, 'cache'));
+    writeFileSync(join(shared, 'cache', 'blob'), 'x');
+    symlinkSync(elsewhere, join(shared, 'link'));
+    const me = process.getuid!();
+
+    clearShared(me + 1, [shared]);
+    expect(readdirSync(shared).sort()).toEqual(['cache', 'left.txt', 'link']);
+
+    clearShared(me, [shared, join(shared, 'missing')]);
+    expect(readdirSync(shared)).toEqual([]);
+    expect(existsSync(shared)).toBe(true);
+    expect(readdirSync(elsewhere)).toEqual(['keep.txt']);
   });
 });

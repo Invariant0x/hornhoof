@@ -2,7 +2,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { chmodSync, chownSync, closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { MAX_RUN_FILES, RUN_FILE_BYTES, TEST_LOG_BYTES, type NodeMessage, type ServerMessage, type TestError } from '@hornhoof/protocol';
-import { ensurePasswd, prepareFolder, type JobUser } from './isolation.js';
+import { ensurePasswd, FIRST_UID, prepareFolder, type JobUser } from './isolation.js';
 import { stripEscapes } from './providers/process.js';
 import { redact } from './redact.js';
 import { gitEnv } from './workspace.js';
@@ -137,6 +137,33 @@ function runIn(bin: string, args: string[], o: { cwd: string; env: NodeJS.Proces
 }
 
 /* Every program of the test runs' user that outlived its group: one part runs on a node at a time. */
+/* Where every user may write, so what a part leaves there outlives its folder. */
+const SHARED = ['/tmp', '/var/tmp', '/dev/shm'];
+
+/* Removes what a user left in these folders and in the folders inside them every user may write to, so the next part,
+   of whatever department, finds none of it. A link goes, never what it points to. */
+export function clearShared(uid: number, places: string[]): void {
+  const sweep = (folder: string) => {
+    let names: string[] = [];
+    try {
+      names = readdirSync(folder);
+    } catch {
+      return;
+    }
+    for (const name of names) {
+      const path = join(folder, name);
+      try {
+        const st = lstatSync(path);
+        if (st.uid === uid) rmSync(path, { recursive: true, force: true });
+        else if (st.isDirectory() && (st.mode & 0o002) !== 0) sweep(path);
+      } catch {
+        /* Gone meanwhile. */
+      }
+    }
+  };
+  for (const place of places) sweep(place);
+}
+
 function killUser(uid: number, proc: string): void {
   let pids: string[] = [];
   try {
@@ -376,6 +403,8 @@ export async function runTests(msg: TestRun, { dir, user, hidden, signal, proc =
     error ??= 'failed';
   } finally {
     if (user) killUser(user.uid, proc);
+    /* Only a user of the node's own, never the node's or a person's. */
+    if (user && user.uid >= FIRST_UID) clearShared(user.uid, SHARED);
     try {
       if (work && ran && files && error !== 'cancelled') await putOutputs(msg, outbox, user, files, out, until(deadline + PUT_GRACE_MS));
     } catch (err) {
