@@ -6,7 +6,7 @@ import { agents, departments, jobs, requests, tasks } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { ask, blocked, cancel, CLOSED, comment, createTask, refuse, report, submit, updateTask, verdict, type Moved, type Task } from './engine.js';
 import { taskByRef, taskDetail, taskLines } from './views.js';
-import { addTasks, editTurn, planTurn, settle, tell, TURN_MESSAGES, turnName, turnRows } from './turns.js';
+import { addTasks, editTurn, mergeTurn, planTurn, settle, tell, TURN_MESSAGES, turnName, turnRows } from './turns.js';
 import { stopTurns, wakeAll } from './wake.js';
 import { orchestratorOf } from '../conversation/queue.js';
 
@@ -196,6 +196,20 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         run(async () => {
           await underCap(await me(), input.tasks.length);
           const moved = await addTasks(ctx, { companyId: job.companyId, agentId: job.agentId, jobId: job.id }, input.turn, input.tasks, input.words, input.improvement);
+          return { text: moved.text, moved };
+        }),
+    );
+    server.registerTool(
+      'merge_turn',
+      {
+        description:
+          'Merges a planned source turn into an existing open or planned target turn. Unfinished tasks keep their ids, trees, assignees, gates, results and history; they start once when the target is open. ' +
+          'The source closes and its closed tasks stay there as history. Repeating the same merge is safe.',
+        inputSchema: { source: Turn, target: Turn },
+      },
+      async input =>
+        run(async () => {
+          const moved = await mergeTurn(ctx, { companyId: job.companyId, agentId: job.agentId }, input.source, input.target);
           return { text: moved.text, moved };
         }),
     );

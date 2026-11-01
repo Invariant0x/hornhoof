@@ -1,13 +1,10 @@
-import type { AddressInfo } from 'node:net';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { eq } from 'drizzle-orm';
-import type { FastifyInstance } from 'fastify';
-import { describe, expect, it, onTestFinished } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, companies, departments, jobs, people, subscriptions, tasks } from '../src/db/schema.js';
 import { createTask } from '../src/modules/tasks/engine.js';
-import { listen, setUpCompany, testApp } from './helpers.js';
+import { listen, mcp, setUpCompany, testApp } from './helpers.js';
 
 async function company() {
   const { app, db } = await testApp();
@@ -42,14 +39,6 @@ async function company() {
   return { app, db, ctx: app.ctx, companyId, ceo: ceo!, orchestrator: orchestrator!, dev: dev!, sales: sales!, head, bruno, rita, tess, sam, tools };
 }
 
-async function mcp(app: FastifyInstance, token: string): Promise<Client> {
-  const url = new URL(`http://127.0.0.1:${(app.server.address() as AddressInfo).port}/mcp`);
-  const client = new Client({ name: 'test', version: '0.0.0' });
-  await client.connect(new StreamableHTTPClientTransport(url, { requestInit: { headers: { Authorization: `Bearer ${token}` } } }));
-  onTestFinished(() => client.close());
-  return client;
-}
-
 type Res = { content: { text: string }[]; isError?: boolean };
 const call = async (c: Client, name: string, args: object) => (await c.callTool({ name, arguments: args })) as Res;
 const text = (r: Res) => r.content[0]!.text;
@@ -58,7 +47,7 @@ describe('task tools', () => {
   it('gives each kind of agent its task tools', async () => {
     const { orchestrator, head, bruno, tools } = await company();
     const names = async (agent: { id: string }) => (await (await tools(agent)).listTools()).tools.map(t => t.name).sort();
-    expect(await names(orchestrator)).toEqual(['add_api_key', 'add_tasks', 'answer_request', 'ask_person', 'build_structure', 'cancel_task', 'cancel_update', 'change_employee', 'change_orchestrator', 'change_person', 'check_updates', 'close_improvement', 'comment', 'company', 'connect_plans', 'disconnect_machine', 'edit_turn', 'explain_request', 'fire_employee', 'forget', 'hire', 'improvements', 'invite_again', 'invite_person', 'message_employee', 'move_orchestrator', 'notebook', 'plan_command', 'plan_turn', 'propose_staff', 'propose_structure', 'remember', 'remove_repository', 'remove_subscription', 'report', 'reset_employee', 'rewrite_note', 'set_repository', 'staffing_options', 'stop_employee', 'task', 'tasks', 'test_subscription', 'turns', 'update_hornhoof', 'update_task', 'view']);
+    expect(await names(orchestrator)).toEqual(['add_api_key', 'add_tasks', 'answer_request', 'ask_person', 'build_structure', 'cancel_task', 'cancel_update', 'change_employee', 'change_orchestrator', 'change_person', 'check_updates', 'close_improvement', 'comment', 'company', 'connect_plans', 'disconnect_machine', 'edit_turn', 'explain_request', 'fire_employee', 'forget', 'hire', 'improvements', 'invite_again', 'invite_person', 'merge_turn', 'message_employee', 'move_orchestrator', 'notebook', 'plan_command', 'plan_turn', 'propose_staff', 'propose_structure', 'remember', 'remove_repository', 'remove_subscription', 'report', 'reset_employee', 'rewrite_note', 'set_repository', 'staffing_options', 'stop_employee', 'task', 'tasks', 'test_subscription', 'turns', 'update_hornhoof', 'update_task', 'view']);
     expect(await names(head)).toEqual(['ask_person', 'blocked', 'cancel_task', 'comment', 'company', 'create_task', 'forget', 'improvements', 'notebook', 'propose_improvement', 'remember', 'report', 'rewrite_note', 'submit', 'task', 'tasks', 'tell_orchestrator', 'update_task', 'verdict']);
     expect(await names(bruno)).toEqual(['ask_person', 'blocked', 'comment', 'company', 'submit', 'task', 'tasks', 'verdict']);
   });
