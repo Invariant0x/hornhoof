@@ -1,3 +1,4 @@
+/* message: the server's own words, empty when it gave none; the screens word the rest from the dictionaries. */
 export class ApiFailure extends Error {
   constructor(
     readonly status: number,
@@ -19,11 +20,11 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch {
-    throw new ApiFailure(0, 'network', 'Hornhoof cannot reach its server. Check your connection and try again.');
+    throw new ApiFailure(0, 'network', '');
   }
   if (res.status === 204) return undefined as T;
   const data = await res.json().catch(() => null);
-  if (!res.ok) throw new ApiFailure(res.status, data?.error?.code ?? 'internal', data?.error?.message ?? 'Something went wrong.', data?.error?.reason);
+  if (!res.ok) throw new ApiFailure(res.status, data?.error?.code ?? 'internal', data?.error?.message ?? '', data?.error?.reason);
   return data as T;
 }
 

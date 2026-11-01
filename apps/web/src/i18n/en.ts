@@ -312,6 +312,7 @@ export const en = {
     tokenHint: 'A GitHub token that can read and push to this repository only: it goes with each turn to the machines that run this department\'s agents. Leave it empty for a public one.',
     tokenKeep: 'Leave it empty to keep the saved token. An address on another host needs a new one.',
     authorName: 'Commit author',
+    authorPlaceholder: 'Jane Smith',
     authorEmail: 'Author email',
     authorHint: "Every agent's commits carry this name and address. Leave both empty to let each agent's program pick its own.",
     commitsAs: (name: string, email: string) => `Commits as ${name} <${email}>`,

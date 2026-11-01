@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest';
-import { ApiFailure } from '../src/api';
+import { describe, expect, it, vi } from 'vitest';
+import { api, ApiFailure } from '../src/api';
 import { detectLanguage, errorText, plural } from '../src/i18n';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
+import { mockApi } from './api-mock';
 
 describe('detectLanguage', () => {
   it('follows the browser until a language is saved', () => {
@@ -55,6 +56,17 @@ describe('errorText', () => {
     expect(errorText(en, err)).toBe('Too many attempts. Wait up to 15 minutes, then try again.');
     expect(errorText(ru, err)).toBe('Слишком много попыток. Подождите до 15 минут и попробуйте снова.');
     expect(errorText(ru, new ApiFailure(429, 'too_many', 'x'))).toBe('Слишком много попыток. Подождите немного и попробуйте снова.');
+  });
+
+  it('words a failure the server did not word from the dictionary, in English too', async () => {
+    mockApi({ 'GET /api/x': [503, { error: { code: 'unavailable' } }] });
+    const silent = await api.get('/api/x').catch((err: unknown) => err);
+    expect(errorText(en, silent)).toBe(en.errors.codes.unavailable);
+    expect(errorText(ru, silent)).toBe(ru.errors.codes.unavailable);
+    vi.stubGlobal('fetch', vi.fn(async () => Promise.reject(new TypeError('Failed to fetch'))));
+    const unreachable = await api.get('/api/x').catch((err: unknown) => err);
+    expect(errorText(en, unreachable)).toBe(en.errors.codes.network);
+    expect(errorText(ru, unreachable)).toBe(ru.errors.codes.network);
   });
 
   it('falls back to the error code in Russian and to the server message in English', () => {

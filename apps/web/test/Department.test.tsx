@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Shell } from '../src/screens/Shell';
+import { RepoSettings } from '../src/ui/RepoSettings';
 import type { Me, Org } from '../src/types';
 import { CARD, DEV_ORG, ME, mockApi, ROSTER, TASK_DETAIL, TASKS } from './api-mock';
 import { fakeStream } from './fake-stream';
@@ -445,6 +446,22 @@ describe('Department view', () => {
     await user.click(within(repo).getByRole('button', { name: 'Remove' }));
     await user.click(within(repo).getByRole('button', { name: 'Yes, remove' }));
     await vi.waitFor(() => expect(calls.some(c => c.method === 'DELETE' && c.path === '/api/departments/d2/repository')).toBe(true));
+  });
+
+  it("suggests a commit author's name in the person's language", async () => {
+    const user = userEvent.setup();
+    localStorage.setItem('hh-lang', 'ru');
+    try {
+      render(
+        <LanguageProvider>
+          <RepoSettings placeId="d2" repository={null} />
+        </LanguageProvider>,
+      );
+      await user.click(screen.getByRole('button', { name: 'Добавить репозиторий' }));
+      expect(screen.getByLabelText('Автор коммитов')).toHaveAttribute('placeholder', 'Анна Смирнова');
+    } finally {
+      localStorage.removeItem('hh-lang');
+    }
   });
 
   it("names who the agents' commits are by once both fields are filled", async () => {

@@ -67,12 +67,13 @@ export function useLanguage(): { language: Language; setLanguage: (l: Language) 
   return { language, setLanguage };
 }
 
-/* A known reason reads in the chosen language. Otherwise English shows the server's own words and other languages say what kind of error it was. */
+/* A known reason reads in the chosen language. Otherwise English shows the server's own words when it gave any, and the
+   rest say what kind of error it was. */
 export function errorText(t: Messages, err: unknown): string {
   if (!(err instanceof ApiFailure)) return t.errors.codes.internal;
   const reasons: Record<string, unknown> = t.errors;
   if (err.reason && err.reason !== 'codes' && typeof reasons[err.reason] === 'string') return reasons[err.reason] as string;
-  if (t === en) return err.message;
+  if (t === en && err.message) return err.message;
   const codes: Record<string, string> = t.errors.codes;
   return codes[err.code] ?? t.errors.codes.internal;
 }
