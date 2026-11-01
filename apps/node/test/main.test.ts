@@ -106,6 +106,14 @@ describe('a node that runs agents in terminals', () => {
     expect(screen()).not.toContain('late-token-1234567890');
   });
 
+  it("says it writes an agent's skills as files, so Hornhoof sends them as files", async () => {
+    const server = await fakeServer();
+    const node = await runNode({ dir: nodeDir(server.url), adapter, log: () => {} });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    expect(server.received[0]).toMatchObject({ type: 'hello', skillFiles: true });
+  });
+
   it('ends a view it cannot show when it runs no terminals', async () => {
     const server = await fakeServer();
     const node = await runNode({ dir: nodeDir(server.url), adapter, log: () => {} });

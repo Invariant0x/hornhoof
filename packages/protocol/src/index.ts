@@ -270,6 +270,8 @@ export const LOAD_MS = 20_000;
 const NodeMessage = z.discriminatedUnion('type', [
   /* terminals: the node runs agents in sessions people can watch and type into. */
   /* tests: the parts of test runs it runs, or ran and Hornhoof has not confirmed. */
+  /* skillFiles: it writes a turn's skills as files where the agent's program finds them; a node without it gets them in
+     the instructions. */
   z.object({
     type: z.literal('hello'),
     version: z.string().max(40),
@@ -279,6 +281,7 @@ const NodeMessage = z.discriminatedUnion('type', [
     terminals: z.boolean().optional(),
     load: Load.optional(),
     tests: z.array(z.string()).max(100).optional(),
+    skillFiles: z.boolean().optional(),
   }),
   z.object({ type: z.literal('load'), ...Load.shape }),
   z.object({ type: z.literal('tests.started'), partId: z.string() }),

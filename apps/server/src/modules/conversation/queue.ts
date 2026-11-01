@@ -353,7 +353,9 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   for (const j of agent.kind === 'head' && job.taskId ? await alongWith(ctx, agentId, job.id) : []) if (!(await heldBack(ctx, { ...j, agentId }))) along.push(j);
   const asked = along.length ? [ALONG, job.prompt, ...along.map(j => j.prompt)].join('\n\n---\n\n') : job.prompt;
 
-  const instructions = await instructionsOf(ctx, agent);
+  /* A node from before skill files gets every skill in the instructions. */
+  const files = hub.takesSkillFiles(identityOf(sub));
+  const instructions = await instructionsOf(ctx, agent, files);
   /* The program's flag only for a model this subscription can run; anything else runs on its Default. */
   const models = modelsFor(sub.provider, sub.models);
   const model = agent.model && models.some(m => m.id === agent.model) ? agent.model : null;
@@ -392,7 +394,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
       guidance: job.prompt || !repo ? null : repoLine(repo),
       /* Each agent keeps one folder on the node, with its repository's clone inside. */
       workspace: { key: agent.id, repo },
-      skills: instructions.skills,
+      ...(files ? { skills: instructions.skills } : {}),
     });
   } catch (err) {
     /* A turn that broke on its way out was not sent: it waits for the next try instead of running forever. */

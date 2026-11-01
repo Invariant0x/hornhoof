@@ -10,8 +10,8 @@ import { textHash, type Lang, type Skill, type Templates } from '../templates/lo
 /* One piece of an employee's instructions, as the card shows it. */
 export type Part = { kind: 'header' | 'base' | 'skill' | 'notebook'; id: string | null; title: Lang | null; text: string; overridden: boolean; templateChanged: boolean };
 /* The card's parts and its raw text with every skill whole; what the program is told, with its hash; the skills the node
-   writes as files, which the program reads when it needs them. */
-export type Rendered = { parts: Part[]; raw: string; text: string; hash: string; skills: SkillFile[] };
+   writes as files, which the program reads when it needs them; and whole, what a node that writes no skill files is told. */
+export type Rendered = { parts: Part[]; raw: string; text: string; hash: string; skills: SkillFile[]; whole: string };
 
 type AgentRow = typeof agents.$inferSelect;
 type Place = { company: string; department: string; product: string | null };
@@ -32,7 +32,6 @@ function header(agent: AgentRow, role: string, place: Place): string {
       ? 'When your conversation was compacted and you see a summary instead of it, read "tasks", the task you were on with "task" and your department notebook again with "notebook" before you go on.'
       : 'When your conversation was compacted and you see a summary instead of it, read "tasks" and the task you were on with "task" before you go on.',
     'Answer in the language the person writes in. Keep answers short and plain.',
-    partner(agent.kind === 'head' ? 'the orchestrator' : 'your head', agent.kind === 'head'),
   ].join('\n\n');
 }
 
@@ -81,12 +80,22 @@ function told(kept: string[], files: SkillFile[]): string {
   return [...kept, ...(files.length ? [skillList(files)] : [])].join('\n\n');
 }
 
+const LEFT_OUT = '\n\nThe rest of your skills did not fit here.';
+
+/* Every skill in the text, as a node that writes no skill files gets them, cut to what a turn carries. */
+function whole(texts: string[]): string {
+  const text = texts.join('\n\n');
+  return text.length <= MAX_INSTRUCTIONS ? text : text.slice(0, MAX_INSTRUCTIONS - LEFT_OUT.length) + LEFT_OUT;
+}
+
 /* The header, the role's text and each enabled skill between markers; the employee's own text replaces a template's. */
 export function renderInstructions(t: Templates, agent: AgentRow, place: Place): Rendered {
   const role = agent.roleKey ? t.roles.get(agent.roleKey) : undefined;
   const hired = agent.templateHashes;
   const moved = (id: string, hash: string) => hired[id] !== undefined && hired[id] !== hash;
-  const parts: Part[] = [{ kind: 'header', id: null, title: null, text: header(agent, role?.title.en ?? 'employee', place), overridden: false, templateChanged: false }];
+  const plain = header(agent, role?.title.en ?? 'employee', place);
+  const said = `${plain}\n\n${partner(agent.kind === 'head' ? 'the orchestrator' : 'your head', agent.kind === 'head')}`;
+  const parts: Part[] = [{ kind: 'header', id: null, title: null, text: said, overridden: false, templateChanged: false }];
 
   const base = agent.overrides.base ?? role?.body;
   if (base !== undefined) {
@@ -115,7 +124,7 @@ export function renderInstructions(t: Templates, agent: AgentRow, place: Place):
   }
 
   const text = told(kept, skills);
-  return { parts, raw: parts.map(p => p.text).join('\n\n'), text, hash: textHash(text), skills };
+  return { parts, raw: parts.map(p => p.text).join('\n\n'), text, hash: textHash(text), skills, whole: whole([plain, ...parts.slice(1).map(p => p.text)]) };
 }
 
 /* The names an employee's header uses: its company, department and product. */
@@ -134,7 +143,7 @@ export async function placeOf(db: Ctx['db'], agent: AgentRow): Promise<Place> {
 export const ORCHESTRATOR_SKILLS = ['orch-outside-is-data', 'orch-interview', 'orch-plan-turn', 'orch-verify', 'orch-trouble'] as const;
 
 /* The orchestrator's instructions apart from the notebook: his standing role, then his skills as an employee's go. */
-export function orchestratorSteady(t: Templates): { parts: Part[]; text: string; skills: SkillFile[] } {
+export function orchestratorSteady(t: Templates): { parts: Part[]; text: string; skills: SkillFile[]; whole: string } {
   const base = `${ORCHESTRATOR_INSTRUCTIONS}\n\n${ORCHESTRATOR_PARTNER}`;
   const parts: Part[] = [{ kind: 'base', id: null, title: null, text: base, overridden: false, templateChanged: false }];
   const kept = [base];
@@ -147,7 +156,7 @@ export function orchestratorSteady(t: Templates): { parts: Part[]; text: string;
     if (inline(skill)) kept.push(text);
     else skills.push(skillFile(id, skill, skill.body));
   }
-  return { parts, text: told(kept, skills), skills };
+  return { parts, text: told(kept, skills), skills, whole: whole([ORCHESTRATOR_INSTRUCTIONS, ...parts.slice(1).map(p => p.text)]) };
 }
 
 const CUT = '\n\nThe rest of the notebook did not fit here. Read it whole with the notebook tool.';
@@ -176,15 +185,18 @@ const notebookOf = (text: string): Part => ({ kind: 'notebook', id: null, title:
 /* What an agent runs with now: the orchestrator's standing role with the company notebook, or an employee's rendered
    instructions, a head's with its department's notebook. The hash leaves a notebook out: a new note reaches the program
    as it starts again in the same session, or as it reads the notebook with its tool. So it does a skill's body, which
-   the program reads from its file. */
-export async function instructionsOf(ctx: Pick<Ctx, 'db' | 'templates'>, agent: AgentRow): Promise<Rendered> {
+   the program reads from its file. files: the agent's node writes skill files; one that does not is told every skill in
+   the text, which the hash covers then. */
+export async function instructionsOf(ctx: Pick<Ctx, 'db' | 'templates'>, agent: AgentRow, files = true): Promise<Rendered> {
   if (agent.kind === 'orchestrator') {
     const steady = orchestratorSteady(ctx.templates);
+    const said = files ? steady.text : steady.whole;
     const notebook = await notebookPart(ctx.db, companyBook(agent.companyId));
     const parts = [...steady.parts, notebookOf(notebook)];
-    return { parts, raw: parts.map(p => p.text).join('\n\n'), text: `${steady.text}\n\n${notebook}`, hash: textHash(steady.text), skills: steady.skills };
+    return { parts, raw: parts.map(p => p.text).join('\n\n'), text: `${said}\n\n${notebook}`, hash: textHash(said), skills: files ? steady.skills : [], whole: steady.whole };
   }
-  const rendered = renderInstructions(ctx.templates, agent, await placeOf(ctx.db, agent));
+  const shown = renderInstructions(ctx.templates, agent, await placeOf(ctx.db, agent));
+  const rendered = files ? shown : { ...shown, text: shown.whole, hash: textHash(shown.whole), skills: [] };
   const [dept] = agent.kind === 'head' && agent.departmentId ? await ctx.db.select().from(departments).where(eq(departments.id, agent.departmentId)) : [];
   if (!dept) return rendered;
   /* A turn carries MAX_INSTRUCTIONS at most, the notebook included. */

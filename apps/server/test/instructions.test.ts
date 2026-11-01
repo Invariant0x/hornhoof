@@ -1,3 +1,4 @@
+import { MAX_INSTRUCTIONS } from '@hornhoof/protocol';
 import { describe, expect, it } from 'vitest';
 import type { agents } from '../src/db/schema.js';
 import { renderInstructions } from '../src/modules/agents/instructions.js';
@@ -119,6 +120,22 @@ describe('renderInstructions', () => {
     expect(head).toContain('is whoever gave you the task: the orchestrator, or the person who wrote to you');
     expect(head).toContain('A task the orchestrator gave you is already approved');
     expect(head).toContain('you and your architects use it only when a task asks for a design');
+  });
+
+  it('keeps every skill whole in the text for a node that writes no skill files, as before', () => {
+    const { parts, whole } = renderInstructions(T, agent(), PLACE);
+    expect(whole.startsWith('You are Bruno')).toBe(true);
+    expect(whole).toContain('\n\nYou own the server side.\n\n');
+    expect(whole.endsWith(`${parts[2]!.text}\n\n${parts[3]!.text}`)).toBe(true);
+    /* Such a node has no superpowers and no files to list. */
+    expect(whole).not.toContain('superpowers');
+    expect(whole).not.toContain('## Skills');
+  });
+
+  it('cuts that text to what a turn carries', () => {
+    const { whole } = renderInstructions(T, agent({ overrides: { skills: { 'dev-tdd': 'Test first. '.repeat(2000) } } }), PLACE);
+    expect(whole.length).toBe(MAX_INSTRUCTIONS);
+    expect(whole.endsWith('The rest of your skills did not fit here.')).toBe(true);
   });
 
   it("uses an override instead of the template's text and marks it", () => {

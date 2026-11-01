@@ -8,14 +8,14 @@ import { as, connectNode, invitePerson, listen, openStream, setUpCompany, testAp
 
 const NODE_KEY = 'k'.repeat(40);
 
-type Run = { type: 'job.run'; jobId: string; prompt: string; sessionId: string | null; model: string | null; effort?: string | null; compactWindow?: number; instructions: string | null; toolToken: string | null; timeoutMs: number };
+type Run = { type: 'job.run'; jobId: string; prompt: string; sessionId: string | null; model: string | null; effort?: string | null; compactWindow?: number; instructions: string | null; toolToken: string | null; timeoutMs: number; skills?: { name: string }[] };
 
 async function live() {
   const { app, db } = await testApp({ NODE_KEY });
   const url = await listen(app);
   const ceo = await setUpCompany(app);
   const builtin = await connectNode(url, NODE_KEY);
-  builtin.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [] });
+  builtin.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [], skillFiles: true });
   await until(async () => (await state(app, ceo)).ready);
   return { app, db, url, ceo, builtin };
 }
@@ -304,6 +304,23 @@ describe('the orchestrator\'s conversation', () => {
     await until(async () => (await state(app, ceo)).ready);
     await say(app, ceo, 'First');
     expect((await nextRun(mac)).effort).toBe('xhigh');
+  });
+
+  it('tells a machine that writes no skill files every skill in the text, and one that writes them only their list', async () => {
+    const { app, ceo, mac } = await onMac('0.5.0');
+    await until(async () => (await state(app, ceo)).ready);
+    await say(app, ceo, 'Hello');
+    const old = await nextRun(mac);
+    const plan = app.ctx.templates.skills.get('orch-plan-turn')!.body;
+    expect(old.instructions).toContain(plan);
+    expect(old.instructions).not.toContain('superpowers');
+    expect(old.skills).toBeUndefined();
+    const fresh = await onMac('0.5.0', 'claude', { skillFiles: true });
+    await until(async () => (await state(fresh.app, fresh.ceo)).ready);
+    await say(fresh.app, fresh.ceo, 'Hello');
+    const run = await nextRun(fresh.mac);
+    expect(run.instructions).not.toContain(plan);
+    expect(run.skills?.map(s => s.name)).toContain('orch-plan-turn');
   });
 
   it('keeps the next message waiting when the machine says its login ran out', async () => {

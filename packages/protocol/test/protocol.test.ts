@@ -76,6 +76,11 @@ describe('server messages', () => {
       expect(parseServerMessage(JSON.stringify({ ...SERVER[0], skills: [{ ...skills[0], name }] })), name).toBeNull();
     }
   });
+
+  it('let a node say it writes skills as files, which nodes before it do not', () => {
+    const hello = { type: 'hello', version: '0.5.0', loggedIn: true, running: [], skillFiles: true };
+    expect(parseNodeMessage(JSON.stringify(hello))).toEqual(hello);
+  });
 });
 
 describe('live agent events', () => {
