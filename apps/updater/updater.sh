@@ -7,10 +7,11 @@
 # The app writes request.json {id, version, tag} into the control folder; this writes status.json {id, version,
 # state, step, log, at} and touches alive. An update saves the database, downloads the build, runs that build's own
 # installer, and waits for the new server to answer with the build's commit. If it does not, the build that ran
-# before goes back, and the database goes back to the saved copy first when the new build added migrations to it, since
-# the old build does not know them. The updater holds the Docker socket, so it takes nothing from the request but the tag, which
-# must be a plain image tag, and only runs images of HORNHOOF_IMAGE. It runs on the bash that ships with macOS (3.2)
-# for the tests, and on Alpine's in its image.
+# before goes back, and the database goes back to the saved copy first when the new build added migrations to it,
+# since the old build does not know them. An updater stopped during an update goes on with it when it starts again.
+# The updater holds the Docker socket, so it takes nothing from the request but the tag, which must be a plain image
+# tag, and only runs images of HORNHOOF_IMAGE. It runs on the bash that ships with macOS (3.2) for the tests, and on
+# Alpine's in its image.
 set -euo pipefail
 
 CONTROL="${HORNHOOF_CONTROL_DIR:-/control}"
@@ -27,6 +28,12 @@ STATE=''
 STEP=''
 LOG=''
 WORK=''
+# The update being run: its tag, the build to go back to, the commit the new server answers with, how many
+# migrations the database had before, and the copy of it.
+TAG=''
+PREVIOUS=''
+TARGET=''
+BEFORE=''
 BACKUP=''
 
 say() {
@@ -50,14 +57,47 @@ step() {
   write_status running "$1"
 }
 
+# The update ends, and the note about it goes.
 stop_with() {
   say "$2"
   write_status "$1" "${3:-$STEP}"
+  forget
 }
 
 compose() { (cd "$SERVER_DIR" && docker compose "$@"); }
 
 env_value() { grep "^$1=" "$SERVER_DIR/.env" 2> /dev/null | tail -1 | cut -d= -f2- || true; }
+
+plain_tag() {
+  case "$1" in '' | [!A-Za-z0-9]* | *[!A-Za-z0-9._-]*) return 1 ;; esac
+  [ "${#1}" -le 128 ]
+}
+
+# The updater's own note of the update it runs, so an updater that was stopped can go on with it. It lies next to
+# the backups, where the app cannot write.
+note() {
+  mkdir -p "$SERVER_DIR/backups"
+  (umask 077 && jq -n --arg id "$ID" --arg version "$VERSION" --arg tag "$TAG" --arg previous "$PREVIOUS" --arg target "$TARGET" \
+    --arg before "$BEFORE" --arg backup "$BACKUP" \
+    '{id: $id, version: $version, tag: $tag, previous: $previous, target: $target, before: $before, backup: $backup}' > "$SERVER_DIR/backups/update.json.new")
+  mv "$SERVER_DIR/backups/update.json.new" "$SERVER_DIR/backups/update.json"
+}
+
+# Reads the note of the update with this ID; fails when there is none.
+recall() {
+  local file="$SERVER_DIR/backups/update.json"
+  [ -n "$SERVER_DIR" ] && [ -f "$file" ] && [ "$(jq -r '.id // empty' "$file" 2> /dev/null || true)" = "$ID" ] || return 1
+  VERSION=$(jq -r '.version' "$file")
+  TAG=$(jq -r '.tag' "$file")
+  PREVIOUS=$(jq -r '.previous' "$file")
+  TARGET=$(jq -r '.target' "$file")
+  BEFORE=$(jq -r '.before' "$file")
+  BACKUP=$(jq -r '.backup' "$file")
+  plain_tag "$TAG" && plain_tag "$PREVIOUS" || return 1
+  case "$BACKUP" in '' | "$SERVER_DIR"/backups/hornhoof-*.sql.gz) ;; *) return 1 ;; esac
+}
+
+forget() { if [ -n "$SERVER_DIR" ]; then rm -f "$SERVER_DIR/backups/update.json"; fi; }
 
 # The commit a build was made from, from its label; empty for a build made by hand.
 commit_of() { docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$IMAGE:$1" 2> /dev/null || true; }
@@ -78,12 +118,19 @@ backup() {
   say "Saved the database to backups/$(basename "$file")."
 }
 
-# How many migrations the database has; empty when the database does not answer.
+# How many migrations the database has, once it answers; empty when it does not within HEALTH_WAIT seconds, as after
+# the computer started again.
 applied() {
-  local db
-  db=$(compose ps -q db 2> /dev/null || true)
-  [ -n "$db" ] || return 0
-  docker exec "$db" psql -U hornhoof -d hornhoof -tAc 'SELECT count(*) FROM drizzle.__drizzle_migrations' 2> /dev/null | tr -d ' ' || true
+  local db n i=0
+  while [ "$i" -lt "$HEALTH_WAIT" ]; do
+    db=$(compose ps -q db 2> /dev/null || true)
+    if [ -n "$db" ] && n=$(docker exec "$db" psql -U hornhoof -d hornhoof -tAc 'SELECT count(*) FROM drizzle.__drizzle_migrations' 2> /dev/null) && [ -n "$n" ]; then
+      printf '%s' "$n" | tr -d ' '
+      return 0
+    fi
+    i=$((i + 1))
+    sleep 1
+  done
 }
 
 # The database goes back to the copy saved before the update. The copy goes into a database of its own first and only
@@ -99,7 +146,7 @@ restore() {
     -c 'DROP DATABASE IF EXISTS hornhoof_restore' -c 'CREATE DATABASE hornhoof_restore OWNER hornhoof TEMPLATE template0' > /dev/null || return 1
   gzip -dc "$BACKUP" | docker exec -i "$db" psql -U hornhoof -d hornhoof_restore -v ON_ERROR_STOP=1 -q > /dev/null || return 1
   docker exec "$db" psql -U hornhoof -d postgres -v ON_ERROR_STOP=1 -q \
-    -c 'DROP DATABASE hornhoof WITH (FORCE)' -c 'ALTER DATABASE hornhoof_restore RENAME TO hornhoof' > /dev/null || return 1
+    -c 'DROP DATABASE IF EXISTS hornhoof WITH (FORCE)' -c 'ALTER DATABASE hornhoof_restore RENAME TO hornhoof' > /dev/null || return 1
 }
 
 # install <tag>: runs the installer and the compose file that come inside that build of the app image.
@@ -140,57 +187,74 @@ swap_updater() {
 }
 
 update() {
-  local tag=$1 previous target before back
+  local tag=$1
   LOG=''
-  case "$tag" in
-    '' | [!A-Za-z0-9]* | *[!A-Za-z0-9._-]*)
+  if ! plain_tag "$tag"; then
+    if [ "${#tag}" -le 128 ]; then
       stop_with failed "$tag is not a version this updater can install." finished
-      return 0
-      ;;
-  esac
-  [ "${#tag}" -le 128 ] || {
-    stop_with failed "The version is too long." finished
+    else
+      stop_with failed "The version is too long." finished
+    fi
     return 0
-  }
+  fi
   if [ -z "$SERVER_DIR" ] || [ ! -f "$SERVER_DIR/.env" ]; then
     stop_with failed "This Hornhoof was not set up with install.sh server, so it updates by running that command again." finished
     return 0
   fi
-  WORK=$(mktemp -d)
+  TAG=$tag
+  TARGET=''
+  BEFORE=''
+  BACKUP=''
 
   # The build to go back to: the one running now, by its commit, or the one .env pins.
-  previous=$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$(compose ps -q app 2> /dev/null || true)" 2> /dev/null || true)
-  [ -n "$previous" ] || previous=$(env_value HORNHOOF_VERSION)
-  [ -n "$previous" ] || previous=latest
+  PREVIOUS=$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$(compose ps -q app 2> /dev/null || true)" 2> /dev/null || true)
+  [ -n "$PREVIOUS" ] || PREVIOUS=$(env_value HORNHOOF_VERSION)
+  [ -n "$PREVIOUS" ] || PREVIOUS=latest
+  note
 
   step backup "Saving the database."
-  before=$(applied)
+  BEFORE=$(applied)
   backup || {
     stop_with failed "Could not save the database, so nothing changed."
     return 0
   }
+  note
   step pull "Downloading $VERSION."
-  docker pull "$IMAGE:$tag" > /dev/null || {
-    stop_with failed "Could not download $IMAGE:$tag, so nothing changed."
+  docker pull "$IMAGE:$TAG" > /dev/null || {
+    stop_with failed "Could not download $IMAGE:$TAG, so nothing changed."
     return 0
   }
-  target=$(commit_of "$tag")
+  TARGET=$(commit_of "$TAG")
+  note
   step install "Installing $VERSION."
-  if install "$tag"; then
-    step health "Waiting for the new server to answer."
-    if healthy "$target"; then
-      stop_with "done" "Hornhoof runs $VERSION now." finished
-      swap_updater "$tag"
-      return 0
-    fi
-    say "$VERSION did not answer within $HEALTH_WAIT seconds."
+  install_new
+}
+
+# The new build goes in and has to answer; otherwise the build from before goes back.
+install_new() {
+  if install "$TAG"; then
+    check_new
   else
     say "The installer of $VERSION failed: $(tail -n 3 "$WORK/install.log" 2> /dev/null | tr '\n' ' ')"
+    go_back
   fi
+}
 
-  step rollback "Going back to $previous."
-  back="Hornhoof runs the build from before the update again. The database was saved before it."
-  if [ "$(applied)" != "$before" ]; then
+check_new() {
+  step health "Waiting for the new server to answer."
+  if healthy "$TARGET"; then
+    stop_with "done" "Hornhoof runs $VERSION now." finished
+    swap_updater "$TAG"
+    return 0
+  fi
+  say "$VERSION did not answer within $HEALTH_WAIT seconds."
+  go_back
+}
+
+go_back() {
+  local back="Hornhoof runs the build from before the update again. The database was saved before it."
+  step rollback "Going back to $PREVIOUS."
+  if [ "$(applied)" != "$BEFORE" ]; then
     say "$VERSION changed the database, so it goes back to the copy saved before the update."
     restore || {
       stop_with failed "Could not put the database back from backups/$(basename "$BACKUP"). Run install.sh server in $SERVER_DIR, and see docker compose logs app." finished
@@ -198,10 +262,10 @@ update() {
     }
     back="Hornhoof runs the build from before the update again, with the database as it was saved before the update."
   fi
-  if install "$previous" && healthy "$(commit_of "$previous")"; then
+  if install "$PREVIOUS" && healthy "$(commit_of "$PREVIOUS")"; then
     stop_with rolled_back "$back" finished
   else
-    stop_with failed "Could not go back to $previous either. Run install.sh server in $SERVER_DIR, and see docker compose logs app." finished
+    stop_with failed "Could not go back to $PREVIOUS either. Run install.sh server in $SERVER_DIR, and see docker compose logs app." finished
   fi
 }
 
@@ -215,20 +279,38 @@ handle_request() {
   ID=$id
   VERSION=$(jq -r '.version // empty' "$CONTROL/request.json" | tr -cd 'A-Za-z0-9._ -' | cut -c1-64)
   tag=$(jq -r '.tag // empty' "$CONTROL/request.json")
+  WORK=$(mktemp -d)
   update "$tag"
-  if [ -n "$WORK" ]; then rm -rf "$WORK"; fi
+  rm -rf "$WORK"
   WORK=''
 }
 
-# An update this updater was stopped in never finishes on its own.
+# An update this updater was stopped in goes on from the step it was at, by the updater's own note of it. Before the
+# install nothing changed yet, so it starts over.
 interrupted() {
   [ "$(jq -r '.state // empty' "$CONTROL/status.json" 2> /dev/null || true)" = running ] || return 0
-  ID=$(jq -r '.id' "$CONTROL/status.json")
-  VERSION=$(jq -r '.version' "$CONTROL/status.json")
-  STEP=$(jq -r '.step' "$CONTROL/status.json")
-  LOG="$(jq -r '.log' "$CONTROL/status.json")
+  ID=$(jq -r '.id // empty' "$CONTROL/status.json" | tr -cd 'A-Za-z0-9-')
+  VERSION=$(jq -r '.version // empty' "$CONTROL/status.json" | tr -cd 'A-Za-z0-9._ -' | cut -c1-64)
+  STEP=$(jq -r '.step // empty' "$CONTROL/status.json")
+  LOG="$(jq -r '.log // empty' "$CONTROL/status.json")
 "
-  stop_with failed "The updater stopped during the update. Check that Hornhoof answers, then try again."
+  if ! recall; then
+    stop_with failed "The updater stopped during the update. Check that Hornhoof answers, then try again."
+    return 0
+  fi
+  say "The updater stopped during the update and goes on with it."
+  WORK=$(mktemp -d)
+  case "$STEP" in
+    backup | pull) update "$TAG" ;;
+    install)
+      step install "Installing $VERSION."
+      install_new
+      ;;
+    health) check_new ;;
+    *) go_back ;;
+  esac
+  rm -rf "$WORK"
+  WORK=''
 }
 
 mkdir -p "$CONTROL"

@@ -21,7 +21,9 @@ case "$1 $2" in
   'inspect --format') [ "${!#}" = appcid ] && printf '%s\n' "${STUB_RUNNING_COMMIT:-}" ;;
   *)
     case "$1" in
-      pull) [ "${STUB_PULL:-ok}" = fail ] && { echo "pull access denied" >&2; exit 1; } ;;
+      pull)
+        [ "${STUB_PULL:-ok}" = fail ] && { echo "pull access denied" >&2; exit 1; }
+        [ "${STUB_STOP_IN:-}" = pull ] && [ ! -f "$STUB_STATE/stopped" ] && { touch "$STUB_STATE/stopped"; kill -9 "$PPID"; } ;;
       create) echo "cid-${2##*:}" ;;
       cp)
         tag=${2%%:*}; tag=${tag#cid-}
@@ -30,6 +32,9 @@ case "$1 $2" in
             # The installer of that build: records how it was run and starts that build, unless it is broken.
             cat > "$3" <<SCRIPT
 #!/usr/bin/env bash
+# STUB_STOP_IN names a build whose installer stops the updater that runs it, once, as a restart of its container would;
+# "pull" stops it while it downloads.
+case " ${STUB_STOP_IN:-} " in *" $tag "*) [ -f "$STUB_STATE/stopped" ] || { touch "$STUB_STATE/stopped"; kill -9 "\$PPID"; exit 0; } ;; esac
 printf 'installer %s HORNHOOF_VERSION=%s HORNHOOF_FROM_UPDATER=%s HORNHOOF_SERVER_DIR=%s HORNHOOF_COMPOSE_FILE=%s\n' "\$*" "\$HORNHOOF_VERSION" "\$HORNHOOF_FROM_UPDATER" "\$HORNHOOF_SERVER_DIR" "\$(basename "\$HORNHOOF_COMPOSE_FILE")" >> "$STUB_LOG"
 grep -v '^HORNHOOF_VERSION=' "\$HORNHOOF_SERVER_DIR/.env" > "\$HORNHOOF_SERVER_DIR/.env.new"; printf 'HORNHOOF_VERSION=%s\n' "\$HORNHOOF_VERSION" >> "\$HORNHOOF_SERVER_DIR/.env.new"; mv "\$HORNHOOF_SERVER_DIR/.env.new" "\$HORNHOOF_SERVER_DIR/.env"
 # The build migrates the database when it starts, also when it fails afterwards.

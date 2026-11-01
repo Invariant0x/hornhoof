@@ -176,7 +176,54 @@ describe('updater', () => {
     expect(again.status.id).toBe('u6');
   });
 
-  it('marks an update it was stopped in as failed when it starts again', () => {
+  it('finishes an update it was stopped in while the new build was installing', () => {
+    const s = stand();
+    const stopped = runOnce(s, { id: 'r1', version: '0.4.1', tag: '0.4.1' }, { STUB_STOP_IN: '0.4.1' });
+    expect(stopped.status).toMatchObject({ id: 'r1', state: 'running', step: 'install' });
+    const r = runOnce(s, null);
+    expect(r.status).toMatchObject({ id: 'r1', version: '0.4.1', state: 'done', step: 'finished' });
+    expect(r.calls.filter(c => c.startsWith('installer')).map(c => c.match(/HORNHOOF_VERSION=(\S+)/)![1])).toEqual(['0.4.1']);
+    expect(r.calls.some(c => c.includes('compose up -d --no-build updater') && c.includes('hornhoof-updater:0.4.1'))).toBe(true);
+    expect(r.status.log).toContain('The updater stopped during the update and goes on with it.');
+    /* The stub log keeps the calls of every run on this stand. */
+    expect(runOnce(s, null).calls.filter(c => c.startsWith('installer'))).toHaveLength(1);
+    expect(readdirSync(join(s.server, 'backups')).filter(f => !f.endsWith('.sql.gz'))).toEqual([]);
+  });
+
+  it('starts an update it was stopped in over when nothing had changed yet', () => {
+    const s = stand();
+    const stopped = runOnce(s, { id: 'r0', version: '0.4.1', tag: '0.4.1' }, { STUB_STOP_IN: 'pull' });
+    expect(stopped.status).toMatchObject({ id: 'r0', state: 'running', step: 'pull' });
+    const r = runOnce(s, null);
+    expect(r.status).toMatchObject({ id: 'r0', state: 'done', step: 'finished' });
+    expect(r.calls.filter(c => c.startsWith('docker exec dbcid pg_dump'))).toHaveLength(2);
+    expect(r.calls.filter(c => c.startsWith('installer'))).toHaveLength(1);
+  });
+
+  it('goes back, with the saved database, from an update it was stopped in whose build does not answer', () => {
+    const s = stand();
+    const env = { STUB_BROKEN: '0.4.1', STUB_MIGRATIONS: '0.4.0=20 0.4.1=21' };
+    runOnce(s, { id: 'r2', version: '0.4.1', tag: '0.4.1' }, { ...env, STUB_STOP_IN: '0.4.1' });
+    const r = runOnce(s, null, env);
+    expect(r.status).toMatchObject({ id: 'r2', state: 'rolled_back', step: 'finished' });
+    expect(readFileSync(join(s.dir, 'migrations'), 'utf8')).toBe('20');
+    expect(r.calls.filter(c => c.startsWith('installer')).map(c => c.match(/HORNHOOF_VERSION=(\S+)/)![1])).toEqual(['0.4.1', '0.4.0']);
+  });
+
+  it('finishes going back when it was stopped on the way back', () => {
+    const s = stand();
+    const env = { STUB_BROKEN: '0.4.1', STUB_MIGRATIONS: '0.4.0=20 0.4.1=21' };
+    const stopped = runOnce(s, { id: 'r3', version: '0.4.1', tag: '0.4.1' }, { ...env, STUB_STOP_IN: '0.4.0' });
+    expect(stopped.status).toMatchObject({ id: 'r3', state: 'running', step: 'rollback' });
+    const r = runOnce(s, null, env);
+    expect(r.status).toMatchObject({ id: 'r3', state: 'rolled_back', step: 'finished' });
+    expect(readFileSync(join(s.dir, 'migrations'), 'utf8')).toBe('20');
+    /* 0.4.1 went in on the first run; the second one only puts 0.4.0 in. */
+    expect(r.calls.filter(c => c.startsWith('installer')).map(c => c.match(/HORNHOOF_VERSION=(\S+)/)![1])).toEqual(['0.4.1', '0.4.0']);
+    expect(r.status.log).toContain('The database was saved before it.');
+  });
+
+  it('marks an update it was stopped in as failed when it kept no note of it', () => {
     const s = stand();
     writeFileSync(join(s.control, 'request.json'), JSON.stringify({ id: 'u7', version: '0.4.1', tag: '0.4.1' }));
     writeFileSync(join(s.control, 'status.json'), JSON.stringify({ id: 'u7', version: '0.4.1', state: 'running', step: 'install', log: '', at: '2026-10-30T00:00:00Z' }));
