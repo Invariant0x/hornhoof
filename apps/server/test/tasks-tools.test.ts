@@ -2,8 +2,9 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, companies, departments, jobs, people, subscriptions, tasks } from '../src/db/schema.js';
+import { agents, companies, departments, jobs, people, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
 import { createTask } from '../src/modules/tasks/engine.js';
+import { TASK_ANSWER } from '../src/modules/tasks/tools.js';
 import { listen, mcp, setUpCompany, testApp } from './helpers.js';
 
 async function company() {
@@ -88,6 +89,18 @@ describe('task tools', () => {
     const eleventh = await call(client, 'add_tasks', { turn: 1, tasks: [{ department: dev.id, title: 'Task 11', brief: '', body: '' }] });
     expect(eleventh.isError).toBe(true);
     expect(text(eleventh)).toMatch(/10 tasks/);
+  });
+
+  it('keeps the newest of a long log within one answer, and says how much of it was left out', async () => {
+    const { ctx, db, ceo, head, dev, tools } = await company();
+    const { task } = await createTask(ctx, { personId: ceo.id }, { title: 'Payments', brief: '', body: 'Stripe.', departmentId: dev.id, assigneeAgentId: head.id });
+    await db.insert(taskEvents).values(Array.from({ length: 60 }, (_, i) => ({ companyId: task.companyId, taskId: task.id, kind: 'comment' as const, text: `${i + 1}. ${'x'.repeat(3990)}`, agentId: head.id })));
+    const answer = text(await call(await tools(head), 'task', { task: task.number }));
+    expect(answer.length).toBeLessThanOrEqual(TASK_ANSWER);
+    const read = JSON.parse(answer);
+    expect(read.log.at(-1).text).toMatch(/^60\. /);
+    expect(read.logLeftOut).toBe(61 - read.log.length);
+    expect(read.body).toBe('Stripe.');
   });
 
   it("hides other departments' tasks from an employee", async () => {

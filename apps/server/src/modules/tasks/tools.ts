@@ -5,7 +5,7 @@ import type { Ctx } from '../../app.js';
 import { agents, departments, jobs, requests, tasks } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { ask, blocked, cancel, CLOSED, comment, createTask, refuse, report, submit, updateTask, verdict, type Moved, type Task } from './engine.js';
-import { taskByRef, taskDetail, taskLines } from './views.js';
+import { taskByRef, taskDetail, taskLines, type TaskDetail } from './views.js';
 import { addTasks, editTurn, mergeTurn, planTurn, settle, tell, TURN_MESSAGES, turnName, turnRows } from './turns.js';
 import { stopTurns, wakeAll } from './wake.js';
 import { orchestratorOf } from '../conversation/queue.js';
@@ -21,6 +21,20 @@ const say = (text: string, isError = false) => ({ content: [{ type: 'text' as co
 /* Agents read role names in English, the language of their instructions. */
 const english = (_k: string, v: unknown) => (v && typeof v === 'object' && !Array.isArray(v) && 'en' in v && 'ru' in v && Object.keys(v).length === 2 ? (v as { en: string }).en : v);
 const json = (value: unknown) => say(JSON.stringify(value, english));
+
+/* One task's answer stays within this, so a long log does not fill the agent's context. */
+export const TASK_ANSWER = 40_000;
+
+/* A task as an agent reads it: when it is too long, its oldest log lines are left out and counted. */
+function fitted(detail: TaskDetail): string {
+  const whole = JSON.stringify(detail, english);
+  if (whole.length <= TASK_ANSWER) return whole;
+  const sizes = detail.log.map(l => JSON.stringify(l, english).length + 1);
+  let size = whole.length + ',"logLeftOut":000'.length;
+  let drop = 0;
+  while (drop < sizes.length && size > TASK_ANSWER) size -= sizes[drop++]!;
+  return JSON.stringify({ ...detail, log: detail.log.slice(drop), logLeftOut: drop }, english);
+}
 
 const Ref = z.union([z.number().int().positive(), z.string().max(40)]).describe('The task number, like 12 or "#12", or its id.');
 const Title = z.string().trim().min(1).max(120);
@@ -98,10 +112,14 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
 
   server.registerTool(
     'task',
-    { description: 'One task in full: its body (the current truth), gates and where it stands, subtasks, open questions and its log.', inputSchema: { task: Ref } },
+    {
+      description:
+        'One task in full: its body (the current truth), gates and where it stands, subtasks, open questions and its log. A long log comes with its newest lines, and logLeftOut counts the older ones left out.',
+      inputSchema: { task: Ref },
+    },
     async ({ task: ref }) =>
       find(ref).then(
-        async ({ agent, task }) => json(await taskDetail(ctx, task, t => sees(agent, t))),
+        async ({ agent, task }) => say(fitted(await taskDetail(ctx, task, t => sees(agent, t)))),
         (err: unknown) => (err instanceof ApiError ? say(err.message, true) : Promise.reject(err)),
       ),
   );
