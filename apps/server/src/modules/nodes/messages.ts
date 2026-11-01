@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, subscriptions } from '../../db/schema.js';
 import { said } from '../conversation/live.js';
-import { afterJob, liveSubscription, openTypedTurn, pumpWaiting, startProgram } from '../conversation/queue.js';
+import { afterJob, liveSubscription, openTypedTurn, pumpWaiting, refusedLimits, startProgram } from '../conversation/queue.js';
 import { appendEvent, publishWorking } from '../events/store.js';
 import { identityOf, sameNode, type NodeIdentity } from './hub.js';
 
@@ -114,6 +114,12 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       /* The login ran out: the subscription waits for one before the next turn could go out and fail too. */
       if (finished.length && msg.error === 'not_logged_in' && id.kind === 'node') {
         await db.update(subscriptions).set({ status: 'needs_login' }).where(eq(subscriptions.id, id.subscriptionId));
+      }
+      /* A program that stopped at the plan's usage limit holds the plan's turns, as a plan that says so itself does. */
+      if (finished.length && msg.error === 'agent_failed' && id.kind === 'node') {
+        const [sub] = await db.select({ limits: subscriptions.limits }).from(subscriptions).where(eq(subscriptions.id, id.subscriptionId));
+        const held = refusedLimits(`${msg.result}\n${msg.tail}`, sub?.limits ?? null, now.getTime());
+        if (held) await db.update(subscriptions).set({ limits: held }).where(eq(subscriptions.id, id.subscriptionId));
       }
       if (finished.length) await afterJob(ctx, msg.jobId);
       return;

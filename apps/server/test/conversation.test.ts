@@ -297,6 +297,49 @@ describe('the orchestrator\'s conversation', () => {
     expect((await state(app, ceo)).limitUntil).toBeNull();
   });
 
+  it('holds turns when the program said the plan ran out of its usage limit, though the plan itself said nothing', async () => {
+    const { app, ceo, mac } = await onMac('0.3.0', 'kimi');
+    await until(async () => (await state(app, ceo)).ready);
+    await say(app, ceo, 'First');
+    const first = await nextRun(mac);
+    await say(app, ceo, 'Second');
+    const tail = "Error: [provider.api_error] 429 You've reached your 5-hour usage limit. Your quota will reset when the current 5-hour window ends.\n\u276f ";
+    mac.send({ type: 'job.done', jobId: first.jobId, ok: false, sessionId: 'sess-k', result: '', tail, error: 'agent_failed' });
+    await until(async () => (await state(app, ceo)).limitUntil !== null);
+    const wait = Date.parse((await state(app, ceo)).limitUntil!) - Date.now();
+    /* Kimi says no time: Hornhoof tries again in a quarter of an hour. */
+    expect(wait).toBeGreaterThan(14 * 60_000);
+    expect(wait).toBeLessThanOrEqual(15 * 60_000);
+    expect(await quiet(mac)).toBe(0);
+    expect((await state(app, ceo)).queued).toBe(1);
+    const [sub] = await app.ctx.db.select({ limits: subscriptions.limits }).from(subscriptions).where(eq(subscriptions.provider, 'kimi'));
+    expect(sub!.limits).toMatchObject({ status: 'rejected', windows: [{ name: 'five_hour', utilization: 1 }] });
+  });
+
+  it('takes the time a program names for its usage limit to start over', async () => {
+    const { app, ceo, mac } = await onMac('0.3.0', 'codex');
+    await until(async () => (await state(app, ceo)).ready);
+    await say(app, ceo, 'First');
+    const first = await nextRun(mac);
+    const tail = "ERROR: You've hit your usage limit. Upgrade to Pro or try again in 2 hours 5 minutes.";
+    mac.send({ type: 'job.done', jobId: first.jobId, ok: false, sessionId: null, result: '', tail, error: 'agent_failed' });
+    await until(async () => (await state(app, ceo)).limitUntil !== null);
+    const wait = Date.parse((await state(app, ceo)).limitUntil!) - Date.now();
+    expect(wait).toBeGreaterThan(124 * 60_000);
+    expect(wait).toBeLessThanOrEqual(125 * 60_000);
+  });
+
+  it('does not hold turns for an agent that only spoke about usage limits in its work', async () => {
+    const { app, ceo, mac } = await onMac('0.3.0', 'kimi');
+    await until(async () => (await state(app, ceo)).ready);
+    await say(app, ceo, 'First');
+    const first = await nextRun(mac);
+    const tail = "Wrote the test for the 429 usage limit message.\n" + 'x'.repeat(3000) + '\nThe build broke.';
+    mac.send({ type: 'job.done', jobId: first.jobId, ok: false, sessionId: null, result: '', tail, error: 'agent_failed' });
+    await until(async () => !(await state(app, ceo)).busy);
+    expect((await state(app, ceo)).limitUntil).toBeNull();
+  });
+
   it('waits for a machine that connected until it said hello', async () => {
     const { app } = await testApp({ NODE_KEY });
     const url = await listen(app);
