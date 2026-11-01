@@ -1,6 +1,6 @@
 {
   "id": "37f6b5b4-66ff-489a-b162-ef946282d87a",
-  "prevId": "074320c0-4d95-4fec-9a05-d4ca1452e4ab",
+  "prevId": "77f0e346-a087-47a5-a023-5da8e2d2e722",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -2252,6 +2252,70 @@
           "tableTo": "people",
           "columnsFrom": [
             "applied_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.public_links": {
+      "name": "public_links",
+      "schema": "",
+      "columns": {
+        "company_id": {
+          "name": "company_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "url": {
+          "name": "url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "key_enc": {
+          "name": "key_enc",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tunnel_enc": {
+          "name": "tunnel_enc",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "public_links_company_id_companies_id_fk": {
+          "name": "public_links_company_id_companies_id_fk",
+          "tableFrom": "public_links",
+          "tableTo": "companies",
+          "columnsFrom": [
+            "company_id"
           ],
           "columnsTo": [
             "id"
