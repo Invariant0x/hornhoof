@@ -2,6 +2,8 @@ import { eq } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import { jobs, machines, subscriptions, type JOB_STATUSES } from '../../db/schema.js';
 
+type Job = typeof jobs.$inferSelect;
+
 export type JobView = {
   id: string;
   status: (typeof JOB_STATUSES)[number];
@@ -15,7 +17,7 @@ export type JobView = {
 };
 
 /* The job with the hostname of the machine its subscription runs on. The prompt and session stay on the server. */
-export async function jobView(db: Db, id: string): Promise<(JobView & { subscriptionId: string; ownerId: string; createdBy: string | null }) | null> {
+export async function jobView(db: Db, id: string): Promise<(JobView & { subscriptionId: string; ownerId: string; createdBy: string | null; companyId: string; kind: Job['kind']; agentId: string | null }) | null> {
   const [row] = await db
     .select({
       id: jobs.id,
@@ -30,6 +32,9 @@ export async function jobView(db: Db, id: string): Promise<(JobView & { subscrip
       subscriptionId: jobs.subscriptionId,
       ownerId: subscriptions.ownerPersonId,
       createdBy: jobs.createdBy,
+      companyId: jobs.companyId,
+      kind: jobs.kind,
+      agentId: jobs.agentId,
     })
     .from(jobs)
     .innerJoin(subscriptions, eq(subscriptions.id, jobs.subscriptionId))
@@ -38,4 +43,4 @@ export async function jobView(db: Db, id: string): Promise<(JobView & { subscrip
   return row ? { ...row, machine: row.machine ?? null } : null;
 }
 
-export const publicJob = ({ subscriptionId: _s, ownerId: _o, createdBy: _c, ...view }: NonNullable<Awaited<ReturnType<typeof jobView>>>): JobView => view;
+export const publicJob = ({ subscriptionId: _s, ownerId: _o, createdBy: _c, companyId: _co, kind: _k, agentId: _a, ...view }: NonNullable<Awaited<ReturnType<typeof jobView>>>): JobView => view;

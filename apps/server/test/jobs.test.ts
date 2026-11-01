@@ -1,5 +1,6 @@
 import { describe, expect, it, onTestFinished } from 'vitest';
-import { companies, departments } from '../src/db/schema.js';
+import { eq } from 'drizzle-orm';
+import { agents, companies, departments, jobs, people, personAccess, subscriptions } from '../src/db/schema.js';
 import { as, connectNode, invitePerson, listen, setUpCompany, TEST_API_KEY, testApp, until } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
@@ -114,5 +115,23 @@ describe('GET /api/jobs/:id', () => {
     expect(missing.statusCode).toBe(404);
     expect(missing.json().error.reason).toBe('job_unknown');
     node.close();
+  });
+
+  it("shows an employee's conversation turn only to people who reach the employee now, whoever wrote it or owns the plan", async () => {
+    const { app, db, ceo } = await liveCompany();
+    const [company] = await db.select().from(companies);
+    const companyId = company!.id;
+    const [sales] = await db.insert(departments).values({ companyId, name: 'Sales', roleCode: 'CSO' }).returning();
+    const [dev] = await db.insert(departments).values({ companyId, name: 'Development', roleCode: 'CTO' }).returning();
+    const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { departments: [sales!.id, dev!.id] } });
+    const [mariaRow] = await db.select().from(people).where(eq(people.email, 'maria@acme.com'));
+    /* Maria's own plan serves Bruno in Development; she wrote to him there. */
+    const [plan] = await db.insert(subscriptions).values({ companyId, provider: 'claude', kind: 'personal', label: 'Claude', status: 'ready', ownerPersonId: mariaRow!.id }).returning();
+    const [bruno] = await db.insert(agents).values({ companyId, kind: 'worker', name: 'Bruno', roleKey: 'DEV-BE', departmentId: dev!.id, model: '', subscriptionId: plan!.id }).returning();
+    const [turn] = await db.insert(jobs).values({ companyId, subscriptionId: plan!.id, agentId: bruno!.id, kind: 'conversation', prompt: 'Maria: hi', timeoutMs: 1000, createdBy: mariaRow!.id, status: 'done', result: 'secret plan' }).returning();
+    expect((await getJob(app, maria, turn!.id)).statusCode).toBe(200);
+    await db.delete(personAccess).where(eq(personAccess.departmentId, dev!.id));
+    expect((await getJob(app, maria, turn!.id)).statusCode).toBe(403);
+    expect((await getJob(app, ceo, turn!.id)).statusCode).toBe(200);
   });
 });

@@ -2,8 +2,10 @@ import { and, eq, isNull } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { requireCompanyScope, requirePerson } from '../../auth/session.js';
-import { jobs, subscriptions } from '../../db/schema.js';
+import { accessOf, agentSpot, canReach } from '../../auth/access.js';
+import { requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
+import type { Db } from '../../db/client.js';
+import { agents, jobs, subscriptions } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { cancelJob } from '../conversation/queue.js';
 import { identityOf } from '../nodes/hub.js';
@@ -11,6 +13,13 @@ import { dispatchJob, TEST_PROMPT, TEST_TIMEOUT_MS } from './dispatch.js';
 import { jobView, publicJob } from './views.js';
 
 const IdParams = z.object({ id: z.uuid() });
+
+/* A test turn is its writer's and its plan owner's; an employee's turn is for whoever reaches the employee now. */
+async function mayRead(db: Db, me: Person, view: NonNullable<Awaited<ReturnType<typeof jobView>>>): Promise<boolean> {
+  if (!view.agentId) return view.createdBy === me.id || view.ownerId === me.id;
+  const [agent] = await db.select().from(agents).where(eq(agents.id, view.agentId));
+  return Boolean(agent && canReach(await accessOf(db, me), await agentSpot(db, agent)));
+}
 
 const notOwner = () => new ApiError(403, 'forbidden', 'Only the owner can do this.', 'not_owner');
 const offline = () => new ApiError(409, 'conflict', 'The machine for this subscription is offline. Start it and try again.', 'machine_offline');
@@ -43,8 +52,8 @@ export function jobRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/api/jobs/:id', async req => {
     const me = await requirePerson(req, db);
     const view = await jobView(db, IdParams.parse(req.params).id);
-    if (!view) throw new ApiError(404, 'not_found', 'This job does not exist.', 'job_unknown');
-    if (me.scopeKind !== 'company' && view.createdBy !== me.id && view.ownerId !== me.id) throw notOwner();
+    if (!view || view.companyId !== me.companyId) throw new ApiError(404, 'not_found', 'This job does not exist.', 'job_unknown');
+    if (me.scopeKind !== 'company' && !(await mayRead(db, me, view))) throw notOwner();
     return { job: publicJob(view) };
   });
 
