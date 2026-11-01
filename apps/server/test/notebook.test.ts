@@ -164,16 +164,11 @@ describe("a department's notebook", () => {
       payload: { provider: 'anthropic_api', kind: 'api_key', label: 'Team key', apiKey: 'sk-ant-api03-team-key-5678', target: { kind: 'any' } },
       ...as(ceo),
     });
-    /* Its own skills and others up to near the limit a person may write; the notebook comes on top. */
+    /* Its own skills, and a role text that brings its instructions near the limit a person may write; the notebook comes
+       on top. */
     const { templates } = app.ctx;
     const role = templates.roles.get('MKT-HEAD')!;
     const skills = role.skills.map(s => s.id);
-    let size = role.body.length + skills.reduce((n, id) => n + templates.skills.get(id)!.body.length + 60, 0);
-    for (const [id, skill] of templates.skills) {
-      if (skills.includes(id) || id.startsWith('orch-') || size + skill.body.length + 60 > 17_500) continue;
-      skills.push(id);
-      size += skill.body.length + 60;
-    }
     const hired = await app.inject({
       method: 'POST',
       url: `/api/departments/${mkt!.id}/staff`,
@@ -181,7 +176,9 @@ describe("a department's notebook", () => {
       ...as(ceo),
     });
     expect(hired.statusCode).toBe(201);
-    const [mira] = await db.select().from(agents).where(eq(agents.name, 'Mira'));
+    const [hire] = await db.select().from(agents).where(eq(agents.name, 'Mira'));
+    const base = `${role.body} ${'x'.repeat(17_500 - (await instructionsOf(app.ctx, { ...hire!, kind: 'worker' })).text.length)}`;
+    const [mira] = await db.update(agents).set({ overrides: { base } }).where(eq(agents.id, hire!.id)).returning();
     const { text } = await instructionsOf(app.ctx, mira!);
     expect(text.length).toBeLessThanOrEqual(MAX_INSTRUCTIONS);
     expect(text).toContain(`[#1] 0 `);

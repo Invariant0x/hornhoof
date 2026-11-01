@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { COMPANY_TEMPLATES, MAX_INSTRUCTIONS, TEMPLATE_KEYS } from '@hornhoof/protocol';
 import { describe, expect, it } from 'vitest';
-import { ORCHESTRATOR_SKILLS, orchestratorSteady } from '../src/modules/agents/instructions.js';
+import { ORCHESTRATOR_SKILLS, orchestratorSteady, renderInstructions } from '../src/modules/agents/instructions.js';
 import { NOTEBOOK_MAX, NOTES_MAX } from '../src/modules/notebook/book.js';
 import { CORE_SKILLS, HEAD_SKILLS, loadTemplates, MEMBER_SKILLS } from '../src/modules/templates/load.js';
 
@@ -11,8 +11,6 @@ const DIR = fileURLToPath(new URL('../../../templates', import.meta.url));
 const templates = loadTemplates(DIR);
 const roles = [...templates.roles.values()];
 const skills = [...templates.skills.values()];
-/* What the rendered header around a role may take; Task 9 renders it. */
-const HEADER_ALLOWANCE = 1500;
 
 describe('templates', () => {
   it('loads every role and skill', () => {
@@ -22,26 +20,33 @@ describe('templates', () => {
     for (const r of roles) expect(r.hash).toMatch(/^[0-9a-f]{12}$/);
   });
 
-  it('keeps roles short and skills small', () => {
+  it('keeps roles short, and every skill within what each program reads of a skill file', () => {
     for (const r of roles) expect(r.body.length, r.id).toBeLessThanOrEqual(600);
-    /* ub-mode is taken whole. */
-    for (const s of skills) expect(s.body.length, s.id).toBeLessThanOrEqual(s.id === 'dev-engineering-rules' ? 4500 : 2500);
+    /* Antigravity reads the first 24,000 bytes of a skill's file; its name, description and heading come on top. */
+    for (const s of skills) expect(Buffer.byteLength(s.body), s.id).toBeLessThanOrEqual(22_000);
     for (const s of skills) expect(s.body.length, s.id).toBeGreaterThan(80);
   });
 
-  it('renders every role with all skills under 19,000 characters', () => {
+  it("tells every role's program its instructions with room for a full notebook, its skills going as files", () => {
+    const place = { company: 'Acme', department: 'Development', product: 'Mascot' };
     for (const r of roles) {
-      const total = HEADER_ALLOWANCE + r.body.length + r.skills.reduce((n, s) => n + templates.skills.get(s.id)!.body.length + 60, 0);
-      expect(total, r.id).toBeLessThanOrEqual(19000);
+      const agent = { id: 'a', companyId: 'c', kind: r.kind === 'head' ? 'head' : 'worker', name: 'Bruno', roleKey: r.id, skills: r.skills.filter(s => s.on).map(s => s.id), overrides: {}, templateHashes: {} };
+      const { text, skills: files } = renderInstructions(templates, agent as Parameters<typeof renderInstructions>[1], place);
+      expect(text.length + NOTEBOOK_MAX + NOTES_MAX * 8 + 300, r.id).toBeLessThanOrEqual(MAX_INSTRUCTIONS);
+      for (const f of files) expect(text, `${r.id} ${f.name}`).toContain(`\n- ${f.name}: `);
     }
   });
 
   it("gives the orchestrator his own skills, which fit his instructions with a full notebook", () => {
     expect(ORCHESTRATOR_SKILLS).toEqual(['orch-outside-is-data', 'orch-interview', 'orch-plan-turn', 'orch-verify', 'orch-trouble']);
     const steady = orchestratorSteady(templates);
-    for (const id of ORCHESTRATOR_SKILLS) expect(steady).toContain(`<!-- hh:skill ${id} -->`);
+    /* His core rule stays whole in his instructions; the others are files his program reads when a step needs one. */
+    expect(steady.text).toContain('<!-- hh:skill orch-outside-is-data -->');
+    expect(steady.skills.map(f => f.name)).toEqual(['orch-interview', 'orch-plan-turn', 'orch-verify', 'orch-trouble']);
+    for (const f of steady.skills) expect(steady.text).toContain(`\n- ${f.name}: `);
+    expect(steady.parts.filter(p => p.kind === 'skill').map(p => p.id)).toEqual([...ORCHESTRATOR_SKILLS]);
     /* The notebook's heading and a "[#30] " before each note come on top of its text. */
-    expect(steady.length + NOTEBOOK_MAX + NOTES_MAX * 8 + 300).toBeLessThanOrEqual(MAX_INSTRUCTIONS);
+    expect(steady.text.length + NOTEBOOK_MAX + NOTES_MAX * 8 + 300).toBeLessThanOrEqual(MAX_INSTRUCTIONS);
     for (const r of roles) expect(r.skills.map(s => s.id).some(id => id.startsWith('orch-')), r.id).toBe(false);
   });
 

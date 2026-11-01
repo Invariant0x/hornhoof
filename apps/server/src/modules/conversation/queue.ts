@@ -392,6 +392,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
       guidance: job.prompt || !repo ? null : repoLine(repo),
       /* Each agent keeps one folder on the node, with its repository's clone inside. */
       workspace: { key: agent.id, repo },
+      skills: instructions.skills,
     });
   } catch (err) {
     /* A turn that broke on its way out was not sent: it waits for the next try instead of running forever. */

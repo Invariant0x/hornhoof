@@ -4,6 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import { MAX_INSTRUCTIONS, parseServerMessage } from '@hornhoof/protocol';
 import { agentChanges, agents, departments, jobs, people, proposals, subscriptions } from '../src/db/schema.js';
+import { instructionsOf } from '../src/modules/agents/instructions.js';
 import { as, invitePerson, setUpCompany, testApp } from './helpers.js';
 
 /* Development with Bruno, a backend engineer on the team key; Oleg in Development has a Codex plan. */
@@ -37,19 +38,21 @@ const open = (app: FastifyInstance, token: string, id: string) => app.inject({ u
 const patch = (app: FastifyInstance, token: string, id: string, payload: object) => app.inject({ method: 'PATCH', url: `/api/agents/${id}`, payload, ...as(token) });
 
 describe('hiring', () => {
-  it('refuses an employee whose instructions would be too long for a turn', async () => {
-    const { app, ceo, dev, teamKey } = await company();
+  it('hires an employee with as many skills as a hire takes, their bodies going as files', async () => {
+    const { app, db, ceo, dev, teamKey } = await company();
     const own = app.ctx.templates.roles.get('DEV-FE')!.skills.filter(s => s.on).map(s => s.id);
-    const all = [...new Set([...own, ...app.ctx.templates.skills.keys()])].slice(0, 40);
+    const many = [...new Set([...own, ...app.ctx.templates.skills.keys()])].filter(id => !id.startsWith('orch-')).slice(0, 60);
     const res = await app.inject({
       method: 'POST',
       url: `/api/departments/${dev.id}/staff`,
-      payload: { people: [{ role: 'DEV-FE', name: 'Ira', model: 'claude-sonnet-5-5', subscription: teamKey, skills: all }] },
+      payload: { people: [{ role: 'DEV-FE', name: 'Ira', model: 'claude-sonnet-5-5', subscription: teamKey, skills: many }] },
       ...as(ceo),
     });
-    expect(res.statusCode).toBe(400);
-    expect(res.json().error.reason).toBe('instructions_too_long');
-    expect(res.json().error.message).toContain('Ira');
+    expect(res.statusCode).toBe(201);
+    const [ira] = await db.select().from(agents).where(eq(agents.name, 'Ira'));
+    const told = await instructionsOf(app.ctx, ira!);
+    expect(told.text.length).toBeLessThanOrEqual(MAX_INSTRUCTIONS);
+    expect(told.skills.length + many.filter(id => app.ctx.templates.skills.get(id)!.kind === 'core').length).toBe(many.length);
   });
 });
 
@@ -170,15 +173,18 @@ describe('the employee card', () => {
     expect(card.parts[1]).toMatchObject({ text: 'You own the billing API.', overridden: true });
   });
 
-  it('keeps the instructions short enough for a node to take them', async () => {
-    const { app, ceo, brunoId } = await company();
+  it('keeps the instructions short enough for a node to take them, counting only what is not a skill file', async () => {
+    const { app, db, ceo, brunoId } = await company();
     const card = (await open(app, ceo, brunoId)).json();
-    const room = MAX_INSTRUCTIONS - card.raw.length;
-    /* Grows the base and skill texts by n characters in all, each within the 8,000 a field takes. */
+    const told = async () => (await instructionsOf(app.ctx, (await db.select().from(agents).where(eq(agents.id, brunoId)))[0]!)).text;
+    const room = MAX_INSTRUCTIONS - (await told()).length;
+    const core = (id: string) => app.ctx.templates.skills.get(id)?.kind === 'core';
+    /* Grows the base and the core skills, which the instructions carry whole, by n characters in all, each within the
+       8,000 a field takes. */
     const grown = (n: number) => {
       const body: { base?: string; skillText: Record<string, string> } = { skillText: {} };
       for (const part of card.parts as { kind: string; id: string; text: string }[]) {
-        if (part.kind === 'header') continue;
+        if (part.kind === 'header' || (part.kind === 'skill' && !core(part.id))) continue;
         /* A skill's part carries its markers and heading around the text it takes. */
         const text = part.kind === 'base' ? part.text : /\n\n([\s\S]*)\n<!-- \/hh:skill -->$/.exec(part.text)![1]!;
         const add = Math.min(n, 8000 - text.length);
@@ -190,8 +196,10 @@ describe('the employee card', () => {
     };
     expect((await patch(app, ceo, brunoId, grown(room + 1))).json().error.reason).toBe('instructions_too_long');
     expect((await patch(app, ceo, brunoId, grown(room))).statusCode).toBe(200);
-    const raw = (await open(app, ceo, brunoId)).json().raw as string;
-    const run = { type: 'job.run', jobId: brunoId, subscriptionId: brunoId, provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 1, secret: null, instructions: raw, toolToken: null };
+    /* A skill that goes as a file may grow to all a field takes. */
+    const file = (card.parts as { kind: string; id: string }[]).find(p => p.kind === 'skill' && !core(p.id))!;
+    expect((await patch(app, ceo, brunoId, { skillText: { [file.id]: 'y'.repeat(8000) } })).statusCode).toBe(200);
+    const run = { type: 'job.run', jobId: brunoId, subscriptionId: brunoId, provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 1, secret: null, instructions: await told(), toolToken: null };
     expect(parseServerMessage(JSON.stringify(run))).not.toBeNull();
   });
 

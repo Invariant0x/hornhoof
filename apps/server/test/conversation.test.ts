@@ -469,6 +469,9 @@ describe("an employee's conversation", () => {
     const expected = renderInstructions(app.ctx.templates, bruno, { company: 'Acme', department: 'Development', product: null });
     expect(run).toMatchObject({ prompt: 'Ivan (CEO): What do you own?', instructions: expected.text, sessionId: null });
     expect(run.instructions).toContain('You are Bruno, the Backend engineer of the Development department at Acme.');
+    /* Skills that are not core rules go as files the program reads when it needs them. */
+    expect(expected.skills.length).toBeGreaterThan(0);
+    expect(run.skills).toEqual(expected.skills);
     expect(run.toolToken).toMatch(/^[A-Za-z0-9_-]{40,}$/);
     const [job] = await db.select().from(jobs).where(eq(jobs.id, run.jobId));
     expect(job!.instructionsHash).toBe(expected.hash);
