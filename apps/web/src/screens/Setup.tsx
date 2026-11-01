@@ -127,7 +127,7 @@ export function Setup({ onDone, linkDomain = 'hornhoof.org' }: { onDone: (done: 
   }
 
   return (
-    <Card>
+    <Card wide={step === 0}>
       <div className="wizard-head">
         <p className="muted">{t.setup.heading}</p>
         <ol className="steps" aria-label={t.setup.stepOf(step + 1, steps.length)}>
@@ -142,36 +142,40 @@ export function Setup({ onDone, linkDomain = 'hornhoof.org' }: { onDone: (done: 
 
       {step === 0 && (
         <form onSubmit={next}>
-          <Field label={t.setup.companyName}>
-            {p => <input {...p} value={companyName} onChange={e => nameCompany(e.target.value)} maxLength={80} autoFocus autoComplete="organization" />}
-          </Field>
-          <CompanyTemplates value={template} onPick={setTemplate} />
-          <label className="check">
-            <input type="checkbox" checked={linkOn} onChange={e => setLinkOn(e.target.checked)} aria-labelledby={`${uid}-link`} aria-describedby={`${uid}-link-hint`} />
-            <span>
-              <b id={`${uid}-link`}>{t.link.open}</b>
-              <small id={`${uid}-link-hint`}>{t.link.openHint}</small>
-            </span>
-          </label>
-          {linkOn && (
-            <LinkName
-              name={linkName}
-              onName={name => {
-                setLinkName(name);
-                setLinkOwn(true);
-                setProblems(({ link: _, ...rest }) => rest);
-              }}
-              domain={linkDomain}
-              check={checkName}
-              onState={setLinkState}
-              problem={problems.link}
-            />
-          )}
-          {askCode && (
-            <Field label={t.setup.code} problem={problems.code} hint={t.setup.codeHint}>
-              {p => <input {...p} value={code} onChange={e => setCode(e.target.value)} maxLength={200} autoComplete="off" spellCheck={false} />}
+          <div className="setup-lead">
+            <Field label={t.setup.companyName}>
+              {p => <input {...p} value={companyName} onChange={e => nameCompany(e.target.value)} maxLength={80} autoFocus autoComplete="organization" />}
             </Field>
-          )}
+          </div>
+          <CompanyTemplates value={template} onPick={setTemplate} />
+          <div className="setup-lead">
+            <label className="check">
+              <input type="checkbox" checked={linkOn} onChange={e => setLinkOn(e.target.checked)} aria-labelledby={`${uid}-link`} aria-describedby={`${uid}-link-hint`} />
+              <span>
+                <b id={`${uid}-link`}>{t.link.open}</b>
+                <small id={`${uid}-link-hint`}>{t.link.openHint}</small>
+              </span>
+            </label>
+            {linkOn && (
+              <LinkName
+                name={linkName}
+                onName={name => {
+                  setLinkName(name);
+                  setLinkOwn(true);
+                  setProblems(({ link: _, ...rest }) => rest);
+                }}
+                domain={linkDomain}
+                check={checkName}
+                onState={setLinkState}
+                problem={problems.link}
+              />
+            )}
+            {askCode && (
+              <Field label={t.setup.code} problem={problems.code} hint={t.setup.codeHint}>
+                {p => <input {...p} value={code} onChange={e => setCode(e.target.value)} maxLength={200} autoComplete="off" spellCheck={false} />}
+              </Field>
+            )}
+          </div>
           <div className="actions">
             <button className="btn" type="submit" disabled={!companyName.trim() || (askCode && !code.trim()) || (linkOn && (blocks(linkState) || !!problems.link))}>{t.common.next}</button>
           </div>

@@ -46,7 +46,9 @@ describe('Setup', () => {
     expect(screen.getByRole('radio', { name: /Start empty/ })).toBeChecked();
     /* The eight ready-made companies, each with a mini department scheme. */
     expect(screen.getAllByRole('radio', { name: /Project team|Startup|Studio with products|Full company|Cybersecurity company|Open-source project|Agency|Research lab|Home/ })).toHaveLength(9);
-    expect(screen.getAllByRole('img', { name: 'Department scheme' })).toHaveLength(9);
+    /* Every card carries a scheme, Start empty included, so the cards line up. */
+    expect(screen.getAllByRole('img', { name: 'Department scheme' })).toHaveLength(10);
+    expect(screen.getByText('27 employees')).toBeInTheDocument();
   });
 
   it('sends the chosen company template with the company', async () => {

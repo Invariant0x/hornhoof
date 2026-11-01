@@ -33,6 +33,13 @@ function textsOf(messages: unknown): string[] {
   return texts;
 }
 
+describe('company template headcount', () => {
+  it('counts employees with the right Russian form', () => {
+    expect([1, 2, 5, 11, 21].map(n => ru.companyTemplates.employees(n))).toEqual(['1 сотрудник', '2 сотрудника', '5 сотрудников', '11 сотрудников', '21 сотрудник']);
+    expect([1, 2].map(n => en.companyTemplates.employees(n))).toEqual(['1 employee', '2 employees']);
+  });
+});
+
 describe('Russian vocabulary', () => {
   it('calls them машина and нода everywhere', () => {
     expect(textsOf(ru).filter(t => /узел|узл|компьютер/i.test(t))).toEqual([]);
