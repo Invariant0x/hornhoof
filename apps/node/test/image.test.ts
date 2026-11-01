@@ -16,4 +16,11 @@ describe('the node image', () => {
     expect(dockerfile).toContain('fetch obra/superpowers /opt/hornhoof/superpowers $SUPERPOWERS_COMMIT');
     expect(runtime).toContain('COPY --from=quality /opt/hornhoof/superpowers /opt/hornhoof/superpowers');
   });
+
+  it('credits superpowers in the templates sources at the commit it pins, as shipped word for word under MIT', () => {
+    const commit = dockerfile.match(/ARG SUPERPOWERS_COMMIT=([0-9a-f]{40})/)![1]!;
+    const credit = readFileSync(new URL('../../../templates/SOURCES.md', import.meta.url), 'utf8').split('\n').find(line => line.startsWith('| obra/superpowers |'))!;
+    expect(credit).toContain('| MIT |');
+    expect(credit).toContain(`word for word at commit ${commit}`);
+  });
 });
