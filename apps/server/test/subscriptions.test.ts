@@ -77,13 +77,15 @@ describe('POST /api/subscriptions/connect', () => {
     expect((await list(app, ceo)).filter((s: { label: string }) => s.label === 'Claude')).toHaveLength(1);
   });
 
-  it('refuses a plan the person already has on a machine', async () => {
+  it('takes a plan the person already has on a machine into the command, for one more machine', async () => {
     const { app, ceo } = await companyWithMaria();
-    const code = (await connect(app, ceo, ['claude'])).json().command.split('--join ')[1];
+    const first = (await connect(app, ceo, ['claude'])).json();
+    const code = first.command.split('--join ')[1];
     await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' } });
     const res = await connect(app, ceo, ['claude']);
-    expect(res.statusCode).toBe(409);
-    expect(res.json().error.reason).toBe('already_connected');
+    expect(res.statusCode).toBe(201);
+    expect(res.json().subscriptions.map((s: { id: string }) => s.id)).toEqual([first.subscriptions[0].id]);
+    expect((await list(app, ceo)).filter((s: { label: string }) => s.label === 'Claude')).toHaveLength(1);
   });
 
   it('refuses an empty list, repeats and API key providers', async () => {
@@ -96,7 +98,7 @@ describe('POST /api/subscriptions/connect', () => {
 });
 
 describe('POST /api/subscriptions/:id/command', () => {
-  it('gives the owner a fresh command until the machine joins', async () => {
+  it('gives the owner a fresh command, also once the plan is on a machine', async () => {
     const { app, db, ceo, maria } = await companyWithMaria();
     const first = (await connect(app, ceo, ['claude'])).json();
     const id = first.subscriptions[0].id;
@@ -110,9 +112,7 @@ describe('POST /api/subscriptions/:id/command', () => {
     expect(other.json().error.reason).toBe('not_owner');
 
     await db.update(subscriptions).set({ status: 'needs_login' }).where(eq(subscriptions.id, id));
-    const joined = await post(app, ceo, `/api/subscriptions/${id}/command`);
-    expect(joined.statusCode).toBe(409);
-    expect(joined.json().error.reason).toBe('already_connected');
+    expect((await post(app, ceo, `/api/subscriptions/${id}/command`)).statusCode).toBe(201);
   });
 
   it('says when the subscription does not exist', async () => {

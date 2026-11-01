@@ -121,18 +121,16 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   /* A person connects their own plans. They serve wherever the person works, so there is nothing to place.
-     One subscription per plan: one still waiting for its machine goes into the new command instead of a second one. */
+     One subscription per plan: one the person has already goes into the new command instead of a second one, and runs
+     on the machine the command joins as well as on those it has. */
   app.post('/api/subscriptions/connect', async (req, reply) => {
     const me = await requirePerson(req, db);
     const { providers } = ConnectBody.parse(req.body);
     const { ids, code } = await db.transaction(async tx => {
       const had = await tx
-        .select({ id: subscriptions.id, provider: subscriptions.provider, status: subscriptions.status })
+        .select({ id: subscriptions.id, provider: subscriptions.provider })
         .from(subscriptions)
         .where(and(eq(subscriptions.ownerPersonId, me.id), eq(subscriptions.kind, 'personal'), inArray(subscriptions.provider, providers), isNull(subscriptions.removedAt)));
-      if (had.some(s => s.status !== 'waiting_machine')) {
-        throw new ApiError(409, 'conflict', 'This subscription is already connected to a machine.', 'already_connected');
-      }
       const fresh = providers.filter(p => !had.some(s => s.provider === p));
       const rows = fresh.length
         ? await tx
@@ -152,7 +150,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const sub = await liveSubscription(IdParams.parse(req.params).id);
     if (sub.ownerPersonId !== me.id) throw notOwner();
-    if (sub.status !== 'waiting_machine') throw new ApiError(409, 'conflict', 'This subscription is already connected to a machine.', 'already_connected');
+    if (sub.kind !== 'personal') throw unknown();
     const code = await createNodeCode(db, { companyId: me.companyId, personId: me.id, subscriptionIds: [sub.id] });
     reply.code(201);
     return { command: installCommand(await publicUrl(db, config), code) };

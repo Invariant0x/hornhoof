@@ -27,6 +27,7 @@ const JoinBody = z.object({
 
 const IdParams = z.object({ id: z.uuid() });
 export const LendBody = z.object({ lendsTests: z.boolean() }).strict();
+export const PlanBody = z.object({ subscription: z.uuid() }).strict();
 
 const codeUsed = () => new ApiError(410, 'gone', 'This install command was already used or has expired. Get a new one in Hornhoof.', 'code_used');
 
@@ -54,6 +55,13 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     /* A person who was disabled after getting the command cannot connect machines with it. */
     const [owner] = await db.select({ status: people.status }).from(people).where(eq(people.id, code.personId));
     if (owner?.status !== 'active') throw codeUsed();
+    /* A command to add plans to one machine is left unused on any other. */
+    if (code.machineId) {
+      const [meant] = await db.select().from(machines).where(eq(machines.id, code.machineId));
+      if (!meant || meant.machineKey !== body.machineId || meant.personId !== code.personId) {
+        throw new ApiError(409, 'conflict', `This command is for the machine ${meant?.hostname ?? ''}. Run it there.`, 'other_machine');
+      }
+    }
 
     const joined = await db.transaction(async tx => {
       const used = await tx
@@ -63,7 +71,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
         .returning({ codeHash: nodeCodes.codeHash });
       if (used.length === 0) throw codeUsed();
 
-      /* Only subscriptions still waiting for a machine; one that joined elsewhere keeps its machine. */
+      /* A plan that runs on other machines keeps them and runs on this one too. */
       const subs = await tx
         .select({ id: subscriptions.id, provider: subscriptions.provider })
         .from(subscriptions)
@@ -71,7 +79,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
           and(
             inArray(subscriptions.id, code.subscriptionIds),
             eq(subscriptions.ownerPersonId, code.personId),
-            eq(subscriptions.status, 'waiting_machine'),
+            eq(subscriptions.kind, 'personal'),
             isNull(subscriptions.removedAt),
           ),
         );
@@ -93,20 +101,13 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
         return { machine: { id: machine!.id }, nodes: [{ nodeId, subscriptionId: null, provider: 'machine' as const, key }] };
       }
 
-      /* Claimed only while still waiting, so a second code for the same subscription cannot take it at the same time. */
+      /* Each plan signs in on this machine by itself, with a key of its own. */
       const made: { nodeId: string; subscriptionId: string | null; provider: Provider | 'machine'; key: string }[] = [];
       for (const sub of subs) {
         const key = newToken();
-        const claimed = await tx
-          .update(subscriptions)
-          .set({ status: 'needs_login' })
-          .where(and(eq(subscriptions.id, sub.id), eq(subscriptions.status, 'waiting_machine')))
-          .returning({ id: subscriptions.id });
-        if (!claimed.length) continue;
         const nodeId = await keyNode(tx, { companyId: code.companyId, machineId: machine!.id, subscriptionId: sub.id }, hashToken(key));
         made.push({ nodeId, subscriptionId: sub.id, provider: sub.provider, key });
       }
-      if (made.length === 0) throw codeUsed();
       await settlePlans(tx, made.map(n => n.subscriptionId));
       return { machine: { id: machine!.id }, nodes: made };
     });
@@ -122,6 +123,25 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/machines/command', async (req, reply) => {
     const me = await requirePerson(req, db);
     const code = await createNodeCode(db, { companyId: me.companyId, personId: me.id, subscriptionIds: [] });
+    reply.code(201);
+    return { command: installCommand(await publicUrl(db, config), code) };
+  });
+
+  /* One of the owner's own plans on one more of their machines: the command starts the plan's node there and signs in
+     there, and works only on that machine. */
+  app.post('/api/machines/:id/plans', async (req, reply) => {
+    const me = await requirePerson(req, db);
+    const { id } = IdParams.parse(req.params);
+    const { subscription } = PlanBody.parse(req.body);
+    const [machine] = await db.select().from(machines).where(and(eq(machines.id, id), isNull(machines.revokedAt)));
+    if (!machine) throw new ApiError(404, 'not_found', 'This machine does not exist.', 'machine_unknown');
+    if (machine.personId !== me.id) throw new ApiError(403, 'forbidden', 'Only the owner of this machine can do this.', 'not_owner');
+    const [sub] = await db.select().from(subscriptions).where(and(eq(subscriptions.id, subscription), eq(subscriptions.kind, 'personal'), isNull(subscriptions.removedAt)));
+    if (!sub) throw new ApiError(404, 'not_found', 'This subscription does not exist.', 'subscription_unknown');
+    if (sub.ownerPersonId !== me.id) throw new ApiError(403, 'forbidden', 'Only the owner of this subscription can do this.', 'not_owner');
+    const [there] = await db.select({ id: nodes.id }).from(nodes).where(and(eq(nodes.machineId, machine.id), eq(nodes.subscriptionId, sub.id), liveNode));
+    if (there) throw new ApiError(409, 'conflict', 'This subscription is on this machine already.', 'already_on_machine');
+    const code = await createNodeCode(db, { companyId: me.companyId, personId: me.id, subscriptionIds: [sub.id], machineId: machine.id });
     reply.code(201);
     return { command: installCommand(await publicUrl(db, config), code) };
   });

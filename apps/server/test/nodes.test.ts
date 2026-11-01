@@ -87,13 +87,15 @@ describe('POST /api/nodes/join', () => {
     expect(list[0].subscriptions).toBe(2);
   });
 
-  it('skips subscriptions that already joined a machine, and says the code is used when nothing is left', async () => {
-    const { app, ceo, code, ids } = await connected(['claude']);
+  it('puts a plan that joined a machine on one more machine with a second command', async () => {
+    const { app, db, ceo, code, ids } = await connected(['claude']);
     const extra = await app.inject({ method: 'POST', url: `/api/subscriptions/${ids[0]}/command`, ...as(ceo) });
-    await join(app, code);
-    const late = await join(app, codeOf(extra.json().command), { machineId: 'other-machine-01' });
-    expect(late.statusCode).toBe(410);
-    expect(late.json().error.reason).toBe('code_used');
+    const first = (await join(app, code)).json();
+    const late = await join(app, codeOf(extra.json().command), { machineId: 'other-machine-01', hostname: 'ivan-laptop' });
+    expect(late.statusCode).toBe(200);
+    expect(late.json().machine.id).not.toBe(first.machine.id);
+    expect((await db.select().from(nodes).where(eq(nodes.subscriptionId, ids[0]))).map(n => n.machineId).sort()).toEqual([first.machine.id, late.json().machine.id].sort());
+    expect(await db.select().from(subscriptions).where(eq(subscriptions.kind, 'personal'))).toHaveLength(1);
   });
 });
 
@@ -155,6 +157,93 @@ describe('a machine without a plan', () => {
     expect((await join(app, await machineCommand(app, maria))).statusCode).toBe(200);
     expect(await machinesOf(app, maria)).toMatchObject([{ owner: { name: 'Maria' }, subscriptions: 0 }]);
     expect((await app.inject({ method: 'POST', url: '/api/machines/command' })).statusCode).toBe(401);
+  });
+});
+
+describe('one plan on several machines', () => {
+  const LAPTOP = { machineId: 'laptop-0002-abcd', hostname: 'ivan-laptop' };
+  const machineCode = async (app: FastifyInstance, token: string) => codeOf((await app.inject({ method: 'POST', url: '/api/machines/command', ...as(token) })).json().command);
+  const addPlan = (app: FastifyInstance, token: string, machineId: string, subscription: string) =>
+    app.inject({ method: 'POST', url: `/api/machines/${machineId}/plans`, payload: { subscription }, ...as(token) });
+
+  /* Ivan's Claude plan on his Mac, and his laptop joined without a plan. */
+  async function twoMachines() {
+    const { app, db, ceo, code, ids } = await connected(['claude']);
+    const mac = (await join(app, code)).json();
+    const laptop = (await join(app, await machineCode(app, ceo), LAPTOP)).json();
+    return { app, db, ceo, plan: ids[0]!, mac, laptop };
+  }
+
+  it("adds the owner's plan to another machine of theirs, where it signs in by itself, and keeps it on the first", async () => {
+    const { app, db, ceo, plan, mac, laptop } = await twoMachines();
+    const res = await addPlan(app, ceo, laptop.machine.id, plan);
+    expect(res.statusCode).toBe(201);
+    const added = await join(app, codeOf(res.json().command), LAPTOP, { accept: 'text/plain' });
+    expect(added.statusCode).toBe(200);
+    const [nodeId, provider] = added.body.trim().split(' ');
+    expect(provider).toBe('claude');
+    expect(nodeId).not.toBe(mac.nodes[0].nodeId);
+    const rows = await db.select().from(nodes).where(eq(nodes.subscriptionId, plan));
+    expect(rows.map(n => n.machineId).sort()).toEqual([mac.machine.id, laptop.machine.id].sort());
+    expect(new Set(rows.map(n => n.keyHash)).size).toBe(2);
+    expect((await db.select().from(nodes).where(eq(nodes.id, nodeId!)))[0]).toMatchObject({ status: 'needs_login' });
+    expect(await machinesOf(app, ceo)).toMatchObject([{ hostname: 'ivan-mac', subscriptions: 1 }, { hostname: 'ivan-laptop', subscriptions: 1 }]);
+  });
+
+  it('works only on the machine it was made for, and stays unused there', async () => {
+    const { app, ceo, plan, laptop } = await twoMachines();
+    const code = codeOf((await addPlan(app, ceo, laptop.machine.id, plan)).json().command);
+    const elsewhere = await join(app, code, { machineId: 'tower-0003-abcd', hostname: 'ivan-tower' });
+    expect(elsewhere.statusCode).toBe(409);
+    expect(elsewhere.json().error).toMatchObject({ reason: 'other_machine', message: expect.stringContaining('ivan-laptop') });
+    expect((await join(app, code, LAPTOP)).statusCode).toBe(200);
+  });
+
+  it("takes only the machine's owner and their own plan, once per machine", async () => {
+    const { app, db, ceo, plan, mac, laptop } = await twoMachines();
+    const oleg = await invitePerson(app, ceo, { name: 'Oleg', email: 'oleg@acme.com', access: { whole: true } });
+    const olegs = (await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['codex'] }, ...as(oleg) })).json();
+    const tower = (await join(app, codeOf(olegs.command), { machineId: 'tower-0003-abcd', hostname: 'oleg-tower' })).json();
+
+    const notTheirs = await addPlan(app, oleg, laptop.machine.id, olegs.subscriptions[0].id);
+    expect(notTheirs.statusCode).toBe(403);
+    expect(notTheirs.json().error.reason).toBe('not_owner');
+    const notMine = await addPlan(app, ceo, laptop.machine.id, olegs.subscriptions[0].id);
+    expect(notMine.statusCode).toBe(403);
+    expect(notMine.json().error.reason).toBe('not_owner');
+    const onIt = await addPlan(app, ceo, mac.machine.id, plan);
+    expect(onIt.statusCode).toBe(409);
+    expect(onIt.json().error.reason).toBe('already_on_machine');
+    expect((await addPlan(app, ceo, '00000000-0000-4000-8000-000000000000', plan)).statusCode).toBe(404);
+    expect((await addPlan(app, ceo, laptop.machine.id, '00000000-0000-4000-8000-000000000000')).json().error.reason).toBe('subscription_unknown');
+    await db.update(subscriptions).set({ removedAt: new Date() }).where(eq(subscriptions.id, plan));
+    expect((await addPlan(app, ceo, laptop.machine.id, plan)).json().error.reason).toBe('subscription_unknown');
+    void tower;
+  });
+
+  it('gives a plan a new key on a machine it is on already, and keeps the node', async () => {
+    const { app, db, ceo, plan, mac } = await twoMachines();
+    const again = (await join(app, codeOf((await app.inject({ method: 'POST', url: `/api/subscriptions/${plan}/command`, ...as(ceo) })).json().command))).json();
+    expect(again.nodes[0].nodeId).toBe(mac.nodes[0].nodeId);
+    expect(again.nodes[0].key).not.toBe(mac.nodes[0].key);
+    expect(await db.select().from(nodes).where(eq(nodes.subscriptionId, plan))).toHaveLength(1);
+  });
+
+  it('keeps the plan ready while one of its machines is signed in, and waiting once none is left', async () => {
+    const { app, db, ceo, plan, mac, laptop } = await twoMachines();
+    const url = await listen(app);
+    const onLaptop = (await join(app, codeOf((await addPlan(app, ceo, laptop.machine.id, plan)).json().command), LAPTOP)).json().nodes[0];
+    const status = async () => (await db.select().from(subscriptions).where(eq(subscriptions.id, plan)))[0]!.status;
+    const signedIn = await connectNode(url, mac.nodes[0].key);
+    signedIn.send({ type: 'hello', version: '0.9.0', loggedIn: true, running: [] });
+    const signedOut = await connectNode(url, onLaptop.key);
+    signedOut.send({ type: 'hello', version: '0.9.0', loggedIn: false, running: [] });
+    await until(async () => (await db.select().from(nodes).where(eq(nodes.id, onLaptop.nodeId)))[0]!.version === '0.9.0');
+    await until(async () => (await status()) === 'ready');
+    await app.inject({ method: 'POST', url: `/api/machines/${mac.machine.id}/disconnect`, ...as(ceo) });
+    expect(await status()).toBe('needs_login');
+    await app.inject({ method: 'POST', url: `/api/machines/${laptop.machine.id}/disconnect`, ...as(ceo) });
+    expect(await status()).toBe('waiting_machine');
   });
 });
 
