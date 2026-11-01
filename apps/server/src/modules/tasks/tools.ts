@@ -95,12 +95,13 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
     return `#${t.number} is ${t.status}${holder}.${await waiting(t)}`;
   }
 
-  /* Tasks another one comes after, named by number or id anywhere in the company: the engine keeps them to its turn. */
+  /* Tasks another one comes after, named by number or id among the tasks the agent sees: the engine keeps them to its turn. */
   async function afterIds(refs: (number | string)[] | undefined): Promise<string[]> {
     const ids: string[] = [];
+    const agent = refs?.length ? await me() : null;
     for (const ref of refs ?? []) {
       const t = await taskByRef(ctx, job.companyId, ref);
-      if (!t) throw refuse(404, 'task_unknown', `There is no task ${ref} to come after. Call turns or tasks for the numbers.`);
+      if (!t || !sees(agent!, t)) throw refuse(404, 'task_unknown', `There is no task ${ref} to come after. Call turns or tasks for the numbers.`);
       ids.push(t.id);
     }
     return ids;

@@ -64,7 +64,7 @@ export type TaskDetail = TaskLine & {
   files: FileView[];
 };
 
-type Names = { agent(id: string | null): AgentRef | null; place(id: string | null): Place; turn(id: string | null): number | null; after(t: Pick<Task, 'after'>): AfterView[] };
+type Names = { agent(id: string | null): AgentRef | null; place(id: string | null): Place; turn(id: string | null): number | null; after(t: Pick<Task, 'after'>): Task[] };
 
 /* Names for everything the tasks point at, read in one go. */
 async function names(ctx: Pick<Ctx, 'db' | 'templates'>, rows: Pick<Task, 'assigneeAgentId' | 'executorAgentId' | 'gates' | 'departmentId' | 'productId' | 'turnId' | 'createdByAgentId' | 'after'>[], more: string[] = []): Promise<Names> {
@@ -75,7 +75,7 @@ async function names(ctx: Pick<Ctx, 'db' | 'templates'>, rows: Pick<Task, 'assig
   const placeRows = placeIds.length ? await ctx.db.select().from(departments).where(inArray(departments.id, placeIds)) : [];
   const turnRows = turnIds.length ? await ctx.db.select({ id: turns.id, number: turns.number }).from(turns).where(inArray(turns.id, turnIds)) : [];
   const afterIds = [...new Set(rows.flatMap(t => t.after))];
-  const afterRows = afterIds.length ? await ctx.db.select({ id: tasks.id, number: tasks.number, title: tasks.title, status: tasks.status }).from(tasks).where(inArray(tasks.id, afterIds)) : [];
+  const afterRows = afterIds.length ? await ctx.db.select().from(tasks).where(inArray(tasks.id, afterIds)) : [];
   return {
     agent: id => {
       const a = agentRows.find(r => r.id === id);
@@ -137,13 +137,16 @@ export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates'>, task: Task,
   const files = await filesOf(db, task.id);
   const [creator] = task.createdByPersonId ? await db.select({ id: people.id, name: people.name }).from(people).where(eq(people.id, task.createdByPersonId)) : [];
   const n = await names(ctx, [task, ...subs], [...events.map(e => e.agentId), ...asks.map(r => r.agentId), ...files.map(f => f.agentId)].filter((x): x is string => Boolean(x)));
+  const after = n.after(task).filter(sees);
   const by = (personId: string | null, personName: string | null, agentId: string | null): LogLine['by'] =>
     personId ? { kind: 'person', id: personId, name: personName ?? '' } : agentId ? { kind: 'agent', id: agentId, name: n.agent(agentId)?.name ?? '' } : null;
   return {
     ...line(task, n),
+    /* Only what this reader may see of what the task comes after. */
+    waitsFor: after.filter(a => a.status !== 'done').map(a => a.number),
     body: task.body,
     parent,
-    after: n.after(task),
+    after: after.map(a => ({ id: a.id, number: a.number, title: a.title, status: a.status })),
     executor: n.agent(task.executorAgentId),
     gates: task.gates.flatMap((id, i) => {
       const a = n.agent(id);

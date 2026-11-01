@@ -93,7 +93,9 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
       [assignee] = await db.select({ id: agents.id }).from(agents).where(and(eq(agents.departmentId, dept.id), eq(agents.kind, 'head'), isNull(agents.removedAt))).orderBy(asc(agents.createdAt));
       if (!assignee) throw refuse(409, 'no_head', 'This department has no head yet. Hire one first.');
     }
-    const after = body.after?.length ? await db.select({ id: tasks.id, number: tasks.number }).from(tasks).where(and(eq(tasks.companyId, me.companyId), inArray(tasks.number, body.after))) : [];
+    /* A task the person does not reach is no task to come after, as for anything else they name. */
+    const access = await accessOf(db, me);
+    const after = body.after?.length ? (await db.select().from(tasks).where(and(eq(tasks.companyId, me.companyId), inArray(tasks.number, body.after)))).filter(t => reaches(access, t)) : [];
     const missing = (body.after ?? []).find(n => !after.some(t => t.number === n));
     if (missing !== undefined) throw refuse(400, 'task_invalid', `There is no task #${missing} to come after.`);
     const moved = await createTask(ctx, actorOf(me), { title: body.title, brief: body.brief, body: body.body, departmentId: body.department ?? null, productId: body.product ?? null, assigneeAgentId: assignee.id, after: (body.after ?? []).map(n => after.find(t => t.number === n)!.id) });

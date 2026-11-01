@@ -5,7 +5,7 @@ import { hashToken } from '../src/crypto/tokens.js';
 import { agents, companies, departments, jobs, pendingWakes, people, subscriptions, taskEvents, tasks, turns } from '../src/db/schema.js';
 import { cancel, comment, createTask, submit, updateTask, verdict } from '../src/modules/tasks/engine.js';
 import { wakeAll, wakePrompt } from '../src/modules/tasks/wake.js';
-import { as, listen, mcp, setUpCompany, testApp } from './helpers.js';
+import { as, invitePerson, listen, mcp, setUpCompany, testApp } from './helpers.js';
 
 async function company() {
   const { app, db } = await testApp();
@@ -35,7 +35,13 @@ async function company() {
     await db.insert(jobs).values({ companyId, subscriptionId: sub!.id, agentId: agent.id, kind: 'conversation', prompt: 'hi', timeoutMs: 900000, status: 'running', startedAt: new Date(), toolTokenHash: hashToken(token) });
     return mcp(app, token);
   };
-  return { app, ctx, db, owner, companyId, ceo: ceo!, dev: dev!, head, bruno, rita, tess, parent, member, read, turnsOf, tools };
+  /* Sales, with a deal of the CEO's that Development knows nothing of. */
+  const outside = async () => {
+    const [sales] = await db.insert(departments).values({ companyId, templateKey: 'sales', roleCode: 'SAL', position: 2 }).returning();
+    const [sid] = await db.insert(agents).values({ companyId, kind: 'head', name: 'Sid', roleKey: 'SAL-HEAD', departmentId: sales!.id, model: '', subscriptionId: sub!.id }).returning();
+    return (await createTask(ctx, { personId: ceo!.id }, { title: 'Big deal', brief: '', body: '', departmentId: sales!.id, assigneeAgentId: sid!.id })).task;
+  };
+  return { app, ctx, db, owner, companyId, ceo: ceo!, dev: dev!, head, bruno, rita, tess, parent, member, read, turnsOf, tools, outside };
 }
 
 type Res = { content: { text: string }[]; isError?: boolean };
@@ -168,5 +174,28 @@ describe('a task that comes after others', () => {
     expect(shown.waitsFor).toEqual([api.number]);
     const unknown = await call(client, 'create_task', { title: 'More', brief: '', body: '', executor: tess.id, gates: [], after: [999] });
     expect(unknown.isError).toBe(true);
+  });
+});
+
+describe('what a task comes after, as each one sees it', () => {
+  it('is refused to a person for a task the person cannot reach, and left out of a task the person reads', async () => {
+    const { app, ctx, owner, ceo, dev, head, outside } = await company();
+    const deal = await outside();
+    const dana = await invitePerson(app, owner, { name: 'Dana', email: 'dana@acme.com', access: { departments: [dev.id] } });
+    const refused = await app.inject({ method: 'POST', url: '/api/tasks', payload: { title: 'Launch', department: dev.id, after: [deal.number] }, ...as(dana) });
+    expect(refused.statusCode).toBe(400);
+    expect(refused.json().error.message).toBe(`There is no task #${deal.number} to come after.`);
+    const launch = (await createTask(ctx, { personId: ceo.id }, { title: 'Launch', brief: '', body: '', departmentId: dev.id, assigneeAgentId: head.id, after: [deal.id] })).task;
+    const read = (session: typeof owner) => app.inject({ url: `/api/tasks/${launch.id}`, ...as(session) }).then(r => r.json().task);
+    expect(await read(dana)).toMatchObject({ after: [], waitsFor: [] });
+    expect(await read(owner)).toMatchObject({ after: [{ title: 'Big deal' }], waitsFor: [deal.number] });
+  });
+
+  it("is refused to a head for another department's task, as a parent is", async () => {
+    const { head, tools, outside } = await company();
+    const deal = await outside();
+    const res = await call(await tools(head), 'create_task', { title: 'Launch', brief: '', body: '', executor: head.id, gates: [], after: [deal.number] });
+    expect(res.isError).toBe(true);
+    expect(text(res)).toContain(`There is no task ${deal.number} to come after`);
   });
 });
