@@ -177,6 +177,11 @@ describe('tasks for people', () => {
     const put = (token: string, payload: object) => app.inject({ method: 'PUT', url: `/api/departments/${dev.id}/repository`, payload, ...as(token) });
     expect((await put(oleg, { url: 'https://github.com/acme/app.git', branch: 'main', token: 'ghp_secret1234' })).json().error.reason).toBe('company_scope_only');
     expect((await put(ceo, { url: 'http://github.com/acme/app.git', branch: 'main' })).json().error.reason).toBe('repo_invalid');
+    /* An address that is no address is refused too, with a token or without. */
+    for (const token of ['', 'ghp_secret1234']) {
+      const broken = await put(ceo, { url: 'https://[', branch: 'main', token });
+      expect([broken.statusCode, broken.json().error.reason]).toEqual([400, 'repo_invalid']);
+    }
     const saved = await put(ceo, { url: 'https://github.com/acme/app.git', branch: 'main', token: 'ghp_secret1234' });
     expect(saved.statusCode).toBe(200);
     expect(saved.body).not.toContain('ghp_secret');

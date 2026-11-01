@@ -117,6 +117,7 @@ describe('job.run', () => {
     expect(parseServerMessage(JSON.stringify({ ...run, workspace: { key: 'a1', repo: { ...repo, url: 'http://github.com/acme/app.git' } } }))).toBeNull();
     expect(parseServerMessage(JSON.stringify({ ...run, workspace: { key: 'a1', repo: { ...repo, branch: '--upload-pack=x' } } }))).toBeNull();
     expect(parseServerMessage(JSON.stringify({ ...run, workspace: { key: 'a1', repo: { ...repo, url: 'https://x:ghp_y@github.com/acme/app.git' } } }))).toBeNull();
+    for (const url of ['https://[', 'https://', 'https://exa mple.com/x', 'https://github.com:99999/acme/app.git']) expect(parseServerMessage(JSON.stringify({ ...run, workspace: { key: 'a1', repo: { ...repo, url } } }))).toBeNull();
   });
 
   it("may name the author of the agents' commits, as one plain line and an address", () => {

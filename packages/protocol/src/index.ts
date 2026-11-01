@@ -190,12 +190,15 @@ const NodeMessage = z.discriminatedUnion('type', [
 export type NodeMessage = z.infer<typeof NodeMessage>;
 
 /* A git repository over https and a branch name git takes as a plain name, never as an option. The token has its own
-   field: an address with a name or password in it would put them on command lines and into the clone's settings. */
+   field: an address with a name or password in it would put them on command lines and into the clone's settings. The
+   address is read as a URL at the door, so what is saved is what the server and the node can read later. */
+const isHttps = (u: string) => URL.canParse(u) && new URL(u).protocol === 'https:' && new URL(u).hostname !== '';
 export const Repo = z.object({
   url: z
     .string()
     .max(500)
     .regex(/^https:\/\/[^\s]+$/)
+    .refine(isHttps, 'Not an https address.')
     .refine(u => !/^https:\/\/[^/]*@/.test(u), 'Put the token in its own field, not in the address.'),
   branch: z.string().min(1).max(200).regex(/^[A-Za-z0-9._\/-]+$/).refine(b => !b.startsWith('-') && !b.includes('..'), 'Not a branch name.'),
   token: z.string().max(500),
