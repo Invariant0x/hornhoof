@@ -1,7 +1,7 @@
 import { execFile, spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { constants, homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { JobUser } from '../isolation.js';
@@ -60,6 +60,11 @@ const CAPTURE = fileURLToPath(new URL('../../hh-capture.cjs', import.meta.url));
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 
 const integer = (value: string | undefined): number | null => value && /^-?\d+$/.test(value) ? Number(value) : null;
+/* tmux 3.6 names the signal ("kill") where older versions give its number. */
+const signalOf = (value: string | undefined): NodeJS.Signals | number | null => {
+  const name = `SIG${(value ?? '').toUpperCase()}`;
+  return integer(value) || (value && name in constants.signals ? (name as NodeJS.Signals) : null);
+};
 const endedAt = (value: string | undefined, observed: string): string => {
   const time = value ? new Date(Number(value) * 1000) : new Date(observed);
   return Number.isNaN(time.getTime()) ? observed : time.toISOString();
@@ -166,7 +171,7 @@ export class Tmux {
       if (dead !== '1') return null;
       observed ??= new Date().toISOString();
       const code = integer(status);
-      const number = integer(signal) || null;
+      const number = signalOf(signal);
       /* EOF can mark the pane dead before tmux reaps the process and fills in its native status. */
       if (code !== null || number !== null || Date.now() >= deadline) return { code, signal: number, at: endedAt(time, observed) };
       /* Some tmux builds leave a zombie until another child exits. Let tmux reap it before reading its status again. */
