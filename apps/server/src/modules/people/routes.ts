@@ -12,6 +12,7 @@ import { isUniqueViolation } from '../../db/errors.js';
 import { agentChanges, agents, companies, invites, machines, people, sessions, subscriptions } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { onAgent } from '../conversation/queue.js';
+import { publicUrl } from '../link/link.js';
 import { disconnectMachines } from '../nodes/disconnect.js';
 import { personView, personViews } from './views.js';
 
@@ -133,7 +134,7 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
     }
 
     reply.code(201);
-    return { person: await personView(db, person), inviteUrl: `${config.publicUrl}/invite/${token}` };
+    return { person: await personView(db, person), inviteUrl: `${await publicUrl(db, config)}/invite/${token}` };
   });
 
   app.post('/api/people/:id/invite', async (req, reply) => {
@@ -148,7 +149,7 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { token, person } = await reinvite(db, id, me);
     ctx.bus.accessChanged(me.companyId);
     reply.code(201);
-    return { person: await personView(db, person), inviteUrl: `${config.publicUrl}/invite/${token}` };
+    return { person: await personView(db, person), inviteUrl: `${await publicUrl(db, config)}/invite/${token}` };
   });
 
   app.get('/api/invites/:token', async req => {

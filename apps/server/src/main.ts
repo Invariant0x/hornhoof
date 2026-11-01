@@ -2,6 +2,7 @@ import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
 import { openAgentSql } from './db/agent-sql.js';
 import { createDb } from './db/client.js';
+import { publicUrl } from './modules/link/link.js';
 import { setupLink } from './modules/setup/code.js';
 
 function requireDbUrl(url: string | undefined): string {
@@ -19,7 +20,7 @@ const app = await buildApp({
   logger: { level: process.env.LOG_LEVEL || 'info' },
 });
 await app.listen({ port: config.port, host: '0.0.0.0' });
-console.log(`Hornhoof is running at ${config.publicUrl}`);
+console.log(`Hornhoof is running at ${await publicUrl(db, config)}`);
 /* Until a company exists, only the link with the setup code sets it up. */
 const link = await setupLink(db, config);
 if (link) console.log(`Open this link to set Hornhoof up: ${link}`);

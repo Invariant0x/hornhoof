@@ -7,6 +7,7 @@ import { requirePerson } from '../../auth/session.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
 import { machines, nodeCodes, people, subscriptions } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
+import { publicUrl } from '../link/link.js';
 import { disconnectMachines } from './disconnect.js';
 
 const JoinBody = z.object({
@@ -126,9 +127,10 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.get('/install.sh', async (_req, reply) => {
     const script = await readFile(config.installScript, 'utf8');
+    const server = await publicUrl(db, config);
     return reply
       .type('text/plain; charset=utf-8')
       .header('cache-control', 'no-cache')
-      .send(script.replaceAll('__HORNHOOF_SERVER__', config.publicUrl));
+      .send(script.replaceAll('__HORNHOOF_SERVER__', server));
   });
 }

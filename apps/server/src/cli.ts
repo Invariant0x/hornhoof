@@ -4,6 +4,7 @@ import { eq } from 'drizzle-orm';
 import { loadConfig, type Config } from './config.js';
 import { createDb, type Db } from './db/client.js';
 import { people } from './db/schema.js';
+import { publicUrl } from './modules/link/link.js';
 import { reinvite } from './modules/people/routes.js';
 import { setupLink } from './modules/setup/code.js';
 
@@ -21,7 +22,7 @@ async function ownerLink({ db, config, print }: Deps): Promise<number> {
   const { token } = await reinvite(db, owner.id, owner);
   print(`A one-time link for ${owner.name} (${owner.email}). It works for 7 days and sets a new password.`);
   print('The old password and every open session stop working now.');
-  print(`${config.publicUrl}/invite/${token}`);
+  print(`${await publicUrl(db, config)}/invite/${token}`);
   return 0;
 }
 

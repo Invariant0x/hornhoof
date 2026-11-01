@@ -2,6 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from '
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { runCli } from '../src/cli.js';
 import { decryptSecret } from '../src/crypto/secrets.js';
 import { companies, departments, publicLinks } from '../src/db/schema.js';
 import { fakeRelay } from './fake-relay.js';
@@ -176,6 +177,45 @@ describe('binding the company to a public link', () => {
       expect(res.json().error.reason).toBe('company_scope_only');
     }
     expect((await app.inject({ url: '/api/link' })).statusCode).toBe(401);
+  });
+});
+
+describe('the public link as the address of this Hornhoof', () => {
+  it('goes into machine commands, invite links and install.sh, and PUBLIC_URL comes back when it goes', async () => {
+    const { app, ceo, put } = await company({ PUBLIC_URL: 'http://localhost:8080' });
+    await put({ name: 'acme' });
+    const connect = await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude'] }, ...as(ceo) });
+    expect(connect.json().command).toMatch(/^curl -fsSL https:\/\/acme\.hornhoof\.test\/install\.sh \| bash -s -- --join /);
+    const again = await app.inject({ method: 'POST', url: `/api/subscriptions/${connect.json().subscriptions[0].id}/command`, ...as(ceo) });
+    expect(again.json().command).toMatch(/^curl -fsSL https:\/\/acme\.hornhoof\.test\/install\.sh/);
+    const invited = await app.inject({ method: 'POST', url: '/api/people/invite', payload: { name: 'Maria', email: 'maria@acme.com', title: '', access: { whole: true } }, ...as(ceo) });
+    expect(invited.json().inviteUrl).toMatch(/^https:\/\/acme\.hornhoof\.test\/invite\/[A-Za-z0-9_-]{43}$/);
+    const reinvited = await app.inject({ method: 'POST', url: `/api/people/${invited.json().person.id}/invite`, ...as(ceo) });
+    expect(reinvited.json().inviteUrl).toMatch(/^https:\/\/acme\.hornhoof\.test\/invite\//);
+    expect((await app.inject({ url: '/install.sh' })).body).toContain('SERVER="${HORNHOOF_SERVER:-https://acme.hornhoof.test}"');
+
+    await app.inject({ method: 'DELETE', url: '/api/link', ...as(ceo) });
+    expect((await app.inject({ url: '/install.sh' })).body).toContain('SERVER="${HORNHOOF_SERVER:-http://localhost:8080}"');
+  });
+
+  it("takes changes from the link's own pages, even when the tunnel names another host", async () => {
+    const { app, ceo, put } = await company();
+    const me = (await app.inject({ url: '/api/me', ...as(ceo) })).json().person;
+    const rename = () =>
+      app.inject({ method: 'PATCH', url: `/api/people/${me.id}`, payload: { title: 'Founder' }, headers: { host: 'app:8080', origin: 'https://acme.hornhoof.test' }, ...as(ceo) });
+    expect((await rename()).statusCode).toBe(403);
+    await put({ name: 'acme' });
+    expect((await rename()).statusCode).toBe(200);
+    await app.inject({ method: 'DELETE', url: '/api/link', ...as(ceo) });
+    expect((await rename()).statusCode).toBe(403);
+  });
+
+  it('is the address of the owner link', async () => {
+    const { db, config, put } = await company({ PUBLIC_URL: 'https://hq.acme.com' });
+    await put({ name: 'acme' });
+    const lines: string[] = [];
+    expect(await runCli(['owner-link'], { db, config, print: line => lines.push(line) })).toBe(0);
+    expect(lines.join('\n')).toMatch(/https:\/\/acme\.hornhoof\.test\/invite\/[A-Za-z0-9_-]{43}/);
   });
 });
 

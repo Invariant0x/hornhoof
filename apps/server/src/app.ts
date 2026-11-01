@@ -94,7 +94,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   await app.register(cookie);
   await app.register(websocket, SOCKET_OPTIONS);
   /* After the socket plugin, so a refused socket is closed by it. */
-  app.addHook('onRequest', fromOwnPages(deps.config));
+  app.addHook('onRequest', fromOwnPages(deps.config, deps.db));
   if (web) await serveWebApp(app, deps.config.webDist);
   const { version, commit, migrations } = deps.config;
   app.get('/api/health', async () => ({ ok: true, version, commit }));
