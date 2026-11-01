@@ -248,8 +248,15 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
     url: `/api/machines/${machine}/disconnect`,
   }));
   tool(
+    'pool',
+    "Lists the company's machines: whose each is, whether it is online and lent to runs, how busy it is (a loaded one gets no new part), and the parts of test and work runs it runs; " +
+      'the built-in node; and every part that waits for a machine, with why it waits.',
+    {},
+    () => ({ method: 'GET', url: '/api/pool' }),
+  );
+  tool(
     'lend_machine',
-    "Lends a machine to the company's test runs (lendsTests true), which go to whichever lent machine is freest, or takes it back.",
+    "Lends a machine to the company's test runs and work runs (lendsTests true), which go to whichever lent machine is freest, or takes it back.",
     { machine: Id('machine'), ...LendBody.shape },
     ({ machine, ...body }) => ({ method: 'PATCH', url: `/api/machines/${machine}`, payload: body }),
   );

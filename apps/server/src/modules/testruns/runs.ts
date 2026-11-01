@@ -61,7 +61,7 @@ const toolsOf = (kind: RunKind) => (kind === 'work' ? { state: 'work_run', stop:
 export const logName = (run: Pick<Run, 'kind' | 'number'>, part: number) => `${run.kind}-${run.number}-${part}.log`;
 export const madeName = (run: Pick<Run, 'number'>, part: number, name: string) => `work-${run.number}-${part}-${name}`;
 const filesOf = (run: Pick<Run, 'kind' | 'number'>) => like(attachments.name, `${run.kind}-${run.number}-%`);
-const commandFor = (run: Pick<Run, 'command' | 'parts'>, part: number) => run.command.replaceAll('{parts}', String(run.parts)).replaceAll('{part}', String(part));
+export const commandFor = (run: Pick<Run, 'command' | 'parts'>, part: number) => run.command.replaceAll('{parts}', String(run.parts)).replaceAll('{part}', String(part));
 
 /* The last lines of a log. */
 export function tailOf(log: string): string {
@@ -109,7 +109,7 @@ const LOST_HOW: Record<string, string> = {
   machine_disconnected: 'was disconnected from the company',
   subscription_removed: 'lost the plan its node ran for',
 };
-const lostLine = (l: LostRun) => `${l.machine} ${LOST_HOW[l.why] ?? 'lost it'}`;
+export const lostLine = (l: LostRun) => `${l.machine} ${LOST_HOW[l.why] ?? 'lost it'}`;
 
 /* What a part that ran again went through before. */
 const ranAgain = (lost: LostRun[]) => (lost.length ? ` It ran again after ${lost.map(lostLine).join(', and again after ')}.` : '');
@@ -137,9 +137,9 @@ function account(run: Run, task: Pick<Task, 'number'>, parts: Part[], files: Set
 /* A place a part can run: a machine of the company through one of its nodes, or the built-in node. access: what the
    machine's owner reaches; the built-in node reaches every repository. works: its node runs parts of any work, not only
    of test runs. */
-type Place = { key: string; node: NodeIdentity; name: string; machineId: string | null; nodeId: string | null; builtin: boolean; lent: boolean; busy: boolean; load: NodeLoad | null; access: Access | null; works: boolean };
+export type Place = { key: string; node: NodeIdentity; name: string; machineId: string | null; nodeId: string | null; builtin: boolean; lent: boolean; busy: boolean; load: NodeLoad | null; access: Access | null; works: boolean };
 
-async function placesOf(ctx: Ctx, companyId: string): Promise<Place[]> {
+export async function placesOf(ctx: Ctx, companyId: string): Promise<Place[]> {
   const { db, hub } = ctx;
   const running = await db.select({ machineId: testParts.machineId, builtin: testParts.builtin }).from(testParts).where(eq(testParts.status, 'running'));
   const rows = await db
@@ -184,7 +184,7 @@ async function placesOf(ctx: Ctx, companyId: string): Promise<Place[]> {
 
 /* The machine's owner reaches the department a run is for; a run for no department only someone who sees the whole
    company. */
-const reaches = (place: Pick<Place, 'access'>, d: Department | null) =>
+export const reaches = (place: Pick<Place, 'access'>, d: Department | null) =>
   place.access === null || (d ? canReach(place.access, { departmentId: d.id, parentId: d.parentId }) : place.access.whole);
 
 /* Whether a place may take a part of this run at all, busy or not. */
@@ -192,7 +192,7 @@ const mayTake = (place: Place, run: Pick<Run, 'kind'>, d: Department | null) => 
 
 /* What a run's parts need: the repository they clone, if any, and the department whose people's machines may take
    them. None when the repository is gone. */
-async function targetOf(ctx: Ctx, run: Pick<Run, 'kind' | 'branch' | 'departmentId'>): Promise<{ department: Department | null; repo: Repo | null } | null> {
+export async function targetOf(ctx: Ctx, run: Pick<Run, 'kind' | 'branch' | 'departmentId'>): Promise<{ department: Department | null; repo: Repo | null } | null> {
   if (run.kind === 'tests' || run.branch) return repoAt(ctx, [run.departmentId]);
   const [department] = run.departmentId ? await ctx.db.select().from(departments).where(eq(departments.id, run.departmentId)) : [];
   return { department: department ?? null, repo: null };
@@ -257,7 +257,7 @@ async function giveOut(ctx: Ctx): Promise<void> {
 }
 
 /* The free memory, in GB, a part of the run needs: what its agent said for work, else what its repository says. */
-const needOf = (run: Pick<Run, 'memoryGb'>, d: Department | null) => run.memoryGb ?? d?.repoTestMemoryGb ?? TEST_MEMORY_GB;
+export const needOf = (run: Pick<Run, 'memoryGb'>, d: Department | null) => run.memoryGb ?? d?.repoTestMemoryGb ?? TEST_MEMORY_GB;
 
 const pumps = new WeakMap<Ctx, Promise<void>>();
 

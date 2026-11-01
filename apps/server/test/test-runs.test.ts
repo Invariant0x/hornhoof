@@ -495,3 +495,70 @@ describe('a run of other work', () => {
     expect(await nextOf(ann.node, 'tests.cancel')).toEqual({ type: 'tests.cancel', partId: big.partId });
   });
 });
+
+describe('the pool of machines', () => {
+  it('shows the orchestrator every machine with its load, the parts it runs and why each waiting part waits', async () => {
+    const c = await company();
+    const ivan = await c.machine(c.ceo, 'ivan-mac');
+    await c.machine(c.ann, 'ann-pc', idle({ load: 7.6 }));
+    const { call } = await c.turn(c.bruno);
+    await call('run_tests', { command: 'npm test -- --shard={part}/{parts}', parts: 2 });
+    const first = await nextOf(ivan.node, 'tests.run');
+    const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    const boss = await c.turn(orchestrator!, null);
+
+    const pool = JSON.parse((await boss.call('pool')).text);
+    expect(pool.machines).toEqual([
+      expect.objectContaining({ name: 'ivan-mac', owner: 'Ivan', online: true, lent: true, loaded: false, load: expect.objectContaining({ cpus: 8 }), parts: [expect.objectContaining({ run: 1, kind: 'tests', task: c.task.number, part: 1, parts: 2, agent: 'Bruno', command: 'npm test -- --shard=1/2', ranAgain: [] })] }),
+      expect.objectContaining({ name: 'ann-pc', owner: 'Ann', online: true, lent: true, loaded: true, parts: [] }),
+    ]);
+    expect(pool.builtin).toMatchObject({ online: false, parts: [] });
+    expect(pool.waiting).toEqual([expect.objectContaining({ run: 1, kind: 'tests', task: c.task.number, part: 2, parts: 2, agent: 'Bruno', why: 'Running another part: ivan-mac. Loaded: ann-pc.' })]);
+
+    /* Once the first part is done, the second goes out, and nothing waits. */
+    ivan.node.send(done(first));
+    await nextOf(ivan.node, 'tests.run');
+    const after = JSON.parse((await boss.call('pool')).text);
+    expect(after.waiting).toEqual([]);
+    expect(after.machines[0].parts).toEqual([expect.objectContaining({ part: 2 })]);
+  });
+
+  it('says a part waits for a lent machine, for one its department reaches, for one that runs work, or for free memory', async () => {
+    const c = await company();
+    const ivan = await c.machine(c.ceo, 'ivan-mac', idle({ memFree: 1 * GIB }), { work: false });
+    const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    const boss = await c.turn(orchestrator!, null);
+    const why = async () => JSON.parse((await boss.call('pool')).text).waiting.map((w: { why: string }) => w.why);
+    const lend = (machineId: string, lendsTests: boolean) => c.app.inject({ method: 'PATCH', url: `/api/machines/${machineId}`, payload: { lendsTests }, ...as(c.ceo) });
+
+    await lend(ivan.machineId, false);
+    await (await c.turn(c.bruno)).call('run_tests', { command: 'npm test' });
+    expect(await why()).toEqual(['No machine lent to runs is online.']);
+    await lend(ivan.machineId, true);
+    expect(await why()).toEqual(['Short of the 4 GB of free memory it needs: ivan-mac.']);
+
+    /* Ann's machine takes the test run; it reaches development only, and its node knows test runs alone. */
+    await lend(ivan.machineId, false);
+    const ann = await c.machine(c.ann, 'ann-pc', idle(), { work: false });
+    await nextOf(ann.node, 'tests.run');
+    const [pitch] = await c.db.insert(tasks).values({ companyId: c.task.companyId, number: 99, title: 'Pitch', brief: '', body: '', departmentId: c.sales.id, assigneeAgentId: c.sam.id, status: 'working' }).returning();
+    await (await c.turn(c.sam, pitch!.id)).call('run_work', { command: 'make report' });
+    expect(await why()).toEqual(['No lent machine online belongs to someone who reaches its department.']);
+    await lend(ivan.machineId, true);
+    expect(await why()).toEqual(['The lent machines online that may take it run a node too old for work: update their node.']);
+  });
+
+  it('shows a person who does not see the whole company only their own machines and what runs there', async () => {
+    const c = await company();
+    await c.machine(c.ceo, 'ivan-mac', idle({ load: 6 }));
+    const ann = await c.machine(c.ann, 'ann-pc');
+    const { call } = await c.turn(c.bruno);
+    await call('run_tests', { command: 'npm test' });
+    const part = await nextOf(ann.node, 'tests.run');
+    const seen = (await c.app.inject({ method: 'GET', url: '/api/pool', ...as(c.ann) })).json();
+    expect(seen.machines.map((m: { name: string }) => m.name)).toEqual(['ann-pc']);
+    expect(seen.machines[0].parts).toEqual([expect.objectContaining({ run: 1, part: 1 })]);
+    expect(seen).toMatchObject({ builtin: null, waiting: [] });
+    void part;
+  });
+});

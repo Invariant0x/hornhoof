@@ -31,6 +31,7 @@ import { archOf, registry } from './modules/updates/registry.js';
 import { updateRoutes } from './modules/updates/routes.js';
 import { attachmentRoutes } from './modules/tasks/attachments.js';
 import { partFileRoutes } from './modules/testruns/files.js';
+import { poolRoutes } from './modules/testruns/pool.js';
 import { taskRoutes } from './modules/tasks/routes.js';
 import { TerminalRelay } from './modules/terminals/relay.js';
 import { terminalRoutes } from './modules/terminals/routes.js';
@@ -121,6 +122,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   taskRoutes(app, ctx);
   attachmentRoutes(app, ctx);
   partFileRoutes(app, ctx);
+  poolRoutes(app, ctx);
   linkRoutes(app, ctx);
   return app;
 }
