@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ownFs, type AgentFs } from '../src/agent-fs.js';
-import { acceptClaudeDialogs, claudePlanLimits, claudeProgram, claudeTranscript, codexProgram, findKimiWire, findRollout, kimiPlanLimits, kimiProgram, prepareKimi } from '../src/terminal/programs.js';
+import { acceptClaudeDialogs, AGY_SCREEN, agyProgram, claudePlanLimits, claudeProgram, claudeTranscript, codexProgram, findKimiWire, findRollout, kimiPlanLimits, kimiProgram, prepareAgy, prepareKimi } from '../src/terminal/programs.js';
 
 const URLS = { mcpUrl: 'http://127.0.0.1:5000/mcp/s3cr3t', attachUrl: 'http://127.0.0.1:5000/attach/s3cr3t', hookUrl: 'http://127.0.0.1:5000/hook/s3cr3t' };
 const arg = (cmd: string[], flag: string) => cmd[cmd.indexOf(flag) + 1];
@@ -147,6 +147,27 @@ describe('Codex in a terminal', () => {
     writeFileSync(join(day, 'rollout-c.jsonl'), meta('th-new', '/w/a2'));
     expect(findRollout(home, '/w/a2', Date.now() - 60_000)).toEqual({ file: join(day, 'rollout-c.jsonl'), sessionId: 'th-new' });
     expect(findRollout(home, '/w/zzz', 0)).toBeNull();
+  });
+});
+
+describe('Antigravity CLI in a terminal', () => {
+  it("runs agy's print mode from Hornhoof's screen, going on with its conversation, model and effort", () => {
+    const first = agyProgram.launch({ bin: '/t/agy', home: '/h', workDir: '/w/g1', sessionId: null, model: 'Gemini 4 Argon', effort: 'high', instructionsFile: null, urls: URLS });
+    expect(first.command).toEqual([process.execPath, AGY_SCREEN, '/t/agy', '--model', 'Gemini 4 Argon', '--effort', 'high']);
+    /* agy names a new conversation when the first message starts it. */
+    expect(first.sessionId).toBeNull();
+    expect(first.env).toMatchObject({ HOME: '/h', AGY_CLI_DISABLE_AUTO_UPDATE: 'true', HH_AGY_LOG: '/w/g1/.hh-agy.jsonl', HH_BRIDGE: URLS.hookUrl, HH_ATTACH_URL: URLS.attachUrl });
+    const again = agyProgram.launch({ bin: '/t/agy', home: '/h', workDir: '/w/g1', sessionId: 'c3b66b04-872b-4fbe-a3a4-058a026ef20a', model: null, effort: null, instructionsFile: null, urls: URLS });
+    expect(again.command).toEqual([process.execPath, AGY_SCREEN, '/t/agy', '--conversation', 'c3b66b04-872b-4fbe-a3a4-058a026ef20a']);
+    expect(again.sessionId).toBe('c3b66b04-872b-4fbe-a3a4-058a026ef20a');
+  });
+
+  it('gives the agent folder the bridge for tools and an empty log for what agy prints', async () => {
+    const work = mkdtempSync(join(tmpdir(), 'hh-agy-work-'));
+    writeFileSync(join(work, '.hh-agy.jsonl'), '{"event":"result"}\n');
+    await prepareAgy(work, URLS.mcpUrl);
+    expect(JSON.parse(readFileSync(join(work, '.agents', 'mcp_config.json'), 'utf8'))).toEqual({ mcpServers: { hornhoof: { serverUrl: URLS.mcpUrl } } });
+    expect(readFileSync(join(work, '.hh-agy.jsonl'), 'utf8')).toBe('');
   });
 });
 

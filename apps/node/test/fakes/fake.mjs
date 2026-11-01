@@ -12,9 +12,13 @@ const LOGGED_ENV = [
 
 const LOGIN_URL = 'https://login.example.test/device?code=ABC';
 
+/* What a message to agy's print mode asks of the fake, for the live terminal tests, where one program sends many. */
+const AGY_ASKS = { HANG: 'hang', FAIL: 'fail', TOOLS: 'tools' };
+
 export function run(name) {
   const argv = process.argv.slice(2);
-  const mode = process.env.FAKE_MODE ?? '';
+  const message = name === 'agy' ? (argv.find(a => a.startsWith('--print=')) ?? '').slice('--print='.length) : '';
+  const mode = process.env.FAKE_MODE ?? AGY_ASKS[message.split(' ')[0]] ?? '';
   const log = entry => process.env.FAKE_LOG && appendFileSync(process.env.FAKE_LOG, JSON.stringify(entry) + '\n');
   const env = Object.fromEntries(LOGGED_ENV.filter(k => k in process.env).map(k => [k, process.env[k]]));
   /* What the node prepared for this run, read now, since the node may delete it when the run ends. */

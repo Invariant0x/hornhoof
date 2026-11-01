@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-# The node: runs the agent programs (Claude Code, Codex, Kimi Code) for one subscription, or for the company's API keys with --builtin.
+# The node: runs the agent programs (Claude Code, Codex, Kimi Code, Antigravity CLI) for one subscription, or for the company's API keys with --builtin.
 # Every step that runs Node runs on the builder's own platform: what it makes is plain JavaScript or a download for the
 # target, and Node under the emulation that builds the other platform crashes. The image itself only copies and runs apt.
 FROM --platform=$BUILDPLATFORM node:22.23.4-bookworm-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da AS build
@@ -96,6 +96,8 @@ COPY --chmod=755 apps/node/hh-hook.cjs /usr/local/bin/hh-hook
 # The terminal's private, bounded raw output survives programs leaving their alternate screen.
 COPY apps/node/hh-capture.cjs /app/apps/node/hh-capture.cjs
 COPY apps/node/hh-fs.cjs /app/apps/node/hh-fs.cjs
+# The terminal of an agent on Antigravity CLI, which runs agy's print mode for each message.
+COPY apps/node/hh-agy.cjs /app/apps/node/hh-agy.cjs
 RUN mkdir -p /data && chown node:node /data
 # Agent programs are installed into /data/tools at first use and keep their sign-in in /data/home.
 # Set last, so nothing the build writes lands in /data.

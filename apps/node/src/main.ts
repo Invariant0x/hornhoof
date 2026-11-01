@@ -10,12 +10,13 @@ import { agentUser, builtinAdapters, secureNode, type JobUser } from './isolatio
 import { adapterFor, programFor } from './providers/index.js';
 import { runJob, type ProviderAdapter, type RunResult } from './runner.js';
 import { dataDir, isRemoved, markRemoved, readState, rememberSession, writeState, type NodeState } from './state.js';
+import { SIGNED_OUT as AGY_SIGNED_OUT } from './providers/antigravity.js';
 import { SIGNED_OUT as CLAUDE_SIGNED_OUT } from './providers/claude.js';
 import { SIGNED_OUT as CODEX_SIGNED_OUT } from './providers/codex.js';
 import { SCREEN_SIGNED_OUT as KIMI_SIGNED_OUT } from './providers/kimi.js';
 import { childEnv, firstLine } from './providers/process.js';
 import { TerminalHost } from './terminal/host.js';
-import { claudeProgram, codexProgram, kimiProgram, type TermProgram } from './terminal/programs.js';
+import { agyProgram, claudeProgram, codexProgram, kimiProgram, type TermProgram } from './terminal/programs.js';
 import { Tmux } from './terminal/tmux.js';
 
 export const VERSION: string = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
@@ -367,9 +368,11 @@ const TERMINALS: Partial<Record<ProviderId, { program: TermProgram; signedOut: R
   claude: { program: claudeProgram, signedOut: CLAUDE_SIGNED_OUT },
   codex: { program: codexProgram, signedOut: CODEX_SIGNED_OUT },
   kimi: { program: kimiProgram, signedOut: KIMI_SIGNED_OUT },
+  antigravity: { program: agyProgram, signedOut: AGY_SIGNED_OUT },
 };
 
-/* A personal Claude Code, Codex or Kimi Code plan runs its agents in tmux when the machine has it; the rest run as before. */
+/* A personal Claude Code, Codex, Kimi Code or Antigravity plan runs its agents in tmux when the machine has it; the rest
+   run as before. */
 function terminalFor(dir: string, provider: ProviderId, user: JobUser | null, fs: AgentFs): { terminal?: TerminalSetup } {
   const known = TERMINALS[provider];
   if (!known) return {};

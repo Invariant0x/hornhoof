@@ -4,6 +4,7 @@ import { readFileSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { TERM_CHUNK, type AgentEvent, type Limits, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
+import { agyStream } from '../providers/antigravity.js';
 import { claudeEvents, claudeInterrupted } from '../providers/claude.js';
 import { contentText } from '../providers/events.js';
 import { agentFs, ownFs, type AgentFs } from '../agent-fs.js';
@@ -14,7 +15,7 @@ import type { ProgramOutput } from '../program-exit.js';
 import { Bridge } from './bridge.js';
 import { fromAgent } from './peer.js';
 import { StreamMask } from './mask.js';
-import { acceptClaudeDialogs, claudeTranscript, findKimiWire, findRollout, prepareKimi, type TermProgram } from './programs.js';
+import { acceptClaudeDialogs, agyLog, claudeTranscript, findKimiWire, findRollout, prepareAgy, prepareKimi, type TermProgram } from './programs.js';
 import { claudeStatusContext, claudeStatusLimits, codexRollout, kimiWire, LineTail, type WireNews } from './transcripts.js';
 import { envFile, type Tmux } from './tmux.js';
 
@@ -102,8 +103,10 @@ type Agent = {
   fresh: boolean;
   /* While a start turn waits for the program's tools: what people type meanwhile reaches Hornhoof after it, in order. */
   starting: Promise<unknown> | null;
-  /* What a new Kimi session was told from before, kept by the session's id once Kimi names it. */
+  /* What a new Kimi or Antigravity session was told from before, kept by the session's id once the program names it. */
   keep: string | null;
+  /* Reads what Antigravity printed, whose answer comes in parts. */
+  agyRead: ((line: unknown) => AgentEvent[]) | null;
 };
 
 type View = { child: ChildProcess; key: string; write: boolean; mask: StreamMask; decoder: StringDecoder; pending: string; timer: NodeJS.Timeout | null; quiet: NodeJS.Timeout | null };
@@ -229,7 +232,7 @@ export class TerminalHost {
   private agent(key: string): Agent {
     let a = this.agents.get(key);
     if (!a) {
-      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, viewers: 0, up: false, watch: null, saying: Promise.resolve(), queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null };
+      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, viewers: 0, up: false, watch: null, saying: Promise.resolve(), queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null };
       this.agents.set(key, a);
     }
     return a;
@@ -274,8 +277,10 @@ export class TerminalHost {
     const sameSession = input.sessionId === null ? a.fresh : input.sessionId === a.sessionId || a.cleared.has(input.sessionId);
     const goesOn = sameSession && a.hash === hash && (await this.opts.tmux.alive(a.name));
     /* A program started with nothing to type gets its tools before its turn ends, while Hornhoof still answers for them.
-       Kimi Code connects to its tools only once it has a session, which a new one gets with the first message. */
-    const lazy = program.kind === 'kimi' && !input.sessionId;
+       Kimi Code connects to its tools only once it has a session, which a new one gets with the first message, and
+       Antigravity only while it answers a message. */
+    const namesLater = (program.kind === 'kimi' || program.kind === 'antigravity') && !input.sessionId;
+    const lazy = (program.kind === 'kimi' && !input.sessionId) || program.kind === 'antigravity';
     const tools = !goesOn && !input.prompt && input.tools && !lazy ? this.bridge.listed(job.key, this.toolsMs) : null;
 
     /* What is left in the log from before belongs to no turn. */
@@ -295,9 +300,11 @@ export class TerminalHost {
         this.programIs(a, false);
         if (program.kind === 'claude') await acceptClaudeDialogs(job.home, input.workDir, this.fs);
         if (program.kind === 'kimi') await prepareKimi(job.home, input.workDir, urls.mcpUrl, this.fs);
-        /* A person's first message into a new Kimi session reaches its tools a moment before Hornhoof opens their turn. */
-        this.bridge.waitForTurns(job.key, program.kind === 'kimi' ? this.openMs + 2000 : 0);
-        Object.assign(a, { program, home: job.home, workDir: input.workDir, hash, sessionId: spec.sessionId, cleared: new Set(), startedAt: Date.now(), started: deferred<void>(), fresh: false, keep: lazy ? (input.context ?? null) : null, contextSize: program.kind === 'kimi' ? kimiWindow(job.home, input.model) : null });
+        if (program.kind === 'antigravity') await prepareAgy(input.workDir, urls.mcpUrl, this.fs);
+        /* A person's first message into a new Kimi session, or into Antigravity, reaches its tools a moment before Hornhoof
+           opens their turn. */
+        this.bridge.waitForTurns(job.key, program.kind === 'kimi' || program.kind === 'antigravity' ? this.openMs + 2000 : 0);
+        Object.assign(a, { program, home: job.home, workDir: input.workDir, hash, sessionId: spec.sessionId, cleared: new Set(), startedAt: Date.now(), started: deferred<void>(), fresh: false, keep: namesLater ? (input.context ?? null) : null, contextSize: program.kind === 'kimi' ? kimiWindow(job.home, input.model) : null });
         if (program.kind === 'claude' && !input.sessionId && input.context && spec.sessionId) await keepContext(this.fs, input.workDir, spec.sessionId, input.context);
         a.tail = this.tailFor(a);
         const env = { ...lasting(input.env), ...spec.env };
@@ -426,14 +433,14 @@ export class TerminalHost {
   }
 
   /* A person cleared the conversation in Claude Code, which goes on in a new session with a log of its own; or Kimi Code
-     named its session, whose log the host finds once Kimi writes it. */
+     named its session, whose log the host finds once Kimi writes it; or Antigravity named its conversation. */
   private follow(a: Agent, sessionId: string): void {
-    if (sessionId === a.sessionId) return;
+    if (!sessionId || sessionId === a.sessionId) return;
     if (a.sessionId) a.cleared.add(a.sessionId);
     a.sessionId = sessionId;
     if (a.program?.kind === 'claude') a.tail = new LineTail(claudeTranscript(a.home, realpathSync(a.workDir), sessionId));
-    if (a.program?.kind === 'kimi') {
-      a.tail = null;
+    if (a.program?.kind === 'kimi' || a.program?.kind === 'antigravity') {
+      if (a.program.kind === 'kimi') a.tail = null;
       if (a.keep) void keepContext(this.fs, a.workDir, sessionId, a.keep).catch(() => {});
       a.keep = null;
     }
@@ -471,14 +478,14 @@ export class TerminalHost {
     return false;
   }
 
-  /* Claude Code says it started through its hook; Codex and Kimi Code are ready once their prompt shows. Kimi shows its
-     prompt also when it is not signed in, with a word to sign in. */
+  /* Claude Code and Hornhoof's screen for Antigravity say they started through their hook; Codex and Kimi Code are ready
+     once their prompt shows. Kimi shows its prompt also when it is not signed in, with a word to sign in. */
   private async ready(a: Agent, job: TermJob): Promise<boolean> {
     const end = Date.now() + this.readyMs;
     while (Date.now() < end) {
       if (!(await this.opts.tmux.alive(a.name))) return false;
       const kind = job.program.kind;
-      if (kind === 'claude') {
+      if (kind === 'claude' || kind === 'antigravity') {
         if (await Promise.race([a.started!.promise.then(() => true), sleep(this.pollMs).then(() => false)])) return true;
       } else {
         const screen = await this.screen(a.key);
@@ -500,6 +507,11 @@ export class TerminalHost {
     if (a.program?.kind === 'codex' && a.sessionId) {
       const found = findRollout(a.home, a.workDir, 0, a.sessionId);
       return found ? new LineTail(found.file, { fromEnd: true }) : null;
+    }
+    /* What Antigravity prints starts anew with the program. */
+    if (a.program?.kind === 'antigravity') {
+      a.agyRead = agyStream();
+      return new LineTail(agyLog(a.workDir));
     }
     const wire = a.program?.kind === 'kimi' && a.sessionId ? findKimiWire(a.home, a.sessionId) : null;
     return wire ? new LineTail(wire, { fromEnd: true }) : null;
@@ -533,6 +545,11 @@ export class TerminalHost {
       }
       if (a.program?.kind === 'kimi') {
         this.kimiNews(a, kimiWire(data));
+        continue;
+      }
+      /* Antigravity's turn ends through hh-agy's hook, which comes after these lines. */
+      if (a.program?.kind === 'antigravity') {
+        for (const e of a.agyRead?.(data) ?? []) this.emit(a, e);
         continue;
       }
       const news = codexRollout(data);
@@ -641,18 +658,28 @@ export class TerminalHost {
         return;
       case 'stop': {
         this.drain(a);
+        /* hh-agy says when Antigravity's turn was stopped with Escape, and why one failed. */
+        if (data.stopped === true) {
+          if (this.stoppable(a)) this.interrupted(a);
+          else a.busy = false;
+          return;
+        }
         a.busy = false;
         if (typeof data.session_id === 'string') this.follow(a, data.session_id);
-        const message = String(data.last_assistant_message ?? '');
+        const failed = typeof data.error === 'string' && data.error ? data.error : null;
+        const message = failed === null ? String(data.last_assistant_message ?? '') : '';
         const turn = a.turn;
         /* The hook answers first: the program may write the rest of its log only after. */
         if (turn?.typed) {
           a.settling = this.settle(a, message)
             .then(() => {
-              if (a.turn === turn) this.finishTyped(a, message);
+              if (a.turn === turn) this.finishTyped(a, message, failed === null ? null : 'agent_failed', failed ?? '');
             })
             .finally(() => (a.settling = null));
-        } else a.ended?.resolve(message);
+        } else {
+          if (failed !== null) a.failure = failed;
+          a.ended?.resolve(message);
+        }
         return;
       }
     }
@@ -735,7 +762,8 @@ export class TerminalHost {
   }
 
   /* Words for the agent while its turn runs, typed into the program as a person types: Claude Code, Codex and Kimi Code
-     take them into the turn at its next step. False when no turn runs, so Hornhoof gives them the next turn instead. */
+     take them into the turn at its next step. False when no turn runs or the program takes none, so Hornhoof gives them
+     the next turn instead. */
   say(key: string, text: string): Promise<boolean> {
     const a = this.agents.get(key);
     if (!a) return Promise.resolve(false);
@@ -745,6 +773,8 @@ export class TerminalHost {
   }
 
   private async sayIn(a: Agent, text: string): Promise<boolean> {
+    /* Antigravity takes nothing while it answers: what is typed then becomes a turn of its own after this one. */
+    if (a.program?.kind === 'antigravity') return false;
     /* Hornhoof's own prompt goes in first, or the words would join it in the program's input. */
     for (const end = Date.now() + ENTER_TRIES * this.enterWaitMs; a.turn && !a.turn.typed && !a.took && Date.now() < end; ) await sleep(this.pollMs);
     if (!a.turn || a.turn.starting || (!a.turn.typed && !a.took) || !(await this.opts.tmux.alive(a.name))) return false;

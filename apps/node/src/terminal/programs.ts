@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { Limits } from '@hornhoof/protocol';
 import { ownFs, type AgentFs } from '../agent-fs.js';
 import type { AgentUrls } from './bridge.js';
@@ -25,7 +26,7 @@ export type LaunchInput = {
 export type LaunchSpec = { command: string[]; env: Record<string, string>; sessionId: string | null };
 
 export type TermProgram = {
-  kind: 'claude' | 'codex' | 'kimi';
+  kind: 'claude' | 'codex' | 'kimi' | 'antigravity';
   launch(input: LaunchInput): LaunchSpec;
   /* The plan's limits, for a program that does not write them where the host reads. */
   limits?(home: string): Promise<Limits | null>;
@@ -116,6 +117,31 @@ export const kimiProgram: TermProgram = {
   },
   limits: kimiPlanLimits,
 };
+
+/* The terminal of an agent on Antigravity CLI, which runs agy's print mode for each message. */
+export const AGY_SCREEN = fileURLToPath(new URL('../../hh-agy.cjs', import.meta.url));
+
+/* Where hh-agy puts what agy prints, for the host to read. */
+export const agyLog = (workDir: string) => join(workDir, '.hh-agy.jsonl');
+
+export const agyProgram: TermProgram = {
+  kind: 'antigravity',
+  launch({ bin, home, workDir, sessionId, model, effort, urls }) {
+    /* agy names a new conversation with the first message, and hh-agy tells the host when the turn ends. */
+    const command = [process.execPath, AGY_SCREEN, bin, ...(sessionId ? ['--conversation', sessionId] : []), ...(model ? ['--model', model] : []), ...(effort ? ['--effort', effort] : [])];
+    /* agy keeps everything in HOME. The node updates the programs it installs itself. */
+    return { command, env: { HOME: home, AGY_CLI_DISABLE_AUTO_UPDATE: 'true', HH_AGY_LOG: agyLog(workDir), ...bridgeEnv(urls) }, sessionId };
+  },
+};
+
+/* agy reads its MCP servers from the agent folder's .agents/mcp_config.json; the bridge adds the turn's token. Its log
+   starts empty with the program. */
+export async function prepareAgy(workDir: string, mcpUrl: string, fs: AgentFs = ownFs): Promise<void> {
+  const dir = join(workDir, '.agents');
+  await fs.mkdir(dir);
+  await fs.write(join(dir, 'mcp_config.json'), JSON.stringify({ mcpServers: { hornhoof: { serverUrl: mcpUrl } } }, null, 2));
+  await fs.write(agyLog(workDir), '');
+}
 
 /* Hornhoof's hooks in Kimi's settings: the start names the session, the prompt opens a person's turn before Kimi goes on. */
 const KIMI_HOOKS = [
