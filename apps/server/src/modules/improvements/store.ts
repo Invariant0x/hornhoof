@@ -2,7 +2,7 @@ import { and, asc, desc, eq, inArray, or, sql } from 'drizzle-orm';
 import type { PgUpdateSetSource } from 'drizzle-orm/pg-core';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
-import { agents, departments, improvements, IMPROVEMENT_STATUSES, people, taskEvents, tasks } from '../../db/schema.js';
+import { agents, departments, improvements, IMPROVEMENT_STATUSES, people, taskEvents, tasks, type ImprovementParts } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { deptName } from '../departments/templates.js';
 import type { Tx } from '../tasks/engine.js';
@@ -11,6 +11,22 @@ export type ImprovementStatus = (typeof IMPROVEMENT_STATUSES)[number];
 /* How many closed ones are listed; every one that waits or is in work is. */
 const CLOSED_LISTED = 200;
 const ACTIVE: readonly ImprovementStatus[] = ['open', 'taken'];
+
+/* A case as one text, in the order a person reads it: what the orchestrator gets when it is taken into work, and what a
+   Hornhoof that goes back to a build before the parts shows. */
+export function caseText(p: ImprovementParts): string {
+  const list = (lines: string[]) => lines.map(line => `- ${line}`).join('\n');
+  return [
+    p.problem && `What is wrong: ${p.problem}`,
+    p.facts.length && `Facts:\n${list(p.facts.map(f => `${f.text} (${f.source})`))}`,
+    p.guesses.length && `Guesses, not checked:\n${list(p.guesses)}`,
+    p.why && `Why it matters: ${p.why}`,
+    `Change: ${p.change}`,
+    p.gain && `What it gives: ${p.gain}`,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+}
 
 /* Improvements as people and the orchestrator read them, the latest changed first, each with who found it and where. */
 export async function listImprovements(ctx: Pick<Ctx, 'db'>, companyId: string, statuses: readonly ImprovementStatus[] = IMPROVEMENT_STATUSES) {
@@ -45,6 +61,7 @@ export async function listImprovements(ctx: Pick<Ctx, 'db'>, companyId: string, 
     id: i.id,
     title: i.title,
     text: i.text,
+    parts: i.parts ?? null,
     seen: i.seen,
     status: i.status,
     result: i.result,

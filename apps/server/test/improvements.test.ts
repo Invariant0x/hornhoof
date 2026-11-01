@@ -94,18 +94,69 @@ describe('improvements', () => {
     const { app, ceo, dev } = await company();
     expect(await names(await mcp(app, TOKENS.bruno))).not.toContain('propose_improvement');
     const wendy = await mcp(app, TOKENS.wendy);
-    const put = JSON.parse((await call(wendy, 'propose_improvement', { title: 'Install jq on the nodes', text: 'Agents looked for jq 3 times.' })).content[0]!.text);
+    const put = JSON.parse((await call(wendy, 'propose_improvement', { title: 'Install jq on the nodes', problem: 'Agents looked for jq 3 times.', change: 'Add jq to the node image.' })).content[0]!.text);
     expect(put.improvement).toMatch(/^[0-9a-f-]{36}$/);
-    const again = await call(wendy, 'propose_improvement', { improvement: put.improvement, title: 'Install jq on the nodes', text: 'Agents looked for jq 7 times, on #4 and #9.' });
+    const again = await call(wendy, 'propose_improvement', { improvement: put.improvement, title: 'Install jq on the nodes', problem: 'Agents looked for jq 7 times, on #4 and #9.', change: 'Add jq to the node image.' });
     expect(again.isError).toBeFalsy();
-    await call(await mcp(app, TOKENS.hana), 'propose_improvement', { title: 'Let reviewers run the tests without asking', text: 'Rita asked twice whether she may run npm test.' });
+    await call(await mcp(app, TOKENS.hana), 'propose_improvement', { title: 'Let reviewers run the tests without asking', problem: 'Rita asked twice whether she may run npm test.', change: 'Let reviewers run npm test.' });
     const listed = (await app.inject({ url: '/api/improvements', ...as(ceo) })).json().improvements;
     expect(listed).toMatchObject([
       { title: 'Let reviewers run the tests without asking', seen: 1, status: 'open', agent: { name: 'Hana' }, department: { id: dev.id, name: 'Development' } },
-      { id: put.improvement, title: 'Install jq on the nodes', text: 'Agents looked for jq 7 times, on #4 and #9.', seen: 2, status: 'open', agent: { name: 'Wendy' }, result: null },
+      { id: put.improvement, title: 'Install jq on the nodes', parts: { problem: 'Agents looked for jq 7 times, on #4 and #9.' }, seen: 2, status: 'open', agent: { name: 'Wendy' }, result: null },
     ]);
     const open = JSON.parse((await call(wendy, 'improvements')).content[0]!.text);
     expect(open.map((i: { title: string }) => i.title)).toEqual(['Let reviewers run the tests without asking', 'Install jq on the nodes']);
+  });
+
+  it('read as a short case: what is wrong, facts with their sources apart from guesses, why it matters, the change and what it gives', async () => {
+    const { app, db, ceo, orchestrator } = await company();
+    const parts = {
+      problem: 'Agents install jq by hand before they can read the test reports.',
+      facts: [
+        { text: 'jq was missing 7 times this week.', source: 'failures, 25 to 31 October' },
+        { text: 'Each install took about 2 minutes.', source: 'task #9, its log' },
+      ],
+      guesses: ['The reviewers may need yq as well.'],
+      why: 'Every review waits for the install.',
+      change: 'Add jq to the node image.',
+      gain: 'Reviews start about 2 minutes sooner.',
+    };
+    const put = await call(await mcp(app, TOKENS.wendy), 'propose_improvement', { title: 'Install jq on the nodes', ...parts });
+    const { improvement: id } = JSON.parse(put.content[0]!.text);
+    const [listed] = (await app.inject({ url: '/api/improvements', ...as(ceo) })).json().improvements;
+    expect(listed).toMatchObject({ id, title: 'Install jq on the nodes', parts });
+    /* The same case as one text, for the orchestrator and for a Hornhoof that goes back to a build before the parts. */
+    expect(listed.text).toBe(
+      'What is wrong: Agents install jq by hand before they can read the test reports.\n\n' +
+        'Facts:\n- jq was missing 7 times this week. (failures, 25 to 31 October)\n- Each install took about 2 minutes. (task #9, its log)\n\n' +
+        'Guesses, not checked:\n- The reviewers may need yq as well.\n\n' +
+        'Why it matters: Every review waits for the install.\n\n' +
+        'Change: Add jq to the node image.\n\n' +
+        'What it gives: Reviews start about 2 minutes sooner.',
+    );
+    await app.inject({ method: 'POST', url: `/api/improvements/${id}/take`, ...as(ceo) });
+    const [turn] = (await waiting(db, orchestrator.id)).filter(j => j.prompt !== 'round');
+    expect(turn!.prompt).toContain(listed.text);
+  });
+
+  it('need a title and the change, and a source for every fact', async () => {
+    const { app, ceo } = await company();
+    const wendy = await mcp(app, TOKENS.wendy);
+    expect((await call(wendy, 'propose_improvement', { title: 'Install jq', problem: 'Agents looked for jq.' })).isError).toBe(true);
+    expect((await call(wendy, 'propose_improvement', { change: 'Add jq to the node image.' })).isError).toBe(true);
+    expect((await call(wendy, 'propose_improvement', { title: 'Install jq', change: 'Add jq to the node image.', facts: [{ text: 'jq was missing 7 times.' }] })).isError).toBe(true);
+    expect((await call(wendy, 'propose_improvement', { title: 'Install jq', change: 'Add jq to the node image.' })).isError).toBeFalsy();
+    const listed = (await app.inject({ url: '/api/improvements', ...as(ceo) })).json().improvements;
+    expect(listed).toMatchObject([
+      { title: 'Install jq', text: 'Change: Add jq to the node image.', parts: { problem: null, facts: [], guesses: [], why: null, change: 'Add jq to the node image.', gain: null } },
+    ]);
+  });
+
+  it('filed the old way, as one text, keep that text and no parts', async () => {
+    const { app, db, ceo, acme, wendy } = await company();
+    await db.insert(improvements).values({ companyId: acme.id, agentId: wendy.id, title: 'Install jq on the nodes', text: 'Agents looked for **jq** 3 times.' });
+    const listed = (await app.inject({ url: '/api/improvements', ...as(ceo) })).json().improvements;
+    expect(listed).toMatchObject([{ title: 'Install jq on the nodes', text: 'Agents looked for **jq** 3 times.', parts: null }]);
   });
 
   it('are for people who see the whole company', async () => {
@@ -116,7 +167,7 @@ describe('improvements', () => {
 
   it('go to the orchestrator when the CEO takes one into work, and it says what came of it', async () => {
     const { app, db, ceo, orchestrator } = await company();
-    const { improvement: id } = JSON.parse((await call(await mcp(app, TOKENS.wendy), 'propose_improvement', { title: 'Install jq on the nodes', text: 'Agents looked for jq 3 times.' })).content[0]!.text);
+    const { improvement: id } = JSON.parse((await call(await mcp(app, TOKENS.wendy), 'propose_improvement', { title: 'Install jq on the nodes', change: 'Agents looked for jq 3 times.' })).content[0]!.text);
     const taken = await app.inject({ method: 'POST', url: `/api/improvements/${id}/take`, ...as(ceo) });
     expect(taken.statusCode).toBe(200);
     const [turn] = (await waiting(db, orchestrator.id)).filter(j => j.prompt !== 'round');
@@ -133,8 +184,8 @@ describe('improvements', () => {
   it('are taken and linked to tasks when a person asks the orchestrator for them', async () => {
     const { app, db, ceo, orchestrator, dev } = await company();
     const wendy = await mcp(app, TOKENS.wendy);
-    const { improvement: id } = JSON.parse((await call(wendy, 'propose_improvement', { title: 'Install jq', text: 'Agents looked for jq.' })).content[0]!.text);
-    const { improvement: openId } = JSON.parse((await call(wendy, 'propose_improvement', { title: 'Leave open', text: 'Not requested yet.' })).content[0]!.text);
+    const { improvement: id } = JSON.parse((await call(wendy, 'propose_improvement', { title: 'Install jq', change: 'Agents looked for jq.' })).content[0]!.text);
+    const { improvement: openId } = JSON.parse((await call(wendy, 'propose_improvement', { title: 'Leave open', change: 'Not requested yet.' })).content[0]!.text);
     await instruct(app, db, ceo, orchestrator.id);
     const published: string[] = [];
     const publish = app.ctx.bus.publish.bind(app.ctx.bus);
@@ -163,7 +214,7 @@ describe('improvements', () => {
 
   it('keep task links when closed and refuse more work on a done improvement', async () => {
     const { app, db, ceo, orchestrator, dev } = await company();
-    const { improvement: id } = JSON.parse((await call(await mcp(app, TOKENS.wendy), 'propose_improvement', { title: 'Install jq', text: 'Agents looked for jq.' })).content[0]!.text);
+    const { improvement: id } = JSON.parse((await call(await mcp(app, TOKENS.wendy), 'propose_improvement', { title: 'Install jq', change: 'Agents looked for jq.' })).content[0]!.text);
     await instruct(app, db, ceo, orchestrator.id);
     const orch = await mcp(app, TOKENS.orchestrator);
     expect((await call(orch, 'plan_turn', { title: 'Install jq', goal: 'Make jq available.', improvement: id, tasks: [work(dev.id, 'Write installer')] })).isError).toBeFalsy();
@@ -177,7 +228,7 @@ describe('improvements', () => {
 
   it('refuses to take an improvement without a human instruction or when task creation fails', async () => {
     const { app, db, ceo, orchestrator, dev } = await company();
-    const { improvement: id } = JSON.parse((await call(await mcp(app, TOKENS.wendy), 'propose_improvement', { title: 'Install jq', text: 'Agents looked for jq.' })).content[0]!.text);
+    const { improvement: id } = JSON.parse((await call(await mcp(app, TOKENS.wendy), 'propose_improvement', { title: 'Install jq', change: 'Agents looked for jq.' })).content[0]!.text);
     const orch = await mcp(app, TOKENS.orchestrator);
     const unauthorized = await call(orch, 'plan_turn', { title: 'Install jq', goal: 'Make jq available.', improvement: id, tasks: [work(dev.id, 'Write installer')] });
     expect(unauthorized.isError).toBe(true);
@@ -192,7 +243,7 @@ describe('improvements', () => {
 
   it('rejects another company improvement and never lists a task from another company', async () => {
     const { app, db, ceo, orchestrator, dev, wendy } = await company();
-    const { improvement: id } = JSON.parse((await call(await mcp(app, TOKENS.wendy), 'propose_improvement', { title: 'Install jq', text: 'Agents looked for jq.' })).content[0]!.text);
+    const { improvement: id } = JSON.parse((await call(await mcp(app, TOKENS.wendy), 'propose_improvement', { title: 'Install jq', change: 'Agents looked for jq.' })).content[0]!.text);
     const [other] = await db.insert(companies).values({ name: 'Other', singleton: false }).returning();
     const [foreign] = await db.insert(improvements).values({ companyId: other!.id, agentId: wendy.id, title: 'Foreign', text: 'Not yours.' }).returning();
     await instruct(app, db, ceo, orchestrator.id);
@@ -209,7 +260,7 @@ describe('improvements', () => {
 
   it('stay waiting when the orchestrator has no subscription to take one on', async () => {
     const { app, db, ceo, orchestrator } = await company();
-    const { improvement: id } = JSON.parse((await call(await mcp(app, TOKENS.wendy), 'propose_improvement', { title: 'Install jq', text: 'Looked for jq.' })).content[0]!.text);
+    const { improvement: id } = JSON.parse((await call(await mcp(app, TOKENS.wendy), 'propose_improvement', { title: 'Install jq', change: 'Looked for jq.' })).content[0]!.text);
     await db.update(agents).set({ subscriptionId: null }).where(eq(agents.id, orchestrator.id));
     const taken = await app.inject({ method: 'POST', url: `/api/improvements/${id}/take`, ...as(ceo) });
     expect([taken.statusCode, taken.json().error.reason]).toEqual([409, 'no_subscription']);
@@ -218,7 +269,7 @@ describe('improvements', () => {
 
   it('stay taken once the turn is stored, though showing it in the window failed', async () => {
     const { app, db, ceo, orchestrator } = await company();
-    const { improvement: id } = JSON.parse((await call(await mcp(app, TOKENS.wendy), 'propose_improvement', { title: 'Install jq', text: 'Looked for jq.' })).content[0]!.text);
+    const { improvement: id } = JSON.parse((await call(await mcp(app, TOKENS.wendy), 'propose_improvement', { title: 'Install jq', change: 'Looked for jq.' })).content[0]!.text);
     const publish = app.ctx.bus.publish.bind(app.ctx.bus);
     app.ctx.bus.publish = (companyId, message) => {
       if (message.type === 'agent_event') throw new Error('The window is gone.');
@@ -242,24 +293,24 @@ describe('improvements', () => {
   it('take at most ten from one turn, though it sends them all at once', async () => {
     const { app } = await company();
     const wendy = await mcp(app, TOKENS.wendy);
-    const all = await Promise.all(Array.from({ length: 11 }, (_, i) => call(wendy, 'propose_improvement', { title: `Fix ${i}`, text: 'x' })));
+    const all = await Promise.all(Array.from({ length: 11 }, (_, i) => call(wendy, 'propose_improvement', { title: `Fix ${i}`, change: 'x' })));
     expect(all.filter(r => !r.isError)).toHaveLength(10);
   });
 
   it('count every round that finds one again, though two do at once', async () => {
     const { app, db } = await company();
     const wendy = await mcp(app, TOKENS.wendy);
-    const { improvement: id } = JSON.parse((await call(wendy, 'propose_improvement', { title: 'Install jq', text: 'Looked for jq.' })).content[0]!.text);
+    const { improvement: id } = JSON.parse((await call(wendy, 'propose_improvement', { title: 'Install jq', change: 'Looked for jq.' })).content[0]!.text);
     const hana = await mcp(app, TOKENS.hana);
-    await Promise.all([call(wendy, 'propose_improvement', { improvement: id, title: 'Install jq', text: 'Again.' }), call(hana, 'propose_improvement', { improvement: id, title: 'Install jq', text: 'Again too.' })]);
+    await Promise.all([call(wendy, 'propose_improvement', { improvement: id, title: 'Install jq', change: 'Again.' }), call(hana, 'propose_improvement', { improvement: id, title: 'Install jq', change: 'Again too.' })]);
     expect((await db.select().from(improvements).where(eq(improvements.id, id)))[0]!.seen).toBe(3);
   });
 
   it('go back to the CEO with the reason when the orchestrator cannot do one, and can be set aside', async () => {
     const { app, db, ceo } = await company();
     const wendy = await mcp(app, TOKENS.wendy);
-    const first = JSON.parse((await call(wendy, 'propose_improvement', { title: 'Buy a bigger machine', text: 'Builds time out.' })).content[0]!.text).improvement;
-    const second = JSON.parse((await call(wendy, 'propose_improvement', { title: 'Install jq', text: 'Looked for jq.' })).content[0]!.text).improvement;
+    const first = JSON.parse((await call(wendy, 'propose_improvement', { title: 'Buy a bigger machine', change: 'Builds time out.' })).content[0]!.text).improvement;
+    const second = JSON.parse((await call(wendy, 'propose_improvement', { title: 'Install jq', change: 'Looked for jq.' })).content[0]!.text).improvement;
     await app.inject({ method: 'POST', url: `/api/improvements/${first}/take`, ...as(ceo) });
     await call(await mcp(app, TOKENS.orchestrator), 'close_improvement', { improvement: first, done: false, text: 'This costs money: the CEO has to choose the machine.' });
     expect((await app.inject({ method: 'POST', url: `/api/improvements/${second}/dismiss`, ...as(ceo) })).statusCode).toBe(200);

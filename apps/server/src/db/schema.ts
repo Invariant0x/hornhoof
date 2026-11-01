@@ -510,6 +510,17 @@ export const notebookNotes = pgTable(
    set it aside. */
 export const IMPROVEMENT_STATUSES = ['open', 'taken', 'done', 'dismissed'] as const;
 
+/* An improvement as a short case: what is wrong, the facts with where each comes from, kept apart from what its finder only
+   guesses, why it matters, the change and what it gives. */
+export type ImprovementParts = {
+  problem: string | null;
+  facts: { text: string; source: string }[];
+  guesses: string[];
+  why: string | null;
+  change: string;
+  gain: string | null;
+};
+
 /* Something an employee found to improve in how the company works, such as a program to install ahead or a harmless
    action to allow, for the CEO to take into work. Its department is its finder's. */
 export const improvements = pgTable(
@@ -521,7 +532,9 @@ export const improvements = pgTable(
       .notNull()
       .references(() => agents.id),
     title: text('title').notNull(),
+    /* The whole case as one text. One filed before the parts has only this. */
     text: text('text').notNull(),
+    parts: jsonb('parts').$type<ImprovementParts>(),
     /* How many rounds found it: one that finds it again rewrites it and adds one. */
     seen: integer('seen').notNull().default(1),
     status: text('status', { enum: IMPROVEMENT_STATUSES }).notNull().default('open'),

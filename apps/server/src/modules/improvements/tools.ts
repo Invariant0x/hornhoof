@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { improvements, jobs } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import { improvementsChanged, listImprovements, moveImprovement } from './store.js';
+import { caseText, improvementsChanged, listImprovements, moveImprovement } from './store.js';
 
 type ToolJob = { id: string; companyId: string; agentId: string };
 
@@ -18,6 +18,21 @@ const PUT_KEPT = 500;
 const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
 const json = (value: unknown) => say(JSON.stringify(value));
 const Id = z.uuid().describe("The improvement's id, from improvements.");
+const Line = (max: number) => z.string().trim().min(1).max(max);
+/* An improvement as a short case. Only the title and the change are a must. */
+const Case = {
+  title: Line(200).describe('The change, in a few words.'),
+  problem: Line(1000).optional().describe('What is wrong, in a sentence or two.'),
+  facts: z
+    .array(z.object({ text: Line(500).describe('One thing that happened, checked.'), source: Line(200).describe('Where it comes from: a task number, a log, a count.') }))
+    .max(10)
+    .optional()
+    .describe('What you checked, each with where it comes from.'),
+  guesses: z.array(Line(500)).max(5).optional().describe('What you think but did not check, kept apart from the facts.'),
+  why: Line(1000).optional().describe('Why it matters: what it costs or holds up now.'),
+  change: Line(2000).describe('What exactly to change: the package to install, the words to add to an instruction, the setting.'),
+  gain: Line(1000).optional().describe('What it gives once it is done.'),
+};
 /* A refusal comes back to the agent as its reason. */
 const refused = async (fn: () => Promise<ReturnType<typeof say>>) => {
   try {
@@ -64,18 +79,21 @@ export function registerImprovementTools(server: McpServer, ctx: Ctx, job: ToolJ
     {
       description:
         'Puts something you found to improve in how the company works under Improvements, where the CEO takes it into work and the orchestrator does it: a program to install on the nodes ahead, words to add to an instruction, ' +
-        'something to write down, a role to move to another subscription. title: the change, in a few words. text: what happened, how often, which agents, the evidence and the exact change. ' +
-        `With improvement, the id of one still waiting, you found it again: it is rewritten with your text and counted once more. One turn puts at most ${TURN_IMPROVEMENTS}.`,
-      inputSchema: { title: z.string().trim().min(1).max(200), text: z.string().trim().min(1).max(4000), improvement: Id.optional() },
+        'something to write down, a role to move to another subscription. Write it as a short case in the CEO\'s language and plain words, keeping names, commands and packages as they are: ' +
+        'the title, what is wrong, the facts with where each comes from, apart from what you only guess, why it matters, the exact change and what it gives. ' +
+        `With improvement, the id of one still waiting, you found it again: it is rewritten with your case and counted once more. One turn puts at most ${TURN_IMPROVEMENTS}.`,
+      inputSchema: { ...Case, improvement: Id.optional() },
     },
-    async ({ title, text, improvement }) =>
+    async ({ title, problem, facts, guesses, why, change, gain, improvement }) =>
       refused(async () => {
         if (!(await room())) return say(`One turn puts at most ${TURN_IMPROVEMENTS} improvements. Go on in your next round.`, true);
+        const parts = { problem: problem ?? null, facts: facts ?? [], guesses: guesses ?? [], why: why ?? null, change, gain: gain ?? null };
+        const text = caseText(parts);
         if (improvement) {
-          await moveImprovement(ctx, job.companyId, improvement, 'open', { title, text, seen: sql`${improvements.seen} + 1` });
+          await moveImprovement(ctx, job.companyId, improvement, 'open', { title, text, parts, seen: sql`${improvements.seen} + 1` });
           return json({ improvement });
         }
-        const [row] = await db.insert(improvements).values({ companyId: job.companyId, agentId: job.agentId, title, text }).returning({ id: improvements.id });
+        const [row] = await db.insert(improvements).values({ companyId: job.companyId, agentId: job.agentId, title, text, parts }).returning({ id: improvements.id });
         improvementsChanged(ctx, job.companyId);
         return json({ improvement: row!.id });
       }),
