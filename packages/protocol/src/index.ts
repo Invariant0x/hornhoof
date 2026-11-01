@@ -28,6 +28,37 @@ const Limits = z.object({
 });
 export type Limits = z.infer<typeof Limits>;
 
+/* Collection provenance survives cached status messages and offline delivery unchanged. */
+const SampleOrder = {
+  epoch: z.uuid().nullable(),
+  seq: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+  delivery: z.enum(['live', 'outbox']),
+};
+const SampleWindow = LimitWindow.extend({ resetsAt: z.iso.datetime().nullable() }).strict();
+const SampleWindows = z.array(SampleWindow).max(8).refine(windows => new Set(windows.map(w => w.name)).size === windows.length);
+const ObservationSource = z.enum(['usage_fetch', 'turn_report']);
+const UsageObservation = z.discriminatedUnion('outcome', [
+  z.object({ ...SampleOrder, source: ObservationSource, outcome: z.literal('success'), sampledAt: z.iso.datetime(), complete: z.boolean(), status: z.enum(['allowed', 'warning', 'rejected']), windows: SampleWindows }).strict(),
+  z.object({ ...SampleOrder, source: ObservationSource, outcome: z.literal('unavailable'), sampledAt: z.null(), complete: z.literal(false), status: z.null(), windows: z.array(SampleWindow).length(0) }).strict(),
+]);
+export type UsageObservation = z.infer<typeof UsageObservation>;
+
+const EvidenceId = z.string().min(1).max(256).regex(/^[^\p{Cc}]+$/u);
+/* This transport describes verified evidence, not a classifier for arbitrary program output. */
+const QuotaRefusal = z.object({
+  ...SampleOrder,
+  kind: z.literal('provider_quota'),
+  provider: z.literal('kimi'),
+  observedAt: z.iso.datetime(),
+  source: z.object({ format: z.enum(['kimi_wire', 'kimi_code_log']), version: EvidenceId }).strict(),
+  native: z.object({
+    sessionId: EvidenceId,
+    turnId: EvidenceId,
+    cursor: z.object({ start: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER), end: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER) }).strict().refine(c => c.end > c.start),
+  }).strict(),
+}).strict();
+export type QuotaRefusal = z.infer<typeof QuotaRefusal>;
+
 /* How hard a model thinks, as its program names the level: low, high, max and the like. */
 const Effort = z.string().regex(/^[a-z]{1,16}$/);
 
@@ -153,7 +184,7 @@ export const TERM_CHUNK = 64 * 1024;
 const NodeMessage = z.discriminatedUnion('type', [
   /* terminals: the node runs agents in sessions people can watch and type into. */
   z.object({ type: z.literal('hello'), version: z.string().max(40), loggedIn: z.boolean(), running: z.array(z.string()).max(100), models: Models.optional(), terminals: z.boolean().optional() }),
-  z.object({ type: z.literal('status'), loggedIn: z.boolean(), limits: Limits.nullable(), models: Models.optional() }),
+  z.object({ type: z.literal('status'), loggedIn: z.boolean(), limits: Limits.nullable(), models: Models.optional(), usageObservation: UsageObservation.optional().catch(undefined) }),
   z.object({ type: z.literal('job.started'), jobId: z.string() }),
   z.object({
     type: z.literal('job.done'),
@@ -163,6 +194,9 @@ const NodeMessage = z.discriminatedUnion('type', [
     result: z.string(),
     tail: z.string(),
     error: z.enum(JOB_ERRORS).nullable(),
+    /* Invalid optional evidence never discards the job's result or changes its error. */
+    usageObservation: UsageObservation.optional().catch(undefined),
+    quotaRefusal: QuotaRefusal.optional().catch(undefined),
   }),
   z.object({ type: z.literal('job.event'), jobId: z.string(), seq: z.number().int().min(0), event: AgentEvent }),
   z.object({ type: z.literal('removed') }),
@@ -210,6 +244,7 @@ export function repoFolder(url: string): string {
 }
 
 const ServerMessage = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('usage.epoch'), epoch: z.uuid() }),
   z.object({
     type: z.literal('job.run'),
     jobId: Id,
