@@ -1,5 +1,5 @@
 import { effortFor, effortsOf, modelsFor, type Limits } from '@hornhoof/protocol';
-import { and, asc, count, desc, eq, inArray, isNotNull, isNull, ne, or } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, lte, ne, or } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
@@ -244,6 +244,7 @@ function outdated(sub: { kind: string; nodeVersion: string | null }, need = CONV
 }
 
 const ALONG = 'Several of your tasks moved while you were busy. Go through each of them in this turn:';
+const GONE_ALONG = 'Went out with the turn before it.';
 
 /* The other task turns waiting for the agent, oldest first. */
 function alongWith(ctx: Ctx, agentId: string, jobId: string) {
@@ -259,7 +260,7 @@ async function goneAlong(ctx: Ctx, jobId: string): Promise<void> {
   const at = new Date();
   const [gone] = await ctx.db
     .update(jobs)
-    .set({ status: 'done', result: 'Went out with the turn before it.', startedAt: at, finishedAt: at })
+    .set({ status: 'done', result: GONE_ALONG, startedAt: at, finishedAt: at })
     .where(and(eq(jobs.id, jobId), eq(jobs.status, 'queued')))
     .returning({ id: jobs.id });
   if (gone) await startWork(ctx, jobId);
@@ -348,16 +349,29 @@ export async function pumpWaiting(ctx: Ctx): Promise<void> {
   for (const { agentId } of waiting) if (agentId) await pump(ctx, agentId);
 }
 
-/* A finished turn: a failure or a stop goes into the conversation, a turn on a task that left it where it was is caught,
-   then the next turn goes out. */
+/* The other tasks whose turns went out inside this one: marked gone while it ran, as an agent runs one turn at a time. */
+async function carriedTasks(ctx: Ctx, job: { agentId: string; taskId: string; startedAt: Date | null; finishedAt: Date | null }): Promise<string[]> {
+  if (!job.startedAt) return [];
+  const rows = await ctx.db
+    .selectDistinct({ taskId: jobs.taskId })
+    .from(jobs)
+    .where(and(conversationOf(job.agentId), eq(jobs.status, 'done'), eq(jobs.result, GONE_ALONG), ne(jobs.taskId, job.taskId), gte(jobs.startedAt, job.startedAt), lte(jobs.startedAt, job.finishedAt ?? new Date())));
+  return rows.flatMap(r => (r.taskId ? [r.taskId] : []));
+}
+
+/* A finished turn: a failure or a stop goes into the conversation, a turn that left a task it carried where it was is
+   caught, then the next turn goes out. */
 export async function afterJob(ctx: Ctx, jobId: string): Promise<void> {
-  const [job] = await ctx.db.select({ companyId: jobs.companyId, agentId: jobs.agentId, kind: jobs.kind, status: jobs.status, error: jobs.error, taskId: jobs.taskId }).from(jobs).where(eq(jobs.id, jobId));
+  const [job] = await ctx.db
+    .select({ companyId: jobs.companyId, agentId: jobs.agentId, kind: jobs.kind, status: jobs.status, error: jobs.error, taskId: jobs.taskId, startedAt: jobs.startedAt, finishedAt: jobs.finishedAt })
+    .from(jobs)
+    .where(eq(jobs.id, jobId));
   if (!job?.agentId || job.kind !== 'conversation') return;
   if (job.status === 'failed') {
     const stopped = job.error === 'cancelled';
     await appendEvent(ctx, { companyId: job.companyId, agentId: job.agentId, jobId, kind: stopped ? 'stopped' : 'failed', data: stopped ? {} : { error: job.error } });
   }
-  if (job.taskId) await checkLiveness(ctx, jobId);
+  if (job.taskId) await checkLiveness(ctx, jobId, await carriedTasks(ctx, { ...job, agentId: job.agentId, taskId: job.taskId }));
   await explainEnded(ctx, jobId);
   await leaveIfOff(ctx, job.agentId);
   await pump(ctx, job.agentId);

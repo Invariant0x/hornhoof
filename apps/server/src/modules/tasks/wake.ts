@@ -268,14 +268,24 @@ async function heldTask(ctx: Ctx, agentId: string, taskId: string): Promise<Task
 /* After a turn on a task: an agent that went idle holding the task without moving it is reminded, and after
    SILENT_TURNS such turns a person is asked. A failed turn counts as silent; a turn a person stopped does not count. One
    that worked until its time ran out, or said in the task how far it got, goes on, up to GOING_ON_TURNS in a row.
-   Nothing is checked while the agent has another turn waiting on the task, or while the task waits on its subtasks or on people. */
-export async function checkLiveness(ctx: Ctx, jobId: string): Promise<void> {
-  const { db } = ctx;
-  const [job] = await db.select().from(jobs).where(eq(jobs.id, jobId));
+   Nothing is checked while the agent has another turn waiting on the task, or while the task waits on its subtasks or on people.
+   A turn that carried other tasks' turns along is checked on each of those tasks too, and a task the agent holds once,
+   however many of them lead to it. */
+export async function checkLiveness(ctx: Ctx, jobId: string, carried: string[] = []): Promise<void> {
+  const [job] = await ctx.db.select().from(jobs).where(eq(jobs.id, jobId));
   if (!job?.taskId || !job.agentId || !job.startedAt || job.error === 'cancelled') return;
-  const agentId = job.agentId;
-  const task = await heldTask(ctx, agentId, job.taskId);
-  if (!task || !['open', 'working', 'review'].includes(task.status)) return;
+  const held = new Map<string, Task>();
+  for (const taskId of [job.taskId, ...carried]) {
+    const task = await heldTask(ctx, job.agentId, taskId);
+    if (task && !held.has(task.id)) held.set(task.id, task);
+  }
+  for (const task of held.values()) await checkHeld(ctx, { ...job, agentId: job.agentId, startedAt: job.startedAt }, task);
+}
+
+async function checkHeld(ctx: Ctx, job: typeof jobs.$inferSelect & { agentId: string; startedAt: Date }, task: Task): Promise<void> {
+  const { db } = ctx;
+  const { agentId } = job;
+  if (!['open', 'working', 'review'].includes(task.status)) return;
   /* A turn already waiting on this task, or on one it gave out, comes back to it anyway. */
   const [next] = await db
     .select({ id: jobs.id })

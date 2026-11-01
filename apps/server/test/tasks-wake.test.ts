@@ -1,6 +1,6 @@
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, inArray } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
-import { agentEvents, agents, companies, departments, jobs, people, personAccess, requests, subscriptions, tasks } from '../src/db/schema.js';
+import { agentEvents, agents, companies, departments, jobs, people, personAccess, requests, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
 import { afterJob, agentState, enqueueTurn, openTypedTurn } from '../src/modules/conversation/queue.js';
 import { said } from '../src/modules/conversation/live.js';
 import { identityOf } from '../src/modules/nodes/hub.js';
@@ -425,6 +425,55 @@ describe('a head', () => {
     const run = await nextRun(builtin);
     for (const said of ['#1 "Checkout API"', 'The payment keys are missing.', '#2 "Refund email"', '#3 "Invoice PDF"', 'Shipped.']) expect(run.prompt).toContain(said);
     expect((await db.select().from(jobs).where(and(eq(jobs.agentId, head.id), eq(jobs.status, 'queued'))))).toEqual([]);
+  });
+
+  /* Hana, a head with a turn running, so that what wakes her waits and goes out in one turn. */
+  async function busyHead() {
+    const { ctx, db, builtin, ceo, dev, companyId } = await withRepositories();
+    const [sub] = await db.select().from(subscriptions);
+    const staff = async (name: string, kind: 'head' | 'worker', roleKey: string) =>
+      (await db.insert(agents).values({ companyId, kind, name, roleKey, departmentId: dev.id, model: '', subscriptionId: sub!.id }).returning())[0]!;
+    const head = await staff('Hana', 'head', 'DEV-HEAD');
+    const [busy] = await db.insert(jobs).values({ companyId, subscriptionId: sub!.id, agentId: head.id, kind: 'conversation', prompt: 'Plan the turn.', timeoutMs: 900000, status: 'running', startedAt: new Date() }).returning();
+    const held = async (title: string) => (await createTask(ctx, { personId: ceo.id }, { title, brief: '', body: '', departmentId: dev.id, assigneeAgentId: head.id })).task;
+    /* What woke her goes out in one turn, which ends as the test says. */
+    const together = async (taskIds: string[], ended: { status: 'done' | 'failed'; error?: string }, during: () => Promise<unknown> = async () => {}) => {
+      await wakeAll(ctx, taskIds.map(taskId => ({ agentId: head.id, taskId, why: 'assigned' as const })));
+      await db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, busy!.id));
+      await afterJob(ctx, busy!.id);
+      const run = await nextRun(builtin);
+      expect(run.prompt).toContain('Several of your tasks moved while you were busy');
+      await during();
+      await db.update(jobs).set({ ...ended, finishedAt: new Date() }).where(eq(jobs.id, run.jobId));
+      await afterJob(ctx, run.jobId);
+    };
+    const reminded = async (taskId: string) => (await db.select().from(taskEvents).where(and(eq(taskEvents.taskId, taskId), eq(taskEvents.kind, 'reminded')))).length;
+    return { ctx, db, dev, head, staff, held, together, reminded };
+  }
+
+  it('comes back to every task that went out in a turn that failed, not only the first', async () => {
+    const { held, together, reminded } = await busyHead();
+    const [payments, refunds] = [await held('Payments'), await held('Refunds')];
+    await together([payments.id, refunds.id], { status: 'failed', error: 'machine_restarted' });
+    expect([await reminded(payments.id), await reminded(refunds.id)]).toEqual([1, 1]);
+  });
+
+  it('reminds it of a task that went out with others and that it left where it was', async () => {
+    const { ctx, head, held, together, reminded } = await busyHead();
+    const [payments, refunds] = [await held('Payments'), await held('Refunds')];
+    await together([payments.id, refunds.id], { status: 'done' }, () => report(ctx, head.id, payments.id, { done: false, summary: 'Asked the bank for keys.' }));
+    expect([await reminded(payments.id), await reminded(refunds.id)]).toEqual([0, 1]);
+  });
+
+  it('reminds it once of a task whose two finished parts went out in one turn', async () => {
+    const { ctx, db, dev, head, staff, held, together, reminded } = await busyHead();
+    const payments = await held('Payments');
+    const bruno = await staff('Bruno', 'worker', 'DEV-BE');
+    const part = async (title: string) => (await createTask(ctx, { agentId: head.id }, { title, brief: '', body: '', departmentId: dev.id, parentId: payments.id, assigneeAgentId: bruno.id, executor: true })).task;
+    const [checkout, refund] = [await part('Checkout API'), await part('Refund email')];
+    await db.update(tasks).set({ status: 'done' }).where(inArray(tasks.id, [checkout.id, refund.id]));
+    await together([checkout.id, refund.id], { status: 'done' });
+    expect(await reminded(payments.id)).toBe(1);
   });
 });
 
