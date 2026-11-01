@@ -6,7 +6,7 @@ import { asc, eq, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, companies, departments, jobs, people, subscriptions, tasks } from '../src/db/schema.js';
+import { agents, companies, departments, jobs, people, sessions, subscriptions, tasks } from '../src/db/schema.js';
 import { as, invitePerson, listen, setUpCompany, testApp } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
@@ -39,6 +39,15 @@ async function mcp(app: FastifyInstance): Promise<Client> {
 
 const metadataPath = (id: string, query = QUERY) => `/api/agents/${id}/job-metadata?${query}`;
 const at = (time: string) => new Date(`2026-11-01T${time}Z`);
+const DB_CANARY = 'postgres://fake-user:fake-password@fake-host/fake-db';
+const DB_CAUSE = 'fake-nested-cause-secret';
+const DB_DETAIL = 'fake-connection-detail-secret';
+const dbSecrets = [DB_CANARY, DB_CAUSE, DB_DETAIL];
+const dbFailure = () => Object.assign(new Error(DB_CANARY, { cause: new Error(DB_CAUSE) }), { detail: DB_DETAIL });
+const metadataState = async (c: Awaited<ReturnType<typeof company>>) => ({
+  jobs: await c.db.select().from(jobs).orderBy(asc(jobs.id)),
+  sessions: await c.db.select().from(sessions).orderBy(asc(sessions.tokenHash)),
+});
 
 async function seed(c: Awaited<ReturnType<typeof company>>) {
   const { db, acme, sub, owner, orchestrator, target } = c;
@@ -152,29 +161,54 @@ describe('job metadata export', () => {
     const lines: string[] = [];
     const c = await company({ level: 'error', stream: { write: (line: string) => void lines.push(line) } });
     await seed(c);
-    const state = async () => c.db.select().from(jobs).orderBy(asc(jobs.id));
-    const before = await state();
+    const before = await metadataState(c);
     const execute = c.db.execute;
-    const canary = 'postgres://fake-user:fake-password@fake-host/fake-db';
-    const nestedCause = 'fake-nested-cause-secret';
-    const detail = 'fake-connection-detail-secret';
     c.db.execute = async () => {
-      const failure = new Error(canary, { cause: new Error(nestedCause) });
-      Object.assign(failure, { detail });
-      throw failure;
+      throw dbFailure();
     };
     onTestFinished(() => {
       c.db.execute = execute;
     });
     const response = await c.app.inject({ url: metadataPath(c.target.id), ...as(c.ceo) });
     const logs = lines.join('\n');
-    for (const marker of [canary, nestedCause, detail]) {
+    for (const marker of dbSecrets) {
       expect(logs).not.toContain(marker);
       expect(response.body).not.toContain(marker);
     }
     expect(response.statusCode).toBe(503);
     expect(response.json()).toEqual({ error: { code: 'unavailable', message: 'Job metadata is temporarily unavailable. Try again later.' } });
-    expect(await state()).toEqual(before);
+    expect(await metadataState(c)).toEqual(before);
+  });
+
+  it.each(['sessions', 'agents'])('sanitizes a database failure while reading %s before metadata and preserves state', async table => {
+    const lines: string[] = [];
+    const c = await company({ level: 'error', stream: { write: (line: string) => void lines.push(line) } });
+    const before = await metadataState(c);
+    const client = c.db.$client;
+    const original = client.query;
+    const forward = original.bind(client) as (text: string, ...args: unknown[]) => Promise<unknown>;
+    let injected = false;
+    client.query = (async (text: string, ...args: unknown[]) => {
+      if (text.toLowerCase().includes(`from "${table}"`)) {
+        injected = true;
+        throw dbFailure();
+      }
+      return forward(text, ...args);
+    }) as typeof client.query;
+    onTestFinished(() => {
+      client.query = original;
+    });
+    const response = await c.app.inject({ url: metadataPath(c.target.id), ...as(c.ceo) });
+    client.query = original;
+    expect(injected).toBe(true);
+    const logs = lines.join('\n');
+    for (const marker of dbSecrets) {
+      expect(logs).not.toContain(marker);
+      expect(response.body).not.toContain(marker);
+    }
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toEqual({ error: { code: 'unavailable', message: 'Job metadata is temporarily unavailable. Try again later.' } });
+    expect(await metadataState(c)).toEqual(before);
   });
 
   it('allows instant, exactly fifteen minute and supported boundary-year windows', async () => {

@@ -65,16 +65,19 @@ export function jobRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   app.get('/api/agents/:id/job-metadata', async req => {
-    const { me, agent } = await agentFor(ctx, req);
-    requireCompanyScope(me);
-    const { from, to } = metadataWindow(req.query);
-    const rows = await jobMetadata(db, agent.id, from, to).catch(() => {
+    try {
+      const { me, agent } = await agentFor(ctx, req);
+      requireCompanyScope(me);
+      const { from, to } = metadataWindow(req.query);
+      const rows = await jobMetadata(db, agent.id, from, to);
+      if (rows.length > JOB_METADATA_MAX_ROWS) throw metadataOverflow();
+      const body = { jobs: rows, complete: true };
+      if (JSON.stringify(body).length > 28_000) throw metadataOverflow();
+      return body;
+    } catch (error) {
+      if (error instanceof ApiError || error instanceof z.ZodError) throw error;
       throw new ApiError(503, 'unavailable', 'Job metadata is temporarily unavailable. Try again later.');
-    });
-    if (rows.length > JOB_METADATA_MAX_ROWS) throw metadataOverflow();
-    const body = { jobs: rows, complete: true };
-    if (JSON.stringify(body).length > 28_000) throw metadataOverflow();
-    return body;
+    }
   });
 
   app.post('/api/jobs/:id/cancel', async (req, reply) => {
