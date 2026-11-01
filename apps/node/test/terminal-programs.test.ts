@@ -64,6 +64,13 @@ describe('Claude Code in a terminal', () => {
     expect(JSON.parse(readFileSync(join(home, 'settings.json'), 'utf8'))).toEqual({ theme: 'light', env: { A: '1' }, skipDangerousModePermissionPrompt: true });
   });
 
+  it('keeps the trust of every agent that starts at the same time in one home', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'hh-claude-'));
+    await Promise.all(['/w/a1', '/w/a2', '/w/a3'].map(dir => acceptClaudeDialogs(home, dir)));
+    const { projects } = JSON.parse(readFileSync(join(home, '.claude.json'), 'utf8'));
+    expect(Object.keys(projects).sort()).toEqual(['/w/a1', '/w/a2', '/w/a3']);
+  });
+
   it('answers them on a fresh home too, in the dark theme a first run picks', async () => {
     const home = mkdtempSync(join(tmpdir(), 'hh-claude-'));
     await acceptClaudeDialogs(home, '/w/a1');

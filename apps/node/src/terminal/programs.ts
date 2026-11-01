@@ -192,9 +192,27 @@ const parsed = (text: string | null): Record<string, unknown> => {
   }
 };
 
+/* Agents of one plan share its home, and each start reads and rewrites the same files there: one start at a time per home,
+   so none writes back what it read before another added its folder. */
+const answering = new Map<string, Promise<unknown>>();
+
+function onHome<T>(home: string, fn: () => Promise<T>): Promise<T> {
+  const run = (answering.get(home) ?? Promise.resolve()).then(fn);
+  const settled = run.catch(() => undefined);
+  answering.set(home, settled);
+  void settled.then(() => {
+    if (answering.get(home) === settled) answering.delete(home);
+  });
+  return run;
+}
+
 /* A first run asks for a theme, shows notes, asks to trust the folder and to accept running without approvals. An agent
    cannot answer, so the answers are written first: the theme a first run picks, unless the person chose one. */
-export async function acceptClaudeDialogs(home: string, workDir: string, fs: AgentFs = ownFs): Promise<void> {
+export function acceptClaudeDialogs(home: string, workDir: string, fs: AgentFs = ownFs): Promise<void> {
+  return onHome(home, () => answerDialogs(home, workDir, fs));
+}
+
+async function answerDialogs(home: string, workDir: string, fs: AgentFs): Promise<void> {
   const stateFile = join(home, '.claude.json');
   const state = parsed(await fs.read(stateFile));
   const projects = (state.projects && typeof state.projects === 'object' ? state.projects : {}) as Record<string, Record<string, unknown>>;
