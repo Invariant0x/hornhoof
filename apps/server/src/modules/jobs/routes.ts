@@ -13,10 +13,19 @@ import { jobMetadata, jobView, JOB_METADATA_MAX_ROWS, publicJob } from './views.
 
 const IdParams = z.object({ id: z.uuid() });
 const Utc = z.iso.datetime().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/).max(27);
-const MetadataWindow = z
-  .object({ from: Utc, to: Utc })
-  .refine(({ from, to }) => Date.parse(from) < Date.parse(to), 'from must be before to')
-  .refine(({ from, to }) => Date.parse(to) - Date.parse(from) <= 15 * 60_000, 'The window must be at most 15 minutes');
+const MetadataWindow = z.object({ from: Utc, to: Utc });
+const utcMicros = (value: string): bigint => {
+  const [seconds, fraction = ''] = value.slice(0, -1).split('.');
+  return BigInt(Date.parse(`${seconds}Z`)) * 1_000n + BigInt(fraction.padEnd(6, '0'));
+};
+const metadataWindow = (query: unknown) => {
+  const { from, to } = MetadataWindow.parse(query);
+  const fromMicros = utcMicros(from);
+  const toMicros = utcMicros(to);
+  if (fromMicros > toMicros) throw new ApiError(400, 'validation', 'from must not be after to');
+  if (toMicros - fromMicros > 15n * 60n * 1_000_000n) throw new ApiError(400, 'validation', 'The window must be at most 15 minutes');
+  return { from, to };
+};
 const metadataOverflow = () => new ApiError(409, 'conflict', 'The job metadata response is too large. Narrow the window and try again.', 'job_metadata_overflow');
 
 const notOwner = () => new ApiError(403, 'forbidden', 'Only the owner can do this.', 'not_owner');
@@ -58,7 +67,7 @@ export function jobRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/api/agents/:id/job-metadata', async req => {
     const { me, agent } = await agentFor(ctx, req);
     requireCompanyScope(me);
-    const { from, to } = MetadataWindow.parse(req.query);
+    const { from, to } = metadataWindow(req.query);
     const rows = await jobMetadata(db, agent.id, from, to);
     if (rows.length > JOB_METADATA_MAX_ROWS) throw metadataOverflow();
     const body = { jobs: rows, complete: true };

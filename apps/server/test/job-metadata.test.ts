@@ -137,6 +137,20 @@ describe('job metadata export', () => {
     for (const path of paths) expect((await c.app.inject({ url: path, ...as(c.ceo) })).statusCode).toBe(400);
   });
 
+  it('allows instant and exactly fifteen minute inclusive windows', async () => {
+    const c = await company();
+    const instant = new URLSearchParams({ from: FROM, to: FROM }).toString();
+    const exact = new URLSearchParams({ from: FROM, to: '2026-11-01T00:32:00.123456Z' }).toString();
+    for (const query of [instant, exact]) expect((await c.app.inject({ url: metadataPath(c.target.id, query), ...as(c.ceo) })).statusCode).toBe(200);
+  });
+
+  it('rejects a window over fifteen minutes by one microsecond', async () => {
+    const c = await company();
+    const fractional = new URLSearchParams({ from: FROM, to: '2026-11-01T00:32:00.123457Z' }).toString();
+    const wholeSecond = new URLSearchParams({ from: '2026-11-01T00:00:00Z', to: '2026-11-01T00:15:00.000001Z' }).toString();
+    for (const query of [fractional, wholeSecond]) expect((await c.app.inject({ url: metadataPath(c.target.id, query), ...as(c.ceo) })).statusCode).toBe(400);
+  });
+
   it('marks empty start only for conversations', async () => {
     const c = await company();
     await c.db.insert(jobs).values({ companyId: c.acme.id, subscriptionId: c.sub.id, agentId: c.target.id, kind: 'test', prompt: '', status: 'queued', createdAt: new Date(Date.parse(FROM) + 1000), timeoutMs: 1000 });
