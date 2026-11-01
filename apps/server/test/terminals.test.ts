@@ -181,6 +181,18 @@ describe("an agent's live terminal", () => {
     expect(await next(builtin, 'term.input')).toEqual({ type: 'term.input', termId: open.termId, data: 'ok' });
   });
 
+  it('ends the view of a person who no longer reaches the agent at once, without waiting for the next look', async () => {
+    const { app, db, url, ceo, builtin } = await live(true, { STREAM_PING_MS: '60000' });
+    const [acme] = await db.select().from(companies);
+    const [sales] = await db.insert(departments).values({ companyId: acme!.id, name: 'Sales', roleCode: 'SAL' }).returning();
+    const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.test', access: { whole: true } });
+    const screen = await watch(url, maria);
+    await next(builtin, 'term.open');
+    const [row] = await db.select().from(people).where(eq(people.name, 'Maria'));
+    await app.inject({ method: 'PATCH', url: `/api/people/${row!.id}`, payload: { access: { departments: [sales!.id] } }, ...as(ceo) });
+    expect(await screen.closed).toEqual({ code: 4403, reason: 'no_access' });
+  });
+
   it('is only for people who reach the agent', async () => {
     const { app, db, url, ceo } = await live();
     const [acme] = await db.select().from(companies);

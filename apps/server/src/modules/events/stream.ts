@@ -27,18 +27,24 @@ export function streamRoutes(app: FastifyInstance, ctx: Ctx): void {
       res.write(`data: ${JSON.stringify(m)}\n\n`);
     });
     /* The ping keeps proxies from closing the stream and looks at the person again: a signed-out or disabled person stops
-       hearing anything, and changed access applies from here on. */
-    const ping = setInterval(async () => {
+       hearing anything, and changed access applies from here on. A change of anyone's access looks at once. */
+    const look = async () => {
       try {
         me = await requirePerson(req, ctx.db);
         access = await accessOf(ctx.db, me);
-        res.write(': ping\n\n');
+        return true;
       } catch {
         res.end();
+        return false;
       }
+    };
+    const ping = setInterval(async () => {
+      if (await look()) res.write(': ping\n\n');
     }, ctx.config.streamPingMs);
+    const stopLooking = ctx.bus.onAccessChange(me.companyId, () => void look());
     res.on('close', () => {
       clearInterval(ping);
+      stopLooking();
       unsubscribe();
       open.delete(res);
     });

@@ -69,6 +69,34 @@ describe('GET /api/stream', () => {
     await until(() => stream.ended());
   });
 
+  it('ends the stream of a person who was disabled at once, without waiting for the ping', async () => {
+    const { app, db, ceo, companyId } = await company({ STREAM_PING_MS: '60000' });
+    const [sales] = await db.insert(departments).values({ companyId, name: 'Sales', roleCode: 'SAL' }).returning();
+    const head = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { departments: [sales!.id] } });
+    const stream = await openStream(app, head);
+    await new Promise(r => setTimeout(r, 50));
+    const maria = (await app.inject({ url: '/api/people', ...as(ceo) })).json().people.find((p: { name: string }) => p.name === 'Maria');
+    await app.inject({ method: 'PATCH', url: `/api/people/${maria.id}`, payload: { status: 'disabled' }, ...as(ceo) });
+    await until(() => stream.ended());
+  });
+
+  it("stops sending a department's news to a person at once when they no longer reach it", async () => {
+    const { app, db, ceo, companyId } = await company({ STREAM_PING_MS: '60000' });
+    const [sales] = await db.insert(departments).values({ companyId, name: 'Sales', roleCode: 'SAL' }).returning();
+    const [support] = await db.insert(departments).values({ companyId, name: 'Support', roleCode: 'SUP' }).returning();
+    const head = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { departments: [sales!.id] } });
+    const stream = await openStream(app, head);
+    await new Promise(r => setTimeout(r, 50));
+    const maria = (await app.inject({ url: '/api/people', ...as(ceo) })).json().people.find((p: { name: string }) => p.name === 'Maria');
+    await app.inject({ method: 'PATCH', url: `/api/people/${maria.id}`, payload: { access: { departments: [support!.id] } }, ...as(ceo) });
+    await new Promise(r => setTimeout(r, 50));
+    app.ctx.bus.publish(companyId, { type: 'requests', spot: { departmentId: sales!.id } });
+    app.ctx.bus.publish(companyId, { type: 'requests', spot: { departmentId: support!.id } });
+    await until(() => stream.messages.length > 0);
+    expect(stream.messages).toEqual([{ type: 'requests', spot: { departmentId: support!.id } }]);
+    stream.close();
+  });
+
   it('counts an agent with a running conversation as working, on the map and in the stream', async () => {
     const { app, db, url, ceo, orchestrator, companyId } = await company();
     const [sub] = await db.select().from(subscriptions);

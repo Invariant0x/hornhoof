@@ -18,7 +18,7 @@ const FromBrowser = z.discriminatedUnion('type', [
 
 /* write: the person owns the subscription the agent runs on. A program's terminal runs commands on its owner's machine
    with the owner's sign-in, so everyone else watches and writes through Hornhoof. */
-type Found = { personId: string; agentId: string; node: NodeIdentity | null; write: boolean };
+type Found = { personId: string; companyId: string; agentId: string; node: NodeIdentity | null; write: boolean };
 
 /* An agent's live terminal for a person who reaches the agent: the screen of its session on the node, and the keys its
    subscription's owner types. */
@@ -33,11 +33,11 @@ export function terminalRoutes(app: FastifyInstance, ctx: Ctx): void {
       preValidation: async req => {
         const { me, agent } = await agentFor(ctx, req);
         const sub = await programSubscription(ctx, agent.id);
-        found.set(req, { personId: me.id, agentId: agent.id, node: sub ? identityOf(sub) : null, write: sub?.ownerPersonId === me.id });
+        found.set(req, { personId: me.id, companyId: me.companyId, agentId: agent.id, node: sub ? identityOf(sub) : null, write: sub?.ownerPersonId === me.id });
       },
     },
     (socket, req) => {
-      const { personId, agentId, node, write } = found.get(req)!;
+      const { personId, companyId, agentId, node, write } = found.get(req)!;
       const { cols, rows } = Size.parse(req.query ?? {});
       const termId = randomUUID();
       if (!node) return socket.close(...CLOSE.noTerminal);
@@ -69,8 +69,8 @@ export function terminalRoutes(app: FastifyInstance, ctx: Ctx): void {
       });
       /* Like the live stream, the view looks at the person again: one signed out or moved away stops watching. An agent
          that moved to another subscription runs on another node once its running turn is over, and the browser opens the
-         view again there. */
-      const check = setInterval(async () => {
+         view again there. A change of anyone's access looks at once. */
+      const look = async () => {
         try {
           await agentFor(ctx, req);
         } catch {
@@ -78,9 +78,12 @@ export function terminalRoutes(app: FastifyInstance, ctx: Ctx): void {
         }
         const sub = await programSubscription(ctx, agentId).catch(() => undefined);
         if (sub !== undefined && (!sub || !sameNode(identityOf(sub), node))) socket.close(...CLOSE.nodeOffline);
-      }, ctx.config.streamPingMs);
+      };
+      const check = setInterval(look, ctx.config.streamPingMs);
+      const stopLooking = ctx.bus.onAccessChange(companyId, () => void look());
       socket.on('close', () => {
         clearInterval(check);
+        stopLooking();
         if (ctx.terminals.remove(termId)) ctx.hub.send(node, { type: 'term.close', termId });
       });
     },

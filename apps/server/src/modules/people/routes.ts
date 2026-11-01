@@ -145,6 +145,7 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (target.id === me.id) throw new ApiError(403, 'forbidden', 'You cannot send a new invite to yourself.', 'self_locked');
 
     const { token, person } = await reinvite(db, id, me);
+    ctx.bus.accessChanged(me.companyId);
     reply.code(201);
     return { person: await personView(db, person), inviteUrl: `${config.publicUrl}/invite/${token}` };
   });
@@ -216,6 +217,7 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
       await disconnectMachines(ctx, theirs.map(m => m.id));
     }
     if (changes.status === 'disabled' || body.access) await releasePlansOf(ctx, person, me);
+    if (changes.status || body.access) ctx.bus.accessChanged(me.companyId);
     return { person: await personView(db, person) };
   });
 }

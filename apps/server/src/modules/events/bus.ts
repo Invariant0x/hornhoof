@@ -34,6 +34,7 @@ export type StreamMessage =
 /* In-process fan-out per company. One server process serves one deployment, so nothing crosses processes. */
 export class EventBus {
   private listeners = new Map<string, Set<(m: StreamMessage) => void>>();
+  private lookers = new Map<string, Set<() => void>>();
   /* Per company, each way a pulse went with the time of the last one, so a map opened later shows them too. */
   private ways = new Map<string, Map<string, { from: Endpoint; to: Endpoint; at: number }>>();
 
@@ -60,12 +61,25 @@ export class EventBus {
   }
 
   subscribe(companyId: string, fn: (m: StreamMessage) => void): () => void {
-    const set = this.listeners.get(companyId) ?? new Set();
-    set.add(fn);
-    this.listeners.set(companyId, set);
-    return () => {
-      set.delete(fn);
-      if (!set.size) this.listeners.delete(companyId);
-    };
+    return keep(this.listeners, companyId, fn);
   }
+
+  /* Someone's access changed or ended: open streams and terminals look at their person again now, not at their next ping. */
+  accessChanged(companyId: string): void {
+    for (const fn of this.lookers.get(companyId) ?? []) fn();
+  }
+
+  onAccessChange(companyId: string, fn: () => void): () => void {
+    return keep(this.lookers, companyId, fn);
+  }
+}
+
+function keep<F>(all: Map<string, Set<F>>, companyId: string, fn: F): () => void {
+  const set = all.get(companyId) ?? new Set<F>();
+  set.add(fn);
+  all.set(companyId, set);
+  return () => {
+    set.delete(fn);
+    if (!set.size) all.delete(companyId);
+  };
 }
