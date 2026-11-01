@@ -48,6 +48,16 @@ describe('loadConfig', () => {
     }
   });
 
+  it('knows the computer it runs on by the hash install.sh gives, and none without one', () => {
+    const id = 'ab'.repeat(32);
+    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET }).hostId).toBeNull();
+    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, HORNHOOF_HOST_ID: '' }).hostId).toBeNull();
+    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, HORNHOOF_HOST_ID: id }).hostId).toBe(id);
+    for (const HORNHOOF_HOST_ID of ['mac-0001-abcd', 'AB'.repeat(32), 'ab'.repeat(31)]) {
+      expect(() => loadConfig({ HORNHOOF_SECRET: TEST_SECRET, HORNHOOF_HOST_ID })).toThrow('HORNHOOF_HOST_ID must be the 64 characters install.sh writes. Remove the line from .env, or run the install command again.');
+    }
+  });
+
   it('gives task files 2 GB unless TASK_FILES_MB names other whole megabytes', () => {
     expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, TASK_FILES_MB: '' }).taskFilesBytes).toBe(2048 * 1024 * 1024);
     expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, TASK_FILES_MB: '512' }).taskFilesBytes).toBe(512 * 1024 * 1024);

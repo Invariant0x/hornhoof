@@ -32,6 +32,8 @@ export type Config = {
   tunnelHost?: string;
   /* How much all the files on the company's tasks may take together. */
   taskFilesBytes: number;
+  /* The computer the server runs on, as a hash of the key a join from it sends; null for a server installed before. */
+  hostId: string | null;
 };
 
 /* Both src/ and dist/ sit one level below apps/server, so this finds apps/web/dist either way. */
@@ -63,6 +65,10 @@ const Env = z.object({
   RELAY_URL: webAddress('RELAY_URL must be an http:// or https:// address, like https://hornhoof.org.'),
   TUNNEL_HOST: z.preprocess(unset, z.string().regex(/^[A-Za-z0-9.-]{1,253}$/, 'TUNNEL_HOST must be the host name of the tunnel container, like tunnel.').optional()),
   TASK_FILES_MB: wholeNumber(1, 1_000_000, 'TASK_FILES_MB must be a whole number of megabytes, like 2048.'),
+  HORNHOOF_HOST_ID: z.preprocess(
+    unset,
+    z.string().regex(/^[0-9a-f]{64}$/, 'HORNHOOF_HOST_ID must be the 64 characters install.sh writes. Remove the line from .env, or run the install command again.').optional(),
+  ),
 });
 
 const productVersion = (): string => (JSON.parse(readFileSync(ROOT_PACKAGE, 'utf8')) as { version: string }).version;
@@ -102,5 +108,6 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     relayUrl: (set.RELAY_URL ?? 'https://hornhoof.org').replace(/\/+$/, ''),
     tunnelHost: set.TUNNEL_HOST,
     taskFilesBytes: (set.TASK_FILES_MB ?? 2048) * 1024 * 1024,
+    hostId: set.HORNHOOF_HOST_ID ?? null,
   };
 }

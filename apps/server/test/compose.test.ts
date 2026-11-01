@@ -20,6 +20,12 @@ describe('the tunnel service', () => {
   });
 });
 
+describe('the computer the server runs on', () => {
+  it('is known to the app by the hash install.sh writes, not by the key a machine joins with', () => {
+    expect(compose.services.app!.environment!.HORNHOOF_HOST_ID).toBe('${HORNHOOF_HOST_ID:-}');
+  });
+});
+
 describe('the built-in node', () => {
   it("hears what the computer has from .env, as Docker on a Mac runs in a smaller system", () => {
     expect(compose.services.node!.environment).toMatchObject({

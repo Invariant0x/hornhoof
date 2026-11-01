@@ -376,6 +376,16 @@ describe('install.sh', () => {
     expect(env).toMatch(new RegExp(`^HORNHOOF_HOST_MEMORY=${32 * 1024 ** 3}$`, 'm'));
   });
 
+  it("tells the server which machine it runs on by a hash of the machine's key, which a later join on it sends", () => {
+    const r = install({ args: ['server'], tty: '\n' });
+    expect(r.code).toBe(0);
+    const env = readFileSync(join(r.dir, 'home', 'hornhoof', '.env'), 'utf8');
+    const key = readFileSync(join(r.dir, 'home', '.hornhoof', 'machine'), 'utf8').trim();
+    expect(key).toMatch(/^[0-9a-f]{32}$/);
+    expect(env).toMatch(new RegExp(`^HORNHOOF_HOST_ID=${createHash('sha256').update(`hornhoof-host:${key}`).digest('hex')}$`, 'm'));
+    expect(env).not.toContain(key);
+  });
+
   it('tells the built-in node of a server on Linux nothing of the machine, which it sees itself', () => {
     const r = install({ args: ['server'], tty: '\n' });
     expect(r.code).toBe(0);
@@ -553,7 +563,7 @@ describe('install.sh', () => {
 
   it('updates without questions or downloads from the updater', () => {
     const dir = mkdtempSync(join(tmpdir(), 'hh-server-'));
-    writeFileSync(join(dir, '.env'), 'HORNHOOF_SECRET=keep-me\nNODE_KEY=k\nPUBLIC_URL=http://localhost:8080\nCOMPOSE_PROJECT_NAME=hornhoof\nHORNHOOF_VERSION=0.4.0\n');
+    writeFileSync(join(dir, '.env'), `HORNHOOF_SECRET=keep-me\nNODE_KEY=k\nPUBLIC_URL=http://localhost:8080\nCOMPOSE_PROJECT_NAME=hornhoof\nHORNHOOF_VERSION=0.4.0\nHORNHOOF_HOST_ID=${'e'.repeat(64)}\n`);
     const compose = join(dir, 'brought.yaml');
     writeFileSync(compose, 'services: {app: {}}\n');
     const r = install({
@@ -576,6 +586,9 @@ describe('install.sh', () => {
     const env = readFileSync(join(dir, '.env'), 'utf8');
     expect(env).toMatch(/^HORNHOOF_VERSION=0\.4\.1$/m);
     expect(env).toContain('HORNHOOF_SECRET=keep-me');
+    /* The updater runs in a container of its own, which is not the computer the server runs on. */
+    expect(env).toMatch(new RegExp(`^HORNHOOF_HOST_ID=${'e'.repeat(64)}$`, 'm'));
+    expect(env.match(/^HORNHOOF_HOST_ID=/gm)).toHaveLength(1);
     /* compose starts exactly the images the updater checked. */
     expect(env).toMatch(new RegExp(`^HORNHOOF_APP_REF=ghcr\\.io/invariant0x/hornhoof@sha256:${'b'.repeat(64)}$`, 'm'));
     expect(env).toMatch(new RegExp(`^HORNHOOF_NODE_REF=ghcr\\.io/invariant0x/hornhoof-node@sha256:${'d'.repeat(64)}$`, 'm'));

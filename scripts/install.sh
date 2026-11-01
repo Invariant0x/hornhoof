@@ -318,6 +318,18 @@ join_machine() {
 
 node_name() { printf 'hornhoof-%s-%s' "$2" "${1:0:8}"; }
 
+# This computer as the server may know it: a hash of the key a join from here sends, which lets no one join as it. The
+# server tells by it that its built-in node runs on one of the company's machines, which the pool then counts once.
+host_id() {
+  local machine
+  machine=$(machine_id)
+  if command -v sha256sum > /dev/null 2>&1; then
+    printf 'hornhoof-host:%s' "$machine" | sha256sum | cut -c1-64
+  elif command -v shasum > /dev/null 2>&1; then
+    printf 'hornhoof-host:%s' "$machine" | shasum -a 256 | cut -c1-64
+  fi
+}
+
 # Docker on a Mac runs in a smaller system of its own, so each node hears what the Mac itself has, to show it next to
 # what the node can use: "NAME=value" lines for its processor, cores and memory. On Linux a node sees its machine.
 host_facts() {
@@ -650,7 +662,7 @@ sweep_nodes() {
 }
 
 server_mode() {
-  local env_file url public port local_url project link fact i=0
+  local env_file url public port local_url project link fact id i=0
   local -a compose
   detect_system
   if [ -z "$FROM_UPDATER" ]; then ensure_docker; fi
@@ -713,6 +725,11 @@ server_mode() {
   while IFS= read -r fact; do
     [ -n "$fact" ] && set_env "${fact%%=*}" "${fact#*=}"
   done < <(host_facts)
+  # The updater runs in a container of its own, not on this computer, so it leaves the hash the last install wrote.
+  if [ -z "$FROM_UPDATER" ]; then
+    id=$(host_id)
+    if [ -n "$id" ]; then set_env HORNHOOF_HOST_ID "$id"; fi
+  fi
   local_url="http://localhost:$(port_of "$env_file")"
   public=$(env_value PUBLIC_URL)
   [ -n "$public" ] || public=$local_url
