@@ -1,4 +1,4 @@
-import type { Build, Registry } from './registry.js';
+import type { Build, Registry, Siblings } from './registry.js';
 
 export type UpdateState = { checkedAt: string | null; latest: Build | null; versions: Build[]; error: string | null };
 
@@ -31,6 +31,11 @@ export class UpdateCheck {
 
   state(): UpdateState {
     return this.#state;
+  }
+
+  /* Read when someone updates, so the node and updater images are the ones of the build's commit then. */
+  siblings(tag: string): Promise<Siblings> {
+    return this.opts.registry.siblings(tag);
   }
 
   async #check(): Promise<void> {

@@ -59,6 +59,7 @@ export type ErrorReason =
   | 'updater_missing'
   | 'update_running'
   | 'version_unknown'
+  | 'registry_unreachable'
   | 'task_unknown'
   | 'task_closed'
   | 'task_changed'

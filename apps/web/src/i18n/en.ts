@@ -587,6 +587,7 @@ export const en = {
     updater_missing: 'The updater is not running. Run the install command for this server again to add it.',
     update_running: 'An update is running already. Wait for it to finish.',
     version_unknown: 'This version is not published. Check for updates and pick another one.',
+    registry_unreachable: 'Could not read this version from where Hornhoof versions are published. Check the internet connection, then try again.',
     structure_invalid: 'This structure does not fit the company as it is now. Ask the orchestrator to correct the card.',
     staff_invalid: 'This roster does not fit the department as it is now. Ask the orchestrator to correct the card.',
     department_unknown: 'This department no longer exists. Reload the page.',

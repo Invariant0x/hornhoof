@@ -43,9 +43,15 @@ export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
   }
 
   /* The image tag names the build: a version tag moves when that version is built again, a commit's does not. The
-     digest pins it: the updater installs only the image the app read. */
-  function requestFor(build: Build, id: string): UpdateRequest {
-    return { id, version: build.version || build.tag, tag: FULL_SHA.test(build.commit) ? build.commit : build.tag, digest: build.digest };
+     digests pin it: the updater installs only the app image the app read, and the node and updater images of the
+     same tag, read now. */
+  async function requestFor(build: Build, id: string): Promise<UpdateRequest> {
+    const tag = FULL_SHA.test(build.commit) ? build.commit : build.tag;
+    const siblings = await ctx.updates.siblings(tag).catch(err => {
+      app.log.warn({ error: loggable(err) }, 'Could not read the node and updater images of the build.');
+      throw new ApiError(503, 'unavailable', 'Could not read this version from the registry. Check the internet connection, then try again.', 'registry_unreachable');
+    });
+    return { id, version: build.version || build.tag, tag, digest: build.digest, nodeDigest: siblings.node, updaterDigest: siblings.updater };
   }
 
   function send(request: UpdateRequest) {
@@ -97,8 +103,8 @@ export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { latest, versions } = ctx.updates.state();
     const build = body.version === 'latest' ? latest : versions.find(v => v.tag === body.version);
     if (!build) throw new ApiError(400, 'validation', `There is no published build ${body.version}.`, 'version_unknown');
+    const request = await requestFor(build, randomUUID());
     callOff();
-    const request = requestFor(build, randomUUID());
     if (body.whenIdle) await sendWhenIdle(me.companyId, request);
     else send(request);
     return reply.code(202).send({ id: request.id });

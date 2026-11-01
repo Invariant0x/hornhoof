@@ -42,12 +42,15 @@ type FakeBuild = { commit: string; version?: string; title?: string; migrations?
 const ARCH = process.arch === 'arm64' ? 'arm64' : 'amd64';
 const OCI_INDEX = 'application/vnd.oci.image.index.v1+json';
 
-/* A registry that serves an index per tag, a manifest per platform and a config blob with the build's labels. */
+/* A registry that serves an index per tag, a manifest per platform and a config blob with the build's labels. The node
+   and updater images of every build are there too, by the build's tags and its commit, unless lacking names them. */
 async function fakeRegistry(
   tags: Record<string, FakeBuild>,
+  lacking: string[] = [],
 ): Promise<{ base: string; set(tag: string, build: FakeBuild): void; fail(status: number | null): void; calls: string[]; digests: Record<string, string> }> {
   const calls: string[] = [];
-  /* The digest of each tag's index: the SHA-256 of the bytes the registry sent for it. */
+  /* The digest of each tag's index: the SHA-256 of the bytes the registry sent for it; "hornhoof-node:<tag>" for the
+     node image's. */
   const digests: Record<string, string> = {};
   let failing: number | null = null;
   const reg: FastifyInstance = Fastify();
@@ -56,11 +59,24 @@ async function fakeRegistry(
     if (failing) return reply.code(failing).send({ errors: [{ code: 'TOOMANYREQUESTS' }] });
   });
   reg.get('/token', async req => {
-    expect((req.query as { scope: string }).scope).toBe('repository:acme/hornhoof:pull');
-    return { token: 'anon' };
+    const scope = (req.query as { scope: string }).scope;
+    expect(scope).toMatch(/^repository:acme\/hornhoof(-node|-updater)?:pull$/);
+    return { token: `anon-${scope.split(':')[1]}` };
   });
+  for (const part of ['hornhoof-node', 'hornhoof-updater']) {
+    reg.get(`/v2/acme/${part}/manifests/:ref`, async (req, reply) => {
+      const { ref } = req.params as { ref: string };
+      expect(req.headers.authorization).toBe(`Bearer anon-acme/${part}`);
+      const known = Object.entries(tags).some(([tag, b]) => tag === ref || b.commit === ref);
+      if (!known || lacking.includes(part)) return reply.code(404).send({ errors: [{ code: 'MANIFEST_UNKNOWN' }] });
+      expect(req.headers.accept).toContain(OCI_INDEX);
+      const index = JSON.stringify({ manifests: [{ digest: `sha256:m-${part}-${ref}`, platform: { os: 'linux', architecture: ARCH } }] });
+      digests[`${part}:${ref}`] = `sha256:${createHash('sha256').update(index).digest('hex')}`;
+      return reply.type(OCI_INDEX).send(index);
+    });
+  }
   reg.get('/v2/acme/hornhoof/tags/list', async req => {
-    expect(req.headers.authorization).toBe('Bearer anon');
+    expect(req.headers.authorization).toBe('Bearer anon-acme/hornhoof');
     return { name: 'acme/hornhoof', tags: Object.keys(tags) };
   });
   reg.get('/v2/acme/hornhoof/manifests/:ref', async (req, reply) => {
@@ -119,6 +135,15 @@ const updaterAlive = (control: string, ageSeconds = 0) => {
 };
 const request = (control: string) => (existsSync(join(control, 'request.json')) ? JSON.parse(readFileSync(join(control, 'request.json'), 'utf8')) : null);
 const SHA = 'b'.repeat(40);
+/* What the updater is asked for: the build the server read, by digest, and the node and updater images of its commit. */
+const asked = (registry: { digests: Record<string, string> }, id: string) => ({
+  id,
+  version: '0.4.1',
+  tag: SHA,
+  digest: registry.digests.latest,
+  nodeDigest: registry.digests[`hornhoof-node:${SHA}`],
+  updaterDigest: registry.digests[`hornhoof-updater:${SHA}`],
+});
 
 describe('updates', () => {
   it('finds a newer build of the main line', async () => {
@@ -189,14 +214,39 @@ describe('updates', () => {
     await app.inject({ method: 'POST', url: '/api/updates/check', ...as(ceo) });
     const res = await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest' }, ...as(ceo) });
     expect(res.statusCode).toBe(202);
-    /* The digest pins the exact build the server read, whatever the tag points at later. */
-    expect(request(control)).toEqual({ id: res.json().id, version: '0.4.1', tag: SHA, digest: registry.digests.latest });
+    /* The digests pin the exact build the server read, whatever the tag points at later, and the node and updater
+       images made from its commit. */
+    expect(request(control)).toEqual(asked(registry, res.json().id));
+    expect(request(control).nodeDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(request(control).updaterDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(new Set([request(control).digest, request(control).nodeDigest, request(control).updaterDigest]).size).toBe(3);
     writeFileSync(join(control, 'status.json'), JSON.stringify({ id: res.json().id, version: '0.4.1', state: 'running', step: 'pull', log: 'Downloading 0.4.1.\n', at: '2026-10-30T01:00:00Z' }));
     const view = (await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json();
     expect(view.updater).toEqual({ present: true, status: expect.objectContaining({ state: 'running', step: 'pull' }), waiting: null });
     const again = await app.inject({ method: 'POST', url: '/api/updates', payload: { version: '0.4.1' }, ...as(ceo) });
     expect(again.statusCode).toBe(409);
     expect(again.json().error.reason).toBe('update_running');
+  });
+
+  it('leaves out an image a build does not have, so the updater takes it by its tag', async () => {
+    const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' } }, ['hornhoof-updater']);
+    const { app, ceo, control } = await company(registry);
+    updaterAlive(control);
+    const res = await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest' }, ...as(ceo) });
+    expect(res.statusCode).toBe(202);
+    expect(request(control)).toEqual({ ...asked(registry, res.json().id), updaterDigest: '' });
+  });
+
+  it('asks the updater for nothing when the registry cannot say which images the build has', async () => {
+    const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' } });
+    const { app, ceo, control } = await company(registry);
+    updaterAlive(control);
+    await app.inject({ method: 'POST', url: '/api/updates/check', ...as(ceo) });
+    registry.fail(500);
+    const res = await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest' }, ...as(ceo) });
+    expect(res.statusCode).toBe(503);
+    expect(res.json().error.reason).toBe('registry_unreachable');
+    expect(request(control)).toBeNull();
   });
 
   it('refuses a version that is not published', async () => {
@@ -225,7 +275,7 @@ describe('updates', () => {
     expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.waiting).toEqual({ version: '0.4.1' });
     await db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, job!.id));
     await publishWorking(app.ctx, acme!.id);
-    await expect.poll(() => request(control)).toEqual({ id: res.json().id, version: '0.4.1', tag: SHA, digest: registry.digests.latest });
+    await expect.poll(() => request(control)).toEqual(asked(registry, res.json().id));
     expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.waiting).toBeNull();
   });
 
@@ -282,7 +332,7 @@ describe('updates', () => {
 
     rmdirSync(join(control, 'request.json.new'));
     await publishWorking(app.ctx, acme!.id);
-    await expect.poll(() => request(control)).toEqual({ id: res.json().id, version: '0.4.1', tag: SHA, digest: registry.digests.latest });
+    await expect.poll(() => request(control)).toEqual(asked(registry, res.json().id));
     expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.waiting).toBeNull();
   });
 
