@@ -1,4 +1,5 @@
-import { TEMPLATE_KEYS, type Limits, type ModelOption } from '@hornhoof/protocol';
+import { TEMPLATE_KEYS, type Limits, type ModelOption, type QuotaRefusal } from '@hornhoof/protocol';
+import type { QuotaState } from '../modules/subscriptions/quota.js';
 import { sql } from 'drizzle-orm';
 import { bigserial, boolean, customType, index, integer, jsonb, pgTable, real, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
 
@@ -149,6 +150,8 @@ export const subscriptions = pgTable(
     nodeVersion: text('node_version'),
     lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
     limits: jsonb('limits').$type<Limits>(),
+    /* Admission evidence is separate from cached legacy limits and survives a restart. */
+    quotaState: jsonb('quota_state').$type<QuotaState>(),
     /* The models its node says it can run; null until a node reports them. */
     models: jsonb('models').$type<ModelOption[]>(),
     removedAt: timestamp('removed_at', { withTimezone: true }),
@@ -243,6 +246,7 @@ export const jobs = pgTable(
     result: text('result'),
     tail: text('tail').notNull().default(''),
     error: text('error'),
+    quotaRefusal: jsonb('quota_refusal').$type<QuotaRefusal>(),
     timeoutMs: integer('timeout_ms').notNull(),
     kind: text('kind', { enum: JOB_KINDS }).notNull().default('test'),
     /* The job's Hornhoof tools present this token; it works only while the job runs. */

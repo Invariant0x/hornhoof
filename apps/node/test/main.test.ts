@@ -127,6 +127,43 @@ describe('a node that runs agents in terminals', () => {
 });
 
 describe('runNode', () => {
+  it('does not collect again when a server repeats the same sampling epoch', async () => {
+    const server = await fakeServer();
+    let collected = 0;
+    const limits = async () => { collected++; return { status: 'allowed' as const, complete: true, windows: [{ name: 'five_hour', utilization: 0.2, resetsAt: null }] }; };
+    const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, limits }, log: () => {}, limitsMs: 60_000 });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    const epoch = { type: 'usage.epoch', epoch: '00000000-0000-4000-8000-000000000062' };
+    server.send(epoch);
+    await server.wait(() => server.received.some(m => m.usageObservation));
+    const before = collected;
+    server.send(epoch);
+    server.send({ type: 'agent.say', agentKey: 'synthetic-agent', text: 'Transport barrier', ref: 'quota-barrier' });
+    await server.wait(() => server.received.some(m => m.type === 'agent.said'));
+    expect(collected).toBe(before);
+  });
+
+  it('collects fresh unchanged usage after a server epoch without starting a model', async () => {
+    const server = await fakeServer();
+    let calls = 0;
+    const limits = async () => ({ status: 'allowed' as const, complete: true, windows: [{ name: 'five_hour', utilization: 0.2, resetsAt: null }] });
+    const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, run: async (input: RunInput) => { calls++; return adapter.run(input); }, limits }, log: () => {}, limitsMs: 40 });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    const epoch = '00000000-0000-4000-8000-000000000062';
+    server.send({ type: 'usage.epoch', epoch });
+    await server.wait(() => server.received.some(m => m.type === 'job.started' || m.usageObservation));
+    expect(server.received.filter(m => m.type === 'job.started')).toEqual([]);
+    await server.wait(() => server.received.filter(m => m.usageObservation).length >= 2);
+    const samples = server.received.flatMap(m => m.usageObservation ? [m.usageObservation as { epoch: string; seq: number; sampledAt: string; delivery: string; windows: unknown[] }] : []);
+    expect(samples[0]).toMatchObject({ epoch, delivery: 'live' });
+    expect(samples[1]!.seq).toBeGreaterThan(samples[0]!.seq);
+    expect(samples[1]!.windows).toEqual(samples[0]!.windows);
+    expect(Date.parse(samples[1]!.sampledAt)).toBeGreaterThanOrEqual(Date.parse(samples[0]!.sampledAt));
+    expect(calls).toBe(0);
+  });
+
   it('runs a job and reports the limits it brought, then the job, so Hornhoof knows of a plan at its limit as the job ends', async () => {
     const server = await fakeServer();
     const node = await runNode({ dir: nodeDir(server.url), adapter, log: () => {} });

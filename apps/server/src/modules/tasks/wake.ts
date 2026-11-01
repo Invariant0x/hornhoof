@@ -6,6 +6,7 @@ import { sayLive } from '../conversation/live.js';
 import { appendEvent } from '../events/store.js';
 import { CLOSED, GATE_ROUNDS, leaveWork, NOT_A_MOVE, published, rejoin, silentTurn, taskSpot, wentOn, type Actor, type Task, type Wake, type WakeWhy } from './engine.js';
 import { settle, tell } from './turns.js';
+import { quotaBlocked } from '../subscriptions/quota.js';
 
 export { SILENT_TURNS } from './engine.js';
 
@@ -287,6 +288,7 @@ export async function checkLiveness(ctx: Ctx, jobId: string): Promise<void> {
   const [subtasks] = await db.select({ n: count() }).from(tasks).where(and(eq(tasks.parentId, task.id), notInArray(tasks.status, [...CLOSED])));
   const [asked] = await db.select({ n: count() }).from(requests).where(and(eq(requests.taskId, task.id), eq(requests.status, 'open')));
   if (Number(subtasks?.n ?? 0) || Number(asked?.n ?? 0)) return;
+  if (await waitOnQuota(ctx, job, task, agentId)) return;
   const [moves] = await db
     .select({ n: count() })
     .from(taskEvents)
@@ -310,4 +312,11 @@ export async function checkLiveness(ctx: Ctx, jobId: string): Promise<void> {
     throw err;
   });
   if (moved) await wakeAll(ctx, moved.wakes);
+}
+
+async function waitOnQuota(ctx: Ctx, job: typeof jobs.$inferSelect, task: Task, agentId: string): Promise<boolean> {
+  const [sub] = await ctx.db.select({ state: subscriptions.quotaState }).from(subscriptions).where(eq(subscriptions.id, job.subscriptionId));
+  if (!job.quotaRefusal && !quotaBlocked(sub?.state)) return false;
+  await wakeAll(ctx, [{ agentId, taskId: task.id, why: 'go_on' }]);
+  return true;
 }

@@ -7,6 +7,9 @@ import { said } from '../conversation/live.js';
 import { afterJob, liveSubscription, openTypedTurn, pumpWaiting, startProgram } from '../conversation/queue.js';
 import { appendEvent, publishWorking } from '../events/store.js';
 import { identityOf, sameNode, type NodeIdentity } from './hub.js';
+import type { UsageConnection } from '../subscriptions/quota.js';
+import { storeUsage } from '../subscriptions/quota-store.js';
+import { finishNodeJob } from './completion.js';
 
 const OPEN_JOBS = ['queued', 'running'] as const;
 
@@ -40,7 +43,7 @@ export async function failOpenJobs(ctx: Ctx, scope: SQL, error: string, stillRun
   return failed.map(j => j.id);
 }
 
-export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage): Promise<void> {
+export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage, connection?: UsageConnection): Promise<void> {
   const { db } = ctx;
   const now = new Date();
   switch (msg.type) {
@@ -59,6 +62,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       }
       await failOpenJobs(ctx, jobsOf(id, ctx), 'machine_restarted', msg.running);
       ctx.hub.greet(id, msg.terminals === true);
+      if (msg.usageObservations && connection?.current()) ctx.hub.send(id, { type: 'usage.epoch', epoch: connection.epoch });
       /* Hornhoof ended these while the node was away, with a stop or a removed subscription; the node stops them now. */
       if (msg.running.length) {
         const open = await db.select({ id: jobs.id }).from(jobs).where(and(inArray(jobs.id, msg.running), inArray(jobs.status, OPEN_JOBS), jobsOf(id, ctx)));
@@ -76,6 +80,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
         .set({ status: msg.loggedIn ? 'ready' : 'needs_login', lastSeenAt: now, ...(msg.limits ? { limits: msg.limits } : {}), ...(msg.models ? { models: msg.models } : {}) })
         .where(and(eq(subscriptions.id, id.subscriptionId), isNull(subscriptions.removedAt)));
       /* A signed-in subscription may have turns waiting for it. */
+      await storeUsage(ctx, id.subscriptionId, msg.usageObservation, connection);
       if (msg.loggedIn) await pumpWaiting(ctx);
       return;
     }
@@ -97,27 +102,8 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       for (const { companyId } of started) await publishWorking(ctx, companyId);
       return;
     }
-    case 'job.done': {
-      const finished = await db
-        .update(jobs)
-        .set({
-          status: msg.ok ? 'done' : 'failed',
-          result: msg.result,
-          tail: lastBytes(msg.tail),
-          error: msg.error,
-          sessionId: msg.sessionId,
-          finishedAt: now,
-        })
-        .where(and(eq(jobs.id, msg.jobId), inArray(jobs.status, OPEN_JOBS), jobsOf(id, ctx)))
-        .returning({ companyId: jobs.companyId });
-      for (const { companyId } of finished) await publishWorking(ctx, companyId);
-      /* The login ran out: the subscription waits for one before the next turn could go out and fail too. */
-      if (finished.length && msg.error === 'not_logged_in' && id.kind === 'node') {
-        await db.update(subscriptions).set({ status: 'needs_login' }).where(eq(subscriptions.id, id.subscriptionId));
-      }
-      if (finished.length) await afterJob(ctx, msg.jobId);
-      return;
-    }
+    case 'job.done':
+      return finishNodeJob(ctx, id, msg, jobsOf(id, ctx), lastBytes(msg.tail), connection);
     case 'turn.open': {
       const opened = await openTypedTurn(ctx, id, msg.agentKey, msg.text, ctx.terminals.typist(msg.agentKey));
       ctx.hub.send(id, { type: 'turn.opened', agentKey: msg.agentKey, jobId: opened?.jobId ?? null, toolToken: opened?.token ?? null, ...(msg.ref ? { ref: msg.ref } : {}) });

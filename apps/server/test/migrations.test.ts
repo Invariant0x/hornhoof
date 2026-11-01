@@ -181,3 +181,25 @@ describe('migration 0020', () => {
     ]);
   });
 });
+
+describe('migration 0021 quota wait', () => {
+  it('preserves existing subscription and completed job data across migration and a second startup', async () => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0020_red_team_skills') });
+    await db.execute(sql`insert into companies (id, name) values ('00000000-0000-4000-8000-000000000001', 'Acme')`);
+    await db.execute(sql`insert into people (id, company_id, name, email, status, scope_kind) values
+      ('00000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-000000000001', 'Ivan', 'ivan@acme.com', 'active', 'company')`);
+    await db.execute(sql`insert into subscriptions (id, company_id, provider, kind, label, owner_person_id, status) values
+      ('00000000-0000-4000-8000-000000000003', '00000000-0000-4000-8000-000000000001', 'kimi', 'personal', 'Synthetic', '00000000-0000-4000-8000-000000000002', 'ready')`);
+    await db.execute(sql`insert into jobs (company_id, subscription_id, prompt, timeout_ms, status, session_id, result, tail, error) values
+      ('00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000003', 'Saved work', 1000, 'failed', 'session', 'progress', 'diagnostic', 'agent_failed')`);
+    const previous = await db.execute(sql`select prompt, status, session_id, result, tail, error from jobs`);
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    expect((await db.execute(sql`select prompt, status, session_id, result, tail, error from jobs`)).rows).toEqual(previous.rows);
+    expect((await db.execute(sql`select quota_state from subscriptions`)).rows).toEqual([{ quota_state: null }]);
+    expect((await db.execute(sql`select quota_refusal from jobs`)).rows).toEqual([{ quota_refusal: null }]);
+  });
+});

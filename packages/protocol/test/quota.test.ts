@@ -13,6 +13,8 @@ describe('optional quota provenance', () => {
     expect(read({ ...done, usageObservation: usage, quotaRefusal: refusal })).toEqual({ ...done, usageObservation: usage, quotaRefusal: refusal });
     expect(read({ type: 'status', loggedIn: true, limits: null, usageObservation: usage })).toMatchObject({ usageObservation: usage });
     expect(parseServerMessage(JSON.stringify({ type: 'usage.epoch', epoch }))).toEqual({ type: 'usage.epoch', epoch });
+    const hello = { type: 'hello', version: '0.5.0', loggedIn: true, running: [], usageObservations: true };
+    expect(read(hello)).toEqual(hello);
   });
 
   it('keeps unavailable refreshes distinct from successful samples', () => {

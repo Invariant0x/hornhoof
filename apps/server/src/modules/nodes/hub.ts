@@ -1,4 +1,6 @@
 import { parseNodeMessage, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
+import { randomUUID } from 'node:crypto';
+import type { UsageConnection } from '../subscriptions/quota.js';
 import type { WebSocket } from 'ws';
 
 /* Who is on the other end of a socket: one personal subscription's node, or the built-in node that runs every API key. */
@@ -24,7 +26,7 @@ export type TerminalMessage = Extract<NodeMessage, { type: 'term.data' | 'term.e
 
 type HubOptions = {
   pingMs: number;
-  onMessage(id: NodeIdentity, msg: NodeMessage): Promise<void>;
+  onMessage(id: NodeIdentity, msg: NodeMessage, connection: UsageConnection): Promise<void>;
   /* A screen goes straight to the people watching, without waiting behind the node's other messages. */
   onTerminal?(id: NodeIdentity, msg: TerminalMessage): void;
   onClose(id: NodeIdentity): Promise<void>;
@@ -46,6 +48,7 @@ export class NodeHub {
     this.sockets.get(key)?.socket.close(4000, 'Replaced by a newer connection.');
     const entry: Entry = { socket, missed: 0, greeted: false, terminals: false };
     this.sockets.set(key, entry);
+    const connection: UsageConnection = { epoch: randomUUID(), issuedAt: Date.now(), current: () => this.sockets.get(key) === entry };
     const report = (err: unknown) => this.opts.onError?.(err);
     /* Messages run one after another, so job.started is stored before job.done. */
     let chain = Promise.resolve();
@@ -63,8 +66,8 @@ export class NodeHub {
         return;
       }
       /* A message before it may wait for this word, as a finished job waits for words typed into another agent's turn. */
-      if (msg?.type === 'agent.said') return void this.opts.onMessage(id, msg).catch(report);
-      if (msg) chain = chain.then(() => this.opts.onMessage(id, msg)).catch(report);
+      if (msg?.type === 'agent.said') return void this.opts.onMessage(id, msg, connection).catch(report);
+      if (msg) chain = chain.then(() => this.opts.onMessage(id, msg, connection)).catch(report);
     });
     socket.on('close', () => {
       if (this.sockets.get(key) === entry) this.sockets.delete(key);

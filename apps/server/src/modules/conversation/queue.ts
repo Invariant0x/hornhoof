@@ -14,6 +14,7 @@ import { textHash } from '../templates/load.js';
 import { answerDirectly } from '../tasks/engine.js';
 import { checkLiveness, explainEnded, leaveIfOff, startWork, wakeAll } from '../tasks/wake.js';
 import { preface } from './prompt.js';
+import { quotaBlocked } from '../subscriptions/quota.js';
 
 /* Workers compact their conversation at half a million tokens, which keeps their turns quick; heads and the orchestrator
    keep the whole window, since they hold the department's and the company's picture. */
@@ -212,7 +213,7 @@ async function sessionFor(ctx: Ctx, agent: { id: string; kind: string; name: str
   const [last] = await ctx.db
     .select({ subscriptionId: jobs.subscriptionId, sessionId: jobs.sessionId, instructionsHash: jobs.instructionsHash })
     .from(jobs)
-    .where(and(conversationOf(agent.id), or(eq(jobs.status, 'done'), and(eq(jobs.status, 'failed'), inArray(jobs.error, ['timeout', 'cancelled']), isNotNull(jobs.sessionId)))))
+    .where(and(conversationOf(agent.id), or(eq(jobs.status, 'done'), and(eq(jobs.status, 'failed'), or(inArray(jobs.error, ['timeout', 'cancelled']), isNotNull(jobs.quotaRefusal)), isNotNull(jobs.sessionId)))))
     .orderBy(desc(jobs.finishedAt))
     .limit(1);
   if (last?.sessionId && last.subscriptionId === subscriptionId && last.instructionsHash === instructionsHash) return { sessionId: last.sessionId, catchUp: null };
@@ -236,7 +237,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   const [running] = await db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
   if (running) return;
   const sub = await liveSubscription(ctx, agentId);
-  if (!sub || sub.status !== 'ready' || outdated(sub) || !hub.isReady(identityOf(sub))) return;
+  if (!sub || sub.status !== 'ready' || outdated(sub) || !hub.isReady(identityOf(sub)) || quotaBlocked(sub.quotaState)) return;
   /* A turn sent now would end at once: it waits until the limit starts over. */
   const until = limitUntil(sub.limits);
   if (until) return pumpAt(ctx, agentId, until);

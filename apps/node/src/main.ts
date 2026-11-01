@@ -16,6 +16,7 @@ import { childEnv } from './providers/process.js';
 import { TerminalHost } from './terminal/host.js';
 import { claudeProgram, codexProgram, kimiProgram, type TermProgram } from './terminal/programs.js';
 import { Tmux } from './terminal/tmux.js';
+import { markOutbox, UsageSampler } from './usage.js';
 
 export const VERSION: string = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
@@ -79,10 +80,14 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
   let send: ((m: NodeMessage) => boolean) | null = null;
   let loggedIn = single ? await single.loggedIn() : true;
   let limits: Limits | null = null;
+  const sampling = new UsageSampler();
   let stopped = false;
 
   const emit = (m: NodeMessage) => {
-    if (!send?.(m)) outbox.push(m);
+    if (!send?.(m)) {
+      markOutbox(m);
+      outbox.push(m);
+    }
   };
   /* Values no screen shows: the node's key, the programs' tokens and each turn's tokens. */
   const known = new Set(hidden);
@@ -113,7 +118,7 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
   const status = async () => {
     /* A program that cannot list its models now keeps those it listed before. */
     models = await readModels().catch(() => models);
-    emit({ type: 'status', loggedIn, limits, ...(models ? { models } : {}) });
+    emit({ type: 'status', loggedIn, limits, ...(models ? { models } : {}), ...sampling.metadata() });
   };
 
   const conn = connect({
@@ -125,7 +130,7 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
       /* Finished jobs waiting in the outbox still count as running, so the server does not give up on them. */
       const pending = outbox.flatMap(m => (m.type === 'job.done' ? [m.jobId] : []));
       const typed = host?.typedJobs() ?? [];
-      next({ type: 'hello', version: VERSION, loggedIn, running: [...running.keys(), ...typed, ...pending], ...(models ? { models } : {}), terminals: Boolean(host) });
+      next({ type: 'hello', version: VERSION, loggedIn, running: [...running.keys(), ...typed, ...pending], ...(models ? { models } : {}), terminals: Boolean(host), usageObservations: true });
       for (const m of outbox.splice(0)) emit(m);
     },
     onMessage: m => void handle(m),
@@ -155,6 +160,9 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
       return;
     }
     switch (m.type) {
+      case 'usage.epoch':
+        sampling.setEpoch(m.epoch, askLimits);
+        return;
       case 'term.open':
         if (!host) return void send?.({ type: 'term.exit', termId: m.termId });
         return host.open(m).catch(() => void send?.({ type: 'term.exit', termId: m.termId }));
@@ -223,10 +231,11 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
   const learning = host ? setInterval(() => void learn(), learnMs) : null;
   learning?.unref();
   const askLimits = async () => {
-    if (stopped || !single?.limits) return;
-    const now = await single.limits().catch(() => null);
-    if (!now || JSON.stringify(merged(limits, now)) === JSON.stringify(limits)) return;
-    limits = merged(limits, now);
+    const readLimits = single?.limits?.bind(single);
+    if (stopped || !readLimits) return;
+    const updated = await sampling.update(() => limits, readLimits, merged);
+    if (stopped || !updated) return;
+    limits = updated.limits;
     void status();
   };
   void askLimits();

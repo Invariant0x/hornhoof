@@ -183,7 +183,7 @@ export const TERM_CHUNK = 64 * 1024;
 
 const NodeMessage = z.discriminatedUnion('type', [
   /* terminals: the node runs agents in sessions people can watch and type into. */
-  z.object({ type: z.literal('hello'), version: z.string().max(40), loggedIn: z.boolean(), running: z.array(z.string()).max(100), models: Models.optional(), terminals: z.boolean().optional() }),
+  z.object({ type: z.literal('hello'), version: z.string().max(40), loggedIn: z.boolean(), running: z.array(z.string()).max(100), models: Models.optional(), terminals: z.boolean().optional(), usageObservations: z.boolean().optional() }),
   z.object({ type: z.literal('status'), loggedIn: z.boolean(), limits: Limits.nullable(), models: Models.optional(), usageObservation: UsageObservation.optional().catch(undefined) }),
   z.object({ type: z.literal('job.started'), jobId: z.string() }),
   z.object({

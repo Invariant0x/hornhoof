@@ -58,7 +58,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   app.decorate('ctx', ctx);
   ctx.hub = new NodeHub({
     pingMs: deps.config.nodePingMs,
-    onMessage: (id, msg) => handleNodeMessage(ctx, id, msg),
+    onMessage: (id, msg, connection) => handleNodeMessage(ctx, id, msg, connection),
     onTerminal: (id, msg) => ctx.terminals.fromNode(id, msg),
     onClose: id => handleNodeClose(ctx, id),
     onError: err => app.log.error(err),
