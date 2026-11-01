@@ -1,5 +1,6 @@
+import { existsSync } from 'node:fs';
 import { eq, sql } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, inject, it } from 'vitest';
 import { isUniqueViolation } from '../src/db/errors.js';
 import { agentChanges, agentEvents, agents, companies, departments, machines, people, personAccess, requests, subscriptions, tasks } from '../src/db/schema.js';
 import { createTestDb } from './helpers.js';
@@ -118,5 +119,13 @@ describe('test databases', () => {
 
   it('closes it once that test ends', () => {
     expect(opened?.closed).toBe(true);
+  });
+
+  it('starts each from a copy of one database the run migrated before any test, and keeps what one test writes from the next', async () => {
+    expect(existsSync(inject('migratedDataDir'))).toBe(true);
+    const first = await createTestDb();
+    await first.insert(companies).values({ name: 'Acme' });
+    const second = await createTestDb();
+    expect(await second.select().from(companies)).toEqual([]);
   });
 });

@@ -1,17 +1,17 @@
+import { readFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { NodeMessage, ServerMessage } from '@hornhoof/protocol';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
-import { migrate } from 'drizzle-orm/pglite/migrator';
 import WebSocket from 'ws';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
-import { onTestFinished } from 'vitest';
+import { inject, onTestFinished } from 'vitest';
 import { buildApp, type Deps } from '../src/app.js';
 import { loadConfig, type Config } from '../src/config.js';
 import { agentRole, grantsFor, type AgentSql } from '../src/db/agent-sql.js';
-import { MIGRATIONS, type Db } from '../src/db/client.js';
+import type { Db } from '../src/db/client.js';
 import * as schema from '../src/db/schema.js';
 import { setupCode } from '../src/modules/setup/code.js';
 
@@ -27,10 +27,13 @@ export const SETUP = {
   orchestrator: { mode: 'api_key', provider: 'anthropic_api', apiKey: TEST_API_KEY },
 };
 
+/* Every test database starts from a copy of the one global-setup.ts migrated for the run. */
+let migrated: Blob | undefined;
+
 async function openTestDb(): Promise<{ client: PGlite; db: Db }> {
-  const client = new PGlite();
+  migrated ??= new Blob([readFileSync(inject('migratedDataDir'))]);
+  const client = new PGlite({ loadDataDir: migrated });
   const db = drizzle(client, { schema });
-  await migrate(db, { migrationsFolder: MIGRATIONS });
   return { client, db: db as unknown as Db };
 }
 
