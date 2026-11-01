@@ -131,7 +131,7 @@ export function tidy(event: AgentEvent, secrets: string[]): AgentEvent {
 
 /* Always ends with a job.done, whatever breaks on the way. */
 export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string, { hidden = [], signal, toolsUrl, onEvent, git, untimed = false }: RunOptions = {}): Promise<JobDone> {
-  /* Programs refresh their tokens during a run, so the values from before and after are both hidden. */
+  /* Programs refresh their tokens during a run, so the values from before, during and after are all hidden. */
   const before = await adapter.secrets().catch(() => []);
   const repo = msg.workspace?.repo ?? null;
   const given = [...hidden, ...(msg.secret ? [msg.secret] : []), ...(msg.toolToken ? [msg.toolToken] : []), ...(repo?.token ? [repo.token] : [])];
@@ -183,7 +183,7 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
   await live;
   /* A job Hornhoof called off ends as cancelled, whatever the stopped program said. */
   if (signal?.aborted) res = { ...res, ok: false, result: 'Stopped.', error: 'cancelled' };
-  const after = await adapter.secrets().catch(() => []);
-  const secrets = [...before, ...after, ...given];
-  return jobDone(msg.jobId, res, secrets);
+  /* Everything the program held at any point of the run, so a token it had only in between is hidden too. */
+  for (const s of await adapter.secrets().catch(() => [])) known.add(s);
+  return jobDone(msg.jobId, res, [...known]);
 }

@@ -168,6 +168,24 @@ describe('runJob', () => {
     expect(events).toEqual([{ kind: 'text', text: 'got [hidden]' }]);
   });
 
+  it('hides a token the program held only in the middle of the run in its result and output', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
+    let token = 'old-token-0123456789';
+    const adapter = {
+      ...fakeAdapter(async input => {
+        token = 'middle-token-0123456789';
+        input.onEvent?.({ kind: 'text', text: 'working' });
+        await new Promise(r => setTimeout(r, 10));
+        token = 'new-token-0123456789';
+        return { ...ok(), result: 'saw middle-token-0123456789', output: 'printed middle-token-0123456789' };
+      }),
+      secrets: async () => [token],
+    };
+    const done = await runJob(adapter, job(), dir, { onEvent: () => {} });
+    expect(done.result).toBe('saw [hidden]');
+    expect(done.tail).not.toContain('middle-token');
+  });
+
   it('hides secrets in live events and cuts them to size', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
     const events: AgentEvent[] = [];
