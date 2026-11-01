@@ -2,7 +2,7 @@ import type { ServerMessage } from '@hornhoof/protocol';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
-import { eq } from 'drizzle-orm';
+import { asc, eq } from 'drizzle-orm';
 import { agents, companies, departments, jobs, people, subscriptions, tasks } from '../src/db/schema.js';
 import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
@@ -320,5 +320,184 @@ describe('starting an agent for someone who opens its window to talk', () => {
     builtin.send({ type: 'agent.start', agentKey: '00000000-0000-4000-8000-000000000000' });
     await new Promise(r => setTimeout(r, 300));
     expect(await db.select().from(jobs)).toHaveLength(1);
+  });
+});
+
+describe('opening a terminal while the plan is at its limit', () => {
+  async function onPlan(provider: 'claude' | 'codex' | 'kimi' = 'claude', saved = true) {
+    const company = await live();
+    const { app, url, ceo, db, orchestratorId } = company;
+    const connected = await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: [provider] }, ...as(ceo) });
+    const code = connected.json().command.split('--join ')[1];
+    const joined = await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: 'limit-test-machine', hostname: 'limit-test', os: 'linux', arch: 'arm64' } });
+    const node = joined.json().nodes[0] as { subscriptionId: string; key: string };
+    const plan = await connectNode(url, node.key);
+    plan.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], terminals: true });
+    expect((await app.inject({ method: 'POST', url: `/api/subscriptions/${node.subscriptionId}/orchestrator`, ...as(ceo) })).statusCode).toBe(200);
+    await until(async () => (await state(app, ceo)).ready);
+    if (saved) {
+      await app.inject({ method: 'POST', url: '/api/agents/orchestrator/messages', payload: { text: 'Save this history' }, ...as(ceo) });
+      const earlier = await next(plan, 'job.run');
+      plan.send({ type: 'job.done', jobId: earlier.jobId, ok: true, sessionId: 'saved-history', result: 'Saved answer', tail: '', error: null });
+      await until(async () => !(await state(app, ceo)).busy);
+    }
+    const resetsAt = new Date(Date.now() + 60_000).toISOString();
+    plan.send({ type: 'status', loggedIn: true, limits: { status: 'rejected', windows: [{ name: 'five_hour', utilization: 1, resetsAt }] } });
+    await until(async () => (await state(app, ceo)).limitUntil === resetsAt);
+    for (const text of ['First waiting prompt', 'Second waiting prompt']) {
+      expect((await app.inject({ method: 'POST', url: '/api/agents/orchestrator/messages', payload: { text }, ...as(ceo) })).statusCode).toBe(202);
+    }
+    const waiting = (await db.select().from(jobs).where(eq(jobs.agentId, orchestratorId)).orderBy(asc(jobs.createdAt))).filter(j => j.status === 'queued');
+    expect(waiting).toHaveLength(2);
+    return { ...company, plan, node, resetsAt, waiting };
+  }
+
+  it.each(['claude', 'codex', 'kimi'] as const)('opens saved %s history after a node restart, once, without sending waiting prompts until reset', async provider => {
+    const { app, db, url, ceo, builtin, orchestratorId, plan, node, resetsAt, waiting } = await onPlan(provider);
+    plan.close();
+    await plan.closed;
+    await until(async () => !(await state(app, ceo)).ready);
+    const back = await connectNode(url, node.key);
+    back.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], terminals: true });
+    await until(async () => (await state(app, ceo)).ready);
+    expect(await state(app, ceo)).toMatchObject({ limitUntil: resetsAt, queued: 2, busy: false });
+
+    /* A different subscription's node cannot start this program or write its terminal. */
+    builtin.send({ type: 'agent.start', agentKey: orchestratorId });
+    const screens = await Promise.all([watch(url, ceo), watch(url, ceo)]);
+    const opens = [await next(back, 'term.open'), await next(back, 'term.open')];
+    for (const open of opens) {
+      expect(open.write).toBe(true);
+      back.send({ type: 'term.program', termId: open.termId, running: false });
+      back.send({ type: 'agent.start', agentKey: orchestratorId });
+      builtin.send({ type: 'term.program', termId: open.termId, running: true });
+      builtin.send({ type: 'term.data', termId: open.termId, data: 'Foreign node data' });
+    }
+    builtin.send({ type: 'turn.open', agentKey: orchestratorId, text: 'guard', ref: 'foreign-node-guard' });
+    expect(await next(builtin, 'turn.opened')).toMatchObject({ jobId: null, ref: 'foreign-node-guard' });
+    for (const open of opens) back.send({ type: 'term.data', termId: open.termId, data: 'Owner node connected' });
+    await until(() => screens.every(s => s.frames.some(f => f.type === 'data' && f.data === 'Owner node connected')));
+    expect(screens.every(s => s.frames.some(f => f.type === 'program' && f.running === false) && s.frames.filter(f => f.type === 'program').every(f => f.running === false))).toBe(true);
+    expect(screens.every(s => !s.frames.some(f => f.type === 'data' && f.data === 'Foreign node data'))).toBe(true);
+    await expect.poll(() => back.queued()).toBe(1);
+    const start = await next(back, 'job.run');
+    expect(start).toMatchObject({ prompt: '', sessionId: 'saved-history', provider });
+    for (const prompt of ['First waiting prompt', 'Second waiting prompt']) {
+      expect(start.context ?? '').not.toContain(prompt);
+      expect(start.instructions ?? '').not.toContain(prompt);
+      expect(start.guidance ?? '').not.toContain(prompt);
+    }
+    for (let i = 0; i < 8; i++) back.send({ type: 'agent.start', agentKey: orchestratorId });
+    for (const open of opens) {
+      back.send({ type: 'term.data', termId: open.termId, data: 'Saved answer' });
+      back.send({ type: 'term.program', termId: open.termId, running: true });
+    }
+    back.send({ type: 'job.done', jobId: start.jobId, ok: true, sessionId: 'saved-history', result: '', tail: '', error: null });
+    await until(async () => !(await state(app, ceo)).busy);
+    await until(() => screens.every(s => s.frames.some(f => f.type === 'program' && f.running === true) && s.frames.some(f => f.type === 'data' && f.data === 'Saved answer')));
+    expect(await state(app, ceo)).toMatchObject({ limitUntil: resetsAt, queued: 2 });
+    const rows = await db.select().from(jobs).where(eq(jobs.agentId, orchestratorId)).orderBy(asc(jobs.createdAt));
+    expect(rows.filter(j => j.prompt === '')).toHaveLength(1);
+    expect(rows.filter(j => j.status === 'queued')).toEqual(waiting);
+    expect(back.queued()).toBe(0);
+    expect(builtin.queued()).toBe(0);
+
+    back.send({ type: 'status', loggedIn: true, limits: { status: 'allowed', windows: [] } });
+    for (const queued of waiting) {
+      const run = await next(back, 'job.run');
+      expect(run).toMatchObject({ jobId: queued.id, prompt: queued.prompt, sessionId: 'saved-history' });
+      back.send({ type: 'job.done', jobId: run.jobId, ok: true, sessionId: 'saved-history', result: 'Done', tail: '', error: null });
+    }
+    await until(async () => !(await state(app, ceo)).busy);
+    expect(await state(app, ceo)).toMatchObject({ limitUntil: null, queued: 0 });
+    expect((await db.select().from(jobs).where(eq(jobs.agentId, orchestratorId))).every(j => j.status === 'done')).toBe(true);
+    expect(back.queued()).toBe(0);
+  });
+
+  it('does not open a limited agent for a person from another company', async () => {
+    const { app, db, url, ceo, orchestratorId, plan } = await onPlan();
+    const outsider = await invitePerson(app, ceo, { name: 'Other owner', email: 'other-owner@acme.test', access: { whole: true } });
+    const [other] = await db.insert(companies).values({ name: 'Other company', singleton: false }).returning();
+    await db.update(people).set({ companyId: other!.id }).where(eq(people.email, 'other-owner@acme.test'));
+    await expect(watch(url, outsider, orchestratorId)).rejects.toThrow('HTTP 404');
+    expect(await state(app, ceo)).toMatchObject({ busy: false, queued: 2 });
+    expect(plan.queued()).toBe(0);
+  });
+
+  it('opens a fresh program without history and preserves prompts when reset races with repeated opens', async () => {
+    const { app, db, url, ceo, orchestratorId, plan, waiting } = await onPlan('claude', false);
+    const screen = await watch(url, ceo);
+    const open = await next(plan, 'term.open');
+    plan.send({ type: 'term.program', termId: open.termId, running: false });
+    plan.send({ type: 'agent.start', agentKey: orchestratorId });
+    await expect.poll(() => plan.queued()).toBe(1);
+    const start = await next(plan, 'job.run');
+    expect(start).toMatchObject({ prompt: '', sessionId: null });
+    for (const prompt of ['First waiting prompt', 'Second waiting prompt']) {
+      expect(start.context ?? '').not.toContain(prompt);
+      expect(start.instructions ?? '').not.toContain(prompt);
+      expect(start.guidance ?? '').not.toContain(prompt);
+    }
+    for (let i = 0; i < 8; i++) plan.send({ type: 'agent.start', agentKey: orchestratorId });
+    plan.send({ type: 'status', loggedIn: true, limits: { status: 'allowed', windows: [] } });
+    await until(async () => (await state(app, ceo)).limitUntil === null);
+    expect(await state(app, ceo)).toMatchObject({ busy: true, runningJobId: start.jobId, queued: 2 });
+    expect(plan.queued()).toBe(0);
+    plan.send({ type: 'term.program', termId: open.termId, running: true });
+    plan.send({ type: 'job.done', jobId: start.jobId, ok: true, sessionId: 'new-history', result: '', tail: '', error: null });
+    for (const queued of waiting) {
+      const run = await next(plan, 'job.run');
+      expect(run).toMatchObject({ jobId: queued.id, prompt: queued.prompt, sessionId: 'new-history' });
+      plan.send({ type: 'job.done', jobId: run.jobId, ok: true, sessionId: 'new-history', result: 'Done', tail: '', error: null });
+    }
+    await until(async () => !(await state(app, ceo)).busy);
+    expect((await db.select().from(jobs).where(eq(jobs.agentId, orchestratorId))).filter(j => j.prompt === '')).toHaveLength(1);
+    expect(await state(app, ceo)).toMatchObject({ queued: 0 });
+    expect(screen.frames).toContainEqual({ type: 'program', running: true });
+  });
+
+  it.each(['person', 'task'] as const)('does not treat an empty %s turn as a program start during a limit', async origin => {
+    const { app, db, ceo, orchestratorId, plan, node, waiting } = await onPlan();
+    const [agent] = await db.select().from(agents).where(eq(agents.id, orchestratorId));
+    const [person] = await db.select().from(people).where(eq(people.companyId, agent!.companyId));
+    const [task] = origin === 'task'
+      ? await db.insert(tasks).values({ companyId: agent!.companyId, number: 1, title: 'Waiting task' }).returning()
+      : [];
+    const [empty] = await db.insert(jobs).values({
+      companyId: agent!.companyId, subscriptionId: node.subscriptionId, agentId: orchestratorId,
+      kind: 'conversation', prompt: '', timeoutMs: 10000,
+      createdBy: origin === 'person' ? person!.id : null, taskId: task?.id ?? null,
+    }).returning();
+
+    plan.send({ type: 'agent.start', agentKey: orchestratorId });
+    const start = await next(plan, 'job.run');
+    expect(start).toMatchObject({ prompt: '', sessionId: 'saved-history' });
+    expect(start.jobId).not.toBe(empty!.id);
+    const [started] = await db.select().from(jobs).where(eq(jobs.id, start.jobId));
+    expect(started).toMatchObject({ createdBy: null, taskId: null });
+    plan.send({ type: 'job.done', jobId: start.jobId, ok: true, sessionId: 'saved-history', result: '', tail: '', error: null });
+    await until(async () => !(await state(app, ceo)).busy);
+    const queued = (await db.select().from(jobs).where(eq(jobs.agentId, orchestratorId))).filter(j => j.status === 'queued');
+    expect(queued.map(j => j.id).sort()).toEqual([...waiting.map(j => j.id), empty!.id].sort());
+    expect(plan.queued()).toBe(0);
+  });
+
+  it('shows a startup failure to the owner and leaves real prompts waiting at the limit', async () => {
+    const { app, db, url, ceo, orchestratorId, plan, resetsAt, waiting } = await onPlan();
+    const screen = await watch(url, ceo);
+    const open = await next(plan, 'term.open');
+    plan.send({ type: 'term.program', termId: open.termId, running: false });
+    plan.send({ type: 'agent.start', agentKey: orchestratorId });
+    await expect.poll(() => plan.queued()).toBe(1);
+    const start = await next(plan, 'job.run');
+    plan.send({ type: 'term.data', termId: open.termId, data: 'No conversation found with session ID: saved-history' });
+    plan.send({ type: 'term.program', termId: open.termId, running: true });
+    plan.send({ type: 'job.done', jobId: start.jobId, ok: false, sessionId: null, result: '', tail: 'No conversation found with session ID: saved-history', error: 'agent_failed' });
+    await until(async () => !(await state(app, ceo)).busy);
+    await until(() => screen.frames.some(f => f.type === 'program' && f.running === true));
+    expect(screen.frames).toContainEqual({ type: 'data', data: 'No conversation found with session ID: saved-history' });
+    expect(await state(app, ceo)).toMatchObject({ limitUntil: resetsAt, queued: 2 });
+    expect((await db.select().from(jobs).where(eq(jobs.agentId, orchestratorId)).orderBy(asc(jobs.createdAt))).filter(j => j.status === 'queued')).toEqual(waiting);
+    expect(plan.queued()).toBe(0);
   });
 });

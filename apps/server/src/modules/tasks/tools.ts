@@ -6,7 +6,7 @@ import { agents, departments, jobs, requests, tasks } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { ask, blocked, cancel, CLOSED, comment, createTask, refuse, report, submit, updateTask, verdict, type Moved, type Task } from './engine.js';
 import { taskByRef, taskDetail, taskLines } from './views.js';
-import { addTasks, editTurn, planTurn, settle, tell, TURN_MESSAGES, turnName, turnRows } from './turns.js';
+import { addTasks, editTurn, mergeTurn, planTurn, settle, tell, TURN_MESSAGES, turnName, turnRows } from './turns.js';
 import { stopTurns, wakeAll } from './wake.js';
 import { orchestratorOf } from '../conversation/queue.js';
 
@@ -26,6 +26,7 @@ const Ref = z.union([z.number().int().positive(), z.string().max(40)]).describe(
 const Title = z.string().trim().min(1).max(120);
 const Brief = z.string().max(600).describe('One to three sentences people read on the map and in the tracker.');
 const Body = z.string().max(20000).describe('What every agent on the task reads: requirements, acceptance criteria (what the gates check), product, constraints. Rewrite it as the current truth.');
+const Improvement = z.uuid().describe("The improvement these tasks take into work after a person's instruction, from improvements.");
 
 /* The tools an agent gets for tasks, by its kind. Each one checks that the task is the agent's to move. */
 export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): void {
@@ -174,7 +175,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
           "Lays out a new turn: a short title, the main point in one or two sentences, and its tasks, one for each department's part, each going to that department's head. " +
           'When no turn runs it starts at once; otherwise it waits after the planned turns and starts by itself when the turn before it is done. ' +
           'A turn is about one feature: split a bigger ask into several turns. department and product ids from company.',
-        inputSchema: { title: z.string().trim().min(1).max(80), goal: z.string().trim().min(1).max(600), tasks: z.array(Item), words: Words },
+        inputSchema: { title: z.string().trim().min(1).max(80), goal: z.string().trim().min(1).max(600), tasks: z.array(Item), words: Words, improvement: Improvement.optional() },
       },
       async input =>
         run(async () => {
@@ -189,12 +190,26 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         description:
           'Adds tasks to a turn that is not over, when people add to what it does: in the running turn they go to the heads at once, in a planned turn they wait for it to start. ' +
           'Work that does not belong to any planned turn goes into a new one with plan_turn.',
-        inputSchema: { turn: Turn, tasks: z.array(Item), words: Words },
+        inputSchema: { turn: Turn, tasks: z.array(Item), words: Words, improvement: Improvement.optional() },
       },
       async input =>
         run(async () => {
           await underCap(await me(), input.tasks.length);
-          const moved = await addTasks(ctx, { companyId: job.companyId, agentId: job.agentId, jobId: job.id }, input.turn, input.tasks, input.words);
+          const moved = await addTasks(ctx, { companyId: job.companyId, agentId: job.agentId, jobId: job.id }, input.turn, input.tasks, input.words, input.improvement);
+          return { text: moved.text, moved };
+        }),
+    );
+    server.registerTool(
+      'merge_turn',
+      {
+        description:
+          'Merges a planned source turn into an existing open or planned target turn. Unfinished tasks keep their ids, trees, assignees, gates, results and history; they start once when the target is open. ' +
+          'The source closes and its closed tasks stay there as history. Repeating the same merge is safe.',
+        inputSchema: { source: Turn, target: Turn },
+      },
+      async input =>
+        run(async () => {
+          const moved = await mergeTurn(ctx, { companyId: job.companyId, agentId: job.agentId }, input.source, input.target);
           return { text: moved.text, moved };
         }),
     );

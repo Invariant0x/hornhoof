@@ -3,6 +3,7 @@ import type { Ctx } from '../../app.js';
 import { agentEvents, agents, companies, departments, people, tasks, turns, type TurnMessage } from '../../db/schema.js';
 import { CLOSED, note, published, refuse, type Task, type Tx, type Wake } from './engine.js';
 import { handOff } from './pulses.js';
+import { improvementsChanged, takeForPlanning } from '../improvements/store.js';
 
 type Live = Pick<Ctx, 'db' | 'bus'>;
 export type Turn = typeof turns.$inferSelect;
@@ -77,8 +78,19 @@ async function newWords(tx: Tx, by: By, words: number): Promise<TurnMessage[]> {
     .filter(m => m.text.trim());
 }
 
+/* The person whose message this orchestrator run answers, not a name supplied to a tool. */
+async function decidingPerson(tx: Tx, by: By): Promise<string | null> {
+  const [message] = await tx
+    .select({ personId: agentEvents.personId })
+    .from(agentEvents)
+    .where(and(eq(agentEvents.companyId, by.companyId), eq(agentEvents.agentId, by.agentId), eq(agentEvents.jobId, by.jobId), eq(agentEvents.kind, 'message'), isNotNull(agentEvents.personId)))
+    .orderBy(desc(agentEvents.seq))
+    .limit(1);
+  return message?.personId ?? null;
+}
+
 /* Planned tasks wait in their turn without anyone holding them. */
-async function insertPlanned(tx: Tx, companyId: string, agentId: string, turnId: string, items: Placed[]): Promise<Task[]> {
+async function insertPlanned(tx: Tx, companyId: string, agentId: string, turnId: string, items: Placed[], improvement?: string): Promise<Task[]> {
   const [last] = await tx.select({ n: max(tasks.number) }).from(tasks).where(eq(tasks.companyId, companyId));
   let n = last?.n ?? 0;
   const rows: Task[] = [];
@@ -99,7 +111,7 @@ async function insertPlanned(tx: Tx, companyId: string, agentId: string, turnId:
         updatedAt: new Date(),
       })
       .returning();
-    await note(tx, row!, { kind: 'created', actor: { agentId }, text: row!.brief, data: { planned: true } });
+    await note(tx, row!, { kind: 'created', actor: { agentId }, text: row!.brief, data: { planned: true, ...(improvement ? { improvement } : {}) } });
     rows.push(row!);
   }
   return rows;
@@ -187,7 +199,7 @@ const numbers = (rows: Task[]) => rows.map(t => `#${t.number}`).join(', ');
 export type TurnMove = { turn: Turn; text: string; wakes: Wake[] };
 
 /* A new turn with its tasks: it starts at once when no turn runs, else it waits after the planned ones. */
-export async function planTurn(ctx: Live, by: By, input: { title: string; goal: string; tasks: PlanItem[]; words?: number }): Promise<TurnMove> {
+export async function planTurn(ctx: Live, by: By, input: { title: string; goal: string; tasks: PlanItem[]; words?: number; improvement?: string }): Promise<TurnMove> {
   const { companyId, agentId } = by;
   const items = await place(ctx, companyId, input.tasks);
   const done = await ctx.db.transaction(async tx => {
@@ -198,11 +210,13 @@ export async function planTurn(ctx: Live, by: By, input: { title: string; goal: 
       .insert(turns)
       .values({ companyId, number: (last?.n ?? 0) + 1, title: input.title.trim(), goal: input.goal.trim(), status: 'planned', messages, createdByAgentId: agentId })
       .returning();
-    const planned = await insertPlanned(tx, companyId, agentId, turn!.id, items);
+    const planned = await insertPlanned(tx, companyId, agentId, turn!.id, items, input.improvement);
+    if (input.improvement) await takeForPlanning(tx, companyId, input.improvement, await decidingPerson(tx, by));
     const opened = await openNext(tx, companyId);
     return { turn: opened?.turn ?? turn!, planned, opened };
   });
   ctx.bus.publish(companyId, { type: 'org' });
+  if (input.improvement) improvementsChanged(ctx, companyId);
   if (done.opened) {
     await announce(ctx, done.opened.started);
     return { turn: done.turn, text: `${turnName(done.turn)} started: ${whoGot(done.opened.started)}.`, wakes: wakesFor(done.opened.started) };
@@ -219,7 +233,7 @@ async function liveTurn(tx: Tx | Live['db'], companyId: string, number: number):
 }
 
 /* More tasks for a turn that has not closed: in the open one they go out at once, in a planned one they wait with it. */
-export async function addTasks(ctx: Live, by: By, number: number, items: PlanItem[], words = 1): Promise<TurnMove> {
+export async function addTasks(ctx: Live, by: By, number: number, items: PlanItem[], words = 1, improvement?: string): Promise<TurnMove> {
   const { companyId, agentId } = by;
   await liveTurn(ctx.db, companyId, number);
   const placed = await place(ctx, companyId, items);
@@ -228,7 +242,8 @@ export async function addTasks(ctx: Live, by: By, number: number, items: PlanIte
     const turn = await liveTurn(tx, companyId, number);
     const said = await newWords(tx, by, words);
     const [kept] = said.length ? await tx.update(turns).set({ messages: [...turn.messages, ...said] }).where(eq(turns.id, turn.id)).returning() : [turn];
-    const planned = await insertPlanned(tx, companyId, agentId, turn.id, placed);
+    const planned = await insertPlanned(tx, companyId, agentId, turn.id, placed, improvement);
+    if (improvement) await takeForPlanning(tx, companyId, improvement, await decidingPerson(tx, by));
     const started: Started[] = [];
     if (turn.status === 'open') for (const task of planned) {
       const s = await start(tx, task);
@@ -237,6 +252,7 @@ export async function addTasks(ctx: Live, by: By, number: number, items: PlanIte
     return { turn: kept!, planned, started };
   });
   ctx.bus.publish(companyId, { type: 'org' });
+  if (improvement) improvementsChanged(ctx, companyId);
   if (done.turn.status === 'open') {
     await announce(ctx, done.started);
     return { turn: done.turn, text: `Added to ${turnName(done.turn)}: ${whoGot(done.started)}.`, wakes: wakesFor(done.started) };
@@ -255,22 +271,102 @@ export async function editTurn(ctx: Live, companyId: string, number: number, cha
   return row!;
 }
 
+async function requiredTurn(tx: Tx, companyId: string, number: number): Promise<Turn> {
+  const [turn] = await tx.select().from(turns).where(and(eq(turns.companyId, companyId), eq(turns.number, number)));
+  if (!turn) throw refuse(404, 'turn_unknown', `There is no turn ${number}. Call turns to see them.`);
+  return turn;
+}
+
+function movingTasks(rows: Task[]): Set<string> {
+  const moving = new Set(rows.filter(t => !t.parentId && !CLOSED.includes(t.status)).map(t => t.id));
+  for (;;) {
+    const before = moving.size;
+    for (const row of rows) if (row.parentId && moving.has(row.parentId)) moving.add(row.id);
+    if (moving.size === before) return moving;
+  }
+}
+
+async function moveTasks(tx: Tx, by: Pick<By, 'companyId' | 'agentId'>, source: Turn, target: Turn, rows: Task[]): Promise<Task[]> {
+  const moving = movingTasks(rows);
+  const moved = moving.size
+    ? await tx.update(tasks).set({ turnId: target.id }).where(and(eq(tasks.companyId, by.companyId), eq(tasks.turnId, source.id), inArray(tasks.id, [...moving]))).returning()
+    : [];
+  for (const root of rows.filter(t => !t.parentId)) {
+    const isMoved = moving.has(root.id);
+    await note(tx, root, {
+      kind: 'updated',
+      actor: { agentId: by.agentId },
+      text: isMoved ? `Moved from Turn ${source.number} to Turn ${target.number} by merge.` : `Turn ${source.number} merged into Turn ${target.number}; this closed task stays in the source as history.`,
+      data: { fields: isMoved ? ['turn'] : [], from: source.number, to: target.number, moved: isMoved },
+    });
+  }
+  return moved;
+}
+
+async function startMoved(tx: Tx, target: Turn, rows: Task[], moved: Task[]): Promise<Started[]> {
+  const started: Started[] = [];
+  if (target.status !== 'open') return started;
+  for (const root of rows.filter(t => !t.parentId)) {
+    const row = moved.find(t => t.id === root.id);
+    if (row?.status !== 'planned') continue;
+    const s = await start(tx, row);
+    if (s) started.push(s);
+  }
+  return started;
+}
+
+type StoredMerge = { source: Turn; target: Turn | null; moved: Task[]; started: Started[] };
+
+async function storeMerge(tx: Tx, by: Pick<By, 'companyId' | 'agentId'>, sourceNumber: number, targetNumber: number): Promise<StoredMerge> {
+  const source = await requiredTurn(tx, by.companyId, sourceNumber);
+  if (source.status === 'closed') return { source, target: null, moved: [], started: [] };
+  if (source.status !== 'planned') throw refuse(409, 'turn_open', `Turn ${sourceNumber} is running. Only a planned turn can be merged.`);
+  const target = await requiredTurn(tx, by.companyId, targetNumber);
+  if (target.status === 'closed') throw refuse(409, 'turn_unknown', `Turn ${targetNumber} is over. Add the work to the open turn or plan a new one.`);
+  const rows = await tx.select().from(tasks).where(and(eq(tasks.companyId, by.companyId), eq(tasks.turnId, source.id))).orderBy(asc(tasks.number));
+  const moved = await moveTasks(tx, by, source, target, rows);
+  const [closed] = await tx.update(turns).set({ status: 'closed', closedAt: new Date() }).where(and(eq(turns.id, source.id), eq(turns.status, 'planned'))).returning();
+  if (!closed) throw refuse(409, 'turn_open', `Turn ${sourceNumber} changed meanwhile. Read it again.`);
+  return { source: closed, target, moved, started: await startMoved(tx, target, rows, moved) };
+}
+
+/* Moves the unfinished trees of a planned turn into another live turn. Closed roots stay with the source as its history. */
+export async function mergeTurn(ctx: Live, by: Pick<By, 'companyId' | 'agentId'>, sourceNumber: number, targetNumber: number): Promise<TurnMove> {
+  if (sourceNumber === targetNumber) throw refuse(400, 'task_invalid', 'A turn cannot merge into itself.');
+  const done = await ctx.db.transaction(async tx => {
+    await lockCompany(tx, by.companyId);
+    return storeMerge(tx, by, sourceNumber, targetNumber);
+  });
+  ctx.bus.publish(by.companyId, { type: 'org' });
+  for (const task of done.moved) published(ctx, task);
+  if (done.started.length) await announce(ctx, done.started);
+  if (!done.target) return { turn: done.source, text: `${turnName(done.source)} is already closed; nothing was moved.`, wakes: [] };
+  const movedRoots = done.moved.filter(t => !t.parentId);
+  const what = movedRoots.length ? ` Moved ${numbers(movedRoots)}.` : ' No unfinished work remained.';
+  return { turn: done.target, text: `Merged ${turnName(done.source)} into ${turnName(done.target)}.${what} ${turnName(done.source)} is closed.`, wakes: wakesFor(done.started) };
+}
+
+async function storeSettle(tx: Tx, task: Pick<Task, 'turnId' | 'companyId' | 'status'>) {
+  const turnId = task.turnId!;
+  const [turn] = await tx.select().from(turns).where(and(eq(turns.id, turnId), inArray(turns.status, ['open', 'planned'])));
+  if (!turn) return null;
+  const [left] = await tx.select({ n: count() }).from(tasks).where(liveAtTop(turnId));
+  if (Number(left?.n ?? 0)) return null;
+  const [closed] = await tx.update(turns).set({ status: 'closed', closedAt: new Date() }).where(eq(turns.id, turnId)).returning();
+  return { closed: closed!, planned: turn.status === 'planned', opened: turn.status === 'open' ? await openNext(tx, task.companyId) : null };
+}
+
 /* After a task closed: when it was the last open task at the top of the open turn, the turn is over and the next planned
-   one starts. note tells the orchestrator what happened. */
+   one starts. A planned turn with no unfinished roots closes without waiting to start. */
 export async function settle(ctx: Live, task: Pick<Task, 'turnId' | 'companyId' | 'status'>): Promise<{ wakes: Wake[]; note: string } | null> {
   if (!task.turnId || !CLOSED.includes(task.status)) return null;
-  const turnId = task.turnId;
   const done = await ctx.db.transaction(async tx => {
     await lockCompany(tx, task.companyId);
-    const [turn] = await tx.select().from(turns).where(and(eq(turns.id, turnId), eq(turns.status, 'open')));
-    if (!turn) return null;
-    const [left] = await tx.select({ n: count() }).from(tasks).where(liveAtTop(turnId));
-    if (Number(left?.n ?? 0)) return null;
-    const [closed] = await tx.update(turns).set({ status: 'closed', closedAt: new Date() }).where(eq(turns.id, turnId)).returning();
-    return { closed: closed!, opened: await openNext(tx, task.companyId) };
+    return storeSettle(tx, task);
   });
   if (!done) return null;
   ctx.bus.publish(task.companyId, { type: 'org' });
+  if (done.planned) return { wakes: [], note: `${turnName(done.closed)} has no unfinished tasks, so it is closed.` };
   const over = `That was the last open task of ${turnName(done.closed)}, so the turn is over.`;
   if (!done.opened) return { wakes: [], note: `${over} No turn is planned next; plan one with plan_turn when people ask for more.` };
   await announce(ctx, done.opened.started);

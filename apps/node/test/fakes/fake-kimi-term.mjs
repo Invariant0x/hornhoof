@@ -9,6 +9,9 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
+import { crash } from './crash.mjs';
+
+if (process.env.FAKE_CRASH_START) crash(process.env.FAKE_CRASH_START);
 
 const args = process.argv.slice(2);
 const home = process.env.KIMI_CODE_HOME ?? '/tmp';
@@ -75,6 +78,8 @@ async function take(line) {
   }
   if (!session) await startSession('startup');
   await hook('prompt', 'UserPromptSubmit', { prompt: [{ type: 'text', text: line }], is_steer: false });
+  // Opening the typed job can finish before the program is ready to take Escape.
+  if (line === 'HANG typed') await new Promise(done => setTimeout(done, 100));
   if (line.includes('BLOCKED')) {
     // A prompt hook of the person's own said no: Kimi completes the prompt as blocked and starts no turn.
     record('prompt.completed', { promptId: `p${turn}`, finishedAt: new Date().toISOString(), reason: 'blocked' });
@@ -83,8 +88,11 @@ async function take(line) {
   }
   const turnId = turn++;
   record('turn.prompt', { input: [{ type: 'text', text: line }], origin: { kind: 'user' } });
+  if (line.startsWith('CRASH')) crash(line.includes('LONG') ? 'long' : '');
+  if (line.includes('HANG_EXIT')) print('exit-test running\n');
   if (line.includes('HANG')) {
     hanging = turnId;
+    print(`waiting: ${line}\n`);
     return;
   }
   if (line.includes('ABORT') || line.includes('FAIL')) {

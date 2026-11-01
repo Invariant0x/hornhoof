@@ -7,8 +7,8 @@ import { TERM_CHUNK, type AgentEvent, type Limits, type NodeMessage, type Server
 import { claudeEvents, claudeInterrupted } from '../providers/claude.js';
 import { contentText } from '../providers/events.js';
 import { kimiContextSize } from '../providers/kimi.js';
-import { redact } from '../redact.js';
-import { tidy, type RunInput, type RunResult } from '../runner.js';
+import { jobDone, tidy, type RunInput, type RunResult } from '../runner.js';
+import type { ProgramOutput } from '../program-exit.js';
 import { Bridge } from './bridge.js';
 import { StreamMask } from './mask.js';
 import { acceptClaudeDialogs, claudeTranscript, findKimiWire, findRollout, prepareKimi, type TermProgram } from './programs.js';
@@ -29,6 +29,10 @@ function deferred<T>(): Deferred<T> {
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
+function exitError(output: string | null, signedOut: RegExp | null, fallback: JobError): JobError {
+  return output && signedOut?.test(output) ? 'not_logged_in' : fallback;
+}
+
 /* A turn running now: one Hornhoof sent, or one a person typed, whose events the host sends itself. A typed turn keeps
    what happened until Hornhoof answers its turn.open (early), and how it ended if it ended before that (over). */
 type Turn = {
@@ -38,7 +42,8 @@ type Turn = {
   seq: number;
   ref?: string;
   early?: AgentEvent[] | null;
-  over?: { message: string; error: JobError; sessionId: string | null } | null;
+  over?: { message: string; error: JobError; sessionId: string | null; output: string; programOutput?: ProgramOutput } | null;
+  toolToken?: string;
   opened?: Deferred<void>;
   /* A turn that only starts the program, until the program has its tools. A person who types meanwhile takes its place. */
   starting?: boolean;
@@ -49,6 +54,7 @@ type Agent = {
   key: string;
   name: string;
   program: TermProgram | null;
+  signedOut: RegExp | null;
   home: string;
   workDir: string;
   /* What the running program was started with; a turn that needs anything else starts it again. */
@@ -193,9 +199,7 @@ export class TerminalHost {
 
   async stop(): Promise<void> {
     this.closeViews();
-    for (const a of this.agents.values()) {
-      if (a.watch) clearInterval(a.watch);
-    }
+    for (const a of this.agents.values()) this.unwatch(a);
     this.bridge.stop();
     await this.opts.tmux.stopAll();
   }
@@ -207,7 +211,7 @@ export class TerminalHost {
   private agent(key: string): Agent {
     let a = this.agents.get(key);
     if (!a) {
-      a = { key, name: `a-${key}`, program: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, viewers: 0, up: false, watch: null, saying: Promise.resolve(), queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null };
+      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, viewers: 0, up: false, watch: null, saying: Promise.resolve(), queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null };
       this.agents.set(key, a);
     }
     return a;
@@ -223,12 +227,13 @@ export class TerminalHost {
 
   private async turnIn(a: Agent, job: TermJob): Promise<RunResult> {
     const { input, program } = job;
-    const fail = async (error: RunResult['error'], output?: string): Promise<RunResult> => ({ ok: false, sessionId: a.sessionId, result: '', output: output ?? (await this.screen(job.key)), error, limits: a.limits });
+    const fail = (error: RunResult['error'], output?: string) => this.failedTurn(a, job, error, output);
     /* A turn a person typed may still run, or wait for the rest of its log; Hornhoof's turn goes in after it, or into it
        once the time Hornhoof gave this turn is over. Nothing stops the program: only its own end or a person does. */
     const deadline = Date.now() + input.timeoutMs;
     for (this.drain(a); a.busy && Date.now() < deadline; this.drain(a)) await sleep(this.pollMs);
     await a.settling;
+    a.signedOut = job.signedOut;
 
     mkdirSync(input.workDir, { recursive: true });
     const urls = this.bridge.agent(job.key);
@@ -278,7 +283,7 @@ export class TerminalHost {
         if (program.kind === 'claude' && !input.sessionId && input.context && spec.sessionId) keepContext(input.workDir, spec.sessionId, input.context);
         a.tail = this.tailFor(a);
         const env = { ...lasting(input.env), ...spec.env };
-        await this.opts.tmux.launch(a.name, { cwd: input.workDir, command: spec.command, cols: this.cols, rows: this.rows, envFile: envFile(input.workDir, env) });
+        await this.opts.tmux.launch(a.name, { cwd: input.workDir, command: spec.command, cols: this.cols, rows: this.rows, envFile: envFile(input.workDir, env), outputDir: input.workDir });
         this.watch(a);
         if (!(await this.ready(a, job))) {
           const screen = await this.screen(job.key);
@@ -357,6 +362,12 @@ export class TerminalHost {
     }
   }
 
+  private async failedTurn(a: Agent, job: TermJob, error: RunResult['error'], output?: string): Promise<RunResult> {
+    const ended = error === 'agent_failed' || error === 'not_logged_in' ? await this.opts.tmux.exitSnapshot(a.name) : null;
+    const details = ended?.output ?? output ?? await this.screen(job.key);
+    return { ok: false, sessionId: a.sessionId, result: '', output: details, programOutput: ended?.programOutput, error: exitError(ended?.output ?? null, job.signedOut, error), limits: a.limits };
+  }
+
   /* While its program runs the host reads the agent's log, where a turn a person typed into Codex shows, and ends a typed
      turn whose program ended or that ran too long. Hornhoof's own turns look after themselves. */
   private watch(a: Agent): void {
@@ -370,19 +381,29 @@ export class TerminalHost {
     a.watch.unref();
   }
 
+  private unwatch(a: Agent): void {
+    if (a.watch) clearInterval(a.watch);
+    a.watch = null;
+  }
+
   private async look(a: Agent): Promise<void> {
     this.drain(a);
     if (a.turn && !a.turn.typed) return;
     const alive = await this.opts.tmux.alive(a.name);
     if (a.turn && !a.turn.typed) return;
     if (!alive) {
-      a.busy = false;
-      this.programEnded(a);
-      this.finishTyped(a, '', 'agent_failed');
-      if (a.watch) clearInterval(a.watch);
-      a.watch = null;
-      return;
+      await this.endedTyped(a);
     }
+  }
+
+  private async endedTyped(a: Agent): Promise<void> {
+    const turn = a.turn;
+    const ended = turn?.typed ? await this.opts.tmux.exitSnapshot(a.name) : null;
+    if (a.turn !== turn) return;
+    a.busy = false;
+    this.programEnded(a);
+    this.finishTyped(a, '', exitError(ended?.output ?? null, a.signedOut, 'agent_failed'), ended?.output ?? '', ended?.programOutput);
+    this.unwatch(a);
   }
 
   /* A person cleared the conversation in Claude Code, which goes on in a new session with a log of its own; or Kimi Code
@@ -662,14 +683,15 @@ export class TerminalHost {
     turn.early = null;
     if (m.jobId && m.toolToken) {
       turn.jobId = m.jobId;
+      turn.toolToken = m.toolToken;
       if (a.turn === turn) this.bridge.setToken(a.key, m.toolToken);
       for (const e of early) this.typedEvent(turn, e);
     }
     turn.opened?.resolve();
-    if (turn.over) this.typedDone(turn, turn.over.message, turn.over.error, turn.over.sessionId);
+    if (turn.over) this.typedDone(turn, turn.over.message, turn.over.error, turn.over.sessionId, turn.over.output, turn.over.programOutput);
   }
 
-  private finishTyped(a: Agent, message: string, error: JobError = null): void {
+  private finishTyped(a: Agent, message: string, error: JobError = null, output = '', programOutput?: ProgramOutput): void {
     const turn = a.turn;
     if (!turn?.typed) return;
     a.turn = null;
@@ -678,14 +700,14 @@ export class TerminalHost {
     /* Hornhoof hears the limits with the next turn it runs. */
     void this.planLimits(a);
     /* Hornhoof has not answered yet: the end goes out with its answer. */
-    if (turn.early) turn.over = { message, error, sessionId: a.sessionId };
-    else this.typedDone(turn, message, error, a.sessionId);
+    if (turn.early) turn.over = { message, error, sessionId: a.sessionId, output, programOutput };
+    else this.typedDone(turn, message, error, a.sessionId, output, programOutput);
   }
 
-  private typedDone(turn: Turn, message: string, error: JobError, sessionId: string | null): void {
+  private typedDone(turn: Turn, message: string, error: JobError, sessionId: string | null, output: string, programOutput?: ProgramOutput): void {
     if (!turn.jobId) return;
-    const result = error === 'cancelled' ? 'Stopped.' : error ? '' : redact(message, this.opts.secrets());
-    this.opts.send({ type: 'job.done', jobId: turn.jobId, ok: !error, sessionId, result, tail: '', error });
+    const result = error === 'cancelled' ? 'Stopped.' : error ? '' : message;
+    this.opts.send(jobDone(turn.jobId, { ok: !error, sessionId, result, output, programOutput, error, limits: null }, [...this.opts.secrets(), ...(turn.toolToken ? [turn.toolToken] : [])]));
   }
 
   /* Turns people typed that run now: they count as running when the node says hello again. */

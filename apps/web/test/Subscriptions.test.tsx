@@ -45,12 +45,12 @@ describe('Subscriptions', () => {
     render(<Subscriptions me={ME} />);
     const list = within(await screen.findByRole('row', { name: /^Claude\b/ })).getByRole('list', { name: 'Limits' });
     const [five, seven, two, month, ...rest] = within(list).getAllByRole('listitem');
-    expect(five).toHaveTextContent(/^5 hours42%resets at /);
+    expect(five).toHaveTextContent(/^5 hours42%resets in /);
     expect(five!.querySelector('.bar')).not.toHaveClass('hi');
-    expect(seven).toHaveTextContent(/^7 days93%$/);
+    expect(seven).toHaveTextContent(/^7 days93%Reset time unknown$/);
     expect(seven!.querySelector('.bar')).toHaveClass('max');
-    expect(two).toHaveTextContent(/^2 hours5%$/);
-    expect(month).toHaveTextContent(/^Month6%$/);
+    expect(two).toHaveTextContent(/^2 hours5%Reset time unknown$/);
+    expect(month).toHaveTextContent(/^Month6%Reset time unknown$/);
     expect(rest).toEqual([]);
   });
 
@@ -64,14 +64,14 @@ describe('Subscriptions', () => {
     render(<Subscriptions me={ME} />);
     const rows = async (name: string) => within(within(await screen.findByRole('row', { name: new RegExp(`^${name}\\b`) })).getByRole('list', { name: 'Limits' })).getAllByRole('listitem');
     const [claudeFive, claudeSeven, ...claudeMore] = await rows('Claude');
-    expect(claudeFive).toHaveTextContent(/^5 hours30%$/);
+    expect(claudeFive).toHaveTextContent(/^5 hours30%Reset time unknown$/);
     expect(claudeSeven).toHaveTextContent(/^7 daysNo data yet$/);
     expect(claudeSeven!.querySelector('.bar')).toHaveClass('none');
-    expect(claudeMore.map(r => r.textContent)).toEqual(['7 days, Opus100%']);
+    expect(claudeMore.map(r => r.textContent)).toEqual(['7 days, Opus100%Reset time unknown']);
     const [codexFive, codexSeven] = await rows('Codex');
     expect(codexFive).toHaveTextContent(/^5 hoursNot on this plan$/);
-    expect(codexSeven).toHaveTextContent(/^7 days73%$/);
-    expect((await rows('Kimi')).map(r => r.textContent)).toEqual(['5 hours88%', '7 daysNot on this plan', 'Month6%']);
+    expect(codexSeven).toHaveTextContent(/^7 days73%Reset time unknown$/);
+    expect((await rows('Kimi')).map(r => r.textContent)).toEqual(['5 hours88%Reset time unknown', '7 daysNot on this plan', 'Month6%Reset time unknown']);
     const key = rowOf('Anthropic key ending 9f3a');
     expect(within(key).getByText('Pay as you go, no plan limits')).toBeInTheDocument();
     expect(within(key).queryByRole('list', { name: 'Limits' })).not.toBeInTheDocument();
@@ -81,7 +81,7 @@ describe('Subscriptions', () => {
     const limits = { status: 'rejected' as const, windows: [{ name: 'five_hour', utilization: 1, resetsAt: '2099-10-29T18:00:00.000Z' }] };
     mockApi({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, limits }] }], 'GET /api/machines': [200, { machines: MACHINES }] });
     render(<Subscriptions me={ME} />);
-    expect(within(await screen.findByRole('row', { name: /^Claude\b/ })).getByText(/^Limit reached, resets at /)).toBeInTheDocument();
+    expect(within(await screen.findByRole('row', { name: /^Claude\b/ })).getByText(/^Limit reached, resets in /)).toBeInTheDocument();
   });
 
   it('shows a window that started over since the plan last spoke as not known yet, and no reached limit for it', async () => {
@@ -94,8 +94,8 @@ describe('Subscriptions', () => {
     render(<Subscriptions me={ME} />);
     const row = await screen.findByRole('row', { name: /^Claude\b/ });
     const [five, seven] = within(within(row).getByRole('list', { name: 'Limits' })).getAllByRole('listitem');
-    expect(five).toHaveTextContent(/^5 hoursNo data yet$/);
-    expect(seven).toHaveTextContent(/^7 days40%resets at /);
+    expect(five).toHaveTextContent(/^5 hoursNo data yetReset time unknown$/);
+    expect(seven).toHaveTextContent(/^7 days40%resets in /);
     expect(within(row).queryByText(/^Limit reached/)).not.toBeInTheDocument();
   });
 
@@ -106,7 +106,7 @@ describe('Subscriptions', () => {
     };
     mockApi({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, limits }] }], 'GET /api/machines': [200, { machines: MACHINES }] });
     render(<Subscriptions me={ME} />);
-    expect(within(await screen.findByRole('row', { name: /^Claude\b/ })).getByText(/^Limit reached, resets at /)).toBeInTheDocument();
+    expect(within(await screen.findByRole('row', { name: /^Claude\b/ })).getByText(/^Limit reached, resets in /)).toBeInTheDocument();
   });
 
   it('says Built-in node offline for an API key whose node is down', async () => {
@@ -250,8 +250,8 @@ describe('Subscriptions', () => {
     expect(screen.getByText('Ждет входа')).toBeInTheDocument();
     expect(screen.getByText('Ждет машину')).toBeInTheDocument();
     const [five, seven] = within(within(rowOf('Claude')).getByRole('list', { name: 'Лимиты' })).getAllByRole('listitem');
-    expect(five).toHaveTextContent(/^5 часов42%сброс в /);
-    expect(seven).toHaveTextContent(/^7 дней10%$/);
+    expect(five).toHaveTextContent(/^5 часов42%До сброса /);
+    expect(seven).toHaveTextContent(/^7 дней10%Время сброса неизвестно$/);
     const [codexFive] = within(within(rowOf('Codex')).getByRole('list', { name: 'Лимиты' })).getAllByRole('listitem');
     expect(codexFive).toHaveTextContent(/^5 часовПока нет данных$/);
     expect(within(rowOf('Ключ Anthropic')).getByText('Оплата по факту, без лимитов плана')).toBeInTheDocument();

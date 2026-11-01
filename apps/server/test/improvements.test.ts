@@ -5,7 +5,7 @@ import { and, eq, inArray } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agentEvents, agents, companies, departments, improvements, jobs, subscriptions } from '../src/db/schema.js';
+import { agentEvents, agents, companies, departments, improvements, jobs, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
 import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until } from './helpers.js';
 import { agentState } from '../src/modules/conversation/queue.js';
 
@@ -55,6 +55,14 @@ const call = async (client: Client, name: string, args: object = {}) => (await c
 const names = async (client: Client) => (await client.listTools()).tools.map(t => t.name);
 const waiting = (db: Awaited<ReturnType<typeof company>>['db'], agentId: string) =>
   db.select().from(jobs).where(and(eq(jobs.agentId, agentId), inArray(jobs.status, ['queued', 'running'])));
+const work = (department: string, title: string) => ({ department, title, brief: title, body: title });
+
+async function instruct(app: FastifyInstance, db: Awaited<ReturnType<typeof company>>['db'], ceo: string, agentId: string): Promise<void> {
+  await db.update(jobs).set({ status: 'done', toolTokenHash: null }).where(and(eq(jobs.agentId, agentId), eq(jobs.toolTokenHash, hashToken(TOKENS.orchestrator))));
+  const told = await app.inject({ method: 'POST', url: `/api/agents/${agentId}/messages`, payload: { text: 'Take this improvement into work.' }, ...as(ceo) });
+  expect(told.statusCode).toBe(202);
+  await db.update(jobs).set({ status: 'running', startedAt: new Date(), toolTokenHash: hashToken(TOKENS.orchestrator) }).where(eq(jobs.id, told.json().jobId));
+}
 
 describe('heads and the orchestrator', () => {
   it('let a head tell the orchestrator what came of its work, in the window people see', async () => {
@@ -113,6 +121,83 @@ describe('improvements', () => {
     expect((await call(orch, 'close_improvement', { improvement: id, done: true, text: 'The node image installs jq from the next update.' })).isError).toBeFalsy();
     const [row] = await db.select().from(improvements).where(eq(improvements.id, id));
     expect(row).toMatchObject({ status: 'done', result: 'The node image installs jq from the next update.' });
+  });
+
+  it('are taken and linked to tasks when a person asks the orchestrator for them', async () => {
+    const { app, db, ceo, orchestrator, dev } = await company();
+    const wendy = await mcp(app, TOKENS.wendy);
+    const { improvement: id } = JSON.parse((await call(wendy, 'propose_improvement', { title: 'Install jq', text: 'Agents looked for jq.' })).content[0]!.text);
+    const { improvement: openId } = JSON.parse((await call(wendy, 'propose_improvement', { title: 'Leave open', text: 'Not requested yet.' })).content[0]!.text);
+    await instruct(app, db, ceo, orchestrator.id);
+    const published: string[] = [];
+    const publish = app.ctx.bus.publish.bind(app.ctx.bus);
+    app.ctx.bus.publish = (companyId, message) => {
+      published.push(message.type);
+      publish(companyId, message);
+    };
+    const orch = await mcp(app, TOKENS.orchestrator);
+    const planned = await call(orch, 'plan_turn', { title: 'Install jq', goal: 'Make jq available.', improvement: id, tasks: [work(dev.id, 'Write installer'), work(dev.id, 'Add coverage')] });
+    expect(planned.isError).toBeFalsy();
+    const added = await call(orch, 'add_tasks', { turn: 1, improvement: id, tasks: [work(dev.id, 'Document jq')] });
+    expect(added.isError).toBeFalsy();
+    app.ctx.bus.publish = publish;
+    const list = async () => (await app.inject({ url: '/api/improvements', ...as(ceo) })).json().improvements;
+    const taken = (await list()).find((i: { id: string }) => i.id === id);
+    expect(taken).toMatchObject({ status: 'taken', decidedBy: 'Ivan' });
+    expect(taken.tasks).toEqual([
+      { id: expect.any(String), number: 1, title: 'Write installer' },
+      { id: expect.any(String), number: 2, title: 'Add coverage' },
+      { id: expect.any(String), number: 3, title: 'Document jq' },
+    ]);
+    expect(new Set(taken.tasks.map((t: { id: string }) => t.id)).size).toBe(3);
+    expect((await list()).find((i: { id: string }) => i.id === openId)).toMatchObject({ status: 'open', decidedBy: null, tasks: [] });
+    expect(published).toContain('improvements');
+  });
+
+  it('keep task links when closed and refuse more work on a done improvement', async () => {
+    const { app, db, ceo, orchestrator, dev } = await company();
+    const { improvement: id } = JSON.parse((await call(await mcp(app, TOKENS.wendy), 'propose_improvement', { title: 'Install jq', text: 'Agents looked for jq.' })).content[0]!.text);
+    await instruct(app, db, ceo, orchestrator.id);
+    const orch = await mcp(app, TOKENS.orchestrator);
+    expect((await call(orch, 'plan_turn', { title: 'Install jq', goal: 'Make jq available.', improvement: id, tasks: [work(dev.id, 'Write installer')] })).isError).toBeFalsy();
+    expect((await call(orch, 'close_improvement', { improvement: id, done: true, text: 'Installed and documented.' })).isError).toBeFalsy();
+    const closed = (await app.inject({ url: '/api/improvements', ...as(ceo) })).json().improvements.find((i: { id: string }) => i.id === id);
+    expect(closed).toMatchObject({ status: 'done', result: 'Installed and documented.', tasks: [{ id: expect.any(String), number: 1, title: 'Write installer' }] });
+    const rejected = await call(orch, 'plan_turn', { title: 'Done already', goal: 'Reject more work.', improvement: id, tasks: [work(dev.id, 'Duplicate')] });
+    expect(rejected.isError).toBe(true);
+    expect(await db.select().from(tasks)).toHaveLength(1);
+  });
+
+  it('refuses to take an improvement without a human instruction or when task creation fails', async () => {
+    const { app, db, ceo, orchestrator, dev } = await company();
+    const { improvement: id } = JSON.parse((await call(await mcp(app, TOKENS.wendy), 'propose_improvement', { title: 'Install jq', text: 'Agents looked for jq.' })).content[0]!.text);
+    const orch = await mcp(app, TOKENS.orchestrator);
+    const unauthorized = await call(orch, 'plan_turn', { title: 'Install jq', goal: 'Make jq available.', improvement: id, tasks: [work(dev.id, 'Write installer')] });
+    expect(unauthorized.isError).toBe(true);
+    expect((await db.select().from(improvements).where(eq(improvements.id, id)))[0]).toMatchObject({ status: 'open', decidedBy: null });
+    expect(await db.select().from(tasks)).toEqual([]);
+    await instruct(app, db, ceo, orchestrator.id);
+    const refused = await call(orch, 'plan_turn', { title: 'Bad task', goal: 'Fail before taking.', improvement: id, tasks: [work('00000000-0000-4000-8000-000000000099', 'Unknown department')] });
+    expect(refused.isError).toBe(true);
+    expect((await db.select().from(improvements).where(eq(improvements.id, id)))[0]).toMatchObject({ status: 'open', decidedBy: null });
+    expect(await db.select().from(tasks)).toEqual([]);
+  });
+
+  it('rejects another company improvement and never lists a task from another company', async () => {
+    const { app, db, ceo, orchestrator, dev, wendy } = await company();
+    const { improvement: id } = JSON.parse((await call(await mcp(app, TOKENS.wendy), 'propose_improvement', { title: 'Install jq', text: 'Agents looked for jq.' })).content[0]!.text);
+    const [other] = await db.insert(companies).values({ name: 'Other', singleton: false }).returning();
+    const [foreign] = await db.insert(improvements).values({ companyId: other!.id, agentId: wendy.id, title: 'Foreign', text: 'Not yours.' }).returning();
+    await instruct(app, db, ceo, orchestrator.id);
+    const refused = await call(await mcp(app, TOKENS.orchestrator), 'plan_turn', { title: 'Foreign', goal: 'Reject foreign work.', improvement: foreign!.id, tasks: [work(dev.id, 'Write installer')] });
+    expect(refused.isError).toBe(true);
+    expect((await db.select().from(improvements).where(eq(improvements.id, foreign!.id)))[0]!.status).toBe('open');
+    expect(await db.select().from(tasks)).toEqual([]);
+    const [foreignTask] = await db.insert(tasks).values({ companyId: other!.id, number: 1, title: 'Foreign task' }).returning();
+    await db.insert(taskEvents).values({ companyId: other!.id, taskId: foreignTask!.id, kind: 'created', data: { improvement: id } });
+    const listed = (await app.inject({ url: '/api/improvements', ...as(ceo) })).json().improvements;
+    expect(listed.find((i: { id: string }) => i.id === id)).toMatchObject({ status: 'open', tasks: [] });
+    expect(listed.some((i: { id: string }) => i.id === foreign!.id)).toBe(false);
   });
 
   it('stay waiting when the orchestrator has no subscription to take one on', async () => {
