@@ -26,7 +26,7 @@ function nextStep(task: Task, agentId: string): { finish: string; stuck: string 
 }
 
 /* Wakes whose text an employee wrote: the reasons of a gate, a report, a block, a cancellation. */
-const EMPLOYEES_SAY: WakeWhy[] = ['changes', 'reported', 'blocked', 'cancelled', 'review'];
+const EMPLOYEES_SAY: WakeWhy[] = ['changes', 'reported', 'blocked', 'cancelled', 'review', 'unblocked'];
 
 /* The turn's prompt: which task, why the agent wakes, and what is expected of it, then what else it should know. Always
    English, like the agents' instructions. */
@@ -70,6 +70,7 @@ function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string {
     case 'blocked':
       /* The orchestrator does not rewrite a department's task: he gives the department a new one. */
       if (agent.kind === 'orchestrator') return `${ref}, which you gave out, cannot go on${said}Cancel it with cancel_task and give the department a task it can do with add_tasks, or tell the CEO what stands in the way.`;
+      if (task.executorAgentId) return `${ref}, which you gave out, cannot go on${said}Answer it with comment, which opens it again for its executor. Rewrite it with update_task only when its goal changed, give it to someone else, or cancel it.`;
       return `${ref}, which you gave out, cannot go on${said}Unblock it: rewrite it with update_task, give it to someone else, or cancel it.`;
     case 'cancelled':
       return `${ref}, which you gave out, was cancelled${said}Go on with ${own} without it.`;
@@ -78,6 +79,8 @@ function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string {
       return `${ref} comes after ${w.text ?? 'a task'}, which was cancelled, so it still waits and nobody works on it. ${read} Give it what it waits for from now on with update_task (after, [] to start it now), or cancel it with cancel_task.`;
     case 'answered':
       return `A person answered on ${ref}${said}Go on with it.`;
+    case 'unblocked':
+      return `Whoever gave you ${ref} answered what blocked it${said}Go on with the work, then ${finish}. If you still cannot go on, ${stuck}.`;
     case 'comment':
       return `A person commented on ${ref}${said}Take it into account and go on.`;
     case 'updated':
@@ -270,7 +273,7 @@ export async function stopTurns(ctx: Ctx, taskIds: string[], keep?: string): Pro
 /* Wakes that bring the agent new words on its task, which a turn on that task takes in while it runs. */
 const LIVE_WAKES: WakeWhy[] = ['comment', 'answered', 'updated'];
 /* Wakes that would set the holder to work on its task, held back while the task waits for the tasks it comes after. */
-const TO_WORK: WakeWhy[] = ['assigned', 'updated', 'comment', 'answered', 'reminder', 'go_on', 'subtasks'];
+const TO_WORK: WakeWhy[] = ['assigned', 'updated', 'comment', 'answered', 'unblocked', 'reminder', 'go_on', 'subtasks'];
 
 async function queueWake(ctx: Ctx, w: Wake): Promise<boolean> {
   const { db } = ctx;

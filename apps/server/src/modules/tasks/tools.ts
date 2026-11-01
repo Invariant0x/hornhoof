@@ -153,12 +153,18 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
 
   server.registerTool(
     'comment',
-    { description: 'Adds a note to a task\'s log for everyone on it. It wakes nobody; to hand work on, use the task\'s own moves.', inputSchema: { task: Ref, text: z.string().trim().min(1).max(4000) } },
+    {
+      description:
+        "Adds a note to a task's log for everyone on it. It wakes nobody, but for one way to answer: whoever gave out a member task that is blocked answers it with a comment, " +
+        'which opens it again and wakes its executor with your words. To hand work on, use the task\'s own moves.',
+      inputSchema: { task: Ref, text: z.string().trim().min(1).max(4000) },
+    },
     async ({ task: ref, text }) =>
       run(async () => {
         const { task } = await find(ref);
         plain(task, text);
-        return { text: `Noted on #${task.number}.`, moved: await comment(ctx, { agentId: job.agentId }, task.id, text) };
+        const moved = await comment(ctx, { agentId: job.agentId }, task.id, text);
+        return { text: moved.wakes.length ? `Noted on #${task.number}. It is open again, and its executor goes on with your answer.` : `Noted on #${task.number}.`, moved };
       }),
   );
 

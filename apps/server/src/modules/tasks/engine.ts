@@ -11,7 +11,7 @@ export type Task = typeof tasks.$inferSelect;
 export type Request = typeof requests.$inferSelect;
 /* Who moves a task: a person from the web app, or an agent from its tools. */
 export type Actor = { personId: string; agentId?: undefined } | { agentId: string; personId?: undefined };
-export type WakeWhy = 'assigned' | 'review' | 'changes' | 'stuck_at_gate' | 'done' | 'reported' | 'blocked' | 'cancelled' | 'answered' | 'comment' | 'updated' | 'reminder' | 'go_on' | 'turn' | 'switched' | 'explain' | 'subtasks' | 'after_cancelled' | 'merge';
+export type WakeWhy = 'assigned' | 'review' | 'changes' | 'stuck_at_gate' | 'done' | 'reported' | 'blocked' | 'cancelled' | 'answered' | 'comment' | 'updated' | 'reminder' | 'go_on' | 'turn' | 'switched' | 'explain' | 'subtasks' | 'after_cancelled' | 'merge' | 'unblocked';
 /* An agent that has to act on a task now; Hornhoof queues a turn for it. note: what else it should know, after the rest. */
 export type Wake = { agentId: string; taskId: string; why: WakeWhy; text?: string; note?: string };
 export type Moved = { task: Task; wakes: Wake[] };
@@ -811,10 +811,16 @@ export async function updateTask(ctx: Live, agentId: string, taskId: string, c: 
   return { task: row, wakes };
 }
 
-/* A comment goes into the log. A person's comment reaches whoever holds the task; an agent's wakes nobody. */
+/* A comment goes into the log. A person's comment reaches whoever holds the task; an agent's wakes nobody, but for one
+   that answers a blocked member task it gave out: the task opens again and its executor goes on with the answer. */
 export async function comment(ctx: Live, actor: Actor, taskId: string, text: string): Promise<Moved> {
   const task = await loadTask(ctx.db, taskId);
   if (!text.trim()) throw refuse(400, 'task_invalid', 'A comment needs text.');
+  if (actor.agentId && task.status === 'blocked' && task.executorAgentId && task.assigneeAgentId === task.executorAgentId && (await gaveOut(ctx.db, task, actor.agentId))) {
+    const wakes: Wake[] = [{ agentId: task.executorAgentId, taskId, why: 'unblocked', text: text.trim() }];
+    const row = await move(ctx, task, { status: 'open', silent: 0 }, { kind: 'comment', actor, text: text.trim() }, undefined, wakes);
+    return { task: row, wakes };
+  }
   const wake = actor.personId && task.assigneeAgentId && !CLOSED.includes(task.status);
   const wakes: Wake[] = wake ? [{ agentId: task.assigneeAgentId!, taskId, why: 'comment', text: text.trim() }] : [];
   await ctx.db.transaction(async tx => {
@@ -823,6 +829,13 @@ export async function comment(ctx: Live, actor: Actor, taskId: string, text: str
   });
   published(ctx, task);
   return { task, wakes };
+}
+
+/* Whoever gave the task out: the agent that made it, or the orchestrator, who runs every task. */
+async function gaveOut(db: Db, task: Task, agentId: string): Promise<boolean> {
+  if (task.createdByAgentId === agentId) return true;
+  const [agent] = await db.select({ kind: agents.kind }).from(agents).where(eq(agents.id, agentId));
+  return agent?.kind === 'orchestrator';
 }
 
 /* What an agent asks: words, an approval of an exact commit, or a pick of one of 2 to 4 ways. images: pictures it sent

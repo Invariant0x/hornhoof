@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import { agents, companies, departments, people, requests, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
 import { answer, ask, blocked, cancel, comment, createTask, report, submit, updateTask, verdict } from '../src/modules/tasks/engine.js';
+import { wakePrompt } from '../src/modules/tasks/wake.js';
 import { setUpCompany, testApp } from './helpers.js';
 
 async function company() {
@@ -35,6 +36,27 @@ const reason = (p: Promise<unknown>) => p.then(() => 'ok', (err: { reason?: stri
 const woken = (r: { wakes: { agentId: string; why: string }[] }) => r.wakes.map(w => [w.agentId, w.why]);
 
 describe('the task engine', () => {
+  it('opens a blocked member task again when whoever gave it out answers in a comment, and wakes its executor with it', async () => {
+    const { ctx, db, orchestrator, head, bruno, rita, memberTask, read } = await company();
+    const task = await memberTask();
+    await blocked(ctx, bruno.id, task.id, 'Which currency?');
+    const aside = await comment(ctx, { agentId: rita.id }, task.id, 'I would ask too.');
+    expect([aside.wakes, (await read(task.id)).status]).toEqual([[], 'blocked']);
+    const answered = await comment(ctx, { agentId: head.id }, task.id, 'Euros only.');
+    expect(answered.task).toMatchObject({ status: 'open', assigneeAgentId: bruno.id });
+    expect(answered.wakes).toEqual([{ agentId: bruno.id, taskId: task.id, why: 'unblocked', text: 'Euros only.' }]);
+    const [me] = await db.select().from(agents).where(eq(agents.id, bruno.id));
+    const prompt = wakePrompt(me!, answered.task, answered.wakes[0]!);
+    expect(prompt).toContain('answered what blocked it');
+    expect(prompt).toContain('Euros only.');
+    expect(prompt).toContain('blocked');
+    const [hana] = await db.select().from(agents).where(eq(agents.id, head.id));
+    const stopped = await blocked(ctx, bruno.id, task.id, 'And the rounding?');
+    expect(wakePrompt(hana!, stopped.task, stopped.wakes[0]!)).toContain('Answer it with comment, which opens it again for its executor');
+    expect((await comment(ctx, { agentId: orchestrator.id }, task.id, 'Round half up.')).task.status).toBe('open');
+    expect(woken(await comment(ctx, { agentId: head.id }, task.id, 'Thanks.'))).toEqual([]);
+  });
+
   it("gives a person's task to the department head and wakes the head", async () => {
     const { ctx, db, CEO, dev, head } = await company();
     const res = await createTask(ctx, CEO, { title: 'Payments', brief: 'Take card payments.', body: 'Stripe checkout.', departmentId: dev.id, assigneeAgentId: head.id });
