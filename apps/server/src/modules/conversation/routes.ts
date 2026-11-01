@@ -9,7 +9,8 @@ import { answerDirectly } from '../tasks/engine.js';
 import { wakeAll } from '../tasks/wake.js';
 import { listEvents } from '../events/store.js';
 import { FIRST_TURN, turnPrompt } from './prompt.js';
-import { agentState, cancelJob, enqueueTurn, insertTurn, onAgent, pump } from './queue.js';
+import { agentState, enqueueTurn, insertTurn, onAgent, pump } from './queue.js';
+import { cancelJob } from '../tasks/wake.js';
 
 const EventsQuery = z.object({ after: z.coerce.number().int().min(0).default(0) });
 const MessageBody = z.object({ text: z.string().trim().min(1).max(4000) });

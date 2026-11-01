@@ -6,7 +6,7 @@ import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agentChanges, agentEvents, agents, companies, departments, jobs, people, proposals, requests, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
-import { afterJob } from '../src/modules/conversation/queue.js';
+import { afterJob } from '../src/modules/tasks/wake.js';
 import { identityOf } from '../src/modules/nodes/hub.js';
 import { ask, createTask } from '../src/modules/tasks/engine.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';

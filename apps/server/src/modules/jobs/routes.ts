@@ -7,7 +7,7 @@ import { requireCompanyScope, requirePerson, type Person } from '../../auth/sess
 import type { Db } from '../../db/client.js';
 import { agents, jobs, subscriptions } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import { cancelJob } from '../conversation/queue.js';
+import { cancelJob } from '../tasks/wake.js';
 import { identityOf } from '../nodes/hub.js';
 import { dispatchJob, TEST_PROMPT, TEST_TIMEOUT_MS } from './dispatch.js';
 import { jobView, publicJob } from './views.js';

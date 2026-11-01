@@ -1,11 +1,11 @@
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import { agentEvents, agents, companies, departments, jobs, people, personAccess, requests, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
-import { afterJob, agentState, enqueueTurn, openTypedTurn } from '../src/modules/conversation/queue.js';
+import { agentState, enqueueTurn } from '../src/modules/conversation/queue.js';
 import { said } from '../src/modules/conversation/live.js';
 import { identityOf } from '../src/modules/nodes/hub.js';
 import { answer, ask, comment, createTask, GOING_ON_TURNS, report, submit, updateTask } from '../src/modules/tasks/engine.js';
-import { SILENT_TURNS, startWork, wakeAll, wakeLeftBehind, wakePrompt } from '../src/modules/tasks/wake.js';
+import { afterJob, SILENT_TURNS, startWork, typedTurn, wakeAll, wakeLeftBehind, wakePrompt } from '../src/modules/tasks/wake.js';
 import { as, connectNode, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
 async function company() {
@@ -53,7 +53,7 @@ describe('a person who speaks to an agent directly', () => {
   it("tells a stuck agent how to go on by typing into its terminal, and the task goes on", async () => {
     const c = await stuck();
     expect(await c.db.select({ status: tasks.status }).from(tasks).where(eq(tasks.id, c.task.id))).toEqual([{ status: 'waiting' }]);
-    expect(await openTypedTurn(c.ctx, identityOf(c.sub), c.bruno.id, 'Run the tests first, then submit.', c.ceo.id)).not.toBeNull();
+    expect(await typedTurn(c.ctx, identityOf(c.sub), c.bruno.id, 'Run the tests first, then submit.', c.ceo.id)).not.toBeNull();
     expect(await requestsOf(c)).toEqual([{ kind: 'stuck', status: 'answered', answer: 'Run the tests first, then submit.', answeredBy: c.ceo.id }]);
     expect(await c.db.select({ status: tasks.status, silent: tasks.silent }).from(tasks).where(eq(tasks.id, c.task.id))).toEqual([{ status: 'working', silent: 0 }]);
     /* After the typed turn the task's own turn follows, so a typed turn that goes nowhere still leaves the task watched. */
@@ -67,7 +67,7 @@ describe('a person who speaks to an agent directly', () => {
     const [sales] = await c.db.insert(departments).values({ companyId: c.dev.companyId, templateKey: 'sales', roleCode: 'SAL' }).returning();
     const [maria] = await c.db.insert(people).values({ companyId: c.dev.companyId, name: 'Maria', email: 'maria@acme.com', status: 'active', scopeKind: 'listed' }).returning();
     await c.db.insert(personAccess).values({ companyId: c.dev.companyId, personId: maria!.id, departmentId: sales!.id });
-    expect(await openTypedTurn(c.ctx, identityOf(c.sub), c.bruno.id, 'Skip the tests.', maria!.id)).not.toBeNull();
+    expect(await typedTurn(c.ctx, identityOf(c.sub), c.bruno.id, 'Skip the tests.', maria!.id)).not.toBeNull();
     expect(await requestsOf(c)).toEqual([{ kind: 'stuck', status: 'open', answer: null, answeredBy: null }]);
     expect(await c.db.select({ status: tasks.status }).from(tasks).where(eq(tasks.id, c.task.id))).toEqual([{ status: 'waiting' }]);
   });

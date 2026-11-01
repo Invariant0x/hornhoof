@@ -792,3 +792,15 @@ export async function answerDirectly(ctx: Live, personId: string, agentId: strin
   }
   return wakes;
 }
+
+/* A turn on a task went out: an open task is being worked on now. */
+export async function startWork(ctx: Live, jobId: string): Promise<void> {
+  const [job] = await ctx.db.select({ taskId: jobs.taskId, agentId: jobs.agentId }).from(jobs).where(eq(jobs.id, jobId));
+  if (!job?.taskId || !job.agentId) return;
+  const [row] = await ctx.db
+    .update(tasks)
+    .set({ status: 'working', version: sql`${tasks.version} + 1`, updatedAt: new Date() })
+    .where(and(eq(tasks.id, job.taskId), eq(tasks.status, 'open'), eq(tasks.assigneeAgentId, job.agentId)))
+    .returning();
+  if (row) published(ctx, row);
+}

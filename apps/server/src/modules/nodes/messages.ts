@@ -4,7 +4,8 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, subscriptions } from '../../db/schema.js';
 import { said } from '../conversation/live.js';
-import { afterJob, liveSubscription, openTypedTurn, pumpWaiting, refusedLimits, startProgram } from '../conversation/queue.js';
+import { liveSubscription, pumpWaiting, refusedLimits, startProgram } from '../conversation/queue.js';
+import { afterJob, typedTurn } from '../tasks/wake.js';
 import { appendEvent, publishWorking } from '../events/store.js';
 import { identityOf, sameNode, type NodeIdentity } from './hub.js';
 
@@ -124,7 +125,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       return;
     }
     case 'turn.open': {
-      const opened = await openTypedTurn(ctx, id, msg.agentKey, msg.text, ctx.terminals.typist(msg.agentKey));
+      const opened = await typedTurn(ctx, id, msg.agentKey, msg.text, ctx.terminals.typist(msg.agentKey));
       ctx.hub.send(id, { type: 'turn.opened', agentKey: msg.agentKey, jobId: opened?.jobId ?? null, toolToken: opened?.token ?? null, ...(msg.ref ? { ref: msg.ref } : {}) });
       return;
     }

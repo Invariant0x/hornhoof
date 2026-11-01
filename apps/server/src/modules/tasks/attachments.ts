@@ -7,7 +7,7 @@ import { requirePerson } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { attachments, departments, requests, tasks, type RequestOption } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import { jobOf } from '../tools/mcp.js';
+import { jobOf } from '../tools/job.js';
 import { refuse, taskSpot, type Task } from './engine.js';
 
 /* A screenshot fits comfortably; a turn sends a few dozen at most. */

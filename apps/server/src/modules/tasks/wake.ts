@@ -1,16 +1,17 @@
-import { and, count, desc, eq, gte, inArray, isNull, notInArray, or, sql } from 'drizzle-orm';
+import { and, count, desc, eq, gte, inArray, isNull, lte, ne, notInArray, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { loggable } from '../../errors.js';
 import { agentChanges, agentEvents, agents, jobs, requests, subscriptions, taskEvents, tasks } from '../../db/schema.js';
-import { afterJob, cancelJob, insertTurn, limitUntil, liveSubscription, onAgent, orchestratorOf, pump } from '../conversation/queue.js';
+import { conversationOf, GONE_ALONG, insertTurn, limitUntil, liveSubscription, onAgent, openTypedTurn, orchestratorOf, pump } from '../conversation/queue.js';
 import { sayLive } from '../conversation/live.js';
 import { quote } from '../conversation/prompt.js';
-import { appendEvent } from '../events/store.js';
-import { CLOSED, GATE_ROUNDS, leaveWork, NOT_A_MOVE, published, regateWaiting, silentTurn, taskSpot, wentOn, type Actor, type Task, type Wake, type WakeWhy } from './engine.js';
+import { appendEvent, publishWorking } from '../events/store.js';
+import { identityOf, type NodeIdentity } from '../nodes/hub.js';
+import { answerDirectly, CLOSED, GATE_ROUNDS, leaveWork, NOT_A_MOVE, published, regateWaiting, silentTurn, taskSpot, wentOn, type Actor, type Task, type Wake, type WakeWhy } from './engine.js';
 import { wakeQueued, wakesLeft } from './outbox.js';
 import { settle, tell } from './turns.js';
 
-export { SILENT_TURNS } from './engine.js';
+export { SILENT_TURNS, startWork } from './engine.js';
 
 type Agent = typeof agents.$inferSelect;
 
@@ -277,18 +278,6 @@ async function queueWake(ctx: Ctx, w: Wake): Promise<boolean> {
   });
 }
 
-/* A turn on a task went out: an open task is being worked on now. */
-export async function startWork(ctx: Ctx, jobId: string): Promise<void> {
-  const [job] = await ctx.db.select({ taskId: jobs.taskId, agentId: jobs.agentId }).from(jobs).where(eq(jobs.id, jobId));
-  if (!job?.taskId || !job.agentId) return;
-  const [row] = await ctx.db
-    .update(tasks)
-    .set({ status: 'working', version: sql`${tasks.version} + 1`, updatedAt: new Date() })
-    .where(and(eq(tasks.id, job.taskId), eq(tasks.status, 'open'), eq(tasks.assigneeAgentId, job.agentId)))
-    .returning();
-  if (row) published(ctx, row);
-}
-
 /* The open task the agent holds after a turn about this one: the task itself, or the task it gave this one out from. */
 async function heldTask(ctx: Ctx, agentId: string, taskId: string): Promise<Task | null> {
   const holds = (t: Task | undefined) => (t && (t.assigneeAgentId === agentId || t.panel.includes(agentId)) && !CLOSED.includes(t.status) ? t : null);
@@ -355,4 +344,55 @@ async function checkHeld(ctx: Ctx, job: typeof jobs.$inferSelect & { agentId: st
     throw err;
   });
   if (moved) await wakeAll(ctx, moved.wakes);
+}
+
+/* The other tasks whose turns went out inside this one: marked gone while it ran, as an agent runs one turn at a time. */
+async function carriedTasks(ctx: Ctx, job: { agentId: string; taskId: string; startedAt: Date | null; finishedAt: Date | null }): Promise<string[]> {
+  if (!job.startedAt) return [];
+  const rows = await ctx.db
+    .selectDistinct({ taskId: jobs.taskId })
+    .from(jobs)
+    .where(and(conversationOf(job.agentId), eq(jobs.status, 'done'), eq(jobs.result, GONE_ALONG), ne(jobs.taskId, job.taskId), gte(jobs.startedAt, job.startedAt), lte(jobs.startedAt, job.finishedAt ?? new Date())));
+  return rows.flatMap(r => (r.taskId ? [r.taskId] : []));
+}
+
+/* A finished turn: a failure or a stop goes into the conversation, a turn that left a task it carried where it was is
+   caught, then the next turn goes out. */
+export async function afterJob(ctx: Ctx, jobId: string): Promise<void> {
+  const [job] = await ctx.db
+    .select({ companyId: jobs.companyId, agentId: jobs.agentId, kind: jobs.kind, status: jobs.status, error: jobs.error, taskId: jobs.taskId, startedAt: jobs.startedAt, finishedAt: jobs.finishedAt })
+    .from(jobs)
+    .where(eq(jobs.id, jobId));
+  if (!job?.agentId || job.kind !== 'conversation') return;
+  if (job.status === 'failed') {
+    const stopped = job.error === 'cancelled';
+    await appendEvent(ctx, { companyId: job.companyId, agentId: job.agentId, jobId, kind: stopped ? 'stopped' : 'failed', data: stopped ? {} : { error: job.error } });
+  }
+  if (job.taskId) await checkLiveness(ctx, jobId, await carriedTasks(ctx, { ...job, agentId: job.agentId, taskId: job.taskId }));
+  await explainEnded(ctx, jobId);
+  await leaveIfOff(ctx, job.agentId);
+  await pump(ctx, job.agentId);
+}
+
+/* The node stops the program and reports the job as cancelled. A node that is away cannot, so the job ends here. */
+export async function cancelJob(ctx: Ctx, jobId: string): Promise<void> {
+  const [job] = await ctx.db.select({ job: jobs, sub: subscriptions }).from(jobs).innerJoin(subscriptions, eq(subscriptions.id, jobs.subscriptionId)).where(eq(jobs.id, jobId));
+  if (!job || job.job.status !== 'running') return;
+  if (ctx.hub.send(identityOf(job.sub), { type: 'job.cancel', jobId })) return;
+  const [ended] = await ctx.db
+    .update(jobs)
+    .set({ status: 'failed', error: 'cancelled', result: 'Stopped.', finishedAt: new Date() })
+    .where(and(eq(jobs.id, jobId), eq(jobs.status, 'running')))
+    .returning({ id: jobs.id });
+  if (!ended) return;
+  await publishWorking(ctx, job.job.companyId);
+  await afterJob(ctx, jobId);
+}
+
+/* A person typed into the agent's terminal: the turn opens, and what they typed answers what the agent asked them, out of
+   the agent's line, which the pump of its task's turn waits on. */
+export async function typedTurn(ctx: Ctx, node: NodeIdentity, agentId: string, text: string, personId: string | null): Promise<{ jobId: string; token: string } | null> {
+  const opened = await openTypedTurn(ctx, node, agentId, text, personId);
+  if (opened && personId) await wakeAll(ctx, await answerDirectly(ctx, personId, agentId, text));
+  return opened;
 }
