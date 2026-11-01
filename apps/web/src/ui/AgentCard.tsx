@@ -1,7 +1,8 @@
 import { useEffect, useId, useState } from 'react';
 import { api } from '../api';
 import { errorText, useLanguage, useT } from '../i18n';
-import { defaultEffort, effortsOf, PROVIDER_NAMES } from '../providers';
+import { effortsOf } from '@hornhoof/protocol/efforts';
+import { defaultEffort, PROVIDER_NAMES } from '../providers';
 import type { AgentCardView, Me, Part, SubView } from '../types';
 import { TimerSettings } from './TimerSettings';
 import { Ask } from './Ask';

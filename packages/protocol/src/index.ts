@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { effortsOf } from './efforts.js';
 
 /* Messages between the Hornhoof server and its nodes, one JSON object per WebSocket frame. */
 
@@ -80,14 +81,8 @@ export function effortFor(provider: ProviderId, chosen: string | null, efforts: 
   return efforts.length && !efforts.includes('max') ? efforts[efforts.length - 1]! : 'max';
 }
 
-/* The efforts a model takes. The program picks the Default model itself, and a model the subscription does not run runs
-   on it, so they take only the levels every model that names some takes. */
-export function effortsOf(models: ModelOption[], model: string | null): string[] {
-  const found = model ? models.find(m => m.id === model) : undefined;
-  if (found) return found.efforts ?? [];
-  const named = models.flatMap(m => (m.efforts?.length ? [m.efforts] : []));
-  return named.length ? named[0]!.filter(level => named.every(list => list.includes(level))) : [];
-}
+/* The efforts a model takes, from a module of its own that the web takes too. */
+export { effortsOf };
 
 const pick = (defaultEffort: string | undefined) => (defaultEffort ? { defaultEffort } : {});
 

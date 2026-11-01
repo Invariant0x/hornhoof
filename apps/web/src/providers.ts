@@ -1,3 +1,4 @@
+import { effortsOf } from '@hornhoof/protocol/efforts';
 import type { ModelOption, ProviderId } from './types';
 
 /* Product names stay as they are in every language. */
@@ -13,15 +14,6 @@ export const PROGRAM_NAMES: Record<ProviderId, string> = {
 /* Plans a person connects on their own machine. */
 export const PLAN_PROVIDERS = ['claude', 'codex', 'kimi', 'glm'] as const;
 export type PlanProvider = (typeof PLAN_PROVIDERS)[number];
-
-/* The levels a model thinks at. The program picks the Default model itself, and one the subscription does not run runs
-   on it, so they take only the levels every model that names some takes. */
-export function effortsOf(models: ModelOption[], model: string): string[] {
-  const found = model ? models.find(m => m.id === model) : undefined;
-  if (found) return found.efforts ?? [];
-  const named = models.flatMap(m => (m.efforts?.length ? [m.efforts] : []));
-  return named.length ? named[0]!.filter(level => named.every(list => list.includes(level))) : [];
-}
 
 /* The level the Default runs at, when Hornhoof knows it: Kimi at the most its model takes, Claude Code's Default model,
    Opus 5.5, at medium, else the model's own. */

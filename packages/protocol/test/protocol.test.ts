@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { API_MODELS, CLAUDE_ALIASES, cut, defaultEffortOf, lastBytes, TAIL_BYTES, DEPARTMENT_TEMPLATES, effortFor, effortsOf, modelsFor, parseNodeMessage, parseServerMessage, repoFolder, type AgentEvent, type NodeMessage, type ServerMessage } from '../src/index.js';
+import { effortsOf as light } from '../src/efforts.js';
 
 const LIMITS = { status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0.38, resetsAt: '2026-10-29T21:30:00.000Z' }] };
 
@@ -234,6 +235,10 @@ describe('models', () => {
     /* A model the subscription does not run runs on its Default. */
     expect(effortsOf(models, 'gone')).toEqual(['low']);
     expect(effortsOf([{ id: 'c', name: 'C' }], '')).toEqual([]);
+  });
+
+  it('gives the web the same effort rule from a module without the message schemas', () => {
+    expect(light).toBe(effortsOf);
   });
 });
 
