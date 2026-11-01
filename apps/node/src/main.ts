@@ -186,7 +186,7 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
       await learn([m.toolToken, m.secret, m.workspace?.repo?.token]);
       /* An agent's turn runs in its session; a test job, with no agent, runs as before. */
       const runIn = (input: Parameters<ProviderAdapter['run']>[0]) =>
-        host && terminal && input.agentKey ? host.run({ key: input.agentKey, program: terminal.program, bin: terminal.bin, home: terminal.home, signedOut: terminal.signedOut, input }) : chosen.run(input);
+        host && terminal && input.agentKey ? host.run({ jobId: m.jobId, key: input.agentKey, program: terminal.program, bin: terminal.bin, home: terminal.home, signedOut: terminal.signedOut, input }) : chosen.run(input);
       const tracked: ProviderAdapter = {
         ...chosen,
         run: async input => {

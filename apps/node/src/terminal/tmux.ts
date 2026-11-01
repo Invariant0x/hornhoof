@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { JobUser } from '../isolation.js';
+import type { PaneObservation } from './phase.js';
 
 /* How agent sessions look and behave: no tmux bar, the wheel scrolls, the size follows the person who looks last, colours
    pass through, and a finished program leaves its last screen. */
@@ -83,9 +84,21 @@ export class Tmux {
   }
 
   /* A live program in the session's pane; false when the program ended or there is no such session. */
-  async alive(name: string): Promise<boolean> {
-    const dead = await this.run(['display-message', '-p', '-t', name, '#{pane_dead}']).catch(() => '1');
-    return dead.trim() === '0';
+  async alive(name: string, observe?: (observation: PaneObservation) => void): Promise<boolean> {
+    const report = (observation: PaneObservation) => {
+      try { observe?.(observation); } catch { /* Observation cannot change a pane decision. */ }
+    };
+    let dead: string;
+    try { dead = await this.run(['display-message', '-p', '-t', name, '#{pane_dead}']); }
+    catch {
+      report({ queryOk: false, paneDead: null, queryError: 'query_failed' });
+      return false;
+    }
+    const value = dead.trim();
+    report(value === '0' || value === '1'
+      ? { queryOk: true, paneDead: value === '1', queryError: null }
+      : { queryOk: false, paneDead: null, queryError: 'invalid_reply' });
+    return value === '0';
   }
 
   /* Starts the program in a new session, or in place of whatever the session ran before. */

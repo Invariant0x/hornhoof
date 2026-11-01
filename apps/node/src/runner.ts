@@ -5,6 +5,7 @@ import type { JobUser } from './isolation.js';
 import { redact } from './redact.js';
 import { readSessions, rememberSession } from './state.js';
 import { prepareRepo, type Git } from './workspace.js';
+import { PhaseStore, type PhaseAttempt } from './terminal/phase.js';
 
 export type RunInput = {
   /* The agent whose turn this is, from its workspace; a test job has none. */
@@ -32,6 +33,8 @@ export type RunInput = {
   onEvent?: (event: AgentEvent) => void;
   /* More environment for the program, such as git access to the agent's repository for this turn. */
   env?: Record<string, string>;
+  /* Local observation only; never part of a provider request or the node/server protocol. */
+  terminalPhase?: PhaseAttempt;
 };
 export type RunResult = { ok: boolean; sessionId: string | null; result: string; output: string; error: JobError | null; limits: Limits | null };
 export type LoginIo = { input: NodeJS.ReadableStream; output: NodeJS.WritableStream; urlFile: string };
@@ -135,6 +138,7 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
       .catch(() => {});
   };
   let res: RunResult;
+  const phase = untimed && msg.workspace?.key ? new PhaseStore(dir).begin(msg.workspace.key, msg.jobId, 'queued') : undefined;
   try {
     const { workDir, sessionId } = workDirFor(msg, dir);
     mkdirSync(workDir, { recursive: true });
@@ -160,11 +164,13 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
       tools,
       onEvent: emit,
       ...(env ? { env } : {}),
+      ...(phase ? { terminalPhase: phase } : {}),
     };
     const run = adapter.run(input).catch((err: unknown) => failed(message(err), 'agent_failed'));
     res = await (untimed ? run : withTimeout(run, msg.timeoutMs));
     if (res.sessionId) rememberSession(dir, res.sessionId, workDir);
   } catch (err) {
+    phase?.finish('runner_exception');
     res = failed(message(err), 'agent_failed');
   }
   await live;
@@ -172,6 +178,14 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
   if (signal?.aborted) res = { ...res, ok: false, result: 'Stopped.', error: 'cancelled' };
   const after = await adapter.secrets().catch(() => []);
   const secrets = [...before, ...after, ...given];
+  if (phase) {
+    phase.complete(res.ok, res.error === 'cancelled');
+    if (!res.ok) {
+      const summary = phase.summary();
+      res = { ...res, output: `${summary}\n\n${res.output}` };
+      try { onEvent?.(tidy({ kind: 'tool_result', ok: false, summary }, secrets)); } catch { /* Preserve the original failure. */ }
+    }
+  }
   return {
     type: 'job.done',
     jobId: msg.jobId,

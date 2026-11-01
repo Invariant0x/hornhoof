@@ -14,9 +14,10 @@ import { StreamMask } from './mask.js';
 import { acceptClaudeDialogs, claudeTranscript, findKimiWire, findRollout, prepareKimi, type TermProgram } from './programs.js';
 import { claudeStatusContext, claudeStatusLimits, codexRollout, kimiWire, LineTail, type WireNews } from './transcripts.js';
 import { envFile, type Tmux } from './tmux.js';
+import { sourceHash, type PhaseAttempt, type PhaseStore } from './phase.js';
 
 /* An agent's turn in its terminal: which program, where it keeps its sign-in, and what the runner hands every program. */
-export type TermJob = { key: string; program: TermProgram; bin: string; home: string; signedOut: RegExp; input: RunInput };
+export type TermJob = { jobId?: string; key: string; program: TermProgram; bin: string; home: string; signedOut: RegExp; input: RunInput };
 
 type Msg<T extends ServerMessage['type']> = Extract<ServerMessage, { type: T }>;
 type Deferred<T> = { promise: Promise<T>; resolve(v: T): void };
@@ -42,6 +43,7 @@ type Turn = {
   opened?: Deferred<void>;
   /* A turn that only starts the program, until the program has its tools. A person who types meanwhile takes its place. */
   starting?: boolean;
+  phase?: PhaseAttempt;
 };
 type JobError = RunResult['error'];
 
@@ -95,6 +97,7 @@ type Agent = {
   starting: Promise<unknown> | null;
   /* What a new Kimi session was told from before, kept by the session's id once Kimi names it. */
   keep: string | null;
+  phaseStore?: PhaseStore;
 };
 
 type View = { child: ChildProcess; key: string; write: boolean; mask: StreamMask; decoder: StringDecoder; pending: string; timer: NodeJS.Timeout | null; quiet: NodeJS.Timeout | null };
@@ -121,6 +124,7 @@ type Options = {
 };
 
 const WAITING = 'This agent starts with its next turn.';
+const HOST_SOURCE_HASH = sourceHash(import.meta.url);
 const STOP_WAIT_MS = 5000;
 /* How often the host presses Enter again for a prompt the program did not take. */
 const ENTER_TRIES = 3;
@@ -223,6 +227,8 @@ export class TerminalHost {
 
   private async turnIn(a: Agent, job: TermJob): Promise<RunResult> {
     const { input, program } = job;
+    const phase = input.terminalPhase?.matchesJob(job.jobId) ? input.terminalPhase : undefined;
+    if (phase) a.phaseStore = phase.store;
     const fail = async (error: RunResult['error'], output?: string): Promise<RunResult> => ({ ok: false, sessionId: a.sessionId, result: '', output: output ?? (await this.screen(job.key)), error, limits: a.limits });
     /* A turn a person typed may still run, or wait for the rest of its log; Hornhoof's turn goes in after it, or into it
        once the time Hornhoof gave this turn is over. Nothing stops the program: only its own end or a person does. */
@@ -249,7 +255,9 @@ export class TerminalHost {
     const hash = hashOf({ kind: program.kind, bin: job.bin, model: input.model, effort: input.effort ?? null, compactWindow: input.compactWindow ?? null, instructions: input.instructions, env: lasting(input.env) });
     /* A new session asked for goes on in a program started for a person that nothing was said in yet. */
     const sameSession = input.sessionId === null ? a.fresh : input.sessionId === a.sessionId || a.cleared.has(input.sessionId);
-    const goesOn = sameSession && a.hash === hash && (await this.opts.tmux.alive(a.name));
+    const hashMatch = a.hash === hash;
+    const goesOn = sameSession && hashMatch && (await this.alive(a, phase));
+    phase?.launch(goesOn ? a.sessionId : spec.sessionId, HOST_SOURCE_HASH, { goesOn, sameSession, hashMatch });
     /* A program started with nothing to type gets its tools before its turn ends, while Hornhoof still answers for them.
        Kimi Code connects to its tools only once it has a session, which a new one gets with the first message. */
     const lazy = program.kind === 'kimi' && !input.sessionId;
@@ -261,7 +269,7 @@ export class TerminalHost {
     a.stepSaid = false;
     this.bridge.setToken(job.key, input.tools?.token ?? null);
     const starting = input.prompt ? null : (tools ?? Promise.resolve());
-    const turn: Turn = { jobId: null, onEvent: input.onEvent ?? (() => {}), typed: false, seq: 0, ...(starting ? { starting: true } : {}) };
+    const turn: Turn = { jobId: null, onEvent: input.onEvent ?? (() => {}), typed: false, seq: 0, phase, ...(starting ? { starting: true } : {}) };
     if (starting) a.starting = starting;
     a.turn = turn;
     a.ended = deferred();
@@ -281,6 +289,7 @@ export class TerminalHost {
         await this.opts.tmux.launch(a.name, { cwd: input.workDir, command: spec.command, cols: this.cols, rows: this.rows, envFile: envFile(input.workDir, env) });
         this.watch(a);
         if (!(await this.ready(a, job))) {
+          phase?.readyFailed();
           const screen = await this.screen(job.key);
           /* Its screen says why, which the loader would hide. */
           this.showViews(a);
@@ -435,23 +444,43 @@ export class TerminalHost {
      prompt also when it is not signed in, with a word to sign in. */
   private async ready(a: Agent, job: TermJob): Promise<boolean> {
     const end = Date.now() + this.readyMs;
+    const phase = a.turn?.phase;
+    phase?.waitStart('ready', end - this.readyMs, this.readyMs);
     while (Date.now() < end) {
-      if (!(await this.opts.tmux.alive(a.name))) return false;
+      if (!(await this.alive(a, phase))) {
+        phase?.waitEnd('ready', phase.paneOutcome());
+        return false;
+      }
       const kind = job.program.kind;
       if (kind === 'claude') {
-        if (await Promise.race([a.started!.promise.then(() => true), sleep(this.pollMs).then(() => false)])) return true;
+        if (await Promise.race([a.started!.promise.then(() => true), sleep(this.pollMs).then(() => false)])) {
+          phase?.waitEnd('ready', 'matched');
+          return true;
+        }
       } else {
         const screen = await this.screen(a.key);
-        if (kind === 'kimi' && job.signedOut.test(screen)) return false;
+        if (kind === 'kimi' && job.signedOut.test(screen)) {
+          phase?.waitEnd('ready', 'signed_out');
+          return false;
+        }
         if (READY[kind](screen)) {
           await sleep(500);
+          phase?.waitEnd('ready', 'matched');
           return true;
         }
         await sleep(this.pollMs);
       }
-      if (job.signedOut.test(await this.screen(a.key))) return false;
+      if (job.signedOut.test(await this.screen(a.key))) {
+        phase?.waitEnd('ready', 'signed_out');
+        return false;
+      }
     }
+    phase?.waitEnd('ready', 'deadline');
     return false;
+  }
+
+  private alive(a: Agent, phase = a.turn?.phase): Promise<boolean> {
+    return this.opts.tmux.alive(a.name, observation => phase?.pane(observation));
   }
 
   private tailFor(a: Agent): LineTail | null {
