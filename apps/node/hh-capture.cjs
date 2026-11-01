@@ -1,20 +1,54 @@
 /* A pane's raw output, bounded and written by one process. Open only the private files the host already made. */
 const { spawnSync } = require('node:child_process');
-const { closeSync, constants, fstatSync, openSync, readSync, rmSync, writeSync } = require('node:fs');
+const { closeSync, constants, fstatSync, ftruncateSync, openSync, readSync, rmSync, writeSync } = require('node:fs');
 
+/* Keeps at least the last limit bytes at the end of the file. A program redraws its screen many times a second, so each
+   chunk is appended, and the file is cut back to its last limit bytes only once it holds twice that. */
+function tail(fd, limit, io = { write: writeSync, truncate: ftruncateSync }) {
+  const kept = [];
+  let keptBytes = 0;
+  let size = 0;
+  const writeAll = (data, at) => {
+    for (let done = 0; done < data.length;) done += io.write(fd, data, done, data.length - done, at + done);
+  };
+  const keep = chunk => {
+    kept.push(chunk);
+    keptBytes += chunk.length;
+    while (kept.length > 1 && keptBytes - kept[0].length >= limit) keptBytes -= kept.shift().length;
+    if (size + chunk.length <= 2 * limit) {
+      writeAll(chunk, size);
+      size += chunk.length;
+      return;
+    }
+    const last = Buffer.concat(kept);
+    const cut = last.subarray(Math.max(0, last.length - limit));
+    io.truncate(fd, 0);
+    writeAll(cut, 0);
+    size = cut.length;
+  };
+  /* Once the program is over the file holds no more than the limit. */
+  keep.end = () => {
+    if (size <= limit) return;
+    const last = Buffer.concat(kept);
+    const cut = last.subarray(Math.max(0, last.length - limit));
+    io.truncate(fd, 0);
+    writeAll(cut, 0);
+    size = cut.length;
+  };
+  return keep;
+}
+
+if (require.main === module) record();
+
+function record() {
 const [file, ready, flush, bytes, socket, session] = process.argv.slice(2);
 const limit = Number(bytes);
 if (!file || !ready || !flush || !socket || !session || !Number.isSafeInteger(limit) || limit <= 0) throw new Error('Invalid output capture arguments.');
 const fd = openSync(file, constants.O_WRONLY | constants.O_NOFOLLOW);
 const readyFd = openSync(ready, constants.O_WRONLY | constants.O_NOFOLLOW);
 
-let output = Buffer.alloc(0);
+const keep = tail(fd, limit);
 let closed = false;
-function keep(chunk) {
-  const next = Buffer.concat([output, chunk]);
-  output = next.length > limit ? next.subarray(next.length - limit) : next;
-  for (let at = 0; at < output.length;) at += writeSync(fd, output, at, output.length - at, at);
-}
 
 function requested() {
   let control;
@@ -51,6 +85,7 @@ function finish() {
   process.stdin.removeListener('data', keep);
   for (let chunk; (chunk = process.stdin.read()) !== null;) keep(chunk);
   drainKernel();
+  keep.end();
   closeSync(fd);
   writeSync(readyFd, 'ended', 0, 'utf8');
   closeSync(readyFd);
@@ -85,3 +120,6 @@ const poll = setInterval(() => { if (requested()) finish(); }, 10);
 poll.unref();
 writeSync(readyFd, 'ready', 0, 'utf8');
 for (const signal of ['SIGTERM', 'SIGHUP']) process.once(signal, () => { close(); process.exit(0); });
+}
+
+module.exports = { tail };
