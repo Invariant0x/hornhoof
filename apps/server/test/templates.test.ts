@@ -267,7 +267,8 @@ describe('templates', () => {
     const body = (id: string) => templates.skills.get(id)!.body;
     expect(role('DEV-ENG').body).toMatch(/whole feature: its plan, server, interface, tests and docs, on one branch/);
     expect(role('DEV-ENG').body).toMatch(/write each test before the code/);
-    for (const id of ['dev-implement', 'dev-migrations', 'dev-frontend-ui', 'dev-browser-check']) expect(role('DEV-ENG').skills.find(k => k.id === id)?.on, id).toBe(true);
+    /* Debugging was taken off only to keep one prompt short; skills are files now. */
+    for (const id of ['dev-implement', 'dev-migrations', 'dev-debugging', 'dev-frontend-ui', 'dev-browser-check']) expect(role('DEV-ENG').skills.find(k => k.id === id)?.on, id).toBe(true);
     expect(role('DEV-HEAD').body).toMatch(/different features to different developers all at once/);
     for (const text of [role('DEV-HEAD').body, body('hh-break-down')]) expect(text).toMatch(/touch the same files/);
     for (const text of [role('DEV-HEAD').body, role('DEV-ARCH').body, body('hh-break-down')]) expect(text).toMatch(/design note/);
