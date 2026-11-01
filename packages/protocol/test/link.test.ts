@@ -6,7 +6,7 @@ describe('linkNameOf', () => {
     expect(linkNameOf('Рога и копыта')).toBe('roga-i-kopyta');
     expect(linkNameOf('Щука, Жук & Юла')).toBe('schuka-zhuk-yula');
     expect(linkNameOf('Объявления Хабаровска')).toBe('obyavleniya-habarovska');
-    expect(linkNameOf('Ёлка')).toBe('yolka');
+    expect(linkNameOf('\u0401лка')).toBe('yolka');
   });
 
   it('keeps Latin letters and digits and turns everything else into one hyphen', () => {
