@@ -91,6 +91,13 @@ describe('a task that passed its last gate', () => {
     expect(skipped.task).toMatchObject({ status: 'open', merging: true, assigneeAgentId: bruno.id });
   });
 
+  it('keeps its gates as they are while it is merged', async () => {
+    const { ctx, head, rita, task, passed } = await company();
+    await passed();
+    const said = await updateTask(ctx, head.id, task.id, { gates: [rita.id, head.id] }).then(() => 'ok', (err: { message?: string }) => err.message);
+    expect(said).toBe(`#${task.number} passed its gates and is being merged, so its gates no longer change. Give more checks as a task of their own.`);
+  });
+
   it('is done at once where no repository is set', async () => {
     const { passed } = await company(false);
     expect((await passed()).task).toMatchObject({ status: 'done', merging: false });

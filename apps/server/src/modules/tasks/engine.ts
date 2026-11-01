@@ -802,6 +802,8 @@ export async function updateTask(ctx: Live, agentId: string, taskId: string, c: 
   if ((c.executor !== undefined || c.gates !== undefined) && !task.executorAgentId) throw refuse(400, 'task_invalid', `#${task.number} has no executor or gates.`);
   if (c.gates !== undefined && c.executor === undefined && task.status === 'review' && task.stage > 0 && !task.panel.length) return regate(ctx, agentId, task, c);
   if ((c.executor !== undefined || c.gates !== undefined) && task.stage !== 0) throw refuse(409, 'task_invalid', `#${task.number} is at a gate; change who works on it after the verdict.`);
+  /* The merge hands in what its gates passed: gates given now would never check it. */
+  if (c.gates !== undefined && task.merging) throw refuse(409, 'task_invalid', `#${task.number} passed its gates and is being merged, so its gates no longer change. Give more checks as a task of their own.`);
   if (c.after !== undefined && task.stage !== 0) throw refuse(409, 'task_invalid', `#${task.number} is at a gate already, so it waits for nothing any more.`);
   const executor = c.executor ?? task.executorAgentId;
   const gates = c.gates ?? task.gates;
