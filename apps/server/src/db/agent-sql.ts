@@ -7,8 +7,9 @@ export type SqlAnswer = { rows: Record<string, unknown>[]; changed: number };
 /* The orchestrator's own way into the database. Each call is one transaction under a role of its own. */
 export type AgentSql = { run: (text: string) => Promise<SqlAnswer[]>; close: () => Promise<void> };
 
-/* Signing in, joining and installing a node stay out of reach, and so do passwords. */
-const HIDDEN = ['sessions', 'invites', 'node_codes'];
+/* Signing in, joining and installing a node stay out of reach, and so do passwords and the public link, whose address
+   goes into machine commands. */
+const HIDDEN = ['sessions', 'invites', 'node_codes', 'public_links'];
 const WRITES = new Set(['INSERT', 'UPDATE', 'DELETE', 'MERGE']);
 
 /* One role per database, so two Hornhoofs on one Postgres do not share it. */

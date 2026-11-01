@@ -8,6 +8,7 @@ import { departments, people } from '../../db/schema.js';
 import { AgentPatch } from '../agents/routes.js';
 import { deptName } from '../departments/templates.js';
 import { BuildBody, RepoBody } from '../departments/routes.js';
+import { LinkBody } from '../link/routes.js';
 import { NOTE_MAX, NoteBody } from '../notebook/book.js';
 import { InviteBody, PersonPatch } from '../people/routes.js';
 import { BudgetBody, ConnectBody, SubscriptionBody } from '../subscriptions/routes.js';
@@ -56,7 +57,7 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
     'view',
     'Reads any page of Hornhoof the CEO can open, as JSON: GET /api/org, /api/people, /api/subscriptions, /api/machines, /api/tasks?status=all, /api/tasks/<id>, ' +
       '/api/requests, /api/turns, /api/agents/<id> (an employee card with its skills, instructions and latest changes), /api/agents/<id>/events (its conversation), ' +
-      '/api/departments/<id>/roster, /api/updates.',
+      '/api/departments/<id>/roster, /api/updates, /api/link (the public link) and /api/link/names/<name> (whether a name for it is free).',
     { path: z.string().trim().min(1).max(500).describe('The page address, starting with /api/.') },
     ({ path }) => {
       const url = new URL(path, 'http://hornhoof');
@@ -204,6 +205,15 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
     body => ({ method: 'POST', url: '/api/updates', payload: body }),
   );
   tool('cancel_update', 'Calls off an update that waits for the agents to finish.', {}, () => ({ method: 'DELETE', url: '/api/updates' }));
+
+  tool(
+    'set_public_link',
+    'Opens Hornhoof on the internet at <name>.hornhoof.org, or moves it to another name: 1 to 63 lowercase Latin letters, digits and hyphens. Left out, the name is long and random. ' +
+      'A name people can guess is protected only by the company\'s sign-in. Machines connected through the old link lose it and need a new command.',
+    LinkBody.shape,
+    body => ({ method: 'PUT', url: '/api/link', payload: body }),
+  );
+  tool('remove_public_link', 'Closes the public link: Hornhoof opens only at its own address again.', {}, () => ({ method: 'DELETE', url: '/api/link' }));
 
   const Note = z.number().int().positive().describe('The note\'s number, as your notebook shows it, like 3 for [#3].');
   /* The company notebook, or with department the one its head carries. */

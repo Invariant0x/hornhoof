@@ -1,15 +1,19 @@
+import { mkdtempSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { and, desc, eq, isNull, like } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agentChanges, agentEvents, agents, companies, departments, jobs, people, proposals, requests, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
+import { agentChanges, agentEvents, agents, companies, departments, jobs, people, proposals, publicLinks, requests, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
 import { afterJob } from '../src/modules/tasks/wake.js';
 import { identityOf } from '../src/modules/nodes/hub.js';
 import { ask, createTask } from '../src/modules/tasks/engine.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
+import { fakeRelay } from './fake-relay.js';
 import { as, connectNode, listen, setUpCompany, testApp, until } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
@@ -18,8 +22,8 @@ const WORKER_TOKEN = 'tool-token-worker-0123456789abcdef01';
 
 /* A company on the built-in node with Development, Hana at its head and Bruno in it, Hana's task for Bruno, and a running
    turn of the orchestrator whose token reaches its tools. */
-async function company() {
-  const { app, db } = await testApp({ NODE_KEY });
+async function company(env: NodeJS.ProcessEnv = {}) {
+  const { app, db } = await testApp({ NODE_KEY, ...env });
   const url = await listen(app);
   const ceo = await setUpCompany(app);
   const builtin = await connectNode(url, NODE_KEY);
@@ -273,6 +277,30 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
 });
 
 
+describe("the orchestrator and the company's public link", () => {
+  it('takes a link, moves it to another name and removes it, as the settings do', async () => {
+    const relay = await fakeRelay();
+    const { app, db } = await company({ RELAY_URL: relay.url, HORNHOOF_CONTROL_DIR: mkdtempSync(join(tmpdir(), 'hh-link-')) });
+    const client = await mcp(app);
+    const taken = await call(client, 'set_public_link', { name: 'acme' });
+    expect(taken.isError).toBeFalsy();
+    expect(JSON.parse(text(taken))).toEqual({ link: { name: 'acme', url: 'https://acme.hornhoof.test' } });
+    expect(JSON.parse(text(await call(client, 'view', { path: '/api/link' })))).toMatchObject({ link: { name: 'acme' } });
+    expect(JSON.parse(text(await call(client, 'view', { path: '/api/link/names/acme-corp' })))).toEqual({ name: 'acme-corp', free: true });
+    expect(JSON.parse(text(await call(client, 'set_public_link', { name: 'acme-corp' }))).link.name).toBe('acme-corp');
+    expect([...relay.bindings.keys()]).toEqual(['acme-corp']);
+    const random = JSON.parse(text(await call(client, 'set_public_link', {}))).link.name;
+    expect(random).toMatch(/^[a-z0-9]{20,}$/);
+    relay.bindings.set('globex', { key: 'k' });
+    const refused = await call(client, 'set_public_link', { name: 'globex' });
+    expect(refused.isError).toBe(true);
+    expect(text(refused)).toBe('This link is taken already. Pick another name.');
+    expect((await call(client, 'remove_public_link', {})).isError).toBeFalsy();
+    expect(await db.select().from(publicLinks)).toEqual([]);
+    expect([...relay.bindings.keys()]).toEqual(['globex']);
+  });
+});
+
 describe('the orchestrator reads and changes the database itself', () => {
   it('reads any table and changes a field, and the map hears of the change', async () => {
     const { app, db, bruno } = await company();
@@ -289,10 +317,10 @@ describe('the orchestrator reads and changes the database itself', () => {
     expect(heard).toEqual(['org']);
   });
 
-  it('is refused sign-ins, invites, install codes, passwords and the tables themselves', async () => {
+  it('is refused sign-ins, invites, install codes, the public link, passwords and the tables themselves', async () => {
     const { app } = await company();
     const client = await mcp(app);
-    for (const sql of ['SELECT * FROM sessions', 'SELECT * FROM invites', 'SELECT * FROM node_codes', 'SELECT password_hash FROM people', 'DROP TABLE tasks', 'ALTER TABLE tasks ADD COLUMN x text', 'CREATE TABLE notes (id int)']) {
+    for (const sql of ['SELECT * FROM sessions', 'SELECT * FROM invites', 'SELECT * FROM node_codes', 'SELECT * FROM public_links', "UPDATE public_links SET url = 'https://evil.test'", 'SELECT password_hash FROM people', 'DROP TABLE tasks', 'ALTER TABLE tasks ADD COLUMN x text', 'CREATE TABLE notes (id int)']) {
       const res = await call(client, 'database', { sql });
       expect(res.isError, sql).toBe(true);
       expect(text(res), sql).toMatch(/permission denied|must be owner/);
