@@ -23,12 +23,11 @@ import { Versions } from './Versions';
 type Tab = 'map' | 'tasks' | 'people' | 'subscriptions' | 'improvements';
 /* The right panel: an agent's terminal or its card, or a task. agentId is 'orchestrator' or an employee's id. */
 type Panel = { kind: 'window' | 'card'; agentId: string } | { kind: 'task'; taskId: string } | null;
-/* Improvements only for people who see the whole company, who decide on them. */
-const TABS: Tab[] = ['map', 'tasks', 'people', 'subscriptions', 'improvements'];
+const TABS: Tab[] = ['map', 'tasks', 'people', 'subscriptions'];
 const THEMES: Theme[] = ['light', 'dark'];
 
-/* onVersions: only for people who see the whole company. */
-function AccountMenu({ me, onClose, onSignOut, onVersions }: { me: Me; onClose: () => void; onSignOut: () => void; onVersions?: () => void }) {
+/* onImprovements and onVersions: only for people who see the whole company. */
+function AccountMenu({ me, onClose, onSignOut, onImprovements, onVersions, toDecide }: { me: Me; onClose: () => void; onSignOut: () => void; onImprovements?: () => void; onVersions?: () => void; toDecide: number }) {
   const t = useT();
   const { language, setLanguage } = useLanguage();
   const [theme, setThemeState] = useState<Theme>(currentTheme);
@@ -66,6 +65,20 @@ function AccountMenu({ me, onClose, onSignOut, onVersions }: { me: Me; onClose: 
         </div>
       </div>
       {version && <p className="menu-version">{t.shell.version(versionText(version))}</p>}
+      {onImprovements && (
+        <button
+          className="btn small ghost"
+          type="button"
+          aria-label={toDecide ? t.improvements.nav(toDecide) : undefined}
+          onClick={() => {
+            onClose();
+            onImprovements();
+          }}
+        >
+          {t.shell.tabs.improvements}
+          {toDecide > 0 && <span className="nav-count" aria-hidden="true">{toDecide}</span>}
+        </button>
+      )}
       {onVersions && (
         <button
           className="btn small ghost"
@@ -117,10 +130,15 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   const agentPanel = panel && panel.kind !== 'task' ? panel : null;
   const [versionsOpen, setVersionsOpen] = useState(false);
   const account = useRef<HTMLDivElement>(null);
+  const accountButton = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!menu) return;
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setMenu(false);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      setMenu(false);
+      accountButton.current?.focus();
+    };
     const onDown = (e: PointerEvent) => {
       if (!account.current?.contains(e.target as Node)) setMenu(false);
     };
@@ -148,15 +166,15 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
           <span className="sr">{me.company.name}</span>
         </div>
         <nav className="tabs glass" aria-label={t.shell.sections}>
-          {TABS.filter(id => company || id !== 'improvements').map(id => {
-            const count = id === 'tasks' ? waiting : id === 'improvements' ? toDecide : 0;
+          {TABS.map(id => {
+            const count = id === 'tasks' ? waiting : 0;
             return (
               <button
                 key={id}
                 type="button"
                 className={tab === id ? 'on' : ''}
                 aria-current={tab === id ? 'page' : undefined}
-                aria-label={count ? (id === 'tasks' ? t.tasks.navWaiting(count) : t.improvements.nav(count)) : undefined}
+                aria-label={count ? t.tasks.navWaiting(count) : undefined}
                 onClick={() => setTab(id)}
               >
                 {t.shell.tabs[id]}
@@ -167,10 +185,10 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
         </nav>
         <div className="tb-right">
           <div className="account" ref={account}>
-            <button className="avatar glass" type="button" aria-label={t.shell.account} aria-expanded={menu} onClick={() => setMenu(!menu)}>
+            <button ref={accountButton} className="avatar glass" type="button" aria-label={t.shell.account} aria-expanded={menu} onClick={() => setMenu(!menu)}>
               {me.person.name.trim().charAt(0).toUpperCase()}
             </button>
-            {menu && <AccountMenu me={me} onClose={() => setMenu(false)} onSignOut={signOut} onVersions={company ? () => setVersionsOpen(true) : undefined} />}
+            {menu && <AccountMenu me={me} onClose={() => setMenu(false)} onSignOut={signOut} onImprovements={company ? () => setTab('improvements') : undefined} onVersions={company ? () => setVersionsOpen(true) : undefined} toDecide={toDecide} />}
           </div>
         </div>
       </header>
