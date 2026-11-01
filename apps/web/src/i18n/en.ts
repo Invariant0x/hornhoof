@@ -491,6 +491,8 @@ export const en = {
     gates: 'Gates',
     gateStates: { working: 'working on it', did: 'did the work', passed: 'passed', current: 'checking now', next: 'next' },
     partOf: 'Part of',
+    after: 'Starts after',
+    waitsFor: (tasks: string) => `waits for ${tasks}`,
     givenBy: (name: string) => `Given by ${name}`,
     details: 'Details',
     subtasks: 'Subtasks',
@@ -520,6 +522,7 @@ export const en = {
       stuck: (by: string) => `${by} is stuck, a person is asked`,
       cancelled: (by: string) => `${by} cancelled it`,
       done: (by: string) => `${by} closed it`,
+      started: (by: string) => `${by} started it once what it waited for was done`,
     },
   },
   improvements: {

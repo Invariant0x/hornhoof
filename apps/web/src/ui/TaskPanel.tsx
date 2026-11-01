@@ -34,6 +34,8 @@ function TaskBody({ task, onOpen, onChanged, waiting }: { task: TaskDetail; onOp
   const when = (at: string) => new Date(at).toLocaleString(language === 'ru' ? 'ru-RU' : 'en-GB', { dateStyle: 'short', timeStyle: 'short' });
   const who = (a: AgentRef) => `${a.name}${roleAfter(a, language)}`;
   const closed = task.status === 'done' || task.status === 'cancelled';
+  const waits = task.waitsFor.length > 0;
+  const executorState = task.stage > 0 || task.status === 'done' ? t.tasks.gateStates.did : waits ? t.tasks.waitsFor(task.waitsFor.map(n => `#${n}`).join(', ')) : t.tasks.gateStates.working;
 
   return (
     <>
@@ -70,9 +72,9 @@ function TaskBody({ task, onOpen, onChanged, waiting }: { task: TaskDetail; onOp
       )}
       {task.executor ? (
         <ol className="tgates" aria-label={t.tasks.gates}>
-          <li className={task.stage > 0 || task.status === 'done' ? 'passed' : 'current'}>
+          <li className={task.stage > 0 || task.status === 'done' ? 'passed' : waits ? 'next' : 'current'}>
             <b>{task.executor.name}</b>
-            {roleAfter(task.executor, language)}, <span>{task.stage > 0 || task.status === 'done' ? t.tasks.gateStates.did : t.tasks.gateStates.working}</span>
+            {roleAfter(task.executor, language)}, <span>{executorState}</span>
           </li>
           {task.gates.map(g => (
             <li key={g.id} className={g.state}>
@@ -83,6 +85,21 @@ function TaskBody({ task, onOpen, onChanged, waiting }: { task: TaskDetail; onOp
         </ol>
       ) : (
         task.assignee && <p className="muted">{who(task.assignee)}</p>
+      )}
+      {task.after.length > 0 && (
+        <section aria-label={t.tasks.after}>
+          <h4>{t.tasks.after}</h4>
+          <ul className="tp-subs">
+            {task.after.map(a => (
+              <li key={a.id}>
+                <button className="linkish" type="button" onClick={() => onOpen(a.id)}>
+                  #{a.number} {a.title}
+                </button>
+                <small>{t.tasks.states[a.status]}</small>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
       {task.brief && <p className="tp-brief">{task.brief}</p>}
       {task.body && (

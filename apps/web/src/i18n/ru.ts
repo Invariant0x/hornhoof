@@ -490,6 +490,8 @@ export const ru: Messages = {
     gates: 'Ворота',
     gateStates: { working: 'работает над ней', did: 'сделал работу', passed: 'пропустил', current: 'проверяет сейчас', next: 'следующий' },
     partOf: 'Часть задачи',
+    after: 'Начнется после',
+    waitsFor: tasks => `ждет ${tasks}`,
     givenBy: name => `Поставил ${name}`,
     details: 'Подробно',
     subtasks: 'Подзадачи',
@@ -519,6 +521,7 @@ export const ru: Messages = {
       stuck: by => `${by} застрял, спрошен человек`,
       cancelled: by => `${by} отменил ее`,
       done: by => `${by} закрыл ее`,
+      started: by => `${by} запустил ее, когда то, чего она ждала, было готово`,
     },
   },
   improvements: {

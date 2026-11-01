@@ -140,6 +140,26 @@ describe('GET /api/org', () => {
     expect(doing).toMatchObject({ Rita: ['waiting', task.number], Rex: ['queued', task.number] });
   });
 
+  it('shows nobody at a task that still waits for the tasks it comes after', async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    const [company] = await db.select().from(companies);
+    const [sub] = await db.select().from(subscriptions);
+    const [dev] = await db.insert(departments).values({ companyId: company!.id, templateKey: 'development', roleCode: 'DEV', position: 0 }).returning();
+    const hire = async (name: string, kind: 'head' | 'worker', roleKey: string) =>
+      (await db.insert(agents).values({ companyId: company!.id, kind, name, roleKey, departmentId: dev!.id, model: '', subscriptionId: sub!.id }).returning())[0]!;
+    const hana = await hire('Hana', 'head', 'DEV-HEAD');
+    const bruno = await hire('Bruno', 'worker', 'DEV-BE');
+    const ida = await hire('Ida', 'worker', 'DEV-OPS');
+    const member = async (title: string, agentId: string, after: string[] = []) =>
+      (await createTask(app.ctx, { agentId: hana.id }, { title, brief: '', body: '', departmentId: dev!.id, assigneeAgentId: agentId, executor: true, gates: [], after })).task;
+    const api = await member('Checkout API', bruno.id);
+    await member('Deploy', ida.id, [api.id]);
+    const org = (await app.inject({ url: '/api/org', ...as(ceo) })).json();
+    const doing = Object.fromEntries(org.departments[0].employees.map((e: { name: string; status: string; task: { number: number } | null }) => [e.name, [e.status, e.task?.number ?? null]]));
+    expect(doing).toMatchObject({ Bruno: ['queued', api.number], Ida: ['idle', null] });
+  });
+
   it('counts the agents of each department, its products included, and those at work', async () => {
     const { app, db } = await testApp();
     const ceo = await setUpCompany(app);

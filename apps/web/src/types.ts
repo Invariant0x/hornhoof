@@ -233,6 +233,8 @@ export type TaskLine = {
   bounces: number;
   turn: number | null;
   parentId: string | null;
+  /* The numbers of the tasks it comes after that are not done yet: until they are, it waits. */
+  waitsFor: number[];
   createdAt: string;
   updatedAt: string;
 };
@@ -243,6 +245,8 @@ export type TaskRequest = { id: string; kind: 'question' | 'approval' | 'stuck';
 export type TaskDetail = TaskLine & {
   body: string;
   parent: { id: string; number: number; title: string } | null;
+  /* The tasks of its turn it comes after, and where each stands. */
+  after: { id: string; number: number; title: string; status: TaskStatus }[];
   executor: AgentRef | null;
   gates: (AgentRef & { state: 'passed' | 'current' | 'next' })[];
   createdBy: { kind: 'person' | 'agent'; id: string; name: string } | null;

@@ -101,6 +101,50 @@ describe('a task', () => {
     ]);
   });
 
+  it('says what it comes after and that it waits for them, in each language', async () => {
+    const waiting = {
+      ...TASK_DETAIL,
+      status: 'open' as const,
+      stage: 0,
+      waitsFor: [11],
+      after: [
+        { id: 't9', number: 9, title: 'Pick a payment provider', status: 'done' as const },
+        { id: 't11', number: 11, title: 'Cart page', status: 'working' as const },
+      ],
+      log: [...TASK_DETAIL.log, { kind: 'started', text: '#9 is done, so it starts now.', data: {}, by: null, at: '2026-10-30T09:00:00.000Z' }],
+    };
+    for (const [lang, words] of [
+      ['en', { gates: 'Gates', first: 'Bruno, Backend engineer, waits for #11', after: 'Starts after', done: 'Done', started: 'Hornhoof started it once what it waited for was done' }],
+      ['ru', { gates: 'Ворота', first: 'Bruno, Бэкенд-разработчик, ждет #11', after: 'Начнется после', done: 'Готова', started: 'Hornhoof запустил ее, когда то, чего она ждала, было готово' }],
+    ] as const) {
+      localStorage.setItem('hh-lang', lang);
+      const user = userEvent.setup();
+      mockApi({
+        'GET /api/org': [200, DEV_ORG],
+        'GET /api/requests': [200, { requests: [] }],
+        'GET /api/turns': [200, { turns: [TURN] }],
+        'GET /api/tasks?status=all': [200, { tasks: TASKS }],
+        'GET /api/tasks/t12': [200, { task: waiting }],
+      });
+      const { unmount } = render(
+        <LanguageProvider>
+          <Shell me={ME} onSignOut={() => {}} />
+        </LanguageProvider>,
+      );
+      await user.click(await screen.findByRole('button', { name: lang === 'en' ? /^Tasks/ : /^Задачи/ }));
+      await user.click(await screen.findByRole('button', { name: /#12/ }));
+      const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
+      const gates = within(panel).getByRole('list', { name: words.gates });
+      expect(within(gates).getAllByRole('listitem')[0]!.textContent).toBe(words.first);
+      const after = within(panel).getByRole('region', { name: words.after });
+      expect(within(after).getAllByRole('listitem').map(li => li.textContent)).toEqual([expect.stringMatching(new RegExp(`#9 Pick a payment provider.*${words.done}`)), expect.stringContaining('#11 Cart page')]);
+      expect(within(after).getByRole('button', { name: /#11 Cart page/ })).toBeInTheDocument();
+      expect(panel).toHaveTextContent(words.started);
+      unmount();
+      localStorage.removeItem('hh-lang');
+    }
+  });
+
   it('posts a comment', async () => {
     const user = userEvent.setup();
     const calls = shell({ 'POST /api/tasks/t12/comments': [201, { task: TASK_DETAIL }] });

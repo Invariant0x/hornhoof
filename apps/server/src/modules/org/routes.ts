@@ -1,5 +1,5 @@
 import { defaultEffortOf, effortFor, effortsOf, modelsFor, type ModelOption, type ProviderId } from '@hornhoof/protocol';
-import { and, asc, desc, eq, isNotNull, isNull, ne, notInArray } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, notInArray } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import type { Ctx } from '../../app.js';
 import { accessOf, canReach } from '../../auth/access.js';
@@ -72,6 +72,10 @@ export function orgRoutes(app: FastifyInstance, { db, hub, templates, bus }: Ctx
       .from(requests)
       .where(and(eq(requests.companyId, me.companyId), eq(requests.status, 'open')));
     const byId = new Map(openTasks.map(t => [t.id, t]));
+    /* A task that waits for the tasks it comes after is nobody's to act on yet. */
+    const afterIds = [...new Set(openTasks.flatMap(t => t.after))];
+    const notDone = new Set(afterIds.length ? (await db.select({ id: tasks.id }).from(tasks).where(and(inArray(tasks.id, afterIds), ne(tasks.status, 'done')))).map(t => t.id) : []);
+    const waitsAfter = (t: (typeof openTasks)[number]) => t.after.some(id => notDone.has(id));
     const parents = new Set(openTasks.map(t => t.parentId));
     /* The task an agent acts on next: at a gate it still checks (or holds, when nobody on can), also while another reviewer
        there waits for a person, or with it as executor (or holder, for a head's task) before any gate. */
@@ -82,7 +86,7 @@ export function orgRoutes(app: FastifyInstance, { db, hub, templates, bus }: Ctx
        and its turn has not started. Handed: what it holds is with gates or with the tasks it gave out. */
     const doing = (a: (typeof allAgents)[number]) => {
       const run = running.find(j => j.agentId === a.id);
-      const held = openTasks.filter(t => holds(t, a.id));
+      const held = openTasks.filter(t => holds(t, a.id) && !waitsAfter(t));
       /* At a gate only the reviewer who asked waits; the others there can still give their verdict. */
       const waits = [...asked.filter(r => r.agentId === a.id).map(r => byId.get(r.taskId)), ...held.filter(t => t.status === 'blocked' || (t.status === 'waiting' && t.stage === 0))].filter(t => t !== undefined);
       const next = held.filter(t => !parents.has(t.id) && !waits.includes(t));
