@@ -26,6 +26,10 @@ export type Config = {
   controlDir: string;
   /* Role and skill templates, loaded once at start. */
   templatesDir: string;
+  /* The service that hands out public links like acme.hornhoof.org and relays them to this server. */
+  relayUrl: string;
+  /* The tunnel container's host name: only requests from it may say they came in over https. */
+  tunnelHost?: string;
 };
 
 /* Both src/ and dist/ sit one level below apps/server, so this finds apps/web/dist either way. */
@@ -54,6 +58,8 @@ const Env = z.object({
   STREAM_PING_MS: milliseconds('STREAM_PING_MS', 1, '25000'),
   UPDATE_CHECK_MS: milliseconds('UPDATE_CHECK_MS', 0, '1800000'),
   REGISTRY_URL: webAddress('REGISTRY_URL must be an http:// or https:// address.'),
+  RELAY_URL: webAddress('RELAY_URL must be an http:// or https:// address, like https://hornhoof.org.'),
+  TUNNEL_HOST: z.preprocess(unset, z.string().regex(/^[A-Za-z0-9.-]{1,253}$/, 'TUNNEL_HOST must be the host name of the tunnel container, like tunnel.').optional()),
 });
 
 const productVersion = (): string => (JSON.parse(readFileSync(ROOT_PACKAGE, 'utf8')) as { version: string }).version;
@@ -90,5 +96,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     updateCheckMs: set.UPDATE_CHECK_MS ?? 1800000,
     controlDir: env.HORNHOOF_CONTROL_DIR || '/control',
     templatesDir: env.TEMPLATES_DIR || DEFAULT_TEMPLATES,
+    relayUrl: (set.RELAY_URL ?? 'https://hornhoof.org').replace(/\/+$/, ''),
+    tunnelHost: set.TUNNEL_HOST,
   };
 }
