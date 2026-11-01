@@ -295,6 +295,23 @@ describe('AgentWindow', () => {
     expect(screen.queryByRole('button', { name: 'Pick departments by hand' })).not.toBeInTheDocument();
   });
 
+  it('shows nothing of an employee before it knows whether to open a terminal or a conversation', async () => {
+    mockApi({
+      'GET /api/agents/b1': [200, CARD],
+      'GET /api/agents/b1/events?after=0': [200, { events: [], state: { ...READY, terminal: true } }],
+    });
+    render(
+      <LanguageProvider>
+        <AgentWindow me={ME} org={DEV_ORG} agentId="b1" onClose={() => {}} />
+      </LanguageProvider>,
+    );
+    expect(screen.queryByRole('log')).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Needs a subscription/)).not.toBeInTheDocument();
+    expect(await screen.findByTestId('live-terminal')).toBeInTheDocument();
+    expect(screen.queryByRole('log')).not.toBeInTheDocument();
+  });
+
   it('titles an employee by its name alone when it is called after its role', async () => {
     mockApi({
       'GET /api/agents/b1': [200, { ...CARD, name: 'Backend engineer' }],

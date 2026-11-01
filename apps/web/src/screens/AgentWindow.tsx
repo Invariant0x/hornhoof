@@ -273,6 +273,8 @@ export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Pro
   const where = [model || t.agent.default, orchestratorStatus(t, sub), sub?.machine?.hostname].filter(Boolean).join(', ');
   const hasTerminal = Boolean(state?.terminal) && !noTerminal;
   const terminal = hasTerminal && !asLog;
+  /* Until its state and card come, the window cannot tell a terminal from a conversation, nor whether the agent can work. */
+  const known = state !== null && (orchestrator || card !== null);
 
   const cards = (
     <>
@@ -432,14 +434,23 @@ export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Pro
         </button>
       </div>
       {notebook && <Notebook departmentId={orchestrator ? null : headOf} />}
-      {!notebook && terminal && <AgentTerminal agentId={agentId} program={sub ? PROGRAM_NAMES[sub.provider] : 'Claude'} onGone={() => setNoTerminal(true)} />}
-      {!notebook && terminal && hasCards && (
+      {!notebook && !known && (
+        <div className="t-log" aria-busy="true">
+          {failure !== null && (
+            <p className="alert" role="alert">
+              {errorText(t, failure)}
+            </p>
+          )}
+        </div>
+      )}
+      {!notebook && known && terminal && <AgentTerminal agentId={agentId} program={sub ? PROGRAM_NAMES[sub.provider] : 'Claude'} onGone={() => setNoTerminal(true)} />}
+      {!notebook && known && terminal && hasCards && (
         <div className="t-cards">
           {cards}
           {after}
         </div>
       )}
-      {!notebook && !terminal && (
+      {!notebook && known && !terminal && (
         <div className="t-log" ref={log} role="log">
           <div className="t-wel">
             <div className="w1">
@@ -468,10 +479,10 @@ export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Pro
           {after}
         </div>
       )}
-      {state && !ready && <p className="t-why">{reasonText(t, state.reason, sub)}</p>}
-      {state?.limitUntil && <p className="t-why">{t.window.limitUntil(clock(language, state.limitUntil)!)}</p>}
+      {known && !ready && <p className="t-why">{reasonText(t, state.reason, sub)}</p>}
+      {known && state?.limitUntil && <p className="t-why">{t.window.limitUntil(clock(language, state.limitUntil)!)}</p>}
       {/* A live terminal has its own line to type in; the log needs this one. */}
-      {!terminal && (
+      {known && !terminal && (
         <form
           className="t-in"
           onSubmit={e => {
@@ -487,8 +498,8 @@ export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Pro
         </form>
       )}
       <div className="t-st">
-        <span>{where}</span>
-        {!terminal && <span>{t.window.hint}</span>}
+        {known && <span>{where}</span>}
+        {known && !terminal && <span>{t.window.hint}</span>}
       </div>
     </aside>
   );
