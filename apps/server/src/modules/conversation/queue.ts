@@ -331,12 +331,22 @@ type Placement = { node: NodeIdentity; nodeId: string | null; moves: boolean };
 
 /* Where the agent's next turn goes. A company key's to the built-in node. A plan's to the node its program is on while
    that one is signed in, connected and new enough, so its folder, session and terminal go on there; otherwise to the
-   freest of the plan's nodes that is. None while no node can take it. */
+   freest of the plan's nodes that is, unless the agent has work in progress on its own and waits for it. None while no
+   node can take it. */
 async function placement(ctx: Ctx, agent: { id: string; nodeId: string | null }, sub: { id: string; kind: 'personal' | 'api_key' }, need = CONVERSATION_NODE): Promise<Placement | null> {
   if (sub.kind === 'api_key') return ctx.hub.isReady(BUILTIN) ? { node: BUILTIN, nodeId: null, moves: false } : null;
-  const able = (await planNodes(ctx.db, [sub.id])).filter(n => n.status === 'ready' && !outdated(n.version, need) && ctx.hub.isReady(nodeIdentity(n.id)));
-  const pick = able.find(n => n.id === agent.nodeId) ?? (await freest(ctx, able));
+  const all = await planNodes(ctx.db, [sub.id]);
+  const able = all.filter(n => n.status === 'ready' && !outdated(n.version, need) && ctx.hub.isReady(nodeIdentity(n.id)));
+  const stays = all.some(n => n.id === agent.nodeId) && (await holdsWork(ctx, agent.id));
+  const pick = able.find(n => n.id === agent.nodeId) ?? (stays ? null : await freest(ctx, able));
   return pick ? { node: nodeIdentity(pick.id), nodeId: pick.id, moves: pick.id !== agent.nodeId } : null;
+}
+
+/* Whether the agent holds a task it works on, or stopped on to ask: its folder may hold work it has not pushed, so it
+   waits for its own machine, and a laptop that sleeps a while does not scatter the team. */
+async function holdsWork(ctx: Ctx, agentId: string): Promise<boolean> {
+  const [held] = await ctx.db.select({ id: tasks.id }).from(tasks).where(and(eq(tasks.assigneeAgentId, agentId), inArray(tasks.status, ['working', 'blocked']))).limit(1);
+  return Boolean(held);
 }
 
 /* The node on the machine its nodes say is freest, and of machines about as free the one that holds the fewest agents,
@@ -556,16 +566,19 @@ export async function orchestratorState(ctx: Ctx, companyId: string): Promise<Ag
 }
 
 /* Why the agent's turns cannot go out now, or null when they can: a plan's go out while one of its machines can take them,
-   and otherwise wait for what its own machine waits for, or one of the plan's that is online, or its first. */
-async function waitsFor(ctx: Ctx, agent: { productId: string | null; departmentId: string | null; nodeId: string | null }, sub: { id: string; kind: 'personal' | 'api_key' }): Promise<AgentState['reason']> {
+   and otherwise wait for what its own machine waits for, or one of the plan's that is online, or its first. One with work
+   in progress waits for its own machine alone. */
+async function waitsFor(ctx: Ctx, agent: { id: string; productId: string | null; departmentId: string | null; nodeId: string | null }, sub: { id: string; kind: 'personal' | 'api_key' }): Promise<AgentState['reason']> {
   if (sub.kind === 'api_key') return ctx.hub.isReady(BUILTIN) ? null : 'machine_offline';
   const all = await planNodes(ctx.db, [sub.id]);
   if (!all.length) return 'waiting_machine';
   const need = all.some(n => outdated(n.version, REPOSITORY_NODE)) && (await repoFor(ctx, agent)) ? REPOSITORY_NODE : CONVERSATION_NODE;
   const why = (n: NodeRow): AgentState['reason'] =>
     n.status === 'needs_login' ? 'needs_login' : outdated(n.version, need) ? 'node_outdated' : !ctx.hub.isReady(nodeIdentity(n.id)) ? 'machine_offline' : null;
+  const own = all.find(n => n.id === agent.nodeId);
+  if (own && why(own) !== null && (await holdsWork(ctx, agent.id))) return why(own);
   if (all.some(n => why(n) === null)) return null;
-  return why(all.find(n => n.id === agent.nodeId) ?? all.find(n => ctx.hub.isOnline(nodeIdentity(n.id))) ?? all[0]!);
+  return why(own ?? all.find(n => ctx.hub.isOnline(nodeIdentity(n.id))) ?? all[0]!);
 }
 
 /* Whether the agent can answer now and, if not, why; what it is doing and how many turns wait. */
@@ -573,7 +586,7 @@ export async function agentState(ctx: Ctx, agentId: string): Promise<AgentState>
   const [running] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
   const [waiting] = await ctx.db.select({ n: count() }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'queued')));
   const sub = await liveSubscription(ctx, agentId);
-  const [agent] = sub ? await ctx.db.select({ productId: agents.productId, departmentId: agents.departmentId, nodeId: agents.nodeId }).from(agents).where(eq(agents.id, agentId)) : [];
+  const [agent] = sub ? await ctx.db.select({ id: agents.id, productId: agents.productId, departmentId: agents.departmentId, nodeId: agents.nodeId }).from(agents).where(eq(agents.id, agentId)) : [];
   const reason: AgentState['reason'] = !sub || !agent ? 'no_subscription' : await waitsFor(ctx, agent, sub);
   /* The terminal the window opens is of the machine the program is on. */
   const shown = await programNode(ctx, agentId);

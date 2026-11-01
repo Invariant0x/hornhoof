@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
-import { agents, companies, departments } from '../src/db/schema.js';
+import { agents, companies, departments, tasks } from '../src/db/schema.js';
 import { nodeIdentity } from '../src/modules/nodes/hub.js';
 import { as, connectNode, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
@@ -95,6 +95,26 @@ describe('agents of one plan on several machines', () => {
     expect(run.sessionId).toBeNull();
     expect(run.prompt).toContain('Are you there?');
     expect((await db.select().from(agents).where(eq(agents.id, bruno.id)))[0]!.nodeId).toBe(nodes.laptop.nodeId);
+  });
+
+  it('keeps an employee with a task in progress waiting for its own machine, whose folder may hold its work', async () => {
+    const { app, db, ceo, url, nodes, mac, lap, bruno } = await planOnTwoMachines();
+    await write(app, ceo, bruno.id, 'Hi');
+    finish(mac, await nextRun(mac), 'bruno-on-mac');
+    await until(async () => !(await state(app, ceo, bruno.id)).busy);
+    await db.insert(tasks).values({ companyId: bruno.companyId, number: 1, title: 'Checkout API', executorAgentId: bruno.id, assigneeAgentId: bruno.id, status: 'working' });
+    mac.close();
+    await mac.closed;
+    await until(async () => (await state(app, ceo, bruno.id)).reason === 'machine_offline');
+    const back = await connectNode(url, nodes.mac.key);
+    back.send(hello);
+    await until(async () => (await state(app, ceo, bruno.id)).ready);
+    await write(app, ceo, bruno.id, 'Are you there?');
+    const run = await nextRun(back);
+    expect(lap.queued()).toBe(0);
+    expect(run.sessionId).toBe('bruno-on-mac');
+    expect(run.prompt).toContain('Are you there?');
+    expect((await db.select().from(agents).where(eq(agents.id, bruno.id)))[0]!.nodeId).toBe(nodes.mac.nodeId);
   });
 
   it('waits while no machine of the plan can take a turn, and goes out on the first that can', async () => {
