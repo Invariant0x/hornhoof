@@ -31,7 +31,7 @@ async function openTask(user: ReturnType<typeof userEvent.setup>) {
 describe('a task', () => {
   it("puts what waits for the person at the top, the orchestrator's plain question above the answer, and says that writing to the agent counts too", async () => {
     const user = userEvent.setup();
-    const plain = 'Bruno cannot finish the checkout because the tests fail on the payment provider. Tell him to skip those tests for now, or to wait for the keys.';
+    const plain = 'Bruno cannot finish the checkout because the tests fail on the payment provider. He needs the provider keys, or a yes to leave those tests for later.';
     const stuck = {
       ...REQUESTS[0]!,
       id: 'r3',
