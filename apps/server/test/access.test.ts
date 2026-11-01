@@ -31,6 +31,14 @@ describe('canReach', () => {
     expect(canReach(sales, { departmentId: 'marketing' })).toBe(false);
     expect(canReach(sales, { departmentId: null })).toBe(false);
   });
+
+  it('does not reach a product of another department', () => {
+    expect(canReach(listed(['sales']), { departmentId: 'website', parentId: 'marketing' })).toBe(false);
+  });
+
+  it('does not reach a team that is not listed', () => {
+    expect(canReach(listed(['sales'], ['social']), { departmentId: 'marketing', teamId: 'ads' })).toBe(false);
+  });
 });
 
 describe('access by departments', () => {
