@@ -57,6 +57,30 @@ function merged(known: Limits | null, news: Limits): Limits {
   return { status: full ? 'rejected' : news.status, windows: windows.slice(0, 8), ...(known.complete ? { complete: true } : {}) };
 }
 
+function commandTracker(terminal: TerminalSetup | undefined, report: (subscriptionId: string) => Promise<void>) {
+  const reports = new Map<string, MissingCommand[]>();
+  const checked = new Set<string>();
+  return {
+    field(subscriptionId?: string): { subscriptionId?: string; missing?: MissingCommand[] } {
+      const missing = subscriptionId ? reports.get(subscriptionId) : undefined;
+      return subscriptionId && missing ? { subscriptionId, missing } : {};
+    },
+    async check(chosen: ProviderAdapter, provider: ProviderId, subscriptionId: string): Promise<void> {
+      if (checked.has(subscriptionId)) return;
+      const find = terminal ? () => terminal.tmux.missingCommands() : chosen.missingCommands?.bind(chosen);
+      if (!find) return;
+      checked.add(subscriptionId);
+      try {
+        const commands = await find();
+        reports.set(subscriptionId, commands.map(command => ({ provider, command })));
+        await report(subscriptionId);
+      } catch {
+        checked.delete(subscriptionId);
+      }
+    },
+  };
+}
+
 /* The node's life: stay connected, run jobs, report the sign-in state and the limits, clean up when removed. */
 export async function runNode({ dir, adapter, builtin, terminal, log = console.log, loginCheckMs = LOGIN_CHECK_MS, learnMs = LEARN_MS, limitsMs = LIMITS_MS }: RunOptions): Promise<{ stop(): void }> {
   if (!builtin && isRemoved(dir)) {
@@ -81,8 +105,6 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
   let loggedIn = single ? await single.loggedIn() : true;
   let limits: Limits | null = null;
   let stopped = false;
-  const commandReports = new Map<string, MissingCommand[]>();
-  const commandChecks = new Set<string>();
 
   const emit = (m: NodeMessage) => {
     if (!send?.(m)) outbox.push(m);
@@ -113,30 +135,11 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
      The built-in node serves API keys, whose models Hornhoof knows. */
   const readModels = async () => (single?.models ? await single.models() : undefined);
   let models = await readModels();
-  const missingField = (): { missing?: MissingCommand[] } => {
-    if (!commandReports.size) return {};
-    const unique = new Map<string, MissingCommand>();
-    for (const report of commandReports.values()) for (const item of report) unique.set(`${item.provider}:${item.command}`, item);
-    return { missing: [...unique.values()] };
-  };
-  const status = async () => {
+  const commands = commandTracker(terminal, status);
+  async function status(subscriptionId?: string) {
     /* A program that cannot list its models now keeps those it listed before. */
     models = await readModels().catch(() => models);
-    emit({ type: 'status', loggedIn, limits, ...(models ? { models } : {}), ...missingField() });
-  };
-
-  async function checkCommands(chosen: ProviderAdapter, provider: ProviderId, key: string) {
-    if (commandChecks.has(key)) return;
-    const check = terminal ? () => terminal.tmux.missingCommands() : chosen.missingCommands?.bind(chosen);
-    if (!check) return;
-    commandChecks.add(key);
-    try {
-      const commands = await check();
-      commandReports.set(key, commands.map(command => ({ provider, command })));
-      await status();
-    } catch {
-      commandChecks.delete(key);
-    }
+    emit({ type: 'status', loggedIn, limits, ...(models ? { models } : {}), ...commands.field(subscriptionId) });
   }
 
   const conn = connect({
@@ -148,13 +151,13 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
       /* Finished jobs waiting in the outbox still count as running, so the server does not give up on them. */
       const pending = outbox.flatMap(m => (m.type === 'job.done' ? [m.jobId] : []));
       const typed = host?.typedJobs() ?? [];
-      next({ type: 'hello', version: VERSION, loggedIn, running: [...running.keys(), ...typed, ...pending], ...(models ? { models } : {}), terminals: Boolean(host), ...missingField() });
+      next({ type: 'hello', version: VERSION, loggedIn, running: [...running.keys(), ...typed, ...pending], ...(models ? { models } : {}), terminals: Boolean(host), ...commands.field(saved?.subscriptionId) });
       for (const m of outbox.splice(0)) emit(m);
     },
     onMessage: m => void handle(m),
     onRefused: () => log('Hornhoof does not know this machine any more. Run the install command from Hornhoof again to reconnect.'),
   });
-  if (single && saved) void checkCommands(single, saved.provider, saved.subscriptionId);
+  if (single && saved) void commands.check(single, saved.provider, saved.subscriptionId);
 
   async function handle(m: ServerMessage) {
     if (m.type === 'remove') {
@@ -207,7 +210,7 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
     let done: Awaited<ReturnType<typeof runJob>>;
     try {
       const chosen = pick(m);
-      void checkCommands(chosen, m.provider, m.subscriptionId);
+      void commands.check(chosen, m.provider, m.subscriptionId);
       await learn([m.toolToken, m.secret, m.workspace?.repo?.token]);
       /* An agent's turn runs in its session; a test job, with no agent, runs as before. */
       const runIn = (input: Parameters<ProviderAdapter['run']>[0]) =>

@@ -40,6 +40,15 @@ export async function failOpenJobs(ctx: Ctx, scope: SQL, error: string, stillRun
   return failed.map(j => j.id);
 }
 
+async function saveBuiltinMissing(ctx: Ctx, msg: Extract<NodeMessage, { type: 'hello' | 'status' }>, now: Date): Promise<void> {
+  if (!msg.subscriptionId) return;
+  if (!msg.missing) return;
+  await ctx.db
+    .update(subscriptions)
+    .set({ missing: msg.missing, lastSeenAt: now })
+    .where(and(eq(subscriptions.id, msg.subscriptionId), eq(subscriptions.kind, 'api_key'), isNull(subscriptions.removedAt)));
+}
+
 export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage): Promise<void> {
   const { db } = ctx;
   const now = new Date();
@@ -56,6 +65,8 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
           .update(subscriptions)
           .set({ nodeVersion: msg.version, lastSeenAt: now, status: msg.loggedIn ? 'ready' : 'needs_login', ...(msg.models ? { models: msg.models } : {}), ...(msg.missing ? { missing: msg.missing } : {}) })
           .where(eq(subscriptions.id, sub.id));
+      } else {
+        await saveBuiltinMissing(ctx, msg, now);
       }
       await failOpenJobs(ctx, jobsOf(id, ctx), 'machine_restarted', msg.running);
       ctx.hub.greet(id, msg.terminals === true);
@@ -69,7 +80,10 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       return;
     }
     case 'status': {
-      if (id.kind !== 'node') return;
+      if (id.kind !== 'node') {
+        await saveBuiltinMissing(ctx, msg, now);
+        return;
+      }
       /* A node that started again knows no limits until its program says them; the last ones stay until then. */
       await db
         .update(subscriptions)

@@ -9,6 +9,8 @@ import { agentEvents, agents, companies, departments, jobs, requests, subscripti
 import { createTask } from '../src/modules/tasks/engine.js';
 import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until } from './helpers.js';
 import { agentState, enqueueTurn } from '../src/modules/conversation/queue.js';
+import { BUILTIN } from '../src/modules/nodes/hub.js';
+import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 
 const TOKEN = 'tool-token-watch-0123456789abcdef0123';
 const NODE_KEY = 'k'.repeat(40);
@@ -35,7 +37,7 @@ async function company(skills: string[]) {
   await until(async () => (await agentState(app.ctx, bruno.id)).ready);
   await db.insert(jobs).values({ companyId: acme!.id, subscriptionId: sub!.id, agentId: wendy.id, kind: 'conversation', prompt: 'round', timeoutMs: 900000, status: 'running', toolTokenHash: hashToken(TOKEN) });
   const task = (await createTask(app.ctx, { agentId: hana.id }, { title: 'Checkout API', brief: '', body: 'POST /checkout.', departmentId: dev!.id, assigneeAgentId: bruno.id, executor: true, gates: [] })).task;
-  return { app, db, ceo, dev: dev!, acme: acme!, sub: sub!, wendy, hana, bruno, task };
+  return { app, db, ceo, dev: dev!, acme: acme!, sub: sub!, builtin, wendy, hana, bruno, task };
 }
 
 async function mcp(app: FastifyInstance): Promise<Client> {
@@ -141,9 +143,31 @@ describe('tools a skill grants', () => {
     expect(recent.blocked).toEqual([]);
   });
 
-  it('lets a failure collector see the commands a node reports missing', async () => {
-    const { app, db, sub } = await company(['ops-failure-review']);
-    await db.update(subscriptions).set({ missing: [{ provider: sub.provider, command: 'uptime' }] }).where(eq(subscriptions.id, sub.id));
+  it('ignores a built-in command report without a subscription scope', async () => {
+    const { app, db, sub } = await company([]);
+    const report = handleNodeMessage(app.ctx, BUILTIN, { type: 'status', loggedIn: true, limits: null, missing: [{ provider: sub.provider, command: 'uptime' }] });
+    await expect(report).resolves.toBeUndefined();
+    const [stored] = await db.select().from(subscriptions).where(eq(subscriptions.id, sub.id));
+    expect(stored!.missing).toBeNull();
+  });
+
+  it('lets a failure collector see built-in command reports by subscription', async () => {
+    const { app, ceo, sub, builtin } = await company(['ops-failure-review']);
+    const added = await app.inject({
+      method: 'POST',
+      url: '/api/subscriptions',
+      payload: { provider: 'anthropic_api', kind: 'api_key', label: 'Second key', apiKey: 'sk-ant-api03-second-key-1234', target: { kind: 'any' } },
+      ...as(ceo),
+    });
+    expect(added.statusCode).toBe(201);
+    const other = added.json().subscription as { id: string };
+    const view = async (id: string) => (await app.inject({ url: '/api/subscriptions', ...as(ceo) })).json().subscriptions.find((s: { id: string }) => s.id === id);
+    const missing = [{ provider: sub.provider, command: 'uptime' }];
+    builtin.send({ type: 'status', loggedIn: true, limits: null, subscriptionId: sub.id, missing });
+    builtin.send({ type: 'status', loggedIn: true, limits: null, subscriptionId: other.id, missing: [] });
+    await until(async () => (await view(sub.id)).missing?.length === 1 && (await view(other.id)).missing?.length === 0);
+    expect(await view(sub.id)).toMatchObject({ status: 'ready', missing });
+    expect(await view(other.id)).toMatchObject({ status: 'ready', missing: [] });
     const recent = JSON.parse((await call(await mcp(app), 'failures', { hours: 6 })).content[0]!.text);
     expect(recent.missingCommands).toEqual([{ provider: sub.provider, command: 'uptime', subscription: sub.label, node: 'built-in' }]);
   });

@@ -360,6 +360,16 @@ describe('required commands', () => {
     await expect(findMissingCommands({}, null, async () => ({ code: 0, output: '', timedOut: true }))).rejects.toThrow('Could not check the agent commands.');
   });
 
+  it('does not scope a hello before any command check has reported', async () => {
+    const server = await fakeServer();
+    const node = await runNode({ dir: nodeDir(server.url), adapter, log: () => {} });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    const hello = server.received.find(m => m.type === 'hello')!;
+    expect(hello).not.toHaveProperty('subscriptionId');
+    expect(hello).not.toHaveProperty('missing');
+  });
+
   it('reports a command missing from the agent PATH without stopping the node', async () => {
     const server = await fakeServer();
     const dir = nodeDir(server.url);
@@ -428,5 +438,22 @@ describe('required commands', () => {
     await server.wait(() => server.received.some(m => m.type === 'job.done' && m.jobId === 'j2'));
     expect(checks).toBe(1);
     expect(server.received.find(m => m.type === 'status' && m.missing !== undefined)).toMatchObject({ missing: [{ provider: 'anthropic_api', command: 'uptime' }] });
+  });
+
+  it('scopes built-in results to their subscription, including a successful empty result', async () => {
+    const server = await fakeServer();
+    const checking = (subscriptionId: string): ProviderAdapter => ({
+      ...adapter,
+      missingCommands: async () => (subscriptionId === 'subscription-a' ? ['ps'] : []),
+    });
+    const node = await runNode({ dir: nodeDir(server.url), adapter: (job: { subscriptionId: string }) => checking(job.subscriptionId), builtin: { server: server.url, key: 'node-key-1234567890' }, log: () => {} });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    const run = (jobId: string, subscriptionId: string) => server.send({ type: 'job.run', jobId, subscriptionId, provider: 'anthropic_api', prompt: 'hi', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
+    run('j1', 'subscription-a');
+    run('j2', 'subscription-b');
+    await server.wait(() => server.received.filter(m => m.type === 'status' && m.missing !== undefined).length >= 2);
+    expect(server.received.find(m => m.type === 'status' && m.subscriptionId === 'subscription-a')).toMatchObject({ missing: [{ provider: 'anthropic_api', command: 'ps' }] });
+    expect(server.received.find(m => m.type === 'status' && m.subscriptionId === 'subscription-b')).toMatchObject({ missing: [] });
   });
 });

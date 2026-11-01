@@ -156,8 +156,8 @@ const MissingCommands = z.array(MissingCommand).max(100);
 
 const NodeMessage = z.discriminatedUnion('type', [
   /* terminals: the node runs agents in sessions people can watch and type into. */
-  z.object({ type: z.literal('hello'), version: z.string().max(40), loggedIn: z.boolean(), running: z.array(z.string()).max(100), models: Models.optional(), terminals: z.boolean().optional(), missing: MissingCommands.optional() }),
-  z.object({ type: z.literal('status'), loggedIn: z.boolean(), limits: Limits.nullable(), models: Models.optional(), missing: MissingCommands.optional() }),
+  z.object({ type: z.literal('hello'), version: z.string().max(40), loggedIn: z.boolean(), running: z.array(z.string()).max(100), models: Models.optional(), terminals: z.boolean().optional(), subscriptionId: Id.optional(), missing: MissingCommands.optional() }),
+  z.object({ type: z.literal('status'), loggedIn: z.boolean(), limits: Limits.nullable(), models: Models.optional(), subscriptionId: Id.optional(), missing: MissingCommands.optional() }),
   z.object({ type: z.literal('job.started'), jobId: z.string() }),
   z.object({
     type: z.literal('job.done'),
