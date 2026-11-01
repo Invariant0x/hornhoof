@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,7 +15,7 @@ const SUB_B = '9f1e2d3c-0000-4000-8000-000000000002';
 const TWO_LINES = `${SUB_A} claude node-key-aaaaaaaaaaaaaaaa\\n${SUB_B} codex node-key-bbbbbbbbbbbbbbbb\\n`;
 
 /* System tools the script and the stubs may use. Real docker, brew, curl and sudo are never reachable. */
-const TOOLS = ['bash', 'sh', 'env', 'cat', 'od', 'tr', 'head', 'base64', 'sleep', 'mkdir', 'rm', 'chmod', 'grep', 'sed', 'cut', 'cp', 'touch', 'basename', 'dirname', 'wc', 'mktemp', 'date', 'sort', 'kill', 'printf', 'tail', 'awk'];
+const TOOLS = ['bash', 'sh', 'env', 'cat', 'od', 'tr', 'head', 'base64', 'sleep', 'mkdir', 'rm', 'chmod', 'grep', 'sed', 'cut', 'cp', 'mv', 'touch', 'basename', 'dirname', 'wc', 'mktemp', 'date', 'sort', 'kill', 'printf', 'tail', 'awk'];
 
 type Options = { args?: string[]; omit?: string[]; env?: Record<string, string>; tty?: string };
 
@@ -290,6 +290,21 @@ describe('install.sh', () => {
     const env = readFileSync(join(dir, '.env'), 'utf8');
     expect(env).toContain('HORNHOOF_SECRET=keep-me');
     expect(env).toMatch(/^NODE_KEY=.{44}$/m);
+  });
+
+  it('replaces an existing .env whole and leaves it readable by its owner only', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-server-'));
+    const file = join(dir, '.env');
+    writeFileSync(file, 'HORNHOOF_SECRET=keep-me\nPUBLIC_URL=http://localhost:8080\n', { mode: 0o644 });
+    chmodSync(file, 0o644);
+    const before = statSync(file).ino;
+    const r = install({ args: ['server'], env: { HORNHOOF_DIR: dir } });
+    expect(r.code).toBe(0);
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+    /* A new file moved into place, so a failed write never leaves half a .env behind. */
+    expect(statSync(file).ino).not.toBe(before);
+    expect(readFileSync(file, 'utf8')).toContain('HORNHOOF_SECRET=keep-me');
+    expect(readdirSync(dir).filter(f => f.startsWith('.env'))).toEqual(['.env']);
   });
 
   it('keeps an existing .env that has no PUBLIC_URL and opens localhost', () => {

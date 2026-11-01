@@ -485,18 +485,23 @@ free_port() {
   printf '%s' "$port"
 }
 
-# set_env <key> <value>: one line for the key in the server's .env, which stays readable only by its owner.
+# set_env <key> <value>: one line for the key in the server's .env, which stays readable only by its owner. The new
+# file is written whole and then moved into place, so a failed write leaves the old one. It starts as a copy, so it
+# keeps the owner when the updater writes it as root.
 set_env() {
-  local file="$SERVER_DIR/.env"
+  local file="$SERVER_DIR/.env" new="$SERVER_DIR/.env.new"
+  rm -f "$new"
+  if [ -f "$file" ]; then cp -p "$file" "$new" 2> /dev/null || true; fi
   (
     umask 077
+    touch "$new"
+    chmod 600 "$new"
     {
       grep -v "^$1=" "$file" 2> /dev/null || true
       printf '%s=%s\n' "$1" "$2"
-    } > "$file.new"
+    } > "$new"
   )
-  cat "$file.new" > "$file"
-  rm -f "$file.new"
+  mv "$new" "$file"
 }
 
 env_value() { grep "^$1=" "$SERVER_DIR/.env" 2> /dev/null | tail -1 | cut -d= -f2- || true; }
@@ -564,7 +569,7 @@ server_mode() {
   if [ -f "$env_file" ]; then
     say "Keeping the settings in $env_file."
     if ! grep -q '^NODE_KEY=' "$env_file"; then
-      printf 'NODE_KEY=%s\n' "$(new_secret)" >> "$env_file"
+      set_env NODE_KEY "$(new_secret)"
       say "Added NODE_KEY to $env_file."
     fi
   else
@@ -576,8 +581,9 @@ server_mode() {
     esac
     (
       umask 077
-      printf 'HORNHOOF_SECRET=%s\nNODE_KEY=%s\nPUBLIC_URL=%s\nHORNHOOF_PORT=%s\n' "$(new_secret)" "$(new_secret)" "${url%/}" "$port" > "$env_file"
+      printf 'HORNHOOF_SECRET=%s\nNODE_KEY=%s\nPUBLIC_URL=%s\nHORNHOOF_PORT=%s\n' "$(new_secret)" "$(new_secret)" "${url%/}" "$port" > "$env_file.new"
     )
+    mv "$env_file.new" "$env_file"
     say "Wrote fresh secrets to $env_file. Keep it safe: HORNHOOF_SECRET is needed to read the stored API keys."
   fi
   # .env names the compose project and the folder too, for the updater and for docker compose run by hand here.
