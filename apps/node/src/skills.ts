@@ -89,10 +89,14 @@ async function exclude(fs: AgentFs, workDir: string, paths: string[]): Promise<v
   });
 }
 
+/* A skill folder the node may have placed: one folder right inside a skills folder. */
+const SKILL_PATH = /^\.(claude|agents)\/skills\/[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+/* What the node placed last time, as far as it is skill folders: the agent can write the list too. */
 async function placed(fs: AgentFs, workDir: string): Promise<Placed> {
   try {
     const data = JSON.parse((await fs.read(join(workDir, PLACED))) ?? '{}') as Partial<Placed>;
-    return { paths: Array.isArray(data.paths) ? data.paths.filter(p => typeof p === 'string') : [], superpowers: typeof data.superpowers === 'string' ? data.superpowers : null };
+    return { paths: Array.isArray(data.paths) ? data.paths.filter((p): p is string => typeof p === 'string' && SKILL_PATH.test(p)) : [], superpowers: typeof data.superpowers === 'string' ? data.superpowers : null };
   } catch {
     return { paths: [], superpowers: null };
   }

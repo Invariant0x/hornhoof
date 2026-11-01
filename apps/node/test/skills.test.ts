@@ -56,6 +56,20 @@ describe('skills as files', () => {
     expect(readdirSync(join(dir, '.agents', 'skills'))).toEqual(['dev-docs']);
   });
 
+  it('removes only skill folders, whatever the list of what it placed says, as the agent can write that list', async () => {
+    const root = work();
+    const dir = join(root, 'agent');
+    mkdirSync(join(dir, 'repo'), { recursive: true });
+    writeFileSync(join(dir, 'repo', 'main.go'), 'package main\n');
+    writeFileSync(join(root, 'node.json'), 'key');
+    const listed = ['repo', '../node.json', '.agents/skills/../../node.json', '.agents/skills/..', '.agents/skills', '/etc', '.claude/skills/a/b'];
+    writeFileSync(join(dir, '.hh-skills.json'), JSON.stringify({ paths: listed, superpowers: null }));
+    await placeSkills(ownFs, dir, 'codex', [TDD], null);
+    expect(existsSync(join(dir, 'repo', 'main.go'))).toBe(true);
+    expect(existsSync(join(root, 'node.json'))).toBe(true);
+    expect(readdirSync(join(dir, '.agents', 'skills'))).toEqual(['dev-tdd']);
+  });
+
   it("leaves a skill the agent made itself in the same folder", async () => {
     const dir = work();
     mkdirSync(join(dir, '.agents', 'skills', 'own'), { recursive: true });
