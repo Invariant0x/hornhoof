@@ -34,10 +34,11 @@ import { terminalRoutes } from './modules/terminals/routes.js';
 import { hasWebApp, serveWebApp, webAppRoutes } from './web.js';
 
 export type { Db } from './db/client.js';
+import type { AgentSql } from './db/agent-sql.js';
 import type { Db } from './db/client.js';
 
 /* logger is off unless given: tests stay quiet, main.ts turns it on so errors reach the container log. */
-export type Deps = { db: Db; config: Config; logger?: FastifyServerOptions['logger'] };
+export type Deps = { db: Db; config: Config; logger?: FastifyServerOptions['logger']; agentSql?: AgentSql | null };
 
 /* What routes get: the deps, the live node connections, the live stream to browsers, the terminals people watch and the
    check for newer builds. */
@@ -64,6 +65,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
     onError: err => app.log.error({ error: loggable(err) }, 'A node message failed.'),
   });
   app.addHook('onClose', async () => ctx.hub.stop());
+  app.addHook('onClose', async () => ctx.agentSql?.close());
   const { config } = deps;
   ctx.updates = new UpdateCheck({
     registry: registry({ image: config.image, arch: archOf(), base: config.registryUrl }),

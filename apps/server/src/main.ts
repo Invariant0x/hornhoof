@@ -1,5 +1,6 @@
 import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
+import { openAgentSql } from './db/agent-sql.js';
 import { createDb } from './db/client.js';
 
 function requireDbUrl(url: string | undefined): string {
@@ -8,8 +9,10 @@ function requireDbUrl(url: string | undefined): string {
 }
 
 const config = loadConfig(process.env);
+const url = requireDbUrl(config.databaseUrl);
 const app = await buildApp({
-  db: await createDb(requireDbUrl(config.databaseUrl)),
+  db: await createDb(url),
+  agentSql: await openAgentSql(url),
   config,
   logger: { level: process.env.LOG_LEVEL || 'info' },
 });

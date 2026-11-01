@@ -272,3 +272,58 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
   });
 });
 
+
+describe('the orchestrator reads and changes the database itself', () => {
+  it('reads any table and changes a field, and the map hears of the change', async () => {
+    const { app, db, bruno } = await company();
+    const client = await mcp(app);
+    const heard: string[] = [];
+    app.ctx.bus.subscribe(bruno.companyId, m => heard.push(m.type));
+    const read = await call(client, 'database', { sql: `SELECT name, kind FROM agents WHERE id = '${bruno.id}'` });
+    expect(read.isError).toBeFalsy();
+    expect(JSON.parse(text(read))).toEqual([{ rows: [{ name: 'Bruno', kind: 'worker' }], changed: 0 }]);
+    expect(heard).toEqual([]);
+    const write = await call(client, 'database', { sql: `UPDATE agents SET name = 'Bruno Diaz' WHERE id = '${bruno.id}'` });
+    expect(JSON.parse(text(write))).toEqual([{ rows: [], changed: 1 }]);
+    expect((await db.select().from(agents).where(eq(agents.id, bruno.id)))[0]!.name).toBe('Bruno Diaz');
+    expect(heard).toEqual(['org']);
+  });
+
+  it('is refused sign-ins, invites, install codes, passwords and the tables themselves', async () => {
+    const { app } = await company();
+    const client = await mcp(app);
+    for (const sql of ['SELECT * FROM sessions', 'SELECT * FROM invites', 'SELECT * FROM node_codes', 'SELECT password_hash FROM people', 'DROP TABLE tasks', 'ALTER TABLE tasks ADD COLUMN x text', 'CREATE TABLE notes (id int)']) {
+      const res = await call(client, 'database', { sql });
+      expect(res.isError, sql).toBe(true);
+      expect(text(res), sql).toMatch(/permission denied|must be owner/);
+    }
+    expect(JSON.parse(text(await call(client, 'database', { sql: 'SELECT name FROM people' })))[0].rows).toEqual([{ name: 'Ivan' }]);
+  });
+
+  it('undoes the whole call when one of its statements fails', async () => {
+    const { app, db, bruno } = await company();
+    const res = await call(await mcp(app), 'database', { sql: `UPDATE agents SET name = 'Nobody' WHERE id = '${bruno.id}'; SELECT * FROM sessions` });
+    expect(res.isError).toBe(true);
+    expect((await db.select().from(agents).where(eq(agents.id, bruno.id)))[0]!.name).toBe('Bruno');
+  });
+
+  it('cuts a long answer', async () => {
+    const { app } = await company();
+    const res = await call(await mcp(app), 'database', { sql: "SELECT repeat('x', 40000) AS long" });
+    expect(text(res)).toMatch(/\[cut at 30000 characters\]$/);
+  });
+
+  it('says why when the database does not let Hornhoof make its role', async () => {
+    const { app } = await company();
+    app.ctx.agentSql = undefined;
+    const res = await call(await mcp(app), 'database', { sql: 'SELECT 1' });
+    expect(res.isError).toBe(true);
+    expect(text(res)).toContain('does not let Hornhoof');
+  });
+
+  it('is the orchestrator\'s alone', async () => {
+    const { app, bruno, running } = await company();
+    await running(bruno.id, WORKER_TOKEN);
+    expect((await (await mcp(app, WORKER_TOKEN)).listTools()).tools.map(t => t.name)).not.toContain('database');
+  });
+});

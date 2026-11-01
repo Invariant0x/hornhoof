@@ -10,6 +10,7 @@ import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import { onTestFinished } from 'vitest';
 import { buildApp, type Deps } from '../src/app.js';
 import { loadConfig, type Config } from '../src/config.js';
+import { agentRole, grantsFor, type AgentSql } from '../src/db/agent-sql.js';
 import { MIGRATIONS, type Db } from '../src/db/client.js';
 import * as schema from '../src/db/schema.js';
 
@@ -37,6 +38,24 @@ export async function createTestDb(): Promise<Db> {
   return db;
 }
 
+/* The orchestrator's database role on PGlite. PGlite has one user, a superuser, so the role is taken with SET LOCAL ROLE:
+   its rights hold, though a statement could take the superuser back, which on Postgres a separate sign-in rules out. */
+function agentSqlOn(client: PGlite): AgentSql {
+  const role = agentRole('postgres');
+  let granted: Promise<unknown> | null = null;
+  return {
+    run: async text => {
+      granted ??= client.exec(grantsFor(role));
+      await granted;
+      return client.transaction(async tx => {
+        await tx.query(`SET LOCAL ROLE "${role}"`);
+        return (await tx.exec(text)).map(r => ({ rows: r.rows as Record<string, unknown>[], changed: r.affectedRows ?? 0 }));
+      });
+    },
+    close: async () => {},
+  };
+}
+
 export async function testApp(env: NodeJS.ProcessEnv = {}, logger?: Deps['logger']): Promise<{ app: FastifyInstance; db: Db; config: Config }> {
   const { client, db } = await openTestDb();
   let app: FastifyInstance | undefined;
@@ -47,7 +66,7 @@ export async function testApp(env: NodeJS.ProcessEnv = {}, logger?: Deps['logger
   });
   /* Tests never reach the real registry unless they ask. */
   const config = loadConfig({ HORNHOOF_SECRET: TEST_SECRET, UPDATE_CHECK_MS: '0', ...env });
-  app = await buildApp({ db, config, logger });
+  app = await buildApp({ db, config, logger, agentSql: agentSqlOn(client) });
   return { app, db, config };
 }
 

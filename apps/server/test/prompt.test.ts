@@ -14,7 +14,7 @@ describe('orchestrator instructions', () => {
   });
 
   it('does what people ask himself, with the tools for every screen', () => {
-    for (const words of ['"build_structure"', '"hire"', '"change_employee"', '"message_employee"', '"answer_request"', '"update_task"', '"view"', 'cannot be undone']) {
+    for (const words of ['"build_structure"', '"hire"', '"change_employee"', '"message_employee"', '"answer_request"', '"update_task"', '"view"', '"database"', 'cannot be undone']) {
       expect(ORCHESTRATOR_INSTRUCTIONS).toContain(words);
     }
     expect(ORCHESTRATOR_INSTRUCTIONS).not.toContain('You cannot create, change or remove departments yourself');

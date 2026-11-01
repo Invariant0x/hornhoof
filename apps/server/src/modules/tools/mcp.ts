@@ -10,6 +10,7 @@ import { ApiError } from '../../errors.js';
 import { appendEvent } from '../events/store.js';
 import { companyView } from './company.js';
 import { registerControlTools } from './control.js';
+import { registerDatabaseTool } from './database.js';
 import { checkStaff, departmentOf, StaffProposal, staffingOptions } from './staff.js';
 import { checkItems, Proposal } from './structure.js';
 import { registerTaskTools } from '../tasks/tools.js';
@@ -118,6 +119,7 @@ function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob): McpServer {
     },
   );
   registerControlTools(server, ctx, app, job);
+  registerDatabaseTool(server, ctx, job);
   registerOrchestratorImprovementTools(server, ctx, job);
   return server;
 }
