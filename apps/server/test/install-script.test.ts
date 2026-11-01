@@ -210,6 +210,27 @@ describe('install.sh', () => {
     expect(r.out).toMatch(/Antigravity.*ready/);
   });
 
+  it('connects a machine without a plan: one node that needs no sign-in and lends itself to test runs', () => {
+    const r = install({ env: { STUB_JOIN_BODY: `${SUB_A} machine node-key-mmmmmmmmmmmmmmmm\\n` } });
+    expect(r.code).toBe(0);
+    const runs = r.calls.filter(c => c.startsWith('docker run -d'));
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toContain(`--name hornhoof-machine-${SUB_A.slice(0, 8)} `);
+    expect(runs[0]).toContain(`--label hornhoof.subscription=${SUB_A}`);
+    expect(r.calls).toContain(`stdin ${SERVER} ${SUB_A} machine node-key-mmmmmmmmmmmmmmmm`);
+    expect(r.calls.filter(c => c.startsWith('docker exec -it'))).toEqual([]);
+    expect(r.out).not.toContain('Signing in');
+    expect(r.out).toMatch(/Test runs, no plan: ready/);
+    expect(r.out).toContain('To run agents here too, add one of your plans to this machine in Hornhoof under Subscriptions.');
+  });
+
+  it('says to run a command made for another machine there, and starts nothing', () => {
+    const r = install({ env: { STUB_JOIN_STATUS: '409', STUB_JOIN_BODY: '{"error":"conflict"}' } });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('This command is for another of your machines. Run it on the machine you got it for: Hornhoof shows which one under Subscriptions.');
+    expect(r.calls.some(c => c.startsWith('docker run -d'))).toBe(false);
+  });
+
   it('keeps the same machine id on the next run', () => {
     const home = join(mkdtempSync(join(tmpdir(), 'hh-machine-')), '.hornhoof');
     const machineOf = (r: ReturnType<typeof install>) => r.calls.find(c => c.startsWith('curl-data'))!.match(/"machineId":"([0-9a-f]{32})"/)![1];

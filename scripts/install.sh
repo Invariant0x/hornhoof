@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Hornhoof installer.
 #
-#   curl -fsSL <server>/install.sh | bash -s -- --join <code>   start this machine's nodes for the subscriptions in the code
+#   curl -fsSL <server>/install.sh | bash -s -- --join <code>   connect this machine and start the nodes in the code
 #   install.sh                                                   update the nodes already on this machine
 #   install.sh server                                            install or update the Hornhoof server
 #   install.sh server --name <name>                              another company's server on this computer, in ~/hornhoof-<name>
@@ -220,6 +220,7 @@ program_name() {
     kimi) echo "Kimi" ;;
     glm) echo "GLM Coding Plan" ;;
     antigravity) echo "Antigravity" ;;
+    machine) echo "Test runs, no plan" ;;
     *) echo "$1" ;;
   esac
 }
@@ -260,7 +261,8 @@ node_server() {
   if [ "$NODE_SERVER" != "$SERVER" ]; then LOCAL_SERVER=1; fi
 }
 
-# Lines "<subscriptionId> <provider> <key>", turned into "id:provider:key" words.
+# Lines "<node> <provider> <key>", turned into "id:provider:key" words. A machine that joins without a plan gets one
+# node of its own, with "machine" for its provider.
 JOINED=''
 join_machine() {
   local code=$1 machine host body request status id provider key
@@ -287,6 +289,10 @@ join_machine() {
       rm -f "$body"
       fail "This command is not valid. Copy it again from Hornhoof."
       ;;
+    409)
+      rm -f "$body"
+      fail "This command is for another of your machines. Run it on the machine you got it for: Hornhoof shows which one under Subscriptions."
+      ;;
     000)
       rm -f "$body"
       fail "Could not reach $SERVER. Check the connection, then run this command again."
@@ -298,7 +304,7 @@ join_machine() {
   esac
   while read -r id provider key; do
     case "$id$provider$key" in *[!A-Za-z0-9_-]*) fail "Hornhoof sent a line this installer cannot read. Update Hornhoof and get a new command." ;; esac
-    case "$provider" in claude | codex | kimi | glm | antigravity) ;; *) continue ;; esac
+    case "$provider" in claude | codex | kimi | glm | antigravity | machine) ;; *) continue ;; esac
     [ -n "$id" ] && [ -n "$key" ] && JOINED="$JOINED $id:$provider:$key"
   done < "$body"
   rm -f "$body"
@@ -447,8 +453,10 @@ node_mode() {
     return 0
   fi
 
-  # New nodes always go through the sign-in (it ends at once when the program is signed in already).
+  # New nodes always go through the sign-in (it ends at once when the program is signed in already). A machine's own
+  # node has no plan to sign in to.
   for name in $STARTED; do
+    case "$name" in hornhoof-machine-*) continue ;; esac
     case " $joined_names " in
       *" $name "*) login_node "$name" ;;
       *) if [ "$(node_status "$name")" != ready ]; then login_node "$name"; fi ;;
@@ -468,6 +476,12 @@ node_mode() {
     esac
     say "  $(program_name "$provider"): $status ($name)"
   done
+  case " $joined_names" in
+    *" hornhoof-machine-"*)
+      say ""
+      say "To run agents here too, add one of your plans to this machine in Hornhoof under Subscriptions."
+      ;;
+  esac
 }
 
 uninstall_mode() {
