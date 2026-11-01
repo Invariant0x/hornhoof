@@ -167,9 +167,11 @@ async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, also?: (
   let started: Task[] = [];
   const row = await ctx.db.transaction(async tx => {
     /* Two changes at once to what tasks come after would each miss the other's half of a circle: they go one at a time in
-       a company, and the circle is looked for once it is this one's turn. */
+       a company, and the circle is looked for once it is this one's turn. What it comes after now is held until the move
+       is kept, so one of them done meanwhile is seen, or sees this task wait for it. */
     if (set.after?.length) {
       await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, task.companyId)).for('update');
+      await tx.select({ id: tasks.id }).from(tasks).where(inArray(tasks.id, set.after)).orderBy(asc(tasks.id)).for('share');
       await refuseCircle(tx, task, set.after);
     }
     /* Two tasks under one parent closing at once would each see the other still open, and nobody would hear that all of
@@ -824,8 +826,6 @@ export async function updateTask(ctx: Live, agentId: string, taskId: string, c: 
     fields.push('after');
   }
   if (!fields.length) return { task, wakes: [] };
-  /* It waits now for what it comes after, so nobody sets to work on it yet; one that waited and waits no more starts. */
-  const waits = (await openAfter(ctx.db, { after: set.after ?? task.after })).length > 0;
   /* A rewrite answers a blocked executor. A task nobody holds stays blocked until someone can take it. */
   if (task.status === 'blocked' && (set.assigneeAgentId ?? task.assigneeAgentId)) set.status = 'open';
   /* Another one takes it up, so Hornhoof's note that it stood still is over; a person's word asked for still waits. */
@@ -846,19 +846,15 @@ export async function updateTask(ctx: Live, agentId: string, taskId: string, c: 
   const holdBack = async (tx: Tx) => {
     if (holder) await tx.update(jobs).set({ status: 'failed', error: 'waiting', finishedAt: new Date() }).where(and(eq(jobs.agentId, holder), eq(jobs.taskId, task.id), eq(jobs.status, 'queued')));
   };
-  const wakes: Wake[] = waits
-    ? []
-    : set.assigneeAgentId || (waited && holder)
-      ? [{ agentId: (set.assigneeAgentId ?? holder)!, taskId, why: 'assigned' }]
-      : holder && holder !== agentId
-        ? [{ agentId: holder, taskId, why: 'updated' }]
-        : [];
-  const also = handedOn || waits
-    ? async (tx: Tx) => {
-        if (handedOn) await handOver(tx);
-        if (waits) await holdBack(tx);
-      }
-    : undefined;
+  const wakes: Wake[] = [];
+  const also = async (tx: Tx) => {
+    if (handedOn) await handOver(tx);
+    /* It waits now for what it comes after, so nobody sets to work on it yet; one that waited and waits no more starts.
+       Seen inside the move, where what it comes after is held. */
+    if ((await openAfter(tx, { after: set.after ?? task.after })).length) return holdBack(tx);
+    if (set.assigneeAgentId || (waited && holder)) wakes.push({ agentId: (set.assigneeAgentId ?? holder)!, taskId, why: 'assigned' });
+    else if (holder && holder !== agentId) wakes.push({ agentId: holder, taskId, why: 'updated' });
+  };
   const row = await move(ctx, task, set, { kind: 'updated', actor: { agentId }, data: { fields } }, also, wakes);
   unstuck.tell();
   return { task: row, wakes };

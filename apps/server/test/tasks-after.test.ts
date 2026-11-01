@@ -248,6 +248,21 @@ describe('a task that comes after others', () => {
     expect(circle).toBeLessThan(change);
   });
 
+  it('holds what it comes after as that changes, and only then sees whether it waits, so one of them done meanwhile still starts it', async () => {
+    const { ctx, head, bruno, tess, member } = await company();
+    const api = (await member('Checkout API', bruno.id)).task;
+    const tests = (await member('End-to-end tests', tess.id)).task;
+    const seen = statements();
+    await updateTask(ctx, head.id, api.id, { after: [tests.id] });
+    const held = seen.findIndex(s => /from "tasks" where "tasks"\."id" in \(\$1\).* for share$/.test(s.sql) && s.params[0] === tests.id);
+    const change = seen.findIndex(s => s.sql.startsWith('update "tasks"') && s.params.includes(api.id));
+    const looks = seen.flatMap((s, i) => (s.sql.includes('"tasks"."status" <> $') && s.params.includes(tests.id) ? [i] : []));
+    expect(held).toBeGreaterThanOrEqual(0);
+    expect(held).toBeLessThan(change);
+    expect(looks.length).toBeGreaterThan(0);
+    expect(looks.every(i => i > held)).toBe(true);
+  });
+
   it('tells whoever made a waiting task once a task it comes after is cancelled, and it keeps waiting', async () => {
     const { ctx, db, ceo, head, bruno, tess, member, read, turnsOf } = await company();
     const api = (await member('Checkout API', bruno.id)).task;
