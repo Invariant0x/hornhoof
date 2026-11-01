@@ -4,10 +4,38 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
-import { describe, expect, it, onTestFinished } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { agents, companies, departments, jobs, subscriptions } from '../src/db/schema.js';
 import { publishWorking } from '../src/modules/events/store.js';
 import { as, invitePerson, setUpCompany, testApp } from './helpers.js';
+
+/* Lets a test hold the next count of working agents the update routes read, so something can happen meanwhile. */
+const pause = vi.hoisted(() => ({ next: undefined as undefined | { reached: () => void; resume: Promise<void> } }));
+vi.mock('../src/modules/events/store.js', async importOriginal => {
+  const real = await importOriginal<typeof import('../src/modules/events/store.js')>();
+  return {
+    ...real,
+    workingCount: async (...args: Parameters<typeof real.workingCount>) => {
+      const held = pause.next;
+      pause.next = undefined;
+      const n = await real.workingCount(...args);
+      if (held) {
+        held.reached();
+        await held.resume;
+      }
+      return n;
+    },
+  };
+});
+
+/* Holds the next count until the returned resume is called; the first promise settles once the count is read. */
+function holdNextCount(): { counted: Promise<void>; resume: () => void } {
+  let reached!: () => void, resume!: () => void;
+  const counted = new Promise<void>(r => (reached = r));
+  pause.next = { reached, resume: new Promise<void>(r => (resume = r)) };
+  return { counted, resume };
+}
+const settled = () => new Promise(r => setImmediate(r));
 
 type FakeBuild = { commit: string; version?: string; title?: string; migrations?: number; created?: string };
 const ARCH = process.arch === 'arm64' ? 'arm64' : 'amd64';
@@ -203,6 +231,24 @@ describe('updates', () => {
     expect((await app.inject({ method: 'DELETE', url: '/api/updates', ...as(ceo) })).statusCode).toBe(204);
     await db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, job!.id));
     await publishWorking(app.ctx, acme!.id);
+    expect(request(control)).toBeNull();
+  });
+
+  it('does not hand over an update called off while the agents were counted', async () => {
+    const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' } });
+    const { app, db, ceo, control } = await company(registry);
+    updaterAlive(control);
+    const [acme] = await db.select().from(companies);
+    const [sub] = await db.select().from(subscriptions);
+    const [job] = await db.insert(jobs).values({ companyId: acme!.id, subscriptionId: sub!.id, agentId: (await db.select().from(agents))[0]!.id, prompt: 'x', status: 'running', timeoutMs: 1000 }).returning();
+    await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: true }, ...as(ceo) });
+    await db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, job!.id));
+    const hold = holdNextCount();
+    await publishWorking(app.ctx, acme!.id);
+    await hold.counted;
+    expect((await app.inject({ method: 'DELETE', url: '/api/updates', ...as(ceo) })).statusCode).toBe(204);
+    hold.resume();
+    await settled();
     expect(request(control)).toBeNull();
   });
 

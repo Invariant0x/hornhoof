@@ -52,10 +52,12 @@ export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
     ctx.updater.request(rest, id);
   }
 
+  /* The request is still the one waiting after the count, since a person may call it off or ask for another meanwhile. */
   async function sendWhenIdle(companyId: string, request: UpdateRequest) {
     let done = false;
+    const wanted = () => !done && waiting?.request.id === request.id;
     const check = async () => {
-      if (done || waiting?.request.id !== request.id || (await workingCount(ctx.db, companyId)) > 0) return;
+      if (!wanted() || (await workingCount(ctx.db, companyId)) > 0 || !wanted()) return;
       done = true;
       callOff();
       send(request);
