@@ -11,7 +11,7 @@ export type Task = typeof tasks.$inferSelect;
 export type Request = typeof requests.$inferSelect;
 /* Who moves a task: a person from the web app, or an agent from its tools. */
 export type Actor = { personId: string; agentId?: undefined } | { agentId: string; personId?: undefined };
-export type WakeWhy = 'assigned' | 'review' | 'changes' | 'stuck_at_gate' | 'done' | 'reported' | 'blocked' | 'cancelled' | 'answered' | 'comment' | 'updated' | 'reminder' | 'go_on' | 'turn' | 'switched' | 'explain' | 'subtasks' | 'after_cancelled' | 'merge' | 'unblocked' | 'tests';
+export type WakeWhy = 'assigned' | 'review' | 'changes' | 'stuck_at_gate' | 'done' | 'reported' | 'blocked' | 'cancelled' | 'answered' | 'comment' | 'updated' | 'reminder' | 'go_on' | 'turn' | 'switched' | 'explain' | 'subtasks' | 'after_cancelled' | 'merge' | 'unblocked' | 'tests' | 'work';
 /* An agent that has to act on a task now; Hornhoof queues a turn for it. note: what else it should know, after the rest. */
 export type Wake = { agentId: string; taskId: string; why: WakeWhy; text?: string; note?: string };
 export type Moved = { task: Task; wakes: Wake[] };

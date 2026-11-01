@@ -24,8 +24,8 @@ export const SECRET: Record<string, string[]> = {
   departments: ['repo_token_enc'],
 };
 /* Who people are and what they reach, and the subscriptions, machines and nodes the company runs on: the orchestrator's
-   role reads them, and they change only through the tools the CEO alone may ask for. Test runs too, as they carry a
-   repository's token to the machines lent to them. */
+   role reads them, and they change only through the tools the CEO alone may ask for. Test and work runs too, as they
+   carry a repository's token and the task's files to the machines lent to them. */
 const READ_ONLY = ['people', 'person_access', 'subscriptions', 'machines', 'nodes', 'test_runs', 'test_parts'];
 /* An employee's fields that give it tools, a place or the machine its turns and their tokens go to: they change only by
    hiring and on its card, which make the CEO's checks. A head's department is held by a trigger, as a column right

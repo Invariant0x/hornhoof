@@ -53,13 +53,13 @@ async function company() {
     return { job: job!, call };
   };
   /* A machine of a person with one node, online with this load. */
-  const machine = async (token: string, hostname: string, load: object = idle()) => {
+  const machine = async (token: string, hostname: string, load: object = idle(), { work = true } = {}) => {
     const connected = await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude'] }, ...as(token) });
     const code = connected.json().command.split('--join ')[1];
     const joined = (await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: `${hostname}-0001-abcd`, hostname, os: 'linux', arch: 'x86_64' } })).json();
     const [{ nodeId, subscriptionId, key }] = joined.nodes;
     const node = await connectNode(url, key);
-    node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], load: load as ReturnType<typeof idle>, tests: [] });
+    node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], load: load as ReturnType<typeof idle>, tests: [], work });
     await until(() => app.ctx.hub.loadOf(nodeIdentity(nodeId)) !== null);
     return { node, key: key as string, nodeId: nodeId as string, subscriptionId: subscriptionId as string, machineId: joined.machine.id as string };
   };
@@ -76,12 +76,18 @@ async function company() {
   /* The same machine's node back online after it was away. */
   const reconnect = async (m: { key: string; nodeId: string }, load: object = idle()) => {
     const node = await connectNode(url, m.key);
-    node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], load: load as ReturnType<typeof idle>, tests: [] });
+    node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], load: load as ReturnType<typeof idle>, tests: [], work: true });
     await until(() => app.ctx.hub.loadOf(nodeIdentity(m.nodeId)) !== null);
     return node;
   };
   const ann = await invitePerson(app, ceo, { name: 'Ann', email: 'ann@acme.com', access: { departments: [dev!.id] } });
   const bob = await invitePerson(app, ceo, { name: 'Bob', email: 'bob@acme.com', access: { departments: [sales!.id] } });
+  /* A file on the task, as an agent puts it there. */
+  const putFile = async (name: string, text: string, taskId = task.id) => {
+    const [made] = await db.select({ id: jobs.id }).from(jobs).limit(1);
+    const bytes = Buffer.from(text);
+    await db.insert(attachments).values({ companyId, jobId: made!.id, agentId: bruno.id, taskId, name, mediaType: 'application/octet-stream', bytes, size: bytes.length });
+  };
   /* The agent's newest turn waiting on the task. */
   const wokeWith = async (agentId: string, taskId = task.id) =>
     (await db.select().from(jobs).where(and(eq(jobs.agentId, agentId), eq(jobs.taskId, taskId), eq(jobs.status, 'queued'))).orderBy(asc(jobs.createdAt))).pop()?.prompt ?? null;
@@ -94,7 +100,7 @@ async function company() {
     await until(() => app.ctx.hub.loadOf({ kind: 'builtin' }) !== null);
     return node;
   };
-  return { app, db, url, ceo, ann, bob, builtin, dev: dev!, sales: sales!, head, bruno, sam, task, turn, machine, planless, reconnect, wokeWith, filesOn };
+  return { app, db, url, ceo, ann, bob, builtin, dev: dev!, sales: sales!, head, bruno, sam, task, turn, machine, planless, reconnect, putFile, wokeWith, filesOn };
 }
 
 /* The next message of one kind a node gets, past the others. */
@@ -389,5 +395,103 @@ describe('a test run', () => {
     expect((await (await c.turn(c.sam, null)).call('run_tests', { command: 'make test' })).text).toMatch(/task/);
     const [own] = await c.db.insert(tasks).values({ companyId: c.task.companyId, number: 99, title: 'Pitch', brief: '', body: '', departmentId: c.sales.id, assigneeAgentId: c.sam.id, status: 'working' }).returning();
     expect((await (await c.turn(c.sam, own!.id)).call('run_tests', { command: 'make test' })).text).toMatch(/repository/);
+  });
+});
+
+describe('a run of other work', () => {
+  it("runs a command with no branch on a free machine, hands its node the task's files it names, and puts what it made on the task", async () => {
+    const c = await company();
+    const ivan = await c.machine(c.ceo, 'ivan-mac');
+    const { call } = await c.turn(c.bruno);
+    await c.putFile('data.csv', 'a,b\n');
+    const started = await call('run_work', { command: 'python3 make.py', files: ['data.csv'] });
+    expect(started).toMatchObject({ error: false, text: expect.stringMatching(/^Work run 1 of #1 runs on ivan-mac\./) });
+    const run = await nextOf(ivan.node, 'tests.run');
+    expect(run).toMatchObject({ kind: 'work', repo: null, branch: null, files: ['data.csv'], command: 'python3 make.py', part: 1, parts: 1, timeoutMs: 30 * 60_000 });
+    const node = { authorization: `Bearer ${ivan.key}` };
+    const fetched = await c.app.inject({ url: `/api/parts/${run.partId}/files/data.csv`, headers: node });
+    expect(fetched.statusCode).toBe(200);
+    expect(fetched.body).toBe('a,b\n');
+    const put = await c.app.inject({ method: 'PUT', url: `/api/parts/${run.partId}/files/report.txt`, headers: { ...node, 'content-type': 'application/octet-stream' }, payload: Buffer.from('made') });
+    expect(put.statusCode).toBe(201);
+    ivan.node.send(done(run, { commit: null, log: 'Put on the task: report.txt.\n' }));
+    await nextOf(ivan.node, 'tests.ack');
+    await until(async () => (await c.wokeWith(c.bruno.id)) !== null);
+    const prompt = (await c.wokeWith(c.bruno.id))!;
+    expect(prompt).toMatch(/^The work you ran on #1/);
+    expect(prompt).toMatch(/Work run 1 is done[\s\S]*Part 1 of 1 done on ivan-mac/);
+    expect(prompt).toMatch(/What it made is on #1: work-1-1-report\.txt/);
+    expect(prompt).toContain('work-1-1.log');
+    expect((await c.filesOn()).map(f => f.name).sort()).toEqual(['data.csv', 'work-1-1-report.txt', 'work-1-1.log']);
+    expect((await c.filesOn()).find(f => f.name === 'work-1-1-report.txt')!.text).toBe('made');
+    expect(JSON.parse((await call('work_run', { run: 1 })).text)).toMatchObject({
+      run: 1,
+      kind: 'work',
+      branch: null,
+      files: ['data.csv'],
+      status: 'done',
+      parts: [{ part: 1, status: 'done', machine: 'ivan-mac', log: 'work-1-1.log', made: ['work-1-1-report.txt'] }],
+    });
+  });
+
+  it('clones a branch first when one is named, and splits into parts like a test run', async () => {
+    const c = await company();
+    const ivan = await c.machine(c.ceo, 'ivan-mac');
+    const ann = await c.machine(c.ann, 'ann-pc');
+    const { call } = await c.turn(c.bruno);
+    expect((await call('run_work', { command: 'render --frames {part}/{parts}', branch: 'main', parts: 2, minutes: 90 })).error).toBe(false);
+    const runs = [await nextOf(ivan.node, 'tests.run'), await nextOf(ann.node, 'tests.run')].sort((a, b) => a.part - b.part);
+    expect(runs[0]).toMatchObject({ kind: 'work', repo: { url: 'https://github.com/acme/shop.git', token: 'ghp_shop0123456789' }, branch: 'main', command: 'render --frames 1/2', files: [], timeoutMs: 90 * 60_000 });
+    expect(runs[1]).toMatchObject({ command: 'render --frames 2/2' });
+  });
+
+  it("is refused a file its task lacks, a branch with no repository and a split command without {part}, and a part's files reach only the node that runs it", async () => {
+    const c = await company();
+    const ivan = await c.machine(c.ceo, 'ivan-mac');
+    const ann = await c.machine(c.ann, 'ann-pc', idle({ load: 7.5 }));
+    const { call } = await c.turn(c.bruno);
+    await c.putFile('data.csv', 'a,b\n');
+    await c.putFile('secret.txt', 'not for this run');
+    expect(await call('run_work', { command: 'x', files: ['nope.csv'] })).toMatchObject({ error: true, text: expect.stringContaining('#1 has no file nope.csv') });
+    expect(await call('run_work', { command: 'x', parts: 2 })).toMatchObject({ error: true, text: expect.stringContaining('{part}') });
+    await call('run_work', { command: 'x', files: ['data.csv'] });
+    const run = await nextOf(ivan.node, 'tests.run');
+    const file = (name: string, key?: string) => c.app.inject({ url: `/api/parts/${run.partId}/files/${name}`, headers: key ? { authorization: `Bearer ${key}` } : {} });
+    expect((await file('data.csv', ann.key)).statusCode).toBe(404);
+    expect((await file('secret.txt', ivan.key)).statusCode).toBe(404);
+    expect((await file('data.csv')).statusCode).toBe(401);
+    expect((await file('data.csv', ivan.key)).statusCode).toBe(200);
+    ivan.node.send(done(run, { commit: null }));
+    await nextOf(ivan.node, 'tests.ack');
+    const late = await c.app.inject({ method: 'PUT', url: `/api/parts/${run.partId}/files/late.txt`, headers: { authorization: `Bearer ${ivan.key}`, 'content-type': 'application/octet-stream' }, payload: Buffer.from('x') });
+    expect(late.statusCode).toBe(404);
+    expect((await c.filesOn()).map(f => f.name)).not.toContain('work-1-1-late.txt');
+    const [pitch] = await c.db.insert(tasks).values({ companyId: c.task.companyId, number: 99, title: 'Pitch', brief: '', body: '', departmentId: c.sales.id, assigneeAgentId: c.sam.id, status: 'working' }).returning();
+    const sam = await c.turn(c.sam, pitch!.id);
+    expect(await sam.call('run_work', { command: 'x', branch: 'main' })).toMatchObject({ error: true, text: expect.stringMatching(/no repository/) });
+    expect((await sam.call('run_work', { command: 'x' })).error).toBe(false);
+  });
+
+  it('goes only to machines whose node runs work, waits for the free memory it asks for, and stops on stop_work', async () => {
+    const c = await company();
+    const old = await c.machine(c.ceo, 'old-mac', idle(), { work: false });
+    const { call } = await c.turn(c.bruno);
+    expect((await call('run_work', { command: 'small' })).text).toMatch(/waits for a free machine/);
+    expect(await gets(old.node, 'tests.run')).toBe(false);
+    const ann = await c.machine(c.ann, 'ann-pc', idle({ memFree: 6 * GIB }));
+    const small = await nextOf(ann.node, 'tests.run');
+    expect(small).toMatchObject({ kind: 'work', command: 'small' });
+    ann.node.send(done(small, { commit: null }));
+    await nextOf(ann.node, 'tests.ack');
+    expect((await call('run_work', { command: 'big', memory: 8 })).text).toMatch(/waits for a free machine/);
+    expect(await gets(ann.node, 'tests.run')).toBe(false);
+    ann.node.send({ type: 'load', ...idle({ memFree: 9 * GIB }) });
+    const big = await nextOf(ann.node, 'tests.run');
+    expect(big.command).toBe('big');
+    /* Test runs still go to a node that knows only them. */
+    await call('run_tests', { command: 'make test' });
+    expect((await nextOf(old.node, 'tests.run')).kind ?? 'tests').toBe('tests');
+    expect(await call('stop_work', { run: 2 })).toEqual({ text: 'Work run 2 is stopped.', error: false });
+    expect(await nextOf(ann.node, 'tests.cancel')).toEqual({ type: 'tests.cancel', partId: big.partId });
   });
 });

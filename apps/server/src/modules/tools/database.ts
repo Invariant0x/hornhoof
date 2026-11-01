@@ -15,7 +15,7 @@ const CLOSED = 'Sign-ins, invites, install codes and the public link are closed 
 export const READ_ONLY = 'Operations reads the database; a change goes to the orchestrator as one message with the SQL and why.';
 const PEOPLE = 'People and what they reach change only through invite_person, change_person and invite_again, which only the CEO may ask for.';
 const PLANS = 'Subscriptions and machines change only through their tools, which only the CEO may ask for.';
-const TESTS = 'Test runs start and stop only through run_tests and stop_tests, so they reach only the machines lent to them.';
+const TESTS = 'Test runs and work runs start and stop only through run_tests, run_work, stop_tests and stop_work, so they reach only the machines lent to them.';
 /* What the orchestrator may not do with a table, in the words he acts on. */
 const RULES: Record<string, string> = {
   people: PEOPLE,

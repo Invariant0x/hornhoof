@@ -1,4 +1,4 @@
-import type { NodeLoad, NodeMessage } from '@hornhoof/protocol';
+import type { NodeLoad, NodeMessage, RunKind, Workspace } from '@hornhoof/protocol';
 import { and, asc, count, eq, inArray, isNull, like, max, notInArray, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -20,8 +20,12 @@ import { pickMachine } from './pick.js';
 
 type Run = typeof testRuns.$inferSelect;
 type Part = typeof testParts.$inferSelect;
+type Department = typeof departments.$inferSelect;
+type Repo = NonNullable<Workspace['repo']>;
 type TestsDone = Extract<NodeMessage, { type: 'tests.done' }>;
 
+/* The free memory a part of work needs unless its agent says. */
+export const WORK_MEMORY_GB = 2;
 /* The time a run gets by default, and at most. */
 export const TEST_MINUTES = 30;
 export const TEST_MINUTES_MAX = 120;
@@ -48,7 +52,15 @@ const isId = (s: string) => z.uuid().safeParse(s).success;
 const nodeOf = (p: Pick<Part, 'builtin' | 'nodeId'>): NodeIdentity | null => (p.builtin ? BUILTIN : p.nodeId ? nodeIdentity(p.nodeId) : null);
 const ofNode = (id: NodeIdentity): SQL => (id.kind === 'builtin' ? eq(testParts.builtin, true) : eq(testParts.nodeId, id.nodeId));
 
-export const logName = (run: Pick<Run, 'number'>, part: number) => `tests-${run.number}-${part}.log`;
+/* What a run is called where agents read of it, and its state there: a run of work that passed is done. */
+const named = (run: Pick<Run, 'kind' | 'number'>) => `${run.kind === 'work' ? 'Work run' : 'Test run'} ${run.number}`;
+const stateOf = (run: Pick<Run, 'kind'>, status: string) => (run.kind === 'work' && status === 'passed' ? 'done' : status);
+const toolsOf = (kind: RunKind) => (kind === 'work' ? { state: 'work_run', stop: 'stop_work' } : { state: 'test_run', stop: 'stop_tests' });
+
+/* The files of a run on its task: each part's log, and what a part of work made. */
+export const logName = (run: Pick<Run, 'kind' | 'number'>, part: number) => `${run.kind}-${run.number}-${part}.log`;
+export const madeName = (run: Pick<Run, 'number'>, part: number, name: string) => `work-${run.number}-${part}-${name}`;
+const filesOf = (run: Pick<Run, 'kind' | 'number'>) => like(attachments.name, `${run.kind}-${run.number}-%`);
 const commandFor = (run: Pick<Run, 'command' | 'parts'>, part: number) => run.command.replaceAll('{parts}', String(run.parts)).replaceAll('{part}', String(part));
 
 /* The last lines of a log. */
@@ -62,13 +74,15 @@ const took = (ms: number) => {
   return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min${s % 60 ? ` ${s % 60} s` : ''}`;
 };
 
-/* Why a part ended other than by its tests passing or failing. */
+/* Why a part ended other than by its command passing or failing. */
 function endedBy(run: Pick<Run, 'timeoutMs'>, p: Part): string {
   switch (p.error) {
     case 'timeout':
       return `it did not end within ${took(run.timeoutMs)}`;
     case 'clone_failed':
       return 'the branch could not be cloned';
+    case 'files_failed':
+      return "the task's files could not be fetched onto its machine";
     case 'cancelled':
       return 'it was stopped on its machine';
     case 'machine_restarted':
@@ -100,26 +114,30 @@ const lostLine = (l: LostRun) => `${l.machine} ${LOST_HOW[l.why] ?? 'lost it'}`;
 /* What a part that ran again went through before. */
 const ranAgain = (lost: LostRun[]) => (lost.length ? ` It ran again after ${lost.map(lostLine).join(', and again after ')}.` : '');
 
-/* Hornhoof's account of a run that ended: each part, where it ran and how long, and the end of what failed. */
-function account(run: Run, task: Pick<Task, 'number'>, parts: Part[], logs: Set<string>): string {
-  const lines = [`Test run ${run.number} ${run.status} after ${took((run.finishedAt ?? new Date()).getTime() - run.createdAt.getTime())}.`];
+/* Hornhoof's account of a run that ended: each part, where it ran and how long, the end of what failed, and the files
+   on the task. */
+function account(run: Run, task: Pick<Task, 'number'>, parts: Part[], files: Set<string>): string {
+  const lines = [`${named(run)} ${run.kind === 'work' && run.status === 'passed' ? 'is done' : run.status} after ${took((run.finishedAt ?? new Date()).getTime() - run.createdAt.getTime())}.`];
   for (const p of parts) {
     const where = p.machineName ? ` on ${p.machineName}` : '';
     const time = p.startedAt && p.finishedAt ? ` in ${took(p.finishedAt.getTime() - p.startedAt.getTime())}` : '';
     const at = p.commit ? `, at ${p.commit.slice(0, 12)}` : '';
     const why = p.status === 'passed' ? '' : `: ${endedBy(run, p)}`;
-    lines.push(`Part ${p.part} of ${run.parts} ${p.status === 'passed' ? 'passed' : 'failed'}${where}${time}${at}${why}.${ranAgain(p.lost)}`);
+    lines.push(`Part ${p.part} of ${run.parts} ${p.status === 'passed' ? stateOf(run, 'passed') : 'failed'}${where}${time}${at}${why}.${ranAgain(p.lost)}`);
   }
   const failed = parts.filter(p => p.status !== 'passed' && p.tail);
   for (const p of failed.slice(0, SHOWN_FAILURES)) lines.push('', `The end of part ${p.part}:`, '', quote(p.tail));
-  const files = parts.map(p => logName(run, p.part)).filter(n => logs.has(n));
-  if (files.length) lines.push('', `Each part's full log is on #${task.number}: hh-fetch ${task.number} ${files[0]}${files.length > 1 ? `, and so on up to ${files.at(-1)}` : ''}.`);
+  const logs = parts.map(p => logName(run, p.part)).filter(n => files.has(n));
+  const made = [...files].filter(n => !logs.includes(n)).sort();
+  if (made.length) lines.push('', `What it made is on #${task.number}: ${made.join(', ')}. Get a file with hh-fetch ${task.number} <name>.`);
+  if (logs.length) lines.push('', `Each part's full log is on #${task.number}: hh-fetch ${task.number} ${logs[0]}${logs.length > 1 ? `, and so on up to ${logs.at(-1)}` : ''}.`);
   return lines.join('\n');
 }
 
 /* A place a part can run: a machine of the company through one of its nodes, or the built-in node. access: what the
-   machine's owner reaches; the built-in node reaches every repository. */
-type Place = { key: string; node: NodeIdentity; name: string; machineId: string | null; nodeId: string | null; builtin: boolean; lent: boolean; busy: boolean; load: NodeLoad | null; access: Access | null };
+   machine's owner reaches; the built-in node reaches every repository. works: its node runs parts of any work, not only
+   of test runs. */
+type Place = { key: string; node: NodeIdentity; name: string; machineId: string | null; nodeId: string | null; builtin: boolean; lent: boolean; busy: boolean; load: NodeLoad | null; access: Access | null; works: boolean };
 
 async function placesOf(ctx: Ctx, companyId: string): Promise<Place[]> {
   const { db, hub } = ctx;
@@ -142,26 +160,43 @@ async function placesOf(ctx: Ctx, companyId: string): Promise<Place[]> {
     /* Only nodes that say how busy they are know test runs. */
     const ready = live.filter(n => n.machineId === machine.id && hub.isReady(nodeIdentity(n.id)) && hub.loadOf(nodeIdentity(n.id)) !== null).map(n => n.id);
     if (!ready.length) continue;
+    /* A node that runs work takes test runs too. */
+    const node = ready.find(id => hub.runsWork(nodeIdentity(id))) ?? ready[0]!;
     places.push({
       key: machine.id,
-      node: nodeIdentity(ready[0]!),
+      node: nodeIdentity(node),
       name: machine.hostname || 'a machine',
       machineId: machine.id,
-      nodeId: ready[0]!,
+      nodeId: node,
       builtin: false,
       lent: machine.lendsTests,
       busy: running.some(r => r.machineId === machine.id),
       load: together(ready.map(id => hub.loadOf(nodeIdentity(id)))),
       access: await accessOf(db, owner),
+      works: hub.runsWork(nodeIdentity(node)),
     });
   }
   if (hub.isReady(BUILTIN) && hub.loadOf(BUILTIN)) {
-    places.push({ key: 'builtin', node: BUILTIN, name: BUILTIN_NAME, machineId: null, nodeId: null, builtin: true, lent: true, busy: running.some(r => r.builtin), load: together([hub.loadOf(BUILTIN)]), access: null });
+    places.push({ key: 'builtin', node: BUILTIN, name: BUILTIN_NAME, machineId: null, nodeId: null, builtin: true, lent: true, busy: running.some(r => r.builtin), load: together([hub.loadOf(BUILTIN)]), access: null, works: hub.runsWork(BUILTIN) });
   }
   return places;
 }
 
-const reaches = (place: Pick<Place, 'access'>, d: typeof departments.$inferSelect) => place.access === null || canReach(place.access, { departmentId: d.id, parentId: d.parentId });
+/* The machine's owner reaches the department a run is for; a run for no department only someone who sees the whole
+   company. */
+const reaches = (place: Pick<Place, 'access'>, d: Department | null) =>
+  place.access === null || (d ? canReach(place.access, { departmentId: d.id, parentId: d.parentId }) : place.access.whole);
+
+/* Whether a place may take a part of this run at all, busy or not. */
+const mayTake = (place: Place, run: Pick<Run, 'kind'>, d: Department | null) => place.lent && reaches(place, d) && (run.kind !== 'work' || place.works);
+
+/* What a run's parts need: the repository they clone, if any, and the department whose people's machines may take
+   them. None when the repository is gone. */
+async function targetOf(ctx: Ctx, run: Pick<Run, 'kind' | 'branch' | 'departmentId'>): Promise<{ department: Department | null; repo: Repo | null } | null> {
+  if (run.kind === 'tests' || run.branch) return repoAt(ctx, [run.departmentId]);
+  const [department] = run.departmentId ? await ctx.db.select().from(departments).where(eq(departments.id, run.departmentId)) : [];
+  return { department: department ?? null, repo: null };
+}
 
 /* Gives every waiting part, oldest run first, to the freest machine that may take it, one part per machine at a time. */
 async function giveOut(ctx: Ctx): Promise<void> {
@@ -174,18 +209,18 @@ async function giveOut(ctx: Ctx): Promise<void> {
     .where(eq(testParts.status, 'queued'))
     .orderBy(asc(testRuns.createdAt), asc(testParts.part));
   const places = new Map<string, Place[]>();
-  const repos = new Map<string, Awaited<ReturnType<typeof repoAt>>>();
+  const targets = new Map<string, Awaited<ReturnType<typeof targetOf>>>();
   for (const { part, run, task } of waiting) {
     if (!places.has(run.companyId)) places.set(run.companyId, await placesOf(ctx, run.companyId));
-    if (!repos.has(run.id)) repos.set(run.id, await repoAt(ctx, [run.departmentId]));
-    const found = repos.get(run.id)!;
+    if (!targets.has(run.id)) targets.set(run.id, await targetOf(ctx, run));
+    const found = targets.get(run.id)!;
     if (!found) {
       await endParts(ctx, and(eq(testParts.id, part.id), eq(testParts.status, 'queued'))!, 'no_repository');
       continue;
     }
     const open = places.get(run.companyId)!;
-    const need = (found.department.repoTestMemoryGb ?? TEST_MEMORY_GB) * GIB;
-    const spots = open.map(p => ({ key: p.key, lent: p.lent, reaches: reaches(p, found.department), busy: p.busy, load: p.load }));
+    const need = needOf(run, found.department) * GIB;
+    const spots = open.map(p => ({ key: p.key, lent: p.lent, reaches: mayTake(p, run, found.department), busy: p.busy, load: p.load }));
     /* A part that ran again goes to another machine than the ones that lost it, while there is one that may take it. */
     const lostOn = new Set(part.lost.map(l => l.key));
     const others = spots.filter(s => !lostOn.has(s.key));
@@ -202,7 +237,8 @@ async function giveOut(ctx: Ctx): Promise<void> {
     const sent = ctx.hub.send(place.node, {
       type: 'tests.run',
       partId: part.id,
-      repo: { url: found.repo.url, token: found.repo.token },
+      ...(run.kind === 'work' ? { kind: 'work' as const, files: run.files } : {}),
+      repo: found.repo ? { url: found.repo.url, token: found.repo.token } : null,
       branch: run.branch,
       task: task.number,
       command: commandFor(run, part.part),
@@ -219,6 +255,9 @@ async function giveOut(ctx: Ctx): Promise<void> {
     }
   }
 }
+
+/* The free memory, in GB, a part of the run needs: what its agent said for work, else what its repository says. */
+const needOf = (run: Pick<Run, 'memoryGb'>, d: Department | null) => run.memoryGb ?? d?.repoTestMemoryGb ?? TEST_MEMORY_GB;
 
 const pumps = new WeakMap<Ctx, Promise<void>>();
 
@@ -244,8 +283,8 @@ async function settleRun(ctx: Ctx, runId: string): Promise<void> {
     if (!run) return null;
     const [task] = await tx.select().from(tasks).where(eq(tasks.id, run.taskId));
     if (!task || CLOSED.includes(task.status)) return null;
-    const logs = await tx.select({ name: attachments.name }).from(attachments).where(and(eq(attachments.taskId, run.taskId), like(attachments.name, `tests-${run.number}-%`)));
-    const w: Wake = { agentId: run.agentId, taskId: run.taskId, why: 'tests', text: account(run, task, parts, new Set(logs.map(l => l.name!))) };
+    const files = await tx.select({ name: attachments.name }).from(attachments).where(and(eq(attachments.taskId, run.taskId), filesOf(run)));
+    const w: Wake = { agentId: run.agentId, taskId: run.taskId, why: run.kind, text: account(run, task, parts, new Set(files.map(l => l.name!))) };
     await keepWakes(tx, run.companyId, [w]);
     return w;
   });
@@ -360,14 +399,15 @@ export async function checkTestTimes(ctx: Ctx, now = new Date()): Promise<void> 
   await pumpTests(ctx);
 }
 
-export type RunInput = { task?: number | string; branch?: string; command: string; parts?: number; minutes?: number };
+/* files: the task's files a part of work takes in; memory: the free memory, in GB, it needs. */
+export type RunInput = { task?: number | string; branch?: string; command: string; parts?: number; minutes?: number; files?: string[]; memory?: number };
 
 /* The task a run is for: the one named, else the one the turn is on. */
-async function taskFor(ctx: Ctx, job: ToolJob, ref: number | string | undefined): Promise<Task> {
+async function taskFor(ctx: Ctx, job: ToolJob, ref: number | string | undefined, kind: RunKind): Promise<Task> {
   if (ref === undefined) {
     const [turn] = await ctx.db.select({ taskId: jobs.taskId }).from(jobs).where(eq(jobs.id, job.id));
     const [task] = turn?.taskId ? await ctx.db.select().from(tasks).where(eq(tasks.id, turn.taskId)) : [];
-    if (!task) throw refuse(400, 'task_invalid', 'This turn is on no task: name the task whose branch to test with task.');
+    if (!task) throw refuse(400, 'task_invalid', `This turn is on no task: name the task ${kind === 'work' ? 'the work is for' : 'whose branch to test'} with task.`);
     return task;
   }
   const task = await taskByRef(ctx, job.companyId, ref);
@@ -375,19 +415,36 @@ async function taskFor(ctx: Ctx, job: ToolJob, ref: number | string | undefined)
   return task;
 }
 
-/* Starts a test run on the task's branch: its parts go out to free machines now or wait for them. Says how it went out. */
-export async function startRun(ctx: Ctx, job: ToolJob, input: RunInput): Promise<string> {
+/* Starts a run for a task: a test run of its branch, or any other work, on a branch or in an empty folder with the task's
+   files. Its parts go out to free machines now or wait for them. Says how it went out. */
+export async function startRun(ctx: Ctx, job: ToolJob, input: RunInput, kind: RunKind = 'tests'): Promise<string> {
   const { db } = ctx;
-  const task = await taskFor(ctx, job, input.task);
+  const task = await taskFor(ctx, job, input.task, kind);
   if (CLOSED.includes(task.status)) throw refuse(409, 'task_closed', `#${task.number} is ${task.status} already.`);
-  const found = await repoAt(ctx, [task.productId, task.departmentId]);
-  if (!found) throw refuse(409, 'repo_invalid', `#${task.number} has no repository to test: its department has none set.`);
+  const cloned = kind === 'tests' || input.branch !== undefined;
+  const found = cloned ? await repoAt(ctx, [task.productId, task.departmentId]) : null;
+  if (cloned && !found) {
+    throw refuse(
+      409,
+      'repo_invalid',
+      kind === 'tests'
+        ? `#${task.number} has no repository to test: its department has none set.`
+        : `#${task.number} has no repository to clone ${input.branch} from: its department has none set. Leave out branch to run in an empty folder.`,
+    );
+  }
+  const files = kind === 'work' ? [...new Set(input.files ?? [])] : [];
+  if (files.length) {
+    const had = await db.select({ name: attachments.name }).from(attachments).where(and(eq(attachments.taskId, task.id), inArray(attachments.name, files)));
+    const missing = files.find(f => !had.some(h => h.name === f));
+    if (missing) throw refuse(404, 'attachment_unknown', `#${task.number} has no file ${missing}. Put it on the task with hh-attach --task ${task.number} first.`);
+  }
   const parts = input.parts ?? 1;
   if (parts > 1 && !input.command.includes('{part}')) {
     throw refuse(400, 'task_invalid', 'A command split into parts says which part it runs with {part}, and with {parts} how many there are, as in --shard={part}/{parts}.');
   }
   const [open] = await db.select({ n: count() }).from(testRuns).where(and(eq(testRuns.agentId, job.agentId), eq(testRuns.status, 'running')));
-  if (Number(open?.n ?? 0) >= OPEN_RUNS) throw refuse(409, 'task_invalid', `You have ${OPEN_RUNS} test runs going on already. Wait for one to end, or stop one with stop_tests.`);
+  if (Number(open?.n ?? 0) >= OPEN_RUNS) throw refuse(409, 'task_invalid', `You have ${OPEN_RUNS} runs going on already. Wait for one to end, or stop one with stop_tests or stop_work.`);
+  const department = found?.department ?? (await targetOf(ctx, { kind, branch: null, departmentId: task.productId ?? task.departmentId }))?.department ?? null;
   const run = await db.transaction(async tx => {
     /* Numbers go up one by one per company, so starting a run waits on the company row. */
     await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, job.companyId)).for('update');
@@ -400,9 +457,12 @@ export async function startRun(ctx: Ctx, job: ToolJob, input: RunInput): Promise
         taskId: task.id,
         agentId: job.agentId,
         jobId: job.id,
-        departmentId: found.department.id,
+        departmentId: department?.id ?? null,
+        kind,
         branch: input.branch ?? null,
         command: input.command,
+        files,
+        memoryGb: kind === 'work' ? (input.memory ?? WORK_MEMORY_GB) : null,
         parts,
         timeoutMs: (input.minutes ?? TEST_MINUTES) * 60_000,
       })
@@ -412,7 +472,7 @@ export async function startRun(ctx: Ctx, job: ToolJob, input: RunInput): Promise
   });
   await pumpTests(ctx);
   const went = await db.select().from(testParts).where(eq(testParts.runId, run.id)).orderBy(asc(testParts.part));
-  const places = (await placesOf(ctx, job.companyId)).filter(p => p.lent && reaches(p, found.department));
+  const places = (await placesOf(ctx, job.companyId)).filter(p => mayTake(p, run, department));
   const one = went.length === 1;
   const where = went.map(p => {
     const at = p.status === 'running' ? `on ${p.machineName}` : 'waits for a free machine';
@@ -420,42 +480,45 @@ export async function startRun(ctx: Ctx, job: ToolJob, input: RunInput): Promise
   });
   const none = went.some(p => p.status === 'queued') && !places.length ? ' No machine that may take it is online now, so it waits until one is.' : '';
   return (
-    `Test run ${run.number} of #${task.number} ${one && went[0]!.status === 'running' ? 'runs ' : ''}${one ? where[0] : `has ${parts} parts: ${where.join(', ')}`}.${none} ` +
-    `When every part has ended you are woken on #${task.number} with the result; test_run ${run.number} shows how it goes.`
+    `${named(run)} of #${task.number} ${one && went[0]!.status === 'running' ? 'runs ' : ''}${one ? where[0] : `has ${parts} parts: ${where.join(', ')}`}.${none} ` +
+    `When every part has ended you are woken on #${task.number} with the result; ${toolsOf(kind).state} ${run.number} shows how it goes.`
   );
 }
 
 /* A run the agent may see and stop: its own, or one on a task it works on. */
-async function runOf(ctx: Ctx, job: ToolJob, number: number): Promise<{ run: Run; task: Task }> {
+async function runOf(ctx: Ctx, job: ToolJob, number: number, kind: RunKind): Promise<{ run: Run; task: Task }> {
   const [found] = await ctx.db
     .select({ run: testRuns, task: tasks })
     .from(testRuns)
     .innerJoin(tasks, eq(tasks.id, testRuns.taskId))
     .where(and(eq(testRuns.companyId, job.companyId), eq(testRuns.number, number)));
-  if (!found || (found.run.agentId !== job.agentId && !onTask(job, found.task))) throw refuse(404, 'task_unknown', `There is no test run ${number} you can see.`);
+  if (!found || (found.run.agentId !== job.agentId && !onTask(job, found.task))) throw refuse(404, 'task_unknown', `There is no ${kind === 'work' ? 'work' : 'test'} run ${number} you can see.`);
   return found;
 }
 
 /* How a run goes, part by part. */
-export async function runState(ctx: Ctx, job: ToolJob, number: number): Promise<object> {
-  const { run, task } = await runOf(ctx, job, number);
+export async function runState(ctx: Ctx, job: ToolJob, number: number, kind: RunKind = 'tests'): Promise<object> {
+  const { run, task } = await runOf(ctx, job, number, kind);
   const parts = await ctx.db.select().from(testParts).where(eq(testParts.runId, run.id)).orderBy(asc(testParts.part));
-  const logs = await ctx.db.select({ name: attachments.name }).from(attachments).where(and(eq(attachments.taskId, run.taskId), like(attachments.name, `tests-${run.number}-%`)));
+  const files = await ctx.db.select({ name: attachments.name }).from(attachments).where(and(eq(attachments.taskId, run.taskId), filesOf(run)));
   const [stopper] = run.stoppedByAgentId ? await ctx.db.select({ name: agents.name }).from(agents).where(eq(agents.id, run.stoppedByAgentId)) : [];
-  const has = new Set(logs.map(l => l.name));
+  const has = new Set(files.map(l => l.name));
+  const work = run.kind === 'work';
   return {
     run: run.number,
     task: task.number,
-    branch: run.branch ?? `the task's own: task-${task.number} or the one that starts with task-${task.number}-`,
+    kind: run.kind,
+    branch: work ? run.branch : (run.branch ?? `the task's own: task-${task.number} or the one that starts with task-${task.number}-`),
     command: run.command,
+    ...(work ? { files: run.files, memoryGb: run.memoryGb } : {}),
     minutes: run.timeoutMs / 60_000,
-    status: run.status,
+    status: stateOf(run, run.status),
     ...(stopper ? { stoppedBy: stopper.name } : {}),
     startedAt: run.createdAt.toISOString(),
     finishedAt: run.finishedAt?.toISOString() ?? null,
     parts: parts.map(p => ({
       part: p.part,
-      status: p.status,
+      status: stateOf(run, p.status),
       machine: p.machineName,
       commit: p.commit,
       exitCode: p.exitCode,
@@ -463,6 +526,7 @@ export async function runState(ctx: Ctx, job: ToolJob, number: number): Promise<
       startedAt: p.startedAt?.toISOString() ?? null,
       finishedAt: p.finishedAt?.toISOString() ?? null,
       log: has.has(logName(run, p.part)) ? logName(run, p.part) : null,
+      ...(work ? { made: [...has].filter(n => n!.startsWith(`work-${run.number}-${p.part}-`)).sort() } : {}),
       ...(p.lost.length ? { ranAgain: p.lost.map(lostLine) } : {}),
       ...(p.status === 'failed' && p.tail ? { end: p.tail } : {}),
     })),
@@ -471,9 +535,9 @@ export async function runState(ctx: Ctx, job: ToolJob, number: number): Promise<
 
 /* Stops a run: its waiting parts end here, its running ones on their nodes too. Its agent hears of it when another one
    stopped it. */
-export async function stopRun(ctx: Ctx, job: ToolJob, number: number): Promise<string> {
-  const { run, task } = await runOf(ctx, job, number);
-  if (run.status !== 'running') throw refuse(409, 'task_invalid', `Test run ${number} ${run.status === 'stopped' ? 'is stopped' : `${run.status}`} already.`);
+export async function stopRun(ctx: Ctx, job: ToolJob, number: number, kind: RunKind = 'tests'): Promise<string> {
+  const { run, task } = await runOf(ctx, job, number, kind);
+  if (run.status !== 'running') throw refuse(409, 'task_invalid', `${named(run)} ${run.status === 'stopped' ? 'is stopped' : stateOf(run, run.status) === 'done' ? 'is done' : run.status} already.`);
   const other = run.agentId !== job.agentId;
   const [me] = other ? await ctx.db.select({ name: agents.name }).from(agents).where(eq(agents.id, job.agentId)) : [];
   const now = new Date();
@@ -489,16 +553,28 @@ export async function stopRun(ctx: Ctx, job: ToolJob, number: number): Promise<s
       .set({ status: 'stopped', finishedAt: now })
       .where(and(eq(testParts.runId, run.id), inArray(testParts.status, ['queued', 'running'])))
       .returning();
-    const wakes: Wake[] = other && !CLOSED.includes(task.status) ? [{ agentId: run.agentId, taskId: run.taskId, why: 'tests', text: `Test run ${number} was stopped by ${me?.name ?? 'another agent'}.` }] : [];
+    const wakes: Wake[] = other && !CLOSED.includes(task.status) ? [{ agentId: run.agentId, taskId: run.taskId, why: run.kind, text: `${named(run)} was stopped by ${me?.name ?? 'another agent'}.` }] : [];
     await keepWakes(tx, run.companyId, wakes);
     return { parts, wakes };
   });
-  if (!stopped) throw refuse(409, 'task_invalid', `Test run ${number} ended meanwhile.`);
+  if (!stopped) throw refuse(409, 'task_invalid', `${named(run)} ended meanwhile.`);
   for (const p of stopped.parts) {
     const node = nodeOf(p);
     if (node) ctx.hub.send(node, { type: 'tests.cancel', partId: p.id });
   }
   await wakeAll(ctx, stopped.wakes);
   await pumpTests(ctx);
-  return `Test run ${number} is stopped.`;
+  return `${named(run)} is stopped.`;
+}
+
+/* A running part of work on this node, and its run, for the part's files. */
+export async function workPartOn(ctx: Ctx, id: NodeIdentity, partId: string): Promise<{ part: Part; run: Run; task: Task } | null> {
+  if (!isId(partId)) return null;
+  const [found] = await ctx.db
+    .select({ part: testParts, run: testRuns, task: tasks })
+    .from(testParts)
+    .innerJoin(testRuns, eq(testRuns.id, testParts.runId))
+    .innerJoin(tasks, eq(tasks.id, testRuns.taskId))
+    .where(and(eq(testParts.id, partId), eq(testParts.status, 'running'), eq(testRuns.kind, 'work'), ofNode(id)));
+  return found ?? null;
 }

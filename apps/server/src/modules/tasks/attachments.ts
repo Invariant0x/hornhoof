@@ -1,6 +1,6 @@
 import { Readable } from 'node:stream';
 import { and, asc, count, desc, eq, inArray, isNotNull, lt, or, sql } from 'drizzle-orm';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { accessOf, canReach } from '../../auth/access.js';
@@ -112,6 +112,49 @@ export async function dropOldFiles(db: Db, now: Date): Promise<number> {
   return (await db.delete(attachments).where(inArray(attachments.taskId, old)).returning({ id: attachments.id })).length;
 }
 
+/* Refuses a new file of this size on the task when the task or the company has no room left for it. */
+export async function checkRoom(ctx: Pick<Ctx, 'db' | 'config'>, companyId: string, task: Pick<Task, 'id' | 'number'>, size: number): Promise<void> {
+  const [used] = await ctx.db
+    .select({
+      task: sql<string>`coalesce(sum(${attachments.size}) filter (where ${attachments.taskId} = ${task.id}), 0)`,
+      company: sql<string>`coalesce(sum(${attachments.size}), 0)`,
+    })
+    .from(attachments)
+    .where(and(eq(attachments.companyId, companyId), isNotNull(attachments.taskId)));
+  const [onTask, inCompany] = [Number(used?.task ?? 0), Number(used?.company ?? 0)];
+  if (onTask + size > TASK_FILES_BYTES) {
+    throw new ApiError(413, 'validation', `Task ${task.number} holds ${sizeText(onTask)} of files, and one task holds at most ${sizeText(TASK_FILES_BYTES)}. ${ELSEWHERE}`, 'attachment_invalid');
+  }
+  if (inCompany + size > ctx.config.taskFilesBytes) {
+    throw new ApiError(
+      413,
+      'validation',
+      `The company's task files take ${sizeText(inCompany)} of the ${sizeText(ctx.config.taskFilesBytes)} Hornhoof keeps for them. The files of a turn go 30 days after it closes. ${ELSEWHERE}`,
+      'attachment_invalid',
+    );
+  }
+}
+
+/* Sends a task file in pieces, so the server never holds a whole one. */
+export function sendFile(db: Db, reply: FastifyReply, found: { id: string; name: string | null; length: number }) {
+  async function* pieces(id: string, length: number) {
+    for (let at = 0; at < length; at += PIECE_BYTES) {
+      const [piece] = await db
+        .select({ bytes: sql<Uint8Array>`substring(${attachments.bytes} from ${at + 1} for ${PIECE_BYTES})` })
+        .from(attachments)
+        .where(eq(attachments.id, id));
+      if (!piece) throw new Error('The file was removed while it was being sent.');
+      yield Buffer.from(piece.bytes);
+    }
+  }
+  return reply
+    .header('x-content-type-options', 'nosniff')
+    .header('x-file-name', encodeURIComponent(found.name ?? ''))
+    .header('content-length', String(found.length))
+    .type('application/octet-stream')
+    .send(Readable.from(pieces(found.id, found.length)));
+}
+
 const IdParams = z.object({ id: z.uuid() });
 const SendQuery = z.object({ task: z.string().optional(), name: z.string().optional() });
 const FetchQuery = z.object({ task: z.string().min(1), file: z.string().min(1) });
@@ -136,27 +179,7 @@ export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
       if (!type) throw new ApiError(400, 'validation', 'Send a PNG, JPEG or WebP picture, or name the task a file is for.', 'attachment_invalid');
       const [sent] = await db.select({ n: count() }).from(attachments).where(eq(attachments.jobId, job.id));
       if (Number(sent?.n ?? 0) >= PER_TURN) throw refuse(409, 'task_invalid', `One turn sends at most ${PER_TURN} pictures and files.`);
-      if (task) {
-        const [used] = await db
-          .select({
-            task: sql<string>`coalesce(sum(${attachments.size}) filter (where ${attachments.taskId} = ${task.id}), 0)`,
-            company: sql<string>`coalesce(sum(${attachments.size}), 0)`,
-          })
-          .from(attachments)
-          .where(and(eq(attachments.companyId, job.companyId), isNotNull(attachments.taskId)));
-        const [onTask, inCompany] = [Number(used?.task ?? 0), Number(used?.company ?? 0)];
-        if (onTask + bytes.length > TASK_FILES_BYTES) {
-          throw new ApiError(413, 'validation', `Task ${task.number} holds ${sizeText(onTask)} of files, and one task holds at most ${sizeText(TASK_FILES_BYTES)}. ${ELSEWHERE}`, 'attachment_invalid');
-        }
-        if (inCompany + bytes.length > ctx.config.taskFilesBytes) {
-          throw new ApiError(
-            413,
-            'validation',
-            `The company's task files take ${sizeText(inCompany)} of the ${sizeText(ctx.config.taskFilesBytes)} Hornhoof keeps for them. The files of a turn go 30 days after it closes. ${ELSEWHERE}`,
-            'attachment_invalid',
-          );
-        }
-      }
+      if (task) await checkRoom(ctx, job.companyId, task, bytes.length);
       const [row] = await db
         .insert(attachments)
         .values({ companyId: job.companyId, jobId: job.id, agentId: job.agentId, taskId: task?.id ?? null, name, mediaType: type, bytes, size: bytes.length })
@@ -182,22 +205,7 @@ export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
           .limit(1)
       : [];
     if (!found) throw new ApiError(404, 'not_found', `Task ${ref} has no file ${file}. Its card lists its files.`, 'attachment_unknown');
-    async function* pieces(id: string, length: number) {
-      for (let at = 0; at < length; at += PIECE_BYTES) {
-        const [piece] = await db
-          .select({ bytes: sql<Uint8Array>`substring(${attachments.bytes} from ${at + 1} for ${PIECE_BYTES})` })
-          .from(attachments)
-          .where(eq(attachments.id, id));
-        if (!piece) throw new Error('The file was removed while it was being sent.');
-        yield Buffer.from(piece.bytes);
-      }
-    }
-    return reply
-      .header('x-content-type-options', 'nosniff')
-      .header('x-file-name', encodeURIComponent(found.name ?? ''))
-      .header('content-length', String(found.length))
-      .type('application/octet-stream')
-      .send(Readable.from(pieces(found.id, found.length)));
+    return sendFile(db, reply, found);
   });
 
   /* People see a picture once a request shows it, and only where they reach the request's task. */

@@ -1,4 +1,4 @@
-import { COMPANY_TEMPLATE_KEYS, TEMPLATE_KEYS, type Limits, type ModelOption } from '@hornhoof/protocol';
+import { COMPANY_TEMPLATE_KEYS, RUN_KINDS, TEMPLATE_KEYS, type Limits, type ModelOption } from '@hornhoof/protocol';
 import { sql } from 'drizzle-orm';
 import { bigserial, boolean, check, customType, index, integer, jsonb, pgTable, real, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
 
@@ -523,8 +523,9 @@ export const attachments = pgTable(
 
 export const TEST_RUN_STATUSES = ['running', 'passed', 'failed', 'stopped'] as const;
 
-/* The full test suite of a task's branch, which an agent runs on whichever machines of the company are free, in parts
-   when its runner splits. The agent hears the result on its task, and each part's log goes on the task as a file. */
+/* A command an agent runs for a task on whichever machines of the company are free, in parts when it splits: the full
+   test suite of a task's branch, or any other work, on a branch or in an empty folder with the task's files. The agent
+   hears the result on its task, and each part's log, and what a part of work made, go on the task as files. */
 export const testRuns = pgTable(
   'test_runs',
   {
@@ -537,9 +538,15 @@ export const testRuns = pgTable(
     jobId: uuid('job_id').notNull().references(() => jobs.id),
     /* The department or product whose repository it clones; a removed one takes its repository along. */
     departmentId: uuid('department_id').references(() => departments.id, { onDelete: 'set null' }),
-    /* None: the task's own branch, task-<number> or the one that starts with task-<number>-. */
+    kind: text('kind', { enum: RUN_KINDS }).notNull().default('tests'),
+    /* None: for tests the task's own branch, task-<number> or the one that starts with task-<number>-; for work no
+       repository, an empty folder. */
     branch: text('branch'),
     command: text('command').notNull(),
+    /* The task's files a part of work takes in, by name. */
+    files: jsonb('files').$type<string[]>().notNull().default([]),
+    /* The free memory a part of work needs; tests need what their repository says. */
+    memoryGb: integer('memory_gb'),
     parts: integer('parts').notNull().default(1),
     timeoutMs: integer('timeout_ms').notNull(),
     status: text('status', { enum: TEST_RUN_STATUSES }).notNull().default('running'),

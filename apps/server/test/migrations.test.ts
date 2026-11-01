@@ -369,3 +369,35 @@ describe('migration 0033', () => {
     expect(events.rows.map(r => r.data.text)).toEqual([`{"command":"${hidden}"}`, `Run this:\n${hidden}\nthen tell me.`, 'Add --joined to the list.']);
   });
 });
+
+describe('migrations 0034 and 0035', () => {
+  const C = '00000000-0000-4000-8000-000000000001';
+  const P = '00000000-0000-4000-8000-000000000002';
+  const A = '00000000-0000-4000-8000-0000000000b1';
+  const T = '00000000-0000-4000-8000-0000000000d1';
+  const R = '00000000-0000-4000-8000-0000000000e1';
+  const S = '00000000-0000-4000-8000-0000000000c1';
+
+  it('keeps how long an older part waits and that it ran nowhere before, and keeps older runs as test runs', async () => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0033_nodes') });
+    await db.execute(sql`insert into companies (id, name) values (${C}, 'Acme')`);
+    await db.execute(sql`insert into people (id, company_id, name, email, status, scope_kind) values (${P}, ${C}, 'Ivan', 'ivan@acme.com', 'active', 'company')`);
+    await db.execute(sql`insert into subscriptions (id, company_id, provider, kind, label, status, owner_person_id) values (${S}, ${C}, 'claude', 'personal', 'Claude', 'ready', ${P})`);
+    await db.execute(sql`insert into agents (id, company_id, kind, name, model) values (${A}, ${C}, 'worker', 'Bruno', '')`);
+    await db.execute(sql`insert into jobs (company_id, subscription_id, agent_id, kind, prompt, timeout_ms) values (${C}, ${S}, ${A}, 'conversation', 'hi', 900000)`);
+    const [job] = (await db.execute<{ id: string }>(sql`select id from jobs`)).rows;
+    await db.execute(sql`insert into tasks (id, company_id, number, title) values (${T}, ${C}, 1, 'Checkout')`);
+    await db.execute(sql`insert into test_runs (id, company_id, number, task_id, agent_id, job_id, command, timeout_ms) values (${R}, ${C}, 1, ${T}, ${A}, ${job!.id}, 'npm test', 60000)`);
+    await db.execute(sql`insert into test_parts (company_id, run_id, part, created_at) values (${C}, ${R}, 1, '2026-10-30T10:00:00Z')`);
+
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+
+    const parts = await db.execute<{ waits: boolean; lost: unknown }>(sql`select queued_at = created_at as waits, lost from test_parts`);
+    expect(parts.rows).toEqual([{ waits: true, lost: [] }]);
+    const runs = await db.execute(sql`select kind, files, memory_gb from test_runs`);
+    expect(runs.rows).toEqual([{ kind: 'tests', files: [], memory_gb: null }]);
+  });
+});

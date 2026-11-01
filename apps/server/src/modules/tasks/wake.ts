@@ -100,6 +100,9 @@ function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string {
     case 'tests':
       /* Its text is Hornhoof's account of the run, or who stopped it. */
       return `The tests you ran on ${ref} ended${said}Go on with the work, then ${finish}. If you cannot go on, ${stuck}.`;
+    case 'work':
+      /* Its text is Hornhoof's account of the run, or who stopped it. */
+      return `The work you ran on ${ref} ended${said}Go on with the task, then ${finish}. If you cannot go on, ${stuck}.`;
     case 'explain':
       /* Hornhoof writes this turn itself, from the request. */
       return `${ref} waits for people. See /api/requests and put what is asked into plain words with explain_request.`;
@@ -275,7 +278,7 @@ export async function stopTurns(ctx: Ctx, taskIds: string[], keep?: string): Pro
 }
 
 /* Wakes that bring the agent new words on its task, which a turn on that task takes in while it runs. */
-const LIVE_WAKES: WakeWhy[] = ['comment', 'answered', 'updated', 'tests'];
+const LIVE_WAKES: WakeWhy[] = ['comment', 'answered', 'updated', 'tests', 'work'];
 /* Wakes that would set the holder to work on its task, held back while the task waits for the tasks it comes after. */
 const TO_WORK: WakeWhy[] = ['assigned', 'updated', 'comment', 'answered', 'unblocked', 'reminder', 'go_on', 'subtasks'];
 
@@ -303,8 +306,8 @@ async function queueWake(ctx: Ctx, w: Wake): Promise<boolean> {
       .where(and(eq(jobs.agentId, agent.id), eq(jobs.taskId, task.id), eq(jobs.status, 'queued')))
       .limit(1);
     if (waiting) {
-      /* A test run's result is not in the task, so the turn that waits carries it along. */
-      if (w.why === 'tests') await db.update(jobs).set({ prompt: sql`${jobs.prompt} || ${`\n\n${wakePrompt(agent, task, w)}`}` }).where(eq(jobs.id, waiting.id));
+      /* A run's result is not in the task, so the turn that waits carries it along. */
+      if (w.why === 'tests' || w.why === 'work') await db.update(jobs).set({ prompt: sql`${jobs.prompt} || ${`\n\n${wakePrompt(agent, task, w)}`}` }).where(eq(jobs.id, waiting.id));
       return false;
     }
     const prompt = wakePrompt(agent, task, w);

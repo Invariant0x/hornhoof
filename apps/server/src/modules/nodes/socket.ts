@@ -17,7 +17,7 @@ function sameKey(given: string, expected: string): boolean {
 
 /* The built-in node's key, or the key a node got at join. Nodes of removed subscriptions still match so they can be told
    to clean up. */
-async function identify(ctx: Ctx, req: FastifyRequest): Promise<NodeIdentity | null> {
+export async function identify(ctx: Ctx, req: FastifyRequest): Promise<NodeIdentity | null> {
   const header = req.headers.authorization ?? '';
   const key = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
   if (!key) return null;
