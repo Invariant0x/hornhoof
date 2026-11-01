@@ -35,6 +35,10 @@ const MAX_UNCONFIRMED = 50;
 
 type JobRun = Extract<ServerMessage, { type: 'job.run' }>;
 type TestRun = Extract<ServerMessage, { type: 'tests.run' }>;
+type TestsDone = Extract<NodeMessage, { type: 'tests.done' }>;
+
+/* A part of a run never runs as the node itself: without a user of its own for runs, the node takes none. */
+const NO_RUNS = 'This node has no user of its own for runs, which it gets only when it runs as root with the rights to switch users, so it takes no part of any run.';
 
 /* Agents of a personal Claude Code, Codex or Kimi Code plan run in tmux sessions people can watch and type into. */
 export type TerminalSetup = { tmux: Tmux; program: TermProgram; bin: string; home: string; signedOut: RegExp; proc?: string; user?: JobUser | null; fs?: AgentFs };
@@ -161,7 +165,7 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
       /* Finished jobs Hornhoof has not confirmed still count as running, so the server does not give up on them. */
       const typed = host?.typedJobs() ?? [];
       const tests = [...testing.keys(), ...unconfirmedTests.keys()];
-      next({ type: 'hello', version: VERSION, loggedIn, running: [...running.keys(), ...typed, ...unconfirmed.keys()], ...(models ? { models } : {}), terminals: Boolean(host), work: true, load: load(), tests, skillFiles: true });
+      next({ type: 'hello', version: VERSION, loggedIn, running: [...running.keys(), ...typed, ...unconfirmed.keys()], ...(models ? { models } : {}), terminals: Boolean(host), work: Boolean(testUser), ...(testUser ? {} : { noRuns: NO_RUNS }), load: load(), tests, skillFiles: true });
       for (const m of outbox.splice(0)) emit(m);
       for (const m of unconfirmed.values()) next(m);
       for (const m of unconfirmedTests.values()) next(m);
@@ -229,6 +233,12 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
 
   /* A part of a test run: no agent program takes part, and its user reaches none of the node's keys. */
   async function testOne(m: TestRun, signal: AbortSignal) {
+    if (!testUser) {
+      const refused: TestsDone = { type: 'tests.done', partId: m.partId, ok: false, exitCode: null, error: 'failed', commit: null, log: NO_RUNS };
+      keepTest(m.partId, refused);
+      testing.delete(m.partId);
+      return emit(refused);
+    }
     emit({ type: 'tests.started', partId: m.partId });
     const done = await runPart(m, { dir, user: testUser, hidden: [...known], signal, files });
     keepTest(m.partId, done);

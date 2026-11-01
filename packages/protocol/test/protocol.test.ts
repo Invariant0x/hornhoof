@@ -155,6 +155,7 @@ describe('test runs', () => {
       expect(parse({ ...work, ...bad })).toBeNull();
     }
     expect(parseNodeMessage(JSON.stringify({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], work: true }))).toMatchObject({ work: true });
+    expect(parseNodeMessage(JSON.stringify({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], work: false, noRuns: 'No user of its own.' }))).toMatchObject({ noRuns: 'No user of its own.' });
   });
 });
 

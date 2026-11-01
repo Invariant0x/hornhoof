@@ -53,13 +53,13 @@ async function company() {
     return { job: job!, call };
   };
   /* A machine of a person with one node, online with this load. */
-  const machine = async (token: string, hostname: string, load: object = idle(), { work = true, kind }: { work?: boolean; kind?: string } = {}) => {
+  const machine = async (token: string, hostname: string, load: object = idle(), { work = true, kind, noRuns }: { work?: boolean; kind?: string; noRuns?: string } = {}) => {
     const connected = await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude'] }, ...as(token) });
     const code = connected.json().command.split('--join ')[1];
     const joined = (await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: `${hostname}-0001-abcd`, hostname, os: 'linux', arch: 'x86_64', ...(kind ? { kind } : {}) } })).json();
     const [{ nodeId, subscriptionId, key }] = joined.nodes;
     const node = await connectNode(url, key);
-    node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], load: load as ReturnType<typeof idle>, tests: [], work });
+    node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], load: load as ReturnType<typeof idle>, tests: [], work, ...(noRuns ? { noRuns } : {}) });
     await until(() => app.ctx.hub.loadOf(nodeIdentity(nodeId)) !== null);
     return { node, key: key as string, nodeId: nodeId as string, subscriptionId: subscriptionId as string, machineId: joined.machine.id as string };
   };
@@ -618,6 +618,18 @@ describe('the pool of machines', () => {
     expect(seen.machines[0].parts).toEqual([expect.objectContaining({ run: 1, part: 1 })]);
     expect(seen).toMatchObject({ builtin: null, waiting: [] });
     void part;
+  });
+
+  it('gives no part to a machine whose node has no user of its own for runs, and shows why', async () => {
+    const c = await company();
+    const ivan = await c.machine(c.ceo, 'ivan-mac', idle(), { noRuns: 'This node runs without a user of its own for runs.' });
+    const { call } = await c.turn(c.bruno);
+    await call('run_tests', { command: 'npm test' });
+    expect(await gets(ivan.node, 'tests.run')).toBe(false);
+    const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    const pool = JSON.parse((await (await c.turn(orchestrator!, null)).call('pool')).text);
+    expect(pool.machines).toEqual([expect.objectContaining({ name: 'ivan-mac', online: true, noRuns: 'This node runs without a user of its own for runs.' })]);
+    expect(pool.waiting).toEqual([expect.objectContaining({ part: 1, why: 'No computer lent to runs is online.' })]);
   });
 
   it('gives no part to a phone or a browser, which run no commands, and shows what kind each machine is', async () => {

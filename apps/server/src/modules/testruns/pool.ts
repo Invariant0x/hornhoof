@@ -100,10 +100,12 @@ export async function poolOf(ctx: Ctx, who: Pick<Person, 'id' | 'companyId' | 's
     machines: rows.map(m => {
       const ids = served.filter(n => n.machineId === m.id).map(n => nodeIdentity(n.id));
       const load = loadOf(ids);
-      return { id: m.id, name: m.name || 'a machine', owner: m.owner, kind: m.kind, online: ids.some(id => hub.isOnline(id)), lent: m.lent, load, loaded: load ? loaded(load) : false, parts: on(m.id) };
+      /* Why it takes no part of any run: what its nodes said, unless one of them takes parts. */
+      const noRuns = ids.some(id => hub.isOnline(id) && hub.noRunsOf(id) === null) ? null : (ids.map(id => hub.noRunsOf(id)).find(Boolean) ?? null);
+      return { id: m.id, name: m.name || 'a machine', owner: m.owner, kind: m.kind, online: ids.some(id => hub.isOnline(id)), lent: m.lent, noRuns, load, loaded: load ? loaded(load) : false, parts: on(m.id) };
     }),
     /* The node that comes with the server takes parts too. */
-    builtin: whole ? { online: hub.isOnline(BUILTIN), load: builtinLoad, loaded: builtinLoad ? loaded(builtinLoad) : false, parts: on(null, true) } : null,
+    builtin: whole ? { online: hub.isOnline(BUILTIN), noRuns: hub.noRunsOf(BUILTIN), load: builtinLoad, loaded: builtinLoad ? loaded(builtinLoad) : false, parts: on(null, true) } : null,
     waiting,
   };
 }

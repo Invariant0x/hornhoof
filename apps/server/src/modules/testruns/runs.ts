@@ -167,8 +167,10 @@ export async function placesOf(ctx: Ctx, companyId: string): Promise<Place[]> {
     .orderBy(asc(nodes.createdAt), asc(nodes.id));
   const places: Place[] = [];
   for (const { machine, owner } of rows) {
-    /* Only nodes that say how busy they are know test runs. */
-    const ready = live.filter(n => n.machineId === machine.id && hub.isReady(nodeIdentity(n.id)) && hub.loadOf(nodeIdentity(n.id)) !== null).map(n => n.id);
+    /* Only nodes that say how busy they are know test runs, and only those with a user of their own for runs take them. */
+    const ready = live
+      .filter(n => n.machineId === machine.id && hub.isReady(nodeIdentity(n.id)) && hub.loadOf(nodeIdentity(n.id)) !== null && hub.noRunsOf(nodeIdentity(n.id)) === null)
+      .map(n => n.id);
     if (!ready.length) continue;
     /* A node that runs work takes test runs too. */
     const node = ready.find(id => hub.runsWork(nodeIdentity(id))) ?? ready[0]!;
@@ -186,7 +188,7 @@ export async function placesOf(ctx: Ctx, companyId: string): Promise<Place[]> {
       works: hub.runsWork(nodeIdentity(node)),
     });
   }
-  if (hub.isReady(BUILTIN) && hub.loadOf(BUILTIN)) {
+  if (hub.isReady(BUILTIN) && hub.loadOf(BUILTIN) && hub.noRunsOf(BUILTIN) === null) {
     places.push({ key: 'builtin', node: BUILTIN, name: BUILTIN_NAME, machineId: null, nodeId: null, builtin: true, lent: true, busy: running.some(r => r.builtin), load: together([hub.loadOf(BUILTIN)]), access: null, works: hub.runsWork(BUILTIN) });
   }
   return places;

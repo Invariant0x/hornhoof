@@ -361,6 +361,20 @@ describe('runNode', () => {
     server.send({ type: 'job.cancel', jobId: 'j1' });
   });
 
+  it('offers no part of any run without a user of its own for them, says why, and turns down a part sent anyway', async () => {
+    const server = await fakeServer();
+    const ran: string[] = [];
+    const runPart: typeof runTests = async m => (ran.push(m.partId), { type: 'tests.done', partId: m.partId, ok: true, exitCode: 0, error: null, commit: null, log: '' });
+    const node = await runNode({ dir: nodeDir(server.url), adapter, log: () => {}, loadMs: 40, runPart });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    expect(server.received[0]).toMatchObject({ type: 'hello', work: false, noRuns: expect.stringMatching(/user of its own/) });
+    server.send({ type: 'tests.run', partId: 'p1', repo: { url: 'https://github.com/acme/shop.git', token: '' }, branch: null, task: 3, command: 'npm test', part: 1, parts: 1, timeoutMs: 60000 });
+    await server.wait(() => server.received.some(m => m.type === 'tests.done'));
+    expect(server.received.find(m => m.type === 'tests.done')).toMatchObject({ partId: 'p1', ok: false, error: 'failed', log: expect.stringMatching(/user of its own/) });
+    expect(ran).toEqual([]);
+  });
+
   it('runs a part of a test run, counts it in its load, sends its end until Hornhoof confirms it, and stops a part when asked', async () => {
     const server = await fakeServer();
     const given: unknown[] = [];
@@ -373,10 +387,11 @@ describe('runNode', () => {
       const stopped = signal?.aborted ?? false;
       return { type: 'tests.done', partId: m.partId, ok: !stopped, exitCode: stopped ? null : 0, error: stopped ? 'cancelled' : null, commit: null, log: stopped ? 'Stopped.' : 'all passed' };
     };
-    const node = await runNode({ dir: nodeDir(server.url), adapter, log: () => {}, loadMs: 40, runPart });
+    const node = await runNode({ dir: nodeDir(server.url), adapter, log: () => {}, loadMs: 40, runPart, testUser: { uid: 20001, gid: 20001 } });
     onTestFinished(() => node.stop());
     await server.wait(() => server.received.some(m => m.type === 'hello'));
     expect(server.received[0]).toMatchObject({ type: 'hello', work: true });
+    expect(server.received[0]).not.toHaveProperty('noRuns');
     const part = { type: 'tests.run', repo: { url: 'https://github.com/acme/shop.git', token: '' }, branch: null, task: 3, part: 1, parts: 1, timeoutMs: 60000 };
     server.send({ ...part, partId: 'p1', command: 'npm test' });
     await server.wait(() => server.received.some(m => m.type === 'tests.started' && m.partId === 'p1'));

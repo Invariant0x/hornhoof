@@ -21,8 +21,9 @@ const MISSED_PINGS = 3;
 
 /* greeted: Hornhoof has handled the node's hello, so a job sent now cannot be mistaken for one lost in a restart.
    terminals: the node said it runs agents in sessions people can watch. work: it runs parts of any work, not only of
-   test runs. load: how busy its machine was when it last said. skillFiles: it writes a turn's skills as files. */
-type Entry = { socket: WebSocket; missed: number; greeted: boolean; terminals: boolean; work: boolean; load: SaidLoad | null; skillFiles: boolean };
+   test runs. load: how busy its machine was when it last said. skillFiles: it writes a turn's skills as files. noRuns: why
+   it takes no part of any run. */
+type Entry = { socket: WebSocket; missed: number; greeted: boolean; terminals: boolean; work: boolean; load: SaidLoad | null; skillFiles: boolean; noRuns: string | null };
 
 /* A node's load and when it said it. */
 export type SaidLoad = NodeLoad & { at: number };
@@ -53,7 +54,7 @@ export class NodeHub {
   attach(id: NodeIdentity, socket: WebSocket): void {
     const key = keyOf(id);
     this.sockets.get(key)?.socket.close(4000, 'Replaced by a newer connection.');
-    const entry: Entry = { socket, missed: 0, greeted: false, terminals: false, work: false, load: null, skillFiles: false };
+    const entry: Entry = { socket, missed: 0, greeted: false, terminals: false, work: false, load: null, skillFiles: false, noRuns: null };
     this.sockets.set(key, entry);
     this.away.delete(key);
     const report = (err: unknown) => this.opts.onError?.(err);
@@ -99,13 +100,19 @@ export class NodeHub {
     return this.away.get(key)!;
   }
 
-  greet(id: NodeIdentity, terminals = false, skillFiles = false, work = false): void {
+  greet(id: NodeIdentity, terminals = false, skillFiles = false, work = false, noRuns: string | null = null): void {
     const entry = this.sockets.get(keyOf(id));
     if (!entry) return;
     entry.greeted = true;
     entry.terminals = terminals;
     entry.skillFiles = skillFiles;
     entry.work = work;
+    entry.noRuns = noRuns;
+  }
+
+  /* Why a connected node takes no part of any run, as it said; none when it takes them. */
+  noRunsOf(id: NodeIdentity): string | null {
+    return this.sockets.get(keyOf(id))?.noRuns ?? null;
   }
 
   /* Ready, and runs parts of any work. */

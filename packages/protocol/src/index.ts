@@ -309,6 +309,8 @@ const NodeMessage = z.discriminatedUnion('type', [
     terminals: z.boolean().optional(),
     /* The node runs parts of other work too, not only of test runs. */
     work: z.boolean().optional(),
+    /* Why the node takes no part of any run: a part runs only as a user of the node's own, which this one lacks. */
+    noRuns: z.string().max(300).optional(),
     load: Load.optional(),
     tests: z.array(z.string()).max(100).optional(),
     skillFiles: z.boolean().optional(),
