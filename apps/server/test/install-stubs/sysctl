@@ -3,5 +3,6 @@
 case "$*" in
   "-n hw.ncpu") echo "${STUB_NCPU:-8}" ;;
   "-n hw.memsize") echo "${STUB_MEMSIZE:-17179869184}" ;;
+  "-n machdep.cpu.brand_string") echo "${STUB_CPU_BRAND:-Apple M1}" ;;
   *) exit 1 ;;
 esac

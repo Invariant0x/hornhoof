@@ -101,6 +101,20 @@ describe('install.sh', () => {
     expect(r.out).toContain('10 processors and 12 GB of memory');
   });
 
+  it("tells each node on a Mac the Mac's processor, cores and memory, as Docker there runs in a smaller system", () => {
+    const r = install({ env: { STUB_OS: 'Darwin', STUB_ARCH: 'arm64', STUB_NCPU: '10', STUB_MEMSIZE: String(32 * 1024 ** 3), STUB_CPU_BRAND: 'Apple M2 Pro' } });
+    expect(r.code).toBe(0);
+    const runs = r.calls.filter(c => c.startsWith('docker run -d'));
+    expect(runs).toHaveLength(2);
+    for (const run of runs) expect(run).toContain(`-e HORNHOOF_HOST_CPU=Apple M2 Pro -e HORNHOOF_HOST_CPUS=10 -e HORNHOOF_HOST_MEMORY=${32 * 1024 ** 3}`);
+  });
+
+  it('tells a node on Linux nothing of the machine, which it sees itself', () => {
+    const r = install();
+    expect(r.code).toBe(0);
+    expect(r.calls.filter(c => c.startsWith('docker run -d')).some(c => c.includes('HORNHOOF_HOST'))).toBe(false);
+  });
+
   it('leaves the processors and memory of a Colima set up before as they are', () => {
     const r = install({ omit: ['docker', 'brew'], env: { STUB_OS: 'Darwin', STUB_ARCH: 'arm64', STUB_DOCKER: 'after_start', STUB_COLIMA_LIST: '{"name":"work","status":"Stopped","cpus":4}' } });
     expect(r.code).toBe(0);

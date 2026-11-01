@@ -313,6 +313,21 @@ join_machine() {
 
 node_name() { printf 'hornhoof-%s-%s' "$2" "${1:0:8}"; }
 
+# Docker on a Mac runs in a smaller system of its own, so each node hears what the Mac itself has, to show it next to
+# what the node can use. On Linux a node sees its machine.
+HOST_ENV=()
+host_env() {
+  local cpu cpus mem
+  HOST_ENV=()
+  if [ "$OS" != darwin ]; then return 0; fi
+  cpu=$(sysctl -n machdep.cpu.brand_string 2> /dev/null | tr -cd 'A-Za-z0-9 ()@.,_-' | cut -c1-200 || true)
+  cpus=$(sysctl -n hw.ncpu 2> /dev/null || true)
+  mem=$(sysctl -n hw.memsize 2> /dev/null || true)
+  if [ -n "$cpu" ]; then HOST_ENV+=(-e "HORNHOOF_HOST_CPU=$cpu"); fi
+  case "$cpus" in '' | *[!0-9]*) ;; *) HOST_ENV+=(-e "HORNHOOF_HOST_CPUS=$cpus") ;; esac
+  case "$mem" in '' | *[!0-9]*) ;; *) HOST_ENV+=(-e "HORNHOOF_HOST_MEMORY=$mem") ;; esac
+}
+
 STARTED=''
 # What a failed start tells the person. Once the join used the code, running it again only gets a 410.
 RETRY='Run this command again.'
@@ -325,6 +340,7 @@ start_node() {
       fail "Could not save the key for $name. $RETRY"
   fi
   say "Starting $name."
+  host_env
   "${DOCKER[@]}" rm -f "$name" > /dev/null 2>&1 || true
   # shellcheck disable=SC2086 # the two --add-host words appear only for a server on localhost
   # Root inside the container only: the node runs its agents as a user of their own, keeps its key and programs from
@@ -332,7 +348,7 @@ start_node() {
   "${DOCKER[@]}" run -d --name "$name" --label "$LABEL=$id" --label "$SERVER_LABEL=$SERVER" --restart unless-stopped --cap-drop ALL \
     --user 0:0 --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add KILL --cap-add SETGID --cap-add SETUID --cap-add SYS_PTRACE \
     --security-opt no-new-privileges --shm-size 2g -v "$name:/data" ${LOCAL_SERVER:+--add-host} ${LOCAL_SERVER:+host.docker.internal:host-gateway} \
-    "$IMAGE" > /dev/null || fail "Could not start $name (docker logs $name shows why). $RETRY"
+    ${HOST_ENV[@]+"${HOST_ENV[@]}"} "$IMAGE" > /dev/null || fail "Could not start $name (docker logs $name shows why). $RETRY"
   STARTED="$STARTED $name"
 }
 
