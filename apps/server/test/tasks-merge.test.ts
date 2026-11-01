@@ -4,7 +4,7 @@ import { agents, companies, departments, people, subscriptions, taskEvents, task
 import { blocked, createTask, submit, updateTask, verdict } from '../src/modules/tasks/engine.js';
 import { taskDetail } from '../src/modules/tasks/views.js';
 import { wakePrompt } from '../src/modules/tasks/wake.js';
-import { setUpCompany, testApp } from './helpers.js';
+import { setUpCompany, statements, testApp } from './helpers.js';
 
 /* Development works in a repository; Bruno's task passes Rita's gate. */
 async function company(repository = true) {
@@ -91,6 +91,20 @@ describe('the head', () => {
     const docs = (await createTask(ctx, { agentId: head.id }, { title: 'Docs', brief: '', body: '', departmentId: task.departmentId, parentId: task.parentId, assigneeAgentId: bruno.id, executor: true, gates: [] })).task;
     expect(woken(await passed())).toEqual([]);
     expect(woken(await submit(ctx, bruno.id, docs.id, { summary: 'Written.', evidence: 'docs/checkout.md' }))).toEqual([[head.id, 'subtasks']]);
+  });
+
+  it('takes the department task first when work under it closes, so the last two closing at once still tell it', async () => {
+    const { ctx, bruno, task } = await company(false);
+    const docs = (await createTask(ctx, { agentId: task.createdByAgentId! }, { title: 'Docs', brief: '', body: '', departmentId: task.departmentId, parentId: task.parentId, assigneeAgentId: bruno.id, executor: true, gates: [] })).task;
+    const seen = statements();
+    await submit(ctx, bruno.id, docs.id, { summary: 'Written.', evidence: 'docs/checkout.md' });
+    const at = (test: (s: { sql: string; params: unknown[] }) => boolean) => seen.findIndex(test);
+    const lock = at(s => /^select .* from "tasks" where "tasks"\."id" = \$1 for update$/.test(s.sql) && s.params[0] === task.parentId);
+    const closing = at(s => s.sql.startsWith('update "tasks"') && s.params.includes(docs.id));
+    const counting = at(s => s.sql.includes('"tasks"."parent_id" = $1') && s.sql.includes('not in') && s.params[0] === task.parentId);
+    expect(lock).toBeGreaterThanOrEqual(0);
+    expect(lock).toBeLessThan(closing);
+    expect(closing).toBeLessThan(counting);
   });
 
   it('hears it once the last of them is merged', async () => {

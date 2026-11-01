@@ -4,10 +4,10 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { NodeMessage, ServerMessage } from '@hornhoof/protocol';
 import { PGlite } from '@electric-sql/pglite';
-import { drizzle } from 'drizzle-orm/pglite';
+import { drizzle, PglitePreparedQuery } from 'drizzle-orm/pglite';
 import WebSocket from 'ws';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
-import { inject, onTestFinished } from 'vitest';
+import { inject, onTestFinished, vi } from 'vitest';
 import { buildApp, type Deps } from '../src/app.js';
 import { loadConfig, type Config } from '../src/config.js';
 import { agentRole, grantsFor, type AgentSql } from '../src/db/agent-sql.js';
@@ -35,6 +35,20 @@ async function openTestDb(): Promise<{ client: PGlite; db: Db }> {
   const client = new PGlite({ loadDataDir: migrated });
   const db = drizzle(client, { schema });
   return { client, db: db as unknown as Db };
+}
+
+/* The statements the database runs from now on, in order, with their values. PGlite has one connection, so two moves
+   cannot race in a test; this shows instead that a move takes the locks that make them go one after the other. */
+export function statements(): { sql: string; params: unknown[] }[] {
+  const seen: { sql: string; params: unknown[] }[] = [];
+  const execute = PglitePreparedQuery.prototype.execute;
+  const spy = vi.spyOn(PglitePreparedQuery.prototype, 'execute').mockImplementation(function (this: PglitePreparedQuery<never>, values) {
+    const q = this as unknown as { queryString: string; params: unknown[] };
+    seen.push({ sql: q.queryString, params: q.params });
+    return execute.call(this, values);
+  });
+  onTestFinished(() => spy.mockRestore());
+  return seen;
 }
 
 /* Each PGlite is a whole Postgres in WASM memory, so it closes when its test ends. Call these inside a test. */
