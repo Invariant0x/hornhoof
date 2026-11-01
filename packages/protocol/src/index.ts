@@ -20,6 +20,10 @@ export const TEST_LOG_BYTES = 1024 * 1024;
    folder. */
 export const RUN_KINDS = ['tests', 'work'] as const;
 export type RunKind = (typeof RUN_KINDS)[number];
+/* What a machine of the company is. A computer runs parts of runs in a shell; a phone or a browser will take work of its
+   own kind once a node for it exists. */
+export const MACHINE_KINDS = ['computer', 'phone', 'browser'] as const;
+export type MachineKind = (typeof MACHINE_KINDS)[number];
 /* The most task files a part of work takes in, and the most files one part puts on the task. */
 export const MAX_RUN_FILES = 20;
 /* The biggest file a part puts on the task, as big as any task file may be. */

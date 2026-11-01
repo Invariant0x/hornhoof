@@ -1,4 +1,4 @@
-import { COMPANY_TEMPLATE_KEYS, RUN_KINDS, TEMPLATE_KEYS, type Limits, type ModelOption } from '@hornhoof/protocol';
+import { COMPANY_TEMPLATE_KEYS, MACHINE_KINDS, RUN_KINDS, TEMPLATE_KEYS, type Limits, type ModelOption } from '@hornhoof/protocol';
 import { sql } from 'drizzle-orm';
 import { bigserial, boolean, check, customType, index, integer, jsonb, pgTable, real, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
 
@@ -114,6 +114,8 @@ export const machines = pgTable(
     hostname: text('hostname').notNull().default(''),
     os: text('os').notNull().default(''),
     arch: text('arch').notNull().default(''),
+    /* Only a computer takes parts of runs, which are shell commands. */
+    kind: text('kind', { enum: MACHINE_KINDS }).notNull().default('computer'),
     /* Lends itself to the company's test runs; its owner, or someone who sees the whole company, can take it back. */
     lendsTests: boolean('lends_tests').notNull().default(true),
     createdAt: createdAt(),

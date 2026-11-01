@@ -40,7 +40,7 @@ async function whyWaits(ctx: Ctx, places: Place[], run: Run, targets: Map<string
   const target = targets.get(run.id)!;
   if (!target) return 'Its repository is gone: it ends with the next round.';
   const lent = places.filter(p => p.lent);
-  if (!lent.length) return 'No machine lent to runs is online.';
+  if (!lent.length) return 'No computer lent to runs is online.';
   const reach = lent.filter(p => reaches(p, target.department));
   if (!reach.length) return `No lent machine online belongs to someone who reaches ${target.department ? 'its department' : 'the whole company'}.`;
   const able = run.kind === 'work' ? reach.filter(p => p.works) : reach;
@@ -69,7 +69,7 @@ export async function poolOf(ctx: Ctx, who: Pick<Person, 'id' | 'companyId' | 's
   const whole = who.scopeKind === 'company';
   const live = and(eq(machines.companyId, who.companyId), isNull(machines.revokedAt));
   const rows = await db
-    .select({ id: machines.id, name: machines.hostname, lent: machines.lendsTests, owner: people.name })
+    .select({ id: machines.id, name: machines.hostname, kind: machines.kind, lent: machines.lendsTests, owner: people.name })
     .from(machines)
     .innerJoin(people, eq(people.id, machines.personId))
     .where(whole ? live : and(live, eq(machines.personId, who.id)))
@@ -100,7 +100,7 @@ export async function poolOf(ctx: Ctx, who: Pick<Person, 'id' | 'companyId' | 's
     machines: rows.map(m => {
       const ids = served.filter(n => n.machineId === m.id).map(n => nodeIdentity(n.id));
       const load = loadOf(ids);
-      return { id: m.id, name: m.name || 'a machine', owner: m.owner, online: ids.some(id => hub.isOnline(id)), lent: m.lent, load, loaded: load ? loaded(load) : false, parts: on(m.id) };
+      return { id: m.id, name: m.name || 'a machine', owner: m.owner, kind: m.kind, online: ids.some(id => hub.isOnline(id)), lent: m.lent, load, loaded: load ? loaded(load) : false, parts: on(m.id) };
     }),
     /* The node that comes with the server takes parts too. */
     builtin: whole ? { online: hub.isOnline(BUILTIN), load: builtinLoad, loaded: builtinLoad ? loaded(builtinLoad) : false, parts: on(null, true) } : null,

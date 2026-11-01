@@ -134,7 +134,7 @@ function account(run: Run, task: Pick<Task, 'number'>, parts: Part[], files: Set
   return lines.join('\n');
 }
 
-/* A place a part can run: a machine of the company through one of its nodes, or the built-in node. access: what the
+/* A place a part can run: a computer of the company through one of its nodes, or the built-in node. access: what the
    machine's owner reaches; the built-in node reaches every repository. works: its node runs parts of any work, not only
    of test runs. */
 export type Place = { key: string; node: NodeIdentity; name: string; machineId: string | null; nodeId: string | null; builtin: boolean; lent: boolean; busy: boolean; load: NodeLoad | null; access: Access | null; works: boolean };
@@ -146,7 +146,7 @@ export async function placesOf(ctx: Ctx, companyId: string): Promise<Place[]> {
     .select({ machine: machines, owner: people })
     .from(machines)
     .innerJoin(people, eq(people.id, machines.personId))
-    .where(and(eq(machines.companyId, companyId), isNull(machines.revokedAt)))
+    .where(and(eq(machines.companyId, companyId), eq(machines.kind, 'computer'), isNull(machines.revokedAt)))
     .orderBy(asc(machines.createdAt));
   /* A machine's own node and its plans' nodes; a removed plan's node is on its way out. */
   const live = await db

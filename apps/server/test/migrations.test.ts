@@ -370,7 +370,7 @@ describe('migration 0033', () => {
   });
 });
 
-describe('migrations 0034 and 0035', () => {
+describe('migrations 0034 to 0036', () => {
   const C = '00000000-0000-4000-8000-000000000001';
   const P = '00000000-0000-4000-8000-000000000002';
   const A = '00000000-0000-4000-8000-0000000000b1';
@@ -378,7 +378,7 @@ describe('migrations 0034 and 0035', () => {
   const R = '00000000-0000-4000-8000-0000000000e1';
   const S = '00000000-0000-4000-8000-0000000000c1';
 
-  it('keeps how long an older part waits and that it ran nowhere before, and keeps older runs as test runs', async () => {
+  it('keeps how long an older part waits and that it ran nowhere before, older runs as test runs and older machines as computers', async () => {
     const client = new PGlite();
     onTestFinished(() => client.close());
     const db = drizzle(client);
@@ -392,6 +392,7 @@ describe('migrations 0034 and 0035', () => {
     await db.execute(sql`insert into tasks (id, company_id, number, title) values (${T}, ${C}, 1, 'Checkout')`);
     await db.execute(sql`insert into test_runs (id, company_id, number, task_id, agent_id, job_id, command, timeout_ms) values (${R}, ${C}, 1, ${T}, ${A}, ${job!.id}, 'npm test', 60000)`);
     await db.execute(sql`insert into test_parts (company_id, run_id, part, created_at) values (${C}, ${R}, 1, '2026-10-30T10:00:00Z')`);
+    await db.execute(sql`insert into machines (company_id, person_id, machine_key, hostname) values (${C}, ${P}, 'mac-0001-abcd', 'ivan-mac')`);
 
     await migrate(db, { migrationsFolder: MIGRATIONS });
 
@@ -399,5 +400,7 @@ describe('migrations 0034 and 0035', () => {
     expect(parts.rows).toEqual([{ waits: true, lost: [] }]);
     const runs = await db.execute(sql`select kind, files, memory_gb from test_runs`);
     expect(runs.rows).toEqual([{ kind: 'tests', files: [], memory_gb: null }]);
+    const kinds = await db.execute(sql`select kind from machines`);
+    expect(kinds.rows).toEqual([{ kind: 'computer' }]);
   });
 });

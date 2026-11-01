@@ -53,10 +53,10 @@ async function company() {
     return { job: job!, call };
   };
   /* A machine of a person with one node, online with this load. */
-  const machine = async (token: string, hostname: string, load: object = idle(), { work = true } = {}) => {
+  const machine = async (token: string, hostname: string, load: object = idle(), { work = true, kind }: { work?: boolean; kind?: string } = {}) => {
     const connected = await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude'] }, ...as(token) });
     const code = connected.json().command.split('--join ')[1];
-    const joined = (await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: `${hostname}-0001-abcd`, hostname, os: 'linux', arch: 'x86_64' } })).json();
+    const joined = (await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: `${hostname}-0001-abcd`, hostname, os: 'linux', arch: 'x86_64', ...(kind ? { kind } : {}) } })).json();
     const [{ nodeId, subscriptionId, key }] = joined.nodes;
     const node = await connectNode(url, key);
     node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], load: load as ReturnType<typeof idle>, tests: [], work });
@@ -509,7 +509,7 @@ describe('the pool of machines', () => {
 
     const pool = JSON.parse((await boss.call('pool')).text);
     expect(pool.machines).toEqual([
-      expect.objectContaining({ name: 'ivan-mac', owner: 'Ivan', online: true, lent: true, loaded: false, load: expect.objectContaining({ cpus: 8 }), parts: [expect.objectContaining({ run: 1, kind: 'tests', task: c.task.number, part: 1, parts: 2, agent: 'Bruno', command: 'npm test -- --shard=1/2', ranAgain: [] })] }),
+      expect.objectContaining({ name: 'ivan-mac', owner: 'Ivan', kind: 'computer', online: true, lent: true, loaded: false, load: expect.objectContaining({ cpus: 8 }), parts: [expect.objectContaining({ run: 1, kind: 'tests', task: c.task.number, part: 1, parts: 2, agent: 'Bruno', command: 'npm test -- --shard=1/2', ranAgain: [] })] }),
       expect.objectContaining({ name: 'ann-pc', owner: 'Ann', online: true, lent: true, loaded: true, parts: [] }),
     ]);
     expect(pool.builtin).toMatchObject({ online: false, parts: [] });
@@ -533,7 +533,7 @@ describe('the pool of machines', () => {
 
     await lend(ivan.machineId, false);
     await (await c.turn(c.bruno)).call('run_tests', { command: 'npm test' });
-    expect(await why()).toEqual(['No machine lent to runs is online.']);
+    expect(await why()).toEqual(['No computer lent to runs is online.']);
     await lend(ivan.machineId, true);
     expect(await why()).toEqual(['Short of the 4 GB of free memory it needs: ivan-mac.']);
 
@@ -560,5 +560,20 @@ describe('the pool of machines', () => {
     expect(seen.machines[0].parts).toEqual([expect.objectContaining({ run: 1, part: 1 })]);
     expect(seen).toMatchObject({ builtin: null, waiting: [] });
     void part;
+  });
+
+  it('gives no part to a phone or a browser, which run no commands, and shows what kind each machine is', async () => {
+    const c = await company();
+    const phone = await c.machine(c.ceo, 'ivan-phone', idle(), { kind: 'phone' });
+    const { call } = await c.turn(c.bruno);
+    await call('run_tests', { command: 'npm test' });
+    expect(await gets(phone.node, 'tests.run')).toBe(false);
+    const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    const pool = JSON.parse((await (await c.turn(orchestrator!, null)).call('pool')).text);
+    expect(pool.machines).toEqual([expect.objectContaining({ name: 'ivan-phone', kind: 'phone', online: true, lent: true, parts: [] })]);
+    expect(pool.waiting).toEqual([expect.objectContaining({ part: 1, why: 'No computer lent to runs is online.' })]);
+    const box = await c.planless(c.ceo, 'build-box');
+    expect(await nextOf(box.node, 'tests.run')).toMatchObject({ command: 'npm test' });
+    expect((await c.app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code: 'x', machineId: 'odd-0001-abcd', hostname: 'odd', os: 'linux', arch: 'x86_64', kind: 'toaster' } })).statusCode).toBe(400);
   });
 });

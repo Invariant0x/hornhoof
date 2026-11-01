@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { MACHINE_KINDS } from '@hornhoof/protocol';
 import { and, asc, eq, gt, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -24,6 +25,7 @@ const JoinBody = z.object({
   hostname: z.string().trim().min(1).max(120),
   os: z.enum(['linux', 'darwin']),
   arch: z.enum(['arm64', 'x86_64']),
+  kind: z.enum(MACHINE_KINDS).default('computer'),
 });
 
 const IdParams = z.object({ id: z.uuid() });
@@ -97,7 +99,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
       const alone = code.subscriptionIds.length === 0;
       if (!alone && subs.length === 0) throw codeUsed();
 
-      const details = { hostname: body.hostname, os: body.os, arch: body.arch };
+      const details = { hostname: body.hostname, os: body.os, arch: body.arch, kind: body.kind };
       const [machine] = await tx
         .insert(machines)
         .values({ companyId: code.companyId, personId: code.personId, machineKey: body.machineId, ...details })
