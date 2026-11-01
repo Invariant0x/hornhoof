@@ -8,14 +8,22 @@ export const MISSING_HINT = 'not found|no module named|cannot find (module|packa
 /* Tool calls that may install something. */
 export const INSTALL_HINT = 'install|global add|add (-g|--global)|npm i ';
 
+/* A shell or a program says what is missing at the start of its own line, after who says it: words with no space or quote,
+   each followed by a colon, as zsh:1: gives its line too. The same words inside a line, as in a file read, a search or a
+   quote, ran nothing. */
+const WHO = String.raw`(?:[^\s'"\x60:]+(?::\d+)?(?: \[[\w-]+\])?: )*`;
+/* Where the shell lives, as in /bin/sh. */
+const PATH = String.raw`(?:[^\s'"\x60:]*\/)?`;
+const said = (what: string, mark = '') => new RegExp(String.raw`^[ \t]*` + mark + WHO + what, 'gm');
 const COMMAND = [
-  /\b([\w][\w.+-]*): command not found(?!:)/g,
-  /command not found: ([\w.+-]+)/g,
-  /^(?:\/bin\/)?(?:ba|da|z)?sh: \d+: ([\w.+-]+): not found/gm,
-  /env: ['‘]?([\w.+-]+)['’]?: No such file or directory/g,
+  said(String.raw`(?:line \d+: )?([\w][\w.+-]*): command not found(?!:)`),
+  said(String.raw`command not found: ([\w.+-]+)`),
+  said(String.raw`(?:ba|da|z)?sh: \d+: ([\w.+-]+): not found`, PATH),
+  said(String.raw`env: ['‘]?([\w.+-]+)['’]?: No such file or directory`, PATH),
 ];
-const PYTHON = /No module named ['"]?([\w.]+)['"]?/g;
-const NODE = /Cannot find (?:module|package) ['"]([^'"\s]+)['"]/g;
+/* pytest marks the lines of an error with E. */
+const PYTHON = said(String.raw`No module named ['"]?([\w.]+)['"]?`, String.raw`(?:E[ \t]+)?`);
+const NODE = said(String.raw`Cannot find (?:module|package) ['"]([^'"\s]+)['"]`);
 /* A package name, not a file the agent wrote: no path, no node: builtin. */
 const PACKAGE = /^(@[\w.-]+\/)?[\w][\w.-]*/;
 

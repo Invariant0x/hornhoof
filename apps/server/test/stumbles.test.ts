@@ -6,6 +6,7 @@ describe('where agents stumbled', () => {
     expect(missingIn('bash: line 1: ps: command not found')).toEqual([{ what: 'ps', kind: 'command' }]);
     expect(missingIn('sh: 1: free: not found')).toEqual([{ what: 'free', kind: 'command' }]);
     expect(missingIn('zsh: command not found: jq')).toEqual([{ what: 'jq', kind: 'command' }]);
+    expect(missingIn('zsh:1: command not found: jq')).toEqual([{ what: 'jq', kind: 'command' }]);
     expect(missingIn("/usr/bin/env: 'python': No such file or directory")).toEqual([{ what: 'python', kind: 'command' }]);
     expect(missingIn('Error: not found')).toEqual([]);
   });
@@ -17,6 +18,19 @@ describe('where agents stumbled', () => {
     expect(missingIn("Cannot find module './local.js'")).toEqual([]);
     expect(missingIn("Cannot find module '/tmp/run.mjs'")).toEqual([]);
     expect(missingIn("Cannot find module 'node:sqlite'")).toEqual([]);
+  });
+
+  it('counts what a shell or a program said on its own line, not the same words read in a file, found in a search or quoted', () => {
+    expect(missingIn("apps/server/test/stumbles.test.ts-6-    expect(missingIn('bash: line 1: ps: command not found')).toEqual([]);")).toEqual([]);
+    expect(missingIn(`    expect(missingIn("/usr/bin/env: 'python': No such file or directory")).toEqual([]);`)).toEqual([]);
+    expect(missingIn('{"missing":[{"what":"jq","kind":"command","example":"bash: line 1: jq: command not found"}]}')).toEqual([]);
+    expect(missingIn('    "example": "zsh: command not found: jq",')).toEqual([]);
+    expect(missingIn(`const said = "ModuleNotFoundError: No module named 'yaml'";`)).toEqual([]);
+    expect(missingIn(`it('x', () => fail("Error: Cannot find module 'left-pad'"));`)).toEqual([]);
+    expect(missingIn('Exit code 127\n./build.sh: line 3: jq: command not found')).toEqual([{ what: 'jq', kind: 'command' }]);
+    expect(missingIn('/usr/bin/python3: No module named pip')).toEqual([{ what: 'pip', kind: 'python module' }]);
+    expect(missingIn("E   ModuleNotFoundError: No module named 'yaml'")).toEqual([{ what: 'yaml', kind: 'python module' }]);
+    expect(missingIn("Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'zod' imported from /work/a.mjs")).toEqual([{ what: 'zod', kind: 'node module' }]);
   });
 
   it("finds what an agent installed for itself or the machine, not a project's own dependencies", () => {
