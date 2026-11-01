@@ -64,6 +64,11 @@ async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, also?: (
       .where(and(eq(tasks.id, task.id), eq(tasks.version, task.version)))
       .returning();
     if (!row) throw refuse(409, 'task_changed', `#${task.number} changed meanwhile. Read it again.`);
+    /* Done means all of it: work under it still open would go on under a finished task, and the turn with it. */
+    if (set.status === 'done') {
+      const open = await tx.select({ number: tasks.number }).from(tasks).where(and(eq(tasks.parentId, task.id), notInArray(tasks.status, [...CLOSED]))).orderBy(asc(tasks.number));
+      if (open.length) throw refuse(409, 'task_invalid', `#${task.number} still has open subtasks: ${open.map(t => `#${t.number}`).join(', ')}. Wait for them, or cancel them first.`);
+    }
     await note(tx, row, n);
     await also?.(tx, row);
     return row;

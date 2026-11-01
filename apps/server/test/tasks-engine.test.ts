@@ -177,6 +177,13 @@ describe('the task engine', () => {
     expect((await db.select().from(tasks)).map(t => t.id)).toEqual([parent.id]);
   });
 
+  it('keeps a task open while a subtask under it is open', async () => {
+    const { ctx, head, memberTask, read } = await company();
+    const child = await memberTask([]);
+    expect(await reason(report(ctx, head.id, child.parentId!, { done: true, summary: 'All done.' }))).toBe('task_invalid');
+    expect((await read(child.parentId!)).status).toBe('open');
+  });
+
   it("wakes the assignee for a person's comment but nobody for an agent's", async () => {
     const { ctx, CEO, head, bruno, memberTask } = await company();
     const task = await memberTask();

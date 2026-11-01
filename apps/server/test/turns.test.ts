@@ -356,6 +356,20 @@ describe('turns', () => {
     expect(told).toContain('Turn 2');
   });
 
+  it('keeps a turn open while work under its finished task is still open', async () => {
+    const { db, ctx, orchestrator, dev, hana, tools } = await company();
+    await call(await tools(orchestrator), 'plan_turn', { title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });
+    const [top] = await db.select().from(tasks);
+    /* As an older Hornhoof left it: the top task done, a subtask under it still open. */
+    const [under] = await db.insert(tasks).values({ companyId: top!.companyId, number: 2, turnId: top!.turnId, parentId: top!.id, departmentId: dev.id, title: 'Webhook', assigneeAgentId: hana.id }).returning();
+    const [finished] = await db.update(tasks).set({ status: 'done', closedAt: new Date() }).where(eq(tasks.id, top!.id)).returning();
+    expect(await settle(ctx, finished!)).toBeNull();
+    expect((await db.select().from(turns))[0]!.status).toBe('open');
+    const [last] = await db.update(tasks).set({ status: 'done', closedAt: new Date() }).where(eq(tasks.id, under!.id)).returning();
+    expect(await settle(ctx, last!)).not.toBeNull();
+    expect((await db.select().from(turns))[0]!.status).toBe('closed');
+  });
+
   it('closes the turn when a person cancels its last open task', async () => {
     const { db, orchestrator, dev, ceoToken, app, tools } = await company();
     await call(await tools(orchestrator), 'plan_turn', { title: 'Payments', goal: 'Card payments.', tasks: [work(dev.id, 'Checkout')] });

@@ -159,7 +159,8 @@ async function announce(ctx: Live, started: Started[]): Promise<void> {
   }
 }
 
-const liveAtTop = (turnId: string) => and(eq(tasks.turnId, turnId), isNull(tasks.parentId), notInArray(tasks.status, [...CLOSED]));
+/* Any open task of the turn, the work under its top tasks too. */
+const liveIn = (turnId: string) => and(eq(tasks.turnId, turnId), notInArray(tasks.status, [...CLOSED]));
 
 /* Opens the lowest planned turn when none is open, and sends its tasks to their heads. An open turn with nothing left at
    its top closes first, and a planned turn whose tasks were all cancelled closes without starting, so the turns after
@@ -168,7 +169,7 @@ async function openNext(tx: Tx, companyId: string): Promise<{ turn: Turn; starte
   for (;;) {
     const [open] = await tx.select({ id: turns.id }).from(turns).where(and(eq(turns.companyId, companyId), eq(turns.status, 'open')));
     if (open) {
-      const [left] = await tx.select({ n: count() }).from(tasks).where(liveAtTop(open.id));
+      const [left] = await tx.select({ n: count() }).from(tasks).where(liveIn(open.id));
       if (Number(left?.n ?? 0)) return null;
       await tx.update(turns).set({ status: 'closed', closedAt: new Date() }).where(eq(turns.id, open.id));
       continue;
@@ -350,7 +351,7 @@ async function storeSettle(tx: Tx, task: Pick<Task, 'turnId' | 'companyId' | 'st
   const turnId = task.turnId!;
   const [turn] = await tx.select().from(turns).where(and(eq(turns.id, turnId), inArray(turns.status, ['open', 'planned'])));
   if (!turn) return null;
-  const [left] = await tx.select({ n: count() }).from(tasks).where(liveAtTop(turnId));
+  const [left] = await tx.select({ n: count() }).from(tasks).where(liveIn(turnId));
   if (Number(left?.n ?? 0)) return null;
   const [closed] = await tx.update(turns).set({ status: 'closed', closedAt: new Date() }).where(eq(turns.id, turnId)).returning();
   return { closed: closed!, planned: turn.status === 'planned', opened: turn.status === 'open' ? await openNext(tx, task.companyId) : null };
