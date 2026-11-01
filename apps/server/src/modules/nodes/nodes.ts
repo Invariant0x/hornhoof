@@ -1,6 +1,7 @@
 import { and, asc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import { machines, nodes, subscriptions } from '../../db/schema.js';
+import type { NodeIdentity } from './hub.js';
 
 /* A node that still has its key: its machine is connected and Hornhoof has not taken the node back. */
 export const liveNode = isNotNull(nodes.keyHash);
@@ -27,6 +28,13 @@ export async function planNodes(db: Db, subscriptionIds: string[]): Promise<Node
     .innerJoin(machines, eq(machines.id, nodes.machineId))
     .where(and(inArray(nodes.subscriptionId, subscriptionIds), liveNode))
     .orderBy(asc(nodes.createdAt), asc(nodes.id));
+}
+
+/* The machine a node is on; none for the built-in node. */
+export async function machineOf(db: Db, node: NodeIdentity | null): Promise<{ id: string; hostname: string } | null> {
+  if (node?.kind !== 'node') return null;
+  const [row] = await db.select({ id: machines.id, hostname: machines.hostname }).from(nodes).innerJoin(machines, eq(machines.id, nodes.machineId)).where(eq(nodes.id, node.nodeId));
+  return row ?? null;
 }
 
 /* A plan's state from its nodes: waiting for a machine while none is left, ready while one is signed in, needing a

@@ -545,7 +545,7 @@ export async function orchestratorState(ctx: Ctx, companyId: string): Promise<Ag
 }
 
 /* Why the agent's turns cannot go out now, or null when they can: a plan's go out while one of its machines can take them,
-   and otherwise wait for what its own machine, or the plan's first, waits for. */
+   and otherwise wait for what its own machine waits for, or one of the plan's that is online, or its first. */
 async function waitsFor(ctx: Ctx, agent: { productId: string | null; departmentId: string | null; nodeId: string | null }, sub: { id: string; kind: 'personal' | 'api_key' }): Promise<AgentState['reason']> {
   if (sub.kind === 'api_key') return ctx.hub.isReady(BUILTIN) ? null : 'machine_offline';
   const all = await planNodes(ctx.db, [sub.id]);
@@ -554,7 +554,7 @@ async function waitsFor(ctx: Ctx, agent: { productId: string | null; departmentI
   const why = (n: NodeRow): AgentState['reason'] =>
     n.status === 'needs_login' ? 'needs_login' : outdated(n.version, need) ? 'node_outdated' : !ctx.hub.isReady(nodeIdentity(n.id)) ? 'machine_offline' : null;
   if (all.some(n => why(n) === null)) return null;
-  return why(all.find(n => n.id === agent.nodeId) ?? all[0]!);
+  return why(all.find(n => n.id === agent.nodeId) ?? all.find(n => ctx.hub.isOnline(nodeIdentity(n.id))) ?? all[0]!);
 }
 
 /* Whether the agent can answer now and, if not, why; what it is doing and how many turns wait. */

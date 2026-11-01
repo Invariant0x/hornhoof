@@ -7,8 +7,9 @@ import { accessOf, agentSpot, canReach } from '../../auth/access.js';
 import { actorOf, changedBy, requireCompanyScope, type Person } from '../../auth/session.js';
 import { agentChanges, agents, departments, jobs, people, subscriptions, tasks, type AGENT_CHANGE_FIELDS } from '../../db/schema.js';
 import { ApiError, type ErrorReason } from '../../errors.js';
-import { onAgent, pump, pumpWaiting } from '../conversation/queue.js';
+import { onAgent, programNode, pump, pumpWaiting } from '../conversation/queue.js';
 import { deptName } from '../departments/templates.js';
+import { machineOf } from '../nodes/nodes.js';
 import { subViews, type IsOnline, type SubView } from '../subscriptions/views.js';
 import { CLOSED, dropGate } from '../tasks/engine.js';
 import { backOn, leaveIfOff, resumeAgent } from '../tasks/wake.js';
@@ -29,6 +30,8 @@ export type AgentCard = {
   /* The level a person picked, or null for the program's default (Kimi's and Codex's most). */
   effort: string | null;
   subscription: SubView | null;
+  /* The machine its program is on; none on the built-in node and before it first ran. */
+  machine: { id: string; hostname: string } | null;
   state: 'working' | 'sleeping' | 'needs_subscription';
   skills: { id: string; title: Lang; description: Lang; on: boolean; locked: boolean; overridden: boolean; templateChanged: boolean }[];
   parts: Part[];
@@ -132,6 +135,7 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
       model: agent.model,
       effort: agent.effort,
       subscription: agent.subscriptionId ? (views.get(agent.subscriptionId) ?? null) : null,
+      machine: await machineOf(db, (await programNode(ctx, agent.id))?.node ?? null),
       state: running ? 'working' : agent.subscriptionId ? 'sleeping' : 'needs_subscription',
       skills: offered.flatMap(s => {
         const skill = ctx.templates.skills.get(s.id);
