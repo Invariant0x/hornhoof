@@ -35,7 +35,7 @@ async function company(skills: string[]) {
   await until(async () => (await agentState(app.ctx, bruno.id)).ready);
   await db.insert(jobs).values({ companyId: acme!.id, subscriptionId: sub!.id, agentId: wendy.id, kind: 'conversation', prompt: 'round', timeoutMs: 900000, status: 'running', toolTokenHash: hashToken(TOKEN) });
   const task = (await createTask(app.ctx, { agentId: hana.id }, { title: 'Checkout API', brief: '', body: 'POST /checkout.', departmentId: dev!.id, assigneeAgentId: bruno.id, executor: true, gates: [] })).task;
-  return { app, db, ceo, dev: dev!, acme: acme!, sub: sub!, wendy, hana, bruno, task };
+  return { app, db, ceo, dev: dev!, ops: ops!, acme: acme!, sub: sub!, wendy, hana, bruno, task, hire };
 }
 
 async function mcp(app: FastifyInstance): Promise<Client> {
@@ -55,7 +55,19 @@ describe('tools a skill grants', () => {
     const { app } = await company([]);
     const tools = await names(await mcp(app));
     expect(tools).toContain('tasks');
-    for (const name of ['agents', 'failures', 'message_employee']) expect(tools).not.toContain(name);
+    for (const name of ['agents', 'failures']) expect(tools).not.toContain(name);
+  });
+
+  it('let any employee write to the people of its own department, and only to them', async () => {
+    const { app, db, ops, bruno, hire } = await company([]);
+    const olga = await hire('Olga', 'worker', 'OPS-INTEG', ops.id);
+    const client = await mcp(app);
+    expect(await names(client)).toContain('message_employee');
+    expect((await call(client, 'message_employee', { employee: olga.id, text: 'Which token did the Stripe connector get? Your branch has none.' })).isError).toBeFalsy();
+    expect((await db.select().from(jobs).where(eq(jobs.agentId, olga.id))).map(j => j.prompt)).toEqual([expect.stringContaining('Which token did the Stripe connector get?')]);
+    const away = await call(client, 'message_employee', { employee: bruno.id, text: 'Hi Bruno.' });
+    expect(away.isError).toBe(true);
+    expect(away.content[0]!.text).toContain('another department');
   });
 
   it("let a watchdog see every agent with what it holds, and nudge one in its window", async () => {

@@ -177,6 +177,19 @@ describe('templates', () => {
     expect(textOf('DEV-SEC')).not.toMatch(/attack|hostile|exploit|steal|атак|враждеб|эксплуат|взлом/i);
   });
 
+  it('runs the whole test suite once per turn, checks a task by what it changed, and keeps the head out of the work', () => {
+    const body = (id: string) => templates.skills.get(id)!.body;
+    const perTask = ['dev-implement', 'dev-worktrees', 'dev-tdd', 'dev-ci-release', 'hh-task-flow', 'hh-verify-before-done'].map(body).join('\n');
+    expect(perTask).not.toMatch(/full test suite|whole test command|every change runs|the suite passes/i);
+    expect(body('dev-gates')).toMatch(/once per turn/);
+    expect(body('dev-gates')).toContain('final check');
+    expect(body('hh-task-flow')).toContain('message_employee');
+    expect(body('hh-report-to-head')).toContain('message_employee');
+    expect(body('hh-lead-tasks')).toMatch(/no permissions/);
+    expect(body('hh-break-down')).toMatch(/not a step of preparation/);
+    expect(templates.roles.get('DEV-OPS')!.body).toContain('final check');
+  });
+
   it('credits every source a skill names in SOURCES.md', () => {
     const credits = readFileSync(`${DIR}/SOURCES.md`, 'utf8');
     for (const s of skills) for (const src of s.sources) expect(credits, `${s.id} ${src}`).toContain(src.split(' ')[0]);

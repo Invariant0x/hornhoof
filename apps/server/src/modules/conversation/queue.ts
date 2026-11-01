@@ -1,5 +1,5 @@
 import { effortFor, effortsOf, modelsFor, type Limits } from '@hornhoof/protocol';
-import { and, asc, count, desc, eq, inArray, isNotNull, isNull, or } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray, isNotNull, isNull, ne, or } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
@@ -231,6 +231,28 @@ function outdated(sub: { kind: string; nodeVersion: string | null }, need = CONV
   return false;
 }
 
+const ALONG = 'Several of your tasks moved while you were busy. Go through each of them in this turn:';
+
+/* The other task turns waiting for the agent, oldest first. */
+function alongWith(ctx: Ctx, agentId: string, jobId: string) {
+  return ctx.db
+    .select({ id: jobs.id, prompt: jobs.prompt })
+    .from(jobs)
+    .where(and(conversationOf(agentId), eq(jobs.status, 'queued'), isNotNull(jobs.taskId), ne(jobs.id, jobId)))
+    .orderBy(asc(jobs.createdAt));
+}
+
+/* A waiting turn that went out inside another: over, with its task taken up as its own turn would have. */
+async function goneAlong(ctx: Ctx, jobId: string): Promise<void> {
+  const at = new Date();
+  const [gone] = await ctx.db
+    .update(jobs)
+    .set({ status: 'done', result: 'Went out with the turn before it.', startedAt: at, finishedAt: at })
+    .where(and(eq(jobs.id, jobId), eq(jobs.status, 'queued')))
+    .returning({ id: jobs.id });
+  if (gone) await startWork(ctx, jobId);
+}
+
 async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   const { db, hub } = ctx;
   const [running] = await db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
@@ -252,6 +274,9 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   if (!job) return;
   const repo = await repoFor(ctx, agent);
   if (repo && outdated(sub, REPOSITORY_NODE)) return;
+  /* A head reads everything that moved on its tasks while it was busy in one turn, instead of one turn per task. */
+  const along = agent.kind === 'head' && job.taskId ? await alongWith(ctx, agentId, job.id) : [];
+  const asked = along.length ? [ALONG, job.prompt, ...along.map(j => j.prompt)].join('\n\n---\n\n') : job.prompt;
 
   const instructions = await instructionsOf(ctx, agent);
   /* The program's flag only for a model this subscription can run; anything else runs on its Default. */
@@ -262,7 +287,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   /* The hash covers the model too, so a new model starts a fresh session like new instructions do. */
   const runHash = model ? textHash(`${instructions.hash}:${model}`) : instructions.hash;
   const { sessionId, catchUp } = await sessionFor(ctx, agent, sub.id, runHash);
-  const said = repo ? `${job.prompt}\n\n${repoLine(repo)}` : job.prompt;
+  const said = repo ? `${asked}\n\n${repoLine(repo)}` : asked;
   /* A turn that types nothing only starts the program, for a person to talk to it: what was said before and where the
      repository is go with its instructions instead. */
   const prompt = !job.prompt ? '' : catchUp ? `${catchUp}\n\n${said}` : said;
@@ -293,6 +318,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   });
   if (sent) {
     if (job.taskId) await startWork(ctx, job.id);
+    for (const j of along) await goneAlong(ctx, j.id);
     return;
   }
   await db.update(jobs).set({ status: 'queued', startedAt: null, prompt: job.prompt, toolTokenHash: null, instructionsHash: null }).where(eq(jobs.id, job.id));
