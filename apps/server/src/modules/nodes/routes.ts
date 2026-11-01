@@ -74,7 +74,11 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
       if (used.length === 0) throw codeUsed();
 
       /* A command made for one machine puts its plan there as well as on the machines it has. Any other takes only plans
-         that wait for a machine, so one that joined elsewhere keeps its machines and nothing else. */
+         that wait for a machine, so one that joined elsewhere keeps its machines and nothing else. Two commands for one
+         plan that join at once take turns here, so the second sees the first one's node. */
+      if (code.subscriptionIds.length) {
+        await tx.select({ id: subscriptions.id }).from(subscriptions).where(inArray(subscriptions.id, code.subscriptionIds)).orderBy(asc(subscriptions.id)).for('update');
+      }
       const subs = await tx
         .select({ id: subscriptions.id, provider: subscriptions.provider })
         .from(subscriptions)

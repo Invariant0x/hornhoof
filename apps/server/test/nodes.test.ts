@@ -96,6 +96,14 @@ describe('POST /api/nodes/join', () => {
     expect(late.statusCode).toBe(410);
     expect(late.json().error.reason).toBe('code_used');
   });
+
+  it('puts a plan on one machine only when two commands for it join at once', async () => {
+    const { app, db, ceo, code, ids } = await connected(['claude']);
+    const extra = codeOf((await app.inject({ method: 'POST', url: `/api/subscriptions/${ids[0]}/command`, ...as(ceo) })).json().command);
+    const both = await Promise.all([join(app, code), join(app, extra, { machineId: 'other-machine-01', hostname: 'ivan-laptop' })]);
+    expect(both.map(r => r.statusCode).sort()).toEqual([200, 410]);
+    expect(await db.select().from(nodes).where(eq(nodes.subscriptionId, ids[0]!))).toHaveLength(1);
+  });
 });
 
 describe('a machine without a plan', () => {
