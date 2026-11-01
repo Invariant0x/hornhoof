@@ -92,13 +92,19 @@ export function AgentCard({ me, agentId, onClose, onTerminal }: Props) {
     };
   }, [base]);
 
-  async function save(run: () => Promise<AgentCardView>) {
+  /* sent: the prompt edits a save carries. Only those clear once it is saved; what the person typed meanwhile stays. */
+  async function save(run: () => Promise<AgentCardView>, sent?: { drafts: Record<string, string>; raw: string | null }) {
     setFailure(null);
     setSaved(false);
     try {
       setCard(await run());
-      setDrafts({});
-      setRawDraft(null);
+      if (sent) {
+        setDrafts(now => Object.fromEntries(Object.entries(now).filter(([key, text]) => sent.drafts[key] !== text)));
+        setRawDraft(now => (now === sent.raw ? null : now));
+      } else {
+        setDrafts({});
+        setRawDraft(null);
+      }
       setBroken(false);
       setSaved(true);
     } catch (err) {
@@ -130,7 +136,7 @@ export function AgentCard({ me, agentId, onClose, onTerminal }: Props) {
       setRawDraft(null);
       return;
     }
-    void change(body);
+    void save(() => api.patch<AgentCardView>(base, body), { drafts, raw: rawDraft });
   }
 
   async function remove() {

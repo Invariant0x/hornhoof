@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
@@ -49,6 +49,42 @@ describe('AgentCard', () => {
     fireEvent.change(raw, { target: { value: CARD.raw.replace('Write the test first.', 'Write it first.') } });
     await user.click(screen.getByRole('button', { name: 'Save' }));
     await vi.waitFor(() => expect(calls.find(c => c.method === 'PATCH')?.body).toEqual({ skillText: { 'dev-tdd': 'Write it first.' } }));
+  });
+
+  it('keeps what the person typed after Save while the prompt was being saved', async () => {
+    const user = userEvent.setup();
+    let answer = () => {};
+    const saved = { ...CARD, parts: CARD.parts.map(p => (p.id === 'dev-tdd' ? { ...p, text: p.text.replace('Write the test first.', 'Write it first.') } : p)) };
+    open({ 'PATCH /api/agents/b1': () => new Promise(resolve => (answer = () => resolve([200, saved]))) });
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Test first' }), { target: { value: 'Write it first.' } });
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Backend engineer' }), { target: { value: 'You build the billing API.' } });
+    await act(async () => {
+      answer();
+      await new Promise(r => setTimeout(r, 50));
+    });
+    expect(screen.getByRole('textbox', { name: 'Test first' })).toHaveValue('Write it first.');
+    expect(screen.getByRole('textbox', { name: 'Backend engineer' })).toHaveValue('You build the billing API.');
+    expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
+  });
+
+  it('keeps a raw text changed after Save while the prompt was being saved', async () => {
+    const user = userEvent.setup();
+    let answer = () => {};
+    const first = CARD.raw.replace('Write the test first.', 'Write it first.');
+    const saved = { ...CARD, raw: first, parts: CARD.parts.map(p => (p.id === 'dev-tdd' ? { ...p, text: p.text.replace('Write the test first.', 'Write it first.') } : p)) };
+    open({ 'PATCH /api/agents/b1': () => new Promise(resolve => (answer = () => resolve([200, saved]))) });
+    await user.click(await screen.findByRole('button', { name: 'Raw' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Raw' }), { target: { value: first } });
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    const second = first.replace('You build the API.', 'You build the billing API.');
+    fireEvent.change(screen.getByRole('textbox', { name: 'Raw' }), { target: { value: second } });
+    await act(async () => {
+      answer();
+      await new Promise(r => setTimeout(r, 50));
+    });
+    expect(screen.getByRole('textbox', { name: 'Raw' })).toHaveValue(second);
+    expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
   });
 
   it('refuses a raw edit that breaks the skill markers', async () => {
