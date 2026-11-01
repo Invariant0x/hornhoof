@@ -41,6 +41,32 @@ describe('Setup', () => {
     expect(screen.getByRole('heading', { name: 'Create your account' })).toBeInTheDocument();
   });
 
+  it('offers the company templates with their schemes and starts empty by default', async () => {
+    render(<Setup onDone={() => {}} />);
+    expect(screen.getByRole('radio', { name: /Start empty/ })).toBeChecked();
+    /* The eight ready-made companies, each with a mini department scheme. */
+    expect(screen.getAllByRole('radio', { name: /Project team|Startup|Studio with products|Full company|Cybersecurity company|Open-source project|Agency|Research lab/ })).toHaveLength(8);
+    expect(screen.getAllByRole('img', { name: 'Department scheme' })).toHaveLength(8);
+  });
+
+  it('sends the chosen company template with the company', async () => {
+    const calls = mockApi({ 'POST /api/setup': [201, CREATED] });
+    const user = userEvent.setup();
+    render(<Setup onDone={() => {}} />);
+    await user.type(screen.getByLabelText('Company name'), 'Acme');
+    await user.click(screen.getByRole('radio', { name: /Studio with products/ }));
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    await user.type(screen.getByLabelText('Your name'), 'Ivan');
+    await user.type(screen.getByLabelText('Email'), 'ivan@acme.com');
+    await user.type(screen.getByLabelText('Password'), 'correct horse battery');
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    await user.click(screen.getByRole('radio', { name: 'API key' }));
+    await user.selectOptions(screen.getByLabelText('Provider'), 'Anthropic');
+    await user.type(screen.getByLabelText('Key'), 'sk-ant-xyz12345');
+    await user.click(screen.getByRole('button', { name: 'Finish setup' }));
+    expect(posted(calls)[0]!.body).toMatchObject({ companyName: 'Acme', template: 'studio' });
+  });
+
   it('sends the API key choice and finishes', async () => {
     const calls = mockApi({ 'POST /api/setup': [201, CREATED] });
     const onDone = vi.fn();

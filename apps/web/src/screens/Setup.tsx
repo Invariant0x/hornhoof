@@ -5,6 +5,7 @@ import { errorText, useT } from '../i18n';
 import { PLAN_PROVIDERS, PROVIDER_NAMES, type PlanProvider } from '../providers';
 import { Card } from '../ui/Card';
 import { CommandBox } from '../ui/CommandBox';
+import { CompanyTemplates, type Pick } from '../ui/CompanyTemplates';
 import { Field } from '../ui/Field';
 import { blocks, LinkName, type NameCheck, type NameState } from '../ui/LinkName';
 
@@ -28,6 +29,8 @@ export function Setup({ onDone, linkDomain = 'hornhoof.org' }: { onDone: (done: 
   const [code, setCode] = useState(linkCode);
   const [askCode, setAskCode] = useState(() => !linkCode());
   const [companyName, setCompanyName] = useState('');
+  /* The ready-made company the CEO starts from, or "empty" to let the orchestrator build it. */
+  const [template, setTemplate] = useState<Pick>('empty');
   /* The public link: on unless the person turns it off, named after the company until they write a name themselves. */
   const [linkOn, setLinkOn] = useState(true);
   const [linkName, setLinkName] = useState('');
@@ -88,6 +91,7 @@ export function Setup({ onDone, linkDomain = 'hornhoof.org' }: { onDone: (done: 
         title: title.trim(),
         orchestrator,
         ...(linkOn ? { link: { name: linkName } } : {}),
+        ...(template === 'empty' ? {} : { template }),
       });
       if (res.command) setCommand(res.command);
       else onDone({ welcome: true });
@@ -141,6 +145,7 @@ export function Setup({ onDone, linkDomain = 'hornhoof.org' }: { onDone: (done: 
           <Field label={t.setup.companyName}>
             {p => <input {...p} value={companyName} onChange={e => nameCompany(e.target.value)} maxLength={80} autoFocus autoComplete="organization" />}
           </Field>
+          <CompanyTemplates value={template} onPick={setTemplate} />
           <label className="check">
             <input type="checkbox" checked={linkOn} onChange={e => setLinkOn(e.target.checked)} aria-labelledby={`${uid}-link`} aria-describedby={`${uid}-link-hint`} />
             <span>

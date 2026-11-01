@@ -166,6 +166,25 @@ button, input, select { font: inherit; color: inherit; }
 .card label.check span { display: grid; gap: 2px; }
 .card label.check b { font-weight: 600; }
 .card label.check small { font-size: 12px; color: var(--muted); }
+/* The company templates on the first screen: a grid of cards, each with a mini department scheme drawn as an SVG. */
+.templates-pick { border: 0; margin: 0; padding: 0; display: grid; gap: 8px; }
+.templates-pick legend { padding: 0; font-weight: 600; }
+.templates-pick > .muted { margin: 0; font-size: 12px; }
+.template-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.template-card { position: relative; display: grid; gap: 8px; padding: 10px; border: 1px solid var(--line2); border-radius: 8px; background: var(--surface); cursor: pointer; }
+.template-card.on { border-color: var(--cyan-ink); box-shadow: 0 0 0 1px var(--cyan-ink); }
+.template-card input { position: absolute; top: 8px; right: 8px; width: 15px; height: 15px; accent-color: var(--cyan-ink); }
+.template-card.empty { align-content: center; min-height: 84px; }
+.template-body { display: grid; gap: 3px; }
+.template-body b { font-weight: 600; }
+.template-body small { font-size: 12px; color: var(--muted); }
+.template-people { font-size: 11px; color: var(--cyan-ink); }
+.scheme { width: 100%; height: auto; max-height: 72px; }
+.scheme-root { fill: var(--cyan-ink); }
+.scheme-line { stroke: var(--line2); stroke-width: 1.5; }
+.scheme-dept { fill: var(--surface2); stroke: var(--line2); stroke-width: 1; }
+.scheme-prod { fill: var(--surface); stroke: var(--line2); stroke-width: 1; }
+.scheme-code { fill: var(--muted); font-size: 10px; font-weight: 600; text-anchor: middle; dominant-baseline: central; font-family: var(--f-mono); }
 /* A public link's name, with what its address ends in after it. */
 .link-name > .btn { justify-self: start; }
 .link-input { display: flex; align-items: stretch; }
