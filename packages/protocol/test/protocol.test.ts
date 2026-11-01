@@ -52,6 +52,11 @@ describe('server messages', () => {
     expect(parseServerMessage('null')).toBeNull();
   });
 
+  it('give null for a timeout longer than a timer can wait, which would end the job at once', () => {
+    expect(parseServerMessage(JSON.stringify({ ...SERVER[0], timeoutMs: 2 ** 31 }))).toBeNull();
+    expect(parseServerMessage(JSON.stringify({ ...SERVER[0], timeoutMs: 2 ** 31 - 1 }))).not.toBeNull();
+  });
+
   it('give null for ids that could leave the node folder, since the node puts them in paths', () => {
     for (const id of ['../../etc', 'a/b', '', 'x'.repeat(65)]) {
       expect(parseServerMessage(JSON.stringify({ ...SERVER[0], jobId: id }))).toBeNull();
