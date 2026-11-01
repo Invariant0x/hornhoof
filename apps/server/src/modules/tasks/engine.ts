@@ -701,11 +701,13 @@ export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answ
     if (!request) throw refuse(409, 'request_closed', 'This request is answered already.');
     await note(tx, task, { kind: 'answered', actor, text: said, data: { requestId, kind: found.kind, status } });
     const [left] = await tx.select({ n: count() }).from(requests).where(and(eq(requests.taskId, task.id), eq(requests.status, 'open')));
-    if (task.status === 'waiting' && !Number(left?.n ?? 0)) {
+    /* As the task is now, not as it was read before: one closed meanwhile stays closed. */
+    const [current] = await tx.select({ status: tasks.status, stage: tasks.stage }).from(tasks).where(eq(tasks.id, task.id)).for('update');
+    if (current?.status === 'waiting' && !Number(left?.n ?? 0)) {
       await tx
         .update(tasks)
-        .set({ status: task.stage > 0 ? 'review' : 'working', silent: 0, version: sql`${tasks.version} + 1`, updatedAt: new Date() })
-        .where(eq(tasks.id, task.id));
+        .set({ status: current.stage > 0 ? 'review' : 'working', silent: 0, version: sql`${tasks.version} + 1`, updatedAt: new Date() })
+        .where(and(eq(tasks.id, task.id), eq(tasks.status, 'waiting')));
     }
     return request;
   });

@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { agents, companies, departments, people, requests, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
 import { answer, ask, blocked, cancel, comment, createTask, report, submit, updateTask, verdict } from '../src/modules/tasks/engine.js';
 import { setUpCompany, testApp } from './helpers.js';
@@ -147,6 +147,21 @@ describe('the task engine', () => {
     expect(await reason(answer(ctx, CEO, approval.request.id, { answer: 'yes' }))).toBe('task_invalid');
     expect((await answer(ctx, CEO, approval.request.id, { approve: true })).request.status).toBe('approved');
     expect(await reason(answer(ctx, CEO, approval.request.id, { approve: false }))).toBe('request_closed');
+  });
+
+  it('leaves a task that closed while a person answered it closed', async () => {
+    const { ctx, db, CEO, bruno, memberTask, read } = await company();
+    const task = await memberTask();
+    const asked = await ask(ctx, bruno.id, task.id, { kind: 'question', text: 'Which currency?' });
+    /* The task is cancelled after the answer read it and before the answer is written. */
+    const begin = db.transaction.bind(db);
+    vi.spyOn(db, 'transaction').mockImplementationOnce(async (fn, config) => {
+      await db.update(tasks).set({ status: 'cancelled', closedAt: new Date(), assigneeAgentId: null }).where(eq(tasks.id, task.id));
+      return begin(fn, config);
+    });
+    const answered = await answer(ctx, CEO, asked.request.id, { answer: 'EUR' });
+    expect((await read(task.id)).status).toBe('cancelled');
+    expect(answered.wakes).toEqual([]);
   });
 
   it("wakes the assignee for a person's comment but nobody for an agent's", async () => {
