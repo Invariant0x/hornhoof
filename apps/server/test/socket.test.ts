@@ -120,6 +120,22 @@ describe('node socket', () => {
     node.close();
   });
 
+  it('confirms each finished job it hears of, again when the node sends it again, and takes only the first', async () => {
+    const { db, url, subId, key } = await liveCompany();
+    const [company] = await db.select({ companyId: subscriptions.companyId }).from(subscriptions).where(eq(subscriptions.id, subId));
+    const [job] = await db.insert(jobs).values({ companyId: company!.companyId, subscriptionId: subId, prompt: 'x', status: 'running', timeoutMs: 1000 }).returning();
+    const node = await connectNode(url, key);
+    node.send(hello([job!.id]));
+    const done = { type: 'job.done' as const, jobId: job!.id, ok: true, sessionId: 's', tail: '', error: null };
+    node.send({ ...done, result: 'first' });
+    await until(() => node.acks.length === 1);
+    node.send({ ...done, result: 'again' });
+    await until(() => node.acks.length === 2);
+    expect(node.acks).toEqual([job!.id, job!.id]);
+    expect((await db.select().from(jobs).where(eq(jobs.id, job!.id)))[0]).toMatchObject({ status: 'done', result: 'first' });
+    node.close();
+  });
+
   it('closes the socket with 4001 when the machine is disconnected in Hornhoof', async () => {
     const { app, db, url, ceo, machineId, subId, key } = await liveCompany();
     const [company] = await db.select({ companyId: subscriptions.companyId }).from(subscriptions).where(eq(subscriptions.id, subId));

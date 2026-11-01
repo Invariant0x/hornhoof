@@ -236,6 +236,8 @@ const ServerMessage = z.discriminatedUnion('type', [
     workspace: Workspace.nullable().optional(),
   }),
   z.object({ type: z.literal('job.cancel'), jobId: Id }),
+  /* Hornhoof has the job's end: the node stops sending it again after each reconnect. */
+  z.object({ type: z.literal('job.ack'), jobId: Id }),
   z.object({ type: z.literal('remove') }),
   /* write: the person may type; anyone else watches. agentKey: the agent's folder and session on the node. */
   z.object({ type: z.literal('term.open'), termId: TermId, agentKey: Id, cols: Cols, rows: Rows, write: z.boolean() }),

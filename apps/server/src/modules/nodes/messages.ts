@@ -122,6 +122,8 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
         if (held) await db.update(subscriptions).set({ limits: held }).where(eq(subscriptions.id, id.subscriptionId));
       }
       if (finished.length) await afterJob(ctx, msg.jobId);
+      /* The node keeps the end until it hears this, and sends it again after a reconnect; a second one changes nothing. */
+      ctx.hub.send(id, { type: 'job.ack', jobId: msg.jobId });
       return;
     }
     case 'turn.open': {

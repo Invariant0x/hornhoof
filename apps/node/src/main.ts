@@ -26,6 +26,8 @@ const LEARN_MS = 60_000;
 const LIMITS_MS = 5 * 60_000;
 /* How long a removal waits for called-off jobs to stop before it deletes their folders. */
 const STOP_WAIT_MS = 5_000;
+/* How many unconfirmed job ends a node keeps for a server that does not confirm them. */
+const MAX_UNCONFIRMED = 50;
 
 type JobRun = Extract<ServerMessage, { type: 'job.run' }>;
 
@@ -76,13 +78,21 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
   const running = new Map<string, { stop: AbortController; done: Promise<void> }>();
   /* Messages that could not be sent while offline. They go out right after the next hello. */
   const outbox: NodeMessage[] = [];
+  /* Ends of jobs Hornhoof has not confirmed: a socket can drop with one on its way. They count as running and go again
+     after each hello. A server that never confirms keeps only the last few. */
+  const unconfirmed = new Map<string, NodeMessage>();
   let send: ((m: NodeMessage) => boolean) | null = null;
   let loggedIn = single ? await single.loggedIn() : true;
   let limits: Limits | null = null;
   let stopped = false;
 
   const emit = (m: NodeMessage) => {
-    if (!send?.(m)) outbox.push(m);
+    if (m.type === 'job.done') keep(m.jobId, m);
+    if (!send?.(m) && m.type !== 'job.done') outbox.push(m);
+  };
+  const keep = (jobId: string, m: NodeMessage) => {
+    unconfirmed.set(jobId, m);
+    if (unconfirmed.size > MAX_UNCONFIRMED) unconfirmed.delete(unconfirmed.keys().next().value!);
   };
   /* Values no screen shows: the node's key, the programs' tokens and each turn's tokens. */
   const known = new Set(hidden);
@@ -122,11 +132,11 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
     onOpen(next) {
       send = next;
       host?.closeViews();
-      /* Finished jobs waiting in the outbox still count as running, so the server does not give up on them. */
-      const pending = outbox.flatMap(m => (m.type === 'job.done' ? [m.jobId] : []));
+      /* Finished jobs Hornhoof has not confirmed still count as running, so the server does not give up on them. */
       const typed = host?.typedJobs() ?? [];
-      next({ type: 'hello', version: VERSION, loggedIn, running: [...running.keys(), ...typed, ...pending], ...(models ? { models } : {}), terminals: Boolean(host) });
+      next({ type: 'hello', version: VERSION, loggedIn, running: [...running.keys(), ...typed, ...unconfirmed.keys()], ...(models ? { models } : {}), terminals: Boolean(host) });
       for (const m of outbox.splice(0)) emit(m);
+      for (const m of unconfirmed.values()) next(m);
     },
     onMessage: m => void handle(m),
     onRefused: () => log('Hornhoof does not know this machine any more. Run the install command from Hornhoof again to reconnect.'),
@@ -149,6 +159,7 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
       stop();
       return;
     }
+    if (m.type === 'job.ack') return void unconfirmed.delete(m.jobId);
     if (m.type === 'job.cancel') {
       running.get(m.jobId)?.stop.abort();
       await host?.cancel(m.jobId);
@@ -201,6 +212,8 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
     } catch (err) {
       done = { type: 'job.done', jobId: m.jobId, ok: false, sessionId: null, result: '', tail: message(err), error: 'agent_failed' };
     }
+    /* The end counts as running from here, so a hello while the limits are read does not give the job up. */
+    keep(m.jobId, done);
     running.delete(m.jobId);
     /* The limits the turn brought go first, so Hornhoof knows of a plan at its limit when it hears the job ended. */
     await status();

@@ -34,7 +34,7 @@ async function fakeServer() {
     while (!check() && Date.now() < end) await new Promise(r => setTimeout(r, 10));
     expect(check()).toBe(true);
   };
-  return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, received, send: (m: object) => socket!.send(JSON.stringify(m)), wait };
+  return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, received, send: (m: object) => socket!.send(JSON.stringify(m)), drop: () => socket!.terminate(), wait };
 }
 
 function nodeDir(server: string) {
@@ -137,6 +137,29 @@ describe('runNode', () => {
     expect(server.received.map(m => m.type)).toEqual(['hello', 'job.started', 'status', 'job.done']);
     expect(server.received[2]).toMatchObject({ loggedIn: true, limits: { status: 'allowed', windows: [] } });
     expect(server.received[3]).toMatchObject({ jobId: 'j1', ok: true, result: 'ready', sessionId: 'sess-9' });
+  });
+
+  it('sends a finished job again after the connection drops before Hornhoof confirms it, and stops once Hornhoof does', async () => {
+    const server = await fakeServer();
+    const node = await runNode({ dir: nodeDir(server.url), adapter, log: () => {} });
+    onTestFinished(() => node.stop());
+    const hellos = () => server.received.filter(m => m.type === 'hello');
+    const dones = () => server.received.filter(m => m.type === 'job.done' && m.jobId === 'j1');
+    await server.wait(() => hellos().length === 1);
+    server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
+    await server.wait(() => dones().length === 1);
+    server.drop();
+    await server.wait(() => dones().length === 2, 5000);
+    expect(hellos()[1]).toMatchObject({ running: ['j1'] });
+    expect(dones()[1]).toMatchObject({ ok: true, result: 'ready' });
+
+    server.send({ type: 'job.ack', jobId: 'j1' });
+    await new Promise(r => setTimeout(r, 50));
+    server.drop();
+    await server.wait(() => hellos().length === 3, 5000);
+    await new Promise(r => setTimeout(r, 100));
+    expect(hellos()[2]).toMatchObject({ running: [] });
+    expect(dones()).toHaveLength(2);
   });
 
   it('ends a job even when its program cannot list its models then, and keeps the models it listed before', async () => {

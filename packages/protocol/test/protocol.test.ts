@@ -23,6 +23,7 @@ const SERVER: ServerMessage[] = [
   { type: 'job.run', jobId: 'job-1', subscriptionId: 's1', provider: 'claude', prompt: 'Reply with one word: ready', sessionId: null, model: null, timeoutMs: 120000, secret: null, instructions: null, toolToken: null },
   { type: 'job.run', jobId: 'job-2', subscriptionId: 's2', provider: 'openai_api', prompt: 'hi', sessionId: 'thread', model: 'gpt-5', timeoutMs: 1000, secret: 'sk-test', instructions: 'You are the orchestrator.', toolToken: 'tok' },
   { type: 'job.cancel', jobId: 'job-1' },
+  { type: 'job.ack', jobId: 'job-1' },
   { type: 'remove' },
 ];
 

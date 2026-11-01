@@ -77,7 +77,9 @@ export async function invitePerson(app: FastifyInstance, ceoToken: string, input
 export type FakeNode = {
   ws: WebSocket;
   send(msg: NodeMessage): void;
+  /* The next message other than a confirmation of a finished job, which lands in acks. */
   next(): Promise<ServerMessage>;
+  acks: string[];
   /* Messages that arrived and nobody took yet. */
   queued(): number;
   closed: Promise<number>;
@@ -90,8 +92,10 @@ export function connectNode(url: string, key: string, opts: { autoPong?: boolean
     const ws = new WebSocket(url, { headers: { authorization: `Bearer ${key}` }, autoPong: opts.autoPong ?? true });
     const queue: ServerMessage[] = [];
     const waiters: ((m: ServerMessage) => void)[] = [];
+    const acks: string[] = [];
     ws.on('message', data => {
       const msg = JSON.parse(String(data)) as ServerMessage;
+      if (msg.type === 'job.ack') return void acks.push(msg.jobId);
       const waiter = waiters.shift();
       if (waiter) waiter(msg);
       else queue.push(msg);
@@ -104,6 +108,7 @@ export function connectNode(url: string, key: string, opts: { autoPong?: boolean
         ws,
         send: msg => ws.send(JSON.stringify(msg)),
         next: () => (queue.length ? Promise.resolve(queue.shift()!) : new Promise(done => waiters.push(done))),
+        acks,
         queued: () => queue.length,
         closed,
         close: () => ws.close(),
