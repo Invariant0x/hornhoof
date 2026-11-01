@@ -325,6 +325,14 @@ describe('AgentWindow', () => {
     expect(screen.getByText('Company structure')).toBeInTheDocument();
   });
 
+  it('offers no structure card on a company that already has departments, only a line to connect a subscription', async () => {
+    const withDepts = { ...ORG, departments: [{ id: 'd1', name: null, templateKey: 'home_devices' as const, roleCode: 'HOM', about: '', agents: { total: 0, working: 0 }, products: [], teams: [], people: [], employees: [], roles: [] }] };
+    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, ready: false, reason: 'needs_login' } }] }, withDepts);
+    expect(await screen.findByText('Connect a subscription, and the orchestrator offers employees for these departments.')).toBeInTheDocument();
+    expect(screen.queryByText('Company structure')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Pick departments by hand' })).not.toBeInTheDocument();
+  });
+
   it('talks to an employee by its id', async () => {
     const user = userEvent.setup();
     const stream = fakeStream();

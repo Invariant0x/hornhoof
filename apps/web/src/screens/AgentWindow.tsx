@@ -279,8 +279,13 @@ export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Pro
   const staffDept = staffing && org.departments.find(d => d.id === staffing.department);
   const ready = state?.ready ?? false;
   const existing = org.departments.flatMap(d => (d.templateKey ? [d.templateKey] : []));
-  const byHand = orchestrator && !open && !staffByHand && (manual ?? (state !== null && !ready));
-  const offerByHand = orchestrator && !open && !byHand && !staffByHand && !state?.busy && !state?.queued && (!ready || !org.departments.length);
+  /* The by-hand card builds the structure of a company that has none; a company that already has departments (made
+     from a template, or built earlier) is past that, so it does not offer more departments. */
+  const empty = !org.departments.length;
+  const byHand = orchestrator && !open && !staffByHand && empty && (manual ?? (state !== null && !ready));
+  const offerByHand = orchestrator && !open && !byHand && !staffByHand && !state?.busy && !state?.queued && empty;
+  /* A company that has departments but no orchestrator yet waits for a subscription, so he can staff them. */
+  const needsOrchestrator = orchestrator && !open && !staffByHand && !empty && state !== null && !ready && !state.busy && !state.queued;
   const where = [model || t.agent.default, orchestratorStatus(t, sub), sub?.machine?.hostname].filter(Boolean).join(', ');
   const hasTerminal = Boolean(state?.terminal) && !noTerminal;
   const terminal = hasTerminal && !asLog;
@@ -302,6 +307,7 @@ export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Pro
           {t.window.pickByHand}
         </button>
       )}
+      {needsOrchestrator && <p className="t-why">{t.window.connectForStaff}</p>}
       {failure !== null && (
         <p className="alert" role="alert">
           {errorText(t, failure)}
@@ -309,7 +315,7 @@ export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Pro
       )}
     </>
   );
-  const hasCards = Boolean(pending || staffing || (!open && staffByHand) || byHand || offerByHand || failure !== null);
+  const hasCards = Boolean(pending || staffing || (!open && staffByHand) || byHand || offerByHand || needsOrchestrator || failure !== null);
 
   /* Who wrote a message no person typed: the orchestrator, an employee by its name, or Hornhoof itself. */
   const author = (from: string, name: string) => (from === 'orchestrator' ? t.window.orchestrator : from === 'agent' && name ? name : t.window.hornhoof);

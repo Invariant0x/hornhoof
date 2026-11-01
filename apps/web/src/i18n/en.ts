@@ -286,6 +286,7 @@ export const en = {
       products ? `Created: ${name}, ${products} ${plural('en', products, { one: 'product', other: 'products' })}` : `Created: ${name}`,
     removed: (name: string) => `Removed: ${name}`,
     pickByHand: 'Pick departments by hand',
+    connectForStaff: 'Connect a subscription, and the orchestrator offers employees for these departments.',
     card: 'Card',
     notebook: 'Notebook',
     showLog: 'Log',

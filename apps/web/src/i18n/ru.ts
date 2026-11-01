@@ -274,6 +274,7 @@ export const ru: Messages = {
       products ? `Создан отдел: ${name}, ${products} ${plural('ru', products, { one: 'продукт', few: 'продукта', many: 'продуктов', other: 'продукта' })}` : `Создан отдел: ${name}`,
     removed: name => `Убран отдел: ${name}`,
     pickByHand: 'Выбрать отделы вручную',
+    connectForStaff: 'Подключите подписку, и оркестратор предложит сотрудников для этих отделов.',
     card: 'Карточка',
     notebook: 'Блокнот',
     showLog: 'Журнал',
