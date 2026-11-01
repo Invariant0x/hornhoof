@@ -33,6 +33,8 @@ function fakeAdapter(result: (input: RunInput) => Partial<RunResult> = () => ({}
 }
 
 /* git as the node calls it: what it was asked, and a clone that leaves a .git folder behind. */
+const NOTED = ['config', '--local', '--get', 'hornhoof.username'];
+
 function fakeGit(origin = REPO.url) {
   const calls: { args: string[]; cwd: string; env: NodeJS.ProcessEnv; user: unknown }[] = [];
   const git: Git = async (args, opts) => {
@@ -70,7 +72,8 @@ describe("an agent's folder and its repository", () => {
     const done = await runJob(adapter, job({ workspace: { key: AGENT, repo: REPO } }), dir, { git });
     const folder = join(dir, 'work', 'agents', AGENT);
     expect(done.ok).toBe(true);
-    expect(calls.map(c => c.args)).toEqual([['clone', '--quiet', '--branch', 'release', '--', REPO.url, join(folder, 'shop')]]);
+    /* With no author named, it looks only whether it set one before. */
+    expect(calls.map(c => c.args)).toEqual([['clone', '--quiet', '--branch', 'release', '--', REPO.url, join(folder, 'shop')], NOTED]);
     expect(calls.flatMap(c => c.args).join(' ')).not.toContain(TOKEN);
     expect(calls[0]!.env).toMatchObject({ GIT_ASKPASS: ASKPASS, HH_GIT_PASSWORD: TOKEN, HH_GIT_HOST: 'github.com', GIT_TERMINAL_PROMPT: '0' });
     expect(calls[0]!.env.NODE_KEY).toBeUndefined();
@@ -84,12 +87,13 @@ describe("an agent's folder and its repository", () => {
     await runJob(fakeAdapter(), job({ workspace: { key: AGENT, repo: REPO } }), dir, { git: first.git });
     const again = fakeGit();
     await runJob(fakeAdapter(), job({ jobId: 'job-2', workspace: { key: AGENT, repo: REPO } }), dir, { git: again.git });
-    expect(again.calls.map(c => c.args)).toEqual([['remote', 'get-url', 'origin']]);
+    expect(again.calls.map(c => c.args)).toEqual([['remote', 'get-url', 'origin'], NOTED]);
     const moved = fakeGit('https://github.com/acme/old-shop.git');
     await runJob(fakeAdapter(), job({ jobId: 'job-3', workspace: { key: AGENT, repo: REPO } }), dir, { git: moved.git });
     expect(moved.calls.map(c => c.args)).toEqual([
       ['remote', 'get-url', 'origin'],
       ['remote', 'set-url', 'origin', REPO.url],
+      NOTED,
     ]);
     expect(moved.calls[0]!.cwd).toBe(join(dir, 'work', 'agents', AGENT, 'shop'));
   });
@@ -100,16 +104,39 @@ describe("an agent's folder and its repository", () => {
     const first = fakeGit();
     await runJob(fakeAdapter(), job({ workspace: { key: AGENT, repo: { ...REPO, author } } }), dir, { git: first.git });
     const clone = join(dir, 'work', 'agents', AGENT, 'shop');
-    expect(first.calls.slice(1).map(c => [c.args, c.cwd])).toEqual([
-      [['config', '--', 'user.name', 'Ivan Korol'], clone],
-      [['config', '--', 'user.email', 'ivan@acme.dev'], clone],
-    ]);
+    const sets = [
+      ['config', '--', 'user.name', 'Ivan Korol'],
+      ['config', '--', 'user.email', 'ivan@acme.dev'],
+      ['config', '--', 'hornhoof.username', 'Ivan Korol'],
+      ['config', '--', 'hornhoof.useremail', 'ivan@acme.dev'],
+    ];
+    expect(first.calls.slice(1).map(c => [c.args, c.cwd])).toEqual(sets.map(args => [args, clone]));
     const again = fakeGit();
     await runJob(fakeAdapter(), job({ jobId: 'job-2', workspace: { key: AGENT, repo: { ...REPO, author } } }), dir, { git: again.git });
-    expect(again.calls.map(c => c.args)).toEqual([['remote', 'get-url', 'origin'], ['config', '--', 'user.name', 'Ivan Korol'], ['config', '--', 'user.email', 'ivan@acme.dev']]);
-    const none = fakeGit();
-    await runJob(fakeAdapter(), job({ jobId: 'job-3', workspace: { key: AGENT, repo: { ...REPO, author: null } } }), dir, { git: none.git });
-    expect(none.calls.map(c => c.args)).toEqual([['remote', 'get-url', 'origin']]);
+    expect(again.calls.map(c => c.args)).toEqual([['remote', 'get-url', 'origin'], ...sets]);
+  });
+
+  it('takes away the author it set once Hornhoof names none, and leaves one the clone was given otherwise', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-ws-'));
+    const env = { ...process.env, HOME: dir, GIT_CONFIG_NOSYSTEM: '1' };
+    const git = (args: string[], cwd: string) => spawnSync('git', args, { cwd, env, encoding: 'utf8' });
+    const origin = join(dir, 'shop');
+    mkdirSync(origin);
+    git(['init', '--quiet', '-b', 'main'], origin);
+    git(['-c', 'user.name=Seed', '-c', 'user.email=seed@acme.dev', 'commit', '--quiet', '--allow-empty', '-m', 'Start'], origin);
+    const work = join(dir, 'work');
+    mkdirSync(work);
+    const repo = { url: origin, branch: 'main', token: '', author: { name: 'Ivan Korol', email: 'ivan@acme.dev' } };
+    const owner = { user: null, home: dir };
+    const clone = join(work, 'shop');
+    const local = (key: string) => git(['config', '--local', '--get', key], clone).stdout.trim() || null;
+    await prepareRepo(work, repo, owner);
+    expect([local('user.name'), local('user.email')]).toEqual(['Ivan Korol', 'ivan@acme.dev']);
+    await prepareRepo(work, { ...repo, author: null }, owner);
+    expect([local('user.name'), local('user.email'), local('hornhoof.username')]).toEqual([null, null, null]);
+    git(['config', 'user.name', 'Maria'], clone);
+    await prepareRepo(work, { ...repo, author: null }, owner);
+    expect(local('user.name')).toBe('Maria');
   });
 
   it('leaves out the askpass helper for a public repository without a token', async () => {

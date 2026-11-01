@@ -44,10 +44,22 @@ export async function prepareRepo(workDir: string, repo: Repo, owner: Owner, git
   } else if ((await run(['remote', 'get-url', 'origin'], target)) !== repo.url) {
     await run(['remote', 'set-url', 'origin', repo.url], target);
   }
-  /* Set each turn, so a changed author reaches clones made before. */
+  /* Set each turn, so a changed author reaches clones made before. Hornhoof notes the author it set, so one taken away in
+     Hornhoof leaves the clone too, while one the clone was given otherwise stays. */
+  const AUTHOR = [['user.name', 'hornhoof.username'], ['user.email', 'hornhoof.useremail']] as const;
   if (repo.author) {
-    await run(['config', '--', 'user.name', repo.author.name], target);
-    await run(['config', '--', 'user.email', repo.author.email], target);
+    const values = [repo.author.name, repo.author.email];
+    for (const [i, [key]] of AUTHOR.entries()) await run(['config', '--', key, values[i]!], target);
+    for (const [i, [, note]] of AUTHOR.entries()) await run(['config', '--', note, values[i]!], target);
+  } else {
+    /* Git answers a key that is not set with an error. One read, as the notes go together. */
+    const local = (key: string) => run(['config', '--local', '--get', key], target).catch(() => '');
+    if (!(await local(AUTHOR[0][1]))) return env;
+    for (const [key, note] of AUTHOR) {
+      const noted = await local(note);
+      if (noted && (await local(key)) === noted) await run(['config', '--local', '--unset', key], target);
+      await run(['config', '--local', '--unset', note], target).catch(() => '');
+    }
   }
   return env;
 }
