@@ -83,7 +83,7 @@ describe('tools a skill grants', () => {
     const nudge = await call(client, 'message_employee', { employee: bruno.id, text: 'Task #1 has had no report for an hour. Report or say what blocks you.' });
     expect(nudge.content[0]!.text).toBe("Sent to Bruno.");
     const [turn] = await db.select().from(jobs).where(and(eq(jobs.agentId, bruno.id), inArray(jobs.status, ['queued', 'running'])));
-    expect(turn!.prompt).toBe('Wendy (Reliability engineer): Task #1 has had no report for an hour. Report or say what blocks you.');
+    expect(turn!.prompt).toBe('Wendy (Reliability engineer) wrote:\n\n> Task #1 has had no report for an hour. Report or say what blocks you.');
     const [said] = await db.select().from(agentEvents).where(and(eq(agentEvents.agentId, bruno.id), eq(agentEvents.kind, 'message')));
     expect(said!.data).toMatchObject({ text: 'Task #1 has had no report for an hour. Report or say what blocks you.', from: 'agent', name: 'Wendy' });
     /* The map runs it from Operations to Development. */
@@ -205,7 +205,7 @@ describe('tools a skill grants', () => {
     await db.insert(requests).values([
       { companyId: acme.id, taskId: task.id, agentId: bruno.id, kind: 'stuck', text: 'Ended 3 turns in a row on #1 without moving it.', createdAt: ago(44) },
       { companyId: acme.id, taskId: task.id, agentId: bruno.id, kind: 'question', text: 'Which payment provider?', status: 'answered', answer: 'Stripe', createdAt: ago(120) },
-      { companyId: acme.id, taskId: task.id, agentId: bruno.id, kind: 'approval', text: 'Approve the commit.', createdAt: ago(10) },
+      { companyId: acme.id, taskId: task.id, agentId: bruno.id, kind: 'approval', text: 'Approve the commit.', commit: 'a'.repeat(40), createdAt: ago(10) },
     ]);
     const recent = JSON.parse((await call(await mcp(app), 'failures', { hours: 6 })).content[0]!.text);
     /* The most frequent first, then the newest, with the newest line that said it. */
