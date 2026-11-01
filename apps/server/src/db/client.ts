@@ -21,5 +21,5 @@ export async function createDb(url: string): Promise<Db> {
   const pool = openPool(url, err => console.warn(`Lost a database connection, will open another: ${err.message}`));
   const db = drizzle(pool, { schema });
   await migrate(db, { migrationsFolder: MIGRATIONS });
-  return db as unknown as Db;
+  return db;
 }
