@@ -16,7 +16,7 @@ import { BudgetBody, ConnectBody, SubscriptionBody } from '../subscriptions/rout
 import { UpdateBody } from '../updates/routes.js';
 import { departmentOf, runsTier, servingSubscriptions, skillsFor, spotIn, StaffLine, type HireLine } from './staff.js';
 
-type ToolJob = { companyId: string; agentId: string };
+type ToolJob = { companyId: string; agentId: string; answersCeo: boolean };
 type Call = { method: HTTPMethods; url: string; payload?: unknown };
 type Dept = typeof departments.$inferSelect;
 type Hire = Omit<StaffLine, 'checked'>;
@@ -29,6 +29,27 @@ const UNREAD = /^\/api\/(stream|attachments|auth|invites|setup|nodes)(\/|$)|\/te
 
 const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
 const Id = (what: string) => z.uuid().describe(`The ${what}'s id, from company or view.`);
+
+/* The tools that change people, their access, money or the company's reach. The orchestrator is the CEO's hands, so he
+   uses them only in a turn that answers the CEO, never because an employee, a timer or a task asked. */
+export const CEO_ONLY = new Set([
+  'invite_person',
+  'change_person',
+  'invite_again',
+  'add_api_key',
+  'connect_plans',
+  'plan_command',
+  'set_budget',
+  'move_orchestrator',
+  'remove_subscription',
+  'disconnect_machine',
+  'set_repository',
+  'remove_repository',
+  'set_public_link',
+  'remove_public_link',
+  'update_hornhoof',
+]);
+export const ONLY_CEO = 'Only the CEO can ask for this. Ask the CEO first.';
 
 /* What the CEO can do in Hornhoof's screens, as the orchestrator's tools. Each one calls the same route the screen calls,
    as the company's owner, so it is allowed and refused exactly what the CEO is; Hornhoof records it as the orchestrator's. */
@@ -50,6 +71,7 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
   const register = server.registerTool.bind(server) as (name: string, config: { description: string; inputSchema: z.ZodRawShape }, cb: (a: never) => Promise<ReturnType<typeof say>>) => unknown;
   const tool = <S extends z.ZodRawShape>(name: string, description: string, input: S, call: (a: z.infer<z.ZodObject<S>>) => Call | string | Promise<Call | string>) =>
     register(name, { description, inputSchema: input }, async (a: z.infer<z.ZodObject<S>>) => {
+      if (CEO_ONLY.has(name) && !job.answersCeo) return say(ONLY_CEO, true);
       const made = await call(a);
       return typeof made === 'string' ? say(made, true) : send(made);
     });
@@ -104,7 +126,13 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
       'and timer { minutes, order, forWork? } (null for none): it wakes every so many minutes, 5 to 1440, outside any task, and does what the order says; ' +
       'with forWork true it skips a round while no task is open and nothing failed since the last one.',
     { employee: Id('employee'), ...AgentPatch.shape },
-    ({ employee, ...body }) => ({ method: 'PATCH', url: `/api/agents/${employee}`, payload: body }),
+    ({ employee, ...body }) => {
+      /* A skill that grants tools shows the whole company through the employee, and his own subscription is where his
+         turns and their tokens go: both are the CEO's to ask for. */
+      const grants = Object.entries(body.skills ?? {}).some(([id, on]) => on && (ctx.templates.skills.get(id)?.grants ?? []).length > 0);
+      if (!job.answersCeo && (grants || (employee === job.agentId && body.subscription !== undefined))) return ONLY_CEO;
+      return { method: 'PATCH', url: `/api/agents/${employee}`, payload: body };
+    },
   );
   tool('reset_employee', 'Puts an employee back to its role as the templates have it now: its skills and texts. Its model and subscription stay.', { employee: Id('employee') }, ({ employee }) => ({
     method: 'POST',

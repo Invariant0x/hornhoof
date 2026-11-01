@@ -258,6 +258,9 @@ export const jobs = pgTable(
     kind: text('kind', { enum: JOB_KINDS }).notNull().default('test'),
     /* The job's Hornhoof tools present this token; it works only while the job runs. */
     toolTokenHash: text('tool_token_hash').unique(),
+    /* The turn carries a message of the company's owner, so the tools for people, access, money and the company's reach
+       work in it. A turn an employee, a timer or a task woke does not. */
+    answersCeo: boolean('answers_ceo').notNull().default(false),
     /* The hash of the instructions it ran with; a change starts a fresh session. */
     instructionsHash: text('instructions_hash'),
     createdBy: uuid('created_by').references(() => people.id),

@@ -1,0 +1,1 @@
+ALTER TABLE "jobs" ADD COLUMN "answers_ceo" boolean DEFAULT false NOT NULL;

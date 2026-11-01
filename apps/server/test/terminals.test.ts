@@ -221,6 +221,8 @@ describe('a turn a person typed into the terminal', () => {
     expect(await state(app, ceo)).toMatchObject({ busy: true, runningJobId: opened.jobId });
     const message = (await events(app, ceo)).find((e: { kind: string }) => e.kind === 'message');
     expect(message).toMatchObject({ jobId: opened.jobId, data: { text: 'what do we sell' }, person: { name: expect.any(String) } });
+    /* The CEO typed it, so the tools only the CEO may ask for work in it. */
+    expect((await app.ctx.db.select({ answersCeo: jobs.answersCeo }).from(jobs).where(eq(jobs.id, opened.jobId!)))[0]).toEqual({ answersCeo: true });
 
     const tools = await app.inject({ method: 'POST', url: '/mcp', headers: { authorization: `Bearer ${opened.toolToken}`, accept: 'application/json, text/event-stream', 'content-type': 'application/json' }, payload: { jsonrpc: '2.0', id: 1, method: 'tools/list' } });
     expect(tools.statusCode).toBe(200);

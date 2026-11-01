@@ -20,9 +20,15 @@ export const SECRET: Record<string, string[]> = {
   subscriptions: ['node_key_hash', 'secret_enc'],
   departments: ['repo_token_enc'],
 };
-/* An employee's fields that give it tools or a place: they change only by hiring and on its card, which make the CEO's
-   checks. A head's department is held by a trigger, as a column right cannot tell a head from a worker. */
-const AGENT_FIXED = ['kind', 'role_key', 'skills'];
+/* Who people are and what they reach, and the subscriptions and machines the company runs on: the orchestrator's role
+   reads them, and they change only through the tools the CEO alone may ask for. */
+const READ_ONLY = ['people', 'person_access', 'subscriptions', 'machines'];
+/* An employee's fields that give it tools, a place or the machine its turns and their tokens go to: they change only by
+   hiring and on its card, which make the CEO's checks. A head's department is held by a trigger, as a column right
+   cannot tell a head from a worker. */
+const AGENT_FIXED = ['kind', 'role_key', 'skills', 'subscription_id'];
+/* Where a department's agents push their work, set only with set_repository. */
+const REPOSITORY = ['repo_url', 'repo_branch', 'repo_token_last4', 'repo_author_name', 'repo_author_email'];
 /* What of a turn the orchestrator may change, to close one that hangs. */
 const JOB_STATUS = ['status', 'error', 'finished_at'];
 const WRITES = new Set(['INSERT', 'UPDATE', 'DELETE', 'MERGE']);
@@ -59,18 +65,16 @@ const eachTable = (but: string[], grant: string) => `  FOR t IN SELECT tablename
   END LOOP;`;
 
 /* The orchestrator's role reads and changes the rows of every table but the hidden ones and the secrets, with these
-   exceptions. People and their access only change through the people tools, which make the CEO's checks. An employee
-   is added by hiring, keeps its kind, role and skills but by its card, and a head stays in its department. Of a turn
-   only its status changes, so no token is forged or swapped. */
+   exceptions. People, their access, subscriptions, machines and repositories only change through the tools the CEO alone
+   may ask for, which make the CEO's checks. An employee is added by hiring, keeps its kind, role, skills and
+   subscription but by its card, and a head stays in its department. Of a turn only its status changes, so no token is
+   forged or swapped. */
 export const grantsFor = (name: string) =>
   role(
     name,
-    `${eachTable(['people', 'person_access', 'agents', 'jobs', ...Object.keys(SECRET)], `GRANT SELECT, INSERT, UPDATE, DELETE ON %I TO "${name}"`)}
-${['subscriptions', 'departments']
-  .map(table => `  EXECUTE format('GRANT SELECT (%1$s), INSERT (%1$s), UPDATE (%1$s), DELETE ON ${table} TO "${name}"', ${visible(table)});`)
-  .join('\n')}
-  EXECUTE format('GRANT SELECT (%s) ON people TO "${name}"', ${visible('people')});
-  GRANT SELECT ON person_access TO "${name}";
+    `${eachTable([...READ_ONLY, 'agents', 'jobs', 'departments', ...Object.keys(SECRET)], `GRANT SELECT, INSERT, UPDATE, DELETE ON %I TO "${name}"`)}
+${READ_ONLY.map(table => `  EXECUTE format('GRANT SELECT (%s) ON ${table} TO "${name}"', ${visible(table)});`).join('\n')}
+  EXECUTE format('GRANT SELECT (%1$s), INSERT (%2$s), UPDATE (%2$s), DELETE ON departments TO "${name}"', ${visible('departments')}, ${columns('departments', [...SECRET.departments!, ...REPOSITORY])});
   EXECUTE format('GRANT SELECT (%s), UPDATE (%s) ON agents TO "${name}"', ${visible('agents')}, ${columns('agents', AGENT_FIXED)});
   EXECUTE format('GRANT SELECT (%s), UPDATE (${JOB_STATUS.join(', ')}) ON jobs TO "${name}"', ${visible('jobs')});
   GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO "${name}";

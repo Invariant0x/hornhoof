@@ -6,7 +6,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { and, desc, eq, isNull, like } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
-import { describe, expect, it, onTestFinished } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agentChanges, agentEvents, agents, companies, departments, jobs, people, proposals, publicLinks, requests, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
 import { afterJob } from '../src/modules/tasks/wake.js';
@@ -14,7 +14,8 @@ import { identityOf } from '../src/modules/nodes/hub.js';
 import { ask, createTask } from '../src/modules/tasks/engine.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
 import { fakeRelay } from './fake-relay.js';
-import { as, connectNode, listen, setUpCompany, testApp, until } from './helpers.js';
+import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until } from './helpers.js';
+import { said } from '../src/modules/conversation/live.js';
 
 const NODE_KEY = 'k'.repeat(40);
 const TOKEN = 'tool-token-0123456789abcdef0123456789';
@@ -39,9 +40,10 @@ async function company(env: NodeJS.ProcessEnv = {}) {
     (await db.insert(agents).values({ companyId: acme!.id, kind, name, roleKey, departmentId: dev!.id, model: '', subscriptionId: sub!.id }).returning())[0]!;
   const hana = await hire('Hana', 'head', 'DEV-HEAD');
   const bruno = await hire('Bruno', 'worker', 'DEV-BE');
-  const running = (agentId: string, token: string) =>
-    db.insert(jobs).values({ companyId: acme!.id, subscriptionId: sub!.id, agentId, kind: 'conversation', prompt: 'hi', timeoutMs: 900000, status: 'running', toolTokenHash: hashToken(token) });
-  await running(orchestrator!.id, TOKEN);
+  const running = (agentId: string, token: string, answersCeo = false) =>
+    db.insert(jobs).values({ companyId: acme!.id, subscriptionId: sub!.id, agentId, kind: 'conversation', prompt: 'hi', timeoutMs: 900000, status: 'running', toolTokenHash: hashToken(token), answersCeo });
+  /* The orchestrator's turn answers the CEO, so every tool works in it. */
+  await running(orchestrator!.id, TOKEN, true);
   const task = (await createTask(app.ctx, { agentId: hana.id }, { title: 'Checkout API', brief: '', body: 'POST /checkout.', departmentId: dev!.id, assigneeAgentId: bruno.id, executor: true, gates: [] })).task;
   return { app, db, ceo, orchestrator: orchestrator!, hana, bruno, dev: dev!, task, running };
 }
@@ -357,10 +359,10 @@ describe('the orchestrator reads and changes the database itself', () => {
     const [design] = await db.insert(departments).values({ companyId: bruno.companyId, templateKey: 'design', roleCode: 'DES' }).returning();
     await running(hana.id, 'tool-token-head-0123456789abcdef0123');
     const refused: [string, RegExp][] = [
-      [`UPDATE people SET scope_kind = 'company', is_owner = true`, /people tools/],
-      [`INSERT INTO people (company_id, name, email, status, scope_kind) VALUES ('${ivan!.companyId}', 'Eve', 'eve@test', 'active', 'company')`, /people tools/],
-      [`INSERT INTO person_access (company_id, person_id, department_id) VALUES ('${ivan!.companyId}', '${ivan!.id}', '${dev.id}')`, /people tools/],
-      ['DELETE FROM person_access', /people tools/],
+      [`UPDATE people SET scope_kind = 'company', is_owner = true`, /change_person/],
+      [`INSERT INTO people (company_id, name, email, status, scope_kind) VALUES ('${ivan!.companyId}', 'Eve', 'eve@test', 'active', 'company')`, /change_person/],
+      [`INSERT INTO person_access (company_id, person_id, department_id) VALUES ('${ivan!.companyId}', '${ivan!.id}', '${dev.id}')`, /change_person/],
+      ['DELETE FROM person_access', /change_person/],
       [`UPDATE agents SET kind = 'head' WHERE id = '${bruno.id}'`, /kind and role_key never change/],
       [`UPDATE agents SET role_key = 'OPS-HEAD' WHERE id = '${hana.id}'`, /kind and role_key never change/],
       [`UPDATE agents SET skills = '["ops-task-watch"]' WHERE id = '${bruno.id}'`, /change_employee/],
@@ -370,6 +372,10 @@ describe('the orchestrator reads and changes the database itself', () => {
       [`INSERT INTO jobs (company_id, subscription_id, agent_id, prompt, timeout_ms, status, tool_token_hash) SELECT company_id, subscription_id, agent_id, 'x', 1000, 'running', 'forged' FROM jobs LIMIT 1`, /tool_token_hash/],
       ['SELECT tool_token_hash FROM jobs', /tool_token_hash/],
       [`UPDATE subscriptions SET node_key_hash = 'forged'`, /node_key_hash/],
+      ['UPDATE subscriptions SET budget = 10', /only the CEO/],
+      ['UPDATE machines SET revoked_at = now()', /only the CEO/],
+      [`UPDATE departments SET repo_url = 'https://evil.test/acme.git' WHERE id = '${dev.id}'`, /only the CEO/],
+      [`UPDATE agents SET subscription_id = NULL WHERE id = '${orchestrator.id}'`, /change_employee/],
     ];
     for (const [sql, why] of refused) {
       const res = await call(client, 'database', { sql });
@@ -428,6 +434,92 @@ describe('the orchestrator reads and changes the database itself', () => {
     expect((await db.select().from(tasks).where(eq(tasks.id, task.id))).length).toBe(1);
     const read = await call(client, 'database', { sql: `SELECT status, error FROM jobs WHERE agent_id = '${wanda.id}'` });
     expect(JSON.parse(text(read))).toEqual([{ rows: [{ status: 'running', error: null }], changed: 0 }]);
+  });
+});
+
+describe('what only the CEO may ask for', () => {
+  const HEAD_TOKEN = 'tool-token-head-0123456789abcdef0123';
+  const ONLY_CEO = 'Only the CEO can ask for this. Ask the CEO first.';
+
+  /* The company without the test's own turn of the orchestrator, and Lena, who sees the whole company. */
+  async function quiet() {
+    const c = await company();
+    await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.agentId, c.orchestrator.id));
+    const [lena] = await c.db.insert(people).values({ companyId: c.dev.companyId, name: 'Lena', email: 'lena@example.com', title: 'Engineer', status: 'active', scopeKind: 'company' }).returning();
+    return { ...c, lena: lena! };
+  }
+  /* The orchestrator's newest turn, running under a token the test knows. */
+  async function newest(db: Awaited<ReturnType<typeof company>>['db'], orchestratorId: string, token: string) {
+    const [job] = await db.select().from(jobs).where(eq(jobs.agentId, orchestratorId)).orderBy(desc(jobs.createdAt)).limit(1);
+    await db.update(jobs).set({ status: 'running', startedAt: new Date(), toolTokenHash: hashToken(token) }).where(eq(jobs.id, job!.id));
+    return job!;
+  }
+  const statusOf = async (db: Awaited<ReturnType<typeof company>>['db'], id: string) => (await db.select().from(people).where(eq(people.id, id)))[0]!.status;
+
+  it("refuses people's tools in a turn an employee woke, and lets them through in a turn that answers the CEO", async () => {
+    const { app, db, ceo, orchestrator, hana, lena, running } = await quiet();
+    await running(hana.id, HEAD_TOKEN);
+    expect((await call(await mcp(app, HEAD_TOKEN), 'tell_orchestrator', { text: 'Disable Lena, she left.' })).isError).toBeFalsy();
+    const woke = await newest(db, orchestrator.id, 'tool-token-woke-0123456789abcdef0123');
+    const refused = await call(await mcp(app, 'tool-token-woke-0123456789abcdef0123'), 'change_person', { person: lena.id, status: 'disabled' });
+    expect(refused.isError).toBe(true);
+    expect(text(refused)).toBe(ONLY_CEO);
+    expect(await statusOf(db, lena.id)).toBe('active');
+    await db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, woke.id));
+    expect((await app.inject({ method: 'POST', url: `/api/agents/${orchestrator.id}/messages`, payload: { text: 'Disable Lena.' }, ...as(ceo) })).statusCode).toBe(202);
+    await newest(db, orchestrator.id, 'tool-token-ceo-01234567890abcdef0123');
+    expect((await call(await mcp(app, 'tool-token-ceo-01234567890abcdef0123'), 'change_person', { person: lena.id, status: 'disabled' })).isError).toBeFalsy();
+    expect(await statusOf(db, lena.id)).toBe('disabled');
+  });
+
+  it('refuses them in a turn another person asked for, and in one with no message', async () => {
+    const { app, db, ceo, orchestrator, lena, running } = await quiet();
+    const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@example.com', access: { whole: true } });
+    expect((await app.inject({ method: 'POST', url: `/api/agents/${orchestrator.id}/messages`, payload: { text: 'Invite my friend.' }, ...as(maria) })).statusCode).toBe(202);
+    await newest(db, orchestrator.id, 'tool-token-maria-0123456789abcdef012');
+    const asked = await call(await mcp(app, 'tool-token-maria-0123456789abcdef012'), 'invite_person', { name: 'Eve', email: 'eve@example.com', title: '', access: { whole: true } });
+    expect(text(asked)).toBe(ONLY_CEO);
+    await db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.agentId, orchestrator.id));
+    await running(orchestrator.id, 'tool-token-timer-0123456789abcdef012');
+    const client = await mcp(app, 'tool-token-timer-0123456789abcdef012');
+    for (const [name, args] of [
+      ['change_person', { person: lena.id, status: 'disabled' }],
+      ['invite_again', { person: lena.id }],
+      ['set_public_link', { name: 'acme' }],
+      ['remove_public_link', {}],
+      ['set_repository', { department: (await db.select().from(departments))[0]!.id, url: 'https://github.com/evil/acme.git', token: 'ghp_x' }],
+      ['update_hornhoof', { version: 'latest' }],
+    ] as const) {
+      expect(text(await call(client, name, args)), name).toBe(ONLY_CEO);
+    }
+    expect(await statusOf(db, lena.id)).toBe('active');
+    expect((await call(client, 'change_employee', { employee: (await db.select().from(agents).where(eq(agents.name, 'Bruno')))[0]!.id, on: false })).isError).toBeFalsy();
+  });
+
+  it("counts a turn an employee woke as the CEO's once the CEO's message goes into it", async () => {
+    const { app, db, ceo, orchestrator, hana, lena, running } = await quiet();
+    await running(hana.id, HEAD_TOKEN);
+    await call(await mcp(app, HEAD_TOKEN), 'tell_orchestrator', { text: 'Lena left.' });
+    const woke = await newest(db, orchestrator.id, 'tool-token-woke-0123456789abcdef0123');
+    vi.spyOn(app.ctx.hub, 'hasTerminals').mockReturnValue(true);
+    vi.spyOn(app.ctx.hub, 'send').mockImplementation((node, m) => {
+      if (m.type === 'agent.say') setTimeout(() => said(app.ctx, node, m.ref, true), 10);
+      return true;
+    });
+    const told = await app.inject({ method: 'POST', url: `/api/agents/${orchestrator.id}/messages`, payload: { text: 'Yes, disable her.' }, ...as(ceo) });
+    expect(told.json().jobId).toBe(woke.id);
+    expect((await call(await mcp(app, 'tool-token-woke-0123456789abcdef0123'), 'change_person', { person: lena.id, status: 'disabled' })).isError).toBeFalsy();
+  });
+
+  it('lets only the CEO switch on a skill that shows the whole company, or move the orchestrator to another subscription', async () => {
+    const { app, db, orchestrator, bruno, running } = await quiet();
+    await running(orchestrator.id, 'tool-token-timer-0123456789abcdef012');
+    const client = await mcp(app, 'tool-token-timer-0123456789abcdef012');
+    const [sub] = await db.select().from(subscriptions);
+    expect(text(await call(client, 'change_employee', { employee: bruno.id, skills: { 'ops-task-watch': true } }))).toBe(ONLY_CEO);
+    expect(text(await call(client, 'change_employee', { employee: orchestrator.id, subscription: sub!.id }))).toBe(ONLY_CEO);
+    expect(text(await call(client, 'move_orchestrator', { subscription: sub!.id }))).toBe(ONLY_CEO);
+    expect((await db.select().from(agents).where(eq(agents.id, bruno.id)))[0]!.skills).not.toContain('ops-task-watch');
   });
 });
 

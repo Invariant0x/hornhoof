@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { loggable } from '../../errors.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
-import { agents, jobs, subscriptions, tasks } from '../../db/schema.js';
+import { agents, jobs, people, subscriptions, tasks } from '../../db/schema.js';
 import { dispatchJob } from '../jobs/dispatch.js';
 import { sayLive } from './live.js';
 import { identityOf, sameNode, type NodeIdentity } from '../nodes/hub.js';
@@ -143,6 +143,14 @@ export class NoSubscription extends Error {
   }
 }
 
+/* Whether the person is the company's owner, the CEO, whose words alone open the tools for people, access, money and
+   the company's reach. */
+async function isCeo(ctx: Ctx, personId: string | null | undefined): Promise<boolean> {
+  if (!personId) return false;
+  const [owner] = await ctx.db.select({ id: people.id }).from(people).where(and(eq(people.id, personId), eq(people.isOwner, true)));
+  return Boolean(owner);
+}
+
 /* Stores the turn and, when it carries a person's message, the message under the same job. */
 export async function insertTurn(ctx: Ctx, t: Turn): Promise<string> {
   const sub = await liveSubscription(ctx, t.agentId);
@@ -158,6 +166,7 @@ export async function insertTurn(ctx: Ctx, t: Turn): Promise<string> {
       timeoutMs: TURN_TIMEOUT_MS,
       createdBy: t.createdBy,
       taskId: t.taskId ?? null,
+      answersCeo: await isCeo(ctx, t.message?.personId),
     })
     .returning({ id: jobs.id });
   await showMessage(ctx, t, job!.id);
@@ -171,10 +180,12 @@ async function showMessage(ctx: Ctx, t: Turn, jobId: string): Promise<void> {
   await appendEvent(ctx, { companyId: t.companyId, agentId: t.agentId, jobId, kind: 'message', data, personId });
 }
 
-/* Stores the turn, then sends it if he is free. A message for an agent at work goes into the turn it runs instead. */
+/* Stores the turn, then sends it if he is free. A message for an agent at work goes into the turn it runs instead, and a
+   turn that took the CEO's message answers the CEO from then on. */
 export async function enqueueTurn(ctx: Ctx, t: Turn): Promise<string> {
   const into = t.message && !t.taskId ? await sayLive(ctx, t.agentId, t.prompt) : null;
   if (into) {
+    if (await isCeo(ctx, t.message?.personId)) await ctx.db.update(jobs).set({ answersCeo: true }).where(eq(jobs.id, into));
     await showMessage(ctx, t, into);
     return into;
   }
@@ -220,6 +231,7 @@ export async function openTypedTurn(ctx: Ctx, node: NodeIdentity, agentId: strin
         prompt: text,
         timeoutMs: TURN_TIMEOUT_MS,
         createdBy: personId,
+        answersCeo: await isCeo(ctx, personId),
         toolTokenHash: hashToken(token),
         instructionsHash: last?.hash ?? null,
       })

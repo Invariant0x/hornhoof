@@ -24,6 +24,10 @@ describe('orchestrator instructions', () => {
     expect(ORCHESTRATOR_INSTRUCTIONS).not.toContain('You cannot create, change or remove departments yourself');
   });
 
+  it('takes orders about people, access, the link, subscriptions and machines only from the CEO, and changes people only with their tools', () => {
+    for (const words of ['come only from the CEO', 'ask the CEO', '"invite_person", "change_person" and "invite_again", never "database"']) expect(ORCHESTRATOR_INSTRUCTIONS).toContain(words);
+  });
+
   it('keeps the notebook and reads the company again after his conversation was compacted', () => {
     for (const words of ['"remember"', '"rewrite_note"', '"forget"', 'one fact per note', 'compacted', '"turns"', '"company"', 'timer', 'Task watchdog', 'Weak point collector']) {
       expect(ORCHESTRATOR_INSTRUCTIONS).toContain(words);
