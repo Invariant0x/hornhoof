@@ -6,7 +6,7 @@ import { migrate } from 'drizzle-orm/pglite/migrator';
 import WebSocket from 'ws';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import { onTestFinished } from 'vitest';
-import { buildApp } from '../src/app.js';
+import { buildApp, type Deps } from '../src/app.js';
 import { loadConfig, type Config } from '../src/config.js';
 import { MIGRATIONS, type Db } from '../src/db/client.js';
 import * as schema from '../src/db/schema.js';
@@ -35,7 +35,7 @@ export async function createTestDb(): Promise<Db> {
   return db;
 }
 
-export async function testApp(env: NodeJS.ProcessEnv = {}): Promise<{ app: FastifyInstance; db: Db; config: Config }> {
+export async function testApp(env: NodeJS.ProcessEnv = {}, logger?: Deps['logger']): Promise<{ app: FastifyInstance; db: Db; config: Config }> {
   const { client, db } = await openTestDb();
   let app: FastifyInstance | undefined;
   /* The app closes first, since stopping it can still write to the database. */
@@ -45,7 +45,7 @@ export async function testApp(env: NodeJS.ProcessEnv = {}): Promise<{ app: Fasti
   });
   /* Tests never reach the real registry unless they ask. */
   const config = loadConfig({ HORNHOOF_SECRET: TEST_SECRET, UPDATE_CHECK_MS: '0', ...env });
-  app = await buildApp({ db, config });
+  app = await buildApp({ db, config, logger });
   return { app, db, config };
 }
 
