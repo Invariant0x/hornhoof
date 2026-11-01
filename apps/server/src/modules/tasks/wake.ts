@@ -310,8 +310,9 @@ async function heldTask(ctx: Ctx, agentId: string, taskId: string): Promise<Task
 }
 
 /* After a turn on a task: an agent that went idle holding the task without moving it is reminded, and after
-   SILENT_TURNS such turns a person is asked. A failed turn counts as silent; a turn a person stopped does not count. One
-   that worked until its time ran out, or said in the task how far it got, goes on, up to GOING_ON_TURNS in a row.
+   SILENT_TURNS such turns a person is asked. Only a turn that ran and said nothing counts so: one that broke, worked until
+   its time ran out or said in the task how far it got goes on, up to GOING_ON_TURNS in a row, and one a person stopped
+   does not count.
    Nothing is checked while the agent has another turn waiting on the task, or while the task waits on its subtasks, on the
    tasks it comes after or on people.
    A turn that carried other tasks' turns along is checked on each of those tasks too, and a task the agent holds once,
@@ -353,12 +354,12 @@ async function checkHeld(ctx: Ctx, job: typeof jobs.$inferSelect & { agentId: st
   /* A turn that ended at the plan's limit did not stand still: the agent goes on once the limit starts over. */
   const [sub] = job.subscriptionId ? await db.select({ limits: subscriptions.limits }).from(subscriptions).where(eq(subscriptions.id, job.subscriptionId)) : [];
   if (limitUntil(sub?.limits ?? null)) return wakeAll(ctx, [{ agentId, taskId: task.id, why: 'go_on' }]);
-    /* A turn that worked until its time ran out, or that said in the task how far it got, did not stand still. */
+  /* A turn that broke, worked until its time ran out, or said in the task how far it got did not stand still. */
   const [told] = await db
     .select({ n: count() })
     .from(taskEvents)
     .where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.agentId, agentId), gte(taskEvents.createdAt, job.startedAt), eq(taskEvents.kind, 'comment')));
-  const working = job.error === 'timeout' || Number(told?.n ?? 0) > 0;
+  const working = job.status === 'failed' || Number(told?.n ?? 0) > 0;
   const moved = await (working ? wentOn : silentTurn)(ctx, agentId, task).catch((err: { reason?: string }) => {
     /* Someone moved the task meanwhile: that answers the question. */
     if (err.reason === 'task_changed') return null;

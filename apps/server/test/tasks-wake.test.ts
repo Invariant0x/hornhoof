@@ -368,12 +368,28 @@ describe('waking agents for their tasks', () => {
     expect(await db.select({ kind: requests.kind, status: requests.status }).from(requests)).toEqual([{ kind: 'stuck', status: 'open' }]);
   });
 
-  it('counts a failed turn as silent', async () => {
+  it('does not count a turn that broke as standing still: the agent goes on, and nobody is reminded', async () => {
+    const { ctx, db, bruno, memberTask, turnsOf, finish } = await company();
+    const task = await memberTask();
+    await wakeAll(ctx, [{ agentId: bruno.id, taskId: task.id, why: 'assigned' }]);
+    /* It worked for ten minutes before its program broke. */
+    const longAgo = () => db.update(jobs).set({ error: 'agent_failed', startedAt: new Date(Date.now() - 10 * 60_000) }).where(and(eq(jobs.agentId, bruno.id), eq(jobs.status, 'running')));
+    for (let i = 0; i < SILENT_TURNS + 1; i++) await finish(bruno.id, longAgo, 'failed');
+    expect((await db.select().from(tasks).where(eq(tasks.id, task.id)))[0]).toMatchObject({ status: 'open', silent: 0 });
+    expect(await db.select({ kind: taskEvents.kind }).from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'reminded')))).toEqual([]);
+    expect(await db.select().from(requests)).toEqual([]);
+    const queued = (await turnsOf(bruno.id)).filter(j => j.status === 'queued');
+    expect(queued).toHaveLength(1);
+    expect(queued[0]!.prompt).toContain('Go on with the work from where you left off');
+  });
+
+  it('does not count a turn that broke because its machine started again', async () => {
     const { ctx, db, bruno, memberTask, finish } = await company();
     const task = await memberTask();
     await wakeAll(ctx, [{ agentId: bruno.id, taskId: task.id, why: 'assigned' }]);
-    await finish(bruno.id, async () => {}, 'failed');
-    expect((await db.select().from(tasks).where(eq(tasks.id, task.id)))[0]!.silent).toBe(1);
+    const restarted = () => db.update(jobs).set({ error: 'machine_restarted', startedAt: new Date(Date.now() - 10 * 60_000) }).where(and(eq(jobs.agentId, bruno.id), eq(jobs.status, 'running')));
+    await finish(bruno.id, restarted, 'failed');
+    expect((await db.select().from(tasks).where(eq(tasks.id, task.id)))[0]!.silent).toBe(0);
   });
 
   it('wakes nobody again after a turn that moved the task', async () => {
@@ -569,10 +585,13 @@ describe('a head', () => {
   }
 
   it('comes back to every task that went out in a turn that failed, not only the first', async () => {
-    const { held, together, reminded } = await busyHead();
+    const { db, held, together, reminded } = await busyHead();
     const [payments, refunds] = [await held('Payments'), await held('Refunds')];
     await together([payments.id, refunds.id], { status: 'failed', error: 'machine_restarted' });
-    expect([await reminded(payments.id), await reminded(refunds.id)]).toEqual([1, 1]);
+    /* A turn that broke is no silence: each of them goes on. */
+    const wentOn = async (taskId: string) => (await db.select().from(taskEvents).where(and(eq(taskEvents.taskId, taskId), eq(taskEvents.kind, 'continued')))).length;
+    expect([await wentOn(payments.id), await wentOn(refunds.id)]).toEqual([1, 1]);
+    expect([await reminded(payments.id), await reminded(refunds.id)]).toEqual([0, 0]);
   });
 
   it('reminds it of a task that went out with others and that it left where it was', async () => {
