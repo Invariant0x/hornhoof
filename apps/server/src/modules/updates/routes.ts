@@ -42,9 +42,10 @@ export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
     waiting = null;
   }
 
-  /* The image tag pins the exact build: a version tag moves when that version is built again, a commit's does not. */
+  /* The image tag names the build: a version tag moves when that version is built again, a commit's does not. The
+     digest pins it: the updater installs only the image the app read. */
   function requestFor(build: Build, id: string): UpdateRequest {
-    return { id, version: build.version || build.tag, tag: FULL_SHA.test(build.commit) ? build.commit : build.tag };
+    return { id, version: build.version || build.tag, tag: FULL_SHA.test(build.commit) ? build.commit : build.tag, digest: build.digest };
   }
 
   function send(request: UpdateRequest) {

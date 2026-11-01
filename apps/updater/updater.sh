@@ -4,14 +4,15 @@
 #   updater.sh          watch the control folder for update requests
 #   updater.sh --once   handle the waiting request, if any, then exit
 #
-# The app writes request.json {id, version, tag} into the control folder; this writes status.json {id, version,
-# state, step, log, at} and touches alive. An update saves the database, downloads the build, runs that build's own
-# installer, and waits for the new server to answer with the build's commit. If it does not, the build that ran
-# before goes back, and the database goes back to the saved copy first when the new build added migrations to it,
-# since the old build does not know them. An updater stopped during an update goes on with it when it starts again.
-# The updater holds the Docker socket, so it takes nothing from the request but the tag, which must be a plain image
-# tag, and only runs images of HORNHOOF_IMAGE. It runs on the bash that ships with macOS (3.2) for the tests, and on
-# Alpine's in its image.
+# The app writes request.json {id, version, tag, digest} into the control folder; this writes status.json {id,
+# version, state, step, log, at} and touches alive. An update saves the database, downloads the build by the digest
+# the app read for it, checks that the tag still names that build, runs that build's own installer, and waits for
+# the new server to answer with the build's commit. If it does not, the build that ran before goes back, and the
+# database goes back to the saved copy first when the new build added migrations to it, since the old build does not
+# know them. An updater stopped during an update goes on with it when it starts again. The updater holds the Docker
+# socket, so it takes nothing from the request but the tag, which must be a plain image tag, and the digest, and only
+# runs images of HORNHOOF_IMAGE. It runs on the bash that ships with macOS (3.2) for the tests, and on Alpine's in its
+# image.
 set -euo pipefail
 
 CONTROL="${HORNHOOF_CONTROL_DIR:-/control}"
@@ -28,9 +29,10 @@ STATE=''
 STEP=''
 LOG=''
 WORK=''
-# The update being run: its tag, the build to go back to, the commit the new server answers with, how many
-# migrations the database had before, and the copy of it.
+# The update being run: its tag and the digest of its build, the build to go back to, the commit the new server
+# answers with, how many migrations the database had before, and the copy of it.
 TAG=''
+DIGEST=''
 PREVIOUS=''
 TARGET=''
 BEFORE=''
@@ -73,13 +75,23 @@ plain_tag() {
   [ "${#1}" -le 128 ]
 }
 
+# sha256: and 64 hex digits, the way a registry names one exact build.
+plain_digest() {
+  case "$1" in sha256:*) ;; *) return 1 ;; esac
+  case "${1#sha256:}" in *[!0-9a-f]*) return 1 ;; esac
+  [ "${#1}" -eq 71 ]
+}
+
+image_id() { docker image inspect --format '{{.Id}}' "$1" 2> /dev/null || true; }
+
 # The updater's own note of the update it runs, so an updater that was stopped can go on with it. It lies next to
 # the backups, where the app cannot write.
 note() {
   mkdir -p "$SERVER_DIR/backups"
-  (umask 077 && jq -n --arg id "$ID" --arg version "$VERSION" --arg tag "$TAG" --arg previous "$PREVIOUS" --arg target "$TARGET" \
-    --arg before "$BEFORE" --arg backup "$BACKUP" \
-    '{id: $id, version: $version, tag: $tag, previous: $previous, target: $target, before: $before, backup: $backup}' > "$SERVER_DIR/backups/update.json.new")
+  (umask 077 && jq -n --arg id "$ID" --arg version "$VERSION" --arg tag "$TAG" --arg digest "$DIGEST" --arg previous "$PREVIOUS" \
+    --arg target "$TARGET" --arg before "$BEFORE" --arg backup "$BACKUP" \
+    '{id: $id, version: $version, tag: $tag, digest: $digest, previous: $previous, target: $target, before: $before, backup: $backup}' \
+    > "$SERVER_DIR/backups/update.json.new")
   mv "$SERVER_DIR/backups/update.json.new" "$SERVER_DIR/backups/update.json"
 }
 
@@ -89,11 +101,12 @@ recall() {
   [ -n "$SERVER_DIR" ] && [ -f "$file" ] && [ "$(jq -r '.id // empty' "$file" 2> /dev/null || true)" = "$ID" ] || return 1
   VERSION=$(jq -r '.version' "$file")
   TAG=$(jq -r '.tag' "$file")
+  DIGEST=$(jq -r '.digest' "$file")
   PREVIOUS=$(jq -r '.previous' "$file")
   TARGET=$(jq -r '.target' "$file")
   BEFORE=$(jq -r '.before' "$file")
   BACKUP=$(jq -r '.backup' "$file")
-  plain_tag "$TAG" && plain_tag "$PREVIOUS" || return 1
+  plain_tag "$TAG" && plain_digest "$DIGEST" && plain_tag "$PREVIOUS" || return 1
   case "$BACKUP" in '' | "$SERVER_DIR"/backups/hornhoof-*.sql.gz) ;; *) return 1 ;; esac
 }
 
@@ -149,12 +162,13 @@ restore() {
     -c 'DROP DATABASE IF EXISTS hornhoof WITH (FORCE)' -c 'ALTER DATABASE hornhoof_restore RENAME TO hornhoof' > /dev/null || return 1
 }
 
-# install <tag>: runs the installer and the compose file that come inside that build of the app image.
+# install <tag> [image]: runs the installer and the compose file that come inside that build of the app image, the
+# one the tag names or the image given.
 install() {
-  local tag=$1 cid dir
+  local tag=$1 image=${2:-$IMAGE:$1} cid dir
   dir="$WORK/$tag"
   mkdir -p "$dir"
-  cid=$(docker create "$IMAGE:$tag") || return 1
+  cid=$(docker create "$image") || return 1
   if ! docker cp "$cid:/app/scripts/install.sh" "$dir/install.sh" > /dev/null || ! docker cp "$cid:/app/compose.yaml" "$dir/compose.yaml" > /dev/null; then
     docker rm "$cid" > /dev/null 2>&1 || true
     return 1
@@ -187,7 +201,7 @@ swap_updater() {
 }
 
 update() {
-  local tag=$1
+  local tag=$1 digest=$2
   LOG=''
   if ! plain_tag "$tag"; then
     if [ "${#tag}" -le 128 ]; then
@@ -197,11 +211,16 @@ update() {
     fi
     return 0
   fi
+  plain_digest "$digest" || {
+    stop_with failed "The request does not name the exact build to install, so nothing changed." finished
+    return 0
+  }
   if [ -z "$SERVER_DIR" ] || [ ! -f "$SERVER_DIR/.env" ]; then
     stop_with failed "This Hornhoof was not set up with install.sh server, so it updates by running that command again." finished
     return 0
   fi
   TAG=$tag
+  DIGEST=$digest
   TARGET=''
   BEFORE=''
   BACKUP=''
@@ -220,10 +239,15 @@ update() {
   }
   note
   step pull "Downloading $VERSION."
-  docker pull "$IMAGE:$TAG" > /dev/null || {
+  { docker pull "$IMAGE@$DIGEST" > /dev/null && docker pull "$IMAGE:$TAG" > /dev/null; } || {
     stop_with failed "Could not download $IMAGE:$TAG, so nothing changed."
     return 0
   }
+  # The installer and compose start the build by its tag, so the tag has to name the build the app read.
+  if [ -z "$(image_id "$IMAGE@$DIGEST")" ] || [ "$(image_id "$IMAGE:$TAG")" != "$(image_id "$IMAGE@$DIGEST")" ]; then
+    stop_with failed "$VERSION in the registry is not the build Hornhoof checked, so nothing changed. Check for updates again, then update."
+    return 0
+  fi
   TARGET=$(commit_of "$TAG")
   note
   step install "Installing $VERSION."
@@ -232,7 +256,7 @@ update() {
 
 # The new build goes in and has to answer; otherwise the build from before goes back.
 install_new() {
-  if install "$TAG"; then
+  if install "$TAG" "$IMAGE@$DIGEST"; then
     check_new
   else
     say "The installer of $VERSION failed: $(tail -n 3 "$WORK/install.log" 2> /dev/null | tr '\n' ' ')"
@@ -270,7 +294,7 @@ go_back() {
 }
 
 handle_request() {
-  local id tag done_id
+  local id tag digest done_id
   [ -f "$CONTROL/request.json" ] || return 0
   id=$(jq -r '.id // empty' "$CONTROL/request.json" 2> /dev/null || true)
   case "$id" in '' | *[!A-Za-z0-9-]*) return 0 ;; esac
@@ -279,8 +303,9 @@ handle_request() {
   ID=$id
   VERSION=$(jq -r '.version // empty' "$CONTROL/request.json" | tr -cd 'A-Za-z0-9._ -' | cut -c1-64)
   tag=$(jq -r '.tag // empty' "$CONTROL/request.json")
+  digest=$(jq -r '.digest // empty' "$CONTROL/request.json")
   WORK=$(mktemp -d)
-  update "$tag"
+  update "$tag" "$digest"
   rm -rf "$WORK"
   WORK=''
 }
@@ -301,7 +326,7 @@ interrupted() {
   say "The updater stopped during the update and goes on with it."
   WORK=$(mktemp -d)
   case "$STEP" in
-    backup | pull) update "$TAG" ;;
+    backup | pull) update "$TAG" "$DIGEST" ;;
     install)
       step install "Installing $VERSION."
       install_new

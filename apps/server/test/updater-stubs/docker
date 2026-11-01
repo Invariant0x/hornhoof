@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
 # The host's Docker as the updater sees it. STUB_COMMITS words are "tag=commit": what each build of the app image is.
 # STUB_MIGRATIONS words are "tag=count": the migrations each build applies when it starts. STUB_STATE/migrations holds
-# how many the database has now.
+# how many the database has now. STUB_DIGESTS words are "tag=digest": the build each tag points at in the registry,
+# which also keeps every build by its digest.
 printf 'docker %s\n' "$*" >> "$STUB_LOG"
 commit_of() { for w in ${STUB_COMMITS:-}; do [ "${w%%=*}" = "$1" ] && { printf '%s' "${w#*=}"; return; }; done; }
+digest_of() { for w in ${STUB_DIGESTS:-}; do [ "${w%%=*}" = "$1" ] && { printf '%s' "${w#*=}"; return; }; done; }
+tag_of() { for w in ${STUB_DIGESTS:-}; do [ "${w#*=}" = "$1" ] && { printf '%s' "${w%%=*}"; return; }; done; }
+# An image by digest or by tag: what tag it is a build of, and the id of the build it is.
+ref_tag() { case "$1" in *@*) tag_of "${1#*@}" ;; *) printf '%s' "${1##*:}" ;; esac; }
+ref_id() { case "$1" in *@*) printf 'id-%s' "${1#*@}" ;; *) printf 'id-%s' "$(digest_of "${1##*:}")" ;; esac; }
 case "$1 $2" in
   'compose ps')
     case " $* " in *' db '*) echo dbcid ;; *' app '*) echo appcid ;; esac ;;
@@ -17,14 +23,19 @@ case "$1 $2" in
   'exec -i')
     [ "${STUB_RESTORE:-ok}" = fail ] && { echo 'psql: error: out of disk space' >&2; exit 3; }
     sed -n 's/^-- migrations //p' | tr -d '\n' > "$STUB_STATE/restored" ;;
-  'image inspect') last=${!#}; commit_of "${last##*:}" ;;
+  'image inspect')
+    last=${!#}
+    case "${4:-}" in
+      '{{.Id}}') ref_id "$last" ;;
+      *) commit_of "$(ref_tag "$last")" ;;
+    esac ;;
   'inspect --format') [ "${!#}" = appcid ] && printf '%s\n' "${STUB_RUNNING_COMMIT:-}" ;;
   *)
     case "$1" in
       pull)
         [ "${STUB_PULL:-ok}" = fail ] && { echo "pull access denied" >&2; exit 1; }
         [ "${STUB_STOP_IN:-}" = pull ] && [ ! -f "$STUB_STATE/stopped" ] && { touch "$STUB_STATE/stopped"; kill -9 "$PPID"; } ;;
-      create) echo "cid-${2##*:}" ;;
+      create) echo "cid-$(ref_tag "$2")" ;;
       cp)
         tag=${2%%:*}; tag=${tag#cid-}
         case "$2" in

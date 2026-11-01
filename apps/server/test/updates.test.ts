@@ -1,4 +1,5 @@
 import Fastify, { type FastifyInstance } from 'fastify';
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmdirSync, utimesSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -42,8 +43,12 @@ const ARCH = process.arch === 'arm64' ? 'arm64' : 'amd64';
 const OCI_INDEX = 'application/vnd.oci.image.index.v1+json';
 
 /* A registry that serves an index per tag, a manifest per platform and a config blob with the build's labels. */
-async function fakeRegistry(tags: Record<string, FakeBuild>): Promise<{ base: string; set(tag: string, build: FakeBuild): void; fail(status: number | null): void; calls: string[] }> {
+async function fakeRegistry(
+  tags: Record<string, FakeBuild>,
+): Promise<{ base: string; set(tag: string, build: FakeBuild): void; fail(status: number | null): void; calls: string[]; digests: Record<string, string> }> {
   const calls: string[] = [];
+  /* The digest of each tag's index: the SHA-256 of the bytes the registry sent for it. */
+  const digests: Record<string, string> = {};
   let failing: number | null = null;
   const reg: FastifyInstance = Fastify();
   reg.addHook('onRequest', async (req, reply) => {
@@ -65,13 +70,15 @@ async function fakeRegistry(tags: Record<string, FakeBuild>): Promise<{ base: st
     }
     if (!tags[ref]) return reply.code(404).send({ errors: [{ code: 'MANIFEST_UNKNOWN' }] });
     expect(req.headers.accept).toContain(OCI_INDEX);
-    return reply.type(OCI_INDEX).send({
+    const index = JSON.stringify({
       manifests: [
         { digest: `sha256:m-${ref}-other`, platform: { os: 'linux', architecture: ARCH === 'amd64' ? 'arm64' : 'amd64' } },
         { digest: `sha256:m-${ref}`, platform: { os: 'linux', architecture: ARCH } },
         { digest: `sha256:m-${ref}-att`, platform: { os: 'unknown', architecture: 'unknown' } },
       ],
-    });
+    }, null, 2);
+    digests[ref] = `sha256:${createHash('sha256').update(index).digest('hex')}`;
+    return reply.type(OCI_INDEX).send(index);
   });
   reg.get('/v2/acme/hornhoof/blobs/:digest', async req => {
     const tag = (req.params as { digest: string }).digest.slice('sha256:c-'.length);
@@ -89,6 +96,7 @@ async function fakeRegistry(tags: Record<string, FakeBuild>): Promise<{ base: st
     set: (tag, build) => (tags[tag] = build),
     fail: status => (failing = status),
     calls,
+    digests,
   };
 }
 
@@ -181,7 +189,8 @@ describe('updates', () => {
     await app.inject({ method: 'POST', url: '/api/updates/check', ...as(ceo) });
     const res = await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest' }, ...as(ceo) });
     expect(res.statusCode).toBe(202);
-    expect(request(control)).toEqual({ id: res.json().id, version: '0.4.1', tag: SHA });
+    /* The digest pins the exact build the server read, whatever the tag points at later. */
+    expect(request(control)).toEqual({ id: res.json().id, version: '0.4.1', tag: SHA, digest: registry.digests.latest });
     writeFileSync(join(control, 'status.json'), JSON.stringify({ id: res.json().id, version: '0.4.1', state: 'running', step: 'pull', log: 'Downloading 0.4.1.\n', at: '2026-10-30T01:00:00Z' }));
     const view = (await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json();
     expect(view.updater).toEqual({ present: true, status: expect.objectContaining({ state: 'running', step: 'pull' }), waiting: null });
@@ -216,7 +225,7 @@ describe('updates', () => {
     expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.waiting).toEqual({ version: '0.4.1' });
     await db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, job!.id));
     await publishWorking(app.ctx, acme!.id);
-    await expect.poll(() => request(control)).toEqual({ id: res.json().id, version: '0.4.1', tag: SHA });
+    await expect.poll(() => request(control)).toEqual({ id: res.json().id, version: '0.4.1', tag: SHA, digest: registry.digests.latest });
     expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.waiting).toBeNull();
   });
 

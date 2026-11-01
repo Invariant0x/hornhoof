@@ -1,6 +1,9 @@
+import { createHash } from 'node:crypto';
+
 /* Reads Hornhoof's published builds from the container registry, anonymously, the way docker pull does. */
 
-export type Build = { tag: string; version: string; commit: string; created: string; title: string; migrations: number };
+/* digest is the one docker pull resolves the tag to: the SHA-256 of the manifest the registry sent for it. */
+export type Build = { tag: string; digest: string; version: string; commit: string; created: string; title: string; migrations: number };
 
 export type Registry = { latest(): Promise<Build | null>; versions(): Promise<Build[]> };
 
@@ -54,7 +57,9 @@ export function registry(opts: { image: string; arch: 'amd64' | 'arm64'; fetch?:
   }
 
   async function build(auth: string, tag: string): Promise<Build> {
-    let manifest = (await (await call(`/v2/${path}/manifests/${tag}`, auth, [...INDEX_TYPES, ...MANIFEST_TYPES])).json()) as Manifest;
+    const raw = Buffer.from(await (await call(`/v2/${path}/manifests/${tag}`, auth, [...INDEX_TYPES, ...MANIFEST_TYPES])).arrayBuffer());
+    const digest = `sha256:${createHash('sha256').update(raw).digest('hex')}`;
+    let manifest = JSON.parse(raw.toString('utf8')) as Manifest;
     if (manifest.manifests) {
       const mine = manifest.manifests.find(m => m.platform?.os === 'linux' && m.platform.architecture === opts.arch);
       if (!mine) throw new Error(`The build ${tag} has no ${opts.arch} image.`);
@@ -65,6 +70,7 @@ export function registry(opts: { image: string; arch: 'amd64' | 'arm64'; fetch?:
     const labels = blob.config?.Labels ?? {};
     return {
       tag,
+      digest,
       version: labels['org.opencontainers.image.version'] ?? (SEMVER.test(tag) ? tag : ''),
       commit: labels['org.opencontainers.image.revision'] ?? '',
       created: blob.created ?? '',

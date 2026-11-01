@@ -14,6 +14,10 @@ if (JQ) symlinkSync(JQ, join(TOOLS, 'jq'));
 
 type Stand = { dir: string; control: string; server: string; log: string };
 
+/* The digest of each build as the registry has it now, and what the app asks for: the build it read, by digest. */
+const DIGESTS: Record<string, string> = { '0.4.0': `sha256:${'a'.repeat(64)}`, '0.4.1': `sha256:${'b'.repeat(64)}` };
+const ask = (id: string) => ({ id, version: '0.4.1', tag: '0.4.1', digest: DIGESTS['0.4.1'] });
+
 function stand(env = 'HORNHOOF_SECRET=s\nHORNHOOF_VERSION=0.4.0\n'): Stand {
   const dir = mkdtempSync(join(tmpdir(), 'hh-updater-'));
   const control = join(dir, 'control');
@@ -41,6 +45,7 @@ function runOnce(s: Stand, request: object | null, env: Record<string, string> =
       STUB_STATE: s.dir,
       STUB_COMMITS: '0.4.0=aaa 0.4.1=bbb',
       STUB_MIGRATIONS: '0.4.0=20 0.4.1=20',
+      STUB_DIGESTS: Object.entries(DIGESTS).map(([tag, digest]) => `${tag}=${digest}`).join(' '),
       HORNHOOF_CONTROL_DIR: s.control,
       HORNHOOF_SERVER_DIR: s.server,
       HORNHOOF_IMAGE: 'ghcr.io/invariant0x/hornhoof',
@@ -62,12 +67,16 @@ describe('updater', () => {
 
   it('updates to the asked version after saving the database', () => {
     const s = stand();
-    const r = runOnce(s, { id: 'u1', version: '0.4.1', tag: '0.4.1' });
+    const r = runOnce(s, ask('u1'));
     expect(r.status).toMatchObject({ id: 'u1', version: '0.4.1', state: 'done', step: 'finished' });
     expect(r.status.at).toEqual(expect.any(String));
     const dump = at(r.calls, 'docker exec dbcid pg_dump');
+    const exact = at(r.calls, `docker pull ghcr.io/invariant0x/hornhoof@${DIGESTS['0.4.1']}`);
     const pull = at(r.calls, 'docker pull ghcr.io/invariant0x/hornhoof:0.4.1');
-    const create = at(r.calls, 'docker create ghcr.io/invariant0x/hornhoof:0.4.1');
+    /* The installer that runs with the Docker socket comes from the exact build. */
+    const create = at(r.calls, `docker create ghcr.io/invariant0x/hornhoof@${DIGESTS['0.4.1']}`);
+    expect(exact).toBeGreaterThan(dump);
+    expect(exact).toBeLessThan(create);
     const install = r.calls.findIndex(c => c.startsWith('installer server') && c.includes('HORNHOOF_VERSION=0.4.1 HORNHOOF_FROM_UPDATER=1'));
     expect([dump, pull, create, install].every(i => i >= 0)).toBe(true);
     expect(dump).toBeLessThan(pull);
@@ -88,7 +97,7 @@ describe('updater', () => {
 
   it('rolls back when the new server never answers', () => {
     const s = stand();
-    const r = runOnce(s, { id: 'u2', version: '0.4.1', tag: '0.4.1' }, { STUB_BROKEN: '0.4.1' });
+    const r = runOnce(s, ask('u2'), { STUB_BROKEN: '0.4.1' });
     expect(r.status).toMatchObject({ id: 'u2', state: 'rolled_back', step: 'finished' });
     const installs = r.calls.filter(c => c.startsWith('installer'));
     expect(installs).toHaveLength(2);
@@ -101,7 +110,7 @@ describe('updater', () => {
 
   it('says what to do by hand when neither the new build nor the one before it answers', () => {
     const s = stand();
-    const r = runOnce(s, { id: 'u9', version: '0.4.1', tag: '0.4.1' }, { STUB_BROKEN: '0.4.1 0.4.0' });
+    const r = runOnce(s, ask('u9'), { STUB_BROKEN: '0.4.1 0.4.0' });
     expect(r.status).toMatchObject({ id: 'u9', state: 'failed', step: 'finished' });
     expect(r.calls.filter(c => c.startsWith('installer')).map(c => c.match(/HORNHOOF_VERSION=(\S+)/)![1])).toEqual(['0.4.1', '0.4.0']);
     expect(r.status.log).toMatch(/0\.4\.1 did not answer/);
@@ -111,7 +120,7 @@ describe('updater', () => {
 
   it('puts the database back before the build from before starts on it, when the new build changed it', () => {
     const s = stand();
-    const r = runOnce(s, { id: 'm1', version: '0.4.1', tag: '0.4.1' }, { STUB_BROKEN: '0.4.1', STUB_MIGRATIONS: '0.4.0=20 0.4.1=21' });
+    const r = runOnce(s, ask('m1'), { STUB_BROKEN: '0.4.1', STUB_MIGRATIONS: '0.4.0=20 0.4.1=21' });
     expect(r.status).toMatchObject({ id: 'm1', state: 'rolled_back', step: 'finished' });
     expect(readFileSync(join(s.dir, 'migrations'), 'utf8')).toBe('20');
     const stop = at(r.calls, 'docker compose stop app');
@@ -127,14 +136,14 @@ describe('updater', () => {
 
   it('leaves the database as it is on the way back when the new build did not change it', () => {
     const s = stand();
-    const r = runOnce(s, { id: 'm2', version: '0.4.1', tag: '0.4.1' }, { STUB_BROKEN: '0.4.1' });
+    const r = runOnce(s, ask('m2'), { STUB_BROKEN: '0.4.1' });
     expect(r.status.state).toBe('rolled_back');
     expect(r.calls.some(c => c.startsWith('docker exec -i') || c.includes('hornhoof_restore'))).toBe(false);
   });
 
   it('does not start the build from before on a database it could not put back', () => {
     const s = stand();
-    const r = runOnce(s, { id: 'm3', version: '0.4.1', tag: '0.4.1' }, { STUB_BROKEN: '0.4.1', STUB_MIGRATIONS: '0.4.0=20 0.4.1=21', STUB_RESTORE: 'fail' });
+    const r = runOnce(s, ask('m3'), { STUB_BROKEN: '0.4.1', STUB_MIGRATIONS: '0.4.0=20 0.4.1=21', STUB_RESTORE: 'fail' });
     expect(r.status).toMatchObject({ id: 'm3', state: 'failed', step: 'finished' });
     expect(r.calls.filter(c => c.startsWith('installer'))).toHaveLength(1);
     expect(r.calls.some(c => c.includes('RENAME TO hornhoof'))).toBe(false);
@@ -143,34 +152,52 @@ describe('updater', () => {
 
   it('goes back to the build that ran when .env names none', () => {
     const s = stand('HORNHOOF_SECRET=s\n');
-    const r = runOnce(s, { id: 'u3', version: '0.4.1', tag: '0.4.1' }, { STUB_BROKEN: '0.4.1', STUB_RUNNING_COMMIT: 'aaa', STUB_COMMITS: '0.4.0=aaa 0.4.1=bbb aaa=aaa' });
+    const r = runOnce(s, ask('u3'), { STUB_BROKEN: '0.4.1', STUB_RUNNING_COMMIT: 'aaa', STUB_COMMITS: '0.4.0=aaa 0.4.1=bbb aaa=aaa' });
     expect(r.status.state).toBe('rolled_back');
     expect(r.calls.filter(c => c.startsWith('installer'))[1]).toContain('HORNHOOF_VERSION=aaa');
   });
 
   it('refuses a version that is not a version', () => {
     const s = stand();
-    const r = runOnce(s, { id: 'u4', version: 'x', tag: '1.0;rm -rf /' });
+    const r = runOnce(s, { ...ask('u4'), version: 'x', tag: '1.0;rm -rf /' });
     expect(r.status).toMatchObject({ id: 'u4', state: 'failed' });
     expect(r.calls.filter(c => c.startsWith('docker'))).toEqual([]);
   });
 
+  it('refuses a request that does not name the exact build', () => {
+    const s = stand();
+    for (const [id, digest] of [['d1', undefined], ['d2', 'latest'], ['d3', `sha256:${'b'.repeat(63)};`]] as const) {
+      const r = runOnce(s, { id, version: '0.4.1', tag: '0.4.1', ...(digest ? { digest } : {}) });
+      expect(r.status).toMatchObject({ id, state: 'failed', step: 'finished' });
+      expect(r.status.log).toContain('The request does not name the exact build to install, so nothing changed.');
+    }
+    expect(readFileSync(s.log, 'utf8')).not.toMatch(/^docker /m);
+  });
+
+  it('changes nothing when the version now points at another build than the one Hornhoof read', () => {
+    const s = stand();
+    const r = runOnce(s, ask('d4'), { STUB_DIGESTS: `0.4.0=${DIGESTS['0.4.0']} 0.4.1=sha256:${'c'.repeat(64)}` });
+    expect(r.status).toMatchObject({ id: 'd4', state: 'failed', step: 'pull' });
+    expect(r.status.log).toContain('0.4.1 in the registry is not the build Hornhoof checked, so nothing changed. Check for updates again, then update.');
+    expect(r.calls.some(c => c.startsWith('docker create') || c.startsWith('installer'))).toBe(false);
+  });
+
   it('changes nothing when the new build cannot be downloaded', () => {
     const s = stand();
-    const r = runOnce(s, { id: 'u5', version: '0.4.1', tag: '0.4.1' }, { STUB_PULL: 'fail' });
+    const r = runOnce(s, ask('u5'), { STUB_PULL: 'fail' });
     expect(r.status).toMatchObject({ state: 'failed', step: 'pull' });
     expect(r.calls.some(c => c.startsWith('installer'))).toBe(false);
   });
 
   it('keeps three backups', () => {
     const s = stand();
-    for (const id of ['b1', 'b2', 'b3', 'b4']) expect(runOnce(s, { id, version: '0.4.1', tag: '0.4.1' }).status.state).toBe('done');
+    for (const id of ['b1', 'b2', 'b3', 'b4']) expect(runOnce(s, ask(id)).status.state).toBe('done');
     expect(readdirSync(join(s.server, 'backups'))).toHaveLength(3);
   });
 
   it('runs each request once', () => {
     const s = stand();
-    runOnce(s, { id: 'u6', version: '0.4.1', tag: '0.4.1' });
+    runOnce(s, ask('u6'));
     const again = runOnce(s, null);
     expect(again.calls.filter(c => c.startsWith('installer'))).toHaveLength(1);
     expect(again.status.id).toBe('u6');
@@ -178,7 +205,7 @@ describe('updater', () => {
 
   it('finishes an update it was stopped in while the new build was installing', () => {
     const s = stand();
-    const stopped = runOnce(s, { id: 'r1', version: '0.4.1', tag: '0.4.1' }, { STUB_STOP_IN: '0.4.1' });
+    const stopped = runOnce(s, ask('r1'), { STUB_STOP_IN: '0.4.1' });
     expect(stopped.status).toMatchObject({ id: 'r1', state: 'running', step: 'install' });
     const r = runOnce(s, null);
     expect(r.status).toMatchObject({ id: 'r1', version: '0.4.1', state: 'done', step: 'finished' });
@@ -192,7 +219,7 @@ describe('updater', () => {
 
   it('starts an update it was stopped in over when nothing had changed yet', () => {
     const s = stand();
-    const stopped = runOnce(s, { id: 'r0', version: '0.4.1', tag: '0.4.1' }, { STUB_STOP_IN: 'pull' });
+    const stopped = runOnce(s, ask('r0'), { STUB_STOP_IN: 'pull' });
     expect(stopped.status).toMatchObject({ id: 'r0', state: 'running', step: 'pull' });
     const r = runOnce(s, null);
     expect(r.status).toMatchObject({ id: 'r0', state: 'done', step: 'finished' });
@@ -203,7 +230,7 @@ describe('updater', () => {
   it('goes back, with the saved database, from an update it was stopped in whose build does not answer', () => {
     const s = stand();
     const env = { STUB_BROKEN: '0.4.1', STUB_MIGRATIONS: '0.4.0=20 0.4.1=21' };
-    runOnce(s, { id: 'r2', version: '0.4.1', tag: '0.4.1' }, { ...env, STUB_STOP_IN: '0.4.1' });
+    runOnce(s, ask('r2'), { ...env, STUB_STOP_IN: '0.4.1' });
     const r = runOnce(s, null, env);
     expect(r.status).toMatchObject({ id: 'r2', state: 'rolled_back', step: 'finished' });
     expect(readFileSync(join(s.dir, 'migrations'), 'utf8')).toBe('20');
@@ -213,7 +240,7 @@ describe('updater', () => {
   it('finishes going back when it was stopped on the way back', () => {
     const s = stand();
     const env = { STUB_BROKEN: '0.4.1', STUB_MIGRATIONS: '0.4.0=20 0.4.1=21' };
-    const stopped = runOnce(s, { id: 'r3', version: '0.4.1', tag: '0.4.1' }, { ...env, STUB_STOP_IN: '0.4.0' });
+    const stopped = runOnce(s, ask('r3'), { ...env, STUB_STOP_IN: '0.4.0' });
     expect(stopped.status).toMatchObject({ id: 'r3', state: 'running', step: 'rollback' });
     const r = runOnce(s, null, env);
     expect(r.status).toMatchObject({ id: 'r3', state: 'rolled_back', step: 'finished' });
@@ -234,7 +261,7 @@ describe('updater', () => {
 
   it('refuses to update a Hornhoof that install.sh did not set up', () => {
     const s = stand();
-    const r = runOnce(s, { id: 'u8', version: '0.4.1', tag: '0.4.1' }, { HORNHOOF_SERVER_DIR: '' });
+    const r = runOnce(s, ask('u8'), { HORNHOOF_SERVER_DIR: '' });
     expect(r.status).toMatchObject({ state: 'failed' });
     expect(r.calls.filter(c => c.startsWith('docker'))).toEqual([]);
   });

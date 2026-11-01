@@ -14,8 +14,9 @@ export type UpdaterStatus = {
 
 export type UpdaterView = { present: boolean; status: UpdaterStatus | null; waiting: { version: string } | null };
 
-/* What the app asks the updater for: the image tag to install and the version people see. */
-export type UpdateRequest = { id: string; version: string; tag: string };
+/* What the app asks the updater for: the image tag to install, the digest of the exact build the app read for it, and
+   the version people see. */
+export type UpdateRequest = { id: string; version: string; tag: string; digest: string };
 
 /* The updater touches alive every few seconds; older than this, it is not running. */
 const ALIVE_MS = 30_000;

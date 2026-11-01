@@ -100,7 +100,7 @@ Each agent gets its own clone in its own folder on the node before its first tur
 
 Hornhoof checks for a newer build every 30 minutes. People who see the whole company get a banner when one is out: "Update" moves to it now, "Update when agents finish" waits until no agent is working. Versions in the account menu lists the published builds with the one running now and goes back to an earlier one the same way.
 
-The updater runs next to the server. It saves the database, starts the new build with the installer inside it, and puts the previous build back if the new server does not answer. A server installed before the updater existed gets it when you run the install command once more.
+The updater runs next to the server. It saves the database, downloads exactly the build Hornhoof found and stops if that version has another build in the registry by then, starts it with the installer inside it, and puts the previous build back if the new server does not answer. When the new build had already changed the database, the database goes back to the saved copy too. An updater that restarts in the middle of an update goes on with it. A server installed before the updater existed gets it when you run the install command once more.
 
 ## Development
 
