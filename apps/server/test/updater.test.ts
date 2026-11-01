@@ -97,6 +97,16 @@ describe('updater', () => {
     expect(r.calls.some(c => c.includes('compose up -d --no-build updater'))).toBe(false);
   });
 
+  it('says what to do by hand when neither the new build nor the one before it answers', () => {
+    const s = stand();
+    const r = runOnce(s, { id: 'u9', version: '0.4.1', tag: '0.4.1' }, { STUB_BROKEN: '0.4.1 0.4.0' });
+    expect(r.status).toMatchObject({ id: 'u9', state: 'failed', step: 'finished' });
+    expect(r.calls.filter(c => c.startsWith('installer')).map(c => c.match(/HORNHOOF_VERSION=(\S+)/)![1])).toEqual(['0.4.1', '0.4.0']);
+    expect(r.status.log).toMatch(/0\.4\.1 did not answer/);
+    expect(r.status.log).toContain(`Could not go back to 0.4.0 either. Run install.sh server in ${s.server}, and see docker compose logs app.`);
+    expect(r.calls.some(c => c.includes('compose up -d --no-build updater'))).toBe(false);
+  });
+
   it('goes back to the build that ran when .env names none', () => {
     const s = stand('HORNHOOF_SECRET=s\n');
     const r = runOnce(s, { id: 'u3', version: '0.4.1', tag: '0.4.1' }, { STUB_BROKEN: '0.4.1', STUB_RUNNING_COMMIT: 'aaa', STUB_COMMITS: '0.4.0=aaa 0.4.1=bbb aaa=aaa' });
