@@ -3,11 +3,11 @@ import { closeSync, constants, fstatSync, fsyncSync, linkSync, mkdirSync, openSy
 import { join, resolve } from 'node:path';
 
 export type Phase = 'launch' | 'ready' | 'accept' | 'done';
-export type Finish = 'ready_deadline' | 'ready_signed_out' | 'ready_pane_dead' | 'ready_query_failed' | 'ready_unknown' | 'accept_deadline' | 'wire_completed' | 'wire_failed' | 'pane_dead' | 'pane_query_failed' | 'pane_unknown' | 'cancelled' | 'start_only' | 'superseded' | 'host_exception' | 'runner_exception' | 'runner_result';
+export type Finish = 'ready_deadline' | 'ready_signed_out' | 'ready_pane_dead' | 'ready_query_failed' | 'ready_unknown' | 'accept_deadline' | 'wire_completed' | 'hook_completed' | 'done_completed' | 'wire_failed' | 'pane_dead' | 'pane_query_failed' | 'pane_unknown' | 'cancelled' | 'start_only' | 'superseded' | 'host_exception' | 'runner_exception' | 'runner_result';
 export type WaitResult = 'matched' | 'deadline' | 'signed_out' | 'pane_dead' | 'query_failed' | 'unknown' | 'accepted' | 'ended' | 'aborted' | 'completed' | 'failed';
 export type Ack = 'hook' | 'wire.turn.prompt' | 'rollout.task_started' | 'ended' | 'aborted' | 'pane_dead' | 'query_failed' | 'unknown';
 export type PaneObservation = { queryOk: boolean; paneDead: boolean | null; queryError: 'query_failed' | 'invalid_reply' | null };
-export type WireObservation = { source: 'kimi_wire' | 'codex_rollout' | 'claude_transcript'; pathHash: string | null; sessionHash: string | null; sizeBefore: number | null; sizeAfter: number | null; recordType: 'turn.prompt' | 'turn.ended' | 'prompt.completed' | 'context.append_loop_event' | 'event_msg' | 'session_meta' | 'other' };
+export type WireObservation = { source: 'kimi_wire' | 'codex_rollout' | 'claude_transcript'; pathHash: string | null; sessionHash: string | null; sizeBefore: number | null; sizeAfter: number | null; recordType: 'turn.prompt' | 'turn.ended' | 'prompt.completed' | 'context.append_loop_event' | 'event_msg' | 'session_meta' | 'other' | null };
 type PersistCode = 'ok' | 'not_saved' | 'unsafe_path' | 'unsupported_fs' | 'io_error' | 'partial_write' | 'conflict' | 'size_limit' | 'record_limit';
 type Receipt = { durable: boolean; code: PersistCode; hash: string | null; seq: number };
 type Wait = { startedAtUtc: string; endedAtUtc: string | null; budgetMs: number | null; result: WaitResult | null };
@@ -29,6 +29,18 @@ export function sourceHash(url: string): string | null {
   try { return digest(readFileSync(new URL(url))); } catch { return null; }
 }
 
+export function wireSize(file: string): number | null {
+  try { return count(statSync(file).size); } catch { return null; }
+}
+
+export function wireRecordType(data: unknown): WireObservation['recordType'] {
+  const value = data && typeof data === 'object' && 'type' in data ? data.type : null;
+  switch (value) {
+    case 'turn.prompt': case 'turn.ended': case 'prompt.completed': case 'context.append_loop_event': case 'event_msg': case 'session_meta': return value;
+    default: return 'other';
+  }
+}
+
 function nodeVersion(): string | null {
   try {
     const data: unknown = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
@@ -42,13 +54,15 @@ const SOURCE = { producerHash: sourceHash(import.meta.url), nodeVersion: nodeVer
 export type PhaseRecord = {
   trace: 'hh-terminal-phase-v1'; attemptId: string; jobId: string | null; agentKey: string | null; origin: 'queued' | 'typed';
   startedAtUtc: string; atUtc: string; monotonicMs: number; seq: number; previousHash: string | null;
-  phase: Phase; event: 'launch' | 'wait_start' | 'wait_end' | 'finish' | 'bind' | 'completion'; finish: Finish | null; outcome: 'ok' | 'failed' | 'cancelled' | null;
+  phase: Phase; event: 'launch' | 'wait_start' | 'wait_end' | 'finish' | 'bind' | 'completion' | 'end_observed'; finish: Finish | null; outcome: 'ok' | 'failed' | 'cancelled' | null;
   source: typeof SOURCE & { hostHash: string | null }; sessionHash: string | null;
+  requestRefHash: string | null;
   launch: { goesOn: boolean | null; sameSession: boolean | null; hashMatch: boolean | null };
   waits: { ready: Wait | null; accept: Wait | null; done: Wait | null };
   counts: { paste: number; enter: number }; ack: Ack | null; pane: (PaneObservation & { status: null; signal: null }) | null;
+  endSource: 'wire' | 'hook' | null; endResult: 'completed' | 'failed' | 'aborted' | null;
   wire: (WireObservation & { cursorBefore: null; cursorAfter: null; cursorReason: 'not_exposed'; nativeTurnHash: null; nativeTurnReason: 'not_exposed' }) | null;
-  gaps: { jobId: 'not_bound' | 'invalid' | null; agentKey: 'invalid' | null; persistFailures: number; lastPersistFailure: PersistCode | null };
+  gaps: { jobId: 'not_bound' | 'invalid' | null; agentKey: 'invalid' | null; session: 'not_observed' | 'changed' | null; binding: 'missing_ref' | null; persistFailures: number; lastPersistFailure: PersistCode | null };
 };
 
 class StoreFailure extends Error {
@@ -119,8 +133,8 @@ export class PhaseStore {
   private readonly root: string;
   constructor(root: string) { this.root = resolve(root); }
 
-  begin(agentKey: string, jobId: string | null, origin: 'queued' | 'typed'): PhaseAttempt {
-    return new PhaseAttempt(this, agentKey, jobId, origin);
+  begin(agentKey: string, jobId: string | null, origin: 'queued' | 'typed', ref?: string): PhaseAttempt {
+    return new PhaseAttempt(this, agentKey, jobId, origin, ref);
   }
 
   persist(record: PhaseRecord): Receipt {
@@ -167,26 +181,36 @@ export class PhaseAttempt {
   private readonly record: PhaseRecord;
   private saved: Receipt = { durable: false, code: 'not_saved', hash: null, seq: 0 };
 
-  constructor(readonly store: PhaseStore, agentKey: string, jobId: string | null, origin: 'queued' | 'typed') {
+  constructor(readonly store: PhaseStore, agentKey: string, jobId: string | null, origin: 'queued' | 'typed', ref?: string) {
     const utc = new Date().toISOString();
     this.record = {
       trace: 'hh-terminal-phase-v1', attemptId: randomUUID(), jobId: validId(jobId), agentKey: validId(agentKey), origin,
       startedAtUtc: utc, atUtc: utc, monotonicMs: 0, seq: 0, previousHash: null, phase: 'launch', event: 'launch', finish: null, outcome: null,
-      source: { ...SOURCE, hostHash: null }, sessionHash: null, launch: { goesOn: null, sameSession: null, hashMatch: null },
+      source: { ...SOURCE, hostHash: null }, sessionHash: null, requestRefHash: origin === 'typed' ? phaseHash(ref) : null, launch: { goesOn: null, sameSession: null, hashMatch: null },
       waits: { ready: null, accept: null, done: null }, counts: { paste: 0, enter: 0 }, ack: null, pane: null, wire: null,
-      gaps: { jobId: jobId === null ? 'not_bound' : validId(jobId) ? null : 'invalid', agentKey: validId(agentKey) ? null : 'invalid', persistFailures: 0, lastPersistFailure: null },
+      endSource: null, endResult: null,
+      gaps: { jobId: jobId === null ? 'not_bound' : validId(jobId) ? null : 'invalid', agentKey: validId(agentKey) ? null : 'invalid', session: 'not_observed', binding: null, persistFailures: 0, lastPersistFailure: null },
     };
   }
 
   launch(sessionId: string | null, hostHash: string | null, flags: PhaseRecord['launch']): void {
     if (this.record.seq || this.record.finish) return;
     this.record.sessionHash = phaseHash(sessionId);
+    this.record.gaps.session = this.record.sessionHash ? null : 'not_observed';
     this.record.source.hostHash = hostHash && DIGEST.test(hostHash) ? hostHash : null;
     this.record.launch = { goesOn: flags.goesOn, sameSession: flags.sameSession, hashMatch: flags.hashMatch };
     this.save('launch');
   }
 
-  session(sessionId: string | null): void { if (!this.record.finish) this.record.sessionHash = phaseHash(sessionId); }
+  session(sessionId: string | null): void {
+    if (this.record.finish) return;
+    const hash = phaseHash(sessionId);
+    if (!hash) return;
+    if (this.record.sessionHash && this.record.sessionHash !== hash) { this.record.gaps.session = 'changed'; return; }
+    this.record.sessionHash = hash; this.record.gaps.session = null;
+  }
+
+  matchesSession(sessionId: string): boolean { return this.record.sessionHash !== null && this.record.sessionHash === phaseHash(sessionId); }
 
   matchesJob(jobId: string | undefined): boolean { return this.record.jobId !== null && this.record.jobId === validId(jobId ?? null); }
 
@@ -204,13 +228,32 @@ export class PhaseAttempt {
     else this.finish('ready_unknown');
   }
 
+  paneFailed(): void {
+    const result = this.paneOutcome();
+    this.waitEnd('done', result);
+    this.finish(result === 'pane_dead' ? 'pane_dead' : result === 'query_failed' ? 'pane_query_failed' : 'pane_unknown');
+  }
+
+  end(source: 'wire' | 'hook', result: 'completed' | 'failed' | 'aborted'): void {
+    if (this.record.finish || this.record.endSource) return;
+    this.record.endSource = source; this.record.endResult = result;
+    this.save('end_observed');
+  }
+
+  completed(): void {
+    this.waitEnd('done', 'completed');
+    this.finish(this.record.endSource === 'wire' ? 'wire_completed' : this.record.endSource === 'hook' ? 'hook_completed' : 'done_completed');
+  }
+
   pane(observation: PaneObservation): void {
     if (!this.record.finish) this.record.pane = { queryOk: observation.queryOk, paneDead: observation.paneDead, queryError: observation.queryError, status: null, signal: null };
   }
 
-  wire(observation: WireObservation): void {
-    if (this.record.finish || observation.sessionHash !== this.record.sessionHash) return;
-    this.record.wire = { source: observation.source, pathHash: observation.pathHash, sessionHash: observation.sessionHash, sizeBefore: count(observation.sizeBefore ?? -1), sizeAfter: count(observation.sizeAfter ?? -1), recordType: observation.recordType, cursorBefore: null, cursorAfter: null, cursorReason: 'not_exposed', nativeTurnHash: null, nativeTurnReason: 'not_exposed' };
+  wire(observation: WireObservation): boolean {
+    if (this.record.finish || !this.record.sessionHash || observation.sessionHash !== this.record.sessionHash) return false;
+    if (!observation.pathHash || (this.record.wire && this.record.wire.pathHash !== observation.pathHash)) return false;
+    this.record.wire = { source: observation.source, pathHash: observation.pathHash, sessionHash: observation.sessionHash, sizeBefore: count(observation.sizeBefore ?? -1), sizeAfter: count(observation.sizeAfter ?? -1), recordType: observation.recordType ?? this.record.wire?.recordType ?? null, cursorBefore: null, cursorAfter: null, cursorReason: 'not_exposed', nativeTurnHash: null, nativeTurnReason: 'not_exposed' };
+    return true;
   }
 
   pasted(): void { if (!this.record.finish) this.record.counts.paste = Math.min(1_000_000, this.record.counts.paste + 1); }
@@ -238,8 +281,13 @@ export class PhaseAttempt {
     this.save('finish');
   }
 
-  bind(jobId: string): void {
+  bind(jobId: string, ref?: string): void {
     if (this.record.origin !== 'typed' || this.record.jobId || !validId(jobId)) return;
+    if (!ref) {
+      if (!this.record.gaps.binding) { this.record.gaps.binding = 'missing_ref'; this.save('bind'); }
+      return;
+    }
+    if (!this.record.requestRefHash || phaseHash(ref) !== this.record.requestRefHash) return;
     this.record.jobId = jobId; this.record.gaps.jobId = null;
     this.save('bind');
   }

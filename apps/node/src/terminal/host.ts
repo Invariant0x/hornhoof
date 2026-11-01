@@ -14,7 +14,7 @@ import { StreamMask } from './mask.js';
 import { acceptClaudeDialogs, claudeTranscript, findKimiWire, findRollout, prepareKimi, type TermProgram } from './programs.js';
 import { claudeStatusContext, claudeStatusLimits, codexRollout, kimiWire, LineTail, type WireNews } from './transcripts.js';
 import { envFile, type Tmux } from './tmux.js';
-import { sourceHash, type PhaseAttempt, type PhaseStore } from './phase.js';
+import { phaseHash, sourceHash, wireRecordType, wireSize, type Finish, type PhaseAttempt, type PhaseStore, type WireObservation } from './phase.js';
 
 /* An agent's turn in its terminal: which program, where it keeps its sign-in, and what the runner hands every program. */
 export type TermJob = { jobId?: string; key: string; program: TermProgram; bin: string; home: string; signedOut: RegExp; input: RunInput };
@@ -98,6 +98,7 @@ type Agent = {
   /* What a new Kimi session was told from before, kept by the session's id once Kimi names it. */
   keep: string | null;
   phaseStore?: PhaseStore;
+  phaseWire?: { file: string; source: WireObservation['source'] };
 };
 
 type View = { child: ChildProcess; key: string; write: boolean; mask: StreamMask; decoder: StringDecoder; pending: string; timer: NodeJS.Timeout | null; quiet: NodeJS.Timeout | null };
@@ -284,6 +285,7 @@ export class TerminalHost {
         this.bridge.waitForTurns(job.key, program.kind === 'kimi' ? this.openMs + 2000 : 0);
         Object.assign(a, { program, home: job.home, workDir: input.workDir, hash, sessionId: spec.sessionId, cleared: new Set(), startedAt: Date.now(), started: deferred<void>(), fresh: false, keep: lazy ? (input.context ?? null) : null, contextSize: program.kind === 'kimi' ? kimiWindow(job.home, input.model) : null });
         if (program.kind === 'claude' && !input.sessionId && input.context && spec.sessionId) keepContext(input.workDir, spec.sessionId, input.context);
+        a.phaseWire = undefined;
         a.tail = this.tailFor(a);
         const env = { ...lasting(input.env), ...spec.env };
         await this.opts.tmux.launch(a.name, { cwd: input.workDir, command: spec.command, cols: this.cols, rows: this.rows, envFile: envFile(input.workDir, env) });
@@ -301,38 +303,56 @@ export class TerminalHost {
       if (!input.prompt) {
         await tools;
         /* A person typed meanwhile: the program goes on with their turn, and the session is theirs to name. */
-        if (a.turn !== turn) return { ok: true, sessionId: null, result: '', output: '', error: null, limits: a.limits };
+        if (a.turn !== turn) {
+          phase?.finish('superseded');
+          return { ok: true, sessionId: null, result: '', output: '', error: null, limits: a.limits };
+        }
         if (!goesOn) a.fresh = input.sessionId === null;
+        phase?.finish('start_only');
         return { ok: true, sessionId: a.fresh ? null : a.sessionId, result: '', output: '', error: null, limits: a.limits };
       }
       a.fresh = false;
       a.took = false;
+      phase?.pasted();
       await this.opts.tmux.paste(a.name, input.prompt);
       await sleep(Math.min(3000, 300 + input.prompt.length / 20));
+      phase?.entered();
       await this.opts.tmux.keys(a.name, 'Enter');
       a.busy = true;
       /* A program that just started, or that still loads a long session it resumed, can miss the Enter and keep the prompt
          in its input: Enter again until it takes it. An Enter into an empty input does nothing. One that never takes it
          ends the turn with its screen, which says why, rather than leave the turn waiting for nothing. */
-      for (const end = Date.now() + this.readyMs; !(await this.tookPrompt(a, input.signal)); ) {
+      const acceptEnd = Date.now() + this.readyMs;
+      phase?.waitStart('accept', acceptEnd - this.readyMs, this.readyMs);
+      for (const end = acceptEnd; !(await this.tookPrompt(a, input.signal)); ) {
         if (Date.now() >= end) {
+          phase?.waitEnd('accept', 'deadline');
+          phase?.finish('accept_deadline');
           a.busy = false;
           /* Its input still holds the prompt, so the next turn starts the program anew, resuming the session. */
           a.hash = null;
           return await fail('agent_failed', `The program did not take Hornhoof's prompt within ${Math.round(this.readyMs / 1000)} s.\n\n${await this.screen(job.key)}`);
         }
+        phase?.entered();
         await this.opts.tmux.keys(a.name, 'Enter');
       }
+
+      phase?.waitEnd('accept', 'accepted');
+      phase?.waitStart('done', Date.now(), null);
 
       for (;;) {
         this.drain(a);
         const message = await Promise.race([a.ended.promise, sleep(this.pollMs).then(() => null)]);
         if (message !== null) {
           if (a.stopped) {
+            phase?.waitEnd('done', 'aborted');
+            phase?.finish('cancelled');
             a.busy = false;
             return await fail('cancelled');
           }
           if (a.failure !== null) {
+            phase?.waitEnd('done', 'failed');
+            phase?.finish('wire_failed');
             const output = `${a.failure}\n\n${await this.screen(job.key)}`;
             return await fail(job.signedOut.test(a.failure) ? 'not_logged_in' : 'agent_failed', output);
           }
@@ -340,16 +360,20 @@ export class TerminalHost {
           await this.planLimits(a);
           /* A turn that ended with no answer keeps its screen, which says why, as when the provider refused the work. */
           const output = message.trim() ? '' : await this.screen(job.key);
+          phase?.completed();
           return { ok: true, sessionId: a.sessionId, result: message, output, error: null, limits: a.limits };
         }
         /* A program stopped with Escape does not say its turn ended: it waits for the next prompt. */
         if (input.signal?.aborted) {
           await this.opts.tmux.keys(a.name, 'Escape');
           await Promise.race([a.ended.promise, sleep(STOP_WAIT_MS)]);
+          phase?.waitEnd('done', 'aborted');
+          phase?.finish('cancelled');
           a.busy = false;
           return await fail('cancelled');
         }
-        if (!(await this.opts.tmux.alive(a.name))) {
+        if (!(await this.alive(a, phase))) {
+          phase?.paneFailed();
           a.busy = false;
           this.programEnded(a);
           const screen = await this.screen(job.key);
@@ -357,6 +381,7 @@ export class TerminalHost {
         }
       }
     } finally {
+      phase?.finish('host_exception');
       if (starting && a.starting === starting) a.starting = null;
       if (a.turn === turn) {
         this.bridge.setToken(job.key, null);
@@ -382,12 +407,14 @@ export class TerminalHost {
   private async look(a: Agent): Promise<void> {
     this.drain(a);
     if (a.turn && !a.turn.typed) return;
-    const alive = await this.opts.tmux.alive(a.name);
+    const phase = a.turn?.phase;
+    const alive = await this.alive(a, phase);
     if (a.turn && !a.turn.typed) return;
     if (!alive) {
+      phase?.paneFailed();
       a.busy = false;
       this.programEnded(a);
-      this.finishTyped(a, '', 'agent_failed');
+      this.finishTyped(a, '', 'agent_failed', 'pane_unknown');
       if (a.watch) clearInterval(a.watch);
       a.watch = null;
       return;
@@ -400,9 +427,11 @@ export class TerminalHost {
     if (sessionId === a.sessionId) return;
     if (a.sessionId) a.cleared.add(a.sessionId);
     a.sessionId = sessionId;
-    if (a.program?.kind === 'claude') a.tail = new LineTail(claudeTranscript(a.home, realpathSync(a.workDir), sessionId));
+    a.turn?.phase?.session(sessionId);
+    if (a.program?.kind === 'claude') a.tail = this.newTail(a, claudeTranscript(a.home, realpathSync(a.workDir), sessionId));
     if (a.program?.kind === 'kimi') {
       a.tail = null;
+      a.phaseWire = undefined;
       if (a.keep) keepContext(a.workDir, sessionId, a.keep);
       a.keep = null;
     }
@@ -423,7 +452,7 @@ export class TerminalHost {
   /* A person stopped the running turn with Escape. */
   private interrupted(a: Agent): void {
     a.busy = false;
-    if (a.turn?.typed) return this.finishTyped(a, '', 'cancelled');
+    if (a.turn?.typed) return this.finishTyped(a, '', 'cancelled', 'cancelled');
     a.stopped = true;
     a.ended?.resolve('');
   }
@@ -431,11 +460,15 @@ export class TerminalHost {
   /* Whether within enterWaitMs the program took the prompt Hornhoof typed, ended its turn or ended itself, or the turn
      was called off: the turn goes on from there without another Enter. */
   private async tookPrompt(a: Agent, signal?: AbortSignal): Promise<boolean> {
+    const phase = a.turn?.phase;
     let ended = false;
     void a.ended?.promise.then(() => (ended = true));
     for (const end = Date.now() + this.enterWaitMs; Date.now() < end; await sleep(this.pollMs)) {
       this.drain(a);
-      if (a.took || ended || signal?.aborted || !(await this.opts.tmux.alive(a.name))) return true;
+      if (a.took) { phase?.ack('unknown'); return true; }
+      if (ended) { phase?.ack('ended'); return true; }
+      if (signal?.aborted) { phase?.ack('aborted'); return true; }
+      if (!(await this.alive(a, phase))) { phase?.ack(phase.paneOutcome() === 'unknown' ? 'unknown' : phase.paneOutcome()); return true; }
     }
     return false;
   }
@@ -479,19 +512,32 @@ export class TerminalHost {
     return false;
   }
 
-  private alive(a: Agent, phase = a.turn?.phase): Promise<boolean> {
+  private alive(a: Agent, phase?: PhaseAttempt): Promise<boolean> {
     return this.opts.tmux.alive(a.name, observation => phase?.pane(observation));
   }
 
   private tailFor(a: Agent): LineTail | null {
     /* The program names its folder by the real path, without links. */
-    if (a.program?.kind === 'claude' && a.sessionId) return new LineTail(claudeTranscript(a.home, realpathSync(a.workDir), a.sessionId), { fromEnd: true });
+    if (a.program?.kind === 'claude' && a.sessionId) return this.newTail(a, claudeTranscript(a.home, realpathSync(a.workDir), a.sessionId), true);
     if (a.program?.kind === 'codex' && a.sessionId) {
       const found = findRollout(a.home, a.workDir, 0, a.sessionId);
-      return found ? new LineTail(found.file, { fromEnd: true }) : null;
+      return found ? this.newTail(a, found.file, true) : null;
     }
     const wire = a.program?.kind === 'kimi' && a.sessionId ? findKimiWire(a.home, a.sessionId) : null;
-    return wire ? new LineTail(wire, { fromEnd: true }) : null;
+    return wire ? this.newTail(a, wire, true) : null;
+  }
+
+  private newTail(a: Agent, file: string, fromEnd = false): LineTail {
+    const source = a.program?.kind === 'kimi' ? 'kimi_wire' : a.program?.kind === 'codex' ? 'codex_rollout' : 'claude_transcript';
+    a.phaseWire = { file, source };
+    return new LineTail(file, { fromEnd });
+  }
+
+  private observeWire(a: Agent, phase: PhaseAttempt | undefined, before: number | null, after: number | null, data: unknown = null): boolean {
+    const wire = a.phaseWire;
+    if (!phase || !wire) return false;
+    if (a.program?.kind === 'kimi' && data && typeof data === 'object' && 'agentId' in data && data.agentId !== 'main') return false;
+    return phase.wire({ source: wire.source, pathHash: phaseHash(wire.file), sessionHash: phaseHash(a.sessionId), sizeBefore: before, sizeAfter: after, recordType: data === null ? null : wireRecordType(data) });
   }
 
   /* What the program wrote to its log since last time: events for the turn, Codex's limits, session and turn end. */
@@ -500,15 +546,20 @@ export class TerminalHost {
       const found = findRollout(a.home, a.workDir, a.startedAt - 2000);
       if (found) {
         a.sessionId = found.sessionId;
-        a.tail = new LineTail(found.file);
+        a.turn?.phase?.session(found.sessionId);
+        a.tail = this.newTail(a, found.file);
       }
     }
     /* Kimi named a session it started now; its log comes once it writes it. */
     if (!a.tail && a.program?.kind === 'kimi' && a.sessionId) {
       const wire = findKimiWire(a.home, a.sessionId);
-      if (wire) a.tail = new LineTail(wire);
+      if (wire) a.tail = this.newTail(a, wire);
     }
-    for (const line of a.tail?.read() ?? []) {
+    const before = a.phaseWire ? wireSize(a.phaseWire.file) : null;
+    const lines = a.tail?.read() ?? [];
+    const after = a.phaseWire ? wireSize(a.phaseWire.file) : null;
+    this.observeWire(a, a.turn?.phase, before, after);
+    for (const line of lines) {
       let data: unknown;
       try {
         data = JSON.parse(line);
@@ -516,24 +567,30 @@ export class TerminalHost {
         continue;
       }
       if (a.program?.kind === 'claude') {
+        this.observeWire(a, a.turn?.phase, before, after, data);
         if (this.stoppable(a) && claudeInterrupted(data)) this.interrupted(a);
         for (const e of claudeEvents(data)) this.emit(a, e);
         continue;
       }
       if (a.program?.kind === 'kimi') {
-        this.kimiNews(a, kimiWire(data));
+        const phase = a.turn?.phase;
+        const observed = this.observeWire(a, phase, before, after, data);
+        this.kimiNews(a, kimiWire(data), observed ? phase : undefined);
         continue;
       }
       const news = codexRollout(data);
       if (news.typed !== undefined && (!a.turn || a.turn.starting)) void this.openTyped(a, news.typed, true);
+      const phase = a.turn?.phase;
+      const observed = this.observeWire(a, phase, before, after, data);
       for (const e of news.events) this.emit(a, e);
       if (news.limits) a.limits = news.limits;
       if (news.context !== undefined) this.context(a, news.context);
-      if (news.session) a.sessionId = news.session.id;
-      if (news.started) a.busy = a.took = true;
+      if (news.session) { a.sessionId = news.session.id; phase?.session(news.session.id); }
+      if (news.started) { if (observed) phase?.ack('rollout.task_started'); a.busy = a.took = true; }
       /* A stop logged before the running turn's prompt went in belongs to the last turn. */
       if (news.aborted && !this.stoppable(a)) continue;
       if (news.ended || news.aborted) {
+        if (observed) phase?.end('wire', news.aborted ? 'aborted' : 'completed');
         const message = news.ended?.message ?? '';
         a.busy = false;
         if (news.aborted) this.interrupted(a);
@@ -545,7 +602,7 @@ export class TerminalHost {
 
   /* Kimi Code logs a turn's end without its answer, which is the text of its last step that said anything, in parts. A
      person's turn reaches Hornhoof through Kimi's prompt hook, as in Claude Code. */
-  private kimiNews(a: Agent, news: WireNews): void {
+  private kimiNews(a: Agent, news: WireNews, phase?: PhaseAttempt): void {
     if (news.step) a.stepSaid = false;
     if (news.model) a.contextSize = kimiWindow(a.home, news.model);
     if (news.tokens !== undefined && a.contextSize) this.context(a, Math.min(1, news.tokens / a.contextSize));
@@ -556,7 +613,7 @@ export class TerminalHost {
       if (a.stepSaid) a.lastText = (before ?? '') + e.text;
       a.stepSaid = true;
     }
-    if (news.started) a.busy = a.took = true;
+    if (news.started) { phase?.ack('wire.turn.prompt'); a.busy = a.took = true; }
     if (!(news.ended || news.aborted || news.failed !== undefined)) return;
     /* An end logged before the running turn's prompt went in belongs to the last turn, but a blocked prompt is the running
        turn's own: it never starts. With no turn, the program is free. */
@@ -564,10 +621,11 @@ export class TerminalHost {
       if (!a.turn) a.busy = false;
       return;
     }
+    phase?.end('wire', news.aborted ? 'aborted' : news.failed !== undefined ? 'failed' : 'completed');
     a.busy = false;
     if (news.aborted) return this.interrupted(a);
     const message = a.lastText ?? '';
-    if (a.turn?.typed) return this.finishTyped(a, news.failed === undefined ? message : '', news.failed === undefined ? null : 'agent_failed');
+    if (a.turn?.typed) return this.finishTyped(a, news.failed === undefined ? message : '', news.failed === undefined ? null : 'agent_failed', news.failed === undefined ? 'wire_completed' : 'wire_failed');
     if (news.failed !== undefined) a.failure = news.failed;
     a.ended?.resolve(news.failed === undefined ? message : '');
   }
@@ -622,14 +680,16 @@ export class TerminalHost {
         return;
       }
       case 'prompt':
+        if (typeof data.session_id === 'string' && a.turn?.phase?.matchesSession(data.session_id)) a.turn.phase.ack('hook');
         a.took = true;
         await a.settling;
         a.busy = true;
         /* Kimi Code hands the prompt as parts of a message. */
-        if (!a.turn || a.turn.starting) await this.openTyped(a, typeof data.prompt === 'string' ? data.prompt : contentText(data.prompt));
+        if (!a.turn || a.turn.starting) await this.openTyped(a, typeof data.prompt === 'string' ? data.prompt : contentText(data.prompt), false, typeof data.session_id === 'string' ? data.session_id : undefined);
         return;
       case 'stop': {
         this.drain(a);
+        if (typeof data.session_id === 'string' && a.turn?.phase?.matchesSession(data.session_id)) a.turn.phase.end('hook', 'completed');
         a.busy = false;
         if (typeof data.session_id === 'string') this.follow(a, data.session_id);
         const message = String(data.last_assistant_message ?? '');
@@ -638,7 +698,7 @@ export class TerminalHost {
         if (turn?.typed) {
           a.settling = this.settle(a, message)
             .then(() => {
-              if (a.turn === turn) this.finishTyped(a, message);
+              if (a.turn === turn) this.finishTyped(a, message, null, 'hook_completed');
             })
             .finally(() => (a.settling = null));
         } else a.ended?.resolve(message);
@@ -651,13 +711,18 @@ export class TerminalHost {
      it, so the agent has its tools and the turn shows like any other. Claude Code waits in its hook for Hornhoof's answer,
      for a while; Codex goes on, and what it does waits in the turn. fromLog: the typing was read from the log, which is
      being read now. */
-  private async openTyped(a: Agent, text: string, fromLog = false): Promise<void> {
+  private async openTyped(a: Agent, text: string, fromLog = false, observedSession?: string): Promise<void> {
     const start = a.starting;
     a.fresh = false;
     if (!fromLog) this.drain(a);
     a.lastText = null;
     a.stepSaid = false;
-    const turn: Turn = { jobId: null, onEvent: () => {}, typed: true, seq: 0, ref: randomUUID(), early: [], over: null, opened: deferred() };
+    const ref = randomUUID();
+    const phase = a.phaseStore?.begin(a.key, null, 'typed', ref);
+    phase?.launch(a.sessionId, HOST_SOURCE_HASH, { goesOn: null, sameSession: null, hashMatch: null });
+    phase?.waitStart('done', Date.now(), null);
+    if (!fromLog && observedSession && phase?.matchesSession(observedSession)) phase.ack('hook');
+    const turn: Turn = { jobId: null, onEvent: () => {}, typed: true, seq: 0, ref, early: [], over: null, opened: deferred(), phase };
     a.turn = turn;
     a.unopened.push(turn);
     this.watch(a);
@@ -682,11 +747,13 @@ export class TerminalHost {
   opened(m: Msg<'turn.opened'>): void {
     const a = this.agents.get(m.agentKey);
     const at = a ? (m.ref ? a.unopened.findIndex(t => t.ref === m.ref) : a.unopened.length ? 0 : -1) : -1;
-    const turn = at >= 0 ? a!.unopened.splice(at, 1)[0]! : null;
+    const turn = at >= 0 ? a!.unopened[at]! : null;
     if (!a || !turn) {
       if (m.jobId) this.opts.send({ type: 'job.done', jobId: m.jobId, ok: false, sessionId: a?.sessionId ?? null, result: 'Stopped.', tail: '', error: 'cancelled' });
       return;
     }
+    if (m.jobId && m.toolToken) turn.phase?.bind(m.jobId, m.ref);
+    a.unopened.splice(at, 1);
     const early = turn.early ?? [];
     turn.early = null;
     if (m.jobId && m.toolToken) {
@@ -698,9 +765,12 @@ export class TerminalHost {
     if (turn.over) this.typedDone(turn, turn.over.message, turn.over.error, turn.over.sessionId);
   }
 
-  private finishTyped(a: Agent, message: string, error: JobError = null): void {
+  private finishTyped(a: Agent, message: string, error: JobError = null, reason: Finish = 'wire_completed'): void {
     const turn = a.turn;
     if (!turn?.typed) return;
+    turn.phase?.waitEnd('done', error === 'cancelled' ? 'aborted' : error ? 'failed' : 'completed');
+    turn.phase?.finish(reason);
+    turn.phase?.complete(!error, error === 'cancelled');
     a.turn = null;
     if (a.sessionId) this.opts.remember?.(a.sessionId, a.workDir);
     this.bridge.setToken(a.key, null);
@@ -714,7 +784,7 @@ export class TerminalHost {
   private typedDone(turn: Turn, message: string, error: JobError, sessionId: string | null): void {
     if (!turn.jobId) return;
     const result = error === 'cancelled' ? 'Stopped.' : error ? '' : redact(message, this.opts.secrets());
-    this.opts.send({ type: 'job.done', jobId: turn.jobId, ok: !error, sessionId, result, tail: '', error });
+    this.opts.send({ type: 'job.done', jobId: turn.jobId, ok: !error, sessionId, result, tail: error ? turn.phase?.summary() ?? '' : '', error });
   }
 
   /* Turns people typed that run now: they count as running when the node says hello again. */
@@ -748,7 +818,7 @@ export class TerminalHost {
     if (!a) return;
     await this.opts.tmux.keys(a.name, 'Escape');
     a.busy = false;
-    this.finishTyped(a, '', 'cancelled');
+    this.finishTyped(a, '', 'cancelled', 'cancelled');
   }
 
   /* The agent's views hear when its program comes up or goes. */
