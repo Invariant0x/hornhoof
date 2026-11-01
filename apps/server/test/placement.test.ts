@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
-import { agents, companies, departments, tasks } from '../src/db/schema.js';
+import { agents, companies, departments, jobs, nodes as nodeRows, tasks } from '../src/db/schema.js';
 import { nodeIdentity } from '../src/modules/nodes/hub.js';
 import { as, connectNode, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
@@ -115,6 +115,24 @@ describe('agents of one plan on several machines', () => {
     expect(run.sessionId).toBe('bruno-on-mac');
     expect(run.prompt).toContain('Are you there?');
     expect((await db.select().from(agents).where(eq(agents.id, bruno.id)))[0]!.nodeId).toBe(nodes.mac.nodeId);
+  });
+
+  it('sends the waiting turn of an employee with work in progress to another machine of its plan once its own is disconnected', async () => {
+    const { app, db, ceo, plan, nodes, mac, lap, bruno } = await planOnTwoMachines();
+    await write(app, ceo, bruno.id, 'Hi');
+    finish(mac, await nextRun(mac), 'bruno-on-mac');
+    await until(async () => !(await state(app, ceo, bruno.id)).busy);
+    await db.insert(tasks).values({ companyId: bruno.companyId, number: 1, title: 'Checkout API', executorAgentId: bruno.id, assigneeAgentId: bruno.id, status: 'working' });
+    mac.close();
+    await mac.closed;
+    await until(async () => (await state(app, ceo, bruno.id)).reason === 'machine_offline');
+    /* A turn waits for him, as a task or a timer queues one. */
+    await db.insert(jobs).values({ companyId: bruno.companyId, subscriptionId: plan, agentId: bruno.id, kind: 'conversation', prompt: 'Go on with the checkout', timeoutMs: 900000, status: 'queued' });
+    const [own] = await db.select({ machineId: nodeRows.machineId }).from(nodeRows).where(eq(nodeRows.id, nodes.mac.nodeId));
+    expect((await app.inject({ method: 'POST', url: `/api/machines/${own!.machineId}/disconnect`, ...as(ceo) })).statusCode).toBe(204);
+    const run = await Promise.race([nextRun(lap), new Promise<null>(r => setTimeout(() => r(null), 3000))]);
+    expect(run?.prompt).toContain('Go on with the checkout');
+    expect(run?.sessionId).toBeNull();
   });
 
   it('waits while no machine of the plan can take a turn, and goes out on the first that can', async () => {
