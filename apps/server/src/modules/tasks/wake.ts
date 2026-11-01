@@ -18,6 +18,7 @@ type Agent = typeof agents.$inferSelect;
 /* What finishes the task for whoever holds it, and what to do when that cannot happen. */
 function nextStep(task: Task, agentId: string): { finish: string; stuck: string } {
   if (task.stage > 0 && task.panel.includes(agentId)) return { finish: 'give your verdict with your reasons', stuck: 'ask a person with ask_person' };
+  if (task.merging && task.executorAgentId === agentId) return { finish: "merge your branch into the turn's branch and report it with submit", stuck: 'report what blocks the merge with blocked' };
   if (task.executorAgentId === agentId) return { finish: 'submit it with what you did and the evidence (the commands you ran and what they showed)', stuck: 'say so with blocked' };
   /* Member work that waits with whoever gave it out, while nobody who does or checks it is on. */
   if (task.executorAgentId) return { finish: 'give it to someone who is on with update_task', stuck: 'tell the CEO it waits' };
@@ -53,6 +54,8 @@ function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string {
     }
     case 'changes':
       return `${ref} came back to you with changes requested${said}Make them, then submit it again.`;
+    case 'merge':
+      return `${ref} passed its gates. Merge your branch into the turn's branch and report: submit it with what you merged and the commit. If the merge fails, report what blocks it with blocked.`;
     case 'stuck_at_gate':
       return `${ref}, which you gave out, went back from the same gate ${GATE_ROUNDS} times. Read its log, then step in: rewrite it with update_task, give it another executor or other gates, or cancel it.`;
     case 'done':

@@ -145,6 +145,15 @@ describe('a task', () => {
     }
   });
 
+  it('says its executor puts the work together with the rest of the turn once every gate passed it', async () => {
+    const user = userEvent.setup();
+    const gates = TASK_DETAIL.gates.map(g => ({ ...g, state: 'passed' as const }));
+    shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, status: 'open', stage: 0, merging: true, gates } }] });
+    const panel = await openTask(user);
+    const list = within(panel).getByRole('list', { name: 'Gates' });
+    expect(within(list).getAllByRole('listitem')[0]!.textContent).toBe('Bruno, Backend engineer, puts the work together with the rest of the turn');
+  });
+
   it('posts a comment', async () => {
     const user = userEvent.setup();
     const calls = shell({ 'POST /api/tasks/t12/comments': [201, { task: TASK_DETAIL }] });

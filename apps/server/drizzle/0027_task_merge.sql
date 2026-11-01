@@ -1,0 +1,1 @@
+ALTER TABLE "tasks" ADD COLUMN "merging" boolean DEFAULT false NOT NULL;

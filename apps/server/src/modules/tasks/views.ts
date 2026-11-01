@@ -19,6 +19,8 @@ export type TaskLine = {
   assignee: AgentRef | null;
   stage: number;
   gateCount: number;
+  /* It passed its gates and its executor merges it. */
+  merging: boolean;
   bounces: number;
   turn: number | null;
   parentId: string | null;
@@ -96,6 +98,7 @@ const line = (t: Task, n: Names): TaskLine => ({
   assignee: n.agent(t.assigneeAgentId),
   stage: t.stage,
   gateCount: t.gates.length,
+  merging: t.merging,
   bounces: t.bounces,
   turn: n.turn(t.turnId),
   parentId: t.parentId,
@@ -142,7 +145,7 @@ export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates'>, task: Task,
       const a = n.agent(id);
       if (!a) return [];
       const at = i + 1;
-      return [{ ...a, state: task.status === 'done' || at < task.stage ? 'passed' : at === task.stage && !['cancelled'].includes(task.status) ? 'current' : 'next' }];
+      return [{ ...a, state: task.status === 'done' || task.merging || at < task.stage ? 'passed' : at === task.stage && !['cancelled'].includes(task.status) ? 'current' : 'next' }];
     }),
     createdBy: creator ? { kind: 'person', ...creator } : task.createdByAgentId ? { kind: 'agent', id: task.createdByAgentId, name: n.agent(task.createdByAgentId)?.name ?? '' } : null,
     subtasks: subs.map(t => line(t, n)),

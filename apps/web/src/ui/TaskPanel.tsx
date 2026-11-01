@@ -35,7 +35,14 @@ function TaskBody({ task, onOpen, onChanged, waiting }: { task: TaskDetail; onOp
   const who = (a: AgentRef) => `${a.name}${roleAfter(a, language)}`;
   const closed = task.status === 'done' || task.status === 'cancelled';
   const waits = task.waitsFor.length > 0;
-  const executorState = task.stage > 0 || task.status === 'done' ? t.tasks.gateStates.did : waits ? t.tasks.waitsFor(task.waitsFor.map(n => `#${n}`).join(', ')) : t.tasks.gateStates.working;
+  const executorState =
+    task.stage > 0 || task.status === 'done'
+      ? t.tasks.gateStates.did
+      : task.merging
+        ? t.tasks.gateStates.merging
+        : waits
+          ? t.tasks.waitsFor(task.waitsFor.map(n => `#${n}`).join(', '))
+          : t.tasks.gateStates.working;
 
   return (
     <>

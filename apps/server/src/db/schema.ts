@@ -365,6 +365,8 @@ export const tasks = pgTable(
     /* Tasks of the same turn that must be done first: until they are, the task waits and its holder is not woken. */
     after: jsonb('after').$type<string[]>().notNull().default([]),
     stage: integer('stage').notNull().default(0),
+    /* It passed its last gate and its executor merges it into the turn's branch, at stage 0 again; handing that in closes it. */
+    merging: boolean('merging').notNull().default(false),
     bounces: integer('bounces').notNull().default(0),
     /* Task turns in a row that ended without moving the task. */
     silent: integer('silent').notNull().default(0),

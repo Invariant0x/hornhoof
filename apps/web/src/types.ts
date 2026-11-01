@@ -230,6 +230,8 @@ export type TaskLine = {
   assignee: AgentRef | null;
   stage: number;
   gateCount: number;
+  /* Every gate passed it and its executor puts the work together with the rest of the turn. */
+  merging: boolean;
   bounces: number;
   turn: number | null;
   parentId: string | null;

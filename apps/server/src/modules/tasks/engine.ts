@@ -2,7 +2,7 @@ import { and, asc, count, eq, gt, inArray, isNull, max, ne, notInArray, sql } fr
 import type { Ctx } from '../../app.js';
 import { accessOf, canReach, type Spot } from '../../auth/access.js';
 import type { Db } from '../../db/client.js';
-import { agents, attachments, companies, jobs, people, requests, subscriptions, taskEvents, tasks, turns, type RequestOption, type TaskEventKind } from '../../db/schema.js';
+import { agents, attachments, companies, departments, jobs, people, requests, subscriptions, taskEvents, tasks, turns, type RequestOption, type TaskEventKind } from '../../db/schema.js';
 import { ApiError, type ErrorReason } from '../../errors.js';
 import { dropEarlierWakes, keepWakes } from './outbox.js';
 import { handOff } from './pulses.js';
@@ -11,7 +11,7 @@ export type Task = typeof tasks.$inferSelect;
 export type Request = typeof requests.$inferSelect;
 /* Who moves a task: a person from the web app, or an agent from its tools. */
 export type Actor = { personId: string; agentId?: undefined } | { agentId: string; personId?: undefined };
-export type WakeWhy = 'assigned' | 'review' | 'changes' | 'stuck_at_gate' | 'done' | 'reported' | 'blocked' | 'cancelled' | 'answered' | 'comment' | 'updated' | 'reminder' | 'go_on' | 'turn' | 'switched' | 'explain' | 'subtasks' | 'after_cancelled';
+export type WakeWhy = 'assigned' | 'review' | 'changes' | 'stuck_at_gate' | 'done' | 'reported' | 'blocked' | 'cancelled' | 'answered' | 'comment' | 'updated' | 'reminder' | 'go_on' | 'turn' | 'switched' | 'explain' | 'subtasks' | 'after_cancelled' | 'merge';
 /* An agent that has to act on a task now; Hornhoof queues a turn for it. note: what else it should know, after the rest. */
 export type Wake = { agentId: string; taskId: string; why: WakeWhy; text?: string; note?: string };
 export type Moved = { task: Task; wakes: Wake[] };
@@ -178,6 +178,28 @@ const giver = (task: Task, why: WakeWhy, actorId?: string, text?: string): Wake[
 
 const closing = () => ({ status: 'done' as const, closedAt: new Date(), assigneeAgentId: null, silent: 0 });
 
+/* Whether the task's work lives in a repository: its product's, else its department's. */
+async function inRepository(db: Db | Tx, task: Pick<Task, 'departmentId' | 'productId'>): Promise<boolean> {
+  const ids = [task.productId, task.departmentId].filter((x): x is string => Boolean(x));
+  if (!ids.length) return false;
+  const rows = await db.select({ repoUrl: departments.repoUrl }).from(departments).where(inArray(departments.id, ids));
+  return rows.some(r => r.repoUrl);
+}
+
+/* The task passed its last gate. Work in a repository goes back to its executor, who merges its branch into the turn's
+   branch and hands that in, which closes it; whoever gave it out decides when the executor is switched off. Other work is
+   done. done: the wakes a finished task needs. */
+async function passedGates(db: Db | Tx, task: Task, done: Wake[]): Promise<{ set: Partial<Task>; wakes: Wake[] }> {
+  if (!task.executorAgentId || !(await inRepository(db, task))) return { set: { ...closing(), panel: [] }, wakes: done };
+  const [executor] = await db.select({ name: agents.name, off: agents.switchedOffAt }).from(agents).where(eq(agents.id, task.executorAgentId));
+  const merging = { status: 'open' as const, stage: 0, panel: [], merging: true, silent: 0 };
+  if (executor?.off && task.createdByAgentId && task.createdByAgentId !== task.executorAgentId) {
+    const text = `${executor.name} does it and is switched off, and it passed its gates: its branch waits to be merged into the turn's branch. Give it to someone who is on with update_task, or tell the CEO it waits for ${executor.name}.`;
+    return { set: { ...merging, assigneeAgentId: task.createdByAgentId }, wakes: [{ agentId: task.createdByAgentId, taskId: task.id, why: 'switched', text }] };
+  }
+  return { set: { ...merging, assigneeAgentId: task.executorAgentId }, wakes: [{ agentId: task.executorAgentId, taskId: task.id, why: 'merge' }] };
+}
+
 /* Whether the task waits for a person's word other than Hornhoof's note that it stood still. */
 async function waitsForPerson(db: Db | Tx, taskId: string): Promise<boolean> {
   const [open] = await db.select({ id: requests.id }).from(requests).where(and(eq(requests.taskId, taskId), eq(requests.status, 'open'), notInArray(requests.kind, ['stuck']))).limit(1);
@@ -307,9 +329,10 @@ export async function submit(ctx: Live, agentId: string, taskId: string, r: { su
   if (task.status === 'waiting' && (await waitsForPerson(ctx.db, task.id))) throw refuse(409, 'task_invalid', `#${task.number} waits for a person's answer first.`);
   await refuseWaiting(ctx.db, task);
   await refuseOpenUnder(ctx.db, task);
-  const n: Note = { kind: 'submitted', actor: { agentId }, text: r.summary, data: { evidence: r.evidence } };
+  const n: Note = { kind: 'submitted', actor: { agentId }, text: r.summary, data: { evidence: r.evidence, ...(task.merging ? { merged: true } : {}) } };
   const unstuck = stuckGoes(ctx, task);
-  if (task.gates.length) {
+  /* Its gates passed it already: handing the merge in finishes it. */
+  if (task.gates.length && !task.merging) {
     const gate = await atGate(ctx.db, task, 1);
     const row = await move(ctx, task, gate.set, n, unstuck.also, gate.wakes);
     unstuck.tell();
@@ -357,7 +380,10 @@ async function roleOn(db: Db | Tx, named: string): Promise<boolean> {
 async function atGate(db: Db | Tx, task: Task, from: number): Promise<{ set: Partial<Task>; wakes: Wake[] }> {
   let stage = from;
   while (task.gates[stage - 1] && !(await roleOn(db, task.gates[stage - 1]!))) stage++;
-  if (!task.gates[stage - 1]) return { set: { ...closing(), stage: task.gates.length, panel: [] }, wakes: giver(task, 'done') };
+  if (!task.gates[stage - 1]) {
+    const passed = await passedGates(db, task, giver(task, 'done'));
+    return { set: { stage: task.gates.length, ...passed.set }, wakes: passed.wakes };
+  }
   const { panel, idle } = await panelFor(db, task, stage);
   if (panel.length && !idle.length) return { set: { status: 'review', stage, panel, silent: 0, assigneeAgentId: panel[0]! }, wakes: panel.map(agentId => ({ agentId, taskId: task.id, why: 'review' as const })) };
   const [lead] = await db.select({ name: agents.name, roleKey: agents.roleKey }).from(agents).where(eq(agents.id, task.gates[stage - 1]!));
@@ -422,8 +448,8 @@ async function closeGate(ctx: Live, task: Task, n: Note, given: Given[]): Promis
       const gate = await atGate(ctx.db, task, task.stage + 1);
       return { task: await move(ctx, task, gate.set, n, undefined, gate.wakes), wakes: gate.wakes };
     }
-    const wakes = giver(task, 'done', actorId);
-    return { task: await move(ctx, task, { ...closing(), panel: [] }, n, undefined, wakes), wakes };
+    const passed = await passedGates(ctx.db, task, giver(task, 'done', actorId));
+    return { task: await move(ctx, task, passed.set, n, undefined, passed.wakes), wakes: passed.wakes };
   }
   const failed = given.filter(g => !g.pass);
   const reasons = given.length === 1 ? failed[0]!.comment : failed.map(g => `${g.name}: ${g.comment}`).join('\n\n');
@@ -649,10 +675,10 @@ async function regate(ctx: Live, agentId: string, task: Task, c: TaskChange): Pr
   const gates = [...task.gates.slice(0, task.stage - 1), ...given];
   const text = rewrite(task, c);
   const n: Note = { kind: 'updated', actor: { agentId }, data: { fields: [...text.fields, 'gates'] } };
-  /* No gates left finishes it: whoever gave it hears so, unless they did it. */
+  /* No gates left passes it: merged first in a repository, else done, and whoever gave it hears so unless they did it. */
   if (!given.length) {
-    const wakes = giver(task, 'done', agentId);
-    return { task: await move(ctx, task, { ...text.set, gates, ...closing(), panel: [] }, n, undefined, wakes), wakes };
+    const passed = await passedGates(ctx.db, task, giver(task, 'done', agentId));
+    return { task: await move(ctx, task, { ...text.set, gates, ...passed.set }, n, undefined, passed.wakes), wakes: passed.wakes };
   }
   const gate = await atGate(ctx.db, { ...task, gates }, task.stage);
   return { task: await move(ctx, task, { ...text.set, gates, ...gate.set }, n, undefined, gate.wakes), wakes: gate.wakes };
