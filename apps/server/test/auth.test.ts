@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { requireCompanyScope, type Person } from '../src/auth/session.js';
 import { runCli } from '../src/cli.js';
 import { people, sessions } from '../src/db/schema.js';
@@ -99,6 +99,32 @@ describe('POST /api/auth/login', () => {
     await db.update(people).set({ status: 'disabled' });
     expect((await app.inject(login('ivan@acme.com', SETUP.password))).statusCode).toBe(401);
     expect((await app.inject(me(token))).statusCode).toBe(401);
+  });
+});
+
+describe('sessions', () => {
+  it('last 30 days, with a cookie only the browser sends back over https', async () => {
+    const { app, db } = await testApp({ PUBLIC_URL: 'https://hq.acme.com' });
+    vi.useFakeTimers({ toFake: ['Date'] });
+    onTestFinished(() => vi.useRealTimers());
+    const start = new Date('2026-11-01T10:00:00Z');
+    vi.setSystemTime(start);
+    const res = await app.inject({ method: 'POST', url: '/api/setup', payload: SETUP });
+    const cookie = res.cookies.find(c => c.name === 'hh_session')!;
+    const end = new Date(start.getTime() + 30 * 24 * 60 * 60 * 1000);
+    expect(cookie).toMatchObject({ secure: true, httpOnly: true, sameSite: 'Lax', path: '/', expires: end });
+    expect((await db.select().from(sessions)).map(s => s.expiresAt)).toEqual([end]);
+
+    vi.setSystemTime(end.getTime() - 1000);
+    expect((await app.inject(me(cookie.value))).statusCode).toBe(200);
+    vi.setSystemTime(end.getTime() + 1000);
+    expect((await app.inject(me(cookie.value))).statusCode).toBe(401);
+  });
+
+  it('send a cookie that also works over plain http when Hornhoof has no https address', async () => {
+    const { app } = await testApp({ PUBLIC_URL: 'http://192.168.1.20:8080' });
+    const res = await app.inject({ method: 'POST', url: '/api/setup', payload: SETUP });
+    expect(res.cookies.find(c => c.name === 'hh_session')?.secure).toBeFalsy();
   });
 });
 
