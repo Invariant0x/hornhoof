@@ -11,6 +11,9 @@ export function summary(counts: StatusCounts, words: Record<EmployeeStatus, stri
 }
 
 /* English is the source. Every other language has to match this shape. */
+/* A machine's load as the machines screen says it: processors, the busy share in percent, memory in GB, and what runs. */
+export type LoadWords = { cpus: number; busy: number; free: string; total: string; tests: number; jobs: number };
+
 export const en = {
   common: {
     somethingWrong: 'Something went wrong.',
@@ -241,6 +244,9 @@ export const en = {
     disconnectAsk: (host: string) => `Disconnect ${host}? Its nodes stop, and its subscriptions wait for a machine again.`,
     yesDisconnect: 'Yes, disconnect',
     noMachines: 'No machines yet.',
+    loadLine: (l: LoadWords) =>
+      `${l.cpus} ${l.cpus === 1 ? 'processor' : 'processors'}, ${l.busy}% busy. ${l.free} of ${l.total} GB of memory free. ` +
+      `Running now: ${l.tests} ${l.tests === 1 ? 'test run' : 'test runs'}, ${l.jobs} ${l.jobs === 1 ? 'agent turn' : 'agent turns'}.`,
   },
   notebook: {
     title: 'Notebook',

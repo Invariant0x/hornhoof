@@ -231,6 +231,10 @@ export const ru: Messages = {
     disconnectAsk: host => `Отключить ${host}? Ее ноды остановятся, а подписки снова будут ждать машину.`,
     yesDisconnect: 'Да, отключить',
     noMachines: 'Машин пока нет.',
+    loadLine: l =>
+      `${l.cpus} ${plural('ru', l.cpus, { one: 'процессор', few: 'процессора', many: 'процессоров', other: 'процессора' })}, загрузка ${l.busy}%. ` +
+      `Свободно ${l.free} из ${l.total} ГБ памяти. Сейчас идут: ${l.tests} ${plural('ru', l.tests, { one: 'прогон', few: 'прогона', many: 'прогонов', other: 'прогона' })} тестов, ` +
+      `${l.jobs} ${plural('ru', l.jobs, { one: 'ход', few: 'хода', many: 'ходов', other: 'хода' })} агентов.`,
   },
   notebook: {
     title: 'Блокнот',

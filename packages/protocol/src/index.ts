@@ -148,9 +148,23 @@ const Rows = z.number().int().min(4).max(200);
 /* What one frame carries of a terminal's screen or of a person's keys and pastes. */
 export const TERM_CHUNK = 64 * 1024;
 
+/* How busy a node's machine is: its processors, the load average over the last minute, its free and total memory in
+   bytes, and how many test runs and agent jobs the node runs now. A node sends it with its hello and every LOAD_MS. */
+const Load = z.object({
+  cpus: z.number().int().min(1).max(4096),
+  load: z.number().min(0).max(100_000),
+  memFree: z.number().int().min(0),
+  memTotal: z.number().int().min(0),
+  tests: z.number().int().min(0).max(1000),
+  jobs: z.number().int().min(0).max(1000),
+});
+export type NodeLoad = z.infer<typeof Load>;
+export const LOAD_MS = 20_000;
+
 const NodeMessage = z.discriminatedUnion('type', [
   /* terminals: the node runs agents in sessions people can watch and type into. */
-  z.object({ type: z.literal('hello'), version: z.string().max(40), loggedIn: z.boolean(), running: z.array(z.string()).max(100), models: Models.optional(), terminals: z.boolean().optional() }),
+  z.object({ type: z.literal('hello'), version: z.string().max(40), loggedIn: z.boolean(), running: z.array(z.string()).max(100), models: Models.optional(), terminals: z.boolean().optional(), load: Load.optional() }),
+  z.object({ type: z.literal('load'), ...Load.shape }),
   z.object({ type: z.literal('status'), loggedIn: z.boolean(), limits: Limits.nullable(), models: Models.optional() }),
   z.object({ type: z.literal('job.started'), jobId: z.string() }),
   z.object({

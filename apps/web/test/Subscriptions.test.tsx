@@ -262,6 +262,19 @@ describe('Subscriptions', () => {
     expect(calls.find(c => c.method === 'POST')).toEqual({ method: 'POST', path: '/api/machines/m2/disconnect', body: undefined });
   });
 
+  it('says how busy each machine is, and the built-in node to those who see the whole company', async () => {
+    const builtin = { online: true, load: { cpus: 4, load: 0.5, memFree: 2.5 * 1024 ** 3, memTotal: 8 * 1024 ** 3, tests: 0, jobs: 1 } };
+    mockApi({ 'GET /api/subscriptions': [200, { subscriptions: SUBS }], 'GET /api/machines': [200, { machines: MACHINES, builtin }] });
+    render(<Subscriptions me={ME} />);
+    const ivan = await screen.findByRole('row', { name: /^ivan-mbp\b/ });
+    expect(within(ivan).getByText('8 processors, 25% busy. 6 of 16 GB of memory free. Running now: 1 test run, 2 agent turns.')).toBeInTheDocument();
+    expect(within(screen.getByRole('row', { name: /^build-box\b/ })).queryByText(/processors/)).not.toBeInTheDocument();
+    const own = screen.getByRole('row', { name: /^Built-in node\b/ });
+    expect(within(own).getByText('4 processors, 13% busy. 2.5 of 8 GB of memory free. Running now: 0 test runs, 1 agent turn.')).toBeInTheDocument();
+    expect(within(own).getByText('Online')).toBeInTheDocument();
+    expect(within(own).queryByRole('button')).not.toBeInTheDocument();
+  });
+
   it('shows the states in Russian', async () => {
     localStorage.setItem('hh-lang', 'ru');
     lists();
@@ -279,5 +292,6 @@ describe('Subscriptions', () => {
     const [codexFive] = within(within(rowOf('Codex')).getByRole('list', { name: 'Лимиты' })).getAllByRole('listitem');
     expect(codexFive).toHaveTextContent(/^5 часовПока нет данных$/);
     expect(within(rowOf('Ключ Anthropic')).getByText('Оплата по факту, без лимитов плана')).toBeInTheDocument();
+    expect(within(rowOf('ivan-mbp')).getByText('8 процессоров, загрузка 25%. Свободно 6 из 16 ГБ памяти. Сейчас идут: 1 прогон тестов, 2 хода агентов.')).toBeInTheDocument();
   });
 });

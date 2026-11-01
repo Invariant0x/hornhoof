@@ -3,10 +3,11 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { AgentEvent, Limits, NodeMessage, ProviderId, ServerMessage } from '@hornhoof/protocol';
+import { LOAD_MS, type AgentEvent, type Limits, type NodeLoad, type NodeMessage, type ProviderId, type ServerMessage } from '@hornhoof/protocol';
 import { agentFs, ownFs, type AgentFs } from './agent-fs.js';
 import { connect } from './connection.js';
 import { agentUser, builtinAdapters, secureNode, type JobUser } from './isolation.js';
+import { machineLoad } from './load.js';
 import { adapterFor, programFor } from './providers/index.js';
 import { runJob, type ProviderAdapter, type RunResult } from './runner.js';
 import { dataDir, isRemoved, markRemoved, readState, rememberSession, writeState, type NodeState } from './state.js';
@@ -47,6 +48,8 @@ type RunOptions = {
   loginCheckMs?: number;
   learnMs?: number;
   limitsMs?: number;
+  /* How often the node says how busy its machine is. */
+  loadMs?: number;
 };
 
 /* A complete list of the plan's windows replaces what the node knew. A partial one, such as the single window a turn
@@ -62,7 +65,7 @@ function merged(known: Limits | null, news: Limits): Limits {
 }
 
 /* The node's life: stay connected, run jobs, report the sign-in state and the limits, clean up when removed. */
-export async function runNode({ dir, adapter, builtin, terminal, log = console.log, loginCheckMs = LOGIN_CHECK_MS, learnMs = LEARN_MS, limitsMs = LIMITS_MS }: RunOptions): Promise<{ stop(): void }> {
+export async function runNode({ dir, adapter, builtin, terminal, log = console.log, loginCheckMs = LOGIN_CHECK_MS, learnMs = LEARN_MS, limitsMs = LIMITS_MS, loadMs = LOAD_MS }: RunOptions): Promise<{ stop(): void }> {
   if (!builtin && isRemoved(dir)) {
     log('This node was removed in Hornhoof.');
     return { stop() {} };
@@ -131,6 +134,9 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
     emit({ type: 'status', loggedIn, limits, ...(models ? { models } : {}) });
   };
 
+  /* How busy the machine is, which Hornhoof weighs when it picks a machine for a test run. */
+  const load = (): NodeLoad => ({ ...machineLoad(), tests: 0, jobs: running.size });
+
   const conn = connect({
     url: state.server.replace(/^http/, 'ws') + '/api/nodes/socket',
     key: state.key,
@@ -139,7 +145,7 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
       host?.closeViews();
       /* Finished jobs Hornhoof has not confirmed still count as running, so the server does not give up on them. */
       const typed = host?.typedJobs() ?? [];
-      next({ type: 'hello', version: VERSION, loggedIn, running: [...running.keys(), ...typed, ...unconfirmed.keys()], ...(models ? { models } : {}), terminals: Boolean(host) });
+      next({ type: 'hello', version: VERSION, loggedIn, running: [...running.keys(), ...typed, ...unconfirmed.keys()], ...(models ? { models } : {}), terminals: Boolean(host), load: load() });
       for (const m of outbox.splice(0)) emit(m);
       for (const m of unconfirmed.values()) next(m);
     },
@@ -251,12 +257,16 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
   void askLimits();
   const asking = setInterval(() => void askLimits(), limitsMs);
   asking.unref();
+  /* An old figure says nothing, so one that cannot go out now is not kept for later. */
+  const reporting = setInterval(() => void send?.({ type: 'load', ...load() }), loadMs);
+  reporting.unref();
 
   function stop() {
     stopped = true;
     clearInterval(timer);
     if (learning) clearInterval(learning);
     clearInterval(asking);
+    clearInterval(reporting);
     void host?.stop();
     /* Let the last message leave before the socket closes. */
     setTimeout(() => conn.close(), 50);

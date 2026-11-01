@@ -1,4 +1,4 @@
-import { parseNodeMessage, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
+import { parseNodeMessage, type NodeLoad, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
 import type { WebSocket } from 'ws';
 
 /* Who is on the other end of a socket: one personal subscription's node, or the built-in node that runs every API key. */
@@ -17,8 +17,11 @@ export const sameNode = (a: NodeIdentity, b: NodeIdentity) => keyOf(a) === keyOf
 const MISSED_PINGS = 3;
 
 /* greeted: Hornhoof has handled the node's hello, so a job sent now cannot be mistaken for one lost in a restart.
-   terminals: the node said it runs agents in sessions people can watch. */
-type Entry = { socket: WebSocket; missed: number; greeted: boolean; terminals: boolean };
+   terminals: the node said it runs agents in sessions people can watch. load: how busy its machine was when it last said. */
+type Entry = { socket: WebSocket; missed: number; greeted: boolean; terminals: boolean; load: SaidLoad | null };
+
+/* A node's load and when it said it. */
+export type SaidLoad = NodeLoad & { at: number };
 
 export type TerminalMessage = Extract<NodeMessage, { type: 'term.data' | 'term.exit' | 'term.program' }>;
 
@@ -44,7 +47,7 @@ export class NodeHub {
   attach(id: NodeIdentity, socket: WebSocket): void {
     const key = keyOf(id);
     this.sockets.get(key)?.socket.close(4000, 'Replaced by a newer connection.');
-    const entry: Entry = { socket, missed: 0, greeted: false, terminals: false };
+    const entry: Entry = { socket, missed: 0, greeted: false, terminals: false, load: null };
     this.sockets.set(key, entry);
     const report = (err: unknown) => this.opts.onError?.(err);
     /* Messages run one after another, so job.started is stored before job.done. */
@@ -82,6 +85,17 @@ export class NodeHub {
     if (!entry) return;
     entry.greeted = true;
     entry.terminals = terminals;
+  }
+
+  /* Kept only in memory and only while the node is connected: a figure from a node that is gone says nothing. */
+  report(id: NodeIdentity, load: NodeLoad): void {
+    const entry = this.sockets.get(keyOf(id));
+    if (entry) entry.load = { ...load, at: Date.now() };
+  }
+
+  loadOf(id: NodeIdentity): SaidLoad | null {
+    const entry = this.sockets.get(keyOf(id));
+    return entry?.socket.readyState === 1 ? entry.load : null;
   }
 
   /* Online and past its hello: ready for an agent's turn. */

@@ -8,7 +8,9 @@ import { hashToken, newToken } from '../../crypto/tokens.js';
 import { machines, nodeCodes, people, subscriptions } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { publicUrl } from '../link/link.js';
+import { together } from '../testruns/load.js';
 import { disconnectMachines } from './disconnect.js';
+import { BUILTIN } from './hub.js';
 
 const JoinBody = z.object({
   code: z.string().min(1).max(200),
@@ -101,7 +103,10 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     const byMachine = new Map(usage.map(u => [u.machineId, u]));
     const served = await db.select({ id: subscriptions.id, machineId: subscriptions.machineId }).from(subscriptions).where(isNull(subscriptions.removedAt));
     const onlineMachines = new Set(served.filter(s => hub.isOnline({ kind: 'node', subscriptionId: s.id })).map(s => s.machineId));
+    const loadOf = (machineId: string) => together(served.filter(s => s.machineId === machineId).map(s => hub.loadOf({ kind: 'node', subscriptionId: s.id })));
     return {
+      /* The node that comes with the server runs the company's API keys and test runs too. */
+      builtin: me.scopeKind === 'company' ? { online: hub.isOnline(BUILTIN), load: together([hub.loadOf(BUILTIN)]) } : null,
       machines: rows.map(m => ({
         id: m.id,
         hostname: m.hostname,
@@ -111,6 +116,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
         online: onlineMachines.has(m.id),
         lastSeenAt: byMachine.get(m.id)?.lastSeenAt ?? null,
         subscriptions: byMachine.get(m.id)?.total ?? 0,
+        load: loadOf(m.id),
       })),
     };
   });

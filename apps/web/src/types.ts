@@ -1,4 +1,4 @@
-import type { Limits, ModelOption, ProviderId, TemplateKey } from '@hornhoof/protocol';
+import type { Limits, ModelOption, NodeLoad, ProviderId, TemplateKey } from '@hornhoof/protocol';
 
 export type { Limits, ModelOption, ProviderId, TemplateKey };
 
@@ -335,7 +335,12 @@ export type MachineView = {
   online: boolean;
   lastSeenAt: string | null;
   subscriptions: number;
+  /* What its nodes said last about how busy it is; none while no node of it is connected. */
+  load: NodeLoad | null;
 };
+
+/* The node that comes with the server, for those who see the whole company. */
+export type BuiltinView = { online: boolean; load: NodeLoad | null };
 
 export type JobView = {
   id: string;

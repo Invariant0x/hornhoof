@@ -339,6 +339,19 @@ describe('runNode', () => {
     expect(server.received.find(m => m.type === 'job.done')).toMatchObject({ jobId: 'j1', ok: false, error: 'cancelled' });
   });
 
+  it("says how busy its machine is in hello and every while after, with the agent jobs it runs", async () => {
+    const server = await fakeServer();
+    const slow: ProviderAdapter = { ...adapter, run: input => new Promise(done => input.signal?.addEventListener('abort', () => done({ ok: false, sessionId: null, result: '', output: '', error: 'agent_failed', limits: null }))) };
+    const node = await runNode({ dir: nodeDir(server.url), adapter: slow, log: () => {}, loadMs: 40 });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    expect(server.received[0]!.load).toMatchObject({ cpus: expect.any(Number), load: expect.any(Number), memFree: expect.any(Number), memTotal: expect.any(Number), tests: 0, jobs: 0 });
+    server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 60000, secret: null, instructions: null, toolToken: null });
+    await server.wait(() => server.received.some(m => m.type === 'load' && m.jobs === 1));
+    expect(server.received.find(m => m.type === 'load')).toMatchObject({ cpus: expect.any(Number), memTotal: expect.any(Number), tests: 0 });
+    server.send({ type: 'job.cancel', jobId: 'j1' });
+  });
+
   it('stays idle once removed', async () => {
     const lines: string[] = [];
     const dir = nodeDir('http://127.0.0.1:9');

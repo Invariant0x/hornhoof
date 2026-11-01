@@ -2,7 +2,8 @@ import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
-import type { JobView, Limits, MachineView, Me, SubView } from '../types';
+import type { NodeLoad } from '@hornhoof/protocol';
+import type { BuiltinView, JobView, Limits, MachineView, Me, SubView } from '../types';
 import { Ask } from '../ui/Ask';
 import { Bar, percent } from '../ui/Bar';
 import { CommandBox } from '../ui/CommandBox';
@@ -148,11 +149,23 @@ function TestResult({ test }: { test: Test }) {
   );
 }
 
+const GIB = 1024 ** 3;
+const gigabytes = (bytes: number) => String(Math.round((bytes / GIB) * 10) / 10);
+
+/* How busy a machine is, in one plain line under its name. */
+function LoadLine({ load }: { load: NodeLoad | null }) {
+  const t = useT();
+  if (!load) return null;
+  const busy = Math.min(100, Math.round((load.load / load.cpus) * 100));
+  return <div className="muted load-line">{t.subs.loadLine({ cpus: load.cpus, busy, free: gigabytes(load.memFree), total: gigabytes(load.memTotal), tests: load.tests, jobs: load.jobs })}</div>;
+}
+
 export function Subscriptions({ me }: { me: Me }) {
   const t = useT();
   const { language } = useLanguage();
   const [subs, setSubs] = useState<SubView[] | null>(null);
   const [machines, setMachines] = useState<MachineView[]>([]);
+  const [builtin, setBuiltin] = useState<BuiltinView | null>(null);
   const [panel, setPanel] = useState<Panel>(null);
   const [confirm, setConfirm] = useState<Confirm>(null);
   const [tests, setTests] = useState<Record<string, Test>>({});
@@ -169,10 +182,11 @@ export function Subscriptions({ me }: { me: Me }) {
 
   const load = useCallback(async () => {
     try {
-      const [list, hosts] = await Promise.all([api.get<{ subscriptions: SubView[] }>('/api/subscriptions'), api.get<{ machines: MachineView[] }>('/api/machines')]);
+      const [list, hosts] = await Promise.all([api.get<{ subscriptions: SubView[] }>('/api/subscriptions'), api.get<{ machines: MachineView[]; builtin?: BuiltinView | null }>('/api/machines')]);
       if (!live.current) return;
       setSubs(list.subscriptions);
       setMachines(hosts.machines);
+      setBuiltin(hosts.builtin ?? null);
     } catch (err) {
       setFailure(err);
     }
@@ -371,8 +385,8 @@ export function Subscriptions({ me }: { me: Me }) {
         <h2>{t.subs.machines}</h2>
         <p className="muted">{t.subs.machinesIntro}</p>
       </div>
-      {subs && machines.length === 0 && <p className="muted">{t.subs.noMachines}</p>}
-      {machines.length > 0 && (
+      {subs && machines.length === 0 && !builtin && <p className="muted">{t.subs.noMachines}</p>}
+      {(machines.length > 0 || builtin) && (
         <table className="ptable">
           <thead>
             <tr>
@@ -388,7 +402,10 @@ export function Subscriptions({ me }: { me: Me }) {
               return (
                 <Fragment key={m.id}>
                   <tr>
-                    <td><span className="pname">{m.hostname}</span></td>
+                    <td>
+                      <span className="pname">{m.hostname}</span>
+                      <LoadLine load={m.load} />
+                    </td>
                     <td>{m.owner.name}</td>
                     <td>{m.online ? <span className="status ready">{t.subs.online}</span> : <span className="muted">{lastSeen(t, language, m.lastSeenAt)}</span>}</td>
                     <td className="row-actions">
@@ -407,6 +424,17 @@ export function Subscriptions({ me }: { me: Me }) {
                 </Fragment>
               );
             })}
+            {builtin && (
+              <tr>
+                <td>
+                  <span className="pname">{t.subs.builtin}</span>
+                  <LoadLine load={builtin.load} />
+                </td>
+                <td />
+                <td>{builtin.online ? <span className="status ready">{t.subs.online}</span> : <span className="muted">{t.subs.states.builtin_offline}</span>}</td>
+                <td />
+              </tr>
+            )}
           </tbody>
         </table>
       )}
