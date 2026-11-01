@@ -6,27 +6,11 @@ import { requireCompanyScope, requirePerson } from '../../auth/session.js';
 import { jobs, subscriptions } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { cancelJob } from '../conversation/queue.js';
-import { agentFor } from '../agents/find.js';
 import { identityOf } from '../nodes/hub.js';
 import { dispatchJob, TEST_PROMPT, TEST_TIMEOUT_MS } from './dispatch.js';
-import { jobMetadata, jobView, JOB_METADATA_MAX_ROWS, publicJob } from './views.js';
+import { jobView, publicJob } from './views.js';
 
 const IdParams = z.object({ id: z.uuid() });
-const Utc = z.iso.datetime().regex(/^(?!0000)\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/).max(27);
-const MetadataWindow = z.object({ from: Utc, to: Utc });
-const utcMicros = (value: string): bigint => {
-  const [seconds, fraction = ''] = value.slice(0, -1).split('.');
-  return BigInt(Date.parse(`${seconds}Z`)) * 1_000n + BigInt(fraction.padEnd(6, '0'));
-};
-const metadataWindow = (query: unknown) => {
-  const { from, to } = MetadataWindow.parse(query);
-  const fromMicros = utcMicros(from);
-  const toMicros = utcMicros(to);
-  if (fromMicros > toMicros) throw new ApiError(400, 'validation', 'from must not be after to');
-  if (toMicros - fromMicros > 15n * 60n * 1_000_000n) throw new ApiError(400, 'validation', 'The window must be at most 15 minutes');
-  return { from, to };
-};
-const metadataOverflow = () => new ApiError(409, 'conflict', 'The job metadata response is too large. Narrow the window and try again.', 'job_metadata_overflow');
 
 const notOwner = () => new ApiError(403, 'forbidden', 'Only the owner can do this.', 'not_owner');
 const offline = () => new ApiError(409, 'conflict', 'The machine for this subscription is offline. Start it and try again.', 'machine_offline');
@@ -62,22 +46,6 @@ export function jobRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (!view) throw new ApiError(404, 'not_found', 'This job does not exist.', 'job_unknown');
     if (me.scopeKind !== 'company' && view.createdBy !== me.id && view.ownerId !== me.id) throw notOwner();
     return { job: publicJob(view) };
-  });
-
-  app.get('/api/agents/:id/job-metadata', async req => {
-    try {
-      const { me, agent } = await agentFor(ctx, req);
-      requireCompanyScope(me);
-      const { from, to } = metadataWindow(req.query);
-      const rows = await jobMetadata(db, agent.id, from, to);
-      if (rows.length > JOB_METADATA_MAX_ROWS) throw metadataOverflow();
-      const body = { jobs: rows, complete: true };
-      if (JSON.stringify(body).length > 28_000) throw metadataOverflow();
-      return body;
-    } catch (error) {
-      if (error instanceof ApiError || error instanceof z.ZodError) throw error;
-      throw new ApiError(503, 'unavailable', 'Job metadata is temporarily unavailable. Try again later.');
-    }
   });
 
   app.post('/api/jobs/:id/cancel', async (req, reply) => {

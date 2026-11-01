@@ -56,7 +56,7 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
     'view',
     'Reads any page of Hornhoof the CEO can open, as JSON: GET /api/org, /api/people, /api/subscriptions, /api/machines, /api/tasks?status=all, /api/tasks/<id>, ' +
       '/api/requests, /api/turns, /api/agents/<id> (an employee card with its skills, instructions and latest changes), /api/agents/<id>/events (its conversation), ' +
-      '/api/departments/<id>/roster, /api/agents/<id>/job-metadata?from=<UTC>&to=<UTC>, /api/updates.',
+      '/api/departments/<id>/roster, /api/updates.',
     { path: z.string().trim().min(1).max(500).describe('The page address, starting with /api/.') },
     ({ path }) => {
       const url = new URL(path, 'http://hornhoof');

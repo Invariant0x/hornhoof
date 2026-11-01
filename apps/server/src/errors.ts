@@ -28,7 +28,6 @@ export type ErrorReason =
   | 'machine_offline'
   | 'needs_login'
   | 'job_unknown'
-  | 'job_metadata_overflow'
   | 'too_many_attempts'
   | 'tool_token_invalid'
   | 'orchestrator_not_ready'
