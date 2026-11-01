@@ -219,39 +219,48 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
     );
   }
 
-  if (grants.has('message_employee')) {
-    server.registerTool(
-      'message_employee',
-      {
-        description: `Writes to another employee, as you, into its window: one at work gets it at once in the turn it runs, one that is not in its next turn. Use it to nudge a stuck agent or to tell a head. One turn sends at most ${TURN_NUDGES}.`,
-        inputSchema: { employee: z.uuid().describe("The employee's id, from agents or company."), text: z.string().trim().min(1).max(4000) },
-      },
-      async ({ employee, text }) => {
-        const [me] = await db.select().from(agents).where(eq(agents.id, job.agentId));
-        const [target] = await db.select().from(agents).where(and(eq(agents.id, employee), eq(agents.companyId, job.companyId), isNull(agents.removedAt)));
-        if (!me || !target || target.kind === 'orchestrator') return say(`There is no employee with id ${employee}. Call agents to see the current ids.`, true);
-        if (target.id === me.id) return say('That is you. Write to another employee.', true);
-        if (target.switchedOffAt) return say(`${target.name} is switched off and takes no work until a person switches it on.`, true);
-        if (!(await agentState(ctx, target.id)).ready) return say(`${target.name} cannot run now. Tell your head, who tells the CEO.`, true);
-        if (!(await counted(me.id))) return say(`One turn sends at most ${TURN_NUDGES} messages. Go on in your next round.`, true);
-        await enqueueTurn(ctx, {
-          companyId: job.companyId,
-          agentId: target.id,
-          prompt: turnPrompt({ name: me.name, title: roleTitle(me.roleKey) ?? '' }, text),
-          createdBy: null,
-          message: { personId: null, text, from: 'agent', name: me.name, by: me.id },
+  /* Everyone talks to the people of its own department directly; writing across departments is a skill's grant. */
+  const anywhere = grants.has('message_employee');
+  const topOf = async (departmentId: string | null) => {
+    if (!departmentId) return null;
+    const [d] = await db.select({ id: departments.id, parentId: departments.parentId }).from(departments).where(eq(departments.id, departmentId));
+    return d ? (d.parentId ?? d.id) : null;
+  };
+  server.registerTool(
+    'message_employee',
+    {
+      description: anywhere
+        ? `Writes to another employee, as you, into its window: one at work gets it at once in the turn it runs, one that is not in its next turn. Use it to nudge a stuck agent or to tell a head. One turn sends at most ${TURN_NUDGES}.`
+        : `Writes to another employee of your department, as you, into its window: one at work gets it at once in the turn it runs, one that is not in its next turn. Ask the one whose work yours builds on, or the one whose findings you do not understand, instead of waiting for your head. One turn sends at most ${TURN_NUDGES}.`,
+      inputSchema: { employee: z.uuid().describe("The employee's id, from agents or company."), text: z.string().trim().min(1).max(4000) },
+    },
+    async ({ employee, text }) => {
+      const [me] = await db.select().from(agents).where(eq(agents.id, job.agentId));
+      const [target] = await db.select().from(agents).where(and(eq(agents.id, employee), eq(agents.companyId, job.companyId), isNull(agents.removedAt)));
+      if (!me || !target || target.kind === 'orchestrator') return say(`There is no employee with id ${employee}. Call agents to see the current ids.`, true);
+      if (target.id === me.id) return say('That is you. Write to another employee.', true);
+      if (!anywhere && (await topOf(target.departmentId)) !== (await topOf(me.departmentId)))
+        return say(`${target.name} works in another department. Ask your head, who has the orchestrator pass it on.`, true);
+      if (target.switchedOffAt) return say(`${target.name} is switched off and takes no work until a person switches it on.`, true);
+      if (!(await agentState(ctx, target.id)).ready) return say(`${target.name} cannot run now. Tell your head, who tells the CEO.`, true);
+      if (!(await counted(me.id))) return say(`One turn sends at most ${TURN_NUDGES} messages. Go on in your next round.`, true);
+      await enqueueTurn(ctx, {
+        companyId: job.companyId,
+        agentId: target.id,
+        prompt: turnPrompt({ name: me.name, title: roleTitle(me.roleKey) ?? '' }, text),
+        createdBy: null,
+        message: { personId: null, text, from: 'agent', name: me.name, by: me.id },
+      });
+      /* The map runs it between the two departments, or the card between the two agents of one. */
+      if (me.departmentId && target.departmentId) {
+        const same = me.departmentId === target.departmentId;
+        ctx.bus.publish(job.companyId, {
+          type: 'pulse',
+          from: same ? { kind: 'agent', id: me.id, departmentId: me.departmentId } : { kind: 'department', id: me.departmentId },
+          to: same ? { kind: 'agent', id: target.id, departmentId: target.departmentId } : { kind: 'department', id: target.departmentId },
         });
-        /* The map runs it between the two departments, or the card between the two agents of one. */
-        if (me.departmentId && target.departmentId) {
-          const same = me.departmentId === target.departmentId;
-          ctx.bus.publish(job.companyId, {
-            type: 'pulse',
-            from: same ? { kind: 'agent', id: me.id, departmentId: me.departmentId } : { kind: 'department', id: me.departmentId },
-            to: same ? { kind: 'agent', id: target.id, departmentId: target.departmentId } : { kind: 'department', id: target.departmentId },
-          });
-        }
-        return say(`Sent to ${target.name}.`);
-      },
-    );
-  }
+      }
+      return say(`Sent to ${target.name}.`);
+    },
+  );
 }

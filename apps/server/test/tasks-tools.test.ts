@@ -59,8 +59,8 @@ describe('task tools', () => {
     const { orchestrator, head, bruno, tools } = await company();
     const names = async (agent: { id: string }) => (await (await tools(agent)).listTools()).tools.map(t => t.name).sort();
     expect(await names(orchestrator)).toEqual(['add_api_key', 'add_tasks', 'answer_request', 'ask_person', 'build_structure', 'cancel_task', 'cancel_update', 'change_employee', 'change_orchestrator', 'change_person', 'check_updates', 'close_improvement', 'comment', 'company', 'connect_plans', 'disconnect_machine', 'edit_turn', 'explain_request', 'fire_employee', 'forget', 'hire', 'improvements', 'invite_again', 'invite_person', 'message_employee', 'move_orchestrator', 'notebook', 'plan_command', 'plan_turn', 'propose_staff', 'propose_structure', 'remember', 'remove_repository', 'remove_subscription', 'report', 'reset_employee', 'rewrite_note', 'set_repository', 'staffing_options', 'stop_employee', 'task', 'tasks', 'test_subscription', 'turns', 'update_hornhoof', 'update_task', 'view']);
-    expect(await names(head)).toEqual(['ask_person', 'blocked', 'cancel_task', 'comment', 'company', 'create_task', 'forget', 'improvements', 'notebook', 'propose_improvement', 'remember', 'report', 'rewrite_note', 'submit', 'task', 'tasks', 'tell_orchestrator', 'update_task', 'verdict']);
-    expect(await names(bruno)).toEqual(['ask_person', 'blocked', 'comment', 'company', 'submit', 'task', 'tasks', 'verdict']);
+    expect(await names(head)).toEqual(['ask_person', 'blocked', 'cancel_task', 'comment', 'company', 'create_task', 'forget', 'improvements', 'message_employee', 'notebook', 'propose_improvement', 'remember', 'report', 'rewrite_note', 'submit', 'task', 'tasks', 'tell_orchestrator', 'update_task', 'verdict']);
+    expect(await names(bruno)).toEqual(['ask_person', 'blocked', 'comment', 'company', 'message_employee', 'submit', 'task', 'tasks', 'verdict']);
   });
 
   it("tells a head to give work to members, and to itself only when no member can do it", async () => {
