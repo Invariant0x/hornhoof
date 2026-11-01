@@ -155,6 +155,13 @@
       "when": 1793544097544,
       "tag": "0021_subscription_budget",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1793551146067,
+      "tag": "0022_pending_wakes",
+      "breakpoints": true
     }
   ]
 }

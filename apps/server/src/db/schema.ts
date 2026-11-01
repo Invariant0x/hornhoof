@@ -389,6 +389,23 @@ export const taskEvents = pgTable(
   t => [index('task_events_task_id').on(t.taskId)],
 );
 
+/* The turns a task move needs, written with the move and gone once they are queued: a server that stopped in between
+   queues them when it is back. why, text and note as in a wake. */
+export const pendingWakes = pgTable(
+  'pending_wakes',
+  {
+    id: id(),
+    companyId: companyId(),
+    agentId: uuid('agent_id').notNull().references(() => agents.id),
+    taskId: uuid('task_id').notNull().references(() => tasks.id),
+    why: text('why').notNull(),
+    text: text('text'),
+    note: text('note'),
+    createdAt: createdAt(),
+  },
+  t => [index('pending_wakes_created_at').on(t.createdAt)],
+);
+
 export const REQUEST_KINDS = ['question', 'approval', 'choice', 'stuck'] as const;
 export const REQUEST_STATUSES = ['open', 'answered', 'approved', 'declined', 'withdrawn'] as const;
 

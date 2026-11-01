@@ -2,6 +2,7 @@ import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lte, max, notInA
 import type { Ctx } from '../../app.js';
 import { agentEvents, agents, companies, departments, people, tasks, turns, type TurnMessage } from '../../db/schema.js';
 import { CLOSED, note, published, refuse, type Task, type Tx, type Wake } from './engine.js';
+import { keepWakes } from './outbox.js';
 import { handOff } from './pulses.js';
 import { improvementsChanged, takeForPlanning } from '../improvements/store.js';
 
@@ -134,7 +135,9 @@ async function start(tx: Tx, task: Task): Promise<Started | null> {
   if (!row) return null;
   if (head) await note(tx, row, { kind: 'assigned', actor: { agentId: task.createdByAgentId! }, data: { assignee: head.id } });
   else await note(tx, row, { kind: 'blocked', actor: { agentId: task.createdByAgentId! }, text: off ? 'Its department is switched off, so it could not start.' : 'Its department has no head, so it could not start.' });
-  return { task: row, head, off };
+  const started = { task: row, head, off };
+  await keepWakes(tx, row.companyId, wakesFor([started]));
+  return started;
 }
 
 function wakesFor(started: Started[]): Wake[] {

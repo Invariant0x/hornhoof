@@ -1,5 +1,5 @@
 import { eq, inArray } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { agents, companies, departments, jobs, requests, subscriptions, tasks } from '../src/db/schema.js';
 import { ask, createTask, submit } from '../src/modules/tasks/engine.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
@@ -43,6 +43,16 @@ describe('tasks for people', () => {
     expect((await get(oleg, '/api/requests')).json().requests).toMatchObject([{ kind: 'question', text: 'Which currency?', task: { number: 1, title: 'Checkout API' } }]);
     expect((await get(maria, '/api/requests')).json().requests).toEqual([]);
     expect((await get(ceo, '/api/requests')).json().requests).toHaveLength(1);
+  });
+
+  it('answers that the task is made even when waking its head breaks', async () => {
+    const { ctx, db, dev, head, oleg, post } = await company();
+    vi.spyOn(ctx.hub, 'isReady').mockImplementation(() => {
+      throw new Error('The node table is gone.');
+    });
+    const made = await post(oleg, '/api/tasks', { title: 'Payments', brief: '', body: '', department: dev.id });
+    expect(made.statusCode).toBe(201);
+    expect(await db.select({ assignee: tasks.assigneeAgentId }).from(tasks)).toEqual([{ assignee: head.id }]);
   });
 
   it("gives a person's task to the department's head, or the orchestrator's to the whole company only", async () => {

@@ -5,7 +5,7 @@ import { afterJob, agentState, enqueueTurn, openTypedTurn } from '../src/modules
 import { said } from '../src/modules/conversation/live.js';
 import { identityOf } from '../src/modules/nodes/hub.js';
 import { answer, ask, comment, createTask, GOING_ON_TURNS, report, submit, updateTask } from '../src/modules/tasks/engine.js';
-import { SILENT_TURNS, startWork, wakeAll, wakePrompt } from '../src/modules/tasks/wake.js';
+import { SILENT_TURNS, startWork, wakeAll, wakeLeftBehind, wakePrompt } from '../src/modules/tasks/wake.js';
 import { as, connectNode, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
 async function company() {
@@ -150,6 +150,46 @@ describe('a plan at its limit', () => {
     const queued = (await c.turnsOf(c.bruno.id)).filter(j => j.status === 'queued');
     expect(queued).toHaveLength(1);
     expect(queued[0]!.prompt).toContain('Go on with the work from where you left off');
+  });
+});
+
+describe('the turns a task move needs', () => {
+  const later = () => new Date(Date.now() + 60_000);
+
+  it('are kept with the move, so a server that stopped before queueing them still queues them', async () => {
+    const c = await company();
+    const task = await c.memberTask();
+    expect(await c.turnsOf(c.bruno.id)).toEqual([]);
+    expect(await wakeLeftBehind(c.ctx, later())).toBe(1);
+    expect((await c.turnsOf(c.bruno.id)).map(j => j.taskId)).toEqual([task.id]);
+    expect(await wakeLeftBehind(c.ctx, later())).toBe(0);
+  });
+
+  it('are forgotten once they are queued', async () => {
+    const c = await company();
+    const task = await c.memberTask();
+    await wakeAll(c.ctx, [{ agentId: c.bruno.id, taskId: task.id, why: 'assigned' }]);
+    expect(await wakeLeftBehind(c.ctx, later())).toBe(0);
+    expect(await c.turnsOf(c.bruno.id)).toHaveLength(1);
+  });
+
+  it('wait for the next try when queueing one breaks, and the others still go out', async () => {
+    const c = await company();
+    const task = await c.memberTask();
+    const publish = c.ctx.bus.publish.bind(c.ctx.bus);
+    let broke = false;
+    vi.spyOn(c.ctx.bus, 'publish').mockImplementation((companyId, m) => {
+      if (m.type !== 'agent_event' || broke) return publish(companyId, m);
+      broke = true;
+      throw new Error('The stream broke.');
+    });
+    await wakeAll(c.ctx, [
+      { agentId: c.bruno.id, taskId: task.id, why: 'assigned' },
+      { agentId: c.head.id, taskId: task.id, why: 'updated' },
+    ]);
+    expect(await c.turnsOf(c.head.id)).toHaveLength(1);
+    expect(await wakeLeftBehind(c.ctx, later())).toBe(1);
+    expect((await c.turnsOf(c.bruno.id)).map(j => j.taskId)).toEqual([task.id]);
   });
 });
 

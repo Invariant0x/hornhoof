@@ -1,11 +1,13 @@
 import { and, count, desc, eq, gte, inArray, isNull, notInArray, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
+import { loggable } from '../../errors.js';
 import { agentChanges, agentEvents, agents, jobs, requests, subscriptions, taskEvents, tasks } from '../../db/schema.js';
 import { afterJob, cancelJob, insertTurn, limitUntil, liveSubscription, onAgent, orchestratorOf, pump } from '../conversation/queue.js';
 import { sayLive } from '../conversation/live.js';
 import { quote } from '../conversation/prompt.js';
 import { appendEvent } from '../events/store.js';
 import { CLOSED, GATE_ROUNDS, leaveWork, NOT_A_MOVE, published, regateWaiting, silentTurn, taskSpot, wentOn, type Actor, type Task, type Wake, type WakeWhy } from './engine.js';
+import { wakeQueued, wakesLeft } from './outbox.js';
 import { settle, tell } from './turns.js';
 
 export { SILENT_TURNS } from './engine.js';
@@ -137,15 +139,33 @@ export async function backOn(ctx: Ctx, actor: Actor, agentId: string): Promise<v
 export async function wakeAll(ctx: Ctx, wakes: Wake[]): Promise<void> {
   const seen = new Set<string>();
   for (const w of wakes) {
-    if (w.why === 'explain') {
-      await explainRequest(ctx, w);
-      continue;
+    try {
+      if (w.why === 'explain') {
+        await explainRequest(ctx, w);
+        await wakeQueued(ctx.db, w);
+        continue;
+      }
+      const key = `${w.agentId}:${w.taskId}`;
+      const queued = !seen.has(key) && (await queueWake(ctx, w));
+      seen.add(key);
+      await wakeQueued(ctx.db, w);
+      /* A queued turn that does not go out now goes when its machine is ready. */
+      if (queued) await pump(ctx, w.agentId);
+    } catch (err) {
+      /* One that breaks keeps the others going, and its kept wake is tried again a minute later. */
+      ctx.log.error({ error: loggable(err) }, 'A turn for a task could not be queued and is tried again in a minute.');
     }
-    const key = `${w.agentId}:${w.taskId}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    if (await queueWake(ctx, w)) await pump(ctx, w.agentId);
   }
+}
+
+/* How long a move's caller has to queue its turns before Hornhoof takes them as left behind. */
+const LEFT_BEHIND_MS = 30_000;
+
+/* Queues the turns that moves kept and nobody queued, as after a server stopped between the two. */
+export async function wakeLeftBehind(ctx: Ctx, now = new Date()): Promise<number> {
+  const left = await wakesLeft(ctx.db, new Date(now.getTime() - LEFT_BEHIND_MS));
+  await wakeAll(ctx, left);
+  return left.length;
 }
 
 /* An employee waits for people: the orchestrator finds out what it needs and puts it into plain words for them, which
