@@ -10,6 +10,12 @@ export const SUPERPOWERS = '/opt/hornhoof/superpowers';
 /* The image's copy, or none on a machine without it. */
 export const superpowersIn = (dir = SUPERPOWERS): string | null => (existsSync(join(dir, '.claude-plugin', 'plugin.json')) ? dir : null);
 
+/* The plugins Claude Code loads for each session: superpowers, when the machine has it. */
+export const claudePlugins = (): string[] => {
+  const dir = superpowersIn();
+  return dir ? [dir] : [];
+};
+
 const CLAUDE: ReadonlySet<ProviderId> = new Set(['claude', 'anthropic_api', 'glm']);
 
 /* Where a program finds a project's skills: Claude Code in .claude/skills, Codex, Kimi Code and Antigravity in

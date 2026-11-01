@@ -21,6 +21,8 @@ export type LaunchInput = {
   compactWindow?: number | null;
   instructionsFile: string | null;
   urls: AgentUrls;
+  /* Claude Code plugin folders loaded for this session only, such as superpowers from the image. */
+  plugins?: string[];
 };
 /* sessionId: known before the program starts, or null when the program names it later in its log. */
 export type LaunchSpec = { command: string[]; env: Record<string, string>; sessionId: string | null };
@@ -44,7 +46,7 @@ const hook = (event: string) => [{ hooks: [{ type: 'command', command: `hh-hook 
 
 export const claudeProgram: TermProgram = {
   kind: 'claude',
-  launch({ bin, home, sessionId, model, effort, compactWindow, instructionsFile, urls }) {
+  launch({ bin, home, sessionId, model, effort, compactWindow, instructionsFile, urls, plugins = [] }) {
     const id = sessionId ?? randomUUID();
     const settings = {
       /* After compacting its conversation, Claude Code adds what hh-hook compact prints, which sends it back to its tools. */
@@ -62,6 +64,7 @@ export const claudeProgram: TermProgram = {
       '--settings',
       JSON.stringify(settings),
       ...(instructionsFile ? ['--append-system-prompt-file', instructionsFile] : []),
+      ...plugins.flatMap(dir => ['--plugin-dir', dir]),
       ...(model ? ['--model', model] : []),
       ...(effort ? ['--effort', effort] : []),
     ];

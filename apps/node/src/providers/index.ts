@@ -6,7 +6,7 @@ import { codexAdapter } from './codex.js';
 import { kimiAdapter } from './kimi.js';
 import { antigravityAdapter } from './antigravity.js';
 
-type Options = { home: string; tools: string; bin?: string; secret?: string | null; user?: JobUser | null };
+type Options = { home: string; tools: string; bin?: string; secret?: string | null; user?: JobUser | null; plugins?: string[] };
 
 /* The program each provider runs on: its file in tools/bin and the name people know it by. */
 export function programFor(provider: ProviderId): { bin: string; name: string } {

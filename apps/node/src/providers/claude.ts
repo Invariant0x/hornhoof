@@ -5,6 +5,7 @@ import { API_MODELS, CLAUDE_ALIASES, type AgentEvent, type Limits } from '@hornh
 import type { JobUser } from '../isolation.js';
 import type { ProviderAdapter, RunInput, RunResult } from '../runner.js';
 import { withProgramExit } from '../program-exit.js';
+import { claudePlugins } from '../skills.js';
 import { claudePlanLimits } from '../terminal/programs.js';
 import { contentText, inputText, isoFrom, isRecord, objectLine, toolName } from './events.js';
 import { askHidden, childEnv, ensureDir, exitsCleanly, installPackage, interactiveLogin, runProgram, tokensIn, writePrivate } from './process.js';
@@ -12,7 +13,8 @@ import { askHidden, childEnv, ensureDir, exitsCleanly, installPackage, interacti
 /* Claude Code serves three kinds of subscription: a personal plan, a company Anthropic key, and a GLM Coding Plan through Z.ai's Anthropic-compatible endpoint. */
 export type ClaudeMode = 'plan' | 'api_key' | 'glm';
 
-type Options = { home: string; tools: string; bin?: string; secret?: string | null; mode: ClaudeMode; user?: JobUser | null };
+/* plugins: folders Claude Code loads for each run, superpowers from the image by default. */
+type Options = { home: string; tools: string; bin?: string; secret?: string | null; mode: ClaudeMode; user?: JobUser | null; plugins?: string[] };
 
 const GLM_ENV = {
   ANTHROPIC_BASE_URL: 'https://api.z.ai/api/anthropic',
@@ -74,7 +76,7 @@ export function claudeInterrupted(line: unknown): boolean {
 
 export const SIGNED_OUT = /not logged in|please run \/login|invalid api key|authentication/i;
 
-export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'), secret = null, mode, user = null }: Options): ProviderAdapter {
+export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'), secret = null, mode, user = null, plugins = claudePlugins() }: Options): ProviderAdapter {
   const keyFile = join(home, 'glm-key');
   const glmKey = () => (existsSync(keyFile) ? readFileSync(keyFile, 'utf8').trim() : '');
 
@@ -125,6 +127,7 @@ export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'),
       const session = input.sessionId ? ['--resume', input.sessionId] : ['--session-id', randomUUID()];
       const args = ['-p', '--output-format', 'stream-json', '--verbose', ...session, '--permission-mode', 'bypassPermissions'];
       if (input.instructions) args.push('--append-system-prompt', input.instructions);
+      for (const dir of plugins) args.push('--plugin-dir', dir);
       /* The token sits in a file only the node reads, for this run alone, never on the command line. */
       const mcpFile = input.tools ? join(ensureDir(home), `mcp-${randomUUID()}.json`) : null;
       if (mcpFile && input.tools) {

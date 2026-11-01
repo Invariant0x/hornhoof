@@ -11,6 +11,7 @@ import { agentFs, ownFs, type AgentFs } from '../agent-fs.js';
 import { asAgent, type JobUser } from '../isolation.js';
 import { kimiContextSize } from '../providers/kimi.js';
 import { jobDone, tidy, type RunInput, type RunResult } from '../runner.js';
+import { claudePlugins } from '../skills.js';
 import type { ProgramOutput } from '../program-exit.js';
 import { Bridge } from './bridge.js';
 import { fromAgent } from './peer.js';
@@ -135,6 +136,8 @@ type Options = {
   /* On a node that runs as root, the user the agents' programs run as, and how the node does file work in their folders. */
   user?: JobUser | null;
   fs?: AgentFs;
+  /* Claude Code plugins loaded for each session, such as superpowers from the image; that copy by default. */
+  plugins?: string[];
 };
 
 const WAITING = 'This agent starts with its next turn.';
@@ -179,6 +182,7 @@ export class TerminalHost {
   private readonly views = new Map<string, View>();
   private readonly bridge: Bridge;
   private readonly fs: AgentFs;
+  private readonly plugins: string[];
   private readonly readyMs: number;
   private readonly pollMs: number;
   private readonly openMs: number;
@@ -194,6 +198,7 @@ export class TerminalHost {
     const owns = opts.proc ? fromAgent(key => this.panes(key), opts.proc) : null;
     this.bridge = new Bridge(opts.hornhoof, (key, event, body) => this.hook(key, event, body), owns);
     this.fs = opts.fs ?? (opts.user ? agentFs(opts.user) : ownFs);
+    this.plugins = opts.plugins ?? claudePlugins();
     this.readyMs = opts.readyMs ?? 120_000;
     this.pollMs = opts.pollMs ?? 500;
     this.openMs = opts.openMs ?? 8000;
@@ -271,7 +276,7 @@ export class TerminalHost {
     }
     /* Codex and Kimi Code read AGENTS.md in the folder they start in. */
     if (told && program.kind !== 'claude') await this.fs.write(join(input.workDir, 'AGENTS.md'), told + '\n');
-    const spec = program.launch({ bin: job.bin, home: job.home, workDir: input.workDir, sessionId: input.sessionId, model: input.model, effort: input.effort, compactWindow: input.compactWindow, instructionsFile, urls });
+    const spec = program.launch({ bin: job.bin, home: job.home, workDir: input.workDir, sessionId: input.sessionId, model: input.model, effort: input.effort, compactWindow: input.compactWindow, instructionsFile, urls, plugins: this.plugins });
     const hash = hashOf({ kind: program.kind, bin: job.bin, model: input.model, effort: input.effort ?? null, compactWindow: input.compactWindow ?? null, instructions: input.instructions, env: lasting(input.env) });
     /* A new session asked for goes on in a program started for a person that nothing was said in yet. */
     const sameSession = input.sessionId === null ? a.fresh : input.sessionId === a.sessionId || a.cleared.has(input.sessionId);

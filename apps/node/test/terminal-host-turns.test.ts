@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ownFs, type AgentFs } from '../src/agent-fs.js';
+import { claudeProgram } from '../src/terminal/programs.js';
 import { FAKE, SECRET, hasTmux, host, tmux, home, setUp, job } from './terminal-host-helpers.js';
 
 describe.skipIf(!hasTmux)('agents in live terminals', () => {
@@ -35,6 +36,15 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     expect(readFileSync(seen, 'utf8')).toMatch(new RegExp(`^--reuid=4242 --regid=4343 --init-groups -- ${FAKE}`));
     expect(done).toEqual(expect.arrayContaining([`mkdir ${j.input.workDir}`, `write ${join(j.input.workDir, '.hh-instructions.md')}`, `read ${join(home, '.claude.json')}`, `read ${join(home, 'settings.json')}`]));
     expect(readdirSync(j.input.workDir).filter(name => name.startsWith('.hh-env-') || name.startsWith('.hh-output-'))).toEqual([]);
+  });
+
+  it('hands Claude Code the plugins the node has, such as superpowers', async () => {
+    await setUp({ plugins: ['/opt/hornhoof/superpowers'] });
+    const given: (string[] | undefined)[] = [];
+    const j = job('a-plug', 'hello');
+    const result = await host.run({ ...j, program: { ...claudeProgram, launch: input => (given.push(input.plugins), claudeProgram.launch(input)) } });
+    expect(result.ok).toBe(true);
+    expect(given).toEqual([['/opt/hornhoof/superpowers']]);
   });
 
   it('presses Enter again when the program did not take the prompt, as Claude Code that just started can miss it', async () => {

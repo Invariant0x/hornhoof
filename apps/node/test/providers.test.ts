@@ -729,6 +729,14 @@ function withTools(provider: ProviderId) {
 }
 
 describe('Hornhoof tools and instructions', () => {
+  it('give Claude Code the plugins the node has, for the run only', async () => {
+    const sp = mkdtempSync(join(tmpdir(), 'hh-sp-'));
+    await adapterFor('claude', { home, tools, bin: join(FAKES, FAKE_BIN.claude), plugins: [sp] }).run(input());
+    const { argv } = lastRun();
+    expect(argv[argv.indexOf('--plugin-dir') + 1]).toBe(sp);
+    expect(argv.indexOf('--plugin-dir')).toBeLessThan(argv.indexOf('--'));
+  });
+
   it('give Claude Code the instructions and a private MCP config it deletes after the run', async () => {
     const { events, run } = withTools('claude');
     await run();
