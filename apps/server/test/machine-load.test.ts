@@ -40,11 +40,11 @@ describe("a machine's load", () => {
 
   it('is shown for the built-in node to those who see the whole company', async () => {
     const { app, db, url, ceo } = await liveCompany();
-    expect((await machinesOf(app, ceo)).builtin).toEqual({ online: false, load: null });
+    expect((await machinesOf(app, ceo)).builtin).toMatchObject({ online: false, load: null, running: { parts: [] } });
     const builtin = await connectNode(url, NODE_KEY);
     builtin.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], load: load({ cpus: 4 }) });
     await until(async () => (await machinesOf(app, ceo)).builtin.load !== null);
-    expect((await machinesOf(app, ceo)).builtin).toEqual({ online: true, load: load({ cpus: 4 }) });
+    expect((await machinesOf(app, ceo)).builtin).toMatchObject({ online: true, load: load({ cpus: 4 }) });
     const [acme] = await db.select().from(companies);
     const [sales] = await db.insert(departments).values({ companyId: acme!.id, templateKey: 'sales', roleCode: 'SAL' }).returning();
     const ann = await invitePerson(app, ceo, { name: 'Ann', email: 'ann@acme.com', access: { departments: [sales!.id] } });

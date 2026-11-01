@@ -1,12 +1,12 @@
 import { readFile } from 'node:fs/promises';
-import { and, asc, eq, gt, inArray, isNull } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { requirePerson } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
-import { machines, nodeCodes, nodes, people, subscriptions, type Provider } from '../../db/schema.js';
+import { agents, jobs, machines, nodeCodes, nodes, people, subscriptions, tasks, testParts, testRuns, type Provider } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { publicUrl } from '../link/link.js';
 import { together } from '../testruns/load.js';
@@ -165,9 +165,38 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
       .orderBy(asc(nodes.createdAt), asc(subscriptions.provider), asc(nodes.id));
     const on = (machineId: string) => served.filter(n => n.machineId === machineId);
     const latest = (seen: (Date | null)[]) => seen.reduce<Date | null>((a, b) => (b && (!a || b > a) ? b : a), null);
+    /* What runs on each machine now: the employees whose program lives there, busy while a turn of theirs runs, and the
+       parts of test runs it takes. A company key's employees are on the built-in node. */
+    const placed = await db
+      .select({
+        id: agents.id,
+        name: agents.name,
+        nodeId: agents.nodeId,
+        builtin: sql<boolean>`${subscriptions.kind} = 'api_key'`,
+        busy: sql<boolean>`exists (select 1 from ${jobs} where ${jobs.agentId} = ${agents.id} and ${jobs.status} = 'running')`,
+      })
+      .from(agents)
+      .leftJoin(subscriptions, eq(subscriptions.id, agents.subscriptionId))
+      .where(and(eq(agents.companyId, me.companyId), isNull(agents.removedAt), isNull(subscriptions.removedAt), isNotNull(agents.subscriptionId)))
+      .orderBy(asc(agents.name), asc(agents.id));
+    const parts = await db
+      .select({ machineId: testParts.machineId, builtin: testParts.builtin, run: testRuns.number, task: tasks.number, part: testParts.part, parts: testRuns.parts, agent: agents.name, startedAt: testParts.startedAt })
+      .from(testParts)
+      .innerJoin(testRuns, eq(testRuns.id, testParts.runId))
+      .leftJoin(tasks, eq(tasks.id, testRuns.taskId))
+      .leftJoin(agents, eq(agents.id, testRuns.agentId))
+      .where(and(eq(testParts.companyId, me.companyId), eq(testParts.status, 'running')))
+      .orderBy(asc(testParts.startedAt), asc(testRuns.number), asc(testParts.part));
+    const running = (holds: (a: (typeof placed)[number]) => boolean, runs: (p: (typeof parts)[number]) => boolean) => ({
+      agents: placed.filter(holds).map(a => ({ id: a.id, name: a.name, busy: Boolean(a.busy) })),
+      parts: parts.filter(runs).map(({ machineId: _, builtin: __, ...p }) => ({ ...p, kind: 'tests' as const })),
+    });
     return {
       /* The node that comes with the server runs the company's API keys and test runs too. */
-      builtin: me.scopeKind === 'company' ? { online: hub.isOnline(BUILTIN), load: together([hub.loadOf(BUILTIN)]) } : null,
+      builtin:
+        me.scopeKind === 'company'
+          ? { online: hub.isOnline(BUILTIN), load: together([hub.loadOf(BUILTIN)]), running: running(a => Boolean(a.builtin), p => p.builtin) }
+          : null,
       machines: rows.map(m => ({
         id: m.id,
         hostname: m.hostname,
@@ -179,6 +208,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
         plans: on(m.id).flatMap(n => (n.subscriptionId && n.provider ? [{ id: n.subscriptionId, provider: n.provider, status: n.status, online: hub.isOnline(nodeIdentity(n.id)) }] : [])),
         load: together(on(m.id).map(n => hub.loadOf(nodeIdentity(n.id)))),
         lendsTests: m.lendsTests,
+        running: running(a => on(m.id).some(n => n.id === a.nodeId), p => p.machineId === m.id),
       })),
     };
   });

@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
-import { agents, departments, companies, nodeCodes, nodes, people, subscriptions } from '../src/db/schema.js';
+import { agents, departments, companies, jobs, nodeCodes, nodes, people, subscriptions, tasks, testParts, testRuns } from '../src/db/schema.js';
 import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until } from './helpers.js';
 
 const MACHINE = { machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' };
@@ -239,6 +239,39 @@ describe('one plan on several machines', () => {
       { id: laptop.machine.id, plans: [{ id: plan, provider: 'claude', status: 'ready', online: true }] },
       { id: tower.machine.id, plans: [] },
     ]);
+  });
+
+  it('says what runs on each machine now: the employees whose program is there, and the parts of test runs', async () => {
+    const { app, db, ceo, plan, mac, laptop } = await twoMachines();
+    const [acme] = await db.select().from(companies);
+    const [dev] = await db.insert(departments).values({ companyId: acme!.id, templateKey: 'development', roleCode: 'DEV' }).returning();
+    const hire = async (name: string) =>
+      (await db.insert(agents).values({ companyId: acme!.id, kind: 'worker', name, roleKey: 'DEV-BE', departmentId: dev!.id, model: '', subscriptionId: plan, nodeId: mac.nodes[0].nodeId }).returning())[0]!;
+    const bruno = await hire('Bruno');
+    const vera = await hire('Vera');
+    const [job] = await db.insert(jobs).values({ companyId: acme!.id, subscriptionId: plan, agentId: bruno.id, prompt: 'work', status: 'running', timeoutMs: 1000, startedAt: new Date() }).returning();
+    const [task] = await db.insert(tasks).values({ companyId: acme!.id, number: 12, title: 'Checkout API', assigneeAgentId: bruno.id }).returning();
+    const [run] = await db.insert(testRuns).values({ companyId: acme!.id, number: 3, taskId: task!.id, agentId: bruno.id, jobId: job!.id, command: 'npm test', parts: 2, timeoutMs: 60_000 }).returning();
+    const startedAt = new Date('2026-11-01T10:00:00Z');
+    await db.insert(testParts).values([
+      { companyId: acme!.id, runId: run!.id, part: 1, status: 'running', machineId: laptop.machine.id, startedAt },
+      { companyId: acme!.id, runId: run!.id, part: 2, status: 'passed', machineId: laptop.machine.id, startedAt },
+    ]);
+    expect(await machinesOf(app, ceo)).toMatchObject([
+      {
+        id: mac.machine.id,
+        running: {
+          agents: [
+            { id: bruno.id, name: 'Bruno', busy: true },
+            { id: vera.id, name: 'Vera', busy: false },
+          ],
+          parts: [],
+        },
+      },
+      { id: laptop.machine.id, running: { agents: [], parts: [{ run: 3, kind: 'tests', task: 12, part: 1, parts: 2, agent: 'Bruno', startedAt: startedAt.toISOString() }] } },
+    ]);
+    await db.update(testParts).set({ machineId: null, builtin: true }).where(eq(testParts.part, 1));
+    expect((await app.inject({ url: '/api/machines', ...as(ceo) })).json().builtin.running.parts).toMatchObject([{ run: 3, part: 1 }]);
   });
 
   it('gives a plan a new key on a machine it is on already, and keeps the node', async () => {
