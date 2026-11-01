@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process';
-import { chownSync, closeSync, constants, fstatSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chownSync, closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { MAX_RUN_FILES, RUN_FILE_BYTES, TEST_LOG_BYTES, type NodeMessage, type ServerMessage, type TestError } from '@hornhoof/protocol';
 import { ensurePasswd, prepareFolder, type JobUser } from './isolation.js';
@@ -206,6 +206,11 @@ export function partFiles(server: string, key: string): PartFiles {
    when it has one, at most MAX_RUN_FILES of them, each at most RUN_FILE_BYTES. Opened without following a link, so a
    link to the node's key never leaves the machine. */
 async function putOutputs(msg: TestRun, folder: string, user: JobUser | null, files: PartFiles, out: Output): Promise<void> {
+  /* The command may have put a link to another folder in its place: then nothing goes. */
+  if (!lstatSync(folder).isDirectory()) {
+    out.line('The output folder is no longer a folder, so nothing goes on the task.');
+    return;
+  }
   const names = readdirSync(folder).sort();
   if (!names.length) return;
   const put: string[] = [];
@@ -217,7 +222,8 @@ async function putOutputs(msg: TestRun, folder: string, user: JobUser | null, fi
     }
     let fd: number | null = null;
     try {
-      fd = openSync(join(folder, name), constants.O_RDONLY | constants.O_NOFOLLOW);
+      /* A named pipe opens without waiting for a writer, and is left out as no plain file. */
+      fd = openSync(join(folder, name), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
       const st = fstatSync(fd);
       if (!st.isFile() || (user && st.uid !== user.uid) || st.size > RUN_FILE_BYTES) {
         left.push(name);

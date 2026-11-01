@@ -145,6 +145,23 @@ describe('a part of other work on a node', () => {
     expect(readdirSync(join(dir, 'tests'))).toEqual([]);
   });
 
+  it('leaves out of the task what is not a plain file, a named pipe too, without waiting on it', async () => {
+    const { files, put } = taskFiles();
+    const done = await runTests(work({ command: 'mkfifo "$HH_OUT/pipe"; mkdir "$HH_OUT/sub"; echo made > "$HH_OUT/made.txt"' }), { dir: nodeDir(), user: null, hidden: [], files });
+    expect(done).toMatchObject({ ok: true });
+    expect(put).toEqual([{ partId: 'part-1', name: 'made.txt', text: 'made\n' }]);
+    expect(done.log).toMatch(/left out: pipe, sub/);
+  });
+
+  it('puts nothing on the task when the command put something else in place of its output folder', async () => {
+    const elsewhere = nodeDir();
+    writeFileSync(join(elsewhere, 'secret.txt'), 'not yours\n');
+    const { files, put } = taskFiles();
+    const done = await runTests(work({ command: `rmdir "$HH_OUT"; ln -s ${elsewhere} "$HH_OUT"` }), { dir: nodeDir(), user: null, hidden: [], files });
+    expect(put).toEqual([]);
+    expect(done.log).toMatch(/output folder is no longer a folder/);
+  });
+
   it("clones a branch first when it has one, with the task's files beside it", async () => {
     const { url, commits } = origin();
     const { files, put } = taskFiles({ 'data.csv': 'x\n' });
