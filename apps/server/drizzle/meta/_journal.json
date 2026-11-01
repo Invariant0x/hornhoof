@@ -176,6 +176,13 @@
       "when": 1793554033146,
       "tag": "0024_builtin_sessions",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1793556097263,
+      "tag": "0025_public_links",
+      "breakpoints": true
     }
   ]
 }

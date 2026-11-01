@@ -13,6 +13,8 @@ import { EventBus } from './modules/events/bus.js';
 import { streamRoutes } from './modules/events/stream.js';
 import { improvementRoutes } from './modules/improvements/routes.js';
 import { jobRoutes } from './modules/jobs/routes.js';
+import { PublicLinks } from './modules/link/link.js';
+import { linkRoutes } from './modules/link/routes.js';
 import { NodeHub } from './modules/nodes/hub.js';
 import { handleNodeClose, handleNodeMessage } from './modules/nodes/messages.js';
 import { nodeRoutes } from './modules/nodes/routes.js';
@@ -41,9 +43,18 @@ import type { Db } from './db/client.js';
 /* logger is off unless given: tests stay quiet, main.ts turns it on so errors reach the container log. */
 export type Deps = { db: Db; config: Config; logger?: FastifyServerOptions['logger']; agentSql?: AgentSql | null };
 
-/* What routes get: the deps, the live node connections, the live stream to browsers, the terminals people watch and the
-   check for newer builds. */
-export type Ctx = Deps & { log: FastifyBaseLogger; hub: NodeHub; bus: EventBus; terminals: TerminalRelay; updates: UpdateCheck; updater: UpdaterControl; templates: Templates };
+/* What routes get: the deps, the live node connections, the live stream to browsers, the terminals people watch, the
+   check for newer builds and the company's public link. */
+export type Ctx = Deps & {
+  log: FastifyBaseLogger;
+  hub: NodeHub;
+  bus: EventBus;
+  terminals: TerminalRelay;
+  updates: UpdateCheck;
+  updater: UpdaterControl;
+  templates: Templates;
+  links: PublicLinks;
+};
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -76,8 +87,10 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   });
   ctx.updater = new UpdaterControl(config.controlDir);
   ctx.templates = loadTemplates(config.templatesDir);
+  ctx.links = new PublicLinks(ctx);
   app.addHook('onReady', async () => ctx.updates.start());
   app.addHook('onClose', async () => ctx.updates.stop());
+  app.addHook('onReady', async () => ctx.links.sync());
   await app.register(cookie);
   await app.register(websocket, SOCKET_OPTIONS);
   /* After the socket plugin, so a refused socket is closed by it. */
@@ -106,5 +119,6 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   updateRoutes(app, ctx);
   taskRoutes(app, ctx);
   attachmentRoutes(app, ctx);
+  linkRoutes(app, ctx);
   return app;
 }

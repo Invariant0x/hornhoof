@@ -526,3 +526,16 @@ export const improvements = pgTable(
   },
   t => [index('improvements_company_id_status').on(t.companyId, t.status)],
 );
+
+/* The company's public link at the relay, like acme.hornhoof.org: its name and address, the key that changes or removes
+   it there and the tunnel's settings, the last two encrypted. One deployment has one company, so at most one link. */
+export const publicLinks = pgTable('public_links', {
+  companyId: uuid('company_id')
+    .primaryKey()
+    .references(() => companies.id),
+  name: text('name').notNull(),
+  url: text('url').notNull(),
+  keyEnc: text('key_enc').notNull(),
+  tunnelEnc: text('tunnel_enc').notNull(),
+  createdAt: createdAt(),
+});

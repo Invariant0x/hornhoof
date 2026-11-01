@@ -76,7 +76,11 @@ export type ErrorReason =
   | 'turn_unknown'
   | 'repo_invalid'
   | 'attachment_invalid'
-  | 'attachment_unknown';
+  | 'attachment_unknown'
+  | 'relay_unreachable'
+  | 'link_taken'
+  | 'link_reserved'
+  | 'link_invalid';
 
 export class ApiError extends Error {
   constructor(
