@@ -148,7 +148,7 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
   };
 
   /* How busy the machine is, which Hornhoof weighs when it picks a machine for a test run. */
-  const load = (): NodeLoad => ({ ...machineLoad(), tests: testing.size, jobs: running.size });
+  const load = (): NodeLoad => ({ ...machineLoad({ dir }), tests: testing.size, jobs: running.size });
 
   const conn = connect({
     url: state.server.replace(/^http/, 'ws') + '/api/nodes/socket',

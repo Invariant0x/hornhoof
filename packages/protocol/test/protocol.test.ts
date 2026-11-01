@@ -121,6 +121,13 @@ describe('test runs', () => {
     expect(parseNodeMessage(JSON.stringify({ type: 'load', ...LOAD, cpus: 0 }))).toBeNull();
   });
 
+  it("carry what the node can use of its machine's processor and disk, and what the machine has, from newer nodes only", () => {
+    const MACHINE = { cpuModel: 'Apple M2 Pro', diskFree: 120e9, diskTotal: 460e9, hostCpus: 10, hostMemory: 32e9 };
+    expect(parseNodeMessage(JSON.stringify({ type: 'load', ...LOAD, ...MACHINE }))).toEqual({ type: 'load', ...LOAD, ...MACHINE });
+    expect(parseNodeMessage(JSON.stringify({ type: 'load', ...LOAD, cpuModel: 'x'.repeat(201) }))).toBeNull();
+    expect(parseNodeMessage(JSON.stringify({ type: 'load', ...LOAD, hostCpus: 0 }))).toBeNull();
+  });
+
   it('send a part with an https repository, a plain branch or none, and at most the parts a run splits into', () => {
     expect(parse(RUN)).toEqual(RUN);
     expect(parse({ ...RUN, branch: null })).toMatchObject({ branch: null });

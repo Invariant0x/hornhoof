@@ -258,7 +258,9 @@ const Rows = z.number().int().min(4).max(200);
 export const TERM_CHUNK = 64 * 1024;
 
 /* How busy a node's machine is: its processors, the load average over the last minute, its free and total memory in
-   bytes, and how many test runs and agent jobs the node runs now. A node sends it with its hello and every LOAD_MS. */
+   bytes, and how many test runs and agent jobs the node runs now. A node sends it with its hello and every LOAD_MS.
+   Newer nodes also name the machine's processor and the free and total space of the disk their folders are on, and,
+   when they run in a smaller system than the machine (Docker on a Mac), the machine's own processors and memory. */
 const Load = z.object({
   cpus: z.number().int().min(1).max(4096),
   load: z.number().min(0).max(100_000),
@@ -266,6 +268,11 @@ const Load = z.object({
   memTotal: z.number().int().min(0),
   tests: z.number().int().min(0).max(1000),
   jobs: z.number().int().min(0).max(1000),
+  cpuModel: z.string().max(200).optional(),
+  diskFree: z.number().int().min(0).optional(),
+  diskTotal: z.number().int().min(0).optional(),
+  hostCpus: z.number().int().min(1).max(4096).optional(),
+  hostMemory: z.number().int().min(0).optional(),
 });
 export type NodeLoad = z.infer<typeof Load>;
 export const LOAD_MS = 20_000;
