@@ -5,14 +5,15 @@
 #   updater.sh --once   handle the waiting request, if any, then exit
 #
 # The app writes request.json {id, version, tag, digest} into the control folder; this writes status.json {id,
-# version, state, step, log, at} and touches alive. An update saves the database, downloads the build by the digest
-# the app read for it, checks that the tag still names that build, runs that build's own installer, and waits for
-# the new server to answer with the build's commit. If it does not, the build that ran before goes back, and the
-# database goes back to the saved copy first when the new build added migrations to it, since the old build does not
-# know them. An updater stopped during an update goes on with it when it starts again. The updater holds the Docker
-# socket, so it takes nothing from the request but the tag, which must be a plain image tag, and the digest, and only
-# runs images of HORNHOOF_IMAGE. It runs on the bash that ships with macOS (3.2) for the tests, and on Alpine's in its
-# image.
+# version, state, step, log, at} and touches alive. An update downloads the build by the digest the app read for it,
+# checks that the tag still names that build, and downloads every image that build's compose file names while the
+# old server keeps working. Only then it saves the database, runs that build's own installer, which starts the
+# images it was given, and waits for the new server to answer with the build's commit. If it does not, the build that
+# ran before goes back, and the database goes back to the saved copy first when the new build added migrations to
+# it, since the old build does not know them. An updater stopped during an update goes on with it when it starts
+# again. The updater holds the Docker socket, so it takes nothing from the request but the tag, which must be a plain
+# image tag, and the digest, and only runs images of HORNHOOF_IMAGE. It runs on the bash that ships with macOS (3.2)
+# for the tests, and on Alpine's in its image.
 set -euo pipefail
 
 CONTROL="${HORNHOOF_CONTROL_DIR:-/control}"
@@ -162,19 +163,31 @@ restore() {
     -c 'DROP DATABASE IF EXISTS hornhoof WITH (FORCE)' -c 'ALTER DATABASE hornhoof_restore RENAME TO hornhoof' > /dev/null || return 1
 }
 
-# install <tag> [image]: runs the installer and the compose file that come inside that build of the app image, the
-# one the tag names or the image given.
-install() {
-  local tag=$1 image=${2:-$IMAGE:$1} cid dir
-  dir="$WORK/$tag"
+# unpack <tag> <image>: the installer and the compose file that come inside that build of the app image, in
+# WORK/<tag>.
+unpack() {
+  local dir="$WORK/$1" cid
   mkdir -p "$dir"
-  cid=$(docker create "$image") || return 1
+  cid=$(docker create "$2") || return 1
   if ! docker cp "$cid:/app/scripts/install.sh" "$dir/install.sh" > /dev/null || ! docker cp "$cid:/app/compose.yaml" "$dir/compose.yaml" > /dev/null; then
     docker rm "$cid" > /dev/null 2>&1 || true
     return 1
   fi
   docker rm "$cid" > /dev/null 2>&1 || true
-  HORNHOOF_SERVER_DIR="$SERVER_DIR" HORNHOOF_VERSION="$tag" HORNHOOF_FROM_UPDATER=1 HORNHOOF_COMPOSE_FILE="$dir/compose.yaml" \
+}
+
+# Every image the compose file of the new build names, with the server's .env filling it in.
+pull_images() {
+  HORNHOOF_VERSION="$TAG" docker compose --project-directory "$SERVER_DIR" -f "$WORK/$TAG/compose.yaml" pull >> "$WORK/install.log" 2>&1
+}
+
+# install <tag> [image]: runs the installer and the compose file that come inside that build of the app image, the
+# one the tag names or the image given. Its images are on this computer already: the new build's came before the
+# database was saved, and the build from before ran here. Compose downloads only an image that is missing.
+install() {
+  local tag=$1 image=${2:-$IMAGE:$1} dir="$WORK/$1"
+  unpack "$tag" "$image" || return 1
+  HORNHOOF_SERVER_DIR="$SERVER_DIR" HORNHOOF_VERSION="$tag" HORNHOOF_FROM_UPDATER=1 HORNHOOF_COMPOSE_FILE="$dir/compose.yaml" HORNHOOF_PULLED=1 \
     bash "$dir/install.sh" server >> "$WORK/install.log" 2>&1
 }
 
@@ -231,13 +244,6 @@ update() {
   [ -n "$PREVIOUS" ] || PREVIOUS=latest
   note
 
-  step backup "Saving the database."
-  BEFORE=$(applied)
-  backup || {
-    stop_with failed "Could not save the database, so nothing changed."
-    return 0
-  }
-  note
   step pull "Downloading $VERSION."
   { docker pull "$IMAGE@$DIGEST" > /dev/null && docker pull "$IMAGE:$TAG" > /dev/null; } || {
     stop_with failed "Could not download $IMAGE:$TAG, so nothing changed."
@@ -248,7 +254,21 @@ update() {
     stop_with failed "$VERSION in the registry is not the build Hornhoof checked, so nothing changed. Check for updates again, then update."
     return 0
   fi
+  # Downloads take minutes and the old server works on meanwhile, so they come before the copy of the database: going
+  # back to the copy then loses only what the old server did in the moment before the new build starts.
+  { unpack "$TAG" "$IMAGE@$DIGEST" && pull_images; } || {
+    stop_with failed "Could not download the images of $VERSION, so nothing changed."
+    return 0
+  }
   TARGET=$(commit_of "$TAG")
+  note
+
+  step backup "Saving the database."
+  BEFORE=$(applied)
+  backup || {
+    stop_with failed "Could not save the database, so nothing changed."
+    return 0
+  }
   note
   step install "Installing $VERSION."
   install_new

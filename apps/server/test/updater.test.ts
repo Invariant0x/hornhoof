@@ -65,22 +65,27 @@ describe('updater', () => {
     if (!JQ) throw new Error('The updater tests need jq. Install it (brew install jq on a Mac, apt install jq on Debian or Ubuntu), then run them again.');
   });
 
-  it('updates to the asked version after saving the database', () => {
+  it('downloads every image of the new build, then saves the database right before installing it', () => {
     const s = stand();
     const r = runOnce(s, ask('u1'));
     expect(r.status).toMatchObject({ id: 'u1', version: '0.4.1', state: 'done', step: 'finished' });
     expect(r.status.at).toEqual(expect.any(String));
-    const dump = at(r.calls, 'docker exec dbcid pg_dump');
     const exact = at(r.calls, `docker pull ghcr.io/invariant0x/hornhoof@${DIGESTS['0.4.1']}`);
-    const pull = at(r.calls, 'docker pull ghcr.io/invariant0x/hornhoof:0.4.1');
-    /* The installer that runs with the Docker socket comes from the exact build. */
+    /* The installer that runs with the Docker socket, and the compose file, come from the exact build. */
     const create = at(r.calls, `docker create ghcr.io/invariant0x/hornhoof@${DIGESTS['0.4.1']}`);
-    expect(exact).toBeGreaterThan(dump);
-    expect(exact).toBeLessThan(create);
+    /* The new compose file names every image the new build runs; the server's .env fills it in. */
+    const images = r.calls.findIndex(c => c.startsWith(`docker compose --project-directory ${s.server} -f `) && c.endsWith('/0.4.1/compose.yaml pull'));
+    const dump = at(r.calls, 'docker exec dbcid pg_dump');
     const install = r.calls.findIndex(c => c.startsWith('installer server') && c.includes('HORNHOOF_VERSION=0.4.1 HORNHOOF_FROM_UPDATER=1'));
-    expect([dump, pull, create, install].every(i => i >= 0)).toBe(true);
-    expect(dump).toBeLessThan(pull);
-    expect(pull).toBeLessThan(install);
+    expect([exact, create, images, dump, install].every(i => i >= 0)).toBe(true);
+    expect(exact).toBeLessThan(create);
+    expect(create).toBeLessThan(images);
+    expect(r.calls[images + 1]).toBe('pull with HORNHOOF_VERSION=0.4.1');
+    /* The old server keeps working through the downloads; what it does then is in the copy. */
+    expect(images).toBeLessThan(dump);
+    expect(dump).toBeLessThan(install);
+    /* The installer starts the images the updater downloaded and downloads none again. */
+    expect(r.calls[install]).toMatch(/ HORNHOOF_PULLED=1$/);
     expect(r.calls).toContain('docker cp cid-0.4.1:/app/scripts/install.sh ' + r.calls.find(c => c.includes(':/app/scripts/install.sh'))!.split(' ').pop());
     expect(r.calls.some(c => c.startsWith('docker cp cid-0.4.1:/app/compose.yaml '))).toBe(true);
     expect(r.calls.find(c => c.startsWith('installer'))).toContain(`HORNHOOF_SERVER_DIR=${s.server} HORNHOOF_COMPOSE_FILE=compose.yaml`);
@@ -189,6 +194,14 @@ describe('updater', () => {
     expect(r.calls.some(c => c.startsWith('installer'))).toBe(false);
   });
 
+  it('changes nothing when the other images of the new build cannot be downloaded', () => {
+    const s = stand();
+    const r = runOnce(s, ask('u10'), { STUB_PULL: 'images' });
+    expect(r.status).toMatchObject({ id: 'u10', state: 'failed', step: 'pull' });
+    expect(r.status.log).toContain('Could not download the images of 0.4.1, so nothing changed.');
+    expect(r.calls.some(c => c.startsWith('docker exec dbcid pg_dump') || c.startsWith('installer'))).toBe(false);
+  });
+
   it('keeps three backups', () => {
     const s = stand();
     for (const id of ['b1', 'b2', 'b3', 'b4']) expect(runOnce(s, ask(id)).status.state).toBe('done');
@@ -221,9 +234,11 @@ describe('updater', () => {
     const s = stand();
     const stopped = runOnce(s, ask('r0'), { STUB_STOP_IN: 'pull' });
     expect(stopped.status).toMatchObject({ id: 'r0', state: 'running', step: 'pull' });
+    /* It stopped while downloading, before it saved the database. */
+    expect(stopped.calls.some(c => c.startsWith('docker exec dbcid pg_dump'))).toBe(false);
     const r = runOnce(s, null);
     expect(r.status).toMatchObject({ id: 'r0', state: 'done', step: 'finished' });
-    expect(r.calls.filter(c => c.startsWith('docker exec dbcid pg_dump'))).toHaveLength(2);
+    expect(r.calls.filter(c => c.startsWith('docker exec dbcid pg_dump'))).toHaveLength(1);
     expect(r.calls.filter(c => c.startsWith('installer'))).toHaveLength(1);
   });
 

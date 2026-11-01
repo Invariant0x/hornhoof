@@ -2,7 +2,7 @@ import { useT } from '../i18n';
 import type { UpdateStep } from '../types';
 
 /* The four steps of an update, in the order the updater takes them. */
-const STEPS: UpdateStep[] = ['backup', 'pull', 'install', 'health'];
+const STEPS: UpdateStep[] = ['pull', 'backup', 'install', 'health'];
 
 type Props = { version: string; step: UpdateStep | null; starting?: boolean; offline?: boolean };
 

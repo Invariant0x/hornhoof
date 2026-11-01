@@ -10,7 +10,8 @@
 # Server installs pin the build in .env as HORNHOOF_VERSION (HORNHOOF_VERSION=<tag> picks one, latest otherwise) and
 # take compose.yaml from that build of the image. The updater service runs the installer of the build it moves to
 # with HORNHOOF_FROM_UPDATER=1: no questions and no Docker setup, the compose file it brings, and this server's nodes
-# on this machine move to the same build.
+# on this machine move to the same build. HORNHOOF_PULLED=1 says the images are on this computer already, so it
+# downloads none of them.
 #
 # Several companies can share a computer: each node carries the address of the server it works for, and an
 # update or an uninstall touches only that server's nodes.
@@ -31,6 +32,7 @@ NAME=''
 PIN="${HORNHOOF_VERSION:-}"
 FROM_UPDATER="${HORNHOOF_FROM_UPDATER:-}"
 COMPOSE_SRC="${HORNHOOF_COMPOSE_FILE:-}"
+PULLED="${HORNHOOF_PULLED:-}"
 
 # Docker's and Homebrew's install scripts at the commits Hornhoof was tested with. They run as root or ask for the
 # password, so each runs only when its SHA-256 is the one written here.
@@ -564,7 +566,7 @@ compose_from_image() {
 
 # This server's nodes on this machine move to the node image of the same build, with their volumes.
 sweep_nodes() {
-  local public port entry name id provider seen=' ' pulled=''
+  local public port entry name id provider seen=' ' pulled=$PULLED
   IMAGE="${HORNHOOF_NODE_IMAGE:-ghcr.io/invariant0x/hornhoof-node:${PIN:-latest}}"
   public=$(env_value PUBLIC_URL)
   port=$(port_of "$SERVER_DIR/.env")
@@ -653,8 +655,11 @@ server_mode() {
     compose_from_image
   fi
 
-  say "Downloading the Hornhoof images."
-  (cd "$SERVER_DIR" && "${compose[@]}" pull) || fail "Could not download the images. Check the internet connection, then run this command again."
+  # The updater downloads them before it saves the database; an updater from before leaves it to this.
+  if [ -z "$PULLED" ]; then
+    say "Downloading the Hornhoof images."
+    (cd "$SERVER_DIR" && "${compose[@]}" pull) || fail "Could not download the images. Check the internet connection, then run this command again."
+  fi
   # The updater checks the new server's answer itself, and replaces itself once it comes.
   if [ -n "$FROM_UPDATER" ]; then
     say "Starting Hornhoof ${PIN:-latest}."

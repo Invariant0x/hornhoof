@@ -73,7 +73,7 @@ describe('updates', () => {
       'GET /api/org': [200, ORG],
       'GET /api/updates': () => [200, view],
       'POST /api/updates': body => {
-        view = (body as { whenIdle?: boolean }).whenIdle ? updates({}, { waiting: { version: '0.4.1' } }) : updates({}, { status: status('running', 'backup') });
+        view = (body as { whenIdle?: boolean }).whenIdle ? updates({}, { waiting: { version: '0.4.1' } }) : updates({}, { status: status('running', 'pull') });
         return [202, { id: 'u1' }];
       },
       'DELETE /api/updates': () => ((view = updates()), [204]),
@@ -89,7 +89,7 @@ describe('updates', () => {
     expect(calls.filter(c => c.method === 'POST' && c.path === '/api/updates').pop()!.body).toEqual({ version: 'latest', whenIdle: false });
     expect(await screen.findByText('Updating Hornhoof to 0.4.1')).toBeInTheDocument();
     const bar = screen.getByRole('progressbar', { name: 'Update progress' });
-    expect(bar).toHaveAttribute('aria-valuetext', 'Step 1 of 4: saving the database');
+    expect(bar).toHaveAttribute('aria-valuetext', 'Step 1 of 4: downloading');
     expect(bar).toHaveAttribute('aria-valuenow', '0');
   });
 
@@ -162,15 +162,15 @@ describe('updates', () => {
   });
 
   it('shows the step and the output while updating, and reloads on the new build', async () => {
-    let view = updates({}, { status: status('running', 'pull', 'Saving the database.\nDownloading 0.4.1.\n') });
+    let view = updates({}, { status: status('running', 'backup', 'Downloading 0.4.1.\nSaving the database.\n') });
     mockApi({ 'GET /api/org': [200, ORG], 'GET /api/updates': () => [200, view] });
     const reload = vi.spyOn(page, 'reload').mockImplementation(() => {});
     const user = userEvent.setup();
     render(<Shell me={ME} onSignOut={() => {}} />);
     const dialog = await openVersions(user);
     expect(within(dialog).getByText('Updating Hornhoof to 0.4.1')).toBeInTheDocument();
-    expect(within(dialog).getByRole('progressbar', { name: 'Update progress' })).toHaveAttribute('aria-valuetext', 'Step 2 of 4: downloading');
-    expect(within(dialog).getByText(/Downloading 0\.4\.1\./)).toBeInTheDocument();
+    expect(within(dialog).getByRole('progressbar', { name: 'Update progress' })).toHaveAttribute('aria-valuetext', 'Step 2 of 4: saving the database');
+    expect(within(dialog).getByText(/Saving the database\./)).toBeInTheDocument();
     view = updates({ current: { version: '0.4.1', commit: 'b'.repeat(40), migrations: 6 }, available: false }, { status: status('done', 'finished') });
     await waitFor(() => expect(reload).toHaveBeenCalled(), { timeout: 4000 });
   });

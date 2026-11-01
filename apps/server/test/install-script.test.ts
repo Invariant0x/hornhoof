@@ -484,7 +484,18 @@ describe('install.sh', () => {
     writeFileSync(join(dir, '.env'), 'HORNHOOF_SECRET=keep-me\nNODE_KEY=k\nPUBLIC_URL=http://localhost:8080\nCOMPOSE_PROJECT_NAME=hornhoof\nHORNHOOF_VERSION=0.4.0\n');
     const compose = join(dir, 'brought.yaml');
     writeFileSync(compose, 'services: {app: {}}\n');
-    const r = install({ args: ['server'], tty: '', env: { HORNHOOF_FROM_UPDATER: '1', HORNHOOF_SERVER_DIR: dir, HORNHOOF_VERSION: '0.4.1', HORNHOOF_COMPOSE_FILE: compose } });
+    const r = install({
+      args: ['server'],
+      tty: '',
+      env: {
+        HORNHOOF_FROM_UPDATER: '1',
+        HORNHOOF_PULLED: '1',
+        HORNHOOF_SERVER_DIR: dir,
+        HORNHOOF_VERSION: '0.4.1',
+        HORNHOOF_COMPOSE_FILE: compose,
+        STUB_CONTAINERS: 'hornhoof-claude-1c07dac4=http://localhost:8080',
+      },
+    });
     expect(r.code).toBe(0);
     expect(readFileSync(join(dir, 'compose.yaml'), 'utf8')).toBe('services: {app: {}}\n');
     const env = readFileSync(join(dir, '.env'), 'utf8');
@@ -492,9 +503,23 @@ describe('install.sh', () => {
     expect(env).toContain('HORNHOOF_SECRET=keep-me');
     expect(r.calls.some(c => c.startsWith('curl'))).toBe(false);
     expect(r.calls.some(c => c.startsWith('docker create') || c.startsWith('docker info'))).toBe(false);
-    expect(r.calls).toContain('docker compose pull');
+    /* The updater downloaded every image before it saved the database, so this only starts them. */
+    expect(r.calls.some(c => c.startsWith('docker pull') || c.startsWith('docker compose pull'))).toBe(false);
     expect(r.calls).toContain('docker compose up -d --no-build db app node');
     expect(r.calls).not.toContain('docker compose up -d --no-build');
+    expect(r.calls.some(c => c.startsWith('docker run -d --name hornhoof-claude-1c07dac4'))).toBe(true);
+  });
+
+  /* The first update of a server from before runs through the updater it has, which downloads nothing. */
+  it('downloads the images itself for an updater that did not', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-server-'));
+    writeFileSync(join(dir, '.env'), 'HORNHOOF_SECRET=keep-me\nNODE_KEY=k\nPUBLIC_URL=http://localhost:8080\nHORNHOOF_VERSION=0.4.0\n');
+    const compose = join(dir, 'brought.yaml');
+    writeFileSync(compose, 'services: {app: {}}\n');
+    const r = install({ args: ['server'], tty: '', env: { HORNHOOF_FROM_UPDATER: '1', HORNHOOF_SERVER_DIR: dir, HORNHOOF_VERSION: '0.4.1', HORNHOOF_COMPOSE_FILE: compose } });
+    expect(r.code).toBe(0);
+    expect(indexOf(r.calls, 'docker compose pull')).toBeGreaterThanOrEqual(0);
+    expect(indexOf(r.calls, 'docker compose pull')).toBeLessThan(indexOf(r.calls, 'docker compose up -d --no-build db app node'));
   });
 
   it("moves this server's nodes on this machine to the new build from the updater", () => {
