@@ -1,12 +1,13 @@
 import { createHash } from 'node:crypto';
 import { chmodSync, chownSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { AgentEvent, ModelOption } from '@hornhoof/protocol';
-import type { JobUser } from '../isolation.js';
-import type { ProviderAdapter, RunInput, RunResult } from '../runner.js';
+import { asAgent, type JobUser } from '../isolation.js';
+import type { LoginIo, ProviderAdapter, RunInput, RunResult } from '../runner.js';
 import { withProgramExit } from '../program-exit.js';
+import { Tmux } from '../terminal/tmux.js';
 import { contentText, inputText, isRecord, objectLine, toolName } from './events.js';
-import { childEnv, ensureDir, exitsCleanly, runProgram, tokensIn, writePrivate } from './process.js';
+import { childEnv, ensureDir, exitsCleanly, firstLine, lastUrl, runProgram, tokensIn, writePrivate } from './process.js';
 
 type Options = { home: string; tools: string; bin?: string; user?: JobUser | null };
 
@@ -123,6 +124,55 @@ function tokenFiles(home: string): string[] {
   });
 }
 
+/* What agy 1.4.12 shows a person who is not signed in, once they pick Google, and when Google refuses the code. */
+const LOGIN_METHODS = /Select login method/;
+const CODE_ASKED = /paste the authorization code/;
+const REFUSED = /Got an error: (.+)/;
+
+const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+/* Checks until the check passes; past the time, the error says what did not happen. */
+async function until(check: () => Promise<boolean>, ms: number, error: string): Promise<void> {
+  for (const end = Date.now() + ms; Date.now() < end; await pause(250)) if (await check()) return;
+  throw new Error(error);
+}
+
+type SignIn = { bin: string; home: string; env: NodeJS.ProcessEnv; user: JobUser | null; recordingsDir: string; signedIn: () => Promise<boolean> };
+
+/* agy signs in only from its own screen: it asks how, shows Google's link and waits for the code Google then shows. The
+   node answers that screen in a hidden tmux session, wide enough to keep the link on one line, and the person answers the
+   node: they open the link, sign in with Google and paste the code. */
+async function signInOnScreen(io: LoginIo, { bin, home, env, user, recordingsDir, signedIn }: SignIn): Promise<void> {
+  const tmux = new Tmux({ socket: 'hh-login', env, recordingsDir });
+  const name = 'agy-login';
+  const screen = () => tmux.screen(name);
+  try {
+    await tmux.launch(name, { cwd: home, command: user ? asAgent([bin], user) : [bin], cols: 1000, rows: 50 });
+    await until(async () => LOGIN_METHODS.test(await screen()), 60_000, 'Antigravity CLI did not show its sign-in screen.');
+    /* The first way it offers is Google's own sign-in. */
+    await tmux.keys(name, 'Enter');
+    let url: string | null = null;
+    await until(async () => {
+      const shown = await screen();
+      url = CODE_ASKED.test(shown) ? lastUrl(shown) : null;
+      return url !== null;
+    }, 60_000, 'Antigravity CLI did not show a sign-in link.');
+    writeFileSync(io.urlFile, url + '\n');
+    io.output.write(`Open this link, sign in with your Google account and copy the code Google shows:\n${url}\nPaste the code here and press Enter: `);
+    const code = await firstLine(io.input);
+    if (!code) throw new Error('No code was pasted.');
+    await tmux.keys(name, '-l', code);
+    await tmux.keys(name, 'Enter');
+    await until(async () => {
+      const refused = REFUSED.exec(await screen());
+      if (refused) throw new Error(`Google did not take the code: ${refused[1]!.trim()}`);
+      return signedIn();
+    }, 120_000, 'Antigravity CLI did not finish signing in.');
+  } finally {
+    await tmux.stopAll();
+  }
+}
+
 /* A folder in the agent's own folder that its program's user may use. */
 function agentDir(path: string, user: JobUser | null): string {
   mkdirSync(path, { recursive: true });
@@ -151,8 +201,9 @@ export function antigravityAdapter({ home, tools, bin = join(tools, 'bin', 'agy'
       return listed;
     },
 
-    async login() {
-      throw new Error('Antigravity CLI signs in from its own screen.');
+    async login(io) {
+      const signedIn = () => exitsCleanly(bin, ['models'], env(), user);
+      await signInOnScreen(io, { bin, home, env: env(), user, recordingsDir: join(dirname(tools), '.hh-recordings'), signedIn });
     },
 
     async run(input: RunInput): Promise<RunResult> {

@@ -13,7 +13,7 @@ import { dataDir, isRemoved, markRemoved, readState, rememberSession, writeState
 import { SIGNED_OUT as CLAUDE_SIGNED_OUT } from './providers/claude.js';
 import { SIGNED_OUT as CODEX_SIGNED_OUT } from './providers/codex.js';
 import { SCREEN_SIGNED_OUT as KIMI_SIGNED_OUT } from './providers/kimi.js';
-import { childEnv } from './providers/process.js';
+import { childEnv, firstLine } from './providers/process.js';
 import { TerminalHost } from './terminal/host.js';
 import { claudeProgram, codexProgram, kimiProgram, type TermProgram } from './terminal/programs.js';
 import { Tmux } from './terminal/tmux.js';
@@ -304,25 +304,6 @@ function withInstall(adapter: ProviderAdapter, tools: string, provider: Provider
       return adapter.run(input);
     },
   };
-}
-
-function firstLine(input: NodeJS.ReadableStream): Promise<string> {
-  return new Promise(resolve => {
-    let text = '';
-    const finish = () => {
-      input.off('data', onData);
-      input.off('end', finish);
-      input.pause();
-      resolve(text.split('\n')[0]!.trim());
-    };
-    const onData = (chunk: Buffer | string) => {
-      text += chunk.toString();
-      if (text.includes('\n')) finish();
-    };
-    input.on('data', onData);
-    input.on('end', finish);
-    input.resume();
-  });
 }
 
 async function setKey(dir: string, io: Io): Promise<number> {

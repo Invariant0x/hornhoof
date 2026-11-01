@@ -162,6 +162,26 @@ export function askHidden(io: LoginIo, question: string): Promise<string> {
   });
 }
 
+/* The first line that comes in, trimmed; what came before the end when no line ends. */
+export function firstLine(input: NodeJS.ReadableStream): Promise<string> {
+  return new Promise(resolve => {
+    let text = '';
+    const finish = () => {
+      input.off('data', onData);
+      input.off('end', finish);
+      input.pause();
+      resolve(text.split('\n')[0]!.trim());
+    };
+    const onData = (chunk: Buffer | string) => {
+      text += chunk.toString();
+      if (text.includes('\n')) finish();
+    };
+    input.on('data', onData);
+    input.on('end', finish);
+    input.resume();
+  });
+}
+
 /* A file only the program's user may read, such as a config that carries a token. The folder is the agent's, so whatever it left at the path goes first and nothing is followed. */
 export function writePrivate(path: string, content: string, user: JobUser | null): void {
   rmSync(path, { force: true });
