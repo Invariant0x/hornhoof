@@ -48,6 +48,8 @@ describe('orchestrator instructions', () => {
     for (const words of ['agent_changes', 'task_events', 'agent_events', 'Never ask the CEO to run SQL', 'head of Operations', "never outranks the CEO's goals", 'Do not ask heads for status']) {
       expect(ORCHESTRATOR_INSTRUCTIONS).toContain(words);
     }
+    /* Operations only reads the database, so no data fix goes there. */
+    expect(ORCHESTRATOR_INSTRUCTIONS).not.toContain('data fix you cannot make');
   });
 
   it('switches off employees with no work in the turn and writes a note only when what it holds changes', () => {
