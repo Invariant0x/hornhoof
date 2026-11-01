@@ -1,7 +1,7 @@
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { chownSync, closeSync, constants, fstatSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { TEST_LOG_BYTES, type NodeMessage, type ServerMessage, type TestError } from '@hornhoof/protocol';
+import { MAX_RUN_FILES, RUN_FILE_BYTES, TEST_LOG_BYTES, type NodeMessage, type ServerMessage, type TestError } from '@hornhoof/protocol';
 import { ensurePasswd, prepareFolder, type JobUser } from './isolation.js';
 import { stripEscapes } from './providers/process.js';
 import { redact } from './redact.js';
@@ -26,6 +26,8 @@ type Options = {
   hidden: string[];
   signal?: AbortSignal;
   proc?: string;
+  /* The task's files of a part of work, in and out. */
+  files?: PartFiles;
 };
 
 /* What a command prints, at most TEST_LOG_BYTES of it: its first quarter and its end, where a runner sums up. */
@@ -172,35 +174,109 @@ export function taskBranch(heads: string, task: number): { branch: string } | { 
   return { problem: `The repository has no branch ${own} or ${own}-... Push the task's branch, or name the branch to test.` };
 }
 
-/* One part of a test run, which always ends with a tests.done: the branch is cloned into a fresh folder, the command runs
-   there within the time with a home and a temporary folder of its own, and the folder goes, whatever happened. */
-export async function runTests(msg: TestRun, { dir, user, hidden, signal, proc = '/proc' }: Options): Promise<TestsDone> {
+/* The task's files a part of work takes in, through Hornhoof with the node's key, and the files it puts on the task. */
+export type PartFiles = {
+  get(partId: string, name: string): Promise<Buffer>;
+  put(partId: string, name: string, bytes: Buffer): Promise<void>;
+};
+
+/* A part's files through Hornhoof, with the node's key: Hornhoof hands out only the task files the part names, and only
+   to the node that runs it. */
+export function partFiles(server: string, key: string): PartFiles {
+  const at = (partId: string, name: string) => `${server}/api/parts/${encodeURIComponent(partId)}/files/${encodeURIComponent(name)}`;
+  const headers = { authorization: `Bearer ${key}` };
+  const refused = async (res: Response) => {
+    const body = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
+    return new Error(`Hornhoof answered ${res.status}${body?.error?.message ? `: ${body.error.message}` : '.'}`);
+  };
+  return {
+    async get(partId, name) {
+      const res = await fetch(at(partId, name), { headers });
+      if (!res.ok) throw await refused(res);
+      return Buffer.from(await res.arrayBuffer());
+    },
+    async put(partId, name, bytes) {
+      const res = await fetch(at(partId, name), { method: 'PUT', headers: { ...headers, 'content-type': 'application/octet-stream' }, body: new Uint8Array(bytes) });
+      if (!res.ok) throw await refused(res);
+    },
+  };
+}
+
+/* The files a part of work left in its output folder that go on the task: plain files only, made by the part's own user
+   when it has one, at most MAX_RUN_FILES of them, each at most RUN_FILE_BYTES. Opened without following a link, so a
+   link to the node's key never leaves the machine. */
+async function putOutputs(msg: TestRun, folder: string, user: JobUser | null, files: PartFiles, out: Output): Promise<void> {
+  const names = readdirSync(folder).sort();
+  if (!names.length) return;
+  const put: string[] = [];
+  const left: string[] = [];
+  for (const name of names) {
+    if (put.length >= MAX_RUN_FILES) {
+      left.push(name);
+      continue;
+    }
+    let fd: number | null = null;
+    try {
+      fd = openSync(join(folder, name), constants.O_RDONLY | constants.O_NOFOLLOW);
+      const st = fstatSync(fd);
+      if (!st.isFile() || (user && st.uid !== user.uid) || st.size > RUN_FILE_BYTES) {
+        left.push(name);
+        continue;
+      }
+      await files.put(msg.partId, name, readFileSync(fd));
+      put.push(name);
+    } catch (err) {
+      if (fd === null) left.push(name);
+      else out.line(`${name} could not go on the task: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      if (fd !== null) closeSync(fd);
+    }
+  }
+  if (put.length) out.line(`Put on the task: ${put.join(', ')}.`);
+  if (left.length) out.line(`Only plain files up to ${RUN_FILE_BYTES / 1024 / 1024} MB go on the task, ${MAX_RUN_FILES} at most; left out: ${left.join(', ')}.`);
+}
+
+/* One part of a run, which always ends with a tests.done: the branch, if there is one, is cloned into a fresh folder,
+   a part of work gets the task's files it names, the command runs within the time with a home and a temporary folder
+   of its own, what a part of work leaves in its output folder goes on the task, and the folder goes, whatever
+   happened. */
+export async function runTests(msg: TestRun, { dir, user, hidden, signal, proc = '/proc', files }: Options): Promise<TestsDone> {
   const deadline = Date.now() + msg.timeoutMs;
+  const work = msg.kind === 'work';
   const root = join(dir, 'tests', msg.partId);
-  const repo = join(root, 'repo');
+  /* Where the command runs: the clone, or for work without a repository an empty folder that holds the task's files. */
+  const repo = join(root, msg.repo ? 'repo' : 'work');
+  const inbox = msg.repo ? join(root, 'in') : repo;
+  const outbox = join(root, 'out');
   const out = new Output();
   let commit: string | null = null;
   let exitCode: number | null = null;
   let error: TestError | null = null;
+  let ran = false;
   const stoppedBy = (ended: Ended): TestError | null => {
-    if (ended.stopped === 'timeout') out.line(`The tests did not finish within ${within(msg.timeoutMs)}.`);
+    if (ended.stopped === 'timeout') out.line(`The ${work ? 'command' : 'tests'} did not finish within ${within(msg.timeoutMs)}.`);
     if (ended.stopped === 'cancelled') out.line('Stopped.');
     return ended.stopped;
   };
   try {
     mkdirSync(join(dir, 'tests'), { recursive: true });
     remove(root);
-    for (const sub of ['', 'home', 'tmp']) prepareFolder(join(root, sub), user);
+    for (const sub of ['', 'home', 'tmp', ...(work ? ['out', ...(msg.repo ? ['in'] : ['work'])] : [])]) prepareFolder(join(root, sub), user);
     if (user) ensurePasswd(user, join(dir, 'tests'));
     const base = { PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin', HOME: join(root, 'home'), TMPDIR: join(root, 'tmp'), LANG: 'C.UTF-8' };
+    const source = msg.repo;
     /* Git reads no settings but its own here, and gets the token only through the helper, for the repository's host. */
     const git = (args: string[], cwd: string, into = out) =>
-      runIn('git', args, { cwd, env: { ...base, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', ...gitEnv(msg.repo) }, user, deadline: Math.min(deadline, Date.now() + GIT_TIMEOUT_MS), signal, out: into });
+      runIn('git', args, { cwd, env: { ...base, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', ...gitEnv(source!) }, user, deadline: Math.min(deadline, Date.now() + GIT_TIMEOUT_MS), signal, out: into });
 
     let branch = msg.branch;
-    if (!branch) {
+    if (!source && !work) {
+      out.line('A test run needs a repository.');
+      error = 'clone_failed';
+    }
+    if (source && !branch && !work) {
       const heads = new Output();
-      const listed = await git(['ls-remote', '--heads', '--', msg.repo.url], root, heads);
+      const listed = await git(['ls-remote', '--heads', '--', source.url], root, heads);
       error = stoppedBy(listed);
       if (!error && listed.code !== 0) {
         out.line(heads.text());
@@ -214,24 +290,50 @@ export async function runTests(msg: TestRun, { dir, user, hidden, signal, proc =
         } else branch = found.branch;
       }
     }
-    if (!error && branch) {
-      out.line(`$ git clone --branch ${branch} ${msg.repo.url}`);
-      const cloned = await git(['clone', '--quiet', '--depth', '1', '--branch', branch, '--', msg.repo.url, repo], root);
-      error = stoppedBy(cloned) ?? (cloned.code === 0 ? null : 'clone_failed');
+    if (!error && source) {
+      if (!branch) {
+        out.line('Name the branch to clone.');
+        error = 'clone_failed';
+      } else {
+        out.line(`$ git clone --branch ${branch} ${source.url}`);
+        const cloned = await git(['clone', '--quiet', '--depth', '1', '--branch', branch, '--', source.url, repo], root);
+        error = stoppedBy(cloned) ?? (cloned.code === 0 ? null : 'clone_failed');
+      }
     }
-    if (!error) {
+    if (!error && source) {
       const head = new Output();
       await git(['rev-parse', 'HEAD'], repo, head);
       commit = /^[0-9a-f]{40,64}$/.exec(head.text().trim())?.[0] ?? null;
       if (commit) out.line(`At ${commit}.`);
+    }
+    if (!error && work && msg.files?.length) {
+      for (const name of msg.files) {
+        try {
+          if (!files) throw new Error('This node has no way to fetch task files.');
+          const path = join(inbox, name);
+          writeFileSync(path, await files.get(msg.partId, name), { mode: 0o600, flag: 'wx' });
+          if (user) chownSync(path, user.uid, user.gid);
+        } catch (err) {
+          out.line(`The task's file ${name} could not be fetched: ${err instanceof Error ? err.message : String(err)}`);
+          error = 'files_failed';
+          break;
+        }
+      }
+      if (!error) out.line(`Fetched from the task: ${msg.files.join(', ')}.`);
+    }
+    if (!error) {
       out.line(`$ ${msg.command}`);
-      const env = { ...base, CI: 'true', NO_COLOR: '1', FORCE_COLOR: '0', HH_TEST_PART: String(msg.part), HH_TEST_PARTS: String(msg.parts) };
-      const ran = await runIn('/bin/bash', ['-c', msg.command], { cwd: repo, env, user, deadline, signal, out });
-      error = stoppedBy(ran);
+      const parts = { HH_PART: String(msg.part), HH_PARTS: String(msg.parts) };
+      const env = work
+        ? { ...base, NO_COLOR: '1', ...parts, HH_IN: inbox, HH_OUT: outbox }
+        : { ...base, CI: 'true', NO_COLOR: '1', FORCE_COLOR: '0', ...parts, HH_TEST_PART: String(msg.part), HH_TEST_PARTS: String(msg.parts) };
+      const ended = await runIn('/bin/bash', ['-c', msg.command], { cwd: repo, env, user, deadline, signal, out });
+      ran = true;
+      error = stoppedBy(ended);
       if (!error) {
-        exitCode = ran.code;
-        if (ran.signal) out.line(`The command was ended by ${ran.signal}.`);
-        if (ran.code !== 0) error = 'failed';
+        exitCode = ended.code;
+        if (ended.signal) out.line(`The command was ended by ${ended.signal}.`);
+        if (ended.code !== 0) error = 'failed';
       }
     }
   } catch (err) {
@@ -240,11 +342,16 @@ export async function runTests(msg: TestRun, { dir, user, hidden, signal, proc =
   } finally {
     if (user) killUser(user.uid, proc);
     try {
+      if (work && ran && files && error !== 'cancelled') await putOutputs(msg, outbox, user, files, out);
+    } catch (err) {
+      out.line(`The output folder could not be read: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    try {
       remove(root);
     } catch (err) {
       out.line(`The run's folder could not be removed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
-  const secrets = [...hidden, ...(msg.repo.token ? [msg.repo.token] : [])];
+  const secrets = [...hidden, ...(msg.repo?.token ? [msg.repo.token] : [])];
   return { type: 'tests.done', partId: msg.partId, ok: error === null && exitCode === 0, exitCode, error, commit, log: redact(stripEscapes(out.text()), secrets) };
 }

@@ -9,13 +9,27 @@ export type ProviderId = (typeof PROVIDER_IDS)[number];
 export const JOB_ERRORS = ['timeout', 'agent_failed', 'not_logged_in', 'cancelled'] as const;
 export type JobError = (typeof JOB_ERRORS)[number];
 
-/* Why a part of a test run ended other than with its tests passing: they failed, ran out of time, were stopped, or the
-   branch could not be cloned. */
-export const TEST_ERRORS = ['failed', 'timeout', 'cancelled', 'clone_failed'] as const;
+/* Why a part of a run ended other than with its command passing: it failed, ran out of time, was stopped, the branch
+   could not be cloned, or the task's files could not be fetched. */
+export const TEST_ERRORS = ['failed', 'timeout', 'cancelled', 'clone_failed', 'files_failed'] as const;
 export type TestError = (typeof TEST_ERRORS)[number];
-/* The most parts a test run splits into, and the most of each part's log a node sends: its start and its end. */
+/* The most parts a run splits into, and the most of each part's log a node sends: its start and its end. */
 export const MAX_TEST_PARTS = 10;
 export const TEST_LOG_BYTES = 1024 * 1024;
+/* What the company's machines run for its agents: a branch's test suite, or any other work, on a branch or in an empty
+   folder. */
+export const RUN_KINDS = ['tests', 'work'] as const;
+export type RunKind = (typeof RUN_KINDS)[number];
+/* The most task files a part of work takes in, and the most files one part puts on the task. */
+export const MAX_RUN_FILES = 20;
+/* The biggest file a part puts on the task, as big as any task file may be. */
+export const RUN_FILE_BYTES = 50 * 1024 * 1024;
+/* A file's plain name, never a folder or a way out of one. */
+export const RunFile = z
+  .string()
+  .min(1)
+  .max(200)
+  .refine(n => !/[\/\\\u0000-\u001f\u007f]/.test(n) && n !== '.' && n !== '..', 'Not a plain file name.');
 
 /* The last bytes of a job's output kept for people to read when something fails. */
 export const TAIL_BYTES = 4096;
@@ -289,6 +303,8 @@ const NodeMessage = z.discriminatedUnion('type', [
     running: z.array(z.string()).max(100),
     models: Models.optional(),
     terminals: z.boolean().optional(),
+    /* The node runs parts of other work too, not only of test runs. */
+    work: z.boolean().optional(),
     load: Load.optional(),
     tests: z.array(z.string()).max(100).optional(),
     skillFiles: z.boolean().optional(),
@@ -409,14 +425,18 @@ const ServerMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('term.close'), termId: TermId }),
   /* The turn Hornhoof opened for what a person typed, or none when it could not. */
   z.object({ type: z.literal('turn.opened'), agentKey: Id, jobId: Id.nullable(), toolToken: z.string().max(200).nullable(), ref: z.string().max(64).optional() }),
-  /* A part of a test run: the node clones the branch into a fresh folder, runs the command there as a user that reaches
-     none of the node's keys, within the time, and removes the folder. No agent program takes part. branch null: the
-     task's own, task-<task> or the only one that starts with task-<task>-. */
+  /* A part of a run: the node clones the branch into a fresh folder, runs the command there as a user that reaches
+     none of the node's keys, within the time, and removes the folder. No agent program takes part. branch null: for
+     tests the task's own, task-<task> or the only one that starts with task-<task>-. kind work: any command, in an
+     empty folder when there is no repository, with the task's files named in files fetched first; what it leaves in its
+     output folder goes on the task. */
   z.object({
     type: z.literal('tests.run'),
     partId: Id,
-    repo: Repo.pick({ url: true, token: true }),
+    kind: z.enum(RUN_KINDS).optional(),
+    repo: Repo.pick({ url: true, token: true }).nullable(),
     branch: Branch.nullable(),
+    files: z.array(RunFile).max(MAX_RUN_FILES).optional(),
     task: z.number().int().positive(),
     command: z.string().min(1).max(4000),
     part: z.number().int().min(1).max(MAX_TEST_PARTS),

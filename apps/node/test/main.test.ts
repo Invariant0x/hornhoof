@@ -363,7 +363,9 @@ describe('runNode', () => {
 
   it('runs a part of a test run, counts it in its load, sends its end until Hornhoof confirms it, and stops a part when asked', async () => {
     const server = await fakeServer();
-    const runPart: typeof runTests = async (m, { signal }) => {
+    const given: unknown[] = [];
+    const runPart: typeof runTests = async (m, { signal, files }) => {
+      given.push(files);
       await new Promise<void>(done => {
         const timer = setTimeout(done, m.command === 'slow' ? 60_000 : 300);
         signal?.addEventListener('abort', () => (clearTimeout(timer), done()));
@@ -374,12 +376,14 @@ describe('runNode', () => {
     const node = await runNode({ dir: nodeDir(server.url), adapter, log: () => {}, loadMs: 40, runPart });
     onTestFinished(() => node.stop());
     await server.wait(() => server.received.some(m => m.type === 'hello'));
+    expect(server.received[0]).toMatchObject({ type: 'hello', work: true });
     const part = { type: 'tests.run', repo: { url: 'https://github.com/acme/shop.git', token: '' }, branch: null, task: 3, part: 1, parts: 1, timeoutMs: 60000 };
     server.send({ ...part, partId: 'p1', command: 'npm test' });
     await server.wait(() => server.received.some(m => m.type === 'tests.started' && m.partId === 'p1'));
     await server.wait(() => server.received.some(m => m.type === 'load' && m.tests === 1));
     await server.wait(() => server.received.some(m => m.type === 'tests.done'));
     expect(server.received.find(m => m.type === 'tests.done')).toMatchObject({ partId: 'p1', ok: true, exitCode: 0, error: null, log: 'all passed' });
+    expect(given[0]).toMatchObject({ get: expect.any(Function), put: expect.any(Function) });
 
     const hellos = () => server.received.filter(m => m.type === 'hello');
     server.drop();

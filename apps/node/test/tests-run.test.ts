@@ -1,10 +1,12 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
-import { TEST_LOG_BYTES, type ServerMessage } from '@hornhoof/protocol';
-import { describe, expect, it } from 'vitest';
-import { runTests } from '../src/tests.js';
+import { MAX_RUN_FILES, TEST_LOG_BYTES, type ServerMessage } from '@hornhoof/protocol';
+import { describe, expect, it, onTestFinished } from 'vitest';
+import { partFiles, runTests, type PartFiles } from '../src/tests.js';
 
 type TestRun = Extract<ServerMessage, { type: 'tests.run' }>;
 
@@ -106,5 +108,112 @@ describe('a part of a test run on a node', () => {
     const done = await runTests(run(join(tmpdir(), 'no-such-repo-hh')), { dir, user: null, hidden: [] });
     expect(done).toMatchObject({ ok: false, error: 'clone_failed' });
     expect(existsSync(join(dir, 'tests', 'part-1'))).toBe(false);
+  });
+});
+
+/* Hornhoof's side of a part's files: the task's files it hands out, and the files put on the task. */
+function taskFiles(have: Record<string, string> = {}) {
+  const put: { partId: string; name: string; text: string }[] = [];
+  const files: PartFiles = {
+    async get(partId, name) {
+      if (!(name in have)) throw new Error(`Hornhoof answered 404: task 12 has no file ${name}.`);
+      return Buffer.from(have[name]!);
+    },
+    async put(partId, name, bytes) {
+      put.push({ partId, name, text: bytes.toString('utf8') });
+    },
+  };
+  return { files, put };
+}
+
+describe('a part of other work on a node', () => {
+  const work = (over: Partial<TestRun> = {}): TestRun => ({
+    type: 'tests.run', kind: 'work', partId: 'part-1', repo: null, branch: null, task: 12, command: 'true', part: 1, parts: 1, timeoutMs: 60_000, ...over,
+  });
+
+  it("runs in an empty folder with the task's files in it, and puts what it leaves in its output folder on the task", async () => {
+    const dir = nodeDir();
+    const { files, put } = taskFiles({ 'data.csv': 'a,b\n' });
+    const command = 'ls -A; cat data.csv > "$HH_OUT/copy.csv"; echo "part $HH_PART of $HH_PARTS"; test "$(cd "$HH_IN" && pwd -P)" = "$(pwd -P)" && echo same';
+    const done = await runTests(work({ command, files: ['data.csv'], part: 2, parts: 3 }), { dir, user: null, hidden: [], files });
+    expect(done).toMatchObject({ type: 'tests.done', partId: 'part-1', ok: true, exitCode: 0, error: null, commit: null });
+    expect(done.log).toContain('data.csv\n');
+    expect(done.log).toContain('part 2 of 3');
+    expect(done.log).toContain('same');
+    expect(done.log).toMatch(/Put on the task: copy\.csv/);
+    expect(put).toEqual([{ partId: 'part-1', name: 'copy.csv', text: 'a,b\n' }]);
+    expect(readdirSync(join(dir, 'tests'))).toEqual([]);
+  });
+
+  it("clones a branch first when it has one, with the task's files beside it", async () => {
+    const { url, commits } = origin();
+    const { files, put } = taskFiles({ 'data.csv': 'x\n' });
+    const done = await runTests(work({ repo: { url, token: '' }, branch: 'task-12-checkout', files: ['data.csv'], command: 'cat marker.txt; cat "$HH_IN/data.csv"; ls' }), { dir: nodeDir(), user: null, hidden: [], files });
+    expect(done).toMatchObject({ ok: true, commit: commits['task-12-checkout'] });
+    expect(done.log).toContain('task-12-checkout\nx\n');
+    expect(done.log).not.toMatch(/^data\.csv$/m);
+    expect(put).toEqual([]);
+  });
+
+  it("fails without running the command when a task file cannot be fetched", async () => {
+    const dir = nodeDir();
+    const { files } = taskFiles();
+    const done = await runTests(work({ files: ['gone.csv'], command: 'echo RAN' }), { dir, user: null, hidden: [], files });
+    expect(done).toMatchObject({ ok: false, error: 'files_failed', exitCode: null });
+    expect(done.log).toContain('gone.csv');
+    expect(done.log).not.toContain('RAN');
+    expect(readdirSync(join(dir, 'tests'))).toEqual([]);
+  });
+
+  it('puts only plain files from the output folder, at most the most a part may, also when the command failed', async () => {
+    const secret = join(mkdtempSync(join(tmpdir(), 'hh-secret-')), 'key');
+    writeFileSync(secret, 'node-key-1234567890');
+    const { files, put } = taskFiles();
+    const many = Array.from({ length: MAX_RUN_FILES + 2 }, (_, i) => `f${String(i).padStart(2, '0')}.txt`);
+    const command = `cd "$HH_OUT"; for f in ${many.join(' ')}; do echo $f > $f; done; ln -s ${secret} key; mkdir sub; echo x > sub/y; exit 4`;
+    const done = await runTests(work({ command }), { dir: nodeDir(), user: null, hidden: [], files });
+    expect(done).toMatchObject({ ok: false, error: 'failed', exitCode: 4 });
+    expect(put.map(p => p.name)).toEqual(many.slice(0, MAX_RUN_FILES));
+    expect(put.some(p => p.text.includes('node-key'))).toBe(false);
+    expect(done.log).toMatch(new RegExp(`left out: ${many[MAX_RUN_FILES]}, ${many[MAX_RUN_FILES + 1]}, key, sub`));
+  });
+
+  it('says which file could not go on the task, and goes on with the others', async () => {
+    const files: PartFiles = {
+      get: async () => Buffer.alloc(0),
+      put: async (_partId, name) => {
+        if (name === 'a.txt') throw new Error('Hornhoof answered 413: Task 12 holds too many files.');
+      },
+    };
+    const done = await runTests(work({ command: 'echo a > "$HH_OUT/a.txt"; echo b > "$HH_OUT/b.txt"' }), { dir: nodeDir(), user: null, hidden: [], files });
+    expect(done.ok).toBe(true);
+    expect(done.log).toMatch(/a\.txt could not go on the task: Hornhoof answered 413/);
+    expect(done.log).toMatch(/Put on the task: b\.txt/);
+  });
+});
+
+describe("a part's files through Hornhoof", () => {
+  it("fetches and puts them at the part's address with the node's key, and gives Hornhoof's reason when it refuses", async () => {
+    const seen: string[] = [];
+    const server = createServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on('data', c => chunks.push(c));
+      req.on('end', () => {
+        seen.push(`${req.method} ${req.url} ${req.headers.authorization} ${Buffer.concat(chunks).toString('utf8')}`);
+        if (req.url?.endsWith('/gone.csv')) {
+          res.writeHead(404, { 'content-type': 'application/json' });
+          return res.end(JSON.stringify({ error: { code: 'not_found', message: 'Task 12 has no file gone.csv.' } }));
+        }
+        res.writeHead(req.method === 'PUT' ? 201 : 200);
+        res.end(req.method === 'GET' ? 'a,b\n' : '{}');
+      });
+    });
+    await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+    onTestFinished(() => void server.close());
+    const files = partFiles(`http://127.0.0.1:${(server.address() as AddressInfo).port}`, 'node-key-1234567890');
+    expect((await files.get('part-1', 'data 1.csv')).toString('utf8')).toBe('a,b\n');
+    await files.put('part-1', 'out.txt', Buffer.from('made'));
+    await expect(files.get('part-1', 'gone.csv')).rejects.toThrow('Hornhoof answered 404: Task 12 has no file gone.csv.');
+    expect(seen.slice(0, 2)).toEqual(['GET /api/parts/part-1/files/data%201.csv Bearer node-key-1234567890 ', 'PUT /api/parts/part-1/files/out.txt Bearer node-key-1234567890 made']);
   });
 });

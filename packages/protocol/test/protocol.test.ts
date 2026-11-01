@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { API_MODELS, CLAUDE_ALIASES, cut, defaultEffortOf, lastBytes, MAX_INSTRUCTIONS, MAX_TEST_PARTS, OLD_NODE_INSTRUCTIONS, TAIL_BYTES, TEST_LOG_BYTES, COMPANY_TEMPLATES, COMPANY_TEMPLATE_KEYS, DEPARTMENT_TEMPLATES, TEMPLATE_KEYS, effortFor, effortsOf, modelsFor, parseNodeMessage, parseServerMessage, repoFolder, type AgentEvent, type NodeMessage, type ServerMessage } from '../src/index.js';
+import { API_MODELS, CLAUDE_ALIASES, cut, defaultEffortOf, lastBytes, MAX_INSTRUCTIONS, MAX_RUN_FILES, MAX_TEST_PARTS, OLD_NODE_INSTRUCTIONS, TAIL_BYTES, TEST_LOG_BYTES, COMPANY_TEMPLATES, COMPANY_TEMPLATE_KEYS, DEPARTMENT_TEMPLATES, TEMPLATE_KEYS, effortFor, effortsOf, modelsFor, parseNodeMessage, parseServerMessage, repoFolder, type AgentEvent, type NodeMessage, type ServerMessage } from '../src/index.js';
 import { effortsOf as light, topEffort as lightTop } from '../src/efforts.js';
 
 const LIMITS = { status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0.38, resetsAt: '2026-10-29T21:30:00.000Z' }] };
@@ -144,6 +144,17 @@ describe('test runs', () => {
     expect(parseNodeMessage(JSON.stringify({ ...done, log: 'x'.repeat(TEST_LOG_BYTES + 2000) }))).toBeNull();
     expect(parseNodeMessage(JSON.stringify({ ...done, error: 'exploded' }))).toBeNull();
     expect(parseNodeMessage(JSON.stringify({ type: 'tests.started', partId: 'p-1' }))).toEqual({ type: 'tests.started', partId: 'p-1' });
+    expect(parseNodeMessage(JSON.stringify({ ...done, error: 'files_failed' }))).toMatchObject({ error: 'files_failed' });
+  });
+
+  it('send a part of other work, with a repository or none, and the plain names of the task files it takes', () => {
+    const work = { ...RUN, kind: 'work', repo: null, branch: null, files: ['data.csv', 'photo 1.png'] };
+    expect(parse(work)).toEqual(work);
+    expect(parse({ ...work, repo: RUN.repo, branch: 'main' })).toMatchObject({ kind: 'work', branch: 'main' });
+    for (const bad of [{ kind: 'mining' }, { files: ['../keys'] }, { files: ['a/b.txt'] }, { files: ['..'] }, { files: [''] }, { files: Array.from({ length: MAX_RUN_FILES + 1 }, (_, i) => `f${i}`) }]) {
+      expect(parse({ ...work, ...bad })).toBeNull();
+    }
+    expect(parseNodeMessage(JSON.stringify({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], work: true }))).toMatchObject({ work: true });
   });
 });
 

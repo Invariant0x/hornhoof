@@ -11,7 +11,7 @@ import { machineLoad } from './load.js';
 import { adapterFor, programFor } from './providers/index.js';
 import { runJob, type ProviderAdapter, type RunResult } from './runner.js';
 import { dataDir, isRemoved, markRemoved, readState, rememberSession, writeState, type NodeState } from './state.js';
-import { runTests } from './tests.js';
+import { partFiles, runTests } from './tests.js';
 import { SIGNED_OUT as AGY_SIGNED_OUT } from './providers/antigravity.js';
 import { SIGNED_OUT as CLAUDE_SIGNED_OUT } from './providers/claude.js';
 import { SIGNED_OUT as CODEX_SIGNED_OUT } from './providers/codex.js';
@@ -81,6 +81,8 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
   /* The node's own key never leaves in a job's output. */
   const hidden = [state.key];
   const toolsUrl = `${state.server}/mcp`;
+  /* The task's files a part of work takes in and puts back. */
+  const files = partFiles(state.server, state.key);
   /* The built-in node serves API keys, which need no sign-in. */
   const single = typeof adapter === 'function' ? null : adapter;
   const pick = typeof adapter === 'function' ? adapter : () => adapter;
@@ -159,7 +161,7 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
       /* Finished jobs Hornhoof has not confirmed still count as running, so the server does not give up on them. */
       const typed = host?.typedJobs() ?? [];
       const tests = [...testing.keys(), ...unconfirmedTests.keys()];
-      next({ type: 'hello', version: VERSION, loggedIn, running: [...running.keys(), ...typed, ...unconfirmed.keys()], ...(models ? { models } : {}), terminals: Boolean(host), load: load(), tests, skillFiles: true });
+      next({ type: 'hello', version: VERSION, loggedIn, running: [...running.keys(), ...typed, ...unconfirmed.keys()], ...(models ? { models } : {}), terminals: Boolean(host), work: true, load: load(), tests, skillFiles: true });
       for (const m of outbox.splice(0)) emit(m);
       for (const m of unconfirmed.values()) next(m);
       for (const m of unconfirmedTests.values()) next(m);
@@ -228,7 +230,7 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
   /* A part of a test run: no agent program takes part, and its user reaches none of the node's keys. */
   async function testOne(m: TestRun, signal: AbortSignal) {
     emit({ type: 'tests.started', partId: m.partId });
-    const done = await runPart(m, { dir, user: testUser, hidden: [...known], signal });
+    const done = await runPart(m, { dir, user: testUser, hidden: [...known], signal, files });
     keepTest(m.partId, done);
     testing.delete(m.partId);
     emit(done);
