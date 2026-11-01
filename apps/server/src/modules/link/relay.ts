@@ -62,9 +62,9 @@ export class Relay {
   async bind(name?: string): Promise<Bound> {
     if (name !== undefined && !isLinkName(name)) throw invalid();
     const res = await this.call('POST', '/bindings', { body: name === undefined ? {} : { name } });
-    if (res.status === 409) throw new ApiError(409, 'conflict', 'This link is taken already. Pick another name.', 'link_taken');
-    if (res.status === 400) {
+    if (res.status === 409 || res.status === 400) {
       if ((await reasonOf(res)) === 'reserved') throw new ApiError(400, 'validation', 'This name is kept for hornhoof.org itself. Pick another one.', 'link_reserved');
+      if (res.status === 409) throw new ApiError(409, 'conflict', 'This link is taken already. Pick another name.', 'link_taken');
       throw invalid();
     }
     if (res.status === 429) throw busy();

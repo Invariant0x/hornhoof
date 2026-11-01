@@ -93,7 +93,7 @@ export class PublicLinks {
   }
 
   /* Writes the tunnel's settings for the link the database holds, or takes them away, written whole and then moved so
-     the tunnel never reads half a file. The token in them is for the tunnel container alone. A control folder that
+     the tunnel never reads half a file. The link's key in them is for the tunnel container alone. A control folder that
      cannot be written, as when Hornhoof runs outside compose, goes to the log: the link works once the tunnel reads
      the settings. */
   async sync(): Promise<void> {
@@ -101,7 +101,8 @@ export class PublicLinks {
     try {
       const [row] = await this.ctx.db.select().from(publicLinks).limit(1);
       if (!row) return rmSync(file, { force: true });
-      const settings = { url: row.url, tunnel: JSON.parse(decryptSecret(row.tunnelEnc, this.ctx.config.secret)) as unknown };
+      const { secret } = this.ctx.config;
+      const settings = { url: row.url, name: row.name, key: decryptSecret(row.keyEnc, secret), tunnel: JSON.parse(decryptSecret(row.tunnelEnc, secret)) as unknown };
       rmSync(`${file}.new`, { force: true });
       writeFileSync(`${file}.new`, JSON.stringify(settings), { mode: 0o600 });
       renameSync(`${file}.new`, file);

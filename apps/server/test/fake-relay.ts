@@ -19,12 +19,26 @@ export type FakeRelay = {
 
 const NAME = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 
+/* What the relay gives the tunnel client, as relay.py builds it: the frpc image and config, and its parts. */
+const tunnelFor = (name: string, key: string) => ({
+  image: 'fatedier/frpc:v0.71.1@sha256:7a0a18bc9c83dc106a7e5213a890f521affdf90d595829c56b0ed8481377d50e',
+  configPath: '/etc/frp/frpc.toml',
+  args: ['-c', '/etc/frp/frpc.toml'],
+  config: `serverAddr = "hornhoof.test"\nmetadatas.name = "${name}"\nmetadatas.key = "${key}"\n`,
+  serverAddr: 'hornhoof.test',
+  serverPort: 443,
+  protocol: 'wss',
+  proxyName: name,
+  subdomain: name,
+  target: 'app:8080',
+});
+
 /* A stand-in for the relay at hornhoof.org, with its API as the relay offers it. */
 export async function fakeRelay(): Promise<FakeRelay> {
   const app = Fastify();
   const relay: FakeRelay = { url: '', bindings: new Map(), reserved: new Set(['www', 'api']), calls: [], down: false, urlFor: name => `https://${name}.hornhoof.test` };
   const check = (name: string) =>
-    !NAME.test(name) ? { name, free: false, reason: 'invalid' } : relay.reserved.has(name) ? { name, free: false, reason: 'reserved' } : relay.bindings.has(name) ? { name, free: false, reason: 'taken' } : { name, free: true };
+    !NAME.test(name) || name.slice(2, 4) === '--' ? { name, free: false, reason: 'invalid' } : relay.reserved.has(name) ? { name, free: false, reason: 'reserved' } : relay.bindings.has(name) ? { name, free: false, reason: 'taken' } : { name, free: true };
 
   app.addHook('onRequest', async (req, reply) => {
     relay.calls.push(`${req.method} ${req.url}`);
@@ -34,15 +48,15 @@ export async function fakeRelay(): Promise<FakeRelay> {
   app.post<{ Body: { name?: string } | undefined }>('/api/v1/bindings', async (req, reply) => {
     const name = req.body?.name ?? randomBytes(12).toString('hex');
     const found = check(name);
-    if (!found.free) return reply.code(found.reason === 'taken' ? 409 : 400).send({ error: found.reason });
+    if (!found.free) return reply.code(found.reason === 'invalid' ? 400 : 409).send({ error: found.reason, message: `${name} is ${found.reason}.` });
     const key = randomBytes(24).toString('base64url');
     relay.bindings.set(name, { key });
-    return reply.code(201).send({ name, url: relay.urlFor(name), key, tunnel: { server: 'hornhoof.test:7000', token: `tunnel-${name}`, name } });
+    return reply.code(201).send({ name, url: relay.urlFor(name), key, tunnel: tunnelFor(name, key) });
   });
   app.delete<{ Params: { name: string } }>('/api/v1/bindings/:name', async (req, reply) => {
     const binding = relay.bindings.get(req.params.name);
     if (!binding) return reply.code(404).send({ error: 'unknown' });
-    if (req.headers.authorization !== `Bearer ${binding.key}`) return reply.code(403).send({ error: 'forbidden' });
+    if (req.headers.authorization !== `Bearer ${binding.key}`) return reply.code(401).send({ error: 'unauthorized' });
     relay.bindings.delete(req.params.name);
     return reply.code(204).send();
   });

@@ -62,10 +62,15 @@ describe('binding the company to a public link', () => {
     expect(row).toMatchObject({ companyId: acme!.id, name: 'acme', url: 'https://acme.hornhoof.test' });
     expect(row!.keyEnc).not.toContain(key);
     expect(decryptSecret(row!.keyEnc, config.secret)).toBe(key);
-    expect(row!.tunnelEnc).not.toContain('tunnel-acme');
+    expect(row!.tunnelEnc).not.toContain(key);
 
-    expect(JSON.parse(readFileSync(tunnelFile, 'utf8'))).toEqual({ url: 'https://acme.hornhoof.test', tunnel: { server: 'hornhoof.test:7000', token: 'tunnel-acme', name: 'acme' } });
-    /* The tunnel's token is for the tunnel container alone. */
+    expect(JSON.parse(readFileSync(tunnelFile, 'utf8'))).toEqual({
+      url: 'https://acme.hornhoof.test',
+      name: 'acme',
+      key,
+      tunnel: expect.objectContaining({ serverAddr: 'hornhoof.test', serverPort: 443, protocol: 'wss' }),
+    });
+    /* The link's key is for the tunnel container alone. */
     expect(statSync(tunnelFile).mode & 0o077).toBe(0);
     expect((await app.inject({ url: '/api/link', ...as(ceo) })).json()).toEqual({ link: { name: 'acme', url: 'https://acme.hornhoof.test' }, domain: '127.0.0.1' });
   });
