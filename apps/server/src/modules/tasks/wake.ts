@@ -164,11 +164,20 @@ export async function wakeAll(ctx: Ctx, wakes: Wake[]): Promise<void> {
 /* How long a move's caller has to queue its turns before Hornhoof takes them as left behind. */
 const LEFT_BEHIND_MS = 30_000;
 
+/* A sweep still running, so the next one does not queue its turns a second time. */
+const sweeping = new WeakSet<Ctx>();
+
 /* Queues the turns that moves kept and nobody queued, as after a server stopped between the two. */
 export async function wakeLeftBehind(ctx: Ctx, now = new Date()): Promise<number> {
-  const left = await wakesLeft(ctx.db, new Date(now.getTime() - LEFT_BEHIND_MS));
-  await wakeAll(ctx, left);
-  return left.length;
+  if (sweeping.has(ctx)) return 0;
+  sweeping.add(ctx);
+  try {
+    const left = await wakesLeft(ctx.db, new Date(now.getTime() - LEFT_BEHIND_MS));
+    await wakeAll(ctx, left);
+    return left.length;
+  } finally {
+    sweeping.delete(ctx);
+  }
 }
 
 /* An employee waits for people: the orchestrator finds out what it needs and puts it into plain words for them, which

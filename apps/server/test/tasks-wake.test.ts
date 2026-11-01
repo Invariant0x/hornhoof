@@ -203,6 +203,24 @@ describe('the turns a task move needs', () => {
     expect(await c.turnsOf(c.bruno.id)).toEqual([]);
     expect((await c.turnsOf(kai!.id)).map(j => j.taskId)).toEqual([handed.id]);
   });
+
+  it('are left out for work cancelled together with the task above it', async () => {
+    const c = await company();
+    const task = await c.memberTask();
+    const [kai] = await c.db.insert(agents).values({ companyId: c.dev.companyId, kind: 'worker', name: 'Kai', roleKey: 'DEV-BE', departmentId: c.dev.id, model: '', subscriptionId: c.sub.id }).returning();
+    await createTask(c.ctx, { agentId: c.head.id }, { title: 'Refunds', brief: '', body: '', departmentId: c.dev.id, parentId: task.id, assigneeAgentId: kai!.id, executor: true, gates: [] });
+    await cancel(c.ctx, { agentId: c.head.id }, task.id, 'Not needed.');
+    expect(await wakeLeftBehind(c.ctx, later())).toBe(0);
+    expect(await c.turnsOf(kai!.id)).toEqual([]);
+  });
+
+  it('are queued by one sweep at a time', async () => {
+    const c = await company();
+    await c.memberTask();
+    const swept = await Promise.all([wakeLeftBehind(c.ctx, later()), wakeLeftBehind(c.ctx, later())]);
+    expect(swept[0]! + swept[1]!).toBe(1);
+    expect(await c.turnsOf(c.bruno.id)).toHaveLength(1);
+  });
 });
 
 describe('a task handed to another executor', () => {

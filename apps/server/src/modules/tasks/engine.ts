@@ -415,7 +415,11 @@ export async function cancel(ctx: Live, actor: Actor, taskId: string, why: strin
         .set({ status: 'cancelled', closedAt: new Date(), assigneeAgentId: null, updatedAt: new Date(), version: sql`${tasks.version} + 1` })
         .where(and(inArray(tasks.parentId, level), notInArray(tasks.status, [...CLOSED])))
         .returning();
-      for (const t of below) await note(tx, t, { kind: 'cancelled', actor, text: `#${task.number} was cancelled.` });
+      for (const t of below) {
+        await note(tx, t, { kind: 'cancelled', actor, text: `#${task.number} was cancelled.` });
+        /* Work cancelled with the task above it needs none of the turns kept for it. */
+        await dropEarlierWakes(tx, t.id);
+      }
       ended.push(...below);
       level = below.map(t => t.id);
     }
