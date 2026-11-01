@@ -19,6 +19,12 @@ describe('what the build runs', () => {
     for (const line of from) expect(line).toMatch(/ [\w.-]+:[\w.-]+@sha256:[0-9a-f]{64}( AS \w+)?$/);
   });
 
+  it('takes the tunnel client from an image pinned by digest', () => {
+    const copies = read('Dockerfile').split('\n').filter(l => /^COPY --from=[\w.-]+[/:]/.test(l));
+    expect(copies.some(l => l.includes(' /usr/bin/frpc '))).toBe(true);
+    for (const line of copies) expect(line).toMatch(/^COPY --from=[\w./-]+:[\w.-]+@sha256:[0-9a-f]{64} /);
+  });
+
   it('runs the database from an image pinned by digest', () => {
     expect(read('compose.yaml')).toMatch(/^ {4}image: postgres:17\.\d+@sha256:[0-9a-f]{64}$/m);
   });
