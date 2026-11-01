@@ -14,6 +14,24 @@ type Options = { home: string; tools: string; bin?: string; user?: JobUser | nul
 /* What agy 1.4.12 says in print mode and in `agy models` when it is not signed in. */
 export const SIGNED_OUT = /authentication failed or timed out|authentication required|not logged into Antigravity|Please sign in/i;
 
+/* agy cuts each rules file, AGENTS.md among them, at 24,000 bytes on a line boundary, and has no setting for it. Longer
+   instructions keep their start there, in whole lines well under that, and say where they are whole. */
+const AGY_RULES = 24_000;
+const AGY_START = 22_000;
+
+/* What AGENTS.md says to agy, and the whole text for the file it then names. */
+export function agyRules(text: string, file: string): { rules: string; whole: string | null } {
+  if (Buffer.byteLength(text) < AGY_RULES) return { rules: text, whole: null };
+  const start: string[] = [];
+  let bytes = 0;
+  for (const line of text.split('\n')) {
+    bytes += Buffer.byteLength(line) + 1;
+    if (bytes > AGY_START) break;
+    start.push(line);
+  }
+  return { rules: `${start.join('\n')}\n\nThe rest of these instructions did not fit here. Read them whole in ${file} before you go on.`, whole: text };
+}
+
 /* Where Google's install script (antigravity.google/cli/install.sh) asks which release to download. */
 const RELEASES = 'https://antigravity-cli-auto-updater-974169037036.us-central1.run.app';
 
@@ -222,7 +240,12 @@ export function antigravityAdapter({ home, tools, bin = join(tools, 'bin', 'agy'
         writePrivate(mcpJson, JSON.stringify({ mcpServers: { hornhoof: server } }), user);
       }
       /* agy reads AGENTS.md in the folder it works in as the folder's rules. */
-      if (input.instructions) writePrivate(join(input.workDir, 'AGENTS.md'), input.instructions + '\n', user);
+      if (input.instructions) {
+        const file = join(input.workDir, '.hh-instructions.md');
+        const { rules, whole } = agyRules(input.instructions, file);
+        if (whole) writePrivate(file, whole + '\n', user);
+        writePrivate(join(input.workDir, 'AGENTS.md'), rules + '\n', user);
+      }
 
       let sessionId: string | null = input.sessionId;
       let result: Record<string, unknown> | null = null;

@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -47,6 +47,20 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     expect(runs[0].env).toMatchObject({ HOME: join(home, 'agy', 'g1'), AGY_CLI_DISABLE_AUTO_UPDATE: 'true' });
     /* One program for both turns. */
     expect((await host.screen('g1')).match(/Antigravity CLI/g)).toHaveLength(1);
+  });
+
+  it('gives Antigravity the start of instructions it would cut, and the whole text in a file of its folder', async () => {
+    await setUp();
+    const long = Array.from({ length: 300 }, (_, i) => `${i} ${'я'.repeat(60)}`).join('\n');
+    const log = join(home, 'agy-g6.log');
+    expect(await host.run(agyJob('g6', 'hello', { instructions: long, env: { FAKE_LOG: log } }))).toMatchObject({ ok: true });
+    const file = join(home, 'work', 'g6', '.hh-instructions.md');
+    expect(readFileSync(file, 'utf8')).toBe(long + '\n');
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+    const [run] = agyRuns(log);
+    expect(Buffer.byteLength(run.agentsMd)).toBeLessThan(23_000);
+    expect(long.startsWith(run.agentsMd.split('\n\n')[0] + '\n')).toBe(true);
+    expect(run.agentsMd).toContain(file);
   });
 
   it("shows Antigravity's steps, and tells one that failed or is not signed in", async () => {

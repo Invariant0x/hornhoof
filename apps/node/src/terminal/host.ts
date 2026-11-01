@@ -4,7 +4,7 @@ import { readFileSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { TERM_CHUNK, type AgentEvent, type Limits, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
-import { agyStream } from '../providers/antigravity.js';
+import { agyRules, agyStream } from '../providers/antigravity.js';
 import { claudeEvents, claudeInterrupted } from '../providers/claude.js';
 import { contentText } from '../providers/events.js';
 import { agentFs, ownFs, type AgentFs } from '../agent-fs.js';
@@ -270,12 +270,17 @@ export class TerminalHost {
     const kept = program.kind !== 'codex' && input.sessionId ? await keptContext(this.fs, input.workDir, input.sessionId) : null;
     const context = kept && input.context && !kept.includes(input.context) ? `${kept}\n\n${input.context}` : (kept ?? input.context);
     const told = [input.instructions, context, input.guidance].filter(Boolean).join('\n\n');
+    const file = join(input.workDir, '.hh-instructions.md');
     if (told && program.kind === 'claude') {
-      instructionsFile = join(input.workDir, '.hh-instructions.md');
-      await this.fs.write(instructionsFile, told + '\n');
+      instructionsFile = file;
+      await this.fs.write(file, told + '\n');
     }
-    /* Codex and Kimi Code read AGENTS.md in the folder they start in. */
-    if (told && program.kind !== 'claude') await this.fs.write(join(input.workDir, 'AGENTS.md'), told + '\n');
+    /* Codex, Kimi Code and Antigravity read AGENTS.md in the folder they start in, agy only its start. */
+    if (told && program.kind !== 'claude') {
+      const { rules, whole } = program.kind === 'antigravity' ? agyRules(told, file) : { rules: told, whole: null };
+      if (whole) await this.fs.write(file, whole + '\n');
+      await this.fs.write(join(input.workDir, 'AGENTS.md'), rules + '\n');
+    }
     const spec = program.launch({ bin: job.bin, home: job.home, workDir: input.workDir, sessionId: input.sessionId, model: input.model, effort: input.effort, compactWindow: input.compactWindow, instructionsFile, urls, plugins: this.plugins });
     const hash = hashOf({ kind: program.kind, bin: job.bin, model: input.model, effort: input.effort ?? null, compactWindow: input.compactWindow ?? null, instructions: input.instructions, env: lasting(input.env) });
     /* A new session asked for goes on in a program started for a person that nothing was said in yet. */

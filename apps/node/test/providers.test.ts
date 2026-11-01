@@ -798,6 +798,22 @@ describe('Hornhoof tools and instructions', () => {
     expect(events).toContainEqual({ kind: 'tool', name: 'run_command', input: 'echo hello_headless_demo' });
   });
 
+  it('give Antigravity the start of instructions it would cut, in whole lines, and the whole text in a file only its user reads', async () => {
+    /* Fewer letters than agy's 24,000 bytes, two bytes each, as agy counts bytes. */
+    const long = Array.from({ length: 300 }, (_, i) => `${i} ${'я'.repeat(60)}`).join('\n');
+    await adapter('antigravity').run(input({ instructions: long }));
+    const file = join(work, '.hh-instructions.md');
+    expect(readFileSync(file, 'utf8')).toBe(long + '\n');
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+    const { agentsMd } = lastRun();
+    expect(Buffer.byteLength(agentsMd!)).toBeLessThan(23_000);
+    const [start, pointer, ...rest] = agentsMd!.split('\n\n');
+    expect(rest).toEqual([]);
+    expect(start!.length).toBeGreaterThan(0);
+    expect(long.startsWith(`${start}\n`)).toBe(true);
+    expect(pointer).toContain(file);
+  });
+
   it.each(['codex', 'kimi', 'antigravity'] as const)('never follow a link the %s agent left where its files go', async provider => {
     const { run } = withTools(provider);
     const outside = join(dir, 'outside.txt');
