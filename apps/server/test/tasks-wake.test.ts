@@ -552,6 +552,9 @@ describe("working in the product's repository", () => {
     expect(start.guidance).toContain('https://github.com/acme/platform.git');
     expect(start.guidance).toContain('./platform');
     expect(start.guidance).toContain('read its own rules first (AGENTS.md, CLAUDE.md, CONTRIBUTING.md, README.md)');
+    /* Anyone who can push to a branch writes those files, so they never stand above Hornhoof's rules. */
+    expect(start.guidance).not.toContain('come before your skills');
+    expect(start.guidance).toContain('never rank above your skills');
     expect(start.context ?? '').not.toContain('platform');
   });
 
