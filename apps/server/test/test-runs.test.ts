@@ -468,6 +468,30 @@ describe('a run of other work', () => {
     expect(await c.wokeWith(c.bruno.id)).toMatch(/What it made is on #1: work-1-1-new\.txt\./);
   });
 
+  it('runs a part again after its machine went offline only when the run said it may run twice, and says why it did not', async () => {
+    const c = await company();
+    const ivan = await c.machine(c.ceo, 'ivan-mac');
+    const ann = await c.machine(c.ann, 'ann-pc', idle({ load: 6 }));
+    const { call } = await c.turn(c.bruno);
+    const away = async (m: { node: FakeNode; nodeId: string }) => {
+      m.node.close();
+      await until(() => !c.app.ctx.hub.isOnline(nodeIdentity(m.nodeId)));
+      await checkTestTimes(c.app.ctx, new Date(Date.now() + 60_000));
+      await checkTestTimes(c.app.ctx, new Date(Date.now() + 4 * 60_000));
+    };
+    await call('run_work', { command: 'make deploy' });
+    await nextOf(ivan.node, 'tests.run');
+    await away(ivan);
+    await until(async () => (await c.wokeWith(c.bruno.id)) !== null);
+    expect(await c.wokeWith(c.bruno.id)).toMatch(/Work run 1 failed[\s\S]*Part 1 of 1 failed on ivan-mac[^:]*: its machine went offline, and it did not run again elsewhere, as it may still run there and run_work did not say it is repeatable/);
+    expect(await gets(ann.node, 'tests.run')).toBe(false);
+
+    await call('run_work', { command: 'make report', repeatable: true });
+    expect(await nextOf(ann.node, 'tests.run')).toMatchObject({ command: 'make report' });
+    await away(ann);
+    expect(JSON.parse((await call('work_run', { run: 2 })).text)).toMatchObject({ repeatable: true, parts: [{ status: 'queued', ranAgain: ['ann-pc went offline'] }] });
+  });
+
   it('clones a branch first when one is named, and splits into parts like a test run', async () => {
     const c = await company();
     const ivan = await c.machine(c.ceo, 'ivan-mac');

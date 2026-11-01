@@ -75,7 +75,12 @@ const took = (ms: number) => {
 };
 
 /* Why a part ended other than by its command passing or failing. */
-function endedBy(run: Pick<Run, 'timeoutMs'>, p: Part): string {
+function endedBy(run: Pick<Run, 'timeoutMs' | 'kind' | 'repeatable'>, p: Part): string {
+  const kept = mayStillRun(p.error ?? '') && !mayRepeat(run, p.error ?? '') ? ', and it did not run again elsewhere, as it may still run there and run_work did not say it is repeatable' : '';
+  return lostHow(run, p) + kept;
+}
+
+function lostHow(run: Pick<Run, 'timeoutMs'>, p: Part): string {
   switch (p.error) {
     case 'timeout':
       return `it did not end within ${took(run.timeoutMs)}`;
@@ -109,6 +114,11 @@ const LOST_HOW: Record<string, string> = {
   machine_disconnected: 'was disconnected from the company',
   subscription_removed: 'lost the plan its node ran for',
 };
+/* A part lost in any way but a restart its node reported may still run on its machine. */
+const mayStillRun = (why: string) => why in LOST_HOW && why !== 'machine_restarted';
+/* A part of a test run runs again wherever it was lost; a part of work, which may publish, deploy or send something, only
+   when it cannot still run, or when its agent said it may run twice. */
+const mayRepeat = (run: Pick<Run, 'kind' | 'repeatable'>, why: string) => run.kind === 'tests' || run.repeatable || !mayStillRun(why);
 export const lostLine = (l: LostRun) => `${l.machine} ${LOST_HOW[l.why] ?? 'lost it'}`;
 
 /* What a part that ran again went through before. */
@@ -313,7 +323,7 @@ export async function loseParts(ctx: Ctx, which: SQL, why: string): Promise<void
     .where(and(which, eq(testParts.status, 'running')));
   for (const { part: p, run } of lost) {
     const running = and(eq(testParts.id, p.id), eq(testParts.status, 'running'))!;
-    if (p.lost.length >= RERUNS) {
+    if (p.lost.length >= RERUNS || !mayRepeat(run, why)) {
       await endParts(ctx, running, why);
       continue;
     }
@@ -408,8 +418,8 @@ export async function checkTestTimes(ctx: Ctx, now = new Date()): Promise<void> 
   await pumpTests(ctx);
 }
 
-/* files: the task's files a part of work takes in; memory: the free memory, in GB, it needs. */
-export type RunInput = { task?: number | string; branch?: string; command: string; parts?: number; minutes?: number; files?: string[]; memory?: number };
+/* files: the task's files a part of work takes in; memory: the free memory, in GB, it needs; repeatable: it may run twice. */
+export type RunInput = { task?: number | string; branch?: string; command: string; parts?: number; minutes?: number; files?: string[]; memory?: number; repeatable?: boolean };
 
 /* The task a run is for: the one named, else the one the turn is on. */
 async function taskFor(ctx: Ctx, job: ToolJob, ref: number | string | undefined, kind: RunKind): Promise<Task> {
@@ -472,6 +482,7 @@ export async function startRun(ctx: Ctx, job: ToolJob, input: RunInput, kind: Ru
         command: input.command,
         files,
         memoryGb: kind === 'work' ? (input.memory ?? WORK_MEMORY_GB) : null,
+        repeatable: kind === 'work' && input.repeatable === true,
         parts,
         timeoutMs: (input.minutes ?? TEST_MINUTES) * 60_000,
       })
@@ -519,7 +530,7 @@ export async function runState(ctx: Ctx, job: ToolJob, number: number, kind: Run
     kind: run.kind,
     branch: work ? run.branch : (run.branch ?? `the task's own: task-${task.number} or the one that starts with task-${task.number}-`),
     command: run.command,
-    ...(work ? { files: run.files, memoryGb: run.memoryGb } : {}),
+    ...(work ? { files: run.files, memoryGb: run.memoryGb, repeatable: run.repeatable } : {}),
     minutes: run.timeoutMs / 60_000,
     status: stateOf(run, run.status),
     ...(stopper ? { stoppedBy: stopper.name } : {}),

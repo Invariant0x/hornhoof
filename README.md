@@ -123,7 +123,7 @@ A machine takes a test run when it is a computer, is online, is lent to test run
 
 There the branch is cloned into a fresh folder, the command runs in it as a user that reaches neither the node's key nor the agents' folders, for at most 30 minutes unless the agent asks for up to 120, and the folder is removed. When every part has ended, the agent is woken on its task with the result: passed or failed, which machine ran each part and for how long, and the last lines of what failed. The whole log of each part goes on the task as a file, like `tests-3-1.log`. `test_run` shows how a run goes and `stop_tests` stops it. The repository's token goes along to each machine that takes a run, so it reaches the lent machines of everyone who reaches the department. Nodes of an older build say nothing about their load and get no test runs until they are updated.
 
-A part does not move once it runs. When its machine restarts, is offline for 3 minutes, is disconnected or loses the plan its node ran for, the part runs again from the start, on another machine when one is free for it, at most twice, and the result says where it was lost.
+A part does not move once it runs. When its machine restarts, is offline for 3 minutes, is disconnected or loses the plan its node ran for, the part runs again from the start, on another machine when one is free for it, at most twice, and the result says where it was lost. A part of work may still run on a machine that went offline, or was disconnected or lost its plan while away, so it runs again only when `run_work` said `repeatable`, for a command that does no harm if it runs twice; otherwise it ends and the result says why.
 
 ### Other work on free machines
 

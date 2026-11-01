@@ -370,7 +370,7 @@ describe('migration 0033', () => {
   });
 });
 
-describe('migrations 0034 to 0036', () => {
+describe('migrations 0034 to 0037', () => {
   const C = '00000000-0000-4000-8000-000000000001';
   const P = '00000000-0000-4000-8000-000000000002';
   const A = '00000000-0000-4000-8000-0000000000b1';
@@ -398,8 +398,8 @@ describe('migrations 0034 to 0036', () => {
 
     const parts = await db.execute<{ waits: boolean; lost: unknown }>(sql`select queued_at = created_at as waits, lost from test_parts`);
     expect(parts.rows).toEqual([{ waits: true, lost: [] }]);
-    const runs = await db.execute(sql`select kind, files, memory_gb from test_runs`);
-    expect(runs.rows).toEqual([{ kind: 'tests', files: [], memory_gb: null }]);
+    const runs = await db.execute(sql`select kind, files, memory_gb, repeatable from test_runs`);
+    expect(runs.rows).toEqual([{ kind: 'tests', files: [], memory_gb: null, repeatable: false }]);
     const kinds = await db.execute(sql`select kind from machines`);
     expect(kinds.rows).toEqual([{ kind: 'computer' }]);
   });

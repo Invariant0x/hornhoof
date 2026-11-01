@@ -549,6 +549,9 @@ export const testRuns = pgTable(
     files: jsonb('files').$type<string[]>().notNull().default([]),
     /* The free memory a part of work needs; tests need what their repository says. */
     memoryGb: integer('memory_gb'),
+    /* The agent said a part of work may run twice, so one whose machine went offline, and may still run there, runs
+       again elsewhere. A part of a test run always may. */
+    repeatable: boolean('repeatable').notNull().default(false),
     parts: integer('parts').notNull().default(1),
     timeoutMs: integer('timeout_ms').notNull(),
     status: text('status', { enum: TEST_RUN_STATUSES }).notNull().default('running'),

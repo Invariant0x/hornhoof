@@ -68,7 +68,8 @@ export function registerTestTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         `the task as work-<run>-<part>-<name>, at most ${MAX_RUN_FILES} files of up to 50 MB per part, and each part's log as work-<run>-<part>.log. When every part has ended you are woken on ` +
         "the task with the result. parts splits it into up to " +
         `${MAX_TEST_PARTS} parts on several machines at once: the command says which part with {part} and how many with {parts}, and HH_PART and HH_PARTS hold them too. ` +
-        'A machine whose processors are busy takes no new part, and a part whose machine goes away runs again on another one, at most twice.',
+        'A machine whose processors are busy takes no new part. A part whose machine restarts runs again on another one, at most twice. A part whose machine goes offline may ' +
+        'still be running there, so it runs again elsewhere only when repeatable is true; otherwise it ends and the result says so.',
       inputSchema: {
         command: z.string().trim().min(1).max(4000).describe('What runs, for example installing what it needs and then the work itself.'),
         task: TaskRef('the work is for'),
@@ -77,6 +78,13 @@ export function registerTestTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         parts: Parts,
         minutes: Minutes,
         memory: z.number().int().min(1).max(512).optional().describe(`The free memory each part needs, in GB; ${WORK_MEMORY_GB} by default.`),
+        repeatable: z
+          .boolean()
+          .optional()
+          .describe(
+            'true only when the command may run twice, even two copies at once, without harm: it publishes, deploys, sends, pays or changes nothing outside its folder. ' +
+              'false by default: a part whose machine goes offline is then not run again.',
+          ),
       },
     },
     async input => answer(() => startRun(ctx, job, input, 'work')),

@@ -260,6 +260,13 @@
       "when": 1793572205757,
       "tag": "0036_machine_kind",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1793573510181,
+      "tag": "0037_work_repeatable",
+      "breakpoints": true
     }
   ]
 }
