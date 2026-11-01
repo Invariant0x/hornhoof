@@ -3,7 +3,8 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   plugins: [react()],
-  server: { proxy: { '/api': 'http://localhost:8080' } },
+  /* ws: the agent terminal is a WebSocket under /api too. */
+  server: { proxy: { '/api': { target: 'http://localhost:8080', ws: true } } },
   test: {
     environment: 'jsdom',
     setupFiles: ['./test/setup.ts'],
