@@ -55,9 +55,9 @@ export function budgetUntil(limits: Limits | null, budget: number | null, now = 
   return resets.length ? resets.reduce((a, b) => (Date.parse(a) >= Date.parse(b) ? a : b)) : null;
 }
 
-/* What a program prints at the end of its output when the plan refuses a turn for its usage limit: Kimi's 429, Codex's
-   "hit your usage limit", Claude's "5-hour limit reached". */
-const REFUSED = /\b429\b[^\n]*\b(?:usage|rate) limit|(?:reached|hit) your (?:[\w-]+ )?usage limit|usage limit reached|\b\d+-hour limit reached/i;
+/* What a program prints at the end of its output when the plan refuses a turn for its usage limit: Kimi's 429 and its
+   APIProviderQuotaExhaustedError, Codex's "hit your usage limit", Claude's "5-hour limit reached". */
+const REFUSED = /\b429\b[^\n]*\b(?:(?:usage|rate) limit|quota)|\bAPIProviderQuotaExhaustedError\b|(?:reached|hit) your (?:[\w-]+ )?usage limit|usage limit reached|\b\d+-hour limit reached/i;
 /* A program that names no time is tried again after this, and held again if the plan still refuses. */
 const LIMIT_PROBE_MS = 15 * 60_000;
 const UNIT_MS: Record<string, number> = { d: 86_400_000, h: 3_600_000, m: 60_000, s: 1000 };

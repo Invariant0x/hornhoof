@@ -473,6 +473,16 @@ describe('waking agents for their tasks', () => {
     expect((await read()).status).toBe('open');
   });
 
+  it("does not block the task when its turns ended on Kimi's quota running out", async () => {
+    const { ctx, db, bruno, memberTask, finish } = await company();
+    const task = await memberTask();
+    await wakeAll(ctx, [{ agentId: bruno.id, taskId: task.id, why: 'assigned' }]);
+    const quota = () =>
+      db.update(jobs).set({ error: 'agent_failed', tail: '{"type":"error","code":"provider.api_error","message":"You exceeded your current token quota","name":"APIProviderQuotaExhaustedError","details":{"statusCode":429,"requestId":null,"traceId":null}}' }).where(and(eq(jobs.agentId, bruno.id), eq(jobs.status, 'running')));
+    for (let i = 0; i < 3; i++) await finish(bruno.id, quota, 'failed');
+    expect((await db.select().from(tasks).where(eq(tasks.id, task.id)))[0]!.status).toBe('open');
+  });
+
   it('does not count a turn that broke because its machine started again', async () => {
     const { ctx, db, bruno, memberTask, finish } = await company();
     const task = await memberTask();

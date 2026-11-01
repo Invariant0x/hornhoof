@@ -332,6 +332,24 @@ describe('the orchestrator\'s conversation', () => {
     expect(sub!.limits).toMatchObject({ status: 'rejected', windows: [{ name: 'five_hour', utilization: 1 }] });
   });
 
+  it.each([
+    ['its error event', '{"type":"error","code":"provider.api_error","message":"You exceeded your current token quota","name":"APIProviderQuotaExhaustedError","details":{"statusCode":429,"requestId":null,"traceId":null},"retryable":false}\n'],
+    ['its terminal', 'Error: [provider.api_error] 429 You exceeded your current token quota, please check your account balance\n❯ '],
+  ])("holds turns when Kimi says in %s that the plan's quota ran out, and tries again in a quarter of an hour", async (_, tail) => {
+    const { app, ceo, mac } = await onMac('0.3.0', 'kimi');
+    await until(async () => (await state(app, ceo)).ready);
+    await say(app, ceo, 'First');
+    const first = await nextRun(mac);
+    await say(app, ceo, 'Second');
+    mac.send({ type: 'job.done', jobId: first.jobId, ok: false, sessionId: 'sess-k', result: '', tail, error: 'agent_failed' });
+    await until(async () => (await state(app, ceo)).limitUntil !== null);
+    const wait = Date.parse((await state(app, ceo)).limitUntil!) - Date.now();
+    expect(wait).toBeGreaterThan(14 * 60_000);
+    expect(wait).toBeLessThanOrEqual(15 * 60_000);
+    expect(await quiet(mac)).toBe(0);
+    expect((await state(app, ceo)).queued).toBe(1);
+  });
+
   it('takes the time a program names for its usage limit to start over, and the map hears of it', async () => {
     const { app, ceo, mac } = await onMac('0.3.0', 'codex');
     await until(async () => (await state(app, ceo)).ready);
