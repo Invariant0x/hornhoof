@@ -185,9 +185,10 @@ export async function enqueueTurn(ctx: Ctx, t: Turn): Promise<string> {
 
 /* A person typed into the agent's terminal while no turn ran, or while the program started. The turn is theirs and runs
    from now on the node that shows the session, which goes on with the instructions it was started with: their hash stays,
-   so the next turn resumes it. */
+   so the next turn resumes it. Nobody typed it when no person pressed Enter in Hornhoof's terminal just now: then the
+   agent's own program asks, which gets no turn and no tool token, so an agent never opens work for itself. */
 export async function openTypedTurn(ctx: Ctx, node: NodeIdentity, agentId: string, text: string, personId: string | null): Promise<{ jobId: string; token: string } | null> {
-  if (!z.uuid().safeParse(agentId).success) return null;
+  if (!personId || !z.uuid().safeParse(agentId).success) return null;
   const opened = await onAgent(ctx, agentId, async () => {
     const { db } = ctx;
     const [agent] = await db.select().from(agents).where(and(eq(agents.id, agentId), isNull(agents.removedAt)));
@@ -228,7 +229,7 @@ export async function openTypedTurn(ctx: Ctx, node: NodeIdentity, agentId: strin
     return { jobId: job!.id, token };
   });
   /* Out of the agent's line, which the pump of its task's turn waits on. */
-  if (opened && personId) await wakeAll(ctx, await answerDirectly(ctx, personId, agentId, text));
+  if (opened) await wakeAll(ctx, await answerDirectly(ctx, personId, agentId, text));
   return opened;
 }
 

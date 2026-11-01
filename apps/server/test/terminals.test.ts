@@ -234,25 +234,22 @@ describe('a turn a person typed into the terminal', () => {
     expect(await next(builtin, 'job.run')).toMatchObject({ sessionId: 'sess-1' });
   });
 
-  it('counts as typed by a person only when they pressed Enter in the terminal', async () => {
+  it('opens only for a person who pressed Enter in the terminal', async () => {
     const { app, url, ceo, builtin, orchestratorId } = await live();
     const screen = await watch(url, ceo);
     await next(builtin, 'term.open');
     screen.ws.send(JSON.stringify({ type: 'input', data: '\u001b[<64;10;5M' }));
     await next(builtin, 'term.input');
+    /* The agent's own program, or anything it runs, asking for a turn of its own gets no job and no tool token. */
     builtin.send({ type: 'turn.open', agentKey: orchestratorId, text: 'from the machine itself' });
-    const first = await next(builtin, 'turn.opened');
-    builtin.send({ type: 'job.done', jobId: first.jobId!, ok: true, sessionId: 's', result: 'ok', tail: '', error: null });
-    await until(async () => !(await state(app, ceo)).busy);
+    expect(await next(builtin, 'turn.opened')).toMatchObject({ jobId: null, toolToken: null });
+    expect(await state(app, ceo)).toMatchObject({ busy: false });
     screen.ws.send(JSON.stringify({ type: 'input', data: 'hi\r' }));
     await next(builtin, 'term.input');
     builtin.send({ type: 'turn.open', agentKey: orchestratorId, text: 'hi' });
-    await next(builtin, 'turn.opened');
+    expect(await next(builtin, 'turn.opened')).toMatchObject({ jobId: expect.any(String), toolToken: expect.any(String) });
     const said = (await events(app, ceo)).filter((e: { kind: string }) => e.kind === 'message');
-    expect(said.map((e: { data: { text: string }; person: unknown }) => [e.data.text, e.person !== null])).toEqual([
-      ['from the machine itself', false],
-      ['hi', true],
-    ]);
+    expect(said.map((e: { data: { text: string }; person: unknown }) => [e.data.text, e.person !== null])).toEqual([['hi', true]]);
   });
 
   it('is not opened while another turn runs, or for an agent the node does not run', async () => {
@@ -309,9 +306,13 @@ describe('starting an agent for someone who opens its window to talk', () => {
   });
 
   it('lets a person who types while the program starts take over its start turn', async () => {
-    const { app, db, ceo, builtin, orchestratorId } = await live();
+    const { app, db, url, ceo, builtin, orchestratorId } = await live();
     builtin.send({ type: 'agent.start', agentKey: orchestratorId });
     const start = await next(builtin, 'job.run');
+    const screen = await watch(url, ceo);
+    await next(builtin, 'term.open');
+    screen.ws.send(JSON.stringify({ type: 'input', data: 'add a department\r' }));
+    await next(builtin, 'term.input');
     builtin.send({ type: 'turn.open', agentKey: orchestratorId, text: 'add a department', ref: 'r-1' });
     const opened = await next(builtin, 'turn.opened');
     expect(opened).toMatchObject({ jobId: expect.any(String), toolToken: expect.any(String), ref: 'r-1' });
