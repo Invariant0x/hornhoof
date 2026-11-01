@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import type { AddressInfo } from 'node:net';
+import type { AddressInfo, Socket } from 'node:net';
+import type { Owns } from './peer.js';
 
 /* Hook calls are short; a picture for people is the biggest thing that passes. */
 const MAX_BODY = 4 * 1024 * 1024;
@@ -13,7 +14,8 @@ export type AgentUrls = { mcpUrl: string; attachUrl: string; hookUrl: string };
 const FORWARD = ['content-type', 'accept', 'mcp-protocol-version', 'mcp-session-id', 'last-event-id'];
 
 /* Between an agent's long-lived program and Hornhoof, on 127.0.0.1 of the node: the program keeps one address for its tools
-   and its hooks, and each call goes on with the token of the turn running now. The secret in the path tells agents apart. */
+   and its hooks, and each call goes on with the token of the turn running now. The secret in the path tells agents apart;
+   on Linux the bridge also checks that the call comes from that agent's own program. */
 export class Bridge {
   private server: Server | null = null;
   private port = 0;
@@ -24,10 +26,13 @@ export class Bridge {
   /* How long an agent's tool calls between turns wait for a turn to open, and the calls waiting now. */
   private readonly patience = new Map<string, number>();
   private readonly waiting = new Map<string, Set<() => void>>();
+  /* What the check found for each open connection and agent: a connection's process does not change. */
+  private readonly checked = new WeakMap<Socket, Map<string, Promise<boolean>>>();
 
   constructor(
     private readonly hornhoof: string,
     private readonly onHook: HookHandler,
+    private readonly owns: Owns | null = null,
   ) {}
 
   async start(): Promise<void> {
@@ -104,10 +109,23 @@ export class Bridge {
     });
   }
 
+  private fromOwner(key: string, socket: Socket): Promise<boolean> {
+    if (!this.owns) return Promise.resolve(true);
+    const known = this.checked.get(socket) ?? new Map<string, Promise<boolean>>();
+    this.checked.set(socket, known);
+    let found = known.get(key);
+    if (!found) {
+      found = this.owns(key, { port: socket.remotePort ?? 0, bridgePort: this.port }).catch(() => false);
+      known.set(key, found);
+    }
+    return found;
+  }
+
   private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const [, kind, secret, event] = (req.url ?? '').split('?')[0]!.split('/');
     const key = secret ? this.bySecret.get(secret) : undefined;
     if (!key || !kind) return reply(res, 404, '');
+    if (!(await this.fromOwner(key, req.socket))) return reply(res, 403, '');
     const body = await readBody(req);
     if (kind === 'hook' && event) {
       let data: unknown = null;

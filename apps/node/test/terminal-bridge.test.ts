@@ -122,4 +122,26 @@ describe("the node's bridge to Hornhoof's tools", () => {
     expect((await fetch(a.hookUrl.replace(/hook\/[^/]+/, 'hook/wrong') + '/stop', { method: 'POST', body: '{}' })).status).toBe(404);
     expect((await fetch(a.mcpUrl.replace(/mcp\/.+$/, 'mcp/wrong'), { method: 'POST', body: '{}' })).status).toBe(404);
   });
+
+  it("refuses tool, picture and hook calls that do not come from the agent's own program", async () => {
+    const up = await upstream();
+    const heard: string[] = [];
+    const asked: { key: string; port: number; bridgePort: number }[] = [];
+    const bridge = new Bridge(up.url, key => void heard.push(key), async (key, peer) => {
+      asked.push({ key, ...peer });
+      return false;
+    });
+    await bridge.start();
+    closers.push(() => bridge.stop(), () => up.server.close());
+    const a = bridge.agent('agent-1');
+    bridge.setToken('agent-1', 'tok-turn-1');
+    const mcp = await fetch(a.mcpUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' });
+    expect(mcp.status).toBe(403);
+    expect((await fetch(a.attachUrl, { method: 'POST', body: Buffer.from('png') })).status).toBe(403);
+    expect((await fetch(`${a.hookUrl}/stop`, { method: 'POST', body: '{}' })).status).toBe(403);
+    expect(up.seen).toEqual([]);
+    expect(heard).toEqual([]);
+    expect(asked[0]).toMatchObject({ key: 'agent-1', bridgePort: Number(new URL(a.mcpUrl).port) });
+    expect(asked[0]!.port).toBeGreaterThan(0);
+  });
 });

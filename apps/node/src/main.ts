@@ -32,7 +32,7 @@ const MAX_UNCONFIRMED = 50;
 type JobRun = Extract<ServerMessage, { type: 'job.run' }>;
 
 /* Agents of a personal Claude Code, Codex or Kimi Code plan run in tmux sessions people can watch and type into. */
-export type TerminalSetup = { tmux: Tmux; program: TermProgram; bin: string; home: string; signedOut: RegExp };
+export type TerminalSetup = { tmux: Tmux; program: TermProgram; bin: string; home: string; signedOut: RegExp; proc?: string };
 
 type RunOptions = {
   dir: string;
@@ -108,6 +108,7 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
         send: m => (m.type === 'term.data' || m.type === 'term.exit' ? void send?.(m) : emit(m)),
         secrets: () => [...known],
         remember: (sessionId, workDir) => rememberSession(dir, sessionId, workDir),
+        proc: terminal.proc,
       })
     : null;
   if (host && terminal) {
@@ -390,7 +391,9 @@ function terminalFor(dir: string, provider: ProviderId): { terminal?: TerminalSe
   const tools = join(dir, 'tools');
   const home = join(dir, 'home');
   const tmux = new Tmux({ env: childEnv(tools, { HOME: process.env.HOME ?? home }), recordingsDir: join(dir, '.hh-recordings') });
-  return { terminal: { tmux, ...known, bin: join(tools, 'bin', programFor(provider).bin), home } };
+  /* Nodes run on Linux, where the bridge can tell which agent's program calls it. */
+  const proc = process.platform === 'linux' && existsSync('/proc/net/tcp') ? '/proc' : undefined;
+  return { terminal: { tmux, ...known, bin: join(tools, 'bin', programFor(provider).bin), home, proc } };
 }
 
 async function run(dir: string, builtinMode: boolean, io: Io): Promise<number | { stop(): void }> {

@@ -10,6 +10,7 @@ import { kimiContextSize } from '../providers/kimi.js';
 import { jobDone, tidy, type RunInput, type RunResult } from '../runner.js';
 import type { ProgramOutput } from '../program-exit.js';
 import { Bridge } from './bridge.js';
+import { fromAgent } from './peer.js';
 import { StreamMask } from './mask.js';
 import { acceptClaudeDialogs, claudeTranscript, findKimiWire, findRollout, prepareKimi, type TermProgram } from './programs.js';
 import { claudeStatusContext, claudeStatusLimits, codexRollout, kimiWire, LineTail, type WireNews } from './transcripts.js';
@@ -124,6 +125,8 @@ type Options = {
   enterWaitMs?: number;
   cols?: number;
   rows?: number;
+  /* Where Linux tells which process holds a connection, so the bridge takes tool calls only from the agent's own program. */
+  proc?: string;
 };
 
 const WAITING = 'This agent starts with its next turn.';
@@ -183,7 +186,8 @@ export class TerminalHost {
   private readonly rows: number;
 
   constructor(private readonly opts: Options) {
-    this.bridge = new Bridge(opts.hornhoof, (key, event, body) => this.hook(key, event, body));
+    const owns = opts.proc ? fromAgent(key => this.panes(key), opts.proc) : null;
+    this.bridge = new Bridge(opts.hornhoof, (key, event, body) => this.hook(key, event, body), owns);
     this.readyMs = opts.readyMs ?? 120_000;
     this.pollMs = opts.pollMs ?? 500;
     this.openMs = opts.openMs ?? 8000;
@@ -202,6 +206,12 @@ export class TerminalHost {
     for (const a of this.agents.values()) this.unwatch(a);
     this.bridge.stop();
     await this.opts.tmux.stopAll();
+  }
+
+  /* The processes an agent's session starts its program in. */
+  private async panes(key: string): Promise<number[]> {
+    const out = await this.opts.tmux.run(['list-panes', '-s', '-t', `=${this.agent(key).name}`, '-F', '#{pane_pid}']).catch(() => '');
+    return out.split('\n').filter(line => /^\d+$/.test(line)).map(Number);
   }
 
   screen(key: string): Promise<string> {
