@@ -28,4 +28,26 @@ describe('the node hub', () => {
     await new Promise(r => setTimeout(r, 20));
     expect(handled).toEqual(['agent.said', 'status']);
   });
+
+  it('says since when a node is away: from its socket closing, else from the first time it is asked', () => {
+    const hub = new NodeHub({ pingMs: 60_000, onClose: async () => {}, onMessage: async () => {} });
+    const node = { kind: 'node' as const, nodeId: 'n1' };
+    const socket = Object.assign(new EventEmitter(), { readyState: 1, close() {}, ping() {} });
+    hub.attach(node, socket as unknown as WebSocket);
+    expect(hub.awaySince(node)).toBeNull();
+    const before = Date.now();
+    socket.readyState = 3;
+    socket.emit('close');
+    const since = hub.awaySince(node)!;
+    expect(since).toBeGreaterThanOrEqual(before);
+    expect(hub.awaySince(node)).toBe(since);
+    /* One Hornhoof never saw, as after its own restart, is away from the first question on. */
+    const other = { kind: 'node' as const, nodeId: 'n2' };
+    const first = hub.awaySince(other)!;
+    expect(first).toBeGreaterThanOrEqual(since);
+    expect(hub.awaySince(other)).toBe(first);
+    hub.attach(node, Object.assign(new EventEmitter(), { readyState: 1, close() {}, ping() {} }) as unknown as WebSocket);
+    expect(hub.awaySince(node)).toBeNull();
+    hub.stop();
+  });
 });

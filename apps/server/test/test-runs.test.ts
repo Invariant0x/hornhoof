@@ -61,7 +61,7 @@ async function company() {
     const node = await connectNode(url, key);
     node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], load: load as ReturnType<typeof idle>, tests: [] });
     await until(() => app.ctx.hub.loadOf(nodeIdentity(nodeId)) !== null);
-    return { node, subscriptionId: subscriptionId as string, machineId: joined.machine.id as string };
+    return { node, key: key as string, nodeId: nodeId as string, subscriptionId: subscriptionId as string, machineId: joined.machine.id as string };
   };
   /* A machine of a person that joined without a plan, online with this load. */
   const planless = async (token: string, hostname: string, load: object = idle()) => {
@@ -72,6 +72,13 @@ async function company() {
     node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], load: load as ReturnType<typeof idle>, tests: [] });
     await until(() => app.ctx.hub.loadOf(nodeIdentity(nodeId)) !== null);
     return { node, nodeId: nodeId as string, machineId: joined.machine.id as string };
+  };
+  /* The same machine's node back online after it was away. */
+  const reconnect = async (m: { key: string; nodeId: string }, load: object = idle()) => {
+    const node = await connectNode(url, m.key);
+    node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], load: load as ReturnType<typeof idle>, tests: [] });
+    await until(() => app.ctx.hub.loadOf(nodeIdentity(m.nodeId)) !== null);
+    return node;
   };
   const ann = await invitePerson(app, ceo, { name: 'Ann', email: 'ann@acme.com', access: { departments: [dev!.id] } });
   const bob = await invitePerson(app, ceo, { name: 'Bob', email: 'bob@acme.com', access: { departments: [sales!.id] } });
@@ -87,7 +94,7 @@ async function company() {
     await until(() => app.ctx.hub.loadOf({ kind: 'builtin' }) !== null);
     return node;
   };
-  return { app, db, url, ceo, ann, bob, builtin, dev: dev!, sales: sales!, head, bruno, sam, task, turn, machine, planless, wokeWith, filesOn };
+  return { app, db, url, ceo, ann, bob, builtin, dev: dev!, sales: sales!, head, bruno, sam, task, turn, machine, planless, reconnect, wokeWith, filesOn };
 }
 
 /* The next message of one kind a node gets, past the others. */
@@ -250,17 +257,54 @@ describe('a test run', () => {
     expect(await c.wokeWith(c.bruno.id)).toMatch(/Test run 1 was stopped by Hana/);
   });
 
-  it('fails a part its machine lost when it restarted, and stops one Hornhoof ended meanwhile', async () => {
+  it('runs a part its machine lost in a restart again on another machine, under a new id, and says so', async () => {
+    const c = await company();
+    const ivan = await c.machine(c.ceo, 'ivan-mac', idle({ load: 6 }));
+    const ann = await c.machine(c.ann, 'ann-pc');
+    const { call } = await c.turn(c.bruno);
+    await call('run_tests', { command: 'make test' });
+    const lost = await nextOf(ann.node, 'tests.run');
+    ann.node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], load: idle(), tests: [] });
+    const again = await nextOf(ivan.node, 'tests.run');
+    expect(again).toMatchObject({ part: 1, command: 'make test' });
+    expect(again.partId).not.toBe(lost.partId);
+    expect(await gets(ann.node, 'tests.run')).toBe(false);
+    /* The lost run's end, should it still come, changes nothing, and its node hears to stop it. */
+    ann.node.send(done(lost, { ok: false, exitCode: 1, error: 'failed' }));
+    await nextOf(ann.node, 'tests.ack');
+    ann.node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], load: idle(), tests: [lost.partId] });
+    expect(await nextOf(ann.node, 'tests.cancel')).toEqual({ type: 'tests.cancel', partId: lost.partId });
+    expect(await c.wokeWith(c.bruno.id)).toBeNull();
+    ivan.node.send(done(again));
+    await nextOf(ivan.node, 'tests.ack');
+    await until(async () => (await c.wokeWith(c.bruno.id)) !== null);
+    expect(await c.wokeWith(c.bruno.id)).toMatch(/Test run 1 passed[\s\S]*Part 1 of 1 passed on ivan-mac[^\n]*It ran again after ann-pc restarted and lost it\./);
+    expect(JSON.parse((await call('test_run', { run: 1 })).text)).toMatchObject({ parts: [{ status: 'passed', machine: 'ivan-mac', ranAgain: ['ann-pc restarted and lost it'] }] });
+  });
+
+  it('runs a part again once its machine is away for 3 minutes, at most twice, then fails it and says where it was lost', async () => {
     const c = await company();
     const ivan = await c.machine(c.ceo, 'ivan-mac');
     const { call } = await c.turn(c.bruno);
     await call('run_tests', { command: 'make test' });
-    const run = await nextOf(ivan.node, 'tests.run');
-    ivan.node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], load: idle(), tests: [] });
+    await nextOf(ivan.node, 'tests.run');
+    ivan.node.close();
+    await until(() => !c.app.ctx.hub.isOnline({ kind: 'node', nodeId: ivan.nodeId }));
+    await checkTestTimes(c.app.ctx, new Date(Date.now() + 60_000));
+    expect(JSON.parse((await call('test_run', { run: 1 })).text)).toMatchObject({ parts: [{ status: 'running' }] });
+    await checkTestTimes(c.app.ctx, new Date(Date.now() + 4 * 60_000));
+    expect(JSON.parse((await call('test_run', { run: 1 })).text)).toMatchObject({ status: 'running', parts: [{ status: 'queued', ranAgain: ['ivan-mac went offline'] }] });
+    /* The only machine there is takes it again once it is back. */
+    const back = await c.reconnect(ivan);
+    await nextOf(back, 'tests.run');
+    back.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], load: idle(), tests: [] });
+    await nextOf(back, 'tests.run');
+    back.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], load: idle(), tests: [] });
     await until(async () => (await c.wokeWith(c.bruno.id)) !== null);
-    expect(await c.wokeWith(c.bruno.id)).toMatch(/Test run 1 failed[\s\S]*restarted/);
-    ivan.node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], load: idle(), tests: [run.partId] });
-    expect(await nextOf(ivan.node, 'tests.cancel')).toEqual({ type: 'tests.cancel', partId: run.partId });
+    expect(await c.wokeWith(c.bruno.id)).toMatch(
+      /Test run 1 failed[\s\S]*Part 1 of 1 failed on ivan-mac[^:\n]*: its machine restarted and lost it\. It ran again after ivan-mac went offline, and again after ivan-mac restarted and lost it\./,
+    );
+    expect(await gets(back, 'tests.run')).toBe(false);
   });
 
   it("does not count a turn that ended while its test run goes on as standing still", async () => {
@@ -295,20 +339,31 @@ describe('a test run', () => {
     expect(await c.wokeWith(c.bruno.id)).toMatch(/Test run 1 failed[\s\S]*no machine was free for it within 120 min/);
   });
 
-  it('fails the parts of a machine disconnected from the company, and of a subscription removed', async () => {
+  it('runs the parts of a machine disconnected from the company, and of a removed plan, again on another machine', async () => {
     const c = await company();
     const ivan = await c.machine(c.ceo, 'ivan-mac');
     const ann = await c.machine(c.ann, 'ann-pc');
+    const spare = await c.planless(c.ceo, 'spare-box', idle({ load: 7 }));
     const { call } = await c.turn(c.bruno);
     await call('run_tests', { command: 'make test -- {part}', parts: 2 });
-    await nextOf(ivan.node, 'tests.run');
+    const first = await nextOf(ivan.node, 'tests.run');
     await nextOf(ann.node, 'tests.run');
     expect((await c.app.inject({ method: 'POST', url: `/api/machines/${ivan.machineId}/disconnect`, ...as(c.ceo) })).statusCode).toBe(204);
+    const one = await nextOf(spare.node, 'tests.run');
+    expect(one).toMatchObject({ part: 1 });
+    expect(one.partId).not.toBe(first.partId);
     expect((await c.app.inject({ method: 'DELETE', url: `/api/subscriptions/${ann.subscriptionId}`, ...as(c.ann) })).statusCode).toBe(204);
+    /* One part at a time on a machine: the second waits for the first to end there. */
+    expect(await gets(spare.node, 'tests.run')).toBe(false);
+    spare.node.send(done(one));
+    const two = await nextOf(spare.node, 'tests.run');
+    expect(two).toMatchObject({ part: 2 });
+    spare.node.send(done(two));
     await until(async () => (await c.wokeWith(c.bruno.id)) !== null);
     const prompt = (await c.wokeWith(c.bruno.id))!;
-    expect(prompt).toMatch(/disconnected from the company/);
-    expect(prompt).toMatch(/subscription whose node ran it was removed/);
+    expect(prompt).toMatch(/Test run 1 passed/);
+    expect(prompt).toMatch(/Part 1 of 2 passed on spare-box[^\n]*It ran again after ivan-mac was disconnected from the company\./);
+    expect(prompt).toMatch(/Part 2 of 2 passed on spare-box[^\n]*It ran again after ann-pc lost the plan its node ran for\./);
   });
 
   it('brings its result into the turn that already waits on the task', async () => {

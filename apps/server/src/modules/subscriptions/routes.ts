@@ -15,7 +15,7 @@ import { commandFor } from '../nodes/command.js';
 import { BUILTIN, nodeIdentity } from '../nodes/hub.js';
 import { planNodes } from '../nodes/nodes.js';
 import { failOpenJobs } from '../nodes/messages.js';
-import { failParts } from '../testruns/runs.js';
+import { loseParts } from '../testruns/runs.js';
 import { subView, subViews, type IsOnline } from './views.js';
 
 const Target = z.discriminatedUnion('kind', [
@@ -197,7 +197,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
     /* The nodes stop their jobs when they hear remove, and may never report them, so they end here. */
     const ended = await failOpenJobs(ctx, eq(jobs.subscriptionId, sub.id), 'subscription_removed');
     const gone = sub.kind === 'personal' ? (await planNodes(db, [sub.id])).map(n => n.id) : [];
-    if (gone.length) await failParts(ctx, inArray(testParts.nodeId, gone), 'subscription_removed');
+    if (gone.length) await loseParts(ctx, inArray(testParts.nodeId, gone), 'subscription_removed');
     /* An offline node hears it at its next hello. The built-in node keeps running for other keys, so it stops just this key's jobs. */
     if (sub.kind === 'personal') for (const id of gone) hub.send(nodeIdentity(id), { type: 'remove' });
     else for (const jobId of ended) hub.send(BUILTIN, { type: 'job.cancel', jobId });

@@ -41,6 +41,8 @@ type HubOptions = {
 /* Live sockets by identity. One socket per identity: a newer one replaces the older. */
 export class NodeHub {
   private readonly sockets = new Map<string, Entry>();
+  /* When each node that is away lost its socket, while it stays away. */
+  private readonly away = new Map<string, number>();
   private readonly timer: NodeJS.Timeout;
 
   constructor(private readonly opts: HubOptions) {
@@ -53,6 +55,7 @@ export class NodeHub {
     this.sockets.get(key)?.socket.close(4000, 'Replaced by a newer connection.');
     const entry: Entry = { socket, missed: 0, greeted: false, terminals: false, load: null, skillFiles: false };
     this.sockets.set(key, entry);
+    this.away.delete(key);
     const report = (err: unknown) => this.opts.onError?.(err);
     /* Messages run one after another, so job.started is stored before job.done. */
     let chain = Promise.resolve();
@@ -74,7 +77,10 @@ export class NodeHub {
       if (msg) chain = chain.then(() => this.opts.onMessage(id, msg)).catch(report);
     });
     socket.on('close', () => {
-      if (this.sockets.get(key) === entry) this.sockets.delete(key);
+      if (this.sockets.get(key) === entry) {
+        this.sockets.delete(key);
+        this.away.set(key, Date.now());
+      }
       chain = chain.then(() => this.opts.onClose(id)).catch(report);
     });
     socket.on('error', report);
@@ -82,6 +88,15 @@ export class NodeHub {
 
   isOnline(id: NodeIdentity): boolean {
     return this.sockets.get(keyOf(id))?.socket.readyState === 1;
+  }
+
+  /* Since when the node is away, none while it is online. One that went away before this Hornhoof started is away from
+     the first time it is asked about. */
+  awaySince(id: NodeIdentity): number | null {
+    if (this.isOnline(id)) return null;
+    const key = keyOf(id);
+    if (!this.away.has(key)) this.away.set(key, Date.now());
+    return this.away.get(key)!;
   }
 
   greet(id: NodeIdentity, terminals = false, skillFiles = false): void {

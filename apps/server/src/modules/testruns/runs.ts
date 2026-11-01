@@ -1,9 +1,9 @@
 import type { NodeLoad, NodeMessage } from '@hornhoof/protocol';
-import { and, asc, count, eq, inArray, isNull, like, max, notInArray, type SQL } from 'drizzle-orm';
+import { and, asc, count, eq, inArray, isNull, like, max, notInArray, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { accessOf, canReach, type Access } from '../../auth/access.js';
-import { agents, attachments, companies, departments, jobs, machines, nodes, people, subscriptions, tasks, testParts, testRuns } from '../../db/schema.js';
+import { agents, attachments, companies, departments, jobs, machines, nodes, people, subscriptions, tasks, testParts, testRuns, type LostRun } from '../../db/schema.js';
 import { loggable } from '../../errors.js';
 import { quote } from '../conversation/prompt.js';
 import { repoAt, TEST_MEMORY_GB } from '../departments/repository.js';
@@ -31,6 +31,9 @@ export const OPEN_RUNS = 3;
 export const WAIT_MS = 2 * 3_600_000;
 /* A machine that said nothing of a part this long past its time limit has lost it. */
 const LATE_MS = 2 * 60_000;
+/* A part whose machine is away this long runs again on another, and a part runs again at most this many times. */
+export const AWAY_MS = 3 * 60_000;
+export const RERUNS = 2;
 /* What a part keeps of its log's end for the result: its last lines. */
 const TAIL_LINES = 20;
 const TAIL_CHARS = 2000;
@@ -70,10 +73,12 @@ function endedBy(run: Pick<Run, 'timeoutMs'>, p: Part): string {
       return 'it was stopped on its machine';
     case 'machine_restarted':
       return 'its machine restarted and lost it';
+    case 'machine_offline':
+      return 'its machine went offline';
     case 'machine_disconnected':
       return 'its machine was disconnected from the company';
     case 'subscription_removed':
-      return 'the subscription whose node ran it was removed';
+      return 'its machine lost the plan its node ran for';
     case 'no_machine':
       return `no machine was free for it within ${took(WAIT_MS)}`;
     case 'no_repository':
@@ -83,6 +88,18 @@ function endedBy(run: Pick<Run, 'timeoutMs'>, p: Part): string {
   }
 }
 
+/* How a machine lost a part, after its name. */
+const LOST_HOW: Record<string, string> = {
+  machine_restarted: 'restarted and lost it',
+  machine_offline: 'went offline',
+  machine_disconnected: 'was disconnected from the company',
+  subscription_removed: 'lost the plan its node ran for',
+};
+const lostLine = (l: LostRun) => `${l.machine} ${LOST_HOW[l.why] ?? 'lost it'}`;
+
+/* What a part that ran again went through before. */
+const ranAgain = (lost: LostRun[]) => (lost.length ? ` It ran again after ${lost.map(lostLine).join(', and again after ')}.` : '');
+
 /* Hornhoof's account of a run that ended: each part, where it ran and how long, and the end of what failed. */
 function account(run: Run, task: Pick<Task, 'number'>, parts: Part[], logs: Set<string>): string {
   const lines = [`Test run ${run.number} ${run.status} after ${took((run.finishedAt ?? new Date()).getTime() - run.createdAt.getTime())}.`];
@@ -91,7 +108,7 @@ function account(run: Run, task: Pick<Task, 'number'>, parts: Part[], logs: Set<
     const time = p.startedAt && p.finishedAt ? ` in ${took(p.finishedAt.getTime() - p.startedAt.getTime())}` : '';
     const at = p.commit ? `, at ${p.commit.slice(0, 12)}` : '';
     const why = p.status === 'passed' ? '' : `: ${endedBy(run, p)}`;
-    lines.push(`Part ${p.part} of ${run.parts} ${p.status === 'passed' ? 'passed' : 'failed'}${where}${time}${at}${why}.`);
+    lines.push(`Part ${p.part} of ${run.parts} ${p.status === 'passed' ? 'passed' : 'failed'}${where}${time}${at}${why}.${ranAgain(p.lost)}`);
   }
   const failed = parts.filter(p => p.status !== 'passed' && p.tail);
   for (const p of failed.slice(0, SHOWN_FAILURES)) lines.push('', `The end of part ${p.part}:`, '', quote(p.tail));
@@ -168,10 +185,11 @@ async function giveOut(ctx: Ctx): Promise<void> {
     }
     const open = places.get(run.companyId)!;
     const need = (found.department.repoTestMemoryGb ?? TEST_MEMORY_GB) * GIB;
-    const spot = pickMachine(
-      open.map(p => ({ key: p.key, lent: p.lent, reaches: reaches(p, found.department), busy: p.busy, load: p.load })),
-      need,
-    );
+    const spots = open.map(p => ({ key: p.key, lent: p.lent, reaches: reaches(p, found.department), busy: p.busy, load: p.load }));
+    /* A part that ran again goes to another machine than the ones that lost it, while there is one that may take it. */
+    const lostOn = new Set(part.lost.map(l => l.key));
+    const others = spots.filter(s => !lostOn.has(s.key));
+    const spot = pickMachine(others.some(s => s.lent && s.reaches) ? others : spots, need);
     const place = spot && open.find(p => p.key === spot.key);
     if (!place) continue;
     place.busy = true;
@@ -245,9 +263,23 @@ async function endParts(ctx: Ctx, which: SQL, error: string, tail = ''): Promise
   return ended;
 }
 
-/* The parts that ran on these nodes end, as when their machine is disconnected or their subscription removed. */
-export async function failParts(ctx: Ctx, which: SQL, error: string): Promise<void> {
-  await endParts(ctx, and(which, eq(testParts.status, 'running'))!, error);
+/* Parts their machines lost as they ran, as when a machine restarted, went offline, was disconnected or lost the plan its
+   node ran for: each waits for another machine under a new id, so its lost run, should that come back, is told apart.
+   One lost RERUNS times already fails with why. */
+export async function loseParts(ctx: Ctx, which: SQL, why: string): Promise<void> {
+  const lost = await ctx.db.select().from(testParts).where(and(which, eq(testParts.status, 'running')));
+  for (const p of lost) {
+    const running = and(eq(testParts.id, p.id), eq(testParts.status, 'running'))!;
+    if (p.lost.length >= RERUNS) {
+      await endParts(ctx, running, why);
+      continue;
+    }
+    const where: LostRun = { key: p.builtin ? 'builtin' : (p.machineId ?? ''), machine: p.machineName ?? 'a machine', why };
+    await ctx.db
+      .update(testParts)
+      .set({ id: sql`gen_random_uuid()`, status: 'queued', lost: [...p.lost, where], nodeId: null, builtin: false, machineId: null, machineName: null, startedAt: null, queuedAt: new Date() })
+      .where(running);
+  }
   await pumpTests(ctx);
 }
 
@@ -293,7 +325,7 @@ export async function partDone(ctx: Ctx, id: NodeIdentity, msg: TestsDone): Prom
    meanwhile stop. A node of a build before test runs knows none. */
 export async function testsHello(ctx: Ctx, id: NodeIdentity, has: string[] = []): Promise<void> {
   const known = has.filter(isId);
-  await endParts(ctx, and(ofNode(id), eq(testParts.status, 'running'), known.length ? notInArray(testParts.id, known) : undefined)!, 'machine_restarted');
+  await loseParts(ctx, and(ofNode(id), known.length ? notInArray(testParts.id, known) : undefined)!, 'machine_restarted');
   if (known.length) {
     const open = await ctx.db.select({ id: testParts.id }).from(testParts).where(and(inArray(testParts.id, known), eq(testParts.status, 'running'), ofNode(id)));
     const keep = new Set(open.map(p => p.id));
@@ -302,7 +334,8 @@ export async function testsHello(ctx: Ctx, id: NodeIdentity, has: string[] = [])
   await pumpTests(ctx);
 }
 
-/* Parts past their time limit whose node never said they ended, and parts that waited too long for a machine. */
+/* Parts past their time limit whose node never said they ended, parts whose machine is away too long, and parts that
+   waited too long for a machine. */
 export async function checkTestTimes(ctx: Ctx, now = new Date()): Promise<void> {
   const { db } = ctx;
   const open = await db
@@ -315,8 +348,12 @@ export async function checkTestTimes(ctx: Ctx, now = new Date()): Promise<void> 
       const [ended] = await endParts(ctx, and(eq(testParts.id, part.id), eq(testParts.status, 'running'))!, 'timeout');
       const node = ended && nodeOf(ended);
       if (node) ctx.hub.send(node, { type: 'tests.cancel', partId: part.id });
+      continue;
     }
-    if (part.status === 'queued' && part.createdAt.getTime() + WAIT_MS < now.getTime()) {
+    const node = part.status === 'running' ? nodeOf(part) : null;
+    const away = node && ctx.hub.awaySince(node);
+    if (away && away + AWAY_MS < now.getTime()) await loseParts(ctx, eq(testParts.id, part.id), 'machine_offline');
+    if (part.status === 'queued' && part.queuedAt.getTime() + WAIT_MS < now.getTime()) {
       await endParts(ctx, and(eq(testParts.id, part.id), eq(testParts.status, 'queued'))!, 'no_machine');
     }
   }
@@ -426,6 +463,7 @@ export async function runState(ctx: Ctx, job: ToolJob, number: number): Promise<
       startedAt: p.startedAt?.toISOString() ?? null,
       finishedAt: p.finishedAt?.toISOString() ?? null,
       log: has.has(logName(run, p.part)) ? logName(run, p.part) : null,
+      ...(p.lost.length ? { ranAgain: p.lost.map(lostLine) } : {}),
       ...(p.status === 'failed' && p.tail ? { end: p.tail } : {}),
     })),
   };

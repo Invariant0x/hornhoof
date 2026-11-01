@@ -2,13 +2,13 @@ import { and, inArray } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, machines, nodes, testParts } from '../../db/schema.js';
 import { pump } from '../conversation/queue.js';
-import { failParts } from '../testruns/runs.js';
+import { loseParts } from '../testruns/runs.js';
 import { failOpenJobs } from './messages.js';
 import { liveNode, settlePlans } from './nodes.js';
 
-/* Stops these machines' nodes: open jobs and the parts of test runs they ran fail, sockets close, the agents on them
-   pick another machine of their plan at their next turn, and a plan left with no machine waits for one again. A turn
-   that waited for one of these machines goes out on another one now. */
+/* Stops these machines' nodes: open jobs fail, the parts of test runs they ran wait for another machine, sockets close,
+   the agents on them pick another machine of their plan at their next turn, and a plan left with no machine waits for
+   one again. A turn that waited for one of these machines goes out on another one now. */
 export async function disconnectMachines(ctx: Ctx, machineIds: string[]): Promise<void> {
   if (machineIds.length === 0) return;
   const { ids, moved } = await ctx.db.transaction(async tx => {
@@ -25,6 +25,6 @@ export async function disconnectMachines(ctx: Ctx, machineIds: string[]): Promis
   /* The nodes lose their keys first, so the turns that end here send no next turn to the leaving ones. */
   for (const id of ids) ctx.hub.close(id, 4001);
   if (ids.length) await failOpenJobs(ctx, inArray(jobs.nodeId, ids), 'machine_disconnected');
-  await failParts(ctx, inArray(testParts.machineId, machineIds), 'machine_disconnected');
+  await loseParts(ctx, inArray(testParts.machineId, machineIds), 'machine_disconnected');
   for (const id of moved) await pump(ctx, id);
 }

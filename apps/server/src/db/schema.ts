@@ -552,6 +552,8 @@ export const testRuns = pgTable(
 );
 
 export const TEST_PART_STATUSES = ['queued', 'running', 'passed', 'failed', 'stopped'] as const;
+/* A machine that lost a part of a run as it ran: the place (a machine's id, or builtin), its name then, and why. */
+export type LostRun = { key: string; machine: string; why: string };
 
 /* One part of a test run: it waits for a free machine, then runs on one node, a node on a machine or the built-in node. */
 export const testParts = pgTable(
@@ -573,7 +575,11 @@ export const testParts = pgTable(
     error: text('error'),
     /* The last lines of what it printed. */
     tail: text('tail').notNull().default(''),
+    /* The machines that lost it before, oldest first: it ran again after each. */
+    lost: jsonb('lost').$type<LostRun[]>().notNull().default([]),
     createdAt: createdAt(),
+    /* Since when it waits for a machine: since it was made, or since it was lost. */
+    queuedAt: timestamp('queued_at', { withTimezone: true }).notNull().defaultNow(),
     startedAt: timestamp('started_at', { withTimezone: true }),
     finishedAt: timestamp('finished_at', { withTimezone: true }),
   },
