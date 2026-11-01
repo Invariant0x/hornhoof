@@ -135,6 +135,22 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
     expect((await call(await mcp(app), 'view', { path: '/mcp' })).isError).toBe(true);
   });
 
+  it("connects a machine of the CEO's without a plan, and adds one of the CEO's plans to it", async () => {
+    const { app } = await company();
+    const client = await mcp(app);
+    const alone = await call(client, 'machine_command', {});
+    expect(alone.isError).toBeFalsy();
+    const code = (command: string) => command.split('--join ')[1]!;
+    const machine = { machineId: 'laptop-0002-abcd', hostname: 'ivan-laptop', os: 'linux', arch: 'x86_64' };
+    const joined = (await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code: code(JSON.parse(text(alone)).command), ...machine } })).json();
+    expect(joined.nodes).toMatchObject([{ subscriptionId: null, provider: 'machine' }]);
+    const plan = JSON.parse(text(await call(client, 'connect_plans', { providers: ['claude'] }))).subscriptions[0].id;
+    const added = await call(client, 'add_plan_to_machine', { machine: joined.machine.id, subscription: plan });
+    expect(added.isError).toBeFalsy();
+    const there = (await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code: code(JSON.parse(text(added)).command), ...machine } })).json();
+    expect(there.nodes).toMatchObject([{ subscriptionId: plan, provider: 'claude' }]);
+  });
+
   it('gives these tools to the orchestrator alone', async () => {
     const { app, bruno, running } = await company();
     await running(bruno.id, WORKER_TOKEN);
@@ -505,6 +521,8 @@ describe('what only the CEO may ask for', () => {
       ['set_repository', { department: (await db.select().from(departments))[0]!.id, url: 'https://github.com/evil/acme.git', token: 'ghp_x' }],
       ['update_hornhoof', { version: 'latest' }],
       ['lend_machine', { machine: '00000000-0000-4000-8000-0000000000aa', lendsTests: true }],
+      ['machine_command', {}],
+      ['add_plan_to_machine', { machine: '00000000-0000-4000-8000-0000000000aa', subscription: '00000000-0000-4000-8000-0000000000bb' }],
     ] as const) {
       expect(text(await call(client, name, args)), name).toBe(ONLY_CEO);
     }

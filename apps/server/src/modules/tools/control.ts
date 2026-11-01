@@ -40,6 +40,8 @@ export const CEO_ONLY = new Set([
   'add_api_key',
   'connect_plans',
   'plan_command',
+  'machine_command',
+  'add_plan_to_machine',
   'set_budget',
   'move_orchestrator',
   'remove_subscription',
@@ -196,10 +198,20 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
     ConnectBody.shape,
     body => ({ method: 'POST', url: '/api/subscriptions/connect', payload: body }),
   );
-  tool('plan_command', 'A new machine command for one of the CEO\'s plans that waits for its machine.', { subscription: Id('subscription') }, ({ subscription }) => ({
+  tool('plan_command', 'A new machine command for one of the CEO\'s plans: it puts the plan on the machine that runs it, as well as on those it has.', { subscription: Id('subscription') }, ({ subscription }) => ({
     method: 'POST',
     url: `/api/subscriptions/${subscription}/command`,
   }));
+  tool('machine_command', 'A command that connects a machine of the CEO\'s without a plan: it lends itself to test runs, and add_plan_to_machine puts plans on it later.', {}, () => ({
+    method: 'POST',
+    url: '/api/machines/command',
+  }));
+  tool(
+    'add_plan_to_machine',
+    'A command that puts one of the CEO\'s own plans on one more of the CEO\'s machines; it works on that machine only, and the plan signs in there by itself.',
+    { machine: Id('machine'), subscription: Id('subscription') },
+    ({ machine, subscription }) => ({ method: 'POST', url: `/api/machines/${machine}/plans`, payload: { subscription } }),
+  );
   tool('test_subscription', 'Sends a tiny prompt through a subscription to prove it works; view /api/jobs/<id> for the answer.', { subscription: Id('subscription') }, ({ subscription }) => ({
     method: 'POST',
     url: `/api/subscriptions/${subscription}/test`,
@@ -224,7 +236,7 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
     method: 'DELETE',
     url: `/api/subscriptions/${subscription}`,
   }));
-  tool('disconnect_machine', 'Disconnects a machine: its node stops and its subscriptions wait for a machine again.', { machine: Id('machine') }, ({ machine }) => ({
+  tool('disconnect_machine', 'Disconnects a machine: everything on it stops, and a plan that runs nowhere else waits for a machine again.', { machine: Id('machine') }, ({ machine }) => ({
     method: 'POST',
     url: `/api/machines/${machine}/disconnect`,
   }));
