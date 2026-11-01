@@ -205,7 +205,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const live = isNull(machines.revokedAt);
     const rows = await db
-      .select({ id: machines.id, hostname: machines.hostname, os: machines.os, arch: machines.arch, lendsTests: machines.lendsTests, ownerId: people.id, ownerName: people.name })
+      .select({ id: machines.id, hostname: machines.hostname, os: machines.os, arch: machines.arch, kind: machines.kind, lendsTests: machines.lendsTests, ownerId: people.id, ownerName: people.name })
       .from(machines)
       .innerJoin(people, eq(people.id, machines.personId))
       .where(me.scopeKind === 'company' ? live : and(live, eq(machines.personId, me.id)))
@@ -221,7 +221,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     const on = (machineId: string) => served.filter(n => n.machineId === machineId);
     const latest = (seen: (Date | null)[]) => seen.reduce<Date | null>((a, b) => (b && (!a || b > a) ? b : a), null);
     /* What runs on each machine now: the employees whose program lives there, busy while a turn of theirs runs, and the
-       parts of test runs it takes. A company key's employees are on the built-in node. */
+       parts of test and work runs it takes. A company key's employees are on the built-in node. */
     const placed = await db
       .select({
         id: agents.id,
@@ -235,7 +235,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
       .where(and(eq(agents.companyId, me.companyId), isNull(agents.removedAt), isNull(subscriptions.removedAt), isNotNull(agents.subscriptionId)))
       .orderBy(asc(agents.name), asc(agents.id));
     const parts = await db
-      .select({ machineId: testParts.machineId, builtin: testParts.builtin, run: testRuns.number, task: tasks.number, part: testParts.part, parts: testRuns.parts, agent: agents.name, startedAt: testParts.startedAt })
+      .select({ machineId: testParts.machineId, builtin: testParts.builtin, run: testRuns.number, kind: testRuns.kind, task: tasks.number, part: testParts.part, parts: testRuns.parts, agent: agents.name, startedAt: testParts.startedAt })
       .from(testParts)
       .innerJoin(testRuns, eq(testRuns.id, testParts.runId))
       .leftJoin(tasks, eq(tasks.id, testRuns.taskId))
@@ -244,7 +244,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
       .orderBy(asc(testParts.startedAt), asc(testRuns.number), asc(testParts.part));
     const running = (holds: (a: (typeof placed)[number]) => boolean, runs: (p: (typeof parts)[number]) => boolean) => ({
       agents: placed.filter(holds).map(a => ({ id: a.id, name: a.name, busy: Boolean(a.busy) })),
-      parts: parts.filter(runs).map(({ machineId: _, builtin: __, ...p }) => ({ ...p, kind: 'tests' as const })),
+      parts: parts.filter(runs).map(({ machineId: _, builtin: __, ...p }) => p),
     });
     return {
       /* The node that comes with the server runs the company's API keys and test runs too. */
@@ -257,6 +257,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
         hostname: m.hostname,
         os: m.os,
         arch: m.arch,
+        kind: m.kind,
         owner: { id: m.ownerId, name: m.ownerName },
         online: on(m.id).some(n => hub.isOnline(nodeIdentity(n.id))),
         lastSeenAt: latest(on(m.id).map(n => n.lastSeenAt)),

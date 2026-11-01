@@ -414,6 +414,8 @@ describe('a run of other work', () => {
     expect(fetched.body).toBe('a,b\n');
     const put = await c.app.inject({ method: 'PUT', url: `/api/parts/${run.partId}/files/report.txt`, headers: { ...node, 'content-type': 'application/octet-stream' }, payload: Buffer.from('made') });
     expect(put.statusCode).toBe(201);
+    const listed = (await c.app.inject({ url: '/api/machines', ...as(c.ceo) })).json().machines;
+    expect(listed).toEqual([expect.objectContaining({ hostname: 'ivan-mac', kind: 'computer', running: expect.objectContaining({ parts: [expect.objectContaining({ run: 1, part: 1, kind: 'work' })] }) })]);
     ivan.node.send(done(run, { commit: null, log: 'Put on the task: report.txt.\n' }));
     await nextOf(ivan.node, 'tests.ack');
     await until(async () => (await c.wokeWith(c.bruno.id)) !== null);
@@ -571,6 +573,7 @@ describe('the pool of machines', () => {
     const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
     const pool = JSON.parse((await (await c.turn(orchestrator!, null)).call('pool')).text);
     expect(pool.machines).toEqual([expect.objectContaining({ name: 'ivan-phone', kind: 'phone', online: true, lent: true, parts: [] })]);
+    expect((await c.app.inject({ url: '/api/machines', ...as(c.ceo) })).json().machines).toEqual([expect.objectContaining({ hostname: 'ivan-phone', kind: 'phone' })]);
     expect(pool.waiting).toEqual([expect.objectContaining({ part: 1, why: 'No computer lent to runs is online.' })]);
     const box = await c.planless(c.ceo, 'build-box');
     expect(await nextOf(box.node, 'tests.run')).toMatchObject({ command: 'npm test' });
