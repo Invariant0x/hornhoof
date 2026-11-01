@@ -3,7 +3,7 @@ import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, companies, departments, jobs, pendingWakes, people, subscriptions, taskEvents, tasks, turns } from '../src/db/schema.js';
-import { comment, createTask, submit, verdict } from '../src/modules/tasks/engine.js';
+import { comment, createTask, submit, updateTask, verdict } from '../src/modules/tasks/engine.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
 import { as, listen, mcp, setUpCompany, testApp } from './helpers.js';
 
@@ -97,6 +97,24 @@ describe('a task that comes after others', () => {
     await submit(ctx, bruno.id, api.id, { summary: 'Done.', evidence: 'npm test' });
     await verdict(ctx, rita.id, api.id, { pass: true, comment: 'Good.' });
     expect(woken(await member('End-to-end tests', tess.id, [api.id]))).toEqual([[tess.id, 'assigned']]);
+  });
+
+  it('lets the head change what a task comes after, starts it once nothing is left to wait for, and refuses a circle', async () => {
+    const { ctx, head, bruno, tess, member, tools } = await company();
+    const api = (await member('Checkout API', bruno.id)).task;
+    const tests = (await member('End-to-end tests', tess.id, [api.id])).task;
+    expect(await reason(updateTask(ctx, head.id, api.id, { after: [tests.id] }))).toBe('task_invalid');
+    expect(await reason(updateTask(ctx, head.id, api.id, { after: [api.id] }))).toBe('task_invalid');
+    const docs = (await member('Docs', bruno.id)).task;
+    expect(woken(await updateTask(ctx, head.id, docs.id, { after: [tests.id] }))).toEqual([]);
+    expect(await reason(updateTask(ctx, head.id, api.id, { after: [docs.id] }))).toBe('task_invalid');
+    const freed = await updateTask(ctx, head.id, tests.id, { after: [] });
+    expect(freed.task.after).toEqual([]);
+    expect(woken(freed)).toEqual([[tess.id, 'assigned']]);
+    const client = await tools(head);
+    const again = await call(client, 'update_task', { task: tests.number, after: [api.number] });
+    expect(again.isError).toBeFalsy();
+    expect(text(again)).toContain(`It starts once #${api.number} is done.`);
   });
 
   it("takes the tasks a person's task comes after by number through the API", async () => {

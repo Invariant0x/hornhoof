@@ -91,6 +91,17 @@ async function checkAfter(db: Db | Tx, companyId: string, turnId: string | null,
   return rows;
 }
 
+/* A task never waits for itself, also not through the tasks it comes after. */
+async function refuseCircle(db: Db | Tx, task: Task, ids: string[]): Promise<void> {
+  const seen = new Set<string>();
+  let level = ids;
+  while (level.length) {
+    if (level.includes(task.id)) throw refuse(400, 'task_invalid', `#${task.number} would wait for itself through what it comes after.`);
+    const rows = await db.select({ after: tasks.after }).from(tasks).where(inArray(tasks.id, level));
+    level = rows.flatMap(r => r.after).filter(id => !seen.has(id) && Boolean(seen.add(id)));
+  }
+}
+
 /* A task is done: each task that came after it and waits for nothing else any more goes on with whoever holds it, and
    its log says why. rows: the tasks that started. */
 async function startAfter(tx: Tx, done: Task): Promise<{ wakes: Wake[]; rows: Task[] }> {
@@ -511,7 +522,7 @@ export async function dropGate(ctx: Live, actor: Actor, task: Task, agentId: str
   return move(ctx, task, { gates }, { kind: 'updated', actor, data: { fields: ['gates'] } });
 }
 
-export type TaskChange = { title?: string; brief?: string; body?: string; executor?: string; gates?: string[] };
+export type TaskChange = { title?: string; brief?: string; body?: string; executor?: string; gates?: string[]; after?: string[] };
 
 /* Runs fn on the task, and again on a fresh read of it when someone moved it meanwhile; null when it kept moving. */
 async function onFresh<T>(ctx: Live, task: Task, fn: (task: Task) => Promise<T>): Promise<T | null> {
@@ -639,6 +650,7 @@ export async function updateTask(ctx: Live, agentId: string, taskId: string, c: 
   if ((c.executor !== undefined || c.gates !== undefined) && !task.executorAgentId) throw refuse(400, 'task_invalid', `#${task.number} has no executor or gates.`);
   if (c.gates !== undefined && c.executor === undefined && task.status === 'review' && task.stage > 0 && !task.panel.length) return regate(ctx, agentId, task, c);
   if ((c.executor !== undefined || c.gates !== undefined) && task.stage !== 0) throw refuse(409, 'task_invalid', `#${task.number} is at a gate; change who works on it after the verdict.`);
+  if (c.after !== undefined && task.stage !== 0) throw refuse(409, 'task_invalid', `#${task.number} is at a gate already, so it waits for nothing any more.`);
   const executor = c.executor ?? task.executorAgentId;
   const gates = c.gates ?? task.gates;
   if (executor && c.executor !== undefined) await workingAgent(ctx.db, task.companyId, executor);
@@ -654,7 +666,16 @@ export async function updateTask(ctx: Live, agentId: string, taskId: string, c: 
     set.gates = gates;
     fields.push('gates');
   }
+  const waited = (await openAfter(ctx.db, task)).length > 0;
+  if (c.after !== undefined && JSON.stringify(c.after) !== JSON.stringify(task.after)) {
+    await checkAfter(ctx.db, task.companyId, task.turnId, c.after);
+    await refuseCircle(ctx.db, task, c.after);
+    set.after = c.after;
+    fields.push('after');
+  }
   if (!fields.length) return { task, wakes: [] };
+  /* It waits now for what it comes after, so nobody sets to work on it yet; one that waited and waits no more starts. */
+  const waits = (await openAfter(ctx.db, { after: set.after ?? task.after })).length > 0;
   /* A rewrite answers a blocked executor. A task nobody holds stays blocked until someone can take it. */
   if (task.status === 'blocked' && (set.assigneeAgentId ?? task.assigneeAgentId)) set.status = 'open';
   /* Another one takes it up, so Hornhoof's note that it stood still is over; a person's word asked for still waits. */
@@ -671,7 +692,13 @@ export async function updateTask(ctx: Live, agentId: string, taskId: string, c: 
     if (before) await tx.update(jobs).set({ status: 'failed', error: 'handed_on', finishedAt: new Date() }).where(and(eq(jobs.agentId, before), eq(jobs.taskId, task.id), eq(jobs.status, 'queued')));
   };
   const holder = set.assigneeAgentId ?? task.assigneeAgentId;
-  const wakes: Wake[] = set.assigneeAgentId ? [{ agentId: set.assigneeAgentId, taskId, why: 'assigned' }] : holder && holder !== agentId ? [{ agentId: holder, taskId, why: 'updated' }] : [];
+  const wakes: Wake[] = waits
+    ? []
+    : set.assigneeAgentId || (waited && holder)
+      ? [{ agentId: (set.assigneeAgentId ?? holder)!, taskId, why: 'assigned' }]
+      : holder && holder !== agentId
+        ? [{ agentId: holder, taskId, why: 'updated' }]
+        : [];
   const row = await move(ctx, task, set, { kind: 'updated', actor: { agentId }, data: { fields } }, handedOn ? handOver : undefined, wakes);
   unstuck.tell();
   return { task: row, wakes };

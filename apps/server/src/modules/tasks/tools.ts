@@ -86,7 +86,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
   async function where(t: Task): Promise<string> {
     const [line] = await taskLines(ctx, [t]);
     const holder = line?.assignee ? `, with ${line.assignee.name}` : '';
-    return `#${t.number} is ${t.status}${holder}.`;
+    return `#${t.number} is ${t.status}${holder}.${await waiting(t)}`;
   }
 
   /* Tasks another one comes after, named by number or id anywhere in the company: the engine keeps them to its turn. */
@@ -296,12 +296,12 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
       {
         description: boss
           ? 'Rewrites any task that is not closed so it reads as the current truth, or hands a member task to another executor or gates of its department (only while it is with its executor). ' +
-            'Whoever holds it is woken with the change. A blocked task opens again.'
+            'Whoever holds it is woken with the change. A blocked task opens again. after: the tasks of its turn it waits for from now on, [] to start it now.'
           : "Rewrites one of your department's member tasks so it reads as the current truth, or hands it to another executor or gates (only while it is with its executor). " +
-            'A task waiting at a gate with nobody on to check it takes new gates from that gate on. A blocked task opens again.',
-        inputSchema: { task: Ref, title: Title.optional(), brief: Brief.optional(), body: Body.optional(), executor: z.uuid().optional(), gates: z.array(z.string().max(40)).max(8).optional() },
+            'A task waiting at a gate with nobody on to check it takes new gates from that gate on. A blocked task opens again. after: the tasks of its turn it waits for from now on, [] to start it now.',
+        inputSchema: { task: Ref, title: Title.optional(), brief: Brief.optional(), body: Body.optional(), executor: z.uuid().optional(), gates: z.array(z.string().max(40)).max(8).optional(), after: After.optional() },
       },
-      async ({ task: ref, executor, gates, ...text }) =>
+      async ({ task: ref, executor, gates, after, ...text }) =>
         run(async () => {
           const { agent, task } = await find(ref);
           if (!boss && (task.departmentId !== agent.departmentId || !task.executorAgentId)) throw refuse(403, 'task_not_yours', `#${task.number} is not a member task of your department.`);
@@ -310,7 +310,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
           if (head.departmentId === null && (executor !== undefined || gates !== undefined)) throw refuse(400, 'task_invalid', `#${task.number} has no executor or gates.`);
           const next = executor !== undefined ? (await member(head, executor)).id : undefined;
           const gateIds = gates !== undefined ? await gatesFor(head, next ?? task.executorAgentId!, gates) : undefined;
-          const moved = await updateTask(ctx, agent.id, task.id, { ...text, executor: next, gates: gateIds });
+          const moved = await updateTask(ctx, agent.id, task.id, { ...text, executor: next, gates: gateIds, ...(after !== undefined ? { after: await afterIds(after) } : {}) });
           return { text: `Updated. ${await where(moved.task)}`, moved };
         }),
     );
