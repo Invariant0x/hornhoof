@@ -750,6 +750,9 @@ export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answ
   const task = await loadTask(ctx.db, found.taskId);
   let wakes: Wake[] = [];
   const row = await ctx.db.transaction(async tx => {
+    /* The task first and then its request, in the order a cancel takes them, so the two never wait on each other. As the task
+       is now, not as it was read before: one closed meanwhile stays closed. */
+    const [current] = await tx.select({ status: tasks.status, stage: tasks.stage }).from(tasks).where(eq(tasks.id, task.id)).for('update');
     const [request] = await tx
       .update(requests)
       .set({ status, answer: text || null, picked: option ? a.pick! : null, answeredBy: actor.personId ?? null, answeredAt: new Date() })
@@ -758,8 +761,6 @@ export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answ
     if (!request) throw refuse(409, 'request_closed', 'This request is answered already.');
     await note(tx, task, { kind: 'answered', actor, text: said, data: { requestId, kind: found.kind, status } });
     const [left] = await tx.select({ n: count() }).from(requests).where(and(eq(requests.taskId, task.id), eq(requests.status, 'open')));
-    /* As the task is now, not as it was read before: one closed meanwhile stays closed. */
-    const [current] = await tx.select({ status: tasks.status, stage: tasks.stage }).from(tasks).where(eq(tasks.id, task.id)).for('update');
     if (current?.status === 'waiting' && !Number(left?.n ?? 0)) {
       await tx
         .update(tasks)
