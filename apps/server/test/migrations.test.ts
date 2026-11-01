@@ -219,6 +219,33 @@ describe('migration 0020', () => {
   });
 });
 
+describe('migration 0023', () => {
+  const C = '00000000-0000-4000-8000-000000000001';
+  const D = '00000000-0000-4000-8000-0000000000d1';
+
+  it('keeps the oldest of two heads of one department, and of two orchestrators, as an older race could leave them', async () => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0022_pending_wakes') });
+    await db.execute(sql`insert into companies (id, name) values (${C}, 'Acme')`);
+    await db.execute(sql`insert into departments (id, company_id, name, role_code) values (${D}, ${C}, 'Sales', 'SAL')`);
+    await db.execute(sql`insert into agents (company_id, department_id, kind, name, model, created_at) values
+      (${C}, ${D}, 'head', 'Hana', '', '2026-10-30T10:00:00Z'),
+      (${C}, ${D}, 'head', 'Hugo', '', '2026-10-30T10:00:01Z'),
+      (${C}, null, 'orchestrator', 'Orchestrator', '', '2026-10-29T10:00:00Z'),
+      (${C}, null, 'orchestrator', 'Orchestrator', '', '2026-10-29T10:00:01Z')`);
+
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+
+    const live = await db.execute<{ name: string; kind: string }>(sql`select name, kind from agents where removed_at is null order by kind, created_at`);
+    expect(live.rows).toEqual([
+      { name: 'Hana', kind: 'head' },
+      { name: 'Orchestrator', kind: 'orchestrator' },
+    ]);
+  });
+});
+
 describe('migration 0024', () => {
   const C = '00000000-0000-4000-8000-000000000001';
   const P = '00000000-0000-4000-8000-000000000002';

@@ -1,3 +1,7 @@
+-- An older race could hire two heads for one department or keep two orchestrators: the oldest stays, the others are
+-- removed, so the indexes below can be made.
+UPDATE "agents" SET "removed_at" = now() WHERE "removed_at" IS NULL AND "kind" = 'head' AND EXISTS (SELECT 1 FROM "agents" o WHERE o."kind" = 'head' AND o."removed_at" IS NULL AND o."department_id" = "agents"."department_id" AND (o."created_at", o."id") < ("agents"."created_at", "agents"."id"));--> statement-breakpoint
+UPDATE "agents" SET "removed_at" = now() WHERE "removed_at" IS NULL AND "kind" = 'orchestrator' AND EXISTS (SELECT 1 FROM "agents" o WHERE o."kind" = 'orchestrator' AND o."removed_at" IS NULL AND o."company_id" = "agents"."company_id" AND (o."created_at", o."id") < ("agents"."created_at", "agents"."id"));--> statement-breakpoint
 CREATE UNIQUE INDEX "agents_one_head" ON "agents" USING btree ("department_id") WHERE kind = 'head' AND removed_at IS NULL;--> statement-breakpoint
 CREATE UNIQUE INDEX "agents_one_orchestrator" ON "agents" USING btree ("company_id") WHERE kind = 'orchestrator' AND removed_at IS NULL;--> statement-breakpoint
 ALTER TABLE "requests" ADD CONSTRAINT "requests_approval_commit" CHECK ("requests"."kind" <> 'approval' OR "requests"."commit" IS NOT NULL) NOT VALID;--> statement-breakpoint
