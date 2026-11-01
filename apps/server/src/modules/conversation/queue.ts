@@ -326,7 +326,7 @@ function outdated(version: string | null, need = CONVERSATION_NODE): boolean {
   return false;
 }
 
-/* moves: the agent has not been on this node until now. */
+/* moves: the agent has not been on this node until now, or leaves the machine it was on for the built-in node. */
 type Placement = { node: NodeIdentity; nodeId: string | null; moves: boolean };
 
 /* Where the agent's next turn goes. A company key's to the built-in node. A plan's to the node its program is on while
@@ -334,7 +334,7 @@ type Placement = { node: NodeIdentity; nodeId: string | null; moves: boolean };
    freest of the plan's nodes that is, unless the agent has work in progress on its own and waits for it. None while no
    node can take it. */
 async function placement(ctx: Ctx, agent: { id: string; nodeId: string | null }, sub: { id: string; kind: 'personal' | 'api_key' }, need = CONVERSATION_NODE): Promise<Placement | null> {
-  if (sub.kind === 'api_key') return ctx.hub.isReady(BUILTIN) ? { node: BUILTIN, nodeId: null, moves: false } : null;
+  if (sub.kind === 'api_key') return ctx.hub.isReady(BUILTIN) ? { node: BUILTIN, nodeId: null, moves: agent.nodeId !== null } : null;
   const all = await planNodes(ctx.db, [sub.id]);
   const able = all.filter(n => n.status === 'ready' && !outdated(n.version, need) && ctx.hub.isReady(nodeIdentity(n.id)));
   const stays = all.some(n => n.id === agent.nodeId) && (await holdsWork(ctx, agent.id));

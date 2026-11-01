@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
-import { agents, companies, departments, jobs, nodes as nodeRows, tasks } from '../src/db/schema.js';
+import { agents, companies, departments, jobs, nodes as nodeRows, subscriptions, tasks } from '../src/db/schema.js';
 import { nodeIdentity } from '../src/modules/nodes/hub.js';
 import { as, connectNode, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
@@ -13,8 +13,8 @@ const codeOf = (command: string) => command.split('--join ')[1]!;
 const hello = { type: 'hello' as const, version: '0.9.0', loggedIn: true, running: [] };
 
 /* Ivan's Claude plan on his Mac and on his laptop, each node online and signed in, and two employees on the plan. */
-async function planOnTwoMachines() {
-  const { app, db } = await testApp();
+async function planOnTwoMachines(env: NodeJS.ProcessEnv = {}) {
+  const { app, db } = await testApp(env);
   const url = await listen(app);
   const ceo = await setUpCompany(app);
   const connected = (await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude'] }, ...as(ceo) })).json();
@@ -156,6 +156,24 @@ describe('agents of one plan on several machines', () => {
     mac.send({ ...hello, terminals: true });
     lap.send({ ...hello, terminals: true });
     await until(async () => (await state(app, ceo, vera.id)).terminal === true);
+  });
+
+  it('lets go of the machine of an employee moved to a company key, which runs it on the built-in node', async () => {
+    const NODE_KEY = 'k'.repeat(40);
+    const { app, db, url, ceo, mac, bruno } = await planOnTwoMachines({ NODE_KEY });
+    await write(app, ceo, bruno.id, 'Hi');
+    finish(mac, await nextRun(mac), 'bruno-on-mac');
+    await until(async () => !(await state(app, ceo, bruno.id)).busy);
+    const builtin = await connectNode(url, NODE_KEY);
+    builtin.send(hello);
+    const [key] = await db.select().from(subscriptions).where(eq(subscriptions.kind, 'api_key'));
+    await db.update(agents).set({ subscriptionId: key!.id }).where(eq(agents.id, bruno.id));
+    await until(async () => (await state(app, ceo, bruno.id)).ready);
+    await write(app, ceo, bruno.id, 'On the key now');
+    const run = await nextRun(builtin);
+    expect(run.sessionId).toBeNull();
+    expect((await db.select().from(agents).where(eq(agents.id, bruno.id)))[0]!.nodeId).toBeNull();
+    builtin.close();
   });
 
   it('shows the employee the machine it runs on', async () => {
