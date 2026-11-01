@@ -4,10 +4,11 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { loggable } from '../../errors.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
-import { agents, jobs, people, subscriptions, tasks } from '../../db/schema.js';
+import { agents, jobs, nodes, people, subscriptions, tasks } from '../../db/schema.js';
 import { dispatchJob } from '../jobs/dispatch.js';
 import { sayLive } from './live.js';
-import { identityOf, sameNode, type NodeIdentity } from '../nodes/hub.js';
+import { BUILTIN, identityOf, nodeIdentity, sameNode, type NodeIdentity } from '../nodes/hub.js';
+import { liveNode, planNodes, type NodeRow } from '../nodes/nodes.js';
 import { appendEvent, earlierTalk, publishWorking } from '../events/store.js';
 import { instructionsOf } from '../agents/instructions.js';
 import { repoFor, repoLine } from '../departments/repository.js';
@@ -124,16 +125,48 @@ export async function liveSubscription(ctx: Ctx, agentId: string) {
   return row && !row.sub.removedAt ? row.sub : null;
 }
 
-/* The subscription whose machine holds the agent's program now: the one its running turn went out on, since that turn
-   goes on there when the agent moves to another subscription, or else the agent's own. */
-export async function programSubscription(ctx: Ctx, agentId: string) {
+/* A node and the owner of the subscription it runs: the person who may type into the agent's terminal there. */
+export type ProgramNode = { node: NodeIdentity; ownerPersonId: string };
+
+/* The node that holds the agent's program now: the one its running turn went out to, since that turn goes on there when
+   the agent moves, or else its own while that is a live node of its plan. A company key's agents are on the built-in
+   node. */
+export async function programNode(ctx: Ctx, agentId: string): Promise<ProgramNode | null> {
   const [running] = await ctx.db
-    .select({ sub: subscriptions })
+    .select({ kind: subscriptions.kind, ownerPersonId: subscriptions.ownerPersonId, nodeId: jobs.nodeId })
     .from(jobs)
     .innerJoin(subscriptions, eq(subscriptions.id, jobs.subscriptionId))
     .where(and(conversationOf(agentId), eq(jobs.status, 'running')))
     .limit(1);
-  return running?.sub ?? liveSubscription(ctx, agentId);
+  const [own] = running
+    ? [running]
+    : await ctx.db
+        .select({ kind: subscriptions.kind, ownerPersonId: subscriptions.ownerPersonId, nodeId: nodes.id })
+        .from(agents)
+        .innerJoin(subscriptions, and(eq(subscriptions.id, agents.subscriptionId), isNull(subscriptions.removedAt)))
+        .leftJoin(nodes, and(eq(nodes.id, agents.nodeId), eq(nodes.subscriptionId, agents.subscriptionId), liveNode))
+        .where(eq(agents.id, agentId));
+  const node = own && identityOf(own, own.nodeId);
+  return node ? { node, ownerPersonId: own.ownerPersonId } : null;
+}
+
+export const nodeOfAgent = async (ctx: Ctx, agentId: string) => (await programNode(ctx, agentId))?.node ?? null;
+
+/* The node someone who opens the agent's window watches. One that runs no turn starts its program where its next turn
+   would go, and keeps that node; while no machine of its plan can take it, the window waits for the first to come back. */
+export async function windowNode(ctx: Ctx, agentId: string): Promise<ProgramNode | null> {
+  const placed = await onAgent(ctx, agentId, async () => {
+    const [running] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
+    const sub = running ? null : await liveSubscription(ctx, agentId);
+    if (sub?.kind !== 'personal') return null;
+    const [agent] = await ctx.db.select({ id: agents.id, nodeId: agents.nodeId }).from(agents).where(eq(agents.id, agentId));
+    const place = agent ? await placement(ctx, agent, sub) : null;
+    if (place?.moves) await ctx.db.update(agents).set({ nodeId: place.nodeId }).where(eq(agents.id, agentId));
+    if (place) return { node: place.node, ownerPersonId: sub.ownerPersonId };
+    const [first] = await planNodes(ctx.db, [sub.id]);
+    return (await programNode(ctx, agentId)) ?? (first ? { node: nodeIdentity(first.id), ownerPersonId: sub.ownerPersonId } : null);
+  });
+  return placed ?? programNode(ctx, agentId);
 }
 
 /* Thrown before anything is stored, so the caller may undo what it did for the turn. */
@@ -204,7 +237,8 @@ export async function openTypedTurn(ctx: Ctx, node: NodeIdentity, agentId: strin
     const { db } = ctx;
     const [agent] = await db.select().from(agents).where(and(eq(agents.id, agentId), isNull(agents.removedAt)));
     const sub = agent ? await liveSubscription(ctx, agent.id) : null;
-    if (!agent || !sub || !sameNode(identityOf(sub), node)) return null;
+    const at = sub ? await nodeOfAgent(ctx, agentId) : null;
+    if (!agent || !sub || !at || !sameNode(at, node)) return null;
     /* A turn that only started the program is over once the person types: their turn takes its place. */
     await db
       .update(jobs)
@@ -224,6 +258,7 @@ export async function openTypedTurn(ctx: Ctx, node: NodeIdentity, agentId: strin
       .values({
         companyId: agent.companyId,
         subscriptionId: sub.id,
+        nodeId: node.kind === 'node' ? node.nodeId : null,
         agentId,
         kind: 'conversation',
         status: 'running',
@@ -251,7 +286,8 @@ export async function startProgram(ctx: Ctx, node: NodeIdentity, agentId: string
     const { db } = ctx;
     const [agent] = await db.select().from(agents).where(and(eq(agents.id, agentId), isNull(agents.removedAt)));
     const sub = agent ? await liveSubscription(ctx, agent.id) : null;
-    if (!agent || !sub || !sameNode(identityOf(sub), node)) return false;
+    const at = sub ? await nodeOfAgent(ctx, agentId) : null;
+    if (!agent || !sub || !at || !sameNode(at, node)) return false;
     /* Task turns of an agent that is switched off wait for it to be on and start nothing. */
     const waiting = and(eq(jobs.status, 'queued'), limitUntil(sub.limits) ? programStart : agent.switchedOffAt ? isNull(jobs.taskId) : undefined);
     const [open] = await db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), or(eq(jobs.status, 'running'), waiting))).limit(1);
@@ -264,17 +300,17 @@ export async function startProgram(ctx: Ctx, node: NodeIdentity, agentId: string
 }
 
 /* A new session catches up from the conversation. The last finished turn's session goes on only on the same subscription
-   with the same instructions: changed instructions would not reach a session that already has the old ones. A turn that
-   ran out of time or was stopped in its session finished too, the session whole; one that broke, or was called off
-   before it ran, leaves the session before it. */
-async function sessionFor(ctx: Ctx, agent: { id: string; kind: string; name: string }, subscriptionId: string, instructionsHash: string): Promise<{ sessionId: string | null; catchUp: string | null }> {
+   and node with the same instructions: another machine does not have it, and changed instructions would not reach a
+   session that already has the old ones. A turn that ran out of time or was stopped in its session finished too, the
+   session whole; one that broke, or was called off before it ran, leaves the session before it. */
+async function sessionFor(ctx: Ctx, agent: { id: string; kind: string; name: string }, on: { subscriptionId: string; nodeId: string | null }, instructionsHash: string): Promise<{ sessionId: string | null; catchUp: string | null }> {
   const [last] = await ctx.db
-    .select({ subscriptionId: jobs.subscriptionId, sessionId: jobs.sessionId, instructionsHash: jobs.instructionsHash })
+    .select({ subscriptionId: jobs.subscriptionId, nodeId: jobs.nodeId, sessionId: jobs.sessionId, instructionsHash: jobs.instructionsHash })
     .from(jobs)
     .where(and(conversationOf(agent.id), or(eq(jobs.status, 'done'), and(eq(jobs.status, 'failed'), inArray(jobs.error, ['timeout', 'cancelled']), isNotNull(jobs.sessionId)))))
     .orderBy(desc(jobs.finishedAt))
     .limit(1);
-  if (last?.sessionId && last.subscriptionId === subscriptionId && last.instructionsHash === instructionsHash) return { sessionId: last.sessionId, catchUp: null };
+  if (last?.sessionId && last.subscriptionId === on.subscriptionId && last.nodeId === on.nodeId && last.instructionsHash === instructionsHash) return { sessionId: last.sessionId, catchUp: null };
   const talk = await earlierTalk(ctx.db, agent.id);
   return { sessionId: null, catchUp: talk.length ? preface(talk, agent.kind === 'orchestrator' ? 'Orchestrator' : agent.name) : null };
 }
@@ -283,11 +319,36 @@ async function sessionFor(ctx: Ctx, agent: { id: string; kind: string; name: str
    Turns with a repository need 0.5.0, which clones it. The built-in node always matches the server. */
 const CONVERSATION_NODE = [0, 3, 0];
 const REPOSITORY_NODE = [0, 5, 0];
-function outdated(sub: { kind: string; nodeVersion: string | null }, need = CONVERSATION_NODE): boolean {
-  if (sub.kind !== 'personal') return false;
-  const have = (sub.nodeVersion ?? '0').split('.').map(n => parseInt(n, 10) || 0);
+function outdated(version: string | null, need = CONVERSATION_NODE): boolean {
+  const have = (version ?? '0').split('.').map(n => parseInt(n, 10) || 0);
   for (let i = 0; i < need.length; i++) if ((have[i] ?? 0) !== need[i]) return (have[i] ?? 0) < need[i]!;
   return false;
+}
+
+/* moves: the agent has not been on this node until now. */
+type Placement = { node: NodeIdentity; nodeId: string | null; moves: boolean };
+
+/* Where the agent's next turn goes. A company key's to the built-in node. A plan's to the node its program is on while
+   that one is signed in, connected and new enough, so its folder, session and terminal go on there; otherwise to the
+   freest of the plan's nodes that is. None while no node can take it. */
+async function placement(ctx: Ctx, agent: { id: string; nodeId: string | null }, sub: { id: string; kind: 'personal' | 'api_key' }, need = CONVERSATION_NODE): Promise<Placement | null> {
+  if (sub.kind === 'api_key') return ctx.hub.isReady(BUILTIN) ? { node: BUILTIN, nodeId: null, moves: false } : null;
+  const able = (await planNodes(ctx.db, [sub.id])).filter(n => n.status === 'ready' && !outdated(n.version, need) && ctx.hub.isReady(nodeIdentity(n.id)));
+  const pick = able.find(n => n.id === agent.nodeId) ?? (await freest(ctx, able));
+  return pick ? { node: nodeIdentity(pick.id), nodeId: pick.id, moves: pick.id !== agent.nodeId } : null;
+}
+
+/* The node on the machine that holds the fewest agents, the older of two alike. */
+async function freest(ctx: Ctx, able: NodeRow[]): Promise<NodeRow | null> {
+  if (able.length <= 1) return able[0] ?? null;
+  const held = await ctx.db
+    .select({ machineId: nodes.machineId, n: count() })
+    .from(agents)
+    .innerJoin(nodes, eq(nodes.id, agents.nodeId))
+    .where(and(isNull(agents.removedAt), inArray(nodes.machineId, able.map(n => n.machineId))))
+    .groupBy(nodes.machineId);
+  const on = (n: NodeRow) => Number(held.find(h => h.machineId === n.machineId)?.n ?? 0);
+  return able.reduce((best, n) => (on(n) < on(best) ? n : best));
 }
 
 const ALONG = 'Several of your tasks moved while you were busy. Go through each of them in this turn:';
@@ -360,18 +421,18 @@ async function unsent(ctx: Ctx, job: { id: string; companyId: string }, why: { e
 }
 
 async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
-  const { db, hub } = ctx;
+  const { db } = ctx;
   const [running] = await db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
   if (running) return;
   const sub = await liveSubscription(ctx, agentId);
-  if (!sub || sub.status !== 'ready' || outdated(sub) || !hub.isReady(identityOf(sub))) return;
+  if (!sub || sub.status !== 'ready') return;
+  const [agent] = await db.select().from(agents).where(eq(agents.id, agentId));
+  if (!agent || !(await placement(ctx, agent, sub))) return;
   /* Real turns wait for the limit; an empty start can still open the saved program. Past the share set for tasks only
      task turns wait. */
   const until = limitUntil(sub.limits);
   const spent = budgetUntil(sub.limits, sub.budget);
   if (until ?? spent) pumpAt(ctx, agentId, (until ?? spent)!);
-  const [agent] = await db.select().from(agents).where(eq(agents.id, agentId));
-  if (!agent) return;
   /* Switched off, it still answers people who write to it; its task turns wait until it is on. */
   const [job] = await db
     .select()
@@ -382,14 +443,15 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   if (!job) return;
   if (await heldBack(ctx, job)) return sendNext(ctx, agentId);
   const repo = await repoFor(ctx, agent);
-  if (repo && outdated(sub, REPOSITORY_NODE)) return;
+  const place = await placement(ctx, agent, sub, repo ? REPOSITORY_NODE : CONVERSATION_NODE);
+  if (!place) return;
   /* A head reads everything that moved on its tasks while it was busy in one turn, instead of one turn per task. */
   const along: { id: string; prompt: string }[] = [];
   for (const j of agent.kind === 'head' && job.taskId ? await alongWith(ctx, agentId, job.id) : []) if (!(await heldBack(ctx, { ...j, agentId }))) along.push(j);
   const asked = along.length ? [ALONG, job.prompt, ...along.map(j => j.prompt)].join('\n\n---\n\n') : job.prompt;
 
   /* A node from before skill files gets every skill in the instructions. */
-  const files = hub.takesSkillFiles(identityOf(sub));
+  const files = ctx.hub.takesSkillFiles(place.node);
   const instructions = await instructionsOf(ctx, agent, files);
   const refused = unsendable(agent.name, instructions.text.length, files);
   if (refused) return unsent(ctx, job, refused);
@@ -400,7 +462,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   const effort = effortFor(sub.provider, agent.effort, effortsOf(models, model));
   /* The hash covers the model too, so a new model starts a fresh session like new instructions do. */
   const runHash = model ? textHash(`${instructions.hash}:${model}`) : instructions.hash;
-  const { sessionId, catchUp } = await sessionFor(ctx, agent, sub.id, runHash);
+  const { sessionId, catchUp } = await sessionFor(ctx, agent, { subscriptionId: sub.id, nodeId: place.nodeId }, runHash);
   const said = repo ? `${asked}\n\n${repoLine(repo)}` : asked;
   /* A turn that types nothing only starts the program, for a person to talk to it: what was said before and where the
      repository is go with its instructions instead. */
@@ -409,16 +471,19 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   /* Running from the moment it is sent: the token works for its tools at once, and the next turn waits. */
   const [taken] = await db
     .update(jobs)
-    .set({ status: 'running', startedAt: new Date(), subscriptionId: sub.id, prompt, toolTokenHash: hashToken(token), instructionsHash: runHash })
+    .set({ status: 'running', startedAt: new Date(), subscriptionId: sub.id, nodeId: place.nodeId, prompt, toolTokenHash: hashToken(token), instructionsHash: runHash })
     .where(and(eq(jobs.id, job.id), eq(jobs.status, 'queued')))
     .returning({ id: jobs.id });
   if (!taken) return;
+  /* The agent stays on this machine from now on. */
+  if (place.moves) await db.update(agents).set({ nodeId: place.nodeId }).where(eq(agents.id, agentId));
   let sent = false;
   try {
     await publishWorking(ctx, job.companyId);
     sent = await dispatchJob(ctx, {
       id: job.id,
       subscriptionId: sub.id,
+      nodeId: place.nodeId,
       prompt,
       sessionId,
       model,
@@ -442,7 +507,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
     for (const j of along) await goneAlong(ctx, j.id);
     return;
   }
-  await db.update(jobs).set({ status: 'queued', startedAt: null, prompt: job.prompt, toolTokenHash: null, instructionsHash: null }).where(and(eq(jobs.id, job.id), eq(jobs.status, 'running')));
+  await db.update(jobs).set({ status: 'queued', startedAt: null, nodeId: null, prompt: job.prompt, toolTokenHash: null, instructionsHash: null }).where(and(eq(jobs.id, job.id), eq(jobs.status, 'running')));
   await publishWorking(ctx, job.companyId);
 }
 
@@ -479,25 +544,28 @@ export async function orchestratorState(ctx: Ctx, companyId: string): Promise<Ag
   return agentState(ctx, agent.id);
 }
 
+/* Why the agent's turns cannot go out now, or null when they can: a plan's go out while one of its machines can take them,
+   and otherwise wait for what its own machine, or the plan's first, waits for. */
+async function waitsFor(ctx: Ctx, agent: { productId: string | null; departmentId: string | null; nodeId: string | null }, sub: { id: string; kind: 'personal' | 'api_key' }): Promise<AgentState['reason']> {
+  if (sub.kind === 'api_key') return ctx.hub.isReady(BUILTIN) ? null : 'machine_offline';
+  const all = await planNodes(ctx.db, [sub.id]);
+  if (!all.length) return 'waiting_machine';
+  const need = all.some(n => outdated(n.version, REPOSITORY_NODE)) && (await repoFor(ctx, agent)) ? REPOSITORY_NODE : CONVERSATION_NODE;
+  const why = (n: NodeRow): AgentState['reason'] =>
+    n.status === 'needs_login' ? 'needs_login' : outdated(n.version, need) ? 'node_outdated' : !ctx.hub.isReady(nodeIdentity(n.id)) ? 'machine_offline' : null;
+  if (all.some(n => why(n) === null)) return null;
+  return why(all.find(n => n.id === agent.nodeId) ?? all[0]!);
+}
+
 /* Whether the agent can answer now and, if not, why; what it is doing and how many turns wait. */
 export async function agentState(ctx: Ctx, agentId: string): Promise<AgentState> {
   const [running] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
   const [waiting] = await ctx.db.select({ n: count() }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'queued')));
   const sub = await liveSubscription(ctx, agentId);
-  const [agent] = sub ? await ctx.db.select({ productId: agents.productId, departmentId: agents.departmentId }).from(agents).where(eq(agents.id, agentId)) : [];
-  const reason: AgentState['reason'] = !sub
-    ? 'no_subscription'
-    : sub.status === 'waiting_machine'
-      ? 'waiting_machine'
-      : sub.status === 'needs_login'
-        ? 'needs_login'
-        : outdated(sub) || (outdated(sub, REPOSITORY_NODE) && agent && (await repoFor(ctx, agent)))
-          ? 'node_outdated'
-          : !ctx.hub.isReady(identityOf(sub))
-            ? 'machine_offline'
-            : null;
+  const [agent] = sub ? await ctx.db.select({ productId: agents.productId, departmentId: agents.departmentId, nodeId: agents.nodeId }).from(agents).where(eq(agents.id, agentId)) : [];
+  const reason: AgentState['reason'] = !sub || !agent ? 'no_subscription' : await waitsFor(ctx, agent, sub);
   /* The terminal the window opens is of the machine the program is on. */
-  const shown = await programSubscription(ctx, agentId);
-  const terminal = Boolean(shown && ctx.hub.hasTerminals(identityOf(shown)));
+  const shown = await programNode(ctx, agentId);
+  const terminal = Boolean(shown && ctx.hub.hasTerminals(shown.node));
   return { ready: reason === null, limitUntil: sub ? limitUntil(sub.limits) : null, budgetUntil: sub ? budgetUntil(sub.limits, sub.budget) : null, reason, busy: Boolean(running), runningJobId: running?.id ?? null, queued: Number(waiting?.n ?? 0), terminal };
 }

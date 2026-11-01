@@ -13,7 +13,8 @@ import { publicUrl } from '../link/link.js';
 import { createNodeCode } from '../nodes/codes.js';
 import { resumeAgent } from '../tasks/wake.js';
 import { installCommand } from '../nodes/command.js';
-import { identityOf } from '../nodes/hub.js';
+import { BUILTIN, nodeIdentity } from '../nodes/hub.js';
+import { planNodes } from '../nodes/nodes.js';
 import { failOpenJobs } from '../nodes/messages.js';
 import { failParts } from '../testruns/runs.js';
 import { subView, subViews, type IsOnline } from './views.js';
@@ -55,7 +56,7 @@ const notOwner = () => new ApiError(403, 'forbidden', 'Only the owner of this su
 
 export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db, config, hub } = ctx;
-  const online: IsOnline = sub => hub.isOnline(identityOf(sub));
+  const online: IsOnline = node => hub.isOnline(node);
 
   async function liveSubscription(id: string) {
     const [row] = await db.select().from(subscriptions).where(and(eq(subscriptions.id, id), isNull(subscriptions.removedAt)));
@@ -190,14 +191,15 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
         .update(subscriptions)
         .set({ removedAt: new Date(), ...(sub.kind === 'api_key' ? { secretEnc: null } : {}) })
         .where(eq(subscriptions.id, sub.id));
-      await tx.update(agents).set({ subscriptionId: null }).where(eq(agents.subscriptionId, sub.id));
+      await tx.update(agents).set({ subscriptionId: null, nodeId: null }).where(eq(agents.subscriptionId, sub.id));
     });
-    /* The node stops its jobs when it hears remove, and may never report them, so they end here. */
+    /* The nodes stop their jobs when they hear remove, and may never report them, so they end here. */
     const ended = await failOpenJobs(ctx, eq(jobs.subscriptionId, sub.id), 'subscription_removed');
-    if (sub.kind === 'personal') await failParts(ctx, eq(testParts.subscriptionId, sub.id), 'subscription_removed');
+    const gone = sub.kind === 'personal' ? (await planNodes(db, [sub.id])).map(n => n.id) : [];
+    if (gone.length) await failParts(ctx, inArray(testParts.nodeId, gone), 'subscription_removed');
     /* An offline node hears it at its next hello. The built-in node keeps running for other keys, so it stops just this key's jobs. */
-    if (sub.kind === 'personal') hub.send(identityOf(sub), { type: 'remove' });
-    else for (const jobId of ended) hub.send(identityOf(sub), { type: 'job.cancel', jobId });
+    if (sub.kind === 'personal') for (const id of gone) hub.send(nodeIdentity(id), { type: 'remove' });
+    else for (const jobId of ended) hub.send(BUILTIN, { type: 'job.cancel', jobId });
     return reply.code(204).send();
   });
 }

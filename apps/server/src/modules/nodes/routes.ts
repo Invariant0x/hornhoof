@@ -1,17 +1,19 @@
 import { readFile } from 'node:fs/promises';
-import { and, count, eq, gt, inArray, isNull, max } from 'drizzle-orm';
+import { and, eq, gt, inArray, isNull } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { requirePerson } from '../../auth/session.js';
+import type { Db } from '../../db/client.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
-import { machines, nodeCodes, people, subscriptions } from '../../db/schema.js';
+import { machines, nodeCodes, nodes, people, subscriptions } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { publicUrl } from '../link/link.js';
 import { together } from '../testruns/load.js';
 import { pumpTests } from '../testruns/runs.js';
 import { disconnectMachines } from './disconnect.js';
-import { BUILTIN } from './hub.js';
+import { BUILTIN, nodeIdentity } from './hub.js';
+import { liveNode, settlePlans } from './nodes.js';
 
 const JoinBody = z.object({
   code: z.string().min(1).max(200),
@@ -25,6 +27,19 @@ const IdParams = z.object({ id: z.uuid() });
 export const LendBody = z.object({ lendsTests: z.boolean() }).strict();
 
 const codeUsed = () => new ApiError(410, 'gone', 'This install command was already used or has expired. Get a new one in Hornhoof.', 'code_used');
+
+/* The node of this plan, or this machine's own, on this machine with a new key. One that was here before keeps its id,
+   so the installer finds its container and sign-in again. A plan's first node takes the plan's id, as nodes had before
+   they had rows of their own. */
+async function keyNode(tx: Db, at: { companyId: string; machineId: string; subscriptionId: string | null }, keyHash: string): Promise<string> {
+  const [had] = at.subscriptionId ? await tx.select({ id: nodes.id }).from(nodes).where(eq(nodes.subscriptionId, at.subscriptionId)).limit(1) : [];
+  const [node] = await tx
+    .insert(nodes)
+    .values({ ...(at.subscriptionId && !had ? { id: at.subscriptionId } : {}), ...at, keyHash, status: 'needs_login' })
+    .onConflictDoUpdate({ target: [nodes.machineId, nodes.subscriptionId], set: { keyHash, status: 'needs_login' } })
+    .returning({ id: nodes.id });
+  return node!.id;
+}
 
 export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db, config, hub } = ctx;
@@ -68,22 +83,26 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
         .returning({ id: machines.id });
 
       /* Claimed only while still waiting, so a second code for the same subscription cannot take it at the same time. */
-      const nodes = [];
+      const made = [];
       for (const sub of subs) {
         const key = newToken();
         const claimed = await tx
           .update(subscriptions)
-          .set({ machineId: machine!.id, nodeKeyHash: hashToken(key), status: 'needs_login' })
-          .where(and(eq(subscriptions.id, sub.id), eq(subscriptions.status, 'waiting_machine'), isNull(subscriptions.machineId)))
+          .set({ status: 'needs_login' })
+          .where(and(eq(subscriptions.id, sub.id), eq(subscriptions.status, 'waiting_machine')))
           .returning({ id: subscriptions.id });
-        if (claimed.length) nodes.push({ subscriptionId: sub.id, provider: sub.provider, key });
+        if (!claimed.length) continue;
+        const nodeId = await keyNode(tx, { companyId: code.companyId, machineId: machine!.id, subscriptionId: sub.id }, hashToken(key));
+        made.push({ nodeId, subscriptionId: sub.id, provider: sub.provider, key });
       }
-      if (nodes.length === 0) throw codeUsed();
-      return { machine: { id: machine!.id }, nodes };
+      if (made.length === 0) throw codeUsed();
+      await settlePlans(tx, made.map(n => n.subscriptionId));
+      return { machine: { id: machine!.id }, nodes: made };
     });
 
+    /* One line per node: the installer names its container after the node. */
     if (req.headers.accept?.includes('text/plain')) {
-      return reply.type('text/plain; charset=utf-8').send(joined.nodes.map(n => `${n.subscriptionId} ${n.provider} ${n.key}\n`).join(''));
+      return reply.type('text/plain; charset=utf-8').send(joined.nodes.map(n => `${n.nodeId} ${n.provider} ${n.key}\n`).join(''));
     }
     return joined;
   });
@@ -97,15 +116,14 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
       .innerJoin(people, eq(people.id, machines.personId))
       .where(me.scopeKind === 'company' ? live : and(live, eq(machines.personId, me.id)))
       .orderBy(machines.createdAt);
-    const usage = await db
-      .select({ machineId: subscriptions.machineId, total: count(), lastSeenAt: max(subscriptions.lastSeenAt) })
-      .from(subscriptions)
-      .where(isNull(subscriptions.removedAt))
-      .groupBy(subscriptions.machineId);
-    const byMachine = new Map(usage.map(u => [u.machineId, u]));
-    const served = await db.select({ id: subscriptions.id, machineId: subscriptions.machineId }).from(subscriptions).where(isNull(subscriptions.removedAt));
-    const onlineMachines = new Set(served.filter(s => hub.isOnline({ kind: 'node', subscriptionId: s.id })).map(s => s.machineId));
-    const loadOf = (machineId: string) => together(served.filter(s => s.machineId === machineId).map(s => hub.loadOf({ kind: 'node', subscriptionId: s.id })));
+    /* A removed plan's node is gone from its machine for people, though it keeps its key until it hears so. */
+    const served = await db
+      .select({ id: nodes.id, machineId: nodes.machineId, subscriptionId: nodes.subscriptionId, lastSeenAt: nodes.lastSeenAt })
+      .from(nodes)
+      .leftJoin(subscriptions, eq(subscriptions.id, nodes.subscriptionId))
+      .where(and(liveNode, isNull(subscriptions.removedAt)));
+    const on = (machineId: string) => served.filter(n => n.machineId === machineId);
+    const latest = (seen: (Date | null)[]) => seen.reduce<Date | null>((a, b) => (b && (!a || b > a) ? b : a), null);
     return {
       /* The node that comes with the server runs the company's API keys and test runs too. */
       builtin: me.scopeKind === 'company' ? { online: hub.isOnline(BUILTIN), load: together([hub.loadOf(BUILTIN)]) } : null,
@@ -115,10 +133,10 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
         os: m.os,
         arch: m.arch,
         owner: { id: m.ownerId, name: m.ownerName },
-        online: onlineMachines.has(m.id),
-        lastSeenAt: byMachine.get(m.id)?.lastSeenAt ?? null,
-        subscriptions: byMachine.get(m.id)?.total ?? 0,
-        load: loadOf(m.id),
+        online: on(m.id).some(n => hub.isOnline(nodeIdentity(n.id))),
+        lastSeenAt: latest(on(m.id).map(n => n.lastSeenAt)),
+        subscriptions: on(m.id).filter(n => n.subscriptionId).length,
+        load: together(on(m.id).map(n => hub.loadOf(nodeIdentity(n.id)))),
         lendsTests: m.lendsTests,
       })),
     };

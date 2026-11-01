@@ -299,3 +299,53 @@ describe('migration 0031', () => {
     expect((await db.execute<{ n: number }>(sql`select count(*)::int as n from test_runs`)).rows).toEqual([{ n: 0 }]);
   });
 });
+
+describe('migration 0033', () => {
+  const C = '00000000-0000-4000-8000-000000000001';
+  const P = '00000000-0000-4000-8000-000000000002';
+  const M = '00000000-0000-4000-8000-0000000000c1';
+  const PLAN = '00000000-0000-4000-8000-0000000000a2';
+  const WAITING = '00000000-0000-4000-8000-0000000000a3';
+  const KEY = '00000000-0000-4000-8000-0000000000a1';
+  const A = '00000000-0000-4000-8000-0000000000b1';
+  const B = '00000000-0000-4000-8000-0000000000b2';
+  const J = '00000000-0000-4000-8000-0000000000d1';
+  const T = '00000000-0000-4000-8000-0000000000e1';
+  const R = '00000000-0000-4000-8000-0000000000f1';
+
+  it("gives each plan's machine a node of its own, with the plan's id, key and state, and puts its jobs and agents on it", async () => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0032_company_template') });
+    await db.execute(sql`insert into companies (id, name) values (${C}, 'Acme')`);
+    await db.execute(sql`insert into people (id, company_id, name, email, status, scope_kind) values (${P}, ${C}, 'Ivan', 'ivan@acme.com', 'active', 'company')`);
+    await db.execute(sql`insert into machines (id, company_id, person_id, machine_key, hostname) values (${M}, ${C}, ${P}, 'mac-0001-abcd', 'ivan-mac')`);
+    await db.execute(sql`insert into subscriptions (id, company_id, provider, kind, label, status, owner_person_id, machine_id, node_key_hash, node_version, last_seen_at) values
+      (${PLAN}, ${C}, 'claude', 'personal', 'Claude', 'ready', ${P}, ${M}, 'hash-of-key', '0.9.0', '2026-10-30T10:00:00Z'),
+      (${WAITING}, ${C}, 'codex', 'personal', 'Codex', 'waiting_machine', ${P}, null, null, null, null),
+      (${KEY}, ${C}, 'anthropic_api', 'api_key', 'Key', 'ready', ${P}, null, null, null, null)`);
+    await db.execute(sql`insert into agents (id, company_id, kind, name, model, subscription_id) values
+      (${A}, ${C}, 'worker', 'Bruno', '', ${PLAN}), (${B}, ${C}, 'worker', 'Vera', '', ${KEY})`);
+    await db.execute(sql`insert into jobs (id, company_id, subscription_id, agent_id, kind, prompt, timeout_ms, status) values
+      (${J}, ${C}, ${PLAN}, ${A}, 'conversation', 'hi', 900000, 'running'), (gen_random_uuid(), ${C}, ${KEY}, ${B}, 'conversation', 'hi', 900000, 'running')`);
+    await db.execute(sql`insert into tasks (id, company_id, number, title) values (${T}, ${C}, 1, 'Checkout API')`);
+    await db.execute(sql`insert into test_runs (id, company_id, number, task_id, agent_id, job_id, command, timeout_ms) values (${R}, ${C}, 1, ${T}, ${A}, ${J}, 'npm test', 1800000)`);
+    await db.execute(sql`insert into test_parts (company_id, run_id, part, status, subscription_id, machine_id) values (${C}, ${R}, 1, 'running', ${PLAN}, ${M}), (${C}, ${R}, 2, 'queued', null, null)`);
+
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+
+    const nodes = await db.execute(sql`select id, company_id, machine_id, subscription_id, key_hash, status, version, last_seen_at from nodes`);
+    expect(nodes.rows).toEqual([
+      { id: PLAN, company_id: C, machine_id: M, subscription_id: PLAN, key_hash: 'hash-of-key', status: 'ready', version: '0.9.0', last_seen_at: expect.anything() },
+    ]);
+    const agents = await db.execute(sql`select name, node_id from agents order by name`);
+    expect(agents.rows).toEqual([{ name: 'Bruno', node_id: PLAN }, { name: 'Vera', node_id: null }]);
+    const jobs = await db.execute(sql`select subscription_id, node_id from jobs order by subscription_id`);
+    expect(jobs.rows).toEqual([{ subscription_id: KEY, node_id: null }, { subscription_id: PLAN, node_id: PLAN }]);
+    const parts = await db.execute(sql`select part, node_id from test_parts order by part`);
+    expect(parts.rows).toEqual([{ part: 1, node_id: PLAN }, { part: 2, node_id: null }]);
+    const gone = await db.execute(sql`select table_name, column_name from information_schema.columns where (table_name = 'subscriptions' and column_name in ('machine_id', 'node_key_hash', 'node_version', 'last_seen_at')) or (table_name = 'test_parts' and column_name = 'subscription_id')`);
+    expect(gone.rows).toEqual([]);
+  });
+});

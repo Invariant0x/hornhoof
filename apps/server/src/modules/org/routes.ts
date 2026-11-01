@@ -12,7 +12,6 @@ import { deptName } from '../departments/templates.js';
 import { CHANNEL_MS, type Endpoint } from '../events/bus.js';
 import { workingCount } from '../events/store.js';
 import { personViews } from '../people/views.js';
-import { identityOf } from '../nodes/hub.js';
 import { subView } from '../subscriptions/views.js';
 
 /* The level an agent thinks at, as far as Hornhoof knows: the one it was set to or Kimi's and Codex's most, else its
@@ -178,7 +177,7 @@ export function orgRoutes(app: FastifyInstance, { db, hub, templates, bus }: Ctx
         context: orchestrator.contextUsed,
         /* His plan is at its limit until then: he waits for the reset on it, and the CEO decides whether he moves. */
         limitUntil: limitUntil((orchestrator.subscriptionId && subs.get(orchestrator.subscriptionId)?.limits) || null),
-        subscription: orchestrator.subscriptionId ? await subView(db, s => hub.isOnline(identityOf(s)), orchestrator.subscriptionId) : null,
+        subscription: orchestrator.subscriptionId ? await subView(db, node => hub.isOnline(node), orchestrator.subscriptionId) : null,
       },
       agents: { total: allAgents.length, working: await workingCount(db, me.companyId) },
       turn: turn ?? null,

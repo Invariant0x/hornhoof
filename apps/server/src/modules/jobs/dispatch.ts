@@ -12,6 +12,8 @@ export const TEST_TIMEOUT_MS = 120_000;
 type JobToSend = {
   id: string;
   subscriptionId: string;
+  /* The node of a plan's machine it goes to; an API key's go to the built-in node. */
+  nodeId: string | null;
   prompt: string;
   sessionId: string | null;
   model?: string | null;
@@ -30,12 +32,13 @@ type JobToSend = {
   skills?: SkillFile[];
 };
 
-/* Sends a job to the node that runs its subscription. A personal plan's node signs in itself; an API key travels with the job to the built-in node. */
+/* Sends a job to its node. A personal plan's node signs in itself; an API key travels with the job to the built-in node. */
 export async function dispatchJob(ctx: Ctx, job: JobToSend): Promise<boolean> {
   const [sub] = await ctx.db.select().from(subscriptions).where(eq(subscriptions.id, job.subscriptionId));
-  if (!sub || sub.removedAt) return false;
+  const node = sub && identityOf(sub, job.nodeId);
+  if (!sub || sub.removedAt || !node) return false;
   const secret = sub.kind === 'api_key' && sub.secretEnc ? decryptSecret(sub.secretEnc, ctx.config.secret) : null;
-  return ctx.hub.send(identityOf(sub), {
+  return ctx.hub.send(node, {
     type: 'job.run',
     jobId: job.id,
     subscriptionId: sub.id,

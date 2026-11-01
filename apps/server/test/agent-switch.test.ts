@@ -27,7 +27,7 @@ async function company() {
   const [acme] = await db.select().from(companies);
   const companyId = acme!.id;
   const [sub] = await db.select().from(subscriptions);
-  await until(() => app.ctx.hub.isReady(identityOf(sub!)));
+  await until(() => app.ctx.hub.isReady(identityOf(sub!, null)));
   const [dev] = await db.insert(departments).values({ companyId, templateKey: 'development', roleCode: 'DEV' }).returning();
   const hire = async (name: string, kind: 'head' | 'worker', roleKey: string) =>
     (await db.insert(agents).values({ companyId, kind, name, roleKey, departmentId: dev!.id, model: '', subscriptionId: sub!.id }).returning())[0]!;

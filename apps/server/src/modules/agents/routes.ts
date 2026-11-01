@@ -9,8 +9,7 @@ import { agentChanges, agents, departments, jobs, people, subscriptions, tasks, 
 import { ApiError, type ErrorReason } from '../../errors.js';
 import { onAgent, pump, pumpWaiting } from '../conversation/queue.js';
 import { deptName } from '../departments/templates.js';
-import { identityOf } from '../nodes/hub.js';
-import { subViews, type SubView } from '../subscriptions/views.js';
+import { subViews, type IsOnline, type SubView } from '../subscriptions/views.js';
 import { CLOSED, dropGate } from '../tasks/engine.js';
 import { backOn, leaveIfOff, resumeAgent } from '../tasks/wake.js';
 import { orchestratorServing, servingSubscriptions, type Serving } from '../tools/staff.js';
@@ -73,7 +72,7 @@ const CHANGES_SHOWN = 20;
 /* The employee card: who it is, where it runs, its skills and the instructions it runs with, and its latest changes. */
 export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db, hub } = ctx;
-  const online = (s: { id: string; kind: 'personal' | 'api_key' }) => hub.isOnline(identityOf(s));
+  const online: IsOnline = node => hub.isOnline(node);
   const invalid = (message: string, reason: ErrorReason) => new ApiError(400, 'validation', message, reason);
 
   /* The subscriptions the agent may move to: for an employee those that serve its department, for the orchestrator those

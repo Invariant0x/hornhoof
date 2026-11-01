@@ -34,7 +34,7 @@ async function company(env: NodeJS.ProcessEnv = {}) {
   const [acme] = await db.select().from(companies);
   const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
   const [sub] = await db.select().from(subscriptions);
-  await until(() => app.ctx.hub.isReady(identityOf(sub!)));
+  await until(() => app.ctx.hub.isReady(identityOf(sub!, null)));
   const [dev] = await db.insert(departments).values({ companyId: acme!.id, templateKey: 'development', roleCode: 'DEV' }).returning();
   const hire = async (name: string, kind: 'head' | 'worker', roleKey: string) =>
     (await db.insert(agents).values({ companyId: acme!.id, kind, name, roleKey, departmentId: dev!.id, model: '', subscriptionId: sub!.id }).returning())[0]!;
@@ -381,13 +381,16 @@ describe('the orchestrator reads and changes the database itself', () => {
       [`UPDATE jobs SET tool_token_hash = 'forged' WHERE agent_id = '${orchestrator.id}'`, /tool_token_hash/],
       [`INSERT INTO jobs (company_id, subscription_id, agent_id, prompt, timeout_ms, status, tool_token_hash) SELECT company_id, subscription_id, agent_id, 'x', 1000, 'running', 'forged' FROM jobs LIMIT 1`, /tool_token_hash/],
       ['SELECT tool_token_hash FROM jobs', /tool_token_hash/],
-      [`UPDATE subscriptions SET node_key_hash = 'forged'`, /node_key_hash/],
+      [`UPDATE nodes SET key_hash = 'forged'`, /key_hash/],
+      ['SELECT key_hash FROM nodes', /key_hash/],
+      [`UPDATE nodes SET status = 'ready'`, /only the CEO/],
       ['UPDATE subscriptions SET budget = 10', /only the CEO/],
       ['UPDATE machines SET revoked_at = now()', /only the CEO/],
       ['UPDATE machines SET lends_tests = false', /only the CEO/],
       ['DELETE FROM test_parts', /run_tests/],
       [`UPDATE departments SET repo_url = 'https://evil.test/acme.git' WHERE id = '${dev.id}'`, /only the CEO/],
       [`UPDATE agents SET subscription_id = NULL WHERE id = '${orchestrator.id}'`, /change_employee/],
+      [`UPDATE agents SET node_id = NULL WHERE id = '${bruno.id}'`, /change_employee/],
     ];
     for (const [sql, why] of refused) {
       const res = await call(client, 'database', { sql });

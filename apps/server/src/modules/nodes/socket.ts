@@ -3,8 +3,8 @@ import { eq } from 'drizzle-orm';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Ctx } from '../../app.js';
 import { hashToken } from '../../crypto/tokens.js';
-import { subscriptions } from '../../db/schema.js';
-import { BUILTIN, type NodeIdentity } from './hub.js';
+import { nodes } from '../../db/schema.js';
+import { BUILTIN, nodeIdentity, type NodeIdentity } from './hub.js';
 
 /* Results can be long; anything bigger than this closes the socket. */
 const MAX_FRAME = 4 * 1024 * 1024;
@@ -15,14 +15,15 @@ function sameKey(given: string, expected: string): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-/* The built-in node's key, or the key a node got at join. Removed subscriptions still match so they can be told to clean up. */
+/* The built-in node's key, or the key a node got at join. Nodes of removed subscriptions still match so they can be told
+   to clean up. */
 async function identify(ctx: Ctx, req: FastifyRequest): Promise<NodeIdentity | null> {
   const header = req.headers.authorization ?? '';
   const key = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
   if (!key) return null;
   if (ctx.config.nodeKey && sameKey(key, ctx.config.nodeKey)) return BUILTIN;
-  const [sub] = await ctx.db.select({ id: subscriptions.id }).from(subscriptions).where(eq(subscriptions.nodeKeyHash, hashToken(key)));
-  return sub ? { kind: 'node', subscriptionId: sub.id } : null;
+  const [node] = await ctx.db.select({ id: nodes.id }).from(nodes).where(eq(nodes.keyHash, hashToken(key)));
+  return node ? nodeIdentity(node.id) : null;
 }
 
 export function nodeSocket(app: FastifyInstance, ctx: Ctx): void {

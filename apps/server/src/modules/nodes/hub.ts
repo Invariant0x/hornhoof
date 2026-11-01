@@ -1,15 +1,18 @@
 import { parseNodeMessage, type NodeLoad, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
 import type { WebSocket } from 'ws';
 
-/* Who is on the other end of a socket: one personal subscription's node, or the built-in node that runs every API key. */
-export type NodeIdentity = { kind: 'node'; subscriptionId: string } | { kind: 'builtin' };
+/* Who is on the other end of a socket: one node on a machine, or the built-in node that runs every API key. */
+export type NodeIdentity = { kind: 'node'; nodeId: string } | { kind: 'builtin' };
 
 export const BUILTIN: NodeIdentity = { kind: 'builtin' };
 
-export const identityOf = (sub: { id: string; kind: 'personal' | 'api_key' }): NodeIdentity =>
-  sub.kind === 'api_key' ? BUILTIN : { kind: 'node', subscriptionId: sub.id };
+export const nodeIdentity = (nodeId: string): NodeIdentity => ({ kind: 'node', nodeId });
 
-const keyOf = (id: NodeIdentity) => (id.kind === 'builtin' ? 'builtin' : id.subscriptionId);
+/* The node a job or an agent of this subscription runs on: an API key's is the built-in node, a plan's the one named. */
+export const identityOf = (sub: { kind: 'personal' | 'api_key' }, nodeId: string | null): NodeIdentity | null =>
+  sub.kind === 'api_key' ? BUILTIN : nodeId ? nodeIdentity(nodeId) : null;
+
+const keyOf = (id: NodeIdentity) => (id.kind === 'builtin' ? 'builtin' : id.nodeId);
 
 export const sameNode = (a: NodeIdentity, b: NodeIdentity) => keyOf(a) === keyOf(b);
 
@@ -124,8 +127,8 @@ export class NodeHub {
   }
 
   /* 4001 tells the node it was disconnected in Hornhoof and should not reconnect with this key. */
-  close(subscriptionId: string, code = 4001): void {
-    this.sockets.get(subscriptionId)?.socket.close(code, 'Disconnected in Hornhoof.');
+  close(nodeId: string, code = 4001): void {
+    this.sockets.get(nodeId)?.socket.close(code, 'Disconnected in Hornhoof.');
   }
 
   stop(): void {

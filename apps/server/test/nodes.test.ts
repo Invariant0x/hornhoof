@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
-import { agents, departments, companies, nodeCodes, people, subscriptions } from '../src/db/schema.js';
+import { agents, departments, companies, nodeCodes, nodes, people, subscriptions } from '../src/db/schema.js';
 import { as, invitePerson, setUpCompany, testApp } from './helpers.js';
 
 const MACHINE = { machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' };
@@ -20,22 +20,25 @@ async function connected(providers: string[]) {
 const machinesOf = async (app: FastifyInstance, token: string) => (await app.inject({ url: '/api/machines', ...as(token) })).json().machines;
 
 describe('POST /api/nodes/join', () => {
-  it('gives every subscription of the code its own key and one machine', async () => {
+  it('gives every subscription of the code a node of its own with its own key on one machine', async () => {
     const { app, db, ceo, code, ids } = await connected(['claude', 'codex']);
     const res = await join(app, code);
     expect(res.statusCode).toBe(200);
-    const { machine, nodes } = res.json();
-    expect(nodes.map((n: { subscriptionId: string }) => n.subscriptionId).sort()).toEqual([...ids].sort());
-    expect(new Set(nodes.map((n: { key: string }) => n.key)).size).toBe(2);
+    const { machine, nodes: made } = res.json();
+    expect(made.map((n: { subscriptionId: string }) => n.subscriptionId).sort()).toEqual([...ids].sort());
+    expect(new Set(made.map((n: { key: string }) => n.key)).size).toBe(2);
     for (const id of ids) {
       const [row] = await db.select().from(subscriptions).where(eq(subscriptions.id, id));
-      expect(row).toMatchObject({ status: 'needs_login', machineId: machine.id });
-      expect(row!.nodeKeyHash).toMatch(/^[0-9a-f]{64}$/);
+      expect(row).toMatchObject({ status: 'needs_login' });
+      const [node] = await db.select().from(nodes).where(eq(nodes.subscriptionId, id));
+      /* A plan's first node takes the plan's id, as nodes had before they had rows of their own. */
+      expect(node).toMatchObject({ id, machineId: machine.id, status: 'needs_login' });
+      expect(node!.keyHash).toMatch(/^[0-9a-f]{64}$/);
     }
     const list = await machinesOf(app, ceo);
     expect(list).toHaveLength(1);
     expect(list[0]).toMatchObject({ id: machine.id, hostname: 'ivan-mac', os: 'darwin', arch: 'arm64', owner: { name: 'Ivan' }, online: false, subscriptions: 2 });
-    expect(JSON.stringify(await app.inject({ url: '/api/subscriptions', ...as(ceo) }).then(r => r.json()))).not.toContain(nodes[0].key);
+    expect(JSON.stringify(await app.inject({ url: '/api/subscriptions', ...as(ceo) }).then(r => r.json()))).not.toContain(made[0].key);
   });
 
   it('answers plain lines for the installer', async () => {
@@ -111,7 +114,8 @@ describe('POST /api/machines/:id/disconnect', () => {
     expect(res.statusCode).toBe(204);
     for (const id of ids) {
       const [row] = await db.select().from(subscriptions).where(eq(subscriptions.id, id));
-      expect(row).toMatchObject({ status: 'waiting_machine', machineId: null, nodeKeyHash: null });
+      expect(row).toMatchObject({ status: 'waiting_machine' });
+      expect(await db.select().from(nodes).where(eq(nodes.subscriptionId, id))).toMatchObject([{ keyHash: null }]);
     }
     expect(await machinesOf(app, ceo)).toEqual([]);
   });
@@ -131,7 +135,8 @@ describe('POST /api/machines/:id/disconnect', () => {
     expect((await app.inject({ method: 'PATCH', url: `/api/people/${person!.id}`, payload: { status: 'disabled' }, ...as(ceo) })).statusCode).toBe(200);
 
     const [row] = await db.select().from(subscriptions).where(eq(subscriptions.id, subId));
-    expect(row).toMatchObject({ status: 'waiting_machine', machineId: null, nodeKeyHash: null });
+    expect(row).toMatchObject({ status: 'waiting_machine' });
+    expect(await db.select().from(nodes).where(eq(nodes.subscriptionId, subId))).toMatchObject([{ keyHash: null }]);
     expect(await machinesOf(app, ceo)).toEqual([]);
     const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
     expect(orchestrator!.subscriptionId).toBeNull();

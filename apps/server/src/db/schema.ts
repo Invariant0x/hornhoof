@@ -122,12 +122,14 @@ export const machines = pgTable(
   t => [unique('machines_person_key').on(t.personId, t.machineKey)],
 );
 
-/* A one-time code inside an install command. Only its hash is stored. */
+/* A one-time code inside an install command. Only its hash is stored. No subscriptions: the machine joins alone. A code
+   made for one machine works only there. */
 export const nodeCodes = pgTable('node_codes', {
   codeHash: text('code_hash').primaryKey(),
   companyId: companyId(),
   personId: uuid('person_id').notNull().references(() => people.id),
   subscriptionIds: uuid('subscription_ids').array().notNull(),
+  machineId: uuid('machine_id').references(() => machines.id),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   usedAt: timestamp('used_at', { withTimezone: true }),
   createdAt: createdAt(),
@@ -146,14 +148,13 @@ export const subscriptions = pgTable(
     ownerPersonId: uuid('owner_person_id').notNull().references(() => people.id),
     secretEnc: text('secret_enc'),
     last4: text('last4'),
+    /* A plan's, over its nodes: waiting for a machine while it has none, ready while one is signed in, needs a sign-in
+       otherwise. */
     status: text('status', { enum: SUBSCRIPTION_STATUSES }).notNull(),
     /* Only API keys have a target. A personal subscription serves wherever its owner works. */
     targetKind: text('target_kind', { enum: TARGET_KINDS }),
     targetId: uuid('target_id'),
-    machineId: uuid('machine_id').references(() => machines.id),
-    nodeKeyHash: text('node_key_hash').unique(),
-    nodeVersion: text('node_version'),
-    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
+    /* The same on every machine the plan runs on. */
     limits: jsonb('limits').$type<Limits>(),
     /* The share of each limit window, in percent, that task turns may use; past it they wait for the window to start
        over while people's own messages still go. Null: the whole limit. */
@@ -164,6 +165,27 @@ export const subscriptions = pgTable(
     createdAt: createdAt(),
   },
   t => [index('subscriptions_owner_person_id').on(t.ownerPersonId)],
+);
+
+export const NODE_STATUSES = ['needs_login', 'ready'] as const;
+
+/* One node on one machine: a personal plan's, signed in on that machine by itself, or the machine's own, which has no
+   plan and takes only test runs. One plan runs on as many of its owner's machines as they add it to. The key is the
+   node's only credential; none once the machine is disconnected or the node removed. */
+export const nodes = pgTable(
+  'nodes',
+  {
+    id: id(),
+    companyId: companyId(),
+    machineId: uuid('machine_id').notNull().references(() => machines.id),
+    subscriptionId: uuid('subscription_id').references(() => subscriptions.id),
+    keyHash: text('key_hash').unique(),
+    status: text('status', { enum: NODE_STATUSES }).notNull().default('needs_login'),
+    version: text('version'),
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  t => [unique('nodes_machine_plan').on(t.machineId, t.subscriptionId).nullsNotDistinct(), index('nodes_subscription_id').on(t.subscriptionId)],
 );
 
 export const agents = pgTable(
@@ -177,6 +199,9 @@ export const agents = pgTable(
     departmentId: uuid('department_id').references(() => departments.id),
     teamId: uuid('team_id').references(() => teams.id),
     subscriptionId: uuid('subscription_id').references(() => subscriptions.id),
+    /* The node of its plan its program lives on, with its folder, session and terminal; it stays there while that node is
+       ready. None on a company key, which runs on the built-in node, and before its first turn. */
+    nodeId: uuid('node_id').references((): AnyPgColumn => nodes.id),
     /* The role template it was hired from, its enabled skills, its own text over the template's, and the template
        hashes it was hired with, so the card can say a template moved on. */
     roleKey: text('role_key'),
@@ -253,6 +278,8 @@ export const jobs = pgTable(
     id: id(),
     companyId: companyId(),
     subscriptionId: uuid('subscription_id').notNull().references(() => subscriptions.id),
+    /* The node it went out to; none for the built-in node's jobs, and while it waits. */
+    nodeId: uuid('node_id').references(() => nodes.id),
     agentId: uuid('agent_id').references(() => agents.id),
     prompt: text('prompt').notNull(),
     sessionId: text('session_id'),
@@ -524,8 +551,7 @@ export const testRuns = pgTable(
 
 export const TEST_PART_STATUSES = ['queued', 'running', 'passed', 'failed', 'stopped'] as const;
 
-/* One part of a test run: it waits for a free machine, then runs on one node, a subscription's node on a machine or the
-   built-in node. */
+/* One part of a test run: it waits for a free machine, then runs on one node, a node on a machine or the built-in node. */
 export const testParts = pgTable(
   'test_parts',
   {
@@ -534,7 +560,7 @@ export const testParts = pgTable(
     runId: uuid('run_id').notNull().references(() => testRuns.id),
     part: integer('part').notNull(),
     status: text('status', { enum: TEST_PART_STATUSES }).notNull().default('queued'),
-    subscriptionId: uuid('subscription_id').references(() => subscriptions.id),
+    nodeId: uuid('node_id').references(() => nodes.id),
     builtin: boolean('builtin').notNull().default(false),
     machineId: uuid('machine_id').references(() => machines.id),
     /* The machine's name as it ran, for the result. */

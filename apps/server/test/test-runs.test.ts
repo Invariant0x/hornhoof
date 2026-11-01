@@ -6,6 +6,7 @@ import { hashToken } from '../src/crypto/tokens.js';
 import { agents, attachments, companies, departments, jobs, subscriptions, tasks } from '../src/db/schema.js';
 import { createTask } from '../src/modules/tasks/engine.js';
 import { afterJob } from '../src/modules/tasks/wake.js';
+import { nodeIdentity } from '../src/modules/nodes/hub.js';
 import { checkTestTimes } from '../src/modules/testruns/runs.js';
 import { as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
@@ -56,10 +57,10 @@ async function company() {
     const connected = await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude'] }, ...as(token) });
     const code = connected.json().command.split('--join ')[1];
     const joined = (await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: `${hostname}-0001-abcd`, hostname, os: 'linux', arch: 'x86_64' } })).json();
-    const [{ subscriptionId, key }] = joined.nodes;
+    const [{ nodeId, subscriptionId, key }] = joined.nodes;
     const node = await connectNode(url, key);
     node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], load: load as ReturnType<typeof idle>, tests: [] });
-    await until(() => app.ctx.hub.loadOf({ kind: 'node', subscriptionId }) !== null);
+    await until(() => app.ctx.hub.loadOf(nodeIdentity(nodeId)) !== null);
     return { node, subscriptionId: subscriptionId as string, machineId: joined.machine.id as string };
   };
   const ann = await invitePerson(app, ceo, { name: 'Ann', email: 'ann@acme.com', access: { departments: [dev!.id] } });

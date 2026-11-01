@@ -14,13 +14,13 @@ const waiting = new WeakMap<Ctx, Map<string, Waiting>>();
    only into a turn on that task. The running turn's job, or null when none runs or the words could not go in. */
 export async function sayLive(ctx: Ctx, agentId: string, text: string, taskId?: string): Promise<string | null> {
   const [running] = await ctx.db
-    .select({ id: jobs.id, taskId: jobs.taskId, sub: subscriptions })
+    .select({ id: jobs.id, taskId: jobs.taskId, nodeId: jobs.nodeId, sub: subscriptions })
     .from(jobs)
     .innerJoin(subscriptions, eq(subscriptions.id, jobs.subscriptionId))
     .where(and(eq(jobs.agentId, agentId), eq(jobs.kind, 'conversation'), eq(jobs.status, 'running')))
     .limit(1);
-  if (!running || (taskId && running.taskId !== taskId)) return null;
-  const node = identityOf(running.sub);
+  const node = running && identityOf(running.sub, running.nodeId);
+  if (!running || !node || (taskId && running.taskId !== taskId)) return null;
   if (!ctx.hub.hasTerminals(node)) return null;
   const ref = randomUUID();
   const map = waiting.get(ctx) ?? new Map<string, Waiting>();

@@ -516,7 +516,8 @@ export async function afterJob(ctx: Ctx, jobId: string): Promise<void> {
 export async function cancelJob(ctx: Ctx, jobId: string): Promise<void> {
   const [job] = await ctx.db.select({ job: jobs, sub: subscriptions }).from(jobs).innerJoin(subscriptions, eq(subscriptions.id, jobs.subscriptionId)).where(eq(jobs.id, jobId));
   if (!job || job.job.status !== 'running') return;
-  if (ctx.hub.send(identityOf(job.sub), { type: 'job.cancel', jobId })) return;
+  const node = identityOf(job.sub, job.job.nodeId);
+  if (node && ctx.hub.send(node, { type: 'job.cancel', jobId })) return;
   const [ended] = await ctx.db
     .update(jobs)
     .set({ status: 'failed', error: 'cancelled', result: 'Stopped.', finishedAt: new Date() })

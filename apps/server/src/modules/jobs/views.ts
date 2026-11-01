@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
-import { jobs, machines, subscriptions, type JOB_STATUSES } from '../../db/schema.js';
+import { jobs, machines, nodes, subscriptions, type JOB_STATUSES } from '../../db/schema.js';
 
 type Job = typeof jobs.$inferSelect;
 
@@ -38,7 +38,8 @@ export async function jobView(db: Db, id: string): Promise<(JobView & { subscrip
     })
     .from(jobs)
     .innerJoin(subscriptions, eq(subscriptions.id, jobs.subscriptionId))
-    .leftJoin(machines, eq(machines.id, subscriptions.machineId))
+    .leftJoin(nodes, eq(nodes.id, jobs.nodeId))
+    .leftJoin(machines, eq(machines.id, nodes.machineId))
     .where(eq(jobs.id, id));
   return row ? { ...row, machine: row.machine ?? null } : null;
 }

@@ -1,20 +1,21 @@
 import { lastBytes, type NodeMessage } from '@hornhoof/protocol';
-import { and, eq, inArray, isNotNull, isNull, notInArray, or, type SQL } from 'drizzle-orm';
+import { and, eq, inArray, isNull, notInArray, or, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { agents, jobs, subscriptions } from '../../db/schema.js';
+import { agents, jobs, nodes, subscriptions } from '../../db/schema.js';
 import { said } from '../conversation/live.js';
-import { liveSubscription, pumpWaiting, refusedLimits, startProgram } from '../conversation/queue.js';
+import { nodeOfAgent, pumpWaiting, refusedLimits, startProgram } from '../conversation/queue.js';
 import { afterJob, typedTurn } from '../tasks/wake.js';
 import { appendEvent, publishWorking } from '../events/store.js';
 import { partDone, partStarted, pumpTests, testsHello } from '../testruns/runs.js';
-import { identityOf, sameNode, type NodeIdentity } from './hub.js';
+import { sameNode, type NodeIdentity } from './hub.js';
+import { liveNode, settlePlans } from './nodes.js';
 
 const OPEN_JOBS = ['queued', 'running'] as const;
 
-/* A node may only touch the jobs of its own subscription; the built-in node those of API keys. */
+/* A node may only touch the jobs sent to it; the built-in node those of API keys. */
 function jobsOf(id: NodeIdentity, ctx: Ctx): SQL {
-  if (id.kind === 'node') return eq(jobs.subscriptionId, id.subscriptionId);
+  if (id.kind === 'node') return eq(jobs.nodeId, id.nodeId);
   return inArray(jobs.subscriptionId, ctx.db.select({ id: subscriptions.id }).from(subscriptions).where(eq(subscriptions.kind, 'api_key')));
 }
 
@@ -22,7 +23,7 @@ function jobsOf(id: NodeIdentity, ctx: Ctx): SQL {
    A queued conversation turn still waits in Hornhoof and goes out later. */
 const ON_NODE = or(eq(jobs.status, 'running'), and(eq(jobs.status, 'queued'), eq(jobs.kind, 'test')));
 
-/* Jobs of these subscriptions that a node had become failed with the reason, except the ones the node still runs.
+/* Jobs of these nodes or subscriptions that a node had become failed with the reason, except the ones the node still runs.
    A failed turn goes into its conversation and the agent's next turn goes out. */
 export async function failOpenJobs(ctx: Ctx, scope: SQL, error: string, stillRunning: string[] = []): Promise<string[]> {
   const conditions = [scope, ON_NODE];
@@ -43,18 +44,18 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
   switch (msg.type) {
     case 'hello': {
       if (id.kind === 'node') {
-        const [sub] = await db.select().from(subscriptions).where(eq(subscriptions.id, id.subscriptionId));
-        if (!sub) return;
-        if (sub.removedAt) {
+        const [row] = await db.select({ node: nodes, removedAt: subscriptions.removedAt }).from(nodes).leftJoin(subscriptions, eq(subscriptions.id, nodes.subscriptionId)).where(eq(nodes.id, id.nodeId));
+        if (!row) return;
+        if (row.removedAt) {
           ctx.hub.send(id, { type: 'remove' });
           return;
         }
         /* A machine disconnected in Hornhoof has no key any more; what its socket still says changes nothing. */
-        if (!sub.nodeKeyHash) return;
-        await db
-          .update(subscriptions)
-          .set({ nodeVersion: msg.version, lastSeenAt: now, status: msg.loggedIn ? 'ready' : 'needs_login', ...(msg.models ? { models: msg.models } : {}) })
-          .where(and(eq(subscriptions.id, sub.id), isNotNull(subscriptions.nodeKeyHash)));
+        if (!row.node.keyHash) return;
+        await db.update(nodes).set({ version: msg.version, lastSeenAt: now, status: msg.loggedIn ? 'ready' : 'needs_login' }).where(and(eq(nodes.id, id.nodeId), liveNode));
+        const plan = row.node.subscriptionId;
+        if (plan && msg.models) await db.update(subscriptions).set({ models: msg.models }).where(eq(subscriptions.id, plan));
+        await settlePlans(db, [plan]);
       }
       await failOpenJobs(ctx, jobsOf(id, ctx), 'machine_restarted', msg.running);
       ctx.hub.greet(id, msg.terminals === true, msg.skillFiles === true);
@@ -71,11 +72,17 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
     }
     case 'status': {
       if (id.kind !== 'node') return;
-      /* A node that started again knows no limits until its program says them; the last ones stay until then. */
-      await db
-        .update(subscriptions)
-        .set({ status: msg.loggedIn ? 'ready' : 'needs_login', lastSeenAt: now, ...(msg.limits ? { limits: msg.limits } : {}), ...(msg.models ? { models: msg.models } : {}) })
-        .where(and(eq(subscriptions.id, id.subscriptionId), isNull(subscriptions.removedAt), isNotNull(subscriptions.nodeKeyHash)));
+      const [node] = await db.update(nodes).set({ status: msg.loggedIn ? 'ready' : 'needs_login', lastSeenAt: now }).where(and(eq(nodes.id, id.nodeId), liveNode)).returning({ plan: nodes.subscriptionId });
+      if (!node?.plan) return;
+      /* A node that started again knows no limits until its program says them; the last ones stay until then. The plan's
+         limits are the same on each of its machines, so the last word counts. */
+      if (msg.limits || msg.models) {
+        await db
+          .update(subscriptions)
+          .set({ ...(msg.limits ? { limits: msg.limits } : {}), ...(msg.models ? { models: msg.models } : {}) })
+          .where(and(eq(subscriptions.id, node.plan), isNull(subscriptions.removedAt)));
+      }
+      await settlePlans(db, [node.plan]);
       /* A signed-in subscription may have turns waiting for it. */
       if (msg.loggedIn) await pumpWaiting(ctx);
       return;
@@ -125,17 +132,18 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
         .where(and(eq(jobs.id, msg.jobId), inArray(jobs.status, OPEN_JOBS), jobsOf(id, ctx)))
         .returning({ companyId: jobs.companyId });
       for (const { companyId } of finished) await publishWorking(ctx, companyId);
-      /* The login ran out: the subscription waits for one before the next turn could go out and fail too. */
+      /* The login ran out on this machine: it waits for one before the next turn could go out and fail too. */
       if (finished.length && msg.error === 'not_logged_in' && id.kind === 'node') {
-        await db.update(subscriptions).set({ status: 'needs_login' }).where(eq(subscriptions.id, id.subscriptionId));
+        const [node] = await db.update(nodes).set({ status: 'needs_login' }).where(eq(nodes.id, id.nodeId)).returning({ plan: nodes.subscriptionId });
+        await settlePlans(db, [node?.plan ?? null]);
       }
       /* A program that stopped at the plan's usage limit holds the plan's turns, as a plan that says so itself does, and the
          map says until when. */
       if (finished.length && msg.error === 'agent_failed' && id.kind === 'node') {
-        const [sub] = await db.select({ limits: subscriptions.limits }).from(subscriptions).where(eq(subscriptions.id, id.subscriptionId));
-        const held = refusedLimits(`${msg.result}\n${msg.tail}`, sub?.limits ?? null, now.getTime());
+        const [sub] = await db.select({ id: subscriptions.id, limits: subscriptions.limits }).from(nodes).innerJoin(subscriptions, eq(subscriptions.id, nodes.subscriptionId)).where(eq(nodes.id, id.nodeId));
+        const held = sub && refusedLimits(`${msg.result}\n${msg.tail}`, sub.limits ?? null, now.getTime());
         if (held) {
-          await db.update(subscriptions).set({ limits: held }).where(eq(subscriptions.id, id.subscriptionId));
+          await db.update(subscriptions).set({ limits: held }).where(eq(subscriptions.id, sub.id));
           for (const { companyId } of finished) ctx.bus.publish(companyId, { type: 'org' });
         }
       }
@@ -155,11 +163,11 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
     case 'agent.said':
       said(ctx, id, msg.ref, msg.ok);
       return;
-    /* Only the node that runs the agent's subscription tells how full its context is. */
+    /* Only the node the agent's program is on tells how full its context is. */
     case 'agent.context': {
       if (!z.uuid().safeParse(msg.agentKey).success) return;
-      const sub = await liveSubscription(ctx, msg.agentKey);
-      if (!sub || !sameNode(identityOf(sub), id)) return;
+      const node = await nodeOfAgent(ctx, msg.agentKey);
+      if (!node || !sameNode(node, id)) return;
       const [agent] = await db
         .update(agents)
         .set({ contextUsed: msg.used })
@@ -170,8 +178,9 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
     }
     case 'removed': {
       if (id.kind !== 'node') return;
-      await db.update(subscriptions).set({ nodeKeyHash: null, machineId: null }).where(eq(subscriptions.id, id.subscriptionId));
-      ctx.hub.close(id.subscriptionId, 1000);
+      const [node] = await db.update(nodes).set({ keyHash: null }).where(eq(nodes.id, id.nodeId)).returning({ plan: nodes.subscriptionId });
+      await settlePlans(db, [node?.plan ?? null]);
+      ctx.hub.close(id.nodeId, 1000);
       return;
     }
   }
@@ -182,5 +191,5 @@ export async function handleNodeClose(ctx: Ctx, id: NodeIdentity): Promise<void>
   /* A newer connection of the same node keeps the views. */
   if (!ctx.hub.isOnline(id)) ctx.terminals.nodeGone(id);
   if (id.kind !== 'node') return;
-  await ctx.db.update(subscriptions).set({ lastSeenAt: new Date() }).where(eq(subscriptions.id, id.subscriptionId));
+  await ctx.db.update(nodes).set({ lastSeenAt: new Date() }).where(eq(nodes.id, id.nodeId));
 }

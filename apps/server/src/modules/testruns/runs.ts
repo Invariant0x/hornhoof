@@ -3,11 +3,12 @@ import { and, asc, count, eq, inArray, isNull, like, max, notInArray, type SQL }
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { accessOf, canReach, type Access } from '../../auth/access.js';
-import { agents, attachments, companies, departments, jobs, machines, people, subscriptions, tasks, testParts, testRuns } from '../../db/schema.js';
+import { agents, attachments, companies, departments, jobs, machines, nodes, people, subscriptions, tasks, testParts, testRuns } from '../../db/schema.js';
 import { loggable } from '../../errors.js';
 import { quote } from '../conversation/prompt.js';
 import { repoAt, TEST_MEMORY_GB } from '../departments/repository.js';
-import { BUILTIN, type NodeIdentity } from '../nodes/hub.js';
+import { BUILTIN, nodeIdentity, type NodeIdentity } from '../nodes/hub.js';
+import { liveNode } from '../nodes/nodes.js';
 import { onTask } from '../tasks/attachments.js';
 import { CLOSED, refuse, type Task, type Wake } from '../tasks/engine.js';
 import { keepWakes } from '../tasks/outbox.js';
@@ -41,8 +42,8 @@ const BUILTIN_NAME = 'the built-in node';
 const isId = (s: string) => z.uuid().safeParse(s).success;
 
 /* The node a part went to. */
-const nodeOf = (p: Pick<Part, 'builtin' | 'subscriptionId'>): NodeIdentity | null => (p.builtin ? BUILTIN : p.subscriptionId ? { kind: 'node', subscriptionId: p.subscriptionId } : null);
-const ofNode = (id: NodeIdentity): SQL => (id.kind === 'builtin' ? eq(testParts.builtin, true) : eq(testParts.subscriptionId, id.subscriptionId));
+const nodeOf = (p: Pick<Part, 'builtin' | 'nodeId'>): NodeIdentity | null => (p.builtin ? BUILTIN : p.nodeId ? nodeIdentity(p.nodeId) : null);
+const ofNode = (id: NodeIdentity): SQL => (id.kind === 'builtin' ? eq(testParts.builtin, true) : eq(testParts.nodeId, id.nodeId));
 
 export const logName = (run: Pick<Run, 'number'>, part: number) => `tests-${run.number}-${part}.log`;
 const commandFor = (run: Pick<Run, 'command' | 'parts'>, part: number) => run.command.replaceAll('{parts}', String(run.parts)).replaceAll('{part}', String(part));
@@ -101,7 +102,7 @@ function account(run: Run, task: Pick<Task, 'number'>, parts: Part[], logs: Set<
 
 /* A place a part can run: a machine of the company through one of its nodes, or the built-in node. access: what the
    machine's owner reaches; the built-in node reaches every repository. */
-type Place = { key: string; node: NodeIdentity; name: string; machineId: string | null; subscriptionId: string | null; builtin: boolean; lent: boolean; busy: boolean; load: NodeLoad | null; access: Access | null };
+type Place = { key: string; node: NodeIdentity; name: string; machineId: string | null; nodeId: string | null; builtin: boolean; lent: boolean; busy: boolean; load: NodeLoad | null; access: Access | null };
 
 async function placesOf(ctx: Ctx, companyId: string): Promise<Place[]> {
   const { db, hub } = ctx;
@@ -112,34 +113,33 @@ async function placesOf(ctx: Ctx, companyId: string): Promise<Place[]> {
     .innerJoin(people, eq(people.id, machines.personId))
     .where(and(eq(machines.companyId, companyId), isNull(machines.revokedAt)))
     .orderBy(asc(machines.createdAt));
-  const nodes = await db
-    .select({ id: subscriptions.id, machineId: subscriptions.machineId })
-    .from(subscriptions)
-    .where(and(eq(subscriptions.companyId, companyId), isNull(subscriptions.removedAt)))
-    .orderBy(asc(subscriptions.createdAt));
+  /* A machine's own node and its plans' nodes; a removed plan's node is on its way out. */
+  const live = await db
+    .select({ id: nodes.id, machineId: nodes.machineId })
+    .from(nodes)
+    .leftJoin(subscriptions, eq(subscriptions.id, nodes.subscriptionId))
+    .where(and(eq(nodes.companyId, companyId), liveNode, isNull(subscriptions.removedAt)))
+    .orderBy(asc(nodes.createdAt), asc(nodes.id));
   const places: Place[] = [];
   for (const { machine, owner } of rows) {
     /* Only nodes that say how busy they are know test runs. */
-    const ready = nodes
-      .filter(n => n.machineId === machine.id)
-      .map(n => ({ kind: 'node' as const, subscriptionId: n.id }))
-      .filter(id => hub.isReady(id) && hub.loadOf(id) !== null);
+    const ready = live.filter(n => n.machineId === machine.id && hub.isReady(nodeIdentity(n.id)) && hub.loadOf(nodeIdentity(n.id)) !== null).map(n => n.id);
     if (!ready.length) continue;
     places.push({
       key: machine.id,
-      node: ready[0]!,
+      node: nodeIdentity(ready[0]!),
       name: machine.hostname || 'a machine',
       machineId: machine.id,
-      subscriptionId: ready[0]!.subscriptionId,
+      nodeId: ready[0]!,
       builtin: false,
       lent: machine.lendsTests,
       busy: running.some(r => r.machineId === machine.id),
-      load: together(ready.map(id => hub.loadOf(id))),
+      load: together(ready.map(id => hub.loadOf(nodeIdentity(id)))),
       access: await accessOf(db, owner),
     });
   }
   if (hub.isReady(BUILTIN) && hub.loadOf(BUILTIN)) {
-    places.push({ key: 'builtin', node: BUILTIN, name: BUILTIN_NAME, machineId: null, subscriptionId: null, builtin: true, lent: true, busy: running.some(r => r.builtin), load: together([hub.loadOf(BUILTIN)]), access: null });
+    places.push({ key: 'builtin', node: BUILTIN, name: BUILTIN_NAME, machineId: null, nodeId: null, builtin: true, lent: true, busy: running.some(r => r.builtin), load: together([hub.loadOf(BUILTIN)]), access: null });
   }
   return places;
 }
@@ -177,7 +177,7 @@ async function giveOut(ctx: Ctx): Promise<void> {
     place.busy = true;
     const [taken] = await db
       .update(testParts)
-      .set({ status: 'running', subscriptionId: place.subscriptionId, builtin: place.builtin, machineId: place.machineId, machineName: place.name, startedAt: new Date() })
+      .set({ status: 'running', nodeId: place.nodeId, builtin: place.builtin, machineId: place.machineId, machineName: place.name, startedAt: new Date() })
       .where(and(eq(testParts.id, part.id), eq(testParts.status, 'queued')))
       .returning();
     if (!taken) continue;
@@ -196,7 +196,7 @@ async function giveOut(ctx: Ctx): Promise<void> {
     if (!sent) {
       await db
         .update(testParts)
-        .set({ status: 'queued', subscriptionId: null, builtin: false, machineId: null, machineName: null, startedAt: null })
+        .set({ status: 'queued', nodeId: null, builtin: false, machineId: null, machineName: null, startedAt: null })
         .where(and(eq(testParts.id, part.id), eq(testParts.status, 'running')));
     }
   }

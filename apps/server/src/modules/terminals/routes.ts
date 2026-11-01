@@ -4,8 +4,8 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agentFor } from '../agents/find.js';
-import { programSubscription } from '../conversation/queue.js';
-import { identityOf, sameNode, type NodeIdentity } from '../nodes/hub.js';
+import { programNode, windowNode } from '../conversation/queue.js';
+import { sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { CLOSE } from './relay.js';
 
 const cols = z.coerce.number().int().min(10).max(500);
@@ -32,8 +32,8 @@ export function terminalRoutes(app: FastifyInstance, ctx: Ctx): void {
       websocket: true,
       preValidation: async req => {
         const { me, agent } = await agentFor(ctx, req);
-        const sub = await programSubscription(ctx, agent.id);
-        found.set(req, { personId: me.id, companyId: me.companyId, agentId: agent.id, node: sub ? identityOf(sub) : null, write: sub?.ownerPersonId === me.id });
+        const at = await windowNode(ctx, agent.id);
+        found.set(req, { personId: me.id, companyId: me.companyId, agentId: agent.id, node: at?.node ?? null, write: at?.ownerPersonId === me.id });
       },
     },
     (socket, req) => {
@@ -68,16 +68,16 @@ export function terminalRoutes(app: FastifyInstance, ctx: Ctx): void {
         } else ctx.hub.send(node, { type: 'term.resize', termId, cols: msg.data.cols, rows: msg.data.rows });
       });
       /* Like the live stream, the view looks at the person again: one signed out or moved away stops watching. An agent
-         that moved to another subscription runs on another node once its running turn is over, and the browser opens the
-         view again there. A change of anyone's access looks at once. */
+         that moved to another subscription or machine runs on another node once its running turn is over, and the browser
+         opens the view again there. A change of anyone's access looks at once. */
       const look = async () => {
         try {
           await agentFor(ctx, req);
         } catch {
           return socket.close(...CLOSE.noAccess);
         }
-        const sub = await programSubscription(ctx, agentId).catch(() => undefined);
-        if (sub !== undefined && (!sub || !sameNode(identityOf(sub), node))) socket.close(...CLOSE.nodeOffline);
+        const at = await programNode(ctx, agentId).catch(() => undefined);
+        if (at !== undefined && (!at || !sameNode(at.node, node))) socket.close(...CLOSE.nodeOffline);
       };
       const check = setInterval(look, ctx.config.streamPingMs);
       const stopLooking = ctx.bus.onAccessChange(companyId, () => void look());

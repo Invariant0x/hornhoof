@@ -22,6 +22,7 @@ const RULES: Record<string, string> = {
   person_access: PEOPLE,
   subscriptions: PLANS,
   machines: PLANS,
+  nodes: PLANS,
   test_runs: TESTS,
   test_parts: TESTS,
   departments: "A department's repository changes only with set_repository, which only the CEO may ask for.",

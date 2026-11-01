@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
-import { agentEvents, agents, companies, departments, jobs, people, personAccess, requests, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
+import { agentEvents, agents, companies, departments, jobs, machines, nodes, people, personAccess, requests, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
 import { agentState, enqueueTurn } from '../src/modules/conversation/queue.js';
 import { said } from '../src/modules/conversation/live.js';
 import { identityOf, type NodeIdentity } from '../src/modules/nodes/hub.js';
@@ -53,7 +53,7 @@ describe('a person who speaks to an agent directly', () => {
   it("tells a stuck agent how to go on by typing into its terminal, and the task goes on", async () => {
     const c = await stuck();
     expect(await c.db.select({ status: tasks.status }).from(tasks).where(eq(tasks.id, c.task.id))).toEqual([{ status: 'waiting' }]);
-    expect(await typedTurn(c.ctx, identityOf(c.sub), c.bruno.id, 'Run the tests first, then submit.', c.ceo.id)).not.toBeNull();
+    expect(await typedTurn(c.ctx, identityOf(c.sub, null), c.bruno.id, 'Run the tests first, then submit.', c.ceo.id)).not.toBeNull();
     expect(await requestsOf(c)).toEqual([{ kind: 'stuck', status: 'answered', answer: 'Run the tests first, then submit.', answeredBy: c.ceo.id }]);
     expect(await c.db.select({ status: tasks.status, silent: tasks.silent }).from(tasks).where(eq(tasks.id, c.task.id))).toEqual([{ status: 'working', silent: 0 }]);
     /* After the typed turn the task's own turn follows, so a typed turn that goes nowhere still leaves the task watched. */
@@ -67,7 +67,7 @@ describe('a person who speaks to an agent directly', () => {
     const [sales] = await c.db.insert(departments).values({ companyId: c.dev.companyId, templateKey: 'sales', roleCode: 'SAL' }).returning();
     const [maria] = await c.db.insert(people).values({ companyId: c.dev.companyId, name: 'Maria', email: 'maria@acme.com', status: 'active', scopeKind: 'listed' }).returning();
     await c.db.insert(personAccess).values({ companyId: c.dev.companyId, personId: maria!.id, departmentId: sales!.id });
-    expect(await typedTurn(c.ctx, identityOf(c.sub), c.bruno.id, 'Skip the tests.', maria!.id)).not.toBeNull();
+    expect(await typedTurn(c.ctx, identityOf(c.sub, null), c.bruno.id, 'Skip the tests.', maria!.id)).not.toBeNull();
     expect(await requestsOf(c)).toEqual([{ kind: 'stuck', status: 'open', answer: null, answeredBy: null }]);
     expect(await c.db.select({ status: tasks.status }).from(tasks).where(eq(tasks.id, c.task.id))).toEqual([{ status: 'waiting' }]);
   });
@@ -162,10 +162,12 @@ describe('a plan at its limit, with others of the role on other plans', () => {
     const rejected = { status: 'rejected' as const, windows: [{ name: 'five_hour', utilization: 1, resetsAt }] };
     const [codex] = await c.db
       .insert(subscriptions)
-      .values({ companyId: c.dev.companyId, provider: 'codex', kind: 'personal', label: 'Codex', ownerPersonId: c.ceo.id, status: rex.status ?? 'ready', nodeVersion: rex.nodeVersion ?? '0.5.0', limits: rex.limited ? rejected : null })
+      .values({ companyId: c.dev.companyId, provider: 'codex', kind: 'personal', label: 'Codex', ownerPersonId: c.ceo.id, status: rex.status ?? 'ready', limits: rex.limited ? rejected : null })
       .returning();
+    const [box] = await c.db.insert(machines).values({ companyId: c.dev.companyId, personId: c.ceo.id, machineKey: 'rex-0001-abcd', hostname: 'rex-box' }).returning();
+    await c.db.insert(nodes).values({ id: codex!.id, companyId: c.dev.companyId, machineId: box!.id, subscriptionId: codex!.id, keyHash: 'rex-key-hash', status: rex.status ?? 'ready', version: rex.nodeVersion ?? '0.5.0' });
     const { isReady, hasTerminals } = { isReady: c.ctx.hub.isReady.bind(c.ctx.hub), hasTerminals: c.ctx.hub.hasTerminals.bind(c.ctx.hub) };
-    const rexs = (id: NodeIdentity) => id.kind === 'node' && id.subscriptionId === codex!.id;
+    const rexs = (id: NodeIdentity) => id.kind === 'node' && id.nodeId === codex!.id;
     vi.spyOn(c.ctx.hub, 'isReady').mockImplementation(id => (rexs(id) ? rex.online ?? true : isReady(id)));
     vi.spyOn(c.ctx.hub, 'hasTerminals').mockImplementation(id => !rexs(id) && hasTerminals(id));
     const [peer] = await c.db.insert(agents).values({ companyId: c.dev.companyId, kind: 'worker', name: 'Rex', roleKey: 'DEV-BE', departmentId: c.dev.id, model: '', subscriptionId: codex!.id }).returning();

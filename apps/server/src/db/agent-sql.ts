@@ -17,17 +17,18 @@ export const HIDDEN = ['sessions', 'invites', 'node_codes', 'public_links'];
 export const SECRET: Record<string, string[]> = {
   people: ['password_hash'],
   jobs: ['tool_token_hash'],
-  subscriptions: ['node_key_hash', 'secret_enc'],
+  subscriptions: ['secret_enc'],
+  nodes: ['key_hash'],
   departments: ['repo_token_enc'],
 };
-/* Who people are and what they reach, and the subscriptions and machines the company runs on: the orchestrator's role
-   reads them, and they change only through the tools the CEO alone may ask for. Test runs too, as they carry a
+/* Who people are and what they reach, and the subscriptions, machines and nodes the company runs on: the orchestrator's
+   role reads them, and they change only through the tools the CEO alone may ask for. Test runs too, as they carry a
    repository's token to the machines lent to them. */
-const READ_ONLY = ['people', 'person_access', 'subscriptions', 'machines', 'test_runs', 'test_parts'];
+const READ_ONLY = ['people', 'person_access', 'subscriptions', 'machines', 'nodes', 'test_runs', 'test_parts'];
 /* An employee's fields that give it tools, a place or the machine its turns and their tokens go to: they change only by
    hiring and on its card, which make the CEO's checks. A head's department is held by a trigger, as a column right
    cannot tell a head from a worker. */
-const AGENT_FIXED = ['kind', 'role_key', 'skills', 'subscription_id'];
+const AGENT_FIXED = ['kind', 'role_key', 'skills', 'subscription_id', 'node_id'];
 /* Where a department's agents push their work, set only with set_repository. */
 const REPOSITORY = ['repo_url', 'repo_branch', 'repo_token_last4', 'repo_author_name', 'repo_author_email'];
 /* What of a turn the orchestrator may change, to close one that hangs. */

@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
-import { agentEvents, agents, departments, jobs, subscriptions } from '../src/db/schema.js';
+import { agentEvents, agents, departments, jobs, nodes, subscriptions } from '../src/db/schema.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { as, connectNode, listen, openStream, setUpCompany, testApp, until } from './helpers.js';
 
@@ -18,7 +18,7 @@ async function liveCompany() {
     payload: { code, machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' },
   });
   const { machine, nodes } = joined.json();
-  return { app, db, url, ceo, machineId: machine.id as string, subId: nodes[0].subscriptionId as string, key: nodes[0].key as string };
+  return { app, db, url, ceo, machineId: machine.id as string, subId: nodes[0].subscriptionId as string, nodeId: nodes[0].nodeId as string, key: nodes[0].key as string };
 }
 
 const subOf = async (app: FastifyInstance, ceo: string, id: string) =>
@@ -33,10 +33,10 @@ describe('node socket', () => {
   });
 
   it('follows the login state and shows the node online while connected', async () => {
-    const { app, db, url, ceo, subId, key } = await liveCompany();
+    const { app, db, url, ceo, subId, nodeId, key } = await liveCompany();
     const node = await connectNode(url, key);
     node.send(hello([], false));
-    await until(async () => (await db.select().from(subscriptions).where(eq(subscriptions.id, subId)))[0]!.nodeVersion === '0.2.0');
+    await until(async () => (await db.select().from(nodes).where(eq(nodes.id, nodeId)))[0]!.version === '0.2.0');
     expect(await subOf(app, ceo, subId)).toMatchObject({ status: 'needs_login', online: true });
     const limits = { status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0.4, resetsAt: null }] };
     node.send({ type: 'status', loggedIn: true, limits });
@@ -71,12 +71,12 @@ describe('node socket', () => {
   });
 
   it("keeps how full each of its agents' context is and tells the map, for its own agents only", async () => {
-    const { app, db, url, ceo, subId, key } = await liveCompany();
+    const { app, db, url, ceo, subId, nodeId, key } = await liveCompany();
     const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
     const [dept] = await db.insert(departments).values({ companyId: orchestrator!.companyId, templateKey: 'development', roleCode: 'DEV' }).returning();
     const [bruno] = await db
       .insert(agents)
-      .values({ companyId: orchestrator!.companyId, kind: 'worker', name: 'Bruno', roleKey: 'DEV-BE', departmentId: dept!.id, model: '', subscriptionId: subId })
+      .values({ companyId: orchestrator!.companyId, kind: 'worker', name: 'Bruno', roleKey: 'DEV-BE', departmentId: dept!.id, model: '', subscriptionId: subId, nodeId })
       .returning();
     const stream = await openStream(app, ceo);
     const node = await connectNode(url, key);
@@ -111,9 +111,9 @@ describe('node socket', () => {
   });
 
   it('fails jobs the node no longer knows after a restart', async () => {
-    const { db, url, subId, key } = await liveCompany();
+    const { db, url, subId, nodeId, key } = await liveCompany();
     const [company] = await db.select({ companyId: subscriptions.companyId }).from(subscriptions).where(eq(subscriptions.id, subId));
-    const [job] = await db.insert(jobs).values({ companyId: company!.companyId, subscriptionId: subId, prompt: 'x', status: 'running', timeoutMs: 1000 }).returning();
+    const [job] = await db.insert(jobs).values({ companyId: company!.companyId, subscriptionId: subId, nodeId, prompt: 'x', status: 'running', timeoutMs: 1000 }).returning();
     const node = await connectNode(url, key);
     node.send(hello([]));
     await until(async () => (await db.select().from(jobs).where(eq(jobs.id, job!.id)))[0]!.status === 'failed');
@@ -122,9 +122,9 @@ describe('node socket', () => {
   });
 
   it('confirms each finished job it hears of, again when the node sends it again, and takes only the first', async () => {
-    const { db, url, subId, key } = await liveCompany();
+    const { db, url, subId, nodeId, key } = await liveCompany();
     const [company] = await db.select({ companyId: subscriptions.companyId }).from(subscriptions).where(eq(subscriptions.id, subId));
-    const [job] = await db.insert(jobs).values({ companyId: company!.companyId, subscriptionId: subId, prompt: 'x', status: 'running', timeoutMs: 1000 }).returning();
+    const [job] = await db.insert(jobs).values({ companyId: company!.companyId, subscriptionId: subId, nodeId, prompt: 'x', status: 'running', timeoutMs: 1000 }).returning();
     const node = await connectNode(url, key);
     node.send(hello([job!.id]));
     const done = { type: 'job.done' as const, jobId: job!.id, ok: true, sessionId: 's', tail: '', error: null };
@@ -160,12 +160,12 @@ describe('node socket', () => {
   });
 
   it('closes the socket with 4001 when the machine is disconnected in Hornhoof', async () => {
-    const { app, db, url, ceo, machineId, subId, key } = await liveCompany();
+    const { app, db, url, ceo, machineId, subId, nodeId, key } = await liveCompany();
     const [company] = await db.select({ companyId: subscriptions.companyId }).from(subscriptions).where(eq(subscriptions.id, subId));
     const node = await connectNode(url, key);
     node.send(hello([]));
     await until(async () => (await subOf(app, ceo, subId)).status === 'ready');
-    const [job] = await db.insert(jobs).values({ companyId: company!.companyId, subscriptionId: subId, prompt: 'x', status: 'running', timeoutMs: 1000 }).returning();
+    const [job] = await db.insert(jobs).values({ companyId: company!.companyId, subscriptionId: subId, nodeId, prompt: 'x', status: 'running', timeoutMs: 1000 }).returning();
     await app.inject({ method: 'POST', url: `/api/machines/${machineId}/disconnect`, ...as(ceo) });
     expect(await node.closed).toBe(4001);
     expect((await db.select().from(jobs).where(eq(jobs.id, job!.id)))[0]).toMatchObject({ status: 'failed', error: 'machine_disconnected' });
@@ -173,15 +173,15 @@ describe('node socket', () => {
   });
 
   it("sends no agent's next turn to a machine while it is being disconnected", async () => {
-    const { app, db, url, ceo, machineId, subId, key } = await liveCompany();
+    const { app, db, url, ceo, machineId, subId, nodeId, key } = await liveCompany();
     const [company] = await db.select({ companyId: subscriptions.companyId }).from(subscriptions).where(eq(subscriptions.id, subId));
     const companyId = company!.companyId;
     const [dept] = await db.insert(departments).values({ companyId, templateKey: 'development', roleCode: 'DEV' }).returning();
-    const [bruno] = await db.insert(agents).values({ companyId, kind: 'worker', name: 'Bruno', roleKey: 'DEV-BE', departmentId: dept!.id, model: '', subscriptionId: subId }).returning();
+    const [bruno] = await db.insert(agents).values({ companyId, kind: 'worker', name: 'Bruno', roleKey: 'DEV-BE', departmentId: dept!.id, model: '', subscriptionId: subId, nodeId }).returning();
     const node = await connectNode(url, key);
     node.send({ ...hello([]), version: '0.5.0' });
     await until(async () => (await subOf(app, ceo, subId)).status === 'ready');
-    const turn = { companyId, subscriptionId: subId, agentId: bruno!.id, kind: 'conversation' as const, timeoutMs: 900000 };
+    const turn = { companyId, subscriptionId: subId, nodeId, agentId: bruno!.id, kind: 'conversation' as const, timeoutMs: 900000 };
     await db.insert(jobs).values({ ...turn, prompt: 'first', status: 'running', startedAt: new Date() });
     const [next] = await db.insert(jobs).values({ ...turn, prompt: 'second', status: 'queued' }).returning();
     await app.inject({ method: 'POST', url: `/api/machines/${machineId}/disconnect`, ...as(ceo) });
@@ -191,16 +191,17 @@ describe('node socket', () => {
   });
 
   it('lets a status that comes in after the disconnect leave the subscription waiting for a machine', async () => {
-    const { app, db, url, ceo, machineId, subId, key } = await liveCompany();
+    const { app, db, url, ceo, machineId, subId, nodeId, key } = await liveCompany();
     const node = await connectNode(url, key);
     node.send(hello([]));
     await until(async () => (await subOf(app, ceo, subId)).status === 'ready');
     await app.inject({ method: 'POST', url: `/api/machines/${machineId}/disconnect`, ...as(ceo) });
     await node.closed;
-    const late = { kind: 'node' as const, subscriptionId: subId };
+    const late = { kind: 'node' as const, nodeId };
     await handleNodeMessage(app.ctx, late, { type: 'status', loggedIn: true, limits: null });
     await handleNodeMessage(app.ctx, late, hello([]));
-    expect((await db.select().from(subscriptions).where(eq(subscriptions.id, subId)))[0]).toMatchObject({ status: 'waiting_machine', machineId: null });
+    expect((await db.select().from(subscriptions).where(eq(subscriptions.id, subId)))[0]).toMatchObject({ status: 'waiting_machine' });
+    expect((await db.select().from(nodes).where(eq(nodes.id, nodeId)))[0]).toMatchObject({ keyHash: null });
     const connected = await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude'] }, ...as(ceo) });
     const code = connected.json().command.split('--join ')[1];
     const joined = await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' } });
@@ -208,7 +209,7 @@ describe('node socket', () => {
   });
 
   it('tells an online node to clean up when its subscription is removed', async () => {
-    const { app, db, url, ceo, subId, key } = await liveCompany();
+    const { app, db, url, ceo, subId, nodeId, key } = await liveCompany();
     const node = await connectNode(url, key);
     node.send(hello([]));
     await until(async () => (await subOf(app, ceo, subId)).online === true);
@@ -216,7 +217,7 @@ describe('node socket', () => {
     expect(await node.next()).toEqual({ type: 'remove' });
     node.send({ type: 'removed' });
     await node.closed;
-    await until(async () => (await db.select().from(subscriptions).where(eq(subscriptions.id, subId)))[0]!.nodeKeyHash === null);
+    await until(async () => (await db.select().from(nodes).where(eq(nodes.id, nodeId)))[0]!.keyHash === null);
   });
 
   it('tells a removed subscription to clean up as soon as it says hello', async () => {

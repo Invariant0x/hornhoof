@@ -72,7 +72,7 @@ describe('database', () => {
     const [company] = await db.insert(companies).values({ name: 'Acme' }).returning();
     const [person] = await db.insert(people).values({ companyId: company!.id, name: 'Ivan', email: 'ivan@acme.com', status: 'active', scopeKind: 'company' }).returning();
     const [sub] = await db.insert(subscriptions).values({ companyId: company!.id, provider: 'glm', kind: 'personal', label: 'GLM', ownerPersonId: person!.id, status: 'waiting_machine' }).returning();
-    expect(sub).toMatchObject({ targetKind: null, targetId: null, machineId: null, limits: null, removedAt: null });
+    expect(sub).toMatchObject({ targetKind: null, targetId: null, limits: null, removedAt: null });
   });
 });
 

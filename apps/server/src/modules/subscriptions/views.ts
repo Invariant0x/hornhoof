@@ -1,9 +1,11 @@
 import type { Limits } from '@hornhoof/protocol';
 import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
-import { agents, departments, machines, people, personAccess, subscriptions, teams, type Provider, type SUBSCRIPTION_STATUSES } from '../../db/schema.js';
+import { agents, departments, people, personAccess, subscriptions, teams, type Provider, type SUBSCRIPTION_STATUSES } from '../../db/schema.js';
 import { WHOLE_COMPANY } from '../people/views.js';
 import { deptName } from '../departments/templates.js';
+import { BUILTIN, nodeIdentity, type NodeIdentity } from '../nodes/hub.js';
+import { planNodes } from '../nodes/nodes.js';
 
 /* listed: a personal plan whose owner has several departments; the name lists them. */
 export type Place = { kind: 'company' | 'department' | 'listed'; id: string | null; name: string };
@@ -24,9 +26,9 @@ export type SubView = {
   isOrchestrator: boolean;
 };
 
-export type IsOnline = (sub: { id: string; kind: 'personal' | 'api_key' }) => boolean;
+export type IsOnline = (node: NodeIdentity) => boolean;
 
-/* Never selects secret_enc or node_key_hash, so they cannot leak into a response. */
+/* Never selects secret_enc, so it cannot leak into a response. */
 const columns = {
   id: subscriptions.id,
   provider: subscriptions.provider,
@@ -41,8 +43,6 @@ const columns = {
   ownerId: people.id,
   ownerName: people.name,
   ownerScopeKind: people.scopeKind,
-  machineId: machines.id,
-  machineHost: machines.hostname,
 };
 
 const COMPANY: Place = { kind: 'company', id: null, name: WHOLE_COMPANY };
@@ -66,7 +66,6 @@ export async function subViews(db: Db, isOnline: IsOnline, id?: string): Promise
     .select(columns)
     .from(subscriptions)
     .innerJoin(people, eq(people.id, subscriptions.ownerPersonId))
-    .leftJoin(machines, eq(machines.id, subscriptions.machineId))
     .where(id ? and(live, eq(subscriptions.id, id)) : live)
     .orderBy(asc(subscriptions.createdAt));
   const deptRows = await db
@@ -83,21 +82,25 @@ export async function subViews(db: Db, isOnline: IsOnline, id?: string): Promise
     return deptRows.filter(d => mine.has(d.id)).map(d => d.id);
   };
   const [orchestrator] = await db.select({ subscriptionId: agents.subscriptionId }).from(agents).where(eq(agents.kind, 'orchestrator'));
-  return rows.map(r => ({
+  const allNodes = await planNodes(db, rows.filter(r => r.kind === 'personal').map(r => r.id));
+  return rows.map(r => {
+    const mine = allNodes.filter(n => n.subscriptionId === r.id);
+    return {
     id: r.id,
     provider: r.provider,
     kind: r.kind,
     label: r.label,
     status: r.status,
-    online: isOnline({ id: r.id, kind: r.kind }),
+    online: r.kind === 'api_key' ? isOnline(BUILTIN) : mine.some(n => isOnline(nodeIdentity(n.id))),
     last4: r.last4,
     owner: { id: r.ownerId, name: r.ownerName },
     place: r.kind === 'api_key' ? placeOf(r.targetKind, r.targetId, depts, teamDept) : r.ownerScopeKind === 'company' ? COMPANY : ownerPlace(ownerDepts(r.ownerId), depts),
-    machine: r.machineId ? { id: r.machineId, hostname: r.machineHost ?? '' } : null,
+    machine: mine[0] ? { id: mine[0].machineId, hostname: mine[0].hostname } : null,
     limits: r.limits ?? null,
     budget: r.budget,
     isOrchestrator: orchestrator?.subscriptionId === r.id,
-  }));
+    };
+  });
 }
 
 export async function subView(db: Db, isOnline: IsOnline, id: string): Promise<SubView | null> {
