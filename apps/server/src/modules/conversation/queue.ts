@@ -82,6 +82,8 @@ export function onAgent<T>(ctx: Ctx, agentId: string, fn: () => Promise<T>): Pro
 }
 
 const conversationOf = (agentId: string) => and(eq(jobs.agentId, agentId), eq(jobs.kind, 'conversation'));
+/* Only a node's empty start opens the program while the plan's real turns wait. */
+const programStart = and(eq(jobs.prompt, ''), isNull(jobs.taskId), isNull(jobs.createdBy));
 
 export async function liveSubscription(ctx: Ctx, agentId: string) {
   const [row] = await ctx.db.select({ sub: subscriptions }).from(agents).innerJoin(subscriptions, eq(subscriptions.id, agents.subscriptionId)).where(eq(agents.id, agentId));
@@ -194,7 +196,7 @@ export async function startProgram(ctx: Ctx, node: NodeIdentity, agentId: string
     const sub = agent ? await liveSubscription(ctx, agent.id) : null;
     if (!agent || !sub || !sameNode(identityOf(sub), node)) return false;
     /* Task turns of an agent that is switched off wait for it to be on and start nothing. */
-    const waiting = and(eq(jobs.status, 'queued'), agent.switchedOffAt ? isNull(jobs.taskId) : undefined);
+    const waiting = and(eq(jobs.status, 'queued'), limitUntil(sub.limits) ? programStart : agent.switchedOffAt ? isNull(jobs.taskId) : undefined);
     const [open] = await db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), or(eq(jobs.status, 'running'), waiting))).limit(1);
     if (open) return false;
     await insertTurn(ctx, { companyId: agent.companyId, agentId, prompt: '', createdBy: null });
@@ -237,16 +239,16 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   if (running) return;
   const sub = await liveSubscription(ctx, agentId);
   if (!sub || sub.status !== 'ready' || outdated(sub) || !hub.isReady(identityOf(sub))) return;
-  /* A turn sent now would end at once: it waits until the limit starts over. */
+  /* Real turns wait for the limit; an empty start can still open the saved program. */
   const until = limitUntil(sub.limits);
-  if (until) return pumpAt(ctx, agentId, until);
+  if (until) pumpAt(ctx, agentId, until);
   const [agent] = await db.select().from(agents).where(eq(agents.id, agentId));
   if (!agent) return;
   /* Switched off, it still answers people who write to it; its task turns wait until it is on. */
   const [job] = await db
     .select()
     .from(jobs)
-    .where(and(conversationOf(agentId), eq(jobs.status, 'queued'), agent.switchedOffAt ? isNull(jobs.taskId) : undefined))
+    .where(and(conversationOf(agentId), eq(jobs.status, 'queued'), until ? programStart : undefined, agent.switchedOffAt ? isNull(jobs.taskId) : undefined))
     .orderBy(asc(jobs.createdAt))
     .limit(1);
   if (!job) return;
