@@ -3,10 +3,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentEvent, ServerMessage } from '@hornhoof/protocol';
 import { describe, expect, it } from 'vitest';
+import { ownFs } from '../src/agent-fs.js';
 import { runJob, type ProviderAdapter, type RunInput, type RunResult } from '../src/runner.js';
 import { readSessions } from '../src/state.js';
 
 const SECRET = 'oauth-token-0123456789abcdef';
+const me = { uid: process.getuid!(), gid: process.getgid!() };
 
 function fakeAdapter(run: (input: RunInput) => Promise<RunResult>): ProviderAdapter & { inputs: RunInput[] } {
   const inputs: RunInput[] = [];
@@ -133,6 +135,29 @@ describe('runJob', () => {
     await runJob(adapter, job({ workspace: { key: 'agent-1', repo: null } }), dir);
     expect(made).toEqual([join(dir, 'work', 'agents', 'agent-1')]);
     expect(existsSync(join(dir, 'work'))).toBe(false);
+  });
+
+  it("writes the agent's skills where its program finds them before the program starts, through the agents' own file work", async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
+    const skill = { name: 'dev-tdd', description: 'Test first.', body: '# Test first\n\nWrite the test first.' };
+    const seen: boolean[] = [];
+    const adapter = fakeAdapter(async input => {
+      seen.push(existsSync(join(input.workDir, '.agents', 'skills', 'dev-tdd', 'SKILL.md')));
+      return ok();
+    });
+    const written: string[] = [];
+    const fs = { ...ownFs, write: async (path: string, data: string) => void (written.push(path), await ownFs.write(path, data)) };
+    const owned = { ...adapter, owner: { user: me, home: dir, prepare: () => {}, fs } };
+    await runJob(owned, job({ provider: 'kimi', workspace: { key: 'agent-1', repo: null }, skills: [skill] }), dir, { superpowers: null });
+    expect(seen).toEqual([true]);
+    expect(written).toContain(join(dir, 'work', 'agents', 'agent-1', '.agents', 'skills', 'dev-tdd', 'SKILL.md'));
+    /* Without file work of its own, the owner's user does it through a helper for the job. */
+    await runJob({ ...adapter, owner: { user: me, home: dir, prepare: () => {} } }, job({ provider: 'claude', workspace: { key: 'agent-2', repo: null }, skills: [skill] }), dir, { superpowers: null });
+    expect(seen).toEqual([true, false]);
+    expect(existsSync(join(dir, 'work', 'agents', 'agent-2', '.claude', 'skills', 'dev-tdd', 'SKILL.md'))).toBe(true);
+    /* A job that brings none, such as a test of the subscription, leaves the folder as it is. */
+    await runJob(adapter, job({ provider: 'kimi' }), dir, { superpowers: null });
+    expect(existsSync(join(dir, 'work', 'job-1', '.agents'))).toBe(false);
   });
 
   it('turns a work folder it cannot make into agent_failed', async () => {

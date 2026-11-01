@@ -1,9 +1,11 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { cut, lastBytes, type AgentEvent, type JobError, type Limits, type ModelOption, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
+import { agentFs, ownFs, type AgentFs } from './agent-fs.js';
 import type { JobUser } from './isolation.js';
 import { redact } from './redact.js';
 import { plainOutput, programEnded, type ProgramOutput } from './program-exit.js';
+import { placeSkills, superpowersIn } from './skills.js';
 import { readSessions, rememberSession } from './state.js';
 import { prepareRepo, type Git } from './workspace.js';
 
@@ -51,8 +53,9 @@ export interface ProviderAdapter {
   limits?(): Promise<Limits | null>;
   /* On the built-in node, the user a key's program runs as and its home: the folder is handed to that user first,
      and the node's own git work in it runs as that user too. */
-  /* mkdir: how a node that runs as root makes an agent's folders as the agents' own user. */
-  owner?: { user: JobUser | null; home: string; prepare(path: string): void; mkdir?(path: string): Promise<void> };
+  /* mkdir: how a node that runs as root makes an agent's folders as the agents' own user; fs: its other file work there.
+     Without fs, a job of such a user does it through a helper of that user for the job. */
+  owner?: { user: JobUser | null; home: string; prepare(path: string): void; mkdir?(path: string): Promise<void>; fs?: AgentFs };
 }
 
 type JobRun = Extract<ServerMessage, { type: 'job.run' }>;
@@ -108,6 +111,8 @@ type RunOptions = {
   git?: Git;
   /* The turn runs in a live program that people watch: only its own end or a stop ends it, never a time limit. */
   untimed?: boolean;
+  /* The superpowers copy whose skills a program without its plugin gets; the image's by default. */
+  superpowers?: string | null;
 };
 
 /* An event as people may see it: no secrets, and within the sizes the protocol allows. */
@@ -126,7 +131,7 @@ export function tidy(event: AgentEvent, secrets: string[]): AgentEvent {
 }
 
 /* Always ends with a job.done, whatever breaks on the way. */
-export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string, { hidden = [], signal, toolsUrl, onEvent, git, untimed = false }: RunOptions = {}): Promise<JobDone> {
+export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string, { hidden = [], signal, toolsUrl, onEvent, git, untimed = false, superpowers = superpowersIn() }: RunOptions = {}): Promise<JobDone> {
   /* Programs refresh their tokens during a run, so the values from before, during and after are all hidden. */
   const before = await adapter.secrets().catch(() => []);
   const repo = msg.workspace?.repo ?? null;
@@ -149,6 +154,14 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
     if (adapter.owner?.mkdir) await adapter.owner.mkdir(workDir);
     else mkdirSync(workDir, { recursive: true });
     adapter.owner?.prepare(workDir);
+    if (msg.skills) {
+      const own = adapter.owner?.fs ?? (adapter.owner?.user ? agentFs(adapter.owner.user) : ownFs);
+      try {
+        await placeSkills(own, workDir, msg.provider, msg.skills, superpowers);
+      } finally {
+        if (own !== adapter.owner?.fs) own.stop();
+      }
+    }
     const repoEnv = repo ? await prepareRepo(workDir, repo, { user: adapter.owner?.user ?? null, home: adapter.owner?.home ?? null }, git) : undefined;
     /* hh-attach sends the turn's pictures with its token. The name has no KEY, SECRET or TOKEN in it, so Codex passes it on. */
     const attachEnv = tools ? { HH_ATTACH_URL: tools.url.replace(/\/mcp$/, '/api/attachments'), HH_ATTACH_PASS: tools.token } : undefined;

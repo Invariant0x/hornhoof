@@ -319,7 +319,7 @@ const message = (err: unknown) => (err instanceof Error ? err.message : String(e
 function personal(dir: string, provider: ProviderId, user: JobUser | null = null, fs: AgentFs = ownFs): ProviderAdapter {
   const home = join(dir, 'home');
   const adapter = adapterFor(provider, { home, tools: join(dir, 'tools'), user });
-  return user ? { ...adapter, owner: { user, home, prepare: () => {}, mkdir: path => fs.mkdir(path) } } : adapter;
+  return user ? { ...adapter, owner: { user, home, prepare: () => {}, mkdir: path => fs.mkdir(path), fs } } : adapter;
 }
 
 /* Each program is installed the first time something needs it. A failed install is tried again next time. */
