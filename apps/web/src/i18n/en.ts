@@ -307,6 +307,7 @@ export const en = {
       not_logged_in: 'The orchestrator\'s subscription is signed out on its machine. Sign in again, then write once more.',
       agent_failed: 'The orchestrator stopped with an error.',
       machine_restarted: 'The machine restarted during this turn. Write again.',
+      instructions_too_long: 'The instructions are longer than one turn can carry. Shorten the role or a skill on the card.',
       machine_disconnected: 'The machine was disconnected during this turn.',
       subscription_removed: 'The subscription was removed during this turn.',
       other: 'This turn failed.',

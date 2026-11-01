@@ -2,7 +2,7 @@ import { and, asc, count, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, ma
 import type { Ctx } from '../../app.js';
 import { loggable } from '../../errors.js';
 import { agentChanges, agentEvents, agents, jobs, requests, subscriptions, taskEvents, tasks, testRuns } from '../../db/schema.js';
-import { agentState, conversationOf, GONE_ALONG, insertTurn, limitUntil, liveSubscription, onAgent, openTypedTurn, orchestratorOf, pump, refusedLimits } from '../conversation/queue.js';
+import { agentState, conversationOf, GONE_ALONG, insertTurn, limitUntil, liveSubscription, onAgent, openTypedTurn, orchestratorOf, pump, refusedLimits, TOO_LONG } from '../conversation/queue.js';
 import { sayLive } from '../conversation/live.js';
 import { quote } from '../conversation/prompt.js';
 import { appendEvent, publishWorking } from '../events/store.js';
@@ -469,10 +469,13 @@ async function checkHeld(ctx: Ctx, job: typeof jobs.$inferSelect & { agentId: st
     .from(taskEvents)
     .where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.agentId, agentId), gte(taskEvents.createdAt, job.startedAt), eq(taskEvents.kind, 'comment')));
   const working = job.status === 'failed' || Number(told?.n ?? 0) > 0;
-  /* Turns that keep breaking as they start would only break again: whoever gave the task out hears of it, once. */
-  const broke = crashed(job) && (await crashesInRow(ctx, agentId, task)) >= QUICK_CRASHES;
-  const [me] = broke ? await db.select({ name: agents.name }).from(agents).where(eq(agents.id, agentId)) : [];
-  const step = broke ? () => brokeDown(ctx, agentId, task, crashNote({ ...job, agentName: me?.name ?? 'the agent' }, task)) : () => (working ? wentOn : silentTurn)(ctx, agentId, task);
+  /* Turns that keep breaking as they start would only break again: whoever gave the task out hears of it, once. So does a
+     turn that did not go out for the length of its instructions, at once, as every next one would not either. */
+  const unsent = job.error === TOO_LONG;
+  const broke = unsent || (crashed(job) && (await crashesInRow(ctx, agentId, task)) >= QUICK_CRASHES);
+  const [me] = broke && !unsent ? await db.select({ name: agents.name }).from(agents).where(eq(agents.id, agentId)) : [];
+  const note = () => (unsent ? (job.result ?? TOO_LONG) : crashNote({ ...job, agentName: me?.name ?? 'the agent' }, task));
+  const step = broke ? () => brokeDown(ctx, agentId, task, note()) : () => (working ? wentOn : silentTurn)(ctx, agentId, task);
   const moved = await step().catch((err: { reason?: string }) => {
     /* Someone moved the task meanwhile: that answers the question. */
     if (err.reason === 'task_changed') return null;

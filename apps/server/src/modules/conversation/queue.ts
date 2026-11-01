@@ -1,4 +1,4 @@
-import { effortFor, effortsOf, modelsFor, type Limits } from '@hornhoof/protocol';
+import { effortFor, effortsOf, MAX_INSTRUCTIONS, modelsFor, type Limits } from '@hornhoof/protocol';
 import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, lte, ne, or } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -324,6 +324,28 @@ async function heldBack(ctx: Ctx, job: { id: string; agentId: string | null; tas
   return true;
 }
 
+/* Why a turn ended unsent: its instructions are longer than a machine takes. */
+export const TOO_LONG = 'instructions_too_long';
+
+/* Instructions saved before the header around them grew can be longer than a machine takes, and a machine drops such a
+   turn unseen. The turn ends at once instead, saying why on the agent's card and its task. It ends after this send is
+   over, as its end sends the agent's next turn. */
+async function tooLong(ctx: Ctx, job: { id: string; companyId: string }, name: string, length: number): Promise<void> {
+  const at = new Date();
+  const result = `${name}'s instructions are ${length} characters, more than the ${MAX_INSTRUCTIONS} a turn carries, so this turn did not go out. Shorten its role or a skill on its card.`;
+  const [ended] = await ctx.db
+    .update(jobs)
+    .set({ status: 'failed', error: TOO_LONG, result, startedAt: at, finishedAt: at })
+    .where(and(eq(jobs.id, job.id), eq(jobs.status, 'queued')))
+    .returning({ id: jobs.id });
+  if (!ended) return;
+  await publishWorking(ctx, job.companyId);
+  /* tasks/wake imports this module, so its afterJob comes in here. */
+  void import('../tasks/wake.js')
+    .then(({ afterJob }) => afterJob(ctx, job.id))
+    .catch(err => ctx.log.error({ error: loggable(err) }, 'A turn that did not go out could not end.'));
+}
+
 async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   const { db, hub } = ctx;
   const [running] = await db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
@@ -356,6 +378,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   /* A node from before skill files gets every skill in the instructions. */
   const files = hub.takesSkillFiles(identityOf(sub));
   const instructions = await instructionsOf(ctx, agent, files);
+  if (instructions.text.length > MAX_INSTRUCTIONS) return tooLong(ctx, job, agent.name, instructions.text.length);
   /* The program's flag only for a model this subscription can run; anything else runs on its Default. */
   const models = modelsFor(sub.provider, sub.models);
   const model = agent.model && models.some(m => m.id === agent.model) ? agent.model : null;

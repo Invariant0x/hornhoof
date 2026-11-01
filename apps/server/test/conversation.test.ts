@@ -1,3 +1,4 @@
+import { MAX_INSTRUCTIONS } from '@hornhoof/protocol';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, vi } from 'vitest';
@@ -477,6 +478,20 @@ describe("an employee's conversation", () => {
       )[0]!;
     return { ...company, dev: dev!, sales: sales!, hire, bruno: await hire('Bruno', dev!.id) };
   }
+
+  it('ends a turn whose instructions are longer than a machine takes at once, saying so, and sends nothing', async () => {
+    const { app, db, ceo, builtin, bruno } = await withEmployee();
+    /* Saved before its header grew: Hornhoof refuses such an edit now. */
+    await db.update(agents).set({ overrides: { base: 'x'.repeat(MAX_INSTRUCTIONS) } }).where(eq(agents.id, bruno.id));
+    expect((await sayTo(app, ceo, bruno.id, 'What do you own?')).statusCode).toBe(202);
+    const log = async () => (await app.inject({ url: `/api/agents/${bruno.id}/events`, ...as(ceo) })).json().events as { kind: string; data: object }[];
+    await until(async () => (await log()).some(e => e.kind === 'failed'));
+    expect((await log()).at(-1)).toMatchObject({ kind: 'failed', data: { error: 'instructions_too_long' } });
+    const [job] = await db.select().from(jobs).where(eq(jobs.agentId, bruno.id));
+    expect(job).toMatchObject({ status: 'failed', error: 'instructions_too_long' });
+    expect(job!.result).toMatch(/^Bruno's instructions are \d+ characters, more than the 20000 a turn carries/);
+    expect(await quiet(builtin)).toBe(0);
+  });
 
   it('talks to an employee with its rendered instructions', async () => {
     const { app, db, ceo, builtin, bruno } = await withEmployee();

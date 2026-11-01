@@ -86,6 +86,11 @@ describe('AgentWindow', () => {
     expect(screen.getByText('Stopped')).toBeInTheDocument();
   });
 
+  it('says plainly when a turn did not go out because the instructions are too long', async () => {
+    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [ev(1, 'failed', { error: 'instructions_too_long' })], state: READY }] });
+    expect(await screen.findByText('The instructions are longer than one turn can carry. Shorten the role or a skill on the card.')).toBeInTheDocument();
+  });
+
   it("names Hornhoof for the turns it starts on a task", async () => {
     const { container } = open({ [`GET ${EVENTS}?after=0`]: [200, { events: [ev(1, 'message', { text: '#4 "Payments" is yours.', task: { id: 't4', number: 4 } })], state: READY }] });
     await screen.findByText(/Payments/);
