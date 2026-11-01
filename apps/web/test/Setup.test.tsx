@@ -41,14 +41,15 @@ describe('Setup', () => {
     expect(screen.getByRole('heading', { name: 'Create your account' })).toBeInTheDocument();
   });
 
-  it('offers the company templates with their schemes and starts empty by default', async () => {
+  it('offers the company templates and starts empty by default', async () => {
     render(<Setup onDone={() => {}} />);
     expect(screen.getByRole('radio', { name: /Start empty/ })).toBeChecked();
-    /* The eight ready-made companies, each with a mini department scheme. */
+    /* The eight ready-made companies, named by the template, not by the scheme picture. */
     expect(screen.getAllByRole('radio', { name: /Project team|Startup|Studio with products|Full company|Cybersecurity company|Open-source project|Agency|Research lab|Home/ })).toHaveLength(9);
-    /* Every card carries a scheme, Start empty included, so the cards line up. */
-    expect(screen.getAllByRole('img', { name: 'Department scheme' })).toHaveLength(10);
-    expect(screen.getByText('27 employees')).toBeInTheDocument();
+    /* The scheme is a picture only, so a screen reader reads the template name and the "Departments:" line, not "Department scheme". */
+    expect(screen.queryByRole('img')).toBeNull();
+    expect(screen.getByRole('radio', { name: /Full company/ })).toHaveAccessibleName(expect.stringContaining('Departments: Operations, Development'));
+    for (const radio of screen.getAllByRole('radio')) expect(radio).toHaveAccessibleName(expect.not.stringContaining('Department scheme'));
   });
 
   it('sends the chosen company template with the company', async () => {

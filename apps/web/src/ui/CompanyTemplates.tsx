@@ -48,7 +48,7 @@ function nameLines(name: string): string[] {
 /* The department scheme the way the map looks: a company node at the top, a box per department wrapped into rows joined
    by a trunk and a bus per row, and a smaller box for each of a department's products under it. Lines are drawn first so
    they sit behind the boxes. Empty for "Start empty", so the cards still line up. */
-function Scheme({ template, label, t }: { template?: CompanyTemplate; label: string; t: Messages }) {
+function Scheme({ template, t }: { template?: CompanyTemplate; t: Messages }) {
   const rootX = W / 2;
   const lines: ReactNode[] = [];
   const nodes: ReactNode[] = [<circle key="root" cx={rootX} cy={ROOT_Y} r={4} className="scheme-root" />];
@@ -101,7 +101,7 @@ function Scheme({ template, label, t }: { template?: CompanyTemplate; label: str
     y += BOX_H + (rowHasProducts ? PROD_V + PROD_H : 0) + ROW_GAP;
   }
   return (
-    <svg className="scheme" viewBox={`0 0 ${W} ${CANVAS_H}`} role="img" aria-label={label} preserveAspectRatio="xMidYMin meet">
+    <svg className="scheme" viewBox={`0 0 ${W} ${CANVAS_H}`} aria-hidden="true" preserveAspectRatio="xMidYMin meet">
       {lines}
       {nodes}
     </svg>
@@ -119,7 +119,7 @@ export function CompanyTemplates({ value, onPick }: { value: Pick; onPick: (valu
       <div className="template-cards">
         <label className={`template-card${value === 'empty' ? ' on' : ''}`}>
           <input type="radio" name="company-template" checked={value === 'empty'} onChange={() => onPick('empty')} />
-          <Scheme label={text.scheme} t={t} />
+          <Scheme t={t} />
           <span className="template-body">
             <b>{text.empty.name}</b>
             <small>{text.empty.description}</small>
@@ -128,7 +128,7 @@ export function CompanyTemplates({ value, onPick }: { value: Pick; onPick: (valu
         {COMPANY_TEMPLATES.map(template => (
           <label key={template.key} className={`template-card${value === template.key ? ' on' : ''}`}>
             <input type="radio" name="company-template" checked={value === template.key} onChange={() => onPick(template.key)} />
-            <Scheme template={template} label={text.scheme} t={t} />
+            <Scheme template={template} t={t} />
             <span className="template-body">
               <b>{text[template.key].name}</b>
               <small>{text[template.key].description}</small>
