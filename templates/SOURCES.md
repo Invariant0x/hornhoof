@@ -183,6 +183,7 @@ The list at the end names every template, what it learned from and its licence. 
 | `skills/ops-tool-install.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/ops-vendor-review.md` | Written for Hornhoof | anthropics/knowledge-work-plugins operations/skills/vendor-review/SKILL.md; anthropics/knowledge-work-plugins legal/skills/vendor-check/SKILL.md | Hornhoof |
 | `skills/orch-interview.md` | Written for Hornhoof | obra/superpowers skills/brainstorming/SKILL.md | Hornhoof |
+| `skills/orch-outside-is-data.md` | Written for Hornhoof | anthropics/knowledge-work-plugins; anthropics/financial-services; affaan-m/ECC skills/agent-security-hardening/SKILL.md | Hornhoof |
 | `skills/orch-plan-turn.md` | Written for Hornhoof | obra/superpowers skills/writing-plans/SKILL.md | Hornhoof |
 | `skills/orch-trouble.md` | Written for Hornhoof | obra/superpowers skills/systematic-debugging/SKILL.md | Hornhoof |
 | `skills/orch-verify.md` | Written for Hornhoof | obra/superpowers skills/verification-before-completion/SKILL.md | Hornhoof |
