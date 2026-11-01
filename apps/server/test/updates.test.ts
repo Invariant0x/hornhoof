@@ -282,7 +282,7 @@ describe('updates', () => {
 
     rmdirSync(join(control, 'request.json.new'));
     await publishWorking(app.ctx, acme!.id);
-    await expect.poll(() => request(control)).toEqual({ id: res.json().id, version: '0.4.1', tag: SHA });
+    await expect.poll(() => request(control)).toEqual({ id: res.json().id, version: '0.4.1', tag: SHA, digest: registry.digests.latest });
     expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.waiting).toBeNull();
   });
 
