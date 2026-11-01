@@ -26,7 +26,7 @@ function nextStep(task: Task, agentId: string): { finish: string; stuck: string 
 }
 
 /* Wakes whose text an employee wrote: the reasons of a gate, a report, a block, a cancellation. */
-const EMPLOYEES_SAY: WakeWhy[] = ['changes', 'reported', 'blocked', 'cancelled'];
+const EMPLOYEES_SAY: WakeWhy[] = ['changes', 'reported', 'blocked', 'cancelled', 'review'];
 
 /* The turn's prompt: which task, why the agent wakes, and what is expected of it, then what else it should know. Always
    English, like the agents' instructions. */
@@ -49,8 +49,13 @@ function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string {
       if (agent.kind === 'orchestrator') return `${ref} is yours. ${read} Lay the work out as tasks for the departments with add_tasks or plan_turn, and report it when every part is done.`;
       return `${ref} is your department's. ${read} Split it into member tasks with create_task, each with its executor and gates, and report it when they are done.`;
     case 'review': {
-      const together = task.panel.length > 1 ? ' Others of your role check it at the same time; give your own verdict.' : '';
-      return `${ref} is at your gate. ${read} Check the work yourself, then give your verdict with your reasons: pass it, or send it back with what to change.${together}`;
+      /* Its text is what this reviewer sent the work back for in the last round. */
+      if (w.text) return `${ref} came back to your gate. You sent it back for${said}Check only the fixes for your own findings, then give your verdict: pass it, or send it back if one of them is still not fixed.`;
+      const together = task.panel.length > 1 ? ' Reviewers of other models check the same work at once; give your own verdict.' : '';
+      return (
+        `${ref} is at your gate. ${read} Check the work yourself, then give your verdict: pass it, with notes for what does not block, or send it back only for blocking findings ` +
+        `(a failing test, an unmet requirement, a security hole, data loss), all of them at once with file and line.${together}`
+      );
     }
     case 'changes':
       return `${ref} came back to you with changes requested${said}Make them, then submit it again.`;

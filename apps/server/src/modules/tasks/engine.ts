@@ -335,9 +335,10 @@ export async function submit(ctx: Live, agentId: string, taskId: string, r: { su
   await refuseOpenUnder(ctx.db, task);
   const n: Note = { kind: 'submitted', actor: { agentId }, text: r.summary, data: { evidence: r.evidence, ...(task.merging ? { merged: true } : {}) } };
   const unstuck = stuckGoes(ctx, task);
-  /* Its gates passed it already: handing the merge in finishes it. */
+  /* Its gates passed it already: handing the merge in finishes it. Work sent back goes straight to the gate that sent it. */
   if (task.gates.length && !task.merging) {
-    const gate = await atGate(ctx.db, task, 1);
+    const back = await sentBack(ctx.db, task);
+    const gate = await atGate(ctx.db, task, back?.stage ?? 1, back?.findings);
     const row = await move(ctx, task, gate.set, n, unstuck.also, gate.wakes);
     unstuck.tell();
     return { task: row, wakes: gate.wakes };
@@ -348,25 +349,68 @@ export async function submit(ctx: Live, agentId: string, taskId: string, r: { su
   return { task: row, wakes };
 }
 
-/* Everyone who checks the work at a gate: each live employee of the named reviewer's role in its department, for the
-   task's product or for none, that is on, the named one first, never the executor. A reviewer without a role checks
-   alone. idle: the names of those among them without a subscription to run on. */
-async function panelFor(db: Db | Tx, task: Task, stage: number): Promise<{ panel: string[]; idle: string[] }> {
+/* An API key runs the models of the maker whose plans it stands beside. */
+const MAKER: Partial<Record<string, string>> = { anthropic_api: 'claude', openai_api: 'codex' };
+
+/* Who checks the work at a gate. Reviewers of different models find different things, so one of each maker's models
+   checks the same work at once: among the live employees of the gate's role in its department that are on, for the
+   task's product or for none, never the executor, the one with the fewest tasks at a gate, the oldest on a tie. The
+   reviewer the gate names is one of them like any other. A reviewer without a role checks alone. again: those who sent
+   the work back from this gate, who check the fixes alone while any of them is still there. idle: the names of those
+   without a subscription to run on. */
+async function panelFor(db: Db | Tx, task: Task, stage: number, again: string[] = []): Promise<{ panel: string[]; idle: string[] }> {
   const named = task.gates[stage - 1];
   if (!named) return { panel: [], idle: [] };
   const [lead] = await db.select().from(agents).where(eq(agents.id, named));
   if (!lead || lead.removedAt) return { panel: [], idle: [] };
   const same = lead.roleKey && lead.departmentId ? and(eq(agents.departmentId, lead.departmentId), eq(agents.roleKey, lead.roleKey)) : eq(agents.id, lead.id);
   const rows = await db
-    .select({ id: agents.id, name: agents.name, productId: agents.productId, sub: subscriptions.id })
+    .select({ id: agents.id, name: agents.name, productId: agents.productId, sub: subscriptions.id, provider: subscriptions.provider })
     .from(agents)
     .leftJoin(subscriptions, and(eq(subscriptions.id, agents.subscriptionId), isNull(subscriptions.removedAt)))
     .where(and(same, isNull(agents.removedAt), isNull(agents.switchedOffAt)))
     .orderBy(asc(agents.createdAt));
   const product = task.productId ?? lead.productId;
   const fit = rows.filter(a => a.id !== task.executorAgentId && (!a.productId || a.productId === product));
-  const ids = fit.filter(a => a.sub).map(a => a.id);
-  return { panel: [...ids.filter(id => id === named), ...ids.filter(id => id !== named)], idle: fit.filter(a => !a.sub).map(a => a.name) };
+  const idle = fit.filter(a => !a.sub).map(a => a.name);
+  const able = fit.filter(a => a.sub);
+  const back = able.filter(a => again.includes(a.id));
+  if (back.length) return { panel: back.map(a => a.id), idle };
+  const checking = able.length
+    ? await db
+        .select({ panel: tasks.panel })
+        .from(tasks)
+        .where(and(eq(tasks.companyId, task.companyId), inArray(tasks.status, ['review', 'waiting']), ne(tasks.id, task.id)))
+    : [];
+  const busy = (id: string) => checking.filter(t => t.panel.includes(id)).length;
+  const picked = new Map<string, string>();
+  for (const a of able) {
+    const maker = MAKER[a.provider!] ?? a.provider!;
+    const best = picked.get(maker);
+    if (best === undefined || busy(a.id) < busy(best)) picked.set(maker, a.id);
+  }
+  const chosen = new Set(picked.values());
+  return { panel: able.filter(a => chosen.has(a.id)).map(a => a.id), idle };
+}
+
+/* Where the work was sent back from in the last round, with the findings of each reviewer who sent it back. Nothing once
+   the task's gates were given again since: it starts at the first of them. */
+async function sentBack(db: Db, task: Task): Promise<{ stage: number; findings: Map<string, string> } | null> {
+  if (!task.bounces) return null;
+  const failed = await db
+    .select({ id: taskEvents.id, agentId: taskEvents.agentId, text: taskEvents.text, data: taskEvents.data })
+    .from(taskEvents)
+    .where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'verdict'), sql`${taskEvents.data}->>'round' = ${String(task.bounces - 1)}`, sql`${taskEvents.data}->>'pass' = 'false'`))
+    .orderBy(asc(taskEvents.id));
+  const last = failed[failed.length - 1];
+  if (!last) return null;
+  const [regated] = await db
+    .select({ id: taskEvents.id })
+    .from(taskEvents)
+    .where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'updated'), gt(taskEvents.id, last.id), sql`${taskEvents.data}->'fields' @> '["gates"]'::jsonb`))
+    .limit(1);
+  if (regated) return null;
+  return { stage: Number(last.data.stage), findings: new Map(failed.map(f => [f.agentId!, f.text])) };
 }
 
 /* Whether anyone of the role behind a gate is switched on. A reviewer without a role stands for itself. */
@@ -379,17 +423,22 @@ async function roleOn(db: Db | Tx, named: string): Promise<boolean> {
 }
 
 /* The task reaches a gate: its whole panel checks it at once. A gate whose role has nobody switched on takes no part,
-   so the task goes on to the next one, and past the last it is done. While anyone of the role who is on cannot check it,
-   it waits with whoever gave it out, as the gate passes only when all of them pass. */
-async function atGate(db: Db | Tx, task: Task, from: number): Promise<{ set: Partial<Task>; wakes: Wake[] }> {
+   so the task goes on to the next one, and past the last it is done. While nobody of the role who is on can check it, it
+   waits with whoever gave it out. findings: what each reviewer sent the work back from this gate for, in the last round;
+   those reviewers check their own fixes. */
+async function atGate(db: Db | Tx, task: Task, from: number, findings = new Map<string, string>()): Promise<{ set: Partial<Task>; wakes: Wake[] }> {
   let stage = from;
   while (task.gates[stage - 1] && !(await roleOn(db, task.gates[stage - 1]!))) stage++;
   if (!task.gates[stage - 1]) {
     const passed = await passedGates(db, task, doneFor(task));
     return { set: { stage: task.gates.length, ...passed.set }, wakes: passed.wakes };
   }
-  const { panel, idle } = await panelFor(db, task, stage);
-  if (panel.length && !idle.length) return { set: { status: 'review', stage, panel, silent: 0, assigneeAgentId: panel[0]! }, wakes: panel.map(agentId => ({ agentId, taskId: task.id, why: 'review' as const })) };
+  const again = stage === from ? [...findings.keys()] : [];
+  const { panel, idle } = await panelFor(db, task, stage, again);
+  if (panel.length) {
+    const wakes = panel.map(agentId => ({ agentId, taskId: task.id, why: 'review' as const, ...(again.includes(agentId) ? { text: findings.get(agentId)! } : {}) }));
+    return { set: { status: 'review', stage, panel, silent: 0, assigneeAgentId: panel[0]! }, wakes };
+  }
   const [lead] = await db.select({ name: agents.name, roleKey: agents.roleKey }).from(agents).where(eq(agents.id, task.gates[stage - 1]!));
   const who = lead?.roleKey ?? lead?.name ?? 'its reviewer';
   const text = idle.length

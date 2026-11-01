@@ -15,7 +15,8 @@ import { as, connectNode, listen, setUpCompany, testApp, until, type FakeNode } 
 
 const NODE_KEY = 'k'.repeat(40);
 
-/* A company on the built-in node with Development: Hana at its head, Bruno and Bea on the backend, Rita and Rex reviewing. */
+/* A company on the built-in node with Development: Hana at its head, Bruno and Bea on the backend, Rita and Rex reviewing,
+   Rex on a Codex plan of the CEO's. */
 async function company() {
   const { app, db } = await testApp({ NODE_KEY });
   const url = await listen(app);
@@ -34,7 +35,9 @@ async function company() {
   const bruno = await hire('Bruno', 'worker', 'DEV-BE');
   const bea = await hire('Bea', 'worker', 'DEV-BE');
   const rita = await hire('Rita', 'worker', 'DEV-REV');
-  const rex = await hire('Rex', 'worker', 'DEV-REV');
+  const [ceoPerson] = await db.select().from(people);
+  const [codex] = await db.insert(subscriptions).values({ companyId, provider: 'codex', kind: 'personal', label: 'Codex', ownerPersonId: ceoPerson!.id, status: 'ready' }).returning();
+  const rex = (await db.insert(agents).values({ companyId, kind: 'worker', name: 'Rex', roleKey: 'DEV-REV', departmentId: dev!.id, model: '', subscriptionId: codex!.id }).returning())[0]!;
   const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
   const ctx = app.ctx;
   const patch = (id: string, payload: object) => app.inject({ method: 'PATCH', url: `/api/agents/${id}`, payload, ...as(ceo) });
@@ -51,7 +54,7 @@ async function company() {
   const off = (...ids: string[]) => Promise.all(ids.map(id => db.update(agents).set({ switchedOffAt: new Date() }).where(eq(agents.id, id))));
   /* On, but without a subscription to check anything with. */
   const unable = (...ids: string[]) => Promise.all(ids.map(id => db.update(agents).set({ subscriptionId: null }).where(eq(agents.id, id))));
-  return { app, db, ctx, ceo, builtin, companyId, sub: sub!, dev: dev!, orchestrator: orchestrator!, hana, bruno, bea, rita, rex, patch, memberTask, jobsOf, tools, off, unable };
+  return { app, db, ctx, ceo, builtin, companyId, sub: sub!, codex: codex!, dev: dev!, orchestrator: orchestrator!, hana, bruno, bea, rita, rex, hire, patch, memberTask, jobsOf, tools, off, unable };
 }
 
 async function mcp(app: FastifyInstance, token: string): Promise<Client> {
@@ -194,6 +197,62 @@ describe('reviewers of one role checking the same work', () => {
     expect(last.task.status).toBe('done');
     expect(last.wakes.map(w => [w.agentId, w.why])).toEqual([[hana.id, 'done']]);
     expect((await db.select().from(tasks).where(eq(tasks.id, task.id)))[0]!.panel).toEqual([]);
+  });
+
+  it('asks one reviewer of each provider, the least busy of each and the oldest on a tie, whoever the gate names', async () => {
+    const { ctx, bruno, bea, rita, rex, hire, memberTask } = await company();
+    const rose = await hire('Rose', 'worker', 'DEV-REV');
+    const first = await memberTask(bruno.id, [rose.id]);
+    expect((await submit(ctx, bruno.id, first.id, done)).task.panel).toEqual([rita.id, rex.id]);
+    const second = await memberTask(bea.id);
+    const sent = await submit(ctx, bea.id, second.id, done);
+    expect(sent.task.panel).toEqual([rex.id, rose.id]);
+    expect(sent.wakes.map(w => [w.agentId, w.why])).toEqual([
+      [rex.id, 'review'],
+      [rose.id, 'review'],
+    ]);
+  });
+
+  it('asks one reviewer when everyone of the role who is on runs on one provider', async () => {
+    const { ctx, bruno, rita, rex, hire, off, memberTask } = await company();
+    await hire('Rose', 'worker', 'DEV-REV');
+    await off(rex.id);
+    const task = await memberTask();
+    expect((await submit(ctx, bruno.id, task.id, done)).task).toMatchObject({ panel: [rita.id], assigneeAgentId: rita.id });
+  });
+
+  it('asks only the reviewers who sent it back in the next round, each to check the fixes for its own findings', async () => {
+    const { ctx, db, bruno, rita, rex, memberTask } = await company();
+    const task = await memberTask();
+    await submit(ctx, bruno.id, task.id, done);
+    await verdict(ctx, rita.id, task.id, { pass: true, comment: 'Fine by me.' });
+    await verdict(ctx, rex.id, task.id, { pass: false, comment: 'The total ignores tax.' });
+    const again = await submit(ctx, bruno.id, task.id, { summary: 'Tax added.', evidence: 'npm test: 13 passed' });
+    expect(again.task).toMatchObject({ status: 'review', stage: 1, panel: [rex.id], assigneeAgentId: rex.id });
+    expect(again.wakes.map(w => [w.agentId, w.why])).toEqual([[rex.id, 'review']]);
+    const [me] = await db.select().from(agents).where(eq(agents.id, rex.id));
+    const prompt = wakePrompt(me!, again.task, again.wakes[0]!);
+    expect(prompt).toContain('The total ignores tax.');
+    expect(prompt).toContain('Check only the fixes for your own findings');
+    expect((await verdict(ctx, rex.id, task.id, { pass: true, comment: 'Tax is in.' })).task.status).toBe('done');
+  });
+
+  it('goes back to the gate that sent it back, past the gates it passed, and to a fresh reviewer there when those are off', async () => {
+    const { ctx, db, bruno, rita, rex, off, memberTask, companyId, dev, sub } = await company();
+    const [sam] = await db.insert(agents).values({ companyId, kind: 'worker', name: 'Sam', roleKey: 'DEV-SEC', departmentId: dev.id, model: '', subscriptionId: sub.id }).returning();
+    const task = await memberTask(bruno.id, [rita.id, sam!.id]);
+    await submit(ctx, bruno.id, task.id, done);
+    await verdict(ctx, rita.id, task.id, { pass: true, comment: 'Fine.' });
+    await verdict(ctx, rex.id, task.id, { pass: true, comment: 'Fine.' });
+    await verdict(ctx, sam!.id, task.id, { pass: false, comment: 'The token is logged.' });
+    expect((await submit(ctx, bruno.id, task.id, done)).task).toMatchObject({ status: 'review', stage: 2, panel: [sam!.id] });
+    await verdict(ctx, sam!.id, task.id, { pass: true, comment: 'Gone.' });
+    const other = await memberTask(bruno.id, [rita.id]);
+    await submit(ctx, bruno.id, other.id, done);
+    await verdict(ctx, rita.id, other.id, { pass: true, comment: 'Fine.' });
+    await verdict(ctx, rex.id, other.id, { pass: false, comment: 'No test.' });
+    await off(rex.id);
+    expect((await submit(ctx, bruno.id, other.id, done)).task).toMatchObject({ stage: 1, panel: [rita.id] });
   });
 
   it('leaves reviewers that are off out of the gate', async () => {
@@ -508,7 +567,7 @@ describe('work an agent held when it was switched off', () => {
     });
   };
 
-  it('starts every waiting gate when its reviewer who cannot check is switched off while someone moves one of them', async () => {
+  it('starts every waiting gate when a reviewer who can check is switched on while someone moves one of them', async () => {
     const { ctx, db, bruno, bea, rita, rex, off, unable, patch, memberTask } = await company();
     const one = await memberTask(bruno.id);
     const two = await memberTask(bea.id);
@@ -516,9 +575,8 @@ describe('work an agent held when it was switched off', () => {
     await unable(rita.id);
     await submit(ctx, bruno.id, one.id, done);
     await submit(ctx, bea.id, two.id, done);
-    await patch(rex.id, { on: true });
     meddle(ctx, db, [one.id, two.id]);
-    await patch(rita.id, { on: false });
+    await patch(rex.id, { on: true });
     for (const t of [one, two]) {
       expect(await row(db, t.id)).toMatchObject({ panel: [rex.id], assigneeAgentId: rex.id });
       expect((await db.select().from(jobs).where(and(eq(jobs.agentId, rex.id), eq(jobs.taskId, t.id)))).length).toBe(1);
@@ -548,16 +606,15 @@ describe('work an agent held when it was switched off', () => {
     expect((await row(db, two.id)).panel).toContain(rita.id);
   });
 
-  it('starts the gate again once everyone of its role who is on can check it', async () => {
+  it('starts the gate again once one of its role who is on can check it', async () => {
     const { ctx, db, bruno, rita, rex, hana, off, unable, patch, memberTask } = await company();
     const task = await memberTask();
     await off(rex.id);
     await unable(rita.id);
     await submit(ctx, bruno.id, task.id, done);
-    await patch(rex.id, { on: true });
-    /* Rita is on but cannot check it, so the gate still waits with the head. */
     expect(await row(db, task.id)).toMatchObject({ status: 'review', stage: 1, panel: [], assigneeAgentId: hana.id });
-    await patch(rita.id, { on: false });
+    /* Rita is on but cannot check it; Rex can, so he checks it alone. */
+    await patch(rex.id, { on: true });
     expect(await row(db, task.id)).toMatchObject({ status: 'review', stage: 1, panel: [rex.id], assigneeAgentId: rex.id });
     expect((await db.select().from(jobs).where(and(eq(jobs.agentId, rex.id), eq(jobs.taskId, task.id)))).length).toBe(1);
   });

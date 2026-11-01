@@ -204,13 +204,13 @@ describe('the task engine', () => {
     expect(await reason(made)).toBe('task_invalid');
   });
 
-  it('holds a gate with the head while someone on of its role has no subscription to check it', async () => {
-    const { ctx, db, dev, head, bruno, rita, memberTask } = await company();
+  it('checks a gate with whoever of its role can, leaving out one that is on without a subscription', async () => {
+    const { ctx, db, dev, bruno, rita, memberTask } = await company();
     await db.insert(agents).values({ companyId: dev.companyId, kind: 'worker', name: 'Rex', roleKey: 'DEV-REV', departmentId: dev.id, model: '', subscriptionId: null });
     const task = await memberTask([rita.id]);
     const sent = await submit(ctx, bruno.id, task.id, { summary: 'Done.', evidence: 'npm test: 12 passed' });
-    expect(sent.task).toMatchObject({ status: 'review', stage: 1, panel: [], assigneeAgentId: head.id });
-    expect(sent.wakes).toEqual([{ agentId: head.id, taskId: task.id, why: 'switched', text: expect.stringContaining('Rex has no subscription') }]);
+    expect(sent.task).toMatchObject({ status: 'review', stage: 1, panel: [rita.id], assigneeAgentId: rita.id });
+    expect(sent.wakes).toEqual([{ agentId: rita.id, taskId: task.id, why: 'review' }]);
   });
 
   it('declines a commit: the request closes, the task goes on and the agent hears why', async () => {
