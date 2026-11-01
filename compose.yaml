@@ -8,6 +8,8 @@ services:
     ports:
       - "${HORNHOOF_PORT:-8080}:8080"
     environment:
+      # install.sh puts a random database password into .env; a server set up before that keeps the one its database
+      # was made with.
       DATABASE_URL: postgres://hornhoof:${POSTGRES_PASSWORD:-hornhoof}@db:5432/hornhoof
       HORNHOOF_SECRET: ${HORNHOOF_SECRET:?Set HORNHOOF_SECRET in .env}
       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8080}

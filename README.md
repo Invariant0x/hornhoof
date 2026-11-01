@@ -15,12 +15,13 @@ git clone https://github.com/Invariant0x/hornhoof.git
 cd hornhoof
 echo "HORNHOOF_SECRET=$(openssl rand -base64 32)" > .env
 echo "NODE_KEY=$(openssl rand -base64 32)" >> .env
+echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)" >> .env
 docker compose up -d --build
 ```
 
 Open http://localhost:8080 and follow the setup: name your company, create your account and connect the orchestrator's subscription.
 
-Keep `.env` safe. `HORNHOOF_SECRET` encrypts the API keys stored in the database, and without it they cannot be read back. `NODE_KEY` lets the built-in node, which runs the company's API keys, connect to Hornhoof.
+Keep `.env` safe. `HORNHOOF_SECRET` encrypts the API keys stored in the database, and without it they cannot be read back. `NODE_KEY` lets the built-in node, which runs the company's API keys, connect to Hornhoof. `POSTGRES_PASSWORD` becomes the database's password when the database is first made, so keep it as it is afterwards.
 
 If people will open Hornhoof from other machines, add `PUBLIC_URL=https://your.domain` to `.env`. Invite links and the node command use it, and sign-in cookies are marked secure when it starts with `https://`. Hornhoof itself serves plain HTTP, so put something that handles TLS in front of it, like Caddy, nginx or a Cloudflare tunnel. Without TLS the browser drops the secure cookie and you stay on the login screen.
 

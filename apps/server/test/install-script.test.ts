@@ -276,6 +276,8 @@ describe('install.sh', () => {
     expect(env).toMatch(/^HORNHOOF_SECRET=[A-Za-z0-9+/=]{44}$/m);
     expect(env).toMatch(/^NODE_KEY=[A-Za-z0-9+/=]{44}$/m);
     expect(env).toContain('PUBLIC_URL=https://hornhoof.my.test');
+    /* It goes into the database address, so it keeps to characters an address takes as they are. */
+    expect(env).toMatch(/^POSTGRES_PASSWORD=[0-9a-f]{48}$/m);
     expect(existsSync(join(r.dir, 'home', 'hornhoof', 'compose.yaml'))).toBe(true);
     expect(r.calls).toContain('docker compose pull');
     expect(r.calls).toContain('docker compose up -d --no-build');
@@ -290,6 +292,10 @@ describe('install.sh', () => {
     const env = readFileSync(join(dir, '.env'), 'utf8');
     expect(env).toContain('HORNHOOF_SECRET=keep-me');
     expect(env).toMatch(/^NODE_KEY=.{44}$/m);
+    /* Its database was made with the password compose gives when .env names none. */
+    expect(env).not.toContain('POSTGRES_PASSWORD');
+    const compose = readFileSync(fileURLToPath(new URL('../../../compose.yaml', import.meta.url)), 'utf8');
+    expect(compose.match(/\$\{POSTGRES_PASSWORD:-hornhoof\}/g)).toHaveLength(2);
   });
 
   it('replaces an existing .env whole and leaves it readable by its owner only', () => {

@@ -462,6 +462,9 @@ uninstall_mode() {
 
 new_secret() { head -c 32 /dev/urandom | base64 | tr -d '\n'; }
 
+# The database password goes into the database address, so it is hex.
+new_password() { od -An -N24 -tx1 /dev/urandom | tr -d ' \n'; }
+
 # The port a server's .env keeps; one from before servers kept a port has the first one.
 port_of() {
   local port
@@ -572,6 +575,7 @@ server_mode() {
   if [ -n "$FROM_UPDATER" ] && [ ! -f "$env_file" ]; then fail "There is no $env_file to update."; fi
   if [ -f "$env_file" ]; then
     say "Keeping the settings in $env_file."
+    # A .env without POSTGRES_PASSWORD keeps the password compose gives, the one its database was made with.
     if ! grep -q '^NODE_KEY=' "$env_file"; then
       set_env NODE_KEY "$(new_secret)"
       say "Added NODE_KEY to $env_file."
@@ -585,7 +589,7 @@ server_mode() {
     esac
     (
       umask 077
-      printf 'HORNHOOF_SECRET=%s\nNODE_KEY=%s\nPUBLIC_URL=%s\nHORNHOOF_PORT=%s\n' "$(new_secret)" "$(new_secret)" "${url%/}" "$port" > "$env_file.new"
+      printf 'HORNHOOF_SECRET=%s\nNODE_KEY=%s\nPOSTGRES_PASSWORD=%s\nPUBLIC_URL=%s\nHORNHOOF_PORT=%s\n' "$(new_secret)" "$(new_secret)" "$(new_password)" "${url%/}" "$port" > "$env_file.new"
     )
     mv "$env_file.new" "$env_file"
     say "Wrote fresh secrets to $env_file. Keep it safe: HORNHOOF_SECRET is needed to read the stored API keys."
