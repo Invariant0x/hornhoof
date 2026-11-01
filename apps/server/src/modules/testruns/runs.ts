@@ -221,10 +221,10 @@ async function giveOut(ctx: Ctx): Promise<void> {
     const open = places.get(run.companyId)!;
     const need = needOf(run, found.department) * GIB;
     const spots = open.map(p => ({ key: p.key, lent: p.lent, reaches: mayTake(p, run, found.department), busy: p.busy, load: p.load }));
-    /* A part that ran again goes to another machine than the ones that lost it, while there is one that may take it. */
+    /* A part that ran again goes to another machine than the ones that lost it when one of them fits it now, else to
+       any that does. */
     const lostOn = new Set(part.lost.map(l => l.key));
-    const others = spots.filter(s => !lostOn.has(s.key));
-    const spot = pickMachine(others.some(s => s.lent && s.reaches) ? others : spots, need);
+    const spot = pickMachine(spots.filter(s => !lostOn.has(s.key)), need) ?? pickMachine(spots, need);
     const place = spot && open.find(p => p.key === spot.key);
     if (!place) continue;
     place.busy = true;

@@ -263,6 +263,19 @@ describe('a test run', () => {
     expect(await c.wokeWith(c.bruno.id)).toMatch(/Test run 1 was stopped by Hana/);
   });
 
+  it('runs a lost part again on the machine that lost it when no other machine could ever fit it', async () => {
+    const c = await company();
+    const ivan = await c.machine(c.ceo, 'ivan-mac');
+    await c.machine(c.ann, 'ann-pc', idle({ memFree: 1 * GIB, memTotal: 1 * GIB }));
+    const { call } = await c.turn(c.bruno);
+    await call('run_tests', { command: 'make test' });
+    const lost = await nextOf(ivan.node, 'tests.run');
+    ivan.node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], load: idle(), tests: [] });
+    const again = await nextOf(ivan.node, 'tests.run');
+    expect(again).toMatchObject({ part: 1, command: 'make test' });
+    expect(again.partId).not.toBe(lost.partId);
+  });
+
   it('runs a part its machine lost in a restart again on another machine, under a new id, and says so', async () => {
     const c = await company();
     const ivan = await c.machine(c.ceo, 'ivan-mac', idle({ load: 6 }));
