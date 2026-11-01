@@ -891,6 +891,14 @@ describe('helpers', () => {
     expect(env.EXTRA).toBe('1');
   });
 
+  it("keeps the node's own NODE_ENV from the child env, so npm ci and tests in a repository run as on a laptop", () => {
+    const own = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    onTestFinished(() => void (process.env.NODE_ENV = own));
+    expect(childEnv(tools, {})).not.toHaveProperty('NODE_ENV');
+    expect(childEnv(tools, { NODE_ENV: 'development' }).NODE_ENV).toBe('development');
+  });
+
   it('finds the last link behind colors and terminal hyperlinks', () => {
     expect(lastUrl('\x1b[1mfirst https://a.example.test/x\x1b[0m then \x1b]8;;https://b.example.test/y\x1b\\here\x1b]8;;\x1b\\')).toBe('https://b.example.test/y');
     expect(lastUrl('no link')).toBeNull();
