@@ -184,6 +184,16 @@ describe('a test run', () => {
     expect((await nextOf(ivan.node, 'tests.run')).command).toBe('make test');
   });
 
+  it('gives no new part to a loaded machine, and gives it one once its load drops', async () => {
+    const c = await company();
+    const ivan = await c.machine(c.ceo, 'ivan-mac', idle({ load: 7.6 }));
+    const { call } = await c.turn(c.bruno);
+    expect((await call('run_tests', { command: 'make test' })).text).toMatch(/waits for a free machine/);
+    expect(await gets(ivan.node, 'tests.run')).toBe(false);
+    ivan.node.send({ type: 'load', ...idle({ load: 2 }) });
+    expect((await nextOf(ivan.node, 'tests.run')).command).toBe('make test');
+  });
+
   it('leaves out a machine its owner took back, and one whose owner does not reach the repository', async () => {
     const c = await company();
     const ivan = await c.machine(c.ceo, 'ivan-mac', idle({ load: 7 }));

@@ -7,13 +7,18 @@ export type Spot = { key: string; lent: boolean; reaches: boolean; busy: boolean
 
 /* Two machines whose free shares differ by less than this count as equally free, and the one running fewer jobs wins. */
 export const ABOUT_AS_FREE = 0.1;
+/* A machine whose processors are busy this share of the time or more is loaded: it gets no new part. */
+export const LOADED = 0.9;
+
+/* Whether a machine's processors are too busy to take another part. */
+export const loaded = (load: NodeLoad) => load.load / load.cpus >= LOADED;
 
 /* The share of its processors a machine has free, and of its memory, together: 2 for one that does nothing. */
 export const freedom = (load: NodeLoad) => Math.max(0, 1 - load.load / load.cpus) + (load.memTotal ? load.memFree / load.memTotal : 0);
 
-/* The freest machine that may take a run needing this much free memory, or none. */
+/* The freest machine that may take a run needing this much free memory, or none. A loaded one takes none. */
 export function pickMachine(spots: Spot[], needBytes: number): Spot | null {
-  const fits = spots.filter(s => s.lent && s.reaches && !s.busy && s.load !== null && s.load.memFree >= needBytes);
+  const fits = spots.filter(s => s.lent && s.reaches && !s.busy && s.load !== null && !loaded(s.load) && s.load.memFree >= needBytes);
   const better = (a: Spot, b: Spot) => {
     const [x, y] = [freedom(a.load!), freedom(b.load!)];
     if (Math.abs(x - y) >= ABOUT_AS_FREE) return x > y;

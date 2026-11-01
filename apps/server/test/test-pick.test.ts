@@ -41,6 +41,12 @@ describe('picking a machine for a test run', () => {
       spot('small', {}, { load: 0, memFree: 3 * GIB }),
     ];
     expect(pickMachine(left, NEED)).toBeNull();
-    expect(pickMachine([...left, spot('fits', {}, { load: 7.5, memFree: 4 * GIB })], NEED)?.key).toBe('fits');
+    expect(pickMachine([...left, spot('fits', {}, { load: 7, memFree: 4 * GIB })], NEED)?.key).toBe('fits');
+  });
+
+  it('gives nothing new to a loaded machine, whose processors are busy nine tenths of the time or more', () => {
+    expect(pickMachine([spot('loaded', {}, { load: 7.2 })], NEED)).toBeNull();
+    expect(pickMachine([spot('big', {}, { cpus: 64, load: 60 })], NEED)).toBeNull();
+    expect(pickMachine([spot('loaded', {}, { load: 7.2 }), spot('busy', {}, { load: 7 })], NEED)?.key).toBe('busy');
   });
 });
