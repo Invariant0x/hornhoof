@@ -126,6 +126,31 @@ describe('sessions', () => {
     const res = await app.inject({ method: 'POST', url: '/api/setup', payload: SETUP });
     expect(res.cookies.find(c => c.name === 'hh_session')?.secure).toBeFalsy();
   });
+
+  it('send an https-only cookie to whoever came over https through the tunnel, and believe that only from the tunnel', async () => {
+    const { app } = await testApp({ TUNNEL_HOST: '192.0.2.10' });
+    await setUpCompany(app);
+    const signIn = async (remoteAddress: string, headers: Record<string, string> = {}) => {
+      const res = await app.inject({ ...login('ivan@acme.com', SETUP.password), remoteAddress, headers });
+      expect(res.statusCode).toBe(200);
+      return Boolean(res.cookies.find(c => c.name === 'hh_session')!.secure);
+    };
+    expect(await signIn('192.0.2.10', { 'x-forwarded-proto': 'https' })).toBe(true);
+    expect(await signIn('::ffff:192.0.2.10', { 'x-forwarded-proto': 'https' })).toBe(true);
+    expect(await signIn('192.0.2.10', { 'x-forwarded-proto': 'http' })).toBe(false);
+    expect(await signIn('192.0.2.10')).toBe(false);
+    /* Anyone else can write the header, so it is not believed from them, and plain http to localhost keeps working. */
+    expect(await signIn('192.0.2.11', { 'x-forwarded-proto': 'https' })).toBe(false);
+    expect(await signIn('127.0.0.1', { 'x-forwarded-proto': 'https' })).toBe(false);
+    expect(await signIn('127.0.0.1')).toBe(false);
+  });
+
+  it('believe nobody about https while there is no tunnel', async () => {
+    const { app } = await testApp();
+    await setUpCompany(app);
+    const res = await app.inject({ ...login('ivan@acme.com', SETUP.password), headers: { 'x-forwarded-proto': 'https' } });
+    expect(res.cookies.find(c => c.name === 'hh_session')?.secure).toBeFalsy();
+  });
 });
 
 describe('GET /api/me', () => {

@@ -6,6 +6,7 @@ import { people, sessions, type ScopeKind } from '../db/schema.js';
 import { hashToken, newToken } from '../crypto/tokens.js';
 import { ApiError } from '../errors.js';
 import { internalCall } from './internal.js';
+import { cameOverHttps } from './tunnel.js';
 
 export const SESSION_COOKIE = 'hh_session';
 const SESSION_DAYS = 30;
@@ -36,7 +37,8 @@ export type Person = {
 
 /* Every sign-in also clears out everyone's expired sessions, so the table does not grow forever. A session starts only
    for the password the caller just checked or set, with the person's row locked until it is in: a reset or a disable
-   running at the same time either comes first and is seen here, or waits and then deletes the new session. */
+   running at the same time either comes first and is seen here, or waits and then deletes the new session. The cookie
+   goes only over https when Hornhoof's address is https, or when the person came over https through the tunnel. */
 export async function startSession(reply: FastifyReply, db: Db, config: Config, personId: string, passwordHash: string): Promise<boolean> {
   await db.delete(sessions).where(lte(sessions.expiresAt, new Date()));
   const token = newToken();
@@ -56,7 +58,7 @@ export async function startSession(reply: FastifyReply, db: Db, config: Config, 
     httpOnly: true,
     sameSite: 'lax',
     path: '/',
-    secure: config.secureCookies,
+    secure: config.secureCookies || (await cameOverHttps(reply.request, config)),
     expires: expiresAt,
   });
   return true;
