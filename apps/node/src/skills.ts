@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import type { ProviderId, SkillFile } from '@hornhoof/protocol';
 import type { AgentFs } from './agent-fs.js';
@@ -36,14 +36,18 @@ function versionOf(superpowers: string): string {
 
 /* The exclude file of the repository the agent's folder is part of, the nearest .git above it as programs find a
    project's root, where the folder is in it, and the git folder of its checkout. A worktree's .git is a file that names
-   its git folder, and that one the common folder whose excludes git reads for every worktree. */
-function repoOf(workDir: string): { exclude: string; at: string; gitDir: string } | null {
+   its git folder, and that one the common folder whose excludes git reads for every worktree. All of it is read as the
+   agent's user, as the agent may have left links there; a .git file that names no git folder is no repository. */
+async function repoOf(fs: AgentFs, workDir: string): Promise<{ exclude: string; at: string; gitDir: string } | null> {
   for (let dir = workDir; ; dir = dirname(dir)) {
     const dotGit = join(dir, '.git');
-    if (existsSync(dotGit)) {
-      const gitDir = statSync(dotGit).isDirectory() ? dotGit : resolve(dir, /^gitdir: (.+)$/m.exec(readFileSync(dotGit, 'utf8'))?.[1] ?? '.git');
-      const common = existsSync(join(gitDir, 'commondir')) ? resolve(gitDir, readFileSync(join(gitDir, 'commondir'), 'utf8').trim()) : gitDir;
-      return { exclude: join(common, 'info', 'exclude'), at: relative(dir, workDir).split(sep).join('/'), gitDir };
+    const kind = await fs.kind(dotGit);
+    if (kind) {
+      const named = kind === 'file' ? /^gitdir: (.+)$/m.exec((await fs.read(dotGit).catch(() => null)) ?? '')?.[1] : dotGit;
+      if (!named) return null;
+      const gitDir = resolve(dir, named);
+      const common = await fs.read(join(gitDir, 'commondir')).catch(() => null);
+      return { exclude: join(common ? resolve(gitDir, common.trim()) : gitDir, 'info', 'exclude'), at: relative(dir, workDir).split(sep).join('/'), gitDir };
     }
     if (dirname(dir) === dir) return null;
   }
@@ -70,7 +74,7 @@ function inTurn<T>(path: string, fn: () => Promise<T>): Promise<T> {
 /* Names what the node writes in the agent's folder in its repository's excludes, one block for each folder of each
    checkout, so git add in that repository takes none of it in; an agent's own files there stay seen. */
 async function exclude(fs: AgentFs, workDir: string, paths: string[]): Promise<void> {
-  const repo = repoOf(workDir);
+  const repo = await repoOf(fs, workDir);
   if (!repo) return;
   const head = `# Hornhoof's skill files in /${repo.at} of the checkout ${repo.gitDir}`;
   await inTurn(repo.exclude, async () => {

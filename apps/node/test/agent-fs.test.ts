@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -62,6 +62,23 @@ describe.each([
     await fs.remove(join(root, 'tdd'));
     expect(existsSync(join(root, 'tdd'))).toBe(false);
     expect(readFileSync(join(root, 'node', 'node.json'), 'utf8')).toBe('key');
+  });
+
+  it("says whether there is a file or a folder at a path, as the agents' user sees it", async () => {
+    fs = make();
+    const root = mkdtempSync(join(tmpdir(), 'hh-afs-'));
+    mkdirSync(join(root, 'repo', '.git'), { recursive: true });
+    writeFileSync(join(root, 'tree.git'), 'gitdir: x\n');
+    symlinkSync(join(root, 'repo', '.git'), join(root, 'linked'));
+    mkdirSync(join(root, 'locked'));
+    chmodSync(join(root, 'locked'), 0o000);
+    expect(await fs.kind(join(root, 'repo', '.git'))).toBe('dir');
+    expect(await fs.kind(join(root, 'tree.git'))).toBe('file');
+    expect(await fs.kind(join(root, 'linked'))).toBe('dir');
+    expect(await fs.kind(join(root, 'missing'))).toBeNull();
+    expect(await fs.kind(join(root, 'tree.git', 'inside'))).toBeNull();
+    expect(await fs.kind(join(root, 'locked', '.git'))).toBeNull();
+    chmodSync(join(root, 'locked'), 0o755);
   });
 
   it('says why a write failed', async () => {

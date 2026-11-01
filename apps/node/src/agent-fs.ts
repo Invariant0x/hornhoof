@@ -1,5 +1,5 @@
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
-import { cpSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import type { Readable, Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
@@ -10,6 +10,8 @@ export type AgentFs = {
   mkdir(path: string): Promise<void>;
   /* The file's text, or null when there is none. */
   read(path: string): Promise<string | null>;
+  /* What is at the path as the agents' user sees it, links followed: a file, a folder, or nothing it can reach. */
+  kind(path: string): Promise<'file' | 'dir' | null>;
   /* Replaces the file whole, readable by the agents' user only. */
   write(path: string, data: string): Promise<void>;
   /* Takes away a file or a folder whole; a link goes, not what it points at. */
@@ -32,6 +34,13 @@ export const ownFs: AgentFs = {
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
       throw err;
+    }
+  },
+  async kind(path) {
+    try {
+      return statSync(path).isDirectory() ? 'dir' : 'file';
+    } catch {
+      return null;
     }
   },
   async write(path, data) {
@@ -97,6 +106,10 @@ export function agentFs(user: JobUser): AgentFs {
     read: async path => {
       const data = await ask('read', path);
       return typeof data === 'string' ? data : null;
+    },
+    kind: async path => {
+      const data = await ask('kind', path);
+      return data === 'file' || data === 'dir' ? data : null;
     },
     write: async (path, data) => void (await ask('write', path, { data })),
     remove: async path => void (await ask('remove', path)),

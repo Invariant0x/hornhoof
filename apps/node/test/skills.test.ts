@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { ownFs } from '../src/agent-fs.js';
+import { ownFs, type AgentFs } from '../src/agent-fs.js';
 import { placeSkills, skillsFolder } from '../src/skills.js';
 
 const TDD = { name: 'dev-tdd', description: 'Test-driven development. Writes the test: then the code.', body: '# Test-driven development\n\nWrite the test first.' };
@@ -112,6 +112,21 @@ describe('skills as files', () => {
     git(dir, 'worktree', 'add', '-q', tree);
     await placeSkills(ownFs, tree, 'claude', [TDD], null);
     expect(added(tree)).toEqual([]);
+  });
+
+  it("finds the repository as the agent's user sees it, never reading the agent's folder itself", async () => {
+    const dir = work();
+    /* What the agent's user sees: a .git file naming a git folder elsewhere, which the node itself cannot see. */
+    const seen: Record<string, string> = { [join(dir, '.git')]: 'gitdir: /elsewhere/.git/worktrees/w\n', '/elsewhere/.git/worktrees/w/commondir': '../..\n' };
+    const fs: AgentFs = {
+      ...ownFs,
+      kind: async path => (path in seen ? 'file' : null),
+      read: async path => seen[path] ?? (path.startsWith('/elsewhere') ? null : ownFs.read(path)),
+      write: async (path, data) => void (path.startsWith('/elsewhere') ? (seen[path] = data) : await ownFs.write(path, data)),
+      mkdir: async path => (path.startsWith('/elsewhere') ? undefined : ownFs.mkdir(path)),
+    };
+    await placeSkills(fs, dir, 'codex', [TDD], null);
+    expect(seen['/elsewhere/.git/info/exclude']).toContain('\n/.agents/skills/dev-tdd/\n');
   });
 
   it('keeps the block of each worktree of a repository, as they share its excludes', async () => {

@@ -1,6 +1,6 @@
 /* File work in agents' folders for a node that runs as root, done as the agents' own user: the node never follows a link
    an agent left there into its own files. One request per line on stdin, one answer per line on stdout. */
-const { cpSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } = require('node:fs');
+const { cpSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } = require('node:fs');
 const { createInterface } = require('node:readline');
 
 const OPS = {
@@ -11,6 +11,14 @@ const OPS = {
     } catch (err) {
       if (err && err.code === 'ENOENT') return null;
       throw err;
+    }
+  },
+  /* What is at the path as this user sees it, links followed: a file, a folder, or nothing it can reach. */
+  kind: ({ path }) => {
+    try {
+      return statSync(path).isDirectory() ? 'dir' : 'file';
+    } catch {
+      return null;
     }
   },
   /* Written whole and moved into place, so a program reading it at the same moment sees the old file or the new one. */
