@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ownFs, type AgentFs } from '../src/agent-fs.js';
-import { FAKE, SECRET, hasTmux, host, home, setUp, job } from './terminal-host-helpers.js';
+import { FAKE, SECRET, hasTmux, host, tmux, home, setUp, job } from './terminal-host-helpers.js';
 
 describe.skipIf(!hasTmux)('agents in live terminals', () => {
   afterEach(async () => host?.stop());
@@ -66,6 +66,21 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     const third = await host.run(job('a2', 'three', { sessionId: first.sessionId }));
     expect(third).toMatchObject({ ok: true, result: 'echo: three' });
     expect(await host.screen('a2')).toContain(`fake claude resumed ${first.sessionId}`);
+  });
+
+  it('takes the next turn at once when the program ended the last one before its Enter came back, as on a busy machine', async () => {
+    await setUp();
+    const keys = tmux.keys.bind(tmux);
+    /* tmux answers late: the program takes the prompt and ends its turn before the key is back. */
+    tmux.keys = async (name, ...pressed) => {
+      await keys(name, ...pressed);
+      if (pressed.includes('Enter')) await new Promise(r => setTimeout(r, 500));
+    };
+    const first = await host.run(job('a17', 'one'));
+    expect(first).toMatchObject({ ok: true, result: 'echo: one' });
+    const next = host.run(job('a17', 'two', { sessionId: first.sessionId }));
+    const late = new Promise(r => setTimeout(() => r('still waiting'), 5000));
+    expect(await Promise.race([next, late])).toMatchObject({ ok: true, result: 'echo: two' });
   });
 
   it('starts the program again in the same session when the agent was set to think harder', async () => {

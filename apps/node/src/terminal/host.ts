@@ -332,7 +332,9 @@ export class TerminalHost {
       await this.opts.tmux.paste(a.name, input.prompt);
       await sleep(Math.min(3000, 300 + input.prompt.length / 20));
       await this.opts.tmux.keys(a.name, 'Enter');
-      a.busy = true;
+      /* On a busy machine the program can take the prompt, and even end its turn, before the key is back: it then said so
+         itself, and its turn's end must not be taken back. */
+      if (!a.took) a.busy = true;
       /* A program that just started, or that still loads a long session it resumed, can miss the Enter and keep the prompt
          in its input: Enter again until it takes it. An Enter into an empty input does nothing. One that never takes it
          ends the turn with its screen, which says why, rather than leave the turn waiting for nothing. */
