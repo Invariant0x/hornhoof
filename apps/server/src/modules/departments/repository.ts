@@ -6,14 +6,19 @@ import { departments } from '../../db/schema.js';
 
 type Repo = NonNullable<Workspace['repo']>;
 
-/* The repository an agent works in: its product's, else its department's, else none. The token comes decrypted, for the node alone. */
-export async function repoFor(ctx: Pick<Ctx, 'db' | 'config'>, agent: { productId: string | null; departmentId: string | null }): Promise<Repo | null> {
-  for (const id of [agent.productId, agent.departmentId]) {
+/* The first of these departments and products that has a repository, with it. The token comes decrypted, for the node alone. */
+export async function repoAt(ctx: Pick<Ctx, 'db' | 'config'>, ids: (string | null)[]): Promise<{ department: typeof departments.$inferSelect; repo: Repo } | null> {
+  for (const id of ids) {
     if (!id) continue;
     const [d] = await ctx.db.select().from(departments).where(eq(departments.id, id));
-    if (d?.repoUrl) return { url: d.repoUrl, branch: d.repoBranch ?? 'main', token: d.repoTokenEnc ? decryptSecret(d.repoTokenEnc, ctx.config.secret) : '', author: authorOf(d) };
+    if (d?.repoUrl) return { department: d, repo: { url: d.repoUrl, branch: d.repoBranch ?? 'main', token: d.repoTokenEnc ? decryptSecret(d.repoTokenEnc, ctx.config.secret) : '', author: authorOf(d) } };
   }
   return null;
+}
+
+/* The repository an agent works in: its product's, else its department's, else none. */
+export async function repoFor(ctx: Pick<Ctx, 'db' | 'config'>, agent: { productId: string | null; departmentId: string | null }): Promise<Repo | null> {
+  return (await repoAt(ctx, [agent.productId, agent.departmentId]))?.repo ?? null;
 }
 
 export const authorOf = (d: { repoAuthorName: string | null; repoAuthorEmail: string | null }) =>

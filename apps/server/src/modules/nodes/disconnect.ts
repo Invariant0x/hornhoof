@@ -1,9 +1,11 @@
 import { and, inArray, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { jobs, machines, subscriptions } from '../../db/schema.js';
+import { jobs, machines, subscriptions, testParts } from '../../db/schema.js';
+import { failParts } from '../testruns/runs.js';
 import { failOpenJobs } from './messages.js';
 
-/* Stops these machines' nodes: open jobs fail, sockets close, and the subscriptions wait for a machine again. */
+/* Stops these machines' nodes: open jobs and the parts of test runs they ran fail, sockets close, and the subscriptions
+   wait for a machine again. */
 export async function disconnectMachines(ctx: Ctx, machineIds: string[]): Promise<void> {
   if (machineIds.length === 0) return;
   const served = and(inArray(subscriptions.machineId, machineIds), isNull(subscriptions.removedAt));
@@ -14,4 +16,5 @@ export async function disconnectMachines(ctx: Ctx, machineIds: string[]): Promis
   /* The subscriptions wait for a machine first, so the turns that end here send no next turn to the leaving one. */
   for (const id of ids) ctx.hub.close(id, 4001);
   if (ids.length) await failOpenJobs(ctx, inArray(jobs.subscriptionId, ids), 'machine_disconnected');
+  await failParts(ctx, inArray(testParts.machineId, machineIds), 'machine_disconnected');
 }

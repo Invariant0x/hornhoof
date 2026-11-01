@@ -228,7 +228,7 @@ export type NodeMessage = z.infer<typeof NodeMessage>;
    field: an address with a name or password in it would put them on command lines and into the clone's settings. The
    address is read as a URL at the door, so what is saved is what the server and the node can read later. */
 const isHttps = (u: string) => URL.canParse(u) && new URL(u).protocol === 'https:' && new URL(u).hostname !== '';
-const Branch = z.string().min(1).max(200).regex(/^[A-Za-z0-9._\/-]+$/).refine(b => !b.startsWith('-') && !b.includes('..'), 'Not a branch name.');
+export const Branch = z.string().min(1).max(200).regex(/^[A-Za-z0-9._\/-]+$/).refine(b => !b.startsWith('-') && !b.includes('..'), 'Not a branch name.');
 export const Repo = z.object({
   url: z
     .string()

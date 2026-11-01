@@ -13,6 +13,7 @@ import { registerDatabaseTool } from './database.js';
 import { checkStaff, departmentOf, StaffProposal, staffingOptions } from './staff.js';
 import { checkItems, Proposal } from './structure.js';
 import { registerTaskTools } from '../tasks/tools.js';
+import { registerTestTools } from '../testruns/tools.js';
 import { registerWatchTools } from './watch.js';
 import { registerHeadNotebookTools } from '../notebook/tools.js';
 import { registerImprovementTools, registerOrchestratorImprovementTools } from '../improvements/tools.js';
@@ -22,8 +23,8 @@ const say = (text: string, isError = false) => ({ content: [{ type: 'text' as co
 /* The head of Operations keeps the company running, so it reads Hornhoof's database; changes stay with the orchestrator. */
 export const DATABASE_ROLES = ['OPS-HEAD'];
 
-/* Hornhoof's tools as one agent's job sees them: every agent reads the company, an employee gets the tools its skills
-   grant, a head keeps its department notebook, tells the orchestrator and puts what to improve under Improvements, and the
+/* Hornhoof's tools as one agent's job sees them: every agent reads the company, an employee runs tests on free machines
+   and gets the tools its skills grant, a head keeps its department notebook, tells the orchestrator and puts what to improve under Improvements, and the
    orchestrator also proposes cards and does whatever the CEO can do in the screens. */
 function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob): McpServer {
   const server = new McpServer({ name: 'hornhoof', version: '0.5.0' });
@@ -36,6 +37,7 @@ function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob): McpServer {
   if (job.agentKind !== 'orchestrator') {
     const grants = new Set(job.skills.flatMap(id => ctx.templates.skills.get(id)?.grants ?? []));
     registerWatchTools(server, ctx, job, grants);
+    registerTestTools(server, ctx, job);
     if (job.agentKind === 'head') registerHeadNotebookTools(server, ctx, job);
     if (job.agentKind === 'head' || grants.has('improvements')) registerImprovementTools(server, ctx, job);
     if (job.agentKind === 'head' && job.roleKey !== null && DATABASE_ROLES.includes(job.roleKey)) registerDatabaseTool(server, ctx, job, 'read');

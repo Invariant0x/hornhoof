@@ -5,7 +5,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
 import { encryptSecret } from '../../crypto/secrets.js';
-import { agents, departments, jobs, people, subscriptions, teams } from '../../db/schema.js';
+import { agents, departments, jobs, people, subscriptions, teams, testParts } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { servesWholeCompany } from '../tools/staff.js';
 import { orchestratorOf, pumpWaiting } from '../conversation/queue.js';
@@ -15,6 +15,7 @@ import { resumeAgent } from '../tasks/wake.js';
 import { installCommand } from '../nodes/command.js';
 import { identityOf } from '../nodes/hub.js';
 import { failOpenJobs } from '../nodes/messages.js';
+import { failParts } from '../testruns/runs.js';
 import { subView, subViews, type IsOnline } from './views.js';
 
 const Target = z.discriminatedUnion('kind', [
@@ -193,6 +194,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
     });
     /* The node stops its jobs when it hears remove, and may never report them, so they end here. */
     const ended = await failOpenJobs(ctx, eq(jobs.subscriptionId, sub.id), 'subscription_removed');
+    if (sub.kind === 'personal') await failParts(ctx, eq(testParts.subscriptionId, sub.id), 'subscription_removed');
     /* An offline node hears it at its next hello. The built-in node keeps running for other keys, so it stops just this key's jobs. */
     if (sub.kind === 'personal') hub.send(identityOf(sub), { type: 'remove' });
     else for (const jobId of ended) hub.send(identityOf(sub), { type: 'job.cancel', jobId });

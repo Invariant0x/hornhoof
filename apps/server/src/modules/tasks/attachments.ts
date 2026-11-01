@@ -57,7 +57,7 @@ export const encodedHint = (task?: number) =>
   `This text carries an encoded file. Put the file on ${task ? `the task with hh-attach --task ${task} FILE` : 'the task it is for with hh-attach --task <task number> FILE'} and write its name instead: anyone downloads it with hh-fetch.`;
 
 /* An agent works on a task when it runs the company, the task is its department's, or it holds, does, checks or made it. */
-const onTask = (job: ToolJob, t: Task) =>
+export const onTask = (job: ToolJob, t: Task) =>
   job.agentKind === 'orchestrator' || (job.departmentId !== null && t.departmentId === job.departmentId) || [t.assigneeAgentId, t.executorAgentId, t.createdByAgentId, ...t.gates, ...t.panel].includes(job.agentId);
 
 /* The files on a task, the newest under each name, without their bytes. */

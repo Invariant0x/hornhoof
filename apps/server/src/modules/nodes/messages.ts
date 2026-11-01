@@ -7,6 +7,7 @@ import { said } from '../conversation/live.js';
 import { liveSubscription, pumpWaiting, refusedLimits, startProgram } from '../conversation/queue.js';
 import { afterJob, typedTurn } from '../tasks/wake.js';
 import { appendEvent, publishWorking } from '../events/store.js';
+import { partDone, partStarted, pumpTests, testsHello } from '../testruns/runs.js';
 import { identityOf, sameNode, type NodeIdentity } from './hub.js';
 
 const OPEN_JOBS = ['queued', 'running'] as const;
@@ -58,6 +59,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       await failOpenJobs(ctx, jobsOf(id, ctx), 'machine_restarted', msg.running);
       ctx.hub.greet(id, msg.terminals === true);
       if (msg.load) ctx.hub.report(id, msg.load);
+      await testsHello(ctx, id, msg.tests);
       /* Hornhoof ended these while the node was away, with a stop or a removed subscription; the node stops them now. */
       if (msg.running.length) {
         const open = await db.select({ id: jobs.id }).from(jobs).where(and(inArray(jobs.id, msg.running), inArray(jobs.status, OPEN_JOBS), jobsOf(id, ctx)));
@@ -81,8 +83,16 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
     case 'load': {
       const { type: _, ...load } = msg;
       ctx.hub.report(id, load);
+      /* A machine that freed up takes a part that waits. */
+      await pumpTests(ctx);
       return;
     }
+    case 'tests.started':
+      await partStarted(ctx, id, msg.partId);
+      return;
+    case 'tests.done':
+      await partDone(ctx, id, msg);
+      return;
     case 'job.event': {
       const [job] = await db
         .select({ companyId: jobs.companyId, agentId: jobs.agentId })

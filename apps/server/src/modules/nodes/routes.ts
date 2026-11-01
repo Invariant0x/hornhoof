@@ -9,6 +9,7 @@ import { machines, nodeCodes, people, subscriptions } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { publicUrl } from '../link/link.js';
 import { together } from '../testruns/load.js';
+import { pumpTests } from '../testruns/runs.js';
 import { disconnectMachines } from './disconnect.js';
 import { BUILTIN } from './hub.js';
 
@@ -146,6 +147,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { lendsTests } = LendBody.parse(req.body);
     await ownMachine(me, id);
     await db.update(machines).set({ lendsTests }).where(eq(machines.id, id));
+    if (lendsTests) await pumpTests(ctx);
     return { lendsTests };
   });
 

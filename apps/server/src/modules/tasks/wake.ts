@@ -1,7 +1,7 @@
 import { and, asc, count, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, max, ne, notInArray, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { loggable } from '../../errors.js';
-import { agentChanges, agentEvents, agents, jobs, requests, subscriptions, taskEvents, tasks } from '../../db/schema.js';
+import { agentChanges, agentEvents, agents, jobs, requests, subscriptions, taskEvents, tasks, testRuns } from '../../db/schema.js';
 import { agentState, conversationOf, GONE_ALONG, insertTurn, limitUntil, liveSubscription, onAgent, openTypedTurn, orchestratorOf, pump, refusedLimits } from '../conversation/queue.js';
 import { sayLive } from '../conversation/live.js';
 import { quote } from '../conversation/prompt.js';
@@ -97,6 +97,9 @@ function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string {
     case 'switched':
       /* Its text says what to do. */
       return `${ref}, which you gave out, has nobody on to go on with it${w.text ? `:\n\n${w.text}` : '. Give it to someone who is on with update_task, or tell the CEO it waits.'}`;
+    case 'tests':
+      /* Its text is Hornhoof's account of the run, or who stopped it. */
+      return `The tests you ran on ${ref} ended${said}Go on with the work, then ${finish}. If you cannot go on, ${stuck}.`;
     case 'explain':
       /* Hornhoof writes this turn itself, from the request. */
       return `${ref} waits for people. See /api/requests and put what is asked into plain words with explain_request.`;
@@ -272,7 +275,7 @@ export async function stopTurns(ctx: Ctx, taskIds: string[], keep?: string): Pro
 }
 
 /* Wakes that bring the agent new words on its task, which a turn on that task takes in while it runs. */
-const LIVE_WAKES: WakeWhy[] = ['comment', 'answered', 'updated'];
+const LIVE_WAKES: WakeWhy[] = ['comment', 'answered', 'updated', 'tests'];
 /* Wakes that would set the holder to work on its task, held back while the task waits for the tasks it comes after. */
 const TO_WORK: WakeWhy[] = ['assigned', 'updated', 'comment', 'answered', 'unblocked', 'reminder', 'go_on', 'subtasks'];
 
@@ -299,7 +302,11 @@ async function queueWake(ctx: Ctx, w: Wake): Promise<boolean> {
       .from(jobs)
       .where(and(eq(jobs.agentId, agent.id), eq(jobs.taskId, task.id), eq(jobs.status, 'queued')))
       .limit(1);
-    if (waiting) return false;
+    if (waiting) {
+      /* A test run's result is not in the task, so the turn that waits carries it along. */
+      if (w.why === 'tests') await db.update(jobs).set({ prompt: sql`${jobs.prompt} || ${`\n\n${wakePrompt(agent, task, w)}`}` }).where(eq(jobs.id, waiting.id));
+      return false;
+    }
     const prompt = wakePrompt(agent, task, w);
     const jobId = await insertTurn(ctx, { companyId: agent.companyId, agentId: agent.id, prompt, createdBy: null, taskId: task.id });
     await appendEvent(ctx, { companyId: agent.companyId, agentId: agent.id, jobId, kind: 'message', data: { text: prompt, task: { id: task.id, number: task.number } } });
@@ -422,6 +429,13 @@ async function checkHeld(ctx: Ctx, job: typeof jobs.$inferSelect & { agentId: st
     .where(and(eq(jobs.agentId, agentId), eq(jobs.kind, 'conversation'), eq(jobs.status, 'queued'), or(eq(tasks.id, task.id), eq(tasks.parentId, task.id))))
     .limit(1);
   if (next) return;
+  /* Its test run's result wakes it on the task. */
+  const [testing] = await db
+    .select({ id: testRuns.id })
+    .from(testRuns)
+    .where(and(eq(testRuns.taskId, task.id), eq(testRuns.agentId, agentId), eq(testRuns.status, 'running')))
+    .limit(1);
+  if (testing) return;
   const [subtasks] = await db.select({ n: count() }).from(tasks).where(and(eq(tasks.parentId, task.id), notInArray(tasks.status, [...CLOSED])));
   const [asked] = await db.select({ n: count() }).from(requests).where(and(eq(requests.taskId, task.id), eq(requests.status, 'open')));
   if (Number(subtasks?.n ?? 0) || Number(asked?.n ?? 0) || (await openAfter(db, task)).length) return;
