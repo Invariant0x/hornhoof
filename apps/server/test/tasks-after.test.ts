@@ -5,7 +5,7 @@ import { hashToken } from '../src/crypto/tokens.js';
 import { agents, companies, departments, jobs, pendingWakes, people, subscriptions, taskEvents, tasks, turns } from '../src/db/schema.js';
 import { cancel, comment, createTask, submit, updateTask, verdict } from '../src/modules/tasks/engine.js';
 import { wakeAll, wakePrompt } from '../src/modules/tasks/wake.js';
-import { as, invitePerson, listen, mcp, setUpCompany, testApp } from './helpers.js';
+import { as, invitePerson, listen, mcp, setUpCompany, statements, testApp } from './helpers.js';
 
 async function company() {
   const { app, db } = await testApp();
@@ -95,6 +95,21 @@ describe('a task that comes after others', () => {
     expect(await reason(member('End-to-end tests', tess.id, ['00000000-0000-4000-8000-000000000000']))).toBe('task_invalid');
     const free = await createTask(ctx, { agentId: head.id }, { title: 'Loose', brief: '', body: '', departmentId: dev.id, assigneeAgentId: tess.id, executor: true, after: [] });
     expect(free.task.after).toEqual([]);
+  });
+
+  it('takes the tasks that wait for a task as it is done before it looks at what else they wait for, so two done at once still start them', async () => {
+    const { ctx, bruno, tess, rita, member } = await company();
+    const api = (await member('Checkout API', bruno.id)).task;
+    const page = (await member('Checkout page', tess.id)).task;
+    const launch = (await member('Launch', bruno.id, [api.id, page.id])).task;
+    await submit(ctx, bruno.id, api.id, { summary: 'Done.', evidence: 'npm test' });
+    const seen = statements();
+    await verdict(ctx, rita.id, api.id, { pass: true, comment: 'Good.' });
+    const lock = seen.findIndex(s => /from "tasks" where .*"tasks"\."after" @> .* for update$/.test(s.sql));
+    const looking = seen.findIndex((s, i) => i > lock && s.sql.includes('"tasks"."status" <> $') && s.params.includes(api.id) && s.params.includes(page.id));
+    expect(lock).toBeGreaterThanOrEqual(0);
+    expect(looking).toBeGreaterThan(lock);
+    expect(launch.id).toBeTruthy();
   });
 
   it('starts at once when what it comes after is done already', async () => {

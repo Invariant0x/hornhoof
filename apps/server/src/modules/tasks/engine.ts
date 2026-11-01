@@ -103,13 +103,15 @@ async function refuseCircle(db: Db | Tx, task: Task, ids: string[]): Promise<voi
 }
 
 /* A task is done: each task that came after it and waits for nothing else any more goes on with whoever holds it, and
-   its log says why. rows: the tasks that started. */
+   its log says why. rows: the tasks that started. Two tasks it waits for done at once would each see the other still
+   open, so the waiting tasks are taken first and the second to be done sees the first. */
 async function startAfter(tx: Tx, done: Task): Promise<{ wakes: Wake[]; rows: Task[] }> {
   const waiting = await tx
     .select()
     .from(tasks)
     .where(and(eq(tasks.companyId, done.companyId), sql`${tasks.after} @> ${JSON.stringify([done.id])}::jsonb`, notInArray(tasks.status, [...CLOSED])))
-    .orderBy(asc(tasks.number));
+    .orderBy(asc(tasks.number))
+    .for('update');
   const wakes: Wake[] = [];
   const rows: Task[] = [];
   for (const t of waiting) {
