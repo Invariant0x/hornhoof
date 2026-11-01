@@ -1,0 +1,2 @@
+ALTER TABLE "subscriptions" ADD COLUMN "budget_percent" integer DEFAULT 100 NOT NULL;--> statement-breakpoint
+ALTER TABLE "subscriptions" ADD CONSTRAINT "subscriptions_budget_percent_range" CHECK ("subscriptions"."budget_percent" between 0 and 100);

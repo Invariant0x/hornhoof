@@ -1,9 +1,10 @@
-import type { Limits } from '@hornhoof/protocol';
+import type { BudgetView, Limits } from '@hornhoof/protocol';
 import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import { agents, departments, machines, people, personAccess, subscriptions, teams, type Provider, type SUBSCRIPTION_STATUSES } from '../../db/schema.js';
 import { WHOLE_COMPANY } from '../people/views.js';
 import { deptName } from '../departments/templates.js';
+import { subscriptionBudget } from './admission.js';
 
 /* listed: a personal plan whose owner has several departments; the name lists them. */
 export type Place = { kind: 'company' | 'department' | 'listed'; id: string | null; name: string };
@@ -20,6 +21,8 @@ export type SubView = {
   place: Place;
   machine: { id: string; hostname: string } | null;
   limits: Limits | null;
+  budgetPercent: number;
+  budget: BudgetView;
   isOrchestrator: boolean;
 };
 
@@ -34,6 +37,8 @@ const columns = {
   status: subscriptions.status,
   last4: subscriptions.last4,
   limits: subscriptions.limits,
+  budgetPercent: subscriptions.budgetPercent,
+  quotaState: subscriptions.quotaState,
   targetKind: subscriptions.targetKind,
   targetId: subscriptions.targetId,
   ownerId: people.id,
@@ -58,8 +63,8 @@ function ownerPlace(deptIds: string[], depts: Map<string, string>): Place {
   return { kind: 'listed', id: null, name: deptIds.map(d => depts.get(d) ?? '').join(', ') };
 }
 
-export async function subViews(db: Db, isOnline: IsOnline, id?: string): Promise<SubView[]> {
-  const live = isNull(subscriptions.removedAt);
+export async function subViews(db: Db, isOnline: IsOnline, companyId: string, id?: string): Promise<SubView[]> {
+  const live = and(isNull(subscriptions.removedAt), eq(subscriptions.companyId, companyId));
   const rows = await db
     .select(columns)
     .from(subscriptions)
@@ -93,10 +98,12 @@ export async function subViews(db: Db, isOnline: IsOnline, id?: string): Promise
     place: r.kind === 'api_key' ? placeOf(r.targetKind, r.targetId, depts, teamDept) : r.ownerScopeKind === 'company' ? COMPANY : ownerPlace(ownerDepts(r.ownerId), depts),
     machine: r.machineId ? { id: r.machineId, hostname: r.machineHost ?? '' } : null,
     limits: r.limits ?? null,
+    budgetPercent: r.budgetPercent,
+    budget: subscriptionBudget(r, Date.now()),
     isOrchestrator: orchestrator?.subscriptionId === r.id,
   }));
 }
 
-export async function subView(db: Db, isOnline: IsOnline, id: string): Promise<SubView | null> {
-  return (await subViews(db, isOnline, id))[0] ?? null;
+export async function subView(db: Db, isOnline: IsOnline, companyId: string, id: string): Promise<SubView | null> {
+  return (await subViews(db, isOnline, companyId, id))[0] ?? null;
 }

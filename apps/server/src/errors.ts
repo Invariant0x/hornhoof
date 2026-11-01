@@ -21,6 +21,7 @@ export type ErrorReason =
   | 'already_connected'
   | 'not_company_level'
   | 'subscription_unknown'
+  | 'budget_invalid'
   | 'code_unknown'
   | 'code_used'
   | 'machine_unknown'

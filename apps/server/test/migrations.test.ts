@@ -203,3 +203,28 @@ describe('migration 0021 quota wait', () => {
     expect((await db.execute(sql`select quota_refusal from jobs`)).rows).toEqual([{ quota_refusal: null }]);
   });
 });
+
+describe('draft migration 0022 subscription budget', () => {
+  it('keeps previous-schema data, defaults to 100 and preserves the setting on repeat startup', async () => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0021_quota_wait') });
+    const c = (await db.execute<{ id: string }>(sql`insert into companies (name) values ('Budget migration') returning id`)).rows[0]!;
+    const p = (await db.execute<{ id: string }>(sql`insert into people (company_id, name, email, status, scope_kind) values (${c.id}, 'Owner', 'budget@example.test', 'active', 'company') returning id`)).rows[0]!;
+    const sub = (await db.execute<{ id: string }>(sql`insert into subscriptions (company_id, provider, kind, label, owner_person_id, status, quota_state) values (${c.id}, 'kimi', 'personal', 'Saved subscription', ${p.id}, 'ready', '{"latest":null,"blocked":null,"recovered":null}') returning id`)).rows[0]!;
+    await db.execute(sql`insert into jobs (company_id, subscription_id, prompt, timeout_ms, result, tail, error, session_id) values (${c.id}, ${sub.id}, 'Saved task', 1000, 'Saved progress', 'Diagnostic', 'agent_failed', 'Saved session')`);
+    const before = (await db.execute(sql`select result, tail, error, session_id from jobs`)).rows;
+    const state = (await db.execute(sql`select quota_state, status, owner_person_id from subscriptions`)).rows;
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    expect((await db.execute(sql`select budget_percent from subscriptions`)).rows).toEqual([{ budget_percent: 100 }]);
+    for (const value of [0, 90, 100]) {
+      await db.execute(sql`update subscriptions set budget_percent = ${value}`);
+      await migrate(db, { migrationsFolder: MIGRATIONS });
+      expect((await db.execute(sql`select budget_percent from subscriptions`)).rows).toEqual([{ budget_percent: value }]);
+    }
+    for (const value of [-1, 101]) await expect(db.execute(sql`update subscriptions set budget_percent = ${value}`)).rejects.toThrow();
+    expect((await db.execute(sql`select result, tail, error, session_id from jobs`)).rows).toEqual(before);
+    expect((await db.execute(sql`select quota_state, status, owner_person_id from subscriptions`)).rows).toEqual(state);
+  });
+});

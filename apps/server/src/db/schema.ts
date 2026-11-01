@@ -1,7 +1,7 @@
 import { TEMPLATE_KEYS, type Limits, type ModelOption, type QuotaRefusal } from '@hornhoof/protocol';
 import type { QuotaState } from '../modules/subscriptions/quota.js';
 import { sql } from 'drizzle-orm';
-import { bigserial, boolean, customType, index, integer, jsonb, pgTable, real, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
+import { bigserial, boolean, check, customType, index, integer, jsonb, pgTable, real, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
 
 const id = () => uuid('id').primaryKey().defaultRandom();
 const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow();
@@ -150,6 +150,7 @@ export const subscriptions = pgTable(
     nodeVersion: text('node_version'),
     lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
     limits: jsonb('limits').$type<Limits>(),
+    budgetPercent: integer('budget_percent').notNull().default(100),
     /* Admission evidence is separate from cached legacy limits and survives a restart. */
     quotaState: jsonb('quota_state').$type<QuotaState>(),
     /* The models its node says it can run; null until a node reports them. */
@@ -157,7 +158,7 @@ export const subscriptions = pgTable(
     removedAt: timestamp('removed_at', { withTimezone: true }),
     createdAt: createdAt(),
   },
-  t => [index('subscriptions_owner_person_id').on(t.ownerPersonId)],
+  t => [index('subscriptions_owner_person_id').on(t.ownerPersonId), check('subscriptions_budget_percent_range', sql`${t.budgetPercent} between 0 and 100`)],
 );
 
 export const agents = pgTable('agents', {

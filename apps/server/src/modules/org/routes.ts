@@ -168,7 +168,7 @@ export function orgRoutes(app: FastifyInstance, { db, hub, templates, bus }: Ctx
         model: orchestrator.model,
         effort: (orchestrator.subscriptionId && subs.has(orchestrator.subscriptionId) && effortShown(subs.get(orchestrator.subscriptionId)!, orchestrator)) || null,
         context: orchestrator.contextUsed,
-        subscription: orchestrator.subscriptionId ? await subView(db, s => hub.isOnline(identityOf(s)), orchestrator.subscriptionId) : null,
+        subscription: orchestrator.subscriptionId ? await subView(db, s => hub.isOnline(identityOf(s)), me.companyId, orchestrator.subscriptionId) : null,
       },
       agents: { total: allAgents.length, working: await workingCount(db, me.companyId) },
       turn: turn ?? null,

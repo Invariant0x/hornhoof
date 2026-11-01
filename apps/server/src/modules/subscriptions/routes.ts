@@ -15,6 +15,7 @@ import { installCommand } from '../nodes/command.js';
 import { identityOf } from '../nodes/hub.js';
 import { failOpenJobs } from '../nodes/messages.js';
 import { subView, subViews, type IsOnline } from './views.js';
+import { subscriptionBudgetRoutes } from './budget-route.js';
 
 const Target = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('orchestrator') }),
@@ -53,6 +54,7 @@ const notOwner = () => new ApiError(403, 'forbidden', 'Only the owner of this su
 export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db, config, hub } = ctx;
   const online: IsOnline = sub => hub.isOnline(identityOf(sub));
+  subscriptionBudgetRoutes(app, ctx, online);
 
   async function liveSubscription(id: string) {
     const [row] = await db.select().from(subscriptions).where(and(eq(subscriptions.id, id), isNull(subscriptions.removedAt)));
@@ -77,7 +79,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.get('/api/subscriptions', async req => {
     const me = await requirePerson(req, db);
-    const all = await subViews(db, online);
+    const all = await subViews(db, online, me.companyId);
     return { subscriptions: me.scopeKind === 'company' ? all : all.filter(s => s.owner.id === me.id) };
   });
 
@@ -113,7 +115,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (target.kind === 'orchestrator') await orchestratorBack(orchestratorBefore);
 
     reply.code(201);
-    return { subscription: await subView(db, online, id) };
+    return { subscription: await subView(db, online, me.companyId, id) };
   });
 
   /* A person connects their own plans. They serve wherever the person works, so there is nothing to place.
@@ -139,7 +141,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
       const ids = [...had.map(s => s.id), ...rows.map(r => r.id)];
       return { ids, code: await createNodeCode(tx, { companyId: me.companyId, personId: me.id, subscriptionIds: ids }) };
     });
-    const views = (await subViews(db, online)).filter(s => ids.includes(s.id));
+    const views = (await subViews(db, online, me.companyId)).filter(s => ids.includes(s.id));
     reply.code(201);
     return { subscriptions: views, command: installCommand(config.publicUrl, code) };
   });
@@ -164,7 +166,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
     const before = await orchestratorOf(ctx, me.companyId);
     await db.update(agents).set(orchestratorOn(sub)).where(eq(agents.kind, 'orchestrator'));
     await orchestratorBack(before);
-    return { subscription: await subView(db, online, sub.id) };
+    return { subscription: await subView(db, online, me.companyId, sub.id) };
   });
 
   app.delete('/api/subscriptions/:id', async (req, reply) => {

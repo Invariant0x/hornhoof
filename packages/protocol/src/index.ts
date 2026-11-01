@@ -181,6 +181,28 @@ const Rows = z.number().int().min(4).max(200);
 /* What one frame carries of a terminal's screen or of a person's keys and pastes. */
 export const TERM_CHUNK = 64 * 1024;
 
+export const BudgetPercent = z.number().int().min(0).max(100);
+export const SubscriptionBudgetBody = z.strictObject({ budgetPercent: BudgetPercent });
+export type ControlCoverage = 'complete' | 'server_only' | 'unavailable';
+export type BudgetReason = 'budget_disabled' | 'provider_limit' | 'budget_reached' | 'usage_unknown' | 'control_unavailable';
+export type BudgetQuality = 'complete' | 'partial' | 'missing' | 'stale' | 'unsupported' | 'legacy';
+export type WindowEvidence = Limits['windows'][number] & { sampledAt: string | null; receivedAt: string | null; source: 'usage_fetch' | 'turn_report' | 'legacy' };
+export type WindowSample = WindowEvidence & { epoch: string | null; seq: number | null; delivery: 'live' | 'outbox' | 'legacy'; admissionEligible: boolean };
+export type BudgetUsage = {
+  windows: WindowSample[];
+  authoritativeNames: string[] | null;
+  lastCompleteSampledAt: string | null;
+  lastCompleteReceivedAt: string | null;
+  lastRefreshReceivedAt: string | null;
+  lastRefreshOutcome: 'success' | 'unavailable';
+  providerStatus: Limits['status'] | null;
+  statusSampledAt: string | null;
+  statusReceivedAt: string | null;
+};
+type DecisionEvidence = { quality: BudgetQuality; blockingWindows: WindowEvidence[]; resetHintAt: string | null; sampledAt: string | null; receivedAt: string | null };
+export type BudgetDecision = DecisionEvidence & ({ allowed: true; reason: null } | { allowed: false; reason: BudgetReason });
+export type BudgetView = { decision: BudgetDecision; control: ControlCoverage; checkedAt: string | null; freshUntil: string | null };
+
 const NodeMessage = z.discriminatedUnion('type', [
   /* terminals: the node runs agents in sessions people can watch and type into. */
   z.object({ type: z.literal('hello'), version: z.string().max(40), loggedIn: z.boolean(), running: z.array(z.string()).max(100), models: Models.optional(), terminals: z.boolean().optional(), usageObservations: z.boolean().optional() }),

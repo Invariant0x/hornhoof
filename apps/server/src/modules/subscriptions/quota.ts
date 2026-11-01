@@ -1,9 +1,9 @@
-import type { QuotaRefusal, UsageObservation } from '@hornhoof/protocol';
+import type { BudgetUsage, QuotaRefusal, UsageObservation } from '@hornhoof/protocol';
 
 export const MAX_USAGE_AGE_MS = 600_000;
 export type UsageConnection = { epoch: string; issuedAt: number; current(): boolean };
 type Stamp = { epoch: string | null; seq: number; at: string };
-export type QuotaState = { latest: Stamp | null; blocked: Stamp | null; recovered: Stamp | null };
+export type QuotaState = { latest: Stamp | null; blocked: Stamp | null; recovered: Stamp | null; usage?: BudgetUsage };
 const empty = (): QuotaState => ({ latest: null, blocked: null, recovered: null });
 
 export function quotaBlocked(state: QuotaState | null | undefined): boolean {
