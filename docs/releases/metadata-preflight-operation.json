@@ -45,7 +45,7 @@
   },
   "readPointsInOrder": [
     "Authenticate and bind task/installation before any service inspection.",
-    "Require agreed quiet window, zero working jobs, no pending request or waiting/running update, and exclusion of concurrent update/config writers.",
+    "Require agreed quiet window, no other working job except the bound orchestrator control job, no pending request or waiting/running update, and exclusion of concurrent update/config writers. After accepted whenIdle request, control turn must finish naturally before workingCount reaches zero.",
     "Resolve actual app/db from updater's configured project; reject foreign project, extra overrides, external target or ambiguous mapping.",
     "Privately bind current app container/image/revision, process start identity, command and deployed main/config/client module hashes. Proposed fixed startup reads inside the current app: /proc/1/environ, /proc/1/stat and /proc/1/cmdline, compared with private container startup configuration and exact image/module hashes. Require PID 1 to be the standard Node entry without injected preload or alternate config path. Unavailable or denied reads refuse; nothing raw is returned.",
     "Verify exact deployed source constructs running app DB from anchored startup config without later rebinding. Compare effective startup and reader settings via private keyed fingerprint. A second loadConfig, label or container environment alone is insufficient.",
@@ -92,7 +92,7 @@
     "requiredBehavior": "Any refusal/missing receipt stops workflow with no request. Receipt creation alone is insufficient. No pre-existing pending request.",
     "existingRouteEnforcesThis": false,
     "implementedRefusalVerified": false,
-    "raceLimit": "No global fence or atomic expected-SHA comparison. Head excludes other update/config writers through revalidation and dispatch.",
+    "raceLimit": "No global fence or atomic expected-SHA comparison. Head excludes other update/config writers through revalidation and acceptance. Existing sendWhenIdle performs no later preflight; bound control job must end naturally before request dispatch. The delay is not atomic with preflight.",
     "oldUpdaterBeforeDispatch": "No delivered request means this operation invokes no old backup/installer/rollback. Existing outer-placement fixture proves condition only in isolation.",
     "oldUpdaterAfterDispatch": "Unchanged; may run previous installer and replace Compose/env. Refuse unknown/incompatible previous/target config and untested recovery before dispatch."
   },
