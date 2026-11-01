@@ -214,6 +214,14 @@ describe('company templates', () => {
       expect(operations, `${template.key} operations`).toBeLessThanOrEqual(1);
     }
   });
+
+  it('give every company its own Operations, which keeps it running', () => {
+    for (const template of COMPANY_TEMPLATES) {
+      const operations = template.departments.find(d => d.template === 'operations');
+      expect(operations, `${template.key} has operations`).toBeDefined();
+      expect(operations!.staff.some(line => line.role === 'OPS-HEAD'), `${template.key} operations head`).toBe(true);
+    }
+  });
 });
 
 describe('lastBytes', () => {
