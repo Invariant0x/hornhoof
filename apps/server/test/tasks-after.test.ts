@@ -122,6 +122,14 @@ describe('a task that comes after others', () => {
     expect(await reason(updateTask(ctx, head.id, parent.id, { after: [api.id] }))).toBe('task_invalid');
   });
 
+  it('takes no work under it while it waits', async () => {
+    const { ctx, ceo, dev, head, bruno, member } = await company();
+    const api = (await member('Checkout API', bruno.id)).task;
+    const launch = (await createTask(ctx, { personId: ceo.id }, { title: 'Launch', brief: '', body: '', departmentId: dev.id, assigneeAgentId: head.id, after: [api.id] })).task;
+    const under = createTask(ctx, { agentId: head.id }, { title: 'Release notes', brief: '', body: '', departmentId: dev.id, parentId: launch.id, assigneeAgentId: bruno.id, executor: true });
+    expect(await under.then(() => 'ok', (err: { message?: string }) => err.message)).toBe(`#${launch.number} waits for #${api.number} first, so no work goes under it yet. You are woken once it can start.`);
+  });
+
   it('takes the tasks that wait for a task as it is done before it looks at what else they wait for, so two done at once still start them', async () => {
     const { ctx, bruno, tess, rita, member } = await company();
     const api = (await member('Checkout API', bruno.id)).task;

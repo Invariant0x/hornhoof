@@ -315,6 +315,9 @@ export async function createTask(ctx: Live, actor: Actor, input: NewTask): Promi
       stillOpen(now!);
       /* Its gates check the work as handed in; more work under it starts once they send it back. */
       if (now!.stage > 0) throw refuse(409, 'task_invalid', `#${now!.number} is being checked at its gates, so no work goes under it now. Give it once the gates send it back, or as a task of its own.`);
+      /* Nor while it waits for what it comes after: its work starts with it. */
+      const open = await openAfter(tx, now!);
+      if (open.length) throw refuse(409, 'task_invalid', `#${now!.number} waits for ${listed(open)} first, so no work goes under it yet. You are woken once it can start.`);
     }
     const [last] = await tx.select({ n: max(tasks.number) }).from(tasks).where(eq(tasks.companyId, assignee.companyId));
     const [turn] = parent ? [] : await tx.select({ id: turns.id }).from(turns).where(and(eq(turns.companyId, assignee.companyId), eq(turns.status, 'open')));
