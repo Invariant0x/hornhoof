@@ -109,10 +109,10 @@ describe('templates', () => {
     }
   });
 
-  it('follows the copy rules: no em dashes and no ё', () => {
+  it('follows the copy rules: no em dashes and no \u0451', () => {
     for (const x of [...roles, ...skills]) {
       const text = [x.body, x.title.en, x.title.ru, x.description.en, x.description.ru].join('\n');
-      expect(text, x.id).not.toMatch(/[—ёЁ]/);
+      expect(text, x.id).not.toMatch(/[\u2014\u0451\u0401]/);
     }
   });
 
