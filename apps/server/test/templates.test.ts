@@ -74,7 +74,7 @@ describe('templates', () => {
   });
 
   it('names each role after its department code', () => {
-    const codes: Record<string, string> = { operations: 'OPS', development: 'DEV', design: 'DSN', marketing: 'MKT', sales: 'SAL', business_development: 'BIZ', support: 'SUP', finance: 'FIN' };
+    const codes: Record<string, string> = { operations: 'OPS', development: 'DEV', design: 'DSN', marketing: 'MKT', sales: 'SAL', business_development: 'BIZ', support: 'SUP', finance: 'FIN', home_devices: 'HOM', household: 'HHD' };
     for (const r of roles) expect(r.id.startsWith(`${codes[r.department]}-`), r.id).toBe(true);
   });
 

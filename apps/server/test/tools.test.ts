@@ -113,7 +113,7 @@ describe('/mcp', () => {
       ],
       subscriptions: [{ provider: 'anthropic_api', kind: 'api_key', servesWholeCompany: true }],
     });
-    expect(view.templates).toHaveLength(8);
+    expect(view.templates).toHaveLength(10);
     expect(view.templates.filter((t: { alwaysOn: boolean }) => t.alwaysOn).map((t: { key: string }) => t.key)).toEqual(['operations']);
     expect(view.templates[0]).toMatchObject({ key: 'operations', name: 'Operations', description: expect.any(String) });
   });

@@ -176,17 +176,17 @@ describe('job.run', () => {
 });
 
 describe('department templates', () => {
-  it('are the eight starting departments, with operations always on', () => {
-    expect(DEPARTMENT_TEMPLATES.map(t => t.key)).toEqual(['operations', 'development', 'marketing', 'sales', 'business_development', 'design', 'support', 'finance']);
+  it('are the ten starting departments, with operations always on', () => {
+    expect(DEPARTMENT_TEMPLATES.map(t => t.key)).toEqual(['operations', 'development', 'marketing', 'sales', 'business_development', 'design', 'support', 'finance', 'home_devices', 'household']);
     expect(DEPARTMENT_TEMPLATES.filter(t => t.always).map(t => t.key)).toEqual(['operations']);
     expect(DEPARTMENT_TEMPLATES.filter(t => t.ticked).map(t => t.key)).toEqual(['operations', 'development', 'marketing', 'sales', 'business_development']);
   });
 });
 
 describe('company templates', () => {
-  it('are eight, each with a distinct key from the list', () => {
+  it('are nine, each with a distinct key from the list', () => {
     expect(COMPANY_TEMPLATES.map(t => t.key)).toEqual([...COMPANY_TEMPLATE_KEYS]);
-    expect(new Set(COMPANY_TEMPLATES.map(t => t.key)).size).toBe(8);
+    expect(new Set(COMPANY_TEMPLATES.map(t => t.key)).size).toBe(9);
   });
 
   it('build only from departments that exist, with sound nesting and staffing', () => {

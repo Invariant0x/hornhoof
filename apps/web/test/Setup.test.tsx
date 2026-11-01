@@ -45,8 +45,8 @@ describe('Setup', () => {
     render(<Setup onDone={() => {}} />);
     expect(screen.getByRole('radio', { name: /Start empty/ })).toBeChecked();
     /* The eight ready-made companies, each with a mini department scheme. */
-    expect(screen.getAllByRole('radio', { name: /Project team|Startup|Studio with products|Full company|Cybersecurity company|Open-source project|Agency|Research lab/ })).toHaveLength(8);
-    expect(screen.getAllByRole('img', { name: 'Department scheme' })).toHaveLength(8);
+    expect(screen.getAllByRole('radio', { name: /Project team|Startup|Studio with products|Full company|Cybersecurity company|Open-source project|Agency|Research lab|Home/ })).toHaveLength(9);
+    expect(screen.getAllByRole('img', { name: 'Department scheme' })).toHaveLength(9);
   });
 
   it('sends the chosen company template with the company', async () => {

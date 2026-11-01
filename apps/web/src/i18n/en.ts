@@ -456,6 +456,8 @@ export const en = {
     design: { name: 'Design', description: 'Interfaces, brand and visual materials.' },
     support: { name: 'Support', description: 'Answers customers and passes what they report to the right department.' },
     finance: { name: 'Finance', description: 'Budget, payments, invoices and reports.' },
+    home_devices: { name: 'Home devices', description: 'Looks after the home network and devices: Wi-Fi, routers, smart home, updates and tuning. Acting on a device waits for a person.' },
+    household: { name: 'Household', description: 'Shopping lists and supplies, bills and subscriptions, chores, the family calendar and reminders. Buying or paying waits for a person.' },
   },
   companyTemplates: {
     heading: 'Start from a template',
@@ -467,10 +469,11 @@ export const en = {
     startup: { name: 'Startup', description: 'Development, design, marketing and business development.' },
     studio: { name: 'Studio with products', description: 'One development department with several products under it.' },
     corporation: { name: 'Full company', description: 'Every department, with products under development.' },
-    security: { name: 'Cybersecurity company', description: 'Development with security and a red team, plus operations and support.' },
+    security: { name: 'Cybersecurity company', description: 'Development with security and a red team, plus operations, sales and support, to protect the company and its clients.' },
     opensource: { name: 'Open-source project', description: 'Development and support for a project people build together.' },
     agency: { name: 'Agency', description: 'Sales, delivery through operations, and support for client work.' },
     lab: { name: 'Research lab', description: 'Development with an architect and documentation, for research work.' },
+    home: { name: 'Home', description: 'A family\'s helpers run like a small company: home devices and network, and the household. Works best with a few home computers connected. Anything that acts on the real world waits for a person.' },
   },
   tasks: {
     heading: 'Tasks',

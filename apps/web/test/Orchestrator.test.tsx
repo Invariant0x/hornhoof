@@ -196,7 +196,7 @@ describe('AgentWindow', () => {
     expect(await screen.findByText('Waiting for the Anthropic login')).toBeInTheDocument();
     expect(screen.getByLabelText('Write to the orchestrator')).toBeDisabled();
     expect(screen.getByText('Company structure')).toBeInTheDocument();
-    expect(screen.getAllByRole('checkbox')).toHaveLength(8);
+    expect(screen.getAllByRole('checkbox')).toHaveLength(10);
   });
 
   it('says that his plan is at its limit and that his turns wait until it starts over', async () => {

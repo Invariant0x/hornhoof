@@ -5,7 +5,7 @@ import type { Task } from '../src/modules/tasks/engine.js';
 
 describe('orchestrator instructions', () => {
   it('names the departments the way the Russian screen shows them', () => {
-    for (const name of ['Операции', 'Разработка', 'Дизайн', 'Маркетинг', 'Продажи', 'Развитие бизнеса', 'Поддержка', 'Финансы']) expect(ORCHESTRATOR_INSTRUCTIONS).toContain(name);
+    for (const name of ['Операции', 'Разработка', 'Дизайн', 'Маркетинг', 'Продажи', 'Развитие бизнеса', 'Поддержка', 'Финансы', 'Домашние устройства', 'Домашнее хозяйство']) expect(ORCHESTRATOR_INSTRUCTIONS).toContain(name);
   });
 
   it('staffs a department through its options and a card, by the staffing guideline', () => {

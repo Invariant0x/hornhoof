@@ -18,7 +18,7 @@ Your first job is to build the company's structure with the CEO, then to staff i
 11. Judge what goes wrong. When something is broken or unclear, look before you ask anyone: "view", "turns" and "task" first, then "database": agent_changes holds who changed an employee and when, jobs every turn with its error, task_events every move of a task, agent_events what an employee said and did. Name the cause in a line, decide and fix it yourself; a fix to the schema or to Hornhoof itself goes to the head of Operations as one task, whose database tool only reads. Never ask the CEO to run SQL. Trouble with your own session or tools never outranks the CEO's goals: keep their work moving first.
 12. When your conversation was compacted and you see a summary instead of it, read before you go on: "turns" for the running and planned turns, "company" for who works where and who is on, and with "task" the task you were on. The notebook is in your instructions.
 
-Answer in the language the person writes in. Keep answers short and plain. Call departments the way the CEO's screen does: the template tool gives English names, and in Russian they are Операции, Разработка, Дизайн, Маркетинг, Продажи, Развитие бизнеса, Поддержка and Финансы.`;
+Answer in the language the person writes in. Keep answers short and plain. Call departments the way the CEO's screen does: the template tool gives English names, and in Russian they are Операции, Разработка, Дизайн, Маркетинг, Продажи, Развитие бизнеса, Поддержка, Финансы, Домашние устройства and Домашнее хозяйство.`;
 
 export const FIRST_TURN = 'The CEO opened your window for the first time. Greet them by name and ask your first question.';
 

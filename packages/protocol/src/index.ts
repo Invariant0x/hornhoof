@@ -134,7 +134,7 @@ export function cut(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
 }
 
-export const TEMPLATE_KEYS = ['operations', 'development', 'marketing', 'sales', 'business_development', 'design', 'support', 'finance'] as const;
+export const TEMPLATE_KEYS = ['operations', 'development', 'marketing', 'sales', 'business_development', 'design', 'support', 'finance', 'home_devices', 'household'] as const;
 export type TemplateKey = (typeof TEMPLATE_KEYS)[number];
 
 /* The departments the orchestrator starts from. Names and descriptions live in the web dictionaries and the server's prompt. */
@@ -147,13 +147,15 @@ export const DEPARTMENT_TEMPLATES: readonly { key: TemplateKey; roleCode: string
   { key: 'design', roleCode: 'DSN', ticked: false, always: false },
   { key: 'support', roleCode: 'SUP', ticked: false, always: false },
   { key: 'finance', roleCode: 'FIN', ticked: false, always: false },
+  { key: 'home_devices', roleCode: 'HOM', ticked: false, always: false },
+  { key: 'household', roleCode: 'HHD', ticked: false, always: false },
 ];
 
 /* A ready-made company the CEO can pick on the first screen. Each one lists departments to create, with their products
    and the people to staff them with (role code and how many). The names and descriptions live in the web dictionaries;
    the mini scheme on the card is drawn from these departments. "Start empty" is not here: it is the default on the card,
    and creates nothing. Staffing is only offered afterwards, so a template brings no subscriptions. */
-export const COMPANY_TEMPLATE_KEYS = ['project', 'startup', 'studio', 'corporation', 'security', 'opensource', 'agency', 'lab'] as const;
+export const COMPANY_TEMPLATE_KEYS = ['project', 'startup', 'studio', 'corporation', 'security', 'opensource', 'agency', 'lab', 'home'] as const;
 export type CompanyTemplateKey = (typeof COMPANY_TEMPLATE_KEYS)[number];
 export type CompanyTemplateStaff = { role: string; count: number };
 export type CompanyTemplateDept = { template: TemplateKey; name?: string; products?: string[]; staff: CompanyTemplateStaff[] };
@@ -206,6 +208,7 @@ export const COMPANY_TEMPLATES: readonly CompanyTemplate[] = [
     departments: [
       { template: 'operations', staff: [{ role: 'OPS-HEAD', count: 1 }, { role: 'OPS-INTEG', count: 1 }] },
       { template: 'development', staff: [{ role: 'DEV-HEAD', count: 1 }, { role: 'DEV-ENG', count: 2 }, { role: 'DEV-SEC', count: 1 }, { role: 'DEV-RED', count: 1 }] },
+      { template: 'sales', staff: [{ role: 'SAL-HEAD', count: 1 }, { role: 'SAL-AE', count: 1 }] },
       { template: 'support', staff: [{ role: 'SUP-HEAD', count: 1 }, { role: 'SUP-T1', count: 1 }] },
     ],
   },
@@ -229,6 +232,13 @@ export const COMPANY_TEMPLATES: readonly CompanyTemplate[] = [
     departments: [
       { template: 'development', staff: [{ role: 'DEV-HEAD', count: 1 }, { role: 'DEV-ARCH', count: 1 }, { role: 'DEV-ENG', count: 2 }, { role: 'DEV-DOCS', count: 1 }] },
       { template: 'business_development', staff: [{ role: 'BIZ-HEAD', count: 1 }, { role: 'BIZ-ANALYST', count: 1 }] },
+    ],
+  },
+  {
+    key: 'home',
+    departments: [
+      { template: 'home_devices', staff: [{ role: 'HOM-HEAD', count: 1 }, { role: 'HOM-NET', count: 1 }, { role: 'HOM-SMART', count: 1 }] },
+      { template: 'household', staff: [{ role: 'HHD-HEAD', count: 1 }, { role: 'HHD-SUPPLY', count: 1 }, { role: 'HHD-BILLS', count: 1 }, { role: 'HHD-CAL', count: 1 }] },
     ],
   },
 ];

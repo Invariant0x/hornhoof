@@ -52,7 +52,7 @@ describe('StructureCard', () => {
   it('offers the missing templates with the default ticks when building by hand', async () => {
     const calls = mockApi({ 'POST /api/departments/build': [201, { created: [], removed: [] }] });
     render(<StructureCard manual={{ existing: ['operations', 'sales'] }} departments={[]} onCorrect={noop} />);
-    expect(screen.getAllByRole('checkbox')).toHaveLength(6);
+    expect(screen.getAllByRole('checkbox')).toHaveLength(8);
     const ticked = screen.getAllByRole('checkbox').filter(b => (b as HTMLInputElement).checked).map(b => b.getAttribute('data-template'));
     expect(ticked).toEqual(['development', 'marketing', 'business_development']);
     fireEvent.click(screen.getByRole('button', { name: 'Create departments (3)' }));

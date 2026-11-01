@@ -10,9 +10,11 @@ export const TEMPLATES: readonly { key: TemplateKey; roleCode: string; ticked: b
   { key: 'design', roleCode: 'DSN', ticked: false, always: false },
   { key: 'support', roleCode: 'SUP', ticked: false, always: false },
   { key: 'finance', roleCode: 'FIN', ticked: false, always: false },
+  { key: 'home_devices', roleCode: 'HOM', ticked: false, always: false },
+  { key: 'household', roleCode: 'HHD', ticked: false, always: false },
 ];
 
-export type CompanyTemplateKey = 'project' | 'startup' | 'studio' | 'corporation' | 'security' | 'opensource' | 'agency' | 'lab';
+export type CompanyTemplateKey = 'project' | 'startup' | 'studio' | 'corporation' | 'security' | 'opensource' | 'agency' | 'lab' | 'home';
 export type CompanyTemplateDept = { template: TemplateKey; name?: string; products?: string[]; staff: { role: string; count: number }[] };
 export type CompanyTemplate = { key: CompanyTemplateKey; departments: readonly CompanyTemplateDept[] };
 
@@ -65,6 +67,7 @@ export const COMPANY_TEMPLATES: readonly CompanyTemplate[] = [
     departments: [
       { template: 'operations', staff: [{ role: 'OPS-HEAD', count: 1 }, { role: 'OPS-INTEG', count: 1 }] },
       { template: 'development', staff: [{ role: 'DEV-HEAD', count: 1 }, { role: 'DEV-ENG', count: 2 }, { role: 'DEV-SEC', count: 1 }, { role: 'DEV-RED', count: 1 }] },
+      { template: 'sales', staff: [{ role: 'SAL-HEAD', count: 1 }, { role: 'SAL-AE', count: 1 }] },
       { template: 'support', staff: [{ role: 'SUP-HEAD', count: 1 }, { role: 'SUP-T1', count: 1 }] },
     ],
   },
@@ -88,6 +91,13 @@ export const COMPANY_TEMPLATES: readonly CompanyTemplate[] = [
     departments: [
       { template: 'development', staff: [{ role: 'DEV-HEAD', count: 1 }, { role: 'DEV-ARCH', count: 1 }, { role: 'DEV-ENG', count: 2 }, { role: 'DEV-DOCS', count: 1 }] },
       { template: 'business_development', staff: [{ role: 'BIZ-HEAD', count: 1 }, { role: 'BIZ-ANALYST', count: 1 }] },
+    ],
+  },
+  {
+    key: 'home',
+    departments: [
+      { template: 'home_devices', staff: [{ role: 'HOM-HEAD', count: 1 }, { role: 'HOM-NET', count: 1 }, { role: 'HOM-SMART', count: 1 }] },
+      { template: 'household', staff: [{ role: 'HHD-HEAD', count: 1 }, { role: 'HHD-SUPPLY', count: 1 }, { role: 'HHD-BILLS', count: 1 }, { role: 'HHD-CAL', count: 1 }] },
     ],
   },
 ];
