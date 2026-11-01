@@ -10,4 +10,10 @@ describe('the node image', () => {
   it('carries the everyday programs agents reach for in a shell', () => {
     for (const program of ['git', 'curl', 'ripgrep', 'tmux', 'procps', 'jq', 'file', 'python3']) expect(installed).toContain(program);
   });
+
+  it('carries superpowers at a pinned commit where the node looks for it, readable by every agent', () => {
+    expect(dockerfile).toMatch(/ARG SUPERPOWERS_COMMIT=[0-9a-f]{40}\n/);
+    expect(dockerfile).toContain('fetch obra/superpowers /opt/hornhoof/superpowers $SUPERPOWERS_COMMIT');
+    expect(runtime).toContain('COPY --from=quality /opt/hornhoof/superpowers /opt/hornhoof/superpowers');
+  });
 });
