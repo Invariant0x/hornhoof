@@ -7,6 +7,7 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { MIGRATIONS } from '../src/db/client.js';
+import { isUniqueViolation } from '../src/db/errors.js';
 
 /* A copy of the migrations folder that stops after the given tag, as an older install would have it. */
 async function migrationsUpTo(tag: string): Promise<string> {
@@ -154,6 +155,42 @@ describe('migration 0011', () => {
       { number: 3, panel: [] },
       { number: 4, panel: [] },
     ]);
+  });
+});
+
+describe('migration 0016', () => {
+  const C = '00000000-0000-4000-8000-000000000001';
+  const P = '00000000-0000-4000-8000-000000000002';
+  const D = '00000000-0000-4000-8000-0000000000d1';
+
+  it("keeps the company's notes as the orchestrator's notebook and lets each department number its own", async () => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0015_memory_timers') });
+    await db.execute(sql`insert into companies (id, name) values (${C}, 'Acme')`);
+    await db.execute(sql`insert into people (id, company_id, name, email, status, scope_kind) values (${P}, ${C}, 'Ivan', 'ivan@acme.com', 'active', 'company')`);
+    await db.execute(sql`insert into notebook_notes (company_id, number, text, person_id, by_orchestrator, removed_at) values
+      (${C}, 1, 'Ship on Fridays only.', ${P}, false, null),
+      (${C}, 2, 'Prices in EUR.', null, true, null),
+      (${C}, 3, 'Old rule.', ${P}, false, '2026-10-30T10:00:00Z')`);
+
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+
+    const rows = await db.execute<{ number: number; text: string; person_id: string | null; by_orchestrator: boolean; removed: boolean; department_id: string | null; agent_id: string | null }>(
+      sql`select number, text, person_id, by_orchestrator, removed_at is not null as removed, department_id, agent_id from notebook_notes order by number`,
+    );
+    expect(rows.rows).toEqual([
+      { number: 1, text: 'Ship on Fridays only.', person_id: P, by_orchestrator: false, removed: false, department_id: null, agent_id: null },
+      { number: 2, text: 'Prices in EUR.', person_id: null, by_orchestrator: true, removed: false, department_id: null, agent_id: null },
+      { number: 3, text: 'Old rule.', person_id: P, by_orchestrator: false, removed: true, department_id: null, agent_id: null },
+    ]);
+
+    await db.execute(sql`insert into departments (id, company_id, name, role_code) values (${D}, ${C}, 'Sales', 'SAL')`);
+    await db.execute(sql`insert into notebook_notes (company_id, department_id, number, text) values (${C}, ${D}, 1, 'Call back within a day.')`);
+    const twice = (insert: Promise<unknown>) => insert.then(() => false, isUniqueViolation);
+    expect(await twice(db.execute(sql`insert into notebook_notes (company_id, number, text) values (${C}, 1, 'A second note 1.')`))).toBe(true);
+    expect(await twice(db.execute(sql`insert into notebook_notes (company_id, department_id, number, text) values (${C}, ${D}, 1, 'Again.')`))).toBe(true);
   });
 });
 
