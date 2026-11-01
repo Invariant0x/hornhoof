@@ -4,11 +4,11 @@ Thank you for wanting to help. Hornhoof is young, and every report, idea and cha
 
 ## Ways to help, with or without code
 
-- **Report a problem.** Open an issue with "Bug report". Say what you did, what you expected and what happened. Logs help, but remove keys and passwords from them first.
-- **Suggest an idea.** Open an issue with "Idea". Start with the problem you have, not the solution: "I lose track of which agent waits for me" tells us more than "add a button".
-- **Translate.** Every screen ships in English and Russian. Better words in either, or a new language, are welcome.
-- **Write templates.** Departments, roles and skills live in `templates/`. They must fit any company: no company, product, industry or programming language of one particular user in them.
-- **Fix and build.** Issues marked `good first issue` are small and well described. `help wanted` marks bigger ones we would love help with.
+- Report a problem: open an issue with "Bug report". Say what you did, what you expected and what happened. Logs help, but remove keys and passwords from them first.
+- Suggest an idea: open an issue with "Idea". Start with the problem you have, not the solution. "I lose track of which agent waits for me" tells us more than "add a button".
+- Translate. English is the main language of Hornhoof, and every other language is a translation of it. The screens have Russian now. Better words, or a whole new language, are welcome; see "Adding a language" below.
+- Write templates. Departments, roles and skills live in `templates/`. They must fit any company: no company, product, industry or programming language of one particular user in them.
+- Fix and build. Issues marked `good first issue` are small and well described, and `help wanted` marks bigger ones we would love help with.
 
 Security problems never go into a public issue. [SECURITY.md](SECURITY.md) says how to report them privately.
 
@@ -16,15 +16,15 @@ Security problems never go into a public issue. [SECURITY.md](SECURITY.md) says 
 
 Hornhoof works like most large open projects: you propose a change as a pull request, the checks run, a maintainer reviews it, and a maintainer merges it.
 
-1. **Agree first on anything big.** For a new feature, a new screen or a change to how agents work, open an issue or comment on one before you write code. A short "I want to do X like this" saves a pull request that cannot be taken. Typos, small fixes and translations need no issue.
-2. **Fork the repository and make a branch from `main`.** Name it after what it does, like `fix-invite-link` or `machines-tab-phone`.
-3. **Write the test first.** Write a test that shows what should happen, run it and watch it fail, then write the code that makes it pass. A change without a test that failed first is not done.
-4. **Run the checks** on your machine (see below). They must be green.
-5. **Commit with a sign-off** (see "Sign your work" below).
-6. **Open a pull request** against `main` and fill in the template. Keep it to one topic. Two small pull requests get in faster than one big one.
-7. **The checks run on GitHub.** Tests, type checks and the sign-off check must pass before review.
-8. **A maintainer reviews it.** Answer review comments with new commits on the same branch; do not force-push over a branch under review. When a comment is unclear, ask.
-9. **A maintainer merges it** as one commit with the pull request's title. Your sign-off goes with it.
+1. Agree first on anything big. For a new feature, a new screen or a change to how agents work, open an issue or comment on one before you write code. A short "I want to do X like this" saves a pull request that cannot be taken. Typos, small fixes and translations need no issue.
+2. Fork the repository and make a branch from `main`. Name it after what it does, like `fix-invite-link` or `machines-tab-phone`.
+3. Write the test first. Write a test that shows what should happen, run it and watch it fail, then write the code that makes it pass. A change without a test that failed first is not done.
+4. Run the checks on your machine, as "Checks before you push" says. They must be green.
+5. Commit with a sign-off, as "Sign your work" says.
+6. Open a pull request against `main` and fill in the template. Keep it to one topic: two small pull requests get in faster than one big one.
+7. The checks run on GitHub. Tests, type checks and the sign-off check must pass before review.
+8. A maintainer reviews it. Answer review comments with new commits on the same branch, and do not force-push over a branch under review. When a comment is unclear, ask.
+9. A maintainer merges it as one commit with the pull request's title. Your sign-off goes with it.
 
 We try to give every pull request a first answer within a week. If yours waits longer, a friendly comment on it is welcome.
 
@@ -72,6 +72,10 @@ These are the same rules everyone follows, people and agents alike. [AGENTS.md](
 - Do not reformat files you did not change, and do not run a formatter over the whole repository.
 - A screen you change must work at phone width, with no sideways scroll. Add screenshots in English and Russian to the pull request.
 - Templates in `templates/` stay general, and `templates/SOURCES.md` names where each text comes from and under which licence. Do not copy text from a source whose licence does not allow it.
+
+## Adding a language
+
+All text people see lives in `apps/web/src/i18n/`: `en.ts` is the source, and `ru.ts` is its Russian translation. A new language is a new file next to them with every key of `en.ts`, plus its name in `LANGUAGES` in `index.tsx`. Write it in plain words, the way a person outside IT speaks, and check the screens at phone width, where longer words wrap first. Open an issue before you start, so two people do not translate the same language.
 
 ## Commit messages
 
