@@ -111,7 +111,7 @@ export function setupRoutes(app: FastifyInstance, { db, config }: Deps): void {
     }
 
     const { company, person, code } = result;
-    await startSession(reply, db, config, person.id);
+    await startSession(reply, db, config, person.id, passwordHash);
     reply.code(201);
     return {
       company: { id: company.id, name: company.name },

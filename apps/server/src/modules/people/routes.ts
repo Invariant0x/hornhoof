@@ -46,13 +46,14 @@ const inviteFor = (token: string, by: Pick<Person, 'id' | 'companyId'>, personId
 const notFound = () => new ApiError(404, 'not_found', 'This invite does not exist.', 'invite_unknown');
 const gone = () => new ApiError(410, 'gone', 'This invite has already been used or has expired. Ask for a new one.', 'invite_used');
 
-/* A fresh link for someone already in the company. It doubles as a password reset, so old access ends here. */
+/* A fresh link for someone already in the company. It doubles as a password reset, so old access ends here. The person's
+   row changes before the sessions go, so a sign-in that holds it finishes first and its session is deleted too. */
 export async function reinvite(db: Db, personId: string, by: Pick<Person, 'id' | 'companyId'>): Promise<{ token: string; person: Person }> {
   const token = newToken();
   const person = await db.transaction(async tx => {
+    const [row] = await tx.update(people).set({ status: 'invited', passwordHash: null }).where(eq(people.id, personId)).returning(personColumns);
     await tx.update(invites).set({ usedAt: new Date() }).where(and(eq(invites.personId, personId), isNull(invites.usedAt)));
     await tx.delete(sessions).where(eq(sessions.personId, personId));
-    const [row] = await tx.update(people).set({ status: 'invited', passwordHash: null }).where(eq(people.id, personId)).returning(personColumns);
     await tx.insert(invites).values(inviteFor(token, by, personId));
     return row!;
   });
@@ -180,7 +181,8 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
       return row;
     });
 
-    await startSession(reply, db, config, person.id);
+    /* A new link sent meanwhile takes this password back. */
+    if (!(await startSession(reply, db, config, person.id, passwordHash))) throw gone();
     return { person };
   });
 

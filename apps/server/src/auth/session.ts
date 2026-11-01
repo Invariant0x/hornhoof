@@ -34,12 +34,24 @@ export type Person = {
   via?: string;
 };
 
-/* Every sign-in also clears out everyone's expired sessions, so the table does not grow forever. */
-export async function startSession(reply: FastifyReply, db: Db, config: Config, personId: string): Promise<void> {
+/* Every sign-in also clears out everyone's expired sessions, so the table does not grow forever. A session starts only
+   for the password the caller just checked or set, with the person's row locked until it is in: a reset or a disable
+   running at the same time either comes first and is seen here, or waits and then deletes the new session. */
+export async function startSession(reply: FastifyReply, db: Db, config: Config, personId: string, passwordHash: string): Promise<boolean> {
   await db.delete(sessions).where(lte(sessions.expiresAt, new Date()));
   const token = newToken();
   const expiresAt = new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000);
-  await db.insert(sessions).values({ tokenHash: hashToken(token), personId, expiresAt });
+  const started = await db.transaction(async tx => {
+    const [still] = await tx
+      .select({ id: people.id })
+      .from(people)
+      .where(and(eq(people.id, personId), eq(people.passwordHash, passwordHash), eq(people.status, 'active')))
+      .for('share');
+    if (!still) return false;
+    await tx.insert(sessions).values({ tokenHash: hashToken(token), personId, expiresAt });
+    return true;
+  });
+  if (!started) return false;
   reply.setCookie(SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: 'lax',
@@ -47,6 +59,7 @@ export async function startSession(reply: FastifyReply, db: Db, config: Config, 
     secure: config.secureCookies,
     expires: expiresAt,
   });
+  return true;
 }
 
 export async function endSession(req: FastifyRequest, reply: FastifyReply, db: Db): Promise<void> {

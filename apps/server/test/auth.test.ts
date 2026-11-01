@@ -1,8 +1,28 @@
 import { eq } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { requireCompanyScope, type Person } from '../src/auth/session.js';
+import { runCli } from '../src/cli.js';
 import { people, sessions } from '../src/db/schema.js';
 import { invitePerson, SETUP, sessionFrom, setUpCompany, testApp } from './helpers.js';
+
+/* Lets a test hold one sign-in after its password check, where a reset can slip in before the session starts. */
+const pause = vi.hoisted(() => ({ next: undefined as undefined | { checked: () => void; resume: Promise<void> } }));
+vi.mock('../src/auth/password.js', async importOriginal => {
+  const real = await importOriginal<typeof import('../src/auth/password.js')>();
+  return {
+    ...real,
+    verifyPassword: async (password: string, stored: string) => {
+      const ok = await real.verifyPassword(password, stored);
+      const held = pause.next;
+      pause.next = undefined;
+      if (held) {
+        held.checked();
+        await held.resume;
+      }
+      return ok;
+    },
+  };
+});
 
 const login = (email: string, password: string) => ({ method: 'POST' as const, url: '/api/auth/login', payload: { email, password } });
 const me = (token?: string) => ({ url: '/api/me', ...(token ? { cookies: { hh_session: token } } : {}) });
@@ -49,6 +69,28 @@ describe('POST /api/auth/login', () => {
     expect(left.map(s => s.tokenHash)).not.toContain('expired-session-hash');
     expect(left).toHaveLength(1);
     expect((await app.inject(me(maria))).statusCode).toBe(200);
+  });
+
+  it('gives no session to a sign-in that checked the old password while an owner link reset it', async () => {
+    const { app, db, config } = await testApp();
+    await setUpCompany(app);
+    let checked!: () => void, resume!: () => void;
+    const reached = new Promise<void>(resolve => (checked = resolve));
+    pause.next = { checked, resume: new Promise<void>(resolve => (resume = resolve)) };
+    const signingIn = app.inject(login('ivan@acme.com', SETUP.password));
+    await reached;
+
+    const lines: string[] = [];
+    await runCli(['owner-link'], { db, config, print: line => lines.push(line) });
+    resume();
+    const res = await signingIn;
+    expect(res.statusCode).toBe(401);
+    expect(res.json().error.reason).toBe('wrong_password');
+
+    const link = lines.join('\n').match(/\/invite\/([A-Za-z0-9_-]{43})/)![1];
+    const accepted = await app.inject({ method: 'POST', url: `/api/invites/${link}/accept`, payload: { password: 'a brand new password' } });
+    expect(accepted.statusCode).toBe(200);
+    expect(await db.select().from(sessions)).toHaveLength(1);
   });
 
   it('refuses a disabled person', async () => {
