@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { errorText, useT } from '../i18n';
+import { errorText, useLanguage, useT } from '../i18n';
 import type { Build } from '../types';
 import type { Updates } from '../updates';
 import { UpdateProgress } from '../ui/UpdateProgress';
@@ -8,6 +8,7 @@ import { versionText } from '../ui/VersionMark';
 /* The builds Hornhoof can run, the one it runs, and the update under way or the last one's end. */
 export function Versions({ updates, onClose }: { updates: Updates; onClose: () => void }) {
   const t = useT();
+  const { language } = useLanguage();
   const { view, busy } = updates;
   const [confirm, setConfirm] = useState<Build | null>(null);
   const [failure, setFailure] = useState<unknown>(null);
@@ -60,7 +61,7 @@ export function Versions({ updates, onClose }: { updates: Updates; onClose: () =
           >
             {t.updates.checkNow}
           </button>
-          <span className="muted">{view.error ? t.updates.checkFailed : view.checkedAt && t.updates.checkedAt(new Date(view.checkedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))}</span>
+          <span className="muted">{view.error ? t.updates.checkFailed : view.checkedAt && t.updates.checkedAt(new Intl.DateTimeFormat(language, { hour: '2-digit', minute: '2-digit' }).format(new Date(view.checkedAt)))}</span>
         </div>
         {!updater.present && <p className="update-note">{t.updates.missing}</p>}
         {updates.starting && !status && <UpdateProgress version={latest?.version ?? ''} step={null} starting offline={updates.offline} />}

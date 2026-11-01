@@ -1,9 +1,11 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { LanguageProvider } from '../src/i18n';
 import { Shell } from '../src/screens/Shell';
+import { Versions } from '../src/screens/Versions';
 import type { Build, UpdatesView, UpdaterStatus } from '../src/types';
-import { page } from '../src/updates';
+import { page, type Updates } from '../src/updates';
 import { ME, mockApi, ORG } from './api-mock';
 
 const build = (version: string, commit: string, extra: Partial<Build> = {}): Build => ({ tag: version, version, commit, created: '2026-10-30T01:00:00Z', title: '', migrations: 5, ...extra });
@@ -189,6 +191,19 @@ describe('updates', () => {
     const dialog = await openVersions(user);
     expect(within(dialog).getByText('The updater is not running. Run the install command for this server again to add it.')).toBeInTheDocument();
     expect(within(dialog).queryByRole('button', { name: 'Install' })).not.toBeInTheDocument();
+  });
+
+  it('gives the time of the last check as the chosen language writes it', () => {
+    localStorage.setItem('hh-lang', 'ru');
+    const view = updates();
+    const idle: Updates = { view, busy: false, starting: false, offline: false, asking: false, check: async () => {}, update: async () => {}, callOff: async () => {} };
+    render(
+      <LanguageProvider>
+        <Versions updates={idle} onClose={() => {}} />
+      </LanguageProvider>,
+    );
+    const time = new Intl.DateTimeFormat('ru', { hour: '2-digit', minute: '2-digit' }).format(new Date(view.checkedAt!));
+    expect(screen.getByText(`Проверено в ${time}`)).toBeInTheDocument();
   });
 
   it('checks for updates when asked and says when it could not', async () => {
