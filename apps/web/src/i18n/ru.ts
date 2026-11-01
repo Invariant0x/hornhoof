@@ -321,6 +321,10 @@ export const ru: Messages = {
     showTerminal: 'Терминал',
     writeTo: (name: string) => `Сообщение для ${name}`,
     hiredLine: (name: string) => `Нанят: ${name}`,
+    commandMachine: 'Команда для подключения машины',
+    commandPlans: names => `Команда для подключения: ${names}`,
+    commandAdd: (name, host) => `Команда, чтобы добавить ${name} на ${host}`,
+    commandOnly: 'Оркестратор попросил эту команду у Hornhoof, и видите ее только вы. Она работает один раз, 24 часа.',
     failedEmployee: {
       timeout: 'Сотрудник не закончил за 15 минут.',
       not_logged_in: 'Подписка сотрудника вышла из аккаунта на своей машине. Войдите снова и напишите еще раз.',

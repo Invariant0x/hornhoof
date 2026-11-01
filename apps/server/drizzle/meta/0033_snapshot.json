@@ -1668,6 +1668,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "command_enc": {
+          "name": "command_enc",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "expires_at": {
           "name": "expires_at",
           "type": "timestamp with time zone",

@@ -4,6 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { requirePerson } from '../../auth/session.js';
+import { decryptSecret } from '../../crypto/secrets.js';
 import type { Db } from '../../db/client.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
 import { agents, jobs, machines, nodeCodes, nodes, people, subscriptions, tasks, testParts, testRuns, type Provider } from '../../db/schema.js';
@@ -12,7 +13,7 @@ import { publicUrl } from '../link/link.js';
 import { together } from '../testruns/load.js';
 import { pumpTests } from '../testruns/runs.js';
 import { createNodeCode } from './codes.js';
-import { installCommand } from './command.js';
+import { commandFor } from './command.js';
 import { disconnectMachines } from './disconnect.js';
 import { BUILTIN, nodeIdentity } from './hub.js';
 import { liveNode, settlePlans } from './nodes.js';
@@ -26,6 +27,7 @@ const JoinBody = z.object({
 });
 
 const IdParams = z.object({ id: z.uuid() });
+const CommandParams = z.object({ id: z.string().regex(/^[0-9a-f]{64}$/) });
 export const LendBody = z.object({ lendsTests: z.boolean() }).strict();
 export const PlanBody = z.object({ subscription: z.uuid() }).strict();
 
@@ -134,7 +136,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const code = await createNodeCode(db, { companyId: me.companyId, personId: me.id, subscriptionIds: [] });
     reply.code(201);
-    return { command: installCommand(await publicUrl(db, config), code) };
+    return commandFor(db, config, me, code);
   });
 
   /* One of the owner's own plans on one more of their machines: the command starts the plan's node there and signs in
@@ -153,7 +155,48 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (there) throw new ApiError(409, 'conflict', 'This subscription is on this machine already.', 'already_on_machine');
     const code = await createNodeCode(db, { companyId: me.companyId, personId: me.id, subscriptionIds: [sub.id], machineId: machine.id });
     reply.code(201);
-    return { command: installCommand(await publicUrl(db, config), code) };
+    return commandFor(db, config, me, code);
+  });
+
+  /* The commands the orchestrator made for this person, on their screen in his window until the machine joins, the day
+     is over or they close it. He never reads them himself, so a code cannot reach him. */
+  const ownScreen = async (req: Parameters<typeof requirePerson>[0]) => {
+    const me = await requirePerson(req, db);
+    if (me.via) throw new ApiError(403, 'forbidden', "Only the CEO's own screen shows this.", 'not_owner');
+    return me;
+  };
+  app.get('/api/nodes/commands', async req => {
+    const me = await ownScreen(req);
+    const rows = await db
+      .select({ id: nodeCodes.codeHash, commandEnc: nodeCodes.commandEnc, subscriptionIds: nodeCodes.subscriptionIds, machine: machines.hostname, expiresAt: nodeCodes.expiresAt })
+      .from(nodeCodes)
+      .leftJoin(machines, eq(machines.id, nodeCodes.machineId))
+      .where(and(eq(nodeCodes.personId, me.id), isNotNull(nodeCodes.commandEnc), isNull(nodeCodes.usedAt), gt(nodeCodes.expiresAt, new Date())))
+      .orderBy(asc(nodeCodes.createdAt));
+    const ids = rows.flatMap(r => r.subscriptionIds);
+    const plans = ids.length ? await db.select({ id: subscriptions.id, label: subscriptions.label }).from(subscriptions).where(inArray(subscriptions.id, ids)) : [];
+    return {
+      commands: rows.map(r => ({
+        id: r.id,
+        kind: r.machine ? 'add' : r.subscriptionIds.length ? 'plans' : 'machine',
+        plans: r.subscriptionIds.flatMap(id => plans.filter(p => p.id === id).map(p => p.label)),
+        machine: r.machine,
+        command: decryptSecret(r.commandEnc!, config.secret),
+        expiresAt: r.expiresAt.toISOString(),
+      })),
+    };
+  });
+
+  app.post('/api/nodes/commands/:id/hide', async (req, reply) => {
+    const me = await ownScreen(req);
+    const { id } = CommandParams.parse(req.params);
+    const hidden = await db
+      .update(nodeCodes)
+      .set({ commandEnc: null })
+      .where(and(eq(nodeCodes.codeHash, id), eq(nodeCodes.personId, me.id)))
+      .returning({ id: nodeCodes.codeHash });
+    if (!hidden.length) throw new ApiError(404, 'not_found', 'This command is not shown any more.', 'code_unknown');
+    return reply.code(204).send();
   });
 
   app.get('/api/machines', async req => {

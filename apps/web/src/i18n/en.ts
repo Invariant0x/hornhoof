@@ -335,6 +335,11 @@ export const en = {
     showTerminal: 'Terminal',
     writeTo: (name: string) => `Write to ${name}`,
     hiredLine: (name: string) => `Hired: ${name}`,
+    /* A machine command he asked Hornhoof for: the CEO sees it here, he does not. */
+    commandMachine: 'Command to connect a machine',
+    commandPlans: (names: string) => `Command to connect ${names}`,
+    commandAdd: (name: string, host: string) => `Command to add ${name} to ${host}`,
+    commandOnly: 'The orchestrator asked Hornhoof for this command, and only you see it. It works once, for 24 hours.',
     failedEmployee: {
       timeout: 'The employee did not finish within 15 minutes.',
       not_logged_in: 'This employee\'s subscription is signed out on its machine. Sign in again, then write once more.',

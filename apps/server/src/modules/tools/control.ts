@@ -9,6 +9,7 @@ import { AgentPatch } from '../agents/routes.js';
 import { deptName } from '../departments/templates.js';
 import { BuildBody, RepoBody } from '../departments/routes.js';
 import { LinkBody } from '../link/routes.js';
+import { SHOWN_TO_CEO } from '../nodes/command.js';
 import { LendBody } from '../nodes/routes.js';
 import { NOTE_MAX, NoteBody } from '../notebook/book.js';
 import { carriesFile, encodedHint } from '../tasks/attachments.js';
@@ -55,6 +56,10 @@ export const CEO_ONLY = new Set([
 ]);
 export const ONLY_CEO = 'Only the CEO can ask for this. Ask the CEO first.';
 
+/* The tools that make a machine command. Hornhoof shows it to the CEO in this window and tells him only that, so the
+   code reaches neither him nor his conversation. */
+const SHOWS_COMMAND = new Set(['connect_plans', 'plan_command', 'machine_command', 'add_plan_to_machine']);
+
 /* What the CEO can do in Hornhoof's screens, as the orchestrator's tools. Each one calls the same route the screen calls,
    as the company's owner, so it is allowed and refused exactly what the CEO is; Hornhoof records it as the orchestrator's. */
 export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyInstance, job: ToolJob): void {
@@ -77,7 +82,9 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
     register(name, { description, inputSchema: input }, async (a: z.infer<z.ZodObject<S>>) => {
       if (CEO_ONLY.has(name) && !job.answersCeo) return say(ONLY_CEO, true);
       const made = await call(a);
-      return typeof made === 'string' ? say(made, true) : send(made);
+      if (typeof made === 'string') return say(made, true);
+      const answer = await send(made);
+      return SHOWS_COMMAND.has(name) && !answer.isError ? say(SHOWN_TO_CEO) : answer;
     });
 
   tool(
@@ -194,7 +201,7 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
   );
   tool(
     'connect_plans',
-    'Connects the CEO\'s own plans (claude, codex, kimi, glm, antigravity for Google AI Pro or Ultra): returns the command the CEO runs on their machine.',
+    'Connects the CEO\'s own plans (claude, codex, kimi, glm, antigravity for Google AI Pro or Ultra): the CEO sees the command to run on their machine in this window, you do not.',
     ConnectBody.shape,
     body => ({ method: 'POST', url: '/api/subscriptions/connect', payload: body }),
   );

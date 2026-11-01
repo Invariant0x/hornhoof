@@ -7,6 +7,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { and, desc, eq, isNull, like } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
+import { orchestratorHeaders } from '../src/auth/internal.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agentChanges, agentEvents, agents, companies, departments, jobs, machines, people, proposals, publicLinks, requests, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
 import { afterJob } from '../src/modules/tasks/wake.js';
@@ -135,20 +136,52 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
     expect((await call(await mcp(app), 'view', { path: '/mcp' })).isError).toBe(true);
   });
 
-  it("connects a machine of the CEO's without a plan, and adds one of the CEO's plans to it", async () => {
-    const { app } = await company();
+  it("shows the CEO alone, in this window, the commands that connect the CEO's machines and plans, and never the orchestrator", async () => {
+    const { app, db, ceo } = await company();
     const client = await mcp(app);
-    const alone = await call(client, 'machine_command', {});
-    expect(alone.isError).toBeFalsy();
+    const SHOWN = 'The command is shown to the CEO in this window; it works once, for 24 hours.';
+    const commands = async () => (await app.inject({ url: '/api/nodes/commands', ...as(ceo) })).json().commands as { id: string; command: string }[];
     const code = (command: string) => command.split('--join ')[1]!;
     const machine = { machineId: 'laptop-0002-abcd', hostname: 'ivan-laptop', os: 'linux', arch: 'x86_64' };
-    const joined = (await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code: code(JSON.parse(text(alone)).command), ...machine } })).json();
+
+    expect(text(await call(client, 'machine_command', {}))).toBe(SHOWN);
+    const [alone] = await commands();
+    expect(alone).toMatchObject({ kind: 'machine', plans: [], machine: null, expiresAt: expect.any(String) });
+    const joined = (await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code: code(alone!.command), ...machine } })).json();
     expect(joined.nodes).toMatchObject([{ subscriptionId: null, provider: 'machine' }]);
-    const plan = JSON.parse(text(await call(client, 'connect_plans', { providers: ['claude'] }))).subscriptions[0].id;
-    const added = await call(client, 'add_plan_to_machine', { machine: joined.machine.id, subscription: plan });
-    expect(added.isError).toBeFalsy();
-    const there = (await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code: code(JSON.parse(text(added)).command), ...machine } })).json();
-    expect(there.nodes).toMatchObject([{ subscriptionId: plan, provider: 'claude' }]);
+    expect(await commands()).toEqual([]);
+
+    expect(text(await call(client, 'connect_plans', { providers: ['claude'] }))).toBe(SHOWN);
+    const [plan] = await db.select().from(subscriptions).where(eq(subscriptions.provider, 'claude'));
+    expect(text(await call(client, 'plan_command', { subscription: plan!.id }))).toBe(SHOWN);
+    expect(text(await call(client, 'add_plan_to_machine', { machine: joined.machine.id, subscription: plan!.id }))).toBe(SHOWN);
+    const made = await commands();
+    expect(made).toMatchObject([
+      { kind: 'plans', plans: ['Claude'], machine: null },
+      { kind: 'plans', plans: ['Claude'], machine: null },
+      { kind: 'add', plans: ['Claude'], machine: 'ivan-laptop' },
+    ]);
+    const there = (await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code: code(made[2]!.command), ...machine } })).json();
+    expect(there.nodes).toMatchObject([{ subscriptionId: plan!.id, provider: 'claude' }]);
+
+    expect((await app.inject({ method: 'POST', url: `/api/nodes/commands/${made[0]!.id}/hide`, ...as(ceo) })).statusCode).toBe(204);
+    expect((await commands()).map(c => c.id)).toEqual([made[1]!.id]);
+    expect((await call(client, 'view', { path: '/api/nodes/commands' })).isError).toBe(true);
+    const events = JSON.stringify(await db.select({ data: agentEvents.data }).from(agentEvents));
+    for (const c of [alone!, ...made]) expect(events).not.toContain(code(c.command));
+  });
+
+  it("keeps a machine's command from the people who did not get it, and from the orchestrator's own calls", async () => {
+    const { app, db, ceo, orchestrator } = await company();
+    await call(await mcp(app), 'machine_command', {});
+    const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { whole: true } });
+    expect((await app.inject({ url: '/api/nodes/commands', ...as(maria) })).json().commands).toEqual([]);
+    const [ivan] = await db.select().from(people).where(eq(people.isOwner, true));
+    const inside = await app.inject({ url: '/api/nodes/commands', headers: orchestratorHeaders(ivan!.id, orchestrator.id) });
+    expect(inside.statusCode).toBe(403);
+    const [made] = (await app.inject({ url: '/api/nodes/commands', ...as(ceo) })).json().commands;
+    expect((await app.inject({ method: 'POST', url: `/api/nodes/commands/${made.id}/hide`, ...as(maria) })).statusCode).toBe(404);
+    expect((await app.inject({ method: 'POST', url: `/api/nodes/commands/${made.id}/hide`, headers: orchestratorHeaders(ivan!.id, orchestrator.id) })).statusCode).toBe(403);
   });
 
   it('gives these tools to the orchestrator alone', async () => {

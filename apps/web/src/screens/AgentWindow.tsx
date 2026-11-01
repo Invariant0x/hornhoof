@@ -3,8 +3,9 @@ import { api } from '../api';
 import { deptLabel, errorText, useLanguage, useT, type Messages } from '../i18n';
 import { useStream } from '../live';
 import { PROGRAM_NAMES, PROVIDER_NAMES } from '../providers';
-import type { AgentCardView, EventView, Me, OrchestratorState, Org, StaffLine, StructureItem, SubView, TemplateKey } from '../types';
+import type { AgentCardView, EventView, Me, OrchestratorState, Org, ShownCommand, StaffLine, StructureItem, SubView, TemplateKey } from '../types';
 import { AgentTerminal } from '../ui/AgentTerminal';
+import { CommandCard } from '../ui/CommandCard';
 import { Markdown } from '../ui/Markdown';
 import { Notebook } from '../ui/Notebook';
 import { StaffCard } from '../ui/StaffCard';
@@ -71,7 +72,7 @@ type Props = { me: Me; org: Org; agentId: string; staff?: StaffAsk | null; onClo
 
 /* An agent's window: its live terminal when its node shows one, or its conversation as a log with a line to write to it;
    and the orchestrator's cards. */
-export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Props) {
+export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard }: Props) {
   const t = useT();
   const { language } = useLanguage();
   const orchestrator = agentId === 'orchestrator';
@@ -91,6 +92,10 @@ export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Pro
      department's. */
   const [notebook, setNotebook] = useState(false);
   const [noTerminal, setNoTerminal] = useState(false);
+  /* The machine commands he asked Hornhoof for. They are the CEO's alone: only the CEO's screen gets them, and shows them
+     here, apart from his conversation. */
+  const [commands, setCommands] = useState<ShownCommand[]>([]);
+  const ownsCommands = orchestrator && me.person.isOwner;
   const asked = useRef<number | null>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const box = useRef<HTMLElement>(null);
@@ -130,6 +135,18 @@ export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Pro
     });
   }, []);
 
+  const loadCommands = useCallback(async () => {
+    if (!ownsCommands) return;
+    const res = await api.get<{ commands: ShownCommand[] }>('/api/nodes/commands').catch(() => null);
+    if (res && mounted.current) setCommands(res.commands);
+  }, [ownsCommands]);
+
+  const hideCommand = (id: string) =>
+    api.post(`/api/nodes/commands/${id}/hide`).then(
+      () => mounted.current && setCommands(list => list.filter(c => c.id !== id)),
+      err => mounted.current && setFailure(err),
+    );
+
   /* History comes in order, a page at a time, and only it moves the cursor: a live line never skips what came before it. */
   const catchUp = useCallback(async () => {
     try {
@@ -148,7 +165,8 @@ export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Pro
     } catch (err) {
       if (mounted.current) setFailure(err);
     }
-  }, [merge, path]);
+    await loadCommands();
+  }, [loadCommands, merge, path]);
 
   const soon = useCallback(() => {
     if (catchUpTimer.current) return;
@@ -299,6 +317,9 @@ export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Pro
       )}
       {!open && staffByHand && <StaffCard key={`hand-${staffByHand.id}`} department={staffByHand} onDone={() => setStaffByHand(null)} onHide={() => setStaffByHand(null)} />}
       {byHand && <StructureCard manual={{ existing }} departments={org.departments} onCorrect={focusLine} onDone={() => setManual(false)} onHide={() => setManual(false)} />}
+      {commands.map(c => (
+        <CommandCard key={c.id} shown={c} onDone={() => void hideCommand(c.id)} />
+      ))}
     </>
   );
   const after = (
@@ -316,7 +337,7 @@ export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Pro
       )}
     </>
   );
-  const hasCards = Boolean(pending || staffing || (!open && staffByHand) || byHand || offerByHand || needsOrchestrator || failure !== null);
+  const hasCards = Boolean(pending || staffing || (!open && staffByHand) || byHand || offerByHand || needsOrchestrator || failure !== null || commands.length);
 
   /* Who wrote a message no person typed: the orchestrator, an employee by its name, or Hornhoof itself. */
   const author = (from: string, name: string) => (from === 'orchestrator' ? t.window.orchestrator : from === 'agent' && name ? name : t.window.hornhoof);

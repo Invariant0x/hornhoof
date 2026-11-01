@@ -357,6 +357,10 @@ export type Running = {
   parts: { run: number; kind: 'tests' | 'work'; task: number | null; part: number; parts: number; agent: string | null; startedAt: string | null }[];
 };
 
+/* A machine command the orchestrator asked Hornhoof for, which only the CEO's screen gets: to connect a machine alone,
+   to connect plans, or to add a plan to a machine. */
+export type ShownCommand = { id: string; kind: 'machine' | 'plans' | 'add'; plans: string[]; machine: string | null; command: string; expiresAt: string };
+
 /* The node that comes with the server, for those who see the whole company. */
 export type BuiltinView = { online: boolean; load: NodeLoad | null; running: Running };
 

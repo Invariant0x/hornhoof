@@ -1,9 +1,9 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { AgentWindow } from '../src/screens/AgentWindow';
-import type { EventView, Org } from '../src/types';
+import type { EventView, Me, Org, ShownCommand } from '../src/types';
 import { CARD, DEV_ORG, ME, mockApi, ORG, ROSTER, SUBS } from './api-mock';
 import { fakeStream } from './fake-stream';
 
@@ -226,6 +226,46 @@ describe('AgentWindow', () => {
     const plan = { ...SUBS[0]!, owner: { id: 'p1', name: 'Ivan' } };
     open({}, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: plan, machine: { id: 'm3', hostname: 'ivan-laptop' } } });
     expect((await screen.findAllByText(/, ivan-laptop$/)).length).toBeGreaterThan(0);
+  });
+
+  it('shows the CEO alone the machine command he asked Hornhoof for, next to his terminal, until the CEO closes it', async () => {
+    const user = userEvent.setup();
+    const command = 'curl -fsSL https://hq.acme.com/install.sh | bash -s -- --join CODE123';
+    const shown: ShownCommand = { id: 'a'.repeat(64), kind: 'add', plans: ['Claude'], machine: 'ivan-laptop', command, expiresAt: '2026-11-02T10:00:00Z' };
+    const { calls } = open({
+      [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, terminal: true } }],
+      'GET /api/nodes/commands': [200, { commands: [shown] }],
+      [`POST /api/nodes/commands/${shown.id}/hide`]: [204],
+    });
+    const card = await screen.findByRole('region', { name: 'Command to add Claude to ivan-laptop' });
+    expect(within(card).getByText(command)).toBeInTheDocument();
+    expect(within(card).getByText(/^Run this in a terminal on ivan-laptop\./)).toBeInTheDocument();
+    expect(within(card).getByText('The orchestrator asked Hornhoof for this command, and only you see it. It works once, for 24 hours.')).toBeInTheDocument();
+    await user.click(within(card).getByRole('button', { name: 'Done' }));
+    expect(calls).toContainEqual({ method: 'POST', path: `/api/nodes/commands/${shown.id}/hide`, body: undefined });
+    await vi.waitFor(() => expect(screen.queryByText(command)).not.toBeInTheDocument());
+  });
+
+  it('names each kind of machine command in Russian', async () => {
+    localStorage.setItem('hh-lang', 'ru');
+    try {
+      const made = (id: string, kind: ShownCommand['kind'], plans: string[], machine: string | null): ShownCommand => ({ id: id.repeat(64), kind, plans, machine, command: `curl ${id}`, expiresAt: '2026-11-02T10:00:00Z' });
+      open({ 'GET /api/nodes/commands': [200, { commands: [made('a', 'machine', [], null), made('b', 'plans', ['Claude', 'Codex'], null), made('c', 'add', ['Kimi'], 'ivan-laptop')] }] });
+      expect(await screen.findByRole('region', { name: 'Команда для подключения машины' })).toBeInTheDocument();
+      expect(screen.getByRole('region', { name: 'Команда для подключения: Claude, Codex' })).toBeInTheDocument();
+      expect(screen.getByRole('region', { name: 'Команда, чтобы добавить Kimi на ivan-laptop' })).toBeInTheDocument();
+      expect(screen.getAllByText('Оркестратор попросил эту команду у Hornhoof, и видите ее только вы. Она работает один раз, 24 часа.')).toHaveLength(3);
+    } finally {
+      localStorage.removeItem('hh-lang');
+    }
+  });
+
+  it('asks for no machine commands for someone who is not the CEO', async () => {
+    const calls = mockApi({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: READY }], 'POST /api/agents/orchestrator/start': [200, { started: false }] });
+    const deputy: Me = { ...ME, person: { ...ME.person, id: 'p2', isOwner: false } };
+    render(<AgentWindow me={deputy} org={ORG} agentId="orchestrator" onClose={vi.fn()} />);
+    expect(await screen.findByRole('textbox')).toBeInTheDocument();
+    expect(calls.some(c => c.path === '/api/nodes/commands')).toBe(false);
   });
 
   it('shows a line once when the stream and a catch-up both bring it', async () => {

@@ -20,6 +20,7 @@ ALTER TABLE "test_parts" DROP CONSTRAINT "test_parts_subscription_id_subscriptio
 ALTER TABLE "agents" ADD COLUMN "node_id" uuid;--> statement-breakpoint
 ALTER TABLE "jobs" ADD COLUMN "node_id" uuid;--> statement-breakpoint
 ALTER TABLE "node_codes" ADD COLUMN "machine_id" uuid;--> statement-breakpoint
+ALTER TABLE "node_codes" ADD COLUMN "command_enc" text;--> statement-breakpoint
 ALTER TABLE "test_parts" ADD COLUMN "node_id" uuid;--> statement-breakpoint
 -- Each plan that has a machine gets a node there with the plan's own id, so its running node, the node's container,
 -- volume and sign-in go on as they are, and its jobs, agents and parts of test runs are on that node. A removed plan

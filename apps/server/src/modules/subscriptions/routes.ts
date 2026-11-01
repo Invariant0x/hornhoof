@@ -9,10 +9,9 @@ import { agents, departments, jobs, people, subscriptions, teams, testParts } fr
 import { ApiError } from '../../errors.js';
 import { servesWholeCompany } from '../tools/staff.js';
 import { orchestratorOf, pumpWaiting } from '../conversation/queue.js';
-import { publicUrl } from '../link/link.js';
 import { createNodeCode } from '../nodes/codes.js';
 import { resumeAgent } from '../tasks/wake.js';
-import { installCommand } from '../nodes/command.js';
+import { commandFor } from '../nodes/command.js';
 import { BUILTIN, nodeIdentity } from '../nodes/hub.js';
 import { planNodes } from '../nodes/nodes.js';
 import { failOpenJobs } from '../nodes/messages.js';
@@ -146,7 +145,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
     });
     const views = (await subViews(db, online)).filter(s => ids.includes(s.id));
     reply.code(201);
-    return { subscriptions: views, command: installCommand(await publicUrl(db, config), code) };
+    return { subscriptions: views, ...(await commandFor(db, config, me, code)) };
   });
 
   app.post('/api/subscriptions/:id/command', async (req, reply) => {
@@ -157,7 +156,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (sub.status !== 'waiting_machine') throw connectedAlready();
     const code = await createNodeCode(db, { companyId: me.companyId, personId: me.id, subscriptionIds: [sub.id] });
     reply.code(201);
-    return { command: installCommand(await publicUrl(db, config), code) };
+    return commandFor(db, config, me, code);
   });
 
   app.post('/api/subscriptions/:id/orchestrator', async req => {
