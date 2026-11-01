@@ -50,12 +50,12 @@ async function refuseOpenUnder(db: Db | Tx, task: Task): Promise<void> {
   if (open.length) throw refuse(409, 'task_invalid', `#${task.number} still has open subtasks: ${open.map(t => `#${t.number}`).join(', ')}. Wait for them, or cancel them first.`);
 }
 
-/* The last work under a task closed: whoever holds the task hears it can go on, unless it gave that work out and hears
-   so already, or closed it itself. */
+/* The last work under a task closed: whoever holds the task hears it can go on, once for all of it, unless it closed that
+   work itself. */
 async function workUnderDone(tx: Tx, closed: Task, actorId?: string): Promise<Wake[]> {
   const [parent] = await tx.select().from(tasks).where(eq(tasks.id, closed.parentId!));
   const holder = parent?.assigneeAgentId;
-  if (!parent || CLOSED.includes(parent.status) || !holder || holder === closed.createdByAgentId || holder === actorId) return [];
+  if (!parent || CLOSED.includes(parent.status) || !holder || holder === actorId) return [];
   const [open] = await tx.select({ id: tasks.id }).from(tasks).where(and(eq(tasks.parentId, parent.id), notInArray(tasks.status, [...CLOSED]))).limit(1);
   return open ? [] : [{ agentId: holder, taskId: parent.id, why: 'subtasks' }];
 }
@@ -175,6 +175,10 @@ export function published(ctx: Pick<Ctx, 'bus'>, task: Task): void {
 /* Whoever gave the task, when that was an agent other than the one acting. */
 const giver = (task: Task, why: WakeWhy, actorId?: string, text?: string): Wake[] =>
   task.createdByAgentId && task.createdByAgentId !== actorId ? [{ agentId: task.createdByAgentId, taskId: task.id, why, ...(text ? { text } : {}) }] : [];
+
+/* Whoever gave out a task that is done hears it only for a task of its own: work under a bigger task is heard of once,
+   when the last of it closes. */
+const doneFor = (task: Task, actorId?: string): Wake[] => (task.parentId ? [] : giver(task, 'done', actorId));
 
 const closing = () => ({ status: 'done' as const, closedAt: new Date(), assigneeAgentId: null, silent: 0 });
 
@@ -338,7 +342,7 @@ export async function submit(ctx: Live, agentId: string, taskId: string, r: { su
     unstuck.tell();
     return { task: row, wakes: gate.wakes };
   }
-  const wakes = giver(task, 'done', agentId);
+  const wakes = doneFor(task, agentId);
   const row = await move(ctx, task, closing(), n, unstuck.also, wakes);
   unstuck.tell();
   return { task: row, wakes };
@@ -381,7 +385,7 @@ async function atGate(db: Db | Tx, task: Task, from: number): Promise<{ set: Par
   let stage = from;
   while (task.gates[stage - 1] && !(await roleOn(db, task.gates[stage - 1]!))) stage++;
   if (!task.gates[stage - 1]) {
-    const passed = await passedGates(db, task, giver(task, 'done'));
+    const passed = await passedGates(db, task, doneFor(task));
     return { set: { stage: task.gates.length, ...passed.set }, wakes: passed.wakes };
   }
   const { panel, idle } = await panelFor(db, task, stage);
@@ -448,7 +452,7 @@ async function closeGate(ctx: Live, task: Task, n: Note, given: Given[]): Promis
       const gate = await atGate(ctx.db, task, task.stage + 1);
       return { task: await move(ctx, task, gate.set, n, undefined, gate.wakes), wakes: gate.wakes };
     }
-    const passed = await passedGates(ctx.db, task, giver(task, 'done', actorId));
+    const passed = await passedGates(ctx.db, task, doneFor(task, actorId));
     return { task: await move(ctx, task, passed.set, n, undefined, passed.wakes), wakes: passed.wakes };
   }
   const failed = given.filter(g => !g.pass);
@@ -677,7 +681,7 @@ async function regate(ctx: Live, agentId: string, task: Task, c: TaskChange): Pr
   const n: Note = { kind: 'updated', actor: { agentId }, data: { fields: [...text.fields, 'gates'] } };
   /* No gates left passes it: merged first in a repository, else done, and whoever gave it hears so unless they did it. */
   if (!given.length) {
-    const passed = await passedGates(ctx.db, task, giver(task, 'done', agentId));
+    const passed = await passedGates(ctx.db, task, doneFor(task, agentId));
     return { task: await move(ctx, task, { ...text.set, gates, ...passed.set }, n, undefined, passed.wakes), wakes: passed.wakes };
   }
   const gate = await atGate(ctx.db, { ...task, gates }, task.stage);

@@ -58,7 +58,8 @@ describe('the task engine', () => {
     const last = await verdict(ctx, tess.id, task.id, { pass: true, comment: 'Tests cover it.' });
     expect(last.task).toMatchObject({ status: 'done', assigneeAgentId: null });
     expect((await read(task.id)).closedAt).not.toBeNull();
-    expect(woken(last)).toEqual([[head.id, 'done']]);
+    /* It was the last work under the department task, which the head hears of once. */
+    expect(woken(last)).toEqual([[head.id, 'subtasks']]);
   });
 
   it('sends changes back to the executor, and the third send-back at one gate also wakes the head', async () => {

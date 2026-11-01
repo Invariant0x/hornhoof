@@ -75,3 +75,24 @@ describe('a task that passed its last gate', () => {
     expect((await passed()).task).toMatchObject({ status: 'done', merging: false });
   });
 });
+
+describe('the head', () => {
+  it('hears once that every task under its department task is closed, not each time one is done', async () => {
+    const { ctx, head, bruno, task, passed } = await company(false);
+    const docs = (await createTask(ctx, { agentId: head.id }, { title: 'Docs', brief: '', body: '', departmentId: task.departmentId, parentId: task.parentId, assigneeAgentId: bruno.id, executor: true, gates: [] })).task;
+    expect(woken(await passed())).toEqual([]);
+    expect(woken(await submit(ctx, bruno.id, docs.id, { summary: 'Written.', evidence: 'docs/checkout.md' }))).toEqual([[head.id, 'subtasks']]);
+  });
+
+  it('hears it once the last of them is merged', async () => {
+    const { ctx, head, bruno, task, passed } = await company();
+    await passed();
+    expect(woken(await submit(ctx, bruno.id, task.id, { summary: 'Merged.', evidence: 'git log' }))).toEqual([[head.id, 'subtasks']]);
+  });
+
+  it('still hears when a task it gave out on its own, under no department task, is done', async () => {
+    const { ctx, head, bruno, task } = await company(false);
+    const loose = (await createTask(ctx, { agentId: head.id }, { title: 'Loose end', brief: '', body: '', departmentId: task.departmentId, assigneeAgentId: bruno.id, executor: true, gates: [] })).task;
+    expect(woken(await submit(ctx, bruno.id, loose.id, { summary: 'Done.', evidence: 'npm test' }))).toEqual([[head.id, 'done']]);
+  });
+});
