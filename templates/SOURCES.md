@@ -2,6 +2,8 @@
 
 Every role and skill text in this folder is written for Hornhoof, with one exception: dev-engineering-rules is unclebob/ub-mode's SKILL.md word for word, as its README asks people to copy it, with a short note on how Hornhoof runs its tools. No other text is copied from the sources below; they taught us what a role does and which steps a procedure needs. Each skill names its sources in its `sources` field as `<repo> <path>`.
 
+The list at the end names every template, what it learned from and its licence. Hornhoof in the licence column means the text is Hornhoof's own and falls under this repository's licence. A skill that names no source is a procedure of Hornhoof itself, such as its task flow, an approval step or work in a second language. A role is a short prompt in the shape paperclipai/paperclip uses, and its skills carry the sources of what it does.
+
 | Source | Licence | What we learned from it |
 |---|---|---|
 | obra/superpowers | MIT | The development process: brainstorming, plans, test-driven development, verification before completion, subagent-driven work and the head's protocol for briefs, reports and fix loops. The orchestrator's own skills: asking before laying out, turns of checkable tasks, done only when proven, finding the cause when work goes wrong. |
@@ -22,3 +24,192 @@ Every role and skill text in this folder is written for Hornhoof, with one excep
 | alirezarezvani/claude-skills | MIT | Business development, partnerships, proposals, RFPs, SaaS metrics. |
 | openai/skills | Apache-2.0 | Fixing CI, Playwright checks, threat models. |
 | paperclipai/paperclip | MIT | Short role prompts with procedures in skills, hiring through a capabilities view, low-trust roles for hostile input. |
+
+## Every template
+
+| File | Where the text comes from | What it learned from | Licence |
+|---|---|---|---|
+| `roles/business_development/BIZ-ANALYST.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/business_development/BIZ-HEAD.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/business_development/BIZ-PARTNER.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/design/DSN-HEAD.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/design/DSN-QA.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/design/DSN-SYS.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/design/DSN-UI.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/development/DEV-ARCH.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/development/DEV-BE.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/development/DEV-DOCS.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/development/DEV-FE.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/development/DEV-HEAD.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/development/DEV-OPS.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/development/DEV-PERF.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/development/DEV-QA.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/development/DEV-RED.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/development/DEV-REV.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/development/DEV-SEC.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/development/DEV-TEST.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/finance/FIN-AUDIT.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/finance/FIN-BOOK.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/finance/FIN-FPA.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/finance/FIN-HEAD.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/marketing/MKT-HEAD.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/marketing/MKT-SEO.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/marketing/MKT-SOCIAL.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/marketing/MKT-WRITE.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/operations/OPS-ACCT.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/operations/OPS-BUGS.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/operations/OPS-FIX.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/operations/OPS-HEAD.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/operations/OPS-INTEG.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/operations/OPS-WATCH.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/sales/SAL-AE.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/sales/SAL-HEAD.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/sales/SAL-OPS.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/sales/SAL-SDR.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/support/SUP-HEAD.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/support/SUP-KB.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/support/SUP-T1.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/support/SUP-T2.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `skills/biz-business-strategy.md` | Written for Hornhoof | msitarzewski/agency-agents specialized/business-strategist.md | Hornhoof |
+| `skills/biz-channel-economics.md` | Written for Hornhoof | alirezarezvani/claude-skills commercial/skills | Hornhoof |
+| `skills/biz-competitive-landscape.md` | Written for Hornhoof | anthropics/financial-services plugins/agent-plugins/market-researcher/skills/competitive-analysis/SKILL.md; wshobson/agents plugins/startup-business-analyst | Hornhoof |
+| `skills/biz-deal-terms.md` | Written for Hornhoof | alirezarezvani/claude-skills commercial/skills; anthropics/knowledge-work-plugins legal/skills/review-contract/SKILL.md; anthropics/knowledge-work-plugins legal/skills/triage-nda/SKILL.md | Hornhoof |
+| `skills/biz-decision-council.md` | Written for Hornhoof | affaan-m/ECC skills/council/SKILL.md | Hornhoof |
+| `skills/biz-deep-research.md` | Written for Hornhoof | affaan-m/ECC skills/deep-research/SKILL.md | Hornhoof |
+| `skills/biz-market-sizing.md` | Written for Hornhoof | wshobson/agents plugins/startup-business-analyst/skills/market-sizing-analysis/SKILL.md | Hornhoof |
+| `skills/biz-marketplace-listings.md` | Written for Hornhoof | coreyhaines31/marketingskills skills/directory-submissions/SKILL.md | Hornhoof |
+| `skills/biz-opportunity-scoring.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
+| `skills/biz-partner-evaluation.md` | Written for Hornhoof | alirezarezvani/claude-skills commercial/skills/partnerships-architect/SKILL.md | Hornhoof |
+| `skills/biz-sector-overview.md` | Written for Hornhoof | anthropics/financial-services plugins/agent-plugins/market-researcher | Hornhoof |
+| `skills/dev-adversarial.md` | Written for Hornhoof | garrytan/gstack review/specialists/red-team.md; msitarzewski/agency-agents security/security-penetration-tester.md; trailofbits/skills | Hornhoof |
+| `skills/dev-api-design.md` | Written for Hornhoof | addyosmani/agent-skills skills/api-and-interface-design/SKILL.md; wshobson/agents plugins/backend-development/skills/api-design-principles/SKILL.md | Hornhoof |
+| `skills/dev-browser-check.md` | Written for Hornhoof | openai/skills skills/.curated/playwright/SKILL.md; anthropics/skills skills/webapp-testing/SKILL.md | Hornhoof |
+| `skills/dev-ci-release.md` | Written for Hornhoof | addyosmani/agent-skills skills/ci-cd-and-automation/SKILL.md; wshobson/agents plugins/cicd-automation/skills/deployment-pipeline-design/SKILL.md; openai/skills skills/.curated/gh-fix-ci/SKILL.md | Hornhoof |
+| `skills/dev-debugging.md` | Written for Hornhoof | obra/superpowers skills/systematic-debugging/SKILL.md | Hornhoof |
+| `skills/dev-deploy-rollback.md` | Written for Hornhoof | anthropics/knowledge-work-plugins engineering/skills/deploy-checklist/SKILL.md; addyosmani/agent-skills skills/shipping-and-launch/SKILL.md; affaan-m/ECC skills/docker-patterns/SKILL.md | Hornhoof |
+| `skills/dev-docs.md` | Written for Hornhoof | affaan-m/ECC agents/doc-updater.md; anthropics/knowledge-work-plugins engineering/skills/documentation/SKILL.md | Hornhoof |
+| `skills/dev-e2e-tests.md` | Written for Hornhoof | affaan-m/ECC skills/e2e-testing/SKILL.md; openai/skills skills/.curated/playwright/SKILL.md; obra/superpowers skills/systematic-debugging/condition-based-waiting.md | Hornhoof |
+| `skills/dev-engineering-rules.md` | unclebob/ub-mode SKILL.md word for word, with a short note on how Hornhoof runs its tools | unclebob/ub-mode SKILL.md; unclebob/crapper README.md; unclebob/dryer README.md; unclebob/mutator README.md | ub-mode names no licence, and its README asks people to copy SKILL.md; the note is Hornhoof's |
+| `skills/dev-frontend-ui.md` | Written for Hornhoof | addyosmani/agent-skills skills/frontend-ui-engineering/SKILL.md; anthropics/skills skills/frontend-design/SKILL.md | Hornhoof |
+| `skills/dev-gates.md` | Written for Hornhoof | obra/superpowers skills/subagent-driven-development/SKILL.md; affaan-m/ECC skills/council-multi-model/SKILL.md; affaan-m/ECC skills/santa-method/SKILL.md | Hornhoof |
+| `skills/dev-i18n-en-ru.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
+| `skills/dev-implement.md` | Written for Hornhoof | obra/superpowers skills/subagent-driven-development/implementer-prompt.md; addyosmani/agent-skills skills/incremental-implementation/SKILL.md; addyosmani/agent-skills skills/source-driven-development/SKILL.md | Hornhoof |
+| `skills/dev-language-rules.md` | Written for Hornhoof | affaan-m/ECC rules | Hornhoof |
+| `skills/dev-migrations.md` | Written for Hornhoof | affaan-m/ECC skills/database-migrations/SKILL.md | Hornhoof |
+| `skills/dev-performance.md` | Written for Hornhoof | affaan-m/ECC agents/performance-optimizer.md; addyosmani/agent-skills skills/performance-optimization/SKILL.md; garrytan/gstack review/specialists/performance.md | Hornhoof |
+| `skills/dev-plan-review.md` | Written for Hornhoof | garrytan/gstack plan-eng-review/SKILL.md.tmpl; affaan-m/ECC agents/architect.md; affaan-m/ECC skills/architecture-decision-records/SKILL.md | Hornhoof |
+| `skills/dev-qa-acceptance.md` | Written for Hornhoof | msitarzewski/agency-agents testing/testing-reality-checker.md; msitarzewski/agency-agents testing/testing-evidence-collector.md; garrytan/gstack qa/SKILL.md.tmpl | Hornhoof |
+| `skills/dev-release-notes.md` | Written for Hornhoof | garrytan/gstack document-release/SKILL.md.tmpl | Hornhoof |
+| `skills/dev-review-diff.md` | Written for Hornhoof | affaan-m/ECC agents/code-reviewer.md; obra/superpowers skills/requesting-code-review/code-reviewer.md; anthropics/claude-plugins-official plugins/pr-review-toolkit/agents/silent-failure-hunter.md; garrytan/gstack review/checklist.md | Hornhoof |
+| `skills/dev-review-verdict.md` | Written for Hornhoof | obra/superpowers skills/requesting-code-review/code-reviewer.md | Hornhoof |
+| `skills/dev-security-review.md` | Written for Hornhoof | affaan-m/ECC agents/security-reviewer.md; addyosmani/agent-skills skills/security-and-hardening/SKILL.md; garrytan/gstack review/specialists/security.md; affaan-m/ECC skills/agent-security-hardening/SKILL.md | Hornhoof |
+| `skills/dev-tdd.md` | Written for Hornhoof | obra/superpowers skills/test-driven-development/SKILL.md; obra/superpowers skills/test-driven-development/writing-good-tests.md | Hornhoof |
+| `skills/dev-test-gaps.md` | Written for Hornhoof | anthropics/claude-plugins-official plugins/pr-review-toolkit/agents/pr-test-analyzer.md; garrytan/gstack review/specialists/testing.md; anthropics/knowledge-work-plugins engineering/skills/testing-strategy/SKILL.md | Hornhoof |
+| `skills/dev-threat-model.md` | Written for Hornhoof | openai/skills skills/.curated/security-threat-model/SKILL.md; wshobson/agents plugins/security-scanning/skills/stride-analysis-patterns/SKILL.md; wshobson/agents plugins/security-scanning/skills/attack-tree-construction/SKILL.md | Hornhoof |
+| `skills/dev-worktrees.md` | Written for Hornhoof | obra/superpowers skills/using-git-worktrees/SKILL.md; obra/superpowers skills/finishing-a-development-branch/SKILL.md | Hornhoof |
+| `skills/dev-write-plan.md` | Written for Hornhoof | obra/superpowers skills/brainstorming/SKILL.md; obra/superpowers skills/writing-plans/SKILL.md; anthropics/knowledge-work-plugins engineering/skills/system-design/SKILL.md | Hornhoof |
+| `skills/dsn-accessibility-review.md` | Written for Hornhoof | anthropics/knowledge-work-plugins design/skills/accessibility-review/SKILL.md; wshobson/agents plugins/ui-design/skills/accessibility-compliance/SKILL.md; affaan-m/ECC agents/a11y-architect.md | Hornhoof |
+| `skills/dsn-brand-consistency.md` | Written for Hornhoof | msitarzewski/agency-agents design/design-brand-guardian.md; anthropics/skills skills/brand-guidelines/SKILL.md | Hornhoof |
+| `skills/dsn-component-spec.md` | Written for Hornhoof | anthropics/knowledge-work-plugins design/skills/design-system/SKILL.md; wshobson/agents plugins/ui-design/skills/design-system-patterns/SKILL.md | Hornhoof |
+| `skills/dsn-design-critique.md` | Written for Hornhoof | anthropics/knowledge-work-plugins design/skills/design-critique/SKILL.md | Hornhoof |
+| `skills/dsn-design-direction.md` | Written for Hornhoof | anthropics/skills skills/frontend-design/SKILL.md | Hornhoof |
+| `skills/dsn-design-md.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
+| `skills/dsn-generic-ui-check.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
+| `skills/dsn-handoff.md` | Written for Hornhoof | anthropics/knowledge-work-plugins design/skills/design-handoff/SKILL.md | Hornhoof |
+| `skills/dsn-plan-review.md` | Written for Hornhoof | garrytan/gstack plan-design-review/SKILL.md.tmpl | Hornhoof |
+| `skills/dsn-system-governance.md` | Written for Hornhoof | anthropics/knowledge-work-plugins design/skills/design-system/SKILL.md | Hornhoof |
+| `skills/dsn-theme.md` | Written for Hornhoof | anthropics/skills skills/theme-factory/SKILL.md | Hornhoof |
+| `skills/dsn-tokens.md` | Written for Hornhoof | nextlevelbuilder/ui-ux-pro-max-skill .claude/skills/design-system/SKILL.md; affaan-m/ECC skills/design-system/SKILL.md | Hornhoof |
+| `skills/dsn-ui-rules.md` | Written for Hornhoof | nextlevelbuilder/ui-ux-pro-max-skill .claude/skills/ui-ux-pro-max/SKILL.md; wshobson/agents plugins/ui-design/skills/visual-design-foundations/SKILL.md | Hornhoof |
+| `skills/dsn-ux-copy.md` | Written for Hornhoof | anthropics/knowledge-work-plugins design/skills/ux-copy/SKILL.md | Hornhoof |
+| `skills/dsn-visual-qa.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
+| `skills/fin-accruals.md` | Written for Hornhoof | anthropics/financial-services plugins/agent-plugins/month-end-closer | Hornhoof |
+| `skills/fin-audit-support.md` | Written for Hornhoof | anthropics/knowledge-work-plugins finance | Hornhoof |
+| `skills/fin-budget-forecast.md` | Written for Hornhoof | msitarzewski/agency-agents finance/finance-fpa-analyst.md | Hornhoof |
+| `skills/fin-cash-flow.md` | Written for Hornhoof | anthropics/knowledge-work-plugins small-business/skills/cash-flow-snapshot/SKILL.md | Hornhoof |
+| `skills/fin-close-management.md` | Written for Hornhoof | anthropics/knowledge-work-plugins finance/skills/close-management/SKILL.md; anthropics/financial-services plugins/agent-plugins/month-end-closer/agents/month-end-closer.md | Hornhoof |
+| `skills/fin-controls-testing.md` | Written for Hornhoof | anthropics/knowledge-work-plugins finance/skills/sox-testing/SKILL.md | Hornhoof |
+| `skills/fin-financial-model.md` | Written for Hornhoof | anthropics/financial-services plugins/agent-plugins/model-builder/skills/3-statement-model/SKILL.md; wshobson/agents plugins/startup-business-analyst/skills/startup-financial-modeling/SKILL.md | Hornhoof |
+| `skills/fin-independent-recompute.md` | Written for Hornhoof | anthropics/financial-services managed-agent-cookbooks/README.md | Hornhoof |
+| `skills/fin-journal-entries.md` | Written for Hornhoof | anthropics/knowledge-work-plugins finance/skills/journal-entry-prep/SKILL.md; anthropics/knowledge-work-plugins finance/skills/journal-entry/SKILL.md; msitarzewski/agency-agents finance/finance-bookkeeper-controller.md | Hornhoof |
+| `skills/fin-payables-receivables.md` | Written for Hornhoof | msitarzewski/agency-agents specialized/accounts-payable-agent.md; anthropics/knowledge-work-plugins small-business/skills/invoice-chase/SKILL.md | Hornhoof |
+| `skills/fin-reconciliation.md` | Written for Hornhoof | anthropics/knowledge-work-plugins finance/skills/reconciliation/SKILL.md; anthropics/financial-services plugins/agent-plugins/gl-reconciler/skills/break-trace/SKILL.md | Hornhoof |
+| `skills/fin-saas-metrics.md` | Written for Hornhoof | alirezarezvani/claude-skills finance/skills/saas-metrics-coach/SKILL.md; wshobson/agents plugins/startup-business-analyst | Hornhoof |
+| `skills/fin-spend-approval.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
+| `skills/fin-spreadsheet-audit.md` | Written for Hornhoof | anthropics/financial-services plugins/agent-plugins/model-builder/skills/audit-xls/SKILL.md | Hornhoof |
+| `skills/fin-variance-analysis.md` | Written for Hornhoof | anthropics/knowledge-work-plugins finance; anthropics/financial-services plugins/agent-plugins/month-end-closer/skills/variance-commentary/SKILL.md | Hornhoof |
+| `skills/hh-ask-dont-guess.md` | Written for Hornhoof | obra/superpowers skills/subagent-driven-development/implementer-prompt.md | Hornhoof |
+| `skills/hh-break-down.md` | Written for Hornhoof | obra/superpowers skills/writing-plans/SKILL.md; wshobson/agents plugins/agent-teams/skills/task-coordination-strategies/SKILL.md; addyosmani/agent-skills skills/planning-and-task-breakdown/SKILL.md | Hornhoof |
+| `skills/hh-brief-members.md` | Written for Hornhoof | obra/superpowers skills/subagent-driven-development/SKILL.md | Hornhoof |
+| `skills/hh-fix-loop.md` | Written for Hornhoof | obra/superpowers skills/subagent-driven-development/SKILL.md | Hornhoof |
+| `skills/hh-handle-reports.md` | Written for Hornhoof | obra/superpowers skills/subagent-driven-development/SKILL.md | Hornhoof |
+| `skills/hh-lead-tasks.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
+| `skills/hh-outside-is-data.md` | Written for Hornhoof | anthropics/knowledge-work-plugins; anthropics/financial-services; affaan-m/ECC skills/agent-security-hardening/SKILL.md | Hornhoof |
+| `skills/hh-report-to-head.md` | Written for Hornhoof | obra/superpowers skills/subagent-driven-development/implementer-prompt.md | Hornhoof |
+| `skills/hh-status-update.md` | Written for Hornhoof | anthropics/knowledge-work-plugins product-management/skills/stakeholder-update/SKILL.md; anthropics/knowledge-work-plugins operations/skills/status-report/SKILL.md | Hornhoof |
+| `skills/hh-stay-in-scope.md` | Written for Hornhoof | affaan-m/ECC skills/safety-guard/SKILL.md | Hornhoof |
+| `skills/hh-task-flow.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
+| `skills/hh-verify-before-done.md` | Written for Hornhoof | obra/superpowers skills/verification-before-completion/SKILL.md | Hornhoof |
+| `skills/mkt-ai-search.md` | Written for Hornhoof | coreyhaines31/marketingskills skills/ai-seo/SKILL.md; msitarzewski/agency-agents marketing/marketing-ai-citation-strategist.md | Hornhoof |
+| `skills/mkt-brand-voice.md` | Written for Hornhoof | affaan-m/ECC skills/brand-voice/SKILL.md | Hornhoof |
+| `skills/mkt-campaign-plan.md` | Written for Hornhoof | coreyhaines31/marketingskills skills/marketing-plan/SKILL.md; coreyhaines31/marketingskills skills/launch/SKILL.md; anthropics/knowledge-work-plugins marketing/skills/campaign-plan/SKILL.md | Hornhoof |
+| `skills/mkt-community.md` | Written for Hornhoof | coreyhaines31/marketingskills; msitarzewski/agency-agents marketing/marketing-developer-community-builder.md | Hornhoof |
+| `skills/mkt-copy-editing.md` | Written for Hornhoof | coreyhaines31/marketingskills; wshobson/agents plugins/avoid-ai-writing/skills/avoid-ai-writing/SKILL.md | Hornhoof |
+| `skills/mkt-copywriting.md` | Written for Hornhoof | coreyhaines31/marketingskills; anthropics/knowledge-work-plugins marketing/skills/content-creation/SKILL.md | Hornhoof |
+| `skills/mkt-crosspost.md` | Written for Hornhoof | affaan-m/ECC skills/crosspost/SKILL.md | Hornhoof |
+| `skills/mkt-product-context.md` | Written for Hornhoof | coreyhaines31/marketingskills skills/product-marketing/SKILL.md | Hornhoof |
+| `skills/mkt-publish-approval.md` | Written for Hornhoof | affaan-m/ECC skills/operator-approval-loop/SKILL.md | Hornhoof |
+| `skills/mkt-russian-copy.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
+| `skills/mkt-schema-markup.md` | Written for Hornhoof | coreyhaines31/marketingskills skills/schema/SKILL.md | Hornhoof |
+| `skills/mkt-seo-audit.md` | Written for Hornhoof | coreyhaines31/marketingskills; anthropics/knowledge-work-plugins | Hornhoof |
+| `skills/mkt-social-posts.md` | Written for Hornhoof | coreyhaines31/marketingskills | Hornhoof |
+| `skills/mkt-telegram-vk.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
+| `skills/mkt-yandex-seo.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
+| `skills/ops-account-register.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
+| `skills/ops-account-signup.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
+| `skills/ops-api-connector.md` | Written for Hornhoof | affaan-m/ECC skills/api-connector-builder/SKILL.md; anthropics/skills skills/mcp-builder/SKILL.md; affaan-m/ECC skills/canary-watch/SKILL.md | Hornhoof |
+| `skills/ops-capacity-plan.md` | Written for Hornhoof | anthropics/knowledge-work-plugins operations/skills/capacity-plan/SKILL.md | Hornhoof |
+| `skills/ops-change-request.md` | Written for Hornhoof | anthropics/knowledge-work-plugins operations/skills/change-request/SKILL.md | Hornhoof |
+| `skills/ops-connector-catalog.md` | Written for Hornhoof | anthropics/knowledge-work-plugins customer-support/CONNECTORS.md | Hornhoof |
+| `skills/ops-credential-vault.md` | Written for Hornhoof | msitarzewski/agency-agents security/security-secrets-credential-engineer.md; wshobson/agents plugins/cicd-automation/skills/secrets-management/SKILL.md | Hornhoof |
+| `skills/ops-failure-review.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
+| `skills/ops-incident-response.md` | Written for Hornhoof | anthropics/knowledge-work-plugins engineering/skills/incident-response/SKILL.md; wshobson/agents plugins/incident-response/skills/incident-runbook-templates/SKILL.md; obra/superpowers skills/systematic-debugging/SKILL.md | Hornhoof |
+| `skills/ops-intake.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
+| `skills/ops-mcp-config-review.md` | Written for Hornhoof | affaan-m/ECC skills/mcp-dependency-review/SKILL.md | Hornhoof |
+| `skills/ops-node-health.md` | Written for Hornhoof | affaan-m/ECC skills/docker-patterns/SKILL.md | Hornhoof |
+| `skills/ops-postmortem.md` | Written for Hornhoof | wshobson/agents plugins/incident-response/skills/postmortem-writing/SKILL.md | Hornhoof |
+| `skills/ops-runbook.md` | Written for Hornhoof | anthropics/knowledge-work-plugins operations/skills/runbook/SKILL.md | Hornhoof |
+| `skills/ops-task-watch.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
+| `skills/ops-tool-install.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
+| `skills/ops-vendor-review.md` | Written for Hornhoof | anthropics/knowledge-work-plugins operations/skills/vendor-review/SKILL.md; anthropics/knowledge-work-plugins legal/skills/vendor-check/SKILL.md | Hornhoof |
+| `skills/orch-interview.md` | Written for Hornhoof | obra/superpowers skills/brainstorming/SKILL.md | Hornhoof |
+| `skills/orch-plan-turn.md` | Written for Hornhoof | obra/superpowers skills/writing-plans/SKILL.md | Hornhoof |
+| `skills/orch-trouble.md` | Written for Hornhoof | obra/superpowers skills/systematic-debugging/SKILL.md | Hornhoof |
+| `skills/orch-verify.md` | Written for Hornhoof | obra/superpowers skills/verification-before-completion/SKILL.md | Hornhoof |
+| `skills/sal-account-research.md` | Written for Hornhoof | anthropics/knowledge-work-plugins | Hornhoof |
+| `skills/sal-call-prep.md` | Written for Hornhoof | anthropics/knowledge-work-plugins; msitarzewski/agency-agents sales/sales-discovery-coach.md | Hornhoof |
+| `skills/sal-call-summary.md` | Written for Hornhoof | anthropics/knowledge-work-plugins | Hornhoof |
+| `skills/sal-cold-outreach.md` | Written for Hornhoof | coreyhaines31/marketingskills skills/cold-email/SKILL.md; anthropics/knowledge-work-plugins sales/skills/draft-outreach/SKILL.md; msitarzewski/agency-agents sales/sales-outbound-strategist.md | Hornhoof |
+| `skills/sal-crm-hygiene.md` | Written for Hornhoof | anthropics/knowledge-work-plugins sales/skills/crm-hygiene-check/SKILL.md | Hornhoof |
+| `skills/sal-deal-plan.md` | Written for Hornhoof | anthropics/knowledge-work-plugins; msitarzewski/agency-agents sales/sales-deal-strategist.md | Hornhoof |
+| `skills/sal-forecast.md` | Written for Hornhoof | anthropics/knowledge-work-plugins | Hornhoof |
+| `skills/sal-lead-signals.md` | Written for Hornhoof | affaan-m/ECC skills/lead-intelligence/SKILL.md | Hornhoof |
+| `skills/sal-outbound-approval.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
+| `skills/sal-pipeline-analytics.md` | Written for Hornhoof | msitarzewski/agency-agents sales/sales-pipeline-analyst.md | Hornhoof |
+| `skills/sal-pipeline-review.md` | Written for Hornhoof | anthropics/knowledge-work-plugins sales/skills/deal-review/SKILL.md; msitarzewski/agency-agents sales/sales-deal-strategist.md | Hornhoof |
+| `skills/sal-proposal.md` | Written for Hornhoof | msitarzewski/agency-agents sales/sales-proposal-strategist.md; alirezarezvani/claude-skills business-growth/skills/contract-and-proposal-writer/SKILL.md | Hornhoof |
+| `skills/sal-prospecting.md` | Written for Hornhoof | coreyhaines31/marketingskills skills/prospecting/SKILL.md; anthropics/knowledge-work-plugins | Hornhoof |
+| `skills/sal-win-loss.md` | Written for Hornhoof | anthropics/knowledge-work-plugins | Hornhoof |
+| `skills/sup-bilingual.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
+| `skills/sup-billing-issues.md` | Written for Hornhoof | affaan-m/ECC skills/customer-billing-ops/SKILL.md | Hornhoof |
+| `skills/sup-bug-report.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
+| `skills/sup-customer-research.md` | Written for Hornhoof | anthropics/knowledge-work-plugins customer-support | Hornhoof |
+| `skills/sup-deflection.md` | Written for Hornhoof | anthropics/knowledge-work-plugins small-business/skills/ticket-deflector/SKILL.md | Hornhoof |
+| `skills/sup-docs-from-tickets.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
+| `skills/sup-draft-response.md` | Written for Hornhoof | anthropics/knowledge-work-plugins customer-support; msitarzewski/agency-agents support/support-support-responder.md | Hornhoof |
+| `skills/sup-escalation.md` | Written for Hornhoof | anthropics/knowledge-work-plugins customer-support/skills/customer-escalation/SKILL.md | Hornhoof |
+| `skills/sup-kb-article.md` | Written for Hornhoof | anthropics/knowledge-work-plugins customer-support/skills/kb-article/SKILL.md | Hornhoof |
+| `skills/sup-reproduce-issue.md` | Written for Hornhoof | obra/superpowers skills/systematic-debugging/SKILL.md | Hornhoof |
+| `skills/sup-support-policy.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
+| `skills/sup-support-report.md` | Written for Hornhoof | msitarzewski/agency-agents support/support-analytics-reporter.md; msitarzewski/agency-agents product/product-feedback-synthesizer.md | Hornhoof |
+| `skills/sup-ticket-triage.md` | Written for Hornhoof | anthropics/knowledge-work-plugins customer-support | Hornhoof |

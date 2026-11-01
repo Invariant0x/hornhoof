@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { MAX_INSTRUCTIONS, TEMPLATE_KEYS } from '@hornhoof/protocol';
 import { describe, expect, it } from 'vitest';
@@ -107,6 +108,16 @@ describe('templates', () => {
       }
       expect(x.title.ru, x.id).toMatch(/[а-я]/i);
     }
+  });
+
+  it('names where every template comes from and under which licence', () => {
+    const sources = readFileSync(join(DIR, 'SOURCES.md'), 'utf8');
+    const files = readdirSync(DIR, { recursive: true, encoding: 'utf8' }).filter(f => f.endsWith('.md') && f !== 'SOURCES.md');
+    expect(files.length).toBe(roles.length + skills.length);
+    for (const file of files) expect(sources, file).toContain(`| \`${file}\` |`);
+    /* Every repository a skill learned from has its licence in the table of sources. */
+    const repos = new Set([...sources.matchAll(/^\| ([\w.-]+\/[\w.-]+(?:, [\w.-]+\/[\w.-]+)*) \|/gm)].flatMap(m => m[1]!.split(', ')));
+    for (const s of skills) for (const source of s.sources) expect(repos, `${s.id}: ${source}`).toContain(source.split(' ')[0]);
   });
 
   it('follows the copy rules: no em dashes and no \u0451', () => {
