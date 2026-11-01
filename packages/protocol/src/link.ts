@@ -2,7 +2,7 @@
    company's name. It lives apart from the message schemas, so the web takes it without the schema library. */
 
 export const LINK_NAME_MAX = 63;
-const LINK_NAME = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+const LINK_NAME = /^(?!.*--)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const RANDOM_LENGTH = 24;
 const ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789';
 
@@ -12,7 +12,7 @@ const LATIN: Record<string, string> = {
   р: 'r', с: 's', т: 't', у: 'u', ф: 'f', х: 'h', ц: 'ts', ч: 'ch', ш: 'sh', щ: 'sch', ъ: '', ы: 'y', ь: '', э: 'e', ю: 'yu', я: 'ya',
 };
 
-/* One to 63 lowercase Latin letters, digits and hyphens, with no hyphen at either end. */
+/* One to 63 lowercase Latin letters, digits and single hyphens, with no hyphen at either end. */
 export const isLinkName = (name: string): boolean => LINK_NAME.test(name);
 
 /* The link name a company's name gives: in Latin letters, lowercase, every run of other characters one hyphen. Empty
