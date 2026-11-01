@@ -97,6 +97,20 @@ describe('a task that comes after others', () => {
     expect(free.task.after).toEqual([]);
   });
 
+  it('never comes after a task it is part of, however far up, as made or changed', async () => {
+    const { ctx, dev, head, bruno, tess, parent, member } = await company();
+    const said = (p: Promise<unknown>) => p.then(() => 'ok', (err: { message?: string }) => err.message);
+    expect(await said(member('End-to-end tests', tess.id, [parent.id]))).toBe(`#${parent.number} is the task this work is part of, so it cannot come after it: #${parent.number} is done only once the work under it is.`);
+    const api = (await member('Checkout API', bruno.id)).task;
+    const under = (after: string[]) => createTask(ctx, { agentId: head.id }, { title: 'Card form', brief: '', body: '', departmentId: dev.id, parentId: api.id, assigneeAgentId: tess.id, executor: true, after });
+    expect(await reason(under([parent.id]))).toBe('task_invalid');
+    expect(await reason(under([api.id]))).toBe('task_invalid');
+    const form = (await under([])).task;
+    expect(await reason(updateTask(ctx, head.id, form.id, { after: [parent.id] }))).toBe('task_invalid');
+    expect(await reason(updateTask(ctx, head.id, api.id, { after: [parent.id] }))).toBe('task_invalid');
+    expect((await updateTask(ctx, head.id, form.id, { after: [] })).task.after).toEqual([]);
+  });
+
   it('takes the tasks that wait for a task as it is done before it looks at what else they wait for, so two done at once still start them', async () => {
     const { ctx, bruno, tess, rita, member } = await company();
     const api = (await member('Checkout API', bruno.id)).task;

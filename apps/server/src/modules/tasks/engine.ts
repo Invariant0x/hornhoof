@@ -102,6 +102,16 @@ async function refuseCircle(db: Db | Tx, task: Task, ids: string[]): Promise<voi
   }
 }
 
+/* A task never waits for a task it is part of, however far up: that one is done only once the work under it is. */
+async function refuseAbove(db: Db | Tx, parentId: string | null, ids: string[]): Promise<void> {
+  for (let id = ids.length ? parentId : null; id; ) {
+    const [up] = await db.select({ id: tasks.id, number: tasks.number, parentId: tasks.parentId }).from(tasks).where(eq(tasks.id, id));
+    if (!up) return;
+    if (ids.includes(up.id)) throw refuse(400, 'task_invalid', `#${up.number} is the task this work is part of, so it cannot come after it: #${up.number} is done only once the work under it is.`);
+    id = up.parentId;
+  }
+}
+
 /* A task is done: each task that came after it and waits for nothing else any more goes on with whoever holds it, and
    its log says why. rows: the tasks that started. Two tasks it waits for done at once would each see the other still
    open, so the waiting tasks are taken first and the second to be done sees the first. */
@@ -299,6 +309,7 @@ export async function createTask(ctx: Live, actor: Actor, input: NewTask): Promi
     const [turn] = parent ? [] : await tx.select({ id: turns.id }).from(turns).where(and(eq(turns.companyId, assignee.companyId), eq(turns.status, 'open')));
     const turnId = parent ? parent.turnId : (turn?.id ?? null);
     const after = await checkAfter(tx, assignee.companyId, turnId, input.after ?? []);
+    await refuseAbove(tx, parent?.id ?? null, input.after ?? []);
     waits = after.some(t => t.status !== 'done');
     const [row] = await tx
       .insert(tasks)
@@ -783,6 +794,7 @@ export async function updateTask(ctx: Live, agentId: string, taskId: string, c: 
   const waited = (await openAfter(ctx.db, task)).length > 0;
   if (c.after !== undefined && JSON.stringify(c.after) !== JSON.stringify(task.after)) {
     await checkAfter(ctx.db, task.companyId, task.turnId, c.after);
+    await refuseAbove(ctx.db, task.parentId, c.after);
     await refuseCircle(ctx.db, task, c.after);
     set.after = c.after;
     fields.push('after');
