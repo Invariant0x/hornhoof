@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { API_MODELS, type AgentEvent, type Limits, type ModelOption } from '@hornhoof/protocol';
 import type { JobUser } from '../isolation.js';
 import type { ProviderAdapter, RunInput, RunResult } from '../runner.js';
+import { withProgramExit } from '../program-exit.js';
 import { contentText, inputText, isRecord } from './events.js';
 import { childEnv, ensureDir, exitsCleanly, installPackage, interactiveLogin, runProgram, tokensIn, withEfforts, writePrivate } from './process.js';
 
@@ -188,10 +189,11 @@ export function codexAdapter({ home, tools, bin = join(tools, 'bin', 'codex'), s
         },
       });
 
-      if (done.timedOut) return { ok: false, sessionId, result: '', output: done.output, error: 'timeout', limits: null };
+      const ended = withProgramExit(done.output, done);
+      if (done.timedOut) return { ok: false, sessionId, result: '', ...ended, error: 'timeout', limits: null };
       if (completed && done.code === 0) return { ok: true, sessionId, result: answer, output: done.output, error: null, limits: null };
       const error = SIGNED_OUT.test(failure || done.output) ? 'not_logged_in' : 'agent_failed';
-      return { ok: false, sessionId, result: answer, output: done.output, error, limits: null };
+      return { ok: false, sessionId, result: answer, ...ended, error, limits: null };
     },
 
     async secrets() {

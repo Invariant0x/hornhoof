@@ -49,6 +49,16 @@ export function run(name) {
     process.stdout.write(`Open this link:\n\x1b[94m\x1b]8;;${LOGIN_URL}\x07${LOGIN_URL}\x1b]8;;\x07\x1b[0m\n`);
     process.exit(0);
   }
+  if (mode === 'killed') {
+    process.stderr.write('boom\n');
+    process.kill(process.pid, 'SIGKILL');
+    return;
+  }
+  if (mode === 'fail-long') {
+    for (let i = 0; i < 60; i++) process.stdout.write(`output ${i}\n`);
+    process.stderr.write(`boom ${process.env.FAKE_ERROR_SECRET}\n\n\n`);
+    process.exit(3);
+  }
   if (mode === 'signed_out') {
     if (name === 'kimi') {
       process.stdout.write('{"role":"meta","type":"system.version","version":"2.4.0"}\n');

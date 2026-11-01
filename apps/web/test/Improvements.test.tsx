@@ -32,7 +32,7 @@ const IMPROVEMENTS: Improvement[] = [
 ];
 const listed = (id: string): Me => ({ ...ME, person: { ...ME.person, id, name: 'Lena', scopeKind: 'listed', isOwner: false } });
 
-function shell(routes: Record<string, unknown> = {}, me: Me = ME) {
+function shell(routes: Record<string, unknown> = {}, me: Me = ME, onSignOut: () => void = () => {}) {
   const calls = mockApi({
     'GET /api/org': [200, DEV_ORG],
     'GET /api/requests': [200, { requests: [] }],
@@ -41,14 +41,16 @@ function shell(routes: Record<string, unknown> = {}, me: Me = ME) {
   });
   render(
     <LanguageProvider>
-      <Shell me={me} onSignOut={() => {}} />
+      <Shell me={me} onSignOut={onSignOut} />
     </LanguageProvider>,
   );
   return calls;
 }
 
 async function openImprovements(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(await screen.findByRole('button', { name: 'Account' }));
   await user.click(await screen.findByRole('button', { name: 'Improvements, 1 to decide' }));
+  expect(screen.queryByRole('button', { name: 'Log out' })).not.toBeInTheDocument();
   return screen.findByRole('heading', { level: 1, name: 'Improvements' });
 }
 
@@ -82,7 +84,8 @@ describe('improvements', () => {
     try {
       const user = userEvent.setup();
       shell();
-      await user.click(await screen.findByRole('button', { name: /^Улучшения/ }));
+      await user.click(await screen.findByRole('button', { name: 'Аккаунт' }));
+      await user.click(await screen.findByRole('button', { name: 'Улучшения, ждут решения: 1' }));
       const taken = await screen.findByRole('article', { name: 'Let reviewers run the tests without asking' });
       expect(taken).toHaveTextContent('Dana, Разработка');
     } finally {
@@ -91,9 +94,57 @@ describe('improvements', () => {
   });
 
   it('are not there for people who see only some departments', async () => {
+    const user = userEvent.setup();
     const calls = shell({}, listed('p6'));
     expect(await screen.findByRole('button', { name: /^Tasks/ })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^Improvements/ })).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Account' }));
+    expect(screen.queryByRole('button', { name: /^Improvements/ })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Log out' })).toBeInTheDocument();
     expect(calls.some(c => c.path === '/api/improvements')).toBe(false);
+  });
+
+  it('puts Improvements before Versions and Log out in the account menu and signs out', async () => {
+    const user = userEvent.setup();
+    let signedOut = false;
+    shell({ 'POST /api/auth/logout': [200, {}] }, ME, () => {
+      signedOut = true;
+    });
+    const navigation = screen.getByRole('navigation', { name: 'Sections' });
+    expect(within(navigation).queryByRole('button', { name: /^Improvements/ })).toBeNull();
+    await user.click(await screen.findByRole('button', { name: 'Account' }));
+    const improvements = await screen.findByRole('button', { name: 'Improvements, 1 to decide' });
+    const versions = screen.getByRole('button', { name: 'Versions' });
+    const logout = screen.getByRole('button', { name: 'Log out' });
+    expect(improvements.compareDocumentPosition(versions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeGreaterThan(0);
+    expect(versions.compareDocumentPosition(logout) & Node.DOCUMENT_POSITION_FOLLOWING).toBeGreaterThan(0);
+    await user.click(logout);
+    await waitFor(() => expect(signedOut).toBe(true));
+    expect(screen.queryByRole('button', { name: 'Improvements, 1 to decide' })).toBeNull();
+  });
+
+  it('reaches account actions with keyboard, returns focus on Escape, and opens Improvements', async () => {
+    const user = userEvent.setup();
+    shell();
+    const account = await screen.findByRole('button', { name: 'Account' });
+    account.focus();
+    await user.keyboard('{Enter}');
+    const improvements = await screen.findByRole('button', { name: 'Improvements, 1 to decide' });
+    const versions = screen.getByRole('button', { name: 'Versions' });
+    const logout = screen.getByRole('button', { name: 'Log out' });
+    for (let i = 0; i < 5; i += 1) await user.tab();
+    expect(improvements).toHaveFocus();
+    await user.tab();
+    expect(versions).toHaveFocus();
+    await user.tab();
+    expect(logout).toHaveFocus();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('button', { name: 'Log out' })).toBeNull();
+    expect(account).toHaveFocus();
+    await user.keyboard('{Enter}');
+    await screen.findByRole('button', { name: 'Improvements, 1 to decide' });
+    for (let i = 0; i < 5; i += 1) await user.tab();
+    await user.keyboard('{Enter}');
+    expect(await screen.findByRole('heading', { level: 1, name: 'Improvements' })).toBeInTheDocument();
   });
 });

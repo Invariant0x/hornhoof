@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { cut, TAIL_BYTES, type AgentEvent, type JobError, type Limits, type ModelOption, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
 import type { JobUser } from './isolation.js';
 import { redact } from './redact.js';
+import { plainOutput, programEnded, type ProgramOutput } from './program-exit.js';
 import { readSessions, rememberSession } from './state.js';
 import { prepareRepo, type Git } from './workspace.js';
 
@@ -33,7 +34,7 @@ export type RunInput = {
   /* More environment for the program, such as git access to the agent's repository for this turn. */
   env?: Record<string, string>;
 };
-export type RunResult = { ok: boolean; sessionId: string | null; result: string; output: string; error: JobError | null; limits: Limits | null };
+export type RunResult = { ok: boolean; sessionId: string | null; result: string; output: string; error: JobError | null; limits: Limits | null; programOutput?: ProgramOutput };
 export type LoginIo = { input: NodeJS.ReadableStream; output: NodeJS.WritableStream; urlFile: string };
 
 /* One agent program (Claude Code, Codex, Kimi) as the node drives it. */
@@ -61,6 +62,18 @@ const failed = (output: string, error: JobError): RunResult => ({ ok: false, ses
 function lastBytes(text: string, bytes: number): string {
   const buf = Buffer.from(text);
   return buf.length <= bytes ? text : buf.subarray(buf.length - bytes).toString();
+}
+
+/* Both dispatched and typed turns use the same redaction and tail boundary. */
+export function jobDone(jobId: string, res: RunResult, secrets: string[]): JobDone {
+  const program = res.programOutput;
+  /* A terminal inserts carriage returns; hide both the raw and normalized forms before any line is removed. */
+  const text = program ? redact(plainOutput(redact(program.text, secrets)), secrets) : res.output;
+  const output = program ? programEnded(text, program, program.complete) : text;
+  return {
+    type: 'job.done', jobId, ok: res.ok, sessionId: res.sessionId,
+    result: redact(res.result, secrets), tail: lastBytes(redact(output, secrets), TAIL_BYTES), error: res.error,
+  };
 }
 
 /* The adapter stops its own program at the timeout and says which session it was in, so the next turn goes on in it.
@@ -172,13 +185,5 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
   if (signal?.aborted) res = { ...res, ok: false, result: 'Stopped.', error: 'cancelled' };
   const after = await adapter.secrets().catch(() => []);
   const secrets = [...before, ...after, ...given];
-  return {
-    type: 'job.done',
-    jobId: msg.jobId,
-    ok: res.ok,
-    sessionId: res.sessionId,
-    result: redact(res.result, secrets),
-    tail: lastBytes(redact(res.output, secrets), TAIL_BYTES),
-    error: res.error,
-  };
+  return jobDone(msg.jobId, res, secrets);
 }
