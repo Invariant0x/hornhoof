@@ -129,7 +129,7 @@ export const agyProgram: TermProgram = {
   launch({ bin, home, workDir, sessionId, model, effort, urls }) {
     /* agy names a new conversation with the first message, and hh-agy tells the host when the turn ends. */
     const command = [process.execPath, AGY_SCREEN, bin, ...(sessionId ? ['--conversation', sessionId] : []), ...(model ? ['--model', model] : []), ...(effort ? ['--effort', effort] : [])];
-    /* agy keeps everything in HOME. The node updates the programs it installs itself. */
+    /* agy keeps everything in HOME, and leaves the program in the node's tools folder as the node installed it. */
     return { command, env: { HOME: home, AGY_CLI_DISABLE_AUTO_UPDATE: 'true', HH_AGY_LOG: agyLog(workDir), ...bridgeEnv(urls) }, sessionId };
   },
 };

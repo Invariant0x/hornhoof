@@ -181,7 +181,8 @@ function agentDir(path: string, user: JobUser | null): string {
 }
 
 export function antigravityAdapter({ home, tools, bin = join(tools, 'bin', 'agy'), user = null }: Options): ProviderAdapter {
-  /* agy has no setting for its folder: it keeps everything in HOME. The node updates the programs it installs itself. */
+  /* agy has no setting for its folder: it keeps everything in HOME. It does not replace itself: the program in the node's
+     tools folder stays as the node installed it, which agents on a root node could not write anyway. */
   const env = () => childEnv(tools, { HOME: ensureDir(home), AGY_CLI_DISABLE_AUTO_UPDATE: 'true' });
   let listed: ModelOption[] = [];
 
