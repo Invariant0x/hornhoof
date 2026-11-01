@@ -6,9 +6,10 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { CLAUDE_ALIASES, type AgentEvent, type ProviderId, type ServerMessage } from '@hornhoof/protocol';
-import { afterEach, beforeEach, describe, expect, it, onTestFinished } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { adapterFor } from '../src/providers/index.js';
 import { claudeEvents, claudeInterrupted, limitsFrom } from '../src/providers/claude.js';
 import { codexEvents, codexRateLimits } from '../src/providers/codex.js';
@@ -69,6 +70,30 @@ const alive = (pid: number) => {
     return true;
   } catch {
     return false;
+  }
+};
+/* The child a hanging program started, once its whole line is in the log. A busy machine takes longer to start the
+   program than any short wait, so a test stops it only after this. */
+const hangingChild = async (): Promise<number> => {
+  for (;; await sleep(20)) {
+    const pid = existsSync(logFile) && /"grandchild":(\d+)\}\n/.exec(readFileSync(logFile, 'utf8'))?.[1];
+    if (pid) return Number(pid);
+  }
+};
+/* Runs a hanging program into its timeout, on a clock that moves only once the program is up. The timeout ends the
+   program's child, and the program, which takes no notice of it, goes after the grace. In between the program collects
+   its ended child, as it would in the grace a real clock gives it; killed first, it would leave it to the system. */
+const timedOut = async (provider: ProviderId) => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    const run = adapter(provider).run(input({ timeoutMs: 200 }));
+    const child = await hangingChild();
+    await vi.advanceTimersByTimeAsync(200);
+    for (const end = Date.now() + 5000; alive(child) && Date.now() < end; ) await sleep(20);
+    await vi.runAllTimersAsync();
+    return await run;
+  } finally {
+    vi.useRealTimers();
   }
 };
 
@@ -217,7 +242,7 @@ describe('Claude Code', () => {
 
   it('stops the whole process group at the timeout', async () => {
     process.env.FAKE_MODE = 'hang';
-    const res = await adapter('claude').run(input({ timeoutMs: 200 }));
+    const res = await timedOut('claude');
     expect(res).toMatchObject({ ok: false, error: 'timeout' });
     const pid = logged().find(l => l.argv)!.pid;
     const grandchild = logged().find(l => l.grandchild)!.grandchild!;
@@ -341,7 +366,7 @@ describe('Codex', () => {
 
   it('stops at the timeout', async () => {
     process.env.FAKE_MODE = 'hang';
-    expect(await adapter('codex').run(input({ timeoutMs: 200 }))).toMatchObject({ ok: false, error: 'timeout' });
+    expect(await timedOut('codex')).toMatchObject({ ok: false, error: 'timeout' });
     expect(alive(logged().find(l => l.grandchild)!.grandchild!)).toBe(false);
   });
 
@@ -684,11 +709,13 @@ describe('calling a job off', () => {
   it.each(['claude', 'codex', 'kimi', 'antigravity'] as const)('stops the whole process group of %s', async provider => {
     process.env.FAKE_MODE = 'hang';
     const stop = new AbortController();
-    setTimeout(() => stop.abort(), 300);
+    const run = adapter(provider).run(input({ timeoutMs: 15000, signal: stop.signal }));
+    const child = await hangingChild();
     const started = Date.now();
-    await adapter(provider).run(input({ timeoutMs: 15000, signal: stop.signal }));
+    stop.abort();
+    await run;
     expect(Date.now() - started).toBeLessThan(5000);
-    expect(alive(logged().find(l => l.grandchild)!.grandchild!)).toBe(false);
+    expect(alive(child)).toBe(false);
   });
 });
 
