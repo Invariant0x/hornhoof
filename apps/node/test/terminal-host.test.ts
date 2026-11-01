@@ -845,6 +845,7 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
       const wire = first.sessionId && findKimiWire(join(home, 'kimi', 'k3'), first.sessionId);
       return Boolean(wire && readFileSync(wire, 'utf8').includes('"text":"HANG typed"'));
     });
+    await until(async () => (await host.screen('k3')).includes('waiting: HANG typed'));
     host.input({ type: 'term.input', termId: 'w3', data: '\u001b' });
     await until(() => Boolean(done('job-k3')));
     expect(done('job-k3')).toMatchObject({ ok: false, error: 'cancelled' });
