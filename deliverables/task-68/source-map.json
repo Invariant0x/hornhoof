@@ -1,0 +1,78 @@
+{
+  "status": "PREPARATION_ONLY_DTO_67_NOT_ACCEPTED",
+  "acceptedBase": "bd696b0724385b6b11da53a24ada2f188b031217",
+  "canonicalContent": {
+    "file": "deliverables/task-34-improvements.md",
+    "sha256": "1ae9826378d8de6dd2d75829b78f941b1be44f4c1727e4fabc693319b833391f",
+    "bytes": 45261,
+    "verification": "CANONICAL_CARDS_MATCH=3/3; PERMANENT_RULE_MATCH=true; STORAGE_CONTRACT_KEY_FIELDS_PRESENT=true",
+    "cards": [
+      {
+        "id": "9b86fbb6-28cf-4ec9-a0b0-40d691adc4a6",
+        "canonicalComment": "2026-11-01T01:37:20.125Z",
+        "sourceComment": "2026-11-01T00:49:37.284Z",
+        "constraint": "One confirmed false recurrence. The tsc and installation examples remain unconfirmed."
+      },
+      {
+        "id": "42480f39-cd24-4613-8c71-916629f1d1ff",
+        "canonicalComment": "2026-11-01T02:30:38.310Z",
+        "sourceComment": "2026-11-01T00:49:37.837Z",
+        "constraint": "Four historical interruptions are separate from two machine_restarted labels. Physical reboot, planning and target node are unconfirmed."
+      },
+      {
+        "id": "08991d70-a596-45f7-857a-371f13bb429b",
+        "canonicalComment": "2026-11-01T01:38:04.602Z",
+        "sourceComment": "2026-11-01T00:49:38.208Z",
+        "constraint": "Nine historical missing-command reports do not prove one cause or the current runtime."
+      }
+    ],
+    "permanentRuleComment": "2026-11-01T01:12:39.940Z",
+    "storageContractComment": "2026-11-01T01:13:10.921Z"
+  },
+  "dependencies": {
+    "67": "blocked; presentation DTO and source SHA are not accepted",
+    "26": "blocked; local 604e397 is not accepted; decision status, decidedBy and task links must come from its accepted DTO",
+    "47": "blocked; navigation commit is not part of this base",
+    "65": "safe local boundary 766b75528bf8ca40248de11de1deeb922b87a634, unchanged"
+  },
+  "requiredPresentationFields": [
+    "schemaVersion",
+    "state",
+    "locales.en/ru.title",
+    "locales.en/ru.observation",
+    "locales.en/ru.impact",
+    "locales.en/ru.change",
+    "locales.en/ru.expectedResult",
+    "locales.en/ru.facts",
+    "locales.en/ru.hypotheses",
+    "locales.en/ru.unknowns",
+    "sourceRevision",
+    "updatedAt",
+    "evidence with stable evidenceId, sourceRef, timestamp and safe source data"
+  ],
+  "preservedDecisionFields": [
+    "original title and text",
+    "author and department",
+    "seen",
+    "status",
+    "result",
+    "decidedBy",
+    "createdAt and updatedAt",
+    "tasks from accepted 26 DTO"
+  ],
+  "uiContract": {
+    "main": ["localized title", "observation", "impact", "proposed change", "expected result", "confirmed facts", "hypotheses", "unknowns", "decision metadata and links"],
+    "details": ["original title and text", "technical quotes and identifiers", "evidence and safe source links", "draft or incomplete-source state"],
+    "fallbacks": ["legacy keeps the original accessible without invented explanation", "draft or missing locale is explicitly not ready", "source revision mismatch is shown rather than silently overwritten"],
+    "safety": ["details closed by default", "keyboard and focus preserved", "narrow text wraps", "no raw HTML execution", "no unsafe href", "no automatic external fetch", "no seen increment or decision action from viewing or translation"]
+  },
+  "plannedProductFilesAfterHandoff": [
+    "apps/web/src/types.ts",
+    "apps/web/src/screens/Improvements.tsx",
+    "apps/web/src/i18n/en.ts",
+    "apps/web/src/i18n/ru.ts",
+    "apps/web/test/Improvements.test.tsx",
+    "new focused presentation tests and fixtures if needed"
+  ],
+  "notDone": ["API integration", "real target payload publication", "browser checks", "root or mutation", "push or release"]
+}

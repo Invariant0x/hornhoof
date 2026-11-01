@@ -796,6 +796,23 @@ summary.turn-head:focus-visible { outline: 2px solid var(--cyan); outline-offset
 .imp-task-list { display: flex; flex-wrap: wrap; gap: 6px; }
 .imp-text { overflow-wrap: anywhere; }
 .imp-text .md { display: grid; gap: 6px; }
+.imp-explanation { display: grid; gap: 10px; overflow-wrap: anywhere; }
+.imp-section { display: grid; gap: 4px; }
+.imp-section h4, .imp-original h4 { margin: 0; font-size: 12.5px; color: var(--muted); }
+.imp-section p, .imp-section ul, .imp-original p { margin: 0; }
+.imp-section ul { padding-left: 20px; }
+.imp-evidence-refs { color: var(--muted); font-size: 12px; }
+.imp-notice { margin: 0; padding: 8px 12px; background: var(--surface2); border-left: 2px solid var(--amber); overflow-wrap: anywhere; }
+.imp-details { overflow-wrap: anywhere; }
+.imp-details > summary { width: fit-content; cursor: pointer; color: var(--cyan-ink); font-size: 12.5px; font-weight: 600; }
+.imp-details > summary:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.imp-original { display: grid; gap: 6px; margin-top: 8px; padding: 10px 12px; background: var(--surface2); }
+.imp-original-title { font-weight: 600; }
+.imp-evidence-list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.imp-evidence { min-width: 0; }
+.imp-evidence-meta { display: flex; flex-wrap: wrap; gap: 2px 12px; color: var(--muted); font-size: 12px; }
+.imp-evidence blockquote { margin: 6px 0 0; padding-left: 10px; border-left: 2px solid var(--line2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.imp-evidence time { color: var(--muted); font-size: 12px; }
 .imp-result { margin: 0; padding: 8px 12px; background: var(--surface2); border-left: 2px solid var(--line2); overflow-wrap: anywhere; }
 .reqs { display: grid; gap: 10px; }
 .req { display: grid; gap: 8px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--amber); }

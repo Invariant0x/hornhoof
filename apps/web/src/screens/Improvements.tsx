@@ -4,7 +4,7 @@ import { errorText, useT } from '../i18n';
 import { useOrg } from '../org';
 import { placeName } from '../tasks';
 import type { Improvement, Org } from '../types';
-import { Markdown } from '../ui/Markdown';
+import { ImprovementPresentation } from './ImprovementPresentation';
 
 function TaskLinks({ item, onTask }: { item: Improvement; onTask: (taskId: string) => void }) {
   const t = useT();
@@ -43,17 +43,14 @@ function Item({ item, org, onChanged, onTask }: { item: Improvement; org: Org | 
   const who = item.department ? `${item.agent.name}, ${placeName(t, org, item.department)}` : item.agent.name;
   return (
     <article className={`imp imp-${item.status}`} aria-labelledby={`imp-${item.id}`}>
+      <ImprovementPresentation item={item} headingId={`imp-${item.id}`} />
       <header>
-        <h3 id={`imp-${item.id}`}>{item.title}</h3>
         <p className="imp-meta">
           <span>{who}</span>
           {item.seen > 1 && <span>{t.improvements.seen(item.seen)}</span>}
           {item.status === 'taken' && item.decidedBy && <span>{t.improvements.takenBy(item.decidedBy)}</span>}
         </p>
       </header>
-      <div className="imp-text">
-        <Markdown text={item.text} />
-      </div>
       {item.result && (
         <p className="imp-result">
           <b>{t.improvements.orchestrator}:</b> {item.result}

@@ -1,0 +1,65 @@
+{
+  "status": "SYNTHETIC_FIXTURE_PLAN_NOT_APPROVED_DTO",
+  "common": {
+    "improvement": {
+      "id": "fixture-ready",
+      "title": "Run the node-check utility",
+      "text": "Execute `node-check --verbose` and inspect the raw output.",
+      "seen": 2,
+      "status": "open",
+      "result": null,
+      "decidedBy": null,
+      "at": "2026-11-01T00:00:00.000Z",
+      "updatedAt": "2026-11-01T00:00:00.000Z",
+      "agent": { "id": "fixture-agent", "name": "Fixture collector" },
+      "department": { "id": "fixture-department", "name": "Fixture operations" }
+    },
+    "presentation": {
+      "schemaVersion": 1,
+      "state": "ready",
+      "sourceRevision": "rev-1",
+      "updatedAt": "2026-11-01T00:01:00.000Z",
+      "locales": {
+        "en": {
+          "title": "Make repeated checks easier to understand",
+          "observation": "Two synthetic checks produced the same unclear message.",
+          "impact": "A reviewer cannot tell whether a new check failed.",
+          "change": "Label each result with its actual run.",
+          "expectedResult": "A reviewer can distinguish a new failure from an old message.",
+          "facts": [{ "text": "The fixture contains two synthetic messages.", "evidenceIds": ["ev-1"] }],
+          "hypotheses": ["The messages may share a display label."],
+          "unknowns": ["The production cause is not evaluated by this fixture."]
+        },
+        "ru": {
+          "title": "Сделать повторные проверки понятнее",
+          "observation": "Две синтетические проверки показали одинаковое непонятное сообщение.",
+          "impact": "Проверяющий не может понять, была ли ошибка у новой проверки.",
+          "change": "Подписывать каждый результат по фактическому запуску.",
+          "expectedResult": "Проверяющий сможет отличить новую ошибку от старого сообщения.",
+          "facts": [{ "text": "Фикстура содержит два синтетических сообщения.", "evidenceIds": ["ev-1"] }],
+          "hypotheses": ["Возможно, сообщения используют одну подпись."],
+          "unknowns": ["Причина в реальной системе этой фикстурой не проверяется."]
+        }
+      }
+    },
+    "evidence": [
+      {
+        "id": "ev-1",
+        "sourceRef": "synthetic-check-log",
+        "at": "2026-11-01T00:00:00.000Z",
+        "author": "Fixture collector",
+        "quote": "Two synthetic messages",
+        "url": "https://example.test/evidence/ev-1"
+      }
+    ]
+  },
+  "cases": [
+    { "name": "ready", "override": {}, "expected": "Plain main explanation in both locales; original and technical quote only inside closed details." },
+    { "name": "draft", "override": { "presentation.state": "draft" }, "expected": "Visible draft/not-ready state; no ready claim and no decision-status change." },
+    { "name": "legacy", "override": { "presentation": null }, "expected": "Original title and text remain accessible; no browser-invented explanation." },
+    { "name": "missingLocale", "override": { "presentation.locales.ru": null }, "expected": "Explicit incomplete-translation fallback, never an invented Russian text or ready state." },
+    { "name": "unsafeURL", "override": { "evidence[0].url": "javascript:alert(1)" }, "expected": "No clickable or navigable unsafe URL; source text remains inert." },
+    { "name": "technicalQuote", "override": { "improvement.text": "<img src=x onerror=alert(1)> node-check --verbose" }, "expected": "Quote renders as text only inside details, without HTML execution or an automatic request." },
+    { "name": "sourcechanged", "override": { "presentation.sourceRevision": "rev-1", "simulatedServerSourceRevision": "rev-2" }, "expected": "Revision mismatch is reported; newer source is not silently replaced or shown as current." }
+  ]
+}

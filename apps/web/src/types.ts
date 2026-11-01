@@ -250,6 +250,34 @@ export type TaskDetail = TaskLine & {
 /* What an agent asks of people, under "Waiting for you". */
 /* Something an employee found to improve in how the company works. open waits for the CEO, taken is with the
    orchestrator, done is done, dismissed was set aside. result: the orchestrator's word on what came of it. */
+export type ImprovementLocale = {
+  title: string;
+  observation: string;
+  impact: string;
+  change: string;
+  expectedResult: string;
+  facts: { text: string; evidenceIds: string[] }[];
+  hypotheses: string[];
+  unknowns: string[];
+};
+
+export type ImprovementEvidence = {
+  id: string;
+  sourceRef: string;
+  at: string;
+  author: string;
+  quote: string;
+  url?: string | null;
+};
+
+export type ImprovementPresentation = {
+  schemaVersion: number;
+  state: 'ready' | 'draft';
+  locales: { en?: ImprovementLocale | null; ru?: ImprovementLocale | null };
+  sourceRevision: string;
+  updatedAt: string;
+};
+
 export type Improvement = {
   id: string;
   title: string;
@@ -263,6 +291,7 @@ export type Improvement = {
   department: { id: string; name: string } | null;
   decidedBy: string | null;
   tasks?: { id: string; number: number; title: string }[];
+  presentation?: ImprovementPresentation | null;
 };
 
 export type WaitingRequest = {

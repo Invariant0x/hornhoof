@@ -6,6 +6,7 @@ import { Shell } from '../src/screens/Shell';
 import type { Improvement, Me } from '../src/types';
 import { DEV_ORG, ME, mockApi, TASK_DETAIL } from './api-mock';
 import { fakeStream } from './fake-stream';
+import { PRESENTATION } from './improvement-presentation-fixture';
 
 const base = { seen: 1, result: null, at: '2026-10-31T09:00:00.000Z', updatedAt: '2026-10-31T09:00:00.000Z', decidedBy: null };
 const IMPROVEMENTS: Improvement[] = [
@@ -204,6 +205,97 @@ describe('improvements', () => {
     expect(dismissed).toHaveTextContent('Agents looked for jq on #4 and #9.');
     expect(dismissed).toHaveTextContent('Wendy, Operations');
     expect(within(dismissed).queryByRole('button', { name: 'Take into work' })).not.toBeInTheDocument();
+  });
+
+  it('shows a ready explanation and keeps the original, metadata, task links and actions intact', async () => {
+    const user = userEvent.setup();
+    const linked = { id: 't12', number: 12, title: 'Checkout API' };
+    const calls = shell({
+      'GET /api/improvements': [200, { improvements: [{ ...IMPROVEMENTS[0]!, presentation: PRESENTATION, tasks: [linked] }] }],
+      'POST /api/improvements/i1/take': [200, { improvement: { id: 'i1', status: 'taken' } }],
+    });
+    await openImprovements(user);
+    const card = await screen.findByRole('article', { name: PRESENTATION.locales.en.title });
+    expect(within(card).queryByRole('heading', { name: IMPROVEMENTS[0]!.title })).not.toBeInTheDocument();
+    expect(card).toHaveTextContent('What happened');
+    expect(card).toHaveTextContent(PRESENTATION.locales.en.observation);
+    expect(card).toHaveTextContent('Who it affects and how');
+    expect(card).toHaveTextContent('Proposed change');
+    expect(card).toHaveTextContent('Expected result');
+    expect(card).toHaveTextContent('Confirmed facts');
+    expect(card).toHaveTextContent(PRESENTATION.locales.en.facts[0]!.text);
+    expect(card).toHaveTextContent('ev-1');
+    expect(card).toHaveTextContent('Hypotheses');
+    expect(card).toHaveTextContent('Still unknown');
+    expect(card).toHaveTextContent('Wendy, Operations');
+    expect(card).toHaveTextContent('Found 3 times');
+    expect(within(card).getByRole('button', { name: '#12 Checkout API' })).toBeInTheDocument();
+    const details = within(card).getByText('Evidence and technical details').closest('details');
+    expect(details).not.toHaveAttribute('open');
+    expect(details).toHaveTextContent('Original proposal');
+    expect(details).toHaveTextContent(IMPROVEMENTS[0]!.title);
+    expect(details).toHaveTextContent('Agents looked for jq on #4 and #9.');
+    expect(calls.some(c => c.method === 'POST')).toBe(false);
+    await user.click(within(card).getByRole('button', { name: 'Take into work' }));
+    await waitFor(() => expect(calls.some(c => c.method === 'POST' && c.path === '/api/improvements/i1/take')).toBe(true));
+  });
+
+  it('uses the complete Russian explanation instead of translating it in the browser', async () => {
+    localStorage.setItem('hh-lang', 'ru');
+    try {
+      const user = userEvent.setup();
+      shell({ 'GET /api/improvements': [200, { improvements: [{ ...IMPROVEMENTS[0]!, presentation: PRESENTATION }] }] });
+      await user.click(await screen.findByRole('button', { name: /^Улучшения/ }));
+      const card = await screen.findByRole('article', { name: PRESENTATION.locales.ru.title });
+      expect(card).toHaveTextContent('Что произошло');
+      expect(card).toHaveTextContent(PRESENTATION.locales.ru.observation);
+      expect(card).toHaveTextContent('Кого это затрагивает и как');
+      expect(card).toHaveTextContent('Что предлагается изменить');
+      expect(card).toHaveTextContent('Ожидаемый результат');
+      expect(card).toHaveTextContent('Подтверждено');
+      expect(card).toHaveTextContent(PRESENTATION.locales.ru.facts[0]!.text);
+      expect(card).toHaveTextContent('Гипотезы');
+      expect(card).toHaveTextContent('Пока неизвестно');
+      expect(within(card).getByText('Доказательства и технические подробности')).toBeInTheDocument();
+      expect(card).not.toHaveTextContent(PRESENTATION.locales.en.observation);
+    } finally {
+      localStorage.removeItem('hh-lang');
+    }
+  });
+
+  it('marks a draft and keeps the original instead of presenting it as ready', async () => {
+    const user = userEvent.setup();
+    shell({ 'GET /api/improvements': [200, { improvements: [{ ...IMPROVEMENTS[0]!, presentation: { ...PRESENTATION, state: 'draft' } }] }] });
+    await openImprovements(user);
+    const card = await screen.findByRole('article', { name: IMPROVEMENTS[0]!.title });
+    expect(card).toHaveTextContent('Draft: source details are missing.');
+    expect(card).toHaveTextContent('Agents looked for jq on #4 and #9.');
+    expect(card).not.toHaveTextContent(PRESENTATION.locales.en.observation);
+  });
+
+  it('keeps a legacy improvement unchanged without inventing an explanation', async () => {
+    const user = userEvent.setup();
+    shell({ 'GET /api/improvements': [200, { improvements: [{ ...IMPROVEMENTS[0]!, presentation: null }] }] });
+    await openImprovements(user);
+    const card = await screen.findByRole('article', { name: IMPROVEMENTS[0]!.title });
+    expect(card).toHaveTextContent('Agents looked for jq on #4 and #9.');
+    expect(within(card).queryByText('What happened')).not.toBeInTheDocument();
+    expect(within(card).queryByText('Evidence and technical details')).not.toBeInTheDocument();
+  });
+
+  it('does not substitute English for a missing Russian locale', async () => {
+    localStorage.setItem('hh-lang', 'ru');
+    try {
+      const user = userEvent.setup();
+      shell({ 'GET /api/improvements': [200, { improvements: [{ ...IMPROVEMENTS[0]!, presentation: { ...PRESENTATION, locales: { en: PRESENTATION.locales.en } } }] }] });
+      await user.click(await screen.findByRole('button', { name: /^Улучшения/ }));
+      const card = await screen.findByRole('article', { name: IMPROVEMENTS[0]!.title });
+      expect(card).toHaveTextContent('Это объяснение еще не готово на вашем языке.');
+      expect(card).not.toHaveTextContent(PRESENTATION.locales.en.observation);
+      expect(card).toHaveTextContent('Agents looked for jq on #4 and #9.');
+    } finally {
+      localStorage.removeItem('hh-lang');
+    }
   });
 
   it('are not there for people who see only some departments', async () => {
