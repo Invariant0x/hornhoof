@@ -348,4 +348,24 @@ describe('migration 0033', () => {
     const gone = await db.execute(sql`select table_name, column_name from information_schema.columns where (table_name = 'subscriptions' and column_name in ('machine_id', 'node_key_hash', 'node_version', 'last_seen_at')) or (table_name = 'test_parts' and column_name = 'subscription_id')`);
     expect(gone.rows).toEqual([]);
   });
+
+  it('hides the code of every machine command in the conversations it was written to', async () => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0032_company_template') });
+    await db.execute(sql`insert into companies (id, name) values (${C}, 'Acme')`);
+    await db.execute(sql`insert into agents (id, company_id, kind, name, model) values (${A}, ${C}, 'orchestrator', 'Orchestrator', '')`);
+    const command = 'curl -fsSL https://hq.acme.com/install.sh | bash -s -- --join Ab3_x-9Zq';
+    await db.execute(sql`insert into agent_events (company_id, agent_id, kind, data) values
+      (${C}, ${A}, 'tool_result', ${JSON.stringify({ text: `{"command":"${command}"}` })}::jsonb),
+      (${C}, ${A}, 'text', ${JSON.stringify({ text: `Run this:\n${command}\nthen tell me.` })}::jsonb),
+      (${C}, ${A}, 'text', ${JSON.stringify({ text: 'Add --joined to the list.' })}::jsonb)`);
+
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+
+    const events = await db.execute<{ data: { text: string } }>(sql`select data from agent_events order by seq`);
+    const hidden = 'curl -fsSL https://hq.acme.com/install.sh | bash -s -- --join [hidden]';
+    expect(events.rows.map(r => r.data.text)).toEqual([`{"command":"${hidden}"}`, `Run this:\n${hidden}\nthen tell me.`, 'Add --joined to the list.']);
+  });
 });

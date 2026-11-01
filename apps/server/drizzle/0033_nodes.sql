@@ -31,6 +31,9 @@ INSERT INTO "nodes" ("id", "company_id", "machine_id", "subscription_id", "key_h
 UPDATE "agents" SET "node_id" = "subscription_id" WHERE "subscription_id" IN (SELECT "id" FROM "nodes");--> statement-breakpoint
 UPDATE "jobs" SET "node_id" = "subscription_id" WHERE "subscription_id" IN (SELECT "id" FROM "nodes");--> statement-breakpoint
 UPDATE "test_parts" SET "node_id" = "subscription_id" WHERE "subscription_id" IN (SELECT "id" FROM "nodes");--> statement-breakpoint
+-- No conversation keeps the code of a machine command: what an agent was given or wrote keeps the command with its code
+-- hidden, as Hornhoof writes it from now on.
+UPDATE "agent_events" SET "data" = regexp_replace("data"::text, '--join [A-Za-z0-9_-]+', '--join [hidden]', 'g')::jsonb WHERE "data"::text LIKE '%--join %';--> statement-breakpoint
 ALTER TABLE "nodes" ADD CONSTRAINT "nodes_company_id_companies_id_fk" FOREIGN KEY ("company_id") REFERENCES "public"."companies"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "nodes" ADD CONSTRAINT "nodes_machine_id_machines_id_fk" FOREIGN KEY ("machine_id") REFERENCES "public"."machines"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "nodes" ADD CONSTRAINT "nodes_subscription_id_subscriptions_id_fk" FOREIGN KEY ("subscription_id") REFERENCES "public"."subscriptions"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
