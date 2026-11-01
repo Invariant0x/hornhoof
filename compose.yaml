@@ -18,6 +18,8 @@ services:
       # the app believes.
       RELAY_URL: ${RELAY_URL:-}
       TUNNEL_HOST: tunnel
+      # How many megabytes all the files on the company's tasks may take together; 2048 when empty.
+      TASK_FILES_MB: ${TASK_FILES_MB:-}
     volumes:
       - control:/control
     healthcheck:

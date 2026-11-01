@@ -48,6 +48,14 @@ describe('loadConfig', () => {
     }
   });
 
+  it('gives task files 2 GB unless TASK_FILES_MB names other whole megabytes', () => {
+    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, TASK_FILES_MB: '' }).taskFilesBytes).toBe(2048 * 1024 * 1024);
+    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, TASK_FILES_MB: '512' }).taskFilesBytes).toBe(512 * 1024 * 1024);
+    for (const TASK_FILES_MB of ['2GB', '0', '-1', '1.5']) {
+      expect(() => loadConfig({ HORNHOOF_SECRET: TEST_SECRET, TASK_FILES_MB })).toThrow('TASK_FILES_MB must be a whole number of megabytes, like 2048.');
+    }
+  });
+
   it('names every wrong setting at once', () => {
     expect(() => loadConfig({ HORNHOOF_SECRET: TEST_SECRET, PORT: 'abc', REGISTRY_URL: 'registry' })).toThrow(/PORT must be[\s\S]*REGISTRY_URL must be an http:\/\/ or https:\/\/ address/);
   });

@@ -5,6 +5,7 @@ import { agents, jobs, tasks } from '../../db/schema.js';
 import { loggable } from '../../errors.js';
 import { appendEvent } from '../events/store.js';
 import { agentState, insertTurn, liveSubscription, onAgent, pump, STOPPED_ON_PURPOSE } from '../conversation/queue.js';
+import { dropOldFiles } from '../tasks/attachments.js';
 import { wakeLeftBehind } from '../tasks/wake.js';
 import type { AgentRow } from './find.js';
 
@@ -90,12 +91,18 @@ export async function timerTick(ctx: Ctx, now = new Date(), report: (err: unknow
 /* Looks for due rounds every minute while the server runs. */
 export function startTimers(app: FastifyInstance, ctx: Ctx): void {
   const failed = (what: string) => (err: unknown) => app.log.error({ error: loggable(err) }, what);
-  /* Turns that task moves kept and nobody queued go out too, the first time as the server starts. */
+  /* Turns that task moves kept and nobody queued go out too, the first time as the server starts, and the files of turns
+     closed a month ago go. */
   const leftBehind = () => void wakeLeftBehind(ctx).catch(failed('queueing left-behind turns failed'));
-  app.addHook('onReady', async () => leftBehind());
+  const oldFiles = () => void dropOldFiles(ctx.db, new Date()).catch(failed('removing the files of old turns failed'));
+  app.addHook('onReady', async () => {
+    leftBehind();
+    oldFiles();
+  });
   const timer = setInterval(() => {
     void timerTick(ctx, new Date(), failed('timer round failed')).catch(failed('timer tick failed'));
     leftBehind();
+    oldFiles();
   }, TICK_MS);
   timer.unref();
   app.addHook('onClose', async () => clearInterval(timer));

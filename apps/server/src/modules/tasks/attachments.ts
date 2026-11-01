@@ -1,11 +1,12 @@
-import { and, asc, count, desc, eq, inArray, or } from 'drizzle-orm';
+import { Readable } from 'node:stream';
+import { and, asc, count, desc, eq, inArray, isNotNull, lt, or, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { accessOf, canReach } from '../../auth/access.js';
 import { requirePerson } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
-import { attachments, departments, requests, tasks, type RequestOption } from '../../db/schema.js';
+import { attachments, departments, requests, tasks, turns, type RequestOption } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { jobOf, type ToolJob } from '../tools/job.js';
 import { refuse, taskSpot, type Task } from './engine.js';
@@ -17,6 +18,16 @@ const PER_TURN = 30;
 /* A file on a task: a build, a log or a data set fits, and the database still carries it. */
 export const FILE_BYTES = 50 * 1024 * 1024;
 const NAME_LENGTH = 200;
+/* Every copy of the database carries the files, so one task holds this much and the company what its setting says. */
+export const TASK_FILES_BYTES = 500 * 1024 * 1024;
+/* The files of a turn go this long after it closed. */
+const KEEP_FILES_MS = 30 * 24 * 60 * 60 * 1000;
+/* A download leaves in pieces of this size, so the server never holds a whole file. */
+const PIECE_BYTES = 1024 * 1024;
+
+const GB = 1024 * 1024 * 1024;
+const sizeText = (bytes: number) => (bytes >= GB ? `${Number((bytes / GB).toFixed(1))} GB` : `${Math.ceil(bytes / 1024 / 1024)} MB`);
+const ELSEWHERE = 'Put a smaller file, or keep a big one outside Hornhoof and write where it is.';
 
 /* A file's name on its task: the last part of what was sent, never a folder, without control characters. */
 export function fileName(raw: string): string | null {
@@ -91,6 +102,16 @@ export async function picturesOf(db: Db, rows: { id: string; options: RequestOpt
   return new Map(rows.map(r => [r.id, found.filter(a => a.requestId === r.id && !r.options.some(o => o.image === a.id)).map(a => a.id)]));
 }
 
+/* Removes the files on the tasks of turns closed 30 days or more before now, and says how many went. */
+export async function dropOldFiles(db: Db, now: Date): Promise<number> {
+  const old = db
+    .select({ id: tasks.id })
+    .from(tasks)
+    .innerJoin(turns, eq(turns.id, tasks.turnId))
+    .where(and(eq(turns.status, 'closed'), lt(turns.closedAt, new Date(now.getTime() - KEEP_FILES_MS))));
+  return (await db.delete(attachments).where(inArray(attachments.taskId, old)).returning({ id: attachments.id })).length;
+}
+
 const IdParams = z.object({ id: z.uuid() });
 const SendQuery = z.object({ task: z.string().optional(), name: z.string().optional() });
 const FetchQuery = z.object({ task: z.string().min(1), file: z.string().min(1) });
@@ -115,6 +136,27 @@ export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
       if (!type) throw new ApiError(400, 'validation', 'Send a PNG, JPEG or WebP picture, or name the task a file is for.', 'attachment_invalid');
       const [sent] = await db.select({ n: count() }).from(attachments).where(eq(attachments.jobId, job.id));
       if (Number(sent?.n ?? 0) >= PER_TURN) throw refuse(409, 'task_invalid', `One turn sends at most ${PER_TURN} pictures and files.`);
+      if (task) {
+        const [used] = await db
+          .select({
+            task: sql<string>`coalesce(sum(${attachments.size}) filter (where ${attachments.taskId} = ${task.id}), 0)`,
+            company: sql<string>`coalesce(sum(${attachments.size}), 0)`,
+          })
+          .from(attachments)
+          .where(and(eq(attachments.companyId, job.companyId), isNotNull(attachments.taskId)));
+        const [onTask, inCompany] = [Number(used?.task ?? 0), Number(used?.company ?? 0)];
+        if (onTask + bytes.length > TASK_FILES_BYTES) {
+          throw new ApiError(413, 'validation', `Task ${task.number} holds ${sizeText(onTask)} of files, and one task holds at most ${sizeText(TASK_FILES_BYTES)}. ${ELSEWHERE}`, 'attachment_invalid');
+        }
+        if (inCompany + bytes.length > ctx.config.taskFilesBytes) {
+          throw new ApiError(
+            413,
+            'validation',
+            `The company's task files take ${sizeText(inCompany)} of the ${sizeText(ctx.config.taskFilesBytes)} Hornhoof keeps for them. The files of a turn go 30 days after it closes. ${ELSEWHERE}`,
+            'attachment_invalid',
+          );
+        }
+      }
       const [row] = await db
         .insert(attachments)
         .values({ companyId: job.companyId, jobId: job.id, agentId: job.agentId, taskId: task?.id ?? null, name, mediaType: type, bytes, size: bytes.length })
@@ -133,18 +175,29 @@ export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     const byId = z.uuid().safeParse(file).success;
     const [found] = task
       ? await db
-          .select({ name: attachments.name, bytes: attachments.bytes })
+          .select({ id: attachments.id, name: attachments.name, length: sql<number>`octet_length(${attachments.bytes})`.mapWith(Number) })
           .from(attachments)
           .where(and(eq(attachments.taskId, task.id), byId ? or(eq(attachments.id, file), eq(attachments.name, file)) : eq(attachments.name, file)))
           .orderBy(desc(attachments.createdAt))
           .limit(1)
       : [];
     if (!found) throw new ApiError(404, 'not_found', `Task ${ref} has no file ${file}. Its card lists its files.`, 'attachment_unknown');
+    async function* pieces(id: string, length: number) {
+      for (let at = 0; at < length; at += PIECE_BYTES) {
+        const [piece] = await db
+          .select({ bytes: sql<Uint8Array>`substring(${attachments.bytes} from ${at + 1} for ${PIECE_BYTES})` })
+          .from(attachments)
+          .where(eq(attachments.id, id));
+        if (!piece) throw new Error('The file was removed while it was being sent.');
+        yield Buffer.from(piece.bytes);
+      }
+    }
     return reply
       .header('x-content-type-options', 'nosniff')
       .header('x-file-name', encodeURIComponent(found.name ?? ''))
+      .header('content-length', String(found.length))
       .type('application/octet-stream')
-      .send(Buffer.from(found.bytes));
+      .send(Readable.from(pieces(found.id, found.length)));
   });
 
   /* People see a picture once a request shows it, and only where they reach the request's task. */

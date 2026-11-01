@@ -30,6 +30,8 @@ export type Config = {
   relayUrl: string;
   /* The tunnel container's host name: only requests from it may say they came in over https. */
   tunnelHost?: string;
+  /* How much all the files on the company's tasks may take together. */
+  taskFilesBytes: number;
 };
 
 /* Both src/ and dist/ sit one level below apps/server, so this finds apps/web/dist either way. */
@@ -60,6 +62,7 @@ const Env = z.object({
   REGISTRY_URL: webAddress('REGISTRY_URL must be an http:// or https:// address.'),
   RELAY_URL: webAddress('RELAY_URL must be an http:// or https:// address, like https://hornhoof.org.'),
   TUNNEL_HOST: z.preprocess(unset, z.string().regex(/^[A-Za-z0-9.-]{1,253}$/, 'TUNNEL_HOST must be the host name of the tunnel container, like tunnel.').optional()),
+  TASK_FILES_MB: wholeNumber(1, 1_000_000, 'TASK_FILES_MB must be a whole number of megabytes, like 2048.'),
 });
 
 const productVersion = (): string => (JSON.parse(readFileSync(ROOT_PACKAGE, 'utf8')) as { version: string }).version;
@@ -98,5 +101,6 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     templatesDir: env.TEMPLATES_DIR || DEFAULT_TEMPLATES,
     relayUrl: (set.RELAY_URL ?? 'https://hornhoof.org').replace(/\/+$/, ''),
     tunnelHost: set.TUNNEL_HOST,
+    taskFilesBytes: (set.TASK_FILES_MB ?? 2048) * 1024 * 1024,
   };
 }
