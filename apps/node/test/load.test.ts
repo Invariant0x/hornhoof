@@ -45,6 +45,12 @@ describe("a node's machine load", () => {
     expect(load).toEqual({ cpus: 8, load: 0, memFree: GIB, memTotal: 2 * GIB, cpuModel: 'AMD EPYC 7B13' });
   });
 
+  it('names no processor when the system calls it unknown, as Linux on arm64 does in Docker on a Mac', () => {
+    const load = machineLoad({ read: () => null, cpus: 10, load: 0, free: GIB, total: 2 * GIB, cpuModel: 'unknown', disk: () => null, env: {} });
+    expect(load).toEqual({ cpus: 10, load: 0, memFree: GIB, memTotal: 2 * GIB });
+    expect(machineLoad({ read: () => null, cpus: 10, cpuModel: 'Unknown CPU', disk: () => null, env: { HORNHOOF_HOST_CPU: 'Apple M5' } }).cpuModel).toBe('Apple M5');
+  });
+
   it('reads this machine without help', () => {
     const now = machineLoad();
     expect(now.cpus).toBeGreaterThanOrEqual(1);

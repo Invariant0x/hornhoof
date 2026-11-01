@@ -78,7 +78,9 @@ export function machineLoad({
     memTotal = limit;
     memFree = Math.min(memFree, Math.max(0, limit - (bytes(read('/sys/fs/cgroup/memory.current')) ?? 0)));
   }
-  const model = (env.HORNHOOF_HOST_CPU?.trim() || cpuModel.trim()).slice(0, 200);
+  /* Node says "unknown" where the system names no processor, as Linux on arm64 does in Docker on a Mac. */
+  const own = /^unknown$/i.test(cpuModel.trim()) ? '' : cpuModel.trim();
+  const model = (env.HORNHOOF_HOST_CPU?.trim() || own).slice(0, 200);
   const space = disk();
   const hostCpus = positive(env.HORNHOOF_HOST_CPUS);
   const hostMemory = positive(env.HORNHOOF_HOST_MEMORY);
