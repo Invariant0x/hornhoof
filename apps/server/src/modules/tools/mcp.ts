@@ -19,6 +19,9 @@ import { registerImprovementTools, registerOrchestratorImprovementTools } from '
 
 const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
 
+/* The head of Operations keeps the company running, so it reaches Hornhoof's database as the orchestrator does. */
+export const DATABASE_ROLES = ['OPS-HEAD'];
+
 /* Hornhoof's tools as one agent's job sees them: every agent reads the company, an employee gets the tools its skills
    grant, a head keeps its department notebook, tells the orchestrator and puts what to improve under Improvements, and the
    orchestrator also proposes cards and does whatever the CEO can do in the screens. */
@@ -35,6 +38,7 @@ function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob): McpServer {
     registerWatchTools(server, ctx, job, grants);
     if (job.agentKind === 'head') registerHeadNotebookTools(server, ctx, job);
     if (job.agentKind === 'head' || grants.has('improvements')) registerImprovementTools(server, ctx, job);
+    if (job.agentKind === 'head' && job.roleKey !== null && DATABASE_ROLES.includes(job.roleKey)) registerDatabaseTool(server, ctx, job);
     return server;
   }
   server.registerTool(

@@ -349,9 +349,17 @@ describe('the orchestrator reads and changes the database itself', () => {
     expect(text(res)).toContain('does not let Hornhoof');
   });
 
-  it('is the orchestrator\'s alone', async () => {
-    const { app, bruno, running } = await company();
-    await running(bruno.id, WORKER_TOKEN);
-    expect((await (await mcp(app, WORKER_TOKEN)).listTools()).tools.map(t => t.name)).not.toContain('database');
+  it("is the orchestrator's and the head of Operations', no one else's", async () => {
+    const { app, db, hana, bruno, running } = await company();
+    const [ops] = await db.insert(departments).values({ companyId: bruno.companyId, templateKey: 'operations', roleCode: 'OPS' }).returning();
+    const [wanda] = await db.insert(agents).values({ companyId: bruno.companyId, kind: 'head', name: 'Wanda', roleKey: 'OPS-HEAD', departmentId: ops!.id, model: '', subscriptionId: bruno.subscriptionId }).returning();
+    const tokens = { bruno: WORKER_TOKEN, hana: 'tool-token-head-0123456789abcdef0123', wanda: 'tool-token-ops-0123456789abcdef01234' };
+    await running(bruno.id, tokens.bruno);
+    await running(hana.id, tokens.hana);
+    await running(wanda!.id, tokens.wanda);
+    const has = async (token: string) => (await (await mcp(app, token)).listTools()).tools.some(t => t.name === 'database');
+    expect([await has(tokens.bruno), await has(tokens.hana), await has(tokens.wanda)]).toEqual([false, false, true]);
+    const read = await call(await mcp(app, tokens.wanda), 'database', { sql: `SELECT name FROM agents WHERE id = '${bruno.id}'` });
+    expect(JSON.parse(text(read))).toEqual([{ rows: [{ name: 'Bruno' }], changed: 0 }]);
   });
 });
