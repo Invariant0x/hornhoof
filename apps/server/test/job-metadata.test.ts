@@ -15,8 +15,8 @@ const FROM = '2026-11-01T00:17:00.123456Z';
 const TO = '2026-11-01T00:30:03.654321Z';
 const QUERY = new URLSearchParams({ from: FROM, to: TO }).toString();
 
-async function company() {
-  const { app, db } = await testApp({ NODE_KEY });
+async function company(logger?: Parameters<typeof testApp>[1]) {
+  const { app, db } = await testApp({ NODE_KEY }, logger);
   const url = await listen(app);
   const ceo = await setUpCompany(app);
   const [acme] = await db.select().from(companies);
@@ -122,8 +122,17 @@ describe('job metadata export', () => {
     expect((await c.app.inject({ url: metadataPath(foreign!.id), ...as(c.ceo) })).statusCode).toBe(404);
   });
 
-  it('rejects invalid ids, non-UTC dates, reversed ranges and large windows', async () => {
+  it('rejects invalid ids, non-UTC dates, reversed ranges and large windows without a database call', async () => {
     const c = await company();
+    let calls = 0;
+    const execute = c.db.execute;
+    c.db.execute = async () => {
+      calls += 1;
+      throw new Error('Unexpected database call');
+    };
+    onTestFinished(() => {
+      c.db.execute = execute;
+    });
     const paths = [
       metadataPath('not-a-uuid'),
       metadataPath(c.target.id, new URLSearchParams({ to: TO }).toString()),
@@ -136,40 +145,45 @@ describe('job metadata export', () => {
       metadataPath(c.target.id, new URLSearchParams({ from: '0000-01-01T00:00:00Z', to: '0000-01-01T00:01:00Z' }).toString()),
     ];
     for (const path of paths) expect((await c.app.inject({ url: path, ...as(c.ceo) })).statusCode).toBe(400);
+    expect(calls).toBe(0);
   });
 
   it('does not expose a database failure in the response or server log and preserves state', async () => {
-    const c = await company();
+    const lines: string[] = [];
+    const c = await company({ level: 'error', stream: { write: (line: string) => void lines.push(line) } });
     await seed(c);
     const state = async () => c.db.select().from(jobs).orderBy(asc(jobs.id));
     const before = await state();
-    const logged: string[] = [];
-    const logError = c.app.log.error;
     const execute = c.db.execute;
-    c.app.log.error = (...args: unknown[]) => {
-      logged.push(args.map(String).join(' '));
-    };
     const canary = 'postgres://fake-user:fake-password@fake-host/fake-db';
+    const nestedCause = 'fake-nested-cause-secret';
+    const detail = 'fake-connection-detail-secret';
     c.db.execute = async () => {
-      throw new Error(canary);
+      const failure = new Error(canary, { cause: new Error(nestedCause) });
+      Object.assign(failure, { detail });
+      throw failure;
     };
     onTestFinished(() => {
-      c.app.log.error = logError;
       c.db.execute = execute;
     });
     const response = await c.app.inject({ url: metadataPath(c.target.id), ...as(c.ceo) });
-    expect(logged.join('\n')).not.toContain(canary);
+    const logs = lines.join('\n');
+    for (const marker of [canary, nestedCause, detail]) {
+      expect(logs).not.toContain(marker);
+      expect(response.body).not.toContain(marker);
+    }
     expect(response.statusCode).toBe(503);
     expect(response.json()).toEqual({ error: { code: 'unavailable', message: 'Job metadata is temporarily unavailable. Try again later.' } });
-    expect(response.body).not.toContain(canary);
     expect(await state()).toEqual(before);
   });
 
-  it('allows instant and exactly fifteen minute inclusive windows', async () => {
+  it('allows instant, exactly fifteen minute and supported boundary-year windows', async () => {
     const c = await company();
     const instant = new URLSearchParams({ from: FROM, to: FROM }).toString();
     const exact = new URLSearchParams({ from: FROM, to: '2026-11-01T00:32:00.123456Z' }).toString();
-    for (const query of [instant, exact]) expect((await c.app.inject({ url: metadataPath(c.target.id, query), ...as(c.ceo) })).statusCode).toBe(200);
+    const early = new URLSearchParams({ from: '0001-01-01T00:00:00Z', to: '0001-01-01T00:00:00Z' }).toString();
+    const latest = new URLSearchParams({ from: '9999-12-31T23:59:59Z', to: '9999-12-31T23:59:59Z' }).toString();
+    for (const query of [instant, exact, early, latest]) expect((await c.app.inject({ url: metadataPath(c.target.id, query), ...as(c.ceo) })).statusCode).toBe(200);
   });
 
   it('rejects a window over fifteen minutes by one microsecond', async () => {
