@@ -22,6 +22,15 @@ describe('GET /api/org', () => {
     expect((await app.inject({ url: '/api/org' })).statusCode).toBe(401);
   });
 
+  it("says until when the orchestrator's plan is at its limit, and nothing once it is not", async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    expect((await app.inject({ url: '/api/org', ...as(ceo) })).json().orchestrator.limitUntil).toBeNull();
+    const resetsAt = new Date(Date.now() + 3_600_000).toISOString();
+    await db.update(subscriptions).set({ limits: { status: 'rejected', windows: [{ name: 'five_hour', utilization: 1, resetsAt }] } });
+    expect((await app.inject({ url: '/api/org', ...as(ceo) })).json().orchestrator.limitUntil).toBe(resetsAt);
+  });
+
   it('lists departments with their teams in pipeline order', async () => {
     const { app, db } = await testApp();
     const ceo = await setUpCompany(app);

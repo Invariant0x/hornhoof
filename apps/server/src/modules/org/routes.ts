@@ -6,6 +6,7 @@ import { accessOf, canReach } from '../../auth/access.js';
 import { personColumns, requirePerson } from '../../auth/session.js';
 import { agents, companies, departments, jobs, people, personAccess, requests, subscriptions, tasks, teams, turns } from '../../db/schema.js';
 import { employeeOrder } from '../agents/order.js';
+import { limitUntil } from '../conversation/queue.js';
 import { authorOf } from '../departments/repository.js';
 import { deptName } from '../departments/templates.js';
 import { CHANNEL_MS, type Endpoint } from '../events/bus.js';
@@ -25,7 +26,7 @@ export function orgRoutes(app: FastifyInstance, { db, hub, templates, bus }: Ctx
     const me = await requirePerson(req, db);
     const [company] = await db.select({ id: companies.id, name: companies.name }).from(companies).where(eq(companies.id, me.companyId));
     const allAgents = await db.select().from(agents).where(isNull(agents.removedAt));
-    const subs = new Map((await db.select({ id: subscriptions.id, provider: subscriptions.provider, models: subscriptions.models }).from(subscriptions)).map(s => [s.id, s]));
+    const subs = new Map((await db.select({ id: subscriptions.id, provider: subscriptions.provider, models: subscriptions.models, limits: subscriptions.limits }).from(subscriptions)).map(s => [s.id, s]));
     const orchestrator = allAgents.find(a => a.kind === 'orchestrator');
     const active = await db.select(personColumns).from(people).where(ne(people.status, 'disabled')).orderBy(asc(people.createdAt));
     const depts = await db.select().from(departments).orderBy(asc(departments.position), asc(departments.createdAt));
@@ -174,6 +175,8 @@ export function orgRoutes(app: FastifyInstance, { db, hub, templates, bus }: Ctx
         model: orchestrator.model,
         effort: (orchestrator.subscriptionId && subs.has(orchestrator.subscriptionId) && effortShown(subs.get(orchestrator.subscriptionId)!, orchestrator)) || null,
         context: orchestrator.contextUsed,
+        /* His plan is at its limit until then: he waits for the reset on it, and the CEO decides whether he moves. */
+        limitUntil: limitUntil((orchestrator.subscriptionId && subs.get(orchestrator.subscriptionId)?.limits) || null),
         subscription: orchestrator.subscriptionId ? await subView(db, s => hub.isOnline(identityOf(s)), orchestrator.subscriptionId) : null,
       },
       agents: { total: allAgents.length, working: await workingCount(db, me.companyId) },
