@@ -74,8 +74,8 @@ export function UpdateBanner({ updates, onDetails }: { updates: Updates; onDetai
     body = (
       <>
         <span>{t.updates.out(latest.version || latest.tag, latest.title)}</span>
-        <button className="btn small" type="button" onClick={() => act(() => updates.update('latest', false))}>{t.updates.update}</button>
-        <button className="btn small ghost" type="button" onClick={() => act(() => updates.update('latest', true))}>{t.updates.whenIdle}</button>
+        <button className="btn small" type="button" disabled={updates.asking} onClick={() => act(() => updates.update('latest', false))}>{t.updates.update}</button>
+        <button className="btn small ghost" type="button" disabled={updates.asking} onClick={() => act(() => updates.update('latest', true))}>{t.updates.whenIdle}</button>
         <button className="btn small ghost" type="button" onClick={() => hide(LATER, latest.commit)}>{t.updates.later}</button>
       </>
     );

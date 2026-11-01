@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Shell } from '../src/screens/Shell';
@@ -89,6 +89,27 @@ describe('updates', () => {
     const bar = screen.getByRole('progressbar', { name: 'Update progress' });
     expect(bar).toHaveAttribute('aria-valuetext', 'Step 1 of 4: saving the database');
     expect(bar).toHaveAttribute('aria-valuenow', '0');
+  });
+
+  it('asks for one update however fast Update is clicked again', async () => {
+    let answer = () => {};
+    const calls = mockApi({
+      'GET /api/org': [200, ORG],
+      'GET /api/updates': [200, updates()],
+      'POST /api/updates': () => new Promise(resolve => (answer = () => resolve([202, { id: 'u1' }]))),
+    });
+    const user = userEvent.setup();
+    render(<Shell me={ME} onSignOut={() => {}} />);
+    const update = await screen.findByRole('button', { name: 'Update' });
+    await user.dblClick(update);
+    expect(calls.filter(c => c.method === 'POST' && c.path === '/api/updates')).toHaveLength(1);
+    expect(update).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Update when agents finish' })).toBeDisabled();
+    await act(async () => {
+      answer();
+      await new Promise(r => setTimeout(r, 50));
+    });
+    expect(calls.filter(c => c.method === 'POST' && c.path === '/api/updates')).toHaveLength(1);
   });
 
   it('shows the update starting at once, then the server restarting', async () => {

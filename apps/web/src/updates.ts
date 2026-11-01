@@ -16,6 +16,8 @@ export type Updates = {
   starting: boolean;
   /* The server stopped answering while an update runs: it is restarting. */
   offline: boolean;
+  /* An update is being asked for and the server has not answered yet. */
+  asking: boolean;
   check(): Promise<void>;
   update(version: string, whenIdle: boolean): Promise<void>;
   callOff(): Promise<void>;
@@ -26,8 +28,10 @@ export function useUpdates(enabled: boolean): Updates {
   const [view, setView] = useState<UpdatesView | null>(null);
   const [sent, setSent] = useState<string | null>(null);
   const [offline, setOffline] = useState(false);
+  const [asking, setAsking] = useState(false);
   const boot = useRef<string | null>(null);
   const busyNow = useRef(false);
+  const askingNow = useRef(false);
 
   const take = useCallback((next: UpdatesView) => {
     boot.current ??= next.current.commit;
@@ -68,11 +72,21 @@ export function useUpdates(enabled: boolean): Updates {
     busy,
     starting,
     offline,
+    asking,
     check: async () => take(await api.post<UpdatesView>('/api/updates/check')),
     update: async (version, whenIdle) => {
-      const { id } = await api.post<{ id: string }>('/api/updates', { version, whenIdle });
-      if (!whenIdle) setSent(id);
-      await load();
+      /* A second click before the answer would ask the updater twice. */
+      if (askingNow.current) return;
+      askingNow.current = true;
+      setAsking(true);
+      try {
+        const { id } = await api.post<{ id: string }>('/api/updates', { version, whenIdle });
+        if (!whenIdle) setSent(id);
+        await load();
+      } finally {
+        askingNow.current = false;
+        setAsking(false);
+      }
     },
     callOff: async () => {
       await api.del('/api/updates');

@@ -88,7 +88,8 @@ export function Versions({ updates, onClose }: { updates: Updates; onClose: () =
                 <span className="versions-now">{t.updates.runningNow}</span>
               ) : (
                 updater.present &&
-                !busy && (
+                !busy &&
+                !updates.asking && (
                   <button className="act" type="button" onClick={() => (b.migrations < current.migrations ? setConfirm(b) : void install(b))}>
                     {t.updates.install}
                   </button>
