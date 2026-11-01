@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { CLAUDE_ALIASES, type AgentEvent, type ProviderId, type ServerMessage } from '@hornhoof/protocol';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished } from 'vitest';
 import { adapterFor } from '../src/providers/index.js';
 import { claudeEvents, claudeInterrupted, limitsFrom } from '../src/providers/claude.js';
 import { codexEvents, codexRateLimits } from '../src/providers/codex.js';
@@ -532,6 +532,13 @@ describe('Kimi Code', () => {
 
     await a.run(input({ sessionId: KIMI_SESSION, model: 'kimi-k3' }));
     expect(lastRun().argv).toEqual(['--prompt=say ready', '--output-format', 'stream-json', '--session', KIMI_SESSION, '-m', 'kimi-k3']);
+    expect(lastRun().env).not.toHaveProperty('KIMI_MODEL_THINKING_EFFORT');
+  });
+
+  it("thinks at Kimi's own default when the agent names no effort, whatever the machine's env says", async () => {
+    process.env.KIMI_MODEL_THINKING_EFFORT = 'low';
+    onTestFinished(() => void delete process.env.KIMI_MODEL_THINKING_EFFORT);
+    await adapter('kimi').run(input());
     expect(lastRun().env).not.toHaveProperty('KIMI_MODEL_THINKING_EFFORT');
   });
 
