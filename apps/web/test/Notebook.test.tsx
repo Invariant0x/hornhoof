@@ -53,6 +53,23 @@ describe('the company notebook', () => {
     ]);
   });
 
+  it('says when the notebook could not be read, and reads it again on Try again', async () => {
+    const user = userEvent.setup();
+    let down = true;
+    mockApi({ 'GET /api/notebook': () => (down ? [503, { error: { code: 'unavailable', message: 'Hornhoof is busy.' } }] : [200, { notes: NOTES }]) });
+    render(
+      <LanguageProvider>
+        <Notebook />
+      </LanguageProvider>,
+    );
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not read the notebook. Hornhoof is busy.');
+    expect(screen.queryByText('The notebook is empty so far.')).not.toBeInTheDocument();
+    down = false;
+    await user.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(await screen.findByText('Turns stay small.')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
   it('says when the notebook is full', async () => {
     const user = userEvent.setup();
     show({ 'POST /api/notebook': [409, { error: { code: 'conflict', message: 'Full.', reason: 'notebook_full' } }] });

@@ -13,11 +13,17 @@ export function Notebook({ departmentId = null }: { departmentId?: string | null
   const [editing, setEditing] = useState<{ number: number; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<unknown>(null);
+  /* Why the notes could not be read, until they are read again. */
+  const [unread, setUnread] = useState<unknown>(null);
 
   const base = departmentId ? `/api/departments/${departmentId}/notebook` : '/api/notebook';
   const load = useCallback(async () => {
-    const res = await api.get<{ notes: NoteView[] }>(base).catch(() => null);
-    if (res) setNotes(res.notes);
+    try {
+      setNotes((await api.get<{ notes: NoteView[] }>(base)).notes);
+      setUnread(null);
+    } catch (err) {
+      setUnread(err);
+    }
   }, [base]);
   useEffect(() => void load(), [load]);
   useStream(m => {
@@ -55,6 +61,16 @@ export function Notebook({ departmentId = null }: { departmentId?: string | null
   return (
     <section className="notebook" aria-label={t.notebook.title}>
       <p className="muted">{departmentId ? t.notebook.departmentIntro : t.notebook.intro}</p>
+      {unread !== null && (
+        <div className="notebook-unread">
+          <p className="error" role="alert">
+            {t.notebook.unread} {errorText(t, unread)}
+          </p>
+          <button className="btn small ghost" type="button" onClick={() => void load()}>
+            {t.app.tryAgain}
+          </button>
+        </div>
+      )}
       {notes && !notes.length && <p className="muted">{t.notebook.empty}</p>}
       {notes && notes.length > 0 && (
         <ul aria-label={t.notebook.title}>

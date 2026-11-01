@@ -503,6 +503,8 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .notebook li small { color: var(--muted); }
 .notebook textarea { width: 100%; box-sizing: border-box; font: inherit; resize: vertical; }
 .notebook-add { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.notebook-unread { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.notebook-unread p { margin: 0; }
 .t-st { flex: none; display: flex; justify-content: space-between; gap: 12px; padding: 6px 16px 10px; font-size: 11.5px; color: var(--muted); white-space: nowrap; }
 .t-st > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 760px) { .orch { left: 0; right: 0; top: 56px; bottom: 0; width: auto; border-left: 0; border-right: 0; } }
