@@ -27,6 +27,8 @@ export type AgentState = {
   ready: boolean;
   /* Its plan is at its limit until then: its turns wait in line, and people may still write to it. */
   limitUntil: string | null;
+  /* Its plan used the share set for tasks until then: task turns wait, people's own messages still go. */
+  budgetUntil: string | null;
   reason: 'no_subscription' | 'waiting_machine' | 'needs_login' | 'node_outdated' | 'machine_offline' | null;
   busy: boolean;
   runningJobId: string | null;
@@ -43,6 +45,13 @@ const LIMIT_GRACE_MS = 5_000;
 export function limitUntil(limits: Limits | null, now = Date.now()): string | null {
   if (limits?.status !== 'rejected') return null;
   const resets = limits.windows.filter(w => (w.utilization === null || w.utilization >= 1) && w.resetsAt && Date.parse(w.resetsAt) > now).map(w => w.resetsAt!);
+  return resets.length ? resets.reduce((a, b) => (Date.parse(a) >= Date.parse(b) ? a : b)) : null;
+}
+
+/* When a window of the plan that used the share set for task turns starts over: the latest such reset still to come. */
+export function budgetUntil(limits: Limits | null, budget: number | null, now = Date.now()): string | null {
+  if (budget === null || budget >= 100) return null;
+  const resets = (limits?.windows ?? []).filter(w => w.utilization !== null && w.utilization * 100 >= budget && w.resetsAt && Date.parse(w.resetsAt) > now).map(w => w.resetsAt!);
   return resets.length ? resets.reduce((a, b) => (Date.parse(a) >= Date.parse(b) ? a : b)) : null;
 }
 
@@ -300,16 +309,18 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   if (running) return;
   const sub = await liveSubscription(ctx, agentId);
   if (!sub || sub.status !== 'ready' || outdated(sub) || !hub.isReady(identityOf(sub))) return;
-  /* Real turns wait for the limit; an empty start can still open the saved program. */
+  /* Real turns wait for the limit; an empty start can still open the saved program. Past the share set for tasks only
+     task turns wait. */
   const until = limitUntil(sub.limits);
-  if (until) pumpAt(ctx, agentId, until);
+  const spent = budgetUntil(sub.limits, sub.budget);
+  if (until ?? spent) pumpAt(ctx, agentId, (until ?? spent)!);
   const [agent] = await db.select().from(agents).where(eq(agents.id, agentId));
   if (!agent) return;
   /* Switched off, it still answers people who write to it; its task turns wait until it is on. */
   const [job] = await db
     .select()
     .from(jobs)
-    .where(and(conversationOf(agentId), eq(jobs.status, 'queued'), until ? programStart : undefined, agent.switchedOffAt ? isNull(jobs.taskId) : undefined))
+    .where(and(conversationOf(agentId), eq(jobs.status, 'queued'), until ? programStart : undefined, agent.switchedOffAt || spent ? isNull(jobs.taskId) : undefined))
     .orderBy(asc(jobs.createdAt))
     .limit(1);
   if (!job) return;
@@ -438,7 +449,7 @@ export async function orchestratorOf(ctx: Ctx, companyId: string) {
 
 export async function orchestratorState(ctx: Ctx, companyId: string): Promise<AgentState> {
   const agent = await orchestratorOf(ctx, companyId);
-  if (!agent) return { ready: false, limitUntil: null, reason: 'no_subscription', busy: false, runningJobId: null, queued: 0, terminal: false };
+  if (!agent) return { ready: false, limitUntil: null, budgetUntil: null, reason: 'no_subscription', busy: false, runningJobId: null, queued: 0, terminal: false };
   return agentState(ctx, agent.id);
 }
 
@@ -462,5 +473,5 @@ export async function agentState(ctx: Ctx, agentId: string): Promise<AgentState>
   /* The terminal the window opens is of the machine the program is on. */
   const shown = await programSubscription(ctx, agentId);
   const terminal = Boolean(shown && ctx.hub.hasTerminals(identityOf(shown)));
-  return { ready: reason === null, limitUntil: sub ? limitUntil(sub.limits) : null, reason, busy: Boolean(running), runningJobId: running?.id ?? null, queued: Number(waiting?.n ?? 0), terminal };
+  return { ready: reason === null, limitUntil: sub ? limitUntil(sub.limits) : null, budgetUntil: sub ? budgetUntil(sub.limits, sub.budget) : null, reason, busy: Boolean(running), runningJobId: running?.id ?? null, queued: Number(waiting?.n ?? 0), terminal };
 }

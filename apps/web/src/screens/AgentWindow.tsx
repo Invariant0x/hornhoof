@@ -482,6 +482,7 @@ export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Pro
       )}
       {known && !ready && <p className="t-why">{reasonText(t, state.reason, sub)}</p>}
       {known && state?.limitUntil && <p className="t-why">{t.window.limitUntil(clock(language, state.limitUntil)!)}</p>}
+      {known && !state?.limitUntil && state?.budgetUntil && <p className="t-why">{t.window.budgetUntil(clock(language, state.budgetUntil)!)}</p>}
       {/* A live terminal has its own line to type in; the log needs this one. */}
       {known && !terminal && (
         <form

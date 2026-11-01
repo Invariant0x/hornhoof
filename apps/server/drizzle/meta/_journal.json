@@ -148,6 +148,13 @@
       "when": 1793480798021,
       "tag": "0020_red_team_skills",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1793544097544,
+      "tag": "0021_subscription_budget",
+      "breakpoints": true
     }
   ]
 }

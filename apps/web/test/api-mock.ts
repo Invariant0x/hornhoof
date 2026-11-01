@@ -42,7 +42,7 @@ export const ORG: Org = {
     name: 'Orchestrator',
     model: 'claude-opus-5-5',
     effort: null,
-    subscription: { id: 's1', provider: 'anthropic_api', kind: 'api_key', label: 'Orchestrator', status: 'ready', online: false, last4: '9f3a', owner: { id: 'p1', name: 'Ivan' }, place: { kind: 'company', id: null, name: 'Whole company' }, machine: null, limits: null, isOrchestrator: true },
+    subscription: { id: 's1', provider: 'anthropic_api', kind: 'api_key', label: 'Orchestrator', status: 'ready', online: false, last4: '9f3a', owner: { id: 'p1', name: 'Ivan' }, place: { kind: 'company', id: null, name: 'Whole company' }, machine: null, limits: null, budget: null, isOrchestrator: true },
     context: null,
   },
   agents: { total: 1, working: 0 },
@@ -58,7 +58,7 @@ export const ORG_WITH_TEAMS: Org = {
   ],
 };
 
-const SUB_BASE = { kind: 'personal' as const, last4: null, owner: { id: 'p1', name: 'Ivan' }, place: { kind: 'company' as const, id: null, name: 'Whole company' }, limits: null, isOrchestrator: false };
+const SUB_BASE = { kind: 'personal' as const, last4: null, owner: { id: 'p1', name: 'Ivan' }, place: { kind: 'company' as const, id: null, name: 'Whole company' }, limits: null, budget: null, isOrchestrator: false };
 
 export const MACHINE = { id: 'm1', hostname: 'ivan-mbp' };
 

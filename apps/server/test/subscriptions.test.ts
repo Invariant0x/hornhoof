@@ -214,6 +214,36 @@ describe('DELETE /api/subscriptions/:id', () => {
   });
 });
 
+describe('PATCH /api/subscriptions/:id', () => {
+  const patch = (app: FastifyInstance, token: string, id: string, payload: object) => app.inject({ method: 'PATCH', url: `/api/subscriptions/${id}`, payload, ...as(token) });
+
+  it("lets the owner set the share of the plan's limits that tasks may use, and take it off", async () => {
+    const { app, maria } = await companyWithMaria();
+    const id = (await connect(app, maria, ['kimi'])).json().subscriptions[0].id;
+    expect((await list(app, maria))[0].budget).toBeNull();
+    const set = await patch(app, maria, id, { budget: 80 });
+    expect(set.statusCode).toBe(200);
+    expect(set.json().subscription.budget).toBe(80);
+    expect((await list(app, maria))[0].budget).toBe(80);
+    expect((await patch(app, maria, id, { budget: null })).json().subscription.budget).toBeNull();
+  });
+
+  it('refuses a share outside 10 to 100 percent', async () => {
+    const { app, maria } = await companyWithMaria();
+    const id = (await connect(app, maria, ['kimi'])).json().subscriptions[0].id;
+    expect((await patch(app, maria, id, { budget: 5 })).statusCode).toBe(400);
+    expect((await patch(app, maria, id, { budget: 101 })).statusCode).toBe(400);
+  });
+
+  it('refuses a person who neither owns it nor has company scope', async () => {
+    const { app, ceo, maria } = await companyWithMaria();
+    const id = (await connect(app, ceo, ['claude'])).json().subscriptions[0].id;
+    const res = await patch(app, maria, id, { budget: 50 });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error.reason).toBe('not_owner');
+  });
+});
+
 describe('GET /api/subscriptions', () => {
   it('shows company scope everything and everyone else only their own', async () => {
     const { app, ceo, maria } = await companyWithMaria();

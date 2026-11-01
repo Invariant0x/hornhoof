@@ -53,6 +53,8 @@ function windowName(t: Messages, name: string): string {
 
 /* The windows every plan shows, so plans read alike; a plan's other windows follow them. */
 const MAIN_WINDOWS = ['five_hour', 'seven_day'];
+/* The shares of a plan's limits tasks may be given. */
+const SHARES = [90, 80, 70, 60, 50];
 
 /* A window that started over since the plan last spoke: its share is not known again until the plan speaks. */
 const startedOver = (w: Limits['windows'][number], now: number) => w.resetsAt !== null && Date.parse(w.resetsAt) <= now;
@@ -217,6 +219,12 @@ export function Subscriptions({ me }: { me: Me }) {
       setSubs(list => list?.map(s => (s.id === subscription.id ? subscription : { ...s, isOrchestrator: false })) ?? null);
     });
 
+  const setBudget = (sub: SubView, budget: number | null) =>
+    run(async () => {
+      const { subscription } = await api.patch<{ subscription: SubView }>(`/api/subscriptions/${sub.id}`, { budget });
+      setSubs(list => list?.map(s => (s.id === subscription.id ? subscription : s)) ?? null);
+    });
+
   const newCommand = (sub: SubView) =>
     run(async () => {
       const { command } = await api.post<{ command: string }>(`/api/subscriptions/${sub.id}/command`);
@@ -310,6 +318,17 @@ export function Subscriptions({ me }: { me: Me }) {
                     <td>
                       <span className={`status ${state}`}>{t.subs.states[state]}</span>
                       <LimitBars sub={s} />
+                      {s.kind === 'personal' && (mine || company) && (
+                        <label className="share">
+                          <span>{t.subs.share}</span>
+                          <select aria-label={t.subs.shareLabel(name)} value={s.budget === null ? '' : String(s.budget)} onChange={e => setBudget(s, e.target.value ? Number(e.target.value) : null)}>
+                            <option value="">{t.subs.shareAll}</option>
+                            {SHARES.map(n => (
+                              <option key={n} value={String(n)}>{`${n}%`}</option>
+                            ))}
+                          </select>
+                        </label>
+                      )}
                     </td>
                     <td className="row-actions">
                       {s.status === 'ready' && s.online && (

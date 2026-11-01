@@ -149,6 +149,9 @@ export const subscriptions = pgTable(
     nodeVersion: text('node_version'),
     lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
     limits: jsonb('limits').$type<Limits>(),
+    /* The share of each limit window, in percent, that task turns may use; past it they wait for the window to start
+       over while people's own messages still go. Null: the whole limit. */
+    budget: integer('budget'),
     /* The models its node says it can run; null until a node reports them. */
     models: jsonb('models').$type<ModelOption[]>(),
     removedAt: timestamp('removed_at', { withTimezone: true }),

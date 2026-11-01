@@ -180,6 +180,11 @@ describe('AgentWindow', () => {
     expect(screen.getByLabelText('Write to the orchestrator')).not.toBeDisabled();
   });
 
+  it("says that the plan used its share for tasks, and that only task turns wait", async () => {
+    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, budgetUntil: '2026-10-31T19:20:00Z' } }] });
+    expect(await screen.findByText(/^The plan used the share set for tasks\. Task turns wait until .+; messages from people still go\.$/)).toBeInTheDocument();
+  });
+
   it('tells to update Hornhoof on a machine too old to run his turns', async () => {
     const mac = { ...SUBS[1]!, kind: 'personal' as const, owner: { id: 'p1', name: 'Ivan' } };
     open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, ready: false, reason: 'node_outdated' } }] }, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: mac } });

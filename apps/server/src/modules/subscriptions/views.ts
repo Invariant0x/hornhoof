@@ -20,6 +20,7 @@ export type SubView = {
   place: Place;
   machine: { id: string; hostname: string } | null;
   limits: Limits | null;
+  budget: number | null;
   isOrchestrator: boolean;
 };
 
@@ -34,6 +35,7 @@ const columns = {
   status: subscriptions.status,
   last4: subscriptions.last4,
   limits: subscriptions.limits,
+  budget: subscriptions.budget,
   targetKind: subscriptions.targetKind,
   targetId: subscriptions.targetId,
   ownerId: people.id,
@@ -93,6 +95,7 @@ export async function subViews(db: Db, isOnline: IsOnline, id?: string): Promise
     place: r.kind === 'api_key' ? placeOf(r.targetKind, r.targetId, depts, teamDept) : r.ownerScopeKind === 'company' ? COMPANY : ownerPlace(ownerDepts(r.ownerId), depts),
     machine: r.machineId ? { id: r.machineId, hostname: r.machineHost ?? '' } : null,
     limits: r.limits ?? null,
+    budget: r.budget,
     isOrchestrator: orchestrator?.subscriptionId === r.id,
   }));
 }

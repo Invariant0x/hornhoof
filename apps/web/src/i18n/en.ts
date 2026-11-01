@@ -163,6 +163,9 @@ export const en = {
     notOnPlan: 'Not on this plan',
     noDataYet: 'No data yet',
     noPlanLimits: 'Pay as you go, no plan limits',
+    share: 'Tasks may use',
+    shareLabel: (name: string) => `Share of ${name} for tasks`,
+    shareAll: 'the whole limit',
     runTest: 'Run a test',
     runTestLabel: (name: string) => `Run a test on ${name}`,
     testing: 'Checking. This can take up to two minutes.',
@@ -251,6 +254,7 @@ export const en = {
     builtinOffline: 'The built-in machine is offline',
     nodeOutdated: (owner: string) => `Hornhoof on ${owner}'s machine is out of date. Run the install command there again.`,
     limitUntil: (at: string) => `The plan is at its limit. Turns wait until ${at} and go on by themselves then.`,
+    budgetUntil: (at: string) => `The plan used the share set for tasks. Task turns wait until ${at}; messages from people still go.`,
     failed: {
       timeout: 'The orchestrator did not finish within 15 minutes.',
       not_logged_in: 'The orchestrator\'s subscription is signed out on its machine. Sign in again, then write once more.',

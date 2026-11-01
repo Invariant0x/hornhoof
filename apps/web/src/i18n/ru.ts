@@ -153,6 +153,9 @@ export const ru: Messages = {
     notOnPlan: 'Нет у этого плана',
     noDataYet: 'Пока нет данных',
     noPlanLimits: 'Оплата по факту, без лимитов плана',
+    share: 'Задачам можно',
+    shareLabel: name => `Доля ${name} для задач`,
+    shareAll: 'весь лимит',
     runTest: 'Проверить',
     runTestLabel: name => `Проверить ${name}`,
     testing: 'Проверяем. Это может занять до двух минут.',
@@ -240,6 +243,7 @@ export const ru: Messages = {
     } as Record<string, string>,
     nodeOutdated: owner => `Старая версия Hornhoof на машине, владелец ${owner}. Запустите там команду установки еще раз.`,
     limitUntil: at => `Лимит подписки исчерпан. Ходы ждут до ${at} и потом продолжатся сами.`,
+    budgetUntil: at => `Подписка израсходовала долю, отведенную задачам. Ходы по задачам ждут до ${at}, сообщения людей идут как обычно.`,
     builtinOffline: 'Встроенная машина не в сети',
     failed: {
       timeout: 'Оркестратор не закончил за 15 минут.',

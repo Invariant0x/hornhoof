@@ -208,6 +208,18 @@ describe('Subscriptions', () => {
     expect(within(rowOf('Anthropic key ending 9f3a')).queryByText('Orchestrator')).not.toBeInTheDocument();
   });
 
+  it("sets the share of a plan's limits that tasks may use", async () => {
+    const calls = lists({ 'PATCH /api/subscriptions/s-claude': [200, { subscription: { ...SUBS[0]!, budget: 80 } }] });
+    const user = userEvent.setup();
+    render(<Subscriptions me={ME} />);
+    const share = await within(await screen.findByRole('row', { name: /^Claude\b/ })).findByRole('combobox', { name: 'Share of Claude for tasks' });
+    expect(share).toHaveValue('');
+    await user.selectOptions(share, '80');
+    await vi.waitFor(() => expect(calls.find(c => c.method === 'PATCH')).toMatchObject({ path: '/api/subscriptions/s-claude', body: { budget: 80 } }));
+    expect(within(rowOf('Claude')).getByRole('combobox', { name: 'Share of Claude for tasks' })).toHaveValue('80');
+    expect(within(rowOf('Anthropic key ending 9f3a')).queryByRole('combobox')).not.toBeInTheDocument();
+  });
+
   it('offers no orchestrator choice to a department-scope viewer', async () => {
     lists();
     const lead: Me = { ...ME, person: { ...ME.person, scopeKind: 'listed', isOwner: false } };

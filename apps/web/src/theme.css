@@ -381,6 +381,8 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .limit-bars li { display: grid; grid-template-columns: 5.5em 120px 3.2em auto; align-items: center; gap: 8px; white-space: nowrap; }
 .limit-bars b { font-weight: 500; color: var(--ink); text-align: right; font-variant-numeric: tabular-nums; }
 .limit-bars em { grid-column: 3 / -1; font-style: normal; }
+.share { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 12.5px; color: var(--muted); }
+.share select { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--line2); padding: 2px 6px; }
 @media (max-width: 760px) {
   .limit-bars li { grid-template-columns: 5.5em minmax(0, 1fr) 3.2em; white-space: normal; }
   .limit-bars li > span:last-child { grid-column: 1 / -1; }

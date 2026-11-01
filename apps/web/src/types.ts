@@ -51,6 +51,8 @@ export type SubView = {
   place: { kind: 'company' | 'department' | 'listed'; id: string | null; name: string };
   machine: { id: string; hostname: string } | null;
   limits: Limits | null;
+  /* The share of each limit window, in percent, that task turns may use; null: the whole limit. */
+  budget: number | null;
   isOrchestrator: boolean;
 };
 
@@ -132,6 +134,8 @@ export type OrchestratorState = {
   ready: boolean;
   /* The plan is at its limit until then; its turns wait, and people may still write. */
   limitUntil?: string | null;
+  /* The plan used the share set for tasks until then; task turns wait, people's messages still go. */
+  budgetUntil?: string | null;
   reason: 'no_subscription' | 'waiting_machine' | 'needs_login' | 'node_outdated' | 'machine_offline' | null;
   busy: boolean;
   runningJobId: string | null;

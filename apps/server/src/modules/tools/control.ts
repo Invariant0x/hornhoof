@@ -10,7 +10,7 @@ import { deptName } from '../departments/templates.js';
 import { BuildBody, RepoBody } from '../departments/routes.js';
 import { NOTE_MAX, NoteBody } from '../notebook/book.js';
 import { InviteBody, PersonPatch } from '../people/routes.js';
-import { ConnectBody, SubscriptionBody } from '../subscriptions/routes.js';
+import { BudgetBody, ConnectBody, SubscriptionBody } from '../subscriptions/routes.js';
 import { UpdateBody } from '../updates/routes.js';
 import { departmentOf, runsTier, servingSubscriptions, skillsFor, spotIn, StaffLine, type HireLine } from './staff.js';
 
@@ -180,6 +180,12 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
     "Changes your own model ('' for Default) and effort (a level your model takes, null for the program's default), as your card does. They count from your next turn.",
     { model: AgentPatch.shape.model, effort: AgentPatch.shape.effort },
     body => ({ method: 'PATCH', url: `/api/agents/${job.agentId}`, payload: body }),
+  );
+  tool(
+    'set_budget',
+    "Sets the share of a plan's limits, in percent from 10 to 100, that task turns may use: past it they wait for the window to start over, while people's own messages still go. null takes it off.",
+    { subscription: Id('subscription'), budget: BudgetBody.shape.budget },
+    ({ subscription, budget }) => ({ method: 'PATCH', url: `/api/subscriptions/${subscription}`, payload: { budget } }),
   );
   tool('remove_subscription', 'Removes a subscription or API key; the employees on it stay without one.', { subscription: Id('subscription') }, ({ subscription }) => ({
     method: 'DELETE',

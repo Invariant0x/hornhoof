@@ -24,6 +24,7 @@ const Target = z.discriminatedUnion('kind', [
 ]);
 
 const label = z.string().trim().min(1).max(80);
+export const BudgetBody = z.object({ budget: z.number().int().min(10).max(100).nullable() });
 
 /* Company API keys only. Personal subscriptions are connected by their owner through a machine. */
 export const SubscriptionBody = z.object({
@@ -164,6 +165,17 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
     const before = await orchestratorOf(ctx, me.companyId);
     await db.update(agents).set(orchestratorOn(sub)).where(eq(agents.kind, 'orchestrator'));
     await orchestratorBack(before);
+    return { subscription: await subView(db, online, sub.id) };
+  });
+
+  /* The share of the plan's limits its task turns may use. Turns held by it go out once it is raised or taken off. */
+  app.patch('/api/subscriptions/:id', async req => {
+    const me = await requirePerson(req, db);
+    const sub = await liveSubscription(IdParams.parse(req.params).id);
+    if (!ownsOrCompany(me, sub.ownerPersonId)) throw notOwner();
+    const { budget } = BudgetBody.parse(req.body);
+    await db.update(subscriptions).set({ budget }).where(eq(subscriptions.id, sub.id));
+    await pumpWaiting(ctx);
     return { subscription: await subView(db, online, sub.id) };
   });
 

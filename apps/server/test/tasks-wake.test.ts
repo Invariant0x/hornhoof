@@ -404,6 +404,41 @@ async function withRepositories() {
   return { app, db, url, ceo, builtin, ctx: app.ctx, companyId, dev: dev!, shop: shop!, hire, repository, task };
 }
 
+describe("a plan's share for tasks", () => {
+  const used = (utilization: number, resetsAt: string) => ({ status: 'allowed' as const, windows: [{ name: 'five_hour', utilization, resetsAt }] });
+  /* Bruno on the built-in node's key, which used most of its five hours. */
+  async function plan(utilization: number) {
+    const r = await withRepositories();
+    const bruno = await r.hire('Bruno', null);
+    const resetsAt = new Date(Date.now() + 3_600_000).toISOString();
+    await r.db.update(subscriptions).set({ budget: 80, limits: used(utilization, resetsAt) });
+    return { ...r, bruno, resetsAt };
+  }
+
+  it('holds task turns once a window of the plan used the share set for tasks, and says until when', async () => {
+    const { ctx, db, builtin, bruno, task, resetsAt } = await plan(0.85);
+    await wakeAll(ctx, [{ agentId: bruno.id, taskId: (await task(bruno.id)).id, why: 'assigned' }]);
+    await new Promise(r => setTimeout(r, 300));
+    expect(builtin.queued()).toBe(0);
+    expect((await db.select({ status: jobs.status }).from(jobs).where(eq(jobs.agentId, bruno.id)))).toEqual([{ status: 'queued' }]);
+    expect(await agentState(ctx, bruno.id)).toMatchObject({ budgetUntil: resetsAt, limitUntil: null });
+  });
+
+  it("still sends a person's own message on such a plan", async () => {
+    const { ctx, builtin, bruno, companyId } = await plan(0.85);
+    const [person] = await ctx.db.select({ id: people.id }).from(people);
+    await enqueueTurn(ctx, { companyId, agentId: bruno.id, prompt: 'Ivan (CEO): How far are you?', createdBy: person!.id });
+    expect((await nextRun(builtin)).prompt).toContain('How far are you?');
+  });
+
+  it('sends task turns below the share', async () => {
+    const { ctx, builtin, bruno, task } = await plan(0.5);
+    await wakeAll(ctx, [{ agentId: bruno.id, taskId: (await task(bruno.id)).id, why: 'assigned' }]);
+    expect((await nextRun(builtin)).prompt).toContain('Checkout API');
+    expect(await agentState(ctx, bruno.id)).toMatchObject({ budgetUntil: null });
+  });
+});
+
 describe('a head', () => {
   it('reads everything that moved on its tasks while it was busy in one turn, not one turn per task', async () => {
     const { ctx, db, builtin, dev, companyId } = await withRepositories();
