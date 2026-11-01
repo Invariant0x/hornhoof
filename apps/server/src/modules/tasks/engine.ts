@@ -1,4 +1,4 @@
-import { and, asc, count, eq, gt, inArray, isNull, max, notInArray, sql } from 'drizzle-orm';
+import { and, asc, count, eq, gt, inArray, isNull, max, ne, notInArray, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { accessOf, canReach, type Spot } from '../../auth/access.js';
 import type { Db } from '../../db/client.js';
@@ -60,6 +60,59 @@ async function workUnderDone(tx: Tx, closed: Task, actorId?: string): Promise<Wa
   return open ? [] : [{ agentId: holder, taskId: parent.id, why: 'subtasks' }];
 }
 
+/* Task numbers as a reader says them: "#2", "#2 and #3", "#2, #3 and #4". */
+export function listed(rows: Pick<Task, 'number'>[]): string {
+  const names = rows.map(t => `#${t.number}`);
+  return names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : (names[0] ?? '');
+}
+
+/* The tasks this one comes after that are not done yet, by number. */
+export async function openAfter(db: Db | Tx, task: Pick<Task, 'after'>): Promise<Pick<Task, 'id' | 'number' | 'status'>[]> {
+  if (!task.after.length) return [];
+  return db.select({ id: tasks.id, number: tasks.number, status: tasks.status }).from(tasks).where(and(inArray(tasks.id, task.after), ne(tasks.status, 'done'))).orderBy(asc(tasks.number));
+}
+
+/* A task that still waits for what it comes after takes no work in for it. */
+async function refuseWaiting(db: Db | Tx, task: Task): Promise<void> {
+  const open = await openAfter(db, task);
+  if (open.length) throw refuse(409, 'task_invalid', `#${task.number} waits for ${listed(open)} first. You are woken once it can start.`);
+}
+
+/* What a task comes after: tasks of the company in its own turn, each once and none cancelled. */
+async function checkAfter(db: Db | Tx, companyId: string, turnId: string | null, ids: string[]): Promise<Task[]> {
+  if (new Set(ids).size !== ids.length) throw refuse(400, 'task_invalid', 'A task it comes after is listed twice.');
+  const rows = ids.length ? await db.select().from(tasks).where(inArray(tasks.id, ids)) : [];
+  for (const id of ids) {
+    const t = rows.find(r => r.id === id);
+    if (!t || t.companyId !== companyId) throw refuse(400, 'task_invalid', `There is no task ${id} to come after.`);
+    if (t.turnId !== turnId) throw refuse(400, 'task_invalid', `#${t.number} is in another turn. A task comes only after tasks of its own turn.`);
+    if (t.status === 'cancelled') throw refuse(400, 'task_invalid', `#${t.number} is cancelled, so nothing can come after it.`);
+  }
+  return rows;
+}
+
+/* A task is done: each task that came after it and waits for nothing else any more goes on with whoever holds it, and
+   its log says why. rows: the tasks that started. */
+async function startAfter(tx: Tx, done: Task): Promise<{ wakes: Wake[]; rows: Task[] }> {
+  const waiting = await tx
+    .select()
+    .from(tasks)
+    .where(and(eq(tasks.companyId, done.companyId), sql`${tasks.after} @> ${JSON.stringify([done.id])}::jsonb`, notInArray(tasks.status, [...CLOSED])))
+    .orderBy(asc(tasks.number));
+  const wakes: Wake[] = [];
+  const rows: Task[] = [];
+  for (const t of waiting) {
+    if ((await openAfter(tx, t)).length) continue;
+    const [row] = await tx.update(tasks).set({ version: sql`${tasks.version} + 1`, updatedAt: new Date() }).where(eq(tasks.id, t.id)).returning();
+    const before = await tx.select({ number: tasks.number }).from(tasks).where(inArray(tasks.id, t.after)).orderBy(asc(tasks.number));
+    await tx.insert(taskEvents).values({ companyId: t.companyId, taskId: t.id, kind: 'started', text: `${listed(before)} ${before.length === 1 ? 'is' : 'are'} done, so it starts now.` });
+    /* One that waits for a person's answer goes on with the answer. */
+    if (row!.assigneeAgentId && ['open', 'working'].includes(row!.status)) wakes.push({ agentId: row!.assigneeAgentId, taskId: row!.id, why: 'assigned' });
+    rows.push(row!);
+  }
+  return { wakes, rows };
+}
+
 /* Where a task sits, for the stream: its product inside its department, or the department; none for the orchestrator's. */
 export const taskSpot = (t: Pick<Task, 'departmentId' | 'productId'>): Spot =>
   t.productId ? { departmentId: t.productId, parentId: t.departmentId } : { departmentId: t.departmentId, parentId: null };
@@ -75,6 +128,7 @@ export async function note(tx: Tx | Db, task: Pick<Task, 'id' | 'companyId'>, n:
 /* One move: the task changes only if nobody moved it since it was read, and the move is written to its log. */
 /* wakes: the turns the move needs, kept with it until they are queued. */
 async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, also?: (tx: Tx, row: Task) => Promise<void>, wakes: Wake[] = []): Promise<Task> {
+  let started: Task[] = [];
   const row = await ctx.db.transaction(async tx => {
     const [row] = await tx
       .update(tasks)
@@ -88,10 +142,17 @@ async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, also?: (
     await note(tx, row, n);
     await also?.(tx, row);
     if (CLOSED.includes(row.status) && row.parentId) wakes.push(...(await workUnderDone(tx, row, n.actor.agentId)));
+    /* What waited for it starts with the same move, so its turn is kept with it. */
+    if (row.status === 'done') {
+      const after = await startAfter(tx, row);
+      wakes.push(...after.wakes);
+      started = after.rows;
+    }
     await keepWakes(tx, task.companyId, wakes);
     return row;
   });
   published(ctx, row);
+  for (const t of started) published(ctx, t);
   await handOff(ctx, n.actor, row);
   return row;
 }
@@ -142,6 +203,8 @@ export type NewTask = {
   /* A member task: the assignee executes it and its gates review it in order. */
   executor?: boolean;
   gates?: string[];
+  /* Tasks of the same turn that must be done first. */
+  after?: string[];
 };
 
 /* A live employee or orchestrator of the company. */
@@ -177,6 +240,7 @@ export async function createTask(ctx: Live, actor: Actor, input: NewTask): Promi
   if (!input.title.trim()) throw refuse(400, 'task_invalid', 'A task needs a title.');
   const parent = input.parentId ? await loadTask(ctx.db, input.parentId) : null;
   if (parent) stillOpen(parent);
+  let waits = false;
   const task = await ctx.db.transaction(async tx => {
     /* Numbers go up one by one per company, so creating tasks waits on the company row. */
     await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, assignee.companyId)).for('update');
@@ -189,12 +253,15 @@ export async function createTask(ctx: Live, actor: Actor, input: NewTask): Promi
     }
     const [last] = await tx.select({ n: max(tasks.number) }).from(tasks).where(eq(tasks.companyId, assignee.companyId));
     const [turn] = parent ? [] : await tx.select({ id: turns.id }).from(turns).where(and(eq(turns.companyId, assignee.companyId), eq(turns.status, 'open')));
+    const turnId = parent ? parent.turnId : (turn?.id ?? null);
+    const after = await checkAfter(tx, assignee.companyId, turnId, input.after ?? []);
+    waits = after.some(t => t.status !== 'done');
     const [row] = await tx
       .insert(tasks)
       .values({
         companyId: assignee.companyId,
         number: (last?.n ?? 0) + 1,
-        turnId: parent ? parent.turnId : (turn?.id ?? null),
+        turnId,
         parentId: parent?.id ?? null,
         departmentId: input.departmentId,
         productId: input.productId ?? null,
@@ -204,18 +271,20 @@ export async function createTask(ctx: Live, actor: Actor, input: NewTask): Promi
         assigneeAgentId: assignee.id,
         executorAgentId: input.executor ? assignee.id : null,
         gates,
+        after: input.after ?? [],
         createdByPersonId: actor.personId ?? null,
         createdByAgentId: actor.agentId ?? null,
         updatedAt: new Date(),
       })
       .returning();
-    await note(tx, row!, { kind: 'created', actor, text: row!.brief, data: { assignee: assignee.id, gates } });
-    await keepWakes(tx, row!.companyId, [{ agentId: assignee.id, taskId: row!.id, why: 'assigned' }]);
+    await note(tx, row!, { kind: 'created', actor, text: row!.brief, data: { assignee: assignee.id, gates, after: row!.after } });
+    /* One that waits for what it comes after is not given out yet: the move that finishes the last of them wakes its holder. */
+    if (!waits) await keepWakes(tx, row!.companyId, [{ agentId: assignee.id, taskId: row!.id, why: 'assigned' }]);
     return row!;
   });
   published(ctx, task);
   await handOff(ctx, actor, task);
-  return { task, wakes: [{ agentId: assignee.id, taskId: task.id, why: 'assigned' }] };
+  return { task, wakes: waits ? [] : [{ agentId: assignee.id, taskId: task.id, why: 'assigned' }] };
 }
 
 /* The executor hands its work to the first gate, or finishes a task without gates. */
@@ -225,6 +294,7 @@ export async function submit(ctx: Live, agentId: string, taskId: string, r: { su
   if (!task.executorAgentId) throw refuse(400, 'task_invalid', `#${task.number} has no executor; its owner closes it with report.`);
   if (task.executorAgentId !== agentId || task.stage !== 0) throw notYours(task, 'is not waiting for your work');
   if (task.status === 'waiting' && (await waitsForPerson(ctx.db, task.id))) throw refuse(409, 'task_invalid', `#${task.number} waits for a person's answer first.`);
+  await refuseWaiting(ctx.db, task);
   await refuseOpenUnder(ctx.db, task);
   const n: Note = { kind: 'submitted', actor: { agentId }, text: r.summary, data: { evidence: r.evidence } };
   const unstuck = stuckGoes(ctx, task);
@@ -370,6 +440,7 @@ export async function report(ctx: Live, agentId: string, taskId: string, r: { do
   stillOpen(task);
   if (task.executorAgentId) throw refuse(400, 'task_invalid', `#${task.number} is a member task: submit it, or say it is blocked.`);
   if (task.assigneeAgentId !== agentId) throw notYours(task, 'is not yours to report');
+  await refuseWaiting(ctx.db, task);
   const n: Note = { kind: 'report', actor: { agentId }, text: r.summary, data: { done: r.done } };
   const unstuck = stuckGoes(ctx, task);
   if (r.done || task.createdByAgentId) {
@@ -395,6 +466,7 @@ export async function blocked(ctx: Live, agentId: string, taskId: string, why: s
   const task = await loadTask(ctx.db, taskId);
   stillOpen(task);
   if (task.executorAgentId !== agentId || task.stage !== 0) throw notYours(task, 'is not waiting for your work');
+  await refuseWaiting(ctx.db, task);
   const wakes = giver(task, 'blocked', agentId, why);
   const row = await move(ctx, task, { status: 'blocked' }, { kind: 'blocked', actor: { agentId }, text: why }, undefined, wakes);
   return { task: row, wakes };

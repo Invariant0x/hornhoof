@@ -7,7 +7,7 @@ import { sayLive } from '../conversation/live.js';
 import { quote } from '../conversation/prompt.js';
 import { appendEvent, publishWorking } from '../events/store.js';
 import { identityOf, type NodeIdentity } from '../nodes/hub.js';
-import { answerDirectly, CLOSED, GATE_ROUNDS, leaveWork, NOT_A_MOVE, published, regateWaiting, silentTurn, taskSpot, wentOn, type Actor, type Task, type Wake, type WakeWhy } from './engine.js';
+import { answerDirectly, CLOSED, GATE_ROUNDS, leaveWork, NOT_A_MOVE, openAfter, published, regateWaiting, silentTurn, taskSpot, wentOn, type Actor, type Task, type Wake, type WakeWhy } from './engine.js';
 import { wakeQueued, wakesLeft } from './outbox.js';
 import { settle, tell } from './turns.js';
 
@@ -258,6 +258,8 @@ export async function stopTurns(ctx: Ctx, taskIds: string[], keep?: string): Pro
 
 /* Wakes that bring the agent new words on its task, which a turn on that task takes in while it runs. */
 const LIVE_WAKES: WakeWhy[] = ['comment', 'answered', 'updated'];
+/* Wakes that would set the holder to work on its task, held back while the task waits for the tasks it comes after. */
+const TO_WORK: WakeWhy[] = ['assigned', 'updated', 'comment', 'answered', 'reminder', 'go_on', 'subtasks'];
 
 async function queueWake(ctx: Ctx, w: Wake): Promise<boolean> {
   const { db } = ctx;
@@ -265,6 +267,7 @@ async function queueWake(ctx: Ctx, w: Wake): Promise<boolean> {
   if (!agent || !(await liveSubscription(ctx, agent.id))) return false;
   const [task] = await db.select().from(tasks).where(eq(tasks.id, w.taskId));
   if (!task) return false;
+  if (TO_WORK.includes(w.why) && w.agentId === task.assigneeAgentId && (await openAfter(db, task)).length) return false;
   /* New words on the task the agent works on right now go into that turn. */
   if (LIVE_WAKES.includes(w.why)) {
     const text = wakePrompt(agent, task, w);
@@ -303,7 +306,8 @@ async function heldTask(ctx: Ctx, agentId: string, taskId: string): Promise<Task
 /* After a turn on a task: an agent that went idle holding the task without moving it is reminded, and after
    SILENT_TURNS such turns a person is asked. A failed turn counts as silent; a turn a person stopped does not count. One
    that worked until its time ran out, or said in the task how far it got, goes on, up to GOING_ON_TURNS in a row.
-   Nothing is checked while the agent has another turn waiting on the task, or while the task waits on its subtasks or on people.
+   Nothing is checked while the agent has another turn waiting on the task, or while the task waits on its subtasks, on the
+   tasks it comes after or on people.
    A turn that carried other tasks' turns along is checked on each of those tasks too, and a task the agent holds once,
    however many of them lead to it. */
 export async function checkLiveness(ctx: Ctx, jobId: string, carried: string[] = []): Promise<void> {
@@ -331,7 +335,7 @@ async function checkHeld(ctx: Ctx, job: typeof jobs.$inferSelect & { agentId: st
   if (next) return;
   const [subtasks] = await db.select({ n: count() }).from(tasks).where(and(eq(tasks.parentId, task.id), notInArray(tasks.status, [...CLOSED])));
   const [asked] = await db.select({ n: count() }).from(requests).where(and(eq(requests.taskId, task.id), eq(requests.status, 'open')));
-  if (Number(subtasks?.n ?? 0) || Number(asked?.n ?? 0)) return;
+  if (Number(subtasks?.n ?? 0) || Number(asked?.n ?? 0) || (await openAfter(db, task)).length) return;
   const [moves] = await db
     .select({ n: count() })
     .from(taskEvents)

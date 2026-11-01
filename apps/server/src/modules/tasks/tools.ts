@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, departments, jobs, requests, tasks } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import { ask, blocked, cancel, CLOSED, comment, createTask, refuse, report, submit, updateTask, verdict, type Moved, type Task } from './engine.js';
+import { ask, blocked, cancel, CLOSED, comment, createTask, listed, openAfter, refuse, report, submit, updateTask, verdict, type Moved, type Task } from './engine.js';
 import { taskByRef, taskDetail, taskLines, type TaskDetail } from './views.js';
 import { addTasks, editTurn, mergeTurn, planTurn, settle, tell, TURN_MESSAGES, turnName, turnRows } from './turns.js';
 import { stopTurns, wakeAll } from './wake.js';
@@ -40,6 +40,10 @@ const Ref = z.union([z.number().int().positive(), z.string().max(40)]).describe(
 const Title = z.string().trim().min(1).max(120);
 const Brief = z.string().max(600).describe('One to three sentences people read on the map and in the tracker.');
 const Body = z.string().max(20000).describe('What every agent on the task reads: requirements, acceptance criteria (what the gates check), product, constraints. Rewrite it as the current truth.');
+const After = z
+  .array(Ref)
+  .max(10)
+  .describe('Tasks of this turn that must be done first, by number. The task waits, and its executor is woken by itself once the last of them is done.');
 const Improvement = z.uuid().describe("The improvement these tasks take into work after a person's instruction, from improvements.");
 
 /* The tools an agent gets for tasks, by its kind. Each one checks that the task is the agent's to move. */
@@ -83,6 +87,23 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
     const [line] = await taskLines(ctx, [t]);
     const holder = line?.assignee ? `, with ${line.assignee.name}` : '';
     return `#${t.number} is ${t.status}${holder}.`;
+  }
+
+  /* Tasks another one comes after, named by number or id anywhere in the company: the engine keeps them to its turn. */
+  async function afterIds(refs: (number | string)[] | undefined): Promise<string[]> {
+    const ids: string[] = [];
+    for (const ref of refs ?? []) {
+      const t = await taskByRef(ctx, job.companyId, ref);
+      if (!t) throw refuse(404, 'task_unknown', `There is no task ${ref} to come after. Call turns or tasks for the numbers.`);
+      ids.push(t.id);
+    }
+    return ids;
+  }
+
+  /* What a task still waits for, as a sentence for the tool's answer. */
+  async function waiting(t: Task): Promise<string> {
+    const open = await openAfter(db, t);
+    return open.length ? ` It starts once ${listed(open)} ${open.length === 1 ? 'is' : 'are'} done.` : '';
   }
 
   async function underCap(agent: Agent, adding = 1): Promise<void> {
@@ -249,7 +270,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         description:
           'Gives work to a member of your department: executor is an employee id from company. Name yourself only when no member can do it. gates are the reviewers it passes in order, as role ids (DEV-REV) or employee ids; ' +
           'left out, the department\'s usual gates that are hired; [] for none. The executor never reviews its own work. parent: the department task it serves.',
-        inputSchema: { title: Title, brief: Brief, body: Body, executor: z.uuid(), gates: z.array(z.string().max(40)).max(8).optional(), parent: Ref.optional(), product: z.uuid().optional() },
+        inputSchema: { title: Title, brief: Brief, body: Body, executor: z.uuid(), gates: z.array(z.string().max(40)).max(8).optional(), parent: Ref.optional(), product: z.uuid().optional(), after: After.optional() },
       },
       async input =>
         run(async () => {
@@ -262,8 +283,9 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
             if (!product) throw refuse(404, 'department_unknown', `${input.product} is not a product of your department.`);
           }
           const parent = input.parent !== undefined ? (await find(input.parent)).task.id : null;
-          const moved = await createTask(ctx, { agentId: agent.id }, { title: input.title, brief: input.brief, body: input.body, departmentId: agent.departmentId, productId: input.product ?? null, parentId: parent, assigneeAgentId: executor.id, executor: true, gates });
-          return { text: `Created #${moved.task.number} for ${executor.name}${gates.length ? ` with ${gates.length} gate${gates.length > 1 ? 's' : ''}` : ''}.`, moved };
+          const after = await afterIds(input.after);
+          const moved = await createTask(ctx, { agentId: agent.id }, { title: input.title, brief: input.brief, body: input.body, departmentId: agent.departmentId, productId: input.product ?? null, parentId: parent, assigneeAgentId: executor.id, executor: true, gates, after });
+          return { text: `Created #${moved.task.number} for ${executor.name}${gates.length ? ` with ${gates.length} gate${gates.length > 1 ? 's' : ''}` : ''}.${await waiting(moved.task)}`, moved };
         }),
     );
   }

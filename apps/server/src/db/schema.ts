@@ -362,6 +362,8 @@ export const tasks = pgTable(
     gates: jsonb('gates').$type<string[]>().notNull().default([]),
     /* Everyone who checks the work at the current gate: each employee of its reviewer's role that is on. */
     panel: jsonb('panel').$type<string[]>().notNull().default([]),
+    /* Tasks of the same turn that must be done first: until they are, the task waits and its holder is not woken. */
+    after: jsonb('after').$type<string[]>().notNull().default([]),
     stage: integer('stage').notNull().default(0),
     bounces: integer('bounces').notNull().default(0),
     /* Task turns in a row that ended without moving the task. */
@@ -389,7 +391,7 @@ export const tasks = pgTable(
   ],
 );
 
-export const TASK_EVENT_KINDS = ['created', 'assigned', 'updated', 'comment', 'submitted', 'verdict', 'report', 'blocked', 'asked', 'answered', 'reminded', 'continued', 'stuck', 'cancelled', 'done'] as const;
+export const TASK_EVENT_KINDS = ['created', 'assigned', 'updated', 'comment', 'submitted', 'verdict', 'report', 'blocked', 'asked', 'answered', 'reminded', 'continued', 'stuck', 'cancelled', 'done', 'started'] as const;
 export type TaskEventKind = (typeof TASK_EVENT_KINDS)[number];
 
 /* Everything that happened to a task, with the person or agent who did it. */

@@ -20,6 +20,8 @@ const NewTaskBody = z.object({
   body: z.string().max(20000).default(''),
   department: z.uuid().optional(),
   product: z.uuid().optional(),
+  /* Tasks of the turn, by number, that must be done first. */
+  after: z.array(z.number().int().positive()).max(10).optional(),
 });
 const ListQuery = z.object({ department: z.uuid().optional(), status: z.enum(['open', 'closed', 'all']).default('open') });
 const AnswerBody = z.union([
@@ -91,7 +93,10 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
       [assignee] = await db.select({ id: agents.id }).from(agents).where(and(eq(agents.departmentId, dept.id), eq(agents.kind, 'head'), isNull(agents.removedAt))).orderBy(asc(agents.createdAt));
       if (!assignee) throw refuse(409, 'no_head', 'This department has no head yet. Hire one first.');
     }
-    const moved = await createTask(ctx, actorOf(me), { title: body.title, brief: body.brief, body: body.body, departmentId: body.department ?? null, productId: body.product ?? null, assigneeAgentId: assignee.id });
+    const after = body.after?.length ? await db.select({ id: tasks.id, number: tasks.number }).from(tasks).where(and(eq(tasks.companyId, me.companyId), inArray(tasks.number, body.after))) : [];
+    const missing = (body.after ?? []).find(n => !after.some(t => t.number === n));
+    if (missing !== undefined) throw refuse(400, 'task_invalid', `There is no task #${missing} to come after.`);
+    const moved = await createTask(ctx, actorOf(me), { title: body.title, brief: body.brief, body: body.body, departmentId: body.department ?? null, productId: body.product ?? null, assigneeAgentId: assignee.id, after: (body.after ?? []).map(n => after.find(t => t.number === n)!.id) });
     await wakeAll(ctx, moved.wakes);
     return reply.code(201).send({ task: await detail(me, moved.task) });
   });

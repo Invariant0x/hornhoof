@@ -22,6 +22,8 @@ export type TaskLine = {
   bounces: number;
   turn: number | null;
   parentId: string | null;
+  /* The numbers of the tasks it comes after that are not done yet: until they are, it waits. */
+  waitsFor: number[];
   createdAt: string;
   updatedAt: string;
 };
@@ -43,9 +45,12 @@ export type RequestView = {
   agent: AgentRef | null;
   at: string;
 };
+/* A task another one comes after, and where it stands. */
+export type AfterView = { id: string; number: number; title: string; status: Task['status'] };
 export type TaskDetail = TaskLine & {
   body: string;
   parent: { id: string; number: number; title: string } | null;
+  after: AfterView[];
   executor: AgentRef | null;
   gates: GateView[];
   createdBy: { kind: 'person' | 'agent'; id: string; name: string } | null;
@@ -54,16 +59,18 @@ export type TaskDetail = TaskLine & {
   requests: RequestView[];
 };
 
-type Names = { agent(id: string | null): AgentRef | null; place(id: string | null): Place; turn(id: string | null): number | null };
+type Names = { agent(id: string | null): AgentRef | null; place(id: string | null): Place; turn(id: string | null): number | null; after(t: Pick<Task, 'after'>): AfterView[] };
 
 /* Names for everything the tasks point at, read in one go. */
-async function names(ctx: Pick<Ctx, 'db' | 'templates'>, rows: Pick<Task, 'assigneeAgentId' | 'executorAgentId' | 'gates' | 'departmentId' | 'productId' | 'turnId' | 'createdByAgentId'>[], more: string[] = []): Promise<Names> {
+async function names(ctx: Pick<Ctx, 'db' | 'templates'>, rows: Pick<Task, 'assigneeAgentId' | 'executorAgentId' | 'gates' | 'departmentId' | 'productId' | 'turnId' | 'createdByAgentId' | 'after'>[], more: string[] = []): Promise<Names> {
   const agentIds = [...new Set([...rows.flatMap(t => [t.assigneeAgentId, t.executorAgentId, t.createdByAgentId, ...t.gates]), ...more].filter((x): x is string => Boolean(x)))];
   const placeIds = [...new Set(rows.flatMap(t => [t.departmentId, t.productId]).filter((x): x is string => Boolean(x)))];
   const turnIds = [...new Set(rows.map(t => t.turnId).filter((x): x is string => Boolean(x)))];
   const agentRows = agentIds.length ? await ctx.db.select({ id: agents.id, name: agents.name, kind: agents.kind, roleKey: agents.roleKey }).from(agents).where(inArray(agents.id, agentIds)) : [];
   const placeRows = placeIds.length ? await ctx.db.select().from(departments).where(inArray(departments.id, placeIds)) : [];
   const turnRows = turnIds.length ? await ctx.db.select({ id: turns.id, number: turns.number }).from(turns).where(inArray(turns.id, turnIds)) : [];
+  const afterIds = [...new Set(rows.flatMap(t => t.after))];
+  const afterRows = afterIds.length ? await ctx.db.select({ id: tasks.id, number: tasks.number, title: tasks.title, status: tasks.status }).from(tasks).where(inArray(tasks.id, afterIds)) : [];
   return {
     agent: id => {
       const a = agentRows.find(r => r.id === id);
@@ -74,6 +81,7 @@ async function names(ctx: Pick<Ctx, 'db' | 'templates'>, rows: Pick<Task, 'assig
       return d ? { id: d.id, name: deptName(d) } : null;
     },
     turn: id => turnRows.find(r => r.id === id)?.number ?? null,
+    after: t => t.after.flatMap(id => afterRows.filter(r => r.id === id)).sort((a, b) => a.number - b.number),
   };
 }
 
@@ -91,6 +99,7 @@ const line = (t: Task, n: Names): TaskLine => ({
   bounces: t.bounces,
   turn: n.turn(t.turnId),
   parentId: t.parentId,
+  waitsFor: n.after(t).filter(a => a.status !== 'done').map(a => a.number),
   createdAt: t.createdAt.toISOString(),
   updatedAt: t.updatedAt.toISOString(),
 });
@@ -127,6 +136,7 @@ export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates'>, task: Task,
     ...line(task, n),
     body: task.body,
     parent,
+    after: n.after(task),
     executor: n.agent(task.executorAgentId),
     gates: task.gates.flatMap((id, i) => {
       const a = n.agent(id);
