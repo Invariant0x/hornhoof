@@ -552,6 +552,7 @@ export const en = {
       internal: 'Something went wrong.',
       network: 'Hornhoof cannot reach its server. Check your connection and try again.',
     },
+    cross_site: 'This came from a page of another site, so Hornhoof did not do it. Open Hornhoof at its own address and try again.',
     signed_out: 'Sign in to continue.',
     company_scope_only: 'Only people with access to the whole company can do this.',
     wrong_password: 'Wrong email or password.',

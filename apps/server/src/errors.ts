@@ -7,6 +7,7 @@ export type ErrorCode = 'validation' | 'unauthorized' | 'forbidden' | 'not_found
 /* A stable reason the web app turns into text in the person's language. */
 export type ErrorReason =
   | 'signed_out'
+  | 'cross_site'
   | 'company_scope_only'
   | 'wrong_password'
   | 'already_set_up'

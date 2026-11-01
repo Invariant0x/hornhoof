@@ -34,6 +34,7 @@ import { terminalRoutes } from './modules/terminals/routes.js';
 import { hasWebApp, serveWebApp, webAppRoutes } from './web.js';
 
 export type { Db } from './db/client.js';
+import { fromOwnPages } from './auth/origin.js';
 import type { AgentSql } from './db/agent-sql.js';
 import type { Db } from './db/client.js';
 
@@ -78,6 +79,8 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   app.addHook('onClose', async () => ctx.updates.stop());
   await app.register(cookie);
   await app.register(websocket, SOCKET_OPTIONS);
+  /* After the socket plugin, so a refused socket is closed by it. */
+  app.addHook('onRequest', fromOwnPages(deps.config));
   if (web) await serveWebApp(app, deps.config.webDist);
   const { version, commit, migrations } = deps.config;
   app.get('/api/health', async () => ({ ok: true, version, commit }));
