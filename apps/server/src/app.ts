@@ -2,7 +2,7 @@ import cookie from '@fastify/cookie';
 import websocket from '@fastify/websocket';
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastify';
 import type { Config } from './config.js';
-import { registerErrorHandling } from './errors.js';
+import { loggable, registerErrorHandling } from './errors.js';
 import { authRoutes } from './modules/auth/routes.js';
 import { agentRoutes } from './modules/agents/routes.js';
 import { conversationRoutes } from './modules/conversation/routes.js';
@@ -61,7 +61,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
     onMessage: (id, msg) => handleNodeMessage(ctx, id, msg),
     onTerminal: (id, msg) => ctx.terminals.fromNode(id, msg),
     onClose: id => handleNodeClose(ctx, id),
-    onError: err => app.log.error(err),
+    onError: err => app.log.error({ error: loggable(err) }, 'A node message failed.'),
   });
   app.addHook('onClose', async () => ctx.hub.stop());
   const { config } = deps;

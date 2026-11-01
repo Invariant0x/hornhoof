@@ -1,3 +1,4 @@
+import { DrizzleQueryError } from 'drizzle-orm';
 import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { ZodError } from 'zod';
 
@@ -86,11 +87,31 @@ export class ApiError extends Error {
 
 const body = (code: ErrorCode, message: string, reason?: ErrorReason) => ({ error: reason ? { code, message, reason } : { code, message } });
 
+/* user:password@ in an address, as in a database URL. */
+const PASSWORD = /(\/\/[^\s:@/]+):[^\s@/]+@/g;
+const hidden = (text: string) => text.replace(PASSWORD, '$1:***@');
+const CAUSES_KEPT = 3;
+
+/* What the log keeps of an error: what it says, its code and where it came from, with a failed query's text but not the
+   values it was given, nothing of the driver's detail, and no password written into an address. */
+export function loggable(err: unknown, depth = 0): Record<string, unknown> {
+  if (!(err instanceof Error)) return { message: hidden(String(err)) };
+  const said = err instanceof DrizzleQueryError ? `Failed query: ${err.query}` : err.message;
+  const { code } = err as { code?: unknown };
+  return {
+    type: err.constructor.name,
+    message: hidden(said),
+    ...(typeof code === 'string' || typeof code === 'number' ? { code } : {}),
+    stack: hidden((err.stack ?? '').replace(err.message, said)),
+    ...(err.cause !== undefined && depth < CAUSES_KEPT ? { cause: loggable(err.cause, depth + 1) } : {}),
+  };
+}
+
 /* Optional handler for unmatched requests that are not errors, like the web app's own routes. */
 export type Fallback = (req: FastifyRequest, reply: FastifyReply) => FastifyReply | Promise<FastifyReply> | undefined;
 
 export function registerErrorHandling(app: FastifyInstance, fallback?: Fallback): void {
-  app.setErrorHandler((err: FastifyError | Error, _req, reply) => {
+  app.setErrorHandler((err: FastifyError | Error, req, reply) => {
     if (err instanceof ApiError) return reply.status(err.status).send(body(err.code, err.message, err.reason));
     if (err instanceof ZodError) {
       const first = err.issues[0];
@@ -99,7 +120,7 @@ export function registerErrorHandling(app: FastifyInstance, fallback?: Fallback)
     }
     const status = 'statusCode' in err && typeof err.statusCode === 'number' ? err.statusCode : 500;
     if (status < 500) return reply.status(status).send(body('validation', err.message));
-    app.log.error(err);
+    req.log.error({ error: loggable(err), method: req.method, route: req.routeOptions.url }, 'A request failed.');
     return reply.status(500).send({ error: { code: 'internal', message: 'Something went wrong.' } });
   });
   app.setNotFoundHandler(async (req, reply) => (await fallback?.(req, reply)) ?? reply.status(404).send(body('not_found', 'Not found.')));
