@@ -155,13 +155,14 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
       .innerJoin(people, eq(people.id, machines.personId))
       .where(me.scopeKind === 'company' ? live : and(live, eq(machines.personId, me.id)))
       .orderBy(machines.createdAt);
-    /* A removed plan's node is gone from its machine for people, though it keeps its key until it hears so. */
+    /* A removed plan's node is gone from its machine for people, though it keeps its key until it hears so. Plans that
+       joined with one command came at the same moment, so they go by name. */
     const served = await db
       .select({ id: nodes.id, machineId: nodes.machineId, subscriptionId: nodes.subscriptionId, provider: subscriptions.provider, status: nodes.status, lastSeenAt: nodes.lastSeenAt })
       .from(nodes)
       .leftJoin(subscriptions, eq(subscriptions.id, nodes.subscriptionId))
       .where(and(liveNode, isNull(subscriptions.removedAt)))
-      .orderBy(asc(nodes.createdAt), asc(nodes.id));
+      .orderBy(asc(nodes.createdAt), asc(subscriptions.provider), asc(nodes.id));
     const on = (machineId: string) => served.filter(n => n.machineId === machineId);
     const latest = (seen: (Date | null)[]) => seen.reduce<Date | null>((a, b) => (b && (!a || b > a) ? b : a), null);
     return {
