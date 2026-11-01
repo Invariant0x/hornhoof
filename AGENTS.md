@@ -12,7 +12,7 @@ These rules are for anyone who changes this repository, people and agents alike.
 
 * Write the failing test first, watch it fail, then make it pass.
 * Match the code around you: its naming, comment density and idioms.
-* Run the whole suite before you push: `npm test` from the repository root, and `npx tsc -p <app>/tsconfig.json --noEmit` for each app you touched.
+* Run the tests of what you changed before you push your branch. The whole suite, `npm test` from the repository root and `npx tsc -p <app>/tsconfig.json --noEmit` for each app the turn touched, runs once per turn, on the merged turn branch, before it goes into main.
 * Do not reformat files you did not change, and do not run a formatter over the whole repository.
 
 ## Templates
