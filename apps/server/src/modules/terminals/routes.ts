@@ -4,7 +4,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agentFor } from '../agents/find.js';
-import { liveSubscription } from '../conversation/queue.js';
+import { programSubscription } from '../conversation/queue.js';
 import { identityOf, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { CLOSE } from './relay.js';
 
@@ -32,7 +32,7 @@ export function terminalRoutes(app: FastifyInstance, ctx: Ctx): void {
       websocket: true,
       preValidation: async req => {
         const { me, agent } = await agentFor(ctx, req);
-        const sub = await liveSubscription(ctx, agent.id);
+        const sub = await programSubscription(ctx, agent.id);
         found.set(req, { personId: me.id, agentId: agent.id, node: sub ? identityOf(sub) : null, write: sub?.ownerPersonId === me.id });
       },
     },
@@ -68,14 +68,15 @@ export function terminalRoutes(app: FastifyInstance, ctx: Ctx): void {
         } else ctx.hub.send(node, { type: 'term.resize', termId, cols: msg.data.cols, rows: msg.data.rows });
       });
       /* Like the live stream, the view looks at the person again: one signed out or moved away stops watching. An agent
-         that moved to another subscription runs on another node, where the browser opens the view again. */
+         that moved to another subscription runs on another node once its running turn is over, and the browser opens the
+         view again there. */
       const check = setInterval(async () => {
         try {
           await agentFor(ctx, req);
         } catch {
           return socket.close(...CLOSE.noAccess);
         }
-        const sub = await liveSubscription(ctx, agentId).catch(() => undefined);
+        const sub = await programSubscription(ctx, agentId).catch(() => undefined);
         if (sub !== undefined && (!sub || !sameNode(identityOf(sub), node))) socket.close(...CLOSE.nodeOffline);
       }, ctx.config.streamPingMs);
       socket.on('close', () => {

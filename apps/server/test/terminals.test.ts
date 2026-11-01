@@ -132,6 +132,28 @@ describe("an agent's live terminal", () => {
     expect(await next(builtin, 'term.close')).toMatchObject({ type: 'term.close' });
   });
 
+  it('shows the node its turn runs on when the agent moved to another subscription mid-turn, and moves once the turn ends', async () => {
+    const { app, db, url, ceo, builtin, orchestratorId } = await live(true, { STREAM_PING_MS: '100' });
+    const [agent] = await db.select().from(agents).where(eq(agents.id, orchestratorId));
+    const [acme] = await db.select().from(companies);
+    const [running] = await db
+      .insert(jobs)
+      .values({ companyId: acme!.id, subscriptionId: agent!.subscriptionId, agentId: orchestratorId, kind: 'conversation', prompt: 'A long turn.', timeoutMs: 900000, status: 'running', startedAt: new Date() })
+      .returning();
+    const [ceoRow] = await db.select().from(people);
+    const [mine] = await db.insert(subscriptions).values({ companyId: acme!.id, provider: 'claude', kind: 'personal', label: 'Claude', ownerPersonId: ceoRow!.id, status: 'ready' }).returning();
+    await db.update(agents).set({ subscriptionId: mine!.id }).where(eq(agents.id, orchestratorId));
+    /* The window asks whether there is a terminal to show of the same machine it then opens. */
+    expect((await state(app, ceo)).terminal).toBe(true);
+    const screen = await watch(url, ceo);
+    expect(await next(builtin, 'term.open')).toMatchObject({ agentKey: orchestratorId });
+    await new Promise(done => setTimeout(done, 400));
+    expect(screen.ws.readyState).toBe(WebSocket.OPEN);
+    await db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, running!.id));
+    expect(await screen.closed).toEqual({ code: 4410, reason: 'node_offline' });
+    expect((await state(app, ceo)).terminal).toBe(false);
+  });
+
   it('says so when the node of the agent cannot show a terminal', async () => {
     const { url, ceo } = await live(false);
     const screen = await watch(url, ceo);

@@ -88,6 +88,18 @@ export async function liveSubscription(ctx: Ctx, agentId: string) {
   return row && !row.sub.removedAt ? row.sub : null;
 }
 
+/* The subscription whose machine holds the agent's program now: the one its running turn went out on, since that turn
+   goes on there when the agent moves to another subscription, or else the agent's own. */
+export async function programSubscription(ctx: Ctx, agentId: string) {
+  const [running] = await ctx.db
+    .select({ sub: subscriptions })
+    .from(jobs)
+    .innerJoin(subscriptions, eq(subscriptions.id, jobs.subscriptionId))
+    .where(and(conversationOf(agentId), eq(jobs.status, 'running')))
+    .limit(1);
+  return running?.sub ?? liveSubscription(ctx, agentId);
+}
+
 /* Thrown before anything is stored, so the caller may undo what it did for the turn. */
 export class NoSubscription extends Error {
   constructor() {
@@ -394,6 +406,8 @@ export async function agentState(ctx: Ctx, agentId: string): Promise<AgentState>
           : !ctx.hub.isReady(identityOf(sub))
             ? 'machine_offline'
             : null;
-  const terminal = Boolean(sub && ctx.hub.hasTerminals(identityOf(sub)));
+  /* The terminal the window opens is of the machine the program is on. */
+  const shown = await programSubscription(ctx, agentId);
+  const terminal = Boolean(shown && ctx.hub.hasTerminals(identityOf(shown)));
   return { ready: reason === null, limitUntil: sub ? limitUntil(sub.limits) : null, reason, busy: Boolean(running), runningJobId: running?.id ?? null, queued: Number(waiting?.n ?? 0), terminal };
 }
