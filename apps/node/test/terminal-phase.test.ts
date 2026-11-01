@@ -1,4 +1,5 @@
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, writeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { AgentEvent, NodeMessage, ServerMessage } from '@hornhoof/protocol';
@@ -10,6 +11,12 @@ import { rememberSession } from '../src/state.js';
 import { TerminalHost } from '../src/terminal/host.js';
 import { codexProgram, kimiProgram } from '../src/terminal/programs.js';
 import { Tmux } from '../src/terminal/tmux.js';
+
+vi.mock('node:fs', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  return { ...actual, writeSync: vi.fn(actual.writeSync) };
+});
+const nativeFs = await vi.importActual<typeof import('node:fs')>('node:fs');
 
 const JOB = '00000000-0000-4000-8000-000000000074';
 const AGENT = '00000000-0000-4000-8000-000000000075';
@@ -71,15 +78,21 @@ function snapshots(root: string): unknown[] {
   return existsSync(directory) ? readdirSync(directory).filter(file => file.endsWith('.json')).sort().map(file => JSON.parse(readFileSync(join(directory, file), 'utf8')) as unknown) : [];
 }
 
-async function acceptWire(test: ReturnType<typeof fixture>): Promise<void> {
-  for (let tick = 0; tick < 100 && test.pane.enter === 0; tick++) await advance(25);
-  expect(test.pane.enter).toBe(1);
+async function acceptWire(test: ReturnType<typeof fixture>, expectedEnter = 1): Promise<void> {
+  for (let tick = 0; tick < 100 && test.pane.enter < expectedEnter; tick++) await advance(25);
+  expect(test.pane.enter).toBe(expectedEnter);
+  const marker = `WIRE_PROBE_READ_${expectedEnter}`;
   test.appendWire({ type: 'turn.prompt', prompt: CANARY });
-  test.appendWire({ type: 'context.append_loop_event', event: { type: 'content.part', part: { type: 'text', text: 'WIRE_PROBE_READ' } } });
-  const read = () => test.events.some(e => e.kind === 'text' && e.text === 'WIRE_PROBE_READ');
+  test.appendWire({ type: 'context.append_loop_event', event: { type: 'content.part', part: { type: 'text', text: marker } } });
+  const read = () => test.events.some(e => e.kind === 'text' && e.text === marker);
   for (let tick = 0; tick < 100 && !read(); tick++) await advance(25);
   expect(read()).toBe(true);
-  expect(test.pane.enter).toBe(1);
+  expect(test.pane.enter).toBe(expectedEnter);
+}
+
+function recordsForRef(root: string, ref: string): unknown[] {
+  const hash = createHash('sha256').update(ref).digest('hex');
+  return snapshots(root).filter(record => isRecord(record) && record.requestRefHash === hash);
 }
 
 afterEach(async () => {
@@ -89,6 +102,7 @@ afterEach(async () => {
   }
   vi.useRealTimers();
   vi.restoreAllMocks();
+  vi.mocked(writeSync).mockImplementation(nativeFs.writeSync);
 });
 
 describe('durable current terminal attempt', () => {
@@ -163,6 +177,35 @@ describe('durable current terminal attempt', () => {
     expect(snapshots(test.root).at(-1)).toMatchObject({ phase: 'done', finish: 'pane_query_failed', pane: { queryOk: false, paneDead: null, queryError: 'query_failed' } });
   });
 
+  it.each(['pane_dead', 'query_failed'] as const)('records %s during accept without claiming the prompt was accepted', async result => {
+    const test = fixture('context: 42%');
+    const pending = test.run();
+    for (let tick = 0; tick < 100 && test.pane.enter === 0; tick++) await advance(25);
+    expect(test.pane.enter).toBe(1);
+    if (result === 'pane_dead') test.pane.dead = true;
+    else test.pane.queryFails = true;
+    await advance(100);
+    expect(await pending).toMatchObject({ ok: false, error: 'agent_failed' });
+    expect(test.pane).toMatchObject({ paste: 1, enter: 1 });
+    expect(snapshots(test.root).at(-1)).toMatchObject({ ack: result, waits: { accept: { result } }, finish: result === 'pane_dead' ? 'pane_dead' : 'pane_query_failed' });
+  });
+
+  it('counts additional host messages without recording their content', async () => {
+    const test = fixture('context: 42%');
+    const pending = test.run();
+    await acceptWire(test);
+    const saying = test.host.say(AGENT, CANARY);
+    await advance(500);
+    expect(await saying).toBe(true);
+    test.appendWire({ type: 'turn.ended', reason: 'failed', error: { message: 'synthetic failure' } });
+    await advance(100);
+    expect(await pending).toMatchObject({ ok: false });
+    expect(test.pane).toMatchObject({ paste: 2, enter: 2 });
+    const records = snapshots(test.root);
+    expect(records.at(-1)).toMatchObject({ counts: { paste: 2, enter: 2 } });
+    expect(JSON.stringify(records)).not.toContain(CANARY);
+  });
+
   it('persists a typed attempt without a guessed job, then binds its exact acknowledged ref', async () => {
     const test = fixture('OpenAI Codex\n›', 'codex');
     const starting = test.run({ prompt: '' });
@@ -184,5 +227,110 @@ describe('durable current terminal attempt', () => {
     expect(test.messages).toContainEqual(expect.objectContaining({ type: 'job.done', jobId: typedJob, ok: true, result: 'synthetic typed result' }));
     expect(JSON.stringify(after)).not.toContain(CANARY);
     expect(test.pane).toMatchObject({ paste: 0, enter: 0 });
+  });
+
+  it('has complete readable hash-linked records before destructive turn cleanup', async () => {
+    const test = fixture('still loading');
+    const pending = test.run();
+    await advance(25);
+    const agents: unknown = Reflect.get(test.host, 'agents');
+    if (!(agents instanceof Map)) throw new Error('Expected the host agent state.');
+    const agent: unknown = agents.get(AGENT);
+    if (!isRecord(agent)) throw new Error('Expected the active agent.');
+    let turn: unknown = agent.turn;
+    let checked = 0;
+    Object.defineProperty(agent, 'turn', {
+      configurable: true,
+      get: () => turn,
+      set(next: unknown) {
+        if (next === null && turn !== null) {
+          const files = readdirSync(join(test.root, 'terminal-phase')).filter(name => name.endsWith('.json')).sort();
+          let previous: string | null = null;
+          for (const name of files) {
+            const bytes = readFileSync(join(test.root, 'terminal-phase', name));
+            const record: unknown = JSON.parse(bytes.toString());
+            expect(record).toMatchObject({ jobId: JOB, previousHash: previous });
+            previous = createHash('sha256').update(bytes).digest('hex');
+          }
+          expect(snapshots(test.root).at(-1)).toMatchObject({ jobId: JOB, finish: 'ready_deadline' });
+          checked++;
+        }
+        turn = next;
+      },
+    });
+    await advance(2300);
+    expect(await pending).toMatchObject({ ok: false, error: 'agent_failed' });
+    expect(checked).toBe(1);
+  });
+
+  it('records a queued current job before an older attempt finishes and never borrows its wire', async () => {
+    const test = fixture('context: 42%');
+    const first = test.run();
+    await acceptWire(test);
+    const nextJob = '00000000-0000-4000-8000-000000000077';
+    const second = test.run({ jobId: nextJob, sessionId: null });
+    await advance(25);
+    expect(snapshots(test.root)).toContainEqual(expect.objectContaining({ jobId: nextJob, event: 'attempt_start', phase: 'launch', finish: null, sessionHash: null, wire: null, counts: { paste: 0, enter: 0 } }));
+    test.appendWire({ type: 'turn.ended', reason: 'failed', error: { message: 'synthetic previous failure' } });
+    await advance(100);
+    expect(await first).toMatchObject({ jobId: JOB, ok: false });
+    await advance(3500);
+    expect(await second).toMatchObject({ jobId: nextJob, ok: false, error: 'agent_failed' });
+    const records = snapshots(test.root).filter(record => isRecord(record) && record.jobId === nextJob);
+    expect(records.at(-1)).toMatchObject({ jobId: nextJob, sessionHash: null, wire: null, finish: 'accept_deadline' });
+  });
+
+  it('binds a late old typed ack to its own attempt while another typed turn is active', async () => {
+    const test = fixture('OpenAI Codex\n›', 'codex');
+    const starting = test.run({ prompt: '' });
+    await advance(800); await starting;
+    const typed = (text: string, done: boolean) => {
+      test.appendWire({ type: 'event_msg', payload: { type: 'item_completed', item: { type: 'UserMessage', content: [{ text }] } } });
+      test.appendWire({ type: 'event_msg', payload: { type: 'task_started' } });
+      if (done) test.appendWire({ type: 'event_msg', payload: { type: 'task_complete', last_agent_message: text } });
+    };
+    typed('first synthetic typed result', true);
+    await advance(50);
+    typed('second synthetic typed result', false);
+    await advance(50);
+    const opened = test.messages.filter(message => message.type === 'turn.open');
+    const first = opened[0]; const second = opened[1];
+    if (!first?.ref || !second?.ref) throw new Error('Expected two distinct typed refs.');
+    const currentBefore = recordsForRef(test.root, second.ref);
+    const firstJob = '00000000-0000-4000-8000-000000000078';
+    test.host.opened({ type: 'turn.opened', agentKey: AGENT, ref: first.ref, jobId: firstJob, toolToken: CANARY });
+    expect(recordsForRef(test.root, second.ref)).toEqual(currentBefore);
+    expect(recordsForRef(test.root, first.ref)).toContainEqual(expect.objectContaining({ jobId: firstJob, finish: 'wire_completed', event: 'bind' }));
+    const secondJob = '00000000-0000-4000-8000-000000000079';
+    test.host.opened({ type: 'turn.opened', agentKey: AGENT, ref: second.ref, jobId: secondJob, toolToken: CANARY });
+    expect(test.host.typedJobs()).toEqual([secondJob]);
+    test.appendWire({ type: 'event_msg', payload: { type: 'task_complete', last_agent_message: 'second synthetic typed result' } });
+    await advance(50);
+    expect(recordsForRef(test.root, second.ref)).toContainEqual(expect.objectContaining({ jobId: secondJob, finish: 'wire_completed', outcome: 'ok' }));
+    const finished = snapshots(test.root);
+    test.host.opened({ type: 'turn.opened', agentKey: AGENT, ref: first.ref, jobId: firstJob, toolToken: CANARY });
+    expect(snapshots(test.root)).toEqual(finished);
+  });
+
+  it('does not restart the READY deadline when persistence consumes the remaining budget', async () => {
+    const test = fixture('still loading');
+    let delayed = false;
+    vi.mocked(writeSync).mockImplementation((fd: number, data: unknown) => {
+      if (!Buffer.isBuffer(data)) throw new Error('Expected bounded record bytes.');
+      const record: unknown = JSON.parse(data.toString());
+      if (!delayed && isRecord(record) && record.phase === 'ready' && record.event === 'wait_start') {
+        delayed = true;
+        vi.setSystemTime(Date.now() + 2500);
+      }
+      return nativeFs.writeSync(fd, data);
+    });
+    let finished = false;
+    const pending = test.run().then(done => { finished = true; return done; });
+    await advance(25);
+    expect(delayed).toBe(true);
+    expect(finished).toBe(true);
+    expect(await pending).toMatchObject({ ok: false, error: 'agent_failed' });
+    expect(test.pane).toMatchObject({ paste: 0, enter: 0 });
+    expect(snapshots(test.root).at(-1)).toMatchObject({ finish: 'ready_deadline', waits: { ready: { budgetMs: 2000, result: 'deadline', startedAtUtc: '2026-11-01T00:00:00.000Z', endedAtUtc: '2026-11-01T00:00:02.500Z' } } });
   });
 });

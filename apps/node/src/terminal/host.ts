@@ -258,7 +258,7 @@ export class TerminalHost {
     const sameSession = input.sessionId === null ? a.fresh : input.sessionId === a.sessionId || a.cleared.has(input.sessionId);
     const hashMatch = a.hash === hash;
     const goesOn = sameSession && hashMatch && (await this.alive(a, phase));
-    phase?.launch(goesOn ? a.sessionId : spec.sessionId, HOST_SOURCE_HASH, { goesOn, sameSession, hashMatch });
+    phase?.launch(goesOn ? a.sessionId : spec.sessionId, HOST_SOURCE_HASH, { goesOn, sameSession, hashMatch }, program.kind);
     /* A program started with nothing to type gets its tools before its turn ends, while Hornhoof still answers for them.
        Kimi Code connects to its tools only once it has a session, which a new one gets with the first message. */
     const lazy = program.kind === 'kimi' && !input.sessionId;
@@ -337,7 +337,6 @@ export class TerminalHost {
         await this.opts.tmux.keys(a.name, 'Enter');
       }
 
-      phase?.waitEnd('accept', 'accepted');
       phase?.waitStart('done', Date.now(), null);
 
       for (;;) {
@@ -465,10 +464,10 @@ export class TerminalHost {
     void a.ended?.promise.then(() => (ended = true));
     for (const end = Date.now() + this.enterWaitMs; Date.now() < end; await sleep(this.pollMs)) {
       this.drain(a);
-      if (a.took) { phase?.ack('unknown'); return true; }
-      if (ended) { phase?.ack('ended'); return true; }
-      if (signal?.aborted) { phase?.ack('aborted'); return true; }
-      if (!(await this.alive(a, phase))) { phase?.ack(phase.paneOutcome() === 'unknown' ? 'unknown' : phase.paneOutcome()); return true; }
+      if (a.took) { phase?.acceptEnd('accepted', 'unknown'); return true; }
+      if (ended) { phase?.acceptEnd('ended', 'ended'); return true; }
+      if (signal?.aborted) { phase?.acceptEnd('aborted', 'aborted'); return true; }
+      if (!(await this.alive(a, phase))) { phase?.acceptEnd(phase.paneOutcome(), phase.paneOutcome()); return true; }
     }
     return false;
   }
@@ -719,7 +718,7 @@ export class TerminalHost {
     a.stepSaid = false;
     const ref = randomUUID();
     const phase = a.phaseStore?.begin(a.key, null, 'typed', ref);
-    phase?.launch(a.sessionId, HOST_SOURCE_HASH, { goesOn: null, sameSession: null, hashMatch: null });
+    phase?.launch(a.sessionId, HOST_SOURCE_HASH, { goesOn: null, sameSession: null, hashMatch: null }, a.program?.kind ?? null);
     phase?.waitStart('done', Date.now(), null);
     if (!fromLog && observedSession && phase?.matchesSession(observedSession)) phase.ack('hook');
     const turn: Turn = { jobId: null, onEvent: () => {}, typed: true, seq: 0, ref, early: [], over: null, opened: deferred(), phase };
@@ -784,6 +783,7 @@ export class TerminalHost {
   private typedDone(turn: Turn, message: string, error: JobError, sessionId: string | null): void {
     if (!turn.jobId) return;
     const result = error === 'cancelled' ? 'Stopped.' : error ? '' : redact(message, this.opts.secrets());
+    if (turn.phase && (error || !turn.phase.isDurable())) this.typedEvent(turn, { kind: 'tool_result', ok: false, summary: turn.phase.summary() });
     this.opts.send({ type: 'job.done', jobId: turn.jobId, ok: !error, sessionId, result, tail: error ? turn.phase?.summary() ?? '' : '', error });
   }
 
@@ -805,9 +805,12 @@ export class TerminalHost {
   private async sayIn(a: Agent, text: string): Promise<boolean> {
     /* Hornhoof's own prompt goes in first, or the words would join it in the program's input. */
     for (const end = Date.now() + ENTER_TRIES * this.enterWaitMs; a.turn && !a.turn.typed && !a.took && Date.now() < end; ) await sleep(this.pollMs);
-    if (!a.turn || a.turn.starting || (!a.turn.typed && !a.took) || !(await this.opts.tmux.alive(a.name))) return false;
+    const phase = a.turn?.phase;
+    if (!a.turn || a.turn.starting || (!a.turn.typed && !a.took) || !(await this.alive(a, phase))) return false;
+    phase?.pasted();
     await this.opts.tmux.paste(a.name, text);
     await sleep(Math.min(3000, 300 + text.length / 20));
+    phase?.entered();
     await this.opts.tmux.keys(a.name, 'Enter');
     return true;
   }

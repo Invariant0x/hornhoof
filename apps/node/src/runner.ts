@@ -180,9 +180,9 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
   const secrets = [...before, ...after, ...given];
   if (phase) {
     phase.complete(res.ok, res.error === 'cancelled');
-    if (!res.ok) {
+    if (!res.ok || !phase.isDurable()) {
       const summary = phase.summary();
-      res = { ...res, output: `${summary}\n\n${res.output}` };
+      if (!res.ok) res = { ...res, output: `${summary}\n\n${res.output}` };
       try { onEvent?.(tidy({ kind: 'tool_result', ok: false, summary }, secrets)); } catch { /* Preserve the original failure. */ }
     }
   }
