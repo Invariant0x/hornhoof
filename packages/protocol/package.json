@@ -2,7 +2,7 @@
   "name": "@hornhoof/protocol",
   "private": true,
   "type": "module",
-  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" }, "./efforts": { "types": "./dist/efforts.d.ts", "default": "./dist/efforts.js" } },
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" }, "./efforts": { "types": "./dist/efforts.d.ts", "default": "./dist/efforts.js" }, "./link": { "types": "./dist/link.d.ts", "default": "./dist/link.js" } },
   "types": "./dist/index.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json",
