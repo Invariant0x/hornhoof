@@ -166,6 +166,12 @@ export async function note(tx: Tx | Db, task: Pick<Task, 'id' | 'companyId'>, n:
 async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, also?: (tx: Tx, row: Task) => Promise<void>, wakes: Wake[] = []): Promise<Task> {
   let started: Task[] = [];
   const row = await ctx.db.transaction(async tx => {
+    /* Two changes at once to what tasks come after would each miss the other's half of a circle: they go one at a time in
+       a company, and the circle is looked for once it is this one's turn. */
+    if (set.after?.length) {
+      await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, task.companyId)).for('update');
+      await refuseCircle(tx, task, set.after);
+    }
     /* Two tasks under one parent closing at once would each see the other still open, and nobody would hear that all of
        the work under it is closed: one that closes takes its parent first, so they close one after the other. */
     if (set.status && CLOSED.includes(set.status) && task.parentId) await tx.select({ id: tasks.id }).from(tasks).where(eq(tasks.id, task.parentId)).for('update');
@@ -814,7 +820,6 @@ export async function updateTask(ctx: Live, agentId: string, taskId: string, c: 
     await checkAfter(ctx.db, task.companyId, task.turnId, c.after);
     await refuseAbove(ctx.db, task.parentId, c.after);
     await refuseBelow(ctx.db, task, c.after);
-    await refuseCircle(ctx.db, task, c.after);
     set.after = c.after;
     fields.push('after');
   }

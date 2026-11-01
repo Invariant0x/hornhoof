@@ -234,6 +234,20 @@ describe('a task that comes after others', () => {
     expect((await turnsOf(head.id)).filter(j => j.taskId === launch.id).map(j => [j.status, j.error])).toEqual([['failed', 'waiting']]);
   });
 
+  it('looks for a circle once changes to what tasks come after are taken one at a time, so two at once cannot close one', async () => {
+    const { ctx, companyId, head, bruno, tess, member } = await company();
+    const api = (await member('Checkout API', bruno.id)).task;
+    const tests = (await member('End-to-end tests', tess.id)).task;
+    const seen = statements();
+    await updateTask(ctx, head.id, api.id, { after: [tests.id] });
+    const lock = seen.findIndex(s => /^select "id" from "companies" where "companies"\."id" = \$1 for update$/.test(s.sql) && s.params[0] === companyId);
+    const circle = seen.findIndex(s => /^select "after" from "tasks" where "tasks"\."id" in \(\$1\)$/.test(s.sql) && s.params[0] === tests.id);
+    const change = seen.findIndex(s => s.sql.startsWith('update "tasks"') && s.params.includes(api.id));
+    expect(lock).toBeGreaterThanOrEqual(0);
+    expect(lock).toBeLessThan(circle);
+    expect(circle).toBeLessThan(change);
+  });
+
   it('tells whoever made a waiting task once a task it comes after is cancelled, and it keeps waiting', async () => {
     const { ctx, db, ceo, head, bruno, tess, member, read, turnsOf } = await company();
     const api = (await member('Checkout API', bruno.id)).task;
