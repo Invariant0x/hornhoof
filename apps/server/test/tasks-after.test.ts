@@ -3,8 +3,8 @@ import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, companies, departments, jobs, pendingWakes, people, subscriptions, taskEvents, tasks, turns } from '../src/db/schema.js';
-import { comment, createTask, submit, updateTask, verdict } from '../src/modules/tasks/engine.js';
-import { wakeAll } from '../src/modules/tasks/wake.js';
+import { cancel, comment, createTask, submit, updateTask, verdict } from '../src/modules/tasks/engine.js';
+import { wakeAll, wakePrompt } from '../src/modules/tasks/wake.js';
 import { as, listen, mcp, setUpCompany, testApp } from './helpers.js';
 
 async function company() {
@@ -115,6 +115,32 @@ describe('a task that comes after others', () => {
     const again = await call(client, 'update_task', { task: tests.number, after: [api.number] });
     expect(again.isError).toBeFalsy();
     expect(text(again)).toContain(`It starts once #${api.number} is done.`);
+  });
+
+  it('tells whoever made a waiting task once a task it comes after is cancelled, and it keeps waiting', async () => {
+    const { ctx, db, ceo, head, bruno, tess, member, read, turnsOf } = await company();
+    const api = (await member('Checkout API', bruno.id)).task;
+    const tests = (await member('End-to-end tests', tess.id, [api.id])).task;
+    const gone = await cancel(ctx, { personId: ceo.id }, api.id, 'Not needed.');
+    const told = gone.wakes.find(w => w.taskId === tests.id)!;
+    expect(told).toMatchObject({ agentId: head.id, why: 'after_cancelled' });
+    const [hana] = await db.select().from(agents).where(eq(agents.id, head.id));
+    const prompt = wakePrompt(hana!, await read(tests.id), told);
+    expect(prompt).toContain(`comes after #${api.number}, which was cancelled`);
+    expect(prompt).toContain('update_task');
+    expect(prompt).toContain('cancel_task');
+    expect((await read(tests.id)).status).toBe('open');
+    await wakeAll(ctx, gone.wakes);
+    expect(await turnsOf(tess.id)).toEqual([]);
+  });
+
+  it('says it in the answer instead when the one who made the waiting task cancels', async () => {
+    const { ctx, head, bruno, tess, member, tools } = await company();
+    const api = (await member('Checkout API', bruno.id)).task;
+    const tests = (await member('End-to-end tests', tess.id, [api.id])).task;
+    const res = await call(await tools(head), 'cancel_task', { task: api.number, why: 'Not needed.' });
+    expect(text(res)).toContain(`#${tests.number} comes after it and still waits`);
+    expect((await cancel(ctx, { agentId: head.id }, (await member('Docs', bruno.id)).task.id, 'No.')).wakes.filter(w => w.why === 'after_cancelled')).toEqual([]);
   });
 
   it("takes the tasks a person's task comes after by number through the API", async () => {

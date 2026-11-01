@@ -336,7 +336,10 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
           if (!boss && task.createdByAgentId !== job.agentId) throw refuse(403, 'task_not_yours', `#${task.number} was not created by you.`);
           const moved = await cancel(ctx, { agentId: job.agentId }, task.id, why);
           await stopTurns(ctx, moved.closed, job.agentId);
-          return { text: `Cancelled #${task.number}.`, moved };
+          const left = moved.waiting.length
+            ? ` ${listed(moved.waiting)} ${moved.waiting.length === 1 ? 'comes after it and still waits' : 'come after it and still wait'}: give ${moved.waiting.length === 1 ? 'it' : 'them'} what to wait for with update_task (after, [] to start now), or cancel ${moved.waiting.length === 1 ? 'it' : 'them'}.`
+            : '';
+          return { text: `Cancelled #${task.number}.${left}`, moved };
         }),
     );
   }

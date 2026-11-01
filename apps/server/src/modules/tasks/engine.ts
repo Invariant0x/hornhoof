@@ -11,7 +11,7 @@ export type Task = typeof tasks.$inferSelect;
 export type Request = typeof requests.$inferSelect;
 /* Who moves a task: a person from the web app, or an agent from its tools. */
 export type Actor = { personId: string; agentId?: undefined } | { agentId: string; personId?: undefined };
-export type WakeWhy = 'assigned' | 'review' | 'changes' | 'stuck_at_gate' | 'done' | 'reported' | 'blocked' | 'cancelled' | 'answered' | 'comment' | 'updated' | 'reminder' | 'go_on' | 'turn' | 'switched' | 'explain' | 'subtasks';
+export type WakeWhy = 'assigned' | 'review' | 'changes' | 'stuck_at_gate' | 'done' | 'reported' | 'blocked' | 'cancelled' | 'answered' | 'comment' | 'updated' | 'reminder' | 'go_on' | 'turn' | 'switched' | 'explain' | 'subtasks' | 'after_cancelled';
 /* An agent that has to act on a task now; Hornhoof queues a turn for it. note: what else it should know, after the rest. */
 export type Wake = { agentId: string; taskId: string; why: WakeWhy; text?: string; note?: string };
 export type Moved = { task: Task; wakes: Wake[] };
@@ -483,14 +483,39 @@ export async function blocked(ctx: Live, agentId: string, taskId: string, why: s
   return { task: row, wakes };
 }
 
+/* Open tasks that come after any of the cancelled ones keep waiting, and whoever made each hears so: its agent, or the
+   orchestrator for a person's. waiting: those whose maker cancelled, who hears it in the answer instead. */
+async function afterCancelled(tx: Tx, actor: Actor, cancelled: Task[]): Promise<{ wakes: Wake[]; waiting: Task[] }> {
+  const ids = cancelled.map(t => t.id);
+  const left = await tx
+    .select()
+    .from(tasks)
+    .where(and(eq(tasks.companyId, cancelled[0]!.companyId), sql`${tasks.after} ?| array[${sql.join(ids.map(id => sql`${id}`), sql`, `)}]::text[]`, notInArray(tasks.status, [...CLOSED])))
+    .orderBy(asc(tasks.number));
+  const [orchestrator] = left.some(t => !t.createdByAgentId)
+    ? await tx.select({ id: agents.id }).from(agents).where(and(eq(agents.companyId, cancelled[0]!.companyId), eq(agents.kind, 'orchestrator'), isNull(agents.removedAt)))
+    : [];
+  const wakes: Wake[] = [];
+  const waiting: Task[] = [];
+  for (const t of left) {
+    const maker = t.createdByAgentId ?? orchestrator?.id;
+    if (!maker) continue;
+    if (maker === actor.agentId) waiting.push(t);
+    else wakes.push({ agentId: maker, taskId: t.id, why: 'after_cancelled', text: listed(cancelled.filter(c => t.after.includes(c.id))) });
+  }
+  return { wakes, waiting };
+}
+
 /* Ends the task and every open task under it; questions waiting on them are withdrawn. Whoever gave it out hears why.
-   closed names every task that ended, for their turns to stop. */
-export async function cancel(ctx: Live, actor: Actor, taskId: string, why: string): Promise<Moved & { closed: string[] }> {
+   closed names every task that ended, for their turns to stop; waiting the open tasks that came after them, which the
+   one who cancelled made. */
+export async function cancel(ctx: Live, actor: Actor, taskId: string, why: string): Promise<Moved & { closed: string[]; waiting: Task[] }> {
   const task = await loadTask(ctx.db, taskId);
   stillOpen(task);
   const ended: Task[] = [];
+  let waiting: Task[] = [];
   const wakes = giver(task, 'cancelled', actor.agentId, why.trim());
-  const row = await move(ctx, task, { status: 'cancelled', closedAt: new Date(), assigneeAgentId: null }, { kind: 'cancelled', actor, text: why }, async tx => {
+  const row = await move(ctx, task, { status: 'cancelled', closedAt: new Date(), assigneeAgentId: null }, { kind: 'cancelled', actor, text: why }, async (tx, row) => {
     let level = [taskId];
     while (level.length) {
       const below = await tx
@@ -510,10 +535,13 @@ export async function cancel(ctx: Live, actor: Actor, taskId: string, why: strin
       .update(requests)
       .set({ status: 'withdrawn', answeredAt: new Date() })
       .where(and(inArray(requests.taskId, [taskId, ...ended.map(t => t.id)]), eq(requests.status, 'open')));
+    const after = await afterCancelled(tx, actor, [row, ...ended]);
+    wakes.push(...after.wakes);
+    waiting = after.waiting;
   }, wakes);
   for (const t of ended) published(ctx, t);
   ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
-  return { task: row, wakes, closed: [taskId, ...ended.map(t => t.id)] };
+  return { task: row, wakes, closed: [taskId, ...ended.map(t => t.id)], waiting };
 }
 
 /* An employee leaves: it comes off the gates of a task it has not reached yet; gates it passed stay as the task's history. */

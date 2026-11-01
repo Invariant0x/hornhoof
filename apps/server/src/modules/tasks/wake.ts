@@ -65,6 +65,9 @@ function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string {
       return `${ref}, which you gave out, cannot go on${said}Unblock it: rewrite it with update_task, give it to someone else, or cancel it.`;
     case 'cancelled':
       return `${ref}, which you gave out, was cancelled${said}Go on with ${own} without it.`;
+    case 'after_cancelled':
+      /* Its text names the cancelled tasks. */
+      return `${ref} comes after ${w.text ?? 'a task'}, which was cancelled, so it still waits and nobody works on it. ${read} Give it what it waits for from now on with update_task (after, [] to start it now), or cancel it with cancel_task.`;
     case 'answered':
       return `A person answered on ${ref}${said}Go on with it.`;
     case 'comment':
