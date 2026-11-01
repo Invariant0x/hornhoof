@@ -1,6 +1,6 @@
 /* File work in agents' folders for a node that runs as root, done as the agents' own user: the node never follows a link
    an agent left there into its own files. One request per line on stdin, one answer per line on stdout. */
-const { mkdirSync, readFileSync, renameSync, writeFileSync } = require('node:fs');
+const { cpSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } = require('node:fs');
 const { createInterface } = require('node:readline');
 
 const OPS = {
@@ -18,6 +18,13 @@ const OPS = {
     const temp = `${path}.hh-${process.pid}`;
     writeFileSync(temp, data, { mode: 0o600 });
     renameSync(temp, path);
+  },
+  /* A link goes, not what it points at. */
+  remove: ({ path }) => void rmSync(path, { recursive: true, force: true }),
+  /* From a folder of the node's own, such as one in the image, with its files' modes. */
+  copy: ({ path, from }) => {
+    if (typeof from !== 'string') throw new Error('copy needs from.');
+    cpSync(from, path, { recursive: true });
   },
 };
 

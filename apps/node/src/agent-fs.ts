@@ -1,5 +1,5 @@
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import type { Readable, Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
@@ -12,6 +12,10 @@ export type AgentFs = {
   read(path: string): Promise<string | null>;
   /* Replaces the file whole, readable by the agents' user only. */
   write(path: string, data: string): Promise<void>;
+  /* Takes away a file or a folder whole; a link goes, not what it points at. */
+  remove(path: string): Promise<void>;
+  /* Copies a folder of the node's own, such as one from the image, with its files' modes. */
+  copy(from: string, to: string): Promise<void>;
   stop(): void;
 };
 
@@ -34,6 +38,12 @@ export const ownFs: AgentFs = {
     const temp = `${path}.hh-${process.pid}`;
     writeFileSync(temp, data, { mode: 0o600 });
     renameSync(temp, path);
+  },
+  async remove(path) {
+    rmSync(path, { recursive: true, force: true });
+  },
+  async copy(from, to) {
+    cpSync(from, to, { recursive: true });
   },
   stop() {},
 };
@@ -75,11 +85,11 @@ export function agentFs(user: JobUser): AgentFs {
     return started;
   };
 
-  const ask = (op: string, path: string, data?: string) =>
+  const ask = (op: string, path: string, more: Record<string, string> = {}) =>
     new Promise<unknown>((resolve, reject) => {
       const id = next++;
       pending.set(id, { resolve, reject });
-      helper().stdin.write(JSON.stringify({ id, op, path, ...(data === undefined ? {} : { data }) }) + '\n');
+      helper().stdin.write(JSON.stringify({ id, op, path, ...more }) + '\n');
     });
 
   return {
@@ -88,7 +98,9 @@ export function agentFs(user: JobUser): AgentFs {
       const data = await ask('read', path);
       return typeof data === 'string' ? data : null;
     },
-    write: async (path, data) => void (await ask('write', path, data)),
+    write: async (path, data) => void (await ask('write', path, { data })),
+    remove: async path => void (await ask('remove', path)),
+    copy: async (from, to) => void (await ask('copy', to, { from })),
     stop() {
       child?.kill();
       child = null;

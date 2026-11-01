@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -34,6 +34,34 @@ describe.each([
     await fs.write(join(dir, 'AGENTS.md'), 'Be brief.\n');
     expect(readFileSync(join(dir, 'node.json'), 'utf8')).toBe('key');
     expect(readFileSync(join(dir, 'AGENTS.md'), 'utf8')).toBe('Be brief.\n');
+  });
+
+  it('removes a folder whole, and copies one with its files and their modes', async () => {
+    fs = make();
+    const root = mkdtempSync(join(tmpdir(), 'hh-afs-'));
+    const from = join(root, 'image', 'tdd');
+    mkdirSync(join(from, 'scripts'), { recursive: true });
+    writeFileSync(join(from, 'SKILL.md'), 'Test first.\n');
+    writeFileSync(join(from, 'scripts', 'run.sh'), '#!/bin/sh\n', { mode: 0o755 });
+    const to = join(root, 'work', '.agents', 'skills', 'tdd');
+    await fs.mkdir(join(root, 'work', '.agents', 'skills'));
+    await fs.copy(from, to);
+    expect(readFileSync(join(to, 'SKILL.md'), 'utf8')).toBe('Test first.\n');
+    expect(statSync(join(to, 'scripts', 'run.sh')).mode & 0o111).not.toBe(0);
+    await fs.remove(to);
+    expect(existsSync(to)).toBe(false);
+    await fs.remove(to);
+  });
+
+  it('removes a link left in place of a folder, not what it points at', async () => {
+    fs = make();
+    const root = mkdtempSync(join(tmpdir(), 'hh-afs-'));
+    mkdirSync(join(root, 'node'));
+    writeFileSync(join(root, 'node', 'node.json'), 'key');
+    symlinkSync(join(root, 'node'), join(root, 'tdd'));
+    await fs.remove(join(root, 'tdd'));
+    expect(existsSync(join(root, 'tdd'))).toBe(false);
+    expect(readFileSync(join(root, 'node', 'node.json'), 'utf8')).toBe('key');
   });
 
   it('says why a write failed', async () => {
