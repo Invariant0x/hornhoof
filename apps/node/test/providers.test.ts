@@ -1,4 +1,8 @@
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -9,22 +13,27 @@ import { adapterFor } from '../src/providers/index.js';
 import { claudeEvents, claudeInterrupted, limitsFrom } from '../src/providers/claude.js';
 import { codexEvents, codexRateLimits } from '../src/providers/codex.js';
 import { kimiContextSize, kimiEvents, kimiModels } from '../src/providers/kimi.js';
+import { agyModels, agyStream, installAgy } from '../src/providers/antigravity.js';
 import { childEnv, lastUrl } from '../src/providers/process.js';
 import { runJob, type RunInput } from '../src/runner.js';
 
 const FAKES = fileURLToPath(new URL('./fakes/', import.meta.url));
 const FAKE_BIN: Record<ProviderId, string> = {
-  claude: 'claude', anthropic_api: 'claude', glm: 'claude', codex: 'codex', openai_api: 'codex', kimi: 'kimi',
+  claude: 'claude', anthropic_api: 'claude', glm: 'claude', codex: 'codex', openai_api: 'codex', kimi: 'kimi', antigravity: 'agy',
 };
 const LOGIN_URL = 'https://login.example.test/device?code=ABC';
 const CLAUDE_SESSION = '5e55c1a0-0000-4000-8000-000000000001';
 const CODEX_THREAD = 'c0dec000-0000-7000-8000-000000000001';
 const KIMI_SESSION = 'k1m1c0de-0000-4000-8000-000000000001';
+/* The conversations in agy's own stream-json examples. */
+const AGY_NEW = 'c3b66b04-872b-4fbe-a3a4-058a026ef20a';
+const AGY_RESUMED = '9ec58bfd-4d67-4f5e-83a5-9d907e9c6b1f';
+const AGY_FLAGS = ['--output-format', 'stream-json', '--print-timeout', '0s', '--dangerously-skip-permissions'];
 const FLAGS = ['--json', '--skip-git-repo-check', '--dangerously-bypass-approvals-and-sandbox'];
 
 type Logged = {
   name: string; argv: string[]; cwd: string; pid: number; env: Record<string, string>; grandchild?: number;
-  mcpConfig?: { path: string; mode: number; json: unknown }; agentsMd?: string; kimiMcp?: unknown;
+  mcpConfig?: { path: string; mode: number; json: unknown }; agentsMd?: string; kimiMcp?: unknown; agyMcp?: { mode: number; json: unknown };
 };
 
 let dir: string;
@@ -356,6 +365,18 @@ describe('Codex', () => {
 });
 
 describe('models', () => {
+  it("groups the models agy lists by the levels in their names, and keeps one with a single level by its own id", () => {
+    const listed = agyModels(readFileSync(new URL('./fixtures/agy-models.txt', import.meta.url), 'utf8'));
+    expect(listed).toEqual([
+      { id: 'Gemini 4 Argon', name: 'Gemini 4 Argon', efforts: ['medium', 'high'] },
+      { id: 'Gemini 3.8 Flash', name: 'Gemini 3.8 Flash', efforts: ['medium', 'high'] },
+      { id: 'Gemini 3.7 Flash', name: 'Gemini 3.7 Flash', efforts: ['medium', 'high'] },
+      { id: 'Gemini 3.6 Flash', name: 'Gemini 3.6 Flash', efforts: ['medium', 'high'] },
+      { id: 'gemini-3.1-pro-high', name: 'Gemini 3.1 Pro (High)' },
+    ]);
+    expect(agyModels('claude-opus-5-5-thinking   Claude Opus 5.5 (Thinking)\nno columns here\n')).toEqual([{ id: 'claude-opus-5-5-thinking', name: 'Claude Opus 5.5 (Thinking)' }]);
+  });
+
   it('lists the Codex models its plan shows in its picker', async () => {
     mkdirSync(home, { recursive: true });
     writeFileSync(join(home, 'models_cache.json'), JSON.stringify({
@@ -576,8 +597,91 @@ describe('Kimi Code', () => {
   });
 });
 
+describe('Antigravity CLI', () => {
+  it('runs a prompt in print mode with every tool allowed in its own home, and goes on in the conversation it named', async () => {
+    const a = adapter('antigravity');
+    const first = await a.run(input());
+    expect(lastRun().argv).toEqual(['--print=say ready', ...AGY_FLAGS]);
+    expect(lastRun().env).toMatchObject({ HOME: home, AGY_CLI_DISABLE_AUTO_UPDATE: 'true' });
+    expect(first).toMatchObject({ ok: true, sessionId: AGY_NEW, result: expect.stringMatching(/^Git rebase destructively rewrites .* base commit\.$/) });
+
+    const again = await a.run(input({ sessionId: AGY_NEW, model: 'Gemini 4 Argon', effort: 'high' }));
+    expect(lastRun().argv).toEqual(['--print=say ready', ...AGY_FLAGS, '--conversation', AGY_NEW, '--model', 'Gemini 4 Argon', '--effort', 'high']);
+    expect(again).toMatchObject({ ok: true, sessionId: AGY_RESUMED, result: 'apple' });
+  });
+
+  it('reports a failed run as agent_failed with its error, and a signed-out one as not_logged_in', async () => {
+    process.env.FAKE_MODE = 'fail';
+    const failed = await adapter('antigravity').run(input());
+    expect(failed).toMatchObject({ ok: false, error: 'agent_failed' });
+    expect(failed.output).toContain('is not recognized as a known model');
+    process.env.FAKE_MODE = 'signed_out';
+    expect(await adapter('antigravity').run(input())).toMatchObject({ ok: false, error: 'not_logged_in' });
+  });
+
+  it('counts as signed in once agy lists its models, and lists them by model with the levels each takes', async () => {
+    process.env.FAKE_MODE = 'needs_login';
+    const a = adapter('antigravity');
+    expect(await a.loggedIn()).toBe(false);
+    expect(await a.models!()).toEqual([]);
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(home, 'fake-signed-in'), '');
+    expect(await a.loggedIn()).toBe(true);
+    const listed = await a.models!();
+    expect(listed[0]).toEqual({ id: 'Gemini 4 Argon', name: 'Gemini 4 Argon', efforts: ['medium', 'high'] });
+    /* A sign-in that went away keeps the models agy listed before. */
+    rmSync(join(home, 'fake-signed-in'));
+    expect(await a.models!()).toEqual(listed);
+  });
+
+  it('hides the tokens agy keeps in its files', async () => {
+    const a = adapter('antigravity');
+    expect(await a.secrets()).toEqual([]);
+    mkdirSync(join(home, '.config', 'antigravity'), { recursive: true });
+    writeFileSync(join(home, '.config', 'antigravity', 'plugin-secrets.json'), JSON.stringify({ github: { token: 'gho_plugin0123456789abcdef' } }));
+    mkdirSync(join(home, '.gemini', 'antigravity-cli'), { recursive: true });
+    writeFileSync(join(home, '.gemini', 'antigravity-cli', 'antigravity-oauth-token'), JSON.stringify({ access_token: 'ya29.access0123456789abcdef', refresh_token: '1//refresh0123456789abcdef' }));
+    writeFileSync(join(home, '.gemini', 'antigravity-cli', 'installation_id'), 'b1f3c7de-0000-4000-8000-000000000001');
+    expect((await a.secrets()).sort()).toEqual(['1//refresh0123456789abcdef', 'gho_plugin0123456789abcdef', 'ya29.access0123456789abcdef']);
+  });
+
+  it('stops at the timeout', async () => {
+    process.env.FAKE_MODE = 'hang';
+    expect(await adapter('antigravity').run(input({ timeoutMs: 200 }))).toMatchObject({ ok: false, error: 'timeout' });
+  });
+
+  it("installs agy the way Google's install script does: the release its manifest names, checked by SHA-512", async () => {
+    const release = join(dir, 'release');
+    mkdirSync(release);
+    writeFileSync(join(release, 'antigravity'), '#!/bin/sh\necho agy 1.4.12\n');
+    execFileSync('tar', ['-czf', join(dir, 'cli.tar.gz'), '-C', release, 'antigravity']);
+    const archive = readFileSync(join(dir, 'cli.tar.gz'));
+    let sha512 = createHash('sha512').update(archive).digest('hex');
+    const asked: string[] = [];
+    const server = createServer((req, res) => {
+      asked.push(req.url!);
+      if (req.url === '/manifests/linux_arm64.json') return void res.end(JSON.stringify({ version: '1.4.12', url: `${base}/1.4.12-1/linux-arm/cli_linux_arm64.tar.gz`, sha512 }));
+      if (req.url === '/1.4.12-1/linux-arm/cli_linux_arm64.tar.gz') return void res.end(archive);
+      res.writeHead(404).end();
+    });
+    await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    onTestFinished(() => void server.close());
+
+    await installAgy(tools, base, 'linux_arm64');
+    expect(asked).toEqual(['/manifests/linux_arm64.json', '/1.4.12-1/linux-arm/cli_linux_arm64.tar.gz']);
+    expect(execFileSync(join(tools, 'bin', 'agy'), { encoding: 'utf8' })).toBe('agy 1.4.12\n');
+    expect(statSync(join(tools, 'bin', 'agy')).mode & 0o755).toBe(0o755);
+
+    rmSync(join(tools, 'bin', 'agy'));
+    sha512 = '0'.repeat(128);
+    await expect(installAgy(tools, base, 'linux_arm64')).rejects.toThrow(/does not match/);
+    expect(existsSync(join(tools, 'bin', 'agy'))).toBe(false);
+  });
+});
+
 describe('calling a job off', () => {
-  it.each(['claude', 'codex', 'kimi'] as const)('stops the whole process group of %s', async provider => {
+  it.each(['claude', 'codex', 'kimi', 'antigravity'] as const)('stops the whole process group of %s', async provider => {
     process.env.FAKE_MODE = 'hang';
     const stop = new AbortController();
     setTimeout(() => stop.abort(), 300);
@@ -634,7 +738,20 @@ describe('Hornhoof tools and instructions', () => {
     expect(events).toContainEqual({ kind: 'tool', name: 'hornhoof.ping', input: '{"note":"hi"}' });
   });
 
-  it.each(['codex', 'kimi'] as const)('never follow a link the %s agent left where its files go', async provider => {
+  it("give Antigravity AGENTS.md and the server with the turn's token in its folder's MCP settings, removed after the run", async () => {
+    const { events, run } = withTools('antigravity');
+    const res = await run();
+    const { argv, agentsMd, agyMcp } = lastRun();
+    expect(res.ok).toBe(true);
+    expect(agentsMd).toBe(INSTRUCTIONS + '\n');
+    expect(argv.join(' ')).not.toContain(TOOLS.token);
+    expect(agyMcp!.json).toEqual({ mcpServers: { hornhoof: { serverUrl: TOOLS.url, headers: { Authorization: `Bearer ${TOOLS.token}` } } } });
+    expect(agyMcp!.mode & 0o777).toBe(0o600);
+    expect(existsSync(join(work, '.agents', 'mcp_config.json'))).toBe(false);
+    expect(events).toContainEqual({ kind: 'tool', name: 'run_command', input: 'echo hello_headless_demo' });
+  });
+
+  it.each(['codex', 'kimi', 'antigravity'] as const)('never follow a link the %s agent left where its files go', async provider => {
     const { run } = withTools(provider);
     const outside = join(dir, 'outside.txt');
     writeFileSync(outside, 'keep me');
@@ -671,7 +788,7 @@ const linesOf = (file: string): unknown[] => readFileSync(new URL(`./fixtures/${
 describe("the turn's repository", () => {
   it('reaches every program as git access in its environment', async () => {
     const env = { GIT_ASKPASS: '/app/git-askpass', HH_GIT_PASSWORD: 'ghp_repo1234', GIT_TERMINAL_PROMPT: '0' };
-    for (const provider of ['claude', 'codex', 'kimi'] as const) {
+    for (const provider of ['claude', 'codex', 'kimi', 'antigravity'] as const) {
       await adapter(provider).run(input({ env }));
       expect(lastRun().env).toMatchObject(env);
     }
@@ -708,6 +825,22 @@ describe('live events', () => {
     ]);
   });
 
+  it("read Antigravity's reply from its parts once its step is done, and its tool steps", () => {
+    const read = agyStream();
+    expect(linesOf('agy-resume').flatMap(read)).toEqual([{ kind: 'text', text: 'apple\n' }]);
+    expect(linesOf('agy-tools').flatMap(agyStream())).toEqual([
+      { kind: 'tool', name: 'run_command', input: 'echo hello_headless_demo' },
+      { kind: 'tool_result', ok: true, summary: 'hello_headless_demo' },
+    ]);
+    /* A failed tool carries an error with its type and message instead of output. */
+    const [step] = linesOf('agy-tools') as { step_update: { tool_info: Record<string, unknown> } }[];
+    step!.step_update.tool_info = { name: 'run_command', parameters: { CommandLine: 'false' }, error: { type: 'EXIT_CODE', message: 'exit status 1' } };
+    expect(agyStream()(step)).toEqual([
+      { kind: 'tool', name: 'run_command', input: 'false' },
+      { kind: 'tool_result', ok: false, summary: 'exit status 1' },
+    ]);
+  });
+
   it('keep the names of built-in tools and show a shell command as it is', () => {
     const use = { type: 'assistant', message: { content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls -la', description: 'List' } }] } };
     expect(claudeEvents(use)).toEqual([{ kind: 'tool', name: 'Bash', input: 'ls -la' }]);
@@ -736,6 +869,7 @@ describe('live events', () => {
     for (const line of [null, 'x', 42, { type: 'system', subtype: 'init' }, { type: 'assistant', message: { content: [{ type: 'thinking', thinking: 'hm' }] } }]) expect(claudeEvents(line)).toEqual([]);
     for (const line of [null, { type: 'turn.started' }, { type: 'item.completed', item: { type: 'reasoning', text: 'hm' } }]) expect(codexEvents(line)).toEqual([]);
     for (const line of [null, { role: 'meta', type: 'system.version' }, { role: 'assistant', content: '' }]) expect(kimiEvents(line)).toEqual([]);
+    for (const line of [null, ...linesOf('agy-new').slice(0, 2), linesOf('agy-new')[3], linesOf('agy-resume')[2]]) expect(agyStream()(line)).toEqual([]);
   });
 });
 

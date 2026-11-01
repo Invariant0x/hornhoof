@@ -1,0 +1,221 @@
+import { createHash } from 'node:crypto';
+import { chmodSync, chownSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import type { AgentEvent, ModelOption } from '@hornhoof/protocol';
+import type { JobUser } from '../isolation.js';
+import type { ProviderAdapter, RunInput, RunResult } from '../runner.js';
+import { withProgramExit } from '../program-exit.js';
+import { contentText, inputText, isRecord, objectLine, toolName } from './events.js';
+import { childEnv, ensureDir, exitsCleanly, runProgram, tokensIn, writePrivate } from './process.js';
+
+type Options = { home: string; tools: string; bin?: string; user?: JobUser | null };
+
+/* What agy 1.4.12 says in print mode and in `agy models` when it is not signed in. */
+export const SIGNED_OUT = /authentication failed or timed out|authentication required|not logged into Antigravity|Please sign in/i;
+
+/* Where Google's install script (antigravity.google/cli/install.sh) asks which release to download. */
+const RELEASES = 'https://antigravity-cli-auto-updater-974169037036.us-central1.run.app';
+
+/* The release Google's install script picks for this machine. Nodes run glibc Linux. */
+function platform(): string {
+  const arch = process.arch === 'x64' ? 'amd64' : process.arch;
+  return `${process.platform}_${arch}`;
+}
+
+/* Installs agy as Google's install script does: the release its manifest names, checked by its SHA-512, the program
+   taken out of the archive. The script then lets agy set up the shell, which the node does not need. */
+export async function installAgy(tools: string, base = RELEASES, on = platform()): Promise<void> {
+  const res = await fetch(`${base}/manifests/${on}.json`, { signal: AbortSignal.timeout(30_000) });
+  if (!res.ok) throw new Error(`Google's release server answered ${res.status} for ${on}.`);
+  const manifest: unknown = await res.json();
+  const { url, sha512 } = isRecord(manifest) ? manifest : {};
+  if (typeof url !== 'string' || typeof sha512 !== 'string') throw new Error("Google's release manifest names no download.");
+  const download = await fetch(url, { signal: AbortSignal.timeout(10 * 60_000) });
+  if (!download.ok) throw new Error(`The download of Antigravity CLI answered ${download.status}.`);
+  const archive = Buffer.from(await download.arrayBuffer());
+  if (createHash('sha512').update(archive).digest('hex') !== sha512.toLowerCase()) throw new Error('The download of Antigravity CLI does not match its checksum.');
+  const staging = mkdtempSync(join(ensureDir(tools), '.agy-'));
+  try {
+    const bin = join(staging, 'antigravity');
+    if (url.split('?')[0]!.endsWith('.tar.gz')) {
+      writeFileSync(join(staging, 'agy.tar.gz'), archive);
+      const done = await runProgram({ bin: 'tar', args: ['-xzf', join(staging, 'agy.tar.gz'), '-C', staging, 'antigravity'], env: process.env, timeoutMs: 60_000 });
+      if (done.code !== 0) throw new Error(`Antigravity CLI could not be taken out of its archive: ${done.output.trim()}`);
+    } else writeFileSync(bin, archive);
+    chmodSync(bin, 0o755);
+    renameSync(bin, join(ensureDir(join(tools, 'bin')), 'agy'));
+  } finally {
+    rmSync(staging, { recursive: true, force: true });
+  }
+}
+
+const LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
+
+/* The models `agy models` lists, one a line as "<id>  <name>". A model it lists at several levels, such as "Gemini 4
+   Argon (High)" and "(Medium)", is one model that takes those levels by --effort, named as --model takes it; one at a
+   single level keeps its own id. */
+export function agyModels(listing: string): ModelOption[] {
+  const rows = listing.split('\n').flatMap(line => {
+    const row = /^(\S+)\s{2,}(\S.*?)\s*$/.exec(line);
+    return row ? [{ id: row[1]!.slice(0, 80), name: row[2]!.slice(0, 80) }] : [];
+  });
+  const levelOf = (name: string) => {
+    const named = /^(.*\S) \((\w+)\)$/.exec(name);
+    const level = named?.[2]!.toLowerCase();
+    return named && level && LEVELS.includes(level) ? { model: named[1]!, level } : null;
+  };
+  const levels = new Map<string, string[]>();
+  for (const row of rows) {
+    const at = levelOf(row.name);
+    if (at) levels.set(at.model, [...(levels.get(at.model) ?? []), at.level]);
+  }
+  const models: ModelOption[] = [];
+  for (const row of rows) {
+    const at = levelOf(row.name);
+    const taken = at ? levels.get(at.model)! : [];
+    if (!at || taken.length < 2) models.push(row);
+    else if (!models.some(m => m.id === at.model)) models.push({ id: at.model, name: at.model, efforts: LEVELS.filter(l => taken.includes(l)) });
+  }
+  return models.slice(0, 60);
+}
+
+/* What a stream-json line of agy's print mode shows people. A reply comes in parts of one step and shows once the step is
+   done; a tool step shows its call and how it ended. */
+export function agyStream(): (line: unknown) => AgentEvent[] {
+  const parts = new Map<unknown, string>();
+  return line => {
+    if (!isRecord(line) || line.event !== 'step_update' || !isRecord(line.step_update)) return [];
+    const step = line.step_update;
+    if (step.step_type === 'agent_response') {
+      const text = (parts.get(step.step_index) ?? '') + (typeof step.text_delta === 'string' ? step.text_delta : '');
+      if (step.state !== 'DONE') {
+        parts.set(step.step_index, text);
+        return [];
+      }
+      parts.delete(step.step_index);
+      return text.trim() ? [{ kind: 'text', text }] : [];
+    }
+    if (step.step_type !== 'tool' || step.state !== 'DONE' || !isRecord(step.tool_info)) return [];
+    const info = step.tool_info;
+    const name = typeof info.name === 'string' ? info.name : String(step.tool_name ?? 'tool');
+    const error = isRecord(info.error) ? String(info.error.message ?? info.error.type ?? 'failed') : null;
+    return [
+      { kind: 'tool', name: toolName(name), input: agyInput(info.parameters) },
+      { kind: 'tool_result', ok: error === null, summary: error ?? contentText(info.output) },
+    ];
+  };
+}
+
+/* A tool's input as people read it: the command of a shell step, else its parameters. */
+export function agyInput(parameters: unknown): string {
+  return isRecord(parameters) && typeof parameters.CommandLine === 'string' ? parameters.CommandLine : inputText(parameters);
+}
+
+/* agy keeps its sign-in in a file when the machine has no keyring, as in a node; where, it does not say. These are the
+   files of its own folders whose names say they hold a token or a secret. */
+function tokenFiles(home: string): string[] {
+  return [join(home, '.gemini', 'antigravity-cli'), join(home, '.config', 'antigravity')].flatMap(dir => {
+    try {
+      return readdirSync(dir).filter(f => /token|secret|cred|oauth/i.test(f)).map(f => join(dir, f));
+    } catch {
+      return [];
+    }
+  });
+}
+
+/* A folder in the agent's own folder that its program's user may use. */
+function agentDir(path: string, user: JobUser | null): string {
+  mkdirSync(path, { recursive: true });
+  if (user) chownSync(path, user.uid, user.gid);
+  return path;
+}
+
+export function antigravityAdapter({ home, tools, bin = join(tools, 'bin', 'agy'), user = null }: Options): ProviderAdapter {
+  /* agy has no setting for its folder: it keeps everything in HOME. The node updates the programs it installs itself. */
+  const env = () => childEnv(tools, { HOME: ensureDir(home), AGY_CLI_DISABLE_AUTO_UPDATE: 'true' });
+  let listed: ModelOption[] = [];
+
+  return {
+    async install() {
+      await installAgy(tools);
+    },
+
+    async loggedIn() {
+      return exitsCleanly(bin, ['models'], env(), user);
+    },
+
+    /* What agy lists now, or what it listed before when it cannot list them, signed out or offline. */
+    async models() {
+      const done = await runProgram({ bin, args: ['models'], env: env(), timeoutMs: 30_000, user });
+      if (done.code === 0) listed = agyModels(done.output);
+      return listed;
+    },
+
+    async login() {
+      throw new Error('Antigravity CLI signs in from its own screen.');
+    },
+
+    async run(input: RunInput): Promise<RunResult> {
+      const args = [`--print=${input.prompt}`, '--output-format', 'stream-json', '--print-timeout', '0s', '--dangerously-skip-permissions'];
+      if (input.sessionId) args.push('--conversation', input.sessionId);
+      if (input.model) args.push('--model', input.model);
+      if (input.effort) args.push('--effort', input.effort);
+
+      /* agy takes MCP servers from settings files only, and the token as a header in them: the folder's own file, which
+         only the program's user reads, for this run alone. */
+      const mcpJson = join(input.workDir, '.agents', 'mcp_config.json');
+      if (input.tools) {
+        agentDir(join(input.workDir, '.agents'), user);
+        const server = { serverUrl: input.tools.url, headers: { Authorization: `Bearer ${input.tools.token}` } };
+        writePrivate(mcpJson, JSON.stringify({ mcpServers: { hornhoof: server } }), user);
+      }
+      /* agy reads AGENTS.md in the folder it works in as the folder's rules. */
+      if (input.instructions) writePrivate(join(input.workDir, 'AGENTS.md'), input.instructions + '\n', user);
+
+      let sessionId: string | null = input.sessionId;
+      let result: Record<string, unknown> | null = null;
+      const read = agyStream();
+      const done = await runProgram({
+        bin,
+        args,
+        env: { ...env(), ...input.env },
+        user,
+        cwd: input.workDir,
+        timeoutMs: input.timeoutMs,
+        signal: input.signal,
+        onLine(line) {
+          const ev = objectLine(line);
+          if (!ev) return;
+          for (const event of read(ev)) input.onEvent?.(event);
+          const step = isRecord(ev.step_update) ? ev.step_update : isRecord(ev.result) ? ev.result : ev;
+          if (typeof step.conversation_id === 'string' && step.conversation_id) sessionId = step.conversation_id;
+          if (ev.event === 'result' && isRecord(ev.result)) result = ev.result;
+        },
+      }).finally(() => {
+        if (input.tools) rmSync(mcpJson, { force: true });
+      });
+
+      /* Assigned in onLine, which TypeScript does not follow. */
+      const final = result as Record<string, unknown> | null;
+      const answer = typeof final?.response === 'string' ? final.response.trimEnd() : '';
+      const ended = withProgramExit(done.output, done);
+      if (done.timedOut) return { ok: false, sessionId, result: '', ...ended, error: 'timeout', limits: null };
+      if (done.code === 0 && final?.status === 'SUCCESS') return { ok: true, sessionId, result: answer, output: done.output, error: null, limits: null };
+      const said = typeof final?.error === 'string' ? final.error : '';
+      return { ok: false, sessionId, result: answer, ...ended, error: SIGNED_OUT.test(`${said}\n${done.output}`) ? 'not_logged_in' : 'agent_failed', limits: null };
+    },
+
+    async secrets() {
+      return tokenFiles(home).flatMap(file => {
+        const found = tokensIn(file);
+        if (found.length) return found;
+        /* A token kept as plain text. */
+        try {
+          return readFileSync(file, 'utf8').split(/\s+/).filter(word => word.length >= 20);
+        } catch {
+          return [];
+        }
+      });
+    },
+  };
+}

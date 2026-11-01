@@ -7,7 +7,7 @@ const LOGGED_ENV = [
   'CLAUDE_CONFIG_DIR', 'CLAUDE_CODE_AUTO_COMPACT_WINDOW', 'CODEX_HOME', 'KIMI_CODE_HOME', 'ANTHROPIC_API_KEY', 'ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN',
   'API_TIMEOUT_MS', 'ANTHROPIC_DEFAULT_OPUS_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL',
   'CODEX_API_KEY', 'NODE_KEY', 'HORNHOOF_DATA', 'HH_TOOL_TOKEN', 'HOME', 'PATH', 'GIT_ASKPASS', 'HH_GIT_PASSWORD', 'GIT_TERMINAL_PROMPT',
-  'KIMI_MODEL_THINKING_EFFORT',
+  'KIMI_MODEL_THINKING_EFFORT', 'AGY_CLI_DISABLE_AUTO_UPDATE',
 ];
 
 const LOGIN_URL = 'https://login.example.test/device?code=ABC';
@@ -27,6 +27,8 @@ export function run(name) {
   if (existsSync('AGENTS.md')) seen.agentsMd = readFileSync('AGENTS.md', 'utf8');
   const kimiMcp = process.env.KIMI_CODE_HOME && join(process.env.KIMI_CODE_HOME, 'mcp.json');
   if (kimiMcp && existsSync(kimiMcp)) seen.kimiMcp = JSON.parse(readFileSync(kimiMcp, 'utf8'));
+  const agyMcp = join('.agents', 'mcp_config.json');
+  if (name === 'agy' && existsSync(agyMcp)) seen.agyMcp = { mode: statSync(agyMcp).mode, json: JSON.parse(readFileSync(agyMcp, 'utf8')) };
   log({ name, argv, cwd: process.cwd(), pid: process.pid, env, ...seen });
   const print = file => process.stdout.write(readFileSync(new URL(`../fixtures/${file}.jsonl`, import.meta.url)));
   const words = argv.join(' ');
@@ -39,9 +41,18 @@ export function run(name) {
     return void setInterval(() => {}, 1000);
   }
   /* needs_login: signed out until a login has run in this home. */
-  const home = process.env.CLAUDE_CONFIG_DIR || process.env.CODEX_HOME || process.env.KIMI_CODE_HOME || '.';
+  const home = (name === 'agy' ? process.env.HOME : '') || process.env.CLAUDE_CONFIG_DIR || process.env.CODEX_HOME || process.env.KIMI_CODE_HOME || '.';
   const signedIn = mode === 'needs_login' ? existsSync(join(home, 'fake-signed-in')) : mode !== 'signed_out';
   if (words === 'auth status' || words === 'login status') process.exit(signedIn ? 0 : 1);
+  /* agy 1.4.12 lists its models only when signed in, and says so otherwise. */
+  if (name === 'agy' && words === 'models') {
+    if (!signedIn) {
+      process.stdout.write('Fetching available models...\n');
+      process.stderr.write('Error: Please sign in to view available models. Launch the CLI without arguments to sign in.\n');
+      process.exit(1);
+    }
+    return void process.stdout.write(readFileSync(new URL('../fixtures/agy-models.txt', import.meta.url)));
+  }
   if (name === 'codex' && words === 'app-server') return void appServer(signedIn);
   if (words === 'auth login' || words === 'login --device-auth' || words === 'login') {
     writeFileSync(join(home, 'fake-signed-in'), '');
@@ -64,12 +75,14 @@ export function run(name) {
       process.stdout.write('{"role":"meta","type":"system.version","version":"2.4.0"}\n');
       process.stderr.write('error: failed to run prompt: No model configured. Run `kimi` and use /login to sign in, then retry.\n');
     } else print(`${name}-signed-out`);
+    if (name === 'agy') process.stderr.write('Waiting for authentication (timeout 60s)...\nOr, paste the authorization code here and press Enter:\nError: authentication timed out.\nerror: authentication failed or timed out\n');
     process.exit(1);
   }
   if (mode === 'fail') {
     if (name === 'claude') process.stdout.write('{"type":"result","subtype":"error_during_execution","is_error":true,"result":"Something broke","session_id":"5e55c1a0-0000-4000-8000-000000000001"}\n');
     if (name === 'codex') process.stdout.write('{"type":"thread.started","thread_id":"c0dec000-0000-7000-8000-000000000009"}\n{"type":"turn.failed","error":{"message":"stream error: something broke"}}\n');
     if (name === 'kimi') process.stderr.write('error: failed to run prompt: something broke\n');
+    if (name === 'agy') print('agy-fail');
     process.exit(1);
   }
   if (mode === 'auth_error' && name === 'claude') {
@@ -80,6 +93,11 @@ export function run(name) {
   if (mode === 'bad_key' && name === 'codex') {
     print('codex-api-key-invalid');
     process.exit(1);
+  }
+  if (mode === 'tools' && name === 'agy') {
+    /* A tool step from agy's docs, then a whole turn, so the run ends with a result. */
+    print('agy-tools');
+    return void print('agy-new');
   }
   if (mode === 'tools') return void print(`${name}-tools`);
   if (mode === 'odd-lines') {
@@ -92,7 +110,7 @@ export function run(name) {
     print('claude-new');
     return void process.stdout.write('{"type":"result","subtype":"success","is_error":false,"result":"","num_turns":0,"session_id":"5e55c1a0-0000-4000-8000-000000000001"}\n');
   }
-  const resume = name === 'claude' ? argv.includes('--resume') : name === 'codex' ? argv[1] === 'resume' : argv.includes('--session');
+  const resume = name === 'claude' ? argv.includes('--resume') : name === 'codex' ? argv[1] === 'resume' : name === 'agy' ? argv.includes('--conversation') : argv.includes('--session');
   print(`${name}-${resume ? 'resume' : 'new'}`);
 }
 

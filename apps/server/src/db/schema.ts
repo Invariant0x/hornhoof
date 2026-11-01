@@ -95,7 +95,7 @@ export const teams = pgTable('teams', {
   createdAt: createdAt(),
 });
 
-export const PROVIDERS = ['claude', 'codex', 'kimi', 'glm', 'anthropic_api', 'openai_api'] as const;
+export const PROVIDERS = ['claude', 'codex', 'kimi', 'glm', 'anthropic_api', 'openai_api', 'antigravity'] as const;
 export type Provider = (typeof PROVIDERS)[number];
 export const TARGET_KINDS = ['orchestrator', 'department', 'team', 'any'] as const;
 

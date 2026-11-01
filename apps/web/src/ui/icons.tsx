@@ -30,11 +30,11 @@ export function LogoMark({ className }: { className?: string }) {
   );
 }
 
-type Program = 'claude' | 'codex' | 'kimi' | 'glm';
+type Program = 'claude' | 'codex' | 'kimi' | 'glm' | 'antigravity';
 
 /* Company keys run in the program of their maker: Anthropic keys in Claude Code, OpenAI keys in Codex. */
-const PROGRAM: Record<ProviderId, Program> = { claude: 'claude', anthropic_api: 'claude', codex: 'codex', openai_api: 'codex', kimi: 'kimi', glm: 'glm' };
-const PROGRAM_NAMES: Record<Program, string> = { claude: 'Claude', codex: 'Codex', kimi: 'Kimi', glm: 'GLM' };
+const PROGRAM: Record<ProviderId, Program> = { claude: 'claude', anthropic_api: 'claude', codex: 'codex', openai_api: 'codex', kimi: 'kimi', glm: 'glm', antigravity: 'antigravity' };
+const PROGRAM_NAMES: Record<Program, string> = { claude: 'Claude', codex: 'Codex', kimi: 'Kimi', glm: 'GLM', antigravity: 'Antigravity' };
 const MARKS: Record<Program, ReactNode> = {
   claude: <path d="M8 1.6v3.6M8 10.8v3.6M1.6 8h3.6M10.8 8h3.6M3.5 3.5l2.5 2.5M10 10l2.5 2.5M12.5 3.5 10 6M6 10l-2.5 2.5" />,
   codex: (
@@ -50,6 +50,7 @@ const MARKS: Record<Program, ReactNode> = {
       <path d="M5.4 5.4h5.2l-5.2 5.2h5.2" />
     </>
   ),
+  antigravity: <path d="M2.5 14V8.5a5.5 5.5 0 0 1 11 0V14M6 14V9.5a2 2 0 0 1 4 0V14" />,
 };
 
 /* The program an agent works in, next to its name; the name is its label and tooltip. */

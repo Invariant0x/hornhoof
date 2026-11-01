@@ -4,6 +4,7 @@ import type { ProviderAdapter } from '../runner.js';
 import { claudeAdapter } from './claude.js';
 import { codexAdapter } from './codex.js';
 import { kimiAdapter } from './kimi.js';
+import { antigravityAdapter } from './antigravity.js';
 
 type Options = { home: string; tools: string; bin?: string; secret?: string | null; user?: JobUser | null };
 
@@ -11,6 +12,7 @@ type Options = { home: string; tools: string; bin?: string; secret?: string | nu
 export function programFor(provider: ProviderId): { bin: string; name: string } {
   if (provider === 'codex' || provider === 'openai_api') return { bin: 'codex', name: 'Codex' };
   if (provider === 'kimi') return { bin: 'kimi', name: 'Kimi Code' };
+  if (provider === 'antigravity') return { bin: 'agy', name: 'Antigravity CLI' };
   return { bin: 'claude', name: 'Claude Code' };
 }
 
@@ -29,5 +31,7 @@ export function adapterFor(provider: ProviderId, opts: Options): ProviderAdapter
       return codexAdapter({ ...opts, mode: 'api_key' });
     case 'kimi':
       return kimiAdapter(opts);
+    case 'antigravity':
+      return antigravityAdapter(opts);
   }
 }

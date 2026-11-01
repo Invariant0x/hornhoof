@@ -3,7 +3,7 @@ import { effortsOf } from './efforts.js';
 
 /* Messages between the Hornhoof server and its nodes, one JSON object per WebSocket frame. */
 
-export const PROVIDER_IDS = ['claude', 'codex', 'kimi', 'glm', 'anthropic_api', 'openai_api'] as const;
+export const PROVIDER_IDS = ['claude', 'codex', 'kimi', 'glm', 'anthropic_api', 'openai_api', 'antigravity'] as const;
 export type ProviderId = (typeof PROVIDER_IDS)[number];
 
 export const JOB_ERRORS = ['timeout', 'agent_failed', 'not_logged_in', 'cancelled'] as const;

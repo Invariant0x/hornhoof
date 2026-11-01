@@ -53,6 +53,10 @@ describe('server messages', () => {
     expect(parseServerMessage('null')).toBeNull();
   });
 
+  it("take a job for a Google plan, which Antigravity CLI runs", () => {
+    expect(parseServerMessage(JSON.stringify({ ...SERVER[0], provider: 'antigravity' }))).toMatchObject({ type: 'job.run', provider: 'antigravity' });
+  });
+
   it('give null for a timeout longer than a timer can wait, which would end the job at once', () => {
     expect(parseServerMessage(JSON.stringify({ ...SERVER[0], timeoutMs: 2 ** 31 }))).toBeNull();
     expect(parseServerMessage(JSON.stringify({ ...SERVER[0], timeoutMs: 2 ** 31 - 1 }))).not.toBeNull();

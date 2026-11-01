@@ -3,12 +3,12 @@ import type { ModelOption, ProviderId } from './types';
 
 /* Product names stay as they are in every language. */
 export const PROVIDER_NAMES: Record<ProviderId, string> = {
-  claude: 'Claude', codex: 'Codex', kimi: 'Kimi', glm: 'GLM', anthropic_api: 'Anthropic', openai_api: 'OpenAI',
+  claude: 'Claude', codex: 'Codex', kimi: 'Kimi', glm: 'GLM', antigravity: 'Antigravity', anthropic_api: 'Anthropic', openai_api: 'OpenAI',
 };
 
 /* The program an agent runs in its terminal, by its subscription. */
 export const PROGRAM_NAMES: Record<ProviderId, string> = {
-  claude: 'Claude', codex: 'Codex', kimi: 'Kimi', glm: 'GLM', anthropic_api: 'Claude', openai_api: 'Codex',
+  claude: 'Claude', codex: 'Codex', kimi: 'Kimi', glm: 'GLM', antigravity: 'Antigravity', anthropic_api: 'Claude', openai_api: 'Codex',
 };
 
 /* Plans a person connects on their own machine. */
