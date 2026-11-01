@@ -108,6 +108,15 @@ describe('pictures, links and choices in requests', () => {
     expect((await call(tools, 'ask_person', { task: task.number, question: 'Again?', images: [mine] })).isError).toBe(true);
   });
 
+  it('never shows a file put on a task as a picture', async () => {
+    const { app, turn, fran, task } = await company();
+    const { token, tools } = await turn(fran);
+    const put = await app.inject({ method: 'POST', url: `/api/attachments?task=${task.number}&name=shot.png`, payload: PNG, headers: { 'content-type': 'application/octet-stream', authorization: `Bearer ${token}` } });
+    const shown = await call(tools, 'ask_person', { task: task.number, question: 'Look?', images: [put.json().id] });
+    expect(shown.isError).toBe(true);
+    expect(shown.content[0]!.text).toContain('is a file on a task, not a picture');
+  });
+
   it('lets a person pick one of a few ways, and wakes the agent with the pick', async () => {
     const { app, db, upload, turn, fran, task, ceoSession } = await company();
     const { token, tools } = await turn(fran);

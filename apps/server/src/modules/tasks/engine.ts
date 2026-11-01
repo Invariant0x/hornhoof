@@ -898,14 +898,18 @@ export async function wentOn(ctx: Live, agentId: string, task: Task): Promise<Mo
 /* pick: the way a person took, from 0, in a choice. */
 export type Answer = { answer?: string; approve?: boolean; retry?: boolean; pick?: number };
 
-/* Pictures are the agent's own, from hh-attach, each shown once. */
+/* Pictures are the agent's own, from hh-attach, each shown once. A file put on a task is no picture, whatever it holds. */
 async function checkPictures(db: Db, companyId: string, agentId: string, ids: string[]): Promise<void> {
   if (!ids.length) return;
   if (new Set(ids).size !== ids.length) throw refuse(400, 'task_invalid', 'A picture is listed twice.');
-  const rows = await db.select({ id: attachments.id, companyId: attachments.companyId, agentId: attachments.agentId, requestId: attachments.requestId }).from(attachments).where(inArray(attachments.id, ids));
+  const rows = await db
+    .select({ id: attachments.id, companyId: attachments.companyId, agentId: attachments.agentId, requestId: attachments.requestId, taskId: attachments.taskId })
+    .from(attachments)
+    .where(inArray(attachments.id, ids));
   for (const id of ids) {
     const found = rows.find(r => r.id === id);
     if (!found || found.companyId !== companyId || found.agentId !== agentId) throw refuse(400, 'task_invalid', `${id} is not a picture you sent. Send it with hh-attach and use the id it prints.`);
+    if (found.taskId) throw refuse(400, 'task_invalid', `${id} is a file on a task, not a picture. Send the picture with hh-attach FILE, without --task.`);
     if (found.requestId) throw refuse(400, 'task_invalid', `${id} is shown in another request already. Send it again with hh-attach.`);
   }
 }
