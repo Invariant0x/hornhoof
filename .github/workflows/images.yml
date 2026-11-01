@@ -68,9 +68,11 @@ jobs:
           build-args: |
             HORNHOOF_VERSION=${{ steps.build.outputs.version }}
             HORNHOOF_COMMIT=${{ github.sha }}
+          # Every company updates to latest, so only a build of main moves it and the version; a run started by hand from a
+          # branch pushes its commit's tag alone. The action skips the empty lines.
           tags: |
-            ghcr.io/invariant0x/${{ matrix.name }}:latest
-            ghcr.io/invariant0x/${{ matrix.name }}:${{ steps.build.outputs.version }}
+            ${{ github.ref == 'refs/heads/main' && format('ghcr.io/invariant0x/{0}:latest', matrix.name) || '' }}
+            ${{ github.ref == 'refs/heads/main' && format('ghcr.io/invariant0x/{0}:{1}', matrix.name, steps.build.outputs.version) || '' }}
             ghcr.io/invariant0x/${{ matrix.name }}:${{ github.sha }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
