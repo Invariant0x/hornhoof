@@ -303,6 +303,15 @@ describe('templates', () => {
     expect(templates.skills.get('dev-worktrees')!.body).toMatch(/long test run, not a stuck member[\s\S]*ask its holder and wait one more round/);
   });
 
+  it('leaves releases to the merge into main, on machines without Docker', () => {
+    const builders = [templates.roles.get('DEV-ENG')!.body, templates.skills.get('dev-ci-release')!.body];
+    for (const text of [...builders, templates.skills.get('dev-worktrees')!.body]) {
+      expect(text).toMatch(/[Nn]ever start a release or image publishing workflow from a branch/);
+      expect(text).toMatch(/merge into main/);
+    }
+    for (const text of builders) expect(text).toMatch(/no Docker/);
+  });
+
   it('credits every source a skill names in SOURCES.md', () => {
     const credits = readFileSync(`${DIR}/SOURCES.md`, 'utf8');
     for (const s of skills) for (const src of s.sources) expect(credits, `${s.id} ${src}`).toContain(src.split(' ')[0]);

@@ -14,7 +14,7 @@ sources: [addyosmani/agent-skills skills/ci-cd-and-automation/SKILL.md, wshobson
 **A release.**
 1. Only changes that passed every gate are in it.
 2. Bump the version where the project keeps it, following its scheme.
-3. Build the images or packages from that exact commit, tagged with the version and the commit.
+3. Let the pipeline build the images or packages from that exact commit, tagged with the version and the commit, without publishing them; your machine has no Docker. Never start a release or image publishing workflow from a branch: it can replace what everyone uses, so publishing comes only from the merge into main.
 4. Run the smoke checks against the built artifact, not against your working copy.
 5. Hand the release notes (dev-release-notes) and the commit to the head; the CEO approves the exact commit before it reaches the main line.
 
