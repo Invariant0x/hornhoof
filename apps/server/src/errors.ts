@@ -29,6 +29,7 @@ export type ErrorReason =
   | 'machine_offline'
   | 'other_machine'
   | 'already_on_machine'
+  | 'already_connected'
   | 'needs_login'
   | 'job_unknown'
   | 'too_many_attempts'

@@ -198,7 +198,7 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
     ConnectBody.shape,
     body => ({ method: 'POST', url: '/api/subscriptions/connect', payload: body }),
   );
-  tool('plan_command', 'A new machine command for one of the CEO\'s plans: it puts the plan on the machine that runs it, as well as on those it has.', { subscription: Id('subscription') }, ({ subscription }) => ({
+  tool('plan_command', 'A new machine command for one of the CEO\'s plans that still waits for a machine; a plan on a machine already goes to another one only with add_plan_to_machine.', { subscription: Id('subscription') }, ({ subscription }) => ({
     method: 'POST',
     url: `/api/subscriptions/${subscription}/command`,
   }));

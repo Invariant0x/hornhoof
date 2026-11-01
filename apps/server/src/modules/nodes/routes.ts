@@ -73,7 +73,8 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
         .returning({ codeHash: nodeCodes.codeHash });
       if (used.length === 0) throw codeUsed();
 
-      /* A plan that runs on other machines keeps them and runs on this one too. */
+      /* A command made for one machine puts its plan there as well as on the machines it has. Any other takes only plans
+         that wait for a machine, so one that joined elsewhere keeps its machines and nothing else. */
       const subs = await tx
         .select({ id: subscriptions.id, provider: subscriptions.provider })
         .from(subscriptions)
@@ -83,6 +84,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
             eq(subscriptions.ownerPersonId, code.personId),
             eq(subscriptions.kind, 'personal'),
             isNull(subscriptions.removedAt),
+            code.machineId ? undefined : sql`not exists (select 1 from ${nodes} where ${nodes.subscriptionId} = ${subscriptions.id} and ${nodes.keyHash} is not null)`,
           ),
         );
       /* A code with no subscriptions connects the machine alone. */
@@ -111,7 +113,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
         const nodeId = await keyNode(tx, { companyId: code.companyId, machineId: machine!.id, subscriptionId: sub.id }, hashToken(key));
         if (nodeId) made.push({ nodeId, subscriptionId: sub.id, provider: sub.provider, key });
       }
-      if (!made.length) throw alreadyThere();
+      if (!made.length) throw code.machineId ? alreadyThere() : codeUsed();
       await settlePlans(tx, made.map(n => n.subscriptionId));
       return { machine: { id: machine!.id }, nodes: made };
     });

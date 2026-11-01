@@ -53,6 +53,8 @@ const IdParams = z.object({ id: z.uuid() });
 
 const unknown = () => new ApiError(404, 'not_found', 'This subscription does not exist.', 'subscription_unknown');
 const notOwner = () => new ApiError(403, 'forbidden', 'Only the owner of this subscription can do this.', 'not_owner');
+const connectedAlready = () =>
+  new ApiError(409, 'conflict', 'This plan runs on a machine already. To run it on another one too, use Add my plan on that machine under Machines.', 'already_connected');
 
 export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db, config, hub } = ctx;
@@ -121,16 +123,17 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   /* A person connects their own plans. They serve wherever the person works, so there is nothing to place.
-     One subscription per plan: one the person has already goes into the new command instead of a second one, and runs
-     on the machine the command joins as well as on those it has. */
+     One subscription per plan: one still waiting for its machine goes into the new command instead of a second one. A
+     plan that runs on a machine goes to another one only by that machine's own command, which works there alone. */
   app.post('/api/subscriptions/connect', async (req, reply) => {
     const me = await requirePerson(req, db);
     const { providers } = ConnectBody.parse(req.body);
     const { ids, code } = await db.transaction(async tx => {
       const had = await tx
-        .select({ id: subscriptions.id, provider: subscriptions.provider })
+        .select({ id: subscriptions.id, provider: subscriptions.provider, status: subscriptions.status })
         .from(subscriptions)
         .where(and(eq(subscriptions.ownerPersonId, me.id), eq(subscriptions.kind, 'personal'), inArray(subscriptions.provider, providers), isNull(subscriptions.removedAt)));
+      if (had.some(s => s.status !== 'waiting_machine')) throw connectedAlready();
       const fresh = providers.filter(p => !had.some(s => s.provider === p));
       const rows = fresh.length
         ? await tx
@@ -151,6 +154,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
     const sub = await liveSubscription(IdParams.parse(req.params).id);
     if (sub.ownerPersonId !== me.id) throw notOwner();
     if (sub.kind !== 'personal') throw unknown();
+    if (sub.status !== 'waiting_machine') throw connectedAlready();
     const code = await createNodeCode(db, { companyId: me.companyId, personId: me.id, subscriptionIds: [sub.id] });
     reply.code(201);
     return { command: installCommand(await publicUrl(db, config), code) };

@@ -88,15 +88,13 @@ describe('POST /api/nodes/join', () => {
     expect(list[0].plans).toHaveLength(2);
   });
 
-  it('puts a plan that joined a machine on one more machine with a second command', async () => {
-    const { app, db, ceo, code, ids } = await connected(['claude']);
+  it('skips subscriptions that already joined a machine, and says the code is used when nothing is left', async () => {
+    const { app, ceo, code, ids } = await connected(['claude']);
     const extra = await app.inject({ method: 'POST', url: `/api/subscriptions/${ids[0]}/command`, ...as(ceo) });
-    const first = (await join(app, code)).json();
+    await join(app, code);
     const late = await join(app, codeOf(extra.json().command), { machineId: 'other-machine-01', hostname: 'ivan-laptop' });
-    expect(late.statusCode).toBe(200);
-    expect(late.json().machine.id).not.toBe(first.machine.id);
-    expect((await db.select().from(nodes).where(eq(nodes.subscriptionId, ids[0]))).map(n => n.machineId).sort()).toEqual([first.machine.id, late.json().machine.id].sort());
-    expect(await db.select().from(subscriptions).where(eq(subscriptions.kind, 'personal'))).toHaveLength(1);
+    expect(late.statusCode).toBe(410);
+    expect(late.json().error.reason).toBe('code_used');
   });
 });
 

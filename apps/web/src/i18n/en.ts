@@ -688,6 +688,7 @@ export const en = {
     not_owner: 'Only the owner can do this.',
     orchestrator_only: 'Only the orchestrator writes this.',
     already_on_machine: 'This plan runs on this machine already. Reload the page.',
+    already_connected: 'This plan runs on a machine already. To run it on another one too, use Add my plan on that machine under Machines.',
     other_machine: 'This command is for another of your machines. Run it on the machine it was made for.',
     not_company_level: 'The orchestrator can only run on a subscription that serves the whole company.',
     subscription_unknown: 'This subscription no longer exists. Reload the page.',
