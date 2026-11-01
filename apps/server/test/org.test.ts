@@ -120,6 +120,26 @@ describe('GET /api/org', () => {
     });
   });
 
+  it('shows a reviewer at work on a gate while another reviewer there waits for a person', async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    const [company] = await db.select().from(companies);
+    const [sub] = await db.select().from(subscriptions);
+    const [dev] = await db.insert(departments).values({ companyId: company!.id, templateKey: 'development', roleCode: 'DEV', position: 0 }).returning();
+    const hire = async (name: string, kind: 'head' | 'worker', roleKey: string) =>
+      (await db.insert(agents).values({ companyId: company!.id, kind, name, roleKey, departmentId: dev!.id, model: '', subscriptionId: sub!.id }).returning())[0]!;
+    const hana = await hire('Hana', 'head', 'DEV-HEAD');
+    const felix = await hire('Felix', 'worker', 'DEV-FE');
+    const rita = await hire('Rita', 'worker', 'DEV-REV');
+    await hire('Rex', 'worker', 'DEV-REV');
+    const { task } = await createTask(app.ctx, { agentId: hana.id }, { title: 'Checkout page', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: felix.id, executor: true, gates: [rita.id] });
+    await submit(app.ctx, felix.id, task.id, { summary: 'Done', evidence: 'npm test' });
+    await ask(app.ctx, rita.id, task.id, { kind: 'question', text: 'Which browsers?' });
+    const org = (await app.inject({ url: '/api/org', ...as(ceo) })).json();
+    const doing = Object.fromEntries(org.departments[0].employees.map((e: { name: string; status: string; task: { number: number } | null }) => [e.name, [e.status, e.task?.number ?? null]]));
+    expect(doing).toMatchObject({ Rita: ['waiting', task.number], Rex: ['queued', task.number] });
+  });
+
   it('counts the agents of each department, its products included, and those at work', async () => {
     const { app, db } = await testApp();
     const ceo = await setUpCompany(app);

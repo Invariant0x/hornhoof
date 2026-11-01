@@ -73,16 +73,18 @@ export function orgRoutes(app: FastifyInstance, { db, hub, templates, bus }: Ctx
       .where(and(eq(requests.companyId, me.companyId), eq(requests.status, 'open')));
     const byId = new Map(openTasks.map(t => [t.id, t]));
     const parents = new Set(openTasks.map(t => t.parentId));
-    /* The task an agent acts on next: at a gate it still checks (or holds, when nobody on can), or with it as executor (or
-       holder, for a head's task) before any gate. */
+    /* The task an agent acts on next: at a gate it still checks (or holds, when nobody on can), also while another reviewer
+       there waits for a person, or with it as executor (or holder, for a head's task) before any gate. */
+    const atGate = (t: (typeof openTasks)[number]) => t.status === 'review' || t.status === 'waiting';
     const holds = (t: (typeof openTasks)[number], id: string) =>
-      t.stage > 0 ? t.status === 'review' && (t.panel.length ? t.panel.includes(id) : t.assigneeAgentId === id) : (t.executorAgentId ?? t.assigneeAgentId) === id;
+      t.stage > 0 ? atGate(t) && (t.panel.length ? t.panel.includes(id) : t.assigneeAgentId === id) : (t.executorAgentId ?? t.assigneeAgentId) === id;
     /* What an employee does now. Working: a turn runs. Waiting: it asked people, or it is blocked. Queued: it holds a task
        and its turn has not started. Handed: what it holds is with gates or with the tasks it gave out. */
     const doing = (a: (typeof allAgents)[number]) => {
       const run = running.find(j => j.agentId === a.id);
       const held = openTasks.filter(t => holds(t, a.id));
-      const waits = [...asked.filter(r => r.agentId === a.id).map(r => byId.get(r.taskId)), ...held.filter(t => t.status === 'blocked' || t.status === 'waiting')].filter(t => t !== undefined);
+      /* At a gate only the reviewer who asked waits; the others there can still give their verdict. */
+      const waits = [...asked.filter(r => r.agentId === a.id).map(r => byId.get(r.taskId)), ...held.filter(t => t.status === 'blocked' || (t.status === 'waiting' && t.stage === 0))].filter(t => t !== undefined);
       const next = held.filter(t => !parents.has(t.id) && !waits.includes(t));
       const gave = [...openTasks.filter(t => t.stage > 0 && t.executorAgentId === a.id), ...held.filter(t => parents.has(t.id))];
       const pick = (status: 'off' | 'working' | 'waiting' | 'queued' | 'handed' | 'idle', t: (typeof openTasks)[number] | null | undefined) => ({ status, task: t ?? null });
