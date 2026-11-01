@@ -140,7 +140,10 @@ describe('GET /api/org', () => {
     const hana = await hire('Hana', 'head', 'DEV-HEAD');
     const felix = await hire('Felix', 'worker', 'DEV-FE');
     const rita = await hire('Rita', 'worker', 'DEV-REV');
-    await hire('Rex', 'worker', 'DEV-REV');
+    /* Rex reviews on Codex, so both check the work at once. */
+    const [ceoPerson] = await db.select().from(people);
+    const [codex] = await db.insert(subscriptions).values({ companyId: company!.id, provider: 'codex', kind: 'personal', label: 'Codex', ownerPersonId: ceoPerson!.id, status: 'ready' }).returning();
+    await db.insert(agents).values({ companyId: company!.id, kind: 'worker', name: 'Rex', roleKey: 'DEV-REV', departmentId: dev!.id, model: '', subscriptionId: codex!.id });
     const { task } = await createTask(app.ctx, { agentId: hana.id }, { title: 'Checkout page', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: felix.id, executor: true, gates: [rita.id] });
     await submit(app.ctx, felix.id, task.id, { summary: 'Done', evidence: 'npm test' });
     await ask(app.ctx, rita.id, task.id, { kind: 'question', text: 'Which browsers?' });
