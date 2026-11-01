@@ -13,7 +13,7 @@ type JobRun = Extract<ServerMessage, { type: 'job.run' }>;
 
 const isRootUser = () => process.getuid?.() === 0;
 
-/* Stable per subscription, kept in <dir>/users.json. Null unless the node runs as root, as personal nodes never do. */
+/* Stable per subscription or agent, kept in <dir>/users.json. Null unless the node runs as root. */
 export function userFor(dir: string, subscriptionId: string, isRoot = isRootUser()): JobUser | null {
   if (!isRoot) return null;
   const file = join(dir, 'users.json');
@@ -132,11 +132,14 @@ export function ensurePasswd(user: JobUser, home: string, files: SystemFiles = S
 
 type BuiltinOptions = { isRoot?: boolean; ops?: FolderOps; files?: SystemFiles };
 
-/* The built-in node's adapter for a job: the key's own home in subs/<id>, its own user, and a work folder handed to that user. */
+/* The built-in node's adapter for a job: a user and home of its own for each agent, in agents/<key>, and for a key's test
+   jobs in subs/<id>, and a work folder handed to that user. A company key needs no sign-in to share, so agents of one key
+   never read each other's tool tokens. */
 export function builtinAdapters(dir: string, tools: string, { isRoot = isRootUser(), ops = REAL_OPS, files = SYSTEM_FILES }: BuiltinOptions = {}) {
   return (job: JobRun): ProviderAdapter => {
-    const user = userFor(dir, job.subscriptionId, isRoot);
-    const home = prepareFolder(join(dir, 'subs', job.subscriptionId), user, ops);
+    const agent = job.workspace?.key ?? null;
+    const user = userFor(dir, agent ? `agent:${agent}` : job.subscriptionId, isRoot);
+    const home = prepareFolder(agent ? join(dir, 'agents', agent) : join(dir, 'subs', job.subscriptionId), user, ops);
     if (user) ensurePasswd(user, home, files);
     const adapter = adapterFor(job.provider, { home, tools, user });
     return {

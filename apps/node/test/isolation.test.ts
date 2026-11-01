@@ -151,6 +151,20 @@ describe('builtinAdapters', () => {
     adapter.owner!.prepare(join(dir, 'work', 'agents', 'a1'));
     expect(calls).toContain(`chown ${join(dir, 'work', 'agents', 'a1')} 20000:20000`);
   });
+
+  it("gives each agent of one company key a user and home of its own, so none reads another's tool token", async () => {
+    const dir = tmp();
+    const { ops } = fakeOps();
+    const files = { passwd: join(dir, 'passwd'), group: join(dir, 'group') };
+    writeFileSync(files.passwd, '');
+    writeFileSync(files.group, '');
+    const pick = builtinAdapters(dir, join(dir, 'tools'), { isRoot: true, ops, files });
+    const job = (key: string | null) => ({ type: 'job.run' as const, jobId: `job-${key}`, subscriptionId: 'sub-a', provider: 'anthropic_api' as const, prompt: 'hi', sessionId: null, model: null, timeoutMs: 1000, secret: null, instructions: null, toolToken: null, workspace: key ? { key, repo: null } : null });
+    expect(pick(job('agent-1')).owner).toMatchObject({ user: { uid: 20000, gid: 20000 }, home: join(dir, 'agents', 'agent-1') });
+    expect(pick(job('agent-2')).owner).toMatchObject({ user: { uid: 20001, gid: 20001 }, home: join(dir, 'agents', 'agent-2') });
+    expect(pick(job(null)).owner).toMatchObject({ user: { uid: 20002, gid: 20002 }, home: join(dir, 'subs', 'sub-a') });
+    expect(pick(job('agent-1')).owner).toMatchObject({ user: { uid: 20000, gid: 20000 } });
+  });
 });
 
 /* A user this test cannot become: a program started as that user fails, which shows the user was passed on. */
