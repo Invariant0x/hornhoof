@@ -143,6 +143,11 @@ describe('templates', () => {
     expect(roles.filter(r => r.timer).map(r => r.id).sort()).toEqual(['OPS-BUGS', 'OPS-WATCH']);
   });
 
+  it('teaches the failure collector to file an improvement as a short case, part by part as the tool takes it', () => {
+    const review = templates.skills.get('ops-failure-review')!.body;
+    for (const part of ['title', 'problem', 'facts', 'source', 'guesses', 'why', 'change', 'gain']) expect(review, part).toContain(`${part}:`);
+  });
+
   it('has the full development roster', () => {
     const dev = templates.roster('development');
     const ids = dev.filter(r => r.inDefault).map(r => r.id);
