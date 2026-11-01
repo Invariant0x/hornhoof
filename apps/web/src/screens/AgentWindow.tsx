@@ -257,7 +257,8 @@ export function AgentWindow({ org, agentId, staff = null, onClose, onCard }: Pro
       await api.post(`${path}/messages`, { text: body });
       void catchUp();
     } catch (err) {
-      setText(body);
+      /* The person may have started the next message meanwhile; that one stays. */
+      setText(now => now || body);
       setFailure(err);
     }
   }

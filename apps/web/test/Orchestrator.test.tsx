@@ -158,6 +158,31 @@ describe('AgentWindow', () => {
     expect(input).toHaveValue('');
   });
 
+  it('puts a message that could not be sent back in the line, unless the person already started the next one', async () => {
+    const user = userEvent.setup();
+    let fail = () => {};
+    open({ 'POST /api/agents/orchestrator/messages': () => new Promise(resolve => (fail = () => resolve([503, { error: { code: 'unavailable', message: 'Not now.' } }]))) });
+    const input = await screen.findByLabelText('Write to the orchestrator');
+    await vi.waitFor(() => expect(input).toBeEnabled());
+    await user.type(input, 'Schools first{Enter}');
+    expect(input).toHaveValue('');
+    await act(async () => {
+      fail();
+      await new Promise(r => setTimeout(r, 50));
+    });
+    expect(screen.getByRole('alert')).toHaveTextContent('Not now.');
+    expect(input).toHaveValue('Schools first');
+    await user.type(input, '{Enter}');
+    expect(input).toHaveValue('');
+    await user.type(input, 'then parents');
+    await act(async () => {
+      fail();
+      await new Promise(r => setTimeout(r, 50));
+    });
+    expect(screen.getByRole('alert')).toHaveTextContent('Not now.');
+    expect(input).toHaveValue('then parents');
+  });
+
   it('shows that he works and stops him on Esc', async () => {
     const { calls } = open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...BUSY, queued: 2 } }], 'POST /api/agents/orchestrator/stop': [202] });
     expect(await screen.findByText(/esc to stop/)).toBeInTheDocument();
