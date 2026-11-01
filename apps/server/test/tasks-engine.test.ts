@@ -193,6 +193,21 @@ describe('the task engine', () => {
     expect(sent.wakes).toEqual([{ agentId: head.id, taskId: task.id, why: 'switched', text: expect.stringContaining('Rex has no subscription') }]);
   });
 
+  it('declines a commit: the request closes, the task goes on and the agent hears why', async () => {
+    const { ctx, db, CEO, bruno, memberTask, read } = await company();
+    const task = await memberTask();
+    const commit = 'b'.repeat(40);
+    const approval = await ask(ctx, bruno.id, task.id, { kind: 'approval', text: 'Merge the checkout?', commit });
+    expect((await read(task.id)).status).toBe('waiting');
+    const declined = await answer(ctx, CEO, approval.request.id, { approve: false, answer: 'Refunds first.' });
+    expect(declined.request).toMatchObject({ status: 'declined', answer: 'Refunds first.', answeredBy: CEO.personId });
+    expect((await read(task.id)).status).toBe('working');
+    expect(declined.wakes).toEqual([{ agentId: bruno.id, taskId: task.id, why: 'answered', text: `Declined ${commit}. Refunds first.` }]);
+    const log = await db.select().from(taskEvents).where(eq(taskEvents.taskId, task.id));
+    expect(log.at(-1)).toMatchObject({ kind: 'answered', personId: CEO.personId, text: `Declined ${commit}. Refunds first.` });
+    expect(await reason(answer(ctx, CEO, approval.request.id, { approve: true }))).toBe('request_closed');
+  });
+
   it("wakes the assignee for a person's comment but nobody for an agent's", async () => {
     const { ctx, CEO, head, bruno, memberTask } = await company();
     const task = await memberTask();
