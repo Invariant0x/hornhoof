@@ -347,10 +347,18 @@ export type MachineView = {
   load: NodeLoad | null;
   /* Takes the company's test runs when it is the freest machine. */
   lendsTests: boolean;
+  running: Running;
+};
+
+/* What runs on a machine now: the employees whose program is there, busy while a turn of theirs runs, and the parts of
+   runs it takes, of tests or of other work. */
+export type Running = {
+  agents: { id: string; name: string; busy: boolean }[];
+  parts: { run: number; kind: 'tests' | 'work'; task: number | null; part: number; parts: number; agent: string | null; startedAt: string | null }[];
 };
 
 /* The node that comes with the server, for those who see the whole company. */
-export type BuiltinView = { online: boolean; load: NodeLoad | null };
+export type BuiltinView = { online: boolean; load: NodeLoad | null; running: Running };
 
 export type JobView = {
   id: string;

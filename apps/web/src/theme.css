@@ -422,10 +422,7 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 }
 
 /* Subscriptions */
-.subs-machines { display: grid; gap: 6px; margin-top: 12px; }
-.load-line { margin-top: 2px; font-size: 12px; }
 .lend { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; margin-right: 8px; }
-.subs-machines h2 { font-size: 18px; }
 .people-head > .head-actions { display: flex; gap: 10px; flex-wrap: wrap; }
 .where-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
 .add-plan { display: grid; gap: 10px; }
@@ -467,11 +464,44 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .plan input { grid-row: span 2; }
 .plan span { font-size: 12px; }
 
-/* On a phone the header stays one row: the tabs get tighter instead of wrapping. */
+/* Machines: the pool in figures, then one card per machine. The figures go in columns, each label over its value. */
+.pool > .edge-in { padding: 16px 20px; }
+.pool-facts { display: grid; grid-template-rows: auto auto; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 2px 20px; margin: 0; }
+.pool-facts dt { font-size: 12px; color: var(--muted); }
+.pool-facts dd { margin: 0 0 6px; font-family: var(--f-display); font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.machine-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); gap: 14px; }
+.machine-list > li > article { height: 100%; }
+.machine { height: 100%; }
+.machine > .edge-in { padding: 16px 18px; display: grid; gap: 12px; align-content: start; }
+.machine-head { display: flex; align-items: center; justify-content: space-between; gap: 6px 10px; flex-wrap: wrap; }
+.machine-head h2 { font-size: 18px; overflow-wrap: anywhere; }
+.machine > .edge-in > p { margin: 0; }
+.facts { display: grid; grid-template-columns: 8.5em minmax(0, 1fr); gap: 6px 12px; margin: 0; font-size: 13.5px; }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.load-now { display: inline-flex; align-items: center; gap: 8px; }
+.load-now .bar { width: 120px; }
+.load-now b { font-weight: 500; font-variant-numeric: tabular-nums; }
+.machine-note { font-size: 12.5px; padding-left: 10px; border-left: 3px solid var(--amber-ink); }
+.machine-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.machine-actions .lend { margin-right: 4px; }
+@media (max-width: 760px) {
+  .pool-facts { grid-template-rows: repeat(4, auto); grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-columns: auto; }
+}
 @media (max-width: 420px) {
-  .topbar { left: 12px; right: 12px; gap: 6px; }
-  .tabs { padding: 0 2px; }
-  .tabs button { padding: 0 7px; font-size: 13px; }
+  .facts { grid-template-columns: 1fr; gap: 0; }
+  .facts dd { margin-bottom: 8px; }
+}
+
+/* On a phone the header stays one row: the mark gives its place to the tabs, which get tighter instead of wrapping,
+   and on the narrowest screens scroll inside their strip, so the account button stays in view and the page itself
+   never scrolls sideways. */
+@media (max-width: 420px) {
+  .topbar { left: 12px; right: 12px; gap: 6px; grid-template-columns: minmax(0, 1fr) auto; }
+  .tb-brand { display: none; }
+  .tabs { justify-self: start; max-width: 100%; min-width: 0; padding: 0 2px; overflow-x: auto; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tabs button { flex: none; padding: 0 5px; font-size: 12px; white-space: nowrap; }
 }
 
 /* The structure card in the orchestrator's window. */

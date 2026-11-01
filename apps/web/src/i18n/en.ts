@@ -11,8 +11,6 @@ export function summary(counts: StatusCounts, words: Record<EmployeeStatus, stri
 }
 
 /* English is the source. Every other language has to match this shape. */
-/* A machine's load as the machines screen says it: processors, the busy share in percent, memory in GB, and what runs. */
-export type LoadWords = { cpus: number; busy: number; free: string; total: string; tests: number; jobs: number };
 
 export const en = {
   common: {
@@ -110,7 +108,7 @@ export const en = {
   },
   shell: {
     sections: 'Sections',
-    tabs: { map: 'Map', tasks: 'Tasks', people: 'People', subscriptions: 'Subscriptions', improvements: 'Improvements' },
+    tabs: { map: 'Map', tasks: 'Tasks', people: 'People', subscriptions: 'Subscriptions', machines: 'Machines', improvements: 'Improvements' },
     account: 'Account',
     theme: 'Theme',
     light: 'Light',
@@ -175,16 +173,12 @@ export const en = {
     heading: 'Subscriptions',
     intro: 'The plans and keys the agents run on. A personal plan runs on its owner\'s machines and serves wherever its owner works.',
     connect: 'Connect a subscription',
-    connectMachine: 'Connect a machine',
-    machineHeading: 'Connect a machine',
-    machineRunThis: 'Run this in a terminal on the machine you want to add. It installs Docker if needed, and the machine joins without a plan. Hornhoof runs tests on it, and you can add your plans to it later.',
     connectHeading: 'Connect your subscriptions',
     connectIntro: 'Tick the plans you have. One command sets up all of them on one machine.',
     plans: { claude: 'Pro or Max plan', codex: 'ChatGPT plan', kimi: 'Kimi Code plan', glm: 'Coding Plan key from z.ai', antigravity: 'Google AI Pro or Ultra plan' },
     getCommand: 'Get the command',
     runThis: 'Run this in a terminal on the machine the agents should use. It installs Docker if needed, starts a node for each plan and opens the sign-in links.',
     trust: 'Agents will run on this machine with your subscription. People with access to this Hornhoof can give them work.',
-    machineTrust: 'Hornhoof will run tests of the company\'s code on this machine. People with access to this Hornhoof can start them.',
     joinOnce: 'The command works once, for 24 hours. The nodes keep running in the background after the terminal is closed.',
     skip: 'Skip for now',
     columns: { subscription: 'Subscription', place: 'Place', machine: 'Machines', status: 'Status', actions: 'Actions' },
@@ -239,11 +233,48 @@ export const en = {
     removeKeyAsk: (name: string) => `Remove ${name}? The key is deleted from Hornhoof.`,
     yesRemove: 'Yes, remove',
     empty: 'No subscriptions yet. Connect yours so the agents can work.',
-    machines: 'Machines',
-    machinesIntro: 'Machines that run plans and tests. Disconnecting one stops everything on it, and a plan that runs nowhere else waits for a machine again.',
-    machineColumns: { machine: 'Machine', owner: 'Owner', plans: 'Plans', state: 'State', actions: 'Actions' },
+  },
+  machines: {
+    heading: 'Machines',
+    intro: 'The company\'s computers that run plans, agents and tests. Together they make one pool of computing power. Disconnecting one stops everything on it, and a plan that runs nowhere else waits for a machine again.',
+    connect: 'Connect a machine',
+    connectHeading: 'Connect a machine',
+    runThis: 'Run this in a terminal on the machine you want to add. It installs Docker if needed, and the machine joins without a plan. Hornhoof runs tests on it, and you can add your plans to it later.',
+    trust: 'Hornhoof will run tests of the company\'s code on this machine. People with access to this Hornhoof can start them.',
+    pool: 'All machines together',
+    poolOnline: 'Machines online',
+    poolCores: 'Processor cores',
+    poolMemory: 'Free memory',
+    poolBusy: 'Busy now',
+    of: (n: string, all: string) => `${n} of ${all}`,
+    gbOf: (n: string, all: string) => `${n} of ${all} GB`,
+    owner: 'Owner',
+    system: 'System',
+    processor: 'Processor',
+    memory: 'Memory',
+    load: 'Load',
+    disk: 'Disk',
+    plans: 'Plans',
+    runningNow: 'Running now',
+    unknown: 'unknown',
+    cores: (n: number) => `${n} ${n === 1 ? 'core' : 'cores'}`,
+    coresOf: (n: number, all: number) => `${n} of ${all} ${all === 1 ? 'core' : 'cores'}`,
+    gbFree: (free: string, total: string) => `${free} of ${total} GB free`,
+    machineHas: (gb: string) => `the machine has ${gb} GB`,
+    /* What the node can use is less than its machine has: Docker on a Mac gets only the share its owner gave it. */
+    smallerMac: 'Docker on this Mac is set smaller than the Mac, so Hornhoof uses only part of it.',
+    smaller: 'Hornhoof on this machine is set smaller than the machine, so it uses only part of it.',
+    noPlan: 'No plan',
     plansOn: (host: string) => `Plans on ${host}`,
-    testRunsOnly: 'No plan, test runs only',
+    runningOn: (host: string) => `What runs on ${host} now`,
+    nothing: 'Nothing right now',
+    working: 'working',
+    /* A part of a run, of a task's tests or of other work; run is its number when it has no task. */
+    part: (p: { kind: 'tests' | 'work'; run: number; task: number | null; part: number; parts: number }) =>
+      `${p.task === null ? `${p.kind === 'tests' ? 'Test run' : 'Work run'} ${p.run}` : `${p.kind === 'tests' ? 'Tests of task' : 'Work on task'} ${p.task}`}` +
+      (p.parts > 1 ? `, part ${p.part} of ${p.parts}` : ''),
+    builtin: 'Built-in node',
+    builtinAbout: 'Comes with the server and runs the company\'s keys and test runs.',
     addPlan: 'Add my plan',
     addPlanLabel: (host: string) => `Add my plan to ${host}`,
     addPlanAsk: (host: string) => `Which of your plans should run on ${host} too?`,
@@ -257,14 +288,11 @@ export const en = {
     disconnectLabel: (host: string) => `Disconnect ${host}`,
     disconnectAsk: (host: string) => `Disconnect ${host}? Everything on it stops, and a plan that runs nowhere else waits for a machine again.`,
     yesDisconnect: 'Yes, disconnect',
-    noMachines: 'No machines yet.',
+    noMachines: 'No machines yet. Connect one, or connect a plan in Subscriptions.',
     lendLabel: (host: string) => `Lend ${host} to the company's test runs`,
     lend: 'Lend to test runs',
     lent: 'Lent to test runs',
     notLent: 'Not lent to test runs',
-    loadLine: (l: LoadWords) =>
-      `${l.cpus} ${l.cpus === 1 ? 'processor' : 'processors'}, ${l.busy}% busy. ${l.free} of ${l.total} GB of memory free. ` +
-      `Running now: ${l.tests} ${l.tests === 1 ? 'test run' : 'test runs'}, ${l.jobs} ${l.jobs === 1 ? 'agent turn' : 'agent turns'}.`,
   },
   notebook: {
     title: 'Notebook',

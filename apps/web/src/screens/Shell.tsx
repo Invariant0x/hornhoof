@@ -14,6 +14,7 @@ import { useUpdates } from '../updates';
 import { AgentWindow, type StaffAsk } from './AgentWindow';
 import { DepartmentView } from './Department';
 import { Improvements } from './Improvements';
+import { Machines } from './Machines';
 import { MapScreen } from './Map';
 import { People } from './People';
 import { Settings } from './Settings';
@@ -21,10 +22,10 @@ import { Subscriptions } from './Subscriptions';
 import { Tasks } from './Tasks';
 import { Versions } from './Versions';
 
-type Tab = 'map' | 'tasks' | 'people' | 'subscriptions' | 'improvements';
+type Tab = 'map' | 'tasks' | 'people' | 'subscriptions' | 'machines' | 'improvements';
 /* The right panel: an agent's terminal or its card, or a task. agentId is 'orchestrator' or an employee's id. */
 type Panel = { kind: 'window' | 'card'; agentId: string } | { kind: 'task'; taskId: string } | null;
-const TABS: Tab[] = ['map', 'tasks', 'people', 'subscriptions'];
+const TABS: Tab[] = ['map', 'tasks', 'people', 'subscriptions', 'machines'];
 const THEMES: Theme[] = ['light', 'dark'];
 
 /* onImprovements, onVersions and onSettings: only for people who see the whole company. */
@@ -263,6 +264,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
         )}
         {tab === 'people' && <People me={me} />}
         {tab === 'subscriptions' && <Subscriptions me={me} />}
+        {tab === 'machines' && <Machines me={me} />}
         {tab === 'improvements' && company && <Improvements improvements={improvements} failure={improvementsFailure} onChanged={loadImprovements} onTask={taskId => setPanel({ kind: 'task', taskId })} />}
       </main>
       {panel?.kind === 'window' && org && (

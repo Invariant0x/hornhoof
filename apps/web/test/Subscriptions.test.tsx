@@ -4,13 +4,12 @@ import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Subscriptions } from '../src/screens/Subscriptions';
 import type { Me } from '../src/types';
-import { MACHINES, ME, mockApi, SUBS } from './api-mock';
+import { ME, mockApi, SUBS } from './api-mock';
 
 const COMMAND = 'curl -fsSL https://hq.acme.com/install.sh | bash -s -- --join CODE123';
 const TRUST = 'Agents will run on this machine with your subscription. People with access to this Hornhoof can give them work.';
 
-const lists = (extra: Parameters<typeof mockApi>[0] = {}) =>
-  mockApi({ 'GET /api/subscriptions': [200, { subscriptions: SUBS }], 'GET /api/machines': [200, { machines: MACHINES }], ...extra });
+const lists = (extra: Parameters<typeof mockApi>[0] = {}) => mockApi({ 'GET /api/subscriptions': [200, { subscriptions: SUBS }], ...extra });
 
 const rowOf = (name: string) => screen.getByRole('row', { name: new RegExp(`^${name}\\b`) });
 
@@ -28,12 +27,15 @@ describe('Subscriptions', () => {
     expect(within(rowOf('Kimi')).getByText('No machine yet')).toBeInTheDocument();
     expect(within(rowOf('Claude')).getByText('Whole company')).toBeInTheDocument();
     expect(within(rowOf('Anthropic key ending 9f3a')).getByText('Orchestrator')).toBeInTheDocument();
+    /* Machines have a tab of their own. */
+    expect(screen.queryByRole('button', { name: 'Connect a machine' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Machines' })).not.toBeInTheDocument();
   });
 
   it('lists every machine a plan runs on, saying on which it waits', async () => {
     const laptop = { id: 'm3', hostname: 'ivan-laptop', status: 'needs_login' as const, online: true };
     const tower = { id: 'm4', hostname: 'ivan-tower', status: 'ready' as const, online: false };
-    mockApi({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, machines: [SUBS[0]!.machines[0]!, laptop, tower] }] }], 'GET /api/machines': [200, { machines: MACHINES }] });
+    mockApi({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, machines: [SUBS[0]!.machines[0]!, laptop, tower] }] }] });
     render(<Subscriptions me={ME} />);
     const machines = within(within(await screen.findByRole('row', { name: /^Claude\b/ })).getByRole('list', { name: 'Machines of Claude' })).getAllByRole('listitem');
     expect(machines.map(m => m.textContent)).toEqual(['ivan-mbp', 'ivan-laptop, waiting for the login', 'ivan-tower, offline']);
@@ -50,7 +52,7 @@ describe('Subscriptions', () => {
         { name: 'one_day', utilization: null, resetsAt: null },
       ],
     };
-    mockApi({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, limits }] }], 'GET /api/machines': [200, { machines: MACHINES }] });
+    mockApi({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, limits }] }] });
     render(<Subscriptions me={ME} />);
     const list = within(await screen.findByRole('row', { name: /^Claude\b/ })).getByRole('list', { name: 'Limits' });
     const [five, seven, two, month, ...rest] = within(list).getAllByRole('listitem');
@@ -69,7 +71,7 @@ describe('Subscriptions', () => {
     const codex = { status: 'allowed' as const, windows: [{ name: 'seven_day', utilization: 0.73, resetsAt: null }], complete: true };
     const kimi = { status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0.88, resetsAt: null }, { name: 'month', utilization: 0.06, resetsAt: null }], complete: true };
     const subs = [{ ...SUBS[0]!, limits: claude }, { ...SUBS[1]!, limits: codex }, { ...SUBS[2]!, limits: kimi }, SUBS[3]!];
-    mockApi({ 'GET /api/subscriptions': [200, { subscriptions: subs }], 'GET /api/machines': [200, { machines: MACHINES }] });
+    mockApi({ 'GET /api/subscriptions': [200, { subscriptions: subs }] });
     render(<Subscriptions me={ME} />);
     const rows = async (name: string) => within(within(await screen.findByRole('row', { name: new RegExp(`^${name}\\b`) })).getByRole('list', { name: 'Limits' })).getAllByRole('listitem');
     const [claudeFive, claudeSeven, ...claudeMore] = await rows('Claude');
@@ -88,7 +90,7 @@ describe('Subscriptions', () => {
 
   it('says when a plan reached its limit', async () => {
     const limits = { status: 'rejected' as const, windows: [{ name: 'five_hour', utilization: 1, resetsAt: '2099-10-29T18:00:00.000Z' }] };
-    mockApi({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, limits }] }], 'GET /api/machines': [200, { machines: MACHINES }] });
+    mockApi({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, limits }] }] });
     render(<Subscriptions me={ME} />);
     expect(within(await screen.findByRole('row', { name: /^Claude\b/ })).getByText(/^Limit reached, resets in /)).toBeInTheDocument();
   });
@@ -99,7 +101,7 @@ describe('Subscriptions', () => {
       windows: [{ name: 'five_hour', utilization: 1, resetsAt: '2026-10-29T18:00:00.000Z' }, { name: 'seven_day', utilization: 0.4, resetsAt: '2099-11-04T00:00:00.000Z' }],
       complete: true,
     };
-    mockApi({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, limits }] }], 'GET /api/machines': [200, { machines: MACHINES }] });
+    mockApi({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, limits }] }] });
     render(<Subscriptions me={ME} />);
     const row = await screen.findByRole('row', { name: /^Claude\b/ });
     const [five, seven] = within(within(row).getByRole('list', { name: 'Limits' })).getAllByRole('listitem');
@@ -113,7 +115,7 @@ describe('Subscriptions', () => {
       status: 'rejected' as const,
       windows: [{ name: 'five_hour', utilization: 1, resetsAt: '2026-10-29T18:00:00.000Z' }, { name: 'seven_day', utilization: null, resetsAt: '2099-11-04T00:00:00.000Z' }],
     };
-    mockApi({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, limits }] }], 'GET /api/machines': [200, { machines: MACHINES }] });
+    mockApi({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, limits }] }] });
     render(<Subscriptions me={ME} />);
     expect(within(await screen.findByRole('row', { name: /^Claude\b/ })).getByText(/^Limit reached, resets in /)).toBeInTheDocument();
   });
@@ -142,7 +144,6 @@ describe('Subscriptions', () => {
         calls += 1;
         return [200, { subscriptions: [calls < 2 ? SUBS[1]! : { ...SUBS[1]!, status: 'ready' }] }];
       },
-      'GET /api/machines': [200, { machines: MACHINES }],
     });
     render(<Subscriptions me={ME} />);
     expect(await screen.findByText('Waiting for the login')).toBeInTheDocument();
@@ -259,91 +260,6 @@ describe('Subscriptions', () => {
     expect(within(rowOf('Claude')).queryByRole('button', { name: /New command/ })).not.toBeInTheDocument();
   });
 
-  it('connects a machine without a plan and shows its command', async () => {
-    const calls = lists({ 'POST /api/machines/command': [201, { command: COMMAND }] });
-    const user = userEvent.setup();
-    render(<Subscriptions me={ME} />);
-    await user.click(await screen.findByRole('button', { name: 'Connect a machine' }));
-    expect(calls.find(c => c.method === 'POST')).toEqual({ method: 'POST', path: '/api/machines/command', body: undefined });
-    expect(await screen.findByText(COMMAND)).toBeInTheDocument();
-    expect(screen.getByText(/joins without a plan/)).toBeInTheDocument();
-    expect(screen.getByText("Hornhoof will run tests of the company's code on this machine. People with access to this Hornhoof can start them.")).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Done' }));
-    expect(screen.queryByText(COMMAND)).not.toBeInTheDocument();
-  });
-
-  it('lists the plans of each machine, or that it only takes test runs', async () => {
-    lists();
-    render(<Subscriptions me={ME} />);
-    const mine = within(within(await screen.findByRole('row', { name: /^ivan-mbp\b/ })).getByRole('list', { name: 'Plans on ivan-mbp' })).getAllByRole('listitem');
-    expect(mine.map(p => p.textContent)).toEqual(['Claude', 'Codex, waiting for the login']);
-    expect(within(screen.getByRole('row', { name: /^build-box\b/ })).getByText('No plan, test runs only')).toBeInTheDocument();
-  });
-
-  it("adds one of the person's plans to a machine of theirs and shows the command to run there", async () => {
-    const calls = lists({ 'POST /api/machines/m1/plans': [201, { command: COMMAND }] });
-    const user = userEvent.setup();
-    render(<Subscriptions me={ME} />);
-    const machine = await screen.findByRole('row', { name: /^ivan-mbp\b/ });
-    expect(within(screen.getByRole('row', { name: /^build-box\b/ })).queryByRole('button', { name: /^Add my plan/ })).not.toBeInTheDocument();
-    await user.click(within(machine).getByRole('button', { name: 'Add my plan to ivan-mbp' }));
-    expect(screen.getByText('Which of your plans should run on ivan-mbp too?')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Add Claude to ivan-mbp' })).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Add Kimi to ivan-mbp' }));
-    expect(calls.find(c => c.method === 'POST')).toEqual({ method: 'POST', path: '/api/machines/m1/plans', body: { subscription: 's-kimi' } });
-    expect(await screen.findByText(COMMAND)).toBeInTheDocument();
-    expect(screen.getByText(/^Run this in a terminal on ivan-mbp\./)).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Done' }));
-    expect(screen.queryByText(COMMAND)).not.toBeInTheDocument();
-  });
-
-  it('lists machines and disconnects one after a confirm', async () => {
-    const calls = lists({ 'POST /api/machines/m2/disconnect': [204] });
-    const user = userEvent.setup();
-    render(<Subscriptions me={ME} />);
-    const machine = await screen.findByRole('row', { name: /^build-box\b/ });
-    expect(within(machine).getByText('Last seen 5 minutes ago')).toBeInTheDocument();
-    expect(within(screen.getByRole('row', { name: /^ivan-mbp\b/ })).getByText('Online')).toBeInTheDocument();
-    await user.click(within(machine).getByRole('button', { name: 'Disconnect build-box' }));
-    await user.click(screen.getByRole('button', { name: 'Yes, disconnect' }));
-    expect(calls.find(c => c.method === 'POST')).toEqual({ method: 'POST', path: '/api/machines/m2/disconnect', body: undefined });
-  });
-
-  it('says how busy each machine is, and the built-in node to those who see the whole company', async () => {
-    const builtin = { online: true, load: { cpus: 4, load: 0.5, memFree: 2.5 * 1024 ** 3, memTotal: 8 * 1024 ** 3, tests: 0, jobs: 1 } };
-    mockApi({ 'GET /api/subscriptions': [200, { subscriptions: SUBS }], 'GET /api/machines': [200, { machines: MACHINES, builtin }] });
-    render(<Subscriptions me={ME} />);
-    const ivan = await screen.findByRole('row', { name: /^ivan-mbp\b/ });
-    expect(within(ivan).getByText('8 processors, 25% busy. 6 of 16 GB of memory free. Running now: 1 test run, 2 agent turns.')).toBeInTheDocument();
-    expect(within(screen.getByRole('row', { name: /^build-box\b/ })).queryByText(/processors/)).not.toBeInTheDocument();
-    const own = screen.getByRole('row', { name: /^Built-in node\b/ });
-    expect(within(own).getByText('4 processors, 13% busy. 2.5 of 8 GB of memory free. Running now: 0 test runs, 1 agent turn.')).toBeInTheDocument();
-    expect(within(own).getByText('Online')).toBeInTheDocument();
-    expect(within(own).queryByRole('button')).not.toBeInTheDocument();
-  });
-
-  it("lends a machine to the company's test runs, or takes it back, for its owner or someone who sees the whole company", async () => {
-    const calls = lists({ 'PATCH /api/machines/m1': [200, { lendsTests: false }] });
-    const user = userEvent.setup();
-    render(<Subscriptions me={ME} />);
-    const ivan = await screen.findByRole('row', { name: /^ivan-mbp\b/ });
-    const lend = within(ivan).getByRole('checkbox', { name: "Lend ivan-mbp to the company's test runs" });
-    expect(lend).toBeChecked();
-    expect(within(screen.getByRole('row', { name: /^build-box\b/ })).getByRole('checkbox')).not.toBeChecked();
-    await user.click(lend);
-    await vi.waitFor(() => expect(calls.find(c => c.method === 'PATCH')).toEqual({ method: 'PATCH', path: '/api/machines/m1', body: { lendsTests: false } }));
-  });
-
-  it("shows another person's machine as lent or not, without the switch", async () => {
-    lists();
-    const lead: Me = { ...ME, person: { ...ME.person, scopeKind: 'listed', isOwner: false } };
-    render(<Subscriptions me={lead} />);
-    const maria = await screen.findByRole('row', { name: /^build-box\b/ });
-    expect(within(maria).queryByRole('checkbox')).not.toBeInTheDocument();
-    expect(within(maria).getByText('Not lent to test runs')).toBeInTheDocument();
-    expect(within(screen.getByRole('row', { name: /^ivan-mbp\b/ })).getByRole('checkbox')).toBeChecked();
-  });
-
   it('shows the states in Russian', async () => {
     localStorage.setItem('hh-lang', 'ru');
     lists();
@@ -361,10 +277,5 @@ describe('Subscriptions', () => {
     const [codexFive] = within(within(rowOf('Codex')).getByRole('list', { name: 'Лимиты' })).getAllByRole('listitem');
     expect(codexFive).toHaveTextContent(/^5 часовПока нет данных$/);
     expect(within(rowOf('Ключ Anthropic')).getByText('Оплата по факту, без лимитов плана')).toBeInTheDocument();
-    expect(within(rowOf('ivan-mbp')).getByRole('checkbox', { name: 'Отдавать ivan-mbp под прогоны тестов компании' })).toBeChecked();
-    expect(within(rowOf('ivan-mbp')).getByText('8 процессоров, загрузка 25%. Свободно 6 из 16 ГБ памяти. Сейчас идут: 1 прогон тестов, 2 хода агентов.')).toBeInTheDocument();
-    expect(within(screen.getByRole('row', { name: /^build-box\b/ })).getByText('Без подписки, только для тестов')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Подключить машину' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Добавить мою подписку на ivan-mbp' })).toBeInTheDocument();
   });
 });

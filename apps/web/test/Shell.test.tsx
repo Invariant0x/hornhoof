@@ -30,10 +30,20 @@ describe('Shell', () => {
     mockApi({ 'GET /api/org': [200, ORG], 'GET /api/subscriptions': [200, { subscriptions: SUBS }], 'GET /api/machines': [200, { machines: MACHINES }] });
     const user = userEvent.setup();
     render(<Shell me={ME} onSignOut={() => {}} />);
-    expect(screen.getAllByRole('button').filter(b => b.closest('nav')).map(b => b.textContent)).toEqual(['Map', 'Tasks', 'People', 'Subscriptions']);
+    expect(screen.getAllByRole('button').filter(b => b.closest('nav')).map(b => b.textContent)).toEqual(['Map', 'Tasks', 'People', 'Subscriptions', 'Machines']);
     await user.click(screen.getByRole('button', { name: 'Subscriptions' }));
     expect(await screen.findByRole('heading', { name: 'Subscriptions' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Subscriptions' })).toHaveAttribute('aria-current', 'page');
+  });
+
+  it('opens the machines of the company from their own tab', async () => {
+    mockApi({ 'GET /api/org': [200, ORG], 'GET /api/subscriptions': [200, { subscriptions: SUBS }], 'GET /api/machines': [200, { machines: MACHINES }] });
+    const user = userEvent.setup();
+    render(<Shell me={ME} onSignOut={() => {}} />);
+    await user.click(screen.getByRole('button', { name: 'Machines' }));
+    expect(await screen.findByRole('heading', { name: 'Machines' })).toBeInTheDocument();
+    expect(await screen.findByRole('article', { name: 'ivan-mbp' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Machines' })).toHaveAttribute('aria-current', 'page');
   });
 
   it('speaks the saved language and switches it from the account menu', async () => {

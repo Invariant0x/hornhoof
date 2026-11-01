@@ -2,8 +2,7 @@ import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
-import type { NodeLoad } from '@hornhoof/protocol';
-import type { BuiltinView, JobView, Limits, MachineView, Me, SubView } from '../types';
+import type { JobView, Limits, Me, SubView } from '../types';
 import { Ask } from '../ui/Ask';
 import { Bar, percent } from '../ui/Bar';
 import { CommandBox } from '../ui/CommandBox';
@@ -16,11 +15,7 @@ const POLL_LIMIT_MS = 150_000;
 const REFRESH_MS = 5000;
 
 type Test = { phase: 'running' } | { phase: 'done'; text: string } | { phase: 'failed'; text: string; tail: string | null };
-/* machine: the command for a machine alone, with no plan. */
-type Panel = { kind: 'connect' } | { kind: 'command' | 'machine'; command: string } | null;
-/* A plan being added to a machine: first which one, then the command to run there. */
-type Adding = { machineId: string; command: string | null } | null;
-type Confirm = { kind: 'sub' | 'machine'; id: string } | null;
+type Panel = { kind: 'connect' } | { kind: 'command'; command: string } | null;
 type State = keyof Messages['subs']['states'];
 
 const sleep = (ms: number) => new Promise(done => setTimeout(done, ms));
@@ -117,16 +112,6 @@ function LimitBars({ sub }: { sub: SubView }) {
   );
 }
 
-function lastSeen(t: Messages, language: Language, iso: string | null): string {
-  if (!iso) return t.subs.notSeen;
-  const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
-  if (s < 60) return t.subs.lastSeenNow;
-  const rtf = new Intl.RelativeTimeFormat(language, { numeric: 'auto' });
-  if (s < 3600) return t.subs.lastSeen(rtf.format(-Math.round(s / 60), 'minute'));
-  if (s < 86400) return t.subs.lastSeen(rtf.format(-Math.round(s / 3600), 'hour'));
-  return t.subs.lastSeen(rtf.format(-Math.round(s / 86400), 'day'));
-}
-
 function finished(t: Messages, language: Language, sub: SubView, job: JobView): Test {
   if (job.status === 'done') {
     const ms = Date.parse(job.finishedAt ?? job.createdAt) - Date.parse(job.startedAt ?? job.createdAt);
@@ -158,26 +143,12 @@ function TestResult({ test }: { test: Test }) {
   );
 }
 
-const GIB = 1024 ** 3;
-const gigabytes = (bytes: number) => String(Math.round((bytes / GIB) * 10) / 10);
-
-/* How busy a machine is, in one plain line under its name. */
-function LoadLine({ load }: { load: NodeLoad | null }) {
-  const t = useT();
-  if (!load) return null;
-  const busy = Math.min(100, Math.round((load.load / load.cpus) * 100));
-  return <div className="muted load-line">{t.subs.loadLine({ cpus: load.cpus, busy, free: gigabytes(load.memFree), total: gigabytes(load.memTotal), tests: load.tests, jobs: load.jobs })}</div>;
-}
-
 export function Subscriptions({ me }: { me: Me }) {
   const t = useT();
   const { language } = useLanguage();
   const [subs, setSubs] = useState<SubView[] | null>(null);
-  const [machines, setMachines] = useState<MachineView[]>([]);
-  const [builtin, setBuiltin] = useState<BuiltinView | null>(null);
   const [panel, setPanel] = useState<Panel>(null);
-  const [confirm, setConfirm] = useState<Confirm>(null);
-  const [adding, setAdding] = useState<Adding>(null);
+  const [confirm, setConfirm] = useState<string | null>(null);
   const [tests, setTests] = useState<Record<string, Test>>({});
   const [failure, setFailure] = useState<unknown>(null);
   const live = useRef(true);
@@ -192,11 +163,9 @@ export function Subscriptions({ me }: { me: Me }) {
 
   const load = useCallback(async () => {
     try {
-      const [list, hosts] = await Promise.all([api.get<{ subscriptions: SubView[] }>('/api/subscriptions'), api.get<{ machines: MachineView[]; builtin?: BuiltinView | null }>('/api/machines')]);
+      const list = await api.get<{ subscriptions: SubView[] }>('/api/subscriptions');
       if (!live.current) return;
       setSubs(list.subscriptions);
-      setMachines(hosts.machines);
-      setBuiltin(hosts.builtin ?? null);
     } catch (err) {
       setFailure(err);
     }
@@ -255,35 +224,10 @@ export function Subscriptions({ me }: { me: Me }) {
       setPanel({ kind: 'command', command });
     });
 
-  const machineCommand = () =>
-    run(async () => {
-      const { command } = await api.post<{ command: string }>('/api/machines/command');
-      setPanel({ kind: 'machine', command });
-    });
-
-  const addPlan = (m: MachineView, sub: SubView) =>
-    run(async () => {
-      const { command } = await api.post<{ command: string }>(`/api/machines/${m.id}/plans`, { subscription: sub.id });
-      setAdding({ machineId: m.id, command });
-    });
-
   const remove = (sub: SubView) =>
     run(async () => {
       setConfirm(null);
       await api.del(`/api/subscriptions/${sub.id}`);
-      await load();
-    });
-
-  const lend = (m: MachineView, lendsTests: boolean) =>
-    run(async () => {
-      await api.patch(`/api/machines/${m.id}`, { lendsTests });
-      setMachines(list => list.map(x => (x.id === m.id ? { ...x, lendsTests } : x)));
-    });
-
-  const disconnect = (m: MachineView) =>
-    run(async () => {
-      setConfirm(null);
-      await api.post(`/api/machines/${m.id}/disconnect`);
       await load();
     });
 
@@ -296,7 +240,6 @@ export function Subscriptions({ me }: { me: Me }) {
         </div>
         {!panel && (
           <div className="head-actions">
-            <button className="btn ghost" type="button" onClick={machineCommand}>{t.subs.connectMachine}</button>
             <button className="btn" type="button" onClick={() => setPanel({ kind: 'connect' })}>{t.subs.connect}</button>
           </div>
         )}
@@ -312,11 +255,11 @@ export function Subscriptions({ me }: { me: Me }) {
           skipLabel={t.common.cancel}
         />
       )}
-      {(panel?.kind === 'command' || panel?.kind === 'machine') && (
+      {panel?.kind === 'command' && (
         <Edge className="panel" cut={12}>
-          <h2>{panel.kind === 'machine' ? t.subs.machineHeading : t.subs.newCommand}</h2>
-          <p className="muted">{panel.kind === 'machine' ? t.subs.machineRunThis : t.subs.runThis}</p>
-          <CommandBox command={panel.command} trust={panel.kind === 'machine' ? t.subs.machineTrust : undefined} />
+          <h2>{t.subs.newCommand}</h2>
+          <p className="muted">{t.subs.runThis}</p>
+          <CommandBox command={panel.command} />
           <p className="muted">{t.subs.joinOnce}</p>
           <div className="actions">
             <button
@@ -352,7 +295,7 @@ export function Subscriptions({ me }: { me: Me }) {
               const state = stateOf(s);
               const test = tests[s.id];
               const mine = s.owner.id === me.person.id;
-              const asking = confirm?.kind === 'sub' && confirm.id === s.id;
+              const asking = confirm === s.id;
               return (
                 <Fragment key={s.id}>
                   <tr>
@@ -414,7 +357,7 @@ export function Subscriptions({ me }: { me: Me }) {
                         <button className="act" type="button" aria-label={t.subs.newCommandLabel(name)} onClick={() => newCommand(s)}>{t.subs.newCommand}</button>
                       )}
                       {(mine || company) && (
-                        <button className="act danger" type="button" aria-label={t.subs.removeLabel(name)} onClick={() => setConfirm({ kind: 'sub', id: s.id })}>{t.subs.remove}</button>
+                        <button className="act danger" type="button" aria-label={t.subs.removeLabel(name)} onClick={() => setConfirm(s.id)}>{t.subs.remove}</button>
                       )}
                     </td>
                   </tr>
@@ -436,122 +379,6 @@ export function Subscriptions({ me }: { me: Me }) {
                 </Fragment>
               );
             })}
-          </tbody>
-        </table>
-      )}
-
-      <div className="subs-machines">
-        <h2>{t.subs.machines}</h2>
-        <p className="muted">{t.subs.machinesIntro}</p>
-      </div>
-      {subs && machines.length === 0 && !builtin && <p className="muted">{t.subs.noMachines}</p>}
-      {(machines.length > 0 || builtin) && (
-        <table className="ptable">
-          <thead>
-            <tr>
-              <th scope="col">{t.subs.machineColumns.machine}</th>
-              <th scope="col">{t.subs.machineColumns.owner}</th>
-              <th scope="col">{t.subs.machineColumns.plans}</th>
-              <th scope="col">{t.subs.machineColumns.state}</th>
-              <th scope="col"><span className="sr">{t.subs.machineColumns.actions}</span></th>
-            </tr>
-          </thead>
-          <tbody>
-            {machines.map(m => {
-              const asking = confirm?.kind === 'machine' && confirm.id === m.id;
-              /* The person's own plans that do not run here yet, offered on their own machines only. */
-              const addable = m.owner.id === me.person.id ? (subs ?? []).filter(s => s.kind === 'personal' && s.owner.id === me.person.id && !m.plans.some(p => p.id === s.id)) : [];
-              const add = adding?.machineId === m.id ? adding : null;
-              return (
-                <Fragment key={m.id}>
-                  <tr>
-                    <td>
-                      <span className="pname">{m.hostname}</span>
-                      <LoadLine load={m.load} />
-                    </td>
-                    <td>{m.owner.name}</td>
-                    <td>
-                      {m.plans.length ? (
-                        <ul className="where-list" aria-label={t.subs.plansOn(m.hostname)}>
-                          {m.plans.map(p => (
-                            <li key={p.id}>
-                              {PROVIDER_NAMES[p.provider]}
-                              {p.status === 'needs_login' && <span className="muted">, {t.subs.waitsThere.needs_login}</span>}
-                            </li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <span className="muted">{t.subs.testRunsOnly}</span>
-                      )}
-                    </td>
-                    <td>{m.online ? <span className="status ready">{t.subs.online}</span> : <span className="muted">{lastSeen(t, language, m.lastSeenAt)}</span>}</td>
-                    <td className="row-actions">
-                      {addable.length > 0 && !add && (
-                        <button className="act" type="button" aria-label={t.subs.addPlanLabel(m.hostname)} onClick={() => setAdding({ machineId: m.id, command: null })}>{t.subs.addPlan}</button>
-                      )}
-                      {company || m.owner.id === me.person.id ? (
-                        <>
-                          <label className="lend">
-                            <input type="checkbox" aria-label={t.subs.lendLabel(m.hostname)} checked={m.lendsTests} onChange={e => lend(m, e.target.checked)} />
-                            <span aria-hidden="true">{t.subs.lend}</span>
-                          </label>
-                          <button className="act danger" type="button" aria-label={t.subs.disconnectLabel(m.hostname)} onClick={() => setConfirm({ kind: 'machine', id: m.id })}>{t.subs.disconnect}</button>
-                        </>
-                      ) : (
-                        <span className="muted">{m.lendsTests ? t.subs.lent : t.subs.notLent}</span>
-                      )}
-                    </td>
-                  </tr>
-                  {(asking || add) && (
-                    <tr className="row-extra">
-                      <td colSpan={5}>
-                        {asking && <Ask text={t.subs.disconnectAsk(m.hostname)} yes={t.subs.yesDisconnect} onYes={() => disconnect(m)} onNo={() => setConfirm(null)} />}
-                        {add && !add.command && (
-                          <div className="ask">
-                            <span>{t.subs.addPlanAsk(m.hostname)}</span>
-                            {addable.map(s => (
-                              <button key={s.id} className="btn small" type="button" aria-label={t.subs.addPlanTo(subName(t, s), m.hostname)} onClick={() => addPlan(m, s)}>{subName(t, s)}</button>
-                            ))}
-                            <button className="btn small ghost" type="button" onClick={() => setAdding(null)}>{t.common.cancel}</button>
-                          </div>
-                        )}
-                        {add?.command && (
-                          <div className="add-plan">
-                            <p className="muted">{t.subs.runOn(m.hostname)}</p>
-                            <CommandBox command={add.command} />
-                            <p className="muted">{t.subs.joinOnce}</p>
-                            <div className="actions">
-                              <button
-                                className="btn small"
-                                type="button"
-                                onClick={() => {
-                                  setAdding(null);
-                                  void load();
-                                }}
-                              >
-                                {t.common.done}
-                              </button>
-                            </div>
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                  )}
-                </Fragment>
-              );
-            })}
-            {builtin && (
-              <tr>
-                <td>
-                  <span className="pname">{t.subs.builtin}</span>
-                  <LoadLine load={builtin.load} />
-                </td>
-                <td />
-                <td />
-                <td>{builtin.online ? <span className="status ready">{t.subs.online}</span> : <span className="muted">{t.subs.states.builtin_offline}</span>}</td>
-                <td />
-              </tr>
-            )}
           </tbody>
         </table>
       )}

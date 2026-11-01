@@ -72,11 +72,20 @@ export const SUBS: SubView[] = [
   { ...SUB_BASE, id: 's-key', provider: 'anthropic_api', kind: 'api_key', label: 'Orchestrator', status: 'ready', online: true, last4: '9f3a', machines: [], isOrchestrator: true },
 ];
 
+const GIB = 1024 ** 3;
+
+/* Ivan's Mac, whose Docker gets 8 of its 10 cores and 12 of its 32 GB, and Maria's offline build box with no plan. */
 export const MACHINES: MachineView[] = [
   { id: 'm1', hostname: 'ivan-mbp', os: 'darwin', arch: 'arm64', owner: { id: 'p1', name: 'Ivan' }, online: true, lastSeenAt: null,
     plans: [{ id: 's-claude', provider: 'claude', status: 'ready', online: true }, { id: 's-codex', provider: 'codex', status: 'needs_login', online: true }],
-    load: { cpus: 8, load: 2, memFree: 6 * 1024 ** 3, memTotal: 16 * 1024 ** 3, tests: 1, jobs: 2 }, lendsTests: true },
-  { id: 'm2', hostname: 'build-box', os: 'linux', arch: 'x86_64', owner: { id: 'p2', name: 'Maria' }, online: false, lastSeenAt: new Date(Date.now() - 5 * 60_000).toISOString(), plans: [], load: null, lendsTests: false },
+    load: { cpus: 8, load: 2, memFree: 6 * GIB, memTotal: 12 * GIB, tests: 1, jobs: 2, cpuModel: 'Apple M2 Pro', diskFree: 120 * GIB, diskTotal: 460 * GIB, hostCpus: 10, hostMemory: 32 * GIB },
+    lendsTests: true,
+    running: {
+      agents: [{ id: 'b1', name: 'Bruno', busy: true }, { id: 'b2', name: 'Vera', busy: false }],
+      parts: [{ run: 3, kind: 'tests', task: 12, part: 1, parts: 2, agent: 'Bruno', startedAt: '2026-11-01T10:00:00.000Z' }],
+    } },
+  { id: 'm2', hostname: 'build-box', os: 'linux', arch: 'x86_64', owner: { id: 'p2', name: 'Maria' }, online: false, lastSeenAt: new Date(Date.now() - 5 * 60_000).toISOString(), plans: [], load: null, lendsTests: false,
+    running: { agents: [], parts: [] } },
 ];
 
 const OPUS = { id: 'claude-opus-5-5', name: 'Claude Opus 5.5' };
