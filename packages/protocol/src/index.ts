@@ -10,6 +10,12 @@ export type JobError = (typeof JOB_ERRORS)[number];
 
 /* The last bytes of a job's output kept for people to read when something fails. */
 export const TAIL_BYTES = 4096;
+
+/* The end of a text in at most this many UTF-8 bytes, as a job's tail is kept on the node and in Hornhoof. */
+export function lastBytes(text: string, bytes = TAIL_BYTES): string {
+  const buf = new TextEncoder().encode(text);
+  return buf.length <= bytes ? text : new TextDecoder().decode(buf.subarray(buf.length - bytes));
+}
 /* The longest standing instructions a job may carry; Hornhoof refuses edits that would go past it. */
 export const MAX_INSTRUCTIONS = 20_000;
 

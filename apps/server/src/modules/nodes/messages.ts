@@ -1,4 +1,4 @@
-import { TAIL_BYTES, type NodeMessage } from '@hornhoof/protocol';
+import { lastBytes, type NodeMessage } from '@hornhoof/protocol';
 import { and, eq, inArray, isNull, notInArray, or, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -15,11 +15,6 @@ function jobsOf(id: NodeIdentity, ctx: Ctx): SQL {
   if (id.kind === 'node') return eq(jobs.subscriptionId, id.subscriptionId);
   return inArray(jobs.subscriptionId, ctx.db.select({ id: subscriptions.id }).from(subscriptions).where(eq(subscriptions.kind, 'api_key')));
 }
-
-const lastBytes = (text: string) => {
-  const buf = Buffer.from(text);
-  return buf.length <= TAIL_BYTES ? text : buf.subarray(buf.length - TAIL_BYTES).toString();
-};
 
 /* Jobs a node has or had: running ones, and test jobs, which go out the moment they are made.
    A queued conversation turn still waits in Hornhoof and goes out later. */

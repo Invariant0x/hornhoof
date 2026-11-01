@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { API_MODELS, CLAUDE_ALIASES, cut, defaultEffortOf, DEPARTMENT_TEMPLATES, effortFor, effortsOf, modelsFor, parseNodeMessage, parseServerMessage, repoFolder, type AgentEvent, type NodeMessage, type ServerMessage } from '../src/index.js';
+import { API_MODELS, CLAUDE_ALIASES, cut, defaultEffortOf, lastBytes, TAIL_BYTES, DEPARTMENT_TEMPLATES, effortFor, effortsOf, modelsFor, parseNodeMessage, parseServerMessage, repoFolder, type AgentEvent, type NodeMessage, type ServerMessage } from '../src/index.js';
 
 const LIMITS = { status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0.38, resetsAt: '2026-10-29T21:30:00.000Z' }] };
 
@@ -144,6 +144,15 @@ describe('department templates', () => {
     expect(DEPARTMENT_TEMPLATES.map(t => t.key)).toEqual(['operations', 'development', 'marketing', 'sales', 'business_development', 'design', 'support', 'finance']);
     expect(DEPARTMENT_TEMPLATES.filter(t => t.always).map(t => t.key)).toEqual(['operations']);
     expect(DEPARTMENT_TEMPLATES.filter(t => t.ticked).map(t => t.key)).toEqual(['operations', 'development', 'marketing', 'sales', 'business_development']);
+  });
+});
+
+describe('lastBytes', () => {
+  it("keeps a short text and the end of a long one, counted in UTF-8 bytes like a job's tail", () => {
+    expect(lastBytes('short')).toBe('short');
+    expect(Buffer.byteLength(lastBytes('x'.repeat(TAIL_BYTES + 10)))).toBe(TAIL_BYTES);
+    expect(lastBytes('abcdef', 3)).toBe('def');
+    expect(lastBytes('aaaaé', 2)).toBe('é');
   });
 });
 

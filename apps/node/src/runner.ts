@@ -1,6 +1,6 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { cut, TAIL_BYTES, type AgentEvent, type JobError, type Limits, type ModelOption, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
+import { cut, lastBytes, type AgentEvent, type JobError, type Limits, type ModelOption, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
 import type { JobUser } from './isolation.js';
 import { redact } from './redact.js';
 import { plainOutput, programEnded, type ProgramOutput } from './program-exit.js';
@@ -60,11 +60,6 @@ type JobDone = Extract<NodeMessage, { type: 'job.done' }>;
 
 const failed = (output: string, error: JobError): RunResult => ({ ok: false, sessionId: null, result: '', output, error, limits: null });
 
-function lastBytes(text: string, bytes: number): string {
-  const buf = Buffer.from(text);
-  return buf.length <= bytes ? text : buf.subarray(buf.length - bytes).toString();
-}
-
 /* Both dispatched and typed turns use the same redaction and tail boundary. */
 export function jobDone(jobId: string, res: RunResult, secrets: string[]): JobDone {
   const program = res.programOutput;
@@ -73,7 +68,7 @@ export function jobDone(jobId: string, res: RunResult, secrets: string[]): JobDo
   const output = program ? programEnded(text, program, program.complete) : text;
   return {
     type: 'job.done', jobId, ok: res.ok, sessionId: res.sessionId,
-    result: redact(res.result, secrets), tail: lastBytes(redact(output, secrets), TAIL_BYTES), error: res.error,
+    result: redact(res.result, secrets), tail: lastBytes(redact(output, secrets)), error: res.error,
   };
 }
 
