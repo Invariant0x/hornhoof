@@ -34,6 +34,8 @@ export type AgentCard = {
   skills: { id: string; title: Lang; description: Lang; on: boolean; locked: boolean; overridden: boolean; templateChanged: boolean }[];
   parts: Part[];
   raw: string;
+  /* How long the text every turn sends is, and the most it may be. */
+  instructions: { length: number; max: number };
   runsOn: { subscription: SubView; models: ModelOption[] }[];
   changes: { field: string; personName: string | null; byOrchestrator: boolean; at: string; before: unknown; after: unknown }[];
   /* The whole company or the agent's department may change it; only the whole company removes it. */
@@ -109,8 +111,10 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
     };
     const views = new Map((await subViews(db, online)).map(v => [v.id, v]));
     const [running] = await db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, agent.id), eq(jobs.status, 'running'))).limit(1);
-    /* An employee's card shows what people edit. A head's department notebook has its own window and its own access. */
-    const { parts, raw } = agent.kind === 'orchestrator' ? await instructionsOf(ctx, agent) : renderInstructions(ctx.templates, agent, await placeOf(db, agent));
+    /* An employee's card shows what people edit. A head's department notebook has its own window and its own access; it
+       counts all the same in what every turn sends. */
+    const told = await instructionsOf(ctx, agent);
+    const { parts, raw } = agent.kind === 'orchestrator' ? told : renderInstructions(ctx.templates, agent, await placeOf(db, agent));
     const offered = [...(role?.skills ?? []), ...agent.skills.filter(id => !role?.skills.some(s => s.id === id)).map(id => ({ id, on: true, locked: false }))];
     const changes = await db
       .select({ field: agentChanges.field, personName: people.name, byOrchestrator: agentChanges.byOrchestrator, at: agentChanges.createdAt, before: agentChanges.before, after: agentChanges.after })
@@ -148,6 +152,7 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
       }),
       parts,
       raw,
+      instructions: { length: told.text.length, max: MAX_INSTRUCTIONS },
       runsOn: (await servingFor(agent)).flatMap(s => {
         const view = views.get(s.id);
         return view ? [{ subscription: view, models: s.models }] : [];

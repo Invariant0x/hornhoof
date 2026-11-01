@@ -166,6 +166,8 @@ export type AgentCardView = {
   skills: CardSkill[];
   parts: Part[];
   raw: string;
+  /* How long the text every turn sends is, and the most it may be. */
+  instructions: { length: number; max: number };
   runsOn: { subscription: SubView; models: ModelOption[] }[];
   changes: { field: string; personName: string | null; byOrchestrator: boolean; at: string }[];
   /* The whole company or the agent's department may change it; only the whole company removes it. */

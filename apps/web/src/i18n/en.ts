@@ -415,6 +415,7 @@ export const en = {
     bySkill: 'By skill',
     raw: 'Raw',
     header: 'Who it is, written by Hornhoof',
+    length: (length: string, max: string) => `Instructions: ${length} characters of ${max}. Every turn sends all of them to the program.`,
     reset: 'Reset to template',
     resetAsk: (name: string) => `Reset ${name} to the template? Its own prompt and skill changes are lost.`,
     yesReset: 'Yes, reset',

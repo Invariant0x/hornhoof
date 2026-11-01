@@ -97,6 +97,11 @@ describe('AgentCard', () => {
     expect(calls.some(c => c.method === 'PATCH')).toBe(false);
   });
 
+  it('says how long the instructions are, as every turn sends them all', async () => {
+    open();
+    expect(await screen.findByText('Instructions: 12,345 characters of 200,000. Every turn sends all of them to the program.')).toBeInTheDocument();
+  });
+
   it('saves a changed model and shows it applies from the next turn', async () => {
     const user = userEvent.setup();
     const { calls } = open({ 'PATCH /api/agents/b1': patched });

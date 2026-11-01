@@ -167,6 +167,7 @@ export const CARD: AgentCardView = {
   ],
   parts: PARTS,
   raw: PARTS.map(p => p.text).join('\n\n'),
+  instructions: { length: 12_345, max: 200_000 },
   runsOn: [
     { subscription: TEAM_KEY, models: [OPUS, SONNET] },
     { subscription: OLEG_CODEX, models: [SOL] },

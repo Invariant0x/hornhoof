@@ -406,6 +406,7 @@ export const ru: Messages = {
     prompt: 'Промпт',
     bySkill: 'По навыкам',
     raw: 'Целиком',
+    length: (length: string, max: string) => `Инструкции: ${length} знаков из ${max}. Каждый ход отправляет их программе целиком.`,
     header: 'Кто это, пишет Hornhoof',
     reset: 'Вернуть к шаблону',
     resetAsk: (name: string) => `Вернуть ${name} к шаблону? Свой промпт и изменения навыков пропадут.`,

@@ -198,8 +198,10 @@ describe("a department's notebook", () => {
     const card = (await app.inject({ url: `/api/agents/${head!.id}`, ...as(ceo) })).json();
     expect(card.parts.map((p: { kind: string }) => p.kind)).not.toContain('notebook');
     expect(card.raw).not.toContain('Deploy on Fridays never.');
-    /* The program carries it all the same. */
-    expect((await instructionsOf(app.ctx, head!)).text).toContain('Deploy on Fridays never.');
+    /* The program carries it all the same, and the card counts it in what every turn sends. */
+    const { text } = await instructionsOf(app.ctx, head!);
+    expect(text).toContain('Deploy on Fridays never.');
+    expect(card.instructions).toEqual({ length: text.length, max: MAX_INSTRUCTIONS });
   });
 
   it("goes into its head's instructions, which say to read it again after a compaction", async () => {

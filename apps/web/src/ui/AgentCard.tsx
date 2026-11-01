@@ -190,6 +190,7 @@ export function AgentCard({ me, agentId, onClose, onTerminal }: Props) {
   const where = [card.department?.name, card.product?.name].filter(Boolean).join(', ');
   const dirty = rawDraft !== null ? rawDraft !== card.raw : Object.keys(drafts).length > 0;
   const when = (at: string) => new Date(at).toLocaleString(language === 'ru' ? 'ru-RU' : 'en-GB', { dateStyle: 'short', timeStyle: 'short' });
+  const count = (n: number) => n.toLocaleString(language === 'ru' ? 'ru-RU' : 'en-GB');
   const editable = card.canEdit;
 
   /* An edit carries over to the other view; a raw text with broken markers stays in the raw view until it is fixed. */
@@ -310,6 +311,7 @@ export function AgentCard({ me, agentId, onClose, onTerminal }: Props) {
               </div>
             )}
           </div>
+          <p className="muted">{t.agent.length(count(card.instructions.length), count(card.instructions.max))}</p>
           {orchestrator && <p className="muted">{t.agent.orchestratorNote}</p>}
           {orchestrator ? (
             <pre className="ac-text">{card.raw}</pre>
