@@ -7,7 +7,8 @@
 # The app writes request.json {id, version, tag} into the control folder; this writes status.json {id, version,
 # state, step, log, at} and touches alive. An update saves the database, downloads the build, runs that build's own
 # installer, and waits for the new server to answer with the build's commit. If it does not, the build that ran
-# before goes back. The updater holds the Docker socket, so it takes nothing from the request but the tag, which
+# before goes back, and the database goes back to the saved copy first when the new build added migrations to it, since
+# the old build does not know them. The updater holds the Docker socket, so it takes nothing from the request but the tag, which
 # must be a plain image tag, and only runs images of HORNHOOF_IMAGE. It runs on the bash that ships with macOS (3.2)
 # for the tests, and on Alpine's in its image.
 set -euo pipefail
@@ -26,6 +27,7 @@ STATE=''
 STEP=''
 LOG=''
 WORK=''
+BACKUP=''
 
 say() {
   printf '%s\n' "$*"
@@ -70,9 +72,34 @@ backup() {
     rm -f "$file"
     return 1
   }
+  BACKUP=$file
   # shellcheck disable=SC2012 # the names are ours: hornhoof-<stamp>-<id>.sql.gz
   ls -1t "$SERVER_DIR"/backups/hornhoof-*.sql.gz | tail -n +$((KEEP_BACKUPS + 1)) | while read -r old; do rm -f "$old"; done
   say "Saved the database to backups/$(basename "$file")."
+}
+
+# How many migrations the database has; empty when the database does not answer.
+applied() {
+  local db
+  db=$(compose ps -q db 2> /dev/null || true)
+  [ -n "$db" ] || return 0
+  docker exec "$db" psql -U hornhoof -d hornhoof -tAc 'SELECT count(*) FROM drizzle.__drizzle_migrations' 2> /dev/null | tr -d ' ' || true
+}
+
+# The database goes back to the copy saved before the update. The copy goes into a database of its own first and only
+# then takes the place of the one there, so a failed load changes nothing. The app stops before, so nothing writes
+# meanwhile; the installer of the build that goes back starts it again.
+restore() {
+  local db
+  [ -n "$BACKUP" ] && [ -f "$BACKUP" ] || return 1
+  db=$(compose ps -q db 2> /dev/null || true)
+  [ -n "$db" ] || return 1
+  compose stop app > /dev/null 2>&1 || true
+  docker exec "$db" psql -U hornhoof -d postgres -v ON_ERROR_STOP=1 -q \
+    -c 'DROP DATABASE IF EXISTS hornhoof_restore' -c 'CREATE DATABASE hornhoof_restore OWNER hornhoof TEMPLATE template0' > /dev/null || return 1
+  gzip -dc "$BACKUP" | docker exec -i "$db" psql -U hornhoof -d hornhoof_restore -v ON_ERROR_STOP=1 -q > /dev/null || return 1
+  docker exec "$db" psql -U hornhoof -d postgres -v ON_ERROR_STOP=1 -q \
+    -c 'DROP DATABASE hornhoof WITH (FORCE)' -c 'ALTER DATABASE hornhoof_restore RENAME TO hornhoof' > /dev/null || return 1
 }
 
 # install <tag>: runs the installer and the compose file that come inside that build of the app image.
@@ -113,7 +140,7 @@ swap_updater() {
 }
 
 update() {
-  local tag=$1 previous target
+  local tag=$1 previous target before back
   LOG=''
   case "$tag" in
     '' | [!A-Za-z0-9]* | *[!A-Za-z0-9._-]*)
@@ -137,6 +164,7 @@ update() {
   [ -n "$previous" ] || previous=latest
 
   step backup "Saving the database."
+  before=$(applied)
   backup || {
     stop_with failed "Could not save the database, so nothing changed."
     return 0
@@ -161,8 +189,17 @@ update() {
   fi
 
   step rollback "Going back to $previous."
+  back="Hornhoof runs the build from before the update again. The database was saved before it."
+  if [ "$(applied)" != "$before" ]; then
+    say "$VERSION changed the database, so it goes back to the copy saved before the update."
+    restore || {
+      stop_with failed "Could not put the database back from backups/$(basename "$BACKUP"). Run install.sh server in $SERVER_DIR, and see docker compose logs app." finished
+      return 0
+    }
+    back="Hornhoof runs the build from before the update again, with the database as it was saved before the update."
+  fi
   if install "$previous" && healthy "$(commit_of "$previous")"; then
-    stop_with rolled_back "Hornhoof runs the build from before the update again. The database was saved before it." finished
+    stop_with rolled_back "$back" finished
   else
     stop_with failed "Could not go back to $previous either. Run install.sh server in $SERVER_DIR, and see docker compose logs app." finished
   fi

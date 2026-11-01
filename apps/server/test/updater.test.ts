@@ -22,6 +22,7 @@ function stand(env = 'HORNHOOF_SECRET=s\nHORNHOOF_VERSION=0.4.0\n'): Stand {
   mkdirSync(server);
   writeFileSync(join(server, '.env'), env);
   writeFileSync(join(dir, 'running'), 'aaa');
+  writeFileSync(join(dir, 'migrations'), '20');
   const log = join(dir, 'stub.log');
   writeFileSync(log, '');
   return { dir, control, server, log };
@@ -39,6 +40,7 @@ function runOnce(s: Stand, request: object | null, env: Record<string, string> =
       STUB_LOG: s.log,
       STUB_STATE: s.dir,
       STUB_COMMITS: '0.4.0=aaa 0.4.1=bbb',
+      STUB_MIGRATIONS: '0.4.0=20 0.4.1=20',
       HORNHOOF_CONTROL_DIR: s.control,
       HORNHOOF_SERVER_DIR: s.server,
       HORNHOOF_IMAGE: 'ghcr.io/invariant0x/hornhoof',
@@ -105,6 +107,38 @@ describe('updater', () => {
     expect(r.status.log).toMatch(/0\.4\.1 did not answer/);
     expect(r.status.log).toContain(`Could not go back to 0.4.0 either. Run install.sh server in ${s.server}, and see docker compose logs app.`);
     expect(r.calls.some(c => c.includes('compose up -d --no-build updater'))).toBe(false);
+  });
+
+  it('puts the database back before the build from before starts on it, when the new build changed it', () => {
+    const s = stand();
+    const r = runOnce(s, { id: 'm1', version: '0.4.1', tag: '0.4.1' }, { STUB_BROKEN: '0.4.1', STUB_MIGRATIONS: '0.4.0=20 0.4.1=21' });
+    expect(r.status).toMatchObject({ id: 'm1', state: 'rolled_back', step: 'finished' });
+    expect(readFileSync(join(s.dir, 'migrations'), 'utf8')).toBe('20');
+    const stop = at(r.calls, 'docker compose stop app');
+    const load = r.calls.findIndex(c => c.startsWith('docker exec -i dbcid psql') && c.includes('-d hornhoof_restore'));
+    const swap = r.calls.findIndex(c => c.startsWith('docker exec dbcid psql') && c.includes('ALTER DATABASE hornhoof_restore RENAME TO hornhoof'));
+    const old = r.calls.findIndex(c => c.startsWith('installer') && c.includes('HORNHOOF_VERSION=0.4.0'));
+    expect([stop, load, swap, old].every(i => i >= 0)).toBe(true);
+    expect(stop).toBeLessThan(swap);
+    expect(load).toBeLessThan(swap);
+    expect(swap).toBeLessThan(old);
+    expect(r.status.log).toContain('0.4.1 changed the database, so it goes back to the copy saved before the update.');
+  });
+
+  it('leaves the database as it is on the way back when the new build did not change it', () => {
+    const s = stand();
+    const r = runOnce(s, { id: 'm2', version: '0.4.1', tag: '0.4.1' }, { STUB_BROKEN: '0.4.1' });
+    expect(r.status.state).toBe('rolled_back');
+    expect(r.calls.some(c => c.startsWith('docker exec -i') || c.includes('hornhoof_restore'))).toBe(false);
+  });
+
+  it('does not start the build from before on a database it could not put back', () => {
+    const s = stand();
+    const r = runOnce(s, { id: 'm3', version: '0.4.1', tag: '0.4.1' }, { STUB_BROKEN: '0.4.1', STUB_MIGRATIONS: '0.4.0=20 0.4.1=21', STUB_RESTORE: 'fail' });
+    expect(r.status).toMatchObject({ id: 'm3', state: 'failed', step: 'finished' });
+    expect(r.calls.filter(c => c.startsWith('installer'))).toHaveLength(1);
+    expect(r.calls.some(c => c.includes('RENAME TO hornhoof'))).toBe(false);
+    expect(r.status.log).toMatch(/Could not put the database back from backups\/hornhoof-\d{8}T\d{6}Z-m3\.sql\.gz\./);
   });
 
   it('goes back to the build that ran when .env names none', () => {

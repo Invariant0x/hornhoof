@@ -1,11 +1,22 @@
 #!/usr/bin/env bash
 # The host's Docker as the updater sees it. STUB_COMMITS words are "tag=commit": what each build of the app image is.
+# STUB_MIGRATIONS words are "tag=count": the migrations each build applies when it starts. STUB_STATE/migrations holds
+# how many the database has now.
 printf 'docker %s\n' "$*" >> "$STUB_LOG"
 commit_of() { for w in ${STUB_COMMITS:-}; do [ "${w%%=*}" = "$1" ] && { printf '%s' "${w#*=}"; return; }; done; }
 case "$1 $2" in
   'compose ps')
     case " $* " in *' db '*) echo dbcid ;; *' app '*) echo appcid ;; esac ;;
-  'exec dbcid') echo '-- a dump of the hornhoof database' ;;
+  'exec dbcid')
+    case "$*" in
+      *pg_dump*) printf -- '-- a dump of the hornhoof database\n-- migrations %s\n' "$(cat "$STUB_STATE/migrations")" ;;
+      *'FROM drizzle.__drizzle_migrations'*) cat "$STUB_STATE/migrations" ;;
+      *'RENAME TO hornhoof'*) mv "$STUB_STATE/restored" "$STUB_STATE/migrations" ;;
+    esac ;;
+  # A dump going into the copy of the database that takes the place of the one there.
+  'exec -i')
+    [ "${STUB_RESTORE:-ok}" = fail ] && { echo 'psql: error: out of disk space' >&2; exit 3; }
+    sed -n 's/^-- migrations //p' | tr -d '\n' > "$STUB_STATE/restored" ;;
   'image inspect') last=${!#}; commit_of "${last##*:}" ;;
   'inspect --format') [ "${!#}" = appcid ] && printf '%s\n' "${STUB_RUNNING_COMMIT:-}" ;;
   *)
@@ -21,6 +32,9 @@ case "$1 $2" in
 #!/usr/bin/env bash
 printf 'installer %s HORNHOOF_VERSION=%s HORNHOOF_FROM_UPDATER=%s HORNHOOF_SERVER_DIR=%s HORNHOOF_COMPOSE_FILE=%s\n' "\$*" "\$HORNHOOF_VERSION" "\$HORNHOOF_FROM_UPDATER" "\$HORNHOOF_SERVER_DIR" "\$(basename "\$HORNHOOF_COMPOSE_FILE")" >> "$STUB_LOG"
 grep -v '^HORNHOOF_VERSION=' "\$HORNHOOF_SERVER_DIR/.env" > "\$HORNHOOF_SERVER_DIR/.env.new"; printf 'HORNHOOF_VERSION=%s\n' "\$HORNHOOF_VERSION" >> "\$HORNHOOF_SERVER_DIR/.env.new"; mv "\$HORNHOOF_SERVER_DIR/.env.new" "\$HORNHOOF_SERVER_DIR/.env"
+# The build migrates the database when it starts, also when it fails afterwards.
+want=\$(for w in ${STUB_MIGRATIONS:-}; do [ "\${w%%=*}" = "$tag" ] && printf '%s' "\${w#*=}"; done)
+[ -n "\$want" ] && [ "\$want" -gt "\$(cat "$STUB_STATE/migrations")" ] && printf '%s' "\$want" > "$STUB_STATE/migrations"
 case " ${STUB_BROKEN:-} " in *" $tag "*) echo dead > "$STUB_STATE/running" ;; *) printf '%s' "$(commit_of "$tag")" > "$STUB_STATE/running" ;; esac
 SCRIPT
             ;;
