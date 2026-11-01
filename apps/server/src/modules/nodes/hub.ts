@@ -111,9 +111,9 @@ export class NodeHub {
     return this.isReady(id) && this.sockets.get(keyOf(id))!.terminals;
   }
 
-  /* Ready, and writes a turn's skills as files. */
+  /* Said in its hello that it writes a turn's skills as files. */
   takesSkillFiles(id: NodeIdentity): boolean {
-    return this.isReady(id) && this.sockets.get(keyOf(id))!.skillFiles;
+    return this.sockets.get(keyOf(id))?.skillFiles === true;
   }
 
   send(id: NodeIdentity, msg: ServerMessage): boolean {
