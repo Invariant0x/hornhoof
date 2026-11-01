@@ -4,7 +4,8 @@ import { describe, expect, it } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Shell } from '../src/screens/Shell';
 import type { Improvement, Me } from '../src/types';
-import { DEV_ORG, ME, mockApi } from './api-mock';
+import { DEV_ORG, ME, mockApi, TASK_DETAIL } from './api-mock';
+import { fakeStream } from './fake-stream';
 
 const base = { seen: 1, result: null, at: '2026-10-31T09:00:00.000Z', updatedAt: '2026-10-31T09:00:00.000Z', decidedBy: null };
 const IMPROVEMENTS: Improvement[] = [
@@ -88,6 +89,121 @@ describe('improvements', () => {
     } finally {
       localStorage.removeItem('hh-lang');
     }
+  });
+
+  it('shows related task numbers and opens them in the existing task panel', async () => {
+    const user = userEvent.setup();
+    const first = { id: 't12', number: 12, title: 'Checkout API' };
+    const second = { id: 't13', number: 13, title: 'Refunds' };
+    shell({
+      'GET /api/improvements': [200, { improvements: [
+        { ...IMPROVEMENTS[0]!, tasks: [] },
+        { ...IMPROVEMENTS[1]!, tasks: [first, second] },
+        { ...IMPROVEMENTS[2]!, tasks: [first] },
+      ] }],
+      'GET /api/tasks/t12': [200, { task: TASK_DETAIL }],
+      'GET /api/tasks/t13': [200, { task: { ...TASK_DETAIL, id: 't13', number: 13, title: 'Refunds' } }],
+    });
+    await openImprovements(user);
+    const open = within(screen.getByRole('region', { name: 'To decide' })).getByRole('article', { name: 'Install jq on the nodes' });
+    expect(within(open).queryByText('Related tasks')).not.toBeInTheDocument();
+    const taken = within(screen.getByRole('region', { name: 'In work' })).getByRole('article', { name: 'Let reviewers run the tests without asking' });
+    expect(within(taken).getByText('Related tasks')).toBeInTheDocument();
+    const firstLink = within(taken).getByRole('button', { name: '#12 Checkout API' });
+    const secondLink = within(taken).getByRole('button', { name: '#13 Refunds' });
+    const done = within(screen.getByRole('region', { name: 'Done' })).getByRole('article', { name: 'Move security to Kimi' });
+    expect(within(done).getAllByRole('button', { name: /^#/ })).toHaveLength(1);
+    await user.click(firstLink);
+    expect(await screen.findByRole('complementary', { name: '#12 Checkout API' })).toBeInTheDocument();
+    await user.click(secondLink);
+    expect(await screen.findByRole('complementary', { name: '#13 Refunds' })).toBeInTheDocument();
+  });
+
+  it('keeps taken out of the open count and shows Take only for open improvements', async () => {
+    const user = userEvent.setup();
+    shell();
+    await openImprovements(user);
+    expect(screen.getByRole('button', { name: 'Improvements, 1 to decide' })).toBeInTheDocument();
+    const open = within(screen.getByRole('region', { name: 'To decide' })).getByRole('article', { name: 'Install jq on the nodes' });
+    expect(within(open).getByRole('button', { name: 'Take into work' })).toBeInTheDocument();
+    const taken = within(screen.getByRole('region', { name: 'In work' })).getByRole('article', { name: 'Let reviewers run the tests without asking' });
+    expect(taken).toHaveTextContent('Taken by Ivan');
+    expect(within(taken).queryByRole('button', { name: 'Take into work' })).not.toBeInTheDocument();
+    const done = within(screen.getByRole('region', { name: 'Done' })).getByRole('article', { name: 'Move security to Kimi' });
+    expect(within(done).queryByRole('button', { name: 'Take into work' })).not.toBeInTheDocument();
+  });
+
+  it('updates the open badge, Take button and task links on an improvements event', async () => {
+    const user = userEvent.setup();
+    const stream = fakeStream();
+    let moved = false;
+    const linked = { id: 't12', number: 12, title: 'Checkout API' };
+    shell({
+      'GET /api/improvements': () => [200, { improvements: [
+        moved ? { ...IMPROVEMENTS[0]!, status: 'taken', decidedBy: 'Ivan', tasks: [linked] } : IMPROVEMENTS[0]!,
+      ] }],
+    });
+    await openImprovements(user);
+    expect(screen.getByRole('button', { name: 'Take into work' })).toBeInTheDocument();
+    moved = true;
+    stream.send({ type: 'improvements' });
+    expect(await screen.findByText('Taken by Ivan')).toBeInTheDocument();
+    const taken = await screen.findByRole('article', { name: 'Install jq on the nodes' });
+    expect(within(taken).queryByRole('button', { name: 'Take into work' })).not.toBeInTheDocument();
+    expect(within(taken).getByRole('button', { name: '#12 Checkout API' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Improvements' })).toBeInTheDocument();
+  });
+
+  it('shows related tasks in Russian', async () => {
+    localStorage.setItem('hh-lang', 'ru');
+    try {
+      const user = userEvent.setup();
+      const linked = { id: 't12', number: 12, title: 'Checkout API' };
+      shell({ 'GET /api/improvements': [200, { improvements: [IMPROVEMENTS[0]!, { ...IMPROVEMENTS[1]!, tasks: [linked] }, IMPROVEMENTS[2]!] }] });
+      await user.click(await screen.findByRole('button', { name: /^Улучшения/ }));
+      const taken = await screen.findByRole('article', { name: 'Let reviewers run the tests without asking' });
+      expect(within(taken).getByText('Связанные задачи')).toBeInTheDocument();
+      expect(within(taken).getByRole('button', { name: '#12 Checkout API' })).toBeInTheDocument();
+      expect(within(taken).queryByRole('button', { name: 'Взять в работу' })).not.toBeInTheDocument();
+    } finally {
+      localStorage.removeItem('hh-lang');
+    }
+  });
+
+  it('leaves related tasks out when an older server has no tasks field', async () => {
+    const user = userEvent.setup();
+    shell();
+    await openImprovements(user);
+    for (const article of screen.getAllByRole('article')) {
+      expect(within(article).queryByText('Related tasks')).not.toBeInTheDocument();
+    }
+  });
+
+  it('shows the empty state without inventing an open improvement', async () => {
+    const user = userEvent.setup();
+    shell({ 'GET /api/improvements': [200, { improvements: [] }] });
+    await user.click(await screen.findByRole('button', { name: 'Improvements' }));
+    expect(await screen.findByText('Nothing yet. Operations puts here what it finds on its rounds.')).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'To decide' })).not.toBeInTheDocument();
+  });
+
+  it('shows a fetch failure without inventing improvement data', async () => {
+    const user = userEvent.setup();
+    shell({ 'GET /api/improvements': [500, { error: { code: 'internal', message: 'Something went wrong.' } }] });
+    await user.click(await screen.findByRole('button', { name: 'Improvements' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Something went wrong.');
+    expect(screen.queryByText('Nothing yet. Operations puts here what it finds on its rounds.')).not.toBeInTheDocument();
+  });
+
+  it('keeps dismissed improvements folded with their original text and no Take button', async () => {
+    const user = userEvent.setup();
+    shell({ 'GET /api/improvements': [200, { improvements: [{ ...IMPROVEMENTS[0]!, status: 'dismissed' }] }] });
+    await user.click(await screen.findByRole('button', { name: 'Improvements' }));
+    await user.click(screen.getByText('Set aside: 1'));
+    const dismissed = await screen.findByRole('article', { name: 'Install jq on the nodes' });
+    expect(dismissed).toHaveTextContent('Agents looked for jq on #4 and #9.');
+    expect(dismissed).toHaveTextContent('Wendy, Operations');
+    expect(within(dismissed).queryByRole('button', { name: 'Take into work' })).not.toBeInTheDocument();
   });
 
   it('are not there for people who see only some departments', async () => {
