@@ -1,0 +1,670 @@
+{
+  "task": 31,
+  "parentTask": 29,
+  "status": "DONE_WITH_CONCERNS",
+  "rootCauseConfirmed": false,
+  "incidentFixed": false,
+  "scope": "Causal analysis, isolated fake-provider reproduction and read-only SQL preparation. No application source or live runtime changes.",
+  "sourceCommit": "bd696b0724385b6b11da53a24ada2f188b031217",
+  "branch": "t29-session-investigation",
+  "versions": {
+    "server": {
+      "version": "0.5.0",
+      "commit": "bd696b0724385b6b11da53a24ada2f188b031217",
+      "migrations": 21,
+      "provenance": "Orchestrator GET /api/version in task29, relayed in task31 body; not a GET performed by this executor"
+    },
+    "nodeBuild": {
+      "installedPackageVersion": "0.5.0",
+      "commit": "UNKNOWN",
+      "provenance": "Task37 packet01 installed @hornhoof/node package metadata in stated Codex container; runtime source commit unavailable",
+      "relevantInstalledModules": {
+        "sourceCommit": "bd696b0724385b6b11da53a24ada2f188b031217",
+        "method": "Exact emitted ESM bytes with node tsconfig; no build or startup",
+        "files": [
+          {
+            "source": "apps/node/src/main.ts",
+            "installed": "/app/apps/node/dist/main.js",
+            "installedSha256": "9e0dd5f2312a22a263e5a47f2547241cf1298405ed2171d75818a0e4f9a6b366",
+            "emittedSha256": "9e0dd5f2312a22a263e5a47f2547241cf1298405ed2171d75818a0e4f9a6b366",
+            "byteIdentical": true
+          },
+          {
+            "source": "apps/node/src/state.ts",
+            "installed": "/app/apps/node/dist/state.js",
+            "installedSha256": "d14e5b43ed46118f64a19da2d709348434f0683f4c585b7253c9f5962ce67bf9",
+            "emittedSha256": "d14e5b43ed46118f64a19da2d709348434f0683f4c585b7253c9f5962ce67bf9",
+            "byteIdentical": true
+          },
+          {
+            "source": "apps/node/src/runner.ts",
+            "installed": "/app/apps/node/dist/runner.js",
+            "installedSha256": "f5bb7438f738c2d6ac7eb9d38e541f051da7d18c6f825490edd30ececc05ef21",
+            "emittedSha256": "f5bb7438f738c2d6ac7eb9d38e541f051da7d18c6f825490edd30ececc05ef21",
+            "byteIdentical": true
+          },
+          {
+            "source": "apps/node/src/terminal/host.ts",
+            "installed": "/app/apps/node/dist/terminal/host.js",
+            "installedSha256": "b5260098c7cdec1f00a441a303ca093ded60b156ca5aa139ee5652e4b6b3c502",
+            "emittedSha256": "b5260098c7cdec1f00a441a303ca093ded60b156ca5aa139ee5652e4b6b3c502",
+            "byteIdentical": true
+          },
+          {
+            "source": "apps/node/src/terminal/programs.ts",
+            "installed": "/app/apps/node/dist/terminal/programs.js",
+            "installedSha256": "bb7a7cf30e39038302ca4f555f2a9e141d3bc71c5fbfaece11704b0f86d1ce6b",
+            "emittedSha256": "bb7a7cf30e39038302ca4f555f2a9e141d3bc71c5fbfaece11704b0f86d1ce6b",
+            "byteIdentical": true
+          },
+          {
+            "source": "apps/node/src/providers/codex.ts",
+            "installed": "/app/apps/node/dist/providers/codex.js",
+            "installedSha256": "bda5607448b340640df6a97a6f630cb3cc130ff34be4776b83402319eee8d284",
+            "emittedSha256": "bda5607448b340640df6a97a6f630cb3cc130ff34be4776b83402319eee8d284",
+            "byteIdentical": true
+          },
+          {
+            "source": "apps/node/src/terminal/bridge.ts",
+            "installed": "/app/apps/node/dist/terminal/bridge.js",
+            "installedSha256": "243058096e3179e548bcb26b7c15da25ce81feed87c79fc5c5536e39e97a3040",
+            "emittedSha256": "243058096e3179e548bcb26b7c15da25ce81feed87c79fc5c5536e39e97a3040",
+            "byteIdentical": true
+          }
+        ],
+        "limitation": "Read-time installed module comparison, not complete build commit or historical launch arguments. Requires the authorized /app installation."
+      }
+    },
+    "provider": {
+      "cli": "Codex 0.166.0",
+      "originator": "codex-tui",
+      "modelProvider": "openai",
+      "provenance": "Both primary rollout session_meta records"
+    },
+    "fixture": {
+      "node": "v22.23.4",
+      "pglite": "Repository dev dependency; isolated memory DB, all migrations, one process, fake hub/provider, no listener"
+    }
+  },
+  "findings": [
+    "Distinct provider threads are proved by session_meta, not inferred from the recovery phrase or UUID clock.",
+    "The head report created a separate normal Hornhoof job after the previous known human job finished; no overlap of these two jobs. Other invisible empty-start jobs remain unverified.",
+    "Gap from previous job finish to report creation: 36294 ms.",
+    "The new first request contains the old architecture request and head report in a recovery bootstrap. This does not prove complete provider-history preservation: server earlierTalk is bounded to 20 message/text events and preface to 48 KiB.",
+    "Notebook additions change full terminal instructions but are excluded from server session-selection hash. Both startup documents contain the exact current steady instructions.",
+    "Selected model changes server runHash even when CLI default model already has the same name. Effort is excluded from runHash, but effort and full instructions enter terminal host process hash.",
+    "Typed turns inherit a prior same-subscription hash; the first later automatic turn recalculates selected-model hash. This reproduces a fresh thread decision in fixtures, but actual incident DB hashes are missing.",
+    "A latest done job with null session can mask an older resumable job. A node also drops a requested session absent from its local cwd registry. Both paths reproduce in isolation, not proved in this incident.",
+    "Current session registry contains the two target thread-to-cwd entries. Its mtime and current entries do not prove their presence before 00:28.",
+    "Task37 safe SQLite log metadata shows distinct CLI process_uuid per old/new target thread within incident window. This proves CLI process replacement in addition to new provider thread, not its initiator.",
+    "Seven relevant installed node JS modules are byte-identical to TypeScript ESM emission from source bd696b0 with node tsconfig. Complete node build commit remains unavailable."
+  ],
+  "timeline": [
+    {
+      "utc": "2026-11-01T00:17:30.653Z",
+      "fact": "Old provider thread created",
+      "evidence": "/data/home/sessions/2026/11/01/rollout-2026-11-01T00-17-30-01a19477-f012-7233-a712-0c9049920301.jsonl:1 payload.timestamp",
+      "threadId": "01a19477-f012-7233-a712-0c9049920301",
+      "cliVersion": "0.166.0",
+      "cwd": "/data/work/agents/7f038470-9455-432f-a113-0d7f72bd87cd"
+    },
+    {
+      "utc": "2026-11-01T00:27:59.024Z",
+      "fact": "Architecture request recorded in old thread",
+      "evidence": "provider-session-metadata.json userInputs (independently checked source)",
+      "characters": 211,
+      "sha256": "2db950292b0a8815412d6a69100c0a224691fbbd888897e5d9b4639a7892271a"
+    },
+    {
+      "utc": "2026-11-01T00:27:59.062Z",
+      "fact": "Hornhoof job started",
+      "evidence": "previous-job.json",
+      "jobId": "a7b57f3e-0100-429a-bb0b-68f9016a7e98",
+      "status": "done",
+      "error": null,
+      "field": "startedAt"
+    },
+    {
+      "utc": "2026-11-01T00:27:59.063Z",
+      "fact": "Hornhoof job created",
+      "evidence": "previous-job.json",
+      "jobId": "a7b57f3e-0100-429a-bb0b-68f9016a7e98",
+      "status": "done",
+      "error": null,
+      "field": "createdAt"
+    },
+    {
+      "utc": "2026-11-01T00:28:16.073Z",
+      "fact": "Old provider turn completed",
+      "evidence": "/data/home/sessions/2026/11/01/rollout-2026-11-01T00-17-30-01a19477-f012-7233-a712-0c9049920301.jsonl:271 event_msg.task_complete"
+    },
+    {
+      "utc": "2026-11-01T00:28:16.126Z",
+      "fact": "Hornhoof job finished",
+      "evidence": "previous-job.json",
+      "jobId": "a7b57f3e-0100-429a-bb0b-68f9016a7e98",
+      "status": "done",
+      "error": null,
+      "field": "finishedAt"
+    },
+    {
+      "utc": "2026-11-01T00:28:52.420Z",
+      "fact": "Hornhoof job created",
+      "evidence": "report-job.json",
+      "jobId": "0adbc4c9-0334-4228-83e2-27908db3420e",
+      "status": "done",
+      "error": null,
+      "field": "createdAt"
+    },
+    {
+      "utc": "2026-11-01T00:28:52.421Z",
+      "fact": "Head report recorded",
+      "evidence": "events-after-14609.json",
+      "seq": 14662,
+      "jobId": "0adbc4c9-0334-4228-83e2-27908db3420e",
+      "kind": "message",
+      "from": "agent",
+      "by": "396d2ee7-2844-48ae-b464-5777d4d41622",
+      "characters": 945
+    },
+    {
+      "utc": "2026-11-01T00:28:52.439Z",
+      "fact": "Hornhoof job started",
+      "evidence": "report-job.json",
+      "jobId": "0adbc4c9-0334-4228-83e2-27908db3420e",
+      "status": "done",
+      "error": null,
+      "field": "startedAt"
+    },
+    {
+      "utc": "2026-11-01T00:28:53.715Z",
+      "fact": "New provider thread created",
+      "evidence": "/data/home/sessions/2026/11/01/rollout-2026-11-01T00-28-53-01a19482-5c46-79e1-bd6e-14a41099f907.jsonl:1 payload.timestamp",
+      "threadId": "01a19482-5c46-79e1-bd6e-14a41099f907",
+      "cliVersion": "0.166.0",
+      "cwd": "/data/work/agents/7f038470-9455-432f-a113-0d7f72bd87cd"
+    },
+    {
+      "utc": "2026-11-01T00:28:55.282Z",
+      "fact": "New first request contains recovery history plus head report and prior architecture request",
+      "evidence": "/data/home/sessions/2026/11/01/rollout-2026-11-01T00-28-53-01a19482-5c46-79e1-bd6e-14a41099f907.jsonl:12 response_item user",
+      "characters": 7755,
+      "sha256": "294bba61eb7cc23bdff6affd2876311acb73ec19bb678fe0e485b81b0cde0494",
+      "earlierSessionPreface": true,
+      "headReport": true,
+      "architectureRequest": true
+    },
+    {
+      "utc": "2026-11-01T00:28:58.489Z",
+      "fact": "Orchestrator response recorded",
+      "evidence": "events-after-14609.json",
+      "seq": 14677,
+      "jobId": "0adbc4c9-0334-4228-83e2-27908db3420e",
+      "kind": "text"
+    },
+    {
+      "utc": "2026-11-01T00:30:02.457Z",
+      "fact": "New provider turn completed",
+      "evidence": "provider-session-metadata.json lifecycle"
+    },
+    {
+      "utc": "2026-11-01T00:30:02.548Z",
+      "fact": "Orchestrator response recorded",
+      "evidence": "events-after-14609.json",
+      "seq": 14777,
+      "jobId": "0adbc4c9-0334-4228-83e2-27908db3420e",
+      "kind": "text"
+    },
+    {
+      "utc": "2026-11-01T00:30:02.616Z",
+      "fact": "Hornhoof job finished",
+      "evidence": "report-job.json",
+      "jobId": "0adbc4c9-0334-4228-83e2-27908db3420e",
+      "status": "done",
+      "error": null,
+      "field": "finishedAt"
+    }
+  ],
+  "timestampNotes": [
+    "session_meta payload.timestamp: old 00:17:30.653Z, new 00:28:53.715Z. Outer JSONL record timestamps: old 00:17:32.069Z, new 00:28:54.354Z. Distinct fields, not conflicting reports.",
+    "UUIDv7-derived times are not used as primary timeline evidence.",
+    "Prior job startedAt precedes createdAt by 1ms; the typed path sets startedAt before DB default createdAt, but timing alone does not prove that path.",
+    "Provider turn_context old effort is absent; its value must not be guessed. New first turn has effort max. Both record model gpt-6.1-sol."
+  ],
+  "sourcePackets": {
+    "directory": "/data/work/agents/7f038470-9455-432f-a113-0d7f72bd87cd/incident-29-api",
+    "independentlyVerified": true,
+    "files": [
+      {
+        "name": "current-job.json",
+        "sha256": "264b26210f0c6232c44f75dbc13d2e3136c41c189770e82c1dcb0e3470ebf639"
+      },
+      {
+        "name": "events-after-14609.json",
+        "sha256": "d4433f808406311bcabe83de96cf69f1b9ad44cf83761c2af817eafd1c36c059"
+      },
+      {
+        "name": "manifest.json",
+        "sha256": "328ca0a2c1946f488c46d6adec63c0554abe82083c312c539b20b7f96d5395ab"
+      },
+      {
+        "name": "previous-job.json",
+        "sha256": "e56ec526afd664a6869dd836146e69b2fb578829b19cf5701dac69c7e71d2878"
+      },
+      {
+        "name": "report-job.json",
+        "sha256": "d9ebc1b39271ed484e9f9ff3b230e4c35a37317412b544cae822b7ab7b26b5f6"
+      },
+      {
+        "name": "self-session-registry.json",
+        "sha256": "4d90ec15ef451249c10a9e7310f1d40aa92e8eff45693d10b3b9c165b821672b"
+      },
+      {
+        "name": "provider-session-metadata.json",
+        "sha256": "2d0185c3bc5c95a44d36d316aab8d16f694362aae6ff99f679359d5d8982a9a1"
+      },
+      {
+        "name": "provider-start-comparison.json",
+        "sha256": "f6a4140542852b0b131352b4fb62b84a05f70af36ff2387bd10e4bae6d2a9ec5"
+      }
+    ],
+    "notes": [
+      "Original exports were not copied or modified. These checksums concern safe saved exports, not the growing live rollout.",
+      "Original event snapshot has 49 events, seq14662..15003, 00:28:52.421Z..00:33:09.658Z; current-job.json is a snapshot.",
+      "Exact API seq14586/14609 were reported in task29, but are outside this saved event slice and are not represented as independently checked timeline rows."
+    ],
+    "operations37": {
+      "packet": "/data/work/agents/52c2cfbc-4946-4a7d-a483-4de3aa1c4ea6/task-37-evidence",
+      "manifestSha256": "2418ed220579cb8719b9c51d58e15bd1dd54fd8432f4799ee643d4dda0965914",
+      "checksumsVerified": 17,
+      "collectedAt": "2026-11-01T00:56:01.742845+00:00",
+      "container": "1994b8342580",
+      "groups": [
+        {
+          "threadId": "01a19477-f012-7233-a712-0c9049920301",
+          "count": 470,
+          "firstAt": "2026-11-01T00:17:30+00:00",
+          "lastAt": "2026-11-01T00:28:16+00:00",
+          "processes": [
+            "pid:77606:4dd3c30f-6ad7-4939-8f32-e8c2f732bfc1"
+          ]
+        },
+        {
+          "threadId": "01a19482-5c46-79e1-bd6e-14a41099f907",
+          "count": 97,
+          "firstAt": "2026-11-01T00:28:53+00:00",
+          "lastAt": "2026-11-01T00:30:02+00:00",
+          "processes": [
+            "pid:7284:6cceff9c-025b-476c-bd65-af2f6beca1d2"
+          ]
+        }
+      ],
+      "nodePackage": {
+        "name": "@hornhoof/node",
+        "version": "0.5.0"
+      },
+      "nodeCommit": "not available: no gitHead/commit in installed package metadata; /app is not a Git checkout",
+      "psEvidence": {
+        "source": "11-restart-evidence.json",
+        "pid1StartUtc": "2026-10-31T23:11:00Z",
+        "tmuxPid93StartUtc": "2026-10-31T23:11:02Z",
+        "otherCodexPid94": "Not attributed to target threads; target process identities are77606 and7284"
+      },
+      "limitations": [
+        "process_uuid comes from saved Codex logs, not a captured OS launch argument list",
+        "Different CLI process identity is proved; why it changed and which sessionFor condition failed remain unproved",
+        "Current PID1 startup predates incident in stated container; no host reboot or server process conclusion",
+        "Only exported metadata examined; no raw body/reasoning/shell-snapshot/auth/env read"
+      ]
+    }
+  },
+  "instructionComparison": {
+    "beforeNotebookEqual": true,
+    "notesAdded": [
+      5,
+      6,
+      7,
+      8
+    ],
+    "notesRemoved": [],
+    "notesChanged": [],
+    "documentCharacters": [
+      11519,
+      12437
+    ],
+    "sourceCandidateHashes": {
+      "sourceCommit": "bd696b0724385b6b11da53a24ada2f188b031217",
+      "steadyCharacters": 10217,
+      "steadyHash": "c8f2475bcb21",
+      "selectedModelHash": "81b60fbd5901",
+      "hashAlgorithm": "sha256 hex first 12 characters, templates/load.ts:80",
+      "documents": [
+        {
+          "path": "/data/home/sessions/2026/11/01/rollout-2026-11-01T00-17-30-01a19477-f012-7233-a712-0c9049920301.jsonl",
+          "line": 8,
+          "recordTimestamp": "2026-11-01T00:17:32.458Z",
+          "containsExactCurrentSteadyBeforeNotebook": true
+        },
+        {
+          "path": "/data/home/sessions/2026/11/01/rollout-2026-11-01T00-28-53-01a19482-5c46-79e1-bd6e-14a41099f907.jsonl",
+          "line": 8,
+          "recordTimestamp": "2026-11-01T00:28:55.232Z",
+          "containsExactCurrentSteadyBeforeNotebook": true
+        }
+      ],
+      "limitation": "Source candidates plus AGENTS content match. Actual DB job hashes remain unavailable. Requires the two authorized source files in this environment."
+    },
+    "limitation": "These hashes are candidates calculated from matched source instructions, not values read from production jobs."
+  },
+  "hypotheses": [
+    {
+      "name": "Head report as delivery trigger",
+      "for": "API seq14662 links from:agent and head id to report job; prior known job done 36.294s earlier; bootstrap contains report",
+      "against": "Report delivery normally resumes the existing provider thread when session/subscription/hash match",
+      "missing": "Actual session-selection predecessor and job.run arguments",
+      "verdict": "Proved trigger for Hornhoof job; thread selection cause not proved",
+      "code": [
+        "apps/server/src/modules/tools/watch.ts:195",
+        "apps/server/src/modules/conversation/queue.ts:127"
+      ]
+    },
+    {
+      "name": "Delayed selected-model hash after typed turns",
+      "for": "Isolated fixture reproduces fresh catch-up; actual old/new steady instructions match; card model change reported earlier",
+      "against": "CLI model is gpt-6.1-sol in both threads; this alone neither confirms nor refutes explicit selection/default distinction",
+      "missing": "DB hashes/subscriptions/session ids of every adjacent job; historical model availability at dispatch",
+      "verdict": "Strong testable hypothesis, not root cause",
+      "code": [
+        "apps/server/src/modules/conversation/queue.ts:141",
+        "apps/server/src/modules/conversation/queue.ts:211",
+        "apps/server/src/modules/conversation/queue.ts:259",
+        "apps/server/src/modules/templates/load.ts:80"
+      ]
+    },
+    {
+      "name": "Notebook or effort alone",
+      "for": "Notebook grew by 918 chars, effort max recorded in new thread; host process hash includes both",
+      "against": "Server hash excludes notebook/effort; both documents have exact same steady; nonempty session launch uses resume",
+      "missing": "Actual host restart/launch decision",
+      "verdict": "Not sufficient alone to explain server fresh-thread selection",
+      "code": [
+        "apps/server/src/modules/agents/instructions.ts:124",
+        "apps/node/src/terminal/host.ts:248",
+        "apps/node/src/terminal/programs.ts:74"
+      ]
+    },
+    {
+      "name": "Latest completed null-session start",
+      "for": "Source selects latest eligible done job even if session_id null; isolated fixture reproduces masking older thread",
+      "against": "No such adjacent job yet exported",
+      "missing": "All adjacent jobs including empty prompt conversation starts",
+      "verdict": "Open hypothesis",
+      "code": [
+        "apps/server/src/modules/conversation/queue.ts:188",
+        "apps/server/src/modules/conversation/queue.ts:211",
+        "apps/node/src/terminal/host.ts:295"
+      ]
+    },
+    {
+      "name": "Subscription/node/session registry change or resume failure",
+      "for": "Earlier card subscription change reported; node discards unknown or wrong-cwd sessions in isolated fixture",
+      "against": "Current registry contains both threads; this is not historical proof. Both CLI records show same cwd/provider/version.",
+      "missing": "Per-job subscription, requested/effective session, safe launch argv and historical node registry/process metadata",
+      "verdict": "Open hypothesis; node build unknown",
+      "code": [
+        "apps/node/src/runner.ts:81",
+        "apps/node/src/state.ts:43",
+        "apps/node/src/terminal/programs.ts:74",
+        "apps/node/src/providers/codex.ts:159"
+      ]
+    },
+    {
+      "name": "Timer",
+      "for": "Timer dispatch shares normal queue/sessionFor selection",
+      "against": "Known report event from agent head, not timer; no timer event in saved 49-event slice",
+      "missing": "Full adjacent jobs and untruncated card timer/history",
+      "verdict": "Not supported as known report initiator; hidden adjacent jobs not excluded",
+      "code": [
+        "apps/server/src/modules/agents/timers.ts:52"
+      ]
+    },
+    {
+      "name": "UI reload or reconnect",
+      "for": "Opening missing terminal can request agent.start and produce empty start",
+      "against": "xterm term.reset only clears display; SSE/WS reconnect alone does not erase provider thread; new provider id is real",
+      "missing": "Browser reconnect metadata and adjacent empty-start jobs",
+      "verdict": "Display-only explanation contradicted; indirect start path remains open",
+      "code": [
+        "apps/web/src/ui/AgentTerminal.tsx:72",
+        "apps/web/src/live.ts:19",
+        "apps/web/src/screens/AgentWindow.tsx:192",
+        "apps/node/src/terminal/host.ts:797"
+      ]
+    },
+    {
+      "name": "Explicit reset or compaction",
+      "for": "Recovery phrase was observed",
+      "against": "Phrase is Hornhoof preface, also present on old first request; role-reset route changes role skills, not provider history; no compacted/context_compacted/abort/error record in exported lifecycle",
+      "missing": "Full relevant runtime lifecycle/launch record; absence in saved scope is not universal absence",
+      "verdict": "No evidence that these caused the new thread",
+      "code": [
+        "apps/server/src/modules/conversation/prompt.ts:37",
+        "apps/server/src/modules/agents/routes.ts:302"
+      ]
+    },
+    {
+      "name": "Node/server/provider process restart",
+      "for": "Task37 SQLite metadata proves distinct CLI process identities; host hash changes and session selection can replace CLI process",
+      "against": "Task37 ps snapshot PID1 node started23:11:00 in stated Codex container and tmux93 at23:11:02, before incident. Codex94 in that ps is not target CLI process.",
+      "missing": "Exact process/hello/restart logs and node build for 00:28:16Z..00:28:56Z",
+      "verdict": "CLI process replacement proved; corresponding container PID1 startup predates incident. Server/other-node restart and replacement initiator unproved.",
+      "code": [
+        "apps/node/src/main.ts:105",
+        "apps/node/src/main.ts:122",
+        "apps/server/src/modules/nodes/messages.ts:30"
+      ]
+    },
+    {
+      "name": "Operations MCP no-turn error",
+      "for": "Exact error is emitted when local bridge lacks current tool token",
+      "against": "Company turn open/closed is not checked there; no failed-call/job ids supplied",
+      "missing": "Target Operations failed-call/job ids, timestamps, safe token presence/binding flags",
+      "verdict": "Separate observation with no proved incident connection",
+      "code": [
+        "apps/node/src/terminal/bridge.ts:121",
+        "apps/node/src/terminal/bridge.ts:162",
+        "apps/node/src/terminal/host.ts:665"
+      ]
+    }
+  ],
+  "missingSources": [
+    {
+      "priority": 1,
+      "source": "Read-only public.jobs metadata for all target-agent neighbors, inclusive 00:17:00Z..00:30:03Z plus eligible predecessor before lower bound",
+      "fields": "id,kind,status,error,subscription_id,session_id,instructions_hash,created_by,task_id,created_at,started_at,finished_at; prompt chars/md5/empty/preface flags",
+      "handoff": "scripts/incident31-jobs.sql sent through task29 to Operations task35; direct task35 access refused",
+      "why": "Determine exact sessionFor predicate and include invisible empty starts"
+    },
+    {
+      "priority": 2,
+      "source": "Server job.run selection and node receive/effective-session/launch metadata around report job",
+      "fields": "jobId, requested/effective sessionId, selected model/effort, startup hash, resume/new boolean, timestamp, node build; exclude env/tool tokens/full argv secrets",
+      "why": "Distinguish server decision, local registry fallback, resume failure and process restart"
+    },
+    {
+      "priority": 3,
+      "source": "GET /api/agents/7f038470-9455-432f-a113-0d7f72bd87cd",
+      "fields": "Untruncated changes and timer/model/effort/subscription metadata; changes limited to latest20 by code",
+      "why": "Historical model selection provenance; existing view truncates at 30000 chars"
+    },
+    {
+      "priority": 4,
+      "source": "Process/hello/disconnect/browser reconnect logs 00:28:16Z..00:28:56Z",
+      "why": "No event absence claim can exclude an idle restart"
+    }
+  ],
+  "dbExport": {
+    "engine": "PostgreSQL; pg.Pool and Drizzle in production, not SQLite/PGlite",
+    "configuration": "DATABASE_URL -> config.databaseUrl -> pg.Pool(connectionString)",
+    "runtimeDsn": "UNKNOWN; no credentials/env read",
+    "runtimeOwnerOnMac": "UNKNOWN",
+    "composeConfiguration": "Postgres17, service db, pgdata volume at /var/lib/postgresql/data; not proof of actual runtime project",
+    "client": "Existing authorized psql or pg; do not invoke createDb(), which runs migrations",
+    "command": "psql -X -w -qAt -v ON_ERROR_STOP=1 -P pager=off -f scripts/incident31-jobs.sql > incident31-jobs.json",
+    "validationCommand": "node -e 'const r=JSON.parse(require(\"node:fs\").readFileSync(\"incident31-jobs.json\",\"utf8\")); if(!Array.isArray(r))process.exit(1); console.log(\"jobs\",r.length)'",
+    "safety": "Repeatable read/read only transaction; UTC; 10s statement and 1s lock timeout; rollback; owner uses existing known connection, no guessed URI/new rights/packages",
+    "fixtureEvidence": "6 expected metadata rows including both bounds, older creation with in-window finish/start, predecessor, empty start, test and conversation kinds; no raw prompts/tokens; rollback ended transaction"
+  },
+  "apiContract": [
+    {
+      "endpoint": "GET /api/jobs/:id",
+      "available": "job id/status/result/tail/error/machine/createdAt/startedAt/finishedAt",
+      "unavailable": "session_id,subscription_id,instructions_hash,prompt,created_by,kind; no list-jobs/session endpoint"
+    },
+    {
+      "endpoint": "GET /api/agents/:id/events?after=<seq>",
+      "available": "events seq/jobId/kind/data/personId/at, state; ascending up to500",
+      "unavailable": "Provider startup/resume metadata; limit query is not supported"
+    },
+    {
+      "endpoint": "GET /api/agents/:id",
+      "available": "Current model/effort/subscription/timer, latest20 changes, current instruction parts/raw",
+      "unavailable": "Historical per-job instructionsHash/sessionId and complete changes pagination"
+    },
+    {
+      "endpoint": "GET /api/version",
+      "available": "version,commit,migrations",
+      "unavailable": "Node build and provider launch metadata"
+    }
+  ],
+  "proposedProductionFix": null,
+  "reasonNoFix": "No actual incident decision predicate proved. Do not choose a speculative fix. Once DB confirms a branch, pin that scenario, preserve existing history, review session identity semantics of default vs explicit model/empty start, then propose the smallest edit and an independent regression check.",
+  "checks": [
+    {
+      "command": "npm ci --include=dev --ignore-scripts --no-save --no-audit --no-fund",
+      "result": "exit0; added306 packages in own worktree; existing lockfile unchanged"
+    },
+    {
+      "command": "npm run build -w @hornhoof/protocol",
+      "result": "exit0; tsc -p tsconfig.json"
+    },
+    {
+      "command": "node --wasm-num-compilation-tasks=1 --liftoff-only --max-old-space-size=256 --import tsx scripts/incident31-session-probe.mjs",
+      "result": "exit0; 7 PASS scenarios plus SQL check; COMPLETE 7 isolated scenarios and SQL metadata check; no incident root cause asserted",
+      "limits": "Fake provider proves transport/state transitions, not real model attention or real CLI resume behavior. No tmux or provider process launched."
+    },
+    {
+      "command": "node --import tsx scripts/incident31-rollout-hashes.mjs",
+      "result": "exit0; exact steady found in both documents, c8f2475bcb21/81b60fbd5901 candidates",
+      "limits": "Requires the authorized files; not available in Kimi environment"
+    },
+    {
+      "command": "sha256sum -c SHA256SUMS; sha256sum -c SESSION-SHA256SUMS (source packet directory)",
+      "result": "exit0; 5 original files OK and3 safe session metadata files OK"
+    },
+    {
+      "command": "node --check scripts/incident31-session-probe.mjs; node --check scripts/incident31-rollout-hashes.mjs; git diff --check",
+      "result": "exit0"
+    },
+    {
+      "command": "crapper --no-coverage scripts/incident31-session-probe.mjs scripts/incident31-rollout-hashes.mjs",
+      "result": "Fixture helpers CC1; agentsDocument CC8, matchStartup CC4; coverage/CRAP N/A, not coverage proof"
+    },
+    {
+      "command": "dryer --threshold 0.8 scripts/incident31-session-probe.mjs",
+      "result": "No source files to analyze; tool does not handle this mjs file, no duplication claim"
+    },
+    {
+      "command": "mutator --scan scripts/incident31-session-probe.mjs",
+      "result": "2 mutation sites listed only; no mutation test/coverage claim"
+    },
+    {
+      "command": "Targeted metadata read of task37 packet08/11/01, validate all17 SHA256SUMS entries against local bytes",
+      "result": "exit0;17/17 OK; old470/new97 log rows in window, each with one different process_uuid; raw log bodies not exported"
+    },
+    {
+      "command": "node --max-old-space-size=256 scripts/incident31-installed-node.mjs",
+      "result": "exit0;7/7 installed/emitted module SHA256 pairs equal; source and installed ESM package types verified",
+      "limits": "No complete build commit or launch-time arguments inferred; local /app environment required"
+    }
+  ],
+  "concerns": [
+    "Root cause remains unproved without actual jobs hashes/session selection and runtime launch metadata. Task29 is not fixed/closed by this report.",
+    "Whole suite/typecheck of production apps were not run: current task explicitly forbids heavy tests and does not modify app source.",
+    "Fixture setup initially rejected PATCH400 because fake model lacked effort support, then failed23502 because SQL-only fixture agent omitted required model; both fixture inputs corrected, assertions/product code not weakened. Subsequent full targeted run exit0.",
+    "Fastify emits existing FSTDEP023 deprecation warning during fixture setup; no test failure.",
+    "Runtime SQL/psql have not been executed here; SQL was checked only against the isolated migration-compatible PGlite database.",
+    "Initial isolated NodeNext transpilation assumed CJS and could not compare with installed ESM. Method corrected after checking package.type=module; exact ESM emission matched7/7, no installed file changes."
+  ],
+  "actionLog": [
+    {
+      "action": "Read tasks31/29 and rewrites using task tools",
+      "reason": "Use current brief and incident chronology; preserve task2 as already submitted"
+    },
+    {
+      "action": "Read repository AGENTS.md and README.md; search CLAUDE.md/CONTRIBUTING.md",
+      "reason": "Apply repository rules first; latter files absent"
+    },
+    {
+      "action": "Read source selection/typed/live/queue/timer/jobs/reset, node runner/host/CLI, web reconnect",
+      "reason": "Separate new Hornhoof job/provider thread/process/UI/context and identify exact predicates"
+    },
+    {
+      "action": "Verify supplied API and SESSION checksums; inspect only safe source fields",
+      "reason": "Independently validate primary evidence without duplicate exports"
+    },
+    {
+      "action": "Filter target-only /data/sessions.json mapping and the two authorized rollout metadata",
+      "reason": "Link actual threads/cwd/timestamps; avoid other agents and private output"
+    },
+    {
+      "action": "Send early timeline, existing GET contracts, gaps and timestamp corrections in task29",
+      "reason": "Unblock evidence collection without asking CEO for orchestrator-readable data"
+    },
+    {
+      "action": "Fetch origin main and create own t29-session-investigation at verified server commit",
+      "reason": "Reproduce exact source; leave main and other worktrees untouched"
+    },
+    {
+      "action": "Install existing locked dev dependencies and build protocol in own worktree",
+      "reason": "Run migration-compatible isolated fixture without real provider"
+    },
+    {
+      "action": "Build and run seven fake-provider/isolated-state scenarios",
+      "reason": "Test delivery idle/active/queued and falsifiable hash/null/registry hypotheses"
+    },
+    {
+      "action": "Prepare schema and bounded read-only SQL; send immediately in task29; task35 access refused",
+      "reason": "Operations needs actual all-jobs metadata, including invisible empty starts"
+    },
+    {
+      "action": "Add inclusive-boundary/metadata-only SQL assertions; correct fixture-only inputs; rerun",
+      "reason": "Verify SELECT syntax and output without touching live DB"
+    },
+    {
+      "action": "Clarify psql quiet JSON output and validation; no live SQL run",
+      "reason": "Prevent command status lines corrupting saved JSON"
+    },
+    {
+      "action": "Match exact source steady against only two initial AGENTS docs; compute12-hex hash candidates",
+      "reason": "Separate notebook diff from actual server runHash; give SQL owner exact candidate comparison"
+    },
+    {
+      "action": "Inspect Operations bridge no-turn error callsite",
+      "reason": "Show local job-token binding differs from company-turn state; no unsupported incident linkage"
+    },
+    {
+      "action": "Package diagnostic scripts, report and commands for independent gate",
+      "reason": "Make analysis and reproduction reviewable without changing production"
+    },
+    {
+      "action": "Independently verify new Operations task37 packet, filter only target-thread SQLite metadata and PID1 startup",
+      "reason": "Incorporate new evidence, prove CLI process identity change, avoid misattributing unrelated PID94 or old23:11 cluster"
+    },
+    {
+      "action": "Read installed node modules and compare exact TypeScript ESM emission for7 relevant files",
+      "reason": "Validate actual installed guard/resume/host/MCP paths without assuming a node commit, building or restarting"
+    }
+  ],
+  "next": "Independent DEV-REV gate verifies evidence and fixtures. Head obtains Operations task35 read-only metadata and node launch/process records; compare actual predecessor/session/subscription/hash before approving any production fix."
+}
