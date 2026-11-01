@@ -298,6 +298,11 @@ describe('templates', () => {
     expect([...roles, ...skills].map(x => x.body).join('\n')).not.toMatch(/merge the turn's task branches/);
   });
 
+  it('has the development head ask the holder of a quiet task before handing it on', () => {
+    expect(templates.roles.get('DEV-HEAD')!.skills.map(k => k.id)).toContain('dev-worktrees');
+    expect(templates.skills.get('dev-worktrees')!.body).toMatch(/long test run, not a stuck member[\s\S]*ask its holder and wait one more round/);
+  });
+
   it('credits every source a skill names in SOURCES.md', () => {
     const credits = readFileSync(`${DIR}/SOURCES.md`, 'utf8');
     for (const s of skills) for (const src of s.sources) expect(credits, `${s.id} ${src}`).toContain(src.split(' ')[0]);

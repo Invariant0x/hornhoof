@@ -11,4 +11,5 @@ sources: [obra/superpowers skills/using-git-worktrees/SKILL.md, obra/superpowers
 - A task branch starts from the turn's branch, which holds what earlier tasks merged, or from the main line while there is none. When the task is done, the tests of what it changed pass and the branch is pushed for review with its brief, commits and test output.
 - Once its gates pass, its executor merges it into the turn's branch the wake names; the final check runs on that branch (dev-gates). After the release, its workspace is removed and the branch deleted.
 - A workspace with uncommitted files is never deleted without asking; those files exist nowhere else.
+- A task quiet for several turns may be a long test run, not a stuck member. Before you give it to someone else, ask its holder and wait one more round: the new holder starts over in a new workspace, so handing it on early does the same work twice.
 - Never force-push a shared branch and never rewrite history someone else built on.
