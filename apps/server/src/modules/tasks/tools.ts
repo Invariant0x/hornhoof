@@ -90,7 +90,8 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
     );
 
   async function where(t: Task): Promise<string> {
-    const [line] = await taskLines(ctx, [t]);
+    const agent = await me();
+    const [line] = await taskLines(ctx, [t], x => sees(agent, x));
     const holder = line?.assignee ? `, with ${line.assignee.name}` : '';
     return `#${t.number} is ${t.status}${holder}.${await waiting(t)}`;
   }
@@ -134,7 +135,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         .limit(200);
       const holds = (t: Task) => t.assigneeAgentId === agent.id || t.panel.includes(agent.id);
       const mine = open.filter(t => sees(agent, t)).sort((a, b) => Number(holds(b)) - Number(holds(a)));
-      return json(await taskLines(ctx, mine.slice(0, 40)));
+      return json(await taskLines(ctx, mine.slice(0, 40), t => sees(agent, t)));
     },
   );
 
@@ -218,7 +219,8 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
       async () => {
         const rows = (await turnRows(ctx, job.companyId)).filter((t, i, all) => t.status !== 'closed' || all[i + 1]?.status !== 'closed');
         const top = rows.length ? await db.select().from(tasks).where(and(inArray(tasks.turnId, rows.map(t => t.id)), isNull(tasks.parentId))).orderBy(asc(tasks.number)) : [];
-        const lines = await taskLines(ctx, top);
+        const agent = await me();
+        const lines = await taskLines(ctx, top, t => sees(agent, t));
         return json(rows.map(t => ({ number: t.number, title: t.title || t.goal, goal: t.goal, status: t.status, tasks: lines.filter((_, i) => top[i]!.turnId === t.id) })));
       },
     );

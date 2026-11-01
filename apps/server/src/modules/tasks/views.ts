@@ -90,7 +90,8 @@ async function names(ctx: Pick<Ctx, 'db' | 'templates'>, rows: Pick<Task, 'assig
   };
 }
 
-const line = (t: Task, n: Names): TaskLine => ({
+/* sees: who reads it may see that task, so the line names what it waits for only of those. */
+const line = (t: Task, n: Names, sees: (t: Task) => boolean): TaskLine => ({
   id: t.id,
   number: t.number,
   title: t.title,
@@ -105,14 +106,14 @@ const line = (t: Task, n: Names): TaskLine => ({
   bounces: t.bounces,
   turn: n.turn(t.turnId),
   parentId: t.parentId,
-  waitsFor: n.after(t).filter(a => a.status !== 'done').map(a => a.number),
+  waitsFor: n.after(t).filter(a => a.status !== 'done' && sees(a)).map(a => a.number),
   createdAt: t.createdAt.toISOString(),
   updatedAt: t.updatedAt.toISOString(),
 });
 
-export async function taskLines(ctx: Pick<Ctx, 'db' | 'templates'>, rows: Task[]): Promise<TaskLine[]> {
+export async function taskLines(ctx: Pick<Ctx, 'db' | 'templates'>, rows: Task[], sees: (t: Task) => boolean): Promise<TaskLine[]> {
   const n = await names(ctx, rows);
-  return rows.map(t => line(t, n));
+  return rows.map(t => line(t, n, sees));
 }
 
 const LOG_SHOWN = 200;
@@ -137,13 +138,12 @@ export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates'>, task: Task,
   const files = await filesOf(db, task.id);
   const [creator] = task.createdByPersonId ? await db.select({ id: people.id, name: people.name }).from(people).where(eq(people.id, task.createdByPersonId)) : [];
   const n = await names(ctx, [task, ...subs], [...events.map(e => e.agentId), ...asks.map(r => r.agentId), ...files.map(f => f.agentId)].filter((x): x is string => Boolean(x)));
+  /* Only what this reader may see of what the task comes after. */
   const after = n.after(task).filter(sees);
   const by = (personId: string | null, personName: string | null, agentId: string | null): LogLine['by'] =>
     personId ? { kind: 'person', id: personId, name: personName ?? '' } : agentId ? { kind: 'agent', id: agentId, name: n.agent(agentId)?.name ?? '' } : null;
   return {
-    ...line(task, n),
-    /* Only what this reader may see of what the task comes after. */
-    waitsFor: after.filter(a => a.status !== 'done').map(a => a.number),
+    ...line(task, n, sees),
     body: task.body,
     parent,
     after: after.map(a => ({ id: a.id, number: a.number, title: a.title, status: a.status })),
@@ -155,7 +155,7 @@ export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates'>, task: Task,
       return [{ ...a, state: task.status === 'done' || task.merging || at < task.stage ? 'passed' : at === task.stage && !['cancelled'].includes(task.status) ? 'current' : 'next' }];
     }),
     createdBy: creator ? { kind: 'person', ...creator } : task.createdByAgentId ? { kind: 'agent', id: task.createdByAgentId, name: n.agent(task.createdByAgentId)?.name ?? '' } : null,
-    subtasks: subs.map(t => line(t, n)),
+    subtasks: subs.map(t => line(t, n, sees)),
     log: events.reverse().map(e => ({ kind: e.kind, text: e.text, data: e.data, by: by(e.personId, e.personName, e.agentId), at: e.at.toISOString() })),
     requests: asks.map((r, i) => ({
       id: r.id,

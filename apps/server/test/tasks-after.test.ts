@@ -270,6 +270,17 @@ describe('what a task comes after, as each one sees it', () => {
     const read = (session: typeof owner) => app.inject({ url: `/api/tasks/${launch.id}`, ...as(session) }).then(r => r.json().task);
     expect(await read(dana)).toMatchObject({ after: [], waitsFor: [] });
     expect(await read(owner)).toMatchObject({ after: [{ title: 'Big deal' }], waitsFor: [deal.number] });
+    const listed = (session: typeof owner) => app.inject({ url: '/api/tasks', ...as(session) }).then(r => r.json().tasks.find((t: { id: string }) => t.id === launch.id));
+    expect(await listed(dana)).toMatchObject({ waitsFor: [] });
+    expect(await listed(owner)).toMatchObject({ waitsFor: [deal.number] });
+  });
+
+  it("is left out of the task lines an agent reads for a task the agent cannot see", async () => {
+    const { ctx, ceo, dev, head, tools, outside } = await company();
+    const deal = await outside();
+    const launch = (await createTask(ctx, { personId: ceo.id }, { title: 'Launch', brief: '', body: '', departmentId: dev.id, assigneeAgentId: head.id, after: [deal.id] })).task;
+    const lines = JSON.parse(text(await call(await tools(head), 'tasks', {}))) as { number: number; waitsFor: number[] }[];
+    expect(lines.find(l => l.number === launch.number)).toMatchObject({ waitsFor: [] });
   });
 
   it("is refused to a head for another department's task, as a parent is", async () => {

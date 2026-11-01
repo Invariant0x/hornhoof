@@ -65,7 +65,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const open = q.status === 'closed' ? [] : await page(notInArray(tasks.status, [...CLOSED]));
     const closed = q.status === 'open' ? [] : await page(inArray(tasks.status, [...CLOSED]));
     const rows = [...open, ...closed].sort((a, b) => b.number - a.number);
-    return { tasks: await taskLines(ctx, rows.filter(t => reaches(access, t))) };
+    return { tasks: await taskLines(ctx, rows.filter(t => reaches(access, t)), t => reaches(access, t)) };
   });
 
   app.get('/api/tasks/:id', async req => {
@@ -136,6 +136,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const lines = await taskLines(
       ctx,
       mine.map(r => r.task),
+      t => reaches(access, t),
     );
     const names = new Map((mine.length ? await db.select({ id: agents.id, name: agents.name }).from(agents).where(inArray(agents.id, mine.map(r => r.request.agentId))) : []).map(a => [a.id, a.name]));
     const pictures = await picturesOf(db, mine.map(r => r.request));
