@@ -6,7 +6,8 @@ import type { JobUser } from '../isolation.js';
 import type { ProviderAdapter, RunInput, RunResult } from '../runner.js';
 import { withProgramExit } from '../program-exit.js';
 import { claudePlugins } from '../skills.js';
-import { claudePlanLimits } from '../terminal/programs.js';
+import { credentialSecrets } from '../credentials.js';
+import { claudePlanLimits, planToken } from '../terminal/programs.js';
 import { contentText, inputText, isoFrom, isRecord, objectLine, toolName } from './events.js';
 import { askHidden, childEnv, ensureDir, exitsCleanly, installPackage, interactiveLogin, runProgram, tokensIn, writePrivate } from './process.js';
 
@@ -86,6 +87,9 @@ export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'),
     if (user) extra.HOME = home;
     if (mode === 'api_key') extra.ANTHROPIC_API_KEY = jobSecret ?? secret ?? '';
     if (mode === 'glm') Object.assign(extra, GLM_ENV, { ANTHROPIC_AUTH_TOKEN: glmKey() });
+    /* A plan signed in once on another machine: its long token, which this node was given. */
+    const token = mode === 'plan' ? planToken(home) : null;
+    if (token) extra.CLAUDE_CODE_OAUTH_TOKEN = token;
     return childEnv(tools, extra);
   }
 
@@ -187,7 +191,7 @@ export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'),
     async secrets() {
       if (mode === 'api_key') return secret ? [secret] : [];
       if (mode === 'glm') return [glmKey()].filter(Boolean);
-      return tokensIn(join(home, '.credentials.json'));
+      return [...tokensIn(join(home, '.credentials.json')), ...credentialSecrets(home)];
     },
   };
 }

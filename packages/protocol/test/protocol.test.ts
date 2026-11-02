@@ -477,13 +477,14 @@ describe('plans on any machine', () => {
     const msgs: ServerMessage[] = [
       { type: 'cred.put', kind: 'kimi_key', version: 1, sealed: SEALED },
       { type: 'cred.drop', kind: 'codex_auth' },
-      { type: 'cred.seal', kind: 'claude_token', recipients: [{ nodeId: 'node-2', publicKey: KEY }] },
+      { type: 'cred.seal', kind: 'claude_token', version: 2, recipients: [{ nodeId: 'node-2', publicKey: KEY }] },
       { type: 'login.start', fresh: true },
       { type: 'login.stop' },
       { type: 'cred.lease', hold: true },
     ];
     for (const m of msgs) expect(parseServerMessage(JSON.stringify(m))).toEqual(m);
     expect(parseServerMessage(JSON.stringify({ ...msgs[0], kind: 'other' }))).toBeNull();
+    expect(parseServerMessage(JSON.stringify({ ...msgs[2], version: 0 }))).toBeNull();
     expect(parseServerMessage(JSON.stringify({ ...msgs[2], recipients: [{ nodeId: 'node-2', publicKey: 'nope' }] }))).toBeNull();
     expect(parseServerMessage(JSON.stringify({ ...msgs[2], recipients: Array.from({ length: 21 }, (_, i) => ({ nodeId: `n-${i}`, publicKey: KEY })) }))).toBeNull();
   });

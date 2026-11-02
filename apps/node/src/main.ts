@@ -3,14 +3,15 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { LOAD_MS, type AgentEvent, type Limits, type NodeLoad, type NodeMessage, type ProviderId, type ServerMessage } from '@hornhoof/protocol';
+import { LOAD_MS, type AgentEvent, type CredKind, type Limits, type NodeLoad, type NodeMessage, type ProviderId, type ServerMessage } from '@hornhoof/protocol';
 import { agentFs, ownFs, type AgentFs } from './agent-fs.js';
 import { connect } from './connection.js';
 import { agentUser, builtinAdapters, secureNode, userFor, type JobUser } from './isolation.js';
 import { machineLoad } from './load.js';
 import { adapterFor, programFor } from './providers/index.js';
 import { runJob, type ProviderAdapter, type RunResult } from './runner.js';
-import { nodeIdentity } from './keys.js';
+import { applyCredential, dropCredential, heldCredential } from './credentials.js';
+import { nodeIdentity, seal, unseal } from './keys.js';
 import { dataDir, isRemoved, markRemoved, readState, rememberSession, writeState, type NodeState } from './state.js';
 import { partFiles, runTests } from './tests.js';
 import { SIGNED_OUT as AGY_SIGNED_OUT } from './providers/antigravity.js';
@@ -85,6 +86,9 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
   if (!state) throw new Error(`No node settings in ${dir}/node.json. Run the install command from Hornhoof again.`);
   /* The key Hornhoof seals this node's sign-ins to. */
   const keyPair = await nodeIdentity(dir);
+  /* Where the plan's program keeps its sign-in; on a node that runs as root it belongs to the agents' user. */
+  const credHome = (typeof adapter === 'function' ? null : adapter.owner?.home) ?? join(dir, 'home');
+  const credUser = (typeof adapter === 'function' ? null : adapter.owner?.user) ?? null;
   /* The node's own keys never leave in a job's output. */
   const hidden = [state.key, keyPair.identity];
   const toolsUrl = `${state.server}/mcp`;
@@ -226,10 +230,15 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
         const ok = host ? await host.say(m.agentKey, m.text).catch(() => false) : false;
         return void send?.({ type: 'agent.said', ref: m.ref, ok });
       }
-      /* Plan sign-ins: applied, sealed and started by the parts that follow. */
       case 'cred.put':
+        return putCredential(m.kind, m.sealed);
       case 'cred.drop':
+        if (!single || builtin) return;
+        dropCredential(dir, credHome, m.kind, credUser);
+        return signedInNow();
       case 'cred.seal':
+        return sealCredential(m.kind, m.version, m.recipients);
+      /* Started by the parts that follow. */
       case 'cred.lease':
       case 'login.start':
       case 'login.stop':
@@ -240,6 +249,39 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
     const done = runOne(m, controller.signal);
     running.set(m.jobId, { stop: controller, done });
     await done;
+  }
+
+  /* A plan's sign-in Hornhoof sealed to this node: opened with its key and kept where the program reads it. What goes into
+     the log never carries it, not even in the words of an error. */
+  async function putCredential(kind: CredKind, sealed: string) {
+    if (!single || builtin) return;
+    let plain: Uint8Array;
+    try {
+      plain = await unseal(sealed, keyPair.identity);
+    } catch {
+      return log("A plan sign-in from Hornhoof is not for this node's key, so it was left out.");
+    }
+    try {
+      applyCredential(dir, credHome, kind, plain, credUser);
+    } catch {
+      return log('A plan sign-in from Hornhoof is not one this program can use, so it was left out.');
+    }
+    await signedInNow();
+  }
+
+  /* The sign-in this node holds, sealed for each of the plan's nodes Hornhoof names, one envelope for each. */
+  async function sealCredential(kind: CredKind, version: number, recipients: { nodeId: string; publicKey: string }[]) {
+    const held = single && !builtin ? heldCredential(credHome, kind) : null;
+    if (!held) return;
+    const envelopes = await Promise.all(recipients.map(async r => ({ nodeId: r.nodeId, sealed: await seal(held, [r.publicKey]) })));
+    emit({ type: 'cred.sealed', kind, version, envelopes });
+  }
+
+  /* After a sign-in came or went: what the screens hide, and whether the program is signed in, said at once. */
+  async function signedInNow() {
+    await learn();
+    loggedIn = single ? await single.loggedIn() : true;
+    await status();
   }
 
   /* A part of a test run: no agent program takes part, and its user reaches none of the node's keys. */

@@ -114,7 +114,7 @@ describe("a plan's sign-in sealed to its nodes", () => {
     na.send({ type: 'cred.sealed', kind: 'claude_token', version: 1, envelopes: [{ nodeId: a.nodeId, sealed: SEALED('a') }] });
     await until(async () => (await stored(db, plan)).length === 1);
     await online(b, KEY('b'));
-    expect(await nextOf(na, 'cred.seal')).toEqual({ type: 'cred.seal', kind: 'claude_token', recipients: [{ nodeId: b.nodeId, publicKey: KEY('b') }] });
+    expect(await nextOf(na, 'cred.seal')).toEqual({ type: 'cred.seal', kind: 'claude_token', version: 1, recipients: [{ nodeId: b.nodeId, publicKey: KEY('b') }] });
   });
 });
 

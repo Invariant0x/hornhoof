@@ -452,8 +452,8 @@ const ServerMessage = z.discriminatedUnion('type', [
   /* A sign-in sealed to this node's key, which it opens and keeps where its program reads it; drop removes it. */
   z.object({ type: z.literal('cred.put'), kind: CredKind, version: z.number().int().min(1), sealed: Sealed }),
   z.object({ type: z.literal('cred.drop'), kind: CredKind }),
-  /* Seal the sign-in this node holds for these nodes of the same plan and send it back as cred.sealed. */
-  z.object({ type: z.literal('cred.seal'), kind: CredKind, recipients: z.array(z.object({ nodeId: Id, publicKey: AgeRecipient })).max(MAX_ENVELOPES) }),
+  /* Seal the sign-in this node holds for these nodes of the same plan and send it back as cred.sealed under version. */
+  z.object({ type: z.literal('cred.seal'), kind: CredKind, version: z.number().int().min(1), recipients: z.array(z.object({ nodeId: Id, publicKey: AgeRecipient })).max(MAX_ENVELOPES) }),
   /* Open the plan's sign-in in the login terminal; fresh signs the program out first, for another account. */
   z.object({ type: z.literal('login.start'), fresh: z.boolean() }),
   z.object({ type: z.literal('login.stop') }),

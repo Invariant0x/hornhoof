@@ -65,5 +65,5 @@ export async function pushCredentials(ctx: Ctx, nodeId: string): Promise<void> {
   if (mine) return void deliver(ctx, kind, node.credVersion, [mine]);
   if (!node.publicKey) return;
   const peer = held.find(h => ctx.hub.isOnline(nodeIdentity(h.nodeId)));
-  if (peer) ctx.hub.send(nodeIdentity(peer.nodeId), { type: 'cred.seal', kind, recipients: [{ nodeId, publicKey: node.publicKey }] });
+  if (peer) ctx.hub.send(nodeIdentity(peer.nodeId), { type: 'cred.seal', kind, version: node.credVersion, recipients: [{ nodeId, publicKey: node.publicKey }] });
 }

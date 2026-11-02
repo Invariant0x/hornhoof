@@ -7,7 +7,7 @@ const LOGGED_ENV = [
   'CLAUDE_CONFIG_DIR', 'CLAUDE_CODE_AUTO_COMPACT_WINDOW', 'CODEX_HOME', 'KIMI_CODE_HOME', 'ANTHROPIC_API_KEY', 'ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN',
   'API_TIMEOUT_MS', 'ANTHROPIC_DEFAULT_OPUS_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL',
   'CODEX_API_KEY', 'NODE_KEY', 'HORNHOOF_DATA', 'HH_TOOL_TOKEN', 'HOME', 'PATH', 'GIT_ASKPASS', 'HH_GIT_PASSWORD', 'GIT_TERMINAL_PROMPT',
-  'KIMI_MODEL_THINKING_EFFORT', 'AGY_CLI_DISABLE_AUTO_UPDATE',
+  'KIMI_MODEL_THINKING_EFFORT', 'AGY_CLI_DISABLE_AUTO_UPDATE', 'CLAUDE_CODE_OAUTH_TOKEN',
 ];
 
 const LOGIN_URL = 'https://login.example.test/device?code=ABC';
@@ -88,6 +88,13 @@ export function run(name) {
     if (name === 'kimi') process.stderr.write('error: failed to run prompt: something broke\n');
     if (name === 'agy') print('agy-fail');
     process.exit(1);
+  }
+  /* An agent that prints the sign-in it was started with, which nobody may see. */
+  if (mode === 'say_token' && name === 'claude') {
+    const text = `my token is ${process.env.CLAUDE_CODE_OAUTH_TOKEN}`;
+    process.stdout.write(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text }] } }) + '\n');
+    process.stdout.write(JSON.stringify({ type: 'result', is_error: false, result: text, session_id: '5e55c1a0-0000-4000-8000-000000000001' }) + '\n');
+    process.exit(0);
   }
   if (mode === 'auth_error' && name === 'claude') {
     /* The error code alone, with a message the sign-in patterns do not know. */
