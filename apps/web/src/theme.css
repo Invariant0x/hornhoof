@@ -723,8 +723,9 @@ button.shead:focus-visible, button.schip:focus-visible { outline: none; }
 .crumb-name:hover { text-decoration: underline; text-underline-offset: 3px; }
 .crumb svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .dv-acts { position: absolute; z-index: 3; right: 16px; bottom: 16px; display: flex; align-items: center; gap: 8px; }
-.body.with-window .dv-acts { right: 688px; }
-.body.with-card .dv-acts, .body.with-task .dv-acts { right: 492px; }
+/* A window, card or task ends above the strip the zoom and the actions sit in, so with one open the actions move along
+   that strip to right after the zoom, out from under it at any width; on a phone the window covers the whole screen. */
+@media (min-width: 761px) { .body.with-window .dv-acts, .body.with-card .dv-acts, .body.with-task .dv-acts { left: 212px; right: auto; } }
 .hbtn { height: 44px; padding: 0 16px; box-sizing: border-box; color: var(--ink); font-family: var(--f-display); font-size: 14px; font-weight: 600; cursor: pointer; }
 .hbtn:hover { border-color: var(--line2); }
 .hbtn.on { color: var(--cyan-ink); box-shadow: inset 0 -2px 0 var(--cyan); }
@@ -815,7 +816,6 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 .staff-pick select { min-width: 0; height: 32px; padding: 0 8px; border: 1px solid var(--line2); background: var(--surface); color: var(--ink); font: inherit; font-size: 13px; }
 .staff-pick select:disabled { opacity: .55; }
 
-@media (max-width: 1180px) { .body.with-window .dv-acts, .body.with-card .dv-acts, .body.with-task .dv-acts { right: 16px; bottom: 72px; } }
 @media (max-width: 760px) {
   .crumbs { top: 64px; left: 16px; max-width: calc(100% - 32px); }
   .dview .ticker { left: 16px; right: 16px; }

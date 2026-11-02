@@ -7,7 +7,7 @@ import { Shell } from '../src/screens/Shell';
 import { RepoSettings } from '../src/ui/RepoSettings';
 import type { Me, Org } from '../src/types';
 import { CARD, DEV_ORG, ME, mockApi, ROSTER, TASK_DETAIL, TASKS } from './api-mock';
-import { decl } from './css';
+import { decl, px, rulesFor } from './css';
 import { fakeStream } from './fake-stream';
 
 const EVENTS = '/api/agents/orchestrator/events?after=0';
@@ -223,6 +223,17 @@ describe('Department view', () => {
     expect(bruno.querySelector('.st')).toHaveTextContent(/^needs a decision$/);
     expect(bruno.querySelector('.st')).toHaveAttribute('title', 'needs a decision');
     expect(ru.dept.status.waiting).toBe('ждет решения');
+  });
+
+  it('keeps the department actions in the free strip after the zoom while a window, card or task is open', () => {
+    /* Windows, cards and tasks end above the strip at the bottom where the zoom and the actions sit, so the actions
+       stay there, right after the zoom, at every width a window leaves beside them; on a phone the window covers all. */
+    const strip = px(decl('.dv-acts', 'bottom')) + px(decl('.hbtn', 'height'));
+    for (const panel of ['.orch', '.acard']) expect(px(decl(panel, 'bottom'))).toBeGreaterThan(strip);
+    for (const kind of ['window', 'card', 'task'])
+      expect(rulesFor(`.body.with-${kind} .dv-acts`).map(r => [r.media, r.decls.left, r.decls.right, r.decls.bottom])).toEqual([
+        ['(min-width: 761px)', decl('.dview .ticker', 'left'), 'auto', undefined],
+      ]);
   });
 
   it('lays out the gates after the work, the way back from them and the report to the head', async () => {
