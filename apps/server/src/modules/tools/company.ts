@@ -1,7 +1,9 @@
 import { DEPARTMENT_TEMPLATES } from '@hornhoof/protocol';
-import { and, asc, eq, isNull, ne } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, ne } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
-import { agents, companies, departments, people, subscriptions } from '../../db/schema.js';
+import { agents, companies, departments, nodes, people, subscriptions } from '../../db/schema.js';
+import { liveNode } from '../nodes/nodes.js';
+import { agreed } from '../subscriptions/views.js';
 import { employeeOrder } from '../agents/order.js';
 import { deptName, TEMPLATE_TEXT } from '../departments/templates.js';
 import type { Templates } from '../templates/load.js';
@@ -18,6 +20,9 @@ export async function companyView(db: Db, templates: Templates, companyId: strin
   const depts = await db.select().from(departments).where(eq(departments.companyId, companyId)).orderBy(asc(departments.position), asc(departments.createdAt));
   const owners = new Map((await db.select({ id: people.id, scopeKind: people.scopeKind }).from(people)).map(p => [p.id, p.scopeKind]));
   const subs = await db.select().from(subscriptions).where(and(eq(subscriptions.companyId, companyId), isNull(subscriptions.removedAt)));
+  /* What each plan's machines are signed in to: agents get the tier, never the address. */
+  const told = subs.length ? await db.select({ subscriptionId: nodes.subscriptionId, account: nodes.account }).from(nodes).where(and(inArray(nodes.subscriptionId, subs.map(s => s.id)), liveNode)) : [];
+  const tierOf = (id: string) => agreed(told.filter(n => n.subscriptionId === id && n.account).map(n => n.account!)).tier;
   const staff = await db.select().from(agents).where(and(eq(agents.companyId, companyId), ne(agents.kind, 'orchestrator'), isNull(agents.removedAt)));
   /* Each department's employees, so a head knows its team: role, product and what it runs on. The id is what create_task
      takes as the executor, the role id what it takes as a gate. */
@@ -55,6 +60,7 @@ export async function companyView(db: Db, templates: Templates, companyId: strin
       provider: s.provider,
       kind: s.kind,
       servesWholeCompany: servesWholeCompany(s, owners.get(s.ownerPersonId)),
+      tier: tierOf(s.id),
     })),
     templates: DEPARTMENT_TEMPLATES.map(t => ({ key: t.key, ...TEMPLATE_TEXT[t.key], alwaysOn: t.always })),
   };

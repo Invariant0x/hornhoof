@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Limits } from '@hornhoof/protocol';
 import { ownFs, type AgentFs } from '../agent-fs.js';
+import { CRED_FILES } from '../credentials.js';
+import { readPrivate } from '../providers/process.js';
 import { WHOLE_AGENTS_MD } from '../providers/codex.js';
 import type { AgentUrls } from './bridge.js';
 import { claudeUsageLimits, kimiUsageLimits } from './transcripts.js';
@@ -45,6 +47,11 @@ const bridgeEnv = (urls: AgentUrls) => ({
 
 const hook = (event: string) => [{ hooks: [{ type: 'command', command: `hh-hook ${event}` }] }];
 
+/* The long token of a Claude plan signed in once on another machine, which this node was given; none otherwise. */
+export function planToken(home: string): string | null {
+  return readPrivate(join(home, CRED_FILES.claude_token))?.trim() || null;
+}
+
 export const claudeProgram: TermProgram = {
   kind: 'claude',
   launch({ bin, home, sessionId, model, effort, compactWindow, instructionsFile, urls, plugins = [] }) {
@@ -70,7 +77,8 @@ export const claudeProgram: TermProgram = {
       ...(effort ? ['--effort', effort] : []),
     ];
     const compact: Record<string, string> = compactWindow ? { CLAUDE_CODE_AUTO_COMPACT_WINDOW: String(compactWindow) } : {};
-    return { command, env: { CLAUDE_CONFIG_DIR: home, ...bridgeEnv(urls), ...compact }, sessionId: id };
+    const token = planToken(home);
+    return { command, env: { CLAUDE_CONFIG_DIR: home, ...bridgeEnv(urls), ...compact, ...(token ? { CLAUDE_CODE_OAUTH_TOKEN: token } : {}) }, sessionId: id };
   },
 };
 

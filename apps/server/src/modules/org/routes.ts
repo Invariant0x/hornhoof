@@ -179,7 +179,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
         context: orchestrator.contextUsed,
         /* His plan is at its limit until then: he waits for the reset on it, and the CEO decides whether he moves. */
         limitUntil: limitUntil((orchestrator.subscriptionId && subs.get(orchestrator.subscriptionId)?.limits) || null),
-        subscription: orchestrator.subscriptionId ? await subView(db, node => hub.isOnline(node), orchestrator.subscriptionId) : null,
+        subscription: orchestrator.subscriptionId ? await subView(db, node => hub.isOnline(node), orchestrator.subscriptionId, me) : null,
         machine: await machineOf(db, (await programNode(ctx, orchestrator.id))?.node ?? null),
       },
       agents: { total: allAgents.length, working: await workingCount(db, me.companyId) },

@@ -50,7 +50,7 @@ The pictures show Moonfern, a made-up company. Its people, plans and work are in
 
    ![Setting up a company](.github/assets/setup.gif)
 
-3. Connect your AI plans. You sign in to each one once, on your own computer, and its agents work in a small locked box of their own.
+3. Connect your AI plans. Each runs on your own computer, in a small locked box of its own, and you sign it in once in Hornhoof for all your machines.
 
    ![Connecting AI plans](.github/assets/subscriptions.png)
 
@@ -108,7 +108,7 @@ You sign in to a plan once, and it runs on any of your machines. A ChatGPT plan 
 
 ### Building something with friends
 
-Invite each friend with a link. Everyone connects their own plan on their own computer, so their agents work for the shared company while their sign-in opens only on their own machines. Give each person the departments they work in, and they see only those. Someone who works across several departments shows up next to the CEO on the map as a deputy.
+Invite each friend with a link. Everyone connects their own plan on their own computer, so their agents work for the shared company. Their sign-in is sealed to their own machines: Hornhoof keeps it locked with each machine's key and cannot read it. Give each person the departments they work in, and they see only those. Someone who works across several departments shows up next to the CEO on the map as a deputy.
 
 ### Several products
 
@@ -155,7 +155,7 @@ Now you are on the map, with the orchestrator in the middle. Click him and tell 
 ### Add more later
 
 - To add another computer, open Machines, click "Connect a machine", then "Copy", and run the command in a terminal on that computer.
-- To add your AI plans, open Subscriptions, click "Connect a subscription", tick your plans, click "Get the command" and run it on the computer that will carry them. Each plan opens its own sign-in.
+- To add your AI plans, open Subscriptions, click "Connect a subscription", tick your plans, click "Get the command" and run it on the computer that will carry them. Each plan opens its own sign-in there, or you sign it in once on the Subscriptions tab, and it reaches every machine of yours.
 - To invite a friend, open People, click "Invite person", fill in their name and email and tick what they may see, click "Send invite", then "Copy link", and send them the link yourself.
 - When a new version is out, Hornhoof shows a banner with an "Update" button. Running the install line again updates too.
 

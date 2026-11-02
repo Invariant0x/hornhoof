@@ -454,6 +454,18 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .subs .status { display: inline-block; white-space: nowrap; }
 .status.offline, .status.builtin_offline { color: var(--muted); }
 .limits { display: block; margin-top: 4px; font-size: 12px; color: var(--muted); }
+.signin-line { display: block; margin-top: 4px; font-size: 12px; overflow-wrap: anywhere; }
+.signin-line.warn { color: var(--amber-ink); }
+/* A plan's sign-in terminal under its row: the program's own screen, which needs room for its links and code. */
+.signin { display: grid; gap: 8px; }
+.signin h3 { margin: 0; font-family: var(--f-display); font-size: 14px; font-weight: 600; }
+.signin p { margin: 0; font-size: 12.5px; }
+.signin .t-term { height: 360px; }
+.key-form { display: grid; gap: 8px; max-width: 520px; }
+.key-form label { display: grid; gap: 4px; font-size: 13px; font-weight: 500; color: var(--muted); }
+.key-form input { font: inherit; font-family: var(--f-mono); color: var(--ink); background: var(--surface); border: 1px solid var(--line2); padding: 6px 8px; }
+.key-form p { margin: 0; font-size: 12.5px; }
+.key-form a { color: var(--cyan-ink); }
 .row-extra td { background: var(--surface2); }
 .ask { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .ask span { flex: 1 1 280px; }

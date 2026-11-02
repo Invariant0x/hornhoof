@@ -512,7 +512,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard }:
           )}
         </div>
       )}
-      {!notebook && known && terminal && <AgentTerminal agentId={agentId} program={sub ? PROGRAM_NAMES[sub.provider] : 'Claude'} onGone={() => setNoTerminal(true)} />}
+      {!notebook && known && terminal && <AgentTerminal path={`/api/agents/${agentId}/terminal`} program={sub ? PROGRAM_NAMES[sub.provider] : 'Claude'} onGone={() => setNoTerminal(true)} />}
       {!notebook && known && terminal && hasCards && (
         <div className="t-cards">
           {cards}

@@ -11,7 +11,7 @@ const MAX_ANSWER = 30_000;
 const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
 
 const SECRETS = Object.values(SECRET).flat().join(', ');
-const CLOSED = 'Sign-ins, invites, install codes and the public link are closed to this tool.';
+const CLOSED = 'Sign-ins, invites, install codes, sealed plan sign-ins and the public link are closed to this tool.';
 export const READ_ONLY = 'Operations reads the database; a change goes to the orchestrator as one message with the SQL and why.';
 const PEOPLE = 'People and what they reach change only through invite_person, change_person and invite_again, which only the CEO may ask for.';
 const PLANS = 'Subscriptions and machines change only through their tools, which only the CEO may ask for.';
@@ -54,13 +54,13 @@ const DESCRIPTIONS: Record<SqlMode, string> = {
   write:
     "Runs SQL on Hornhoof's own Postgres database, for what no other tool does: fixing a stuck row, changing a field, removing what the screens cannot. " +
     'Several statements run in one transaction and are undone together when one fails; a call may take 15 seconds. It reads and changes the rows of every table ' +
-    `but sign-ins, invites, install codes and the public link, and never the columns with secrets (${SECRETS}), so name columns instead of * on those tables. ` +
+    `but sign-ins, invites, install codes, sealed plan sign-ins and the public link, and never the columns with secrets (${SECRETS}), so name columns instead of * on those tables. ` +
     "People and their access, subscriptions, machines, repositories, an employee's kind, role, skills and subscription, a head's department and a turn but its status change only through the other tools. " +
     'It cannot change the tables themselves. A change skips the checks and notices the other tools make, so prefer them, read before you write and change only ' +
     'the rows you mean. Each statement comes back as { rows, changed }.',
   read:
     "Reads Hornhoof's own Postgres database, to find what went wrong: stuck rows, failed turns, who changed what and when. Several statements run in one " +
-    'transaction; a call may take 15 seconds. It reads the rows of every table but sign-ins, invites, install codes and the public link, and never the columns ' +
+    'transaction; a call may take 15 seconds. It reads the rows of every table but sign-ins, invites, install codes, sealed plan sign-ins and the public link, and never the columns ' +
     `with secrets (${SECRETS}), so name columns instead of * on those tables. ${READ_ONLY} Each statement comes back as { rows, changed }.`,
 };
 

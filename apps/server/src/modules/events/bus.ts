@@ -29,7 +29,9 @@ export type StreamMessage =
   /* What employees found to improve changed; it goes to people who see the whole company. */
   | { type: 'improvements'; spot: Spot }
   /* How full an agent's context is now, for the bar on the map, which everyone sees. */
-  | { type: 'context'; agentId: string; used: number };
+  | { type: 'context'; agentId: string; used: number }
+  /* How a plan's sign-in on one of its machines ended; it goes to the plan's owner alone. */
+  | { type: 'subscription.signin'; subscriptionId: string; nodeId: string; ok: boolean; error: string | null; owner: string };
 
 /* In-process fan-out per company. One server process serves one deployment, so nothing crosses processes. */
 export class EventBus {

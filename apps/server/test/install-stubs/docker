@@ -41,10 +41,13 @@ case "$1" in
     fi
     WORD=login; if has "$@"; then
       IFS= read -r line || true; printf 'tty %s\n' "$line" >> "$STUB_LOG"
+      touch "$STUB_STATE/signed-in-$3"
       sleep "${STUB_LOGIN_SLEEP:-0}"; echo "Logged in."; exit "${STUB_LOGIN_EXIT:-0}"
     fi
     WORD=status; if has "$@"; then
       for n in ${STUB_REMOVED:-}; do WORD=$n; if has "$@"; then echo removed; exit 0; fi; done
+      # after_login: the node needs its sign-in until it went through the terminal sign-in.
+      if [ "${STUB_STATUS:-}" = after_login ]; then [ -f "$STUB_STATE/signed-in-$2" ] && echo ready || echo needs_login; exit 0; fi
       echo "${STUB_STATUS:-ready}"
     fi ;;
   *) ;;

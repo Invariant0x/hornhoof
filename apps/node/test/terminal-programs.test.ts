@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ownFs, type AgentFs } from '../src/agent-fs.js';
+import { credentialSecrets } from '../src/credentials.js';
+import { StreamMask } from '../src/terminal/mask.js';
 import { acceptClaudeDialogs, AGY_SCREEN, agyProgram, claudePlanLimits, claudeProgram, claudeTranscript, codexProgram, findKimiWire, findRollout, kimiPlanLimits, kimiProgram, prepareAgy, prepareKimi } from '../src/terminal/programs.js';
 
 const URLS = { mcpUrl: 'http://127.0.0.1:5000/mcp/s3cr3t', attachUrl: 'http://127.0.0.1:5000/attach/s3cr3t', hookUrl: 'http://127.0.0.1:5000/hook/s3cr3t' };
@@ -29,6 +31,16 @@ describe('Claude Code in a terminal', () => {
     expect(arg(command, '--append-system-prompt-file')).toBe('/w/a1/.hh-instructions.md');
     expect(arg(command, '--model')).toBe('opus');
     expect(env).toMatchObject({ CLAUDE_CONFIG_DIR: '/h', HH_BRIDGE: URLS.hookUrl, HH_ATTACH_URL: URLS.attachUrl, COLORTERM: 'truecolor' });
+  });
+
+  it("starts with the plan's sign-in its node was given, which the screen never shows", () => {
+    const home = mkdtempSync(join(tmpdir(), 'hh-claude-home-'));
+    const token = 'sk-ant-oat01-' + 'c'.repeat(40);
+    expect(claudeProgram.launch({ bin: 'claude', home, workDir: '/w', sessionId: null, model: null, instructionsFile: null, urls: URLS }).env).not.toHaveProperty('CLAUDE_CODE_OAUTH_TOKEN');
+    writeFileSync(join(home, 'claude-oauth-token'), token + '\n', { mode: 0o600 });
+    expect(claudeProgram.launch({ bin: 'claude', home, workDir: '/w', sessionId: null, model: null, instructionsFile: null, urls: URLS }).env.CLAUDE_CODE_OAUTH_TOKEN).toBe(token);
+    const mask = new StreamMask(() => credentialSecrets(home));
+    expect(mask.push(`$ echo $CLAUDE_CODE_OAUTH_TOKEN\r\n${token}\r\n$ `) + mask.flush()).toBe('$ echo $CLAUDE_CODE_OAUTH_TOKEN\r\n[hidden]\r\n$ ');
   });
 
   it('goes on with the session it had, and leaves the model to the plan when none is set', () => {
