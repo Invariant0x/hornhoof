@@ -286,7 +286,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
       {
         description:
           'Gives work to a member of your department: executor is an employee id from company. Name yourself only when no member can do it. gates are the reviewers it passes in order, as role ids (DEV-REV) or employee ids: ' +
-          "name only the gates the work's size and risk need: [] for research, reports, plans and docs. Name a role once: one reviewer of each model of it checks the work at once there. Left out, every gate role of the department that is hired. The executor never reviews its own work. parent: the department task it serves.",
+          "name only the gates the work's size and risk need: [] for research, reports, plans and docs. Name a role once: one reviewer of each model of it checks the work at once there. Left out, only the department's first review stage. The executor never reviews its own work. parent: the department task it serves.",
         inputSchema: { title: Title, brief: Brief, body: Body, executor: z.uuid(), gates: z.array(z.string().max(40)).max(8).optional(), parent: Ref.optional(), product: z.uuid().optional(), after: After.optional() },
       },
       async input =>
@@ -410,17 +410,16 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
     return agent;
   }
 
-  /* Gates by role id or employee id; left out, the department's gate roles that are hired, in their order. */
+  /* Gates by role id or employee id; left out, the department's first gate role that is hired: code gets one review stage,
+     and the head names the others a change's risk needs. */
   async function gatesFor(head: Agent, executor: string, given: string[] | undefined): Promise<string[]> {
     const staff = await db.select().from(agents).where(and(eq(agents.departmentId, head.departmentId!), isNull(agents.removedAt))).orderBy(asc(agents.createdAt));
     const gate = (a: Agent) => (a.roleKey ? ctx.templates.roles.get(a.roleKey)?.gate : null) ?? null;
     if (given === undefined) {
-      const seen = new Set<string>();
-      return staff
+      const [first] = staff
         .filter(a => a.id !== executor && gate(a) !== null)
-        .sort((a, b) => gate(a)! - gate(b)! || Number(!!a.switchedOffAt) - Number(!!b.switchedOffAt))
-        .filter(a => !seen.has(a.roleKey!) && seen.add(a.roleKey!))
-        .map(a => a.id);
+        .sort((a, b) => gate(a)! - gate(b)! || Number(!!a.switchedOffAt) - Number(!!b.switchedOffAt));
+      return first ? [first.id] : [];
     }
     return given.map(g => {
       const role = (a: Agent) => a.roleKey === g && a.id !== executor;
