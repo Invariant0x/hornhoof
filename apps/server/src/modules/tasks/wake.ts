@@ -57,6 +57,23 @@ function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string {
         `(a failing test, an unmet requirement, a security hole, data loss), all of them at once with file and line.${together}`
       );
     }
+    case 'turn_review': {
+      /* Its text names the turn's branch. */
+      const branch = w.text ?? "the turn's branch";
+      return (
+        `${ref} is the review of everything ${branch.replace('-', ' ')} changed in your department, once for the whole turn. ${read} Check it on the turn's branch: git diff <main line>...${branch}. ` +
+        'Other reviewers check the same branch at once, each for what their role looks at. Give your verdict: pass it, with notes for what does not block, or send it back for blocking findings ' +
+        '(a failing test, an unmet requirement, a security hole, data loss), all of them at once with file and line. Your findings go only in your verdict: write to nobody while you review.'
+      );
+    }
+    case 'reviewed':
+      return (
+        `The reviewers of ${ref} gave their verdicts, and some of them block:\n\n${quote(w.text ?? '')}\n\n` +
+        "Give each blocking finding as a fix task without gates (gates: []) under your department's task, to the member whose change it is, all at once with create_task. " +
+        'Each fix starts with a test that fails and then passes; there is no second review. Take a note that does not block into those tasks only when it is cheap. Once the fixes are in, give the final check.'
+      );
+    case 'review_passed':
+      return `Every reviewer passed the ${task.title.toLowerCase()}:\n\n${quote(w.text ?? '')}\n\nGive the final check now.`;
     case 'changes':
       return `${ref} came back to you with changes requested${said}Make them, then submit it again.`;
     case 'merge':

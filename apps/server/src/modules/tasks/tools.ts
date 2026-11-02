@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, departments, jobs, requests, tasks } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import { ask, blocked, cancel, CLOSED, comment, createTask, listed, openAfter, refuse, report, submit, updateTask, verdict, type Moved, type Task } from './engine.js';
+import { ask, blocked, cancel, CLOSED, comment, createTask, gateLeads, inRepository, listed, openAfter, refuse, report, submit, updateTask, verdict, type Moved, type Task } from './engine.js';
 import { carriesFile, encodedHint } from './attachments.js';
 import { taskByRef, taskDetail, taskLines, type TaskDetail } from './views.js';
 import { addTasks, editTurn, mergeTurn, planTurn, settle, tell, TURN_MESSAGES, turnName, turnRows } from './turns.js';
@@ -286,7 +286,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
       {
         description:
           'Gives work to a member of your department: executor is an employee id from company. Name yourself only when no member can do it. gates are the reviewers it passes in order, as role ids (DEV-REV) or employee ids: ' +
-          "name only the gates the work's size and risk need: [] for research, reports, plans and docs. Name a role once: one reviewer of each model of it checks the work at once there. Left out, only the department's first review stage. The executor never reviews its own work. parent: the department task it serves.",
+          "name only the gates the work's size and risk need: [] for research, reports, plans and docs. Name a role once: one reviewer of each model of it checks the work at once there. Left out, none for work in a repository, which the review of the turn checks at once, else the department's first review stage. The executor never reviews its own work. parent: the department task it serves.",
         inputSchema: { title: Title, brief: Brief, body: Body, executor: z.uuid(), gates: z.array(z.string().max(40)).max(8).optional(), parent: Ref.optional(), product: z.uuid().optional(), after: After.optional() },
       },
       async input =>
@@ -294,7 +294,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
           const agent = await me();
           await underCap(agent);
           const executor = await member(agent, input.executor);
-          const gates = await gatesFor(agent, executor.id, input.gates);
+          const gates = await gatesFor(agent, executor.id, input.gates, input.product);
           if (input.product) {
             const [product] = await db.select({ id: departments.id }).from(departments).where(and(eq(departments.id, input.product), eq(departments.parentId, agent.departmentId!)));
             if (!product) throw refuse(404, 'department_unknown', `${input.product} is not a product of your department.`);
@@ -410,17 +410,12 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
     return agent;
   }
 
-  /* Gates by role id or employee id; left out, the department's first gate role that is hired: code gets one review stage,
-     and the head names the others a change's risk needs. */
-  async function gatesFor(head: Agent, executor: string, given: string[] | undefined): Promise<string[]> {
+  /* Gates by role id or employee id. Left out, work in a repository gets none, since the review of the turn checks all of
+     it at once; other work gets the department's first gate role that is hired. */
+  async function gatesFor(head: Agent, executor: string, given: string[] | undefined, productId?: string): Promise<string[]> {
+    if (given === undefined && (await inRepository(db, { departmentId: head.departmentId, productId: productId ?? null }))) return [];
+    if (given === undefined) return (await gateLeads(db, ctx.templates, head.departmentId!, executor)).slice(0, 1);
     const staff = await db.select().from(agents).where(and(eq(agents.departmentId, head.departmentId!), isNull(agents.removedAt))).orderBy(asc(agents.createdAt));
-    const gate = (a: Agent) => (a.roleKey ? ctx.templates.roles.get(a.roleKey)?.gate : null) ?? null;
-    if (given === undefined) {
-      const [first] = staff
-        .filter(a => a.id !== executor && gate(a) !== null)
-        .sort((a, b) => gate(a)! - gate(b)! || Number(!!a.switchedOffAt) - Number(!!b.switchedOffAt));
-      return first ? [first.id] : [];
-    }
     return given.map(g => {
       const role = (a: Agent) => a.roleKey === g && a.id !== executor;
       const found = /^[A-Z]{3}-[A-Z0-9]+$/.test(g) ? (staff.find(a => role(a) && !a.switchedOffAt) ?? staff.find(role)) : staff.find(a => a.id === g);
