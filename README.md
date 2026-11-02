@@ -35,11 +35,25 @@ Hornhoof is young. It works, and it changes fast. Expect rough edges, and tell u
 
 ## How it works
 
+The pictures show Moonfern, a made-up company. Its people, plans and work are invented for the demo.
+
 1. Install Hornhoof with one line in the terminal.
+
 2. Open the link it shows. Name your company and pick a template, or start empty.
+
+   ![Setup: the company is named Moonfern, the Startup template is picked, the CEO makes her account and runs the orchestrator on her own plan, and the map opens with five empty departments](.github/assets/setup.gif)
+
 3. Connect your AI plans. Each plan signs in on your own computer, in a small locked box of its own.
+
+   ![Subscriptions: Claude, Codex and Kimi ticked to connect with one command, and each connected plan with its 5 hour and 7 day limits and how much of them tasks may use](.github/assets/subscriptions.png)
+
 4. Tell the orchestrator about your company. He proposes departments and people for them. You tick what you want and click once.
+
+   ![An empty company: the CEO tells the orchestrator what the company does, he proposes departments on a card, and one click creates them on the map](.github/assets/build.gif)
+
 5. Write what you need. The orchestrator packs it into a turn of tasks, the heads hand out the work, and you watch it move on the map.
+
+   ![The map of a working company: the orchestrator in the middle, departments around him, messages running along the lines and employees starting and finishing tasks](.github/assets/map.gif)
 
 ## What people do with it
 
@@ -49,13 +63,21 @@ Say you have Claude, ChatGPT and Kimi. Usually you work in one of them while the
 
 A change written on one maker's model is checked by reviewers on the others, because each of them catches mistakes the others miss. When one plan reaches its limit, its task goes to an employee of the same role on another plan, or waits until the limit resets and then goes on by itself. You set how much of each plan's limit the tasks may use, so some is always left for you.
 
+![Inside the Development department: the head on top, a frame for each role, and developers on Claude, Codex, Kimi, GLM and Antigravity working, queued, waiting for a decision or free, while work passes the review gates](.github/assets/development.gif)
+
 ### Too many windows
 
 Instead of a dozen chats you have one company. You write to the orchestrator once, he turns it into tasks, and each department's head gives them out. Every employee works in its own terminal, which you can open, watch live and type into. When an agent needs you, its question waits for you at the top of Tasks, so you answer everything in one place.
 
+![An employee's window: a developer's live Claude Code terminal while he writes a failing test, fixes the code, runs the tests on the free machines and hands the task in](.github/assets/terminal.gif)
+
+![Tasks: what waits for the CEO on top, a question, a commit to approve and a choice, then the running turn with its tasks and the planned turns after it](.github/assets/tasks.gif)
+
 ### Every computer you have helps
 
 Connect your work laptop, an old one and a server, each with one command. The Machines tab shows them as one pool: how many cores and how much free memory they have together, and how busy each one is. Tests and other heavy work go to whichever machine is free, while the agents keep working where they are.
+
+![Machines: the company's computers as one pool, with each one's load, its plans and what runs on it, from agents to parts of a test run](.github/assets/machines.png)
 
 ### Building something with friends
 

@@ -2,6 +2,8 @@
 
 Real ways to use Hornhoof, from everyday work with AI plans to a home run like a small company. Each one says what to set up. The [README](README.md) has the install.
 
+The pictures show Moonfern, a made-up company. Its people, plans and work are invented for the demo.
+
 ## Work
 
 ### Many AI plans working as one team
@@ -12,19 +14,29 @@ Work written on one maker's model is checked by reviewers on the others, one of 
 
 A plan that reaches its limit does not stop the job. Its task goes to an employee of the same role on another maker's plan that still has room, or waits until the limit resets and then goes on by itself. Next to each plan's limits, "Tasks may use" sets how much of every limit window the tasks may spend, from 50 to 90 percent, so some is always left for you.
 
+![Subscriptions: Claude, Codex and Kimi ticked to connect with one command, and each connected plan with its 5 hour and 7 day limits and how much of them tasks may use](.github/assets/subscriptions.png)
+
 ### Too many windows
 
 Instead of a dozen chats you have one company. You write to the orchestrator once, he turns it into a turn of tasks, and each department's head gives them out. Every employee works in its own terminal, which you can open, watch live and type into. When an agent needs you, its question, a change to approve or a task it is stuck on waits for you at the top of Tasks, so you answer everything in one place.
 
+![An employee's window: a developer's live Claude Code terminal while he writes a failing test, fixes the code, runs the tests on the free machines and hands the task in](.github/assets/terminal.gif)
+
+![Tasks: what waits for the CEO on top, a question, a commit to approve and a choice, then the running turn with its tasks and the planned turns after it](.github/assets/tasks.gif)
+
 ### A development team that checks its own work
 
 Give the Development department a git repository and a token for it. The head splits each task into large pieces, one for each developer, with a short design note from an architect first when the feature is new or big. Each piece gets only the checks it needs: none for research and docs, one review for code, and a security review when the change touches sign-in, access or secrets. The whole turn is tested once at the end, on its own branch. Nothing reaches the main branch until you approve the exact commit.
+
+![Inside the Development department: the head on top, a frame for each role, and developers on Claude, Codex, Kimi, GLM and Antigravity working, queued, waiting for a decision or free, while work passes the review gates](.github/assets/development.gif)
 
 ### Every computer you have helps
 
 Connect your work laptop, an old one and a server, each with one command from the Machines tab. A computer does not need a plan of its own to help. The Machines tab shows them as one pool: how many cores and how much free memory they have together, and how busy each one is.
 
 When an agent runs the tests, Hornhoof sends them to whichever machine is free and splits a big test suite across several machines at once. Other heavy work, like a build or a report, goes out the same way, and the results come back to the task. A busy machine gets no new work. Untick "Lend to test runs" on a machine to keep it for yourself.
+
+![Machines: the company's computers as one pool, with each one's load, its plans and what runs on it, from agents to parts of a test run](.github/assets/machines.png)
 
 ### Building something with friends
 
@@ -49,6 +61,8 @@ curl -fsSL https://raw.githubusercontent.com/Invariant0x/hornhoof/main/scripts/i
 ## Templates to start from
 
 Setup offers these. A template creates its departments right away, and the orchestrator then offers people for them. You can change everything later.
+
+![Setup: the company is named Moonfern, the Startup template is picked, the CEO makes her account and runs the orchestrator on her own plan, and the map opens with five empty departments](.github/assets/setup.gif)
 
 | Template | What you get |
 | --- | --- |
