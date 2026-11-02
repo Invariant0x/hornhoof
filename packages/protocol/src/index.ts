@@ -295,6 +295,19 @@ const Load = z.object({
 export type NodeLoad = z.infer<typeof Load>;
 export const LOAD_MS = 20_000;
 
+/* What a plan's sign-in is on a node: Claude's long token, Codex's auth file (on one machine at a time), Kimi's and GLM's
+   keys. Hornhoof keeps each only sealed to one node's public key, so it can never read them. */
+export const CRED_KINDS = ['claude_token', 'codex_auth', 'kimi_key', 'glm_key'] as const;
+export type CredKind = (typeof CRED_KINDS)[number];
+const CredKind = z.enum(CRED_KINDS);
+/* The account a node's program is signed in to, as far as the program tells: unknown parts are null. */
+export const Account = z.object({ email: z.string().max(200).nullable(), tier: z.string().max(40).nullable() });
+export type Account = z.infer<typeof Account>;
+/* An age public key, and an armored age message sealed to one. */
+export const AgeRecipient = z.string().regex(/^age1[0-9a-z]{58}$/);
+export const Sealed = z.string().min(1).max(64 * 1024);
+const MAX_ENVELOPES = 20;
+
 const NodeMessage = z.discriminatedUnion('type', [
   /* terminals: the node runs agents in sessions people can watch and type into. */
   /* tests: the parts of test runs it runs, or ran and Hornhoof has not confirmed. */
@@ -314,6 +327,9 @@ const NodeMessage = z.discriminatedUnion('type', [
     load: Load.optional(),
     tests: z.array(z.string()).max(100).optional(),
     skillFiles: z.boolean().optional(),
+    /* The key Hornhoof seals this node's sign-ins to; the private half never leaves the node. */
+    publicKey: AgeRecipient.optional(),
+    account: Account.nullable().optional(),
   }),
   z.object({ type: z.literal('load'), ...Load.shape }),
   z.object({ type: z.literal('tests.started'), partId: z.string() }),
@@ -327,7 +343,16 @@ const NodeMessage = z.discriminatedUnion('type', [
     commit: z.string().regex(/^[0-9a-f]{40,64}$/).nullable(),
     log: z.string().max(TEST_LOG_BYTES + 1024),
   }),
-  z.object({ type: z.literal('status'), loggedIn: z.boolean(), limits: Limits.nullable(), models: Models.optional() }),
+  z.object({ type: z.literal('status'), loggedIn: z.boolean(), limits: Limits.nullable(), models: Models.optional(), account: Account.nullable().optional() }),
+  /* The sign-in this node holds, sealed for each of the plan's other nodes; version counts sign-ins of the plan. */
+  z.object({
+    type: z.literal('cred.sealed'),
+    kind: CredKind,
+    version: z.number().int().min(1),
+    envelopes: z.array(z.object({ nodeId: Id, sealed: Sealed })).max(MAX_ENVELOPES),
+  }),
+  /* How the sign-in Hornhoof started on this node ended. */
+  z.object({ type: z.literal('login.done'), ok: z.boolean(), error: z.string().max(300).nullable() }),
   z.object({ type: z.literal('job.started'), jobId: z.string() }),
   z.object({
     type: z.literal('job.done'),
@@ -424,6 +449,16 @@ const ServerMessage = z.discriminatedUnion('type', [
   /* Hornhoof has the job's end: the node stops sending it again after each reconnect. */
   z.object({ type: z.literal('job.ack'), jobId: Id }),
   z.object({ type: z.literal('remove') }),
+  /* A sign-in sealed to this node's key, which it opens and keeps where its program reads it; drop removes it. */
+  z.object({ type: z.literal('cred.put'), kind: CredKind, version: z.number().int().min(1), sealed: Sealed }),
+  z.object({ type: z.literal('cred.drop'), kind: CredKind }),
+  /* Seal the sign-in this node holds for these nodes of the same plan and send it back as cred.sealed. */
+  z.object({ type: z.literal('cred.seal'), kind: CredKind, recipients: z.array(z.object({ nodeId: Id, publicKey: AgeRecipient })).max(MAX_ENVELOPES) }),
+  /* Open the plan's sign-in in the login terminal; fresh signs the program out first, for another account. */
+  z.object({ type: z.literal('login.start'), fresh: z.boolean() }),
+  z.object({ type: z.literal('login.stop') }),
+  /* Codex runs on one machine at a time: hold says whether this node is it. */
+  z.object({ type: z.literal('cred.lease'), hold: z.boolean() }),
   /* write: the person may type; anyone else watches. agentKey: the agent's folder and session on the node. */
   z.object({ type: z.literal('term.open'), termId: TermId, agentKey: Id, cols: Cols, rows: Rows, write: z.boolean() }),
   z.object({ type: z.literal('term.input'), termId: TermId, data: z.string().max(TERM_CHUNK) }),
