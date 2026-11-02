@@ -42,6 +42,7 @@ export type AgentState = {
 
 /* How long after a plan's limit starts over its waiting turns go out, so the program sees the new limit. */
 const LIMIT_GRACE_MS = 5_000;
+const LONGEST_TIMER_MS = 2 ** 31 - 1;
 
 /* When the plan's limit starts over, while the plan is at it: the latest reset of a full window still to come. A plan at
    its limit that says no reset holds nothing, so its turns go out and fail as before rather than wait forever. */
@@ -90,10 +91,13 @@ function pumpAt(ctx: Ctx, agentId: string, at: string): void {
   resets.set(ctx, timers);
   if (timers.get(agentId)?.at === at) return;
   clearTimeout(timers.get(agentId)?.timer);
+  /* A timer holds at most about 24 days: a longer wait wakes once then and sets itself again. */
+  const wait = Date.parse(at) - Date.now() + LIMIT_GRACE_MS;
   const timer = setTimeout(() => {
     timers.delete(agentId);
+    if (wait > LONGEST_TIMER_MS) return pumpAt(ctx, agentId, at);
     void pump(ctx, agentId).catch(() => {});
-  }, Date.parse(at) - Date.now() + LIMIT_GRACE_MS);
+  }, Math.min(wait, LONGEST_TIMER_MS));
   timer.unref();
   timers.set(agentId, { at, timer });
 }

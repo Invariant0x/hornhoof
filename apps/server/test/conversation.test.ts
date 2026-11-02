@@ -1,7 +1,7 @@
 import { MAX_INSTRUCTIONS, OLD_NODE_INSTRUCTIONS } from '@hornhoof/protocol';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { agents, companies, departments, jobs, people, subscriptions, turns } from '../src/db/schema.js';
 import { renderInstructions } from '../src/modules/agents/instructions.js';
 import { FIRST_TURN, FIRST_TURN_TEMPLATE, ORCHESTRATOR_INSTRUCTIONS } from '../src/modules/conversation/prompt.js';
@@ -365,6 +365,22 @@ describe('the orchestrator\'s conversation', () => {
     expect((await state(app, ceo)).queued).toBe(1);
     expect((await nextRun(mac)).prompt).toBe('Ivan (CEO): Go on');
     expect((await state(app, ceo)).limitUntil).toBeNull();
+  });
+
+  it('waits quietly for a limit that starts over in more than 24 days, too long for one timer', async () => {
+    const { app, ceo, mac } = await onMac('0.3.0');
+    await until(async () => (await state(app, ceo)).ready);
+    const overflows: string[] = [];
+    const warned = (w: Error) => w.name === 'TimeoutOverflowWarning' && overflows.push(w.message);
+    process.on('warning', warned);
+    onTestFinished(() => void process.off('warning', warned));
+    const resetsAt = new Date(Date.now() + 40 * 24 * 3600_000).toISOString();
+    mac.send({ type: 'status', loggedIn: true, limits: { status: 'rejected', windows: [{ name: 'seven_day', utilization: 1, resetsAt }] } });
+    await until(async () => (await state(app, ceo)).limitUntil === resetsAt);
+    expect((await say(app, ceo, 'Go on')).statusCode).toBe(202);
+    await new Promise(r => setTimeout(r, 300));
+    expect(overflows).toEqual([]);
+    expect((await state(app, ceo)).queued).toBe(1);
   });
 
   it('holds turns when the program said the plan ran out of its usage limit, though the plan itself said nothing', async () => {
