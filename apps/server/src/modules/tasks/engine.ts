@@ -167,11 +167,22 @@ export async function note(tx: Tx | Db, task: Pick<Task, 'id' | 'companyId'>, n:
   return row!;
 }
 
+/* A move by which an agent gives its work back lights its line to the one above it on the map: the task, when it did. */
+async function givesBack(tx: Tx, row: Task, n: Note, event: { id: number; createdAt: Date }): Promise<Task | null> {
+  if (!n.returned || !n.actor.agentId) return null;
+  return (await returnAlongLine(tx, { agentId: n.actor.agentId, sourceKey: `task:${event.id}`, sourceTaskId: row.id, returnedAt: event.createdAt })) ? row : null;
+}
+
+/* The map reads its lines again when one of them changed, in the company of what changed it. */
+function linesMoved(ctx: Live, changed: { companyId: string } | null): void {
+  if (changed) ctx.bus.publish(changed.companyId, { type: 'org' });
+}
+
 /* One move: the task changes only if nobody moved it since it was read, and the move is written to its log. */
 /* wakes: the turns the move needs, kept with it until they are queued. */
 async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, also?: (tx: Tx, row: Task) => Promise<void>, wakes: Wake[] = []): Promise<Task> {
   let started: Task[] = [];
-  let gaveBack = false;
+  let lit: Task | null = null;
   const row = await ctx.db.transaction(async tx => {
     /* Two changes at once to what tasks come after would each miss the other's half of a circle: they go one at a time in
        a company, and the circle is looked for once it is this one's turn. What it comes after now is held until the move
@@ -193,8 +204,7 @@ async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, also?: (
     /* Done means all of it: work under it still open would go on under a finished task, and the turn with it. */
     if (set.status === 'done') await refuseOpenUnder(tx, task);
     await dropEarlierWakes(tx, task.id);
-    const event = await note(tx, row, n);
-    if (n.returned && n.actor.agentId) gaveBack = await returnAlongLine(tx, { agentId: n.actor.agentId, sourceKey: `task:${event.id}`, sourceTaskId: row.id, returnedAt: event.createdAt });
+    lit = await givesBack(tx, row, n, await note(tx, row, n));
     await also?.(tx, row);
     if (CLOSED.includes(row.status) && row.parentId) wakes.push(...(await workUnderDone(tx, row, n.actor.agentId)));
     /* What waited for it starts with the same move, so its turn is kept with it. */
@@ -208,7 +218,7 @@ async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, also?: (
   });
   published(ctx, row);
   for (const t of started) published(ctx, t);
-  if (gaveBack) ctx.bus.publish(row.companyId, { type: 'org' });
+  linesMoved(ctx, lit);
   await handOff(ctx, n.actor, row);
   return row;
 }
@@ -1147,6 +1157,5 @@ export async function startWork(ctx: Live, jobId: string): Promise<void> {
     .returning();
   if (row) published(ctx, row);
   /* After the task is at work, so the map's lines see it so. */
-  const began = await mapWorkStarted(ctx.db, jobId);
-  if (began) ctx.bus.publish(began.companyId, { type: 'org' });
+  linesMoved(ctx, await mapWorkStarted(ctx.db, jobId));
 }

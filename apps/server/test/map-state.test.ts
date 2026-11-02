@@ -334,8 +334,12 @@ describe('results given back in a message', () => {
     expect(stateOf(await org(), orchestrator, hana)).toBe('yellow');
   });
 
-  it('count a message to the own head as a return, and one to another employee as none', async () => {
-    const { hana, bruno, felix, tools, org } = await online();
+  it('count a message to the own head as a return, and one to another employee or from the head down as none', async () => {
+    const { orchestrator, hana, bruno, felix, tools, org } = await online();
+    const head = await tools(hana.id);
+    expect((await head.call('message_employee', { employee: felix.id, text: 'Take the card form next.' })).isError).toBeFalsy();
+    expect(stateOf(await org(), hana, felix)).toBe('quiet');
+    expect(stateOf(await org(), orchestrator, hana)).toBe('quiet');
     const { call } = await tools(bruno.id);
     expect((await call('message_employee', { employee: felix.id, text: 'Which branch has the cart?' })).isError).toBeFalsy();
     expect(stateOf(await org(), hana, bruno)).toBe('quiet');

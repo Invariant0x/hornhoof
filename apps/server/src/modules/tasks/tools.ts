@@ -204,7 +204,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         if (Number(asked?.n ?? 0) >= TURN_QUESTIONS) throw refuse(409, 'task_invalid', `One turn asks people at most ${TURN_QUESTIONS} times.`);
         const kind = commit ? 'approval' : options?.length ? 'choice' : 'question';
         const ways = options?.map(o => ({ label: o.label, image: o.image ?? null }));
-        const moved = await ask(ctx, job.agentId, task.id, { kind, text: question, ...(commit ? { commit } : {}), images, options: ways, link: link ?? null, ...(topic ? { topic } : {}) });
+        const moved = await ask(ctx, job.agentId, task.id, { kind, text: question, ...(commit ? { commit } : {}), images, options: ways, link: link ?? null, topic });
         return { text: `Asked. #${task.number} waits for a person's answer; you will be woken with it.`, moved };
       }),
   );

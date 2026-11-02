@@ -39,6 +39,11 @@ export async function failOpenJobs(ctx: Ctx, scope: SQL, error: string, stillRun
   return failed.map(j => j.id);
 }
 
+/* A turn on a task that started here rather than from the queue is at work on it the same way. */
+async function workBegins(ctx: Ctx, jobId: string, started: readonly { kind: string; taskId: string | null }[]): Promise<void> {
+  for (const { kind, taskId } of started) if (kind === 'conversation' && taskId) await startWork(ctx, jobId);
+}
+
 export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage): Promise<void> {
   const { db } = ctx;
   const now = new Date();
@@ -117,8 +122,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
         .where(and(eq(jobs.id, msg.jobId), eq(jobs.status, 'queued'), jobsOf(id, ctx)))
         .returning({ companyId: jobs.companyId, kind: jobs.kind, taskId: jobs.taskId });
       for (const { companyId } of started) await publishWorking(ctx, companyId);
-      /* A turn on a task that started here rather than from the queue is at work on it the same way. */
-      for (const { kind, taskId } of started) if (kind === 'conversation' && taskId) await startWork(ctx, msg.jobId);
+      await workBegins(ctx, msg.jobId, started);
       return;
     }
     case 'job.done': {
