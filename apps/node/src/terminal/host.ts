@@ -129,7 +129,9 @@ type View = {
 const sameSize = (a: Size, b: Size) => a.cols === b.cols && a.rows === b.rows;
 /* Erases a window's screen below a session of so many rows, and puts the cursor back where it was. */
 const eraseBelow = (rows: number) => `\u001b7\u001b[${rows + 1};1H\u001b[J\u001b8`;
-const run = (bin: string, args: string[]) => new Promise<void>(resolve => execFile(bin, args, () => resolve()));
+/* Sets a terminal's size: stty names the terminal with -f on macOS and -F elsewhere. */
+const stty = (tty: string, size: Size) =>
+  new Promise<void>(resolve => execFile('stty', [process.platform === 'darwin' ? '-f' : '-F', tty, 'cols', String(size.cols), 'rows', String(size.rows)], () => resolve()));
 
 type Options = {
   tmux: Tmux;
@@ -955,15 +957,23 @@ export class TerminalHost {
     const tty = await this.ttyOf(termId, view);
     /* A newer size may have come while the client was looked for. */
     if (!tty || view.shown !== size) return;
-    await run('stty', [process.platform === 'darwin' ? '-f' : '-F', tty, 'cols', String(size.cols), 'rows', String(size.rows)]);
-    /* The terminal tells its client, which tells tmux; a session sized before then would still be sized for the old one. */
+    await stty(tty, size);
+    await this.clientSized(tty, size);
+    if (view.shown === size) this.eraseBelowSession(termId, view, size);
+  }
+
+  /* The terminal tells its client, which tells tmux; a session sized before then would still be sized for the old one. */
+  private async clientSized(tty: string, size: Size): Promise<void> {
     for (const end = Date.now() + this.openMs; Date.now() < end; await new Promise(r => setTimeout(r, 20))) {
       const client = (await this.opts.tmux.clients()).find(c => c.tty === tty);
-      if (!client || (client.cols === size.cols && client.rows === size.rows)) break;
+      if (!client || sameSize(client, size)) return;
     }
-    /* tmux redraws a client that got smaller only within its new size; what the window showed below stays unless erased. */
+  }
+
+  /* tmux redraws a client that got smaller only within its new size; what the window showed below stays unless erased. */
+  private eraseBelowSession(termId: string, view: View, size: Size): void {
     const own = this.wanted.get(termId)?.size;
-    if (own && size.rows < own.rows && view.shown === size) view.out(eraseBelow(size.rows));
+    if (own && size.rows < own.rows) view.out(eraseBelow(size.rows));
   }
 
   /* The terminal of a view's tmux client. A client attaches a moment after its view opens, so a size that comes before
