@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFileSync, statfsSync } from 'node:fs';
 import { availableParallelism, cpus as processors, freemem, loadavg, totalmem } from 'node:os';
 
@@ -9,7 +10,10 @@ export type MachineLoad = {
   cpuModel?: string;
   diskFree?: number;
   diskTotal?: number;
+  host?: string;
   hostCpus?: number;
+  hostLoad?: number;
+  hostMemFree?: number;
   hostMemory?: number;
 };
 
@@ -46,6 +50,52 @@ const bytes = (text: string | null) => (text && /^\d+\s*$/.test(text) ? Number(t
 
 const positive = (text: string | undefined) => (text && /^\d+$/.test(text.trim()) && Number(text) > 0 ? Number(text) : null);
 
+const validCpus = (n: number | null) => (n && n <= 4096 ? n : null);
+
+const hostHash = (text: string | null) => {
+  const id = text?.trim();
+  return id ? createHash('sha256').update(`hornhoof-host:${id}`).digest('hex') : null;
+};
+
+const procCpus = (cpuinfo: string | null) => (cpuinfo ? (cpuinfo.match(/^processor\s*:/gm)?.length ?? null) : null);
+
+/* What a container can use of its machine's memory, capped by its cgroup limit when it has one. */
+const containerMemory = (read: (path: string) => string | null, rawFree: number, rawTotal: number) => {
+  const limit = bytes(read('/sys/fs/cgroup/memory.max'));
+  if (limit === null || limit >= rawTotal) return { memFree: Math.min(rawFree, rawTotal), memTotal: rawTotal };
+  const current = bytes(read('/sys/fs/cgroup/memory.current')) ?? 0;
+  return { memFree: Math.min(rawFree, Math.max(0, limit - current)), memTotal: limit };
+};
+
+/* Node says "unknown" where the system names no processor, as Linux on arm64 does in Docker on a Mac. */
+const processorModel = (cpuModel: string, hostCpu: string | undefined) => {
+  const own = /^unknown$/i.test(cpuModel.trim()) ? '' : cpuModel.trim();
+  return (hostCpu?.trim() || own).slice(0, 200);
+};
+
+/* The physical host and what is free on it across all its containers, when the kernel identifies the host. */
+const hostFacts = (
+  read: (path: string) => string | null,
+  env: Record<string, string | undefined>,
+  cpus: number,
+  load: number,
+  rawFree: number,
+  rawTotal: number,
+) => {
+  const host = hostHash(read('/proc/sys/kernel/random/boot_id'));
+  const envCpus = validCpus(positive(env.HORNHOOF_HOST_CPUS));
+  const hostMemory = positive(env.HORNHOOF_HOST_MEMORY);
+  if (!host) return { ...(envCpus ? { hostCpus: envCpus } : {}), ...(hostMemory ? { hostMemory } : {}) };
+  const total = hostMemory ?? rawTotal;
+  return {
+    host,
+    hostCpus: envCpus ?? validCpus(procCpus(read('/proc/cpuinfo'))) ?? cpus,
+    hostLoad: load,
+    hostMemFree: Math.min(rawFree, total),
+    hostMemory: total,
+  };
+};
+
 /* The space of the disk a folder is on that a program of this user can still fill. */
 const diskOf = (path: string) => (): Disk | null => {
   try {
@@ -71,27 +121,18 @@ export function machineLoad({
   env = process.env,
 }: Sources = {}): MachineLoad {
   const meminfo = read('/proc/meminfo') ?? '';
-  let memTotal = kilobytes(meminfo, 'MemTotal') ?? total ?? totalmem();
-  let memFree = kilobytes(meminfo, 'MemAvailable') ?? free ?? freemem();
-  const limit = bytes(read('/sys/fs/cgroup/memory.max'));
-  if (limit !== null && limit < memTotal) {
-    memTotal = limit;
-    memFree = Math.min(memFree, Math.max(0, limit - (bytes(read('/sys/fs/cgroup/memory.current')) ?? 0)));
-  }
-  /* Node says "unknown" where the system names no processor, as Linux on arm64 does in Docker on a Mac. */
-  const own = /^unknown$/i.test(cpuModel.trim()) ? '' : cpuModel.trim();
-  const model = (env.HORNHOOF_HOST_CPU?.trim() || own).slice(0, 200);
+  const rawTotal = kilobytes(meminfo, 'MemTotal') ?? total ?? totalmem();
+  const rawFree = kilobytes(meminfo, 'MemAvailable') ?? free ?? freemem();
+  const model = processorModel(cpuModel, env.HORNHOOF_HOST_CPU);
   const space = disk();
-  const hostCpus = positive(env.HORNHOOF_HOST_CPUS);
-  const hostMemory = positive(env.HORNHOOF_HOST_MEMORY);
+  const cores = Math.max(1, cpus);
+  const busy = Math.max(0, Math.round(load * 100) / 100);
   return {
-    cpus: Math.max(1, cpus),
-    load: Math.max(0, Math.round(load * 100) / 100),
-    memFree: Math.min(memFree, memTotal),
-    memTotal,
+    cpus: cores,
+    load: busy,
+    ...containerMemory(read, rawFree, rawTotal),
     ...(model ? { cpuModel: model } : {}),
     ...(space ? { diskFree: Math.min(space.free, space.total), diskTotal: space.total } : {}),
-    ...(hostCpus && hostCpus <= 4096 ? { hostCpus } : {}),
-    ...(hostMemory ? { hostMemory } : {}),
+    ...hostFacts(read, env, cores, busy, rawFree, rawTotal),
   };
 }
