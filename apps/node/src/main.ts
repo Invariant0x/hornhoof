@@ -12,6 +12,7 @@ import { adapterFor, programFor } from './providers/index.js';
 import { runJob, type ProviderAdapter, type RunResult } from './runner.js';
 import { applyCredential, dropCredential, heldCredential } from './credentials.js';
 import { nodeIdentity, seal, unseal } from './keys.js';
+import { LOGIN_KEY, LoginTerminal, type LoginSetup } from './login.js';
 import { dataDir, isRemoved, markRemoved, readState, rememberSession, writeState, type NodeState } from './state.js';
 import { partFiles, runTests } from './tests.js';
 import { SIGNED_OUT as AGY_SIGNED_OUT } from './providers/antigravity.js';
@@ -39,6 +40,9 @@ type JobRun = Extract<ServerMessage, { type: 'job.run' }>;
 type TestRun = Extract<ServerMessage, { type: 'tests.run' }>;
 type TestsDone = Extract<NodeMessage, { type: 'tests.done' }>;
 
+/* What a node says to a sign-in it cannot run: a company key's, a Kimi or GLM key's, or one with no tmux. */
+const NO_LOGIN = 'This machine cannot run the sign-in for its plan from Hornhoof.';
+
 /* A part of a run never runs as the node itself: without a user of its own for runs, the node takes none. */
 const NO_RUNS = 'This node has no user of its own for runs, which it gets only when it runs as root with the rights to switch users, so it takes no part of any run.';
 
@@ -48,6 +52,8 @@ export type TerminalSetup = { tmux: Tmux; program: TermProgram; bin: string; hom
 type RunOptions = {
   dir: string;
   terminal?: TerminalSetup;
+  /* A personal Claude Code or Codex plan signs in from Hornhoof, in a terminal the plan's owner sees. */
+  login?: LoginSetup;
   /* A personal node runs one agent program; the built-in node picks one per job. */
   adapter: ProviderAdapter | ((job: JobRun) => ProviderAdapter);
   /* The built-in node takes Hornhoof's address and its key from the env instead of node.json. */
@@ -77,7 +83,7 @@ function merged(known: Limits | null, news: Limits): Limits {
 }
 
 /* The node's life: stay connected, run jobs, report the sign-in state and the limits, clean up when removed. */
-export async function runNode({ dir, adapter, builtin, terminal, log = console.log, loginCheckMs = LOGIN_CHECK_MS, learnMs = LEARN_MS, limitsMs = LIMITS_MS, loadMs = LOAD_MS, testUser = null, runPart = runTests }: RunOptions): Promise<{ stop(): void }> {
+export async function runNode({ dir, adapter, builtin, terminal, login: loginSetup, log = console.log, loginCheckMs = LOGIN_CHECK_MS, learnMs = LEARN_MS, limitsMs = LIMITS_MS, loadMs = LOAD_MS, testUser = null, runPart = runTests }: RunOptions): Promise<{ stop(): void }> {
   if (!builtin && isRemoved(dir)) {
     log('This node was removed in Hornhoof.');
     return { stop() {} };
@@ -144,6 +150,19 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
         fs: terminal.fs,
       })
     : null;
+  const login =
+    loginSetup && !builtin
+      ? new LoginTerminal({
+          setup: loginSetup,
+          dir,
+          home: credHome,
+          send: m => (m.type === 'term.data' || m.type === 'term.exit' ? void send?.(m) : emit(m)),
+          secrets: () => [...known],
+          signedIn: () => signedInNow(),
+        })
+      : null;
+  /* A sign-in that ran when the node last stopped is over: it gave nothing, and its session and folder go. */
+  await login?.clear();
   if (host && terminal) {
     /* Sessions from before a restart talk to a bridge that is gone; their turns failed with the restart. */
     await terminal.tmux.stopAll();
@@ -169,6 +188,7 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
     onOpen(next) {
       send = next;
       host?.closeViews();
+      login?.closeViews();
       /* Finished jobs Hornhoof has not confirmed still count as running, so the server does not give up on them. */
       const typed = host?.typedJobs() ?? [];
       const tests = [...testing.keys(), ...unconfirmedTests.keys()];
@@ -192,6 +212,7 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
       for (const job of jobs) job.stop.abort();
       await Promise.race([Promise.allSettled(jobs.map(j => j.done)), new Promise(r => setTimeout(r, STOP_WAIT_MS))]);
       await host?.stop();
+      await login?.shutdown();
       for (const sub of ['home', 'work']) rmSync(join(dir, sub), { recursive: true, force: true });
       markRemoved(dir);
       emit({ type: 'removed' });
@@ -215,15 +236,17 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
       return;
     }
     switch (m.type) {
-      case 'term.open':
-        if (!host) return void send?.({ type: 'term.exit', termId: m.termId });
-        return host.open(m).catch(() => void send?.({ type: 'term.exit', termId: m.termId }));
+      case 'term.open': {
+        const shows = m.agentKey === LOGIN_KEY ? login : host;
+        if (!shows) return void send?.({ type: 'term.exit', termId: m.termId });
+        return shows.open(m).catch(() => void send?.({ type: 'term.exit', termId: m.termId }));
+      }
       case 'term.input':
-        return host?.input(m);
+        return login?.owns(m.termId) ? login.input(m) : host?.input(m);
       case 'term.resize':
-        return host?.resize(m);
+        return login?.owns(m.termId) ? login.resize(m) : host?.resize(m);
       case 'term.close':
-        return host?.close(m);
+        return login?.owns(m.termId) ? login.close(m) : host?.close(m);
       case 'turn.opened':
         return host?.opened(m);
       case 'agent.say': {
@@ -238,10 +261,13 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
         return signedInNow();
       case 'cred.seal':
         return sealCredential(m.kind, m.version, m.recipients);
-      /* Started by the parts that follow. */
-      case 'cred.lease':
       case 'login.start':
+        if (!login) return emit({ type: 'login.done', ok: false, error: NO_LOGIN });
+        return login.start(m.fresh);
       case 'login.stop':
+        return login?.stop();
+      /* Started by a part that follows. */
+      case 'cred.lease':
         return;
     }
     if (stopped || running.has(m.jobId)) return;
@@ -366,6 +392,7 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
     clearInterval(asking);
     clearInterval(reporting);
     void host?.stop();
+    void login?.shutdown();
     /* Let the last message leave before the socket closes. */
     setTimeout(() => conn.close(), 50);
   }
@@ -495,8 +522,8 @@ const TERMINALS: Partial<Record<ProviderId, { program: TermProgram; signedOut: R
 };
 
 /* A personal Claude Code, Codex, Kimi Code or Antigravity plan runs its agents in tmux when the machine has it; the rest
-   run as before. */
-function terminalFor(dir: string, provider: ProviderId, user: JobUser | null, fs: AgentFs): { terminal?: TerminalSetup } {
+   run as before. A Claude Code or Codex plan also signs in from Hornhoof there, on a tmux server apart from the agents'. */
+function terminalFor(dir: string, provider: ProviderId, user: JobUser | null, fs: AgentFs): { terminal?: TerminalSetup; login?: LoginSetup } {
   const known = TERMINALS[provider];
   if (!known) return {};
   try {
@@ -509,7 +536,12 @@ function terminalFor(dir: string, provider: ProviderId, user: JobUser | null, fs
   const tmux = new Tmux({ env: childEnv(tools, { HOME: process.env.HOME ?? home }), recordingsDir: join(dir, '.hh-recordings') });
   /* Nodes run on Linux, where the bridge can tell which agent's program calls it. */
   const proc = process.platform === 'linux' && existsSync('/proc/net/tcp') ? '/proc' : undefined;
-  return { terminal: { tmux, ...known, bin: join(tools, 'bin', programFor(provider).bin), home, proc, user, fs } };
+  const bin = join(tools, 'bin', programFor(provider).bin);
+  const signs = provider === 'claude' || provider === 'codex' ? provider : null;
+  const login: LoginSetup | undefined = signs
+    ? { provider: signs, bin, tmux: new Tmux({ socket: 'hh-signin', env: childEnv(tools, { HOME: process.env.HOME ?? home }), recordingsDir: join(dir, '.hh-recordings') }), env: childEnv(tools, {}), user, fs }
+    : undefined;
+  return { terminal: { tmux, ...known, bin, home, proc, user, fs }, ...(login ? { login } : {}) };
 }
 
 async function run(dir: string, builtinMode: boolean, io: Io): Promise<number | { stop(): void }> {

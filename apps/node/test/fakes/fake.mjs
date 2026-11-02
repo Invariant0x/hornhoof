@@ -47,7 +47,29 @@ export function run(name) {
   /* needs_login: signed out until a login has run in this home. */
   const home = (name === 'agy' ? process.env.HOME : '') || process.env.CLAUDE_CONFIG_DIR || process.env.CODEX_HOME || process.env.KIMI_CODE_HOME || '.';
   const signedIn = mode === 'needs_login' ? existsSync(join(home, 'fake-signed-in')) : mode !== 'signed_out';
+  /* Claude Code with a long token in its env is signed in when the token has the shape setup-token prints. */
+  if (name === 'claude' && words === 'auth status' && process.env.CLAUDE_CODE_OAUTH_TOKEN) process.exit(/^sk-ant-oat01-[A-Za-z0-9_-]{20,}$/.test(process.env.CLAUDE_CODE_OAUTH_TOKEN) ? 0 : 1);
   if (words === 'auth status' || words === 'login status') process.exit(signedIn ? 0 : 1);
+  /* claude setup-token: a link, a code the person types, then the long token, wrapped at FAKE_WRAP columns as Ink wraps
+     it on a narrow screen. A wrong code or login_fail ends it with an error. */
+  if (name === 'claude' && words === 'setup-token') {
+    process.stdout.write(`Browser didn't open? Use the url below to sign in\n\n${LOGIN_URL}\n\nPaste code here if prompted > `);
+    let typed = '';
+    process.stdin.setEncoding('utf8');
+    return void process.stdin.on('data', chunk => {
+      typed += chunk;
+      if (!/[\r\n]/.test(typed)) return;
+      if (mode === 'login_fail' || typed.trim() !== 'code123') {
+        process.stdout.write('\nOAuth error: Invalid code\n');
+        process.exit(1);
+      }
+      const token = process.env.FAKE_TOKEN ?? '';
+      const width = Number(process.env.FAKE_WRAP) || token.length || 1;
+      const wrapped = token.match(new RegExp(`.{1,${width}}`, 'g'))?.join('\n') ?? '';
+      process.stdout.write(`\n\u2713 Long-lived authentication token created successfully!\n\nYour OAuth token (valid for 1 year):\n\n\x1b[33m${wrapped}\x1b[39m\n\nStore this token securely. You won't be able to see it again.\n\nUse this token by setting: export CLAUDE_CODE_OAUTH_TOKEN=<token>\n`);
+      process.exit(0);
+    });
+  }
   /* agy 1.4.12 lists its models only when signed in, and says so otherwise. */
   if (name === 'agy' && words === 'models') {
     if (!signedIn) {
@@ -59,7 +81,12 @@ export function run(name) {
   }
   if (name === 'codex' && words === 'app-server') return void appServer(signedIn);
   if (words === 'auth login' || words === 'login --device-auth' || words === 'login') {
+    if (mode === 'login_fail') {
+      process.stderr.write('Error logging in: the device code expired\n');
+      process.exit(1);
+    }
     writeFileSync(join(home, 'fake-signed-in'), '');
+    if (name === 'codex' && process.env.CODEX_HOME) writeFileSync(join(process.env.CODEX_HOME, 'auth.json'), JSON.stringify({ tokens: { access_token: process.env.FAKE_TOKEN ?? 'fake-access' } }));
     /* Colored, inside a terminal hyperlink, the way the real programs print it. */
     process.stdout.write(`Open this link:\n\x1b[94m\x1b]8;;${LOGIN_URL}\x07${LOGIN_URL}\x1b]8;;\x07\x1b[0m\n`);
     process.exit(0);

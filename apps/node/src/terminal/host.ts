@@ -906,7 +906,7 @@ export class TerminalHost {
 }
 
 /* The process that started a given one: from /proc on Linux, from ps elsewhere. */
-async function parentOf(pid: number): Promise<number | null> {
+export async function parentOf(pid: number): Promise<number | null> {
   try {
     const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
     return Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[1]);
