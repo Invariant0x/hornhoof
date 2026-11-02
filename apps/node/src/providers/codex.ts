@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Readable, Writable } from 'node:stream';
 import { API_MODELS, type AgentEvent, type Limits, type ModelOption } from '@hornhoof/protocol';
+import { readAccount } from '../account.js';
 import type { JobUser } from '../isolation.js';
 import type { ProviderAdapter, RunInput, RunResult } from '../runner.js';
 import { withProgramExit } from '../program-exit.js';
@@ -155,6 +156,10 @@ export function codexAdapter({ home, tools, bin = join(tools, 'bin', 'codex'), s
     /* A company key has no plan limits. */
     async limits() {
       return mode === 'api_key' ? null : askLimits(bin, env(null), user);
+    },
+
+    async account() {
+      return mode === 'api_key' ? null : readAccount('codex', home, env(null), bin, user);
     },
 
     async login(io) {

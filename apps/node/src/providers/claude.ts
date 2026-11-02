@@ -7,6 +7,7 @@ import type { ProviderAdapter, RunInput, RunResult } from '../runner.js';
 import { withProgramExit } from '../program-exit.js';
 import { claudePlugins } from '../skills.js';
 import { credentialSecrets } from '../credentials.js';
+import { readAccount } from '../account.js';
 import { claudePlanLimits, planToken } from '../terminal/programs.js';
 import { contentText, inputText, isoFrom, isRecord, objectLine, toolName } from './events.js';
 import { askHidden, childEnv, ensureDir, exitsCleanly, installPackage, interactiveLogin, runProgram, tokensIn, writePrivate } from './process.js';
@@ -106,6 +107,10 @@ export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'),
     /* A company key and a GLM plan have no Claude plan limits. */
     async limits() {
       return mode === 'plan' ? claudePlanLimits(home) : null;
+    },
+
+    async account() {
+      return mode === 'plan' ? readAccount('claude', home, env(null), bin, user) : null;
     },
 
     async loggedIn() {

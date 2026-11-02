@@ -3,7 +3,8 @@ import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
-import { nodes, planCredentials, subscriptions } from '../src/db/schema.js';
+import { agents, companies, departments, nodes, planCredentials, subscriptions } from '../src/db/schema.js';
+import { companyView } from '../src/modules/tools/company.js';
 import { as, connectNode, invitePerson, listen, openStream, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
 const MAC = { machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' };
@@ -266,5 +267,51 @@ describe('signing a plan in from Hornhoof', () => {
     no.send({ type: 'login.done', ok: true, error: null });
     expect(await nextOf(no, 'cred.seal')).toEqual({ type: 'cred.seal', kind: 'codex_auth', version: 1, recipients: [{ nodeId: o.nodeId, publicKey: KEY('o') }] });
     await until(async () => (await db.select({ l: subscriptions.leaseNodeId }).from(subscriptions).where(eq(subscriptions.id, olegsPlan)))[0]!.l === o.nodeId);
+  });
+});
+
+describe('which account a plan runs on', () => {
+  const IVAN = { email: 'ivan.plans@example.com', tier: 'max' };
+  const mine = async (app: FastifyInstance, token: string, plan: string) =>
+    ((await app.inject({ method: 'GET', url: '/api/subscriptions', ...as(token) })).json().subscriptions as { id: string }[]).find(s => s.id === plan) as Record<string, unknown>;
+
+  it('is kept as each node tells it, with the address for the plan\'s owner only', async () => {
+    const { app, db, ceo, plan, a, url } = await plans();
+    const na = await connectNode(url, a.key);
+    na.send({ type: 'hello', version: '0.9.0', loggedIn: true, running: [], publicKey: KEY('a'), terminals: true, account: IVAN });
+    await until(async () => (await db.select({ account: nodes.account }).from(nodes).where(eq(nodes.id, a.nodeId)))[0]?.account?.tier === 'max');
+    expect(await mine(app, ceo, plan)).toMatchObject({ accounts: [{ nodeId: a.nodeId, hostname: 'ivan-mac', tier: 'max', email: 'ivan.plans@example.com' }], tier: 'max', accountsDiffer: false });
+
+    /* Dana works in Sales only. The map shows her the orchestrator's plan, which is Ivan's, without his address. */
+    const [acme] = await db.select().from(companies);
+    const [sales] = await db.insert(departments).values({ companyId: acme!.id, name: 'Sales', roleCode: 'SAL' }).returning();
+    const dana = await invitePerson(app, ceo, { name: 'Dana', email: 'dana@acme.com', access: { departments: [sales!.id] } });
+    await db.update(agents).set({ subscriptionId: plan }).where(eq(agents.kind, 'orchestrator'));
+    const org = (await app.inject({ method: 'GET', url: '/api/org', ...as(dana) })).json();
+    expect(org.orchestrator.subscription).toMatchObject({ id: plan, tier: 'max', accounts: [{ nodeId: a.nodeId, tier: 'max' }] });
+    expect(JSON.stringify(org)).not.toContain('ivan.plans@example.com');
+    const ceoOrg = (await app.inject({ method: 'GET', url: '/api/org', ...as(ceo) })).json();
+    expect(ceoOrg.orchestrator.subscription.accounts[0].email).toBe('ivan.plans@example.com');
+  });
+
+  it('gets a note when its machines are on different plans of the maker', async () => {
+    const { app, db, ceo, plan, a, b, url } = await plans();
+    const na = await connectNode(url, a.key);
+    const nb = await connectNode(url, b.key);
+    na.send({ type: 'hello', version: '0.9.0', loggedIn: true, running: [], terminals: true, account: { email: 'ivan@acme.com', tier: 'free' } });
+    nb.send({ type: 'hello', version: '0.9.0', loggedIn: true, running: [], terminals: true, account: null });
+    nb.send({ type: 'status', loggedIn: true, limits: null, account: { email: 'ivan@acme.com', tier: 'pro' } });
+    await until(async () => (await db.select({ account: nodes.account }).from(nodes).where(eq(nodes.id, b.nodeId)))[0]?.account?.tier === 'pro');
+    await until(async () => (await db.select({ account: nodes.account }).from(nodes).where(eq(nodes.id, a.nodeId)))[0]?.account?.tier === 'free');
+    expect(await mine(app, ceo, plan)).toMatchObject({ tier: null, accountsDiffer: true });
+  });
+
+  it('reaches agents as its tier alone', async () => {
+    const { app, db, a } = await plans();
+    await db.update(nodes).set({ account: IVAN }).where(eq(nodes.id, a.nodeId));
+    const [acme] = await db.select().from(companies);
+    const view = await companyView(db, app.ctx.templates, acme!.id);
+    expect(view.subscriptions.find(s => s.provider === 'claude')).toMatchObject({ tier: 'max' });
+    expect(JSON.stringify(view)).not.toContain('@');
   });
 });

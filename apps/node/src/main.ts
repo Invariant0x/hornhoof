@@ -173,10 +173,13 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
      The built-in node serves API keys, whose models Hornhoof knows. */
   const readModels = async () => (single?.models ? await single.models() : undefined);
   let models = await readModels();
+  /* Which account and plan the program is signed in to, read at the start, after a sign-in and with the limits. */
+  const readAccount = async () => (single?.account ? await single.account().catch(() => null) : null);
+  let account = await readAccount();
   const status = async () => {
     /* A program that cannot list its models now keeps those it listed before. */
     models = await readModels().catch(() => models);
-    emit({ type: 'status', loggedIn, limits, ...(models ? { models } : {}) });
+    emit({ type: 'status', loggedIn, limits, ...(models ? { models } : {}), account });
   };
 
   /* How busy the machine is, which Hornhoof weighs when it picks a machine for a test run. */
@@ -192,7 +195,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       /* Finished jobs Hornhoof has not confirmed still count as running, so the server does not give up on them. */
       const typed = host?.typedJobs() ?? [];
       const tests = [...testing.keys(), ...unconfirmedTests.keys()];
-      next({ type: 'hello', version: VERSION, loggedIn, running: [...running.keys(), ...typed, ...unconfirmed.keys()], ...(models ? { models } : {}), terminals: Boolean(host), work: Boolean(testUser), ...(testUser ? {} : { noRuns: NO_RUNS }), load: load(), tests, skillFiles: true, publicKey: keyPair.recipient });
+      next({ type: 'hello', version: VERSION, loggedIn, running: [...running.keys(), ...typed, ...unconfirmed.keys()], ...(models ? { models } : {}), terminals: Boolean(host), work: Boolean(testUser), ...(testUser ? {} : { noRuns: NO_RUNS }), load: load(), tests, skillFiles: true, publicKey: keyPair.recipient, account });
       for (const m of outbox.splice(0)) emit(m);
       for (const m of unconfirmed.values()) next(m);
       for (const m of unconfirmedTests.values()) next(m);
@@ -307,6 +310,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   async function signedInNow() {
     await learn();
     loggedIn = single ? await single.loggedIn() : true;
+    account = await readAccount();
     await status();
   }
 
@@ -372,11 +376,14 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   const learning = host ? setInterval(() => void learn(), learnMs) : null;
   learning?.unref();
   const askLimits = async () => {
-    if (stopped || !single?.limits) return;
-    const now = await single.limits().catch(() => null);
-    if (!now || JSON.stringify(merged(limits, now)) === JSON.stringify(limits)) return;
-    limits = merged(limits, now);
-    void status();
+    if (stopped) return;
+    /* A program that renewed its sign-in, or one signed in again by hand, may be on another plan of its maker now. */
+    const was = JSON.stringify(account);
+    account = await readAccount();
+    const now = single?.limits ? await single.limits().catch(() => null) : null;
+    const moved = now !== null && JSON.stringify(merged(limits, now)) !== JSON.stringify(limits);
+    if (moved) limits = merged(limits, now);
+    if (moved || JSON.stringify(account) !== was) void status();
   };
   void askLimits();
   const asking = setInterval(() => void askLimits(), limitsMs);

@@ -90,7 +90,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.get('/api/subscriptions', async req => {
     const me = await requirePerson(req, db);
-    const all = await subViews(db, online);
+    const all = await subViews(db, online, undefined, me);
     return { subscriptions: me.scopeKind === 'company' ? all : all.filter(s => s.owner.id === me.id) };
   });
 
@@ -126,7 +126,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (target.kind === 'orchestrator') await orchestratorBack(orchestratorBefore);
 
     reply.code(201);
-    return { subscription: await subView(db, online, id) };
+    return { subscription: await subView(db, online, id, me) };
   });
 
   /* A person connects their own plans. They serve wherever the person works, so there is nothing to place.
@@ -151,7 +151,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
       const ids = [...had.map(s => s.id), ...rows.map(r => r.id)];
       return { ids, code: await createNodeCode(tx, { companyId: me.companyId, personId: me.id, subscriptionIds: ids }) };
     });
-    const views = (await subViews(db, online)).filter(s => ids.includes(s.id));
+    const views = (await subViews(db, online, undefined, me)).filter(s => ids.includes(s.id));
     reply.code(201);
     return { subscriptions: views, ...(await commandFor(db, config, me, code)) };
   });
@@ -177,7 +177,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
     const before = await orchestratorOf(ctx, me.companyId);
     await db.update(agents).set(orchestratorOn(sub)).where(eq(agents.kind, 'orchestrator'));
     await orchestratorBack(before);
-    return { subscription: await subView(db, online, sub.id) };
+    return { subscription: await subView(db, online, sub.id, me) };
   });
 
   /* The plan's nodes the owner's browser seals a key to, with the number the new one goes under. */
@@ -212,7 +212,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { budget } = BudgetBody.parse(req.body);
     await db.update(subscriptions).set({ budget }).where(eq(subscriptions.id, sub.id));
     await pumpWaiting(ctx);
-    return { subscription: await subView(db, online, sub.id) };
+    return { subscription: await subView(db, online, sub.id, me) };
   });
 
   app.delete('/api/subscriptions/:id', async (req, reply) => {

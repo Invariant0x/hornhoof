@@ -47,6 +47,13 @@ export function run(name) {
   /* needs_login: signed out until a login has run in this home. */
   const home = (name === 'agy' ? process.env.HOME : '') || process.env.CLAUDE_CONFIG_DIR || process.env.CODEX_HOME || process.env.KIMI_CODE_HOME || '.';
   const signedIn = mode === 'needs_login' ? existsSync(join(home, 'fake-signed-in')) : mode !== 'signed_out';
+  /* claude auth status --json: the account of an interactive sign-in; a long token tells no address or plan. */
+  if (name === 'claude' && words === 'auth status --json') {
+    const token = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    const status = token ? { loggedIn: true, authMethod: 'oauth_token', apiProvider: 'firstParty' } : { loggedIn: signedIn, authMethod: 'claude.ai', apiProvider: 'firstParty', email: 'x@y.z', orgName: 'Acme', subscriptionType: 'max' };
+    process.stdout.write(JSON.stringify(status, null, 2) + '\n');
+    process.exit(status.loggedIn ? 0 : 1);
+  }
   /* Claude Code with a long token in its env is signed in when the token has the shape setup-token prints. */
   if (name === 'claude' && words === 'auth status' && process.env.CLAUDE_CODE_OAUTH_TOKEN) process.exit(/^sk-ant-oat01-[A-Za-z0-9_-]{20,}$/.test(process.env.CLAUDE_CODE_OAUTH_TOKEN) ? 0 : 1);
   if (words === 'auth status' || words === 'login status') process.exit(signedIn ? 0 : 1);
