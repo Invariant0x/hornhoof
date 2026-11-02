@@ -127,8 +127,11 @@ async function everyKind() {
   const devPlain = await c.asking('dev', { kind: 'question', text: 'An older kind of question' });
   const salesQuestion = await c.asking('sales', { kind: 'choice', text: 'Which price?', options: [{ label: '9', image: null }, { label: '12', image: null }], topic: 'task' });
   const mktQuestion = await c.asking('mkt', { kind: 'question', text: 'Which channel?', topic: 'employee' });
-  const [structure] = await c.db.insert(proposals).values({ companyId: c.acme.id, agentId: c.orchestrator.id, brief: 'Add Support.', items: [] }).returning();
-  const [staff] = await c.db.insert(proposals).values({ companyId: c.acme.id, agentId: c.orchestrator.id, kind: 'staff', departmentId: c.dev.id, brief: 'Hire a reviewer.', items: [] }).returning();
+  /* The cards a second apart, structure first: two written in the same millisecond would be put in order by their
+     random ids. */
+  const at = Date.now();
+  const [structure] = await c.db.insert(proposals).values({ companyId: c.acme.id, agentId: c.orchestrator.id, brief: 'Add Support.', items: [], createdAt: new Date(at) }).returning();
+  const [staff] = await c.db.insert(proposals).values({ companyId: c.acme.id, agentId: c.orchestrator.id, kind: 'staff', departmentId: c.dev.id, brief: 'Hire a reviewer.', items: [], createdAt: new Date(at + 1000) }).returning();
   c.ctx.computer.ask('Inspect disk space.');
   return { ...c, devQuestion, devApproval, devPeople, devPlain, salesQuestion, mktQuestion, structure: structure!, staff: staff! };
 }
