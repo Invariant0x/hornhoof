@@ -3,8 +3,8 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Shell } from '../src/screens/Shell';
-import type { Me } from '../src/types';
-import { CLOSED_TASKS, DEV_ORG, FINISHED_TURN, ME, mockApi, PLANNED_TURN, REQUESTS, TASKS, TURN } from './api-mock';
+import type { ComputerAccessDecision, Me, Org, ProposalDecision } from '../src/types';
+import { CLOSED_TASKS, decisions, DEV_ORG, FINISHED_TURN, ME, mockApi, PLANNED_TURN, REQUESTS, ROSTER, TASKS, TURN } from './api-mock';
 import { fakeStream } from './fake-stream';
 
 const ALL = '/api/tasks?status=all';
@@ -14,7 +14,7 @@ const SUBTASK = { ...TASKS[1]!, id: 't13', number: 13, title: 'Card form', brief
 function shell(routes: Record<string, unknown> = {}, me: Me = ME) {
   const calls = mockApi({
     'GET /api/org': [200, DEV_ORG],
-    'GET /api/requests': [200, { requests: REQUESTS }],
+    'GET /api/requests': [200, decisions(REQUESTS)],
     'GET /api/turns': [200, { turns: [FINISHED_TURN, TURN, PLANNED_TURN] }],
     [`GET ${ALL}`]: [200, { tasks: [...TASKS, SUBTASK, PLANNED, { ...CLOSED_TASKS[0]!, turn: 2 }] }],
     ...(routes as Record<string, [number, unknown]>),
@@ -124,7 +124,7 @@ describe('the tracker', () => {
     const user = userEvent.setup();
     let answered = false;
     const calls = shell({
-      'GET /api/requests': () => [200, { requests: answered ? REQUESTS.slice(1) : REQUESTS }],
+      'GET /api/requests': () => [200, decisions(answered ? REQUESTS.slice(1) : REQUESTS)],
       'POST /api/requests/r1': () => {
         answered = true;
         return [200, { request: { id: 'r1', status: 'answered' } }];
@@ -146,7 +146,7 @@ describe('the tracker', () => {
 
   it('says the orchestrator is putting a question into plain words while it is on it', async () => {
     const user = userEvent.setup();
-    shell({ 'GET /api/requests': [200, { requests: [{ ...REQUESTS[0]!, explaining: true }, REQUESTS[1]] }] });
+    shell({ 'GET /api/requests': [200, decisions([{ ...REQUESTS[0]!, explaining: true }, REQUESTS[1]])] });
     await openTasks(user);
     const waiting = screen.getByRole('region', { name: 'Waiting for you' });
     expect(within(waiting).getByRole('article', { name: /#9/ })).toHaveTextContent('The orchestrator is writing this up in plain words.');
@@ -168,7 +168,7 @@ describe('the tracker', () => {
       link: 'https://preview.example.com/logo',
       task: { ...REQUESTS[0]!.task, id: 't11', number: 11, title: 'Logo' },
     };
-    const calls = shell({ 'GET /api/requests': [200, { requests: [choice] }], 'POST /api/requests/r4': [200, { request: { id: 'r4', status: 'answered' } }] });
+    const calls = shell({ 'GET /api/requests': [200, decisions([choice])], 'POST /api/requests/r4': [200, { request: { id: 'r4', status: 'answered' } }] });
     await openTasks(user);
     const asked = within(screen.getByRole('region', { name: 'Waiting for you' })).getByRole('article', { name: /#11/ });
     expect(within(asked).getByRole('img', { name: 'Picture 1' })).toHaveAttribute('src', '/api/attachments/p0');
@@ -193,7 +193,7 @@ describe('the tracker', () => {
 
   it('shows a commit waiting for approval to people with part of the company, without letting them approve it', async () => {
     const user = userEvent.setup();
-    shell({}, { ...ME, person: { ...ME.person, scopeKind: 'listed', isOwner: false } });
+    shell({ 'GET /api/requests': [200, decisions([REQUESTS[0]!, { ...REQUESTS[1]!, canAnswer: false }])] }, { ...ME, person: { ...ME.person, scopeKind: 'listed', isOwner: false } });
     await openTasks(user);
     const approval = within(screen.getByRole('region', { name: 'Waiting for you' })).getByRole('article', { name: /#10/ });
     expect(approval).toHaveTextContent('a'.repeat(40));
@@ -253,5 +253,111 @@ describe('the tracker', () => {
       await new Promise(r => setTimeout(r, 50));
     });
     expect(screen.getByRole('button', { name: /#11/ })).toHaveTextContent('Gate 1 of 3');
+  });
+});
+
+/* Development with Dan as its only person; Ivan, the CEO, and Maria, a deputy, sit next to the hub. */
+const DAN = { id: 'p4', name: 'Dan', email: 'dan@acme.com', title: '', status: 'active' as const, isOwner: false, access: { whole: false, departments: [{ id: 'd2', name: 'Development' }], teams: [] } };
+const counted = (counts: Record<string, number>): Org => ({
+  ...DEV_ORG,
+  people: DEV_ORG.people.map(p => ({ ...p, pendingDecisions: counts[p.id] ?? 0 })),
+  departments: [{ ...DEV_ORG.departments[0]!, people: [{ ...DAN, pendingDecisions: counts.p4 ?? 0 }] }],
+});
+const AT = '2026-11-02T12:00:00.000Z';
+const STRUCTURE: ProposalDecision = { id: 'pr1', kind: 'structure', agent: { id: 'a1', name: 'Orchestrator' }, department: null, brief: 'Add Support.', items: [{ template: 'support', checked: true, note: 'Answers customers.' }], at: AT, ownerPersonId: 'p1', canAnswer: true };
+const COMPUTER: ComputerAccessDecision = { kind: 'computer_access', id: 'server', agent: { id: 'a1', name: 'Orchestrator' }, ownerPersonId: 'p1', canAnswer: true, at: AT, view: { available: true, until: null, asked: { reason: 'Inspect disk space.', at: AT }, machine: null } };
+
+describe('the decisions of one person', () => {
+  it("open from that person's card on the map, with a filter one can see and take off", async () => {
+    const user = userEvent.setup();
+    shell({ 'GET /api/org': [200, counted({ p1: 1, p4: 1 })], 'GET /api/requests': [200, decisions([{ ...REQUESTS[0]!, ownerPersonId: 'p4' }, REQUESTS[1]!])] });
+    await user.click(await screen.findByRole('button', { name: 'Dan: 1 decision waits' }));
+    expect(await screen.findByRole('heading', { level: 1, name: 'Tasks' })).toBeInTheDocument();
+    const waiting = screen.getByRole('region', { name: 'Waiting for you' });
+    expect(within(waiting).getByText('Decisions for Dan')).toBeInTheDocument();
+    expect(within(waiting).getAllByRole('article').map(a => a.getAttribute('aria-label'))).toEqual(['#9 Pick a payment provider']);
+    await user.click(within(waiting).getByRole('button', { name: "Show everyone's decisions" }));
+    expect(within(waiting).getAllByRole('article')).toHaveLength(2);
+    expect(within(waiting).queryByText('Decisions for Dan')).not.toBeInTheDocument();
+  });
+
+  it('say plainly when nothing waits for that person, and give way to all of them when Tasks is opened by hand', async () => {
+    const user = userEvent.setup();
+    shell({ 'GET /api/org': [200, counted({ p1: 2 })] });
+    await user.click(await screen.findByRole('button', { name: 'Maria: no decisions wait' }));
+    const waiting = await screen.findByRole('region', { name: 'Waiting for you' });
+    expect(waiting).toHaveTextContent('Decisions for Maria');
+    expect(waiting).toHaveTextContent('Nothing waits for a decision from Maria.');
+    await user.click(screen.getByRole('button', { name: 'Map' }));
+    await user.click(screen.getByRole('button', { name: /^Tasks/ }));
+    expect(await screen.findAllByRole('article')).toHaveLength(2);
+    expect(screen.queryByText('Decisions for Maria')).not.toBeInTheDocument();
+  });
+
+  it("include the orchestrator's card and his request for the computer, counted in the navigation and answered with their own buttons", async () => {
+    const user = userEvent.setup();
+    let asked = true;
+    const calls = shell({
+      'GET /api/requests': () => [200, decisions(REQUESTS, { proposals: [STRUCTURE], computerAccess: asked ? COMPUTER : null })],
+      'POST /api/computer/open': () => {
+        asked = false;
+        return [200, { available: true, until: '2099-11-03T12:00:00.000Z', asked: null, machine: null }];
+      },
+    });
+    expect(await screen.findByRole('button', { name: 'Tasks, 4 waiting for you' })).toBeInTheDocument();
+    await openTasks(user);
+    const waiting = screen.getByRole('region', { name: 'Waiting for you' });
+    expect(within(waiting).getByRole('heading', { name: 'Company structure' })).toBeInTheDocument();
+    expect(within(waiting).getByRole('button', { name: 'Create departments (1)' })).toBeInTheDocument();
+    const computer = within(waiting).getByRole('region', { name: "The orchestrator asks for access to the server's computer" });
+    expect(computer).toHaveTextContent('Inspect disk space.');
+    await user.click(within(computer).getByRole('button', { name: 'Open access for a day' }));
+    expect(calls.some(c => c.method === 'POST' && c.path === '/api/computer/open')).toBe(true);
+    expect(await screen.findByRole('button', { name: 'Tasks, 3 waiting for you' })).toBeInTheDocument();
+    expect(within(waiting).queryByRole('region', { name: /asks for access/ })).not.toBeInTheDocument();
+  });
+
+  it("show a card to hire into a department under the department's name, and say why the computer could not be opened", async () => {
+    const user = userEvent.setup();
+    const staff: ProposalDecision = { ...STRUCTURE, id: 'pr2', kind: 'staff', department: { id: 'd2', name: 'development' }, brief: 'Hire a reviewer.', items: [{ role: 'DEV-BE', name: 'Reviewer' }] };
+    shell({
+      'GET /api/requests': [200, decisions([], { proposals: [staff], computerAccess: COMPUTER })],
+      'GET /api/departments/d2/roster': [200, ROSTER],
+      'POST /api/computer/open': [409, { error: { code: 'conflict', message: 'Hornhoof cannot reach this computer.', reason: 'updater_missing' } }],
+    });
+    await openTasks(user);
+    const waiting = screen.getByRole('region', { name: 'Waiting for you' });
+    expect(within(waiting).getByRole('heading', { name: 'Hiring for Development' })).toBeInTheDocument();
+    expect(within(waiting).getByText('Hire a reviewer.')).toBeInTheDocument();
+    await user.click(within(waiting).getByRole('button', { name: 'Open access for a day' }));
+    expect(await within(waiting).findByRole('alert')).toHaveTextContent('The updater is not running.');
+  });
+
+  it("show the CEO's own filter with the computer, and another person's without it", async () => {
+    const user = userEvent.setup();
+    shell({ 'GET /api/org': [200, counted({ p1: 3, p4: 1 })], 'GET /api/requests': [200, decisions([{ ...REQUESTS[0]!, ownerPersonId: 'p4' }, REQUESTS[1]!], { proposals: [STRUCTURE], computerAccess: COMPUTER })] });
+    await user.click(await screen.findByRole('button', { name: 'Ivan: 3 decisions wait' }));
+    const waiting = await screen.findByRole('region', { name: 'Waiting for you' });
+    expect(within(waiting).getAllByRole('article').map(a => a.getAttribute('aria-label'))).toEqual(['#10 Payments']);
+    expect(within(waiting).getByRole('region', { name: /asks for access/ })).toBeInTheDocument();
+    expect(within(waiting).getByRole('heading', { name: 'Company structure' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Map' }));
+    await user.click(await screen.findByRole('button', { name: 'Dan: 1 decision waits' }));
+    const his = await screen.findByRole('region', { name: 'Waiting for you' });
+    expect(within(his).queryByRole('region', { name: /asks for access/ })).not.toBeInTheDocument();
+    expect(within(his).queryByRole('heading', { name: 'Company structure' })).not.toBeInTheDocument();
+  });
+
+  it('fetch again when who decides may have moved, or the request for the computer changed', async () => {
+    const stream = fakeStream();
+    let total = 1;
+    shell({ 'GET /api/requests': () => [200, decisions(REQUESTS.slice(0, total))] });
+    expect(await screen.findByRole('button', { name: 'Tasks, 1 waiting for you' })).toBeInTheDocument();
+    total = 2;
+    stream.send({ type: 'org' });
+    expect(await screen.findByRole('button', { name: 'Tasks, 2 waiting for you' })).toBeInTheDocument();
+    total = 0;
+    stream.send({ type: 'computer' });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Tasks' })).toBeInTheDocument());
   });
 });

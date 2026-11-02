@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Shell } from '../src/screens/Shell';
 import type { Improvement, Me } from '../src/types';
-import { DEV_ORG, ME, mockApi, TASK_DETAIL } from './api-mock';
+import { decisions, DEV_ORG, ME, mockApi, TASK_DETAIL } from './api-mock';
 import { fakeStream } from './fake-stream';
 
 const base = { seen: 1, result: null, at: '2026-10-31T09:00:00.000Z', updatedAt: '2026-10-31T09:00:00.000Z', decidedBy: null };
@@ -52,7 +52,7 @@ const listed = (id: string): Me => ({ ...ME, person: { ...ME.person, id, name: '
 function shell(routes: Record<string, unknown> = {}, me: Me = ME, onSignOut: () => void = () => {}) {
   const calls = mockApi({
     'GET /api/org': [200, DEV_ORG],
-    'GET /api/requests': [200, { requests: [] }],
+    'GET /api/requests': [200, decisions([])],
     'GET /api/improvements': [200, { improvements: IMPROVEMENTS }],
     ...(routes as Record<string, [number, unknown]>),
   });

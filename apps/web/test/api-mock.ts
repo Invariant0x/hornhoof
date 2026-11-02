@@ -1,5 +1,5 @@
 import { vi } from 'vitest';
-import type { AgentCardView, MachineView, Me, Org, PersonView, Roster, Serving, SubView, TaskDetail, TaskLine, TurnView, WaitingRequest } from '../src/types';
+import type { AgentCardView, Decisions, MachineView, Me, Org, PersonView, Roster, Serving, SubView, TaskDetail, TaskLine, TurnView, WaitingRequest } from '../src/types';
 
 type Reply = [status: number, body?: unknown];
 type Route = Reply | ((body: unknown) => Reply | Promise<Reply>);
@@ -230,9 +230,23 @@ export const TASK_DETAIL: TaskDetail = {
 };
 
 export const REQUESTS: WaitingRequest[] = [
-  { id: 'r1', kind: 'question', text: 'Stripe or Adyen?', commit: null, commitUrl: null, images: [], options: [], link: null, explained: null, explaining: false, at: '2026-10-30T09:10:00.000Z', agent: { id: 'b0', name: 'Dana' }, task: { id: 't9', number: 9, title: 'Pick a payment provider', department: DEV } },
-  { id: 'r2', kind: 'approval', text: 'Release 0.5.0 to main.', commit: 'a'.repeat(40), commitUrl: null, images: [], options: [], link: null, explained: null, explaining: false, at: '2026-10-30T09:20:00.000Z', agent: { id: 'b0', name: 'Dana' }, task: { id: 't10', number: 10, title: 'Payments', department: DEV } },
+  { id: 'r1', kind: 'question', text: 'Stripe or Adyen?', commit: null, commitUrl: null, images: [], options: [], link: null, explained: null, explaining: false, at: '2026-10-30T09:10:00.000Z', agent: { id: 'b0', name: 'Dana' }, task: { id: 't9', number: 9, title: 'Pick a payment provider', department: DEV }, ownerPersonId: 'p1', canAnswer: true },
+  { id: 'r2', kind: 'approval', text: 'Release 0.5.0 to main.', commit: 'a'.repeat(40), commitUrl: null, images: [], options: [], link: null, explained: null, explaining: false, at: '2026-10-30T09:20:00.000Z', agent: { id: 'b0', name: 'Dana' }, task: { id: 't10', number: 10, title: 'Payments', department: DEV }, ownerPersonId: 'p1', canAnswer: true },
 ];
+
+/* What GET /api/requests answers: the requests, the orchestrator's cards and his request for the computer, counted per
+   owner and per asking agent as the server counts them. */
+export function decisions(requests: WaitingRequest[], more: Partial<Pick<Decisions, 'proposals' | 'computerAccess'>> = {}): Decisions {
+  const all = { proposals: [], computerAccess: null, ...more };
+  const items = [...requests, ...all.proposals, ...(all.computerAccess ? [all.computerAccess] : [])];
+  const byPerson: Record<string, number> = {};
+  const byAgent: Record<string, number> = {};
+  for (const i of items) {
+    byPerson[i.ownerPersonId] = (byPerson[i.ownerPersonId] ?? 0) + 1;
+    byAgent[i.agent.id] = (byAgent[i.agent.id] ?? 0) + 1;
+  }
+  return { requests, ...all, counts: { byPerson, byAgent, total: items.length } };
+}
 
 export const TURN: TurnView = {
   id: 'u3',

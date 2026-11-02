@@ -31,17 +31,12 @@ type PulseProps = {
   once?: boolean;
   tone?: 'c' | 'a' | 'k';
   r?: number;
-  /* Where on its way a running dot is when it appears, from 0 to 1, so several on one path keep apart. */
-  phase?: number;
 };
-
-/* Where the signals that keep running along a live way are when they appear: two, half a way apart. */
-export const SIGNALS = [0, 0.5];
 
 export const pulseSeconds = (pts: Point[], speed: number, bounce = false) => (lengthOf(pts) * (bounce ? 2 : 1)) / speed;
 
 /* A dot that runs along a path while something real is going on, or once for one message. */
-export function Pulse({ pts, speed, bounce = false, once = false, tone = 'c', r = 3, phase = 0 }: PulseProps) {
+export function Pulse({ pts, speed, bounce = false, once = false, tone = 'c', r = 3 }: PulseProps) {
   const dur = pulseSeconds(pts, speed, bounce);
   return (
     <circle className={`pt ${tone}`} r={r}>
@@ -49,7 +44,6 @@ export function Pulse({ pts, speed, bounce = false, once = false, tone = 'c', r 
         path={toD(pts)}
         dur={`${dur.toFixed(2)}s`}
         repeatCount={once ? '1' : 'indefinite'}
-        {...(phase ? { begin: `-${(phase * dur).toFixed(2)}s` } : {})}
         fill={once ? 'freeze' : 'remove'}
         {...(bounce ? { keyPoints: '0;1;0', keyTimes: '0;0.5;1', calcMode: 'linear' } : {})}
       />

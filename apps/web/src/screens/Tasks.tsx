@@ -1,16 +1,21 @@
 import { useState } from 'react';
 import { deptLabel, errorText, useT } from '../i18n';
-import { useOrg } from '../org';
+import { mapPeople, useOrg } from '../org';
 import { placeName, useTasks, useTurns } from '../tasks';
-import type { Me, TaskLine, TaskStatus, TurnView, WaitingRequest } from '../types';
+import type { Decisions, Org, ProposalDecision, TaskLine, TaskStatus, TurnView } from '../types';
+import { ComputerCard } from '../ui/ComputerCard';
 import { Field } from '../ui/Field';
 import { Requests, wordsAnswer } from '../ui/Requests';
+import { StaffCard } from '../ui/StaffCard';
+import { StructureCard } from '../ui/StructureCard';
 import { TaskRow } from '../ui/TaskRow';
 
 type Props = {
-  me: Me;
-  requests: WaitingRequest[] | undefined;
-  onRequestsChanged: () => void;
+  decisions: Decisions | undefined;
+  onDecisionsChanged: () => void;
+  /* Opened from a person's card: only that person's decisions show until the filter is taken off. */
+  personId: string | null;
+  onClearPerson: () => void;
   selected: string | null;
   onOpenTask: (id: string) => void;
   onOpenAgent: (id: string) => void;
@@ -97,9 +102,90 @@ function Turn({ turn, tasks, rows }: { turn: TurnView; tasks: TaskLine[]; rows: 
   );
 }
 
+type Waiting = Pick<Props, 'decisions' | 'onDecisionsChanged' | 'personId' | 'onClearPerson' | 'onOpenTask' | 'onOpenAgent' | 'onOpenOrchestrator'> & {
+  org: Org | null;
+  place: (p: TaskLine['department']) => string;
+};
+
+type Shown = Pick<Decisions, 'requests' | 'proposals' | 'computerAccess'>;
+
+/* What of the decisions the screen lists: all of them, or one person's; nothing before the first answer. */
+function shownOf(decisions: Decisions | undefined, personId: string | null): Shown {
+  const theirs = <T extends { ownerPersonId: string }>(items: T[]) => (personId ? items.filter(i => i.ownerPersonId === personId) : items);
+  const computer = decisions?.computerAccess ? theirs([decisions.computerAccess]) : [];
+  return { requests: theirs(decisions?.requests ?? []), proposals: theirs(decisions?.proposals ?? []), computerAccess: computer[0] ?? null };
+}
+
+const shownNone = (s: Shown) => !s.requests.length && !s.proposals.length && !s.computerAccess;
+
+/* The person whose decisions show, with a cross that shows everyone's again. */
+function PersonFilter({ name, onClear }: { name: string; onClear: () => void }) {
+  const t = useT();
+  return (
+    <p className="filter-chip">
+      <span>{t.tasks.decisionsFor(name)}</span>
+      <button className="zbtn" type="button" aria-label={t.tasks.showAll} title={t.tasks.showAll} onClick={onClear}>
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M6 6l12 12M18 6L6 18" />
+        </svg>
+      </button>
+    </p>
+  );
+}
+
+const nothing = () => {};
+
+/* An orchestrator's card as his window shows it: a structure to build, or people to hire into a department. Correcting it
+   in words opens his window. */
+function ProposalCard({ card, org, onCorrect = nothing, onDone }: { card: ProposalDecision; org: Org | null; onCorrect?: () => void; onDone: () => void }) {
+  const t = useT();
+  if (card.kind === 'structure') return <StructureCard proposal={{ id: card.id, brief: card.brief, items: card.items }} departments={org?.departments ?? []} onCorrect={onCorrect} onDone={onDone} />;
+  if (!card.department) return null;
+  const known = org?.departments.find(d => d.id === card.department!.id);
+  const department = { id: card.department.id, name: known ? deptLabel(t, known) : card.department.name };
+  return <StaffCard department={department} proposal={{ id: card.id, brief: card.brief, people: card.items }} onCorrect={onCorrect} onDone={onDone} />;
+}
+
+type Listed = Pick<Waiting, 'onDecisionsChanged' | 'onOpenTask' | 'onOpenAgent' | 'onOpenOrchestrator' | 'org' | 'place'> & { shown: Shown; onFailure: (err: unknown) => void };
+
+/* Each decision with the buttons it already has elsewhere: requests, then the orchestrator's cards, then the computer. */
+function DecisionList({ shown, onDecisionsChanged, onOpenTask, onOpenAgent, onOpenOrchestrator, org, place, onFailure }: Listed) {
+  const t = useT();
+  const { requests, proposals, computerAccess } = shown;
+  return (
+    <>
+      {requests.length > 0 && <Requests requests={requests} onChanged={onDecisionsChanged} onOpenTask={onOpenTask} onOpenAgent={onOpenAgent} placeName={place} />}
+      {wordsAnswer(requests) && <p className="muted">{t.tasks.answerElsewhere}</p>}
+      {proposals.map(c => (
+        <ProposalCard key={c.id} card={c} org={org} onCorrect={onOpenOrchestrator} onDone={onDecisionsChanged} />
+      ))}
+      {computerAccess && <ComputerCard view={computerAccess.view} onChange={onDecisionsChanged} onFailure={onFailure} />}
+    </>
+  );
+}
+
+/* What waits for the person: what agents ask, the orchestrator's cards and his request for the computer. Opened from a
+   person's card, only theirs, with the filter in sight. */
+function WaitingForYou({ decisions, personId, onClearPerson, ...rest }: Waiting) {
+  const t = useT();
+  const [failure, setFailure] = useState<unknown>(null);
+  const shown = shownOf(decisions, personId);
+  const name = mapPeople(rest.org).find(p => p.id === personId)?.name ?? t.tasks.someone;
+
+  return (
+    <section className="waiting" aria-label={t.tasks.waiting}>
+      <h2>{t.tasks.waiting}</h2>
+      {personId && <PersonFilter name={name} onClear={onClearPerson} />}
+      <DecisionList shown={shown} onFailure={setFailure} {...rest} />
+      {decisions && shownNone(shown) && <p className="muted">{personId ? t.tasks.nothingFor(name) : t.tasks.nothingWaiting}</p>}
+      {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
+    </section>
+  );
+}
+
 /* The tracker shows the work and changes nothing by itself: what waits for the person, then the turns as the orchestrator
    laid them out, the running one first, the planned ones in order and the finished ones folded away. */
-export function Tasks({ me, requests, onRequestsChanged, selected, onOpenTask, onOpenAgent, onOpenOrchestrator }: Props) {
+export function Tasks({ decisions, onDecisionsChanged, personId, onClearPerson, selected, onOpenTask, onOpenAgent, onOpenOrchestrator }: Props) {
   const t = useT();
   const { org } = useOrg();
   const [department, setDepartment] = useState<string | null>(null);
@@ -129,17 +215,17 @@ export function Tasks({ me, requests, onRequestsChanged, selected, onOpenTask, o
         )}
       </header>
 
-      <section className="waiting" aria-label={t.tasks.waiting}>
-        <h2>{t.tasks.waiting}</h2>
-        {requests?.length ? (
-          <>
-            <Requests requests={requests} onChanged={onRequestsChanged} company={me.person.scopeKind === 'company'} onOpenTask={onOpenTask} onOpenAgent={onOpenAgent} placeName={place} />
-            {wordsAnswer(requests) && <p className="muted">{t.tasks.answerElsewhere}</p>}
-          </>
-        ) : (
-          requests && <p className="muted">{t.tasks.nothingWaiting}</p>
-        )}
-      </section>
+      <WaitingForYou
+        decisions={decisions}
+        onDecisionsChanged={onDecisionsChanged}
+        personId={personId}
+        onClearPerson={onClearPerson}
+        onOpenTask={onOpenTask}
+        onOpenAgent={onOpenAgent}
+        onOpenOrchestrator={onOpenOrchestrator}
+        org={org}
+        place={place}
+      />
 
       {!!org?.departments.length && (
         <div className="task-filters">

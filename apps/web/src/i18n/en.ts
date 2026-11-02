@@ -141,6 +141,9 @@ export const en = {
     machineOffline: (owner: string) => `${owner}'s machine is offline`,
     runsOnPersonal: (owner: string, provider: string) => `Ready, on ${owner}'s ${provider} subscription`,
     waitingLimit: (at: string) => `Waiting for the limit to reset at ${at}`,
+    /* A person's card: how many decisions wait for them, or nothing when the viewer cannot see their decisions. */
+    decisionsOf: (name: string, n: number | null) =>
+      n === null ? `${name}: open the decisions` : n ? `${name}: ${n} ${plural('en', n, { one: 'decision waits', other: 'decisions wait' })}` : `${name}: no decisions wait`,
   },
   people: {
     heading: 'People',
@@ -564,6 +567,11 @@ export const en = {
     closedOutside: (n: number) => `Closed outside turns: ${n}`,
     waiting: 'Waiting for you',
     nothingWaiting: 'Nothing waits for you.',
+    /* The decisions screen opened from a person's card shows theirs until the filter is taken off. */
+    decisionsFor: (name: string) => `Decisions for ${name}`,
+    someone: 'this person',
+    showAll: "Show everyone's decisions",
+    nothingFor: (name: string) => `Nothing waits for a decision from ${name}.`,
     asks: (agent: string) => `${agent} asks`,
     asksApproval: (agent: string) => `${agent} asks you to approve a commit`,
     stuck: (agent: string) => `${agent} is stuck`,

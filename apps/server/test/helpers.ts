@@ -182,11 +182,12 @@ export async function mcp(app: FastifyInstance, token: string): Promise<Client> 
 
 export type StreamReader = { res: Response; messages: { type: string; [k: string]: unknown }[]; ended(): boolean; close(): void };
 
-/* Reads Server-Sent Events from /api/stream of a listening app as parsed messages. */
-export async function openStream(app: FastifyInstance, token?: string): Promise<StreamReader> {
+/* Reads Server-Sent Events from /api/stream of a listening app as parsed messages; headers sign in another way, as the
+   orchestrator does inside. */
+export async function openStream(app: FastifyInstance, token?: string, headers: Record<string, string> = {}): Promise<StreamReader> {
   const base = `http://127.0.0.1:${(app.server.address() as AddressInfo).port}`;
   const stop = new AbortController();
-  const res = await fetch(`${base}/api/stream`, { headers: token ? { cookie: `hh_session=${token}` } : {}, signal: stop.signal });
+  const res = await fetch(`${base}/api/stream`, { headers: { ...(token ? { cookie: `hh_session=${token}` } : {}), ...headers }, signal: stop.signal });
   const messages: StreamReader['messages'] = [];
   let ended = false;
   if (res.ok) {
