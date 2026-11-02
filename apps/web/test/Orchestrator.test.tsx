@@ -174,7 +174,6 @@ describe('AgentWindow', () => {
     expect(input).toHaveValue('');
     await act(async () => {
       fail();
-      await new Promise(r => setTimeout(r, 50));
     });
     expect(screen.getByRole('alert')).toHaveTextContent('Not now.');
     expect(input).toHaveValue('Schools first');
@@ -183,18 +182,17 @@ describe('AgentWindow', () => {
     await user.type(input, 'then parents');
     await act(async () => {
       fail();
-      await new Promise(r => setTimeout(r, 50));
     });
     expect(screen.getByRole('alert')).toHaveTextContent('Not now.');
     expect(input).toHaveValue('then parents');
   });
 
   it('shows that he works and stops him on Esc', async () => {
-    const { calls } = open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...BUSY, queued: 2 } }], 'POST /api/agents/orchestrator/stop': [202] });
-    expect(await screen.findByText(/esc to stop/)).toBeInTheDocument();
+    const { calls } = await act(async () => open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...BUSY, queued: 2 } }], 'POST /api/agents/orchestrator/stop': [202] }));
+    expect(screen.getByText(/esc to stop/)).toBeInTheDocument();
     expect(screen.getByText('2 waiting')).toBeInTheDocument();
     fireEvent.keyDown(document, { key: 'Escape' });
-    await vi.waitFor(() => expect(calls.some(c => c.method === 'POST' && c.path === '/api/agents/orchestrator/stop')).toBe(true));
+    expect(calls.some(c => c.method === 'POST' && c.path === '/api/agents/orchestrator/stop')).toBe(true);
   });
 
   it('says why he cannot answer and offers the card by hand', async () => {
@@ -427,7 +425,6 @@ describe('AgentWindow', () => {
     await vi.waitFor(() => expect(input).toBeEnabled());
     await act(async () => {
       late();
-      await new Promise(r => setTimeout(r, 50));
     });
     expect(input).toBeEnabled();
   });
