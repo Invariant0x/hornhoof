@@ -140,7 +140,7 @@ describe('parts on physical computers', () => {
     const host = { host: 'linux', hostCpus: 16, hostLoad: 1, hostMemFree: 12 * GIB, hostMemory: 16 * GIB };
     for (const entry of joined.nodes) {
       const node = await connectNode(c.url, entry.key);
-      node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], tests: [], work: true, load: idle(host) });
+      node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], tests: [], work: true, load: idle({ ...host, memFree: GIB }) });
       await until(() => c.app.ctx.hub.loadOf(nodeIdentity(entry.nodeId)) !== null);
       connected.push({ node, id: entry.nodeId });
     }
