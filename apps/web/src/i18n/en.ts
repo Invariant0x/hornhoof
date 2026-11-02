@@ -619,7 +619,7 @@ export const en = {
     sentBack: (n: number) => (n === 1 ? 'sent back once' : `sent back ${n} times`),
     nobody: 'Nobody',
     gates: 'Gates',
-    gateStates: { working: 'working on it', did: 'did the work', merging: 'puts the work together with the rest of the turn', passed: 'passed', current: 'checking now', next: 'next' },
+    gateStates: { working: 'working on it', did: 'did the work', merging: 'puts the work together with the rest of the turn', passed: 'passed', current: 'checking now', next: 'next', returned: 'found what blocks' },
     partOf: 'Part of',
     after: 'Starts after',
     waitsFor: (tasks: string) => `waits for ${tasks}`,

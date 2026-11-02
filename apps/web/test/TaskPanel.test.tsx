@@ -82,6 +82,33 @@ describe('a task', () => {
     expect(await screen.findByRole('complementary', { name: 'Bruno, Backend engineer' })).toBeInTheDocument();
   });
 
+  it.each([
+    ['en', ['Rita, Code reviewer, passed', 'Rex, Code reviewer, found what blocks', 'Sam, Security engineer, checking now']],
+    ['ru', ['Rita, Ревьюер кода, пропустил', 'Rex, Ревьюер кода, нашел, что блокирует', 'Sam, Инженер безопасности, проверяет сейчас']],
+  ])('shows the review of a turn with every reviewer checking at once, in %s', async (language, rows) => {
+    localStorage.setItem('hh-lang', language);
+    const user = userEvent.setup();
+    const review = {
+      ...TASK_DETAIL,
+      title: 'Review of turn 4',
+      turnReview: true,
+      stage: 1,
+      gates: [
+        { ...TASK_DETAIL.gates[0]!, state: 'passed' as const },
+        { ...TASK_DETAIL.gates[0]!, id: 'b5', name: 'Rex', state: 'returned' as const },
+        { ...TASK_DETAIL.gates[2]!, state: 'current' as const },
+      ],
+    };
+    shell({ 'GET /api/tasks?status=all': [200, { tasks: [{ ...TASKS[0]!, title: 'Review of turn 4' }] }], 'GET /api/tasks/t12': [200, { task: review }] });
+    await user.click(await screen.findByRole('button', { name: /^(Tasks|Задачи)/ }));
+    await user.click(await screen.findByRole('button', { name: /#12/ }));
+    const panel = await screen.findByRole('complementary', { name: '#12 Review of turn 4' });
+    const gates = within(panel).getByRole('list', { name: language === 'ru' ? 'Ворота' : 'Gates' });
+    /* The head gave the work and gets the verdicts: no executor row. */
+    expect(within(gates).getAllByRole('listitem').map(li => li.textContent)).toEqual(rows);
+    localStorage.removeItem('hh-lang');
+  });
+
   it('opens with where it stands at its gates, its brief, body, subtasks and log', async () => {
     const user = userEvent.setup();
     shell();

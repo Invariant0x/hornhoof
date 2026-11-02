@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, companies, departments, jobs, people, subscriptions, tasks, turns } from '../src/db/schema.js';
 import { createTask, submit, verdict, type Moved } from '../src/modules/tasks/engine.js';
+import { taskDetail } from '../src/modules/tasks/views.js';
 import { wakePrompt } from '../src/modules/tasks/wake.js';
 import { listen, mcp, setUpCompany, testApp } from './helpers.js';
 
@@ -99,6 +100,21 @@ describe('the review of a turn', () => {
     expect(prompt).toContain('fix task without gates');
     expect(prompt).toContain('starts with a test that fails');
     expect(prompt).toContain('no second review');
+  });
+
+  it('shows every reviewer of the turn on the task at once, each with its verdict as it comes', async () => {
+    const { ctx, bruno, kai, rita, rex, member, merged, reviews } = await company();
+    await merged(bruno.id, (await member(bruno.id, 'Checkout API')).id);
+    await merged(kai.id, (await member(kai.id, 'Checkout page')).id);
+    const shown = async () => {
+      const detail = await taskDetail(ctx, (await reviews())[0]!, () => true);
+      return { turnReview: detail.turnReview, gates: detail.gates.map(g => [g.name, g.state]) };
+    };
+    expect(await shown()).toEqual({ turnReview: true, gates: [['Rita', 'current'], ['Rex', 'current'], ['Sid', 'current']] });
+    const [review] = await reviews();
+    await verdict(ctx, rita!.id, review!.id, { pass: true, comment: 'Good.' });
+    await verdict(ctx, rex!.id, review!.id, { pass: false, comment: 'cart.ts:12 drops the total.' });
+    expect(await shown()).toEqual({ turnReview: true, gates: [['Rita', 'passed'], ['Rex', 'returned'], ['Sid', 'current']] });
   });
 
   it('tells the head to give the final check when every reviewer passed the turn', async () => {

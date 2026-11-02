@@ -150,7 +150,7 @@ async function openTurnReview(ctx: Live, parentId: string): Promise<Wake[]> {
         updatedAt: new Date(),
       })
       .returning();
-    await note(tx, row!, { kind: 'created', actor: { agentId: head }, text: row!.brief, data: { assignee: panel[0], gates: leads, after: [], turnReview: true } });
+    await note(tx, row!, { kind: 'created', actor: { agentId: head }, text: row!.brief, data: { assignee: panel[0], gates: leads, after: [], panel, turnReview: true } });
     const wakes: Wake[] = panel.map(agentId => ({ agentId, taskId: row!.id, why: 'turn_review', text: branch }));
     await keepWakes(tx, row!.companyId, wakes);
     return { row: row!, wakes };
