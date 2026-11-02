@@ -7,6 +7,8 @@ works() {
     *) [ -f "$STUB_STATE/docker-running" ] ;;
   esac
 }
+# The command line knows its context without the daemon. STUB_CONTEXT names it, as Docker Desktop or OrbStack does.
+if [ "${1:-}" = context ] && [ "${2:-}" = show ]; then echo "${STUB_CONTEXT:-desktop-linux}"; exit 0; fi
 if ! works; then echo "Cannot connect to the Docker daemon" >&2; exit 1; fi
 has() { case " $* " in *" $WORD "*) return 0 ;; esac; return 1; }
 case "$1" in

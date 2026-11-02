@@ -192,14 +192,36 @@ install_docker_engine() {
   rm -f "$script"
 }
 
+# Docker Desktop or OrbStack that is installed but not running starts like any app, the one the Docker command line
+# belongs to first. Docker Desktop starts at login only when its owner turns that on, so the person hears how.
+start_docker_app() {
+  local first=Docker second=OrbStack app
+  if [ "$(docker context show 2> /dev/null)" = orbstack ]; then
+    first=OrbStack
+    second=Docker
+  fi
+  for app in "$first" "$second"; do
+    open -g -a "$app" > /dev/null 2>&1 || continue
+    if [ "$app" = Docker ]; then
+      say "Starting Docker Desktop. If it opens a window, answer it there; the first start can take a minute."
+      say "So Hornhoof comes back after a restart, turn on Start Docker Desktop when you sign in to your computer, under Settings, General in Docker Desktop."
+    else
+      say "Starting OrbStack. If it opens a window, answer it there."
+    fi
+    return 0
+  done
+  return 1
+}
+
 ensure_docker() {
   say "Checking Docker."
   docker_works && return 0
   if [ "$OS" = darwin ]; then
     if command -v docker > /dev/null 2>&1 && ! command -v colima > /dev/null 2>&1; then
-      fail "Docker is installed but not running. Start Docker Desktop or OrbStack, then run this command again."
+      start_docker_app || fail "Docker is installed but not running. Start Docker Desktop or OrbStack, then run this command again."
+    else
+      install_colima
     fi
-    install_colima
   else
     command -v docker > /dev/null 2>&1 || install_docker_engine
     if ! docker_works; then
@@ -692,14 +714,11 @@ server_mode() {
     fi
   else
     port=$(free_port)
-    url=$(ask "Address people will open Hornhoof at (Enter for http://localhost:$port): " "http://localhost:$port")
-    case "$url" in
-      http://* | https://*) ;;
-      *) fail "The address must start with http:// or https://. Run this command again." ;;
-    esac
+    # People get the company's link at setup, so the server starts at its address on this computer. Another address of
+    # its own, such as a domain, goes into PUBLIC_URL later.
     (
       umask 077
-      printf 'HORNHOOF_SECRET=%s\nNODE_KEY=%s\nPOSTGRES_PASSWORD=%s\nPUBLIC_URL=%s\nHORNHOOF_PORT=%s\n' "$(new_secret)" "$(new_secret)" "$(new_password)" "${url%/}" "$port" > "$env_file.new"
+      printf 'HORNHOOF_SECRET=%s\nNODE_KEY=%s\nPOSTGRES_PASSWORD=%s\nPUBLIC_URL=%s\nHORNHOOF_PORT=%s\n' "$(new_secret)" "$(new_secret)" "$(new_password)" "http://localhost:$port" "$port" > "$env_file.new"
     )
     mv "$env_file.new" "$env_file"
     say "Wrote fresh secrets to $env_file. Keep it safe: HORNHOOF_SECRET is needed to read the stored API keys."

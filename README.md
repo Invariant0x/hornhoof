@@ -110,7 +110,7 @@ You need a computer with macOS or Linux. Windows is not supported yet. Docker is
    curl -fsSL https://raw.githubusercontent.com/Invariant0x/hornhoof/main/scripts/install.sh | bash -s -- server
    ```
 
-3. Answer its questions. It may ask for your computer's password, to install Docker. When it asks for the address people will open Hornhoof at, just press `Enter`.
+3. It may ask for your computer's password, to install Docker. If Docker Desktop is installed but not running, it starts it.
 
 4. Wait a few minutes. The first time, it downloads Hornhoof. At the end it shows a link like `http://localhost:8080/setup?code=...`.
 

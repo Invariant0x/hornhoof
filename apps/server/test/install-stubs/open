@@ -1,3 +1,9 @@
 #!/usr/bin/env bash
 . "$STUB_SRC/_log.sh"
+# STUB_APPS: the Mac apps installed, by name. Opening one starts Docker, as Docker Desktop and OrbStack do; another is not found.
+if [ "${1:-}" = -g ] && [ "${2:-}" = -a ]; then
+  case " ${STUB_APPS:-} " in *" $3 "*) touch "$STUB_STATE/docker-running"; exit 0 ;; esac
+  echo "Unable to find application named '$3'" >&2
+  exit 1
+fi
 exit 0

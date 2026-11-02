@@ -122,6 +122,29 @@ describe('install.sh', () => {
     expect(indexOf(r.calls, 'brew services start colima')).toBeGreaterThanOrEqual(0);
   });
 
+  it('starts Docker Desktop on a Mac where it is installed but not running, and says how to have it start at login', () => {
+    const r = install({ env: { STUB_OS: 'Darwin', STUB_ARCH: 'arm64', STUB_DOCKER: 'after_start', STUB_APPS: 'Docker OrbStack' } });
+    expect(r.code).toBe(0);
+    expect(r.calls).toContain('open -g -a Docker');
+    expect(r.calls.some(c => c.startsWith('open -g -a OrbStack') || c.startsWith('brew install'))).toBe(false);
+    expect(r.out).toContain('Starting Docker Desktop.');
+    expect(r.out).toContain('Start Docker Desktop when you sign in to your computer');
+  });
+
+  it('starts OrbStack when the Docker command line belongs to it', () => {
+    const r = install({ env: { STUB_OS: 'Darwin', STUB_ARCH: 'arm64', STUB_DOCKER: 'after_start', STUB_APPS: 'Docker OrbStack', STUB_CONTEXT: 'orbstack' } });
+    expect(r.code).toBe(0);
+    expect(r.calls).toContain('open -g -a OrbStack');
+    expect(r.calls).not.toContain('open -g -a Docker');
+    expect(r.out).not.toContain('when you sign in');
+  });
+
+  it('asks to start Docker by hand on a Mac where its command line has no app to start', () => {
+    const r = install({ env: { STUB_OS: 'Darwin', STUB_ARCH: 'arm64', STUB_DOCKER: 'after_start' } });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('Docker is installed but not running. Start Docker Desktop or OrbStack, then run this command again.');
+  });
+
   it('uses a working Docker on Linux as it is, without sudo', () => {
     const r = install();
     expect(r.code).toBe(0);
@@ -348,13 +371,15 @@ describe('install.sh', () => {
     expect(r.calls.some(c => c.startsWith('docker exec -it hornhoof-claude-1c07dac4'))).toBe(true);
   });
 
-  it('sets up the server with fresh secrets and the address typed on the terminal', () => {
+  /* People get the company's link at setup, so the installer asks nothing about addresses: it takes this computer's own. */
+  it('sets up the server with fresh secrets and its address on this computer, without a question', () => {
     const r = install({ args: ['server'], tty: 'https://hornhoof.my.test\n' });
     expect(r.code).toBe(0);
     const env = readFileSync(join(r.dir, 'home', 'hornhoof', '.env'), 'utf8');
     expect(env).toMatch(/^HORNHOOF_SECRET=[A-Za-z0-9+/=]{44}$/m);
     expect(env).toMatch(/^NODE_KEY=[A-Za-z0-9+/=]{44}$/m);
-    expect(env).toContain('PUBLIC_URL=https://hornhoof.my.test');
+    expect(env).toContain('PUBLIC_URL=http://localhost:8080');
+    expect(r.out).not.toContain('Address');
     /* It goes into the database address, so it keeps to characters an address takes as they are. */
     expect(env).toMatch(/^POSTGRES_PASSWORD=[0-9a-f]{48}$/m);
     /* compose starts the images .env names; set up by hand, they are the build's tag. */
@@ -364,7 +389,7 @@ describe('install.sh', () => {
     expect(existsSync(join(r.dir, 'home', 'hornhoof', 'compose.yaml'))).toBe(true);
     expect(r.calls).toContain('docker compose pull');
     expect(r.calls).toContain('docker compose up -d --no-build');
-    expect(r.out).toContain('https://hornhoof.my.test');
+    expect(r.out).toContain('http://localhost:8080');
   });
 
   it("tells the built-in node of a server on a Mac the Mac's processor, cores and memory, through .env", () => {
@@ -432,7 +457,7 @@ describe('install.sh', () => {
   /* Whoever opens a new server first would become its owner, so only the link with its setup code sets it up. */
   it('shows the setup link the new server gives, once it answers', () => {
     const link = 'https://hornhoof.my.test/setup?code=Ab3_d-Ef0123456789abcdef';
-    const r = install({ args: ['server', '--name', 'acme'], tty: 'https://hornhoof.my.test\n', env: { STUB_SETUP_LINK: link } });
+    const r = install({ args: ['server', '--name', 'acme'], env: { STUB_SETUP_LINK: link } });
     expect(r.code).toBe(0);
     const ask = indexOf(r.calls, 'docker compose -p hornhoof-acme exec -T app node apps/server/dist/cli.js setup-link');
     expect(ask).toBeGreaterThan(r.calls.findIndex(c => c.startsWith('curl') && c.includes('/api/health')));
@@ -442,11 +467,6 @@ describe('install.sh', () => {
       expect(odd.out).not.toContain('Open this link');
       expect(odd.out).toContain('Hornhoof is running at http://localhost:8080.');
     }
-  });
-
-  it('takes localhost when Enter is pressed for the address', () => {
-    const r = install({ args: ['server'], tty: '\n' });
-    expect(readFileSync(join(r.dir, 'home', 'hornhoof', '.env'), 'utf8')).toContain('PUBLIC_URL=http://localhost:8080');
   });
 
   it('removes the labelled containers on --uninstall after a y', () => {

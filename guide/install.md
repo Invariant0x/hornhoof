@@ -12,11 +12,10 @@ curl -fsSL https://raw.githubusercontent.com/Invariant0x/hornhoof/main/scripts/i
 
 It goes through these steps:
 
-1. It installs Docker if it is missing. On macOS that is Colima, through Homebrew.
+1. It installs Docker if it is missing. On macOS that is Colima, through Homebrew. Docker Desktop or OrbStack that is installed but not running, it starts.
 2. It puts `compose.yaml` and a `.env` file with fresh secrets into the `~/hornhoof` folder.
-3. It asks for the address people will open Hornhoof at.
-4. It downloads the images and starts them.
-5. It shows the link that sets Hornhoof up.
+3. It downloads the images and starts them.
+4. It shows the link that sets Hornhoof up. People get the company's own link later, at setup.
 
 ![Setting up a company](../.github/assets/setup.gif)
 
@@ -27,6 +26,8 @@ Run the same line again. It keeps the existing `.env`. [Updates](updates.md) say
 ## How much of my Mac does it take?
 
 On a Mac, Docker runs inside Colima. A Colima the installer sets up gets all of the Mac's processors and three quarters of its memory. A Colima you set up before keeps the size you gave it.
+
+Docker Desktop and OrbStack keep the size set in their own settings. Docker Desktop starts by itself after a restart only when "Start Docker Desktop when you sign in to your computer" is on, under Settings, General. Without it, your companies wait until you open Docker Desktop.
 
 Every node also gets 2 GB of shared memory for the browsers agents run.
 
@@ -81,7 +82,7 @@ The simplest way is a link at hornhoof.org. [The link on the internet](public-li
 
 To use your own domain instead:
 
-1. Add `PUBLIC_URL=https://your.domain` to `.env`. The installer writes the address you gave it into this same line.
+1. Put `https://your.domain` into the `PUBLIC_URL=` line of `.env`. The installer writes this computer's own address there, like `http://localhost:8080`.
 2. Put something that handles TLS in front of Hornhoof, like Caddy, nginx or a Cloudflare tunnel. Hornhoof itself serves plain HTTP.
 
 Invite links and the node command use this address. Sign-in cookies are marked secure when it starts with `https://`. Without TLS the browser drops the secure cookie, and you stay on the login screen.
