@@ -5,6 +5,7 @@ import { LanguageProvider } from '../src/i18n';
 import { Settings } from '../src/screens/Settings';
 import { Shell } from '../src/screens/Shell';
 import { ME, mockApi, ORG } from './api-mock';
+import { decl } from './css';
 
 const ACME = { name: 'acme', url: 'https://acme.hornhoof.org' };
 
@@ -28,6 +29,7 @@ describe('Share access', () => {
     render(<Settings me={ME} onClose={() => {}} />);
     await user.click(await screen.findByRole('button', { name: 'Change name' }));
     expect(screen.getByLabelText('Link')).toHaveValue('acme');
+    expect(screen.getByLabelText('Link').closest('.link-input')).toHaveTextContent('.hornhoof.org');
     expect(screen.getByText('Machines connected through the old link lose the connection. Connect them again under Subscriptions or Machines.')).toBeInTheDocument();
     await user.clear(screen.getByLabelText('Link'));
     await user.type(screen.getByLabelText('Link'), 'acme-corp');
@@ -35,6 +37,22 @@ describe('Share access', () => {
     await user.click(screen.getByRole('button', { name: 'Save' }));
     expect(await screen.findByRole('link', { name: 'https://acme-corp.hornhoof.org' })).toBeInTheDocument();
     expect(calls.find(c => c.method === 'PUT')).toEqual({ method: 'PUT', path: '/api/link', body: { name: 'acme-corp' } });
+  });
+
+  it('breaks the note under the field inside the longest address, so the window does not get wider', async () => {
+    const longest = 'a'.repeat(63);
+    mockApi({
+      'GET /api/link': [200, { link: ACME, domain: 'hornhoof.org' }],
+      [`GET /api/link/names/${longest}`]: [200, { name: longest, free: true }],
+    });
+    const user = userEvent.setup();
+    render(<Settings me={ME} onClose={() => {}} />);
+    await user.click(await screen.findByRole('button', { name: 'Change name' }));
+    await user.clear(screen.getByLabelText('Link'));
+    await user.type(screen.getByLabelText('Link'), longest);
+    const note = await screen.findByText(`${longest}.hornhoof.org is free.`);
+    expect(note.matches('.link-name > span')).toBe(true);
+    expect(decl('.link-name > span', 'overflow-wrap')).toBe('anywhere');
   });
 
   it('removes the link after asking', async () => {
@@ -46,6 +64,17 @@ describe('Share access', () => {
     await user.click(screen.getByRole('button', { name: 'Remove' }));
     expect(await screen.findByText('Hornhoof opens only at its own address, on this computer and your network.')).toBeInTheDocument();
     expect(calls.map(c => `${c.method} ${c.path}`)).toContain('DELETE /api/link');
+  });
+
+  it('breaks the question about removing inside the longest address, so the window does not get wider', async () => {
+    const longest = { name: 'a'.repeat(63), url: `https://${'a'.repeat(63)}.hornhoof.org` };
+    mockApi({ 'GET /api/link': [200, { link: longest, domain: 'hornhoof.org' }] });
+    const user = userEvent.setup();
+    render(<Settings me={ME} onClose={() => {}} />);
+    await user.click(await screen.findByRole('button', { name: 'Remove link' }));
+    const question = screen.getByText(`Hornhoof stops opening at ${longest.url}. Machines connected through this link lose the connection.`);
+    expect(question.matches('.settings-actions > span')).toBe(true);
+    expect(decl('.settings-actions > span', 'overflow-wrap')).toBe('anywhere');
   });
 
   it('opens Hornhoof on the internet at a name made from the company name', async () => {

@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Setup } from '../src/screens/Setup';
 import { mockApi, type Call } from './api-mock';
+import { decl } from './css';
 
 const CREATED = { company: { id: 'c1', name: 'Acme' }, person: { id: 'p1', name: 'Ivan', email: 'ivan@acme.com', title: 'CEO' } };
 const CHECK_ACME = 'GET /api/setup/names/acme?code=LINK-CODE-123';
@@ -190,6 +191,30 @@ describe('Setup', () => {
 
 describe('the public link on the setup screen', () => {
   beforeEach(() => window.history.replaceState(null, '', '/setup?code=LINK-CODE-123'));
+
+  /* jsdom does not lay out: the rules are what keeps the row of the name and ".hornhoof.org" inside a phone's screen. */
+  it('lets the name field give way on a narrow screen, so the row with the domain fits', () => {
+    render(<Setup onDone={() => {}} linkDomain="hornhoof.org" />);
+    const row = screen.getByLabelText('Link').closest('.link-input');
+    expect(row).toHaveTextContent('.hornhoof.org');
+    /* A form field's own width counts toward the row's narrowest size unless it is set in %; then it takes what the
+       domain leaves. */
+    expect(decl('.link-input input', 'width')).toBe('100%');
+    expect(decl('.link-input input', 'min-width')).toBe('0');
+    expect(decl('.link-input .link-domain', 'white-space')).toBe('nowrap');
+  });
+
+  it('breaks the note under the field inside the longest address, so the note does not widen the row', async () => {
+    const longest = 'a'.repeat(63);
+    mockApi({ [`GET /api/setup/names/${longest}?code=LINK-CODE-123`]: [200, { name: longest, free: true }] });
+    const user = userEvent.setup();
+    render(<Setup onDone={() => {}} linkDomain="hornhoof.org" />);
+    await user.type(screen.getByLabelText('Link'), longest);
+    const note = await screen.findByText(`${longest}.hornhoof.org is free.`);
+    /* The address is one word with no place to wrap, wider than a phone; the note may break inside it. */
+    expect(note.matches('.link-name > span')).toBe(true);
+    expect(decl('.link-name > span', 'overflow-wrap')).toBe('anywhere');
+  });
 
   it('opens Hornhoof on the internet at a link made from the company name as it is typed', async () => {
     const user = userEvent.setup();

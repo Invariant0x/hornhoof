@@ -192,10 +192,13 @@ button, input, select { font: inherit; color: inherit; }
 .scheme-name { fill: var(--ink); font-size: 8.5px; text-anchor: middle; dominant-baseline: central; }
 @media (max-width: 860px) { .template-cards { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 560px) { .template-cards { grid-template-columns: 1fr; } }
-/* A public link's name, with what its address ends in after it. */
+/* A public link's name, with what its address ends in after it. The field's width in % keeps its own width out of the
+   row's narrowest size, so on a phone the field takes what the domain leaves and the row stays inside the screen. The
+   notes under it may break inside the address, which for a long name is one word wider than a phone. */
 .link-name > .btn { justify-self: start; }
+.link-name > span { overflow-wrap: anywhere; }
 .link-input { display: flex; align-items: stretch; }
-.link-input input { flex: 1; min-width: 0; }
+.link-input input { flex: 1; min-width: 0; width: 100%; }
 .link-input .link-domain { display: flex; align-items: center; padding: 0 10px; border: 1px solid var(--line2); border-left: 0; background: var(--surface); color: var(--muted); font-size: 14px; white-space: nowrap; }
 .segments label:has(input:focus-visible) { outline: 2px solid var(--cyan); outline-offset: 2px; }
 .command { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: start; padding: 12px; background: var(--surface2); border: 1px solid var(--line); }
@@ -261,6 +264,8 @@ button, input, select { font: inherit; color: inherit; }
 .settings-link { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .settings-link a { color: var(--cyan-ink); font-weight: 600; word-break: break-all; }
 .settings-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; }
+/* The question before removing names the link, one word as wide as its name; it may break inside it. */
+.settings-actions > span { overflow-wrap: anywhere; }
 /* An update under way: a turning ring, the version, four steps with the current one moving, and what it does now. */
 .uprog { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; font-size: 13px; }
 .uprog > b { font-weight: 600; }
