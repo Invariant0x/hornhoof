@@ -34,6 +34,14 @@ const NO_TERMINAL = 4404;
 const NO_ACCESS = 4403;
 
 type Props = { agentId: string; program: string; onGone(): void };
+type Size = { cols: number; rows: number };
+
+/* A card that came or went while the view connected changed the terminal's size, and that resize was lost: sent before
+   the socket opened, or after the server said ready but before the node held the view. The session's first screen comes
+   from the view itself, so then the terminal tells its size once, if it is not the one the view was opened at. */
+function confirmSize(term: Terminal, opened: Size | null, send: (m: unknown) => void) {
+  if (opened && (term.cols !== opened.cols || term.rows !== opened.rows)) send({ type: 'resize', cols: term.cols, rows: term.rows });
+}
 
 /* An agent's live terminal: its session on the node, as it is, with the person's keys going back to it. */
 export function AgentTerminal({ agentId, program, onGone }: Props) {
@@ -55,11 +63,13 @@ export function AgentTerminal({ agentId, program, onGone }: Props) {
     let retry: ReturnType<typeof setTimeout> | null = null;
     let tries = 0;
     let told = false;
+    let unconfirmed: Size | null = null;
     const send = (m: unknown) => socket?.readyState === 1 && socket.send(JSON.stringify(m));
 
     const connect = () => {
       const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
-      const ws = new WebSocket(`${scheme}://${location.host}/api/agents/${agentId}/terminal?cols=${term.cols}&rows=${term.rows}`);
+      const asked: Size = { cols: term.cols, rows: term.rows };
+      const ws = new WebSocket(`${scheme}://${location.host}/api/agents/${agentId}/terminal?cols=${asked.cols}&rows=${asked.rows}`);
       socket = ws;
       ws.onmessage = e => {
         const m = JSON.parse(String(e.data)) as { type: string; data?: string; write?: boolean; running?: boolean };
@@ -71,6 +81,7 @@ export function AgentTerminal({ agentId, program, onGone }: Props) {
           told = false;
           term.reset();
           term.options.disableStdin = !m.write;
+          unconfirmed = asked;
         }
         if (m.type === 'program') {
           told = true;
@@ -79,6 +90,10 @@ export function AgentTerminal({ agentId, program, onGone }: Props) {
         if (m.type === 'data' && m.data) {
           if (!told) setUp(true);
           term.write(m.data);
+          /* Forgotten before the resize goes, since the screen it brings may come before send returns. */
+          const opened = unconfirmed;
+          unconfirmed = null;
+          confirmSize(term, opened, send);
         }
       };
       ws.onclose = e => {
@@ -94,7 +109,15 @@ export function AgentTerminal({ agentId, program, onGone }: Props) {
       for (let i = 0; i < data.length; i += PIECE) send({ type: 'input', data: data.slice(i, i + PIECE) });
     });
     term.onResize(({ cols, rows }) => send({ type: 'resize', cols, rows }));
-    const resized = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => fit.fit());
+    /* A card below the terminal coming or going changes its height. Rows it gains come back from the history with the view
+       left where it was, which hides the program's line to type in below the window, so the view goes back to the bottom. */
+    const resized =
+      typeof ResizeObserver === 'undefined'
+        ? null
+        : new ResizeObserver(() => {
+            fit.fit();
+            term.scrollToBottom();
+          });
     resized?.observe(box.current!);
     connect();
     term.focus();
