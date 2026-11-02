@@ -9,6 +9,8 @@ import { decl } from './css';
 
 /* The terminal itself needs a real browser; these stand-ins keep what the window gives it and what it hands back. */
 const terms = vi.hoisted(() => [] as FakeTerminal[]);
+/* What the terminal and its fit did, in order. */
+const moves = vi.hoisted(() => [] as string[]);
 type FakeTerminal = { options: Record<string, unknown>; written: string[]; cols: number; rows: number; type(data: string): void; resized(cols: number, rows: number): void; disposed: boolean };
 
 vi.mock('@xterm/xterm', () => ({
@@ -27,6 +29,9 @@ vi.mock('@xterm/xterm', () => ({
     loadAddon() {}
     open() {}
     focus() {}
+    scrollToBottom() {
+      moves.push('scrollToBottom');
+    }
     reset() {
       this.written = [];
     }
@@ -52,7 +57,26 @@ vi.mock('@xterm/xterm', () => ({
     }
   },
 }));
-vi.mock('@xterm/addon-fit', () => ({ FitAddon: class { fit() {} } }));
+vi.mock('@xterm/addon-fit', () => ({
+  FitAddon: class {
+    fit() {
+      moves.push('fit');
+    }
+  },
+}));
+
+/* The browser tells of a new size of the terminal's box; jsdom has no layout, so a test says when. */
+class FakeResizeObserver {
+  static all: FakeResizeObserver[] = [];
+  constructor(private fn: () => void) {
+    FakeResizeObserver.all.push(this);
+  }
+  observe() {}
+  disconnect() {}
+  resized() {
+    this.fn();
+  }
+}
 
 class FakeSocket {
   static all: FakeSocket[] = [];
@@ -117,8 +141,11 @@ const socket = async () => {
 
 beforeEach(() => {
   terms.length = 0;
+  moves.length = 0;
   FakeSocket.all = [];
+  FakeResizeObserver.all = [];
   vi.stubGlobal('WebSocket', FakeSocket);
+  vi.stubGlobal('ResizeObserver', FakeResizeObserver);
 });
 
 describe("an agent's live terminal in its window", () => {
@@ -227,6 +254,15 @@ describe("an agent's live terminal in its window", () => {
     FakeSocket.all[1]!.opened();
     FakeSocket.all[1]!.screen('new screen');
     expect(terms[0]!.written).toEqual(['new screen']);
+  });
+
+  it('shows the bottom of the screen, where the line to type in is, after a card below the terminal comes or goes', async () => {
+    /* A taller terminal takes rows back from its history and stays scrolled up: the program's input line fell below the window. */
+    open();
+    (await socket()).opened();
+    moves.length = 0;
+    for (const ro of FakeResizeObserver.all) ro.resized();
+    expect(moves).toEqual(['fit', 'scrollToBottom']);
   });
 
   it('keeps the log for agents whose node shows no terminal', async () => {

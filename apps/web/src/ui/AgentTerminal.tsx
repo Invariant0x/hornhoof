@@ -94,7 +94,15 @@ export function AgentTerminal({ agentId, program, onGone }: Props) {
       for (let i = 0; i < data.length; i += PIECE) send({ type: 'input', data: data.slice(i, i + PIECE) });
     });
     term.onResize(({ cols, rows }) => send({ type: 'resize', cols, rows }));
-    const resized = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => fit.fit());
+    /* A card below the terminal coming or going changes its height. Rows it gains come back from the history with the view
+       left where it was, which hides the program's line to type in below the window, so the view goes back to the bottom. */
+    const resized =
+      typeof ResizeObserver === 'undefined'
+        ? null
+        : new ResizeObserver(() => {
+            fit.fit();
+            term.scrollToBottom();
+          });
     resized?.observe(box.current!);
     connect();
     term.focus();
