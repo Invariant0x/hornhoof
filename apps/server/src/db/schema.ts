@@ -503,6 +503,10 @@ export const pendingWakes = pgTable(
 );
 
 export const REQUEST_KINDS = ['question', 'approval', 'choice', 'stuck'] as const;
+/* What a decision is about, which says whose it is: a task or an employee of a department goes to that department's own
+   person, the rest only to the CEO. */
+export const DECISION_TOPICS = ['task', 'employee', 'people', 'access', 'subscriptions', 'machines', 'repositories', 'public_link', 'updates', 'release'] as const;
+export type DecisionTopic = (typeof DECISION_TOPICS)[number];
 export const REQUEST_STATUSES = ['open', 'answered', 'approved', 'declined', 'withdrawn'] as const;
 
 /* One of the ways a person can pick from, with the picture that shows it. */
@@ -528,6 +532,8 @@ export const requests = pgTable(
     answeredBy: uuid('answered_by').references(() => people.id),
     /* The orchestrator's words for people: what is needed from them, why, and the ways to go, in plain words. */
     explained: text('explained'),
+    /* What it is about; none on requests from before topics, which go to the CEO. */
+    decisionTopic: text('decision_topic', { enum: DECISION_TOPICS }),
     createdAt: createdAt(),
     answeredAt: timestamp('answered_at', { withTimezone: true }),
   },

@@ -433,3 +433,29 @@ describe('migration 0038', () => {
     await expect(db.execute(sql`insert into map_returns (company_id, upstream_agent_id, downstream_agent_id) values (${C}, ${H}, ${W})`)).rejects.toThrow();
   });
 });
+
+describe('migration 0039', () => {
+  const C = '00000000-0000-4000-8000-000000000001';
+  const W = '00000000-0000-4000-8000-0000000000b2';
+  const T = '00000000-0000-4000-8000-0000000000d1';
+
+  it('keeps older requests with their answers and no topic, which gives them to the CEO', async () => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0038_map_returns') });
+    await db.execute(sql`insert into companies (id, name) values (${C}, 'Acme')`);
+    await db.execute(sql`insert into agents (id, company_id, kind, name, model) values (${W}, ${C}, 'worker', 'Bruno', '')`);
+    await db.execute(sql`insert into tasks (id, company_id, number, title, status) values (${T}, ${C}, 1, 'Checkout', 'waiting')`);
+    await db.execute(sql`insert into requests (company_id, task_id, agent_id, kind, text, status) values (${C}, ${T}, ${W}, 'question', 'Which cards?', 'open')`);
+    await db.execute(sql`insert into requests (company_id, task_id, agent_id, kind, text, status, answer) values (${C}, ${T}, ${W}, 'question', 'Which banks?', 'answered', 'Any.')`);
+
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+
+    const rows = await db.execute(sql`select text, status, answer, decision_topic from requests order by text`);
+    expect(rows.rows).toEqual([
+      { text: 'Which banks?', status: 'answered', answer: 'Any.', decision_topic: null },
+      { text: 'Which cards?', status: 'open', answer: null, decision_topic: null },
+    ]);
+  });
+});

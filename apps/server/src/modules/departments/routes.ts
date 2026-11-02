@@ -151,6 +151,8 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
       });
     }
     ctx.bus.publish(me.companyId, { type: 'org' });
+    /* A card applied or ended with its department: only people who see the whole company see cards. */
+    ctx.bus.publish(me.companyId, { type: 'requests', spot: { departmentId: null } });
     for (const id of result.fresh) ctx.bus.publish(me.companyId, { type: 'pulse', from: { kind: 'orchestrator' }, to: { kind: 'department', id } });
     /* The orchestrator that built it reads the outcome in its tool's answer. */
     if (agentId && !me.via && (await orchestratorState(ctx, me.companyId)).ready) {
@@ -305,6 +307,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
       });
     }
     ctx.bus.publish(me.companyId, { type: 'org' });
+    ctx.bus.publish(me.companyId, { type: 'requests', spot: { departmentId: null } });
     ctx.bus.publish(me.companyId, { type: 'pulse', from: { kind: 'orchestrator' }, to: { kind: 'department', id: dept.id } });
     if (agentId && !me.via && (await orchestratorState(ctx, me.companyId)).ready) {
       await enqueueTurn(ctx, { companyId: me.companyId, agentId, prompt: staffedNote(deptName(dept), result.hired), createdBy: null });

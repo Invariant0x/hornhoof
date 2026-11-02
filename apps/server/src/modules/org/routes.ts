@@ -12,6 +12,7 @@ import { deptName } from '../departments/templates.js';
 import { CHANNEL_MS, type Endpoint } from '../events/bus.js';
 import { workingCount } from '../events/store.js';
 import { machineOf } from '../nodes/nodes.js';
+import { pendingFor, visibleDecisions } from '../tasks/decisions.js';
 import { mapLines, type MapLine } from './map-state.js';
 import { personViews } from '../people/views.js';
 import { subView } from '../subscriptions/views.js';
@@ -64,7 +65,9 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
     );
     /* People who see the whole company or more than one department sit next to the CEO; the rest in their department. */
     const nextToCeo = active.filter(p => p.scopeKind === 'company' || homes.get(p.id)!.size > 1);
-    const views = new Map((await personViews(db, active)).map(v => [v.id, v]));
+    /* Each card counts the decisions waiting for its person that the viewer sees, as the decisions screen lists them. */
+    const decisions = await visibleDecisions(ctx, me);
+    const views = new Map((await personViews(db, active)).map(v => [v.id, { ...v, pendingDecisions: pendingFor(decisions, me, v.id) }]));
     const inDepartment = (deptId: string) => active.filter(p => p.scopeKind !== 'company' && homes.get(p.id)!.size === 1 && homes.get(p.id)!.has(deptId)).map(p => views.get(p.id)!);
     const running = await db
       .select({ agentId: jobs.agentId, taskId: jobs.taskId, startedAt: jobs.startedAt, createdAt: jobs.createdAt })

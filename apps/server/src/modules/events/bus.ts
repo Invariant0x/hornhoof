@@ -29,7 +29,9 @@ export type StreamMessage =
   /* What employees found to improve changed; it goes to people who see the whole company. */
   | { type: 'improvements'; spot: Spot }
   /* How full an agent's context is now, for the bar on the map, which everyone sees. */
-  | { type: 'context'; agentId: string; used: number };
+  | { type: 'context'; agentId: string; used: number }
+  /* The orchestrator's request for the computer the server runs on, or its access, changed; only the CEO hears it. */
+  | { type: 'computer' };
 
 /* In-process fan-out per company. One server process serves one deployment, so nothing crosses processes. */
 export class EventBus {

@@ -28,6 +28,8 @@ export function computerRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   /* What the CEO sees: the state, and which machine it is, the same from every screen of theirs. */
   const view = async (companyId: string) => ({ ...ctx.computer.view(), machine: await serverMachine(ctx, companyId) });
+  /* The CEO's other screens fetch it again, once the file says the new state. */
+  const changed = (companyId: string) => ctx.bus.publish(companyId, { type: 'computer' });
 
   app.get('/api/computer', async req => {
     const me = await ceo(req);
@@ -40,6 +42,7 @@ export function computerRoutes(app: FastifyInstance, ctx: Ctx): void {
       throw new ApiError(409, 'conflict', "Hornhoof cannot reach this computer: its updater does not run. Run this server's install command again, it adds it.", 'updater_missing');
     }
     const { until, asked } = ctx.computer.open();
+    changed(me.companyId);
     const machine = await serverMachine(ctx, me.companyId);
     const orchestrator = await line(me.companyId, { state: 'opened', until, ...onMachine(machine) }, me.id);
     /* The note waits in his line while his machine is offline, and goes out when it is back. */
@@ -54,13 +57,17 @@ export function computerRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/computer/close', async req => {
     const me = await ceo(req);
     ctx.computer.close();
+    changed(me.companyId);
     await line(me.companyId, { state: 'closed', ...onMachine(await serverMachine(ctx, me.companyId)) }, me.id);
     return view(me.companyId);
   });
 
   app.post('/api/computer/decline', async req => {
     const me = await ceo(req);
-    if (ctx.computer.decline()) await line(me.companyId, { state: 'declined', ...onMachine(await serverMachine(ctx, me.companyId)) }, me.id);
+    if (ctx.computer.decline()) {
+      changed(me.companyId);
+      await line(me.companyId, { state: 'declined', ...onMachine(await serverMachine(ctx, me.companyId)) }, me.id);
+    }
     return view(me.companyId);
   });
 }

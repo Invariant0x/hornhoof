@@ -101,8 +101,9 @@ describe('GET /api/stream', () => {
     await new Promise(r => setTimeout(r, 50));
     app.ctx.bus.publish(companyId, { type: 'requests', spot: { departmentId: sales!.id } });
     app.ctx.bus.publish(companyId, { type: 'requests', spot: { departmentId: support!.id } });
-    await until(() => stream.messages.length > 0);
-    expect(stream.messages).toEqual([{ type: 'requests', spot: { departmentId: support!.id } }]);
+    await until(() => stream.messages.some(m => m.type === 'requests'));
+    /* The change itself tells everyone to fetch the map again, as owners of decisions may move with it. */
+    expect(stream.messages).toEqual([{ type: 'org' }, { type: 'requests', spot: { departmentId: support!.id } }]);
     stream.close();
   });
 

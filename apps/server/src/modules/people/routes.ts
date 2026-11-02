@@ -148,6 +148,8 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
 
     const { token, person } = await reinvite(db, id, me);
     ctx.bus.accessChanged(me.companyId);
+    /* Who owns which decision follows who is active and what they reach. */
+    ctx.bus.publish(me.companyId, { type: 'org' });
     reply.code(201);
     return { person: await personView(db, person), inviteUrl: `${await publicUrl(db, config)}/invite/${token}` };
   });
@@ -184,6 +186,7 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
 
     /* A new link sent meanwhile takes this password back. */
     if (!(await startSession(reply, db, config, person.id, passwordHash))) throw gone();
+    ctx.bus.publish(person.companyId, { type: 'org' });
     return { person };
   });
 
@@ -220,7 +223,10 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
       await disconnectMachines(ctx, theirs.map(m => m.id));
     }
     if (changes.status === 'disabled' || body.access) await releasePlansOf(ctx, person, me);
-    if (changes.status || body.access) ctx.bus.accessChanged(me.companyId);
+    if (changes.status || body.access) {
+      ctx.bus.accessChanged(me.companyId);
+      ctx.bus.publish(me.companyId, { type: 'org' });
+    }
     return { person: await personView(db, person) };
   });
 }

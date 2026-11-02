@@ -2,7 +2,7 @@ import { and, asc, count, eq, gt, inArray, isNull, max, ne, notInArray, sql } fr
 import type { Ctx } from '../../app.js';
 import { accessOf, canReach, type Spot } from '../../auth/access.js';
 import type { Db } from '../../db/client.js';
-import { agents, attachments, companies, departments, jobs, people, requests, subscriptions, taskEvents, tasks, turns, type RequestOption, type TaskEventKind } from '../../db/schema.js';
+import { agents, attachments, companies, departments, jobs, people, requests, subscriptions, taskEvents, tasks, turns, type DecisionTopic, type RequestOption, type TaskEventKind } from '../../db/schema.js';
 import { ApiError, type ErrorReason } from '../../errors.js';
 import { dropEarlierWakes, keepWakes } from './outbox.js';
 import { mapWorkStarted, returnAlongLine } from '../org/map-state.js';
@@ -597,7 +597,7 @@ export async function report(ctx: Live, agentId: string, taskId: string, r: { do
   let wakes: Wake[] = [];
   const row = await move(ctx, task, { status: 'waiting' }, n, async tx => {
     await letStuckGo(tx, task.id);
-    const [note] = await tx.insert(requests).values({ companyId: task.companyId, taskId, agentId, kind: 'stuck', text: r.summary }).returning();
+    const [note] = await tx.insert(requests).values({ companyId: task.companyId, taskId, agentId, kind: 'stuck', text: r.summary, decisionTopic: 'task' }).returning();
     wakes = await explaining(tx, task, agentId, note!.id);
     await keepWakes(tx, task.companyId, wakes);
   });
@@ -900,8 +900,11 @@ async function gaveOut(db: Db, task: Task, agentId: string): Promise<boolean> {
 }
 
 /* What an agent asks: words, an approval of an exact commit, or a pick of one of 2 to 4 ways. images: pictures it sent
-   with hh-attach, link: where to see the work. */
-export type Ask = { kind: 'question' | 'approval' | 'choice'; text: string; commit?: string; images?: string[]; options?: RequestOption[]; link?: string | null };
+   with hh-attach, link: where to see the work, topic: what it is about, which says whose decision it is. */
+export type Ask = { kind: 'question' | 'approval' | 'choice'; text: string; commit?: string; images?: string[]; options?: RequestOption[]; link?: string | null; topic?: DecisionTopic };
+
+/* An approval lets a commit into the release, whatever the agent says it is about. */
+const topicOf = (q: Ask): DecisionTopic | null => (q.kind === 'approval' ? 'release' : (q.topic ?? null));
 
 /* The agent that holds the task, or any reviewer at its gate, asks a person and the task waits for the answer. */
 export async function ask(ctx: Live, agentId: string, taskId: string, q: Ask): Promise<Moved & { request: Request }> {
@@ -921,7 +924,7 @@ export async function ask(ctx: Live, agentId: string, taskId: string, q: Ask): P
   const row = await move(ctx, task, { status: 'waiting', silent: 0 }, { kind: 'asked', actor: { agentId }, text: q.text.trim(), data: { kind: q.kind, commit: q.commit ?? null } }, async tx => {
     [request] = await tx
       .insert(requests)
-      .values({ companyId: task.companyId, taskId, agentId, kind: q.kind, text: q.text.trim(), commit: q.commit ?? null, options, link: q.link ?? null })
+      .values({ companyId: task.companyId, taskId, agentId, kind: q.kind, text: q.text.trim(), commit: q.commit ?? null, options, link: q.link ?? null, decisionTopic: topicOf(q) })
       .returning();
     wakes = await explaining(tx, task, agentId, request!.id);
     await keepWakes(tx, task.companyId, wakes);
@@ -989,7 +992,7 @@ export async function brokeDown(ctx: Live, agentId: string, task: Task, text: st
 async function askAboutStill(ctx: Live, agentId: string, task: Task, silent: number, text: string): Promise<Moved> {
   let wakes: Wake[] = [];
   const row = await move(ctx, task, { silent, status: 'waiting' }, { kind: 'stuck', actor: { agentId }, text }, async tx => {
-    const [note] = await tx.insert(requests).values({ companyId: task.companyId, taskId: task.id, agentId, kind: 'stuck', text }).returning();
+    const [note] = await tx.insert(requests).values({ companyId: task.companyId, taskId: task.id, agentId, kind: 'stuck', text, decisionTopic: 'task' }).returning();
     wakes = await explaining(tx, task, agentId, note!.id);
     await keepWakes(tx, task.companyId, wakes);
   });

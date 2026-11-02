@@ -2,7 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { and, asc, count, desc, eq, gte, inArray, isNull, notInArray } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { agents, departments, jobs, requests, tasks } from '../../db/schema.js';
+import { agents, DECISION_TOPICS, departments, jobs, requests, tasks } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { ask, blocked, cancel, CLOSED, comment, createTask, listed, openAfter, refuse, report, submit, updateTask, verdict, type Moved, type Task } from './engine.js';
 import { carriesFile, encodedHint } from './attachments.js';
@@ -185,9 +185,15 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         images: z.array(z.uuid()).max(6).optional(),
         options: z.array(z.object({ label: z.string().trim().min(1).max(200), image: z.uuid().optional() })).max(4).optional(),
         link: z.url({ protocol: /^https$/ }).max(500).optional(),
+        topic: z
+          .enum(DECISION_TOPICS)
+          .optional()
+          .describe(
+            'What it is about, which says who decides: task or employee for work of your department, which its own person answers; people, access, subscriptions, machines, repositories, public_link, updates or release for what only the CEO decides. Name it on every question; without it the CEO answers.',
+          ),
       },
     },
-    async ({ task: ref, question, commit, images, options, link }) =>
+    async ({ task: ref, question, commit, images, options, link, topic }) =>
       run(async () => {
         const { task } = await find(ref);
         plain(task, question);
@@ -198,7 +204,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         if (Number(asked?.n ?? 0) >= TURN_QUESTIONS) throw refuse(409, 'task_invalid', `One turn asks people at most ${TURN_QUESTIONS} times.`);
         const kind = commit ? 'approval' : options?.length ? 'choice' : 'question';
         const ways = options?.map(o => ({ label: o.label, image: o.image ?? null }));
-        const moved = await ask(ctx, job.agentId, task.id, { kind, text: question, ...(commit ? { commit } : {}), images, options: ways, link: link ?? null });
+        const moved = await ask(ctx, job.agentId, task.id, { kind, text: question, ...(commit ? { commit } : {}), images, options: ways, link: link ?? null, ...(topic ? { topic } : {}) });
         return { text: `Asked. #${task.number} waits for a person's answer; you will be woken with it.`, moved };
       }),
   );

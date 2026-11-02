@@ -62,6 +62,7 @@ function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob): McpServer {
         return row!;
       });
       await appendEvent(ctx, { companyId: job.companyId, agentId: job.agentId, jobId: job.id, kind: 'proposal', data: { proposalId: proposal.id, brief, items } });
+      ctx.bus.publish(job.companyId, { type: 'requests', spot: { departmentId: null } });
       return say('Shown to the CEO. Wait for their answer.');
     },
   );
@@ -105,6 +106,7 @@ function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob): McpServer {
         return row!;
       });
       await appendEvent(ctx, { companyId: job.companyId, agentId: job.agentId, jobId: job.id, kind: 'proposal', data: { proposalId: proposal.id, kind: 'staff', department: dept.id, brief, people } });
+      ctx.bus.publish(job.companyId, { type: 'requests', spot: { departmentId: null } });
       return say('Shown to the CEO. Wait for their answer.');
     },
   );
