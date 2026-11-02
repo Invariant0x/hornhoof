@@ -3,7 +3,7 @@ import type { Ctx } from '../../app.js';
 import { accessOf, canReach, WHOLE, type Access, type Spot } from '../../auth/access.js';
 import type { Person } from '../../auth/session.js';
 import { agents, departments, people, personAccess, proposals, requests, tasks, type DecisionTopic, type REQUEST_KINDS } from '../../db/schema.js';
-import type { Asked } from '../computer/access.js';
+import { ownsComputer, type Asked } from '../computer/access.js';
 import { taskSpot } from './engine.js';
 
 /* Who decides what waits for people, and what each person may see of it. The owner only says whose card counts a decision
@@ -109,7 +109,7 @@ export async function visibleDecisions(ctx: Pick<Ctx, 'db' | 'computer'>, me: Pe
   const cards = whole ? (await db.select().from(proposals).where(and(eq(proposals.companyId, me.companyId), eq(proposals.status, 'pending')))).sort(byTimeAndId) : [];
   const shownCards = cards.map(proposal => ({ proposal, ownerPersonId: decisionOwner({ source: 'proposal' }, everyone), canAnswer: true }));
   /* The control folder is read once, for the item and for the counts alike. */
-  const asked = me.isOwner && !me.via ? ctx.computer.view().asked : null;
+  const asked = ownsComputer(me) ? ctx.computer.view().asked : null;
   const [orchestrator] = asked ? await db.select({ id: agents.id }).from(agents).where(and(eq(agents.companyId, me.companyId), eq(agents.kind, 'orchestrator'))) : [];
   const computer = asked && orchestrator ? { asked, agentId: orchestrator.id, ownerPersonId: decisionOwner({ source: 'computer_access' }, everyone) } : null;
   const counts = counted([

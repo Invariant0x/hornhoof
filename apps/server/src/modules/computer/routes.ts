@@ -4,7 +4,7 @@ import { requirePerson } from '../../auth/session.js';
 import { ApiError } from '../../errors.js';
 import { enqueueTurn, NoSubscription, orchestratorOf } from '../conversation/queue.js';
 import { appendEvent } from '../events/store.js';
-import { onMachine, serverMachine } from './access.js';
+import { onMachine, ownsComputer, serverMachine } from './access.js';
 
 /* The note that starts the orchestrator's turn once the CEO opened access: the CEO's order, so it may use the computer. */
 const openedNote = (until: string, reason: string, machine: string | null) =>
@@ -15,7 +15,7 @@ const openedNote = (until: string, reason: string, machine: string | null) =>
 export function computerRoutes(app: FastifyInstance, ctx: Ctx): void {
   async function ceo(req: FastifyRequest) {
     const me = await requirePerson(req, ctx.db);
-    if (me.via || !me.isOwner) throw new ApiError(403, 'forbidden', 'Only the CEO opens and closes access to the computer.', 'not_owner');
+    if (!ownsComputer(me)) throw new ApiError(403, 'forbidden', 'Only the CEO opens and closes access to the computer.', 'not_owner');
     return me;
   }
 
