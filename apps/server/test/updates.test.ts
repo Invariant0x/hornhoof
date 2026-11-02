@@ -9,6 +9,7 @@ import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { agents, companies, departments, jobs, subscriptions } from '../src/db/schema.js';
 import { publishWorking } from '../src/modules/events/store.js';
 import { as, invitePerson, setUpCompany, testApp } from './helpers.js';
+import { turnsHeld } from '../src/modules/updates/drain.js';
 
 /* Lets a test hold the next count of working agents the update routes read, so something can happen meanwhile. */
 const pause = vi.hoisted(() => ({ next: undefined as undefined | { reached: () => void; resume: Promise<void> } }));
@@ -277,6 +278,20 @@ describe('updates', () => {
     await publishWorking(app.ctx, acme!.id);
     await expect.poll(() => request(control)).toEqual(asked(registry, res.json().id));
     expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.waiting).toBeNull();
+  });
+
+  it('holds new turns of the company while its update waits for the agents, and lets them go when it is called off', async () => {
+    const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' } });
+    const { app, db, ceo, control } = await company(registry);
+    updaterAlive(control);
+    const [acme] = await db.select().from(companies);
+    const [sub] = await db.select().from(subscriptions);
+    await db.insert(jobs).values({ companyId: acme!.id, subscriptionId: sub!.id, agentId: (await db.select().from(agents))[0]!.id, prompt: 'x', status: 'running', timeoutMs: 1000 });
+    expect(turnsHeld(app.ctx, acme!.id)).toBe(false);
+    await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: true }, ...as(ceo) });
+    expect(turnsHeld(app.ctx, acme!.id)).toBe(true);
+    expect((await app.inject({ method: 'DELETE', url: '/api/updates', ...as(ceo) })).statusCode).toBe(204);
+    expect(turnsHeld(app.ctx, acme!.id)).toBe(false);
   });
 
   it('calls off an update that waits for the agents', async () => {

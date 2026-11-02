@@ -6,6 +6,7 @@ import { loggable } from '../../errors.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
 import { agents, jobs, nodes, people, subscriptions, tasks, turns } from '../../db/schema.js';
 import { dispatchJob } from '../jobs/dispatch.js';
+import { turnsHeld } from '../updates/drain.js';
 import { sayLive } from './live.js';
 import { BUILTIN, identityOf, nodeIdentity, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { liveNode, planNodes, type NodeRow } from '../nodes/nodes.js';
@@ -457,6 +458,8 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   if (!sub || sub.status !== 'ready') return;
   const [agent] = await db.select().from(agents).where(eq(agents.id, agentId));
   if (!agent || !(await placement(ctx, agent, sub))) return;
+  /* An update waits for the turns that run: new ones start after it, the orchestrator's go on. */
+  if (agent.kind !== 'orchestrator' && turnsHeld(ctx, agent.companyId)) return;
   /* Real turns wait for the limit; an empty start can still open the saved program. Past the share set for tasks only
      task turns wait. */
   const until = limitUntil(sub.limits);

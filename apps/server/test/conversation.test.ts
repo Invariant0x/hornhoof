@@ -5,6 +5,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { agents, companies, departments, jobs, people, subscriptions, turns } from '../src/db/schema.js';
 import { renderInstructions } from '../src/modules/agents/instructions.js';
 import { FIRST_TURN, FIRST_TURN_TEMPLATE, ORCHESTRATOR_INSTRUCTIONS } from '../src/modules/conversation/prompt.js';
+import { pumpWaiting } from '../src/modules/conversation/queue.js';
+import { holdTurns } from '../src/modules/updates/drain.js';
 import { as, connectNode, invitePerson, listen, openStream, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
@@ -561,6 +563,16 @@ describe("an employee's conversation", () => {
     await until(async () => !(await stateOf(app, ceo, bruno.id)).busy);
     await sayTo(app, ceo, bruno.id, 'Still you?');
     expect((await nextRun(builtin)).sessionId).toBe('sess-2');
+  });
+
+  it('starts no turn of an employee while an update waits for the agents, and starts it once the wait is over', async () => {
+    const { app, ceo, builtin, bruno } = await withEmployee();
+    holdTurns(app.ctx, bruno.companyId, true);
+    await sayTo(app, ceo, bruno.id, 'Hello');
+    expect(await quiet(builtin)).toBe(0);
+    holdTurns(app.ctx, bruno.companyId, false);
+    await pumpWaiting(app.ctx);
+    expect((await nextRun(builtin)).prompt).toContain('Hello');
   });
 
   it("lets a person with the department write to its employees and nobody else's", async () => {
