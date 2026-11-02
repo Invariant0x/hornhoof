@@ -31,15 +31,17 @@ describe.skipIf(!hasTmux)("a terminal's size", () => {
   });
 
   it('keeps no size of a view that failed to open', async () => {
-    /* Two windows open a new agent at once; one of them may fail to start its session. */
     await setUp();
-    await Promise.allSettled([
+    const failure = new Error('could not create the session');
+    vi.spyOn(tmux, 'launch').mockRejectedValueOnce(failure);
+    const results = await Promise.allSettled([
       host.open({ type: 'term.open', termId: 'big', agentKey: 'a70', cols: 120, rows: 40, write: true }),
       host.open({ type: 'term.open', termId: 'small', agentKey: 'a70', cols: 80, rows: 20, write: true }),
     ]);
+    expect(results).toEqual([{ status: 'rejected', reason: failure }, { status: 'rejected', reason: failure }]);
     host.close({ type: 'term.close', termId: 'big' });
     host.close({ type: 'term.close', termId: 'small' });
-    await until(async () => (await clients()).length === 0);
+    expect(await tmux.has('a-a70')).toBe(false);
     await host.open({ type: 'term.open', termId: 'next', agentKey: 'a70', cols: 158, rows: 50, write: true });
     await until(async () => (await clients()).join() === '158x50');
   });
