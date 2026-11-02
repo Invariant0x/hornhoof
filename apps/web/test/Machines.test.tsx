@@ -75,7 +75,8 @@ describe('Machines', () => {
     expect(within(own).queryByRole('button')).not.toBeInTheDocument();
   });
 
-  it('counts once the machine the built-in node runs on, and says so on both cards', async () => {
+  /* The server on a computer that joined as a machine too: one computer, one card. */
+  it('shows the machine the built-in node runs on as one card, with what runs on either', async () => {
     lists({}, { ...BUILTIN, machine: { id: 'm1', hostname: 'ivan-mbp' } });
     render(<Machines me={ME} />);
     const pool = await screen.findByRole('region', { name: 'All machines together' });
@@ -83,8 +84,10 @@ describe('Machines', () => {
     expect(fact(pool, 'Processor cores')).toBe('8');
     expect(fact(pool, 'Free memory')).toBe('6 of 12 GB');
     expect(fact(pool, 'Busy now')).toBe('25%');
-    expect(within(card('ivan-mbp')).getByText('The built-in node runs on this machine too, so the pool counts it once.')).toBeInTheDocument();
-    expect(within(card('Built-in node')).getByText('Runs on ivan-mbp, so the pool counts that machine once.')).toBeInTheDocument();
+    const mac = card('ivan-mbp');
+    expect(within(mac).getByText("The server runs here too, with its built-in node for the company's keys and test runs.")).toBeInTheDocument();
+    expect(within(within(mac).getByRole('list', { name: 'What runs on ivan-mbp now' })).getByText('Orchestrator')).toBeInTheDocument();
+    expect(screen.getAllByRole('article').map(a => a.getAttribute('aria-label'))).toEqual(['ivan-mbp', 'build-box']);
     expect(within(card('build-box')).queryByText(/built-in node/)).not.toBeInTheDocument();
   });
 
@@ -185,7 +188,7 @@ describe('Machines', () => {
     expect(within(mac).getByRole('checkbox', { name: 'Отдавать ivan-mbp под прогоны тестов компании' })).toBeChecked();
   });
 
-  it('says in Russian that the built-in node runs on a machine that joined', async () => {
+  it('says in Russian that the server runs on a machine that joined', async () => {
     localStorage.setItem('hh-lang', 'ru');
     lists({}, { ...BUILTIN, machine: { id: 'm1', hostname: 'ivan-mbp' } });
     render(
@@ -194,7 +197,7 @@ describe('Machines', () => {
       </LanguageProvider>,
     );
     expect(fact(await screen.findByRole('region', { name: 'Все машины вместе' }), 'Машин в сети')).toBe('1 из 2');
-    expect(within(card('ivan-mbp')).getByText('На этой машине работает и встроенная нода, поэтому в общем пуле машина считается один раз.')).toBeInTheDocument();
-    expect(within(card('Встроенная нода')).getByText('Работает на ivan-mbp, поэтому в общем пуле эта машина считается один раз.')).toBeInTheDocument();
+    expect(within(card('ivan-mbp')).getByText('Здесь же работает сервер и его встроенная нода: ключи компании и прогоны тестов.')).toBeInTheDocument();
+    expect(screen.queryByRole('article', { name: 'Встроенная нода' })).not.toBeInTheDocument();
   });
 });

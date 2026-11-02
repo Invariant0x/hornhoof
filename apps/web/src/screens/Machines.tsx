@@ -187,8 +187,8 @@ export function Machines({ me }: { me: Me }) {
       await load();
     });
 
-  /* The built-in node on a machine that joined runs on that machine's computer, which the pool counts once: online while
-     either is, with what either says it has. */
+  /* The built-in node on a machine that joined runs on that machine's computer, which the pool counts once and the list
+     shows as one card: online while either is, with what either says it has and what runs on either. */
   const host = builtin?.machine ? ((machines ?? []).find(m => m.id === builtin.machine!.id) ?? null) : null;
   const apart = host ? null : builtin;
   const loads = [...(machines ?? []).map(m => (m === host ? (m.load ?? builtin!.load) : m.load)), apart?.load ?? null].filter((l): l is NodeLoad => l !== null);
@@ -236,7 +236,9 @@ export function Machines({ me }: { me: Me }) {
         <ul className="machine-list">
           {machines.map(m => {
             const mine = m.owner.id === me.person.id;
-            const { items, note } = hardware(t, language, m.os, m.load);
+            const here = m === host ? builtin : null;
+            const { items, note } = hardware(t, language, m.os, here ? (m.load ?? here.load) : m.load);
+            const running = here ? { agents: [...m.running.agents, ...here.running.agents], parts: [...m.running.parts, ...here.running.parts] } : m.running;
             /* The person's own plans that do not run here yet, offered on their own machines only. */
             const addable = mine ? subs.filter(s => s.kind === 'personal' && s.owner.id === me.person.id && !m.plans.some(p => p.id === s.id)) : [];
             const add = adding?.machineId === m.id ? adding : null;
@@ -246,7 +248,7 @@ export function Machines({ me }: { me: Me }) {
                   <Edge className="machine" cut={12}>
                     <header className="machine-head">
                       <h2>{m.hostname}</h2>
-                      {m.online ? <span className="status ready">{t.machines.online}</span> : <span className="muted">{lastSeen(t, language, m.lastSeenAt)}</span>}
+                      {m.online || here?.online ? <span className="status ready">{t.machines.online}</span> : <span className="muted">{lastSeen(t, language, m.lastSeenAt)}</span>}
                     </header>
                     <Facts
                       items={[
@@ -268,11 +270,11 @@ export function Machines({ me }: { me: Me }) {
                             <span className="muted">{t.machines.noPlan}</span>
                           ),
                         ],
-                        [t.machines.runningNow, <RunningNow host={m.hostname} running={m.running} />],
+                        [t.machines.runningNow, <RunningNow host={m.hostname} running={running} />],
                       ]}
                     />
                     {note && <p className="machine-note">{note}</p>}
-                    {m === host && <p className="machine-note">{t.machines.builtinHere}</p>}
+                    {here && <p className="machine-note">{t.machines.builtinHere}</p>}
                     <div className="machine-actions">
                       {company || mine ? (
                         <label className="lend">
@@ -323,17 +325,16 @@ export function Machines({ me }: { me: Me }) {
               </li>
             );
           })}
-          {builtin && (
+          {apart && (
             <li>
               <article aria-label={t.machines.builtin}>
                 <Edge className="machine" cut={12}>
                   <header className="machine-head">
                     <h2>{t.machines.builtin}</h2>
-                    {builtin.online ? <span className="status ready">{t.machines.online}</span> : <span className="muted">{t.subs.states.builtin_offline}</span>}
+                    {apart.online ? <span className="status ready">{t.machines.online}</span> : <span className="muted">{t.subs.states.builtin_offline}</span>}
                   </header>
                   <p className="muted">{t.machines.builtinAbout}</p>
-                  <Facts items={[...hardware(t, language, 'linux', builtin.load).items, [t.machines.runningNow, <RunningNow host={t.machines.builtin} running={builtin.running} />]]} />
-                  {host && <p className="machine-note">{t.machines.builtinOn(host.hostname)}</p>}
+                  <Facts items={[...hardware(t, language, 'linux', apart.load).items, [t.machines.runningNow, <RunningNow host={t.machines.builtin} running={apart.running} />]]} />
                 </Edge>
               </article>
             </li>

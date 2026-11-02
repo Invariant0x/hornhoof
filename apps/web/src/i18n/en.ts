@@ -275,9 +275,8 @@ export const en = {
       (p.parts > 1 ? `, part ${p.part} of ${p.parts}` : ''),
     builtin: 'Built-in node',
     builtinAbout: 'Comes with the server and runs the company\'s keys and test runs.',
-    /* The built-in node runs on a machine that joined too: one computer, which the pool counts once. */
-    builtinHere: 'The built-in node runs on this machine too, so the pool counts it once.',
-    builtinOn: (host: string) => `Runs on ${host}, so the pool counts that machine once.`,
+    /* The built-in node runs on a machine that joined too: one computer, one card. */
+    builtinHere: "The server runs here too, with its built-in node for the company's keys and test runs.",
     addPlan: 'Add my plan',
     addPlanLabel: (host: string) => `Add my plan to ${host}`,
     addPlanAsk: (host: string) => `Which of your plans should run on ${host} too?`,
