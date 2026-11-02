@@ -305,6 +305,9 @@ button, input, select { font: inherit; color: inherit; }
 .seg button[aria-pressed='true'] { position: relative; border-color: var(--cyan); background: var(--glow); color: var(--cyan-ink); }
 .seg button:focus-visible { position: relative; outline: 2px solid var(--cyan); outline-offset: 2px; }
 .body { position: absolute; inset: 0; overflow: auto; }
+/* A page scrolls under the floating header, so a band in the page's own color stays at the top of what scrolls, as tall
+   as the header and the gap above it: text never shows around the glass blocks. It takes no room from the page. */
+.body.page::before { content: ''; position: sticky; z-index: 5; top: 0; display: block; height: 68px; margin-bottom: -68px; background: var(--bg); }
 
 /* Map */
 .map {

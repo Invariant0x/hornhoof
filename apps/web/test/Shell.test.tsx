@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Shell } from '../src/screens/Shell';
 import { MACHINES, ME, mockApi, ORG, SUBS } from './api-mock';
+import { decl, px } from './css';
 
 function renderShell() {
   mockApi({ 'GET /api/org': [200, ORG] });
@@ -34,6 +35,27 @@ describe('Shell', () => {
     await user.click(screen.getByRole('button', { name: 'Subscriptions' }));
     expect(await screen.findByRole('heading', { name: 'Subscriptions' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Subscriptions' })).toHaveAttribute('aria-current', 'page');
+  });
+
+  it('keeps a page from showing under the floating top bar as it scrolls, while the map still runs under it', async () => {
+    mockApi({ 'GET /api/org': [200, ORG], 'GET /api/subscriptions': [200, { subscriptions: SUBS }], 'GET /api/machines': [200, { machines: MACHINES }] });
+    const user = userEvent.setup();
+    render(<Shell me={ME} onSignOut={() => {}} />);
+    expect(screen.getByRole('main')).not.toHaveClass('page');
+    for (const tab of ['Tasks', 'People', 'Subscriptions', 'Machines']) {
+      await user.click(screen.getByRole('button', { name: tab }));
+      expect(screen.getByRole('main')).toHaveClass('page');
+    }
+    await user.click(screen.getByRole('button', { name: 'Map' }));
+    expect(screen.getByRole('main')).not.toHaveClass('page');
+    /* A band in the page's own color stays at the top of what scrolls, as tall as the bar and the gap above it, and
+       takes no room from the page. */
+    const band = (property: string) => decl('.body.page::before', property);
+    expect(band('position')).toBe('sticky');
+    expect(band('top')).toBe('0');
+    expect(band('background')).toBe('var(--bg)');
+    expect(px(band('height'))).toBeGreaterThanOrEqual(px(decl('.topbar', 'top')) + px(decl('.tabs', 'height')));
+    expect(px(band('margin-bottom'))).toBe(-px(band('height')));
   });
 
   it('opens the machines of the company from their own tab', async () => {

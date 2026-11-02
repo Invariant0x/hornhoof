@@ -224,7 +224,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
         </div>
       </header>
       {company && <UpdateBanner updates={updates} onDetails={() => setVersionsOpen(true)} />}
-      <main className={`body${panel ? ` with-${panel.kind}` : ''}`}>
+      <main className={`body${tab === 'map' ? '' : ' page'}${panel ? ` with-${panel.kind}` : ''}`}>
         {tab === 'map' && (
           <MapScreen
             me={me}
