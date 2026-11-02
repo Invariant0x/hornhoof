@@ -71,17 +71,17 @@ function givenBack(line: Line | undefined, jobId: string, taskId: string | null)
 
 const topOf = (parents: ReadonlyMap<string, string | null>, departmentId: string | null) => (departmentId ? (parents.get(departmentId) ?? departmentId) : null);
 
-/* The agent above this one on the map: the orchestrator above a head, the head of its department above an employee. */
-async function above(db: Reader, agent: Agent): Promise<string | null> {
-  if (agent.removedAt) return null;
-  if (agent.kind === 'head') {
-    const [orchestrator] = await db
-      .select({ id: agents.id })
-      .from(agents)
-      .where(and(eq(agents.companyId, agent.companyId), eq(agents.kind, 'orchestrator'), isNull(agents.removedAt)));
-    return orchestrator?.id ?? null;
-  }
-  if (agent.kind !== 'worker' || !agent.departmentId) return null;
+async function orchestratorOf(db: Reader, companyId: string): Promise<string | null> {
+  const [orchestrator] = await db
+    .select({ id: agents.id })
+    .from(agents)
+    .where(and(eq(agents.companyId, companyId), eq(agents.kind, 'orchestrator'), isNull(agents.removedAt)));
+  return orchestrator?.id ?? null;
+}
+
+/* The head of the employee's department, of the department holding it when it works on a product. */
+async function headOf(db: Reader, agent: Agent): Promise<string | null> {
+  if (!agent.departmentId) return null;
   const [dept] = await db.select({ parentId: departments.parentId }).from(departments).where(eq(departments.id, agent.departmentId));
   const top = dept?.parentId ?? agent.departmentId;
   const [head] = await db
@@ -89,6 +89,13 @@ async function above(db: Reader, agent: Agent): Promise<string | null> {
     .from(agents)
     .where(and(eq(agents.companyId, agent.companyId), eq(agents.kind, 'head'), eq(agents.departmentId, top), isNull(agents.removedAt)));
   return head?.id ?? null;
+}
+
+/* The agent above this one on the map: the orchestrator above a head, the head of its department above an employee. */
+async function above(db: Reader, agent: Agent): Promise<string | null> {
+  if (agent.removedAt) return null;
+  if (agent.kind === 'head') return orchestratorOf(db, agent.companyId);
+  return agent.kind === 'worker' ? headOf(db, agent) : null;
 }
 
 async function agentOf(db: Reader, id: string): Promise<Agent | null> {
@@ -181,28 +188,35 @@ async function withDependencies(db: Reader, companyId: string, found: Map<string
   return { tasks: found, notDone: new Set(notDone), asked: new Set(asked.map(r => `${r.agentId}:${r.taskId}`)) };
 }
 
+/* The lines the agent's turn on the task keeps on: its own while it acts on the task, and for an employee its department's
+   too, while the department task above it can go on. */
+async function linesOfTurn(tx: Tx, companyId: string, agent: Agent, up: string, taskId: string): Promise<Ends[]> {
+  const f = await factsFor(tx, companyId, [taskId]);
+  const own = { companyId, upstreamAgentId: up, downstreamAgentId: agent.id };
+  if (agent.kind === 'head') return headActs(f, agent.id, taskId) ? [own] : [];
+  if (agent.kind !== 'worker' || !memberActs(f, agent.id, taskId)) return [];
+  const head = await agentOf(tx, up);
+  const top = head && (await above(tx, head));
+  return top && underLiveRoot(f, taskId) ? [own, { companyId, upstreamAgentId: top, downstreamAgentId: up }] : [own];
+}
+
+/* A new cycle on each line, in one order everywhere, so two starts never wait on each other's lines. True when one began. */
+async function beginCycles(tx: Tx, lines: Ends[], jobId: string): Promise<boolean> {
+  const ordered = [...lines].sort((a, b) => `${a.upstreamAgentId}>${a.downstreamAgentId}`.localeCompare(`${b.upstreamAgentId}>${b.downstreamAgentId}`));
+  let began = false;
+  for (const line of ordered) began = (await recordMapWorkStarted(tx, { ...line, jobId })) || began;
+  return began;
+}
+
 /* A turn on a task went out: a new cycle begins on each line the agent's work keeps on, its own and, for an employee, its
-   department's. True when a line began one. */
+   department's. The company when a line began one. */
 export async function mapWorkStarted(db: Db, jobId: string): Promise<{ companyId: string } | null> {
   return db.transaction(async tx => {
     const [job] = await tx.select({ companyId: jobs.companyId, agentId: jobs.agentId, taskId: jobs.taskId }).from(jobs).where(eq(jobs.id, jobId));
     const agent = job?.agentId ? await agentOf(tx, job.agentId) : null;
     const up = agent && (await above(tx, agent));
     if (!job?.taskId || !agent || !up) return null;
-    const f = await factsFor(tx, job.companyId, [job.taskId]);
-    const lines: Ends[] = [];
-    if (agent.kind === 'head' && headActs(f, agent.id, job.taskId)) lines.push({ companyId: job.companyId, upstreamAgentId: up, downstreamAgentId: agent.id });
-    if (agent.kind === 'worker' && memberActs(f, agent.id, job.taskId)) {
-      lines.push({ companyId: job.companyId, upstreamAgentId: up, downstreamAgentId: agent.id });
-      const head = await agentOf(tx, up);
-      const top = head && (await above(tx, head));
-      if (top && underLiveRoot(f, job.taskId)) lines.push({ companyId: job.companyId, upstreamAgentId: top, downstreamAgentId: up });
-    }
-    /* In one order everywhere, so two starts never wait on each other's lines. */
-    lines.sort((a, b) => `${a.upstreamAgentId}>${a.downstreamAgentId}`.localeCompare(`${b.upstreamAgentId}>${b.downstreamAgentId}`));
-    let began = false;
-    for (const line of lines) began = (await recordMapWorkStarted(tx, { ...line, jobId })) || began;
-    return began ? { companyId: job.companyId } : null;
+    return (await beginCycles(tx, await linesOfTurn(tx, job.companyId, agent, up, job.taskId), jobId)) ? { companyId: job.companyId } : null;
   });
 }
 
@@ -237,6 +251,22 @@ export async function mapLines(db: Db, companyId: string): Promise<{ lines: MapL
   );
 }
 
+type Started = { agentId: string | null; taskId: string | null; startedAt: Date | null };
+
+/* The turns that went out inside the heads' running turns, from the earliest of those on. */
+async function goneAlong(tx: Tx, heads: Started[]): Promise<Started[]> {
+  const starts = heads.flatMap(j => (j.startedAt ? [j.startedAt.getTime()] : []));
+  if (!starts.length) return [];
+  return tx
+    .select({ agentId: jobs.agentId, taskId: jobs.taskId, startedAt: jobs.startedAt })
+    .from(jobs)
+    .where(and(eq(jobs.result, GONE_ALONG), inArray(jobs.agentId, heads.map(j => j.agentId!)), gte(jobs.startedAt, new Date(Math.min(...starts)))))
+    .orderBy(asc(jobs.startedAt));
+}
+
+/* The tasks a running turn carries: its own, then those of the turns that went out inside it after it started. */
+const carried = (j: Started, along: Started[]) => [j.taskId, ...along.filter(a => a.agentId === j.agentId && j.startedAt && a.startedAt && a.startedAt >= j.startedAt).map(a => a.taskId)];
+
 /* Each agent's running turn with the tasks it carries: its own, and for a head those of the turns that went out inside it. */
 async function runningTurns(tx: Tx, companyId: string, staff: Agent[]): Promise<Turn[]> {
   const ids = staff.map(a => a.id);
@@ -245,57 +275,56 @@ async function runningTurns(tx: Tx, companyId: string, staff: Agent[]): Promise<
     .select({ id: jobs.id, agentId: jobs.agentId, taskId: jobs.taskId, startedAt: jobs.startedAt })
     .from(jobs)
     .where(and(eq(jobs.companyId, companyId), eq(jobs.kind, 'conversation'), eq(jobs.status, 'running'), inArray(jobs.agentId, ids)));
-  const heads = running.filter(j => staff.find(a => a.id === j.agentId)?.kind === 'head' && j.startedAt);
-  const since = heads.reduce<Date | null>((min, j) => (!min || j.startedAt! < min ? j.startedAt! : min), null);
-  const along = since
-    ? await tx
-        .select({ agentId: jobs.agentId, taskId: jobs.taskId, startedAt: jobs.startedAt })
-        .from(jobs)
-        .where(and(eq(jobs.result, GONE_ALONG), inArray(jobs.agentId, heads.map(j => j.agentId!)), gte(jobs.startedAt, since)))
-        .orderBy(asc(jobs.startedAt))
-    : [];
-  return running.map(j => ({
-    id: j.id,
-    agentId: j.agentId!,
-    taskIds: [j.taskId, ...along.filter(a => a.agentId === j.agentId && j.startedAt && a.startedAt && a.startedAt >= j.startedAt).map(a => a.taskId)],
-  }));
+  const along = await goneAlong(
+    tx,
+    running.filter(j => staff.find(a => a.id === j.agentId)?.kind === 'head'),
+  );
+  return running.map(j => ({ id: j.id, agentId: j.agentId!, taskIds: carried(j, along) }));
 }
 
 type Snapshot = { staff: Agent[]; parents: ReadonlyMap<string, string | null>; saved: Line[]; turns: Turn[]; facts: Facts };
 
+const savedOf = (s: Snapshot, up: string, down: string) => s.saved.find(l => l.upstreamAgentId === up && l.downstreamAgentId === down);
+
+/* An agent runs one turn at a time; a switched off one runs none that counts. */
+const turnsOf = (s: Snapshot, agent: Agent) => (agent.switchedOffAt ? [] : s.turns.filter(t => t.agentId === agent.id));
+
+/* The task an employee's running turn works on, while it acts on it and has not given it back. */
+function memberWork(s: Snapshot, head: Agent, member: Agent): string | undefined {
+  const line = savedOf(s, head.id, member.id);
+  for (const turn of turnsOf(s, member)) {
+    const taskId = turn.taskIds[0];
+    if (taskId && memberActs(s.facts, member.id, taskId) && !givenBack(line, turn.id, taskId)) return taskId;
+  }
+  return undefined;
+}
+
+/* Whether the head works on a department task of its own in a turn that has not given it back. */
+function headWorks(s: Snapshot, orchestrator: Agent, head: Agent): boolean {
+  const line = savedOf(s, orchestrator.id, head.id);
+  return turnsOf(s, head).some(turn => turn.taskIds.some(taskId => headActs(s.facts, head.id, taskId) && !givenBack(line, turn.id, taskId)));
+}
+
+function lineView(s: Snapshot, up: string, down: string, working: boolean): WorkLine {
+  const saved = savedOf(s, up, down);
+  return { upstreamAgentId: up, downstreamAgentId: down, working, workEpoch: saved?.workEpoch ?? 0, returnedEpoch: saved?.returnedEpoch ?? null, returnedAt: saved?.returnedAt?.toISOString() ?? null };
+}
+
+/* A head's lines: to each employee of its department, and from the orchestrator to it, on while the head or an employee
+   under a department task that can go on works. */
+function departmentLines(s: Snapshot, orchestrator: Agent | undefined, head: Agent): MapLine[] {
+  const departmentId = topOf(s.parents, head.departmentId);
+  if (!departmentId) return [];
+  const members = s.staff.filter(a => a.kind === 'worker' && topOf(s.parents, a.departmentId) === departmentId);
+  const busy = members.map(m => ({ m, taskId: memberWork(s, head, m) }));
+  const lines: MapLine[] = busy.map(({ m, taskId }) => ({ ...lineView(s, head.id, m.id, taskId !== undefined), departmentId, kind: 'member' }));
+  if (!orchestrator) return lines;
+  const working = headWorks(s, orchestrator, head) || busy.some(b => b.taskId !== undefined && underLiveRoot(s.facts, b.taskId));
+  return [...lines, { ...lineView(s, orchestrator.id, head.id, working), departmentId, kind: 'department' }];
+}
+
 /* Each line with whether the work below it goes on now, and what came back along it. */
 export function project(s: Snapshot): MapLine[] {
   const orchestrator = s.staff.find(a => a.kind === 'orchestrator');
-  const savedOf = (up: string, down: string) => s.saved.find(l => l.upstreamAgentId === up && l.downstreamAgentId === down);
-  /* An agent runs one turn at a time; a switched off one runs none that counts. */
-  const turnsOf = (agent: Agent) => (agent.switchedOffAt ? [] : s.turns.filter(t => t.agentId === agent.id));
-  /* The task an employee's running turn works on, while it acts on it and has not given it back. */
-  const memberWork = (head: Agent, member: Agent): string | undefined => {
-    const line = savedOf(head.id, member.id);
-    for (const turn of turnsOf(member)) {
-      const taskId = turn.taskIds[0];
-      if (taskId && memberActs(s.facts, member.id, taskId) && !givenBack(line, turn.id, taskId)) return taskId;
-    }
-    return undefined;
-  };
-  const headWorks = (head: Agent) => {
-    const line = orchestrator && savedOf(orchestrator.id, head.id);
-    return turnsOf(head).some(turn => turn.taskIds.some(taskId => headActs(s.facts, head.id, taskId) && !givenBack(line, turn.id, taskId)));
-  };
-  const lineView = (up: string, down: string, working: boolean): WorkLine => {
-    const saved = savedOf(up, down);
-    return { upstreamAgentId: up, downstreamAgentId: down, working, workEpoch: saved?.workEpoch ?? 0, returnedEpoch: saved?.returnedEpoch ?? null, returnedAt: saved?.returnedAt?.toISOString() ?? null };
-  };
-  const out: MapLine[] = [];
-  for (const head of s.staff.filter(a => a.kind === 'head')) {
-    const departmentId = topOf(s.parents, head.departmentId);
-    if (!departmentId) continue;
-    const members = s.staff.filter(a => a.kind === 'worker' && topOf(s.parents, a.departmentId) === departmentId);
-    const busy = members.map(m => ({ m, taskId: memberWork(head, m) }));
-    for (const { m, taskId } of busy) out.push({ ...lineView(head.id, m.id, taskId !== undefined), departmentId, kind: 'member' });
-    if (!orchestrator) continue;
-    const working = headWorks(head) || busy.some(b => b.taskId !== undefined && underLiveRoot(s.facts, b.taskId));
-    out.push({ ...lineView(orchestrator.id, head.id, working), departmentId, kind: 'department' });
-  }
-  return out;
+  return s.staff.filter(a => a.kind === 'head').flatMap(head => departmentLines(s, orchestrator, head));
 }

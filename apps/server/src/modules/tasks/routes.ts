@@ -9,7 +9,7 @@ import { ApiError } from '../../errors.js';
 import { orchestratorOf } from '../conversation/queue.js';
 import { serverMachine } from '../computer/access.js';
 import { deptName } from '../departments/templates.js';
-import { departmentNames, visibleDecisions } from './decisions.js';
+import { departmentNames, visibleDecisions, type Decisions } from './decisions.js';
 import { answer, cancel, CLOSED, comment, createTask, refuse, taskSpot, type Task } from './engine.js';
 import { commitUrl, picturesOf } from './attachments.js';
 import { taskDetail, taskLines } from './views.js';
@@ -37,6 +37,54 @@ const AnswerBody = z.union([
 ]);
 
 const reaches = (access: Access, t: Pick<Task, 'departmentId' | 'productId'>) => canReach(access, taskSpot(t));
+
+/* The requests among these the orchestrator was asked to put into words, in a turn that waits or runs now. */
+async function explainingOf(db: Ctx['db'], companyId: string, ids: string[]): Promise<Set<string>> {
+  if (!ids.length) return new Set();
+  const asked = sql<string>`${agentEvents.data}->>'request'`;
+  const rows = await db
+    .select({ id: asked })
+    .from(agentEvents)
+    .innerJoin(jobs, eq(jobs.id, agentEvents.jobId))
+    .where(and(eq(agentEvents.companyId, companyId), eq(agentEvents.kind, 'message'), inArray(jobs.status, ['queued', 'running']), inArray(asked, ids)));
+  return new Set(rows.map(r => r.id));
+}
+
+async function agentNames(db: Ctx['db'], ids: string[]): Promise<Map<string, string>> {
+  if (!ids.length) return new Map();
+  return new Map((await db.select({ id: agents.id, name: agents.name }).from(agents).where(inArray(agents.id, ids))).map(a => [a.id, a.name]));
+}
+
+type Places = Awaited<ReturnType<typeof departmentNames>>;
+
+/* An orchestrator's pending card, answered with its own build or staff click. */
+function proposalView({ proposal: p, ownerPersonId, canAnswer }: Decisions['proposals'][number], names: Map<string, string>, places: Places) {
+  const place = p.departmentId ? places.get(p.departmentId) : undefined;
+  return {
+    id: p.id,
+    kind: p.kind,
+    agent: { id: p.agentId, name: names.get(p.agentId) ?? '' },
+    department: place ? { id: place.id, name: deptName(place) } : null,
+    brief: p.brief,
+    items: Array.isArray(p.items) ? p.items : [],
+    at: p.createdAt.toISOString(),
+    ownerPersonId,
+    canAnswer,
+  };
+}
+
+/* What the computer card shows, with the orchestrator's request; open and decline stay on /api/computer. */
+async function computerView(ctx: Ctx, companyId: string, computer: NonNullable<Decisions['computer']>, names: Map<string, string>) {
+  return {
+    kind: 'computer_access' as const,
+    id: 'server' as const,
+    agent: { id: computer.agentId, name: names.get(computer.agentId) ?? '' },
+    ownerPersonId: computer.ownerPersonId,
+    canAnswer: true,
+    at: computer.asked.at,
+    view: { ...ctx.computer.view(), asked: computer.asked, machine: await serverMachine(ctx, companyId) },
+  };
+}
 
 /* Tasks, what waits for people, and turns, as each person may see them: the departments they reach, and the
    orchestrator's tasks and turns for people with the whole company. */
@@ -143,25 +191,11 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     );
     const cards = decisions.proposals.filter(p => picked(p.ownerPersonId));
     const computer = decisions.computer && picked(decisions.computer.ownerPersonId) ? decisions.computer : null;
-    const askers = [...mine.map(r => r.request.agentId), ...cards.map(c => c.proposal.agentId), ...(computer ? [computer.agentId] : [])];
-    const names = new Map((askers.length ? await db.select({ id: agents.id, name: agents.name }).from(agents).where(inArray(agents.id, askers)) : []).map(a => [a.id, a.name]));
+    const names = await agentNames(db, [...mine.map(r => r.request.agentId), ...cards.map(c => c.proposal.agentId), ...(computer ? [computer.agentId] : [])]);
     const places = await departmentNames(ctx, cards.flatMap(c => (c.proposal.departmentId ? [c.proposal.departmentId] : [])));
     const pictures = await picturesOf(db, mine.map(r => r.request));
     const commits = await Promise.all(mine.map(r => commitUrl(db, r.task, r.request.commit)));
-    /* Requests the orchestrator was asked to put into words, in a turn that waits or runs now. */
-    const unexplained = mine.filter(r => !r.request.explained).map(r => r.request.id);
-    const asked = sql<string>`${agentEvents.data}->>'request'`;
-    const explaining = new Set(
-      unexplained.length
-        ? (
-            await db
-              .select({ id: asked })
-              .from(agentEvents)
-              .innerJoin(jobs, eq(jobs.id, agentEvents.jobId))
-              .where(and(eq(agentEvents.companyId, me.companyId), eq(agentEvents.kind, 'message'), inArray(jobs.status, ['queued', 'running']), inArray(asked, unexplained)))
-          ).map(r => r.id)
-        : [],
-    );
+    const explaining = await explainingOf(db, me.companyId, mine.filter(r => !r.request.explained).map(r => r.request.id));
     return {
       requests: mine.map((r, i) => ({
         id: r.request.id,
@@ -180,31 +214,8 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
         ownerPersonId: r.ownerPersonId,
         canAnswer: r.canAnswer,
       })),
-      /* The orchestrator's pending cards, each answered with its own build or staff click. */
-      proposals: cards.map(({ proposal: p, ownerPersonId, canAnswer }) => {
-        const place = p.departmentId ? places.get(p.departmentId) : undefined;
-        return {
-          id: p.id,
-          kind: p.kind,
-          agent: { id: p.agentId, name: names.get(p.agentId) ?? '' },
-          department: place ? { id: place.id, name: deptName(place) } : null,
-          brief: p.brief,
-          items: Array.isArray(p.items) ? p.items : [],
-          at: p.createdAt.toISOString(),
-          ownerPersonId,
-          canAnswer,
-        };
-      }),
-      /* What the computer card shows, with the orchestrator's request; open and decline stay on /api/computer. */
-      computerAccess: computer && {
-        kind: 'computer_access' as const,
-        id: 'server' as const,
-        agent: { id: computer.agentId, name: names.get(computer.agentId) ?? '' },
-        ownerPersonId: computer.ownerPersonId,
-        canAnswer: true,
-        at: computer.asked.at,
-        view: { ...ctx.computer.view(), asked: computer.asked, machine: await serverMachine(ctx, me.companyId) },
-      },
+      proposals: cards.map(c => proposalView(c, names, places)),
+      computerAccess: computer && (await computerView(ctx, me.companyId, computer, names)),
       counts: decisions.counts,
     };
   });
