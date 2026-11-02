@@ -5,6 +5,7 @@ import { LanguageProvider } from '../src/i18n';
 import { AgentWindow } from '../src/screens/AgentWindow';
 import type { EventView, OrchestratorState } from '../src/types';
 import { ME, mockApi, ORG } from './api-mock';
+import { decl } from './css';
 
 /* The terminal itself needs a real browser; these stand-ins keep what the window gives it and what it hands back. */
 const terms = vi.hoisted(() => [] as FakeTerminal[]);
@@ -129,6 +130,12 @@ describe("an agent's live terminal in its window", () => {
     ws.screen('\u001b[1m✻ Welcome to Claude Code\u001b[0m');
     expect(terms[0]!.written).toEqual(['\u001b[1m✻ Welcome to Claude Code\u001b[0m']);
     expect(screen.queryByText('Hello from the log')).not.toBeInTheDocument();
+  });
+
+  it('fills the whole phone screen with a terminal window, as with any other window', () => {
+    /* The terminal window is wider than the others on a computer; on a phone it takes the full width like them. */
+    expect(decl('.orch', 'width', '(max-width: 760px)')).toBe('auto');
+    expect(decl('.orch.term', 'width', '(max-width: 760px)')).toBe('auto');
   });
 
   it('shows one big loader naming the program until it is up, over whatever the session shows meanwhile', async () => {
