@@ -127,8 +127,9 @@ type View = {
 };
 
 const sameSize = (a: Size, b: Size) => a.cols === b.cols && a.rows === b.rows;
-/* Puts the cursor home and erases the screen without pushing it into the history. */
-const CLEAR = '\u001b[H\u001b[J';
+/* Erases a window's screen below a session of so many rows, and puts the cursor back where it was. */
+const eraseBelow = (rows: number) => `\u001b7\u001b[${rows + 1};1H\u001b[J\u001b8`;
+const run = (bin: string, args: string[]) => new Promise<void>(resolve => execFile(bin, args, () => resolve()));
 
 type Options = {
   tmux: Tmux;
@@ -866,12 +867,15 @@ export class TerminalHost {
            starting its own. */
         if (!a.turn) a.hash = null;
       }
+      /* The others get smaller first, if this window is: a client bigger than the session gets rows of dots. */
+      await this.fit(m.agentKey);
     } finally {
       this.viewsOpening.delete(m.termId);
     }
     if (this.viewsClosed.delete(m.termId)) {
+      /* The others may have got smaller for it. */
       this.wanted.delete(m.termId);
-      return;
+      return this.fit(m.agentKey);
     }
     const shown = this.fitted(m.agentKey);
     const child = this.opts.tmux.attach(a.name, shown.cols, shown.rows, m.write);
@@ -942,19 +946,24 @@ export class TerminalHost {
 
   private async fit(key: string): Promise<void> {
     const size = this.fitted(key);
-    const changed = [...this.views].filter(([, view]) => view.key === key && !sameSize(view.shown, size));
+    const changed = [...this.views].filter(([termId, view]) => view.key === key && this.wanted.has(termId) && !sameSize(view.shown, size));
     await Promise.all(changed.map(([termId, view]) => this.sizeView(termId, view, size)));
   }
 
   private async sizeView(termId: string, view: View, size: Size): Promise<void> {
     view.shown = size;
-    /* tmux redraws a client that gets smaller only within its new size; what the window showed below stays unless erased. */
-    const own = this.wanted.get(termId)?.size;
-    if (own && (size.cols < own.cols || size.rows < own.rows)) view.out(CLEAR);
     const tty = await this.ttyOf(termId, view);
     /* A newer size may have come while the client was looked for. */
     if (!tty || view.shown !== size) return;
-    execFile('stty', [process.platform === 'darwin' ? '-f' : '-F', tty, 'cols', String(size.cols), 'rows', String(size.rows)], () => {});
+    await run('stty', [process.platform === 'darwin' ? '-f' : '-F', tty, 'cols', String(size.cols), 'rows', String(size.rows)]);
+    /* The terminal tells its client, which tells tmux; a session sized before then would still be sized for the old one. */
+    for (const end = Date.now() + this.openMs; Date.now() < end; await new Promise(r => setTimeout(r, 20))) {
+      const client = (await this.opts.tmux.clients()).find(c => c.tty === tty);
+      if (!client || (client.cols === size.cols && client.rows === size.rows)) break;
+    }
+    /* tmux redraws a client that got smaller only within its new size; what the window showed below stays unless erased. */
+    const own = this.wanted.get(termId)?.size;
+    if (own && size.rows < own.rows && view.shown === size) view.out(eraseBelow(size.rows));
   }
 
   /* The terminal of a view's tmux client. A client attaches a moment after its view opens, so a size that comes before
@@ -968,8 +977,12 @@ export class TerminalHost {
 
   close(m: Msg<'term.close'>): void {
     const view = this.views.get(m.termId);
-    if (view) view.child.kill();
-    else if (this.viewsOpening.has(m.termId)) this.viewsClosed.add(m.termId);
+    if (view) {
+      view.child.kill();
+      /* Its viewer process takes a while to end; the others get their size back at once. */
+      this.wanted.delete(m.termId);
+      void this.fit(view.key);
+    } else if (this.viewsOpening.has(m.termId)) this.viewsClosed.add(m.termId);
   }
 }
 

@@ -33,7 +33,7 @@ const KEYS: string[][] = [
 ];
 
 export type Launch = { cwd: string; command: string[]; cols: number; rows: number; envFile?: string; outputDir?: string };
-export type Client = { pid: number; tty: string; session: string };
+export type Client = { pid: number; tty: string; session: string; cols: number; rows: number };
 
 type Options = {
   /* The tmux server's socket name, so agent sessions never mix with anyone else's tmux. */
@@ -202,13 +202,13 @@ export class Tmux {
   }
 
   async clients(): Promise<Client[]> {
-    const out = await this.run(['list-clients', '-F', '#{client_pid} #{client_tty} #{session_name}']).catch(() => '');
+    const out = await this.run(['list-clients', '-F', '#{client_pid} #{client_tty} #{session_name} #{client_width} #{client_height}']).catch(() => '');
     return out
       .split('\n')
       .filter(Boolean)
       .map(line => {
-        const [pid, tty, session] = line.split(' ');
-        return { pid: Number(pid), tty: tty ?? '', session: session ?? '' };
+        const [pid, tty, session, cols, rows] = line.split(' ');
+        return { pid: Number(pid), tty: tty ?? '', session: session ?? '', cols: Number(cols), rows: Number(rows) };
       });
   }
 
