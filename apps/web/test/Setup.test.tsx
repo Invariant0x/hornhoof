@@ -204,6 +204,18 @@ describe('the public link on the setup screen', () => {
     expect(decl('.link-input .link-domain', 'white-space')).toBe('nowrap');
   });
 
+  it('breaks the note under the field inside the longest address, so the note does not widen the row', async () => {
+    const longest = 'a'.repeat(63);
+    mockApi({ [`GET /api/setup/names/${longest}?code=LINK-CODE-123`]: [200, { name: longest, free: true }] });
+    const user = userEvent.setup();
+    render(<Setup onDone={() => {}} linkDomain="hornhoof.org" />);
+    await user.type(screen.getByLabelText('Link'), longest);
+    const note = await screen.findByText(`${longest}.hornhoof.org is free.`);
+    /* The address is one word with no place to wrap, wider than a phone; the note may break inside it. */
+    expect(note.matches('.link-name > span')).toBe(true);
+    expect(decl('.link-name > span', 'overflow-wrap')).toBe('anywhere');
+  });
+
   it('opens Hornhoof on the internet at a link made from the company name as it is typed', async () => {
     const user = userEvent.setup();
     render(<Setup onDone={() => {}} linkDomain="hornhoof.org" />);

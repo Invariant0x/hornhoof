@@ -193,8 +193,10 @@ button, input, select { font: inherit; color: inherit; }
 @media (max-width: 860px) { .template-cards { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 560px) { .template-cards { grid-template-columns: 1fr; } }
 /* A public link's name, with what its address ends in after it. The field's width in % keeps its own width out of the
-   row's narrowest size, so on a phone the field takes what the domain leaves and the row stays inside the screen. */
+   row's narrowest size, so on a phone the field takes what the domain leaves and the row stays inside the screen. The
+   notes under it may break inside the address, which for a long name is one word wider than a phone. */
 .link-name > .btn { justify-self: start; }
+.link-name > span { overflow-wrap: anywhere; }
 .link-input { display: flex; align-items: stretch; }
 .link-input input { flex: 1; min-width: 0; width: 100%; }
 .link-input .link-domain { display: flex; align-items: center; padding: 0 10px; border: 1px solid var(--line2); border-left: 0; background: var(--surface); color: var(--muted); font-size: 14px; white-space: nowrap; }
