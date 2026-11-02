@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { lineState, RETURN_MS, type LineFacts } from '../src/map.js';
+import { lineState, RETURN_MS, yellowUntil, type LineFacts } from '../src/map.js';
 import { lineState as fromIndex } from '../src/index.js';
 
 const T = Date.parse('2026-11-02T12:00:00Z');
@@ -74,5 +74,15 @@ describe('lineState', () => {
 
   it('is what the package entry point gives too', () => {
     expect(fromIndex).toBe(lineState);
+  });
+});
+
+describe('yellowUntil', () => {
+  it('gives when the yellow of a return in this cycle goes out, and nothing while work goes on or for an older cycle', () => {
+    const returned: LineFacts = { working: false, workEpoch: 2, returnedEpoch: 2, returnedAt: T };
+    expect(yellowUntil(returned)).toBe(T + RETURN_MS);
+    expect(yellowUntil({ ...returned, working: true })).toBeNull();
+    expect(yellowUntil({ ...returned, workEpoch: 3 })).toBeNull();
+    expect(yellowUntil(quietEdge)).toBeNull();
   });
 });
