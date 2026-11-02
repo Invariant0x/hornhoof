@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
@@ -96,20 +96,26 @@ describe('Department view', () => {
   });
 
   it('shows an employee start working while the department is open', async () => {
-    const user = userEvent.setup();
     const stream = fakeStream();
     const [dev] = DEV_ORG.departments;
     const task = { id: 't12', number: 12, title: 'Checkout API', stage: 0, gateCount: 1, bounces: 0 };
     const busy: Org = { ...DEV_ORG, departments: [{ ...dev!, employees: dev!.employees.map(e => ({ ...e, state: 'working' as const, status: 'working' as const, task })) }] };
     let started = false;
-    shell({ 'GET /api/org': () => [200, started ? busy : DEV_ORG] });
-    await flyIn(user);
+    await act(async () => {
+      shell({ 'GET /api/org': () => [200, started ? busy : DEV_ORG] });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Development/ }));
+    });
+    expect(screen.getByRole('heading', { level: 2, name: 'Development' })).toBeInTheDocument();
     const bruno = within(screen.getByRole('region', { name: 'Members' })).getByRole('button', { name: /Bruno/ });
     expect(bruno).toHaveTextContent('free');
     expect(screen.getByText(/Work goes left to right through the gates/)).toBeInTheDocument();
     started = true;
-    stream.send({ type: 'working', working: 2 });
-    await vi.waitFor(() => expect(within(screen.getByRole('region', { name: 'Members' })).getByRole('button', { name: /Bruno/ })).toHaveTextContent('BrunoClaudeworkingClaude Sonnet 5.5, default effort, Anthropic#12 Checkout API'));
+    await act(async () => {
+      stream.send({ type: 'working', working: 2 });
+    });
+    expect(within(screen.getByRole('region', { name: 'Members' })).getByRole('button', { name: /Bruno/ })).toHaveTextContent('BrunoClaudeworkingClaude Sonnet 5.5, default effort, Anthropic#12 Checkout API');
     /* The line at the bottom says what changed last. */
     expect(screen.getByText('Bruno: working, #12 Checkout API')).toBeInTheDocument();
   });

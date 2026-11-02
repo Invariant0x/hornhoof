@@ -12,23 +12,25 @@ const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 
 function fixedTime() {
-  vi.useFakeTimers({ shouldAdvanceTime: true });
+  vi.useFakeTimers();
   vi.setSystemTime(NOW);
 }
 
 async function renderSubs(subscriptions: SubView[], language: 'en' | 'ru' = 'en') {
   if (language === 'ru') localStorage.setItem('hh-lang', 'ru');
   mockApi({ 'GET /api/subscriptions': [200, { subscriptions }], 'GET /api/machines': [200, { machines: [] }] });
-  render(
-    <LanguageProvider>
-      <Subscriptions me={ME} />
-    </LanguageProvider>,
-  );
+  await act(async () => {
+    render(
+      <LanguageProvider>
+        <Subscriptions me={ME} />
+      </LanguageProvider>,
+    );
+  });
 }
 
 async function renderLimits(limits: Limits, language: 'en' | 'ru' = 'en') {
   await renderSubs([{ ...SUBS[0]!, limits }], language);
-  const row = await screen.findByRole('row', { name: /^Claude\b/ });
+  const row = screen.getByRole('row', { name: /^Claude\b/ });
   return within(row).getByRole('list', { name: language === 'ru' ? 'Лимиты' : 'Limits' });
 }
 
@@ -128,7 +130,7 @@ describe('relative subscription reset times', () => {
     const codex = { ...SUBS[1]!, limits: { status: 'allowed' as const, windows: [{ name: '120_minutes', utilization: 0.05, resetsAt: at(7 * HOUR + 5 * MINUTE) }, { name: 'five_hour', utilization: null, resetsAt: null }] } };
     const kimi = { ...SUBS[2]!, limits: { status: 'allowed' as const, complete: true, windows: [{ name: 'five_hour', utilization: 0.88, resetsAt: at(30_000) }, { name: 'month', utilization: 0.06, resetsAt: 'not-a-time' }] } };
     await renderSubs([claude, codex, kimi]);
-    expect(within(await screen.findByRole('row', { name: /^Claude\b/ })).getByText('resets in 3 days 7 hours')).toBeInTheDocument();
+    expect(within(screen.getByRole('row', { name: /^Claude\b/ })).getByText('resets in 3 days 7 hours')).toBeInTheDocument();
     expect(within(screen.getByRole('row', { name: /^Codex\b/ })).getByText('resets in 7 hours 5 minutes')).toBeInTheDocument();
     expect(within(screen.getByRole('row', { name: /^Codex\b/ })).getByText('Reset time unknown')).toBeInTheDocument();
     expect(within(screen.getByRole('row', { name: /^Kimi\b/ })).getByText('resets in less than a minute')).toBeInTheDocument();
