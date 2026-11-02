@@ -88,8 +88,11 @@ services:
       - SETUID
       - SETGID
       - KILL
+    # Docker's AppArmor profile on newer Linux, as Debian 13, would stop this root from stopping the programs of its
+    # jobs, so the node runs outside it. Docker skips the option where AppArmor is off, as on a Mac.
     security_opt:
       - no-new-privileges:true
+      - apparmor:unconfined
     depends_on:
       - app
     networks:

@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
 
-type Service = { image?: string; command?: string[]; volumes?: string[]; environment?: Record<string, string> };
+type Service = { image?: string; command?: string[]; volumes?: string[]; environment?: Record<string, string>; security_opt?: string[] };
 const compose = parse(readFileSync(fileURLToPath(new URL('../../../compose.yaml', import.meta.url)), 'utf8')) as { services: Record<string, Service> };
 
 describe('the tunnel service', () => {
@@ -33,5 +33,10 @@ describe('the built-in node', () => {
       HORNHOOF_HOST_CPUS: '${HORNHOOF_HOST_CPUS:-}',
       HORNHOOF_HOST_MEMORY: '${HORNHOOF_HOST_MEMORY:-}',
     });
+  });
+
+  /* Docker's AppArmor profile on newer Linux, as Debian 13, keeps the node from stopping the programs of its jobs. */
+  it('runs outside AppArmor, and still gains no new privileges', () => {
+    expect(compose.services.node!.security_opt).toEqual(['no-new-privileges:true', 'apparmor:unconfined']);
   });
 });

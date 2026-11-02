@@ -221,6 +221,8 @@ describe('install.sh', () => {
       expect(run).toContain('--user 0:0');
       for (const cap of ['CHOWN', 'DAC_OVERRIDE', 'FOWNER', 'KILL', 'SETGID', 'SETUID', 'SYS_PTRACE']) expect(run).toContain(`--cap-add ${cap}`);
       expect(run).toContain('--security-opt no-new-privileges');
+      /* Docker's AppArmor profile on newer Linux, as Debian 13, keeps the node from seeing and stopping its agents' programs. */
+      expect(run).toContain('--security-opt apparmor=unconfined');
       expect(run).toContain('--shm-size 2g');
       expect(run).toContain(`-v ${name}:/data`);
       expect(run.endsWith(IMAGE)).toBe(true);
