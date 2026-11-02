@@ -130,6 +130,12 @@ export const ru: Messages = {
     machineOffline: owner => `Машина не в сети, владелец ${owner}`,
     runsOnPersonal: (owner, provider) => `На связи, подписка ${provider}, владелец ${owner}`,
     waitingLimit: at => `Ждет, пока лимит обновится в ${at}`,
+    decisionsOf: (name, n) =>
+      n === null
+        ? `${name}: открыть решения`
+        : n
+          ? `${name}: ${n} ${plural('ru', n, { one: 'решение ждет', few: 'решения ждут', many: 'решений ждут', other: 'решения ждут' })}`
+          : `${name}: решений нет`,
   },
   people: {
     heading: 'Люди',

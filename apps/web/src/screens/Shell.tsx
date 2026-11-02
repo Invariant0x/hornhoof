@@ -242,6 +242,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
             selected={agentPanel?.agentId ?? null}
             selectedTask={panel?.kind === 'task' ? panel.taskId : null}
             panel={panel?.kind ?? null}
+            serverNow={org?.serverNow}
             onBack={() => setDeptId(null)}
             onOpen={agentId => setPanel({ kind: 'window', agentId })}
             onOpenTask={taskId => setPanel({ kind: 'task', taskId })}

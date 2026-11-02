@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Shell } from '../src/screens/Shell';
 import type { Me } from '../src/types';
-import { CLOSED_TASKS, DEV_ORG, FINISHED_TURN, ME, mockApi, PLANNED_TURN, REQUESTS, TASKS, TURN } from './api-mock';
+import { CLOSED_TASKS, decisions, DEV_ORG, FINISHED_TURN, ME, mockApi, PLANNED_TURN, REQUESTS, TASKS, TURN } from './api-mock';
 import { fakeStream } from './fake-stream';
 
 const ALL = '/api/tasks?status=all';
@@ -14,7 +14,7 @@ const SUBTASK = { ...TASKS[1]!, id: 't13', number: 13, title: 'Card form', brief
 function shell(routes: Record<string, unknown> = {}, me: Me = ME) {
   const calls = mockApi({
     'GET /api/org': [200, DEV_ORG],
-    'GET /api/requests': [200, { requests: REQUESTS }],
+    'GET /api/requests': [200, decisions(REQUESTS)],
     'GET /api/turns': [200, { turns: [FINISHED_TURN, TURN, PLANNED_TURN] }],
     [`GET ${ALL}`]: [200, { tasks: [...TASKS, SUBTASK, PLANNED, { ...CLOSED_TASKS[0]!, turn: 2 }] }],
     ...(routes as Record<string, [number, unknown]>),
@@ -124,7 +124,7 @@ describe('the tracker', () => {
     const user = userEvent.setup();
     let answered = false;
     const calls = shell({
-      'GET /api/requests': () => [200, { requests: answered ? REQUESTS.slice(1) : REQUESTS }],
+      'GET /api/requests': () => [200, decisions(answered ? REQUESTS.slice(1) : REQUESTS)],
       'POST /api/requests/r1': () => {
         answered = true;
         return [200, { request: { id: 'r1', status: 'answered' } }];
@@ -146,7 +146,7 @@ describe('the tracker', () => {
 
   it('says the orchestrator is putting a question into plain words while it is on it', async () => {
     const user = userEvent.setup();
-    shell({ 'GET /api/requests': [200, { requests: [{ ...REQUESTS[0]!, explaining: true }, REQUESTS[1]] }] });
+    shell({ 'GET /api/requests': [200, decisions([{ ...REQUESTS[0]!, explaining: true }, REQUESTS[1]])] });
     await openTasks(user);
     const waiting = screen.getByRole('region', { name: 'Waiting for you' });
     expect(within(waiting).getByRole('article', { name: /#9/ })).toHaveTextContent('The orchestrator is writing this up in plain words.');
@@ -168,7 +168,7 @@ describe('the tracker', () => {
       link: 'https://preview.example.com/logo',
       task: { ...REQUESTS[0]!.task, id: 't11', number: 11, title: 'Logo' },
     };
-    const calls = shell({ 'GET /api/requests': [200, { requests: [choice] }], 'POST /api/requests/r4': [200, { request: { id: 'r4', status: 'answered' } }] });
+    const calls = shell({ 'GET /api/requests': [200, decisions([choice])], 'POST /api/requests/r4': [200, { request: { id: 'r4', status: 'answered' } }] });
     await openTasks(user);
     const asked = within(screen.getByRole('region', { name: 'Waiting for you' })).getByRole('article', { name: /#11/ });
     expect(within(asked).getByRole('img', { name: 'Picture 1' })).toHaveAttribute('src', '/api/attachments/p0');

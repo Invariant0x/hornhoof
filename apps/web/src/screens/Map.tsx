@@ -1,16 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { deptLabel, errorText, useLanguage, useT, type Messages } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
 import { useStream, type LiveMessage } from '../live';
 import { useOrg } from '../org';
-import type { Department, Employee, EmployeeStatus, Endpoint, Me, Org, SubView } from '../types';
+import type { Department, Employee, EmployeeStatus, Endpoint, Me, Org, PersonView, SubView } from '../types';
 import { accessText } from '../ui/AccessPicker';
-import { useChannels } from '../ui/channels';
 import { Bar, percent } from '../ui/Bar';
 import { usePanZoom, ZoomBar } from '../ui/canvas';
 import { Edge } from '../ui/Edge';
 import { LogoMark, PersonIcon } from '../ui/icons';
-import { Pulse, pulseSeconds, SIGNALS, toD, useReducedMotion, type Point } from '../ui/wires';
+import { Pulse, pulseSeconds, toD, useReducedMotion, type Point } from '../ui/wires';
+import { useWorkLines } from '../ui/work-lines';
 import { clock } from './Subscriptions';
 
 /* World coordinates, laid out like the prototype: people on top, the orchestrator in the middle, departments in two columns around him. */
@@ -105,18 +105,33 @@ const GAUGE_TRACK: Point[] = Array.from({ length: 37 }, (_, i) => {
   return [120 + 103 * Math.cos(a), 120 + 103 * Math.sin(a)];
 });
 
-/* The way from an endpoint to the hub: down from a person's chip, or in from a department along its trace. */
+/* A person on the top row, with the department they belong to when they reach only one. */
+export type MapPerson = PersonView & { deputy?: boolean; home?: Department };
+
+/* Everyone with a card on the top row, each once: the people next to the CEO, then the people of one department in the
+   order of the departments. The server places them; the map only lines them up, so every card is reachable from the hub. */
+export function mapPeople(org: Org): MapPerson[] {
+  const seen = new Set<string>();
+  const all: MapPerson[] = [...org.people, ...org.departments.flatMap(d => d.people.map(p => ({ ...p, home: d })))];
+  return all.filter(p => !seen.has(p.id) && !!seen.add(p.id));
+}
+
+/* The way from the hub's edge down to a person's card. */
+function toPerson(org: Org, id: string): Point[] | null {
+  const people = mapPeople(org);
+  const i = people.findIndex(p => p.id === id);
+  if (i < 0) return null;
+  const x = chipCenters(people.length)[i]!;
+  const n = org.departments.length;
+  return [[CX, CY - HUB], [CX, busY(n)], [x, busY(n)], [x, chipsTop(n) + CHIP_H]];
+}
+
+/* The way from an endpoint to the hub: up from a person's chip, or in from a department along its trace. */
 function toHub(e: Endpoint, org: Org): Point[] | null {
   if (e.kind === 'orchestrator') return [];
   /* Agents inside one department run on its card. */
   if (e.kind === 'agent') return null;
-  if (e.kind === 'person') {
-    const i = org.people.findIndex(p => p.id === e.id);
-    if (i < 0) return null;
-    const x = chipCenters(org.people.length)[i]!;
-    const n = org.departments.length;
-    return [[x, chipsTop(n) + CHIP_H], [x, busY(n)], [CX, busY(n)], [CX, CY - HUB]];
-  }
+  if (e.kind === 'person') return toPerson(org, e.id)?.reverse() ?? null;
   const i = org.departments.findIndex(d => d.id === e.id);
   return i < 0 ? null : [...deptLayout(org.departments.length)[i]!.path].reverse();
 }
@@ -128,9 +143,6 @@ export function pulsePath(from: Endpoint, to: Endpoint, org: Org): Point[] | nul
   const pts = [...a, ...[...b].reverse()];
   return pts.length >= 2 ? pts : null;
 }
-
-const endKey = (e: Endpoint) => (e.kind === 'orchestrator' ? e.kind : `${e.kind}:${e.id}`);
-const wayKey = (from: Endpoint, to: Endpoint) => `${endKey(from)}>${endKey(to)}`;
 
 /* Work going back up, to a person or from a department to the hub, runs amber; work handed down runs cyan. */
 export const pulseTone = (from: Endpoint, to: Endpoint): 'c' | 'a' => (to.kind === 'person' || (to.kind === 'orchestrator' && from.kind === 'department') ? 'a' : 'c');
@@ -184,7 +196,7 @@ const orchestratorReady = (sub: SubView | null) => !!sub && sub.status === 'read
 
 /* The part of the world that has something on it, so Fit fills the screen with it. */
 function contentBounds(org: Org): { x0: number; y0: number; x1: number; y1: number } {
-  const half = Math.max(chipsWidth(org.people.length) / 2, 260);
+  const half = Math.max(chipsWidth(mapPeople(org).length) / 2, 260);
   const n = org.departments.length;
   const turn = org.turn ? TURN_H : 0;
   const b = { x0: CX - half, x1: CX + half, y0: chipsTop(n), y1: BELOW + turn + (n ? 0 : 120) };
@@ -198,10 +210,11 @@ function contentBounds(org: Org): { x0: number; y0: number; x1: number; y1: numb
 
 type Shot = { key: number; pts: Point[]; tone: 'c' | 'a' };
 
-type Props = { me: Me; windowOpen: boolean; onOpenOrchestrator(): void; inside?: boolean; onOpenDepartment?(id: string): void };
+/* onOpenDecisions: a person's card opens the decisions screen showing theirs. */
+type Props = { me: Me; windowOpen: boolean; onOpenOrchestrator(): void; inside?: boolean; onOpenDepartment?(id: string): void; onOpenDecisions?(personId: string): void };
 
 /* inside: a department's view is open over the map, which stays flown into it until the view closes. */
-export function MapScreen({ me, windowOpen, onOpenOrchestrator, inside = false, onOpenDepartment }: Props) {
+export function MapScreen({ me, windowOpen, onOpenOrchestrator, inside = false, onOpenDepartment, onOpenDecisions }: Props) {
   const t = useT();
   const { language } = useLanguage();
   const still = useReducedMotion();
@@ -259,17 +272,13 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator, inside = false, 
     [flash],
   );
 
-  /* Each way a message went keeps running for ten minutes after the last one, and longer while the work it brought goes
-     on, so a glance shows where work goes on. */
-  const seed = useMemo(() => (org?.live ?? []).map(c => ({ key: wayKey(c.from, c.to), at: c.at, held: c.held, value: { from: c.from, to: c.to } })), [org?.live]);
-  const channels = useChannels(seed);
-  const { touch } = channels;
+  /* The line to each department: blue while its head works on the orchestrator's task, yellow for five minutes after it
+     gave a result back, as the server keeps them. */
+  const stateOf = useWorkLines(org?.workLines, org?.serverNow);
 
   /* Real signals only: a pulse runs once per message or move of a task. useOrg keeps the working count and the org itself fresh. */
   useStream((m: LiveMessage) => {
-    if (m.type !== 'pulse' || m.from.kind === 'agent' || m.to.kind === 'agent') return;
-    touch(wayKey(m.from, m.to), { from: m.from, to: m.to });
-    if (still) return;
+    if (m.type !== 'pulse' || m.from.kind === 'agent' || m.to.kind === 'agent' || still) return;
     const pts = org && pulsePath(m.from, m.to, org);
     if (pts) fire(pts, m);
     /* A pulse to a department that was just made comes before the map has fetched it, so it waits a little for it. */
@@ -308,6 +317,10 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator, inside = false, 
   }, [fit]);
 
   /* The map flies into the department's card until it fills the screen, then the department opens. */
+  function openDecisions(personId: string) {
+    if (!dragged()) onOpenDecisions?.(personId);
+  }
+
   function enter(spot: DeptSpot, id: string) {
     if (dragged() || !onOpenDepartment) return;
     const el = box.current;
@@ -331,8 +344,18 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator, inside = false, 
   const status = orchestratorStatus(t, sub, limitAt);
   const spots = deptLayout(depts.length);
   const top = chipsTop(depts.length), bus = busY(depts.length);
-  const chips = chipCenters(org.people.length);
-  const chipsW = chipsWidth(org.people.length);
+  const people = mapPeople(org);
+  const chips = chipCenters(people.length);
+  const chipsW = chipsWidth(people.length);
+  const lineTo = (d: Department) => {
+    const head = d.employees.find(e => e.kind === 'head');
+    return head && org.orchestrator ? stateOf(org.orchestrator.id, head.id) : 'quiet';
+  };
+  /* Each person decisions wait for gets a signal of their own from the hub, and the hub blinks while any of them waits. */
+  const asked = people.flatMap(p => {
+    const pts = p.pendingDecisions ? toPerson(org, p.id) : null;
+    return pts ? [{ id: p.id, pts }] : [];
+  });
   const gauge = gaugeArc(org.agents.working, org.agents.total);
   const hubPlace = { left: CX - HUB, top: CY - HUB, width: HUB * 2, height: HUB * 2 };
   const hubArt = (
@@ -386,44 +409,52 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator, inside = false, 
             <path key={depts[i]!.id} className="tr" data-wire={depts[i]!.id} d={toD(s.path)} />
           ))}
           {spots.map((s, i) => s.path.length > 2 && <circle key={depts[i]!.id} className="via" cx={s.path[2]![0]} cy={s.path[2]![1]} r="4" />)}
-          {channels.live.map(c => {
-            const pts = pulsePath(c.from, c.to, org);
-            const tone = pulseTone(c.from, c.to);
-            /* A live way lights up, and signals keep running along it until it goes quiet. */
-            return (
-              pts && (
-                <g key={wayKey(c.from, c.to)}>
-                  <path className={`tr live ${tone}`} d={toD(pts)} />
-                  {!still && SIGNALS.map(phase => <Pulse key={phase} pts={pts} speed={PULSE_SPEED} tone={tone} phase={phase} />)}
-                </g>
-              )
-            );
+          {/* One solid path over the whole trace, so the color fills it at any zoom. */}
+          {spots.map((s, i) => {
+            const state = lineTo(depts[i]!);
+            return state !== 'quiet' && <path key={depts[i]!.id} className={`tr work ${state}`} data-work={depts[i]!.id} d={toD(s.path)} />;
           })}
+          {asked.map(a => (
+            <g key={a.id}>
+              <path className="tr ask" data-ask={a.id} d={toD(a.pts)} />
+              {!still && <Pulse pts={a.pts} speed={PULSE_SPEED} tone="a" />}
+            </g>
+          ))}
           {shots.map(s => (
             <Pulse key={s.key} pts={s.pts} speed={PULSE_SPEED} once tone={s.tone} />
           ))}
         </svg>
 
         <ul className="chips" style={{ left: CX - chipsW / 2, top, gap: CHIP_GAP }} aria-label={t.map.leaders}>
-          {org.people.map(p => (
-            <li key={p.id} style={{ width: CHIP_W, height: CHIP_H }}>
-              <Edge cut={8} className="chip">
-                <PersonIcon label={t.map.person} />
-                <span>
-                  <b>{p.name}</b>
-                  <small>{p.title || (p.deputy ? t.map.deputy(accessText(t, p.access, org)) : t.map.wholeCompany)}</small>
-                </span>
-              </Edge>
-            </li>
-          ))}
+          {people.map(p => {
+            const n = p.pendingDecisions ?? null;
+            return (
+              <li key={p.id} style={{ width: CHIP_W, height: CHIP_H }}>
+                <button type="button" className={`chip-btn${n ? ' attn' : ''}`} aria-label={t.map.decisionsOf(p.name, n)} onClick={() => openDecisions(p.id)}>
+                  <Edge cut={8} className="chip">
+                    <PersonIcon label={t.map.person} />
+                    <span>
+                      <b>{p.name}</b>
+                      <small>{p.title || (p.home ? deptLabel(t, p.home) : p.deputy ? t.map.deputy(accessText(t, p.access, org)) : t.map.wholeCompany)}</small>
+                    </span>
+                  </Edge>
+                  {n ? (
+                    <span className="nav-count chip-count" aria-hidden="true">
+                      {n}
+                    </span>
+                  ) : null}
+                </button>
+              </li>
+            );
+          })}
         </ul>
 
         {company ? (
-          <button className={`hub${windowOpen ? ' on' : ''}`} type="button" style={hubPlace} aria-label={t.map.openOrchestrator} onPointerDown={e => e.stopPropagation()} onClick={onOpenOrchestrator}>
+          <button className={`hub${windowOpen ? ' on' : ''}${asked.length ? ' attn' : ''}`} type="button" style={hubPlace} aria-label={t.map.openOrchestrator} onPointerDown={e => e.stopPropagation()} onClick={onOpenOrchestrator}>
             {hubArt}
           </button>
         ) : (
-          <div className="hub" style={hubPlace}>
+          <div className={`hub${asked.length ? ' attn' : ''}`} style={hubPlace}>
             {hubArt}
           </div>
         )}

@@ -6,14 +6,14 @@ import { useStream } from '../live';
 import { useTasks } from '../tasks';
 import type { Department, Employee, EmployeeStatus, Me, PersonView } from '../types';
 import { Bar, percent } from '../ui/Bar';
-import { useChannels } from '../ui/channels';
 import { usePanZoom, ZoomBar } from '../ui/canvas';
 import { Edge } from '../ui/Edge';
 import { AgentIcon, PersonIcon, ProviderMark } from '../ui/icons';
 import { NewTask } from '../ui/NewTask';
 import { RepoSettings } from '../ui/RepoSettings';
 import { byState, TaskRow } from '../ui/TaskRow';
-import { Pulse, pulseSeconds, SIGNALS, toD, useReducedMotion, type Point } from '../ui/wires';
+import { Pulse, pulseSeconds, toD, useReducedMotion, type Point } from '../ui/wires';
+import { useWorkLines } from '../ui/work-lines';
 import { arrowD, CH, CW, CY, FT, FW, HH, HW, PH, PW, schemaLayout, stepPaths, type Line } from './schema';
 
 type Props = {
@@ -25,10 +25,14 @@ type Props = {
   selectedTask: string | null;
   /* What covers the right of the screen, so the schema starts clear of it. */
   panel: 'window' | 'card' | 'task' | null;
+  /* The server's clock when it read the company, which times the yellow lines. */
+  serverNow?: string;
   onBack(): void;
   onHire(): void;
   onOpen(agentId: string): void;
   onOpenTask(taskId: string): void;
+  /* A person's card opens the decisions screen showing theirs. */
+  onOpenDecisions?(personId: string): void;
 };
 
 /* The orchestrator's window and the right panels, with their margins. */
@@ -220,7 +224,7 @@ function DeptTasks({ department: d, head, canGive, selected, onOpenTask }: { dep
 
 /* Inside a department: its schema as in the prototype. The head on top, a frame per role in stages left to right through
    the gates, and the way back from them. Tasks, the repository, products and people open in a drawer at the left. */
-export function DepartmentView({ me, department: d, deputies, selected, selectedTask, panel, onBack, onHire, onOpen, onOpenTask }: Props) {
+export function DepartmentView({ me, department: d, deputies, selected, selectedTask, panel, serverNow, onBack, onHire, onOpen, onOpenTask, onOpenDecisions }: Props) {
   const t = useT();
   const { language } = useLanguage();
   const id = useId();
@@ -269,15 +273,11 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
     return () => ro.disconnect();
   }, [place]);
 
-  /* Each way a message went between two of its agents keeps running for ten minutes after the last one, and longer while
-     the work it brought goes on: amber up to the head and back from a gate, cyan down and on. */
-  const seed = useMemo(() => (d.live ?? []).map(w => ({ key: `${w.from}>${w.to}`, at: w.at, held: w.held, value: { from: w.from, to: w.to } })), [d.live]);
-  const channels = useChannels(seed);
-  const { touch } = channels;
-  useStream(m => {
-    if (m.type === 'pulse' && m.from.kind === 'agent' && m.to.kind === 'agent' && m.from.departmentId === d.id) touch(`${m.from.id}>${m.to.id}`, { from: m.from.id, to: m.to.id });
-  });
+  /* The line from the head to each employee: blue while it works on the head's task, yellow for five minutes after it gave
+     a result back, as the server keeps them. */
+  const stateOf = useWorkLines(d.workLines, serverNow);
   const stageOf = (id: string) => s.frames.find(f => f.members.some(m => m.e.id === id))?.stage ?? -1;
+  /* A message runs amber up to the head and back from a gate, cyan down and on. */
   const wayTone = (from: string, to: string) => (to === s.head?.id || stageOf(to) < stageOf(from) ? 'a' : 'c');
 
   /* Real changes only: an employee's chip flashes, a pulse runs where its work went, and the line below says what happened. */
@@ -304,6 +304,23 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
     timers.current.add(x);
   }, []);
 
+  /* Dots that run once, each taken away when it gets there. */
+  const shoot = useCallback(
+    (fired: Shot[]) => {
+      if (!fired.length || still) return;
+      setShots(x => [...x, ...fired]);
+      for (const f of fired) later(pulseSeconds(f.pts, PULSE_SPEED) * 1000, () => setShots(x => x.filter(y => y.key !== f.key)));
+    },
+    [still, later],
+  );
+
+  /* A message between two of its agents runs once along the way it took. */
+  useStream(m => {
+    if (m.type !== 'pulse' || m.from.kind !== 'agent' || m.to.kind !== 'agent' || m.from.departmentId !== d.id) return;
+    const pts = paths.way(m.from.id, m.to.id);
+    if (pts) shoot([{ key: ++shotKey.current, pts, tone: wayTone(m.from.id, m.to.id) }]);
+  });
+
   useEffect(() => {
     const before = seen.current;
     seen.current = new Map(d.employees.map(e => [e.id, { status: e.status, taskId: e.task?.id ?? null, bounces: e.task?.bounces ?? 0 }]));
@@ -318,11 +335,9 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
       const cameBack = !!e.task && was.taskId === taskId && e.task.bounces > was.bounces;
       if (!cameBack && was.status === e.status && was.taskId === taskId) continue;
       changed.push(e.id);
+      /* A gate sent the work back: said in words, with no amber dot, which the line of work keeps for a result given back. */
       if (cameBack) {
         text = t.dept.cameBack(e.name);
-        const gate = [...before.entries()].find(([other, v]) => other !== e.id && v.taskId === taskId && v.status === 'queued')?.[0];
-        const pts = gate ? paths.back(gate, e.id) : null;
-        if (pts) fired.push({ key: ++shotKey.current, pts, tone: 'a' });
         continue;
       }
       text = [`${e.name}: ${t.dept.status[e.status]}`, taskText(e)].filter(Boolean).join(', ');
@@ -334,11 +349,8 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
       setFlashing(new Set(changed));
       later(FLASH_MS, () => setFlashing(new Set()));
     }
-    if (fired.length && !still) {
-      setShots(x => [...x, ...fired]);
-      for (const f of fired) later(pulseSeconds(f.pts, PULSE_SPEED) * 1000, () => setShots(x => x.filter(y => y.key !== f.key)));
-    }
-  }, [d.employees, paths, still, later, t]);
+    shoot(fired);
+  }, [d.employees, paths, shoot, later, t]);
 
   function open(agentId: string) {
     if (!dragged()) onOpen(agentId);
@@ -422,18 +434,15 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
             ))}
             {lines('rl')}
             {s.report && <Wire l={{ cls: 'pl', pts: s.report.pts, arrow: true }} />}
-            {channels.live.map(c => {
-              const pts = paths.way(c.from, c.to);
-              const tone = wayTone(c.from, c.to);
-              return (
-                pts && (
-                  <g key={`${c.from}>${c.to}`}>
-                    <path className={`tr live ${tone}`} d={toD(pts)} />
-                    {!still && SIGNALS.map(phase => <Pulse key={phase} pts={pts} speed={PULSE_SPEED} tone={tone} phase={phase} />)}
-                  </g>
-                )
-              );
-            })}
+            {/* One solid path from the head's card to each employee's, so the color fills the whole way at any zoom. */}
+            {s.head &&
+              s.frames.flatMap(f =>
+                f.members.map(m => {
+                  const state = stateOf(s.head!.id, m.e.id);
+                  const pts = state === 'quiet' ? null : paths.toMember(m.e.id);
+                  return pts && <path key={m.e.id} className={`tr work ${state}`} data-work={m.e.id} d={toD(pts)} />;
+                }),
+              )}
             {shots.map(x => (
               <Pulse key={x.key} pts={x.pts} speed={PULSE_SPEED} once tone={x.tone} />
             ))}

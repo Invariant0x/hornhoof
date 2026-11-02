@@ -141,6 +141,9 @@ export const en = {
     machineOffline: (owner: string) => `${owner}'s machine is offline`,
     runsOnPersonal: (owner: string, provider: string) => `Ready, on ${owner}'s ${provider} subscription`,
     waitingLimit: (at: string) => `Waiting for the limit to reset at ${at}`,
+    /* A person's card: how many decisions wait for them, or nothing when the viewer cannot see their decisions. */
+    decisionsOf: (name: string, n: number | null) =>
+      n === null ? `${name}: open the decisions` : n ? `${name}: ${n} ${plural('en', n, { one: 'decision waits', other: 'decisions wait' })}` : `${name}: no decisions wait`,
   },
   people: {
     heading: 'People',

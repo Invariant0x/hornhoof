@@ -14,6 +14,14 @@ const PROPS = { me: ME, windowOpen: false, onOpenOrchestrator: () => {} };
 const DEPUTY: Me = { ...ME, person: { ...ME.person, scopeKind: 'listed', isOwner: false } };
 
 const dept = (d: Partial<Department> & { id: string }): Department => ({ name: null, templateKey: null, roleCode: 'SAL', about: '', agents: { total: 0, working: 0 }, products: [], teams: [], people: [], employees: [], roles: [], ...d });
+/* Sales with Dan, its only person, and the counts of decisions waiting for each person by id. */
+const waiting = (counts: Record<string, number | null>) => {
+  const dan = { ...PEOPLE[2]!, id: 'p4', name: 'Dan', title: '', status: 'active' as const, access: { whole: false, departments: [{ id: 'd1', name: 'Sales' }], teams: [] } };
+  const count = <P extends { id: string }>(p: P) => ({ ...p, pendingDecisions: counts[p.id] ?? 0 });
+  return { ...ORG, people: ORG.people.map(count), departments: [dept({ id: 'd1', templateKey: 'sales', people: [count(dan)] })] };
+};
+/* A department's head, by id. */
+const head = (id: string): Employee => ({ ...DEV_ORG.departments[0]!.employees[0]!, id, name: id, status: 'idle' });
 const STATES: [string, SubView | null, string, string][] = [
   ['none', null, 'Needs a subscription to start', 'Чтобы начать, нужна подписка'],
   ['API key', SUBS[3]!, 'Ready, on the Anthropic key ending 9f3a', 'На связи, ключ Anthropic, последние символы 9f3a'],
@@ -24,7 +32,7 @@ const STATES: [string, SubView | null, string, string][] = [
 ];
 
 
-/* The dots that run once, one per message; a live way's signals keep running and are not counted. */
+/* The dots that run once, one per message; the signal to a person decisions wait for keeps running and is not counted. */
 const shots = (container: HTMLElement, tone: 'c' | 'a') => [...container.querySelectorAll(`circle.pt.${tone}`)].filter(c => c.querySelector('animateMotion')?.getAttribute('repeatCount') === '1');
 describe('orchestratorStatus', () => {
   it.each(STATES)('says where the orchestrator runs: %s', (_, sub, english, russian) => {
@@ -215,6 +223,69 @@ describe('Map', () => {
     expect(opened).toBe(2);
   });
 
+  it('puts a count on the card of each person decisions wait for, runs an amber signal from the hub to them, and opens their decisions', async () => {
+    const onOpenDecisions = vi.fn();
+    mockApi({ 'GET /api/org': [200, waiting({ p1: 1, p2: 0, p4: 2 })] });
+    const { container } = render(<MapScreen {...PROPS} onOpenDecisions={onOpenDecisions} />);
+    const dan = await screen.findByRole('button', { name: 'Dan: 2 decisions wait' });
+    expect(dan).toHaveClass('attn');
+    expect(within(dan).getByText('2')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Ivan: 1 decision waits' })).toHaveClass('attn');
+    const maria = screen.getByRole('button', { name: 'Maria: no decisions wait' });
+    expect(maria).not.toHaveClass('attn');
+    expect(maria.querySelector('.chip-count')).toBeNull();
+    /* One signal per person, each from the hub's edge down to the bottom of their card, with a dot running that way. */
+    const signals = [...container.querySelectorAll('.wires path.ask')];
+    expect(signals.map(s => s.getAttribute('data-ask'))).toEqual(['p1', 'p4']);
+    for (const s of signals) {
+      const d = s.getAttribute('d')!;
+      expect(d.startsWith('M 600 300 ')).toBe(true);
+      const runs = [...container.querySelectorAll('circle.pt.a animateMotion')].filter(m => m.getAttribute('path') === d);
+      expect(runs.map(m => m.getAttribute('repeatCount'))).toEqual(['indefinite']);
+      expect(runs[0]!.getAttribute('keyPoints')).toBeNull();
+    }
+    expect(container.querySelector('.hub')).toHaveClass('attn');
+    fireEvent.click(dan);
+    expect(onOpenDecisions).toHaveBeenCalledWith('p4');
+    fireEvent.click(maria);
+    expect(onOpenDecisions).toHaveBeenLastCalledWith('p2');
+  });
+
+  it('gives a person with one department a card on the map too, once, and keeps the count when the map is fetched again', async () => {
+    const stream = fakeStream();
+    let counts: Record<string, number> = { p1: 0, p2: 0, p4: 1 };
+    mockApi({ 'GET /api/org': () => [200, waiting(counts)] });
+    const { container } = render(<MapScreen {...PROPS} />);
+    expect(await screen.findByRole('button', { name: 'Dan: 1 decision waits' })).toBeInTheDocument();
+    expect([...container.querySelectorAll('.chips li b')].map(b => b.textContent)).toEqual(['Ivan', 'Maria', 'Dan']);
+    /* The last decision was answered: the count, the blinking and the signals go out. */
+    counts = { p1: 0, p2: 0, p4: 0 };
+    stream.send({ type: 'requests' });
+    expect(await screen.findByRole('button', { name: 'Dan: no decisions wait' })).not.toHaveClass('attn');
+    expect(container.querySelectorAll('.chip-count, .wires path.ask, .attn')).toHaveLength(0);
+  });
+
+  it('keeps the signal and the blinking calm and still for a person who asks for less motion', async () => {
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: query.includes('reduce'), addEventListener() {}, removeEventListener() {} }));
+    mockApi({ 'GET /api/org': [200, waiting({ p1: 0, p2: 0, p4: 3 })] });
+    const { container } = render(<MapScreen {...PROPS} />);
+    expect(await screen.findByRole('button', { name: 'Dan: 3 decisions wait' })).toHaveClass('attn');
+    expect(container.querySelectorAll('.wires path.ask')).toHaveLength(1);
+    expect(container.querySelectorAll('animateMotion')).toHaveLength(0);
+  });
+
+  it("lets a department's person open their decisions, but not the orchestrator, and shows no count they cannot see", async () => {
+    const onOpenDecisions = vi.fn();
+    const org = waiting({ p1: 1, p4: 1 });
+    mockApi({ 'GET /api/org': [200, { ...org, people: org.people.map(p => (p.id === 'p2' ? { ...p, pendingDecisions: null } : p)) }] });
+    const { container } = render(<MapScreen {...PROPS} me={DEPUTY} onOpenDecisions={onOpenDecisions} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Dan: 1 decision waits' }));
+    expect(onOpenDecisions).toHaveBeenCalledWith('p4');
+    expect(screen.getByRole('button', { name: 'Maria: open the decisions' }).querySelector('.chip-count')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Open the orchestrator' })).not.toBeInTheDocument();
+    expect(container.querySelector('.hub')).toHaveClass('attn');
+  });
+
   it('gives a department-scope person nothing to open', async () => {
     mockApi({ 'GET /api/org': [200, ORG] });
     render(<MapScreen {...PROPS} me={DEPUTY} />);
@@ -261,58 +332,66 @@ describe('Map', () => {
     }
   });
 
-  it('keeps a way running for ten minutes after its last message, then lets it go quiet', async () => {
+  it("leaves no way running after a message: the dot runs once, and the department's line stays as the server says", async () => {
     const stream = fakeStream();
     mockApi({ 'GET /api/org': [200, { ...ORG, departments: [dept({ id: 'd1', templateKey: 'sales' })] }] });
     const { container } = render(<MapScreen {...PROPS} />);
     await screen.findByText('Sales');
-    const live = () => container.querySelectorAll('path.live');
     vi.useFakeTimers();
     try {
       stream.send({ type: 'pulse', from: { kind: 'orchestrator' }, to: { kind: 'department', id: 'd1' } });
-      expect(live()).toHaveLength(1);
-      expect(live()[0]).toHaveClass('c');
-      act(() => vi.advanceTimersByTime(9 * 60_000));
-      expect(live()).toHaveLength(1);
-      /* Another message keeps it going ten minutes from then. */
-      stream.send({ type: 'pulse', from: { kind: 'orchestrator' }, to: { kind: 'department', id: 'd1' } });
-      act(() => vi.advanceTimersByTime(9 * 60_000));
-      expect(live()).toHaveLength(1);
-      act(() => vi.advanceTimersByTime(2 * 60_000));
-      expect(live()).toHaveLength(0);
-      /* Agents inside a department run on its card, not on the map. */
-      stream.send({ type: 'pulse', from: { kind: 'agent', id: 'a1', departmentId: 'd1' }, to: { kind: 'agent', id: 'a2', departmentId: 'd1' } });
-      expect(live()).toHaveLength(0);
+      expect(shots(container, 'c')).toHaveLength(1);
+      act(() => vi.advanceTimersByTime(10_000));
+      expect(container.querySelectorAll('circle.pt')).toHaveLength(0);
+      expect(container.querySelectorAll('.wires path.live, .wires path.work')).toHaveLength(0);
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it('shows the ways a message went in the last ten minutes when the map opens', async () => {
-    const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
-    const live = [
-      { from: { kind: 'department', id: 'd1' }, to: { kind: 'orchestrator' }, at: ago(4) },
-      { from: { kind: 'orchestrator' }, to: { kind: 'department', id: 'd1' }, at: ago(11) },
-    ];
-    mockApi({ 'GET /api/org': [200, { ...ORG, live, departments: [dept({ id: 'd1', templateKey: 'sales' })] }] });
+  it("draws the line to a department blue while its head works on the orchestrator's task, and none to a quiet one", async () => {
+    const org = {
+      ...ORG,
+      serverNow: new Date().toISOString(),
+      workLines: [
+        { upstreamAgentId: 'a1', downstreamAgentId: 'h1', working: true, workEpoch: 1, returnedEpoch: null, returnedAt: null },
+        { upstreamAgentId: 'a1', downstreamAgentId: 'h2', working: false, workEpoch: 1, returnedEpoch: null, returnedAt: null },
+      ],
+      departments: [dept({ id: 'd1', templateKey: 'sales', employees: [head('h1')] }), dept({ id: 'd2', templateKey: 'design', employees: [head('h2')] })],
+    };
+    mockApi({ 'GET /api/org': [200, org] });
     const { container } = render(<MapScreen {...PROPS} />);
     await screen.findByText('Sales');
-    /* The ways come in a moment after the card. */
-    await vi.waitFor(() => expect(container.querySelectorAll('path.live')).toHaveLength(1));
-    const way = container.querySelector('path.live')!;
-    expect(way).toHaveClass('a');
-    /* Signals keep running along it while it is live. */
-    const signals = [...container.querySelectorAll('circle.pt animateMotion')].filter(m => m.getAttribute('path') === way.getAttribute('d'));
-    expect(signals.length).toBeGreaterThan(0);
-    expect(signals.every(m => m.getAttribute('repeatCount') === 'indefinite')).toBe(true);
+    const work = container.querySelector('.wires path.work[data-work="d1"]');
+    expect(work).toHaveClass('blue');
+    /* The whole trace, from the hub to the card. */
+    expect(work!.getAttribute('d')).toBe(container.querySelector('.wires [data-wire="d1"]')!.getAttribute('d'));
+    expect(container.querySelector('.wires path.work[data-work="d2"]')).toBeNull();
   });
 
-  it('keeps a way on past ten minutes while the server holds it for work that goes on', async () => {
-    const live = [{ from: { kind: 'orchestrator' }, to: { kind: 'department', id: 'd1' }, at: new Date(Date.now() - 25 * 60_000).toISOString(), held: true }];
-    mockApi({ 'GET /api/org': [200, { ...ORG, live, departments: [dept({ id: 'd1', templateKey: 'sales' })] }] });
+  it('turns the line yellow over its whole length when the head gave a result back, for what is left of five minutes', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
+    const now = Date.now();
+    /* The result came back two minutes before the page opened. */
+    const org = {
+      ...ORG,
+      serverNow: new Date(now).toISOString(),
+      workLines: [{ upstreamAgentId: 'a1', downstreamAgentId: 'h1', working: false, workEpoch: 2, returnedEpoch: 2, returnedAt: new Date(now - 2 * 60_000).toISOString() }],
+      departments: [dept({ id: 'd1', templateKey: 'sales', employees: [head('h1')] })],
+    };
+    mockApi({ 'GET /api/org': [200, org] });
     const { container } = render(<MapScreen {...PROPS} />);
     await screen.findByText('Sales');
-    await vi.waitFor(() => expect(container.querySelectorAll('path.live')).toHaveLength(1));
+    const work = () => container.querySelector('.wires path.work[data-work="d1"]');
+    expect(work()).toHaveClass('yellow');
+    expect(work()!.getAttribute('d')).toBe(container.querySelector('.wires [data-wire="d1"]')!.getAttribute('d'));
+    await act(() => vi.advanceTimersByTimeAsync(2.5 * 60_000));
+    expect(work()).toHaveClass('yellow');
+    await act(() => vi.advanceTimersByTimeAsync(30_000));
+    expect(work()).toBeNull();
   });
 
   it('runs work back to the hub in amber, and flashes a card where work leaves or lands', async () => {
