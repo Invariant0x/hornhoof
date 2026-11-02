@@ -125,6 +125,7 @@ More examples, from a cybersecurity company to several companies on one computer
 - It runs on your machines. There is no Hornhoof cloud, no account with us, and no Hornhoof server that holds your company.
 - Its database sits only on machines of the CEO and of people who see the whole company. Backups are encrypted, so only those machines and your recovery file open them.
 - Every agent works in a locked box: a Docker container with no folder of your computer in it, where the agent runs as a user of its own and cannot read the machine's keys.
+- Root on a machine opens only when that machine's owner allows it, for a day at most. Nobody else can allow it, the CEO included.
 - A plan's sign-in opens only on its owner's machines. Keys and tokens show as `[hidden]` in every terminal and every output.
 - Stored keys are encrypted, passwords are hashed, and each person sees only the departments they are given.
 - The hornhoof.org link is optional. It passes traffic to your company through a tunnel your own server opens, and keeps no copy of it.
