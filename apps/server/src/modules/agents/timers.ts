@@ -4,9 +4,10 @@ import type { Ctx } from '../../app.js';
 import { agents, jobs, tasks } from '../../db/schema.js';
 import { loggable } from '../../errors.js';
 import { appendEvent } from '../events/store.js';
-import { agentState, insertTurn, liveSubscription, onAgent, pump, STOPPED_ON_PURPOSE } from '../conversation/queue.js';
+import { agentState, insertTurn, liveSubscription, onAgent, pump, pumpWaiting, STOPPED_ON_PURPOSE } from '../conversation/queue.js';
 import { dropOldFiles } from '../tasks/attachments.js';
 import { wakeLeftBehind } from '../tasks/wake.js';
+import { moveLeases } from '../subscriptions/lease.js';
 import { checkTestTimes } from '../testruns/runs.js';
 import type { AgentRow } from './find.js';
 
@@ -89,23 +90,39 @@ export async function timerTick(ctx: Ctx, now = new Date(), report: (err: unknow
   return started;
 }
 
-/* Looks for due rounds every minute while the server runs. */
+/* A turn whose send was lost, in a crash or a missed signal, waits for nothing: one sweep at a time sends it. */
+const sending = new WeakSet<Ctx>();
+async function sendWaiting(ctx: Ctx): Promise<void> {
+  if (sending.has(ctx)) return;
+  sending.add(ctx);
+  try {
+    await pumpWaiting(ctx);
+  } finally {
+    sending.delete(ctx);
+  }
+}
+
+/* What Hornhoof does every minute: due rounds, turns that task moves kept and nobody queued, turns left waiting though
+   their agent is free, files of turns closed a month ago, test run times and Codex plans to move. */
+export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) => (err: unknown) => void): Promise<void> {
+  await Promise.all([
+    timerTick(ctx, now, failed('timer round failed')).catch(failed('timer tick failed')),
+    wakeLeftBehind(ctx).catch(failed('queueing left-behind turns failed')),
+    sendWaiting(ctx).catch(failed('sending waiting turns failed')),
+    dropOldFiles(ctx.db, now).catch(failed('removing the files of old turns failed')),
+    checkTestTimes(ctx).catch(failed('checking test run times failed')),
+    moveLeases(ctx, now).catch(failed('moving Codex plans to another machine failed')),
+  ]);
+}
+
+/* Does the minute round while the server runs; left-behind turns and old files are looked at as it starts too. */
 export function startTimers(app: FastifyInstance, ctx: Ctx): void {
   const failed = (what: string) => (err: unknown) => app.log.error({ error: loggable(err) }, what);
-  /* Turns that task moves kept and nobody queued go out too, the first time as the server starts, and the files of turns
-     closed a month ago go. */
-  const leftBehind = () => void wakeLeftBehind(ctx).catch(failed('queueing left-behind turns failed'));
-  const oldFiles = () => void dropOldFiles(ctx.db, new Date()).catch(failed('removing the files of old turns failed'));
   app.addHook('onReady', async () => {
-    leftBehind();
-    oldFiles();
+    void wakeLeftBehind(ctx).catch(failed('queueing left-behind turns failed'));
+    void dropOldFiles(ctx.db, new Date()).catch(failed('removing the files of old turns failed'));
   });
-  const timer = setInterval(() => {
-    void timerTick(ctx, new Date(), failed('timer round failed')).catch(failed('timer tick failed'));
-    leftBehind();
-    oldFiles();
-    void checkTestTimes(ctx).catch(failed('checking test run times failed'));
-  }, TICK_MS);
+  const timer = setInterval(() => void minuteRound(ctx, new Date(), failed), TICK_MS);
   timer.unref();
   app.addHook('onClose', async () => clearInterval(timer));
 }

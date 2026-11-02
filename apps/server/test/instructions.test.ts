@@ -116,6 +116,7 @@ describe('renderInstructions', () => {
     expect(member).toContain('A task your head gave you is already approved');
     expect(member).toContain('never by waiting for an answer in your terminal');
     expect(member).toContain('Use it only when your task asks for a design');
+    expect(member).toContain('A small task needs no written plan: test, code, check, submit. writing-plans and executing-plans are for a new or large feature only.');
     const head = renderInstructions(T, agent({ kind: 'head' }), PLACE).parts[0]!.text;
     expect(head).toContain('is whoever gave you the task: the orchestrator, or the person who wrote to you');
     expect(head).toContain('A task the orchestrator gave you is already approved');

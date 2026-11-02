@@ -1,6 +1,7 @@
-import { readdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AgentEvent, ModelOption } from '@hornhoof/protocol';
+import { CRED_FILES, credentialSecrets } from '../credentials.js';
 import type { JobUser } from '../isolation.js';
 import type { ProviderAdapter, RunInput, RunResult } from '../runner.js';
 import { withProgramExit } from '../program-exit.js';
@@ -102,8 +103,9 @@ export function kimiAdapter({ home, tools, bin = join(tools, 'bin', 'kimi'), use
       await installPackage(tools, '@moonshot-ai/kimi-code');
     },
 
+    /* Signed in with /login, or with a membership key this node was given. */
     async loggedIn() {
-      return credentials().length > 0;
+      return credentials().length > 0 || existsSync(join(home, CRED_FILES.kimi_key));
     },
 
     async models() {
@@ -163,7 +165,7 @@ export function kimiAdapter({ home, tools, bin = join(tools, 'bin', 'kimi'), use
     },
 
     async secrets() {
-      return credentials().flatMap(tokensIn);
+      return [...credentials().flatMap(tokensIn), ...credentialSecrets(home)];
     },
   };
 }

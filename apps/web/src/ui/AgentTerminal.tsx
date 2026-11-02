@@ -33,7 +33,8 @@ const RETRY_MAX_MS = 10_000;
 const NO_TERMINAL = 4404;
 const NO_ACCESS = 4403;
 
-type Props = { agentId: string; program: string; onGone(): void };
+/* path: the view's address on the server, such as /api/agents/<id>/terminal; the terminal's size goes after it. */
+type Props = { path: string; program: string; onGone(): void };
 type Size = { cols: number; rows: number };
 type Frame = { type: string; data?: string; write?: boolean; running?: boolean };
 type Send = (m: unknown) => void;
@@ -74,16 +75,16 @@ function screenCame(view: View, data: string) {
   confirmSize(view.term, opened, view.send);
 }
 
-function viewUrl(agentId: string, size: Size) {
+function viewUrl(path: string, size: Size) {
   const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
-  return `${scheme}://${location.host}/api/agents/${agentId}/terminal?cols=${size.cols}&rows=${size.rows}`;
+  return `${scheme}://${location.host}${path}${path.includes('?') ? '&' : '?'}cols=${size.cols}&rows=${size.rows}`;
 }
 
 /* The node cannot show a view, or the person may no longer reach the agent: trying again changes nothing. */
 const final = (code: number) => code === NO_TERMINAL || code === NO_ACCESS;
 
 /* The view of the session over a socket, opened again after a machine went away for a moment, until it ends. */
-function connectView(term: Terminal, agentId: string, setUp: (up: boolean) => void, gone: () => void) {
+function connectView(term: Terminal, path: string, setUp: (up: boolean) => void, gone: () => void) {
   let socket: WebSocket | null = null;
   let ended = false;
   let retry: ReturnType<typeof setTimeout> | null = null;
@@ -91,7 +92,7 @@ function connectView(term: Terminal, agentId: string, setUp: (up: boolean) => vo
   const send: Send = m => socket?.readyState === 1 && socket.send(JSON.stringify(m));
   const connect = () => {
     const view: View = { term, send, setUp, asked: { cols: term.cols, rows: term.rows }, told: false, unconfirmed: null, ready: () => (tries = 0) };
-    const ws = new WebSocket(viewUrl(agentId, view.asked));
+    const ws = new WebSocket(viewUrl(path, view.asked));
     socket = ws;
     ws.onmessage = e => received(view, JSON.parse(String(e.data)) as Frame);
     ws.onclose = e => {
@@ -176,8 +177,8 @@ function disposeLater(term: Terminal) {
   requestAnimationFrame(() => setTimeout(() => term.dispose()));
 }
 
-/* An agent's live terminal: its session on the node, as it is, with the person's keys going back to it. */
-export function AgentTerminal({ agentId, program, onGone }: Props) {
+/* A live terminal: an agent's session on the node, or a plan's sign-in, as it is, with the person's keys going back to it. */
+export function AgentTerminal({ path, program, onGone }: Props) {
   const t = useT();
   const box = useRef<HTMLDivElement>(null);
   /* Until the view is open and the program is up, a loader hides what the session shows meanwhile. */
@@ -191,7 +192,7 @@ export function AgentTerminal({ agentId, program, onGone }: Props) {
     term.loadAddon(fit);
     term.open(box.current!);
     fit.fit();
-    const view = connectView(term, agentId, setUp, () => gone.current());
+    const view = connectView(term, path, setUp, () => gone.current());
     forward(term, view.send);
     const unfit = keepFitted(term, fit, box.current!);
     term.focus();
@@ -200,7 +201,7 @@ export function AgentTerminal({ agentId, program, onGone }: Props) {
       unfit();
       disposeLater(term);
     };
-  }, [agentId]);
+  }, [path]);
 
   return (
     <div className="t-term">

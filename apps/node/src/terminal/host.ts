@@ -16,7 +16,7 @@ import type { ProgramOutput } from '../program-exit.js';
 import { Bridge } from './bridge.js';
 import { fromAgent } from './peer.js';
 import { StreamMask } from './mask.js';
-import { acceptClaudeDialogs, agyLog, claudeTranscript, findKimiWire, findRollout, prepareAgy, prepareKimi, type TermProgram } from './programs.js';
+import { acceptClaudeDialogs, agyLog, claudeTranscript, findKimiWire, findRollout, prepareAgy, prepareKimi, rolloutFiles, type TermProgram } from './programs.js';
 import { claudeStatusContext, claudeStatusLimits, codexRollout, kimiWire, LineTail, type WireNews } from './transcripts.js';
 import { envFile, type Tmux } from './tmux.js';
 
@@ -24,12 +24,20 @@ import { envFile, type Tmux } from './tmux.js';
 export type TermJob = { key: string; program: TermProgram; bin: string; home: string; signedOut: RegExp; input: RunInput };
 
 type Msg<T extends ServerMessage['type']> = Extract<ServerMessage, { type: T }>;
-type Deferred<T> = { promise: Promise<T>; resolve(v: T): void };
+type Deferred<T> = { promise: Promise<T>; resolve(v: T): void; settled: boolean };
 
 function deferred<T>(): Deferred<T> {
   let resolve!: (v: T) => void;
   const promise = new Promise<T>(r => (resolve = r));
-  return { promise, resolve };
+  const d: Deferred<T> = {
+    promise,
+    resolve: v => {
+      d.settled = true;
+      resolve(v);
+    },
+    settled: false,
+  };
+  return d;
 }
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
@@ -68,6 +76,8 @@ type Agent = {
   /* Sessions a person cleared in the running program: a turn asking for one goes on in the session that replaced it. */
   cleared: Set<string>;
   tail: LineTail | null;
+  /* The Codex session logs there were when the program started a new session: its own log is none of them. */
+  oldLogs: Set<string> | null;
   startedAt: number;
   started: Deferred<void> | null;
   ended: Deferred<string> | null;
@@ -265,7 +275,7 @@ export class TerminalHost {
   private agent(key: string): Agent {
     let a = this.agents.get(key);
     if (!a) {
-      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, viewers: 0, up: false, watch: null, saying: Promise.resolve(), queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null };
+      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, viewers: 0, up: false, watch: null, saying: Promise.resolve(), queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null };
       this.agents.set(key, a);
     }
     return a;
@@ -310,7 +320,10 @@ export class TerminalHost {
       await this.fs.write(join(input.workDir, 'AGENTS.md'), rules + '\n');
     }
     const spec = program.launch({ bin: job.bin, home: job.home, workDir: input.workDir, sessionId: input.sessionId, model: input.model, effort: input.effort, compactWindow: input.compactWindow, instructionsFile, urls, plugins: this.plugins });
-    const hash = hashOf({ kind: program.kind, bin: job.bin, model: input.model, effort: input.effort ?? null, compactWindow: input.compactWindow ?? null, instructions: input.instructions, env: lasting(input.env) });
+    /* A plan signed in to another account in Hornhoof reaches a running Claude Code only when it starts again, which it
+       does between turns, in the same session. */
+    const signedAs = spec.env.CLAUDE_CODE_OAUTH_TOKEN ? hashOf(spec.env.CLAUDE_CODE_OAUTH_TOKEN) : null;
+    const hash = hashOf({ kind: program.kind, bin: job.bin, model: input.model, effort: input.effort ?? null, compactWindow: input.compactWindow ?? null, instructions: input.instructions, env: lasting(input.env), signedAs });
     /* A new session asked for goes on in a program started for a person that nothing was said in yet. */
     const sameSession = input.sessionId === null ? a.fresh : input.sessionId === a.sessionId || a.cleared.has(input.sessionId);
     const goesOn = sameSession && a.hash === hash && (await this.opts.tmux.alive(a.name));
@@ -342,7 +355,7 @@ export class TerminalHost {
         /* A person's first message into a new Kimi session, or into Antigravity, reaches its tools a moment before Hornhoof
            opens their turn. */
         this.bridge.waitForTurns(job.key, program.kind === 'kimi' || program.kind === 'antigravity' ? this.openMs + 2000 : 0);
-        Object.assign(a, { program, home: job.home, workDir: input.workDir, hash, sessionId: spec.sessionId, cleared: new Set(), startedAt: Date.now(), started: deferred<void>(), fresh: false, keep: namesLater ? (input.context ?? null) : null, contextSize: program.kind === 'kimi' ? kimiWindow(job.home, input.model) : null });
+        Object.assign(a, { program, home: job.home, workDir: input.workDir, hash, sessionId: spec.sessionId, cleared: new Set(), oldLogs: program.kind === 'codex' && !spec.sessionId ? rolloutFiles(job.home) : null, startedAt: Date.now(), started: deferred<void>(), fresh: false, keep: namesLater ? (input.context ?? null) : null, contextSize: program.kind === 'kimi' ? kimiWindow(job.home, input.model) : null });
         if (program.kind === 'claude' && !input.sessionId && input.context && spec.sessionId) await keepContext(this.fs, input.workDir, spec.sessionId, input.context);
         a.tail = this.tailFor(a);
         const env = { ...lasting(input.env), ...spec.env };
@@ -496,6 +509,11 @@ export class TerminalHost {
   }
 
   /* A stop in the log counts for the running turn once its prompt went in: one logged before is the last turn's. */
+  /* Hornhoof's turn ended in the program, and the host only reads the rest of its log. */
+  private overIn(a: Agent): boolean {
+    return Boolean(a.turn && !a.turn.typed && !a.turn.starting && a.ended?.settled);
+  }
+
   private stoppable(a: Agent): boolean {
     return Boolean(a.turn && (a.turn.typed || a.busy));
   }
@@ -562,7 +580,7 @@ export class TerminalHost {
   /* What the program wrote to its log since last time: events for the turn, Codex's limits, session and turn end. */
   private drain(a: Agent): void {
     if (!a.tail && a.program?.kind === 'codex') {
-      const found = findRollout(a.home, a.workDir, a.startedAt - 2000);
+      const found = findRollout(a.home, a.workDir, a.startedAt - 2000, null, a.oldLogs ?? undefined);
       if (found) {
         a.sessionId = found.sessionId;
         a.tail = new LineTail(found.file);
@@ -595,7 +613,7 @@ export class TerminalHost {
         continue;
       }
       const news = codexRollout(data);
-      if (news.typed !== undefined && (!a.turn || a.turn.starting)) void this.openTyped(a, news.typed, true);
+      if (news.typed !== undefined && (!a.turn || a.turn.starting || this.overIn(a))) void this.openTyped(a, news.typed, true);
       for (const e of news.events) this.emit(a, e);
       if (news.limits) a.limits = news.limits;
       if (news.context !== undefined) this.context(a, news.context);
@@ -695,8 +713,9 @@ export class TerminalHost {
         a.took = true;
         await a.settling;
         a.busy = true;
-        /* Kimi Code hands the prompt as parts of a message. */
-        if (!a.turn || a.turn.starting) await this.openTyped(a, typeof data.prompt === 'string' ? data.prompt : contentText(data.prompt));
+        /* Kimi Code hands the prompt as parts of a message. A prompt after Hornhoof's turn ended in the program is a turn
+           of its own, though the host still reads the end of that one's log. */
+        if (!a.turn || a.turn.starting || this.overIn(a)) await this.openTyped(a, typeof data.prompt === 'string' ? data.prompt : contentText(data.prompt));
         return;
       case 'stop': {
         this.drain(a);
@@ -819,7 +838,8 @@ export class TerminalHost {
     if (a.program?.kind === 'antigravity') return false;
     /* Hornhoof's own prompt goes in first, or the words would join it in the program's input. */
     for (const end = Date.now() + ENTER_TRIES * this.enterWaitMs; a.turn && !a.turn.typed && !a.took && Date.now() < end; ) await sleep(this.pollMs);
-    if (!a.turn || a.turn.starting || (!a.turn.typed && !a.took) || !(await this.opts.tmux.alive(a.name))) return false;
+    /* A turn that ended in the program takes no words: typed then, they would start a turn nobody waits for. */
+    if (!a.turn || a.turn.starting || (!a.turn.typed && !a.took) || !a.busy || this.overIn(a) || !(await this.opts.tmux.alive(a.name))) return false;
     await this.opts.tmux.paste(a.name, text);
     await sleep(Math.min(3000, 300 + text.length / 20));
     await this.opts.tmux.keys(a.name, 'Enter');
@@ -1033,7 +1053,7 @@ export class TerminalHost {
 }
 
 /* The process that started a given one: from /proc on Linux, from ps elsewhere. */
-async function parentOf(pid: number): Promise<number | null> {
+export async function parentOf(pid: number): Promise<number | null> {
   try {
     const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
     return Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[1]);

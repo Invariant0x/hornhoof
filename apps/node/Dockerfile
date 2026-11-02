@@ -105,6 +105,9 @@ COPY apps/node/hh-fs.cjs /app/apps/node/hh-fs.cjs
 # The terminal of an agent on Antigravity CLI, which runs agy's print mode for each message.
 COPY apps/node/hh-agy.cjs /app/apps/node/hh-agy.cjs
 RUN mkdir -p /data && chown node:node /data
+# Agent programs run their commands in login shells, where Debian's /etc/profile sets PATH again: the tools folder goes
+# back in front, so an agent finds codex, claude, kimi and agy by name.
+RUN printf '%s\n' 'case ":$PATH:" in *:/data/tools/bin:*) ;; *) PATH=/data/tools/bin:$PATH ;; esac' 'export PATH' > /etc/profile.d/hornhoof-tools.sh
 # Agent programs are installed into /data/tools at first use and keep their sign-in in /data/home.
 # Set last, so nothing the build writes lands in /data.
 ENV PATH=/data/tools/bin:$PATH HOME=/data/home

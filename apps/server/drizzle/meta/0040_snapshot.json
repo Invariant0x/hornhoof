@@ -1,6 +1,6 @@
 {
-  "id": "1c815d75-c75a-407d-9660-03d97a4983ce",
-  "prevId": "b5d38a62-febc-47a8-ae6d-c23d82a80ae8",
+  "id": "4c62bd18-7a68-482c-b169-113cc27d53e7",
+  "prevId": "595254f5-a6ec-479f-ae0c-6105e124c8c7",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1974,6 +1974,18 @@
           "primaryKey": false,
           "notNull": false
         },
+        "public_key": {
+          "name": "public_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "account": {
+          "name": "account",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -2565,6 +2577,134 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.plan_credentials": {
+      "name": "plan_credentials",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "company_id": {
+          "name": "company_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "subscription_id": {
+          "name": "subscription_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "node_id": {
+          "name": "node_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sealed": {
+          "name": "sealed",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "plan_credentials_subscription_id": {
+          "name": "plan_credentials_subscription_id",
+          "columns": [
+            {
+              "expression": "subscription_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "plan_credentials_company_id_companies_id_fk": {
+          "name": "plan_credentials_company_id_companies_id_fk",
+          "tableFrom": "plan_credentials",
+          "tableTo": "companies",
+          "columnsFrom": [
+            "company_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "plan_credentials_subscription_id_subscriptions_id_fk": {
+          "name": "plan_credentials_subscription_id_subscriptions_id_fk",
+          "tableFrom": "plan_credentials",
+          "tableTo": "subscriptions",
+          "columnsFrom": [
+            "subscription_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "plan_credentials_node_id_nodes_id_fk": {
+          "name": "plan_credentials_node_id_nodes_id_fk",
+          "tableFrom": "plan_credentials",
+          "tableTo": "nodes",
+          "columnsFrom": [
+            "node_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "plan_credentials_node_kind": {
+          "name": "plan_credentials_node_kind",
+          "nullsNotDistinct": false,
+          "columns": [
+            "node_id",
+            "kind"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.proposals": {
       "name": "proposals",
       "schema": "",
@@ -3135,6 +3275,19 @@
           "primaryKey": false,
           "notNull": false
         },
+        "cred_version": {
+          "name": "cred_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "lease_node_id": {
+          "name": "lease_node_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "removed_at": {
           "name": "removed_at",
           "type": "timestamp with time zone",
@@ -3186,6 +3339,19 @@
           "tableTo": "people",
           "columnsFrom": [
             "owner_person_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "subscriptions_lease_node_id_nodes_id_fk": {
+          "name": "subscriptions_lease_node_id_nodes_id_fk",
+          "tableFrom": "subscriptions",
+          "tableTo": "nodes",
+          "columnsFrom": [
+            "lease_node_id"
           ],
           "columnsTo": [
             "id"
@@ -3866,12 +4032,6 @@
         },
         "machine_name": {
           "name": "machine_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "computer": {
-          "name": "computer",
           "type": "text",
           "primaryKey": false,
           "notNull": false

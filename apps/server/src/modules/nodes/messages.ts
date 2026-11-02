@@ -2,7 +2,7 @@ import { lastBytes, type NodeMessage } from '@hornhoof/protocol';
 import { and, eq, inArray, isNull, notInArray, or, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { agents, jobs, nodes, subscriptions } from '../../db/schema.js';
+import { agents, jobs, nodes, planCredentials, subscriptions } from '../../db/schema.js';
 import { said } from '../conversation/live.js';
 import { nodeOfAgent, pumpWaiting, refusedLimits, startProgram } from '../conversation/queue.js';
 import { workStarts } from '../org/map-state.js';
@@ -11,6 +11,7 @@ import { afterJob, typedTurn } from '../tasks/wake.js';
 import { appendEvent, publishWorking } from '../events/store.js';
 import { partDone, partStarted, pumpTests, testsHello } from '../testruns/runs.js';
 import { sameNode, type NodeIdentity } from './hub.js';
+import { deliver, pushCredentials, signedIn, storeEnvelopes } from '../subscriptions/credentials.js';
 import { liveNode, settlePlans } from './nodes.js';
 
 const OPEN_JOBS = ['queued', 'running'] as const;
@@ -75,7 +76,18 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
         }
         /* A machine disconnected in Hornhoof has no key any more; what its socket still says changes nothing. */
         if (!row.node.keyHash) return;
-        await db.update(nodes).set({ version: msg.version, lastSeenAt: now, status: msg.loggedIn ? 'ready' : 'needs_login' }).where(and(eq(nodes.id, id.nodeId), liveNode));
+        /* A node set up again has a new key: what was sealed to its old one is of no use, and gets sealed to the new one. */
+        if (msg.publicKey && row.node.publicKey && msg.publicKey !== row.node.publicKey) await db.delete(planCredentials).where(eq(planCredentials.nodeId, id.nodeId));
+        await db
+          .update(nodes)
+          .set({
+            version: msg.version,
+            lastSeenAt: now,
+            status: msg.loggedIn ? 'ready' : 'needs_login',
+            ...(msg.publicKey ? { publicKey: msg.publicKey } : {}),
+            ...(msg.account !== undefined ? { account: msg.account } : {}),
+          })
+          .where(and(eq(nodes.id, id.nodeId), liveNode));
         const plan = row.node.subscriptionId;
         if (plan && msg.models) await db.update(subscriptions).set({ models: msg.models }).where(eq(subscriptions.id, plan));
         await settlePlans(db, [plan]);
@@ -90,12 +102,18 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
         const keep = new Set(open.map(j => j.id));
         for (const jobId of msg.running) if (!keep.has(jobId)) ctx.hub.send(id, { type: 'job.cancel', jobId });
       }
+      /* The plan's sign-in sealed to this node, or a word to a node that holds it to seal it for this one. */
+      if (id.kind === 'node') await pushCredentials(ctx, id.nodeId, msg.loggedIn);
       await pumpWaiting(ctx);
       return;
     }
     case 'status': {
       if (id.kind !== 'node') return;
-      const [node] = await db.update(nodes).set({ status: msg.loggedIn ? 'ready' : 'needs_login', lastSeenAt: now }).where(and(eq(nodes.id, id.nodeId), liveNode)).returning({ plan: nodes.subscriptionId });
+      const [node] = await db
+        .update(nodes)
+        .set({ status: msg.loggedIn ? 'ready' : 'needs_login', lastSeenAt: now, ...(msg.account !== undefined ? { account: msg.account } : {}) })
+        .where(and(eq(nodes.id, id.nodeId), liveNode))
+        .returning({ plan: nodes.subscriptionId });
       if (!node?.plan) return;
       /* A node that started again knows no limits until its program says them; the last ones stay until then. The plan's
          limits are the same on each of its machines, so the last word counts. */
@@ -110,6 +128,18 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       if (msg.loggedIn) await pumpWaiting(ctx);
       return;
     }
+    /* A node of a plan sealed the sign-in it holds for the plan's other nodes. */
+    case 'cred.sealed': {
+      if (id.kind !== 'node') return;
+      const [node] = await db.select({ plan: nodes.subscriptionId, companyId: nodes.companyId }).from(nodes).where(and(eq(nodes.id, id.nodeId), liveNode));
+      if (!node?.plan) return;
+      const kept = await storeEnvelopes(db, { id: node.plan, companyId: node.companyId }, msg.kind, msg.version, msg.envelopes, id.nodeId);
+      deliver(ctx, msg.kind, msg.version, kept, id.nodeId);
+      return;
+    }
+    case 'login.done':
+      if (id.kind === 'node') await signedIn(ctx, id.nodeId, msg.ok, msg.error);
+      return;
     case 'load': {
       const { type: _, ...load } = msg;
       ctx.hub.report(id, load);

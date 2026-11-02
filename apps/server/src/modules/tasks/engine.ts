@@ -486,13 +486,28 @@ async function roleOn(db: Db | Tx, named: string): Promise<boolean> {
   return Boolean(on);
 }
 
+/* The role behind a gate: its role in its department, or the reviewer itself when it has none. */
+async function gateRole(db: Db | Tx, named: string): Promise<string> {
+  const [lead] = await db.select({ departmentId: agents.departmentId, roleKey: agents.roleKey }).from(agents).where(eq(agents.id, named));
+  return lead?.roleKey && lead.departmentId ? `${lead.departmentId}:${lead.roleKey}` : named;
+}
+
+/* Whether a gate before this one stands for the same role: the role's whole panel checked the work there. */
+async function checkedBefore(db: Db | Tx, task: Task, stage: number): Promise<boolean> {
+  const role = await gateRole(db, task.gates[stage - 1]!);
+  for (const named of task.gates.slice(0, stage - 1)) if ((await gateRole(db, named)) === role) return true;
+  return false;
+}
+
 /* The task reaches a gate: its whole panel checks it at once. A gate whose role has nobody switched on takes no part,
-   so the task goes on to the next one, and past the last it is done. While nobody of the role who is on can check it, it
+   nor one whose role a gate before it has, so the task goes on to the next one, and past the last it is done. While nobody of the role who is on can check it, it
    waits with whoever gave it out. findings: what each reviewer sent the work back from this gate for, in the last round;
    those reviewers check their own fixes. */
 async function atGate(db: Db | Tx, task: Task, from: number, findings = new Map<string, string>()): Promise<{ set: Partial<Task>; wakes: Wake[] }> {
   let stage = from;
-  while (task.gates[stage - 1] && !(await roleOn(db, task.gates[stage - 1]!))) stage++;
+  /* Work sent back from a gate goes back to it, to those who sent it back. */
+  const skip = async (at: number) => !(await roleOn(db, task.gates[at - 1]!)) || (!(at === from && findings.size) && (await checkedBefore(db, task, at)));
+  while (task.gates[stage - 1] && (await skip(stage))) stage++;
   if (!task.gates[stage - 1]) {
     const passed = await passedGates(db, task, doneFor(task));
     return { set: { stage: task.gates.length, ...passed.set }, wakes: passed.wakes };

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Plays Claude Code in a terminal for the host tests: tells the bridge it started, answers each line typed or pasted with
 // "echo: LINE" on the screen and in its session log, and calls the prompt and stop hooks around each answer.
-// SLOW makes an answer take 2 s, LAG writes the answer to the log only after the stop hook, as Claude Code can, HANG never
+// SLOW makes an answer take 2 s, LAG writes the answer to the log only after the stop hook, as Claude Code can (LAGLONG
+// 2.5 s after), HANG never
 // answers (as when a person stops it with Escape: no stop hook), EXIT ends the
 // program, SECRET prints the value of FAKE_SECRET, MUTE says on the screen only that it will not answer and ends the turn with
 // no answer, as Codex does when its provider refuses the work. INTERRUPT logs what Claude Code logs when a person stops a turn with
@@ -87,5 +88,5 @@ for await (const typed of createInterface({ input: process.stdin })) {
   process.stdout.write(`● ${answer}\n❯ `);
   await hook('status', { rate_limits: { five_hour: { used_percentage: 40, resets_at: 1793379000 } }, context_window: { used_percentage: 25 } });
   await hook('stop', { last_assistant_message: answer, transcript_path: log });
-  if (line.includes('LAG')) setTimeout(write, 300);
+  if (line.includes('LAG')) setTimeout(write, line.includes('LAGLONG') ? 2500 : 300);
 }

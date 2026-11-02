@@ -1,6 +1,6 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { cut, lastBytes, type AgentEvent, type JobError, type Limits, type ModelOption, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
+import { cut, lastBytes, type Account, type AgentEvent, type JobError, type Limits, type ModelOption, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
 import { agentFs, ownFs, type AgentFs } from './agent-fs.js';
 import type { JobUser } from './isolation.js';
 import { redact } from './redact.js';
@@ -51,6 +51,8 @@ export interface ProviderAdapter {
   models?(): Promise<ModelOption[]>;
   /* The plan's limits now, asked without a turn, or null when the program cannot tell at the moment. */
   limits?(): Promise<Limits | null>;
+  /* Which account and plan of its maker the program is signed in to, or null when it cannot tell. */
+  account?(): Promise<Account | null>;
   /* On the built-in node, the user a key's program runs as and its home: the folder is handed to that user first,
      and the node's own git work in it runs as that user too. */
   /* mkdir: how a node that runs as root makes an agent's folders as the agents' own user; fs: its other file work there.

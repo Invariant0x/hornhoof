@@ -264,21 +264,6 @@ export function Machines({ me }: { me: Me }) {
                         [t.machines.owner, m.owner.name],
                         [t.machines.system, `${SYSTEMS[m.os] ?? m.os}, ${m.arch}`],
                         ...items,
-                        [
-                          t.machines.plans,
-                          m.plans.length ? (
-                            <ul className="where-list" aria-label={t.machines.plansOn(m.hostname)}>
-                              {m.plans.map(p => (
-                                <li key={p.id}>
-                                  {PROVIDER_NAMES[p.provider]}
-                                  {p.status === 'needs_login' && <span className="muted">, {t.subs.waitsThere.needs_login}</span>}
-                                </li>
-                              ))}
-                            </ul>
-                          ) : (
-                            <span className="muted">{t.machines.noPlan}</span>
-                          ),
-                        ],
                         [t.machines.runningNow, <RunningNow host={m.hostname} running={running} />],
                       ]}
                     />

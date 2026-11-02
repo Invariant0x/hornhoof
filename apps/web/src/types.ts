@@ -58,7 +58,18 @@ export type SubView = {
   /* The share of each limit window, in percent, that task turns may use; null: the whole limit. */
   budget: number | null;
   isOrchestrator: boolean;
+  /* The account each signed-in machine of the plan is on; the address only for its owner and people who see the whole
+     company. tier: the one all of them say; accountsDiffer: they are on different accounts or tiers. */
+  accounts: PlanAccount[];
+  tier: string | null;
+  accountsDiffer: boolean;
+  /* The owner signed the plan in once in Hornhoof, so it runs on any of their machines. */
+  signedInOnce: boolean;
+  /* The machine a Codex plan signed in once runs on now, one at a time. */
+  leaseMachine: string | null;
 };
+
+export type PlanAccount = { nodeId: string; hostname: string; tier: string | null; email?: string | null };
 
 export type Team = { id: string; name: string; about: string; stage: number; gate: boolean };
 
@@ -222,7 +233,9 @@ export type StreamMessage =
   /* The orchestrator's request for the computer changed; only the CEO's screen hears it. */
   | { type: 'computer' }
   | { type: 'improvements' }
-  | { type: 'context'; agentId: string; used: number };
+  | { type: 'context'; agentId: string; used: number }
+  /* A plan's owner finished or gave up a sign-in on one of its machines; only the owner hears it. */
+  | { type: 'subscription.signin'; subscriptionId: string; nodeId: string; ok: boolean; error: string | null; owner: string };
 
 export type TaskStatus = 'planned' | 'open' | 'working' | 'review' | 'waiting' | 'blocked' | 'done' | 'cancelled';
 export type AgentRef = { id: string; name: string; kind: 'orchestrator' | 'head' | 'worker'; role: Lang | null };

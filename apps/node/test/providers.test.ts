@@ -251,6 +251,25 @@ describe('Claude Code', () => {
     expect(alive(grandchild)).toBe(false);
   });
 
+  it("runs with the plan's sign-in its node was given, and hides it in what the agent says", async () => {
+    const token = 'sk-ant-oat01-' + 'b'.repeat(40);
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(home, 'claude-oauth-token'), token + '\n', { mode: 0o600 });
+    process.env.FAKE_MODE = 'say_token';
+    const events: AgentEvent[] = [];
+    const msg = { type: 'job.run' as const, jobId: 'j1', subscriptionId: 's1', provider: 'claude' as const, prompt: 'hi', sessionId: null, model: null, timeoutMs: 15000, secret: null, instructions: null, toolToken: null };
+    const done = await runJob(adapter('claude'), msg, work, { onEvent: e => void events.push(e) });
+    expect(lastRun().env.CLAUDE_CODE_OAUTH_TOKEN).toBe(token);
+    expect(events).toContainEqual({ kind: 'text', text: 'my token is [hidden]' });
+    expect(JSON.stringify(done)).not.toContain(token);
+    expect(await adapter('claude').secrets()).toContain(token);
+  });
+
+  it('runs without a token when its node was given none', async () => {
+    await adapter('claude').run(input());
+    expect(lastRun().env).not.toHaveProperty('CLAUDE_CODE_OAUTH_TOKEN');
+  });
+
   it('hides the tokens of its credentials file', async () => {
     mkdirSync(home, { recursive: true });
     writeFileSync(join(home, '.credentials.json'), JSON.stringify({
@@ -608,6 +627,14 @@ describe('Kimi Code', () => {
     writeFileSync(join(home, 'credentials', 'kimi-code.json'), JSON.stringify({ access_token: 'kimi-access-0123456789abcdef', expires_in: 3600 }));
     expect(await a.loggedIn()).toBe(true);
     expect(await a.secrets()).toEqual(['kimi-access-0123456789abcdef']);
+  });
+
+  it('counts as signed in with a key its node was given, and hides the key', async () => {
+    const a = adapter('kimi');
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(home, 'kimi-key'), 'sk-kimi-0123456789abcdef\n', { mode: 0o600 });
+    expect(await a.loggedIn()).toBe(true);
+    expect(await a.secrets()).toContain('sk-kimi-0123456789abcdef');
   });
 
   it('stops at the timeout', async () => {

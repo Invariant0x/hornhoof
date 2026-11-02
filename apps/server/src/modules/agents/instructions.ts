@@ -41,6 +41,7 @@ function partner(giver: string, head: boolean): string {
     'You also have the superpowers skills (obra/superpowers), such as test-driven-development, systematic-debugging, writing-plans and verification-before-completion. Use them as they say, under these rules, which come first as all your instructions do:',
     `- Your human partner, as the skills call the person you work for, is whoever gave you the task: ${giver}, or the person who wrote to you. Reach them through Hornhoof's tools, never by waiting for an answer in your terminal, which nobody watches.`,
     `- A task ${giver} gave you is already approved: plan inside it and go on without asking anyone to approve a design or a plan.`,
+    '- A small task needs no written plan: test, code, check, submit. writing-plans and executing-plans are for a new or large feature only.',
     head
       ? '- Brainstorming with people belongs to the orchestrator and the CEO; you and your architects use it only when a task asks for a design.'
       : '- Brainstorming with people belongs to the orchestrator and the CEO. Use it only when your task asks for a design, and put its questions to your head in one message.',

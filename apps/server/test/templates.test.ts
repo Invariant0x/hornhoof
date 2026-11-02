@@ -106,7 +106,7 @@ describe('templates', () => {
         .filter(r => r.gate !== null)
         .sort((a, b) => a.gate! - b.gate!)
         .map(r => r.id);
-    expect(gates('development')).toEqual(['DEV-REV', 'DEV-TEST', 'DEV-SEC', 'DEV-RED']);
+    expect(gates('development')).toEqual(['DEV-REV', 'DEV-SEC', 'DEV-RED']);
     expect(gates('design')).toEqual(['DSN-QA']);
     expect(gates('finance')).toEqual(['FIN-AUDIT']);
     for (const r of roles) if (r.kind === 'head') expect(r.gate, r.id).toBeNull();
@@ -189,7 +189,7 @@ describe('templates', () => {
     for (const id of ['dev-engineering-rules', 'dev-review-diff', 'dev-test-gaps']) expect(templates.skills.get(id)!.body, id).toContain(changed);
     expect(templates.skills.get('dev-review-diff')!.body).toMatch(/crapper[\s\S]*dryer/);
     /* They are as objective as a failing test, so they block; the developer runs them before submitting. */
-    expect(templates.skills.get('dev-review-diff')!.body).toMatch(/0\.8 or more, is blocking, like a failing test/);
+    expect(templates.skills.get('dev-review-diff')!.body).toMatch(/0\.8 or more is blocking, like a failing test/);
     expect(templates.skills.get('dev-review-diff')!.body).toMatch(/runs them before submitting/);
     expect(templates.skills.get('dev-review-verdict')!.body).toMatch(/CRAP 10 or more[\s\S]*counts as a failing test/);
     expect(templates.skills.get('dev-test-gaps')!.body).toContain('mutator');
@@ -238,7 +238,7 @@ describe('templates', () => {
   });
 
   it('runs the whole test suite through run_tests on a free machine, in parts when its runner can split', () => {
-    const texts = { 'dev-gates': templates.skills.get('dev-gates')!.body, 'dev-ci-release': templates.skills.get('dev-ci-release')!.body, 'hh-task-flow': templates.skills.get('hh-task-flow')!.body, 'DEV-ENG': templates.roles.get('DEV-ENG')!.body };
+    const texts = { 'dev-gates': templates.skills.get('dev-gates')!.body, 'dev-ci-release': templates.skills.get('dev-ci-release')!.body };
     for (const [id, text] of Object.entries(texts)) {
       expect(text, id).toContain('run_tests');
       expect(text, id).toMatch(/free machine/);
@@ -310,6 +310,22 @@ describe('templates', () => {
     expect(verdict).not.toMatch(/Important/);
     for (const id of ['DEV-REV', 'DEV-SEC', 'DEV-TEST', 'DEV-QA', 'DEV-RED']) expect(templates.roles.get(id)!.body, id).toMatch(/blocking/);
     expect(templates.roles.get('DEV-SEC')!.body).toMatch(/access, sign-in, secrets or permissions/);
+  });
+
+  it('runs the whole test suite once per turn, by the test engineer, never on a task', () => {
+    const body = (id: string) => templates.skills.get(id)!.body;
+    const all = [...roles, ...skills].map(x => x.body).join('\n');
+    expect(all).not.toMatch(/Run the whole suite through run_tests/);
+    expect(all).not.toMatch(/changed function at CRAP 10/);
+    for (const id of ['DEV-ENG', 'DEV-REV']) expect(templates.roles.get(id)!.body, id).toMatch(/never run the project's whole test suite/);
+    expect(body('hh-task-flow')).not.toMatch(/run_tests/);
+    const test = templates.roles.get('DEV-TEST')!;
+    expect(test.gate).toBeNull();
+    expect(test.body).toMatch(/never a gate on a task/);
+    const gates = body('dev-gates');
+    expect(gates).toMatch(/to the test engineer, or to the DevOps engineer when there is none, or runs run_tests itself when there is neither, never to a developer/);
+    expect(gates).toMatch(/only what failed and the tests around it/);
+    for (const id of ['dev-review-diff', 'dev-review-verdict']) expect(body(id), id).toMatch(/old complexity/);
   });
 
   it('has Operations lead a problem: diagnosis split at once, the database only read by the head, one message back', () => {

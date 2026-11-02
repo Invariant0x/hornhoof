@@ -6,9 +6,11 @@ import type { JobUser } from '../isolation.js';
 import type { ProviderAdapter, RunInput, RunResult } from '../runner.js';
 import { withProgramExit } from '../program-exit.js';
 import { claudePlugins } from '../skills.js';
-import { claudePlanLimits } from '../terminal/programs.js';
+import { credentialSecrets } from '../credentials.js';
+import { readAccount } from '../account.js';
+import { claudePlanLimits, planToken } from '../terminal/programs.js';
 import { contentText, inputText, isoFrom, isRecord, objectLine, toolName } from './events.js';
-import { askHidden, childEnv, ensureDir, exitsCleanly, installPackage, interactiveLogin, runProgram, tokensIn, writePrivate } from './process.js';
+import { askHidden, childEnv, ensureDir, exitsCleanly, installPackage, interactiveLogin, readPrivate, runProgram, tokensIn, writePrivate } from './process.js';
 
 /* Claude Code serves three kinds of subscription: a personal plan, a company Anthropic key, and a GLM Coding Plan through Z.ai's Anthropic-compatible endpoint. */
 export type ClaudeMode = 'plan' | 'api_key' | 'glm';
@@ -78,7 +80,8 @@ export const SIGNED_OUT = /not logged in|please run \/login|invalid api key|auth
 
 export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'), secret = null, mode, user = null, plugins = claudePlugins() }: Options): ProviderAdapter {
   const keyFile = join(home, 'glm-key');
-  const glmKey = () => (existsSync(keyFile) ? readFileSync(keyFile, 'utf8').trim() : '');
+  /* The agents own the home, so the key is not read through a link they could put there. */
+  const glmKey = () => readPrivate(keyFile)?.trim() ?? '';
 
   function env(jobSecret: string | null): NodeJS.ProcessEnv {
     const extra: Record<string, string> = { CLAUDE_CONFIG_DIR: ensureDir(home) };
@@ -86,6 +89,9 @@ export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'),
     if (user) extra.HOME = home;
     if (mode === 'api_key') extra.ANTHROPIC_API_KEY = jobSecret ?? secret ?? '';
     if (mode === 'glm') Object.assign(extra, GLM_ENV, { ANTHROPIC_AUTH_TOKEN: glmKey() });
+    /* A plan signed in once on another machine: its long token, which this node was given. */
+    const token = mode === 'plan' ? planToken(home) : null;
+    if (token) extra.CLAUDE_CODE_OAUTH_TOKEN = token;
     return childEnv(tools, extra);
   }
 
@@ -102,6 +108,10 @@ export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'),
     /* A company key and a GLM plan have no Claude plan limits. */
     async limits() {
       return mode === 'plan' ? claudePlanLimits(home) : null;
+    },
+
+    async account() {
+      return mode === 'plan' ? readAccount('claude', home, env(null), bin, user) : null;
     },
 
     async loggedIn() {
@@ -187,7 +197,7 @@ export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'),
     async secrets() {
       if (mode === 'api_key') return secret ? [secret] : [];
       if (mode === 'glm') return [glmKey()].filter(Boolean);
-      return tokensIn(join(home, '.credentials.json'));
+      return [...tokensIn(join(home, '.credentials.json')), ...credentialSecrets(home)];
     },
   };
 }
