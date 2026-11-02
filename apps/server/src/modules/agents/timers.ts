@@ -7,6 +7,7 @@ import { appendEvent } from '../events/store.js';
 import { agentState, insertTurn, liveSubscription, onAgent, pump, pumpWaiting, STOPPED_ON_PURPOSE } from '../conversation/queue.js';
 import { dropOldFiles } from '../tasks/attachments.js';
 import { wakeLeftBehind } from '../tasks/wake.js';
+import { reconcile } from '../tasks/reconcile.js';
 import { moveLeases } from '../subscriptions/lease.js';
 import { checkTestTimes } from '../testruns/runs.js';
 import type { AgentRow } from './find.js';
@@ -108,6 +109,7 @@ export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) =>
   await Promise.all([
     timerTick(ctx, now, failed('timer round failed')).catch(failed('timer tick failed')),
     wakeLeftBehind(ctx).catch(failed('queueing left-behind turns failed')),
+    reconcile(ctx, now).catch(failed('recovering stalled task turns failed')),
     sendWaiting(ctx).catch(failed('sending waiting turns failed')),
     dropOldFiles(ctx.db, now).catch(failed('removing the files of old turns failed')),
     checkTestTimes(ctx).catch(failed('checking test run times failed')),

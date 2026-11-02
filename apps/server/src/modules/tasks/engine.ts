@@ -1,4 +1,4 @@
-import { and, asc, count, eq, gt, inArray, isNull, max, ne, notInArray, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gt, inArray, isNull, max, ne, notInArray, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { accessOf, canReach, type Spot } from '../../auth/access.js';
 import type { Db } from '../../db/client.js';
@@ -367,7 +367,7 @@ export function published(ctx: Pick<Ctx, 'bus'>, task: Task): void {
 }
 
 /* Whoever gave the task, when that was an agent other than the one acting. */
-const giver = (task: Task, why: WakeWhy, actorId?: string, text?: string): Wake[] =>
+export const giver = (task: Task, why: WakeWhy, actorId?: string, text?: string): Wake[] =>
   task.createdByAgentId && task.createdByAgentId !== actorId ? [{ agentId: task.createdByAgentId, taskId: task.id, why, ...(text ? { text } : {}) }] : [];
 
 /* Whoever gave out a task that is done hears it only for a task of its own: work under a bigger task is heard of once,
@@ -670,7 +670,7 @@ async function atGate(db: Db | Tx, task: Task, from: number, findings = new Map<
 type Given = { agentId: string; name: string; pass: boolean; comment: string };
 
 /* The verdicts given at the task's gate in this round, oldest first. */
-async function gateVerdicts(db: Db, task: Task): Promise<Given[]> {
+export async function gateVerdicts(db: Db | Tx, task: Task): Promise<Given[]> {
   const rows = await db
     .select({ agentId: taskEvents.agentId, name: agents.name, text: taskEvents.text, data: taskEvents.data })
     .from(taskEvents)
@@ -685,6 +685,15 @@ async function gateVerdicts(db: Db, task: Task): Promise<Given[]> {
     )
     .orderBy(asc(taskEvents.id));
   return rows.map(r => ({ agentId: r.agentId!, name: r.name, pass: r.data.pass === true, comment: r.text }));
+}
+
+/* Repeated returns at one gate call in whoever gave the work out. */
+export async function stuckAtGate(db: Db | Tx, task: Task, stage: number, actorId?: string): Promise<Wake[]> {
+  const [sent] = await db
+    .select({ n: sql<number>`count(distinct coalesce(${taskEvents.data}->>'round', ${taskEvents.id}::text))` })
+    .from(taskEvents)
+    .where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'verdict'), sql`${taskEvents.data}->>'pass' = 'false'`, sql`${taskEvents.data}->>'stage' = ${String(stage)}`));
+  return Number(sent?.n ?? 0) >= GATE_ROUNDS ? giver(task, 'stuck_at_gate', actorId) : [];
 }
 
 /* The agent asked a person on the task and waits for the answer. */
@@ -735,11 +744,7 @@ async function closeGate(ctx: Live, task: Task, n: Note, given: Given[]): Promis
     ? [{ agentId: away, taskId: task.id, why: 'switched', text: `${name} does it and is switched off, and gate ${task.stage} sent it back with changes to make: ${reasons}\n\nGive it to someone who is on with update_task, or tell the CEO it waits for ${name}.` }]
     : [{ agentId: task.executorAgentId!, taskId: task.id, why: 'changes', text: reasons }];
   const row = await move(ctx, task, { status: 'open', stage: 0, panel: [], assigneeAgentId: away ?? task.executorAgentId, bounces: task.bounces + 1, silent: 0 }, n, async tx => {
-    const [sent] = await tx
-      .select({ n: sql<number>`count(distinct coalesce(${taskEvents.data}->>'round', ${taskEvents.id}::text))` })
-      .from(taskEvents)
-      .where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'verdict'), sql`${taskEvents.data}->>'pass' = 'false'`, sql`${taskEvents.data}->>'stage' = ${String(task.stage)}`));
-    if (Number(sent?.n ?? 0) >= GATE_ROUNDS) wakes.push(...giver(task, 'stuck_at_gate', actorId));
+    wakes.push(...(await stuckAtGate(tx, task, task.stage, actorId)));
     await keepWakes(tx, task.companyId, wakes);
   });
   return { task: row, wakes };
@@ -1194,17 +1199,20 @@ async function askAboutStill(ctx: Live, agentId: string, task: Task, silent: num
 /* Events that do not move a task: what an agent says in it and Hornhoof's own notes about its turns. */
 export const NOT_A_MOVE = ['comment', 'reminded', 'continued', 'stuck'] as const;
 
+/* Comments and notes about a turn ending do not begin a new piece of work. */
+export async function lastMove(db: Db | Tx, taskId: string) {
+  const [last] = await db.select().from(taskEvents).where(and(eq(taskEvents.taskId, taskId), notInArray(taskEvents.kind, [...NOT_A_MOVE]))).orderBy(desc(taskEvents.createdAt), desc(taskEvents.id)).limit(1);
+  return last;
+}
+
 /* The agent holding the task worked through a turn without handing anything in, but said in the task how far it got or
    worked until its time ran out: it goes on in another turn, from GOING_ON_TURNS such turns in a row a person is asked. */
 export async function wentOn(ctx: Live, agentId: string, task: Task): Promise<Moved> {
-  const [last] = await ctx.db
-    .select({ at: max(taskEvents.createdAt) })
-    .from(taskEvents)
-    .where(and(eq(taskEvents.taskId, task.id), notInArray(taskEvents.kind, [...NOT_A_MOVE])));
+  const last = await lastMove(ctx.db, task.id);
   const [before] = await ctx.db
     .select({ n: count() })
     .from(taskEvents)
-    .where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.agentId, agentId), eq(taskEvents.kind, 'continued'), ...(last?.at ? [gt(taskEvents.createdAt, last.at)] : [])));
+    .where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.agentId, agentId), eq(taskEvents.kind, 'continued'), last ? gt(taskEvents.createdAt, last.createdAt) : undefined));
   const turns = Number(before?.n ?? 0) + 1;
   if (turns >= GOING_ON_TURNS) return askAboutStill(ctx, agentId, task, 0, `Went on for ${turns} turns in a row on #${task.number} without handing anything in. Tell it how to go on, or cancel the task.`);
   const wakes: Wake[] = [{ agentId, taskId: task.id, why: 'go_on' }];

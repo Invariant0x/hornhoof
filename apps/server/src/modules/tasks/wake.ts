@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, max, ne, notInArray, or, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, ne, notInArray, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { loggable } from '../../errors.js';
 import { agentChanges, agentEvents, agents, jobs, requests, subscriptions, taskEvents, tasks, testRuns } from '../../db/schema.js';
@@ -7,7 +7,7 @@ import { sayLive } from '../conversation/live.js';
 import { quote } from '../conversation/prompt.js';
 import { appendEvent, publishWorking } from '../events/store.js';
 import { identityOf, type NodeIdentity } from '../nodes/hub.js';
-import { answerDirectly, brokeDown, CLOSED, GATE_ROUNDS, handOver, leaveWork, NOT_A_MOVE, openAfter, published, regateWaiting, reviewWake, silentTurn, taskSpot, wentOn, type Actor, type Task, type Wake, type WakeWhy } from './engine.js';
+import { answerDirectly, brokeDown, CLOSED, GATE_ROUNDS, handOver, lastMove, leaveWork, NOT_A_MOVE, openAfter, published, regateWaiting, reviewWake, silentTurn, taskSpot, wentOn, type Actor, type Task, type Wake, type WakeWhy } from './engine.js';
 import { wakeQueued, wakesLeft } from './outbox.js';
 import { settle, tell } from './turns.js';
 
@@ -386,14 +386,11 @@ const refusedAtStart = (j: Ended) =>
 
 /* How many of the agent's last turns on the task broke as they started, in a row, of those that ended since the task last moved. */
 async function crashesInRow(ctx: Ctx, agentId: string, task: Task): Promise<number> {
-  const [moved] = await ctx.db
-    .select({ at: max(taskEvents.createdAt) })
-    .from(taskEvents)
-    .where(and(eq(taskEvents.taskId, task.id), notInArray(taskEvents.kind, [...NOT_A_MOVE])));
+  const moved = await lastMove(ctx.db, task.id);
   const rows = await ctx.db
     .select({ status: jobs.status, error: jobs.error, startedAt: jobs.startedAt, finishedAt: jobs.finishedAt, result: jobs.result, tail: jobs.tail })
     .from(jobs)
-    .where(and(conversationOf(agentId), eq(jobs.taskId, task.id), isNotNull(jobs.startedAt), inArray(jobs.status, ['done', 'failed']), moved?.at ? gt(jobs.finishedAt, moved.at) : undefined))
+    .where(and(conversationOf(agentId), eq(jobs.taskId, task.id), isNotNull(jobs.startedAt), inArray(jobs.status, ['done', 'failed']), moved ? gt(jobs.finishedAt, moved.createdAt) : undefined))
     .orderBy(desc(jobs.startedAt))
     .limit(QUICK_CRASHES);
   const n = rows.findIndex(j => !crashed(j));

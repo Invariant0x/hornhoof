@@ -1,0 +1,103 @@
+import { and, eq, gt, gte, inArray, isNull, lte, notInArray, or, sql } from 'drizzle-orm';
+import type { Ctx } from '../../app.js';
+import { agents, jobs, pendingWakes, requests, subscriptions, tasks, testRuns } from '../../db/schema.js';
+import { agentState, liveSubscription } from '../conversation/queue.js';
+import { identityOf } from '../nodes/hub.js';
+import { failOpenJobs } from '../nodes/messages.js';
+import { CLOSED, gateVerdicts, giver, lastMove, openAfter, reviewWake, stuckAtGate, type Task, type Wake } from './engine.js';
+import { wakeAll } from './wake.js';
+
+const MACHINE_AWAY_MS = 5 * 60_000;
+const LOST_WAKE_MS = 2 * 60_000;
+
+/* A turn on a machine that stayed away too long ends just as one the machine reported failed. */
+async function failAwayTurns(ctx: Ctx, now: Date): Promise<void> {
+  const running = await ctx.db
+    .select({ job: jobs, sub: subscriptions })
+    .from(jobs)
+    .innerJoin(subscriptions, eq(subscriptions.id, jobs.subscriptionId))
+    .where(and(eq(jobs.kind, 'conversation'), eq(jobs.status, 'running')));
+  for (const { job, sub } of running) {
+    const node = identityOf(sub, job.nodeId);
+    if (!node) continue;
+    const away = ctx.hub.awaySince(node);
+    if (away !== null && away + MACHINE_AWAY_MS < now.getTime()) await failOpenJobs(ctx, eq(jobs.id, job.id), 'machine_offline');
+  }
+}
+
+type Move = Awaited<ReturnType<typeof lastMove>>;
+
+/* Reviewers who have not answered this stage and round still need a turn. */
+async function reviewWakes(ctx: Ctx, task: Task): Promise<Wake[]> {
+  const given = new Set((await gateVerdicts(ctx.db, task)).map(v => v.agentId));
+  const due = new Set([task.assigneeAgentId, ...task.panel]);
+  const prompt = await reviewWake(ctx.db, task);
+  return [...due].filter((id): id is string => id !== null && !given.has(id)).map(agentId => ({ agentId, taskId: task.id, ...prompt }));
+}
+
+/* The task's current state says who should act on its last move. */
+async function wakesDue(ctx: Ctx, task: Task, move: Move): Promise<Wake[]> {
+  if (task.status === 'blocked') return giver(task, 'blocked', task.executorAgentId ?? undefined, move?.text);
+  if (task.status === 'review') return reviewWakes(ctx, task);
+  const wakes: Wake[] = task.assigneeAgentId ? [{ agentId: task.assigneeAgentId, taskId: task.id, why: 'assigned' }] : [];
+  if (task.stage === 0 && move?.kind === 'verdict' && Number(move.data.round) + 1 === task.bounces) {
+    wakes.push(...(await stuckAtGate(ctx.db, task, Number(move.data.stage), move.agentId ?? undefined)));
+  }
+  return wakes;
+}
+
+/* Tasks waiting for other work or an answer already have a way to continue. */
+async function waitsOnPurpose(ctx: Ctx, task: Task): Promise<boolean> {
+  if ((await openAfter(ctx.db, task)).length) return true;
+  const [subtask] = await ctx.db.select({ id: tasks.id }).from(tasks).where(and(eq(tasks.parentId, task.id), notInArray(tasks.status, [...CLOSED]))).limit(1);
+  if (subtask) return true;
+  const [asked] = await ctx.db.select({ id: requests.id }).from(requests).where(and(eq(requests.taskId, task.id), eq(requests.status, 'open'))).limit(1);
+  if (asked) return true;
+  const [testing] = await ctx.db.select({ id: testRuns.id }).from(testRuns).where(and(eq(testRuns.taskId, task.id), eq(testRuns.status, 'running'))).limit(1);
+  return Boolean(testing);
+}
+
+/* Only an available holder without a turn covering the move needs a wake. */
+async function canWake(ctx: Ctx, w: Wake, movedAt: Date, before: Date): Promise<boolean> {
+  const [agent] = await ctx.db.select({ id: agents.id }).from(agents).where(and(eq(agents.id, w.agentId), isNull(agents.removedAt), isNull(agents.switchedOffAt)));
+  if (!agent || !(await liveSubscription(ctx, agent.id))) return false;
+  const state = await agentState(ctx, agent.id);
+  if (!state.ready || state.busy || state.queued) return false;
+  const [pending] = await ctx.db.select({ id: pendingWakes.id }).from(pendingWakes).where(eq(pendingWakes.agentId, agent.id)).limit(1);
+  if (pending) return false;
+  const [covered] = await ctx.db.select({ id: jobs.id }).from(jobs).leftJoin(tasks, eq(tasks.id, jobs.taskId)).where(and(eq(jobs.agentId, agent.id), or(
+    inArray(jobs.status, ['queued', 'running']),
+    and(or(eq(tasks.id, w.taskId), eq(tasks.parentId, w.taskId)), or(gt(jobs.createdAt, movedAt), and(lte(jobs.startedAt, movedAt), gte(jobs.finishedAt, movedAt)))),
+    sql`coalesce(${jobs.finishedAt}, ${jobs.createdAt}) >= ${before}`,
+  ))).limit(1);
+  return !covered;
+}
+
+/* Old moves need a wake only when the holder has not handled them or chosen to wait. */
+async function wakeMissing(ctx: Ctx, now: Date): Promise<void> {
+  const before = new Date(now.getTime() - LOST_WAKE_MS);
+  const open = await ctx.db.select().from(tasks).where(inArray(tasks.status, ['open', 'working', 'review', 'blocked']));
+  for (const task of open) {
+    const move = await lastMove(ctx.db, task.id);
+    const movedAt = move?.createdAt ?? task.createdAt;
+    if (movedAt >= before || (await waitsOnPurpose(ctx, task))) continue;
+    for (const w of await wakesDue(ctx, task, move)) {
+      if (move?.agentId === w.agentId) continue;
+      if (await canWake(ctx, w, movedAt, before)) await wakeAll(ctx, [w]);
+    }
+  }
+}
+
+const reconciling = new WeakSet<Ctx>();
+
+/* Recover turns lost when a machine went away or a task move did not wake its holder. */
+export async function reconcile(ctx: Ctx, now = new Date()): Promise<void> {
+  if (reconciling.has(ctx)) return;
+  reconciling.add(ctx);
+  try {
+    await failAwayTurns(ctx, now);
+    await wakeMissing(ctx, now);
+  } finally {
+    reconciling.delete(ctx);
+  }
+}
