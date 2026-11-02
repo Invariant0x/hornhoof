@@ -422,6 +422,9 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 }
 
 /* Subscriptions */
+/* A plan's buttons go onto more lines rather than make the table wider than the page; each button stays whole. */
+.subs .row-actions { white-space: normal; }
+.subs .row-actions .act { white-space: nowrap; margin-top: 3px; margin-bottom: 3px; }
 .lend { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; margin-right: 8px; }
 .people-head > .head-actions { display: flex; gap: 10px; flex-wrap: wrap; }
 .where-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
@@ -433,12 +436,13 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .limit-bars em { grid-column: 3 / -1; font-style: normal; }
 .share { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 12.5px; color: var(--muted); }
 .share select { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--line2); padding: 2px 6px; }
-@media (max-width: 760px) {
+/* Below a wide screen, when a window resets goes under its bar, so the table keeps to the page. */
+@media (max-width: 1000px) {
   .limit-bars li { grid-template-columns: 5.5em minmax(0, 1fr) 3.2em; white-space: normal; }
   .limit-bars li > span:last-child { grid-column: 1 / -1; }
   .limit-bars em { grid-column: 1 / -1; }
-  .subs .row-actions { display: flex; flex-wrap: wrap; row-gap: 4px; }
 }
+@media (max-width: 760px) { .subs .row-actions { display: flex; flex-wrap: wrap; row-gap: 4px; } }
 .bar.none { background: repeating-linear-gradient(90deg, var(--idle) 0 6px, transparent 6px 10px); }
 .sub-name { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
 .badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 1px 7px; color: var(--pink-ink); border: 1px solid currentColor; vertical-align: 1px; }

@@ -5,6 +5,7 @@ import { LanguageProvider } from '../src/i18n';
 import { Subscriptions } from '../src/screens/Subscriptions';
 import type { Me } from '../src/types';
 import { ME, mockApi, SUBS } from './api-mock';
+import { decl } from './css';
 
 const COMMAND = 'curl -fsSL https://hq.acme.com/install.sh | bash -s -- --join CODE123';
 const TRUST = 'Agents will run on this machine with your subscription. People with access to this Hornhoof can give them work.';
@@ -16,6 +17,14 @@ const rowOf = (name: string) => screen.getByRole('row', { name: new RegExp(`^${n
 afterEach(() => localStorage.clear());
 
 describe('Subscriptions', () => {
+  it("keeps the table to the page on a laptop: a plan's buttons take more lines, and the reset time goes under its bar", () => {
+    /* In one line, a plan's three buttons made the table wider than the page from a phone up to a wide screen. */
+    expect(decl('.subs .row-actions', 'white-space')).toBe('normal');
+    expect(decl('.subs .row-actions .act', 'white-space')).toBe('nowrap');
+    /* Below a wide screen, when a window resets goes under its bar instead of beside it. */
+    expect(decl('.limit-bars li > span:last-child', 'grid-column', '(max-width: 1000px)')).toBe('1 / -1');
+  });
+
   it('lists each subscription with its place, machine, state and limits', async () => {
     lists();
     render(<Subscriptions me={ME} />);
