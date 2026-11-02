@@ -1,14 +1,16 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
-import { PROVIDER_NAMES } from '../providers';
+import { PROGRAM_NAMES, PROVIDER_NAMES } from '../providers';
 import type { JobView, Limits, Me, SubView } from '../types';
 import { Ask } from '../ui/Ask';
 import { Bar, percent } from '../ui/Bar';
 import { CommandBox } from '../ui/CommandBox';
 import { ConnectPanel } from '../ui/ConnectPanel';
 import { Edge } from '../ui/Edge';
+import { isKeyPlan, KeyForm } from '../ui/KeyForm';
 import { ResetTime, resetDurationAt, useNow } from '../ui/reset';
+import { SignInPanel } from '../ui/SignInPanel';
 
 const POLL_MS = 1000;
 const POLL_LIMIT_MS = 150_000;
@@ -17,6 +19,8 @@ const REFRESH_MS = 5000;
 type Test = { phase: 'running' } | { phase: 'done'; text: string } | { phase: 'failed'; text: string; tail: string | null };
 type Panel = { kind: 'connect' } | { kind: 'command'; command: string } | null;
 type State = keyof Messages['subs']['states'];
+/* A sign-in the owner runs now, in a terminal on one of the plan's machines. */
+type Signing = { subId: string; nodeId: string; hostname: string };
 
 const sleep = (ms: number) => new Promise(done => setTimeout(done, ms));
 
@@ -26,6 +30,46 @@ const subName = (t: Messages, s: SubView) => (s.kind === 'api_key' ? t.subs.keyE
 function waitsThere(t: Messages, on: { status: 'needs_login' | 'ready'; online: boolean }): string | null {
   if (!on.online) return t.subs.waitsThere.offline;
   return on.status === 'needs_login' ? t.subs.waitsThere.needs_login : null;
+}
+
+/* Plans that sign in once in a terminal on one machine; Hornhoof then passes the sign-in to the owner's others. */
+const TERMINAL_SIGNIN = new Set(['claude', 'codex']);
+
+const capital = (word: string) => word.charAt(0).toUpperCase() + word.slice(1);
+
+/* Where a personal plan's sign-in works: on any of its owner's machines once signed in from Hornhoof (Codex on one of
+   them at a time), else only on the machines it was signed in on by hand. */
+function signinLine(t: Messages, language: Language, s: SubView): string | null {
+  if (s.kind !== 'personal') return null;
+  if (s.signedInOnce) {
+    if (s.provider === 'codex' && s.leaseMachine) return t.subs.leaseOn(s.leaseMachine);
+    return t.subs.signedInOnce(s.owner.name, s.machines.filter(m => m.online).length);
+  }
+  const ready = s.machines.filter(m => m.status === 'ready').map(m => m.hostname);
+  return ready.length ? t.subs.signedInOn(new Intl.ListFormat(language, { type: 'conjunction' }).format(ready)) : null;
+}
+
+/* The tier the plan's machines say they run on. A Claude plan signed in from Hornhoof holds a sign-in for a year that does
+   not name its tier. */
+function tierLine(t: Messages, s: SubView): string | null {
+  if (s.kind !== 'personal' || s.accountsDiffer) return null;
+  if (s.provider === 'codex' && s.tier) return s.tier === 'free' ? t.subs.codexFree : t.subs.tier('Codex', capital(s.tier));
+  if (s.provider === 'claude') return s.tier ? t.subs.tier('Claude', capital(s.tier)) : s.signedInOnce ? t.subs.claudeYear : null;
+  return null;
+}
+
+/* Two machines of the plan on different accounts or tiers. */
+function differLine(t: Messages, s: SubView): string | null {
+  const [first, ...rest] = s.accounts;
+  if (!s.accountsDiffer || !first || !rest.length) return null;
+  const other = rest.find(a => a.tier !== first.tier || (a.email ?? null) !== (first.email ?? null)) ?? rest[0]!;
+  return t.subs.differentAccounts(first.hostname, other.hostname);
+}
+
+/* The address the plan's machines are signed in with, when the viewer may see it and all of them agree. */
+function accountEmail(s: SubView): string | null {
+  const emails = new Set(s.accounts.map(a => a.email ?? null));
+  return !s.accountsDiffer && emails.size === 1 ? [...emails][0]! : null;
 }
 
 function stateOf(s: SubView): State {
@@ -151,6 +195,10 @@ export function Subscriptions({ me }: { me: Me }) {
   const [confirm, setConfirm] = useState<string | null>(null);
   const [tests, setTests] = useState<Record<string, Test>>({});
   const [failure, setFailure] = useState<unknown>(null);
+  const [signing, setSigning] = useState<Signing | null>(null);
+  /* Why the last sign-in of a plan did not finish. */
+  const [signNote, setSignNote] = useState<{ subId: string; text: string } | null>(null);
+  const [keyFor, setKeyFor] = useState<string | null>(null);
   const live = useRef(true);
   const company = me.person.scopeKind === 'company';
 
@@ -224,6 +272,25 @@ export function Subscriptions({ me }: { me: Me }) {
       setPanel({ kind: 'command', command });
     });
 
+  const signIn = (sub: SubView, fresh: boolean) =>
+    run(async () => {
+      setSignNote(null);
+      const { nodeId, hostname } = await api.post<{ nodeId: string; hostname: string }>(`/api/subscriptions/${sub.id}/signin`, { fresh });
+      setSigning({ subId: sub.id, nodeId, hostname });
+    });
+
+  const stopSignIn = (on: Signing) =>
+    run(async () => {
+      await api.post(`/api/subscriptions/${on.subId}/signin/stop`, { nodeId: on.nodeId });
+      setSigning(null);
+    });
+
+  const endSignIn = (on: Signing, error: string | null) => {
+    setSigning(null);
+    setSignNote(error ? { subId: on.subId, text: error } : null);
+    void load();
+  };
+
   const remove = (sub: SubView) =>
     run(async () => {
       setConfirm(null);
@@ -296,6 +363,16 @@ export function Subscriptions({ me }: { me: Me }) {
               const test = tests[s.id];
               const mine = s.owner.id === me.person.id;
               const asking = confirm === s.id;
+              const line = signinLine(t, language, s);
+              const tier = tierLine(t, s);
+              const differ = differLine(t, s);
+              const email = accountEmail(s);
+              const signingHere = signing?.subId === s.id ? signing : null;
+              const note = signNote?.subId === s.id ? signNote.text : null;
+              const keying = keyFor === s.id && isKeyPlan(s.provider);
+              /* Only the owner signs a plan in, on one of its machines that is online. */
+              const canSign = mine && s.kind === 'personal' && !signingHere && s.machines.some(m => m.online);
+              const again = s.signedInOnce && s.status === 'ready';
               return (
                 <Fragment key={s.id}>
                   <tr>
@@ -333,6 +410,10 @@ export function Subscriptions({ me }: { me: Me }) {
                     </td>
                     <td>
                       <span className={`status ${state}`}>{t.subs.states[state]}</span>
+                      {line && <small className="signin-line">{line}</small>}
+                      {tier && <small className="signin-line">{tier}</small>}
+                      {email && <small className="signin-line muted">{email}</small>}
+                      {differ && <small className="signin-line warn">{differ}</small>}
                       <LimitBars sub={s} />
                       {s.kind === 'personal' && (mine || company) && (
                         <label className="share">
@@ -353,6 +434,19 @@ export function Subscriptions({ me }: { me: Me }) {
                       {company && s.place.kind === 'company' && !s.isOrchestrator && (
                         <button className="act" type="button" aria-label={t.subs.useForOrchestratorLabel(name)} onClick={() => makeOrchestrator(s)}>{t.subs.useForOrchestrator}</button>
                       )}
+                      {canSign && TERMINAL_SIGNIN.has(s.provider) && (
+                        <button
+                          className="act"
+                          type="button"
+                          aria-label={again ? t.subs.signInAgainLabel(name) : t.subs.signInLabel(name)}
+                          onClick={() => signIn(s, again)}
+                        >
+                          {again ? t.subs.signInAgain : t.subs.signIn}
+                        </button>
+                      )}
+                      {mine && s.kind === 'personal' && isKeyPlan(s.provider) && s.machines.length > 0 && !keying && (
+                        <button className="act" type="button" aria-label={t.subs.pasteKeyLabel(name)} onClick={() => setKeyFor(s.id)}>{t.subs.pasteKey}</button>
+                      )}
                       {mine && s.kind === 'personal' && s.status === 'waiting_machine' && (
                         <button className="act" type="button" aria-label={t.subs.newCommandLabel(name)} onClick={() => newCommand(s)}>{t.subs.newCommand}</button>
                       )}
@@ -361,9 +455,30 @@ export function Subscriptions({ me }: { me: Me }) {
                       )}
                     </td>
                   </tr>
-                  {(asking || test) && (
+                  {(asking || test || signingHere || note || keying) && (
                     <tr className="row-extra">
                       <td colSpan={5}>
+                        {signingHere && (
+                          <SignInPanel
+                            subId={s.id}
+                            program={PROGRAM_NAMES[s.provider]}
+                            nodeId={signingHere.nodeId}
+                            hostname={signingHere.hostname}
+                            onEnd={error => endSignIn(signingHere, error)}
+                            onStop={() => stopSignIn(signingHere)}
+                          />
+                        )}
+                        {note && <p className="test failed" role="status">{note}</p>}
+                        {keying && isKeyPlan(s.provider) && (
+                          <KeyForm
+                            sub={{ ...s, provider: s.provider }}
+                            onDone={() => {
+                              setKeyFor(null);
+                              void load();
+                            }}
+                            onCancel={() => setKeyFor(null)}
+                          />
+                        )}
                         {asking && (
                           <Ask
                             text={s.kind === 'api_key' ? t.subs.removeKeyAsk(name) : t.subs.removeAsk(name)}

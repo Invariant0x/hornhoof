@@ -35,7 +35,7 @@ describe('Machines', () => {
     expect(fact(pool, 'Busy now')).toBe('21%');
   });
 
-  it('shows each machine with its owner, system, processor, memory, load, disk and plans', async () => {
+  it('shows each machine with its owner, system, processor, memory, load and disk', async () => {
     lists();
     render(<Machines me={ME} />);
     const mac = await screen.findByRole('article', { name: 'ivan-mbp' });
@@ -47,8 +47,9 @@ describe('Machines', () => {
     expect(within(mac).getByText('Docker on this Mac is set smaller than the Mac, so Hornhoof uses only part of it.')).toBeInTheDocument();
     expect(fact(mac, 'Load')).toBe('25%');
     expect(fact(mac, 'Disk')).toBe('120 of 460 GB free');
-    const plans = within(within(mac).getByRole('list', { name: 'Plans on ivan-mbp' })).getAllByRole('listitem');
-    expect(plans.map(p => p.textContent)).toEqual(['Claude', 'Codex, waiting for the login']);
+    /* Plans are signed in once and run on any machine of their owner, so the Plans tab says where; a card does not. */
+    expect(within(mac).queryByRole('list', { name: 'Plans on ivan-mbp' })).not.toBeInTheDocument();
+    expect(within(mac).queryByText('Plans')).not.toBeInTheDocument();
   });
 
   it('says what runs on a machine now: its employees and the parts of test runs', async () => {
@@ -60,14 +61,14 @@ describe('Machines', () => {
     expect(fact(card('build-box'), 'Running now')).toBe('Nothing right now');
   });
 
-  it('says unknown for what an offline or older machine has not told, and that it has no plan', async () => {
+  it('says unknown for what an offline or older machine has not told', async () => {
     lists();
     render(<Machines me={ME} />);
     const box = await screen.findByRole('article', { name: 'build-box' });
     expect(within(box).getByText('Last seen 5 minutes ago')).toBeInTheDocument();
     expect(fact(box, 'System')).toBe('Linux, x86_64');
     for (const label of ['Processor', 'Memory', 'Load', 'Disk']) expect(fact(box, label)).toBe('unknown');
-    expect(fact(box, 'Plans')).toBe('No plan');
+    expect(within(box).queryByText('No plan')).not.toBeInTheDocument();
     const own = card('Built-in node');
     expect(fact(own, 'Processor')).toBe('4 cores');
     expect(fact(own, 'Memory')).toBe('2.5 of 8 GB free');
@@ -184,7 +185,6 @@ describe('Machines', () => {
     const now = within(within(mac).getByRole('list', { name: 'Что сейчас идет на ivan-mbp' })).getAllByRole('listitem');
     expect(now.map(p => p.textContent)).toEqual(['Bruno, работает', 'Vera', 'Тесты задачи 12, часть 1 из 2']);
     const box = card('build-box');
-    expect(fact(box, 'Подписки')).toBe('Без подписки');
     expect(fact(box, 'Процессор')).toBe('неизвестно');
     expect(fact(card('Встроенная нода'), 'Процессор')).toBe('4 ядра');
     expect(screen.getByRole('button', { name: 'Подключить машину' })).toBeInTheDocument();

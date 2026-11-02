@@ -4,8 +4,14 @@ import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Subscriptions } from '../src/screens/Subscriptions';
 import type { Me } from '../src/types';
-import { ME, mockApi, SUBS } from './api-mock';
+import { armor, Decrypter, generateX25519Identity, identityToRecipient } from 'age-encryption';
+import { ME, MACHINE, mockApi, SUBS } from './api-mock';
 import { decl } from './css';
+import { fakeStream } from './fake-stream';
+
+vi.mock('../src/ui/AgentTerminal', () => ({
+  AgentTerminal: ({ path }: { path: string }) => <div data-testid="live-terminal" data-path={path} />,
+}));
 
 const COMMAND = 'curl -fsSL https://hq.acme.com/install.sh | bash -s -- --join CODE123';
 const TRUST = 'Agents will run on this machine with your subscription. People with access to this Hornhoof can give them work.';
@@ -286,5 +292,144 @@ describe('Subscriptions', () => {
     const [codexFive] = within(within(rowOf('Codex')).getByRole('list', { name: 'Лимиты' })).getAllByRole('listitem');
     expect(codexFive).toHaveTextContent(/^5 часовПока нет данных$/);
     expect(within(rowOf('Ключ Anthropic')).getByText('Оплата по факту, без лимитов плана')).toBeInTheDocument();
+  });
+});
+
+describe('signing in to plans', () => {
+  const NODE = '7d1c6a52-2f4e-4c4b-9f55-0d7a3c1e9b10';
+  const LAPTOP = { id: 'm3', hostname: 'ivan-laptop', status: 'ready' as const, online: true };
+  const claude = SUBS[0]!;
+  const codex = SUBS[1]!;
+  const only = (...subs: typeof SUBS) => ({ 'GET /api/subscriptions': [200, { subscriptions: subs }] as [number, unknown] });
+
+  it("says a plan signed in once runs on any of its owner's machines, and how many are online", async () => {
+    mockApi(only({ ...claude, signedInOnce: true, machines: [MACHINE, LAPTOP, { ...LAPTOP, id: 'm4', hostname: 'ivan-tower', online: false }] }));
+    render(<Subscriptions me={ME} />);
+    expect(within(await screen.findByRole('row', { name: /^Claude\b/ })).getByText("Signed in once, runs on any of Ivan's machines (2 online)")).toBeInTheDocument();
+  });
+
+  it('says a plan signed in on its machine by hand runs only there', async () => {
+    mockApi(only(claude));
+    render(<Subscriptions me={ME} />);
+    const row = await screen.findByRole('row', { name: /^Claude\b/ });
+    expect(within(row).getByText('Signed in on ivan-mbp only')).toBeInTheDocument();
+    expect(within(row).queryByText(/^Signed in once/)).not.toBeInTheDocument();
+  });
+
+  it('says a Codex plan signed in once runs on one machine at a time, and on which', async () => {
+    mockApi(only({ ...codex, status: 'ready', signedInOnce: true, leaseMachine: 'ivan-laptop', machines: [MACHINE, LAPTOP] }));
+    render(<Subscriptions me={ME} />);
+    const row = await screen.findByRole('row', { name: /^Codex\b/ });
+    expect(within(row).getByText('Codex runs on one machine at a time; now on ivan-laptop')).toBeInTheDocument();
+    expect(within(row).queryByText(/^Signed in once/)).not.toBeInTheDocument();
+  });
+
+  it('names the tier each plan runs on, and what a free Codex plan cannot do', async () => {
+    const free = { ...codex, status: 'ready' as const, tier: 'free', accounts: [{ nodeId: NODE, hostname: 'ivan-mbp', tier: 'free' }] };
+    mockApi(only({ ...claude, signedInOnce: true }, free));
+    render(<Subscriptions me={ME} />);
+    expect(within(await screen.findByRole('row', { name: /^Claude\b/ })).getByText('Claude, one-year sign-in')).toBeInTheDocument();
+    expect(within(rowOf('Codex')).getByText('Codex, Free: newer models need Plus or Pro')).toBeInTheDocument();
+  });
+
+  it('names a paid tier, and says when machines of one plan are signed in to different accounts', async () => {
+    const pro = { ...codex, status: 'ready' as const, tier: 'pro', accounts: [{ nodeId: NODE, hostname: 'ivan-mbp', tier: 'pro', email: 'ivan@acme.com' }] };
+    const accounts = [
+      { nodeId: NODE, hostname: 'ivan-mbp', tier: 'max', email: 'ivan@acme.com' },
+      { nodeId: 'n2', hostname: 'ivan-laptop', tier: 'pro', email: 'ivan@home.org' },
+    ];
+    mockApi(only({ ...claude, machines: [MACHINE, LAPTOP], accounts, accountsDiffer: true }, pro));
+    render(<Subscriptions me={ME} />);
+    expect(within(await screen.findByRole('row', { name: /^Codex\b/ })).getByText('Codex, Pro')).toBeInTheDocument();
+    expect(within(rowOf('Claude')).getByText('ivan-mbp and ivan-laptop are signed in to different accounts')).toBeInTheDocument();
+  });
+
+  it("signs a plan in again with another account in a terminal on the owner's machine, and closes it once signed in", async () => {
+    const stream = fakeStream();
+    const calls = mockApi({ ...only({ ...claude, signedInOnce: true }), 'POST /api/subscriptions/s-claude/signin': [200, { nodeId: NODE, hostname: 'ivan-mbp' }] });
+    render(<Subscriptions me={ME} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Sign in to Claude with another account' }));
+    expect(calls.find(c => c.method === 'POST')).toEqual({ method: 'POST', path: '/api/subscriptions/s-claude/signin', body: { fresh: true } });
+    expect(await screen.findByRole('heading', { name: 'Signing in on ivan-mbp' })).toBeInTheDocument();
+    expect(screen.getByTestId('live-terminal')).toHaveAttribute('data-path', `/api/subscriptions/s-claude/signin/terminal?nodeId=${NODE}`);
+    /* Another plan's or machine's sign-in leaves this one open. */
+    stream.send({ type: 'subscription.signin', subscriptionId: 's-codex', nodeId: NODE, ok: true, error: null, owner: 'p1' });
+    expect(screen.getByRole('heading', { name: 'Signing in on ivan-mbp' })).toBeInTheDocument();
+    stream.send({ type: 'subscription.signin', subscriptionId: 's-claude', nodeId: NODE, ok: true, error: null, owner: 'p1' });
+    await vi.waitFor(() => expect(screen.queryByRole('heading', { name: 'Signing in on ivan-mbp' })).not.toBeInTheDocument());
+    expect(screen.queryByTestId('live-terminal')).not.toBeInTheDocument();
+  });
+
+  it('signs in a plan that waits for its login, and says in plain words when the sign-in fails', async () => {
+    const stream = fakeStream();
+    const calls = mockApi({ ...only(codex), 'POST /api/subscriptions/s-codex/signin': [200, { nodeId: NODE, hostname: 'ivan-mbp' }] });
+    render(<Subscriptions me={ME} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Sign in to Codex' }));
+    expect(calls.find(c => c.method === 'POST')!.body).toEqual({ fresh: false });
+    await screen.findByRole('heading', { name: 'Signing in on ivan-mbp' });
+    stream.send({ type: 'subscription.signin', subscriptionId: 's-codex', nodeId: NODE, ok: false, error: 'tmux: lost server', owner: 'p1' });
+    /* Under the plan's row, as a test's result is. */
+    expect(await screen.findByText('The sign-in did not finish, so nothing changed. Try again.')).toBeInTheDocument();
+    expect(screen.queryByTestId('live-terminal')).not.toBeInTheDocument();
+  });
+
+  it('stops a sign-in half way', async () => {
+    fakeStream();
+    const calls = mockApi({ ...only(codex), 'POST /api/subscriptions/s-codex/signin': [200, { nodeId: NODE, hostname: 'ivan-mbp' }], 'POST /api/subscriptions/s-codex/signin/stop': [204] });
+    render(<Subscriptions me={ME} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Sign in to Codex' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Stop the sign-in' }));
+    expect(calls.find(c => c.path.endsWith('/signin/stop'))).toEqual({ method: 'POST', path: '/api/subscriptions/s-codex/signin/stop', body: { nodeId: NODE } });
+    expect(screen.queryByTestId('live-terminal')).not.toBeInTheDocument();
+  });
+
+  it('offers no sign-in for a plan of another person, or one with no machine online', async () => {
+    mockApi(only({ ...codex, owner: { id: 'p4', name: 'Oleg' } }, { ...claude, online: false, machines: [{ ...MACHINE, online: false }] }));
+    render(<Subscriptions me={ME} />);
+    await screen.findByRole('row', { name: /^Codex\b/ });
+    expect(screen.queryByRole('button', { name: /^Sign in to / })).not.toBeInTheDocument();
+  });
+
+  it('seals a pasted Kimi key in the browser for each machine of the plan, so Hornhoof never sees it', async () => {
+    const identity = await generateX25519Identity();
+    const KEY = 'sk-kimi-7Hq2xP9wLm4Zr8Tv';
+    const kimi = { ...SUBS[2]!, status: 'needs_login' as const, online: true, machines: [{ ...MACHINE, status: 'needs_login' as const }] };
+    const calls = mockApi({
+      ...only(kimi),
+      'GET /api/subscriptions/s-kimi/recipients': [200, { version: 2, recipients: [{ nodeId: NODE, publicKey: await identityToRecipient(identity), hostname: 'ivan-mbp' }] }],
+      'POST /api/subscriptions/s-kimi/credential': [200, { stored: 1 }],
+    });
+    render(<Subscriptions me={ME} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Paste the key for Kimi' }));
+    expect(screen.getByRole('link', { name: /Kimi/ })).toHaveAttribute('href', 'https://www.kimi.com/code/console');
+    await userEvent.type(screen.getByLabelText('Kimi key'), KEY);
+    await userEvent.click(screen.getByRole('button', { name: 'Save the key' }));
+    await vi.waitFor(() => expect(calls.find(c => c.path === '/api/subscriptions/s-kimi/credential')).toBeTruthy());
+    const sent = calls.find(c => c.path === '/api/subscriptions/s-kimi/credential')!.body as { kind: string; version: number; envelopes: { nodeId: string; sealed: string }[] };
+    expect(sent.kind).toBe('kimi_key');
+    expect(sent.version).toBe(3);
+    expect(sent.envelopes.map(e => e.nodeId)).toEqual([NODE]);
+    const d = new Decrypter();
+    d.addIdentity(identity);
+    expect(await d.decrypt(armor.decode(sent.envelopes[0]!.sealed), 'text')).toBe(KEY);
+    expect(JSON.stringify(calls)).not.toContain(KEY);
+    await vi.waitFor(() => expect(screen.queryByLabelText('Kimi key')).not.toBeInTheDocument());
+  });
+
+  it('says the sign-in lines in Russian', async () => {
+    localStorage.setItem('hh-lang', 'ru');
+    const free = { ...codex, status: 'ready' as const, tier: 'free', signedInOnce: true, leaseMachine: 'ivan-mbp', accounts: [{ nodeId: NODE, hostname: 'ivan-mbp', tier: 'free' }] };
+    mockApi(only({ ...claude, signedInOnce: true, machines: [MACHINE, LAPTOP] }, free));
+    render(
+      <LanguageProvider>
+        <Subscriptions me={ME} />
+      </LanguageProvider>,
+    );
+    const row = await screen.findByRole('row', { name: /^Claude\b/ });
+    expect(within(row).getByText('Вход выполнен один раз, работает на любой машине Ivan (на связи: 2)')).toBeInTheDocument();
+    expect(within(row).getByText('Claude, вход на год')).toBeInTheDocument();
+    expect(within(row).getByRole('button', { name: 'Войти в Claude с другим аккаунтом' })).toHaveTextContent('Войти в другой аккаунт');
+    expect(within(rowOf('Codex')).getByText('Codex работает на одной машине за раз; сейчас на ivan-mbp')).toBeInTheDocument();
+    expect(within(rowOf('Codex')).getByText('Codex, Free: новым моделям нужен Plus или Pro')).toBeInTheDocument();
   });
 });

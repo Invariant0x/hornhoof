@@ -33,10 +33,11 @@ const RETRY_MAX_MS = 10_000;
 const NO_TERMINAL = 4404;
 const NO_ACCESS = 4403;
 
-type Props = { agentId: string; program: string; onGone(): void };
+/* path: the view's address on the server, such as /api/agents/<id>/terminal; the terminal's size goes after it. */
+type Props = { path: string; program: string; onGone(): void };
 
-/* An agent's live terminal: its session on the node, as it is, with the person's keys going back to it. */
-export function AgentTerminal({ agentId, program, onGone }: Props) {
+/* A live terminal: an agent's session on the node, or a plan's sign-in, as it is, with the person's keys going back to it. */
+export function AgentTerminal({ path, program, onGone }: Props) {
   const t = useT();
   const box = useRef<HTMLDivElement>(null);
   /* Until the view is open and the program is up, a loader hides what the session shows meanwhile. */
@@ -59,7 +60,7 @@ export function AgentTerminal({ agentId, program, onGone }: Props) {
 
     const connect = () => {
       const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
-      const ws = new WebSocket(`${scheme}://${location.host}/api/agents/${agentId}/terminal?cols=${term.cols}&rows=${term.rows}`);
+      const ws = new WebSocket(`${scheme}://${location.host}${path}${path.includes('?') ? '&' : '?'}cols=${term.cols}&rows=${term.rows}`);
       socket = ws;
       ws.onmessage = e => {
         const m = JSON.parse(String(e.data)) as { type: string; data?: string; write?: boolean; running?: boolean };
@@ -106,7 +107,7 @@ export function AgentTerminal({ agentId, program, onGone }: Props) {
       resized?.disconnect();
       term.dispose();
     };
-  }, [agentId]);
+  }, [path]);
 
   return (
     <div className="t-term">

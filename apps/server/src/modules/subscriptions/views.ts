@@ -30,6 +30,10 @@ export type SubView = {
   accounts: PlanAccount[];
   tier: string | null;
   accountsDiffer: boolean;
+  /* The owner signed the plan in once in Hornhoof, so it runs on any of their machines. */
+  signedInOnce: boolean;
+  /* The machine a Codex plan signed in once runs on now, one at a time. */
+  leaseMachine: string | null;
 };
 
 export type PlanAccount = { nodeId: string; hostname: string; tier: string | null; email?: string | null };
@@ -56,6 +60,8 @@ const columns = {
   last4: subscriptions.last4,
   limits: subscriptions.limits,
   budget: subscriptions.budget,
+  credVersion: subscriptions.credVersion,
+  leaseNodeId: subscriptions.leaseNodeId,
   targetKind: subscriptions.targetKind,
   targetId: subscriptions.targetId,
   ownerId: people.id,
@@ -132,6 +138,8 @@ export async function subViews(db: Db, isOnline: IsOnline, id?: string, viewer: 
     accounts: signed.map(({ node, account }) => ({ nodeId: node.id, hostname: node.hostname, tier: account.tier, ...(sees ? { email: account.email } : {}) })),
     tier,
     accountsDiffer: differ,
+    signedInOnce: r.kind === 'personal' && r.credVersion > 0,
+    leaseMachine: (r.leaseNodeId && mine.find(n => n.id === r.leaseNodeId)?.hostname) || null,
     };
   });
 }

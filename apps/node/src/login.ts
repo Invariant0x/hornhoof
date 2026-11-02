@@ -3,6 +3,7 @@ import { execFile } from 'node:child_process';
 import { join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { TERM_CHUNK, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
+import { SIGNIN_ERRORS } from '@hornhoof/protocol/signin';
 import { ownFs, type AgentFs } from './agent-fs.js';
 import { applyCredential, takeLease } from './credentials.js';
 import { asAgent, type JobUser } from './isolation.js';
@@ -86,10 +87,7 @@ type Options = {
   pollMs?: number;
 };
 
-const STOPPED = 'The sign-in was stopped.';
-const UNFINISHED = 'The sign-in ended before it finished, so nothing changed.';
-const NOT_TAKEN = 'The program did not take the new sign-in, so nothing changed.';
-const BROKE = 'The sign-in failed on this machine, so nothing changed.';
+const { stopped: STOPPED, unfinished: UNFINISHED, notTaken: NOT_TAKEN, broke: BROKE } = SIGNIN_ERRORS;
 
 /* One sign-in at a time, in a tmux session the plan's owner watches and types into. It runs in a folder of its own, so
    the sign-in the plan has stays until the new one is complete. */

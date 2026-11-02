@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LOAD_MS, type AgentEvent, type CredKind, type Limits, type NodeLoad, type NodeMessage, type ProviderId, type ServerMessage } from '@hornhoof/protocol';
+import { SIGNIN_ERRORS } from '@hornhoof/protocol/signin';
 import { agentFs, ownFs, type AgentFs } from './agent-fs.js';
 import { connect } from './connection.js';
 import { agentUser, builtinAdapters, secureNode, userFor, type JobUser } from './isolation.js';
@@ -47,7 +48,6 @@ type TestRun = Extract<ServerMessage, { type: 'tests.run' }>;
 type TestsDone = Extract<NodeMessage, { type: 'tests.done' }>;
 
 /* What a node says to a sign-in it cannot run: a company key's, a Kimi or GLM key's, or one with no tmux. */
-const NO_LOGIN = 'This machine cannot run the sign-in for its plan from Hornhoof.';
 
 /* A part of a run never runs as the node itself: without a user of its own for runs, the node takes none. */
 const NO_RUNS = 'This node has no user of its own for runs, which it gets only when it runs as root with the rights to switch users, so it takes no part of any run.';
@@ -279,7 +279,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
         giveUpLease(dir, credHome, credUser);
         return signedInNow();
       case 'login.start':
-        if (!login) return emit({ type: 'login.done', ok: false, error: NO_LOGIN });
+        if (!login) return emit({ type: 'login.done', ok: false, error: SIGNIN_ERRORS.noLogin });
         return login.start(m.fresh);
       case 'login.stop':
         return login?.stop();

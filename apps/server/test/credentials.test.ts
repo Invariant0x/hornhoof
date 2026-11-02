@@ -281,7 +281,7 @@ describe('which account a plan runs on', () => {
     const na = await connectNode(url, a.key);
     na.send({ type: 'hello', version: '0.9.0', loggedIn: true, running: [], publicKey: KEY('a'), terminals: true, account: IVAN });
     await until(async () => (await db.select({ account: nodes.account }).from(nodes).where(eq(nodes.id, a.nodeId)))[0]?.account?.tier === 'max');
-    expect(await mine(app, ceo, plan)).toMatchObject({ accounts: [{ nodeId: a.nodeId, hostname: 'ivan-mac', tier: 'max', email: 'ivan.plans@example.com' }], tier: 'max', accountsDiffer: false });
+    expect(await mine(app, ceo, plan)).toMatchObject({ accounts: [{ nodeId: a.nodeId, hostname: 'ivan-mac', tier: 'max', email: 'ivan.plans@example.com' }], tier: 'max', accountsDiffer: false, signedInOnce: false, leaseMachine: null });
 
     /* Dana works in Sales only. The map shows her the orchestrator's plan, which is Ivan's, without his address. */
     const [acme] = await db.select().from(companies);
@@ -340,9 +340,12 @@ describe("a Codex plan's lease", () => {
   });
 
   it('moves to a machine of the plan that is online once the holder has been away ten minutes, and the holder gives it up when back', async () => {
-    const { app, a, b, nb, holder, url } = await codex();
+    const { app, a, b, nb, holder, url, ceo, plan } = await codex();
     await moveLeases(app.ctx, new Date(Date.now() + LEASE_MOVE_MS + 1000));
     expect(await holder()).toBe(b.nodeId);
+    /* The Plans tab says the plan was signed in once and runs on the laptop now. */
+    const listed = ((await app.inject({ method: 'GET', url: '/api/subscriptions', ...as(ceo) })).json().subscriptions as { id: string }[]).find(s => s.id === plan);
+    expect(listed).toMatchObject({ signedInOnce: true, leaseMachine: 'ivan-laptop' });
     expect(await nextOf(nb, 'cred.lease')).toEqual({ type: 'cred.lease', hold: true });
     expect(await nextOf(nb, 'cred.put')).toEqual({ type: 'cred.put', kind: 'codex_auth', version: 1, sealed: SEALED('b') });
     /* The new holder learns whom to seal a renewed sign-in for. */
