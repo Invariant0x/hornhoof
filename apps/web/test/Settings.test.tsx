@@ -66,6 +66,17 @@ describe('Share access', () => {
     expect(calls.map(c => `${c.method} ${c.path}`)).toContain('DELETE /api/link');
   });
 
+  it('breaks the question about removing inside the longest address, so the window does not get wider', async () => {
+    const longest = { name: 'a'.repeat(63), url: `https://${'a'.repeat(63)}.hornhoof.org` };
+    mockApi({ 'GET /api/link': [200, { link: longest, domain: 'hornhoof.org' }] });
+    const user = userEvent.setup();
+    render(<Settings me={ME} onClose={() => {}} />);
+    await user.click(await screen.findByRole('button', { name: 'Remove link' }));
+    const question = screen.getByText(`Hornhoof stops opening at ${longest.url}. Machines connected through this link lose the connection.`);
+    expect(question.matches('.settings-actions > span')).toBe(true);
+    expect(decl('.settings-actions > span', 'overflow-wrap')).toBe('anywhere');
+  });
+
   it('opens Hornhoof on the internet at a name made from the company name', async () => {
     const calls = mockApi({
       'GET /api/link': [200, { link: null, domain: 'hornhoof.org' }],
