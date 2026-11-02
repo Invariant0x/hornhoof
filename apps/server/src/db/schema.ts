@@ -566,7 +566,7 @@ export const testRuns = pgTable(
 
 export const TEST_PART_STATUSES = ['queued', 'running', 'passed', 'failed', 'stopped'] as const;
 /* A machine that lost a part of a run as it ran: the place (a machine's id, or builtin), its name then, and why. */
-export type LostRun = { key: string; machine: string; why: string };
+export type LostRun = { key: string; machine: string; why: string; computer?: string };
 
 /* One part of a test run: it waits for a free machine, then runs on one node, a node on a machine or the built-in node. */
 export const testParts = pgTable(

@@ -20,6 +20,8 @@ services:
       TUNNEL_HOST: tunnel
       # How many megabytes all the files on the company's tasks may take together; 2048 when empty.
       TASK_FILES_MB: ${TASK_FILES_MB:-}
+      # Parts of runs allowed on one physical computer at once; 1 when empty.
+      MAX_RUNS_PER_HOST: ${MAX_RUNS_PER_HOST:-}
       # The computer the server and its built-in node run on, as a hash of the key a join from it sends, which install.sh
       # writes, so the pool counts that computer once when it joined as a machine too.
       HORNHOOF_HOST_ID: ${HORNHOOF_HOST_ID:-}

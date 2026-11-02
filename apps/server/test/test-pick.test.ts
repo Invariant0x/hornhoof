@@ -13,6 +13,22 @@ const spot = (key: string, over: Partial<Spot> = {}, load: Partial<NonNullable<S
 const NEED = 4 * GIB;
 
 describe('picking a machine for a test run', () => {
+  it('ranks free hosts by their processors and memory instead of their containers', () => {
+    const container = spot('container', {}, { load: 0, ...{ hostCpus: 16, hostLoad: 12, hostMemFree: 5 * GIB, hostMemory: 16 * GIB } });
+    const mac = spot('mac', {}, { load: 6, ...{ hostCpus: 12, hostLoad: 1, hostMemFree: 12 * GIB, hostMemory: 16 * GIB } });
+    expect(pickMachine([container, mac], NEED)?.key).toBe('mac');
+  });
+
+  it('takes no part when host memory is short, including zero free bytes', () => {
+    for (const hostMemFree of [0, 3 * GIB]) {
+      expect(pickMachine([spot('container', {}, { ...{ hostMemFree } })], NEED)).toBeNull();
+    }
+  });
+
+  it('takes no part on a loaded host, even when its container has idle processors', () => {
+    expect(pickMachine([spot('container', {}, { load: 0, ...{ hostCpus: 16, hostLoad: 14.4 } })], NEED)).toBeNull();
+  });
+
   it('takes the one with the most free processor and memory', () => {
     const busy = spot('busy', {}, { load: 7 });
     const free = spot('free', {}, { load: 1, memFree: 12 * GIB });

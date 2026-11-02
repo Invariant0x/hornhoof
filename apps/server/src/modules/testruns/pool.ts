@@ -5,6 +5,7 @@ import { requirePerson, type Person } from '../../auth/session.js';
 import { agents, machines, people, tasks, testParts, testRuns } from '../../db/schema.js';
 import { BUILTIN, nodeIdentity, type NodeIdentity } from '../nodes/hub.js';
 import { builtinMachine } from '../nodes/nodes.js';
+import { resources } from './capacity.js';
 import { machineNodes, machineState, together } from './load.js';
 import { loaded } from './pick.js';
 import { commandFor, lostLine, needOf, placesOf, reaches, targetOf, type Place } from './runs.js';
@@ -50,7 +51,7 @@ async function whyWaits(ctx: Ctx, places: Place[], run: Run, targets: Map<string
   for (const p of able) {
     if (p.busy) busy.push(p.name);
     else if (p.load && loaded(p.load)) hot.push(p.name);
-    else if (!p.load || p.load.memFree < need * GIB) short.push(p.name);
+    else if (!p.load || resources(p.load).memFree < need * GIB) short.push(p.name);
     else return 'A machine is free for it: it goes out in a moment.';
   }
   return [
