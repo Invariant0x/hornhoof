@@ -265,13 +265,42 @@ describe("an agent's live terminal in its window", () => {
     expect(moves).toEqual(['fit', 'scrollToBottom']);
   });
 
-  it('tells the session the size the terminal has when the view opens, after a card changed it while connecting', async () => {
-    /* A resize while the socket still connects goes nowhere, and the session would draw its screen for the rows in the address. */
+  it("tells the session the terminal's size once its first screen comes, after a card changed it while connecting", async () => {
+    /* A resize while the socket still connects goes nowhere. The server says ready before the node holds the view, so a
+       resize at ready can be lost too; the first screen comes from the view itself. */
     open();
     const ws = await socket();
     terms[0]!.resized(100, 13);
     ws.opened();
-    expect(ws.sent).toContainEqual({ type: 'resize', cols: 100, rows: 13 });
+    expect(ws.sent).toEqual([]);
+    ws.screen('screen for 30 rows');
+    expect(ws.sent).toEqual([{ type: 'resize', cols: 100, rows: 13 }]);
+    ws.screen('screen for 13 rows');
+    expect(ws.sent).toHaveLength(1);
+  });
+
+  it('tells its size once when the session answers the resize at once with a new screen', async () => {
+    open();
+    const ws = await socket();
+    terms[0]!.resized(100, 13);
+    ws.opened();
+    const sent = ws.send.bind(ws);
+    ws.send = (data: string) => {
+      sent(data);
+      if (ws.sent.length < 5) ws.screen('screen for 13 rows');
+    };
+    ws.screen('screen for 30 rows');
+    expect(ws.sent).toEqual([{ type: 'resize', cols: 100, rows: 13 }]);
+  });
+
+  it('sends no size when a card came and went while connecting, and the terminal is back at the size it asked for', async () => {
+    open();
+    const ws = await socket();
+    terms[0]!.resized(100, 13);
+    terms[0]!.resized(100, 30);
+    ws.opened();
+    ws.screen('screen for 30 rows');
+    expect(ws.sent).toEqual([]);
   });
 
   it('keeps the log for agents whose node shows no terminal', async () => {
