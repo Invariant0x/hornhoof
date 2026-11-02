@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { pickMachine, type Spot } from '../src/modules/testruns/pick.js';
+import { computerKey, latestHost } from '../src/modules/testruns/capacity.js';
+import { freedom, pickMachine, type Spot } from '../src/modules/testruns/pick.js';
 
 const GIB = 1024 ** 3;
 const spot = (key: string, over: Partial<Spot> = {}, load: Partial<NonNullable<Spot['load']>> = {}): Spot => ({
@@ -13,6 +14,21 @@ const spot = (key: string, over: Partial<Spot> = {}, load: Partial<NonNullable<S
 const NEED = 4 * GIB;
 
 describe('picking a machine for a test run', () => {
+  it('keeps an offline legacy place separate from a reported host with the same name', () => {
+    const offline = { key: 'shared', load: null };
+    const reported = { ...spot('other'), load: { ...spot('other').load!, host: 'shared' } };
+    expect(computerKey(offline)).not.toBe(computerKey(reported));
+    expect(latestHost(offline, [null])).toBeNull();
+  });
+
+  it('does not exceed a container memory limit even on a host with enough memory', () => {
+    expect(pickMachine([spot('small-container', {}, { memFree: 2 * GIB, ...{ hostMemFree: 12 * GIB } })], NEED)).toBeNull();
+  });
+
+  it('treats zero host load and unknown total memory as reported, without substituting container figures', () => {
+    expect(freedom({ cpus: 8, load: 4, memFree: 8 * GIB, memTotal: 16 * GIB, tests: 0, jobs: 0, ...{ hostLoad: 0, hostMemFree: 4 * GIB, hostMemory: 0 } })).toBe(1);
+  });
+
   it('ranks free hosts by their processors and memory instead of their containers', () => {
     const container = spot('container', {}, { load: 0, ...{ hostCpus: 16, hostLoad: 12, hostMemFree: 5 * GIB, hostMemory: 16 * GIB } });
     const mac = spot('mac', {}, { load: 6, ...{ hostCpus: 12, hostLoad: 1, hostMemFree: 12 * GIB, hostMemory: 16 * GIB } });

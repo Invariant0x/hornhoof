@@ -7,7 +7,7 @@ import { agents, attachments, companies, departments, jobs, subscriptions, tasks
 import { createTask } from '../src/modules/tasks/engine.js';
 import { afterJob } from '../src/modules/tasks/wake.js';
 import { nodeIdentity } from '../src/modules/nodes/hub.js';
-import { checkTestTimes } from '../src/modules/testruns/runs.js';
+import { checkTestTimes, pumpTests } from '../src/modules/testruns/runs.js';
 import { as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
 const GIB = 1024 ** 3;
@@ -121,9 +121,11 @@ async function gets(node: FakeNode, type: ServerMessage['type'], ms = 300): Prom
 
 const done = (run: TestsRun, over: object = {}) => ({ type: 'tests.done' as const, partId: run.partId, ok: true, exitCode: 0, error: null, commit: 'a'.repeat(40), log: `part ${run.part} ok\n`, ...over });
 
-/* Until #29's optional protocol fields arrive, report the agreed host data at the hub boundary. */
-const reportHost = (c: Awaited<ReturnType<typeof company>>, nodeId: string | null, host: string, over: object = {}) =>
-  c.app.ctx.hub.report(nodeId ? nodeIdentity(nodeId) : { kind: 'builtin' }, { ...idle(), host, hostCpus: 16, hostLoad: 1, hostMemFree: 12 * GIB, hostMemory: 16 * GIB, ...over });
+/* The scheduler consumes optional physical resources at the hub boundary. */
+const reportHost = (c: Awaited<ReturnType<typeof company>>, nodeId: string | null, host: string, over: object = {}) => {
+  const load = { ...idle(), host, hostCpus: 16, hostLoad: 1, hostMemFree: 12 * GIB, hostMemory: 16 * GIB, ...over };
+  c.app.ctx.hub.report(nodeId ? nodeIdentity(nodeId) : { kind: 'builtin' }, load);
+};
 
 describe('parts on physical computers', () => {
   it('sends the next run to another host even when a sibling container looks idle', async () => {
@@ -285,6 +287,34 @@ describe('parts on physical computers', () => {
     await Promise.all([call('run_tests', { command: 'make test' }), call('run_tests', { command: 'make test' })]);
     const parts = await c.db.select().from(testParts).orderBy(asc(testParts.createdAt));
     expect(parts.map(p => p.status).sort()).toEqual(['queued', 'running']);
+  });
+
+  it('recovers the occupied host from the database when its sibling reconnects before it after a server restart', async () => {
+    const c = await company();
+    const one = await c.planless(c.ceo, 'container-one');
+    const two = await c.planless(c.ceo, 'container-two');
+    reportHost(c, one.nodeId, 'linux');
+    reportHost(c, two.nodeId, 'linux');
+    const { call } = await c.turn(c.bruno);
+    await call('run_tests', { command: 'make test' });
+    await nextOf(one.node, 'tests.run');
+    one.node.close();
+    await until(() => !c.app.ctx.hub.isOnline(nodeIdentity(one.nodeId)));
+    await call('run_tests', { command: 'make test' });
+    /* A new server context has the persisted database and the sibling's connection, without the old server's cache. */
+    await pumpTests({ ...c.app.ctx });
+    expect(JSON.parse((await call('test_run', { run: 2 })).text).parts).toMatchObject([{ status: 'queued', machine: null }]);
+    expect(await gets(two.node, 'tests.run')).toBe(false);
+  });
+
+  it('queues and explains a run whose host has memory but whose container does not', async () => {
+    const c = await company();
+    const box = await c.planless(c.ceo, 'small-container');
+    reportHost(c, box.nodeId, 'linux', { memFree: 2 * GIB, hostMemFree: 12 * GIB });
+    const { call } = await c.turn(c.bruno);
+    expect((await call('run_tests', { command: 'make test' })).text).toMatch(/waits for a free machine/);
+    const pool = (await c.app.inject({ url: '/api/pool', ...as(c.ceo) })).json();
+    expect(pool.waiting[0].why).toMatch(/Short of the 4 GB/);
   });
 });
 

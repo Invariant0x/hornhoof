@@ -582,6 +582,8 @@ export const testParts = pgTable(
     machineId: uuid('machine_id').references(() => machines.id),
     /* The machine's name as it ran, for the result. */
     machineName: text('machine_name'),
+    /* Its assigned physical computer, kept through disconnects and server restarts. Null on older parts. */
+    computer: text('computer'),
     /* The commit it tested, the command's exit code, and why it ended when that was not the tests themselves. */
     commit: text('commit'),
     exitCode: integer('exit_code'),

@@ -1,5 +1,5 @@
 import type { NodeLoad } from '@hornhoof/protocol';
-import { resources } from './capacity.js';
+import { availableMemory, resources } from './capacity.js';
 
 /* A place a test run can go: a machine of the company, or the built-in node. load: what its nodes said last, none while
    none of them is connected. reaches: its owner reaches the department whose repository the run clones. busy: it runs a
@@ -12,20 +12,20 @@ export const ABOUT_AS_FREE = 0.1;
 export const LOADED = 0.9;
 
 /* Whether a machine's processors are too busy to take another part. */
-export const loaded = (load: NodeLoad) => {
+export const loaded = (load: NodeLoad): boolean => {
   const host = resources(load);
   return host.load / host.cpus >= LOADED;
 };
 
 /* The share of its processors a machine has free, and of its memory, together: 2 for one that does nothing. */
-export const freedom = (load: NodeLoad) => {
+export const freedom = (load: NodeLoad): number => {
   const host = resources(load);
   return Math.max(0, 1 - host.load / host.cpus) + (host.memTotal ? host.memFree / host.memTotal : 0);
 };
 
 /* The freest machine that may take a run needing this much free memory, or none. A loaded one takes none. */
 export function pickMachine(spots: Spot[], needBytes: number): Spot | null {
-  const fits = spots.filter(s => s.lent && s.reaches && !s.busy && s.load !== null && !loaded(s.load) && resources(s.load).memFree >= needBytes);
+  const fits = spots.filter(s => s.lent && s.reaches && !s.busy && s.load !== null && !loaded(s.load) && availableMemory(s.load) >= needBytes);
   const better = (a: Spot, b: Spot) => {
     const [x, y] = [freedom(a.load!), freedom(b.load!)];
     if (Math.abs(x - y) >= ABOUT_AS_FREE) return x > y;

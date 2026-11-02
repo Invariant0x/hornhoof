@@ -267,6 +267,13 @@
       "when": 1793573510181,
       "tag": "0037_work_repeatable",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1793648206686,
+      "tag": "0038_run_computer",
+      "breakpoints": true
     }
   ]
 }

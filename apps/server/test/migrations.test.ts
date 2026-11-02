@@ -394,10 +394,11 @@ describe('migrations 0034 to 0037', () => {
     await db.execute(sql`insert into test_parts (company_id, run_id, part, created_at) values (${C}, ${R}, 1, '2026-10-30T10:00:00Z')`);
     await db.execute(sql`insert into machines (company_id, person_id, machine_key, hostname) values (${C}, ${P}, 'mac-0001-abcd', 'ivan-mac')`);
 
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0037_work_repeatable') });
     await migrate(db, { migrationsFolder: MIGRATIONS });
 
-    const parts = await db.execute<{ waits: boolean; lost: unknown }>(sql`select queued_at = created_at as waits, lost from test_parts`);
-    expect(parts.rows).toEqual([{ waits: true, lost: [] }]);
+    const parts = await db.execute<{ waits: boolean; lost: unknown; computer: string | null }>(sql`select queued_at = created_at as waits, lost, computer from test_parts`);
+    expect(parts.rows).toEqual([{ waits: true, lost: [], computer: null }]);
     const runs = await db.execute(sql`select kind, files, memory_gb, repeatable from test_runs`);
     expect(runs.rows).toEqual([{ kind: 'tests', files: [], memory_gb: null, repeatable: false }]);
     const kinds = await db.execute(sql`select kind from machines`);

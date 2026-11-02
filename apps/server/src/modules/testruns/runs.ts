@@ -150,33 +150,14 @@ function account(run: Run, task: Pick<Task, 'number'>, parts: Part[], files: Set
    of test runs. */
 export type Place = { key: string; node: NodeIdentity; name: string; machineId: string | null; nodeId: string | null; builtin: boolean; lent: boolean; busy: boolean; running: number; load: NodeLoad | null; access: Access | null; works: boolean };
 
-const partPlace = (ctx: Ctx, part: Pick<Part, 'builtin' | 'machineId' | 'nodeId'>): ComputerPlace => {
+const partPlace = (ctx: Ctx, part: Pick<Part, 'builtin' | 'machineId' | 'nodeId' | 'computer'>): ComputerPlace => {
   const id = nodeOf(part);
-  return { key: part.builtin ? 'builtin' : (part.machineId ?? ''), load: id ? ctx.hub.loadOf(id) : null };
+  return { key: part.builtin ? 'builtin' : (part.machineId ?? ''), load: id ? ctx.hub.loadOf(id) : null, computer: part.computer };
 };
-
-/* A disconnected node can still run its part. Keep its assigned computer until the part ends or is declared lost. */
-const computers = new WeakMap<Ctx, Map<string, ComputerPlace>>();
-
-function rememberComputer(ctx: Ctx, partId: string, place: ComputerPlace): void {
-  const known = computers.get(ctx) ?? new Map<string, ComputerPlace>();
-  known.set(partId, place);
-  computers.set(ctx, known);
-}
-
-function runningPlaces(ctx: Ctx, parts: Pick<Part, 'id' | 'builtin' | 'machineId' | 'nodeId'>[]): ComputerPlace[] {
-  const known = computers.get(ctx);
-  const active = new Map(parts.map(p => {
-    const now = partPlace(ctx, p);
-    return [p.id, now.load?.host ? now : (known?.get(p.id) ?? now)] as const;
-  }));
-  computers.set(ctx, active);
-  return [...active.values()];
-}
 
 export async function placesOf(ctx: Ctx, companyId: string): Promise<Place[]> {
   const { db, hub } = ctx;
-  const running = runningPlaces(ctx, await db.select({ id: testParts.id, machineId: testParts.machineId, builtin: testParts.builtin, nodeId: testParts.nodeId }).from(testParts).where(eq(testParts.status, 'running')));
+  const running = (await db.select({ computer: testParts.computer, machineId: testParts.machineId, builtin: testParts.builtin, nodeId: testParts.nodeId }).from(testParts).where(eq(testParts.status, 'running'))).map(p => partPlace(ctx, p));
   const rows = await db
     .select({ machine: machines, owner: people })
     .from(machines)
@@ -277,7 +258,7 @@ async function giveOut(ctx: Ctx): Promise<void> {
     if (!place) continue;
     const [taken] = await db
       .update(testParts)
-      .set({ status: 'running', nodeId: place.nodeId, builtin: place.builtin, machineId: place.machineId, machineName: place.name, startedAt: new Date() })
+      .set({ status: 'running', nodeId: place.nodeId, builtin: place.builtin, machineId: place.machineId, machineName: place.name, computer: computerKey(place), startedAt: new Date() })
       .where(and(eq(testParts.id, part.id), eq(testParts.status, 'queued')))
       .returning();
     if (!taken) continue;
@@ -297,11 +278,10 @@ async function giveOut(ctx: Ctx): Promise<void> {
     if (!sent) {
       await db
         .update(testParts)
-        .set({ status: 'queued', nodeId: null, builtin: false, machineId: null, machineName: null, startedAt: null })
+        .set({ status: 'queued', nodeId: null, builtin: false, machineId: null, machineName: null, computer: null, startedAt: null })
         .where(and(eq(testParts.id, part.id), eq(testParts.status, 'running')));
     } else {
       reserved.take(place);
-      rememberComputer(ctx, part.id, place);
     }
   }
 }
@@ -352,6 +332,11 @@ async function endParts(ctx: Ctx, which: SQL, error: string, tail = ''): Promise
   return ended;
 }
 
+const lostAt = (ctx: Ctx, part: Part, why: string): LostRun => {
+  const place = partPlace(ctx, part);
+  return { key: place.key, computer: computerKey(place), machine: part.machineName ?? 'a machine', why };
+};
+
 /* Parts their machines lost as they ran, as when a machine restarted, went offline, was disconnected or lost the plan its
    node ran for: each waits for another machine under a new id, so its lost run, should that come back, is told apart.
    One lost RERUNS times already fails with why. */
@@ -367,10 +352,10 @@ export async function loseParts(ctx: Ctx, which: SQL, why: string): Promise<void
       await endParts(ctx, running, why);
       continue;
     }
-    const where: LostRun = { key: p.builtin ? 'builtin' : (p.machineId ?? ''), machine: p.machineName ?? 'a machine', why, computer: computerKey(computers.get(ctx)?.get(p.id) ?? partPlace(ctx, p)) };
+    const where = lostAt(ctx, p, why);
     const [again] = await ctx.db
       .update(testParts)
-      .set({ id: sql`gen_random_uuid()`, status: 'queued', lost: [...p.lost, where], nodeId: null, builtin: false, machineId: null, machineName: null, startedAt: null, queuedAt: new Date() })
+      .set({ id: sql`gen_random_uuid()`, status: 'queued', lost: [...p.lost, where], nodeId: null, builtin: false, machineId: null, machineName: null, computer: null, startedAt: null, queuedAt: new Date() })
       .where(running)
       .returning({ id: testParts.id });
     /* What the lost attempt put on the task goes: the part makes it again, and the old id takes no more. */

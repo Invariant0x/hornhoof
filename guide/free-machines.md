@@ -51,7 +51,9 @@ between 1 and 1000, then restart the server. With Docker Compose, put it in `.en
 Each place still takes only one part at a time: the parts on its node share a system user.
 
 The newest host report supplies its processor load and free memory when available. Otherwise Hornhoof uses the node's
-figures. An older node that reports no host remains a separate computer until it is updated.
+figures. A part must also fit within its node's own memory limit, such as a container's limit. An older node that reports
+no host remains a separate computer until it is updated. Each assigned part keeps its computer in the database, so its
+slot stays occupied through a lost connection or a server restart until the part ends or is declared lost.
 
 ## Keep your machine out of test runs
 
