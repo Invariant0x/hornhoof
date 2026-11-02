@@ -8,7 +8,7 @@ import { schemaLayout, stepPaths } from '../src/screens/schema';
 import { RepoSettings } from '../src/ui/RepoSettings';
 import { toD } from '../src/ui/wires';
 import type { Me, Org } from '../src/types';
-import { CARD, DEV_ORG, ME, mockApi, ROSTER, TASK_DETAIL, TASKS } from './api-mock';
+import { CARD, decisions, DEV_ORG, ME, mockApi, REQUESTS, ROSTER, TASK_DETAIL, TASKS } from './api-mock';
 import { decl, px, rulesFor } from './css';
 import { fakeStream } from './fake-stream';
 
@@ -107,6 +107,22 @@ describe('Department view', () => {
     await drawer(user, 'About the department');
     const people = screen.getByRole('region', { name: 'People with access' });
     expect(within(people).getAllByRole('listitem').map(li => li.querySelector('b')!.textContent)).toEqual(['Sasha', 'Oleg']);
+  });
+
+  it("opens a person's decisions from their card in the department, which shows the same count as the map", async () => {
+    const user = userEvent.setup();
+    const [dev] = DEV_ORG.departments;
+    const sasha = { ...dev!.people[0]!, pendingDecisions: 2 };
+    shell({ 'GET /api/requests': [200, decisions([{ ...REQUESTS[0]!, ownerPersonId: sasha.id }, { ...REQUESTS[1]!, ownerPersonId: sasha.id }])] }, { ...DEV_ORG, departments: [{ ...dev!, people: [sasha] }] });
+    await flyIn(user);
+    const schema = screen.getByRole('region', { name: 'Department schema' });
+    const card = within(schema).getByRole('button', { name: 'Sasha: 2 decisions wait' });
+    expect(card).toHaveClass('attn');
+    expect(card).toHaveTextContent('2');
+    await user.click(card);
+    expect(await screen.findByRole('heading', { level: 1, name: 'Tasks' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Waiting for you' })).toHaveTextContent('Decisions for Sasha');
+    expect(screen.queryByRole('heading', { level: 2, name: 'Development' })).not.toBeInTheDocument();
   });
 
   it('shows an employee start working while the department is open', async () => {

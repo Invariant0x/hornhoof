@@ -904,6 +904,9 @@ summary.turn-head:focus-visible { outline: 2px solid var(--cyan); outline-offset
 .ttree.sub { padding-left: 18px; border-left: 1px solid var(--line2); margin-left: 10px; }
 .tstate.planned { border-style: dashed; }
 .waiting { display: grid; gap: 10px; }
+/* The person whose decisions show, with a cross that shows everyone's again. */
+.filter-chip { justify-self: start; display: inline-flex; align-items: center; gap: 2px; max-width: 100%; margin: 0; padding-left: 12px; border: 1px solid var(--amber); background: var(--surface); font-size: 13px; font-weight: 600; }
+.filter-chip > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .imps { display: grid; gap: 10px; }
 .imp { display: grid; gap: 8px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--amber); }
 .imp-taken { border-left-color: var(--cyan); }

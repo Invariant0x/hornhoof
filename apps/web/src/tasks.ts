@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api';
 import { useStream, type LiveMessage } from './live';
 import { deptLabel, type Messages } from './i18n';
-import type { AgentRef, Improvement, Lang, Org, TaskDetail, TaskLine, TaskPlace, TurnView, WaitingRequest } from './types';
+import type { AgentRef, Decisions, Improvement, Lang, Org, TaskDetail, TaskLine, TaskPlace, TurnView } from './types';
 
 /* Fetches the path, again whenever a stream message says it may have changed. undefined until the first answer. */
 function useLive<T>(path: string | null, pick: (body: never) => T, refresh: (m: LiveMessage) => boolean): { data: T | undefined; failure: unknown; load: () => void } {
@@ -62,10 +62,12 @@ export function useTask(id: string) {
   return { task: data, failure, load };
 }
 
-/* What agents ask of the people who reach their tasks. */
-export function useRequests() {
-  const { data, failure, load } = useLive('/api/requests', (b: { requests: WaitingRequest[] }) => b.requests, m => m.type === 'requests');
-  return { requests: data, failure, load };
+/* Everything that waits for people as this person may see it: what agents ask on the tasks they reach, the orchestrator's
+   cards and his request for the computer, with the counts of all of it. Fetched again when any of them may have changed,
+   and when people or access changed, as whose decision it is may move with them. */
+export function useDecisions() {
+  const { data, failure, load } = useLive('/api/requests', (b: Decisions) => b, m => m.type === 'requests' || m.type === 'org' || m.type === 'computer');
+  return { decisions: data, failure, load };
 }
 
 /* What employees found to improve, for people who see the whole company; nothing is fetched for others. */

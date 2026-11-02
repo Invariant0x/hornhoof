@@ -10,6 +10,7 @@ import { usePanZoom, ZoomBar } from '../ui/canvas';
 import { Edge } from '../ui/Edge';
 import { AgentIcon, PersonIcon, ProviderMark } from '../ui/icons';
 import { NewTask } from '../ui/NewTask';
+import { PersonButton } from '../ui/PersonButton';
 import { RepoSettings } from '../ui/RepoSettings';
 import { byState, TaskRow } from '../ui/TaskRow';
 import { Pulse, pulseSeconds, toD, useReducedMotion, type Point } from '../ui/wires';
@@ -479,13 +480,15 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
           </section>
           {reach.map((p, k) => (
             <div key={p.id} className="pchip" style={{ left: s.people[k]![0], top: s.people[k]![1], width: PW, height: PH }}>
-              <Edge cut={8}>
-                <PersonIcon />
-                <span className="pn">
-                  <b>{p.name}</b>
-                  <span>{p.title || t.dept.leads}</span>
-                </span>
-              </Edge>
+              <PersonButton person={p} onOpen={() => !dragged() && onOpenDecisions?.(p.id)}>
+                <Edge cut={8}>
+                  <PersonIcon />
+                  <span className="pn">
+                    <b>{p.name}</b>
+                    <span>{p.title || t.dept.leads}</span>
+                  </span>
+                </Edge>
+              </PersonButton>
             </div>
           ))}
           <section aria-labelledby={`${id}-members`} className="slayer">

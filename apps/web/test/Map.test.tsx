@@ -482,6 +482,20 @@ describe('Map', () => {
     expect(container.querySelector('.hub-num')).toHaveTextContent('1/1');
   });
 
+  it("fetches the company again when the CEO's request for the computer changes and when the tab comes back", async () => {
+    const stream = fakeStream();
+    const calls = mockApi({ 'GET /api/org': [200, ORG] });
+    render(<MapScreen {...PROPS} />);
+    await screen.findByText('agents working');
+    const loads = () => calls.filter(c => c.path === '/api/org').length;
+    stream.send({ type: 'computer' });
+    await vi.waitFor(() => expect(loads()).toBe(2));
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await vi.waitFor(() => expect(loads()).toBe(3));
+  });
+
   it('keeps the newest company when an older answer comes after it', async () => {
     const stream = fakeStream();
     let working = 0;

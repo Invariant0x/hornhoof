@@ -223,6 +223,8 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard }:
     }
     if (m.type === 'working') soon();
     if (m.type === 'org') loadCard();
+    /* The request for the computer changed, here or on another of the CEO's screens. */
+    if (m.type === 'computer') void loadCommands();
     if (m.type === 'reconnected') {
       loadCard();
       void catchUp();

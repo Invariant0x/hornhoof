@@ -12,12 +12,12 @@ export const wordsAnswer = (requests: WaitingRequest[]) => requests.some(r => r.
 /* A picture an agent showed, as people who reach its task load it. */
 const picture = (id: string) => `/api/attachments/${id}`;
 
-/* company: whether the person sees the whole company, the only people who approve a commit. onOpenAgent opens the asking
-   agent's window, to see in its terminal what it did. */
-type Shared = { company: boolean; onOpenTask: (id: string) => void; onOpenAgent: (id: string) => void; placeName: (p: TaskPlace) => string };
+/* onOpenAgent opens the asking agent's window, to see in its terminal what it did. */
+type Shared = { onOpenTask: (id: string) => void; onOpenAgent: (id: string) => void; placeName: (p: TaskPlace) => string };
 
-/* One thing an agent waits for: a question to answer, a commit to approve, or a task it is stuck on. */
-function RequestItem({ request, onDone, company, onOpenTask, onOpenAgent, placeName }: Shared & { request: WaitingRequest; onDone: () => void }) {
+/* One thing an agent waits for: a question to answer, a commit to approve, or a task it is stuck on. Its answers show only
+   to a person the server lets answer it: an approval to people who see the whole company. */
+function RequestItem({ request, onDone, onOpenTask, onOpenAgent, placeName }: Shared & { request: WaitingRequest; onDone: () => void }) {
   const t = useT();
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
@@ -88,7 +88,7 @@ function RequestItem({ request, onDone, company, onOpenTask, onOpenAgent, placeN
           {t.tasks.seeWork}
         </a>
       )}
-      {request.kind === 'choice' && (
+      {request.kind === 'choice' && request.canAnswer && (
         <div className="req-form">
           <div className="req-options">
             {request.options.map((o, i) => (
@@ -101,7 +101,7 @@ function RequestItem({ request, onDone, company, onOpenTask, onOpenAgent, placeN
           <Field label={t.tasks.note}>{p => <input {...p} value={text} maxLength={4000} onChange={e => setText(e.target.value)} />}</Field>
         </div>
       )}
-      {(request.kind === 'question' || request.kind === 'stuck') && (
+      {(request.kind === 'question' || request.kind === 'stuck') && request.canAnswer && (
         <form className="req-form" onSubmit={answer}>
           <Field label={t.tasks.yourAnswer}>{p => <textarea {...p} rows={3} value={text} maxLength={4000} onChange={e => setText(e.target.value)} />}</Field>
           <div className="req-actions">
@@ -116,13 +116,13 @@ function RequestItem({ request, onDone, company, onOpenTask, onOpenAgent, placeN
           </div>
         </form>
       )}
-      {request.kind === 'approval' && !company && (
+      {request.kind === 'approval' && !request.canAnswer && (
         <div className="req-form">
           <Commit request={request} />
           <p className="muted">{t.tasks.approvedByCompany}</p>
         </div>
       )}
-      {request.kind === 'approval' && company && (
+      {request.kind === 'approval' && request.canAnswer && (
         <div className="req-form">
           <Commit request={request} />
           <Field label={t.tasks.note}>{p => <input {...p} value={text} maxLength={4000} onChange={e => setText(e.target.value)} />}</Field>

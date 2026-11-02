@@ -2,13 +2,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { deptLabel, errorText, useLanguage, useT, type Messages } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
 import { useStream, type LiveMessage } from '../live';
-import { useOrg } from '../org';
-import type { Department, Employee, EmployeeStatus, Endpoint, Me, Org, PersonView, SubView } from '../types';
+import { mapPeople, useOrg } from '../org';
+import type { Department, Employee, EmployeeStatus, Endpoint, Me, Org, SubView } from '../types';
 import { accessText } from '../ui/AccessPicker';
 import { Bar, percent } from '../ui/Bar';
 import { usePanZoom, ZoomBar } from '../ui/canvas';
 import { Edge } from '../ui/Edge';
 import { LogoMark, PersonIcon } from '../ui/icons';
+import { PersonButton } from '../ui/PersonButton';
 import { Pulse, pulseSeconds, toD, useReducedMotion, type Point } from '../ui/wires';
 import { useWorkLines } from '../ui/work-lines';
 import { clock } from './Subscriptions';
@@ -104,17 +105,6 @@ const GAUGE_TRACK: Point[] = Array.from({ length: 37 }, (_, i) => {
   const a = Math.PI + (Math.PI * i) / 36;
   return [120 + 103 * Math.cos(a), 120 + 103 * Math.sin(a)];
 });
-
-/* A person on the top row, with the department they belong to when they reach only one. */
-export type MapPerson = PersonView & { deputy?: boolean; home?: Department };
-
-/* Everyone with a card on the top row, each once: the people next to the CEO, then the people of one department in the
-   order of the departments. The server places them; the map only lines them up, so every card is reachable from the hub. */
-export function mapPeople(org: Org): MapPerson[] {
-  const seen = new Set<string>();
-  const all: MapPerson[] = [...org.people, ...org.departments.flatMap(d => d.people.map(p => ({ ...p, home: d })))];
-  return all.filter(p => !seen.has(p.id) && !!seen.add(p.id));
-}
 
 /* The way from the hub's edge down to a person's card. */
 function toPerson(org: Org, id: string): Point[] | null {
@@ -426,27 +416,19 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator, inside = false, 
         </svg>
 
         <ul className="chips" style={{ left: CX - chipsW / 2, top, gap: CHIP_GAP }} aria-label={t.map.leaders}>
-          {people.map(p => {
-            const n = p.pendingDecisions ?? null;
-            return (
-              <li key={p.id} style={{ width: CHIP_W, height: CHIP_H }}>
-                <button type="button" className={`chip-btn${n ? ' attn' : ''}`} aria-label={t.map.decisionsOf(p.name, n)} onClick={() => openDecisions(p.id)}>
-                  <Edge cut={8} className="chip">
-                    <PersonIcon label={t.map.person} />
-                    <span>
-                      <b>{p.name}</b>
-                      <small>{p.title || (p.home ? deptLabel(t, p.home) : p.deputy ? t.map.deputy(accessText(t, p.access, org)) : t.map.wholeCompany)}</small>
-                    </span>
-                  </Edge>
-                  {n ? (
-                    <span className="nav-count chip-count" aria-hidden="true">
-                      {n}
-                    </span>
-                  ) : null}
-                </button>
-              </li>
-            );
-          })}
+          {people.map(p => (
+            <li key={p.id} style={{ width: CHIP_W, height: CHIP_H }}>
+              <PersonButton person={p} onOpen={() => openDecisions(p.id)}>
+                <Edge cut={8} className="chip">
+                  <PersonIcon label={t.map.person} />
+                  <span>
+                    <b>{p.name}</b>
+                    <small>{p.title || (p.home ? deptLabel(t, p.home) : p.deputy ? t.map.deputy(accessText(t, p.access, org)) : t.map.wholeCompany)}</small>
+                  </span>
+                </Edge>
+              </PersonButton>
+            </li>
+          ))}
         </ul>
 
         {company ? (
