@@ -4,6 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { agents, companies, departments, nodes, planCredentials, subscriptions } from '../src/db/schema.js';
+import { LEASE_MOVE_MS, moveLeases } from '../src/modules/subscriptions/lease.js';
 import { companyView } from '../src/modules/tools/company.js';
 import { as, connectNode, invitePerson, listen, openStream, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
@@ -20,7 +21,7 @@ const machineCode = async (app: FastifyInstance, token: string) => codeOf((await
 type Joined = { nodeId: string; key: string };
 
 /* Ivan's plan on his Mac (a) and his laptop (b), and Oleg's Codex plan on his tower (o). */
-async function plans(provider: 'claude' | 'kimi' = 'claude') {
+async function plans(provider: 'claude' | 'kimi' | 'codex' = 'claude') {
   const lines: string[] = [];
   const { app, db } = await testApp({}, { level: 'trace', stream: { write: (line: string) => void lines.push(line) } });
   const ceo = await setUpCompany(app);
@@ -313,5 +314,94 @@ describe('which account a plan runs on', () => {
     const view = await companyView(db, app.ctx.templates, acme!.id);
     expect(view.subscriptions.find(s => s.provider === 'claude')).toMatchObject({ tier: 'max' });
     expect(JSON.stringify(view)).not.toContain('@');
+  });
+});
+
+describe("a Codex plan's lease", () => {
+  /* Ivan's Codex plan on his Mac (a), which holds it, and his laptop (b), both with the sign-in sealed to them. */
+  async function codex() {
+    const p = await plans('codex');
+    const na = await p.online(p.a, KEY('a'));
+    const nb = await p.online(p.b, KEY('b'));
+    na.send({ type: 'cred.sealed', kind: 'codex_auth', version: 1, envelopes: [{ nodeId: p.a.nodeId, sealed: SEALED('a') }, { nodeId: p.b.nodeId, sealed: SEALED('b') }] });
+    await until(async () => (await stored(p.db, p.plan)).length === 2);
+    await p.db.update(subscriptions).set({ leaseNodeId: p.a.nodeId }).where(eq(subscriptions.id, p.plan));
+    na.close();
+    await until(() => !p.app.ctx.hub.isOnline({ kind: 'node', nodeId: p.a.nodeId }));
+    const holder = async () => (await p.db.select({ lease: subscriptions.leaseNodeId }).from(subscriptions).where(eq(subscriptions.id, p.plan)))[0]!.lease;
+    return { ...p, nb, holder };
+  }
+
+  it('stays with a holder that has been away less than ten minutes', async () => {
+    const { app, a, nb, holder } = await codex();
+    await moveLeases(app.ctx, new Date(Date.now() + LEASE_MOVE_MS - 60_000));
+    expect(await holder()).toBe(a.nodeId);
+    await expect(nextOf(nb, 'cred.lease', 300)).rejects.toThrow();
+  });
+
+  it('moves to a machine of the plan that is online once the holder has been away ten minutes, and the holder gives it up when back', async () => {
+    const { app, a, b, nb, holder, url } = await codex();
+    await moveLeases(app.ctx, new Date(Date.now() + LEASE_MOVE_MS + 1000));
+    expect(await holder()).toBe(b.nodeId);
+    expect(await nextOf(nb, 'cred.lease')).toEqual({ type: 'cred.lease', hold: true });
+    expect(await nextOf(nb, 'cred.put')).toEqual({ type: 'cred.put', kind: 'codex_auth', version: 1, sealed: SEALED('b') });
+    /* The new holder learns whom to seal a renewed sign-in for. */
+    expect((await nextOf(nb, 'cred.seal')).recipients.map(r => r.nodeId).sort()).toEqual([a.nodeId, b.nodeId].sort());
+    const back = await connectNode(url, a.key);
+    back.send({ type: 'hello', version: '0.9.0', loggedIn: true, running: [], publicKey: KEY('a'), terminals: true });
+    expect(await nextOf(back, 'cred.lease')).toEqual({ type: 'cred.lease', hold: false });
+  });
+
+  it('stays with a new holder whose sign-in Codex no longer takes, and nothing goes round', async () => {
+    const { app, a, b, nb, holder, db } = await codex();
+    await moveLeases(app.ctx, new Date(Date.now() + LEASE_MOVE_MS + 1000));
+    await nextOf(nb, 'cred.seal');
+    /* The sign-in the old holder sealed was used up by a refresh it never sent: the new holder is signed out. */
+    nb.send({ type: 'status', loggedIn: false, limits: null });
+    await until(async () => (await db.select({ status: nodes.status }).from(nodes).where(eq(nodes.id, b.nodeId)))[0]!.status === 'needs_login');
+    await moveLeases(app.ctx, new Date(Date.now() + 3 * LEASE_MOVE_MS));
+    expect(await holder()).toBe(b.nodeId);
+    await expect(nextOf(nb, 'cred.lease', 300)).rejects.toThrow();
+    void a;
+  });
+
+  it('stays when no other machine of the plan is online', async () => {
+    const { app, a, b, nb, holder } = await codex();
+    nb.close();
+    await until(() => !app.ctx.hub.isOnline({ kind: 'node', nodeId: b.nodeId }));
+    await moveLeases(app.ctx, new Date(Date.now() + LEASE_MOVE_MS + 1000));
+    expect(await holder()).toBe(a.nodeId);
+  });
+
+  it('is not handed back to its holder, who keeps the sign-in Codex renewed, and goes to a new holder that lost it', async () => {
+    const { a, b, nb, url, db, plan } = await codex();
+    const back = await connectNode(url, a.key);
+    back.send({ type: 'hello', version: '0.9.0', loggedIn: true, running: [], publicKey: KEY('a'), terminals: true });
+    const told = await nextOf(back, 'cred.seal');
+    expect(told).toMatchObject({ kind: 'codex_auth', version: 1 });
+    expect(told.recipients.map(r => r.nodeId).sort()).toEqual([a.nodeId, b.nodeId].sort());
+    await expect(nextOf(back, 'cred.put', 300)).rejects.toThrow();
+    /* The laptop says hello again: it holds no lease, so it is told to give up any sign-in. */
+    nb.close();
+    const laptop = await connectNode(url, b.key);
+    laptop.send({ type: 'hello', version: '0.9.0', loggedIn: true, running: [], publicKey: KEY('b'), terminals: true });
+    expect(await nextOf(laptop, 'cred.lease')).toEqual({ type: 'cred.lease', hold: false });
+    /* Made the holder, it says hello signed out: it gets its envelope. */
+    await db.update(subscriptions).set({ leaseNodeId: b.nodeId }).where(eq(subscriptions.id, plan));
+    laptop.close();
+    const again = await connectNode(url, b.key);
+    again.send({ type: 'hello', version: '0.9.0', loggedIn: false, running: [], publicKey: KEY('b'), terminals: true });
+    expect(await nextOf(again, 'cred.put')).toEqual({ type: 'cred.put', kind: 'codex_auth', version: 1, sealed: SEALED('b') });
+  });
+
+  it('goes to the machine that signed in, and the others give theirs up', async () => {
+    const { a, b, nb, url, holder } = await codex();
+    const back = await connectNode(url, a.key);
+    back.send({ type: 'hello', version: '0.9.0', loggedIn: true, running: [], publicKey: KEY('a'), terminals: true });
+    await nextOf(back, 'cred.seal');
+    nb.send({ type: 'login.done', ok: true, error: null });
+    await until(async () => (await holder()) === b.nodeId);
+    expect(await nextOf(back, 'cred.lease')).toEqual({ type: 'cred.lease', hold: false });
+    void a;
   });
 });

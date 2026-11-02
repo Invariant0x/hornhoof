@@ -4,10 +4,10 @@ import { join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { TERM_CHUNK, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
 import { ownFs, type AgentFs } from './agent-fs.js';
-import { applyCredential, LEASE_FILE } from './credentials.js';
+import { applyCredential, takeLease } from './credentials.js';
 import { asAgent, type JobUser } from './isolation.js';
 import { plainOutput } from './program-exit.js';
-import { exitsCleanly, writePrivate } from './providers/process.js';
+import { exitsCleanly } from './providers/process.js';
 import { HIDDEN } from './redact.js';
 import { parentOf } from './terminal/host.js';
 import { StreamMask } from './terminal/mask.js';
@@ -226,7 +226,7 @@ export class LoginTerminal {
     const auth = await this.fs.read(join(this.scratch, 'auth.json'));
     if (auth === null) return NOT_TAKEN;
     /* The machine that signed in holds the plan's Codex sign-in, which Codex renews. */
-    writePrivate(join(dir, LEASE_FILE), '', null);
+    takeLease(dir);
     applyCredential(dir, home, 'codex_auth', new TextEncoder().encode(auth), this.user);
     return null;
   }

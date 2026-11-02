@@ -5,6 +5,7 @@ import type { Db } from '../../db/client.js';
 import { nodes, planCredentials, subscriptions } from '../../db/schema.js';
 import { nodeIdentity } from '../nodes/hub.js';
 import { liveNode, settlePlans } from '../nodes/nodes.js';
+import { keyedNodes } from './lease.js';
 
 /* What a plan's sign-in is on its nodes. Antigravity has none Hornhoof can carry yet. */
 export const CRED_KIND: Partial<Record<ProviderId, CredKind>> = { claude: 'claude_token', codex: 'codex_auth', kimi: 'kimi_key', glm: 'glm_key' };
@@ -46,16 +47,28 @@ export function deliver(ctx: Ctx, kind: CredKind, version: number, envelopes: En
 }
 
 /* On a node's hello: its plan's newest sign-in sealed to it, or, when it has none yet, a word to a node of the plan that
-   holds it to seal it for this one. */
-export async function pushCredentials(ctx: Ctx, nodeId: string): Promise<void> {
+   holds it to seal it for this one. A Codex plan's machine that does not hold the plan's lease is told to give up its
+   copy; the holder keeps the one Codex renewed, and is told whom to seal it for, unless it lost it. */
+export async function pushCredentials(ctx: Ctx, nodeId: string, loggedIn = false): Promise<void> {
   const { db } = ctx;
   const [node] = await db
-    .select({ plan: subscriptions.id, provider: subscriptions.provider, credVersion: subscriptions.credVersion, publicKey: nodes.publicKey })
+    .select({ plan: subscriptions.id, provider: subscriptions.provider, credVersion: subscriptions.credVersion, publicKey: nodes.publicKey, lease: subscriptions.leaseNodeId })
     .from(nodes)
     .innerJoin(subscriptions, eq(subscriptions.id, nodes.subscriptionId))
     .where(and(eq(nodes.id, nodeId), liveNode, eq(subscriptions.kind, 'personal'), isNull(subscriptions.removedAt)));
   const kind = node && CRED_KIND[node.provider];
-  if (!node || !kind || node.credVersion === 0) return;
+  if (!node || !kind) return;
+  const me = nodeIdentity(nodeId);
+  if (kind === 'codex_auth' && node.lease) {
+    if (node.lease !== nodeId) return void ctx.hub.send(me, { type: 'cred.lease', hold: false });
+    if (loggedIn) {
+      const recipients = node.credVersion > 0 ? await keyedNodes(db, node.plan) : [];
+      if (recipients.length) ctx.hub.send(me, { type: 'cred.seal', kind, version: node.credVersion, recipients });
+      return;
+    }
+    ctx.hub.send(me, { type: 'cred.lease', hold: true });
+  }
+  if (node.credVersion === 0) return;
   const held = await db
     .select({ nodeId: planCredentials.nodeId, sealed: planCredentials.sealed })
     .from(planCredentials)
@@ -84,13 +97,14 @@ export async function signedIn(ctx: Ctx, nodeId: string, ok: boolean, error: str
   if (!node) return;
   const kind = CRED_KIND[node.provider];
   if (ok && kind) {
-    const keyed = await db
-      .select({ nodeId: nodes.id, publicKey: nodes.publicKey })
-      .from(nodes)
-      .where(and(eq(nodes.subscriptionId, node.plan), liveNode, isNotNull(nodes.publicKey)));
-    const recipients = keyed.map(k => ({ nodeId: k.nodeId, publicKey: k.publicKey! }));
-    if (kind === 'codex_auth') await db.update(subscriptions).set({ leaseNodeId: nodeId }).where(eq(subscriptions.id, node.plan));
-    if (recipients.length) ctx.hub.send(nodeIdentity(nodeId), { type: 'cred.seal', kind, version: node.credVersion + 1, recipients: recipients.slice(0, 20) });
+    const recipients = await keyedNodes(db, node.plan);
+    if (kind === 'codex_auth') {
+      await db.update(subscriptions).set({ leaseNodeId: nodeId }).where(eq(subscriptions.id, node.plan));
+      /* The plan runs on this machine now; the others give up their copies. */
+      const others = await db.select({ id: nodes.id }).from(nodes).where(and(eq(nodes.subscriptionId, node.plan), liveNode));
+      for (const other of others) if (other.id !== nodeId) ctx.hub.send(nodeIdentity(other.id), { type: 'cred.lease', hold: false });
+    }
+    if (recipients.length) ctx.hub.send(nodeIdentity(nodeId), { type: 'cred.seal', kind, version: node.credVersion + 1, recipients });
   }
   await settlePlans(db, [node.plan]);
   ctx.bus.publish(node.companyId, { type: 'subscription.signin', subscriptionId: node.plan, nodeId, ok, error, owner: node.owner });

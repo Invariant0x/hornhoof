@@ -7,6 +7,7 @@ import { appendEvent } from '../events/store.js';
 import { agentState, insertTurn, liveSubscription, onAgent, pump, STOPPED_ON_PURPOSE } from '../conversation/queue.js';
 import { dropOldFiles } from '../tasks/attachments.js';
 import { wakeLeftBehind } from '../tasks/wake.js';
+import { moveLeases } from '../subscriptions/lease.js';
 import { checkTestTimes } from '../testruns/runs.js';
 import type { AgentRow } from './find.js';
 
@@ -105,6 +106,7 @@ export function startTimers(app: FastifyInstance, ctx: Ctx): void {
     leftBehind();
     oldFiles();
     void checkTestTimes(ctx).catch(failed('checking test run times failed'));
+    void moveLeases(ctx, new Date()).catch(failed('moving Codex plans to another machine failed'));
   }, TICK_MS);
   timer.unref();
   app.addHook('onClose', async () => clearInterval(timer));

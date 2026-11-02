@@ -16,6 +16,14 @@ const WORD = /^[A-Za-z0-9._~+/=-]{8,4096}$/;
 
 export const holdsLease = (dir: string): boolean => existsSync(join(dir, LEASE_FILE));
 
+export const takeLease = (dir: string): void => writePrivate(join(dir, LEASE_FILE), '', null);
+
+/* Another machine of the plan runs Codex now: this one keeps no sign-in of it, so it says it is signed out. */
+export function giveUpLease(dir: string, home: string, user: JobUser | null = null): void {
+  rmSync(join(dir, LEASE_FILE), { force: true });
+  dropCredential(dir, home, 'codex_auth', user);
+}
+
 const read = (path: string): string | null => {
   try {
     return readFileSync(path, 'utf8');

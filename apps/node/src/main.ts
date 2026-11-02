@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,7 +11,7 @@ import { agentUser, builtinAdapters, secureNode, userFor, type JobUser } from '.
 import { machineLoad } from './load.js';
 import { adapterFor, programFor } from './providers/index.js';
 import { runJob, type ProviderAdapter, type RunResult } from './runner.js';
-import { applyCredential, dropCredential, heldCredential } from './credentials.js';
+import { applyCredential, dropCredential, giveUpLease, heldCredential, holdsLease, takeLease } from './credentials.js';
 import { nodeIdentity, seal, unseal } from './keys.js';
 import { LOGIN_KEY, LoginTerminal, type LoginSetup } from './login.js';
 import { dataDir, isRemoved, markRemoved, readState, rememberSession, writeState, type NodeState } from './state.js';
@@ -27,6 +28,8 @@ import { Tmux } from './terminal/tmux.js';
 export const VERSION: string = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
 const LOGIN_CHECK_MS = 10_000;
+/* How often a Codex plan's holder looks whether Codex renewed its sign-in between turns. */
+const LEASE_CHECK_MS = 60_000;
 /* How often a node with terminals reads its program's tokens again: a program signs in again or renews them between turns. */
 const LEARN_MS = 60_000;
 /* How often a personal node asks its program for the plan's limits between turns: work on other machines moves them too. */
@@ -37,6 +40,9 @@ const STOP_WAIT_MS = 5_000;
 const MAX_UNCONFIRMED = 50;
 
 type JobRun = Extract<ServerMessage, { type: 'job.run' }>;
+type Recipient = { nodeId: string; publicKey: string };
+
+const digestOf = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex');
 type TestRun = Extract<ServerMessage, { type: 'tests.run' }>;
 type TestsDone = Extract<NodeMessage, { type: 'tests.done' }>;
 
@@ -64,6 +70,7 @@ type RunOptions = {
   limitsMs?: number;
   /* How often the node says how busy its machine is. */
   loadMs?: number;
+  leaseCheckMs?: number;
   /* The user test runs run as, on a node that runs as root; none runs them as the node, as its agents run there. */
   testUser?: JobUser | null;
   /* Runs a part of a test run; tests pass a fake. */
@@ -83,7 +90,7 @@ function merged(known: Limits | null, news: Limits): Limits {
 }
 
 /* The node's life: stay connected, run jobs, report the sign-in state and the limits, clean up when removed. */
-export async function runNode({ dir, adapter, builtin, terminal, login: loginSetup, log = console.log, loginCheckMs = LOGIN_CHECK_MS, learnMs = LEARN_MS, limitsMs = LIMITS_MS, loadMs = LOAD_MS, testUser = null, runPart = runTests }: RunOptions): Promise<{ stop(): void }> {
+export async function runNode({ dir, adapter, builtin, terminal, login: loginSetup, log = console.log, loginCheckMs = LOGIN_CHECK_MS, learnMs = LEARN_MS, limitsMs = LIMITS_MS, loadMs = LOAD_MS, leaseCheckMs = LEASE_CHECK_MS, testUser = null, runPart = runTests }: RunOptions): Promise<{ stop(): void }> {
   if (!builtin && isRemoved(dir)) {
     log('This node was removed in Hornhoof.');
     return { stop() {} };
@@ -264,14 +271,18 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
         return signedInNow();
       case 'cred.seal':
         return sealCredential(m.kind, m.version, m.recipients);
+      /* A Codex plan runs on one of its machines at a time: the one that holds its lease keeps its sign-in. */
+      case 'cred.lease':
+        if (!single || builtin) return;
+        if (m.hold) return takeLease(dir);
+        codexSealed = null;
+        giveUpLease(dir, credHome, credUser);
+        return signedInNow();
       case 'login.start':
         if (!login) return emit({ type: 'login.done', ok: false, error: NO_LOGIN });
         return login.start(m.fresh);
       case 'login.stop':
         return login?.stop();
-      /* Started by a part that follows. */
-      case 'cred.lease':
-        return;
     }
     if (stopped || running.has(m.jobId)) return;
     const controller = new AbortController();
@@ -298,13 +309,36 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     await signedInNow();
   }
 
-  /* The sign-in this node holds, sealed for each of the plan's nodes Hornhoof names, one envelope for each. */
-  async function sealCredential(kind: CredKind, version: number, recipients: { nodeId: string; publicKey: string }[]) {
+  /* The sign-in this node holds, sealed for each of the plan's nodes Hornhoof names, one envelope for each. A Codex
+     holder keeps whom it sealed for, under which number and what the file was, to seal it again once Codex renews it:
+     a list of the plan's nodes replaces what it kept, one more node under the same number joins it. */
+  async function sealCredential(kind: CredKind, version: number, recipients: Recipient[]) {
     const held = single && !builtin ? heldCredential(credHome, kind) : null;
     if (!held) return;
-    const envelopes = await Promise.all(recipients.map(async r => ({ nodeId: r.nodeId, sealed: await seal(held, [r.publicKey]) })));
-    emit({ type: 'cred.sealed', kind, version, envelopes });
+    if (kind === 'codex_auth' && holdsLease(dir)) {
+      const joins = codexSealed !== null && version === codexSealed.version;
+      codexSealed = joins
+        ? { ...codexSealed!, recipients: [...codexSealed!.recipients.filter(r => !recipients.some(n => n.nodeId === r.nodeId)), ...recipients].slice(-20) }
+        : version > (codexSealed?.version ?? 0) ? { version, recipients, digest: digestOf(held) } : codexSealed;
+    }
+    emit({ type: 'cred.sealed', kind, version, envelopes: await sealFor(held, recipients) });
   }
+
+  const sealFor = (held: Uint8Array, recipients: Recipient[]) => Promise.all(recipients.map(async r => ({ nodeId: r.nodeId, sealed: await seal(held, [r.publicKey]) })));
+
+  /* Codex renews its sign-in as it runs, and the old one stops working: the holder seals the new one for the plan's
+     other machines, under the next number, so one of them can take over. */
+  async function renewedCodex() {
+    if (!codexSealed || !single || builtin || !holdsLease(dir)) return;
+    const held = heldCredential(credHome, 'codex_auth');
+    if (!held || digestOf(held) === codexSealed.digest) return;
+    const version = codexSealed.version + 1;
+    codexSealed = { ...codexSealed, version, digest: digestOf(held) };
+    emit({ type: 'cred.sealed', kind: 'codex_auth', version, envelopes: await sealFor(held, codexSealed.recipients) });
+  }
+
+  /* What a Codex holder last sealed its sign-in for. */
+  let codexSealed: { version: number; recipients: Recipient[]; digest: string } | null = null;
 
   /* After a sign-in came or went: what the screens hide, and whether the program is signed in, said at once. */
   async function signedInNow() {
@@ -358,6 +392,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     /* The limits the turn brought go first, so Hornhoof knows of a plan at its limit when it hears the job ended. */
     await status();
     emit(done);
+    await renewedCodex().catch(() => {});
     if (done.error === 'not_logged_in') {
       loggedIn = false;
       void status();
@@ -388,6 +423,8 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   void askLimits();
   const asking = setInterval(() => void askLimits(), limitsMs);
   asking.unref();
+  const renewing = setInterval(() => void renewedCodex().catch(() => {}), leaseCheckMs);
+  renewing.unref();
   /* An old figure says nothing, so one that cannot go out now is not kept for later. */
   const reporting = setInterval(() => void send?.({ type: 'load', ...load() }), loadMs);
   reporting.unref();
@@ -398,6 +435,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     if (learning) clearInterval(learning);
     clearInterval(asking);
     clearInterval(reporting);
+    clearInterval(renewing);
     void host?.stop();
     void login?.shutdown();
     /* Let the last message leave before the socket closes. */

@@ -78,7 +78,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
         for (const jobId of msg.running) if (!keep.has(jobId)) ctx.hub.send(id, { type: 'job.cancel', jobId });
       }
       /* The plan's sign-in sealed to this node, or a word to a node that holds it to seal it for this one. */
-      if (id.kind === 'node') await pushCredentials(ctx, id.nodeId);
+      if (id.kind === 'node') await pushCredentials(ctx, id.nodeId, msg.loggedIn);
       await pumpWaiting(ctx);
       return;
     }
