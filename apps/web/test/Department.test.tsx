@@ -67,11 +67,20 @@ describe('Department view', () => {
     expect(screen.queryByRole('heading', { level: 2, name: 'Development' })).not.toBeInTheDocument();
   });
 
-  it('goes back to the map from the department name too, not only from the small arrow', async () => {
+  it('goes back to the map from anywhere in the department bar, not only from the small arrow', async () => {
     const user = userEvent.setup();
     shell();
     const title = await flyIn(user);
-    await user.click(within(title).getByRole('button', { name: 'Development' }));
+    const bar = screen.getByRole('navigation', { name: 'Development' });
+    const back = within(bar).getByRole('button', { name: 'Back to the map' });
+    expect(within(bar).getAllByRole('button')).toEqual([back]);
+    expect(back).toContainElement(title);
+    expect(back).toContainElement(within(bar).getByText('CTO'));
+    expect(decl('.crumbs', 'padding')).toBeUndefined();
+    expect(decl('.crumb', 'width')).toBe('100%');
+    expect(decl('.crumb', 'height')).toBe('100%');
+    expect(decl('.crumb', 'cursor')).toBe('pointer');
+    await user.click(within(bar).getByText('CTO'));
     expect(screen.queryByRole('heading', { level: 2, name: 'Development' })).not.toBeInTheDocument();
   });
 

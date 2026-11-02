@@ -494,18 +494,14 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
       </div>
 
       <nav className="crumbs glass" aria-label={deptLabel(t, d)}>
+        {/* The whole bar goes back, so nobody has to aim at the small arrow. */}
         <button className="crumb" type="button" aria-label={t.dept.back} title={t.dept.back} onClick={onBack}>
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M15 5l-7 7 7 7" />
           </svg>
+          <h2>{deptLabel(t, d)}</h2>
+          <span className="role">{d.roleCode}</span>
         </button>
-        {/* The name goes back too, so nobody has to aim at the small arrow. */}
-        <h2>
-          <button className="crumb-name" type="button" title={t.dept.back} onClick={onBack}>
-            {deptLabel(t, d)}
-          </button>
-        </h2>
-        <span className="role">{d.roleCode}</span>
       </nav>
 
       <div className="dv-acts" onPointerDown={e => e.stopPropagation()}>
