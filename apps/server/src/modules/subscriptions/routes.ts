@@ -1,11 +1,11 @@
-import type { ProviderId } from '@hornhoof/protocol';
-import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { Sealed, type ProviderId } from '@hornhoof/protocol';
+import { and, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
 import { encryptSecret } from '../../crypto/secrets.js';
-import { agents, departments, jobs, people, subscriptions, teams, testParts } from '../../db/schema.js';
+import { agents, departments, jobs, machines, nodes, people, planCredentials, subscriptions, teams, testParts } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { servesWholeCompany } from '../tools/staff.js';
 import { orchestratorOf, pumpWaiting } from '../conversation/queue.js';
@@ -13,7 +13,8 @@ import { createNodeCode } from '../nodes/codes.js';
 import { resumeAgent } from '../tasks/wake.js';
 import { commandFor } from '../nodes/command.js';
 import { BUILTIN, nodeIdentity } from '../nodes/hub.js';
-import { planNodes } from '../nodes/nodes.js';
+import { liveNode, planNodes } from '../nodes/nodes.js';
+import { CRED_KIND, deliver, storeEnvelopes } from './credentials.js';
 import { failOpenJobs } from '../nodes/messages.js';
 import { loseParts } from '../testruns/runs.js';
 import { subView, subViews, type IsOnline } from './views.js';
@@ -49,6 +50,13 @@ export const ConnectBody = z.object({
 });
 
 const IdParams = z.object({ id: z.uuid() });
+
+/* A key the owner pasted and sealed in their browser to the plan's nodes. Claude and Codex sign in on a machine. */
+export const CredentialBody = z.object({
+  kind: z.enum(['kimi_key', 'glm_key']),
+  version: z.number().int().min(1),
+  envelopes: z.array(z.object({ nodeId: z.uuid(), sealed: Sealed })).min(1).max(20),
+});
 
 const unknown = () => new ApiError(404, 'not_found', 'This subscription does not exist.', 'subscription_unknown');
 const notOwner = () => new ApiError(403, 'forbidden', 'Only the owner of this subscription can do this.', 'not_owner');
@@ -172,6 +180,30 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { subscription: await subView(db, online, sub.id) };
   });
 
+  /* The plan's nodes the owner's browser seals a key to, with the number the new one goes under. */
+  app.get('/api/subscriptions/:id/recipients', async req => {
+    const me = await requirePerson(req, db);
+    const sub = await liveSubscription(IdParams.parse(req.params).id);
+    if (sub.ownerPersonId !== me.id) throw notOwner();
+    const rows = await db
+      .select({ nodeId: nodes.id, publicKey: nodes.publicKey, hostname: machines.hostname })
+      .from(nodes)
+      .innerJoin(machines, eq(machines.id, nodes.machineId))
+      .where(and(eq(nodes.subscriptionId, sub.id), liveNode, isNotNull(nodes.publicKey)));
+    return { version: sub.credVersion, recipients: rows.map(r => ({ nodeId: r.nodeId, publicKey: r.publicKey!, hostname: r.hostname })) };
+  });
+
+  app.post('/api/subscriptions/:id/credential', async req => {
+    const me = await requirePerson(req, db);
+    const sub = await liveSubscription(IdParams.parse(req.params).id);
+    if (sub.ownerPersonId !== me.id) throw notOwner();
+    const body = CredentialBody.parse(req.body);
+    if (sub.kind !== 'personal' || CRED_KIND[sub.provider] !== body.kind) throw new ApiError(400, 'validation', `kind: This plan does not sign in with a ${body.kind === 'kimi_key' ? 'Kimi' : 'GLM'} key.`, 'wrong_kind');
+    const kept = await storeEnvelopes(db, sub, body.kind, body.version, body.envelopes);
+    deliver(ctx, body.kind, body.version, kept);
+    return { stored: kept.length };
+  });
+
   /* The share of the plan's limits its task turns may use. Turns held by it go out once it is raised or taken off. */
   app.patch('/api/subscriptions/:id', async req => {
     const me = await requirePerson(req, db);
@@ -193,6 +225,8 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
         .set({ removedAt: new Date(), ...(sub.kind === 'api_key' ? { secretEnc: null } : {}) })
         .where(eq(subscriptions.id, sub.id));
       await tx.update(agents).set({ subscriptionId: null, nodeId: null }).where(eq(agents.subscriptionId, sub.id));
+      /* Its sign-in, sealed to its nodes, goes with it. */
+      await tx.delete(planCredentials).where(eq(planCredentials.subscriptionId, sub.id));
     });
     /* The nodes stop their jobs when they hear remove, and may never report them, so they end here. */
     const ended = await failOpenJobs(ctx, eq(jobs.subscriptionId, sub.id), 'subscription_removed');

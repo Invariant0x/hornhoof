@@ -20,6 +20,7 @@ export type ErrorReason =
   | 'self_locked'
   | 'unknown_place'
   | 'not_owner'
+  | 'wrong_kind'
   | 'orchestrator_only'
   | 'not_company_level'
   | 'subscription_unknown'

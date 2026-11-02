@@ -381,12 +381,12 @@ describe('the orchestrator reads and changes the database itself', () => {
   it('is refused sign-ins, invites, install codes, the public link, passwords and the tables themselves', async () => {
     const { app } = await company();
     const client = await mcp(app);
-    for (const sql of ['SELECT * FROM sessions', 'SELECT * FROM invites', 'SELECT * FROM node_codes', 'SELECT * FROM public_links', "UPDATE public_links SET url = 'https://evil.test'", 'SELECT password_hash FROM people', 'DROP TABLE tasks', 'ALTER TABLE tasks ADD COLUMN x text', 'CREATE TABLE notes (id int)']) {
+    for (const sql of ['SELECT * FROM sessions', 'SELECT * FROM invites', 'SELECT * FROM node_codes', 'SELECT * FROM public_links', "UPDATE public_links SET url = 'https://evil.test'", 'SELECT * FROM plan_credentials', "DELETE FROM plan_credentials", 'SELECT account FROM nodes', 'SELECT password_hash FROM people', 'DROP TABLE tasks', 'ALTER TABLE tasks ADD COLUMN x text', 'CREATE TABLE notes (id int)']) {
       const res = await call(client, 'database', { sql });
       expect(res.isError, sql).toBe(true);
       expect(text(res), sql).toMatch(/permission denied|must be owner/);
     }
-    expect(text(await call(client, 'database', { sql: 'SELECT * FROM sessions' }))).toContain('Sign-ins, invites, install codes and the public link are closed to this tool.');
+    expect(text(await call(client, 'database', { sql: 'SELECT * FROM sessions' }))).toContain('Sign-ins, invites, install codes, sealed plan sign-ins and the public link are closed to this tool.');
     expect(JSON.parse(text(await call(client, 'database', { sql: 'SELECT name FROM people' })))[0].rows).toEqual([{ name: 'Ivan' }]);
   });
 
@@ -490,7 +490,7 @@ describe('the orchestrator reads and changes the database itself', () => {
       expect(res.isError, sql).toBe(true);
       expect(text(res), sql).toContain('Operations reads the database; a change goes to the orchestrator as one message with the SQL and why.');
     }
-    for (const sql of ['SELECT * FROM sessions', 'SELECT * FROM invites', 'SELECT * FROM node_codes', 'SELECT * FROM public_links', 'SELECT password_hash FROM people', 'SELECT tool_token_hash FROM jobs', 'SELECT * FROM jobs', 'SELECT key_hash FROM nodes', 'SELECT machine_key FROM machines', 'SELECT * FROM machines']) {
+    for (const sql of ['SELECT * FROM sessions', 'SELECT * FROM invites', 'SELECT * FROM node_codes', 'SELECT * FROM public_links', 'SELECT password_hash FROM people', 'SELECT tool_token_hash FROM jobs', 'SELECT * FROM jobs', 'SELECT key_hash FROM nodes', 'SELECT account FROM nodes', 'SELECT * FROM plan_credentials', 'SELECT machine_key FROM machines', 'SELECT * FROM machines']) {
       const res = await call(client, 'database', { sql });
       expect(res.isError, sql).toBe(true);
       expect(text(res), sql).toMatch(/closed to this tool/);
