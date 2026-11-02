@@ -115,6 +115,12 @@ function RunningNow({ host, running }: { host: string; running: Running }) {
   );
 }
 
+/* The machine the company's server runs on now. */
+function Leader() {
+  const t = useT();
+  return <span className="badge lead" title={t.machines.leaderAbout}>{t.machines.leader}</span>;
+}
+
 export function Machines({ me }: { me: Me }) {
   const t = useT();
   const { language } = useLanguage();
@@ -245,9 +251,12 @@ export function Machines({ me }: { me: Me }) {
             return (
               <li key={m.id}>
                 <article aria-label={m.hostname}>
-                  <Edge className="machine" cut={12}>
+                  <Edge className="machine" cut={12} accent={here !== null} corner={here !== null}>
                     <header className="machine-head">
-                      <h2>{m.hostname}</h2>
+                      <div className="machine-name">
+                        <h2>{m.hostname}</h2>
+                        {here && <Leader />}
+                      </div>
                       {m.online || here?.online ? <span className="status ready">{t.machines.online}</span> : <span className="muted">{lastSeen(t, language, m.lastSeenAt)}</span>}
                     </header>
                     <Facts
@@ -328,9 +337,12 @@ export function Machines({ me }: { me: Me }) {
           {apart && (
             <li>
               <article aria-label={t.machines.builtin}>
-                <Edge className="machine" cut={12}>
+                <Edge className="machine" cut={12} accent corner>
                   <header className="machine-head">
-                    <h2>{t.machines.builtin}</h2>
+                    <div className="machine-name">
+                      <h2>{t.machines.builtin}</h2>
+                      <Leader />
+                    </div>
                     {apart.online ? <span className="status ready">{t.machines.online}</span> : <span className="muted">{t.subs.states.builtin_offline}</span>}
                   </header>
                   <p className="muted">{t.machines.builtinAbout}</p>

@@ -482,6 +482,9 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .machine > .edge-in { padding: 16px 18px; display: grid; gap: 12px; align-content: start; }
 .machine-head { display: flex; align-items: center; justify-content: space-between; gap: 6px 10px; flex-wrap: wrap; }
 .machine-head h2 { font-size: 18px; overflow-wrap: anywhere; }
+.machine-name { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; min-width: 0; }
+/* The machine the company's server runs on: a filled badge by its name and a cyan frame. */
+.badge.lead { color: var(--on-btn); background: var(--btn); border-color: var(--btn); }
 .machine > .edge-in > p { margin: 0; }
 .facts { display: grid; grid-template-columns: 8.5em minmax(0, 1fr); gap: 6px 12px; margin: 0; font-size: 13.5px; }
 .facts dt { color: var(--muted); }

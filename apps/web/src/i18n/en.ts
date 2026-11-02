@@ -277,6 +277,9 @@ export const en = {
     builtinAbout: 'Comes with the server and runs the company\'s keys and test runs.',
     /* The built-in node runs on a machine that joined too: one computer, one card. */
     builtinHere: "The server runs here too, with its built-in node for the company's keys and test runs.",
+    /* The badge on the machine the company's server runs on now. */
+    leader: 'Leader',
+    leaderAbout: 'The company server runs on this machine now',
     addPlan: 'Add my plan',
     addPlanLabel: (host: string) => `Add my plan to ${host}`,
     addPlanAsk: (host: string) => `Which of your plans should run on ${host} too?`,

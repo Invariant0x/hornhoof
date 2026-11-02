@@ -73,6 +73,8 @@ describe('Machines', () => {
     expect(fact(own, 'Memory')).toBe('2.5 of 8 GB free');
     expect(fact(own, 'Disk')).toBe('unknown');
     expect(within(own).queryByRole('button')).not.toBeInTheDocument();
+    expect(within(own).getByTitle('The company server runs on this machine now')).toHaveTextContent('Leader');
+    expect(within(box).queryByText('Leader')).not.toBeInTheDocument();
   });
 
   /* The server on a computer that joined as a machine too: one computer, one card. */
@@ -89,6 +91,8 @@ describe('Machines', () => {
     expect(within(within(mac).getByRole('list', { name: 'What runs on ivan-mbp now' })).getByText('Orchestrator')).toBeInTheDocument();
     expect(screen.getAllByRole('article').map(a => a.getAttribute('aria-label'))).toEqual(['ivan-mbp', 'build-box']);
     expect(within(card('build-box')).queryByText(/built-in node/)).not.toBeInTheDocument();
+    expect(within(mac).getByTitle('The company server runs on this machine now')).toHaveTextContent('Leader');
+    expect(within(card('build-box')).queryByText('Leader')).not.toBeInTheDocument();
   });
 
   it('shows no built-in node and no pool part of it to those who do not see the whole company', async () => {
@@ -198,6 +202,8 @@ describe('Machines', () => {
     );
     expect(fact(await screen.findByRole('region', { name: 'Все машины вместе' }), 'Машин в сети')).toBe('1 из 2');
     expect(within(card('ivan-mbp')).getByText('Здесь же работает сервер и его встроенная нода: ключи компании и прогоны тестов.')).toBeInTheDocument();
+    expect(within(card('ivan-mbp')).getByTitle('Сервер компании сейчас работает на этой машине')).toHaveTextContent('Ведущая');
+    expect(within(card('build-box')).queryByText('Ведущая')).not.toBeInTheDocument();
     expect(screen.queryByRole('article', { name: 'Встроенная нода' })).not.toBeInTheDocument();
   });
 });
