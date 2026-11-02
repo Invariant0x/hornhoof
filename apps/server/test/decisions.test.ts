@@ -157,6 +157,18 @@ describe('decisions waiting for people', () => {
     expect(all.counts.total).toBe(9);
   });
 
+  it("take in the orchestrator's own question and a release confirmation as the requests they are, both the CEO's", async () => {
+    const c = await company();
+    const { task } = await createTask(c.ctx, { personId: c.ids.ivan }, { title: 'Turn 3: Launch', brief: '', body: '', departmentId: null, assigneeAgentId: c.orchestrator.id });
+    const itsOwn = await ask(c.ctx, c.orchestrator.id, task.id, { kind: 'question', text: 'Which goal goes first?', topic: 'task' });
+    const release = await c.asking('dev', { kind: 'approval', text: 'Release 0.6?', commit: 'c'.repeat(40) });
+    const all = await c.view(c.tokens.ceo);
+    expect(ownersOf(all)).toEqual({ [itsOwn.request.id]: c.ids.ivan, [release.request.id]: c.ids.ivan });
+    expect(all.counts).toEqual({ byPerson: { [c.ids.ivan]: 2 }, byAgent: { [c.orchestrator.id]: 1, [c.workers.dev.id]: 1 }, total: 2 });
+    /* Development's person sees the release of his department, not what the orchestrator asks the CEO. */
+    expect((await c.view(c.tokens.dan)).requests.map(r => r.id)).toEqual([release.request.id]);
+  });
+
   it("are counted from what the viewer may read: a department's person sees only the department's", async () => {
     const c = await everyKind();
     const his = await c.view(c.tokens.dan);
