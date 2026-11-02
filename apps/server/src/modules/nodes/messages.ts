@@ -9,7 +9,7 @@ import { afterJob, typedTurn } from '../tasks/wake.js';
 import { appendEvent, publishWorking } from '../events/store.js';
 import { partDone, partStarted, pumpTests, testsHello } from '../testruns/runs.js';
 import { sameNode, type NodeIdentity } from './hub.js';
-import { deliver, pushCredentials, storeEnvelopes } from '../subscriptions/credentials.js';
+import { deliver, pushCredentials, signedIn, storeEnvelopes } from '../subscriptions/credentials.js';
 import { liveNode, settlePlans } from './nodes.js';
 
 const OPEN_JOBS = ['queued', 'running'] as const;
@@ -113,6 +113,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       return;
     }
     case 'login.done':
+      if (id.kind === 'node') await signedIn(ctx, id.nodeId, msg.ok, msg.error);
       return;
     case 'load': {
       const { type: _, ...load } = msg;

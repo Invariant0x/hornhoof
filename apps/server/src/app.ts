@@ -23,6 +23,7 @@ import { orgRoutes } from './modules/org/routes.js';
 import { peopleRoutes } from './modules/people/routes.js';
 import { setupRoutes } from './modules/setup/routes.js';
 import { subscriptionRoutes } from './modules/subscriptions/routes.js';
+import { signinRoutes } from './modules/subscriptions/signin.js';
 import { loadTemplates, type Templates } from './modules/templates/load.js';
 import { mcpRoutes } from './modules/tools/mcp.js';
 import { UpdateCheck } from './modules/updates/check.js';
@@ -110,6 +111,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   peopleRoutes(app, ctx);
   orgRoutes(app, ctx);
   subscriptionRoutes(app, ctx);
+  signinRoutes(app, ctx);
   nodeRoutes(app, ctx);
   nodeSocket(app, ctx);
   jobRoutes(app, ctx);

@@ -2,8 +2,9 @@ import type { ServerMessage } from '@hornhoof/protocol';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
+import WebSocket from 'ws';
 import { nodes, planCredentials, subscriptions } from '../src/db/schema.js';
-import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
+import { as, connectNode, invitePerson, listen, openStream, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
 const MAC = { machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' };
 const LAPTOP = { ...MAC, machineId: 'laptop-0002-abcd', hostname: 'ivan-laptop' };
@@ -33,13 +34,13 @@ async function plans(provider: 'claude' | 'kimi' = 'claude') {
   const o = (await join(app, codeOf(olegs.command), TOWER)).json().nodes[0] as Joined;
   const url = await listen(app);
   /* A node that says hello with its key and waits until Hornhoof has it. */
-  const online = async (n: Joined, key: string) => {
+  const online = async (n: Joined, key: string, loggedIn = true) => {
     const node = await connectNode(url, n.key);
-    node.send({ type: 'hello', version: '0.9.0', loggedIn: true, running: [], publicKey: key });
+    node.send({ type: 'hello', version: '0.9.0', loggedIn, running: [], publicKey: key, terminals: true });
     await until(async () => (await db.select({ k: nodes.publicKey }).from(nodes).where(eq(nodes.id, n.nodeId)))[0]?.k === key);
     return node;
   };
-  return { app, db, ceo, oleg, plan, a, b, o, online, lines };
+  return { app, db, ceo, oleg, plan, olegsPlan: olegs.subscriptions[0].id as string, a, b, o, online, lines, url };
 }
 
 /* The next message of this type, past the others. */
@@ -164,5 +165,106 @@ describe('the sealing routes', () => {
     await app.inject({ method: 'POST', url: `/api/subscriptions/${plan}/credential`, payload: { kind: 'kimi_key', version: 1, envelopes: [{ nodeId: a.nodeId, sealed: SEALED('kimi') }] }, ...as(ceo) });
     expect((await app.inject({ method: 'DELETE', url: `/api/subscriptions/${plan}`, ...as(ceo) })).statusCode).toBe(204);
     expect(await stored(db, plan)).toEqual([]);
+  });
+});
+
+/* The owner's browser on a node's sign-in terminal. */
+function loginScreen(url: string, token: string, plan: string, nodeId: string): Promise<{ ws: WebSocket; frames: { type: string; [k: string]: unknown }[] }> {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(url.replace('/api/nodes/socket', `/api/subscriptions/${plan}/signin/terminal?nodeId=${nodeId}&cols=100&rows=30`), { headers: { cookie: `hh_session=${token}` } });
+    const frames: { type: string; [k: string]: unknown }[] = [];
+    ws.on('message', data => frames.push(JSON.parse(String(data))));
+    ws.on('unexpected-response', (_req, res) => reject(new Error(`HTTP ${res.statusCode}`)));
+    ws.on('error', reject);
+    ws.on('open', () => resolve({ ws, frames }));
+  });
+}
+
+describe('signing a plan in from Hornhoof', () => {
+  it("starts the sign-in on one of the owner's online machines, and on no machine of another person's plan", async () => {
+    const { app, ceo, oleg, plan, a, b, online } = await plans();
+    const none = await app.inject({ method: 'POST', url: `/api/subscriptions/${plan}/signin`, payload: { fresh: false }, ...as(ceo) });
+    expect(none.statusCode).toBe(409);
+    expect(none.json().error.reason).toBe('no_node_online');
+    await online(a, KEY('a'), false);
+    const nb = await online(b, KEY('b'), false);
+    const res = await app.inject({ method: 'POST', url: `/api/subscriptions/${plan}/signin`, payload: { nodeId: b.nodeId, fresh: true }, ...as(ceo) });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ nodeId: b.nodeId, hostname: 'ivan-laptop' });
+    expect(await nextOf(nb, 'login.start')).toEqual({ type: 'login.start', fresh: true });
+    const theirs = await app.inject({ method: 'POST', url: `/api/subscriptions/${plan}/signin`, payload: { fresh: false }, ...as(oleg) });
+    expect(theirs.statusCode).toBe(403);
+    expect(theirs.json().error.reason).toBe('not_owner');
+    const stop = await app.inject({ method: 'POST', url: `/api/subscriptions/${plan}/signin/stop`, payload: { nodeId: b.nodeId }, ...as(ceo) });
+    expect(stop.statusCode).toBe(204);
+    expect(await nextOf(nb, 'login.stop')).toEqual({ type: 'login.stop' });
+  });
+
+  it('signs Kimi in with a pasted key instead of a terminal', async () => {
+    const { app, ceo, plan, a, online } = await plans('kimi');
+    await online(a, KEY('a'), false);
+    const res = await app.inject({ method: 'POST', url: `/api/subscriptions/${plan}/signin`, payload: { fresh: false }, ...as(ceo) });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.reason).toBe('wrong_kind');
+  });
+
+  it("opens the sign-in terminal to the plan's owner alone, who types into it", async () => {
+    const { ceo, oleg, plan, a, online, url } = await plans();
+    const na = await online(a, KEY('a'), false);
+    const screen = await loginScreen(url, ceo, plan, a.nodeId);
+    const open = await nextOf(na, 'term.open');
+    expect(open).toMatchObject({ agentKey: 'login', cols: 100, rows: 30, write: true });
+    await until(() => screen.frames.length > 0);
+    expect(screen.frames[0]).toEqual({ type: 'ready', write: true });
+    na.send({ type: 'term.data', termId: open.termId, data: 'Paste code here' });
+    await until(() => screen.frames.length > 1);
+    expect(screen.frames[1]).toEqual({ type: 'data', data: 'Paste code here' });
+    screen.ws.send(JSON.stringify({ type: 'input', data: 'abc\r' }));
+    expect(await nextOf(na, 'term.input')).toEqual({ type: 'term.input', termId: open.termId, data: 'abc\r' });
+    screen.ws.close();
+    expect(await nextOf(na, 'term.close')).toEqual({ type: 'term.close', termId: open.termId });
+    await expect(loginScreen(url, oleg, plan, a.nodeId)).rejects.toThrow('HTTP 403');
+  });
+
+  it("keeps the CEO out of another person's sign-in terminal", async () => {
+    const { ceo, olegsPlan, o, online, url } = await plans();
+    await online(o, KEY('o'), false);
+    await expect(loginScreen(url, ceo, olegsPlan, o.nodeId)).rejects.toThrow('HTTP 403');
+  });
+
+  it("tells the owner how it ended, seals the new sign-in for the plan's nodes and is ready once the node says so", async () => {
+    const { app, db, ceo, plan, a, b, online } = await plans();
+    const stream = await openStream(app, ceo);
+    const na = await online(a, KEY('a'), false);
+    await online(b, KEY('b'), false);
+    na.send({ type: 'login.done', ok: true, error: null });
+    const seal = await nextOf(na, 'cred.seal');
+    expect(seal).toMatchObject({ kind: 'claude_token', version: 1 });
+    expect(seal.recipients.map(r => r.nodeId).sort()).toEqual([a.nodeId, b.nodeId].sort());
+    await until(() => stream.messages.some(m => m.type === 'subscription.signin'));
+    expect(stream.messages.find(m => m.type === 'subscription.signin')).toEqual({ type: 'subscription.signin', subscriptionId: plan, nodeId: a.nodeId, ok: true, error: null, owner: expect.any(String) });
+    na.send({ type: 'status', loggedIn: true, limits: null });
+    await until(async () => (await db.select({ s: subscriptions.status }).from(subscriptions).where(eq(subscriptions.id, plan)))[0]!.s === 'ready');
+  });
+
+  it('says a failed sign-in only to the plan owner', async () => {
+    const { app, ceo, oleg, olegsPlan, o, online } = await plans();
+    const ceoStream = await openStream(app, ceo);
+    const olegStream = await openStream(app, oleg);
+    const no = await online(o, KEY('o'), false);
+    no.send({ type: 'login.done', ok: false, error: 'The sign-in window was closed.' });
+    await until(() => olegStream.messages.some(m => m.type === 'subscription.signin'));
+    expect(olegStream.messages.find(m => m.type === 'subscription.signin')).toMatchObject({ subscriptionId: olegsPlan, ok: false, error: 'The sign-in window was closed.' });
+    /* The CEO sees the plan's state change, not its sign-in. */
+    await until(() => ceoStream.messages.some(m => m.type === 'org'));
+    expect(ceoStream.messages.some(m => m.type === 'subscription.signin')).toBe(false);
+  });
+
+  it('gives the Codex plan to the machine it was signed in on', async () => {
+    const { db, olegsPlan, o, online } = await plans();
+    const no = await online(o, KEY('o'), false);
+    no.send({ type: 'login.done', ok: true, error: null });
+    expect(await nextOf(no, 'cred.seal')).toEqual({ type: 'cred.seal', kind: 'codex_auth', version: 1, recipients: [{ nodeId: o.nodeId, publicKey: KEY('o') }] });
+    await until(async () => (await db.select({ l: subscriptions.leaseNodeId }).from(subscriptions).where(eq(subscriptions.id, olegsPlan)))[0]!.l === o.nodeId);
   });
 });

@@ -1,10 +1,10 @@
 import type { CredKind, ProviderId } from '@hornhoof/protocol';
-import { and, eq, inArray, isNull, lt, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, isNull, lt, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { nodes, planCredentials, subscriptions } from '../../db/schema.js';
 import { nodeIdentity } from '../nodes/hub.js';
-import { liveNode } from '../nodes/nodes.js';
+import { liveNode, settlePlans } from '../nodes/nodes.js';
 
 /* What a plan's sign-in is on its nodes. Antigravity has none Hornhoof can carry yet. */
 export const CRED_KIND: Partial<Record<ProviderId, CredKind>> = { claude: 'claude_token', codex: 'codex_auth', kimi: 'kimi_key', glm: 'glm_key' };
@@ -66,4 +66,33 @@ export async function pushCredentials(ctx: Ctx, nodeId: string): Promise<void> {
   if (!node.publicKey) return;
   const peer = held.find(h => ctx.hub.isOnline(nodeIdentity(h.nodeId)));
   if (peer) ctx.hub.send(nodeIdentity(peer.nodeId), { type: 'cred.seal', kind, version: node.credVersion, recipients: [{ nodeId, publicKey: node.publicKey }] });
+}
+
+/* The agentKey of a node's sign-in terminal: only the plan's owner opens it, and types into it. */
+export const LOGIN_KEY = 'login';
+
+/* A sign-in on a node of a plan ended. Its owner hears how; on success the node seals the new sign-in, under the plan's
+   next number, for each of the plan's nodes that has a key, itself too, so a node that joins later can get it from any
+   of them. A Codex plan then runs on that machine. */
+export async function signedIn(ctx: Ctx, nodeId: string, ok: boolean, error: string | null): Promise<void> {
+  const { db } = ctx;
+  const [node] = await db
+    .select({ plan: subscriptions.id, provider: subscriptions.provider, credVersion: subscriptions.credVersion, owner: subscriptions.ownerPersonId, companyId: subscriptions.companyId })
+    .from(nodes)
+    .innerJoin(subscriptions, eq(subscriptions.id, nodes.subscriptionId))
+    .where(and(eq(nodes.id, nodeId), liveNode, eq(subscriptions.kind, 'personal'), isNull(subscriptions.removedAt)));
+  if (!node) return;
+  const kind = CRED_KIND[node.provider];
+  if (ok && kind) {
+    const keyed = await db
+      .select({ nodeId: nodes.id, publicKey: nodes.publicKey })
+      .from(nodes)
+      .where(and(eq(nodes.subscriptionId, node.plan), liveNode, isNotNull(nodes.publicKey)));
+    const recipients = keyed.map(k => ({ nodeId: k.nodeId, publicKey: k.publicKey! }));
+    if (kind === 'codex_auth') await db.update(subscriptions).set({ leaseNodeId: nodeId }).where(eq(subscriptions.id, node.plan));
+    if (recipients.length) ctx.hub.send(nodeIdentity(nodeId), { type: 'cred.seal', kind, version: node.credVersion + 1, recipients: recipients.slice(0, 20) });
+  }
+  await settlePlans(db, [node.plan]);
+  ctx.bus.publish(node.companyId, { type: 'subscription.signin', subscriptionId: node.plan, nodeId, ok, error, owner: node.owner });
+  ctx.bus.publish(node.companyId, { type: 'org' });
 }
