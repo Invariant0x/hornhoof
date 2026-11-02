@@ -3,9 +3,10 @@ import { api } from '../api';
 import { deptLabel, errorText, useLanguage, useT, type Messages } from '../i18n';
 import { useStream } from '../live';
 import { PROGRAM_NAMES, PROVIDER_NAMES } from '../providers';
-import type { AgentCardView, EventView, Me, OrchestratorState, Org, ShownCommand, StaffLine, StructureItem, SubView, TemplateKey } from '../types';
+import type { AgentCardView, ComputerView, EventView, Me, OrchestratorState, Org, ShownCommand, StaffLine, StructureItem, SubView, TemplateKey } from '../types';
 import { AgentTerminal } from '../ui/AgentTerminal';
 import { CommandCard } from '../ui/CommandCard';
+import { ComputerCard, isOpen } from '../ui/ComputerCard';
 import { Markdown } from '../ui/Markdown';
 import { Notebook } from '../ui/Notebook';
 import { StaffCard } from '../ui/StaffCard';
@@ -96,6 +97,8 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard }:
      here, apart from his conversation. */
   const [commands, setCommands] = useState<ShownCommand[]>([]);
   const ownsCommands = orchestrator && me.person.isOwner;
+  /* Access to the computer the server runs on: the orchestrator asks, and only the CEO's screen opens or closes it. */
+  const [computer, setComputer] = useState<ComputerView | null>(null);
   const asked = useRef<number | null>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const box = useRef<HTMLElement>(null);
@@ -137,8 +140,13 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard }:
 
   const loadCommands = useCallback(async () => {
     if (!ownsCommands) return;
-    const res = await api.get<{ commands: ShownCommand[] }>('/api/nodes/commands').catch(() => null);
-    if (res && mounted.current) setCommands(res.commands);
+    const [res, access] = await Promise.all([
+      api.get<{ commands: ShownCommand[] }>('/api/nodes/commands').catch(() => null),
+      api.get<ComputerView>('/api/computer').catch(() => null),
+    ]);
+    if (!mounted.current) return;
+    if (res) setCommands(res.commands);
+    if (access) setComputer(access);
   }, [ownsCommands]);
 
   const hideCommand = (id: string) =>
@@ -320,6 +328,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard }:
       {commands.map(c => (
         <CommandCard key={c.id} shown={c} onDone={() => void hideCommand(c.id)} />
       ))}
+      {computer && <ComputerCard view={computer} onChange={next => mounted.current && setComputer(next)} onFailure={err => mounted.current && setFailure(err)} />}
     </>
   );
   const after = (
@@ -337,10 +346,25 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard }:
       )}
     </>
   );
-  const hasCards = Boolean(pending || staffing || (!open && staffByHand) || byHand || offerByHand || needsOrchestrator || failure !== null || commands.length);
+  const hasCards = Boolean(pending || staffing || (!open && staffByHand) || byHand || offerByHand || needsOrchestrator || failure !== null || commands.length || (computer && (isOpen(computer) || computer.asked)));
 
   /* Who wrote a message no person typed: the orchestrator, an employee by its name, or Hornhoof itself. */
   const author = (from: string, name: string) => (from === 'orchestrator' ? t.window.orchestrator : from === 'agent' && name ? name : t.window.hornhoof);
+
+  /* What the orchestrator asked of the computer, and what the CEO did about it. */
+  function computerLine(e: EventView): string {
+    const who = e.person?.name ?? t.window.hornhoof;
+    switch (field(e.data, 'state')) {
+      case 'asked':
+        return t.window.computerAsked(field(e.data, 'reason'));
+      case 'opened':
+        return t.window.computerOpened(who, clock(language, field(e.data, 'until')) ?? '');
+      case 'closed':
+        return t.window.computerClosed(who);
+      default:
+        return t.window.computerDeclined(who);
+    }
+  }
 
   function line(e: EventView, i: number) {
     switch (e.kind) {
@@ -424,6 +448,13 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard }:
           <div className="t-l t-bad">
             <i>⏺</i>
             <div>{t.window.stopped}</div>
+          </div>
+        );
+      case 'computer':
+        return (
+          <div className="t-l">
+            <i>⏺</i>
+            <div>{computerLine(e)}</div>
           </div>
         );
     }

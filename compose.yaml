@@ -116,6 +116,8 @@ services:
   # the database, runs the installer that comes inside that build, and goes back if the new server does not answer.
   # It holds the Docker socket, so it reads nothing from the app but the tag and the digests of Hornhoof's images.
   # The server folder is mounted at the same path as on the host, so compose finds the same files from inside.
+  # While the CEO keeps access to the computer open, it also runs the orchestrator's commands on the computer, as root,
+  # in a container of its own image.
   updater:
     image: ${HORNHOOF_UPDATER_REF:-ghcr.io/invariant0x/hornhoof-updater:latest}
     build:
@@ -126,6 +128,7 @@ services:
       HORNHOOF_IMAGE: ghcr.io/invariant0x/hornhoof
       HORNHOOF_SERVER_DIR: ${HORNHOOF_SERVER_DIR:-}
       COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-hornhoof}
+      HORNHOOF_COMPUTER_IMAGE: ${HORNHOOF_UPDATER_REF:-ghcr.io/invariant0x/hornhoof-updater:latest}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - control:/control

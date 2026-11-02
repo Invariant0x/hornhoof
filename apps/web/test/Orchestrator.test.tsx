@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { AgentWindow } from '../src/screens/AgentWindow';
-import type { EventView, Me, Org, ShownCommand } from '../src/types';
+import type { ComputerView, EventView, Me, Org, ShownCommand } from '../src/types';
 import { CARD, DEV_ORG, ME, mockApi, ORG, ROSTER, SUBS } from './api-mock';
 import { fakeStream } from './fake-stream';
 
@@ -260,12 +260,95 @@ describe('AgentWindow', () => {
     }
   });
 
-  it('asks for no machine commands for someone who is not the CEO', async () => {
+  it('asks for no machine commands and no computer access for someone who is not the CEO', async () => {
     const calls = mockApi({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: READY }], 'POST /api/agents/orchestrator/start': [200, { started: false }] });
     const deputy: Me = { ...ME, person: { ...ME.person, id: 'p2', isOwner: false } };
     render(<AgentWindow me={deputy} org={ORG} agentId="orchestrator" onClose={vi.fn()} />);
     expect(await screen.findByRole('textbox')).toBeInTheDocument();
     expect(calls.some(c => c.path === '/api/nodes/commands')).toBe(false);
+    expect(calls.some(c => c.path === '/api/computer')).toBe(false);
+  });
+
+  describe('access to the computer', () => {
+    const ASKED: ComputerView = { available: true, until: null, asked: { reason: 'Restart the nodes outside AppArmor.', at: '2026-11-02T10:00:00Z' } };
+    const OPEN: ComputerView = { available: true, until: '2026-11-03T10:00:00.000Z', asked: null };
+    const CLOSED: ComputerView = { available: true, until: null, asked: null };
+
+    it("shows the CEO the orchestrator's request next to his terminal and opens access for a day with one click", async () => {
+      const user = userEvent.setup();
+      const { calls } = open({
+        [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, terminal: true } }],
+        'GET /api/computer': [200, ASKED],
+        'POST /api/computer/open': [200, OPEN],
+      });
+      const card = await screen.findByRole('region', { name: 'The orchestrator asks for access to the computer' });
+      expect(within(card).getByText('Restart the nodes outside AppArmor.')).toBeInTheDocument();
+      expect(within(card).getByText(/as root on the computer the server runs on/)).toBeInTheDocument();
+      await user.click(within(card).getByRole('button', { name: 'Open access for a day' }));
+      expect(calls).toContainEqual({ method: 'POST', path: '/api/computer/open', body: undefined });
+      const opened = await screen.findByRole('region', { name: 'Access to the computer' });
+      expect(within(opened).getByText(/^The orchestrator can run commands on the computer the server runs on until .+\.$/)).toBeInTheDocument();
+      expect(screen.queryByRole('region', { name: 'The orchestrator asks for access to the computer' })).not.toBeInTheDocument();
+    });
+
+    it('closes access when the CEO takes it back', async () => {
+      const user = userEvent.setup();
+      const { calls } = open({ 'GET /api/computer': [200, OPEN], 'POST /api/computer/close': [200, CLOSED] });
+      await user.click(within(await screen.findByRole('region', { name: 'Access to the computer' })).getByRole('button', { name: 'Close access' }));
+      expect(calls).toContainEqual({ method: 'POST', path: '/api/computer/close', body: undefined });
+      await vi.waitFor(() => expect(screen.queryByRole('region', { name: 'Access to the computer' })).not.toBeInTheDocument());
+    });
+
+    it('shows no open access once its day is over', async () => {
+      open({ 'GET /api/computer': [200, { ...OPEN, until: new Date(Date.now() - 60_000).toISOString() }], 'GET /api/nodes/commands': [200, { commands: [] }] });
+      expect(await screen.findByRole('textbox')).toBeInTheDocument();
+      await vi.waitFor(() => expect(screen.queryByRole('region', { name: 'Access to the computer' })).not.toBeInTheDocument());
+    });
+
+    it('says no to a request', async () => {
+      const user = userEvent.setup();
+      const { calls } = open({ 'GET /api/computer': [200, ASKED], 'POST /api/computer/decline': [200, CLOSED] });
+      await user.click(within(await screen.findByRole('region', { name: 'The orchestrator asks for access to the computer' })).getByRole('button', { name: 'Not now' }));
+      expect(calls).toContainEqual({ method: 'POST', path: '/api/computer/decline', body: undefined });
+      await vi.waitFor(() => expect(screen.queryByRole('region', { name: 'The orchestrator asks for access to the computer' })).not.toBeInTheDocument());
+    });
+
+    it('writes each step in the log', async () => {
+      open({
+        [`GET ${EVENTS}?after=0`]: [
+          200,
+          {
+            events: [
+              ev(1, 'computer', { state: 'asked', reason: 'Clean Docker images.' }),
+              ev(2, 'computer', { state: 'opened', until: OPEN.until }, { person: IVAN }),
+              ev(3, 'computer', { state: 'closed' }, { person: IVAN }),
+              ev(4, 'computer', { state: 'declined' }, { person: IVAN }),
+            ],
+            state: READY,
+          },
+        ],
+      });
+      expect(await screen.findByText('Asked for access to the computer: Clean Docker images.')).toBeInTheDocument();
+      expect(screen.getByText(/^Ivan opened access to the computer until .+$/)).toBeInTheDocument();
+      expect(screen.getByText('Ivan closed access to the computer')).toBeInTheDocument();
+      expect(screen.getByText('Ivan did not open access to the computer')).toBeInTheDocument();
+    });
+
+    it('asks and answers in Russian', async () => {
+      localStorage.setItem('hh-lang', 'ru');
+      try {
+        open({
+          [`GET ${EVENTS}?after=0`]: [200, { events: [ev(1, 'computer', { state: 'opened', until: OPEN.until }, { person: IVAN })], state: READY }],
+          'GET /api/computer': [200, ASKED],
+        });
+        const card = await screen.findByRole('region', { name: 'Оркестратор просит доступ к машине сервера' });
+        expect(within(card).getByRole('button', { name: 'Открыть доступ на сутки' })).toBeInTheDocument();
+        expect(within(card).getByRole('button', { name: 'Не сейчас' })).toBeInTheDocument();
+        expect(screen.getByText(/^Ivan: доступ к машине сервера открыт до .+$/)).toBeInTheDocument();
+      } finally {
+        localStorage.removeItem('hh-lang');
+      }
+    });
   });
 
   it('shows a line once when the stream and a catch-up both bring it', async () => {

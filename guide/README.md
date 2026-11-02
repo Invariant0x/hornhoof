@@ -5,7 +5,7 @@ How Hornhoof works, in detail, one topic per page. The [README](../README.md) ha
 - [Install and run the server](install.md): what the install line does, several companies on one computer, running from source, your own domain, and a forgotten password.
 - [The link on the internet](public-link.md): how people open your company from anywhere, and who can reach it.
 - [Machines and plans](machines-and-plans.md): how to connect your AI plans and computers, how agents are kept apart, and what happens when a plan hits its limit.
-- [The orchestrator](orchestrator.md): what the main agent can do for you, and what stays with people.
+- [The orchestrator](orchestrator.md): what the main agent can do for you, also on the computer the server runs on, and what stays with people.
 - [Departments and employees](departments-and-employees.md): the department schema, hiring, an employee's window and terminal, switching agents off, and reviews at a gate.
 - [Tasks and turns](tasks-and-turns.md): how your words become tasks, which checks they pass, and what happens when an agent gets stuck.
 - [Repositories](repositories.md): how a department gets a git repository, and where its token goes.

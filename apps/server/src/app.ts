@@ -27,6 +27,8 @@ import { loadTemplates, type Templates } from './modules/templates/load.js';
 import { mcpRoutes } from './modules/tools/mcp.js';
 import { UpdateCheck } from './modules/updates/check.js';
 import { UpdaterControl } from './modules/updates/control.js';
+import { ComputerAccess } from './modules/computer/access.js';
+import { computerRoutes } from './modules/computer/routes.js';
 import { archOf, registry } from './modules/updates/registry.js';
 import { updateRoutes } from './modules/updates/routes.js';
 import { attachmentRoutes } from './modules/tasks/attachments.js';
@@ -46,7 +48,7 @@ import type { Db } from './db/client.js';
 export type Deps = { db: Db; config: Config; logger?: FastifyServerOptions['logger']; agentSql?: AgentSql | null };
 
 /* What routes get: the deps, the live node connections, the live stream to browsers, the terminals people watch, the
-   check for newer builds and the company's public link. */
+   check for newer builds, access to the computer the server runs on and the company's public link. */
 export type Ctx = Deps & {
   log: FastifyBaseLogger;
   hub: NodeHub;
@@ -54,6 +56,7 @@ export type Ctx = Deps & {
   terminals: TerminalRelay;
   updates: UpdateCheck;
   updater: UpdaterControl;
+  computer: ComputerAccess;
   templates: Templates;
   links: PublicLinks;
 };
@@ -88,6 +91,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
     onError: err => app.log.warn({ err }, 'Could not check for newer builds.'),
   });
   ctx.updater = new UpdaterControl(config.controlDir);
+  ctx.computer = new ComputerAccess(config.controlDir, ctx.updater);
   ctx.templates = loadTemplates(config.templatesDir);
   ctx.links = new PublicLinks(ctx);
   app.addHook('onReady', async () => ctx.updates.start());
@@ -119,6 +123,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   agentRoutes(app, ctx);
   departmentRoutes(app, ctx);
   updateRoutes(app, ctx);
+  computerRoutes(app, ctx);
   taskRoutes(app, ctx);
   attachmentRoutes(app, ctx);
   partFileRoutes(app, ctx);

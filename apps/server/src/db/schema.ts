@@ -310,7 +310,8 @@ export const jobs = pgTable(
   t => [index('jobs_subscription_id').on(t.subscriptionId), index('jobs_task_id').on(t.taskId), index('jobs_agent_id_status').on(t.agentId, t.status)],
 );
 
-export const AGENT_EVENT_KINDS = ['message', 'text', 'tool', 'tool_result', 'todo', 'proposal', 'applied', 'stopped', 'failed'] as const;
+/* computer: the orchestrator asked for the computer the server runs on, or the CEO opened, closed or declined it. */
+export const AGENT_EVENT_KINDS = ['message', 'text', 'tool', 'tool_result', 'todo', 'proposal', 'applied', 'stopped', 'failed', 'computer'] as const;
 export type AgentEventKind = (typeof AGENT_EVENT_KINDS)[number];
 
 /* An agent's conversation as people see it: their messages, what the agent did, and what came of it. */

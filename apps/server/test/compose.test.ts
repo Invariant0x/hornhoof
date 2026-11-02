@@ -40,3 +40,11 @@ describe('the built-in node', () => {
     expect(compose.services.node!.security_opt).toEqual(['no-new-privileges:true', 'apparmor:unconfined']);
   });
 });
+
+describe('the updater', () => {
+  /* The orchestrator's commands on the computer run in a container of the updater's own image, which is on the computer already. */
+  it('runs commands on the computer in its own image', () => {
+    const { updater } = compose.services;
+    expect(updater!.environment!.HORNHOOF_COMPUTER_IMAGE).toBe(updater!.image);
+  });
+});

@@ -100,7 +100,8 @@ function pumpAt(ctx: Ctx, agentId: string, at: string): void {
 /* What a turn ends with when a person or Hornhoof stopped it on purpose; none of these is a failure. */
 export const STOPPED_ON_PURPOSE = ['cancelled', 'removed', 'switched_off'];
 
-type Turn = { companyId: string; agentId: string; prompt: string; createdBy: string | null; message?: { personId: string | null; text: string; from?: 'orchestrator' | 'agent'; name?: string; by?: string }; taskId?: string };
+/* answersCeo: a note of something the CEO did, which counts as the CEO's order without a message. */
+type Turn = { companyId: string; agentId: string; prompt: string; createdBy: string | null; message?: { personId: string | null; text: string; from?: 'orchestrator' | 'agent'; name?: string; by?: string }; taskId?: string; answersCeo?: boolean };
 
 /* One thing at a time per agent, so two pumps never send two turns. */
 const chains = new WeakMap<Ctx, Map<string, Promise<unknown>>>();
@@ -200,7 +201,7 @@ export async function insertTurn(ctx: Ctx, t: Turn): Promise<string> {
       timeoutMs: TURN_TIMEOUT_MS,
       createdBy: t.createdBy,
       taskId: t.taskId ?? null,
-      answersCeo: await isCeo(ctx, t.message?.personId),
+      answersCeo: t.answersCeo === true || (await isCeo(ctx, t.message?.personId)),
     })
     .returning({ id: jobs.id });
   await showMessage(ctx, t, job!.id);

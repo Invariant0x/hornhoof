@@ -203,7 +203,7 @@ export type Endpoint = { kind: 'person'; id: string } | { kind: 'orchestrator' }
 /* held: kept on past the last minutes while the work it brought goes on. */
 export type Channel = { from: Endpoint; to: Endpoint; at: string; held?: boolean };
 
-export type AgentEventKind = 'message' | 'text' | 'tool' | 'tool_result' | 'todo' | 'proposal' | 'applied' | 'stopped' | 'failed';
+export type AgentEventKind = 'message' | 'text' | 'tool' | 'tool_result' | 'todo' | 'proposal' | 'applied' | 'stopped' | 'failed' | 'computer';
 
 /* One line of an agent's conversation, as the server keeps it. */
 export type EventView = { seq: number; kind: AgentEventKind; data: unknown; jobId: string | null; person: { id: string; name: string } | null; at: string };
@@ -359,6 +359,8 @@ export type Running = {
 
 /* A machine command the orchestrator asked Hornhoof for, which only the CEO's screen gets: to connect a machine alone,
    to connect plans, or to add a plan to a machine. */
+/* Access to the computer the server runs on: whether Hornhoof reaches it, until when it is open, what the orchestrator asked it for. */
+export type ComputerView = { available: boolean; until: string | null; asked: { reason: string; at: string } | null };
 export type ShownCommand = { id: string; kind: 'machine' | 'plans' | 'add'; plans: string[]; machine: string | null; command: string; expiresAt: string };
 
 /* The node that comes with the server, for those who see the whole company. */

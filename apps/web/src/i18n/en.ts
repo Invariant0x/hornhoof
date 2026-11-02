@@ -342,6 +342,18 @@ export const en = {
     commandPlans: (names: string) => `Command to connect ${names}`,
     commandAdd: (name: string, host: string) => `Command to add ${name} to ${host}`,
     commandOnly: 'The orchestrator asked Hornhoof for this command, and only you see it. It works once, for 24 hours.',
+    /* Access to the computer the server runs on, which the orchestrator asks for and the CEO opens for a day. */
+    computerAsks: 'The orchestrator asks for access to the computer',
+    computerWhat: 'For a day it runs commands as root on the computer the server runs on, and each one shows in this window. Access closes by itself after a day, or when you close it.',
+    computerOpen: 'Open access for a day',
+    computerNotNow: 'Not now',
+    computerAccess: 'Access to the computer',
+    computerOpenUntil: (at: string) => `The orchestrator can run commands on the computer the server runs on until ${at}.`,
+    computerClose: 'Close access',
+    computerAsked: (reason: string) => `Asked for access to the computer: ${reason}`,
+    computerOpened: (who: string, at: string) => `${who} opened access to the computer until ${at}`,
+    computerClosed: (who: string) => `${who} closed access to the computer`,
+    computerDeclined: (who: string) => `${who} did not open access to the computer`,
     failedEmployee: {
       timeout: 'The employee did not finish within 15 minutes.',
       not_logged_in: 'This employee\'s subscription is signed out on its machine. Sign in again, then write once more.',

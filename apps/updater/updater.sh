@@ -16,6 +16,10 @@
 # request but the tag, which must be a plain image tag, and the digests, and only runs images of HORNHOOF_IMAGE and of
 # its -node and -updater repositories. It runs on the bash that ships with macOS (3.2) for the tests, and on Alpine's
 # in its image.
+#
+# It also runs the orchestrator's commands on this computer, as root, while the CEO keeps access to the computer open:
+# the app writes computer.json {untilSec} and each command as computer/<id>.json {id, command, timeout}; this answers
+# computer/<id>.out.json {id, exit, output}. It checks untilSec itself before each command.
 set -euo pipefail
 
 CONTROL="${HORNHOOF_CONTROL_DIR:-/control}"
@@ -26,6 +30,11 @@ UPDATER_IMAGE="${IMAGE}-updater"
 HEALTH_URL="${HORNHOOF_HEALTH_URL:-http://app:8080/api/health}"
 HEALTH_WAIT="${HORNHOOF_HEALTH_WAIT:-120}"
 KEEP_BACKUPS=3
+# The image commands on the computer run in: the updater's own, which compose names.
+COMPUTER_IMAGE="${HORNHOOF_COMPUTER_IMAGE:-$UPDATER_IMAGE:latest}"
+# The longest a command on the computer runs, in seconds, and how many characters of its output go back.
+COMPUTER_MAX=1800
+COMPUTER_OUTPUT=30000
 
 ID=''
 VERSION=''
@@ -439,16 +448,126 @@ interrupted() {
   WORK=''
 }
 
+# Whether the CEO keeps access to the computer open now, by the time the app wrote, which ends it by itself.
+computer_open() {
+  local until
+  until=$(jq -r '.untilSec // 0' "$CONTROL/computer.json" 2> /dev/null || true)
+  case "$until" in '' | *[!0-9]*) return 1 ;; esac
+  [ "$until" -gt "$(date +%s)" ]
+}
+
+# computer_answer <id> <exit code> <output file>: the end of the output, written whole and then moved.
+computer_answer() {
+  local file="$CONTROL/computer/$1.out.json"
+  tail -c "$COMPUTER_OUTPUT" "$3" | jq -Rs --arg id "$1" --argjson exit "$2" '{id: $id, exit: $exit, output: .}' > "$file.new"
+  mv "$file.new" "$file"
+}
+
+# Each waiting command, one at a time, in a container of the updater's image: root with every privilege, in the
+# computer's processes, network and names, with its whole file system at /host and its Docker. chroot /host runs a
+# command on the computer itself. A command past its time, or still running when the CEO closes access, is stopped;
+# nothing runs while access is closed. A command this updater started is marked, so after a restart it never runs a
+# second time, and what still runs of it is stopped.
+computer_runs() {
+  local file id command timeout out name watch code made
+  [ -d "$CONTROL/computer" ] || return 0
+  for file in "$CONTROL"/computer/*.started; do
+    [ -f "$file" ] || continue
+    id=$(basename "$file" .started)
+    case "$id" in '' | *[!A-Za-z0-9-]*) continue ;; esac
+    [ ! -f "$CONTROL/computer/$id.json" ] || continue
+    docker rm -f "hornhoof-computer-$id" > /dev/null 2>&1 || true
+    rm -f "$file"
+  done
+  for file in "$CONTROL"/computer/*.json; do
+    case "$file" in *.out.json) continue ;; esac
+    [ -f "$file" ] || continue
+    id=$(basename "$file" .json)
+    case "$id" in '' | *[!A-Za-z0-9-]*) continue ;; esac
+    [ ! -f "$CONTROL/computer/$id.out.json" ] || continue
+    name="hornhoof-computer-$id"
+    out=$(mktemp)
+    if [ -f "$CONTROL/computer/$id.started" ]; then
+      docker rm -f "$name" > /dev/null 2>&1 || true
+      printf 'The updater restarted while this command ran, so it was stopped. Look at what it did before you run it again.\n' > "$out"
+      computer_answer "$id" 125 "$out"
+      rm -f "$out" "$CONTROL/computer/$id.started"
+      continue
+    fi
+    if ! computer_open; then
+      printf 'Access to the computer is closed.\n' > "$out"
+      computer_answer "$id" 126 "$out"
+      rm -f "$out"
+      continue
+    fi
+    command=$(jq -r '.command // empty' "$file" 2> /dev/null || true)
+    timeout=$(jq -r '.timeout // empty' "$file" 2> /dev/null || true)
+    case "$timeout" in '' | *[!0-9]*) timeout=300 ;; esac
+    if [ "$timeout" -lt 1 ] || [ "$timeout" -gt "$COMPUTER_MAX" ]; then timeout=300; fi
+    touch "$CONTROL/computer/$id.started"
+    code=0
+    made=1
+    # Made first and only then started, so the watch can always stop it.
+    docker create --rm --name "$name" --privileged --pid=host --network=host --ipc=host --uts=host -v /:/host \
+      -v /var/run/docker.sock:/var/run/docker.sock --entrypoint bash "$COMPUTER_IMAGE" -c "$command" > /dev/null 2>> "$out" || made=''
+    if [ -z "$made" ]; then
+      code=125
+    elif ! computer_open; then
+      touch "$out.closed"
+      docker rm -f "$name" > /dev/null 2>&1 || true
+    else
+      # The watch removes the container once its time is up or access closes, unless the command ended first.
+      (
+        i=0
+        while [ "$i" -lt "$timeout" ]; do
+          sleep 1
+          [ ! -f "$out.done" ] || exit 0
+          if ! computer_open; then
+            touch "$out.closed"
+            docker rm -f "$name"
+            exit 0
+          fi
+          i=$((i + 1))
+        done
+        touch "$out.late"
+        docker rm -f "$name"
+      ) > /dev/null 2>&1 &
+      watch=$!
+      docker start -a "$name" < /dev/null >> "$out" 2>&1 || code=$?
+      touch "$out.done"
+      wait "$watch" 2> /dev/null || true
+    fi
+    if [ -f "$out.late" ]; then
+      printf '\nStopped after %s seconds.\n' "$timeout" >> "$out"
+      code=124
+    elif [ -f "$out.closed" ]; then
+      printf '\nStopped: access to the computer was closed.\n' >> "$out"
+      code=125
+    fi
+    # The app stops waiting for an answer and takes the command back after a while.
+    [ ! -f "$file" ] || computer_answer "$id" "$code" "$out"
+    rm -f "$out" "$out.done" "$out.late" "$out.closed" "$CONTROL/computer/$id.started"
+  done
+}
+
 mkdir -p "$CONTROL"
 touch "$CONTROL/alive"
 interrupted
 if [ "${1:-}" = --once ]; then
   handle_request
+  computer_runs
   exit 0
 fi
-# alive stays fresh through long downloads too.
+# alive stays fresh through long downloads too, and commands on the computer do not wait for an update.
 (while sleep 5; do touch "$CONTROL/alive"; done) &
-trap 'kill $! 2> /dev/null || true' EXIT
+ALIVE=$!
+# A command that went wrong does not end the loop.
+(while true; do
+  computer_runs || true
+  sleep 1
+done) &
+RUNS=$!
+trap 'kill $ALIVE $RUNS 2> /dev/null || true' EXIT
 while true; do
   handle_request
   sleep 2

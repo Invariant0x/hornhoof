@@ -65,6 +65,17 @@ Because Operations reads the whole database, whoever has access to Operations ca
 
 He looks in the database and in the screens first. Then he fixes the cause himself, or gives it to Operations as one task, instead of asking the CEO.
 
+## Can he fix the computer the server runs on?
+
+Yes, when the CEO lets him. Some trouble sits outside Hornhoof, in Docker or in the system itself. He never asks you to type commands for it. He asks for access to the computer instead:
+
+1. A card in his window says what he needs the computer for.
+2. **Open access for a day** gives it to him. He goes on by himself.
+3. For a day he runs commands on that computer as root, and each one shows in his window.
+4. Access closes by itself after a day. **Close access** in his window closes it sooner. **Not now** turns a request down.
+
+Only the CEO opens and closes it, in the CEO's own window. He runs commands only in a turn that answers the CEO, or the one that starts when the CEO opens access. The computer here is the one the server runs on. On a Mac, he reaches Docker's own Linux system there, not macOS.
+
 ## What stays with people?
 
 - He does not open the live feed, the pictures agents send, terminals, or the sign-in and invite pages.

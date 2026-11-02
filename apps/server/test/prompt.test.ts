@@ -56,6 +56,10 @@ describe('orchestrator instructions', () => {
     expect(ORCHESTRATOR_INSTRUCTIONS).not.toContain('data fix you cannot make');
   });
 
+  it('fixes trouble on the computer itself after asking the CEO for it, and never asks the CEO to type commands', () => {
+    for (const words of ['"ask_computer_access"', '"computer"', 'Never ask the CEO to type commands']) expect(ORCHESTRATOR_INSTRUCTIONS).toContain(words);
+  });
+
   it('switches off employees with no work in the turn and writes a note only when what it holds changes', () => {
     expect(ORCHESTRATOR_INSTRUCTIONS).toMatch(/[Ss]witch off the employees that have no work in the turn/);
     expect(ORCHESTRATOR_INSTRUCTIONS).toMatch(/only when something it holds changes/);
