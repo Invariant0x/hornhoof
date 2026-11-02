@@ -98,7 +98,7 @@ function Chip({ e, x, y, on, flash, onOpen, onSwitch }: { e: Employee; x: number
             <AgentIcon />
             <span className="mn">{e.name}</span>
             <ProviderMark provider={e.provider} />
-            <span className="st">{t.dept.status[e.status]}</span>
+            <span className="st" title={t.dept.status[e.status]}>{t.dept.status[e.status]}</span>
           </span>
           <span className="r2">{modelLine(t, e)}</span>
           <span className="r3">{doingLine(t, e)}</span>

@@ -113,7 +113,7 @@ describe('Map', () => {
     let later = false;
     mockApi({ 'GET /api/org': () => [200, later ? { ...staffed, departments: [{ ...staffed.departments[0]!, employees: [one('a', 'handed'), ...staffed.departments[0]!.employees.slice(1)] }] } : staffed] });
     const { container } = render(<MapScreen {...PROPS} />);
-    const cells = await screen.findByRole('img', { name: 'working: 1, waiting for a decision: 1, free: 2' });
+    const cells = await screen.findByRole('img', { name: 'working: 1, needs a decision: 1, free: 2' });
     expect([...cells.querySelectorAll('.cell')].map(c => c.className)).toEqual(['cell w', 'cell h', 'cell', 'cell']);
     later = true;
     stream.send({ type: 'task', id: 't1' });

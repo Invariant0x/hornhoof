@@ -672,8 +672,9 @@ button.shead, button.schip { cursor: pointer; }
 .schip .cx { position: absolute; left: 14px; right: 12px; bottom: 6px; height: 3px; }
 .schip .r1 { display: flex; align-items: center; gap: 8px; }
 .schip .r1 .ic { color: var(--muted); }
-.schip .mn { flex: 1 1 auto; min-width: 0; font-family: var(--f-display); font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.schip .st { flex: none; font-size: 11.5px; color: var(--muted); }
+/* The name keeps its whole width up to most of the row; the state takes what is left and ends in an ellipsis. */
+.schip .mn { flex: 1 0 auto; max-width: 62%; min-width: 0; font-family: var(--f-display); font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.schip .st { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; color: var(--muted); }
 .schip .r2 { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .schip .r3 { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .schip.s-i .r3, .schip.s-o .r3 { color: var(--muted); }

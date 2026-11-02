@@ -13,7 +13,7 @@ Click a department to fly into it. Its schema shows:
 - work going left to right through the gates;
 - an amber line for what a gate sent back.
 
-Every employee shows the task it is about and what it does now: working, queued, handed on, waiting for a decision, or free.
+Every employee shows the task it is about and what it does now: working, queued, handed on, needs a decision, or free.
 
 On the map, a department's card has one square per employee, in the same colors.
 

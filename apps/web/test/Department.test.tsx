@@ -2,10 +2,12 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
+import { ru } from '../src/i18n/ru';
 import { Shell } from '../src/screens/Shell';
 import { RepoSettings } from '../src/ui/RepoSettings';
 import type { Me, Org } from '../src/types';
 import { CARD, DEV_ORG, ME, mockApi, ROSTER, TASK_DETAIL, TASKS } from './api-mock';
+import { decl } from './css';
 import { fakeStream } from './fake-stream';
 
 const EVENTS = '/api/agents/orchestrator/events?after=0';
@@ -196,7 +198,31 @@ describe('Department view', () => {
     await flyIn(user);
     asked = true;
     stream.send({ type: 'requests' });
-    await vi.waitFor(() => expect(within(screen.getByRole('region', { name: 'Members' })).getByRole('button', { name: /Bruno/ })).toHaveTextContent('waiting for a decision'));
+    await vi.waitFor(() => expect(within(screen.getByRole('region', { name: 'Members' })).getByRole('button', { name: /Bruno/ })).toHaveTextContent('needs a decision'));
+  });
+
+  it("keeps an employee's whole name on its chip, and lets the state give way when the row is short", () => {
+    /* The name does not shrink below its own width, and takes at most part of the row; the state takes what is left
+       and ends in an ellipsis when that is too little. */
+    expect(decl('.schip .mn', 'flex')).toMatch(/^\d+ 0 /);
+    expect(decl('.schip .mn', 'max-width')).toBeDefined();
+    expect(decl('.schip .st', 'flex')).toMatch(/^0 1 /);
+    expect(decl('.schip .st', 'min-width')).toBe('0');
+    expect(decl('.schip .st', 'overflow')).toBe('hidden');
+    expect(decl('.schip .st', 'text-overflow')).toBe('ellipsis');
+    expect(decl('.schip .st', 'white-space')).toBe('nowrap');
+  });
+
+  it("says what an employee waits for in a few words that fit next to its name, in both languages", async () => {
+    const user = userEvent.setup();
+    const [dev] = DEV_ORG.departments;
+    const waits: Org = { ...DEV_ORG, departments: [{ ...dev!, employees: dev!.employees.map(e => (e.id === 'b1' ? { ...e, status: 'waiting' as const } : e)) }] };
+    shell({}, waits);
+    await flyIn(user);
+    const bruno = within(screen.getByRole('region', { name: 'Members' })).getByRole('button', { name: /Bruno/ });
+    expect(bruno.querySelector('.st')).toHaveTextContent(/^needs a decision$/);
+    expect(bruno.querySelector('.st')).toHaveAttribute('title', 'needs a decision');
+    expect(ru.dept.status.waiting).toBe('ждет решения');
   });
 
   it('lays out the gates after the work, the way back from them and the report to the head', async () => {
