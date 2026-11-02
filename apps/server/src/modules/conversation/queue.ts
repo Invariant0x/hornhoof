@@ -9,7 +9,7 @@ import { dispatchJob } from '../jobs/dispatch.js';
 import { sayLive } from './live.js';
 import { BUILTIN, identityOf, nodeIdentity, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { liveNode, planNodes, type NodeRow } from '../nodes/nodes.js';
-import { appendEvent, earlierTalk, publishWorking } from '../events/store.js';
+import { appendEvent, earlierTalk, publishWorking, type WithEvent } from '../events/store.js';
 import { instructionsOf } from '../agents/instructions.js';
 import { repoFor, repoLine } from '../departments/repository.js';
 import { textHash } from '../templates/load.js';
@@ -101,7 +101,8 @@ function pumpAt(ctx: Ctx, agentId: string, at: string): void {
 export const STOPPED_ON_PURPOSE = ['cancelled', 'removed', 'switched_off'];
 
 /* answersCeo: a note of something the CEO did, which counts as the CEO's order without a message. */
-type Turn = { companyId: string; agentId: string; prompt: string; createdBy: string | null; message?: { personId: string | null; text: string; from?: 'orchestrator' | 'agent'; name?: string; by?: string }; taskId?: string; answersCeo?: boolean };
+/* withMessage: what is kept together with the message, or not at all. */
+type Turn = { companyId: string; agentId: string; prompt: string; createdBy: string | null; message?: { personId: string | null; text: string; from?: 'orchestrator' | 'agent'; name?: string; by?: string }; taskId?: string; answersCeo?: boolean; withMessage?: WithEvent };
 
 /* One thing at a time per agent, so two pumps never send two turns. */
 const chains = new WeakMap<Ctx, Map<string, Promise<unknown>>>();
@@ -212,7 +213,7 @@ export async function insertTurn(ctx: Ctx, t: Turn): Promise<string> {
 async function showMessage(ctx: Ctx, t: Turn, jobId: string): Promise<void> {
   if (!t.message) return;
   const { personId, ...data } = t.message;
-  await appendEvent(ctx, { companyId: t.companyId, agentId: t.agentId, jobId, kind: 'message', data, personId });
+  await appendEvent(ctx, { companyId: t.companyId, agentId: t.agentId, jobId, kind: 'message', data, personId }, t.withMessage);
 }
 
 /* Stores the turn, then sends it if he is free. A message for an agent at work goes into the turn it runs instead, and a

@@ -5,6 +5,7 @@ import type { Ctx } from '../../app.js';
 import { agents, jobs, nodes, subscriptions } from '../../db/schema.js';
 import { said } from '../conversation/live.js';
 import { nodeOfAgent, pumpWaiting, refusedLimits, startProgram } from '../conversation/queue.js';
+import { startWork } from '../tasks/engine.js';
 import { afterJob, typedTurn } from '../tasks/wake.js';
 import { appendEvent, publishWorking } from '../events/store.js';
 import { partDone, partStarted, pumpTests, testsHello } from '../testruns/runs.js';
@@ -114,8 +115,10 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
         .update(jobs)
         .set({ status: 'running', startedAt: now })
         .where(and(eq(jobs.id, msg.jobId), eq(jobs.status, 'queued'), jobsOf(id, ctx)))
-        .returning({ companyId: jobs.companyId });
+        .returning({ companyId: jobs.companyId, kind: jobs.kind, taskId: jobs.taskId });
       for (const { companyId } of started) await publishWorking(ctx, companyId);
+      /* A turn on a task that started here rather than from the queue is at work on it the same way. */
+      for (const { kind, taskId } of started) if (kind === 'conversation' && taskId) await startWork(ctx, msg.jobId);
       return;
     }
     case 'job.done': {

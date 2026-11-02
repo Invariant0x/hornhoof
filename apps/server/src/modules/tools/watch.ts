@@ -6,6 +6,8 @@ import { agentEvents, agents, departments, jobs, requests, taskEvents, tasks } f
 import { wrote } from '../conversation/prompt.js';
 import { agentState, carrierOf, enqueueTurn, GONE_ALONG, orchestratorOf, STOPPED_ON_PURPOSE } from '../conversation/queue.js';
 import { deptName } from '../departments/templates.js';
+import type { WithEvent } from '../events/store.js';
+import { returnAlongLine } from '../org/map-state.js';
 import { carriesFile, encodedHint } from '../tasks/attachments.js';
 import { CLOSED } from '../tasks/engine.js';
 import type { Grant } from '../templates/load.js';
@@ -200,6 +202,16 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
     );
   }
 
+  /* A message to the one above the sender on the map gives a result back along their line, kept with the message. */
+  function givingBack(me: string, to: string) {
+    const gave = { back: false };
+    const withMessage: WithEvent = async (tx, stored) => {
+      gave.back = await returnAlongLine(tx, { agentId: me, to, sourceKey: `message:${stored.seq}`, sourceTaskId: null, returnedAt: stored.createdAt });
+    };
+    const told = () => gave.back && ctx.bus.publish(job.companyId, { type: 'org' });
+    return { withMessage, told };
+  }
+
   /* Whether this turn may send one more message, counted at once. */
   async function counted(me: string): Promise<boolean> {
     const counts = sent.get(ctx) ?? new Map<string, number>();
@@ -237,13 +249,16 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
         const orchestrator = await orchestratorOf(ctx, job.companyId);
         if (!me || !orchestrator) return say('This company has no orchestrator.', true);
         if (!(await counted(me.id))) return say(`One turn sends at most ${TURN_NUDGES} messages. Go on in your next round.`, true);
+        const back = givingBack(me.id, orchestrator.id);
         await enqueueTurn(ctx, {
           companyId: job.companyId,
           agentId: orchestrator.id,
           prompt: wrote({ name: me.name, title: roleTitle(me.roleKey) ?? '' }, text),
           createdBy: null,
           message: { personId: null, text, from: 'agent', name: me.name, by: me.id },
+          withMessage: back.withMessage,
         });
+        back.told();
         if (me.departmentId) ctx.bus.publish(job.companyId, { type: 'pulse', from: { kind: 'department', id: me.departmentId }, to: { kind: 'orchestrator' } });
         return say('Told the orchestrator.');
       },
@@ -276,13 +291,17 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
       if (target.switchedOffAt) return say(`${target.name} is switched off and takes no work until a person switches it on.`, true);
       if (!(await agentState(ctx, target.id)).ready) return say(`${target.name} cannot run now. Tell your head, who tells the CEO.`, true);
       if (!(await counted(me.id))) return say(`One turn sends at most ${TURN_NUDGES} messages. Go on in your next round.`, true);
+      /* Only an employee writing to its own head gives something back; a head writing down, or a word to a peer, does not. */
+      const back = me.kind === 'worker' ? givingBack(me.id, target.id) : null;
       await enqueueTurn(ctx, {
         companyId: job.companyId,
         agentId: target.id,
         prompt: wrote({ name: me.name, title: roleTitle(me.roleKey) ?? '' }, text),
         createdBy: null,
         message: { personId: null, text, from: 'agent', name: me.name, by: me.id },
+        ...(back ? { withMessage: back.withMessage } : {}),
       });
+      back?.told();
       /* The map runs it between the two departments, or the card between the two agents of one. */
       if (me.departmentId && target.departmentId) {
         const same = me.departmentId === target.departmentId;

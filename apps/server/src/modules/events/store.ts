@@ -8,6 +8,10 @@ export type EventView = { seq: number; kind: AgentEventKind; data: unknown; jobI
 
 type NewEvent = { companyId: string; agentId: string; jobId?: string | null; kind: AgentEventKind; data: unknown; personId?: string | null };
 
+type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
+/* What must be kept with the event or not at all, in the transaction that stores it. */
+export type WithEvent = (tx: Tx, stored: { seq: number; createdAt: Date }) => Promise<void>;
+
 const columns = {
   seq: agentEvents.seq,
   kind: agentEvents.kind,
@@ -36,12 +40,17 @@ const view = (r: Row): EventView => ({
   at: r.createdAt.toISOString(),
 });
 
-/* Stores the event, then tells everyone watching. */
-export async function appendEvent(ctx: Pick<Ctx, 'db' | 'bus'>, e: NewEvent): Promise<EventView> {
-  const [row] = await ctx.db
-    .insert(agentEvents)
-    .values({ companyId: e.companyId, agentId: e.agentId, jobId: e.jobId ?? null, kind: e.kind, data: hideCodes(e.data), personId: e.personId ?? null })
-    .returning({ id: agentEvents.id });
+/* Stores the event, with what goes along with it, then tells everyone watching. */
+export async function appendEvent(ctx: Pick<Ctx, 'db' | 'bus'>, e: NewEvent, also?: WithEvent): Promise<EventView> {
+  const values = { companyId: e.companyId, agentId: e.agentId, jobId: e.jobId ?? null, kind: e.kind, data: hideCodes(e.data), personId: e.personId ?? null };
+  const returning = { id: agentEvents.id, seq: agentEvents.seq, createdAt: agentEvents.createdAt };
+  const [row] = also
+    ? await ctx.db.transaction(async tx => {
+        const stored = await tx.insert(agentEvents).values(values).returning(returning);
+        await also(tx, stored[0]!);
+        return stored;
+      })
+    : await ctx.db.insert(agentEvents).values(values).returning(returning);
   const [stored] = await ctx.db.select(columns).from(agentEvents).leftJoin(people, eq(people.id, agentEvents.personId)).where(eq(agentEvents.id, row!.id));
   const event = view(stored!);
   const [agent] = await ctx.db.select({ departmentId: agents.departmentId, productId: agents.productId, teamId: agents.teamId }).from(agents).where(eq(agents.id, e.agentId));

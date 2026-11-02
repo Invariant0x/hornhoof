@@ -5,6 +5,7 @@ import type { Db } from '../../db/client.js';
 import { agents, attachments, companies, departments, jobs, people, requests, subscriptions, taskEvents, tasks, turns, type RequestOption, type TaskEventKind } from '../../db/schema.js';
 import { ApiError, type ErrorReason } from '../../errors.js';
 import { dropEarlierWakes, keepWakes } from './outbox.js';
+import { mapWorkStarted, returnAlongLine } from '../org/map-state.js';
 import { handOff } from './pulses.js';
 
 export type Task = typeof tasks.$inferSelect;
@@ -155,16 +156,22 @@ export const taskSpot = (t: Pick<Task, 'departmentId' | 'productId'>): Spot =>
 
 const actorColumns = (a: Actor) => ({ personId: a.personId ?? null, agentId: a.agentId ?? null });
 
-type Note = { kind: TaskEventKind; actor: Actor; text?: string; data?: Record<string, unknown> };
+/* returned: the agent gives its work back to the one above it with this move, which the map shows on their line. */
+type Note = { kind: TaskEventKind; actor: Actor; text?: string; data?: Record<string, unknown>; returned?: true };
 
-export async function note(tx: Tx | Db, task: Pick<Task, 'id' | 'companyId'>, n: Note): Promise<void> {
-  await tx.insert(taskEvents).values({ companyId: task.companyId, taskId: task.id, kind: n.kind, ...actorColumns(n.actor), text: n.text ?? '', data: n.data ?? {} });
+export async function note(tx: Tx | Db, task: Pick<Task, 'id' | 'companyId'>, n: Note): Promise<{ id: number; createdAt: Date }> {
+  const [row] = await tx
+    .insert(taskEvents)
+    .values({ companyId: task.companyId, taskId: task.id, kind: n.kind, ...actorColumns(n.actor), text: n.text ?? '', data: n.data ?? {} })
+    .returning({ id: taskEvents.id, createdAt: taskEvents.createdAt });
+  return row!;
 }
 
 /* One move: the task changes only if nobody moved it since it was read, and the move is written to its log. */
 /* wakes: the turns the move needs, kept with it until they are queued. */
 async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, also?: (tx: Tx, row: Task) => Promise<void>, wakes: Wake[] = []): Promise<Task> {
   let started: Task[] = [];
+  let gaveBack = false;
   const row = await ctx.db.transaction(async tx => {
     /* Two changes at once to what tasks come after would each miss the other's half of a circle: they go one at a time in
        a company, and the circle is looked for once it is this one's turn. What it comes after now is held until the move
@@ -186,7 +193,8 @@ async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, also?: (
     /* Done means all of it: work under it still open would go on under a finished task, and the turn with it. */
     if (set.status === 'done') await refuseOpenUnder(tx, task);
     await dropEarlierWakes(tx, task.id);
-    await note(tx, row, n);
+    const event = await note(tx, row, n);
+    if (n.returned && n.actor.agentId) gaveBack = await returnAlongLine(tx, { agentId: n.actor.agentId, sourceKey: `task:${event.id}`, sourceTaskId: row.id, returnedAt: event.createdAt });
     await also?.(tx, row);
     if (CLOSED.includes(row.status) && row.parentId) wakes.push(...(await workUnderDone(tx, row, n.actor.agentId)));
     /* What waited for it starts with the same move, so its turn is kept with it. */
@@ -200,6 +208,7 @@ async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, also?: (
   });
   published(ctx, row);
   for (const t of started) published(ctx, t);
+  if (gaveBack) ctx.bus.publish(row.companyId, { type: 'org' });
   await handOff(ctx, n.actor, row);
   return row;
 }
@@ -377,7 +386,7 @@ export async function submit(ctx: Live, agentId: string, taskId: string, r: { su
   if (task.status === 'waiting' && (await waitsForPerson(ctx.db, task.id))) throw refuse(409, 'task_invalid', `#${task.number} waits for a person's answer first.`);
   await refuseWaiting(ctx.db, task);
   await refuseOpenUnder(ctx.db, task);
-  const n: Note = { kind: 'submitted', actor: { agentId }, text: r.summary, data: { evidence: r.evidence, ...(task.merging ? { merged: true } : {}) } };
+  const n: Note = { kind: 'submitted', actor: { agentId }, text: r.summary, data: { evidence: r.evidence, ...(task.merging ? { merged: true } : {}) }, returned: true };
   const unstuck = stuckGoes(ctx, task);
   /* Its gates passed it already: handing the merge in finishes it. Work sent back goes straight to the gate that sent it. */
   if (task.gates.length && !task.merging) {
@@ -530,7 +539,7 @@ export async function verdict(ctx: Live, agentId: string, taskId: string, v: { p
   if (!v.comment.trim()) throw refuse(400, 'task_invalid', 'A verdict needs its reasons.');
   /* The others at the gate go on while one of them waits for a person; that one decides once the answer is in. */
   if (task.status === 'waiting' && (await asked(ctx.db, task, agentId))) throw refuse(409, 'task_invalid', `#${task.number} waits for the answer to your question first.`);
-  const n: Note = { kind: 'verdict', actor: { agentId }, text: v.comment.trim(), data: { pass: v.pass, stage: task.stage, round: task.bounces } };
+  const n: Note = { kind: 'verdict', actor: { agentId }, text: v.comment.trim(), data: { pass: v.pass, stage: task.stage, round: task.bounces }, returned: true };
   const panel = task.panel.filter(id => id !== agentId);
   if (panel.length) return { task: await move(ctx, task, { panel, assigneeAgentId: panel[0]!, silent: 0 }, n), wakes: [] };
   const [me] = await ctx.db.select({ name: agents.name }).from(agents).where(eq(agents.id, agentId));
@@ -576,7 +585,7 @@ export async function report(ctx: Live, agentId: string, taskId: string, r: { do
   if (task.executorAgentId) throw refuse(400, 'task_invalid', `#${task.number} is a member task: submit it, or say it is blocked.`);
   if (task.assigneeAgentId !== agentId) throw notYours(task, 'is not yours to report');
   await refuseWaiting(ctx.db, task);
-  const n: Note = { kind: 'report', actor: { agentId }, text: r.summary, data: { done: r.done } };
+  const n: Note = { kind: 'report', actor: { agentId }, text: r.summary, data: { done: r.done }, returned: true };
   const unstuck = stuckGoes(ctx, task);
   if (r.done || task.createdByAgentId) {
     const wakes = giver(task, r.done ? 'reported' : 'blocked', agentId, r.summary);
@@ -603,7 +612,7 @@ export async function blocked(ctx: Live, agentId: string, taskId: string, why: s
   if (task.executorAgentId !== agentId || task.stage !== 0) throw notYours(task, 'is not waiting for your work');
   await refuseWaiting(ctx.db, task);
   const wakes = giver(task, 'blocked', agentId, why);
-  const row = await move(ctx, task, { status: 'blocked' }, { kind: 'blocked', actor: { agentId }, text: why }, undefined, wakes);
+  const row = await move(ctx, task, { status: 'blocked' }, { kind: 'blocked', actor: { agentId }, text: why, returned: true }, undefined, wakes);
   return { task: row, wakes };
 }
 
@@ -1134,4 +1143,7 @@ export async function startWork(ctx: Live, jobId: string): Promise<void> {
     .where(and(eq(tasks.id, job.taskId), eq(tasks.status, 'open'), eq(tasks.assigneeAgentId, job.agentId)))
     .returning();
   if (row) published(ctx, row);
+  /* After the task is at work, so the map's lines see it so. */
+  const began = await mapWorkStarted(ctx.db, jobId);
+  if (began) ctx.bus.publish(began.companyId, { type: 'org' });
 }

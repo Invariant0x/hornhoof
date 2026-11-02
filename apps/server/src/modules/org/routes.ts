@@ -12,6 +12,7 @@ import { deptName } from '../departments/templates.js';
 import { CHANNEL_MS, type Endpoint } from '../events/bus.js';
 import { workingCount } from '../events/store.js';
 import { machineOf } from '../nodes/nodes.js';
+import { mapLines, type MapLine } from './map-state.js';
 import { personViews } from '../people/views.js';
 import { subView } from '../subscriptions/views.js';
 
@@ -163,6 +164,18 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
     /* The ways messages went in the last minutes, and those held while their work goes on: between places on the map, and
        between agents on a department's card. */
     const ways = bus.channels(me.companyId, Date.now(), goesOn);
+    /* The lines of work and of results given back, only of the places the person reaches: a department's line to people who
+       reach the department, an employee's to people who reach where it works. */
+    const map = await mapLines(db, me.companyId);
+    const seen = (l: MapLine) => {
+      if (l.kind === 'department') return canReach(reach, { departmentId: l.departmentId });
+      const agent = allAgents.find(a => a.id === l.downstreamAgentId);
+      const parentOf = (id: string | null) => depts.find(d => d.id === id)?.parentId ?? null;
+      return !!agent && canReach(reach, agent.productId ? { departmentId: agent.productId, parentId: agent.departmentId, teamId: agent.teamId } : { departmentId: agent.departmentId, parentId: parentOf(agent.departmentId), teamId: agent.teamId });
+    };
+    const shown = map.lines.filter(seen);
+    const linesOf = (kind: MapLine['kind'], departmentId?: string) =>
+      shown.filter(l => l.kind === kind && (!departmentId || l.departmentId === departmentId)).map(({ kind: _, departmentId: __, ...line }) => line);
     const inside = (id: string) =>
       ways.flatMap(w =>
         w.from.kind === 'agent' && w.to.kind === 'agent' && w.from.departmentId === id ? [{ from: w.from.id, to: w.to.id, at: w.at, ...(w.held ? { held: w.held } : {}) }] : [],
@@ -170,7 +183,9 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
 
     return {
       company,
+      serverNow: map.serverNow.toISOString(),
       live: ways.filter(w => w.from.kind !== 'agent' && w.to.kind !== 'agent'),
+      workLines: linesOf('department'),
       orchestrator: orchestrator && {
         id: orchestrator.id,
         name: orchestrator.name,
@@ -205,6 +220,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
             .filter(t => t.departmentId === d.id)
             .map(t => ({ id: t.id, name: t.name, about: t.about, stage: t.stage, gate: t.gate })),
           live: inside(d.id),
+          workLines: linesOf('member', d.id),
         })),
     };
   });

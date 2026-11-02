@@ -404,3 +404,32 @@ describe('migrations 0034 to 0037', () => {
     expect(kinds.rows).toEqual([{ kind: 'computer' }]);
   });
 });
+
+describe('migration 0038', () => {
+  const C = '00000000-0000-4000-8000-000000000001';
+  const H = '00000000-0000-4000-8000-0000000000b1';
+  const W = '00000000-0000-4000-8000-0000000000b2';
+  const T = '00000000-0000-4000-8000-0000000000d1';
+
+  it('starts the lines of an older install with no result given back, and refuses a return without its cycle', async () => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0037_work_repeatable') });
+    await db.execute(sql`insert into companies (id, name) values (${C}, 'Acme')`);
+    await db.execute(sql`insert into agents (id, company_id, kind, name, model) values (${H}, ${C}, 'head', 'Hana', ''), (${W}, ${C}, 'worker', 'Bruno', '')`);
+    await db.execute(sql`insert into tasks (id, company_id, number, title, status, closed_at) values (${T}, ${C}, 1, 'Checkout', 'done', now())`);
+    await db.execute(sql`insert into task_events (company_id, task_id, kind, agent_id, text) values (${C}, ${T}, 'submitted', ${W}, 'Done')`);
+
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+
+    /* Earlier hand-ins are not lit as returns: the map starts without any. */
+    expect((await db.execute(sql`select * from map_returns`)).rows).toEqual([]);
+    expect((await db.execute(sql`select kind, text from task_events`)).rows).toEqual([{ kind: 'submitted', text: 'Done' }]);
+    await db.execute(sql`insert into map_returns (company_id, upstream_agent_id, downstream_agent_id) values (${C}, ${H}, ${W})`);
+    expect((await db.execute(sql`select work_epoch, returned_epoch, returned_at from map_returns`)).rows).toEqual([{ work_epoch: 0, returned_epoch: null, returned_at: null }]);
+    await expect(db.execute(sql`update map_returns set returned_at = now(), source_key = 'task:1'`)).rejects.toThrow();
+    await expect(db.execute(sql`update map_returns set returned_epoch = 1, returned_at = now(), source_key = 'task:1'`)).rejects.toThrow();
+    await expect(db.execute(sql`insert into map_returns (company_id, upstream_agent_id, downstream_agent_id) values (${C}, ${H}, ${W})`)).rejects.toThrow();
+  });
+});
