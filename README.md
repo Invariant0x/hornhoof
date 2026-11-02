@@ -120,9 +120,9 @@ Now you are on the map, with the orchestrator in the middle. Click him and tell 
 
 ### Add more later
 
-- To add another computer, open Machines, click "Connect a machine", copy the command and run it in a terminal on that computer.
-- To add your AI plans, open Subscriptions, click "Connect a subscription", tick your plans, and run the command on the computer that will carry them. Each plan opens its own sign-in.
-- To invite a friend, open People, click "Invite person" and send them the link.
+- To add another computer, open Machines, click "Connect a machine", then "Copy", and run the command in a terminal on that computer.
+- To add your AI plans, open Subscriptions, click "Connect a subscription", tick your plans, click "Get the command" and run it on the computer that will carry them. Each plan opens its own sign-in.
+- To invite a friend, open People, click "Invite person", fill in their name and email and tick what they may see, click "Send invite", then "Copy link", and send them the link yourself.
 - When a new version is out, Hornhoof shows a banner with an "Update" button. Running the install line again updates too.
 
 ### Remove it

@@ -25,7 +25,7 @@ On the map, a department's card has one square per employee, in the same colors.
 
 ## Hire employees
 
-"+ Hire" asks the orchestrator to staff the department. He proposes people, each with a role, a subscription and a model, and "Hire" creates the ticked ones.
+"+ Hire" asks the orchestrator to staff the department. He proposes people, each with a role, a subscription and a model, and "Hire (2)", with the number of people ticked, creates them.
 
 When he cannot answer, the card comes from the department's default roster. Roles and their skills come from the templates in `templates/`.
 
