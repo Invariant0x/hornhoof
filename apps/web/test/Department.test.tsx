@@ -1,4 +1,4 @@
-import { act, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
@@ -96,7 +96,6 @@ describe('Department view', () => {
   });
 
   it('shows an employee start working while the department is open', async () => {
-    const user = userEvent.setup();
     const stream = fakeStream();
     const [dev] = DEV_ORG.departments;
     const task = { id: 't12', number: 12, title: 'Checkout API', stage: 0, gateCount: 1, bounces: 0 };
@@ -106,7 +105,7 @@ describe('Department view', () => {
       shell({ 'GET /api/org': () => [200, started ? busy : DEV_ORG] });
     });
     await act(async () => {
-      await user.click(screen.getByRole('button', { name: /Development/ }));
+      fireEvent.click(screen.getByRole('button', { name: /Development/ }));
     });
     expect(screen.getByRole('heading', { level: 2, name: 'Development' })).toBeInTheDocument();
     const bruno = within(screen.getByRole('region', { name: 'Members' })).getByRole('button', { name: /Bruno/ });
