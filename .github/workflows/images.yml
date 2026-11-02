@@ -3,6 +3,18 @@ name: Images
 on:
   push:
     branches: [main]
+    # A push that changes only texts and pictures builds no new images, so no update is offered for it.
+    paths-ignore:
+      - 'README.md'
+      - 'EXAMPLES.md'
+      - 'CONTRIBUTING.md'
+      - 'SECURITY.md'
+      - 'CODE_OF_CONDUCT.md'
+      - 'LICENSE'
+      - '.github/assets/**'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/CODEOWNERS'
+      - '.github/pull_request_template.md'
   # Pull requests run the tests only; images are built and pushed from main.
   pull_request:
   workflow_dispatch:
