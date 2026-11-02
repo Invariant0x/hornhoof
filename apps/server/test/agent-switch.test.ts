@@ -255,6 +255,27 @@ describe('reviewers of one role checking the same work', () => {
     expect((await submit(ctx, bruno.id, other.id, done)).task).toMatchObject({ stage: 1, panel: [rita.id] });
   });
 
+  it('checks the work once at a role that two gates name, since its whole panel checks it at the first', async () => {
+    const { ctx, db, bruno, rita, rex, hana, memberTask, companyId, dev, sub } = await company();
+    const [sam] = await db.insert(agents).values({ companyId, kind: 'worker', name: 'Sam', roleKey: 'DEV-SEC', departmentId: dev.id, model: '', subscriptionId: sub.id }).returning();
+    const task = await memberTask(bruno.id, [rita.id, rex.id, sam!.id]);
+    expect((await submit(ctx, bruno.id, task.id, done)).task).toMatchObject({ stage: 1, panel: [rita.id, rex.id] });
+    await verdict(ctx, rita.id, task.id, { pass: true, comment: 'Fine.' });
+    expect((await verdict(ctx, rex.id, task.id, { pass: true, comment: 'Fine.' })).task).toMatchObject({ status: 'review', stage: 3, panel: [sam!.id] });
+    const last = await verdict(ctx, sam!.id, task.id, { pass: true, comment: 'No secrets.' });
+    expect(last.task.status).toBe('done');
+    expect(last.wakes.map(w => [w.agentId, w.why])).toEqual([[hana.id, 'done']]);
+  });
+
+  it('brings work sent back from a second gate of a role back to it, as for a task that reached it before', async () => {
+    const { ctx, db, bruno, rita, rex, memberTask } = await company();
+    const task = await memberTask(bruno.id, [rita.id, rex.id]);
+    await submit(ctx, bruno.id, task.id, done);
+    await db.update(tasks).set({ stage: 2, panel: [rex.id], assigneeAgentId: rex.id }).where(eq(tasks.id, task.id));
+    await verdict(ctx, rex.id, task.id, { pass: false, comment: 'No test.' });
+    expect((await submit(ctx, bruno.id, task.id, done)).task).toMatchObject({ status: 'review', stage: 2, panel: [rex.id] });
+  });
+
   it('leaves reviewers that are off out of the gate', async () => {
     const { ctx, bruno, rita, rex, off, memberTask } = await company();
     const task = await memberTask(bruno.id, [rex.id]);

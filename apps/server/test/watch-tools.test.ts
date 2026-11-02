@@ -94,6 +94,15 @@ describe('tools a skill grants', () => {
     expect((await call(client, 'message_employee', { employee: wendy.id, text: 'Hi me.' })).isError).toBe(true);
   });
 
+  it('count as an agent\'s activity only what it did, not the messages others sent it', async () => {
+    const { app, db, acme, bruno } = await company(['ops-task-watch']);
+    const did = new Date(Date.now() - 3 * 3_600_000);
+    await db.insert(agentEvents).values({ companyId: acme.id, agentId: bruno.id, seq: 1, kind: 'text', data: { kind: 'text', text: 'Reviewing #15.' }, createdAt: did });
+    await db.insert(agentEvents).values({ companyId: acme.id, agentId: bruno.id, seq: 2, kind: 'message', data: { text: 'Any news on #15?', from: 'agent', name: 'Hana' } });
+    const all = JSON.parse((await call(await mcp(app), 'agents')).content[0]!.text) as { name: string; lastActivityAt: string | null }[];
+    expect(all.find(a => a.name === 'Bruno')!.lastActivityAt).toBe(did.toISOString());
+  });
+
   it('show until when a plan is at its limit, so the watchdog leaves its agents to wait', async () => {
     const { app, db, sub } = await company(['ops-task-watch']);
     const resetsAt = new Date(Date.now() + 3_600_000).toISOString();

@@ -1,11 +1,12 @@
 import { effortFor, effortsOf, MAX_INSTRUCTIONS, modelsFor, OLD_NODE_INSTRUCTIONS, type Limits } from '@hornhoof/protocol';
-import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, lte, ne, or } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, lte, ne, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { loggable } from '../../errors.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
-import { agents, jobs, nodes, people, subscriptions, tasks } from '../../db/schema.js';
+import { agents, jobs, nodes, people, subscriptions, tasks, turns } from '../../db/schema.js';
 import { dispatchJob } from '../jobs/dispatch.js';
+import { turnsHeld } from '../updates/drain.js';
 import { sayLive } from './live.js';
 import { BUILTIN, identityOf, nodeIdentity, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { liveNode, planNodes, type NodeRow } from '../nodes/nodes.js';
@@ -41,6 +42,7 @@ export type AgentState = {
 
 /* How long after a plan's limit starts over its waiting turns go out, so the program sees the new limit. */
 const LIMIT_GRACE_MS = 5_000;
+const LONGEST_TIMER_MS = 2 ** 31 - 1;
 
 /* When the plan's limit starts over, while the plan is at it: the latest reset of a full window still to come. A plan at
    its limit that says no reset holds nothing, so its turns go out and fail as before rather than wait forever. */
@@ -89,10 +91,13 @@ function pumpAt(ctx: Ctx, agentId: string, at: string): void {
   resets.set(ctx, timers);
   if (timers.get(agentId)?.at === at) return;
   clearTimeout(timers.get(agentId)?.timer);
+  /* A timer holds at most about 24 days: a longer wait wakes once then and sets itself again. */
+  const wait = Date.parse(at) - Date.now() + LIMIT_GRACE_MS;
   const timer = setTimeout(() => {
     timers.delete(agentId);
+    if (wait > LONGEST_TIMER_MS) return pumpAt(ctx, agentId, at);
     void pump(ctx, agentId).catch(() => {});
-  }, Date.parse(at) - Date.now() + LIMIT_GRACE_MS);
+  }, Math.min(wait, LONGEST_TIMER_MS));
   timer.unref();
   timers.set(agentId, { at, timer });
 }
@@ -304,15 +309,22 @@ export async function startProgram(ctx: Ctx, node: NodeIdentity, agentId: string
 /* A new session catches up from the conversation. The last finished turn's session goes on only on the same subscription
    and node with the same instructions: another machine does not have it, and changed instructions would not reach a
    session that already has the old ones. A turn that ran out of time or was stopped in its session finished too, the
-   session whole; one that broke, or was called off before it ran, leaves the session before it. */
-async function sessionFor(ctx: Ctx, agent: { id: string; kind: string; name: string }, on: { subscriptionId: string; nodeId: string | null }, instructionsHash: string): Promise<{ sessionId: string | null; catchUp: string | null }> {
+   session whole; one that broke, or was called off before it ran, leaves the session before it. Each turn of the company
+   starts every agent in a clean session, which only the orchestrator, who talks with people across turns, catches up. */
+async function sessionFor(ctx: Ctx, agent: { id: string; companyId: string; kind: string; name: string }, on: { subscriptionId: string; nodeId: string | null }, instructionsHash: string): Promise<{ sessionId: string | null; catchUp: string | null }> {
   const [last] = await ctx.db
-    .select({ subscriptionId: jobs.subscriptionId, nodeId: jobs.nodeId, sessionId: jobs.sessionId, instructionsHash: jobs.instructionsHash })
+    .select({ subscriptionId: jobs.subscriptionId, nodeId: jobs.nodeId, sessionId: jobs.sessionId, instructionsHash: jobs.instructionsHash, startedAt: jobs.startedAt })
     .from(jobs)
     .where(and(conversationOf(agent.id), or(eq(jobs.status, 'done'), and(eq(jobs.status, 'failed'), inArray(jobs.error, ['timeout', 'cancelled']), isNotNull(jobs.sessionId)))))
     .orderBy(desc(jobs.finishedAt))
     .limit(1);
-  if (last?.sessionId && last.subscriptionId === on.subscriptionId && last.nodeId === on.nodeId && last.instructionsHash === instructionsHash) return { sessionId: last.sessionId, catchUp: null };
+  const [turn] = await ctx.db
+    .select({ openedAt: sql<Date>`coalesce(${turns.openedAt}, ${turns.createdAt})` })
+    .from(turns)
+    .where(and(eq(turns.companyId, agent.companyId), eq(turns.status, 'open')));
+  const newTurn = Boolean(last?.startedAt && turn && new Date(last.startedAt) < new Date(turn.openedAt));
+  if (last?.sessionId && !newTurn && last.subscriptionId === on.subscriptionId && last.nodeId === on.nodeId && last.instructionsHash === instructionsHash) return { sessionId: last.sessionId, catchUp: null };
+  if (newTurn && agent.kind !== 'orchestrator') return { sessionId: null, catchUp: null };
   const talk = await earlierTalk(ctx.db, agent.id);
   return { sessionId: null, catchUp: talk.length ? preface(talk, agent.kind === 'orchestrator' ? 'Orchestrator' : agent.name) : null };
 }
@@ -450,6 +462,8 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   if (!sub || sub.status !== 'ready') return;
   const [agent] = await db.select().from(agents).where(eq(agents.id, agentId));
   if (!agent || !(await placement(ctx, agent, sub))) return;
+  /* An update waits for the turns that run: new ones start after it, the orchestrator's go on. */
+  if (agent.kind !== 'orchestrator' && turnsHeld(ctx, agent.companyId)) return;
   /* Real turns wait for the limit; an empty start can still open the saved program. Past the share set for tasks only
      task turns wait. */
   const until = limitUntil(sub.limits);

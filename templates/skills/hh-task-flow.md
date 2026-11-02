@@ -9,7 +9,7 @@ Hornhoof wakes you with a task number and the reason. Read the task with "task" 
 **When you do the work** (you are its executor):
 
 1. Work in your repository's clone, on a branch named after the task, like task-12-checkout-api. Never commit to the main branch.
-2. Do what the body asks and check it the way the body says, for what you changed. "run_tests" runs a whole suite on a free machine, in parts if it splits.
+2. Do what the body asks and check it the way the body says, for what you changed.
 3. Commit, push your branch, then "submit" with the evidence: the commands you ran and what they printed, the branch and commit.
 4. When it comes back with changes, make exactly those, check and "submit" again.
 5. When only your head can settle what stops you (a wrong brief, missing access, who does what), say so with "blocked" and name what you need. Your checks need nobody's permission.

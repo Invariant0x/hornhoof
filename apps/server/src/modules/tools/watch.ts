@@ -1,5 +1,5 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { and, desc, eq, gte, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNotNull, isNull, ne, notInArray, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agentEvents, agents, departments, jobs, requests, taskEvents, tasks } from '../../db/schema.js';
@@ -78,7 +78,13 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
         for (const a of staff) {
           const state = await agentState(ctx, a.id);
           const [running] = state.runningJobId ? await db.select({ at: jobs.startedAt }).from(jobs).where(eq(jobs.id, state.runningJobId)) : [];
-          const [active] = await db.select({ at: agentEvents.createdAt }).from(agentEvents).where(eq(agentEvents.agentId, a.id)).orderBy(desc(agentEvents.seq)).limit(1);
+          /* What the agent did itself: words others sent it are no sign of life. */
+          const [active] = await db
+            .select({ at: agentEvents.createdAt })
+            .from(agentEvents)
+            .where(and(eq(agentEvents.agentId, a.id), ne(agentEvents.kind, 'message')))
+            .orderBy(desc(agentEvents.seq))
+            .limit(1);
           const [last] = await db
             .select({ status: jobs.status, error: jobs.error, at: jobs.finishedAt })
             .from(jobs)

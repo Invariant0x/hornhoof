@@ -267,21 +267,29 @@ async function answerDialogs(home: string, workDir: string, fs: AgentFs): Promis
 /* Claude Code logs a session under its folder, each character that is not a letter or digit made a dash. */
 export const claudeTranscript = (home: string, workDir: string, sessionId: string) => join(home, 'projects', workDir.replace(/[^A-Za-z0-9]/g, '-'), `${sessionId}.jsonl`);
 
-/* The log of a known Codex session, or the newest one Codex started in this folder since the given time. */
-export function findRollout(home: string, workDir: string, since: number, sessionId: string | null = null): { file: string; sessionId: string } | null {
+/* Every session log Codex keeps, with when each was last written. */
+function rollouts(home: string): { file: string; mtime: number }[] {
   const files: { file: string; mtime: number }[] = [];
   const walk = (dir: string, depth: number) => {
     if (!existsSync(dir)) return;
     for (const name of readdirSync(dir)) {
       const path = join(dir, name);
       if (depth < 3) walk(path, depth + 1);
-      else if (name.startsWith('rollout-') && name.endsWith('.jsonl')) {
-        const mtime = statSync(path).mtimeMs;
-        if (sessionId ? name.endsWith(`-${sessionId}.jsonl`) : mtime >= since) files.push({ file: path, mtime });
-      }
+      else if (name.startsWith('rollout-') && name.endsWith('.jsonl')) files.push({ file: path, mtime: statSync(path).mtimeMs });
     }
   };
   walk(join(home, 'sessions'), 0);
+  return files;
+}
+
+/* The session logs there are now: a new session's log is none of them. */
+export const rolloutFiles = (home: string): Set<string> => new Set(rollouts(home).map(r => r.file));
+
+/* The log of a known Codex session, or the newest one Codex started in this folder since the given time, other than
+   those before. Codex writes a new session's log only with its first message, so the last session's log, written a
+   moment ago, would pass for it. */
+export function findRollout(home: string, workDir: string, since: number, sessionId: string | null = null, before: ReadonlySet<string> = new Set()): { file: string; sessionId: string } | null {
+  const files = rollouts(home).filter(({ file, mtime }) => !before.has(file) && (sessionId ? file.endsWith(`-${sessionId}.jsonl`) : mtime >= since));
   for (const { file } of files.sort((a, b) => b.mtime - a.mtime)) {
     const first = readFileSync(file, 'utf8').split('\n', 1)[0] ?? '';
     try {

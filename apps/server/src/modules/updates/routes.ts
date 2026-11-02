@@ -4,7 +4,9 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { requireCompanyScope, requirePerson } from '../../auth/session.js';
 import { ApiError, loggable } from '../../errors.js';
+import { pumpWaiting } from '../conversation/queue.js';
 import { workingCount } from '../events/store.js';
+import { holdTurns } from './drain.js';
 import type { UpdateRequest, UpdaterView } from './control.js';
 import type { Build } from './registry.js';
 
@@ -12,6 +14,8 @@ export const UpdateBody = z.object({ version: z.string().min(1).max(128), whenId
 const FULL_SHA = /^[0-9a-f]{40}$/;
 /* While an update waits for the agents, the working count is checked when it changes and this often besides. */
 const IDLE_CHECK_MS = 30_000;
+/* An update handed over restarts Hornhoof within minutes; one that did not keeps no turns waiting longer. */
+const HELD_AFTER_MS = 10 * 60_000;
 
 type Waiting = { companyId: string; request: UpdateRequest; stop: () => void };
 
@@ -37,9 +41,16 @@ export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { current: { version, commit, migrations }, available: Boolean(state.latest?.commit && state.latest.commit !== commit), ...state, updater };
   }
 
-  function callOff() {
+  /* release: the turns held for the update start again; an update handed over keeps them for the restart. */
+  function callOff(release = true) {
     waiting?.stop();
+    if (waiting && release) letTurnsGo(waiting.companyId);
     waiting = null;
+  }
+
+  function letTurnsGo(companyId: string) {
+    holdTurns(ctx, companyId, false);
+    void pumpWaiting(ctx).catch(err => app.log.error({ error: loggable(err) }, 'Could not start the turns held for an update.'));
   }
 
   /* The image tag names the build: a version tag moves when that version is built again, a commit's does not. The
@@ -69,17 +80,20 @@ export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
       if (!wanted() || (await workingCount(ctx.db, companyId)) > 0 || !wanted()) return;
       send(request);
       done = true;
-      callOff();
+      callOff(false);
+      setTimeout(() => waiting?.companyId === companyId || letTurnsGo(companyId), HELD_AFTER_MS).unref();
     };
     const tryCheck = () => check().catch(err => app.log.error({ error: loggable(err) }, 'Could not hand the waiting update to the updater.'));
     const unsubscribe = ctx.bus.subscribe(companyId, m => m.type === 'working' && m.working === 0 && void tryCheck());
     const timer = setInterval(() => void tryCheck(), IDLE_CHECK_MS);
     timer.unref();
     waiting = { companyId, request, stop: () => (unsubscribe(), clearInterval(timer)) };
+    /* No new turn starts meanwhile, so the running ones can end. */
+    holdTurns(ctx, companyId, true);
     await tryCheck();
   }
 
-  app.addHook('onClose', async () => callOff());
+  app.addHook('onClose', async () => callOff(false));
 
   app.get('/api/updates', async req => {
     await companyPerson(req);

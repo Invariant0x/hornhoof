@@ -84,6 +84,16 @@ describe('task tools', () => {
     expect(outside.isError).toBe(true);
   });
 
+  it('gives a task whose gates the head left out only the first review stage, not every gate role of the department', async () => {
+    const { db, dev, head, bruno, rita, tools } = await company();
+    const [sid] = await db.select().from(agents).where(eq(agents.id, rita.id));
+    await db.insert(agents).values({ companyId: sid!.companyId, kind: 'worker', name: 'Sid', roleKey: 'DEV-SEC', departmentId: dev.id, model: '', subscriptionId: sid!.subscriptionId });
+    const made = await call(await tools(head), 'create_task', { title: 'Checkout API', brief: 'The API.', body: 'POST /checkout.', executor: bruno.id });
+    expect(made.isError).toBeFalsy();
+    const [task] = await db.select().from(tasks);
+    expect(task!.gates).toEqual([rita.id]);
+  });
+
   it("refuses a member's move on another member's task with a readable error", async () => {
     const { ctx, db, head, bruno, tess, dev, tools } = await company();
     const { task } = await createTask(ctx, { agentId: head.id }, { title: 'Checkout API', brief: '', body: '', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true, gates: [] });
