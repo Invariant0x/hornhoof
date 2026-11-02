@@ -74,9 +74,12 @@ describe('Department view', () => {
     const bar = screen.getByRole('navigation', { name: 'Development' });
     const back = within(bar).getByRole('button', { name: 'Back to the map' });
     expect(within(bar).getAllByRole('button')).toEqual([back]);
+    expect(bar).not.toHaveClass('glass');
+    expect(back).toHaveClass('glass');
     expect(back).toContainElement(title);
     expect(back).toContainElement(within(bar).getByText('CTO'));
     expect(decl('.crumbs', 'padding')).toBeUndefined();
+    expect(decl('.crumb', 'border')).toBeUndefined();
     expect(decl('.crumb', 'width')).toBe('100%');
     expect(decl('.crumb', 'height')).toBe('100%');
     expect(decl('.crumb', 'cursor')).toBe('pointer');

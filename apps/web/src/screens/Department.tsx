@@ -493,9 +493,9 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
         {!d.employees.some(e => e.kind !== 'head') && <p className="dv-empty glass">{t.dept.noMembers}</p>}
       </div>
 
-      <nav className="crumbs glass" aria-label={deptLabel(t, d)}>
+      <nav className="crumbs" aria-label={deptLabel(t, d)}>
         {/* The whole bar goes back, so nobody has to aim at the small arrow. */}
-        <button className="crumb" type="button" aria-label={t.dept.back} title={t.dept.back} onClick={onBack}>
+        <button className="crumb glass" type="button" aria-label={t.dept.back} title={t.dept.back} onClick={onBack}>
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M15 5l-7 7 7 7" />
           </svg>

@@ -725,9 +725,9 @@ button.shead:focus-visible, button.schip:focus-visible { outline: none; }
 .pchip .pn span { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dv-empty { position: absolute; left: 50%; bottom: 76px; transform: translateX(-50%); margin: 0; padding: 10px 16px; font-size: 13px; color: var(--muted); }
 /* The department's name next to the logo, its actions bottom right and the drawer they open at the left. */
-.crumbs { position: absolute; z-index: 3; top: 12px; left: 68px; display: flex; height: 44px; box-sizing: border-box; max-width: calc(50% - 280px); min-width: 0; }
+.crumbs { position: absolute; z-index: 3; top: 12px; left: 68px; display: flex; height: 44px; max-width: calc(50% - 280px); min-width: 0; }
 .crumbs h2 { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; color: var(--cyan-ink); }
-.crumb { display: flex; align-items: center; gap: 10px; width: 100%; height: 100%; min-width: 0; padding: 0 14px 0 0; border: 0; background: none; color: var(--ink); cursor: pointer; }
+.crumb { display: flex; align-items: center; gap: 10px; width: 100%; height: 100%; min-width: 0; padding: 0 14px 0 0; color: var(--ink); cursor: pointer; }
 .crumb:hover { color: var(--cyan-ink); }
 .crumb:hover h2 { text-decoration: underline; text-underline-offset: 3px; }
 .crumb svg { flex: none; width: 42px; height: 42px; padding: 12px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
