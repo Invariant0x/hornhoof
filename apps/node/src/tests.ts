@@ -1,5 +1,6 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { chmodSync, chownSync, closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { availableParallelism } from 'node:os';
 import { join } from 'node:path';
 import { MAX_RUN_FILES, RUN_FILE_BYTES, TEST_LOG_BYTES, type NodeMessage, type ServerMessage, type TestError } from '@hornhoof/protocol';
 import { ensurePasswd, FIRST_UID, prepareFolder, type JobUser } from './isolation.js';
@@ -29,6 +30,8 @@ type Options = {
   hidden: string[];
   signal?: AbortSignal;
   proc?: string;
+  cpus?: number;
+  env?: NodeJS.ProcessEnv;
   /* The task's files of a part of work, in and out. */
   files?: PartFiles;
 };
@@ -285,11 +288,20 @@ export function partFolders(root: string, msg: TestRun): { own: string; user: st
   return { own: root, user: subs.map(sub => join(root, sub)) };
 }
 
+const vitestWorkers = (cpus = availableParallelism(), env: NodeJS.ProcessEnv = process.env) =>
+  env.VITEST_MAX_WORKERS?.trim() || String(Math.max(1, Math.floor(cpus / 2)));
+
+function commandEnv(base: NodeJS.ProcessEnv, msg: TestRun, inbox: string, outbox: string, workers: string): NodeJS.ProcessEnv {
+  const parts = { HH_PART: String(msg.part), HH_PARTS: String(msg.parts) };
+  if (msg.kind === 'work') return { ...base, NO_COLOR: '1', ...parts, HH_IN: inbox, HH_OUT: outbox };
+  return { ...base, CI: 'true', NO_COLOR: '1', FORCE_COLOR: '0', VITEST_MAX_WORKERS: workers, ...parts, HH_TEST_PART: String(msg.part), HH_TEST_PARTS: String(msg.parts) };
+}
+
 /* One part of a run, which always ends with a tests.done: the branch, if there is one, is cloned into a fresh folder,
    a part of work gets the task's files it names, the command runs within the time with a home and a temporary folder
    of its own, what a part of work leaves in its output folder goes on the task, and the folder goes, whatever
    happened. */
-export async function runTests(msg: TestRun, { dir, user, hidden, signal, proc = '/proc', files }: Options): Promise<TestsDone> {
+export async function runTests(msg: TestRun, { dir, user, hidden, signal, proc = '/proc', cpus, env: hostEnv, files }: Options): Promise<TestsDone> {
   const deadline = Date.now() + msg.timeoutMs;
   const work = msg.kind === 'work';
   const root = join(dir, 'tests', msg.partId);
@@ -385,10 +397,7 @@ export async function runTests(msg: TestRun, { dir, user, hidden, signal, proc =
     }
     if (!error) {
       out.line(`$ ${msg.command}`);
-      const parts = { HH_PART: String(msg.part), HH_PARTS: String(msg.parts) };
-      const env = work
-        ? { ...base, NO_COLOR: '1', ...parts, HH_IN: inbox, HH_OUT: outbox }
-        : { ...base, CI: 'true', NO_COLOR: '1', FORCE_COLOR: '0', ...parts, HH_TEST_PART: String(msg.part), HH_TEST_PARTS: String(msg.parts) };
+      const env = commandEnv(base, msg, inbox, outbox, vitestWorkers(cpus, hostEnv));
       const ended = await runIn('/bin/bash', ['-c', msg.command], { cwd: repo, env, user, deadline, signal, out });
       ran = true;
       error = stoppedBy(ended);

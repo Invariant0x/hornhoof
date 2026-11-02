@@ -128,6 +128,16 @@ const reportHost = (c: Awaited<ReturnType<typeof company>>, nodeId: string | nul
 };
 
 describe('parts on physical computers', () => {
+  it('groups reports received through the node protocol without injecting hub state', async () => {
+    const c = await company();
+    const load = idle({ host: 'linux', hostCpus: 16, hostLoad: 1, hostMemFree: 12 * GIB, hostMemory: 16 * GIB });
+    await c.planless(c.ceo, 'container-one', load);
+    await c.planless(c.ceo, 'container-two', load);
+    const { call } = await c.turn(c.bruno);
+    await call('run_tests', { command: 'make test -- {part}', parts: 2 });
+    expect(JSON.parse((await call('test_run', { run: 1 })).text).parts).toMatchObject([{ status: 'running' }, { status: 'queued' }]);
+  });
+
   it('sends the next run to another host even when a sibling container looks idle', async () => {
     const c = await company();
     const one = await c.planless(c.ceo, 'container-one');

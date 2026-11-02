@@ -1,14 +1,12 @@
 import type { NodeLoad } from '@hornhoof/protocol';
 
-/* Physical host reports are optional, so nodes from before host reporting keep their earlier behavior. */
-type HostLoad = NodeLoad & { host?: string; hostLoad?: number; hostMemFree?: number };
-export type ComputerPlace = { key: string; load: HostLoad | null; computer?: string | null };
+export type ComputerPlace = { key: string; load: NodeLoad | null; computer?: string | null };
 
 /* Older nodes stand for separate computers. Prefixes keep a host name apart from a place's key. */
 export const computerKey = (place: ComputerPlace): string => place.computer ?? (place.load?.host ? `host:${place.load.host}` : `place:${place.key}`);
 
 /* The host's resources when it reports them, otherwise the node's earlier figures. */
-export const resources = (load: HostLoad): Pick<NodeLoad, 'cpus' | 'load' | 'memFree' | 'memTotal'> => ({
+export const resources = (load: NodeLoad): Pick<NodeLoad, 'cpus' | 'load' | 'memFree' | 'memTotal'> => ({
   cpus: load.hostCpus ?? load.cpus,
   load: load.hostLoad ?? load.load,
   memFree: load.hostMemFree ?? load.memFree,
@@ -16,13 +14,13 @@ export const resources = (load: HostLoad): Pick<NodeLoad, 'cpus' | 'load' | 'mem
 });
 
 /* A run must fit both the physical host and the node's own memory limit. */
-export const availableMemory = (load: HostLoad): number => Math.min(load.memFree, resources(load).memFree);
+export const availableMemory = (load: NodeLoad): number => Math.min(load.memFree, resources(load).memFree);
 
 /* Sibling containers describe one host; its newest report counts for all of them. */
-export function latestHost(place: ComputerPlace, reports: ((HostLoad & { at: number }) | null)[]): HostLoad | null {
+export function latestHost(place: ComputerPlace, reports: ((NodeLoad & { at: number }) | null)[]): NodeLoad | null {
   const own = place.load;
   if (!own?.host) return own;
-  const same = reports.filter((r): r is HostLoad & { at: number } => r !== null && r.host === own.host);
+  const same = reports.filter((r): r is NodeLoad & { at: number } => r !== null && r.host === own.host);
   const newest = same.reduce((a, b) => (b.at > a.at ? b : a), { ...own, at: -Infinity });
   const host = resources(newest);
   return { ...own, hostCpus: host.cpus, hostLoad: host.load, hostMemFree: host.memFree, hostMemory: host.memTotal };
@@ -32,7 +30,7 @@ export function latestHost(place: ComputerPlace, reports: ((HostLoad & { at: num
 export const runningOn = (place: ComputerPlace, running: ComputerPlace[]): number =>
   running.filter(p => p.key === place.key || computerKey(p) === computerKey(place)).length;
 
-export function computerState(place: ComputerPlace, running: ComputerPlace[], reports: Parameters<typeof latestHost>[1], limit: number): { load: HostLoad | null; running: number; busy: boolean } {
+export function computerState(place: ComputerPlace, running: ComputerPlace[], reports: Parameters<typeof latestHost>[1], limit: number): { load: NodeLoad | null; running: number; busy: boolean } {
   const count = runningOn(place, running);
   return { load: latestHost(place, reports), running: count, busy: running.some(p => p.key === place.key) || count >= limit };
 }
