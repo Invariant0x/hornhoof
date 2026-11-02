@@ -65,11 +65,11 @@ describe('task tools', () => {
   it('tells the head to give work out in a few large pieces with only the gates they need, and the orchestrator one task per goal', async () => {
     const { orchestrator, head, tools } = await company();
     const said = async (agent: { id: string }, name: string) => (await (await tools(agent)).listTools()).tools.find(t => t.name === name)!.description!;
-    expect(await said(head, 'create_task')).toContain("name only the gates the work's size and risk need: [] for research, reports, plans and docs");
+    expect(await said(head, 'create_task')).toContain("leave them out for code in a repository under your department's task of the turn, which the review of the turn checks all at once; [] for research, reports, plans and docs");
     expect(await said(orchestrator, 'plan_turn')).toContain("one for each of the CEO's goals, for the one department that owns it end to end");
     expect(await said(orchestrator, 'add_tasks')).toContain('A new ask goes into the next planned turn, into the running turn only when the CEO says now.');
     expect(wakePrompt({ kind: 'head' }, { number: 1, title: 'Payments', executorAgentId: null, panel: [] } as unknown as Task, { agentId: head.id, taskId: 't', why: 'assigned' })).toContain(
-      'Give it out in 2-4 large self-contained pieces to different members at once with create_task, each with its executor and only the gates its size and risk need',
+      'Give it out in 2-4 large self-contained pieces to different members at once with create_task, each under it (parent 1) with its executor and no gates for code: the review of the turn checks all of it once the last piece is in',
     );
   });
 

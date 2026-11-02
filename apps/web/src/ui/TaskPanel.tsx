@@ -79,10 +79,12 @@ function TaskBody({ task, onOpen, onChanged, waiting }: { task: TaskDetail; onOp
       )}
       {task.executor ? (
         <ol className="tgates" aria-label={t.tasks.gates}>
-          <li className={task.stage > 0 || task.status === 'done' ? 'passed' : waits ? 'next' : 'current'}>
-            <b>{task.executor.name}</b>
-            {roleAfter(task.executor, language)}, <span>{executorState}</span>
-          </li>
+          {!task.turnReview && (
+            <li className={task.stage > 0 || task.status === 'done' ? 'passed' : waits ? 'next' : 'current'}>
+              <b>{task.executor.name}</b>
+              {roleAfter(task.executor, language)}, <span>{executorState}</span>
+            </li>
+          )}
           {task.gates.map(g => (
             <li key={g.id} className={g.state}>
               <b>{g.name}</b>

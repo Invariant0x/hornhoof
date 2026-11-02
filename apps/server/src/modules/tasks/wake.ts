@@ -7,7 +7,7 @@ import { sayLive } from '../conversation/live.js';
 import { quote } from '../conversation/prompt.js';
 import { appendEvent, publishWorking } from '../events/store.js';
 import { identityOf, type NodeIdentity } from '../nodes/hub.js';
-import { answerDirectly, brokeDown, CLOSED, GATE_ROUNDS, handOver, leaveWork, NOT_A_MOVE, openAfter, published, regateWaiting, silentTurn, taskSpot, wentOn, type Actor, type Task, type Wake, type WakeWhy } from './engine.js';
+import { answerDirectly, brokeDown, CLOSED, GATE_ROUNDS, handOver, leaveWork, NOT_A_MOVE, openAfter, published, regateWaiting, reviewWake, silentTurn, taskSpot, wentOn, type Actor, type Task, type Wake, type WakeWhy } from './engine.js';
 import { wakeQueued, wakesLeft } from './outbox.js';
 import { settle, tell } from './turns.js';
 
@@ -47,7 +47,7 @@ function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string {
     case 'assigned':
       if (task.executorAgentId) return `${ref} is yours to do. ${read} Do the work, then ${finish}. If you cannot go on, ${stuck}; if only a person can answer, use ask_person.`;
       if (agent.kind === 'orchestrator') return `${ref} is yours. ${read} Lay the work out as tasks for the departments with add_tasks or plan_turn, and report it when every part is done.`;
-      return `${ref} is your department's. ${read} Give it out in 2-4 large self-contained pieces to different members at once with create_task, each with its executor and only the gates its size and risk need, and report it when they are done.`;
+      return `${ref} is your department's. ${read} Give it out in 2-4 large self-contained pieces to different members at once with create_task, each under it (parent ${task.number}) with its executor and no gates for code: the review of the turn checks all of it once the last piece is in. Report it when they are done.`;
     case 'review': {
       /* Its text is what this reviewer sent the work back for in the last round. */
       if (w.text) return `${ref} came back to your gate. You sent it back for${said}Check only the fixes for your own findings, then give your verdict: pass it, or send it back if one of them is still not fixed.`;
@@ -57,6 +57,23 @@ function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string {
         `(a failing test, an unmet requirement, a security hole, data loss), all of them at once with file and line.${together}`
       );
     }
+    case 'turn_review': {
+      /* Its text names the turn's branch. */
+      const branch = w.text ?? "the turn's branch";
+      return (
+        `${ref} is the review of everything ${branch.replace('-', ' ')} changed in your department, once for the whole turn. ${read} Check it on the turn's branch: git diff <main line>...${branch}. ` +
+        'Other reviewers check the same branch at once, each for what their role looks at. Give your verdict: pass it, with notes for what does not block, or send it back for blocking findings ' +
+        '(a failing test, an unmet requirement, a security hole, data loss), all of them at once with file and line. Your findings go only in your verdict: write to nobody while you review.'
+      );
+    }
+    case 'reviewed':
+      return (
+        `The reviewers of ${ref} gave their verdicts, and some of them block:\n\n${quote(w.text ?? '')}\n\n` +
+        "Give each blocking finding as a fix task without gates (gates: []) under your department's task, to the member whose change it is, all at once with create_task. " +
+        'Each fix starts with a test that fails and then passes; there is no second review. Take a note that does not block into those tasks only when it is cheap. Once the fixes are in, give the final check.'
+      );
+    case 'review_passed':
+      return `Nobody found anything that blocks in the ${task.title.toLowerCase()}:\n\n${quote(w.text ?? '')}\n\nWhere it says someone did not check, decide first whether the turn needs their check, then give the final check.`;
     case 'changes':
       return `${ref} came back to you with changes requested${said}Make them, then submit it again.`;
     case 'merge':
@@ -246,13 +263,14 @@ export async function explainEnded(ctx: Ctx, jobId: string): Promise<void> {
   }
 }
 
-/* An agent back on a subscription: the wakes it missed without one were left out, so every task waiting on it gets a turn. */
+/* An agent back on a subscription: the wakes it missed without one were left out, so every task waiting on it gets a turn,
+   also each one it checks at a gate. */
 export async function resumeAgent(ctx: Ctx, agentId: string): Promise<void> {
-  const held = await ctx.db.select().from(tasks).where(and(eq(tasks.assigneeAgentId, agentId), inArray(tasks.status, ['open', 'working', 'review'])));
-  await wakeAll(
-    ctx,
-    held.map(t => ({ agentId, taskId: t.id, why: t.status === 'review' ? 'review' : 'assigned' })),
-  );
+  const checks = and(eq(tasks.status, 'review'), sql`${tasks.panel} @> ${JSON.stringify([agentId])}::jsonb`);
+  const held = await ctx.db.select().from(tasks).where(or(and(eq(tasks.assigneeAgentId, agentId), inArray(tasks.status, ['open', 'working', 'review'])), checks));
+  const wakes: Wake[] = [];
+  for (const t of held) wakes.push({ agentId, taskId: t.id, ...(t.panel.includes(agentId) ? await reviewWake(ctx.db, t) : { why: t.status === 'review' ? 'review' : 'assigned' }) });
+  await wakeAll(ctx, wakes);
 }
 
 /* Turns on cancelled tasks end: a waiting one at once, a running one through its node. The agent that cancelled keeps its own. */

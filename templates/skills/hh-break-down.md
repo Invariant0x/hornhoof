@@ -11,7 +11,7 @@ When a goal reaches your department:
 2. Split it into two to four large self-contained pieces for different members to do at once, each a whole result one member owns end to end, with one check that shows it is done; pieces that touch the same files or records go to one member. A small goal is one piece. Each piece is a whole result, not a step of preparation: planning is part of doing, so no tasks for plans, contracts or proofs before the real work. The one exception is a short step your department's rules name for a new or large piece, such as an architect's design note: give it at the same time, with the piece waiting on it in `after`.
 3. When two pieces must fit together, their owners agree how they fit directly, in the task's comments or by message, and both start at once: no separate task for that.
 4. For each piece write: the owner, what it receives, what it hands back and how the result is checked. A piece that truly needs another's result names that task in `after`; all the others start at once.
-5. Give each piece only the gates its size and risk need: none for research, reports, plans and docs, one review for normal work, more only where your department's rules ask for them. The one who did the work never passes its own gate.
+5. Give each piece only the gates it needs: none for research, reports, plans and docs, nor for code in a repository, which the review of the turn checks at once; one review for other normal work; more only where your department's rules ask for them. The one who did the work never passes its own gate.
 6. A new ask that comes while the work runs goes to the next turn, unless the CEO says "now".
 
 Show the plan to whoever gave you the goal only when it changes scope, cost or dates; otherwise start.
