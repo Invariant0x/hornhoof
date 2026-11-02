@@ -1,0 +1,114 @@
+# Tests and heavy work on free machines
+
+> In short: when an agent runs the tests, Hornhoof sends them to whichever machine of the company is freest, and splits them over several machines when it can. Other heavy commands go out the same way. Only machines lent to test runs take this work, and a loaded one takes none.
+
+The names in `code`, like `run_tests` or `pool`, are tools the agents use. You do not type them.
+
+## Where do the tests run?
+
+An agent runs the whole test suite of a branch with `run_tests`. The suite does not run on the agent's own machine. Hornhoof sends it to whichever machine of the company is freest at that moment, while the agents keep working where they are.
+
+A test runner that can split a suite runs it in parts, one part on each of several machines at once.
+
+## What does the Machines tab show?
+
+Machines shows the company's machines as one pool: how many are online, their processor cores, their free memory and how busy they are now.
+
+Each machine's card adds:
+
+- its owner, system, processor, memory, load and free disk;
+- its plans;
+- the employees and test parts on it now.
+
+On a Mac, Docker runs in a smaller system of its own. So the card shows what Hornhoof can use there, and says when that is less than the Mac has. What a node of an older build does not tell shows as unknown.
+
+![The pool of machines](../.github/assets/machines.png)
+
+## Is the server's own machine counted twice?
+
+No. When the server runs on a machine that also joined, the installer tells the server which one, by a hash of that machine's key, never the key itself. So Machines and the pool count that machine once, and the built-in node's card names it.
+
+A server installed before that counts its built-in node apart, as before.
+
+## Which machines take a test run?
+
+A machine takes a test run when all of these are true:
+
+- it is a computer;
+- it is online;
+- it is lent to test runs;
+- it runs no other test run;
+- it is not loaded, which means its processors are busy less than 90% of the time;
+- it has enough free memory;
+- its owner reaches the department whose repository is tested.
+
+The built-in node takes test runs too. A run needs 4 GB of free memory, unless the repository's settings name another amount.
+
+## Keep your machine out of test runs
+
+Every machine is lent at first. Its owner, or someone who sees the whole company, takes it back with the tick on the machine's card, "Lend to test runs".
+
+## What if no machine is free?
+
+The run waits, and starts on the first machine that frees up. A part that finds none within 2 hours ends.
+
+## What happens on the machine during a run?
+
+1. The branch is cloned into a fresh folder.
+2. The command runs in it as a user that reaches neither the node's key nor the agents' folders.
+3. It runs for at most 30 minutes, unless the agent asks for up to 120.
+4. The folder is removed.
+
+## How does the agent get the result?
+
+When every part has ended, the agent is woken on its task with the result:
+
+- passed or failed;
+- which machine ran each part, and for how long;
+- the last lines of what failed.
+
+The whole log of each part goes on the task as a file, like `tests-3-1.log`. `test_run` shows how a run goes, and `stop_tests` stops it.
+
+## Where does the repository token go during a test run?
+
+The repository's token goes along to each machine that takes a run. So it reaches the lent machines of everyone who reaches the department.
+
+## Which nodes take test runs?
+
+- Nodes of an older build say nothing about their load, and get no test runs until they are updated.
+- A node takes parts of runs only when it can run them as a user of its own. It can when it runs as root, with the rights to switch users.
+- A node that cannot takes none and says why. The orchestrator sees that in `pool`.
+
+## What if a machine goes away during a run?
+
+A part does not move once it runs. The part runs again from the start when its machine:
+
+- restarts;
+- is offline for 3 minutes;
+- is disconnected;
+- loses the plan its node ran for.
+
+It runs again on another machine when one is free for it, at most twice, and the result says where it was lost.
+
+Other work, from `run_work`, is different. A part of it may still run on a machine that went offline, or that was disconnected or lost its plan while away. So it runs again only when `run_work` said `repeatable`, for a command that does no harm if it runs twice. Otherwise it ends, and the result says why.
+
+## Run other heavy work on free machines
+
+Heads and workers run any other command the same way, with `run_work`:
+
+- With a branch, it runs in a clone of the repository. Without one, it runs in a fresh empty folder.
+- The files it names come from the task.
+- Whatever the command leaves in its output folder goes on the task, like `work-2-1-report.pdf`.
+- A part needs 2 GB of free memory, unless the agent names another amount.
+
+`work_run` shows how it goes, and `stop_work` stops it. Only nodes of a build that knows work take it.
+
+## How does the orchestrator see the pool?
+
+With `pool`. It shows every machine with its owner, its load and the parts it runs, and each part that waits, with why no machine took it.
+
+## Can phones and browsers join?
+
+Not yet. A machine is a computer for now. Phones and browsers will join as machines of their own kind, and take no shell commands.
+
+[Back to the guide](README.md)

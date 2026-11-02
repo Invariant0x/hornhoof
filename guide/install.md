@@ -1,0 +1,111 @@
+# Install and run the server
+
+> In short: one line in a terminal installs Hornhoof with Docker and shows a link that sets it up. Run the same line again to update. You can also run several companies on one computer, or build Hornhoof from its source.
+
+## What does the install line do?
+
+On a Linux or macOS server, run:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Invariant0x/hornhoof/main/scripts/install.sh | bash -s -- server
+```
+
+It goes through these steps:
+
+1. It installs Docker if it is missing. On macOS that is Colima, through Homebrew.
+2. It puts `compose.yaml` and a `.env` file with fresh secrets into the `~/hornhoof` folder.
+3. It asks for the address people will open Hornhoof at.
+4. It downloads the images and starts them.
+5. It shows the link that sets Hornhoof up.
+
+![Setting up a company](../.github/assets/setup.gif)
+
+## How do I update it?
+
+Run the same line again. It keeps the existing `.env`. [Updates](updates.md) says how Hornhoof offers a new version by itself.
+
+## How much of my Mac does it take?
+
+On a Mac, Docker runs inside Colima. A Colima the installer sets up gets all of the Mac's processors and three quarters of its memory. A Colima you set up before keeps the size you gave it.
+
+Every node also gets 2 GB of shared memory for the browsers agents run.
+
+## Run several companies on one computer
+
+Each company is its own Hornhoof. To run a second one next to the first, give it a name:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Invariant0x/hornhoof/main/scripts/install.sh | bash -s -- server --name acme
+```
+
+- It goes into `~/hornhoof-acme`, as its own compose project.
+- It takes the first free port from 8080 and keeps it in `.env` as `HORNHOOF_PORT`.
+- Run the same command again to update that company.
+
+Machines can carry nodes for several companies too. Each node remembers the address of its Hornhoof. So an update or `--uninstall` from one Hornhoof touches only that company's nodes.
+
+## Run it from source with Docker
+
+You need Docker with Compose.
+
+```sh
+git clone https://github.com/Invariant0x/hornhoof.git
+cd hornhoof
+echo "HORNHOOF_SECRET=$(openssl rand -base64 32)" > .env
+echo "NODE_KEY=$(openssl rand -base64 32)" >> .env
+echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)" >> .env
+docker compose up -d --build
+```
+
+Hornhoof writes a setup link to its log, like `http://localhost:8080/setup?code=...`. Find it with `docker compose logs app`, or print it with:
+
+```sh
+docker compose exec app node apps/server/dist/cli.js setup-link
+```
+
+Open the link and follow the setup: name your company, create your account and connect the orchestrator's subscription.
+
+Until a company is set up, only that link sets it up. So nobody else who reaches the port first can make the company their own.
+
+## What in `.env` must I keep safe?
+
+Keep `.env` safe. Here is what its secrets do:
+
+- `HORNHOOF_SECRET` encrypts the API keys stored in the database. Without it they cannot be read back.
+- `NODE_KEY` lets the built-in node connect to Hornhoof. The built-in node runs the company's API keys.
+- `POSTGRES_PASSWORD` becomes the database's password when the database is first made. Keep it as it is afterwards.
+
+## How do people open it from other computers?
+
+The simplest way is a link at hornhoof.org. [The link on the internet](public-link.md) describes it.
+
+To use your own domain instead:
+
+1. Add `PUBLIC_URL=https://your.domain` to `.env`. The installer writes the address you gave it into this same line.
+2. Put something that handles TLS in front of Hornhoof, like Caddy, nginx or a Cloudflare tunnel. Hornhoof itself serves plain HTTP.
+
+Invite links and the node command use this address. Sign-in cookies are marked secure when it starts with `https://`. Without TLS the browser drops the secure cookie, and you stay on the login screen.
+
+## Where do errors go?
+
+To the container log. Run this next to `compose.yaml`:
+
+```sh
+docker compose logs app
+```
+
+## What if the owner forgets the password?
+
+Run this next to `compose.yaml`:
+
+```sh
+docker compose exec app node apps/server/dist/cli.js owner-link
+```
+
+It prints a one-time link that works for 7 days and sets a new password. The old password and open sessions stop working at once.
+
+## How do I remove it?
+
+The README's [Remove it](../README.md#remove-it) says how to remove the server and what Hornhoof put on a connected computer.
+
+[Back to the guide](README.md)

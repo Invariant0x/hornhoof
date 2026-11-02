@@ -39,7 +39,7 @@ npm install
 npm test
 ```
 
-To run it, start Postgres, then the server with `DATABASE_URL` and `HORNHOOF_SECRET` set (`npm run dev`) and the web app with `npm run dev -w apps/web`. The web app sends `/api` to port 8080. To run everything in Docker instead, see "Run from source with Docker" in the [README](README.md#run-from-source-with-docker).
+To run it, start Postgres, then the server with `DATABASE_URL` and `HORNHOOF_SECRET` set (`npm run dev`) and the web app with `npm run dev -w apps/web`. The web app sends `/api` to port 8080. To run everything in Docker instead, see [Run it from source with Docker](guide/install.md#run-it-from-source-with-docker) in the guide.
 
 The repository has four parts:
 

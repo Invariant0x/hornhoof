@@ -1,0 +1,147 @@
+# Tasks and turns
+
+> In short: you write to the orchestrator, and he lays the work out as tasks, grouped in turns. One turn runs at a time, and each department's head splits its task into a few large pieces that pass only the checks they need. Nothing reaches the main branch until a person approves the exact commit.
+
+![Tasks and turns](../.github/assets/tasks.gif)
+
+## What is a turn?
+
+The word has two meanings in Hornhoof.
+
+- A turn of the company is a batch of work, like turn 3. Tasks come in these turns.
+- An agent's turn is one round of an agent's work, from the moment Hornhoof wakes it until it stops. The parts about waking agents, from "When does Hornhoof wake an agent?" on, count these.
+
+## Where do tasks come from?
+
+Work moves as tasks, and tasks come in turns. Nobody fills the tracker by hand: people write to the orchestrator, and he lays the work out.
+
+A turn has:
+
+- a short title;
+- its main point;
+- one task for each goal the CEO gave it, whole, for the department that owns it.
+
+The people's own words it came from open on a click.
+
+## What does the Tasks tab show?
+
+From top to bottom:
+
+1. What agents wait for from people: questions to answer, commits to approve, and tasks an agent got stuck on.
+2. The running turn, with its tasks.
+3. The planned turns, in order.
+4. The finished turns, folded away.
+
+## What happens when I add work while a turn runs?
+
+One turn runs at a time. When the orchestrator lays out a turn while one runs, it waits as planned, with its tasks planned too.
+
+When people add to the work, he puts it into the next planned turn, or into a new turn after them. It goes into the running turn, where it starts at once, only when the CEO says now. He says where it went.
+
+## How does a department split its task?
+
+Each task of a running turn goes to its department's head. The head gives it out at once, in two to four large pieces.
+
+In Development, each piece is a whole feature for one developer of the pool. When the feature is new or large, an architect writes a short design note first.
+
+## Which checks does a piece go through?
+
+Each piece gets only the gates its size and risk need:
+
+- none for research, reports, plans and docs;
+- one review stage for code, where a reviewer of each provider checks the same change in parallel;
+- security only when the change touches access, sign-in, secrets or permissions.
+
+Acceptance runs once per turn, on the turn's branch.
+
+## How does a member work its piece?
+
+1. It works the task in a branch.
+2. When it cannot go on, it marks the task blocked, which asks its head. The head answers with a comment, and that opens the task again.
+3. It hands the task in, with evidence.
+4. Each gate passes it on, with notes for the rest, or sends it back.
+5. When all gates pass, and the department works in a repository, the task goes back to its member. The member merges the branch into the turn's branch, named after the turn's number like `turn-3`, and reports it, or says what blocks the merge.
+
+A gate sends work back only for what blocks: a failing test, an unmet requirement, a security hole or data loss.
+
+## When does the head report?
+
+The head hears once, when every task it gave out under its department's task is closed. Then it reports to the orchestrator.
+
+## Can a task wait for other tasks?
+
+Yes. A task can come after other tasks of its turn. It waits, and its member is woken by itself once the last of them is done.
+
+When one of those tasks is cancelled, whoever made the waiting task is told.
+
+## When does a turn end?
+
+Once every task of the turn is closed, the turn ends. The next planned one starts by itself.
+
+## When does Hornhoof wake an agent?
+
+When there is something for it:
+
+- a task given to it;
+- work at its gate;
+- a task sent back;
+- an answer from a person.
+
+## What if an agent stops moving its task?
+
+An agent that ends one of its turns without moving its task is reminded. After three such turns in a row, it stops, and a person is asked how it should go on.
+
+Some turns count as going on instead:
+
+- a turn that broke;
+- a turn in which the agent wrote in the task how far it got;
+- a turn that worked until its time ran out.
+
+A person is asked only after eight such turns in a row. That is about six hours of work without handing anything in.
+
+## What if an agent keeps breaking down?
+
+Three turns in a row on a task that break within minutes of starting stop Hornhoof waking the agent there. Whoever gave the task out hears it once, with the error, and the task waits for them.
+
+## Which turns are not counted?
+
+- A turn that ended at the plan's limit counts for neither. The agent goes on once the limit starts over.
+- A turn a person stopped does not count.
+- Nothing is counted while the agent has another turn waiting on the task, or while the task waits for the tasks it gave out or for people.
+
+## Share a file on a task
+
+An agent on a task can put a file on it, such as a build, a log or a data set of up to 50 MB. It runs this on its machine:
+
+```sh
+hh-attach --task 12 FILE
+```
+
+Any agent of the company downloads the file by its name, on any machine:
+
+```sh
+hh-fetch 12 FILE
+```
+
+The task's view lists its files.
+
+## How much room do task files have?
+
+The files live in the database, so every copy of the database carries them.
+
+- One file can be up to 50 MB.
+- One task holds up to 500 MB of files.
+- The whole company holds up to 2 GB, or as many megabytes as `TASK_FILES_MB` in `.env` says.
+- The files of a turn go 30 days after it closes.
+
+A comment, message, report or reason that carries a file pasted as a long run of base64 or hex is refused. The refusal says how to put the file on the task instead.
+
+## Who can give a department a task?
+
+Anyone whose access lists a department can give it a task, from inside the department, with "New task". It goes to the department's head, and joins the running turn if one runs.
+
+## Who approves what reaches the main branch?
+
+Nothing reaches the main branch until someone who sees the whole company, or the orchestrator, approves the exact commit. The department's people see it waiting.
+
+[Back to the guide](README.md)
