@@ -214,6 +214,8 @@ export class TerminalHost {
   /* Views being opened, and those Hornhoof closed meanwhile. */
   private readonly viewsOpening = new Set<string>();
   private readonly viewsClosed = new Set<string>();
+  /* Windows opening one agent wait for the same session to be created. */
+  private readonly sessionsOpening = new Map<string, Promise<void>>();
   /* The size each view's window asks for, from the moment Hornhoof opens it: a resize that comes while it still opens
      counts too, since Hornhoof says the view is ready as it asks for it. */
   private readonly wanted = new Map<string, { key: string; size: Size }>();
@@ -860,7 +862,7 @@ export class TerminalHost {
     try {
       await this.openView(m);
     } catch (err) {
-      /* A view that did not open, as one whose session another window started at the same moment, keeps no size. */
+      /* A view that did not open keeps no size. */
       await this.forget(m.termId, m.agentKey);
       throw err;
     }
@@ -872,6 +874,24 @@ export class TerminalHost {
     return this.fit(key);
   }
 
+  private ensureSession(a: Agent, starts: boolean): Promise<void> {
+    const opening = this.sessionsOpening.get(a.key);
+    if (opening) return opening;
+    const created = this.createSession(a, starts).finally(() => this.sessionsOpening.delete(a.key));
+    this.sessionsOpening.set(a.key, created);
+    return created;
+  }
+
+  private async createSession(a: Agent, starts: boolean): Promise<void> {
+    if (await this.opts.tmux.has(a.name)) return;
+    /* The window shows a loader over the empty session while the program starts. */
+    const waiting = starts ? '' : `printf '\\n  %s\\n' '${WAITING}'; `;
+    await this.opts.tmux.launch(a.name, { cwd: '/', command: this.asAgent(['sh', '-c', `${waiting}exec sleep 2147483647`]), ...this.fitted(a.key) });
+    /* The waiting screen is no program of the agent's: the next turn starts one in its place. A turn that runs now is
+       starting its own. */
+    if (!a.turn) a.hash = null;
+  }
+
   private async openView(m: Msg<'term.open'>): Promise<void> {
     const a = this.agent(m.agentKey);
     this.viewsOpening.add(m.termId);
@@ -879,14 +899,7 @@ export class TerminalHost {
     /* Someone who may type gets the program at once, to talk to it; watchers see it once it has a turn. */
     const starts = m.write && !a.turn && !(a.hash && (await this.opts.tmux.alive(a.name)));
     try {
-      if (!(await this.opts.tmux.has(a.name))) {
-        /* The window shows a loader over the empty session while the program starts. */
-        const waiting = starts ? '' : `printf '\\n  %s\\n' '${WAITING}'; `;
-        await this.opts.tmux.launch(a.name, { cwd: '/', command: this.asAgent(['sh', '-c', `${waiting}exec sleep 2147483647`]), ...this.fitted(m.agentKey) });
-        /* The waiting screen is no program of the agent's: the next turn starts one in its place. A turn that runs now is
-           starting its own. */
-        if (!a.turn) a.hash = null;
-      }
+      await this.ensureSession(a, starts);
       /* The others get smaller first, if this window is: a client bigger than the session gets rows of dots. */
       await this.fit(m.agentKey);
     } finally {
