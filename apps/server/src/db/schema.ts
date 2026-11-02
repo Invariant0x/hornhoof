@@ -603,7 +603,7 @@ export const testRuns = pgTable(
 
 export const TEST_PART_STATUSES = ['queued', 'running', 'passed', 'failed', 'stopped'] as const;
 /* A machine that lost a part of a run as it ran: the place (a machine's id, or builtin), its name then, and why. */
-export type LostRun = { key: string; machine: string; why: string };
+export type LostRun = { key: string; machine: string; why: string; computer?: string };
 
 /* One part of a test run: it waits for a free machine, then runs on one node, a node on a machine or the built-in node. */
 export const testParts = pgTable(
@@ -619,6 +619,8 @@ export const testParts = pgTable(
     machineId: uuid('machine_id').references(() => machines.id),
     /* The machine's name as it ran, for the result. */
     machineName: text('machine_name'),
+    /* Its assigned physical computer, kept through disconnects and server restarts. Null on older parts. */
+    computer: text('computer'),
     /* The commit it tested, the command's exit code, and why it ended when that was not the tests themselves. */
     commit: text('commit'),
     exitCode: integer('exit_code'),

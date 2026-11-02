@@ -15,7 +15,8 @@ import { keepWakes } from '../tasks/outbox.js';
 import { taskByRef } from '../tasks/views.js';
 import { wakeAll } from '../tasks/wake.js';
 import type { ToolJob } from '../tools/job.js';
-import { together } from './load.js';
+import { computerKey, computerState, Reservations, type ComputerPlace } from './capacity.js';
+import { forRun, together } from './load.js';
 import { pickMachine } from './pick.js';
 
 type Run = typeof testRuns.$inferSelect;
@@ -147,11 +148,16 @@ function account(run: Run, task: Pick<Task, 'number'>, parts: Part[], files: Set
 /* A place a part can run: a computer of the company through one of its nodes, or the built-in node. access: what the
    machine's owner reaches; the built-in node reaches every repository. works: its node runs parts of any work, not only
    of test runs. */
-export type Place = { key: string; node: NodeIdentity; name: string; machineId: string | null; nodeId: string | null; builtin: boolean; lent: boolean; busy: boolean; load: NodeLoad | null; access: Access | null; works: boolean };
+export type Place = { key: string; node: NodeIdentity; name: string; machineId: string | null; nodeId: string | null; builtin: boolean; lent: boolean; busy: boolean; running: number; load: NodeLoad | null; access: Access | null; works: boolean };
+
+const partPlace = (ctx: Ctx, part: Pick<Part, 'builtin' | 'machineId' | 'nodeId' | 'computer'>): ComputerPlace => {
+  const id = nodeOf(part);
+  return { key: part.builtin ? 'builtin' : (part.machineId ?? ''), load: id ? ctx.hub.loadOf(id) : null, computer: part.computer };
+};
 
 export async function placesOf(ctx: Ctx, companyId: string): Promise<Place[]> {
   const { db, hub } = ctx;
-  const running = await db.select({ machineId: testParts.machineId, builtin: testParts.builtin }).from(testParts).where(eq(testParts.status, 'running'));
+  const running = (await db.select({ computer: testParts.computer, machineId: testParts.machineId, builtin: testParts.builtin, nodeId: testParts.nodeId }).from(testParts).where(eq(testParts.status, 'running'))).map(p => partPlace(ctx, p));
   const rows = await db
     .select({ machine: machines, owner: people })
     .from(machines)
@@ -182,16 +188,18 @@ export async function placesOf(ctx: Ctx, companyId: string): Promise<Place[]> {
       nodeId: node,
       builtin: false,
       lent: machine.lendsTests,
-      busy: running.some(r => r.machineId === machine.id),
-      load: together(ready.map(id => hub.loadOf(nodeIdentity(id)))),
+      busy: false,
+      running: 0,
+      load: forRun(hub.loadOf(nodeIdentity(node)), ready.map(id => hub.loadOf(nodeIdentity(id)))),
       access: await accessOf(db, owner),
       works: hub.runsWork(nodeIdentity(node)),
     });
   }
   if (hub.isReady(BUILTIN) && hub.loadOf(BUILTIN) && hub.noRunsOf(BUILTIN) === null) {
-    places.push({ key: 'builtin', node: BUILTIN, name: BUILTIN_NAME, machineId: null, nodeId: null, builtin: true, lent: true, busy: running.some(r => r.builtin), load: together([hub.loadOf(BUILTIN)]), access: null, works: hub.runsWork(BUILTIN) });
+    places.push({ key: 'builtin', node: BUILTIN, name: BUILTIN_NAME, machineId: null, nodeId: null, builtin: true, lent: true, busy: false, running: 0, load: together([hub.loadOf(BUILTIN)]), access: null, works: hub.runsWork(BUILTIN) });
   }
-  return places;
+  const reports = [...live.map(n => hub.loadOf(nodeIdentity(n.id))), hub.loadOf(BUILTIN)];
+  return places.map(p => ({ ...p, ...computerState(p, running, reports, ctx.config.runsPerHost) }));
 }
 
 /* The machine's owner reaches the department a run is for; a run for no department only someone who sees the whole
@@ -210,7 +218,23 @@ export async function targetOf(ctx: Ctx, run: Pick<Run, 'kind' | 'branch' | 'dep
   return { department: department ?? null, repo: null };
 }
 
-/* Gives every waiting part, oldest run first, to the freest machine that may take it, one part per machine at a time. */
+/* Snapshot companies before assigning parts, so reservations in this pass are counted exactly once. */
+async function queuePlaces(ctx: Ctx, companyIds: string[]): Promise<Map<string, Place[]>> {
+  const places = new Map<string, Place[]>();
+  for (const id of new Set(companyIds)) places.set(id, await placesOf(ctx, id));
+  return places;
+}
+
+/* Prefer another computer after a loss, falling back when only a previously used computer can fit the part. */
+function placeFor(open: Place[], run: Run, part: Part, department: Department | null, reserved: Reservations): Place | null {
+  const need = needOf(run, department) * GIB;
+  const spots = open.map(p => ({ key: p.key, computer: computerKey(p), lent: p.lent, reaches: mayTake(p, run, department), busy: reserved.busy(p), load: p.load }));
+  const lostOn = new Set(part.lost.flatMap(l => [l.key, l.computer ?? computerKey(open.find(p => p.key === l.key) ?? { key: l.key, load: null })]));
+  const spot = pickMachine(spots.filter(s => !lostOn.has(s.key) && !lostOn.has(s.computer)), need) ?? pickMachine(spots, need);
+  return spot ? open.find(p => p.key === spot.key) ?? null : null;
+}
+
+/* Gives waiting parts out oldest first, keeping a shared count of reservations on each physical computer. */
 async function giveOut(ctx: Ctx): Promise<void> {
   const { db } = ctx;
   const waiting = await db
@@ -220,29 +244,21 @@ async function giveOut(ctx: Ctx): Promise<void> {
     .innerJoin(tasks, eq(tasks.id, testRuns.taskId))
     .where(eq(testParts.status, 'queued'))
     .orderBy(asc(testRuns.createdAt), asc(testParts.part));
-  const places = new Map<string, Place[]>();
+  const places = await queuePlaces(ctx, waiting.map(w => w.run.companyId));
+  const reserved = new Reservations(ctx.config.runsPerHost);
   const targets = new Map<string, Awaited<ReturnType<typeof targetOf>>>();
   for (const { part, run, task } of waiting) {
-    if (!places.has(run.companyId)) places.set(run.companyId, await placesOf(ctx, run.companyId));
     if (!targets.has(run.id)) targets.set(run.id, await targetOf(ctx, run));
     const found = targets.get(run.id)!;
     if (!found) {
       await endParts(ctx, and(eq(testParts.id, part.id), eq(testParts.status, 'queued'))!, 'no_repository');
       continue;
     }
-    const open = places.get(run.companyId)!;
-    const need = needOf(run, found.department) * GIB;
-    const spots = open.map(p => ({ key: p.key, lent: p.lent, reaches: mayTake(p, run, found.department), busy: p.busy, load: p.load }));
-    /* A part that ran again goes to another machine than the ones that lost it when one of them fits it now, else to
-       any that does. */
-    const lostOn = new Set(part.lost.map(l => l.key));
-    const spot = pickMachine(spots.filter(s => !lostOn.has(s.key)), need) ?? pickMachine(spots, need);
-    const place = spot && open.find(p => p.key === spot.key);
+    const place = placeFor(places.get(run.companyId)!, run, part, found.department, reserved);
     if (!place) continue;
-    place.busy = true;
     const [taken] = await db
       .update(testParts)
-      .set({ status: 'running', nodeId: place.nodeId, builtin: place.builtin, machineId: place.machineId, machineName: place.name, startedAt: new Date() })
+      .set({ status: 'running', nodeId: place.nodeId, builtin: place.builtin, machineId: place.machineId, machineName: place.name, computer: computerKey(place), startedAt: new Date() })
       .where(and(eq(testParts.id, part.id), eq(testParts.status, 'queued')))
       .returning();
     if (!taken) continue;
@@ -262,8 +278,10 @@ async function giveOut(ctx: Ctx): Promise<void> {
     if (!sent) {
       await db
         .update(testParts)
-        .set({ status: 'queued', nodeId: null, builtin: false, machineId: null, machineName: null, startedAt: null })
+        .set({ status: 'queued', nodeId: null, builtin: false, machineId: null, machineName: null, computer: null, startedAt: null })
         .where(and(eq(testParts.id, part.id), eq(testParts.status, 'running')));
+    } else {
+      reserved.take(place);
     }
   }
 }
@@ -314,6 +332,11 @@ async function endParts(ctx: Ctx, which: SQL, error: string, tail = ''): Promise
   return ended;
 }
 
+const lostAt = (ctx: Ctx, part: Part, why: string): LostRun => {
+  const place = partPlace(ctx, part);
+  return { key: place.key, computer: computerKey(place), machine: part.machineName ?? 'a machine', why };
+};
+
 /* Parts their machines lost as they ran, as when a machine restarted, went offline, was disconnected or lost the plan its
    node ran for: each waits for another machine under a new id, so its lost run, should that come back, is told apart.
    One lost RERUNS times already fails with why. */
@@ -329,10 +352,10 @@ export async function loseParts(ctx: Ctx, which: SQL, why: string): Promise<void
       await endParts(ctx, running, why);
       continue;
     }
-    const where: LostRun = { key: p.builtin ? 'builtin' : (p.machineId ?? ''), machine: p.machineName ?? 'a machine', why };
+    const where = lostAt(ctx, p, why);
     const [again] = await ctx.db
       .update(testParts)
-      .set({ id: sql`gen_random_uuid()`, status: 'queued', lost: [...p.lost, where], nodeId: null, builtin: false, machineId: null, machineName: null, startedAt: null, queuedAt: new Date() })
+      .set({ id: sql`gen_random_uuid()`, status: 'queued', lost: [...p.lost, where], nodeId: null, builtin: false, machineId: null, machineName: null, computer: null, startedAt: null, queuedAt: new Date() })
       .where(running)
       .returning({ id: testParts.id });
     /* What the lost attempt put on the task goes: the part makes it again, and the old id takes no more. */

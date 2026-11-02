@@ -14,6 +14,8 @@ export type Config = {
   nodeKey?: string;
   nodePingMs: number;
   streamPingMs: number;
+  /* Parts of runs that may run at once on one physical computer. */
+  runsPerHost: number;
   /* The running build: the product version, its commit, and how many database migrations it carries. */
   version: string;
   commit: string;
@@ -60,6 +62,7 @@ const Env = z.object({
   PORT: wholeNumber(1, 65535, 'PORT must be a number between 1 and 65535.'),
   NODE_PING_MS: milliseconds('NODE_PING_MS', 1, '20000'),
   STREAM_PING_MS: milliseconds('STREAM_PING_MS', 1, '25000'),
+  MAX_RUNS_PER_HOST: wholeNumber(1, 1000, 'MAX_RUNS_PER_HOST must be a whole number between 1 and 1000.').default(1),
   UPDATE_CHECK_MS: milliseconds('UPDATE_CHECK_MS', 0, '1800000'),
   REGISTRY_URL: webAddress('REGISTRY_URL must be an http:// or https:// address.'),
   RELAY_URL: webAddress('RELAY_URL must be an http:// or https:// address, like https://hornhoof.org.'),
@@ -97,6 +100,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     nodeKey,
     nodePingMs: set.NODE_PING_MS ?? 20000,
     streamPingMs: set.STREAM_PING_MS ?? 25000,
+    runsPerHost: set.MAX_RUNS_PER_HOST,
     version: env.HORNHOOF_VERSION || productVersion(),
     commit: env.HORNHOOF_COMMIT || 'local',
     migrations: migrationCount(),

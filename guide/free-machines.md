@@ -38,11 +38,22 @@ A machine takes a test run when all of these are true:
 - it is online;
 - it is lent to test runs;
 - it runs no other test run;
+- its physical computer has a free slot for a run;
 - it is not loaded, which means its processors are busy less than 90% of the time;
 - it has enough free memory;
 - its owner reaches the department whose repository is tested.
 
 The built-in node takes test runs too. A run needs 4 GB of free memory, unless the repository's settings name another amount.
+
+Nodes and containers that report the same physical host share its slots, including the built-in node. By default one
+part runs on a physical computer at a time. To allow more, set `MAX_RUNS_PER_HOST` on the server to a whole number
+between 1 and 1000, then restart the server. With Docker Compose, put it in `.env`. An empty setting means 1.
+Each place still takes only one part at a time: the parts on its node share a system user.
+
+The newest host report supplies its processor load and free memory when available. Otherwise Hornhoof uses the node's
+figures. A part must also fit within its node's own memory limit, such as a container's limit. An older node that reports
+no host remains a separate computer until it is updated. Each assigned part keeps its computer in the database, so its
+slot stays occupied through a lost connection or a server restart until the part ends or is declared lost.
 
 ## Keep your machine out of test runs
 
