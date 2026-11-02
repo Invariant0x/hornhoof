@@ -1,10 +1,10 @@
 import { effortFor, effortsOf, MAX_INSTRUCTIONS, modelsFor, OLD_NODE_INSTRUCTIONS, type Limits } from '@hornhoof/protocol';
-import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, lte, ne, or } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, lte, ne, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { loggable } from '../../errors.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
-import { agents, jobs, nodes, people, subscriptions, tasks } from '../../db/schema.js';
+import { agents, jobs, nodes, people, subscriptions, tasks, turns } from '../../db/schema.js';
 import { dispatchJob } from '../jobs/dispatch.js';
 import { sayLive } from './live.js';
 import { BUILTIN, identityOf, nodeIdentity, sameNode, type NodeIdentity } from '../nodes/hub.js';
@@ -304,15 +304,22 @@ export async function startProgram(ctx: Ctx, node: NodeIdentity, agentId: string
 /* A new session catches up from the conversation. The last finished turn's session goes on only on the same subscription
    and node with the same instructions: another machine does not have it, and changed instructions would not reach a
    session that already has the old ones. A turn that ran out of time or was stopped in its session finished too, the
-   session whole; one that broke, or was called off before it ran, leaves the session before it. */
-async function sessionFor(ctx: Ctx, agent: { id: string; kind: string; name: string }, on: { subscriptionId: string; nodeId: string | null }, instructionsHash: string): Promise<{ sessionId: string | null; catchUp: string | null }> {
+   session whole; one that broke, or was called off before it ran, leaves the session before it. Each turn of the company
+   starts every agent in a clean session, which only the orchestrator, who talks with people across turns, catches up. */
+async function sessionFor(ctx: Ctx, agent: { id: string; companyId: string; kind: string; name: string }, on: { subscriptionId: string; nodeId: string | null }, instructionsHash: string): Promise<{ sessionId: string | null; catchUp: string | null }> {
   const [last] = await ctx.db
-    .select({ subscriptionId: jobs.subscriptionId, nodeId: jobs.nodeId, sessionId: jobs.sessionId, instructionsHash: jobs.instructionsHash })
+    .select({ subscriptionId: jobs.subscriptionId, nodeId: jobs.nodeId, sessionId: jobs.sessionId, instructionsHash: jobs.instructionsHash, startedAt: jobs.startedAt })
     .from(jobs)
     .where(and(conversationOf(agent.id), or(eq(jobs.status, 'done'), and(eq(jobs.status, 'failed'), inArray(jobs.error, ['timeout', 'cancelled']), isNotNull(jobs.sessionId)))))
     .orderBy(desc(jobs.finishedAt))
     .limit(1);
-  if (last?.sessionId && last.subscriptionId === on.subscriptionId && last.nodeId === on.nodeId && last.instructionsHash === instructionsHash) return { sessionId: last.sessionId, catchUp: null };
+  const [turn] = await ctx.db
+    .select({ openedAt: sql<Date>`coalesce(${turns.openedAt}, ${turns.createdAt})` })
+    .from(turns)
+    .where(and(eq(turns.companyId, agent.companyId), eq(turns.status, 'open')));
+  const newTurn = Boolean(last?.startedAt && turn && new Date(last.startedAt) < new Date(turn.openedAt));
+  if (last?.sessionId && !newTurn && last.subscriptionId === on.subscriptionId && last.nodeId === on.nodeId && last.instructionsHash === instructionsHash) return { sessionId: last.sessionId, catchUp: null };
+  if (newTurn && agent.kind !== 'orchestrator') return { sessionId: null, catchUp: null };
   const talk = await earlierTalk(ctx.db, agent.id);
   return { sessionId: null, catchUp: talk.length ? preface(talk, agent.kind === 'orchestrator' ? 'Orchestrator' : agent.name) : null };
 }

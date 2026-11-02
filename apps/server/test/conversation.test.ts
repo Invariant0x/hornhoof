@@ -2,7 +2,7 @@ import { MAX_INSTRUCTIONS, OLD_NODE_INSTRUCTIONS } from '@hornhoof/protocol';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, vi } from 'vitest';
-import { agents, companies, departments, jobs, people, subscriptions } from '../src/db/schema.js';
+import { agents, companies, departments, jobs, people, subscriptions, turns } from '../src/db/schema.js';
 import { renderInstructions } from '../src/modules/agents/instructions.js';
 import { FIRST_TURN, FIRST_TURN_TEMPLATE, ORCHESTRATOR_INSTRUCTIONS } from '../src/modules/conversation/prompt.js';
 import { as, connectNode, invitePerson, listen, openStream, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
@@ -544,6 +544,23 @@ describe("an employee's conversation", () => {
     expect(fresh.instructions).toContain('You own the billing API.');
     expect(fresh.prompt).toMatch(/^Earlier in this conversation/);
     expect(fresh.prompt.endsWith('Ivan (CEO): And now?')).toBe(true);
+  });
+
+  it('starts an employee in a clean session when a new turn of the company opens, and goes on in it during the turn', async () => {
+    const { app, db, ceo, builtin, bruno } = await withEmployee();
+    await sayTo(app, ceo, bruno.id, 'Hello');
+    await finish(builtin, await nextRun(builtin), 'sess-1');
+    await until(async () => !(await stateOf(app, ceo, bruno.id)).busy);
+    await db.insert(turns).values({ companyId: bruno.companyId, number: 1, goal: 'Card payments.', status: 'open', openedAt: new Date() });
+    await sayTo(app, ceo, bruno.id, 'The new turn starts.');
+    const fresh = await nextRun(builtin);
+    expect(fresh.sessionId).toBeNull();
+    expect(fresh.prompt).not.toMatch(/Earlier in this conversation/);
+    expect(fresh.prompt.endsWith('The new turn starts.')).toBe(true);
+    await finish(builtin, fresh, 'sess-2');
+    await until(async () => !(await stateOf(app, ceo, bruno.id)).busy);
+    await sayTo(app, ceo, bruno.id, 'Still you?');
+    expect((await nextRun(builtin)).sessionId).toBe('sess-2');
   });
 
   it("lets a person with the department write to its employees and nobody else's", async () => {
