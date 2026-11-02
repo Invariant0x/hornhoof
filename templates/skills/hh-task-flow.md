@@ -16,9 +16,9 @@ Hornhoof wakes you with a task number and the reason. Read the task with "task" 
 
 **Ask teammates directly** with "message_employee" about their work or findings you do not understand, and answer theirs. Pass files with `hh-attach --task N FILE`, by name, and get them with `hh-fetch N NAME`; never paste one in text.
 
-**At your gate** (you review, test or check it):
+**At your gate or in the review of a turn** (you review, test or check it):
 
 1. Check the work yourself: run the checks your role owns on what it changed. Never pass what you did not check, and never fix it.
-2. Give your own "verdict"; reviewers of other models check at once. Send it back only for what blocks (a failing test, an unmet requirement, a security hole, data loss), all at once with where and the evidence; the rest are notes under a pass. A second round asks you only if you sent it back.
+2. Give your own "verdict"; reviewers of other models check at once. Send it back only for what blocks (a failing test, an unmet requirement, a security hole, data loss), all at once with where and the evidence; the rest are notes under a pass. At a gate of one task, a second round asks you only if you sent it back; the review of a turn has none.
 
 **Every turn moves the task.** End a turn with "submit", "verdict", "blocked" or a question. A turn without one gets a reminder; after three a person steps in. Use "ask_person" only for what only a person can answer, one clear question. Decide details yourself. When a person judges something they will see, show it: send screenshots with `hh-attach FILE` and pass the ids it prints as images, or as pictures of 2 to 4 options. "comment" adds a note to the log and wakes nobody.

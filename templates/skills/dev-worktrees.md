@@ -9,7 +9,7 @@ sources: [obra/superpowers skills/using-git-worktrees/SKILL.md, obra/superpowers
 - Before work starts the workspace is clean and the tests of the part you will change pass on it. A red baseline is reported, not built upon.
 - Nobody works on the main branch. Only a release that passed every gate and the CEO's approval reaches it. Releases come only from that merge into main: never start a release or image publishing workflow from a branch, as it can replace what everyone uses.
 - A task branch starts from the turn's branch, which holds what earlier tasks merged, or from the main line while there is none. When the task is done, the tests of what it changed pass and the branch is pushed for review with its brief, commits and test output.
-- Once its gates pass, its executor merges it into the turn's branch the wake names; the final check runs on that branch (dev-gates). After the release, its workspace is removed and the branch deleted.
+- Once it is handed in, or its gates pass when it has some, its executor merges it into the turn's branch the wake names; the review of the turn and the final check run on that branch (dev-gates). After the release, its workspace is removed and the branch deleted.
 - A workspace with uncommitted files is never deleted without asking; those files exist nowhere else.
 - A task quiet for several turns may be a long test run, not a stuck member. Before you give it to someone else, ask its holder and wait one more round: the new holder starts over in a new workspace, so handing it on early does the same work twice.
 - Never force-push a shared branch and never rewrite history someone else built on.

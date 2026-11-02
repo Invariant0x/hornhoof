@@ -287,13 +287,35 @@ describe('templates', () => {
     for (const x of [...roles, ...skills]) expect(x.body, x.id).not.toMatch(/not by layer/);
   });
 
+  it('reviews a turn once, with every reviewer at once, and sends its fixes in without a second review', () => {
+    const body = (id: string) => templates.skills.get(id)!.body;
+    const gates = body('dev-gates');
+    expect(gates).toMatch(/Work goes out without gates/);
+    expect(gates).toMatch(/checks everything the turn changed on its branch at the same time/);
+    expect(gates).toMatch(/fix task without gates to the member whose change it is/);
+    expect(gates).toMatch(/starts with a test that fails and then passes; there is no second review/);
+    expect(templates.roles.get('DEV-HEAD')!.body).toMatch(/one review of the turn/);
+    expect(templates.roles.get('DEV-REV')!.body).toMatch(/everything the turn changed/);
+    expect(templates.roles.get('DEV-SEC')!.body).toMatch(/review of each turn/);
+    expect(body('dev-review-diff')).toMatch(/write to nobody while you review/);
+    expect(body('dev-review-diff')).toMatch(/you do not run mutator/);
+    expect(body('hh-fix-loop')).toMatch(/After the review of a turn nobody checks again/);
+  });
+
+  it("splits a CEO's ask into turns by what must come first, never by size", () => {
+    const plan = templates.skills.get('orch-plan-turn')!.body;
+    expect(plan).toMatch(/Split by what must come first, never by size/);
+    expect(plan).toMatch(/one turn, however large/);
+    expect(plan).toMatch(/reviewed, tested and released first, or when the CEO has to see a result/);
+  });
+
   it('gates work by its size and risk, and fails it only for what blocks', () => {
     const body = (id: string) => templates.skills.get(id)!.body;
     const gates = body('dev-gates');
-    expect(gates).toMatch(/[Rr]esearch, reports, plans and docs get no gates/);
+    expect(gates).toMatch(/Research, reports, plans, docs and the architect's design note never get one/);
     expect(gates).toMatch(/one review/);
     expect(gates).toMatch(/access, sign-in, secrets or permissions/);
-    expect(gates).toMatch(/one reviewer per provider/);
+    expect(gates).toMatch(/one reviewer of each provider/);
     expect(gates).toMatch(/once per turn, on the turn's branch/);
     expect(gates).toMatch(/risky or public-facing/);
     expect(templates.roles.get('DEV-QA')!.gate).toBeNull();
