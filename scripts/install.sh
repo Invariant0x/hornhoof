@@ -32,6 +32,8 @@ SERVER_DIR=$BASE_DIR
 NAME=''
 PIN="${HORNHOOF_VERSION:-}"
 FROM_UPDATER="${HORNHOOF_FROM_UPDATER:-}"
+# How long a joined node may take to get its plan's sign-in from Hornhoof, in seconds.
+SIGNIN_WAIT="${HORNHOOF_SIGNIN_WAIT:-20}"
 COMPOSE_SRC="${HORNHOOF_COMPOSE_FILE:-}"
 PULLED="${HORNHOOF_PULLED:-}"
 APP_REF="${HORNHOOF_APP_REF:-}"
@@ -451,23 +453,48 @@ watch_link() {
   done
 }
 
+# Plans whose owner signs them in once in Hornhoof, which then passes the sign-in to every machine of the plan.
+# Antigravity signs in on each machine.
+signs_in_hornhoof() { case "$1" in claude | codex | kimi | glm) return 0 ;; esac; return 1; }
+
+# The joined nodes, of those named, that are not ready after SIGNIN_WAIT seconds. A plan its owner signed in once in
+# Hornhoof reaches a new node of the plan within seconds, and that node needs no sign-in here.
+late_nodes() {
+  local left=$SIGNIN_WAIT name late
+  while :; do
+    late=''
+    for name in "$@"; do
+      if [ "$(node_status "$name")" != ready ]; then late="$late $name"; fi
+    done
+    if [ -z "$late" ] || [ "$left" -le 0 ]; then break; fi
+    sleep 1
+    left=$((left - 1))
+  done
+  printf '%s' "$late"
+}
+
 login_node() {
   local name=$1 provider watcher
   provider=${name#hornhoof-}
   provider=${provider%-*}
   say "Signing in to $(program_name "$provider") on $name. A browser opens when a link appears."
+  if signs_in_hornhoof "$provider"; then say "You can also sign in once in Hornhoof under Subscriptions, for all your machines."; fi
   "${DOCKER[@]}" exec "$name" rm -f /data/login-url > /dev/null 2>&1 || true
   watch_link "$name" &
   watcher=$!
   if ! "${DOCKER[@]}" exec -it "$name" node "$NODE_MAIN" login < "$TTY"; then
-    say "The sign-in on $name did not finish. To try again, run the install command without --join."
+    if signs_in_hornhoof "$provider"; then
+      say "The sign-in on $name did not finish. Sign in once in Hornhoof under Subscriptions, or run the install command again without --join."
+    else
+      say "The sign-in on $name did not finish. To try again, run the install command without --join."
+    fi
   fi
   kill "$watcher" 2> /dev/null || true
   wait "$watcher" 2> /dev/null || true
 }
 
 node_mode() {
-  local code=$1 entry name id provider key status removed='' existing joined_names=''
+  local code=$1 entry name id provider key status removed='' existing joined_names='' waits='' late
   detect_system
   check_server
   ensure_docker
@@ -517,13 +544,33 @@ node_mode() {
     return 0
   fi
 
-  # New nodes always go through the sign-in (it ends at once when the program is signed in already). A machine's own
-  # node has no plan to sign in to.
+  # A new node of a plan signed in once in Hornhoof gets that sign-in by itself; the others go through the sign-in here
+  # (it ends at once when the program is signed in already). A machine's own node has no plan to sign in to.
+  for name in $joined_names; do
+    provider=${name#hornhoof-}
+    provider=${provider%-*}
+    if signs_in_hornhoof "$provider"; then waits="$waits $name"; fi
+  done
+  if [ -n "$waits" ] && [ "$SIGNIN_WAIT" -gt 0 ]; then say "Checking whether the plans got their sign-in from Hornhoof."; fi
+  # shellcheck disable=SC2086 # one word per node
+  late=" $(late_nodes $waits) "
   for name in $STARTED; do
     case "$name" in hornhoof-machine-*) continue ;; esac
-    case " $joined_names " in
-      *" $name "*) login_node "$name" ;;
-      *) if [ "$(node_status "$name")" != ready ]; then login_node "$name"; fi ;;
+    provider=${name#hornhoof-}
+    provider=${provider%-*}
+    case " $waits " in
+      *" $name "*)
+        case "$late" in
+          *" $name "*) login_node "$name" ;;
+          *) say "$(program_name "$provider") on $name got its sign-in from Hornhoof." ;;
+        esac
+        ;;
+      *)
+        case " $joined_names " in
+          *" $name "*) login_node "$name" ;;
+          *) if [ "$(node_status "$name")" != ready ]; then login_node "$name"; fi ;;
+        esac
+        ;;
     esac
   done
 
@@ -535,7 +582,13 @@ node_mode() {
     status=$(node_status "$name")
     case "$status" in
       ready) status="ready" ;;
-      needs_login) status="needs sign-in, run the install command again without --join" ;;
+      needs_login)
+        if signs_in_hornhoof "$provider"; then
+          status="needs sign-in, sign in once in Hornhoof under Subscriptions, or run the install command again without --join"
+        else
+          status="needs sign-in, run the install command again without --join"
+        fi
+        ;;
       *) status="not answering yet, see docker logs $name" ;;
     esac
     say "  $(program_name "$provider"): $status ($name)"

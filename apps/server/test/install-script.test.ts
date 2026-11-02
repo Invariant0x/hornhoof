@@ -52,6 +52,7 @@ function install({ args = ['--join', CODE], omit = [], env = {}, tty = 'typed-an
       HORNHOOF_HOME: join(dir, 'home', '.hornhoof'),
       HORNHOOF_DIR: join(dir, 'home', 'hornhoof'),
       STUB_JOIN_BODY: TWO_LINES,
+      HORNHOOF_SIGNIN_WAIT: '0',
       HORNHOOF_DOCKER_SCRIPT_SHA256: sha256('_docker-install.sh'),
       HORNHOOF_BREW_SCRIPT_SHA256: sha256('_brew-install.sh'),
       ...env,
@@ -198,7 +199,7 @@ describe('install.sh', () => {
   });
 
   it('starts one locked-down container per subscription and signs each in from the terminal', () => {
-    const r = install({ tty: 'typed-answer\n' });
+    const r = install({ tty: 'typed-answer\n', env: { STUB_STATUS: 'after_login' } });
     expect(r.code).toBe(0);
     expect(r.calls.find(c => c.startsWith('curl') && c.includes('/api/nodes/join'))).toContain('accept: text/plain');
     /* The code travels in a file, not on the command line where other users could see it. */
@@ -234,10 +235,37 @@ describe('install.sh', () => {
     expect(keys).toHaveLength(2);
     for (const key of keys) expect(key).toMatch(/--network none --user 0:0 --cap-drop ALL --cap-add DAC_OVERRIDE --security-opt no-new-privileges /);
     expect(r.calls.filter(c => c.startsWith('tty '))).toEqual(['tty typed-answer', 'tty typed-answer']);
+    expect(r.out).toContain('You can also sign in once in Hornhoof under Subscriptions, for all your machines.');
     expect(r.calls.filter(c => c.startsWith('docker exec -it') && c.endsWith('login'))).toHaveLength(2);
     expect(r.out).toMatch(/Claude.*ready/);
     expect(r.out).toMatch(/Codex.*ready/);
     expect(existsSync(join(r.dir, 'home', '.hornhoof', 'machine'))).toBe(true);
+  });
+
+  it("skips the terminal sign-in on a joined node that got its plan's sign-in from Hornhoof", () => {
+    /* The owner signed the plan in once in Hornhoof: it reaches a new node of the plan within seconds. */
+    const r = install({ env: { HORNHOOF_SIGNIN_WAIT: '20' } });
+    expect(r.code).toBe(0);
+    expect(r.calls.filter(c => c.startsWith('docker exec -it'))).toEqual([]);
+    expect(r.calls.filter(c => c.startsWith('tty '))).toEqual([]);
+    expect(r.out).toContain('Claude on hornhoof-claude-1c07dac4 got its sign-in from Hornhoof.');
+    expect(r.out).toMatch(/Claude: ready/);
+    expect(r.out).toMatch(/Codex: ready/);
+  });
+
+  it('waits a little for the sign-in from Hornhoof, then signs in here when it does not come', () => {
+    const r = install({ env: { STUB_STATUS: 'after_login', HORNHOOF_SIGNIN_WAIT: '2' } });
+    expect(r.code).toBe(0);
+    expect(r.calls.filter(c => c.startsWith('docker exec -it') && c.endsWith('login'))).toHaveLength(2);
+    expect(r.out).not.toContain('got its sign-in from Hornhoof');
+    expect(r.out).toMatch(/Claude: ready/);
+  });
+
+  it('says how else to sign in when a node is left without its sign-in', () => {
+    const r = install({ env: { STUB_STATUS: 'needs_login', STUB_LOGIN_EXIT: '1' } });
+    expect(r.code).toBe(0);
+    expect(r.out).toContain('The sign-in on hornhoof-claude-1c07dac4 did not finish. Sign in once in Hornhoof under Subscriptions, or run the install command again without --join.');
+    expect(r.out).toMatch(/Claude: needs sign-in, sign in once in Hornhoof under Subscriptions/);
   });
 
   it('sets up a node for a Google AI plan and signs in to Antigravity on it', () => {
@@ -288,7 +316,7 @@ describe('install.sh', () => {
   });
 
   it('opens the sign-in link in the browser', () => {
-    const r = install({ env: { STUB_OS: 'Darwin', STUB_ARCH: 'arm64', STUB_LOGIN_URL: 'https://claude.ai/oauth/authorize?code=1', STUB_LOGIN_SLEEP: '1.5' } });
+    const r = install({ env: { STUB_OS: 'Darwin', STUB_ARCH: 'arm64', STUB_STATUS: 'after_login', STUB_LOGIN_URL: 'https://claude.ai/oauth/authorize?code=1', STUB_LOGIN_SLEEP: '1.5' } });
     expect(r.code).toBe(0);
     expect(r.calls).toContain('open https://claude.ai/oauth/authorize?code=1');
   });
@@ -331,7 +359,7 @@ describe('install.sh', () => {
 
   it('opens only https sign-in links', () => {
     for (const link of ['file:///etc/passwd', '-a Terminal']) {
-      const r = install({ env: { STUB_OS: 'Darwin', STUB_ARCH: 'arm64', STUB_LOGIN_URL: link, STUB_LOGIN_SLEEP: '1.5' } });
+      const r = install({ env: { STUB_OS: 'Darwin', STUB_ARCH: 'arm64', STUB_STATUS: 'after_login', STUB_LOGIN_URL: link, STUB_LOGIN_SLEEP: '1.5' } });
       expect(r.code).toBe(0);
       expect(r.calls.filter(c => c.startsWith('open '))).toEqual([]);
     }
