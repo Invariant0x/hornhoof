@@ -28,6 +28,30 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     expect(await host.say('nobody', 'Hello.')).toBe(false);
   });
 
+  it("does not type Hornhoof's words into a program whose turn already ended, so they get the next turn", async () => {
+    await setUp();
+    await host.run(job('a13', 'warm up'));
+    /* The program ended its turn; the host still reads the rest of its log. */
+    const running = host.run(job('a13', 'LAGLONG one'));
+    await until(async () => (await host.screen('a13')).includes('echo: LAGLONG one'));
+    await new Promise(r => setTimeout(r, 300));
+    expect(await host.say('a13', 'Use the new schema.')).toBe(false);
+    expect(await running).toMatchObject({ ok: true, result: 'echo: LAGLONG one' });
+    expect(await host.screen('a13')).not.toContain('echo: Use the new schema.');
+  });
+
+  it('opens a turn for what a person typed right after a turn ended, while the host still read its log', async () => {
+    await setUp();
+    await host.run(job('a14', 'warm up'));
+    await host.open({ type: 'term.open', termId: 'w14', agentKey: 'a14', cols: 80, rows: 24, write: true });
+    const running = host.run(job('a14', 'LAGLONG one'));
+    await until(async () => (await host.screen('a14')).includes('echo: LAGLONG one'));
+    await new Promise(r => setTimeout(r, 300));
+    host.input({ type: 'term.input', termId: 'w14', data: 'typed after\r' });
+    await until(() => sent.some(m => m.type === 'turn.open' && m.agentKey === 'a14' && m.text === 'typed after'));
+    expect(await running).toMatchObject({ ok: true, result: 'echo: LAGLONG one' });
+  });
+
   it("does not type Hornhoof's words before the turn's own prompt went in, so they get the next turn", async () => {
     await setUp({ enterWaitMs: 200 });
     const running = host.run(job('a12', 'hello', { env: { FAKE_SECRET: SECRET, FAKE_START_MS: '2500' } }));

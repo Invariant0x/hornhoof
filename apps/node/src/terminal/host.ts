@@ -24,12 +24,20 @@ import { envFile, type Tmux } from './tmux.js';
 export type TermJob = { key: string; program: TermProgram; bin: string; home: string; signedOut: RegExp; input: RunInput };
 
 type Msg<T extends ServerMessage['type']> = Extract<ServerMessage, { type: T }>;
-type Deferred<T> = { promise: Promise<T>; resolve(v: T): void };
+type Deferred<T> = { promise: Promise<T>; resolve(v: T): void; settled: boolean };
 
 function deferred<T>(): Deferred<T> {
   let resolve!: (v: T) => void;
   const promise = new Promise<T>(r => (resolve = r));
-  return { promise, resolve };
+  const d: Deferred<T> = {
+    promise,
+    resolve: v => {
+      d.settled = true;
+      resolve(v);
+    },
+    settled: false,
+  };
+  return d;
 }
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
@@ -473,6 +481,11 @@ export class TerminalHost {
   }
 
   /* A stop in the log counts for the running turn once its prompt went in: one logged before is the last turn's. */
+  /* Hornhoof's turn ended in the program, and the host only reads the rest of its log. */
+  private overIn(a: Agent): boolean {
+    return Boolean(a.turn && !a.turn.typed && !a.turn.starting && a.ended?.settled);
+  }
+
   private stoppable(a: Agent): boolean {
     return Boolean(a.turn && (a.turn.typed || a.busy));
   }
@@ -572,7 +585,7 @@ export class TerminalHost {
         continue;
       }
       const news = codexRollout(data);
-      if (news.typed !== undefined && (!a.turn || a.turn.starting)) void this.openTyped(a, news.typed, true);
+      if (news.typed !== undefined && (!a.turn || a.turn.starting || this.overIn(a))) void this.openTyped(a, news.typed, true);
       for (const e of news.events) this.emit(a, e);
       if (news.limits) a.limits = news.limits;
       if (news.context !== undefined) this.context(a, news.context);
@@ -672,8 +685,9 @@ export class TerminalHost {
         a.took = true;
         await a.settling;
         a.busy = true;
-        /* Kimi Code hands the prompt as parts of a message. */
-        if (!a.turn || a.turn.starting) await this.openTyped(a, typeof data.prompt === 'string' ? data.prompt : contentText(data.prompt));
+        /* Kimi Code hands the prompt as parts of a message. A prompt after Hornhoof's turn ended in the program is a turn
+           of its own, though the host still reads the end of that one's log. */
+        if (!a.turn || a.turn.starting || this.overIn(a)) await this.openTyped(a, typeof data.prompt === 'string' ? data.prompt : contentText(data.prompt));
         return;
       case 'stop': {
         this.drain(a);
@@ -796,7 +810,8 @@ export class TerminalHost {
     if (a.program?.kind === 'antigravity') return false;
     /* Hornhoof's own prompt goes in first, or the words would join it in the program's input. */
     for (const end = Date.now() + ENTER_TRIES * this.enterWaitMs; a.turn && !a.turn.typed && !a.took && Date.now() < end; ) await sleep(this.pollMs);
-    if (!a.turn || a.turn.starting || (!a.turn.typed && !a.took) || !(await this.opts.tmux.alive(a.name))) return false;
+    /* A turn that ended in the program takes no words: typed then, they would start a turn nobody waits for. */
+    if (!a.turn || a.turn.starting || (!a.turn.typed && !a.took) || !a.busy || this.overIn(a) || !(await this.opts.tmux.alive(a.name))) return false;
     await this.opts.tmux.paste(a.name, text);
     await sleep(Math.min(3000, 300 + text.length / 20));
     await this.opts.tmux.keys(a.name, 'Enter');
