@@ -26,13 +26,18 @@ function ceoOf(people: readonly Candidate[]): string {
   return ceo.id;
 }
 
+/* Whether a person's access lists the place itself or the department holding it. A team, or the whole company, is not a
+   department's own. */
+const listsPlace = (access: Access, spot: Spot) =>
+  !access.whole && Boolean((spot.departmentId && access.departments.has(spot.departmentId)) || (spot.parentId && access.departments.has(spot.parentId)));
+
 /* A question on a department's task or employee goes to the one active person, other than the CEO, whose access lists that
-   department; with nobody or with several such people, to the CEO. People who see the whole company decide like the CEO
-   and are no department's own. Approvals, the CEO's topics, unknown topics, the orchestrator's own tasks, its cards and its
-   request for the computer go to the CEO. */
+   department or the product it is about; with nobody or with several such people, to the CEO. People who see the whole
+   company decide like the CEO and are no department's own. Approvals, the CEO's topics, unknown topics, the orchestrator's
+   own tasks, its cards and its request for the computer go to the CEO. */
 export function decisionOwner(d: DecisionSubject, people: readonly Candidate[]): string {
   if (d.source !== 'request' || d.kind === 'approval' || !d.topic || !DEPARTMENTAL.includes(d.topic) || !d.spot.departmentId) return ceoOf(people);
-  const own = people.filter(p => p.status === 'active' && !p.isOwner && !p.access.whole && canReach(p.access, d.spot));
+  const own = people.filter(p => p.status === 'active' && !p.isOwner && listsPlace(p.access, d.spot));
   return own.length === 1 ? own[0]!.id : ceoOf(people);
 }
 

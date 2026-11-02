@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { WHOLE, type Access } from '../src/auth/access.js';
+import { WHOLE, type Access, type Spot } from '../src/auth/access.js';
 import { orchestratorHeaders } from '../src/auth/internal.js';
 import { agents, companies, departments, people, proposals, requests, subscriptions, teams } from '../src/db/schema.js';
 import { decisionOwner, type Candidate } from '../src/modules/tasks/decisions.js';
@@ -17,7 +17,7 @@ describe('decisionOwner', () => {
   const ceo = person('ceo', WHOLE, { isOwner: true });
   const dan = person('dan', listed(['dev']));
   const dev = { departmentId: 'dev', parentId: null };
-  const question = (spot: { departmentId: string | null; parentId?: string | null }, topic: Candidate['id'] | null = 'task') => ({ source: 'request' as const, kind: 'question' as const, topic: topic as never, spot });
+  const question = (spot: Spot, topic: Candidate['id'] | null = 'task') => ({ source: 'request' as const, kind: 'question' as const, topic: topic as never, spot });
 
   it("gives a department's question to the one person who reaches the department", () => {
     expect(decisionOwner(question(dev), [ceo, dan])).toBe('dan');
@@ -37,6 +37,18 @@ describe('decisionOwner', () => {
     expect(decisionOwner(question(dev), [ceo, person('tia', listed([], ['dev-team']))])).toBe('ceo');
     expect(decisionOwner(question(dev), [ceo, person('ina', listed(['dev']), { status: 'invited' })])).toBe('ceo');
     expect(decisionOwner(question(dev), [ceo, person('dis', listed(['dev']), { status: 'disabled' }), dan])).toBe('dan');
+  });
+
+  it('passes over a deputy of the whole company: the department person owns, and with only the deputy the CEO does', () => {
+    const deputy = person('zed', WHOLE);
+    expect(decisionOwner(question(dev), [ceo, deputy, dan])).toBe('dan');
+    expect(decisionOwner(question(dev), [ceo, deputy])).toBe('ceo');
+  });
+
+  it("counts only the departments a person's access lists, never a team of the same place", () => {
+    const tia = person('tia', listed([], ['dev-team']));
+    expect(decisionOwner(question({ departmentId: 'dev', parentId: null, teamId: 'dev-team' }), [ceo, tia])).toBe('ceo');
+    expect(decisionOwner(question({ departmentId: 'dev', parentId: null, teamId: 'dev-team' }), [ceo, tia, dan])).toBe('dan');
   });
 
   it("gives the CEO every approval, every topic only the CEO decides, a question without a topic and the orchestrator's own tasks", () => {
