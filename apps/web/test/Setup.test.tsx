@@ -195,6 +195,7 @@ describe('the public link on the setup screen', () => {
     const user = userEvent.setup();
     render(<Setup onDone={() => {}} linkDomain="hornhoof.org" />);
     expect(screen.getByRole('checkbox', { name: 'Open Hornhoof on the internet' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Open Hornhoof on the internet' })).toHaveAccessibleDescription(/open it later under Share access\.$/);
     await user.type(screen.getByLabelText('Company name'), 'Рога и копыта');
     expect(screen.getByLabelText('Link')).toHaveValue('roga-i-kopyta');
     expect(screen.getByText('.hornhoof.org')).toBeInTheDocument();
@@ -274,7 +275,7 @@ describe('the public link on the setup screen', () => {
     await user.click(screen.getByRole('radio', { name: 'Later' }));
     await user.click(screen.getByRole('button', { name: 'Finish setup' }));
     expect(await screen.findByText('hornhoof.org does not answer now. Try again in a few minutes.')).toBeInTheDocument();
-    expect(screen.getByText(/turn off "Open Hornhoof on the internet"/)).toBeInTheDocument();
+    expect(screen.getByText(/turn off "Open Hornhoof on the internet", and open the link later under Share access\./)).toBeInTheDocument();
   });
 });
 

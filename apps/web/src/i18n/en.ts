@@ -68,7 +68,7 @@ export const en = {
   },
   link: {
     open: 'Open Hornhoof on the internet',
-    openHint: 'People open it from anywhere at this link, each with their own sign-in. Turn it off to keep Hornhoof on this computer and your network; you can open it later in Settings.',
+    openHint: 'People open it from anywhere at this link, each with their own sign-in. Turn it off to keep Hornhoof on this computer and your network; you can open it later under Share access.',
     label: 'Link',
     random: 'Random name',
     empty: 'Type a name, or take a random one.',
@@ -81,11 +81,11 @@ export const en = {
     unknown: 'Could not check the name now. It is checked again when you go on.',
     guessable: 'A name like this is easy to guess, so anyone may find the sign-in page. Only the company\'s sign-in protects what is inside.',
     hardToGuess: 'A random name is hard to guess. The company\'s sign-in still protects what is inside.',
-    skipHint: 'To go on without it, go back, turn off "Open Hornhoof on the internet", and open the link later in Settings.',
+    skipHint: 'To go on without it, go back, turn off "Open Hornhoof on the internet", and open the link later under Share access.',
   },
   settings: {
-    menu: 'Settings',
-    title: 'Settings',
+    menu: 'Share access',
+    title: 'Share access',
     link: 'Link on the internet',
     opensAt: 'Hornhoof opens from anywhere at this link:',
     closed: 'Hornhoof opens only at its own address, on this computer and your network.',

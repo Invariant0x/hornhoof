@@ -278,6 +278,7 @@ describe('taking over a link made before', () => {
     const second = await run(NAME, KEY);
     expect(second.code).toBe(1);
     expect(second.out).toContain('https://acme.hornhoof.test');
+    expect(second.out).toContain('Remove it under Share access first.');
     expect((await db.select().from(publicLinks)).map(r => r.name)).toEqual(['acme']);
   });
 });

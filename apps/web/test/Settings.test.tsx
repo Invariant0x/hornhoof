@@ -1,17 +1,18 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+import { LanguageProvider } from '../src/i18n';
 import { Settings } from '../src/screens/Settings';
 import { Shell } from '../src/screens/Shell';
 import { ME, mockApi, ORG } from './api-mock';
 
 const ACME = { name: 'acme', url: 'https://acme.hornhoof.org' };
 
-describe('Settings', () => {
+describe('Share access', () => {
   it('shows the public link with a copy button', async () => {
     mockApi({ 'GET /api/link': [200, { link: ACME, domain: 'hornhoof.org' }] });
     render(<Settings me={ME} onClose={() => {}} />);
-    const dialog = await screen.findByRole('dialog', { name: 'Settings' });
+    const dialog = await screen.findByRole('dialog', { name: 'Share access' });
     expect(within(dialog).getByText('Hornhoof opens from anywhere at this link:')).toBeInTheDocument();
     expect(await within(dialog).findByRole('link', { name: 'https://acme.hornhoof.org' })).toHaveAttribute('href', 'https://acme.hornhoof.org');
     expect(within(dialog).getByRole('button', { name: 'Copy' })).toBeInTheDocument();
@@ -76,14 +77,30 @@ describe('Settings', () => {
   });
 });
 
-describe('Settings in the account menu', () => {
+describe('Share access in the account menu', () => {
+  afterEach(() => localStorage.clear());
+
   it('opens for people who see the whole company', async () => {
     mockApi({ 'GET /api/org': [200, ORG], 'GET /api/link': [200, { link: ACME, domain: 'hornhoof.org' }] });
     const user = userEvent.setup();
     render(<Shell me={ME} onSignOut={() => {}} />);
     await user.click(screen.getByRole('button', { name: 'Account' }));
-    await user.click(screen.getByRole('button', { name: 'Settings' }));
-    expect(await screen.findByRole('dialog', { name: 'Settings' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Share access' }));
+    expect(await screen.findByRole('dialog', { name: 'Share access' })).toBeInTheDocument();
+  });
+
+  it('has its Russian name in the menu and on the window', async () => {
+    localStorage.setItem('hh-lang', 'ru');
+    mockApi({ 'GET /api/org': [200, ORG], 'GET /api/link': [200, { link: ACME, domain: 'hornhoof.org' }] });
+    const user = userEvent.setup();
+    render(
+      <LanguageProvider>
+        <Shell me={ME} onSignOut={() => {}} />
+      </LanguageProvider>,
+    );
+    await user.click(screen.getByRole('button', { name: 'Аккаунт' }));
+    await user.click(screen.getByRole('button', { name: 'Общий доступ' }));
+    expect(await screen.findByRole('dialog', { name: 'Общий доступ' })).toBeInTheDocument();
   });
 
   it('is not there for people who see only some departments', async () => {
@@ -91,6 +108,6 @@ describe('Settings in the account menu', () => {
     const user = userEvent.setup();
     render(<Shell me={{ ...ME, person: { ...ME.person, scopeKind: 'listed' } }} onSignOut={() => {}} />);
     await user.click(screen.getByRole('button', { name: 'Account' }));
-    expect(screen.queryByRole('button', { name: 'Settings' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Share access' })).not.toBeInTheDocument();
   });
 });
