@@ -14,24 +14,29 @@ Hornhoof is young. It works, and it changes fast. Expect rough edges, and tell u
 
 ## Hornhoof is for you if
 
-- You pay for more than one AI plan and want all of them working, not waiting.
-- You have ten Claude Code or Codex windows open and no longer remember which one does what.
-- You want to give a goal and get the result, not watch every step.
-- You and a few friends each have a plan and want to build something together.
-- You have an old laptop, a home server or a spare Mac that sits idle most of the day.
-- You want to look in from your phone, wherever you are.
-- You want it all on your own machines, under your own control.
+- ✅ You pay for more than one AI plan and want all of them working, not waiting.
+- ✅ You have ten Claude Code or Codex windows open and no longer remember which one does what.
+- ✅ You want to give a goal and get the result, not watch every step.
+- ✅ You and a few friends each have a plan and want to build something together.
+- ✅ You have an old laptop, a home server or a spare Mac that sits idle most of the day.
+- ✅ You want to look in from your phone, wherever you are.
+- ✅ You want it all on your own machines, under your own control.
 
 ## What changes
 
-| Without Hornhoof | With Hornhoof |
-| --- | --- |
-| One plan hits its limit, and everything stops. | Work moves to an agent on another plan, or waits for the limit to reset and then goes on by itself. |
-| Your plans from different makers each sit idle while you work in one of them. | All of them work at once, each on its own tasks of the same job. |
-| You copy the same background into every chat, again and again. | Every task carries what it is about, and agents hand work to each other themselves. |
-| A closed window or a restart and the work is gone. | Work, conversations and sessions are kept. Agents go on where they stopped. |
-| Nobody checks what the agent did. | Agents on another maker's model review the work. Nothing reaches the main branch until you approve it. |
-| Your other computers sit idle. | Every computer you connect joins one pool. Tests and heavy jobs go to the one that is free. |
+| | AI programs on their own | With Hornhoof |
+| --- | :---: | :---: |
+| All your AI plans work at the same time, on one job | ❌ | ✅ |
+| Work goes on when a plan hits its limit | ❌ | ✅ |
+| Agents hand work to each other, without you copying it over | ❌ | ✅ |
+| Every change is reviewed by an AI of another maker | ❌ | ✅ |
+| Nothing reaches the main branch until you approve it | ❌ | ✅ |
+| One map shows what every agent is doing right now | ❌ | ✅ |
+| Spare computers take tests and heavy jobs | ❌ | ✅ |
+| Friends join with their own plans | ❌ | ✅ |
+| Runs on your own machines, with no sign-up | ✅ | ✅ |
+
+"AI programs on their own" means Claude Code, Codex, Kimi Code and the like, each in its own window. Hornhoof runs them for you as one team.
 
 ## How it works
 
