@@ -111,8 +111,8 @@ type Agent = {
 };
 
 type Size = { cols: number; rows: number };
-/* shown: the size its tmux client is to have; applied: the size it was last given; sizing: the sizes on their way, one
-   after another; tty: that client's terminal, once found. */
+/* shown: the size its tmux client is to have; applied: the size it was last given; tty: that client's terminal, once
+   found. */
 type View = {
   child: ChildProcess;
   key: string;
@@ -124,7 +124,6 @@ type View = {
   quiet: NodeJS.Timeout | null;
   shown: Size;
   applied: Size;
-  sizing: Promise<void>;
   tty: string | null;
   out(text: string): void;
 };
@@ -896,7 +895,7 @@ export class TerminalHost {
     if (this.viewsClosed.delete(m.termId)) return this.forget(m.termId, m.agentKey);
     const shown = this.fitted(m.agentKey);
     const child = this.opts.tmux.attach(a.name, shown.cols, shown.rows, m.write);
-    const view: View = { child, key: m.agentKey, write: m.write, mask: new StreamMask(this.opts.secrets), decoder: new StringDecoder('utf8'), pending: '', timer: null, quiet: null, shown, applied: shown, sizing: Promise.resolve(), tty: null, out: () => {} };
+    const view: View = { child, key: m.agentKey, write: m.write, mask: new StreamMask(this.opts.secrets), decoder: new StringDecoder('utf8'), pending: '', timer: null, quiet: null, shown, applied: shown, tty: null, out: () => {} };
     this.views.set(m.termId, view);
     a.viewers++;
     /* A watcher of an agent that sleeps sees the waiting screen; anyone else, a loader until the program is up. */
@@ -967,22 +966,24 @@ export class TerminalHost {
     await Promise.all(changed.map(([termId, view]) => this.sizeView(termId, view, size)));
   }
 
-  /* Sizes go to a view's terminal one after another, so an older one never lands after a newer one, and each takes the
-     newest size there is by then. */
-  private sizeView(termId: string, view: View, size: Size): Promise<void> {
+  private async sizeView(termId: string, view: View, size: Size): Promise<void> {
     view.shown = size;
-    view.sizing = view.sizing.then(() => this.applySize(termId, view));
-    return view.sizing;
+    const tty = await this.ttyOf(termId, view);
+    if (!tty) return;
+    await this.applyNewest(tty, view);
+    const last = view.shown;
+    await this.clientSized(tty, last);
+    if (view.shown === last) this.eraseBelowSession(termId, view, last);
   }
 
-  private async applySize(termId: string, view: View): Promise<void> {
-    const size = view.shown;
-    const tty = await this.ttyOf(termId, view);
-    if (!tty || sameSize(view.applied, size)) return;
-    await stty(tty, size);
-    view.applied = size;
-    await this.clientSized(tty, size);
-    if (view.shown === size) this.eraseBelowSession(termId, view, size);
+  /* Sizes on their way do not wait for each other. One that lands after a newer one would leave the terminal at the older
+     size, so whichever ends last gives it the newest size again. */
+  private async applyNewest(tty: string, view: View): Promise<void> {
+    while (!sameSize(view.applied, view.shown)) {
+      const size = view.shown;
+      await stty(tty, size);
+      view.applied = size;
+    }
   }
 
   /* The terminal tells its client, which tells tmux; a session sized before then would still be sized for the old one. */

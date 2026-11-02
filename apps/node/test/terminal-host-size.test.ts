@@ -2,12 +2,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { hasTmux, until, host, tmux, sent, setUp } from './terminal-host-helpers.js';
 
 /* A size command that takes long, to see two sizes of one view cross. Only stty is held, and only while a test asks. */
-const held = vi.hoisted(() => ({ rows: null as string | null, ms: 0 }));
+const held = vi.hoisted(() => ({ rows: null as string | null, ms: 0, release: null as (() => void) | null }));
 vi.mock('node:child_process', async original => {
   const real = await original<typeof import('node:child_process')>();
   const execFile = ((file: string, args: string[], ...rest: unknown[]) => {
     if (file === 'stty' && held.rows && args.includes(held.rows)) {
-      setTimeout(() => (real.execFile as (...a: unknown[]) => unknown)(file, args, ...rest), held.ms);
+      const run = () => (real.execFile as (...a: unknown[]) => unknown)(file, args, ...rest);
+      /* Held for so long, or until the test lets it go. */
+      if (held.ms) setTimeout(run, held.ms);
+      else held.release = run;
       return undefined;
     }
     return (real.execFile as (...a: unknown[]) => unknown)(file, args, ...rest);
@@ -20,7 +23,10 @@ const clients = async () => (await tmux.run(['list-clients', '-F', '#{client_wid
 
 describe.skipIf(!hasTmux)("a terminal's size", () => {
   afterEach(async () => {
+    held.release?.();
     held.rows = null;
+    held.ms = 0;
+    held.release = null;
     await host?.stop();
   });
 
@@ -50,6 +56,24 @@ describe.skipIf(!hasTmux)("a terminal's size", () => {
     await host.resize({ type: 'term.resize', termId: 't71', cols: 158, rows: 20 });
     await first;
     await new Promise(r => setTimeout(r, 1200));
+    expect(await clients()).toEqual(['158x20']);
+  });
+
+  it('does not keep a newer size waiting for an older one that has not landed yet', async () => {
+    await setUp();
+    await host.open({ type: 'term.open', termId: 't72', agentKey: 'a72', cols: 158, rows: 29, write: true });
+    await until(() => sent.some(m => m.type === 'term.data' && m.termId === 't72'));
+    held.rows = '13';
+    const first = host.resize({ type: 'term.resize', termId: 't72', cols: 158, rows: 13 });
+    await until(() => held.release !== null);
+    await host.resize({ type: 'term.resize', termId: 't72', cols: 158, rows: 20 });
+    expect(await clients()).toEqual(['158x20']);
+    const late = held.release!;
+    held.release = null;
+    late();
+    await first;
+    await until(async () => (await clients()).join() === '158x20');
+    await new Promise(r => setTimeout(r, 300));
     expect(await clients()).toEqual(['158x20']);
   });
 });
