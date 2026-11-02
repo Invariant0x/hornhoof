@@ -9,13 +9,13 @@ import { withProgramExit, type ProgramExit } from '../program-exit.js';
 import { KEEP_BYTES } from '../providers/process.js';
 import { Recordings, type ExitSnapshot } from './recordings.js';
 
-/* How agent sessions look and behave: no tmux bar, the wheel scrolls, the size follows the person who looks last, colours
-   pass through, and a finished program leaves its last screen. */
+/* How agent sessions look and behave: no tmux bar, the wheel scrolls, the size is the smallest window's of the people
+   watching (the node gives them all that size), colours pass through, and a finished program leaves its last screen. */
 const OPTIONS: string[][] = [
   ['status', 'off'],
   ['mouse', 'on'],
   ['focus-events', 'on'],
-  ['window-size', 'latest'],
+  ['window-size', 'smallest'],
   ['escape-time', '0'],
   ['history-limit', '50000'],
   ['default-terminal', 'tmux-256color'],
