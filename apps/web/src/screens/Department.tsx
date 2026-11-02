@@ -1,3 +1,4 @@
+import type { LineState } from '@hornhoof/protocol/map';
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { api } from '../api';
 import { deptLabel, errorText, useLanguage, useT } from '../i18n';
@@ -15,7 +16,7 @@ import { RepoSettings } from '../ui/RepoSettings';
 import { byState, TaskRow } from '../ui/TaskRow';
 import { Pulse, pulseSeconds, toD, useReducedMotion, type Point } from '../ui/wires';
 import { useWorkLines } from '../ui/work-lines';
-import { arrowD, CH, CW, CY, FT, FW, HH, HW, PH, PW, schemaLayout, stepPaths, type Line } from './schema';
+import { arrowD, CH, CW, CY, FT, FW, HH, HW, PH, PW, schemaLayout, stepPaths, type Line, type Schema } from './schema';
 
 type Props = {
   me: Me;
@@ -172,6 +173,20 @@ function Wire({ l }: { l: Line }) {
       <path className={l.cls} d={d} />
       {l.arrow && <path className={l.cls === 'rl' ? 'rah' : 'ah'} d={arrowD(l.pts)} />}
     </>
+  );
+}
+
+/* One solid path from the head's card to each employee's, so its color fills the whole way at any zoom: blue while the
+   employee works on the head's task, yellow for five minutes after it gave a result back. */
+function MemberLines({ s, toMember, stateOf }: { s: Schema; toMember(id: string): Point[] | null; stateOf(up: string, down: string): LineState }) {
+  const head = s.head;
+  if (!head) return null;
+  return s.frames.flatMap(f =>
+    f.members.map(m => {
+      const state = stateOf(head.id, m.e.id);
+      const pts = state === 'quiet' ? null : toMember(m.e.id);
+      return pts && <path key={m.e.id} className={`tr work ${state}`} data-work={m.e.id} d={toD(pts)} />;
+    }),
   );
 }
 
@@ -357,6 +372,10 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
     if (!dragged()) onOpen(agentId);
   }
 
+  function openDecisions(personId: string) {
+    if (!dragged()) onOpenDecisions?.(personId);
+  }
+
   /* A switch shows at once and holds until the company says the same; a refusal puts it back and says why. */
   const [switched, setSwitched] = useState<Record<string, boolean>>({});
   useEffect(() => setSwitched(x => Object.fromEntries(Object.entries(x).filter(([id, on]) => d.employees.find(e => e.id === id)?.on !== on))), [d.employees]);
@@ -435,15 +454,7 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
             ))}
             {lines('rl')}
             {s.report && <Wire l={{ cls: 'pl', pts: s.report.pts, arrow: true }} />}
-            {/* One solid path from the head's card to each employee's, so the color fills the whole way at any zoom. */}
-            {s.head &&
-              s.frames.flatMap(f =>
-                f.members.map(m => {
-                  const state = stateOf(s.head!.id, m.e.id);
-                  const pts = state === 'quiet' ? null : paths.toMember(m.e.id);
-                  return pts && <path key={m.e.id} className={`tr work ${state}`} data-work={m.e.id} d={toD(pts)} />;
-                }),
-              )}
+            <MemberLines s={s} toMember={paths.toMember} stateOf={stateOf} />
             {shots.map(x => (
               <Pulse key={x.key} pts={x.pts} speed={PULSE_SPEED} once tone={x.tone} />
             ))}
@@ -480,7 +491,7 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
           </section>
           {reach.map((p, k) => (
             <div key={p.id} className="pchip" style={{ left: s.people[k]![0], top: s.people[k]![1], width: PW, height: PH }}>
-              <PersonButton person={p} onOpen={() => !dragged() && onOpenDecisions?.(p.id)}>
+              <PersonButton person={p} onOpen={() => openDecisions(p.id)}>
                 <Edge cut={8}>
                   <PersonIcon />
                   <span className="pn">

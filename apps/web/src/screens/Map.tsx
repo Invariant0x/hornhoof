@@ -1,8 +1,9 @@
+import type { LineState } from '@hornhoof/protocol/map';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { deptLabel, errorText, useLanguage, useT, type Messages } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
 import { useStream, type LiveMessage } from '../live';
-import { mapPeople, useOrg } from '../org';
+import { mapPeople, useOrg, type MapPerson } from '../org';
 import type { Department, Employee, EmployeeStatus, Endpoint, Me, Org, SubView } from '../types';
 import { accessText } from '../ui/AccessPicker';
 import { Bar, percent } from '../ui/Bar';
@@ -116,6 +117,14 @@ function toPerson(org: Org, id: string): Point[] | null {
   return [[CX, CY - HUB], [CX, busY(n)], [x, busY(n)], [x, chipsTop(n) + CHIP_H]];
 }
 
+/* The ways from the hub to each person decisions wait for. */
+function decisionWays(org: Org): { id: string; pts: Point[] }[] {
+  return mapPeople(org).flatMap(p => {
+    const pts = p.pendingDecisions ? toPerson(org, p.id) : null;
+    return pts ? [{ id: p.id, pts }] : [];
+  });
+}
+
 /* The way from an endpoint to the hub: up from a person's chip, or in from a department along its trace. */
 function toHub(e: Endpoint, org: Org): Point[] | null {
   if (e.kind === 'orchestrator') return [];
@@ -199,6 +208,58 @@ function contentBounds(org: Org): { x0: number; y0: number; x1: number; y1: numb
 }
 
 type Shot = { key: number; pts: Point[]; tone: 'c' | 'a' };
+
+/* One solid path over each department's whole trace, so its color fills it at any zoom: blue while its head works on the
+   orchestrator's task, yellow for five minutes after it gave a result back. */
+function WorkLines({ org, spots, stateOf }: { org: Org; spots: DeptSpot[]; stateOf(up: string, down: string): LineState }) {
+  const orchestrator = org.orchestrator;
+  if (!orchestrator) return null;
+  return org.departments.map((d, i) => {
+    const head = d.employees.find(e => e.kind === 'head');
+    const state = head ? stateOf(orchestrator.id, head.id) : 'quiet';
+    return state !== 'quiet' && <path key={d.id} className={`tr work ${state}`} data-work={d.id} d={toD(spots[i]!.path)} />;
+  });
+}
+
+/* Each person decisions wait for gets a signal of their own: a solid amber way from the hub to their card, with a dot
+   running toward them unless the person watching asks for less motion. */
+function DecisionSignals({ ways, still }: { ways: { id: string; pts: Point[] }[]; still: boolean }) {
+  return ways.map(w => (
+    <g key={w.id}>
+      <path className="tr ask" data-ask={w.id} d={toD(w.pts)} />
+      {!still && <Pulse pts={w.pts} speed={PULSE_SPEED} tone="a" />}
+    </g>
+  ));
+}
+
+/* The line under a person's name: their title, else the department they belong to or what they reach. */
+function personDetail(t: Messages, p: MapPerson, org: Org): string {
+  if (p.title) return p.title;
+  if (p.home) return deptLabel(t, p.home);
+  return p.deputy ? t.map.deputy(accessText(t, p.access, org)) : t.map.wholeCompany;
+}
+
+/* The people on the top row, each card opening the decisions waiting for that person. */
+function PeopleRow({ org, people, top, onOpen }: { org: Org; people: MapPerson[]; top: number; onOpen(personId: string): void }) {
+  const t = useT();
+  return (
+    <ul className="chips" style={{ left: CX - chipsWidth(people.length) / 2, top, gap: CHIP_GAP }} aria-label={t.map.leaders}>
+      {people.map(p => (
+        <li key={p.id} style={{ width: CHIP_W, height: CHIP_H }}>
+          <PersonButton person={p} onOpen={() => onOpen(p.id)}>
+            <Edge cut={8} className="chip">
+              <PersonIcon label={t.map.person} />
+              <span>
+                <b>{p.name}</b>
+                <small>{personDetail(t, p, org)}</small>
+              </span>
+            </Edge>
+          </PersonButton>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 /* onOpenDecisions: a person's card opens the decisions screen showing theirs. */
 type Props = { me: Me; windowOpen: boolean; onOpenOrchestrator(): void; inside?: boolean; onOpenDepartment?(id: string): void; onOpenDecisions?(personId: string): void };
@@ -336,16 +397,8 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator, inside = false, 
   const top = chipsTop(depts.length), bus = busY(depts.length);
   const people = mapPeople(org);
   const chips = chipCenters(people.length);
-  const chipsW = chipsWidth(people.length);
-  const lineTo = (d: Department) => {
-    const head = d.employees.find(e => e.kind === 'head');
-    return head && org.orchestrator ? stateOf(org.orchestrator.id, head.id) : 'quiet';
-  };
-  /* Each person decisions wait for gets a signal of their own from the hub, and the hub blinks while any of them waits. */
-  const asked = people.flatMap(p => {
-    const pts = p.pendingDecisions ? toPerson(org, p.id) : null;
-    return pts ? [{ id: p.id, pts }] : [];
-  });
+  /* The hub blinks while decisions wait for anyone on the map. */
+  const asked = decisionWays(org);
   const gauge = gaugeArc(org.agents.working, org.agents.total);
   const hubPlace = { left: CX - HUB, top: CY - HUB, width: HUB * 2, height: HUB * 2 };
   const hubArt = (
@@ -399,37 +452,14 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator, inside = false, 
             <path key={depts[i]!.id} className="tr" data-wire={depts[i]!.id} d={toD(s.path)} />
           ))}
           {spots.map((s, i) => s.path.length > 2 && <circle key={depts[i]!.id} className="via" cx={s.path[2]![0]} cy={s.path[2]![1]} r="4" />)}
-          {/* One solid path over the whole trace, so the color fills it at any zoom. */}
-          {spots.map((s, i) => {
-            const state = lineTo(depts[i]!);
-            return state !== 'quiet' && <path key={depts[i]!.id} className={`tr work ${state}`} data-work={depts[i]!.id} d={toD(s.path)} />;
-          })}
-          {asked.map(a => (
-            <g key={a.id}>
-              <path className="tr ask" data-ask={a.id} d={toD(a.pts)} />
-              {!still && <Pulse pts={a.pts} speed={PULSE_SPEED} tone="a" />}
-            </g>
-          ))}
+          <WorkLines org={org} spots={spots} stateOf={stateOf} />
+          <DecisionSignals ways={asked} still={still} />
           {shots.map(s => (
             <Pulse key={s.key} pts={s.pts} speed={PULSE_SPEED} once tone={s.tone} />
           ))}
         </svg>
 
-        <ul className="chips" style={{ left: CX - chipsW / 2, top, gap: CHIP_GAP }} aria-label={t.map.leaders}>
-          {people.map(p => (
-            <li key={p.id} style={{ width: CHIP_W, height: CHIP_H }}>
-              <PersonButton person={p} onOpen={() => openDecisions(p.id)}>
-                <Edge cut={8} className="chip">
-                  <PersonIcon label={t.map.person} />
-                  <span>
-                    <b>{p.name}</b>
-                    <small>{p.title || (p.home ? deptLabel(t, p.home) : p.deputy ? t.map.deputy(accessText(t, p.access, org)) : t.map.wholeCompany)}</small>
-                  </span>
-                </Edge>
-              </PersonButton>
-            </li>
-          ))}
-        </ul>
+        <PeopleRow org={org} people={people} top={top} onOpen={openDecisions} />
 
         {company ? (
           <button className={`hub${windowOpen ? ' on' : ''}${asked.length ? ' attn' : ''}`} type="button" style={hubPlace} aria-label={t.map.openOrchestrator} onPointerDown={e => e.stopPropagation()} onClick={onOpenOrchestrator}>

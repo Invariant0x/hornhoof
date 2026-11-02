@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Shell } from '../src/screens/Shell';
 import type { ComputerAccessDecision, Me, Org, ProposalDecision } from '../src/types';
-import { CLOSED_TASKS, decisions, DEV_ORG, FINISHED_TURN, ME, mockApi, PLANNED_TURN, REQUESTS, TASKS, TURN } from './api-mock';
+import { CLOSED_TASKS, decisions, DEV_ORG, FINISHED_TURN, ME, mockApi, PLANNED_TURN, REQUESTS, ROSTER, TASKS, TURN } from './api-mock';
 import { fakeStream } from './fake-stream';
 
 const ALL = '/api/tasks?status=all';
@@ -315,6 +315,22 @@ describe('the decisions of one person', () => {
     expect(calls.some(c => c.method === 'POST' && c.path === '/api/computer/open')).toBe(true);
     expect(await screen.findByRole('button', { name: 'Tasks, 3 waiting for you' })).toBeInTheDocument();
     expect(within(waiting).queryByRole('region', { name: /asks for access/ })).not.toBeInTheDocument();
+  });
+
+  it("show a card to hire into a department under the department's name, and say why the computer could not be opened", async () => {
+    const user = userEvent.setup();
+    const staff: ProposalDecision = { ...STRUCTURE, id: 'pr2', kind: 'staff', department: { id: 'd2', name: 'development' }, brief: 'Hire a reviewer.', items: [{ role: 'DEV-BE', name: 'Reviewer' }] };
+    shell({
+      'GET /api/requests': [200, decisions([], { proposals: [staff], computerAccess: COMPUTER })],
+      'GET /api/departments/d2/roster': [200, ROSTER],
+      'POST /api/computer/open': [409, { error: { code: 'conflict', message: 'Hornhoof cannot reach this computer.', reason: 'updater_missing' } }],
+    });
+    await openTasks(user);
+    const waiting = screen.getByRole('region', { name: 'Waiting for you' });
+    expect(within(waiting).getByRole('heading', { name: 'Hiring for Development' })).toBeInTheDocument();
+    expect(within(waiting).getByText('Hire a reviewer.')).toBeInTheDocument();
+    await user.click(within(waiting).getByRole('button', { name: 'Open access for a day' }));
+    expect(await within(waiting).findByRole('alert')).toHaveTextContent('The updater is not running.');
   });
 
   it("show the CEO's own filter with the computer, and another person's without it", async () => {

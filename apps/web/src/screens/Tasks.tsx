@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { deptLabel, errorText, useT } from '../i18n';
 import { mapPeople, useOrg } from '../org';
 import { placeName, useTasks, useTurns } from '../tasks';
-import type { Decisions, Org, TaskLine, TaskStatus, TurnView } from '../types';
+import type { Decisions, Org, ProposalDecision, TaskLine, TaskStatus, TurnView } from '../types';
 import { ComputerCard } from '../ui/ComputerCard';
 import { Field } from '../ui/Field';
 import { Requests, wordsAnswer } from '../ui/Requests';
@@ -107,50 +107,77 @@ type Waiting = Pick<Props, 'decisions' | 'onDecisionsChanged' | 'personId' | 'on
   place: (p: TaskLine['department']) => string;
 };
 
-/* What waits for the person: what agents ask, the orchestrator's cards and his request for the computer, each with the
-   buttons it already has elsewhere. Opened from a person's card, only theirs, with the filter in sight. */
-function WaitingForYou({ decisions, onDecisionsChanged, personId, onClearPerson, onOpenTask, onOpenAgent, onOpenOrchestrator, org, place }: Waiting) {
+type Shown = Pick<Decisions, 'requests' | 'proposals' | 'computerAccess'>;
+
+/* What of the decisions the screen lists: all of them, or one person's; nothing before the first answer. */
+function shownOf(decisions: Decisions | undefined, personId: string | null): Shown {
+  const theirs = <T extends { ownerPersonId: string }>(items: T[]) => (personId ? items.filter(i => i.ownerPersonId === personId) : items);
+  const computer = decisions?.computerAccess ? theirs([decisions.computerAccess]) : [];
+  return { requests: theirs(decisions?.requests ?? []), proposals: theirs(decisions?.proposals ?? []), computerAccess: computer[0] ?? null };
+}
+
+const shownNone = (s: Shown) => !s.requests.length && !s.proposals.length && !s.computerAccess;
+
+/* The person whose decisions show, with a cross that shows everyone's again. */
+function PersonFilter({ name, onClear }: { name: string; onClear: () => void }) {
+  const t = useT();
+  return (
+    <p className="filter-chip">
+      <span>{t.tasks.decisionsFor(name)}</span>
+      <button className="zbtn" type="button" aria-label={t.tasks.showAll} title={t.tasks.showAll} onClick={onClear}>
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M6 6l12 12M18 6L6 18" />
+        </svg>
+      </button>
+    </p>
+  );
+}
+
+const nothing = () => {};
+
+/* An orchestrator's card as his window shows it: a structure to build, or people to hire into a department. Correcting it
+   in words opens his window. */
+function ProposalCard({ card, org, onCorrect = nothing, onDone }: { card: ProposalDecision; org: Org | null; onCorrect?: () => void; onDone: () => void }) {
+  const t = useT();
+  if (card.kind === 'structure') return <StructureCard proposal={{ id: card.id, brief: card.brief, items: card.items }} departments={org?.departments ?? []} onCorrect={onCorrect} onDone={onDone} />;
+  if (!card.department) return null;
+  const known = org?.departments.find(d => d.id === card.department!.id);
+  const department = { id: card.department.id, name: known ? deptLabel(t, known) : card.department.name };
+  return <StaffCard department={department} proposal={{ id: card.id, brief: card.brief, people: card.items }} onCorrect={onCorrect} onDone={onDone} />;
+}
+
+type Listed = Pick<Waiting, 'onDecisionsChanged' | 'onOpenTask' | 'onOpenAgent' | 'onOpenOrchestrator' | 'org' | 'place'> & { shown: Shown; onFailure: (err: unknown) => void };
+
+/* Each decision with the buttons it already has elsewhere: requests, then the orchestrator's cards, then the computer. */
+function DecisionList({ shown, onDecisionsChanged, onOpenTask, onOpenAgent, onOpenOrchestrator, org, place, onFailure }: Listed) {
+  const t = useT();
+  const { requests, proposals, computerAccess } = shown;
+  return (
+    <>
+      {requests.length > 0 && <Requests requests={requests} onChanged={onDecisionsChanged} onOpenTask={onOpenTask} onOpenAgent={onOpenAgent} placeName={place} />}
+      {wordsAnswer(requests) && <p className="muted">{t.tasks.answerElsewhere}</p>}
+      {proposals.map(c => (
+        <ProposalCard key={c.id} card={c} org={org} onCorrect={onOpenOrchestrator} onDone={onDecisionsChanged} />
+      ))}
+      {computerAccess && <ComputerCard view={computerAccess.view} onChange={onDecisionsChanged} onFailure={onFailure} />}
+    </>
+  );
+}
+
+/* What waits for the person: what agents ask, the orchestrator's cards and his request for the computer. Opened from a
+   person's card, only theirs, with the filter in sight. */
+function WaitingForYou({ decisions, personId, onClearPerson, ...rest }: Waiting) {
   const t = useT();
   const [failure, setFailure] = useState<unknown>(null);
-  const theirs = <T extends { ownerPersonId: string }>(items: T[]) => (personId ? items.filter(i => i.ownerPersonId === personId) : items);
-  const requests = decisions ? theirs(decisions.requests) : [];
-  const cards = decisions ? theirs(decisions.proposals) : [];
-  const computer = decisions?.computerAccess && theirs([decisions.computerAccess])[0];
-  const name = personId ? ((org && mapPeople(org).find(p => p.id === personId)?.name) ?? t.tasks.someone) : '';
-  const correct = onOpenOrchestrator ?? (() => {});
-  const deptName = (d: { id: string; name: string }) => {
-    const known = org?.departments.find(x => x.id === d.id);
-    return known ? deptLabel(t, known) : d.name;
-  };
+  const shown = shownOf(decisions, personId);
+  const name = mapPeople(rest.org).find(p => p.id === personId)?.name ?? t.tasks.someone;
 
   return (
     <section className="waiting" aria-label={t.tasks.waiting}>
       <h2>{t.tasks.waiting}</h2>
-      {personId && (
-        <p className="filter-chip">
-          <span>{t.tasks.decisionsFor(name)}</span>
-          <button className="zbtn" type="button" aria-label={t.tasks.showAll} title={t.tasks.showAll} onClick={onClearPerson}>
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M6 6l12 12M18 6L6 18" />
-            </svg>
-          </button>
-        </p>
-      )}
-      {requests.length > 0 && (
-        <>
-          <Requests requests={requests} onChanged={onDecisionsChanged} onOpenTask={onOpenTask} onOpenAgent={onOpenAgent} placeName={place} />
-          {wordsAnswer(requests) && <p className="muted">{t.tasks.answerElsewhere}</p>}
-        </>
-      )}
-      {cards.map(c =>
-        c.kind === 'structure' ? (
-          <StructureCard key={c.id} proposal={{ id: c.id, brief: c.brief, items: c.items }} departments={org?.departments ?? []} onCorrect={correct} onDone={onDecisionsChanged} />
-        ) : (
-          c.department && <StaffCard key={c.id} department={{ id: c.department.id, name: deptName(c.department) }} proposal={{ id: c.id, brief: c.brief, people: c.items }} onCorrect={correct} onDone={onDecisionsChanged} />
-        ),
-      )}
-      {computer && <ComputerCard view={computer.view} onChange={onDecisionsChanged} onFailure={setFailure} />}
-      {decisions && !requests.length && !cards.length && !computer && <p className="muted">{personId ? t.tasks.nothingFor(name) : t.tasks.nothingWaiting}</p>}
+      {personId && <PersonFilter name={name} onClear={onClearPerson} />}
+      <DecisionList shown={shown} onFailure={setFailure} {...rest} />
+      {decisions && shownNone(shown) && <p className="muted">{personId ? t.tasks.nothingFor(name) : t.tasks.nothingWaiting}</p>}
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
     </section>
   );

@@ -19,10 +19,21 @@ export type MapPerson = PersonView & { deputy?: boolean; home?: Department };
 /* Everyone with a card on the map's top row, each once: the people next to the CEO, then the people of one department in
    the order of the departments. The server places them; the map only lines them up, so every card is reachable from the
    hub, and the decisions screen names whoever it shows. */
-export function mapPeople(org: Org): MapPerson[] {
+export function mapPeople(org: Org | null): MapPerson[] {
+  if (!org) return [];
   const seen = new Set<string>();
   const all: MapPerson[] = [...org.people, ...org.departments.flatMap(d => d.people.map(p => ({ ...p, home: d })))];
   return all.filter(p => !seen.has(p.id) && !!seen.add(p.id));
+}
+
+/* A tab that comes back from the background, or a computer from sleep, fetches again: what it shows moved meanwhile. */
+function useFetchOnReturn(enabled: boolean, load: () => void): void {
+  useEffect(() => {
+    if (!enabled) return;
+    const back = () => document.visibilityState === 'visible' && load();
+    document.addEventListener('visibilitychange', back);
+    return () => document.removeEventListener('visibilitychange', back);
+  }, [enabled, load]);
 }
 
 /* The company as /api/org shows it, kept fresh from the live stream while enabled. */
@@ -59,14 +70,8 @@ export function useOrg(enabled = true): { org: Org | null; failure: unknown } {
     };
   }, [enabled, load]);
 
-  /* A tab that comes back from the background, or a computer from sleep, fetches the company again: the lines and the
-     counts moved meanwhile. */
-  useEffect(() => {
-    if (!enabled) return;
-    const back = () => document.visibilityState === 'visible' && load();
-    document.addEventListener('visibilitychange', back);
-    return () => document.removeEventListener('visibilitychange', back);
-  }, [enabled, load]);
+  /* The lines and the counts moved while the tab was away. */
+  useFetchOnReturn(enabled, load);
 
   /* Tasks and questions move often while agents work, so they fetch the company once things settle a little. */
   const soon = useRef<ReturnType<typeof setTimeout> | null>(null);
