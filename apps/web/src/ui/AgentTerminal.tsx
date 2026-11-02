@@ -127,15 +127,38 @@ function pageAtBottom(scrolled: Element | null | undefined) {
   return !!scrolled && scrolled.scrollHeight > scrolled.clientHeight && scrolled.scrollTop + scrolled.clientHeight >= scrolled.scrollHeight - 1;
 }
 
-/* A card below the terminal coming or going changes its height. Rows it gains come back from the history and move the
-   view, which hides the program's line to type in below the window, so a view at the bottom stays there, and a view the
-   person scrolled up into the history keeps the line it starts at. */
+/* The line of the history the view starts at, held by a marker xterm moves with it as lines wrap again for a new width
+   and drops when the history is trimmed, and how far into that line the view starts, in cells. */
+function anchor(term: Terminal) {
+  const buffer = term.buffer.active;
+  let start = buffer.viewportY;
+  while (start > 0 && buffer.getLine(start)?.isWrapped) start--;
+  return { marker: term.registerMarker(start - buffer.baseY - buffer.cursorY), cells: (buffer.viewportY - start) * term.cols };
+}
+
+/* Wider, the lines take fewer rows and the page's scroll area shrinks: the browser cuts its scroll, and xterm follows that
+   scroll once it comes, after the terminal fit. So the view goes back to its line on the next frame as well. */
+function scrollToAnchor(term: Terminal, { marker, cells }: ReturnType<typeof anchor>) {
+  const back = () => marker && !marker.isDisposed && term.scrollToLine(marker.line + Math.floor(cells / term.cols));
+  back();
+  requestAnimationFrame(() => {
+    back();
+    marker?.dispose();
+  });
+}
+
+/* A card below the terminal coming or going changes its height, and a narrower or wider window its width. Rows it gains
+   come back from the history and lines wrap again, which moves the view and hides the program's line to type in below
+   the window, so a view at the bottom stays there, and a view the person scrolled up into the history keeps its line. */
 function fitKeepingPlace(term: Terminal, fit: FitAddon) {
   const { viewportY, baseY } = term.buffer.active;
-  const bottom = viewportY >= baseY || pageAtBottom(term.element?.querySelector('.xterm-viewport'));
+  if (viewportY >= baseY || pageAtBottom(term.element?.querySelector('.xterm-viewport'))) {
+    fit.fit();
+    return term.scrollToBottom();
+  }
+  const place = anchor(term);
   fit.fit();
-  if (bottom) term.scrollToBottom();
-  else term.scrollToLine(viewportY);
+  scrollToAnchor(term, place);
 }
 
 function keepFitted(term: Terminal, fit: FitAddon, box: HTMLElement) {

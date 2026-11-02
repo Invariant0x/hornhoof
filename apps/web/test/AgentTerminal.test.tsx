@@ -13,13 +13,18 @@ const terms = vi.hoisted(() => [] as FakeTerminal[]);
 const moves = vi.hoisted(() => [] as string[]);
 /* What xterm's own timers found when they came after the terminal was gone; xterm 5.5 throws there. */
 const late = vi.hoisted(() => [] as string[]);
+/* What a test makes the terminal's buffer do as it fits its box, as xterm rewraps long lines for a new width. */
+const fitting = vi.hoisted(() => ({ then: null as null | (() => void) }));
+type Marker = { line: number; isDisposed: boolean; dispose(): void };
 type FakeTerminal = {
   options: Record<string, unknown>;
   written: string[];
   cols: number;
   rows: number;
-  buffer: { active: { viewportY: number; baseY: number } };
+  buffer: { active: { viewportY: number; baseY: number; cursorY: number } };
   element: HTMLElement;
+  wrapped: Set<number>;
+  markers: Marker[];
   type(data: string): void;
   resized(cols: number, rows: number): void;
   disposed: boolean;
@@ -33,7 +38,10 @@ vi.mock('@xterm/xterm', () => ({
     rows = 30;
     disposed = false;
     /* The history above the screen, and the line the view starts at: at the bottom when they are equal. */
-    buffer = { active: { viewportY: 200, baseY: 200 } };
+    /* Rows that go on the line above them, as xterm wraps a line longer than the terminal is wide. */
+    wrapped = new Set<number>();
+    markers: Marker[] = [];
+    buffer = { active: { viewportY: 200, baseY: 200, cursorY: 29, getLine: (y: number) => ({ isWrapped: this.wrapped.has(y) }) } };
     /* Where xterm scrolls its view in the page; jsdom lays nothing out, so a test sets where it stands. */
     element = Object.assign(document.createElement('div'), { innerHTML: '<div class="xterm-viewport"></div>' });
     private onKeys: ((d: string) => void)[] = [];
@@ -51,6 +59,12 @@ vi.mock('@xterm/xterm', () => ({
     scrollToBottom() {
       moves.push('scrollToBottom');
       this.buffer.active.viewportY = this.buffer.active.baseY;
+    }
+    /* xterm keeps a marker on its line as lines wrap again and the history is trimmed. */
+    registerMarker(offset: number) {
+      const marker: Marker = { line: this.buffer.active.baseY + this.buffer.active.cursorY + offset, isDisposed: false, dispose: () => (marker.isDisposed = true) };
+      this.markers.push(marker);
+      return marker;
     }
     scrollToLine(line: number) {
       moves.push(`scrollToLine ${line}`);
@@ -89,6 +103,7 @@ vi.mock('@xterm/addon-fit', () => ({
   FitAddon: class {
     fit() {
       moves.push('fit');
+      fitting.then?.();
     }
   },
 }));
@@ -162,6 +177,8 @@ function view() {
   );
 }
 
+const frame = () => new Promise(r => requestAnimationFrame(() => r(undefined)));
+
 const socket = async () => {
   await waitFor(() => expect(FakeSocket.all.length).toBeGreaterThan(0));
   return FakeSocket.all.at(-1)!;
@@ -171,6 +188,7 @@ beforeEach(() => {
   terms.length = 0;
   moves.length = 0;
   late.length = 0;
+  fitting.then = null;
   FakeSocket.all = [];
   FakeResizeObserver.all = [];
   vi.stubGlobal('WebSocket', FakeSocket);
@@ -302,6 +320,51 @@ describe("an agent's live terminal in its window", () => {
     for (const ro of FakeResizeObserver.all) ro.resized();
     expect(moves).toEqual(['fit', 'scrollToLine 120']);
     expect(terms[0]!.buffer.active.viewportY).toBe(120);
+    await frame();
+    expect(terms[0]!.buffer.active.viewportY).toBe(120);
+  });
+
+  it('keeps the line of the history the person reads when the terminal gets narrower and long lines wrap again', async () => {
+    /* The view starts on the second row of a line that wraps at 100 columns, and 100 more lines of the history wrap at 50. */
+    open();
+    (await socket()).opened();
+    const term = terms[0]!;
+    term.wrapped.add(121);
+    term.buffer.active.viewportY = 121;
+    fitting.then = () => {
+      term.cols = 50;
+      for (const m of term.markers) m.line += 100;
+    };
+    moves.length = 0;
+    for (const ro of FakeResizeObserver.all) ro.resized();
+    expect(moves).toEqual(['fit', 'scrollToLine 222']);
+    await frame();
+    expect(term.markers.every(m => m.isDisposed)).toBe(true);
+  });
+
+  it('puts the view back on its line after the browser cut the page scroll of a wider terminal and xterm followed it', async () => {
+    /* Wider, the lines take fewer rows: the page's scroll area shrinks, the browser cuts its scroll to the end, and xterm
+       moves the view to the bottom once that scroll comes, after the terminal fit. */
+    open();
+    (await socket()).opened();
+    const term = terms[0]!;
+    term.buffer.active.viewportY = 120;
+    for (const ro of FakeResizeObserver.all) ro.resized();
+    term.buffer.active.viewportY = term.buffer.active.baseY;
+    await frame();
+    expect(term.buffer.active.viewportY).toBe(120);
+    expect(term.markers.every(m => m.isDisposed)).toBe(true);
+  });
+
+  it('leaves the view where xterm put it when the line the person read was trimmed from the history', async () => {
+    open();
+    (await socket()).opened();
+    const term = terms[0]!;
+    term.buffer.active.viewportY = 3;
+    fitting.then = () => term.markers.forEach(m => m.dispose());
+    moves.length = 0;
+    for (const ro of FakeResizeObserver.all) ro.resized();
+    expect(moves).toEqual(['fit']);
   });
 
   it('stays at the bottom when the browser moved the view up on its own as the terminal grew', async () => {
