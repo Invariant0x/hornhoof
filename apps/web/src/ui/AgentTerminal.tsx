@@ -34,6 +34,91 @@ const NO_TERMINAL = 4404;
 const NO_ACCESS = 4403;
 
 type Props = { agentId: string; program: string; onGone(): void };
+type Frame = { type: string; data?: string; write?: boolean; running?: boolean };
+type Size = { cols: number; rows: number };
+
+/* One view of an agent's session: its socket, how many times it tried again, and whether the node said if the program is up. */
+type View = {
+  agentId: string;
+  term: Terminal;
+  setUp(up: boolean): void;
+  gone(): void;
+  socket: WebSocket | null;
+  ended: boolean;
+  retry: ReturnType<typeof setTimeout> | null;
+  tries: number;
+  told: boolean;
+};
+
+function send(view: View, m: unknown) {
+  if (view.socket?.readyState === 1) view.socket.send(JSON.stringify(m));
+}
+
+function connect(view: View) {
+  const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
+  const asked: Size = { cols: view.term.cols, rows: view.term.rows };
+  const ws = new WebSocket(`${scheme}://${location.host}/api/agents/${view.agentId}/terminal?cols=${asked.cols}&rows=${asked.rows}`);
+  view.socket = ws;
+  ws.onmessage = e => receive(view, JSON.parse(String(e.data)) as Frame, asked);
+  ws.onclose = e => closed(view, ws, e.code);
+}
+
+/* The session draws its whole screen for each new view. Only its subscription's owner types into it. The node says
+   whether the program is up before it sends the screen; one that says nothing, as for a watcher of an agent that
+   sleeps or a node from before, shows its screen as it comes. */
+function receive(view: View, m: Frame, asked: Size) {
+  if (m.type === 'ready') opened(view, m, asked);
+  if (m.type === 'program') {
+    view.told = true;
+    view.setUp(Boolean(m.running));
+  }
+  if (m.type === 'data' && m.data) {
+    if (!view.told) view.setUp(true);
+    view.term.write(m.data);
+  }
+}
+
+function opened(view: View, m: Frame, asked: Size) {
+  const { term } = view;
+  view.tries = 0;
+  view.told = false;
+  term.reset();
+  term.options.disableStdin = !m.write;
+  /* A card that came or went while the socket connected changed the size the address carried, and its resize was lost. */
+  if (term.cols !== asked.cols || term.rows !== asked.rows) send(view, { type: 'resize', cols: term.cols, rows: term.rows });
+}
+
+function closed(view: View, ws: WebSocket, code: number) {
+  if (view.ended || view.socket !== ws) return;
+  view.setUp(false);
+  if (code === NO_TERMINAL || code === NO_ACCESS) return view.gone();
+  view.retry = setTimeout(() => connect(view), Math.min(RETRY_MAX_MS, RETRY_MS * 2 ** view.tries++));
+}
+
+function typed(view: View, data: string) {
+  if (view.term.options.disableStdin) return;
+  for (let i = 0; i < data.length; i += PIECE) send(view, { type: 'input', data: data.slice(i, i + PIECE) });
+}
+
+/* A card below the terminal coming or going changes its height. Rows it gains come back from the history with the view
+   left where it was, which hides the program's line to type in below the window, so the view goes back to the bottom. */
+function followSize(box: HTMLElement, term: Terminal, fit: FitAddon): ResizeObserver | null {
+  if (typeof ResizeObserver === 'undefined') return null;
+  const observer = new ResizeObserver(() => {
+    fit.fit();
+    term.scrollToBottom();
+  });
+  observer.observe(box);
+  return observer;
+}
+
+function end(view: View, resized: ResizeObserver | null) {
+  view.ended = true;
+  if (view.retry) clearTimeout(view.retry);
+  view.socket?.close();
+  resized?.disconnect();
+  view.term.dispose();
+}
 
 /* An agent's live terminal: its session on the node, as it is, with the person's keys going back to it. */
 export function AgentTerminal({ agentId, program, onGone }: Props) {
@@ -50,70 +135,13 @@ export function AgentTerminal({ agentId, program, onGone }: Props) {
     term.loadAddon(fit);
     term.open(box.current!);
     fit.fit();
-    let socket: WebSocket | null = null;
-    let ended = false;
-    let retry: ReturnType<typeof setTimeout> | null = null;
-    let tries = 0;
-    let told = false;
-    const send = (m: unknown) => socket?.readyState === 1 && socket.send(JSON.stringify(m));
-
-    const connect = () => {
-      const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
-      const ws = new WebSocket(`${scheme}://${location.host}/api/agents/${agentId}/terminal?cols=${term.cols}&rows=${term.rows}`);
-      socket = ws;
-      ws.onmessage = e => {
-        const m = JSON.parse(String(e.data)) as { type: string; data?: string; write?: boolean; running?: boolean };
-        /* The session draws its whole screen for each new view. Only its subscription's owner types into it. The node says
-           whether the program is up before it sends the screen; one that says nothing, as for a watcher of an agent that
-           sleeps or a node from before, shows its screen as it comes. */
-        if (m.type === 'ready') {
-          tries = 0;
-          told = false;
-          term.reset();
-          term.options.disableStdin = !m.write;
-        }
-        if (m.type === 'program') {
-          told = true;
-          setUp(Boolean(m.running));
-        }
-        if (m.type === 'data' && m.data) {
-          if (!told) setUp(true);
-          term.write(m.data);
-        }
-      };
-      ws.onclose = e => {
-        if (ended || socket !== ws) return;
-        setUp(false);
-        if (e.code === NO_TERMINAL || e.code === NO_ACCESS) return gone.current();
-        retry = setTimeout(connect, Math.min(RETRY_MAX_MS, RETRY_MS * 2 ** tries++));
-      };
-    };
-
-    term.onData(data => {
-      if (term.options.disableStdin) return;
-      for (let i = 0; i < data.length; i += PIECE) send({ type: 'input', data: data.slice(i, i + PIECE) });
-    });
-    term.onResize(({ cols, rows }) => send({ type: 'resize', cols, rows }));
-    /* A card below the terminal coming or going changes its height. Rows it gains come back from the history with the view
-       left where it was, which hides the program's line to type in below the window, so the view goes back to the bottom. */
-    const resized =
-      typeof ResizeObserver === 'undefined'
-        ? null
-        : new ResizeObserver(() => {
-            fit.fit();
-            term.scrollToBottom();
-          });
-    resized?.observe(box.current!);
-    connect();
+    const view: View = { agentId, term, setUp, gone: () => gone.current(), socket: null, ended: false, retry: null, tries: 0, told: false };
+    term.onData(data => typed(view, data));
+    term.onResize(({ cols, rows }) => send(view, { type: 'resize', cols, rows }));
+    const resized = followSize(box.current!, term, fit);
+    connect(view);
     term.focus();
-
-    return () => {
-      ended = true;
-      if (retry) clearTimeout(retry);
-      socket?.close();
-      resized?.disconnect();
-      term.dispose();
-    };
+    return () => end(view, resized);
   }, [agentId]);
 
   return (

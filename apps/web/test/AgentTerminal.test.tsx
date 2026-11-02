@@ -265,6 +265,15 @@ describe("an agent's live terminal in its window", () => {
     expect(moves).toEqual(['fit', 'scrollToBottom']);
   });
 
+  it('tells the session the size the terminal has when the view opens, after a card changed it while connecting', async () => {
+    /* A resize while the socket still connects goes nowhere, and the session would draw its screen for the rows in the address. */
+    open();
+    const ws = await socket();
+    terms[0]!.resized(100, 13);
+    ws.opened();
+    expect(ws.sent).toContainEqual({ type: 'resize', cols: 100, rows: 13 });
+  });
+
   it('keeps the log for agents whose node shows no terminal', async () => {
     open(false);
     expect(await screen.findByText('Hello from the log')).toBeInTheDocument();
