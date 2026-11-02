@@ -3,12 +3,12 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Shell } from '../src/screens/Shell';
-import { CARD, DEV_ORG, ME, mockApi, REQUESTS, TASK_DETAIL, TASKS, TURN } from './api-mock';
+import { CARD, decisions, DEV_ORG, ME, mockApi, REQUESTS, TASK_DETAIL, TASKS, TURN } from './api-mock';
 
 function shell(routes: Record<string, unknown> = {}) {
   const calls = mockApi({
     'GET /api/org': [200, DEV_ORG],
-    'GET /api/requests': [200, { requests: [] }],
+    'GET /api/requests': [200, decisions([])],
     'GET /api/turns': [200, { turns: [TURN] }],
     'GET /api/tasks?status=all': [200, { tasks: TASKS }],
     'GET /api/tasks/t12': [200, { task: TASK_DETAIL }],
@@ -41,7 +41,7 @@ describe('a task', () => {
       agent: { id: 'b1', name: 'Bruno' },
       task: { ...REQUESTS[0]!.task, id: 't12', number: 12, title: 'Checkout API' },
     };
-    const calls = shell({ 'GET /api/requests': [200, { requests: [REQUESTS[0], stuck] }], 'POST /api/requests/r3': [200, { request: { id: 'r3', status: 'answered' } }] });
+    const calls = shell({ 'GET /api/requests': [200, decisions([REQUESTS[0], stuck])], 'POST /api/requests/r3': [200, { request: { id: 'r3', status: 'answered' } }] });
     /* From the list of what waits, as a person goes. */
     await user.click(await screen.findByRole('button', { name: /^Tasks/ }));
     await user.click(within(await screen.findByRole('region', { name: 'Waiting for you' })).getByRole('button', { name: /#12/ }));
@@ -70,7 +70,7 @@ describe('a task', () => {
     const user = userEvent.setup();
     const asked = { ...REQUESTS[0]!, id: 'r5', agent: { id: 'b1', name: 'Bruno' }, task: { ...REQUESTS[0]!.task, id: 't12', number: 12, title: 'Checkout API' } };
     shell({
-      'GET /api/requests': [200, { requests: [asked] }],
+      'GET /api/requests': [200, decisions([asked])],
       'GET /api/agents/b1': [200, CARD],
       'GET /api/agents/b1/events?after=0': [200, { events: [], state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 } }],
     });
@@ -121,7 +121,7 @@ describe('a task', () => {
       const user = userEvent.setup();
       mockApi({
         'GET /api/org': [200, DEV_ORG],
-        'GET /api/requests': [200, { requests: [] }],
+        'GET /api/requests': [200, decisions([])],
         'GET /api/turns': [200, { turns: [TURN] }],
         'GET /api/tasks?status=all': [200, { tasks: TASKS }],
         'GET /api/tasks/t12': [200, { task: waiting }],

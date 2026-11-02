@@ -2,9 +2,10 @@ import { and, asc, count, eq, gt, inArray, isNull, max, ne, notInArray, sql } fr
 import type { Ctx } from '../../app.js';
 import { accessOf, canReach, type Spot } from '../../auth/access.js';
 import type { Db } from '../../db/client.js';
-import { agents, attachments, companies, departments, jobs, people, requests, subscriptions, taskEvents, tasks, turns, type RequestOption, type TaskEventKind } from '../../db/schema.js';
+import { agents, attachments, companies, departments, jobs, people, requests, subscriptions, taskEvents, tasks, turns, type DecisionTopic, type RequestOption, type TaskEventKind } from '../../db/schema.js';
 import { ApiError, type ErrorReason } from '../../errors.js';
 import { dropEarlierWakes, keepWakes } from './outbox.js';
+import { returnAlongLine } from '../org/map-state.js';
 import { handOff } from './pulses.js';
 
 export type Task = typeof tasks.$inferSelect;
@@ -155,16 +156,33 @@ export const taskSpot = (t: Pick<Task, 'departmentId' | 'productId'>): Spot =>
 
 const actorColumns = (a: Actor) => ({ personId: a.personId ?? null, agentId: a.agentId ?? null });
 
-type Note = { kind: TaskEventKind; actor: Actor; text?: string; data?: Record<string, unknown> };
+/* returned: the agent gives its work back to the one above it with this move, which the map shows on their line. */
+type Note = { kind: TaskEventKind; actor: Actor; text?: string; data?: Record<string, unknown>; returned?: true };
 
-export async function note(tx: Tx | Db, task: Pick<Task, 'id' | 'companyId'>, n: Note): Promise<void> {
-  await tx.insert(taskEvents).values({ companyId: task.companyId, taskId: task.id, kind: n.kind, ...actorColumns(n.actor), text: n.text ?? '', data: n.data ?? {} });
+export async function note(tx: Tx | Db, task: Pick<Task, 'id' | 'companyId'>, n: Note): Promise<{ id: number; createdAt: Date }> {
+  const [row] = await tx
+    .insert(taskEvents)
+    .values({ companyId: task.companyId, taskId: task.id, kind: n.kind, ...actorColumns(n.actor), text: n.text ?? '', data: n.data ?? {} })
+    .returning({ id: taskEvents.id, createdAt: taskEvents.createdAt });
+  return row!;
+}
+
+/* A move by which an agent gives its work back lights its line to the one above it on the map: the task, when it did. */
+async function givesBack(tx: Tx, row: Task, n: Note, event: { id: number; createdAt: Date }): Promise<Task | null> {
+  if (!n.returned || !n.actor.agentId) return null;
+  return (await returnAlongLine(tx, { agentId: n.actor.agentId, sourceKey: `task:${event.id}`, sourceTaskId: row.id, returnedAt: event.createdAt })) ? row : null;
+}
+
+/* The map reads its lines again when one of them changed, in the company of what changed it. */
+function linesMoved(ctx: Live, changed: { companyId: string } | null): void {
+  if (changed) ctx.bus.publish(changed.companyId, { type: 'org' });
 }
 
 /* One move: the task changes only if nobody moved it since it was read, and the move is written to its log. */
 /* wakes: the turns the move needs, kept with it until they are queued. */
 async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, also?: (tx: Tx, row: Task) => Promise<void>, wakes: Wake[] = []): Promise<Task> {
   let started: Task[] = [];
+  let lit: Task | null = null;
   const row = await ctx.db.transaction(async tx => {
     /* Two changes at once to what tasks come after would each miss the other's half of a circle: they go one at a time in
        a company, and the circle is looked for once it is this one's turn. What it comes after now is held until the move
@@ -186,7 +204,7 @@ async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, also?: (
     /* Done means all of it: work under it still open would go on under a finished task, and the turn with it. */
     if (set.status === 'done') await refuseOpenUnder(tx, task);
     await dropEarlierWakes(tx, task.id);
-    await note(tx, row, n);
+    lit = await givesBack(tx, row, n, await note(tx, row, n));
     await also?.(tx, row);
     if (CLOSED.includes(row.status) && row.parentId) wakes.push(...(await workUnderDone(tx, row, n.actor.agentId)));
     /* What waited for it starts with the same move, so its turn is kept with it. */
@@ -200,6 +218,7 @@ async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, also?: (
   });
   published(ctx, row);
   for (const t of started) published(ctx, t);
+  linesMoved(ctx, lit);
   await handOff(ctx, n.actor, row);
   return row;
 }
@@ -377,7 +396,7 @@ export async function submit(ctx: Live, agentId: string, taskId: string, r: { su
   if (task.status === 'waiting' && (await waitsForPerson(ctx.db, task.id))) throw refuse(409, 'task_invalid', `#${task.number} waits for a person's answer first.`);
   await refuseWaiting(ctx.db, task);
   await refuseOpenUnder(ctx.db, task);
-  const n: Note = { kind: 'submitted', actor: { agentId }, text: r.summary, data: { evidence: r.evidence, ...(task.merging ? { merged: true } : {}) } };
+  const n: Note = { kind: 'submitted', actor: { agentId }, text: r.summary, data: { evidence: r.evidence, ...(task.merging ? { merged: true } : {}) }, returned: true };
   const unstuck = stuckGoes(ctx, task);
   /* Its gates passed it already: handing the merge in finishes it. Work sent back goes straight to the gate that sent it. */
   if (task.gates.length && !task.merging) {
@@ -530,7 +549,7 @@ export async function verdict(ctx: Live, agentId: string, taskId: string, v: { p
   if (!v.comment.trim()) throw refuse(400, 'task_invalid', 'A verdict needs its reasons.');
   /* The others at the gate go on while one of them waits for a person; that one decides once the answer is in. */
   if (task.status === 'waiting' && (await asked(ctx.db, task, agentId))) throw refuse(409, 'task_invalid', `#${task.number} waits for the answer to your question first.`);
-  const n: Note = { kind: 'verdict', actor: { agentId }, text: v.comment.trim(), data: { pass: v.pass, stage: task.stage, round: task.bounces } };
+  const n: Note = { kind: 'verdict', actor: { agentId }, text: v.comment.trim(), data: { pass: v.pass, stage: task.stage, round: task.bounces }, returned: true };
   const panel = task.panel.filter(id => id !== agentId);
   if (panel.length) return { task: await move(ctx, task, { panel, assigneeAgentId: panel[0]!, silent: 0 }, n), wakes: [] };
   const [me] = await ctx.db.select({ name: agents.name }).from(agents).where(eq(agents.id, agentId));
@@ -576,7 +595,7 @@ export async function report(ctx: Live, agentId: string, taskId: string, r: { do
   if (task.executorAgentId) throw refuse(400, 'task_invalid', `#${task.number} is a member task: submit it, or say it is blocked.`);
   if (task.assigneeAgentId !== agentId) throw notYours(task, 'is not yours to report');
   await refuseWaiting(ctx.db, task);
-  const n: Note = { kind: 'report', actor: { agentId }, text: r.summary, data: { done: r.done } };
+  const n: Note = { kind: 'report', actor: { agentId }, text: r.summary, data: { done: r.done }, returned: true };
   const unstuck = stuckGoes(ctx, task);
   if (r.done || task.createdByAgentId) {
     const wakes = giver(task, r.done ? 'reported' : 'blocked', agentId, r.summary);
@@ -588,7 +607,7 @@ export async function report(ctx: Live, agentId: string, taskId: string, r: { do
   let wakes: Wake[] = [];
   const row = await move(ctx, task, { status: 'waiting' }, n, async tx => {
     await letStuckGo(tx, task.id);
-    const [note] = await tx.insert(requests).values({ companyId: task.companyId, taskId, agentId, kind: 'stuck', text: r.summary }).returning();
+    const [note] = await tx.insert(requests).values({ companyId: task.companyId, taskId, agentId, kind: 'stuck', text: r.summary, decisionTopic: 'task' }).returning();
     wakes = await explaining(tx, task, agentId, note!.id);
     await keepWakes(tx, task.companyId, wakes);
   });
@@ -603,7 +622,7 @@ export async function blocked(ctx: Live, agentId: string, taskId: string, why: s
   if (task.executorAgentId !== agentId || task.stage !== 0) throw notYours(task, 'is not waiting for your work');
   await refuseWaiting(ctx.db, task);
   const wakes = giver(task, 'blocked', agentId, why);
-  const row = await move(ctx, task, { status: 'blocked' }, { kind: 'blocked', actor: { agentId }, text: why }, undefined, wakes);
+  const row = await move(ctx, task, { status: 'blocked' }, { kind: 'blocked', actor: { agentId }, text: why, returned: true }, undefined, wakes);
   return { task: row, wakes };
 }
 
@@ -891,8 +910,11 @@ async function gaveOut(db: Db, task: Task, agentId: string): Promise<boolean> {
 }
 
 /* What an agent asks: words, an approval of an exact commit, or a pick of one of 2 to 4 ways. images: pictures it sent
-   with hh-attach, link: where to see the work. */
-export type Ask = { kind: 'question' | 'approval' | 'choice'; text: string; commit?: string; images?: string[]; options?: RequestOption[]; link?: string | null };
+   with hh-attach, link: where to see the work, topic: what it is about, which says whose decision it is. */
+export type Ask = { kind: 'question' | 'approval' | 'choice'; text: string; commit?: string; images?: string[]; options?: RequestOption[]; link?: string | null; topic?: DecisionTopic };
+
+/* An approval lets a commit into the release, whatever the agent says it is about. */
+const topicOf = (q: Ask): DecisionTopic | null => (q.kind === 'approval' ? 'release' : (q.topic ?? null));
 
 /* The agent that holds the task, or any reviewer at its gate, asks a person and the task waits for the answer. */
 export async function ask(ctx: Live, agentId: string, taskId: string, q: Ask): Promise<Moved & { request: Request }> {
@@ -912,7 +934,7 @@ export async function ask(ctx: Live, agentId: string, taskId: string, q: Ask): P
   const row = await move(ctx, task, { status: 'waiting', silent: 0 }, { kind: 'asked', actor: { agentId }, text: q.text.trim(), data: { kind: q.kind, commit: q.commit ?? null } }, async tx => {
     [request] = await tx
       .insert(requests)
-      .values({ companyId: task.companyId, taskId, agentId, kind: q.kind, text: q.text.trim(), commit: q.commit ?? null, options, link: q.link ?? null })
+      .values({ companyId: task.companyId, taskId, agentId, kind: q.kind, text: q.text.trim(), commit: q.commit ?? null, options, link: q.link ?? null, decisionTopic: topicOf(q) })
       .returning();
     wakes = await explaining(tx, task, agentId, request!.id);
     await keepWakes(tx, task.companyId, wakes);
@@ -980,7 +1002,7 @@ export async function brokeDown(ctx: Live, agentId: string, task: Task, text: st
 async function askAboutStill(ctx: Live, agentId: string, task: Task, silent: number, text: string): Promise<Moved> {
   let wakes: Wake[] = [];
   const row = await move(ctx, task, { silent, status: 'waiting' }, { kind: 'stuck', actor: { agentId }, text }, async tx => {
-    const [note] = await tx.insert(requests).values({ companyId: task.companyId, taskId: task.id, agentId, kind: 'stuck', text }).returning();
+    const [note] = await tx.insert(requests).values({ companyId: task.companyId, taskId: task.id, agentId, kind: 'stuck', text, decisionTopic: 'task' }).returning();
     wakes = await explaining(tx, task, agentId, note!.id);
     await keepWakes(tx, task.companyId, wakes);
   });

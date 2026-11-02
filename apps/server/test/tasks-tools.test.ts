@@ -2,7 +2,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, companies, departments, jobs, people, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
+import { agents, companies, departments, jobs, people, requests, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
 import { createTask, type Task } from '../src/modules/tasks/engine.js';
 import { TASK_ANSWER } from '../src/modules/tasks/tools.js';
 import { wakePrompt } from '../src/modules/tasks/wake.js';
@@ -125,5 +125,21 @@ describe('task tools', () => {
     expect(mine).toMatchObject({ number: 1, title: 'Payments', body: 'Stripe.', assignee: { name: 'Hana' } });
     const listed = JSON.parse(text(await call(client, 'tasks', {})));
     expect(listed.map((t: { number: number }) => t.number)).toEqual([1]);
+  });
+});
+
+describe('asking a person', () => {
+  it('keeps what the question is about, and takes no topic it does not know', async () => {
+    const { ctx, db, dev, head, bruno, tools } = await company();
+    const task = (await createTask(ctx, { agentId: head.id }, { title: 'Checkout API', brief: '', body: '', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true, gates: [] })).task;
+    const client = await tools(bruno);
+    expect((await call(client, 'ask_person', { task: task.number, question: 'Which cards do we take?', topic: 'task' })).isError).toBeFalsy();
+    expect((await call(client, 'ask_person', { task: task.number, question: 'Who pays for the card fees?', topic: 'money' })).isError).toBe(true);
+    expect((await call(client, 'ask_person', { task: task.number, question: 'Which banks?' })).isError).toBeFalsy();
+    const asked = await db.select({ text: requests.text, topic: requests.decisionTopic }).from(requests).orderBy(requests.createdAt);
+    expect(asked).toEqual([
+      { text: 'Which cards do we take?', topic: 'task' },
+      { text: 'Which banks?', topic: null },
+    ]);
   });
 });

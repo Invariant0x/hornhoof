@@ -8,7 +8,7 @@ import { AgentCard } from '../ui/AgentCard';
 import { LogoMark } from '../ui/icons';
 import { UpdateBanner } from '../ui/UpdateBanner';
 import { useVersion, versionText } from '../ui/VersionMark';
-import { useImprovements, useRequests } from '../tasks';
+import { useDecisions, useImprovements } from '../tasks';
 import { TaskPanel } from '../ui/TaskPanel';
 import { useUpdates } from '../updates';
 import { AgentWindow, type StaffAsk } from './AgentWindow';
@@ -135,6 +135,24 @@ function AccountMenu({
   );
 }
 
+/* What waits for people as the navigation counts it and the screens show it, and whose decisions the Tasks screen shows
+   after a click on a person's card: null shows everyone's. */
+function useDecisionsView() {
+  const { decisions, load } = useDecisions();
+  const [personId, showPerson] = useState<string | null>(null);
+  const requests = decisions?.requests ?? [];
+  return {
+    all: decisions,
+    load,
+    /* What agents ask, the orchestrator's cards and his request for the computer. */
+    waiting: decisions?.counts.total ?? 0,
+    personId,
+    showPerson,
+    /* What agents ask on one task, for its panel. */
+    requestsOf: (taskId: string) => requests.filter(r => r.task.id === taskId),
+  };
+}
+
 /* welcome: setup just finished, so the orchestrator's window opens at once. */
 export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: boolean; onSignOut: () => void }) {
   const t = useT();
@@ -152,9 +170,13 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
     if (org && deptId && !dept) setDeptId(null);
   }, [org, deptId, dept]);
   const updates = useUpdates(company);
-  /* What agents wait for, counted in the navigation. */
-  const { requests, load: loadRequests } = useRequests();
-  const waiting = requests?.length ?? 0;
+  const decisions = useDecisionsView();
+  /* A person's card, on the map or in a department, opens the decisions screen showing theirs. */
+  const openDecisions = (personId: string) => {
+    setDeptId(null);
+    decisions.showPerson(personId);
+    setTab('tasks');
+  };
   const { improvements, failure: improvementsFailure, load: loadImprovements } = useImprovements(company);
   const toDecide = improvements?.filter(i => i.status === 'open').length ?? 0;
   const agentPanel = panel && panel.kind !== 'task' ? panel : null;
@@ -198,7 +220,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
         </div>
         <nav className="tabs glass" aria-label={t.shell.sections}>
           {TABS.map(id => {
-            const count = id === 'tasks' ? waiting : 0;
+            const count = id === 'tasks' ? decisions.waiting : 0;
             return (
               <button
                 key={id}
@@ -206,7 +228,10 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
                 className={tab === id ? 'on' : ''}
                 aria-current={tab === id ? 'page' : undefined}
                 aria-label={count ? t.tasks.navWaiting(count) : undefined}
-                onClick={() => setTab(id)}
+                onClick={() => {
+                  setTab(id);
+                  decisions.showPerson(null);
+                }}
               >
                 {t.shell.tabs[id]}
                 {count > 0 && <span className="nav-count" aria-hidden="true">{count}</span>}
@@ -232,6 +257,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
             onOpenOrchestrator={() => setPanel({ kind: 'window', agentId: 'orchestrator' })}
             inside={!!dept}
             onOpenDepartment={setDeptId}
+            onOpenDecisions={openDecisions}
           />
         )}
         {tab === 'map' && dept && (
@@ -242,9 +268,11 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
             selected={agentPanel?.agentId ?? null}
             selectedTask={panel?.kind === 'task' ? panel.taskId : null}
             panel={panel?.kind ?? null}
+            serverNow={org?.serverNow}
             onBack={() => setDeptId(null)}
             onOpen={agentId => setPanel({ kind: 'window', agentId })}
             onOpenTask={taskId => setPanel({ kind: 'task', taskId })}
+            onOpenDecisions={openDecisions}
             onHire={() => {
               setStaff({ id: dept.id, name: deptLabel(t, dept), at: Date.now() });
               setPanel({ kind: 'window', agentId: 'orchestrator' });
@@ -253,9 +281,10 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
         )}
         {tab === 'tasks' && (
           <Tasks
-            me={me}
-            requests={requests}
-            onRequestsChanged={loadRequests}
+            decisions={decisions.all}
+            onDecisionsChanged={decisions.load}
+            personId={decisions.personId}
+            onClearPerson={() => decisions.showPerson(null)}
             selected={panel?.kind === 'task' ? panel.taskId : null}
             onOpenTask={taskId => setPanel({ kind: 'task', taskId })}
             onOpenAgent={agentId => setPanel({ kind: 'window', agentId })}
@@ -284,9 +313,8 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
           taskId={panel.taskId}
           onClose={() => setPanel(null)}
           onOpen={taskId => setPanel({ kind: 'task', taskId })}
-          requests={(requests ?? []).filter(r => r.task.id === panel.taskId)}
-          company={company}
-          onRequestsChanged={loadRequests}
+          requests={decisions.requestsOf(panel.taskId)}
+          onRequestsChanged={decisions.load}
           onOpenAgent={agentId => setPanel({ kind: 'window', agentId })}
         />
       )}

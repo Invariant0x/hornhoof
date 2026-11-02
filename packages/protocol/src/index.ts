@@ -111,6 +111,7 @@ export function effortFor(provider: ProviderId, chosen: string | null, efforts: 
 
 /* The efforts a model takes, from a module of its own that the web takes too. */
 export { effortsOf };
+export { lineState, yellowUntil, RETURN_MS, type LineFacts, type LineState, type WorkLine } from './map.js';
 
 const pick = (defaultEffort: string | undefined) => (defaultEffort ? { defaultEffort } : {});
 

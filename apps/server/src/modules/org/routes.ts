@@ -2,7 +2,7 @@ import { defaultEffortOf, effortFor, effortsOf, modelsFor, type ModelOption, typ
 import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, notInArray } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import type { Ctx } from '../../app.js';
-import { accessOf, canReach } from '../../auth/access.js';
+import { accessOf, canReach, type Access, type Spot } from '../../auth/access.js';
 import { personColumns, requirePerson } from '../../auth/session.js';
 import { agents, companies, departments, jobs, people, personAccess, requests, subscriptions, tasks, teams, turns } from '../../db/schema.js';
 import { employeeOrder } from '../agents/order.js';
@@ -12,6 +12,8 @@ import { deptName } from '../departments/templates.js';
 import { CHANNEL_MS, type Endpoint } from '../events/bus.js';
 import { workingCount } from '../events/store.js';
 import { machineOf } from '../nodes/nodes.js';
+import { pendingFor, visibleDecisions } from '../tasks/decisions.js';
+import { mapLines, type MapLine } from './map-state.js';
 import { personViews } from '../people/views.js';
 import { subView } from '../subscriptions/views.js';
 
@@ -20,6 +22,30 @@ import { subView } from '../subscriptions/views.js';
 function effortShown(sub: { provider: ProviderId; models: ModelOption[] | null }, agent: { model: string; effort: string | null }): string | null {
   const models = modelsFor(sub.provider, sub.models);
   return effortFor(sub.provider, agent.effort, effortsOf(models, agent.model)) ?? defaultEffortOf(sub.provider, models, agent.model);
+}
+
+type AgentRow = typeof agents.$inferSelect;
+type DeptRow = typeof departments.$inferSelect;
+
+/* Where an employee works, as agentSpot says, from the departments already read: its product inside its department when it
+   has one. */
+const spotAmong = (agent: AgentRow, depts: readonly DeptRow[]): Spot =>
+  agent.productId
+    ? { departmentId: agent.productId, parentId: agent.departmentId, teamId: agent.teamId }
+    : { departmentId: agent.departmentId, parentId: depts.find(d => d.id === agent.departmentId)?.parentId ?? null, teamId: agent.teamId };
+
+/* The lines of work and of results given back, only of the places the person reaches: a department's line to people who
+   reach the department, an employee's to people who reach where it works. The answer gives a kind's lines, of one
+   department when it is named, without what only the server needs. */
+function reachedLines(lines: readonly MapLine[], reach: Access, allAgents: readonly AgentRow[], depts: readonly DeptRow[]) {
+  const seen = (l: MapLine) => {
+    if (l.kind === 'department') return canReach(reach, { departmentId: l.departmentId });
+    const agent = allAgents.find(a => a.id === l.downstreamAgentId);
+    return !!agent && canReach(reach, spotAmong(agent, depts));
+  };
+  const shown = lines.filter(seen);
+  return (kind: MapLine['kind'], departmentId?: string) =>
+    shown.filter(l => l.kind === kind && (!departmentId || l.departmentId === departmentId)).map(({ kind: _, departmentId: __, ...line }) => line);
 }
 
 export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
@@ -63,7 +89,9 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
     );
     /* People who see the whole company or more than one department sit next to the CEO; the rest in their department. */
     const nextToCeo = active.filter(p => p.scopeKind === 'company' || homes.get(p.id)!.size > 1);
-    const views = new Map((await personViews(db, active)).map(v => [v.id, v]));
+    /* Each card counts the decisions waiting for its person that the viewer sees, as the decisions screen lists them. */
+    const decisions = await visibleDecisions(ctx, me);
+    const views = new Map((await personViews(db, active)).map(v => [v.id, { ...v, pendingDecisions: pendingFor(decisions, me, v.id) }]));
     const inDepartment = (deptId: string) => active.filter(p => p.scopeKind !== 'company' && homes.get(p.id)!.size === 1 && homes.get(p.id)!.has(deptId)).map(p => views.get(p.id)!);
     const running = await db
       .select({ agentId: jobs.agentId, taskId: jobs.taskId, startedAt: jobs.startedAt, createdAt: jobs.createdAt })
@@ -163,6 +191,8 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
     /* The ways messages went in the last minutes, and those held while their work goes on: between places on the map, and
        between agents on a department's card. */
     const ways = bus.channels(me.companyId, Date.now(), goesOn);
+    const map = await mapLines(db, me.companyId);
+    const linesOf = reachedLines(map.lines, reach, allAgents, depts);
     const inside = (id: string) =>
       ways.flatMap(w =>
         w.from.kind === 'agent' && w.to.kind === 'agent' && w.from.departmentId === id ? [{ from: w.from.id, to: w.to.id, at: w.at, ...(w.held ? { held: w.held } : {}) }] : [],
@@ -170,7 +200,9 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
 
     return {
       company,
+      serverNow: map.serverNow.toISOString(),
       live: ways.filter(w => w.from.kind !== 'agent' && w.to.kind !== 'agent'),
+      workLines: linesOf('department'),
       orchestrator: orchestrator && {
         id: orchestrator.id,
         name: orchestrator.name,
@@ -205,6 +237,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
             .filter(t => t.departmentId === d.id)
             .map(t => ({ id: t.id, name: t.name, about: t.about, stage: t.stage, gate: t.gate })),
           live: inside(d.id),
+          workLines: linesOf('member', d.id),
         })),
     };
   });

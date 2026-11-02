@@ -311,6 +311,19 @@ describe('AgentWindow', () => {
       await vi.waitFor(() => expect(screen.queryByRole('region', { name: "The orchestrator asks for access to the server's computer" })).not.toBeInTheDocument());
     });
 
+    it('follows a request the CEO answered on another screen, or a new one, without waiting for the log', async () => {
+      const stream = fakeStream();
+      let view: ComputerView = ASKED;
+      open({ 'GET /api/computer': () => [200, view], 'GET /api/nodes/commands': [200, { commands: [] }] });
+      expect(await screen.findByRole('region', { name: "The orchestrator asks for access to the server's computer" })).toBeInTheDocument();
+      view = CLOSED;
+      stream.send({ type: 'computer' });
+      await vi.waitFor(() => expect(screen.queryByRole('region', { name: "The orchestrator asks for access to the server's computer" })).not.toBeInTheDocument());
+      view = ASKED;
+      stream.send({ type: 'computer' });
+      expect(await screen.findByRole('region', { name: "The orchestrator asks for access to the server's computer" })).toBeInTheDocument();
+    });
+
     it('writes each step in the log', async () => {
       open({
         [`GET ${EVENTS}?after=0`]: [
