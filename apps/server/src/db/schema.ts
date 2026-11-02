@@ -1,6 +1,6 @@
 import { COMPANY_TEMPLATE_KEYS, CRED_KINDS, MACHINE_KINDS, RUN_KINDS, TEMPLATE_KEYS, type Account, type Limits, type ModelOption } from '@hornhoof/protocol';
 import { sql } from 'drizzle-orm';
-import { bigserial, boolean, check, customType, index, integer, jsonb, pgTable, real, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
+import { bigserial, boolean, check, customType, index, integer, jsonb, pgTable, primaryKey, real, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
 
 const id = () => uuid('id').primaryKey().defaultRandom();
 const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow();
@@ -478,6 +478,37 @@ export const taskEvents = pgTable(
   t => [index('task_events_task_id').on(t.taskId)],
 );
 
+/* A line of the map from an agent to the one above it: the orchestrator to a department's head, a head to an employee of
+   its department. Each start of new work on it begins a new cycle, and the latest result given back along it keeps the
+   cycle it came in, so a result from an earlier cycle never lights the line again. */
+export const mapReturns = pgTable(
+  'map_returns',
+  {
+    companyId: companyId(),
+    upstreamAgentId: uuid('upstream_agent_id')
+      .notNull()
+      .references(() => agents.id),
+    downstreamAgentId: uuid('downstream_agent_id')
+      .notNull()
+      .references(() => agents.id),
+    workEpoch: integer('work_epoch').notNull().default(0),
+    /* The turn whose start began the cycle, so its start told again begins no other. */
+    workJobId: uuid('work_job_id').references(() => jobs.id),
+    returnedEpoch: integer('returned_epoch'),
+    returnedAt: timestamp('returned_at', { withTimezone: true }),
+    /* What gave it back: task:<task event id> or message:<agent event seq>. */
+    sourceKey: text('source_key'),
+    /* The turn that gave it back and the task it gave back, kept off the line while that turn still runs. */
+    sourceJobId: uuid('source_job_id').references(() => jobs.id),
+    sourceTaskId: uuid('source_task_id').references(() => tasks.id),
+  },
+  t => [
+    primaryKey({ columns: [t.companyId, t.upstreamAgentId, t.downstreamAgentId] }),
+    check('map_returns_epochs', sql`${t.workEpoch} >= 0 AND (${t.returnedEpoch} IS NULL OR (${t.returnedEpoch} >= 0 AND ${t.returnedEpoch} <= ${t.workEpoch}))`),
+    check('map_returns_given_back', sql`(${t.returnedAt} IS NULL) = (${t.returnedEpoch} IS NULL) AND (${t.returnedAt} IS NULL) = (${t.sourceKey} IS NULL)`),
+  ],
+);
+
 /* The turns a task move needs, written with the move and gone once they are queued: a server that stopped in between
    queues them when it is back. why, text and note as in a wake. */
 export const pendingWakes = pgTable(
@@ -496,6 +527,10 @@ export const pendingWakes = pgTable(
 );
 
 export const REQUEST_KINDS = ['question', 'approval', 'choice', 'stuck'] as const;
+/* What a decision is about, which says whose it is: a task or an employee of a department goes to that department's own
+   person, the rest only to the CEO. */
+export const DECISION_TOPICS = ['task', 'employee', 'people', 'access', 'subscriptions', 'machines', 'repositories', 'public_link', 'updates', 'release'] as const;
+export type DecisionTopic = (typeof DECISION_TOPICS)[number];
 export const REQUEST_STATUSES = ['open', 'answered', 'approved', 'declined', 'withdrawn'] as const;
 
 /* One of the ways a person can pick from, with the picture that shows it. */
@@ -521,6 +556,8 @@ export const requests = pgTable(
     answeredBy: uuid('answered_by').references(() => people.id),
     /* The orchestrator's words for people: what is needed from them, why, and the ways to go, in plain words. */
     explained: text('explained'),
+    /* What it is about; none on requests from before topics, which go to the CEO. */
+    decisionTopic: text('decision_topic', { enum: DECISION_TOPICS }),
     createdAt: createdAt(),
     answeredAt: timestamp('answered_at', { withTimezone: true }),
   },
@@ -590,7 +627,7 @@ export const testRuns = pgTable(
 
 export const TEST_PART_STATUSES = ['queued', 'running', 'passed', 'failed', 'stopped'] as const;
 /* A machine that lost a part of a run as it ran: the place (a machine's id, or builtin), its name then, and why. */
-export type LostRun = { key: string; machine: string; why: string };
+export type LostRun = { key: string; machine: string; why: string; computer?: string };
 
 /* One part of a test run: it waits for a free machine, then runs on one node, a node on a machine or the built-in node. */
 export const testParts = pgTable(
@@ -606,6 +643,8 @@ export const testParts = pgTable(
     machineId: uuid('machine_id').references(() => machines.id),
     /* The machine's name as it ran, for the result. */
     machineName: text('machine_name'),
+    /* Its assigned physical computer, kept through disconnects and server restarts. Null on older parts. */
+    computer: text('computer'),
     /* The commit it tested, the command's exit code, and why it ended when that was not the tests themselves. */
     commit: text('commit'),
     exitCode: integer('exit_code'),

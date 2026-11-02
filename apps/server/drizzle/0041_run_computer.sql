@@ -1,0 +1,1 @@
+ALTER TABLE "test_parts" ADD COLUMN "computer" text;

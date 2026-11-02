@@ -122,10 +122,14 @@ describe('test runs', () => {
   });
 
   it("carry what the node can use of its machine's processor and disk, and what the machine has, from newer nodes only", () => {
-    const MACHINE = { cpuModel: 'Apple M2 Pro', diskFree: 120e9, diskTotal: 460e9, hostCpus: 10, hostMemory: 32e9 };
+    const MACHINE = { cpuModel: 'Apple M2 Pro', diskFree: 120e9, diskTotal: 460e9, host: 'host-a', hostCpus: 10, hostLoad: 2.5, hostMemFree: 20e9, hostMemory: 32e9 };
     expect(parseNodeMessage(JSON.stringify({ type: 'load', ...LOAD, ...MACHINE }))).toEqual({ type: 'load', ...LOAD, ...MACHINE });
     expect(parseNodeMessage(JSON.stringify({ type: 'load', ...LOAD, cpuModel: 'x'.repeat(201) }))).toBeNull();
+    expect(parseNodeMessage(JSON.stringify({ type: 'load', ...LOAD, host: '' }))).toBeNull();
+    expect(parseNodeMessage(JSON.stringify({ type: 'load', ...LOAD, host: 'x'.repeat(201) }))).toBeNull();
     expect(parseNodeMessage(JSON.stringify({ type: 'load', ...LOAD, hostCpus: 0 }))).toBeNull();
+    expect(parseNodeMessage(JSON.stringify({ type: 'load', ...LOAD, hostLoad: -1 }))).toBeNull();
+    expect(parseNodeMessage(JSON.stringify({ type: 'load', ...LOAD, hostMemFree: -1 }))).toBeNull();
   });
 
   it('send a part with an https repository, a plain branch or none, and at most the parts a run splits into', () => {

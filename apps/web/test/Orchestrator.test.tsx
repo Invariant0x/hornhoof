@@ -174,7 +174,6 @@ describe('AgentWindow', () => {
     expect(input).toHaveValue('');
     await act(async () => {
       fail();
-      await new Promise(r => setTimeout(r, 50));
     });
     expect(screen.getByRole('alert')).toHaveTextContent('Not now.');
     expect(input).toHaveValue('Schools first');
@@ -183,18 +182,17 @@ describe('AgentWindow', () => {
     await user.type(input, 'then parents');
     await act(async () => {
       fail();
-      await new Promise(r => setTimeout(r, 50));
     });
     expect(screen.getByRole('alert')).toHaveTextContent('Not now.');
     expect(input).toHaveValue('then parents');
   });
 
   it('shows that he works and stops him on Esc', async () => {
-    const { calls } = open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...BUSY, queued: 2 } }], 'POST /api/agents/orchestrator/stop': [202] });
-    expect(await screen.findByText(/esc to stop/)).toBeInTheDocument();
+    const { calls } = await act(async () => open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...BUSY, queued: 2 } }], 'POST /api/agents/orchestrator/stop': [202] }));
+    expect(screen.getByText(/esc to stop/)).toBeInTheDocument();
     expect(screen.getByText('2 waiting')).toBeInTheDocument();
     fireEvent.keyDown(document, { key: 'Escape' });
-    await vi.waitFor(() => expect(calls.some(c => c.method === 'POST' && c.path === '/api/agents/orchestrator/stop')).toBe(true));
+    expect(calls.some(c => c.method === 'POST' && c.path === '/api/agents/orchestrator/stop')).toBe(true);
   });
 
   it('says why he cannot answer and offers the card by hand', async () => {
@@ -313,6 +311,19 @@ describe('AgentWindow', () => {
       await vi.waitFor(() => expect(screen.queryByRole('region', { name: "The orchestrator asks for access to the server's computer" })).not.toBeInTheDocument());
     });
 
+    it('follows a request the CEO answered on another screen, or a new one, without waiting for the log', async () => {
+      const stream = fakeStream();
+      let view: ComputerView = ASKED;
+      open({ 'GET /api/computer': () => [200, view], 'GET /api/nodes/commands': [200, { commands: [] }] });
+      expect(await screen.findByRole('region', { name: "The orchestrator asks for access to the server's computer" })).toBeInTheDocument();
+      view = CLOSED;
+      stream.send({ type: 'computer' });
+      await vi.waitFor(() => expect(screen.queryByRole('region', { name: "The orchestrator asks for access to the server's computer" })).not.toBeInTheDocument());
+      view = ASKED;
+      stream.send({ type: 'computer' });
+      expect(await screen.findByRole('region', { name: "The orchestrator asks for access to the server's computer" })).toBeInTheDocument();
+    });
+
     it('writes each step in the log', async () => {
       open({
         [`GET ${EVENTS}?after=0`]: [
@@ -427,7 +438,6 @@ describe('AgentWindow', () => {
     await vi.waitFor(() => expect(input).toBeEnabled());
     await act(async () => {
       late();
-      await new Promise(r => setTimeout(r, 50));
     });
     expect(input).toBeEnabled();
   });

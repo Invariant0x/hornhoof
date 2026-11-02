@@ -10,11 +10,12 @@ import { turnsHeld } from '../updates/drain.js';
 import { sayLive } from './live.js';
 import { BUILTIN, identityOf, nodeIdentity, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { liveNode, planNodes, type NodeRow } from '../nodes/nodes.js';
-import { appendEvent, earlierTalk, publishWorking } from '../events/store.js';
+import { appendEvent, earlierTalk, publishWorking, type WithEvent } from '../events/store.js';
 import { instructionsOf } from '../agents/instructions.js';
 import { repoFor, repoLine } from '../departments/repository.js';
 import { textHash } from '../templates/load.js';
 import { openAfter, startWork } from '../tasks/engine.js';
+import { workStarts } from '../org/map-state.js';
 import { preface } from './prompt.js';
 import { ABOUT_AS_FREE, freedom } from '../testruns/pick.js';
 
@@ -106,7 +107,8 @@ function pumpAt(ctx: Ctx, agentId: string, at: string): void {
 export const STOPPED_ON_PURPOSE = ['cancelled', 'removed', 'switched_off'];
 
 /* answersCeo: a note of something the CEO did, which counts as the CEO's order without a message. */
-type Turn = { companyId: string; agentId: string; prompt: string; createdBy: string | null; message?: { personId: string | null; text: string; from?: 'orchestrator' | 'agent'; name?: string; by?: string }; taskId?: string; answersCeo?: boolean };
+/* withMessage: what is kept together with the message, or not at all. */
+type Turn = { companyId: string; agentId: string; prompt: string; createdBy: string | null; message?: { personId: string | null; text: string; from?: 'orchestrator' | 'agent'; name?: string; by?: string }; taskId?: string; answersCeo?: boolean; withMessage?: WithEvent };
 
 /* One thing at a time per agent, so two pumps never send two turns. */
 const chains = new WeakMap<Ctx, Map<string, Promise<unknown>>>();
@@ -217,7 +219,7 @@ export async function insertTurn(ctx: Ctx, t: Turn): Promise<string> {
 async function showMessage(ctx: Ctx, t: Turn, jobId: string): Promise<void> {
   if (!t.message) return;
   const { personId, ...data } = t.message;
-  await appendEvent(ctx, { companyId: t.companyId, agentId: t.agentId, jobId, kind: 'message', data, personId });
+  await appendEvent(ctx, { companyId: t.companyId, agentId: t.agentId, jobId, kind: 'message', data, personId }, t.withMessage);
 }
 
 /* Stores the turn, then sends it if he is free. A message for an agent at work goes into the turn it runs instead, and a
@@ -454,6 +456,34 @@ async function unsent(ctx: Ctx, job: { id: string; companyId: string }, why: { e
     .catch(err => ctx.log.error({ error: loggable(err) }, 'A turn that did not go out could not end.'));
 }
 
+/* A turn that waited for the agent and goes out inside its turn. */
+type Along = { id: string; prompt: string; taskId: string | null };
+type Queued = Pick<typeof jobs.$inferSelect, 'id' | 'companyId' | 'agentId' | 'taskId'>;
+/* What a turn goes out with: where it runs and what it says. */
+type Sending = Pick<typeof jobs.$inferInsert, 'subscriptionId' | 'nodeId' | 'prompt' | 'toolTokenHash' | 'instructionsHash'>;
+
+/* Takes the waiting turn to send it, running from now on. In the same write each line of the map its work keeps on, with
+   the tasks that go out along with it, begins a new cycle: a server that stops once the turn went out never brings the
+   line's old return back, and a turn whose cycle cannot be kept is not taken. The lines when one began a cycle. */
+async function take(ctx: Ctx, job: Queued, along: readonly Along[], sending: Sending): Promise<{ lines: { companyId: string } | null } | null> {
+  return ctx.db.transaction(async tx => {
+    const [row] = await tx
+      .update(jobs)
+      .set({ ...sending, status: 'running', startedAt: new Date() })
+      .where(and(eq(jobs.id, job.id), eq(jobs.status, 'queued')))
+      .returning({ id: jobs.id });
+    return row ? { lines: await workStarts(tx, { id: job.id, companyId: job.companyId, agentId: job.agentId, taskIds: [job.taskId, ...along.map(a => a.taskId)] }) } : null;
+  });
+}
+
+/* The turn went out: its task and those that went along with it are at work, and the map reads its lines again once the
+   turn carries them all. */
+async function wentOut(ctx: Ctx, job: Queued, along: readonly Along[], lines: { companyId: string } | null): Promise<void> {
+  if (job.taskId) await startWork(ctx, job.id);
+  for (const j of along) await goneAlong(ctx, j.id);
+  if (lines) ctx.bus.publish(lines.companyId, { type: 'org' });
+}
+
 async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   const { db } = ctx;
   const [running] = await db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
@@ -482,7 +512,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   const place = await placement(ctx, agent, sub, repo ? REPOSITORY_NODE : CONVERSATION_NODE);
   if (!place) return;
   /* A head reads everything that moved on its tasks while it was busy in one turn, instead of one turn per task. */
-  const along: { id: string; prompt: string }[] = [];
+  const along: Along[] = [];
   for (const j of agent.kind === 'head' && job.taskId ? await alongWith(ctx, agentId, job.id) : []) if (!(await heldBack(ctx, { ...j, agentId }))) along.push(j);
   const asked = along.length ? [ALONG, job.prompt, ...along.map(j => j.prompt)].join('\n\n---\n\n') : job.prompt;
 
@@ -505,11 +535,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   const prompt = !job.prompt ? '' : catchUp ? `${catchUp}\n\n${said}` : said;
   const token = newToken();
   /* Running from the moment it is sent: the token works for its tools at once, and the next turn waits. */
-  const [taken] = await db
-    .update(jobs)
-    .set({ status: 'running', startedAt: new Date(), subscriptionId: sub.id, nodeId: place.nodeId, prompt, toolTokenHash: hashToken(token), instructionsHash: runHash })
-    .where(and(eq(jobs.id, job.id), eq(jobs.status, 'queued')))
-    .returning({ id: jobs.id });
+  const taken = await take(ctx, job, along, { subscriptionId: sub.id, nodeId: place.nodeId, prompt, toolTokenHash: hashToken(token), instructionsHash: runHash });
   if (!taken) return;
   /* The agent stays on this machine from now on. */
   if (place.moves) await db.update(agents).set({ nodeId: place.nodeId }).where(eq(agents.id, agentId));
@@ -538,11 +564,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
     /* A turn that broke on its way out was not sent: it waits for the next try instead of running forever. */
     ctx.log.error({ error: loggable(err) }, 'A turn could not go out and waits for the next try.');
   }
-  if (sent) {
-    if (job.taskId) await startWork(ctx, job.id);
-    for (const j of along) await goneAlong(ctx, j.id);
-    return;
-  }
+  if (sent) return wentOut(ctx, job, along, taken.lines);
   await db.update(jobs).set({ status: 'queued', startedAt: null, nodeId: null, prompt: job.prompt, toolTokenHash: null, instructionsHash: null }).where(and(eq(jobs.id, job.id), eq(jobs.status, 'running')));
   await publishWorking(ctx, job.companyId);
 }

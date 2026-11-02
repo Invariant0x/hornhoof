@@ -48,7 +48,7 @@ Put a product under a department for each thing you build, each with its own git
 
 ### Open it from anywhere
 
-During setup, Hornhoof offers your company a link like `https://your-name.hornhoof.org`. Open it from your phone or any computer, with your own sign-in. Nothing has to be opened on your router, and you can change or remove the link later in Settings. Or keep Hornhoof on your own network only.
+During setup, Hornhoof offers your company a link like `https://your-name.hornhoof.org`. Open it from your phone or any computer, with your own sign-in. Nothing has to be opened on your router, and you can change or remove the link later under Share access. Or keep Hornhoof on your own network only.
 
 ### Several companies on one computer
 

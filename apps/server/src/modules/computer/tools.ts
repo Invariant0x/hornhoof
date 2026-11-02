@@ -34,6 +34,7 @@ export function registerComputerTools(server: McpServer, ctx: Ctx, job: ToolJob)
       const until = ctx.computer.openUntil();
       if (until) return say(`Access to the computer is open until ${until}. Use computer.`);
       ctx.computer.ask(reason);
+      ctx.bus.publish(job.companyId, { type: 'computer' });
       await appendEvent(ctx, { companyId: job.companyId, agentId: job.agentId, jobId: job.id, kind: 'computer', data: { state: 'asked', reason, ...onMachine(await serverMachine(ctx, job.companyId)) } });
       return say('The CEO sees your request in your window and opens access with one click. You get a note then and go on; until then go on with other work or end your turn.');
     },

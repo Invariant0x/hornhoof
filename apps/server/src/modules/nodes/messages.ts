@@ -5,6 +5,8 @@ import type { Ctx } from '../../app.js';
 import { agents, jobs, nodes, planCredentials, subscriptions } from '../../db/schema.js';
 import { said } from '../conversation/live.js';
 import { nodeOfAgent, pumpWaiting, refusedLimits, startProgram } from '../conversation/queue.js';
+import { workStarts } from '../org/map-state.js';
+import { startWork } from '../tasks/engine.js';
 import { afterJob, typedTurn } from '../tasks/wake.js';
 import { appendEvent, publishWorking } from '../events/store.js';
 import { partDone, partStarted, pumpTests, testsHello } from '../testruns/runs.js';
@@ -37,6 +39,27 @@ export async function failOpenJobs(ctx: Ctx, scope: SQL, error: string, stillRun
   for (const companyId of new Set(failed.map(j => j.companyId))) await publishWorking(ctx, companyId);
   for (const { id } of failed) await afterJob(ctx, id);
   return failed.map(j => j.id);
+}
+
+/* An agent's turn on a task, of the jobs a node runs. */
+const onTask = (job: { kind: string; taskId: string | null }) => job.kind === 'conversation' && job.taskId !== null;
+
+/* A job the node says it started, one that went out from here rather than from the queue: running from now on. A turn on
+   a task begins the new cycle of the map's lines its work keeps on in the same write, as when the queue takes a turn, and
+   then its task is at work. */
+async function jobStarted(ctx: Ctx, id: NodeIdentity, jobId: string, now: Date): Promise<void> {
+  const started = await ctx.db.transaction(async tx => {
+    const [row] = await tx
+      .update(jobs)
+      .set({ status: 'running', startedAt: now })
+      .where(and(eq(jobs.id, jobId), eq(jobs.status, 'queued'), jobsOf(id, ctx)))
+      .returning({ id: jobs.id, companyId: jobs.companyId, agentId: jobs.agentId, kind: jobs.kind, taskId: jobs.taskId });
+    return row ? { row, lines: onTask(row) ? await workStarts(tx, { id: row.id, companyId: row.companyId, agentId: row.agentId, taskIds: [row.taskId] }) : null } : null;
+  });
+  if (!started) return;
+  if (started.lines) ctx.bus.publish(started.lines.companyId, { type: 'org' });
+  await publishWorking(ctx, started.row.companyId);
+  if (onTask(started.row)) await startWork(ctx, jobId);
 }
 
 export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage): Promise<void> {
@@ -139,15 +162,9 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       await appendEvent(ctx, { companyId: job.companyId, agentId: job.agentId, jobId: msg.jobId, kind: msg.event.kind, data: msg.event });
       return;
     }
-    case 'job.started': {
-      const started = await db
-        .update(jobs)
-        .set({ status: 'running', startedAt: now })
-        .where(and(eq(jobs.id, msg.jobId), eq(jobs.status, 'queued'), jobsOf(id, ctx)))
-        .returning({ companyId: jobs.companyId });
-      for (const { companyId } of started) await publishWorking(ctx, companyId);
+    case 'job.started':
+      await jobStarted(ctx, id, msg.jobId, now);
       return;
-    }
     case 'job.done': {
       const finished = await db
         .update(jobs)

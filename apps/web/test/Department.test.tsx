@@ -1,12 +1,14 @@
-import { render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { ru } from '../src/i18n/ru';
 import { Shell } from '../src/screens/Shell';
+import { schemaLayout, stepPaths } from '../src/screens/schema';
 import { RepoSettings } from '../src/ui/RepoSettings';
+import { toD } from '../src/ui/wires';
 import type { Me, Org } from '../src/types';
-import { CARD, DEV_ORG, ME, mockApi, ROSTER, TASK_DETAIL, TASKS } from './api-mock';
+import { CARD, decisions, DEV_ORG, ME, mockApi, REQUESTS, ROSTER, TASK_DETAIL, TASKS } from './api-mock';
 import { decl, px, rulesFor } from './css';
 import { fakeStream } from './fake-stream';
 
@@ -67,11 +69,23 @@ describe('Department view', () => {
     expect(screen.queryByRole('heading', { level: 2, name: 'Development' })).not.toBeInTheDocument();
   });
 
-  it('goes back to the map from the department name too, not only from the small arrow', async () => {
+  it('goes back to the map from anywhere in the department bar, not only from the small arrow', async () => {
     const user = userEvent.setup();
     shell();
     const title = await flyIn(user);
-    await user.click(within(title).getByRole('button', { name: 'Development' }));
+    const bar = screen.getByRole('navigation', { name: 'Development' });
+    const back = within(bar).getByRole('button', { name: 'Back to the map' });
+    expect(within(bar).getAllByRole('button')).toEqual([back]);
+    expect(bar).not.toHaveClass('glass');
+    expect(back).toHaveClass('glass');
+    expect(back).toContainElement(title);
+    expect(back).toContainElement(within(bar).getByText('CTO'));
+    expect(decl('.crumbs', 'padding')).toBeUndefined();
+    expect(decl('.crumb', 'border')).toBeUndefined();
+    expect(decl('.crumb', 'width')).toBe('100%');
+    expect(decl('.crumb', 'height')).toBe('100%');
+    expect(decl('.crumb', 'cursor')).toBe('pointer');
+    await user.click(within(bar).getByText('CTO'));
     expect(screen.queryByRole('heading', { level: 2, name: 'Development' })).not.toBeInTheDocument();
   });
 
@@ -95,21 +109,43 @@ describe('Department view', () => {
     expect(within(people).getAllByRole('listitem').map(li => li.querySelector('b')!.textContent)).toEqual(['Sasha', 'Oleg']);
   });
 
-  it('shows an employee start working while the department is open', async () => {
+  it("opens a person's decisions from their card in the department, which shows the same count as the map", async () => {
     const user = userEvent.setup();
+    const [dev] = DEV_ORG.departments;
+    const sasha = { ...dev!.people[0]!, pendingDecisions: 2 };
+    shell({ 'GET /api/requests': [200, decisions([{ ...REQUESTS[0]!, ownerPersonId: sasha.id }, { ...REQUESTS[1]!, ownerPersonId: sasha.id }])] }, { ...DEV_ORG, departments: [{ ...dev!, people: [sasha] }] });
+    await flyIn(user);
+    const schema = screen.getByRole('region', { name: 'Department schema' });
+    const card = within(schema).getByRole('button', { name: 'Sasha: 2 decisions wait' });
+    expect(card).toHaveClass('attn');
+    expect(card).toHaveTextContent('2');
+    await user.click(card);
+    expect(await screen.findByRole('heading', { level: 1, name: 'Tasks' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Waiting for you' })).toHaveTextContent('Decisions for Sasha');
+    expect(screen.queryByRole('heading', { level: 2, name: 'Development' })).not.toBeInTheDocument();
+  });
+
+  it('shows an employee start working while the department is open', async () => {
     const stream = fakeStream();
     const [dev] = DEV_ORG.departments;
     const task = { id: 't12', number: 12, title: 'Checkout API', stage: 0, gateCount: 1, bounces: 0 };
     const busy: Org = { ...DEV_ORG, departments: [{ ...dev!, employees: dev!.employees.map(e => ({ ...e, state: 'working' as const, status: 'working' as const, task })) }] };
     let started = false;
-    shell({ 'GET /api/org': () => [200, started ? busy : DEV_ORG] });
-    await flyIn(user);
+    await act(async () => {
+      shell({ 'GET /api/org': () => [200, started ? busy : DEV_ORG] });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Development/ }));
+    });
+    expect(screen.getByRole('heading', { level: 2, name: 'Development' })).toBeInTheDocument();
     const bruno = within(screen.getByRole('region', { name: 'Members' })).getByRole('button', { name: /Bruno/ });
     expect(bruno).toHaveTextContent('free');
     expect(screen.getByText(/Work goes left to right through the gates/)).toBeInTheDocument();
     started = true;
-    stream.send({ type: 'working', working: 2 });
-    await vi.waitFor(() => expect(within(screen.getByRole('region', { name: 'Members' })).getByRole('button', { name: /Bruno/ })).toHaveTextContent('BrunoClaudeworkingClaude Sonnet 5.5, default effort, Anthropic#12 Checkout API'));
+    await act(async () => {
+      stream.send({ type: 'working', working: 2 });
+    });
+    expect(within(screen.getByRole('region', { name: 'Members' })).getByRole('button', { name: /Bruno/ })).toHaveTextContent('BrunoClaudeworkingClaude Sonnet 5.5, default effort, Anthropic#12 Checkout API');
     /* The line at the bottom says what changed last. */
     expect(screen.getByText('Bruno: working, #12 Checkout API')).toBeInTheDocument();
   });
@@ -132,29 +168,77 @@ describe('Department view', () => {
     expect(within(members).getByTitle('Context 20%')).not.toHaveClass('hi');
   });
 
-  it('keeps the way to an agent on past ten minutes while the server holds it for work that goes on', async () => {
+  it("draws the line from the head to an employee blue while it works on the head's task, from card to card", async () => {
     const user = userEvent.setup();
     const [dev] = DEV_ORG.departments;
-    shell({}, { ...DEV_ORG, departments: [{ ...dev!, live: [{ from: 'b0', to: 'b1', at: new Date(Date.now() - 25 * 60_000).toISOString(), held: true }] }] });
+    const lines = [{ upstreamAgentId: 'b0', downstreamAgentId: 'b1', working: true, workEpoch: 1, returnedEpoch: null, returnedAt: null }];
+    shell({}, { ...DEV_ORG, serverNow: new Date().toISOString(), departments: [{ ...dev!, workLines: lines }] });
     await flyIn(user);
-    await vi.waitFor(() => expect(document.querySelectorAll('path.live')).toHaveLength(1));
+    const work = document.querySelector('.wires path.work[data-work="b1"]');
+    expect(work).toHaveClass('blue');
+    /* From inside the head's card down the bus and the role's spine into the employee's. */
+    expect(work!.getAttribute('d')).toBe(toD(stepPaths(schemaLayout(dev!, 1)).toMember('b1')!));
   });
 
-  it('keeps the way between two agents running for ten minutes after their last message, also when it opens later', async () => {
+  it('turns the line yellow over its whole length when the employee gave a result back, for what is left of five minutes', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const [dev] = DEV_ORG.departments;
+    const now = Date.now();
+    const lines = [{ upstreamAgentId: 'b0', downstreamAgentId: 'b1', working: false, workEpoch: 4, returnedEpoch: 4, returnedAt: new Date(now - 4.5 * 60_000).toISOString() }];
+    shell({}, { ...DEV_ORG, serverNow: new Date(now).toISOString(), departments: [{ ...dev!, workLines: lines }] });
+    await flyIn(user);
+    const work = () => document.querySelector('.wires path.work[data-work="b1"]');
+    expect(work()).toHaveClass('yellow');
+    await act(() => vi.advanceTimersByTimeAsync(30_000));
+    expect(work()).toBeNull();
+  });
+
+  it('runs a dot once along the way a message between two of its agents took, and leaves no way running', async () => {
     const user = userEvent.setup();
     const stream = fakeStream();
     const [dev] = DEV_ORG.departments;
-    shell({}, { ...DEV_ORG, departments: [{ ...dev!, live: [{ from: 'b1', to: 'b0', at: new Date(Date.now() - 3 * 60_000).toISOString() }] }] });
+    shell();
     await flyIn(user);
-    const live = () => document.querySelectorAll('path.live');
-    await vi.waitFor(() => expect(live()).toHaveLength(1));
-    /* Signals keep running along it while it is live. */
-    expect([...document.querySelectorAll('circle.pt animateMotion[repeatCount="indefinite"]')].some(m => m.getAttribute('path') === live()[0]!.getAttribute('d'))).toBe(true);
-    stream.send({ type: 'pulse', from: { kind: 'agent', id: 'b0', departmentId: dev!.id }, to: { kind: 'agent', id: 'b1', departmentId: dev!.id } });
-    await vi.waitFor(() => expect(live()).toHaveLength(2));
-    /* Another department's agents are not this one's. */
-    stream.send({ type: 'pulse', from: { kind: 'agent', id: 'x0', departmentId: 'other' }, to: { kind: 'agent', id: 'x1', departmentId: 'other' } });
-    expect(live()).toHaveLength(2);
+    vi.useFakeTimers();
+    try {
+      stream.send({ type: 'pulse', from: { kind: 'agent', id: 'b0', departmentId: dev!.id }, to: { kind: 'agent', id: 'b1', departmentId: dev!.id } });
+      /* Another department's agents are not this one's. */
+      stream.send({ type: 'pulse', from: { kind: 'agent', id: 'x0', departmentId: 'other' }, to: { kind: 'agent', id: 'x1', departmentId: 'other' } });
+      const dots = [...document.querySelectorAll('.dview circle.pt animateMotion')];
+      expect(dots.map(m => [m.getAttribute('path'), m.getAttribute('repeatCount')])).toEqual([[toD(stepPaths(schemaLayout(dev!, 1)).toMember('b1')!), '1']]);
+      act(() => vi.advanceTimersByTime(10_000));
+      expect(document.querySelectorAll('.dview circle.pt, .dview .wires path.live')).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('says when a gate sent work back, without an amber dot that would look like a result given back', async () => {
+    const user = userEvent.setup();
+    const stream = fakeStream();
+    const [dev] = DEV_ORG.departments;
+    const [dana, bruno] = dev!.employees;
+    const qa = { id: 'DEV-QA', title: { en: 'Test engineer', ru: 'Тестировщик' }, description: { en: 'Tests.', ru: 'Тестирует.' }, kind: 'member' as const, gate: 1 };
+    const task = { id: 't1', number: 1, title: 'Checkout', stage: 1, gateCount: 1, bounces: 0 };
+    const before: Org = {
+      ...DEV_ORG,
+      departments: [{ ...dev!, roles: [...dev!.roles, qa], employees: [dana!, { ...bruno!, status: 'handed', task }, { ...bruno!, id: 'q1', name: 'Quinn', roleId: 'DEV-QA', status: 'queued', task }] }],
+    };
+    const after: Org = {
+      ...DEV_ORG,
+      departments: [{ ...before.departments[0]!, employees: [dana!, { ...bruno!, status: 'working', task: { ...task, stage: 0, bounces: 1 } }, before.departments[0]!.employees[2]!] }],
+    };
+    let back = false;
+    shell({ 'GET /api/org': () => [200, back ? after : before] });
+    await flyIn(user);
+    back = true;
+    stream.send({ type: 'task', id: 't1' });
+    expect(await screen.findByText('Bruno: work came back for rework')).toBeInTheDocument();
+    expect(document.querySelectorAll('.dview circle.pt.a')).toHaveLength(0);
   });
 
   it('shows how hard each employee thinks next to its model', async () => {

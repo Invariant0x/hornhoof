@@ -68,7 +68,7 @@ export const en = {
   },
   link: {
     open: 'Open Hornhoof on the internet',
-    openHint: 'People open it from anywhere at this link, each with their own sign-in. Turn it off to keep Hornhoof on this computer and your network; you can open it later in Settings.',
+    openHint: 'People open it from anywhere at this link, each with their own sign-in. Turn it off to keep Hornhoof on this computer and your network; you can open it later under Share access.',
     label: 'Link',
     random: 'Random name',
     empty: 'Type a name, or take a random one.',
@@ -81,11 +81,11 @@ export const en = {
     unknown: 'Could not check the name now. It is checked again when you go on.',
     guessable: 'A name like this is easy to guess, so anyone may find the sign-in page. Only the company\'s sign-in protects what is inside.',
     hardToGuess: 'A random name is hard to guess. The company\'s sign-in still protects what is inside.',
-    skipHint: 'To go on without it, go back, turn off "Open Hornhoof on the internet", and open the link later in Settings.',
+    skipHint: 'To go on without it, go back, turn off "Open Hornhoof on the internet", and open the link later under Share access.',
   },
   settings: {
-    menu: 'Settings',
-    title: 'Settings',
+    menu: 'Share access',
+    title: 'Share access',
     link: 'Link on the internet',
     opensAt: 'Hornhoof opens from anywhere at this link:',
     closed: 'Hornhoof opens only at its own address, on this computer and your network.',
@@ -141,6 +141,9 @@ export const en = {
     machineOffline: (owner: string) => `${owner}'s machine is offline`,
     runsOnPersonal: (owner: string, provider: string) => `Ready, on ${owner}'s ${provider} subscription`,
     waitingLimit: (at: string) => `Waiting for the limit to reset at ${at}`,
+    /* A person's card: how many decisions wait for them, or nothing when the viewer cannot see their decisions. */
+    decisionsOf: (name: string, n: number | null) =>
+      n === null ? `${name}: open the decisions` : n ? `${name}: ${n} ${plural('en', n, { one: 'decision waits', other: 'decisions wait' })}` : `${name}: no decisions wait`,
   },
   people: {
     heading: 'People',
@@ -590,6 +593,11 @@ export const en = {
     closedOutside: (n: number) => `Closed outside turns: ${n}`,
     waiting: 'Waiting for you',
     nothingWaiting: 'Nothing waits for you.',
+    /* The decisions screen opened from a person's card shows theirs until the filter is taken off. */
+    decisionsFor: (name: string) => `Decisions for ${name}`,
+    someone: 'this person',
+    showAll: "Show everyone's decisions",
+    nothingFor: (name: string) => `Nothing waits for a decision from ${name}.`,
     asks: (agent: string) => `${agent} asks`,
     asksApproval: (agent: string) => `${agent} asks you to approve a commit`,
     stuck: (agent: string) => `${agent} is stuck`,

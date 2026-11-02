@@ -35,6 +35,10 @@ export async function serverMachine(ctx: Pick<Ctx, 'db' | 'config'>, companyId: 
   return (await builtinMachine(ctx.db, ctx.config.hostId, companyId))?.hostname ?? null;
 }
 
+/* Only the CEO on their own screen sees and changes access to the computer the server runs on: never another person, and
+   never the orchestrator acting for the CEO. */
+export const ownsComputer = (me: { isOwner: boolean; via?: string }): boolean => me.isOwner && !me.via;
+
 /* What a line in the log says of the machine, when it is known. */
 export const onMachine = (machine: string | null): Record<string, string> => (machine ? { machine } : {});
 

@@ -1,6 +1,7 @@
 import type { Limits, ModelOption, NodeLoad, ProviderId, TemplateKey } from '@hornhoof/protocol';
+import type { WorkLine } from '@hornhoof/protocol/map';
 
-export type { Limits, ModelOption, ProviderId, TemplateKey };
+export type { Limits, ModelOption, ProviderId, TemplateKey, WorkLine };
 
 /* Template text that comes in both languages. */
 export type Lang = { en: string; ru: string };
@@ -31,6 +32,8 @@ export type PersonView = {
   status: Person['status'];
   isOwner: boolean;
   access: AccessView;
+  /* On the map: how many decisions wait for this person among those the viewer sees; null when the viewer cannot see them. */
+  pendingDecisions?: number | null;
 };
 
 /* What a person reaches: the whole company, or departments and teams, in the order of the map. */
@@ -109,8 +112,8 @@ export type DeptRole = { id: string; title: Lang; description: Lang; kind: 'head
    only this department. */
 export type Department = {
   id: string;
-  /* The ways messages went between its agents in the last minutes. */
-  live?: { from: string; to: string; at: string; held?: boolean }[];
+  /* The lines from its head to each employee: who works on the head's task now, and who just gave a result back. */
+  workLines?: WorkLine[];
   name: string | null;
   templateKey: TemplateKey | null;
   roleCode: string;
@@ -138,8 +141,10 @@ export type Org = {
   people: (PersonView & { deputy?: boolean })[];
   departments: Department[];
   turn?: { id: string; number: number; goal: string } | null;
-  /* The ways messages went between places on the map in the last minutes. */
-  live?: Channel[];
+  /* The server's clock when it read the lines, which times how long a yellow line burns. */
+  serverNow?: string;
+  /* The lines from the orchestrator to each department's head, as the server keeps them. */
+  workLines?: WorkLine[];
 };
 
 /* Whether the orchestrator can take a turn now, and what he is doing. */
@@ -210,9 +215,6 @@ export type StructureItem = NewItem | ChangeItem;
 
 /* Who a pulse on the map runs between. */
 export type Endpoint = { kind: 'person'; id: string } | { kind: 'orchestrator' } | { kind: 'department'; id: string } | { kind: 'agent'; id: string; departmentId: string };
-/* A way a message went in the last minutes, with when the last one did. */
-/* held: kept on past the last minutes while the work it brought goes on. */
-export type Channel = { from: Endpoint; to: Endpoint; at: string; held?: boolean };
 
 export type AgentEventKind = 'message' | 'text' | 'tool' | 'tool_result' | 'todo' | 'proposal' | 'applied' | 'stopped' | 'failed' | 'computer';
 
@@ -228,6 +230,8 @@ export type StreamMessage =
   | { type: 'pulse'; from: Endpoint; to: Endpoint }
   | { type: 'task'; id: string }
   | { type: 'requests' }
+  /* The orchestrator's request for the computer changed; only the CEO's screen hears it. */
+  | { type: 'computer' }
   | { type: 'improvements' }
   | { type: 'context'; agentId: string; used: number }
   /* A plan's owner finished or gave up a sign-in on one of its machines; only the owner hears it. */
@@ -329,6 +333,33 @@ export type WaitingRequest = {
   at: string;
   agent: { id: string; name: string };
   task: { id: string; number: number; title: string; department: TaskPlace };
+  /* The person whose decision it is: whose card counts it and whose filter shows it. Who may answer stays as before. */
+  ownerPersonId: string;
+  /* Whether this person may answer it here; an approval is for people who see the whole company. */
+  canAnswer: boolean;
+};
+
+/* A card of the orchestrator that waits for people: a structure to build, or people to hire into a department. */
+export type ProposalDecision = {
+  id: string;
+  agent: { id: string; name: string };
+  department: { id: string; name: string } | null;
+  brief: string;
+  at: string;
+  ownerPersonId: string;
+  canAnswer: boolean;
+} & ({ kind: 'structure'; items: StructureItem[] } | { kind: 'staff'; items: StaffLine[] });
+
+/* The orchestrator's request for the computer the server runs on, which only the CEO sees and answers. */
+export type ComputerAccessDecision = { kind: 'computer_access'; id: 'server'; agent: { id: string; name: string }; ownerPersonId: string; canAnswer: true; at: string; view: ComputerView };
+
+/* Everything that waits for people as /api/requests shows it to this person, and the counts of all of it: per owner, per
+   asking agent and in total. */
+export type Decisions = {
+  requests: WaitingRequest[];
+  proposals: ProposalDecision[];
+  computerAccess: ComputerAccessDecision | null;
+  counts: { byPerson: Record<string, number>; byAgent: Record<string, number>; total: number };
 };
 
 /* A turn as the orchestrator laid it out: a short title, its main point, and the people's own words it came from (only for

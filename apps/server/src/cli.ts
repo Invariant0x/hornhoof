@@ -46,7 +46,7 @@ async function takeLink(name: string | undefined, { db, config, print, read }: D
   }
   const had = await linkOf(db);
   if (had) {
-    print(`This Hornhoof has a link already: ${had.url}. Remove it in Settings first.`);
+    print(`This Hornhoof has a link already: ${had.url}. Remove it under Share access first.`);
     return 1;
   }
   if (!name || !isLinkName(name)) {

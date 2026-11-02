@@ -120,7 +120,30 @@ type Agent = {
   agyRead: ((line: unknown) => AgentEvent[]) | null;
 };
 
-type View = { child: ChildProcess; key: string; write: boolean; mask: StreamMask; decoder: StringDecoder; pending: string; timer: NodeJS.Timeout | null; quiet: NodeJS.Timeout | null };
+type Size = { cols: number; rows: number };
+/* shown: the size its tmux client is to have; applied: the size it was last given; tty: that client's terminal, once
+   found. */
+type View = {
+  child: ChildProcess;
+  key: string;
+  write: boolean;
+  mask: StreamMask;
+  decoder: StringDecoder;
+  pending: string;
+  timer: NodeJS.Timeout | null;
+  quiet: NodeJS.Timeout | null;
+  shown: Size;
+  applied: Size;
+  tty: string | null;
+  out(text: string): void;
+};
+
+const sameSize = (a: Size, b: Size) => a.cols === b.cols && a.rows === b.rows;
+/* Erases a window's screen below a session of so many rows, and puts the cursor back where it was. */
+const eraseBelow = (rows: number) => `\u001b7\u001b[${rows + 1};1H\u001b[J\u001b8`;
+/* Sets a terminal's size: stty names the terminal with -f on macOS and -F elsewhere. */
+const stty = (tty: string, size: Size) =>
+  new Promise<void>(resolve => execFile('stty', [process.platform === 'darwin' ? '-f' : '-F', tty, 'cols', String(size.cols), 'rows', String(size.rows)], () => resolve()));
 
 type Options = {
   tmux: Tmux;
@@ -201,6 +224,11 @@ export class TerminalHost {
   /* Views being opened, and those Hornhoof closed meanwhile. */
   private readonly viewsOpening = new Set<string>();
   private readonly viewsClosed = new Set<string>();
+  /* Windows opening one agent wait for the same session to be created. */
+  private readonly sessionsOpening = new Map<string, Promise<void>>();
+  /* The size each view's window asks for, from the moment Hornhoof opens it: a resize that comes while it still opens
+     counts too, since Hornhoof says the view is ready as it asks for it. */
+  private readonly wanted = new Map<string, { key: string; size: Size }>();
   private readonly cols: number;
   private readonly rows: number;
 
@@ -851,25 +879,56 @@ export class TerminalHost {
   }
 
   async open(m: Msg<'term.open'>): Promise<void> {
+    try {
+      await this.openView(m);
+    } catch (err) {
+      /* A view that did not open keeps no size. */
+      await this.forget(m.termId, m.agentKey);
+      throw err;
+    }
+  }
+
+  /* The others may have got smaller for a view that is gone. */
+  private forget(termId: string, key: string): Promise<void> {
+    this.wanted.delete(termId);
+    return this.fit(key);
+  }
+
+  private ensureSession(a: Agent, starts: boolean): Promise<void> {
+    const opening = this.sessionsOpening.get(a.key);
+    if (opening) return opening;
+    const created = this.createSession(a, starts).finally(() => this.sessionsOpening.delete(a.key));
+    this.sessionsOpening.set(a.key, created);
+    return created;
+  }
+
+  private async createSession(a: Agent, starts: boolean): Promise<void> {
+    if (await this.opts.tmux.has(a.name)) return;
+    /* The window shows a loader over the empty session while the program starts. */
+    const waiting = starts ? '' : `printf '\\n  %s\\n' '${WAITING}'; `;
+    await this.opts.tmux.launch(a.name, { cwd: '/', command: this.asAgent(['sh', '-c', `${waiting}exec sleep 2147483647`]), ...this.fitted(a.key) });
+    /* The waiting screen is no program of the agent's: the next turn starts one in its place. A turn that runs now is
+       starting its own. */
+    if (!a.turn) a.hash = null;
+  }
+
+  private async openView(m: Msg<'term.open'>): Promise<void> {
     const a = this.agent(m.agentKey);
     this.viewsOpening.add(m.termId);
+    this.wanted.set(m.termId, { key: m.agentKey, size: { cols: m.cols, rows: m.rows } });
     /* Someone who may type gets the program at once, to talk to it; watchers see it once it has a turn. */
     const starts = m.write && !a.turn && !(a.hash && (await this.opts.tmux.alive(a.name)));
     try {
-      if (!(await this.opts.tmux.has(a.name))) {
-        /* The window shows a loader over the empty session while the program starts. */
-        const waiting = starts ? '' : `printf '\\n  %s\\n' '${WAITING}'; `;
-        await this.opts.tmux.launch(a.name, { cwd: '/', command: this.asAgent(['sh', '-c', `${waiting}exec sleep 2147483647`]), cols: m.cols, rows: m.rows });
-        /* The waiting screen is no program of the agent's: the next turn starts one in its place. A turn that runs now is
-           starting its own. */
-        if (!a.turn) a.hash = null;
-      }
+      await this.ensureSession(a, starts);
+      /* The others get smaller first, if this window is: a client bigger than the session gets rows of dots. */
+      await this.fit(m.agentKey);
     } finally {
       this.viewsOpening.delete(m.termId);
     }
-    if (this.viewsClosed.delete(m.termId)) return;
-    const child = this.opts.tmux.attach(a.name, m.cols, m.rows, m.write);
-    const view: View = { child, key: m.agentKey, write: m.write, mask: new StreamMask(this.opts.secrets), decoder: new StringDecoder('utf8'), pending: '', timer: null, quiet: null };
+    if (this.viewsClosed.delete(m.termId)) return this.forget(m.termId, m.agentKey);
+    const shown = this.fitted(m.agentKey);
+    const child = this.opts.tmux.attach(a.name, shown.cols, shown.rows, m.write);
+    const view: View = { child, key: m.agentKey, write: m.write, mask: new StreamMask(this.opts.secrets), decoder: new StringDecoder('utf8'), pending: '', timer: null, quiet: null, shown, applied: shown, tty: null, out: () => {} };
     this.views.set(m.termId, view);
     a.viewers++;
     /* A watcher of an agent that sleeps sees the waiting screen; anyone else, a loader until the program is up. */
@@ -886,6 +945,7 @@ export class TerminalHost {
       view.pending += text;
       view.timer ??= setTimeout(flush, 16);
     };
+    view.out = out;
     child.stdout?.on('data', (chunk: Buffer) => {
       out(view.mask.push(view.decoder.write(chunk)));
       if (view.quiet) clearTimeout(view.quiet);
@@ -897,10 +957,14 @@ export class TerminalHost {
       if (view.timer) clearTimeout(view.timer);
       flush();
       this.views.delete(m.termId);
+      this.wanted.delete(m.termId);
       a.viewers = Math.max(0, a.viewers - 1);
       this.opts.send({ type: 'term.exit', termId: m.termId });
+      void this.fit(m.agentKey);
     });
     if (starts) this.opts.send({ type: 'agent.start', agentKey: m.agentKey });
+    /* A resize that came while it opened, or a window smaller than the others', sizes every view of the session. */
+    await this.fit(m.agentKey);
   }
 
   input(m: Msg<'term.input'>): void {
@@ -909,19 +973,82 @@ export class TerminalHost {
   }
 
   async resize(m: Msg<'term.resize'>): Promise<void> {
-    const view = this.views.get(m.termId);
-    if (!view?.child.pid) return;
-    for (const client of await this.opts.tmux.clients()) {
-      if ((await parentOf(client.pid)) !== view.child.pid) continue;
-      execFile('stty', [process.platform === 'darwin' ? '-f' : '-F', client.tty, 'cols', String(m.cols), 'rows', String(m.rows)], () => {});
-      return;
+    const wanted = this.wanted.get(m.termId);
+    if (!wanted) return;
+    wanted.size = { cols: m.cols, rows: m.rows };
+    await this.fit(wanted.key);
+  }
+
+  /* One session runs one program at one size. People watching it in windows of different sizes are tmux clients of
+     different sizes, and tmux fills what a bigger client has beyond the window with rows of dots. So every view of a
+     session gets the size of the smallest window among them: all of it shows in each, and a bigger window keeps empty
+     room below and to the right. */
+  private fitted(key: string): Size {
+    const size = { cols: Infinity, rows: Infinity };
+    for (const w of this.wanted.values()) {
+      if (w.key !== key) continue;
+      size.cols = Math.min(size.cols, w.size.cols);
+      size.rows = Math.min(size.rows, w.size.rows);
     }
+    return size;
+  }
+
+  private async fit(key: string): Promise<void> {
+    const size = this.fitted(key);
+    const changed = [...this.views].filter(([termId, view]) => view.key === key && this.wanted.has(termId) && !sameSize(view.shown, size));
+    await Promise.all(changed.map(([termId, view]) => this.sizeView(termId, view, size)));
+  }
+
+  private async sizeView(termId: string, view: View, size: Size): Promise<void> {
+    view.shown = size;
+    const tty = await this.ttyOf(termId, view);
+    if (!tty) return;
+    await this.applyNewest(tty, view);
+    const last = view.shown;
+    await this.clientSized(tty, last);
+    if (view.shown === last) this.eraseBelowSession(termId, view, last);
+  }
+
+  /* Sizes on their way do not wait for each other. One that lands after a newer one would leave the terminal at the older
+     size, so whichever ends last gives it the newest size again. */
+  private async applyNewest(tty: string, view: View): Promise<void> {
+    while (!sameSize(view.applied, view.shown)) {
+      const size = view.shown;
+      await stty(tty, size);
+      view.applied = size;
+    }
+  }
+
+  /* The terminal tells its client, which tells tmux; a session sized before then would still be sized for the old one. */
+  private async clientSized(tty: string, size: Size): Promise<void> {
+    for (const end = Date.now() + this.openMs; Date.now() < end; await new Promise(r => setTimeout(r, 20))) {
+      const client = (await this.opts.tmux.clients()).find(c => c.tty === tty);
+      if (!client || sameSize(client, size)) return;
+    }
+  }
+
+  /* tmux redraws a client that got smaller only within its new size; what the window showed below stays unless erased. */
+  private eraseBelowSession(termId: string, view: View, size: Size): void {
+    const own = this.wanted.get(termId)?.size;
+    if (own && size.rows < own.rows) view.out(eraseBelow(size.rows));
+  }
+
+  /* The terminal of a view's tmux client. A client attaches a moment after its view opens, so a size that comes before
+     waits for it. */
+  private async ttyOf(termId: string, view: View): Promise<string | null> {
+    for (const end = Date.now() + this.openMs; !view.tty && this.views.get(termId) === view && Date.now() < end; await new Promise(r => setTimeout(r, 50))) {
+      for (const client of await this.opts.tmux.clients()) if ((await parentOf(client.pid)) === view.child.pid) view.tty = client.tty;
+    }
+    return view.tty;
   }
 
   close(m: Msg<'term.close'>): void {
     const view = this.views.get(m.termId);
-    if (view) view.child.kill();
-    else if (this.viewsOpening.has(m.termId)) this.viewsClosed.add(m.termId);
+    if (view) {
+      view.child.kill();
+      /* Its viewer process takes a while to end; the others get their size back at once. */
+      void this.forget(m.termId, view.key);
+    } else if (this.viewsOpening.has(m.termId)) this.viewsClosed.add(m.termId);
   }
 }
 

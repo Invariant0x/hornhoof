@@ -274,6 +274,27 @@
       "when": 1793643805328,
       "tag": "0038_plan_credentials",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1793657422426,
+      "tag": "0039_map_returns",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1793657432131,
+      "tag": "0040_decision_topic",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1793657433477,
+      "tag": "0041_run_computer",
+      "breakpoints": true
     }
   ]
 }

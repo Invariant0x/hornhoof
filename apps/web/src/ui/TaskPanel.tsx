@@ -24,8 +24,8 @@ function eventTitle(t: Messages, e: TaskLogLine): string {
   }
 }
 
-/* What waits for the person in this task, and whether they see the whole company, which approving a commit takes. */
-type Waiting = { requests: WaitingRequest[]; company: boolean; onRequestsChanged: () => void; onOpenAgent: (id: string) => void };
+/* What waits for the person in this task. */
+type Waiting = { requests: WaitingRequest[]; onRequestsChanged: () => void; onOpenAgent: (id: string) => void };
 
 function TaskBody({ task, onOpen, onChanged, waiting }: { task: TaskDetail; onOpen: (id: string) => void; onChanged: () => void; waiting: Waiting }) {
   const t = useT();
@@ -61,7 +61,6 @@ function TaskBody({ task, onOpen, onChanged, waiting }: { task: TaskDetail; onOp
               waiting.onRequestsChanged();
               onChanged();
             }}
-            company={waiting.company}
             onOpenTask={onOpen}
             onOpenAgent={waiting.onOpenAgent}
             placeName={p => placeName(t, org, p)}

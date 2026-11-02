@@ -51,6 +51,38 @@ describe("a node's machine load", () => {
     expect(machineLoad({ read: () => null, cpus: 10, cpuModel: 'Unknown CPU', disk: () => null, env: { HORNHOOF_HOST_CPU: 'Apple M5' } }).cpuModel).toBe('Apple M5');
   });
 
+  it('identifies the physical host and reports its un-clamped load and memory alongside the container load', () => {
+    const base = {
+      '/proc/sys/kernel/random/boot_id': 'f5cf03f6-ca13-4dd0-a96c-4214f39198fb\n',
+      '/proc/cpuinfo': Array.from({ length: 16 }, (_, i) => `processor\t: ${i}\n`).join('\n'),
+      '/proc/meminfo': 'MemTotal:       16777216 kB\nMemAvailable:    8388608 kB\n',
+      '/sys/fs/cgroup/memory.max': `${4 * GIB}\n`,
+      '/sys/fs/cgroup/memory.current': `${1 * GIB}\n`,
+    };
+    const first = machineLoad({ read: files(base), cpus: 4, load: 6.25, cpuModel: '', disk: () => null, env: {} });
+    const second = machineLoad({ read: files({ ...base, '/sys/fs/cgroup/memory.current': `${2 * GIB}\n` }), cpus: 8, load: 6.25, cpuModel: '', disk: () => null, env: {} });
+    const other = machineLoad({ read: files({ ...base, '/proc/sys/kernel/random/boot_id': '11111111-2222-3333-4444-555555555555\n' }), cpus: 4, load: 6.25, cpuModel: '', disk: () => null, env: {} });
+
+    expect(first.host).toMatch(/^[0-9a-f]{64}$/);
+    expect(first.host).not.toContain('f5cf03f6');
+    expect(second.host).toBe(first.host);
+    expect(other.host).not.toBe(first.host);
+    expect(first).toEqual({
+      cpus: 4,
+      load: 6.25,
+      memFree: 3 * GIB,
+      memTotal: 4 * GIB,
+      host: first.host,
+      hostCpus: 16,
+      hostLoad: 6.25,
+      hostMemFree: 8 * GIB,
+      hostMemory: 16 * GIB,
+    });
+
+    const withoutBootId = machineLoad({ read: files({ ...base, '/proc/sys/kernel/random/boot_id': '   \n' }), cpus: 4, load: 0.5, cpuModel: '', disk: () => null, env: {} });
+    expect(withoutBootId).toEqual({ cpus: 4, load: 0.5, memFree: 3 * GIB, memTotal: 4 * GIB });
+  });
+
   it('reads this machine without help', () => {
     const now = machineLoad();
     expect(now.cpus).toBeGreaterThanOrEqual(1);
@@ -58,5 +90,10 @@ describe("a node's machine load", () => {
     expect(now.memFree).toBeLessThanOrEqual(now.memTotal);
     expect(now.load).toBeGreaterThanOrEqual(0);
     expect(now.diskTotal).toBeGreaterThan(0);
+    expect(now.host).toMatch(/^[0-9a-f]{64}$/);
+    expect(now.hostCpus).toBeGreaterThanOrEqual(now.cpus);
+    expect(now.hostLoad).toBe(now.load);
+    expect(now.hostMemFree).toBeGreaterThan(0);
+    expect(now.hostMemory).toBeGreaterThanOrEqual(now.memTotal);
   });
 });

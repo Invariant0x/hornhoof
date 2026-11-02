@@ -109,6 +109,19 @@ describe('a part of a test run on a node', () => {
     expect(done).toMatchObject({ ok: false, error: 'clone_failed' });
     expect(existsSync(join(dir, 'tests', 'part-1'))).toBe(false);
   });
+
+  it("caps Vitest workers at half the machine's cores unless already set", async () => {
+    const { url } = origin();
+    const command = 'echo "workers=$VITEST_MAX_WORKERS"';
+    const sixteen = await runTests(run(url, { command }), { dir: nodeDir(), user: null, hidden: [], cpus: 16, env: {} });
+    expect(sixteen.log).toContain('workers=8\n');
+    const one = await runTests(run(url, { command }), { dir: nodeDir(), user: null, hidden: [], cpus: 1, env: {} });
+    expect(one.log).toContain('workers=1\n');
+    const presetEnv = await runTests(run(url, { command }), { dir: nodeDir(), user: null, hidden: [], cpus: 16, env: { VITEST_MAX_WORKERS: '3' } });
+    expect(presetEnv.log).toContain('workers=3\n');
+    const presetCmd = await runTests(run(url, { command: 'VITEST_MAX_WORKERS=2 sh -c \'echo "workers=$VITEST_MAX_WORKERS"\'' }), { dir: nodeDir(), user: null, hidden: [], cpus: 16, env: {} });
+    expect(presetCmd.log).toContain('workers=2\n');
+  });
 });
 
 /* Hornhoof's side of a part's files: the task's files it hands out, and the files put on the task. */

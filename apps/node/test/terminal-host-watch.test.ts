@@ -95,6 +95,80 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     await until(async () => (await size()).trim() === '132x40');
   });
 
+  const clients = async () => (await tmux.run(['list-clients', '-F', '#{client_width}x#{client_height}'])).trim().split('\n').sort();
+  const windowSize = async (key: string) => (await tmux.run(['list-windows', '-t', `=a-${key}`, '-F', '#{window_width}x#{window_height}'])).trim();
+
+  it('keeps a size that came while its view was still opening', async () => {
+    /* Hornhoof says the view is ready as it asks the node to open it, so a card that changes the window meanwhile sends
+       its size before the view is there. */
+    await setUp();
+    const opening = host.open({ type: 'term.open', termId: 't60', agentKey: 'a60', cols: 158, rows: 29, write: true });
+    await host.resize({ type: 'term.resize', termId: 't60', cols: 158, rows: 13 });
+    await opening;
+    await until(async () => (await clients()).join() === '158x13');
+  });
+
+  it('keeps a size that came before the view had its tmux client', async () => {
+    await setUp();
+    await host.open({ type: 'term.open', termId: 't61', agentKey: 'a61', cols: 158, rows: 29, write: true });
+    await host.resize({ type: 'term.resize', termId: 't61', cols: 158, rows: 13 });
+    await until(async () => (await clients()).join() === '158x13');
+  });
+
+  it('gives everyone watching one session the size of the smallest window, so no one gets filler dots or a size that jumps', async () => {
+    await setUp();
+    await host.run(job('a62', 'hello'));
+    await host.open({ type: 'term.open', termId: 'big', agentKey: 'a62', cols: 120, rows: 40, write: true });
+    await until(() => sent.some(m => m.type === 'term.data' && m.termId === 'big'));
+    const joined = sent.length;
+    await host.open({ type: 'term.open', termId: 'small', agentKey: 'a62', cols: 80, rows: 20, write: true });
+    await until(async () => (await clients()).join() === '80x20,80x20');
+    /* Not even while the smaller window joins. */
+    await new Promise(r => setTimeout(r, 400));
+    expect(sent.slice(joined).flatMap(m => (m.type === 'term.data' && m.termId === 'big' ? [m.data] : [])).join('')).not.toContain('·');
+    for (const who of ['big', 'small', 'big', 'small']) {
+      const from = sent.length;
+      host.input({ type: 'term.input', termId: who, data: 'x' });
+      await new Promise(r => setTimeout(r, 400));
+      expect(await windowSize('a62')).toBe('80x20');
+      const big = sent.slice(from).flatMap(m => (m.type === 'term.data' && m.termId === 'big' ? [m.data] : [])).join('');
+      expect(big).not.toContain('·');
+    }
+    /* The smaller window leaves, and the other gets its own size back; then it follows its window again. */
+    host.close({ type: 'term.close', termId: 'small' });
+    /* Its viewer process takes a while to end; the size does not wait for it. */
+    await until(async () => (await windowSize('a62')) === '120x40', 1000);
+    await until(async () => (await clients()).join() === '120x40');
+    await host.resize({ type: 'term.resize', termId: 'big', cols: 100, rows: 30 });
+    await until(async () => (await clients()).join() === '100x30');
+    expect(await windowSize('a62')).toBe('100x30');
+  }, 30_000);
+
+  it('ends a view Hornhoof closed while it was opening beside another, and leaves the other its size', async () => {
+    /* A page that opens a view and closes it at once, as React does in development, must leave no client behind. */
+    await setUp();
+    await host.open({ type: 'term.open', termId: 'stay', agentKey: 'a64', cols: 120, rows: 40, write: true });
+    await until(() => sent.some(m => m.type === 'term.data' && m.termId === 'stay'));
+    const opening = host.open({ type: 'term.open', termId: 'gone', agentKey: 'a64', cols: 80, rows: 20, write: true });
+    await new Promise(r => setTimeout(r, 30));
+    host.close({ type: 'term.close', termId: 'gone' });
+    await opening;
+    await until(async () => (await clients()).join() === '120x40');
+    await new Promise(r => setTimeout(r, 500));
+    expect(await clients()).toEqual(['120x40']);
+  });
+
+  it('erases what a window shows below the session once its terminal gets smaller than the window', async () => {
+    await setUp();
+    await host.open({ type: 'term.open', termId: 'wide', agentKey: 'a63', cols: 120, rows: 40, write: true });
+    await until(() => sent.some(m => m.type === 'term.data' && m.termId === 'wide'));
+    const from = sent.length;
+    await host.open({ type: 'term.open', termId: 'narrow', agentKey: 'a63', cols: 80, rows: 20, write: true });
+    await until(async () => (await clients()).join() === '80x20,80x20');
+    /* The cursor is kept, so the program's screen above is left as it is. */
+    await until(() => sent.slice(from).some(m => m.type === 'term.data' && m.termId === 'wide' && m.data.includes('\u001b7\u001b[21;1H\u001b[J\u001b8')));
+  });
+
   it('shows a waiting screen for an agent that has not started yet, and ends the view when asked', async () => {
     await setUp();
     await host.open({ type: 'term.open', termId: 't3', agentKey: 'a7', cols: 80, rows: 24, write: false });

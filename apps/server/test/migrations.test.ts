@@ -394,10 +394,12 @@ describe('migrations 0034 to 0037', () => {
     await db.execute(sql`insert into test_parts (company_id, run_id, part, created_at) values (${C}, ${R}, 1, '2026-10-30T10:00:00Z')`);
     await db.execute(sql`insert into machines (company_id, person_id, machine_key, hostname) values (${C}, ${P}, 'mac-0001-abcd', 'ivan-mac')`);
 
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0037_work_repeatable') });
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0040_decision_topic') });
     await migrate(db, { migrationsFolder: MIGRATIONS });
 
-    const parts = await db.execute<{ waits: boolean; lost: unknown }>(sql`select queued_at = created_at as waits, lost from test_parts`);
-    expect(parts.rows).toEqual([{ waits: true, lost: [] }]);
+    const parts = await db.execute<{ waits: boolean; lost: unknown; computer: string | null }>(sql`select queued_at = created_at as waits, lost, computer from test_parts`);
+    expect(parts.rows).toEqual([{ waits: true, lost: [], computer: null }]);
     const runs = await db.execute(sql`select kind, files, memory_gb, repeatable from test_runs`);
     expect(runs.rows).toEqual([{ kind: 'tests', files: [], memory_gb: null, repeatable: false }]);
     const kinds = await db.execute(sql`select kind from machines`);
@@ -425,5 +427,60 @@ describe('migration 0038', () => {
     expect((await db.execute(sql`select cred_version, lease_node_id from subscriptions`)).rows).toEqual([{ cred_version: 0, lease_node_id: null }]);
     expect((await db.execute(sql`select public_key, account from nodes`)).rows).toEqual([{ public_key: null, account: null }]);
     expect((await db.execute(sql`select count(*)::int as n from plan_credentials`)).rows).toEqual([{ n: 0 }]);
+  });
+});
+
+describe('migration 0039', () => {
+  const C = '00000000-0000-4000-8000-000000000001';
+  const H = '00000000-0000-4000-8000-0000000000b1';
+  const W = '00000000-0000-4000-8000-0000000000b2';
+  const T = '00000000-0000-4000-8000-0000000000d1';
+
+  it('starts the lines of an older install with no result given back, and refuses a return without its cycle', async () => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0038_plan_credentials') });
+    await db.execute(sql`insert into companies (id, name) values (${C}, 'Acme')`);
+    await db.execute(sql`insert into agents (id, company_id, kind, name, model) values (${H}, ${C}, 'head', 'Hana', ''), (${W}, ${C}, 'worker', 'Bruno', '')`);
+    await db.execute(sql`insert into tasks (id, company_id, number, title, status, closed_at) values (${T}, ${C}, 1, 'Checkout', 'done', now())`);
+    await db.execute(sql`insert into task_events (company_id, task_id, kind, agent_id, text) values (${C}, ${T}, 'submitted', ${W}, 'Done')`);
+
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+
+    /* Earlier hand-ins are not lit as returns: the map starts without any. */
+    expect((await db.execute(sql`select * from map_returns`)).rows).toEqual([]);
+    expect((await db.execute(sql`select kind, text from task_events`)).rows).toEqual([{ kind: 'submitted', text: 'Done' }]);
+    await db.execute(sql`insert into map_returns (company_id, upstream_agent_id, downstream_agent_id) values (${C}, ${H}, ${W})`);
+    expect((await db.execute(sql`select work_epoch, returned_epoch, returned_at from map_returns`)).rows).toEqual([{ work_epoch: 0, returned_epoch: null, returned_at: null }]);
+    await expect(db.execute(sql`update map_returns set returned_at = now(), source_key = 'task:1'`)).rejects.toThrow();
+    await expect(db.execute(sql`update map_returns set returned_epoch = 1, returned_at = now(), source_key = 'task:1'`)).rejects.toThrow();
+    await expect(db.execute(sql`insert into map_returns (company_id, upstream_agent_id, downstream_agent_id) values (${C}, ${H}, ${W})`)).rejects.toThrow();
+  });
+});
+
+describe('migration 0040', () => {
+  const C = '00000000-0000-4000-8000-000000000001';
+  const W = '00000000-0000-4000-8000-0000000000b2';
+  const T = '00000000-0000-4000-8000-0000000000d1';
+
+  it('keeps older requests with their answers and no topic, which gives them to the CEO', async () => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0039_map_returns') });
+    await db.execute(sql`insert into companies (id, name) values (${C}, 'Acme')`);
+    await db.execute(sql`insert into agents (id, company_id, kind, name, model) values (${W}, ${C}, 'worker', 'Bruno', '')`);
+    await db.execute(sql`insert into tasks (id, company_id, number, title, status) values (${T}, ${C}, 1, 'Checkout', 'waiting')`);
+    await db.execute(sql`insert into requests (company_id, task_id, agent_id, kind, text, status) values (${C}, ${T}, ${W}, 'question', 'Which cards?', 'open')`);
+    await db.execute(sql`insert into requests (company_id, task_id, agent_id, kind, text, status, answer) values (${C}, ${T}, ${W}, 'question', 'Which banks?', 'answered', 'Any.')`);
+
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+
+    const rows = await db.execute(sql`select text, status, answer, decision_topic from requests order by text`);
+    expect(rows.rows).toEqual([
+      { text: 'Which banks?', status: 'answered', answer: 'Any.', decision_topic: null },
+      { text: 'Which cards?', status: 'open', answer: null, decision_topic: null },
+    ]);
   });
 });
