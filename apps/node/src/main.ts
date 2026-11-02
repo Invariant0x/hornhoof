@@ -10,6 +10,7 @@ import { agentUser, builtinAdapters, secureNode, userFor, type JobUser } from '.
 import { machineLoad } from './load.js';
 import { adapterFor, programFor } from './providers/index.js';
 import { runJob, type ProviderAdapter, type RunResult } from './runner.js';
+import { nodeIdentity } from './keys.js';
 import { dataDir, isRemoved, markRemoved, readState, rememberSession, writeState, type NodeState } from './state.js';
 import { partFiles, runTests } from './tests.js';
 import { SIGNED_OUT as AGY_SIGNED_OUT } from './providers/antigravity.js';
@@ -82,8 +83,10 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
   }
   const state = builtin ?? readState(dir);
   if (!state) throw new Error(`No node settings in ${dir}/node.json. Run the install command from Hornhoof again.`);
-  /* The node's own key never leaves in a job's output. */
-  const hidden = [state.key];
+  /* The key Hornhoof seals this node's sign-ins to. */
+  const keyPair = await nodeIdentity(dir);
+  /* The node's own keys never leave in a job's output. */
+  const hidden = [state.key, keyPair.identity];
   const toolsUrl = `${state.server}/mcp`;
   /* The task's files a part of work takes in and puts back. */
   const files = partFiles(state.server, state.key);
@@ -165,7 +168,7 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
       /* Finished jobs Hornhoof has not confirmed still count as running, so the server does not give up on them. */
       const typed = host?.typedJobs() ?? [];
       const tests = [...testing.keys(), ...unconfirmedTests.keys()];
-      next({ type: 'hello', version: VERSION, loggedIn, running: [...running.keys(), ...typed, ...unconfirmed.keys()], ...(models ? { models } : {}), terminals: Boolean(host), work: Boolean(testUser), ...(testUser ? {} : { noRuns: NO_RUNS }), load: load(), tests, skillFiles: true });
+      next({ type: 'hello', version: VERSION, loggedIn, running: [...running.keys(), ...typed, ...unconfirmed.keys()], ...(models ? { models } : {}), terminals: Boolean(host), work: Boolean(testUser), ...(testUser ? {} : { noRuns: NO_RUNS }), load: load(), tests, skillFiles: true, publicKey: keyPair.recipient });
       for (const m of outbox.splice(0)) emit(m);
       for (const m of unconfirmed.values()) next(m);
       for (const m of unconfirmedTests.values()) next(m);
@@ -223,6 +226,14 @@ export async function runNode({ dir, adapter, builtin, terminal, log = console.l
         const ok = host ? await host.say(m.agentKey, m.text).catch(() => false) : false;
         return void send?.({ type: 'agent.said', ref: m.ref, ok });
       }
+      /* Plan sign-ins: applied, sealed and started by the parts that follow. */
+      case 'cred.put':
+      case 'cred.drop':
+      case 'cred.seal':
+      case 'cred.lease':
+      case 'login.start':
+      case 'login.stop':
+        return;
     }
     if (stopped || running.has(m.jobId)) return;
     const controller = new AbortController();

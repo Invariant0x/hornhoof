@@ -236,6 +236,14 @@ describe('runNode', () => {
     expect(server.received.filter(m => m.type === 'status').at(-1)!.limits).toMatchObject({ status: 'rejected' });
   });
 
+  it('sends the key its sign-ins are sealed to in hello', async () => {
+    const server = await fakeServer();
+    const node = await runNode({ dir: nodeDir(server.url), adapter, log: () => {} });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    expect(server.received[0]).toMatchObject({ type: 'hello', publicKey: expect.stringMatching(/^age1[0-9a-z]{58}$/) });
+  });
+
   it('sends the models its program can run in hello and status', async () => {
     const server = await fakeServer();
     const models = [{ id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol' }];

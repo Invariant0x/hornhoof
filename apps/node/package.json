@@ -3,7 +3,9 @@
   "version": "0.5.0",
   "private": true,
   "type": "module",
-  "bin": { "hornhoof-node": "dist/main.js" },
+  "bin": {
+    "hornhoof-node": "dist/main.js"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "pretest": "npm run build -w @hornhoof/protocol",
@@ -11,6 +13,7 @@
   },
   "dependencies": {
     "@hornhoof/protocol": "*",
+    "age-encryption": "0.3.1",
     "ws": "^8.22.0",
     "zod": "^4.6.7"
   },
