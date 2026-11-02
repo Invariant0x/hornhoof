@@ -57,7 +57,21 @@ const hostHash = (text: string | null) => {
   return id ? createHash('sha256').update(`hornhoof-host:${id}`).digest('hex') : null;
 };
 
-const procCpus = (cpuinfo: string | null) => cpuinfo?.match(/^processor\s*:/gm)?.length || null;
+const procCpus = (cpuinfo: string | null) => (cpuinfo ? (cpuinfo.match(/^processor\s*:/gm)?.length ?? null) : null);
+
+/* What a container can use of its machine's memory, capped by its cgroup limit when it has one. */
+const containerMemory = (read: (path: string) => string | null, rawFree: number, rawTotal: number) => {
+  const limit = bytes(read('/sys/fs/cgroup/memory.max'));
+  if (limit === null || limit >= rawTotal) return { memFree: Math.min(rawFree, rawTotal), memTotal: rawTotal };
+  const current = bytes(read('/sys/fs/cgroup/memory.current')) ?? 0;
+  return { memFree: Math.min(rawFree, Math.max(0, limit - current)), memTotal: limit };
+};
+
+/* Node says "unknown" where the system names no processor, as Linux on arm64 does in Docker on a Mac. */
+const processorModel = (cpuModel: string, hostCpu: string | undefined) => {
+  const own = /^unknown$/i.test(cpuModel.trim()) ? '' : cpuModel.trim();
+  return (hostCpu?.trim() || own).slice(0, 200);
+};
 
 /* The physical host and what is free on it across all its containers, when the kernel identifies the host. */
 const hostFacts = (
@@ -109,21 +123,14 @@ export function machineLoad({
   const meminfo = read('/proc/meminfo') ?? '';
   const rawTotal = kilobytes(meminfo, 'MemTotal') ?? total ?? totalmem();
   const rawFree = kilobytes(meminfo, 'MemAvailable') ?? free ?? freemem();
-  const limit = bytes(read('/sys/fs/cgroup/memory.max'));
-  const clamped = limit !== null && limit < rawTotal;
-  const memTotal = clamped ? limit : rawTotal;
-  const memFree = clamped ? Math.min(rawFree, Math.max(0, limit - (bytes(read('/sys/fs/cgroup/memory.current')) ?? 0))) : rawFree;
-  /* Node says "unknown" where the system names no processor, as Linux on arm64 does in Docker on a Mac. */
-  const own = /^unknown$/i.test(cpuModel.trim()) ? '' : cpuModel.trim();
-  const model = (env.HORNHOOF_HOST_CPU?.trim() || own).slice(0, 200);
+  const model = processorModel(cpuModel, env.HORNHOOF_HOST_CPU);
   const space = disk();
   const cores = Math.max(1, cpus);
   const busy = Math.max(0, Math.round(load * 100) / 100);
   return {
     cpus: cores,
     load: busy,
-    memFree: Math.min(memFree, memTotal),
-    memTotal,
+    ...containerMemory(read, rawFree, rawTotal),
     ...(model ? { cpuModel: model } : {}),
     ...(space ? { diskFree: Math.min(space.free, space.total), diskTotal: space.total } : {}),
     ...hostFacts(read, env, cores, busy, rawFree, rawTotal),
