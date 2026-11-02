@@ -208,16 +208,29 @@ async function beginCycles(tx: Tx, lines: Ends[], jobId: string): Promise<boolea
   return began;
 }
 
-/* A turn on a task went out: a new cycle begins on each line the agent's work keeps on, its own and, for an employee, its
-   department's. The company when a line began one. */
-export async function mapWorkStarted(db: Db, jobId: string): Promise<{ companyId: string } | null> {
-  return db.transaction(async tx => {
-    const [job] = await tx.select({ companyId: jobs.companyId, agentId: jobs.agentId, taskId: jobs.taskId }).from(jobs).where(eq(jobs.id, jobId));
-    const agent = job?.agentId ? await agentOf(tx, job.agentId) : null;
-    const up = agent && (await above(tx, agent));
-    if (!job?.taskId || !agent || !up) return null;
-    return (await beginCycles(tx, await linesOfTurn(tx, job.companyId, agent, up, job.taskId), jobId)) ? { companyId: job.companyId } : null;
-  });
+/* The lines the agent's turn keeps on for all the tasks it carries, each line once. */
+async function linesOfTurns(tx: Tx, companyId: string, agent: Agent, up: string, taskIds: readonly (string | null)[]): Promise<Ends[]> {
+  const lines = new Map<string, Ends>();
+  for (const taskId of taskIds) {
+    if (!taskId) continue;
+    for (const line of await linesOfTurn(tx, companyId, agent, up, taskId)) lines.set(`${line.upstreamAgentId}>${line.downstreamAgentId}`, line);
+  }
+  return [...lines.values()];
+}
+
+/* A turn taken to go out: the agent's, with the tasks it carries, its own and those of the turns that go out inside it. */
+export type TakenTurn = { id: string; companyId: string; agentId: string | null; taskIds: readonly (string | null)[] };
+
+/* A turn was taken to go out: a new cycle begins on each line the agent's work on its tasks keeps on, its own and, for an
+   employee, its department's. It runs in the transaction that takes the turn, so the cycle is kept exactly when the turn
+   is: a server that stops once the turn went out never brings the line's old return back, and one that could not keep
+   the cycle took no turn. The company when a line began one. */
+export async function workStarts(tx: Tx, turn: TakenTurn): Promise<{ companyId: string } | null> {
+  const agent = turn.agentId ? await agentOf(tx, turn.agentId) : null;
+  const up = agent && (await above(tx, agent));
+  if (!agent || !up) return null;
+  const lines = await linesOfTurns(tx, turn.companyId, agent, up, turn.taskIds);
+  return (await beginCycles(tx, lines, turn.id)) ? { companyId: turn.companyId } : null;
 }
 
 /* A department line runs to its head, an employee's line to its head inside the department. */

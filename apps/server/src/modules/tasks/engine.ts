@@ -5,7 +5,7 @@ import type { Db } from '../../db/client.js';
 import { agents, attachments, companies, departments, jobs, people, requests, subscriptions, taskEvents, tasks, turns, type DecisionTopic, type RequestOption, type TaskEventKind } from '../../db/schema.js';
 import { ApiError, type ErrorReason } from '../../errors.js';
 import { dropEarlierWakes, keepWakes } from './outbox.js';
-import { mapWorkStarted, returnAlongLine } from '../org/map-state.js';
+import { returnAlongLine } from '../org/map-state.js';
 import { handOff } from './pulses.js';
 
 export type Task = typeof tasks.$inferSelect;
@@ -1156,6 +1156,4 @@ export async function startWork(ctx: Live, jobId: string): Promise<void> {
     .where(and(eq(tasks.id, job.taskId), eq(tasks.status, 'open'), eq(tasks.assigneeAgentId, job.agentId)))
     .returning();
   if (row) published(ctx, row);
-  /* After the task is at work, so the map's lines see it so. */
-  linesMoved(ctx, await mapWorkStarted(ctx.db, jobId));
 }
