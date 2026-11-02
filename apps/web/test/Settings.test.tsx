@@ -27,7 +27,7 @@ describe('Settings', () => {
     render(<Settings me={ME} onClose={() => {}} />);
     await user.click(await screen.findByRole('button', { name: 'Change name' }));
     expect(screen.getByLabelText('Link')).toHaveValue('acme');
-    expect(screen.getByText('Machines connected through the old link lose the connection. Connect them again under Subscriptions.')).toBeInTheDocument();
+    expect(screen.getByText('Machines connected through the old link lose the connection. Connect them again under Subscriptions or Machines.')).toBeInTheDocument();
     await user.clear(screen.getByLabelText('Link'));
     await user.type(screen.getByLabelText('Link'), 'acme-corp');
     expect(await screen.findByText('acme-corp.hornhoof.org is free.')).toBeInTheDocument();

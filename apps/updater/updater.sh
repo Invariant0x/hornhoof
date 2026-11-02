@@ -198,7 +198,7 @@ keep_link() {
   local file="${BACKUP%.sql.gz}.tunnel.json"
   if [ -z "$BACKUP" ] || [ ! -f "$CONTROL/tunnel.json" ]; then return 0; fi
   if (umask 077 && cp "$CONTROL/tunnel.json" "$file.new" && chmod 600 "$file.new" && mv "$file.new" "$file"); then
-    say "The public link's settings are in backups/$(basename "$file"). A link taken after the database was saved is not in it; the README says how to take it back."
+    say "The public link's settings are in backups/$(basename "$file"). A link taken after the database was saved is not in it; guide/updates.md says how to take it back."
   else
     rm -f "$file.new"
     say "Could not keep a copy of the public link's settings."

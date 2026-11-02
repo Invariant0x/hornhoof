@@ -172,6 +172,7 @@ describe('updater', () => {
     expect(readFileSync(join(s.server, 'backups', kept[0]!), 'utf8')).toBe(settings);
     expect(statSync(join(s.server, 'backups', kept[0]!)).mode & 0o777).toBe(0o600);
     expect(r.status.log).toContain(`backups/${kept[0]}`);
+    expect(r.status.log).toContain('guide/updates.md says how to take it back');
   });
 
   it("keeps no copy of the link's settings when the database stays as it is", () => {

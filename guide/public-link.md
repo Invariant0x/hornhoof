@@ -32,7 +32,7 @@ People who see the whole company find the link under Settings in the account men
 
 The orchestrator does the same when the CEO asks him.
 
-When the name changes or the link goes, machines that were connected through it lose the connection. Connect them again under Machines.
+When the name changes or the link goes, machines that were connected through it lose the connection. Connect them again under Subscriptions or Machines.
 
 ## Keep a link you made before
 

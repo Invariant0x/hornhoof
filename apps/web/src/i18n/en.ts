@@ -95,7 +95,7 @@ export const en = {
     removeAsk: (url: string) => `Hornhoof stops opening at ${url}. Machines connected through this link lose the connection.`,
     yesRemove: 'Remove',
     keep: 'Keep',
-    moveNote: 'Machines connected through the old link lose the connection. Connect them again under Subscriptions.',
+    moveNote: 'Machines connected through the old link lose the connection. Connect them again under Subscriptions or Machines.',
   },
   invite: {
     heading: 'Invite link',
