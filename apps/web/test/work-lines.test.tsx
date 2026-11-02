@@ -29,6 +29,33 @@ describe('the lines of work', () => {
     expect(result.current('o', 'h')).toBe('quiet');
   });
 
+  it("go out five minutes after the result by the time that passed, when this computer's clock is put back while the map is open", () => {
+    /* The page opens two minutes after the result; a minute later the clock goes two minutes back. */
+    vi.useFakeTimers({ now: T });
+    const { result } = renderHook(() => useWorkLines([line({ workEpoch: 3, returnedEpoch: 3, returnedAt: at(T - 2 * 60_000) })], at(T)));
+    act(() => vi.advanceTimersByTime(60_000));
+    vi.setSystemTime(T - 60_000);
+    act(() => vi.advanceTimersByTime(2 * 60_000 - 1));
+    expect(result.current('o', 'h')).toBe('yellow');
+    act(() => vi.advanceTimersByTime(1));
+    expect(result.current('o', 'h')).toBe('quiet');
+  });
+
+  it("burn the rest of the five minutes when this computer's clock is put forward while the map is open", () => {
+    vi.useFakeTimers({ now: T });
+    const { result, rerender } = renderHook(() => useWorkLines([line({ workEpoch: 3, returnedEpoch: 3, returnedAt: at(T - 2 * 60_000) })], at(T)));
+    act(() => vi.advanceTimersByTime(60_000));
+    vi.setSystemTime(T + 60 * 60_000);
+    /* The map draws again for something else. */
+    rerender();
+    expect(result.current('o', 'h')).toBe('yellow');
+    act(() => vi.advanceTimersByTime(2 * 60_000 - 1));
+    rerender();
+    expect(result.current('o', 'h')).toBe('yellow');
+    act(() => vi.advanceTimersByTime(1));
+    expect(result.current('o', 'h')).toBe('quiet');
+  });
+
   it('start the five minutes again with a newer result, and stay quiet for an old one once new work began', () => {
     vi.useFakeTimers({ now: T });
     const { result, rerender } = renderHook(({ lines, now }) => useWorkLines(lines, now), {
