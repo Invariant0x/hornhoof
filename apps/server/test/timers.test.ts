@@ -2,8 +2,8 @@ import { and, eq, isNull } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { agentChanges, agentEvents, agents, departments, jobs, tasks } from '../src/db/schema.js';
-import { timerTick } from '../src/modules/agents/timers.js';
-import { agentState, onAgent } from '../src/modules/conversation/queue.js';
+import { minuteRound, timerTick } from '../src/modules/agents/timers.js';
+import { agentState, insertTurn, onAgent } from '../src/modules/conversation/queue.js';
 import { as, connectNode, listen, setUpCompany, testApp, until } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
@@ -35,6 +35,16 @@ const patch = (app: FastifyInstance, token: string, id: string, payload: object)
 const MIN = 60_000;
 
 describe('timers', () => {
+  it('sends a turn that was left waiting with nothing running on the next minute round', async () => {
+    const { app, db, wandaId, orchestrator } = await company();
+    /* A turn put in line whose send was lost: nothing else would start it. */
+    const jobId = await insertTurn(app.ctx, { companyId: orchestrator.companyId, agentId: wandaId, prompt: 'Left waiting', createdBy: null });
+    const status = async () => (await db.select({ status: jobs.status }).from(jobs).where(eq(jobs.id, jobId)))[0]!.status;
+    expect(await status()).toBe('queued');
+    await minuteRound(app.ctx, new Date(), () => () => {});
+    expect(await status()).toBe('running');
+  });
+
   it('sets an employee to wake every so many minutes with an order, and the card shows it', async () => {
     const { app, db, ceo, wandaId } = await company();
     const set = await patch(app, ceo, wandaId, { timer: { minutes: 10, order: 'Check that every agent reported its task.' } });
