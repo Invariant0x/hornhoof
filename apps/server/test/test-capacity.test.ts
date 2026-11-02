@@ -1,10 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import { computerState, latestHost, Reservations } from '../src/modules/testruns/capacity.js';
+import { forRun } from '../src/modules/testruns/load.js';
 
 const load = (host: string, at = 0, hostLoad = 1) => ({ cpus: 8, load: 0, memFree: 12, memTotal: 16, tests: 0, jobs: 0, host, hostCpus: 16, hostLoad, hostMemFree: 12, hostMemory: 16, at });
 const place = (key: string, host: string) => ({ key, load: load(host), busy: false, running: 0 });
 
 describe('host capacity', () => {
+  it('keeps the assigned node resources while counting jobs and tests of all machine nodes', () => {
+    const own = { ...load('linux', 1), cpus: 4, load: 1, memFree: 2, memTotal: 4, jobs: 3, tests: 2 };
+    const sibling = { ...load('linux', 2, 7), cpus: 16, load: 4, memFree: 12, memTotal: 16, jobs: 6, tests: 5 };
+    expect(forRun(own, [own, sibling])).toMatchObject({ cpus: 4, load: 1, memFree: 2, memTotal: 4, jobs: 9, tests: 7, hostLoad: 7 });
+  });
+
+  it('takes no resource report from a sibling when the assigned node has none', () => {
+    expect(forRun(null, [load('linux')])).toBeNull();
+  });
+
   it('reserves the shared computer for its containers and built-in node, leaving another computer free', () => {
     const slots = new Reservations(1);
     const one = place('container', 'linux');

@@ -16,6 +16,12 @@ export function together(loads: (SaidLoad | null)[]): NodeLoad | null {
   return { ...plain(newest), tests: said.reduce((n, l) => n + l.tests, 0), jobs: said.reduce((n, l) => n + l.jobs, 0) };
 }
 
+/* A part runs on one node, whose local limits count; jobs and tests still belong to the whole machine. */
+export function forRun(own: SaidLoad | null, loads: (SaidLoad | null)[]): NodeLoad | null {
+  const combined = together(loads);
+  return own && combined ? { ...combined, cpus: own.cpus, load: own.load, memFree: own.memFree, memTotal: own.memTotal } : null;
+}
+
 /* The nodes that stand for the company's machines: each machine's own and its plans'. A removed plan's node is gone from
    its machine, though it keeps its key until it hears so. Plans that joined with one command came at the same moment, so
    they go by name. */

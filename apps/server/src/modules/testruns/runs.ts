@@ -16,7 +16,7 @@ import { taskByRef } from '../tasks/views.js';
 import { wakeAll } from '../tasks/wake.js';
 import type { ToolJob } from '../tools/job.js';
 import { computerKey, computerState, Reservations, type ComputerPlace } from './capacity.js';
-import { together } from './load.js';
+import { forRun, together } from './load.js';
 import { pickMachine } from './pick.js';
 
 type Run = typeof testRuns.$inferSelect;
@@ -190,7 +190,7 @@ export async function placesOf(ctx: Ctx, companyId: string): Promise<Place[]> {
       lent: machine.lendsTests,
       busy: false,
       running: 0,
-      load: together(ready.map(id => hub.loadOf(nodeIdentity(id)))),
+      load: forRun(hub.loadOf(nodeIdentity(node)), ready.map(id => hub.loadOf(nodeIdentity(id)))),
       access: await accessOf(db, owner),
       works: hub.runsWork(nodeIdentity(node)),
     });

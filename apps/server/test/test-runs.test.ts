@@ -7,7 +7,7 @@ import { agents, attachments, companies, departments, jobs, subscriptions, tasks
 import { createTask } from '../src/modules/tasks/engine.js';
 import { afterJob } from '../src/modules/tasks/wake.js';
 import { nodeIdentity } from '../src/modules/nodes/hub.js';
-import { checkTestTimes, pumpTests } from '../src/modules/testruns/runs.js';
+import { checkTestTimes, placesOf, pumpTests } from '../src/modules/testruns/runs.js';
 import { as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
 const GIB = 1024 ** 3;
@@ -128,6 +128,38 @@ const reportHost = (c: Awaited<ReturnType<typeof company>>, nodeId: string | nul
 };
 
 describe('parts on physical computers', () => {
+  it.each([
+    { selectedGb: 2, siblingGb: 12, status: 'queued' },
+    { selectedGb: 12, siblingGb: 2, status: 'running' },
+  ])('uses the selected node with $selectedGb GB, even when its sibling reports $siblingGb GB last', async ({ selectedGb, siblingGb, status }) => {
+    const c = await company();
+    const connect = await c.app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude', 'codex'] }, ...as(c.ceo) });
+    const code = connect.json().command.split('--join ')[1];
+    const joined = (await c.app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: 'shared-0001-abcd', hostname: 'shared', os: 'linux', arch: 'x86_64' } })).json();
+    const connected: { node: FakeNode; id: string }[] = [];
+    const host = { host: 'linux', hostCpus: 16, hostLoad: 1, hostMemFree: 12 * GIB, hostMemory: 16 * GIB };
+    for (const entry of joined.nodes) {
+      const node = await connectNode(c.url, entry.key);
+      node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], tests: [], work: true, load: idle(host) });
+      await until(() => c.app.ctx.hub.loadOf(nodeIdentity(entry.nodeId)) !== null);
+      connected.push({ node, id: entry.nodeId });
+    }
+    const [chosen] = await placesOf(c.app.ctx, c.task.companyId);
+    const selected = connected.find(n => n.id === chosen!.nodeId)!;
+    const sibling = connected.find(n => n.id !== selected.id)!;
+    selected.node.send({ type: 'load', ...idle({ ...host, memFree: selectedGb * GIB }) });
+    await until(() => c.app.ctx.hub.loadOf(nodeIdentity(selected.id))?.memFree === selectedGb * GIB);
+    const selectedAt = c.app.ctx.hub.loadOf(nodeIdentity(selected.id))!.at;
+    await until(() => Date.now() > selectedAt);
+    sibling.node.send({ type: 'load', ...idle({ ...host, memFree: siblingGb * GIB }) });
+    await until(() => (c.app.ctx.hub.loadOf(nodeIdentity(sibling.id))?.at ?? 0) > selectedAt);
+    const { call } = await c.turn(c.bruno);
+    await call('run_tests', { command: 'make test' });
+    expect(JSON.parse((await call('test_run', { run: 1 })).text).parts).toMatchObject([{ status }]);
+    if (status === 'running') expect((await c.db.select().from(testParts))[0]!.nodeId).toBe(selected.id);
+    else expect((await c.app.inject({ url: '/api/pool', ...as(c.ceo) })).json().waiting[0].why).toMatch(/Short of the 4 GB/);
+  });
+
   it('groups reports received through the node protocol without injecting hub state', async () => {
     const c = await company();
     const load = idle({ host: 'linux', hostCpus: 16, hostLoad: 1, hostMemFree: 12 * GIB, hostMemory: 16 * GIB });
