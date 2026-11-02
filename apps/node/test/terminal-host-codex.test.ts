@@ -30,6 +30,22 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     expect(await host.run(codexJob('c3', 'two', { sessionId: first.sessionId }))).toMatchObject({ ok: true, result: 'echo: two' });
   }, 30_000);
 
+  it("starts a new Codex session right after a turn without taking the last session's log for its own", async () => {
+    await setUp();
+    const first = await host.run(codexJob('c6', 'one'));
+    expect(first).toMatchObject({ ok: true, result: 'echo: one' });
+    /* Hornhoof asks for a new session at once: the last one's log was written a moment ago, the new one has none yet. */
+    const fresh = codexJob('c6', 'two');
+    const next = await host.run(fresh);
+    expect(next).toMatchObject({ ok: true, result: 'echo: two' });
+    expect(next.sessionId).not.toBe(first.sessionId);
+    expect(fresh.events).not.toContainEqual({ kind: 'text', text: 'echo: one' });
+    /* The program is free for the turn after. */
+    const started = Date.now();
+    expect(await host.run(codexJob('c6', 'three', { sessionId: next.sessionId }))).toMatchObject({ ok: true, result: 'echo: three' });
+    expect(Date.now() - started).toBeLessThan(5000);
+  }, 60_000);
+
   it('goes on in the cleared session when Hornhoof asks for the session it was cleared from', async () => {
     await setUp();
     const first = await host.run(job('b10', 'hello'));

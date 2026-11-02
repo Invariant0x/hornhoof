@@ -1,6 +1,6 @@
 # Machines and plans
 
-> In short: agents run on machines that hold the AI plans. You connect a plan with one command on your own computer, and its sign-in never leaves that computer. A machine can also join with no plan, just to lend itself to test runs.
+> In short: agents run on machines that hold the AI plans. You connect a plan with one command on your own computer and sign it in once in Hornhoof. It then runs on any of your machines, and Hornhoof keeps the sign-in sealed so that only those machines read it. A machine can also join with no plan, just to lend itself to test runs.
 
 ## Where do agents run?
 
@@ -15,7 +15,7 @@ Agents run on machines that hold the subscriptions.
 2. Tick the plans this machine will carry, click "Get the command" and copy it.
 3. Run it in a terminal on that machine. The command works once, for 24 hours.
 
-The command installs Docker if needed, starts one small locked-down container per subscription and signs each one in:
+The command installs Docker if needed and starts one small locked-down container per subscription. A plan you already signed in once in Hornhoof reaches the new machine by itself within seconds. The command signs the others in there:
 
 - Claude opens the claude.ai login for your Claude plan.
 - Codex opens the ChatGPT device login for your ChatGPT plan.
@@ -24,6 +24,20 @@ The command installs Docker if needed, starts one small locked-down container pe
 - Antigravity, Google's agent program for a Google AI Pro or Ultra plan, opens the Google sign-in. Google then shows a code: paste it into the terminal where the command runs.
 
 ![Connecting AI plans](../.github/assets/subscriptions.png)
+
+## Sign in once for all your machines
+
+On Subscriptions, the owner of a plan signs it in once, and it runs on any of their machines:
+
+- Claude and Codex: click "Sign in". A terminal opens under the plan's row, on one of your machines that is online. Only you see it and type into it, the CEO neither. Follow the steps in it. Claude gives a sign-in that lasts a year.
+- Kimi and GLM: click "Paste the key", get the key from the provider's page and save it. The browser seals the key before it leaves, so Hornhoof never sees it.
+- "Sign in with another account" replaces the sign-in on all your machines of the plan.
+
+Each machine has a key of its own. The sign-in is sealed to every machine of the plan with that machine's key, so Hornhoof stores it and passes it on without reading it. A machine you connect later gets it from one of your machines that has it.
+
+Codex renews its sign-in as it works, and the old one stops working. So a Codex plan runs on one of your machines at a time, and the tab says which. When that machine has been away for 10 minutes, another machine of the plan that is online takes over.
+
+The tab also names the tier each plan runs on, as "Codex, Pro". A free Codex plan cannot use the newer models. When machines of one plan are signed in to different accounts, the tab says so.
 
 ## What can agents use on a machine?
 
@@ -56,7 +70,7 @@ It starts one container with nothing to sign in to. The machine lends itself to 
 
 ## Add a plan to a machine that already joined
 
-The owner clicks "Add my plan" on the machine's card. That gives a command for this machine only. It starts the plan's node there and signs it in there, because sign-ins never travel between machines.
+The owner clicks "Add my plan" on the machine's card. That gives a command for this machine only. It starts the plan's node there. A plan signed in once in Hornhoof gets its sign-in by itself; any other is signed in there.
 
 One plan can run on several machines of its owner this way.
 

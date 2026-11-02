@@ -1,5 +1,5 @@
 {
-  "id": "4d858316-cb6e-43aa-8660-8123e8fdccb9",
+  "id": "c64708db-e901-42cd-8bc7-ad3726b063e3",
   "prevId": "c765f8f7-bf4b-4d16-abc5-296249c398f0",
   "version": "7",
   "dialect": "postgresql",
@@ -1641,177 +1641,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.map_returns": {
-      "name": "map_returns",
-      "schema": "",
-      "columns": {
-        "company_id": {
-          "name": "company_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "upstream_agent_id": {
-          "name": "upstream_agent_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "downstream_agent_id": {
-          "name": "downstream_agent_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "work_epoch": {
-          "name": "work_epoch",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "work_job_id": {
-          "name": "work_job_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "returned_epoch": {
-          "name": "returned_epoch",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "returned_at": {
-          "name": "returned_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "source_key": {
-          "name": "source_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "source_job_id": {
-          "name": "source_job_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "source_task_id": {
-          "name": "source_task_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "map_returns_company_id_companies_id_fk": {
-          "name": "map_returns_company_id_companies_id_fk",
-          "tableFrom": "map_returns",
-          "tableTo": "companies",
-          "columnsFrom": [
-            "company_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "map_returns_upstream_agent_id_agents_id_fk": {
-          "name": "map_returns_upstream_agent_id_agents_id_fk",
-          "tableFrom": "map_returns",
-          "tableTo": "agents",
-          "columnsFrom": [
-            "upstream_agent_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "map_returns_downstream_agent_id_agents_id_fk": {
-          "name": "map_returns_downstream_agent_id_agents_id_fk",
-          "tableFrom": "map_returns",
-          "tableTo": "agents",
-          "columnsFrom": [
-            "downstream_agent_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "map_returns_work_job_id_jobs_id_fk": {
-          "name": "map_returns_work_job_id_jobs_id_fk",
-          "tableFrom": "map_returns",
-          "tableTo": "jobs",
-          "columnsFrom": [
-            "work_job_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "map_returns_source_job_id_jobs_id_fk": {
-          "name": "map_returns_source_job_id_jobs_id_fk",
-          "tableFrom": "map_returns",
-          "tableTo": "jobs",
-          "columnsFrom": [
-            "source_job_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "map_returns_source_task_id_tasks_id_fk": {
-          "name": "map_returns_source_task_id_tasks_id_fk",
-          "tableFrom": "map_returns",
-          "tableTo": "tasks",
-          "columnsFrom": [
-            "source_task_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "map_returns_company_id_upstream_agent_id_downstream_agent_id_pk": {
-          "name": "map_returns_company_id_upstream_agent_id_downstream_agent_id_pk",
-          "columns": [
-            "company_id",
-            "upstream_agent_id",
-            "downstream_agent_id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "map_returns_epochs": {
-          "name": "map_returns_epochs",
-          "value": "\"map_returns\".\"work_epoch\" >= 0 AND (\"map_returns\".\"returned_epoch\" IS NULL OR (\"map_returns\".\"returned_epoch\" >= 0 AND \"map_returns\".\"returned_epoch\" <= \"map_returns\".\"work_epoch\"))"
-        },
-        "map_returns_given_back": {
-          "name": "map_returns_given_back",
-          "value": "(\"map_returns\".\"returned_at\" IS NULL) = (\"map_returns\".\"returned_epoch\" IS NULL) AND (\"map_returns\".\"returned_at\" IS NULL) = (\"map_returns\".\"source_key\" IS NULL)"
-        }
-      },
-      "isRLSEnabled": false
-    },
     "public.node_codes": {
       "name": "node_codes",
       "schema": "",
@@ -1971,6 +1800,18 @@
         "last_seen_at": {
           "name": "last_seen_at",
           "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "public_key": {
+          "name": "public_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "account": {
+          "name": "account",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
@@ -2565,6 +2406,134 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.plan_credentials": {
+      "name": "plan_credentials",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "company_id": {
+          "name": "company_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "subscription_id": {
+          "name": "subscription_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "node_id": {
+          "name": "node_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sealed": {
+          "name": "sealed",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "plan_credentials_subscription_id": {
+          "name": "plan_credentials_subscription_id",
+          "columns": [
+            {
+              "expression": "subscription_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "plan_credentials_company_id_companies_id_fk": {
+          "name": "plan_credentials_company_id_companies_id_fk",
+          "tableFrom": "plan_credentials",
+          "tableTo": "companies",
+          "columnsFrom": [
+            "company_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "plan_credentials_subscription_id_subscriptions_id_fk": {
+          "name": "plan_credentials_subscription_id_subscriptions_id_fk",
+          "tableFrom": "plan_credentials",
+          "tableTo": "subscriptions",
+          "columnsFrom": [
+            "subscription_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "plan_credentials_node_id_nodes_id_fk": {
+          "name": "plan_credentials_node_id_nodes_id_fk",
+          "tableFrom": "plan_credentials",
+          "tableTo": "nodes",
+          "columnsFrom": [
+            "node_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "plan_credentials_node_kind": {
+          "name": "plan_credentials_node_kind",
+          "nullsNotDistinct": false,
+          "columns": [
+            "node_id",
+            "kind"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.proposals": {
       "name": "proposals",
       "schema": "",
@@ -3129,6 +3098,19 @@
           "primaryKey": false,
           "notNull": false
         },
+        "cred_version": {
+          "name": "cred_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "lease_node_id": {
+          "name": "lease_node_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "removed_at": {
           "name": "removed_at",
           "type": "timestamp with time zone",
@@ -3180,6 +3162,19 @@
           "tableTo": "people",
           "columnsFrom": [
             "owner_person_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "subscriptions_lease_node_id_nodes_id_fk": {
+          "name": "subscriptions_lease_node_id_nodes_id_fk",
+          "tableFrom": "subscriptions",
+          "tableTo": "nodes",
+          "columnsFrom": [
+            "lease_node_id"
           ],
           "columnsTo": [
             "id"

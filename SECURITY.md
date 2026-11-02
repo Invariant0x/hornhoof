@@ -1,10 +1,71 @@
 # Security
 
-Hornhoof runs AI agents on people's own machines, with their plans, keys and repositories. A hole in it can reach all of those, so we take reports seriously and thank everyone who sends one.
+Hornhoof is built so that your company stays yours. It runs on your own machines, its agents work in locked boxes there, and only people your company invites can sign in. This page says exactly how, and how to tell us if you find a hole.
 
-## How to report
+## Your company lives on your machines
 
-Do not open a public issue. Report it privately on GitHub: open the repository's **Security** tab and click **Report a vulnerability**. Only the maintainers see the report.
+- There is no Hornhoof cloud and no account with us. The server, its database and its files run in Docker on your own computers.
+- The company's database sits on up to three of your machines: one leads, and the others keep full copies. Copies go only to machines of the CEO and of people who see the whole company.
+- No single machine is the company. If the leading machine stops, an up-to-date copy takes over within about a minute, under the same link.
+- Every 6 hours and before each update, the leading machine makes a backup, signs it and encrypts it. Up to three other company machines keep the latest two and cannot open them. Only the machines that may hold the data, and the recovery file you save in Settings, can. A machine's owner can untick "Keep company backups".
+- A machine that only does work keeps no copy of the database, only those sealed backups when its owner allows them.
+- Your machines talk to each other over encrypted connections, and each one proves who it is with a certificate from the company's own authority. The port they talk on takes only machines with such a certificate.
+- Hornhoof looks for new builds at GitHub's container registry, anonymously, as `docker pull` does. An update runs exactly the images it checked, by their digests. It saves the database first, and goes back to the old build by itself if the new one does not answer.
+- The web app loads nothing from other sites. Its scripts and fonts come from your own server.
+
+## Agents work in locked boxes
+
+- On each machine, every plan runs in a Docker container of its own. The company's API keys run in the server's built-in node, which is a container too.
+- No folder of your computer is put into these containers, and none of them gets the Docker socket. An agent sees its container, not your computer.
+- The containers drop every Linux capability but the few needed to run agents as another user, and nothing inside them can gain new privileges.
+- Inside its container, an agent runs as a user of its own. It cannot read the node's key or change the programs the node starts.
+- The built-in node is not on the database's network, so no agent there can reach the database.
+- Tests and other work on lent machines run in a fresh folder, as a user that reaches neither the node's key nor the agents' folders. The folder is removed afterwards.
+
+## Sign-ins and keys
+
+- You sign in to each plan yourself, on your own machine. The sign-in is sealed to your machines: Hornhoof stores it so that the server and the copies of the company cannot open it, and only your own machines can. An Antigravity sign-in stays on the machine it was made on. A personal plan's work goes only to its owner's machines.
+- Before anything leaves a machine, the node puts `[hidden]` in place of its own key, the plans' tokens, API keys and repository tokens, in terminals and in every output.
+- API keys, repository tokens and the link's key are stored encrypted with AES-256-GCM, under the secret in your `.env`. Passwords are stored as scrypt hashes. Sessions, invite links, install commands and the keys nodes connect with are kept only as SHA-256 hashes.
+- The command that connects a machine works once, for 24 hours. When the orchestrator makes one, its code shows only on the CEO's screen and never reaches an agent.
+- "Disconnect" on a machine's card takes its keys away at once, so a lost or stolen machine can no longer reach the company.
+
+## People see only what they are given
+
+- Until a company is set up, only the setup link from the server's own log can set it up.
+- Failed sign-ins are capped: 10 in 15 minutes for one email from one address, and 50 in an hour for one email.
+- Session cookies cannot be read by scripts on the page, and travel only over https when Hornhoof is on https.
+- A change, or a terminal connection, that comes from another site's page is refused, even with your cookie.
+- Each person sees only the departments they are given.
+- Only the owner of a plan types into its agents' terminals. Everyone else who reaches the employee watches.
+- The orchestrator takes orders about people, access, plans, machines, repositories, the public link and updates only in a turn that answers the CEO.
+- The orchestrator's database role cannot read or write passwords, tokens or keys, nor the tables of sign-ins, invites and install commands.
+- Every machine lends its power to the company's pool by default, and agents still work only inside their boxes there. Root on a machine goes to the orchestrator only when that machine's owner opens access to it, for one day at most, and only in turns that answer the CEO. Nobody else can open it, the CEO included.
+
+## The hornhoof.org link
+
+The link, like `https://acme.hornhoof.org`, lets people open your company from anywhere without opening anything on your router.
+
+- It is optional. Untick "Open Hornhoof on the internet" at setup, or remove the link in Settings, and people open Hornhoof only from your own network.
+- Your server opens the tunnel itself, over an encrypted connection to hornhoof.org whose certificate it checks.
+- The tunnel carries traffic only to the Hornhoof app, never to anything else on your network, whatever hornhoof.org asks for.
+- hornhoof.org has no accounts and holds none of your company's data. For each link it keeps only the name, a hash of its key, when and from which address the link was made, and when its tunnel was last seen. For a company on several machines it also keeps which machine holds the link, and one flag that says whether the company's copy is up to date.
+- The browser's https connection ends at hornhoof.org. It opens each request to see which company it is for, passes it on through that company's tunnel, and keeps no copy. If you want no one in between, use your own domain with your own TLS, as [the install guide](guide/install.md#how-do-people-open-it-from-other-computers) shows.
+- Traffic between your machines that goes through hornhoof.org is encrypted from one machine to the other, so hornhoof.org sees only encrypted bytes.
+- hornhoof.org decides nothing for your company. A link points to one machine at a time, and that tells two machines which of them leads. A company with no public link keeps a hidden name there for that alone. Three or more machines that are always on choose the leader by vote among themselves.
+
+## What you decide
+
+- Who sees the whole company. Those people see everything, and so do the orchestrator and anyone with access to Operations, whose head reads the database.
+- Which plan a department uses. Agents on one plan share its sign-in and can read each other's folders, so work that must stay apart gets a plan of its own.
+- What a repository token may do. It goes to the machines that run the department's agents and tests, so a fine-grained token for one repository is best.
+- Which AI makers you use. Agents send their prompts and code to those makers, as the programs do outside Hornhoof.
+
+Keep `.env` and the recovery file like passwords: the secret in `.env` opens the stored keys, and the recovery file opens the backups.
+
+## Report a vulnerability
+
+Report it privately on GitHub, not in a public issue: open the repository's **Security** tab and click **Report a vulnerability**. Only the maintainers see the report.
 
 Tell us:
 
@@ -15,14 +76,8 @@ Tell us:
 
 We aim to answer within a week, agree on a fix and a date with you, and name you in the fix unless you ask us not to.
 
+You are welcome to test all of this as hard as you like on your own install.
+
 ## Which versions
 
 Only the latest build on `main` gets security fixes. Update from the banner in Hornhoof, or run the install line again.
-
-## Please do not
-
-- test against a company or a hornhoof.org link that is not yours;
-- read, change or delete other people's data, or keep it;
-- slow the relay down for others or flood it.
-
-Testing your own install is always fine.

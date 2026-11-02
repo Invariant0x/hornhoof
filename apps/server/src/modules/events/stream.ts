@@ -26,6 +26,7 @@ export function streamRoutes(app: FastifyInstance, ctx: Ctx): void {
     const unsubscribe = ctx.bus.subscribe(me.companyId, m => {
       if ('spot' in m && !canReach(access, m.spot)) return;
       if (m.type === 'computer' && !ownsComputer(me)) return;
+      if (m.type === 'subscription.signin' && m.owner !== me.id) return;
       res.write(`data: ${JSON.stringify(m)}\n\n`);
     });
     /* The ping keeps proxies from closing the stream and looks at the person again: a signed-out or disabled person stops

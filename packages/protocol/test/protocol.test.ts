@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { API_MODELS, CLAUDE_ALIASES, cut, defaultEffortOf, lastBytes, MAX_INSTRUCTIONS, MAX_RUN_FILES, MAX_TEST_PARTS, OLD_NODE_INSTRUCTIONS, TAIL_BYTES, TEST_LOG_BYTES, COMPANY_TEMPLATES, COMPANY_TEMPLATE_KEYS, DEPARTMENT_TEMPLATES, TEMPLATE_KEYS, effortFor, effortsOf, modelsFor, parseNodeMessage, parseServerMessage, repoFolder, type AgentEvent, type NodeMessage, type ServerMessage } from '../src/index.js';
+import { API_MODELS, CLAUDE_ALIASES, CRED_KINDS, cut, defaultEffortOf, lastBytes, MAX_INSTRUCTIONS, MAX_RUN_FILES, MAX_TEST_PARTS, OLD_NODE_INSTRUCTIONS, TAIL_BYTES, TEST_LOG_BYTES, COMPANY_TEMPLATES, COMPANY_TEMPLATE_KEYS, DEPARTMENT_TEMPLATES, TEMPLATE_KEYS, effortFor, effortsOf, modelsFor, parseNodeMessage, parseServerMessage, repoFolder, type AgentEvent, type NodeMessage, type ServerMessage } from '../src/index.js';
 import { effortsOf as light, topEffort as lightTop } from '../src/efforts.js';
 
 const LIMITS = { status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0.38, resetsAt: '2026-10-29T21:30:00.000Z' }] };
@@ -444,5 +444,56 @@ describe('live terminals', () => {
     expect(parseNodeMessage(JSON.stringify({ ...m, used: 1.2 }))).toBeNull();
     expect(parseNodeMessage(JSON.stringify({ ...m, used: -0.1 }))).toBeNull();
     expect(parseNodeMessage(JSON.stringify({ ...m, agentKey: '../x' }))).toBeNull();
+  });
+});
+
+describe('plans on any machine', () => {
+  const KEY = 'age1' + 'q'.repeat(58);
+  const SEALED = '-----BEGIN AGE ENCRYPTED FILE-----\nabc\n-----END AGE ENCRYPTED FILE-----\n';
+
+  it("carry the node's public key and the account its plan is signed in to", () => {
+    const hello: NodeMessage = { type: 'hello', version: '0.9.0', loggedIn: true, running: [], publicKey: KEY, account: { email: 'a@b.c', tier: 'pro' } };
+    const status: NodeMessage = { type: 'status', loggedIn: true, limits: null, account: { email: null, tier: null } };
+    expect(parseNodeMessage(JSON.stringify(hello))).toEqual(hello);
+    expect(parseNodeMessage(JSON.stringify(status))).toEqual(status);
+    expect(parseNodeMessage(JSON.stringify({ ...hello, publicKey: 'age2' + 'q'.repeat(58) }))).toBeNull();
+    expect(parseNodeMessage(JSON.stringify({ ...hello, publicKey: 'age1' + 'Q'.repeat(58) }))).toBeNull();
+  });
+
+  it('still take a hello from a node before keys', () => {
+    expect(parseNodeMessage(JSON.stringify({ type: 'hello', version: '0.8.0', loggedIn: false, running: [] }))).toMatchObject({ type: 'hello' });
+  });
+
+  it('carry a sign-in sealed for at most 20 nodes, and how the sign-in on a node ended', () => {
+    const one = { nodeId: 'node-1', sealed: SEALED };
+    const sealed: NodeMessage = { type: 'cred.sealed', kind: 'claude_token', version: 3, envelopes: [one, { ...one, nodeId: 'node-2' }] };
+    expect(parseNodeMessage(JSON.stringify(sealed))).toEqual(sealed);
+    expect(parseNodeMessage(JSON.stringify({ ...sealed, envelopes: Array.from({ length: 21 }, (_, i) => ({ ...one, nodeId: `n-${i}` })) }))).toBeNull();
+    expect(parseNodeMessage(JSON.stringify({ ...sealed, version: 0 }))).toBeNull();
+    expect(parseNodeMessage(JSON.stringify({ ...sealed, envelopes: [{ ...one, nodeId: '../x' }] }))).toBeNull();
+    expect(parseNodeMessage(JSON.stringify({ ...sealed, envelopes: [{ ...one, sealed: 'x'.repeat(64 * 1024 + 1) }] }))).toBeNull();
+    const done: NodeMessage = { type: 'login.done', ok: false, error: 'The sign-in window was closed.' };
+    expect(parseNodeMessage(JSON.stringify(done))).toEqual(done);
+    expect(parseNodeMessage(JSON.stringify({ ...done, error: 'x'.repeat(301) }))).toBeNull();
+  });
+
+  it('send sealed sign-ins, ask a node to seal what it holds, start and stop a sign-in and hand the Codex lease', () => {
+    const msgs: ServerMessage[] = [
+      { type: 'cred.put', kind: 'kimi_key', version: 1, sealed: SEALED },
+      { type: 'cred.drop', kind: 'codex_auth' },
+      { type: 'cred.seal', kind: 'claude_token', version: 2, recipients: [{ nodeId: 'node-2', publicKey: KEY }] },
+      { type: 'login.start', fresh: true },
+      { type: 'login.stop' },
+      { type: 'cred.lease', hold: true },
+    ];
+    for (const m of msgs) expect(parseServerMessage(JSON.stringify(m))).toEqual(m);
+    expect(parseServerMessage(JSON.stringify({ ...msgs[0], kind: 'other' }))).toBeNull();
+    expect(parseServerMessage(JSON.stringify({ ...msgs[2], version: 0 }))).toBeNull();
+    expect(parseServerMessage(JSON.stringify({ ...msgs[2], recipients: [{ nodeId: 'node-2', publicKey: 'nope' }] }))).toBeNull();
+    expect(parseServerMessage(JSON.stringify({ ...msgs[2], recipients: Array.from({ length: 21 }, (_, i) => ({ nodeId: `n-${i}`, publicKey: KEY })) }))).toBeNull();
+  });
+
+  it('name the four kinds of sign-in a plan can carry', () => {
+    expect(CRED_KINDS).toEqual(['claude_token', 'codex_auth', 'kimi_key', 'glm_key']);
   });
 });

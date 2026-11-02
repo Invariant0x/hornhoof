@@ -395,7 +395,7 @@ describe('migrations 0034 to 0037', () => {
     await db.execute(sql`insert into machines (company_id, person_id, machine_key, hostname) values (${C}, ${P}, 'mac-0001-abcd', 'ivan-mac')`);
 
     await migrate(db, { migrationsFolder: await migrationsUpTo('0037_work_repeatable') });
-    await migrate(db, { migrationsFolder: await migrationsUpTo('0039_decision_topic') });
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0040_decision_topic') });
     await migrate(db, { migrationsFolder: MIGRATIONS });
 
     const parts = await db.execute<{ waits: boolean; lost: unknown; computer: string | null }>(sql`select queued_at = created_at as waits, lost, computer from test_parts`);
@@ -408,6 +408,29 @@ describe('migrations 0034 to 0037', () => {
 });
 
 describe('migration 0038', () => {
+  it("gives an older install's plans no sign-in yet and its nodes no key", async () => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0037_work_repeatable') });
+    const C = '00000000-0000-4000-8000-000000000001';
+    const P = '00000000-0000-4000-8000-000000000002';
+    const S = '00000000-0000-4000-8000-0000000000c1';
+    await db.execute(sql`insert into companies (id, name) values (${C}, 'Acme')`);
+    await db.execute(sql`insert into people (id, company_id, name, email, status, scope_kind) values (${P}, ${C}, 'Ivan', 'ivan@acme.com', 'active', 'company')`);
+    await db.execute(sql`insert into subscriptions (id, company_id, provider, kind, label, status, owner_person_id) values (${S}, ${C}, 'claude', 'personal', 'Claude', 'ready', ${P})`);
+    await db.execute(sql`insert into machines (id, company_id, person_id, machine_key, hostname) values (${S}, ${C}, ${P}, 'mac-0001-abcd', 'ivan-mac')`);
+    await db.execute(sql`insert into nodes (id, company_id, machine_id, subscription_id, status) values (${S}, ${C}, ${S}, ${S}, 'ready')`);
+
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+
+    expect((await db.execute(sql`select cred_version, lease_node_id from subscriptions`)).rows).toEqual([{ cred_version: 0, lease_node_id: null }]);
+    expect((await db.execute(sql`select public_key, account from nodes`)).rows).toEqual([{ public_key: null, account: null }]);
+    expect((await db.execute(sql`select count(*)::int as n from plan_credentials`)).rows).toEqual([{ n: 0 }]);
+  });
+});
+
+describe('migration 0039', () => {
   const C = '00000000-0000-4000-8000-000000000001';
   const H = '00000000-0000-4000-8000-0000000000b1';
   const W = '00000000-0000-4000-8000-0000000000b2';
@@ -417,7 +440,7 @@ describe('migration 0038', () => {
     const client = new PGlite();
     onTestFinished(() => client.close());
     const db = drizzle(client);
-    await migrate(db, { migrationsFolder: await migrationsUpTo('0037_work_repeatable') });
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0038_plan_credentials') });
     await db.execute(sql`insert into companies (id, name) values (${C}, 'Acme')`);
     await db.execute(sql`insert into agents (id, company_id, kind, name, model) values (${H}, ${C}, 'head', 'Hana', ''), (${W}, ${C}, 'worker', 'Bruno', '')`);
     await db.execute(sql`insert into tasks (id, company_id, number, title, status, closed_at) values (${T}, ${C}, 1, 'Checkout', 'done', now())`);
@@ -436,7 +459,7 @@ describe('migration 0038', () => {
   });
 });
 
-describe('migration 0039', () => {
+describe('migration 0040', () => {
   const C = '00000000-0000-4000-8000-000000000001';
   const W = '00000000-0000-4000-8000-0000000000b2';
   const T = '00000000-0000-4000-8000-0000000000d1';
@@ -445,7 +468,7 @@ describe('migration 0039', () => {
     const client = new PGlite();
     onTestFinished(() => client.close());
     const db = drizzle(client);
-    await migrate(db, { migrationsFolder: await migrationsUpTo('0038_map_returns') });
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0039_map_returns') });
     await db.execute(sql`insert into companies (id, name) values (${C}, 'Acme')`);
     await db.execute(sql`insert into agents (id, company_id, kind, name, model) values (${W}, ${C}, 'worker', 'Bruno', '')`);
     await db.execute(sql`insert into tasks (id, company_id, number, title, status) values (${T}, ${C}, 1, 'Checkout', 'waiting')`);

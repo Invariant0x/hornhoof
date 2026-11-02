@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -99,6 +99,23 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     const second = await host.run(job('a50', 'two', { sessionId: first.sessionId, effort: 'max' }));
     expect(second).toMatchObject({ ok: true, result: 'echo: two', sessionId: first.sessionId });
     expect(await host.screen('a50')).toContain(`fake claude resumed ${first.sessionId}`);
+  });
+
+  it('starts the program again in the same session once its plan was signed in to another account', async () => {
+    await setUp();
+    const token = join(home, 'claude-oauth-token');
+    try {
+      writeFileSync(token, `sk-ant-oat01-${'a'.repeat(40)}\n`);
+      const first = await host.run(job('a52', 'one'));
+      const same = await host.run(job('a52', 'two', { sessionId: first.sessionId }));
+      expect(await host.screen('a52')).not.toContain('resumed');
+      writeFileSync(token, `sk-ant-oat01-${'b'.repeat(40)}\n`);
+      const third = await host.run(job('a52', 'three', { sessionId: same.sessionId }));
+      expect(third).toMatchObject({ ok: true, result: 'echo: three', sessionId: first.sessionId });
+      expect(await host.screen('a52')).toContain(`fake claude resumed ${first.sessionId}`);
+    } finally {
+      rmSync(token, { force: true });
+    }
   });
 
   it('starts a new session when Hornhoof asks for one', async () => {

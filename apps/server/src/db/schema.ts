@@ -1,4 +1,4 @@
-import { COMPANY_TEMPLATE_KEYS, MACHINE_KINDS, RUN_KINDS, TEMPLATE_KEYS, type Limits, type ModelOption } from '@hornhoof/protocol';
+import { COMPANY_TEMPLATE_KEYS, CRED_KINDS, MACHINE_KINDS, RUN_KINDS, TEMPLATE_KEYS, type Account, type Limits, type ModelOption } from '@hornhoof/protocol';
 import { sql } from 'drizzle-orm';
 import { bigserial, boolean, check, customType, index, integer, jsonb, pgTable, primaryKey, real, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
 
@@ -165,6 +165,10 @@ export const subscriptions = pgTable(
     budget: integer('budget'),
     /* The models its node says it can run; null until a node reports them. */
     models: jsonb('models').$type<ModelOption[]>(),
+    /* Counts the plan's sign-ins: each new one is sealed to its nodes under a higher number, and older ones are dropped. */
+    credVersion: integer('cred_version').notNull().default(0),
+    /* Codex runs on one machine at a time, as its sign-in renews itself: the node that holds it now. */
+    leaseNodeId: uuid('lease_node_id').references((): AnyPgColumn => nodes.id),
     removedAt: timestamp('removed_at', { withTimezone: true }),
     createdAt: createdAt(),
   },
@@ -187,9 +191,29 @@ export const nodes = pgTable(
     status: text('status', { enum: NODE_STATUSES }).notNull().default('needs_login'),
     version: text('version'),
     lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
+    /* The age key Hornhoof seals the plan's sign-in to for this node; the node keeps the private half. */
+    publicKey: text('public_key'),
+    /* The account its program is signed in to, as the program tells. */
+    account: jsonb('account').$type<Account>(),
     createdAt: createdAt(),
   },
   t => [unique('nodes_machine_plan').on(t.machineId, t.subscriptionId).nullsNotDistinct(), index('nodes_subscription_id').on(t.subscriptionId)],
+);
+
+/* A plan's sign-in sealed to one of its nodes. Hornhoof cannot open it: only that node's private key does. */
+export const planCredentials = pgTable(
+  'plan_credentials',
+  {
+    id: id(),
+    companyId: companyId(),
+    subscriptionId: uuid('subscription_id').notNull().references(() => subscriptions.id),
+    nodeId: uuid('node_id').notNull().references(() => nodes.id),
+    kind: text('kind', { enum: CRED_KINDS }).notNull(),
+    version: integer('version').notNull(),
+    sealed: text('sealed').notNull(),
+    createdAt: createdAt(),
+  },
+  t => [unique('plan_credentials_node_kind').on(t.nodeId, t.kind), index('plan_credentials_subscription_id').on(t.subscriptionId)],
 );
 
 export const agents = pgTable(

@@ -82,6 +82,28 @@ describe('a node that runs agents in terminals', () => {
     expect(server.received.find(m => m.type === 'job.done' && m.jobId === 'j2')).toMatchObject({ ok: true, result: 'ready' });
   });
 
+  it.skipIf(!hasTmux)("installs the agents' program before a turn in a session, and says the turn failed when it cannot", async () => {
+    const server = await fakeServer();
+    const dir = nodeDir(server.url);
+    const tmux = new Tmux({ socket: `hh-install-${process.pid}`, env: { PATH: process.env.PATH ?? '', HOME: dir } });
+    onTestFinished(() => tmux.run(['kill-server']).catch(() => {}));
+    const fake = new URL('./fakes/fake-term.mjs', import.meta.url).pathname;
+    let installs = 0;
+    const install = async () => {
+      installs++;
+      throw new Error('npm: offline');
+    };
+    const node = await runNode({ dir, adapter, log: () => {}, install, terminal: { tmux, program: claudeProgram, bin: fake, home: join(dir, 'home'), signedOut: /not logged in/i } });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    const before = installs;
+    server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', sessionId: null, model: null, timeoutMs: 20000, secret: null, instructions: null, toolToken: 'tok-1', prompt: 'hi', workspace: { key: 'agent-1', repo: null } });
+    await server.wait(() => server.received.some(m => m.type === 'job.done'), 15000);
+    expect(installs).toBeGreaterThan(before);
+    expect(server.received.find(m => m.type === 'job.done')).toMatchObject({ jobId: 'j1', ok: false, error: 'agent_failed' });
+    expect(await tmux.has('a-agent-1')).toBe(false);
+  });
+
   it.skipIf(!hasTmux)("hides on a screen a program's token from after the node started, with no Hornhoof turn since", async () => {
     const server = await fakeServer();
     const dir = nodeDir(server.url);
@@ -234,6 +256,14 @@ describe('runNode', () => {
     server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
     await server.wait(() => server.received.filter(m => m.type === 'status').length >= 2);
     expect(server.received.filter(m => m.type === 'status').at(-1)!.limits).toMatchObject({ status: 'rejected' });
+  });
+
+  it('sends the key its sign-ins are sealed to in hello', async () => {
+    const server = await fakeServer();
+    const node = await runNode({ dir: nodeDir(server.url), adapter, log: () => {} });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    expect(server.received[0]).toMatchObject({ type: 'hello', publicKey: expect.stringMatching(/^age1[0-9a-z]{58}$/) });
   });
 
   it('sends the models its program can run in hello and status', async () => {

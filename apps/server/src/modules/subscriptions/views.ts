@@ -1,7 +1,7 @@
-import type { Limits } from '@hornhoof/protocol';
+import type { Account, Limits } from '@hornhoof/protocol';
 import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
-import { agents, departments, people, personAccess, subscriptions, teams, type Provider, type SUBSCRIPTION_STATUSES } from '../../db/schema.js';
+import { agents, departments, nodes, people, personAccess, subscriptions, teams, type Provider, type SUBSCRIPTION_STATUSES } from '../../db/schema.js';
 import { WHOLE_COMPANY } from '../people/views.js';
 import { deptName } from '../departments/templates.js';
 import { BUILTIN, nodeIdentity, type NodeIdentity } from '../nodes/hub.js';
@@ -25,7 +25,28 @@ export type SubView = {
   limits: Limits | null;
   budget: number | null;
   isOrchestrator: boolean;
+  /* The account each machine's program is signed in to: the address only for the plan's owner and people who see the
+     whole company. tier when all machines say the same one; accountsDiffer when they are on different ones. */
+  accounts: PlanAccount[];
+  tier: string | null;
+  accountsDiffer: boolean;
+  /* The owner signed the plan in once in Hornhoof, so it runs on any of their machines. */
+  signedInOnce: boolean;
+  /* The machine a Codex plan signed in once runs on now, one at a time. */
+  leaseMachine: string | null;
 };
+
+export type PlanAccount = { nodeId: string; hostname: string; tier: string | null; email?: string | null };
+
+/* Who asks for the view: the address of a plan's account goes to its owner and to people who see the whole company. */
+export type Viewer = { id: string; scopeKind: string; isOwner?: boolean; via?: string };
+
+/* The tier all these accounts are on, and whether they are on different accounts or tiers. */
+export function agreed(accounts: Account[]): { tier: string | null; differ: boolean } {
+  const tiers = new Set(accounts.map(a => a.tier));
+  const differ = new Set(accounts.map(a => `${a.email ?? ''}\n${a.tier ?? ''}`)).size > 1;
+  return { tier: tiers.size === 1 ? [...tiers][0]! : null, differ };
+}
 
 export type IsOnline = (node: NodeIdentity) => boolean;
 
@@ -39,6 +60,8 @@ const columns = {
   last4: subscriptions.last4,
   limits: subscriptions.limits,
   budget: subscriptions.budget,
+  credVersion: subscriptions.credVersion,
+  leaseNodeId: subscriptions.leaseNodeId,
   targetKind: subscriptions.targetKind,
   targetId: subscriptions.targetId,
   ownerId: people.id,
@@ -61,7 +84,7 @@ function ownerPlace(deptIds: string[], depts: Map<string, string>): Place {
   return { kind: 'listed', id: null, name: deptIds.map(d => depts.get(d) ?? '').join(', ') };
 }
 
-export async function subViews(db: Db, isOnline: IsOnline, id?: string): Promise<SubView[]> {
+export async function subViews(db: Db, isOnline: IsOnline, id?: string, viewer: Viewer | null = null): Promise<SubView[]> {
   const live = isNull(subscriptions.removedAt);
   const rows = await db
     .select(columns)
@@ -84,12 +107,21 @@ export async function subViews(db: Db, isOnline: IsOnline, id?: string): Promise
   };
   const [orchestrator] = await db.select({ subscriptionId: agents.subscriptionId }).from(agents).where(eq(agents.kind, 'orchestrator'));
   const allNodes = await planNodes(db, rows.filter(r => r.kind === 'personal').map(r => r.id));
+  const told = allNodes.length ? await db.select({ id: nodes.id, account: nodes.account }).from(nodes).where(inArray(nodes.id, allNodes.map(n => n.id))) : [];
+  const accountOf = new Map(told.map(n => [n.id, n.account]));
   return rows.map(r => {
     const mine = allNodes.filter(n => n.subscriptionId === r.id);
     /* A plan's state is of one machine: one online and signed in, else one online, else what the plan was last. So it
        never shows signed in on one machine and online on another, which can take no turn. */
     const up = mine.filter(n => isOnline(nodeIdentity(n.id)));
     const shown = up.find(n => n.status === 'ready') ?? up[0];
+    /* The address an account signed in with goes to the plan's owner and the CEO, never to an agent acting for them. */
+    const sees = viewer !== null && !viewer.via && (viewer.id === r.ownerId || viewer.isOwner === true);
+    const signed = mine.flatMap(n => {
+      const account = accountOf.get(n.id);
+      return account ? [{ node: n, account }] : [];
+    });
+    const { tier, differ } = agreed(signed.map(s => s.account));
     return {
     id: r.id,
     provider: r.provider,
@@ -104,10 +136,15 @@ export async function subViews(db: Db, isOnline: IsOnline, id?: string): Promise
     limits: r.limits ?? null,
     budget: r.budget,
     isOrchestrator: orchestrator?.subscriptionId === r.id,
+    accounts: signed.map(({ node, account }) => ({ nodeId: node.id, hostname: node.hostname, tier: account.tier, ...(sees ? { email: account.email } : {}) })),
+    tier,
+    accountsDiffer: differ,
+    signedInOnce: r.kind === 'personal' && r.credVersion > 0,
+    leaseMachine: (r.leaseNodeId && mine.find(n => n.id === r.leaseNodeId)?.hostname) || null,
     };
   });
 }
 
-export async function subView(db: Db, isOnline: IsOnline, id: string): Promise<SubView | null> {
-  return (await subViews(db, isOnline, id))[0] ?? null;
+export async function subView(db: Db, isOnline: IsOnline, id: string, viewer: Viewer | null = null): Promise<SubView | null> {
+  return (await subViews(db, isOnline, id, viewer))[0] ?? null;
 }
