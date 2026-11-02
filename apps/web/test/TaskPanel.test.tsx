@@ -83,8 +83,8 @@ describe('a task', () => {
   });
 
   it.each([
-    ['en', ['Rita, Code reviewer, passed', 'Rex, Code reviewer, found what blocks', 'Sam, Security engineer, checking now']],
-    ['ru', ['Rita, Ревьюер кода, пропустил', 'Rex, Ревьюер кода, нашел, что блокирует', 'Sam, Инженер безопасности, проверяет сейчас']],
+    ['en', ['Rita, Code reviewer, passed', 'Rex, Code reviewer, found what blocks', 'Tom, Test engineer, checking now', 'Sam, Security engineer, did not check']],
+    ['ru', ['Rita, Ревьюер кода, пропустил', 'Rex, Ревьюер кода, нашел, что блокирует', 'Tom, Инженер по тестам, проверяет сейчас', 'Sam, Инженер безопасности, не проверял']],
   ])('shows the review of a turn with every reviewer checking at once, in %s', async (language, rows) => {
     localStorage.setItem('hh-lang', language);
     const user = userEvent.setup();
@@ -96,7 +96,8 @@ describe('a task', () => {
       gates: [
         { ...TASK_DETAIL.gates[0]!, state: 'passed' as const },
         { ...TASK_DETAIL.gates[0]!, id: 'b5', name: 'Rex', state: 'returned' as const },
-        { ...TASK_DETAIL.gates[2]!, state: 'current' as const },
+        { ...TASK_DETAIL.gates[1]!, state: 'current' as const },
+        { ...TASK_DETAIL.gates[2]!, state: 'skipped' as const },
       ],
     };
     shell({ 'GET /api/tasks?status=all': [200, { tasks: [{ ...TASKS[0]!, title: 'Review of turn 4' }] }], 'GET /api/tasks/t12': [200, { task: review }] });

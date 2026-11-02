@@ -609,7 +609,7 @@ export const ru: Messages = {
     sentBack: n => `возвращена ${n} ${plural('ru', n, { one: 'раз', few: 'раза', many: 'раз', other: 'раза' })}`,
     nobody: 'Никто',
     gates: 'Ворота',
-    gateStates: { working: 'работает над ней', did: 'сделал работу', merging: 'соединяет работу с остальной работой хода', passed: 'пропустил', current: 'проверяет сейчас', next: 'следующий', returned: 'нашел, что блокирует' },
+    gateStates: { working: 'работает над ней', did: 'сделал работу', merging: 'соединяет работу с остальной работой хода', passed: 'пропустил', current: 'проверяет сейчас', next: 'следующий', returned: 'нашел, что блокирует', skipped: 'не проверял' },
     partOf: 'Часть задачи',
     after: 'Начнется после',
     waitsFor: tasks => `ждет ${tasks}`,

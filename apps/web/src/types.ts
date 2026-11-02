@@ -269,8 +269,8 @@ export type TaskDetail = TaskLine & {
   /* The tasks of its turn it comes after, and where each stands. */
   after: { id: string; number: number; title: string; status: TaskStatus }[];
   executor: AgentRef | null;
-  /* returned: a reviewer in the review of a turn who found what blocks. */
-  gates: (AgentRef & { state: 'passed' | 'current' | 'next' | 'returned' })[];
+  /* returned: a reviewer in the review of a turn who found what blocks; skipped: one who did not check it. */
+  gates: (AgentRef & { state: 'passed' | 'current' | 'next' | 'returned' | 'skipped' })[];
   /* The review of a department's turn: every reviewer checks at once, and the head who gets the verdicts did no work. */
   turnReview?: boolean;
   createdBy: { kind: 'person' | 'agent'; id: string; name: string } | null;

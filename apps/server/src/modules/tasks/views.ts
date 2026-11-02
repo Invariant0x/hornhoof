@@ -4,7 +4,7 @@ import { agents, departments, people, requests, taskEvents, tasks, turns, type R
 import { commitUrl, filesOf, picturesOf } from './attachments.js';
 import { deptName } from '../departments/templates.js';
 import type { Lang } from '../templates/load.js';
-import type { Task } from './engine.js';
+import { CLOSED, type Task } from './engine.js';
 
 export type AgentRef = { id: string; name: string; kind: 'orchestrator' | 'head' | 'worker'; role: Lang | null };
 type Place = { id: string; name: string } | null;
@@ -29,8 +29,9 @@ export type TaskLine = {
   createdAt: string;
   updatedAt: string;
 };
-/* returned: a reviewer in the review of a turn who found what blocks. */
-export type GateView = AgentRef & { state: 'passed' | 'current' | 'next' | 'returned' };
+/* In the review of a turn, returned: a reviewer who found what blocks; skipped: one who did not check it, for want of a
+   subscription or having left it. */
+export type GateView = AgentRef & { state: 'passed' | 'current' | 'next' | 'returned' | 'skipped' };
 export type LogLine = { kind: string; text: string; data: unknown; by: { kind: 'person' | 'agent'; id: string; name: string } | null; at: string };
 /* images: the pictures the agent showed, commitUrl: where its commit can be seen, picked: the way a person took in a choice. */
 export type RequestView = {
@@ -141,7 +142,7 @@ export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates'>, task: Task,
   const files = await filesOf(db, task.id);
   /* The review of a turn names everyone who checks it as it opens, and each one's verdict says where they stand. */
   const [made] = await db.select({ data: taskEvents.data }).from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'created'))).limit(1);
-  const reviewers = made?.data.turnReview === true && Array.isArray(made.data.panel) ? (made.data.panel as string[]) : null;
+  const reviewers = made?.data.turnReview === true && Array.isArray(made.data.panel) ? [...(made.data.panel as string[]), ...((made.data.unable as string[] | undefined) ?? [])] : null;
   const verdicts = reviewers ? await db.select({ agentId: taskEvents.agentId, data: taskEvents.data }).from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'verdict'))) : [];
   const [creator] = task.createdByPersonId ? await db.select({ id: people.id, name: people.name }).from(people).where(eq(people.id, task.createdByPersonId)) : [];
   const n = await names(ctx, [task, ...subs], [...(reviewers ?? []), ...events.map(e => e.agentId), ...asks.map(r => r.agentId), ...files.map(f => f.agentId)].filter((x): x is string => Boolean(x)));
@@ -160,7 +161,7 @@ export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates'>, task: Task,
           const a = n.agent(id);
           const given = verdicts.find(v => v.agentId === id);
           if (!a) return [];
-          return [{ ...a, state: given ? (given.data.pass === true ? 'passed' : 'returned') : task.status === 'cancelled' ? 'next' : 'current' }];
+          return [{ ...a, state: given ? (given.data.pass === true ? 'passed' : 'returned') : CLOSED.includes(task.status) || !task.panel.includes(id) ? 'skipped' : 'current' }];
         })
       : task.gates.flatMap((id, i) => {
           const a = n.agent(id);

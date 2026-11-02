@@ -52,7 +52,7 @@ async function refuseOpenUnder(db: Db | Tx, task: Task): Promise<void> {
 }
 
 /* The last work under a task closed: whoever holds the task hears it can go on, once for all of it, unless it closed that
-   work itself. When the work of a department's turn is in, the review of the turn opens instead, with the same move;
+   work itself. When the code of a department's turn is in, the review of the turn opens instead, with the same move;
    opened takes it. A review of the turn that closes tells the head itself. */
 async function workUnderDone(tx: Tx, templates: Live['templates'], closed: Task, actorId: string | undefined, opened: Task[]): Promise<Wake[]> {
   const [parent] = await tx.select().from(tasks).where(eq(tasks.id, closed.parentId!));
@@ -60,14 +60,19 @@ async function workUnderDone(tx: Tx, templates: Live['templates'], closed: Task,
   if (!parent || CLOSED.includes(parent.status) || !holder || (await isTurnReview(tx, closed.id))) return [];
   const [open] = await tx.select({ id: tasks.id }).from(tasks).where(and(eq(tasks.parentId, parent.id), notInArray(tasks.status, [...CLOSED]))).limit(1);
   if (open) return [];
-  if (templates && (await reviewDue(tx, parent))) {
-    const review = await openTurnReview(tx, templates, parent, holder);
-    if (review) {
+  const due = templates ? await reviewDue(tx, parent) : null;
+  let note: string | undefined;
+  if (due?.waiting.length) {
+    note = `The review of the turn opens by itself once the department's other code of the turn, under ${listed(due.waiting)}, is in, and checks the code under this task with it. Give the final check only after its verdicts.`;
+  } else if (due) {
+    const review = await openTurnReview(tx, templates!, parent, holder, due.covered);
+    if ('row' in review) {
       opened.push(review.row);
       return review.wakes;
     }
+    note = review.note;
   }
-  return holder === actorId ? [] : [{ agentId: holder, taskId: parent.id, why: 'subtasks' }];
+  return holder === actorId ? [] : [{ agentId: holder, taskId: parent.id, why: 'subtasks', ...(note ? { note } : {}) }];
 }
 
 const reviewMark = sql`${taskEvents.data}->>'turnReview' = 'true'`;
@@ -78,19 +83,48 @@ async function isTurnReview(db: Db | Tx, taskId: string): Promise<boolean> {
   return Boolean(made);
 }
 
-/* A department's task of a turn in a repository gets one review of the turn, once some of the work under it was merged
-   into the turn's branch: the fixes it asks for go in without a second one. */
-async function reviewDue(db: Db | Tx, parent: Task): Promise<boolean> {
-  if (parent.executorAgentId || !parent.turnId || !parent.departmentId || !(await inRepository(db, parent))) return false;
-  const under = db.select({ id: tasks.id }).from(tasks).where(eq(tasks.parentId, parent.id));
-  const [reviewed] = await db.select({ id: taskEvents.id }).from(taskEvents).where(and(inArray(taskEvents.taskId, under), eq(taskEvents.kind, 'created'), reviewMark)).limit(1);
-  if (reviewed) return false;
+/* The note a task was created with. */
+async function createdData(db: Db | Tx, taskId: string): Promise<Record<string, unknown>> {
+  const [made] = await db.select({ data: taskEvents.data }).from(taskEvents).where(and(eq(taskEvents.taskId, taskId), eq(taskEvents.kind, 'created'))).limit(1);
+  return made?.data ?? {};
+}
+
+/* How a reviewer is woken back to the task it checks: the review of a turn names the turn's branch. */
+export async function reviewWake(db: Db | Tx, task: Task): Promise<Pick<Wake, 'why' | 'text'>> {
+  if (!task.turnId || !(await isTurnReview(db, task.id))) return { why: 'review' };
+  const [turn] = await db.select({ number: turns.number }).from(turns).where(eq(turns.id, task.turnId));
+  return { why: 'turn_review', text: `turn-${turn!.number}` };
+}
+
+/* A department's turn gets its review once code given out for it (without gates of its own, inTurnReview) was merged into
+   the turn's branch, under the department's tasks of the turn that no review checked yet, each review once: the fixes it
+   asks for go in without a second one. covered: those tasks that have such code under them; waiting: the ones whose code
+   is still going on, which the review waits for. Null when none is due. */
+async function reviewDue(db: Db | Tx, parent: Task): Promise<{ covered: Task[]; waiting: Task[] } | null> {
+  if (parent.executorAgentId || !parent.turnId || !parent.departmentId) return null;
+  const ofTurn = and(eq(tasks.companyId, parent.companyId), eq(tasks.turnId, parent.turnId), eq(tasks.departmentId, parent.departmentId));
+  const reviews = await db
+    .select({ data: taskEvents.data })
+    .from(taskEvents)
+    .where(and(inArray(taskEvents.taskId, db.select({ id: tasks.id }).from(tasks).where(ofTurn)), eq(taskEvents.kind, 'created'), reviewMark));
+  const checked = new Set(reviews.flatMap(r => (Array.isArray(r.data.covers) ? (r.data.covers as string[]) : [])));
+  if (checked.has(parent.id)) return null;
+  const own = (await db.select().from(tasks).where(and(ofTurn, isNull(tasks.executorAgentId), ne(tasks.status, 'cancelled'))).orderBy(asc(tasks.number))).filter(t => !checked.has(t.id));
+  const code = await db
+    .select({ id: tasks.id, parentId: tasks.parentId, status: tasks.status })
+    .from(tasks)
+    .innerJoin(taskEvents, and(eq(taskEvents.taskId, tasks.id), eq(taskEvents.kind, 'created'), sql`${taskEvents.data}->>'inTurnReview' = 'true'`))
+    .where(inArray(tasks.parentId, own.map(t => t.id)));
+  if (!code.length) return null;
   const [merged] = await db
     .select({ id: taskEvents.id })
     .from(taskEvents)
-    .where(and(inArray(taskEvents.taskId, under), eq(taskEvents.kind, 'submitted'), sql`${taskEvents.data}->>'merged' = 'true'`))
+    .where(and(inArray(taskEvents.taskId, code.map(c => c.id)), eq(taskEvents.kind, 'submitted'), sql`${taskEvents.data}->>'merged' = 'true'`))
     .limit(1);
-  return Boolean(merged);
+  if (!merged) return null;
+  const covered = own.filter(t => code.some(c => c.parentId === t.id));
+  const waiting = covered.filter(t => code.some(c => c.parentId === t.id && !CLOSED.includes(c.status)));
+  return { covered, waiting };
 }
 
 /* The gate roles of a department in their order, by the first employee of each, one that is on before one that is off. */
@@ -106,17 +140,25 @@ export async function gateLeads(db: Db | Tx, templates: Ctx['templates'], depart
 }
 
 /* The review of a department's turn: every gate role checks the turn's branch at once, of each one of each maker's
-   models, the least busy. The head gives the work and gets the verdicts. Null with nobody to check it: the head hears the
-   work under its task is done, as without a review. Inside the move that closed the last work, which holds the company
-   and the task, as a new task takes them. */
-async function openTurnReview(tx: Tx, templates: Ctx['templates'], parent: Task, head: string): Promise<{ row: Task; wakes: Wake[] } | null> {
+   models, the least busy. The head gives the work and gets the verdicts. With nobody to check it, a note for the head,
+   who hears the work under its task is done as without a review. Inside the move that closed the last work, which holds
+   the company and the task, as a new task takes them. covered: the department's tasks of the turn it checks. */
+async function openTurnReview(tx: Tx, templates: Ctx['templates'], parent: Task, head: string, covered: Task[]): Promise<{ row: Task; wakes: Wake[] } | { note?: string }> {
   const leads = await gateLeads(tx, templates, parent.departmentId!, head);
   const draft = { ...parent, executorAgentId: head, gates: leads };
-  const panel = [...new Set((await Promise.all(leads.map((_, i) => panelFor(tx, draft, i + 1)))).flatMap(p => p.panel))];
-  if (!panel.length) return null;
+  const roles = await Promise.all(leads.map((_, i) => panelFor(tx, draft, i + 1)));
+  const panel = [...new Set(roles.flatMap(p => p.panel))];
+  /* A role none of whose reviewers has a subscription does not check it, and the head hears who. */
+  const unable = roles.filter(p => !p.panel.length).flatMap(p => p.idle);
+  if (!panel.length) {
+    const who = joined(unable.map(a => a.name));
+    return unable.length ? { note: `Nobody could review the turn: ${who} ${unable.length === 1 ? 'has' : 'have'} no subscription to run on. Give them one on their cards, or give the final check without the review.` } : {};
+  }
   const [turn] = await tx.select({ number: turns.number }).from(turns).where(eq(turns.id, parent.turnId!));
   const [last] = await tx.select({ n: max(tasks.number) }).from(tasks).where(eq(tasks.companyId, parent.companyId));
   const branch = `turn-${turn!.number}`;
+  const titles = joined(covered.map(t => `"${t.title}"`));
+  const under = joined(covered.map(t => `#${t.number} "${t.title}"`));
   const [row] = await tx
     .insert(tasks)
     .values({
@@ -127,8 +169,8 @@ async function openTurnReview(tx: Tx, templates: Ctx['templates'], parent: Task,
       departmentId: parent.departmentId,
       productId: parent.productId,
       title: `Review of turn ${turn!.number}`,
-      brief: `Every reviewer checks all that turn ${turn!.number} changed for "${parent.title}" at once, on ${branch}.`,
-      body: `Review ${branch} against the main line: everything the turn changed under #${parent.number} "${parent.title}". The verdicts go to the head in one list.`,
+      brief: `Every reviewer checks all that turn ${turn!.number} changed for ${titles} at once, on ${branch}.`,
+      body: `Review ${branch} against the main line: everything the turn changed under ${under}. The verdicts go to the head in one list.`,
       status: 'review',
       stage: 1,
       assigneeAgentId: panel[0]!,
@@ -139,14 +181,23 @@ async function openTurnReview(tx: Tx, templates: Ctx['templates'], parent: Task,
       updatedAt: new Date(),
     })
     .returning();
-  await note(tx, row!, { kind: 'created', actor: { agentId: head }, text: row!.brief, data: { assignee: panel[0], gates: leads, after: [], panel, turnReview: true } });
+  await note(tx, row!, {
+    kind: 'created',
+    actor: { agentId: head },
+    text: row!.brief,
+    data: { assignee: panel[0], gates: leads, after: [], panel, unable: unable.map(a => a.id), covers: covered.map(t => t.id), turnReview: true },
+  });
   return { row: row!, wakes: panel.map(agentId => ({ agentId, taskId: row!.id, why: 'turn_review', text: branch })) };
+}
+
+/* Names as a reader says them: "A", "A and B", "A, B and C". */
+function joined(names: string[]): string {
+  return names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : (names[0] ?? '');
 }
 
 /* Task numbers as a reader says them: "#2", "#2 and #3", "#2, #3 and #4". */
 export function listed(rows: Pick<Task, 'number'>[]): string {
-  const names = rows.map(t => `#${t.number}`);
-  return names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : (names[0] ?? '');
+  return joined(rows.map(t => `#${t.number}`));
 }
 
 /* The tasks this one comes after that are not done yet, by number. */
@@ -368,6 +419,8 @@ export type NewTask = {
   gates?: string[];
   /* Tasks of the same turn that must be done first. */
   after?: string[];
+  /* Code given out without gates of its own: the review of its department's turn checks it. */
+  inTurnReview?: boolean;
 };
 
 /* A live employee or orchestrator of the company. */
@@ -446,7 +499,7 @@ export async function createTask(ctx: Live, actor: Actor, input: NewTask): Promi
         updatedAt: new Date(),
       })
       .returning();
-    await note(tx, row!, { kind: 'created', actor, text: row!.brief, data: { assignee: assignee.id, gates, after: row!.after } });
+    await note(tx, row!, { kind: 'created', actor, text: row!.brief, data: { assignee: assignee.id, gates, after: row!.after, ...(input.inTurnReview ? { inTurnReview: true } : {}) } });
     /* One that waits for what it comes after is not given out yet: the move that finishes the last of them wakes its holder. */
     if (!waits) await keepWakes(tx, row!.companyId, [{ agentId: assignee.id, taskId: row!.id, why: 'assigned' }]);
     return row!;
@@ -489,9 +542,9 @@ const MAKER: Partial<Record<string, string>> = { anthropic_api: 'claude', openai
    checks the same work at once: among the live employees of the gate's role in its department that are on, for the
    task's product or for none, never the executor, the one with the fewest tasks at a gate, the oldest on a tie. The
    reviewer the gate names is one of them like any other. A reviewer without a role checks alone. again: those who sent
-   the work back from this gate, who check the fixes alone while any of them is still there. idle: the names of those
-   without a subscription to run on. */
-async function panelFor(db: Db | Tx, task: Task, stage: number, again: string[] = []): Promise<{ panel: string[]; idle: string[] }> {
+   the work back from this gate, who check the fixes alone while any of them is still there. idle: those without a
+   subscription to run on. */
+async function panelFor(db: Db | Tx, task: Task, stage: number, again: string[] = []): Promise<{ panel: string[]; idle: { id: string; name: string }[] }> {
   const named = task.gates[stage - 1];
   if (!named) return { panel: [], idle: [] };
   const [lead] = await db.select().from(agents).where(eq(agents.id, named));
@@ -505,7 +558,7 @@ async function panelFor(db: Db | Tx, task: Task, stage: number, again: string[] 
     .orderBy(asc(agents.createdAt));
   const product = task.productId ?? lead.productId;
   const fit = rows.filter(a => a.id !== task.executorAgentId && (!a.productId || a.productId === product));
-  const idle = fit.filter(a => !a.sub).map(a => a.name);
+  const idle = fit.filter(a => !a.sub).map(a => ({ id: a.id, name: a.name }));
   const able = fit.filter(a => a.sub);
   const back = able.filter(a => again.includes(a.id));
   if (back.length) return { panel: back.map(a => a.id), idle };
@@ -590,7 +643,7 @@ async function atGate(db: Db | Tx, task: Task, from: number, findings = new Map<
   const [lead] = await db.select({ name: agents.name, roleKey: agents.roleKey }).from(agents).where(eq(agents.id, task.gates[stage - 1]!));
   const who = lead?.roleKey ?? lead?.name ?? 'its reviewer';
   const text = idle.length
-    ? `${idle.join(', ')} ${idle.length === 1 ? 'has' : 'have'} no subscription to run on, so gate ${stage} (${who}) cannot check it. Give them one on their card and then give the task its gates again with update_task, switch them off, or give it other gates.`
+    ? `${idle.map(a => a.name).join(', ')} ${idle.length === 1 ? 'has' : 'have'} no subscription to run on, so gate ${stage} (${who}) cannot check it. Give them one on their card and then give the task its gates again with update_task, switch them off, or give it other gates.`
     : `Nobody who can check it at gate ${stage} (${who}) is on. Give it other gates with update_task, or tell the CEO it waits for one of them.`;
   return { set: { status: 'review', stage, panel: [], silent: 0, assigneeAgentId: task.createdByAgentId }, wakes: giver(task, 'switched', undefined, text) };
 }
@@ -673,14 +726,26 @@ async function closeGate(ctx: Live, task: Task, n: Note, given: Given[]): Promis
   return { task: row, wakes };
 }
 
-/* Everyone has spoken on the review of a turn: it is over either way, without a second round, and the head gets every
-   verdict in one list, what blocks first. */
+/* Everyone has spoken on the review of a turn, or left it: it is over either way, without a second round, and the head
+   gets every verdict in one list, what blocks first, then who did not check it. */
 async function closeTurnReview(ctx: Live, task: Task, n: Note, given: Given[]): Promise<Moved> {
   const said = (gs: Given[]) => gs.map(g => `${g.name}: ${g.comment}`).join('\n\n');
   const blocking = given.filter(g => !g.pass);
   const notes = given.filter(g => g.pass);
-  const text = blocking.length ? [`Blocking:\n\n${said(blocking)}`, ...(notes.length ? [`Passed, with their notes:\n\n${said(notes)}`] : [])].join('\n\n') : said(notes);
-  const wakes: Wake[] = [{ agentId: task.executorAgentId!, taskId: task.id, why: blocking.length ? 'reviewed' : 'review_passed', text }];
+  const made = await createdData(ctx.db, task.id);
+  const spoke = new Set(given.map(g => g.agentId));
+  const left = ((made.panel as string[] | undefined) ?? []).filter(id => !spoke.has(id));
+  const unable = (made.unable as string[] | undefined) ?? [];
+  const staff = left.length + unable.length ? await ctx.db.select({ id: agents.id, name: agents.name }).from(agents).where(inArray(agents.id, [...left, ...unable])) : [];
+  const name = (id: string) => staff.find(a => a.id === id)?.name ?? id;
+  const missed = [...left.map(id => `${name(id)} (left without a verdict)`), ...unable.map(id => `${name(id)} (no subscription to run on)`)];
+  const text = [
+    ...(blocking.length ? [`Blocking:\n\n${said(blocking)}`, ...(notes.length ? [`Passed, with their notes:\n\n${said(notes)}`] : [])] : notes.length ? [said(notes)] : []),
+    ...(missed.length ? [`Did not check: ${missed.join(', ')}.`] : []),
+  ].join('\n\n');
+  const [parent] = blocking.length && task.parentId ? await ctx.db.select({ number: tasks.number, title: tasks.title }).from(tasks).where(eq(tasks.id, task.parentId)) : [];
+  const where = parent ? { note: `Put the fixes under #${parent.number} "${parent.title}": create_task with parent ${parent.number}.` } : {};
+  const wakes: Wake[] = [{ agentId: task.executorAgentId!, taskId: task.id, why: blocking.length ? 'reviewed' : 'review_passed', text, ...where }];
   return { task: await move(ctx, task, { ...closing(), panel: [] }, n, undefined, wakes), wakes };
 }
 
@@ -846,7 +911,8 @@ async function leaveTask(ctx: Live, n: Note, agent: Leaver, task: Task): Promise
     return { wakes: [], closed: null };
   }
   const given = await gateVerdicts(ctx.db, task);
-  if (given.length) {
+  /* The review of a turn closes as its last reviewer leaves, with whatever verdicts it has. */
+  if (given.length || (await isTurnReview(ctx.db, task.id))) {
     const moved = await closeGate(ctx, task, n, given);
     return { wakes: moved.wakes, closed: CLOSED.includes(moved.task.status) ? moved.task : null };
   }
@@ -1194,7 +1260,10 @@ export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answ
     const goesOn = found.kind === 'stuck' && after!.stage === 0 && after!.assigneeAgentId ? after!.assigneeAgentId : found.agentId;
     wakes = CLOSED.includes(after!.status) ? [] : [{ agentId: goesOn, taskId: task.id, why: 'answered', text: said }];
     /* The last answer at a gate: everyone else still to give a verdict there goes on too, also after a turn spent waiting. */
-    if (current?.status === 'waiting' && after!.status === 'review') wakes.push(...after!.panel.filter(id => id !== found.agentId).map(agentId => ({ agentId, taskId: task.id, why: 'review' as const })));
+    if (current?.status === 'waiting' && after!.status === 'review') {
+      const back = await reviewWake(tx, after!);
+      wakes.push(...after!.panel.filter(id => id !== found.agentId).map(agentId => ({ agentId, taskId: task.id, ...back })));
+    }
     await keepWakes(tx, task.companyId, wakes);
     return request;
   });

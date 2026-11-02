@@ -974,6 +974,7 @@ summary.turn-head:focus-visible { outline: 2px solid var(--cyan); outline-offset
 .tgates li span { color: var(--muted); }
 .tgates li.passed::before { background: var(--ok); }
 .tgates li.returned::before { background: var(--amber); }
+.tgates li.skipped { opacity: 0.6; }
 .tgates li.current::before { background: var(--cyan); box-shadow: 0 0 0 4px var(--glow); }
 .tgates li.current span { color: var(--cyan-ink); font-weight: 600; }
 .tp-brief { font-weight: 500; }
