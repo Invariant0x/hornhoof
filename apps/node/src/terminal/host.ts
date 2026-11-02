@@ -16,7 +16,7 @@ import type { ProgramOutput } from '../program-exit.js';
 import { Bridge } from './bridge.js';
 import { fromAgent } from './peer.js';
 import { StreamMask } from './mask.js';
-import { acceptClaudeDialogs, agyLog, claudeTranscript, findKimiWire, findRollout, prepareAgy, prepareKimi, type TermProgram } from './programs.js';
+import { acceptClaudeDialogs, agyLog, claudeTranscript, findKimiWire, findRollout, prepareAgy, prepareKimi, rolloutFiles, type TermProgram } from './programs.js';
 import { claudeStatusContext, claudeStatusLimits, codexRollout, kimiWire, LineTail, type WireNews } from './transcripts.js';
 import { envFile, type Tmux } from './tmux.js';
 
@@ -68,6 +68,8 @@ type Agent = {
   /* Sessions a person cleared in the running program: a turn asking for one goes on in the session that replaced it. */
   cleared: Set<string>;
   tail: LineTail | null;
+  /* The Codex session logs there were when the program started a new session: its own log is none of them. */
+  oldLogs: Set<string> | null;
   startedAt: number;
   started: Deferred<void> | null;
   ended: Deferred<string> | null;
@@ -237,7 +239,7 @@ export class TerminalHost {
   private agent(key: string): Agent {
     let a = this.agents.get(key);
     if (!a) {
-      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, viewers: 0, up: false, watch: null, saying: Promise.resolve(), queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null };
+      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, viewers: 0, up: false, watch: null, saying: Promise.resolve(), queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null };
       this.agents.set(key, a);
     }
     return a;
@@ -317,7 +319,7 @@ export class TerminalHost {
         /* A person's first message into a new Kimi session, or into Antigravity, reaches its tools a moment before Hornhoof
            opens their turn. */
         this.bridge.waitForTurns(job.key, program.kind === 'kimi' || program.kind === 'antigravity' ? this.openMs + 2000 : 0);
-        Object.assign(a, { program, home: job.home, workDir: input.workDir, hash, sessionId: spec.sessionId, cleared: new Set(), startedAt: Date.now(), started: deferred<void>(), fresh: false, keep: namesLater ? (input.context ?? null) : null, contextSize: program.kind === 'kimi' ? kimiWindow(job.home, input.model) : null });
+        Object.assign(a, { program, home: job.home, workDir: input.workDir, hash, sessionId: spec.sessionId, cleared: new Set(), oldLogs: program.kind === 'codex' && !spec.sessionId ? rolloutFiles(job.home) : null, startedAt: Date.now(), started: deferred<void>(), fresh: false, keep: namesLater ? (input.context ?? null) : null, contextSize: program.kind === 'kimi' ? kimiWindow(job.home, input.model) : null });
         if (program.kind === 'claude' && !input.sessionId && input.context && spec.sessionId) await keepContext(this.fs, input.workDir, spec.sessionId, input.context);
         a.tail = this.tailFor(a);
         const env = { ...lasting(input.env), ...spec.env };
@@ -537,7 +539,7 @@ export class TerminalHost {
   /* What the program wrote to its log since last time: events for the turn, Codex's limits, session and turn end. */
   private drain(a: Agent): void {
     if (!a.tail && a.program?.kind === 'codex') {
-      const found = findRollout(a.home, a.workDir, a.startedAt - 2000);
+      const found = findRollout(a.home, a.workDir, a.startedAt - 2000, null, a.oldLogs ?? undefined);
       if (found) {
         a.sessionId = found.sessionId;
         a.tail = new LineTail(found.file);

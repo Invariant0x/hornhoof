@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Plays Codex in a terminal for the host tests: shows its prompt, keeps a session log under CODEX_HOME/sessions as Codex
 // does, and answers each line typed or pasted with "echo: LINE". HANG never answers, ABORT logs what Codex logs when a
-// person stops a turn with Escape; LATE answers, then logs a stop of that turn a moment later.
+// person stops a turn with Escape; LATE answers, then logs a stop of that turn a moment later. Like Codex, a new session
+// writes its log only once the first message comes.
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, mkdirSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -15,14 +16,19 @@ const home = process.env.CODEX_HOME ?? '/tmp';
 const day = join(home, 'sessions', '2026', '10', '30');
 mkdirSync(day, { recursive: true });
 let log;
+let meta = null;
 if (args[0] === 'resume') {
   log = join(day, readdirSync(day).find(name => name.endsWith(`-${args[1]}.jsonl`)));
 } else {
   const id = randomUUID();
   log = join(day, `rollout-2026-10-30T00-00-00-${id}.jsonl`);
-  appendFileSync(log, JSON.stringify({ type: 'session_meta', payload: { id, cwd: args[args.indexOf('-C') + 1] } }) + '\n');
+  meta = { type: 'session_meta', payload: { id, cwd: args[args.indexOf('-C') + 1] } };
 }
-const event = payload => appendFileSync(log, JSON.stringify({ type: 'event_msg', payload }) + '\n');
+const event = payload => {
+  if (meta) appendFileSync(log, JSON.stringify(meta) + '\n');
+  meta = null;
+  appendFileSync(log, JSON.stringify({ type: 'event_msg', payload }) + '\n');
+};
 const item = (type, text) => event({ type: 'item_completed', item: { type, id: randomUUID(), content: [{ type: 'text', text }] } });
 
 process.stdout.write('OpenAI Codex\n› ');
