@@ -286,7 +286,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
       {
         description:
           'Gives work to a member of your department: executor is an employee id from company. Name yourself only when no member can do it. gates are the reviewers it passes in order, as role ids (DEV-REV) or employee ids: ' +
-          "name only the gates the work's size and risk need: [] for research, reports, plans and docs. Left out, every gate role of the department that is hired. The executor never reviews its own work. parent: the department task it serves.",
+          "name only the gates the work's size and risk need: [] for research, reports, plans and docs. Name a role once: one reviewer of each model of it checks the work at once there. Left out, every gate role of the department that is hired. The executor never reviews its own work. parent: the department task it serves.",
         inputSchema: { title: Title, brief: Brief, body: Body, executor: z.uuid(), gates: z.array(z.string().max(40)).max(8).optional(), parent: Ref.optional(), product: z.uuid().optional(), after: After.optional() },
       },
       async input =>
