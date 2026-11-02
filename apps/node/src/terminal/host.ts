@@ -111,7 +111,8 @@ type Agent = {
 };
 
 type Size = { cols: number; rows: number };
-/* shown: the size its tmux client has, or is being given; tty: that client's terminal, once found. */
+/* shown: the size its tmux client is to have; applied: the size it was last given; sizing: the sizes on their way, one
+   after another; tty: that client's terminal, once found. */
 type View = {
   child: ChildProcess;
   key: string;
@@ -122,6 +123,8 @@ type View = {
   timer: NodeJS.Timeout | null;
   quiet: NodeJS.Timeout | null;
   shown: Size;
+  applied: Size;
+  sizing: Promise<void>;
   tty: string | null;
   out(text: string): void;
 };
@@ -855,6 +858,22 @@ export class TerminalHost {
   }
 
   async open(m: Msg<'term.open'>): Promise<void> {
+    try {
+      await this.openView(m);
+    } catch (err) {
+      /* A view that did not open, as one whose session another window started at the same moment, keeps no size. */
+      await this.forget(m.termId, m.agentKey);
+      throw err;
+    }
+  }
+
+  /* The others may have got smaller for a view that is gone. */
+  private forget(termId: string, key: string): Promise<void> {
+    this.wanted.delete(termId);
+    return this.fit(key);
+  }
+
+  private async openView(m: Msg<'term.open'>): Promise<void> {
     const a = this.agent(m.agentKey);
     this.viewsOpening.add(m.termId);
     this.wanted.set(m.termId, { key: m.agentKey, size: { cols: m.cols, rows: m.rows } });
@@ -874,14 +893,10 @@ export class TerminalHost {
     } finally {
       this.viewsOpening.delete(m.termId);
     }
-    if (this.viewsClosed.delete(m.termId)) {
-      /* The others may have got smaller for it. */
-      this.wanted.delete(m.termId);
-      return this.fit(m.agentKey);
-    }
+    if (this.viewsClosed.delete(m.termId)) return this.forget(m.termId, m.agentKey);
     const shown = this.fitted(m.agentKey);
     const child = this.opts.tmux.attach(a.name, shown.cols, shown.rows, m.write);
-    const view: View = { child, key: m.agentKey, write: m.write, mask: new StreamMask(this.opts.secrets), decoder: new StringDecoder('utf8'), pending: '', timer: null, quiet: null, shown, tty: null, out: () => {} };
+    const view: View = { child, key: m.agentKey, write: m.write, mask: new StreamMask(this.opts.secrets), decoder: new StringDecoder('utf8'), pending: '', timer: null, quiet: null, shown, applied: shown, sizing: Promise.resolve(), tty: null, out: () => {} };
     this.views.set(m.termId, view);
     a.viewers++;
     /* A watcher of an agent that sleeps sees the waiting screen; anyone else, a loader until the program is up. */
@@ -952,12 +967,20 @@ export class TerminalHost {
     await Promise.all(changed.map(([termId, view]) => this.sizeView(termId, view, size)));
   }
 
-  private async sizeView(termId: string, view: View, size: Size): Promise<void> {
+  /* Sizes go to a view's terminal one after another, so an older one never lands after a newer one, and each takes the
+     newest size there is by then. */
+  private sizeView(termId: string, view: View, size: Size): Promise<void> {
     view.shown = size;
+    view.sizing = view.sizing.then(() => this.applySize(termId, view));
+    return view.sizing;
+  }
+
+  private async applySize(termId: string, view: View): Promise<void> {
+    const size = view.shown;
     const tty = await this.ttyOf(termId, view);
-    /* A newer size may have come while the client was looked for. */
-    if (!tty || view.shown !== size) return;
+    if (!tty || sameSize(view.applied, size)) return;
     await stty(tty, size);
+    view.applied = size;
     await this.clientSized(tty, size);
     if (view.shown === size) this.eraseBelowSession(termId, view, size);
   }
@@ -990,8 +1013,7 @@ export class TerminalHost {
     if (view) {
       view.child.kill();
       /* Its viewer process takes a while to end; the others get their size back at once. */
-      this.wanted.delete(m.termId);
-      void this.fit(view.key);
+      void this.forget(m.termId, view.key);
     } else if (this.viewsOpening.has(m.termId)) this.viewsClosed.add(m.termId);
   }
 }
