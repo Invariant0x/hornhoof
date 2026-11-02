@@ -6,6 +6,10 @@ import type { Department, Org, PersonView } from './types';
 /* What each employee does changes with its tasks and questions. */
 const SETTLE_MS = 400;
 
+/* What makes the company fetch again at once: the map changed, the stream came back after a break, or the request for
+   the computer changed, since who decides and what waits for the CEO change the counts on the people's cards. */
+const FETCH_AT_ONCE: ReadonlySet<string> = new Set(['org', 'reconnected', 'computer']);
+
 /* An agent's context moves with every step it takes; only its bar changes. */
 function withContext(org: Org, agentId: string, used: number): Org {
   const departments = org.departments.map(d => (d.employees.some(e => e.id === agentId) ? { ...d, employees: d.employees.map(e => (e.id === agentId ? { ...e, context: used } : e)) } : d));
@@ -91,8 +95,7 @@ export function useOrg(enabled = true): { org: Org | null; failure: unknown } {
         load();
       }, SETTLE_MS);
     }
-    /* Who decides and what waits for the CEO change the counts on the people's cards. */
-    if (m.type === 'org' || m.type === 'reconnected' || m.type === 'computer') load();
+    if (FETCH_AT_ONCE.has(m.type)) load();
     if (m.type === 'context') setOrg(o => o && withContext(o, m.agentId, m.used));
     if (m.type === 'working') {
       setOrg(o => o && { ...o, agents: { ...o.agents, working: m.working } });

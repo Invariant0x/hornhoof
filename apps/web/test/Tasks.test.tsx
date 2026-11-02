@@ -361,4 +361,3 @@ describe('the decisions of one person', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Tasks' })).toBeInTheDocument());
   });
 });
-

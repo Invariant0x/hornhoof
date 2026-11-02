@@ -12,6 +12,9 @@ export const wordsAnswer = (requests: WaitingRequest[]) => requests.some(r => r.
 /* A picture an agent showed, as people who reach its task load it. */
 const picture = (id: string) => `/api/attachments/${id}`;
 
+/* The form a request shows: the one of its kind to a person the server lets answer it, and none to anyone else. */
+const formOf = (request: WaitingRequest): WaitingRequest['kind'] | null => (request.canAnswer ? request.kind : null);
+
 /* onOpenAgent opens the asking agent's window, to see in its terminal what it did. */
 type Shared = { onOpenTask: (id: string) => void; onOpenAgent: (id: string) => void; placeName: (p: TaskPlace) => string };
 
@@ -23,6 +26,7 @@ function RequestItem({ request, onDone, onOpenTask, onOpenAgent, placeName }: Sh
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<unknown>(null);
   const { task, agent } = request;
+  const form = formOf(request);
 
   async function send(path: string, body: unknown) {
     setBusy(true);
@@ -88,7 +92,7 @@ function RequestItem({ request, onDone, onOpenTask, onOpenAgent, placeName }: Sh
           {t.tasks.seeWork}
         </a>
       )}
-      {request.kind === 'choice' && request.canAnswer && (
+      {form === 'choice' && (
         <div className="req-form">
           <div className="req-options">
             {request.options.map((o, i) => (
@@ -101,7 +105,7 @@ function RequestItem({ request, onDone, onOpenTask, onOpenAgent, placeName }: Sh
           <Field label={t.tasks.note}>{p => <input {...p} value={text} maxLength={4000} onChange={e => setText(e.target.value)} />}</Field>
         </div>
       )}
-      {(request.kind === 'question' || request.kind === 'stuck') && request.canAnswer && (
+      {(form === 'question' || form === 'stuck') && (
         <form className="req-form" onSubmit={answer}>
           <Field label={t.tasks.yourAnswer}>{p => <textarea {...p} rows={3} value={text} maxLength={4000} onChange={e => setText(e.target.value)} />}</Field>
           <div className="req-actions">
@@ -122,7 +126,7 @@ function RequestItem({ request, onDone, onOpenTask, onOpenAgent, placeName }: Sh
           <p className="muted">{t.tasks.approvedByCompany}</p>
         </div>
       )}
-      {request.kind === 'approval' && request.canAnswer && (
+      {form === 'approval' && (
         <div className="req-form">
           <Commit request={request} />
           <Field label={t.tasks.note}>{p => <input {...p} value={text} maxLength={4000} onChange={e => setText(e.target.value)} />}</Field>

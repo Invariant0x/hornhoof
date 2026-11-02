@@ -71,6 +71,13 @@ export type StaffAsk = { id: string; name: string; at: number };
 /* agentId: 'orchestrator' or an employee's id. staff: the CEO's "+ Hire", for the orchestrator's window only. */
 type Props = { me: Me; org: Org; agentId: string; staff?: StaffAsk | null; onClose(): void; onCard?(): void };
 
+/* The request for the computer changed, here or on another of the CEO's screens: what the window shows of it loads again. */
+function useComputerChanges(load: () => Promise<void>): void {
+  useStream(m => {
+    if (m.type === 'computer') void load();
+  });
+}
+
 /* An agent's window: its live terminal when its node shows one, or its conversation as a log with a line to write to it;
    and the orchestrator's cards. */
 export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard }: Props) {
@@ -216,6 +223,8 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard }:
     wasReady.current = canAnswer;
   }, [canAnswer, greet]);
 
+  useComputerChanges(loadCommands);
+
   useStream(m => {
     if (m.type === 'agent_event' && m.agentId === liveId) {
       merge([m.event]);
@@ -223,8 +232,6 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard }:
     }
     if (m.type === 'working') soon();
     if (m.type === 'org') loadCard();
-    /* The request for the computer changed, here or on another of the CEO's screens. */
-    if (m.type === 'computer') void loadCommands();
     if (m.type === 'reconnected') {
       loadCard();
       void catchUp();
