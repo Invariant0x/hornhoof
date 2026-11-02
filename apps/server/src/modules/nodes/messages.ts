@@ -2,7 +2,7 @@ import { lastBytes, type NodeMessage } from '@hornhoof/protocol';
 import { and, eq, inArray, isNull, notInArray, or, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { agents, jobs, nodes, subscriptions } from '../../db/schema.js';
+import { agents, jobs, nodes, planCredentials, subscriptions } from '../../db/schema.js';
 import { said } from '../conversation/live.js';
 import { nodeOfAgent, pumpWaiting, refusedLimits, startProgram } from '../conversation/queue.js';
 import { afterJob, typedTurn } from '../tasks/wake.js';
@@ -53,6 +53,8 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
         }
         /* A machine disconnected in Hornhoof has no key any more; what its socket still says changes nothing. */
         if (!row.node.keyHash) return;
+        /* A node set up again has a new key: what was sealed to its old one is of no use, and gets sealed to the new one. */
+        if (msg.publicKey && row.node.publicKey && msg.publicKey !== row.node.publicKey) await db.delete(planCredentials).where(eq(planCredentials.nodeId, id.nodeId));
         await db
           .update(nodes)
           .set({
@@ -108,7 +110,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       if (id.kind !== 'node') return;
       const [node] = await db.select({ plan: nodes.subscriptionId, companyId: nodes.companyId }).from(nodes).where(and(eq(nodes.id, id.nodeId), liveNode));
       if (!node?.plan) return;
-      const kept = await storeEnvelopes(db, { id: node.plan, companyId: node.companyId }, msg.kind, msg.version, msg.envelopes);
+      const kept = await storeEnvelopes(db, { id: node.plan, companyId: node.companyId }, msg.kind, msg.version, msg.envelopes, id.nodeId);
       deliver(ctx, msg.kind, msg.version, kept, id.nodeId);
       return;
     }

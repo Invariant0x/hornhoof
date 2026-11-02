@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,6 +10,9 @@ import { runNode } from '../src/main.js';
 import { kimiModels } from '../src/providers/kimi.js';
 import type { ProviderAdapter } from '../src/runner.js';
 import { writeState } from '../src/state.js';
+import { planToken } from '../src/terminal/programs.js';
+import { readAccount } from '../src/account.js';
+import { claudeAdapter } from '../src/providers/claude.js';
 
 const TOKEN = 'sk-ant-oat01-' + 'a'.repeat(40);
 const bytes = (s: string) => new TextEncoder().encode(s);
@@ -169,6 +172,52 @@ describe('applying a sign-in', () => {
   });
 });
 
+describe('a sign-in its program refused', () => {
+  it('keeps the node signed out until the sign-in changes, so turns do not go round on it', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-cred-'));
+    const refusing: ProviderAdapter = { ...adapter, run: async () => ({ ok: false, sessionId: null, result: '', output: 'Not logged in', error: 'not_logged_in', limits: null }) };
+    const { server, me } = await node({ adapter: refusing, loginCheckMs: 30 }, dir);
+    server.send({ type: 'cred.put', kind: 'claude_token', version: 1, sealed: await seal(bytes(TOKEN), [me.recipient]) });
+    await server.wait(() => existsSync(join(dir, 'home', 'claude-oauth-token')));
+    server.send({ type: 'job.run', jobId: 'j1', provider: 'claude', secret: null, subscriptionId: 's1', sessionId: null, model: null, timeoutMs: 10000, prompt: 'hi', instructions: null, toolToken: null });
+    await server.wait(() => server.received.filter(m => m.type === 'status').at(-1)?.loggedIn === false);
+    await new Promise(r => setTimeout(r, 300));
+    expect(server.received.filter(m => m.type === 'status').at(-1)).toMatchObject({ loggedIn: false });
+    /* A new sign-in from Hornhoof is tried again. */
+    server.send({ type: 'cred.put', kind: 'claude_token', version: 2, sealed: await seal(bytes(TOKEN.replace('a', 'b')), [me.recipient]) });
+    await server.wait(() => server.received.filter(m => m.type === 'status').at(-1)?.loggedIn === true);
+  });
+});
+
+describe("sign-in files in the agents' home", () => {
+  /* Agents own the plan's home and can put a link there to a file only the node reads, such as its key. */
+  const swapped = (make: (target: string, path: string) => void) => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-swap-'));
+    const home = join(dir, 'home');
+    mkdirSync(home);
+    const key = join(dir, 'node-key');
+    writeFileSync(key, `AGE-SECRET-KEY-1${'Q'.repeat(40)}\n`);
+    for (const f of ['claude-oauth-token', 'auth.json', 'kimi-key', 'glm-key', 'config.toml']) make(key, join(home, f));
+    return { dir, home };
+  };
+
+  for (const [what, make] of [['a link', symlinkSync], ['a second name', linkSync]] as const) {
+    it(`are not read through ${what} an agent put there, so no file of the node reaches the agents`, async () => {
+      const { dir, home } = swapped(make);
+      expect(planToken(home)).toBeNull();
+      expect(heldCredential(home, 'claude_token')).toBeNull();
+      expect(heldCredential(home, 'codex_auth')).toBeNull();
+      expect(credentialSecrets(home)).toEqual([]);
+      expect(await readAccount('codex', home, {})).toBeNull();
+      /* A GLM plan's program does not get the file in its env either. */
+      expect(await claudeAdapter({ home, tools: dir, mode: 'glm' }).loggedIn()).toBe(false);
+      /* A Kimi key keeps the settings it finds; a swapped settings file is not one. */
+      applyCredential(dir, home, 'kimi_key', bytes('sk-kimi-0123456789abcdef'));
+      expect(readFileSync(join(home, 'config.toml'), 'utf8')).not.toContain('AGE-SECRET-KEY');
+    });
+  }
+});
+
 describe("a Codex plan's lease on a node", () => {
   const auth = (n: number) => JSON.stringify({ tokens: { access_token: `codex-access-${n}-0123456789abcdef`, refresh_token: `codex-refresh-${n}-0123456789abcdef` } });
   const holder = (dir: string) => {
@@ -217,6 +266,40 @@ describe("a Codex plan's lease on a node", () => {
     await server.wait(() => sealedCount(server.received) === 2);
     await new Promise(r => setTimeout(r, 300));
     expect(sealedCount(server.received)).toBe(2);
+  });
+
+  it('takes the plan over from the messages of a move sent all at once, and seals what it got and what Codex renews', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-cred-'));
+    const { server, me } = await node({ leaseCheckMs: 50 }, dir);
+    const peer = await nodeIdentity(mkdtempSync(join(tmpdir(), 'hh-peer-')));
+    const recipients = [{ nodeId: 'n-self', publicKey: me.recipient }, { nodeId: 'n-peer', publicKey: peer.recipient }];
+    server.send({ type: 'cred.lease', hold: true });
+    server.send({ type: 'cred.put', kind: 'codex_auth', version: 2, sealed: await seal(bytes(auth(5)), [me.recipient]) });
+    server.send({ type: 'cred.seal', kind: 'codex_auth', version: 2, recipients });
+    await server.wait(() => sealedCount(server.received) === 1);
+    const first = server.received.find(m => m.type === 'cred.sealed') as unknown as { version: number; envelopes: { nodeId: string; sealed: string }[] };
+    expect(first.version).toBe(2);
+    expect(new TextDecoder().decode(await unseal(first.envelopes.find(e => e.nodeId === 'n-peer')!.sealed, peer.identity))).toBe(auth(5));
+    writeFileSync(join(dir, 'home', 'auth.json'), auth(6));
+    await server.wait(() => sealedCount(server.received) === 2);
+    expect(server.received.filter(m => m.type === 'cred.sealed')[1]).toMatchObject({ version: 3 });
+  });
+
+  it('as a spare machine stays signed out though a Codex still running there writes its file back', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-cred-'));
+    holder(dir);
+    const { server, me } = await node({ adapter: { ...adapter, loggedIn: async () => existsSync(join(dir, 'home', 'auth.json')) }, loginCheckMs: 30 }, dir);
+    server.send({ type: 'cred.lease', hold: false });
+    await server.wait(() => server.received.some(m => m.type === 'status' && m.loggedIn === false));
+    expect(existsSync(join(dir, 'codex-spare'))).toBe(true);
+    writeFileSync(join(dir, 'home', 'auth.json'), auth(9));
+    await new Promise(r => setTimeout(r, 300));
+    expect(server.received.filter(m => m.type === 'status').at(-1)).toMatchObject({ loggedIn: false });
+    /* Given the plan, it works again. */
+    server.send({ type: 'cred.lease', hold: true });
+    server.send({ type: 'cred.put', kind: 'codex_auth', version: 3, sealed: await seal(bytes(auth(10)), [me.recipient]) });
+    await server.wait(() => server.received.filter(m => m.type === 'status').at(-1)?.loggedIn === true);
+    expect(existsSync(join(dir, 'codex-spare'))).toBe(false);
   });
 
   it('given up, takes the sign-in away and says the node is signed out; held again, keeps the one it gets', async () => {

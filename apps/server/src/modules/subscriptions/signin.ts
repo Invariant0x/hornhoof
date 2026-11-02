@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { TERM_CHUNK } from '@hornhoof/protocol';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNotNull, isNull } from 'drizzle-orm';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -44,13 +44,13 @@ export function signinRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { me, sub };
   }
 
-  /* The plan's live nodes that are online with a terminal, oldest first. */
+  /* The plan's live nodes that are online with a terminal and a key the new sign-in is sealed to, oldest first. */
   async function onlineNodes(planId: string) {
     const rows = await db
       .select({ nodeId: nodes.id, hostname: machines.hostname })
       .from(nodes)
       .innerJoin(machines, eq(machines.id, nodes.machineId))
-      .where(and(eq(nodes.subscriptionId, planId), liveNode))
+      .where(and(eq(nodes.subscriptionId, planId), liveNode, isNotNull(nodes.publicKey)))
       .orderBy(nodes.createdAt);
     return rows.filter(r => hub.isReady(nodeIdentity(r.nodeId)) && hub.hasTerminals(nodeIdentity(r.nodeId)));
   }

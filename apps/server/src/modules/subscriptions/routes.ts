@@ -184,7 +184,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/api/subscriptions/:id/recipients', async req => {
     const me = await requirePerson(req, db);
     const sub = await liveSubscription(IdParams.parse(req.params).id);
-    if (sub.ownerPersonId !== me.id) throw notOwner();
+    if (me.via || sub.ownerPersonId !== me.id) throw notOwner();
     const rows = await db
       .select({ nodeId: nodes.id, publicKey: nodes.publicKey, hostname: machines.hostname })
       .from(nodes)
@@ -193,10 +193,11 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { version: sub.credVersion, recipients: rows.map(r => ({ nodeId: r.nodeId, publicKey: r.publicKey!, hostname: r.hostname })) };
   });
 
+  /* Only the owner pastes a plan's key, never the orchestrator for them. */
   app.post('/api/subscriptions/:id/credential', async req => {
     const me = await requirePerson(req, db);
     const sub = await liveSubscription(IdParams.parse(req.params).id);
-    if (sub.ownerPersonId !== me.id) throw notOwner();
+    if (me.via || sub.ownerPersonId !== me.id) throw notOwner();
     const body = CredentialBody.parse(req.body);
     if (sub.kind !== 'personal' || CRED_KIND[sub.provider] !== body.kind) throw new ApiError(400, 'validation', `kind: This plan does not sign in with a ${body.kind === 'kimi_key' ? 'Kimi' : 'GLM'} key.`, 'wrong_kind');
     const kept = await storeEnvelopes(db, sub, body.kind, body.version, body.envelopes);

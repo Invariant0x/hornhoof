@@ -39,7 +39,7 @@ export type SubView = {
 export type PlanAccount = { nodeId: string; hostname: string; tier: string | null; email?: string | null };
 
 /* Who asks for the view: the address of a plan's account goes to its owner and to people who see the whole company. */
-export type Viewer = { id: string; scopeKind: string };
+export type Viewer = { id: string; scopeKind: string; isOwner?: boolean; via?: string };
 
 /* The tier all these accounts are on, and whether they are on different accounts or tiers. */
 export function agreed(accounts: Account[]): { tier: string | null; differ: boolean } {
@@ -115,7 +115,8 @@ export async function subViews(db: Db, isOnline: IsOnline, id?: string, viewer: 
        never shows signed in on one machine and online on another, which can take no turn. */
     const up = mine.filter(n => isOnline(nodeIdentity(n.id)));
     const shown = up.find(n => n.status === 'ready') ?? up[0];
-    const sees = viewer !== null && (viewer.id === r.ownerId || viewer.scopeKind === 'company');
+    /* The address an account signed in with goes to the plan's owner and the CEO, never to an agent acting for them. */
+    const sees = viewer !== null && !viewer.via && (viewer.id === r.ownerId || viewer.isOwner === true);
     const signed = mine.flatMap(n => {
       const account = accountOf.get(n.id);
       return account ? [{ node: n, account }] : [];

@@ -55,7 +55,11 @@ export function run(name) {
     process.exit(status.loggedIn ? 0 : 1);
   }
   /* Claude Code with a long token in its env is signed in when the token has the shape setup-token prints. */
-  if (name === 'claude' && words === 'auth status' && process.env.CLAUDE_CODE_OAUTH_TOKEN) process.exit(/^sk-ant-oat01-[A-Za-z0-9_-]{20,}$/.test(process.env.CLAUDE_CODE_OAUTH_TOKEN) ? 0 : 1);
+  /* FAKE_STATUS_SLEEP: milliseconds it takes to check the token. */
+  if (name === 'claude' && words === 'auth status' && process.env.CLAUDE_CODE_OAUTH_TOKEN) {
+    const ok = /^sk-ant-oat01-[A-Za-z0-9_-]{20,}$/.test(process.env.CLAUDE_CODE_OAUTH_TOKEN);
+    return void setTimeout(() => process.exit(ok ? 0 : 1), Number(process.env.FAKE_STATUS_SLEEP) || 0);
+  }
   if (words === 'auth status' || words === 'login status') process.exit(signedIn ? 0 : 1);
   /* claude setup-token: a link, a code the person types, then the long token, wrapped at FAKE_WRAP columns as Ink wraps
      it on a narrow screen. A wrong code or login_fail ends it with an error. */
@@ -71,7 +75,8 @@ export function run(name) {
         process.exit(1);
       }
       const token = process.env.FAKE_TOKEN ?? '';
-      const width = Number(process.env.FAKE_WRAP) || token.length || 1;
+      /* FAKE_WRAP=tty: as wide as the terminal it runs in. */
+      const width = (process.env.FAKE_WRAP === 'tty' ? process.stdout.columns : Number(process.env.FAKE_WRAP)) || token.length || 1;
       const wrapped = token.match(new RegExp(`.{1,${width}}`, 'g'))?.join('\n') ?? '';
       process.stdout.write(`\n\u2713 Long-lived authentication token created successfully!\n\nYour OAuth token (valid for 1 year):\n\n\x1b[33m${wrapped}\x1b[39m\n\nStore this token securely. You won't be able to see it again.\n\nUse this token by setting: export CLAUDE_CODE_OAUTH_TOKEN=<token>\n`);
       process.exit(0);

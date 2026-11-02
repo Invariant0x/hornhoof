@@ -253,6 +253,16 @@ describe('install.sh', () => {
     expect(r.out).toMatch(/Codex: ready/);
   });
 
+  it('signs in nothing on a spare machine of a Codex plan, on the join and on an update', () => {
+    const r = install({ env: { STUB_JOIN_BODY: `${SUB_B} codex node-key-bbbbbbbbbbbbbbbb\\n`, STUB_STATUS: 'spare', HORNHOOF_SIGNIN_WAIT: '20' } });
+    expect(r.code).toBe(0);
+    expect(r.calls.filter(c => c.startsWith('docker exec -it'))).toEqual([]);
+    expect(r.out).toContain('Codex on hornhoof-codex-9f1e2d3c is a spare machine: Codex runs on another machine of this plan and moves here when that one is away.');
+    expect(r.out).toMatch(/Codex: spare, Codex runs on another machine of this plan now/);
+    const update = install({ args: [], env: { STUB_CONTAINERS: `hornhoof-codex-9f1e2d3c=${SERVER}`, STUB_STATUS: 'spare' } });
+    expect(update.calls.filter(c => c.startsWith('docker exec -it'))).toEqual([]);
+  });
+
   it('waits a little for the sign-in from Hornhoof, then signs in here when it does not come', () => {
     const r = install({ env: { STUB_STATUS: 'after_login', HORNHOOF_SIGNIN_WAIT: '2' } });
     expect(r.code).toBe(0);

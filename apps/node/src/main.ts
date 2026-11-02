@@ -12,7 +12,7 @@ import { agentUser, builtinAdapters, secureNode, userFor, type JobUser } from '.
 import { machineLoad } from './load.js';
 import { adapterFor, programFor } from './providers/index.js';
 import { runJob, type ProviderAdapter, type RunResult } from './runner.js';
-import { applyCredential, dropCredential, giveUpLease, heldCredential, holdsLease, takeLease } from './credentials.js';
+import { applyCredential, dropCredential, giveUpLease, heldCredential, holdsLease, isSpare, takeLease } from './credentials.js';
 import { nodeIdentity, seal, unseal } from './keys.js';
 import { LOGIN_KEY, LoginTerminal, type LoginSetup } from './login.js';
 import { dataDir, isRemoved, markRemoved, readState, rememberSession, writeState, type NodeState } from './state.js';
@@ -44,6 +44,8 @@ type JobRun = Extract<ServerMessage, { type: 'job.run' }>;
 type Recipient = { nodeId: string; publicKey: string };
 
 const digestOf = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex');
+/* The sign-in Hornhoof hands each kind of plan. */
+const CRED_KINDS: Record<string, CredKind> = { claude: 'claude_token', codex: 'codex_auth', kimi: 'kimi_key', glm: 'glm_key' };
 type TestRun = Extract<ServerMessage, { type: 'tests.run' }>;
 type TestsDone = Extract<NodeMessage, { type: 'tests.done' }>;
 
@@ -71,6 +73,8 @@ type RunOptions = {
   /* How often the node says how busy its machine is. */
   loadMs?: number;
   leaseCheckMs?: number;
+  /* Installs the plan's program when it is missing: as the node starts, and before a turn in a session or a sign-in. */
+  install?: () => Promise<void>;
   /* The user test runs run as, on a node that runs as root; none runs them as the node, as its agents run there. */
   testUser?: JobUser | null;
   /* Runs a part of a test run; tests pass a fake. */
@@ -90,7 +94,7 @@ function merged(known: Limits | null, news: Limits): Limits {
 }
 
 /* The node's life: stay connected, run jobs, report the sign-in state and the limits, clean up when removed. */
-export async function runNode({ dir, adapter, builtin, terminal, login: loginSetup, log = console.log, loginCheckMs = LOGIN_CHECK_MS, learnMs = LEARN_MS, limitsMs = LIMITS_MS, loadMs = LOAD_MS, leaseCheckMs = LEASE_CHECK_MS, testUser = null, runPart = runTests }: RunOptions): Promise<{ stop(): void }> {
+export async function runNode({ dir, adapter, builtin, terminal, login: loginSetup, log = console.log, loginCheckMs = LOGIN_CHECK_MS, learnMs = LEARN_MS, limitsMs = LIMITS_MS, loadMs = LOAD_MS, leaseCheckMs = LEASE_CHECK_MS, install, testUser = null, runPart = runTests }: RunOptions): Promise<{ stop(): void }> {
   if (!builtin && isRemoved(dir)) {
     log('This node was removed in Hornhoof.');
     return { stop() {} };
@@ -121,7 +125,23 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   const unconfirmed = new Map<string, NodeMessage>();
   const unconfirmedTests = new Map<string, NodeMessage>();
   let send: ((m: NodeMessage) => boolean) | null = null;
-  let loggedIn = single ? await single.loggedIn() : true;
+  /* The kind of sign-in Hornhoof hands this plan, and what that sign-in was when the plan's program refused it: until
+     it changes, the node stays signed out, so turns do not go round on a sign-in that no longer works. */
+  const planProvider = builtin ? null : (state as NodeState).provider;
+  const credKind: CredKind | null = single && !builtin && planProvider ? (CRED_KINDS[planProvider] ?? null) : null;
+  let refused: string | null = null;
+  const signedInHere = async (): Promise<boolean> => {
+    if (!single) return true;
+    /* Only a Codex plan's machines are told they are spare. */
+    if (isSpare(dir)) return false;
+    if (refused !== null) {
+      const held = credKind ? heldCredential(credHome, credKind) : null;
+      if (held && digestOf(held) === refused) return false;
+      refused = null;
+    }
+    return single.loggedIn();
+  };
+  let loggedIn = await signedInHere();
   let limits: Limits | null = null;
   let stopped = false;
 
@@ -166,10 +186,13 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
           send: m => (m.type === 'term.data' || m.type === 'term.exit' ? void send?.(m) : emit(m)),
           secrets: () => [...known],
           signedIn: () => signedInNow(),
+          install,
         })
       : null;
   /* A sign-in that ran when the node last stopped is over: it gave nothing, and its session and folder go. */
   await login?.clear();
+  /* A plan's sign-in can reach a new node from Hornhoof with no sign-in on the machine, which used to install it. */
+  if (!builtin) install?.().catch(err => log(`Could not install the program: ${message(err)}`));
   if (host && terminal) {
     /* Sessions from before a restart talk to a bridge that is gone; their turns failed with the restart. */
     await terminal.tmux.stopAll();
@@ -264,20 +287,24 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
         return void send?.({ type: 'agent.said', ref: m.ref, ok });
       }
       case 'cred.put':
-        return putCredential(m.kind, m.sealed);
+        return inOrder(() => putCredential(m.kind, m.sealed));
       case 'cred.drop':
-        if (!single || builtin) return;
-        dropCredential(dir, credHome, m.kind, credUser);
-        return signedInNow();
+        return inOrder(() => {
+          if (!single || builtin) return;
+          dropCredential(dir, credHome, m.kind, credUser);
+          return signedInNow();
+        });
       case 'cred.seal':
-        return sealCredential(m.kind, m.version, m.recipients);
+        return inOrder(() => sealCredential(m.kind, m.version, m.recipients));
       /* A Codex plan runs on one of its machines at a time: the one that holds its lease keeps its sign-in. */
       case 'cred.lease':
-        if (!single || builtin) return;
-        if (m.hold) return takeLease(dir);
-        codexSealed = null;
-        giveUpLease(dir, credHome, credUser);
-        return signedInNow();
+        return inOrder(() => {
+          if (!single || builtin) return;
+          if (m.hold) return takeLease(dir);
+          codexSealed = null;
+          giveUpLease(dir, credHome, credUser);
+          return signedInNow();
+        });
       case 'login.start':
         if (!login) return emit({ type: 'login.done', ok: false, error: SIGNIN_ERRORS.noLogin });
         return login.start(m.fresh);
@@ -337,13 +364,22 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     emit({ type: 'cred.sealed', kind: 'codex_auth', version, envelopes: await sealFor(held, codexSealed.recipients) });
   }
 
+  /* Sign-in messages take effect in the order Hornhoof sent them: a move sends the lease, the sign-in and whom to seal it
+     for at once, and opening the sign-in takes a moment. */
+  let credChain: Promise<unknown> = Promise.resolve();
+  function inOrder(work: () => unknown): Promise<unknown> {
+    const next = credChain.then(work);
+    credChain = next.catch(() => {});
+    return next;
+  }
+
   /* What a Codex holder last sealed its sign-in for. */
   let codexSealed: { version: number; recipients: Recipient[]; digest: string } | null = null;
 
   /* After a sign-in came or went: what the screens hide, and whether the program is signed in, said at once. */
   async function signedInNow() {
     await learn();
-    loggedIn = single ? await single.loggedIn() : true;
+    loggedIn = await signedInHere();
     account = await readAccount();
     await status();
   }
@@ -370,8 +406,15 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       const chosen = pick(m);
       await learn([m.toolToken, m.secret, m.workspace?.repo?.token]);
       /* An agent's turn runs in its session; a test job, with no agent, runs as before. */
-      const runIn = (input: Parameters<ProviderAdapter['run']>[0]) =>
-        host && terminal && input.agentKey ? host.run({ key: input.agentKey, program: terminal.program, bin: terminal.bin, home: terminal.home, signedOut: terminal.signedOut, input }) : chosen.run(input);
+      const runIn = async (input: Parameters<ProviderAdapter['run']>[0]): Promise<RunResult> => {
+        if (!(host && terminal && input.agentKey)) return chosen.run(input);
+        try {
+          await install?.();
+        } catch (err) {
+          return { ok: false, sessionId: null, result: '', output: `Could not install the program: ${message(err)}`, error: 'agent_failed', limits: null };
+        }
+        return host.run({ key: input.agentKey, program: terminal.program, bin: terminal.bin, home: terminal.home, signedOut: terminal.signedOut, input });
+      };
       const tracked: ProviderAdapter = {
         ...chosen,
         run: async input => {
@@ -395,6 +438,8 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     await renewedCodex().catch(() => {});
     if (done.error === 'not_logged_in') {
       loggedIn = false;
+      const held = credKind ? heldCredential(credHome, credKind) : null;
+      if (held) refused = digestOf(held);
       void status();
     }
   }
@@ -402,7 +447,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   /* While signed out, look again now and then, so the person sees Ready soon after signing in. */
   const timer = setInterval(async () => {
     if (loggedIn || stopped || !single) return;
-    if (await single.loggedIn()) {
+    if (await signedInHere()) {
       loggedIn = true;
       void status();
     }
@@ -515,7 +560,8 @@ async function setKey(dir: string, io: Io): Promise<number> {
 
 async function status(dir: string, io: Io): Promise<number> {
   const state = readState(dir);
-  const word = isRemoved(dir) ? 'removed' : !state ? 'no_key' : !state.provider || (await personal(dir, state.provider, agentUser()).loggedIn()) ? 'ready' : 'needs_login';
+  /* spare: another machine of the plan runs Codex now, and this one takes over when that one is away. */
+  const word = isRemoved(dir) ? 'removed' : !state ? 'no_key' : isSpare(dir) ? 'spare' : !state.provider || (await personal(dir, state.provider, agentUser()).loggedIn()) ? 'ready' : 'needs_login';
   io.stdout.write(word + '\n');
   return 0;
 }
@@ -605,7 +651,8 @@ async function run(dir: string, builtinMode: boolean, io: Io): Promise<number | 
     if (state && !state.provider) return runNode({ dir, adapter: machineOnly, log, testUser });
     const provider = state?.provider ?? 'claude';
     const fs = user ? agentFs(user) : ownFs;
-    return runNode({ dir, adapter: withInstall(personal(dir, provider, user, fs), tools, provider), log, testUser, ...terminalFor(dir, provider, user, fs) });
+    const adapter = personal(dir, provider, user, fs);
+    return runNode({ dir, adapter: withInstall(adapter, tools, provider), install: () => ensureInstalled(tools, provider, adapter), log, testUser, ...terminalFor(dir, provider, user, fs) });
   }
 
   const server = process.env.HORNHOOF_SERVER;

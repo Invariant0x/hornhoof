@@ -282,7 +282,10 @@ export class TerminalHost {
       await this.fs.write(join(input.workDir, 'AGENTS.md'), rules + '\n');
     }
     const spec = program.launch({ bin: job.bin, home: job.home, workDir: input.workDir, sessionId: input.sessionId, model: input.model, effort: input.effort, compactWindow: input.compactWindow, instructionsFile, urls, plugins: this.plugins });
-    const hash = hashOf({ kind: program.kind, bin: job.bin, model: input.model, effort: input.effort ?? null, compactWindow: input.compactWindow ?? null, instructions: input.instructions, env: lasting(input.env) });
+    /* A plan signed in to another account in Hornhoof reaches a running Claude Code only when it starts again, which it
+       does between turns, in the same session. */
+    const signedAs = spec.env.CLAUDE_CODE_OAUTH_TOKEN ? hashOf(spec.env.CLAUDE_CODE_OAUTH_TOKEN) : null;
+    const hash = hashOf({ kind: program.kind, bin: job.bin, model: input.model, effort: input.effort ?? null, compactWindow: input.compactWindow ?? null, instructions: input.instructions, env: lasting(input.env), signedAs });
     /* A new session asked for goes on in a program started for a person that nothing was said in yet. */
     const sameSession = input.sessionId === null ? a.fresh : input.sessionId === a.sessionId || a.cleared.has(input.sessionId);
     const goesOn = sameSession && a.hash === hash && (await this.opts.tmux.alive(a.name));

@@ -1,8 +1,7 @@
-import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Account, ProviderId } from '@hornhoof/protocol';
 import type { JobUser } from './isolation.js';
-import { runProgram } from './providers/process.js';
+import { readPrivate, runProgram } from './providers/process.js';
 
 const text = (value: unknown, max: number): string | null => (typeof value === 'string' && value.length > 0 && value.length <= max ? value : null);
 const account = (email: unknown, tier: unknown): Account => ({ email: text(email, 200), tier: text(tier, 40) });
@@ -11,7 +10,7 @@ const account = (email: unknown, tier: unknown): Account => ({ email: text(email
    screen only, so its signature is not checked. */
 function codexAccount(home: string): Account | null {
   try {
-    const auth = JSON.parse(readFileSync(join(home, 'auth.json'), 'utf8'));
+    const auth = JSON.parse(readPrivate(join(home, 'auth.json')) ?? 'null');
     const token = auth?.tokens?.id_token;
     if (typeof token !== 'string') return null;
     const parts = token.split('.');

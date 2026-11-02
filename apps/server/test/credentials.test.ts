@@ -3,7 +3,8 @@ import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
-import { agents, companies, departments, nodes, planCredentials, subscriptions } from '../src/db/schema.js';
+import { orchestratorHeaders } from '../src/auth/internal.js';
+import { agents, companies, departments, nodes, people, planCredentials, subscriptions } from '../src/db/schema.js';
 import { LEASE_MOVE_MS, moveLeases } from '../src/modules/subscriptions/lease.js';
 import { companyView } from '../src/modules/tools/company.js';
 import { as, connectNode, invitePerson, listen, openStream, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
@@ -119,6 +120,20 @@ describe("a plan's sign-in sealed to its nodes", () => {
     await online(b, KEY('b'));
     expect(await nextOf(na, 'cred.seal')).toEqual({ type: 'cred.seal', kind: 'claude_token', version: 1, recipients: [{ nodeId: b.nodeId, publicKey: KEY('b') }] });
   });
+
+  it('throws out what was sealed to a key a node no longer has, and has the sign-in sealed to its new one', async () => {
+    const { db, plan, a, b, online } = await plans();
+    const na = await online(a, KEY('a'));
+    const nb = await online(b, KEY('b'));
+    na.send({ type: 'cred.sealed', kind: 'claude_token', version: 1, envelopes: [{ nodeId: a.nodeId, sealed: SEALED('a') }, { nodeId: b.nodeId, sealed: SEALED('b') }] });
+    await nextOf(nb, 'cred.put');
+    /* The laptop's node was set up again and made a new key. */
+    nb.close();
+    const again = await online(b, KEY('c'));
+    expect(await nextOf(na, 'cred.seal')).toEqual({ type: 'cred.seal', kind: 'claude_token', version: 1, recipients: [{ nodeId: b.nodeId, publicKey: KEY('c') }] });
+    expect(await stored(db, plan)).toEqual([{ nodeId: a.nodeId, version: 1, sealed: SEALED('a') }]);
+    await expect(nextOf(again, 'cred.put', 300)).rejects.toThrow();
+  });
 });
 
 describe('the sealing routes', () => {
@@ -138,6 +153,21 @@ describe('the sealing routes', () => {
     const theirs = await app.inject({ url: `/api/subscriptions/${plan}/recipients`, ...as(oleg) });
     expect(theirs.statusCode).toBe(403);
     expect(theirs.json().error.reason).toBe('not_owner');
+  });
+
+  it('are closed to the orchestrator acting for the owner', async () => {
+    const { app, db, plan, a, online } = await plans('kimi');
+    await online(a, KEY('a'));
+    const [owner] = await db.select({ id: people.id }).from(people).where(eq(people.isOwner, true));
+    const [orchestrator] = await db.select({ id: agents.id }).from(agents).where(eq(agents.kind, 'orchestrator'));
+    const headers = orchestratorHeaders(owner!.id, orchestrator!.id);
+    const listed = await app.inject({ url: `/api/subscriptions/${plan}/recipients`, headers });
+    expect(listed.statusCode).toBe(403);
+    expect(listed.json().error.reason).toBe('not_owner');
+    const body = { kind: 'kimi_key', version: 1, envelopes: [{ nodeId: a.nodeId, sealed: SEALED('kimi') }] };
+    const sent = await app.inject({ method: 'POST', url: `/api/subscriptions/${plan}/credential`, payload: body, headers });
+    expect(sent.statusCode).toBe(403);
+    expect(await stored(db, plan)).toEqual([]);
   });
 
   it("keep a key the owner sealed in the browser, hand it to the plan's nodes and refuse a Codex or Claude sign-in", async () => {
@@ -200,6 +230,21 @@ describe('signing a plan in from Hornhoof', () => {
     const stop = await app.inject({ method: 'POST', url: `/api/subscriptions/${plan}/signin/stop`, payload: { nodeId: b.nodeId }, ...as(ceo) });
     expect(stop.statusCode).toBe(204);
     expect(await nextOf(nb, 'login.stop')).toEqual({ type: 'login.stop' });
+  });
+
+  it('starts the sign-in only on a machine with a key, which the new sign-in can be sealed to', async () => {
+    const { app, db, ceo, plan, a, b, online, url } = await plans();
+    /* The Mac's node is from before machine keys. */
+    const na = await connectNode(url, a.key);
+    na.send({ type: 'hello', version: '0.8.0', loggedIn: false, running: [], terminals: true });
+    await until(async () => (await db.select({ v: nodes.version }).from(nodes).where(eq(nodes.id, a.nodeId)))[0]?.v === '0.8.0');
+    const nb = await online(b, KEY('b'), false);
+    const res = await app.inject({ method: 'POST', url: `/api/subscriptions/${plan}/signin`, payload: { fresh: false }, ...as(ceo) });
+    expect(res.json()).toEqual({ nodeId: b.nodeId, hostname: 'ivan-laptop' });
+    expect(await nextOf(nb, 'login.start')).toEqual({ type: 'login.start', fresh: false });
+    const old = await app.inject({ method: 'POST', url: `/api/subscriptions/${plan}/signin`, payload: { nodeId: a.nodeId, fresh: false }, ...as(ceo) });
+    expect(old.statusCode).toBe(409);
+    await expect(nextOf(na, 'login.start', 300)).rejects.toThrow();
   });
 
   it('signs Kimi in with a pasted key instead of a terminal', async () => {
@@ -293,6 +338,21 @@ describe('which account a plan runs on', () => {
     expect(JSON.stringify(org)).not.toContain('ivan.plans@example.com');
     const ceoOrg = (await app.inject({ method: 'GET', url: '/api/org', ...as(ceo) })).json();
     expect(ceoOrg.orchestrator.subscription.accounts[0].email).toBe('ivan.plans@example.com');
+  });
+
+  it("keeps the address from other people who see the whole company, and from the orchestrator acting for the CEO", async () => {
+    const { app, db, ceo, oleg, plan, a, url } = await plans();
+    const na = await connectNode(url, a.key);
+    na.send({ type: 'hello', version: '0.9.0', loggedIn: true, running: [], publicKey: KEY('a'), terminals: true, account: IVAN });
+    await until(async () => (await db.select({ account: nodes.account }).from(nodes).where(eq(nodes.id, a.nodeId)))[0]?.account?.tier === 'max');
+    expect((await mine(app, ceo, plan)).accounts).toEqual([expect.objectContaining({ email: IVAN.email })]);
+    expect((await mine(app, oleg, plan)).accounts).toEqual([{ nodeId: a.nodeId, hostname: 'ivan-mac', tier: 'max' }]);
+    const [owner] = await db.select({ id: people.id }).from(people).where(eq(people.isOwner, true));
+    const [orchestrator] = await db.select({ id: agents.id }).from(agents).where(eq(agents.kind, 'orchestrator'));
+    const seen = await app.inject({ method: 'GET', url: '/api/subscriptions', headers: orchestratorHeaders(owner!.id, orchestrator!.id) });
+    expect(seen.statusCode).toBe(200);
+    expect(seen.body).toContain('"tier":"max"');
+    expect(seen.body).not.toContain('@');
   });
 
   it('gets a note when its machines are on different plans of the maker', async () => {
@@ -395,6 +455,43 @@ describe("a Codex plan's lease", () => {
     const again = await connectNode(url, b.key);
     again.send({ type: 'hello', version: '0.9.0', loggedIn: false, running: [], publicKey: KEY('b'), terminals: true });
     expect(await nextOf(again, 'cred.put')).toEqual({ type: 'cred.put', kind: 'codex_auth', version: 1, sealed: SEALED('b') });
+  });
+
+  it('takes a sealed sign-in only from the machine that holds the plan', async () => {
+    const { a, b, nb, url, db, plan } = await codex();
+    await db.update(subscriptions).set({ leaseNodeId: b.nodeId }).where(eq(subscriptions.id, plan));
+    /* The Mac held the plan before and seals the sign-in it still had, which Codex has renewed on the laptop since. */
+    const back = await connectNode(url, a.key);
+    back.send({ type: 'hello', version: '0.9.0', loggedIn: true, running: [], publicKey: KEY('a'), terminals: true });
+    expect(await nextOf(back, 'cred.lease')).toEqual({ type: 'cred.lease', hold: false });
+    back.send({ type: 'cred.sealed', kind: 'codex_auth', version: 1, envelopes: [{ nodeId: a.nodeId, sealed: SEALED('a-old') }, { nodeId: b.nodeId, sealed: SEALED('b-old') }] });
+    /* A message after it shows it was handled. */
+    back.send({ type: 'status', loggedIn: false, limits: null });
+    await until(async () => (await db.select({ status: nodes.status }).from(nodes).where(eq(nodes.id, a.nodeId)))[0]!.status === 'needs_login');
+    expect(await stored(db, plan)).toEqual([{ nodeId: a.nodeId, version: 1, sealed: SEALED('a') }, { nodeId: b.nodeId, version: 1, sealed: SEALED('b') }].sort((x, y) => x.nodeId.localeCompare(y.nodeId)));
+    nb.send({ type: 'cred.sealed', kind: 'codex_auth', version: 1, envelopes: [{ nodeId: a.nodeId, sealed: SEALED('a-new') }] });
+    await until(async () => (await stored(db, plan)).find(s => s.nodeId === a.nodeId)?.sealed === SEALED('a-new'));
+  });
+
+  it('has a machine that joined the plan later sealed the sign-in by the holder, ready to take over', async () => {
+    const p = await plans('codex');
+    const na = await p.online(p.a, KEY('a'));
+    na.send({ type: 'cred.sealed', kind: 'codex_auth', version: 1, envelopes: [{ nodeId: p.a.nodeId, sealed: SEALED('a') }] });
+    await until(async () => (await stored(p.db, p.plan)).length === 1);
+    await p.db.update(subscriptions).set({ leaseNodeId: p.a.nodeId }).where(eq(subscriptions.id, p.plan));
+    const nb = await p.online(p.b, KEY('b'), false);
+    expect(await nextOf(nb, 'cred.lease')).toEqual({ type: 'cred.lease', hold: false });
+    expect(await nextOf(na, 'cred.seal')).toEqual({ type: 'cred.seal', kind: 'codex_auth', version: 1, recipients: [{ nodeId: p.b.nodeId, publicKey: KEY('b') }] });
+  });
+
+  it('gives a holder that comes back signed out its envelope and whom to seal a renewal for', async () => {
+    const { a, b, url } = await codex();
+    const back = await connectNode(url, a.key);
+    back.send({ type: 'hello', version: '0.9.0', loggedIn: false, running: [], publicKey: KEY('a'), terminals: true });
+    expect(await nextOf(back, 'cred.put')).toEqual({ type: 'cred.put', kind: 'codex_auth', version: 1, sealed: SEALED('a') });
+    const told = await nextOf(back, 'cred.seal');
+    expect(told).toMatchObject({ kind: 'codex_auth', version: 1 });
+    expect(told.recipients.map(r => r.nodeId).sort()).toEqual([a.nodeId, b.nodeId].sort());
   });
 
   it('goes to the machine that signed in, and the others give theirs up', async () => {

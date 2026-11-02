@@ -186,6 +186,52 @@ describe('a plan sign-in in a terminal on the node', () => {
     expect(signIn.env.CODEX_HOME).not.toBe(home);
   });
 
+  it.skipIf(!hasTmux)("keeps the sign-in at least 80 columns wide, so a narrow view never splits the token's start", async () => {
+    const { server, home, tmux } = await node('claude', { FAKE_WRAP: 'tty' });
+    server.send({ type: 'login.start', fresh: false });
+    await prompted(tmux);
+    server.send({ type: 'term.open', termId: 't1', agentKey: 'login', cols: 10, rows: 5, write: true });
+    await until(() => server.frames('t1').includes('Paste'));
+    server.send({ type: 'term.resize', termId: 't1', cols: 12, rows: 5 });
+    await new Promise(r => setTimeout(r, 300));
+    server.send({ type: 'term.input', termId: 't1', data: 'code123\r' });
+    await until(() => Boolean(server.done()));
+    expect(server.done()).toMatchObject({ ok: true });
+    expect(readFileSync(join(home, 'claude-oauth-token'), 'utf8').trim()).toBe(TOKEN);
+    const frames = server.frames('t1');
+    for (let i = 'sk-ant-oat01-'.length; i + 10 <= TOKEN.length; i++) expect(frames).not.toContain(TOKEN.slice(i, i + 10));
+  });
+
+  it.skipIf(!hasTmux)('stopped while it checks the new sign-in keeps nothing of it', async () => {
+    const { server, home, tmux, calls } = await node('claude', { FAKE_STATUS_SLEEP: '1500' });
+    server.send({ type: 'login.start', fresh: false });
+    await prompted(tmux);
+    server.send({ type: 'term.open', termId: 't1', agentKey: 'login', cols: 120, rows: 30, write: true });
+    await until(() => server.frames('t1').includes('Paste code'));
+    server.send({ type: 'term.input', termId: 't1', data: 'code123\r' });
+    await until(() => calls().some(c => c.argv.join(' ') === 'auth status'));
+    server.send({ type: 'login.stop' });
+    await until(() => Boolean(server.done()));
+    await new Promise(r => setTimeout(r, 1800));
+    expect(server.done()).toMatchObject({ ok: false, error: 'The sign-in was stopped.' });
+    expect(existsSync(join(home, 'claude-oauth-token'))).toBe(false);
+    expect(server.received.filter(m => m.type === 'login.done')).toHaveLength(1);
+  });
+
+  it.skipIf(!hasTmux)('installs its program before the sign-in, and says the sign-in failed when it cannot', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-login-'));
+    let installs = 0;
+    const { server, calls } = await node('claude', {}, dir, { install: async () => { installs++; throw new Error('npm: offline'); } });
+    /* It starts installing as the node starts, so a node that got its sign-in from Hornhoof has its program too. */
+    await until(() => installs >= 1);
+    const before = installs;
+    server.send({ type: 'login.start', fresh: false });
+    await until(() => Boolean(server.done()));
+    expect(installs).toBeGreaterThan(before);
+    expect(server.done()).toMatchObject({ ok: false, error: 'The sign-in failed on this machine, so nothing changed.' });
+    expect(calls().some(c => c.argv.join(' ') === 'setup-token')).toBe(false);
+  });
+
   it('on a node that has no sign-in terminal, says the sign-in cannot run there', async () => {
     const server = await fakeServer();
     const dir = mkdtempSync(join(tmpdir(), 'hh-login-'));

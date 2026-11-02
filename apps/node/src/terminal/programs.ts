@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import type { Limits } from '@hornhoof/protocol';
 import { ownFs, type AgentFs } from '../agent-fs.js';
 import { CRED_FILES } from '../credentials.js';
+import { readPrivate } from '../providers/process.js';
 import { WHOLE_AGENTS_MD } from '../providers/codex.js';
 import type { AgentUrls } from './bridge.js';
 import { claudeUsageLimits, kimiUsageLimits } from './transcripts.js';
@@ -48,8 +49,7 @@ const hook = (event: string) => [{ hooks: [{ type: 'command', command: `hh-hook 
 
 /* The long token of a Claude plan signed in once on another machine, which this node was given; none otherwise. */
 export function planToken(home: string): string | null {
-  const file = join(home, CRED_FILES.claude_token);
-  return existsSync(file) ? readFileSync(file, 'utf8').trim() || null : null;
+  return readPrivate(join(home, CRED_FILES.claude_token))?.trim() || null;
 }
 
 export const claudeProgram: TermProgram = {

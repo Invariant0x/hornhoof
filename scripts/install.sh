@@ -457,6 +457,9 @@ watch_link() {
 # Antigravity signs in on each machine.
 signs_in_hornhoof() { case "$1" in claude | codex | kimi | glm) return 0 ;; esac; return 1; }
 
+# A node that needs no sign-in here: ready, or a spare machine of a Codex plan that another machine runs now.
+signed_in() { case "$(node_status "$1")" in ready | spare) return 0 ;; esac; return 1; }
+
 # The joined nodes, of those named, that are not ready after SIGNIN_WAIT seconds. A plan its owner signed in once in
 # Hornhoof reaches a new node of the plan within seconds, and that node needs no sign-in here.
 late_nodes() {
@@ -464,7 +467,7 @@ late_nodes() {
   while :; do
     late=''
     for name in "$@"; do
-      if [ "$(node_status "$name")" != ready ]; then late="$late $name"; fi
+      if ! signed_in "$name"; then late="$late $name"; fi
     done
     if [ -z "$late" ] || [ "$left" -le 0 ]; then break; fi
     sleep 1
@@ -562,13 +565,19 @@ node_mode() {
       *" $name "*)
         case "$late" in
           *" $name "*) login_node "$name" ;;
-          *) say "$(program_name "$provider") on $name got its sign-in from Hornhoof." ;;
+          *)
+            if [ "$(node_status "$name")" = spare ]; then
+              say "$(program_name "$provider") on $name is a spare machine: Codex runs on another machine of this plan and moves here when that one is away."
+            else
+              say "$(program_name "$provider") on $name got its sign-in from Hornhoof."
+            fi
+            ;;
         esac
         ;;
       *)
         case " $joined_names " in
           *" $name "*) login_node "$name" ;;
-          *) if [ "$(node_status "$name")" != ready ]; then login_node "$name"; fi ;;
+          *) if ! signed_in "$name"; then login_node "$name"; fi ;;
         esac
         ;;
     esac
@@ -582,6 +591,7 @@ node_mode() {
     status=$(node_status "$name")
     case "$status" in
       ready) status="ready" ;;
+      spare) status="spare, Codex runs on another machine of this plan now" ;;
       needs_login)
         if signs_in_hornhoof "$provider"; then
           status="needs sign-in, sign in once in Hornhoof under Subscriptions, or run the install command again without --join"

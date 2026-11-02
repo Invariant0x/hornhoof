@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { closeSync, constants, fchownSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, fchownSync, fstatSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { JobUser } from '../isolation.js';
 import type { LoginIo } from '../runner.js';
@@ -191,6 +191,25 @@ export function writePrivate(path: string, content: string, user: JobUser | null
   try {
     writeFileSync(fd, content);
     if (user) fchownSync(fd, user.uid, user.gid);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/* A file in an agent's home, read by the node: null for a link or a second name an agent could have put there to a file
+   only the node reads, such as its key, and for anything that is not a plain file. */
+export function readPrivate(path: string): string | null {
+  let fd: number;
+  try {
+    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  } catch {
+    return null;
+  }
+  try {
+    const st = fstatSync(fd);
+    return st.isFile() && st.nlink === 1 ? readFileSync(fd, 'utf8') : null;
+  } catch {
+    return null;
   } finally {
     closeSync(fd);
   }

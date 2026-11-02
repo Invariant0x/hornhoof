@@ -1,8 +1,8 @@
-import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { CredKind } from '@hornhoof/protocol';
 import type { JobUser } from './isolation.js';
-import { ensureDir, writePrivate } from './providers/process.js';
+import { ensureDir, readPrivate, writePrivate } from './providers/process.js';
 
 /* Where each kind of plan sign-in lives in the program's home. Claude Code takes its long token from
    CLAUDE_CODE_OAUTH_TOKEN, which the node sets from this file; Codex reads auth.json; Kimi Code reads its settings, which
@@ -10,27 +10,31 @@ import { ensureDir, writePrivate } from './providers/process.js';
 export const CRED_FILES: Record<CredKind, string> = { claude_token: 'claude-oauth-token', codex_auth: 'auth.json', kimi_key: 'kimi-key', glm_key: 'glm-key' };
 /* Codex renews its own sign-in, so it runs on one machine of a plan at a time: the one holding this file. */
 export const LEASE_FILE = 'codex-lease';
+/* A machine of a Codex plan that another machine runs: it is signed out of Codex here, whatever file a Codex that still
+   runs on it writes, until it holds the plan again. */
+export const SPARE_FILE = 'codex-spare';
 
 /* A token or key is one word, so it cannot break the settings it goes into. */
 const WORD = /^[A-Za-z0-9._~+/=-]{8,4096}$/;
 
 export const holdsLease = (dir: string): boolean => existsSync(join(dir, LEASE_FILE));
 
-export const takeLease = (dir: string): void => writePrivate(join(dir, LEASE_FILE), '', null);
+export const isSpare = (dir: string): boolean => existsSync(join(dir, SPARE_FILE));
+
+export function takeLease(dir: string): void {
+  writePrivate(join(dir, LEASE_FILE), '', null);
+  rmSync(join(dir, SPARE_FILE), { force: true });
+}
 
 /* Another machine of the plan runs Codex now: this one keeps no sign-in of it, so it says it is signed out. */
 export function giveUpLease(dir: string, home: string, user: JobUser | null = null): void {
   rmSync(join(dir, LEASE_FILE), { force: true });
+  writePrivate(join(dir, SPARE_FILE), '', null);
   dropCredential(dir, home, 'codex_auth', user);
 }
 
-const read = (path: string): string | null => {
-  try {
-    return readFileSync(path, 'utf8');
-  } catch {
-    return null;
-  }
-};
+/* The agents own the plan's home, so the node reads nothing there through a link. */
+const read = readPrivate;
 
 /* Keeps a plan's sign-in where its program reads it, readable by the agents' user alone. A Codex sign-in waits while
    another machine holds the plan's lease; false then. Throws on a value that is not a sign-in of that kind. */

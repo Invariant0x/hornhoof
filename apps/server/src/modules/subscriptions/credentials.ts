@@ -14,15 +14,17 @@ export type Envelope = { nodeId: string; sealed: string };
 
 /* Keeps a plan's sign-in sealed to each of its live nodes the envelopes name; others are dropped. A newer sign-in
    throws out the older ones, including those of nodes it leaves out, which then get it sealed by a node that holds it.
-   One older than what the plan has changes nothing. Returns the envelopes it kept. */
-export async function storeEnvelopes(db: Db, sub: { id: string; companyId: string }, kind: CredKind, version: number, envelopes: Envelope[]): Promise<Envelope[]> {
+   One older than what the plan has changes nothing. A Codex plan's sign-in comes only from the machine that holds the
+   plan: one that held it before has a copy Codex has renewed since. Returns the envelopes it kept. */
+export async function storeEnvelopes(db: Db, sub: { id: string; companyId: string }, kind: CredKind, version: number, envelopes: Envelope[], from: string | null = null): Promise<Envelope[]> {
   return db.transaction(async tx => {
     const [plan] = await tx
-      .select({ provider: subscriptions.provider, credVersion: subscriptions.credVersion })
+      .select({ provider: subscriptions.provider, credVersion: subscriptions.credVersion, lease: subscriptions.leaseNodeId })
       .from(subscriptions)
       .where(and(eq(subscriptions.id, sub.id), eq(subscriptions.kind, 'personal'), isNull(subscriptions.removedAt)))
       .for('update');
     if (!plan || CRED_KIND[plan.provider] !== kind || version < plan.credVersion) return [];
+    if (kind === 'codex_auth' && from && plan.lease && plan.lease !== from) return [];
     const ids = [...new Set(envelopes.map(e => e.nodeId))];
     const live = ids.length
       ? new Set((await tx.select({ id: nodes.id }).from(nodes).where(and(inArray(nodes.id, ids), eq(nodes.subscriptionId, sub.id), liveNode))).map(n => n.id))
@@ -59,26 +61,34 @@ export async function pushCredentials(ctx: Ctx, nodeId: string, loggedIn = false
   const kind = node && CRED_KIND[node.provider];
   if (!node || !kind) return;
   const me = nodeIdentity(nodeId);
+  const held = node.credVersion > 0
+    ? await db
+        .select({ nodeId: planCredentials.nodeId, sealed: planCredentials.sealed })
+        .from(planCredentials)
+        .innerJoin(nodes, eq(nodes.id, planCredentials.nodeId))
+        .where(and(eq(planCredentials.subscriptionId, node.plan), eq(planCredentials.kind, kind), eq(planCredentials.version, node.credVersion), liveNode))
+    : [];
+  const mine = held.find(h => h.nodeId === nodeId);
+  const sealFor = (peer: string) => node.publicKey && ctx.hub.send(nodeIdentity(peer), { type: 'cred.seal', kind, version: node.credVersion, recipients: [{ nodeId, publicKey: node.publicKey }] });
   if (kind === 'codex_auth' && node.lease) {
-    if (node.lease !== nodeId) return void ctx.hub.send(me, { type: 'cred.lease', hold: false });
-    if (loggedIn) {
-      const recipients = node.credVersion > 0 ? await keyedNodes(db, node.plan) : [];
-      if (recipients.length) ctx.hub.send(me, { type: 'cred.seal', kind, version: node.credVersion, recipients });
+    /* Another machine keeps an envelope to take over with; the holder seals one for it when it has none. */
+    if (node.lease !== nodeId) {
+      ctx.hub.send(me, { type: 'cred.lease', hold: false });
+      if (held.length && !mine && ctx.hub.isOnline(nodeIdentity(node.lease))) sealFor(node.lease);
       return;
     }
-    ctx.hub.send(me, { type: 'cred.lease', hold: true });
+    if (!loggedIn) {
+      ctx.hub.send(me, { type: 'cred.lease', hold: true });
+      if (mine) deliver(ctx, kind, node.credVersion, [mine]);
+    }
+    /* The holder learns whom to seal a renewed sign-in for. */
+    const recipients = node.credVersion > 0 ? await keyedNodes(db, node.plan) : [];
+    if ((loggedIn || mine) && recipients.length) ctx.hub.send(me, { type: 'cred.seal', kind, version: node.credVersion, recipients });
+    return;
   }
-  if (node.credVersion === 0) return;
-  const held = await db
-    .select({ nodeId: planCredentials.nodeId, sealed: planCredentials.sealed })
-    .from(planCredentials)
-    .innerJoin(nodes, eq(nodes.id, planCredentials.nodeId))
-    .where(and(eq(planCredentials.subscriptionId, node.plan), eq(planCredentials.kind, kind), eq(planCredentials.version, node.credVersion), liveNode));
-  const mine = held.find(h => h.nodeId === nodeId);
   if (mine) return void deliver(ctx, kind, node.credVersion, [mine]);
-  if (!node.publicKey) return;
   const peer = held.find(h => ctx.hub.isOnline(nodeIdentity(h.nodeId)));
-  if (peer) ctx.hub.send(nodeIdentity(peer.nodeId), { type: 'cred.seal', kind, version: node.credVersion, recipients: [{ nodeId, publicKey: node.publicKey }] });
+  if (peer) sealFor(peer.nodeId);
 }
 
 /* The agentKey of a node's sign-in terminal: only the plan's owner opens it, and types into it. */

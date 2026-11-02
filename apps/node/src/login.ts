@@ -84,10 +84,16 @@ type Options = {
   secrets(): string[];
   /* After a sign-in was kept: what the screens hide and whether the program is signed in, said at once. */
   signedIn(): Promise<void>;
+  /* Installs the program when it is missing, before its sign-in starts. */
+  install?: () => Promise<void>;
   pollMs?: number;
 };
 
 const { stopped: STOPPED, unfinished: UNFINISHED, notTaken: NOT_TAKEN, broke: BROKE } = SIGNIN_ERRORS;
+/* The sign-in's window is never narrower: Claude Code wraps its token at the window's width, and the start of a token is
+   how the node finds it to cut it from what the owner sees. */
+const MIN_COLS = 80;
+const MIN_ROWS = 10;
 
 /* One sign-in at a time, in a tmux session the plan's owner watches and types into. It runs in a folder of its own, so
    the sign-in the plan has stays until the new one is complete. */
@@ -160,6 +166,8 @@ export class LoginTerminal {
     await this.end();
     if (run !== this.run) return;
     try {
+      await this.opts.install?.();
+      if (run !== this.run) return;
       await this.fs.mkdir(this.scratch);
       const { provider, bin, env } = this.opts.setup;
       const homeVar = provider === 'claude' ? 'CLAUDE_CONFIG_DIR' : 'CODEX_HOME';
@@ -199,16 +207,19 @@ export class LoginTerminal {
       const screen = await this.tmux.screen(SESSION, 2000);
       if (run !== this.run) return;
       const code = snapshot?.programOutput?.code ?? null;
-      error = code !== 0 ? UNFINISHED : await this.keep(snapshot?.programOutput?.text ?? '', screen);
+      error = code !== 0 ? UNFINISHED : await this.keep(run, snapshot?.programOutput?.text ?? '', screen);
     } catch {
       error = BROKE;
     }
     if (run !== this.run) return;
+    /* A sign-in kept is done: a stop that comes now has nothing left to stop. */
+    if (error === null) this.active = false;
     await this.finish(run, error);
   }
 
-  /* Takes the new sign-in into the plan's home; the words of what went wrong, or null. */
-  private async keep(output: string, screen: string): Promise<string | null> {
+  /* Takes the new sign-in into the plan's home; the words of what went wrong, or null. One stopped while its program
+     checks it keeps nothing. */
+  private async keep(run: number, output: string, screen: string): Promise<string | null> {
     const { provider, bin, env } = this.opts.setup;
     const { dir, home } = this.opts;
     const programEnv = { ...env, HOME: this.scratch };
@@ -216,6 +227,7 @@ export class LoginTerminal {
       const token = tokenIn(output) ?? tokenIn(screen);
       if (!token) return UNFINISHED;
       if (!(await exitsCleanly(bin, ['auth', 'status'], { ...programEnv, CLAUDE_CONFIG_DIR: this.scratch, CLAUDE_CODE_OAUTH_TOKEN: token }, this.user))) return NOT_TAKEN;
+      if (run !== this.run) return STOPPED;
       applyCredential(dir, home, 'claude_token', new TextEncoder().encode(token), this.user);
       return null;
     }
@@ -223,6 +235,7 @@ export class LoginTerminal {
     /* Read as the agents' user, who could have put a link there. */
     const auth = await this.fs.read(join(this.scratch, 'auth.json'));
     if (auth === null) return NOT_TAKEN;
+    if (run !== this.run) return STOPPED;
     /* The machine that signed in holds the plan's Codex sign-in, which Codex renews. */
     takeLease(dir);
     applyCredential(dir, home, 'codex_auth', new TextEncoder().encode(auth), this.user);
@@ -251,7 +264,7 @@ export class LoginTerminal {
 
   async open(m: Msg<'term.open'>): Promise<void> {
     if (!this.active || !(await this.tmux.alive(SESSION))) return void this.opts.send({ type: 'term.exit', termId: m.termId });
-    const child = this.tmux.attach(SESSION, m.cols, m.rows, m.write);
+    const child = this.tmux.attach(SESSION, Math.max(m.cols, MIN_COLS), Math.max(m.rows, MIN_ROWS), m.write);
     this.views.set(m.termId, { child, write: m.write });
     const cut = new CutAtToken();
     const mask = new StreamMask(this.opts.secrets);
@@ -296,7 +309,7 @@ export class LoginTerminal {
     if (!view?.child.pid) return;
     for (const client of await this.tmux.clients()) {
       if ((await parentOf(client.pid)) !== view.child.pid) continue;
-      execFile('stty', [process.platform === 'darwin' ? '-f' : '-F', client.tty, 'cols', String(m.cols), 'rows', String(m.rows)], () => {});
+      execFile('stty', [process.platform === 'darwin' ? '-f' : '-F', client.tty, 'cols', String(Math.max(m.cols, MIN_COLS)), 'rows', String(Math.max(m.rows, MIN_ROWS))], () => {});
       return;
     }
   }

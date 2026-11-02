@@ -10,7 +10,7 @@ import { credentialSecrets } from '../credentials.js';
 import { readAccount } from '../account.js';
 import { claudePlanLimits, planToken } from '../terminal/programs.js';
 import { contentText, inputText, isoFrom, isRecord, objectLine, toolName } from './events.js';
-import { askHidden, childEnv, ensureDir, exitsCleanly, installPackage, interactiveLogin, runProgram, tokensIn, writePrivate } from './process.js';
+import { askHidden, childEnv, ensureDir, exitsCleanly, installPackage, interactiveLogin, readPrivate, runProgram, tokensIn, writePrivate } from './process.js';
 
 /* Claude Code serves three kinds of subscription: a personal plan, a company Anthropic key, and a GLM Coding Plan through Z.ai's Anthropic-compatible endpoint. */
 export type ClaudeMode = 'plan' | 'api_key' | 'glm';
@@ -80,7 +80,8 @@ export const SIGNED_OUT = /not logged in|please run \/login|invalid api key|auth
 
 export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'), secret = null, mode, user = null, plugins = claudePlugins() }: Options): ProviderAdapter {
   const keyFile = join(home, 'glm-key');
-  const glmKey = () => (existsSync(keyFile) ? readFileSync(keyFile, 'utf8').trim() : '');
+  /* The agents own the home, so the key is not read through a link they could put there. */
+  const glmKey = () => readPrivate(keyFile)?.trim() ?? '';
 
   function env(jobSecret: string | null): NodeJS.ProcessEnv {
     const extra: Record<string, string> = { CLAUDE_CONFIG_DIR: ensureDir(home) };
