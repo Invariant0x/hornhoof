@@ -360,7 +360,8 @@ export type Running = {
 /* A machine command the orchestrator asked Hornhoof for, which only the CEO's screen gets: to connect a machine alone,
    to connect plans, or to add a plan to a machine. */
 /* Access to the computer the server runs on: whether Hornhoof reaches it, until when it is open, what the orchestrator asked it for. */
-export type ComputerView = { available: boolean; until: string | null; asked: { reason: string; at: string } | null };
+/* machine: the hostname of the machine the server runs on, when that computer joined as a machine. */
+export type ComputerView = { available: boolean; until: string | null; asked: { reason: string; at: string } | null; machine?: string | null };
 export type ShownCommand = { id: string; kind: 'machine' | 'plans' | 'add'; plans: string[]; machine: string | null; command: string; expiresAt: string };
 
 /* The node that comes with the server, for those who see the whole company. */

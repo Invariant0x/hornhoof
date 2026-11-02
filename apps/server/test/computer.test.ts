@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -20,10 +21,10 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const ONLY_CEO = 'Only the CEO can ask for this. Ask the CEO first.';
 
 /* A company whose server has an updater, and a running turn of the orchestrator that answers the CEO. */
-async function company({ updater = true } = {}) {
+async function company({ updater = true, env = {} as NodeJS.ProcessEnv } = {}) {
   const control = mkdtempSync(join(tmpdir(), 'hh-control-'));
   if (updater) writeFileSync(join(control, 'alive'), '');
-  const { app, db } = await testApp({ NODE_KEY, HORNHOOF_CONTROL_DIR: control });
+  const { app, db } = await testApp({ NODE_KEY, HORNHOOF_CONTROL_DIR: control, ...env });
   const url = await listen(app);
   const ceo = await setUpCompany(app);
   const builtin = await connectNode(url, NODE_KEY);
@@ -70,7 +71,7 @@ describe('access to the computer the server runs on', () => {
     const asked = await call(await mcp(app), 'ask_computer_access', { reason: 'Restart the nodes outside AppArmor.' });
     expect(asked.isError).toBeFalsy();
     const shown = (await app.inject({ method: 'GET', url: '/api/computer', ...as(ceo) })).json();
-    expect(shown).toEqual({ available: true, until: null, asked: { reason: 'Restart the nodes outside AppArmor.', at: expect.any(String) } });
+    expect(shown).toEqual({ available: true, until: null, asked: { reason: 'Restart the nodes outside AppArmor.', at: expect.any(String) }, machine: null });
 
     const before = Date.now();
     const opened = await app.inject({ method: 'POST', url: '/api/computer/open', ...as(ceo) });
@@ -79,7 +80,7 @@ describe('access to the computer the server runs on', () => {
     expect(until_).toBeGreaterThanOrEqual(before + DAY_MS - 1000);
     expect(until_).toBeLessThanOrEqual(Date.now() + DAY_MS);
     expect(settings(control)).toMatchObject({ untilSec: Math.floor(until_ / 1000), asked: null });
-    expect((await app.inject({ method: 'GET', url: '/api/computer', ...as(ceo) })).json()).toEqual({ available: true, until: opened.json().until, asked: null });
+    expect((await app.inject({ method: 'GET', url: '/api/computer', ...as(ceo) })).json()).toEqual({ available: true, until: opened.json().until, asked: null, machine: null });
     expect(await lines(db, orchestrator.id)).toEqual([
       { state: 'asked', reason: 'Restart the nodes outside AppArmor.' },
       { state: 'opened', until: opened.json().until },
@@ -159,6 +160,25 @@ describe('access to the computer the server runs on', () => {
     expect((await app.inject({ method: 'POST', url: '/api/computer/decline', ...as(ceo) })).statusCode).toBe(200);
     expect((await app.inject({ method: 'GET', url: '/api/computer', ...as(ceo) })).json().asked).toBeNull();
     expect((await lines(db, orchestrator.id)).map(l => (l as { state: string }).state)).toEqual(['opened', 'closed', 'asked', 'declined']);
+  });
+
+  /* The server's computer joined as a machine too: the CEO sees which machine the access is to, wherever they look from. */
+  it('names the machine the server runs on, in what the CEO sees and in the log', async () => {
+    const hostId = createHash('sha256').update('hornhoof-host:debian-0001-abcd').digest('hex');
+    const { app, db, ceo, orchestrator } = await company({ env: { HORNHOOF_HOST_ID: hostId } });
+    const { command } = (await app.inject({ method: 'POST', url: '/api/machines/command', ...as(ceo) })).json();
+    const join_ = { code: command.split('--join ')[1], machineId: 'debian-0001-abcd', hostname: 'debian-box', os: 'linux', arch: 'x86_64' };
+    expect((await app.inject({ method: 'POST', url: '/api/nodes/join', payload: join_ })).statusCode).toBe(200);
+
+    await call(await mcp(app), 'ask_computer_access', { reason: 'Clean Docker images.' });
+    expect((await app.inject({ method: 'GET', url: '/api/computer', ...as(ceo) })).json().machine).toBe('debian-box');
+    expect((await app.inject({ method: 'POST', url: '/api/computer/open', ...as(ceo) })).json().machine).toBe('debian-box');
+    await app.inject({ method: 'POST', url: '/api/computer/close', ...as(ceo) });
+    expect(await lines(db, orchestrator.id)).toEqual([
+      { state: 'asked', reason: 'Clean Docker images.', machine: 'debian-box' },
+      { state: 'opened', until: expect.any(String), machine: 'debian-box' },
+      { state: 'closed', machine: 'debian-box' },
+    ]);
   });
 
   it('is opened and closed by the CEO alone, never by another person or through the orchestrator', async () => {

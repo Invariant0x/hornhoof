@@ -74,7 +74,7 @@ Yes, when the CEO lets him. Some trouble sits outside Hornhoof, in Docker or in 
 3. For a day he runs commands on that computer as root, and each one shows in his window.
 4. Access closes by itself after a day. **Close access** in his window closes it sooner. **Not now** turns a request down.
 
-Only the CEO opens and closes it, in the CEO's own window. He runs commands only in a turn that answers the CEO, or the one that starts when the CEO opens access. The computer here is the one the server runs on. On a Mac, he reaches Docker's own Linux system there, not macOS.
+Only the CEO opens and closes it, in the CEO's own window. He runs commands only in a turn that answers the CEO, or the one that starts when the CEO opens access. The computer here is the one the server runs on, whichever machine you open Hornhoof from, so the card names that machine and shows on every screen of yours. On a Mac, he reaches Docker's own Linux system there, not macOS.
 
 ## What stays with people?
 

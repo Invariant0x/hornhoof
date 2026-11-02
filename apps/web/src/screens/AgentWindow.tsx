@@ -354,15 +354,16 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard }:
   /* What the orchestrator asked of the computer, and what the CEO did about it. */
   function computerLine(e: EventView): string {
     const who = e.person?.name ?? t.window.hornhoof;
+    const machine = field(e.data, 'machine') || t.window.computerServer;
     switch (field(e.data, 'state')) {
       case 'asked':
-        return t.window.computerAsked(field(e.data, 'reason'));
+        return t.window.computerAsked(field(e.data, 'reason'), machine);
       case 'opened':
-        return t.window.computerOpened(who, clock(language, field(e.data, 'until')) ?? '');
+        return t.window.computerOpened(who, clock(language, field(e.data, 'until')) ?? '', machine);
       case 'closed':
-        return t.window.computerClosed(who);
+        return t.window.computerClosed(who, machine);
       default:
-        return t.window.computerDeclined(who);
+        return t.window.computerDeclined(who, machine);
     }
   }
 
