@@ -13,7 +13,7 @@ const LOGGED_ENV = [
 const LOGIN_URL = 'https://login.example.test/device?code=ABC';
 
 /* What a message to agy's print mode asks of the fake, for the live terminal tests, where one program sends many. */
-const AGY_ASKS = { HANG: 'hang', FAIL: 'fail', TOOLS: 'tools', TICK: 'tick', WORK: 'work' };
+const AGY_ASKS = { HANG: 'hang', FAIL: 'fail', TOOLS: 'tools', TICK: 'tick', WORK: 'work', CUT: 'cut' };
 
 export function run(name) {
   const argv = process.argv.slice(2);
@@ -113,21 +113,8 @@ export function run(name) {
     process.stderr.write(`boom ${process.env.FAKE_ERROR_SECRET}\n\n\n`);
     process.exit(3);
   }
-  if (mode === 'signed_out') {
-    if (name === 'kimi') {
-      process.stdout.write('{"role":"meta","type":"system.version","version":"2.4.0"}\n');
-      process.stderr.write('error: failed to run prompt: No model configured. Run `kimi` and use /login to sign in, then retry.\n');
-    } else print(`${name}-signed-out`);
-    if (name === 'agy') process.stderr.write('Waiting for authentication (timeout 60s)...\nOr, paste the authorization code here and press Enter:\nError: authentication timed out.\nerror: authentication failed or timed out\n');
-    process.exit(1);
-  }
-  if (mode === 'fail') {
-    if (name === 'claude') process.stdout.write('{"type":"result","subtype":"error_during_execution","is_error":true,"result":"Something broke","session_id":"5e55c1a0-0000-4000-8000-000000000001"}\n');
-    if (name === 'codex') process.stdout.write('{"type":"thread.started","thread_id":"c0dec000-0000-7000-8000-000000000009"}\n{"type":"turn.failed","error":{"message":"stream error: something broke"}}\n');
-    if (name === 'kimi') process.stderr.write('error: failed to run prompt: something broke\n');
-    if (name === 'agy') print('agy-fail');
-    process.exit(1);
-  }
+  if (mode === 'signed_out') signedOutRun(name, print);
+  if (mode === 'fail') failedRun(name, print);
   /* An agent that prints the sign-in it was started with, which nobody may see. */
   if (mode === 'say_token' && name === 'claude') {
     const text = `my token is ${process.env.CLAUDE_CODE_OAUTH_TOKEN}`;
@@ -144,32 +131,8 @@ export function run(name) {
     print('codex-api-key-invalid');
     process.exit(1);
   }
-  if (mode === 'tools' && name === 'agy') {
-    /* A tool step from agy's docs, then a whole turn, so the run ends with a result. */
-    print('agy-tools');
-    return void print('agy-new');
-  }
+  if (name === 'agy' && Object.hasOwn(AGY_RUNS, mode)) return void AGY_RUNS[mode](print);
   if (mode === 'tools') return void print(`${name}-tools`);
-  if (mode === 'tick' && name === 'agy') {
-    /* Works for 4 s, telling only on the screen how long, as on stderr, which agy's print mode keeps out of its stream. */
-    let worked = 0;
-    const tick = setInterval(() => process.stderr.write(`Working ${(worked += 250)} ms\n`), 250);
-    return void setTimeout(() => {
-      clearInterval(tick);
-      print('agy-new');
-    }, 4000);
-  }
-  if (mode === 'work' && name === 'agy') {
-    /* Thinks for 1.5 s, then runs a command for 1.5 s, as agy updates a tool step while it runs and once it is done. */
-    const step = state => process.stdout.write(JSON.stringify({ event: 'step_update', step_update: { step_index: 2, state, step_type: 'tool', tool_name: 'run_command', tool_info: { name: 'run_command', parameters: { CommandLine: 'make' }, ...(state === 'DONE' ? { output: 'built\n' } : {}) } } }) + '\n');
-    return void setTimeout(() => {
-      step('ACTIVE');
-      setTimeout(() => {
-        step('DONE');
-        print('agy-new');
-      }, 1500);
-    }, 1500);
-  }
   if (mode === 'odd-lines') {
     /* Valid JSON that is no event: the node goes on to the real output after it. */
     process.stdout.write('null\n[]\n"text"\n42\n');
@@ -183,6 +146,64 @@ export function run(name) {
   const resume = name === 'claude' ? argv.includes('--resume') : name === 'codex' ? argv[1] === 'resume' : name === 'agy' ? argv.includes('--conversation') : argv.includes('--session');
   print(`${name}-${resume ? 'resume' : 'new'}`);
 }
+
+/* What each program prints when it is not signed in, and how it fails. */
+function signedOutRun(name, print) {
+  if (name === 'kimi') {
+    process.stdout.write('{"role":"meta","type":"system.version","version":"2.4.0"}\n');
+    process.stderr.write('error: failed to run prompt: No model configured. Run `kimi` and use /login to sign in, then retry.\n');
+  } else print(`${name}-signed-out`);
+  if (name === 'agy') process.stderr.write('Waiting for authentication (timeout 60s)...\nOr, paste the authorization code here and press Enter:\nError: authentication timed out.\nerror: authentication failed or timed out\n');
+  process.exit(1);
+}
+
+const FAILURES = {
+  claude: () => process.stdout.write('{"type":"result","subtype":"error_during_execution","is_error":true,"result":"Something broke","session_id":"5e55c1a0-0000-4000-8000-000000000001"}\n'),
+  codex: () => process.stdout.write('{"type":"thread.started","thread_id":"c0dec000-0000-7000-8000-000000000009"}\n{"type":"turn.failed","error":{"message":"stream error: something broke"}}\n'),
+  kimi: () => process.stderr.write('error: failed to run prompt: something broke\n'),
+  agy: print => print('agy-fail'),
+};
+
+function failedRun(name, print) {
+  FAILURES[name]?.(print);
+  process.exit(1);
+}
+
+/* agy's print runs that the live terminal tests ask for by their message's first word. */
+const AGY_RUNS = {
+  /* A tool step from agy's docs, then a whole turn, so the run ends with a result. */
+  tools: print => {
+    print('agy-tools');
+    print('agy-new');
+  },
+  /* Works for 4 s, telling only on the screen how long, as on stderr, which agy's print mode keeps out of its stream. */
+  tick: print => {
+    let worked = 0;
+    const tick = setInterval(() => process.stderr.write(`Working ${(worked += 250)} ms\n`), 250);
+    setTimeout(() => {
+      clearInterval(tick);
+      print('agy-new');
+    }, 4000);
+  },
+  /* Thinks for 1.5 s, then runs a command for 1.5 s, as agy updates a tool step while it runs and once it is done. */
+  work: print => {
+    setTimeout(() => {
+      agyToolStep('ACTIVE');
+      setTimeout(() => {
+        agyToolStep('DONE');
+        print('agy-new');
+      }, 1500);
+    }, 1500);
+  },
+  /* Starts a command and then prints nothing more, never ending, as agy did when its stream broke off mid-turn with a 503
+     from its backend while its work went on. */
+  cut: () => {
+    agyToolStep('ACTIVE');
+    setInterval(() => {}, 1000);
+  },
+};
+
+const agyToolStep = state => process.stdout.write(JSON.stringify({ event: 'step_update', step_update: { step_index: 2, state, step_type: 'tool', tool_name: 'run_command', tool_info: { name: 'run_command', parameters: { CommandLine: 'make' }, ...(state === 'DONE' ? { output: 'built\n' } : {}) } } }) + '\n');
 
 /* Codex's app server over stdin and stdout, one JSON-RPC message a line: the plan's limits as Codex 0.166 answers them. */
 function appServer(signedIn) {

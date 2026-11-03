@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { NodeMessage } from '@hornhoof/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SIGNED_OUT as AGY_SIGNED_OUT } from '../src/providers/antigravity.js';
 import type { RunResult } from '../src/runner.js';
@@ -97,6 +98,26 @@ describe.skipIf(!hasTmux)('a turn whose end its program never said', () => {
     const run = host.run(kimiJob('wait-kimi', 'HANG here', { jobId: 'job-wait-kimi', signal: stop.signal }));
     expect(await within(run, 3 * LOST_MS + 2000)).toBe(STILL_WAITING);
     expect(new Set(states('job-wait-kimi'))).toEqual(new Set(['thinking']));
+    stop.abort();
+    expect(await run).toMatchObject({ ok: false, error: 'cancelled' });
+  });
+
+  /* agy's stream can break off mid-turn, as with a 503 from its backend, while agy works on and never says the turn
+     ended. The node tells no lie about it: no wait for what to type, no end, and the screen's time stands with the
+     screen. Hornhoof's alarm on a program that stood still takes the turn from there. */
+  it('of Antigravity whose output broke off mid-tool stays open, and tells the tool with a screen that stood still', async () => {
+    const logs: string[] = [];
+    await setUp({ lostMs: LOST_MS, lookMs: 100, reportMs: 400, log: m => logs.push(m) });
+    const stop = new AbortController();
+    const run = host.run(agyJob('cut-agy', 'CUT here', { jobId: 'job-cut', signal: stop.signal }));
+    expect(await within(run, 3 * LOST_MS + 2000)).toBe(STILL_WAITING);
+    const told = sent.filter((m): m is Extract<NodeMessage, { type: 'job.program' }> => m.type === 'job.program' && m.jobId === 'job-cut');
+    expect(told.map(m => m.state)).not.toContain('idle');
+    expect(told.at(-1)).toMatchObject({ state: 'tool', tool: 'run_command' });
+    const tool = told.filter(m => m.state === 'tool');
+    expect(tool.length).toBeGreaterThanOrEqual(3);
+    expect(new Set(tool.map(m => m.screenAt)).size).toBe(1);
+    expect(logs.filter(l => l.includes(UNSAID))).toEqual([]);
     stop.abort();
     expect(await run).toMatchObject({ ok: false, error: 'cancelled' });
   });

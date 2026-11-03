@@ -79,73 +79,88 @@ let turn = 0;
 let hanging = null;
 async function take(line) {
   if (line === 'EXIT') process.exit(3);
-  if (line === '/new') {
-    await startSession('new');
-    prompt();
-    return;
-  }
+  if (line === '/new') return newSession();
   if (!session) await startSession('startup');
   const context = await hook('prompt', 'UserPromptSubmit', { prompt: [{ type: 'text', text: line }], is_steer: false });
   // Opening the typed job can finish before the program is ready to take Escape.
-  if (line === 'HANG typed') await new Promise(done => setTimeout(done, 100));
-  if (line.includes('BLOCKED')) {
-    // A prompt hook of the person's own said no: Kimi completes the prompt as blocked and starts no turn.
-    record('prompt.completed', { promptId: `p${turn}`, finishedAt: new Date().toISOString(), reason: 'blocked' });
-    print('Blocked by a hook\n');
-    prompt();
-    return;
-  }
+  if (line === 'HANG typed') await sleep(100);
+  if (line.includes('BLOCKED')) return blocked();
   const turnId = turn++;
   record('turn.prompt', { input: [{ type: 'text', text: line }], origin: { kind: 'user' } });
+  if (endsAtOnce(line, turnId)) return;
+  await workFirst(line, turnId);
+  if (line.includes('PARTS')) return parts(turnId);
+  answer(line, turnId, context);
+}
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const loop = (turnId, event) => record('context.append_loop_event', { event: { turnId: String(turnId), ...event } });
+
+async function newSession() {
+  await startSession('new');
+  prompt();
+}
+
+// A prompt hook of the person's own said no: Kimi completes the prompt as blocked and starts no turn.
+function blocked() {
+  record('prompt.completed', { promptId: `p${turn}`, finishedAt: new Date().toISOString(), reason: 'blocked' });
+  print('Blocked by a hook\n');
+  prompt();
+}
+
+// Whether the turn ended as it started: CRASH ends the program, HANG waits until Escape stops it, ABORT logs a stopped
+// turn and FAIL a failed one.
+function endsAtOnce(line, turnId) {
   if (line.startsWith('CRASH')) crash(line.includes('LONG') ? 'long' : '');
   if (line.includes('HANG_EXIT')) print('exit-test running\n');
   if (line.includes('HANG')) {
     hanging = turnId;
     print(`waiting: ${line}\n`);
-    prompt();
-    return;
-  }
-  if (line.includes('ABORT') || line.includes('FAIL')) {
+  } else if (line.includes('ABORT') || line.includes('FAIL')) {
     record('turn.ended', line.includes('FAIL') ? { turnId, reason: 'failed', error: { name: 'APIError', message: 'The plan ran out.' } } : { turnId, reason: 'cancelled' });
     print('Interrupted\n');
-    prompt();
-    return;
-  }
+  } else return false;
+  prompt();
+  return true;
+}
+
+async function workFirst(line, turnId) {
   if (line.includes('SLOW')) {
     prompt();
-    await new Promise(r => setTimeout(r, 2000));
+    await sleep(2000);
     print('\r\x1b[J');
   }
-  const loop = event => record('context.append_loop_event', { event: { turnId: String(turnId), ...event } });
-  if (line.includes('WORK')) {
-    await new Promise(r => setTimeout(r, 1500));
-    loop({ type: 'tool.call', step: 1, toolCallId: 'work-1', name: 'Bash', args: { command: 'make' } });
-    await new Promise(r => setTimeout(r, 1500));
-    loop({ type: 'tool.result', step: 1, toolCallId: 'work-1', result: { output: 'built', isError: false } });
-  }
-  if (line.includes('PARTS')) {
-    // A step with a tool call, then a final message in two text parts with a thought between them.
-    loop({ type: 'step.begin', step: 1 });
-    loop({ type: 'content.part', step: 1, part: { type: 'text', text: 'Looking.' } });
-    loop({ type: 'tool.call', step: 1, toolCallId: 'c1', name: 'Bash', args: { command: 'ls' } });
-    loop({ type: 'tool.result', step: 1, toolCallId: 'c1', result: { output: 'a.txt', isError: false } });
-    loop({ type: 'step.end', step: 1 });
-    loop({ type: 'step.begin', step: 2 });
-    loop({ type: 'content.part', step: 2, part: { type: 'text', text: 'first half.' } });
-    loop({ type: 'content.part', step: 2, part: { type: 'think', think: 'More.' } });
-    loop({ type: 'content.part', step: 2, part: { type: 'text', text: ' second half.' } });
-    loop({ type: 'step.end', step: 2 });
-    record('turn.ended', { turnId, reason: 'completed' });
-    print('● first half. second half.\n');
-    prompt();
-    return;
-  }
-  const answer = line === 'SECRET' ? `the key is ${process.env.FAKE_SECRET}` : `echo: ${line}${context ? `\n${context}` : ''}`;
-  loop({ type: 'content.part', step: 1, part: { type: 'text', text: answer } });
+  if (!line.includes('WORK')) return;
+  await sleep(1500);
+  loop(turnId, { type: 'tool.call', step: 1, toolCallId: 'work-1', name: 'Bash', args: { command: 'make' } });
+  await sleep(1500);
+  loop(turnId, { type: 'tool.result', step: 1, toolCallId: 'work-1', result: { output: 'built', isError: false } });
+}
+
+// A step with a tool call, then a final message in two text parts with a thought between them.
+function parts(turnId) {
+  loop(turnId, { type: 'step.begin', step: 1 });
+  loop(turnId, { type: 'content.part', step: 1, part: { type: 'text', text: 'Looking.' } });
+  loop(turnId, { type: 'tool.call', step: 1, toolCallId: 'c1', name: 'Bash', args: { command: 'ls' } });
+  loop(turnId, { type: 'tool.result', step: 1, toolCallId: 'c1', result: { output: 'a.txt', isError: false } });
+  loop(turnId, { type: 'step.end', step: 1 });
+  loop(turnId, { type: 'step.begin', step: 2 });
+  loop(turnId, { type: 'content.part', step: 2, part: { type: 'text', text: 'first half.' } });
+  loop(turnId, { type: 'content.part', step: 2, part: { type: 'think', think: 'More.' } });
+  loop(turnId, { type: 'content.part', step: 2, part: { type: 'text', text: ' second half.' } });
+  loop(turnId, { type: 'step.end', step: 2 });
+  record('turn.ended', { turnId, reason: 'completed' });
+  print('● first half. second half.\n');
+  prompt();
+}
+
+function answer(line, turnId, context) {
+  const text = line === 'SECRET' ? `the key is ${process.env.FAKE_SECRET}` : `echo: ${line}${context ? `\n${context}` : ''}`;
+  loop(turnId, { type: 'content.part', step: 1, part: { type: 'text', text } });
   if (line.includes('SWITCH')) record('config.update', { modelAlias: 'small' });
   record('token_counting.measured', { length: 2, tokens: 262144 });
   record('turn.ended', { turnId, reason: 'completed' });
-  print(`● ${answer}\n`);
+  print(`● ${text}\n`);
   prompt();
 }
 

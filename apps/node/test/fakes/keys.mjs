@@ -17,55 +17,83 @@ export function rawKeys({ ask = true } = {}) {
 
 export function readKeys(on) {
   process.stdin.setEncoding('utf8');
-  let rest = '';
-  let paste = null;
-  let timer = null;
-  const take = () => {
-    while (rest) {
-      if (paste !== null) {
-        const end = rest.indexOf(PASTE_END);
-        const keep = end < 0 ? partialEnd(rest) : 0;
-        paste += rest.slice(0, end < 0 ? rest.length - keep : end);
-        rest = end < 0 ? rest.slice(rest.length - keep) : rest.slice(end + PASTE_END.length);
-        if (end < 0) return;
-        on({ text: paste.replace(/\r\n?/g, '\n') });
-        paste = null;
-        continue;
-      }
-      if (rest.startsWith(PASTE_START)) {
-        paste = '';
-        rest = rest.slice(PASTE_START.length);
-        continue;
-      }
-      /* The rest of a paste's start may still be on its way. */
-      if (rest.length < PASTE_START.length && PASTE_START.startsWith(rest)) {
-        timer = setTimeout(() => {
-          timer = null;
-          rest = rest.slice(1);
-          on('escape');
-          take();
-        }, ESCAPE_WAIT_MS);
-        return;
-      }
-      /* Another key's escape sequence, such as an arrow's, counts as Escape. */
-      const sequence = rest.match(/^\x1b\[[0-9;?]*[ -/]*[@-~]/);
-      if (sequence) {
-        rest = rest.slice(sequence[0].length);
-        on('escape');
-        continue;
-      }
-      const ch = String.fromCodePoint(rest.codePointAt(0));
-      rest = rest.slice(ch.length);
-      if (ch === '\x1b') on('escape');
-      else on(SINGLE[ch] ?? { text: ch });
-    }
-  };
-  process.stdin.on('data', data => {
-    if (timer) clearTimeout(timer);
-    timer = null;
-    rest += data;
-    take();
-  });
+  const keys = new Keys(on);
+  process.stdin.on('data', data => keys.add(data));
+}
+
+/* What the terminal sent, read key by key as it comes: a paste waits for its end, and a lone Escape a moment for what may
+   follow it. */
+class Keys {
+  rest = '';
+  paste = null;
+  timer = null;
+
+  constructor(on) {
+    this.on = on;
+  }
+
+  add(data) {
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    this.rest += data;
+    this.take();
+  }
+
+  take() {
+    while (this.rest && this.next());
+  }
+
+  /* Reads what comes next; false when the rest has to wait for more. */
+  next() {
+    if (this.paste !== null) return this.pasted();
+    if (this.rest.startsWith(PASTE_START)) return this.startPaste();
+    /* The rest of a paste's start may still be on its way. */
+    if (this.rest.length < PASTE_START.length && PASTE_START.startsWith(this.rest)) return this.waitForPaste();
+    return this.key();
+  }
+
+  pasted() {
+    const end = this.rest.indexOf(PASTE_END);
+    if (end < 0) return this.pastedSoFar();
+    this.paste += this.rest.slice(0, end);
+    this.rest = this.rest.slice(end + PASTE_END.length);
+    this.on({ text: this.paste.replace(/\r\n?/g, '\n') });
+    this.paste = null;
+    return true;
+  }
+
+  /* Keeps what may begin the paste's end marker for the next piece. */
+  pastedSoFar() {
+    const keep = partialEnd(this.rest);
+    this.paste += this.rest.slice(0, this.rest.length - keep);
+    this.rest = this.rest.slice(this.rest.length - keep);
+    return false;
+  }
+
+  startPaste() {
+    this.paste = '';
+    this.rest = this.rest.slice(PASTE_START.length);
+    return true;
+  }
+
+  waitForPaste() {
+    this.timer = setTimeout(() => {
+      this.timer = null;
+      this.rest = this.rest.slice(1);
+      this.on('escape');
+      this.take();
+    }, ESCAPE_WAIT_MS);
+    return false;
+  }
+
+  /* Another key's escape sequence, such as an arrow's, counts as Escape. */
+  key() {
+    const sequence = this.rest.match(/^\x1b\[[0-9;?]*[ -/]*[@-~]/)?.[0];
+    const ch = sequence ?? String.fromCodePoint(this.rest.codePointAt(0));
+    this.rest = this.rest.slice(ch.length);
+    this.on(sequence || ch === '\x1b' ? 'escape' : (SINGLE[ch] ?? { text: ch }));
+    return true;
+  }
 }
 
 export function bracketed() {

@@ -72,79 +72,106 @@ const show = () => {
   shown = lines.length - 1;
 };
 let queue = Promise.resolve();
-readKeys(
-  key => {
-    if (Date.now() < inputAt) return;
-    // Escape stops an answer; it is not part of the next line.
-    if (key === 'escape') return;
-    if (key === 'kill') input = input.slice(0, input.lastIndexOf('\n') + 1);
-    else if (key === 'erase') input = input.slice(0, -1);
-    else if (key !== 'enter') input += key.text;
-    if (key !== 'enter') return show();
-    if (Date.now() < deafUntil) return;
-    if (loseEnter) {
-      loseEnter = false;
-      return;
-    }
-    const line = keepTail ? input.slice(-keepTail) : input;
-    // An Enter into an empty input does nothing.
-    if (!line) return;
-    keepTail = 0;
-    input = '';
-    shown = 0;
-    process.stdout.write('\r\n');
-    queue = queue.then(() => take(line));
-  },
-);
+readKeys(key => {
+  if (Date.now() < inputAt) return;
+  // Escape stops an answer; it is not part of the next line.
+  if (key === 'escape') return;
+  if (key !== 'enter') return typed(key);
+  const line = entered();
+  if (line) queue = queue.then(() => take(line));
+});
+
+function typed(key) {
+  if (key === 'kill') input = input.slice(0, input.lastIndexOf('\n') + 1);
+  else if (key === 'erase') input = input.slice(0, -1);
+  else input += key.text;
+  show();
+}
+
+// The line Enter sends, or none while the fake is deaf, loses the Enter, or its input is empty: an Enter into an empty
+// input does nothing.
+function entered() {
+  if (Date.now() < deafUntil) return '';
+  if (loseEnter) {
+    loseEnter = false;
+    return '';
+  }
+  const line = keepTail ? input.slice(-keepTail) : input;
+  if (!line) return '';
+  keepTail = 0;
+  input = '';
+  shown = 0;
+  process.stdout.write('\r\n');
+  return line;
+}
 
 async function take(line) {
   if (line === 'EXIT') process.exit(3);
-  if (line === 'CLEAR') {
-    session = randomUUID();
-    log = logOf(session);
-    process.stdout.write('❯ ');
-    await hook('start', { source: 'clear' });
-    return;
-  }
+  if (line === 'CLEAR') return clear();
   const context = await hook('prompt', { prompt: line });
   if (line.startsWith('CRASH')) crash(line.includes('LONG') ? 'long' : '');
   if (line.includes('HANG_EXIT')) process.stdout.write('exit-test running\n');
-  if (line.includes('HANG')) {
-    process.stdout.write('❯ ');
-    return;
-  }
-  if (line.includes('INTERRUPT')) {
-    appendFileSync(log, JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: '[Request interrupted by user]' }] } }) + '\n');
-    process.stdout.write('  ⎿  Interrupted\n❯ ');
-    return;
-  }
-  if (line.includes('MUTE')) {
-    process.stdout.write("■ This content can't be shown.\n❯ ");
-    await hook('stop', { last_assistant_message: '', transcript_path: log });
-    return;
-  }
+  const ending = ENDINGS.find(([word]) => line.includes(word));
+  if (ending) return ending[1]();
+  await workFirst(line);
+  await answer(line, context);
+}
+
+async function clear() {
+  session = randomUUID();
+  log = logOf(session);
+  process.stdout.write('❯ ');
+  await hook('start', { source: 'clear' });
+}
+
+// Words that end a turn without an answer, each its own way.
+const ENDINGS = [
+  ['HANG', () => process.stdout.write('❯ ')],
+  [
+    'INTERRUPT',
+    () => {
+      appendFileSync(log, JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: '[Request interrupted by user]' }] } }) + '\n');
+      process.stdout.write('  ⎿  Interrupted\n❯ ');
+    },
+  ],
+  [
+    'MUTE',
+    async () => {
+      process.stdout.write("■ This content can't be shown.\n❯ ");
+      await hook('stop', { last_assistant_message: '', transcript_path: log });
+    },
+  ],
+];
+
+async function workFirst(line) {
   if (line.includes('SLOW')) {
     process.stdout.write('❯ ');
-    await new Promise(r => setTimeout(r, 2000));
+    await sleep(2000);
   }
-  // TICK works for 3 s with its prompt empty under a line that counts the time, as Claude Code's spinner does.
-  if (line.includes('TICK')) {
-    process.stdout.write('\n❯ ');
-    for (let i = 0; i < 12; i++) {
-      spinner(`Working ${i * 250} ms`);
-      await sleep(250);
-    }
-    spinner('');
-    process.stdout.write('\r\x1b[2K');
-  }
+  if (line.includes('TICK')) await tick();
   if (line.includes('WORK')) await work();
-  const answer = line === 'SECRET' ? `the key is ${process.env.FAKE_SECRET}` : `echo: ${line}${context ? `\n${context}` : ''}`;
-  const write = () => appendFileSync(log, JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: answer }] } }) + '\n');
-  if (!line.includes('LAG')) write();
-  process.stdout.write(`● ${answer}\n❯ `);
+}
+
+// TICK works for 3 s with its prompt empty under a line that counts the time, as Claude Code's spinner does.
+async function tick() {
+  process.stdout.write('\n❯ ');
+  for (let i = 0; i < 12; i++) {
+    spinner(`Working ${i * 250} ms`);
+    await sleep(250);
+  }
+  spinner('');
+  process.stdout.write('\r\x1b[2K');
+}
+
+async function answer(line, context) {
+  const text = line === 'SECRET' ? `the key is ${process.env.FAKE_SECRET}` : `echo: ${line}${context ? `\n${context}` : ''}`;
+  const write = () => appendFileSync(log, JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text }] } }) + '\n');
+  const lag = line.includes('LAG');
+  if (!lag) write();
+  process.stdout.write(`● ${text}\n❯ `);
   await hook('status', { rate_limits: { five_hour: { used_percentage: 40, resets_at: 1793379000 } }, context_window: { used_percentage: 25 } });
-  await hook('stop', { last_assistant_message: answer, transcript_path: log });
-  if (line.includes('LAG')) setTimeout(write, line.includes('LAGLONG') ? 2500 : 300);
+  await hook('stop', { last_assistant_message: text, transcript_path: log });
+  if (lag) setTimeout(write, line.includes('LAGLONG') ? 2500 : 300);
 }
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
