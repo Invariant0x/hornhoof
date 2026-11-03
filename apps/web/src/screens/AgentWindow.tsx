@@ -4,7 +4,7 @@ import { deptLabel, errorText, useLanguage, useT, type Messages } from '../i18n'
 import { useStream } from '../live';
 import { PROGRAM_NAMES, PROVIDER_NAMES } from '../providers';
 import type { AgentCardView, ComputerView, DecidedBy, Decisions, EventView, Me, OrchestratorState, Org, ShownCommand, StaffLine, StructureItem, SubView, TemplateKey } from '../types';
-import { EventMessage, isMessage, MessageFrame, useFolding } from '../ui/AgentMessage';
+import { EventMessage, isMessage, useFolding } from '../ui/AgentMessage';
 import { AgentTerminal } from '../ui/AgentTerminal';
 import { CommandCard } from '../ui/CommandCard';
 import { CEO_DECIDES } from '../ui/DecidedBy';
@@ -348,10 +348,13 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard }:
     void send();
   }
 
+  const hasTerminal = Boolean(state?.terminal) && !noTerminal;
+  const terminal = hasTerminal && !asLog;
   /* One card at a time: his newest proposal until it is applied, below his latest line. */
   const shown = visible(events);
   const messages = shown.filter(isMessage);
-  const folding = useFolding(messages.map(e => e.seq), box);
+  /* Only the log folds messages; the live terminal has the whole window, and its program has Ctrl+O. */
+  const folding = useFolding(terminal ? [] : messages.map(e => e.seq), box);
   const newest = events.findLast(e => e.kind === 'proposal');
   const applied = new Set(events.filter(e => e.kind === 'applied').map(e => (e.data as Applied).proposalId));
   const open = newest && !applied.has(field(newest.data, 'proposalId')) ? newest.data : null;
@@ -368,8 +371,6 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard }:
   /* A company that has departments but no orchestrator yet waits for a subscription, so he can staff them. */
   const needsOrchestrator = orchestrator && !open && !staffByHand && !empty && state !== null && !ready && !state.busy && !state.queued;
   const where = [model || t.agent.default, orchestratorStatus(t, sub), machine?.hostname].filter(Boolean).join(', ');
-  const hasTerminal = Boolean(state?.terminal) && !noTerminal;
-  const terminal = hasTerminal && !asLog;
   const { cardLock, handLock } = useCardLocks(me, open);
 
   const cards = (
@@ -569,10 +570,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard }:
         </div>
       )}
       {!notebook && known && terminal && (
-        <>
-          <MessageFrame events={messages} folding={folding} />
-          <AgentTerminal path={`/api/agents/${agentId}/terminal`} program={sub ? PROGRAM_NAMES[sub.provider] : 'Claude'} onGone={() => setNoTerminal(true)} />
-        </>
+        <AgentTerminal path={`/api/agents/${agentId}/terminal`} program={sub ? PROGRAM_NAMES[sub.provider] : 'Claude'} onGone={() => setNoTerminal(true)} />
       )}
       {!notebook && known && terminal && hasCards && (
         <div className="t-cards">
