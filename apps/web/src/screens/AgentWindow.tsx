@@ -1,3 +1,4 @@
+import { commandBlockOpen } from '../ui/CommandBox';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { api } from '../api';
 import { deptLabel, errorText, useLanguage, useT, type Messages } from '../i18n';
@@ -196,7 +197,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard }:
   const loadCommands = useCallback(async () => {
     const [res, access] = await loadCards(ownsCommands, seesComputer);
     if (!mounted.current) return;
-    if (res) setCommands(res.commands);
+    if (res) setCommands(res.commands.filter(commandBlockOpen));
     if (access) setComputer(access);
   }, [ownsCommands, seesComputer]);
 

@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
 import { PROGRAM_NAMES, PROVIDER_NAMES } from '../providers';
-import type { JobView, Me, SubView } from '../types';
+import type { JobView, Me, ShownCommand, SubView } from '../types';
 import { Ask } from '../ui/Ask';
-import { ActiveCommandPanel, hideShownCommand, livePanel, loadPlansCommand, toActiveCommand, type CommandPanelState } from '../ui/CommandBox';
+import type { ActiveCommand } from '../ui/CommandBox';
+import { usePlanCommands } from './use-plan-commands';
+import { commandForPlan, SubscriptionCommandBlocks, SubscriptionInstall } from './SubscriptionCommands';
 import { ConnectPanel } from '../ui/ConnectPanel';
 import { isKeyPlan, KeyForm } from '../ui/KeyForm';
 import { resetDurationAt, useNow } from '../ui/reset';
@@ -20,7 +22,6 @@ export { clock } from '../ui/subscription';
 
 const POLL_MS = 1000;
 const POLL_LIMIT_MS = 150_000;
-const REFRESH_MS = 5000;
 
 type Test = { phase: 'running' } | { phase: 'done'; text: string } | { phase: 'failed'; text: string; tail: string | null };
 /* A sign-in the owner runs now, in a terminal on one of the plan's machines. */
@@ -180,6 +181,7 @@ function TestResult({ test }: { test: Test }) {
 }
 
 type PlanControls = {
+  command: ShownCommand | null | undefined;
   test: Test | undefined;
   asking: boolean;
   signing: Signing | null;
@@ -241,7 +243,6 @@ function RemoveButtons({ sub: s, me, controls: c }: PlanProps) {
   const name = subName(t, s);
   const mine = s.owner.id === me.person.id;
   return <>
-    {mine && s.kind === 'personal' && s.status === 'waiting_machine' && <button className="act" type="button" aria-label={t.subs.newCommandLabel(name)} onClick={() => c.newCommand(s)}>{t.subs.newCommand}</button>}
     {(mine || me.person.scopeKind === 'company') && <button className="act danger" type="button" aria-label={t.subs.removeLabel(name)} onClick={() => c.setConfirm(s.id)}>{t.subs.remove}</button>}
   </>;
 }
@@ -297,6 +298,7 @@ function SubscriptionDetails({ sub: s, me, controls, now }: PlanProps & { now: n
       <section className="blk blk-side">
         <h4>{t.cards.machinesOf}</h4>
         <PlanMachines sub={s} now={now} />
+        <SubscriptionInstall sub={s} ownerId={me.person.id} command={controls.command} onNew={() => controls.newCommand(s)} />
         <PlanSettings sub={s} me={me} controls={controls} />
         <PlanButtons sub={s} me={me} controls={controls} />
         <SignInNote text={controls.note} />
@@ -307,46 +309,11 @@ function SubscriptionDetails({ sub: s, me, controls, now }: PlanProps & { now: n
   );
 }
 
-function SubscriptionConnect({
-  panel,
-  setPanel,
-  onLoaded,
-  onCancel,
-}: {
-  panel: CommandPanelState;
-  setPanel: (next: CommandPanelState) => void;
-  onLoaded: () => void;
-  onCancel: (id: string) => void;
-}) {
-  const t = useT();
-  if (panel?.kind === 'connect') {
-    return (
-      <ConnectPanel
-        onCommand={shown => {
-          setPanel({ kind: 'command', shown });
-          onLoaded();
-        }}
-        onDone={() => {
-          setPanel(null);
-          onLoaded();
-        }}
-        onSkip={() => setPanel(null)}
-        skipLabel={t.common.cancel}
-      />
-    );
-  }
-  if (panel?.kind === 'command') {
-    return <ActiveCommandPanel heading={t.subs.connectHeading} run={t.subs.runThis} shown={panel.shown} onCancel={() => onCancel(panel.shown.id)} />;
-  }
-  return null;
-}
-
 export function Subscriptions({ me }: { me: Me }) {
   const t = useT();
   const { language } = useLanguage();
   const now = useNow();
-  const [subs, setSubs] = useState<SubView[] | null>(null);
-  const [panel, setPanel] = useState<CommandPanelState>(null);
+  const [connecting, setConnecting] = useState(false);
   const [confirm, setConfirm] = useState<string | null>(null);
   const [tests, setTests] = useState<Record<string, Test>>({});
   const [failure, setFailure] = useState<unknown>(null);
@@ -362,22 +329,9 @@ export function Subscriptions({ me }: { me: Me }) {
     };
   }, []);
 
-  const load = useCallback(async () => {
-    try {
-      const [list] = await Promise.all([api.get<{ subscriptions: SubView[] }>('/api/subscriptions'), loadPlansCommand(live, setPanel)]);
-      if (!live.current) return;
-      setSubs(list.subscriptions);
-    } catch (err) {
-      setFailure(err);
-    }
-  }, []);
-
-  /* Nodes sign in and come online on their own, so the screen looks again every few seconds. */
-  useEffect(() => {
-    void load();
-    const timer = setInterval(() => void load(), REFRESH_MS);
-    return () => clearInterval(timer);
-  }, [load]);
+  const { subs, setSubs, commands, load, connected, newCommand: requestCommand, dismissCommand } = usePlanCommands(live, setFailure);
+  const newCommand = (sub: SubView) => run(() => requestCommand(sub));
+  const onConnected = (shown: ActiveCommand, added: SubView[]) => { setConnecting(false); connected(shown, added); };
 
   async function run(action: () => Promise<void>) {
     setFailure(null);
@@ -419,18 +373,6 @@ export function Subscriptions({ me }: { me: Me }) {
       setSubs(list => list?.map(s => (s.id === subscription.id ? { ...s, ...subscription } : s)) ?? null);
     });
 
-  const newCommand = (sub: SubView) =>
-    run(async () => {
-      const res = await api.post<{ id?: string; command: string; expiresAt?: string }>(`/api/subscriptions/${sub.id}/command`);
-      setPanel({ kind: 'command', shown: toActiveCommand(res) });
-    });
-
-  const cancelCommand = (id: string) =>
-    run(async () => {
-      await hideShownCommand(id);
-      setPanel(null);
-    });
-
   const signIn = (sub: SubView, fresh: boolean) => startSignIn(t, sub, fresh, setSigning, setSignNote);
 
   const stopSignIn = (on: Signing) =>
@@ -452,8 +394,6 @@ export function Subscriptions({ me }: { me: Me }) {
       await load();
     });
 
-  const activePanel = livePanel(panel, now);
-
   return (
     <section className="people subs">
       <header className="people-head">
@@ -461,14 +401,15 @@ export function Subscriptions({ me }: { me: Me }) {
           <h1>{t.subs.heading}</h1>
           <p className="muted">{t.subs.intro}</p>
         </div>
-        {!activePanel && (
+        {!connecting && (
           <div className="head-actions">
-            <button className="btn" type="button" onClick={() => setPanel({ kind: 'connect' })}>{t.subs.connect}</button>
+            <button className="btn" type="button" onClick={() => setConnecting(true)}>{t.subs.connect}</button>
           </div>
         )}
       </header>
 
-      <SubscriptionConnect panel={activePanel} setPanel={setPanel} onLoaded={() => void load()} onCancel={id => void cancelCommand(id)} />
+      {connecting && <ConnectPanel onCommand={onConnected} onDone={() => setConnecting(false)} onSkip={() => setConnecting(false)} skipLabel={t.common.cancel} />}
+      <SubscriptionCommandBlocks subscriptions={subs ?? []} commands={commands ?? []} now={now} onDone={(command, id) => void run(() => dismissCommand(command, id))} />
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
 
       {subs && subs.length === 0 && <p className="muted">{t.subs.empty}</p>}
@@ -481,6 +422,7 @@ export function Subscriptions({ me }: { me: Me }) {
           search={{ placeholder: t.tables.searchSubscriptions, text: s => subscriptionSearch(t, language, s), count: t.tables.subscriptionCount }}
           filters={subscriptionFilters(t, now, subs)}
           card={s => <SubscriptionDetails sub={s} me={me} now={now} controls={{
+            command: commands ? commandForPlan(commands, s, now) : undefined,
             test: tests[s.id], asking: confirm === s.id,
             signing: signing?.subId === s.id ? signing : null,
             note: signNote?.subId === s.id ? signNote.text : null,

@@ -1,14 +1,15 @@
 import { useState, type FormEvent } from 'react';
 import { api } from '../api';
 import { errorText, useT } from '../i18n';
+import type { SubView } from '../types';
 import { PLAN_PROVIDERS, PROVIDER_NAMES, type PlanProvider } from '../providers';
 import { CommandBox, toActiveCommand, type ActiveCommand } from './CommandBox';
 import { Edge } from './Edge';
 
-type Props = { onDone: () => void; onCommand?: (shown: ActiveCommand) => void; onSkip?: () => void; skipLabel?: string };
+type Props = { onDone: () => void; onCommand?: (shown: ActiveCommand, subscriptions: SubView[]) => void; onSkip?: () => void; skipLabel?: string };
 
-const applyConnected = (res: { id?: string; command: string; expiresAt?: string }, onCommand: ((shown: ActiveCommand) => void) | undefined, setCommand: (c: string) => void) =>
-  onCommand ? onCommand(toActiveCommand(res)) : setCommand(res.command);
+const applyConnected = (res: { id?: string; command: string; expiresAt?: string; subscriptions?: SubView[] }, onCommand: Props['onCommand'], setCommand: (c: string) => void) =>
+  onCommand ? onCommand(toActiveCommand(res), res.subscriptions ?? []) : setCommand(res.command);
 
 /* Tick the plans, get one install command for all of them. */
 export function ConnectPanel({ onDone, onCommand, onSkip, skipLabel }: Props) {
@@ -26,7 +27,7 @@ export function ConnectPanel({ onDone, onCommand, onSkip, skipLabel }: Props) {
     setFailure('');
     try {
       const providers = PLAN_PROVIDERS.filter(p => picked.includes(p));
-      const res = await api.post<{ id?: string; command: string; expiresAt?: string }>('/api/subscriptions/connect', { providers });
+      const res = await api.post<{ id?: string; command: string; expiresAt?: string; subscriptions: SubView[] }>('/api/subscriptions/connect', { providers });
       applyConnected(res, onCommand, setCommand);
     } catch (err) {
       setFailure(errorText(t, err));

@@ -18,6 +18,14 @@ async function connected(providers: string[], env: NodeJS.ProcessEnv = {}) {
   return { app, db, ceo, code: codeOf(res.json().command), ids: res.json().subscriptions.map((s: { id: string }) => s.id) as string[] };
 }
 
+/* Legacy installs could have a hidden, still-live duplicate code. The join defenses must still handle those rows. */
+async function legacyCopy(db: Awaited<ReturnType<typeof testApp>>['db'], code: string): Promise<string> {
+  const [row] = await db.select().from(nodeCodes).where(eq(nodeCodes.codeHash, hashToken(code)));
+  const copy = `legacy-${code}`;
+  await db.insert(nodeCodes).values({ ...row!, codeHash: hashToken(copy), commandEnc: null });
+  return copy;
+}
+
 const machinesOf = async (app: FastifyInstance, token: string) => (await app.inject({ url: '/api/machines', ...as(token) })).json().machines;
 
 describe('POST /api/nodes/join', () => {
@@ -89,17 +97,17 @@ describe('POST /api/nodes/join', () => {
   });
 
   it('skips subscriptions that already joined a machine, and says the code is used when nothing is left', async () => {
-    const { app, ceo, code, ids } = await connected(['claude']);
-    const extra = await app.inject({ method: 'POST', url: `/api/subscriptions/${ids[0]}/command`, ...as(ceo) });
+    const { app, db, code } = await connected(['claude']);
+    const extra = await legacyCopy(db, code);
     await join(app, code);
-    const late = await join(app, codeOf(extra.json().command), { machineId: 'other-machine-01', hostname: 'ivan-laptop' });
+    const late = await join(app, extra, { machineId: 'other-machine-01', hostname: 'ivan-laptop' });
     expect(late.statusCode).toBe(410);
     expect(late.json().error.reason).toBe('code_used');
   });
 
   it('puts a plan on one machine only when two commands for it join at once', async () => {
     const { app, db, ceo, code, ids } = await connected(['claude']);
-    const extra = codeOf((await app.inject({ method: 'POST', url: `/api/subscriptions/${ids[0]}/command`, ...as(ceo) })).json().command);
+    const extra = await legacyCopy(db, code);
     const both = await Promise.all([join(app, code), join(app, extra, { machineId: 'other-machine-01', hostname: 'ivan-laptop' })]);
     expect(both.map(r => r.statusCode).sort()).toEqual([200, 410]);
     expect(await db.select().from(nodes).where(eq(nodes.subscriptionId, ids[0]!))).toHaveLength(1);
@@ -150,9 +158,11 @@ describe('a machine without a plan', () => {
     const url = await listen(app);
     const ceo = await setUpCompany(app);
     const first = (await join(app, await machineCommand(app, ceo))).json();
-    const again = await join(app, await machineCommand(app, ceo));
+    const duplicateCode = await machineCommand(app, ceo);
+    const again = await join(app, duplicateCode);
     expect(again.statusCode).toBe(409);
     expect(again.json().error.reason).toBe('already_on_machine');
+    await app.inject({ method: 'POST', url: `/api/nodes/commands/${hashToken(duplicateCode)}/hide`, ...as(ceo) });
     const node = await connectNode(url, first.nodes[0].key);
     node.send({ type: 'hello', version: '0.9.0', loggedIn: true, running: [] });
     await until(async () => (await machinesOf(app, ceo))[0].online === true);
@@ -308,7 +318,7 @@ describe('one plan on several machines', () => {
   it('never gives a plan a new key on a machine it runs on, so a second command cannot take its node over', async () => {
     const { app, db, ceo, plan, laptop } = await twoMachines();
     const one = codeOf((await addPlan(app, ceo, laptop.machine.id, plan)).json().command);
-    const two = codeOf((await addPlan(app, ceo, laptop.machine.id, plan)).json().command);
+    const two = await legacyCopy(db, one);
     const added = (await join(app, one, LAPTOP)).json().nodes[0];
     const again = await join(app, two, LAPTOP);
     expect(again.statusCode).toBe(409);
@@ -433,7 +443,7 @@ describe('node config', () => {
 });
 
 describe('active commands for the person who made them', () => {
-  it('keeps person-made commands encrypted, shows them only to their author across reloads, and invalidates cancelled codes in all three places', async () => {
+  it('keeps commands encrypted and owner-only, dismisses plan blocks and invalidates cancelled machine codes', async () => {
     const { app, db } = await testApp();
     const ceo = await setUpCompany(app);
     const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { whole: true } });
@@ -450,7 +460,7 @@ describe('active commands for the person who made them', () => {
 
     const firstPlan = (await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude'] }, ...as(ceo) })).json();
     const subId = firstPlan.subscriptions[0].id as string;
-    const planCmd = (await app.inject({ method: 'POST', url: `/api/subscriptions/${subId}/command`, ...as(ceo) })).json();
+    const planCmd = firstPlan;
     const firstMachine = (await app.inject({ method: 'POST', url: '/api/machines/command', ...as(ceo) })).json();
     const joined = (await join(app, codeOf(firstMachine.command))).json();
     const machineCmd = (await app.inject({ method: 'POST', url: '/api/machines/command', ...as(ceo) })).json();
@@ -468,9 +478,9 @@ describe('active commands for the person who made them', () => {
 
     const active = await commandsOf(ceo);
     expect(active).toEqual([
-      { id: planCmd.id, kind: 'plans', plans: ['Claude'], machineId: null, machine: null, command: planCmd.command, expiresAt: planCmd.expiresAt },
-      { id: machineCmd.id, kind: 'machine', plans: [], machineId: null, machine: null, command: machineCmd.command, expiresAt: machineCmd.expiresAt },
-      { id: addCmd.id, kind: 'add', plans: ['Claude'], machineId: joined.machine.id, machine: 'ivan-mac', command: addCmd.command, expiresAt: addCmd.expiresAt },
+      { id: planCmd.id, kind: 'plans', plans: ['Claude'], machineId: null, machine: null, command: planCmd.command, expiresAt: planCmd.expiresAt, subscriptionIds: [subId], dismissedSubscriptionIds: [] },
+      { id: machineCmd.id, kind: 'machine', plans: [], machineId: null, machine: null, command: machineCmd.command, expiresAt: machineCmd.expiresAt, subscriptionIds: [], dismissedSubscriptionIds: [] },
+      { id: addCmd.id, kind: 'add', plans: ['Claude'], machineId: joined.machine.id, machine: 'ivan-mac', command: addCmd.command, expiresAt: addCmd.expiresAt, subscriptionIds: [subId], dismissedSubscriptionIds: [] },
     ]);
 
     expect(await commandsOf(maria)).toEqual([]);
@@ -484,8 +494,8 @@ describe('active commands for the person who made them', () => {
     for (const made of [planCmd, machineCmd, addCmd]) {
       expect((await app.inject({ method: 'POST', url: `/api/nodes/commands/${made.id}/hide`, ...as(ceo) })).statusCode).toBe(204);
       const attempt = await join(app, codeOf(made.command), made === addCmd ? {} : { machineId: 'other-mac-9999', hostname: 'other' });
-      expect(attempt.statusCode).toBe(410);
-      expect(attempt.json().error.reason).toBe('code_used');
+      expect(attempt.statusCode).toBe(made === planCmd ? 200 : 410);
+      if (made !== planCmd) expect(attempt.json().error.reason).toBe('code_used');
     }
     expect(await commandsOf(ceo)).toEqual([]);
   });

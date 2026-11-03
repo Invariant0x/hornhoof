@@ -153,19 +153,18 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
 
     expect(text(await call(client, 'connect_plans', { providers: ['claude'] }))).toBe(SHOWN);
     const [plan] = await db.select().from(subscriptions).where(eq(subscriptions.provider, 'claude'));
-    expect(text(await call(client, 'plan_command', { subscription: plan!.id }))).toBe(SHOWN);
+    expect((await call(client, 'plan_command', { subscription: plan!.id })).isError).toBe(true);
     expect(text(await call(client, 'add_plan_to_machine', { machine: joined.machine.id, subscription: plan!.id }))).toBe(SHOWN);
     const made = await commands();
     expect(made).toMatchObject([
       { kind: 'plans', plans: ['Claude'], machine: null },
-      { kind: 'plans', plans: ['Claude'], machine: null },
       { kind: 'add', plans: ['Claude'], machine: 'ivan-laptop' },
     ]);
-    const there = (await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code: code(made[2]!.command), ...machine } })).json();
+    const there = (await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code: code(made[1]!.command), ...machine } })).json();
     expect(there.nodes).toMatchObject([{ subscriptionId: plan!.id, provider: 'claude' }]);
 
     expect((await app.inject({ method: 'POST', url: `/api/nodes/commands/${made[0]!.id}/hide`, ...as(ceo) })).statusCode).toBe(204);
-    expect((await commands()).map(c => c.id)).toEqual([made[1]!.id]);
+    expect(await commands()).toMatchObject([{ id: made[0]!.id, dismissedSubscriptionIds: [plan!.id] }]);
     expect((await call(client, 'view', { path: '/api/nodes/commands' })).isError).toBe(true);
     const events = JSON.stringify(await db.select({ data: agentEvents.data }).from(agentEvents));
     for (const c of [alone!, ...made]) expect(events).not.toContain(code(c.command));

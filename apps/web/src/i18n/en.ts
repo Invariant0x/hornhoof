@@ -194,6 +194,10 @@ export const en = {
     runThis: 'Run this in a terminal on the machine the agents should use. It installs Docker if needed, starts a node for each plan and opens the sign-in links.',
     trust: 'Agents will run on this machine with your subscription. People with access to this Hornhoof can give them work.',
     joinOnce: 'The command works once, for 24 hours. The nodes keep running in the background after the terminal is closed.',
+    commandHours: (hours: number) => `Valid for ${hours} more ${hours === 1 ? 'hour' : 'hours'}.`,
+    commandMinutes: (minutes: number) => `Valid for ${minutes} more ${minutes === 1 ? 'minute' : 'minutes'}.`,
+    commandHeading: (name: string) => `Install ${name}`,
+    commandBackground: 'The command works once. The nodes keep running in the background after the terminal is closed.',
     joinUntil: (at: string) => `The command works once, until ${at}. The nodes keep running in the background after the terminal is closed.`,
     cancelCommand: 'Cancel',
     skip: 'Skip for now',
@@ -241,7 +245,7 @@ export const en = {
     showOutput: 'Show the output',
     useForOrchestrator: 'Use for the orchestrator',
     useForOrchestratorLabel: (name: string) => `Use ${name} for the orchestrator`,
-    newCommand: 'New command',
+    newCommand: 'Make a new command',
     newCommandLabel: (name: string) => `New command for ${name}`,
     remove: 'Remove',
     removeLabel: (name: string) => `Remove ${name}`,
@@ -931,6 +935,7 @@ export const en = {
     missing: 'The updater is not running. Run the install command for this server again to add it.',
   },
   errors: {
+    command_active: 'There is an active command for this place. Use it or wait until it expires.',
     codes: {
       validation: 'Check the fields and try again.',
       unauthorized: 'Sign in to continue.',

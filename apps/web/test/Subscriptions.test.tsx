@@ -16,7 +16,7 @@ vi.mock('../src/ui/AgentTerminal', () => ({
 const COMMAND = 'curl -fsSL https://hq.acme.com/install.sh | bash -s -- --join CODE123';
 const TRUST = 'Agents will run on this machine with your subscription. People with access to this Hornhoof can give them work.';
 
-const lists = (extra: Parameters<typeof mockApi>[0] = {}) => mockApi({ 'GET /api/subscriptions': [200, { subscriptions: SUBS }], ...extra });
+const lists = (extra: Parameters<typeof mockApi>[0] = {}) => mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }],  'GET /api/subscriptions': [200, { subscriptions: SUBS }], ...extra });
 
 const rowOf = (name: string) => screen.queryByRole('article', { name: new RegExp(`^${name}, `) }) ?? screen.getByRole('row', { name: new RegExp(`^${name}\\b`) });
 const openAll = async () => {
@@ -176,7 +176,7 @@ describe('Subscriptions', () => {
   it('lists every machine a plan runs on, saying on which it waits', async () => {
     const laptop = { id: 'm3', hostname: 'ivan-laptop', status: 'needs_login' as const, online: true };
     const tower = { id: 'm4', hostname: 'ivan-tower', status: 'ready' as const, online: false };
-    mockApi({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, machines: [SUBS[0]!.machines[0]!, laptop, tower] }] }] });
+    mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }],  'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, machines: [SUBS[0]!.machines[0]!, laptop, tower] }] }] });
     render(<Subscriptions me={ME} />);
     await openAll();
     const machines = within(within(rowOf('Claude')).getByRole('list', { name: 'Machines of Claude' })).getAllByRole('listitem');
@@ -194,7 +194,7 @@ describe('Subscriptions', () => {
         { name: 'one_day', utilization: null, resetsAt: null },
       ],
     };
-    mockApi({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, limits }] }] });
+    mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }],  'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, limits }] }] });
     render(<Subscriptions me={ME} />);
     await openAll();
     const [five, seven, two, month, ...rest] = meterRows(rowOf('Claude'));
@@ -213,7 +213,7 @@ describe('Subscriptions', () => {
     const codex = { status: 'allowed' as const, windows: [{ name: 'seven_day', utilization: 0.73, resetsAt: null }], complete: true };
     const kimi = { status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0.88, resetsAt: null }, { name: 'month', utilization: 0.06, resetsAt: null }], complete: true };
     const subs = [{ ...SUBS[0]!, limits: claude }, { ...SUBS[1]!, limits: codex }, { ...SUBS[2]!, limits: kimi }, SUBS[3]!];
-    mockApi({ 'GET /api/subscriptions': [200, { subscriptions: subs }] });
+    mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }],  'GET /api/subscriptions': [200, { subscriptions: subs }] });
     render(<Subscriptions me={ME} />);
     await openAll();
     const rows = async (name: string) => meterRows(rowOf(name));
@@ -233,7 +233,7 @@ describe('Subscriptions', () => {
 
   it('says when a plan reached its limit', async () => {
     const limits = { status: 'rejected' as const, windows: [{ name: 'five_hour', utilization: 1, resetsAt: '2099-10-29T18:00:00.000Z' }] };
-    mockApi({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, limits }] }] });
+    mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }],  'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, limits }] }] });
     render(<Subscriptions me={ME} />);
     await openAll();
     expect(within(rowOf('Claude')).getByText('Limit reached')).toBeInTheDocument();
@@ -245,7 +245,7 @@ describe('Subscriptions', () => {
       windows: [{ name: 'five_hour', utilization: 1, resetsAt: '2026-10-29T18:00:00.000Z' }, { name: 'seven_day', utilization: 0.4, resetsAt: '2099-11-04T00:00:00.000Z' }],
       complete: true,
     };
-    mockApi({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, limits }] }] });
+    mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }],  'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, limits }] }] });
     render(<Subscriptions me={ME} />);
     await openAll();
     const row = rowOf('Claude');
@@ -260,21 +260,21 @@ describe('Subscriptions', () => {
       status: 'rejected' as const,
       windows: [{ name: 'five_hour', utilization: 1, resetsAt: '2026-10-29T18:00:00.000Z' }, { name: 'seven_day', utilization: null, resetsAt: '2099-11-04T00:00:00.000Z' }],
     };
-    mockApi({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, limits }] }] });
+    mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }],  'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, limits }] }] });
     render(<Subscriptions me={ME} />);
     await openAll();
     expect(within(rowOf('Claude')).getByText('Limit reached')).toBeInTheDocument();
   });
 
   it('says Built-in node offline for an API key whose node is down', async () => {
-    mockApi({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[3]!, online: false }] }], 'GET /api/machines': [200, { machines: [] }] });
+    mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }],  'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[3]!, online: false }] }], 'GET /api/machines': [200, { machines: [] }] });
     render(<Subscriptions me={ME} />);
     await openAll();
     expect(within(rowOf('Anthropic key ending 9f3a')).getByText('Built-in node offline')).toBeInTheDocument();
   });
 
   it('says Machine offline when the node is not connected', async () => {
-    mockApi({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, online: false }] }], 'GET /api/machines': [200, { machines: [] }] });
+    mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }],  'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, online: false }] }], 'GET /api/machines': [200, { machines: [] }] });
     render(<Subscriptions me={ME} />);
     await openAll();
     expect(within(rowOf('Claude')).getByText('Machine offline')).toBeInTheDocument();
@@ -287,7 +287,7 @@ describe('Subscriptions', () => {
       vi.useRealTimers();
     });
     let calls = 0;
-    mockApi({
+    mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }],
       'GET /api/subscriptions': () => {
         calls += 1;
         return [200, { subscriptions: [calls < 2 ? SUBS[1]! : { ...SUBS[1]!, status: 'ready' }] }];
@@ -300,7 +300,7 @@ describe('Subscriptions', () => {
   });
 
   it('connects Claude and Codex and shows the command with Copy and the trust line', async () => {
-    const calls = lists({ 'POST /api/subscriptions/connect': [201, { subscriptions: [], command: COMMAND }] });
+    const calls = lists({ 'POST /api/subscriptions/connect': [201, { subscriptions: [SUBS[0]], command: COMMAND }] });
     const user = userEvent.setup();
     render(<Subscriptions me={ME} />);
     await openAll();
@@ -317,7 +317,7 @@ describe('Subscriptions', () => {
   });
 
   it('connects a Google AI plan, which Antigravity runs', async () => {
-    const calls = lists({ 'POST /api/subscriptions/connect': [201, { subscriptions: [], command: COMMAND }] });
+    const calls = lists({ 'POST /api/subscriptions/connect': [201, { subscriptions: [SUBS[0]], command: COMMAND }] });
     const user = userEvent.setup();
     render(<Subscriptions me={ME} />);
     await openAll();
@@ -413,59 +413,8 @@ describe('Subscriptions', () => {
     await openAll();
     await user.click(await screen.findByRole('button', { name: 'New command for Kimi' }));
     expect(calls.find(c => c.method === 'POST')!.path).toBe('/api/subscriptions/s-kimi/command');
-    expect(await screen.findByText(COMMAND)).toBeInTheDocument();
+    expect(await within(rowOf('Kimi')).findByText(COMMAND)).toBeInTheDocument();
     expect(within(rowOf('Claude')).queryByRole('button', { name: /New command/ })).not.toBeInTheDocument();
-  });
-
-  it('keeps an unused subscription command visible across tab switches and reloads with its expiry, Copy and Cancel, and hides it on join, expiry or Cancel', async () => {
-    const expiresAt = new Date(Date.now() + 3600_000).toISOString();
-    const shown = { id: 'c'.repeat(64), kind: 'plans' as const, plans: ['Claude'], machine: null, command: COMMAND, expiresAt };
-    let active: (typeof shown)[] = [];
-    const calls = lists({
-      'POST /api/subscriptions/connect': () => {
-        active = [shown];
-        return [201, { subscriptions: [], id: shown.id, command: COMMAND, expiresAt }];
-      },
-      'GET /api/nodes/commands': () => [200, { commands: active }],
-      [`POST /api/nodes/commands/${shown.id}/hide`]: () => {
-        active = [];
-        return [204];
-      },
-    });
-    const user = userEvent.setup();
-    const first = render(<LanguageProvider><Subscriptions me={ME} /></LanguageProvider>);
-    await user.click(await screen.findByRole('button', { name: 'Connect a subscription' }));
-    await user.click(screen.getByRole('checkbox', { name: 'Claude' }));
-    await user.click(screen.getByRole('button', { name: 'Get the command' }));
-    expect(await screen.findByText(COMMAND)).toBeInTheDocument();
-    expect(screen.getByText(/^The command works once, until .+\. The nodes keep running in the background after the terminal is closed\.$/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
-
-    /* Switching away to Machines and back, or reloading the page, keeps the same command on screen. */
-    first.unmount();
-    const afterTab = render(<LanguageProvider><Subscriptions me={ME} /></LanguageProvider>);
-    expect(await screen.findByText(COMMAND)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
-
-    /* Russian labels for expiration, Copy and Cancel after reload. */
-    afterTab.unmount();
-    localStorage.setItem('hh-lang', 'ru');
-    const inRu = render(<LanguageProvider><Subscriptions me={ME} /></LanguageProvider>);
-    expect(await screen.findByText(COMMAND)).toBeInTheDocument();
-    expect(screen.getByText(/^Команда сработает один раз, до .+\. Ноды продолжат работать в фоне и после закрытия терминала\.$/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Копировать' })).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Отменить' }));
-    expect(calls).toContainEqual({ method: 'POST', path: `/api/nodes/commands/${shown.id}/hide`, body: undefined });
-    await vi.waitFor(() => expect(screen.queryByText(COMMAND)).not.toBeInTheDocument());
-    inRu.unmount();
-
-    /* After a machine joins or the command expires, reload shows no command. */
-    localStorage.removeItem('hh-lang');
-    render(<LanguageProvider><Subscriptions me={ME} /></LanguageProvider>);
-    await screen.findByRole('table');
-    expect(screen.queryByText(COMMAND)).not.toBeInTheDocument();
   });
 
   it('shows the states in Russian', async () => {
@@ -597,7 +546,7 @@ describe('signing in to plans', () => {
 
   it("signs a plan in again with another account in a terminal on the owner's machine, and closes it once signed in", async () => {
     const stream = fakeStream();
-    const calls = mockApi({ ...only({ ...claude, signedInOnce: true }), 'POST /api/subscriptions/s-claude/signin': [200, { nodeId: NODE, hostname: 'ivan-mbp' }] });
+    const calls = mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }],  ...only({ ...claude, signedInOnce: true }), 'POST /api/subscriptions/s-claude/signin': [200, { nodeId: NODE, hostname: 'ivan-mbp' }] });
     render(<Subscriptions me={ME} />);
     await openAll();
     await userEvent.click(await screen.findByRole('button', { name: 'Sign in to Claude with another account' }));
@@ -614,7 +563,7 @@ describe('signing in to plans', () => {
 
   it('signs in a plan that waits for its login, and says in plain words when the sign-in fails', async () => {
     const stream = fakeStream();
-    const calls = mockApi({ ...only(codex), 'POST /api/subscriptions/s-codex/signin': [200, { nodeId: NODE, hostname: 'ivan-mbp' }] });
+    const calls = mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }],  ...only(codex), 'POST /api/subscriptions/s-codex/signin': [200, { nodeId: NODE, hostname: 'ivan-mbp' }] });
     render(<Subscriptions me={ME} />);
     await openAll();
     await userEvent.click(await screen.findByRole('button', { name: 'Sign in to Codex' }));
@@ -633,7 +582,7 @@ describe('signing in to plans', () => {
     Element.prototype.scrollIntoView = function (this: Element) { shown.push(this); return Promise.resolve() as unknown as void; };
     onTestFinished(() => void (Element.prototype.scrollIntoView = before));
     fakeStream();
-    mockApi({ ...only({ ...codex, status: 'ready', machines: [MACHINE] }), 'POST /api/subscriptions/s-codex/signin': [200, { nodeId: NODE, hostname: 'ivan-mbp' }], 'POST /api/subscriptions/s-codex/signin/stop': [204] });
+    mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }],  ...only({ ...codex, status: 'ready', machines: [MACHINE] }), 'POST /api/subscriptions/s-codex/signin': [200, { nodeId: NODE, hostname: 'ivan-mbp' }], 'POST /api/subscriptions/s-codex/signin/stop': [204] });
     render(<Subscriptions me={ME} />);
     await openAll();
     await userEvent.click(await screen.findByRole('button', { name: 'Sign in to Codex' }));
@@ -646,7 +595,7 @@ describe('signing in to plans', () => {
 
   it('says what to do when the machine could not install the program to sign in with', async () => {
     const stream = fakeStream();
-    mockApi({ ...only(codex), 'POST /api/subscriptions/s-codex/signin': [200, { nodeId: NODE, hostname: 'ivan-mbp' }] });
+    mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }],  ...only(codex), 'POST /api/subscriptions/s-codex/signin': [200, { nodeId: NODE, hostname: 'ivan-mbp' }] });
     render(<Subscriptions me={ME} />);
     await openAll();
     await userEvent.click(await screen.findByRole('button', { name: 'Sign in to Codex' }));
@@ -657,7 +606,7 @@ describe('signing in to plans', () => {
 
   it('stops a sign-in half way', async () => {
     fakeStream();
-    const calls = mockApi({ ...only(codex), 'POST /api/subscriptions/s-codex/signin': [200, { nodeId: NODE, hostname: 'ivan-mbp' }], 'POST /api/subscriptions/s-codex/signin/stop': [204] });
+    const calls = mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }],  ...only(codex), 'POST /api/subscriptions/s-codex/signin': [200, { nodeId: NODE, hostname: 'ivan-mbp' }], 'POST /api/subscriptions/s-codex/signin/stop': [204] });
     render(<Subscriptions me={ME} />);
     await openAll();
     await userEvent.click(await screen.findByRole('button', { name: 'Sign in to Codex' }));
@@ -669,7 +618,7 @@ describe('signing in to plans', () => {
   it('says under the plan, in plain words, why a sign-in cannot start, instead of at the top of the page', async () => {
     const ready = { ...codex, status: 'ready' as const, machines: [MACHINE] };
     const unsupported = { error: { code: 'conflict', message: 'The machine of this plan is online, but its node cannot run the sign-in.', reason: 'signin_unsupported' } };
-    mockApi({ ...only(ready), 'POST /api/subscriptions/s-codex/signin': [409, unsupported] });
+    mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }],  ...only(ready), 'POST /api/subscriptions/s-codex/signin': [409, unsupported] });
     render(<Subscriptions me={ME} />);
     await openAll();
     await userEvent.click(await screen.findByRole('button', { name: 'Sign in to Codex' }));
@@ -683,7 +632,7 @@ describe('signing in to plans', () => {
     localStorage.setItem('hh-lang', 'ru');
     const ready = { ...codex, status: 'ready' as const, machines: [MACHINE] };
     const offline = { error: { code: 'conflict', message: 'No machine of this plan is online.', reason: 'no_node_online' } };
-    mockApi({ ...only(ready), 'POST /api/subscriptions/s-codex/signin': [409, offline] });
+    mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }],  ...only(ready), 'POST /api/subscriptions/s-codex/signin': [409, offline] });
     render(<LanguageProvider><Subscriptions me={ME} /></LanguageProvider>);
     await openAll();
     await userEvent.click(await screen.findByRole('button', { name: 'Войти в Codex' }));
@@ -703,7 +652,7 @@ describe('signing in to plans', () => {
     const identity = await generateX25519Identity();
     const KEY = 'sk-kimi-7Hq2xP9wLm4Zr8Tv';
     const kimi = { ...SUBS[2]!, status: 'needs_login' as const, online: true, machines: [{ ...MACHINE, status: 'needs_login' as const }] };
-    const calls = mockApi({
+    const calls = mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }],
       ...only(kimi),
       'GET /api/subscriptions/s-kimi/recipients': [200, { version: 2, recipients: [{ nodeId: NODE, publicKey: await identityToRecipient(identity), hostname: 'ivan-mbp' }] }],
       'POST /api/subscriptions/s-kimi/credential': [200, { stored: 1 }],

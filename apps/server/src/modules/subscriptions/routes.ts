@@ -11,9 +11,9 @@ import { ApiError } from '../../errors.js';
 import { runningAgents } from '../agents/running.js';
 import { servesWholeCompany } from '../tools/staff.js';
 import { orchestratorOf, pumpWaiting } from '../conversation/queue.js';
-import { createNodeCode } from '../nodes/codes.js';
+import { lockCommandOwner } from '../nodes/codes.js';
 import { resumeAgent } from '../tasks/wake.js';
-import { commandFor } from '../nodes/command.js';
+import { createInstallCommand } from '../nodes/command.js';
 import { BUILTIN, nodeIdentity } from '../nodes/hub.js';
 import { liveNode, planNodes } from '../nodes/nodes.js';
 import { CRED_KIND, deliver, storeEnvelopes } from './credentials.js';
@@ -191,13 +191,14 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/subscriptions/connect', async (req, reply) => {
     const me = await requirePerson(req, db);
     const { providers } = ConnectBody.parse(req.body);
-    const { ids, code } = await db.transaction(async tx => {
+    const { ids, command } = await db.transaction(async tx => {
+      await lockCommandOwner(tx, me.id);
       const ids = await prepareConnectPlans(tx, me, providers);
-      return { ids, code: await createNodeCode(tx, { companyId: me.companyId, personId: me.id, subscriptionIds: ids }) };
+      return { ids, command: await createInstallCommand(tx, config, me, { companyId: me.companyId, personId: me.id, subscriptionIds: ids }) };
     });
     const views = (await subViews(db, online, undefined, me)).filter(s => ids.includes(s.id));
     reply.code(201);
-    return { subscriptions: views, ...(await commandFor(db, config, me, code)) };
+    return { subscriptions: views, ...command };
   });
 
   app.post('/api/subscriptions/:id/command', async (req, reply) => {
@@ -206,9 +207,8 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (sub.ownerPersonId !== me.id) throw notOwner();
     if (sub.kind !== 'personal') throw unknown();
     if (sub.status !== 'waiting_machine') throw connectedAlready();
-    const code = await createNodeCode(db, { companyId: me.companyId, personId: me.id, subscriptionIds: [sub.id] });
     reply.code(201);
-    return commandFor(db, config, me, code);
+    return createInstallCommand(db, config, me, { companyId: me.companyId, personId: me.id, subscriptionIds: [sub.id] });
   });
 
   app.post('/api/subscriptions/:id/orchestrator', async req => {
