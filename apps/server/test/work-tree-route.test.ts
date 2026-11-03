@@ -5,6 +5,7 @@ import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agents, companies, departments, jobs, people, subscriptions, taskEvents, tasks, turns } from '../src/db/schema.js';
 import { createTask, submit, verdict } from '../src/modules/tasks/engine.js';
 import type { DepartmentTree } from '../src/modules/tasks/tree.js';
+import { treeFacts } from '../src/modules/tasks/tree-facts.js';
 import { as, invitePerson, listen, mcp, setUpCompany, statements, testApp } from './helpers.js';
 
 async function company({ openTurn = true, openedMinutesAgo = 120 } = {}) {
@@ -75,6 +76,44 @@ async function company({ openTurn = true, openedMinutesAgo = 120 } = {}) {
 }
 
 describe('GET /api/departments/:id/tree', () => {
+  it('shows a holder external wait in task details, tree facts and the calm tree state, then removes it after a comment', async () => {
+    const c = await company();
+    const task = await c.member(c.bruno.id, 'Publish images');
+    const client = await c.tools(c.bruno);
+    const until = new Date(Date.now() + 3_600_000).toISOString();
+    const result = await client.callTool({ name: 'wait_for', arguments: { task: task.number, reason: 'Images on the registry', until } });
+    expect(result.isError).toBeFalsy();
+    const [row] = await c.db.select().from(tasks).where(eq(tasks.id, task.id));
+    const facts = await treeFacts(c.db, c.companyId, c.dev.id, () => true);
+    expect(facts.tasks.find(t => t.id === task.id)?.externalWait).toEqual(row!.externalWait);
+    const detail = await c.app.inject({ url: `/api/tasks/${task.id}`, ...as(c.ceoToken) });
+    expect(detail.json().task.externalWait).toEqual(row!.externalWait);
+    const readTree = async () => (await c.app.inject({ url: `/api/departments/${c.dev.id}/tree`, ...as(c.ceoToken) })).json<{ tree: DepartmentTree }>().tree;
+    const line = (await readTree()).lines.find(l => l.taskId === task.id)!;
+    expect(line.externalWait).toEqual(row!.externalWait);
+    expect(line.segments.at(-1)).toMatchObject({ kind: 'after', externalWait: row!.externalWait });
+    const comment = await c.app.inject({ method: 'POST', url: `/api/tasks/${task.id}/comments`, payload: { text: 'Images are ready.' }, ...as(c.ceoToken) });
+    expect(comment.statusCode).toBe(201);
+    expect((await treeFacts(c.db, c.companyId, c.dev.id, () => true)).tasks.find(t => t.id === task.id)?.externalWait).toBeNull();
+    expect((await readTree()).lines.find(l => l.taskId === task.id)?.externalWait).toBeNull();
+  });
+
+  it('reads the same reported program history for the tree and Speed', async () => {
+    const c = await company();
+    const task = await c.member(c.bruno.id, 'Checkout API');
+    const start = new Date(Date.now() - 40 * 60_000);
+    await c.db.update(tasks).set({ createdAt: start }).where(eq(tasks.id, task.id));
+    const [job] = await c.db.insert(jobs).values({ companyId: c.companyId, subscriptionId: c.claude.id, agentId: c.bruno.id, taskId: task.id,
+      kind: 'conversation', prompt: 'Checkout API', timeoutMs: 3_600_000, status: 'running', createdAt: start, startedAt: start }).returning();
+    await c.db.insert(agentEvents).values({ companyId: c.companyId, agentId: c.bruno.id, jobId: job!.id, kind: 'program', createdAt: start,
+      data: { program: { state: 'thinking', since: start.getTime(), tool: null }, alarm: null } });
+    const res = await c.app.inject({ url: `/api/departments/${c.dev.id}/tree`, ...as(c.ceoToken) });
+    const tree = res.json<{ tree: DepartmentTree }>().tree;
+    expect(tree.lines.find(l => l.taskId === task.id)?.segments[0]).toMatchObject({ kind: 'work', program: { state: 'thinking' } });
+    expect(tree.time.find(t => t.agent.id === c.bruno.id)?.work).toBeGreaterThanOrEqual(2400);
+    expect(tree.time.find(t => t.agent.id === c.bruno.id)?.stall).toBe(0);
+  });
+
   it('lists member tasks with agents, part, mergedAt after a merge, and the turn review with reviewers and findings', async () => {
     const { app, ctx, db, ceoToken, dev, turn, head, bruno, kai, rita, rex, sid, parent, member, merged, tools } = await company();
     const api = await member(bruno.id, 'Checkout API');
@@ -100,12 +139,13 @@ describe('GET /api/departments/:id/tree', () => {
     });
     expect(tree.stage).toBe('review');
     expect(tree.lines.map(l => [l.title, l.agent.name, l.part?.id, l.branch])).toEqual([
+      ['Payments', 'Hana', undefined, `task-${parent!.number}`],
       ['Checkout API', 'Bruno', parent!.id, `task-${api.number}`],
       ['Checkout page', 'Kai', parent!.id, `task-${page.number}`],
     ]);
-    expect(tree.lines[0]!.mergedAt).not.toBeNull();
-    expect(tree.lines[0]!.doneAt).toBeNull();
-    expect(tree.lines[1]!.mergedAt).not.toBeNull();
+    expect(tree.lines.find(l => l.taskId === api.id)!.mergedAt).not.toBeNull();
+    expect(tree.lines.find(l => l.taskId === api.id)!.doneAt).toBeNull();
+    expect(tree.lines.find(l => l.taskId === page.id)!.mergedAt).not.toBeNull();
 
     expect(tree.review).not.toBeNull();
     expect(tree.review!.head).toEqual({ id: head.id, name: 'Hana' });
@@ -115,7 +155,7 @@ describe('GET /api/departments/:id/tree', () => {
     expect(byReviewer.get(sid.id)).toBeNull();
   });
 
-  it('ends a line in a stall from the agent event timestamp when a job had an agent event 40 minutes ago and nothing since', async () => {
+  it('keeps an old action timestamp without guessing the program state during forty quiet minutes', async () => {
     const { app, db, companyId, ceoToken, claude, dev, bruno, member } = await company();
     const api = await member(bruno.id, 'Checkout API');
     const sixtyAgo = new Date(Date.now() - 60 * 60_000);
@@ -151,13 +191,12 @@ describe('GET /api/departments/:id/tree', () => {
     const res = await app.inject({ method: 'GET', url: `/api/departments/${dev.id}/tree`, ...as(ceoToken) });
     expect(res.statusCode).toBe(200);
     const { tree } = res.json<{ tree: DepartmentTree }>();
-    expect(tree.lines).toHaveLength(1);
-    const line = tree.lines[0]!;
+    expect(tree.lines).toHaveLength(2);
+    const line = tree.lines.find(l => l.taskId === api.id)!;
     expect(line.live).toBe(true);
     expect(line.lastActionAt).toBe(fortyAgo.toISOString());
     expect(line.segments).toEqual([
-      { kind: 'work', from: sixtyAgo.toISOString(), to: fortyAgo.toISOString() },
-      { kind: 'stall', from: fortyAgo.toISOString(), to: null },
+      { kind: 'unknown', from: sixtyAgo.toISOString(), to: null },
     ]);
   });
 
@@ -217,7 +256,7 @@ describe('GET /api/departments/:id/tree', () => {
     seen.length = 0;
     const fourRes = await live.app.inject({ method: 'GET', url: `/api/departments/${live.dev.id}/tree`, ...as(live.ceoToken) });
     expect(fourRes.statusCode).toBe(200);
-    expect(fourRes.json<{ tree: DepartmentTree }>().tree.lines).toHaveLength(4);
+    expect(fourRes.json<{ tree: DepartmentTree }>().tree.lines).toHaveLength(5);
     expect(seen.length).toBe(countWithOneLine);
   });
 });

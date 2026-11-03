@@ -3,17 +3,11 @@ import { fileURLToPath } from 'node:url';
 import type { NodeMessage } from '@hornhoof/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { agyProgram } from '../src/terminal/programs.js';
-import { ack, done, hasTmux, home, host, job, SECRET, sent, setUp, tmux, typeTurn, until } from './terminal-host-helpers.js';
+import { ack, done, hasTmux, home, host, job, SECRET, sent, setUp, tmux, typeTurn, until, endsLost, pastLostEndWindows } from './terminal-host-helpers.js';
 
 type Report = Extract<NodeMessage, { type: 'job.program' }>;
 const reports = (id: string) => sent.filter((m): m is Report => m.type === 'job.program' && m.jobId === id);
 const AGY = fileURLToPath(new URL('./fakes/fake-agy-term.mjs', import.meta.url));
-
-/* Simulate only the lost Stop; the real program, prompt hook, transcript and tmux observer keep running. */
-function loseStop(): void {
-  const hook = host['hook'].bind(host);
-  vi.spyOn(host as unknown as { hook: typeof hook }, 'hook').mockImplementation((key, event, data) => event === 'stop' ? Promise.resolve() : hook(key, event, data));
-}
 
 async function typeWithoutAck(key: string, text: string): Promise<void> {
   await host.open({ type: 'term.open', termId: 'view', agentKey: key, cols: 100, rows: 30, write: true });
@@ -22,62 +16,83 @@ async function typeWithoutAck(key: string, text: string): Promise<void> {
 }
 
 describe.skipIf(!hasTmux)('observing turns people type in a terminal', () => {
-  afterEach(async () => { vi.restoreAllMocks();await host?.stop(); });
+  afterEach(async () => { vi.restoreAllMocks(); await host?.stop(); });
 
-  it.each(['claude', 'antigravity'] as const)('recovers a lost %s Stop with the answer and releases its tools without touching the program', async kind => {
-    await setUp({ lostMs: 300, lookMs: 50, reportMs: 100 });
+  it.each(['claude', 'antigravity'] as const)('keeps a lost %s Stop open until a person cancels it, without touching the program', async kind => {
+    await setUp({ lookMs: 50, reportMs: 100 });
     const key = `typed-${kind}`;
     const start = job(key, '');
     if (kind === 'antigravity') Object.assign(start, { program: agyProgram, bin: AGY, home: join(home, key) });
     expect(await host.run(start)).toMatchObject({ ok: true });
     const pid = await tmux.programPid(`a-${key}`);
-    loseStop();
+    endsLost();
     await typeTurn(key, 'view', 'hello', 'typed-job');
     const keys = vi.spyOn(tmux, 'keys');
     const kill = vi.spyOn(tmux, 'kill');
-    await until(() => Boolean(done('typed-job')), 6000);
-    expect(done('typed-job')).toMatchObject({ ok: true, error: null, result: expect.stringContaining(kind === 'claude' ? 'echo: hello' : 'FINISHED') });
-    expect(reports('typed-job').at(-1)).toMatchObject({ state: 'idle' });
-    expect(host.typedJobs()).toEqual([]);
+    const answer = kind === 'claude' ? 'echo: hello' : 'FINISHED';
+    await until(() => sent.some(m => m.type === 'job.event' && m.jobId === 'typed-job' && m.event.kind === 'text' && m.event.text.includes(answer)));
+    await until(() => reports('typed-job').length > 0);
+    const before = reports('typed-job').length;
+    const clock = pastLostEndWindows();
+    await until(() => reports('typed-job').length > before);
+    expect(done('typed-job')).toBeUndefined();
+    expect(reports('typed-job').map(m => m.state)).not.toContain('idle');
+    expect(reports('typed-job').at(-1)).toMatchObject({ state: 'thinking' });
+    expect(host.typedJobs()).toEqual(['typed-job']);
     expect(await tmux.programPid(`a-${key}`)).toBe(pid);
     expect(keys.mock.calls).toEqual([]);
     expect(kill.mock.calls).toEqual([]);
+    clock.mockRestore();
+    await host.cancel('typed-job');
+    expect(done('typed-job')).toMatchObject({ ok: false, error: 'cancelled' });
+    expect(host.typedJobs()).toEqual([]);
+    expect(await tmux.programPid(`a-${key}`)).toBe(pid);
     const url = host['bridge'].agent(key).mcpUrl;
     const tools = await fetch(url, { method: 'POST', body: '{"jsonrpc":"2.0","id":1,"method":"tools/call"}' });
     expect(await tools.json()).toMatchObject({ error: { message: expect.stringContaining('No Hornhoof turn') } });
   });
 
-  it('keeps a thinking typed turn open and reports it across several lost-end intervals', async () => {
-    await setUp({ lostMs: 200, lookMs: 50, reportMs: 100 });
+  it('keeps a typed Claude turn with the current spinner thinking beyond three former lost-end windows until its Stop hook', async () => {
+    await setUp({ lookMs: 50, reportMs: 100 });
     await host.run(job('thinking', ''));
-    await typeTurn('thinking', 'view', 'TICK here', 'thinking-job');
-    await until(() => {
-      const latest = reports('thinking-job').at(-1);
-      return latest?.state === 'thinking' && Date.now() - latest.since > 600;
-    });
+    const stopHook = vi.spyOn(host as unknown as { hook: typeof host['hook'] }, 'hook');
+    await typeTurn('thinking', 'view', 'SPINNER here', 'thinking-job');
+    await until(async () => (await host.screen('thinking')).includes('Recombobulating'));
+    await until(() => reports('thinking-job').length > 0);
+    const clock = pastLostEndWindows();
+    await new Promise(r => setTimeout(r, 400));
     expect(done('thinking-job')).toBeUndefined();
+    expect(new Set(reports('thinking-job').map(m => m.state))).toEqual(new Set(['thinking']));
+    expect(reports('thinking-job').length).toBeGreaterThanOrEqual(3);
     expect(await tmux.alive('a-thinking')).toBe(true);
+    expect(stopHook.mock.calls.some(([, event]) => event === 'stop')).toBe(false);
+    clock.mockRestore();
     await until(() => Boolean(done('thinking-job')));
-    expect(done('thinking-job')).toMatchObject({ ok: true, result: 'echo: TICK here' });
+    expect(done('thinking-job')).toMatchObject({ ok: true, result: 'echo: SPINNER here' });
+    expect(stopHook.mock.calls.some(([, event]) => event === 'stop')).toBe(true);
   });
 
-  it('keeps diagnostics until the typed turn receives its confirmed job id', async () => {
-    const logs: string[] = [];
-    await setUp({ lostMs: 300, lookMs: 50, openMs: 50, log: line => logs.push(line) });
+  it('keeps an unconfirmed typed turn open when its Stop is lost, then reports it under its confirmed job id', async () => {
+    await setUp({ lookMs: 50, openMs: 50 });
     await host.run(job('late', ''));
-    loseStop();
+    endsLost();
     await typeWithoutAck('late', 'hello');
-    await until(() => logs.some(line => line.includes('end seen without hook')), 6000);
+    await until(async () => (await host.screen('late')).includes('echo: hello'));
+    const clock = pastLostEndWindows();
+    await new Promise(r => setTimeout(r, 400));
     expect(sent.filter(m => m.type === 'job.program')).toEqual([]);
     expect(done('late-job')).toBeUndefined();
     ack('late', 'late-job');
-    expect(reports('late-job').at(-1)).toMatchObject({ state: 'idle' });
-    expect(done('late-job')).toMatchObject({ ok: true, result: 'echo: hello' });
+    expect(reports('late-job').at(-1)).toMatchObject({ state: 'thinking' });
+    expect(done('late-job')).toBeUndefined();
+    clock.mockRestore();
+    await host.cancel('late-job');
+    expect(done('late-job')).toMatchObject({ ok: false, error: 'cancelled' });
   });
 
   it.each([true, false])('reports gone with a masked screen before completion (ack first: %s)', async ackFirst => {
     const remembered: string[] = [];
-    await setUp({ lostMs: 10_000, lookMs: 50, openMs: 50, remember: session => remembered.push(session) });
+    await setUp({ lookMs: 50, openMs: 50, remember: session => remembered.push(session) });
     await host.run(job('gone', ''));
     await typeWithoutAck('gone', `HANG ${SECRET}`);
     if (ackFirst) ack('gone', 'gone-job');
@@ -100,7 +115,7 @@ describe.skipIf(!hasTmux)('observing turns people type in a terminal', () => {
   });
 
   it('reports gone without inventing an exit code when the entire session disappeared', async () => {
-    await setUp({ lostMs: 10_000, lookMs: 50 });
+    await setUp({ lookMs: 50 });
     await host.run(job('lost-session', ''));
     await typeTurn('lost-session', 'view', 'HANG here', 'lost-session-job');
     await tmux.kill('a-lost-session');

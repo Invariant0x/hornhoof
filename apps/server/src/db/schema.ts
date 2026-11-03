@@ -360,7 +360,7 @@ export const jobs = pgTable(
 /* computer: the orchestrator asked for the computer the server runs on, or the CEO opened, closed or declined it. typed: a
    person pressed Enter in the terminal of the running turn, so what they typed is their word in it; the window shows
    what the program shows instead. */
-export const AGENT_EVENT_KINDS = ['message', 'text', 'tool', 'tool_result', 'todo', 'proposal', 'applied', 'stopped', 'failed', 'computer', 'typed', 'hook_rejected'] as const;
+export const AGENT_EVENT_KINDS = ['message', 'text', 'tool', 'tool_result', 'todo', 'proposal', 'applied', 'stopped', 'failed', 'computer', 'typed', 'hook_rejected', 'program'] as const;
 export type AgentEventKind = (typeof AGENT_EVENT_KINDS)[number];
 
 /* An agent's conversation as people see it: their messages, what the agent did, and what came of it. */
@@ -378,7 +378,11 @@ export const agentEvents = pgTable(
     personId: uuid('person_id').references(() => people.id),
     createdAt: createdAt(),
   },
-  t => [index('agent_events_agent_id_seq').on(t.agentId, t.seq), index('agent_events_job_id').on(t.jobId)],
+  t => [
+    index('agent_events_agent_id_seq').on(t.agentId, t.seq), index('agent_events_job_id').on(t.jobId),
+    index('agent_events_program_history').on(t.jobId, t.createdAt).where(sql`${t.kind} in ('program', 'failed')`),
+    index('agent_events_silent_job').on(sql`(${t.data}->>'silentJob')`).where(sql`${t.kind} = 'message' and ${t.data} ? 'silentJob'`),
+  ],
 );
 
 export const proposals = pgTable('proposals', {
@@ -429,6 +433,7 @@ export const turns = pgTable(
 
 export const TASK_STATUSES = ['planned', 'open', 'working', 'review', 'waiting', 'blocked', 'done', 'cancelled'] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
+export type ExternalWait = { reason: string; since: string; until: string };
 
 /* A piece of work: the title and brief for people, the body every agent reads as the current truth, and its gates. */
 export const tasks = pgTable(
@@ -460,6 +465,8 @@ export const tasks = pgTable(
     bounces: integer('bounces').notNull().default(0),
     /* Task turns in a row that ended without moving the task. */
     silent: integer('silent').notNull().default(0),
+    /* Waiting for an external event, without changing who holds the task or its workflow stage. */
+    externalWait: jsonb('external_wait').$type<ExternalWait>(),
     /* Grows with every move, so two moves that read the same task cannot both land. */
     version: integer('version').notNull().default(0),
     createdByPersonId: uuid('created_by_person_id').references(() => people.id),
@@ -475,6 +482,7 @@ export const tasks = pgTable(
     index('tasks_parent_id').on(t.parentId),
     index('tasks_turn_id').on(t.turnId),
     index('tasks_product_id').on(t.productId),
+    index('tasks_external_wait_until').on(sql`(${t.externalWait}->>'until')`).where(sql`${t.externalWait} IS NOT NULL`),
     /* What no move makes: a gate with no executor behind it, counts below zero, a closed task without its time, a task
        under itself, gates that are not lists. */
     check('tasks_review_has_executor', sql`${t.status} <> 'review' OR ${t.executorAgentId} IS NOT NULL`),
@@ -545,6 +553,8 @@ export const pendingWakes = pgTable(
     companyId: companyId(),
     agentId: uuid('agent_id').notNull().references(() => agents.id),
     taskId: uuid('task_id').notNull().references(() => tasks.id),
+    /* A timed wake is obsolete once another task move replaced the action it names. */
+    taskVersion: integer('task_version'),
     why: text('why').notNull(),
     text: text('text'),
     note: text('note'),

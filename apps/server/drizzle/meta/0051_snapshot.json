@@ -1,6 +1,6 @@
 {
   "id": "51515151-b527-4782-8af8-3bf896c675b4",
-  "prevId": "767280d7-b527-4782-8af8-3bf896c675b4",
+  "prevId": "5663d071-2e53-4860-b628-dcc2a7bf259a",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -224,6 +224,44 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "agent_events_program_history": {
+          "name": "agent_events_program_history",
+          "columns": [
+            {
+              "expression": "job_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"agent_events\".\"kind\" in ('program', 'failed')",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "agent_events_silent_job": {
+          "name": "agent_events_silent_job",
+          "columns": [
+            {
+              "expression": "(\"data\"->>'silentJob')",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"agent_events\".\"kind\" = 'message' and \"agent_events\".\"data\" ? 'silentJob'",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -2324,6 +2362,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "task_version": {
+          "name": "task_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
         "why": {
           "name": "why",
           "type": "text",
@@ -3766,6 +3810,12 @@
           "notNull": true,
           "default": 0
         },
+        "external_wait": {
+          "name": "external_wait",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
         "version": {
           "name": "version",
           "type": "integer",
@@ -3878,6 +3928,22 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "tasks_external_wait_until": {
+          "name": "tasks_external_wait_until",
+          "columns": [
+            {
+              "expression": "(\"external_wait\"->>'until')",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"tasks\".\"external_wait\" IS NOT NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}

@@ -76,7 +76,9 @@ const isProtectedPlan = (s: ExistingPlan, busy: ReadonlySet<string | null>) => s
 
 async function clearPlanNodes(tx: Db, resetIds: string[]): Promise<void> {
   if (!resetIds.length) return;
+  const goneNodes = tx.select({ id: nodes.id }).from(nodes).where(inArray(nodes.subscriptionId, resetIds));
   await tx.update(subscriptions).set({ removedAt: null, status: 'waiting_machine', leaseNodeId: null }).where(inArray(subscriptions.id, resetIds));
+  await tx.update(testParts).set({ nodeId: null }).where(inArray(testParts.nodeId, goneNodes));
   await tx.delete(planCredentials).where(inArray(planCredentials.subscriptionId, resetIds));
   await tx.delete(nodes).where(inArray(nodes.subscriptionId, resetIds));
 }
@@ -92,9 +94,13 @@ async function prepareConnectPlans(tx: Db, me: Person, providers: Plan[]): Promi
     .from(subscriptions)
     .where(and(eq(subscriptions.ownerPersonId, me.id), eq(subscriptions.kind, 'personal'), inArray(subscriptions.provider, providers)))
     .orderBy(asc(subscriptions.createdAt))) as ExistingPlan[];
-  const busy = new Set(
-    (await tx.select({ id: agents.subscriptionId }).from(agents).where(and(eq(agents.companyId, me.companyId), isNotNull(agents.subscriptionId)))).map(a => a.id),
-  );
+  const agentPlans = await tx.select({ id: agents.subscriptionId }).from(agents).where(and(eq(agents.companyId, me.companyId), isNotNull(agents.subscriptionId)));
+  const runPlans = await tx
+    .select({ id: nodes.subscriptionId })
+    .from(nodes)
+    .innerJoin(testParts, eq(testParts.nodeId, nodes.id))
+    .where(and(eq(nodes.companyId, me.companyId), isNotNull(nodes.subscriptionId)));
+  const busy = new Set([...agentPlans, ...runPlans].map(r => r.id));
   if (had.some(s => isProtectedPlan(s, busy))) throw connectedAlready();
   const kept = providers.flatMap(p => {
     const row = had.find(s => s.provider === p);

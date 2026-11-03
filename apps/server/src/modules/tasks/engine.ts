@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gt, inArray, isNull, max, ne, notInArray, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, max, ne, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { accessOf, canReach, type Access, type Spot } from '../../auth/access.js';
 import type { Db } from '../../db/client.js';
@@ -15,9 +15,9 @@ export type Task = typeof tasks.$inferSelect;
 export type Request = typeof requests.$inferSelect;
 /* Who moves a task: a person from the web app, or an agent from its tools. */
 export type Actor = { personId: string; agentId?: undefined } | { agentId: string; personId?: undefined };
-export type WakeWhy = 'assigned' | 'review' | 'changes' | 'stuck_at_gate' | 'done' | 'reported' | 'blocked' | 'cancelled' | 'answered' | 'comment' | 'updated' | 'reminder' | 'go_on' | 'turn' | 'switched' | 'explain' | 'subtasks' | 'after_cancelled' | 'merge' | 'unblocked' | 'tests' | 'work' | 'turn_review' | 'reviewed' | 'review_passed';
+export type WakeWhy = 'assigned' | 'review' | 'changes' | 'stuck_at_gate' | 'done' | 'reported' | 'blocked' | 'cancelled' | 'answered' | 'comment' | 'updated' | 'reminder' | 'go_on' | 'turn' | 'switched' | 'explain' | 'subtasks' | 'after_cancelled' | 'merge' | 'unblocked' | 'tests' | 'work' | 'turn_review' | 'reviewed' | 'review_passed' | 'wait_ended';
 /* An agent that has to act on a task now; Hornhoof queues a turn for it. note: what else it should know, after the rest. */
-export type Wake = { agentId: string; taskId: string; why: WakeWhy; text?: string; note?: string };
+export type Wake = { agentId: string; taskId: string; why: WakeWhy; text?: string; note?: string; version?: number };
 export type Moved = { task: Task; wakes: Wake[] };
 
 export type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
@@ -331,7 +331,7 @@ function linesMoved(ctx: Live, changed: { companyId: string } | null): void {
 
 /* One move: the task changes only if nobody moved it since it was read, and the move is written to its log. */
 /* wakes: the turns the move needs, kept with it until they are queued. */
-async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, also?: (tx: Tx, row: Task) => Promise<void>, wakes: Wake[] = []): Promise<Task> {
+export async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, also?: (tx: Tx, row: Task) => Promise<void>, wakes: Wake[] = []): Promise<Task> {
   let started: Task[] = [];
   const opened: Task[] = [];
   let lit: Task | null = null;
@@ -353,7 +353,7 @@ async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, also?: (
     }
     const [row] = await tx
       .update(tasks)
-      .set({ ...set, version: task.version + 1, updatedAt: new Date() })
+      .set({ externalWait: null, ...set, version: task.version + 1, updatedAt: new Date() })
       .where(and(eq(tasks.id, task.id), eq(tasks.version, task.version)))
       .returning();
     if (!row) throw refuse(409, 'task_changed', `#${task.number} changed meanwhile. Read it again.`);
@@ -867,7 +867,7 @@ export async function cancel(ctx: Live, actor: Actor, taskId: string, why: strin
     while (level.length) {
       const below = await tx
         .update(tasks)
-        .set({ status: 'cancelled', closedAt: new Date(), assigneeAgentId: null, updatedAt: new Date(), version: sql`${tasks.version} + 1` })
+        .set({ status: 'cancelled', closedAt: new Date(), assigneeAgentId: null, externalWait: null, updatedAt: new Date(), version: sql`${tasks.version} + 1` })
         .where(and(inArray(tasks.parentId, level), notInArray(tasks.status, [...CLOSED])))
         .returning();
       for (const t of below) {
@@ -1087,20 +1087,31 @@ export async function updateTask(ctx: Live, agentId: string, taskId: string, c: 
   return { task: row, wakes };
 }
 
-/* A comment goes into the log. A person's comment reaches whoever holds the task; an agent's wakes nobody, but for one
-   that answers a blocked member task it gave out: the task opens again and its executor goes on with the answer. */
+/* Comments from others end an external wait. A giver's answer also opens a blocked member task for its executor. */
 export async function comment(ctx: Live, actor: Actor, taskId: string, text: string): Promise<Moved> {
   const task = await loadTask(ctx.db, taskId);
   if (!text.trim()) throw refuse(400, 'task_invalid', 'A comment needs text.');
-  if (actor.agentId && task.status === 'blocked' && task.executorAgentId && task.assigneeAgentId === task.executorAgentId && (await gaveOut(ctx.db, task, actor.agentId))) {
-    const wakes: Wake[] = [{ agentId: task.executorAgentId, taskId, why: 'unblocked', text: text.trim() }];
-    const row = await move(ctx, task, { status: 'open', silent: 0 }, { kind: 'comment', actor, text: text.trim() }, undefined, wakes);
-    return { task: row, wakes };
-  }
+  const words = text.trim();
+  return (await unblockByComment(ctx, actor, task, words)) ?? (await resumeByComment(ctx, actor, task, words)) ?? logComment(ctx, actor, task, words);
+}
+
+async function unblockByComment(ctx: Live, actor: Actor, task: Task, text: string): Promise<Moved | null> {
+  if (!actor.agentId || task.status !== 'blocked' || !task.executorAgentId || task.assigneeAgentId !== task.executorAgentId || !(await gaveOut(ctx.db, task, actor.agentId))) return null;
+  const wakes: Wake[] = [{ agentId: task.executorAgentId, taskId: task.id, why: 'unblocked', text }];
+  return { task: await move(ctx, task, { status: 'open', silent: 0 }, { kind: 'comment', actor, text }, undefined, wakes), wakes };
+}
+
+async function resumeByComment(ctx: Live, actor: Actor, task: Task, text: string): Promise<Moved | null> {
+  if (!task.externalWait || !task.assigneeAgentId || actor.agentId === task.assigneeAgentId || CLOSED.includes(task.status)) return null;
+  const wakes: Wake[] = [{ agentId: task.assigneeAgentId, taskId: task.id, why: 'comment', text }];
+  return { task: await move(ctx, task, { externalWait: null, silent: 0 }, { kind: 'comment', actor, text, data: { externalWait: null } }, undefined, wakes), wakes };
+}
+
+async function logComment(ctx: Live, actor: Actor, task: Task, text: string): Promise<Moved> {
   const wake = actor.personId && task.assigneeAgentId && !CLOSED.includes(task.status);
-  const wakes: Wake[] = wake ? [{ agentId: task.assigneeAgentId!, taskId, why: 'comment', text: text.trim() }] : [];
+  const wakes: Wake[] = wake ? [{ agentId: task.assigneeAgentId!, taskId: task.id, why: 'comment', text }] : [];
   await ctx.db.transaction(async tx => {
-    await note(tx, task, { kind: 'comment', actor, text: text.trim() });
+    await note(tx, task, { kind: 'comment', actor, text });
     await keepWakes(tx, task.companyId, wakes);
   });
   published(ctx, task);
@@ -1166,6 +1177,11 @@ async function explaining(db: Db | Tx, task: Task, agentId: string, requestId: s
 
 /* The agent holding the task ended a turn without moving it: a reminder, and from SILENT_TURNS on a person is asked. */
 export async function silentTurn(ctx: Live, agentId: string, task: Task): Promise<Moved> {
+  if (task.externalWait) return { task, wakes: [] };
+  return remindOnSilence(ctx, agentId, task);
+}
+
+async function remindOnSilence(ctx: Live, agentId: string, task: Task): Promise<Moved> {
   const silent = task.silent + 1;
   if (silent < SILENT_TURNS) {
     const wakes: Wake[] = [{ agentId, taskId: task.id, why: 'reminder' }];
@@ -1329,6 +1345,8 @@ export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answ
       .where(and(eq(requests.id, requestId), eq(requests.status, 'open')))
       .returning();
     if (!request) throw refuse(409, 'request_closed', 'This request is answered already.');
+    await tx.update(tasks).set({ externalWait: null, silent: 0, version: sql`${tasks.version} + 1`, updatedAt: new Date() })
+      .where(and(eq(tasks.id, task.id), isNotNull(tasks.externalWait)));
     await note(tx, task, { kind: 'answered', actor, text: said, data: { requestId, kind: found.kind, status, ...forWhom } });
     const [left] = await tx.select({ n: count() }).from(requests).where(and(eq(requests.taskId, task.id), eq(requests.status, 'open')));
     if (current?.status === 'waiting' && !Number(left?.n ?? 0)) {

@@ -9,11 +9,20 @@ import { answerDirectly } from '../tasks/engine.js';
 import { wakeAll } from '../tasks/wake.js';
 import { listEvents } from '../events/store.js';
 import { FIRST_TURN, FIRST_TURN_TEMPLATE, turnPrompt } from './prompt.js';
-import { agentState, enqueueTurn, insertTurn, onAgent, pump } from './queue.js';
+import { agentState, insertTurn, onAgent, pump } from './queue.js';
 import { cancelJob } from '../tasks/wake.js';
+import { queueTaskMessage, TaskReference } from '../tasks/external-wait.js';
 
 const EventsQuery = z.object({ after: z.coerce.number().int().min(0).default(0) });
-const MessageBody = z.object({ text: z.string().trim().min(1).max(4000) });
+const MessageBody = z.object({ text: z.string().trim().min(1).max(4000), task: TaskReference.optional() });
+
+function writtenBy(me: Awaited<ReturnType<typeof agentFor>>['me'], text: string) {
+  if (me.via) return {
+    actor: { agentId: me.via },
+    turn: { prompt: turnPrompt({ name: 'Orchestrator', title: '' }, text), createdBy: null, message: { personId: null, text, from: 'orchestrator' as const } },
+  };
+  return { actor: { personId: me.id }, turn: { prompt: turnPrompt(me, text), createdBy: me.id, message: { personId: me.id, text } } };
+}
 
 /* Every agent's window: its conversation, what it is doing, writing to it and stopping it. The orchestrator is for people
    who see the whole company; an employee for people who reach its department. */
@@ -28,23 +37,20 @@ export function conversationRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.post('/api/agents/:id/messages', async (req, reply) => {
     const { me, agent } = await agentFor(ctx, req);
-    const { text } = MessageBody.parse(req.body);
+    const { text, task: ref } = MessageBody.parse(req.body);
     if (me.via === agent.id) throw new ApiError(400, 'validation', 'This is your own conversation. Write to people in your answer.');
     if (!(await agentState(ctx, agent.id)).ready) {
       throw agent.kind === 'orchestrator'
         ? new ApiError(409, 'conflict', 'The orchestrator cannot answer right now. See the window for what to do.', 'orchestrator_not_ready')
         : new ApiError(409, 'conflict', 'This employee cannot answer right now. See the window for what to do.', 'agent_not_ready');
     }
+    const { actor, turn } = writtenBy(me, text);
+    const jobId = await queueTaskMessage(ctx, { companyId: me.companyId, agentId: agent.id, task: ref, actor, text }, { companyId: me.companyId, agentId: agent.id, ...turn });
     ctx.bus.publish(me.companyId, {
       type: 'pulse',
       from: me.via ? { kind: 'orchestrator' } : { kind: 'person', id: me.id },
       to: agent.kind === 'orchestrator' ? { kind: 'orchestrator' } : { kind: 'department', id: agent.departmentId ?? '' },
     });
-    /* The orchestrator writes as itself. */
-    const turn = me.via
-      ? { prompt: turnPrompt({ name: 'Orchestrator', title: '' }, text), createdBy: null, message: { personId: null, text, from: 'orchestrator' as const } }
-      : { prompt: turnPrompt(me, text), createdBy: me.id, message: { personId: me.id, text } };
-    const jobId = await enqueueTurn(ctx, { companyId: me.companyId, agentId: agent.id, ...turn });
     /* Once the words are on their way, a person's words answer what the agent waits for from people; the orchestrator
        answers requests with its own tool. */
     if (!me.via) await wakeAll(ctx, await answerDirectly(ctx, me.id, agent.id, text));

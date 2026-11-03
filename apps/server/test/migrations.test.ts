@@ -13,6 +13,44 @@ import { isUniqueViolation } from '../src/db/errors.js';
 import { tasks } from '../src/db/schema.js';
 import { appOn, approvalAsked, as } from './helpers.js';
 
+describe('migration 0050', () => {
+  it('adds a nullable external wait and its deadline index on a fresh database', async () => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    const columns = await db.execute(sql`select column_name, data_type, is_nullable from information_schema.columns where table_name = 'tasks'`);
+    expect(columns.rows).toContainEqual({ column_name: 'external_wait', data_type: 'jsonb', is_nullable: 'YES' });
+    const indexes = await db.execute<{ indexdef: string }>(sql`select indexdef from pg_indexes where tablename = 'tasks' and indexname = 'tasks_external_wait_until'`);
+    expect(indexes.rows).toHaveLength(1);
+    expect(indexes.rows[0]!.indexdef).toContain("external_wait ->> 'until'");
+    expect(indexes.rows[0]!.indexdef).toContain('WHERE (external_wait IS NOT NULL)');
+  });
+
+  it('upgrades existing tasks without changing them and defaults their wait to null', async () => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0049_turn_program_history') });
+    const company = (await db.execute<{ id: string }>(sql`insert into companies (name) values ('Acme') returning id`)).rows[0]!.id;
+    await db.execute(sql`insert into tasks (company_id, number, title, status, silent, version)
+      select ${company}, n, 'Task ' || n, 'working', 2, 7 from generate_series(1, 150) n`);
+    const agent = (await db.execute<{ id: string }>(sql`insert into agents (company_id, kind, name, model) values (${company}, 'worker', 'Bruno', '') returning id`)).rows[0]!.id;
+    await db.execute(sql`insert into pending_wakes (company_id, agent_id, task_id, why, text, note)
+      select ${company}, ${agent}, id, 'tests', '', '' from tasks where number = 1`);
+    const before = (await db.execute(sql`select to_jsonb(t) as data from tasks t order by number`)).rows;
+    const beforeWakes = (await db.execute(sql`select to_jsonb(w) as data from pending_wakes w order by id`)).rows;
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    expect((await db.execute(sql`select to_jsonb(t) - 'external_wait' as data from tasks t order by number`)).rows).toEqual(before);
+    expect((await db.execute(sql`select to_jsonb(w) - 'task_version' as data from pending_wakes w order by id`)).rows).toEqual(beforeWakes);
+    expect((await db.execute(sql`select task_version from pending_wakes`)).rows).toEqual([{ task_version: null }]);
+    const rows = (await db.execute(sql`select * from tasks order by number`)).rows;
+    expect(rows).toHaveLength(150);
+    for (const row of rows) expect(row).toHaveProperty('external_wait', null);
+  });
+});
+
 /* A copy of the migrations folder that stops after the given tag, as an older install would have it. */
 async function migrationsUpTo(tag: string): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'hh-migrations-'));
@@ -25,6 +63,33 @@ async function migrationsUpTo(tag: string): Promise<string> {
   await writeFile(journalPath, JSON.stringify(journal));
   return dir;
 }
+
+describe('migration 0049', () => {
+  it.each(['Acme', 'Moonfern'])('adds history indexes on an upgraded %s copy without changing old events', async name => {
+    const source = new PGlite();
+    onTestFinished(() => source.close());
+    let db = drizzle(source);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0047_requested_prompt') });
+    await db.execute(sql`insert into companies (id, name) values ('00000000-0000-4000-8000-000000000001', ${name})`);
+    await db.execute(sql`insert into agents (company_id, kind, name, model) select id, 'worker', name, '' from companies`);
+    await db.execute(sql`insert into agent_events (company_id, agent_id, kind, data)
+      select a.company_id, a.id, 'message', case when n % 3 = 0 then '{}'::jsonb
+        else jsonb_build_object('silentJob', null, 'text', repeat('step ', 120)) end
+      from generate_series(1,30161) n cross join agents a`);
+    const fingerprint = sql`select count(*)::int as n, md5(jsonb_agg(to_jsonb(e) order by seq)::text) as checksum from agent_events e`;
+    const before = (await db.execute(fingerprint)).rows;
+    const copy = new PGlite({ loadDataDir: await source.dumpDataDir('none') });
+    onTestFinished(() => copy.close());
+    db = drizzle(copy);
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    expect((await db.execute(fingerprint)).rows).toEqual(before);
+    expect(before[0]).toMatchObject({ n: 30161 });
+    expect((await db.execute(sql`select indexname from pg_indexes where indexname in
+      ('agent_events_program_history', 'agent_events_silent_job', 'tasks_turn_id', 'tasks_product_id') order by indexname`)).rows)
+      .toEqual(['agent_events_program_history', 'agent_events_silent_job', 'tasks_product_id', 'tasks_turn_id'].map(indexname => ({ indexname })));
+  });
+});
 
 describe('migration 0047', () => {
   it.each(['Acme', 'Moonfern'])('keeps old prompts in %s without inventing their requested text', async name => {
@@ -634,7 +699,8 @@ describe('migration 0045', () => {
         ('20000000-0000-4000-8000-' || lpad((1 + n % 100)::text, 12, '0'))::uuid
       from generate_series(1, 20000) n`);
     await db.execute(sql`insert into tasks (company_id, number, title) values (${C}, 20001, 'No turn or product')`);
-    const fingerprint = sql`select count(*)::int as n, md5(string_agg(row_to_json(t)::text, '' order by number)) as checksum from tasks t`;
+    /* Migration 0050 checks its new nullable field separately; every earlier field must stay identical. */
+    const fingerprint = sql`select count(*)::int as n, md5(string_agg((to_jsonb(t) - 'external_wait')::text, '' order by number)) as checksum from tasks t`;
     const before = await db.execute(fingerprint);
     expect(before.rows[0]).toMatchObject({ n: 20001 });
 
@@ -662,14 +728,20 @@ describe('migration 0045', () => {
 describe('migration 0051', () => {
   const C = '00000000-0000-4000-8000-000000000001';
   const P = '00000000-0000-4000-8000-000000000002';
-  const M = '00000000-0000-4000-8000-000000000003';
+  const M = '991d4eb4-0000-4000-8000-000000000003';
+  const TASK = '00000000-0000-4000-8000-000000000004';
+  const AGENT = '00000000-0000-4000-8000-000000000005';
+  const JOB = '00000000-0000-4000-8000-000000000006';
+  const RUN = '00000000-0000-4000-8000-000000000007';
   const TAIL = '1f6db355-484e-4c57-b516-ca0c2fa8be3e';
   const LIVE = '606af686-0000-4000-8000-000000000001';
   const CLAUDE_WITH_AGENT = '00000000-0000-4000-8000-000000000011';
   const CLAUDE_READY = '00000000-0000-4000-8000-000000000012';
   const KIMI_WAITING = '00000000-0000-4000-8000-000000000013';
+  const GLM_WITH_NODE_RUN = '00000000-0000-4000-8000-000000000014';
+  const GLM_READY = '00000000-0000-4000-8000-000000000015';
 
-  it('passes on a fresh install and removes only unfinished waiting_machine tails replaced by a newer ready subscription', async () => {
+  it('passes on a fresh install and removes unfinished waiting_machine tails on a machine with test runs while keeping ready, agent-assigned and node-run subscriptions', async () => {
     const freshClient = new PGlite();
     onTestFinished(() => freshClient.close());
     const freshDb = drizzle(freshClient);
@@ -689,17 +761,28 @@ describe('migration 0051', () => {
       (${LIVE}, ${C}, 'codex', 'personal', 'Codex', 'ready', ${P}, null, '2026-11-02T14:58:12Z'),
       (${CLAUDE_WITH_AGENT}, ${C}, 'claude', 'personal', 'Claude', 'waiting_machine', ${P}, null, '2026-11-02T13:00:00Z'),
       (${CLAUDE_READY}, ${C}, 'claude', 'personal', 'Claude', 'ready', ${P}, null, '2026-11-02T14:00:00Z'),
+      (${GLM_WITH_NODE_RUN}, ${C}, 'glm', 'personal', 'GLM', 'waiting_machine', ${P}, null, '2026-11-02T13:30:00Z'),
+      (${GLM_READY}, ${C}, 'glm', 'personal', 'GLM', 'ready', ${P}, null, '2026-11-02T14:30:00Z'),
       (${KIMI_WAITING}, ${C}, 'kimi', 'personal', 'Kimi', 'waiting_machine', ${P}, null, '2026-11-02T15:00:00Z')`);
 
     await db.execute(sql`insert into nodes (id, company_id, machine_id, subscription_id, key_hash, status, last_seen_at) values
       (${TAIL}, ${C}, ${M}, ${TAIL}, null, 'ready', '2026-11-02T14:58:09Z'),
       (${LIVE}, ${C}, ${M}, ${LIVE}, 'live-codex-hash', 'ready', '2026-11-03T16:00:00Z'),
-      (${CLAUDE_READY}, ${C}, ${M}, ${CLAUDE_READY}, 'claude-ready-hash', 'ready', '2026-11-03T16:00:00Z')`);
+      (${CLAUDE_READY}, ${C}, ${M}, ${CLAUDE_READY}, 'claude-ready-hash', 'ready', '2026-11-03T16:00:00Z'),
+      (${GLM_WITH_NODE_RUN}, ${C}, ${M}, ${GLM_WITH_NODE_RUN}, null, 'needs_login', '2026-11-02T13:45:00Z'),
+      (${GLM_READY}, ${C}, ${M}, ${GLM_READY}, 'glm-ready-hash', 'ready', '2026-11-03T16:00:00Z')`);
 
     for (let i = 1; i <= 8; i++) {
       await db.execute(sql`insert into agents (company_id, kind, name, model, subscription_id, node_id) values (${C}, 'worker', ${`Agent ${i}`}, '', ${LIVE}, ${LIVE})`);
     }
-    await db.execute(sql`insert into agents (company_id, kind, name, model, subscription_id) values (${C}, 'worker', 'Claude Agent', '', ${CLAUDE_WITH_AGENT})`);
+    await db.execute(sql`insert into agents (id, company_id, kind, name, model, subscription_id) values (${AGENT}, ${C}, 'worker', 'Claude Agent', '', ${CLAUDE_WITH_AGENT})`);
+    await db.execute(sql`insert into tasks (id, company_id, number, title) values (${TASK}, ${C}, 1, 'Verify test parts on Mac')`);
+    await db.execute(sql`insert into jobs (id, company_id, subscription_id, agent_id, prompt, timeout_ms, status, kind) values (${JOB}, ${C}, ${CLAUDE_READY}, ${AGENT}, 'Run tests', 60000, 'done', 'conversation')`);
+    await db.execute(sql`insert into test_runs (id, company_id, number, task_id, agent_id, job_id, command, parts, timeout_ms, status) values (${RUN}, ${C}, 1, ${TASK}, ${AGENT}, ${JOB}, 'npm test', 17, 60000, 'passed')`);
+    for (let part = 1; part <= 16; part++) {
+      await db.execute(sql`insert into test_parts (company_id, run_id, part, status, node_id, machine_id) values (${C}, ${RUN}, ${part}, 'passed', ${CLAUDE_READY}, ${M})`);
+    }
+    await db.execute(sql`insert into test_parts (company_id, run_id, part, status, node_id, machine_id) values (${C}, ${RUN}, 17, 'passed', ${GLM_WITH_NODE_RUN}, ${M})`);
 
     await migrate(db, { migrationsFolder: MIGRATIONS });
 
@@ -709,6 +792,15 @@ describe('migration 0051', () => {
     expect(codexNodes.rows).toEqual([{ id: LIVE }]);
 
     const keptSubs = await db.execute<{ id: string }>(sql`select id from subscriptions order by created_at`);
-    expect(keptSubs.rows).toEqual([{ id: CLAUDE_WITH_AGENT }, { id: CLAUDE_READY }, { id: LIVE }, { id: KIMI_WAITING }]);
+    expect(keptSubs.rows).toEqual([
+      { id: CLAUDE_WITH_AGENT },
+      { id: GLM_WITH_NODE_RUN },
+      { id: CLAUDE_READY },
+      { id: GLM_READY },
+      { id: LIVE },
+      { id: KIMI_WAITING },
+    ]);
+    const glmPart = await db.execute<{ node_id: string | null }>(sql`select node_id from test_parts where run_id = ${RUN} and part = 17`);
+    expect(glmPart.rows).toEqual([{ node_id: GLM_WITH_NODE_RUN }]);
   });
 });

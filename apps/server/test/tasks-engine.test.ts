@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import { agents, companies, departments, people, requests, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
-import { answer, ask, blocked, cancel, comment, createTask, report, submit, updateTask, verdict } from '../src/modules/tasks/engine.js';
+import { answer, ask, blocked, cancel, comment, createTask, leaveWork, report, submit, updateTask, verdict } from '../src/modules/tasks/engine.js';
 import { wakePrompt } from '../src/modules/tasks/wake.js';
 import { setUpCompany, testApp } from './helpers.js';
 
@@ -36,6 +36,17 @@ const reason = (p: Promise<unknown>) => p.then(() => 'ok', (err: { reason?: stri
 const woken = (r: { wakes: { agentId: string; why: string }[] }) => r.wakes.map(w => [w.agentId, w.why]);
 
 describe('the task engine', () => {
+  it('keeps a blocked task with its giver after its executor leaves, even when the giver comments', async () => {
+    const { ctx, CEO, head, bruno, memberTask, read } = await company();
+    const task = await memberTask();
+    await blocked(ctx, bruno.id, task.id, 'Which currency?');
+    await leaveWork(ctx, CEO, bruno);
+    expect(await read(task.id)).toMatchObject({ status: 'blocked', assigneeAgentId: head.id, executorAgentId: bruno.id });
+    const result = await comment(ctx, { agentId: head.id }, task.id, 'The next executor will use euros.');
+    expect(result.wakes).toEqual([]);
+    expect(await read(task.id)).toMatchObject({ status: 'blocked', assigneeAgentId: head.id, executorAgentId: bruno.id });
+  });
+
   it('opens a blocked member task again when whoever gave it out answers in a comment, and wakes its executor with it', async () => {
     const { ctx, db, orchestrator, head, bruno, rita, memberTask, read } = await company();
     const task = await memberTask();
@@ -43,7 +54,7 @@ describe('the task engine', () => {
     const aside = await comment(ctx, { agentId: rita.id }, task.id, 'I would ask too.');
     expect([aside.wakes, (await read(task.id)).status]).toEqual([[], 'blocked']);
     const answered = await comment(ctx, { agentId: head.id }, task.id, 'Euros only.');
-    expect(answered.task).toMatchObject({ status: 'open', assigneeAgentId: bruno.id });
+    expect(answered.task).toMatchObject({ status: 'open', assigneeAgentId: bruno.id, silent: 0 });
     expect(answered.wakes).toEqual([{ agentId: bruno.id, taskId: task.id, why: 'unblocked', text: 'Euros only.' }]);
     const [me] = await db.select().from(agents).where(eq(agents.id, bruno.id));
     const prompt = wakePrompt(me!, answered.task, answered.wakes[0]!);

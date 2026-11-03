@@ -13,6 +13,7 @@ import { orchestratorOf } from '../conversation/queue.js';
 import { appendOutgoing } from '../events/store.js';
 import { personParty } from '../events/parties.js';
 import { decisionPerson } from './decisions.js';
+import { WaitInput, waitFor } from './external-wait.js';
 
 export type ToolJob = { id: string; companyId: string; agentId: string; agentKind: 'orchestrator' | 'head' | 'worker' };
 type Agent = typeof agents.$inferSelect;
@@ -180,11 +181,25 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
   );
 
   server.registerTool(
+    'wait_for',
+    {
+      description: 'Waits on a task you hold for an external event, with a one-line reason and an ISO deadline at most two hours away. End your turn after this: no reminder or stuck request is sent while it waits. A comment, a message naming this task, or the deadline wakes you once.',
+      inputSchema: { task: Ref, ...WaitInput.shape },
+    },
+    async ({ task: ref, reason, until }) => run(async () => {
+      const { task } = await find(ref);
+      plain(task, reason);
+      const moved = await waitFor(ctx, job.agentId, task.id, { reason, until });
+      return { text: `#${task.number} waits for "${moved.task.externalWait!.reason}" until ${moved.task.externalWait!.until}. End this turn; you will be woken.`, moved };
+    }),
+  );
+
+  server.registerTool(
     'comment',
     {
       description:
-        "Adds a note to a task's log for everyone on it. It wakes nobody, but for one way to answer: whoever gave out a member task that is blocked answers it with a comment, " +
-        'which opens it again and wakes its executor with your words. To hand work on, use the task\'s own moves.',
+        "Adds a note to a task's log for everyone on it. Whoever gave out a member task that is blocked can answer it with a comment, " +
+        'which opens it again and wakes its executor with your words. A comment from a person or another agent also ends an external wait and wakes its holder. To hand work on, use the task\'s own moves.',
       inputSchema: { task: Ref, text: z.string().trim().min(1).max(4000) },
     },
     async ({ task: ref, text }) =>
