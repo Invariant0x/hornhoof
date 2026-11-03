@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { serveApi } from './api';
+import { box, serveApi } from './api';
 
 /* A task or an agent's window slides over a page: the page keeps its width and place, the panel runs to the bottom of the
    window, scrolls by itself and leaves the page scrolled where it was. */
@@ -24,12 +24,6 @@ const openImprovements = (page: Page) => openPage(page, 'Improvements', 'Account
 
 const row = (page: Page, n: number) => page.getByRole('button', { name: new RegExp(`^#${n} Checkout step ${n}(?!\\d)`) });
 const panelOf = (page: Page, n: number) => page.getByRole('complementary', { name: `#${n} Checkout step ${n}` });
-
-async function box(locator: Locator) {
-  const b = await locator.boundingBox();
-  if (!b) throw new Error('not on screen');
-  return b;
-}
 
 /* What scrolls on a page is its main part under the header, not the document. */
 const pageScroll = (page: Page) => page.getByRole('main').evaluate(el => el.scrollTop);

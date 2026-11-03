@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import type { Decisions, Improvement, Me, Org, TaskDetail, TaskLine, TurnView } from '../src/types';
 
 /* A company with one department and a running turn of enough tasks to scroll, answered in the page as the server would. */
@@ -73,4 +73,10 @@ export async function serveApi(page: Page) {
     if (task) return route.fulfill(json({ task: detail(task) }));
     return route.fulfill(json({ error: { code: 'not_found', message: 'Not found.' } }, 404));
   });
+}
+
+export async function box(locator: Locator) {
+  const b = await locator.boundingBox();
+  if (!b) throw new Error('not on screen');
+  return b;
 }
