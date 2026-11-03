@@ -359,7 +359,7 @@ describe('Map', () => {
       stream.send({ type: 'pulse', from: { kind: 'person', id: 'p1' }, to: { kind: 'orchestrator' } });
       stream.send({ type: 'pulse', from: { kind: 'orchestrator' }, to: { kind: 'department', id: 'd1' } });
       expect(shots(container, 'c')).toHaveLength(2);
-      act(() => vi.advanceTimersByTime(10_000));
+      act(() => { vi.advanceTimersByTime(10_000); });
       expect(shots(container, 'c')).toHaveLength(0);
     } finally {
       vi.useRealTimers();
@@ -375,7 +375,7 @@ describe('Map', () => {
     try {
       stream.send({ type: 'pulse', from: { kind: 'orchestrator' }, to: { kind: 'department', id: 'd1' } });
       expect(shots(container, 'c')).toHaveLength(1);
-      act(() => vi.advanceTimersByTime(10_000));
+      act(() => { vi.advanceTimersByTime(10_000); });
       expect(container.querySelectorAll('circle.pt')).toHaveLength(0);
       expect(container.querySelectorAll('.wires path.live, .wires path[data-work]')).toHaveLength(0);
     } finally {
@@ -473,10 +473,10 @@ describe('Map', () => {
       expect(shots(container, 'c')).toHaveLength(1);
       expect(card('Sales')).not.toHaveClass('flash');
       /* The frame lights when the dot gets there, and not before. */
-      for (let ms = 0; ms < 10_000 && !card('Sales').classList.contains('flash'); ms += 100) act(() => vi.advanceTimersByTime(100));
+      for (let ms = 0; ms < 10_000 && !card('Sales').classList.contains('flash'); ms += 100) act(() => { vi.advanceTimersByTime(100); });
       expect(shots(container, 'c')).toHaveLength(0);
       expect(card('Sales')).toHaveClass('flash');
-      act(() => vi.advanceTimersByTime(2_000));
+      act(() => { vi.advanceTimersByTime(2_000); });
       expect(card('Sales')).not.toHaveClass('flash');
 
       stream.send({ type: 'pulse', from: { kind: 'department', id: 'd2' }, to: { kind: 'orchestrator' } });

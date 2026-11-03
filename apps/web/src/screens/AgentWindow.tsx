@@ -244,7 +244,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard }:
   useEffect(() => {
     mounted.current = true;
     loadCard();
-    (async () => {
+    void (async () => {
       await catchUp();
       await greet();
     })();
@@ -423,6 +423,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard }:
   }
 
   function line(e: EventView, i: number) {
+    // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- proposal and typed events are not rendered as log lines
     switch (e.kind) {
       case 'message':
         if (isMessage(e)) return <EventMessage event={e} folding={folding} />;

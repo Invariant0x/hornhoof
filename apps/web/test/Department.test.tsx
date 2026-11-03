@@ -225,7 +225,7 @@ describe('Department view', () => {
       stream.send({ type: 'pulse', from: { kind: 'agent', id: 'x0', departmentId: 'other' }, to: { kind: 'agent', id: 'x1', departmentId: 'other' } });
       const dots = [...document.querySelectorAll('.dview circle.pt animateMotion')];
       expect(dots.map(m => [m.getAttribute('path'), m.getAttribute('repeatCount')])).toEqual([[toD(stepPaths(schemaLayout(dev!, 1)).toMember('b1')!), '1']]);
-      act(() => vi.advanceTimersByTime(10_000));
+      act(() => { vi.advanceTimersByTime(10_000); });
       expect(document.querySelectorAll('.dview circle.pt, .dview .wires path.live')).toHaveLength(0);
     } finally {
       vi.useRealTimers();

@@ -88,9 +88,12 @@ describe('what the build runs', () => {
   /* Coverage for crapper comes from vitest's provider, and a provider of another version than vitest refuses to load. */
   it('installs the coverage provider with every part that runs vitest, at the version of vitest', () => {
     const json = (path: string) => JSON.parse(read(path));
+    const root = json('package.json');
+    expect(root.scripts?.prepare).toContain('node_modules/@vitest/coverage-v8');
     for (const part of ['packages/protocol', 'apps/server', 'apps/web', 'apps/node']) {
       const dev = json(`${part}/package.json`).devDependencies;
       expect(dev['@vitest/coverage-v8'], part).toBe(dev.vitest);
+      expect(json(`${part}/node_modules/@vitest/coverage-v8/package.json`).version, part).toBe(json('node_modules/vitest/package.json').version);
     }
     const lock = json('package-lock.json').packages;
     expect(lock['node_modules/@vitest/coverage-v8']).toMatchObject({ version: lock['node_modules/vitest'].version, dev: true });

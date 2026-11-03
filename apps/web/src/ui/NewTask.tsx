@@ -43,7 +43,7 @@ export function NewTask({ department: d, head, onCreated, onCancel }: Props) {
   }
 
   return (
-    <form className="new-task" onSubmit={create}>
+    <form className="new-task" onSubmit={e => void create(e)}>
       <p className="muted">{t.dept.goesTo(head)}</p>
       <Field label={t.common.title}>{p => <input {...p} value={title} onChange={e => setTitle(e.target.value)} maxLength={120} required autoFocus />}</Field>
       <Field label={t.dept.brief}>{p => <input {...p} value={brief} onChange={e => setBrief(e.target.value)} maxLength={600} />}</Field>

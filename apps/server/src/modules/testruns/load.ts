@@ -5,6 +5,7 @@ import { nodes, subscriptions } from '../../db/schema.js';
 import { nodeIdentity, type NodeHub, type SaidLoad } from '../nodes/hub.js';
 import { liveNode } from '../nodes/nodes.js';
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- strip the timestamp from the public load
 const plain = ({ at: _, ...load }: SaidLoad): NodeLoad => load;
 
 /* A machine's load from what its nodes said: they share its processors and memory, of which the newest word counts, and

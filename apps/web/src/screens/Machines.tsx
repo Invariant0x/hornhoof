@@ -174,9 +174,9 @@ type MachineControls = {
   confirm: string | null;
   setAdding: (adding: Adding) => void;
   setConfirm: (id: string | null) => void;
-  addPlan: (machine: MachineView, sub: SubView) => void;
-  lend: (machine: MachineView, value: boolean) => void;
-  disconnect: (machine: MachineView) => void;
+  addPlan: (machine: MachineView, sub: SubView) => unknown;
+  lend: (machine: MachineView, value: boolean) => unknown;
+  disconnect: (machine: MachineView) => unknown;
   done: () => void;
 };
 
@@ -341,7 +341,7 @@ export function Machines({ me }: { me: Me }) {
         </div>
         {!command && (
           <div className="head-actions">
-            <button className="btn" type="button" onClick={machineCommand}>{t.machines.connect}</button>
+            <button className="btn" type="button" onClick={() => void machineCommand()}>{t.machines.connect}</button>
           </div>
         )}
       </header>

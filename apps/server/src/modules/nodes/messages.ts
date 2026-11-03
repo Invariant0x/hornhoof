@@ -19,7 +19,7 @@ import { hookRejected } from './hook-rejections.js';
 
 const OPEN_JOBS = ['queued', 'running'] as const;
 
-const completionValue = (value: unknown, stopped: string): SQL => sql`case when ${jobs.error} = 'cancelled' then ${stopped} else ${value} end`;
+const completionValue = (value: unknown, stopped: string): SQL => sql`case when ${jobs.error} = 'cancelled' then ${stopped} else ${value ?? null} end`;
 
 /* A node may only touch the jobs sent to it; the built-in node those of API keys. */
 function jobsOf(id: NodeIdentity, ctx: Ctx): SQL {
@@ -96,6 +96,7 @@ const nodeCut = (ctx: Ctx, nodeId: string, row: { node: typeof nodes.$inferSelec
 
 export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage, now = new Date()): Promise<void> {
   const { db } = ctx;
+  // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- term.* messages are routed by the terminal hub
   switch (msg.type) {
     case 'hello': {
       let cut = builtinCut(ctx, id, msg, now);
@@ -170,6 +171,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       if (id.kind === 'node') await signedIn(ctx, id.nodeId, msg.ok, msg.error);
       return;
     case 'load': {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars -- strip the message type tag from the node load
       const { type: _, ...load } = msg;
       ctx.hub.report(id, load);
       /* A machine that freed up takes a part that waits. */

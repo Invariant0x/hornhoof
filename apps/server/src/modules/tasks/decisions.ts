@@ -1,6 +1,6 @@
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { accessOf, canReach, WHOLE, type Access, type Spot } from '../../auth/access.js';
+import { accessOf, canReach, WHOLE } from '../../auth/access.js';
 import { decisionOwner, type Candidate, type DecisionSubject } from '../../auth/decision-owner.js';
 import { canDecide, decidedBy, type DecidedBy } from '../../auth/decisions.js';
 import type { Person } from '../../auth/session.js';

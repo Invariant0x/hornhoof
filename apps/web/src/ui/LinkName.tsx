@@ -46,7 +46,7 @@ export function LinkName({ name, onName, domain, check, onState, problem, curren
     if (now !== 'checking') return;
     let live = true;
     const timer = setTimeout(() => {
-      asking
+      void asking
         .current(name)
         .then(found => (found.free ? 'free' : (found.reason ?? 'taken')) as NameState)
         .catch((): NameState => 'unknown')
