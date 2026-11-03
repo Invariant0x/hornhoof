@@ -713,22 +713,14 @@ describe('messages between agents and people', () => {
     expect(screen.getByText('Возьми #83.')).toBeInTheDocument();
   });
 
-  it('shows the same lines in the frame around the live terminal, and leaves Ctrl+O typed in the terminal to the program', async () => {
+  it('leaves the whole window and Ctrl+O to the live terminal, even with messages that name who wrote to whom', async () => {
     open({ [`GET ${EVENTS}?after=0`]: [200, { events: ORCHESTRATOR_LOG, state: { ...READY, terminal: true } }] });
     expect(await screen.findByTestId('live-terminal')).toBeInTheDocument();
-    const frame = screen.getByRole('region', { name: 'Messages' });
-    const david = within(frame).getByRole('button', { name: 'Message from David AI (CEO assistant) to the orchestrator' });
-    expect(within(frame).getByRole('button', { name: 'Message to Dana (Head of development) from the orchestrator' })).toBeInTheDocument();
-    ctrlO(screen.getByRole('textbox', { name: 'Terminal input' }));
-    expect(david).toHaveAttribute('aria-expanded', 'false');
-    fireEvent.click(david);
-    expect(within(frame).getByText(/Take #78 into work/)).toBeInTheDocument();
-  });
-
-  it('leaves the whole window to the live terminal while no message names who wrote to whom', async () => {
-    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [ev(1, 'message', { text: 'Before senders were kept' }, { person: IVAN })], state: { ...READY, terminal: true } }] });
-    expect(await screen.findByTestId('live-terminal')).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Messages' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Message from David AI (CEO assistant) to the orchestrator' })).not.toBeInTheDocument();
+    /* Nothing over the terminal folds, so the window takes no Ctrl+O for itself. */
+    expect(ctrlO()).toBe(true);
+    expect(ctrlO(screen.getByRole('textbox', { name: 'Terminal input' }))).toBe(true);
   });
 });
 

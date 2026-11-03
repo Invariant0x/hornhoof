@@ -397,7 +397,6 @@ export const ru: Messages = {
     notice: to => `Уведомление Hornhoof для ${to}`,
     theOrchestrator: 'оркестратора',
     people: 'людей',
-    messages: 'Сообщения',
     folded: n => `+${n} ${plural('ru', n, { one: 'строка', few: 'строки', many: 'строк', other: 'строки' })} (Ctrl+O, чтобы открыть)`,
     hint: 'Enter отправить, Shift+Enter новая строка',
     working: 'Работает…',
