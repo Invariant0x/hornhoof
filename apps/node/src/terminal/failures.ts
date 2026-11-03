@@ -12,6 +12,7 @@ export function failure(kind: FailureKind, reason: string, retryable?: unknown):
 const reason = (...parts: unknown[]) => parts.map(text).filter(Boolean).join(': ') || 'unknown';
 const PLAN_LIMIT = /limit reached|hit your usage limit|\b\d+[- ]hour limit/i;
 const NETWORK = /ECONNREFUSED|ENOTFOUND|timed out|connection/i;
+const serverError = (status: unknown): boolean => typeof status === 'number' && status >= 500 && status < 600;
 const CLAUDE: Record<string, FailureKind> = {
   overloaded: 'overloaded', rate_limit: 'rate_limited', authentication_failed: 'auth', oauth_org_not_allowed: 'auth',
   billing_error: 'refused', account_on_hold: 'refused', verification_required: 'refused', cloud_credential_error: 'refused', max_output_tokens: 'too_big',
@@ -25,7 +26,8 @@ function claudeFailure(raw: Record<string, unknown>): Failure {
   if (code === 'server_error' && /\b529\b|overloaded/i.test(message)) kind = 'overloaded';
   else if (code === 'server_error' && NETWORK.test(message)) kind = 'network';
   if (code === 'unknown' && /empty or malformed response/i.test(message)) kind = 'cut';
-  return failure(kind, reason(code, message), raw.retryable);
+  const retryable = kind === 'unknown' && code === 'server_error' ? true : undefined;
+  return failure(kind, reason(code, message), raw.retryable ?? retryable);
 }
 
 const CODEX: Record<string, FailureKind> = {
@@ -44,7 +46,8 @@ export function codexFailure(raw: Record<string, unknown>): Failure {
   else if (code === 'response_too_many_failed_attempts' && status === 429) kind = 'rate_limited';
   else if (code === 'http_connection_failed' && status == null) kind = 'network';
   if (code === 'other' && /stream disconnected/i.test(text(raw.message))) kind = 'cut';
-  return failure(kind, reason(code + (typeof status === 'number' ? ` ${status}` : ''), raw.message), raw.retryable);
+  const retryable = kind === 'unknown' && (code === 'internal_server_error' || serverError(status)) ? true : undefined;
+  return failure(kind, reason(code + (typeof status === 'number' ? ` ${status}` : ''), raw.message), raw.retryable ?? retryable);
 }
 
 const KIMI: Record<string, FailureKind> = {
@@ -58,17 +61,20 @@ function kimiFailure(raw: Record<string, unknown>): Failure {
   const code = text(raw.code) || text(raw.error_type) || text(raw.name);
   const message = text(raw.message) || text(raw.error_message);
   const kind = code === 'APIStatusError' && /^401\b/.test(message) ? 'auth' : KIMI[code] ?? KIMI[text(raw.name)] ?? 'unknown';
-  return failure(kind, reason(code, message), raw.retryable);
+  const status = isRecord(raw.details) ? raw.details.statusCode : undefined;
+  const server = serverError(status) || ((code === 'APIStatusError' || raw.name === 'APIStatusError') && /^5\d\d\b/.test(message));
+  return failure(kind, reason(code, message), raw.retryable ?? (kind === 'unknown' && server ? true : undefined));
 }
 
 const AGY: [FailureKind, RegExp][] = [
-  ['auth', AGY_SIGNED_OUT], ['overloaded', /overload/i], ['rate_limited', /\b429\b/],
+  ['overloaded', /overload/i], ['rate_limited', /\b429\b/],
   ['usage_limit', /quota/i], ['network', /network issue/i],
 ];
 
 function agyFailure(raw: Record<string, unknown>): Failure {
   const message = text(raw.short_error) || text(raw.error) || 'unknown';
-  return failure(AGY.find(([, pattern]) => pattern.test(message))?.[0] ?? 'unknown', message, raw.retryable);
+  const kind = AGY_SIGNED_OUT.test(message) ? 'auth' : AGY.find(([, pattern]) => pattern.test(message))?.[0] ?? 'unknown';
+  return failure(kind, message, raw.retryable);
 }
 
 export const FAILURE = { claude: claudeFailure, codex: codexFailure, kimi: kimiFailure, antigravity: agyFailure };

@@ -444,6 +444,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     /* The limits the turn brought go first, so Hornhoof knows of a plan at its limit when it hears the job ended. */
     await status();
     emit(done);
+    host?.completed(m.jobId);
     await renewedCodex().catch(() => {});
     if (done.error === 'not_logged_in') {
       loggedIn = false;

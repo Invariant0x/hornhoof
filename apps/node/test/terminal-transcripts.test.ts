@@ -12,7 +12,7 @@ const loop = (event: object) => ({ type: 'context.append_loop_event', agentId: '
 
 describe("Codex's session log", () => {
   it.each(failures.filter(f => f.program === 'codex'))('reads the real $prompt failure with its kind and message', ({ line, reason }) => {
-    expect(codexRollout(line)).toEqual({ events: [], failed: reason });
+    expect(codexRollout(line)).toEqual({ events: [], failed: expect.objectContaining({ text: reason, kind: expect.any(String), retryable: expect.any(Boolean) }) });
   });
 
   it.each([
@@ -23,7 +23,7 @@ describe("Codex's session log", () => {
     [{}, 'unknown'],
     [{ message: '' }, 'unknown'],
   ])('keeps an incomplete error as a nonempty failure: %j', (error, reason) => {
-    expect(codexRollout({ type: 'event_msg', payload: { type: 'task_complete', last_agent_message: null, error } })).toEqual({ events: [], failed: reason });
+    expect(codexRollout({ type: 'event_msg', payload: { type: 'task_complete', last_agent_message: null, error } })).toEqual({ events: [], failed: expect.objectContaining({ text: reason, kind: expect.any(String), retryable: expect.any(Boolean) }) });
   });
 
   it('keeps a normal completion, including an empty answer', () => {
