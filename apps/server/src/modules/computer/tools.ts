@@ -1,7 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { ceoPrincipal, withInputLock } from '../conversation/decision-context.js';
+import { computerPrincipal, withInputLock } from '../conversation/decision-context.js';
 import { appendEvent, appendOutgoing } from '../events/store.js';
 import { personParty } from '../events/parties.js';
 import { decisionPerson } from '../tasks/decisions.js';
@@ -21,11 +21,12 @@ function answer(id: string, waited: Waited, seconds: number) {
   return say(`Exit code ${waited.exit}.\n${waited.output}`);
 }
 
-/* A command starts only in a turn that answers the CEO or the CEO delegate now, kept under the input lock from words that
-   would change it meanwhile, and while access is open: its id, or why it did not start. */
+/* A command starts only in a turn that answers the CEO or the CEO delegate now, or that their click opening the computer
+   opened, kept under the input lock from words that would change it meanwhile, and while access is open: its id, or why
+   it did not start. */
 function started(ctx: Ctx, job: ToolJob, command: string, seconds: number) {
   return withInputLock(ctx, job.agentId, async () => {
-    if (!(await ceoPrincipal(ctx.db, job.id))) return say(ONLY_CEO, true);
+    if (!(await computerPrincipal(ctx.db, job.id))) return say(ONLY_CEO, true);
     if (!ctx.computer.openUntil()) return say(CLOSED, true);
     if (!ctx.computer.available()) return say(UNREACHABLE, true);
     return ctx.computer.start(command, seconds);

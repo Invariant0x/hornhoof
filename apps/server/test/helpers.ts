@@ -4,6 +4,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { NodeMessage, ServerMessage } from '@hornhoof/protocol';
 import { PGlite } from '@electric-sql/pglite';
+import { eq } from 'drizzle-orm';
 import { drizzle, PglitePreparedQuery } from 'drizzle-orm/pglite';
 import WebSocket from 'ws';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
@@ -14,6 +15,7 @@ import { agentRole, grantsFor, readerGrantsFor, readerRole, type AgentSql } from
 import type { Db } from '../src/db/client.js';
 import * as schema from '../src/db/schema.js';
 import { setupCode } from '../src/modules/setup/code.js';
+import { ask, createTask } from '../src/modules/tasks/engine.js';
 
 export const TEST_SECRET = Buffer.alloc(32, 7).toString('base64');
 export const TEST_API_KEY = 'sk-ant-api03-test-key-9f3a';
@@ -107,6 +109,18 @@ export const as = (token: string) => ({ cookies: { hh_session: token } });
 type Access = { whole: true } | { departments?: string[]; teams?: string[] };
 
 /* Invites a person, accepts the invite with a password and returns their session token. */
+/* A worker of a new Development department asks the CEO to approve a merge, which only the CEO or the CEO delegate may. */
+export async function approvalAsked(app: FastifyInstance) {
+  const { db } = app.ctx;
+  const [orchestrator] = await db.select().from(schema.agents).where(eq(schema.agents.kind, 'orchestrator'));
+  const on = { companyId: orchestrator!.companyId, subscriptionId: orchestrator!.subscriptionId, model: '' };
+  const [dev] = await db.insert(schema.departments).values({ companyId: on.companyId, templateKey: 'development', roleCode: 'DEV' }).returning();
+  const [head] = await db.insert(schema.agents).values({ ...on, kind: 'head', name: 'Head', roleKey: 'DEV-HEAD', departmentId: dev!.id }).returning();
+  const [worker] = await db.insert(schema.agents).values({ ...on, kind: 'worker', name: 'Worker', roleKey: 'DEV-BE', departmentId: dev!.id }).returning();
+  const { task } = await createTask(app.ctx, { agentId: head!.id }, { title: 'Checkout', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: worker!.id, executor: true, gates: [] });
+  return (await ask(app.ctx, worker!.id, task.id, { kind: 'approval', text: 'Merge?', commit: 'a'.repeat(40) })).request;
+}
+
 export async function invitePerson(app: FastifyInstance, ceoToken: string, input: { name: string; email: string; access: Access }): Promise<string> {
   const invited = await app.inject({ method: 'POST', url: '/api/people/invite', payload: { ...input, title: '' }, ...as(ceoToken) });
   if (invited.statusCode !== 201) throw new Error(`Invite failed with ${invited.statusCode}: ${invited.body}`);
