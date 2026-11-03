@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:
 import { hostname, uptime } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { LOAD_MS, type AgentEvent, type CredKind, type Limits, type NodeLoad, type NodeMessage, type ProviderId, type ServerMessage } from '@hornhoof/protocol';
+import { LOAD_MS, NodeBuild, type AgentEvent, type CredKind, type Limits, type NodeLoad, type NodeMessage, type ProviderId, type ServerMessage } from '@hornhoof/protocol';
 import { SIGNIN_ERRORS } from '@hornhoof/protocol/signin';
 import { agentFs, ownFs, type AgentFs } from './agent-fs.js';
 import { bootFacts } from './boot.js';
@@ -29,6 +29,9 @@ import { agyProgram, claudeProgram, codexProgram, kimiProgram, type TermProgram 
 import { Tmux } from './terminal/tmux.js';
 
 export const VERSION: string = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
+
+/* The node build CI wrote into this node's image, when it is one: the last commit that changed the image's files. */
+export const buildOf = (env: NodeJS.ProcessEnv): string | undefined => NodeBuild.safeParse(env.HORNHOOF_NODE_BUILD).data;
 
 const LOGIN_CHECK_MS = 10_000;
 /* How often a Codex plan's holder looks whether Codex renewed its sign-in between turns. */
@@ -81,6 +84,8 @@ type RunOptions = {
   testUser?: JobUser | null;
   /* Runs a part of a test run; tests pass a fake. */
   runPart?: typeof runTests;
+  /* The node build it says in its hello; none from a node built by hand. */
+  build?: string;
 };
 
 /* A complete list of the plan's windows replaces what the node knew. A partial one, such as the single window a turn
@@ -96,7 +101,7 @@ function merged(known: Limits | null, news: Limits): Limits {
 }
 
 /* The node's life: stay connected, run jobs, report the sign-in state and the limits, clean up when removed. */
-export async function runNode({ dir, adapter, builtin, terminal, login: loginSetup, log = console.log, loginCheckMs = LOGIN_CHECK_MS, learnMs = LEARN_MS, limitsMs = LIMITS_MS, loadMs = LOAD_MS, leaseCheckMs = LEASE_CHECK_MS, install, testUser = null, runPart = runTests }: RunOptions): Promise<{ stop(): void }> {
+export async function runNode({ dir, adapter, builtin, terminal, login: loginSetup, log = console.log, loginCheckMs = LOGIN_CHECK_MS, learnMs = LEARN_MS, limitsMs = LIMITS_MS, loadMs = LOAD_MS, leaseCheckMs = LEASE_CHECK_MS, install, testUser = null, runPart = runTests, build }: RunOptions): Promise<{ stop(): void }> {
   if (!builtin && isRemoved(dir)) {
     log('This node was removed in Hornhoof.');
     return { stop() {} };
@@ -230,7 +235,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       /* Finished jobs Hornhoof has not confirmed still count as running, so the server does not give up on them. */
       const typed = host?.typedJobs() ?? [];
       const tests = [...testing.keys(), ...unconfirmedTests.keys()];
-      next({ type: 'hello', version: VERSION, loggedIn, running: [...running.keys(), ...typed, ...unconfirmed.keys()], ...(models ? { models } : {}), terminals: Boolean(host), work: Boolean(testUser), ...(testUser ? {} : { noRuns: NO_RUNS }), load: load(), tests, skillFiles: true, publicKey: keyPair.recipient, account, boot });
+      next({ type: 'hello', version: VERSION, loggedIn, running: [...running.keys(), ...typed, ...unconfirmed.keys()], ...(models ? { models } : {}), terminals: Boolean(host), work: Boolean(testUser), ...(testUser ? {} : { noRuns: NO_RUNS }), load: load(), tests, skillFiles: true, publicKey: keyPair.recipient, account, boot, build });
       for (const m of outbox.splice(0)) emit(m);
       for (const m of unconfirmed.values()) next(m);
       for (const m of unconfirmedTests.values()) next(m);
@@ -643,6 +648,7 @@ function terminalFor(dir: string, provider: ProviderId, user: JobUser | null, fs
 async function run(dir: string, builtinMode: boolean, io: Io): Promise<number | { stop(): void }> {
   const log = (line: string) => void io.stdout.write(line + '\n');
   const tools = join(dir, 'tools');
+  const build = buildOf(process.env);
   if (!builtinMode) {
     const state = readState(dir);
     if (!state && !isRemoved(dir)) {
@@ -653,11 +659,11 @@ async function run(dir: string, builtinMode: boolean, io: Io): Promise<number | 
     if (user) secureNode(dir, user);
     /* Test runs get a user of their own, apart from the agents' sign-in and folders. */
     const testUser = user ? userFor(dir, 'tests', true) : null;
-    if (state && !state.provider) return runNode({ dir, adapter: machineOnly, log, testUser });
+    if (state && !state.provider) return runNode({ dir, adapter: machineOnly, log, testUser, build });
     const provider = state?.provider ?? 'claude';
     const fs = user ? agentFs(user) : ownFs;
     const adapter = personal(dir, provider, user, fs);
-    return runNode({ dir, adapter: withInstall(adapter, tools, provider), install: () => ensureInstalled(tools, provider, adapter), log, testUser, ...terminalFor(dir, provider, user, fs) });
+    return runNode({ dir, adapter: withInstall(adapter, tools, provider), install: () => ensureInstalled(tools, provider, adapter), log, testUser, build, ...terminalFor(dir, provider, user, fs) });
   }
 
   const server = process.env.HORNHOOF_SERVER;
@@ -673,7 +679,7 @@ async function run(dir: string, builtinMode: boolean, io: Io): Promise<number | 
   for (const provider of ['anthropic_api', 'openai_api'] as const) {
     ensureInstalled(tools, provider, adapterFor(provider, { home: dir, tools })).catch(err => log(`Could not install ${programFor(provider).name}: ${message(err)}`));
   }
-  return runNode({ dir, adapter: pick, builtin: { server, key }, log, testUser: userFor(dir, 'tests') });
+  return runNode({ dir, adapter: pick, builtin: { server, key }, log, testUser: userFor(dir, 'tests'), build });
 }
 
 /* One command line. A running node answers its handle and keeps the process up; the others answer an exit code. */
