@@ -5,7 +5,7 @@ import type { Ctx } from '../../app.js';
 import { agents, jobs, machines, nodes, planCredentials, subscriptions, tasks, type Interruption } from '../../db/schema.js';
 import { said } from '../conversation/live.js';
 import { unheard } from '../conversation/unheard.js';
-import { nodeOfAgent, pumpWaiting, refusedLimits, startProgram } from '../conversation/queue.js';
+import { holdForWords, nodeOfAgent, onAgent, pumpWaiting, refusedLimits, startProgram } from '../conversation/queue.js';
 import { workStarts } from '../org/map-state.js';
 import { startWork } from '../tasks/engine.js';
 import { programRestarted } from '../tasks/program-restarts.js';
@@ -30,6 +30,31 @@ function jobsOf(id: NodeIdentity, ctx: Ctx): SQL {
 /* Jobs a node has or had: running ones, and test jobs, which go out the moment they are made.
    A queued conversation turn still waits in Hornhoof and goes out later. */
 const ON_NODE = or(eq(jobs.status, 'running'), and(eq(jobs.status, 'queued'), eq(jobs.kind, 'test')));
+
+async function jobEnded(ctx: Ctx, id: NodeIdentity, msg: Extract<NodeMessage, { type: 'job.done' }>, now: Date) {
+  const [job] = await ctx.db.select({ agentId: jobs.agentId }).from(jobs).where(and(eq(jobs.id, msg.jobId), jobsOf(id, ctx)));
+  const finish = async () => {
+    const finished = await ctx.db
+      .update(jobs)
+      .set({
+        status: msg.ok ? 'done' : 'failed',
+        result: msg.result,
+        tail: lastBytes(msg.tail),
+        error: msg.failure?.kind === 'auth' ? 'not_logged_in' : msg.error,
+        failure: msg.failure ?? null,
+        ...exitOf(msg.exit),
+        sessionId: msg.sessionId,
+        finishedAt: now,
+      })
+      .where(and(eq(jobs.id, msg.jobId), inArray(jobs.status, OPEN_JOBS), jobsOf(id, ctx)))
+      .returning({ companyId: jobs.companyId, agentId: jobs.agentId, kind: jobs.kind });
+    if (msg.wordsWaiting) for (const job of finished) {
+      if (job.agentId && job.kind === 'conversation') holdForWords(ctx, job.agentId, msg.jobId, now);
+    }
+    return finished;
+  };
+  return job?.agentId ? onAgent(ctx, job.agentId, finish) : finish();
+}
 
 /* Why a node restart cut a turn off, with the number of the task it was on; nothing for a turn that failed otherwise. */
 const cutOf = (cut?: Omit<Interruption, 'task'>) =>
@@ -198,20 +223,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       await recordJobProgram(ctx, msg, now, jobsOf(id, ctx));
       return;
     case 'job.done': {
-      const finished = await db
-        .update(jobs)
-        .set({
-          status: msg.ok ? 'done' : 'failed',
-          result: msg.result,
-          tail: lastBytes(msg.tail),
-          error: msg.failure?.kind === 'auth' ? 'not_logged_in' : msg.error,
-          failure: msg.failure ?? null,
-          ...exitOf(msg.exit),
-          sessionId: msg.sessionId,
-          finishedAt: now,
-        })
-        .where(and(eq(jobs.id, msg.jobId), inArray(jobs.status, OPEN_JOBS), jobsOf(id, ctx)))
-        .returning({ companyId: jobs.companyId });
+      const finished = await jobEnded(ctx, id, msg, now);
       for (const { companyId } of finished) await publishWorking(ctx, companyId);
       /* The login ran out on this machine: it waits for one before the next turn could go out and fail too. */
       if (finished.length && (msg.error === 'not_logged_in' || msg.failure?.kind === 'auth') && id.kind === 'node') {

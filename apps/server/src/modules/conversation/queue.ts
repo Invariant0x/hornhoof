@@ -1,4 +1,4 @@
-import { effortFor, effortsOf, MAX_INSTRUCTIONS, modelsFor, OLD_NODE_INSTRUCTIONS, ORCHESTRATOR_EFFORT, type Limits } from '@hornhoof/protocol';
+import { effortFor, effortsOf, MAX_INSTRUCTIONS, modelsFor, OLD_NODE_INSTRUCTIONS, ORCHESTRATOR_EFFORT, UNHEARD_MS, type Limits } from '@hornhoof/protocol';
 import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, lte, ne, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -108,6 +108,45 @@ function pumpAt(ctx: Ctx, agentId: string, at: string, grace = LIMIT_GRACE_MS): 
   }, Math.min(wait, LONGEST_TIMER_MS));
   timer.unref();
   timers.set(agentId, { at, timer });
+}
+
+/* The program gets a short chance to start its waiting words. Only queued sends wait, and a restart holds nothing. */
+/* A null deadline means the words opened before their job.done arrived. */
+const waitingWords = new WeakMap<Ctx, Map<string, Map<string, number | null>>>();
+
+function wordsForAgent(ctx: Ctx, agentId: string): Map<string, number | null> {
+  const agents = waitingWords.get(ctx) ?? new Map<string, Map<string, number | null>>();
+  waitingWords.set(ctx, agents);
+  const jobs = agents.get(agentId) ?? new Map<string, number | null>();
+  agents.set(agentId, jobs);
+  return jobs;
+}
+
+/* Called under the agent's line together with the job's end, before another pump can send. */
+export function holdForWords(ctx: Ctx, agentId: string, jobId: string, endedAt: Date): void {
+  const jobs = wordsForAgent(ctx, agentId);
+  if (jobs.has(jobId) && jobs.get(jobId) === null) return settleWords(ctx, agentId, jobId);
+  jobs.set(jobId, +endedAt + UNHEARD_MS);
+}
+
+export function settleWords(ctx: Ctx, agentId: string, jobId: string, beforeEnd = false): void {
+  if (beforeEnd) { wordsForAgent(ctx, agentId).set(jobId, null); return; }
+  const agents = waitingWords.get(ctx);
+  const jobs = agents?.get(agentId);
+  jobs?.delete(jobId);
+  if (!jobs?.size) agents?.delete(agentId);
+}
+
+function waitsForWords(ctx: Ctx, agentId: string): boolean {
+  const jobs = waitingWords.get(ctx)?.get(agentId);
+  let at = Infinity;
+  for (const [jobId, until] of jobs ?? []) {
+    if (until === null || until <= Date.now()) settleWords(ctx, agentId, jobId);
+    else at = Math.min(at, until);
+  }
+  if (at === Infinity) return false;
+  pumpAt(ctx, agentId, new Date(at).toISOString(), 0);
+  return true;
 }
 
 /* What a turn ends with when a person or Hornhoof stopped it on purpose; none of these is a failure. */
@@ -314,6 +353,7 @@ export async function openTypedTurn(ctx: Ctx, node: NodeIdentity, agentId: strin
     if (queued && repeated) {
       await appendEvent(ctx, { companyId: agent.companyId, agentId, jobId: job!.id, kind: 'typed', personId: repeated.repeated.personId, data: { ...queued.source.data as object, queuedEvent: queued.seq } });
       await logTurnFact(ctx, queued.job, UNHEARD_NOTE);
+      settleWords(ctx, agentId, queued.job.id, queued.job.status === 'running');
     }
     else if (text.trim()) await appendEvent(ctx, { companyId: agent.companyId, agentId, jobId: job!.id, kind: 'message', data: { text }, personId });
     await publishWorking(ctx, agent.companyId);
@@ -575,7 +615,7 @@ async function waitsForRetry(ctx: Ctx, agentId: string): Promise<boolean> {
 async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   const { db } = ctx;
   const [running] = await db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
-  if (running) return;
+  if (running || waitsForWords(ctx, agentId)) return;
   const sub = await liveSubscription(ctx, agentId);
   if (!sub || sub.status !== 'ready') return;
   const [agent] = await db.select().from(agents).where(eq(agents.id, agentId));

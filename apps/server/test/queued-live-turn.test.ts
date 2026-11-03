@@ -1,22 +1,121 @@
 import { and, eq, sql } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { UNHEARD_MS } from '@hornhoof/protocol';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { agentEvents, agents, jobs, people } from '../src/db/schema.js';
-import { decisionPrincipal } from '../src/modules/conversation/decision-context.js';
+import { decisionPrincipal, enterPressed } from '../src/modules/conversation/decision-context.js';
+import { enqueueTurn, pump } from '../src/modules/conversation/queue.js';
 import { appendEvent, messageForJob } from '../src/modules/events/store.js';
 import { addressed } from '../src/modules/conversation/prompt.js';
 import { BUILTIN, nodeIdentity } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { failureCompany } from './failure-company.js';
 
-async function queuedWords() {
-  const c = await failureCompany();
+async function queuedWords(asOrchestrator = false) {
+  let c = await failureCompany();
+  if (asOrchestrator) {
+    const [agent] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    c = { ...c, agent: agent! };
+  }
   const [before] = await c.db.insert(jobs).values({ companyId: c.companyId, agentId: c.agent.id, subscriptionId: c.sub.id, kind: 'conversation', prompt: 'work', status: 'done', timeoutMs: 1000, finishedAt: new Date() }).returning();
   const event = await appendEvent(c.ctx, { companyId: c.companyId, agentId: c.agent.id, jobId: before!.id, kind: 'message', data: { text: 'Keep these words.' } });
   const open = (text = addressed('Keep these words.', event.message!), node = BUILTIN) => handleNodeMessage(c.ctx, node, { type: 'turn.open', agentKey: c.agent.id, text, queuedFrom: before!.id, ref: 'queued' });
   return { ...c, before: before!, open };
 }
 
+async function waitingWords(asOrchestrator = false) {
+  const c = await queuedWords(asOrchestrator);
+  await c.db.update(jobs).set({ status: 'running', finishedAt: null }).where(eq(jobs.id, c.before.id));
+  const next = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.agent.id, prompt: 'Turn B.', createdBy: null });
+  const done = (jobId = c.before.id, wordsWaiting: boolean | undefined = true) => handleNodeMessage(c.ctx, BUILTIN, {
+    type: 'job.done', jobId, ok: true, sessionId: 'session', result: 'Done.', tail: '', error: null,
+    ...(wordsWaiting === undefined ? {} : { wordsWaiting }),
+  });
+  return { ...c, next, done };
+}
+
 describe('a program starts a turn with its queued live words', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('holds B after the old job ends, opens queued words, then sends B after their answer', async () => {
+    const c = await waitingWords();
+    await c.done();
+    expect(await c.jobOf(c.before.id)).toMatchObject({ status: 'done' });
+    expect(await c.jobOf(c.next)).toMatchObject({ status: 'queued' });
+    await pump(c.ctx, c.agent.id);
+    expect(await c.jobOf(c.next)).toMatchObject({ status: 'queued' });
+    await c.open();
+    const opened = c.sent.mock.calls.map(([, m]) => m).find(m => m.type === 'turn.opened');
+    if (opened?.type !== 'turn.opened' || !opened.jobId) throw new Error('No queued turn opened.');
+    expect(await c.jobOf(opened.jobId)).toMatchObject({ status: 'running' });
+    await c.done(opened.jobId, false);
+    expect(await c.jobOf(c.next)).toMatchObject({ status: 'running' });
+    expect(c.sent.mock.calls.filter(([, m]) => m.type === 'job.run' && m.jobId === c.next)).toHaveLength(1);
+  });
+
+  it('sends B once at the deadline without a turn.open or an unheard report', async () => {
+    const c = await waitingWords();
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    await c.done();
+    await vi.advanceTimersByTimeAsync(UNHEARD_MS - 1);
+    expect(await c.jobOf(c.next)).toMatchObject({ status: 'queued' });
+    await vi.advanceTimersByTimeAsync(1);
+    await vi.waitFor(async () => expect(await c.jobOf(c.next)).toMatchObject({ status: 'running' }));
+    await vi.advanceTimersByTimeAsync(UNHEARD_MS);
+    expect(c.sent.mock.calls.filter(([, m]) => m.type === 'job.run' && m.jobId === c.next)).toHaveLength(1);
+  });
+
+  it('releases B on an unheard report and keeps the repeated words after B', async () => {
+    const c = await waitingWords();
+    await c.done();
+    expect(await c.jobOf(c.next)).toMatchObject({ status: 'queued' });
+    await handleNodeMessage(c.ctx, BUILTIN, { type: 'agent.unheard', agentKey: c.agent.id, jobId: c.before.id, text: 'Keep these words.' });
+    const repeated = (await c.turnsOf()).find(j => j.id !== c.before.id && j.id !== c.next)!;
+    expect(await c.jobOf(c.next)).toMatchObject({ status: 'running' });
+    expect(repeated).toMatchObject({ status: 'queued', prompt: 'Keep these words.' });
+    await c.done(c.next, false);
+    expect(await c.jobOf(repeated.id)).toMatchObject({ status: 'running' });
+  });
+
+  it('keeps the line released when queued words open before the old end arrives', async () => {
+    const c = await waitingWords();
+    await c.open();
+    const opened = c.sent.mock.calls.map(([, m]) => m).find(m => m.type === 'turn.opened');
+    if (opened?.type !== 'turn.opened' || !opened.jobId) throw new Error('No queued turn opened.');
+    await c.done();
+    await c.done(opened.jobId, false);
+    expect(await c.jobOf(c.next)).toMatchObject({ status: 'running' });
+  });
+
+  it('does not extend the wait when a node repeats job.done', async () => {
+    const c = await waitingWords();
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    await c.done();
+    await vi.advanceTimersByTimeAsync(UNHEARD_MS - 1);
+    await c.done();
+    await vi.advanceTimersByTimeAsync(1);
+    await vi.waitFor(async () => expect(await c.jobOf(c.next)).toMatchObject({ status: 'running' }));
+  });
+
+  it('opens a human turn during the wait and keeps its author and answer', async () => {
+    const c = await waitingWords(true);
+    await c.done();
+    await enterPressed(c.ctx, c.agent.id, c.sub.ownerPersonId, BUILTIN);
+    await handleNodeMessage(c.ctx, BUILTIN, { type: 'turn.open', agentKey: c.agent.id, text: 'A separate question.', ref: 'human' });
+    const opened = c.sent.mock.calls.map(([, m]) => m).find(m => m.type === 'turn.opened');
+    if (opened?.type !== 'turn.opened' || !opened.jobId) throw new Error('No human turn opened.');
+    expect(await c.jobOf(opened.jobId)).toMatchObject({ status: 'running', createdBy: c.sub.ownerPersonId });
+    expect(await decisionPrincipal(c.db, opened.jobId)).toMatchObject({ personId: c.sub.ownerPersonId });
+    await c.done(opened.jobId, false);
+    expect(await c.jobOf(opened.jobId)).toMatchObject({ status: 'done', result: 'Done.' });
+    expect(await c.jobOf(c.next)).toMatchObject({ status: 'queued' });
+  });
+
+  it.each([undefined, false])('sends B immediately when the old end has wordsWaiting: %s', async flag => {
+    const c = await waitingWords();
+    await handleNodeMessage(c.ctx, BUILTIN, { type: 'job.done', jobId: c.before.id, ok: true, sessionId: null, result: '', tail: '', error: null, ...(flag === undefined ? {} : { wordsWaiting: flag }) });
+    expect(await c.jobOf(c.next)).toMatchObject({ status: 'running' });
+  });
+
   it.each(['pending', 'agent', 'person'] as const)('does not restore an older CEO principal after %s words', async after => {
     const c = await failureCompany();
     const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));

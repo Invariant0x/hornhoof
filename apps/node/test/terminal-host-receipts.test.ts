@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import type { NodeMessage } from '@hornhoof/protocol';
+import { UNHEARD_MS, type NodeMessage } from '@hornhoof/protocol';
 import { RESTART_AFTER_MS } from '@hornhoof/protocol/map';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TerminalHost } from '../src/terminal/host.js';
@@ -82,7 +82,6 @@ async function atWork(kind: Kind, mode: Mode) {
     initial = true;
     return host.run({ ...makeJob('receipt', 'HANG', { jobId: 'job-receipt', workDir, sessionId: SESSION }), home }).then(result => {
       sent.push(jobDone('job-receipt', result, []));
-      host.completed('job-receipt');
       return result;
     });
   };
@@ -103,7 +102,7 @@ async function atWork(kind: Kind, mode: Mode) {
     drain(); drain();
   };
   const unheard = () => sent.filter(m => m.type === 'agent.unheard');
-  return { host, running, run, sent, keys, alive, record, drain, finish, expire, unheard, input: () => input };
+  return { host, running, run, sent, keys, alive, home, workDir, record, drain, finish, expire, unheard, input: () => input };
 }
 
 async function atTypedWork(kind: 'claude' | 'codex', mode: Mode) {
@@ -167,6 +166,49 @@ describe('program receipts for live words', () => {
     expect(c.unheard()).toEqual([]);
   });
 
+  it('starts Claude receipts empty after clear and absorbs only the new session words', async () => {
+    const c = await atWork('claude', 'queued');
+    expect(await c.host.say('receipt', 'Words A.')).toBe(true);
+    await c.host['hook']('receipt', 'end', { reason: 'clear' });
+    const session = 'b3b66b04-872b-4fbe-a3a4-058a026ef20a';
+    const file = claudeTranscript(c.home, c.workDir, session);
+    const record = (line: object) => appendFileSync(file, JSON.stringify(line) + '\n');
+    record({ type: 'metadata' });
+    await c.host['hook']('receipt', 'start', { session_id: session, source: 'clear' });
+    await until(() => c.sent.some(m => m.type === 'job.done'));
+    const prompt = c.host['hook']('receipt', 'prompt', { prompt: 'New session question.' });
+    await until(() => c.sent.some(m => m.type === 'turn.open'));
+    c.host.opened({ type: 'turn.opened', agentKey: 'receipt', jobId: 'new-session', toolToken: 'token' });
+    await prompt;
+    c.keys.mockImplementation(async () => { record(claudeQueue('enqueue', 'Words B.')); });
+    expect(await c.host.say('receipt', 'Words B.')).toBe(true);
+    record({ type: 'queue-operation', operation: 'remove', reason: 'absorbed_mid_turn' });
+    c.drain();
+    await c.host['hook']('receipt', 'stop', { last_assistant_message: '' });
+    await until(() => c.sent.some(m => m.type === 'job.done' && m.jobId === 'new-session'));
+    c.expire();
+    expect(c.unheard()).toEqual([{ type: 'agent.unheard', agentKey: 'receipt', jobId: 'job-receipt', text: 'Words A.' }]);
+  });
+
+  it.each(['claude', 'codex'] as const)('reports %s unheard words on time with no watcher, log line or Enter', async kind => {
+    const c = await atWork(kind, kind === 'claude' ? 'queued' : 'silent');
+    expect(await c.host.say('receipt', TEXT)).toBe(true);
+    c.host['unwatch'](c.host['agents'].get('receipt')!);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    try {
+      c.finish();
+      await vi.advanceTimersByTimeAsync(100);
+      expect(c.sent.filter(m => m.type === 'job.done')).toEqual([expect.objectContaining({ wordsWaiting: true })]);
+      expect(c.unheard()).toEqual([]);
+      await vi.advanceTimersByTimeAsync(UNHEARD_MS - 101);
+      expect(c.unheard()).toEqual([]);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(c.unheard()).toEqual([{ type: 'agent.unheard', agentKey: 'receipt', jobId: 'job-receipt', text: TEXT }]);
+      await vi.advanceTimersByTimeAsync(UNHEARD_MS);
+      expect(c.unheard()).toHaveLength(1);
+    } finally { vi.useRealTimers(); }
+  });
+
   it('does not report live words unheard from the program display flag', async () => {
     const c = await atWork('claude', 'queued');
     c.host['programIs'](c.host['agents'].get('receipt')!, false);
@@ -207,7 +249,7 @@ describe('program receipts for live words', () => {
     const jobId = typed ? 'typed' : 'job-receipt';
     expect(await c.host.say('receipt', TEXT)).toBe(true);
     await c.host['hook']('receipt', 'stop', { last_assistant_message: '' });
-    await until(() => c.host['agents'].get('receipt')!.finishing.size > 0);
+    await until(() => c.sent.some(m => m.type === 'job.done' && m.jobId === jobId));
     c.record(claudeQueue('remove', TEXT, { reason: 'absorbed_mid_turn' }));
     c.drain(); c.expire();
     await until(() => c.sent.some(m => m.type === 'job.done' && m.jobId === jobId));
@@ -219,7 +261,7 @@ describe('program receipts for live words', () => {
     const c = await atWork('claude', 'queued');
     expect(await c.host.say('receipt', TEXT)).toBe(true);
     await c.host['hook']('receipt', 'stop', { last_assistant_message: '' });
-    await until(() => c.host['agents'].get('receipt')!.finishing.size > 0);
+    await until(() => c.sent.some(m => m.type === 'job.done' && m.jobId === 'job-receipt'));
     const prompt = c.host['hook']('receipt', 'prompt', { prompt: 'A separate question.' });
     await until(() => c.sent.some(m => m.type === 'turn.open'));
     c.host.opened({ type: 'turn.opened', agentKey: 'receipt', jobId: 'human', toolToken: 'token' });
@@ -298,7 +340,7 @@ describe('program receipts for live words', () => {
     const c = await atTypedWork('codex', 'silent');
     expect(await c.host.say('receipt', TEXT)).toBe(true);
     await c.end();
-    await until(() => c.host['agents'].get('receipt')!.finishing.size > 0);
+    await until(() => c.sent.some(m => m.type === 'job.done' && m.jobId === 'typed'));
     c.record({ type: 'event_msg', payload: { type: 'task_started', turn_id: 'next' } });
     c.record(userMessage(TEXT, 'next'));
     c.record({ type: 'event_msg', payload: { type: 'task_complete', turn_id: 'next', last_agent_message: 'Queued answer.' } });
@@ -315,13 +357,13 @@ describe('program receipts for live words', () => {
     expect(c.unheard()).toEqual([]);
   });
 
-  it.each(['claude', 'codex'] as const)('keeps one successful completion when typed %s exits during the hold', async kind => {
+  it.each(['claude', 'codex'] as const)('keeps one successful completion when typed %s exits after its end, including while its log settles', async kind => {
     const c = await atTypedWork(kind, kind === 'claude' ? 'queued' : 'silent');
     expect(await c.host.say('receipt', TEXT)).toBe(true);
     await c.end();
     await until(() => {
       const a = c.host['agents'].get('receipt')!;
-      return a.finishing.size > 0 && !a.settling;
+      return Boolean(a.turn?.ending) || c.sent.some(m => m.type === 'job.done' && m.jobId === 'typed');
     });
     c.alive.mockResolvedValue(false);
     await c.host['look'](c.host['agents'].get('receipt')!);
@@ -344,7 +386,7 @@ describe('program receipts for live words', () => {
     ]);
   });
 
-  it.each(['claude', 'codex'] as const)('keeps the successful completion when typed %s exits after the hold', async kind => {
+  it.each(['claude', 'codex'] as const)('keeps the successful completion when typed %s exits after its end', async kind => {
     const c = await atTypedWork(kind, kind === 'claude' ? 'queued' : 'silent');
     expect(await c.host.say('receipt', TEXT)).toBe(true);
     await c.end(); c.expire();
@@ -361,8 +403,8 @@ describe('program receipts for live words', () => {
     const c = await atWork(kind, kind === 'codex' ? 'silent' : 'queued');
     expect(await c.host.say('receipt', TEXT)).toBe(true);
     c.finish();
-    await new Promise(r => setTimeout(r, 50));
-    expect(c.sent.filter(m => m.type === 'job.done')).toEqual([]);
+    await until(() => c.sent.some(m => m.type === 'job.done'));
+    expect(c.sent.find(m => m.type === 'job.done')).toHaveProperty('wordsWaiting', true);
     expect(c.unheard()).toEqual([]);
     c.expire();
     await c.running;
@@ -371,12 +413,13 @@ describe('program receipts for live words', () => {
     expect(c.sent.filter(m => m.type === 'job.done' || m.type === 'agent.unheard').map(m => m.type)).toEqual(['job.done', 'agent.unheard']);
   });
 
-  it.each(['claude', 'codex'] as const)('opens %s queued words before completing the old job', async kind => {
+  it.each(['claude', 'codex'] as const)('completes the old %s job before opening queued words 300 ms later', async kind => {
     const c = await atWork(kind, kind === 'claude' ? 'queued' : 'silent');
     expect(await c.host.say('receipt', TEXT)).toBe(true);
     if (kind === 'claude') await c.host['hook']('receipt', 'stop', { last_assistant_message: '' });
     else c.finish();
     await new Promise(r => setTimeout(r, 300));
+    expect(c.sent.filter(m => m.type === 'job.done')).toEqual([expect.objectContaining({ wordsWaiting: true })]);
     if (kind === 'claude') {
       c.record(claudeQueue('dequeue', TEXT));
       c.record({ type: 'user', message: { content: TEXT } });
@@ -385,48 +428,48 @@ describe('program receipts for live words', () => {
       c.record(userMessage(TEXT, 'next'));
     }
     c.drain(); await c.running;
-    expect(c.sent.filter(m => m.type === 'turn.open' || m.type === 'job.done').map(m => m.type)).toEqual(['turn.open', 'job.done']);
+    expect(c.sent.filter(m => m.type === 'turn.open' || m.type === 'job.done').map(m => m.type)).toEqual(['job.done', 'turn.open']);
     expect(c.sent.find(m => m.type === 'turn.open')).toMatchObject({ text: TEXT, queuedFrom: 'job-receipt' });
     c.expire();
     expect(c.unheard()).toEqual([]);
   });
 
-  it('completes a Claude job at Stop when there are no queued words', async () => {
-    const c = await atWork('claude', 'queued');
+  it.each(['claude', 'codex'] as const)('completes a %s job without the flag when there are no queued words', async kind => {
+    const c = await atWork(kind, 'queued');
     await c.host['hook']('receipt', 'stop', { last_assistant_message: '' });
     await c.running;
     expect(c.sent.filter(m => m.type === 'job.done')).toHaveLength(1);
+    expect(c.sent.find(m => m.type === 'job.done')).not.toHaveProperty('wordsWaiting');
   });
 
   it.each([
     ['claude', false], ['claude', true], ['codex', false], ['codex', true],
-  ] as const)('completes the old %s job before opening unrelated human words during the hold, typed: %s', async (kind, typed) => {
+  ] as const)('opens unrelated human words right after %s Stop without queuedFrom or a word wait, typed: %s', async (kind, typed) => {
     const mode = kind === 'claude' ? 'queued' : 'silent';
     const c = typed ? await atTypedWork(kind, mode) : await atWork(kind, mode);
     const jobId = typed ? 'typed' : 'job-receipt';
     expect(await c.host.say('receipt', TEXT)).toBe(true);
+    const at = c.sent.length;
     if (kind === 'claude') await c.host['hook']('receipt', 'stop', { last_assistant_message: '' });
     else {
       c.record({ type: 'event_msg', payload: { type: 'task_complete', turn_id: typed ? 'typed' : 'turn', last_agent_message: '' } });
       c.drain();
     }
-    await until(() => c.host['agents'].get('receipt')!.finishing.size > 0);
-    const at = c.sent.length;
     const prompt = kind === 'claude' ? c.host['hook']('receipt', 'prompt', { prompt: 'A separate question.' }) : Promise.resolve();
     if (kind === 'codex') {
       c.record({ type: 'event_msg', payload: { type: 'task_started', turn_id: 'human' } });
       c.record(userMessage('A separate question.', 'human')); c.drain();
     }
     await until(() => c.sent.slice(at).some(m => m.type === 'turn.open'));
-    const order = c.sent.slice(at).filter(m => m.type === 'job.done' || m.type === 'turn.open').map(m => m.type);
     c.host.opened({ type: 'turn.opened', agentKey: 'receipt', jobId: 'human', toolToken: 'token' });
     await prompt;
     await c.host['hook']('receipt', 'stop', { last_assistant_message: 'Human answer.' });
     await until(() => c.sent.some(m => m.type === 'job.done' && m.jobId === 'human'));
     c.expire();
     await c.running;
-    expect(order).toEqual(['job.done', 'turn.open']);
+    expect(c.sent.filter(m => m.type === 'job.done' && m.jobId === jobId)).toHaveLength(1);
     expect(c.sent.slice(at).find(m => m.type === 'turn.open')).toMatchObject({ text: 'A separate question.' });
+    expect(c.sent.slice(at).find(m => m.type === 'turn.open')).not.toHaveProperty('queuedFrom');
     expect(c.unheard()).toEqual([{ type: 'agent.unheard', agentKey: 'receipt', jobId, text: TEXT }]);
     expect(c.sent.filter(m => m.type === 'job.done' && m.jobId === 'human')).toEqual([
       expect.objectContaining({ ok: true, result: 'Human answer.' }),
@@ -449,11 +492,11 @@ describe('program receipts for live words', () => {
     c.expire();
   });
 
-  it('reports queued words on shutdown while the old job still waits to complete', async () => {
+  it('reports queued words on shutdown after the old job completed', async () => {
     const c = await atWork('claude', 'queued');
     expect(await c.host.say('receipt', TEXT)).toBe(true);
     c.finish();
-    await until(() => c.host['agents'].get('receipt')!.finishing.size > 0);
+    await until(() => c.sent.some(m => m.type === 'job.done' && m.jobId === 'job-receipt'));
     c.alive.mockResolvedValue(false);
     await c.host.stop();
     expect(c.unheard()).toEqual([{ type: 'agent.unheard', agentKey: 'receipt', jobId: 'job-receipt', text: TEXT }]);
