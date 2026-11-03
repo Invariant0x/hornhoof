@@ -614,11 +614,14 @@ describe('signing in to plans', () => {
     expect(screen.queryByTestId('live-terminal')).not.toBeInTheDocument();
   });
 
-  /* A server that names no machine or gives no command gets the plain words, and no command box. */
+  /* A server that names no machine or gives no command, or gives them in another shape, gets the plain words, and no
+     command box. */
   it.each([
     ['no details', undefined],
     ['no machines', { command: 'curl -fsSL https://hq.acme.com/install.sh | bash' }],
     ['no command', { machines: ['ivan-mbp'] }],
+    ['machines that are not a list', { machines: 'ivan-mbp', command: 'curl -fsSL https://hq.acme.com/install.sh | bash' }],
+    ['a command that is not text', { machines: ['ivan-mbp'], command: { text: 'curl -fsSL https://hq.acme.com/install.sh | bash' } }],
   ])('says under the plan, in plain words, why a sign-in cannot start, instead of at the top of the page, with %s', async (_, details) => {
     const ready = { ...codex, status: 'ready' as const, machines: [MACHINE] };
     const unsupported = { error: { code: 'conflict', message: 'The machine of this plan is online, but its node cannot run the sign-in.', reason: 'signin_unsupported', ...(details ? { details } : {}) } };

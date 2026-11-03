@@ -266,8 +266,8 @@ type SignNote = { subId: string; text: string; command?: string };
 /* The machines whose nodes are too old for the sign-in, and the command that updates them, as the server names them. */
 function oldNodes(err: unknown): { machines: string[]; command: string } | null {
   if (!(err instanceof ApiFailure) || err.reason !== 'signin_unsupported') return null;
-  const { machines, command } = (err.details ?? {}) as { machines?: string[]; command?: string };
-  return machines && command ? { machines, command } : null;
+  const { machines, command } = err.details ?? {};
+  return Array.isArray(machines) && typeof command === 'string' ? { machines, command } : null;
 }
 
 /* What a sign-in that cannot start says under its plan: why, and for nodes too old for it, the command to update them. */
