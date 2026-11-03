@@ -493,7 +493,7 @@ export type JobView = {
 /* A published build of Hornhoof, from the registry. */
 export type Build = { tag: string; version: string; commit: string; created: string; title: string; migrations: number };
 export type UpdateStep = 'backup' | 'pull' | 'install' | 'health' | 'rollback' | 'finished';
-export type UpdaterStatus = { id: string; version: string; state: 'running' | 'done' | 'failed' | 'rolled_back'; step: UpdateStep; log: string; at: string };
+export type UpdaterStatus = { id: string; version: string; commit?: string; state: 'running' | 'done' | 'failed' | 'rolled_back'; step: UpdateStep; log: string; at: string };
 export type UpdatesView = {
   current: { version: string; commit: string; migrations: number };
   available: boolean;
@@ -501,7 +501,7 @@ export type UpdatesView = {
   latest: Build | null;
   versions: Build[];
   error: string | null;
-  updater: { present: boolean; status: UpdaterStatus | null; waiting: { version: string } | null };
+  updater: { present: boolean; status: UpdaterStatus | null; waiting: { version: string; commit?: string } | null };
 };
 
 /* A note of the company notebook or a department's, and who wrote it last: a person, the orchestrator or the head. */

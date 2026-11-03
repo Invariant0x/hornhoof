@@ -28,7 +28,7 @@ describe('About from the account menu', () => {
     const user = page();
     await open(user);
     const box = await screen.findByRole('dialog', { name: 'About Hornhoof' });
-    expect(await within(box).findByText('0.5.0 · abc1234')).toBeInTheDocument();
+    expect(await within(box).findByText('0.5.0 (abc1234)')).toBeInTheDocument();
     expect(within(box).getByText('A company where people and agents work together.')).toBeInTheDocument();
     expect(within(box).getByText('Ivan Korol', { exact: true })).toBeInTheDocument();
     expect(within(box).getByText('Copyright (c) 2026 Ivan Korol')).toBeInTheDocument();
@@ -65,7 +65,7 @@ describe('About from the account menu', () => {
     const user = page('ru');
     await open(user, 'Аккаунт', 'О программе');
     const box = await screen.findByRole('dialog', { name: 'О программе Hornhoof' });
-    expect(await within(box).findByText('0.5.0 · abc1234')).toBeInTheDocument();
+    expect(await within(box).findByText('0.5.0 (abc1234)')).toBeInTheDocument();
     expect(within(box).getByText('Компания, где люди и агенты работают вместе.')).toBeInTheDocument();
     expect(within(box).getByRole('link', { name: 'Сообщить об ошибке или предложить идею' })).toBeInTheDocument();
     expect(box.textContent).not.toMatch(/[\u0451\u2014]/);
@@ -103,7 +103,7 @@ describe('About from the account menu', () => {
     expect(within(box).getByText('Loading…')).toBeInTheDocument();
     expect(within(box).getByRole('link', { name: 'MIT' })).toBeInTheDocument();
     await act(async () => answer([200, VERSION]));
-    expect(await within(box).findByText('0.5.0 · abc1234')).toBeInTheDocument();
+    expect(await within(box).findByText('0.5.0 (abc1234)')).toBeInTheDocument();
   });
 
   it('explains a version failure and retries when the window is opened again', async () => {
@@ -115,6 +115,6 @@ describe('About from the account menu', () => {
     await user.click(screen.getByRole('button', { name: 'Close' }));
     fails = false;
     await open(user);
-    expect(await within(screen.getByRole('dialog')).findByText('0.5.0 · abc1234')).toBeInTheDocument();
+    expect(await within(screen.getByRole('dialog')).findByText('0.5.0 (abc1234)')).toBeInTheDocument();
   });
 });

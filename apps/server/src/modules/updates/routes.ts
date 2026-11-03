@@ -36,7 +36,7 @@ export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
     const updater: UpdaterView = {
       present: ctx.updater.present(),
       status: ctx.updater.status(),
-      waiting: waiting && { version: waiting.request.version },
+      waiting: waiting && { version: waiting.request.version, commit: waiting.request.commit },
     };
     return { current: { version, commit, migrations }, available: Boolean(state.latest?.commit && state.latest.commit !== commit), ...state, updater };
   }
@@ -62,7 +62,7 @@ export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
       app.log.warn({ error: loggable(err) }, 'Could not read the node and updater images of the build.');
       throw new ApiError(503, 'unavailable', 'Could not read this version from the registry. Check the internet connection, then try again.', 'registry_unreachable');
     });
-    return { id, version: build.version || build.tag, tag, digest: build.digest, nodeDigest: siblings.node, updaterDigest: siblings.updater };
+    return { id, version: build.version || build.tag, commit: build.commit, tag, digest: build.digest, nodeDigest: siblings.node, updaterDigest: siblings.updater };
   }
 
   function send(request: UpdateRequest) {

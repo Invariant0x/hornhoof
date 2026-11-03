@@ -93,7 +93,7 @@ describe('Shell', () => {
     const user = userEvent.setup();
     render(<Shell me={ME} onSignOut={() => {}} />);
     await user.click(screen.getByRole('button', { name: 'Account' }));
-    expect(await screen.findByText('Version 0.4.0 · abc1234')).toBeInTheDocument();
+    expect(await screen.findByText('Version 0.4.0 (abc1234)')).toBeInTheDocument();
   });
 
   it('keeps the theme in the account menu, not in the top bar', async () => {
