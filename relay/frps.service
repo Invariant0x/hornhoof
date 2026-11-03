@@ -7,6 +7,10 @@ Wants=hornhoof-relay.service
 User=frps
 Group=frps
 ExecStart=/usr/local/bin/frps -c /etc/frp/frps.toml
+# systemd owns /run/frps; the relay reads the file to know when frps last started.
+RuntimeDirectory=frps
+RuntimeDirectoryMode=0755
+ExecStartPost=/bin/sh -c 'date +%%s > /run/frps/started'
 Restart=always
 RestartSec=2
 LimitNOFILE=1048576

@@ -3,6 +3,7 @@
 import contextlib
 import importlib.util
 import io
+import http.client
 import json
 import os
 import re
@@ -22,7 +23,8 @@ else:
 ROOT = Path(__file__).resolve().parents[2]
 SUCCESS = re.compile(r'\[acme\]\s+start proxy success\b')
 # A refusal is one of these documented reasons; anything else in an outcome is a failure.
-REFUSALS = frozenset({'router config conflict: acme is held', 'relay error: frps does not answer'})
+REFUSALS = frozenset({'router config conflict: acme is held', 'relay error: frps does not answer',
+                      'relay error: busy'})
 
 
 def first_outcome(log: str):
@@ -208,6 +210,31 @@ localPort = {self.stack.echo_port}{extra}
         for call in self.newproxy_calls():
             self.assertLess(call['ms'], 1000, call)
 
+    def test_busy_write_answers_503_instead_of_dropping_the_connection(self):
+        # A contended API write answers 503 busy with Retry-After; it never drops the
+        # connection mid-request (R2.3: a relay error is a structured answer, not a hangup).
+        db = sqlite3.connect(str(Path(self.tmp) / 'relay.db'), timeout=10, isolation_level=None)
+        self.addCleanup(db.close)
+        db.execute('BEGIN IMMEDIATE')
+        db.execute("INSERT INTO creations (ip, at) VALUES ('holding the write lock', 0)")
+        try:
+            for method, path, body in (('POST', '/api/v1/bindings', b'{}'),
+                                       ('DELETE', '/api/v1/bindings/acme', None)):
+                with self.subTest(method=method):
+                    connection = http.client.HTTPConnection('127.0.0.1', self.stack.relay_port,
+                                                            timeout=5)
+                    connection.request(method, path, body=body,
+                                       headers={'Content-Type': 'application/json',
+                                                'Authorization': f'Bearer {self.key}'})
+                    response = connection.getresponse()
+                    self.assertEqual(response.status, 503)
+                    self.assertEqual(response.getheader('Retry-After'), '1')
+                    answer = json.loads(response.read())
+                    self.assertEqual(answer['error'], 'busy')
+                    connection.close()
+        finally:
+            db.execute('ROLLBACK')
+
     def test_r2_1_route_body_has_no_key(self):
         client = self.stack.client('acme', self.key, settings='network', client='acme-aaaaaaaa-link')
         self.assertTrue(client.started('acme'), client.log())
@@ -363,6 +390,15 @@ class DashboardContractTests(unittest.TestCase):
         with self.assertRaises(self.relay.FrpsUnknown):
             self.relay.frps_route('acme')
 
+    def test_watcher_takes_a_slow_good_healthz_answer(self):
+        # The watcher's probe budget is 1 s for each probe: a good dashboard answer arriving
+        # at 0.7 s means frps is up, not down.
+        old_bind = self.relay.RELAY_FRPS_BIND
+        self.addCleanup(setattr, self.relay, 'RELAY_FRPS_BIND', old_bind)
+        self.relay.RELAY_FRPS_BIND = f'127.0.0.1:{self.server.server_port}'
+        self.server.records['/healthz'] = _record(200, delay=0.7)
+        self.assertTrue(self.relay.frps_answers())
+
     def test_straighten_empties_the_row_as_read(self):
         t = self.relay.now()
         self.relay.db().execute("INSERT INTO routes (name, generation, client, run_id, type, state, since) "
@@ -476,8 +512,41 @@ class DashboardContractTests(unittest.TestCase):
             conn.execute('ROLLBACK')
         self.assertFalse(worker.is_alive(), 'plugin call outlived its 1 s budget')
         self.assertLess(elapsed, 1.6, f'refusal took {elapsed:.2f} s')
-        self.assertEqual(result[-1], {'reject': True, 'reject_reason': 'relay error: frps does not answer'})
+        self.assertEqual(result[-1], {'reject': True, 'reject_reason': 'relay error: busy'})
         self.assertIsNone(self.relay.db().execute("SELECT generation FROM routes WHERE name = 'acme'").fetchone())
+
+    def test_write_refuses_before_executing_when_the_call_budget_is_spent(self):
+        # A spent budget must not run the SQL at all: write refuses before executing, or an
+        # expired upsert would move a generation after the call should have refused.
+        self.relay.call_state.end = time.monotonic() - 0.1
+        self.addCleanup(setattr, self.relay.call_state, 'end', None)
+        with self.assertRaises(self.relay.WriteBusy):
+            self.relay.write("INSERT INTO creations (ip, at) VALUES ('spent budget', 1)", ())
+        self.assertIsNone(self.relay.db().execute(
+            "SELECT 1 FROM creations WHERE ip = 'spent budget'").fetchone())
+
+    def test_login_refuses_busy_when_the_write_lock_is_held(self):
+        # touch() is a write too: a Login whose last_seen update cannot land inside the call's
+        # budget is refused with 'relay error: busy', not accepted late without the touch.
+        self._bind('acme', 'k')
+        conn = self.relay.db()
+        conn.execute('BEGIN')
+        conn.execute("INSERT INTO creations (ip, at) VALUES ('holding the write lock', 0)")
+        try:
+            result = []
+            worker = threading.Thread(target=lambda: result.append(
+                self.relay.plugin('Login', {'metas': {'name': 'acme', 'key': 'k'}, 'run_id': 'r1'})))
+            started = time.monotonic()
+            worker.start()
+            worker.join(timeout=8)
+            elapsed = time.monotonic() - started
+        finally:
+            conn.execute('ROLLBACK')
+        self.assertFalse(worker.is_alive(), 'plugin call outlived its 1 s budget')
+        self.assertLess(elapsed, 1.6, f'refusal took {elapsed:.2f} s')
+        self.assertEqual(result[-1], {'reject': True, 'reject_reason': 'relay error: busy'})
+        self.assertIsNone(self.relay.db().execute(
+            "SELECT last_seen FROM bindings WHERE name = 'acme'").fetchone()[0])
 
     def test_trace_lines_are_atomic_under_concurrency(self):
         old = os.environ.get('RELAY_TRACE')

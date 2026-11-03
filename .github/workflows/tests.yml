@@ -14,4 +14,4 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: sh relay/test/frp.sh
       - run: python3 -m unittest discover -s relay/test -v
-      - run: shellcheck relay/setup-relay.sh relay/hornhoof-relay relay/test/frp.sh
+      - run: shellcheck relay/setup-relay.sh relay/private-file.sh relay/hornhoof-relay relay/test/frp.sh

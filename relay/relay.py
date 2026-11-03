@@ -6,6 +6,7 @@ Public API (Caddy sends https://hornhoof.org/api/* here):
   POST   /api/v1/bindings          {name?} -> 201 {name, url, key, tunnel}
   DELETE /api/v1/bindings/{name}   Authorization: Bearer <key> -> 204
   GET    /api/v1/links/{name}/route Authorization: Bearer <key> -> 200 {state, client, since, generation, ...}
+  GET    /api/v1/health            -> 200 {ok, frps, relayStarted} while frps takes logins, else 503
 frps plugin (local only): POST /frp/handler?op=Login|NewProxy|Ping
 Admin (as the service user): relay.py admin list|show|ban|unban|release|banned-caddy ...
 
@@ -19,6 +20,7 @@ import json
 import os
 import re
 import secrets
+import socket
 import sqlite3
 import sys
 import threading
@@ -45,6 +47,10 @@ MAX_BODY = 4096
 RELAY_FRPS_API = os.environ.get('RELAY_FRPS_API', 'http://127.0.0.1:7500')
 FRPS_USER = os.environ.get('RELAY_FRPS_USER', 'admin')
 FRPS_PASSWORD = os.environ.get('RELAY_FRPS_PASSWORD', '')
+# The watcher probes these to know whether frps takes logins (R4.1); systemd's ExecStartPost
+# rewrites the started file every time frps starts.
+RELAY_FRPS_BIND = os.environ.get('RELAY_FRPS_BIND', '127.0.0.1:7000')
+RELAY_FRPS_STARTED = os.environ.get('RELAY_FRPS_STARTED', '/run/frps/started')
 # A registration frps has not shown yet reads as held for this long (R1.1, R2.1).
 PENDING_S = 10
 # R3.1 measured with frp 0.71.1: network 20.16/20.46 s, today 20.26 s (2026-11-03).
@@ -86,8 +92,7 @@ def db() -> sqlite3.Connection:
 
 
 def init_db() -> None:
-    db().executescript('''
-        CREATE TABLE IF NOT EXISTS bindings (
+    write('''CREATE TABLE IF NOT EXISTS bindings (
             name TEXT PRIMARY KEY,
             key_hash TEXT NOT NULL,
             created_at INTEGER NOT NULL,
@@ -95,10 +100,10 @@ def init_db() -> None:
             last_seen INTEGER,
             banned_at INTEGER,
             ban_reason TEXT
-        );
-        CREATE TABLE IF NOT EXISTS creations (ip TEXT NOT NULL, at INTEGER NOT NULL);
-        CREATE INDEX IF NOT EXISTS creations_at ON creations(at);
-        CREATE TABLE IF NOT EXISTS routes (
+        )''', ())
+    write('CREATE TABLE IF NOT EXISTS creations (ip TEXT NOT NULL, at INTEGER NOT NULL)', ())
+    write('CREATE INDEX IF NOT EXISTS creations_at ON creations(at)', ())
+    write('''CREATE TABLE IF NOT EXISTS routes (
             name TEXT PRIMARY KEY,
             generation INTEGER NOT NULL,
             client TEXT NOT NULL,
@@ -106,8 +111,7 @@ def init_db() -> None:
             type TEXT NOT NULL CHECK (type IN ('http', 'https')),
             state TEXT NOT NULL CHECK (state IN ('pending', 'held', 'empty')),
             since INTEGER NOT NULL
-        );
-    ''')
+        )''', ())
 
 
 _reserved = {'mtime': None, 'names': frozenset()}
@@ -142,18 +146,75 @@ def check_name(name: str):
     return 'reserved' if row[0] else 'taken'
 
 
-# relayStarted is the process start until the frps watcher lands (Task 4).
+# relayStarted is the latest of: this process's start, the watcher's first frps answer after
+# a failure or after start, and the integer in RELAY_FRPS_STARTED (R2.2, R4.1).
 STARTED = now()
+
+# frps watcher state: frps_ok_at is the epoch of the last good probe, frps_back_at the epoch
+# of the first good probe after a failure or after start (0 until then).
+_frps = {'ok_at': 0.0, 'back_at': 0}
+WATCH_INTERVAL_S = 0.5
+# Health answers 200 only while the watcher's last good probe is younger than this.
+HEALTH_MAX_AGE_S = 2.0
+
+
+def frps_answers() -> bool:
+    """True when frps's bind port accepts a connection and its dashboard answers /healthz."""
+    host, _, port_text = RELAY_FRPS_BIND.rpartition(':')
+    try:
+        connection = socket.create_connection((host, int(port_text)), timeout=1)
+        connection.close()
+    except OSError:
+        return False
+    try:
+        status, _ = _dash_get('/healthz', cap=1.0)
+    except FrpsUnknown:
+        return False
+    return status == 200
+
+
+def watch_frps() -> None:
+    """Probe frps forever; keep the last good answer and the recovery after a failure."""
+    was_ok = False
+    while True:
+        if frps_answers():
+            t = time.time()
+            if not was_ok:
+                _frps['back_at'] = t
+            _frps['ok_at'] = t
+            was_ok = True
+        else:
+            was_ok = False
+        time.sleep(WATCH_INTERVAL_S)
+
+
+def frps_ok() -> bool:
+    """R4.1: true while the watcher's last frps answer is under HEALTH_MAX_AGE_S old."""
+    return time.time() - _frps['ok_at'] < HEALTH_MAX_AGE_S
+
+
+def frps_started_file() -> int:
+    """The integer systemd's ExecStartPost wrote when frps last started, 0 when unreadable."""
+    try:
+        with open(RELAY_FRPS_STARTED) as f:
+            return int(f.read().strip())
+    except (OSError, ValueError):
+        return 0
+
+
+def relay_started() -> int:
+    """The latest of the relay's start, the frps recovery and frps's own start."""
+    return int(max(STARTED, _frps['back_at'], frps_started_file()))
 
 
 class FrpsUnknown(Exception):
     """frps's dashboard gave no trustworthy answer about a route: read unknown, never empty."""
 
 
-def _dash_get(path: str) -> tuple[int, bytes]:
-    """One dashboard read with a 0.5 s timeout; less when the plugin call's budget is nearly spent.
+def _dash_get(path: str, cap: float = 0.5) -> tuple[int, bytes]:
+    """One dashboard read with a cap-second timeout; less when the plugin call's budget is nearly spent.
 
-    Any error, timeout or a spent budget is FrpsUnknown.
+    The watcher's own probes pass cap=1. Any error, timeout or a spent budget is FrpsUnknown.
     """
     parsed = urlsplit(RELAY_FRPS_API)
     host = parsed.hostname or '127.0.0.1'
@@ -162,7 +223,7 @@ def _dash_get(path: str) -> tuple[int, bytes]:
     left = call_deadline()
     if left is not None and left <= 0:
         raise FrpsUnknown(f'{path}: plugin call budget spent')
-    connection = kind(host, port, timeout=0.5 if left is None else min(0.5, left))
+    connection = kind(host, port, timeout=cap if left is None else min(cap, left))
     try:
         token = base64.b64encode(f'{FRPS_USER}:{FRPS_PASSWORD}'.encode()).decode()
         connection.request('GET', path, headers={'Authorization': f'Basic {token}'})
@@ -226,13 +287,29 @@ def check_route_holder(name: str, row, status: str, client_id: str | None, proxy
     raise FrpsUnknown(f'frps route of {name} does not match the relay record')
 
 
-def execute_bounded(statement: str, params: tuple) -> sqlite3.Cursor:
-    """Run one write with SQLite's busy wait bounded by the plugin call's remaining budget."""
+class WriteBusy(Exception):
+    """A SQLite write could not take the lock within its budget: refuse the op, never guess."""
+
+
+def write(sql: str, args: tuple) -> None:
+    """The one SQLite write of the plugin and the API.
+
+    SQLite itself retries database is locked for the write's budget (0.8 s, or the plugin
+    call's time left, whichever is less); past the budget the write raises WriteBusy and a
+    plugin call refuses with 'relay error: busy' (Review Focus 3).
+    """
     conn = db()
     left = call_deadline()
-    conn.execute(f'PRAGMA busy_timeout = {10000 if left is None else int(left * 1000)}')
+    if left is not None and left <= 0:
+        raise WriteBusy('plugin call budget spent')
+    budget = 0.8 if left is None else min(0.8, left)
+    conn.execute(f'PRAGMA busy_timeout = {max(0, int(budget * 1000))}')
     try:
-        return conn.execute(statement, params)
+        conn.execute(sql, args)
+    except sqlite3.OperationalError as e:
+        if 'locked' in str(e):
+            raise WriteBusy(f'database is locked for {budget:.2f} s') from None
+        raise
     finally:
         conn.execute('PRAGMA busy_timeout = 10000')
 
@@ -247,14 +324,14 @@ def straighten_route(name: str, row, status: str, t: int) -> None:
     """
     state, generation = row[4], row[0]
     if status == 'online':
-        execute_bounded("UPDATE routes SET state = 'held' WHERE name = ? AND generation = ? "
-                        "AND state IN ('pending', 'empty')", (name, generation))
+        write("UPDATE routes SET state = 'held' WHERE name = ? AND generation = ? "
+              "AND state IN ('pending', 'empty')", (name, generation))
     elif state == 'held':
-        execute_bounded("UPDATE routes SET state = 'empty', since = ? WHERE name = ? AND generation = ? "
-                        "AND state = 'held'", (t, name, generation))
+        write("UPDATE routes SET state = 'empty', since = ? WHERE name = ? AND generation = ? "
+              "AND state = 'held'", (t, name, generation))
     elif state == 'pending' and t - row[5] > PENDING_S:
-        execute_bounded("UPDATE routes SET state = 'empty', since = ? WHERE name = ? AND generation = ? "
-                        "AND state = 'pending'", (t, name, generation))
+        write("UPDATE routes SET state = 'empty', since = ? WHERE name = ? AND generation = ? "
+              "AND state = 'pending'", (t, name, generation))
 
 
 def route_body(name: str, row) -> dict:
@@ -269,7 +346,7 @@ def route_body(name: str, row) -> dict:
         client = row[1] if state == 'held' else None
         generation = row[0]
     return {'state': state, 'client': client, 'since': since, 'generation': generation,
-            'relayStarted': STARTED, 'evictionBound': EVICTION_BOUND_S, 'sync': None}
+            'relayStarted': relay_started(), 'evictionBound': EVICTION_BOUND_S, 'sync': None}
 
 
 def locked_route_of(name: str) -> dict:
@@ -339,26 +416,27 @@ def register_locked(name: str, content: dict, user: dict) -> str | None:
         held = locked_route_of(name)['state'] == 'held'
     except FrpsUnknown:
         return 'relay error: frps does not answer'
+    except WriteBusy:
+        return 'relay error: busy'
     if held:
         return f'router config conflict: {name} is held'
     return upsert_route(name, content, user)
 
 
 def upsert_route(name: str, content: dict, user: dict) -> str | None:
-    """Write the pending row for a let-through registration; a refusal when the call's budget ran out."""
-    left = call_deadline()
-    if left is not None and left <= 0:
-        return 'relay error: frps does not answer'
+    """Write the pending row for a let-through registration; a refusal when the write cannot land."""
     row = db().execute('SELECT generation FROM routes WHERE name = ?', (name,)).fetchone()
     generation = (row[0] if row else 0) + 1
     metas = user.get('metas') or {}
     try:
-        execute_bounded(
+        write(
             'INSERT INTO routes (name, generation, client, run_id, type, state, since) VALUES (?, ?, ?, ?, ?, ?, ?) '
             'ON CONFLICT(name) DO UPDATE SET generation = excluded.generation, client = excluded.client, '
             'run_id = excluded.run_id, type = excluded.type, state = excluded.state, since = excluded.since',
             (name, generation, metas.get('client') or 'legacy', user.get('run_id') or '',
              content.get('proxy_type') or 'http', 'pending', now()))
+    except WriteBusy:
+        return 'relay error: busy'
     except sqlite3.Error:
         return 'relay error: frps does not answer'
     return None
@@ -508,9 +586,10 @@ _seen = {}
 
 def touch(name: str) -> None:
     t = now()
-    if t - _seen.get(name, 0) > 600:
-        _seen[name] = t
-        db().execute('UPDATE bindings SET last_seen = ? WHERE name = ?', (t, name))
+    if t - _seen.get(name, 0) <= 600:
+        return
+    write('UPDATE bindings SET last_seen = ? WHERE name = ?', (t, name))
+    _seen[name] = t
 
 
 def plugin(op: str, content: dict) -> dict:
@@ -518,6 +597,8 @@ def plugin(op: str, content: dict) -> dict:
     call_state.end = time.monotonic() + PLUGIN_CALL_S
     try:
         return plugin_decide(op, content)
+    except WriteBusy:
+        return {'reject': True, 'reject_reason': 'relay error: busy'}
     finally:
         call_state.end = None
 
@@ -544,6 +625,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt, *args):
         pass
+
+    def handle_one_request(self):
+        """A busy store answers 503 instead of dropping the connection mid-request."""
+        try:
+            super().handle_one_request()
+        except WriteBusy:
+            self.error(503, 'busy', 'The relay store is busy, try again.', {'Retry-After': '1'})
 
     def client_ip(self) -> str:
         fwd = self.headers.get('X-Forwarded-For')
@@ -592,7 +680,7 @@ class Handler(BaseHTTPRequestHandler):
         if parts[:3] == ['api', 'v1', 'links'] and len(parts) == 5 and parts[4] == 'route':
             return self.route_answer(parts[3].lower())
         if parts == ['api', 'v1', 'health']:
-            return self.send_json(200, {'ok': True})
+            return self.health_answer()
         self.error(404, 'not_found', 'Not found.')
 
     def name_answer(self, name: str):
@@ -615,8 +703,14 @@ class Handler(BaseHTTPRequestHandler):
             return self.wrong_key(self.client_ip())
         try:
             return self.send_json(200, route_of(name))
-        except FrpsUnknown:
+        except (FrpsUnknown, WriteBusy):
             return self.error(503, 'unknown', 'The relay cannot tell whether the route is live.')
+
+    def health_answer(self):
+        """GET /api/v1/health (R4.1): 200 only while frps takes logins, else 503; never a guess."""
+        if frps_ok():
+            return self.send_json(200, {'ok': True, 'frps': True, 'relayStarted': relay_started()})
+        return self.send_json(503, {'ok': False, 'frps': False})
 
     def handle_plugin(self):
         # frps only: Caddy never routes /frp/ here and always adds X-Forwarded-For.
@@ -670,7 +764,7 @@ class Handler(BaseHTTPRequestHandler):
         with create_lock:
             t = now()
             conn = db()
-            conn.execute('DELETE FROM creations WHERE at < ?', (t - 3600,))
+            write('DELETE FROM creations WHERE at < ?', (t - 3600,))
             mine = conn.execute('SELECT COUNT(*), MIN(at) FROM creations WHERE ip = ?', (ip,)).fetchone()
             total = conn.execute('SELECT COUNT(*) FROM creations').fetchone()[0]
             if mine[0] >= BIND_PER_IP_HOUR or total >= BIND_ALL_HOUR:
@@ -691,9 +785,9 @@ class Handler(BaseHTTPRequestHandler):
                 if reason:
                     return self.error(409, reason, f'{name}.{DOMAIN} is {reason}.')
             key = secrets.token_urlsafe(32)
-            conn.execute('INSERT INTO bindings (name, key_hash, created_at, created_ip) VALUES (?, ?, ?, ?)',
-                         (name, key_hash(key), t, ip))
-            conn.execute('INSERT INTO creations (ip, at) VALUES (?, ?)', (ip, t))
+            write('INSERT INTO bindings (name, key_hash, created_at, created_ip) VALUES (?, ?, ?, ?)',
+                  (name, key_hash(key), t, ip))
+            write('INSERT INTO creations (ip, at) VALUES (?, ?)', (ip, t))
         log_line(f'bound {name} for {ip}')
         self.send_json(201, {'name': name, 'url': f'https://{name}.{DOMAIN}', 'key': key,
                              'tunnel': tunnel_info(name, key)})
@@ -711,7 +805,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.wrong_key(self.client_ip())
         if row[1]:
             return self.error(403, 'blocked', f'{name}.{DOMAIN} is blocked and cannot be released.')
-        db().execute('DELETE FROM bindings WHERE name = ?', (name,))
+        write('DELETE FROM bindings WHERE name = ?', (name,))
         log_line(f'released {name} for {self.client_ip()}')
         self.send_json(204)
 
@@ -742,8 +836,8 @@ def admin(args) -> int:
             print(f'{name}: {reason}', file=sys.stderr)
             return 1
         key = secrets.token_urlsafe(32)
-        conn.execute('INSERT INTO bindings (name, key_hash, created_at, created_ip) VALUES (?, ?, ?, ?)',
-                     (name, key_hash(key), now(), 'operator'))
+        write('INSERT INTO bindings (name, key_hash, created_at, created_ip) VALUES (?, ?, ?, ?)',
+              (name, key_hash(key), now(), 'operator'))
         print(json.dumps({'name': name, 'key': key}))
         return 0
     if cmd in ('ban', 'unban', 'release') and len(args) >= 2:
@@ -751,15 +845,15 @@ def admin(args) -> int:
         if cmd == 'ban':
             reason = ' '.join(args[2:]) or 'blocked by the relay operator'
             if conn.execute('SELECT 1 FROM bindings WHERE name = ?', (name,)).fetchone():
-                conn.execute('UPDATE bindings SET banned_at = ?, ban_reason = ? WHERE name = ?', (now(), reason, name))
+                write('UPDATE bindings SET banned_at = ?, ban_reason = ? WHERE name = ?', (now(), reason, name))
             else:  # block a name nobody holds, so nobody can take it
-                conn.execute('INSERT INTO bindings (name, key_hash, created_at, created_ip, banned_at, ban_reason) '
-                             'VALUES (?, ?, ?, ?, ?, ?)', (name, '-', now(), 'operator', now(), reason))
+                write('INSERT INTO bindings (name, key_hash, created_at, created_ip, banned_at, ban_reason) '
+                      'VALUES (?, ?, ?, ?, ?, ?)', (name, '-', now(), 'operator', now(), reason))
         elif cmd == 'unban':
-            conn.execute('UPDATE bindings SET banned_at = NULL, ban_reason = NULL WHERE name = ?', (name,))
-            conn.execute("DELETE FROM bindings WHERE name = ? AND key_hash = '-'", (name,))
+            write('UPDATE bindings SET banned_at = NULL, ban_reason = NULL WHERE name = ?', (name,))
+            write("DELETE FROM bindings WHERE name = ? AND key_hash = '-'", (name,))
         else:
-            conn.execute('DELETE FROM bindings WHERE name = ?', (name,))
+            write('DELETE FROM bindings WHERE name = ?', (name,))
         print(f'{cmd} {name}: done')
         return 0
     print('usage: relay.py admin list | add <name> | ban <name> [reason] | unban <name> | release <name> | banned-caddy',
@@ -771,6 +865,7 @@ def main() -> int:
     if sys.argv[1:2] == ['admin']:
         return admin(sys.argv[2:])
     init_db()
+    threading.Thread(target=watch_frps, name='frps-watcher', daemon=True).start()
     server = ThreadingHTTPServer(LISTEN, Handler)
     server.daemon_threads = True
     print(f'hornhoof-relay listening on {LISTEN[0]}:{LISTEN[1]}', flush=True)

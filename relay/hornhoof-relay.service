@@ -5,6 +5,7 @@ After=network.target
 [Service]
 User=hornhoof-relay
 Group=hornhoof-relay
+EnvironmentFile=/etc/hornhoof-relay.env
 ExecStart=/usr/bin/python3 /usr/local/lib/hornhoof-relay/relay.py
 StateDirectory=hornhoof-relay
 StateDirectoryMode=0700
