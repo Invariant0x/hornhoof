@@ -187,16 +187,16 @@ type PlanControls = {
   signing: Signing | null;
   note: string | null;
   keying: boolean;
-  setBudget: (sub: SubView, budget: number | null) => void;
-  runTest: (sub: SubView) => void;
-  makeOrchestrator: (sub: SubView) => void;
-  signIn: (sub: SubView, fresh: boolean) => void;
+  setBudget: (sub: SubView, budget: number | null) => unknown;
+  runTest: (sub: SubView) => unknown;
+  makeOrchestrator: (sub: SubView) => unknown;
+  signIn: (sub: SubView, fresh: boolean) => unknown;
   setKeyFor: (id: string | null) => void;
-  newCommand: (sub: SubView) => void;
+  newCommand: (sub: SubView) => unknown;
   setConfirm: (id: string | null) => void;
-  remove: (sub: SubView) => void;
+  remove: (sub: SubView) => unknown;
   endSignIn: (signing: Signing, error: string | null) => void;
-  stopSignIn: (signing: Signing) => void;
+  stopSignIn: (signing: Signing) => unknown;
   done: () => void;
 };
 

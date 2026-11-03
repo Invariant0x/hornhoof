@@ -41,8 +41,10 @@ export function streamRoutes(app: FastifyInstance, ctx: Ctx): void {
         return false;
       }
     };
-    const ping = setInterval(async () => {
-      if (await look()) res.write(': ping\n\n');
+    const ping = setInterval(() => {
+      void look().then(ok => {
+        if (ok) res.write(': ping\n\n');
+      });
     }, ctx.config.streamPingMs);
     const stopLooking = ctx.bus.onAccessChange(me.companyId, () => void look());
     res.on('close', () => {

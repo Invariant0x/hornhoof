@@ -81,7 +81,7 @@ export function AcceptInvite({ token, onDone }: { token: string; onDone: () => v
         <p>{role}</p>
       </div>
       <p className="muted">{t.invite.hi(invite.name, invite.email)}</p>
-      <form onSubmit={submit} noValidate>
+      <form onSubmit={e => void submit(e)} noValidate>
         <Field label={t.invite.choosePassword} problem={problem} hint={t.common.atLeast10}>
           {p => <input {...p} type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="new-password" autoFocus />}
         </Field>

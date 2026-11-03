@@ -1,10 +1,11 @@
 import { Sealed, type ProviderId } from '@hornhoof/protocol';
-import { and, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
 import { encryptSecret } from '../../crypto/secrets.js';
+import type { Db } from '../../db/client.js';
 import { agents, departments, jobs, machines, nodes, people, planCredentials, subscriptions, teams, testParts } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { runningAgents } from '../agents/running.js';
@@ -63,6 +64,52 @@ const unknown = () => new ApiError(404, 'not_found', 'This subscription does not
 const notOwner = () => new ApiError(403, 'forbidden', 'Only the owner of this subscription can do this.', 'not_owner');
 const connectedAlready = () =>
   new ApiError(409, 'conflict', 'This plan runs on a machine already. To run it on another one too, use Add my plan on that machine under Machines.', 'already_connected');
+
+type ExistingPlan = {
+  id: string;
+  provider: Plan;
+  status: 'waiting_machine' | 'needs_login' | 'ready';
+  removedAt: Date | null;
+};
+
+const isProtectedPlan = (s: ExistingPlan, busy: ReadonlySet<string | null>) => s.removedAt === null && (s.status === 'ready' || busy.has(s.id));
+
+async function clearPlanNodes(tx: Db, resetIds: string[]): Promise<void> {
+  if (!resetIds.length) return;
+  await tx.update(subscriptions).set({ removedAt: null, status: 'waiting_machine', leaseNodeId: null }).where(inArray(subscriptions.id, resetIds));
+  await tx.delete(planCredentials).where(inArray(planCredentials.subscriptionId, resetIds));
+  await tx.delete(nodes).where(inArray(nodes.subscriptionId, resetIds));
+}
+
+async function prepareConnectPlans(tx: Db, me: Person, providers: Plan[]): Promise<string[]> {
+  const had = (await tx
+    .select({
+      id: subscriptions.id,
+      provider: subscriptions.provider,
+      status: subscriptions.status,
+      removedAt: subscriptions.removedAt,
+    })
+    .from(subscriptions)
+    .where(and(eq(subscriptions.ownerPersonId, me.id), eq(subscriptions.kind, 'personal'), inArray(subscriptions.provider, providers)))
+    .orderBy(asc(subscriptions.createdAt))) as ExistingPlan[];
+  const busy = new Set(
+    (await tx.select({ id: agents.subscriptionId }).from(agents).where(and(eq(agents.companyId, me.companyId), isNotNull(agents.subscriptionId)))).map(a => a.id),
+  );
+  if (had.some(s => isProtectedPlan(s, busy))) throw connectedAlready();
+  const kept = providers.flatMap(p => {
+    const row = had.find(s => s.provider === p);
+    return row ? [row] : [];
+  });
+  await clearPlanNodes(tx, kept.map(s => s.id));
+  const fresh = providers.filter(p => !kept.some(s => s.provider === p));
+  const rows = fresh.length
+    ? await tx
+        .insert(subscriptions)
+        .values(fresh.map(p => ({ companyId: me.companyId, provider: p, kind: 'personal' as const, label: PLANS[p], ownerPersonId: me.id, status: 'waiting_machine' as const })))
+        .returning({ id: subscriptions.id })
+    : [];
+  return [...kept.map(s => s.id), ...rows.map(r => r.id)];
+}
 
 export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db, config, hub } = ctx;
@@ -139,19 +186,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const { providers } = ConnectBody.parse(req.body);
     const { ids, code } = await db.transaction(async tx => {
-      const had = await tx
-        .select({ id: subscriptions.id, provider: subscriptions.provider, status: subscriptions.status })
-        .from(subscriptions)
-        .where(and(eq(subscriptions.ownerPersonId, me.id), eq(subscriptions.kind, 'personal'), inArray(subscriptions.provider, providers), isNull(subscriptions.removedAt)));
-      if (had.some(s => s.status !== 'waiting_machine')) throw connectedAlready();
-      const fresh = providers.filter(p => !had.some(s => s.provider === p));
-      const rows = fresh.length
-        ? await tx
-            .insert(subscriptions)
-            .values(fresh.map(p => ({ companyId: me.companyId, provider: p, kind: 'personal' as const, label: PLANS[p], ownerPersonId: me.id, status: 'waiting_machine' as const })))
-            .returning({ id: subscriptions.id })
-        : [];
-      const ids = [...had.map(s => s.id), ...rows.map(r => r.id)];
+      const ids = await prepareConnectPlans(tx, me, providers);
       return { ids, code: await createNodeCode(tx, { companyId: me.companyId, personId: me.id, subscriptionIds: ids }) };
     });
     const views = (await subViews(db, online, undefined, me)).filter(s => ids.includes(s.id));
@@ -226,9 +261,10 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
     await db.transaction(async tx => {
       await tx
         .update(subscriptions)
-        .set({ removedAt: new Date(), ...(sub.kind === 'api_key' ? { secretEnc: null } : {}) })
+        .set({ removedAt: new Date(), leaseNodeId: null, ...(sub.kind === 'api_key' ? { secretEnc: null } : {}) })
         .where(eq(subscriptions.id, sub.id));
       await tx.update(agents).set({ subscriptionId: null, nodeId: null }).where(eq(agents.subscriptionId, sub.id));
+      await tx.update(nodes).set({ status: 'needs_login' }).where(eq(nodes.subscriptionId, sub.id));
       /* Its sign-in, sealed to its nodes, goes with it. */
       await tx.delete(planCredentials).where(eq(planCredentials.subscriptionId, sub.id));
     });

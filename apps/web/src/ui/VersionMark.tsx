@@ -2,18 +2,27 @@ import { useEffect, useState } from 'react';
 import { api } from '../api';
 
 export type Version = { version: string; commit: string };
+type VersionState = { version: Version | null; failed: boolean };
 
-/* The running build, asked once; null until it answers or when it cannot. */
-export function useVersion(): Version | null {
-  const [version, setVersion] = useState<Version | null>(null);
+/* One source for loading the running build, including the smaller authenticated About response. */
+export function useVersionState(path: string): VersionState {
+  const [state, setState] = useState<VersionState>({ version: null, failed: false });
   useEffect(() => {
     let live = true;
-    api.get<Version>('/api/version').then(v => live && setVersion(v), () => {});
+    api.get<Version>(path).then(
+      version => live && setState({ version, failed: false }),
+      () => live && setState({ version: null, failed: true }),
+    );
     return () => {
       live = false;
     };
-  }, []);
-  return version;
+  }, [path]);
+  return state;
+}
+
+/* The running build, asked once; null until it answers or when it cannot. */
+export function useVersion(): Version | null {
+  return useVersionState('/api/version').version;
 }
 
 export const versionText = ({ version, commit }: Version) => `${version} · ${commit.slice(0, 7)}`;

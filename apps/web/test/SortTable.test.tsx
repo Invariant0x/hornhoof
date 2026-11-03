@@ -1,6 +1,6 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { expect, it, vi } from 'vitest';
+import { expect, it } from 'vitest';
 import { SortTable, type TableColumn } from '../src/ui/SortTable';
 
 type Row = { id: string; name: string; load: number | null };

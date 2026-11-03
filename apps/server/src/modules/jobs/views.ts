@@ -44,4 +44,5 @@ export async function jobView(db: Db, id: string): Promise<(JobView & { subscrip
   return row ? { ...row, machine: row.machine ?? null } : null;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- strip internal columns from the public job view
 export const publicJob = ({ subscriptionId: _s, ownerId: _o, createdBy: _c, companyId: _co, kind: _k, agentId: _a, ...view }: NonNullable<Awaited<ReturnType<typeof jobView>>>): JobView => view;

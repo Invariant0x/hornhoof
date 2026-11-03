@@ -19,8 +19,8 @@ const HELD_AFTER_MS = 10 * 60_000;
 
 type Waiting = { companyId: string; request: UpdateRequest; stop: () => void };
 
-/* Which build runs, which are published, whether a newer one is out, and asking the updater to move to one.
-   Only for people who see the whole company. */
+/* The running build summary is for every signed-in person. Published builds and update controls
+   are for people who see the whole company. */
 export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { version, commit, migrations } = ctx.config;
   let waiting: Waiting | null = null;
@@ -94,6 +94,11 @@ export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
   }
 
   app.addHook('onClose', async () => callOff(false));
+
+  app.get('/api/updates/current', async req => {
+    await requirePerson(req, ctx.db);
+    return { version, commit: commit.slice(0, 7) };
+  });
 
   app.get('/api/updates', async req => {
     await companyPerson(req);

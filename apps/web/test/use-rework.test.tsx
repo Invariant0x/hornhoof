@@ -13,9 +13,9 @@ it('shows rework at its event time and expires at exactly ten minutes on the ser
   vi.setSystemTime('2040-01-01T00:00:00Z');
   rerender();
   expect(result.current).toBe(true);
-  act(() => vi.advanceTimersByTime(599_999));
+  act(() => { vi.advanceTimersByTime(599_999); });
   expect(result.current).toBe(true);
-  act(() => vi.advanceTimersByTime(1));
+  act(() => { vi.advanceTimersByTime(1); });
   expect(result.current).toBe(false);
 });
 

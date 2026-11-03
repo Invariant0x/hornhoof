@@ -82,6 +82,7 @@ function endedBy(run: Pick<Run, 'timeoutMs' | 'kind' | 'repeatable'>, p: Part): 
 }
 
 function lostHow(run: Pick<Run, 'timeoutMs'>, p: Part): string {
+  // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- null and other error codes use the default message
   switch (p.error) {
     case 'timeout':
       return `it did not end within ${took(run.timeoutMs)}`;

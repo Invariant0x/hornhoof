@@ -15,7 +15,7 @@ export async function disconnectMachines(ctx: Ctx, machineIds: string[]): Promis
     await tx.update(machines).set({ revokedAt: new Date() }).where(inArray(machines.id, machineIds));
     const gone = await tx
       .update(nodes)
-      .set({ keyHash: null })
+      .set({ keyHash: null, status: 'needs_login' })
       .where(and(inArray(nodes.machineId, machineIds), liveNode))
       .returning({ id: nodes.id, subscriptionId: nodes.subscriptionId });
     await settlePlans(tx, gone.map(n => n.subscriptionId));

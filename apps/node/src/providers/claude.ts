@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { API_MODELS, CLAUDE_ALIASES, type AgentEvent, type Limits } from '@hornhoof/protocol';
 import type { JobUser } from '../isolation.js';

@@ -228,6 +228,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
       .orderBy(asc(testParts.startedAt), asc(testRuns.number), asc(testParts.part));
     const running = (holds: (a: (typeof placed)[number]) => boolean, runs: (p: (typeof parts)[number]) => boolean) => ({
       agents: placed.filter(holds).map(a => a.view),
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars -- strip placement keys used only for filtering
       parts: parts.filter(runs).map(({ machineId: _, builtin: __, ...p }) => p),
     });
     return {

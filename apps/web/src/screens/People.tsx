@@ -58,7 +58,7 @@ function InviteForm({ org, onSent, onClose }: { org: Org | null; onSent: (name: 
   return (
     <Edge className="panel" cut={12}>
       <h2>{t.people.invitePerson}</h2>
-      <form onSubmit={submit} className="panel-form">
+      <form onSubmit={e => void submit(e)} className="panel-form">
         <Field label={t.common.name}>{p => <input {...p} value={name} onChange={e => setName(e.target.value)} maxLength={80} autoFocus required />}</Field>
         <Field label={t.common.email}>{p => <input {...p} type="email" value={email} onChange={e => setEmail(e.target.value)} required />}</Field>
         <Field label={t.common.title}>{p => <input {...p} value={title} onChange={e => setTitle(e.target.value)} maxLength={80} placeholder={t.people.titlePlaceholder} />}</Field>
@@ -100,7 +100,7 @@ function EditForm({ person, org, titleOnly, onSaved, onClose }: { person: Person
   return (
     <Edge className="panel" cut={12}>
       <h2>{t.people.editHeading(person.name)}</h2>
-      <form onSubmit={submit} className="panel-form">
+      <form onSubmit={e => void submit(e)} className="panel-form">
         <Field label={t.common.title}>{p => <input {...p} value={title} onChange={e => setTitle(e.target.value)} maxLength={80} autoFocus />}</Field>
         {!titleOnly && <AccessPicker org={org} value={access} onChange={setAccess} />}
         {failure && <p className="alert" role="alert">{failure}</p>}
@@ -264,11 +264,11 @@ export function People({ me }: { me: Me }) {
                     )}
                     {manageable && (
                       <>
-                        <button className="act" type="button" aria-label={t.people.newLinkLabel(p.name)} onClick={() => newLink(p)}>{t.people.newLink}</button>
+                        <button className="act" type="button" aria-label={t.people.newLinkLabel(p.name)} onClick={() => void newLink(p)}>{t.people.newLink}</button>
                         {p.status === 'disabled' ? (
-                          <button className="act" type="button" aria-label={t.people.enableLabel(p.name)} onClick={() => setStatus(p, 'active')}>{t.people.enable}</button>
+                          <button className="act" type="button" aria-label={t.people.enableLabel(p.name)} onClick={() => void setStatus(p, 'active')}>{t.people.enable}</button>
                         ) : (
-                          <button className="act danger" type="button" aria-label={t.people.disableLabel(p.name)} onClick={() => setStatus(p, 'disabled')}>{t.people.disable}</button>
+                          <button className="act danger" type="button" aria-label={t.people.disableLabel(p.name)} onClick={() => void setStatus(p, 'disabled')}>{t.people.disable}</button>
                         )}
                       </>
                     )}

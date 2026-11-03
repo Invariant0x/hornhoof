@@ -4,6 +4,7 @@ import { agents, jobs, pendingWakes, requests, subscriptions, tasks, testRuns } 
 import { agentState, liveSubscription } from '../conversation/queue.js';
 import { identityOf } from '../nodes/hub.js';
 import { failOpenJobs } from '../nodes/messages.js';
+import { expireStaleNodes } from '../nodes/nodes.js';
 import { CLOSED, gateVerdicts, giver, lastMove, openAfter, reviewWake, stuckAtGate, type Task, type Wake } from './engine.js';
 import { checkSilentTurns, SILENT_TURN_MS } from './silent.js';
 import { wakeAll } from './wake.js';
@@ -98,6 +99,7 @@ export async function reconcile(ctx: Ctx, now = new Date()): Promise<void> {
   if (reconciling.has(ctx)) return;
   reconciling.add(ctx);
   try {
+    await expireStaleNodes(ctx.db, now);
     await failAwayTurns(ctx, now);
     await wakeMissing(ctx, now);
     await checkSilentTurns(ctx, now);

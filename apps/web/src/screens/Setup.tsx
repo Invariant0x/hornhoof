@@ -162,6 +162,7 @@ export function Setup({ onDone, linkDomain = 'hornhoof.org' }: { onDone: (done: 
                 onName={name => {
                   setLinkName(name);
                   setLinkOwn(true);
+                  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omit the cleared link problem
                   setProblems(({ link: _, ...rest }) => rest);
                 }}
                 domain={linkDomain}
@@ -205,7 +206,7 @@ export function Setup({ onDone, linkDomain = 'hornhoof.org' }: { onDone: (done: 
       )}
 
       {step === 2 && (
-        <form onSubmit={finish} noValidate>
+        <form onSubmit={e => void finish(e)} noValidate>
           <p className="muted">{t.setup.orchestratorIntro}</p>
           <fieldset className="choice">
             <legend className="sr">{t.setup.howOrchestratorRuns}</legend>
