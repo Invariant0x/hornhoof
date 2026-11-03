@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { ME, serveApi, TASKS } from './api';
+import { box, ME, serveApi, TASKS } from './api';
 
 test.use({ locale: 'en-US' });
 
@@ -198,12 +198,6 @@ async function serveSelectScreens(page: Page) {
       }),
     }),
   );
-}
-
-async function box(locator: Locator) {
-  const b = await locator.boundingBox();
-  if (!b) throw new Error('not on screen');
-  return b;
 }
 
 async function expectSelectInsideViewport(select: Locator, viewportWidth: number) {

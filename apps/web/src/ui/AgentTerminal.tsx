@@ -149,52 +149,52 @@ function copyText(text: string) {
 }
 
 type XtermCore = {
-  _selectionService?: { shouldForceSelection: (e: MouseEvent) => boolean; enable(): void };
-  coreMouseService?: {
-    _protocols?: Record<string, { events: number }>;
-    onProtocolChange?: (fn: (events: number) => void) => { dispose(): void };
+  _selectionService: { shouldForceSelection: (e: MouseEvent) => boolean; enable(): void };
+  coreMouseService: {
+    _protocols: Record<string, { events: number }>;
+    onProtocolChange: (fn: (events: number) => void) => { dispose(): void };
   };
 };
 
 /* Mouse drag selects text in the browser while the wheel (bit 16) still goes to tmux for history scrolling. */
 function keepSelecting(term: Terminal) {
-  const core = (term as unknown as { _core?: XtermCore })._core;
-  const selection = core?._selectionService;
-  const mouse = core?.coreMouseService;
-  if (mouse?._protocols) {
-    for (const p of Object.values(mouse._protocols)) p.events &= 16;
-  }
-  if (!selection) return;
+  const { _selectionService: selection, coreMouseService: mouse } = (term as unknown as { _core: XtermCore })._core;
+  for (const p of Object.values(mouse._protocols)) p.events &= 16;
   selection.shouldForceSelection = () => true;
   const enable = () => {
     selection.enable();
-    term.element?.classList.remove('enable-mouse-events');
+    term.element!.classList.remove('enable-mouse-events');
   };
   enable();
-  mouse?.onProtocolChange?.(enable);
+  mouse.onProtocolChange(enable);
 }
 
 function isKeyC(e: KeyboardEvent) {
-  return e.code === 'KeyC' || e.key === 'c' || e.key === 'C' || e.keyCode === 67;
+  return e.code === 'KeyC' || e.key.toLowerCase() === 'c';
+}
+
+function isCmdC(e: KeyboardEvent) {
+  return e.metaKey && !e.ctrlKey && !e.shiftKey;
+}
+
+function isCtrlC(e: KeyboardEvent, hasSelection: boolean) {
+  return e.ctrlKey && !e.metaKey && (e.shiftKey || hasSelection);
 }
 
 function isCopyChord(e: KeyboardEvent, hasSelection: boolean) {
-  if (!isKeyC(e) || e.altKey) return false;
-  if (e.metaKey && !e.ctrlKey && !e.shiftKey) return true;
-  if (e.ctrlKey && e.shiftKey && !e.metaKey) return true;
-  return e.ctrlKey && !e.shiftKey && !e.metaKey && hasSelection;
+  return isKeyC(e) && !e.altKey && (isCmdC(e) || isCtrlC(e, hasSelection));
 }
 
 function selectedText(term: Terminal | null) {
-  return term?.hasSelection?.() ? (term.getSelection?.() ?? '') : '';
+  return term?.hasSelection() ? term.getSelection() : '';
 }
 
 function bindCopy(term: Terminal) {
-  term.onSelectionChange?.(() => {
+  term.onSelectionChange(() => {
     const text = selectedText(term);
     if (text) copyText(text);
   });
-  term.attachCustomKeyEventHandler?.(e => {
+  term.attachCustomKeyEventHandler(e => {
     const text = selectedText(term);
     if (!isCopyChord(e, text.length > 0)) return true;
     e.preventDefault();
@@ -213,10 +213,76 @@ function menuPlace(e: ReactMouseEvent<HTMLDivElement>, text: string): MenuState 
   return { x, y, text };
 }
 
+function openMenu(e: ReactMouseEvent<HTMLDivElement>, term: Terminal | null, setMenu: (m: MenuState) => void) {
+  e.preventDefault();
+  e.stopPropagation();
+  setMenu(menuPlace(e, selectedText(term)));
+}
+
+function closeMenuOnKey(e: KeyboardEvent, term: Terminal | null, close: () => void) {
+  if (e.key !== 'Escape') return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  close();
+  term?.focus();
+}
+
+function closeMenuOnDown(e: MouseEvent, close: () => void) {
+  if ((e.target as Element | null)?.closest('.t-menu')) return;
+  close();
+}
+
+function useMenuDismiss(open: boolean, termRef: { current: Terminal | null }, close: () => void) {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => closeMenuOnKey(e, termRef.current, close);
+    const onDown = (e: MouseEvent) => closeMenuOnDown(e, close);
+    document.addEventListener('keydown', onKey, true);
+    document.addEventListener('mousedown', onDown, true);
+    return () => {
+      document.removeEventListener('keydown', onKey, true);
+      document.removeEventListener('mousedown', onDown, true);
+    };
+  }, [open, termRef, close]);
+}
+
+type CopyMenuProps = {
+  menu: MenuState | null;
+  termRef: { current: Terminal | null };
+  onClose(): void;
+  label: string;
+};
+
+function CopyMenu({ menu, termRef, onClose, label }: CopyMenuProps) {
+  useMenuDismiss(menu !== null, termRef, onClose);
+  if (!menu) return null;
+  return (
+    <div className="t-menu glass" role="menu" style={{ left: menu.x, top: menu.y }}>
+      <button
+        className="t-copy"
+        type="button"
+        disabled={!menu.text}
+        onMouseDown={e => e.preventDefault()}
+        onClick={() => {
+          copyText(selectedText(termRef.current) || menu.text);
+          onClose();
+          termRef.current?.focus();
+        }}
+      >
+        {label}
+      </button>
+    </div>
+  );
+}
+
+function shouldIgnoreInput(term: Terminal, data: string) {
+  return Boolean(term.options.disableStdin) || isMouseClickOrDrag(data);
+}
+
 /* What the person types goes to the session in pieces the server takes, and so does each new size of the terminal. */
 function forward(term: Terminal, send: Send) {
   term.onData(data => {
-    if (term.options.disableStdin || isMouseClickOrDrag(data)) return;
+    if (shouldIgnoreInput(term, data)) return;
     for (let i = 0; i < data.length; i += PIECE) send({ type: 'input', data: data.slice(i, i + PIECE) });
   });
   term.onResize(({ cols, rows }) => send({ type: 'resize', cols, rows }));
@@ -309,53 +375,10 @@ export function AgentTerminal({ path, program, onGone }: Props) {
     };
   }, [path]);
 
-  useEffect(() => {
-    if (!menu) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      setMenu(null);
-      termRef.current?.focus();
-    };
-    const onDown = (e: MouseEvent) => {
-      if ((e.target as Element | null)?.closest?.('.t-menu')) return;
-      setMenu(null);
-    };
-    document.addEventListener('keydown', onKey, true);
-    document.addEventListener('mousedown', onDown, true);
-    return () => {
-      document.removeEventListener('keydown', onKey, true);
-      document.removeEventListener('mousedown', onDown, true);
-    };
-  }, [menu]);
-
-  function openMenu(e: ReactMouseEvent<HTMLDivElement>) {
-    e.preventDefault();
-    e.stopPropagation();
-    setMenu(menuPlace(e, selectedText(termRef.current)));
-  }
-
   return (
-    <div className="t-term" onContextMenu={openMenu}>
+    <div className="t-term" onContextMenu={e => openMenu(e, termRef.current, setMenu)}>
       <div className="t-xterm" ref={box} />
-      {menu && (
-        <div className="t-menu glass" role="menu" style={{ left: menu.x, top: menu.y }}>
-          <button
-            className="t-copy"
-            type="button"
-            disabled={!menu.text}
-            onMouseDown={e => e.preventDefault()}
-            onClick={() => {
-              copyText(selectedText(termRef.current) || menu.text);
-              setMenu(null);
-              termRef.current?.focus();
-            }}
-          >
-            {t.common.copy}
-          </button>
-        </div>
-      )}
+      <CopyMenu menu={menu} termRef={termRef} onClose={() => setMenu(null)} label={t.common.copy} />
       {!up && (
         <div className="t-load" role="status">
           <span className="spinner" aria-hidden="true" />

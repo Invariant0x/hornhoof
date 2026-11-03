@@ -526,7 +526,7 @@ describe("an agent's live terminal in its window", () => {
     expect(ws.sent).toEqual([]);
 
     /* Cmd+C, Ctrl+Shift+C and Ctrl+C with a selection copy the selection and send nothing to the program. */
-    term.pressKey({ key: 'c', code: 'KeyC', metaKey: true });
+    term.pressKey({ key: 'c', metaKey: true });
     term.pressKey({ key: 'C', code: 'KeyC', ctrlKey: true, shiftKey: true });
     term.pressKey({ key: 'c', code: 'KeyC', ctrlKey: true });
     expect(copied).toEqual(['selected line', 'selected line', 'selected line', 'selected line']);
@@ -576,10 +576,17 @@ describe("an agent's live terminal in its window", () => {
 
     fireEvent.contextMenu(term.element);
     expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument();
+    await user.keyboard('a');
+    expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument();
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('button', { name: 'Copy' })).not.toBeInTheDocument();
     expect(ws.sent).toEqual([]);
     expect(calls.some(c => c.method === 'POST' && c.path === '/api/agents/orchestrator/stop')).toBe(false);
+
+    fireEvent.contextMenu(term.element);
+    expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument();
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByRole('button', { name: 'Copy' })).not.toBeInTheDocument();
 
     cleanup();
     terms.length = 0;
