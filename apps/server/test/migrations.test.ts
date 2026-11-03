@@ -662,14 +662,20 @@ describe('migration 0045', () => {
 describe('migration 0051', () => {
   const C = '00000000-0000-4000-8000-000000000001';
   const P = '00000000-0000-4000-8000-000000000002';
-  const M = '00000000-0000-4000-8000-000000000003';
+  const M = '991d4eb4-0000-4000-8000-000000000003';
+  const TASK = '00000000-0000-4000-8000-000000000004';
+  const AGENT = '00000000-0000-4000-8000-000000000005';
+  const JOB = '00000000-0000-4000-8000-000000000006';
+  const RUN = '00000000-0000-4000-8000-000000000007';
   const TAIL = '1f6db355-484e-4c57-b516-ca0c2fa8be3e';
   const LIVE = '606af686-0000-4000-8000-000000000001';
   const CLAUDE_WITH_AGENT = '00000000-0000-4000-8000-000000000011';
   const CLAUDE_READY = '00000000-0000-4000-8000-000000000012';
   const KIMI_WAITING = '00000000-0000-4000-8000-000000000013';
+  const GLM_WITH_NODE_RUN = '00000000-0000-4000-8000-000000000014';
+  const GLM_READY = '00000000-0000-4000-8000-000000000015';
 
-  it('passes on a fresh install and removes only unfinished waiting_machine tails replaced by a newer ready subscription', async () => {
+  it('passes on a fresh install and removes unfinished waiting_machine tails on a machine with test runs while keeping ready, agent-assigned and node-run subscriptions', async () => {
     const freshClient = new PGlite();
     onTestFinished(() => freshClient.close());
     const freshDb = drizzle(freshClient);
@@ -689,17 +695,28 @@ describe('migration 0051', () => {
       (${LIVE}, ${C}, 'codex', 'personal', 'Codex', 'ready', ${P}, null, '2026-11-02T14:58:12Z'),
       (${CLAUDE_WITH_AGENT}, ${C}, 'claude', 'personal', 'Claude', 'waiting_machine', ${P}, null, '2026-11-02T13:00:00Z'),
       (${CLAUDE_READY}, ${C}, 'claude', 'personal', 'Claude', 'ready', ${P}, null, '2026-11-02T14:00:00Z'),
+      (${GLM_WITH_NODE_RUN}, ${C}, 'glm', 'personal', 'GLM', 'waiting_machine', ${P}, null, '2026-11-02T13:30:00Z'),
+      (${GLM_READY}, ${C}, 'glm', 'personal', 'GLM', 'ready', ${P}, null, '2026-11-02T14:30:00Z'),
       (${KIMI_WAITING}, ${C}, 'kimi', 'personal', 'Kimi', 'waiting_machine', ${P}, null, '2026-11-02T15:00:00Z')`);
 
     await db.execute(sql`insert into nodes (id, company_id, machine_id, subscription_id, key_hash, status, last_seen_at) values
       (${TAIL}, ${C}, ${M}, ${TAIL}, null, 'ready', '2026-11-02T14:58:09Z'),
       (${LIVE}, ${C}, ${M}, ${LIVE}, 'live-codex-hash', 'ready', '2026-11-03T16:00:00Z'),
-      (${CLAUDE_READY}, ${C}, ${M}, ${CLAUDE_READY}, 'claude-ready-hash', 'ready', '2026-11-03T16:00:00Z')`);
+      (${CLAUDE_READY}, ${C}, ${M}, ${CLAUDE_READY}, 'claude-ready-hash', 'ready', '2026-11-03T16:00:00Z'),
+      (${GLM_WITH_NODE_RUN}, ${C}, ${M}, ${GLM_WITH_NODE_RUN}, null, 'needs_login', '2026-11-02T13:45:00Z'),
+      (${GLM_READY}, ${C}, ${M}, ${GLM_READY}, 'glm-ready-hash', 'ready', '2026-11-03T16:00:00Z')`);
 
     for (let i = 1; i <= 8; i++) {
       await db.execute(sql`insert into agents (company_id, kind, name, model, subscription_id, node_id) values (${C}, 'worker', ${`Agent ${i}`}, '', ${LIVE}, ${LIVE})`);
     }
-    await db.execute(sql`insert into agents (company_id, kind, name, model, subscription_id) values (${C}, 'worker', 'Claude Agent', '', ${CLAUDE_WITH_AGENT})`);
+    await db.execute(sql`insert into agents (id, company_id, kind, name, model, subscription_id) values (${AGENT}, ${C}, 'worker', 'Claude Agent', '', ${CLAUDE_WITH_AGENT})`);
+    await db.execute(sql`insert into tasks (id, company_id, number, title) values (${TASK}, ${C}, 1, 'Verify test parts on Mac')`);
+    await db.execute(sql`insert into jobs (id, company_id, subscription_id, agent_id, prompt, timeout_ms, status, kind) values (${JOB}, ${C}, ${CLAUDE_READY}, ${AGENT}, 'Run tests', 60000, 'done', 'conversation')`);
+    await db.execute(sql`insert into test_runs (id, company_id, number, task_id, agent_id, job_id, command, parts, timeout_ms, status) values (${RUN}, ${C}, 1, ${TASK}, ${AGENT}, ${JOB}, 'npm test', 17, 60000, 'passed')`);
+    for (let part = 1; part <= 16; part++) {
+      await db.execute(sql`insert into test_parts (company_id, run_id, part, status, node_id, machine_id) values (${C}, ${RUN}, ${part}, 'passed', ${CLAUDE_READY}, ${M})`);
+    }
+    await db.execute(sql`insert into test_parts (company_id, run_id, part, status, node_id, machine_id) values (${C}, ${RUN}, 17, 'passed', ${GLM_WITH_NODE_RUN}, ${M})`);
 
     await migrate(db, { migrationsFolder: MIGRATIONS });
 
@@ -709,6 +726,15 @@ describe('migration 0051', () => {
     expect(codexNodes.rows).toEqual([{ id: LIVE }]);
 
     const keptSubs = await db.execute<{ id: string }>(sql`select id from subscriptions order by created_at`);
-    expect(keptSubs.rows).toEqual([{ id: CLAUDE_WITH_AGENT }, { id: CLAUDE_READY }, { id: LIVE }, { id: KIMI_WAITING }]);
+    expect(keptSubs.rows).toEqual([
+      { id: CLAUDE_WITH_AGENT },
+      { id: GLM_WITH_NODE_RUN },
+      { id: CLAUDE_READY },
+      { id: GLM_READY },
+      { id: LIVE },
+      { id: KIMI_WAITING },
+    ]);
+    const glmPart = await db.execute<{ node_id: string | null }>(sql`select node_id from test_parts where run_id = ${RUN} and part = 17`);
+    expect(glmPart.rows).toEqual([{ node_id: GLM_WITH_NODE_RUN }]);
   });
 });
