@@ -8,6 +8,7 @@
 // no answer, as Codex does when its provider refuses the work. INTERRUPT logs what Claude Code logs when a person stops a turn with
 // Escape, and calls no stop hook. TICK works 3 s under a line counting the time, with Claude Code's way to stop it.
 // SPINNER works for 3 s with the current spinner and an empty prompt, without a way to stop it on screen.
+// APIFAIL ends through the configured StopFailure hooks, without Stop or an answer in the session log.
 // WORK thinks, runs a command and asks a question with AskUserQuestion, 1.5 s each, as Claude Code shows and logs them,
 // and then answers. CLEAR starts a new session, as /clear does. FAKE_MCP_LIST_MS makes it list its Hornhoof
 // tools that long after it started, as Claude Code connects to its MCP servers, and show "tools: ok" or "tools: failed".
@@ -18,9 +19,11 @@
 // makes it say it started that long before its input box shows, as Claude Code can while it still starts: what is typed
 // meanwhile is lost. FAKE_KEEP_TAIL keeps only that many last characters of the first message, as Claude Code once did
 // with a message typed while it started. What its prompt hook answers goes with the prompt, as in Claude Code.
+import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { crash } from './crash.mjs';
 import { bracketed, rawKeys, readKeys } from './keys.mjs';
 
@@ -28,6 +31,8 @@ if (process.env.FAKE_CRASH_START) crash(process.env.FAKE_CRASH_START);
 
 const args = process.argv.slice(2);
 const flag = name => (args.includes(name) ? args[args.indexOf(name) + 1] : null);
+const settings = JSON.parse(flag('--settings') ?? '{}');
+const HOOK = fileURLToPath(new URL('../../hh-hook.cjs', import.meta.url));
 let session = flag('--session-id') ?? flag('--resume') ?? 'none';
 const home = process.env.CLAUDE_CONFIG_DIR ?? '/tmp';
 const logOf = id => join(home, 'projects', process.cwd().replace(/[^A-Za-z0-9]/g, '-'), `${id}.jsonl`);
@@ -110,12 +115,46 @@ async function take(line) {
   if (line === 'EXIT') process.exit(3);
   if (line === 'CLEAR') return clear();
   const context = await hook('prompt', { prompt: line });
+  if (line.includes('APIFAIL')) return apiFailure(line);
   if (line.startsWith('CRASH')) crash(line.includes('LONG') ? 'long' : '');
   if (line.includes('HANG_EXIT')) process.stdout.write('exit-test running\n');
   const ending = ENDINGS.find(([word]) => line.includes(word));
   if (ending) return ending[1]();
   await workFirst(line);
   await answer(line, context);
+}
+
+/* Claude Code 2.1.317 sends StopFailure with the error's kind and puts the API error's own text in
+   last_assistant_message, with no error_details: APIFAIL_REAL and APIFAIL_AUTH_REAL send what it sent. */
+const REAL_FAILURES = {
+  APIFAIL_REAL: { error: 'server_error', last_assistant_message: 'API Error: Connection refused (ECONNREFUSED)' },
+  APIFAIL_AUTH_REAL: { error: 'authentication_failed', last_assistant_message: 'API Error: 401 · Please run /login' },
+};
+
+function failureBody(line) {
+  const body = { session_id: session, hook_event_name: 'StopFailure' };
+  const real = Object.entries(REAL_FAILURES).find(([word]) => line.includes(word));
+  if (real) return { ...body, ...real[1] };
+  if (line.includes('NOTHING')) return body;
+  body.last_assistant_message = 'API Error: Overloaded';
+  if (!line.includes('MISSING') && !line.includes('BARE')) body.error = line.includes('EMPTY') ? '' : line.includes('AUTH') ? 'authentication_failed' : 'server_error';
+  if (!line.includes('BARE') && !line.includes('KIND')) body.error_details = line.includes('AUTH') ? 'Please run /login' : 'Overloaded';
+  return body;
+}
+
+async function apiFailure(line) {
+  const body = failureBody(line);
+  process.stdout.write('❯ ');
+  for (const group of settings.hooks?.StopFailure ?? []) {
+    for (const { command } of group.hooks) {
+      const [bin, ...args] = command.split(' ');
+      if (bin !== 'hh-hook') throw new Error(`Unknown hook: ${command}`);
+      await new Promise(resolve => {
+        const child = spawn(process.execPath, [HOOK, ...args, JSON.stringify(body)], { stdio: ['ignore', 'ignore', 'inherit'] });
+        child.on('close', resolve);
+      });
+    }
+  }
 }
 
 async function clear() {

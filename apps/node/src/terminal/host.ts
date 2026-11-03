@@ -51,6 +51,15 @@ function exitError(output: string | null, signedOut: RegExp | null, fallback: Jo
   return output && signedOut?.test(output) ? 'not_logged_in' : fallback;
 }
 
+const textOf = (value: unknown): string => (typeof value === 'string' ? value : '');
+
+/* Why an API error ended Claude Code's turn: the error's kind, then its details or, as Claude Code 2.1.317 sends it, the
+   API error's own text in last_assistant_message. Never empty, so the turn always ends as failed. */
+function stopFailureReason(data: Record<string, unknown>): string {
+  const said = textOf(data.error_details) || textOf(data.last_assistant_message);
+  return [textOf(data.error), said].filter(Boolean).join(': ') || 'unknown';
+}
+
 /* A turn running now: one Hornhoof sent, or one a person typed, whose events the host sends itself. A typed turn keeps
    what happened until Hornhoof answers its turn.open (early), and how it ended if it ended before that (over). */
 type Turn = {
@@ -919,7 +928,7 @@ export class TerminalHost {
         }
         a.busy = false;
         if (typeof data.session_id === 'string') this.follow(a, data.session_id);
-        const failed = typeof data.error === 'string' && data.error ? data.error : null;
+        const failed = data.hook_event_name === 'StopFailure' ? stopFailureReason(data) : (typeof data.error === 'string' && data.error) || null;
         const message = failed === null ? String(data.last_assistant_message ?? '') : '';
         const turn = a.turn;
         /* The hook answers first: the program may write the rest of its log only after. */
