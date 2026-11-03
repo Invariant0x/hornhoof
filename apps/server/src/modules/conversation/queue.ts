@@ -18,9 +18,11 @@ import { openAfter, startWork } from '../tasks/engine.js';
 import { agentProgramState, type TurnAlarm, type TurnAlarmReason, type TurnProgram } from '../tasks/silent.js';
 import { workStarts } from '../org/map-state.js';
 import { agentFailureState, type FailureState } from '../tasks/failures.js';
+import { logTurnFact } from '../tasks/turn-log.js';
 import { addressed, preface } from './prompt.js';
 import { ABOUT_AS_FREE, freedom } from '../testruns/pick.js';
 import { queuedInput } from './queued-input.js';
+import { repeatedTurn, UNHEARD_NOTE, type TurnWords } from './turn-words.js';
 
 /* Workers compact their conversation at half a million tokens, which keeps their turns quick; heads and the orchestrator
    keep the whole window, since they hold the department's and the company's picture. */
@@ -115,7 +117,7 @@ export const STOPPED_ON_PURPOSE = ['cancelled', 'removed', 'switched_off'];
 /* withMessage: what is kept together with the message, or not at all. */
 /* retryOf: the turn a node restart cut off, which this one runs once more. continueOf: the turn that ended without
    recording its work, whose session this one goes on with. */
-type Turn = { companyId: string; agentId: string; prompt: string; createdBy: string | null; message?: { personId: string | null; text: string; from?: 'orchestrator' | 'agent'; name?: string; by?: string; task?: { id: string; number: number }; request?: string; timer?: true; failureCase?: string; silentJob?: string; silentReason?: TurnAlarmReason }; taskId?: string; answersCeo?: boolean; withMessage?: WithEvent; retryOf?: string; continueOf?: string; notBefore?: Date | null };
+type Turn = { companyId: string; agentId: string; prompt: string; createdBy: string | null; message?: { personId: string | null; text: string; from?: 'orchestrator' | 'agent'; name?: string; by?: string; task?: { id: string; number: number }; request?: string; timer?: true; failureCase?: string; silentJob?: string; silentReason?: TurnAlarmReason }; repeated?: TurnWords; taskId?: string; answersCeo?: boolean; withMessage?: WithEvent; retryOf?: string; continueOf?: string; notBefore?: Date | null };
 
 /* One thing at a time per agent, so two pumps never send two turns. */
 const chains = new WeakMap<Ctx, Map<string, Promise<unknown>>>();
@@ -220,7 +222,7 @@ export async function insertTurn(ctx: Ctx, t: Turn): Promise<string> {
       notBefore: t.notBefore ?? null,
       answersCeo: t.answersCeo === true || (await isCeo(ctx, t.message?.personId)),
       /* Until its message is kept, a turn sent at once answers nobody. */
-      decisionInputPending: shownOf(t) !== null,
+      decisionInputPending: !!t.repeated || shownOf(t) !== null,
     })
     .returning({ id: jobs.id });
   await showMessage(ctx, t, job!.id, tx => inputKept(tx, job!.id));
@@ -229,12 +231,17 @@ export async function insertTurn(ctx: Ctx, t: Turn): Promise<string> {
 
 /* The message a turn shows in the window: a person's or an agent's, or Hornhoof's own words. */
 function shownOf(t: Turn): NonNullable<Turn['message']> | null {
+  if (t.repeated) return null;
   const message = t.message ?? { personId: null, text: t.prompt };
   return message.text.trim() ? message : null;
 }
 
 /* An employee's message carries its name for the window and its id in by. kept: also kept with it. */
 async function showMessage(ctx: Ctx, t: Turn, jobId: string, kept: WithEvent): Promise<void> {
+  if (t.repeated) {
+    await appendEvent(ctx, { companyId: t.companyId, agentId: t.agentId, jobId, kind: 'typed', ...t.repeated }, kept);
+    return;
+  }
   const message = shownOf(t);
   if (!message) return;
   const { personId, ...data } = message;
@@ -244,7 +251,7 @@ async function showMessage(ctx: Ctx, t: Turn, jobId: string, kept: WithEvent): P
 /* Stores the turn, then sends it if he is free. A message for an agent at work goes into the turn it runs instead, and a
    turn that took the CEO's message answers the CEO from then on. */
 export async function enqueueTurn(ctx: Ctx, t: Turn): Promise<string> {
-  const message = !t.taskId ? t.message : undefined;
+  const message = !t.taskId && !t.repeated ? t.message : undefined;
   const into = message
     ? await deliverLive(ctx, t.agentId, t.prompt, { source: { personId: message.personId, data: message } }, async (jobId, kept) => {
         if (await isCeo(ctx, message.personId)) await ctx.db.update(jobs).set({ answersCeo: true }).where(eq(jobs.id, jobId));
@@ -270,7 +277,7 @@ export async function openTypedTurn(ctx: Ctx, node: NodeIdentity, agentId: strin
     if (!agent || !sub || !at || !sameNode(at, node)) return null;
     const queued = queuedFrom ? await queuedInput(ctx, agentId, queuedFrom, text) : null;
     if (queuedFrom && !queued) return null;
-    const author = queued ? queued.personId : personId;
+    const repeated = queued ? await repeatedTurn(ctx, queued.job, queued.source) : null;
     /* A turn that only started the program is over once the person types: their turn takes its place. */
     await db
       .update(jobs)
@@ -298,13 +305,17 @@ export async function openTypedTurn(ctx: Ctx, node: NodeIdentity, agentId: strin
         startedAt: new Date(),
         prompt: text,
         timeoutMs: TURN_TIMEOUT_MS,
-        createdBy: author,
-        answersCeo: await isCeo(ctx, author),
+        createdBy: repeated ? repeated.createdBy : personId,
+        answersCeo: repeated ? repeated.answersCeo : await isCeo(ctx, personId),
         toolTokenHash: hashToken(token),
         instructionsHash: last?.hash ?? null,
       })
       .returning({ id: jobs.id });
-    if (text.trim()) await appendEvent(ctx, { companyId: agent.companyId, agentId, jobId: job!.id, kind: 'message', data: { text, ...(queued ? { queuedEvent: queued.seq } : {}) }, personId: author, ...(queued ? { message: queued.message } : {}) });
+    if (queued && repeated) {
+      await appendEvent(ctx, { companyId: agent.companyId, agentId, jobId: job!.id, kind: 'typed', personId: repeated.repeated.personId, data: { ...queued.source.data as object, queuedEvent: queued.seq } });
+      await logTurnFact(ctx, queued.job, UNHEARD_NOTE);
+    }
+    else if (text.trim()) await appendEvent(ctx, { companyId: agent.companyId, agentId, jobId: job!.id, kind: 'message', data: { text }, personId });
     await publishWorking(ctx, agent.companyId);
     return { jobId: job!.id, token };
   });

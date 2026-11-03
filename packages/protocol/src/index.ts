@@ -25,6 +25,9 @@ export type ProgramState = (typeof PROGRAM_STATES)[number];
 /* The most of a gone program's last screen a node tells: its last 40 lines, cut to this many characters. */
 export const PROGRAM_SCREEN_MAX = 4000;
 
+/* How long after a turn ends the program may still start its own turn with words it kept. */
+export const UNHEARD_MS = 15_000;
+
 /* Why a part of a run ended other than with its command passing: it failed, ran out of time, was stopped, the branch
    could not be cloned, or the task's files could not be fetched. */
 export const TEST_ERRORS = ['failed', 'timeout', 'cancelled', 'clone_failed', 'files_failed'] as const;

@@ -1,7 +1,8 @@
-import { eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { jobs } from '../src/db/schema.js';
-import { appendEvent } from '../src/modules/events/store.js';
+import { agentEvents, agents, jobs } from '../src/db/schema.js';
+import { decisionPrincipal } from '../src/modules/conversation/decision-context.js';
+import { appendEvent, messageForJob } from '../src/modules/events/store.js';
 import { addressed } from '../src/modules/conversation/prompt.js';
 import { BUILTIN, nodeIdentity } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
@@ -16,6 +17,25 @@ async function queuedWords() {
 }
 
 describe('a program starts a turn with its queued live words', () => {
+  it.each(['person', 'agent'] as const)('keeps the queued %s author without another message or sent copy', async author => {
+    const c = await failureCompany();
+    const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    const [before] = await c.db.insert(jobs).values({ companyId: c.companyId, agentId: orchestrator!.id, subscriptionId: c.sub.id, kind: 'conversation', prompt: 'work', status: 'done', timeoutMs: 1000, finishedAt: new Date(), answersCeo: true }).returning();
+    const source = await appendEvent(c.ctx, { companyId: c.companyId, agentId: orchestrator!.id, jobId: before!.id, kind: 'message', personId: author === 'person' ? c.sub.ownerPersonId : null, data: { text: 'Keep these words.', ...(author === 'agent' ? { from: 'agent', by: c.head.id } : {}) } });
+    await handleNodeMessage(c.ctx, BUILTIN, { type: 'turn.open', agentKey: orchestrator!.id, text: addressed('Keep these words.', source.message!), queuedFrom: before!.id, ref: 'queued' });
+    const next = (await c.turnsOf(orchestrator!.id)).find(j => j.id !== before!.id)!;
+    expect(await c.jobOf(next.id)).toMatchObject({ createdBy: null, answersCeo: true });
+    expect(await decisionPrincipal(c.db, next.id)).toEqual(author === 'person' ? { personId: c.sub.ownerPersonId, sourceSeq: expect.any(Number) } : null);
+    expect(await messageForJob(c.ctx, { id: next.id, companyId: c.companyId, agentId: orchestrator!.id })).toEqual(source.message);
+    const messages = await c.db.select().from(agentEvents).where(and(eq(agentEvents.agentId, orchestrator!.id), eq(agentEvents.kind, 'message')));
+    expect(messages.filter(e => (e.data as { text?: string }).text === 'Keep these words.')).toHaveLength(1);
+    expect(messages.filter(e => (e.data as { text?: string }).text === 'Words sent into the running turn were not taken by the program. They go with its next turn.')).toHaveLength(1);
+    if (author === 'agent') {
+      expect(await c.db.select().from(agentEvents).where(and(eq(agentEvents.agentId, c.head.id), eq(agentEvents.kind, 'message')))).toHaveLength(1);
+      expect(await c.db.select().from(agentEvents).where(and(eq(agentEvents.kind, 'message'), sql`${agentEvents.data}->>'by' = ${c.head.id}`))).toHaveLength(1);
+    }
+  });
+
   it('opens known words without another person keystroke and accepts its Stop', async () => {
     const c = await queuedWords();
     await c.open();

@@ -3,7 +3,8 @@ import { TOOL_QUIET_ALARM_MS, type TurnAlarm, type TurnAlarmReason, type TurnPro
 import { and, asc, eq, inArray, isNotNull, isNull, ne, or, sql, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentEvents, agents, departments, jobs, tasks } from '../../db/schema.js';
-import { enqueueTurn, liveSubscription, orchestratorOf } from '../conversation/queue.js';
+import { enqueueTurn, liveSubscription } from '../conversation/queue.js';
+import { headOf } from './failures.js';
 import { programRestartStatus } from './program-restarts.js';
 import { logTurnFact } from './turn-log.js';
 
@@ -255,8 +256,7 @@ async function sendTurnAlarm(ctx: Ctx, s: SilentTurn, unavailable: ReadonlySet<s
   if (s.job.restartedAt) {
     const since = Math.max(+s.job.restartedAt, s.program?.signAt ?? 0);
     if (+now - since < SILENT_TURN_MS) return;
-    const [head] = s.agent.departmentId ? await ctx.db.select().from(agents).where(and(eq(agents.departmentId, s.agent.departmentId), eq(agents.kind, 'head'), isNull(agents.removedAt), isNull(agents.switchedOffAt))).limit(1) : [];
-    const to = head && head.id !== s.agent.id ? head : await orchestratorOf(ctx, s.job.companyId);
+    const to = await headOf(ctx, s.agent);
     if (to && to.id !== s.agent.id) await dispatchAlarm(ctx, s, to, now, `${s.job.id}:after_restart`);
     return;
   }

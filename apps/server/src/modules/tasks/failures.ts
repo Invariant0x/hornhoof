@@ -5,6 +5,7 @@ import type { Ctx } from '../../app.js';
 import { agentEvents, agents, departments, jobs, nodes, people, subscriptions, tasks } from '../../db/schema.js';
 import { agentState, conversationOf, enqueueTurn, insertTurn, limitUntil, onAgent, orchestratorOf, STOPPED_ON_PURPOSE } from '../conversation/queue.js';
 import { turnAgain } from './again.js';
+import { repeatedTurn } from '../conversation/turn-words.js';
 import { continuationNote } from './endings.js';
 import { operationsWatchers, pickOpsRecipient } from './silent.js';
 import { logTurnFact } from './turn-log.js';
@@ -75,7 +76,7 @@ async function alreadySent(ctx: Ctx, caseId: string): Promise<boolean> {
   return !!seen;
 }
 
-async function headOf(ctx: Ctx, agent: typeof agents.$inferSelect) {
+export async function headOf(ctx: Ctx, agent: typeof agents.$inferSelect) {
   const [dept] = agent.departmentId ? await ctx.db.select().from(departments).where(eq(departments.id, agent.departmentId)) : [];
   const [head] = dept ? await ctx.db.select().from(agents).where(and(eq(agents.departmentId, dept.parentId ?? dept.id), eq(agents.kind, 'head'), isNull(agents.removedAt), isNull(agents.switchedOffAt))).limit(1) : [];
   return head && head.id !== agent.id ? head : orchestratorOf(ctx, agent.companyId);
@@ -120,8 +121,9 @@ async function retryTurn(ctx: Ctx, job: Job, at: Date | null, next: string): Pro
   const id = await onAgent(ctx, agent.id, async () => {
     const [existing] = await ctx.db.select({ id: jobs.id }).from(jobs).where(eq(jobs.continueOf, job.id)).limit(1);
     if (existing) return existing.id;
-    return task ? turnAgain(ctx, { job, task, agent }, note, { continueOf: job.id }, prompt, at) : insertTurn(ctx, {
-      companyId: job.companyId, agentId: agent.id, prompt, createdBy: job.createdBy, answersCeo: job.answersCeo, continueOf: job.id, notBefore: at,
+    const repeated = await repeatedTurn(ctx, job);
+    return task ? turnAgain(ctx, { job, task, agent }, note, { continueOf: job.id }, prompt, at, repeated) : insertTurn(ctx, {
+      companyId: job.companyId, agentId: agent.id, prompt, ...repeated, continueOf: job.id, notBefore: at,
     });
   });
   await logTurnFact(ctx, job, `${why}. ${id ? next : 'The agent has no plan to continue.'}`, { continuation: id, at: at?.toISOString() ?? null });

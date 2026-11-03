@@ -242,7 +242,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       await startProgram(ctx, id, msg.agentKey);
       return;
     case 'agent.restarted':
-      programRestarted(ctx, id, msg);
+      await programRestarted(ctx, id, msg);
       return;
     case 'agent.said':
       said(ctx, id, msg.ref, msg.ok);

@@ -1,6 +1,10 @@
-import { eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agentEvents, jobs } from '../src/db/schema.js';
+import { agentEvents, agents, jobs } from '../src/db/schema.js';
+import { decisionPrincipal } from '../src/modules/conversation/decision-context.js';
+import { addressed } from '../src/modules/conversation/prompt.js';
+import { enqueueTurn, pump } from '../src/modules/conversation/queue.js';
+import { appendEvent, messageForJob } from '../src/modules/events/store.js';
 import { BUILTIN, nodeIdentity } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { failureCompany } from './failure-company.js';
@@ -17,6 +21,34 @@ async function atWork() {
 }
 
 describe('words the program never took', () => {
+  it('keeps the CEO and the envelope of live words without showing them twice', async () => {
+    const c = await failureCompany();
+    const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    const id = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: orchestrator!.id, prompt: 'Work', createdBy: null });
+    const source = await appendEvent(c.ctx, { companyId: c.companyId, agentId: orchestrator!.id, jobId: id, kind: 'message', personId: c.sub.ownerPersonId, data: { text: 'Approve it.' } });
+    await c.db.update(jobs).set({ answersCeo: true }).where(eq(jobs.id, id));
+    const text = addressed('Approve it.', source.message!);
+    await handleNodeMessage(c.ctx, BUILTIN, { type: 'agent.unheard', agentKey: orchestrator!.id, jobId: id, text });
+    const next = (await c.turnsOf(orchestrator!.id)).find(j => j.id !== id)!;
+    await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, id));
+    await pump(c.ctx, orchestrator!.id);
+    expect(await decisionPrincipal(c.db, next.id)).toMatchObject({ personId: c.sub.ownerPersonId });
+    expect(await c.jobOf(next.id)).toMatchObject({ createdBy: null, answersCeo: true });
+    expect(await messageForJob(c.ctx, { id: next.id, companyId: c.companyId, agentId: orchestrator!.id })).toEqual(source.message);
+    const messages = await c.db.select().from(agentEvents).where(and(eq(agentEvents.agentId, orchestrator!.id), eq(agentEvents.kind, 'message')));
+    expect(messages.filter(e => (e.data as { text: string }).text.includes('Approve it.'))).toHaveLength(1);
+  });
+
+  it('keeps an unheard agent letter on its sender lane and in its quota only once', async () => {
+    const c = await atWork();
+    const source = await appendEvent(c.ctx, { companyId: c.companyId, agentId: c.agent.id, jobId: c.job.id, kind: 'message', data: { text: 'Read this letter.', from: 'agent', by: c.head.id, name: c.head.name } });
+    await c.send(addressed('Read this letter.', source.message!));
+    const next = (await c.turnsOf()).find(j => j.id !== c.job.id)!;
+    expect(await messageForJob(c.ctx, { id: next.id, companyId: c.companyId, agentId: c.agent.id })).toEqual(source.message);
+    expect(await c.db.select().from(agentEvents).where(and(eq(agentEvents.agentId, c.head.id), eq(agentEvents.kind, 'message')))).toHaveLength(1);
+    expect(await c.db.select().from(agentEvents).where(and(eq(agentEvents.kind, 'message'), sql`${agentEvents.data}->>'by' = ${c.head.id}`))).toHaveLength(1);
+  });
+
   it('queues the exact words for the next turn and logs why in the agent window', async () => {
     const c = await atWork();
     await c.send();

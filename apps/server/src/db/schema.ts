@@ -360,7 +360,8 @@ export const jobs = pgTable(
 
 /* computer: the orchestrator asked for the computer the server runs on, or the CEO opened, closed or declined it. typed: a
    person pressed Enter in the terminal of the running turn, so what they typed is their word in it; the window shows
-   what the program shows instead. */
+   what the program shows instead. Repeated words keep their author and envelope as typed, without showing or sending
+   another message. */
 export const AGENT_EVENT_KINDS = ['message', 'text', 'tool', 'tool_result', 'todo', 'proposal', 'applied', 'stopped', 'failed', 'computer', 'typed', 'hook_rejected'] as const;
 export type AgentEventKind = (typeof AGENT_EVENT_KINDS)[number];
 

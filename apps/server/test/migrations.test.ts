@@ -3,13 +3,19 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PGlite } from '@electric-sql/pglite';
 import { sql } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/pglite';
-import { migrate } from 'drizzle-orm/pglite/migrator';
-import { describe, expect, it, onTestFinished } from 'vitest';
-import { MIGRATIONS } from '../src/db/client.js';
+import type { MigrationConfig } from 'drizzle-orm/migrator';
+import { drizzle, type PgliteDatabase } from 'drizzle-orm/pglite';
+import { migrate as migrateDrizzle } from 'drizzle-orm/pglite/migrator';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
+import { applyMissingMigrations, MIGRATIONS } from '../src/db/client.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { isUniqueViolation } from '../src/db/errors.js';
 import { appOn, approvalAsked, as } from './helpers.js';
+
+async function migrate(db: PgliteDatabase, config: MigrationConfig): Promise<void> {
+  await migrateDrizzle(db, config);
+  await applyMissingMigrations(db, config);
+}
 
 /* A copy of the migrations folder that stops after the given tag, as an older install would have it. */
 async function migrationsUpTo(tag: string): Promise<string> {
@@ -543,6 +549,48 @@ describe('migration 0044', () => {
 });
 
 describe('migration 0046', () => {
+  it('recovers a missing migration below the newest recorded timestamp exactly once', async () => {
+    const logged = vi.spyOn(console, 'info').mockImplementation(() => {});
+    onTestFinished(() => logged.mockRestore());
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await db.execute(sql`insert into drizzle.__drizzle_migrations (hash, created_at) values ('another branch', 1793700000001)`);
+    const before = (await db.execute(sql`select * from drizzle.__drizzle_migrations order by id`)).rows;
+    await db.execute(sql`delete from drizzle.__drizzle_migrations where created_at = 1793700000000`);
+    await db.execute(sql`alter table jobs drop column failure, drop column not_before, drop column restarted_at`);
+    await db.execute(sql`drop index agent_events_failure_case`);
+    await db.execute(sql`drop index agent_events_operations_pending`);
+
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+
+    const columns = (await db.execute<{ column_name: string }>(sql`select column_name from information_schema.columns where table_name = 'jobs'`)).rows.map(c => c.column_name);
+    expect(columns).toEqual(expect.arrayContaining(['failure', 'not_before', 'restarted_at']));
+    const indexes = (await db.execute<{ indexname: string }>(sql`select indexname from pg_indexes where tablename = 'agent_events'`)).rows.map(i => i.indexname);
+    expect(indexes).toEqual(expect.arrayContaining(['agent_events_failure_case', 'agent_events_operations_pending']));
+    const after = (await db.execute(sql`select * from drizzle.__drizzle_migrations order by id`)).rows;
+    expect(after.filter(row => Number(row.created_at) !== 1793700000000)).toEqual(before.filter(row => Number(row.created_at) !== 1793700000000));
+    expect(after.filter(row => Number(row.created_at) === 1793700000000)).toEqual([expect.objectContaining({ hash: before.find(row => Number(row.created_at) === 1793700000000)!.hash })]);
+    expect(logged).toHaveBeenCalledExactlyOnceWith('Applied missing migration 0046_turn_failures');
+  });
+
+  it('does nothing on a second start even if a recorded hash differs', async () => {
+    const logged = vi.spyOn(console, 'info').mockImplementation(() => {});
+    onTestFinished(() => logged.mockRestore());
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await db.execute(sql`update drizzle.__drizzle_migrations set hash = 'old file' where created_at = 1793700000000`);
+    const before = (await db.execute(sql`select * from drizzle.__drizzle_migrations order by id`)).rows;
+
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+
+    expect((await db.execute(sql`select * from drizzle.__drizzle_migrations order by id`)).rows).toEqual(before);
+    expect(logged).not.toHaveBeenCalled();
+  });
+
   it.each([['agent_events_failure_case', 'failureCase'], ['agent_events_operations_pending', 'operationsPending']])('indexes %s only when %s is present', async (name, field) => {
     const client = new PGlite();
     onTestFinished(() => client.close());
