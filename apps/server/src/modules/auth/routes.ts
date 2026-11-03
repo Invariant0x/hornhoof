@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { Deps } from '../../app.js';
 import { guard, limiter } from '../../auth/limit.js';
 import { hashPassword, verifyPassword } from '../../auth/password.js';
+import { actsAsCeo } from '../../auth/decisions.js';
 import { endSession, personColumns, requirePerson, startSession } from '../../auth/session.js';
 import { clientAddress } from '../../auth/tunnel.js';
 import { companies, people } from '../../db/schema.js';
@@ -48,6 +49,7 @@ export function authRoutes(app: FastifyInstance, { db, config }: Deps): void {
   app.get('/api/me', async req => {
     const person = await requirePerson(req, db);
     const [company] = await db.select({ id: companies.id, name: companies.name }).from(companies).where(eq(companies.id, person.companyId));
-    return { person, company };
+    /* Whether the cards only the CEO and the delegate decide show their buttons to this person. */
+    return { person, company, canDecideCompany: actsAsCeo(person) };
   });
 }

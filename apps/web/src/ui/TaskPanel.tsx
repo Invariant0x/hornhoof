@@ -11,9 +11,15 @@ import { Requests, wordsAnswer } from './Requests';
 
 const field = (data: unknown, key: string): unknown => (data && typeof data === 'object' && key in data ? (data as Record<string, unknown>)[key] : undefined);
 
+/* Who wrote a log line; the orchestrator answering for a person says for whom. */
+function authorOf(t: Messages, e: TaskLogLine): string {
+  if (e.by?.for) return t.tasks.actedFor(t.window.orchestrator, e.by.for.name);
+  return e.by?.name ?? t.window.hornhoof;
+}
+
 /* A log line in words: who did what, with its text and, for work handed in, the evidence. */
 function eventTitle(t: Messages, e: TaskLogLine): string {
-  const by = e.by?.name ?? t.window.hornhoof;
+  const by = authorOf(t, e);
   const ev = t.tasks.events;
   switch (e.kind) {
     case 'verdict':

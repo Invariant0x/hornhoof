@@ -1,21 +1,28 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Ctx } from '../../app.js';
-import { requirePerson } from '../../auth/session.js';
+import { actsAsCeo } from '../../auth/decisions.js';
+import { requirePerson, type Person } from '../../auth/session.js';
 import { ApiError } from '../../errors.js';
 import { enqueueTurn, NoSubscription, orchestratorOf } from '../conversation/queue.js';
 import { appendEvent } from '../events/store.js';
-import { onMachine, ownsComputer, serverMachine } from './access.js';
+import { canViewComputer, onMachine, serverMachine } from './access.js';
 
-/* The note that starts the orchestrator's turn once the CEO opened access: the CEO's order, so it may use the computer. */
-const openedNote = (until: string, reason: string, machine: string | null) =>
-  `The CEO opened access to the computer the server runs on${machine ? ` (${machine})` : ''} until ${until}. Go on with what you asked it for: ${reason}`;
+/* The note that starts the orchestrator's turn once the CEO or the delegate opened access: the CEO's order, so it may use
+   the computer. */
+const openedNote = (by: Person, until: string, reason: string, machine: string | null) =>
+  `${by.isOwner ? 'The CEO' : `The CEO delegate ${by.name}`} opened access to the computer the server runs on${machine ? ` (${machine})` : ''} until ${until}. Go on with what you asked it for: ${reason}`;
 
-/* Access to the computer the server runs on: the CEO's own screen opens it for a day, closes it, or says no to the
-   orchestrator's request. Never another person, and never the orchestrator acting for the CEO. */
+/* Access to the computer the server runs on: the CEO's or the delegate's own screen opens it for a day, closes it, or says
+   no to the orchestrator's request. People who see the whole company see it. Never the orchestrator acting for the CEO. */
 export function computerRoutes(app: FastifyInstance, ctx: Ctx): void {
-  async function ceo(req: FastifyRequest) {
+  async function viewer(req: FastifyRequest) {
     const me = await requirePerson(req, ctx.db);
-    if (!ownsComputer(me)) throw new ApiError(403, 'forbidden', 'Only the CEO opens and closes access to the computer.', 'not_owner');
+    if (!canViewComputer(me)) throw new ApiError(403, 'forbidden', 'Only people who see the whole company see access to the computer.', 'company_scope_only');
+    return me;
+  }
+  async function ceo(req: FastifyRequest) {
+    const me = await viewer(req);
+    if (!actsAsCeo(me)) throw new ApiError(403, 'forbidden', 'Only the CEO or the CEO delegate opens and closes access to the computer.', 'decision_not_allowed');
     return me;
   }
 
@@ -26,15 +33,12 @@ export function computerRoutes(app: FastifyInstance, ctx: Ctx): void {
     return orchestrator;
   }
 
-  /* What the CEO sees: the state, and which machine it is, the same from every screen of theirs. */
-  const view = async (companyId: string) => ({ ...ctx.computer.view(), machine: await serverMachine(ctx, companyId) });
+  /* What people see: the state, which machine it is, the same from every screen, and whether they may change it. */
+  const view = async (me: Person) => ({ ...ctx.computer.view(), machine: await serverMachine(ctx, me.companyId), canAnswer: actsAsCeo(me) });
   /* The CEO's other screens fetch it again, once the file says the new state. */
   const changed = (companyId: string) => ctx.bus.publish(companyId, { type: 'computer' });
 
-  app.get('/api/computer', async req => {
-    const me = await ceo(req);
-    return view(me.companyId);
-  });
+  app.get('/api/computer', async req => view(await viewer(req)));
 
   app.post('/api/computer/open', async req => {
     const me = await ceo(req);
@@ -47,11 +51,11 @@ export function computerRoutes(app: FastifyInstance, ctx: Ctx): void {
     const orchestrator = await line(me.companyId, { state: 'opened', until, ...onMachine(machine) }, me.id);
     /* The note waits in his line while his machine is offline, and goes out when it is back. */
     if (orchestrator && asked) {
-      await enqueueTurn(ctx, { companyId: me.companyId, agentId: orchestrator.id, prompt: openedNote(until, asked.reason, machine), createdBy: me.id, answersCeo: true }).catch(err => {
+      await enqueueTurn(ctx, { companyId: me.companyId, agentId: orchestrator.id, prompt: openedNote(me, until, asked.reason, machine), createdBy: me.id, answersCeo: true }).catch(err => {
         if (!(err instanceof NoSubscription)) throw err;
       });
     }
-    return view(me.companyId);
+    return view(me);
   });
 
   app.post('/api/computer/close', async req => {
@@ -59,7 +63,7 @@ export function computerRoutes(app: FastifyInstance, ctx: Ctx): void {
     ctx.computer.close();
     changed(me.companyId);
     await line(me.companyId, { state: 'closed', ...onMachine(await serverMachine(ctx, me.companyId)) }, me.id);
-    return view(me.companyId);
+    return view(me);
   });
 
   app.post('/api/computer/decline', async req => {
@@ -68,6 +72,6 @@ export function computerRoutes(app: FastifyInstance, ctx: Ctx): void {
       changed(me.companyId);
       await line(me.companyId, { state: 'declined', ...onMachine(await serverMachine(ctx, me.companyId)) }, me.id);
     }
-    return view(me.companyId);
+    return view(me);
   });
 }

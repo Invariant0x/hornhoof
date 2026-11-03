@@ -21,7 +21,7 @@ const end = (socket: WebSocket, [code, reason]: readonly [number, string]) => so
 /* Browsers watching agents' terminals, each tied to the node that shows the session. */
 export class TerminalRelay {
   private readonly views = new Map<string, View>();
-  private readonly typed = new Map<string, { personId: string; at: number }>();
+  private readonly typed = new Map<string, { personId: string; node: NodeIdentity; at: number }>();
 
   add(termId: string, view: View): void {
     this.views.set(termId, view);
@@ -58,14 +58,18 @@ export class TerminalRelay {
     }
   }
 
-  typing(agentId: string, personId: string): void {
-    this.typed.set(agentId, { personId, at: Date.now() });
+  /* A person pressed Enter in the agent's terminal, which the node shows. */
+  typing(agentId: string, personId: string, node: NodeIdentity): void {
+    this.typed.set(agentId, { personId, node, at: Date.now() });
   }
 
-  /* The person who typed into the agent's terminal just now, if anyone did. */
-  typist(agentId: string): string | null {
+  /* The person who pressed Enter in the agent's terminal on this node just now, if anyone did. One Enter opens one turn:
+     the next prompt needs a new one. */
+  takeTyped(node: NodeIdentity, agentId: string): string | null {
     const last = this.typed.get(agentId);
-    return last && Date.now() - last.at < TYPED_MS ? last.personId : null;
+    if (!last || !sameNode(last.node, node) || Date.now() - last.at >= TYPED_MS) return null;
+    this.typed.delete(agentId);
+    return last.personId;
   }
 
   stop(): void {

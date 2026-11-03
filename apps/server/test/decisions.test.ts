@@ -71,10 +71,11 @@ describe('decisionOwner', () => {
   });
 });
 
+type DecidedBy = { kind: 'ceo_and_delegate' | 'department_and_ceo'; department: { id: string; name: string } | null };
 type View = {
-  requests: { id: string; ownerPersonId: string; canAnswer: boolean; explained: string | null; task: { number: number } }[];
-  proposals: { id: string; kind: string; ownerPersonId: string; canAnswer: boolean; brief: string; department: { id: string } | null }[];
-  computerAccess: { kind: string; id: string; ownerPersonId: string; canAnswer: boolean; view: { asked: { reason: string } | null } } | null;
+  requests: { id: string; ownerPersonId: string; canAnswer: boolean; decidedBy: DecidedBy; explained: string | null; task: { number: number } }[];
+  proposals: { id: string; kind: string; ownerPersonId: string; canAnswer: boolean; decidedBy: DecidedBy; brief: string; department: { id: string } | null }[];
+  computerAccess: { kind: string; id: string; ownerPersonId: string; canAnswer: boolean; decidedBy: DecidedBy; view: { asked: { reason: string } | null } } | null;
   counts: { byPerson: Record<string, number>; byAgent: Record<string, number>; total: number };
 };
 
@@ -179,29 +180,46 @@ describe('decisions waiting for people', () => {
     expect(his.proposals).toEqual([]);
     expect(his.computerAccess).toBeNull();
     expect(his.counts).toEqual({ byPerson: { [c.ids.dan]: 1, [c.ids.ivan]: 3 }, byAgent: { [c.workers.dev.id]: 4 }, total: 4 });
-    /* He answers questions of his department as before, and approvals stay with people who see the whole company. */
+    /* He takes his department's own decisions; approvals, the CEO's topics and a question without a topic are the CEO's. */
     expect(Object.fromEntries(his.requests.map(r => [r.id, r.canAnswer]))).toEqual({
       [c.devQuestion.request.id]: true,
       [c.devApproval.request.id]: false,
-      [c.devPeople.request.id]: true,
-      [c.devPlain.request.id]: true,
+      [c.devPeople.request.id]: false,
+      [c.devPlain.request.id]: false,
+    });
+    expect(Object.fromEntries(his.requests.map(r => [r.id, r.decidedBy]))).toEqual({
+      [c.devQuestion.request.id]: { kind: 'department_and_ceo', department: { id: c.dev.id, name: 'Development' } },
+      [c.devApproval.request.id]: { kind: 'ceo_and_delegate', department: null },
+      [c.devPeople.request.id]: { kind: 'ceo_and_delegate', department: null },
+      [c.devPlain.request.id]: { kind: 'ceo_and_delegate', department: null },
     });
     const tias = await c.view(c.tokens.tia);
     expect(tias.requests).toEqual([]);
     expect(tias.counts).toEqual({ byPerson: {}, byAgent: {}, total: 0 });
   });
 
-  it("show a deputy of the whole company every task's decision and the orchestrator's cards, but not the computer", async () => {
+  it('show a person of the whole company without the delegate mark every decision, and let them take none', async () => {
     const c = await everyKind();
     const his = await c.view(c.tokens.zed);
     expect(his.requests).toHaveLength(6);
-    expect(his.proposals.map(p => [p.id, p.canAnswer])).toEqual([
-      [c.structure.id, true],
-      [c.staff.id, true],
+    expect(his.requests.every(r => !r.canAnswer)).toBe(true);
+    expect(his.proposals.map(p => [p.id, p.canAnswer, p.decidedBy])).toEqual([
+      [c.structure.id, false, { kind: 'ceo_and_delegate', department: null }],
+      [c.staff.id, false, { kind: 'ceo_and_delegate', department: null }],
     ]);
-    expect(his.computerAccess).toBeNull();
-    expect(his.counts.total).toBe(8);
-    expect(his.counts.byPerson[c.ids.ivan]).toBe(7);
+    expect(his.computerAccess).toMatchObject({ canAnswer: false, decidedBy: { kind: 'ceo_and_delegate', department: null }, view: { asked: { reason: 'Inspect disk space.' } } });
+    expect(his.counts.total).toBe(9);
+    expect(his.counts.byPerson[c.ids.ivan]).toBe(8);
+  });
+
+  it('let the CEO and the CEO delegate take every decision they see', async () => {
+    const c = await everyKind();
+    await c.app.inject({ method: 'PUT', url: `/api/people/${c.ids.zed}/ceo-delegate`, payload: { isCeoDelegate: true }, ...as(c.tokens.ceo) });
+    for (const token of [c.tokens.ceo, c.tokens.zed]) {
+      const v = await c.view(token);
+      expect(v.requests).toHaveLength(6);
+      expect([...v.requests, ...v.proposals, v.computerAccess!].every(d => d.canAnswer)).toBe(true);
+    }
   });
 
   it('filter by one owner without changing the counts', async () => {
@@ -248,25 +266,107 @@ describe('decisions waiting for people', () => {
   });
 });
 
-describe('who may answer, as before the owners came', () => {
-  it('stays the same for every person and the orchestrator', async () => {
+describe('who may answer, by the rules of #49', () => {
+  /* Each decision with whom it lets take it (200), whom it refuses while they see it (403) and from whom it stays out of
+     sight (404). Each answer goes to a fresh company, as an answer closes its request. */
+  type Who = 'ceo' | 'delegate' | 'zed' | 'dan' | 'eve' | 'sara' | 'olga' | 'tia';
+  type Kind = 'devQuestion' | 'devApproval' | 'devPeople' | 'devPlain' | 'salesQuestion' | 'mktQuestion';
+  const answers: Record<Kind, object> = {
+    devQuestion: { answer: 'Visa.' },
+    devApproval: { approve: true },
+    devPeople: { answer: 'Not yet.' },
+    devPlain: { answer: 'Yes.' },
+    salesQuestion: { pick: 0 },
+    mktQuestion: { answer: 'Email.' },
+  };
+  const matrix: Record<Kind, Partial<Record<Who, 200 | 403 | 404>>> = {
+    devQuestion: { ceo: 200, delegate: 200, zed: 403, dan: 200, eve: 200, sara: 404, tia: 404 },
+    devApproval: { ceo: 200, delegate: 200, zed: 403, dan: 403, sara: 404, tia: 404 },
+    devPeople: { ceo: 200, delegate: 200, zed: 403, dan: 403, sara: 404 },
+    devPlain: { ceo: 200, delegate: 200, zed: 403, dan: 403, sara: 404 },
+    salesQuestion: { ceo: 200, delegate: 200, zed: 403, sara: 200, olga: 200, dan: 404 },
+    mktQuestion: { ceo: 200, delegate: 200, zed: 403, dan: 404, sara: 404 },
+  };
+
+  async function staffed() {
     const c = await everyKind();
-    const post = (token: string | null, id: string, payload: object) =>
-      c.app.inject({ method: 'POST', url: `/api/requests/${id}`, payload, ...(token ? as(token) : { headers: orchestratorHeaders(c.ids.ivan, c.orchestrator.id) }) });
-    /* Another person of Development, so the department's questions go to the CEO now; she still answers them. */
+    const delegate = await invitePerson(c.app, c.tokens.ceo, { name: 'Dave', email: 'dave@acme.com', access: { whole: true } });
+    const [dave] = await c.db.select().from(people).where(eq(people.name, 'Dave'));
+    await c.app.inject({ method: 'PUT', url: `/api/people/${dave!.id}/ceo-delegate`, payload: { isCeoDelegate: true }, ...as(c.tokens.ceo) });
+    /* A second person of Development, so its questions go to the CEO's count; both of them still take them. */
     const eve = await invitePerson(c.app, c.tokens.ceo, { name: 'Eve', email: 'eve@acme.com', access: { departments: [c.dev.id], teams: [] } });
-    expect(ownersOf(await c.view(c.tokens.ceo))[c.devPlain.request.id]).toBe(c.ids.ivan);
-    expect((await post(eve, c.devPlain.request.id, { answer: 'Yes.' })).statusCode).toBe(200);
-    expect((await post(c.tokens.dan, c.devPeople.request.id, { answer: 'Not yet.' })).statusCode).toBe(200);
-    expect((await post(c.tokens.dan, c.devApproval.request.id, { approve: true })).json().error.reason).toBe('company_scope_only');
-    expect((await post(c.tokens.sara, c.devQuestion.request.id, { answer: 'Visa.' })).statusCode).toBe(404);
-    expect((await post(c.tokens.tia, c.devQuestion.request.id, { answer: 'Visa.' })).statusCode).toBe(404);
-    expect((await post(c.tokens.zed, c.devApproval.request.id, { approve: true })).statusCode).toBe(200);
-    expect((await post(null, c.salesQuestion.request.id, { pick: 0 })).statusCode).toBe(200);
-    /* The computer stays the real CEO's alone, whatever the counts say. */
-    for (const token of [c.tokens.zed, c.tokens.dan]) expect((await c.app.inject({ url: '/api/computer', ...as(token) })).statusCode).toBe(403);
+    const tokens: Record<Who, string> = { ...c.tokens, delegate, eve };
+    return { ...c, tokens };
+  }
+
+  for (const [kind, whom] of Object.entries(matrix) as [Kind, Partial<Record<Who, number>>][]) {
+    for (const [who, status] of Object.entries(whom) as [Who, number][]) {
+      it(`${kind}: ${who} gets ${status}`, async () => {
+        const c = await staffed();
+        const id = c[kind].request.id;
+        const res = await c.app.inject({ method: 'POST', url: `/api/requests/${id}`, payload: answers[kind], ...as(c.tokens[who]) });
+        expect(res.statusCode).toBe(status);
+        if (status === 403) expect(res.json().error.reason).toBe('decision_not_allowed');
+        if (status === 404) expect(res.json().error.reason).toBe('request_unknown');
+        const [row] = await c.db.select().from(requests).where(eq(requests.id, id));
+        expect(row!.status === 'open').toBe(status !== 200);
+        if (status !== 200) expect(row).toMatchObject({ answeredBy: null, answer: null, picked: null });
+        const shown = (await c.view(c.tokens[who])).requests.find(r => r.id === id);
+        if (status === 404) expect(shown).toBeUndefined();
+        if (status === 403) expect(shown?.canAnswer).toBe(false);
+      });
+    }
+  }
+
+  it("refuses the orchestrator's own call that carries no turn of a person with the right", async () => {
+    const c = await everyKind();
+    const res = await c.app.inject({ method: 'POST', url: `/api/requests/${c.salesQuestion.request.id}`, payload: { pick: 0 }, headers: orchestratorHeaders(c.ids.ivan, c.orchestrator.id) });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error.reason).toBe('decision_context_missing');
+    const [row] = await c.db.select().from(requests).where(eq(requests.id, c.salesQuestion.request.id));
+    expect(row!.status).toBe('open');
+  });
+
+  it('shows the computer to people of the whole company and lets only the CEO and the delegate decide it, from their own screen', async () => {
+    const c = await staffed();
+    expect((await c.app.inject({ url: '/api/computer', ...as(c.tokens.zed) })).json()).toMatchObject({ asked: { reason: 'Inspect disk space.' }, canAnswer: false });
+    expect((await c.app.inject({ url: '/api/computer', ...as(c.tokens.delegate) })).json()).toMatchObject({ canAnswer: true });
+    expect((await c.app.inject({ url: '/api/computer', ...as(c.tokens.dan) })).statusCode).toBe(403);
     expect((await c.app.inject({ url: '/api/computer', headers: orchestratorHeaders(c.ids.ivan, c.orchestrator.id) })).statusCode).toBe(403);
-    expect((await c.app.inject({ method: 'POST', url: '/api/departments/build', payload: { proposalId: c.structure.id, items: [] }, ...as(c.tokens.dan) })).statusCode).toBe(403);
+    for (const action of ['decline', 'close', 'open']) {
+      for (const token of [c.tokens.zed, c.tokens.dan]) {
+        const res = await c.app.inject({ method: 'POST', url: `/api/computer/${action}`, ...as(token) });
+        expect(res.statusCode, `${action} by a person without the right`).toBe(403);
+      }
+      const viaOrchestrator = await c.app.inject({ method: 'POST', url: `/api/computer/${action}`, headers: orchestratorHeaders(c.ids.ivan, c.orchestrator.id) });
+      expect(viaOrchestrator.statusCode, `${action} by the orchestrator`).toBe(403);
+    }
+    expect(c.ctx.computer.view().asked).not.toBeNull();
+    expect((await c.app.inject({ method: 'POST', url: '/api/computer/decline', ...as(c.tokens.delegate) })).statusCode).toBe(200);
+    expect(c.ctx.computer.view().asked).toBeNull();
+  });
+
+  it('lets only the CEO and the delegate apply the cards, with or without the card', async () => {
+    const c = await staffed();
+    for (const token of [c.tokens.zed, c.tokens.dan]) {
+      for (const payload of [{ proposalId: c.structure.id, items: [] }, { items: [] }]) {
+        const res = await c.app.inject({ method: 'POST', url: '/api/departments/build', payload, ...as(token) });
+        expect(res.statusCode).toBe(403);
+      }
+      for (const payload of [{ proposalId: c.staff.id, people: [] }, { people: [] }]) {
+        const res = await c.app.inject({ method: 'POST', url: `/api/departments/${c.dev.id}/staff`, payload, ...as(token) });
+        expect([403, 404]).toContain(res.statusCode);
+      }
+    }
+    const zedsTry = await c.app.inject({ method: 'POST', url: '/api/departments/build', payload: { proposalId: c.structure.id, items: [] }, ...as(c.tokens.zed) });
+    expect(zedsTry.json().error.reason).toBe('decision_not_allowed');
+    const [still] = await c.db.select().from(proposals).where(eq(proposals.id, c.structure.id));
+    expect(still!.status).toBe('pending');
+    const byDelegate = await c.app.inject({ method: 'POST', url: '/api/departments/build', payload: { proposalId: c.structure.id, items: [{ template: 'support', checked: true, note: 'Answers customers.' }] }, ...as(c.tokens.delegate) });
+    expect(byDelegate.statusCode).toBe(201);
+    const [applied] = await c.db.select().from(proposals).where(eq(proposals.id, c.structure.id));
+    const [dave] = await c.db.select().from(people).where(eq(people.name, 'Dave'));
+    expect(applied).toMatchObject({ status: 'applied', appliedBy: dave!.id });
   });
 });
 
@@ -279,14 +379,14 @@ describe('decisions on the map', () => {
     const c = await everyKind();
     const org = async (token: string): Promise<OrgView> => (await c.app.inject({ url: '/api/org', ...as(token) })).json();
     expect(cards(await org(c.tokens.ceo))).toEqual({ [c.ids.ivan]: 8, [c.ids.zed]: 0, [c.ids.dan]: 1, [c.ids.sara]: 0, [c.ids.olga]: 0, [c.ids.tia]: 0 });
-    expect(cards(await org(c.tokens.zed))).toEqual({ [c.ids.ivan]: 7, [c.ids.zed]: 0, [c.ids.dan]: 1, [c.ids.sara]: 0, [c.ids.olga]: 0, [c.ids.tia]: 0 });
+    expect(cards(await org(c.tokens.zed))).toEqual({ [c.ids.ivan]: 8, [c.ids.zed]: 0, [c.ids.dan]: 1, [c.ids.sara]: 0, [c.ids.olga]: 0, [c.ids.tia]: 0 });
     expect(cards(await org(c.tokens.dan))).toEqual({ [c.ids.ivan]: 3, [c.ids.zed]: null, [c.ids.dan]: 1, [c.ids.sara]: null, [c.ids.olga]: null, [c.ids.tia]: null });
     expect(cards(await org(c.tokens.sara))).toEqual({ [c.ids.ivan]: 1, [c.ids.zed]: null, [c.ids.dan]: null, [c.ids.sara]: 0, [c.ids.olga]: null, [c.ids.tia]: null });
   });
 });
 
 describe('telling screens that decisions changed', () => {
-  it('tells only the real CEO that the request for the computer changed, without what it says', async () => {
+  it('tells people who see the whole company that the request for the computer changed, without what it says', async () => {
     const c = await company();
     await listen(c.app);
     const streams = { ceo: await openStream(c.app, c.tokens.ceo), zed: await openStream(c.app, c.tokens.zed), dan: await openStream(c.app, c.tokens.dan) };
@@ -295,7 +395,7 @@ describe('telling screens that decisions changed', () => {
     expect((await c.app.inject({ method: 'POST', url: '/api/computer/decline', ...as(c.tokens.ceo) })).statusCode).toBe(200);
     await until(() => streams.ceo.messages.some(m => m.type === 'computer'));
     expect(streams.ceo.messages.filter(m => m.type === 'computer')).toEqual([{ type: 'computer' }]);
-    expect(streams.zed.messages.some(m => m.type === 'computer')).toBe(false);
+    await until(() => streams.zed.messages.some(m => m.type === 'computer'));
     expect(streams.dan.messages.some(m => m.type === 'computer')).toBe(false);
   });
 
@@ -321,7 +421,7 @@ describe('telling screens that decisions changed', () => {
     const streams = { zed: await openStream(c.app, c.tokens.zed), dan: await openStream(c.app, c.tokens.dan) };
     await new Promise(r => setTimeout(r, 50));
     const [card] = await c.db.insert(proposals).values({ companyId: c.acme.id, agentId: c.orchestrator.id, brief: 'Add Support.', items: [] }).returning();
-    const built = await c.app.inject({ method: 'POST', url: '/api/departments/build', payload: { proposalId: card!.id, items: [{ template: 'support', checked: true, note: 'Answers customers.' }] }, ...as(c.tokens.zed) });
+    const built = await c.app.inject({ method: 'POST', url: '/api/departments/build', payload: { proposalId: card!.id, items: [{ template: 'support', checked: true, note: 'Answers customers.' }] }, ...as(c.tokens.ceo) });
     expect(built.statusCode).toBe(201);
     await until(() => streams.zed.messages.some(m => m.type === 'requests'));
     expect(streams.zed.messages.filter(m => m.type === 'requests')).toEqual([{ type: 'requests', spot: { departmentId: null } }]);

@@ -197,7 +197,7 @@ describe('the tracker', () => {
     await openTasks(user);
     const approval = within(screen.getByRole('region', { name: 'Waiting for you' })).getByRole('article', { name: /#10/ });
     expect(approval).toHaveTextContent('a'.repeat(40));
-    expect(approval).toHaveTextContent('Someone who sees the whole company approves it.');
+    expect(approval).toHaveTextContent('Decided by the CEO or the CEO delegate.');
     expect(within(approval).queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
     expect(within(approval).queryByRole('button', { name: 'Decline' })).not.toBeInTheDocument();
   });

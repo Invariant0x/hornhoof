@@ -215,7 +215,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       return;
     }
     case 'turn.open': {
-      const opened = await typedTurn(ctx, id, msg.agentKey, msg.text, ctx.terminals.typist(msg.agentKey));
+      const opened = await typedTurn(ctx, id, msg.agentKey, msg.text, ctx.terminals.takeTyped(id, msg.agentKey));
       ctx.hub.send(id, { type: 'turn.opened', agentKey: msg.agentKey, jobId: opened?.jobId ?? null, toolToken: opened?.token ?? null, ...(msg.ref ? { ref: msg.ref } : {}) });
       return;
     }

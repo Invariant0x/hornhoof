@@ -437,6 +437,8 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .status.invited { color: var(--amber-ink); border-color: currentColor; }
 .row-actions { text-align: right; white-space: nowrap; }
 .row-actions .act + .act { margin-left: 8px; }
+/* The CEO's mark of the delegate, a tick in the row's actions. */
+.act.delegate { gap: 6px; }
 .people-foot { display: flex; align-items: center; gap: 8px; font-size: 13px; }
 @media (max-width: 760px) {
   .tabs button { padding: 0 10px; }
@@ -446,6 +448,9 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
   .ptable tr { padding: 10px 0; border-bottom: 1px solid var(--line); }
   .ptable td { padding: 2px 14px; border: 0; }
   .row-actions { text-align: left; }
+  /* The actions wrap on a narrow screen instead of pushing it sideways. */
+  .ptable td.row-actions { display: flex; flex-wrap: wrap; gap: 8px; width: auto; white-space: normal; }
+  .row-actions .act + .act { margin-left: 0; }
 }
 
 /* Subscriptions */
@@ -977,6 +982,8 @@ summary.turn-head:focus-visible { outline: 2px solid var(--cyan); outline-offset
 .req-pics img { display: block; max-width: 240px; max-height: 160px; border: 1px solid var(--line); }
 .req-link { justify-self: start; }
 .req-options { display: flex; flex-wrap: wrap; gap: 8px; }
+/* A choice's ways for someone who reads it without picking. */
+.req-ways { margin: 0; padding-left: 20px; }
 .req-option { display: grid; gap: 6px; justify-items: start; padding: 8px 10px; border: 1px solid var(--line2); background: var(--surface2); color: var(--ink); font: inherit; cursor: pointer; }
 .req-option img { display: block; max-width: 200px; max-height: 140px; }
 .req-option:hover:not(:disabled), .req-option:focus-visible { border-color: var(--cyan); outline: none; box-shadow: 0 0 0 3px var(--glow); }

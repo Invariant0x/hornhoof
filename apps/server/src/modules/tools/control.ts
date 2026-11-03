@@ -4,9 +4,10 @@ import { and, eq } from 'drizzle-orm';
 import type { FastifyInstance, HTTPMethods } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { orchestratorHeaders } from '../../auth/internal.js';
+import { orchestratorDecisionHeaders, orchestratorHeaders } from '../../auth/internal.js';
 import { departments, people } from '../../db/schema.js';
 import { AgentPatch } from '../agents/routes.js';
+import { decisionPrincipal } from '../conversation/decision-context.js';
 import { deptName } from '../departments/templates.js';
 import { BuildBody, RepoBody } from '../departments/routes.js';
 import { LinkBody } from '../link/routes.js';
@@ -19,7 +20,7 @@ import { BudgetBody, ConnectBody, SubscriptionBody } from '../subscriptions/rout
 import { UpdateBody } from '../updates/routes.js';
 import { departmentOf, runsTier, servingSubscriptions, skillsFor, spotIn, StaffLine, type HireLine } from './staff.js';
 
-type ToolJob = { companyId: string; agentId: string; answersCeo: boolean };
+type ToolJob = { id: string; companyId: string; agentId: string; answersCeo: boolean };
 type Call = { method: HTTPMethods; url: string; payload?: unknown };
 type Dept = typeof departments.$inferSelect;
 type Hire = Omit<StaffLine, 'checked'>;
@@ -57,6 +58,14 @@ export const CEO_ONLY = new Set([
 ]);
 export const ONLY_CEO = 'Only the CEO can ask for this. Ask the CEO first.';
 
+/* The tools that take a decision for a person: the one this turn answers, who must have the right to take it. */
+const DECIDES = new Set(['answer_request', 'build_structure', 'hire']);
+const NO_PRINCIPAL =
+  'This turn answers no person who may take a decision now: the last message in it came from an employee or from Hornhoof, or words for it are still on their way. ' +
+  'Nothing was changed. Ask the person who takes it (the CEO, the CEO delegate or, for a department, its people) to decide it, or to tell you so in this window.';
+const NOT_THEIRS =
+  'The person this turn answers may not take this decision. Nothing was changed. Tell them who takes it (the CEO, the CEO delegate or, for a department, its people) and leave it to them.';
+
 /* The tools that make a machine command. Hornhoof shows it to the CEO in this window and tells him only that, so the
    code reaches neither him nor his conversation. */
 const SHOWS_COMMAND = new Set(['connect_plans', 'plan_command', 'machine_command', 'add_plan_to_machine']);
@@ -71,9 +80,7 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
       .where(and(eq(people.companyId, job.companyId), eq(people.isOwner, true)));
     if (!owner) return say('This company has no owner to act for.', true);
     const res = await app.inject({ method, url, headers: orchestratorHeaders(owner.id, job.agentId), ...(payload === undefined ? {} : { payload: payload as object }) });
-    if (res.statusCode >= 400) return say(errorOf(res.body) ?? `Hornhoof answered ${res.statusCode}.`, true);
-    if (!res.body) return say('Done.');
-    return say(res.body.length > MAX_ANSWER ? `${res.body.slice(0, MAX_ANSWER)}\n[cut at ${MAX_ANSWER} characters]` : res.body);
+    return answered(res);
   }
 
   /* One tool for one screen action. The id fields name the thing in the address; the rest is the body. A call that
@@ -84,7 +91,7 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
       if (CEO_ONLY.has(name) && !job.answersCeo) return say(ONLY_CEO, true);
       const made = await call(a);
       if (typeof made === 'string') return say(made, true);
-      const answer = await send(made);
+      const answer = DECIDES.has(name) ? await decide(ctx, app, job, made) : await send(made);
       return SHOWS_COMMAND.has(name) && !answer.isError ? say(SHOWN_TO_CEO) : answer;
     });
 
@@ -105,7 +112,8 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
     'build_structure',
     'Creates, changes and removes departments at once, as the CEO\'s click on a structure card does. brief: two to five sentences about the company, when it changed. ' +
       'Each item is a new department { template, name?, note?, products? } (name only when a template is used a second time) or a change { department, note?, products?, remove? }: ' +
-      'products are added, remove takes a department without employees away with its products. proposalId applies a card you proposed.',
+      'products are added, remove takes a department without employees away with its products. proposalId applies a card you proposed. ' +
+      'Only in a turn that answers the CEO or the CEO delegate, as their decision.',
     BuildBody.shape,
     body => ({ method: 'POST', url: '/api/departments/build', payload: body }),
   );
@@ -114,7 +122,8 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
     'hire',
     'Hires employees into a department, as the CEO\'s click on a staff card does. Each person is { role, name?, product?, model?, subscription?, skills?: { on, off } } as in propose_staff: ' +
       'left out, the name is the role\'s title, the model is Default, the subscription is the first one that serves the department and runs the role, and the skills are the role\'s. ' +
-      'Call staffing_options first. A department has one head. proposalId: the staff card this hires from, so it closes.',
+      'Call staffing_options first. A department has one head. proposalId: the staff card this hires from, so it closes. ' +
+      'Only in a turn that answers the CEO or the CEO delegate, as their decision.',
     { department: Id('department'), proposalId: z.uuid().optional(), people: z.array(StaffLine.omit({ checked: true })).min(1).max(30) },
     async ({ department, proposalId, people: lines }) => {
       const url = `/api/departments/${department}/staff`;
@@ -162,7 +171,8 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
 
   tool(
     'answer_request',
-    'Answers what an employee asked people (see /api/requests): answer for a question; approve true or false, with an optional answer, for a commit; pick (0 for the first way) for a choice; retry true for a stuck task.',
+    'Answers what an employee asked people (see /api/requests): answer for a question; approve true or false, with an optional answer, for a commit; pick (0 for the first way) for a choice; retry true for a stuck task. ' +
+      'It is the decision of the person this turn answers, the last one who wrote into it, and goes through only when they may take it.',
     {
       request: Id('request'),
       answer: z.string().max(4000).optional(),
@@ -328,10 +338,32 @@ async function hireLines(ctx: Ctx, companyId: string, dept: Dept, lines: Hire[])
   return out;
 }
 
-const errorOf = (body: string): string | undefined => {
+/* Why a decision did not go through, in the orchestrator's words; nothing for any other answer. */
+const REFUSED: Record<string, string> = { decision_not_allowed: NOT_THEIRS, decision_context_missing: NO_PRINCIPAL };
+
+/* A decision goes as the person this turn answers, found from the turn itself; the route checks the turn again and that
+   person's right while it keeps the decision. */
+async function decide(ctx: Ctx, app: FastifyInstance, job: ToolJob, { method, url, payload }: Call) {
+  const principal = await decisionPrincipal(ctx.db, job.id);
+  if (!principal) return say(NO_PRINCIPAL, true);
+  const headers = orchestratorDecisionHeaders({ ...principal, agentId: job.agentId, jobId: job.id });
+  const res = await app.inject({ method, url, headers, ...(payload === undefined ? {} : { payload: payload as object }) });
+  const refused = REFUSED[reasonOf(res.body) ?? ''];
+  return refused ? say(refused, true) : answered(res);
+}
+
+const errorBody = (body: string): { message?: string; reason?: string } | undefined => {
   try {
-    return (JSON.parse(body) as { error?: { message?: string } }).error?.message;
+    return (JSON.parse(body) as { error?: { message?: string; reason?: string } }).error;
   } catch {
     return undefined;
   }
 };
+const errorOf = (body: string): string | undefined => errorBody(body)?.message;
+const reasonOf = (body: string): string | undefined => errorBody(body)?.reason;
+
+function answered(res: { statusCode: number; body: string }) {
+  if (res.statusCode >= 400) return say(errorOf(res.body) ?? `Hornhoof answered ${res.statusCode}.`, true);
+  if (!res.body) return say('Done.');
+  return say(res.body.length > MAX_ANSWER ? `${res.body.slice(0, MAX_ANSWER)}\n[cut at ${MAX_ANSWER} characters]` : res.body);
+}

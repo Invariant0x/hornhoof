@@ -258,13 +258,24 @@ describe('AgentWindow', () => {
     }
   });
 
-  it('asks for no machine commands and no computer access for someone who is not the CEO', async () => {
-    const calls = mockApi({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: READY }], 'POST /api/agents/orchestrator/start': [200, { started: false }] });
-    const deputy: Me = { ...ME, person: { ...ME.person, id: 'p2', isOwner: false } };
-    render(<AgentWindow me={deputy} org={ORG} agentId="orchestrator" onClose={vi.fn()} />);
-    expect(await screen.findByRole('textbox')).toBeInTheDocument();
+  it('asks for no machine commands for someone who is not the CEO, and shows them the request for the computer without its buttons', async () => {
+    const asked: ComputerView = { available: true, until: null, asked: { reason: 'Restart the nodes outside AppArmor.', at: '2026-11-02T10:00:00Z' }, canAnswer: false };
+    const calls = mockApi({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: READY }], 'POST /api/agents/orchestrator/start': [200, { started: false }], 'GET /api/computer': [200, asked] });
+    const zed: Me = { ...ME, person: { ...ME.person, id: 'p2', isOwner: false }, canDecideCompany: false };
+    render(<AgentWindow me={zed} org={ORG} agentId="orchestrator" onClose={vi.fn()} />);
+    const card = await screen.findByRole('region', { name: "The orchestrator asks for access to the server's computer" });
+    expect(within(card).getByText('Restart the nodes outside AppArmor.')).toBeInTheDocument();
+    expect(within(card).getByText('Decided by the CEO or the CEO delegate.')).toBeInTheDocument();
+    expect(within(card).queryByRole('button', { name: 'Open access for a day' })).not.toBeInTheDocument();
     expect(calls.some(c => c.path === '/api/nodes/commands')).toBe(false);
-    expect(calls.some(c => c.path === '/api/computer')).toBe(false);
+  });
+
+  it('asks for no computer access for someone who sees only part of the company', async () => {
+    const calls = mockApi({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: READY }], 'POST /api/agents/orchestrator/start': [200, { started: false }] });
+    const dana: Me = { ...ME, person: { ...ME.person, id: 'p3', isOwner: false, scopeKind: 'listed' }, canDecideCompany: false };
+    render(<AgentWindow me={dana} org={ORG} agentId="orchestrator" onClose={vi.fn()} />);
+    expect(await screen.findByRole('textbox')).toBeInTheDocument();
+    expect(calls.some(c => c.path === '/api/nodes/commands' || c.path === '/api/computer')).toBe(false);
   });
 
   describe('access to the computer', () => {

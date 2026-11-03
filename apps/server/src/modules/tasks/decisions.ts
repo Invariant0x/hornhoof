@@ -1,45 +1,17 @@
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { accessOf, canReach, WHOLE, type Access, type Spot } from '../../auth/access.js';
+import { decisionOwner, type Candidate, type DecisionSubject } from '../../auth/decision-owner.js';
+import { canDecide, decidedBy, type DecidedBy } from '../../auth/decisions.js';
 import type { Person } from '../../auth/session.js';
-import { agents, departments, people, personAccess, proposals, requests, tasks, type DecisionTopic, type REQUEST_KINDS } from '../../db/schema.js';
-import { ownsComputer, type Asked } from '../computer/access.js';
-import { taskSpot } from './engine.js';
+import { agents, departments, people, personAccess, proposals, requests, tasks } from '../../db/schema.js';
+import { canViewComputer, type Asked } from '../computer/access.js';
+import { requestSubject, taskSpot } from './engine.js';
 
-/* Who decides what waits for people, and what each person may see of it. The owner only says whose card counts a decision
-   and whose filter shows it: who may read or answer it stays as the existing routes check it. */
+/* What waits for people, as each person may see it: whose card counts each decision and whose filter shows it, and whether
+   this person may take it (auth/decisions.ts). */
 
-export type Candidate = { id: string; status: Person['status']; isOwner: boolean; access: Access };
-
-/* A request of an agent on a task, a card of the orchestrator, or its request for the computer the server runs on. */
-export type DecisionSubject =
-  | { source: 'request'; kind: (typeof REQUEST_KINDS)[number]; topic: DecisionTopic | null; spot: Spot }
-  | { source: 'proposal' }
-  | { source: 'computer_access' };
-
-/* The topics a department's own person decides; every other one, and one not given, is the CEO's. */
-const DEPARTMENTAL: readonly DecisionTopic[] = ['task', 'employee'];
-
-function ceoOf(people: readonly Candidate[]): string {
-  const ceo = people.find(p => p.isOwner && p.status === 'active');
-  if (!ceo) throw new Error('The company has no active CEO to give its decisions to.');
-  return ceo.id;
-}
-
-/* Whether a person's access lists the place itself or the department holding it. A team, or the whole company, is not a
-   department's own. */
-const listsPlace = (access: Access, spot: Spot) =>
-  !access.whole && Boolean((spot.departmentId && access.departments.has(spot.departmentId)) || (spot.parentId && access.departments.has(spot.parentId)));
-
-/* A question on a department's task or employee goes to the one active person, other than the CEO, whose access lists that
-   department or the product it is about; with nobody or with several such people, to the CEO. People who see the whole
-   company decide like the CEO and are no department's own. Approvals, the CEO's topics, unknown topics, the orchestrator's
-   own tasks, its cards and its request for the computer go to the CEO. */
-export function decisionOwner(d: DecisionSubject, people: readonly Candidate[]): string {
-  if (d.source !== 'request' || d.kind === 'approval' || !d.topic || !DEPARTMENTAL.includes(d.topic) || !d.spot.departmentId) return ceoOf(people);
-  const own = people.filter(p => p.status === 'active' && !p.isOwner && listsPlace(p.access, d.spot));
-  return own.length === 1 ? own[0]!.id : ceoOf(people);
-}
+export { DEPARTMENTAL, decisionOwner, decisionPlace, listsPlace, type Candidate, type DecisionSubject } from '../../auth/decision-owner.js';
 
 type RequestRow = typeof requests.$inferSelect;
 type TaskRow = typeof tasks.$inferSelect;
@@ -50,9 +22,9 @@ export type Counts = { byPerson: Record<string, number>; byAgent: Record<string,
 /* What waits for people as one person may see it, each with its owner and whether this person may answer it, and the counts
    of all of it. */
 export type Decisions = {
-  requests: { request: RequestRow; task: TaskRow; ownerPersonId: string; canAnswer: boolean }[];
-  proposals: { proposal: ProposalRow; ownerPersonId: string; canAnswer: boolean }[];
-  computer: { asked: Asked; agentId: string; ownerPersonId: string } | null;
+  requests: { request: RequestRow; task: TaskRow; ownerPersonId: string; canAnswer: boolean; decidedBy: DecidedBy }[];
+  proposals: { proposal: ProposalRow; ownerPersonId: string; canAnswer: boolean; decidedBy: DecidedBy }[];
+  computer: { asked: Asked; agentId: string; ownerPersonId: string; canAnswer: boolean; decidedBy: DecidedBy } | null;
   counts: Counts;
 };
 
@@ -91,7 +63,7 @@ function counted(owners: { ownerPersonId: string; agentId: string }[]): Counts {
 }
 
 /* Everything waiting for people that this person may see: requests on tasks they reach, the orchestrator's pending cards
-   for people who see the whole company, and the orchestrator's request for the computer for the real CEO only. */
+   and its request for the computer for people who see the whole company, each with whether this person may take it. */
 export async function visibleDecisions(ctx: Pick<Ctx, 'db' | 'computer'>, me: Person): Promise<Decisions> {
   const { db } = ctx;
   const access = await accessOf(db, me);
@@ -103,20 +75,15 @@ export async function visibleDecisions(ctx: Pick<Ctx, 'db' | 'computer'>, me: Pe
     .where(and(eq(requests.companyId, me.companyId), eq(requests.status, 'open')))
     .orderBy(asc(requests.createdAt), asc(requests.id));
   const whole = me.scopeKind === 'company';
-  const seen = rows
-    .filter(r => canReach(access, taskSpot(r.task)))
-    .map(r => ({
-      ...r,
-      ownerPersonId: decisionOwner({ source: 'request', kind: r.request.kind, topic: r.request.decisionTopic, spot: taskSpot(r.task) }, everyone),
-      /* As POST /api/requests/:id lets them: anyone who reaches the task, and for an approval someone who sees the whole company. */
-      canAnswer: r.request.kind !== 'approval' || whole,
-    }));
+  /* As the routes that take them let them. */
+  const judged = (subject: DecisionSubject) => ({ ownerPersonId: decisionOwner(subject, everyone), canAnswer: canDecide(subject, me, access, me.companyId), decidedBy: decidedBy(subject) });
+  const seen = rows.filter(r => canReach(access, taskSpot(r.task))).map(r => ({ ...r, ...judged(requestSubject(r.request, r.task)) }));
   const cards = whole ? (await db.select().from(proposals).where(and(eq(proposals.companyId, me.companyId), eq(proposals.status, 'pending')))).sort(byTimeAndId) : [];
-  const shownCards = cards.map(proposal => ({ proposal, ownerPersonId: decisionOwner({ source: 'proposal' }, everyone), canAnswer: true }));
-  /* The control folder is read once, for the item and for the counts alike. */
-  const asked = ownsComputer(me) ? ctx.computer.view().asked : null;
+  const shownCards = cards.map(proposal => ({ proposal, ...judged({ source: 'proposal' }) }));
+  /* The control folder is read once, for the item and for the counts alike. Only a screen of a person takes it. */
+  const asked = canViewComputer(me) ? ctx.computer.view().asked : null;
   const [orchestrator] = asked ? await db.select({ id: agents.id }).from(agents).where(and(eq(agents.companyId, me.companyId), eq(agents.kind, 'orchestrator'))) : [];
-  const computer = asked && orchestrator ? { asked, agentId: orchestrator.id, ownerPersonId: decisionOwner({ source: 'computer_access' }, everyone) } : null;
+  const computer = asked && orchestrator ? { asked, agentId: orchestrator.id, ...judged({ source: 'computer_access' }) } : null;
   const counts = counted([
     ...seen.map(r => ({ ownerPersonId: r.ownerPersonId, agentId: r.request.agentId })),
     ...shownCards.map(c => ({ ownerPersonId: c.ownerPersonId, agentId: c.proposal.agentId })),

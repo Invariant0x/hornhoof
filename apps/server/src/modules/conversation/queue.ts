@@ -7,7 +7,7 @@ import { hashToken, newToken } from '../../crypto/tokens.js';
 import { agents, jobs, nodes, people, subscriptions, tasks, turns } from '../../db/schema.js';
 import { dispatchJob } from '../jobs/dispatch.js';
 import { turnsHeld } from '../updates/drain.js';
-import { sayLive } from './live.js';
+import { alsoKept, deliverLive, inputKept } from './decision-context.js';
 import { BUILTIN, identityOf, nodeIdentity, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { liveNode, planNodes, type NodeRow } from '../nodes/nodes.js';
 import { appendEvent, earlierTalk, messageForJob, publishWorking, type WithEvent } from '../events/store.js';
@@ -213,29 +213,39 @@ export async function insertTurn(ctx: Ctx, t: Turn): Promise<string> {
       retryOf: t.retryOf ?? null,
       continueOf: t.continueOf ?? null,
       answersCeo: t.answersCeo === true || (await isCeo(ctx, t.message?.personId)),
+      /* Until its message is kept, a turn sent at once answers nobody. */
+      decisionInputPending: shownOf(t) !== null,
     })
     .returning({ id: jobs.id });
-  await showMessage(ctx, t, job!.id);
+  await showMessage(ctx, t, job!.id, tx => inputKept(tx, job!.id));
   return job!.id;
 }
 
-/* An employee's message carries its name for the window and its id in by. */
-async function showMessage(ctx: Ctx, t: Turn, jobId: string): Promise<void> {
+/* The message a turn shows in the window: a person's or an agent's, or Hornhoof's own words. */
+function shownOf(t: Turn): NonNullable<Turn['message']> | null {
   const message = t.message ?? { personId: null, text: t.prompt };
-  if (!message.text.trim()) return;
+  return message.text.trim() ? message : null;
+}
+
+/* An employee's message carries its name for the window and its id in by. kept: also kept with it. */
+async function showMessage(ctx: Ctx, t: Turn, jobId: string, kept: WithEvent): Promise<void> {
+  const message = shownOf(t);
+  if (!message) return;
   const { personId, ...data } = message;
-  await appendEvent(ctx, { companyId: t.companyId, agentId: t.agentId, jobId, kind: 'message', data, personId }, t.withMessage);
+  await appendEvent(ctx, { companyId: t.companyId, agentId: t.agentId, jobId, kind: 'message', data, personId }, alsoKept(t.withMessage, kept));
 }
 
 /* Stores the turn, then sends it if he is free. A message for an agent at work goes into the turn it runs instead, and a
    turn that took the CEO's message answers the CEO from then on. */
 export async function enqueueTurn(ctx: Ctx, t: Turn): Promise<string> {
-  const into = t.message && !t.taskId ? await sayLive(ctx, t.agentId, t.prompt, undefined, { personId: t.message.personId, data: t.message }) : null;
-  if (into) {
-    if (await isCeo(ctx, t.message?.personId)) await ctx.db.update(jobs).set({ answersCeo: true }).where(eq(jobs.id, into));
-    await showMessage(ctx, t, into);
-    return into;
-  }
+  const message = !t.taskId ? t.message : undefined;
+  const into = message
+    ? await deliverLive(ctx, t.agentId, t.prompt, { source: { personId: message.personId, data: message } }, async (jobId, kept) => {
+        if (await isCeo(ctx, message.personId)) await ctx.db.update(jobs).set({ answersCeo: true }).where(eq(jobs.id, jobId));
+        await showMessage(ctx, t, jobId, kept);
+      })
+    : null;
+  if (into) return into;
   const jobId = await insertTurn(ctx, t);
   await pump(ctx, t.agentId);
   return jobId;

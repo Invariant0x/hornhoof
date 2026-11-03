@@ -15,6 +15,7 @@ export type PersonView = {
   title: string;
   status: Person['status'];
   isOwner: boolean;
+  isCeoDelegate: boolean;
   access: AccessView;
 };
 
@@ -38,6 +39,7 @@ export async function personViews(db: Db, rows: Person[]): Promise<PersonView[]>
       title: p.title,
       status: p.status,
       isOwner: p.isOwner,
+      isCeoDelegate: p.isCeoDelegate,
       access: {
         whole: p.scopeKind === 'company',
         departments: depts.filter(d => deptIds.has(d.id)).map(d => ({ id: d.id, name: deptName(d) })),

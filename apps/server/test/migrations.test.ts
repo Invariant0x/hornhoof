@@ -484,3 +484,36 @@ describe('migration 0040', () => {
     ]);
   });
 });
+
+describe('migration 0044', () => {
+  const C = '00000000-0000-4000-8000-000000000001';
+
+  it('makes each active person who sees the whole company, but the CEO, the CEO delegate, and nobody else', async () => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0043_turn_exits') });
+    await db.execute(sql`insert into companies (id, name) values (${C}, 'Acme')`);
+    const person = (name: string, status: string, scope: string, owner: boolean) =>
+      db.execute(sql`insert into people (company_id, name, email, status, scope_kind, is_owner) values (${C}, ${name}, ${`${name.toLowerCase()}@acme.com`}, ${status}, ${scope}, ${owner})`);
+    await person('Ivan', 'active', 'company', true);
+    await person('David', 'active', 'company', false);
+    await person('Dana', 'active', 'listed', false);
+    await person('Ilya', 'invited', 'company', false);
+    await person('Olga', 'disabled', 'company', false);
+
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+
+    expect((await db.execute(sql`select name, is_owner, is_ceo_delegate from people order by name`)).rows).toEqual([
+      { name: 'Dana', is_owner: false, is_ceo_delegate: false },
+      { name: 'David', is_owner: false, is_ceo_delegate: true },
+      { name: 'Ilya', is_owner: false, is_ceo_delegate: false },
+      { name: 'Ivan', is_owner: true, is_ceo_delegate: false },
+      { name: 'Olga', is_owner: false, is_ceo_delegate: false },
+    ]);
+    await db.execute(sql`insert into people (company_id, name, email, status, scope_kind) values (${C}, 'Nina', 'nina@acme.com', 'active', 'company')`);
+    expect((await db.execute(sql`select is_ceo_delegate from people where name = 'Nina'`)).rows).toEqual([{ is_ceo_delegate: false }]);
+    expect((await db.execute(sql`select decision_input_pending from jobs`)).rows).toEqual([]);
+    expect((await db.execute(sql`select answered_by_agent_id, answer_job_id, answer_source_seq from requests`)).rows).toEqual([]);
+  });
+});

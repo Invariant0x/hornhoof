@@ -113,6 +113,42 @@ function EditForm({ person, org, titleOnly, onSaved, onClose }: { person: Person
   );
 }
 
+/* The delegate's access, status and sign-in are the CEO's alone to change. */
+const delegateLocked = (me: Me, p: PersonView): boolean => Boolean(p.isCeoDelegate) && !me.person.isOwner;
+/* The CEO alone sets the mark, on someone active with the whole company, and takes it off anyone who has it. */
+const marksOn = (me: Me, p: PersonView): boolean => me.person.isOwner && !p.isOwner && (Boolean(p.isCeoDelegate) || (p.status === 'active' && p.access.whole));
+
+/* What this person may do on another's row. */
+function rightsOn(me: Me, p: PersonView): { manageable: boolean; titleOnly: boolean; marks: boolean } {
+  const canManage = me.person.scopeKind === 'company';
+  const locked = delegateLocked(me, p);
+  const manageable = canManage && !p.isOwner && p.id !== me.person.id && !locked;
+  const titleOnly = !manageable && (p.id === me.person.id || (canManage && (p.isOwner || locked)));
+  return { manageable, titleOnly, marks: marksOn(me, p) };
+}
+
+function DelegateTag({ person }: { person: PersonView }) {
+  const t = useT();
+  if (!person.isCeoDelegate) return null;
+  return (
+    <>
+      {' '}
+      <em className="t-card-tag">{t.people.ceoDelegate}</em>
+    </>
+  );
+}
+
+/* The CEO's tick that marks the delegate, who then takes the CEO's decisions, and takes the mark off. */
+function DelegateMark({ person, onChange }: { person: PersonView; onChange: (on: boolean) => void }) {
+  const t = useT();
+  return (
+    <label className="act delegate" title={t.people.ceoDelegateHint}>
+      <input type="checkbox" checked={Boolean(person.isCeoDelegate)} aria-label={t.people.ceoDelegateLabel(person.name)} onChange={e => onChange(e.target.checked)} />
+      {t.people.ceoDelegate}
+    </label>
+  );
+}
+
 export function People({ me }: { me: Me }) {
   const t = useT();
   const [people, setPeople] = useState<PersonView[] | null>(null);
@@ -148,6 +184,10 @@ export function People({ me }: { me: Me }) {
 
   const setStatus = (person: PersonView, status: 'active' | 'disabled') =>
     run(async () => replace((await api.patch<{ person: PersonView }>(`/api/people/${person.id}`, { status })).person));
+
+  /* The CEO marks the delegate, who then takes the CEO's decisions, and takes the mark off. */
+  const setDelegate = (person: PersonView, isCeoDelegate: boolean) =>
+    run(async () => replace((await api.put<{ person: PersonView }>(`/api/people/${person.id}/ceo-delegate`, { isCeoDelegate })).person));
 
   const newLink = (person: PersonView) =>
     run(async () => {
@@ -207,17 +247,18 @@ export function People({ me }: { me: Me }) {
           </thead>
           <tbody>
             {people.map(p => {
-              const manageable = canManage && !p.isOwner && p.id !== me.person.id;
-              const titleOnly = !manageable && (p.id === me.person.id || (canManage && p.isOwner));
+              const { manageable, titleOnly, marks } = rightsOn(me, p);
               return (
                 <tr key={p.id} className={p.status}>
                   <td>
                     <span className="pname"><PersonIcon />{p.name}</span>
+                    <DelegateTag person={p} />
                   </td>
                   <td>{p.title}</td>
                   <td>{accessText(t, p.access, org)}</td>
                   <td><span className={`status ${p.status}`}>{t.people.status[p.status]}</span></td>
                   <td className="row-actions">
+                    {marks && <DelegateMark person={p} onChange={on => void setDelegate(p, on)} />}
                     {(manageable || titleOnly) && (
                       <button className="act" type="button" aria-label={t.people.editLabel(p.name)} onClick={() => setPanel({ kind: 'edit', person: p, titleOnly })}>{t.people.edit}</button>
                     )}
@@ -238,6 +279,7 @@ export function People({ me }: { me: Me }) {
           </tbody>
         </table>
       )}
+      {me.person.isOwner && <p className="muted">{t.people.ceoDelegate}: {t.people.ceoDelegateHint}</p>}
       <p className="muted people-foot"><AgentIcon /> {t.people.agentsNote}</p>
     </section>
   );

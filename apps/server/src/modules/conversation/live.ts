@@ -14,9 +14,19 @@ const SAY_MARGIN_MS = 5_000;
 type Waiting = { node: NodeIdentity; done: (ok: boolean) => void };
 const waiting = new WeakMap<Ctx, Map<string, Waiting>>();
 
+const nothingBefore = async (): Promise<void> => {};
+
 /* Words for an agent whose turn runs in a live terminal go into that turn at once, typed as a person types; with taskId,
-   only into a turn on that task. The running turn's job, or null when none runs or the words could not go in. */
-export async function sayLive(ctx: Ctx, agentId: string, text: string, taskId?: string, source?: { personId?: string | null; data?: unknown }): Promise<string | null> {
+   only into a turn on that task. The running turn's job, or null when none runs or the words could not go in. before
+   runs once the turn is found, before the words go. */
+export async function sayLive(
+  ctx: Ctx,
+  agentId: string,
+  text: string,
+  taskId?: string,
+  source?: { personId?: string | null; data?: unknown },
+  before: (jobId: string) => Promise<void> = nothingBefore,
+): Promise<string | null> {
   const [running] = await ctx.db
     .select({ id: jobs.id, companyId: jobs.companyId, taskId: jobs.taskId, nodeId: jobs.nodeId, sub: subscriptions })
     .from(jobs)
@@ -27,6 +37,7 @@ export async function sayLive(ctx: Ctx, agentId: string, text: string, taskId?: 
   if (!running || !node || (taskId && running.taskId !== taskId)) return null;
   if (!ctx.hub.hasTerminals(node)) return null;
   const message = await incomingEnvelope(ctx, running.companyId, agentId, source?.personId, source?.data);
+  await before(running.id);
   return (await waitForWords(ctx, node, agentId, addressed(text, message))) ? running.id : null;
 }
 

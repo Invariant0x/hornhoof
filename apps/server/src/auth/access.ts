@@ -33,7 +33,7 @@ export async function agentSpot(db: Db, agent: { departmentId: string | null; pr
   return { departmentId: agent.departmentId, parentId: dept?.parentId ?? null, teamId: agent.teamId };
 }
 
-export async function accessOf(db: Db, person: Pick<Person, 'id' | 'scopeKind'>): Promise<Access> {
+export async function accessOf(db: Pick<Db, 'select'>, person: Pick<Person, 'id' | 'scopeKind'>): Promise<Access> {
   if (person.scopeKind === 'company') return WHOLE;
   const rows = await db.select().from(personAccess).where(eq(personAccess.personId, person.id));
   return {

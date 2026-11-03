@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { errorText, useLanguage, useT } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
-import type { ProviderId, RoleOption, Roster, Serving, StaffLine } from '../types';
+import type { DecidedBy, ProviderId, RoleOption, Roster, Serving, StaffLine } from '../types';
+import { Decides, frozenBy } from './DecidedBy';
 
 type Props = {
   department: { id: string; name: string };
@@ -12,6 +13,8 @@ type Props = {
   /* Called once the people are hired. */
   onDone?(): void;
   onHide?(): void;
+  /* Someone who may not take the card reads it, with who takes it, and changes nothing. */
+  locked?: DecidedBy;
 };
 
 /* A line with the CEO's choices: the subscription and model start from the line, or from the role and Default. */
@@ -48,7 +51,7 @@ function rowsOf(roster: Roster, lines: StaffLine[]): Row[] {
 }
 
 /* Who to hire into a department: ticks, a subscription and a model per person, and one click that hires them. */
-export function StaffCard({ department, proposal, onCorrect, onDone, onHide }: Props) {
+export function StaffCard({ department, proposal, onCorrect, onDone, onHide, locked }: Props) {
   const t = useT();
   const { language } = useLanguage();
   const [roster, setRoster] = useState<Roster | null>(null);
@@ -106,11 +109,11 @@ export function StaffCard({ department, proposal, onCorrect, onDone, onHide }: P
       {rows.map((r, i) => {
         const name = nameOf(r);
         const sub = roster?.subscriptions.find(s => s.id === r.subscription);
-        const off = sent || !r.checked;
+        const off = frozenBy(sent, locked) || !r.checked;
         return (
           <div key={i} className="staff-row">
             <label>
-              <input type="checkbox" checked={r.checked} disabled={sent} onChange={e => update(i, { checked: e.target.checked })} />
+              <input type="checkbox" checked={r.checked} disabled={frozenBy(sent, locked)} onChange={e => update(i, { checked: e.target.checked })} />
               <span>
                 <b>{name}</b>
                 {r.role.kind === 'head' && <em className="t-card-tag">{t.dept.head}</em>}
@@ -148,14 +151,16 @@ export function StaffCard({ department, proposal, onCorrect, onDone, onHide }: P
         </p>
       )}
       <div className="f">
-        <button className="btn" type="button" disabled={!roster || sent || busy || !chosen.length} onClick={hire}>
-          {t.staff.hire(chosen.length)}
-        </button>
-        {!sent && proposal && onCorrect && (
-          <button className="btn ghost" type="button" onClick={onCorrect}>
-            {t.card.correct}
+        <Decides locked={locked}>
+          <button className="btn" type="button" disabled={!roster || sent || busy || !chosen.length} onClick={hire}>
+            {t.staff.hire(chosen.length)}
           </button>
-        )}
+          {!sent && proposal && onCorrect && (
+            <button className="btn ghost" type="button" onClick={onCorrect}>
+              {t.card.correct}
+            </button>
+          )}
+        </Decides>
         {!sent && onHide && (
           <button className="btn ghost" type="button" onClick={onHide}>
             {t.card.hide}

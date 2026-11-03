@@ -80,7 +80,7 @@ describe('access to the computer the server runs on', () => {
     const asked = await call(await mcp(app), 'ask_computer_access', { reason: 'Restart the nodes outside AppArmor.' });
     expect(asked.isError).toBeFalsy();
     const shown = (await app.inject({ method: 'GET', url: '/api/computer', ...as(ceo) })).json();
-    expect(shown).toEqual({ available: true, until: null, asked: { reason: 'Restart the nodes outside AppArmor.', at: expect.any(String) }, machine: null });
+    expect(shown).toEqual({ available: true, until: null, asked: { reason: 'Restart the nodes outside AppArmor.', at: expect.any(String) }, machine: null, canAnswer: true });
 
     const before = Date.now();
     const opened = await app.inject({ method: 'POST', url: '/api/computer/open', ...as(ceo) });
@@ -89,7 +89,7 @@ describe('access to the computer the server runs on', () => {
     expect(until_).toBeGreaterThanOrEqual(before + DAY_MS - 1000);
     expect(until_).toBeLessThanOrEqual(Date.now() + DAY_MS);
     expect(settings(control)).toMatchObject({ untilSec: Math.floor(until_ / 1000), asked: null });
-    expect((await app.inject({ method: 'GET', url: '/api/computer', ...as(ceo) })).json()).toEqual({ available: true, until: opened.json().until, asked: null, machine: null });
+    expect((await app.inject({ method: 'GET', url: '/api/computer', ...as(ceo) })).json()).toEqual({ available: true, until: opened.json().until, asked: null, machine: null, canAnswer: true });
     expect(await lines(db, orchestrator.id)).toEqual([
       { state: 'asked', reason: 'Restart the nodes outside AppArmor.' },
       { state: 'opened', until: opened.json().until },
@@ -190,16 +190,27 @@ describe('access to the computer the server runs on', () => {
     ]);
   });
 
-  it('is opened and closed by the CEO alone, never by another person or through the orchestrator', async () => {
+  it('is opened and closed by the CEO and the delegate alone, never by another person or through the orchestrator', async () => {
     const { app, db, ceo, control, orchestrator } = await company();
     const lena = await invitePerson(app, ceo, { name: 'Lena', email: 'lena@example.com', access: { whole: true } });
     const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
     for (const action of ['open', 'close', 'decline']) {
-      expect((await app.inject({ method: 'POST', url: `/api/computer/${action}`, ...as(lena) })).statusCode).toBe(403);
+      const byLena = await app.inject({ method: 'POST', url: `/api/computer/${action}`, ...as(lena) });
+      expect(byLena.statusCode).toBe(403);
+      expect(byLena.json().error.reason).toBe('decision_not_allowed');
       expect((await app.inject({ method: 'POST', url: `/api/computer/${action}`, headers: orchestratorHeaders(owner!.id, orchestrator.id) })).statusCode).toBe(403);
     }
-    expect((await app.inject({ method: 'GET', url: '/api/computer', ...as(lena) })).statusCode).toBe(403);
+    /* She sees it without the buttons; the orchestrator does not see it. */
+    expect((await app.inject({ method: 'GET', url: '/api/computer', ...as(lena) })).json()).toMatchObject({ available: true, canAnswer: false });
+    expect((await app.inject({ method: 'GET', url: '/api/computer', headers: orchestratorHeaders(owner!.id, orchestrator.id) })).statusCode).toBe(403);
     expect(existsSync(join(control, 'computer.json'))).toBe(false);
+
+    const [lenaRow] = await db.select().from(people).where(eq(people.name, 'Lena'));
+    await app.inject({ method: 'PUT', url: `/api/people/${lenaRow!.id}/ceo-delegate`, payload: { isCeoDelegate: true }, ...as(ceo) });
+    const opened = await app.inject({ method: 'POST', url: '/api/computer/open', ...as(lena) });
+    expect(opened.statusCode).toBe(200);
+    expect(opened.json()).toMatchObject({ canAnswer: true, until: expect.any(String) });
+    expect((await app.inject({ method: 'POST', url: '/api/computer/close', ...as(lena) })).statusCode).toBe(200);
   });
 
   it('is not offered on a server without an updater', async () => {

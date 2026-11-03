@@ -309,6 +309,13 @@
       "when": 1793680326456,
       "tag": "0043_turn_exits",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1793682406470,
+      "tag": "0044_ceo_delegate",
+      "breakpoints": true
     }
   ]
 }

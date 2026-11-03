@@ -10,7 +10,10 @@ import { orchestratorOf } from '../conversation/queue.js';
 import { serverMachine } from '../computer/access.js';
 import { deptName } from '../departments/templates.js';
 import { departmentNames, visibleDecisions, type Decisions } from './decisions.js';
-import { answer, cancel, CLOSED, comment, createTask, refuse, taskSpot, type Task } from './engine.js';
+import { answer, cancel, CLOSED, comment, createTask, refuse, requestSubject, taskSpot, type Task } from './engine.js';
+import { requireDecision } from '../../auth/decisions.js';
+import { delegationOf, lockedFor } from '../conversation/decision-context.js';
+import type { DecidedBy } from '../../auth/decisions.js';
 import { commitUrl, picturesOf } from './attachments.js';
 import { departmentOf } from '../tools/staff.js';
 import { workTree } from './tree.js';
@@ -60,8 +63,20 @@ async function agentNames(db: Ctx['db'], ids: string[]): Promise<Map<string, str
 
 type Places = Awaited<ReturnType<typeof departmentNames>>;
 
+/* Whom people read a decision is for, with the department's name. */
+function decidedByView(d: DecidedBy, places: Places) {
+  const place = d.departmentId ? places.get(d.departmentId) : undefined;
+  return { kind: d.kind, department: place ? { id: place.id, name: deptName(place) } : null };
+}
+
+/* The departments the cards are for and the requests' departments decide. */
+function placesOf(cards: Decisions['proposals'], mine: Decisions['requests']): string[] {
+  const ids = [...cards.map(c => c.proposal.departmentId), ...mine.map(r => r.decidedBy.departmentId)];
+  return ids.filter((id): id is string => id !== null);
+}
+
 /* An orchestrator's pending card, answered with its own build or staff click. */
-function proposalView({ proposal: p, ownerPersonId, canAnswer }: Decisions['proposals'][number], names: Map<string, string>, places: Places) {
+function proposalView({ proposal: p, ownerPersonId, canAnswer, decidedBy }: Decisions['proposals'][number], names: Map<string, string>, places: Places) {
   const place = p.departmentId ? places.get(p.departmentId) : undefined;
   return {
     id: p.id,
@@ -73,6 +88,7 @@ function proposalView({ proposal: p, ownerPersonId, canAnswer }: Decisions['prop
     at: p.createdAt.toISOString(),
     ownerPersonId,
     canAnswer,
+    decidedBy: decidedByView(decidedBy, places),
   };
 }
 
@@ -83,9 +99,10 @@ async function computerView(ctx: Ctx, companyId: string, computer: NonNullable<D
     id: 'server' as const,
     agent: { id: computer.agentId, name: names.get(computer.agentId) ?? '' },
     ownerPersonId: computer.ownerPersonId,
-    canAnswer: true,
+    canAnswer: computer.canAnswer,
+    decidedBy: decidedByView(computer.decidedBy, new Map()),
     at: computer.asked.at,
-    view: { ...ctx.computer.view(), asked: computer.asked, machine: await serverMachine(ctx, companyId) },
+    view: { ...ctx.computer.view(), asked: computer.asked, machine: await serverMachine(ctx, companyId), canAnswer: computer.canAnswer },
   };
 }
 
@@ -195,7 +212,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const cards = decisions.proposals.filter(p => picked(p.ownerPersonId));
     const computer = decisions.computer && picked(decisions.computer.ownerPersonId) ? decisions.computer : null;
     const names = await agentNames(db, [...mine.map(r => r.request.agentId), ...cards.map(c => c.proposal.agentId), ...(computer ? [computer.agentId] : [])]);
-    const places = await departmentNames(ctx, cards.flatMap(c => (c.proposal.departmentId ? [c.proposal.departmentId] : [])));
+    const places = await departmentNames(ctx, placesOf(cards, mine));
     const pictures = await picturesOf(db, mine.map(r => r.request));
     const commits = await Promise.all(mine.map(r => commitUrl(db, r.task, r.request.commit)));
     const explaining = await explainingOf(db, me.companyId, mine.filter(r => !r.request.explained).map(r => r.request.id));
@@ -216,6 +233,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
         task: { id: lines[i]!.id, number: lines[i]!.number, title: lines[i]!.title, department: lines[i]!.department },
         ownerPersonId: r.ownerPersonId,
         canAnswer: r.canAnswer,
+        decidedBy: decidedByView(r.decidedBy, places),
       })),
       proposals: cards.map(c => proposalView(c, names, places)),
       computerAccess: computer && (await computerView(ctx, me.companyId, computer, names)),
@@ -227,14 +245,16 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const { id } = IdParams.parse(req.params);
     const body = AnswerBody.parse(req.body);
-    const [found] = await db.select({ taskId: requests.taskId, kind: requests.kind }).from(requests).where(and(eq(requests.id, id), eq(requests.companyId, me.companyId)));
+    const [found] = await db.select().from(requests).where(and(eq(requests.id, id), eq(requests.companyId, me.companyId)));
     if (!found) throw refuse(404, 'request_unknown', 'There is no such request.');
-    await reachable(me, found.taskId).catch(() => {
+    /* What the person does not see stays unknown; what they see and may not take is refused. */
+    const task = await reachable(me, found.taskId).catch(() => {
       throw refuse(404, 'request_unknown', 'There is no such request.');
     });
-    /* The people of the department see a commit waiting for approval; only someone who sees the whole company lets it into main. */
-    if (found.kind === 'approval') requireCompanyScope(me);
-    const done = await answer(ctx, actorOf(me), id, body);
+    /* The orchestrator answers only for the person its turn answers, under its input lock, checked again as it is kept. */
+    const on = delegationOf(me);
+    requireDecision(requestSubject(found, task), me, await accessOf(db, me), me.companyId);
+    const done = await lockedFor(ctx, on, () => answer(ctx, actorOf(me), id, body, on));
     await wakeAll(ctx, done.wakes);
     /* An agent switched off while it waited for this answer leaves the work now. */
     await leaveIfOff(ctx, done.request.agentId);

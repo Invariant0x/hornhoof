@@ -3,10 +3,11 @@ import { api } from '../api';
 import { deptLabel, errorText, useLanguage, useT, type Messages } from '../i18n';
 import { useStream } from '../live';
 import { PROGRAM_NAMES, PROVIDER_NAMES } from '../providers';
-import type { AgentCardView, ComputerView, EventView, Me, OrchestratorState, Org, ShownCommand, StaffLine, StructureItem, SubView, TemplateKey } from '../types';
+import type { AgentCardView, ComputerView, DecidedBy, Decisions, EventView, Me, OrchestratorState, Org, ShownCommand, StaffLine, StructureItem, SubView, TemplateKey } from '../types';
 import { EventMessage, isMessage, MessageFrame, useFolding } from '../ui/AgentMessage';
 import { AgentTerminal } from '../ui/AgentTerminal';
 import { CommandCard } from '../ui/CommandCard';
+import { CEO_DECIDES } from '../ui/DecidedBy';
 import { ComputerCard, isOpen } from '../ui/ComputerCard';
 import { Markdown } from '../ui/Markdown';
 import { Notebook } from '../ui/Notebook';
@@ -72,6 +73,44 @@ export type StaffAsk = { id: string; name: string; at: number };
 /* agentId: 'orchestrator' or an employee's id. staff: the CEO's "+ Hire", for the orchestrator's window only. */
 type Props = { me: Me; org: Org; agentId: string; staff?: StaffAsk | null; onClose(): void; onCard?(): void };
 
+/* Whether this person takes the orchestrator's open card, as /api/requests says of that card; until it says, or for a card
+   it no longer lists, as /api/me says of the CEO's decisions. */
+function useCardRight(id: string | null, fallback: boolean): boolean {
+  const [right, setRight] = useState<{ id: string; canAnswer: boolean } | null>(null);
+  useEffect(() => {
+    if (!id) return;
+    let live = true;
+    api.get<Decisions>('/api/requests').then(
+      d => live && setRight({ id, canAnswer: d.proposals.find(p => p.id === id)?.canAnswer ?? fallback }),
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, [id, fallback]);
+  return right?.id === id ? right.canAnswer : fallback;
+}
+
+/* The cards are the CEO's decisions: someone else reads them without their buttons. The orchestrator's open card goes by
+   what /api/requests says of it, the hand-made ones by what /api/me says of the CEO's decisions. */
+function useCardLocks(me: Me, open: unknown): { cardLock?: DecidedBy; handLock?: DecidedBy } {
+  const decidesCompany = me.canDecideCompany ?? me.person.isOwner;
+  const cardRight = useCardRight(open ? field(open, 'proposalId') : null, decidesCompany);
+  return { cardLock: cardRight ? undefined : CEO_DECIDES, handLock: decidesCompany ? undefined : CEO_DECIDES };
+}
+
+/* What the orchestrator's window shows a person besides the conversation. The machine commands he asked Hornhoof for
+   are the CEO's alone. Access to the computer the server runs on: the orchestrator asks, people of the whole company
+   see it, and the CEO's or the delegate's screen opens or closes it. */
+const cardsFor = (me: Me, orchestrator: boolean) => ({ ownsCommands: orchestrator && me.person.isOwner, seesComputer: orchestrator && me.person.scopeKind === 'company' });
+
+/* Loads them; null for what this person does not get, or what did not load. */
+const loadCards = (ownsCommands: boolean, seesComputer: boolean) =>
+  Promise.all([
+    ownsCommands ? api.get<{ commands: ShownCommand[] }>('/api/nodes/commands').catch(() => null) : null,
+    seesComputer ? api.get<ComputerView>('/api/computer').catch(() => null) : null,
+  ]);
+
 /* The request for the computer changed, here or on another of the CEO's screens: what the window shows of it loads again. */
 function useComputerChanges(load: () => Promise<void>): void {
   useStream(m => {
@@ -104,8 +143,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard }:
   /* The machine commands he asked Hornhoof for. They are the CEO's alone: only the CEO's screen gets them, and shows them
      here, apart from his conversation. */
   const [commands, setCommands] = useState<ShownCommand[]>([]);
-  const ownsCommands = orchestrator && me.person.isOwner;
-  /* Access to the computer the server runs on: the orchestrator asks, and only the CEO's screen opens or closes it. */
+  const { ownsCommands, seesComputer } = cardsFor(me, orchestrator);
   const [computer, setComputer] = useState<ComputerView | null>(null);
   const asked = useRef<number | null>(null);
   const input = useRef<HTMLTextAreaElement>(null);
@@ -147,15 +185,11 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard }:
   }, []);
 
   const loadCommands = useCallback(async () => {
-    if (!ownsCommands) return;
-    const [res, access] = await Promise.all([
-      api.get<{ commands: ShownCommand[] }>('/api/nodes/commands').catch(() => null),
-      api.get<ComputerView>('/api/computer').catch(() => null),
-    ]);
+    const [res, access] = await loadCards(ownsCommands, seesComputer);
     if (!mounted.current) return;
     if (res) setCommands(res.commands);
     if (access) setComputer(access);
-  }, [ownsCommands]);
+  }, [ownsCommands, seesComputer]);
 
   const hideCommand = (id: string) =>
     api.post(`/api/nodes/commands/${id}/hide`).then(
@@ -328,15 +362,16 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard }:
   const where = [model || t.agent.default, orchestratorStatus(t, sub), machine?.hostname].filter(Boolean).join(', ');
   const hasTerminal = Boolean(state?.terminal) && !noTerminal;
   const terminal = hasTerminal && !asLog;
+  const { cardLock, handLock } = useCardLocks(me, open);
 
   const cards = (
     <>
-      {pending && <StructureCard key={pending.proposalId} proposal={{ id: pending.proposalId, brief: pending.brief, items: pending.items }} departments={org.departments} onCorrect={focusLine} />}
+      {pending && <StructureCard key={pending.proposalId} proposal={{ id: pending.proposalId, brief: pending.brief, items: pending.items }} departments={org.departments} onCorrect={focusLine} locked={cardLock} />}
       {staffing && (
-        <StaffCard key={staffing.proposalId} department={{ id: staffing.department, name: staffDept ? deptLabel(t, staffDept) : '' }} proposal={{ id: staffing.proposalId, brief: staffing.brief, people: staffing.people }} onCorrect={focusLine} />
+        <StaffCard key={staffing.proposalId} department={{ id: staffing.department, name: staffDept ? deptLabel(t, staffDept) : '' }} proposal={{ id: staffing.proposalId, brief: staffing.brief, people: staffing.people }} onCorrect={focusLine} locked={cardLock} />
       )}
-      {!open && staffByHand && <StaffCard key={`hand-${staffByHand.id}`} department={staffByHand} onDone={() => setStaffByHand(null)} onHide={() => setStaffByHand(null)} />}
-      {byHand && <StructureCard manual={{ existing }} departments={org.departments} onCorrect={focusLine} onDone={() => setManual(false)} onHide={() => setManual(false)} />}
+      {!open && staffByHand && <StaffCard key={`hand-${staffByHand.id}`} department={staffByHand} onDone={() => setStaffByHand(null)} onHide={() => setStaffByHand(null)} locked={handLock} />}
+      {byHand && <StructureCard manual={{ existing }} departments={org.departments} onCorrect={focusLine} onDone={() => setManual(false)} onHide={() => setManual(false)} locked={handLock} />}
       {commands.map(c => (
         <CommandCard key={c.id} shown={c} onDone={() => void hideCommand(c.id)} />
       ))}

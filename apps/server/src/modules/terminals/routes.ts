@@ -4,6 +4,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agentFor } from '../agents/find.js';
+import { typedInto } from '../conversation/decision-context.js';
 import { programNode, windowNode } from '../conversation/queue.js';
 import { sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { CLOSE } from './relay.js';
@@ -51,6 +52,19 @@ export function terminalRoutes(app: FastifyInstance, ctx: Ctx): void {
       }
       socket.send(JSON.stringify({ type: 'ready', write }));
 
+      /* Frames go on in the order they came, as one waits for the person's Enter to be kept. */
+      let frames = Promise.resolve();
+      const frame = async (data: z.infer<typeof FromBrowser>) => {
+        if (data.type === 'resize') return void ctx.hub.send(node, { type: 'term.resize', termId, cols: data.cols, rows: data.rows });
+        if (!write) return;
+        /* A prompt goes in with Enter; scrolling and clicks send keys too. What the person sends with it is their word in
+           the running turn from now on, kept before the keys reach it. */
+        if (data.data.includes('\r')) {
+          ctx.terminals.typing(agentId, personId, node);
+          await typedInto(ctx, agentId, personId);
+        }
+        ctx.hub.send(node, { type: 'term.input', termId, data: data.data });
+      };
       socket.on('message', raw => {
         let parsed: unknown;
         try {
@@ -60,12 +74,7 @@ export function terminalRoutes(app: FastifyInstance, ctx: Ctx): void {
         }
         const msg = FromBrowser.safeParse(parsed);
         if (!msg.success) return;
-        if (msg.data.type === 'input') {
-          if (!write) return;
-          /* A prompt goes in with Enter; scrolling and clicks send keys too. */
-          if (msg.data.data.includes('\r')) ctx.terminals.typing(agentId, personId);
-          ctx.hub.send(node, { type: 'term.input', termId, data: msg.data.data });
-        } else ctx.hub.send(node, { type: 'term.resize', termId, cols: msg.data.cols, rows: msg.data.rows });
+        frames = frames.then(() => frame(msg.data)).catch(err => ctx.log.error({ error: String(err) }, 'Keys for a terminal could not go on.'));
       });
       /* Like the live stream, the view looks at the person again: one signed out or moved away stops watching. An agent
          that moved to another subscription or machine runs on another node once its running turn is over, and the browser
