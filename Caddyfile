@@ -1,0 +1,82 @@
+# Hornhoof edge and relay. hornhoof.org and www show the stub; hornhoof.org/api/ is the relay's link API and
+# hornhoof.org/~!frp takes the tunnels (frpc over wss) of Hornhoof servers. Each company is one subdomain, a name it
+# picked (acme) or by default a long random one, served by frps through its server's own tunnel. Reserved and blocked
+# names get the 404 and 410 pages of /var/www/hornhoof-pages; a name with no tunnel gets the same 404 page from frps.
+# Older companies on the Mac's SSH tunnel live in /etc/caddy/companies/*.caddy and come first.
+# After an edit: caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy
+{
+	servers {
+		# No HTTP/3: the firewall opens TCP only.
+		protocols h1 h2
+	}
+}
+
+hornhoof.org {
+	# The relay's API (hornhoof-relay on 7600).
+	handle /api/* {
+		reverse_proxy 127.0.0.1:7600
+	}
+	# Tunnels of Hornhoof servers: frpc over wss into frps (7000). They live for hours.
+	handle /~!frp {
+		reverse_proxy 127.0.0.1:7000 {
+			stream_close_delay 1h
+		}
+	}
+	handle {
+		root * /var/www/hornhoof
+		file_server
+	}
+	header {
+		-Server
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy no-referrer
+	}
+}
+
+www.hornhoof.org {
+	redir https://hornhoof.org{uri} permanent
+}
+
+# Used by every company file: import company <company>
+(company) {
+	reverse_proxy unix//run/hornhoof-tunnel/{args[0]}.sock {
+		# Event streams and terminals go out as they come, never buffered.
+		flush_interval -1
+		# A reload (a company added, a certificate renewed) leaves open sockets and streams alone for an hour.
+		stream_close_delay 1h
+	}
+}
+
+*.hornhoof.org {
+	# Wildcard certificate, renewed on the Mac by DNS-01 and pushed here. Company names never reach CT logs.
+	tls /etc/caddy/certs/wildcard.crt /etc/caddy/certs/wildcard.key
+	header -Server
+
+	# Names that never go to a company, whatever the company files say. company.sh on the Mac reads this line.
+	@reserved host www.hornhoof.org api.hornhoof.org admin.hornhoof.org administrator.hornhoof.org root.hornhoof.org mail.hornhoof.org email.hornhoof.org smtp.hornhoof.org imap.hornhoof.org pop.hornhoof.org pop3.hornhoof.org mx.hornhoof.org webmail.hornhoof.org autodiscover.hornhoof.org autoconfig.hornhoof.org ns.hornhoof.org ns1.hornhoof.org ns2.hornhoof.org ns3.hornhoof.org ns4.hornhoof.org dns.hornhoof.org status.hornhoof.org health.hornhoof.org app.hornhoof.org apps.hornhoof.org dashboard.hornhoof.org console.hornhoof.org panel.hornhoof.org portal.hornhoof.org login.hornhoof.org signin.hornhoof.org signup.hornhoof.org auth.hornhoof.org sso.hornhoof.org oauth.hornhoof.org id.hornhoof.org account.hornhoof.org accounts.hornhoof.org billing.hornhoof.org pay.hornhoof.org payments.hornhoof.org support.hornhoof.org help.hornhoof.org docs.hornhoof.org doc.hornhoof.org blog.hornhoof.org news.hornhoof.org cdn.hornhoof.org static.hornhoof.org assets.hornhoof.org media.hornhoof.org files.hornhoof.org img.hornhoof.org images.hornhoof.org download.hornhoof.org downloads.hornhoof.org upload.hornhoof.org uploads.hornhoof.org dev.hornhoof.org staging.hornhoof.org stage.hornhoof.org test.hornhoof.org testing.hornhoof.org demo.hornhoof.org beta.hornhoof.org preview.hornhoof.org sandbox.hornhoof.org git.hornhoof.org ssh.hornhoof.org vpn.hornhoof.org ftp.hornhoof.org sftp.hornhoof.org proxy.hornhoof.org edge.hornhoof.org gateway.hornhoof.org internal.hornhoof.org intranet.hornhoof.org hostmaster.hornhoof.org postmaster.hornhoof.org webmaster.hornhoof.org abuse.hornhoof.org security.hornhoof.org noc.hornhoof.org localhost.hornhoof.org wildcard.hornhoof.org hornhoof.hornhoof.org
+	handle @reserved {
+		root * /var/www/hornhoof-pages
+		rewrite * /404.html
+		file_server {
+			status 404
+		}
+	}
+
+	# Names blocked with hornhoof-relay ban: 410.
+	import blocked.caddy
+
+	# Companies on the Mac's SSH tunnel (managed by company.sh), until they move to the relay.
+	import companies/*.caddy
+
+	# Everything else goes to frps, which knows the name of every live tunnel.
+	handle {
+		reverse_proxy 127.0.0.1:8080 {
+			flush_interval -1
+			stream_close_delay 1h
+			# Caddy sets X-Forwarded-For, -Host and -Proto itself; drop the client-address headers it does not set.
+			header_up -X-Real-IP
+			header_up -Forwarded
+		}
+	}
+}

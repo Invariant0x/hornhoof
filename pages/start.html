@@ -1,0 +1,33 @@
+
+    <div class="cmd">
+      <div class="cmd-head">
+        <span class="cmd-label">Run in a terminal</span>
+        <button class="copy" type="button" id="copy"><span>Copy</span></button>
+      </div>
+      <code id="cmd">curl -fsSL https://hornhoof.org/install.sh | bash -s -- server</code>
+    </div>
+    <p class="small">Already have a company? Open it with its link.</p>
+    <script>
+    (() => {
+      const copy = document.getElementById('copy');
+      const cmd = document.getElementById('cmd');
+      let timer;
+      copy.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(cmd.textContent);
+        } catch {
+          /* No clipboard here: the command is selected for the reader to copy. */
+          const range = document.createRange();
+          range.selectNodeContents(cmd);
+          const sel = getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+          return;
+        }
+        copy.firstChild.textContent = 'Copied';
+        copy.classList.add('done');
+        clearTimeout(timer);
+        timer = setTimeout(() => { copy.firstChild.textContent = 'Copy'; copy.classList.remove('done'); }, 2000);
+      });
+    })();
+    </script>

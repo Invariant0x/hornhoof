@@ -1,0 +1,19 @@
+[Unit]
+Description=frps for the Hornhoof relay
+After=network.target hornhoof-relay.service
+Wants=hornhoof-relay.service
+
+[Service]
+User=frps
+Group=frps
+ExecStart=/usr/local/bin/frps -c /etc/frp/frps.toml
+Restart=always
+RestartSec=2
+LimitNOFILE=1048576
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

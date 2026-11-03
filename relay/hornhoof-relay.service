@@ -1,0 +1,20 @@
+[Unit]
+Description=Hornhoof relay: link API and frps plugin
+After=network.target
+
+[Service]
+User=hornhoof-relay
+Group=hornhoof-relay
+ExecStart=/usr/bin/python3 /usr/local/lib/hornhoof-relay/relay.py
+StateDirectory=hornhoof-relay
+StateDirectoryMode=0700
+Restart=always
+RestartSec=2
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+MemoryMax=200M
+
+[Install]
+WantedBy=multi-user.target
