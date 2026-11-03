@@ -1,4 +1,4 @@
-import { effortFor, effortsOf, MAX_INSTRUCTIONS, modelsFor, OLD_NODE_INSTRUCTIONS, type Limits } from '@hornhoof/protocol';
+import { effortFor, effortsOf, MAX_INSTRUCTIONS, modelsFor, OLD_NODE_INSTRUCTIONS, ORCHESTRATOR_EFFORT, type Limits } from '@hornhoof/protocol';
 import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, lte, ne, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -308,11 +308,16 @@ export async function startProgram(ctx: Ctx, node: NodeIdentity, agentId: string
   if (started) await pump(ctx, agentId);
 }
 
+function keepsSessionAcrossTurns(kind: string): boolean {
+  return kind === 'orchestrator' || kind === 'head';
+}
+
 /* A new session catches up from the conversation. The last finished turn's session goes on only on the same subscription
    and node with the same instructions: another machine does not have it, and changed instructions would not reach a
    session that already has the old ones. A turn that ran out of time or was stopped in its session finished too, the
-   session whole; one that broke, or was called off before it ran, leaves the session before it. Each turn of the company
-   starts every agent in a clean session, which only the orchestrator, who talks with people across turns, catches up. */
+   session whole; one that broke, or was called off before it ran, leaves the session before it. Members start each company
+   turn in a clean session with no catch-up. The orchestrator and department heads keep their session across turns and
+   compact it when it fills. */
 async function sessionFor(ctx: Ctx, agent: { id: string; companyId: string; kind: string; name: string }, on: { subscriptionId: string; nodeId: string | null }, instructionsHash: string): Promise<{ sessionId: string | null; catchUp: string | null }> {
   const [last] = await ctx.db
     .select({ subscriptionId: jobs.subscriptionId, nodeId: jobs.nodeId, sessionId: jobs.sessionId, instructionsHash: jobs.instructionsHash, startedAt: jobs.startedAt })
@@ -325,8 +330,8 @@ async function sessionFor(ctx: Ctx, agent: { id: string; companyId: string; kind
     .from(turns)
     .where(and(eq(turns.companyId, agent.companyId), eq(turns.status, 'open')));
   const newTurn = Boolean(last?.startedAt && turn && new Date(last.startedAt) < new Date(turn.openedAt));
-  if (last?.sessionId && !newTurn && last.subscriptionId === on.subscriptionId && last.nodeId === on.nodeId && last.instructionsHash === instructionsHash) return { sessionId: last.sessionId, catchUp: null };
-  if (newTurn && agent.kind !== 'orchestrator') return { sessionId: null, catchUp: null };
+  if (newTurn && !keepsSessionAcrossTurns(agent.kind)) return { sessionId: null, catchUp: null };
+  if (last?.sessionId && last.subscriptionId === on.subscriptionId && last.nodeId === on.nodeId && last.instructionsHash === instructionsHash) return { sessionId: last.sessionId, catchUp: null };
   const talk = await earlierTalk(ctx.db, agent.id);
   return { sessionId: null, catchUp: talk.length ? preface(talk, agent.kind === 'orchestrator' ? 'Orchestrator' : agent.name) : null };
 }
@@ -525,7 +530,9 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   const models = modelsFor(sub.provider, sub.models);
   const model = agent.model && models.some(m => m.id === agent.model) ? agent.model : null;
   /* How hard it thinks goes on in the same session; the program starts again at the new level. */
-  const effort = effortFor(sub.provider, agent.effort, effortsOf(models, model));
+  const role = agent.roleKey ? ctx.templates.roles.get(agent.roleKey) : undefined;
+  const roleEffort = agent.kind === 'orchestrator' ? ORCHESTRATOR_EFFORT : role?.effort;
+  const effort = effortFor(agent.effort, effortsOf(models, model), roleEffort);
   /* The hash covers the model too, so a new model starts a fresh session like new instructions do. */
   const runHash = model ? textHash(`${instructions.hash}:${model}`) : instructions.hash;
   const { sessionId, catchUp } = await sessionFor(ctx, agent, { subscriptionId: sub.id, nodeId: place.nodeId }, runHash);

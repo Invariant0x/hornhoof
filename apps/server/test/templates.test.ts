@@ -1,8 +1,9 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { COMPANY_TEMPLATES, MAX_INSTRUCTIONS, TEMPLATE_KEYS } from '@hornhoof/protocol';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, onTestFinished } from 'vitest';
 import { ORCHESTRATOR_SKILLS, orchestratorSteady, renderInstructions } from '../src/modules/agents/instructions.js';
 import { NOTEBOOK_MAX, NOTES_MAX } from '../src/modules/notebook/book.js';
 import { CORE_SKILLS, HEAD_SKILLS, loadTemplates, MEMBER_SKILLS } from '../src/modules/templates/load.js';
@@ -18,6 +19,24 @@ describe('templates', () => {
     expect(skills.length).toBeGreaterThanOrEqual(40);
     for (const s of skills) expect(s.hash).toMatch(/^[0-9a-f]{12}$/);
     for (const r of roles) expect(r.hash).toMatch(/^[0-9a-f]{12}$/);
+  });
+
+  it('gives every role the effort assigned to its work', () => {
+    const xhigh = ['DEV-ENG', 'DEV-BE', 'DEV-FE', 'DEV-REV', 'DEV-SEC', 'DEV-ARCH', 'DEV-RED', 'DEV-PERF'];
+    const high = ['DEV-HEAD', 'DEV-TEST', 'DEV-QA', 'DEV-OPS', 'OPS-FIX', 'OPS-BUGS', 'OPS-INTEG', 'BIZ-ANALYST', 'FIN-AUDIT', 'FIN-FPA', 'DSN-SYS', 'DSN-UI', 'SUP-T2', 'HOM-NET', 'SAL-AE', 'MKT-WRITE'];
+    for (const role of roles) expect(role.effort, role.id).toBe(xhigh.includes(role.id) ? 'xhigh' : high.includes(role.id) ? 'high' : 'medium');
+  });
+
+  it('rejects an unknown role effort and allows a role to omit it', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hornhoof-effort-'));
+    onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+    cpSync(DIR, dir, { recursive: true });
+    const file = join(dir, 'roles/development/DEV-BE.md');
+    const original = readFileSync(file, 'utf8').replace(/^effort:.*\n/m, '');
+    writeFileSync(file, original.replace('tier:', 'effort: extreme\ntier:'));
+    expect(() => loadTemplates(dir)).toThrow(/DEV-BE\.md: effort/);
+    writeFileSync(file, original);
+    expect(loadTemplates(dir).roles.get('DEV-BE')!.effort).toBeUndefined();
   });
 
   it('keeps roles short, and every skill within what each program reads of a skill file', () => {

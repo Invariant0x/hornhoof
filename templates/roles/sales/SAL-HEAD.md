@@ -5,6 +5,7 @@ kind: head
 title: { en: "Head of sales", ru: "Руководитель отдела продаж" }
 description: { en: "Runs the pipeline and the forecast, and lets nothing go out to prospects or customers without approval.", ru: "Ведет воронку и прогноз продаж и не выпускает ни одного сообщения клиентам без одобрения." }
 tier: standard
+effort: medium
 perProduct: false
 default: true
 order: 10

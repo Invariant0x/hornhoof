@@ -5,6 +5,7 @@ kind: head
 title: { en: "Head of design", ru: "Руководитель отдела дизайна" }
 description: { en: "Owns the one design system for all products and decides which design work goes forward.", ru: "Отвечает за единую дизайн-систему всех продуктов и решает, какая дизайнерская работа идет дальше." }
 tier: standard
+effort: medium
 perProduct: false
 default: true
 order: 10
