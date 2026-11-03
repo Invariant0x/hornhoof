@@ -520,3 +520,55 @@ describe('opening a terminal while the plan is at its limit', () => {
     expect(plan.queued()).toBe(0);
   });
 });
+
+describe('who typed into the terminal, for the decisions of a turn', () => {
+  it('takes the Enter of a person once, and only from the node that shows the terminal', async () => {
+    const { TerminalRelay } = await import('../src/modules/terminals/relay.js');
+    const { BUILTIN, nodeIdentity } = await import('../src/modules/nodes/hub.js');
+    const relay = new TerminalRelay();
+    const other = nodeIdentity('00000000-0000-4000-8000-0000000000aa');
+    relay.typing('agent-1', 'ivan', BUILTIN);
+    expect(relay.takeTyped(other, 'agent-1')).toBeNull();
+    expect(relay.takeTyped(BUILTIN, 'agent-2')).toBeNull();
+    expect(relay.takeTyped(BUILTIN, 'agent-1')).toBe('ivan');
+    expect(relay.takeTyped(BUILTIN, 'agent-1')).toBeNull();
+  });
+
+  it('opens no second turn for one Enter', async () => {
+    const { app, url, ceo, builtin, orchestratorId } = await live();
+    const screen = await watch(url, ceo);
+    await next(builtin, 'term.open');
+    screen.ws.send(JSON.stringify({ type: 'input', data: 'hi\r' }));
+    await next(builtin, 'term.input');
+    builtin.send({ type: 'turn.open', agentKey: orchestratorId, text: 'hi' });
+    const opened = await next(builtin, 'turn.opened');
+    expect(opened.jobId).toEqual(expect.any(String));
+    builtin.send({ type: 'job.done', jobId: opened.jobId!, ok: true, sessionId: 'sess-1', result: 'Hi', tail: '', error: null });
+    await until(async () => !(await state(app, ceo)).busy);
+    builtin.send({ type: 'turn.open', agentKey: orchestratorId, text: 'approve the release' });
+    expect(await next(builtin, 'turn.opened')).toMatchObject({ jobId: null, toolToken: null });
+  });
+
+  it("makes the person who presses Enter in the orchestrator's running turn its last word, before the keys go on", async () => {
+    const { app, db, url, ceo, builtin, orchestratorId } = await live();
+    const { decisionPrincipal } = await import('../src/modules/conversation/decision-context.js');
+    await app.inject({ method: 'POST', url: '/api/agents/orchestrator/start', ...as(ceo) });
+    const greeting = await next(builtin, 'job.run');
+    /* Hornhoof's greeting is no person's word. */
+    expect(await decisionPrincipal(db, greeting.jobId)).toBeNull();
+    const screen = await watch(url, ceo);
+    await next(builtin, 'term.open');
+    screen.ws.send(JSON.stringify({ type: 'input', data: 'approve it' }));
+    expect(await next(builtin, 'term.input')).toMatchObject({ data: 'approve it' });
+    expect(await decisionPrincipal(db, greeting.jobId)).toBeNull();
+    screen.ws.send(JSON.stringify({ type: 'input', data: '\r' }));
+    expect(await next(builtin, 'term.input')).toMatchObject({ data: '\r' });
+    const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
+    expect(await decisionPrincipal(db, greeting.jobId)).toMatchObject({ personId: owner!.id });
+    /* One mark for the same person, however many times they press Enter. */
+    screen.ws.send(JSON.stringify({ type: 'input', data: 'y\r' }));
+    await next(builtin, 'term.input');
+    const marks = (await events(app, ceo)).filter((e: { kind: string }) => e.kind === 'typed');
+    expect(marks).toHaveLength(1);
+  });
+});

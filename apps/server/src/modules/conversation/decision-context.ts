@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { accessOf } from '../../auth/access.js';
 import type { DecisionSubject } from '../../auth/decision-owner.js';
@@ -6,11 +6,11 @@ import { actsAsCeo, canDecide, notAllowed } from '../../auth/decisions.js';
 import type { Db } from '../../db/client.js';
 import { agentEvents, agents, jobs, people } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import type { WithEvent } from '../events/store.js';
+import { appendEvent, type WithEvent } from '../events/store.js';
 import { sayLive } from './live.js';
 
 /* The orchestrator takes a decision for a person only in a turn that answers that person: the last message that came into
-   the turn says who it is. A message of an agent or of Hornhoof itself answers nobody, so after it the turn takes no
+   the turn, or the last Enter a person pressed in its terminal, says who it is. A message of an agent or of Hornhoof itself answers nobody, so after it the turn takes no
    decision until a person with the right writes again. A turn that took no message answers whoever started it. Words on
    their way into the turn, or that went in without being kept, leave the turn without anyone's right. */
 
@@ -36,7 +36,7 @@ export async function decisionPrincipal(db: Reader, jobId: string): Promise<Prin
   const [last] = await db
     .select({ seq: agentEvents.seq, personId: agentEvents.personId })
     .from(agentEvents)
-    .where(and(eq(agentEvents.jobId, jobId), eq(agentEvents.agentId, job.agentId!), eq(agentEvents.kind, 'message'), incoming))
+    .where(and(eq(agentEvents.jobId, jobId), eq(agentEvents.agentId, job.agentId!), inArray(agentEvents.kind, ['message', 'typed']), incoming))
     .orderBy(desc(agentEvents.seq))
     .limit(1);
   if (last) return last.personId ? { personId: last.personId, sourceSeq: last.seq } : null;
@@ -146,4 +146,19 @@ export const lockedFor = <T>(ctx: Pick<Ctx, 'db'>, on: Delegation | undefined, f
 export async function stillDecides(db: Reader, companyId: string, personId: string, subject: DecisionSubject, on: Delegation | undefined): Promise<void> {
   if (on) await checkDelegation(db, on);
   await requireDecider(db, companyId, on?.personId ?? personId, subject);
+}
+
+/* A person pressed Enter in the terminal of the orchestrator's running turn: what they typed is their word in it, so the
+   turn answers them from now on. Kept under the lock before the keys go on, once as long as the turn answers them. */
+export async function typedInto(ctx: Pick<Ctx, 'db' | 'bus' | 'templates'>, agentId: string, personId: string): Promise<void> {
+  await withInputLock(ctx, agentId, async () => {
+    const [job] = await ctx.db
+      .select({ id: jobs.id, companyId: jobs.companyId })
+      .from(jobs)
+      .innerJoin(agents, eq(agents.id, jobs.agentId))
+      .where(and(eq(jobs.agentId, agentId), eq(jobs.kind, 'conversation'), eq(jobs.status, 'running'), eq(agents.kind, 'orchestrator')))
+      .limit(1);
+    if (!job || (await decisionPrincipal(ctx.db, job.id))?.personId === personId) return;
+    await appendEvent(ctx, { companyId: job.companyId, agentId, jobId: job.id, kind: 'typed', data: {}, personId });
+  });
 }

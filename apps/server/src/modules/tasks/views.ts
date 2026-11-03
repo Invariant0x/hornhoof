@@ -32,7 +32,8 @@ export type TaskLine = {
 /* In the review of a turn, returned: a reviewer who found what blocks; skipped: one who did not check it, for want of a
    subscription or having left it. */
 export type GateView = AgentRef & { state: 'passed' | 'current' | 'next' | 'returned' | 'skipped' };
-export type LogLine = { kind: string; text: string; data: unknown; by: { kind: 'person' | 'agent'; id: string; name: string } | null; at: string };
+/* for: the person the orchestrator acted for, as in a request it answered for them. */
+export type LogLine = { kind: string; text: string; data: unknown; by: { kind: 'person' | 'agent'; id: string; name: string; for?: { id: string; name: string } } | null; at: string };
 /* images: the pictures the agent showed, commitUrl: where its commit can be seen, picked: the way a person took in a choice. */
 export type RequestView = {
   id: string;
@@ -122,6 +123,13 @@ export async function taskLines(ctx: Pick<Ctx, 'db' | 'templates'>, rows: Task[]
 
 const LOG_SHOWN = 200;
 
+/* The people the orchestrator acted for in these events, by id. */
+async function forWhom(db: Ctx['db'], data: Record<string, unknown>[]): Promise<Map<string, { id: string; name: string }>> {
+  const ids = [...new Set(data.flatMap(d => (typeof d.onBehalfOfPersonId === 'string' ? [d.onBehalfOfPersonId] : [])))];
+  if (!ids.length) return new Map();
+  return new Map((await db.select({ id: people.id, name: people.name }).from(people).where(inArray(people.id, ids))).map(p => [p.id, p]));
+}
+
 /* One task as people and agents read it: the body, its gates with where it stands, what it was split into, and its log.
    The task it serves and the tasks under it show only when the reader may see them too. */
 export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates'>, task: Task, sees: (t: Task) => boolean): Promise<TaskDetail> {
@@ -148,8 +156,13 @@ export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates'>, task: Task,
   const n = await names(ctx, [task, ...subs], [...(reviewers ?? []), ...events.map(e => e.agentId), ...asks.map(r => r.agentId), ...files.map(f => f.agentId)].filter((x): x is string => Boolean(x)));
   /* Only what this reader may see of what the task comes after. */
   const after = n.after(task).filter(sees);
-  const by = (personId: string | null, personName: string | null, agentId: string | null): LogLine['by'] =>
-    personId ? { kind: 'person', id: personId, name: personName ?? '' } : agentId ? { kind: 'agent', id: agentId, name: n.agent(agentId)?.name ?? '' } : null;
+  const actedFor = await forWhom(db, events.map(e => e.data));
+  const by = (personId: string | null, personName: string | null, agentId: string | null, data: Record<string, unknown>): LogLine['by'] => {
+    if (personId) return { kind: 'person', id: personId, name: personName ?? '' };
+    if (!agentId) return null;
+    const whom = typeof data.onBehalfOfPersonId === 'string' ? actedFor.get(data.onBehalfOfPersonId) : undefined;
+    return { kind: 'agent', id: agentId, name: n.agent(agentId)?.name ?? '', ...(whom ? { for: whom } : {}) };
+  };
   return {
     ...line(task, n, sees),
     body: task.body,
@@ -172,7 +185,7 @@ export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates'>, task: Task,
     turnReview: reviewers !== null,
     createdBy: creator ? { kind: 'person', ...creator } : task.createdByAgentId ? { kind: 'agent', id: task.createdByAgentId, name: n.agent(task.createdByAgentId)?.name ?? '' } : null,
     subtasks: subs.map(t => line(t, n, sees)),
-    log: events.reverse().map(e => ({ kind: e.kind, text: e.text, data: e.data, by: by(e.personId, e.personName, e.agentId), at: e.at.toISOString() })),
+    log: events.reverse().map(e => ({ kind: e.kind, text: e.text, data: e.data, by: by(e.personId, e.personName, e.agentId, e.data), at: e.at.toISOString() })),
     requests: asks.map((r, i) => ({
       id: r.id,
       kind: r.kind,

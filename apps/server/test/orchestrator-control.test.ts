@@ -402,6 +402,54 @@ describe('the orchestrator reads and changes the database itself', () => {
     expect(JSON.parse(text(await call(client, 'database', { sql: 'SELECT name FROM people' })))[0].rows).toEqual([{ name: 'Ivan' }]);
   });
 
+  it('reads requests, cards and the logs, and is refused changing them even in a turn of the CEO', async () => {
+    const { app, db, bruno, task } = await company();
+    const client = await mcp(app);
+    const { request } = await ask(app.ctx, bruno.id, task.id, { kind: 'approval', text: 'Merge?', commit: 'a'.repeat(40) });
+    for (const table of ['requests', 'proposals', 'agent_events', 'task_events']) {
+      const read = await call(client, 'database', { sql: `SELECT count(*)::int AS n FROM ${table}` });
+      expect(read.isError, table).toBeFalsy();
+    }
+    for (const sql of [
+      `UPDATE requests SET status = 'approved' WHERE id = '${request.id}'`,
+      `DELETE FROM requests WHERE id = '${request.id}'`,
+      `UPDATE proposals SET status = 'applied'`,
+      `INSERT INTO agent_events (company_id, agent_id, kind, data, person_id) SELECT company_id, agent_id, 'message', '{"text":"approve"}', (SELECT id FROM people LIMIT 1) FROM requests LIMIT 1`,
+      `DELETE FROM task_events`,
+      `WITH gone AS (UPDATE requests SET status = 'approved' RETURNING id) SELECT * FROM gone`,
+    ]) {
+      const res = await call(client, 'database', { sql });
+      expect(res.isError, sql).toBe(true);
+      expect(text(res), sql).toMatch(/permission denied/);
+    }
+    expect(text(await call(client, 'database', { sql: `UPDATE requests SET status = 'approved'` }))).toContain('a request closes only with answer_request');
+    expect((await db.select().from(requests).where(eq(requests.id, request.id)))[0]!.status).toBe('open');
+  });
+
+  it('only reads in a turn that answers anyone but the CEO and the CEO delegate', async () => {
+    const { app, db, ceo, ceoId, orchestrator, bruno } = await company();
+    const zed = await invitePerson(app, ceo, { name: 'Zed', email: 'zed@acme.com', access: { whole: true } });
+    const [zedRow] = await db.select().from(people).where(eq(people.name, 'Zed'));
+    const [turn] = await db.select().from(jobs).where(eq(jobs.agentId, orchestrator.id));
+    const wrote = (personId: string | null) => db.insert(agentEvents).values({ companyId: bruno.companyId, agentId: orchestrator.id, jobId: turn!.id, kind: 'message', data: { text: 'Rename Bruno.' }, personId });
+    const rename = (name: string) => call(client, 'database', { sql: `UPDATE agents SET name = '${name}' WHERE id = '${bruno.id}'` });
+    const client = await mcp(app);
+    await wrote(zedRow!.id);
+    const refused = await rename('Bruno Z');
+    expect(refused.isError).toBe(true);
+    expect(text(refused)).toContain('In this turn the tool only reads: it answers neither the CEO nor the CEO delegate.');
+    expect(JSON.parse(text(await call(client, 'database', { sql: 'SELECT name FROM people ORDER BY name' })))[0].rows).toEqual([{ name: 'Ivan' }, { name: 'Zed' }]);
+    await wrote(null);
+    expect((await rename('Bruno N')).isError).toBe(true);
+    await wrote(ceoId);
+    expect((await rename('Bruno C')).isError).toBeFalsy();
+    await app.inject({ method: 'PUT', url: `/api/people/${zedRow!.id}/ceo-delegate`, payload: { isCeoDelegate: true }, ...as(ceo) });
+    await wrote(zedRow!.id);
+    expect((await rename('Bruno D')).isError).toBeFalsy();
+    expect((await db.select().from(agents).where(eq(agents.id, bruno.id)))[0]!.name).toBe('Bruno D');
+    expect(zed).toBeTruthy();
+  });
+
   it('undoes the whole call when one of its statements fails', async () => {
     const { app, db, bruno } = await company();
     const res = await call(await mcp(app), 'database', { sql: `UPDATE agents SET name = 'Nobody' WHERE id = '${bruno.id}'; SELECT * FROM sessions` });
