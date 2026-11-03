@@ -64,7 +64,7 @@ describe.skipIf(!hasTmux)('installed versions between terminal turns', () => {
     expect(await done).toMatchObject({ ok: true, result: 'echo: after update' });
   });
 
-  it('does not launch a turn cancelled while waiting for an update', async () => {
+  it('does not launch or wait for npm when a pending turn is cancelled', async () => {
     install('1.0.0');
     const before = launches().length;
     const stop = new AbortController();
@@ -72,14 +72,24 @@ describe.skipIf(!hasTmux)('installed versions between terminal turns', () => {
     let requested!: () => void;
     const pending = new Promise<void>(resolve => { release = resolve; });
     const asked = new Promise<void>(resolve => { requested = resolve; });
+    const updates = new ProgramUpdates([{ id: 'claude', readVersion: () => '1.0.0', install: () => pending }]);
+    const batch = updates.update();
     await setUp();
+    let completed = false;
     const done = host.run({ ...job('cancel-version', 'Do not send this.', { signal: stop.signal }), bin,
-      version: async () => { requested(); await pending; return '1.0.0'; } });
-    await asked;
-    stop.abort();
-    release();
-    expect(await done).toMatchObject({ ok: false, error: 'cancelled' });
-    expect(launches()).toHaveLength(before);
+      version: async () => { requested(); await updates.ready(stop.signal); return updates.version('claude'); } }).then(result => { completed = true; return result; });
+    try {
+      await asked;
+      stop.abort();
+      await until(() => completed, 1000);
+      expect(await done).toMatchObject({ ok: false, error: 'cancelled' });
+      expect(launches()).toHaveLength(before);
+      expect(updates.snapshot()[0]?.updating).toBe(true);
+    } finally {
+      release();
+      await batch;
+      await done;
+    }
   });
 
   it.each(['1.0.0', '2.0.0'])('lets a typed turn that began during an update finish before using version %s', async target => {

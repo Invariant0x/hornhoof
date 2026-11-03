@@ -116,6 +116,23 @@ describe('reporting managed programs', () => {
     expect(server.received.filter(m => m.type === 'status').at(-1)).toMatchObject({ programs: [{ version: '2.0.0', updating: false, failed: false }] });
   });
 
+  it('does not replay a delivered live event when its connection comes back', async () => {
+    const server = await fakeServer();
+    const node = await runNode({ dir: nodeDir(server.url), log: () => {}, adapter: {
+      ...adapter, run: async input => { input.onEvent?.({ kind: 'text', text: 'Delivered once.' }); return adapter.run(input); },
+    } });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    server.send({ type: 'job.run', jobId: 'delivered', subscriptionId: 's1', provider: 'claude', prompt: 'Say once.', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
+    await server.wait(() => server.received.some(m => m.type === 'job.done' && m.jobId === 'delivered'));
+    expect(server.received.filter(m => m.type === 'job.event' && m.jobId === 'delivered')).toHaveLength(1);
+    server.drop();
+    await server.wait(() => server.received.filter(m => m.type === 'hello').length === 2, 6000);
+    server.send({ type: 'agent.say', agentKey: 'none', text: 'barrier', ref: 'reconnected' });
+    await server.wait(() => server.received.some(m => m.type === 'agent.said' && m.ref === 'reconnected'));
+    expect(server.received.filter(m => m.type === 'job.event' && m.jobId === 'delivered')).toHaveLength(1);
+  });
+
   it('replays current snapshots after hello and reconnect instead of older queued update states', async () => {
     const server = await fakeServer();
     let installed = 1;
@@ -481,6 +498,48 @@ describe('runNode', () => {
     expect(seen!.tools).toEqual({ url: `${server.url}/mcp`, token: 'tool-token-0123456789' });
   });
 
+  it('waits at headless launch if an update starts during job preparation', async () => {
+    const server = await fakeServer();
+    let releaseInstall!: () => void;
+    let releasePreparation!: () => void;
+    const install = new Promise<void>(resolve => { releaseInstall = resolve; });
+    const preparation = new Promise<void>(resolve => { releasePreparation = resolve; });
+    let installs = 0;
+    let preparing = false;
+    let prepared = 0;
+    let blockPreparation = false;
+    const launches: boolean[] = [];
+    const programs = new ProgramUpdates([{ id: 'claude', readVersion: () => '1.0.0', install: async () => { if (++installs > 1) await install; } }]);
+    const node = await runNode({ dir: nodeDir(server.url), programs, log: () => {}, adapter: {
+      ...adapter,
+      secrets: async () => { if (blockPreparation) { preparing = true; await preparation; } prepared++; return []; },
+      run: async input => { launches.push(programs.snapshot()[0]!.updating); return adapter.run(input); },
+    } });
+    onTestFinished(() => node.stop());
+    try {
+      await server.wait(() => server.received.some(m => m.type === 'hello'));
+      await programs.ready();
+      prepared = 0;
+      blockPreparation = true;
+      server.send({ type: 'job.run', jobId: 'late-update', subscriptionId: 's1', provider: 'claude', prompt: 'Wait for the programs.', sessionId: null, model: null, timeoutMs: 100, secret: null, instructions: null, toolToken: null });
+      await server.wait(() => preparing);
+      server.send({ type: 'programs.update' });
+      await server.wait(() => installs === 2);
+      blockPreparation = false;
+      releasePreparation();
+      await server.wait(() => prepared >= 2);
+      await new Promise(resolve => setTimeout(resolve, 200));
+      expect(server.received.some(m => m.type === 'job.done' && m.jobId === 'late-update')).toBe(false);
+      expect(launches).toEqual([]);
+    } finally {
+      releasePreparation();
+      releaseInstall();
+    }
+    await server.wait(() => server.received.some(m => m.type === 'job.done' && m.jobId === 'late-update'));
+    expect(launches).toEqual([false]);
+    expect(server.received.find(m => m.type === 'job.done' && m.jobId === 'late-update')).toMatchObject({ ok: true });
+  });
+
   it('does not run a job cancelled while its program update is pending', async () => {
     const server = await fakeServer();
     let release!: () => void;
@@ -499,12 +558,13 @@ describe('runNode', () => {
       server.send({ type: 'job.cancel', jobId: 'waiting-update' });
       server.send({ type: 'agent.say', agentKey: 'unused', text: 'barrier', ref: 'after-cancel' });
       await server.wait(() => server.received.some(m => m.type === 'agent.said' && m.ref === 'after-cancel'));
+      await server.wait(() => server.received.some(m => m.type === 'job.done' && m.jobId === 'waiting-update'));
+      expect(server.received.find(m => m.type === 'job.done' && m.jobId === 'waiting-update')).toMatchObject({ ok: false, error: 'cancelled' });
+      expect(started).toEqual([]);
+      expect(programs.snapshot()[0]?.updating).toBe(true);
     } finally {
       release();
     }
-    await server.wait(() => server.received.some(m => m.type === 'job.done' && m.jobId === 'waiting-update'));
-    expect(server.received.find(m => m.type === 'job.done' && m.jobId === 'waiting-update')).toMatchObject({ ok: false, error: 'cancelled' });
-    expect(started).toEqual([]);
   });
 
   it('calls a running job off when Hornhoof asks and ignores ids it does not run', async () => {

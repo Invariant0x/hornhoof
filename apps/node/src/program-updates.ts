@@ -16,6 +16,18 @@ export function readInstalledVersion(tools: string, id: ProgramId): string | nul
   }
 }
 
+/* Cancelling one waiting turn leaves the node's shared installation running. */
+async function untilReady(pending: Promise<void>, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return;
+  let abort!: () => void;
+  const stopped = new Promise<void>(resolve => { abort = resolve; signal.addEventListener('abort', abort, { once: true }); });
+  try {
+    await Promise.race([pending, stopped]);
+  } finally {
+    signal.removeEventListener('abort', abort);
+  }
+}
+
 /* One installation at a time in a node's shared npm prefix. Running agent processes are never signalled. */
 export class ProgramUpdates {
   private state: ProgramInfo[];
@@ -33,8 +45,9 @@ export class ProgramUpdates {
     return this.state.find(program => program.id === id)?.version ?? null;
   }
 
-  ready(): Promise<void> {
-    return this.pending ?? Promise.resolve();
+  ready(signal?: AbortSignal): Promise<void> {
+    const pending = this.pending ?? Promise.resolve();
+    return signal ? untilReady(pending, signal) : pending;
   }
 
   update(changed: () => void = () => {}): Promise<void> {

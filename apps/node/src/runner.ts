@@ -114,6 +114,8 @@ type RunOptions = {
   onEvent?: (event: AgentEvent) => void;
   /* Runs git; tests pass a fake. */
   git?: Git;
+  /* Node preparation, such as a shared program installation, finishes before the program's timeout starts. */
+  beforeRun?: () => Promise<void>;
   /* The turn runs in a live program that people watch: only its own end or a stop ends it, never a time limit. */
   untimed?: boolean;
   /* The superpowers copy whose skills a program without its plugin gets; the image's by default. */
@@ -136,7 +138,7 @@ export function tidy(event: AgentEvent, secrets: string[]): AgentEvent {
 }
 
 /* Always ends with a job.done, whatever breaks on the way. */
-export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string, { hidden = [], signal, toolsUrl, onEvent, git, untimed = false, superpowers = superpowersIn() }: RunOptions = {}): Promise<JobDone> {
+export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string, { hidden = [], signal, toolsUrl, onEvent, git, beforeRun = async () => {}, untimed = false, superpowers = superpowersIn() }: RunOptions = {}): Promise<JobDone> {
   /* Programs refresh their tokens during a run, so the values from before, during and after are all hidden. */
   const before = await adapter.secrets().catch(() => []);
   const repo = msg.workspace?.repo ?? null;
@@ -190,6 +192,7 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
       onEvent: emit,
       ...(env ? { env } : {}),
     };
+    await beforeRun();
     const run = adapter.run(input).catch((err: unknown) => failed(message(err), 'agent_failed'));
     res = await (untimed ? run : withTimeout(run, msg.timeoutMs));
     if (res.sessionId) rememberSession(dir, res.sessionId, workDir);

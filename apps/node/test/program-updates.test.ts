@@ -30,6 +30,7 @@ describe('node-owned program updates', () => {
       id: 'claude', readVersion: () => readInstalledVersion(tools, 'claude'),
       install: async () => { started.release(); await finish.waiting; writeVersion('@anthropic-ai/claude-code', '2.0.0'); },
     }]);
+    expect(updates.snapshot()).toEqual([{ id: 'claude', version: '1.0.0', updating: false, failed: false }]);
     const states: ProgramInfo[][] = [];
     const batch = updates.update(() => states.push(updates.snapshot()));
     expect(updates.update()).toBe(batch);
@@ -45,6 +46,26 @@ describe('node-owned program updates', () => {
       [{ id: 'claude', version: '1.0.0', updating: true, failed: false }],
       [{ id: 'claude', version: '2.0.0', updating: false, failed: false }],
     ]);
+  });
+
+  it.each([false, true])('stops waiting without stopping the installation, already aborted=%s', async alreadyAborted => {
+    const install = gate();
+    const stop = new AbortController();
+    const updates = new ProgramUpdates([{ id: 'claude', readVersion: () => '1.0.0', install: () => install.waiting }]);
+    const batch = updates.update();
+    if (alreadyAborted) stop.abort();
+    let stopped = false;
+    const waiting = updates.ready(stop.signal).then(() => { stopped = true; });
+    stop.abort();
+    try {
+      await vi.waitFor(() => expect(stopped).toBe(true), { timeout: 150 });
+      expect(updates.snapshot()).toEqual([{ id: 'claude', version: '1.0.0', updating: true, failed: false }]);
+      expect(updates.ready()).toBe(batch);
+    } finally {
+      install.release();
+      await batch;
+      await waiting;
+    }
   });
 
   it('serializes installations sharing the npm prefix', async () => {

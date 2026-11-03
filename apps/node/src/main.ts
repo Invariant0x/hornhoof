@@ -416,7 +416,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     emit({ type: 'job.started', jobId: m.jobId });
     let done: Awaited<ReturnType<typeof runJob>>;
     try {
-      await programs.ready();
+      await programs.ready(signal);
       const chosen = pick(m);
       await learn([m.toolToken, m.secret, m.workspace?.repo?.token]);
       /* An agent's turn runs in its session; a test job, with no agent, runs as before. */
@@ -427,7 +427,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
         } catch (err) {
           return { ok: false, sessionId: null, result: '', output: `Could not install the program: ${message(err)}`, error: 'agent_failed', limits: null };
         }
-        const version = async () => { await programs.ready(); return programs.version(terminal.program.kind); };
+        const version = async () => { await programs.ready(input.signal); return programs.version(terminal.program.kind); };
         return host.run({ key: input.agentKey, program: terminal.program, bin: terminal.bin, home: terminal.home, signedOut: terminal.signedOut, input, version });
       };
       const tracked: ProviderAdapter = {
@@ -440,7 +440,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       };
       let seq = 0;
       const onEvent = (event: AgentEvent) => emit({ type: 'job.event', jobId: m.jobId, seq: seq++, event });
-      done = await runJob(tracked, m, dir, { hidden, signal, toolsUrl, onEvent, untimed: Boolean(host && terminal && m.workspace?.key) });
+      done = await runJob(tracked, m, dir, { hidden, signal, toolsUrl, onEvent, beforeRun: () => programs.ready(signal), untimed: Boolean(host && terminal && m.workspace?.key) });
     } catch (err) {
       done = { type: 'job.done', jobId: m.jobId, ok: false, sessionId: null, result: '', tail: message(err), error: 'agent_failed' };
     }
@@ -708,7 +708,7 @@ async function run(dir: string, builtinMode: boolean, io: Io): Promise<number | 
     const fs = user ? agentFs(user) : ownFs;
     const adapter = personal(dir, provider, user, fs);
     const programs = managedUpdates(tools, [{ provider, adapter }]);
-    const install = () => programs.ready().then(() => ensureInstalled(tools, provider, adapter));
+    const install = () => ensureInstalled(tools, provider, adapter);
     return runNode({ dir, adapter: withInstall(adapter, tools, provider), install, programs, log, testUser, ...terminalFor(dir, provider, user, fs) });
   }
 
