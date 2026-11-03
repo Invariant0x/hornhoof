@@ -4,12 +4,12 @@ import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { People } from '../src/screens/People';
-import type { ComputerView, Me, PersonView, StructureItem, WaitingRequest } from '../src/types';
+import type { AccessInput, AccessView, ComputerView, Me, PersonView, StructureItem, WaitingRequest } from '../src/types';
 import { ComputerCard } from '../src/ui/ComputerCard';
 import { Requests } from '../src/ui/Requests';
 import { StaffCard } from '../src/ui/StaffCard';
 import { StructureCard } from '../src/ui/StructureCard';
-import { ME, mockApi, ORG_WITH_TEAMS, PEOPLE, REQUESTS, ROSTER } from './api-mock';
+import { ME, mockApi, ORG_WITH_TEAMS, PEOPLE, REQUESTS, ROSTER, WHOLE } from './api-mock';
 
 const noop = () => {};
 const DEV = { id: 'd2', name: 'Development' };
@@ -85,6 +85,29 @@ describe('the deputy CEO on People', () => {
   const lena: PersonView = { ...PEOPLE[1]!, id: 'p5', name: 'Lena', email: 'lena@acme.com', isCeoDelegate: false, access: { whole: false, departments: [{ id: 'd2', name: 'Development' }], teams: [] } };
   const about = "Takes the decisions only the CEO takes and sees the whole company. Only you change the deputy's access, status and sign-in.";
   const routes = (list: PersonView[] = people): Parameters<typeof mockApi>[0] => ({ 'GET /api/people': [200, { people: list }], 'GET /api/org': [200, ORG_WITH_TEAMS] });
+  /* What the server answers when asked for a deputy without the whole company. */
+  const refused = { error: { code: 'conflict', message: 'Only an active person with access to the whole company can be the CEO delegate.' } };
+
+  /* A server that keeps one person by the server's rule for the deputy (apps/server/src/modules/people/routes.ts): only an
+     active person with the whole company is made the deputy, and a narrower access takes the deputy off. person() is what
+     it holds now. */
+  function serverKeeping(start: PersonView, list: PersonView[]) {
+    let person = start;
+    const reach = (a: AccessInput): AccessView =>
+      'whole' in a ? WHOLE : { whole: false, departments: ORG_WITH_TEAMS.departments.filter(d => a.departments.includes(d.id)).map(d => ({ id: d.id, name: d.name ?? '' })), teams: [] };
+    const save = (body: unknown): [number, unknown] => {
+      const { title, access } = body as { title: string; access: AccessInput };
+      person = { ...person, title, access: reach(access), isCeoDelegate: Boolean(person.isCeoDelegate) && 'whole' in access };
+      return [200, { person }];
+    };
+    const mark = (body: unknown): [number, unknown] => {
+      const { isCeoDelegate } = body as { isCeoDelegate: boolean };
+      if (isCeoDelegate && !(person.status === 'active' && person.access.whole)) return [409, refused];
+      person = { ...person, isCeoDelegate };
+      return [200, { person }];
+    };
+    return { routes: { ...routes(list), [`PATCH /api/people/${start.id}`]: save, [`PUT /api/people/${start.id}/ceo-delegate`]: mark }, person: () => person };
+  }
 
   it('keeps the row to Edit, New link and Disable, with no tick for the deputy', async () => {
     mockApi(routes());
@@ -148,20 +171,6 @@ describe('the deputy CEO on People', () => {
     expect(calls.filter(c => c.method !== 'GET').map(c => `${c.method} ${c.path}`)).toEqual(['PATCH /api/people/p4']);
   });
 
-  /* A deputy sees the whole company, as the server requires: the window keeps the two together. */
-  it('gives the deputy the whole company, and takes the deputy off a narrower access', async () => {
-    mockApi(routes([...people, lena]));
-    const user = userEvent.setup();
-    render(<People me={ME} />);
-    await user.click(await screen.findByRole('button', { name: 'Edit Lena' }));
-    expect(screen.getByRole('checkbox', { name: 'Development' })).toBeChecked();
-    await user.click(screen.getByRole('switch', { name: 'Deputy CEO' }));
-    expect(screen.getByRole('checkbox', { name: 'Whole company' })).toBeChecked();
-    expect(screen.queryByRole('checkbox', { name: 'Development' })).not.toBeInTheDocument();
-    await user.click(screen.getByRole('checkbox', { name: 'Whole company' }));
-    expect(screen.getByRole('switch', { name: 'Deputy CEO' })).not.toBeChecked();
-  });
-
   /* The deputy may change in another window while this one is open: a save that did not touch the switch leaves it. */
   it('keeps a deputy made elsewhere when only the title is saved', async () => {
     const calls = mockApi({ ...routes(), 'PATCH /api/people/p2': [200, { person: { ...people[1]!, isCeoDelegate: true } }] });
@@ -189,7 +198,7 @@ describe('the deputy CEO on People', () => {
     mockApi({
       ...routes([...people, lena]),
       'PATCH /api/people/p5': [200, { person: saved }],
-      'PUT /api/people/p5/ceo-delegate': [409, { error: { code: 'conflict', message: 'Only an active person with access to the whole company can be the CEO delegate.' } }],
+      'PUT /api/people/p5/ceo-delegate': [409, refused],
     });
     const user = userEvent.setup();
     render(<People me={ME} />);
@@ -240,20 +249,6 @@ describe('the deputy CEO on People', () => {
     expect(screen.queryByRole('switch')).not.toBeInTheDocument();
   });
 
-  it('takes the deputy off with a narrower access alone, as the server does', async () => {
-    const narrowed = { ...people[2]!, isCeoDelegate: false, access: { whole: false, departments: [{ id: 'd2', name: 'Development' }], teams: [] } };
-    const calls = mockApi({ ...routes(), 'PATCH /api/people/p4': [200, { person: narrowed }] });
-    const user = userEvent.setup();
-    render(<People me={ME} />);
-    await user.click(await screen.findByRole('button', { name: 'Edit Dave' }));
-    await user.click(screen.getByRole('checkbox', { name: 'Whole company' }));
-    await user.click(screen.getByRole('checkbox', { name: 'Development' }));
-    expect(screen.getByRole('switch', { name: 'Deputy CEO' })).not.toBeChecked();
-    await user.click(screen.getByRole('button', { name: 'Save' }));
-    await vi.waitFor(() => expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument());
-    expect(calls.filter(c => c.method !== 'GET')).toEqual([{ method: 'PATCH', path: '/api/people/p4', body: { title: 'Deputy CEO', access: { departments: ['d2'], teams: [] } } }]);
-  });
-
   it("shows anyone else the deputy's short mark with the whole name on hover, and leaves the deputy to the CEO", async () => {
     mockApi(routes());
     render(<People me={ZED} />);
@@ -278,5 +273,54 @@ describe('the deputy CEO on People', () => {
     expect(mark).toHaveTextContent(/^Зам$/);
     await user.click(screen.getByRole('button', { name: 'Изменить Maria' }));
     expect(screen.getByRole('switch', { name: 'Заместитель CEO' })).toHaveAccessibleDescription('Принимает решения, которые принимает только CEO, и видит всю компанию. Доступ, статус и вход заместителя меняете только вы.');
+  });
+
+  /* The CEO's choice for the window (#166): switching the deputy on gives the whole company and hides the departments, and
+     taking the whole company off switches the deputy off. Save sends only what the server keeps: a deputy with the whole
+     company. */
+  describe.each([
+    { language: 'English', show: render, deputy: 'Deputy CEO', whole: 'Whole company', edit: 'Edit', save: 'Save' },
+    { language: 'Russian', show: inRussian, deputy: 'Заместитель CEO', whole: 'Вся компания', edit: 'Изменить', save: 'Сохранить' },
+  ])('in $language', ({ show, deputy, whole, edit, save }) => {
+    it('switching the deputy on gives the whole company and hides the departments, and the server makes the person the deputy', async () => {
+      const server = serverKeeping(lena, [...people, lena]);
+      const calls = mockApi(server.routes);
+      const user = userEvent.setup();
+      show(<People me={ME} />);
+      await user.click(await screen.findByRole('button', { name: `${edit} Lena` }));
+      expect(screen.getByRole('checkbox', { name: 'Development' })).toBeChecked();
+      await user.click(screen.getByRole('switch', { name: deputy }));
+      expect(screen.getByRole('checkbox', { name: whole })).toBeChecked();
+      expect(screen.queryByRole('checkbox', { name: 'Development' })).not.toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: save }));
+      await vi.waitFor(() => expect(screen.queryByRole('button', { name: save })).not.toBeInTheDocument());
+      expect(calls.filter(c => c.method !== 'GET')).toEqual([
+        { method: 'PATCH', path: '/api/people/p5', body: { title: 'Deputy CEO', access: { whole: true } } },
+        { method: 'PUT', path: '/api/people/p5/ceo-delegate', body: { isCeoDelegate: true } },
+      ]);
+      expect(server.person()).toMatchObject({ isCeoDelegate: true, access: { whole: true } });
+      const row = screen.getByRole('row', { name: /^Lena\b/ });
+      expect(within(row).getByRole('img', { name: deputy })).toBeInTheDocument();
+      expect(within(row).getByText(whole)).toBeInTheDocument();
+    });
+
+    it('taking the whole company off switches the deputy off, and the server keeps the narrower access without the deputy', async () => {
+      const server = serverKeeping(people[2]!, people);
+      const calls = mockApi(server.routes);
+      const user = userEvent.setup();
+      show(<People me={ME} />);
+      await user.click(await screen.findByRole('button', { name: `${edit} Dave` }));
+      expect(screen.getByRole('switch', { name: deputy })).toBeChecked();
+      await user.click(screen.getByRole('checkbox', { name: whole }));
+      expect(screen.getByRole('switch', { name: deputy })).not.toBeChecked();
+      await user.click(screen.getByRole('checkbox', { name: 'Development' }));
+      await user.click(screen.getByRole('button', { name: save }));
+      await vi.waitFor(() => expect(screen.queryByRole('button', { name: save })).not.toBeInTheDocument());
+      expect(calls.filter(c => c.method !== 'GET')).toEqual([{ method: 'PATCH', path: '/api/people/p4', body: { title: 'Deputy CEO', access: { departments: ['d2'], teams: [] } } }]);
+      expect(server.person()).toMatchObject({ isCeoDelegate: false, access: { whole: false } });
+      const row = screen.getByRole('row', { name: /^Dave\b/ });
+      expect(within(row).queryByRole('img', { name: deputy })).not.toBeInTheDocument();
+      expect(within(row).getByText('Development')).toBeInTheDocument();
+    });
   });
 });
