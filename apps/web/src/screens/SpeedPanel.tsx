@@ -1,24 +1,17 @@
 import { useId, useState } from 'react';
 import { useT } from '../i18n';
-import type { AgentTime, Department, DepartmentTree, IdleStretch, SegmentKind, TreeAgent } from '../types';
+import type { AgentTime, Department, DepartmentTree, IdleStretch, TreeAgent } from '../types';
+import { segmentText } from './tree-state';
 import { TreeWho } from './TreeCard';
-import { idleClass, latestLines, SEGMENT_CLASS, secondsBetween, treeClock } from './tree';
+import { agentSegments, idleClass, currentTaskNumber, SEGMENT_CLASS, secondsBetween, treeClock } from './tree';
 
 type Props = { tree: DepartmentTree; department: Department; onAgent(id: string, top: number): void };
-const amount = (time: AgentTime) => [time.work, time.after + time.person, time.stall];
-
-function taskNumber(tree: DepartmentTree, agentId: string): number | undefined {
-  if (tree.review?.reviewers.some(r => r.agent.id === agentId)) return tree.review.number;
-  return latestLines(tree.lines).find(l => l.agent.id === agentId)?.number;
-}
+const amount = ({ work, after, person, stall, lost = 0, alarm = 0, queued = 0, unknown = 0 }: AgentTime) => [work, after + person, stall, lost + alarm, queued, unknown];
 
 function Strip({ tree, agent }: { tree: DepartmentTree; agent: TreeAgent }) {
   const L = useT().dept.tree, start = tree.turn!.startedAt;
   const duration = Math.max(1, secondsBetween(start, tree.now));
-  const segments = [
-    ...tree.lines.filter(l => l.agent.id === agent.id).flatMap(l => l.segments),
-    ...(tree.review?.reviewers.find(r => r.agent.id === agent.id)?.segments ?? []),
-  ];
+  const segments = agentSegments(tree, agent.id);
   const time = tree.time.find(a => a.agent.id === agent.id)!;
   const label = `${agent.name}: ${amount(time).map((n, i) => `${L.cols[i + 1]} ${L.dur(n / 60)}`).join(', ')}`;
   return (
@@ -42,9 +35,14 @@ function Strip({ tree, agent }: { tree: DepartmentTree; agent: TreeAgent }) {
 
 function amountClass(time: AgentTime, value: number, index: number): string {
   if (!value) return 'z';
-  if (index === 2) return 'a';
+  if (index === 3) return 'bad';
   if (index === 1 && time.person) return 'p';
   return '';
+}
+
+function taskLabel(tree: DepartmentTree, agentId: string, noTask: string): string {
+  const number = currentTaskNumber(tree, agentId);
+  return number === undefined ? noTask : `#${number}`;
 }
 
 function SpeedRow({ time, tree, department, onAgent }: Props & { time: AgentTime }) {
@@ -58,10 +56,10 @@ function SpeedRow({ time, tree, department, onAgent }: Props & { time: AgentTime
       >
         <span className="who">
           <b><TreeWho agent={time.agent} department={department} /></b>
-          <small>#{taskNumber(tree, time.agent.id)}</small>
+          <small>{taskLabel(tree, time.agent.id, L.noTask)}</small>
         </span>
         {amount(time).map((n, i) => (
-          <span key={i} className={`n ${amountClass(time, n, i)}`}>{n ? L.dur(n / 60) : '0'}</span>
+          <span key={i} className={`n ${amountClass(time, n, i)}`} data-label={L.cols[i + 1]} aria-label={`${L.cols[i + 1]} ${L.dur(n / 60)}`}>{n ? L.dur(n / 60) : '0'}</span>
         ))}
         <Strip tree={tree} agent={time.agent} />
       </button>
@@ -71,21 +69,20 @@ function SpeedRow({ time, tree, department, onAgent }: Props & { time: AgentTime
 
 function SpeedRows({ tree, department, onAgent }: Props) {
   const L = useT().dept.tree;
-  const totals = tree.time.reduce((sum, time) => sum.map((v, i) => v + amount(time)[i]!), [0, 0, 0]);
+  const totals = tree.time.reduce((sum, time) => sum.map((v, i) => v + amount(time)[i]!), [0, 0, 0, 0, 0, 0]);
   const start = tree.turn!.startedAt;
   const middle = new Date(Date.parse(start) + secondsBetween(start, tree.now) * 500).toISOString();
   return (
     <>
       <dl className="sum">
         {totals.map((n, i) => (
-          <div key={i} className={['c', '', 'a'][i]}>
+          <div key={i} className={['c', '', '', 'bad', '', ''][i]}>
             <dt>{L.cols[i + 1]}</dt>
             <dd>{L.dur(n / 60)}</dd>
           </div>
         ))}
       </dl>
       <div>
-        <div className="spl-h">{L.cols.map(col => <span key={col}>{col}</span>)}</div>
         <ul className="spl">
           {tree.time.map(time => (
             <SpeedRow key={time.agent.id} time={time} tree={tree} department={department} onAgent={onAgent} />
@@ -102,9 +99,14 @@ function SpeedRows({ tree, department, onAgent }: Props) {
   );
 }
 
+function idleReason(t: ReturnType<typeof useT>, idle: IdleStretch, now: string): string {
+  if (idle.kind === 'after' && !idle.waitsForAgent && !idle.externalWait) return idle.waitsFor.map(t.dept.tree.idleKind.after).join(', ');
+  return segmentText(t, idle, now);
+}
+
 function IdleItem({ idle, tree, department, onAgent }: Props & { idle: IdleStretch }) {
-  const L = useT().dept.tree;
-  const reason = idle.kind === 'after' ? idle.waitsFor.map(L.idleKind.after).join(', ') : L.idleKind[idle.kind];
+  const t = useT(), L = t.dept.tree;
+  const reason = idleReason(t, idle, tree.now);
   return (
     <li>
       <button
@@ -134,7 +136,6 @@ function IdleItem({ idle, tree, department, onAgent }: Props & { idle: IdleStret
 
 function IdleRows(props: Props) {
   const L = useT().dept.tree, open = props.tree.idle.filter(i => !i.to), ended = props.tree.idle.filter(i => i.to);
-  const count = (kind: SegmentKind) => open.filter(i => i.kind === kind).length;
   const list = (items: IdleStretch[]) => (
     <ul className="idl">
       {items.map((idle, i) => <IdleItem key={`${idle.taskId}-${idle.from}-${i}`} {...props} idle={idle} />)}
@@ -142,7 +143,7 @@ function IdleRows(props: Props) {
   );
   return (
     <>
-      <p className="idle-now">{L.idleNow(count('stall'), count('person'), count('after'))}</p>
+      <p className="idle-now">{L.idleNow}</p>
       {list(open)}
       {ended.length > 0 && (
         <>

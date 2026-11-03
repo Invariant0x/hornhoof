@@ -29,7 +29,7 @@ function lineOf(t: Messages, a: AgentLive | null | undefined, now: number): Line
 }
 
 /* A program waiting for input in a running turn longer than its node waits before it closes the turn lost its end. */
-function programLine(say: Messages['dept']['now'], p: ProgramView, now: number): Line {
+export function programLine(say: Messages['dept']['now'], p: Pick<ProgramView, 'state' | 'since' | 'tool'>, now: number): Line {
   if (p.state === 'thinking') return { tone: 'work', text: say.thinking(minutes(now, p.since)) };
   if (p.state === 'tool') return { tone: 'work', text: say.tool(p.tool ?? '', minutes(now, p.since)) };
   if (p.state === 'asking') return { tone: 'person', text: say.asking };

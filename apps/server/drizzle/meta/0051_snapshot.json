@@ -1,6 +1,6 @@
 {
   "id": "51515151-b527-4782-8af8-3bf896c675b4",
-  "prevId": "767280d7-b527-4782-8af8-3bf896c675b4",
+  "prevId": "0ed1a22b-5f93-48c7-93d9-d0d4ae2ce1b7",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -224,6 +224,44 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "agent_events_program_history": {
+          "name": "agent_events_program_history",
+          "columns": [
+            {
+              "expression": "job_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"agent_events\".\"kind\" in ('program', 'failed')",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "agent_events_silent_job": {
+          "name": "agent_events_silent_job",
+          "columns": [
+            {
+              "expression": "(\"data\"->>'silentJob')",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"agent_events\".\"kind\" = 'message' and \"agent_events\".\"data\" ? 'silentJob'",
           "concurrently": false,
           "method": "btree",
           "with": {}

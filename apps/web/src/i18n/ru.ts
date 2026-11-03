@@ -478,8 +478,9 @@ export const ru: Messages = {
     treeNoTurn: 'Сейчас нет открытого хода.',
     tree: {
       treeAria: (n: number) => `Дерево хода ${n}`,
+      noTask: 'Нет задачи',
       lgH: 'Обозначения',
-      lg: { w: 'работает', af: 'ждет другую задачу', ps: 'ждет ответа человека', st: 'стоит: 30 мин без хода и действий агента', mv: 'ход по задаче', dn: 'задача сдана', vd: 'проверка хода: находки или чисто', mg: (branch: string) => `сдана и влита в ${branch}` },
+      lg: { ls: 'конец хода потерян', al: 'тревога программы или ноды', q: 'сообщение в очереди', u: 'нет записанного состояния', w: 'работает', af: 'ждет другую задачу', ps: 'ждет ответа человека', st: 'ждет задачу', mv: 'ход по задаче', dn: 'задача сдана', vd: 'проверка хода: находки или чисто', mg: (branch: string) => `сдана и влита в ${branch}` },
       after: (n: number) => 'ждет #' + n,
       mv: { comment: 'Комментарий', asked: 'Вопрос человеку', answered: 'Ответ человека', started: 'Начало работы', report: 'Отчет' },
       st: { work: 'Работает', stall: (d: string) => 'Стоит ' + d, person: (d: string) => 'Ждет ответа ' + d, after: (n: number) => 'Ждет #' + n, doneSal: 'Сдана', review: (d: string) => 'Проверяет ' + d, done: (branch: string) => `Влита в ${branch}` },
@@ -499,7 +500,7 @@ export const ru: Messages = {
       cWhat: 'Что',
       cChecked: 'Проверка шла',
       openTask: 'Открыть задачу',
-      stallSay: '30 минут нет хода по задаче и действий агента, поэтому линия стоит.',
+      stallSay: 'Агент ждет новую задачу.',
       afterSay: (n: number) => 'Начнется, когда будет готова #' + n + '.',
       noRepo: 'хранилища нет, линия показывает только ходы по задаче',
       agentNow: 'действует сейчас',
@@ -514,6 +515,14 @@ export const ru: Messages = {
       tWork: 'работа',
       tWait: 'ожидание',
       tStall: 'простой',
+      tInterrupted: 'прерывание', tQueued: 'в очереди', tUnknown: 'Нет данных',
+      externalWaiting: (reason: string, until: string) => `ждет: ${reason}, до ${until}`,
+      noData: 'нет данных',
+      lostSince: (at: string) => `конец хода потерян с ${at}: ждет ввода`,
+      interruptedSince: (at: string) => `прерывание с ${at}`,
+      queuedSince: (at: string) => `в очереди с ${at}`,
+      waitingFor: (name: string, at: string) => `ждет ${name} с ${at}`,
+      historyAlarm: { program_stalled: (at: string) => `программа замерла с ${at}`, node_silent: (at: string) => `нода молчит с ${at}` },
       reviewH: (n: number) => `Проверка хода ${n}`,
       reviewWhat: (branch: string) => `весь ${branch} сразу: все, что ход изменил`,
       reviewOpened: (t: string) => t + ', тем же ходом, которым влита последняя работа',
@@ -522,16 +531,10 @@ export const ru: Messages = {
       found: (n: number) => n ? `${n} ${plural('ru', n, { one: 'находка', few: 'находки', many: 'находок', other: 'находки' })}` : 'чисто',
       spdSub: (n: number, a: string, b: string) => `Ход ${n}, с ${a} до ${b}`,
       spdTabs: ['Скорость', 'Простои'],
-      cols: ['Кто', 'Работа', 'Ожидание', 'Простой'],
-      key: { w: 'работа', af: 'ждет задачу', ps: 'ждет человека', st: 'стоит' },
-      idleNow: (s: number, p: number, a: number) => {
-        const out: string[] = [];
-        if (s) out.push('стоит ' + s);
-        if (p) out.push('ждет человека ' + p);
-        if (a) out.push('ждет задачу ' + a);
-        return out.length ? 'Сейчас: ' + out.join(', ') + '.' : 'Сейчас никто не стоит и не ждет.';
-      },
-      idleKind: { stall: 'Стоит: нет хода и действий агента', person: 'Ждет ответа человека', after: (n: number) => 'Ждет #' + n },
+      cols: ['Кто', 'Работа', 'Ожидание', 'Простой', 'Прерывание', 'В очереди', 'Нет данных'],
+      key: { w: 'работа', af: 'ждет задачу', ps: 'ждет человека', st: 'простой', ls: 'конец хода потерян', al: 'тревога программы или ноды', q: 'сообщение в очереди', u: 'нет данных' },
+      idleNow: 'Текущие ожидания и прерывания',
+      idleKind: { stall: 'Ждет новую задачу', person: 'Ждет ответа человека', after: (n: number) => 'Ждет #' + n },
       idleOpen: (a: string) => 'с ' + a + ', ',
       idleGoing: 'еще идет',
       idleClosed: (a: string, z: string) => `с ${a} до ${z}`,
