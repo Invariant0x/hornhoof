@@ -93,6 +93,8 @@ export function MessageFrame({ events, folding }: { events: MessageEvent[]; fold
     const el = frame.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [events.length]);
+  /* No message, no frame: the terminal keeps the whole window. */
+  if (!events.length) return null;
   return (
     <section ref={frame} className="t-msgs" aria-label={t.window.messages}>
       {events.map(e => <EventMessage key={e.seq} event={e} folding={folding} />)}
