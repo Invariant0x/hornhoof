@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 export type Point = [number, number];
 
@@ -40,12 +40,23 @@ export const SIGNALS = [0, 0.5];
 
 export const pulseSeconds = (pts: Point[], speed: number, bounce = false) => (lengthOf(pts) * (bounce ? 2 : 1)) / speed;
 
+/* Work still travels under reduced motion, at a quarter of its usual speed. */
+export const motionSpeed = (speed: number, reduce: boolean) => reduce ? speed / 4 : speed;
+
+/* Start after the animation is connected to its SVG clock, keeping the initial phase. */
+function beginMotion(node: SVGAnimateMotionElement | null): void {
+  node?.beginElementAt?.(parseFloat(node.getAttribute('begin') ?? '0'));
+}
+
 /* A dot that runs along a path while something real is going on, or once for one message. */
 export function Pulse({ pts, speed, bounce = false, once = false, tone = 'c', r = 3, phase = 0 }: PulseProps) {
   const dur = pulseSeconds(pts, speed, bounce);
+  const animation = useRef<SVGAnimateMotionElement>(null);
+  useEffect(() => { beginMotion(animation.current); }, []);
   return (
     <circle className={`pt ${tone}`} r={r}>
       <animateMotion
+        ref={animation}
         path={toD(pts)}
         dur={`${dur.toFixed(2)}s`}
         repeatCount={once ? '1' : 'indefinite'}
@@ -59,13 +70,12 @@ export function Pulse({ pts, speed, bounce = false, once = false, tone = 'c', r 
 
 type LiveWayProps = { pts: Point[]; speed: number; tone: 'c' | 'a'; still: boolean; data?: Record<`data-${string}`, string> };
 
-/* A way where work goes on: dashes run along it toward whoever gets the work, and two signals keep running with them,
-   unless the person watching asks for less motion. */
+/* Two signals carry work along the way; reduced motion slows them while CSS stops the dashes. */
 export function LiveWay({ pts, speed, tone, still, data }: LiveWayProps) {
   return (
     <g>
       <path className={`tr live ${tone}`} d={toD(pts)} {...data} />
-      {!still && SIGNALS.map(phase => <Pulse key={phase} pts={pts} speed={speed} tone={tone} phase={phase} />)}
+      {SIGNALS.map(phase => <Pulse key={phase} pts={pts} speed={motionSpeed(speed, still)} tone={tone} phase={phase} />)}
     </g>
   );
 }

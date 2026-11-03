@@ -244,8 +244,8 @@ function connections(d: Drawing, row: TreeRow, line: TreeLine, end: string, done
   mark(d, { kind: 'merge', x, y: turnY, cls: 'via ok', pick: { ...row.pick!, kind: 'merge' } });
 }
 
-function needsPulse(d: Drawing, row: TreeRow, s: TreeSegment, to: string, dim: boolean, live: boolean, width: number): boolean {
-  if (!live || dim || s.kind !== 'work' || to !== d.tree.now || width <= 20) return false;
+function needsPulse(d: Drawing, row: TreeRow, s: TreeSegment, to: string, dim: boolean, live: boolean): boolean {
+  if (!live || dim || s.kind !== 'work' || to !== d.tree.now) return false;
   return strongestCurrent(agentSegments(d.tree, row.agent!.id), d.tree.now)?.kind === 'work';
 }
 
@@ -263,7 +263,7 @@ function segments(
     if (x2 <= x1) continue;
     path(d, 'segment', `seg ${SEGMENT_CLASS[s.kind]}`, [[x1, y], [x2, y]], row.agent?.id, dim).segmentKind = s.kind;
     l.targets.push({ pick: row.pick!, row: row.agent!.id, x: x1, y: y - 8, width: x2 - x1, height: 16, round: false, segment: s });
-    if (needsPulse(d, row, s, to, dim, live, x2 - x1)) {
+    if (needsPulse(d, row, s, to, dim, live)) {
       l.pulses.push([[Math.max(x1, x2 - 200), y], [x2, y]]);
     }
   }

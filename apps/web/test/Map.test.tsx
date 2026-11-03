@@ -236,7 +236,7 @@ describe('Map', () => {
     expect(container.querySelector('.hub animateMotion')).toBeInTheDocument();
   });
 
-  it('keeps the gauge still for a person who asks for less motion', async () => {
+  it('keeps a slower work dot on the gauge under reduced motion', async () => {
     vi.stubGlobal('matchMedia', (query: string) => ({ matches: query.includes('reduce'), addEventListener() {}, removeEventListener() {} }));
     onTestFinished(() => {
       vi.unstubAllGlobals();
@@ -244,7 +244,7 @@ describe('Map', () => {
     mockApi({ 'GET /api/org': [200, { ...ORG, agents: { total: 1, working: 1 } }] });
     const { container } = render(<MapScreen {...PROPS} />);
     await screen.findByText('agents working');
-    expect(container.querySelectorAll('animateMotion')).toHaveLength(0);
+    expect(container.querySelector('.hub circle.pt animateMotion')).toBeInTheDocument();
   });
 
   it('opens the orchestrator from the empty map and from the hub', async () => {
@@ -299,13 +299,13 @@ describe('Map', () => {
     expect(container.querySelectorAll('.chip-count, .wires path[data-ask], .attn')).toHaveLength(0);
   });
 
-  it('keeps the signal and the blinking calm and still for a person who asks for less motion', async () => {
+  it('keeps two slower decision signals under reduced motion', async () => {
     vi.stubGlobal('matchMedia', (query: string) => ({ matches: query.includes('reduce'), addEventListener() {}, removeEventListener() {} }));
     mockApi({ 'GET /api/org': [200, waiting({ p1: 0, p2: 0, p4: 3 })] });
     const { container } = render(<MapScreen {...PROPS} />);
     expect(await screen.findByRole('button', { name: 'Dan: 3 decisions wait' })).toHaveClass('attn');
     expect(container.querySelectorAll('.wires path[data-ask]')).toHaveLength(1);
-    expect(container.querySelectorAll('animateMotion')).toHaveLength(0);
+    expect(container.querySelectorAll('.wires circle.pt.a animateMotion')).toHaveLength(2);
   });
 
   it("lets a department's person open their decisions, but not the orchestrator, and shows no count they cannot see", async () => {
@@ -523,14 +523,24 @@ describe('Map', () => {
     await vi.waitFor(() => expect(shots(container, 'c')).toHaveLength(1));
   });
 
-  it('runs no pulse for a person who asks for less motion', async () => {
+  it('keeps a slower message pulse until it arrives under reduced motion', async () => {
     vi.stubGlobal('matchMedia', (query: string) => ({ matches: query.includes('reduce'), addEventListener() {}, removeEventListener() {} }));
     const stream = fakeStream();
     mockApi({ 'GET /api/org': [200, ORG] });
     const { container } = render(<MapScreen {...PROPS} />);
     await screen.findByText('agents working');
+    vi.useFakeTimers();
+    onTestFinished(() => { vi.useRealTimers(); });
     stream.send({ type: 'pulse', from: { kind: 'person', id: 'p1' }, to: { kind: 'orchestrator' } });
-    expect(container.querySelectorAll('circle.pt')).toHaveLength(0);
+    const dot = container.querySelector('circle.pt')!;
+    expect(dot).toBeInTheDocument();
+    const motion = dot.querySelector('animateMotion')!;
+    expect(motion).toHaveAttribute('repeatCount', '1');
+    const duration = parseFloat(motion.getAttribute('dur')!) * 1000;
+    act(() => { vi.advanceTimersByTime(duration / 2); });
+    expect(dot).toBeInTheDocument();
+    act(() => { vi.advanceTimersByTime(duration / 2 + 20); });
+    expect(dot).not.toBeInTheDocument();
   });
 
   it('follows the company live: a changed org is fetched again and the working count moves', async () => {
