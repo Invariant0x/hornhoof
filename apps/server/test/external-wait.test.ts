@@ -122,16 +122,16 @@ describe('external task wait', () => {
     }
   });
 
-  it('does not count three ended task turns or ask people while the task waits', async () => {
+  it.each(['done', 'failed'] as const)('does not count three %s task turns or ask people while the task waits', async status => {
     const c = await fixture();
     const task = await c.task();
     await c.wait(task.number, 'Images', new Date(Date.now() + 3_600_000).toISOString());
     for (let n = 0; n < 3; n++) {
       const startedAt = new Date(Date.now() + 1000);
-      const [job] = await c.db.insert(jobs).values({ companyId: c.company.id, subscriptionId: c.sub.id, agentId: c.worker.id, taskId: task.id, kind: 'conversation', prompt: 'Wait for images.', timeoutMs: 900000, status: 'done', startedAt, finishedAt: new Date(startedAt.getTime() + 1000) }).returning();
+      const [job] = await c.db.insert(jobs).values({ companyId: c.company.id, subscriptionId: c.sub.id, agentId: c.worker.id, taskId: task.id, kind: 'conversation', prompt: 'Wait for images.', timeoutMs: 900000, status, startedAt, finishedAt: new Date(startedAt.getTime() + 1000) }).returning();
       await checkLiveness(c.ctx, job!.id);
     }
-    expect(await c.read(task.id)).toMatchObject({ status: 'open', silent: 0 });
+    expect(await c.read(task.id)).toMatchObject({ status: 'open', silent: 0, externalWait: { reason: 'Images' } });
     expect((await c.db.select().from(jobs).where(eq(jobs.taskId, task.id))).filter(j => j.status === 'queued')).toEqual([]);
     expect(await c.db.select().from(requests).where(eq(requests.taskId, task.id))).toEqual([]);
   });
@@ -252,6 +252,13 @@ describe('external task wait', () => {
     expect((await c.read(task.id)).silent).toBe(0);
     expect((await c.read(task.id)).externalWait).toBeNull();
     expect((await c.read(other.id)).externalWait).toMatchObject({ reason: 'Deployment' });
+    if (sender === 'head') expect(c.ctx.bus.channels(c.company.id)).toContainEqual(expect.objectContaining({
+      from: { kind: 'agent', id: c.head.id, departmentId: c.department.id },
+      to: { kind: 'agent', id: c.worker.id, departmentId: c.department.id },
+    }));
+    expect(c.ctx.bus.channels(c.company.id)).not.toContainEqual(expect.objectContaining({
+      from: { kind: 'department', id: c.department.id }, to: { kind: 'department', id: c.department.id },
+    }));
     const turns = await c.db.select().from(jobs).where(eq(jobs.taskId, task.id));
     expect(turns).toHaveLength(1);
     expect(turns[0]!.prompt).toContain('Images are ready.');
@@ -263,6 +270,20 @@ describe('external task wait', () => {
     await c.wait(task.number, 'Images', new Date(Date.now() + 3_600_000).toISOString());
     const result = await (await c.tools(c[sender].id)).callTool({ name: 'message_employee', arguments: { employee: c.worker.id, text: `#${task.number}: another topic.` } });
     expect(result.isError).toBeFalsy();
+    expect((await c.read(task.id)).externalWait).toMatchObject({ reason: 'Images' });
+    expect(await c.db.select().from(jobs).where(eq(jobs.taskId, task.id))).toEqual([]);
+  });
+
+  it.each(['head', 'orchestrator'] as const)('describes task binding and refuses a blank %s message without resuming work', async sender => {
+    const c = await messaging();
+    const task = await c.task();
+    await c.wait(task.number, 'Images', new Date(Date.now() + 3_600_000).toISOString());
+    const client = await c.tools(c[sender].id);
+    const messageTool = (await client.listTools()).tools.find(t => t.name === 'message_employee')!;
+    expect(messageTool.description).toContain('With task, the message concerns that task and ends its external wait.');
+    expect(messageTool.inputSchema.properties?.text).toMatchObject({ type: 'string', minLength: 1 });
+    const result = await client.callTool({ name: 'message_employee', arguments: { employee: c.worker.id, task: task.number, text: ' ' } });
+    expect(result.isError).toBe(true);
     expect((await c.read(task.id)).externalWait).toMatchObject({ reason: 'Images' });
     expect(await c.db.select().from(jobs).where(eq(jobs.taskId, task.id))).toEqual([]);
   });
