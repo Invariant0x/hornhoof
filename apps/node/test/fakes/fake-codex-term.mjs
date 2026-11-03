@@ -35,7 +35,7 @@ const event = payload => {
   meta = null;
   appendFileSync(log, JSON.stringify({ type: 'event_msg', payload }) + '\n');
 };
-const item = (type, text) => event({ type: 'item_completed', item: { type, id: randomUUID(), content: [{ type: 'text', text }] } });
+const item = (type, text) => event({ type: 'item_completed', turn_id: turnId, item: { type, id: randomUUID(), content: [{ type: 'text', text }] } });
 const prompt = () => process.stdout.write('\x1b[1m›\x1b[0m \x1b[2mAsk Codex to do anything\x1b[0m\r\x1b[2C');
 
 rawKeys();

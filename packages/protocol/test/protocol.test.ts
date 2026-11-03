@@ -31,6 +31,17 @@ const SERVER: ServerMessage[] = [
 ];
 
 describe('node messages', () => {
+  it('keeps the original job of a turn the program starts from queued live words', () => {
+    const message = { type: 'turn.open', agentKey: 'agent-1', text: 'Queued words.', queuedFrom: 'job-1', ref: 'next' };
+    expect(parseNodeMessage(JSON.stringify(message))).toEqual(message);
+  });
+  it.each(['job-1', null])('carries unheard words with job %s and bounds their text like agent.say', jobId => {
+    const message = { type: 'agent.unheard', agentKey: 'agent-1', jobId, text: 'From Hornhoof:\n\nKeep these words.' };
+    expect(parseNodeMessage(JSON.stringify(message))).toEqual(message);
+    expect(parseNodeMessage(JSON.stringify({ ...message, text: 'x'.repeat(100_000) }))).not.toBeNull();
+    expect(parseNodeMessage(JSON.stringify({ ...message, text: 'x'.repeat(100_001) }))).toBeNull();
+  });
+
   it('round-trip through JSON', () => {
     for (const m of NODE) expect(parseNodeMessage(JSON.stringify(m))).toEqual(m);
   });

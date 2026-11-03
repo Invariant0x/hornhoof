@@ -49,7 +49,7 @@ async function headOf(ctx: Ctx, agent: typeof agents.$inferSelect) {
 }
 
 /* Use the silence watch's Operations selection and keep the case in its message across server restarts. */
-async function notifyFailure(ctx: Ctx, job: Job, text: string, caseId: string, options: { tellHead?: boolean; waitForWatcher?: boolean } = {}): Promise<void> {
+export async function notifyFailure(ctx: Ctx, job: Job, text: string, caseId: string, options: { tellHead?: boolean; waitForWatcher?: boolean } = {}): Promise<void> {
   const tellHead = options.tellHead === true;
   if (!job.agentId) return;
   const [agent] = await ctx.db.select().from(agents).where(eq(agents.id, job.agentId));

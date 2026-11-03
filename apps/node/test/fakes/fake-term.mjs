@@ -81,6 +81,7 @@ const show = () => {
   shown = lines.length - 1;
 };
 let queue = Promise.resolve();
+let hanging = false;
 readKeys(key => {
   if (Date.now() < inputAt) return;
   // Escape stops an answer; it is not part of the next line.
@@ -115,6 +116,15 @@ function entered() {
 }
 
 async function take(line) {
+  if (hanging) {
+    await hook('prompt', { prompt: line });
+    appendFileSync(log, JSON.stringify({ type: 'queue-operation', operation: 'enqueue', content: line }) + '\n');
+    if (process.env.FAKE_HOLD_WORDS) return;
+    appendFileSync(log, JSON.stringify({ type: 'queue-operation', operation: 'remove', reason: 'absorbed_mid_turn' }) + '\n');
+    hanging = false;
+    await workFirst(line);
+    return answer(line, '');
+  }
   if (line === 'EXIT') process.exit(3);
   if (line === 'CLEAR') return clear();
   const context = await hook('prompt', { prompt: line });
@@ -171,7 +181,7 @@ async function clear() {
 
 // Words that end a turn without an answer, each its own way.
 const ENDINGS = [
-  ['HANG', () => process.stdout.write('❯ ')],
+  ['HANG', () => { hanging = true; process.stdout.write('❯ '); }],
   [
     'INTERRUPT',
     () => {

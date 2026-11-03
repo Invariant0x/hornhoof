@@ -30,7 +30,7 @@ describe.skipIf(!hasTmux)('restarting a silent program in the same turn', () => 
     expect(log.mock.calls.some(([text]) => text.includes('restarted'))).toBe(true);
   });
   it('replays only words without a log acknowledgment and ignores the old program ending during replacement', async () => {
-    await setUp({ lookMs: 50 });
+    await setUp({ lookMs: 50, enterWaitMs: 100 });
     const running = host.run(codexJob('held', 'HANG', { jobId: 'job-held', env: { FAKE_HOLD_WORDS: '1' } }));
     await until(() => sent.some(m => m.type === 'job.program' && m.jobId === 'job-held'));
     expect(await host.say('held', 'Words held by the program.')).toBe(true);
@@ -49,7 +49,7 @@ describe.skipIf(!hasTmux)('restarting a silent program in the same turn', () => 
   it('keeps a second held message when the rollout acknowledged only the first', async () => {
     const { appendFileSync } = await import('node:fs');
     const { findRollout } = await import('../src/terminal/programs.js');
-    await setUp({ lookMs: 50 });
+    await setUp({ lookMs: 50, enterWaitMs: 100 });
     const running = host.run(codexJob('two-held', 'HANG', { jobId: 'job-two', env: { FAKE_HOLD_WORDS: '1' } }));
     await until(() => host['agents'].get('two-held')?.took === true);
     expect(await host.say('two-held', 'First message.')).toBe(true);

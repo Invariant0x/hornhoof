@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, machines, nodes, planCredentials, subscriptions, tasks, type Interruption } from '../../db/schema.js';
 import { said } from '../conversation/live.js';
+import { unheard } from '../conversation/unheard.js';
 import { nodeOfAgent, pumpWaiting, refusedLimits, startProgram } from '../conversation/queue.js';
 import { workStarts } from '../org/map-state.js';
 import { startWork } from '../tasks/engine.js';
@@ -233,7 +234,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       return;
     }
     case 'turn.open': {
-      const opened = await typedTurn(ctx, id, msg.agentKey, msg.text, ctx.terminals.takeTyped(id, msg.agentKey));
+      const opened = await typedTurn(ctx, id, msg.agentKey, msg.text, ctx.terminals.takeTyped(id, msg.agentKey), msg.queuedFrom);
       ctx.hub.send(id, { type: 'turn.opened', agentKey: msg.agentKey, jobId: opened?.jobId ?? null, toolToken: opened?.token ?? null, ...(msg.ref ? { ref: msg.ref } : {}) });
       return;
     }
@@ -245,6 +246,9 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       return;
     case 'agent.said':
       said(ctx, id, msg.ref, msg.ok);
+      return;
+    case 'agent.unheard':
+      await unheard(ctx, id, msg, now);
       return;
     case 'agent.hook_rejected':
       await hookRejected(ctx, id, msg, jobsOf(id, ctx));

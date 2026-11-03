@@ -414,7 +414,7 @@ const NodeMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('term.program'), termId: TermId, running: z.boolean() }),
   /* A person typed to an agent that had no turn running: Hornhoof opens one so the agent has its tools. ref names the
      typed turn, and Hornhoof's answer carries it back. */
-  z.object({ type: z.literal('turn.open'), agentKey: z.string().regex(/^[A-Za-z0-9-]{1,64}$/), text: z.string().max(100_000), ref: z.string().max(64).optional() }),
+  z.object({ type: z.literal('turn.open'), queuedFrom: Id.optional(), agentKey: z.string().regex(/^[A-Za-z0-9-]{1,64}$/), text: z.string().max(100_000), ref: z.string().max(64).optional() }),
   /* Someone who may type opened the window of an agent whose program does not run: Hornhoof starts it with a turn that
      types nothing. */
   z.object({ type: z.literal('agent.start'), agentKey: z.string().regex(/^[A-Za-z0-9-]{1,64}$/) }),
@@ -428,7 +428,9 @@ const NodeMessage = z.discriminatedUnion('type', [
   /* How full the agent's context is now, as its program counts it: a share from 0 to 1. */
   z.object({ type: z.literal('agent.context'), agentKey: z.string().regex(/^[A-Za-z0-9-]{1,64}$/), used: z.number().min(0).max(1) }),
   /* Whether Hornhoof's words named by ref went into the agent's running turn; if not, they wait for its next one. */
+  /* Said ok means the program recorded the words, or Codex holds them. Unheard follows if they never entered a turn. */
   z.object({ type: z.literal('agent.said'), ref: z.string().max(64), ok: z.boolean() }),
+  z.object({ type: z.literal('agent.unheard'), agentKey: Id, jobId: Id.nullable(), text: z.string().max(100_000) }),
   /* How a restart Hornhoof asked for went: done, or why the node did not do it. */
   z.object({ type: z.literal('agent.restarted'), agentKey: Id, jobId: Id, ok: z.boolean(), reason: z.string().max(300).nullable() }),
 ]);

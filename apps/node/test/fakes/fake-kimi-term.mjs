@@ -197,6 +197,23 @@ readKeys(key => {
     }
     return;
   }
+  if (key === 'steer') {
+    const text = typed;
+    typed = '';
+    print('\r\x1b[J\n');
+    if (!text || hanging === null) return prompt();
+    queue = queue.then(async () => {
+      await hook('queued', 'UserPromptQueued', { prompt: [{ type: 'text', text }], is_steer: true });
+      record('prompt.steered', { input: [{ type: 'text', text }] });
+      if (process.env.FAKE_HOLD_WORDS) return prompt();
+      const turnId = hanging;
+      record('turn.steer', { turnId, input: [{ type: 'text', text }], origin: { inTurn: true } });
+      hanging = null;
+      await workFirst(text, turnId);
+      await answer(text, turnId, '');
+    });
+    return;
+  }
   if (key === 'enter') {
     const line = keepTail ? typed.slice(-keepTail) : typed;
     typed = '';

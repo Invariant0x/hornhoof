@@ -20,6 +20,7 @@ import { workStarts } from '../org/map-state.js';
 import { agentFailureState, type FailureState } from '../tasks/failures.js';
 import { addressed, preface } from './prompt.js';
 import { ABOUT_AS_FREE, freedom } from '../testruns/pick.js';
+import { queuedInput } from './queued-input.js';
 
 /* Workers compact their conversation at half a million tokens, which keeps their turns quick; heads and the orchestrator
    keep the whole window, since they hold the department's and the company's picture. */
@@ -258,23 +259,26 @@ export async function enqueueTurn(ctx: Ctx, t: Turn): Promise<string> {
 
 /* A person typed into the agent's terminal while no turn ran, or while the program started. The turn is theirs and runs
    from now on the node that shows the session, which goes on with the instructions it was started with: their hash stays,
-   so the next turn resumes it. Nobody typed it when no person pressed Enter in Hornhoof's terminal just now: then the
-   agent's own program asks, which gets no turn and no tool token, so an agent never opens work for itself. */
-export async function openTypedTurn(ctx: Ctx, node: NodeIdentity, agentId: string, text: string, personId: string | null): Promise<{ jobId: string; token: string } | null> {
-  if (!personId || !z.uuid().safeParse(agentId).success) return null;
+   so the next turn resumes it. Without a person's keys, only known live words the program queued may open a turn. */
+export async function openTypedTurn(ctx: Ctx, node: NodeIdentity, agentId: string, text: string, personId: string | null, queuedFrom?: string): Promise<{ jobId: string; token: string } | null> {
+  if ((!personId && !queuedFrom) || !z.uuid().safeParse(agentId).success) return null;
   const opened = await onAgent(ctx, agentId, async () => {
     const { db } = ctx;
     const [agent] = await db.select().from(agents).where(and(eq(agents.id, agentId), isNull(agents.removedAt)));
     const sub = agent ? await liveSubscription(ctx, agent.id) : null;
     const at = sub ? await nodeOfAgent(ctx, agentId) : null;
     if (!agent || !sub || !at || !sameNode(at, node)) return null;
+    const queued = queuedFrom ? await queuedInput(ctx, agentId, queuedFrom, text) : null;
+    if (queuedFrom && !queued) return null;
+    const author = queued ? queued.personId : personId;
     /* A turn that only started the program is over once the person types: their turn takes its place. */
     await db
       .update(jobs)
       .set({ status: 'done', result: '', finishedAt: new Date() })
       .where(and(conversationOf(agentId), eq(jobs.status, 'running'), eq(jobs.prompt, ''), isNull(jobs.taskId)));
     const [running] = await db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
-    if (running) return null;
+    /* A program's queued turn can start before the old job's end has reached Hornhoof. It holds the line meanwhile. */
+    if (running && running.id !== queuedFrom) return null;
     const [last] = await db
       .select({ hash: jobs.instructionsHash })
       .from(jobs)
@@ -294,13 +298,13 @@ export async function openTypedTurn(ctx: Ctx, node: NodeIdentity, agentId: strin
         startedAt: new Date(),
         prompt: text,
         timeoutMs: TURN_TIMEOUT_MS,
-        createdBy: personId,
-        answersCeo: await isCeo(ctx, personId),
+        createdBy: author,
+        answersCeo: await isCeo(ctx, author),
         toolTokenHash: hashToken(token),
         instructionsHash: last?.hash ?? null,
       })
       .returning({ id: jobs.id });
-    if (text.trim()) await appendEvent(ctx, { companyId: agent.companyId, agentId, jobId: job!.id, kind: 'message', data: { text }, personId });
+    if (text.trim()) await appendEvent(ctx, { companyId: agent.companyId, agentId, jobId: job!.id, kind: 'message', data: { text, ...(queued ? { queuedEvent: queued.seq } : {}) }, personId: author, ...(queued ? { message: queued.message } : {}) });
     await publishWorking(ctx, agent.companyId);
     return { jobId: job!.id, token };
   });

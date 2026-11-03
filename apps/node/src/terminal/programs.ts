@@ -160,6 +160,7 @@ export async function prepareAgy(workDir: string, mcpUrl: string, fs: AgentFs = 
 const KIMI_HOOKS = [
   ['SessionStart', 'start'],
   ['UserPromptSubmit', 'prompt'],
+  ['UserPromptQueued', 'queued'],
   ['Stop', 'stop'],
   ['StopFailure', 'stop'],
   ['Interrupt', 'interrupt'],
