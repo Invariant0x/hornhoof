@@ -3,10 +3,11 @@ import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { agentSpot } from '../../auth/access.js';
 import { agentEvents, agents, jobs, people, type AgentEventKind } from '../../db/schema.js';
+import { incomingEnvelope, messageData, readMessage, type MessageEnvelope } from './parties.js';
 
-export type EventView = { seq: number; kind: AgentEventKind; data: unknown; jobId: string | null; person: { id: string; name: string } | null; at: string };
+export type EventView = { seq: number; kind: AgentEventKind; data: unknown; message?: MessageEnvelope; jobId: string | null; person: { id: string; name: string } | null; at: string };
 
-type NewEvent = { companyId: string; agentId: string; jobId?: string | null; kind: AgentEventKind; data: unknown; personId?: string | null };
+type NewEvent = { companyId: string; agentId: string; jobId?: string | null; kind: AgentEventKind; data: unknown; message?: MessageEnvelope; personId?: string | null };
 
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 /* What must be kept with the event or not at all, in the transaction that stores it. */
@@ -34,15 +35,17 @@ function hideCodes(data: unknown): unknown {
 const view = (r: Row): EventView => ({
   seq: r.seq,
   kind: r.kind,
-  data: r.data,
+  ...(r.kind === 'message' ? readMessage(r.data) : { data: r.data }),
   jobId: r.jobId,
   person: r.personId ? { id: r.personId, name: r.personName ?? '' } : null,
   at: r.createdAt.toISOString(),
 });
 
 /* Stores the event, with what goes along with it, then tells everyone watching. */
-export async function appendEvent(ctx: Pick<Ctx, 'db' | 'bus'>, e: NewEvent, also?: WithEvent): Promise<EventView> {
-  const values = { companyId: e.companyId, agentId: e.agentId, jobId: e.jobId ?? null, kind: e.kind, data: hideCodes(e.data), personId: e.personId ?? null };
+export async function appendEvent(ctx: Pick<Ctx, 'db' | 'bus' | 'templates'>, e: NewEvent, also?: WithEvent): Promise<EventView> {
+  const message = e.kind === 'message' ? e.message ?? await incomingEnvelope(ctx, e.companyId, e.agentId, e.personId, e.data) : undefined;
+  const data = message ? messageData(e.data, message) : e.data;
+  const values = { companyId: e.companyId, agentId: e.agentId, jobId: e.jobId ?? null, kind: e.kind, data: hideCodes(data), personId: e.personId ?? null };
   const returning = { id: agentEvents.id, seq: agentEvents.seq, createdAt: agentEvents.createdAt };
   const [row] = also
     ? await ctx.db.transaction(async tx => {
