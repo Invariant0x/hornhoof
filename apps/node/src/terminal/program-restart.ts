@@ -1,4 +1,4 @@
-import type { ProgramState } from '@hornhoof/protocol';
+import { UNHEARD_MS, type ProgramState } from '@hornhoof/protocol';
 import { RESTART_AFTER_MS } from '@hornhoof/protocol/map';
 import { contentText, isRecord } from '../providers/events.js';
 import type { TermProgram } from './programs.js';
@@ -40,7 +40,6 @@ export function resumeCommand(kind: TermProgram['kind'], original: string[], ses
 }
 
 
-export const UNHEARD_MS = 15_000;
 const flat = (text: string) => text.replace(/\s+/g, ' ').trim();
 type WordState = 'waiting' | 'queued' | 'held' | 'taken' | 'discarded';
 export type WordReceipt = { text: string; jobId: string | null; state: WordState; accepted: boolean; sources: Set<string> };
