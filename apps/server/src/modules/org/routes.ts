@@ -50,6 +50,7 @@ function reachedLines(lines: readonly MapLine[], reach: Access, allAgents: reado
   };
   const shown = lines.filter(seen);
   return (kind: MapLine['kind'], departmentId?: string) =>
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- strip routing keys used only for filtering
     shown.filter(l => l.kind === kind && (!departmentId || l.departmentId === departmentId)).map(({ kind: _, departmentId: __, ...line }) => line);
 }
 

@@ -35,6 +35,7 @@ export function authRoutes(app: FastifyInstance, { db, config }: Deps): void {
     const ok = await verifyPassword(body.password, row?.passwordHash ?? (await fallbackHash()));
     if (!row?.passwordHash || !ok || row.status !== 'active') throw wrongPassword();
 
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omit passwordHash from the returned person
     const { passwordHash: _, ...person } = row;
     /* An owner link or a disable that lands during the check above makes this password an old one. */
     if (!(await startSession(reply, db, config, person.id, row.passwordHash))) throw wrongPassword();
