@@ -323,13 +323,16 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard }:
     });
   }
 
-  /* Ctrl+O opens every folded message, or folds them all once all are open. In the live terminal the key is the program's. */
+  /* Ctrl+O opens every folded message, or folds them all once all are open, wherever the focus is, as in Claude Code: on
+     the map that opened the window too. In the live terminal the key is the program's, and in a field elsewhere it is
+     the field's. */
   useEffect(() => {
     const seqs = messageSeqs ? messageSeqs.split(',').map(Number) : [];
     const onKey = (e: globalThis.KeyboardEvent) => {
       if (!e.ctrlKey || e.altKey || e.metaKey || e.key.toLowerCase() !== 'o' || !seqs.length) return;
       const target = e.target instanceof Element ? e.target : null;
-      if (target?.closest('.t-term, .xterm-helper-textarea') || (target && target !== document.body && !box.current?.contains(target))) return;
+      if (target?.closest('.t-term, .xterm-helper-textarea')) return;
+      if (target?.closest('input, textarea, select, [contenteditable="true"]') && !box.current?.contains(target)) return;
       e.preventDefault();
       setOpened(now => (seqs.every(seq => now.has(seq)) ? new Set() : new Set(seqs)));
     };

@@ -666,6 +666,18 @@ describe('messages between agents and people', () => {
     expect(screen.getByText('Handed #78 to development.')).toBeInTheDocument();
   });
 
+  it('takes Ctrl+O while the focus is still on the map that opened the window, but not while one types elsewhere', async () => {
+    open({ [`GET ${EVENTS}?after=0`]: [200, { events: ORCHESTRATOR_LOG, state: READY }] });
+    await screen.findByRole('button', { name: 'Hornhoof notice to the orchestrator' });
+    const chip = document.body.appendChild(document.createElement('button'));
+    const field = document.body.appendChild(document.createElement('input'));
+    onTestFinished(() => { chip.remove(); field.remove(); });
+    ctrlO(field);
+    expect(screen.queryByText(/#49 is blocked/)).not.toBeInTheDocument();
+    ctrlO(chip);
+    expect(screen.getByText(/#49 is blocked/)).toBeInTheDocument();
+  });
+
   it("shows a head's messages the same way", async () => {
     employee('b0', [msg(1, 'in', ORCH, DANA, 'Plan #78.'), msg(2, 'out', DANA, BRUNO, 'Take #83.')]);
     expect(await screen.findByRole('button', { name: 'Message from the orchestrator to Dana (Head of development)' })).toBeInTheDocument();
