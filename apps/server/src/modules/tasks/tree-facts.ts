@@ -5,6 +5,8 @@ import { agentEvents, agents, departments, jobs, requests, taskEvents, tasks, tu
 import type { Task } from './engine.js';
 import { NUDGES, type FactJobState, type FactRequest, type FactSign, type FactTask, type FactTaskEvent, type TreeFacts } from './tree.js';
 
+import { readTurnHistory } from './tree-history.js';
+
 const toDate = (v: Date | string): Date => (v instanceof Date ? v : new Date(v));
 
 /* Signs of life grouped by distinct minute per task and agent, keeping the minute's bounds for exact stall starts. */
@@ -79,7 +81,7 @@ function panelFromEvent(e: FactTaskEvent): string[] {
 
 function collectAgentIds(turnTasks: Task[], events: FactTaskEvent[], asks: FactRequest[]): string[] {
   const raw = [
-    ...turnTasks.map(t => t.executorAgentId),
+    ...turnTasks.flatMap(t => [t.executorAgentId, t.assigneeAgentId]),
     ...asks.map(r => r.agentId),
     ...events.flatMap(e => [e.agentId, ...panelFromEvent(e)]),
   ];
@@ -103,6 +105,7 @@ const toFactTask = (t: Task, repoIds: Set<string>, sees: (t: Task) => boolean): 
   status: t.status,
   parentId: t.parentId,
   executorAgentId: t.executorAgentId,
+  assigneeAgentId: t.assigneeAgentId,
   after: t.after,
   inRepository: hasRepository(t, repoIds),
   createdAt: t.createdAt,
@@ -176,6 +179,7 @@ export async function treeFacts(db: Db, companyId: string, departmentId: string,
   const signs = await readSigns(db, taskIds, turn.openedAt ?? turn.createdAt);
   const jobStates = await readJobStates(db, taskIds);
   const agentIds = collectAgentIds(turnTasks, events, asks);
+  const history = await readTurnHistory(db, companyId, agentIds, turn.openedAt ?? turn.createdAt);
   const agentRows = agentIds.length
     ? await db.select({ id: agents.id, name: agents.name, createdAt: agents.createdAt }).from(agents).where(inArray(agents.id, agentIds)).orderBy(asc(agents.createdAt))
     : [];
@@ -190,5 +194,6 @@ export async function treeFacts(db: Db, companyId: string, departmentId: string,
     requests: asks,
     signs,
     jobs: jobStates,
+    turns: history,
   };
 }

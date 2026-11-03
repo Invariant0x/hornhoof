@@ -46,12 +46,34 @@ export async function recordJobProgram(
   scope: SQL,
 ): Promise<void> {
   const [job] = await ctx.db
-    .select({ id: jobs.id, companyId: jobs.companyId })
+    .select({ id: jobs.id, companyId: jobs.companyId, agentId: jobs.agentId })
     .from(jobs)
     .where(and(eq(jobs.id, msg.jobId), eq(jobs.status, 'running'), eq(jobs.kind, 'conversation'), scope));
   if (!job) return;
-  mapOf(turnPrograms, ctx).set(job.id, { program: programOf(msg, now), gone: goneProgram(msg) });
+  await replaceProgram(ctx, job, msg, now);
   ctx.bus.publish(job.companyId, { type: 'org' });
+}
+
+/* The same state as the live map, without reports or terminal contents, kept only when it changes. */
+export type ProgramChange = { program: Pick<TurnProgram, 'state' | 'since' | 'tool'> | null; alarm: TurnAlarm | null };
+type HistoryJob = Pick<Job, 'id' | 'companyId' | 'agentId'>;
+
+const historyOf = (program: TurnProgram | null, alarm: TurnAlarm | null): ProgramChange => ({
+  program: program ? { state: program.state, since: program.since, tool: program.tool } : null,
+  alarm,
+});
+
+async function keepProgramChange(ctx: Ctx, job: HistoryJob, program: TurnProgram | null, alarm: TurnAlarm | null, now: Date): Promise<void> {
+  if (!job.agentId) return;
+  await ctx.db.insert(agentEvents).values({ companyId: job.companyId, agentId: job.agentId, jobId: job.id,
+    kind: 'program', data: historyOf(program, alarm), createdAt: now });
+}
+
+async function replaceProgram(ctx: Ctx, job: HistoryJob, msg: ProgramReport, now: Date): Promise<void> {
+  const programs = mapOf(turnPrograms, ctx), previous = programs.get(job.id);
+  const program = programOf(msg, now);
+  programs.set(job.id, { program, gone: goneProgram(msg) });
+  if (previous?.program.state !== program.state) await keepProgramChange(ctx, job, program, mapOf(turnAlarms, ctx).get(job.id) ?? null, now);
 }
 
 const programOf = (msg: ProgramReport, now: Date): TurnProgram => ({ state: msg.state, since: msg.since, tool: msg.tool ?? null, screenAt: msg.screenAt, reportedAt: now.getTime() });
@@ -101,12 +123,18 @@ function alarmForTurn(job: Job, program: TurnProgram | null, nowMs: number): Tur
 
 const sameAlarm = (a: TurnAlarm | null, b: TurnAlarm | null) => a?.reason === b?.reason && a?.since === b?.since;
 
-function updateTurnAlarm(ctx: Ctx, job: Job, alarm: TurnAlarm | null): void {
+async function updateTurnAlarm(ctx: Ctx, job: Job, alarm: TurnAlarm | null, now: Date): Promise<void> {
   const alarms = mapOf(turnAlarms, ctx);
   const prev = alarms.get(job.id) ?? null;
   if (alarm) alarms.set(job.id, alarm);
   else alarms.delete(job.id);
-  if (!sameAlarm(prev, alarm)) ctx.bus.publish(job.companyId, { type: 'org' });
+  await changedAlarm(ctx, job, prev, alarm, now);
+}
+
+async function changedAlarm(ctx: Ctx, job: Job, before: TurnAlarm | null, alarm: TurnAlarm | null, now: Date): Promise<void> {
+  if (sameAlarm(before, alarm)) return;
+  await keepProgramChange(ctx, job, mapOf(turnPrograms, ctx).get(job.id)?.program ?? null, alarm, now);
+  ctx.bus.publish(job.companyId, { type: 'org' });
 }
 
 async function findSilentTurns(ctx: Ctx, now: Date): Promise<SilentTurn[]> {
@@ -129,7 +157,7 @@ async function findSilentTurns(ctx: Ctx, now: Date): Promise<SilentTurn[]> {
   for (const { job, agent, task } of rows) {
     const program = programs.get(job.id)?.program ?? null;
     const alarm = alarmForTurn(job, program, nowMs);
-    updateTurnAlarm(ctx, job, alarm);
+    await updateTurnAlarm(ctx, job, alarm, now);
     if (alarm) silent.push({ job, agent, task: task?.id ? task : null, program, alarm });
   }
   return silent;

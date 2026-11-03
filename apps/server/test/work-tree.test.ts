@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { STALL_MS, workTree, type DepartmentTree, type TreeFacts, type TreeLine } from '../src/modules/tasks/tree.js';
+import { workTree, type DepartmentTree, type TreeFacts, type TreeLine } from '../src/modules/tasks/tree.js';
 
 const T0 = Date.parse('2026-05-01T09:00:00.000Z');
 const at = (minutes: number): Date => new Date(T0 + minutes * 60_000);
@@ -51,12 +51,65 @@ function assertAllLinesCovered(tree: DepartmentTree): void {
 }
 
 describe('workTree', () => {
+  it('keeps the department head assignment even when it has no member executor', () => {
+    const tree = workTree(baseFacts({ tasks: [{ id: 'head-task', number: 109, title: 'Whole department turn', status: 'working', parentId: null,
+      executorAgentId: null, assigneeAgentId: 'head', after: [], inRepository: true, createdAt: at(0), closedAt: null }] }), at(40));
+    expect(tree.lines.map(l => [l.number, l.agent.id])).toEqual([[109, 'head']]);
+  });
+
+  it('counts one agent minute once when multiple task and review lifetimes overlap', () => {
+    const tasks = [1, 2].map(n => ({ id: `t${n}`, number: n, title: 'Checkout', status: 'working' as const, parentId: null,
+      executorAgentId: 'head', after: [], inRepository: true, createdAt: at(0), closedAt: null }));
+    const tree = workTree(baseFacts({ tasks, turns: [{ id: 'j1', taskId: 't1', agentId: 'head', createdAt: at(0), startedAt: at(0), finishedAt: null, status: 'running',
+      history: [{ at: at(0), program: { state: 'thinking', since: at(0).getTime(), tool: null }, alarm: null }] }] }), at(40));
+    expect(tree.time[0]).toMatchObject({ work: 2400, unknown: 0 });
+  });
+
+  it.each(['thinking', 'tool'] as const)('counts forty minutes of reported %s as work, not silence', state => {
+    const facts = baseFacts({
+      tasks: [{ id: 't1', number: 1, title: 'Checkout', status: 'working', parentId: null, executorAgentId: 'head', after: [], inRepository: true, createdAt: at(0), closedAt: null }],
+      turns: [{ id: 'j1', taskId: 't1', agentId: 'head', createdAt: at(0), startedAt: at(0), finishedAt: null, status: 'running',
+        history: [{ at: at(0), program: { state, since: at(0).getTime(), tool: state === 'tool' ? 'Bash' : null }, alarm: null }] }],
+    });
+    const tree = workTree(facts, at(40));
+    expect(tree.lines[0]!.segments).toEqual([{ kind: 'work', from: iso(0), to: null, program: { state, since: at(0).getTime(), tool: state === 'tool' ? 'Bash' : null } }]);
+    expect(tree.time[0]).toMatchObject({ work: 2400, stall: 0, lost: 0, alarm: 0, queued: 0, unknown: 0 });
+  });
+
+  it('uses an old proven alarm for the four-hour lost interval and counts queued review messages separately', () => {
+    const start = new Date('2026-11-03T06:10:00.000Z'), stopped = new Date('2026-11-03T10:33:35.000Z');
+    const since = Date.parse('2026-11-03T06:11:06.000Z');
+    const queued = ['2026-11-03T06:13:00.000Z', '2026-11-03T06:35:00.000Z'];
+    const facts = baseFacts({
+      turn: { id: 'turn-4', number: 4, createdAt: start, openedAt: start },
+      tasks: [0, 1, 2].map(i => ({ id: `t${i}`, number: i === 0 ? 109 : i === 1 ? 90 : 95, title: 'Work', status: 'working', parentId: null,
+        executorAgentId: 'head', after: [], inRepository: true, createdAt: i ? new Date(queued[i - 1]!) : start, closedAt: null })),
+      turns: [
+        { id: 'c7c49849', taskId: 't0', agentId: 'head', createdAt: start, startedAt: start, finishedAt: stopped, status: 'failed',
+          history: [{ at: new Date('2026-11-03T06:41:06.000Z'), program: null, alarm: { reason: 'program_stalled', since } }] },
+        ...queued.map((time, i) => ({ id: `queued-${i}`, taskId: `t${i + 1}`, agentId: 'head', createdAt: new Date(time), startedAt: null, finishedAt: null, status: 'queued', history: [] })),
+      ],
+    });
+    const tree = workTree(facts, stopped);
+    expect(tree.lines[0]!.segments).toContainEqual({ kind: 'alarm', from: new Date(since).toISOString(), to: stopped.toISOString(), alarm: { reason: 'program_stalled', since } });
+    expect(tree.time[0]).toMatchObject({ work: 0, stall: 0, alarm: 15749, queued: 29950 });
+    expect(tree.lines[1]!.segments[0]).toMatchObject({ kind: 'queued', from: queued[0], waitsForAgent: { id: 'head', name: 'Nika' } });
+  });
+
+  it('shows missing historical program evidence as unknown instead of inventing work or a stall', () => {
+    const tree = workTree(baseFacts({ tasks: [{ id: 't1', number: 1, title: 'Old work', status: 'working', parentId: null,
+      executorAgentId: 'head', after: [], inRepository: false, createdAt: at(0), closedAt: null }] }), at(40));
+    expect(tree.lines[0]!.segments).toEqual([{ kind: 'unknown', from: iso(0), to: null }]);
+    expect(tree.time[0]).toMatchObject({ work: 0, stall: 0, unknown: 2400 });
+  });
+
   it('keeps both turn reviews, their verdicts, fixes and the final check in time order', () => {
     const task = (number: number, executorAgentId: string, created: number, closed: number | null): TreeFacts['tasks'][number] => ({
       id: `t${number}`, number, title: `Task ${number}`, status: closed === null ? 'review' : 'done', parentId: null,
       executorAgentId, after: [], inRepository: true, createdAt: at(created), closedAt: closed === null ? null : at(closed),
     });
     const facts = baseFacts({ tasks: [task(90, 'head', 10, 20), task(100, 'mira', 20, 30), task(121, 'head', 30, null), task(135, 'rita', 40, null)] });
+    facts.turns = [90, 121].map((number, i) => ({ id: `j${number}`, taskId: `t${number}`, agentId: 'vera', createdAt: at(10 + i * 20), startedAt: at(10 + i * 20), finishedAt: at(18 + i * 20), status: 'done', history: [{ at: at(10 + i * 20), program: { state: 'thinking', since: at(10 + i * 20).getTime(), tool: null }, alarm: null }] }));
     facts.events = [90, 121].flatMap((number, i) => [
       { taskId: `t${number}`, agentId: 'head', kind: 'created' as const, text: '', data: { turnReview: true, panel: ['vera'] }, createdAt: at(10 + i * 20) },
       { taskId: `t${number}`, agentId: 'vera', kind: 'verdict' as const, text: '', data: { pass: i === 1, findings: i === 1 ? 0 : 2 }, createdAt: at(18 + i * 20) },
@@ -70,8 +123,7 @@ describe('workTree', () => {
     expect(tree.time.find(t => t.agent.id === 'vera')?.work).toBe(16 * 60);
   });
 
-  it('marks 42 silent minutes as stall from the last sign, keeps 29 silent minutes as work, and ignores nudges', () => {
-    expect(STALL_MS).toBe(30 * 60_000);
+  it('keeps unreported history unknown regardless of the gaps between task events, and ignores nudges', () => {
     const facts = baseFacts({
       tasks: [
         {
@@ -89,9 +141,9 @@ describe('workTree', () => {
       ],
       events: [
         { taskId: 't43', agentId: 'head', kind: 'created', text: 'Build screen.', data: {}, createdAt: at(20) },
-        /* 29 minutes of silence from 20 to 49 stays work. */
+        /* Task events remain visible, but prove no continuous program state. */
         { taskId: 't43', agentId: 'timur', kind: 'comment', text: 'Layout ready.', data: {}, createdAt: at(49) },
-        /* Nudges inside a 42 minute silence are neither moves nor signs of life. */
+        /* Nudges are neither moves nor proof of program state. */
         { taskId: 't43', agentId: null, kind: 'reminded', text: 'Still on it?', data: {}, createdAt: at(65) },
         { taskId: 't43', agentId: null, kind: 'continued', text: 'Continue.', data: {}, createdAt: at(70) },
         { taskId: 't43', agentId: null, kind: 'stuck', text: 'Stuck.', data: {}, createdAt: at(80) },
@@ -103,16 +155,12 @@ describe('workTree', () => {
     const tree = workTree(facts, at(110));
     expect(tree.lines).toHaveLength(1);
     const line = tree.lines[0]!;
-    expect(line.segments).toEqual([
-      { kind: 'work', from: iso(20), to: iso(49) },
-      { kind: 'stall', from: iso(49), to: iso(91) },
-      { kind: 'work', from: iso(91), to: null },
-    ]);
+    expect(line.segments).toEqual([{ kind: 'unknown', from: iso(20), to: null }]);
     expect(line.moves.map(m => m.kind)).toEqual(['created', 'comment', 'comment']);
     assertAllLinesCovered(tree);
   });
 
-  it('starts an ongoing stall at the later of the last task event and the last agent event, with to null', () => {
+  it('keeps lastActionAt without interpreting it as historical program state', () => {
     const facts = baseFacts({
       tasks: [
         {
@@ -159,15 +207,13 @@ describe('workTree', () => {
     const tree = workTree(facts, at(90));
     const [first, second] = tree.lines;
     expect(first!.segments).toEqual([
-      { kind: 'work', from: iso(10), to: iso(40) },
-      { kind: 'stall', from: iso(40), to: null },
+      { kind: 'unknown', from: iso(10), to: null },
     ]);
     expect(first!.lastActionAt).toBe(iso(40));
     expect(first!.live).toBe(true);
 
     expect(second!.segments).toEqual([
-      { kind: 'work', from: iso(10), to: iso(50) },
-      { kind: 'stall', from: iso(50), to: null },
+      { kind: 'unknown', from: iso(10), to: null },
     ]);
     expect(second!.lastActionAt).toBe(iso(30));
     expect(second!.live).toBe(false);
@@ -224,21 +270,21 @@ describe('workTree', () => {
     const tree = workTree(facts, at(140));
     const evaLine = tree.lines.find(l => l.taskId === 't49')!;
     expect(evaLine.segments).toEqual([
-      { kind: 'work', from: iso(10), to: iso(20) },
+      { kind: 'unknown', from: iso(10), to: iso(20) },
       { kind: 'person', from: iso(20), to: iso(85) },
-      { kind: 'work', from: iso(85), to: iso(100) },
+      { kind: 'unknown', from: iso(85), to: iso(100) },
       { kind: 'person', from: iso(100), to: null },
     ]);
     expect(evaLine.moves[1]!.text).toHaveLength(160);
 
     const miraLine = tree.lines.find(l => l.taskId === 't51')!;
     expect(miraLine.segments).toEqual([
-      { kind: 'work', from: iso(10), to: iso(30) },
+      { kind: 'unknown', from: iso(10), to: iso(30) },
       { kind: 'person', from: iso(30), to: iso(75) },
-      { kind: 'stall', from: iso(75), to: null },
+      { kind: 'unknown', from: iso(75), to: null },
     ]);
 
-    const answeredIdle = tree.idle.find(i => i.taskId === 't49' && i.to !== null)!;
+    const answeredIdle = tree.idle.find(i => i.taskId === 't49' && i.kind === 'person' && i.to !== null)!;
     expect(answeredIdle.question).toBe(longQuestion.slice(0, 160));
     expect(answeredIdle.question).toHaveLength(160);
     assertAllLinesCovered(tree);
@@ -312,7 +358,7 @@ describe('workTree', () => {
     expect(started.waitsFor).toEqual([]);
     expect(started.segments).toEqual([
       { kind: 'after', from: iso(15), to: iso(60) },
-      { kind: 'work', from: iso(60), to: null },
+      { kind: 'unknown', from: iso(60), to: null },
     ]);
 
     const waiting = tree.lines.find(l => l.taskId === 't52')!;
@@ -367,15 +413,14 @@ describe('workTree', () => {
     expect(mergedLine.branch).toBe('task-42');
     expect(mergedLine.mergedAt).toBe(iso(90));
     expect(mergedLine.doneAt).toBeNull();
-    expect(mergedLine.segments).toEqual([{ kind: 'work', from: iso(10), to: iso(90) }]);
+    expect(mergedLine.segments).toEqual([{ kind: 'unknown', from: iso(10), to: iso(90) }]);
 
     const plainDone = tree.lines.find(l => l.taskId === 't2')!;
     expect(plainDone.branch).toBeNull();
     expect(plainDone.mergedAt).toBeNull();
     expect(plainDone.doneAt).toBe(iso(80));
     expect(plainDone.segments).toEqual([
-      { kind: 'work', from: iso(15), to: iso(40) },
-      { kind: 'stall', from: iso(40), to: iso(80) },
+      { kind: 'unknown', from: iso(15), to: iso(80) },
     ]);
     assertAllLinesCovered(tree);
   });
@@ -440,21 +485,21 @@ describe('workTree', () => {
         {
           agent: { id: 'vera', name: 'Vera' },
           verdict: { at: iso(58), pass: false, findings: 2 },
-          segments: [{ kind: 'work', from: iso(40), to: iso(58) }],
+          segments: [{ kind: 'unknown', from: iso(40), to: iso(58) }],
           lastActionAt: null,
           live: false,
         },
         {
           agent: { id: 'gleb', name: 'Gleb' },
           verdict: null,
-          segments: [{ kind: 'stall', from: iso(40), to: null }],
+          segments: [{ kind: 'unknown', from: iso(40), to: null }],
           lastActionAt: null,
           live: true,
         },
         {
           agent: { id: 'rita', name: 'Rita' },
           verdict: { at: iso(55), pass: true, findings: 0 },
-          segments: [{ kind: 'work', from: iso(40), to: iso(55) }],
+          segments: [{ kind: 'unknown', from: iso(40), to: iso(55) }],
           lastActionAt: null,
           live: false,
         },
@@ -486,7 +531,7 @@ describe('workTree', () => {
         { id: 'timur', name: 'Timur', createdAt: at(-40) },
       ],
       tasks: [
-        /* Mira line 1: 20m work (from 0 to 20). */
+        /* Mira line 1 has no program reports. */
         {
           id: 'm1',
           number: 1,
@@ -499,7 +544,7 @@ describe('workTree', () => {
           createdAt: at(0),
           closedAt: at(20),
         },
-        /* Mira line 2: 10m after (20..30), 15m work (30..45), 35m ended stall (45..80), 20m work (80..100). */
+        /* Mira line 2: ten minutes waiting for its dependency, then unreported work. */
         {
           id: 'm2',
           number: 2,
@@ -512,7 +557,7 @@ describe('workTree', () => {
           createdAt: at(20),
           closedAt: null,
         },
-        /* Timur: ongoing stall since 50 (50m at now=100). */
+        /* Timur has no historical program evidence. */
         {
           id: 't1',
           number: 3,
@@ -568,51 +613,18 @@ describe('workTree', () => {
     const tree = workTree(facts, at(100));
     assertAllLinesCovered(tree);
 
-    /* Agents ordered by createdAt: Mira (-50), Timur (-40), Eva (-30), Ostap (-10). */
     expect(tree.time).toEqual([
-      {
-        agent: { id: 'mira', name: 'Mira' },
-        /* (20 + 15 + 20)m = 55m = 3300s work; 10m = 600s after; 35m = 2100s stall. */
-        work: 55 * 60,
-        after: 10 * 60,
-        person: 0,
-        stall: 35 * 60,
-      },
-      {
-        agent: { id: 'timur', name: 'Timur' },
-        work: 0,
-        after: 0,
-        person: 0,
-        stall: 50 * 60,
-      },
-      {
-        agent: { id: 'eva', name: 'Eva' },
-        /* 50m (35..85) work; (25 + 15)m = 40m person. */
-        work: 50 * 60,
-        after: 0,
-        person: 40 * 60,
-        stall: 0,
-      },
-      {
-        agent: { id: 'ostap', name: 'Ostap' },
-        work: 0,
-        after: 60 * 60,
-        person: 0,
-        stall: 0,
-      },
+      { agent: { id: 'mira', name: 'Mira' }, work: 0, after: 600, person: 0, stall: 0, lost: 0, alarm: 0, queued: 0, unknown: 5400 },
+      { agent: { id: 'timur', name: 'Timur' }, work: 0, after: 0, person: 0, stall: 0, lost: 0, alarm: 0, queued: 0, unknown: 3000 },
+      { agent: { id: 'eva', name: 'Eva' }, work: 0, after: 0, person: 2400, stall: 0, lost: 0, alarm: 0, queued: 0, unknown: 3000 },
+      { agent: { id: 'ostap', name: 'Ostap' }, work: 0, after: 3600, person: 0, stall: 0, lost: 0, alarm: 0, queued: 0, unknown: 0 },
     ]);
-
-    /* Idle order: ongoing first (stall, then person, then after), then ended longest first (35m, 25m, 10m). */
     expect(tree.idle.map(i => [i.kind, i.to === null ? 'open' : 'ended', i.number])).toEqual([
-      ['stall', 'open', 3],
-      ['person', 'open', 4],
-      ['after', 'open', 5],
-      ['stall', 'ended', 2],
-      ['person', 'ended', 4],
-      ['after', 'ended', 2],
+      ['person', 'open', 4], ['after', 'open', 5], ['unknown', 'open', 2], ['unknown', 'open', 3],
+      ['unknown', 'ended', 4], ['person', 'ended', 4], ['unknown', 'ended', 1], ['after', 'ended', 2],
     ]);
-    expect(tree.idle[1]!.question).toBe('Second question?');
-    expect(tree.idle[2]!.waitsFor).toEqual([3]);
+    expect(tree.idle[0]!.question).toBe('Second question?');
+    expect(tree.idle[1]!.waitsFor).toEqual([3]);
   });
 
   it('returns an empty work tree when there is no open turn', () => {

@@ -1,16 +1,17 @@
+import type { TurnAlarm, TurnProgram } from '@hornhoof/protocol/map';
+import { countedSegments, turnSegments, withPrograms, type FactTurn } from './tree-programs.js';
 import type { REQUEST_STATUSES, TaskEventKind, TaskStatus } from '../../db/schema.js';
 
 type RequestStatus = (typeof REQUEST_STATUSES)[number];
 
-export const STALL_MS = 30 * 60_000;
 const TEXT_MAX = 160;
 
 /* Hornhoof's own reminders on a quiet task are neither moves nor signs of life. */
 export const NUDGES: ReadonlySet<TaskEventKind> = new Set(['reminded', 'continued', 'stuck']);
 
-export type SegmentKind = 'work' | 'after' | 'person' | 'stall';
+export type SegmentKind = 'work' | 'after' | 'person' | 'stall' | 'lost' | 'alarm' | 'queued' | 'unknown';
 /* to is null while it still goes on at `now`. */
-export type TreeSegment = { kind: SegmentKind; from: string; to: string | null };
+export type TreeSegment = { kind: SegmentKind; from: string; to: string | null; program?: Pick<TurnProgram, 'state' | 'since' | 'tool'>; alarm?: TurnAlarm; waitsForAgent?: TreeAgent };
 /* A task event as a dot on the line; text cut to 160 characters. */
 export type TreeMove = { kind: TaskEventKind; at: string; text: string };
 export type TreeAgent = { id: string; name: string };
@@ -43,7 +44,7 @@ export type TreeVerdict = { at: string; pass: boolean; findings: number | null }
 export type TreeReviewer = { agent: TreeAgent; verdict: TreeVerdict | null; segments: TreeSegment[]; lastActionAt: string | null; live: boolean };
 export type TreeReview = { taskId: string; number: number; openedAt: string; closedAt: string | null; head: TreeAgent; reviewers: TreeReviewer[] };
 /* Seconds of each kind from the start of the turn to now, over all of the agent's lines and review lines. */
-export type AgentTime = { agent: TreeAgent; work: number; after: number; person: number; stall: number };
+export type AgentTime = { agent: TreeAgent; work: number; after: number; person: number; stall: number; lost: number; alarm: number; queued: number; unknown: number };
 export type IdleStretch = {
   agent: TreeAgent;
   taskId: string;
@@ -77,6 +78,7 @@ export type FactTask = {
   status: TaskStatus;
   parentId: string | null;
   executorAgentId: string | null;
+  assigneeAgentId?: string | null;
   after: string[];
   inRepository: boolean;
   createdAt: Date;
@@ -113,6 +115,7 @@ export type TreeFacts = {
   requests: FactRequest[];
   signs: FactSign[];
   jobs: FactJobState[];
+  turns?: FactTurn[];
 };
 
 type PersonWindow = { a: number; b: number; open: boolean };
@@ -160,32 +163,22 @@ function personWindows(fromMs: number, stopMs: number, ongoing: boolean, asks: F
   return mergePersonWindows(clipped);
 }
 
-function workAndStall(a: number, b: number, signs: number[]): TreeSegment[] {
-  const pts = [a, ...signs.filter(s => s > a && s < b), b];
-  const out: TreeSegment[] = [];
-  for (let i = 0; i < pts.length - 1; i++) {
-    const start = pts[i]!;
-    const end = pts[i + 1]!;
-    const kind: SegmentKind = end - start >= STALL_MS ? 'stall' : 'work';
-    const prev = out.at(-1);
-    if (kind === 'work' && prev?.kind === 'work') prev.to = iso(end);
-    else out.push({ kind, from: iso(start), to: iso(end) });
-  }
-  return out;
+function unreportedSegment(a: number, b: number): TreeSegment[] {
+  return [{ kind: 'unknown', from: iso(a), to: iso(b) }];
 }
 
 function finishTail(out: TreeSegment[], cursor: number, fromMs: number, stopMs: number, ongoing: boolean, allSigns: number[]): void {
   if (stopMs > cursor) {
-    const tail = workAndStall(cursor, stopMs, allSigns);
+    const tail = unreportedSegment(cursor, stopMs);
     if (ongoing) tail[tail.length - 1]!.to = null;
     out.push(...tail);
     return;
   }
   if (ongoing) {
-    if (out.at(-1)?.to !== null) out.push({ kind: 'work', from: iso(stopMs), to: null });
+    if (out.at(-1)?.to !== null) out.push({ kind: 'unknown', from: iso(stopMs), to: null });
     return;
   }
-  if (!out.length) out.push({ kind: 'work', from: iso(fromMs), to: iso(stopMs) });
+  if (!out.length) out.push({ kind: 'unknown', from: iso(fromMs), to: iso(stopMs) });
 }
 
 function activeSegments(fromMs: number, endAt: Date | null, nowMs: number, asks: FactRequest[], signsMs: number[]): TreeSegment[] {
@@ -198,7 +191,7 @@ function activeSegments(fromMs: number, endAt: Date | null, nowMs: number, asks:
   let cursor = fromMs;
 
   for (const w of waits) {
-    if (w.a > cursor) out.push(...workAndStall(cursor, w.a, allSigns));
+    if (w.a > cursor) out.push(...unreportedSegment(cursor, w.a));
     const openAtEnd = w.open && ongoing;
     out.push({ kind: 'person', from: iso(w.a), to: openAtEnd ? null : iso(w.b) });
     cursor = w.b;
@@ -220,7 +213,7 @@ export function lineSegments(input: {
   const cutMs = Math.max(startMs, input.cutAt.getTime());
   const head: TreeSegment[] = cutMs > startMs ? [{ kind: 'after', from: iso(startMs), to: iso(cutMs) }] : [];
   if (input.endAt && input.endAt.getTime() <= cutMs) {
-    return head.length ? head : [{ kind: 'work', from: iso(startMs), to: iso(cutMs) }];
+    return head.length ? head : [{ kind: 'unknown', from: iso(startMs), to: iso(cutMs) }];
   }
   return [...head, ...activeSegments(cutMs, input.endAt, input.now.getTime(), input.requests, input.signs.map(d => d.getTime()))];
 }
@@ -236,7 +229,7 @@ export function reviewerSegments(input: {
 }
 
 function sumSegmentSeconds(segments: TreeSegment[], startMs: number, nowMs: number) {
-  const ms = { work: 0, after: 0, person: 0, stall: 0 };
+  const ms: Record<SegmentKind, number> = { work: 0, after: 0, person: 0, stall: 0, lost: 0, alarm: 0, queued: 0, unknown: 0 };
   for (const seg of segments) {
     const from = Math.max(startMs, Date.parse(seg.from));
     const to = Math.min(nowMs, seg.to ? Date.parse(seg.to) : nowMs);
@@ -247,6 +240,10 @@ function sumSegmentSeconds(segments: TreeSegment[], startMs: number, nowMs: numb
     after: Math.round(ms.after / 1000),
     person: Math.round(ms.person / 1000),
     stall: Math.round(ms.stall / 1000),
+    lost: Math.round(ms.lost / 1000),
+    alarm: Math.round(ms.alarm / 1000),
+    queued: Math.round(ms.queued / 1000),
+    unknown: Math.round(ms.unknown / 1000),
   };
 }
 
@@ -266,7 +263,7 @@ export function agentTime(
     .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
     .map(a => ({
       agent: { id: a.id, name: a.name },
-      ...sumSegmentSeconds(byAgent.get(a.id)!, startMs, nowMs),
+      ...sumSegmentSeconds(countedSegments(byAgent.get(a.id)!, now), startMs, nowMs),
     }));
 }
 
@@ -281,7 +278,7 @@ type IdleSource = {
   requests: FactRequest[];
 };
 
-const IDLE_RANK: Record<Exclude<SegmentKind, 'work'>, number> = { stall: 0, person: 1, after: 2 };
+const IDLE_RANK: Record<Exclude<SegmentKind, 'work'>, number> = { lost: 0, alarm: 0, person: 1, queued: 2, after: 3, stall: 4, unknown: 5 };
 
 function questionFor(asks: FactRequest[], fromIso: string): string | null {
   const fromMs = Date.parse(fromIso);
@@ -349,6 +346,7 @@ type Indexed = {
   signsByTask: Map<string, FactSign[]>;
   jobsByTask: Map<string, FactJobState[]>;
   jobsByPair: Map<string, FactJobState>;
+  turnsByPair: Map<string, FactTurn[]>;
 };
 
 function indexFacts(facts: TreeFacts): Indexed {
@@ -365,6 +363,7 @@ function indexFacts(facts: TreeFacts): Indexed {
     signsByTask: groupBy(facts.signs, s => s.taskId),
     jobsByTask: groupBy(facts.jobs, j => j.taskId),
     jobsByPair: new Map(facts.jobs.map(j => [`${j.taskId}:${j.agentId}`, j])),
+    turnsByPair: groupBy(facts.turns ?? [], j => `${j.taskId}:${j.agentId}`),
   };
 }
 
@@ -403,9 +402,12 @@ function lineSigns(taskId: string, moves: FactTaskEvent[], ix: Indexed): Date[] 
   ];
 }
 
+const taskActor = (task: FactTask): string | null => task.executorAgentId ?? task.assigneeAgentId ?? null;
+
 function buildLine(task: FactTask, ix: Indexed, now: Date): { line: TreeLine; idle: IdleSource } | null {
-  if (!task.executorAgentId) return null;
-  const actor = ix.agents.get(task.executorAgentId);
+  const actorId = taskActor(task);
+  if (!actorId) return null;
+  const actor = ix.agents.get(actorId);
   if (!actor) return null;
   const agent: TreeAgent = { id: actor.id, name: actor.name };
   const moves = listOf(ix.movesByTask, task.id);
@@ -413,14 +415,14 @@ function buildLine(task: FactTask, ix: Indexed, now: Date): { line: TreeLine; id
   const cutDate = cutDateOf(task, moves, afterTasks);
   const ends = lineEndDates(task, moves);
   const asks = listOf(ix.asksByPair, `${task.id}:${agent.id}`);
-  const segments = lineSegments({
+  const segments = withPrograms(lineSegments({
     createdAt: task.createdAt,
     cutAt: cutDate,
     endAt: ends.mergedAt ?? ends.doneAt,
     now,
     requests: asks,
     signs: lineSigns(task.id, moves, ix),
-  });
+  }), listOf(ix.turnsByPair, `${task.id}:${agent.id}`), agent, now);
   const job = jobView(ix, task.id, agent.id);
   const visibleAfter = afterTasks.filter(a => a.visible);
   const waitsFor = visibleAfter.filter(a => a.status !== 'done').map(a => a.number);
@@ -463,7 +465,7 @@ function buildReviewer(task: FactTask, reviewerId: string, ix: Indexed, now: Dat
   const asks = listOf(ix.asksByPair, `${task.id}:${reviewerId}`);
   const ownSigns = listOf(ix.signsByTask, task.id).filter(s => s.agentId === reviewerId).map(s => s.at);
   const signs = [...ownMoves.map(e => e.createdAt), ...ownSigns, ...(job.actionDate ? [job.actionDate] : [])];
-  const segments = reviewerSegments({ openedAt: task.createdAt, endAt: vEvent?.createdAt ?? task.closedAt, now, requests: asks, signs });
+  const segments = withPrograms(reviewerSegments({ openedAt: task.createdAt, endAt: vEvent?.createdAt ?? task.closedAt, now, requests: asks, signs }), listOf(ix.turnsByPair, `${task.id}:${agent.id}`), agent, now);
   return {
     reviewer: { agent, verdict, segments, lastActionAt: job.lastActionAt, live: job.live },
     idle: { agent, taskId: task.id, number: task.number, title: task.title, segments, afterNumbers: [], waitsFor: [], requests: asks },
@@ -518,7 +520,14 @@ function reviewCreatedMap(tasks: FactTask[], ix: Indexed): Map<string, Record<st
 }
 
 const isLineTask = (t: FactTask, reviews: Map<string, unknown>): boolean =>
-  t.visible !== false && t.status !== 'cancelled' && t.executorAgentId !== null && !reviews.has(t.id);
+  t.visible !== false && t.status !== 'cancelled' && taskActor(t) !== null && !reviews.has(t.id);
+
+function observedTime(facts: TreeFacts, ix: Indexed, now: Date): { agentId: string; segments: TreeSegment[] }[] {
+  return (facts.turns ?? []).filter(turn => turn.taskId === null).flatMap(turn => {
+    const agent = ix.agents.get(turn.agentId);
+    return agent ? [{ agentId: agent.id, segments: turnSegments(turn, agent, now) }] : [];
+  });
+}
 
 export function workTree(facts: TreeFacts, now: Date): DepartmentTree {
   if (!facts.turn) {
@@ -542,7 +551,7 @@ export function workTree(facts: TreeFacts, now: Date): DepartmentTree {
 
   const lines = builtLines.map(b => b.line);
   const turnStarted = facts.turn.openedAt ?? facts.turn.createdAt;
-  const timeEntries = [...lines.map(l => ({ agentId: l.agent.id, segments: l.segments })), ...builtReviews.flatMap(r => r.timeEntries)];
+  const timeEntries = [...lines.map(l => ({ agentId: l.agent.id, segments: l.segments })), ...builtReviews.flatMap(r => r.timeEntries), ...observedTime(facts, ix, now)];
 
   return {
     now: now.toISOString(),
