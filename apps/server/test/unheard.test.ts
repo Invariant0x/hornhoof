@@ -1,6 +1,6 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agentEvents, agents, jobs } from '../src/db/schema.js';
+import { agentEvents, agents, jobs, people } from '../src/db/schema.js';
 import { decisionPrincipal } from '../src/modules/conversation/decision-context.js';
 import { addressed } from '../src/modules/conversation/prompt.js';
 import { enqueueTurn, pump } from '../src/modules/conversation/queue.js';
@@ -21,6 +21,28 @@ async function atWork() {
 }
 
 describe('words the program never took', () => {
+  it.each(['pending', 'agent', 'person', 'unknown'] as const)('does not restore an older CEO principal after %s words', async after => {
+    const c = await failureCompany();
+    const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    const id = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: orchestrator!.id, prompt: 'Work', createdBy: c.sub.ownerPersonId, answersCeo: true });
+    const source = await appendEvent(c.ctx, { companyId: c.companyId, agentId: orchestrator!.id, jobId: id, kind: 'message', personId: c.sub.ownerPersonId, data: { text: 'Approve it.' } });
+    expect(await decisionPrincipal(c.db, id)).toMatchObject({ personId: c.sub.ownerPersonId });
+    if (after === 'pending') await c.db.update(jobs).set({ decisionInputPending: true }).where(eq(jobs.id, id));
+    if (after === 'agent') await appendEvent(c.ctx, { companyId: c.companyId, agentId: orchestrator!.id, jobId: id, kind: 'message', data: { text: 'Wait for the review.', from: 'agent', by: c.head.id } });
+    if (after === 'person') {
+      const [person] = await c.db.insert(people).values({ companyId: c.companyId, name: 'Zed', email: 'zed@acme.com', status: 'active', scopeKind: 'company' }).returning();
+      await appendEvent(c.ctx, { companyId: c.companyId, agentId: orchestrator!.id, jobId: id, kind: 'typed', personId: person!.id, data: {} });
+    }
+    if (after === 'pending' || after === 'agent') expect(await decisionPrincipal(c.db, id)).toBeNull();
+    const text = after === 'unknown' ? 'Words that were never saved.' : addressed('Approve it.', source.message!);
+    await handleNodeMessage(c.ctx, BUILTIN, { type: 'agent.unheard', agentKey: orchestrator!.id, jobId: id, text });
+    const next = (await c.turnsOf(orchestrator!.id)).find(j => j.id !== id)!;
+    await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, id));
+    await pump(c.ctx, orchestrator!.id);
+    expect(await c.jobOf(next.id)).toMatchObject({ status: 'running' });
+    expect(await decisionPrincipal(c.db, next.id)).toBeNull();
+  });
+
   it('keeps the CEO and the envelope of live words without showing them twice', async () => {
     const c = await failureCompany();
     const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));

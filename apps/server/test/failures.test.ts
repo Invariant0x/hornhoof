@@ -3,6 +3,7 @@ import { and, eq } from 'drizzle-orm';
 import { describe, expect, it, vi, onTestFinished } from 'vitest';
 import { agentEvents, agents, jobs, tasks } from '../src/db/schema.js';
 import { decisionPrincipal } from '../src/modules/conversation/decision-context.js';
+import { said } from '../src/modules/conversation/live.js';
 import { enqueueTurn, GONE_ALONG, insertTurn, pump } from '../src/modules/conversation/queue.js';
 import { createTask } from '../src/modules/tasks/engine.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
@@ -18,6 +19,30 @@ async function atWork() {
 }
 
 describe('named turn failures', () => {
+  it.each(['overloaded', 'crash'] as const)('keeps the %s orchestrator retry without a principal after live words could not be saved', async kind => {
+    const c = await failureCompany();
+    const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    const id = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: orchestrator!.id, prompt: 'Approve this work.', createdBy: c.sub.ownerPersonId, message: { personId: c.sub.ownerPersonId, text: 'Approve this work.' } });
+    expect(await decisionPrincipal(c.db, id)).toMatchObject({ personId: c.sub.ownerPersonId });
+    c.sent.mockImplementation((node, m) => {
+      if (m.type === 'agent.say') said(c.ctx, node, m.ref, true);
+      return true;
+    });
+    const save = vi.spyOn(c.db, 'transaction').mockRejectedValueOnce(new Error('Message save failed.'));
+    onTestFinished(() => save.mockRestore());
+    await expect(enqueueTurn(c.ctx, { companyId: c.companyId, agentId: orchestrator!.id, prompt: 'Wait for the review.', createdBy: null, message: { personId: null, text: 'Wait for the review.', from: 'agent', by: c.head.id } })).rejects.toThrow('Message save failed.');
+    save.mockRestore();
+    expect(await c.jobOf(id)).toMatchObject({ decisionInputPending: true });
+    expect(await decisionPrincipal(c.db, id)).toBeNull();
+
+    await c.fail(id, failure(kind, kind !== 'crash'));
+    const retry = (await c.turnsOf(orchestrator!.id)).find(j => j.continueOf === id)!;
+    await c.db.update(jobs).set({ notBefore: new Date(Date.now() - 1) }).where(eq(jobs.id, retry.id));
+    await pump(c.ctx, orchestrator!.id);
+    expect(await c.jobOf(retry.id)).toMatchObject({ status: 'running' });
+    expect(await decisionPrincipal(c.db, retry.id)).toBeNull();
+  });
+
   it.each(['overloaded', 'crash'] as const)('keeps the CEO as the principal of a %s orchestrator retry', async kind => {
     const c = await failureCompany();
     const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
