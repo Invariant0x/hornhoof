@@ -27,6 +27,7 @@ function repository() {
   git('config', 'user.name', 'Test');
   mkdirSync(join(dir, 'scripts'));
   copyFileSync(SCRIPT, join(dir, 'scripts', 'node-build.sh'));
+  copyFileSync(join(ROOT, '.dockerignore'), join(dir, '.dockerignore'));
   /* One commit that changes this file alone, or a file in this folder, as a folder of the repository is one. */
   const change = (path: string) => {
     const file = statSync(join(ROOT, path), { throwIfNoEntry: false })?.isDirectory() ? join(path, 'file') : path;
@@ -37,7 +38,7 @@ function repository() {
     return git('rev-parse', 'HEAD');
   };
   const build = () => spawnSync('bash', [join(dir, 'scripts', 'node-build.sh')], { cwd: tmpdir(), encoding: 'utf8' });
-  git('add', 'scripts');
+  git('add', 'scripts', '.dockerignore');
   git('commit', '-q', '-m', 'The script');
   return { dir, git, change, build };
 }
@@ -62,6 +63,35 @@ describe('the node build', () => {
       const commit = change(path);
       expect({ path, ...build() }).toMatchObject({ path, status: 0, stdout: `${commit}\n` });
     }
+  });
+
+  it('does not move with a file Docker leaves out of the node image, such as a test of the node or the protocol', () => {
+    const { change, build } = repository();
+    const node = change('apps/node/src/main.ts');
+    change('apps/node/test/main.test.ts');
+    change('packages/protocol/test/index.test.ts');
+    expect(build()).toMatchObject({ status: 0, stdout: `${node}\n` });
+  });
+
+  it('leaves out what each line of .dockerignore leaves out, read as Docker reads it', () => {
+    const { dir, git, change, build } = repository();
+    /* A blank line, spaces around a pattern, a * that stays in its folder, a leading and a trailing slash, and a last
+       line with no end. */
+    writeFileSync(join(dir, '.dockerignore'), '**/test\n\n  apps/node/*.md  \n/apps/node/fixtures/\n**/*.tmp/');
+    git('commit', '-q', '-am', 'Leave out more');
+    const kept = change('apps/node/docs/guide.md');
+    for (const path of ['apps/node/test/main.test.ts', 'apps/node/README.md', 'apps/node/fixtures/a.json', 'packages/protocol/src/x.tmp']) change(path);
+    expect(build()).toMatchObject({ status: 0, stdout: `${kept}\n` });
+  });
+
+  it('refuses an exception in .dockerignore, which brings back a file it would leave out', () => {
+    const { dir, git, build } = repository();
+    writeFileSync(join(dir, '.dockerignore'), '**/test\n!apps/node/test/fixtures\n');
+    git('commit', '-q', '-am', 'Bring the fixtures back');
+    const res = build();
+    expect(res.status).not.toBe(0);
+    expect(res.stdout).toBe('');
+    expect(res.stderr).toContain('!apps/node/test/fixtures');
   });
 
   it('refuses a shallow clone, where the one commit there seems to change every file', () => {

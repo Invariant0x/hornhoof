@@ -13,7 +13,19 @@ if [ "$(git rev-parse --is-shallow-repository)" != false ]; then
   echo "node-build.sh needs the whole history of the repository: check it out with fetch-depth: 0." >&2
   exit 1
 fi
-build=$(git log -1 --format=%H -- "${INPUTS[@]}")
+# What Docker leaves out of them, such as the tests: each line of .dockerignore, read as Docker reads it, and all under
+# it. An exception would bring back a file that this leaves out, so the script refuses one rather than miss a change.
+OUTSIDE=()
+while read -r pattern || [ -n "$pattern" ]; do
+  case "$pattern" in
+    '') continue ;;
+    '!'*) echo "node-build.sh cannot follow the exception $pattern in .dockerignore." >&2; exit 1 ;;
+  esac
+  pattern=${pattern#/}
+  pattern=${pattern%/}
+  OUTSIDE+=(":(exclude,glob)$pattern" ":(exclude,glob)$pattern/**")
+done < .dockerignore
+build=$(git log -1 --format=%H -- "${INPUTS[@]}" "${OUTSIDE[@]}")
 if [ -z "$build" ]; then
   echo "node-build.sh found no commit that changed the files of the node image." >&2
   exit 1
