@@ -11,16 +11,30 @@ works() {
 if [ "${1:-}" = context ] && [ "${2:-}" = show ]; then echo "${STUB_CONTEXT:-desktop-linux}"; exit 0; fi
 if ! works; then echo "Cannot connect to the Docker daemon" >&2; exit 1; fi
 has() { case " $* " in *" $WORD "*) return 0 ;; esac; return 1; }
+# STUB_NODE_RUNNING is the image the server's built-in node runs now; STUB_IMAGE_IDS words are "ref=id" for tags that
+# point at the same image.
+id_of() {
+  for w in ${STUB_IMAGE_IDS:-}; do [ "${w%%=*}" = "$1" ] && { printf '%s\n' "${w#*=}"; return; }; done
+  printf 'id-%s\n' "$1"
+}
 case "$1" in
   info) echo "Server Version: 28.0.0" ;;
   pull) [ "${STUB_PULL:-ok}" = fail ] && { echo "pull access denied" >&2; exit 1; } ;;
   create) echo cid-app ;;
   cp) case "$2" in *:/app/compose.yaml) echo 'services: {}' > "$3" ;; esac ;;
-  image) [ "${STUB_IMAGE_LOCAL:-0}" = 1 ] || exit 1 ;;
+  image)
+    if [ "${2:-}" = inspect ] && [ "${3:-}" = --format ]; then
+      [ -n "${STUB_NODE_RUNNING:-}${STUB_IMAGE_IDS:-}" ] || exit 1
+      id_of "${!#}"
+    else
+      [ "${STUB_IMAGE_LOCAL:-0}" = 1 ] || exit 1
+    fi ;;
+  inspect) [ "${!#}" = nodecid ] && [ -n "${STUB_NODE_RUNNING:-}" ] && id_of "$STUB_NODE_RUNNING" ;;
   # STUB_CONTAINERS words are "name" or "name=server", the server label of a node.
   # The server's own command line in its container: STUB_SETUP_LINK is the setup link of a server not set up yet.
   compose)
     case "$*" in
+      *' ps -q node') [ -n "${STUB_NODE_RUNNING:-}" ] && echo nodecid ;;
       *'/cli.js setup-link') if [ -n "${STUB_SETUP_LINK:-}" ]; then echo "$STUB_SETUP_LINK"; else echo 'Hornhoof is set up already.'; exit 1; fi ;;
       # STUB_TUNNEL_SETTINGS: what the app wrote for the tunnel once the company has a public link.
       *'cat /control/tunnel.json') if [ -n "${STUB_TUNNEL_SETTINGS:-}" ]; then echo "$STUB_TUNNEL_SETTINGS"; else echo "cat: can't open /control/tunnel.json" >&2; exit 1; fi ;;

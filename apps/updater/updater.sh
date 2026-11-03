@@ -154,18 +154,39 @@ forget() { if [ -n "$SERVER_DIR" ]; then rm -f "$SERVER_DIR/backups/update.json"
 # The commit an app image was made from, from its label; empty for a build made by hand.
 commit_of() { docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$1" 2> /dev/null || true; }
 
+# The digests Docker keeps for the image the service runs now.
+service_digests() {
+  local id
+  id=$(docker inspect --format '{{.Image}}' "$(compose ps -q "$1" 2> /dev/null || true)" 2> /dev/null || true)
+  [ -n "$id" ] || return 0
+  docker image inspect --format '{{join .RepoDigests " "}}' "$id" 2> /dev/null || true
+}
+
 # running <service> <repository>: the image the service runs now, by the digest Docker keeps for it in that
 # repository; empty when it keeps none, as for a build made on this computer.
 running() {
-  local id ref
-  id=$(docker inspect --format '{{.Image}}' "$(compose ps -q "$1" 2> /dev/null || true)" 2> /dev/null || true)
-  [ -n "$id" ] || return 0
-  for ref in $(docker image inspect --format '{{join .RepoDigests " "}}' "$id" 2> /dev/null || true); do
+  local ref
+  for ref in $(service_digests "$1"); do
     if own "$2" "$ref"; then
       printf '%s' "$ref"
       return 0
     fi
   done
+}
+
+# Whether the built-in node runs the exact node image of the update already.
+same_node() {
+  [ -n "$NODE_DIGEST" ] || return 1
+  case " $(service_digests node) " in *" $NODE_IMAGE@$NODE_DIGEST "*) return 0 ;; esac
+  return 1
+}
+
+services_without_node() {
+  local s list=''
+  for s in $(docker compose --project-directory "$SERVER_DIR" -f "$1" config --services 2> /dev/null || true); do
+    [ "$s" = node ] || list="$list $s"
+  done
+  printf '%s' "${list# }"
 }
 
 backup() {
@@ -244,11 +265,17 @@ unpack() {
 }
 
 # Every image the compose file of the new build names, the update's own by digest, with the server's .env filling in
-# the rest.
+# the rest. When the node runs that exact image already, compose leaves the node image out.
 pull_images() {
+  local services=''
+  if same_node; then
+    services=$(services_without_node "$WORK/$TAG/compose.yaml")
+    [ -n "$services" ] || return 1
+  fi
+  # shellcheck disable=SC2086 # services is a space-separated list of compose service names, or empty for all of them.
   HORNHOOF_VERSION="$TAG" HORNHOOF_APP_REF="$IMAGE@$DIGEST" HORNHOOF_NODE_REF="$(pinned "$NODE_IMAGE" "$NODE_DIGEST")" \
     HORNHOOF_UPDATER_REF="$(pinned "$UPDATER_IMAGE" "$UPDATER_DIGEST")" \
-    docker compose --project-directory "$SERVER_DIR" -f "$WORK/$TAG/compose.yaml" pull >> "$WORK/install.log" 2>&1
+    docker compose --project-directory "$SERVER_DIR" -f "$WORK/$TAG/compose.yaml" pull $services >> "$WORK/install.log" 2>&1
 }
 
 # install <tag> <app> <node> <updater>: runs the installer and the compose file that come inside that app image, and

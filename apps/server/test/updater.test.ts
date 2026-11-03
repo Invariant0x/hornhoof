@@ -109,6 +109,25 @@ describe('updater', () => {
     expect(existsSync(join(s.control, 'alive'))).toBe(true);
   });
 
+  it('skips pulling the node image when the node container runs that exact digest already', () => {
+    const s = stand();
+    const r = runOnce(s, { ...ask('n1'), nodeDigest: NODE_DIGESTS['0.4.0'] }, { STUB_SERVICES: 'db app node tunnel updater' });
+    expect(r.status).toMatchObject({ id: 'n1', version: '0.4.1', state: 'done', step: 'finished' });
+    const pull = r.calls.find(c => c.startsWith(`docker compose --project-directory ${s.server} -f `) && c.includes('/0.4.1/compose.yaml pull'));
+    expect(pull).toMatch(/\/0\.4\.1\/compose\.yaml pull db app tunnel updater$/);
+    expect(r.calls.some(c => c.startsWith('docker pull') && c.includes('hornhoof-node'))).toBe(false);
+    expect(r.calls.find(c => c.startsWith('installer'))).toContain(
+      `HORNHOOF_PULLED=1 HORNHOOF_APP_REF=${APP}@${DIGESTS['0.4.1']} HORNHOOF_NODE_REF=${APP}-node@${NODE_DIGESTS['0.4.0']} HORNHOOF_UPDATER_REF=${APP}-updater@${UPDATER_DIGESTS['0.4.1']}`,
+    );
+    expect(r.calls.some(c => c.startsWith('docker run') && c.includes(`${APP}-updater@${UPDATER_DIGESTS['0.4.1']} compose up -d --no-build updater`))).toBe(true);
+
+    /* Without a running node container on that digest, the node image is pulled with the rest. */
+    const missing = stand();
+    const m = runOnce(missing, { ...ask('n2'), nodeDigest: NODE_DIGESTS['0.4.0'] }, { STUB_RUNNING_IMAGES: `app=${APP}@${DIGESTS['0.4.0']} updater=${APP}-updater@${UPDATER_DIGESTS['0.4.0']}` });
+    expect(m.status).toMatchObject({ id: 'n2', state: 'done', step: 'finished' });
+    expect(m.calls.some(c => c.endsWith('/0.4.1/compose.yaml pull'))).toBe(true);
+  });
+
   it('rolls back when the new server never answers', () => {
     const s = stand();
     const r = runOnce(s, ask('u2'), { STUB_BROKEN: '0.4.1' });

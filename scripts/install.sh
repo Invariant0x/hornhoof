@@ -748,6 +748,37 @@ sweep_nodes() {
   done
 }
 
+# Whether the server's built-in node runs now on NODE_REF.
+node_unchanged() {
+  local cid running target
+  cid=$(cd "$SERVER_DIR" && "$@" ps -q node 2> /dev/null) || true
+  [ -n "$cid" ] || return 1
+  running=$("${DOCKER[@]}" inspect --format '{{if .State.Running}}{{.Image}}{{end}}' "$cid" 2> /dev/null || true)
+  [ -n "$running" ] || return 1
+  target=$("${DOCKER[@]}" image inspect --format '{{.Id}}' "$NODE_REF" 2> /dev/null || true)
+  [ -n "$target" ] && [ "$running" = "$target" ]
+}
+
+# Starts the compose stack, leaving the built-in node and this server's plan nodes running when the node image is unchanged.
+start_server_services() {
+  if [ -n "$FROM_UPDATER" ]; then
+    say "Starting Hornhoof ${PIN:-latest}."
+    if node_unchanged "$@"; then
+      (cd "$SERVER_DIR" && "$@" up -d --no-build db app tunnel) || fail "Hornhoof did not start."
+    else
+      (cd "$SERVER_DIR" && "$@" up -d --no-build db app node tunnel) || fail "Hornhoof did not start."
+      sweep_nodes "$@"
+    fi
+    return 0
+  fi
+  say "Starting Hornhoof."
+  if node_unchanged "$@"; then
+    (cd "$SERVER_DIR" && "$@" up -d --no-build db app tunnel updater) || fail "Hornhoof did not start. Run docker compose logs in $SERVER_DIR to see why."
+  else
+    (cd "$SERVER_DIR" && "$@" up -d --no-build) || fail "Hornhoof did not start. Run docker compose logs in $SERVER_DIR to see why."
+  fi
+}
+
 server_mode() {
   local env_file url public port local_url project link fact id i=0
   local -a compose
@@ -833,14 +864,8 @@ server_mode() {
     (cd "$SERVER_DIR" && "${compose[@]}" pull) || fail "Could not download the images. Check the internet connection, then run this command again."
   fi
   # The updater checks the new server's answer itself, and replaces itself once it comes.
-  if [ -n "$FROM_UPDATER" ]; then
-    say "Starting Hornhoof ${PIN:-latest}."
-    (cd "$SERVER_DIR" && "${compose[@]}" up -d --no-build db app node tunnel) || fail "Hornhoof did not start."
-    sweep_nodes "${compose[@]}"
-    return 0
-  fi
-  say "Starting Hornhoof."
-  (cd "$SERVER_DIR" && "${compose[@]}" up -d --no-build) || fail "Hornhoof did not start. Run docker compose logs in $SERVER_DIR to see why."
+  start_server_services "${compose[@]}"
+  if [ -n "$FROM_UPDATER" ]; then return 0; fi
   say "Waiting for Hornhoof to answer."
   until curl -fsS --max-time 5 "$local_url/api/health" > /dev/null 2>&1; do
     i=$((i + 1))

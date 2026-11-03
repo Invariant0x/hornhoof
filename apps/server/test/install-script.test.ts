@@ -737,6 +737,68 @@ describe('install.sh', () => {
     expect(r.calls).toContain('docker pull ghcr.io/invariant0x/hornhoof-node:0.4.1');
   });
 
+  it("leaves the built-in node and this server's plan nodes running when the node image did not change", () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-server-'));
+    writeFileSync(join(dir, '.env'), 'HORNHOOF_SECRET=s\nNODE_KEY=k\nPUBLIC_URL=https://hh.acme.test\nHORNHOOF_PORT=8081\nHORNHOOF_VERSION=0.4.0\n');
+    const compose = join(dir, 'brought.yaml');
+    writeFileSync(compose, 'services: {app: {}}\n');
+    const nodeRef = `ghcr.io/invariant0x/hornhoof-node@sha256:${'c'.repeat(64)}`;
+    const r = install({
+      args: ['server'],
+      tty: '',
+      env: {
+        HORNHOOF_FROM_UPDATER: '1',
+        HORNHOOF_PULLED: '1',
+        HORNHOOF_SERVER_DIR: dir,
+        HORNHOOF_VERSION: '0.4.1',
+        HORNHOOF_COMPOSE_FILE: compose,
+        HORNHOOF_APP_REF: `ghcr.io/invariant0x/hornhoof@sha256:${'b'.repeat(64)}`,
+        HORNHOOF_NODE_REF: nodeRef,
+        HORNHOOF_UPDATER_REF: `ghcr.io/invariant0x/hornhoof-updater@sha256:${'f'.repeat(64)}`,
+        STUB_NODE_RUNNING: nodeRef,
+        STUB_CONTAINERS: 'hornhoof-claude-1c07dac4=http://localhost:8081 hornhoof-kimi-22222222=https://hh.acme.test',
+      },
+    });
+    expect(r.code).toBe(0);
+    expect(r.calls).toContain('docker compose up -d --no-build db app tunnel');
+    expect(r.calls).not.toContain('docker compose up -d --no-build db app node tunnel');
+    expect(r.calls.some(c => c.startsWith('docker rm') || c.startsWith('docker run -d'))).toBe(false);
+    expect(r.calls.some(c => c.includes('tunnel.json'))).toBe(false);
+  });
+
+  it('leaves the built-in node and plan nodes running in server mode when the node image is unchanged', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-server-'));
+    writeFileSync(join(dir, '.env'), 'HORNHOOF_SECRET=s\nNODE_KEY=k\nPUBLIC_URL=http://localhost:8080\nHORNHOOF_VERSION=0.4.0\n');
+    const r = install({
+      args: ['server'],
+      tty: '',
+      env: {
+        HORNHOOF_DIR: dir,
+        HORNHOOF_VERSION: '0.4.1',
+        STUB_NODE_RUNNING: 'ghcr.io/invariant0x/hornhoof-node:0.4.0',
+        STUB_IMAGE_IDS: 'ghcr.io/invariant0x/hornhoof-node:0.4.0=sha256:same ghcr.io/invariant0x/hornhoof-node:0.4.1=sha256:same',
+        STUB_CONTAINERS: 'hornhoof-claude-1c07dac4=http://localhost:8080',
+      },
+    });
+    expect(r.code).toBe(0);
+    expect(r.calls).toContain('docker compose up -d --no-build db app tunnel updater');
+    expect(r.calls).not.toContain('docker compose up -d --no-build');
+    expect(r.calls.some(c => c.startsWith('docker rm -f hornhoof-claude') || c.startsWith('docker run -d'))).toBe(false);
+
+    /* When the node image did change, compose recreates the built-in node as before. */
+    const changed = install({
+      args: ['server'],
+      tty: '',
+      env: {
+        HORNHOOF_DIR: dir,
+        HORNHOOF_VERSION: '0.4.2',
+        STUB_NODE_RUNNING: 'ghcr.io/invariant0x/hornhoof-node:0.4.1',
+      },
+    });
+    expect(changed.code).toBe(0);
+    expect(changed.calls).toContain('docker compose up -d --no-build');
+  });
+
   it('refuses a server name it cannot use as a folder', () => {
     const r = install({ args: ['server', '--name', 'Acme Inc'] });
     expect(r.code).toBe(1);
