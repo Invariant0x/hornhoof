@@ -1,13 +1,11 @@
-import type { Dispatch, SetStateAction } from 'react';
 import { api } from '../api';
-import { useLanguage, useT } from '../i18n';
+import { useT, type Messages } from '../i18n';
 import type { ShownCommand } from '../types';
 import { CopyButton } from './CopyButton';
 import { Edge } from './Edge';
-import { clock } from './subscription';
+import { useNow } from './reset';
 
 export type ActiveCommand = { id: string; command: string; expiresAt: string | null };
-export type CommandPanelState = { kind: 'connect' } | { kind: 'command'; shown: ActiveCommand } | null;
 
 export const toActiveCommand = (res: { id?: string; command: string; expiresAt?: string | null }): ActiveCommand => ({
   id: res.id ?? '',
@@ -18,9 +16,6 @@ export const toActiveCommand = (res: { id?: string; command: string; expiresAt?:
 export const liveCommand = (cmd: ActiveCommand | null | undefined, now: number): ActiveCommand | null =>
   cmd && (!cmd.expiresAt || Date.parse(cmd.expiresAt) > now) ? cmd : null;
 
-export const livePanel = (panel: CommandPanelState, now: number): CommandPanelState =>
-  panel?.kind === 'command' && !liveCommand(panel.shown, now) ? null : panel;
-
 export const openCommandIds = (cmds: Record<string, ActiveCommand>, now: number): string[] =>
   Object.keys(cmds).filter(id => Boolean(liveCommand(cmds[id], now)));
 
@@ -29,16 +24,6 @@ export const hideShownCommand = async (id: string): Promise<void> => {
 };
 
 const fetchShownCommands = () => api.get<{ commands: ShownCommand[] }>('/api/nodes/commands').catch(() => null);
-
-const nextPlansPanel = (prev: CommandPanelState, found: ShownCommand | undefined): CommandPanelState =>
-  found ? { kind: 'command', shown: toActiveCommand(found) } : prev?.kind === 'connect' ? prev : null;
-
-export async function loadPlansCommand(live: { current: boolean }, setPanel: Dispatch<SetStateAction<CommandPanelState>>): Promise<void> {
-  const res = await fetchShownCommands();
-  if (!live.current || !res) return;
-  const found = res.commands.findLast(c => c.kind === 'plans');
-  setPanel(prev => nextPlansPanel(prev, found));
-}
 
 export async function loadMachineCommands(
   live: { current: boolean },
@@ -70,13 +55,22 @@ export function CommandBox({ command, trust }: { command: string; trust?: string
   );
 }
 
-/* Until when a one-time command works, or 24 hours when its clock time is not given. */
+/* Remaining time is shared by the top block, the plan's card and machine commands. */
+function commandDuration(t: Messages, expiresAt: string | null | undefined, now: number): string {
+  if (!expiresAt) return t.subs.joinOnce;
+  const minutes = Math.max(1, Math.floor((Date.parse(expiresAt) - now) / 60_000));
+  if (minutes >= 60) return t.subs.commandHours(Math.floor(minutes / 60));
+  return t.subs.commandMinutes(minutes);
+}
+
 export function CommandLifetime({ expiresAt }: { expiresAt?: string | null }) {
   const t = useT();
-  const { language } = useLanguage();
-  const at = clock(language, expiresAt ?? null);
-  return <p className="muted">{at ? t.subs.joinUntil(at) : t.subs.joinOnce}</p>;
+  const now = useNow();
+  return <><p className="muted">{commandDuration(t, expiresAt, now)}</p>{expiresAt && <p className="muted">{t.subs.commandBackground}</p>}</>;
 }
+
+export const commandBlockOpen = (cmd: ShownCommand): boolean =>
+  cmd.kind !== 'plans' || !cmd.subscriptionIds?.length || cmd.subscriptionIds.some(id => !cmd.dismissedSubscriptionIds?.includes(id));
 
 export function ActiveCommandPanel({
   heading,

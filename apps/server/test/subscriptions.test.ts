@@ -68,9 +68,11 @@ describe('POST /api/subscriptions/connect', () => {
     expect(after).toEqual({ ...sub, agents: [], place: { kind: 'department', id: development.id, name: 'Development' } });
   });
 
-  it('reuses a plan still waiting for its machine instead of making a second one', async () => {
-    const { app, ceo } = await companyWithMaria();
-    const first = (await connect(app, ceo, ['claude'])).json().subscriptions[0];
+  it('reuses a plan still waiting for its machine after its command expires instead of making a second one', async () => {
+    const { app, db, ceo } = await companyWithMaria();
+    const response = (await connect(app, ceo, ['claude'])).json();
+    const first = response.subscriptions[0];
+    await db.update(nodeCodes).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(nodeCodes.codeHash, response.id));
     const again = await connect(app, ceo, ['claude', 'codex']);
     expect(again.statusCode).toBe(201);
     expect(again.json().subscriptions.map((s: { id: string }) => s.id)).toContain(first.id);
@@ -141,9 +143,9 @@ describe('POST /api/subscriptions/connect', () => {
     const kimiId = kimi.subscriptions[0].id as string;
     expect((await joinNode(kimi.command, 'mac-0003-ijkl')).statusCode).toBe(200);
     await db.update(nodes).set({ machineId: claudeNode!.machineId }).where(eq(nodes.subscriptionId, kimiId));
-    expect((await connect(app, ceo, ['kimi'])).statusCode).toBe(201);
-
-    expect((await joinNode((await connect(app, ceo, ['kimi'])).json().command, 'mac-0003-ijkl')).statusCode).toBe(200);
+    const replacement = await connect(app, ceo, ['kimi']);
+    expect(replacement.statusCode).toBe(201);
+    expect((await joinNode(replacement.json().command, 'mac-0003-ijkl')).statusCode).toBe(200);
     const [kimiNode] = await db.select().from(nodes).where(eq(nodes.subscriptionId, kimiId));
     await db.insert(testParts).values({ companyId: development.companyId, runId: run!.id, part: 2, status: 'passed', nodeId: kimiNode!.id, machineId: kimiNode!.machineId });
 
@@ -163,10 +165,12 @@ describe('POST /api/subscriptions/connect', () => {
 });
 
 describe('POST /api/subscriptions/:id/command', () => {
-  it('gives the owner a fresh command until the machine joins', async () => {
+  it('gives the owner a fresh command after expiry and refuses another person or an already joined plan', async () => {
     const { app, db, ceo, maria } = await companyWithMaria();
     const first = (await connect(app, ceo, ['claude'])).json();
     const id = first.subscriptions[0].id;
+    expect((await post(app, ceo, `/api/subscriptions/${id}/command`)).statusCode).toBe(409);
+    await db.update(nodeCodes).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(nodeCodes.codeHash, first.id));
     const again = await post(app, ceo, `/api/subscriptions/${id}/command`);
     expect(again.statusCode).toBe(201);
     expect(again.json().command).toMatch(COMMAND);

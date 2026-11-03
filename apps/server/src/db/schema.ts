@@ -134,12 +134,14 @@ export const nodeCodes = pgTable('node_codes', {
   personId: uuid('person_id').notNull().references(() => people.id),
   subscriptionIds: uuid('subscription_ids').array().notNull(),
   machineId: uuid('machine_id').references(() => machines.id),
-  /* The command, sealed, when the orchestrator asked for it: only the CEO's screen shows it, until the CEO closes it. */
+  /* The install command, sealed for its author, or for the CEO when the orchestrator asked for it. */
   commandEnc: text('command_enc'),
+  /* Closing a plan's top block leaves its install command active in the plan's card. */
+  dismissedSubscriptionIds: uuid('dismissed_subscription_ids').array().notNull().default(sql`'{}'::uuid[]`),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   usedAt: timestamp('used_at', { withTimezone: true }),
   createdAt: createdAt(),
-});
+}, t => [index('node_codes_active_owner').on(t.personId).where(sql`${t.usedAt} is null`)]);
 
 export const SUBSCRIPTION_STATUSES = ['waiting_machine', 'needs_login', 'ready'] as const;
 

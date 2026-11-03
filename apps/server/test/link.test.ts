@@ -204,7 +204,7 @@ describe('the public link as the address of this Hornhoof', () => {
     await put({ name: 'acme' });
     const connect = await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude'] }, ...as(ceo) });
     expect(connect.json().command).toMatch(/^curl -fsSL https:\/\/acme\.hornhoof\.test\/install\.sh \| bash -s -- --join /);
-    const again = await app.inject({ method: 'POST', url: `/api/subscriptions/${connect.json().subscriptions[0].id}/command`, ...as(ceo) });
+    const again = await app.inject({ method: 'POST', url: '/api/machines/command', ...as(ceo) });
     expect(again.json().command).toMatch(/^curl -fsSL https:\/\/acme\.hornhoof\.test\/install\.sh/);
     const invited = await app.inject({ method: 'POST', url: '/api/people/invite', payload: { name: 'Maria', email: 'maria@acme.com', title: '', access: { whole: true } }, ...as(ceo) });
     expect(invited.json().inviteUrl).toMatch(/^https:\/\/acme\.hornhoof\.test\/invite\/[A-Za-z0-9_-]{43}$/);

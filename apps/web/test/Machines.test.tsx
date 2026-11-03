@@ -233,7 +233,8 @@ describe('Machines', () => {
     expect(await screen.findByText(COMMAND)).toBeInTheDocument();
     expect(screen.getByText(/joins without a plan/)).toBeInTheDocument();
     expect(screen.getByText("Hornhoof will run tests of the company's code on this machine. People with access to this Hornhoof can start them.")).toBeInTheDocument();
-    expect(screen.getByText(/^The command works once, until .+\. The nodes keep running in the background after the terminal is closed\.$/)).toBeInTheDocument();
+    expect(screen.getByText(/^Valid for (59 more minutes|1 more hour)\.$/)).toBeInTheDocument();
+    expect(screen.getByText('The command works once. The nodes keep running in the background after the terminal is closed.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(calls).toContainEqual({ method: 'POST', path: `/api/nodes/commands/${id}/hide`, body: undefined });
@@ -258,7 +259,8 @@ describe('Machines', () => {
     expect(calls.find(c => c.method === 'POST')).toEqual({ method: 'POST', path: '/api/machines/m1/plans', body: { subscription: 's-kimi' } });
     expect(await screen.findByText(COMMAND)).toBeInTheDocument();
     expect(screen.getByText(/^Run this in a terminal on ivan-mbp\./)).toBeInTheDocument();
-    expect(within(mac).getByText(/^The command works once, until .+\. The nodes keep running in the background after the terminal is closed\.$/)).toBeInTheDocument();
+    expect(within(mac).getByText(/^Valid for (59 more minutes|1 more hour)\.$/)).toBeInTheDocument();
+    expect(within(mac).getByText('The command works once. The nodes keep running in the background after the terminal is closed.')).toBeInTheDocument();
     expect(within(mac).getByRole('button', { name: 'Copy' })).toBeInTheDocument();
     await user.click(within(mac).getByRole('button', { name: 'Cancel' }));
     expect(calls).toContainEqual({ method: 'POST', path: `/api/nodes/commands/${id}/hide`, body: undefined });
@@ -292,7 +294,7 @@ describe('Machines', () => {
     const inRu = render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
     expect(await screen.findByText(machineCmd.command)).toBeInTheDocument();
     expect(await screen.findByText(addCmd.command)).toBeInTheDocument();
-    expect(screen.getAllByText(/^Команда сработает один раз, до .+\. Ноды продолжат работать в фоне и после закрытия терминала\.$/)).toHaveLength(2);
+    expect(screen.getAllByText(/^Действует еще (59 мин|1 ч)\.$/)).toHaveLength(2);
     expect(screen.getAllByRole('button', { name: 'Копировать' })).toHaveLength(2);
     const cancels = screen.getAllByRole('button', { name: 'Отменить' });
     expect(cancels).toHaveLength(2);

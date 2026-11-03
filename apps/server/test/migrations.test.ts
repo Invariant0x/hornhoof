@@ -804,3 +804,24 @@ describe('migration 0051', () => {
     expect(glmPart.rows).toEqual([{ node_id: GLM_WITH_NODE_RUN }]);
   });
 });
+
+describe('migration 0052', () => {
+  it('keeps old sealed install commands usable and defaults dismissed plan blocks to an empty list', async () => {
+    const source = new PGlite();
+    onTestFinished(() => source.close());
+    let db = drizzle(source);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0051_unfinished_subscription_tails') });
+    const company = (await db.execute<{ id: string }>(sql`insert into companies (name) values ('Demo') returning id`)).rows[0]!.id;
+    const person = (await db.execute<{ id: string }>(sql`insert into people (company_id, name, email, title, scope_kind, status) values (${company}, 'Demo', 'demo@example.test', 'CEO', 'company', 'active') returning id`)).rows[0]!.id;
+    await db.execute(sql`insert into node_codes (code_hash, company_id, person_id, subscription_ids, command_enc, expires_at, used_at)
+      select md5(n::text), ${company}, ${person}, '{}'::uuid[], 'sealed-demo-' || n, now() + interval '24 hours', case when n = 2 then now() end from generate_series(1,3) n`);
+    const before = (await db.execute(sql`select to_jsonb(c) as data from node_codes c order by code_hash`)).rows;
+    const copy = new PGlite({ loadDataDir: await source.dumpDataDir('none') });
+    onTestFinished(() => copy.close());
+    db = drizzle(copy);
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    expect((await db.execute(sql`select to_jsonb(c) - 'dismissed_subscription_ids' as data from node_codes c order by code_hash`)).rows).toEqual(before);
+    expect((await db.execute(sql`select dismissed_subscription_ids from node_codes`)).rows).toEqual(Array.from({ length: 3 }, () => ({ dismissed_subscription_ids: [] })));
+  });
+});

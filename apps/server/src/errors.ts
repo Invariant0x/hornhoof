@@ -29,6 +29,7 @@ export type ErrorReason =
   | 'not_company_level'
   | 'subscription_unknown'
   | 'code_unknown'
+  | 'command_active'
   | 'code_used'
   | 'machine_unknown'
   | 'machine_offline'

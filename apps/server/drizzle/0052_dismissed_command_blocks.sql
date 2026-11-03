@@ -1,0 +1,2 @@
+ALTER TABLE "node_codes" ADD COLUMN "dismissed_subscription_ids" uuid[] DEFAULT '{}'::uuid[] NOT NULL;--> statement-breakpoint
+CREATE INDEX "node_codes_active_owner" ON "node_codes" USING btree ("person_id") WHERE "node_codes"."used_at" is null;
