@@ -271,17 +271,16 @@ describe('whether a turn has open tasks, over a long history', () => {
   it('stops at the first open task it finds rather than counting them all', async () => {
     const h = await history();
     const ran = statements();
-    /* Before, every task was read and each open one of the turn counted. */
+    /* Counting still reads every task of the turn through its index. */
     await h.db.transaction(tx => everyLiveTask(tx, h.turnOf(TURNS)));
-    expect(await rowsOf(h.db, ran.splice(0), 'tasks')).toEqual({ read: TASKS, kept: TASKS / TURNS / 2 });
+    expect(await rowsOf(h.db, ran.splice(0), 'tasks')).toEqual({ read: TASKS / TURNS, kept: TASKS / TURNS / 2 });
     expect(await h.db.transaction(tx => liveIn(tx, h.companyId, h.turnOf(TURNS)))).toBe(true);
     expect((await rowsOf(h.db, ran, 'tasks')).kept).toBe(1);
   });
 
-  it("reads only the turn's own tasks once they have an index by turn, which a migration of its own adds", async () => {
+  it("reads only the turn's own tasks through the migrated turn index", async () => {
     const h = await history();
-    /* In this test's database only: the index that migration is to add. */
-    await (h.db as unknown as { $client: { exec(sql: string): Promise<unknown> } }).$client.exec('create index tasks_turn_id on tasks (turn_id); analyze tasks;');
+    await h.db.execute(sql`analyze tasks`);
     const ran = statements();
     /* A closed turn: all its tasks, and no other. The open one: up to its first open task. */
     expect(await h.db.transaction(tx => liveIn(tx, h.companyId, h.turnOf(1)))).toBe(false);

@@ -1,6 +1,6 @@
 {
   "id": "767280d7-b527-4782-8af8-3bf896c675b4",
-  "prevId": "bc067f3d-5545-49d8-831b-900d53ed6755",
+  "prevId": "c8fd7e75-84b3-4acd-847a-97623831c5ec",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -3842,6 +3842,36 @@
           "columns": [
             {
               "expression": "parent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "tasks_turn_id": {
+          "name": "tasks_turn_id",
+          "columns": [
+            {
+              "expression": "turn_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "tasks_product_id": {
+          "name": "tasks_product_id",
+          "columns": [
+            {
+              "expression": "product_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

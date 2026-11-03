@@ -3,12 +3,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PGlite } from '@electric-sql/pglite';
 import { sql } from 'drizzle-orm';
+import { getTableConfig } from 'drizzle-orm/pg-core';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { MIGRATIONS } from '../src/db/client.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { isUniqueViolation } from '../src/db/errors.js';
+import { tasks } from '../src/db/schema.js';
 import { appOn, approvalAsked, as } from './helpers.js';
 
 /* A copy of the migrations folder that stops after the given tag, as an older install would have it. */
@@ -584,5 +586,75 @@ describe('migration 0044', () => {
     expect((await db.execute(sql`select status from requests`)).rows).toEqual([{ status: 'open' }]);
     expect((await approve(ivan)).statusCode).toBe(200);
     expect((await db.execute(sql`select status, answered_by from requests`)).rows).toEqual([{ status: 'approved', answered_by: ivan }]);
+  });
+});
+
+describe('migration 0045', () => {
+  const C = '00000000-0000-4000-8000-000000000001';
+  const D = '00000000-0000-4000-8000-000000000002';
+  const TURN = '10000000-0000-4000-8000-000000000001';
+  const PRODUCT = '20000000-0000-4000-8000-000000000001';
+
+  it('keeps the turn and product indexes in the schema for future migrations', () => {
+    const indexes = getTableConfig(tasks).indexes.map(i => ({ name: i.config.name, columns: i.config.columns }));
+    expect(indexes).toEqual(expect.arrayContaining([
+      { name: 'tasks_turn_id', columns: [expect.objectContaining({ name: 'turn_id' })] },
+      { name: 'tasks_product_id', columns: [expect.objectContaining({ name: 'product_id' })] },
+    ]));
+  });
+
+  it('creates both indexes on a fresh install', async () => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+
+    const indexes = await db.execute(sql`select indexname, indexdef from pg_indexes
+      where schemaname = 'public' and tablename = 'tasks' and indexname in ('tasks_turn_id', 'tasks_product_id') order by indexname`);
+    expect(indexes.rows).toEqual([
+      { indexname: 'tasks_product_id', indexdef: 'CREATE INDEX tasks_product_id ON public.tasks USING btree (product_id)' },
+      { indexname: 'tasks_turn_id', indexdef: 'CREATE INDEX tasks_turn_id ON public.tasks USING btree (turn_id)' },
+    ]);
+  });
+
+  it('upgrades existing tasks intact and uses the indexes for turn and product reads', async () => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0044_ceo_delegate') });
+    await db.execute(sql`insert into companies (id, name) values (${C}, 'Acme')`);
+    await db.execute(sql`insert into departments (id, company_id, name, role_code) values (${D}, ${C}, 'Development', 'DEV')`);
+    await db.execute(sql`insert into turns (id, company_id, number, goal, status)
+      select ('10000000-0000-4000-8000-' || lpad(n::text, 12, '0'))::uuid, ${C}, n, 'Earlier turn', 'closed' from generate_series(1, 100) n`);
+    await db.execute(sql`insert into departments (id, company_id, parent_id, name, role_code)
+      select ('20000000-0000-4000-8000-' || lpad(n::text, 12, '0'))::uuid, ${C}, ${D}, 'Product ' || n, 'DEV' from generate_series(1, 100) n`);
+    await db.execute(sql`insert into tasks (company_id, department_id, number, title, turn_id, product_id)
+      select ${C}, ${D}, n, 'Task ' || n,
+        ('10000000-0000-4000-8000-' || lpad((1 + n % 100)::text, 12, '0'))::uuid,
+        ('20000000-0000-4000-8000-' || lpad((1 + n % 100)::text, 12, '0'))::uuid
+      from generate_series(1, 20000) n`);
+    await db.execute(sql`insert into tasks (company_id, number, title) values (${C}, 20001, 'No turn or product')`);
+    const fingerprint = sql`select count(*)::int as n, md5(string_agg(row_to_json(t)::text, '' order by number)) as checksum from tasks t`;
+    const before = await db.execute(fingerprint);
+    expect(before.rows[0]).toMatchObject({ n: 20001 });
+
+    const started = performance.now();
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    console.info(`Migration 0045 on 20001 tasks: ${(performance.now() - started).toFixed(1)} ms`);
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    expect((await db.execute(fingerprint)).rows).toEqual(before.rows);
+    await db.execute(sql`analyze tasks`);
+
+    const turn = await db.execute<{ 'QUERY PLAN': string }>(sql`explain select * from tasks
+      where company_id = ${C} and turn_id = ${TURN} order by number`);
+    const product = await db.execute<{ 'QUERY PLAN': string }>(sql`explain select * from tasks
+      where company_id = ${C} and department_id = ${D} and product_id in (${PRODUCT})`);
+    const turnPlan = turn.rows.map(r => r['QUERY PLAN']).join('\n');
+    const productPlan = product.rows.map(r => r['QUERY PLAN']).join('\n');
+    console.info(`Turn tasks:\n${turnPlan}\nProduct tasks:\n${productPlan}`);
+    expect(turnPlan).toContain('Index Scan on tasks_turn_id');
+    expect(productPlan).toContain('Index Scan on tasks_product_id');
+    expect((await db.execute(sql`select count(*)::int as n from tasks where turn_id = ${TURN}`)).rows).toEqual([{ n: 200 }]);
+    expect((await db.execute(sql`select count(*)::int as n from tasks where product_id = ${PRODUCT}`)).rows).toEqual([{ n: 200 }]);
   });
 });
