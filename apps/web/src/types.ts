@@ -228,7 +228,7 @@ export type StreamMessage =
   | { type: 'org' }
   | { type: 'notebook'; spot: { departmentId: string | null } }
   | { type: 'pulse'; from: Endpoint; to: Endpoint }
-  | { type: 'task'; id: string }
+  | { type: 'task'; id: string; spot: { departmentId: string | null; parentId?: string | null } }
   | { type: 'requests' }
   /* The orchestrator's request for the computer changed; only the CEO's screen hears it. */
   | { type: 'computer' }
@@ -443,3 +443,40 @@ export type UpdatesView = {
 
 /* A note of the company notebook or a department's, and who wrote it last: a person, the orchestrator or the head. */
 export type NoteView = { number: number; text: string; by: { kind: 'orchestrator' } | { kind: 'person' | 'agent'; id: string; name: string } | null; updatedAt: string };
+
+export type SegmentKind = 'work' | 'after' | 'person' | 'stall';
+export type TreeSegment = { kind: SegmentKind; from: string; to: string | null };
+export type TreeMove = { kind: string; at: string; text: string };
+export type TreeAgent = { id: string; name: string };
+export type TreeLine = {
+  taskId: string;
+  number: number;
+  title: string;
+  agent: TreeAgent;
+  part: { id: string; number: number; title: string } | null;
+  branch: string | null;
+  createdAt: string;
+  cutAt: string | null;
+  mergedAt: string | null;
+  doneAt: string | null;
+  waitsFor: number[];
+  segments: TreeSegment[];
+  moves: TreeMove[];
+  lastActionAt: string | null;
+  live: boolean;
+};
+export type TreeVerdict = { at: string; pass: boolean; findings: number | null };
+export type TreeReviewer = { agent: TreeAgent; verdict: TreeVerdict | null; segments: TreeSegment[]; lastActionAt: string | null; live: boolean };
+export type TreeReview = { taskId: string; number: number; openedAt: string; closedAt: string | null; head: TreeAgent; reviewers: TreeReviewer[] };
+export type AgentTime = { agent: TreeAgent; work: number; after: number; person: number; stall: number };
+export type IdleStretch = { agent: TreeAgent; taskId: string; number: number; title: string; kind: Exclude<SegmentKind, 'work'>; from: string; to: string | null; waitsFor: number[]; question: string | null };
+export type DepartmentTree = {
+  now: string;
+  turn: { id: string; number: number; branch: string; startedAt: string } | null;
+  repository: boolean;
+  stage: 'work' | 'review';
+  lines: TreeLine[];
+  review: TreeReview | null;
+  time: AgentTime[];
+  idle: IdleStretch[];
+};

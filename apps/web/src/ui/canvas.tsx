@@ -70,15 +70,15 @@ export function usePanZoom(box: RefObject<HTMLDivElement | null>, ready: unknown
 }
 
 /* Zoom out, the scale, zoom in and Fit, bottom left as in the prototype. */
-export function ZoomBar({ k, onZoom, onFit }: { k: number; onZoom(factor: number): void; onFit(): void }) {
+export function ZoomBar({ k, onZoom, onFit, step = 1.2 }: { step?: number; k: number; onZoom(factor: number): void; onFit(): void }) {
   const t = useT();
   return (
     <div className="zoom glass" onPointerDown={e => e.stopPropagation()}>
-      <button className="zbtn" type="button" aria-label={t.map.zoomOut} onClick={() => onZoom(1 / 1.2)}>
+      <button className="zbtn" type="button" aria-label={t.map.zoomOut} onClick={() => onZoom(1 / step)}>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /></svg>
       </button>
       <span className="zv">{Math.round(k * 100)}%</span>
-      <button className="zbtn" type="button" aria-label={t.map.zoomIn} onClick={() => onZoom(1.2)}>
+      <button className="zbtn" type="button" aria-label={t.map.zoomIn} onClick={() => onZoom(step)}>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
       </button>
       <button className="zbtn" type="button" aria-label={t.map.showAll} onClick={onFit}>

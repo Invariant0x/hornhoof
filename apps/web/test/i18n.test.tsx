@@ -83,3 +83,22 @@ describe('errorText', () => {
     expect(errorText(en, err)).toBe('Some new server text.');
   });
 });
+
+describe('work tree words', () => {
+  it('uses the actual turn, branch and times in both languages', () => {
+    for (const L of [en.dept.tree, ru.dept.tree]) {
+      expect(L.treeAria(7)).toContain('7');
+      expect(L.reviewH(7)).toContain('7');
+      expect(L.mergeH(49, 'turn-7')).toContain('turn-7');
+      expect(L.turnSay(7, '11:42', 'develop')).toContain('11:42');
+      expect(L.turnSay(7, '11:42', 'develop')).toContain('develop');
+      expect(L.spdSub(7, '11:42', '17:24')).toContain('17:24');
+      expect(L.verdict(false, null)).not.toContain('null');
+    }
+  });
+
+  it('counts findings in Russian and tasks in English', () => {
+    expect([1, 2, 5, 11, 21].map(ru.dept.tree.found)).toEqual(['1 находка', '2 находки', '5 находок', '11 находок', '21 находка']);
+    expect(en.dept.tree.inTurn(1, 1)).toBe('1 of 1 task');
+  });
+});
