@@ -65,6 +65,26 @@ function draftsOf(raw: string, parts: Part[]): Record<string, string> | null {
   return drafts;
 }
 
+/* Its latest turns a node restart cut off: on which task, why and where, and whether it was a retry; nothing without one. */
+function Interruptions({ list, headingId, when }: { list: AgentCardView['interrupted']; headingId: string; when(at: string): string }) {
+  const t = useT();
+  if (!list.length) return null;
+  return (
+    <section className="ac-history" aria-labelledby={headingId}>
+      <h4 id={headingId}>{t.restarts.heading}</h4>
+      <ul>
+        {list.map(c => (
+          <li key={c.job}>
+            {c.task && `#${c.task.number}: `}
+            {cutLine(t, c, when(c.at))}
+            {c.retry && ` ${t.restarts.wasRetry}`}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 const subLabel = (s: SubView) => servingLabel({ kind: s.kind, label: s.label, provider: s.provider, owner: s.owner.name });
 
 /* An agent's card in the side panel: where it runs, its skills and the text it runs with, with every change kept. */
@@ -399,20 +419,7 @@ export function AgentCard({ me, agentId, live, serverNow, onClose, onTerminal }:
           </div>
         )}
 
-        {card.interrupted.length > 0 && (
-          <section className="ac-history" aria-labelledby={`${id}-restarts`}>
-            <h4 id={`${id}-restarts`}>{t.restarts.heading}</h4>
-            <ul>
-              {card.interrupted.map(c => (
-                <li key={c.job}>
-                  {c.task && `#${c.task.number}: `}
-                  {cutLine(t, c, when(c.at))}
-                  {c.retry && ` ${t.restarts.wasRetry}`}
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
+        <Interruptions list={card.interrupted} headingId={`${id}-restarts`} when={when} />
 
         {card.changes.length > 0 && (
           <section className="ac-history" aria-labelledby={`${id}-history`}>

@@ -27,15 +27,22 @@ const builtinSaid = new WeakMap<Ctx, Said>();
 /* What a node's hello tells of the turns it no longer runs: why, as far as Hornhoof can tell, when, and on which node.
    The task's number goes in with each turn. A personal node's last word is in its row; the built-in node's is kept here. */
 export function interruptionOf(ctx: Ctx, node: { id: string | null; name: string; said: Said | null }, now: { version: string; boot?: Boot }, at: Date): Omit<Interruption, 'task'> {
-  const before = node.id ? node.said : (builtinSaid.get(ctx) ?? null);
-  if (!node.id) builtinSaid.set(ctx, { version: now.version, boot: now.boot ?? null });
+  const before = saidBefore(ctx, node, now);
   const cause = restartCause(before, now);
-  return {
-    cause,
-    at: at.toISOString(),
-    node: { id: node.id, name: node.name },
-    ...(cause === 'update' && before?.version ? { versions: { from: before.version, to: now.version } } : {}),
-  };
+  return { cause, at: at.toISOString(), node: { id: node.id, name: node.name }, ...versionsOf(cause, before, now) };
 }
+
+/* What the node said in its hello before this one. The built-in node's last word is kept here, and this hello takes its
+   place. */
+function saidBefore(ctx: Ctx, node: { id: string | null; said: Said | null }, now: { version: string; boot?: Boot }): Said | null {
+  if (node.id) return node.said;
+  const before = builtinSaid.get(ctx) ?? null;
+  builtinSaid.set(ctx, { version: now.version, boot: now.boot ?? null });
+  return before;
+}
+
+/* An update names the versions it went between, when the node said the one before. */
+const versionsOf = (cause: RestartCause, before: Said | null, now: { version: string }) =>
+  cause === 'update' && before?.version ? { versions: { from: before.version, to: now.version } } : {};
 
 export const BUILTIN_NAME = 'the built-in node';

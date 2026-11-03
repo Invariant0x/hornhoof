@@ -5,7 +5,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { accessOf, agentSpot, canReach } from '../../auth/access.js';
 import { actorOf, changedBy, requireCompanyScope, type Person } from '../../auth/session.js';
-import { agentChanges, agents, departments, jobs, people, subscriptions, tasks, type AGENT_CHANGE_FIELDS, type RestartCause } from '../../db/schema.js';
+import { agentChanges, agents, departments, jobs, people, subscriptions, tasks, type AGENT_CHANGE_FIELDS, type Interruption, type RestartCause } from '../../db/schema.js';
 import { ApiError, type ErrorReason } from '../../errors.js';
 import { onAgent, programNode, pump, pumpWaiting } from '../conversation/queue.js';
 import { deptName } from '../departments/templates.js';
@@ -75,6 +75,17 @@ type Field = (typeof AGENT_CHANGE_FIELDS)[number];
 
 const CHANGES_SHOWN = 20;
 const INTERRUPTED_SHOWN = 5;
+
+/* A turn a node restart cut off, as the card lists it: the built-in node goes unnamed. */
+type CutRow = { job: string; cut: Interruption | null; retryOf: string | null; taskId: string | null; number: number | null };
+const interruptedView = (i: CutRow): AgentCard['interrupted'][number] => ({
+  job: i.job,
+  at: i.cut!.at,
+  cause: i.cut!.cause,
+  node: i.cut!.node.id ? i.cut!.node.name : null,
+  task: i.taskId ? { id: i.taskId, number: i.number! } : null,
+  retry: i.retryOf !== null,
+});
 
 /* The employee card: who it is, where it runs, its skills and the instructions it runs with, and its latest changes. */
 export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
@@ -172,7 +183,7 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
         return view ? [{ subscription: view, models: s.models }] : [];
       }),
       changes: changes.map(c => ({ ...c, at: c.at.toISOString() })),
-      interrupted: interrupted.map(i => ({ job: i.job, at: i.cut!.at, cause: i.cut!.cause, node: i.cut!.node.id ? i.cut!.node.name : null, task: i.taskId ? { id: i.taskId, number: i.number! } : null, retry: i.retryOf !== null })),
+      interrupted: interrupted.map(interruptedView),
       canEdit: await mayEdit(me, agent),
       on: !agent.switchedOffAt,
       timer: timerOf(agent),

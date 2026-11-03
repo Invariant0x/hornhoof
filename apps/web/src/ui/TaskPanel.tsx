@@ -49,6 +49,9 @@ function cutText(t: Messages, data: unknown, when: (at: string) => string): stri
   return `${cutLine(t, { node: named, cause, job }, when(at))} ${then}`;
 }
 
+/* What a log line says under its title: Hornhoof's line about a cut-off turn in the person's language, else its own text. */
+const lineText = (t: Messages, e: TaskLogLine, when: (at: string) => string) => (e.kind === 'interrupted' && cutText(t, e.data, when)) || e.text;
+
 /* What waits for the person in this task. */
 type Waiting = { requests: WaitingRequest[]; onRequestsChanged: () => void; onOpenAgent: (id: string) => void };
 
@@ -176,7 +179,7 @@ function TaskBody({ task, onOpen, onChanged, waiting }: { task: TaskDetail; onOp
         <ol className="tp-log" aria-label={t.tasks.log}>
           {task.log.map((e, i) => {
             const evidence = field(e.data, 'evidence');
-            const said = (e.kind === 'interrupted' && cutText(t, e.data, when)) || e.text;
+            const said = lineText(t, e, when);
             return (
               <li key={i} className={e.kind}>
                 <span className="tp-ev">
@@ -255,11 +258,8 @@ function Actions({ task, onChanged }: { task: TaskDetail; onChanged: () => void 
 }
 
 /* One task in the right panel, kept fresh from the live stream. */
-export function TaskPanel({ taskId, onClose, onOpen, ...waiting }: { taskId: string; onClose: () => void; onOpen: (id: string) => void } & Waiting) {
-  const t = useT();
-  const { task, failure, load } = useTask(taskId);
-  const title = task ? `#${task.number} ${task.title}` : t.tasks.heading;
-  /* Escape closes the panel before what lies under it, such as a department's tasks, which leave an Escape it took alone. */
+/* Escape closes the panel before what lies under it, such as a department's tasks, which leave an Escape it took alone. */
+function useEscapeCloses(onClose: () => void): void {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented) return;
@@ -269,6 +269,13 @@ export function TaskPanel({ taskId, onClose, onOpen, ...waiting }: { taskId: str
     document.addEventListener('keydown', onKey, true);
     return () => document.removeEventListener('keydown', onKey, true);
   }, [onClose]);
+}
+
+export function TaskPanel({ taskId, onClose, onOpen, ...waiting }: { taskId: string; onClose: () => void; onOpen: (id: string) => void } & Waiting) {
+  const t = useT();
+  const { task, failure, load } = useTask(taskId);
+  const title = task ? `#${task.number} ${task.title}` : t.tasks.heading;
+  useEscapeCloses(onClose);
   return (
     <aside className="acard tpanel" aria-label={title} aria-busy={!task && failure === null}>
       <div className="t-bar">
