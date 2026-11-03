@@ -8,6 +8,7 @@ import { withProgramExit } from '../program-exit.js';
 import { kimiPlanLimits } from '../terminal/programs.js';
 import { contentText, inputText, isRecord, objectLine, toolName } from './events.js';
 import { childEnv, ensureDir, installPackage, interactiveLogin, runProgram, tokensIn, withEfforts, writePrivate } from './process.js';
+import { KIMI_NO_AUTO_UPDATE } from './session-updates.js';
 
 type Options = { home: string; tools: string; bin?: string; user?: JobUser | null };
 
@@ -91,7 +92,7 @@ export function kimiContextSize(config: string, model: string | null): number | 
 
 export function kimiAdapter({ home, tools, bin = join(tools, 'bin', 'kimi'), user = null }: Options): ProviderAdapter {
   const env = (toolToken: string | null = null) => {
-    const own = childEnv(tools, { KIMI_CODE_HOME: ensureDir(home), ...(toolToken ? { HH_TOOL_TOKEN: toolToken } : {}) });
+    const own = childEnv(tools, { KIMI_CODE_HOME: ensureDir(home), ...KIMI_NO_AUTO_UPDATE, ...(toolToken ? { HH_TOOL_TOKEN: toolToken } : {}) });
     /* The effort is the agent's, set below; without one Kimi thinks at its own default, not at one the machine set. */
     delete own.KIMI_MODEL_THINKING_EFFORT;
     return own;

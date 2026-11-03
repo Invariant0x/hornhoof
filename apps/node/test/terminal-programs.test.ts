@@ -12,6 +12,24 @@ import { acceptClaudeDialogs, agyProgram, claudePlanLimits, claudeProgram, claud
 const URLS = { mcpUrl: 'http://127.0.0.1:5000/mcp/s3cr3t', attachUrl: 'http://127.0.0.1:5000/attach/s3cr3t', hookUrl: 'http://127.0.0.1:5000/hook/s3cr3t' };
 const arg = (cmd: string[], flag: string) => cmd[cmd.indexOf(flag) + 1];
 
+describe('program updates managed outside the agent terminal', () => {
+  const launch = { bin: '/t/program', home: '/h', workDir: '/w', sessionId: null, model: null, instructionsFile: null, urls: URLS };
+
+  it('disables Claude Code self-updates in its terminal environment', () => {
+    expect(claudeProgram.launch(launch).env.DISABLE_AUTOUPDATER).toBe('1');
+  });
+
+  it('disables Kimi self-updates in its terminal environment', () => {
+    expect(kimiProgram.launch(launch).env).toMatchObject({ KIMI_CODE_NO_AUTO_UPDATE: '1', KIMI_CLI_NO_AUTO_UPDATE: '1' });
+  });
+
+  it.each([null, 'existing-session'])('disables Codex startup updates with session %s', sessionId => {
+    const { command } = codexProgram.launch({ ...launch, sessionId });
+    expect(command).toContain('check_for_update_on_startup=false');
+    expect(command[command.indexOf('check_for_update_on_startup=false') - 1]).toBe('-c');
+  });
+});
+
 describe('Claude Code in a terminal', () => {
   it('starts a new session with a known id, its instructions, the bridge for tools and hooks', () => {
     const { command, env, sessionId } = claudeProgram.launch({ bin: '/t/claude', home: '/h', workDir: '/w/a1', sessionId: null, model: 'opus', instructionsFile: '/w/a1/.hh-instructions.md', urls: URLS });

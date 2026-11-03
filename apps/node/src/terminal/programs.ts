@@ -6,6 +6,7 @@ import { ownFs, type AgentFs } from '../agent-fs.js';
 import { CRED_FILES } from '../credentials.js';
 import { readPrivate } from '../providers/process.js';
 import { WHOLE_AGENTS_MD } from '../providers/codex.js';
+import { CLAUDE_NO_AUTO_UPDATE, CODEX_NO_AUTO_UPDATE, KIMI_NO_AUTO_UPDATE } from '../providers/session-updates.js';
 import type { AgentUrls } from './bridge.js';
 import { claudeUsageLimits, kimiUsageLimits } from './transcripts.js';
 
@@ -77,14 +78,14 @@ export const claudeProgram: TermProgram = {
     ];
     const compact: Record<string, string> = compactWindow ? { CLAUDE_CODE_AUTO_COMPACT_WINDOW: String(compactWindow) } : {};
     const token = planToken(home);
-    return { command, env: { CLAUDE_CONFIG_DIR: home, ...bridgeEnv(urls), ...compact, ...(token ? { CLAUDE_CODE_OAUTH_TOKEN: token } : {}) }, sessionId: id };
+    return { command, env: { CLAUDE_CONFIG_DIR: home, ...CLAUDE_NO_AUTO_UPDATE, ...bridgeEnv(urls), ...compact, ...(token ? { CLAUDE_CODE_OAUTH_TOKEN: token } : {}) }, sessionId: id };
   },
 };
 
 export const codexProgram: TermProgram = {
   kind: 'codex',
   launch({ bin, home, workDir, sessionId, model, effort, urls }) {
-    const config = ['-c', `mcp_servers.hornhoof.url=${JSON.stringify(urls.mcpUrl)}`, ...WHOLE_AGENTS_MD, ...(effort ? ['-c', `model_reasoning_effort=${JSON.stringify(effort)}`] : [])];
+    const config = ['-c', `mcp_servers.hornhoof.url=${JSON.stringify(urls.mcpUrl)}`, ...WHOLE_AGENTS_MD, ...CODEX_NO_AUTO_UPDATE, ...(effort ? ['-c', `model_reasoning_effort=${JSON.stringify(effort)}`] : [])];
     const rest = ['--dangerously-bypass-approvals-and-sandbox', ...config, ...(model ? ['-m', model] : [])];
     /* A resumed session works in the folder it started in, which is the pane's. */
     const command = sessionId ? [bin, 'resume', sessionId, ...rest] : [bin, rest[0]!, '-C', workDir, ...rest.slice(1)];
@@ -124,7 +125,7 @@ export const kimiProgram: TermProgram = {
     /* The agent's folder is trusted, so Kimi reads the tools and instructions Hornhoof leaves there without asking. Kimi
        has no flag for effort; it reads this setting over its own. */
     const thinking: Record<string, string> = effort ? { KIMI_MODEL_THINKING_EFFORT: effort } : {};
-    return { command, env: { KIMI_CODE_HOME: home, KIMI_CODE_TRUST_WORKSPACE: '1', ...thinking, ...bridgeEnv(urls) }, sessionId };
+    return { command, env: { KIMI_CODE_HOME: home, KIMI_CODE_TRUST_WORKSPACE: '1', ...KIMI_NO_AUTO_UPDATE, ...thinking, ...bridgeEnv(urls) }, sessionId };
   },
   limits: kimiPlanLimits,
 };

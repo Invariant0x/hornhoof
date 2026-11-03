@@ -9,6 +9,7 @@ import type { ProviderAdapter, RunInput, RunResult } from '../runner.js';
 import { withProgramExit } from '../program-exit.js';
 import { contentText, inputText, isoFrom, isRecord, objectLine } from './events.js';
 import { childEnv, ensureDir, exitsCleanly, installPackage, interactiveLogin, runProgram, tokensIn, withEfforts, writePrivate } from './process.js';
+import { CODEX_NO_AUTO_UPDATE } from './session-updates.js';
 
 /* Codex serves a ChatGPT plan, or a company OpenAI key on the built-in node. */
 type Options = { home: string; tools: string; bin?: string; secret?: string | null; mode: 'plan' | 'api_key'; user?: JobUser | null };
@@ -18,7 +19,7 @@ type Options = { home: string; tools: string; bin?: string; secret?: string | nu
 export const WHOLE_AGENTS_MD = ['-c', `project_doc_max_bytes=${1 << 20}`];
 
 /* The container is the sandbox, so Codex's own approvals and sandbox are off; resume takes no -C or -s. */
-const FLAGS = ['--json', '--skip-git-repo-check', '--dangerously-bypass-approvals-and-sandbox', ...WHOLE_AGENTS_MD];
+const FLAGS = ['--json', '--skip-git-repo-check', '--dangerously-bypass-approvals-and-sandbox', ...WHOLE_AGENTS_MD, ...CODEX_NO_AUTO_UPDATE];
 export const SIGNED_OUT = /401 Unauthorized|Missing bearer|invalid_api_key|not logged in/i;
 
 /* What a --json line shows people: messages, MCP calls, shell commands with their results, and the plan. */

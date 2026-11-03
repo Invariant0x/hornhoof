@@ -31,7 +31,7 @@ const AGY_NEW = 'c3b66b04-872b-4fbe-a3a4-058a026ef20a';
 const AGY_RESUMED = '9ec58bfd-4d67-4f5e-83a5-9d907e9c6b1f';
 const AGY_FLAGS = ['--output-format', 'stream-json', '--print-timeout', '0s', '--dangerously-skip-permissions'];
 /* Codex reads AGENTS.md only up to project_doc_max_bytes, 32 KiB unless set. */
-const FLAGS = ['--json', '--skip-git-repo-check', '--dangerously-bypass-approvals-and-sandbox', '-c', 'project_doc_max_bytes=1048576'];
+const FLAGS = ['--json', '--skip-git-repo-check', '--dangerously-bypass-approvals-and-sandbox', '-c', 'project_doc_max_bytes=1048576', '-c', 'check_for_update_on_startup=false'];
 
 type Logged = {
   name: string; argv: string[]; cwd: string; pid: number; env: Record<string, string>; grandchild?: number;
@@ -65,6 +65,31 @@ const adapter = (provider: ProviderId, secret: string | null = null) => adapterF
 const input = (over: Partial<RunInput> = {}): RunInput => ({ prompt: 'say ready', sessionId: null, model: null, workDir: work, secret: null, timeoutMs: 15000, instructions: null, tools: null, ...over });
 const logged = (): Logged[] => readFileSync(logFile, 'utf8').trim().split('\n').map(l => JSON.parse(l));
 const lastRun = () => logged().filter(l => l.argv)[logged().filter(l => l.argv).length - 1]!;
+
+describe('program updates managed by the node', () => {
+  it('disables Claude Code self-updates even when the machine enables them', async () => {
+    vi.stubEnv('DISABLE_AUTOUPDATER', '0');
+    onTestFinished(() => vi.unstubAllEnvs());
+    expect(await adapter('claude').run(input())).toMatchObject({ ok: true });
+    expect(lastRun().env.DISABLE_AUTOUPDATER).toBe('1');
+  });
+
+  it('disables Kimi self-updates for both current and older programs', async () => {
+    vi.stubEnv('KIMI_CODE_NO_AUTO_UPDATE', '0');
+    vi.stubEnv('KIMI_CLI_NO_AUTO_UPDATE', '0');
+    onTestFinished(() => vi.unstubAllEnvs());
+    expect(await adapter('kimi').run(input())).toMatchObject({ ok: true });
+    expect(lastRun().env).toMatchObject({ KIMI_CODE_NO_AUTO_UPDATE: '1', KIMI_CLI_NO_AUTO_UPDATE: '1' });
+  });
+
+  it.each([null, CODEX_THREAD])('disables Codex startup updates with session %s', async sessionId => {
+    expect(await adapter('codex').run(input({ sessionId }))).toMatchObject({ ok: true });
+    const args = lastRun().argv;
+    expect(args).toContain('check_for_update_on_startup=false');
+    expect(args[args.indexOf('check_for_update_on_startup=false') - 1]).toBe('-c');
+  });
+});
+
 const alive = (pid: number) => {
   try {
     process.kill(pid, 0);
