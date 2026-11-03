@@ -55,10 +55,17 @@ const STATUS_CLASS: Record<EmployeeStatus, string> = { working: 's-w', queued: '
 
 type Shot = { key: number; pts: Point[]; tone: 'c' | 'a' };
 type Said = { key: number; at: string; text: string } | null;
-type Seen = Map<string, { status: EmployeeStatus; taskId: string | null; bounces: number }>;
+type SeenState = { status: EmployeeStatus; taskId: string | null; bounces: number };
+type Seen = Map<string, SeenState>;
 
 const hhmm = (d: Date) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 const taskText = (e: Employee) => (e.task ? `#${e.task.number} ${e.task.title}` : '');
+
+function employeeChange(e: Employee, was: SeenState) {
+  const taskId = e.task?.id ?? null;
+  const cameBack = !!e.task && was.taskId === taskId && e.task.bounces > was.bounces;
+  return { taskId, cameBack };
+}
 
 function modelLine(t: ReturnType<typeof useT>, e: Employee): string {
   /* Hornhoof names the level whenever it knows it, the Default's too; else it says the program picks it. */
@@ -403,8 +410,7 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
     for (const e of d.employees) {
       const was = before.get(e.id);
       if (!was) continue;
-      const taskId = e.task?.id ?? null;
-      const cameBack = !!e.task && was.taskId === taskId && e.task.bounces > was.bounces;
+      const { taskId, cameBack } = employeeChange(e, was);
       if (!cameBack && was.status === e.status && was.taskId === taskId) continue;
       changed.push(e.id);
       /* A gate sent the work back: said in words, with no amber dot, which the line of work keeps for a result given back. */
