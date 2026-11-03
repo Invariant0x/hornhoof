@@ -5,7 +5,6 @@ import { hashToken } from '../../crypto/tokens.js';
 import { agents, jobs } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 
-/* answersCeo: the turn carries a message of the CEO, so the tools only the CEO may ask for work in it. */
 export type ToolJob = {
   id: string;
   companyId: string;
@@ -14,7 +13,6 @@ export type ToolJob = {
   roleKey: string | null;
   departmentId: string | null;
   skills: string[];
-  answersCeo: boolean;
 };
 
 /* The token works only while its job runs, and only for a job that belongs to an agent. */
@@ -30,7 +28,6 @@ export async function jobOf(ctx: Ctx, req: FastifyRequest): Promise<ToolJob> {
           roleKey: agents.roleKey,
           departmentId: agents.departmentId,
           skills: agents.skills,
-          answersCeo: jobs.answersCeo,
         })
         .from(jobs)
         .innerJoin(agents, eq(agents.id, jobs.agentId))

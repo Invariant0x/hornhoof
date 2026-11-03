@@ -12,7 +12,8 @@ import { sayLive } from './live.js';
 
 /* The orchestrator takes a decision for a person only in a turn that answers that person: the last message that came into
    the turn, or the last Enter a person pressed in its terminal, says who it is. A message of an agent or of Hornhoof itself answers nobody, so after it the turn takes no
-   decision until a person with the right writes again. A turn that took no message answers whoever started it. Words on
+   decision until a person with the right writes again, but for Hornhoof's note of something a person did that counts as
+   their order, which answers them until other words come in. A turn that took no message answers whoever started it. Words on
    their way into the turn, or that went in without being kept, leave the turn without anyone's right. */
 
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
@@ -29,20 +30,32 @@ const incoming = sql`coalesce(${agentEvents.data}->'_message'->>'direction', 'in
 
 export async function decisionPrincipal(db: Reader, jobId: string): Promise<Principal | null> {
   const [job] = await db
-    .select({ agentId: jobs.agentId, status: jobs.status, kind: jobs.kind, pending: jobs.decisionInputPending, createdBy: jobs.createdBy, agentKind: agents.kind })
+    .select({ agentId: jobs.agentId, status: jobs.status, kind: jobs.kind, pending: jobs.decisionInputPending, createdBy: jobs.createdBy, answersCeo: jobs.answersCeo, agentKind: agents.kind })
     .from(jobs)
     .innerJoin(agents, eq(agents.id, jobs.agentId))
     .where(eq(jobs.id, jobId));
   if (!job || job.status !== 'running' || job.kind !== 'conversation' || job.agentKind !== 'orchestrator' || job.pending) return null;
-  const [last] = await db
-    .select({ seq: agentEvents.seq, personId: agentEvents.personId })
+  const said = await db
+    .select({ seq: agentEvents.seq, personId: agentEvents.personId, kind: agentEvents.kind })
     .from(agentEvents)
     .where(and(eq(agentEvents.jobId, jobId), eq(agentEvents.agentId, job.agentId!), inArray(agentEvents.kind, ['message', 'typed']), incoming))
     .orderBy(desc(agentEvents.seq))
-    .limit(1);
-  if (last) return last.personId ? { personId: last.personId, sourceSeq: last.seq } : null;
-  return job.createdBy ? { personId: job.createdBy, sourceSeq: null } : null;
+    .limit(2);
+  return answered(job, said);
 }
+
+type Said = { seq: number; personId: string | null; kind: string };
+type Started = { createdBy: string | null; answersCeo: boolean };
+
+/* Whom the turn answers by its last word: the person who said it, or else whoever started it, when that word is theirs. */
+function answered(job: Started, [last, before]: Said[]): Principal | null {
+  if (last?.personId) return { personId: last.personId, sourceSeq: last.seq };
+  return theirs(job, last, before) && job.createdBy ? { personId: job.createdBy, sourceSeq: last?.seq ?? null } : null;
+}
+
+/* A turn without words is its starter's, and so is Hornhoof's note of something they did that counts as their order, which
+   opened the turn, while nothing came after it. */
+const theirs = (job: Started, last: Said | undefined, before: Said | undefined): boolean => !last || (!before && last.kind === 'message' && job.answersCeo);
 
 export const contextMissing = () =>
   new ApiError(
@@ -69,16 +82,19 @@ export async function requireDecider(db: Reader, companyId: string, personId: st
   if (!p || !canDecide(subject, p, await accessOf(db, p), companyId)) throw notAllowed();
 }
 
-/* Whether the turn answers the CEO or the CEO delegate, now. */
-export async function answersCeoOrDelegate(db: Reader, jobId: string): Promise<boolean> {
+/* The CEO or the CEO delegate the turn answers now, or null. */
+export async function ceoPrincipal(db: Reader, jobId: string): Promise<string | null> {
   const principal = await decisionPrincipal(db, jobId);
-  if (!principal) return false;
+  if (!principal) return null;
   const [p] = await db
     .select({ status: people.status, scopeKind: people.scopeKind, isOwner: people.isOwner, isCeoDelegate: people.isCeoDelegate, companyId: people.companyId })
     .from(people)
     .where(eq(people.id, principal.personId));
-  return Boolean(p && actsAsCeo(p));
+  return p && actsAsCeo(p) ? principal.personId : null;
 }
+
+/* Whether the turn answers the CEO or the CEO delegate, now. */
+export const answersCeoOrDelegate = async (db: Reader, jobId: string): Promise<boolean> => (await ceoPrincipal(db, jobId)) !== null;
 
 /* One thing at a time per agent between words that go into its turn and a decision taken in that turn, so a decision
    never goes by a principal that new words changed already. Separate from the agent's queue line; nothing inside takes it

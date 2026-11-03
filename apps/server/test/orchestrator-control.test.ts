@@ -1,11 +1,8 @@
 import { mkdtempSync } from 'node:fs';
-import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { and, desc, eq, isNull, like } from 'drizzle-orm';
-import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { orchestratorHeaders } from '../src/auth/internal.js';
 import { hashToken } from '../src/crypto/tokens.js';
@@ -15,7 +12,7 @@ import { identityOf } from '../src/modules/nodes/hub.js';
 import { ask, createTask } from '../src/modules/tasks/engine.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
 import { fakeRelay } from './fake-relay.js';
-import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until } from './helpers.js';
+import { as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until } from './helpers.js';
 import { said } from '../src/modules/conversation/live.js';
 
 const NODE_KEY = 'k'.repeat(40);
@@ -50,14 +47,6 @@ async function company(env: NodeJS.ProcessEnv = {}) {
   return { app, db, ceo, ceoId: owner!.id, orchestrator: orchestrator!, hana, bruno, dev: dev!, task, running };
 }
 
-async function mcp(app: FastifyInstance, token = TOKEN): Promise<Client> {
-  const url = new URL(`http://127.0.0.1:${(app.server.address() as AddressInfo).port}/mcp`);
-  const transport = new StreamableHTTPClientTransport(url, { requestInit: { headers: { Authorization: `Bearer ${token}` } } });
-  const client = new Client({ name: 'test', version: '0.0.0' });
-  await client.connect(transport);
-  onTestFinished(() => client.close());
-  return client;
-}
 
 type Result = { content: { type: string; text: string }[]; isError?: boolean };
 const call = async (client: Client, name: string, args: object) => (await client.callTool({ name, arguments: args })) as Result;
@@ -70,13 +59,13 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
     ['reset_employee', 'its skills, texts and effort'],
   ])('describes the role effort in %s', async (name, words) => {
     const { app } = await company();
-    const tools = (await (await mcp(app)).listTools()).tools;
+    const tools = (await (await mcp(app, TOKEN)).listTools()).tools;
     expect(tools.find(t => t.name === name)!.description).toContain(words);
   });
 
   it("sets an employee's timer and takes it away", async () => {
     const { app, db, bruno } = await company();
-    const client = await mcp(app);
+    const client = await mcp(app, TOKEN);
     const set = await call(client, 'change_employee', { employee: bruno.id, timer: { minutes: 60, order: 'Read the failed jobs of the last hour.' } });
     expect(set.isError).toBeFalsy();
     expect((await db.select().from(agents).where(eq(agents.id, bruno.id)))[0]).toMatchObject({ timerMinutes: 60, timerOrder: 'Read the failed jobs of the last hour.' });
@@ -86,7 +75,7 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
 
   it('changes its own effort as its card does, and keeps to what the card changes', async () => {
     const { app, db, orchestrator } = await company();
-    const client = await mcp(app);
+    const client = await mcp(app, TOKEN);
     expect((await call(client, 'change_orchestrator', { effort: 'high' })).isError).toBeFalsy();
     expect((await db.select().from(agents).where(eq(agents.id, orchestrator.id)))[0]!.effort).toBe('high');
     const changes = await db.select().from(agentChanges).where(eq(agentChanges.agentId, orchestrator.id));
@@ -96,7 +85,7 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
 
   it('switches an employee off and on, and the card says the orchestrator did it', async () => {
     const { app, db, ceo, bruno } = await company();
-    const client = await mcp(app);
+    const client = await mcp(app, TOKEN);
     const off = await call(client, 'change_employee', { employee: bruno.id, on: false });
     expect(off.isError).toBeFalsy();
     expect((await db.select().from(agents).where(eq(agents.id, bruno.id)))[0]!.switchedOffAt).not.toBeNull();
@@ -113,14 +102,14 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
 
   it('is refused what the CEO would be refused, in the same words', async () => {
     const { app, orchestrator } = await company();
-    const res = await call(await mcp(app), 'fire_employee', { employee: orchestrator.id });
+    const res = await call(await mcp(app, TOKEN), 'fire_employee', { employee: orchestrator.id });
     expect(res.isError).toBe(true);
     expect(text(res)).toContain('The orchestrator stays with the company.');
   });
 
   it('writes to an employee as itself', async () => {
     const { app, db, bruno } = await company();
-    const res = await call(await mcp(app), 'message_employee', { employee: bruno.id, text: 'Please look at the checkout bug first.' });
+    const res = await call(await mcp(app, TOKEN), 'message_employee', { employee: bruno.id, text: 'Please look at the checkout bug first.' });
     expect(res.isError).toBeFalsy();
     const [turn] = await db.select().from(jobs).where(and(eq(jobs.agentId, bruno.id), isNull(jobs.taskId)));
     expect(turn!.prompt).toBe('From Orchestrator to Bruno (Backend engineer, Development):\n\nOrchestrator: Please look at the checkout bug first.');
@@ -134,22 +123,22 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
     const [acme] = await db.select().from(companies);
     const [ivan] = await db.select().from(people);
     const [machine] = await db.insert(machines).values({ companyId: acme!.id, personId: ivan!.id, machineKey: 'mac-0001-abcd', hostname: 'ivan-mac' }).returning();
-    const client = await mcp(app);
+    const client = await mcp(app, TOKEN);
     expect(text(await call(client, 'lend_machine', { machine: machine!.id, lendsTests: false }))).toContain('"lendsTests":false');
     expect((await db.select().from(machines))[0]!.lendsTests).toBe(false);
   });
 
   it('reads any page the CEO can open', async () => {
     const { app } = await company();
-    const res = await call(await mcp(app), 'view', { path: '/api/people' });
+    const res = await call(await mcp(app, TOKEN), 'view', { path: '/api/people' });
     expect(res.isError).toBeFalsy();
     expect(JSON.parse(text(res)).people[0]).toMatchObject({ title: 'CEO' });
-    expect((await call(await mcp(app), 'view', { path: '/mcp' })).isError).toBe(true);
+    expect((await call(await mcp(app, TOKEN), 'view', { path: '/mcp' })).isError).toBe(true);
   });
 
   it("shows the CEO alone, in this window, the commands that connect the CEO's machines and plans, and never the orchestrator", async () => {
     const { app, db, ceo } = await company();
-    const client = await mcp(app);
+    const client = await mcp(app, TOKEN);
     const SHOWN = 'The command is shown to the CEO in this window; it works once, for 24 hours.';
     const commands = async () => (await app.inject({ url: '/api/nodes/commands', ...as(ceo) })).json().commands as { id: string; command: string }[];
     const code = (command: string) => command.split('--join ')[1]!;
@@ -184,7 +173,7 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
 
   it("keeps a machine's command from the people who did not get it, and from the orchestrator's own calls", async () => {
     const { app, db, ceo, orchestrator } = await company();
-    await call(await mcp(app), 'machine_command', {});
+    await call(await mcp(app, TOKEN), 'machine_command', {});
     const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { whole: true } });
     expect((await app.inject({ url: '/api/nodes/commands', ...as(maria) })).json().commands).toEqual([]);
     const [ivan] = await db.select().from(people).where(eq(people.isOwner, true));
@@ -211,21 +200,21 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
 
   it('does not write to itself', async () => {
     const { app, db, orchestrator } = await company();
-    const res = await call(await mcp(app), 'message_employee', { employee: orchestrator.id, text: 'Remember to check the tests.' });
+    const res = await call(await mcp(app, TOKEN), 'message_employee', { employee: orchestrator.id, text: 'Remember to check the tests.' });
     expect(res.isError).toBe(true);
     expect(await db.select().from(jobs).where(and(eq(jobs.agentId, orchestrator.id), eq(jobs.status, 'queued')))).toEqual([]);
   });
 
   it('cancels a task that someone else gave', async () => {
     const { app, db, task } = await company();
-    const res = await call(await mcp(app), 'cancel_task', { task: task.number, why: 'The CEO dropped checkout.' });
+    const res = await call(await mcp(app, TOKEN), 'cancel_task', { task: task.number, why: 'The CEO dropped checkout.' });
     expect(res.isError).toBeFalsy();
     expect((await db.select().from(tasks).where(eq(tasks.id, task.id)))[0]!.status).toBe('cancelled');
   });
 
   it('rewrites any task', async () => {
     const { app, db, task } = await company();
-    const res = await call(await mcp(app), 'update_task', { task: task.number, body: 'POST /checkout with tax.' });
+    const res = await call(await mcp(app, TOKEN), 'update_task', { task: task.number, body: 'POST /checkout with tax.' });
     expect(res.isError).toBeFalsy();
     expect((await db.select().from(tasks).where(eq(tasks.id, task.id)))[0]!.body).toBe('POST /checkout with tax.');
   });
@@ -246,7 +235,7 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
 
   it('builds a department itself and is not woken about its own change', async () => {
     const { app, db, orchestrator } = await company();
-    const res = await call(await mcp(app), 'build_structure', { items: [{ template: 'design', note: 'Screens for checkout.' }] });
+    const res = await call(await mcp(app, TOKEN), 'build_structure', { items: [{ template: 'design', note: 'Screens for checkout.' }] });
     expect(res.isError).toBeFalsy();
     expect(await db.select().from(departments).where(eq(departments.templateKey, 'design'))).toHaveLength(1);
     expect(await db.select().from(jobs).where(and(eq(jobs.agentId, orchestrator.id), like(jobs.prompt, 'Hornhoof applied%')))).toEqual([]);
@@ -267,7 +256,7 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
     expect((await app.inject({ url: '/api/requests', ...as(ceo) })).json().requests).toMatchObject([{ id: request.id, explained: null, explaining: true }]);
     await running(orchestrator.id, TOKEN);
     const plain = 'Бруно спрашивает, как входить в оплату. Нужно выбрать: проще (сессии) или для приложений тоже (JWT).';
-    expect((await call(await mcp(app), 'explain_request', { request: request.id, text: plain })).isError).toBeFalsy();
+    expect((await call(await mcp(app, TOKEN), 'explain_request', { request: request.id, text: plain })).isError).toBeFalsy();
     const listed = (await app.inject({ url: '/api/requests', ...as(ceo) })).json().requests;
     expect(listed).toMatchObject([{ id: request.id, explained: plain, explaining: false }]);
     /* People answer; only the orchestrator puts a request into words. */
@@ -278,7 +267,7 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
   it('answers an employee\'s question as itself, for the CEO its turn answers', async () => {
     const { app, db, ceoId, orchestrator, bruno, task } = await company();
     const { request } = await ask(app.ctx, bruno.id, task.id, { kind: 'question', text: 'Is tax in scope?' });
-    const res = await call(await mcp(app), 'answer_request', { request: request.id, answer: 'Yes, with tax.' });
+    const res = await call(await mcp(app, TOKEN), 'answer_request', { request: request.id, answer: 'Yes, with tax.' });
     expect(res.isError).toBeFalsy();
     const [job] = await db.select().from(jobs).where(eq(jobs.agentId, orchestrator.id));
     expect((await db.select().from(requests).where(eq(requests.id, request.id)))[0]).toMatchObject({ status: 'answered', answeredBy: ceoId, answeredByAgentId: orchestrator.id, answerJobId: job!.id, answerSourceSeq: null });
@@ -288,7 +277,7 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
 
   it('hires with what the card starts with and is not woken about it', async () => {
     const { app, db, orchestrator, dev } = await company();
-    const res = await call(await mcp(app), 'hire', { department: dev.id, people: [{ role: 'DEV-QA' }] });
+    const res = await call(await mcp(app, TOKEN), 'hire', { department: dev.id, people: [{ role: 'DEV-QA' }] });
     expect(res.isError).toBeFalsy();
     const [qa] = await db.select().from(agents).where(eq(agents.roleKey, 'DEV-QA'));
     const role = app.ctx.templates.roles.get('DEV-QA')!;
@@ -303,7 +292,7 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
     const { app, db, orchestrator, hana, dev } = await company();
     const payments = (await createTask(app.ctx, { agentId: orchestrator.id }, { title: 'Payments', brief: '', body: '', departmentId: dev.id, assigneeAgentId: hana.id })).task;
     await db.update(tasks).set({ status: 'blocked', assigneeAgentId: null }).where(eq(tasks.id, payments.id));
-    const res = await call(await mcp(app), 'update_task', { task: payments.number, body: 'Payments with tax.' });
+    const res = await call(await mcp(app, TOKEN), 'update_task', { task: payments.number, body: 'Payments with tax.' });
     expect(res.isError).toBeFalsy();
     expect((await db.select().from(tasks).where(eq(tasks.id, payments.id)))[0]).toMatchObject({ body: 'Payments with tax.', status: 'blocked' });
   });
@@ -313,7 +302,7 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
     const [rita] = await db.insert(agents).values({ companyId: dev.companyId, kind: 'worker', name: 'Rita', roleKey: 'DEV-REV', departmentId: dev.id, model: '', subscriptionId: bruno.subscriptionId }).returning();
     const checked = (await createTask(app.ctx, { agentId: hana.id }, { title: 'Refunds', brief: '', body: '', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true, gates: [rita!.id] })).task;
     await db.update(tasks).set({ status: 'review', stage: 1, panel: [], assigneeAgentId: hana.id }).where(eq(tasks.id, checked.id));
-    const res = await call(await mcp(app), 'update_task', { task: checked.number, gates: [] });
+    const res = await call(await mcp(app, TOKEN), 'update_task', { task: checked.number, gates: [] });
     expect(res.isError).toBeFalsy();
     expect((await db.select().from(tasks).where(eq(tasks.id, checked.id)))[0]!.status).toBe('done');
     expect(await db.select().from(jobs).where(and(eq(jobs.agentId, hana.id), eq(jobs.taskId, checked.id)))).toHaveLength(1);
@@ -321,7 +310,7 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
 
   it('closes the staff card it hires from', async () => {
     const { app, db, dev } = await company();
-    const client = await mcp(app);
+    const client = await mcp(app, TOKEN);
     await call(client, 'propose_staff', { department: dev.id, brief: 'Acceptance first.', people: [{ role: 'DEV-QA', checked: true }] });
     const [card] = await db.select().from(proposals).where(eq(proposals.kind, 'staff'));
     const res = await call(client, 'hire', { department: dev.id, proposalId: card!.id, people: [{ role: 'DEV-QA' }] });
@@ -334,7 +323,7 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
     const [lena] = await db.insert(people).values({ companyId: dev.companyId, name: 'Lena', email: 'lena@example.com', title: 'Engineer', status: 'active', scopeKind: 'company' }).returning();
     const [plan] = await db.insert(subscriptions).values({ companyId: dev.companyId, provider: 'claude', kind: 'personal', label: 'Claude', ownerPersonId: lena!.id, status: 'ready' }).returning();
     await db.update(agents).set({ subscriptionId: plan!.id }).where(eq(agents.id, bruno.id));
-    const res = await call(await mcp(app), 'change_person', { person: lena!.id, status: 'disabled' });
+    const res = await call(await mcp(app, TOKEN), 'change_person', { person: lena!.id, status: 'disabled' });
     expect(res.isError).toBeFalsy();
     const [freed] = await db.select().from(agentChanges).where(and(eq(agentChanges.agentId, bruno.id), eq(agentChanges.field, 'subscription')));
     expect(freed).toMatchObject({ personId: null, byOrchestrator: true });
@@ -342,7 +331,7 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
 
   it('hands the work of an employee it switches off on in its own name', async () => {
     const { app, db, orchestrator, bruno, task } = await company();
-    const res = await call(await mcp(app), 'change_employee', { employee: bruno.id, on: false });
+    const res = await call(await mcp(app, TOKEN), 'change_employee', { employee: bruno.id, on: false });
     expect(res.isError).toBeFalsy();
     const [handed] = await db.select().from(taskEvents).where(eq(taskEvents.taskId, task.id)).orderBy(desc(taskEvents.id)).limit(1);
     expect(handed).toMatchObject({ text: 'Bruno was switched off.', agentId: orchestrator.id, personId: null });
@@ -354,7 +343,7 @@ describe("the orchestrator and the company's public link", () => {
   it('takes a link, moves it to another name and removes it, as the settings do', async () => {
     const relay = await fakeRelay();
     const { app, db } = await company({ RELAY_URL: relay.url, HORNHOOF_CONTROL_DIR: mkdtempSync(join(tmpdir(), 'hh-link-')) });
-    const client = await mcp(app);
+    const client = await mcp(app, TOKEN);
     const taken = await call(client, 'set_public_link', { name: 'acme' });
     expect(taken.isError).toBeFalsy();
     expect(JSON.parse(text(taken))).toEqual({ link: { name: 'acme', url: 'https://acme.hornhoof.test' } });
@@ -377,7 +366,7 @@ describe("the orchestrator and the company's public link", () => {
 describe('the orchestrator reads and changes the database itself', () => {
   it('reads any table and changes a field, and the map hears of the change', async () => {
     const { app, db, bruno } = await company();
-    const client = await mcp(app);
+    const client = await mcp(app, TOKEN);
     const heard: string[] = [];
     app.ctx.bus.subscribe(bruno.companyId, m => heard.push(m.type));
     const read = await call(client, 'database', { sql: `SELECT name, kind FROM agents WHERE id = '${bruno.id}'` });
@@ -392,7 +381,7 @@ describe('the orchestrator reads and changes the database itself', () => {
 
   it('is refused sign-ins, invites, install codes, the public link, passwords and the tables themselves', async () => {
     const { app } = await company();
-    const client = await mcp(app);
+    const client = await mcp(app, TOKEN);
     for (const sql of ['SELECT * FROM sessions', 'SELECT * FROM invites', 'SELECT * FROM node_codes', 'SELECT * FROM public_links', "UPDATE public_links SET url = 'https://evil.test'", 'SELECT * FROM plan_credentials', "DELETE FROM plan_credentials", 'SELECT account FROM nodes', 'SELECT password_hash FROM people', 'DROP TABLE tasks', 'ALTER TABLE tasks ADD COLUMN x text', 'CREATE TABLE notes (id int)']) {
       const res = await call(client, 'database', { sql });
       expect(res.isError, sql).toBe(true);
@@ -404,7 +393,7 @@ describe('the orchestrator reads and changes the database itself', () => {
 
   it('reads requests, cards and the logs, and is refused changing them even in a turn of the CEO', async () => {
     const { app, db, bruno, task } = await company();
-    const client = await mcp(app);
+    const client = await mcp(app, TOKEN);
     const { request } = await ask(app.ctx, bruno.id, task.id, { kind: 'approval', text: 'Merge?', commit: 'a'.repeat(40) });
     for (const table of ['requests', 'proposals', 'agent_events', 'task_events']) {
       const read = await call(client, 'database', { sql: `SELECT count(*)::int AS n FROM ${table}` });
@@ -433,7 +422,7 @@ describe('the orchestrator reads and changes the database itself', () => {
     const [turn] = await db.select().from(jobs).where(eq(jobs.agentId, orchestrator.id));
     const wrote = (personId: string | null) => db.insert(agentEvents).values({ companyId: bruno.companyId, agentId: orchestrator.id, jobId: turn!.id, kind: 'message', data: { text: 'Rename Bruno.' }, personId });
     const rename = (name: string) => call(client, 'database', { sql: `UPDATE agents SET name = '${name}' WHERE id = '${bruno.id}'` });
-    const client = await mcp(app);
+    const client = await mcp(app, TOKEN);
     await wrote(zedRow!.id);
     const refused = await rename('Bruno Z');
     expect(refused.isError).toBe(true);
@@ -452,28 +441,28 @@ describe('the orchestrator reads and changes the database itself', () => {
 
   it('undoes the whole call when one of its statements fails', async () => {
     const { app, db, bruno } = await company();
-    const res = await call(await mcp(app), 'database', { sql: `UPDATE agents SET name = 'Nobody' WHERE id = '${bruno.id}'; SELECT * FROM sessions` });
+    const res = await call(await mcp(app, TOKEN), 'database', { sql: `UPDATE agents SET name = 'Nobody' WHERE id = '${bruno.id}'; SELECT * FROM sessions` });
     expect(res.isError).toBe(true);
     expect((await db.select().from(agents).where(eq(agents.id, bruno.id)))[0]!.name).toBe('Bruno');
   });
 
   it('cuts a long answer', async () => {
     const { app } = await company();
-    const res = await call(await mcp(app), 'database', { sql: "SELECT repeat('x', 40000) AS long" });
+    const res = await call(await mcp(app, TOKEN), 'database', { sql: "SELECT repeat('x', 40000) AS long" });
     expect(text(res)).toMatch(/\[cut at 30000 characters\]$/);
   });
 
   it('says why when the database does not let Hornhoof make its role', async () => {
     const { app } = await company();
     app.ctx.agentSql = undefined;
-    const res = await call(await mcp(app), 'database', { sql: 'SELECT 1' });
+    const res = await call(await mcp(app, TOKEN), 'database', { sql: 'SELECT 1' });
     expect(res.isError).toBe(true);
     expect(text(res)).toContain('does not let Hornhoof');
   });
 
   it("keeps people, their access, an employee's kind, role and skills, a head's department and turns' tokens out of its hands, and says why", async () => {
     const { app, db, orchestrator, hana, bruno, dev, running } = await company();
-    const client = await mcp(app);
+    const client = await mcp(app, TOKEN);
     const [ivan] = await db.select().from(people);
     const [design] = await db.insert(departments).values({ companyId: bruno.companyId, templateKey: 'design', roleCode: 'DES' }).returning();
     await running(hana.id, 'tool-token-head-0123456789abcdef0123');
@@ -565,7 +554,7 @@ describe('the orchestrator reads and changes the database itself', () => {
 
 describe('what only the CEO may ask for', () => {
   const HEAD_TOKEN = 'tool-token-head-0123456789abcdef0123';
-  const ONLY_CEO = 'Only the CEO can ask for this. Ask the CEO first.';
+  const ONLY_CEO = 'Only the CEO or the CEO delegate can ask for this, in a turn that answers them: the last person who wrote into it. Nothing was changed. Ask the CEO first.';
 
   /* The company without the test's own turn of the orchestrator, and Lena, who sees the whole company. */
   async function quiet() {

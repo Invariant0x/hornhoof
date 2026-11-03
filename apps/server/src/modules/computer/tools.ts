@@ -1,6 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
+import { ceoPrincipal, withInputLock } from '../conversation/decision-context.js';
 import { appendEvent, appendOutgoing } from '../events/store.js';
 import { personParty } from '../events/parties.js';
 import { decisionPerson } from '../tasks/decisions.js';
@@ -18,6 +19,17 @@ function answer(id: string, waited: Waited, seconds: number) {
   if (waited === 'gone') return say('The updater has no such command: its answer was taken already, or it was forgotten. Look before you run it again.', true);
   if (waited === 'running') return say(`Still running. Call computer_result with id ${id} for its result; each call waits up to ${seconds} seconds.`);
   return say(`Exit code ${waited.exit}.\n${waited.output}`);
+}
+
+/* A command starts only in a turn that answers the CEO or the CEO delegate now, kept under the input lock from words that
+   would change it meanwhile, and while access is open: its id, or why it did not start. */
+function started(ctx: Ctx, job: ToolJob, command: string, seconds: number) {
+  return withInputLock(ctx, job.agentId, async () => {
+    if (!(await ceoPrincipal(ctx.db, job.id))) return say(ONLY_CEO, true);
+    if (!ctx.computer.openUntil()) return say(CLOSED, true);
+    if (!ctx.computer.available()) return say(UNREACHABLE, true);
+    return ctx.computer.start(command, seconds);
+  });
 }
 
 /* The orchestrator's way out of its container: it asks the CEO for the computer the server runs on, and while the CEO
@@ -58,11 +70,8 @@ export function registerComputerTools(server: McpServer, ctx: Ctx, job: ToolJob)
       },
     },
     async ({ command, timeoutSeconds }) => {
-      if (!job.answersCeo) return say(ONLY_CEO, true);
-      if (!ctx.computer.openUntil()) return say(CLOSED, true);
-      if (!ctx.computer.available()) return say(UNREACHABLE, true);
-      const id = ctx.computer.start(command, timeoutSeconds ?? RUN_DEFAULT_S);
-      return answer(id, await ctx.computer.wait(id), Math.round(ctx.computer.waitMs / 1000));
+      const id = await started(ctx, job, command, timeoutSeconds ?? RUN_DEFAULT_S);
+      return typeof id === 'string' ? answer(id, await ctx.computer.wait(id), Math.round(ctx.computer.waitMs / 1000)) : id;
     },
   );
 

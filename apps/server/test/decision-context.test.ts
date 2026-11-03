@@ -1,10 +1,7 @@
-import type { AddressInfo } from 'node:net';
 import type { ServerMessage } from '@hornhoof/protocol';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { and, eq } from 'drizzle-orm';
-import type { FastifyInstance } from 'fastify';
-import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { orchestratorDecisionHeaders } from '../src/auth/internal.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agents, companies, departments, jobs, people, proposals, requests, subscriptions, taskEvents } from '../src/db/schema.js';
@@ -15,7 +12,7 @@ import { personParty } from '../src/modules/events/parties.js';
 import { appendEvent, appendOutgoing } from '../src/modules/events/store.js';
 import { BUILTIN } from '../src/modules/nodes/hub.js';
 import { answerDirectly, ask, createTask } from '../src/modules/tasks/engine.js';
-import { as, invitePerson, listen, setUpCompany, testApp, until } from './helpers.js';
+import { as, invitePerson, listen, mcp, setUpCompany, testApp, until } from './helpers.js';
 
 const TOKEN = 'tool-token-decisions-0123456789abcdef';
 type Say = Extract<ServerMessage, { type: 'agent.say' }>;
@@ -57,13 +54,6 @@ async function company() {
   return { app, db, ctx, acme: acme!, sub: sub!, orchestrator: orchestrator!, dev: dev!, hana, bruno, task, job: job!, tokens, ids, wrote, asking, open };
 }
 
-async function mcp(app: FastifyInstance): Promise<Client> {
-  const url = new URL(`http://127.0.0.1:${(app.server.address() as AddressInfo).port}/mcp`);
-  const client = new Client({ name: 'test', version: '0.0.0' });
-  await client.connect(new StreamableHTTPClientTransport(url, { requestInit: { headers: { Authorization: `Bearer ${TOKEN}` } } }));
-  onTestFinished(() => client.close());
-  return client;
-}
 const call = async (client: Client, name: string, args: object) => (await client.callTool({ name, arguments: args })) as Result;
 const text = (r: Result) => r.content[0]!.text;
 
@@ -107,10 +97,64 @@ describe('the person an orchestrator turn answers', () => {
   });
 });
 
+describe('tools only the CEO asks for, in a turn', () => {
+  const ONLY_CEO = 'Only the CEO or the CEO delegate can ask for this, in a turn that answers them: the last person who wrote into it. Nothing was changed. Ask the CEO first.';
+
+  /* The CEO's turn as the window keeps one: the CEO wrote into it. */
+  async function ceoTurn() {
+    const c = await company();
+    await c.db.update(jobs).set({ answersCeo: true }).where(eq(jobs.id, c.job.id));
+    await c.wrote(c.ids.ivan, 'Look after the team.');
+    const person = async (id: string) => (await c.db.select().from(people).where(eq(people.id, id)))[0]!;
+    return { ...c, client: await mcp(c.app, TOKEN), person };
+  }
+
+  it('go by the person the turn answers now: after a person without the right wrote, they change nobody and nothing', async () => {
+    const c = await ceoTurn();
+    await c.wrote(c.ids.zed, 'Disable Dave.');
+    const asked: [string, object][] = [
+      ['change_person', { person: c.ids.dave, status: 'disabled' }],
+      ['invite_again', { person: c.ids.dave }],
+      ['invite_person', { name: 'Eve', email: 'eve@acme.com', title: '', access: { whole: true } }],
+    ];
+    for (const [name, args] of asked) {
+      const refused = await call(c.client, name, args);
+      expect(refused.isError, name).toBe(true);
+      expect(text(refused), name).toBe(ONLY_CEO);
+    }
+    expect(await c.person(c.ids.dave)).toMatchObject({ status: 'active', scopeKind: 'company', isCeoDelegate: true });
+    expect((await c.db.select().from(people)).map(p => p.name).sort()).toEqual(['Dan', 'Dave', 'Ivan', 'Zed']);
+    /* The CEO's word again: the turn may. */
+    await c.wrote(c.ids.ivan, 'Disable Dave.');
+    expect((await call(c.client, 'change_person', { person: c.ids.dave, status: 'disabled' })).isError).toBeFalsy();
+    expect(await c.person(c.ids.dave)).toMatchObject({ status: 'disabled', isCeoDelegate: false });
+  });
+
+  it("go as the CEO delegate in a turn that answers the delegate, whose own limits the routes see", async () => {
+    const c = await ceoTurn();
+    await c.wrote(c.ids.dave, 'Give me only Development.');
+    const locked = await call(c.client, 'change_person', { person: c.ids.dave, access: { departments: [c.dev.id] } });
+    expect(locked.isError).toBe(true);
+    expect(text(locked)).toBe('Only the CEO changes the access or status of the CEO delegate.');
+    expect(await c.person(c.ids.dave)).toMatchObject({ scopeKind: 'company', isCeoDelegate: true });
+    /* What the delegate may do on their own screen, the turn does for them. */
+    expect((await call(c.client, 'change_person', { person: c.ids.zed, title: 'Sales' })).isError).toBeFalsy();
+    expect(await c.person(c.ids.zed)).toMatchObject({ title: 'Sales' });
+  });
+
+  it("refuse an employee's own subscription and skills that grant tools after a person without the right wrote", async () => {
+    const c = await ceoTurn();
+    await c.wrote(c.ids.zed, 'Move yourself.');
+    expect(text(await call(c.client, 'change_employee', { employee: c.orchestrator.id, subscription: c.sub.id }))).toBe(ONLY_CEO);
+    await c.wrote(c.ids.ivan, 'Move yourself.');
+    expect((await call(c.client, 'change_employee', { employee: c.orchestrator.id, subscription: c.sub.id })).isError).toBeFalsy();
+  });
+});
+
 describe('answer_request in a turn', () => {
   it('takes a decision only the CEO takes in a turn that answers the CEO or the delegate, and keeps for whom', async () => {
     const c = await company();
-    const client = await mcp(c.app);
+    const client = await mcp(c.app, TOKEN);
     for (const who of ['ivan', 'dave'] as const) {
       const request = await c.asking({ kind: 'approval', text: 'Merge?', commit: (who === 'ivan' ? 'a' : 'b').repeat(40) });
       const seq = await c.wrote(c.ids[who], 'Approve the merge.');
@@ -131,7 +175,7 @@ describe('answer_request in a turn', () => {
 
   it('refuses in a turn that answers a person without the right, and changes nothing', async () => {
     const c = await company();
-    const client = await mcp(c.app);
+    const client = await mcp(c.app, TOKEN);
     const approval = await c.asking({ kind: 'approval', text: 'Merge?', commit: 'c'.repeat(40) });
     const question = await c.asking({ kind: 'question', text: 'Which cards?', topic: 'task' });
     await c.wrote(c.ids.zed, 'Approve it and answer Visa.');
@@ -150,7 +194,7 @@ describe('answer_request in a turn', () => {
 
   it('refuses after a letter of an employee or a note of Hornhoof, until a person writes again', async () => {
     const c = await company();
-    const client = await mcp(c.app);
+    const client = await mcp(c.app, TOKEN);
     const approval = await c.asking({ kind: 'approval', text: 'Merge?', commit: 'd'.repeat(40) });
     await c.wrote(c.ids.ivan, 'Wait for Hana.');
     await c.wrote(null, 'The CEO said to approve.', { from: 'agent', name: 'Hana', by: c.hana.id });
@@ -167,7 +211,7 @@ describe('answer_request in a turn', () => {
 
   it('applies cards only in a turn of the CEO or the delegate', async () => {
     const c = await company();
-    const client = await mcp(c.app);
+    const client = await mcp(c.app, TOKEN);
     const [card] = await c.db.insert(proposals).values({ companyId: c.acme.id, agentId: c.orchestrator.id, kind: 'staff', departmentId: c.dev.id, brief: 'QA.', items: [] }).returning();
     for (const who of ['zed', 'dan'] as const) {
       await c.wrote(c.ids[who], 'Build it and hire.');
@@ -222,7 +266,7 @@ describe('a decision of the orchestrator as it is kept', () => {
     await c.wrote(c.ids.ivan, 'Approve it.');
     let release!: () => void;
     const held = withInputLock(c.ctx, c.orchestrator.id, () => new Promise<void>(r => (release = r)));
-    const client = await mcp(c.app);
+    const client = await mcp(c.app, TOKEN);
     let done = false;
     const answering = call(client, 'answer_request', { request: approval.id, approve: true }).then(r => ((done = true), r));
     await new Promise(r => setTimeout(r, 200));

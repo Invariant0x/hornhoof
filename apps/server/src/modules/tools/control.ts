@@ -7,7 +7,7 @@ import type { Ctx } from '../../app.js';
 import { orchestratorDecisionHeaders, orchestratorHeaders } from '../../auth/internal.js';
 import { departments, people } from '../../db/schema.js';
 import { AgentPatch } from '../agents/routes.js';
-import { decisionPrincipal } from '../conversation/decision-context.js';
+import { ceoPrincipal, decisionPrincipal, withInputLock } from '../conversation/decision-context.js';
 import { deptName } from '../departments/templates.js';
 import { BuildBody, RepoBody } from '../departments/routes.js';
 import { LinkBody } from '../link/routes.js';
@@ -20,8 +20,9 @@ import { BudgetBody, ConnectBody, SubscriptionBody } from '../subscriptions/rout
 import { UpdateBody } from '../updates/routes.js';
 import { departmentOf, runsTier, servingSubscriptions, skillsFor, spotIn, StaffLine, type HireLine } from './staff.js';
 
-type ToolJob = { id: string; companyId: string; agentId: string; answersCeo: boolean };
-type Call = { method: HTTPMethods; url: string; payload?: unknown };
+type ToolJob = { id: string; companyId: string; agentId: string };
+/* asCeo: only the CEO may ask for this one call of a tool anyone may ask for. */
+type Call = { method: HTTPMethods; url: string; payload?: unknown; asCeo?: true };
 type Dept = typeof departments.$inferSelect;
 type Hire = Omit<StaffLine, 'checked'>;
 
@@ -35,7 +36,8 @@ const say = (text: string, isError = false) => ({ content: [{ type: 'text' as co
 const Id = (what: string) => z.uuid().describe(`The ${what}'s id, from company or view.`);
 
 /* The tools that change people, their access, money or the company's reach. The orchestrator is the CEO's hands, so he
-   uses them only in a turn that answers the CEO, never because an employee, a timer or a task asked. */
+   uses them only in a turn that answers the CEO or the CEO delegate now, as that person, never because an employee, a
+   timer, a task or another person asked. */
 export const CEO_ONLY = new Set([
   'invite_person',
   'change_person',
@@ -56,7 +58,7 @@ export const CEO_ONLY = new Set([
   'remove_public_link',
   'update_hornhoof',
 ]);
-export const ONLY_CEO = 'Only the CEO can ask for this. Ask the CEO first.';
+export const ONLY_CEO = 'Only the CEO or the CEO delegate can ask for this, in a turn that answers them: the last person who wrote into it. Nothing was changed. Ask the CEO first.';
 
 /* The tools that take a decision for a person: the one this turn answers, who must have the right to take it. */
 const DECIDES = new Set(['answer_request', 'build_structure', 'hire']);
@@ -71,27 +73,17 @@ const NOT_THEIRS =
 const SHOWS_COMMAND = new Set(['connect_plans', 'plan_command', 'machine_command', 'add_plan_to_machine']);
 
 /* What the CEO can do in Hornhoof's screens, as the orchestrator's tools. Each one calls the same route the screen calls,
-   as the company's owner, so it is allowed and refused exactly what the CEO is; Hornhoof records it as the orchestrator's. */
+   as the company's owner, so it is allowed and refused exactly what the CEO is; what only the CEO asks for goes as the
+   CEO or the CEO delegate the turn answers. Hornhoof records it as the orchestrator's. */
 export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyInstance, job: ToolJob): void {
-  async function send({ method, url, payload }: Call) {
-    const [owner] = await ctx.db
-      .select({ id: people.id })
-      .from(people)
-      .where(and(eq(people.companyId, job.companyId), eq(people.isOwner, true)));
-    if (!owner) return say('This company has no owner to act for.', true);
-    const res = await app.inject({ method, url, headers: orchestratorHeaders(owner.id, job.agentId), ...(payload === undefined ? {} : { payload: payload as object }) });
-    return answered(res);
-  }
-
   /* One tool for one screen action. The id fields name the thing in the address; the rest is the body. A call that
      cannot be made comes back as the reason. */
   const register = server.registerTool.bind(server) as (name: string, config: { description: string; inputSchema: z.ZodRawShape }, cb: (a: never) => Promise<ReturnType<typeof say>>) => unknown;
   const tool = <S extends z.ZodRawShape>(name: string, description: string, input: S, call: (a: z.infer<z.ZodObject<S>>) => Call | string | Promise<Call | string>) =>
     register(name, { description, inputSchema: input }, async (a: z.infer<z.ZodObject<S>>) => {
-      if (CEO_ONLY.has(name) && !job.answersCeo) return say(ONLY_CEO, true);
       const made = await call(a);
       if (typeof made === 'string') return say(made, true);
-      const answer = DECIDES.has(name) ? await decide(ctx, app, job, made) : await send(made);
+      const answer = await carry(ctx, app, job, name, made);
       return SHOWS_COMMAND.has(name) && !answer.isError ? say(SHOWN_TO_CEO) : answer;
     });
 
@@ -152,8 +144,8 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
       /* A skill that grants tools shows the whole company through the employee, and his own subscription is where his
          turns and their tokens go: both are the CEO's to ask for. */
       const grants = Object.entries(body.skills ?? {}).some(([id, on]) => on && (ctx.templates.skills.get(id)?.grants ?? []).length > 0);
-      if (!job.answersCeo && (grants || (employee === job.agentId && body.subscription !== undefined))) return ONLY_CEO;
-      return { method: 'PATCH', url: `/api/agents/${employee}`, payload: body };
+      const ceos = grants || (employee === job.agentId && body.subscription !== undefined);
+      return { method: 'PATCH', url: `/api/agents/${employee}`, payload: body, ...(ceos ? { asCeo: true as const } : {}) };
     },
   );
   tool('reset_employee', 'Puts an employee back to its role as the templates have it now: its skills, texts and effort. Its model and subscription stay.', { employee: Id('employee') }, ({ employee }) => ({
@@ -336,6 +328,35 @@ async function hireLines(ctx: Ctx, companyId: string, dept: Dept, lines: Hire[])
     });
   }
   return out;
+}
+
+/* A screen's route, called as this person, the company's owner when none is named. */
+async function send(ctx: Ctx, app: FastifyInstance, job: ToolJob, { method, url, payload }: Call, personId?: string) {
+  const [owner] = personId
+    ? [{ id: personId }]
+    : await ctx.db
+        .select({ id: people.id })
+        .from(people)
+        .where(and(eq(people.companyId, job.companyId), eq(people.isOwner, true)));
+  if (!owner) return say('This company has no owner to act for.', true);
+  const res = await app.inject({ method, url, headers: orchestratorHeaders(owner.id, job.agentId), ...(payload === undefined ? {} : { payload: payload as object }) });
+  return answered(res);
+}
+
+/* What only the CEO asks for goes as the CEO or the CEO delegate this turn answers now, kept under the input lock from words
+   that would change it meanwhile, so the route sees the person it is for and allows that person what their own screen
+   does. */
+function asCeo(ctx: Ctx, app: FastifyInstance, job: ToolJob, made: Call) {
+  return withInputLock(ctx, job.agentId, async () => {
+    const personId = await ceoPrincipal(ctx.db, job.id);
+    return personId ? send(ctx, app, job, made, personId) : say(ONLY_CEO, true);
+  });
+}
+
+/* A tool's call goes as a decision of the person this turn answers, as the CEO or the delegate, or as the owner. */
+function carry(ctx: Ctx, app: FastifyInstance, job: ToolJob, name: string, made: Call) {
+  if (DECIDES.has(name)) return decide(ctx, app, job, made);
+  return CEO_ONLY.has(name) || made.asCeo ? asCeo(ctx, app, job, made) : send(ctx, app, job, made);
 }
 
 /* Why a decision did not go through, in the orchestrator's words; nothing for any other answer. */

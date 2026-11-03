@@ -1,13 +1,10 @@
-import type { AddressInfo } from 'node:net';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { and, eq, inArray } from 'drizzle-orm';
-import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agents, companies, departments, jobs, requests, subscriptions } from '../src/db/schema.js';
 import { blocked, createTask } from '../src/modules/tasks/engine.js';
-import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until } from './helpers.js';
+import { as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until } from './helpers.js';
 import { agentState, enqueueTurn, GONE_ALONG } from '../src/modules/conversation/queue.js';
 
 const TOKEN = 'tool-token-watch-0123456789abcdef0123';
@@ -38,13 +35,6 @@ async function company(skills: string[]) {
   return { app, db, ceo, dev: dev!, ops: ops!, acme: acme!, sub: sub!, wendy, hana, bruno, task, hire };
 }
 
-async function mcp(app: FastifyInstance): Promise<Client> {
-  const url = new URL(`http://127.0.0.1:${(app.server.address() as AddressInfo).port}/mcp`);
-  const client = new Client({ name: 'test', version: '0.0.0' });
-  await client.connect(new StreamableHTTPClientTransport(url, { requestInit: { headers: { Authorization: `Bearer ${TOKEN}` } } }));
-  onTestFinished(() => client.close());
-  return client;
-}
 
 type Result = { content: { text: string }[]; isError?: boolean };
 const call = async (client: Client, name: string, args: object = {}) => (await client.callTool({ name, arguments: args })) as Result;
@@ -53,7 +43,7 @@ const names = async (client: Client) => (await client.listTools()).tools.map(t =
 describe('tools a skill grants', () => {
   it('are not there for an employee without such a skill', async () => {
     const { app } = await company([]);
-    const tools = await names(await mcp(app));
+    const tools = await names(await mcp(app, TOKEN));
     expect(tools).toContain('tasks');
     for (const name of ['agents', 'failures']) expect(tools).not.toContain(name);
   });
@@ -61,7 +51,7 @@ describe('tools a skill grants', () => {
   it('let any employee write to the people of its own department, and only to them', async () => {
     const { app, db, ops, bruno, hire } = await company([]);
     const olga = await hire('Olga', 'worker', 'OPS-INTEG', ops.id);
-    const client = await mcp(app);
+    const client = await mcp(app, TOKEN);
     expect(await names(client)).toContain('message_employee');
     expect((await call(client, 'message_employee', { employee: olga.id, text: 'Which token did the Stripe connector get? Your branch has none.' })).isError).toBeFalsy();
     expect((await db.select().from(jobs).where(eq(jobs.agentId, olga.id))).map(j => j.prompt)).toEqual([expect.stringContaining('Which token did the Stripe connector get?')]);
@@ -72,7 +62,7 @@ describe('tools a skill grants', () => {
 
   it("let a watchdog see every agent with what it holds, and nudge one in its window", async () => {
     const { app, db, bruno, task, wendy } = await company(['ops-task-watch']);
-    const client = await mcp(app);
+    const client = await mcp(app, TOKEN);
     const tools = await names(client);
     expect(tools).toEqual(expect.arrayContaining(['agents', 'message_employee']));
     expect(tools).not.toContain('failures');
@@ -99,7 +89,7 @@ describe('tools a skill grants', () => {
     const did = new Date(Date.now() - 3 * 3_600_000);
     await db.insert(agentEvents).values({ companyId: acme.id, agentId: bruno.id, seq: 1, kind: 'text', data: { kind: 'text', text: 'Reviewing #15.' }, createdAt: did });
     await db.insert(agentEvents).values({ companyId: acme.id, agentId: bruno.id, seq: 2, kind: 'message', data: { text: 'Any news on #15?', from: 'agent', name: 'Hana' } });
-    const all = JSON.parse((await call(await mcp(app), 'agents')).content[0]!.text) as { name: string; lastActivityAt: string | null }[];
+    const all = JSON.parse((await call(await mcp(app, TOKEN), 'agents')).content[0]!.text) as { name: string; lastActivityAt: string | null }[];
     expect(all.find(a => a.name === 'Bruno')!.lastActivityAt).toBe(did.toISOString());
   });
 
@@ -107,7 +97,7 @@ describe('tools a skill grants', () => {
     const { app, db, sub } = await company(['ops-task-watch']);
     const resetsAt = new Date(Date.now() + 3_600_000).toISOString();
     await db.update(subscriptions).set({ limits: { status: 'rejected', windows: [{ name: 'five_hour', utilization: 1, resetsAt }] } }).where(eq(subscriptions.id, sub.id));
-    const all = JSON.parse((await call(await mcp(app), 'agents')).content[0]!.text) as { name: string; limitUntil: string | null }[];
+    const all = JSON.parse((await call(await mcp(app, TOKEN), 'agents')).content[0]!.text) as { name: string; limitUntil: string | null }[];
     expect(all.find(a => a.name === 'Bruno')).toMatchObject({ limitUntil: resetsAt });
   });
 
@@ -123,7 +113,7 @@ describe('tools a skill grants', () => {
 
   it('send at most ten messages in one turn', async () => {
     const { app, hana, bruno } = await company(['ops-task-watch']);
-    const client = await mcp(app);
+    const client = await mcp(app, TOKEN);
     for (let i = 0; i < 10; i++) expect((await call(client, 'message_employee', { employee: i % 2 ? hana.id : bruno.id, text: `Nudge ${i}.` })).isError).toBeFalsy();
     const more = await call(client, 'message_employee', { employee: hana.id, text: 'One more.' });
     expect([more.isError, more.content[0]!.text]).toEqual([true, 'One turn sends at most 10 messages. Go on in your next round.']);
@@ -131,7 +121,7 @@ describe('tools a skill grants', () => {
 
   it('keep to ten messages when a turn sends several at once', async () => {
     const { app, hana, bruno } = await company(['ops-task-watch']);
-    const client = await mcp(app);
+    const client = await mcp(app, TOKEN);
     for (let i = 0; i < 9; i++) await call(client, 'message_employee', { employee: bruno.id, text: `Nudge ${i}.` });
     const last = await Promise.all([1, 2, 3].map(i => call(client, 'message_employee', { employee: hana.id, text: `At once ${i}.` })));
     expect(last.filter(r => !r.isError)).toHaveLength(1);
@@ -142,7 +132,7 @@ describe('tools a skill grants', () => {
     /* Sent through the queue before a restart, so only what Hornhoof keeps knows of them. */
     for (let i = 0; i < 9; i++)
       await enqueueTurn(app.ctx, { companyId: acme.id, agentId: bruno.id, prompt: `Nudge ${i}.`, createdBy: null, message: { personId: null, text: `Nudge ${i}.`, from: 'agent', name: 'Wendy', by: wendy.id } });
-    const client = await mcp(app);
+    const client = await mcp(app, TOKEN);
     expect((await call(client, 'message_employee', { employee: hana.id, text: 'Last one.' })).isError).toBeFalsy();
     expect((await call(client, 'message_employee', { employee: hana.id, text: 'One more.' })).isError).toBe(true);
   });
@@ -158,7 +148,7 @@ describe('tools a skill grants', () => {
       { companyId: acme.id, subscriptionId: sub.id, agentId: bruno.id, kind: 'conversation', prompt: 'x', timeoutMs: 1, status: 'failed', error: 'cancelled', tail: 'stopped', finishedAt: ago(20) },
     ]);
     await blocked(app.ctx, bruno.id, task.id, 'Waits for #40: the staging database does not answer.');
-    const client = await mcp(app);
+    const client = await mcp(app, TOKEN);
     const recent = JSON.parse((await call(client, 'failures', { hours: 6 })).content[0]!.text) as { failed: { agent: string; error: string; tail: string }[]; blocked: unknown[] };
     expect(recent.failed).toEqual([expect.objectContaining({ agent: 'Bruno', error: 'timeout', tail: 'npm test hung' })]);
     expect(recent.blocked).toEqual([
@@ -184,7 +174,7 @@ describe('tools a skill grants', () => {
       { companyId: acme.id, subscriptionId: sub.id, agentId: hana.id, taskId: payments.id, kind: 'conversation', prompt: 'x', timeoutMs: 1, status: 'done', result: GONE_ALONG, startedAt: ago(30), finishedAt: ago(30) },
     ]);
     await blocked(app.ctx, hana.id, payments.id, 'Waits for the bank.');
-    const client = await mcp(app);
+    const client = await mcp(app, TOKEN);
     const recent = JSON.parse((await call(client, 'failures', { hours: 6 })).content[0]!.text) as { blocked: { title: string; lastTurn: unknown }[] };
     expect(recent.blocked.find(b => b.title === 'Payments')?.lastTurn).toEqual({ status: 'failed', error: 'machine_restarted', at: restarted.toISOString() });
   });
@@ -216,7 +206,7 @@ describe('tools a skill grants', () => {
       { companyId: acme.id, taskId: task.id, agentId: bruno.id, kind: 'question', text: 'Which payment provider?', status: 'answered', answer: 'Stripe', createdAt: ago(120) },
       { companyId: acme.id, taskId: task.id, agentId: bruno.id, kind: 'approval', text: 'Approve the commit.', commit: 'a'.repeat(40), createdAt: ago(10) },
     ]);
-    const recent = JSON.parse((await call(await mcp(app), 'failures', { hours: 6 })).content[0]!.text);
+    const recent = JSON.parse((await call(await mcp(app, TOKEN), 'failures', { hours: 6 })).content[0]!.text);
     /* The most frequent first, then the newest, with the newest line that said it. */
     expect(recent.missing).toEqual([
       { what: 'ps', kind: 'command', times: 2, agents: ['Bruno', 'Hana'], example: 'bash: line 3: ps: command not found', at: newest.createdAt.toISOString(), task: task.number },
