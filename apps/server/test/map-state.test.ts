@@ -243,6 +243,56 @@ describe('lines between the orchestrator and a department', () => {
   });
 });
 
+describe('lines to an employee whose turn a message started', () => {
+  /* The head or a colleague wrote to it, so its turn carries no task: it acts on the one its card shows. */
+  it('run blue while it acts on its open task before any gate, and so does its department', async () => {
+    const { orchestrator, hana, bruno, member, run, org } = await company();
+    await member('Checkout API', bruno.id);
+    await run(bruno.id, null);
+    const now = await org();
+    expect(stateOf(now, hana, bruno)).toBe('blue');
+    expect(stateOf(now, orchestrator, hana)).toBe('blue');
+  });
+
+  it('stay quiet when it has no open task', async () => {
+    const { db, orchestrator, hana, bruno, member, run, org } = await company();
+    const api = await member('Checkout API', bruno.id);
+    await db.update(tasks).set({ status: 'cancelled', closedAt: new Date() }).where(eq(tasks.id, api.id));
+    await run(bruno.id, null);
+    const now = await org();
+    expect(stateOf(now, hana, bruno)).toBe('quiet');
+    expect(stateOf(now, orchestrator, hana)).toBe('quiet');
+  });
+
+  it('stay quiet while its task waits for another one', async () => {
+    const { ctx, hana, bruno, felix, top, member, run, org } = await company();
+    const schema = await member('Schema', felix.id);
+    await createTask(ctx, { agentId: hana.id }, { title: 'Checkout API', brief: '', body: '', departmentId: top.departmentId, parentId: top.id, assigneeAgentId: bruno.id, executor: true, after: [schema.id] });
+    await run(bruno.id, null);
+    expect(stateOf(await org(), hana, bruno)).toBe('quiet');
+  });
+
+  it("keep to the task of a turn that carries one: handed in, it does not light for the employee's other task", async () => {
+    const { ctx, hana, bruno, member, run, org } = await company();
+    const api = await member('Checkout API', bruno.id);
+    await member('Docs', bruno.id);
+    await run(bruno.id, api.id);
+    expect(stateOf(await org(), hana, bruno)).toBe('blue');
+    await submit(ctx, bruno.id, api.id, { summary: 'Done', evidence: 'npm test' });
+    expect(stateOf(await org(), hana, bruno)).toBe('yellow');
+  });
+
+  it('run blue for a reviewer at its gate', async () => {
+    const { ctx, hana, bruno, rita, member, run, end, org } = await company();
+    const page = await member('Checkout page', bruno.id, [rita.id]);
+    const built = await run(bruno.id, page.id);
+    await submit(ctx, bruno.id, page.id, { summary: 'Done', evidence: 'npm test' });
+    await end(built.id);
+    await run(rita.id, null);
+    expect(stateOf(await org(), hana, rita)).toBe('blue');
+  });
+});
+
 describe('the cycles of a line', () => {
   it('put out an old return once new work starts, even when that work ends without one, also after a restart', async () => {
     const { db, config, ctx, bruno, hana, member, run, end, org } = await company();

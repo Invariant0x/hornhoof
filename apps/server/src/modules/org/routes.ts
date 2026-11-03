@@ -139,6 +139,8 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
       if (gave.length) return pick('handed', gave[0]);
       return pick('idle', null);
     };
+    /* What each agent's card shows, once: the map's lines go by the same tasks. */
+    const cards = new Map(allAgents.map(a => [a.id, doing(a)]));
     /* A department's agents include those in its products. */
     const agentIdsOf = (deptId: string) => {
       const ids = new Set([deptId, ...depts.filter(p => p.parentId === deptId).map(p => p.id)]);
@@ -155,7 +157,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
         .map(a => {
           const sub = a.subscriptionId ? subs.get(a.subscriptionId) : undefined;
           const role = a.roleKey ? templates.roles.get(a.roleKey) : undefined;
-          const now = doing(a);
+          const now = cards.get(a.id)!;
           const run = running.find(j => j.agentId === a.id);
           return {
             id: a.id,
@@ -203,7 +205,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
     /* The ways messages went in the last minutes, and those held while their work goes on: between places on the map, and
        between agents on a department's card. */
     const ways = bus.channels(me.companyId, Date.now(), goesOn);
-    const map = await mapLines(db, me.companyId);
+    const map = await mapLines(db, me.companyId, cards);
     const reworks = await reworkTimes(db, me.companyId, map.serverNow, reach);
     const linesOf = reachedLines(map.lines, reach, allAgents, depts);
     const inside = (id: string) =>
