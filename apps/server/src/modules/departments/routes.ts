@@ -16,7 +16,7 @@ import { delegationOf, lockedFor, stillDecides, type Delegation } from '../conve
 import { enqueueTurn, orchestratorOf, orchestratorState } from '../conversation/queue.js';
 import { appendEvent } from '../events/store.js';
 import { checkStaff, departmentOf, HireLine, runsTier, servingSubscriptions, spotIn } from '../tools/staff.js';
-import { BuildItem, checkItems, isNew } from '../tools/structure.js';
+import { BuildItem, checkItems, inPlaces, isNew } from '../tools/structure.js';
 import { repoView } from './repository.js';
 import { deptName, TEMPLATE_TEXT } from './templates.js';
 
@@ -140,9 +140,10 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
             .where(and(or(inArray(agents.departmentId, inside), inArray(agents.productId, inside)), isNotNull(agents.removedAt)));
           await tx.update(proposals).set({ status: 'dismissed' }).where(and(inArray(proposals.departmentId, inside), eq(proposals.status, 'pending')));
           await tx.update(proposals).set({ departmentId: null }).where(inArray(proposals.departmentId, inside));
-          /* Finished tasks keep their log without the department. */
+          /* Finished tasks keep their log without the department. A product's tasks are in the department that holds
+             the product, so they are found through the department, not among all the tasks there are. */
+          await tx.update(tasks).set({ productId: null }).where(and(inPlaces(me.companyId, dept, inside), inArray(tasks.productId, inside)));
           await tx.update(tasks).set({ departmentId: null }).where(inArray(tasks.departmentId, inside));
-          await tx.update(tasks).set({ productId: null }).where(inArray(tasks.productId, inside));
           await tx.delete(teams).where(inArray(teams.departmentId, inside));
           await tx.delete(departments).where(eq(departments.parentId, dept.id));
           await tx.delete(departments).where(eq(departments.id, dept.id));

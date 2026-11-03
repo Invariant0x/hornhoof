@@ -1,7 +1,9 @@
 import { eq, isNull } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agentEvents, agents, companies, departments, jobs, proposals } from '../src/db/schema.js';
-import { as, connectNode, invitePerson, listen, openStream, SETUP, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
+import { agentEvents, agents, companies, departments, jobs, proposals, tasks } from '../src/db/schema.js';
+import { as, connectNode, invitePerson, listen, openStream, SETUP, setUpCompany, statements, testApp, until, type FakeNode } from './helpers.js';
+import { rowsRead, statementReads } from './rows-read.js';
+import { checkItems } from '../src/modules/tools/structure.js';
 
 const NODE_KEY = 'k'.repeat(40);
 
@@ -145,5 +147,91 @@ describe('POST /api/departments/build', () => {
     const res = await build(app, maria, { items: [{ template: 'operations' }] });
     expect(res.statusCode).toBe(403);
     expect(res.json().error.reason).toBe('company_scope_only');
+  });
+});
+
+describe('removing a department of a company with a long history', () => {
+  /* Development's 40 closed tasks, the one left open, and a few for the index to step over. */
+  const DEV_TASKS = 50;
+
+  /* Development with its products Mascot and Characters among four other departments, 2000 closed tasks of those, 40 of
+     Development, and 20 open tasks of the other departments. */
+  async function longHistory() {
+    const c = await withOrchestrator();
+    const { app, db, ceo, acme } = c;
+    await build(app, ceo, { items: ITEMS });
+    const all = await db.select().from(departments);
+    const byName = (template: string) => all.find(d => d.templateKey === template)!;
+    const dev = byName('development');
+    const mascot = all.find(d => d.name === 'Mascot')!;
+    const characters = all.find(d => d.name === 'Characters')!;
+    const others = ['operations', 'design', 'marketing', 'sales'].map(byName);
+    const closedAt = new Date(Date.now() - 86_400_000);
+    let number = 10_000;
+    for (let from = 0; from < 2000; from += 500) {
+      await db.insert(tasks).values(Array.from({ length: 500 }, (_, k) => ({ companyId: acme.id, number: number++, departmentId: others[(from + k) % 4]!.id, title: `Old ${from + k}`, status: 'done' as const, closedAt })));
+    }
+    const productOf = (i: number) => (i % 4 === 0 ? mascot.id : i % 4 === 1 ? characters.id : null);
+    const devTasks = await db
+      .insert(tasks)
+      .values(Array.from({ length: 40 }, (_, i) => ({ companyId: acme.id, number: number++, departmentId: dev.id, productId: productOf(i), title: `Dev ${i}`, status: i % 2 ? ('done' as const) : ('cancelled' as const), closedAt })))
+      .returning({ id: tasks.id });
+    /* A database holds one company, so the open work elsewhere is in its other departments. */
+    await db.insert(tasks).values(Array.from({ length: 20 }, (_, i) => ({ companyId: acme.id, number: number++, departmentId: others[i % 4]!.id, title: `Elsewhere ${i}`, status: 'open' as const })));
+    return { ...c, dev, mascot, characters, others, devTasks: devTasks.map(t => t.id) };
+  }
+
+  /* Where every task stands: its department and product. */
+  const places = async (db: Awaited<ReturnType<typeof longHistory>>['db']) =>
+    new Map((await db.select({ id: tasks.id, departmentId: tasks.departmentId, productId: tasks.productId }).from(tasks)).map(t => [t.id, `${t.departmentId}/${t.productId}`]));
+
+  it('keeps a product with an open task, then removes it and its whole department as before', async () => {
+    const h = await longHistory();
+    const { app, db, ceo, acme, dev, mascot, characters } = h;
+    const [open] = await db.insert(tasks).values({ companyId: acme.id, number: 99_999, departmentId: dev.id, productId: characters.id, title: 'Open on Characters', status: 'open' }).returning();
+    const kept = await build(app, ceo, { items: [{ department: characters.id, note: '', remove: true }] });
+    expect(kept.statusCode).toBe(400);
+    expect(kept.json().error.message).toContain('has open tasks');
+
+    /* Open tasks of other departments do not keep Mascot. */
+    const before = await places(db);
+    const mascotGone = await build(app, ceo, { items: [{ department: mascot.id, note: '', remove: true }] });
+    expect(mascotGone.statusCode).toBe(201);
+    const afterMascot = await places(db);
+    for (const [id, place] of before) expect(afterMascot.get(id)).toBe(place.replace(`/${mascot.id}`, '/null'));
+
+    await db.update(tasks).set({ status: 'done', closedAt: new Date() }).where(eq(tasks.id, open!.id));
+    const devGone = await build(app, ceo, { items: [{ department: dev.id, note: '', remove: true }] });
+    expect(devGone.statusCode).toBe(201);
+    const afterDev = await places(db);
+    for (const [id, place] of afterMascot) expect(afterDev.get(id)).toBe(place.startsWith(`${dev.id}/`) ? 'null/null' : place);
+    expect([...afterDev.values()].filter(p => p === 'null/null')).toHaveLength(41);
+  });
+  it('reads only the tasks of the department and its products', async () => {
+    const h = await longHistory();
+    const { app, db, ceo, acme, dev, mascot, characters } = h;
+    const [open] = await db.insert(tasks).values({ companyId: acme.id, number: 99_999, departmentId: dev.id, productId: characters.id, title: 'Open on Characters', status: 'open' }).returning();
+    const check = (department: string) => rowsRead(db, ['tasks'], () => checkItems(db, acme.id, [{ department, note: '', remove: true }]));
+    /* Whether work is open there: Development's 41 tasks at most, for a product found through the department holding it,
+       not the 2000 of the other departments. */
+    const busy = await check(characters.id);
+    expect(busy.result).toContain('has open tasks');
+    expect(busy.read.tasks).toBeLessThanOrEqual(DEV_TASKS);
+    await db.update(tasks).set({ status: 'done', closedAt: new Date() }).where(eq(tasks.id, open!.id));
+    for (const place of [mascot.id, dev.id]) {
+      const free = await check(place);
+      expect(free.result).toBeNull();
+      expect(free.read.tasks).toBeLessThanOrEqual(DEV_TASKS);
+    }
+    /* The removal's own changes to tasks, each read through the department's index. Deleting the department rows also
+       makes Postgres look for tasks still pointing at them, which reads every task until product_id has an index. */
+    const seen = statements();
+    for (const place of [mascot.id, dev.id]) {
+      const from = seen.length;
+      expect((await build(app, ceo, { items: [{ department: place, note: '', remove: true }] })).statusCode).toBe(201);
+      const changes = seen.slice(from).filter(q => q.sql.startsWith('update "tasks"'));
+      expect(changes).toHaveLength(2);
+      for (const change of changes) expect(await statementReads(db, change, 'tasks')).toBeLessThanOrEqual(DEV_TASKS);
+    }
   });
 });
