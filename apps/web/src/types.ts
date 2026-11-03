@@ -96,6 +96,7 @@ export type Employee = {
   id: string;
   name: string;
   roleId: string | null;
+  teamId?: string | null;
   title: Lang | null;
   kind: 'head' | 'worker';
   model: string;
@@ -193,6 +194,8 @@ export type AgentCardView = {
   role: { id: string; title: Lang; description: Lang; effort?: RoleEffort } | null;
   department: { id: string; name: string } | null;
   product: { id: string; name: string } | null;
+  team?: { id: string; name: string } | null;
+  teams?: { id: string; name: string }[];
   model: string;
   /* The level a person picked, or null for the Default. */
   effort: string | null;

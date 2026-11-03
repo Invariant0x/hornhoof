@@ -718,6 +718,58 @@ describe('Department view', () => {
       expect(calls.find(c => c.method === 'PUT')).toEqual({ method: 'PUT', path: '/api/departments/pd1/repository', body: { url: 'https://github.com/acme/mascot.git', branch: 'main', token: 'ghp_mascot5678' } }),
     );
   });
+
+  it('lists a sub-unit employee under the sub-unit name instead of its role group, and creates, renames, moves and deletes a sub-unit from the screen', async () => {
+    const user = userEvent.setup();
+    const [dev] = DEV_ORG.departments;
+    const [dana, bruno] = dev!.employees;
+    const simon = { ...bruno!, id: 'b2', name: 'Simon', teamId: 'u1' };
+    const urgent = { id: 'u1', name: 'Urgent fixes', about: '', stage: 0, gate: false };
+    let org: Org = { ...DEV_ORG, departments: [{ ...dev!, teams: [urgent], employees: [dana!, bruno!, simon] }] };
+    const calls = shell(
+      {
+        'GET /api/org': () => [200, org],
+        'POST /api/departments/d2/teams': [201, { team: { id: 'u2', name: 'Hotfixes', about: '', stage: 0, gate: false } }],
+        'PATCH /api/departments/d2/teams/u1': [200, { team: { ...urgent, name: 'Fast lane' } }],
+        'PATCH /api/agents/b1': [200, { ...CARD, team: { id: 'u1', name: 'Urgent fixes' } }],
+        'DELETE /api/departments/d2/teams/u1': [204],
+      },
+      org,
+    );
+    await flyIn(user);
+    const schema = screen.getByRole('region', { name: 'Department schema' });
+    expect(within(schema).getByText('Urgent fixes')).toBeInTheDocument();
+    await drawer(user, 'About the department');
+    const about = screen.getByRole('complementary', { name: 'About the department' });
+    const employees = within(about).getByRole('region', { name: 'Members' });
+    const groups = [...employees.querySelectorAll('.dv-emp-g')].map(g => [
+      g.querySelector('h4')!.textContent,
+      [...g.querySelectorAll('li b')].map(b => b.textContent),
+    ]);
+    expect(groups).toEqual([
+      ['Urgent fixes', ['Simon']],
+      ['Backend engineer', ['Bruno']],
+    ]);
+
+    const subUnits = within(about).getByRole('region', { name: 'Sub-units' });
+    await user.selectOptions(within(employees).getByLabelText('Sub-unit for Bruno'), 'u1');
+    await vi.waitFor(() => expect(calls.find(c => c.method === 'PATCH' && c.path === '/api/agents/b1')?.body).toEqual({ team: 'u1' }));
+
+    await user.click(within(subUnits).getByRole('button', { name: 'Rename' }));
+    const renameBox = within(subUnits).getByLabelText('Sub-unit name');
+    await user.clear(renameBox);
+    await user.type(renameBox, 'Fast lane');
+    await user.click(within(subUnits).getByRole('button', { name: 'Save' }));
+    await vi.waitFor(() => expect(calls.find(c => c.method === 'PATCH' && c.path === '/api/departments/d2/teams/u1')?.body).toEqual({ name: 'Fast lane' }));
+
+    await user.click(within(subUnits).getByRole('button', { name: 'New sub-unit' }));
+    await user.type(within(subUnits).getByLabelText('Sub-unit name'), 'Hotfixes');
+    await user.click(within(subUnits).getByRole('button', { name: 'Add sub-unit' }));
+    await vi.waitFor(() => expect(calls.find(c => c.method === 'POST' && c.path === '/api/departments/d2/teams')?.body).toEqual({ name: 'Hotfixes' }));
+
+    await user.click(within(subUnits).getByRole('button', { name: 'Delete sub-unit' }));
+    await vi.waitFor(() => expect(calls.some(c => c.method === 'DELETE' && c.path === '/api/departments/d2/teams/u1')).toBe(true));
+  });
 });
 
 const TREE_PATH = '/api/departments/d2/tree';

@@ -417,7 +417,11 @@ const PROVIDER_NAMES: Record<string, string> = { claude: 'Claude', codex: 'Codex
    task's gates. Only an employee's work moves: a head and the orchestrator keep theirs and wait for the reset. */
 async function standIn(ctx: Ctx, agentId: string, task: Task): Promise<{ id: string; name: string; provider: string } | null> {
   if (task.executorAgentId !== agentId || task.assigneeAgentId !== agentId || task.stage !== 0 || !['open', 'working'].includes(task.status)) return null;
-  const [me] = await ctx.db.select({ agent: agents, provider: subscriptions.provider }).from(agents).innerJoin(subscriptions, eq(subscriptions.id, agents.subscriptionId)).where(eq(agents.id, agentId));
+  const [me] = await ctx.db
+    .select({ agent: agents, provider: subscriptions.provider })
+    .from(agents)
+    .innerJoin(subscriptions, eq(subscriptions.id, agents.subscriptionId))
+    .where(and(eq(agents.id, agentId), isNull(agents.teamId)));
   if (!me || me.agent.kind !== 'worker' || !me.agent.roleKey || !me.agent.departmentId) return null;
   /* What its turns did so far is in its folder on its machine and maybe not pushed, so only work none of them did
      anything on goes to another. */
@@ -430,7 +434,18 @@ async function standIn(ctx: Ctx, agentId: string, task: Task): Promise<{ id: str
     .select({ id: agents.id, name: agents.name, productId: agents.productId, provider: subscriptions.provider })
     .from(agents)
     .innerJoin(subscriptions, and(eq(subscriptions.id, agents.subscriptionId), isNull(subscriptions.removedAt)))
-    .where(and(eq(agents.departmentId, me.agent.departmentId), eq(agents.roleKey, me.agent.roleKey), eq(agents.kind, 'worker'), isNull(agents.removedAt), isNull(agents.switchedOffAt), ne(agents.id, agentId), ne(subscriptions.provider, me.provider)))
+    .where(
+      and(
+        eq(agents.departmentId, me.agent.departmentId),
+        eq(agents.roleKey, me.agent.roleKey),
+        eq(agents.kind, 'worker'),
+        isNull(agents.removedAt),
+        isNull(agents.switchedOffAt),
+        isNull(agents.teamId),
+        ne(agents.id, agentId),
+        ne(subscriptions.provider, me.provider),
+      ),
+    )
     .orderBy(asc(agents.createdAt));
   /* Only one whose turn would go out now: signed in, on a machine that is on, and with plan left for tasks. Anyone else
      would only wait in the agent's place. */

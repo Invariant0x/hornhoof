@@ -6,7 +6,7 @@ import { and, desc, eq, isNull, like } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { orchestratorHeaders } from '../src/auth/internal.js';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agentChanges, agentEvents, agents, companies, departments, jobs, machines, people, proposals, publicLinks, requests, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
+import { agentChanges, agentEvents, agents, companies, departments, jobs, machines, people, proposals, publicLinks, requests, subscriptions, taskEvents, tasks, teams } from '../src/db/schema.js';
 import { afterJob } from '../src/modules/tasks/wake.js';
 import { identityOf } from '../src/modules/nodes/hub.js';
 import { ask, createTask } from '../src/modules/tasks/engine.js';
@@ -335,6 +335,48 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
     expect(res.isError).toBeFalsy();
     const [handed] = await db.select().from(taskEvents).where(eq(taskEvents.taskId, task.id)).orderBy(desc(taskEvents.id)).limit(1);
     expect(handed).toMatchObject({ text: 'Bruno was switched off.', agentId: orchestrator.id, personId: null });
+  });
+
+  it('creates, renames and deletes a sub-unit and moves an employee into it and back, from the screen and with its tools', async () => {
+    const { app, db, ceo, bruno, dev } = await company();
+    const client = await mcp(app, TOKEN);
+
+    const built = await call(client, 'build_structure', { items: [{ department: dev.id, note: '', teams: ['Urgent fixes'] }] });
+    expect(built.isError).toBeFalsy();
+    const [urgent] = await db.select().from(teams).where(eq(teams.departmentId, dev.id));
+    expect(urgent).toMatchObject({ name: 'Urgent fixes', stage: 0, gate: false });
+
+    const movedIn = await call(client, 'change_employee', { employee: bruno.id, team: urgent!.id });
+    expect(movedIn.isError).toBeFalsy();
+    expect((await db.select().from(agents).where(eq(agents.id, bruno.id)))[0]!.teamId).toBe(urgent!.id);
+
+    const renamed = await call(client, 'build_structure', { items: [{ department: dev.id, note: '', teams: [{ id: urgent!.id, name: 'Hotfixes' }] }] });
+    expect(renamed.isError).toBeFalsy();
+    expect((await db.select().from(teams).where(eq(teams.id, urgent!.id)))[0]!.name).toBe('Hotfixes');
+
+    const movedOut = await call(client, 'change_employee', { employee: bruno.id, team: null });
+    expect(movedOut.isError).toBeFalsy();
+    expect((await db.select().from(agents).where(eq(agents.id, bruno.id)))[0]!.teamId).toBeNull();
+
+    const screenCreated = await app.inject({ method: 'POST', url: `/api/departments/${dev.id}/teams`, payload: { name: 'Labs' }, ...as(ceo) });
+    expect(screenCreated.statusCode).toBe(201);
+    const labsId = screenCreated.json().team.id as string;
+
+    const screenMoved = await app.inject({ method: 'PATCH', url: `/api/agents/${bruno.id}`, payload: { team: labsId }, ...as(ceo) });
+    expect(screenMoved.statusCode).toBe(200);
+    expect(screenMoved.json().team).toEqual({ id: labsId, name: 'Labs' });
+
+    const screenRenamed = await app.inject({ method: 'PATCH', url: `/api/departments/${dev.id}/teams/${labsId}`, payload: { name: 'R&D' }, ...as(ceo) });
+    expect(screenRenamed.statusCode).toBe(200);
+    expect(screenRenamed.json().team.name).toBe('R&D');
+
+    const screenDeleted = await app.inject({ method: 'DELETE', url: `/api/departments/${dev.id}/teams/${labsId}`, ...as(ceo) });
+    expect(screenDeleted.statusCode).toBe(204);
+    expect((await db.select().from(agents).where(eq(agents.id, bruno.id)))[0]!.teamId).toBeNull();
+
+    const toolDeleted = await call(client, 'build_structure', { items: [{ department: dev.id, note: '', teams: [{ id: urgent!.id, remove: true }] }] });
+    expect(toolDeleted.isError).toBeFalsy();
+    expect(await db.select().from(teams).where(eq(teams.departmentId, dev.id))).toEqual([]);
   });
 });
 

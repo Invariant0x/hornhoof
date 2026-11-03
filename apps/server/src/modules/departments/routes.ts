@@ -6,8 +6,9 @@ import type { Ctx } from '../../app.js';
 import { accessOf } from '../../auth/access.js';
 import type { DecisionSubject } from '../../auth/decision-owner.js';
 import { requireDecision } from '../../auth/decisions.js';
-import { changedBy, personOf, requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
-import { agentChanges, agents, companies, departments, proposals, tasks, teams } from '../../db/schema.js';
+import { actorOf, changedBy, personOf, requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
+import type { Db } from '../../db/client.js';
+import { agentChanges, agents, companies, departments, personAccess, proposals, subscriptions, tasks, teams } from '../../db/schema.js';
 import { encryptSecret } from '../../crypto/secrets.js';
 import { Repo } from '@hornhoof/protocol';
 import { ApiError } from '../../errors.js';
@@ -15,12 +16,16 @@ import { placeOf, renderInstructions } from '../agents/instructions.js';
 import { delegationOf, lockedFor, stillDecides, type Delegation } from '../conversation/decision-context.js';
 import { enqueueTurn, orchestratorOf, orchestratorState } from '../conversation/queue.js';
 import { appendEvent } from '../events/store.js';
+import type { Tx } from '../tasks/engine.js';
+import { backOn } from '../tasks/wake.js';
 import { checkStaff, departmentOf, HireLine, runsTier, servingSubscriptions, spotIn } from '../tools/staff.js';
-import { BuildItem, checkItems, inPlaces, isNew } from '../tools/structure.js';
+import { BuildItem, checkItems, inPlaces, isNew, type TeamChange } from '../tools/structure.js';
 import { repoView } from './repository.js';
 import { deptName, TEMPLATE_TEXT } from './templates.js';
 
 const IdParams = z.object({ id: z.uuid() });
+const TeamParams = z.object({ id: z.uuid(), teamId: z.uuid() });
+const TeamBody = z.object({ name: z.string().trim().min(1).max(60) }).strict();
 export const StaffBody = z.object({ proposalId: z.uuid().optional(), people: z.array(HireLine).min(1).max(30) });
 
 export const BuildBody = z.object({ proposalId: z.uuid().optional(), brief: z.string().trim().max(1500).optional(), items: z.array(BuildItem).min(1).max(20) });
@@ -68,6 +73,84 @@ function staffedNote(department: string, hired: Hired[]): string {
 
 const CARD: DecisionSubject = { source: 'proposal' };
 
+/* Removes a sub-unit and moves its live employees back into the department's pipeline. */
+async function clearTeam(tx: Db | Tx, me: Person, departmentId: string, teamId: string): Promise<string[]> {
+  const members = await tx
+    .select({ id: agents.id })
+    .from(agents)
+    .where(and(eq(agents.departmentId, departmentId), eq(agents.teamId, teamId), isNull(agents.removedAt)));
+  await tx.update(agents).set({ teamId: null }).where(and(eq(agents.departmentId, departmentId), eq(agents.teamId, teamId)));
+  if (members.length) {
+    await tx.insert(agentChanges).values(members.map(m => ({ companyId: me.companyId, agentId: m.id, ...changedBy(me), field: 'team' as const, before: teamId, after: null })));
+  }
+  await tx.delete(personAccess).where(eq(personAccess.teamId, teamId));
+  await tx.update(subscriptions).set({ targetKind: 'department', targetId: departmentId }).where(and(eq(subscriptions.targetKind, 'team'), eq(subscriptions.targetId, teamId)));
+  await tx.delete(teams).where(and(eq(teams.id, teamId), eq(teams.departmentId, departmentId)));
+  return members.map(m => m.id);
+}
+
+/* Creates, renames and removes sub-units of a department in one structure change. */
+async function applyTeams(tx: Db | Tx, me: Person, departmentId: string, list: TeamChange[] = []): Promise<string[]> {
+  const freed: string[] = [];
+  for (const t of list) {
+    if (typeof t === 'string') await tx.insert(teams).values({ companyId: me.companyId, departmentId, name: t });
+    else if (t.remove) freed.push(...(await clearTeam(tx, me, departmentId, t.id)));
+    else if (t.name) await tx.update(teams).set({ name: t.name }).where(and(eq(teams.id, t.id), eq(teams.departmentId, departmentId)));
+  }
+  return freed;
+}
+
+async function wakeFreed(ctx: Ctx, me: Person, freed: string[]): Promise<void> {
+  for (const id of freed) await backOn(ctx, actorOf(me), id);
+}
+
+/* Sub-unit routes on a department: create, rename and delete a sub-unit outside the pipeline. */
+function teamRoutes(app: FastifyInstance, ctx: Ctx): void {
+  const { db } = ctx;
+  const view = (t: typeof teams.$inferSelect) => ({ id: t.id, name: t.name, about: t.about, stage: t.stage, gate: t.gate });
+
+  app.post('/api/departments/:id/teams', async (req, reply) => {
+    const me = await requirePerson(req, db);
+    requireCompanyScope(me);
+    const dept = await departmentOf(db, me.companyId, IdParams.parse(req.params).id);
+    if (!dept) throw new ApiError(404, 'not_found', 'This department does not exist.', 'department_unknown');
+    const body = TeamBody.parse(req.body);
+    const [team] = await db.insert(teams).values({ companyId: me.companyId, departmentId: dept.id, name: body.name }).returning();
+    ctx.bus.publish(me.companyId, { type: 'org' });
+    reply.code(201);
+    return { team: view(team!) };
+  });
+
+  app.patch('/api/departments/:id/teams/:teamId', async req => {
+    const me = await requirePerson(req, db);
+    requireCompanyScope(me);
+    const { id, teamId } = TeamParams.parse(req.params);
+    const body = TeamBody.parse(req.body);
+    const [team] = await db
+      .update(teams)
+      .set({ name: body.name })
+      .where(and(eq(teams.id, teamId), eq(teams.departmentId, id), eq(teams.companyId, me.companyId)))
+      .returning();
+    if (!team) throw new ApiError(404, 'not_found', 'This sub-unit does not exist.', 'unknown_place');
+    ctx.bus.publish(me.companyId, { type: 'org' });
+    return { team: view(team) };
+  });
+
+  app.delete('/api/departments/:id/teams/:teamId', async (req, reply) => {
+    const me = await requirePerson(req, db);
+    requireCompanyScope(me);
+    const { id, teamId } = TeamParams.parse(req.params);
+    const freed = await db.transaction(async tx => {
+      const [team] = await tx.select({ id: teams.id }).from(teams).where(and(eq(teams.id, teamId), eq(teams.departmentId, id), eq(teams.companyId, me.companyId)));
+      if (!team) throw new ApiError(404, 'not_found', 'This sub-unit does not exist.', 'unknown_place');
+      return clearTeam(tx, me, id, teamId);
+    });
+    await wakeFreed(ctx, me, freed);
+    ctx.bus.publish(me.companyId, { type: 'org' });
+    return reply.code(204).send();
+  });
+}
+
 /* Departments come and go here: the CEO's click on a structure card, or the orchestrator's build_structure. */
 export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db } = ctx;
@@ -112,6 +195,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
       const created: Created[] = [];
       const removed: Removed[] = [];
       const fresh: string[] = [];
+      const freed: string[] = [];
       const addProducts = async (parent: { id: string; roleCode: string }, names: string[]) => {
         for (const name of names) {
           await tx.insert(departments).values({ companyId: me.companyId, name, parentId: parent.id, roleCode: parent.roleCode, position: position++ });
@@ -125,6 +209,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
             .values({ companyId: me.companyId, templateKey: item.template, name: item.name ?? null, roleCode: roleOf(item.template), about: item.note, position: position++ })
             .returning();
           await addProducts(dept!, item.products ?? []);
+          await applyTeams(tx, me, dept!.id, item.teams);
           created.push({ id: dept!.id, template: item.template, name: dept!.name, products: item.products ?? [] });
           fresh.push(dept!.id);
           continue;
@@ -154,10 +239,12 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
           await addProducts(dept, item.products);
           created.push({ id: dept.id, template: dept.templateKey, name: dept.name, products: item.products });
         }
+        freed.push(...(await applyTeams(tx, me, dept.id, item.teams)));
       }
       if (brief) await tx.update(companies).set({ brief }).where(eq(companies.id, me.companyId));
-      return { created, removed, fresh, agentId };
+      return { created, removed, fresh, freed, agentId };
     }));
+    await wakeFreed(ctx, me, result.freed);
 
     const orchestrator = await orchestratorOf(ctx, me.companyId);
     const agentId = result.agentId ?? orchestrator?.id;
@@ -295,7 +382,8 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
             name: line.name,
             model: line.model,
             departmentId: dept.id,
-            productId: line.product ?? null,
+            productId: line.product,
+            teamId: line.team,
             subscriptionId: line.subscription,
             roleKey: role.id,
             skills: line.skills,
@@ -336,4 +424,6 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     reply.code(201);
     return { hired: result.hired.map(h => h.id) };
   });
+
+  teamRoutes(app, ctx);
 }

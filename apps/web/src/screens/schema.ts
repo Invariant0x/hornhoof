@@ -1,4 +1,4 @@
-import type { Department, DeptRole, Employee } from '../types';
+import type { Department, DeptRole, Employee, Team } from '../types';
 import type { Point } from '../ui/wires';
 
 /* A department's schema in world pixels, laid out like the prototype. From the top: the head with the people who reach the
@@ -9,8 +9,8 @@ export const BUS = HH + 44, RY = BUS + 44, CY = BUS + 84, FT = CY + 50, FHEAD = 
 const PEOPLE_Y = 12, PEOPLE_STEP = 66;
 
 export type Placed = { e: Employee; x: number; y: number; cy: number };
-/* key: the role's id, or '' for the frame of employees whose role the department does not know. */
-export type Frame = { key: string; role: DeptRole | null; x: number; h: number; stage: number; members: Placed[] };
+/* key: the role's id, 'team:<id>' for a sub-unit frame, or '' for the frame of employees whose role the department does not know. */
+export type Frame = { key: string; role: DeptRole | null; team?: Team | null; x: number; h: number; stage: number; members: Placed[] };
 /* tr: the bus from the head; tick: from a spine to a chip; pl: the pipeline and the report; rl: the way back; gate: between stages. */
 export type Line = { cls: 'tr' | 'tick' | 'pl' | 'rl' | 'gate'; pts: Point[]; arrow?: boolean };
 
@@ -38,9 +38,38 @@ const outX = (f: Frame) => f.x + FW - 30;
 const inX = (f: Frame) => f.x + 30;
 const midX = (f: Frame) => f.x + FW / 2;
 
+const placeMembers = (held: Employee[], x: number): Placed[] =>
+  held.map((e, i) => ({ e, x: x + 20, y: FT + FHEAD + i * PY, cy: FT + FHEAD + i * PY + CH / 2 }));
+
+/* Each sub-unit gets its own frame at the left, outside the pipeline stages. */
+function splitMembers(d: Department) {
+  const all = d.employees.filter(e => e.kind !== 'head');
+  const teamIds = new Set(d.teams.map(t => t.id));
+  const teamFrames: Frame[] = d.teams.map((team, i) => {
+    const held = all.filter(e => e.teamId === team.id);
+    const x = i * (FW + GS);
+    return { key: `team:${team.id}`, role: null, team, x, h: FHEAD + Math.max(1, held.length) * PY + 8, stage: -1, members: placeMembers(held, x) };
+  });
+  const last = teamFrames[teamFrames.length - 1];
+  const teamEnd = last ? last.x + FW : 0;
+  return { teamFrames, members: all.filter(e => !e.teamId || !teamIds.has(e.teamId)), startX: last ? teamEnd + G : 0, teamEnd };
+}
+
+/* Direct lines from the head's left edge into each sub-unit frame, with no stage bus or pipeline connection. */
+function addTeamLines(lines: Line[], vias: Point[], teamFrames: Frame[], hx: number) {
+  for (const [i, tf] of teamFrames.entries()) {
+    const y = HH / 2 - i * 20;
+    const end = tf.members.length ? tf.members[tf.members.length - 1]!.cy : FT + 40;
+    lines.push({ cls: 'tr', pts: [[hx - HW / 2, y], [tf.x + 10, y], [tf.x + 10, FT]], arrow: true });
+    lines.push({ cls: 'tr', pts: [[tf.x + 10, FT], [tf.x + 10, end]] });
+    for (const m of tf.members) lines.push({ cls: 'tick', pts: [[tf.x + 10, m.cy], [m.x, m.cy]] });
+    vias.push([tf.x + 10, FT]);
+  }
+}
+
 export function schemaLayout(d: Department, people: number): Schema {
   const head = d.employees.find(e => e.kind === 'head') ?? null;
-  const members = d.employees.filter(e => e.kind !== 'head');
+  const { teamFrames, members, startX, teamEnd } = splitMembers(d);
   const known = new Map(d.roles.filter(r => members.some(e => e.roleId === r.id)).map(r => [r.id, r]));
   const loose = members.filter(e => !e.roleId || !known.has(e.roleId));
 
@@ -54,7 +83,7 @@ export function schemaLayout(d: Department, people: number): Schema {
   const stages: Frame[][] = [];
   const starts: number[] = [];
   const ends: number[] = [];
-  let x = 0;
+  let x = startX;
   for (const [k, group] of groups.entries()) {
     starts.push(x);
     const frames = group.map(g => {
@@ -65,7 +94,7 @@ export function schemaLayout(d: Department, people: number): Schema {
         x,
         h: FHEAD + Math.max(1, held.length) * PY + 8,
         stage: k,
-        members: held.map((e, i) => ({ e, x: x + 20, y: FT + FHEAD + i * PY, cy: FT + FHEAD + i * PY + CH / 2 })),
+        members: placeMembers(held, x),
       };
       x += FW + GS;
       return frame;
@@ -74,14 +103,16 @@ export function schemaLayout(d: Department, people: number): Schema {
     x = x - GS + G;
     stages.push(frames);
   }
-  const frames = stages.flat();
-  const w = ends.length ? ends[ends.length - 1]! : 0;
+  const stageFrames = stages.flat();
+  const frames = [...teamFrames, ...stageFrames];
+  const w = ends.length ? ends[ends.length - 1]! : teamEnd;
   const h = FT + Math.max(0, ...frames.map(f => f.h));
-  const hx = Math.max(HW / 2, w / 2);
+  const hx = Math.max(teamEnd + HW / 2, w / 2);
   const firstGated = gateNumbers.length && plain.length + loose.length ? 1 : 0;
 
   const lines: Line[] = [];
   const vias: Point[] = [];
+  addTeamLines(lines, vias, teamFrames, hx);
   /* Between stages, a dotted divider; on the pipeline, a diamond where a stage is a gate. */
   const gates: Schema['gates'] = [];
   for (let k = 1; k < stages.length; k++) {
@@ -91,11 +122,11 @@ export function schemaLayout(d: Department, people: number): Schema {
   }
   if (gates.length) gates[gates.length - 1]!.last = true;
 
-  /* The head leads every frame: down to the bus, along it, and down each frame's spine to its chips. */
-  if (frames.length) {
+  /* The head leads every stage frame: down to the bus, along it, and down each frame's spine to its chips. */
+  if (stageFrames.length) {
     lines.push({ cls: 'tr', pts: [[hx, HH], [hx, BUS]] });
-    lines.push({ cls: 'tr', pts: [[Math.min(hx, frames[0]!.x + 10), BUS], [Math.max(hx, frames[frames.length - 1]!.x + 10), BUS]] });
-    for (const f of frames) {
+    lines.push({ cls: 'tr', pts: [[Math.min(hx, stageFrames[0]!.x + 10), BUS], [Math.max(hx, stageFrames[stageFrames.length - 1]!.x + 10), BUS]] });
+    for (const f of stageFrames) {
       const end = f.members.length ? f.members[f.members.length - 1]!.cy : FT + 40;
       lines.push({ cls: 'tr', pts: [[f.x + 10, BUS], [f.x + 10, end]] });
       for (const m of f.members) lines.push({ cls: 'tick', pts: [[f.x + 10, m.cy], [m.x, m.cy]] });
@@ -120,7 +151,7 @@ export function schemaLayout(d: Department, people: number): Schema {
 
   /* The way back: any gate can send work back to the first stage. */
   let back: Point | null = null;
-  const gated = frames.filter(f => f.stage >= firstGated && groups[f.stage]![0]!.gate !== null);
+  const gated = stageFrames.filter(f => f.stage >= firstGated && groups[f.stage]![0]!.gate !== null);
   const first = firstGated ? stages[0]! : [];
   if (gated.length && first.length) {
     for (const g of gated) lines.push({ cls: 'rl', pts: [[midX(g), FT], [midX(g), RY]] });
@@ -130,9 +161,9 @@ export function schemaLayout(d: Department, people: number): Schema {
     back = [lx + Math.min(150, (gated[0]!.x - lx) / 2 + 40), RY];
   }
 
-  /* The report: from the last frame up and over into the head, or straight up when the head sits above it. */
+  /* The report: from the last stage frame up and over into the head, or straight up when the head sits above it. */
   let report: Schema['report'] = null;
-  const last = frames[frames.length - 1];
+  const last = stageFrames[stageFrames.length - 1];
   if (head && last) {
     const ox = outX(last);
     const pts: Point[] = ox <= hx + HW / 2 ? [[ox, FT], [ox, HH]] : [[ox, FT], [ox, REP], [hx + HW / 2, REP]];
@@ -144,9 +175,37 @@ export function schemaLayout(d: Department, people: number): Schema {
   return { head, hx, w, h, right, frames, stages, lines, vias, gates, back, report, people: peopleAt };
 }
 
+type Spot = { f: Frame; m: Placed };
+
+function memberDown(s: Schema, at: Spot | null): Point[] | null {
+  if (!at) return null;
+  const sx = at.f.x + 10;
+  if (at.f.stage < 0) {
+    const y = HH / 2 - s.frames.filter(f => f.stage < 0).indexOf(at.f) * 20;
+    return [[s.hx - HW / 2 + 14, y], [sx, y], [sx, at.m.cy], [at.m.x + 14, at.m.cy]];
+  }
+  return [[s.hx, HH - 30], [s.hx, BUS], [sx, BUS], [sx, at.m.cy], [at.m.x + 14, at.m.cy]];
+}
+
+function memberOnward(s: Schema, at: Spot | null): Point[] | null {
+  if (!at) return null;
+  if (at.f.stage < 0) return [...memberDown(s, at)!].reverse();
+  const next = s.stages[at.f.stage + 1];
+  if (next) return [[outX(at.f), FT], [outX(at.f), CY], [inX(next[0]!), CY], [inX(next[0]!), FT]];
+  return s.report?.pts ?? null;
+}
+
+function wayToHead(s: Schema, a: Spot): Point[] | null {
+  if (a.f.stage >= 0 && !s.stages[a.f.stage + 1]) return s.report?.pts ?? null;
+  return [...memberDown(s, a)!].reverse();
+}
+
+const canStepBetween = (a: Spot, b: Spot | null): b is Spot =>
+  !!b && a.f.stage >= 0 && b.f.stage >= 0 && b.f.stage !== a.f.stage;
+
 /* The paths a pulse runs along when an employee's work moves. */
 export function stepPaths(s: Schema) {
-  const spot = (id: string) => {
+  const spot = (id: string): Spot | null => {
     for (const f of s.frames) {
       const m = f.members.find(x => x.e.id === id);
       if (m) return { f, m };
@@ -154,17 +213,10 @@ export function stepPaths(s: Schema) {
     return null;
   };
   function toMember(id: string): Point[] | null {
-    const at = spot(id);
-    if (!at) return null;
-    const sx = at.f.x + 10;
-    return [[s.hx, HH - 30], [s.hx, BUS], [sx, BUS], [sx, at.m.cy], [at.m.x + 14, at.m.cy]];
+    return memberDown(s, spot(id));
   }
   function onward(id: string): Point[] | null {
-    const at = spot(id);
-    if (!at) return null;
-    const next = s.stages[at.f.stage + 1];
-    if (next) return [[outX(at.f), FT], [outX(at.f), CY], [inX(next[0]!), CY], [inX(next[0]!), FT]];
-    return s.report?.pts ?? null;
+    return memberOnward(s, spot(id));
   }
   function back(from: string, to: string): Point[] | null {
     const a = spot(from), b = spot(to);
@@ -185,13 +237,9 @@ export function stepPaths(s: Schema) {
       if (from === head) return toMember(to);
       const a = spot(from);
       if (!a) return null;
-      if (to === head) {
-        if (!s.stages[a.f.stage + 1]) return s.report?.pts ?? null;
-        const down = toMember(from);
-        return down && [...down].reverse();
-      }
+      if (to === head) return wayToHead(s, a);
       const b = spot(to);
-      if (!b || b.f.stage === a.f.stage) return null;
+      if (!canStepBetween(a, b)) return null;
       return b.f.stage > a.f.stage ? onward(from) : back(from, to);
     },
   };
