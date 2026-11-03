@@ -658,3 +658,57 @@ describe('migration 0045', () => {
     expect((await db.execute(sql`select count(*)::int as n from tasks where product_id = ${PRODUCT}`)).rows).toEqual([{ n: 200 }]);
   });
 });
+
+describe('migration 0051', () => {
+  const C = '00000000-0000-4000-8000-000000000001';
+  const P = '00000000-0000-4000-8000-000000000002';
+  const M = '00000000-0000-4000-8000-000000000003';
+  const TAIL = '1f6db355-484e-4c57-b516-ca0c2fa8be3e';
+  const LIVE = '606af686-0000-4000-8000-000000000001';
+  const CLAUDE_WITH_AGENT = '00000000-0000-4000-8000-000000000011';
+  const CLAUDE_READY = '00000000-0000-4000-8000-000000000012';
+  const KIMI_WAITING = '00000000-0000-4000-8000-000000000013';
+
+  it('passes on a fresh install and removes only unfinished waiting_machine tails replaced by a newer ready subscription', async () => {
+    const freshClient = new PGlite();
+    onTestFinished(() => freshClient.close());
+    const freshDb = drizzle(freshClient);
+    await migrate(freshDb, { migrationsFolder: MIGRATIONS });
+
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0047_requested_prompt') });
+
+    await db.execute(sql`insert into companies (id, name) values (${C}, 'Acme')`);
+    await db.execute(sql`insert into people (id, company_id, name, email, status, scope_kind) values (${P}, ${C}, 'Ivan', 'ivan@acme.com', 'active', 'company')`);
+    await db.execute(sql`insert into machines (id, company_id, person_id, machine_key, hostname) values (${M}, ${C}, ${P}, 'mac-0001-abcd', 'ivan-mac')`);
+
+    await db.execute(sql`insert into subscriptions (id, company_id, provider, kind, label, status, owner_person_id, removed_at, created_at) values
+      (${TAIL}, ${C}, 'codex', 'personal', 'Codex', 'waiting_machine', ${P}, '2026-11-02T14:58:09Z', '2026-11-02T13:59:58Z'),
+      (${LIVE}, ${C}, 'codex', 'personal', 'Codex', 'ready', ${P}, null, '2026-11-02T14:58:12Z'),
+      (${CLAUDE_WITH_AGENT}, ${C}, 'claude', 'personal', 'Claude', 'waiting_machine', ${P}, null, '2026-11-02T13:00:00Z'),
+      (${CLAUDE_READY}, ${C}, 'claude', 'personal', 'Claude', 'ready', ${P}, null, '2026-11-02T14:00:00Z'),
+      (${KIMI_WAITING}, ${C}, 'kimi', 'personal', 'Kimi', 'waiting_machine', ${P}, null, '2026-11-02T15:00:00Z')`);
+
+    await db.execute(sql`insert into nodes (id, company_id, machine_id, subscription_id, key_hash, status, last_seen_at) values
+      (${TAIL}, ${C}, ${M}, ${TAIL}, null, 'ready', '2026-11-02T14:58:09Z'),
+      (${LIVE}, ${C}, ${M}, ${LIVE}, 'live-codex-hash', 'ready', '2026-11-03T16:00:00Z'),
+      (${CLAUDE_READY}, ${C}, ${M}, ${CLAUDE_READY}, 'claude-ready-hash', 'ready', '2026-11-03T16:00:00Z')`);
+
+    for (let i = 1; i <= 8; i++) {
+      await db.execute(sql`insert into agents (company_id, kind, name, model, subscription_id, node_id) values (${C}, 'worker', ${`Agent ${i}`}, '', ${LIVE}, ${LIVE})`);
+    }
+    await db.execute(sql`insert into agents (company_id, kind, name, model, subscription_id) values (${C}, 'worker', 'Claude Agent', '', ${CLAUDE_WITH_AGENT})`);
+
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+
+    const codexSubs = await db.execute<{ id: string }>(sql`select id from subscriptions where provider = 'codex'`);
+    expect(codexSubs.rows).toEqual([{ id: LIVE }]);
+    const codexNodes = await db.execute<{ id: string }>(sql`select id from nodes where subscription_id in (${TAIL}, ${LIVE})`);
+    expect(codexNodes.rows).toEqual([{ id: LIVE }]);
+
+    const keptSubs = await db.execute<{ id: string }>(sql`select id from subscriptions order by created_at`);
+    expect(keptSubs.rows).toEqual([{ id: CLAUDE_WITH_AGENT }, { id: CLAUDE_READY }, { id: LIVE }, { id: KIMI_WAITING }]);
+  });
+});
