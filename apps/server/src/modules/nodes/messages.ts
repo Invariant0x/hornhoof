@@ -1,8 +1,8 @@
 import { lastBytes, type NodeMessage } from '@hornhoof/protocol';
-import { and, eq, inArray, isNull, notInArray, or, type SQL } from 'drizzle-orm';
+import { and, eq, inArray, isNull, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { agents, jobs, nodes, planCredentials, subscriptions } from '../../db/schema.js';
+import { agents, jobs, machines, nodes, planCredentials, subscriptions, tasks, type Interruption } from '../../db/schema.js';
 import { said } from '../conversation/live.js';
 import { nodeOfAgent, pumpWaiting, refusedLimits, startProgram } from '../conversation/queue.js';
 import { workStarts } from '../org/map-state.js';
@@ -13,6 +13,7 @@ import { partDone, partStarted, pumpTests, testsHello } from '../testruns/runs.j
 import { sameNode, type NodeIdentity } from './hub.js';
 import { deliver, pushCredentials, signedIn, storeEnvelopes } from '../subscriptions/credentials.js';
 import { liveNode, settlePlans } from './nodes.js';
+import { BUILTIN_NAME, interruptionOf } from './restarts.js';
 
 const OPEN_JOBS = ['queued', 'running'] as const;
 
@@ -27,13 +28,15 @@ function jobsOf(id: NodeIdentity, ctx: Ctx): SQL {
 const ON_NODE = or(eq(jobs.status, 'running'), and(eq(jobs.status, 'queued'), eq(jobs.kind, 'test')));
 
 /* Jobs of these nodes or subscriptions that a node had become failed with the reason, except the ones the node still runs.
-   A failed turn goes into its conversation and the agent's next turn goes out. */
-export async function failOpenJobs(ctx: Ctx, scope: SQL, error: string, stillRunning: string[] = []): Promise<string[]> {
+   A failed turn goes into its conversation and the agent's next turn goes out. Turns a node restart cut off keep why,
+   with the number of the task each was on. */
+export async function failOpenJobs(ctx: Ctx, scope: SQL, error: string, stillRunning: string[] = [], cut?: Omit<Interruption, 'task'>): Promise<string[]> {
   const conditions = [scope, ON_NODE];
   if (stillRunning.length) conditions.push(notInArray(jobs.id, stillRunning));
+  const taskNumber = sql`(select ${tasks.number} from ${tasks} where ${tasks.id} = ${jobs.taskId})`;
   const failed = await ctx.db
     .update(jobs)
-    .set({ status: 'failed', error, finishedAt: new Date() })
+    .set({ status: 'failed', error, finishedAt: new Date(), ...(cut ? { interruption: sql`${JSON.stringify(cut)}::jsonb || jsonb_build_object('task', ${taskNumber})` } : {}) })
     .where(and(...conditions))
     .returning({ id: jobs.id, companyId: jobs.companyId });
   for (const companyId of new Set(failed.map(j => j.companyId))) await publishWorking(ctx, companyId);
@@ -67,8 +70,14 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
   const now = new Date();
   switch (msg.type) {
     case 'hello': {
+      let cut = id.kind === 'builtin' ? interruptionOf(ctx, { id: null, name: BUILTIN_NAME, said: null }, msg, now) : undefined;
       if (id.kind === 'node') {
-        const [row] = await db.select({ node: nodes, removedAt: subscriptions.removedAt }).from(nodes).leftJoin(subscriptions, eq(subscriptions.id, nodes.subscriptionId)).where(eq(nodes.id, id.nodeId));
+        const [row] = await db
+          .select({ node: nodes, removedAt: subscriptions.removedAt, host: machines.hostname })
+          .from(nodes)
+          .leftJoin(subscriptions, eq(subscriptions.id, nodes.subscriptionId))
+          .leftJoin(machines, eq(machines.id, nodes.machineId))
+          .where(eq(nodes.id, id.nodeId));
         if (!row) return;
         if (row.removedAt) {
           ctx.hub.send(id, { type: 'remove' });
@@ -78,6 +87,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
         if (!row.node.keyHash) return;
         /* A node set up again has a new key: what was sealed to its old one is of no use, and gets sealed to the new one. */
         if (msg.publicKey && row.node.publicKey && msg.publicKey !== row.node.publicKey) await db.delete(planCredentials).where(eq(planCredentials.nodeId, id.nodeId));
+        cut = interruptionOf(ctx, { id: id.nodeId, name: row.host || 'a machine with no name', said: { version: row.node.version, boot: row.node.boot } }, msg, now);
         await db
           .update(nodes)
           .set({
@@ -86,13 +96,14 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
             status: msg.loggedIn ? 'ready' : 'needs_login',
             ...(msg.publicKey ? { publicKey: msg.publicKey } : {}),
             ...(msg.account !== undefined ? { account: msg.account } : {}),
+            ...(msg.boot ? { boot: msg.boot } : {}),
           })
           .where(and(eq(nodes.id, id.nodeId), liveNode));
         const plan = row.node.subscriptionId;
         if (plan && msg.models) await db.update(subscriptions).set({ models: msg.models }).where(eq(subscriptions.id, plan));
         await settlePlans(db, [plan]);
       }
-      await failOpenJobs(ctx, jobsOf(id, ctx), 'machine_restarted', msg.running);
+      await failOpenJobs(ctx, jobsOf(id, ctx), 'machine_restarted', msg.running, cut);
       ctx.hub.greet(id, msg.terminals === true, msg.skillFiles === true, msg.work === true, msg.noRuns ?? null);
       if (msg.load) ctx.hub.report(id, msg.load);
       await testsHello(ctx, id, msg.tests);

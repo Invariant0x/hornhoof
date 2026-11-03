@@ -9,6 +9,7 @@ import { appendEvent, publishWorking } from '../events/store.js';
 import { identityOf, type NodeIdentity } from '../nodes/hub.js';
 import { answerDirectly, brokeDown, CLOSED, GATE_ROUNDS, handOver, lastMove, leaveWork, NOT_A_MOVE, openAfter, published, regateWaiting, reviewWake, silentTurn, taskSpot, wentOn, type Actor, type Task, type Wake, type WakeWhy } from './engine.js';
 import { wakeQueued, wakesLeft } from './outbox.js';
+import { afterRestart } from './restarts.js';
 import { settle, tell } from './turns.js';
 
 export { SILENT_TURNS, startWork } from './engine.js';
@@ -516,8 +517,8 @@ async function carriedTasks(ctx: Ctx, job: { agentId: string; taskId: string; st
   return rows.flatMap(r => (r.taskId ? [r.taskId] : []));
 }
 
-/* A finished turn: a failure or a stop goes into the conversation, a turn that left a task it carried where it was is
-   caught, then the next turn goes out. */
+/* A finished turn: a failure or a stop goes into the conversation, a turn a node restart cut off on a task runs once more
+   or calls Operations, a turn that left a task it carried where it was is caught, then the next turn goes out. */
 export async function afterJob(ctx: Ctx, jobId: string): Promise<void> {
   const [job] = await ctx.db
     .select({ companyId: jobs.companyId, agentId: jobs.agentId, kind: jobs.kind, status: jobs.status, error: jobs.error, taskId: jobs.taskId, startedAt: jobs.startedAt, finishedAt: jobs.finishedAt })
@@ -528,10 +529,17 @@ export async function afterJob(ctx: Ctx, jobId: string): Promise<void> {
     const stopped = job.error === 'cancelled';
     await appendEvent(ctx, { companyId: job.companyId, agentId: job.agentId, jobId, kind: stopped ? 'stopped' : 'failed', data: stopped ? {} : { error: job.error } });
   }
-  if (job.taskId) await checkLiveness(ctx, jobId, await carriedTasks(ctx, { ...job, agentId: job.agentId, taskId: job.taskId }));
+  if (job.taskId) await afterTaskTurn(ctx, jobId, { ...job, agentId: job.agentId, taskId: job.taskId });
   await explainEnded(ctx, jobId);
   await leaveIfOff(ctx, job.agentId);
   await pump(ctx, job.agentId);
+}
+
+/* A turn on a task a node restart cut off gets its retry waiting on the task before the task is checked, so nothing else
+   runs it again; a retry cut off too runs no more. */
+async function afterTaskTurn(ctx: Ctx, jobId: string, job: Parameters<typeof carriedTasks>[1] & { error: string | null }): Promise<void> {
+  const restarted = job.error === 'machine_restarted' ? await afterRestart(ctx, jobId) : null;
+  if (restarted !== 'called') await checkLiveness(ctx, jobId, await carriedTasks(ctx, job));
 }
 
 /* The node stops the program and reports the job as cancelled. A node that is away cannot, so the job ends here. */

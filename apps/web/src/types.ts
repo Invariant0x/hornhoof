@@ -173,6 +173,9 @@ export type Part = { kind: 'header' | 'base' | 'skill' | 'notebook'; id: string 
 export type CardSkill = { id: string; title: Lang; description: Lang; on: boolean; locked: boolean; overridden: boolean; templateChanged: boolean };
 
 /* An agent's card: what it is, where it runs and the text it runs with. The orchestrator has no role and no skills. */
+/* Why a node restarted, as far as Hornhoof could tell. */
+export type RestartCause = 'update' | 'machine' | 'container' | 'program' | 'connection' | 'unknown';
+
 export type AgentCardView = {
   id: string;
   kind: 'orchestrator' | 'head' | 'worker';
@@ -194,6 +197,8 @@ export type AgentCardView = {
   instructions: { length: number; max: number };
   runsOn: { subscription: SubView; models: ModelOption[] }[];
   changes: { field: string; personName: string | null; byOrchestrator: boolean; at: string }[];
+  /* Its latest turns a node restart cut off, the latest first; node: none for the built-in node. */
+  interrupted: { job: string; at: string; cause: RestartCause; node: string | null; task: { id: string; number: number } | null; retry: boolean }[];
   /* The whole company or the agent's department may change it; only the whole company removes it. */
   canEdit: boolean;
   /* Wakes every so many minutes, outside any task, to do its order; lastAt: the last round, or when it was set. */

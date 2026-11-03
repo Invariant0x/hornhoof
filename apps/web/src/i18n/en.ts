@@ -791,7 +791,27 @@ export const en = {
       cancelled: (by: string) => `${by} cancelled it`,
       done: (by: string) => `${by} closed it`,
       started: (by: string) => `${by} started it once what it waited for was done`,
+      interrupted: (by: string) => `${by}'s turn was cut off by a node restart`,
     },
+  },
+  /* A turn a node restart cut off: on which node and when, why, which turn, and what Hornhoof did about it. */
+  restarts: {
+    heading: 'Turns cut off by a node restart',
+    builtin: 'The built-in node',
+    causes: {
+      update: 'Hornhoof updated it.',
+      machine: 'Its machine started again.',
+      container: 'Its container was created again, as an update of Hornhoof or a new install does.',
+      program: 'Its program started again after a crash or a restart of its container.',
+      connection: 'The connection to it broke, and the turn did not reach it.',
+      unknown: 'Why it restarted is not known.',
+    } as Record<string, string>,
+    turn: (id: string) => `Turn ${id}.`,
+    retry: (n: number, of: number) => `Retry ${n} of ${of}.`,
+    notRetried: 'It was not run again: its employee has no subscription.',
+    called: (name: string) => `The retry was cut off too, so it is not run a third time. ${name} of Operations was called.`,
+    nobody: 'The retry was cut off too, so it is not run a third time. Nobody in Operations is on to call.',
+    wasRetry: 'It was a retry.',
   },
   improvements: {
     title: 'Improvements',

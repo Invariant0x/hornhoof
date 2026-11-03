@@ -190,6 +190,7 @@ export const CARD: AgentCardView = {
     { subscription: OLEG_CODEX, models: [SOL] },
   ],
   changes: [{ field: 'hired', personName: 'Ivan', byOrchestrator: false, at: '2026-10-30T08:00:00.000Z' }],
+  interrupted: [],
   timer: null,
   canEdit: true,
 };

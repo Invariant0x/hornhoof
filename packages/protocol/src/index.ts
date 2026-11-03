@@ -301,6 +301,10 @@ export type Account = z.infer<typeof Account>;
 export const AgeRecipient = z.string().regex(/^age1[0-9a-z]{58}$/);
 export const Sealed = z.string().min(1).max(64 * 1024);
 const MAX_ENVELOPES = 20;
+/* How a node came up: when its program started, when the machine under it did, and the container it runs in. Hornhoof
+   compares it with what the node said before to tell why turns it ran are gone. */
+export const Boot = z.object({ startedAt: z.iso.datetime(), machineUpAt: z.iso.datetime(), container: z.string().min(1).max(200) });
+export type Boot = z.infer<typeof Boot>;
 
 const NodeMessage = z.discriminatedUnion('type', [
   /* terminals: the node runs agents in sessions people can watch and type into. */
@@ -324,6 +328,7 @@ const NodeMessage = z.discriminatedUnion('type', [
     /* The key Hornhoof seals this node's sign-ins to; the private half never leaves the node. */
     publicKey: AgeRecipient.optional(),
     account: Account.nullable().optional(),
+    boot: Boot.optional(),
   }),
   z.object({ type: z.literal('load'), ...Load.shape }),
   z.object({ type: z.literal('tests.started'), partId: z.string() }),
