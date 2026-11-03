@@ -1287,8 +1287,8 @@ summary.turn-head:focus-visible { outline: 2px solid var(--cyan); outline-offset
 .blk-side { grid-area: side; }
 .blk h4 { font-size: 14px; }
 .blk-side .machine-actions { margin-top: 4px; }
-/* A plan that does not work has one block, across the card, whatever its width. */
-.blk-fix { grid-column: 1 / -1; }
+/* A plan that does not work has one block, filling the card whatever its columns and rows, so no empty row leaves a gap. */
+.blk-fix { grid-column: 1 / -1; grid-row: 1 / -1; }
 @container card (min-width: 700px) {
   .blocks { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "facts side" "run run"; }
 }

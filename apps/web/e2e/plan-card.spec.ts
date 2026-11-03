@@ -32,13 +32,15 @@ async function servePlans(page: Page) {
   await page.route('**/api/subscriptions/s-codex/signin', route => route.fulfill({ status: 409, json: OLD }));
 }
 
-/* The block runs across the card's blocks, whatever their columns, and nothing in it sticks out. */
+/* The block fills the card's blocks, whatever their columns and rows, with no empty rows under it, and nothing in it sticks
+   out. */
 async function across(card: Locator) {
   const blocks = await box(card.locator('.blocks'));
   const block = card.locator('.blk-fix');
   const own = await box(block);
   expect(Math.abs(own.x - blocks.x)).toBeLessThanOrEqual(1);
   expect(Math.abs(own.width - blocks.width)).toBeLessThanOrEqual(1);
+  expect(Math.abs(own.height - blocks.height)).toBeLessThanOrEqual(1);
   for (const inner of await block.locator('p, .command-box, .machine-actions').all()) {
     const b = await box(inner);
     expect(b.x + b.width).toBeLessThanOrEqual(own.x + own.width + 1);

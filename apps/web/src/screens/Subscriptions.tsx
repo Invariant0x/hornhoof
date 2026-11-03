@@ -281,11 +281,12 @@ function signNoteOf(t: Messages, subId: string, err: unknown): SignNote {
   return old ? { subId, text: t.subs.oldNodes(old.machines.join(', ')), command: old.command } : { subId, text: errorText(t, err) };
 }
 
-/* A sign-in that cannot start says why next to the button that was pressed, not at the top of the page. */
+/* A sign-in that cannot start says why next to the button that was pressed, not at the top of the page. What it said last
+   stays until the server answers again, so the card does not change shape while it is asked. */
 async function startSignIn(t: Messages, sub: SubView, fresh: boolean, started: (s: Signing) => void, note: (n: SignNote | null) => void): Promise<void> {
-  note(null);
   try {
     const { nodeId, hostname } = await api.post<{ nodeId: string; hostname: string }>(`/api/subscriptions/${sub.id}/signin`, { fresh });
+    note(null);
     started({ subId: sub.id, nodeId, hostname });
   } catch (err) {
     note(signNoteOf(t, sub.id, err));

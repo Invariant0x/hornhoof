@@ -764,6 +764,7 @@ describe('the card of a plan that does not work', () => {
     /* Said once, in the block, and not in the card's head as well. */
     expect(within(card).getAllByText('On ivan-mbp. Only Ivan can sign in.')).toHaveLength(1);
     expect(decl('.blk-fix', 'grid-column')).toBe('1 / -1');
+    expect(decl('.blk-fix', 'grid-row')).toBe('1 / -1');
   });
 
   it.each([
@@ -815,6 +816,26 @@ describe('the card of a plan that does not work', () => {
     const again = screen.getByRole('article', { name: 'Codex, Ivan' });
     expect(blocks(again)).toEqual(THREE);
     expect(within(again).queryByText(UPDATE)).not.toBeInTheDocument();
+  });
+
+  it('keeps the block while Sign in is asked again, and changes it only for the answer', async () => {
+    const ready = { ...codex, status: 'ready' as const, machines: [MACHINE] };
+    let answer: (reply: [number, unknown]) => void = () => {};
+    let asked = 0;
+    mockApi({ ...only(ready), 'POST /api/subscriptions/s-codex/signin': () => (++asked === 1 ? [409, OLD] : new Promise(done => { answer = done; })) });
+    render(<Subscriptions me={ME} />);
+    await openAll();
+    const card = screen.getByRole('article', { name: 'Codex, Ivan' });
+    await userEvent.click(within(card).getByRole('button', { name: 'Sign in to Codex' }));
+    await vi.waitFor(() => expect(blocks(card)).toEqual(['blk blk-fix']));
+    await userEvent.click(within(card).getByRole('button', { name: 'Sign in to Codex' }));
+    await vi.waitFor(() => expect(asked).toBe(2));
+    /* While the server has not answered, the card stays as it was. */
+    expect(blocks(card)).toEqual(['blk blk-fix']);
+    expect(within(card).getByText(UPDATE)).toBeInTheDocument();
+    act(() => answer([409, OLD]));
+    await vi.waitFor(() => expect(within(card).getByText(UPDATE)).toBeInTheDocument());
+    expect(blocks(card)).toEqual(['blk blk-fix']);
   });
 
   it('puts the old nodes and their command in place of the why, in the block of a plan waiting for its sign-in', async () => {
