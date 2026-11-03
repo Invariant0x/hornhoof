@@ -15,6 +15,7 @@ import { providerFilter, type FilterGroup } from '../ui/TableTools';
 import { SortTable, type TableColumn } from '../ui/SortTable';
 import { planStateOnMachine, subName } from '../ui/subscription';
 import { useNow } from '../ui/reset';
+import { ProgramVersions } from '../ui/ProgramVersions';
 
 const REFRESH_MS = 5000;
 const GIB = 1024 ** 3;
@@ -133,7 +134,7 @@ function machineRows(machines: MachineView[], builtin: BuiltinView | null, subs:
       running: here ? combinedRunning(m.running, here.running) : m.running };
   });
   if (!builtin || machines.some(m => m.id === host)) return rows;
-  return [...rows, { id: 'builtin', hostname: builtinName, source: null, server: true, owner: null, lendsTests: null, os: 'linux', arch: '', online: builtin.online, lastSeenAt: null, plans: keys, load: builtin.load, running: builtin.running }];
+  return [...rows, { id: 'builtin', hostname: builtinName, source: null, server: true, owner: null, lendsTests: null, os: 'linux', arch: '', online: builtin.online, lastSeenAt: null, plans: keys, load: builtin.load, running: builtin.running, programs: builtin.programs }];
 }
 
 function machineColumns(t: Messages, language: Language): TableColumn<MachineRow>[] {
@@ -178,6 +179,7 @@ type MachineControls = {
   lend: (machine: MachineView, value: boolean) => unknown;
   disconnect: (machine: MachineView) => unknown;
   done: () => void;
+  refresh: () => Promise<void>;
 };
 
 function LendSetting({ machine, editable, onChange }: { machine: MachineView; editable: boolean; onChange: (value: boolean) => void }) {
@@ -243,6 +245,7 @@ function MachineDetails({ row, subs, me, controls }: { row: MachineRow; subs: Su
         </Part>
         {m && <Part title={t.cards.ownerSystem}><Facts items={[[t.machines.owner, m.owner.name], [t.machines.system, `${SYSTEMS[m.os] ?? m.os}, ${m.arch}`]]} /></Part>}
         {m && row.server && <Part title={t.cards.priority}><p className="server-priority"><b>1</b><span>{t.cards.serverHere}</span></p></Part>}
+        <ProgramVersions id={row.id} online={row.online} programs={row.programs} canUpdate={editable} onUpdated={controls.refresh} />
       </section>
       <RunningNow title={t.machines.runningNow} label={t.machines.runningOn(row.hostname)} agents={row.running.agents} parts={row.running.parts} online={row.online} me={me} />
       <section className="blk blk-side">
@@ -379,7 +382,7 @@ export function Machines({ me }: { me: Me }) {
           search={{ placeholder: t.tables.searchMachines, text: row => machineSearch(t, language, subs, row), count: t.tables.machineCount }}
           filters={machineFilters(t)}
           card={row => <MachineDetails row={row} subs={subs} me={me} controls={{
-            adding, confirm, setAdding, setConfirm, addPlan, lend, disconnect,
+            adding, confirm, setAdding, setConfirm, addPlan, lend, disconnect, refresh: load,
             done: () => { setAdding(null); void load(); },
           }} />}
         />

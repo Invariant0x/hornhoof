@@ -1,4 +1,4 @@
-import type { Limits, ModelOption, NodeLoad, ProviderId, TemplateKey } from '@hornhoof/protocol';
+import type { Limits, ModelOption, NodeLoad, ProgramInfo, ProviderId, TemplateKey } from '@hornhoof/protocol';
 import type { RoleEffort } from '@hornhoof/protocol/efforts';
 import type { TurnAlarm, TurnProgram, WorkLine } from '@hornhoof/protocol/map';
 
@@ -445,6 +445,8 @@ export type MachineView = {
   /* Takes the company's test runs when it is the freest machine. */
   lendsTests: boolean;
   running: Running;
+  /* Older servers omit program snapshots. */
+  programs?: ProgramInfo[] | null;
 };
 
 /* What runs on a machine now: the employees whose program is there, busy while a turn of theirs runs, and the parts of
@@ -476,7 +478,7 @@ export type ShownCommand = { id: string; kind: 'machine' | 'plans' | 'add'; plan
 
 /* The node that comes with the server, for those who see the whole company. */
 /* machine: the company's machine it runs on, when the server is on one; the pool counts that computer once. */
-export type BuiltinView = { online: boolean; load: NodeLoad | null; running: Running; machine?: Machine | null };
+export type BuiltinView = { online: boolean; load: NodeLoad | null; running: Running; machine?: Machine | null; programs?: ProgramInfo[] | null };
 
 export type JobView = {
   id: string;

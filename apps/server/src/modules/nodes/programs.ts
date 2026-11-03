@@ -34,6 +34,11 @@ export function programsFor(hub: NodeHub, ids: NodeIdentity[]): ProgramInfo[] | 
   return [...programs.values()].sort((a, b) => a.id.localeCompare(b.id) || String(a.version).localeCompare(String(b.version)));
 }
 
+export function machineProgramState(hub: NodeHub, ids: string[], machineId: string, builtin: { id: string } | null) {
+  const nodes = machineProgramNodes(ids, machineId, builtin);
+  return { online: nodes.some(id => hub.isOnline(id)), programs: programsFor(hub, nodes) };
+}
+
 async function targets(ctx: Ctx, person: Person, id: string, ownMachine: OwnMachine): Promise<NodeIdentity[]> {
   if (id === 'builtin') {
     requireCompanyScope(person);

@@ -70,7 +70,8 @@ fixtures='${FAKES.replaceAll("'", "'\\''")}'
 ln -sf "$fixtures$name" "$4/bin/$name"
 mkdir -p "$4/lib/node_modules/$package"
 printf '{"version":"2.0.0"}' > "$4/lib/node_modules/$package/package.json"
-id -u > "$4/../npm.uid"
+id -u > "$4/../npm.uid.tmp"
+mv "$4/../npm.uid.tmp" "$4/../npm.uid"
 `
     : `echo "npm error 404 Not Found" >&2\nexit 1\n`;
   writeFileSync(join(bin, 'npm'), `#!/bin/sh\n${body}`);

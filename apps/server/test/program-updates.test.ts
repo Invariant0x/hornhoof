@@ -131,4 +131,14 @@ describe('updating the programs on a machine', () => {
       ...f.machine.nodes.map(n => nodeIdentity(n.nodeId)), BUILTIN,
     ]);
   });
+
+  it('keeps the owned physical server online when only its built-in node is connected', async () => {
+    const f = await liveCompany(true);
+    await f.connect(NODE_KEY, [claude, codex]);
+    await until(() => f.app.ctx.hub.isReady(BUILTIN));
+    const view = await f.machineView();
+    expect(view.builtin).toBeNull();
+    expect(view.machines[0]).toMatchObject({ online: true, programs: [claude, codex] });
+    expect((await f.app.inject({ method: 'POST', url: `/api/machines/${f.machine.machine.id}/programs/update`, ...as(f.owner) })).statusCode).toBe(202);
+  });
 });

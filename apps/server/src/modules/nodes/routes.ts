@@ -19,7 +19,7 @@ import { commandFor } from './command.js';
 import { disconnectMachines } from './disconnect.js';
 import { BUILTIN, nodeIdentity } from './hub.js';
 import { builtinMachine, liveNode, settlePlans } from './nodes.js';
-import { machineProgramNodes, machineProgramRoutes, programsFor } from './programs.js';
+import { machineProgramState, machineProgramRoutes, programsFor } from './programs.js';
 
 const JoinBody = z.object({
   code: z.string().min(1).max(200),
@@ -255,7 +255,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
         kind: m.kind,
         owner: { id: m.ownerId, name: m.ownerName },
         ...machineState(hub, on(m.id).map(n => n.id)),
-        programs: programsFor(hub, machineProgramNodes(on(m.id).map(n => n.id), m.id, programHost)),
+        ...machineProgramState(hub, on(m.id).map(n => n.id), m.id, programHost),
         lastSeenAt: latest(on(m.id).map(n => n.lastSeenAt)),
         plans: on(m.id).flatMap(n => (n.subscriptionId && n.provider ? [{ id: n.subscriptionId, provider: n.provider, status: n.status, online: hub.isOnline(nodeIdentity(n.id)) }] : [])),
         lendsTests: m.lendsTests,

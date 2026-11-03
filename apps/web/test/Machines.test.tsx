@@ -36,6 +36,24 @@ const fact = (within_: HTMLElement, label: string) => within(within_).getByText(
 afterEach(() => localStorage.clear());
 
 describe('Machines', () => {
+  it.each([['en', 'Agent programs'], ['ru', 'Программы агентов']])('shows reported program versions on the machine card in %s', async (language, heading) => {
+    localStorage.setItem('hh-lang', language);
+    lists({ 'GET /api/machines': [200, { machines: [{ ...MACHINES[0]!, programs: [{ id: 'claude', version: '2.1.0', updating: false, failed: false }] }], builtin: null }] });
+    render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
+    const mac = await openCard('ivan-mbp');
+    expect(within(mac).getByRole('heading', { name: heading })).toBeInTheDocument();
+    expect(fact(mac, 'Claude Code')).toBe('2.1.0');
+  });
+
+  it('updates programs on the virtual built-in card through its own action', async () => {
+    const calls = lists({ 'POST /api/machines/builtin/programs/update': [202, { updating: true }] },
+      { ...BUILTIN, programs: [{ id: 'codex', version: '3.0.0', updating: false, failed: false }] });
+    render(<Machines me={ME} />);
+    const builtin = await openCard('Built-in node');
+    await userEvent.setup().click(within(builtin).getByRole('button', { name: 'Update programs' }));
+    expect(calls).toContainEqual({ method: 'POST', path: '/api/machines/builtin/programs/update', body: undefined });
+  });
+
   it.each([
     ['en', 'Priority', 'The company server runs here', 'Built-in node'],
     ['ru', 'Приоритет', 'Здесь работает сервер компании', 'Встроенная нода'],
@@ -136,7 +154,8 @@ describe('Machines', () => {
     expect(meter(own, 'Processor').querySelector('.g-f')?.textContent).toBe('4 cores');
     expect(meter(own, 'Memory').textContent).toBe('Memory2.5GB freeof 8 GB');
     expect(meter(own, 'Disk').querySelector('b')?.textContent).toBe('unknown');
-    expect(within(own).queryByRole('button')).not.toBeInTheDocument();
+    expect(within(own).getAllByRole('button')).toHaveLength(1);
+    expect(within(own).getByRole('button', { name: 'Update programs' })).toBeDisabled();
     expect(within(own).getByTitle('The company server runs on this machine now')).toHaveTextContent('Company server here');
     expect(within(box).queryByText('Company server here')).not.toBeInTheDocument();
   });
