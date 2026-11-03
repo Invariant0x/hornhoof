@@ -330,6 +330,13 @@
       "when": 1793714572653,
       "tag": "0047_requested_prompt",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1793722672199,
+      "tag": "0050_external_wait",
+      "breakpoints": true
     }
   ]
 }

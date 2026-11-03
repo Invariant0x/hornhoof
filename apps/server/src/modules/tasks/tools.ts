@@ -13,6 +13,7 @@ import { orchestratorOf } from '../conversation/queue.js';
 import { appendOutgoing } from '../events/store.js';
 import { personParty } from '../events/parties.js';
 import { decisionPerson } from './decisions.js';
+import { WaitInput, waitFor } from './external-wait.js';
 
 export type ToolJob = { id: string; companyId: string; agentId: string; agentKind: 'orchestrator' | 'head' | 'worker' };
 type Agent = typeof agents.$inferSelect;
@@ -162,6 +163,20 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         async ({ agent, task }) => say(fitted(await taskDetail(ctx, task, t => sees(agent, t)))),
         (err: unknown) => (err instanceof ApiError ? say(err.message, true) : Promise.reject(err)),
       ),
+  );
+
+  server.registerTool(
+    'wait_for',
+    {
+      description: 'Waits on a task you hold for an external event, with a one-line reason and an ISO deadline at most two hours away. End your turn after this: no reminder or stuck request is sent while it waits. A comment, a message naming this task, or the deadline wakes you once.',
+      inputSchema: { task: Ref, ...WaitInput.shape },
+    },
+    async ({ task: ref, reason, until }) => run(async () => {
+      const { task } = await find(ref);
+      plain(task, reason);
+      const moved = await waitFor(ctx, job.agentId, task.id, { reason, until });
+      return { text: `#${task.number} waits for "${moved.task.externalWait!.reason}" until ${moved.task.externalWait!.until}. End this turn; you will be woken.`, moved };
+    }),
   );
 
   server.registerTool(

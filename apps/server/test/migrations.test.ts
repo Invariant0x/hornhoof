@@ -13,6 +13,38 @@ import { isUniqueViolation } from '../src/db/errors.js';
 import { tasks } from '../src/db/schema.js';
 import { appOn, approvalAsked, as } from './helpers.js';
 
+describe('migration 0050', () => {
+  it('adds a nullable external wait and its deadline index on a fresh database', async () => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    const columns = await db.execute(sql`select column_name, data_type, is_nullable from information_schema.columns where table_name = 'tasks'`);
+    expect(columns.rows).toContainEqual({ column_name: 'external_wait', data_type: 'jsonb', is_nullable: 'YES' });
+    const indexes = await db.execute<{ indexdef: string }>(sql`select indexdef from pg_indexes where tablename = 'tasks' and indexname = 'tasks_external_wait_until'`);
+    expect(indexes.rows).toHaveLength(1);
+    expect(indexes.rows[0]!.indexdef).toContain("external_wait ->> 'until'");
+    expect(indexes.rows[0]!.indexdef).toContain('WHERE (external_wait IS NOT NULL)');
+  });
+
+  it('upgrades existing tasks without changing them and defaults their wait to null', async () => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0047_requested_prompt') });
+    const company = (await db.execute<{ id: string }>(sql`insert into companies (name) values ('Acme') returning id`)).rows[0]!.id;
+    await db.execute(sql`insert into tasks (company_id, number, title, status, silent, version)
+      select ${company}, n, 'Task ' || n, 'working', 2, 7 from generate_series(1, 150) n`);
+    const before = (await db.execute(sql`select to_jsonb(t) as data from tasks t order by number`)).rows;
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    expect((await db.execute(sql`select to_jsonb(t) - 'external_wait' as data from tasks t order by number`)).rows).toEqual(before);
+    const rows = (await db.execute(sql`select * from tasks order by number`)).rows;
+    expect(rows).toHaveLength(150);
+    for (const row of rows) expect(row).toHaveProperty('external_wait', null);
+  });
+});
+
 /* A copy of the migrations folder that stops after the given tag, as an older install would have it. */
 async function migrationsUpTo(tag: string): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'hh-migrations-'));
@@ -634,7 +666,8 @@ describe('migration 0045', () => {
         ('20000000-0000-4000-8000-' || lpad((1 + n % 100)::text, 12, '0'))::uuid
       from generate_series(1, 20000) n`);
     await db.execute(sql`insert into tasks (company_id, number, title) values (${C}, 20001, 'No turn or product')`);
-    const fingerprint = sql`select count(*)::int as n, md5(string_agg(row_to_json(t)::text, '' order by number)) as checksum from tasks t`;
+    /* Migration 0050 checks its new nullable field separately; every earlier field must stay identical. */
+    const fingerprint = sql`select count(*)::int as n, md5(string_agg((to_jsonb(t) - 'external_wait')::text, '' order by number)) as checksum from tasks t`;
     const before = await db.execute(fingerprint);
     expect(before.rows[0]).toMatchObject({ n: 20001 });
 

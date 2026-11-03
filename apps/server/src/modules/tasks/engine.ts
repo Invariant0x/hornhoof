@@ -331,7 +331,7 @@ function linesMoved(ctx: Live, changed: { companyId: string } | null): void {
 
 /* One move: the task changes only if nobody moved it since it was read, and the move is written to its log. */
 /* wakes: the turns the move needs, kept with it until they are queued. */
-async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, also?: (tx: Tx, row: Task) => Promise<void>, wakes: Wake[] = []): Promise<Task> {
+export async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, also?: (tx: Tx, row: Task) => Promise<void>, wakes: Wake[] = []): Promise<Task> {
   let started: Task[] = [];
   const opened: Task[] = [];
   let lit: Task | null = null;
@@ -353,7 +353,7 @@ async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, also?: (
     }
     const [row] = await tx
       .update(tasks)
-      .set({ ...set, version: task.version + 1, updatedAt: new Date() })
+      .set({ externalWait: null, ...set, version: task.version + 1, updatedAt: new Date() })
       .where(and(eq(tasks.id, task.id), eq(tasks.version, task.version)))
       .returning();
     if (!row) throw refuse(409, 'task_changed', `#${task.number} changed meanwhile. Read it again.`);
