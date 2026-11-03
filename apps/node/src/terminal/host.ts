@@ -3,7 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
-import { TERM_CHUNK, type AgentEvent, type Failure, type Limits, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
+import { TERM_CHUNK, UNHEARD_MS, type AgentEvent, type Failure, type Limits, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
 import { agyConversation, agyRules, agyStream } from '../providers/antigravity.js';
 import { claudeEvents, claudeInterrupted } from '../providers/claude.js';
 import type { ProgramRetry } from '@hornhoof/protocol/map';
@@ -115,8 +115,8 @@ type Agent = {
   waitingWords: TurnWords[];
   /* Claude's queue, in the order its log enqueued the words. */
   enqueuedWords: string[];
-  /* Ended turns whose waiting words stay owned until their job.done goes out. */
-  finishing: Map<Turn, Deferred<void>>;
+  /* Reports waiting words even when no later log line or Enter comes. */
+  unheardTimers: Map<TurnWords, NodeJS.Timeout>;
   dequeued: boolean;
   inputUnknown?: boolean;
   /* Hornhoof's turns, one after another. */
@@ -328,7 +328,12 @@ export class TerminalHost {
 
   async stop(): Promise<void> {
     this.closeViews();
-    for (const a of this.agents.values()) { this.reportUnheard(a, true); this.unwatch(a); }
+    for (const a of this.agents.values()) {
+      this.reportUnheard(a, true);
+      for (const timer of a.unheardTimers.values()) clearTimeout(timer);
+      a.unheardTimers.clear();
+      this.unwatch(a);
+    }
     this.bridge.stop();
     this.fs.stop();
     await this.opts.tmux.stopAll();
@@ -351,7 +356,7 @@ export class TerminalHost {
   private agent(key: string): Agent {
     let a = this.agents.get(key);
     if (!a) {
-      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, viewers: 0, up: false, watch: null, saying: Promise.resolve(), waitingWords: [], enqueuedWords: [], finishing: new Map(), dequeued: false, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null, calls: new Map(), closedCalls: new Set(), question: null, ends: new TurnEnds(), signAt: 0, retry: null, apiError: null, restarting: false, launch: null, programTurnId: undefined };
+      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, viewers: 0, up: false, watch: null, saying: Promise.resolve(), waitingWords: [], enqueuedWords: [], unheardTimers: new Map(), dequeued: false, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null, calls: new Map(), closedCalls: new Set(), question: null, ends: new TurnEnds(), signAt: 0, retry: null, apiError: null, restarting: false, launch: null, programTurnId: undefined };
       this.agents.set(key, a);
     }
     return a;
@@ -409,7 +414,7 @@ export class TerminalHost {
       if (!input.prompt) return await this.started(a, turn, tools, goesOn ? null : input.sessionId === null);
       return (await this.typePrompt(a, job, input.prompt)) ?? (await this.turnEnd(a, job, a.ended, turn));
     } finally {
-      turn.words?.end(Date.now());
+      this.endWords(a, turn);
       a.typing = null;
       if (starting && a.starting === starting) a.starting = null;
       if (a.turn === turn) {
@@ -527,8 +532,8 @@ export class TerminalHost {
       this.drain(a);
       const message = await Promise.race([ended.promise, sleep(this.pollMs).then(() => null)]);
       if (message !== null) {
-        await this.waitForWords(a, turn);
-        return await this.saidEnded(a, job, message, turn.ending);
+        const result = await this.saidEnded(a, job, message, turn.ending);
+        return { ...result, ...(turn.words?.waitingForTurn(Date.now()) ? { wordsWaiting: true } : {}) };
       }
       /* A program stopped with Escape does not say its turn ended: it waits for the next prompt. */
       if (job.input.signal?.aborted) return await this.stopTurn(a, job, ended);
@@ -668,6 +673,8 @@ export class TerminalHost {
     if (!sessionId || sessionId === a.sessionId) return;
     if (a.sessionId) a.cleared.add(a.sessionId);
     a.sessionId = sessionId;
+    a.enqueuedWords = [];
+    a.dequeued = false;
     if (a.program?.kind === 'claude') a.tail = new LineTail(claudeTranscript(a.home, realpathSync(a.workDir), sessionId));
     if (a.program?.kind === 'kimi' || a.program?.kind === 'antigravity') {
       if (a.program.kind === 'kimi') a.tail = null;
@@ -717,7 +724,7 @@ export class TerminalHost {
     const decision = a.ends.end(end.status, this.stoppable(a) || Boolean(blocked && a.turn), id);
     if (decision.conflict) this.log(`Agent ${a.key} (${a.program?.kind}): turn end channels disagree. The first end was kept.`);
     if (!decision.accept) return;
-    a.turn?.words?.end(Date.now());
+    if (a.turn) this.endWords(a, a.turn);
     a.busy = false;
     a.retry = null;
     a.calls.clear();
@@ -725,18 +732,13 @@ export class TerminalHost {
     a.stopped = end.status === 'stopped';
     a.failure = end.failure ?? null;
     const turn = a.turn;
-    if (turn) {
-      turn.ending = end;
-      if (turn.words?.waitingForTurn(Date.now())) {
-        a.finishing.set(turn, deferred());
-      }
-    }
+    if (turn) turn.ending = end;
     if (!turn?.typed) return a.ended?.resolve(end.message);
     const error = a.stopped ? 'cancelled' : end.failure ? (end.failure.kind === 'auth' || a.signedOut?.test(end.failure.text) ? 'not_logged_in' : 'agent_failed') : null;
     const settling = this.settle(a, end.message);
     a.settling = settling;
     void settling.finally(() => { if (a.settling === settling) a.settling = null; });
-    void settling.then(() => this.waitForWords(a, turn)).then(() => {
+    void settling.then(() => {
       this.finishTyped(a, end.message, error, end.failure?.text ?? '', undefined, turn);
     });
   }
@@ -926,7 +928,6 @@ export class TerminalHost {
 
   private reportUnheard(a: Agent, gone = false): void {
     for (const words of a.waitingWords) {
-      if (!gone && [...a.finishing.keys()].some(turn => turn.words === words)) continue;
       for (const entry of words.unheard(Date.now(), gone)) {
         /* Start afresh before the next prompt, so words still held by the TUI cannot be submitted a second time. */
         a.hash = null;
@@ -936,24 +937,18 @@ export class TerminalHost {
     a.waitingWords = a.waitingWords.filter(words => words.pending().length > 0);
   }
 
-  /* The program may start its queued words on the next log read. Open that turn before giving up the old job. */
-  private async waitForWords(a: Agent, turn: Turn): Promise<void> {
-    if (!turn.words?.waitingForTurn(Date.now())) return;
-    while (a.turn === turn && turn.words.waitingForTurn(Date.now()) && await this.opts.tmux.alive(a.name)) {
-      await sleep(this.pollMs);
+  private endWords(a: Agent, turn: Turn): void {
+    const words = turn.words;
+    if (!words) return;
+    words.end(Date.now());
+    if (!words.pending().length || a.unheardTimers.has(words)) return;
+    const timer = setTimeout(() => {
+      a.unheardTimers.delete(words);
       this.drain(a);
-    }
-  }
-
-  /* Called after job.done was sent, including when the runner read limits or secrets after the turn ended. */
-  completed(jobId: string): void {
-    for (const a of this.agents.values()) {
-      for (const [turn, finished] of a.finishing) if (turn.jobId === jobId) {
-        a.finishing.delete(turn);
-        finished.resolve();
-      }
       this.reportUnheard(a);
-    }
+    }, UNHEARD_MS);
+    timer.unref();
+    a.unheardTimers.set(words, timer);
   }
 
   /* Tool calls a line of the program's log began and ended, for what it does now. */
@@ -1055,6 +1050,7 @@ export class TerminalHost {
         return this.interrupted(a, typeof data.turn_id === 'string' ? data.turn_id : undefined);
       case 'end':
         this.drain(a);
+        if (data.reason === 'clear') { a.enqueuedWords = []; a.dequeued = false; }
         if (await this.opts.tmux.alive(a.name)) {
           if (data.reason === 'clear' && this.stoppable(a)) this.interrupted(a);
           return;
@@ -1129,7 +1125,6 @@ export class TerminalHost {
       const taken = words.takeQueued(text);
       if (taken) { queuedFrom = taken.jobId; break; }
     }
-    const finishing = queuedFrom ? [] : [...a.finishing.values()].map(finished => finished.promise);
     const start = a.starting;
     a.fresh = false;
     if (!fromLog) this.drain(a);
@@ -1157,7 +1152,6 @@ export class TerminalHost {
       });
       await start;
     }
-    if (finishing.length) await Promise.all(finishing);
     this.opts.send({ type: 'turn.open', agentKey: a.key, text: text.slice(0, 100_000), ref: turn.ref, ...(queuedFrom ? { queuedFrom } : {}) });
     await answered();
   }
@@ -1192,7 +1186,7 @@ export class TerminalHost {
 
   private finishTyped(a: Agent, message: string, error: JobError = null, output = '', programOutput?: ProgramOutput, turn = a.turn): void {
     if (!turn?.typed) return;
-    turn.words?.end(Date.now());
+    this.endWords(a, turn);
     if (a.turn === turn) { a.turn = null; this.bridge.setToken(a.key, null); }
     if (a.sessionId) this.opts.remember?.(a.sessionId, a.workDir);
     /* Hornhoof hears the limits with the next turn it runs. */
@@ -1206,8 +1200,7 @@ export class TerminalHost {
   private typedDone(turn: Turn, message: string, error: JobError, sessionId: string | null, output: string, programOutput?: ProgramOutput, failure?: Failure): void {
     if (!turn.jobId) return;
     const result = error === 'cancelled' ? 'Stopped.' : error ? '' : message;
-    this.opts.send(jobDone(turn.jobId, { ok: !error, sessionId, result, output, programOutput, failure, error, limits: null }, [...this.opts.secrets(), ...(turn.toolToken ? [turn.toolToken] : [])]));
-    this.completed(turn.jobId);
+    this.opts.send(jobDone(turn.jobId, { ok: !error, sessionId, result, output, programOutput, failure, error, limits: null, ...(turn.words?.waitingForTurn(Date.now()) ? { wordsWaiting: true } : {}) }, [...this.opts.secrets(), ...(turn.toolToken ? [turn.toolToken] : [])]));
   }
 
   /* Turns people typed that run now: they count as running when the node says hello again. */

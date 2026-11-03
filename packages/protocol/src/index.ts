@@ -385,6 +385,8 @@ const NodeMessage = z.discriminatedUnion('type', [
     result: z.string(),
     tail: z.string(),
     error: z.enum(JOB_ERRORS).nullable(),
+    /* The ended turn's words are still queued or held by the program; older nodes send none. */
+    wordsWaiting: z.boolean().optional(),
     /* Set on a failed turn whose program said why; older nodes send none. */
     failure: Failure.optional(),
     /* How the agent's program ended, when the node saw it end: its exit code, or the name of the signal that ended it. */

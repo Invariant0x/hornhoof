@@ -36,6 +36,14 @@ const SERVER: ServerMessage[] = [
 ];
 
 describe('node messages', () => {
+  it('carries waiting words on a job end and still accepts older nodes', () => {
+    const done = { type: 'job.done', jobId: 'job-1', ok: true, sessionId: null, result: '', tail: '', error: null };
+    for (const message of [done, { ...done, wordsWaiting: true }, { ...done, wordsWaiting: false }]) {
+      expect(parseNodeMessage(JSON.stringify(message))).toEqual(message);
+    }
+    expect(parseNodeMessage(JSON.stringify({ ...done, wordsWaiting: 'yes' }))).toBeNull();
+  });
+
   it('keeps the original job of a turn the program starts from queued live words', () => {
     const message = { type: 'turn.open', agentKey: 'agent-1', text: 'Queued words.', queuedFrom: 'job-1', ref: 'next' };
     expect(parseNodeMessage(JSON.stringify(message))).toEqual(message);

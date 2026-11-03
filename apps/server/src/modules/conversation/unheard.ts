@@ -6,7 +6,7 @@ import { agentEvents, agents, jobs, subscriptions } from '../../db/schema.js';
 import { sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { notifyFailure } from '../tasks/failures.js';
 import { logTurnFact } from '../tasks/turn-log.js';
-import { enqueueTurn, nodeOfAgent, onAgent } from './queue.js';
+import { enqueueTurn, nodeOfAgent, onAgent, pump, settleWords } from './queue.js';
 import { repeatedTurn, UNHEARD_NOTE, wordsForTurn } from './turn-words.js';
 
 const HOUR_MS = 3_600_000;
@@ -27,7 +27,9 @@ export async function unheard(ctx: Ctx, node: NodeIdentity, msg: Extract<NodeMes
   await onAgent(ctx, agent.id, async () => {
     await logTurnFact(ctx, job!, UNHEARD_NOTE, { unheardAt: now.toISOString() });
     await repeatedUnheard(ctx, job!, agent.name, now);
+    if (original) settleWords(ctx, agent.id, original.id, original.status === 'running');
   });
+  await pump(ctx, agent.id);
 }
 
 async function repeatedUnheard(ctx: Ctx, job: Job, name: string, now: Date): Promise<void> {
