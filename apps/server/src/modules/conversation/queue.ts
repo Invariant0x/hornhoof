@@ -327,22 +327,32 @@ function keepsSessionAcrossTurns(kind: string): boolean {
   return kind === 'orchestrator' || kind === 'head';
 }
 
-/* The session of the turn this one goes on from, when it can go on there: the same plan, node and instructions. */
-async function continuedSession(ctx: Ctx, jobId: string | null, on: { subscriptionId: string; nodeId: string | null }, instructionsHash: string): Promise<string | null> {
-  if (!jobId) return null;
-  const [from] = await ctx.db.select({ subscriptionId: jobs.subscriptionId, nodeId: jobs.nodeId, sessionId: jobs.sessionId, instructionsHash: jobs.instructionsHash }).from(jobs).where(eq(jobs.id, jobId));
-  return from?.sessionId && from.subscriptionId === on.subscriptionId && from.nodeId === on.nodeId && from.instructionsHash === instructionsHash ? from.sessionId : null;
-}
-
 type Agent = { id: string; companyId: string; kind: string; name: string };
 type On = { subscriptionId: string; nodeId: string | null };
 type Session = { sessionId: string | null; catchUp: string | null };
+/* lost: what the turn this one goes on from was asked, when this one cannot go on in its session and a session without
+   it takes over. */
+type Going = Session & { lost: string | null };
 
-/* continueOf: a turn that goes on from one that ended without its work recorded goes on in that turn's session. */
-async function sessionFor(ctx: Ctx, agent: Agent, on: On, instructionsHash: string, continueOf: string | null): Promise<Session> {
-  const going = await continuedSession(ctx, continueOf, on, instructionsHash);
-  return going ? { sessionId: going, catchUp: null } : lastSession(ctx, agent, on, instructionsHash);
+/* The turn this one goes on from: its session, when it can go on there, on the same plan and node with the same
+   instructions; otherwise what that turn was asked. */
+async function continuedFrom(ctx: Ctx, jobId: string, on: On, instructionsHash: string): Promise<{ sessionId: string | null; lost: string | null }> {
+  const [from] = await ctx.db.select({ subscriptionId: jobs.subscriptionId, nodeId: jobs.nodeId, sessionId: jobs.sessionId, instructionsHash: jobs.instructionsHash, prompt: jobs.prompt }).from(jobs).where(eq(jobs.id, jobId));
+  if (!from) return { sessionId: null, lost: null };
+  const goesOn = from.subscriptionId === on.subscriptionId && from.nodeId === on.nodeId && from.instructionsHash === instructionsHash;
+  return goesOn && from.sessionId ? { sessionId: from.sessionId, lost: null } : { sessionId: null, lost: from.prompt };
 }
+
+/* continueOf: a turn that goes on from one that ended without its work recorded goes on in that turn's session, or, when
+   it cannot, takes what that turn was asked along into the session it gets. */
+async function sessionFor(ctx: Ctx, agent: Agent, on: On, instructionsHash: string, continueOf: string | null): Promise<Going> {
+  const from = continueOf ? await continuedFrom(ctx, continueOf, on, instructionsHash) : { sessionId: null, lost: null };
+  if (from.sessionId) return { sessionId: from.sessionId, catchUp: null, lost: null };
+  return { ...(await lastSession(ctx, agent, on, instructionsHash)), lost: from.lost };
+}
+
+/* What a turn asks: a continuation that lost its session says again what the turn that ended was asked. */
+const withLost = (asked: string, lost: string | null) => (lost ? `${asked}\n\nThe turn that ended was asked:\n\n${lost}` : asked);
 
 /* A new session catches up from the conversation. The last finished turn's session goes on only on the same subscription
    and node with the same instructions: another machine does not have it, and changed instructions would not reach a
@@ -567,8 +577,8 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   const effort = effortFor(agent.effort, effortsOf(models, model), roleEffort);
   /* The hash covers the model too, so a new model starts a fresh session like new instructions do. */
   const runHash = model ? textHash(`${instructions.hash}:${model}`) : instructions.hash;
-  const { sessionId, catchUp } = await sessionFor(ctx, agent, { subscriptionId: sub.id, nodeId: place.nodeId }, runHash, job.continueOf);
-  const said = repo ? `${asked}\n\n${repoLine(repo)}` : asked;
+  const { sessionId, catchUp, lost } = await sessionFor(ctx, agent, { subscriptionId: sub.id, nodeId: place.nodeId }, runHash, job.continueOf);
+  const said = repo ? `${withLost(asked, lost)}\n\n${repoLine(repo)}` : withLost(asked, lost);
   /* A turn that types nothing only starts the program, for a person to talk to it: what was said before and where the
      repository is go with its instructions instead. */
   const composed = catchUp ? `${catchUp}\n\n${said}` : said;

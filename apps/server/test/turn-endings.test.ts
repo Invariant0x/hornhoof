@@ -1,8 +1,9 @@
 import { and, asc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agentEvents, agents, companies, departments, jobs, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
+import { agentEvents, agents, companies, departments, jobs, people, subscriptions, taskEvents, tasks, turns } from '../src/db/schema.js';
+import { GONE_ALONG } from '../src/modules/conversation/queue.js';
 import { identityOf } from '../src/modules/nodes/hub.js';
-import { createTask, submit, verdict } from '../src/modules/tasks/engine.js';
+import { blocked, createTask, report, submit, verdict } from '../src/modules/tasks/engine.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
 import { connectNode, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
@@ -129,6 +130,51 @@ describe("a turn whose program ended without the work done", () => {
     await c.settle();
     expect((await c.turnsOf(c.bruno.id)).filter(j => j.continueOf === more.jobId)).toEqual([]);
     expect((await c.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, c.task.id), eq(taskEvents.kind, 'continued')))).filter(e => (e.data as { continuation?: string }).continuation)).toHaveLength(1);
+  });
+
+  it('is not done by what the agent recorded on another task while it ran, and goes on', async () => {
+    const c = await company();
+    const other = (await createTask(c.ctx, { agentId: c.hana.id }, { title: 'Refund email', brief: '', body: 'Send it.', departmentId: c.task.departmentId, assigneeAgentId: c.bruno.id, executor: true })).task;
+    const work = await c.brunoAtWork();
+    /* While his turn on the checkout runs, he says why he is stuck on the refund email, and nothing on the checkout. */
+    await blocked(c.ctx, c.bruno.id, other.id, 'The mail keys are missing.');
+    await c.failed(work, { code: 1, signal: null }, { sessionId: 'bruno-session' });
+    expect(await c.jobOf(work.jobId)).toMatchObject({ status: 'failed', error: 'agent_failed' });
+    const more = await c.nextTurn(c.bruno.id, 1);
+    expect(await c.jobOf(more.jobId)).toMatchObject({ taskId: c.task.id, continueOf: work.jobId });
+  });
+
+  it("is done by what a head recorded on a task whose turn went out inside it", async () => {
+    const c = await company();
+    const [ceo] = await c.db.select().from(people);
+    const held = async (title: string) => (await createTask(c.ctx, { personId: ceo!.id }, { title, brief: '', body: '', departmentId: c.task.departmentId, assigneeAgentId: c.hana.id })).task;
+    const [payments, refunds] = [await held('Payments'), await held('Refunds')];
+    const started = new Date();
+    const [turn] = await c.db.insert(jobs).values({ companyId: c.companyId, subscriptionId: c.sub.id, agentId: c.hana.id, taskId: payments.id, kind: 'conversation', prompt: 'Payments moved.', timeoutMs: 60_000, status: 'running', startedAt: started }).returning();
+    /* The turn on the refunds waited for her and went out inside this one. */
+    const at = new Date(started.getTime() + 1);
+    await c.db.insert(jobs).values({ companyId: c.companyId, subscriptionId: c.sub.id, agentId: c.hana.id, taskId: refunds.id, kind: 'conversation', prompt: 'Refunds moved.', timeoutMs: 60_000, status: 'done', result: GONE_ALONG, startedAt: at, finishedAt: at });
+    await report(c.ctx, c.hana.id, refunds.id, { done: true, summary: 'Refunds shipped.' });
+    await c.failed({ type: 'job.run', jobId: turn!.id, prompt: 'Payments moved.', sessionId: null }, { code: 1, signal: null });
+    expect(await c.jobOf(turn!.id)).toMatchObject({ status: 'done', error: null, exitCode: 1 });
+  });
+
+  it('carries what the turn was asked when its session cannot go on, as his instructions changed meanwhile', async () => {
+    const c = await company();
+    /* Bruno last finished a turn before the company's turn opened, so a new session of his starts clean, with no catch-up. */
+    const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000);
+    await c.db.insert(jobs).values({ companyId: c.companyId, subscriptionId: c.sub.id, agentId: c.bruno.id, kind: 'conversation', prompt: 'Earlier work.', timeoutMs: 60_000, status: 'done', sessionId: 'earlier-session', createdAt: ago(60), startedAt: ago(60), finishedAt: ago(55) });
+    await c.db.insert(turns).values({ companyId: c.companyId, number: 1, title: 'Checkout', goal: '', status: 'open', messages: [], createdByAgentId: orchestrator!.id, openedAt: ago(30) });
+    await wakeAll(c.ctx, [{ agentId: c.bruno.id, taskId: c.task.id, why: 'assigned' }]);
+    const work = await c.nextTurn(c.bruno.id, 1);
+    await c.db.update(agents).set({ overrides: { base: 'Write the test first, then the code.' } }).where(eq(agents.id, c.bruno.id));
+    await c.failed(work, { code: 1, signal: null }, { sessionId: 'bruno-session' });
+    const more = await c.nextTurn(c.bruno.id, 2);
+    expect(await c.jobOf(more.jobId)).toMatchObject({ continueOf: work.jobId });
+    expect(more.sessionId).toBeNull();
+    expect(more.prompt).toContain('without recording');
+    expect(more.prompt).toContain(`#${c.task.number} "Checkout API" is yours to do`);
   });
 
   it('starts anew with the same work when its program never named a session to go on in', async () => {
