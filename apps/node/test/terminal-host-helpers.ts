@@ -6,7 +6,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AgentEvent, NodeMessage } from '@hornhoof/protocol';
-import { LOST_END_MS } from '@hornhoof/protocol/map';
 import { vi } from 'vitest';
 import { SCREEN_SIGNED_OUT } from '../src/providers/kimi.js';
 import { TerminalHost, type TermJob } from '../src/terminal/host.js';
@@ -21,6 +20,7 @@ export const FAKE = fileURLToPath(new URL('./fakes/fake-term.mjs', import.meta.u
 export const FAKE_CODEX = fileURLToPath(new URL('./fakes/fake-codex-term.mjs', import.meta.url));
 export const FAKE_KIMI = fileURLToPath(new URL('./fakes/fake-kimi-term.mjs', import.meta.url));
 export const SECRET = 'sk-fake-0123456789abcdef';
+const LOST_END_MS = 60_000;
 
 export const hasTmux = (() => {
   try {

@@ -159,6 +159,7 @@
       "error": "server_error",
       "last_assistant_message": "Internal error"
     },
+    "retryable": true,
     "source": "signals.md section 1"
   },
   {
@@ -352,6 +353,7 @@
       },
       "message": "Internal error"
     },
+    "retryable": true,
     "source": "signals.md section 2"
   },
   {
@@ -365,6 +367,7 @@
       },
       "message": "Internal error"
     },
+    "retryable": true,
     "source": "signals.md section 2"
   },
   {

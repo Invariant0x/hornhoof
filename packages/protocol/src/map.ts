@@ -19,8 +19,6 @@ export const TOOL_QUIET_ALARM_MS = 7_200_000;
    out. Claude Code ends a dead wait itself after its retries, about 66 minutes; Codex never does; Kimi Code logs every
    retry, so half an hour without one is past its own; Antigravity's run ends by itself. */
 export const RESTART_AFTER_MS: Record<'claude' | 'codex' | 'kimi' | 'antigravity', number | null> = { claude: 4_500_000, codex: 1_800_000, kimi: 1_800_000, antigravity: null };
-/* The map marks a program red when it reports idle this long while its turn still runs. */
-export const LOST_END_MS = 60_000;
 
 /* The program's own retry, with its next try in epoch milliseconds when known. */
 export type ProgramRetry = { attempt: number; max: number | null; nextAt: number | null };

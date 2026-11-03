@@ -69,6 +69,11 @@ export class TurnWords {
   replay(text: string): void { this.replayed = text; this.endedAt = null; }
   end(now: number): void { this.endedAt ??= now; }
 
+  waitingForTurn(now: number): boolean {
+    return this.endedAt !== null && now - this.endedAt < UNHEARD_MS
+      && this.words.some(word => word.state === 'queued' || word.state === 'held');
+  }
+
   queued(text: string, source: string): boolean {
     const word = this.words.find(word => this.waiting(word) && flat(word.text) === flat(text) && !word.sources.has(source));
     if (!word) return false;

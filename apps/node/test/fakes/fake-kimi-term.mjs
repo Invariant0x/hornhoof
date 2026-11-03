@@ -93,7 +93,7 @@ async function take(line) {
   record('turn.prompt', { input: [{ type: 'text', text: line }], origin: { kind: 'user' } });
   if (await endsAtOnce(line, turnId)) return;
   await workFirst(line, turnId);
-  if (line.includes('PARTS')) return parts(turnId);
+  if (line.includes('PARTS')) return parts(turnId, line.includes('HOOKFIRST'));
   await answer(line, turnId, context);
 }
 
@@ -154,7 +154,7 @@ async function workFirst(line, turnId) {
 }
 
 // A step with a tool call, then a final message in two text parts with a thought between them.
-function parts(turnId) {
+async function parts(turnId, hookFirst) {
   loop(turnId, { type: 'step.begin', step: 1 });
   loop(turnId, { type: 'content.part', step: 1, part: { type: 'text', text: 'Looking.' } });
   loop(turnId, { type: 'tool.call', step: 1, toolCallId: 'c1', name: 'Bash', args: { command: 'ls' } });
@@ -162,10 +162,13 @@ function parts(turnId) {
   loop(turnId, { type: 'step.end', step: 1 });
   loop(turnId, { type: 'step.begin', step: 2 });
   loop(turnId, { type: 'content.part', step: 2, part: { type: 'text', text: 'first half.' } });
+  const stopping = hookFirst ? hook('stop', 'Stop', { turn_id: String(turnId) }) : null;
+  if (hookFirst) await sleep(300);
   loop(turnId, { type: 'content.part', step: 2, part: { type: 'think', think: 'More.' } });
   loop(turnId, { type: 'content.part', step: 2, part: { type: 'text', text: ' second half.' } });
   loop(turnId, { type: 'step.end', step: 2 });
   record('turn.ended', { turnId, reason: 'completed' });
+  await stopping;
   print('● first half. second half.\n');
   prompt();
 }
@@ -175,8 +178,9 @@ async function answer(line, turnId, context) {
   loop(turnId, { type: 'content.part', step: 1, part: { type: 'text', text } });
   if (line.includes('SWITCH')) record('config.update', { modelAlias: 'small' });
   record('token_counting.measured', { length: 2, tokens: 262144 });
-  if (!line.includes('LOGFIRST')) await hook('stop', 'Stop', {});
+  const stopping = !line.includes('LOGFIRST') ? hook('stop', 'Stop', {}) : null;
   record('turn.ended', { turnId, reason: 'completed' });
+  await stopping;
   if (line.includes('LOGFIRST')) await hook('stop', 'Stop', {});
   print(`● ${text}\n`);
   prompt();

@@ -1,6 +1,7 @@
 import { closeSync, openSync, readSync, statSync } from 'node:fs';
-import type { AgentEvent, Limits } from '@hornhoof/protocol';
+import type { AgentEvent, Failure, Limits } from '@hornhoof/protocol';
 import { contentText, inputText, isoFrom, isRecord, toolName } from '../providers/events.js';
+import { codexFailure } from './failures.js';
 
 /* Follows a log file a program appends to, a whole line at a time. */
 export class LineTail {
@@ -53,7 +54,7 @@ function windowName(minutes: unknown): string {
 
 /* What a line of Codex's session log tells: things to show, the session, a turn's start, what a person typed, the turn's
    end, failure or that a person stopped it, the limits, how full the context is. */
-export type RolloutNews = { events: AgentEvent[]; session?: { id: string; cwd: string }; started?: true; typed?: string; ended?: { message: string }; aborted?: true; failed?: string; limits?: Limits; context?: number };
+export type RolloutNews = { events: AgentEvent[]; session?: { id: string; cwd: string }; started?: true; typed?: string; ended?: { message: string }; aborted?: true; failed?: Failure; limits?: Limits; context?: number };
 
 /* Codex counts its context past the part every session starts with, and so does Hornhoof, to show what its screen shows. */
 const CODEX_BASELINE = 12_000;
@@ -109,15 +110,6 @@ function itemEvents(item: Record<string, unknown>): AgentEvent[] {
     default:
       return [];
   }
-}
-
-/* Codex logs the error's kind as a name or an object whose value can hold the HTTP status. */
-function codexFailure(error: Record<string, unknown>): string {
-  const info = error.codex_error_info;
-  const [kind, details] = isRecord(info) ? (Object.entries(info)[0] ?? ['', null]) : [typeof info === 'string' ? info : '', null];
-  const status = isRecord(details) && typeof details.http_status_code === 'number' ? ` ${details.http_status_code}` : '';
-  const message = typeof error.message === 'string' ? error.message : '';
-  return [kind + status, message].filter(Boolean).join(': ') || 'unknown';
 }
 
 export function codexRollout(line: unknown): RolloutNews {

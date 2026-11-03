@@ -48,6 +48,7 @@ async function atWork(takePrompt = true) {
   const turns = [running];
   const finish = () => record({ type: 'task_complete', last_agent_message: 'Done.' });
   cleanups.push(async () => {
+    alive.mockResolvedValue(false);
     finish();
     await Promise.all(turns);
     await host.stop();
