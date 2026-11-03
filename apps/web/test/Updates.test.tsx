@@ -23,7 +23,7 @@ function updates(over: Partial<UpdatesView> = {}, updater: Partial<UpdatesView['
   };
 }
 
-const status = (state: UpdaterStatus['state'], step: UpdaterStatus['step'], log = ''): UpdaterStatus => ({ id: 'u1', version: '0.4.1', state, step, log, at: '2026-10-30T02:05:00Z' });
+const status = (state: UpdaterStatus['state'], step: UpdaterStatus['step'], log = ''): UpdaterStatus => ({ id: 'u1', version: '0.4.1', commit: 'b'.repeat(40), state, step, log, at: '2026-10-30T02:05:00Z' });
 
 afterEach(() => {
   localStorage.clear();
@@ -41,7 +41,7 @@ describe('updates', () => {
     mockApi({ 'GET /api/org': [200, ORG], 'GET /api/updates': [200, updates()] });
     render(<Shell me={ME} onSignOut={() => {}} />);
     const banner = await screen.findByRole('status', { name: 'Hornhoof update' });
-    expect(banner).toHaveTextContent('Hornhoof 0.4.1 is out: Hire from the staff card');
+    expect(banner).toHaveTextContent('Hornhoof 0.4.1 (bbbbbbb) is out: Hire from the staff card');
     expect(within(banner).getAllByRole('button').map(b => b.textContent)).toEqual(['Update', 'Update when agents finish', 'Later']);
   });
 
@@ -73,7 +73,7 @@ describe('updates', () => {
       'GET /api/org': [200, ORG],
       'GET /api/updates': () => [200, view],
       'POST /api/updates': body => {
-        view = (body as { whenIdle?: boolean }).whenIdle ? updates({}, { waiting: { version: '0.4.1' } }) : updates({}, { status: status('running', 'pull') });
+        view = (body as { whenIdle?: boolean }).whenIdle ? updates({}, { waiting: { version: '0.4.1', commit: 'b'.repeat(40) } }) : updates({}, { status: status('running', 'pull') });
         return [202, { id: 'u1' }];
       },
       'DELETE /api/updates': () => ((view = updates()), [204]),
@@ -82,12 +82,12 @@ describe('updates', () => {
     render(<Shell me={ME} onSignOut={() => {}} />);
     await user.click(await screen.findByRole('button', { name: 'Update when agents finish' }));
     expect(calls.find(c => c.method === 'POST' && c.path === '/api/updates')!.body).toEqual({ version: 'latest', whenIdle: true });
-    expect(await screen.findByText('Hornhoof will update to 0.4.1 when the agents finish.')).toBeInTheDocument();
+    expect(await screen.findByText('Hornhoof will update to 0.4.1 (bbbbbbb) when the agents finish.')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Call off' }));
     expect(calls.some(c => c.method === 'DELETE' && c.path === '/api/updates')).toBe(true);
     await user.click(await screen.findByRole('button', { name: 'Update' }));
     expect(calls.filter(c => c.method === 'POST' && c.path === '/api/updates').pop()!.body).toEqual({ version: 'latest', whenIdle: false });
-    expect(await screen.findByText('Updating Hornhoof to 0.4.1')).toBeInTheDocument();
+    expect(await screen.findByText('Updating Hornhoof to 0.4.1 (bbbbbbb)')).toBeInTheDocument();
     const bar = screen.getByRole('progressbar', { name: 'Update progress' });
     expect(bar).toHaveAttribute('aria-valuetext', 'Step 1 of 4: downloading');
     expect(bar).toHaveAttribute('aria-valuenow', '0');
@@ -126,6 +126,7 @@ describe('updates', () => {
     render(<Shell me={ME} onSignOut={() => {}} />);
     await user.click(await screen.findByRole('button', { name: 'Update' }));
     /* The updater has not picked it up yet, and the banner already moves. */
+    expect(await screen.findByText('Updating Hornhoof to 0.4.1 (bbbbbbb)')).toBeInTheDocument();
     expect(await screen.findByRole('progressbar', { name: 'Update progress' })).toHaveAttribute('aria-valuetext', 'Getting the update ready');
     view = updates({}, { status: { ...status('running', 'install'), id: 'u2' } });
     await waitFor(() => expect(screen.getByRole('progressbar', { name: 'Update progress' })).toHaveAttribute('aria-valuetext', 'Step 3 of 4: installing'), { timeout: 4000 });
@@ -157,6 +158,35 @@ describe('updates', () => {
     expect(within(dialog).getAllByRole('listitem').map(r => r.querySelector('b')!.textContent)).toEqual(['0.5.0 (ddddddd)', 'snapshot (eeeeeee)']);
   });
 
+  it('keeps the selected rollback build while the request starts and latest moves', async () => {
+    let view = updates();
+    const calls = mockApi({
+      'GET /api/org': [200, ORG],
+      'GET /api/updates': () => [200, view],
+      'POST /api/updates': () => {
+        view = updates({ latest: build('0.4.2', 'd'.repeat(40)) });
+        return [202, { id: 'selected-rollback' }];
+      },
+    });
+    const user = userEvent.setup();
+    render(<Shell me={ME} onSignOut={() => {}} />);
+    const dialog = await openVersions(user);
+    await user.click(within(within(dialog).getAllByRole('listitem')[2]!).getByRole('button', { name: 'Install' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Go back to 0.3.0 (ccccccc)' }));
+    expect(await within(dialog).findByText('Updating Hornhoof to 0.3.0 (ccccccc)')).toBeInTheDocument();
+    expect(within(screen.getByRole('status', { name: 'Hornhoof update' })).getByText('Updating Hornhoof to 0.3.0 (ccccccc)')).toBeInTheDocument();
+    expect(calls.find(c => c.method === 'POST' && c.path === '/api/updates')!.body).toEqual({ version: '0.3.0', whenIdle: false });
+  });
+
+  it('marks a legacy status commit as unknown instead of borrowing the latest build', async () => {
+    const legacy: UpdaterStatus = { id: 'legacy', version: '0.4.1', state: 'failed', step: 'finished', log: '', at: '2026-10-30T02:05:00Z' };
+    mockApi({ 'GET /api/org': [200, ORG], 'GET /api/updates': [200, updates({}, { status: legacy })] });
+    const user = userEvent.setup();
+    render(<Shell me={ME} onSignOut={() => {}} />);
+    const dialog = await openVersions(user);
+    expect(within(dialog).getByText('The update to 0.4.1 (?) failed. What the updater wrote is in Versions.')).toBeInTheDocument();
+  });
+
   it('warns before going back past a database change', async () => {
     const calls = mockApi({ 'GET /api/org': [200, ORG], 'GET /api/updates': [200, updates()], 'POST /api/updates': [202, { id: 'u2' }] });
     const user = userEvent.setup();
@@ -166,7 +196,7 @@ describe('updates', () => {
     await user.click(within(old).getByRole('button', { name: 'Install' }));
     expect(within(dialog).getByText('Going back past a database change may not start. If it does not, update to the newest version again.')).toBeInTheDocument();
     expect(calls.some(c => c.method === 'POST' && c.path === '/api/updates')).toBe(false);
-    await user.click(within(dialog).getByRole('button', { name: 'Go back to 0.3.0' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Go back to 0.3.0 (ccccccc)' }));
     expect(calls.find(c => c.method === 'POST' && c.path === '/api/updates')!.body).toEqual({ version: '0.3.0', whenIdle: false });
   });
 
@@ -177,7 +207,7 @@ describe('updates', () => {
     const user = userEvent.setup();
     render(<Shell me={ME} onSignOut={() => {}} />);
     const dialog = await openVersions(user);
-    expect(within(dialog).getByText('Updating Hornhoof to 0.4.1')).toBeInTheDocument();
+    expect(within(dialog).getByText('Updating Hornhoof to 0.4.1 (bbbbbbb)')).toBeInTheDocument();
     expect(within(dialog).getByRole('progressbar', { name: 'Update progress' })).toHaveAttribute('aria-valuetext', 'Step 2 of 4: saving the database');
     expect(within(dialog).getByText(/Saving the database\./)).toBeInTheDocument();
     view = updates({ current: { version: '0.4.1', commit: 'b'.repeat(40), migrations: 6 }, available: false }, { status: status('done', 'finished') });
@@ -189,7 +219,7 @@ describe('updates', () => {
     const user = userEvent.setup();
     render(<Shell me={ME} onSignOut={() => {}} />);
     const dialog = await openVersions(user);
-    expect(within(dialog).getByText('The update to 0.4.1 did not start. Hornhoof went back to 0.4.0.')).toBeInTheDocument();
+    expect(within(dialog).getByText('The update to 0.4.1 (bbbbbbb) did not start. Hornhoof went back to 0.4.0 (aaaaaaa).')).toBeInTheDocument();
     expect(within(dialog).getByText(/did not answer within 120 seconds/)).toBeInTheDocument();
   });
 
@@ -205,7 +235,7 @@ describe('updates', () => {
   it('gives the time of the last check as the chosen language writes it', () => {
     localStorage.setItem('hh-lang', 'ru');
     const view = updates();
-    const idle: Updates = { view, busy: false, starting: false, offline: false, asking: false, check: async () => {}, update: async () => {}, callOff: async () => {} };
+    const idle: Updates = { view, busy: false, starting: false, target: null, offline: false, asking: false, check: async () => {}, update: async () => {}, callOff: async () => {} };
     render(
       <LanguageProvider>
         <Versions updates={idle} onClose={() => {}} />

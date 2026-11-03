@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { errorText, useT } from '../i18n';
 import type { Updates } from '../updates';
 import { UpdateProgress } from './UpdateProgress';
+import { buildText, versionText } from './VersionMark';
+import { updateTargetText, versionedStatus } from './UpdateVersion';
 
 const LATER = 'hh-later';
 const SEEN = 'hh-update-seen';
@@ -47,24 +49,23 @@ export function UpdateBanner({ updates, onDetails }: { updates: Updates; onDetai
 
   let body: React.ReactNode = null;
   if (updates.starting || status?.state === 'running') {
-    const version = updates.starting ? (view.latest?.version ?? '') : status!.version;
     body = (
       <>
-        <UpdateProgress version={version} step={updates.starting ? null : status!.step} starting={updates.starting} offline={updates.offline} />
+        <UpdateProgress version={updateTargetText(updates)} step={updates.starting ? null : status!.step} starting={updates.starting} offline={updates.offline} />
         <button className="btn small ghost" type="button" onClick={onDetails}>{t.updates.details}</button>
       </>
     );
   } else if (waiting) {
     body = (
       <>
-        <span>{t.updates.waiting(waiting.version)}</span>
+        <span>{t.updates.waiting(versionText(waiting))}</span>
         <button className="btn small ghost" type="button" onClick={() => void act(updates.callOff)}>{t.updates.callOff}</button>
       </>
     );
   } else if (status && stored(SEEN) !== status.id) {
     body = (
       <>
-        <span>{t.updates.result(status, view.current.version)}</span>
+        <span>{t.updates.result(versionedStatus(status), versionText(view.current))}</span>
         {status.state !== 'done' && <button className="btn small ghost" type="button" onClick={onDetails}>{t.updates.details}</button>}
         <button className="btn small ghost" type="button" onClick={() => hide(SEEN, status.id)}>{t.updates.ok}</button>
       </>
@@ -73,7 +74,7 @@ export function UpdateBanner({ updates, onDetails }: { updates: Updates; onDetai
     const latest = view.latest;
     body = (
       <>
-        <span>{t.updates.out(latest.version || latest.tag, latest.title)}</span>
+        <span>{t.updates.out(buildText(latest), latest.title)}</span>
         <button className="btn small" type="button" disabled={updates.asking} onClick={() => void act(() => updates.update('latest', false))}>{t.updates.update}</button>
         <button className="btn small ghost" type="button" disabled={updates.asking} onClick={() => void act(() => updates.update('latest', true))}>{t.updates.whenIdle}</button>
         <button className="btn small ghost" type="button" onClick={() => hide(LATER, latest.commit)}>{t.updates.later}</button>

@@ -113,6 +113,14 @@ test('a missing origin/main is an actionable failure in full mode', () => {
   assert.match(result.stderr, /origin\/main/);
 });
 
+test('a malformed newer heading cannot hide the actual top release', () => {
+  const p = project();
+  writeFileSync(join(p.root, 'CHANGELOG.md'), '## [0.6.0] - 2026-11-5\nNew notes.\n\n## [0.5.0] - 2026-11-04\nPrevious notes.\n');
+  const result = p.run('check-release.mjs');
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /CHANGELOG\.md.*heading/);
+});
+
 for (const args of [['--other'], ['--other', '5'], ['--turn'], ['--turn', '05'], ['--turn', '5', 'extra'], ['--local', '--turn', '5']]) {
   test(`rejects check-release arguments ${JSON.stringify(args)}`, () => {
     const p = project();

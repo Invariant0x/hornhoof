@@ -1,11 +1,17 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+function sectionHeading(text) {
+  const match = /^## \[([^\]\r\n]+)\](?: - (\d{4}-\d{2}-\d{2}))?[ \t]*$/.exec(text);
+  if (!match) throw new Error(`CHANGELOG.md has a malformed release heading: ${text}`);
+  return { version: match[1], date: match[2] };
+}
+
 export function changelogSections(root) {
   const text = readFileSync(join(root, 'CHANGELOG.md'), 'utf8').replace(/\r\n/g, '\n');
-  const headings = [...text.matchAll(/^## \[([^\]\r\n]+)\](?: - (\d{4}-\d{2}-\d{2}))?[ \t]*$/gm)];
+  const headings = [...text.matchAll(/^##(?!#)[^\n]*$/gm)];
   return headings.map((h, i) => ({
-    version: h[1], date: h[2],
+    ...sectionHeading(h[0]),
     body: text.slice(h.index + h[0].length, headings[i + 1]?.index).trim(),
     text: text.slice(h.index, headings[i + 1]?.index).trim() + '\n',
   }));

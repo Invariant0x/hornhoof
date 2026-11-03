@@ -140,6 +140,7 @@ const SHA = 'b'.repeat(40);
 const asked = (registry: { digests: Record<string, string> }, id: string) => ({
   id,
   version: '0.4.1',
+  commit: SHA,
   tag: SHA,
   digest: registry.digests.latest,
   nodeDigest: registry.digests[`hornhoof-node:${SHA}`],
@@ -273,7 +274,7 @@ describe('updates', () => {
     const res = await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: true }, ...as(ceo) });
     expect(res.statusCode).toBe(202);
     expect(request(control)).toBeNull();
-    expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.waiting).toEqual({ version: '0.4.1' });
+    expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.waiting).toEqual({ version: '0.4.1', commit: SHA });
     await db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, job!.id));
     await publishWorking(app.ctx, acme!.id);
     await expect.poll(() => request(control)).toEqual(asked(registry, res.json().id));
@@ -294,7 +295,7 @@ describe('updates', () => {
     const res = await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest' }, ...as(ceo) });
     expect(res.statusCode).toBe(202);
     expect(request(control)).toBeNull();
-    expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.waiting).toEqual({ version: '0.4.1' });
+    expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.waiting).toEqual({ version: '0.4.1', commit: SHA });
     await db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, job!.id));
     await publishWorking(app.ctx, acme!.id);
     await expect.poll(() => request(control)).toEqual(asked(registry, res.json().id));
@@ -368,7 +369,7 @@ describe('updates', () => {
     hold.resume();
     await settled();
     expect(request(control)).toBeNull();
-    expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.waiting).toEqual({ version: '0.4.1' });
+    expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.waiting).toEqual({ version: '0.4.1', commit: SHA });
 
     rmdirSync(join(control, 'request.json.new'));
     await publishWorking(app.ctx, acme!.id);

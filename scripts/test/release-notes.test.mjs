@@ -22,6 +22,15 @@ test('defaults to the root version', () => {
   assert.match(result.stdout, /^## \[0\.5\.0\]/);
 });
 
+test('a malformed older heading cannot fill empty notes with another release', () => {
+  const p = project();
+  writeFileSync(join(p.root, 'CHANGELOG.md'), '## [0.5.0] - 2026-11-04\n\n### Fixed\n\n## [0.4.0] - 2026-10-3\nOld notes.\n');
+  const result = p.run('release-notes.mjs');
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /CHANGELOG\.md.*heading/);
+  assert.equal(result.stdout, '');
+});
+
 for (const text of ['# Changelog\n', '## [0.5.0] - 2026-11-04\n\n### Fixed\n', '## [0.5.0]\nMissing date.\n']) {
   test(`rejects absent or empty dated notes: ${JSON.stringify(text)}`, () => {
     const p = project();
