@@ -1,0 +1,2 @@
+CREATE INDEX "agent_events_program_history" ON "agent_events" USING btree ("job_id","created_at") WHERE "agent_events"."kind" in ('program', 'failed');--> statement-breakpoint
+CREATE INDEX "agent_events_silent_job" ON "agent_events" USING btree (("data"->>'silentJob')) WHERE "agent_events"."kind" = 'message' and "agent_events"."data" ? 'silentJob';

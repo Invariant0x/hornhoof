@@ -20,7 +20,7 @@ export const WHOLE_AGENTS_MD = ['-c', `project_doc_max_bytes=${1 << 20}`];
 
 /* The container is the sandbox, so Codex's own approvals and sandbox are off; resume takes no -C or -s. */
 const FLAGS = ['--json', '--skip-git-repo-check', '--dangerously-bypass-approvals-and-sandbox', ...WHOLE_AGENTS_MD, ...CODEX_NO_AUTO_UPDATE];
-export const SIGNED_OUT = /401 Unauthorized|Missing bearer|invalid_api_key|not logged in/i;
+export const SIGNED_OUT = /401 Unauthorized|Missing bearer|invalid_api_key|not logged in|(?:^|\n)\s*unauthorized:/i;
 
 /* What a --json line shows people: messages, MCP calls, shell commands with their results, and the plan. */
 export function codexEvents(line: unknown): AgentEvent[] {

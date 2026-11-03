@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import type { Db } from '../src/db/client.js';
-import { agents, companies, departments, jobs, nodeCodes, nodes, subscriptions, tasks, teams } from '../src/db/schema.js';
+import { agents, companies, departments, jobs, nodeCodes, nodes, subscriptions, tasks, teams, testParts, testRuns } from '../src/db/schema.js';
 import { as, invitePerson, SETUP, setUpCompany, TEST_API_KEY, testApp } from './helpers.js';
 
 const COMMAND = /^curl -fsSL http:\/\/localhost:8080\/install\.sh \| bash -s -- --join ([A-Za-z0-9_-]{43})$/;
@@ -129,6 +129,28 @@ describe('POST /api/subscriptions/connect', () => {
     expect(refusedWithAgents.json().error.reason).toBe('already_connected');
     expect((await db.select().from(subscriptions).where(eq(subscriptions.id, codexId)))[0]).toMatchObject({ status: 'needs_login', removedAt: null });
     expect(await db.select().from(nodes).where(eq(nodes.subscriptionId, codexId))).toHaveLength(1);
+
+    const [claudeNode] = await db.select().from(nodes).where(eq(nodes.subscriptionId, claudeId));
+    const [bruno] = await db.select().from(agents).where(eq(agents.subscriptionId, codexId));
+    const [task] = await db.insert(tasks).values({ companyId: development.companyId, number: 1, title: 'Check test runs' }).returning();
+    const [job] = await db.insert(jobs).values({ companyId: development.companyId, subscriptionId: claudeId, agentId: bruno!.id, prompt: 'Run', timeoutMs: 1000, status: 'done', kind: 'conversation' }).returning();
+    const [run] = await db.insert(testRuns).values({ companyId: development.companyId, number: 1, taskId: task!.id, agentId: bruno!.id, jobId: job!.id, command: 'npm test', parts: 2, timeoutMs: 1000, status: 'passed' }).returning();
+    await db.insert(testParts).values({ companyId: development.companyId, runId: run!.id, part: 1, status: 'passed', nodeId: claudeNode!.id, machineId: claudeNode!.machineId });
+
+    const kimi = (await connect(app, ceo, ['kimi'])).json();
+    const kimiId = kimi.subscriptions[0].id as string;
+    expect((await joinNode(kimi.command, 'mac-0003-ijkl')).statusCode).toBe(200);
+    await db.update(nodes).set({ machineId: claudeNode!.machineId }).where(eq(nodes.subscriptionId, kimiId));
+    expect((await connect(app, ceo, ['kimi'])).statusCode).toBe(201);
+
+    expect((await joinNode((await connect(app, ceo, ['kimi'])).json().command, 'mac-0003-ijkl')).statusCode).toBe(200);
+    const [kimiNode] = await db.select().from(nodes).where(eq(nodes.subscriptionId, kimiId));
+    await db.insert(testParts).values({ companyId: development.companyId, runId: run!.id, part: 2, status: 'passed', nodeId: kimiNode!.id, machineId: kimiNode!.machineId });
+
+    const refusedWithNodeRun = await connect(app, ceo, ['kimi']);
+    expect(refusedWithNodeRun.statusCode).toBe(409);
+    expect(refusedWithNodeRun.json().error.reason).toBe('already_connected');
+    expect(await db.select().from(nodes).where(eq(nodes.subscriptionId, kimiId))).toHaveLength(1);
   });
 
   it('refuses an empty list, repeats and API key providers', async () => {

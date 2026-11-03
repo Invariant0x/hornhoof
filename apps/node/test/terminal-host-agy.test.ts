@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SIGNED_OUT } from '../src/providers/antigravity.js';
 import type { TermJob } from '../src/terminal/host.js';
 import { agyProgram } from '../src/terminal/programs.js';
-import { ack, hasTmux, until, host, sent, home, setUp, job, done, tmux, typeTurn } from './terminal-host-helpers.js';
+import { ack, hasTmux, until, host, sent, home, setUp, job, done, tmux, typeTurn, pastLostEndWindows } from './terminal-host-helpers.js';
 
 const FAKE = fileURLToPath(new URL('./fakes/fake-agy-term.mjs', import.meta.url));
 const agyJob = (key: string, prompt: string, more: Partial<TermJob['input']> = {}) => ({
@@ -123,14 +123,25 @@ describe.skipIf(!hasTmux)("Antigravity's own terminal", () => {
     expect(keys).not.toHaveBeenCalled();
   });
 
-  it('closes a lost stop through the existing idle path with the last transcript answer and no keys', async () => {
-    const logs: string[] = [];
-    await setUp({ readyMs: 2000, cols: 120, rows: 40, lostMs: 500, lookMs: 100, log: text => logs.push(text) });
+  it('keeps a lost Stop open beyond the former idle timeout until a person stops it', async () => {
+    await setUp({ readyMs: 2000, cols: 120, rows: 40, lookMs: 50, reportMs: 100 });
+    const stop = new AbortController();
+    let ended = false;
+    const turn = agyJob('lost', 'NO_STOP', { jobId: 'job-lost', signal: stop.signal });
+    const run = host.run(turn);
+    void run.then(() => { ended = true; });
+    await until(() => turn.events.some(e => e.kind === 'text' && e.text === 'FINISHED'));
     const keys = vi.spyOn(tmux, 'keys');
-    expect(await host.run(agyJob('lost', 'NO_STOP', { jobId: 'job-lost' }))).toMatchObject({ ok: true, result: 'FINISHED' });
-    expect(sent).toContainEqual(expect.objectContaining({ type: 'job.program', jobId: 'job-lost', state: 'idle' }));
-    expect(logs.some(text => text.includes('end seen without hook'))).toBe(true);
-    expect(keys.mock.calls.flatMap(([, ...keys]) => keys).every(key => key === 'Enter')).toBe(true);
+    const reports = () => sent.filter(m => m.type === 'job.program' && m.jobId === 'job-lost');
+    const before = reports().length;
+    const clock = pastLostEndWindows();
+    await until(() => reports().length > before);
+    expect(ended).toBe(false);
+    expect(reports().at(-1)).toMatchObject({ state: 'thinking' });
+    expect(keys).not.toHaveBeenCalled();
+    clock.mockRestore();
+    stop.abort();
+    expect(await run).toMatchObject({ ok: false, error: 'cancelled' });
   });
 
   it('drains the transcript when stop arrives before its answer is readable', async () => {
@@ -148,8 +159,8 @@ describe.skipIf(!hasTmux)("Antigravity's own terminal", () => {
   });
 
   it('keeps an older interruption in the screen history from cancelling a later turn', async () => {
-    await setUp({ readyMs: 2000, cols: 120, rows: 40, lostMs: 500, lookMs: 100, log: () => {} });
-    expect(await host.run(agyJob('old-interruption', 'NO_STOP', { env: { FAKE_OLD_INTERRUPTED: '1' } }))).toMatchObject({ ok: true, result: 'FINISHED' });
+    await setUp({ readyMs: 2000, cols: 120, rows: 40, lookMs: 100 });
+    expect(await host.run(agyJob('old-interruption', 'WORK', { env: { FAKE_OLD_INTERRUPTED: '1' } }))).toMatchObject({ ok: true, result: 'FINISHED' });
   });
 
   it('fails a stop with an error and leaves agy ready for the next turn', async () => {
