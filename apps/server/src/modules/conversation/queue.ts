@@ -14,7 +14,8 @@ import { appendEvent, earlierTalk, messageForJob, publishWorking, type WithEvent
 import { instructionsOf } from '../agents/instructions.js';
 import { repoFor, repoLine } from '../departments/repository.js';
 import { textHash } from '../templates/load.js';
-import { openAfter, startWork } from '../tasks/engine.js';
+import { openAfter, startWork, type Tx } from '../tasks/engine.js';
+import { discardStaleTurn, discardStaleTurns, type TaskWake } from '../tasks/wake-state.js';
 import { agentProgramState, type TurnAlarm, type TurnAlarmReason, type TurnProgram } from '../tasks/silent.js';
 import { workStarts } from '../org/map-state.js';
 import { addressed, preface } from './prompt.js';
@@ -114,7 +115,7 @@ export const STOPPED_ON_PURPOSE = ['cancelled', 'removed', 'switched_off'];
 /* withMessage: what is kept together with the message, or not at all. */
 /* retryOf: the turn a node restart cut off, which this one runs once more. continueOf: the turn that ended without
    recording its work, whose session this one goes on with. */
-type Turn = { companyId: string; agentId: string; prompt: string; createdBy: string | null; message?: { personId: string | null; text: string; from?: 'orchestrator' | 'agent'; name?: string; by?: string; task?: { id: string; number: number }; request?: string; timer?: true; silentJob?: string; silentReason?: TurnAlarmReason }; taskId?: string; answersCeo?: boolean; withMessage?: WithEvent; retryOf?: string; continueOf?: string };
+type Turn = { companyId: string; agentId: string; prompt: string; createdBy: string | null; message?: { personId: string | null; text: string; from?: 'orchestrator' | 'agent'; name?: string; by?: string; task?: { id: string; number: number }; taskWake?: TaskWake; request?: string; timer?: true; silentJob?: string; silentReason?: TurnAlarmReason }; taskId?: string; answersCeo?: boolean; withMessage?: WithEvent; retryOf?: string; continueOf?: string };
 
 /* One thing at a time per agent, so two pumps never send two turns. */
 const chains = new WeakMap<Ctx, Map<string, Promise<unknown>>>();
@@ -464,6 +465,10 @@ async function goneAlong(ctx: Ctx, jobId: string): Promise<void> {
 /* A task turn of the task's holder left waiting from before the task came to wait for the tasks it comes after: it would
    set to work on it anyway, so it ends unsent. The holder is woken again once the task can start. */
 async function heldBack(ctx: Ctx, job: { id: string; agentId: string | null; taskId: string | null }): Promise<boolean> {
+  return (await discardStaleTurn(ctx.db, job)) || (await waitsForTasks(ctx, job));
+}
+
+async function waitsForTasks(ctx: Ctx, job: { id: string; agentId: string | null; taskId: string | null }): Promise<boolean> {
   if (!job.taskId) return false;
   const [task] = await ctx.db.select({ after: tasks.after, assigneeAgentId: tasks.assigneeAgentId }).from(tasks).where(eq(tasks.id, job.taskId));
   if (!task || task.assigneeAgentId !== job.agentId || !(await openAfter(ctx.db, task)).length) return false;
@@ -522,14 +527,17 @@ async function promptAlong(ctx: Ctx, job: Along, on: On, instructionsHash: strin
    the tasks that go out along with it, begins a new cycle: a server that stops once the turn went out never brings the
    line's old return back, and a turn whose cycle cannot be kept is not taken. The lines when one began a cycle. */
 async function take(ctx: Ctx, job: Queued, along: readonly Along[], sending: Sending): Promise<{ lines: { companyId: string } | null } | null> {
-  return ctx.db.transaction(async tx => {
-    const [row] = await tx
-      .update(jobs)
-      .set({ ...sending, requestedPrompt: job.prompt, status: 'running', startedAt: new Date() })
-      .where(and(eq(jobs.id, job.id), eq(jobs.status, 'queued')))
-      .returning({ id: jobs.id });
-    return row ? { lines: await workStarts(tx, { id: job.id, companyId: job.companyId, agentId: job.agentId, taskIds: [job.taskId, ...along.map(a => a.taskId)] }) } : null;
-  });
+  return ctx.db.transaction(tx => takeCurrent(tx, job, along, sending));
+}
+
+async function takeCurrent(tx: Tx, job: Queued, along: readonly Along[], sending: Sending): Promise<{ lines: { companyId: string } | null } | null> {
+  if (await discardStaleTurns(tx, [job, ...along.map(j => ({ ...j, agentId: job.agentId }))])) return null;
+  const [row] = await tx
+    .update(jobs)
+    .set({ ...sending, requestedPrompt: job.prompt, status: 'running', startedAt: new Date() })
+    .where(and(eq(jobs.id, job.id), eq(jobs.status, 'queued')))
+    .returning({ id: jobs.id });
+  return row ? { lines: await workStarts(tx, { id: job.id, companyId: job.companyId, agentId: job.agentId, taskIds: [job.taskId, ...along.map(a => a.taskId)] }) } : null;
 }
 
 /* A turn with words of its own is taken: an Enter that waited to open a turn of its own is settled with it. Not waited for,
@@ -604,7 +612,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   const token = newToken();
   /* Running from the moment it is sent: the token works for its tools at once, and the next turn waits. */
   const taken = await take(ctx, job, along, { subscriptionId: sub.id, nodeId: place.nodeId, prompt, toolTokenHash: hashToken(token), instructionsHash: runHash });
-  if (!taken) return;
+  if (!taken) return sendNext(ctx, agentId);
   wentOutWithWords(ctx, agentId, job);
   /* The agent stays on this machine from now on. */
   if (place.moves) await db.update(agents).set({ nodeId: place.nodeId }).where(eq(agents.id, agentId));

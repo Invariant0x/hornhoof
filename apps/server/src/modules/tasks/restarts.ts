@@ -7,6 +7,7 @@ import { published } from './engine.js';
 
 /* Why a node restarted, in words for the agents and the task's log. */
 const CAUSES: Record<RestartCause, string> = {
+  server: 'the Hornhoof server started again',
   update: 'Hornhoof updated it',
   machine: 'the machine under it started again',
   container: 'its container was created again, as an update of Hornhoof or a new install does',
@@ -53,7 +54,7 @@ async function retry(ctx: Ctx, { job, task, agent, cut }: Ended): Promise<void> 
   const note = `Your last turn on #${task.number} "${task.title}" ${cutOff(cut)}. Hornhoof runs it once more: check what that turn already did, then go on.`;
   const retried = await onAgent(ctx, agent.id, () => turnAgain(ctx, { job, task, agent }, note, { retryOf: job.id }));
   const again = retried ? `Hornhoof runs it again: retry 1 of ${RETRIES}, turn ${retried}.` : `Hornhoof could not run it again: ${agent.name} has no subscription.`;
-  await logCut(ctx, task, agent, cut, `${agent.name}'s turn ${job.id} ${cutOff(cut)}. ${again}`, { retry: retried ? { job: retried, n: 1, of: RETRIES } : null });
+  await logCut(ctx, task, agent, cut, `${agent.name}'s turn ${job.id} on #${task.number} ${cutOff(cut)}. ${again}`, { retry: retried ? { job: retried, n: 1, of: RETRIES } : null });
 }
 
 /* Operations' reliability engineer who is on, or else its head who is on: either needs a plan to take the turn. */
@@ -93,7 +94,7 @@ async function callOperations(ctx: Ctx, ended: Ended): Promise<void> {
     await enqueueTurn(ctx, { companyId: job.companyId, agentId: to.id, prompt: text, createdBy: null, message: { personId: null, text } });
   }
   const called = to ? `Hornhoof does not run it a third time and called ${to.name} of Operations to look at the node.` : 'Hornhoof does not run it a third time, and nobody in Operations is on to look at the node.';
-  await logCut(ctx, task, agent, cut, `${agent.name}'s turn ${job.id}, the retry of turn ${before.job}, ${cutOff(cut)}. ${called}`, {
+  await logCut(ctx, task, agent, cut, `${agent.name}'s turn ${job.id} on #${task.number}, the retry of turn ${before.job}, ${cutOff(cut)}. ${called}`, {
     first: { job: before.job, cause: before.cause, at: before.at },
     called: to ? { id: to.id, name: to.name } : null,
   });

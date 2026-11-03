@@ -1,7 +1,9 @@
 import { and, asc, eq, inArray } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
-import { agentEvents, agents, companies, departments, jobs, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
-import { identityOf } from '../src/modules/nodes/hub.js';
+import type { FastifyInstance } from 'fastify';
+import { describe, expect, it, onTestFinished } from 'vitest';
+import { buildApp } from '../src/app.js';
+import { agentEvents, agents, companies, departments, jobs, nodes, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
+import { BUILTIN, identityOf } from '../src/modules/nodes/hub.js';
 import { restartCause } from '../src/modules/nodes/restarts.js';
 import { createTask } from '../src/modules/tasks/engine.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
@@ -246,6 +248,108 @@ describe('a turn cut off by a node restart', () => {
     expect((await c.jobOf(timer!.id)).interruption).toMatchObject({ cause: 'program', task: null });
     await new Promise(r => setTimeout(r, 100));
     expect((await c.turnsOf(c.rob.id)).map(j => j.id)).toEqual([timer!.id]);
+  });
+});
+
+/* A fresh server context on the same database, as after the server's process ended. */
+async function restartServer(app: FastifyInstance) {
+  const { db, config } = app.ctx;
+  await app.close();
+  const next = await buildApp({ db, config });
+  onTestFinished(() => next.close());
+  return { app: next, url: await listen(next) };
+}
+
+async function builtinHello(url: string, how?: ReturnType<typeof boot>, running: string[] = []) {
+  const node = await connectNode(url, NODE_KEY);
+  node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running, boot: how });
+  return node;
+}
+
+describe('a built-in turn cut off by a server restart', () => {
+  it.each([
+    { name: 'with boot information', how: boot('2026-11-03T00:11:00.000Z') },
+    { name: 'without boot information', how: undefined },
+  ])('names the server restart and retries once, $name', async ({ how }) => {
+    const c = await company();
+    const first = await c.brunoAtWork();
+    const next = await restartServer(c.app);
+    const node = await builtinHello(next.url, how);
+    const retry = await nextRun(node);
+
+    const cut = await c.jobOf(first.jobId);
+    expect(cut).toMatchObject({ status: 'failed', error: 'machine_restarted', interruption: { cause: 'server', task: c.task.number, node: { id: null, name: 'the built-in node' } } });
+    expect(Date.parse(cut.interruption!.at)).not.toBeNaN();
+    expect((await c.turnsOf(c.bruno.id)).map(j => ({ id: j.id, retryOf: j.retryOf }))).toEqual([
+      { id: first.jobId, retryOf: null },
+      { id: retry.jobId, retryOf: first.jobId },
+    ]);
+    expect(retry.prompt).toContain('the Hornhoof server started again');
+    const [note] = await c.notes();
+    expect(note).toMatchObject({ data: { job: first.jobId, cause: 'server', retry: { job: retry.jobId, n: 1, of: 1 } } });
+    for (const said of [first.jobId, `#${c.task.number}`, 'the Hornhoof server started again', 'retry 1 of 1']) expect(note!.text).toContain(said);
+    const card = (await next.app.inject({ url: `/api/agents/${c.bruno.id}`, ...as(c.ceo) })).json();
+    expect(card.interrupted).toEqual([{ job: first.jobId, at: cut.interruption!.at, cause: 'server', node: null, task: { id: c.task.id, number: c.task.number }, retry: false }]);
+    expect(await c.db.select().from(nodes)).toEqual([]);
+  });
+
+  it('does not retry a second server restart and calls Operations with both turns', async () => {
+    const c = await company();
+    const first = await c.brunoAtWork();
+    const again = await restartServer(c.app);
+    const retry = await nextRun(await builtinHello(again.url));
+    const next = await restartServer(again.app);
+    await builtinHello(next.url);
+    await until(async () => (await c.notes()).length === 2);
+
+    expect((await c.turnsOf(c.bruno.id)).map(j => ({ id: j.id, status: j.status, retryOf: j.retryOf }))).toEqual([
+      { id: first.jobId, status: 'failed', retryOf: null },
+      { id: retry.jobId, status: 'failed', retryOf: first.jobId },
+    ]);
+    const notes = await c.notes();
+    expect(notes[1]).toMatchObject({ data: { job: retry.jobId, cause: 'server', first: { job: first.jobId, cause: 'server' }, called: { id: c.rob.id, name: 'Rob' } } });
+    const [call] = await c.turnsOf(c.rob.id);
+    for (const said of [first.jobId, retry.jobId, `#${c.task.number}`, 'the Hornhoof server started again', 'does not run the turn a third time']) expect(call!.prompt).toContain(said);
+    expect((await c.db.select().from(tasks).where(eq(tasks.id, c.task.id)))[0]).toMatchObject({ assigneeAgentId: c.bruno.id, executorAgentId: c.bruno.id });
+  });
+
+  it('does not retry timers or end turns the built-in node still reports', async () => {
+    const c = await company();
+    const [timer, kept] = await c.db.insert(jobs).values([
+      { companyId: c.companyId, subscriptionId: c.sub.id, agentId: c.rob.id, kind: 'conversation', prompt: 'Your round.', timeoutMs: 60_000, status: 'running', startedAt: new Date() },
+      { companyId: c.companyId, subscriptionId: c.sub.id, agentId: c.hana.id, kind: 'conversation', prompt: 'Still working.', timeoutMs: 60_000, status: 'running', startedAt: new Date() },
+    ]).returning();
+    const next = await restartServer(c.app);
+    await builtinHello(next.url, undefined, [kept!.id]);
+    await until(() => next.app.ctx.hub.isReady(BUILTIN));
+
+    expect(await c.jobOf(timer!.id)).toMatchObject({ status: 'failed', interruption: { cause: 'server', task: null } });
+    expect((await c.turnsOf(c.rob.id)).map(j => j.id)).toEqual([timer!.id]);
+    expect(await c.jobOf(kept!.id)).toMatchObject({ status: 'running', interruption: null });
+  });
+
+  it.each([
+    { name: 'with a known boot', before: boot('2026-11-03T00:00:00.000Z'), cause: 'program' },
+    { name: 'without a known boot', before: null, cause: 'unknown' },
+  ])('keeps a machine hello before the built-in node separate, $name', async ({ before, cause }) => {
+    const c = await company();
+    const first = await c.brunoAtWork();
+    const connected = await c.app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude'] }, ...as(c.ceo) });
+    const code = connected.json().command.split('--join ')[1];
+    const joined = await c.app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' } });
+    const personal = joined.json().nodes[0];
+    await c.db.update(nodes).set({ version: '0.5.0', boot: before }).where(eq(nodes.id, personal.nodeId));
+    const [machineJob] = await c.db.insert(jobs).values({ companyId: c.companyId, subscriptionId: personal.subscriptionId, nodeId: personal.nodeId, kind: 'test', prompt: 'Check.', timeoutMs: 60_000, status: 'running' }).returning();
+    const next = await restartServer(c.app);
+    const machine = await connectNode(next.url, personal.key);
+    machine.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], boot: boot('2026-11-03T00:11:00.000Z') });
+    await until(async () => (await c.jobOf(machineJob!.id)).status === 'failed');
+
+    expect((await c.jobOf(machineJob!.id)).interruption).toMatchObject({ cause, node: { id: personal.nodeId, name: 'ivan-mac' } });
+    expect((await c.jobOf(first.jobId)).status).toBe('running');
+    const retry = await nextRun(await builtinHello(next.url));
+    expect((await c.jobOf(first.jobId)).interruption).toMatchObject({ cause: 'server', task: c.task.number });
+    expect((await c.jobOf(retry.jobId)).retryOf).toBe(first.jobId);
   });
 });
 

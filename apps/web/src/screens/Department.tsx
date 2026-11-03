@@ -13,6 +13,7 @@ import { AgentIcon, BackIcon, MapIcon, PersonIcon, ProviderMark, SpeedIcon, Tree
 import { NewTask } from '../ui/NewTask';
 import { PersonButton } from '../ui/PersonButton';
 import { RepoSettings } from '../ui/RepoSettings';
+import { DeptEmployeeList, DeptSubUnits, employeeGroups } from '../ui/SubUnits';
 import { byState, TaskRow } from '../ui/TaskRow';
 import { LiveWay, Pulse, pulseSeconds, toD, useReducedMotion, type Point } from '../ui/wires';
 import { useWorkLines } from '../ui/work-lines';
@@ -20,7 +21,12 @@ import { useRework } from '../ui/use-rework';
 import { AgentState, type AgentLive } from '../ui/AgentState';
 import { TreeView } from './TreeView';
 import { SpeedPanel } from './SpeedPanel';
-import { arrowD, CH, CW, CY, FT, FW, HH, HW, PH, PW, schemaLayout, stepPaths, type Line, type Schema } from './schema';
+import { arrowD, CH, CW, CY, FT, FW, HH, HW, PH, PW, schemaLayout, stepPaths, type Frame, type Line, type Schema } from './schema';
+
+export { employeeGroups };
+
+const frameTitle = (f: Frame, language: 'en' | 'ru', others: string) =>
+  f.team ? f.team.name : f.role ? f.role.title[language] : others;
 
 type Props = {
   me: Me;
@@ -516,7 +522,7 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
             <div key={f.key || 'others'} className={`frame${f.role?.gate != null ? ' gt' : ''}`} style={{ left: f.x, top: FT, width: FW, height: f.h }}>
               <Edge cut={14} corner>
                 <span className={`fh${f.role && canGive ? ' has-sw' : ''}`}>
-                  <span className="fn">{f.role ? f.role.title[language] : t.dept.others}</span>
+                  <span className="fn">{frameTitle(f, language, t.dept.others)}</span>
                   {f.role && <span className="fa">{f.role.description[language]}</span>}
                   <span className="fc">{t.dept.agents(f.members.length)}</span>
                 </span>
@@ -649,6 +655,8 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
             {drawer === 'tasks' && sees && <DeptTasks department={d} head={head} canGive={canGive} selected={selectedTask} onOpenTask={onOpenTask} />}
             {drawer === 'about' && (
               <>
+                <DeptEmployeeList department={d} company={company} />
+                <DeptSubUnits department={d} company={company} />
                 {company && (
                   <section aria-labelledby={`${id}-repo`}>
                     <h3 id={`${id}-repo`}>{t.dept.repository}</h3>

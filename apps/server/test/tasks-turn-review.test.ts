@@ -1,7 +1,7 @@
 import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, companies, departments, jobs, people, subscriptions, taskEvents, tasks, turns } from '../src/db/schema.js';
+import { agents, companies, departments, jobs, people, subscriptions, taskEvents, tasks, teams, turns } from '../src/db/schema.js';
 import { answer, ask, createTask, leaveWork, submit, verdict, type Moved } from '../src/modules/tasks/engine.js';
 import { taskDetail } from '../src/modules/tasks/views.js';
 import { resumeAgent, wakePrompt } from '../src/modules/tasks/wake.js';
@@ -296,5 +296,47 @@ describe('the review of a turn', () => {
     expect(byAgent.get(rex!.id)).toEqual({ pass: true, stage: 1, round: 0 });
     expect('findings' in byAgent.get(rex!.id)!).toBe(false);
     expect(byAgent.get(sid!.id)).toEqual({ pass: true, stage: 1, round: 0, findings: 0 });
+  });
+
+  it('never puts a sub-unit employee into a task gate, the review of a turn, or the final check even when its role fits', async () => {
+    const { db, companyId, dev, head, bruno, rita, rex, sid, parent, member, merged, reviews, tools } = await company();
+    const [urgent] = await db.insert(teams).values({ companyId, departmentId: dev.id, name: 'Urgent fixes' }).returning();
+    const [claude] = await db.select().from(subscriptions);
+    const [simon] = await db
+      .insert(agents)
+      .values({ companyId, kind: 'worker', name: 'Simon', roleKey: 'DEV-REV', departmentId: dev.id, teamId: urgent!.id, model: '', subscriptionId: claude!.id })
+      .returning();
+    await db.update(agents).set({ teamId: urgent!.id }).where(eq(agents.id, sid!.id));
+
+    const headTools = await tools(head);
+    const hotfix = await headTools.callTool({ name: 'create_task', arguments: { title: 'Hotfix', brief: 'A fix.', body: 'Fix it.', executor: bruno.id } });
+    expect(hotfix.isError).toBeFalsy();
+    const [hotfixTask] = await db.select().from(tasks).where(eq(tasks.title, 'Hotfix'));
+    expect(hotfixTask!.gates).toEqual([rita!.id]);
+
+    const namedGate = await headTools.callTool({ name: 'create_task', arguments: { title: 'Checked', brief: 'A fix.', body: 'Fix it.', executor: bruno.id, gates: [simon!.id] } });
+    expect(namedGate.isError).toBe(true);
+
+    const roleGate = await headTools.callTool({ name: 'create_task', arguments: { title: 'Security check', brief: 'A fix.', body: 'Fix it.', executor: bruno.id, gates: ['DEV-SEC'] } });
+    expect(roleGate.isError).toBe(true);
+
+    const urgentTask = await headTools.callTool({
+      name: 'create_task',
+      arguments: { title: 'Urgent patch', brief: 'Quick fix.', body: 'Patch it.', executor: simon!.id, parent: parent.number },
+    });
+    expect(urgentTask.isError).toBeFalsy();
+    const [simonTask] = await db.select().from(tasks).where(eq(tasks.title, 'Urgent patch'));
+    expect(simonTask!.gates).toEqual([]);
+    const urgentDone = await merged(simon!.id, simonTask!.id);
+    expect(woken(urgentDone)).toEqual([[head.id, 'subtasks']]);
+    expect(await reviews()).toHaveLength(0);
+
+    const api = await member(bruno.id, 'Checkout API');
+    const last = await merged(bruno.id, api.id);
+    const [review] = await reviews();
+    expect(review!.panel.sort()).toEqual([rita!.id, rex!.id].sort());
+    expect(review!.panel).not.toContain(simon!.id);
+    expect(review!.panel).not.toContain(sid!.id);
+    expect(woken(last).map(w => w[0]).sort()).toEqual([rita!.id, rex!.id].sort());
   });
 });

@@ -18,6 +18,7 @@ export const StaffLine = z.object({
   role: Id,
   name: Name.optional(),
   product: z.uuid().optional(),
+  team: z.uuid().optional(),
   model: z.string().max(80).optional(),
   subscription: z.uuid().optional(),
   skills: z.object({ on: SkillIds.default([]), off: SkillIds.default([]) }).optional(),
@@ -33,6 +34,7 @@ export const HireLine = z.object({
   role: Id,
   name: Name,
   product: z.uuid().nullable().optional(),
+  team: z.uuid().nullable().optional(),
   model: z.string().max(80),
   subscription: z.uuid().nullable(),
   skills: SkillIds,
@@ -101,13 +103,37 @@ export function orchestratorServing(ctx: Pick<Ctx, 'db'>, companyId: string): Pr
   return connected(ctx.db, companyId, (sub, owner) => servesWholeCompany(sub, owner.scopeKind));
 }
 
-type Line = { role: string; product?: string | null; model?: string; subscription?: string | null; skills: { on: string[]; off: string[] } | string[] };
+type Line = { role: string; product?: string | null; team?: string | null; model?: string; subscription?: string | null; skills: { on: string[]; off: string[] } | string[] };
+
+function checkLineTeam(role: Role, teamId: string | null | undefined, deptTeams: Set<string>, dept: Dept): string | null {
+  if (!teamId) return null;
+  if (role.kind === 'head') return 'A department head cannot be in a sub-unit.';
+  if (!deptTeams.has(teamId)) return `There is no sub-unit with id ${teamId} in ${deptName(dept)}.`;
+  return null;
+}
+
+function checkLockedSkills(role: Role, skills: Line['skills'], roleId: string): string | null {
+  const { on, off } = Array.isArray(skills) ? { on: skills, off: [] } : skills;
+  for (const s of role.skills.filter(x => x.locked)) {
+    if (off.includes(s.id)) return `${s.id} is locked on for every ${role.kind === 'head' ? 'head' : 'employee'} and cannot be turned off.`;
+    if (Array.isArray(skills) && !on.includes(s.id)) return `${roleId} must keep the locked skill ${s.id}.`;
+  }
+  return null;
+}
+
+function checkLineSkills(templates: Ctx['templates'], role: Role, skills: Line['skills'], roleId: string, teamProblem: string | null): string | null {
+  if (teamProblem) return teamProblem;
+  const { on, off } = Array.isArray(skills) ? { on: skills, off: [] } : skills;
+  for (const id of [...on, ...off]) if (!templates.skills.has(id)) return `There is no skill ${id}.`;
+  return checkLockedSkills(role, skills, roleId);
+}
 
 /* What is wrong with these lines for the department, in plain English for the agent or the card to fix, or null. */
 export async function checkStaff(ctx: Pick<Ctx, 'db' | 'templates'>, companyId: string, dept: Dept, lines: Line[]): Promise<string | null> {
   const { db, templates } = ctx;
   if (!dept.templateKey) return `${deptName(dept)} has no template, so Hornhoof has no roles for it.`;
   const products = new Set((await db.select({ id: departments.id }).from(departments).where(eq(departments.parentId, dept.id))).map(p => p.id));
+  const deptTeams = new Set((await db.select({ id: teams.id }).from(teams).where(eq(teams.departmentId, dept.id))).map(t => t.id));
   const serving = new Map<string, Map<string, Serving>>();
   const servingAt = async (product: string | null) => {
     const key = product ?? '';
@@ -125,13 +151,8 @@ export async function checkStaff(ctx: Pick<Ctx, 'db' | 'templates'>, companyId: 
       if (!sub) return `${line.role}: a model needs a subscription to run on; leave the model out for Default.`;
       if (!sub.models.some(m => m.id === line.model)) return `${sub.label} cannot run the model ${line.model}. It runs: ${sub.models.map(m => m.id).join(', ') || 'only its Default'}.`;
     }
-    const locked = role.skills.filter(s => s.locked).map(s => s.id);
-    const { on, off } = Array.isArray(line.skills) ? { on: line.skills, off: [] } : line.skills;
-    for (const id of [...on, ...off]) if (!templates.skills.has(id)) return `There is no skill ${id}.`;
-    for (const id of locked) {
-      if (off.includes(id)) return `${id} is locked on for every ${role.kind === 'head' ? 'head' : 'employee'} and cannot be turned off.`;
-      if (Array.isArray(line.skills) && !on.includes(id)) return `${line.role} must keep the locked skill ${id}.`;
-    }
+    const skillProblem = checkLineSkills(templates, role, line.skills, line.role, checkLineTeam(role, line.team, deptTeams, dept));
+    if (skillProblem) return skillProblem;
   }
   return null;
 }

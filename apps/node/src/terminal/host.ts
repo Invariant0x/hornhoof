@@ -17,7 +17,7 @@ import { plainOutput, signalName, type ProgramOutput } from '../program-exit.js'
 import { redact } from '../redact.js';
 import { Bridge, type AgentUrls } from './bridge.js';
 import { inputOf } from './input.js';
-import { fromAgent } from './peer.js';
+import { procOwner, type OwnerFactory, type Ownership, type Panes } from './peer.js';
 import { StreamMask } from './mask.js';
 import { ProgramWatch, READY, REPORT_MS, type Pending } from './program-state.js';
 import { acceptClaudeDialogs, agyTranscript, claudeTranscript, findKimiWire, findRollout, prepareAgy, prepareKimi, rolloutFiles, type LaunchSpec, type TermProgram } from './programs.js';
@@ -59,6 +59,7 @@ type Turn = {
   onEvent(e: AgentEvent): void;
   typed: boolean;
   seq: number;
+  signal?: AbortSignal;
   ref?: string;
   early?: AgentEvent[] | null;
   over?: { message: string; error: JobError; sessionId: string | null; output: string; programOutput?: ProgramOutput } | null;
@@ -109,6 +110,8 @@ type Agent = {
   inputUnknown?: boolean;
   /* Hornhoof's turns, one after another. */
   queue: Promise<unknown>;
+  /* Escape from a cancelled typed turn must finish before another prompt goes in. */
+  cancelling?: Promise<void>;
   /* Typed turns Hornhoof has not answered yet, oldest first. */
   unopened: Turn[];
   /* A person stopped the running turn with Escape. */
@@ -189,6 +192,7 @@ type Options = {
   rows?: number;
   /* Where Linux tells which process holds a connection, so the bridge takes tool calls only from the agent's own program. */
   proc?: string;
+  owner?: OwnerFactory;
   /* On a node that runs as root, the user the agents' programs run as, and how the node does file work in their folders. */
   user?: JobUser | null;
   fs?: AgentFs;
@@ -286,9 +290,9 @@ export class TerminalHost {
   private readonly rows: number;
 
   constructor(private readonly opts: Options) {
-    const owns = opts.proc ? fromAgent(key => this.panes(key), opts.proc) : null;
-    this.bridge = new Bridge(opts.hornhoof, (key, event, body) => this.hook(key, event, body), owns, {
-      proc: opts.proc, rejected: (key, event, reason) => this.hookRejected(key, event, reason),
+    const owner = ownership(opts, key => this.panes(key));
+    this.bridge = new Bridge(opts.hornhoof, (key, event, body) => this.hook(key, event, body), owner.owns, {
+      capture: owner.capture, rejected: (key, event, reason) => this.hookRejected(key, event, reason),
     });
     this.fs = opts.fs ?? (opts.user ? agentFs(opts.user) : ownFs);
     this.plugins = opts.plugins ?? claudePlugins();
@@ -359,9 +363,8 @@ export class TerminalHost {
     const { input, program } = job;
     /* A turn a person typed may still run, or wait for the rest of its log; Hornhoof's turn goes in after it, or into it
        once the time Hornhoof gave this turn is over. Nothing stops the program: only its own end or a person does. */
-    const deadline = Date.now() + input.timeoutMs;
-    for (this.drain(a); a.busy && Date.now() < deadline; this.drain(a)) await sleep(this.pollMs);
-    await a.settling;
+    await this.waitForTurn(a, job);
+    if (input.signal?.aborted) return this.failedTurn(a, job, 'cancelled');
     a.signedOut = job.signedOut;
 
     await this.fs.mkdir(input.workDir);
@@ -383,7 +386,7 @@ export class TerminalHost {
     a.calls.clear();
     this.bridge.setToken(job.key, input.tools?.token ?? null);
     const starting = input.prompt ? null : (tools ?? Promise.resolve());
-    const turn: Turn = { jobId: null, onEvent: input.onEvent ?? (() => {}), typed: false, seq: 0, ...(starting ? { starting: true } : {}) };
+    const turn: Turn = { jobId: null, onEvent: input.onEvent ?? (() => {}), typed: false, seq: 0, signal: input.signal, ...(starting ? { starting: true } : {}) };
     if (starting) a.starting = starting;
     a.turn = turn;
     a.ended = deferred();
@@ -404,6 +407,13 @@ export class TerminalHost {
         a.ended = null;
       }
     }
+  }
+
+  private async waitForTurn(a: Agent, job: TermJob): Promise<void> {
+    const deadline = Date.now() + job.input.timeoutMs;
+    for (this.drain(a); a.busy && !job.input.signal?.aborted && Date.now() < deadline; this.drain(a)) await sleep(this.pollMs);
+    await a.settling;
+    await a.cancelling;
   }
 
   /* What the agent is told before its turn. The conversation from before reaches a program that starts now; it is not part
@@ -918,7 +928,7 @@ export class TerminalHost {
   }
 
   private emit(a: Agent, event: AgentEvent): void {
-    const turn = a.turn;
+    const turn = activeTurn(a);
     if (!turn) return;
     if (event.kind === 'text') a.lastText = event.text;
     if (!turn.typed) return turn.onEvent(event);
@@ -1142,7 +1152,7 @@ export class TerminalHost {
   private wordsMayGoIn(a: Agent, words: LiveWords): boolean {
     this.drain(a);
     /* A turn that ended in the program takes no words: typed then, they would start a turn nobody waits for. */
-    return a.turn === words.turn && !words.turn.starting && (words.turn.typed || Boolean(a.took)) && a.busy && !this.overIn(a) && Date.now() < words.deadline;
+    return activeTurn(a) === words.turn && !words.turn.starting && (words.turn.typed || Boolean(a.took)) && a.busy && !this.overIn(a) && Date.now() < words.deadline;
   }
 
   private async canSay(a: Agent, words: LiveWords): Promise<boolean> {
@@ -1183,10 +1193,11 @@ export class TerminalHost {
   async cancel(jobId: string): Promise<void> {
     const a = [...this.agents.values()].find(x => x.turn?.typed && x.turn.jobId === jobId);
     if (!a) return;
-    /* A session that is gone took its program with it; the turn ends all the same. */
-    await this.opts.tmux.keys(a.name, 'Escape').catch(() => {});
-    a.busy = false;
     this.finishTyped(a, '', 'cancelled');
+    /* A session that is gone took its program with it; the turn ends all the same. */
+    a.cancelling = this.opts.tmux.keys(a.name, 'Escape').catch(() => {});
+    await a.cancelling;
+    a.busy = false;
   }
 
   /* The agent's views hear when its program comes up or goes. */
@@ -1393,6 +1404,16 @@ export async function parentOf(pid: number): Promise<number | null> {
   } catch {
     return new Promise(resolve => execFile('ps', ['-o', 'ppid=', '-p', String(pid)], (err, out) => resolve(err ? null : Number(out.trim()))));
   }
+}
+
+function ownership(options: Options, panes: Panes): Ownership {
+  if (options.owner) return options.owner(panes);
+  return options.proc ? procOwner(options.proc)(panes) : { owns: null };
+}
+
+/* A cancelled turn can still wait for Escape and its final session, but takes no more input or events. */
+function activeTurn(a: Agent): Turn | null {
+  return a.turn?.signal?.aborted ? null : a.turn;
 }
 
 /* How many tokens the model Kimi starts with takes in its context, from its settings. */

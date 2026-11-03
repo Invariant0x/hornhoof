@@ -1,15 +1,16 @@
-import { and, asc, desc, eq, inArray, isNotNull } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
+import * as instructionBuilder from '../src/modules/agents/instructions.js';
 import { describe, expect, it, vi } from 'vitest';
-import { agentEvents, agents, companies, departments, jobs, machines, nodes, people, personAccess, requests, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
+import { agentEvents, agents, companies, departments, jobs, machines, nodes, pendingWakes, people, personAccess, requests, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
 import { agentState, enqueueTurn } from '../src/modules/conversation/queue.js';
 import { said } from '../src/modules/conversation/live.js';
 import { identityOf, type NodeIdentity } from '../src/modules/nodes/hub.js';
-import { answer, ask, cancel, comment, createTask, GOING_ON_TURNS, report, submit, updateTask } from '../src/modules/tasks/engine.js';
+import { answer, ask, blocked, cancel, comment, createTask, GOING_ON_TURNS, report, submit, updateTask } from '../src/modules/tasks/engine.js';
 import { afterJob, SILENT_TURNS, startWork, typedTurn, wakeAll, wakeLeftBehind, wakePrompt } from '../src/modules/tasks/wake.js';
-import { as, connectNode, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
+import { as, connectNode, listen, setUpCompany, statements, testApp, until, type FakeNode } from './helpers.js';
 
-async function company() {
-  const { app, db } = await testApp();
+async function company(env?: NodeJS.ProcessEnv) {
+  const { app, db } = await testApp(env);
   const owner = await setUpCompany(app);
   const [acme] = await db.select().from(companies);
   const companyId = acme!.id;
@@ -251,7 +252,7 @@ describe('the turns a task move needs', () => {
     });
     await wakeAll(c.ctx, [
       { agentId: c.bruno.id, taskId: task.id, why: 'assigned' },
-      { agentId: c.head.id, taskId: task.id, why: 'updated' },
+      { agentId: c.head.id, taskId: task.id, why: 'blocked' },
     ]);
     expect(await c.turnsOf(c.head.id)).toHaveLength(1);
     expect(await wakeLeftBehind(c.ctx, later())).toBe(1);
@@ -688,8 +689,8 @@ describe('a head', () => {
     const [busy] = await db.insert(jobs).values({ companyId, subscriptionId: sub!.id, agentId: head.id, kind: 'conversation', prompt: 'Plan the turn.', timeoutMs: 900000, status: 'running', startedAt: new Date() }).returning();
     const held = async (title: string) => (await createTask(ctx, { personId: ceo.id }, { title, brief: '', body: '', departmentId: dev.id, assigneeAgentId: head.id })).task;
     /* What woke her goes out in one turn, which ends as the test says. */
-    const together = async (taskIds: string[], ended: { status: 'done' | 'failed'; error?: string }, during: () => Promise<unknown> = async () => {}) => {
-      await wakeAll(ctx, taskIds.map(taskId => ({ agentId: head.id, taskId, why: 'assigned' as const })));
+    const together = async (taskIds: string[], ended: { status: 'done' | 'failed'; error?: string }, during: () => Promise<unknown> = async () => {}, why: 'assigned' | 'done' = 'assigned') => {
+      await wakeAll(ctx, taskIds.map(taskId => ({ agentId: head.id, taskId, why })));
       await db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, busy!.id));
       await afterJob(ctx, busy!.id);
       const run = await nextRun(builtin);
@@ -738,7 +739,7 @@ describe('a head', () => {
     const part = async (title: string) => (await createTask(ctx, { agentId: head.id }, { title, brief: '', body: '', departmentId: dev.id, parentId: payments.id, assigneeAgentId: bruno.id, executor: true })).task;
     const [checkout, refund] = [await part('Checkout API'), await part('Refund email')];
     await db.update(tasks).set({ status: 'done', closedAt: new Date() }).where(inArray(tasks.id, [checkout.id, refund.id]));
-    await together([checkout.id, refund.id], { status: 'done' });
+    await together([checkout.id, refund.id], { status: 'done' }, undefined, 'done');
     expect(await reminded(payments.id)).toBe(1);
   });
 });
@@ -814,5 +815,274 @@ describe("working in the product's repository", () => {
     await new Promise(r => setTimeout(r, 150));
     expect(mac.queued()).toBe(0);
     expect((await app.inject({ url: `/api/agents/${olga.id}/events`, ...as(ceo) })).json().state.reason).toBe('node_outdated');
+  });
+});
+
+/* Real dispatch after an agent's long turn, with task wakes held behind it. */
+async function busyQueue() {
+  const c = await company({ NODE_KEY });
+  const builtin = await connectNode(await listen(c.app), NODE_KEY);
+  builtin.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [] });
+  await until(() => c.ctx.hub.isReady(identityOf(c.sub, null)));
+  const hold = async (agentId: string) => (await c.db.insert(jobs).values({ companyId: c.dev.companyId, subscriptionId: c.sub.id, agentId, kind: 'conversation', prompt: 'A long turn.', timeoutMs: 900000, status: 'running', startedAt: new Date() }).returning())[0]!;
+  const busy = await hold(c.bruno.id);
+  const release = async (id = busy.id) => {
+    await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, id));
+    await afterJob(c.ctx, id);
+  };
+  const close = async (ids: string[], status: 'done' | 'cancelled' = 'done') => c.db.update(tasks).set({ status, closedAt: new Date(), assigneeAgentId: null }).where(inArray(tasks.id, ids));
+  return { ...c, builtin, hold, release, close };
+}
+
+describe('obsolete task turns', () => {
+  it.each(['done', 'cancelled'] as const)('drops the three queued assignment and merge turns after their tasks are %s', async status => {
+    const c = await busyQueue();
+    const [first, second, merge] = await Promise.all([c.memberTask([]), c.memberTask([]), c.memberTask([])]);
+    await c.db.update(tasks).set({ merging: true }).where(eq(tasks.id, merge!.id));
+    await wakeAll(c.ctx, [
+      { agentId: c.bruno.id, taskId: first!.id, why: 'assigned' },
+      { agentId: c.bruno.id, taskId: second!.id, why: 'assigned' },
+      { agentId: c.bruno.id, taskId: merge!.id, why: 'merge', text: 'turn-4' },
+    ]);
+    const queued = (await c.turnsOf(c.bruno.id)).filter(j => j.status === 'queued');
+    expect(queued).toHaveLength(3);
+    /* These are the old rows of the incident, before wake snapshots existed. */
+    await c.db.update(agentEvents).set({ data: sql`${agentEvents.data} - 'taskWake'` }).where(inArray(agentEvents.jobId, queued.map(j => j.id)));
+    await c.close([first!.id, second!.id, merge!.id], status);
+    const next = await enqueueTurn(c.ctx, { companyId: c.dev.companyId, agentId: c.bruno.id, prompt: 'A new message.', createdBy: c.ceo.id });
+    await c.release();
+
+    expect((await nextRun(c.builtin)).jobId).toBe(next);
+    expect(c.builtin.queued()).toBe(0);
+    for (const [i, task] of [first!, second!, merge!].entries()) {
+      const [stale] = await c.db.select().from(jobs).where(eq(jobs.id, queued[i]!.id));
+      expect(stale).toMatchObject({ status: 'failed', error: 'stale', startedAt: null });
+      expect(stale!.result).toContain(`#${task.number}`);
+      expect((await c.db.select().from(agentEvents).where(and(eq(agentEvents.jobId, stale!.id), eq(agentEvents.kind, 'stopped')))).map(e => e.data)).toEqual([
+        { reason: 'stale', text: stale!.result, task: { id: task.id, number: task.number } },
+      ]);
+    }
+  });
+
+  it('drops a late merge signal before it queues a turn, and forgets the kept signal', async () => {
+    const c = await busyQueue();
+    const task = await c.memberTask([]);
+    await c.close([task.id]);
+    await c.db.insert(pendingWakes).values({ companyId: task.companyId, agentId: c.bruno.id, taskId: task.id, why: 'merge', createdAt: new Date(Date.now() - 60_000) });
+    await wakeLeftBehind(c.ctx, new Date(Date.now() + 60_000));
+    expect((await c.turnsOf(c.bruno.id)).filter(j => j.status === 'queued')).toEqual([]);
+    expect(await c.db.select().from(pendingWakes).where(eq(pendingWakes.taskId, task.id))).toEqual([]);
+  });
+
+  it('keeps comments on a done task in its log without waking its executor or reviewers', async () => {
+    const c = await company();
+    const task = await c.memberTask();
+    await c.db.update(tasks).set({ status: 'done', closedAt: new Date(), assigneeAgentId: c.bruno.id, panel: [c.rita.id] }).where(eq(tasks.id, task.id));
+    for (const actor of [{ personId: c.ceo.id }, { agentId: c.head.id }]) {
+      const moved = await comment(c.ctx, actor, task.id, 'A note for the turn review.');
+      expect(moved.wakes).toEqual([]);
+      await wakeAll(c.ctx, moved.wakes);
+    }
+    expect(await c.turnsOf(c.bruno.id)).toEqual([]);
+    expect(await c.turnsOf(c.rita.id)).toEqual([]);
+    expect((await c.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'comment'))))).toHaveLength(2);
+  });
+
+  it('still wakes the executor when its head answers a blocked task', async () => {
+    const c = await company();
+    const task = await c.memberTask();
+    await blocked(c.ctx, c.bruno.id, task.id, 'Which schema?');
+    const moved = await comment(c.ctx, { agentId: c.head.id }, task.id, 'Use the current schema.');
+    await wakeAll(c.ctx, moved.wakes);
+    expect(moved.task.status).toBe('open');
+    expect((await c.turnsOf(c.bruno.id)).map(j => j.prompt)).toEqual([expect.stringContaining('Use the current schema.')]);
+  });
+
+  it.each(['done', 'reported', 'reviewed', 'review_passed'] as const)('preserves the %s notice to the head after a task closes', async why => {
+    const c = await busyQueue();
+    const held = await c.hold(c.head.id);
+    const task = await c.memberTask([]);
+    await c.close([task.id]);
+    await wakeAll(c.ctx, [{ agentId: c.head.id, taskId: task.id, why, text: 'The checks passed.' }]);
+    const [queued] = (await c.turnsOf(c.head.id)).filter(j => j.status === 'queued');
+    expect(queued).toBeDefined();
+    await c.release(held.id);
+    expect((await nextRun(c.builtin)).jobId).toBe(queued!.id);
+  });
+
+  it.each([
+    { name: 'another executor', set: { assigneeAgentId: null } },
+    { name: 'work already started', set: { status: 'working' as const } },
+    { name: 'the merge phase', set: { merging: true } },
+  ])('drops an assignment that now belongs to $name', async ({ set }) => {
+    const c = await busyQueue();
+    const task = await c.memberTask([]);
+    await wakeAll(c.ctx, [{ agentId: c.bruno.id, taskId: task.id, why: 'assigned' }]);
+    const [queued] = (await c.turnsOf(c.bruno.id)).filter(j => j.status === 'queued');
+    await c.db.update(tasks).set(set).where(eq(tasks.id, task.id));
+    await c.release();
+    expect(c.builtin.queued()).toBe(0);
+    expect((await c.db.select().from(jobs).where(eq(jobs.id, queued!.id)))[0]).toMatchObject({ status: 'failed', error: 'stale', startedAt: null });
+  });
+
+  it('drops a review from a previous stage even when the same reviewer is on the next panel', async () => {
+    const c = await busyQueue();
+    const held = await c.hold(c.rita.id);
+    const task = await c.memberTask();
+    await c.db.update(tasks).set({ status: 'review', stage: 1, panel: [c.rita.id], assigneeAgentId: c.rita.id }).where(eq(tasks.id, task.id));
+    await wakeAll(c.ctx, [{ agentId: c.rita.id, taskId: task.id, why: 'review' }]);
+    const [queued] = (await c.turnsOf(c.rita.id)).filter(j => j.status === 'queued');
+    await c.db.update(tasks).set({ stage: 2 }).where(eq(tasks.id, task.id));
+    await c.release(held.id);
+    expect(c.builtin.queued()).toBe(0);
+    expect((await c.db.select().from(jobs).where(eq(jobs.id, queued!.id)))[0]).toMatchObject({ error: 'stale', startedAt: null });
+  });
+
+  it('still dispatches a current assignment after the busy turn ends', async () => {
+    const c = await busyQueue();
+    const task = await c.memberTask([]);
+    await wakeAll(c.ctx, [{ agentId: c.bruno.id, taskId: task.id, why: 'assigned' }]);
+    await wakeAll(c.ctx, [{ agentId: c.bruno.id, taskId: task.id, why: 'comment', text: 'The same current work.' }]);
+    expect((await c.turnsOf(c.bruno.id)).filter(j => j.status === 'queued')).toHaveLength(1);
+    const [queued] = (await c.turnsOf(c.bruno.id)).filter(j => j.status === 'queued');
+    const ran = statements();
+    await c.release();
+    expect((await nextRun(c.builtin)).jobId).toBe(queued!.id);
+    /* PGlite has one connection: the executed row lock proves the Postgres claim cannot race a task move. */
+    const locked = ran.find(s => s.sql.includes('from "tasks"') && s.sql.includes('for share'));
+    expect(locked?.params).toContain(task.id);
+  });
+
+  it('checks the task again at take if it closes while instructions are being built', async () => {
+    const c = await busyQueue();
+    const task = await c.memberTask([]);
+    await wakeAll(c.ctx, [{ agentId: c.bruno.id, taskId: task.id, why: 'assigned' }]);
+    const [queued] = (await c.turnsOf(c.bruno.id)).filter(j => j.status === 'queued');
+    const next = await enqueueTurn(c.ctx, { companyId: task.companyId, agentId: c.bruno.id, prompt: 'A current message.', createdBy: c.ceo.id });
+    const build = instructionBuilder.instructionsOf;
+    vi.spyOn(instructionBuilder, 'instructionsOf').mockImplementationOnce(async (...args) => {
+      const instructions = await build(...args);
+      await c.close([task.id]);
+      return instructions;
+    });
+    await c.release();
+    expect((await nextRun(c.builtin)).jobId).toBe(next);
+    expect((await c.db.select().from(jobs).where(eq(jobs.id, queued!.id)))[0]).toMatchObject({ error: 'stale', startedAt: null });
+  });
+
+  it.each(['before preparation', 'during preparation'] as const)('drops an obsolete task from a head combined turn, %s, and keeps the completed child notice', async timing => {
+    const c = await busyQueue();
+    const held = await c.hold(c.head.id);
+    const own = async (title: string) => (await createTask(c.ctx, { personId: c.ceo.id }, { title, brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.head.id })).task;
+    const current = await own('Current work');
+    const old = await own('Obsolete work');
+    const child = await c.memberTask([]);
+    await c.close([child.id]);
+    await wakeAll(c.ctx, [
+      { agentId: c.head.id, taskId: current.id, why: 'assigned' },
+      { agentId: c.head.id, taskId: old.id, why: 'assigned' },
+      { agentId: c.head.id, taskId: child.id, why: 'done' },
+    ]);
+    if (timing === 'before preparation') await c.close([old.id]);
+    else {
+      const build = instructionBuilder.instructionsOf;
+      vi.spyOn(instructionBuilder, 'instructionsOf').mockImplementationOnce(async (...args) => {
+        const instructions = await build(...args);
+        await c.close([old.id]);
+        return instructions;
+      });
+    }
+    await c.release(held.id);
+    const run = await nextRun(c.builtin);
+    expect(run.prompt).toContain('Current work');
+    expect(run.prompt).toContain(`#${child.number} "Checkout API"`);
+    expect(run.prompt).not.toContain('Obsolete work');
+    expect((await c.db.select().from(jobs).where(eq(jobs.taskId, old.id)))[0]).toMatchObject({ error: 'stale', startedAt: null });
+  });
+
+  it('drops a head update after the task it created is handed to another holder', async () => {
+    const c = await busyQueue();
+    const held = await c.hold(c.head.id);
+    const task = await c.memberTask([]);
+    await c.db.update(tasks).set({ assigneeAgentId: c.head.id }).where(eq(tasks.id, task.id));
+    await wakeAll(c.ctx, [{ agentId: c.head.id, taskId: task.id, why: 'updated' }]);
+    const [queued] = (await c.turnsOf(c.head.id)).filter(j => j.status === 'queued');
+    await c.db.update(tasks).set({ assigneeAgentId: c.bruno.id }).where(eq(tasks.id, task.id));
+    await c.release(held.id);
+    expect((await c.db.select().from(jobs).where(eq(jobs.id, queued!.id)))[0]).toMatchObject({ error: 'stale', startedAt: null });
+  });
+
+  it('drops a legacy task turn when its worker also created the task', async () => {
+    const c = await busyQueue();
+    const task = await c.memberTask([]);
+    await c.db.update(tasks).set({ createdByAgentId: c.bruno.id }).where(eq(tasks.id, task.id));
+    const queued = await enqueueTurn(c.ctx, { companyId: task.companyId, agentId: c.bruno.id, taskId: task.id, prompt: 'An old assignment.', createdBy: null });
+    await c.close([task.id]);
+    await c.release();
+    expect((await c.db.select().from(jobs).where(eq(jobs.id, queued)))[0]).toMatchObject({ error: 'stale', startedAt: null });
+  });
+
+  it('still dispatches a current legacy task turn', async () => {
+    const c = await busyQueue();
+    const task = await c.memberTask([]);
+    const [queued] = await c.db.insert(jobs).values({ companyId: task.companyId, subscriptionId: c.sub.id, agentId: c.bruno.id, taskId: task.id, kind: 'conversation', prompt: 'A current legacy assignment.', timeoutMs: 900000 }).returning();
+    await c.release();
+    expect((await nextRun(c.builtin)).jobId).toBe(queued!.id);
+  });
+
+  it('still dispatches a legacy completion notice to the giver', async () => {
+    const c = await busyQueue();
+    const held = await c.hold(c.head.id);
+    const task = await c.memberTask([]);
+    await c.close([task.id]);
+    const queued = await enqueueTurn(c.ctx, { companyId: task.companyId, agentId: c.head.id, taskId: task.id, prompt: wakePrompt(c.head, task, { agentId: c.head.id, taskId: task.id, why: 'done' }), createdBy: null });
+    await c.release(held.id);
+    expect((await nextRun(c.builtin)).jobId).toBe(queued);
+  });
+
+  it.each(['blocked', 'stuck_at_gate', 'tests', 'work'] as const)('preserves current %s news for the giver', async why => {
+    const c = await busyQueue();
+    const held = await c.hold(c.head.id);
+    const task = await c.memberTask([]);
+    await wakeAll(c.ctx, [{ agentId: c.head.id, taskId: task.id, why, text: 'Current news.' }]);
+    const [queued] = (await c.turnsOf(c.head.id)).filter(j => j.status === 'queued');
+    expect(queued).toBeDefined();
+    await c.release(held.id);
+    expect((await nextRun(c.builtin)).jobId).toBe(queued!.id);
+  });
+
+  it.each([
+    { why: 'assigned', status: 'blocked', merging: false, stage: 0, holder: 'bruno', receiver: 'bruno', panel: [] },
+    { why: 'merge', status: 'open', merging: false, stage: 0, holder: 'bruno', receiver: 'bruno', panel: [] },
+    { why: 'merge', status: 'open', merging: true, stage: 0, holder: 'head', receiver: 'bruno', panel: [] },
+    { why: 'review', status: 'open', merging: false, stage: 0, holder: 'bruno', receiver: 'rita', panel: ['rita'] },
+    { why: 'review', status: 'review', merging: false, stage: 1, holder: 'bruno', receiver: 'rita', panel: ['bruno'] },
+  ] as const)('rejects $why before queueing when its current phase or recipient does not match ($status, $holder)', async ({ why, status, merging, stage, holder, receiver, panel }) => {
+    const c = await company();
+    const task = await c.memberTask([]);
+    await c.db.update(tasks).set({ status, merging, stage, assigneeAgentId: c[holder].id, panel: panel.map(p => c[p].id) }).where(eq(tasks.id, task.id));
+    await wakeAll(c.ctx, [{ agentId: c[receiver].id, taskId: task.id, why }]);
+    expect(await c.turnsOf(c[receiver].id)).toEqual([]);
+  });
+
+  it('resumes current working tasks when the agent gets its subscription back', async () => {
+    const c = await company();
+    const task = await c.memberTask([]);
+    await c.db.update(tasks).set({ status: 'working' }).where(eq(tasks.id, task.id));
+    await c.db.update(agents).set({ subscriptionId: null }).where(eq(agents.id, c.bruno.id));
+    const response = await c.app.inject({ method: 'PATCH', url: `/api/agents/${c.bruno.id}`, payload: { subscription: c.sub.id }, ...as(c.owner) });
+    expect(response.statusCode).toBe(200);
+    expect((await c.turnsOf(c.bruno.id)).filter(j => j.status === 'queued')).toHaveLength(1);
+  });
+
+  it('discards obsolete work even if its instructions can no longer be built', async () => {
+    const c = await busyQueue();
+    const task = await c.memberTask([]);
+    await wakeAll(c.ctx, [{ agentId: c.bruno.id, taskId: task.id, why: 'assigned' }]);
+    await c.close([task.id]);
+    vi.spyOn(instructionBuilder, 'instructionsOf').mockRejectedValue(new Error('These obsolete instructions are unavailable.'));
+    await c.release();
+    expect(c.builtin.queued()).toBe(0);
+    expect((await c.db.select().from(jobs).where(eq(jobs.taskId, task.id)))[0]).toMatchObject({ error: 'stale', startedAt: null });
   });
 });

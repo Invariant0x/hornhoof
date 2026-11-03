@@ -267,7 +267,7 @@ export const agents = pgTable(
 
 export type AgentOverrides = { base?: string; skills?: Record<string, string> };
 
-export const AGENT_CHANGE_FIELDS = ['name', 'model', 'effort', 'timer', 'subscription', 'skills', 'prompt', 'reset', 'hired', 'removed', 'switch'] as const;
+export const AGENT_CHANGE_FIELDS = ['name', 'model', 'effort', 'timer', 'subscription', 'skills', 'prompt', 'reset', 'hired', 'removed', 'switch', 'team'] as const;
 
 /* Every change to an employee's card: who, when, what, before and after. */
 export const agentChanges = pgTable(
@@ -302,10 +302,10 @@ export const personAccess = pgTable(
 
 export const JOB_STATUSES = ['queued', 'running', 'done', 'failed'] as const;
 export const JOB_KINDS = ['test', 'conversation'] as const;
-/* Why a node started again, as far as Hornhoof can tell from what it said before and now: Hornhoof updated it, the machine
+/* Why a node started again, as far as Hornhoof can tell: its built-in server started again, Hornhoof updated it, the machine
    started again, its container was made anew, its program started again in the same container, or the connection broke
    and the turn never reached it. */
-export const RESTART_CAUSES = ['update', 'machine', 'container', 'program', 'connection', 'unknown'] as const;
+export const RESTART_CAUSES = ['server', 'update', 'machine', 'container', 'program', 'connection', 'unknown'] as const;
 export type RestartCause = (typeof RESTART_CAUSES)[number];
 /* A turn a node restart cut off: why, when Hornhoof learned it, on which node, and the number of the task it was on. */
 export type Interruption = { cause: RestartCause; at: string; node: { id: string | null; name: string }; task: number | null; versions?: { from: string; to: string } };

@@ -58,6 +58,21 @@ async function recordQuestion(ctx: Ctx, job: ToolJob, task: Task, { kind, text, 
   await appendOutgoing(ctx, { ...job, jobId: job.id, text, to: await personParty(ctx, job.companyId, personId) });
 }
 
+const isDepartmentTurnParent = (parent: Task | null, departmentId: string | null): parent is Task =>
+  !!parent && !parent.executorAgentId && !!parent.turnId && parent.departmentId === departmentId;
+
+/* Whether a member task without explicit gates is checked by the review of the department's turn. */
+async function turnReviewed(
+  db: Ctx['db'],
+  head: Agent,
+  executor: Agent,
+  parent: Task | null,
+  input: { gates?: string[]; product?: string },
+): Promise<boolean> {
+  if (executor.teamId || input.gates !== undefined || !isDepartmentTurnParent(parent, head.departmentId)) return false;
+  return inRepository(db, { departmentId: head.departmentId, productId: input.product ?? null });
+}
+
 /* The tools an agent gets for tasks, by its kind. Each one checks that the task is the agent's to move. */
 export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): void {
   const { db } = ctx;
@@ -318,10 +333,9 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
           }
           const parent = input.parent !== undefined ? (await find(input.parent)).task : null;
           /* Code left without gates under the department's task of a turn waits for the review of the turn; other work left
-             without them gets the department's first review stage. */
-          const inTurnReview =
-            input.gates === undefined && !!parent && !parent.executorAgentId && !!parent.turnId && parent.departmentId === agent.departmentId && (await inRepository(db, { departmentId: agent.departmentId, productId: input.product ?? null }));
-          const gates = inTurnReview ? [] : await gatesFor(agent, executor.id, input.gates);
+             without them gets the department's first review stage. Sub-unit employees work outside the pipeline. */
+          const inTurnReview = await turnReviewed(db, agent, executor, parent, input);
+          const gates = inTurnReview || (executor.teamId && input.gates === undefined) ? [] : await gatesFor(agent, executor.id, input.gates);
           const after = await afterIds(input.after);
           const moved = await createTask(ctx, { agentId: agent.id }, { title: input.title, brief: input.brief, body: input.body, departmentId: agent.departmentId, productId: input.product ?? null, parentId: parent?.id ?? null, assigneeAgentId: executor.id, executor: true, gates, after, inTurnReview });
           return { text: `Created #${moved.task.number} for ${executor.name}${gates.length ? ` with ${gates.length} gate${gates.length > 1 ? 's' : ''}` : ''}.${await waiting(moved.task)}`, moved };
@@ -436,7 +450,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
   /* Gates by role id or employee id. Left out, the department's first gate role that is hired. */
   async function gatesFor(head: Agent, executor: string, given: string[] | undefined): Promise<string[]> {
     if (given === undefined) return (await gateLeads(db, ctx.templates, head.departmentId!, executor)).slice(0, 1);
-    const staff = await db.select().from(agents).where(and(eq(agents.departmentId, head.departmentId!), isNull(agents.removedAt))).orderBy(asc(agents.createdAt));
+    const staff = await db.select().from(agents).where(and(eq(agents.departmentId, head.departmentId!), isNull(agents.removedAt), isNull(agents.teamId))).orderBy(asc(agents.createdAt));
     return given.map(g => {
       const role = (a: Agent) => a.roleKey === g && a.id !== executor;
       const found = /^[A-Z]{3}-[A-Z0-9]+$/.test(g) ? (staff.find(a => role(a) && !a.switchedOffAt) ?? staff.find(role)) : staff.find(a => a.id === g);

@@ -1,0 +1,133 @@
+import { eq } from 'drizzle-orm';
+import { describe, expect, it } from 'vitest';
+import { agentEvents, agents, companies, jobs, people, subscriptions, tasks } from '../src/db/schema.js';
+import type { Task, WakeWhy } from '../src/modules/tasks/engine.js';
+import { discardStaleTurn, discardStaleTurns, taskForWake, taskWakeOf, waitingTaskTurn } from '../src/modules/tasks/wake-state.js';
+import { wakePrompt } from '../src/modules/tasks/wake.js';
+import { createTestDb, statements } from './helpers.js';
+
+async function fixture() {
+  const db = await createTestDb();
+  const [company] = await db.insert(companies).values({ name: 'Acme' }).returning();
+  const [owner] = await db.insert(people).values({ companyId: company!.id, name: 'Ivan', email: 'ivan@acme.test', status: 'active', scopeKind: 'company', isOwner: true }).returning();
+  const [sub] = await db.insert(subscriptions).values({ companyId: company!.id, provider: 'anthropic_api', kind: 'api_key', label: 'Key', ownerPersonId: owner!.id, status: 'ready' }).returning();
+  const [head, worker, reviewer] = await db.insert(agents).values([
+    { companyId: company!.id, kind: 'head', name: 'Hana', model: '' },
+    { companyId: company!.id, kind: 'worker', name: 'Bruno', model: '' },
+    { companyId: company!.id, kind: 'worker', name: 'Rita', model: '' },
+  ]).returning();
+  let number = 0;
+  const task = async (set: Partial<Task> = {}) => (await db.insert(tasks).values({ companyId: company!.id, number: ++number, title: 'Checkout', createdByAgentId: head!.id, executorAgentId: worker!.id, assigneeAgentId: worker!.id, ...set }).returning())[0]!;
+  const job = async (t: Task | null, agentId: string | null = worker!.id) => (await db.insert(jobs).values({ companyId: company!.id, subscriptionId: sub!.id, agentId, taskId: t?.id ?? null, kind: 'conversation', prompt: 'Work.', timeoutMs: 1000 }).returning())[0]!;
+  const message = async (id: string, t: Task, why: WakeWhy, agentId = worker!.id) => db.insert(agentEvents).values({ companyId: company!.id, agentId, jobId: id, kind: 'message', data: { text: 'A task wake.', taskWake: taskWakeOf(t, { why }) } });
+  return { db, head: head!, worker: worker!, reviewer: reviewer!, task, job, message };
+}
+
+describe('task wake policy in the database', () => {
+  it('keeps current actions and rejects work for closed tasks, other holders, and other phases', async () => {
+    const c = await fixture();
+    const cases: { why: WakeWhy; initial?: Partial<Task>; next?: Partial<Task>; receiver?: string; stale: boolean }[] = [
+      { why: 'assigned', stale: false },
+      { why: 'assigned', initial: { status: 'working' }, stale: false },
+      { why: 'assigned', next: { status: 'working' }, stale: true },
+      { why: 'assigned', next: { merging: true }, stale: true },
+      { why: 'assigned', next: { status: 'done', closedAt: new Date(), assigneeAgentId: null }, stale: true },
+      { why: 'assigned', next: { status: 'cancelled', closedAt: new Date() }, stale: true },
+      { why: 'assigned', next: { assigneeAgentId: c.head.id }, stale: true },
+      { why: 'assigned', initial: { status: 'blocked' }, stale: true },
+      { why: 'merge', initial: { merging: true }, stale: false },
+      { why: 'merge', stale: true },
+      { why: 'merge', initial: { merging: true, assigneeAgentId: c.head.id }, stale: true },
+      { why: 'review', initial: { status: 'review', stage: 1, panel: [c.reviewer.id] }, receiver: c.reviewer.id, stale: false },
+      { why: 'turn_review', initial: { status: 'review', stage: 1, panel: [c.reviewer.id] }, next: { stage: 2 }, receiver: c.reviewer.id, stale: true },
+      { why: 'review', initial: { panel: [c.reviewer.id] }, receiver: c.reviewer.id, stale: true },
+      { why: 'review', initial: { status: 'review', stage: 1, panel: [c.worker.id] }, receiver: c.reviewer.id, stale: true },
+      { why: 'updated', next: { assigneeAgentId: c.head.id }, stale: true },
+      { why: 'comment', stale: false },
+      ...(['done', 'reported', 'reviewed', 'review_passed'] as const).map(why => ({ why, next: { status: 'done' as const, closedAt: new Date() }, receiver: c.head.id, stale: false })),
+      ...(['blocked', 'stuck_at_gate', 'tests', 'work'] as const).map(why => ({ why, receiver: c.head.id, stale: false })),
+      { why: 'tests', stale: false },
+    ];
+    for (const test of cases) {
+      const task = await c.task(test.initial);
+      const receiver = test.receiver ?? c.worker.id;
+      const job = await c.job(task, receiver);
+      await c.message(job.id, task, test.why, receiver);
+      if (test.next) await c.db.update(tasks).set(test.next).where(eq(tasks.id, task.id));
+      expect(await discardStaleTurn(c.db, job), `${test.why} ${task.number}`).toBe(test.stale);
+      const [ended] = await c.db.select().from(jobs).where(eq(jobs.id, job.id));
+      expect(ended!.status).toBe(test.stale ? 'failed' : 'queued');
+      expect(ended!.startedAt).toBeNull();
+      if (test.stale) expect(ended!.result).toContain(`#${task.number}`);
+    }
+  });
+
+  it('validates fresh wakes before queueing, including missing tasks and current reviews', async () => {
+    const c = await fixture();
+    const task = await c.task();
+    expect(await taskForWake(c.db, { agentId: c.worker.id, taskId: task.id, why: 'assigned' })).not.toBeNull();
+    expect(await taskForWake(c.db, { agentId: c.worker.id, taskId: task.id, why: 'merge' })).toBeNull();
+    expect(await taskForWake(c.db, { agentId: c.worker.id, taskId: '00000000-0000-4000-8000-000000000099', why: 'assigned' })).toBeNull();
+  });
+
+  it('retains stale log entries once and leaves non-task turns and current queued wakes intact', async () => {
+    const c = await fixture();
+    const task = await c.task();
+    const job = await c.job(task);
+    await c.message(job.id, task, 'assigned');
+    expect(await waitingTaskTurn(c.db, c.worker.id, task.id)).toEqual({ id: job.id });
+    await c.db.update(tasks).set({ status: 'done', closedAt: new Date() }).where(eq(tasks.id, task.id));
+    expect(await discardStaleTurn(c.db, job)).toBe(true);
+    const stopped = (await c.db.select().from(agentEvents).where(eq(agentEvents.jobId, job.id))).filter(e => e.kind === 'stopped');
+    expect(stopped).toHaveLength(1);
+    expect(stopped[0]!.data).toMatchObject({ reason: 'stale', task: { id: task.id, number: task.number } });
+    expect(await discardStaleTurn(c.db, job)).toBe(true);
+    expect((await c.db.select().from(agentEvents).where(eq(agentEvents.jobId, job.id))).filter(e => e.kind === 'stopped')).toHaveLength(1);
+    expect(await waitingTaskTurn(c.db, c.worker.id, task.id)).toBeUndefined();
+    const plain = await c.job(null);
+    expect(await discardStaleTurn(c.db, plain)).toBe(false);
+    expect(await discardStaleTurn(c.db, await c.job(task, null))).toBe(false);
+    expect(await discardStaleTurns(c.db, [])).toBe(false);
+  });
+
+  it('checks every task of a batch and takes its row locks', async () => {
+    const c = await fixture();
+    const current = await c.task();
+    const old = await c.task({ status: 'done', closedAt: new Date() });
+    const a = await c.job(current);
+    const b = await c.job(old);
+    await c.message(a.id, current, 'assigned');
+    await c.message(b.id, old, 'assigned');
+    const ran = statements();
+    expect(await c.db.transaction(tx => discardStaleTurns(tx, [a, b]))).toBe(true);
+    expect(ran.find(s => s.sql.includes('for share'))?.params).toEqual(expect.arrayContaining([current.id, old.id]));
+    expect((await c.db.select().from(jobs).where(eq(jobs.id, a.id)))[0]!.status).toBe('queued');
+    expect((await c.db.select().from(jobs).where(eq(jobs.id, b.id)))[0]!.error).toBe('stale');
+  });
+
+  it('supports legacy messages without treating a worker who created its task as a completion notice', async () => {
+    const c = await fixture();
+    const current = await c.task();
+    expect(await discardStaleTurn(c.db, await c.job(current))).toBe(false);
+    const old = await c.task({ status: 'done', closedAt: new Date(), createdByAgentId: c.worker.id });
+    expect(await discardStaleTurn(c.db, await c.job(old))).toBe(true);
+    const given = await c.task({ status: 'done', closedAt: new Date() });
+    const notice = await c.job(given, c.head.id);
+    await c.db.update(jobs).set({ prompt: `#${given.number} "Checkout", which you gave out, passed its gates and is done.` }).where(eq(jobs.id, notice.id));
+    expect(await discardStaleTurn(c.db, notice)).toBe(false);
+    for (const why of ['done', 'reported', 'reviewed', 'review_passed', 'cancelled', 'turn'] as const) {
+      const kept = await c.job(given, c.head.id);
+      const prompt = wakePrompt(c.head, given, { agentId: c.head.id, taskId: given.id, why, text: 'Checked.' });
+      await c.db.update(jobs).set({ prompt }).where(eq(jobs.id, kept.id));
+      expect(await discardStaleTurn(c.db, kept), why).toBe(false);
+    }
+    const own = await c.task({ status: 'done', closedAt: new Date(), executorAgentId: c.head.id });
+    expect(await discardStaleTurn(c.db, await c.job(own, c.head.id))).toBe(true);
+    const blocked = await c.task({ status: 'blocked' });
+    const alert = await c.job(blocked, c.head.id);
+    await c.db.update(jobs).set({ prompt: `#${blocked.number} "Checkout", which you gave out, cannot go on.` }).where(eq(jobs.id, alert.id));
+    expect(await discardStaleTurn(c.db, alert)).toBe(false);
+    await c.db.update(tasks).set({ status: 'done', closedAt: new Date() }).where(eq(tasks.id, blocked.id));
+    expect(await discardStaleTurn(c.db, alert)).toBe(true);
+  });
+});

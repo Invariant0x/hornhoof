@@ -21,14 +21,18 @@ export function restartCause(before: Said | null, now: { version: string; boot?:
   return 'connection';
 }
 
-/* The built-in node has no row of its own: what it said last is kept while this server runs. */
+/* The built-in node lives in the server's process. Its first hello in this context finds only turns from before that
+   process started again; later hellos compare what it said while this server has been running. No machine row is needed. */
 const builtinSaid = new WeakMap<Ctx, Said>();
+
+const causeOf = (nodeId: string | null, before: Said | null, now: { version: string; boot?: Boot }): RestartCause =>
+  nodeId === null && before === null ? 'server' : restartCause(before, now);
 
 /* What a node's hello tells of the turns it no longer runs: why, as far as Hornhoof can tell, when, and on which node.
    The task's number goes in with each turn. A personal node's last word is in its row; the built-in node's is kept here. */
 export function interruptionOf(ctx: Ctx, node: { id: string | null; name: string; said: Said | null }, now: { version: string; boot?: Boot }, at: Date): Omit<Interruption, 'task'> {
   const before = saidBefore(ctx, node, now);
-  const cause = restartCause(before, now);
+  const cause = causeOf(node.id, before, now);
   return { cause, at: at.toISOString(), node: { id: node.id, name: node.name }, ...versionsOf(cause, before, now) };
 }
 

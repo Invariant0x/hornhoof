@@ -1,4 +1,5 @@
-import { and, asc, countDistinct, desc, eq, gt, inArray, isNotNull, isNull, notInArray, or } from 'drizzle-orm';
+import type { AgentEvent } from '@hornhoof/protocol';
+import { and, asc, countDistinct, desc, eq, gt, inArray, isNotNull, isNull, notInArray, or, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { agentSpot } from '../../auth/access.js';
@@ -52,6 +53,18 @@ export async function appendEvent(ctx: Pick<Ctx, 'db' | 'bus' | 'templates'>, e:
   const event = await publishEvent(ctx, e.companyId, e.agentId, rows[0]!.id);
   if (outgoing) await publishEvent(ctx, e.companyId, outgoing.agentId, rows[1]!.id);
   return event;
+}
+
+/* Serialize a stream write with Stop and completion on the same job row, before publishing it. */
+export async function appendTurnEvent(ctx: Pick<Ctx, 'db' | 'bus'>, jobId: string, event: AgentEvent, scope: SQL): Promise<void> {
+  const stored = await ctx.db.transaction(async tx => {
+    const [job] = await tx.select({ companyId: jobs.companyId, agentId: jobs.agentId }).from(jobs)
+      .where(and(eq(jobs.id, jobId), eq(jobs.status, 'running'), eq(jobs.kind, 'conversation'), isNull(jobs.error), scope)).for('update');
+    if (!job?.agentId) return null;
+    const [row] = await tx.insert(agentEvents).values({ companyId: job.companyId, agentId: job.agentId, jobId, kind: event.kind, data: hideCodes(event), personId: null }).returning({ id: agentEvents.id });
+    return { id: row!.id, companyId: job.companyId, agentId: job.agentId };
+  });
+  if (stored) await publishEvent(ctx, stored.companyId, stored.agentId, stored.id);
 }
 
 /* Only the receiving copy carries by, which the per-turn send quota counts after a restart. */
@@ -121,12 +134,13 @@ export async function workingCount(db: Db, companyId: string): Promise<number> {
 
 /* The last people's messages and his answers from turns that are over, oldest first, for a new session to catch up. */
 export async function earlierTalk(db: Db, agentId: string, limit = 20): Promise<EventView[]> {
-  const open = db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, agentId), inArray(jobs.status, ['queued', 'running'])));
+  /* Stale wakes stay in the log, but were never spoken: a new session must not receive them as catch-up instructions. */
+  const unspoken = db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, agentId), or(inArray(jobs.status, ['queued', 'running']), eq(jobs.error, 'stale'))));
   const rows = await db
     .select(columns)
     .from(agentEvents)
     .leftJoin(people, eq(people.id, agentEvents.personId))
-    .where(and(eq(agentEvents.agentId, agentId), inArray(agentEvents.kind, ['message', 'text']), or(isNull(agentEvents.jobId), notInArray(agentEvents.jobId, open))))
+    .where(and(eq(agentEvents.agentId, agentId), inArray(agentEvents.kind, ['message', 'text']), or(isNull(agentEvents.jobId), notInArray(agentEvents.jobId, unspoken))))
     .orderBy(desc(agentEvents.seq))
     .limit(limit);
   return rows.reverse().map(view);
