@@ -489,7 +489,7 @@ export const en = {
     tree: {
       treeAria: (n: number) => `Tree of turn ${n}`,
       lgH: 'Key',
-      lg: { w: 'working', af: 'waits for another task', ps: 'waits for a person\'s answer', st: 'stalled: 30 min with no move and no agent action', mv: 'a move on the task', dn: 'task handed in', vd: 'review of the turn: findings or clean', mg: (branch: string) => `handed in and merged into ${branch}` },
+      lg: { ls: 'turn end lost', al: 'program or node alarm', q: 'message waiting in the queue', u: 'no recorded state', w: 'working', af: 'waits for another task', ps: 'waits for a person\'s answer', st: 'waiting for a task', mv: 'a move on the task', dn: 'task handed in', vd: 'review of the turn: findings or clean', mg: (branch: string) => `handed in and merged into ${branch}` },
       after: (n: number) => 'waits for #' + n,
       mv: { comment: 'Comment', asked: 'Question to a person', answered: 'A person\'s answer', started: 'Work started', report: 'Report' },
       st: { work: 'Working', stall: (d: string) => 'Stalled ' + d, person: (d: string) => 'Waits for an answer ' + d, after: (n: number) => 'Waits for #' + n, doneSal: 'Handed in', review: (d: string) => 'Checking ' + d, done: (branch: string) => `Merged into ${branch}` },
@@ -509,7 +509,7 @@ export const en = {
       cWhat: 'What',
       cChecked: 'Checked for',
       openTask: 'Open the task',
-      stallSay: '30 minutes with no move on the task and no action of the agent, so the line stands still.',
+      stallSay: 'The agent is waiting for a task.',
       afterSay: (n: number) => 'Starts once #' + n + ' is done.',
       noRepo: 'no repository, the line shows task moves only',
       agentNow: 'acting now',
@@ -523,7 +523,15 @@ export const en = {
       doneAt: (t: string) => 'handed in at ' + t,
       tWork: 'working',
       tWait: 'waiting',
-      tStall: 'stalled',
+      tStall: 'idle',
+      tInterrupted: 'interrupted', tQueued: 'queued', tUnknown: 'No data',
+      externalWaiting: (reason: string, until: string) => `waits: ${reason}, until ${until}`,
+      noData: 'no data',
+      lostSince: (at: string) => `turn end lost since ${at}: waiting for input`,
+      interruptedSince: (at: string) => `interrupted since ${at}`,
+      queuedSince: (at: string) => `queued since ${at}`,
+      waitingFor: (name: string, at: string) => `waits for ${name} since ${at}`,
+      historyAlarm: { program_stalled: (at: string) => `program frozen since ${at}`, node_silent: (at: string) => `node silent since ${at}` },
       reviewH: (n: number) => `Review of turn ${n}`,
       reviewWhat: (branch: string) => `all of ${branch} at once: everything the turn changed`,
       reviewOpened: (t: string) => t + ', with the move that merged the last work',
@@ -532,16 +540,10 @@ export const en = {
       found: (n: number) => n ? `${n} ${plural('en', n, { one: 'finding', other: 'findings' })}` : 'clean',
       spdSub: (n: number, a: string, b: string) => `Turn ${n}, from ${a} to ${b}`,
       spdTabs: ['Speed', 'Idle'],
-      cols: ['Who', 'Working', 'Waiting', 'Stalled'],
-      key: { w: 'working', af: 'waits for a task', ps: 'waits for a person', st: 'stalled' },
-      idleNow: (s: number, p: number, a: number) => {
-        const out: string[] = [];
-        if (s) out.push(s + ' stalled');
-        if (p) out.push(p + ' waiting for a person');
-        if (a) out.push(a + ' waiting for a task');
-        return out.length ? 'Now: ' + out.join(', ') + '.' : 'Nobody is stalled or waiting now.';
-      },
-      idleKind: { stall: 'Stalled: no move and no agent action', person: 'Waits for a person\'s answer', after: (n: number) => 'Waits for #' + n },
+      cols: ['Who', 'Working', 'Waiting', 'Idle', 'Interrupted', 'Queued', 'No data'],
+      key: { w: 'working', af: 'waits for a task', ps: 'waits for a person', st: 'idle', ls: 'turn end lost', al: 'program or node alarm', q: 'queued message', u: 'no data' },
+      idleNow: 'Current waits and interruptions',
+      idleKind: { stall: 'Waiting for a task', person: 'Waits for a person\'s answer', after: (n: number) => 'Waits for #' + n },
       idleOpen: (a: string) => 'since ' + a + ', ',
       idleGoing: 'still going',
       idleClosed: (a: string, z: string) => `from ${a} to ${z}`,

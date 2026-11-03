@@ -64,6 +64,33 @@ async function migrationsUpTo(tag: string): Promise<string> {
   return dir;
 }
 
+describe('migration 0049', () => {
+  it.each(['Acme', 'Moonfern'])('adds history indexes on an upgraded %s copy without changing old events', async name => {
+    const source = new PGlite();
+    onTestFinished(() => source.close());
+    let db = drizzle(source);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0047_requested_prompt') });
+    await db.execute(sql`insert into companies (id, name) values ('00000000-0000-4000-8000-000000000001', ${name})`);
+    await db.execute(sql`insert into agents (company_id, kind, name, model) select id, 'worker', name, '' from companies`);
+    await db.execute(sql`insert into agent_events (company_id, agent_id, kind, data)
+      select a.company_id, a.id, 'message', case when n % 3 = 0 then '{}'::jsonb
+        else jsonb_build_object('silentJob', null, 'text', repeat('step ', 120)) end
+      from generate_series(1,30161) n cross join agents a`);
+    const fingerprint = sql`select count(*)::int as n, md5(jsonb_agg(to_jsonb(e) order by seq)::text) as checksum from agent_events e`;
+    const before = (await db.execute(fingerprint)).rows;
+    const copy = new PGlite({ loadDataDir: await source.dumpDataDir('none') });
+    onTestFinished(() => copy.close());
+    db = drizzle(copy);
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    expect((await db.execute(fingerprint)).rows).toEqual(before);
+    expect(before[0]).toMatchObject({ n: 30161 });
+    expect((await db.execute(sql`select indexname from pg_indexes where indexname in
+      ('agent_events_program_history', 'agent_events_silent_job', 'tasks_turn_id', 'tasks_product_id') order by indexname`)).rows)
+      .toEqual(['agent_events_program_history', 'agent_events_silent_job', 'tasks_product_id', 'tasks_turn_id'].map(indexname => ({ indexname })));
+  });
+});
+
 describe('migration 0047', () => {
   it.each(['Acme', 'Moonfern'])('keeps old prompts in %s without inventing their requested text', async name => {
     const source = new PGlite();

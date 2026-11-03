@@ -1077,10 +1077,12 @@ summary.turn-head:focus-visible { outline: 2px solid var(--cyan); outline-offset
 .tview .lchip:focus-visible { outline: none; background: var(--cyan); }
 .tview .lchip .r1 { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .tview .lchip .r1 b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--f-display); font-size: 13.5px; font-weight: 600; }
+.tview .tv-task { display: none; flex: none; font-size: 10px; color: var(--muted); }
 .tview .lchip .r2 { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tview .lchip .ast { align-self: flex-start; max-width: 100%; box-sizing: border-box; overflow: hidden; text-overflow: ellipsis; padding: 0 4px; font-size: 10.5px; line-height: 13px; }
 /* A phone's lane label is narrow: what the agent does takes the task's line and wraps. */
 @media (max-width: 760px) {
+  .tview .tv-task { display: inline; }
   .tview .lchip > .in:has(.ast) { padding: 0 6px; }
   .tview .lchip .in:has(.ast) .r2 { display: none; }
   .tview .lchip .ast { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; }
@@ -1099,7 +1101,7 @@ summary.turn-head:focus-visible { outline: 2px solid var(--cyan); outline-offset
 .tview .seg.w { stroke: var(--cyan); stroke-width: 2.4; }
 .tview .seg.af { stroke: var(--line2); stroke-width: 1.8; stroke-dasharray: 4 5; }
 .tview .seg.ps { stroke: var(--pink); stroke-width: 2.4; stroke-dasharray: 6 4; }
-.tview .seg.st { stroke: var(--amber); stroke-width: 3.4; stroke-dasharray: .1 6.5; }
+.tview .seg.st { stroke: var(--muted); stroke-width: 3.4; stroke-dasharray: .1 6.5; }
 .tview .ko { fill: none; stroke: var(--bg); stroke-width: 7; }
 .tview .cn { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
 .tview .cn.c { stroke: var(--cyan); }
@@ -1139,6 +1141,9 @@ summary.turn-head:focus-visible { outline: 2px solid var(--cyan); outline-offset
 .tview .bdg.a .bdg-t { fill: var(--amber-ink); }
 .tview .bdg.p .bdg-t, .tview .bdg.p .bdg-q { fill: var(--pink-ink); }
 .tview .bdg.m .bdg-t { fill: var(--muted); font-weight: 500; }
+.tview .bdg-copy { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; overflow-wrap: anywhere; font-size: 11.5px; line-height: 13px; color: var(--muted); }
+.tview .bdg.bad .bdg-copy { color: var(--red); }
+.tview .bdg.p .bdg-copy { color: var(--pink-ink); }
 .tview .bdg-i { stroke: var(--amber); stroke-width: 2; stroke-linecap: round; }
 .tview .bdg-q { font-family: var(--f-body); font-size: 11.5px; font-weight: 700; text-anchor: middle; dominant-baseline: central; }
 .tview .pt { fill: var(--cyan); }
@@ -1195,9 +1200,7 @@ summary.turn-head:focus-visible { outline: 2px solid var(--cyan); outline-offset
 .dv-drawer.spd .sum dt { font-size: 12px; color: var(--muted); }
 .dv-drawer.spd .sum dd { margin: 0; font-family: var(--f-display); font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .dv-drawer.spd .spl { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
-.dv-drawer.spd .spl-h, .dv-drawer.spd .spl-r { display: grid; grid-template-columns: minmax(0, 1fr) repeat(3, 76px); gap: 2px 8px; align-items: center; }
-.dv-drawer.spd .spl-h { padding: 0 6px 6px; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--line); }
-.dv-drawer.spd .spl-h span:not(:first-child), .dv-drawer.spd .spl-r .n { text-align: right; }
+.dv-drawer.spd .spl-r { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px 8px; align-items: center; }
 .dv-drawer.spd .spl-r { width: 100%; padding: 9px 6px; border: 0; border-bottom: 1px solid var(--line); background: none; cursor: pointer; text-align: left; font-size: 13px; }
 .dv-drawer.spd .spl-r:hover { background: var(--surface2); }
 .dv-drawer.spd .spl-r.on { background: var(--glow); box-shadow: inset 3px 0 0 var(--cyan); }
@@ -1247,7 +1250,7 @@ summary.turn-head:focus-visible { outline: 2px solid var(--cyan); outline-offset
   .tview .tv-card { position: fixed; left: 0 !important; right: 0; top: auto !important; bottom: 0; width: auto; }
   .tview .tv-card-in { max-height: min(440px, 76vh); }
   .tview .lgd-b span, .tview .tv-title { display: none; }
-  .dv-drawer.spd .spl-h, .dv-drawer.spd .spl-r { grid-template-columns: minmax(0, 1fr) repeat(3, 64px); gap: 2px 6px; }
+  .dv-drawer.spd .spl-r { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px 6px; }
   .dv-drawer.spd .spl-r .who small { display: none; }
   .dv-drawer.spd .sum dd { font-size: 15px; }
 }
@@ -1448,3 +1451,20 @@ summary.turn-head:focus-visible { outline: 2px solid var(--cyan); outline-offset
 .result { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; font-size: 13px; color: var(--muted); }
 .dt .status { white-space: normal; }
 .dt td, .dt th, .cell-lim, .where-list { overflow-wrap: anywhere; }
+
+/* Program history uses the same alarm color as the live agent state. */
+.tview .seg.ls, .tview .seg.al { stroke: var(--red); stroke-width: 3; }
+.tview .seg.q { stroke: var(--line2); stroke-width: 2; stroke-dasharray: 2 4; }
+.tview .seg.u { stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 1 5; }
+.tview .hd-c.ls, .tview .hd-c.al { stroke: var(--red); }
+.tview .hd-c.q, .tview .hd-c.u { stroke: var(--muted); }
+.tview .bdg.bad polygon { stroke: var(--red); }
+.tview .bdg.bad .bdg-t, .tview .tstate.bad { color: var(--red); fill: var(--red); border-color: var(--red); }
+.dv-drawer.spd .sum div.bad, .dv-drawer.spd .idle.bad { border-left-color: var(--red); }
+.dv-drawer.spd .spl-r .n.bad, .dv-drawer.spd .idle.bad .d { color: var(--red); font-weight: 700; }
+.dv-drawer.spd .strip .ls, .dv-drawer.spd .strip .al, .dv-drawer.spd .sk.ls, .dv-drawer.spd .sk.al { background: var(--red); }
+.dv-drawer.spd .strip .q, .dv-drawer.spd .sk.q { background: var(--line2); }
+.dv-drawer.spd .strip .u, .dv-drawer.spd .sk.u { background: repeating-linear-gradient(90deg, var(--muted) 0 1px, transparent 1px 5px); }
+.dv-drawer.spd .spl-r .who { grid-column: 1 / -1; }
+.dv-drawer.spd .spl-r .n { text-align: left; }
+.dv-drawer.spd .spl-r .n::before { content: attr(data-label); display: block; color: var(--muted); font-size: 11px; font-weight: 400; }

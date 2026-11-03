@@ -1,8 +1,9 @@
 import { Fragment, type ReactNode } from 'react';
 import { useT } from '../i18n';
 import type { Department, DepartmentTree, TreeAgent, TreeLine, TreeSegment } from '../types';
+import { segmentText, segmentTone } from './tree-state';
 import { ProviderMark } from '../ui/icons';
-import { currentSegment, secondsBetween, treeClock, trunkBranch, type TreePick } from './tree';
+import { currentSegment, secondsBetween, treeClock, trunkBranch, reviewsOf, type TreePick } from './tree';
 
 type Props = { tree: DepartmentTree; department: Department; pick: TreePick; onOpenTask(id: string): void };
 
@@ -39,37 +40,34 @@ function LineTimes({ segments, now }: { segments: TreeSegment[]; now: string }) 
       <span>{L.tWork} <b>{L.dur(count('work'))}</b></span>
       <span>{L.tWait} <b>{L.dur(count('after') + count('person'))}</b></span>
       <span>{L.tStall} <b>{L.dur(count('stall'))}</b></span>
+      <span>{L.tInterrupted} <b>{L.dur(count('lost') + count('alarm'))}</b></span>
+      <span>{L.tQueued} <b>{L.dur(count('queued'))}</b></span>
+      <span>{L.tUnknown} <b>{L.dur(count('unknown'))}</b></span>
     </p>
   );
 }
 
-function lineState(line: TreeLine, tree: DepartmentTree, L: ReturnType<typeof useT>['dept']['tree']): string {
+function lineState(line: TreeLine, tree: DepartmentTree, t: ReturnType<typeof useT>): string {
+  const L = t.dept.tree;
   if (line.mergedAt) return L.st.done(tree.turn!.branch);
   if (line.doneAt) return L.st.doneSal;
-  const s = currentSegment(line.segments, tree.now);
-  const duration = L.dur(s ? secondsBetween(s.from, tree.now) / 60 : 0);
-  if (s?.kind === 'stall') return L.st.stall(duration);
-  if (s?.kind === 'person') return L.st.person(duration);
-  if (s?.kind === 'after') return line.waitsFor.map(L.st.after).join(', ');
-  return L.st.work;
+  const segment = currentSegment(line.segments, tree.now);
+  if (segment?.kind === 'after' && !segment.waitsForAgent && !segment.externalWait) return line.waitsFor.map(L.st.after).join(', ');
+  return segmentText(t, segment, tree.now);
 }
 
 function lineStateClass(line: TreeLine, segment: TreeSegment | undefined): string {
-  if (segment?.kind === 'stall') return 'st';
-  if (segment?.kind === 'person') return 'ps';
-  if (line.mergedAt || line.doneAt) return 'ok';
-  if (segment?.kind === 'after') return '';
-  return 'w';
+  return line.mergedAt || line.doneAt ? 'ok' : segmentTone(segment);
 }
 
 function WorkCard({ tree, department, line, onOpenTask }: Omit<Props, 'pick'> & { line: TreeLine }) {
-  const L = useT().dept.tree, s = currentSegment(line.segments, tree.now);
+  const t = useT(), L = t.dept.tree, s = currentSegment(line.segments, tree.now);
   const last = line.moves.filter(m => m.at <= tree.now).sort((a, b) => b.at.localeCompare(a.at))[0];
   const moves: Record<string, string> = L.mv;
   const branch = tree.repository && line.branch ? `${line.branch} → ${tree.turn!.branch}` : L.noRepo;
   const pairs: [string, ReactNode][] = [
     [L.cWho, <TreeWho agent={line.agent} department={department} />],
-    [L.cNow, <span className={`tstate ${lineStateClass(line, s)}`}>{lineState(line, tree, L)}</span>],
+    [L.cNow, <span className={`tstate ${lineStateClass(line, s)}`}>{lineState(line, tree, t)}</span>],
     [L.cBranch, branch],
     [L.cLast, last
       ? `${treeClock(last.at)}, ${moves[last.kind] ?? last.kind}${last.text ? `: ${last.text}` : ''}`
@@ -94,8 +92,12 @@ function WorkCard({ tree, department, line, onOpenTask }: Omit<Props, 'pick'> & 
   );
 }
 
+function selectedReview(tree: DepartmentTree, pick: TreePick) {
+  return reviewsOf(tree).find(r => r.taskId === pick.taskId) ?? tree.review!;
+}
+
 function ReviewCard({ tree, department, pick, onOpenTask }: Props) {
-  const L = useT().dept.tree, review = tree.review!;
+  const L = useT().dept.tree, review = selectedReview(tree, pick);
   const reviewer = review.reviewers.find(r => r.agent.id === pick.agentId);
   const pairs: [string, ReactNode][] = [[L.cWhat, L.reviewWhat(tree.turn!.branch)]];
   if (reviewer) {
@@ -174,7 +176,7 @@ function MoveCard({ tree, department, pick, line, onOpenTask }: Props & { line: 
 export function TreeCardBody(props: Props) {
   const { tree, pick, department } = props, L = useT().dept.tree;
   const line = tree.lines.find(l => l.taskId === pick.taskId);
-  if (pick.kind === 'review' || pick.kind === 'reviewer') return tree.review && <ReviewCard {...props} />;
+  if (pick.kind === 'review' || pick.kind === 'reviewer') return reviewsOf(tree).length > 0 && <ReviewCard {...props} />;
   if (pick.kind === 'main') {
     return (
       <>

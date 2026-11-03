@@ -70,6 +70,17 @@ describe('AgentWindow', () => {
     expect(screen.queryByTestId('live-terminal')).not.toBeInTheDocument();
   });
 
+  it('keeps program state history out of the conversation without blank lines', async () => {
+    const { container } = open({ [`GET ${EVENTS}?after=0`]: [200, { events: [
+      ev(1, 'text', { text: 'Starting checkout.' }),
+      ev(2, 'program', { program: { state: 'thinking', since: Date.parse('2026-11-03T10:00:00Z'), tool: null }, alarm: null }),
+      ev(3, 'text', { text: 'Checkout is ready.' }),
+    ], state: READY }] });
+    expect(await screen.findByText('Checkout is ready.')).toBeInTheDocument();
+    expect(screen.getByText('Starting checkout.')).toBeInTheDocument();
+    expect(container.querySelectorAll('.t-line')).toHaveLength(2);
+  });
+
   it('shows each kind of line the way a terminal would', async () => {
     const { container } = open({ [`GET ${EVENTS}?after=0`]: [200, { events: LOG, state: READY }] });
     expect(await screen.findByText('What matters most right now?')).toBeInTheDocument();

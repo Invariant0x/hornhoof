@@ -436,7 +436,7 @@ function exampleIdle(lines: TreeLine[], now: string): IdleStretch[] {
     agent: line.agent, taskId: line.taskId, number: line.number, title: line.title, kind: s.kind, from: s.from, to: s.to,
     waitsFor: line.waitsFor, question: s.kind === 'person' ? line.moves.find(m => m.kind === 'asked')?.text ?? null : null,
   })));
-  const rank = { stall: 0, person: 1, after: 2 };
+  const rank = { lost: 0, alarm: 0, stall: 1, person: 2, after: 3, queued: 4, unknown: 5 };
   const length = (i: IdleStretch) => exampleSeconds(i.from, i.to ?? now);
   return idle.sort((a, b) => Number(!!a.to) - Number(!!b.to) || (!a.to ? rank[a.kind] - rank[b.kind] : 0) || length(b) - length(a));
 }
