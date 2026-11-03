@@ -1,4 +1,4 @@
-import { taskActor, type TreeAgent, type TreeFacts, type TreeLine, type TreeReview, type TreeSegment } from './tree.js';
+import { taskActor, type TreeAgent, type TreeFacts, type TreeLine, type TreeReview } from './tree.js';
 import { countedSegments, turnSegments, type FactTurn } from './tree-programs.js';
 
 export type TreeWait = { agent: TreeAgent; waitsForAgent: TreeAgent; from: string; kind: 'stall' | 'after'; taskId: string; number: number; title: string };

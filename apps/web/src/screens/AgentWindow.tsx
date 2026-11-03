@@ -40,11 +40,12 @@ const field = (data: unknown, key: string): string => {
 
 /* Claude Code loading its own tools: plumbing, not something he did. */
 const LOADER = 'ToolSearch';
+type LogEvent = EventView & { kind: Exclude<EventView['kind'], 'program'> };
 
 /* The lines people read: no proposal (the one card shows below the log) and no tool loading, with its result. */
-function visible(events: EventView[]): EventView[] {
+function visible(events: EventView[]): LogEvent[] {
   let call = '';
-  return events.filter(e => {
+  return events.filter((e): e is LogEvent => {
     if (e.kind === 'tool') call = field(e.data, 'name');
     if (['proposal', 'program'].includes(e.kind)) return false;
     if (e.kind === 'tool' || e.kind === 'tool_result') return call !== LOADER;
@@ -422,7 +423,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard }:
     }
   }
 
-  function line(e: EventView, i: number) {
+  function line(e: LogEvent, i: number) {
     // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- proposal and typed events are not rendered as log lines
     switch (e.kind) {
       case 'message':

@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import type { Db } from '../src/db/client.js';
-import { agents, companies, departments, jobs, nodeCodes, subscriptions, tasks, teams } from '../src/db/schema.js';
+import { agents, companies, departments, jobs, nodeCodes, nodes, subscriptions, tasks, teams, testParts, testRuns } from '../src/db/schema.js';
 import { as, invitePerson, SETUP, setUpCompany, TEST_API_KEY, testApp } from './helpers.js';
 
 const COMMAND = /^curl -fsSL http:\/\/localhost:8080\/install\.sh \| bash -s -- --join ([A-Za-z0-9_-]{43})$/;
@@ -77,13 +77,80 @@ describe('POST /api/subscriptions/connect', () => {
     expect((await list(app, ceo)).filter((s: { label: string }) => s.label === 'Claude')).toHaveLength(1);
   });
 
-  it('refuses a plan the person already has on a machine, which goes to another one only by that machine\'s own command', async () => {
-    const { app, ceo } = await companyWithMaria();
-    const code = (await connect(app, ceo, ['claude'])).json().command.split('--join ')[1];
-    await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' } });
-    const res = await connect(app, ceo, ['claude']);
-    expect(res.statusCode).toBe(409);
-    expect(res.json().error.reason).toBe('already_connected');
+  it('finishes or cleans up an unfinished plan and its node on a second connection so two connections leave one subscription and one node', async () => {
+    const { app, db, ceo } = await companyWithMaria();
+    const joinNode = (command: string, machineId: string, hostname: string) =>
+      app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code: command.split('--join ')[1], machineId, hostname, os: 'darwin', arch: 'arm64' } });
+
+    const first = (await connect(app, ceo, ['codex'])).json();
+    expect((await joinNode(first.command, 'mac-0001-abcd', 'ivan-mac')).statusCode).toBe(200);
+
+    const second = await connect(app, ceo, ['codex']);
+    expect(second.statusCode).toBe(201);
+    expect((await joinNode(second.json().command, 'mac-0002-efgh', 'ivan-laptop')).statusCode).toBe(200);
+
+    expect(await db.select().from(subscriptions).where(eq(subscriptions.provider, 'codex'))).toHaveLength(1);
+    expect(await db.select().from(nodes)).toHaveLength(1);
+
+    const subId = second.json().subscriptions[0].id as string;
+    expect((await app.inject({ method: 'DELETE', url: `/api/subscriptions/${subId}`, ...as(ceo) })).statusCode).toBe(204);
+    const third = await connect(app, ceo, ['codex']);
+    expect(third.statusCode).toBe(201);
+    expect((await joinNode(third.json().command, 'mac-0001-abcd', 'ivan-mac')).statusCode).toBe(200);
+
+    expect(await db.select().from(subscriptions).where(eq(subscriptions.provider, 'codex'))).toHaveLength(1);
+    expect(await db.select().from(nodes)).toHaveLength(1);
+  });
+
+  it('refuses a ready plan or a plan with agents on a second connection and never touches its row or node', async () => {
+    const { app, db, ceo, development } = await companyWithMaria();
+    const joinNode = (command: string, machineId: string) =>
+      app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code: command.split('--join ')[1], machineId, hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' } });
+
+    const claude = (await connect(app, ceo, ['claude'])).json();
+    const claudeId = claude.subscriptions[0].id as string;
+    await joinNode(claude.command, 'mac-0001-abcd');
+    await db.update(nodes).set({ status: 'ready' }).where(eq(nodes.subscriptionId, claudeId));
+    await db.update(subscriptions).set({ status: 'ready' }).where(eq(subscriptions.id, claudeId));
+
+    const refusedReady = await connect(app, ceo, ['claude']);
+    expect(refusedReady.statusCode).toBe(409);
+    expect(refusedReady.json().error.reason).toBe('already_connected');
+    expect((await db.select().from(subscriptions).where(eq(subscriptions.id, claudeId)))[0]).toMatchObject({ status: 'ready', removedAt: null });
+    expect((await db.select().from(nodes).where(eq(nodes.subscriptionId, claudeId)))[0]).toMatchObject({ status: 'ready' });
+
+    const codex = (await connect(app, ceo, ['codex'])).json();
+    const codexId = codex.subscriptions[0].id as string;
+    expect((await joinNode(codex.command, 'mac-0002-efgh')).statusCode).toBe(200);
+    await db.insert(agents).values({ companyId: development.companyId, kind: 'worker', name: 'Bruno', departmentId: development.id, roleKey: 'DEV-BE', model: '', subscriptionId: codexId });
+
+    const refusedWithAgents = await connect(app, ceo, ['codex']);
+    expect(refusedWithAgents.statusCode).toBe(409);
+    expect(refusedWithAgents.json().error.reason).toBe('already_connected');
+    expect((await db.select().from(subscriptions).where(eq(subscriptions.id, codexId)))[0]).toMatchObject({ status: 'needs_login', removedAt: null });
+    expect(await db.select().from(nodes).where(eq(nodes.subscriptionId, codexId))).toHaveLength(1);
+
+    const [claudeNode] = await db.select().from(nodes).where(eq(nodes.subscriptionId, claudeId));
+    const [bruno] = await db.select().from(agents).where(eq(agents.subscriptionId, codexId));
+    const [task] = await db.insert(tasks).values({ companyId: development.companyId, number: 1, title: 'Check test runs' }).returning();
+    const [job] = await db.insert(jobs).values({ companyId: development.companyId, subscriptionId: claudeId, agentId: bruno!.id, prompt: 'Run', timeoutMs: 1000, status: 'done', kind: 'conversation' }).returning();
+    const [run] = await db.insert(testRuns).values({ companyId: development.companyId, number: 1, taskId: task!.id, agentId: bruno!.id, jobId: job!.id, command: 'npm test', parts: 2, timeoutMs: 1000, status: 'passed' }).returning();
+    await db.insert(testParts).values({ companyId: development.companyId, runId: run!.id, part: 1, status: 'passed', nodeId: claudeNode!.id, machineId: claudeNode!.machineId });
+
+    const kimi = (await connect(app, ceo, ['kimi'])).json();
+    const kimiId = kimi.subscriptions[0].id as string;
+    expect((await joinNode(kimi.command, 'mac-0003-ijkl')).statusCode).toBe(200);
+    await db.update(nodes).set({ machineId: claudeNode!.machineId }).where(eq(nodes.subscriptionId, kimiId));
+    expect((await connect(app, ceo, ['kimi'])).statusCode).toBe(201);
+
+    expect((await joinNode((await connect(app, ceo, ['kimi'])).json().command, 'mac-0003-ijkl')).statusCode).toBe(200);
+    const [kimiNode] = await db.select().from(nodes).where(eq(nodes.subscriptionId, kimiId));
+    await db.insert(testParts).values({ companyId: development.companyId, runId: run!.id, part: 2, status: 'passed', nodeId: kimiNode!.id, machineId: kimiNode!.machineId });
+
+    const refusedWithNodeRun = await connect(app, ceo, ['kimi']);
+    expect(refusedWithNodeRun.statusCode).toBe(409);
+    expect(refusedWithNodeRun.json().error.reason).toBe('already_connected');
+    expect(await db.select().from(nodes).where(eq(nodes.subscriptionId, kimiId))).toHaveLength(1);
   });
 
   it('refuses an empty list, repeats and API key providers', async () => {

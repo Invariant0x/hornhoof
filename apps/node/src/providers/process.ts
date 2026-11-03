@@ -4,17 +4,15 @@ import { join } from 'node:path';
 import type { JobUser } from '../isolation.js';
 import type { LoginIo } from '../runner.js';
 import type { ProgramExit } from '../program-exit.js';
+import { agentEnv } from '../agent-env.js';
 
 /* Output kept in memory per run. The tail sent to Hornhoof is cut from the end of it. */
 export const KEEP_BYTES = 256 * 1024;
 const KILL_GRACE_MS = 2000;
 
-/* The node's own key and settings never reach the agent, which runs whatever its prompt asks. Nor does the image's
-   NODE_ENV=production: with it npm ci leaves out a repository's dev dependencies and React loads a build without act(). */
-const NODE_ONLY = new Set(['NODE_KEY', 'NODE_ENV']);
+/* Inherit operating-system settings, then apply only the account and program settings Hornhoof chose. */
 export function childEnv(tools: string, extra: Record<string, string>): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {};
-  for (const [k, v] of Object.entries(process.env)) if (!NODE_ONLY.has(k) && !k.startsWith('HORNHOOF_')) env[k] = v;
+  const env = agentEnv(process.env);
   env.PATH = `${tools}/bin:${process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin'}`;
   return { ...env, ...extra };
 }

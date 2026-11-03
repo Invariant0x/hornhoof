@@ -3,6 +3,9 @@ import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { agentEvents, agents, departments, jobs, nodes, subscriptions } from '../src/db/schema.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
+import { NODE_STALE_MS, expireStaleNodes } from '../src/modules/nodes/nodes.js';
+import { reconcile } from '../src/modules/tasks/reconcile.js';
+import { agentProgramState } from '../src/modules/tasks/silent.js';
 import { as, connectNode, listen, openStream, setUpCompany, testApp, until } from './helpers.js';
 
 async function liveCompany() {
@@ -218,6 +221,8 @@ describe('node socket', () => {
     node.send({ type: 'removed' });
     await node.closed;
     await until(async () => (await db.select().from(nodes).where(eq(nodes.id, nodeId)))[0]!.keyHash === null);
+    expect((await db.select().from(nodes).where(eq(nodes.id, nodeId)))[0]!.status).toBe('needs_login');
+    expect((await db.select().from(subscriptions).where(eq(subscriptions.id, subId)))[0]!.leaseNodeId).toBeNull();
   });
 
   it('tells a removed subscription to clean up as soon as it says hello', async () => {
@@ -227,5 +232,62 @@ describe('node socket', () => {
     node.send(hello([]));
     expect(await node.next()).toEqual({ type: 'remove' });
     node.close();
+  });
+
+  it('marks a node silent for more than 24 hours as not ready and restores readiness after hello', async () => {
+    const { app, db, url, ceo, subId, nodeId, key } = await liveCompany();
+    const node = await connectNode(url, key);
+    node.send(hello([]));
+    await until(async () => (await subOf(app, ceo, subId)).status === 'ready');
+    node.close();
+    await node.closed;
+
+    const now = new Date();
+    const justUnder24h = new Date(now.getTime() - NODE_STALE_MS + 60_000);
+    await db.update(nodes).set({ lastSeenAt: justUnder24h }).where(eq(nodes.id, nodeId));
+    await expireStaleNodes(db, now);
+    expect((await db.select().from(nodes).where(eq(nodes.id, nodeId)))[0]!.status).toBe('ready');
+
+    const [orchestrator] = await db.select().from(agents);
+    const turnStartedAt = new Date(now.getTime() - 40 * 60_000);
+    const [turn] = await db
+      .insert(jobs)
+      .values({
+        companyId: orchestrator!.companyId,
+        subscriptionId: subId,
+        nodeId,
+        agentId: orchestrator!.id,
+        kind: 'conversation',
+        prompt: 'Check status.',
+        timeoutMs: 900_000,
+        status: 'running',
+        startedAt: turnStartedAt,
+      })
+      .returning();
+
+    const silentSince = new Date(now.getTime() - NODE_STALE_MS);
+    await db.update(nodes).set({ lastSeenAt: silentSince }).where(eq(nodes.id, nodeId));
+    await reconcile(app.ctx, now);
+    expect(agentProgramState(app.ctx, turn).alarm).toBeNull();
+
+    await db.update(nodes).set({ status: 'ready', lastSeenAt: silentSince }).where(eq(nodes.id, nodeId));
+    await db.update(subscriptions).set({ status: 'ready' }).where(eq(subscriptions.id, subId));
+    const machinesRes = (await app.inject({ url: '/api/machines', ...as(ceo) })).json();
+    expect(machinesRes.machines[0].plans[0].status).toBe('needs_login');
+
+    await db.update(nodes).set({ status: 'ready', lastSeenAt: silentSince }).where(eq(nodes.id, nodeId));
+    await db.update(subscriptions).set({ status: 'ready' }).where(eq(subscriptions.id, subId));
+    const staleSub = await subOf(app, ceo, subId);
+    expect(staleSub.status).toBe('needs_login');
+    expect(staleSub.machines[0].status).toBe('needs_login');
+    expect((await db.select().from(nodes).where(eq(nodes.id, nodeId)))[0]!.status).toBe('needs_login');
+    expect((await db.select().from(subscriptions).where(eq(subscriptions.id, subId)))[0]!.status).toBe('needs_login');
+
+    const back = await connectNode(url, key);
+    back.send(hello([]));
+    await until(async () => (await subOf(app, ceo, subId)).status === 'ready');
+    expect((await subOf(app, ceo, subId)).machines[0].status).toBe('ready');
+    expect((await db.select().from(nodes).where(eq(nodes.id, nodeId)))[0]!.status).toBe('ready');
+    back.close();
   });
 });

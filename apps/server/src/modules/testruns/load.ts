@@ -3,7 +3,7 @@ import { and, asc, eq, isNull } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import { nodes, subscriptions } from '../../db/schema.js';
 import { nodeIdentity, type NodeHub, type SaidLoad } from '../nodes/hub.js';
-import { liveNode } from '../nodes/nodes.js';
+import { expireStaleNodes, liveNode } from '../nodes/nodes.js';
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars -- strip the timestamp from the public load
 const plain = ({ at: _, ...load }: SaidLoad): NodeLoad => load;
@@ -26,7 +26,8 @@ export function forRun(own: SaidLoad | null, loads: (SaidLoad | null)[]): NodeLo
 /* The nodes that stand for the company's machines: each machine's own and its plans'. A removed plan's node is gone from
    its machine, though it keeps its key until it hears so. Plans that joined with one command came at the same moment, so
    they go by name. */
-export function machineNodes(db: Db, companyId: string) {
+export async function machineNodes(db: Db, companyId: string) {
+  await expireStaleNodes(db);
   return db
     .select({ id: nodes.id, machineId: nodes.machineId, subscriptionId: nodes.subscriptionId, provider: subscriptions.provider, status: nodes.status, lastSeenAt: nodes.lastSeenAt })
     .from(nodes)

@@ -34,6 +34,21 @@ describe('work tree layout', () => {
     expect(currentTaskNumber(REVIEW_TREE, 'not-in-this-turn')).toBeUndefined();
   });
 
+  it('keeps an unlinked head turn and queued review messages on one head lane', () => {
+    const head = REVIEW_TREE.review!.head;
+    const activity = [{ jobId: 'held-head', agent: head, task: null, segments: [{ kind: 'alarm' as const, from: REVIEW_TREE.turn!.startedAt, to: null,
+      alarm: { reason: 'node_silent' as const, since: Date.parse(REVIEW_TREE.turn!.startedAt) } }] },
+    { jobId: 'queued-review', agent: head, task: { id: 'r90', number: 90, title: 'Review' }, segments: [{ kind: 'queued' as const, from: REVIEW_TREE.review!.openedAt, to: null, waitsForAgent: head }] }];
+    const tree = { ...REVIEW_TREE, activity };
+    const layout = treeLayout(tree, box, 1);
+    expect(layout.rows.filter(r => r.agent?.id === head.id)).toHaveLength(1);
+    expect(layout.paths).toContainEqual(expect.objectContaining({ row: head.id, cls: 'seg al' }));
+    expect(layout.targets).toContainEqual(expect.objectContaining({ pick: { kind: 'activity', agentId: head.id, jobId: 'held-head', segmentIndex: 0 } }));
+    expect(layout.badges).toContainEqual(expect.objectContaining({ row: head.id, kind: 'alarm' }));
+    expect(currentTaskNumber(tree, head.id)).toBeUndefined();
+    expect(currentTaskNumber({ ...tree, activity: [activity[1]!] }, head.id)).toBe(90);
+  });
+
   it('keeps all 38 tasks in time order on one lane, labelled by the current task', () => {
     const lines = Array.from({ length: 38 }, (_, i) => {
       const from = new Date(Date.parse(DEV_TREE.turn!.startedAt) + i * 480_000).toISOString();

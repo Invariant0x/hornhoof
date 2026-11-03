@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, isNull, lte, sql } from 'drizzle-orm';
 import { hashToken } from '../../crypto/tokens.js';
 import type { Db } from '../../db/client.js';
 import { machines, nodes, subscriptions } from '../../db/schema.js';
@@ -6,6 +6,19 @@ import type { NodeIdentity } from './hub.js';
 
 /* A node that still has its key: its machine is connected and Hornhoof has not taken the node back. */
 export const liveNode = isNotNull(nodes.keyHash);
+
+export const NODE_STALE_MS = 24 * 60 * 60 * 1000;
+
+/* Clears ready on nodes that have not been heard from for more than 24 hours and settles their plans. */
+export async function expireStaleNodes(db: Db, now = new Date()): Promise<void> {
+  const cutoff = new Date(now.getTime() - NODE_STALE_MS);
+  const stale = await db
+    .update(nodes)
+    .set({ status: 'needs_login' })
+    .where(and(eq(nodes.status, 'ready'), lte(nodes.lastSeenAt, cutoff)))
+    .returning({ subscriptionId: nodes.subscriptionId });
+  await settlePlans(db, stale.map(n => n.subscriptionId));
+}
 
 /* Never selects key_hash, so it cannot leak into a response. */
 const columns = {

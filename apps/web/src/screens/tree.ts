@@ -1,5 +1,5 @@
 import type {
-  Department, DepartmentTree, SegmentKind, TreeAgent, TreeLine, TreeMove, TreeReview, TreeReviewer, TreeSegment, TreeVerdict,
+  Department, DepartmentTree, SegmentKind, TreeActivity, TreeAgent, TreeLine, TreeMove, TreeReview, TreeReviewer, TreeSegment, TreeVerdict,
 } from '../types';
 import type { Point } from '../ui/wires';
 
@@ -21,10 +21,12 @@ const IDLE_CLASS = { stall: 'm', person: 'p', after: 'm', lost: 'bad', alarm: 'b
 export const idleClass = (kind: Exclude<SegmentKind, 'work'>): string => IDLE_CLASS[kind];
 
 export type TreePick = {
-  kind: 'line' | 'reviewer' | 'move' | 'merge' | 'main' | 'turn' | 'review';
+  kind: 'activity' | 'line' | 'reviewer' | 'move' | 'merge' | 'main' | 'turn' | 'review';
   agentId?: string;
   taskId?: string;
   moveIndex?: number;
+  jobId?: string;
+  segmentIndex?: number;
 };
 export type TreeRow = {
   type: 'axis' | 'main' | 'turn' | 'lane';
@@ -37,6 +39,8 @@ export type TreeRow = {
   lines?: TreeLine[];
   reviews?: { review: TreeReview; reviewer: TreeReviewer }[];
   current?: boolean;
+  activities?: TreeActivity[];
+  activity?: TreeActivity;
   pick?: TreePick;
 };
 export type TreePath = {
@@ -45,6 +49,7 @@ export type TreePath = {
   cls: string;
   row?: string;
   dim?: boolean;
+  segmentKind?: SegmentKind;
 };
 export type TreeMark = {
   kind: 'start' | 'fork' | 'merge' | 'done' | 'move' | 'head' | 'verdict' | 'review';
@@ -90,10 +95,41 @@ type Drawing = { tree: DepartmentTree; layout: TreeLayout; turnY: number };
 const R = 8;
 const center = (r: TreeRow) => r.y + r.h / 2;
 
+const STATE_PRIORITY: Record<SegmentKind, number> = { unknown: 0, queued: 1, stall: 2, after: 3, person: 4, work: 5, lost: 6, alarm: 7 };
+export const statePriority = (kind: SegmentKind): number => STATE_PRIORITY[kind];
+const containsNow = (s: TreeSegment, now: string) => s.from <= now && (!s.to || s.to > now);
+
+function strongestCurrent(segments: TreeSegment[], now: string): TreeSegment | undefined {
+  return segments.filter(s => containsNow(s, now)).sort((a, b) => statePriority(a.kind) - statePriority(b.kind) || a.from.localeCompare(b.from)).at(-1);
+}
+
+function lastSegment(segments: TreeSegment[], now: string): TreeSegment | undefined {
+  return [...segments].sort((a, b) => (a.to ?? now).localeCompare(b.to ?? now) || statePriority(a.kind) - statePriority(b.kind)).at(-1);
+}
+
+type ActivityItem = { activity: TreeActivity; segment: TreeSegment; index: number };
+function activityItem(activities: TreeActivity[], now: string): ActivityItem | undefined {
+  const items = activities.flatMap(activity => activity.segments.map((segment, index) => ({ activity, segment, index })));
+  const segments = items.map(i => i.segment), chosen = strongestCurrent(segments, now) ?? lastSegment(segments, now);
+  return items.find(i => i.segment === chosen);
+}
+
+function activityPick(item: ActivityItem): TreePick {
+  return { kind: 'activity', agentId: item.activity.agent.id, jobId: item.activity.jobId, segmentIndex: item.index };
+}
+
+export function agentSegments(tree: DepartmentTree, agentId: string): TreeSegment[] {
+  return [...tree.lines.filter(l => l.agent.id === agentId).flatMap(l => l.segments),
+    ...reviewsOf(tree).flatMap(r => r.reviewers.filter(p => p.agent.id === agentId).flatMap(p => p.segments)),
+    ...(tree.activity ?? []).filter(a => a.agent.id === agentId).flatMap(a => a.segments),
+    ...tree.idle.filter(i => i.agent.id === agentId && i.waitsForAgent),
+  ].sort((a, b) => statePriority(a.kind) - statePriority(b.kind));
+}
+
 type Lane = Omit<TreeRow, 'y' | 'h'>;
 
 function laneFor(lanes: Map<string, Lane>, agent: TreeAgent): Lane {
-  const row = lanes.get(agent.id) ?? { type: 'lane', agent, lines: [], reviews: [] };
+  const row = lanes.get(agent.id) ?? { type: 'lane', agent, lines: [], reviews: [], activities: [] };
   lanes.set(agent.id, row);
   return row;
 }
@@ -104,13 +140,19 @@ function reviewIsCurrent(line: TreeLine | undefined, last: { review: TreeReview;
   return !line || last.review.openedAt >= line.createdAt;
 }
 
-function labelledLane(row: Lane): Lane {
+function labelledLane(row: Lane, now: string): Lane {
+  const observed = activityItem(row.activities!, now), activity = observed?.activity;
   row.lines!.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   const line = row.lines!.findLast(l => l.live) ?? row.lines!.at(-1), last = row.reviews!.findLast(r => r.reviewer.live) ?? row.reviews!.at(-1);
   if (last && reviewIsCurrent(line, last)) {
-    return { ...row, reviewer: last.reviewer, review: last.review, pick: { kind: 'reviewer', taskId: last.review.taskId, agentId: row.agent!.id } };
+    return { ...row, activity, reviewer: last.reviewer, review: last.review, pick: { kind: 'reviewer', taskId: last.review.taskId, agentId: row.agent!.id } };
   }
-  return { ...row, line, pick: { kind: 'line', taskId: line!.taskId, agentId: row.agent!.id } };
+  if (!line) return { ...row, activity, pick: activityPick(observed!) };
+  return { ...row, activity, line, pick: { kind: 'line', taskId: line.taskId, agentId: row.agent!.id } };
+}
+
+function addActivityLanes(lanes: Map<string, Lane>, activities: TreeActivity[] = []): void {
+  for (const activity of activities) laneFor(lanes, activity.agent).activities!.push(activity);
 }
 
 function lanesOf(tree: DepartmentTree): Lane[] {
@@ -119,12 +161,17 @@ function lanesOf(tree: DepartmentTree): Lane[] {
   for (const review of reviewsOf(tree)) {
     for (const reviewer of review.reviewers) laneFor(lanes, reviewer.agent).reviews!.push({ review, reviewer });
   }
-  return [...lanes.values()].map(labelledLane);
+  addActivityLanes(lanes, tree.activity);
+  return [...lanes.values()].map(row => labelledLane(row, tree.now));
+}
+
+export function rowTaskNumber(row: Pick<TreeRow, 'line' | 'review' | 'activity'>): number | undefined {
+  return (row.line ?? row.review ?? row.activity?.task)?.number;
 }
 
 export function currentTaskNumber(tree: DepartmentTree, agentId: string): number | undefined {
   const row = lanesOf(tree).find(r => r.agent?.id === agentId);
-  return row?.line?.number ?? row?.review?.number;
+  return row ? rowTaskNumber(row) : undefined;
 }
 
 function orderedLanes(tree: DepartmentTree, agentOrder: string[]): Lane[] {
@@ -158,8 +205,10 @@ function windowStart(tree: DepartmentTree): string {
   return new Date(Date.parse(tree.turn?.startedAt ?? tree.now) - 720_000).toISOString();
 }
 
-function path(d: Drawing, kind: TreePath['kind'], cls: string, points: Point[], row?: string, dim = false) {
-  d.layout.paths.push({ kind, cls, points, row, dim });
+function path(d: Drawing, kind: TreePath['kind'], cls: string, points: Point[], row?: string, dim = false): TreePath {
+  const drawn = { kind, cls, points, row, dim };
+  d.layout.paths.push(drawn);
+  return drawn;
 }
 
 function mark(d: Drawing, m: TreeMark) {
@@ -195,11 +244,16 @@ function connections(d: Drawing, row: TreeRow, line: TreeLine, end: string, done
   mark(d, { kind: 'merge', x, y: turnY, cls: 'via ok', pick: { ...row.pick!, kind: 'merge' } });
 }
 
+function needsPulse(d: Drawing, row: TreeRow, s: TreeSegment, to: string, dim: boolean, live: boolean, width: number): boolean {
+  if (!live || dim || s.kind !== 'work' || to !== d.tree.now || width <= 20) return false;
+  return strongestCurrent(agentSegments(d.tree, row.agent!.id), d.tree.now)?.kind === 'work';
+}
+
 function segments(
   d: Drawing, row: TreeRow, list: TreeSegment[], end: string,
   dim: boolean, live: boolean, cut?: string | null, plain = false,
 ) {
-  const { layout: l, tree } = d, y = center(row);
+  const { layout: l } = d, y = center(row);
   for (const s of list) {
     const from = s.from < l.from ? l.from : s.from;
     const to = s.to && s.to < end ? s.to : end;
@@ -207,9 +261,9 @@ function segments(
     const x1 = l.x(from) + (s.from === cut && s.kind !== 'after' ? R : 0) + (plain && s.from === row.line?.createdAt ? 3.4 : 0);
     const x2 = l.x(to) - (dim && !plain && to === end ? R : 0);
     if (x2 <= x1) continue;
-    path(d, 'segment', `seg ${SEGMENT_CLASS[s.kind]}`, [[x1, y], [x2, y]], row.agent?.id, dim);
+    path(d, 'segment', `seg ${SEGMENT_CLASS[s.kind]}`, [[x1, y], [x2, y]], row.agent?.id, dim).segmentKind = s.kind;
     l.targets.push({ pick: row.pick!, row: row.agent!.id, x: x1, y: y - 8, width: x2 - x1, height: 16, round: false, segment: s });
-    if (live && !dim && s.kind === 'work' && to === tree.now && x2 - x1 > 20) {
+    if (needsPulse(d, row, s, to, dim, live, x2 - x1)) {
       l.pulses.push([[Math.max(x1, x2 - 200), y], [x2, y]]);
     }
   }
@@ -307,6 +361,21 @@ function drawWait(d: Drawing, row: TreeRow) {
 }
 
 /* lanesOf supplies both arrays for every lane, including review-only agents. */
+function drawActivityHead(d: Drawing, row: TreeRow, item: ActivityItem | undefined) {
+  if (!item || !containsNow(item.segment, d.tree.now)) return;
+  const strongest = strongestCurrent(agentSegments(d.tree, row.agent!.id), d.tree.now);
+  if (strongest !== item.segment) return;
+  d.layout.badges = d.layout.badges.filter(b => b.row !== row.agent!.id);
+  head(d, { ...row, pick: activityPick(item) }, [item.segment]);
+}
+
+function drawActivity(d: Drawing, row: TreeRow) {
+  for (const activity of row.activities!) {
+    activity.segments.forEach((segment, index) => segments(d, { ...row, pick: activityPick({ activity, segment, index }) }, [segment], d.tree.now, false, true));
+  }
+  drawActivityHead(d, row, activityItem(row.activities!, d.tree.now));
+}
+
 function drawLane(d: Drawing, row: TreeRow) {
   for (const line of row.lines!) {
     workLane(d, { ...row, line, current: row.pick?.taskId === line.taskId, pick: { kind: 'line', agentId: line.agent.id, taskId: line.taskId } });
@@ -315,6 +384,7 @@ function drawLane(d: Drawing, row: TreeRow) {
     reviewLane(d, { ...row, reviewer, current: row.pick?.taskId === review.taskId && !review.closedAt, pick: { kind: 'reviewer', agentId: reviewer.agent.id, taskId: review.taskId } }, review.openedAt);
   }
   drawWait(d, row);
+  drawActivity(d, row);
 }
 
 function reviewMark(d: Drawing, review: TreeReview) {
