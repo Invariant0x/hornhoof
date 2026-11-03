@@ -13,7 +13,7 @@ import { Edge } from '../ui/Edge';
 import { LogoMark, PersonIcon } from '../ui/icons';
 import { PersonButton } from '../ui/PersonButton';
 import { PeopleBridgeMasks, peopleMask, PeopleWires } from '../ui/PeopleWires';
-import { LiveWay, Pulse, pulseSeconds, toD, useReducedMotion, type Point } from '../ui/wires';
+import { LiveWay, Pulse, motionSpeed, pulseSeconds, toD, useReducedMotion, type Point } from '../ui/wires';
 import { useWorkLines } from '../ui/work-lines';
 import { AgentState } from '../ui/AgentState';
 import { clock } from './Subscriptions';
@@ -253,7 +253,7 @@ function contentBounds(org: Org): { x0: number; y0: number; x1: number; y1: numb
   return b;
 }
 
-type Shot = { key: number; pts: Point[]; tone: 'c' | 'a'; personId?: string };
+type Shot = { key: number; pts: Point[]; tone: 'c' | 'a'; personId?: string; speed: number };
 
 const pulsePersonId = (from: Endpoint, to: Endpoint) => from.kind === 'person' ? from.id : to.kind === 'person' ? to.id : undefined;
 
@@ -387,17 +387,17 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator, inside = false, 
 
   const fire = useCallback(
     (pts: Point[], m: Extract<LiveMessage, { type: 'pulse' }>) => {
-      const key = ++shotKey.current;
-      setShots(s => [...s, { key, pts, tone: pulseTone(m.from, m.to), personId: pulsePersonId(m.from, m.to) }]);
+      const key = ++shotKey.current, speed = motionSpeed(PULSE_SPEED, still);
+      setShots(s => [...s, { key, pts, tone: pulseTone(m.from, m.to), personId: pulsePersonId(m.from, m.to), speed }]);
       if (m.from.kind === 'department') flash(m.from.id);
       const id = setTimeout(() => {
         timers.current.delete(id);
         setShots(s => s.filter(x => x.key !== key));
         if (m.to.kind === 'department') flash(m.to.id);
-      }, pulseSeconds(pts, PULSE_SPEED) * 1000);
+      }, pulseSeconds(pts, speed) * 1000);
       timers.current.add(id);
     },
-    [flash],
+    [flash, still],
   );
 
   /* The line to each department: blue while its head works on the orchestrator's task, yellow for five minutes after it
@@ -406,7 +406,7 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator, inside = false, 
 
   /* Real signals only: a pulse runs once per message or move of a task. useOrg keeps the working count and the org itself fresh. */
   useStream((m: LiveMessage) => {
-    if (m.type !== 'pulse' || m.from.kind === 'agent' || m.to.kind === 'agent' || still) return;
+    if (m.type !== 'pulse' || m.from.kind === 'agent' || m.to.kind === 'agent') return;
     const pts = org && pulsePath(m.from, m.to, org);
     if (pts) fire(pts, m);
     /* A pulse to a department that was just made comes before the map has fetched it, so it waits a little for it. */
@@ -495,7 +495,7 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator, inside = false, 
         <circle className="hub-in" cx="120" cy="120" r="88" />
         <path className="hub-hz" d="M 40 132 L 200 132" />
         {/* Motion means real work: the dot runs only while an agent works. */}
-        {!still && org.agents.working > 0 && <Pulse pts={GAUGE_TRACK} speed={55} bounce tone="k" />}
+        {org.agents.working > 0 && <Pulse pts={GAUGE_TRACK} speed={motionSpeed(55, still)} bounce tone="k" />}
       </svg>
       <LogoMark className="hub-mark" />
       <span className="hub-num">
@@ -541,7 +541,7 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator, inside = false, 
           <DecisionSignals ways={asked} still={still} placed={placed} prefix={wirePrefix} />
           {shots.map(s => (
             <g key={s.key} mask={peopleMask(placed, wirePrefix, s.personId)}>
-              <Pulse pts={s.pts} speed={PULSE_SPEED} once tone={s.tone} />
+              <Pulse pts={s.pts} speed={s.speed} once tone={s.tone} />
             </g>
           ))}
         </svg>
