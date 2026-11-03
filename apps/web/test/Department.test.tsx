@@ -8,7 +8,7 @@ import { schemaLayout, stepPaths } from '../src/screens/schema';
 import { RepoSettings } from '../src/ui/RepoSettings';
 import { useDepartmentTree } from '../src/tasks';
 import { toD } from '../src/ui/wires';
-import type { Me, Org } from '../src/types';
+import type { Employee, Me, Org, ProgramView } from '../src/types';
 import { CARD, decisions, DEV_ORG, DEV_TREE, REVIEW_TREE, TREE_ORG, ME, mockApi, REQUESTS, ROSTER, TASK_DETAIL, TASKS } from './api-mock';
 import { decl, px, rulesFor } from './css';
 import { fakeStream } from './fake-stream';
@@ -1032,4 +1032,117 @@ it('anchors a card opened from Speed beside the clicked row', async () => {
   vi.spyOn(row, 'getBoundingClientRect').mockReturnValue({ x: 700, y: 280, left: 700, right: 1000, top: 280, bottom: 320, width: 300, height: 40, toJSON() {} });
   await user.click(row);
   expect(await screen.findByRole('dialog')).toHaveStyle({ top: '260px' });
+});
+
+describe("what an agent's program does, and the server's alarms about its turn", () => {
+  type Live = Pick<Employee, 'program' | 'alarm'> & Partial<Pick<Employee, 'status'>>;
+  const ago = (now: number, minutes: number) => new Date(now - minutes * 60_000).toISOString();
+  /* The company with Bruno's program and alarm as given, on a server clock at now. */
+  function live(now: number, bruno: Live, base: Org = TREE_ORG): Org {
+    return { ...base, serverNow: new Date(now).toISOString(), departments: base.departments.map(d => ({ ...d, employees: d.employees.map(e => (e.id === 'b1' ? { ...e, ...bruno } : e)) })) };
+  }
+  const program = (now: number, state: ProgramView['state'], minutes: number, tool: string | null = null): ProgramView => ({ state, since: ago(now, minutes), tool, screenAt: ago(now, 0), reportedAt: ago(now, 0) });
+  const STATES: [string, (now: number) => Live, string, string, boolean][] = [
+    ['thinking', now => ({ program: program(now, 'thinking', 12), alarm: null }), 'thinking 12 min', 'думает 12 мин', false],
+    ['a tool', now => ({ program: program(now, 'tool', 40, 'Bash'), alarm: null }), 'Bash running 40 min', 'Bash работает 40 мин', false],
+    ['asking', now => ({ program: program(now, 'asking', 3), alarm: null }), 'asking', 'спрашивает', false],
+    ['waiting for input for 59 s', now => ({ program: program(now, 'idle', 59 / 60), alarm: null }), 'waiting for input', 'ждет ввода', false],
+    ['a lost turn end after 61 s of it', now => ({ program: program(now, 'idle', 61 / 60), alarm: null }), 'turn end lost: waiting for input', 'конец хода потерян: ждет ввода', true],
+    ['a frozen program', now => ({ program: program(now, 'thinking', 50), alarm: { reason: 'program_stalled', since: ago(now, 34) } }), 'program frozen 34 min', 'программа замерла 34 мин', true],
+    ['a silent node', now => ({ program: program(now, 'tool', 45, 'Bash'), alarm: { reason: 'node_silent', since: ago(now, 31) } }), 'node silent 31 min', 'нода молчит 31 мин', true],
+  ];
+  const stateOf = (where: HTMLElement) => where.querySelector('.ast');
+  function heldClock() {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
+    return userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+  }
+  const bruno = () => within(screen.getByRole('region', { name: /^(Members|Сотрудники)$/ })).getByRole('button', { name: /Bruno/ });
+  const lane = () => [...document.querySelectorAll<HTMLElement>('.tv-labs .lchip')].find(b => b.textContent!.includes('Bruno'))!;
+
+  describe.each([
+    ['en', /Development/, 'Tree'],
+    ['ru', /Разработка/, 'Дерево'],
+  ] as const)('in %s', (lang, department, tree) => {
+    it.each(STATES)('shows %s on the agent on the map and in the tree', async (_, state, en, ru, alarm) => {
+      localStorage.setItem('hh-lang', lang);
+      onTestFinished(() => localStorage.removeItem('hh-lang'));
+      /* The page's steady clock stands still, so 59 and 61 seconds stay what they are while the test runs. */
+      vi.useFakeTimers({ toFake: ['performance'] });
+      onTestFinished(() => {
+        vi.useRealTimers();
+      });
+      const user = userEvent.setup();
+      const now = Date.now();
+      shell(treeRoute({ ...DEV_TREE, now: new Date(now).toISOString() }), live(now, state(now)));
+      await user.click(await screen.findByRole('button', { name: department }));
+      const text = lang === 'en' ? en : ru;
+      for (const where of [bruno]) {
+        expect(stateOf(where())).toHaveTextContent(text);
+        expect(stateOf(where())!.classList.contains('alarm')).toBe(alarm);
+      }
+      await user.click(screen.getByRole('button', { name: tree }));
+      await screen.findByRole('group');
+      expect(stateOf(lane())).toHaveTextContent(text);
+      expect(stateOf(lane())!.classList.contains('alarm')).toBe(alarm);
+      /* Where a phone's label cuts it short, the whole of it is a touch away. */
+      expect(stateOf(lane())).toHaveAttribute('title', text);
+    });
+
+    it('says in the tree that an agent without a running turn waits for a task, and nothing of it on the schema, which says so already', async () => {
+      localStorage.setItem('hh-lang', lang);
+      onTestFinished(() => localStorage.removeItem('hh-lang'));
+      const user = userEvent.setup();
+      const now = Date.now();
+      shell(treeRoute({ ...DEV_TREE, now: new Date(now).toISOString() }), live(now, { program: null, alarm: null, status: 'idle' }));
+      await user.click(await screen.findByRole('button', { name: department }));
+      expect(stateOf(bruno())).toBeNull();
+      await user.click(screen.getByRole('button', { name: tree }));
+      await screen.findByRole('group');
+      expect(stateOf(lane())).toHaveTextContent(lang === 'en' ? 'waiting for a task' : 'ждет задачу');
+    });
+  });
+
+  it('counts the minutes on without a reload, turns a long wait for input red, and follows the server when it says the company changed', async () => {
+    const user = heldClock();
+    const stream = fakeStream();
+    const now = Date.now();
+    let org = live(now, { program: program(now, 'thinking', 12), alarm: null }, DEV_ORG);
+    shell({ 'GET /api/org': async () => [200, org] });
+    await flyIn(user);
+    expect(stateOf(bruno())).toHaveTextContent('thinking 12 min');
+    await act(() => vi.advanceTimersByTimeAsync(60_000));
+    expect(stateOf(bruno())).toHaveTextContent('thinking 13 min');
+    /* It waits for input from the minute the held clock just passed. */
+    org = live(now, { program: program(now, 'idle', -1), alarm: null }, DEV_ORG);
+    stream.send({ type: 'org' });
+    await vi.waitFor(() => expect(stateOf(bruno())).toHaveTextContent('waiting for input'));
+    expect(stateOf(bruno())).not.toHaveClass('alarm');
+    await act(() => vi.advanceTimersByTimeAsync(60_000));
+    expect(stateOf(bruno())).toHaveTextContent('turn end lost: waiting for input');
+    expect(stateOf(bruno())).toHaveClass('alarm');
+    org = live(now, { program: null, alarm: null }, DEV_ORG);
+    stream.send({ type: 'working', working: 0 });
+    await vi.waitFor(() => expect(stateOf(bruno())).toBeNull());
+  });
+
+  it.each([
+    ['en', 'Card', 'program frozen 34 min'],
+    ['ru', 'Карточка', 'программа замерла 34 мин'],
+  ])("shows it on the agent's card opened from the department, in %s", async (lang, card, text) => {
+    localStorage.setItem('hh-lang', lang);
+    onTestFinished(() => localStorage.removeItem('hh-lang'));
+    const user = userEvent.setup();
+    const now = Date.now();
+    const routes = { 'GET /api/agents/b1': [200, { ...CARD, state: 'working' }], 'GET /api/agents/b1/events?after=0': [200, { events: [], state: READY }] };
+    shell(routes, live(now, { program: program(now, 'thinking', 50), alarm: { reason: 'program_stalled', since: ago(now, 34) } }, DEV_ORG));
+    await user.click(await screen.findByRole('button', { name: lang === 'en' ? /Development/ : /Разработка/ }));
+    await user.click(screen.getByRole('button', { name: /Bruno/ }));
+    await user.click(await screen.findByRole('button', { name: card }));
+    const head = (await screen.findByRole('heading', { level: 3, name: 'Bruno' })).parentElement!;
+    expect(stateOf(head)).toHaveTextContent(text);
+    expect(stateOf(head)).toHaveClass('alarm');
+  });
 });
