@@ -860,6 +860,8 @@ export const en = {
     self_locked: 'You cannot do this to yourself.',
     unknown_place: 'This department or team no longer exists. Reload the page and pick again.',
     not_owner: 'Only the owner can do this.',
+    no_node_online: 'No machine of this plan is online. Turn one of them on and try again.',
+    signin_unsupported: 'The machine is online, but its node cannot sign in from Hornhoof yet. Update the nodes on that machine, then try again.',
     orchestrator_only: 'Only the orchestrator writes this.',
     already_on_machine: 'This plan runs on this machine already. Reload the page.',
     already_connected: 'This plan runs on a machine already. To run it on another one too, use Add my plan on that machine under Machines.',

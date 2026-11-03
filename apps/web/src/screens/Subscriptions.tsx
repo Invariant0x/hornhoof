@@ -256,7 +256,6 @@ function PlanExtra({ sub: s, controls: c }: Omit<PlanProps, 'me'>) {
   const on = c.signing;
   return <>
     {on && <SignInPanel subId={s.id} program={PROGRAM_NAMES[s.provider]} nodeId={on.nodeId} hostname={on.hostname} onEnd={error => c.endSignIn(on, error)} onStop={() => c.stopSignIn(on)} />}
-    {c.note && <p className="test failed" role="status">{c.note}</p>}
     {c.keying && isKeyPlan(s.provider) && <KeyForm sub={{ ...s, provider: s.provider }} onDone={c.done} onCancel={() => c.setKeyFor(null)} />}
   </>;
 }
@@ -280,6 +279,7 @@ function SubscriptionDetails({ sub: s, me, controls, now }: PlanProps & { now: n
         <PlanMachines sub={s} now={now} />
         <PlanSettings sub={s} me={me} controls={controls} />
         <PlanButtons sub={s} me={me} controls={controls} />
+        {controls.note && <p className="test failed" role="status">{controls.note}</p>}
         {controls.asking && <Ask text={s.kind === 'api_key' ? t.subs.removeKeyAsk(name) : t.subs.removeAsk(name)} yes={t.subs.yesRemove} onYes={() => controls.remove(s)} onNo={() => controls.setConfirm(null)} />}
         {controls.test && <TestResult test={controls.test} />}
       </section>
@@ -371,12 +371,16 @@ export function Subscriptions({ me }: { me: Me }) {
       setPanel({ kind: 'command', command });
     });
 
-  const signIn = (sub: SubView, fresh: boolean) =>
-    run(async () => {
-      setSignNote(null);
+  /* A sign-in that cannot start says why next to the button that was pressed, not at the top of the page. */
+  async function signIn(sub: SubView, fresh: boolean) {
+    setSignNote(null);
+    try {
       const { nodeId, hostname } = await api.post<{ nodeId: string; hostname: string }>(`/api/subscriptions/${sub.id}/signin`, { fresh });
       setSigning({ subId: sub.id, nodeId, hostname });
-    });
+    } catch (err) {
+      setSignNote({ subId: sub.id, text: errorText(t, err) });
+    }
+  }
 
   const stopSignIn = (on: Signing) =>
     run(async () => {

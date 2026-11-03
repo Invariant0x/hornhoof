@@ -585,6 +585,31 @@ describe('signing in to plans', () => {
     expect(screen.queryByTestId('live-terminal')).not.toBeInTheDocument();
   });
 
+  it('says under the plan, in plain words, why a sign-in cannot start, instead of at the top of the page', async () => {
+    const ready = { ...codex, status: 'ready' as const, machines: [MACHINE] };
+    const unsupported = { error: { code: 'conflict', message: 'The machine of this plan is online, but its node cannot run the sign-in.', reason: 'signin_unsupported' } };
+    mockApi({ ...only(ready), 'POST /api/subscriptions/s-codex/signin': [409, unsupported] });
+    render(<Subscriptions me={ME} />);
+    await openAll();
+    await userEvent.click(await screen.findByRole('button', { name: 'Sign in to Codex' }));
+    const card = screen.getByRole('article', { name: 'Codex, Ivan' });
+    expect(await within(card).findByText('The machine is online, but its node cannot sign in from Hornhoof yet. Update the nodes on that machine, then try again.')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(within(card).getByRole('button', { name: 'Sign in to Codex' })).toBeInTheDocument();
+  });
+
+  it('says in Russian that no machine of the plan is online to sign in on', async () => {
+    localStorage.setItem('hh-lang', 'ru');
+    const ready = { ...codex, status: 'ready' as const, machines: [MACHINE] };
+    const offline = { error: { code: 'conflict', message: 'No machine of this plan is online.', reason: 'no_node_online' } };
+    mockApi({ ...only(ready), 'POST /api/subscriptions/s-codex/signin': [409, offline] });
+    render(<LanguageProvider><Subscriptions me={ME} /></LanguageProvider>);
+    await openAll();
+    await userEvent.click(await screen.findByRole('button', { name: 'Войти в Codex' }));
+    const card = screen.getByRole('article', { name: 'Codex, Ivan' });
+    expect(await within(card).findByText('Ни одна машина этой подписки не в сети. Включите одну из них и попробуйте еще раз.')).toBeInTheDocument();
+  });
+
   it('offers no sign-in for a plan of another person, or one with no machine online', async () => {
     mockApi(only({ ...codex, owner: { id: 'p4', name: 'Oleg' } }, { ...claude, online: false, machines: [{ ...MACHINE, online: false }] }));
     render(<Subscriptions me={ME} />);
