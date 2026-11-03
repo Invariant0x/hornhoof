@@ -39,6 +39,22 @@ describe('the node log that leaves the machine', () => {
     expect(text).toBe('Node failure.\n[hidden]');
   });
 
+  it('redacts incomplete multiline quoted credentials and folded authorization headers', () => {
+    for (const input of ['access_token="synthetic-first-line\nsynthetic-second-line', "password='synthetic-first-line\nsynthetic-second-line", 'Authorization: Bearer synthetic-first-line\n synthetic-second-line']) {
+      const clean = nodeLog('Node error.\n' + input, []);
+      expect(clean).not.toContain('synthetic-first-line');
+      expect(clean).not.toContain('synthetic-second-line');
+      expect(clean).toContain('Node error.');
+    }
+  });
+
+  it('keeps diagnostic context around quoted secrets, including escapes and multiple labels', () => {
+    expect(nodeLog('Provider error: access_token="private\\"part"; state=offline; password=\'another-private\'; retry=1', [])).toBe('Provider error: access_token=[hidden]; state=offline; password=[hidden]; retry=1');
+    expect(nodeLog('Node token="first-private"; state=offline; password="second-private"; retry=1', [])).toBe('Node token=[hidden]; state=offline; password=[hidden]; retry=1');
+    expect(nodeLog('Node token="private "; state=offline', [])).toBe('Node token=[hidden]; state=offline');
+    expect(nodeLog('  at connect(node.ts:42)', [])).toBe('  at connect(node.ts:42)');
+  });
+
   it('keeps the last 80 lines within 16384 UTF-8 bytes, after redaction', () => {
     const token = 'secret-across-tail-boundary-'.repeat(700);
     const lines = Array.from({ length: 100 }, (_, i) => `Node line ${i}: ${'界'.repeat(100)}`);

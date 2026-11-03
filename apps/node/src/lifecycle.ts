@@ -34,6 +34,20 @@ function keep(path: string, value: unknown): void {
   renameSync(pending, path);
 }
 
+function journalWriter(path: string, failed: () => void): (value: State) => void {
+  let warned = false;
+  return value => {
+    try {
+      keep(path, value);
+    } catch {
+      if (!warned) {
+        warned = true;
+        failed();
+      }
+    }
+  };
+}
+
 function oomKills(): number | null {
   try {
     const value = /^oom_kill (\d+)$/m.exec(readFileSync('/sys/fs/cgroup/memory.events', 'utf8'));
@@ -72,7 +86,12 @@ export function nodeLifecycle(input: Input): Lifecycle {
   const previous = previousExit(parsed.success ? parsed.data : null, oom, secrets());
   let state: State = { startedAt, oomKills: oom, log: '', exit: null };
   const cleanLine = nodeLogStream();
-  const persist = () => keep(join(dir, JOURNAL), state);
+  const save = journalWriter(join(dir, JOURNAL), () => {
+    const warning = 'Node lifecycle journal could not be saved; restart evidence may be missing.';
+    state = { ...state, log: nodeLog(`${state.log}\n${warning}`, secrets()) };
+    write(warning);
+  });
+  const persist = () => save(state);
   persist();
   const log = (line: string): void => {
     if (state.exit) return;

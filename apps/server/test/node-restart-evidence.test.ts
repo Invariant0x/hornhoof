@@ -3,6 +3,8 @@ import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { jobs, nodes, subscriptions } from '../src/db/schema.js';
 import { hashToken } from '../src/crypto/tokens.js';
+import { BUILTIN } from '../src/modules/nodes/hub.js';
+import { receiveNodeMessage } from '../src/modules/nodes/lifecycle.js';
 import { as, connectNode, listen, setUpCompany, testApp, until } from './helpers.js';
 
 const firstBoot = { startedAt: '2026-11-03T20:00:00.000Z', machineUpAt: '2026-11-01T00:00:00.000Z', container: 'old-container' };
@@ -10,8 +12,8 @@ const nextBoot = { ...firstBoot, startedAt: '2026-11-03T21:00:00.000Z', containe
 const planned = { kind: 'planned' as const, reason: 'node_update' as const, startedAt: firstBoot.startedAt, at: '2026-11-03T20:59:59.000Z', log: 'Stopping node: node_update.' };
 type Hello = Extract<NodeMessage, { type: 'hello' }>;
 
-async function personalNode() {
-  const { app, db } = await testApp({ NODE_KEY: 'k'.repeat(40), HORNHOOF_HOST_ID: hashToken('hornhoof-host:a-host-machine') });
+async function personalNode(knownHost = true) {
+  const { app, db } = await testApp({ NODE_KEY: 'k'.repeat(40), ...(knownHost ? { HORNHOOF_HOST_ID: hashToken('hornhoof-host:a-host-machine') } : {}) });
   const url = await listen(app);
   const ceo = await setUpCompany(app);
   const connected = await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude'] }, ...as(ceo) });
@@ -63,6 +65,11 @@ describe('node restart evidence stored with a failure', () => {
     expect((await c.restart()).interruption).toMatchObject({ diagnosis: { kind: 'unknown', reason: 'unknown', log: '', startedAt: null, at: null } });
   });
 
+  it('accepts a legacy node without boot metadata or lifecycle fields', async () => {
+    const c = await personalNode();
+    expect((await c.restart({ boot: undefined })).interruption).toMatchObject({ cause: 'unknown', diagnosis: { kind: 'unknown', reason: 'unknown', log: '' } });
+  });
+
   it('ignores a stop for a different generation and a mismatched previous exit', async () => {
     const c = await personalNode();
     await c.stopping('2026-11-03T19:00:00.000Z');
@@ -97,5 +104,40 @@ describe('node restart evidence stored with a failure', () => {
     const failed = async () => (await c.db.select().from(jobs).where(eq(jobs.id, job!.id)))[0]!;
     await until(async () => (await failed()).status === 'failed');
     expect((await failed()).interruption).toMatchObject({ machine: { id: (await c.row()).machineId, name: 'a-host' }, diagnosis: { kind: 'planned', reason, log: reason === 'server_restart' ? 'Current process reconnected.' : planned.log } });
+  });
+
+  it('keeps the first matching built-in stop and ignores missing, stale and inconsistent generations', async () => {
+    const c = await personalNode();
+    const receive = (message: NodeMessage) => receiveNodeMessage(c.app.ctx, BUILTIN, message);
+    const stopping = (startedAt: string, exit = planned) => receive({ type: 'node.stopping', startedAt, exit });
+    await stopping(firstBoot.startedAt);
+    await receive({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], boot: firstBoot });
+    await stopping('2026-11-03T19:00:00.000Z', { ...planned, startedAt: '2026-11-03T19:00:00.000Z' });
+    await stopping(firstBoot.startedAt, { ...planned, startedAt: nextBoot.startedAt });
+    const [sub] = await c.db.select().from(subscriptions).where(eq(subscriptions.kind, 'api_key'));
+    const [job] = await c.db.insert(jobs).values({ companyId: sub!.companyId, subscriptionId: sub!.id, kind: 'test', prompt: 'Check.', timeoutMs: 60_000, status: 'running' }).returning();
+    await stopping(firstBoot.startedAt);
+    await stopping(firstBoot.startedAt, { ...planned, log: 'A duplicate.' });
+    await receive({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], boot: nextBoot });
+    expect((await c.db.select().from(jobs).where(eq(jobs.id, job!.id)))[0]!.interruption).toMatchObject({ diagnosis: planned });
+    expect((await c.row()).boot).toEqual(firstBoot);
+  });
+
+  it('keeps an old built-in node unknown even when a server restart is observed', async () => {
+    const c = await personalNode();
+    const [sub] = await c.db.select().from(subscriptions).where(eq(subscriptions.kind, 'api_key'));
+    const [job] = await c.db.insert(jobs).values({ companyId: sub!.companyId, subscriptionId: sub!.id, kind: 'test', prompt: 'Check.', timeoutMs: 60_000, status: 'running', startedAt: new Date() }).returning();
+    await receiveNodeMessage(c.app.ctx, BUILTIN, { type: 'hello', version: '0.5.0', loggedIn: true, running: [], boot: nextBoot });
+    expect((await c.db.select().from(jobs).where(eq(jobs.id, job!.id)))[0]!.interruption).toMatchObject({ cause: 'server', diagnosis: { kind: 'unknown', reason: 'unknown', log: '' } });
+  });
+
+  it('keeps an unmapped built-in machine unknown and ignores a stop without a known boot', async () => {
+    const c = await personalNode(false);
+    await receiveNodeMessage(c.app.ctx, BUILTIN, { type: 'hello', version: '0.5.0', loggedIn: true, running: [] });
+    await receiveNodeMessage(c.app.ctx, BUILTIN, { type: 'node.stopping', startedAt: firstBoot.startedAt, exit: planned });
+    const [sub] = await c.db.select().from(subscriptions).where(eq(subscriptions.kind, 'api_key'));
+    const [job] = await c.db.insert(jobs).values({ companyId: sub!.companyId, subscriptionId: sub!.id, kind: 'test', prompt: 'Check.', timeoutMs: 60_000, status: 'running' }).returning();
+    await receiveNodeMessage(c.app.ctx, BUILTIN, { type: 'hello', version: '0.5.0', loggedIn: true, running: [], boot: nextBoot });
+    expect((await c.db.select().from(jobs).where(eq(jobs.id, job!.id)))[0]!.interruption).toMatchObject({ machine: { id: null, name: null }, diagnosis: { kind: 'unknown' } });
   });
 });
