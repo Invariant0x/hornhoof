@@ -1,15 +1,15 @@
-import { and, asc, count, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, ne, notInArray, or, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gt, gte, inArray, isNotNull, isNull, ne, notInArray, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { loggable } from '../../errors.js';
 import { agentChanges, agentEvents, agents, jobs, requests, subscriptions, taskEvents, tasks, testRuns } from '../../db/schema.js';
-import { agentState, conversationOf, GONE_ALONG, insertTurn, limitUntil, liveSubscription, onAgent, openTypedTurn, orchestratorOf, pump, refusedLimits, UNSENT } from '../conversation/queue.js';
+import { agentState, conversationOf, insertTurn, limitUntil, liveSubscription, onAgent, openTypedTurn, orchestratorOf, pump, refusedLimits, UNSENT } from '../conversation/queue.js';
 import { deliverLive } from '../conversation/decision-context.js';
 import { quote } from '../conversation/prompt.js';
 import { appendEvent, publishWorking } from '../events/store.js';
 import { identityOf, type NodeIdentity } from '../nodes/hub.js';
 import { answerDirectly, brokeDown, CLOSED, GATE_ROUNDS, handOver, lastMove, leaveWork, NOT_A_MOVE, openAfter, published, regateWaiting, reviewWake, silentTurn, taskSpot, wentOn, type Actor, type Task, type Wake, type WakeWhy } from './engine.js';
 import { wakeQueued, wakesLeft } from './outbox.js';
-import { continueOnce, doneIfRecorded } from './endings.js';
+import { carriedTasks, continueOnce, doneIfRecorded } from './endings.js';
 import { afterRestart } from './restarts.js';
 import { clearTurnProgram } from './silent.js';
 import { settle, tell } from './turns.js';
@@ -507,16 +507,6 @@ async function checkHeld(ctx: Ctx, job: typeof jobs.$inferSelect & { agentId: st
     throw err;
   });
   if (moved) await wakeAll(ctx, moved.wakes);
-}
-
-/* The other tasks whose turns went out inside this one: marked gone while it ran, as an agent runs one turn at a time. */
-async function carriedTasks(ctx: Ctx, job: { agentId: string; taskId: string; startedAt: Date | null; finishedAt: Date | null }): Promise<string[]> {
-  if (!job.startedAt) return [];
-  const rows = await ctx.db
-    .selectDistinct({ taskId: jobs.taskId })
-    .from(jobs)
-    .where(and(conversationOf(job.agentId), eq(jobs.status, 'done'), eq(jobs.result, GONE_ALONG), ne(jobs.taskId, job.taskId), gte(jobs.startedAt, job.startedAt), lte(jobs.startedAt, job.finishedAt ?? new Date())));
-  return rows.flatMap(r => (r.taskId ? [r.taskId] : []));
 }
 
 /* A finished turn: a failure or a stop goes into the conversation, a turn a node restart cut off on a task runs once more

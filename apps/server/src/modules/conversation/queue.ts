@@ -330,22 +330,31 @@ function keepsSessionAcrossTurns(kind: string): boolean {
   return kind === 'orchestrator' || kind === 'head';
 }
 
-/* The session of the turn this one goes on from, when it can go on there: the same plan, node and instructions. */
-async function continuedSession(ctx: Ctx, jobId: string | null, on: { subscriptionId: string; nodeId: string | null }, instructionsHash: string): Promise<string | null> {
-  if (!jobId) return null;
-  const [from] = await ctx.db.select({ subscriptionId: jobs.subscriptionId, nodeId: jobs.nodeId, sessionId: jobs.sessionId, instructionsHash: jobs.instructionsHash }).from(jobs).where(eq(jobs.id, jobId));
-  return from?.sessionId && from.subscriptionId === on.subscriptionId && from.nodeId === on.nodeId && from.instructionsHash === instructionsHash ? from.sessionId : null;
-}
-
 type Agent = { id: string; companyId: string; kind: string; name: string };
 type On = { subscriptionId: string; nodeId: string | null };
 type Session = { sessionId: string | null; catchUp: string | null };
+/* The original prompt goes along when the continuation cannot resume the session that holds it. */
+type Continuation = { sessionId: string | null; originalPrompt: string | null };
 
-/* continueOf: a turn that goes on from one that ended without its work recorded goes on in that turn's session. */
-async function sessionFor(ctx: Ctx, agent: Agent, on: On, instructionsHash: string, continueOf: string | null): Promise<Session> {
-  const going = await continuedSession(ctx, continueOf, on, instructionsHash);
-  return going ? { sessionId: going, catchUp: null } : lastSession(ctx, agent, on, instructionsHash);
+/* The turn this one goes on from: its session, when it can go on there, on the same plan and node with the same
+   instructions; otherwise what that turn was asked. */
+async function continuedFrom(ctx: Ctx, jobId: string, on: On, instructionsHash: string): Promise<Continuation> {
+  const [from] = await ctx.db.select({ subscriptionId: jobs.subscriptionId, nodeId: jobs.nodeId, sessionId: jobs.sessionId, instructionsHash: jobs.instructionsHash, prompt: jobs.prompt }).from(jobs).where(eq(jobs.id, jobId));
+  if (!from) return { sessionId: null, originalPrompt: null };
+  const goesOn = from.subscriptionId === on.subscriptionId && from.nodeId === on.nodeId && from.instructionsHash === instructionsHash;
+  return { sessionId: goesOn ? from.sessionId : null, originalPrompt: from.prompt };
 }
+
+/* continueOf: a turn that goes on from one that ended without its work recorded goes on in that turn's session, or, when
+   it cannot, takes what that turn was asked along into the session it gets. */
+async function sessionFor(ctx: Ctx, agent: Agent, on: On, instructionsHash: string, continueOf: string | null): Promise<Session & Continuation> {
+  const from = continueOf ? await continuedFrom(ctx, continueOf, on, instructionsHash) : { sessionId: null, originalPrompt: null };
+  if (from.sessionId) return { sessionId: from.sessionId, catchUp: null, originalPrompt: null };
+  return { ...(await lastSession(ctx, agent, on, instructionsHash)), originalPrompt: from.originalPrompt };
+}
+
+/* What a turn asks: a continuation that lost its session says again what the turn that ended was asked. */
+const withOriginal = (asked: string, original: string | null) => (original ? `${asked}\n\nThe turn that ended was asked:\n\n${original}` : asked);
 
 /* A new session catches up from the conversation. The last finished turn's session goes on only on the same subscription
    and node with the same instructions: another machine does not have it, and changed instructions would not reach a
@@ -434,7 +443,7 @@ export const GONE_ALONG = 'Went out with the turn before it.';
 /* The other task turns waiting for the agent, oldest first. */
 function alongWith(ctx: Ctx, agentId: string, jobId: string) {
   return ctx.db
-    .select({ id: jobs.id, prompt: jobs.prompt, taskId: jobs.taskId })
+    .select({ id: jobs.id, prompt: jobs.prompt, taskId: jobs.taskId, continueOf: jobs.continueOf })
     .from(jobs)
     .where(and(conversationOf(agentId), eq(jobs.status, 'queued'), isNotNull(jobs.taskId), ne(jobs.id, jobId)))
     .orderBy(asc(jobs.createdAt));
@@ -497,10 +506,16 @@ async function unsent(ctx: Ctx, job: { id: string; companyId: string }, why: { e
 }
 
 /* A turn that waited for the agent and goes out inside its turn. */
-type Along = { id: string; prompt: string; taskId: string | null };
+type Along = Pick<typeof jobs.$inferSelect, 'id' | 'prompt' | 'taskId' | 'continueOf'>;
 type Queued = Pick<typeof jobs.$inferSelect, 'id' | 'companyId' | 'agentId' | 'taskId'>;
 /* What a turn goes out with: where it runs and what it says. */
 type Sending = Pick<typeof jobs.$inferInsert, 'subscriptionId' | 'nodeId' | 'prompt' | 'toolTokenHash' | 'instructionsHash'>;
+
+/* A continuation carried inside another task's turn takes its original work along too. */
+async function promptAlong(ctx: Ctx, job: Along, on: On, instructionsHash: string): Promise<string> {
+  const from = job.continueOf ? await continuedFrom(ctx, job.continueOf, on, instructionsHash) : null;
+  return withOriginal(job.prompt, from?.originalPrompt ?? null);
+}
 
 /* Takes the waiting turn to send it, running from now on. In the same write each line of the map its work keeps on, with
    the tasks that go out along with it, begins a new cycle: a server that stops once the turn went out never brings the
@@ -561,7 +576,6 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   /* A head reads everything that moved on its tasks while it was busy in one turn, instead of one turn per task. */
   const along: Along[] = [];
   for (const j of agent.kind === 'head' && job.taskId ? await alongWith(ctx, agentId, job.id) : []) if (!(await heldBack(ctx, { ...j, agentId }))) along.push(j);
-  const asked = along.length ? [ALONG, job.prompt, ...along.map(j => j.prompt)].join('\n\n---\n\n') : job.prompt;
 
   /* A node from before skill files gets every skill in the instructions. */
   const files = ctx.hub.takesSkillFiles(place.node);
@@ -577,8 +591,11 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   const effort = effortFor(agent.effort, effortsOf(models, model), roleEffort);
   /* The hash covers the model too, so a new model starts a fresh session like new instructions do. */
   const runHash = model ? textHash(`${instructions.hash}:${model}`) : instructions.hash;
-  const { sessionId, catchUp } = await sessionFor(ctx, agent, { subscriptionId: sub.id, nodeId: place.nodeId }, runHash, job.continueOf);
-  const said = repo ? `${asked}\n\n${repoLine(repo)}` : asked;
+  const on = { subscriptionId: sub.id, nodeId: place.nodeId };
+  const { sessionId, catchUp, originalPrompt } = await sessionFor(ctx, agent, on, runHash, job.continueOf);
+  const prompts = await Promise.all(along.map(j => promptAlong(ctx, j, on, runHash)));
+  const asked = along.length ? [ALONG, job.prompt, ...prompts].join('\n\n---\n\n') : job.prompt;
+  const said = repo ? `${withOriginal(asked, originalPrompt)}\n\n${repoLine(repo)}` : withOriginal(asked, originalPrompt);
   /* A turn that types nothing only starts the program, for a person to talk to it: what was said before and where the
      repository is go with its instructions instead. */
   const composed = catchUp ? `${catchUp}\n\n${said}` : said;
