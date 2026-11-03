@@ -1,7 +1,7 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { People } from '../src/screens/People';
 import type { ComputerView, Me, PersonView, StructureItem, WaitingRequest } from '../src/types';
@@ -79,43 +79,204 @@ describe('a decision for someone who may not take it', () => {
   });
 });
 
-describe('the CEO delegate on People', () => {
+describe('the deputy CEO on People', () => {
   const people: PersonView[] = [PEOPLE[0]!, { ...PEOPLE[1]!, isCeoDelegate: false }, { ...PEOPLE[1]!, id: 'p4', name: 'Dave', email: 'dave@acme.com', isCeoDelegate: true }, PEOPLE[2]!];
+  /* Lena is active and works in Development alone. */
+  const lena: PersonView = { ...PEOPLE[1]!, id: 'p5', name: 'Lena', email: 'lena@acme.com', isCeoDelegate: false, access: { whole: false, departments: [{ id: 'd2', name: 'Development' }], teams: [] } };
+  const about = "Takes the decisions only the CEO takes and sees the whole company. Only you change the deputy's access, status and sign-in.";
+  const routes = (list: PersonView[] = people): Parameters<typeof mockApi>[0] => ({ 'GET /api/people': [200, { people: list }], 'GET /api/org': [200, ORG_WITH_TEAMS] });
 
-  it('lets the CEO set and take off the mark of a person who sees the whole company', async () => {
+  it('keeps the row to Edit, New link and Disable, with no tick for the deputy', async () => {
+    mockApi(routes());
+    render(<People me={ME} />);
+    const maria = await screen.findByRole('row', { name: /^Maria\b/ });
+    expect(within(maria).getAllByRole('button').map(b => b.textContent)).toEqual(['Edit', 'New link', 'Disable']);
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(screen.queryByRole('switch')).not.toBeInTheDocument();
+  });
+
+  it('lets the CEO make someone the deputy in Edit, next to the access, and saves it as before', async () => {
     const calls = mockApi({
-      'GET /api/people': [200, { people }],
-      'GET /api/org': [200, ORG_WITH_TEAMS],
+      ...routes(),
+      'PATCH /api/people/p2': [200, { person: people[1]! }],
       'PUT /api/people/p2/ceo-delegate': [200, { person: { ...people[1]!, isCeoDelegate: true } }],
     });
     const user = userEvent.setup();
     render(<People me={ME} />);
-    const maria = await screen.findByRole('checkbox', { name: 'Maria is the CEO delegate' });
-    expect(maria).not.toBeChecked();
-    expect(screen.getByRole('checkbox', { name: 'Dave is the CEO delegate' })).toBeChecked();
-    /* Not for the CEO, nor for someone invited to a team. */
-    expect(screen.getAllByRole('checkbox', { name: /is the CEO delegate$/ })).toHaveLength(2);
-    await user.click(maria);
-    expect(calls.find(c => c.method === 'PUT')).toEqual({ method: 'PUT', path: '/api/people/p2/ceo-delegate', body: { isCeoDelegate: true } });
-    expect(await screen.findByRole('checkbox', { name: 'Maria is the CEO delegate' })).toBeChecked();
+    await user.click(await screen.findByRole('button', { name: 'Edit Maria' }));
+    const deputy = screen.getByRole('switch', { name: 'Deputy CEO' });
+    expect(deputy).not.toBeChecked();
+    expect(deputy).toHaveAccessibleDescription(about);
+    /* In the same form as the access, right after it. */
+    const access = screen.getByRole('group', { name: 'Access' });
+    expect(access.nextElementSibling).toBe(deputy.closest('label'));
+    await user.click(deputy);
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect(calls.filter(c => c.method !== 'GET')).toEqual([
+      { method: 'PATCH', path: '/api/people/p2', body: { title: 'Deputy CEO', access: { whole: true } } },
+      { method: 'PUT', path: '/api/people/p2/ceo-delegate', body: { isCeoDelegate: true } },
+    ]);
+    const maria = await screen.findByRole('row', { name: /^Maria\b/ });
+    expect(within(maria).getByRole('img', { name: 'Deputy CEO' })).toHaveTextContent('Dep');
   });
 
-  it('shows anyone else who the delegate is, and leaves the delegate to the CEO', async () => {
-    mockApi({ 'GET /api/people': [200, { people }], 'GET /api/org': [200, ORG_WITH_TEAMS] });
+  it('takes the deputy off in Edit', async () => {
+    const calls = mockApi({
+      ...routes(),
+      'PATCH /api/people/p4': [200, { person: people[2]! }],
+      'PUT /api/people/p4/ceo-delegate': [200, { person: { ...people[2]!, isCeoDelegate: false } }],
+    });
+    const user = userEvent.setup();
+    render(<People me={ME} />);
+    await user.click(await screen.findByRole('button', { name: 'Edit Dave' }));
+    const deputy = screen.getByRole('switch', { name: 'Deputy CEO' });
+    expect(deputy).toBeChecked();
+    await user.click(deputy);
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect(calls.filter(c => c.method === 'PUT')).toEqual([{ method: 'PUT', path: '/api/people/p4/ceo-delegate', body: { isCeoDelegate: false } }]);
+    const dave = await screen.findByRole('row', { name: /^Dave\b/ });
+    expect(within(dave).queryByRole('img', { name: 'Deputy CEO' })).not.toBeInTheDocument();
+  });
+
+  it('saves the title and the access alone when the deputy stays as it was', async () => {
+    const calls = mockApi({ ...routes(), 'PATCH /api/people/p4': [200, { person: people[2]! }] });
+    const user = userEvent.setup();
+    render(<People me={ME} />);
+    await user.click(await screen.findByRole('button', { name: 'Edit Dave' }));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await vi.waitFor(() => expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument());
+    expect(calls.filter(c => c.method !== 'GET').map(c => `${c.method} ${c.path}`)).toEqual(['PATCH /api/people/p4']);
+  });
+
+  /* A deputy sees the whole company, as the server requires: the window keeps the two together. */
+  it('gives the deputy the whole company, and takes the deputy off a narrower access', async () => {
+    mockApi(routes([...people, lena]));
+    const user = userEvent.setup();
+    render(<People me={ME} />);
+    await user.click(await screen.findByRole('button', { name: 'Edit Lena' }));
+    expect(screen.getByRole('checkbox', { name: 'Development' })).toBeChecked();
+    await user.click(screen.getByRole('switch', { name: 'Deputy CEO' }));
+    expect(screen.getByRole('checkbox', { name: 'Whole company' })).toBeChecked();
+    expect(screen.queryByRole('checkbox', { name: 'Development' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('checkbox', { name: 'Whole company' }));
+    expect(screen.getByRole('switch', { name: 'Deputy CEO' })).not.toBeChecked();
+  });
+
+  /* The deputy may change in another window while this one is open: a save that did not touch the switch leaves it. */
+  it('keeps a deputy made elsewhere when only the title is saved', async () => {
+    const calls = mockApi({ ...routes(), 'PATCH /api/people/p2': [200, { person: { ...people[1]!, isCeoDelegate: true } }] });
+    const user = userEvent.setup();
+    render(<People me={ME} />);
+    await user.click(await screen.findByRole('button', { name: 'Edit Maria' }));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    const maria = await screen.findByRole('row', { name: /^Maria\b/ });
+    expect(within(maria).getByRole('img', { name: 'Deputy CEO' })).toBeInTheDocument();
+    expect(calls.filter(c => c.method !== 'GET').map(c => `${c.method} ${c.path}`)).toEqual(['PATCH /api/people/p2']);
+  });
+
+  it('sends no deputy call from a window without the switch, whatever the deputy became meanwhile', async () => {
+    const calls = mockApi({ ...routes(), 'PATCH /api/people/p4': [200, { person: { ...people[2]!, isCeoDelegate: false } }] });
+    const user = userEvent.setup();
+    render(<People me={ZED} />);
+    await user.click(await screen.findByRole('button', { name: 'Edit Dave' }));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await vi.waitFor(() => expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument());
+    expect(calls.filter(c => c.method !== 'GET').map(c => `${c.method} ${c.path}`)).toEqual(['PATCH /api/people/p4']);
+  });
+
+  it('shows the saved title and access in the row when the deputy call fails after them', async () => {
+    const saved = { ...lena, access: { whole: true, departments: [], teams: [] } };
+    mockApi({
+      ...routes([...people, lena]),
+      'PATCH /api/people/p5': [200, { person: saved }],
+      'PUT /api/people/p5/ceo-delegate': [409, { error: { code: 'conflict', message: 'Only an active person with access to the whole company can be the CEO delegate.' } }],
+    });
+    const user = userEvent.setup();
+    render(<People me={ME} />);
+    await user.click(await screen.findByRole('button', { name: 'Edit Lena' }));
+    await user.click(screen.getByRole('switch', { name: 'Deputy CEO' }));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    expect(screen.getByRole('switch', { name: 'Deputy CEO' })).toBeInTheDocument();
+    expect(within(screen.getByRole('row', { name: /^Lena\b/ })).getByText('Whole company')).toBeInTheDocument();
+  });
+
+  it('gives back the access a person had when the deputy is switched off again in the same window', async () => {
+    const calls = mockApi({ ...routes([...people, lena]), 'PATCH /api/people/p5': [200, { person: lena }] });
+    const user = userEvent.setup();
+    render(<People me={ME} />);
+    await user.click(await screen.findByRole('button', { name: 'Edit Lena' }));
+    const deputy = screen.getByRole('switch', { name: 'Deputy CEO' });
+    await user.click(deputy);
+    await user.click(deputy);
+    expect(screen.getByRole('checkbox', { name: 'Whole company' })).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Development' })).toBeChecked();
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await vi.waitFor(() => expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument());
+    expect(calls.filter(c => c.method !== 'GET')).toEqual([{ method: 'PATCH', path: '/api/people/p5', body: { title: 'Deputy CEO', access: { departments: ['d2'], teams: [] } } }]);
+  });
+
+  it('tells the CEO under the table where the deputy is made', async () => {
+    mockApi(routes());
+    render(<People me={ME} />);
+    expect(await screen.findByText('Deputy CEO: Only you make someone the deputy or take it off, in Edit.')).toBeInTheDocument();
+  });
+
+  it('offers the deputy to the CEO alone, for someone active or the deputy already, and not in the CEO\'s own window', async () => {
+    const off: PersonView = { ...people[2]!, status: 'disabled' };
+    mockApi(routes([people[0]!, people[1]!, off, people[3]!]));
+    const user = userEvent.setup();
+    const { unmount } = render(<People me={ME} />);
+    await user.click(await screen.findByRole('button', { name: 'Edit Sasha' }));
+    expect(screen.queryByRole('switch')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Edit Ivan' }));
+    expect(screen.queryByRole('switch')).not.toBeInTheDocument();
+    /* A deputy switched off can still be taken off. */
+    await user.click(screen.getByRole('button', { name: 'Edit Dave' }));
+    expect(screen.getByRole('switch', { name: 'Deputy CEO' })).toBeChecked();
+    unmount();
+    render(<People me={ZED} />);
+    await user.click(await screen.findByRole('button', { name: 'Edit Maria' }));
+    expect(screen.queryByRole('switch')).not.toBeInTheDocument();
+  });
+
+  it('takes the deputy off with a narrower access alone, as the server does', async () => {
+    const narrowed = { ...people[2]!, isCeoDelegate: false, access: { whole: false, departments: [{ id: 'd2', name: 'Development' }], teams: [] } };
+    const calls = mockApi({ ...routes(), 'PATCH /api/people/p4': [200, { person: narrowed }] });
+    const user = userEvent.setup();
+    render(<People me={ME} />);
+    await user.click(await screen.findByRole('button', { name: 'Edit Dave' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Whole company' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Development' }));
+    expect(screen.getByRole('switch', { name: 'Deputy CEO' })).not.toBeChecked();
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await vi.waitFor(() => expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument());
+    expect(calls.filter(c => c.method !== 'GET')).toEqual([{ method: 'PATCH', path: '/api/people/p4', body: { title: 'Deputy CEO', access: { departments: ['d2'], teams: [] } } }]);
+  });
+
+  it("shows anyone else the deputy's short mark with the whole name on hover, and leaves the deputy to the CEO", async () => {
+    mockApi(routes());
     render(<People me={ZED} />);
     const dave = await screen.findByRole('row', { name: /^Dave\b/ });
-    expect(within(dave).getByText('CEO delegate')).toBeInTheDocument();
-    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    const mark = within(dave).getByRole('img', { name: 'Deputy CEO' });
+    expect(mark).toHaveAttribute('title', 'Deputy CEO');
+    expect(mark).toHaveTextContent(/^Dep$/);
+    expect(within(screen.getByRole('row', { name: /^Maria\b/ })).queryByRole('img', { name: 'Deputy CEO' })).not.toBeInTheDocument();
     expect(within(dave).queryByRole('button', { name: 'Disable Dave' })).not.toBeInTheDocument();
     expect(within(dave).queryByRole('button', { name: 'New invite link for Dave' })).not.toBeInTheDocument();
     const maria = screen.getByRole('row', { name: /^Maria\b/ });
     expect(within(maria).getByRole('button', { name: 'Disable Maria' })).toBeInTheDocument();
   });
 
-  it('names the mark in Russian', async () => {
-    mockApi({ 'GET /api/people': [200, { people }], 'GET /api/org': [200, ORG_WITH_TEAMS] });
+  it('names the deputy in Russian', async () => {
+    mockApi(routes());
+    const user = userEvent.setup();
     inRussian(<People me={ME} />);
-    expect(await screen.findByRole('checkbox', { name: 'Заместитель CEO: Maria' })).toBeInTheDocument();
-    expect(screen.getAllByText('Заместитель CEO').length).toBeGreaterThan(0);
+    const dave = await screen.findByRole('row', { name: /^Dave\b/ });
+    const mark = within(dave).getByRole('img', { name: 'Заместитель CEO' });
+    expect(mark).toHaveAttribute('title', 'Заместитель CEO');
+    expect(mark).toHaveTextContent(/^Зам$/);
+    await user.click(screen.getByRole('button', { name: 'Изменить Maria' }));
+    expect(screen.getByRole('switch', { name: 'Заместитель CEO' })).toHaveAccessibleDescription('Принимает решения, которые принимает только CEO, и видит всю компанию. Доступ, статус и вход заместителя меняете только вы.');
   });
 });

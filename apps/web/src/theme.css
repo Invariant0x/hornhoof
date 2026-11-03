@@ -180,12 +180,13 @@ select:disabled { opacity: .55; }
 .segments label:first-of-type { margin-left: 0; }
 .segments label.on { position: relative; border-color: var(--cyan); background: var(--glow); color: var(--cyan-ink); }
 .segments input { position: absolute; opacity: 0; pointer-events: none; }
-/* A switch with its line and a hint under it, like opening Hornhoof on the internet. */
-.card label.check { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: start; cursor: pointer; }
-.card label.check input { width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--cyan-ink); }
-.card label.check span { display: grid; gap: 2px; }
-.card label.check b { font-weight: 600; }
-.card label.check small { font-size: 12px; color: var(--muted); }
+/* A switch with its line and a hint under it, like opening Hornhoof on the internet, or the deputy in a person's window. */
+.card label.check, .panel-form label.check { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: start; cursor: pointer; }
+.card label.check input, .panel-form label.check input { width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--cyan-ink); }
+.card label.check span, .panel-form label.check span { display: grid; gap: 2px; }
+.card label.check b, .panel-form label.check b { font-weight: 600; }
+.card label.check small, .panel-form label.check small { font-size: 12px; color: var(--muted); }
+.panel-form label.check { grid-column: 1 / -1; }
 /* The narrow column for the name, link and sign-in code, so they stay readable inside the wide template step. */
 .setup-lead { display: grid; gap: 14px; max-width: 440px; }
 /* The company templates on the first screen: a grid of cards, each with a mini department scheme drawn as an SVG. */
@@ -437,17 +438,14 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .ptable tr.disabled td { color: var(--muted); }
 .pname { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; }
 .pname .ic { color: var(--pink-ink); }
+/* The deputy CEO's mark by the name: a hat before a short word, which as one flex line never wraps. */
+.badge.deputy { display: inline-flex; align-items: center; gap: 3px; }
+.badge.deputy .ic { width: 11px; height: 11px; }
 .status { font-size: 12px; font-weight: 600; padding: 2px 8px; border: 1px solid var(--line2); }
 .status.active { color: var(--ok); border-color: currentColor; }
 .status.invited { color: var(--amber-ink); border-color: currentColor; }
 .row-actions { text-align: right; white-space: nowrap; }
-/* The actions line up by their middles: the delegate's mark starts with a tick, which has no line of words for the
-   buttons' baseline to meet. */
-.row-actions .act { vertical-align: middle; }
 .row-actions .act + .act { margin-left: 8px; }
-/* The CEO's mark of the delegate, a tick in the row's actions with a button's padding around it. */
-.act.delegate { gap: 6px; }
-.act.delegate input { margin: 0; }
 .people-foot { display: flex; align-items: center; gap: 8px; font-size: 13px; }
 @media (max-width: 760px) {
   .tabs button { padding: 0 10px; }
