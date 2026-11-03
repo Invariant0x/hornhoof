@@ -751,7 +751,7 @@ sweep_nodes() {
 # Whether the server's built-in node runs now on NODE_REF.
 node_unchanged() {
   local cid running target
-  cid=$(cd "$SERVER_DIR" && "$@" ps -q node 2> /dev/null || true)
+  cid=$(cd "$SERVER_DIR" && "$@" ps -q node 2> /dev/null) || true
   [ -n "$cid" ] || return 1
   running=$("${DOCKER[@]}" inspect --format '{{if .State.Running}}{{.Image}}{{end}}' "$cid" 2> /dev/null || true)
   [ -n "$running" ] || return 1
