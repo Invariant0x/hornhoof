@@ -147,7 +147,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
         await settlePlans(db, [plan]);
       }
       await failOpenJobs(ctx, jobsOf(id, ctx), 'machine_restarted', msg.running, cut);
-      ctx.hub.greet(id, msg.terminals === true, msg.skillFiles === true, msg.work === true, msg.noRuns ?? null);
+      ctx.hub.greet(id, msg.terminals === true, msg.skillFiles === true, msg.work === true, msg.noRuns ?? null, msg.build);
       if (msg.load) ctx.hub.report(id, msg.load);
       await testsHello(ctx, id, msg.tests);
       /* Hornhoof ended these while the node was away, with a stop or a removed subscription; the node stops them now. */

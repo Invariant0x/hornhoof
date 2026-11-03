@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { NodeBuild } from '@hornhoof/protocol';
 import { z } from 'zod';
 
 export type Config = {
@@ -20,6 +21,9 @@ export type Config = {
   version: string;
   commit: string;
   migrations: number;
+  /* The node build this server's nodes should be, which CI gives it and the node image of its commit: the last commit
+     that changed that image's files. None for a server built without CI, which then tells no node build apart. */
+  nodeBuild: string | null;
   /* Where newer builds are published, and how often to look; 0 looks only when someone asks. */
   image: string;
   registryUrl?: string;
@@ -74,6 +78,8 @@ const Env = z.object({
   ),
 });
 
+/* CI sets it, so one that is not a commit counts as none rather than stopping the server. */
+const nodeBuildOf = (env: NodeJS.ProcessEnv): string | null => NodeBuild.safeParse(env.HORNHOOF_NODE_BUILD).data ?? null;
 const productVersion = (): string => (JSON.parse(readFileSync(ROOT_PACKAGE, 'utf8')) as { version: string }).version;
 const migrationCount = (): number => readdirSync(MIGRATIONS).filter(f => f.endsWith('.sql')).length;
 
@@ -104,6 +110,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     version: env.HORNHOOF_VERSION || productVersion(),
     commit: env.HORNHOOF_COMMIT || 'local',
     migrations: migrationCount(),
+    nodeBuild: nodeBuildOf(env),
     image: env.HORNHOOF_IMAGE || 'ghcr.io/invariant0x/hornhoof',
     registryUrl: set.REGISTRY_URL,
     updateCheckMs: set.UPDATE_CHECK_MS ?? 1800000,

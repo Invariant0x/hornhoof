@@ -17,7 +17,7 @@ async function liveCompany(env: NodeJS.ProcessEnv = {}) {
   const code = connected.json().command.split('--join ')[1];
   const joined = await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' } });
   const { machine, nodes } = joined.json();
-  return { app, db, url, ceo, machineId: machine.id as string, keys: nodes.map((n: { key: string }) => n.key) as string[] };
+  return { app, db, url, ceo, machineId: machine.id as string, keys: nodes.map((n: { key: string }) => n.key) as string[], ids: nodes.map((n: { nodeId: string }) => n.nodeId) as string[] };
 }
 
 const machinesOf = async (app: FastifyInstance, token: string) => (await app.inject({ url: '/api/machines', ...as(token) })).json();
@@ -84,5 +84,43 @@ describe("a machine's load", () => {
     expect(off.json()).toEqual({ lendsTests: false });
     expect((await machinesOf(app, ceo)).machines[0].lendsTests).toBe(false);
     expect((await app.inject({ method: 'PATCH', url: '/api/machines/00000000-0000-4000-8000-000000000000', payload: { lendsTests: true }, ...as(ceo) })).statusCode).toBe(404);
+  });
+});
+
+describe("a machine whose nodes are not this server's build", () => {
+  const BUILD = 'a1'.repeat(20);
+  const OTHER = 'b2'.repeat(20);
+
+  /* The mark of the machine once both its nodes said hello, each of the build given; null says none, as a node from
+     before builds does. */
+  async function markOf(env: NodeJS.ProcessEnv, builds: (string | null)[]) {
+    const { app, url, ceo, keys, ids } = await liveCompany(env);
+    const sockets = await Promise.all(keys.map(k => connectNode(url, k)));
+    sockets.forEach((s, i) => s.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], ...(builds[i] ? { build: builds[i] } : {}) }));
+    await until(() => ids.every(id => app.ctx.hub.isReady({ kind: 'node', nodeId: id })));
+    return (await machinesOf(app, ceo)).machines[0].otherBuild;
+  }
+
+  it('marks a machine with a node of another commit at the same version, and not one whose nodes are the same build', async () => {
+    expect(await markOf({ HORNHOOF_NODE_BUILD: BUILD }, [BUILD, BUILD])).toBeNull();
+    expect(await markOf({ HORNHOOF_NODE_BUILD: BUILD }, [BUILD, OTHER])).toEqual({ server: BUILD, nodes: [OTHER] });
+    /* Each build once, however many nodes are of it. */
+    expect(await markOf({ HORNHOOF_NODE_BUILD: BUILD }, [OTHER, OTHER])).toEqual({ server: BUILD, nodes: [OTHER] });
+  });
+
+  it('counts only the nodes that are online: one that is away says nothing of its build', async () => {
+    const { app, url, ceo, keys, ids } = await liveCompany({ HORNHOOF_NODE_BUILD: BUILD });
+    (await connectNode(url, keys[0]!)).send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], build: BUILD });
+    await until(() => app.ctx.hub.isReady({ kind: 'node', nodeId: ids[0]! }));
+    expect((await machinesOf(app, ceo)).machines[0]).toMatchObject({ online: true, otherBuild: null });
+  });
+
+  it('marks a machine whose node says no build, as nodes from before builds, once the server knows its own', async () => {
+    expect(await markOf({ HORNHOOF_NODE_BUILD: BUILD }, [null, BUILD])).toEqual({ server: BUILD, nodes: [null] });
+  });
+
+  it('marks nothing on a server that does not know its own build, as one run without CI', async () => {
+    expect(await markOf({}, [null, OTHER])).toBeNull();
+    expect(await markOf({ HORNHOOF_NODE_BUILD: 'local' }, [null, OTHER])).toBeNull();
   });
 });

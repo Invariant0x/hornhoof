@@ -280,6 +280,42 @@ describe('Machines', () => {
     expect(within(card('ivan-mbp')).getByRole('checkbox')).toBeChecked();
   });
 
+  it.each([
+    ['en', 'Other build', "Its nodes are not the server's build (3fe094e here, 8de55ce on the server). To update them, run the install command on it again without --join.", "Its nodes are not the server's build (an older one here, 8de55ce on the server). To update them, run the install command on it again without --join."],
+    ['ru', 'Другая сборка', 'Ее ноды не той сборки, что у сервера (здесь 3fe094e, у сервера 8de55ce). Чтобы обновить их, выполните на ней команду установки еще раз без --join.', 'Ее ноды не той сборки, что у сервера (здесь старая, у сервера 8de55ce). Чтобы обновить их, выполните на ней команду установки еще раз без --join.'],
+  ])('marks a machine whose nodes are not the server build, in its row and its card, and no other, in %s', async (language, mark, note, older) => {
+    localStorage.setItem('hh-lang', language);
+    const server = '8de55ce'.padEnd(40, '0');
+    let nodes: (string | null)[] = ['3fe094e'.padEnd(40, '1')];
+    lists({ 'GET /api/machines': () => [200, { machines: [{ ...MACHINES[0]!, otherBuild: { server, nodes } }, { ...MACHINES[1]!, otherBuild: null }], builtin: BUILTIN }] });
+    const view = render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
+    await screen.findByRole('table');
+    expect(within(screen.getByRole('row', { name: 'ivan-mbp' })).getByTitle(note)).toHaveTextContent(mark);
+    expect(within(screen.getByRole('row', { name: 'build-box' })).queryByText(mark)).not.toBeInTheDocument();
+    const mac = card('ivan-mbp');
+    expect(within(mac).getByText(note, { selector: 'p' })).toBeInTheDocument();
+    expect(within(card('build-box')).queryByText(mark)).not.toBeInTheDocument();
+    /* A node from before builds says none. */
+    view.unmount();
+    nodes = [null];
+    const again = render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
+    await screen.findByRole('table');
+    expect(within(screen.getByRole('row', { name: 'ivan-mbp' })).getByTitle(older)).toHaveTextContent(mark);
+    /* Two nodes of two builds name both. */
+    again.unmount();
+    nodes = ['3fe094e'.padEnd(40, '1'), null];
+    render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
+    await screen.findByRole('table');
+    expect(within(screen.getByRole('row', { name: 'ivan-mbp' })).getByTitle(note.replace('3fe094e', `3fe094e, ${language === 'en' ? 'an older one' : 'старая'}`))).toHaveTextContent(mark);
+  });
+
+  it('marks no machine when the server does not tell builds apart', async () => {
+    lists();
+    render(<Machines me={ME} />);
+    await screen.findByRole('table');
+    expect(screen.queryByText('Other build')).not.toBeInTheDocument();
+  });
+
   it('shows the machines in Russian', async () => {
     localStorage.setItem('hh-lang', 'ru');
     lists();
