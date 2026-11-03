@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-/* The stylesheet as rules, for what jsdom cannot lay out: which declarations a selector gets, outside any @media or
+/* The stylesheet as rules, for what jsdom cannot lay out: which declarations a selector gets, outside any @media or @container, or
    inside one. A rule's selectors are split at the commas between them, not those inside :has() or :is(). Vitest hands
    CSS to tests empty, so the file is read as it is, from the app's folder the tests run in. */
 const css = readFileSync(resolve(process.cwd(), 'src/theme.css'), 'utf8');
@@ -35,14 +35,14 @@ function split(text: string, at: string): string[] {
   return parts.map(p => p.trim().replace(/\s+/g, ' ')).filter(Boolean);
 }
 
-function parse(text: string, media: string | null): Rule[] {
+export function parse(text: string, media: string | null): Rule[] {
   const rules: Rule[] = [];
   let at = 0;
   for (let open = text.indexOf('{', at); open >= 0; open = text.indexOf('{', at)) {
     const prelude = text.slice(at, open).split(';').pop()!.trim();
     const close = closing(text, open);
     const body = text.slice(open + 1, close);
-    if (prelude.startsWith('@media')) rules.push(...parse(body, prelude.slice('@media'.length).trim()));
+    if (/^@(media|container)\b/.test(prelude)) rules.push(...parse(body, prelude.replace(/^@(media|container)\s*/, '')));
     else if (!prelude.startsWith('@'))
       rules.push({
         media,
@@ -59,7 +59,7 @@ export const RULES = parse(css.replace(/\/\*[\s\S]*?\*\//g, ''), null);
 /* Every rule that names this selector, in the stylesheet's order. */
 export const rulesFor = (selector: string) => RULES.filter(r => r.selectors.includes(selector));
 
-/* What the selector gets for a property at one @media, or outside any: the last rule wins, as in the cascade. */
+/* What the selector gets for a property at one @media or @container, or outside any: the last rule wins, as in the cascade. */
 export function decl(selector: string, property: string, media: string | null = null): string | undefined {
   return rulesFor(selector)
     .filter(r => r.media === media && property in r.decls)

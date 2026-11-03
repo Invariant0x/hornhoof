@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import type { Db } from '../src/db/client.js';
-import { agents, companies, departments, nodeCodes, subscriptions, teams } from '../src/db/schema.js';
+import { agents, companies, departments, jobs, nodeCodes, subscriptions, tasks, teams } from '../src/db/schema.js';
 import { as, invitePerson, SETUP, setUpCompany, TEST_API_KEY, testApp } from './helpers.js';
 
 const COMMAND = /^curl -fsSL http:\/\/localhost:8080\/install\.sh \| bash -s -- --join ([A-Za-z0-9_-]{43})$/;
@@ -65,7 +65,7 @@ describe('POST /api/subscriptions/connect', () => {
     const moved = await app.inject({ method: 'PATCH', url: `/api/people/${person.id}`, payload: { access: { teams: [backend.id] } }, ...as(ceo) });
     expect(moved.statusCode).toBe(200);
     const after = (await list(app, ceo)).find((s: { id: string }) => s.id === sub.id);
-    expect(after).toEqual({ ...sub, place: { kind: 'department', id: development.id, name: 'Development' } });
+    expect(after).toEqual({ ...sub, agents: [], place: { kind: 'department', id: development.id, name: 'Development' } });
   });
 
   it('reuses a plan still waiting for its machine instead of making a second one', async () => {
@@ -253,6 +253,29 @@ describe('PATCH /api/subscriptions/:id', () => {
 });
 
 describe('GET /api/subscriptions', () => {
+  it('lists the agents of a plan in map order, with work and only the tasks the viewer reaches', async () => {
+    const { app, db, ceo, maria, marketing, development } = await companyWithMaria();
+    const sub = (await connect(app, maria, ['claude'])).json().subscriptions[0];
+    await db.update(departments).set({ position: 1 }).where(eq(departments.id, marketing.id));
+    const hire = async (name: string, departmentId: string) =>
+      (await db.insert(agents).values({ companyId: development.companyId, kind: 'worker', name, departmentId, roleKey: 'DEV-BE', model: '', subscriptionId: sub.id }).returning())[0]!;
+    const vera = await hire('Vera', marketing.id);
+    const bruno = await hire('Bruno', development.id);
+    const [task] = await db.insert(tasks).values({ companyId: development.companyId, departmentId: development.id, number: 12, title: 'Checkout API' }).returning();
+    const since = new Date('2026-11-01T10:00:00Z');
+    await db.insert(jobs).values({ companyId: development.companyId, subscriptionId: sub.id, agentId: bruno.id, taskId: task!.id, prompt: 'work', status: 'running', timeoutMs: 1000, startedAt: since, answersCeo: true });
+    /* A finished turn leaves its agent on the plan, without the old task or start time. */
+    await db.insert(jobs).values({ companyId: development.companyId, subscriptionId: sub.id, agentId: vera.id, taskId: task!.id, prompt: 'review', status: 'done', timeoutMs: 1000, startedAt: since, finishedAt: new Date('2026-11-01T10:05:00Z'), answersCeo: true });
+    const shown = (await list(app, ceo)).find((s: { id: string }) => s.id === sub.id);
+    expect(shown.agents).toEqual([
+      { id: bruno.id, name: 'Bruno', busy: true, title: { en: 'Backend engineer', ru: 'Бэкенд-разработчик' }, department: { id: development.id, name: 'Development' }, provider: 'claude', since: since.toISOString(), task: { number: 12, title: 'Checkout API' }, withCeo: true },
+      { id: vera.id, name: 'Vera', busy: false, title: { en: 'Backend engineer', ru: 'Бэкенд-разработчик' }, department: { id: marketing.id, name: 'Marketing' }, provider: 'claude', since: null, task: null, withCeo: false },
+    ]);
+    expect((await list(app, maria))[0].agents[0].task).toBeNull();
+    const org = (await app.inject({ url: '/api/org', ...as(ceo) })).json();
+    expect(org.orchestrator.subscription).not.toHaveProperty('agents');
+  });
+
   it('shows company scope everything and everyone else only their own', async () => {
     const { app, ceo, maria } = await companyWithMaria();
     await connect(app, maria, ['claude']);

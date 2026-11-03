@@ -1,6 +1,6 @@
-import { render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Machines } from '../src/screens/Machines';
 import type { BuiltinView, Me } from '../src/types';
@@ -12,19 +12,68 @@ const GIB = 1024 ** 3;
 const BUILTIN: BuiltinView = {
   online: true,
   load: { cpus: 4, load: 0.5, memFree: 2.5 * GIB, memTotal: 8 * GIB, tests: 0, jobs: 1 },
-  running: { agents: [{ id: 'o1', name: 'Orchestrator', busy: false }], parts: [] },
+  running: { agents: [{ id: 'o1', name: 'Orchestrator', busy: false, title: null, department: null, provider: 'anthropic_api', since: null, task: null, withCeo: false }], parts: [] },
 };
 
 const lists = (extra: Parameters<typeof mockApi>[0] = {}, builtin: BuiltinView | null = BUILTIN) =>
   mockApi({ 'GET /api/subscriptions': [200, { subscriptions: SUBS }], 'GET /api/machines': [200, { machines: MACHINES, builtin }], ...extra });
 
-const card = (name: string) => screen.getByRole('article', { name });
+const card = (name: string) => {
+  const existing = screen.queryByRole('article', { name });
+  if (existing) return existing;
+  fireEvent.click(screen.getByRole('button', { name: new RegExp(`^(Open the card of |Открыть карточку )${name}$`) }));
+  return screen.getByRole('article', { name });
+};
+const openCard = async (name: string) => {
+  await screen.findByRole('table');
+  return card(name);
+};
+const meter = (node: HTMLElement, label: string) => within(node).getByText(label, { selector: '.g-l' }).closest('.gauge')!;
+
 /* The value next to a label in a machine's card or in the pool. */
 const fact = (within_: HTMLElement, label: string) => within(within_).getByText(label, { selector: 'dt' }).nextElementSibling?.textContent;
 
 afterEach(() => localStorage.clear());
 
 describe('Machines', () => {
+  it.each([
+    ['en', 'Priority', 'The company server runs here', 'Built-in node'],
+    ['ru', 'Приоритет', 'Здесь работает сервер компании', 'Встроенная нода'],
+  ])('shows read-only priority on the joined server machine only in %s', async (language, title, line, builtinName) => {
+    localStorage.setItem('hh-lang', language);
+    let joined = true;
+    lists({ 'GET /api/machines': () => [200, { machines: MACHINES, builtin: { ...BUILTIN, machine: joined ? { id: 'm1', hostname: 'ivan-mbp' } : null } }] });
+    const view = render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
+    const mac = await openCard('ivan-mbp');
+    const priority = within(mac).getByRole('heading', { name: title }).closest('section')!;
+    expect(priority.textContent).toBe(`${title}1${line}`);
+    expect(priority.querySelector('button, input, select')).toBeNull();
+    expect(within(card('build-box')).queryByRole('heading', { name: title })).not.toBeInTheDocument();
+    view.unmount();
+    joined = false;
+    render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
+    await openCard(builtinName);
+    card('ivan-mbp');
+    card('build-box');
+    expect(screen.queryByRole('heading', { name: title })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['en', 'Ivan, limit reached until ', 'Ivan, waiting for the login', 'No plans on this machine yet'],
+    ['ru', 'Ivan, лимит исчерпан до ', 'Ivan, ждет входа', 'На этой машине пока нет подписок'],
+  ])('lists plans with their local states and empty text in %s', async (language, limited, login, empty) => {
+    localStorage.setItem('hh-lang', language);
+    const limits = { status: 'rejected', windows: [{ name: 'five_hour', utilization: 1, resetsAt: new Date(Date.now() + 80 * 60_000).toISOString() }] };
+    lists({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, tier: 'Max', limits }, ...SUBS.slice(1)] }] });
+    render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
+    const mac = await openCard('ivan-mbp');
+    const plans = mac.querySelector('.plist')!;
+    expect(within(plans as HTMLElement).getAllByRole('listitem').map(item => item.querySelector('.nm')?.textContent)).toEqual([
+      expect.stringMatching(new RegExp(`^Claude Max${limited}`)), `Codex${login}`,
+    ]);
+    expect(within(card('build-box')).getByText(empty)).toBeInTheDocument();
+  });
+
   it('shows the whole pool: machines online of all, processor cores, free memory and how busy it is now', async () => {
     lists();
     render(<Machines me={ME} />);
@@ -38,44 +87,58 @@ describe('Machines', () => {
   it('shows each machine with its owner, system, processor, memory, load and disk', async () => {
     lists();
     render(<Machines me={ME} />);
-    const mac = await screen.findByRole('article', { name: 'ivan-mbp' });
+    const mac = await openCard('ivan-mbp');
     expect(within(mac).getByText('Online')).toBeInTheDocument();
     expect(fact(mac, 'Owner')).toBe('Ivan');
     expect(fact(mac, 'System')).toBe('macOS, arm64');
-    expect(fact(mac, 'Processor')).toBe('Apple M2 Pro, 8 of 10 cores');
-    expect(fact(mac, 'Memory')).toBe('6 of 12 GB free, the machine has 32 GB');
+    expect(meter(mac, 'Processor').textContent).toBe('Processor8 coresApple M2 Pro, the machine has 10');
+    expect(meter(mac, 'Processor').querySelector('b')).toHaveTextContent(/^8$/);
+    expect(meter(mac, 'Memory').textContent).toBe('Memory6GB freeof 12 GB, the machine has 32 GB');
     expect(within(mac).getByText('Docker on this Mac is set smaller than the Mac, so Hornhoof uses only part of it.')).toBeInTheDocument();
-    expect(fact(mac, 'Load')).toBe('25%');
-    expect(fact(mac, 'Disk')).toBe('120 of 460 GB free');
-    /* Plans are signed in once and run on any machine of their owner, so the Plans tab says where; a card does not. */
-    expect(within(mac).queryByRole('list', { name: 'Plans on ivan-mbp' })).not.toBeInTheDocument();
-    expect(within(mac).queryByText('Plans')).not.toBeInTheDocument();
+    expect(meter(mac, 'Load').querySelector('b')?.textContent).toBe('25%');
+    expect(meter(mac, 'Disk').textContent).toBe('Disk120GB freeof 460 GB');
+    expect(within(mac).getByRole('heading', { name: 'Plans on this machine' })).toBeInTheDocument();
+    expect(fact(mac, 'Test runs')).toContain('Lend to test runs');
+  });
+
+  it('does not draw an invalid resource bar when a node reports zero total memory or disk', async () => {
+    lists({}, { ...BUILTIN, load: { ...BUILTIN.load!, memFree: 0, memTotal: 0, diskFree: 0, diskTotal: 0 } });
+    render(<Machines me={ME} />);
+    const own = await openCard('Built-in node');
+    expect(meter(own, 'Memory').querySelector('.bar i')).not.toBeInTheDocument();
+    expect(meter(own, 'Disk').querySelector('.bar i')).not.toBeInTheDocument();
   });
 
   it('says what runs on a machine now: its employees and the parts of test runs', async () => {
     lists();
     render(<Machines me={ME} />);
-    const mac = await screen.findByRole('article', { name: 'ivan-mbp' });
-    const now = within(within(mac).getByRole('list', { name: 'What runs on ivan-mbp now' })).getAllByRole('listitem');
-    expect(now.map(p => p.textContent)).toEqual(['Bruno, working', 'Vera', 'Tests of task 12, part 1 of 2']);
-    expect(fact(card('build-box'), 'Running now')).toBe('Nothing right now');
+    const mac = await openCard('ivan-mbp');
+    const now = within(mac).getByRole('region', { name: 'What runs on ivan-mbp now' });
+    expect(within(now).getByRole('region', { name: 'Development' })).toHaveTextContent('Bruno');
+    expect(within(now).getByTitle('Checkout API')).toHaveTextContent('#12');
+    expect(within(now).getByText('12 min')).toBeInTheDocument();
+    expect(within(now).getByText('Started by Bruno')).toBeInTheDocument();
+    expect(now.querySelectorAll('.segs i')).toHaveLength(2);
+    expect(now.querySelectorAll('.segs i.here')).toHaveLength(1);
+    expect(within(now).getByRole('region', { name: 'Test runs' })).toHaveTextContent('Tests of task 12, part 1 of 2');
+    expect(within(card('build-box')).getByText('Nothing, the machine is offline.')).toBeInTheDocument();
   });
 
   it('says unknown for what an offline or older machine has not told', async () => {
     lists();
     render(<Machines me={ME} />);
-    const box = await screen.findByRole('article', { name: 'build-box' });
+    const box = await openCard('build-box');
     expect(within(box).getByText('Last seen 5 minutes ago')).toBeInTheDocument();
     expect(fact(box, 'System')).toBe('Linux, x86_64');
-    for (const label of ['Processor', 'Memory', 'Load', 'Disk']) expect(fact(box, label)).toBe('unknown');
+    expect(within(box).getByText('Not known while the machine is offline.')).toBeInTheDocument();
     expect(within(box).queryByText('No plan')).not.toBeInTheDocument();
     const own = card('Built-in node');
-    expect(fact(own, 'Processor')).toBe('4 cores');
-    expect(fact(own, 'Memory')).toBe('2.5 of 8 GB free');
-    expect(fact(own, 'Disk')).toBe('unknown');
+    expect(meter(own, 'Processor').querySelector('.g-f')?.textContent).toBe('4 cores');
+    expect(meter(own, 'Memory').textContent).toBe('Memory2.5GB freeof 8 GB');
+    expect(meter(own, 'Disk').querySelector('b')?.textContent).toBe('unknown');
     expect(within(own).queryByRole('button')).not.toBeInTheDocument();
-    expect(within(own).getByTitle('The company server runs on this machine now')).toHaveTextContent('Leader');
-    expect(within(box).queryByText('Leader')).not.toBeInTheDocument();
+    expect(within(own).getByTitle('The company server runs on this machine now')).toHaveTextContent('Company server here');
+    expect(within(box).queryByText('Company server here')).not.toBeInTheDocument();
   });
 
   /* The server on a computer that joined as a machine too: one computer, one card. */
@@ -88,12 +151,26 @@ describe('Machines', () => {
     expect(fact(pool, 'Free memory')).toBe('6 of 12 GB');
     expect(fact(pool, 'Busy now')).toBe('25%');
     const mac = card('ivan-mbp');
+    expect(mac.querySelector('.machine')).toHaveClass('accent');
+    expect(mac.querySelector('.corner')).toBeInTheDocument();
+    expect(within(screen.getByRole('button', { name: 'Open the card of ivan-mbp' })).getByTitle('The company server runs on this machine now')).toHaveTextContent('Company server here');
+    expect(within(screen.getByRole('row', { name: 'build-box' })).queryByTitle('The company server runs on this machine now')).not.toBeInTheDocument();
     expect(within(mac).getByText("The server runs here too, with its built-in node for the company's keys and test runs.")).toBeInTheDocument();
-    expect(within(within(mac).getByRole('list', { name: 'What runs on ivan-mbp now' })).getByText('Orchestrator')).toBeInTheDocument();
-    expect(screen.getAllByRole('article').map(a => a.getAttribute('aria-label'))).toEqual(['ivan-mbp', 'build-box']);
+    expect(within(within(mac).getByRole('region', { name: 'What runs on ivan-mbp now' })).getByText('Orchestrator')).toBeInTheDocument();
+    expect(screen.getAllByRole('row').filter(r => r.classList.contains('rm'))).toHaveLength(2);
     expect(within(card('build-box')).queryByText(/built-in node/)).not.toBeInTheDocument();
-    expect(within(mac).getByTitle('The company server runs on this machine now')).toHaveTextContent('Leader');
-    expect(within(card('build-box')).queryByText('Leader')).not.toBeInTheDocument();
+    expect(within(mac).getByTitle('The company server runs on this machine now')).toHaveTextContent('Company server here');
+    expect(within(card('build-box')).queryByText('Company server here')).not.toBeInTheDocument();
+  });
+
+  it('counts server work once when the joined machine already includes it in map order', async () => {
+    const merged = { ...MACHINES[0]!, running: { agents: [...BUILTIN.running.agents, ...MACHINES[0]!.running.agents], parts: MACHINES[0]!.running.parts } };
+    lists({ 'GET /api/machines': [200, { machines: [merged], builtin: { ...BUILTIN, machine: { id: merged.id, hostname: merged.hostname } } }] });
+    render(<Machines me={ME} />);
+    const running = within(await openCard('ivan-mbp')).getByRole('region', { name: 'What runs on ivan-mbp now' });
+    expect(within(running).getByText('3 agents, 1 working, 1 test run')).toBeInTheDocument();
+    expect(within(running).getAllByRole('region').map(r => r.getAttribute('aria-label'))).toEqual(['Company', 'Development', 'Test runs']);
+    expect(within(running).getAllByText('Orchestrator')).toHaveLength(1);
   });
 
   it('shows no built-in node and no pool part of it to those who do not see the whole company', async () => {
@@ -103,6 +180,43 @@ describe('Machines', () => {
     const pool = await screen.findByRole('region', { name: 'All machines together' });
     expect(fact(pool, 'Machines online')).toBe('1 of 2');
     expect(screen.queryByRole('article', { name: 'Built-in node' })).not.toBeInTheDocument();
+  });
+
+  it('shows one table row per machine and toggles cards independently from any cell', async () => {
+    lists();
+    render(<Machines me={ME} />);
+    await screen.findByRole('table');
+    expect(screen.getAllByRole('row').filter(r => r.classList.contains('rm'))).toHaveLength(3);
+    expect(screen.queryByRole('article')).not.toBeInTheDocument();
+    await userEvent.click(within(screen.getByRole('row', { name: 'ivan-mbp' })).getByText('Ivan'));
+    expect(screen.getByRole('button', { name: 'Open the card of ivan-mbp' })).toHaveAttribute('aria-expanded', 'true');
+    await userEvent.click(screen.getByRole('button', { name: 'Open the card of build-box' }));
+    expect(screen.getAllByRole('article')).toHaveLength(2);
+    await userEvent.click(screen.getByRole('button', { name: 'Open the card of ivan-mbp' }));
+    expect(screen.queryByRole('article', { name: 'ivan-mbp' })).not.toBeInTheDocument();
+  });
+
+  it('keeps a card and its row order through the five second refresh and sorts unknown loads last both ways', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    onTestFinished(() => { vi.useRealTimers(); });
+    let calls = 0;
+    lists({ 'GET /api/machines': () => [200, { machines: ++calls === 1 ? MACHINES : MACHINES.map(m => ({ ...m, online: !m.online })), builtin: BUILTIN }] });
+    render(<Machines me={ME} />);
+    const mac = await openCard('ivan-mbp');
+    const order = () => screen.getAllByRole('row').filter(r => r.classList.contains('rm')).map(r => r.getAttribute('aria-label'));
+    const before = order();
+    await act(() => vi.advanceTimersByTimeAsync(5000));
+    expect(order()).toEqual(before);
+    expect(screen.getByRole('article', { name: 'ivan-mbp' })).toBe(mac);
+    await userEvent.click(screen.getByRole('button', { name: 'Open the card of ivan-mbp' }));
+    expect(order()[0]).toBe('build-box');
+    const load = within(screen.getByRole('columnheader', { name: 'Load' })).getByRole('button');
+    await userEvent.click(load);
+    expect(load.closest('th')).toHaveAttribute('aria-sort', 'descending');
+    expect(order().at(-1)).toBe('ivan-mbp');
+    await userEvent.click(load);
+    expect(load.closest('th')).toHaveAttribute('aria-sort', 'ascending');
+    expect(order().at(-1)).toBe('ivan-mbp');
   });
 
   it('connects a machine without a plan and shows its command', async () => {
@@ -122,7 +236,7 @@ describe('Machines', () => {
     const calls = lists({ 'POST /api/machines/m1/plans': [201, { command: COMMAND }] });
     const user = userEvent.setup();
     render(<Machines me={ME} />);
-    const mac = await screen.findByRole('article', { name: 'ivan-mbp' });
+    const mac = await openCard('ivan-mbp');
     expect(within(card('build-box')).queryByRole('button', { name: /^Add my plan/ })).not.toBeInTheDocument();
     await user.click(within(mac).getByRole('button', { name: 'Add my plan to ivan-mbp' }));
     expect(screen.getByText('Which of your plans should run on ivan-mbp too?')).toBeInTheDocument();
@@ -139,7 +253,7 @@ describe('Machines', () => {
     const calls = lists({ 'POST /api/machines/m2/disconnect': [204] });
     const user = userEvent.setup();
     render(<Machines me={ME} />);
-    await user.click(within(await screen.findByRole('article', { name: 'build-box' })).getByRole('button', { name: 'Disconnect build-box' }));
+    await user.click(within(await openCard('build-box')).getByRole('button', { name: 'Disconnect build-box' }));
     expect(screen.getByText('Disconnect build-box? Everything on it stops, and a plan that runs nowhere else waits for a machine again.')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Yes, disconnect' }));
     expect(calls.find(c => c.method === 'POST')).toEqual({ method: 'POST', path: '/api/machines/m2/disconnect', body: undefined });
@@ -149,7 +263,7 @@ describe('Machines', () => {
     const calls = lists({ 'PATCH /api/machines/m1': [200, { lendsTests: false }] });
     const user = userEvent.setup();
     render(<Machines me={ME} />);
-    const lend = within(await screen.findByRole('article', { name: 'ivan-mbp' })).getByRole('checkbox', { name: "Lend ivan-mbp to the company's test runs" });
+    const lend = within(await openCard('ivan-mbp')).getByRole('checkbox', { name: "Lend ivan-mbp to the company's test runs" });
     expect(lend).toBeChecked();
     expect(within(card('build-box')).getByRole('checkbox')).not.toBeChecked();
     await user.click(lend);
@@ -160,7 +274,7 @@ describe('Machines', () => {
     lists({}, null);
     const lead: Me = { ...ME, person: { ...ME.person, scopeKind: 'listed', isOwner: false } };
     render(<Machines me={lead} />);
-    const maria = await screen.findByRole('article', { name: 'build-box' });
+    const maria = await openCard('build-box');
     expect(within(maria).queryByRole('checkbox')).not.toBeInTheDocument();
     expect(within(maria).getByText('Not lent to test runs')).toBeInTheDocument();
     expect(within(card('ivan-mbp')).getByRole('checkbox')).toBeChecked();
@@ -178,15 +292,14 @@ describe('Machines', () => {
     expect(fact(pool, 'Машин в сети')).toBe('2 из 3');
     expect(fact(pool, 'Свободно памяти')).toBe('8,5 из 20 ГБ');
     const mac = card('ivan-mbp');
-    expect(fact(mac, 'Процессор')).toBe('Apple M2 Pro, 8 из 10 ядер');
-    expect(fact(mac, 'Память')).toBe('Свободно 6 из 12 ГБ, у машины 32 ГБ');
+    expect(meter(mac, 'Процессор').textContent).toBe('Процессор8 ядерApple M2 Pro, у машины 10');
+    expect(meter(mac, 'Память').textContent).toBe('Память6ГБ свободноиз 12 ГБ, у машины 32 ГБ');
     expect(within(mac).getByText('Docker на этом Mac настроен меньше самого Mac, поэтому Hornhoof использует только часть.')).toBeInTheDocument();
-    expect(fact(mac, 'Диск')).toBe('Свободно 120 из 460 ГБ');
-    const now = within(within(mac).getByRole('list', { name: 'Что сейчас идет на ivan-mbp' })).getAllByRole('listitem');
-    expect(now.map(p => p.textContent)).toEqual(['Bruno, работает', 'Vera', 'Тесты задачи 12, часть 1 из 2']);
-    const box = card('build-box');
-    expect(fact(box, 'Процессор')).toBe('неизвестно');
-    expect(fact(card('Встроенная нода'), 'Процессор')).toBe('4 ядра');
+    expect(meter(mac, 'Диск').textContent).toBe('Диск120ГБ свободноиз 460 ГБ');
+    expect(within(mac).getByRole('region', { name: 'Что сейчас идет на ivan-mbp' })).toHaveTextContent('Тесты задачи 12, часть 1 из 2');
+    expect(within(card('build-box')).getByText('Неизвестно, пока машина не в сети.')).toBeInTheDocument();
+    expect(meter(card('Встроенная нода'), 'Процессор').querySelector('.g-f')).toHaveTextContent('4 ядра');
+    expect(within(screen.getByRole('group', { name: 'Тесты' })).getByRole('button', { name: /^Отдана под тесты/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Подключить машину' })).toBeInTheDocument();
     expect(within(mac).getByRole('button', { name: 'Добавить мою подписку на ivan-mbp' })).toBeInTheDocument();
     expect(within(mac).getByRole('checkbox', { name: 'Отдавать ivan-mbp под прогоны тестов компании' })).toBeChecked();
@@ -202,8 +315,62 @@ describe('Machines', () => {
     );
     expect(fact(await screen.findByRole('region', { name: 'Все машины вместе' }), 'Машин в сети')).toBe('1 из 2');
     expect(within(card('ivan-mbp')).getByText('Здесь же работает сервер и его встроенная нода: ключи компании и прогоны тестов.')).toBeInTheDocument();
-    expect(within(card('ivan-mbp')).getByTitle('Сервер компании сейчас работает на этой машине')).toHaveTextContent('Ведущая');
-    expect(within(card('build-box')).queryByText('Ведущая')).not.toBeInTheDocument();
+    expect(within(card('ivan-mbp')).getByTitle('Сервер компании сейчас работает на этой машине')).toHaveTextContent('Здесь сервер компании');
+    expect(within(card('build-box')).queryByText('Здесь сервер компании')).not.toBeInTheDocument();
     expect(screen.queryByRole('article', { name: 'Встроенная нода' })).not.toBeInTheDocument();
   });
+  it('searches agents, roles, departments and machine names, with counts, clear and no matches', async () => {
+    lists();
+    render(<Machines me={ME} />);
+    expect(await screen.findByText('3 machines')).toBeInTheDocument();
+    const search = screen.getByRole('searchbox', { name: 'Search' });
+    await userEvent.click(screen.getByRole('button', { name: 'Open the card of ivan-mbp' }));
+    for (const query of ['BRUNO', 'Backend engineer', 'Development', 'ivan-mbp']) {
+      await userEvent.clear(search);
+      await userEvent.type(search, query);
+      expect(screen.getByText('Showing 1 of 3')).toBeInTheDocument();
+      expect(screen.getByRole('article', { name: 'ivan-mbp' })).toBeInTheDocument();
+    }
+    await userEvent.clear(search);
+    await userEvent.type(search, 'missing machine');
+    expect(screen.getByText('Nothing matches. Change the search or clear the filters.')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
+    expect(search).toHaveValue('');
+    expect(screen.getByText('3 machines')).toBeInTheDocument();
+    expect(screen.getByRole('article', { name: 'ivan-mbp' })).toBeInTheDocument();
+  });
+
+  it('widens matches inside one filter group and narrows across groups, counting keys by their program', async () => {
+    const extra = { ...MACHINES[1]!, plans: [{ id: 'hidden', provider: 'kimi' as const, status: 'ready' as const, online: false }] };
+    lists({ 'GET /api/machines': [200, { machines: [MACHINES[0]!, extra], builtin: BUILTIN }] });
+    render(<Machines me={ME} />);
+    await screen.findByRole('table');
+    const provider = screen.getByRole('group', { name: 'Provider' });
+    const claude = within(provider).getByRole('button', { name: /Claude.*2/ });
+    await userEvent.click(claude);
+    expect(claude).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText('Showing 2 of 3')).toBeInTheDocument();
+    await userEvent.click(within(provider).getByRole('button', { name: /Kimi.*1/ }));
+    expect(screen.getByText('Showing 3 of 3')).toBeInTheDocument();
+    await userEvent.click(within(screen.getByRole('group', { name: 'Status' })).getByRole('button', { name: /^Offline/ }));
+    expect(screen.getByText('Showing 1 of 3')).toBeInTheDocument();
+    await userEvent.click(within(screen.getByRole('group', { name: 'Tests' })).getByRole('button', { name: /^Lent to test runs/ }));
+    expect(screen.getByText('Showing 0 of 3')).toBeInTheDocument();
+  });
+
+  it('keeps search and filters through refreshes and only offers groups with a choice', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    onTestFinished(() => { vi.useRealTimers(); });
+    lists({ 'GET /api/machines': [200, { machines: [MACHINES[0]!], builtin: null }] });
+    render(<Machines me={ME} />);
+    await screen.findByRole('table');
+    expect(screen.queryByRole('group', { name: 'Status' })).not.toBeInTheDocument();
+    await userEvent.type(screen.getByRole('searchbox'), 'Bruno');
+    await userEvent.click(within(screen.getByRole('group', { name: 'Tests' })).getByRole('button'));
+    await act(() => vi.advanceTimersByTimeAsync(5000));
+    expect(screen.getByRole('searchbox')).toHaveValue('Bruno');
+    expect(within(screen.getByRole('group', { name: 'Tests' })).getByRole('button')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText('Showing 1 of 1')).toBeInTheDocument();
+  });
+
 });

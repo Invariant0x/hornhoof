@@ -1,0 +1,117 @@
+import { Fragment, useEffect, useState, type ReactNode } from 'react';
+import { useLanguage, useT } from '../i18n';
+import { Edge } from './Edge';
+import { matchesFilters, TableTools, type FilterGroup, type Selections, type TableSearch } from './TableTools';
+import { nextSort, orderRows, sortRows, type Sort, type SortColumn } from './sort';
+
+export type TableColumn<T> = SortColumn<T> & { label: string; cell: (row: T) => ReactNode; className?: string };
+type Props<T> = {
+  rows: readonly T[];
+  columns: TableColumn<T>[];
+  name: (row: T) => string;
+  initialSort: Sort;
+  card: (row: T) => ReactNode;
+  search?: TableSearch<T>;
+  filters?: FilterGroup<T>[];
+};
+type SortControls<T> = { columns: TableColumn<T>[]; sort: Sort; choose: (column: TableColumn<T>) => void };
+
+function Arrow({ ascending }: { ascending: boolean }) {
+  return <span className={`sa-w${ascending ? ' up' : ''}`} aria-hidden="true"><svg className="sa" viewBox="0 0 12 12"><path d="M6 1v9M2 6l4 4 4-4" /></svg></span>;
+}
+
+function TableHead<T>({ columns, sort, choose }: SortControls<T>) {
+  return <thead><tr>{columns.map(c => <th key={c.key} scope="col" aria-sort={sort.key === c.key ? (sort.direction === 1 ? 'ascending' : 'descending') : 'none'}>
+    <button className={`sorth${sort.key === c.key ? ' on' : ''}`} type="button" onClick={() => choose(c)}>{c.label}<Arrow ascending={(sort.key === c.key ? sort.direction : c.direction) === 1} /></button>
+  </th>)}</tr></thead>;
+}
+
+function SortBar<T>({ columns, sort, choose }: SortControls<T>) {
+  const t = useT();
+  return <div className="sortbar" role="group" aria-label={t.tables.sortBy}>
+    <span className="lbl">{t.tables.sortBy}</span>
+    {columns.map(c => <button key={c.key} className={`sortb${sort.key === c.key ? ' on' : ''}`} type="button" aria-pressed={sort.key === c.key} onClick={() => choose(c)}>
+      {c.label}{sort.key === c.key && <><Arrow ascending={sort.direction === 1} /><span className="sr">{`, ${sort.direction === 1 ? t.tables.ascending : t.tables.descending}`}</span></>}
+    </button>)}
+  </div>;
+}
+
+function TableRow<T>({ row, columns, name, expanded, toggle }: { row: T; columns: TableColumn<T>[]; name: string; expanded: boolean; toggle: () => void }) {
+  const t = useT();
+  return <tr className={`rm${expanded ? ' open' : ''}`} aria-label={name} onClick={() => { if (!window.getSelection()?.toString()) toggle(); }}>
+    {columns.map((c, i) => <td key={c.key} className={i === 0 ? 'k-name' : c.className} data-label={i === 0 || c.className === 'k-status' ? undefined : c.label}>
+      {i === 0 ? <button className="rowbtn" type="button" aria-expanded={expanded} aria-label={t.tables.openCard(name)}>
+        <svg className="chev" viewBox="0 0 12 12" aria-hidden="true"><path d="m4 2 4 4-4 4" /></svg>{c.cell(row)}
+      </button> : c.cell(row)}
+    </td>)}
+  </tr>;
+}
+
+function ResultLine({ filtered, count, shown, all, clear }: { filtered: boolean; count: string; shown: number; all: number; clear: () => void }) {
+  const t = useT();
+  return <p className="result" role="status">{filtered ? <>{t.tables.shown(shown, all)} <button className="linkbtn" type="button" onClick={clear}>{t.tables.clear}</button></> : count}</p>;
+}
+
+export function SortTable<T extends { id: string }>({ rows, columns, name, initialSort, card, search, filters = [] }: Props<T>) {
+  const t = useT();
+  const { language } = useLanguage();
+  const [query, setQuery] = useState('');
+  const [selected, setSelected] = useState<Selections>({});
+  const [sort, setSort] = useState(initialSort);
+  const [open, setOpen] = useState<Set<string>>(() => new Set());
+  const [order, setOrder] = useState<string[]>([]);
+  const column = columns.find(c => c.key === sort.key) ?? columns[0]!;
+  const sorted = sortRows(rows, column, sort.direction, name, language);
+  const held = rows.some(r => open.has(r.id));
+  const ordered = orderRows(sorted, order, held);
+  const needle = query.trim().toLocaleLowerCase(language);
+  const visible = ordered.filter(row => (!needle || search?.text(row).toLocaleLowerCase(language).includes(needle)) && matchesFilters(row, filters, selected));
+  const filtered = Boolean(needle || Object.values(selected).some(values => values.length));
+
+  /* Record additions and removals after each refresh, keeping all surviving cards and their places. */
+  useEffect(() => {
+    setOrder(previous => orderRows(rows, previous, true).map(r => r.id));
+    setOpen(previous => new Set([...previous].filter(id => rows.some(r => r.id === id))));
+  }, [rows]);
+
+  function toggleFilter(key: string, value: string) {
+    setSelected(previous => {
+      const values = previous[key] ?? [];
+      return { ...previous, [key]: values.includes(value) ? values.filter(v => v !== value) : [...values, value] };
+    });
+  }
+
+  function toggle(id: string) {
+    setOrder(ordered.map(r => r.id));
+    setOpen(previous => {
+      const next = new Set(previous);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function choose(column: TableColumn<T>) {
+    const next = nextSort(sort, column);
+    setSort(next);
+    setOrder(sortRows(rows, column, next.direction, name, language).map(r => r.id));
+  }
+
+  return <>
+    {search && <>
+      <TableTools rows={rows} groups={filters} selected={selected} toggle={toggleFilter} query={query} setQuery={setQuery} placeholder={search.placeholder} />
+      <ResultLine filtered={filtered} count={search.count(rows.length)} shown={visible.length} all={rows.length} clear={() => { setQuery(''); setSelected({}); }} />
+    </>}
+    {search && visible.length === 0 && <p className="nothing">{t.tables.noMatch}</p>}
+    <Edge className="tbl-frame"><div className="tbl">
+      <SortBar columns={columns} sort={sort} choose={choose} />
+      <table className="dt">
+        <TableHead columns={columns} sort={sort} choose={choose} />
+        <tbody>{visible.map(row => <Fragment key={row.id}>
+          <TableRow row={row} columns={columns} name={name(row)} expanded={open.has(row.id)} toggle={() => toggle(row.id)} />
+          {open.has(row.id) && <tr className="det"><td colSpan={columns.length}>{card(row)}</td></tr>}
+        </Fragment>)}</tbody>
+      </table>
+    </div></Edge>
+  </>;
+}

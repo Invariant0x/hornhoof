@@ -11,8 +11,8 @@ const codeOf = (command: string) => command.split('--join ')[1]!;
 const join = (app: FastifyInstance, code: string, extra: object = {}, headers: Record<string, string> = {}) =>
   app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, ...MACHINE, ...extra }, headers });
 
-async function connected(providers: string[]) {
-  const { app, db } = await testApp();
+async function connected(providers: string[], env: NodeJS.ProcessEnv = {}) {
+  const { app, db } = await testApp(env);
   const ceo = await setUpCompany(app);
   const res = await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers }, ...as(ceo) });
   return { app, db, ceo, code: codeOf(res.json().command), ids: res.json().subscriptions.map((s: { id: string }) => s.id) as string[] };
@@ -181,8 +181,8 @@ describe('one plan on several machines', () => {
     app.inject({ method: 'POST', url: `/api/machines/${machineId}/plans`, payload: { subscription }, ...as(token) });
 
   /* Ivan's Claude plan on his Mac, and his laptop joined without a plan. */
-  async function twoMachines() {
-    const { app, db, ceo, code, ids } = await connected(['claude']);
+  async function twoMachines(env: NodeJS.ProcessEnv = {}) {
+    const { app, db, ceo, code, ids } = await connected(['claude'], env);
     const mac = (await join(app, code)).json();
     const laptop = (await join(app, await machineCode(app, ceo), LAPTOP)).json();
     return { app, db, ceo, plan: ids[0]!, mac, laptop };
@@ -265,6 +265,7 @@ describe('one plan on several machines', () => {
     const vera = await hire('Vera');
     const [job] = await db.insert(jobs).values({ companyId: acme!.id, subscriptionId: plan, agentId: bruno.id, prompt: 'work', status: 'running', timeoutMs: 1000, startedAt: new Date() }).returning();
     const [task] = await db.insert(tasks).values({ companyId: acme!.id, number: 12, title: 'Checkout API', assigneeAgentId: bruno.id }).returning();
+    await db.update(jobs).set({ taskId: task!.id }).where(eq(jobs.id, job!.id));
     const [run] = await db.insert(testRuns).values({ companyId: acme!.id, number: 3, taskId: task!.id, agentId: bruno.id, jobId: job!.id, command: 'npm test', parts: 2, timeoutMs: 60_000 }).returning();
     const startedAt = new Date('2026-11-01T10:00:00Z');
     await db.insert(testParts).values([
@@ -276,8 +277,8 @@ describe('one plan on several machines', () => {
         id: mac.machine.id,
         running: {
           agents: [
-            { id: bruno.id, name: 'Bruno', busy: true },
-            { id: vera.id, name: 'Vera', busy: false },
+            { id: bruno.id, name: 'Bruno', busy: true, title: { en: 'Backend engineer', ru: 'Бэкенд-разработчик' }, department: { id: dev!.id, name: 'Development' }, provider: 'claude', since: job!.startedAt!.toISOString(), task: { number: 12, title: 'Checkout API' }, withCeo: false },
+            { id: vera.id, name: 'Vera', busy: false, department: { id: dev!.id, name: 'Development' }, provider: 'claude', since: null, task: null, withCeo: false },
           ],
           parts: [],
         },
@@ -286,6 +287,22 @@ describe('one plan on several machines', () => {
     ]);
     await db.update(testParts).set({ machineId: null, builtin: true }).where(eq(testParts.part, 1));
     expect((await app.inject({ url: '/api/machines', ...as(ceo) })).json().builtin.running.parts).toMatchObject([{ run: 3, part: 1 }]);
+  });
+
+  it('keeps map order across personal plans and keys when both run on the server machine', async () => {
+    const { app, db, ceo, plan, mac } = await twoMachines({ HORNHOOF_HOST_ID: hashToken(`hornhoof-host:${MACHINE.machineId}`) });
+    const [company] = await db.select().from(companies);
+    const [key] = await db.select().from(subscriptions).where(eq(subscriptions.kind, 'api_key'));
+    const [first, second] = await db.insert(departments).values([
+      { companyId: company!.id, name: 'Operations', roleCode: 'OPS', position: 0 },
+      { companyId: company!.id, name: 'Development', roleCode: 'DEV', position: 1 },
+    ]).returning();
+    await db.insert(agents).values([
+      { companyId: company!.id, name: 'Zoe', kind: 'worker', model: '', departmentId: first!.id, subscriptionId: key!.id },
+      { companyId: company!.id, name: 'Anna', kind: 'worker', model: '', departmentId: second!.id, subscriptionId: plan, nodeId: mac.nodes[0].nodeId },
+    ]);
+    const shown = (await machinesOf(app, ceo)).find((m: { id: string }) => m.id === mac.machine.id);
+    expect(shown.running.agents.map((a: { name: string }) => a.name)).toEqual(['Orchestrator', 'Zoe', 'Anna']);
   });
 
   it('never gives a plan a new key on a machine it runs on, so a second command cannot take its node over', async () => {
