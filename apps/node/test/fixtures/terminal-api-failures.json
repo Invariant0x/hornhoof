@@ -1,0 +1,47 @@
+[
+  {
+    "program": "codex", "prompt": "APIFAIL_503", "error": "agent_failed",
+    "line": {"type":"event_msg","payload":{"type":"task_complete","turn_id":"t1","last_agent_message":null,"error":{"message":"unexpected status 503 Service Unavailable: The server is overloaded, please try again later., url: http://127.0.0.1:18931/overload/v1/responses","codex_error_info":{"http_connection_failed":{"http_status_code":503}}},"duration_ms":677}},
+    "reason": "http_connection_failed 503: unexpected status 503 Service Unavailable: The server is overloaded, please try again later., url: http://127.0.0.1:18931/overload/v1/responses"
+  },
+  {
+    "program": "codex", "prompt": "APIFAIL_401", "error": "not_logged_in",
+    "line": {"type":"event_msg","payload":{"type":"task_complete","turn_id":"t2","last_agent_message":null,"error":{"message":"unexpected status 401 Unauthorized: Incorrect API key provided, url: http://127.0.0.1:18931/auth/v1/responses","codex_error_info":{"http_connection_failed":{"http_status_code":401}}},"duration_ms":241}},
+    "reason": "http_connection_failed 401: unexpected status 401 Unauthorized: Incorrect API key provided, url: http://127.0.0.1:18931/auth/v1/responses"
+  },
+  {
+    "program": "codex", "prompt": "APIFAIL_STREAM", "error": "agent_failed",
+    "line": {"type":"event_msg","payload":{"type":"task_complete","turn_id":"t3","last_agent_message":null,"error":{"message":"stream disconnected before completion: stream closed before response.completed","codex_error_info":"other"},"duration_ms":2283}},
+    "reason": "other: stream disconnected before completion: stream closed before response.completed"
+  },
+  {
+    "program": "codex", "prompt": "APIFAIL_429", "error": "agent_failed",
+    "line": {"type":"event_msg","payload":{"type":"task_complete","turn_id":"t4","last_agent_message":null,"error":{"message":"exceeded retry limit, last status: 429 Too Many Requests","codex_error_info":{"response_too_many_failed_attempts":{"http_status_code":429}}},"duration_ms":1069}},
+    "reason": "response_too_many_failed_attempts 429: exceeded retry limit, last status: 429 Too Many Requests"
+  },
+  {
+    "program": "codex", "prompt": "APIFAIL_CAPACITY", "error": "agent_failed",
+    "line": {"type":"event_msg","payload":{"type":"task_complete","last_agent_message":null,"error":{"codex_error_info":"server_overloaded","message":"Selected model is at capacity. Please try a different model."}}},
+    "reason": "server_overloaded: Selected model is at capacity. Please try a different model."
+  },
+  {
+    "program": "codex", "prompt": "APIFAIL_LIMIT", "error": "agent_failed",
+    "line": {"type":"event_msg","payload":{"type":"task_complete","last_agent_message":null,"error":{"codex_error_info":"usage_limit_exceeded","message":"You’ve hit your usage limit. Visit https://chatgpt.com/settings/usage to purchase more credits or try again at Oct 22nd, 2026 3:18 AM."}}},
+    "reason": "usage_limit_exceeded: You’ve hit your usage limit. Visit https://chatgpt.com/settings/usage to purchase more credits or try again at Oct 22nd, 2026 3:18 AM."
+  },
+  {
+    "program": "codex", "prompt": "APIFAIL_AUTH", "error": "not_logged_in",
+    "line": {"type":"event_msg","payload":{"type":"task_complete","last_agent_message":null,"error":{"codex_error_info":"unauthorized","message":"Your access token could not be refreshed. Please log out and sign in again."}}},
+    "reason": "unauthorized: Your access token could not be refreshed. Please log out and sign in again."
+  },
+  {
+    "program": "kimi", "prompt": "APIFAIL_AUTH", "error": "not_logged_in",
+    "line": {"type":"turn.ended","agentId":"main","turnId":0,"reason":"failed","error":{"code":"provider.auth_error","message":"401 Incorrect API key provided","name":"APIStatusError","details":{"statusCode":401},"retryable":false},"durationMs":20},
+    "reason": "provider.auth_error: 401 Incorrect API key provided"
+  },
+  {
+    "program": "kimi", "prompt": "APIFAIL_503", "error": "agent_failed",
+    "line": {"type":"turn.ended","agentId":"main","turnId":0,"reason":"failed","error":{"code":"provider.overloaded","message":"503 The server is overloaded, please try again later.","name":"APIProviderOverloadedError","details":{"statusCode":503},"retryable":true},"durationMs":139276},
+    "reason": "provider.overloaded: 503 The server is overloaded, please try again later."
+  }
+]

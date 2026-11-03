@@ -8,11 +8,13 @@
 // "tools: failed". FAKE_SIGNED_OUT shows what a signed-out Kimi shows. A paste comes whole, line breaks and all, as in Kimi;
 // FAKE_KEEP_TAIL keeps only that many last characters of the first message. What its prompt hook prints goes with the
 // prompt, as in Kimi Code.
+// APIFAIL prompts replay API failures captured from Kimi Code, with their error codes.
 import { createHash, randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { crash } from './crash.mjs';
 import { rawKeys, readKeys } from './keys.mjs';
+import failures from '../fixtures/terminal-api-failures.json' with { type: 'json' };
 
 if (process.env.FAKE_CRASH_START) crash(process.env.FAKE_CRASH_START);
 
@@ -111,6 +113,13 @@ function blocked() {
 // Whether the turn ended as it started: CRASH ends the program, HANG waits until Escape stops it, ABORT logs a stopped
 // turn and FAIL a failed one.
 function endsAtOnce(line, turnId) {
+  const failure = failures.find(f => f.program === 'kimi' && line.startsWith(f.prompt));
+  if (failure) {
+    const { type, ...body } = failure.line;
+    record(type, { ...body, turnId });
+    prompt();
+    return true;
+  }
   if (line.startsWith('CRASH')) crash(line.includes('LONG') ? 'long' : '');
   if (line.includes('HANG_EXIT')) print('exit-test running\n');
   if (line.includes('HANG')) {
