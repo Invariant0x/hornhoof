@@ -89,7 +89,7 @@ describe('useStream', () => {
         first.readyState = 2;
         first.fire('error');
       });
-      act(() => vi.advanceTimersByTime(1000));
+      act(() => { vi.advanceTimersByTime(1000); });
       expect(first.closed).toBe(true);
       expect(stream.sources()).toHaveLength(2);
       act(() => stream.sources()[1]!.fire('open'));

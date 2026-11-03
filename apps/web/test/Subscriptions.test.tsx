@@ -102,6 +102,7 @@ describe('Subscriptions', () => {
   });
 
   it('opens independent cards from cells, keeps controls inside them open, and accents the orchestrator card', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omit agents from the PATCH response shape
     const { agents: _, ...updated } = SUBS[0]!;
     const calls = lists({ 'PATCH /api/subscriptions/s-claude': [200, { subscription: { ...updated, budget: 80 } }] });
     render(<Subscriptions me={ME} />);

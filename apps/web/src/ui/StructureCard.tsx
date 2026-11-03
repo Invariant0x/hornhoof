@@ -46,6 +46,7 @@ export function StructureCard({ proposal, manual, departments, onCorrect, onDone
     setBusy(true);
     setFailure(null);
     try {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars -- strip UI-only checked flag from payload items
       const picked = chosen.map(({ checked: _checked, ...rest }) => rest);
       await api.post('/api/departments/build', proposal ? { proposalId: proposal.id, items: picked } : { items: picked });
       setSent(true);
@@ -91,7 +92,7 @@ export function StructureCard({ proposal, manual, departments, onCorrect, onDone
       )}
       <div className="f">
         <Decides locked={locked}>
-          <button className="btn" type="button" disabled={sent || busy || !chosen.length} onClick={create}>
+          <button className="btn" type="button" disabled={sent || busy || !chosen.length} onClick={() => void create()}>
             {label}
           </button>
           {!sent && (

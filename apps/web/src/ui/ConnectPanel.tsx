@@ -50,7 +50,7 @@ export function ConnectPanel({ onDone, onSkip, skipLabel }: Props) {
     <Edge className="panel" cut={12}>
       <h2>{t.subs.connectHeading}</h2>
       <p className="muted">{t.subs.connectIntro}</p>
-      <form onSubmit={submit} className="connect-form">
+      <form onSubmit={e => void submit(e)} className="connect-form">
         <fieldset className="plans">
           <legend className="sr">{t.subs.connectHeading}</legend>
           {PLAN_PROVIDERS.map(p => (

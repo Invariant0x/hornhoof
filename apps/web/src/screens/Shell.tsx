@@ -244,7 +244,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
             <button ref={accountButton} className="avatar glass" type="button" aria-label={t.shell.account} aria-expanded={menu} onClick={() => setMenu(!menu)}>
               {me.person.name.trim().charAt(0).toUpperCase()}
             </button>
-            {menu && <AccountMenu me={me} onClose={() => setMenu(false)} onSignOut={signOut} onImprovements={company ? () => setTab('improvements') : undefined} onVersions={company ? () => setVersionsOpen(true) : undefined} onSettings={company ? () => setSettingsOpen(true) : undefined} toDecide={toDecide} />}
+            {menu && <AccountMenu me={me} onClose={() => setMenu(false)} onSignOut={() => void signOut()} onImprovements={company ? () => setTab('improvements') : undefined} onVersions={company ? () => setVersionsOpen(true) : undefined} onSettings={company ? () => setSettingsOpen(true) : undefined} toDecide={toDecide} />}
           </div>
         </div>
       </header>
