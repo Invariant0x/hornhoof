@@ -1,11 +1,13 @@
-import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { hostname, tmpdir, uptime } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { buildOf, runNode } from '../src/main.js';
+import { prepareNodeStop } from '../src/lifecycle.js';
 import { ProgramUpdates } from '../src/program-updates.js';
 import { TerminalHost } from '../src/terminal/host.js';
 import { claudeProgram } from '../src/terminal/programs.js';
@@ -58,6 +60,77 @@ const hasTmux = (() => {
     return false;
   }
 })();
+
+describe('reporting the node lifecycle', () => {
+  it('reports a real SIGKILL as an unclean exit with the previous process log after startup', async () => {
+    const server = await fakeServer();
+    const dir = nodeDir(server.url);
+    const start = () => {
+      const child = spawn(process.execPath, ['--import', 'tsx', join(import.meta.dirname, 'fakes', 'run-lifecycle.mjs')], { env: { TASK187_NODE_DIR: dir, PATH: process.env.PATH }, stdio: 'ignore' });
+      onTestFinished(() => { child.kill('SIGKILL'); });
+      return child;
+    };
+    const first = start();
+    await server.wait(() => server.received.some(m => m.type === 'hello'), 6000);
+    const boot = server.received[0]!.boot as { startedAt: string };
+    const ended = once(first, 'exit');
+    first.kill('SIGKILL');
+    await ended;
+    start();
+    await server.wait(() => server.received.filter(m => m.type === 'hello').length === 2, 6000);
+    expect(server.received.findLast(m => m.type === 'hello')).toMatchObject({ restart: { kind: 'unplanned', reason: 'unclean_exit', at: null, startedAt: boot.startedAt, log: expect.stringContaining(`Node started at ${boot.startedAt}.`) } });
+    expect(server.received.filter(m => m.type === 'node.stopping')).toEqual([]);
+  });
+
+  it('reports a completed update before closing, and carries it into the next process hello', async () => {
+    const server = await fakeServer();
+    const dir = nodeDir(server.url);
+    const first = await runNode({ dir, adapter, log: () => {} });
+    onTestFinished(() => first.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    const boot = server.received[0]!.boot as { startedAt: string };
+    prepareNodeStop(dir, 'node_update');
+    first.stop();
+    await server.wait(() => server.received.some(m => m.type === 'node.stopping'));
+    expect(server.received.find(m => m.type === 'node.stopping')).toMatchObject({ startedAt: boot.startedAt, exit: { kind: 'planned', reason: 'node_update' } });
+    const second = await runNode({ dir, adapter, log: () => {} });
+    onTestFinished(() => second.stop());
+    await server.wait(() => server.received.filter(m => m.type === 'hello').length === 2);
+    expect(server.received.findLast(m => m.type === 'hello')).toMatchObject({ restart: { kind: 'planned', reason: 'node_update', startedAt: boot.startedAt, log: expect.stringContaining('Node stopping: node_update.') } });
+  });
+
+  it('sanitizes its own diagnostics before persistence or output and keeps agent output separate', async () => {
+    const server = await fakeServer();
+    const dir = nodeDir(server.url);
+    const logs: string[] = [];
+    const secret = 'opaque-provider-secret-12345';
+    const node = await runNode({ dir, adapter: { ...adapter, secrets: async () => [secret] }, log: line => logs.push(line), install: async () => { throw new Error(`Installer failed with ${secret}, Authorization: Bearer auth-secret-123`); } });
+    onTestFinished(() => node.stop());
+    await server.wait(() => logs.some(line => line.includes('Could not install')));
+    const state = readFileSync(join(dir, 'node-runtime.json'), 'utf8');
+    for (const text of [state, logs.join('\n')]) {
+      expect(text).toContain('Could not install');
+      expect(text).not.toContain(secret);
+      expect(text).not.toContain('auth-secret-123');
+    }
+    expect(state).not.toContain('sess-9');
+  });
+
+  it('sends the current log on a socket reconnect without claiming that the process ended', async () => {
+    const server = await fakeServer();
+    const node = await runNode({ dir: nodeDir(server.url), adapter, log: () => {} });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    const before = server.received[0]!;
+    server.drop();
+    await server.wait(() => server.received.filter(m => m.type === 'hello').length === 2, 6000);
+    const after = server.received.findLast(m => m.type === 'hello')!;
+    expect(after.boot).toEqual(before.boot);
+    expect(after.restart).toMatchObject({ kind: 'unknown', reason: 'unknown' });
+    expect(after.nodeLog).toContain('Connection closed');
+    expect(server.received.filter(m => m.type === 'node.stopping')).toEqual([]);
+  });
+});
 
 describe('reporting managed programs', () => {
   it('reports startup and explicit updates without stopping an active job, and coalesces requests', async () => {

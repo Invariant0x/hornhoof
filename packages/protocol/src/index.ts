@@ -1,4 +1,7 @@
 import { z } from 'zod';
+import { NodeExit, NodeLog } from './node-exit.js';
+
+export { NODE_LOG_BYTES, NODE_LOG_LINES, NodeExit, NodeLog, NodeStopReason } from './node-exit.js';
 
 /* Messages between the Hornhoof server and its nodes, one JSON object per WebSocket frame. */
 
@@ -356,7 +359,10 @@ const NodeMessage = z.discriminatedUnion('type', [
     /* The node build CI wrote into the node's image, the last commit that changed its files; none from a node built by
        hand or from before. One that is not a commit is left out rather than the hello refused. */
     build: NodeBuild.optional().catch(undefined),
+    restart: NodeExit.optional(),
+    nodeLog: NodeLog.optional(),
   }),
+  z.object({ type: z.literal('node.stopping'), startedAt: z.iso.datetime(), exit: NodeExit }),
   z.object({ type: z.literal('load'), ...Load.shape }),
   z.object({ type: z.literal('tests.started'), partId: z.string() }),
   /* exitCode: the command's, none when it never ran or was killed. commit: what the clone tested. */

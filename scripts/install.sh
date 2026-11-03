@@ -377,6 +377,11 @@ host_env() {
 }
 
 STARTED=''
+prepare_node_stop() {
+  local name=$1 reason=$2
+  "${DOCKER[@]}" exec "$name" node "$NODE_MAIN" prepare-stop "$reason" > /dev/null 2>&1 || true
+  "${DOCKER[@]}" stop --time 5 "$name" > /dev/null 2>&1 || true
+}
 # What a failed start tells the person. Once the join used the code, running it again only gets a 410.
 RETRY='Run this command again.'
 # start_node <name> <id> <provider> [key]: the key goes into the node's volume through stdin, never on a command line.
@@ -389,6 +394,7 @@ start_node() {
   fi
   say "Starting $name."
   host_env
+  prepare_node_stop "$name" "${5:-node_update}"
   "${DOCKER[@]}" rm -f "$name" > /dev/null 2>&1 || true
   # shellcheck disable=SC2086 # the two --add-host words appear only for a server on localhost
   # Root inside the container only: the node runs its agents as a user of their own, keeps its key and programs from
@@ -743,7 +749,7 @@ sweep_nodes() {
       provider=${provider%-*}
       LOCAL_SERVER=''
       node_server
-      start_node "$name" "$id" "$provider"
+      start_node "$name" "$id" "$provider" '' hornhoof_update
     done
   done
 }
@@ -760,12 +766,20 @@ node_unchanged() {
 }
 
 # Starts the compose stack, leaving the built-in node and this server's plan nodes running when the node image is unchanged.
+prepare_builtin_stop() {
+  local cid
+  cid=$(cd "$SERVER_DIR" && "$@" ps -q node 2> /dev/null) || true
+  [ -n "$cid" ] || return 0
+  prepare_node_stop "$cid" hornhoof_update
+}
+
 start_server_services() {
   if [ -n "$FROM_UPDATER" ]; then
     say "Starting Hornhoof ${PIN:-latest}."
     if node_unchanged "$@"; then
       (cd "$SERVER_DIR" && "$@" up -d --no-build db app tunnel) || fail "Hornhoof did not start."
     else
+      prepare_builtin_stop "$@"
       (cd "$SERVER_DIR" && "$@" up -d --no-build db app node tunnel) || fail "Hornhoof did not start."
       sweep_nodes "$@"
     fi
@@ -775,6 +789,7 @@ start_server_services() {
   if node_unchanged "$@"; then
     (cd "$SERVER_DIR" && "$@" up -d --no-build db app tunnel updater) || fail "Hornhoof did not start. Run docker compose logs in $SERVER_DIR to see why."
   else
+    prepare_builtin_stop "$@"
     (cd "$SERVER_DIR" && "$@" up -d --no-build) || fail "Hornhoof did not start. Run docker compose logs in $SERVER_DIR to see why."
   fi
 }

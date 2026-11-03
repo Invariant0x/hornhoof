@@ -65,6 +65,28 @@ function install({ args = ['--join', CODE], omit = [], env = {}, tty = 'typed-an
 const indexOf = (calls: string[], start: string) => calls.findIndex(c => c.startsWith(start));
 
 describe('install.sh', () => {
+  it('records an update intent and stops an old node gracefully before replacing it', () => {
+    const name = 'hornhoof-claude-1c07dac4';
+    const r = install({ args: [], env: { STUB_CONTAINERS: `${name}=${SERVER}` } });
+    expect(r.code).toBe(0);
+    const steps = [
+      `docker exec ${name} node /app/apps/node/dist/main.js prepare-stop node_update`,
+      `docker stop --time 5 ${name}`,
+      `docker rm -f ${name}`,
+      'docker run -d',
+    ].map(prefix => indexOf(r.calls, prefix));
+    expect(steps.every(index => index >= 0)).toBe(true);
+    expect([...steps].sort((a, b) => a - b)).toEqual(steps);
+  });
+
+  it('still replaces a legacy node which cannot record the new stop intent', () => {
+    const name = 'hornhoof-claude-1c07dac4';
+    const r = install({ args: [], env: { STUB_CONTAINERS: `${name}=${SERVER}`, STUB_STOP_INTENT: 'unsupported' } });
+    expect(r.code).toBe(0);
+    expect(r.calls).toContain(`docker stop --time 5 ${name}`);
+    expect(r.calls.some(call => call.startsWith('docker run -d'))).toBe(true);
+  });
+
   it('passes bash -n', () => {
     expect(spawnSync('bash', ['-n', SCRIPT]).status).toBe(0);
   });
@@ -797,6 +819,11 @@ describe('install.sh', () => {
     });
     expect(changed.code).toBe(0);
     expect(changed.calls).toContain('docker compose up -d --no-build');
+    const intent = indexOf(changed.calls, 'docker exec nodecid node /app/apps/node/dist/main.js prepare-stop hornhoof_update');
+    const stopped = indexOf(changed.calls, 'docker stop --time 5 nodecid');
+    expect(intent).toBeGreaterThanOrEqual(0);
+    expect(stopped).toBeGreaterThan(intent);
+    expect(indexOf(changed.calls, 'docker compose up -d --no-build')).toBeGreaterThan(stopped);
   });
 
   it('refuses a server name it cannot use as a folder', () => {

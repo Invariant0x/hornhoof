@@ -44,6 +44,7 @@ case "$1" in
     WORD=set-key; if has "$@"; then IFS= read -r line; printf 'stdin %s\n' "$line" >> "$STUB_LOG"; fi
     WORD=-d; if has "$@"; then [ "${STUB_RUN:-ok}" = fail ] && { echo "docker: Error response from daemon: port is already allocated" >&2; exit 1; }; echo "0123456789ab"; fi ;;
   exec)
+    WORD=prepare-stop; if has "$@"; then [ "${STUB_STOP_INTENT:-}" = unsupported ] && exit 1; exit 0; fi
     # STUB_NODE_SERVERS words are "name=server", the server a node's own settings name.
     WORD=/data/node.json; if has "$@"; then
       for n in ${STUB_NODE_SERVERS:-}; do WORD=${n%%=*}; if has "$@"; then printf '{\n  "server": "%s",\n  "provider": "kimi"\n}\n' "${n#*=}"; exit 0; fi; done

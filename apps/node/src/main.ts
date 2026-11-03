@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:
 import { hostname, uptime } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { LOAD_MS, NodeBuild, type AgentEvent, type CredKind, type Limits, type NodeLoad, type NodeMessage, type ProviderId, type ServerMessage } from '@hornhoof/protocol';
+import { LOAD_MS, NodeBuild, type AgentEvent, type CredKind, type Limits, type NodeLoad, type NodeMessage, type NodeStopReason, type ProviderId, type ServerMessage } from '@hornhoof/protocol';
 import { SIGNIN_ERRORS } from '@hornhoof/protocol/signin';
 import { agentFs, ownFs, type AgentFs } from './agent-fs.js';
 import { bootFacts } from './boot.js';
@@ -30,6 +30,8 @@ import { Tmux } from './terminal/tmux.js';
 import { procOwner, type OwnerFactory } from './terminal/peer.js';
 import { macOwner, type Command } from './terminal/mac-peer.js';
 import { ProgramUpdates, readInstalledVersion } from './program-updates.js';
+import { nodeLifecycle, stopNode } from './lifecycle.js';
+import { lifecycleCommand } from './lifecycle-command.js';
 
 export const VERSION: string = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
@@ -105,9 +107,9 @@ function merged(known: Limits | null, news: Limits): Limits {
 }
 
 /* The node's life: stay connected, run jobs, report the sign-in state and the limits, clean up when removed. */
-export async function runNode({ dir, adapter, builtin, terminal, login: loginSetup, log = console.log, loginCheckMs = LOGIN_CHECK_MS, learnMs = LEARN_MS, limitsMs = LIMITS_MS, loadMs = LOAD_MS, leaseCheckMs = LEASE_CHECK_MS, install, programs = new ProgramUpdates([]), testUser = null, runPart = runTests, build }: RunOptions): Promise<{ stop(): void }> {
+export async function runNode({ dir, adapter, builtin, terminal, login: loginSetup, log: writeLog = console.log, loginCheckMs = LOGIN_CHECK_MS, learnMs = LEARN_MS, limitsMs = LIMITS_MS, loadMs = LOAD_MS, leaseCheckMs = LEASE_CHECK_MS, install, programs = new ProgramUpdates([]), testUser = null, runPart = runTests, build }: RunOptions): Promise<{ stop(reason?: NodeStopReason): void }> {
   if (!builtin && isRemoved(dir)) {
-    log('This node was removed in Hornhoof.');
+    writeLog('This node was removed in Hornhoof.');
     return { stop() {} };
   }
   /* How this node came up, the same in every hello of this run: Hornhoof tells from it why the turns it ran are gone. */
@@ -121,6 +123,9 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   const credUser = (typeof adapter === 'function' ? null : adapter.owner?.user) ?? null;
   /* The node's own keys never leave in a job's output. */
   const hidden = [state.key, keyPair.identity];
+  const known = new Set(hidden);
+  const life = nodeLifecycle({ dir, startedAt: boot.startedAt, secrets: () => [...known], write: writeLog });
+  const log = life.log;
   const toolsUrl = `${state.server}/mcp`;
   /* The task's files a part of work takes in and puts back. */
   const files = partFiles(state.server, state.key);
@@ -173,11 +178,11 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     if (unconfirmedTests.size > MAX_UNCONFIRMED) unconfirmedTests.delete(unconfirmedTests.keys().next().value!);
   };
   /* Values no screen shows: the node's key, the programs' tokens and each turn's tokens. */
-  const known = new Set(hidden);
   const learn = async (more: (string | null | undefined)[] = []) => {
     for (const s of more) if (s) known.add(s);
     for (const s of await (single?.secrets() ?? Promise.resolve([])).catch(() => [])) known.add(s);
   };
+  await learn();
   /* A screen nobody receives is not worth keeping; everything else waits for the connection like any message. */
   const host = terminal
     ? new TerminalHost({
@@ -234,6 +239,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   const conn = connect({
     url: state.server.replace(/^http/, 'ws') + '/api/nodes/socket',
     key: state.key,
+    log,
     onOpen(next) {
       send = next;
       host?.closeViews();
@@ -241,7 +247,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       /* Finished jobs Hornhoof has not confirmed still count as running, so the server does not give up on them. */
       const typed = host?.typedJobs() ?? [];
       const tests = [...testing.keys(), ...unconfirmedTests.keys()];
-      next({ type: 'hello', version: VERSION, loggedIn, running: [...running.keys(), ...typed, ...unconfirmed.keys()], ...(models ? { models } : {}), terminals: Boolean(host), work: Boolean(testUser), ...(testUser ? {} : { noRuns: NO_RUNS }), load: load(), tests, skillFiles: true, publicKey: keyPair.recipient, account, boot, programs: programs.snapshot(), build });
+      next({ type: 'hello', version: VERSION, loggedIn, running: [...running.keys(), ...typed, ...unconfirmed.keys()], ...(models ? { models } : {}), terminals: Boolean(host), work: Boolean(testUser), ...(testUser ? {} : { noRuns: NO_RUNS }), load: load(), tests, skillFiles: true, publicKey: keyPair.recipient, account, boot, programs: programs.snapshot(), build, restart: life.previous, nodeLog: life.tail() });
       for (const m of outbox.splice(0)) emit(m);
       for (const m of unconfirmed.values()) next(m);
       for (const m of unconfirmedTests.values()) next(m);
@@ -495,7 +501,8 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   const reporting = setInterval(() => void send?.({ type: 'load', ...load() }), loadMs);
   reporting.unref();
 
-  function stop() {
+  function stop(reason: NodeStopReason = 'stopped') {
+    stopNode(life, send, boot.startedAt, reason);
     stopped = true;
     clearInterval(timer);
     if (learning) clearInterval(learning);
@@ -758,7 +765,7 @@ function isEntry(): boolean {
 }
 
 if (isEntry()) {
-  void command(process.argv.slice(2), process).then(res => {
+  void Promise.resolve(lifecycleCommand(process.argv.slice(2)) ?? command(process.argv.slice(2), process)).then(res => {
     if (typeof res === 'number') process.exit(res);
     /* Stay up, also after a removal, until Docker stops the container. */
     setInterval(() => {}, 1 << 30);
