@@ -140,6 +140,7 @@ export class LoginTerminal {
 
   /* Every sign-in runs in an empty folder, so a fresh one needs nothing more: the browser picks the account. A second
      start replaces the running sign-in. */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- every sign-in already starts in an empty folder
   start(_fresh: boolean): Promise<void> {
     const run = ++this.run;
     this.active = true;
