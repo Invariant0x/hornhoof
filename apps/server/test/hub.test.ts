@@ -50,6 +50,17 @@ describe('the node hub', () => {
     expect(hub.awaySince(node)).toBeNull();
     hub.stop();
   });
+
+  it('keeps the build a node said in its hello, and says none for a node it does not know', () => {
+    const hub = new NodeHub({ pingMs: 60_000, onClose: async () => {}, onMessage: async () => {} });
+    const node = { kind: 'node' as const, nodeId: 'n1' };
+    hub.attach(node, Object.assign(new EventEmitter(), { readyState: 1, close() {}, ping() {} }) as unknown as WebSocket);
+    expect(hub.buildOf(node)).toBeNull();
+    hub.greet(node, true, true, false, null, 'c0ffee'.padEnd(40, '0'));
+    expect(hub.buildOf(node)).toBe('c0ffee'.padEnd(40, '0'));
+    expect(hub.buildOf({ kind: 'node', nodeId: 'n2' })).toBeNull();
+    hub.stop();
+  });
 });
 
 

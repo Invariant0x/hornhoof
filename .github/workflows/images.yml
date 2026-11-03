@@ -36,7 +36,7 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: bash -n scripts/install.sh
-      - run: shellcheck scripts/install.sh
+      - run: shellcheck scripts/install.sh scripts/node-build.sh
 
   images:
     needs: test
@@ -56,12 +56,17 @@ jobs:
             file: apps/updater/Dockerfile
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # The product version, the commit's title and how many database migrations the build carries.
+        with:
+          fetch-depth: 0
+      # The product version, the commit's title, how many database migrations the build carries, and the node build:
+      # the last commit that changed the node image's files, which needs the whole history checked out above.
       - id: build
         run: |
           echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
           echo "title=$(git log -1 --format=%s | tr -d '\r"')" >> "$GITHUB_OUTPUT"
           echo "migrations=$(ls apps/server/drizzle/*.sql | wc -l | tr -d ' ')" >> "$GITHUB_OUTPUT"
+          node=$(bash scripts/node-build.sh)
+          echo "node=$node" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
@@ -88,6 +93,7 @@ jobs:
           build-args: |
             ${{ matrix.name == 'hornhoof' && format('HORNHOOF_VERSION={0}', steps.build.outputs.version) || '' }}
             ${{ matrix.name == 'hornhoof' && format('HORNHOOF_COMMIT={0}', github.sha) || '' }}
+            ${{ matrix.name != 'hornhoof-updater' && format('HORNHOOF_NODE_BUILD={0}', steps.build.outputs.node) || '' }}
             ${{ matrix.name == 'hornhoof-node' && 'SOURCE_DATE_EPOCH=315532800' || '' }}
           outputs: ${{ matrix.name == 'hornhoof-node' && 'type=registry,rewrite-timestamp=true' || '' }}
           provenance: ${{ matrix.name != 'hornhoof-node' }}

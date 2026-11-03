@@ -92,18 +92,22 @@ export type ErrorReason =
   | 'link_reserved'
   | 'link_invalid';
 
+/* details: what the web shows with the reason's words, such as the machines it names and a command to run there. */
 export class ApiError extends Error {
   constructor(
     readonly status: number,
     readonly code: ErrorCode,
     message: string,
     readonly reason?: ErrorReason,
+    readonly details?: Record<string, unknown>,
   ) {
     super(message);
   }
 }
 
-const body = (code: ErrorCode, message: string, reason?: ErrorReason) => ({ error: reason ? { code, message, reason } : { code, message } });
+const body = (code: ErrorCode, message: string, reason?: ErrorReason, details?: Record<string, unknown>) => ({
+  error: { code, message, ...(reason ? { reason } : {}), ...(details ? { details } : {}) },
+});
 
 /* user:password@ in an address, as in a database URL. */
 const PASSWORD = /(\/\/[^\s:@/]+):[^\s@/]+@/g;
@@ -130,7 +134,7 @@ export type Fallback = (req: FastifyRequest, reply: FastifyReply) => FastifyRepl
 
 export function registerErrorHandling(app: FastifyInstance, fallback?: Fallback): void {
   app.setErrorHandler((err: FastifyError | Error, req, reply) => {
-    if (err instanceof ApiError) return reply.status(err.status).send(body(err.code, err.message, err.reason));
+    if (err instanceof ApiError) return reply.status(err.status).send(body(err.code, err.message, err.reason, err.details));
     if (err instanceof ZodError) {
       const first = err.issues[0];
       const where = first?.path.length ? first.path.join('.') + ': ' : '';

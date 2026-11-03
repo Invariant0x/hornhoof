@@ -137,7 +137,7 @@ function machineRows(machines: MachineView[], builtin: BuiltinView | null, subs:
 function machineColumns(t: Messages, language: Language): TableColumn<MachineRow>[] {
   const load = (m: MachineRow) => m.online && m.load ? busyShare(m.load.load, m.load.cpus) : null;
   return [
-    { key: 'name', label: t.tables.machine, direction: 1, value: m => m.hostname, cell: m => <><span className="nm"><b>{m.hostname}</b></span>{m.server && <Leader />}</> },
+    { key: 'name', label: t.tables.machine, direction: 1, value: m => m.hostname, cell: m => <><span className="nm"><b>{m.hostname}</b></span>{m.server && <Leader />}<OtherBuild row={m} /></> },
     { key: 'owner', label: t.machines.owner, direction: 1, value: m => m.owner?.name ?? null, cell: m => m.owner?.name },
     { key: 'status', label: t.tables.status, direction: 1, value: m => m.online ? 0 : 1, className: 'k-status', cell: m => m.online ? <span className="status ready">{t.machines.online}</span> : <span className="muted">{lastSeen(t, language, m.lastSeenAt)}</span> },
     { key: 'load', label: t.machines.load, direction: -1, value: load, cell: m => load(m) === null ? t.machines.unknown : <span className="cell-load"><Bar used={load(m)! / 100} /><b>{load(m)}%</b></span> },
@@ -165,6 +165,24 @@ function machineSearch(t: Messages, language: Language, subs: SubView[], row: Ma
 function Leader() {
   const t = useT();
   return <span className="badge lead" title={t.machines.leaderAbout}>{t.machines.leader}</span>;
+}
+
+/* Why a machine's nodes are not the server's build: their builds, by the short commit, and the server's. */
+function buildNote(t: Messages, other: NonNullable<MachineView['otherBuild']>): string {
+  const short = (build: string | null) => build?.slice(0, 7) ?? t.machines.olderBuild;
+  return t.machines.otherBuildNote(other.nodes.map(short).join(', '), short(other.server));
+}
+
+/* The mark of a machine whose nodes are not the server's build, in its row and its card. */
+function OtherBuild({ row }: { row: MachineRow }) {
+  const t = useT();
+  return row.otherBuild ? <span className="badge old" title={buildNote(t, row.otherBuild)}>{t.machines.otherBuild}</span> : null;
+}
+
+/* The same in words in its card, for a screen with no pointer to show the mark's title. */
+function BuildNote({ row }: { row: MachineRow }) {
+  const t = useT();
+  return row.otherBuild ? <p className="machine-note">{buildNote(t, row.otherBuild)}</p> : null;
 }
 
 type MachineControls = {
@@ -234,13 +252,14 @@ function MachineDetails({ row, subs, me, now, controls }: { row: MachineRow; sub
   const picking = controls.picking === row.id;
   return (
     <CardFrame label={row.hostname} accent={row.server}
-      head={<CardHead mark={<MachineMark />} name={row.hostname} badges={row.server && <Leader />} state={<span className={`status ${row.online ? 'ready' : 'offline'}`}>{row.online ? t.machines.online : t.cards.offline}</span>} line={!row.online && lastSeen(t, language, row.lastSeenAt)} />}
+      head={<CardHead mark={<MachineMark />} name={row.hostname} badges={<>{row.server && <Leader />}<OtherBuild row={row} /></>} state={<span className={`status ${row.online ? 'ready' : 'offline'}`}>{row.online ? t.machines.online : t.cards.offline}</span>} line={!row.online && lastSeen(t, language, row.lastSeenAt)} />}
       extra={m && <PlanPicker machine={m} addable={addable} shown={shown} picking={picking} controls={controls} />}>
       <section className="blk blk-facts">
         <h4>{t.cards.aboutMachine}</h4>
         <Part title={t.cards.resources}>
           <Resources row={row} />
           {row.server && <p className="machine-note">{m ? t.machines.builtinHere : t.machines.builtinAbout}</p>}
+          <BuildNote row={row} />
         </Part>
         {m && <Part title={t.cards.ownerSystem}><Facts items={[[t.machines.owner, m.owner.name], [t.machines.system, `${SYSTEMS[m.os] ?? m.os}, ${m.arch}`]]} /></Part>}
         {m && row.server && <Part title={t.cards.priority}><p className="server-priority"><b>1</b><span>{t.cards.serverHere}</span></p></Part>}

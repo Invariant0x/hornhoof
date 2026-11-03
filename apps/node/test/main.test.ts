@@ -5,7 +5,7 @@ import { hostname, tmpdir, uptime } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { runNode } from '../src/main.js';
+import { buildOf, runNode } from '../src/main.js';
 import { ProgramUpdates } from '../src/program-updates.js';
 import { TerminalHost } from '../src/terminal/host.js';
 import { claudeProgram } from '../src/terminal/programs.js';
@@ -272,6 +272,31 @@ describe('a node that runs agents in terminals', () => {
     onTestFinished(() => node.stop());
     await server.wait(() => server.received.some(m => m.type === 'hello'));
     expect(server.received[0]).toMatchObject({ type: 'hello', skillFiles: true });
+  });
+
+  it('says the build CI wrote into its image, so Hornhoof can tell a node of another build', async () => {
+    const build = 'c0ffee'.padEnd(40, '0');
+    const server = await fakeServer();
+    const node = await runNode({ dir: nodeDir(server.url), adapter, log: () => {}, build });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    expect(server.received[0]).toMatchObject({ type: 'hello', build });
+  });
+
+  it('says no build when it was given none, as a node built by hand', async () => {
+    const server = await fakeServer();
+    const node = await runNode({ dir: nodeDir(server.url), adapter, log: () => {} });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    expect(server.received[0]).not.toHaveProperty('build');
+  });
+
+  it('takes its build from HORNHOOF_NODE_BUILD only when it is a commit', () => {
+    const commit = 'c0ffee'.padEnd(40, '0');
+    expect(buildOf({ HORNHOOF_NODE_BUILD: commit })).toBe(commit);
+    expect(buildOf({ HORNHOOF_NODE_BUILD: 'local' })).toBeUndefined();
+    expect(buildOf({ HORNHOOF_NODE_BUILD: '' })).toBeUndefined();
+    expect(buildOf({})).toBeUndefined();
   });
 
   it('ends a view it cannot show when it runs no terminals', async () => {

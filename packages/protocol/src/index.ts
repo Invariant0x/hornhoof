@@ -322,6 +322,8 @@ const MAX_ENVELOPES = 20;
    compares it with what the node said before to tell why turns it ran are gone. */
 export const Boot = z.object({ startedAt: z.iso.datetime(), machineUpAt: z.iso.datetime(), container: z.string().min(1).max(200) });
 export type Boot = z.infer<typeof Boot>;
+/* A node build: the commit, in full, of the last change to the files of the node's image. */
+export const NodeBuild = z.string().regex(/^[0-9a-f]{40}([0-9a-f]{24})?$/);
 
 /* How an agent's program ended: its exit code, or the signal that ended it, by name, such as SIGTERM. */
 export const ProgramExit = z.object({ code: z.number().int().nullable(), signal: z.string().max(40).nullable() });
@@ -351,6 +353,9 @@ const NodeMessage = z.discriminatedUnion('type', [
     account: Account.nullable().optional(),
     boot: Boot.optional(),
     programs: Programs.optional(),
+    /* The node build CI wrote into the node's image, the last commit that changed its files; none from a node built by
+       hand or from before. One that is not a commit is left out rather than the hello refused. */
+    build: NodeBuild.optional().catch(undefined),
   }),
   z.object({ type: z.literal('load'), ...Load.shape }),
   z.object({ type: z.literal('tests.started'), partId: z.string() }),
