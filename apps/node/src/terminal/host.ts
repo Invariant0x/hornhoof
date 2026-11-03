@@ -90,6 +90,7 @@ type Agent = {
   /* Sessions a person cleared in the running program: a turn asking for one goes on in the session that replaced it. */
   cleared: Set<string>;
   tail: LineTail | null;
+  draining: boolean;
   /* The Codex session logs there were when the program started a new session: its own log is none of them. */
   oldLogs: Set<string> | null;
   startedAt: number;
@@ -356,7 +357,7 @@ export class TerminalHost {
   private agent(key: string): Agent {
     let a = this.agents.get(key);
     if (!a) {
-      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, viewers: 0, up: false, watch: null, saying: Promise.resolve(), waitingWords: [], enqueuedWords: [], unheardTimers: new Map(), dequeued: false, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null, calls: new Map(), closedCalls: new Set(), question: null, ends: new TurnEnds(), signAt: 0, retry: null, apiError: null, restarting: false, launch: null, programTurnId: undefined };
+      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, draining: false, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, viewers: 0, up: false, watch: null, saying: Promise.resolve(), waitingWords: [], enqueuedWords: [], unheardTimers: new Map(), dequeued: false, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null, calls: new Map(), closedCalls: new Set(), question: null, ends: new TurnEnds(), signAt: 0, retry: null, apiError: null, restarting: false, launch: null, programTurnId: undefined };
       this.agents.set(key, a);
     }
     return a;
@@ -671,7 +672,11 @@ export class TerminalHost {
      named its session, whose log the host finds once Kimi writes it; or Antigravity named its conversation. */
   private follow(a: Agent, sessionId: string): void {
     if (!sessionId || sessionId === a.sessionId) return;
-    if (a.sessionId) a.cleared.add(a.sessionId);
+    if (a.sessionId) {
+      this.drain(a);
+      this.reportUnheard(a, true);
+      a.cleared.add(a.sessionId);
+    }
     a.sessionId = sessionId;
     a.enqueuedWords = [];
     a.dequeued = false;
@@ -841,7 +846,17 @@ export class TerminalHost {
 
   /* What the program wrote to its log since last time: events for the turn, Codex's limits, session and turn end. */
   private drain(a: Agent): void {
-    if (a.restarting) return;
+    if (a.restarting || a.draining) return;
+    a.draining = true;
+    try {
+      this.readLog(a);
+    } finally {
+      a.draining = false;
+    }
+    this.reportUnheard(a);
+  }
+
+  private readLog(a: Agent): void {
     if (!a.tail && a.program?.kind === 'codex') {
       const found = findRollout(a.home, a.workDir, a.startedAt - 2000, null, a.oldLogs ?? undefined);
       if (found) {
@@ -911,7 +926,6 @@ export class TerminalHost {
       else if (news.aborted) this.interrupted(a, id);
       else if (news.ended) this.endTurn(a, { status: 'done', message: news.ended.message }, id);
     }
-    this.reportUnheard(a);
   }
 
   private receivedWords(a: Agent, line: Record<string, unknown>): void {
@@ -945,7 +959,6 @@ export class TerminalHost {
     const timer = setTimeout(() => {
       a.unheardTimers.delete(words);
       this.drain(a);
-      this.reportUnheard(a);
     }, UNHEARD_MS);
     timer.unref();
     a.unheardTimers.set(words, timer);
@@ -1050,7 +1063,11 @@ export class TerminalHost {
         return this.interrupted(a, typeof data.turn_id === 'string' ? data.turn_id : undefined);
       case 'end':
         this.drain(a);
-        if (data.reason === 'clear') { a.enqueuedWords = []; a.dequeued = false; }
+        if (data.reason === 'clear') {
+          this.reportUnheard(a, true);
+          a.enqueuedWords = [];
+          a.dequeued = false;
+        }
         if (await this.opts.tmux.alive(a.name)) {
           if (data.reason === 'clear' && this.stoppable(a)) this.interrupted(a);
           return;

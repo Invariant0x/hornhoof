@@ -190,6 +190,36 @@ describe('program receipts for live words', () => {
     expect(c.unheard()).toEqual([{ type: 'agent.unheard', agentKey: 'receipt', jobId: 'job-receipt', text: 'Words A.' }]);
   });
 
+  it.each(['clear', 'session change'])('settles old Claude words at %s before absorbing identical new words', async change => {
+    const c = await atWork('claude', 'queued');
+    expect(await c.host.say('receipt', TEXT)).toBe(true);
+    const session = 'b3b66b04-872b-4fbe-a3a4-058a026ef20a';
+    const file = claudeTranscript(c.home, c.workDir, session);
+    const record = (line: object) => appendFileSync(file, JSON.stringify(line) + '\n');
+    record({ type: 'metadata' });
+    if (change === 'clear') await c.host['hook']('receipt', 'end', { reason: 'clear' });
+    else await c.host['hook']('receipt', 'stop', { last_assistant_message: '' });
+    const afterEnd = c.unheard();
+    await c.host['hook']('receipt', 'start', { session_id: session, source: change });
+    const afterChange = c.unheard();
+    await c.running;
+    const prompt = c.host['hook']('receipt', 'prompt', { prompt: 'New session question.' });
+    await until(() => c.sent.some(m => m.type === 'turn.open'));
+    c.host.opened({ type: 'turn.opened', agentKey: 'receipt', jobId: 'new-session', toolToken: 'token' });
+    await prompt;
+    c.keys.mockImplementation(async () => { record(claudeQueue('enqueue', TEXT)); });
+    expect(await c.host.say('receipt', TEXT)).toBe(true);
+    record(claudeQueue('remove', TEXT, { reason: 'absorbed_mid_turn' }));
+    c.drain();
+    await c.host['hook']('receipt', 'stop', { last_assistant_message: '' });
+    await until(() => c.sent.some(m => m.type === 'job.done' && m.jobId === 'new-session'));
+    c.expire(); c.drain();
+    const unheard = [{ type: 'agent.unheard', agentKey: 'receipt', jobId: 'job-receipt', text: TEXT }];
+    expect(c.unheard()).toEqual(unheard);
+    expect(afterChange).toEqual(unheard);
+    expect(afterEnd).toEqual(change === 'clear' ? unheard : []);
+  });
+
   it.each(['claude', 'codex'] as const)('reports %s unheard words on time with no watcher, log line or Enter', async kind => {
     const c = await atWork(kind, kind === 'claude' ? 'queued' : 'silent');
     expect(await c.host.say('receipt', TEXT)).toBe(true);
@@ -269,6 +299,33 @@ describe('program receipts for live words', () => {
     c.record(claudeQueue('remove', TEXT, { reason: 'absorbed_mid_turn' }));
     c.expire();
     expect(c.unheard()).toEqual([]);
+  });
+
+  it('reads the whole Claude receipt batch at expiry when a human turn ends first', async () => {
+    const c = await atWork('claude', 'queued');
+    expect(await c.host.say('receipt', TEXT)).toBe(true);
+    c.host['unwatch'](c.host['agents'].get('receipt')!);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    try {
+      c.finish();
+      await vi.advanceTimersByTimeAsync(100);
+      await c.running;
+      const prompt = c.host['hook']('receipt', 'prompt', { prompt: 'A separate question.' });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(c.sent.filter(m => m.type === 'turn.open')).toHaveLength(1);
+      c.host.opened({ type: 'turn.opened', agentKey: 'receipt', jobId: 'human', toolToken: 'token' });
+      await prompt;
+      c.host['unwatch'](c.host['agents'].get('receipt')!);
+      c.record({ type: 'system', subtype: 'turn_duration', durationMs: 1 });
+      c.record(claudeQueue('remove', TEXT, { reason: 'absorbed_mid_turn' }));
+      await vi.advanceTimersByTimeAsync(UNHEARD_MS - 101);
+      expect(c.unheard()).toEqual([]);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(c.unheard()).toEqual([]);
+      expect(c.sent.filter(m => m.type === 'job.done' && m.jobId === 'human')).toEqual([expect.objectContaining({ ok: true })]);
+      await vi.advanceTimersByTimeAsync(UNHEARD_MS);
+      expect(c.unheard()).toEqual([]);
+    } finally { vi.useRealTimers(); }
   });
 
   it.each(['Words for the human turn.', TEXT])('takes a delayed Claude receipt once, leaving later words: %s', async text => {
