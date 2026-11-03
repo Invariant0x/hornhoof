@@ -5,7 +5,10 @@ import { agentState, liveSubscription } from '../conversation/queue.js';
 import { identityOf } from '../nodes/hub.js';
 import { failOpenJobs } from '../nodes/messages.js';
 import { CLOSED, gateVerdicts, giver, lastMove, openAfter, reviewWake, stuckAtGate, type Task, type Wake } from './engine.js';
+import { checkSilentTurns, SILENT_TURN_MS } from './silent.js';
 import { wakeAll } from './wake.js';
+
+export { checkSilentTurns, SILENT_TURN_MS };
 
 const MACHINE_AWAY_MS = 5 * 60_000;
 const LOST_WAKE_MS = 2 * 60_000;
@@ -97,6 +100,7 @@ export async function reconcile(ctx: Ctx, now = new Date()): Promise<void> {
   try {
     await failAwayTurns(ctx, now);
     await wakeMissing(ctx, now);
+    await checkSilentTurns(ctx, now);
   } finally {
     reconciling.delete(ctx);
   }

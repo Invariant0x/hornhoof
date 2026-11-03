@@ -1,9 +1,12 @@
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, asc, eq, isNull } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
-import { agentChanges, agentEvents, agents, departments, jobs, tasks } from '../src/db/schema.js';
+import { agentChanges, agentEvents, agents, departments, jobs, taskEvents, tasks } from '../src/db/schema.js';
 import { minuteRound, timerTick } from '../src/modules/agents/timers.js';
-import { agentState, insertTurn, onAgent } from '../src/modules/conversation/queue.js';
+import { agentState, enqueueTurn, insertTurn, onAgent } from '../src/modules/conversation/queue.js';
+import { BUILTIN } from '../src/modules/nodes/hub.js';
+import { handleNodeMessage } from '../src/modules/nodes/messages.js';
+import { submit } from '../src/modules/tasks/engine.js';
 import { as, connectNode, listen, setUpCompany, testApp, until } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
@@ -149,5 +152,409 @@ describe('timers', () => {
     await patch(app, ceo, wandaId, { on: true, subscription: null });
     expect(await timerTick(app.ctx, later)).toBe(0);
     expect(await db.select().from(jobs).where(eq(jobs.agentId, wandaId))).toHaveLength(0);
+  });
+
+  it('at 10 minutes of silence asks the node what the turn is doing, closes a turn waiting at its prompt as lost_ending with its last answer (done or failed by doneIfRecorded), logs it, and sends queued messages at once', async () => {
+    const { app, db, ceo, wandaId, orchestrator } = await company();
+    const [dev] = await db.insert(departments).values({ companyId: orchestrator.companyId, templateKey: 'development', roleCode: 'DEV' }).returning();
+    await db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.agentId, orchestrator.id));
+    const [bruno] = await db
+      .insert(agents)
+      .values({ companyId: orchestrator.companyId, kind: 'worker', name: 'Bruno', roleKey: 'DEV-BE', departmentId: dev!.id, model: '', subscriptionId: orchestrator.subscriptionId })
+      .returning();
+    const [task] = await db
+      .insert(tasks)
+      .values({ companyId: orchestrator.companyId, number: 1, title: 'Checkout API', status: 'working', departmentId: dev!.id, assigneeAgentId: bruno!.id, executorAgentId: bruno!.id })
+      .returning();
+    const startedAt = new Date();
+    const at = (minutes: number) => new Date(startedAt.getTime() + minutes * MIN);
+    const [turn] = await db
+      .insert(jobs)
+      .values({
+        companyId: orchestrator.companyId,
+        subscriptionId: orchestrator.subscriptionId!,
+        agentId: bruno!.id,
+        taskId: task!.id,
+        kind: 'conversation',
+        prompt: 'Build POST /checkout.',
+        timeoutMs: 900_000,
+        status: 'running',
+        startedAt,
+      })
+      .returning();
+    /* Bruno recorded his submission and emitted his final answer at +2m, then his hook was lost while waiting at prompt. */
+    await submit(app.ctx, bruno!.id, task!.id, { summary: 'POST /checkout works.', evidence: 'npm test: 4 passed' });
+    await db.insert(agentEvents).values({
+      companyId: orchestrator.companyId,
+      agentId: bruno!.id,
+      jobId: turn!.id,
+      kind: 'text',
+      data: { kind: 'text', text: 'All tests pass and the branch is pushed.' },
+      createdAt: at(2),
+    });
+    /* A message queued behind Bruno's hanging turn waits until the turn closes. */
+    const queuedMsgId = await enqueueTurn(app.ctx, {
+      companyId: orchestrator.companyId,
+      agentId: bruno!.id,
+      prompt: 'Check the edge case too.',
+      createdBy: null,
+      message: { personId: null, text: 'Check the edge case too.', from: 'agent', name: 'Wanda', by: wandaId },
+    });
+    expect((await db.select().from(jobs).where(eq(jobs.id, queuedMsgId)))[0]!.status).toBe('queued');
+
+    /* At +12m (10 minutes after the last event at +2m), the cron checks with the node; the node says it waits at prompt. */
+    await minuteRound(app.ctx, at(12), () => () => {});
+    await handleNodeMessage(app.ctx, BUILTIN, { type: 'job.state', jobId: turn!.id, state: 'waiting' });
+
+    const [closed] = await db.select().from(jobs).where(eq(jobs.id, turn!.id));
+    expect(closed).toMatchObject({
+      status: 'done',
+      error: null,
+      result: 'All tests pass and the branch is pushed.',
+      tail: expect.stringContaining('lost_ending'),
+    });
+    /* Logged in agent_events and task_events as lost_ending. */
+    const turnEvents = await db.select().from(agentEvents).where(eq(agentEvents.jobId, turn!.id));
+    expect(turnEvents).toEqual(
+      expect.arrayContaining([expect.objectContaining({ data: expect.objectContaining({ error: 'lost_ending' }) })]),
+    );
+    const taskLog = await db.select().from(taskEvents).where(eq(taskEvents.taskId, task!.id));
+    expect(taskLog).toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: 'interrupted', data: expect.objectContaining({ job: turn!.id, reason: 'lost_ending' }) })]),
+    );
+    /* The queued message behind the hanging turn went out at once. */
+    expect((await db.select().from(jobs).where(eq(jobs.id, queuedMsgId)))[0]!.status).toBe('running');
+
+    /* A turn that recorded no task move before waiting at its prompt closes as failed with error lost_ending. */
+    const [unrecorded] = await db
+      .insert(jobs)
+      .values({
+        companyId: orchestrator.companyId,
+        subscriptionId: orchestrator.subscriptionId!,
+        agentId: wandaId,
+        kind: 'conversation',
+        prompt: 'Check the status.',
+        timeoutMs: 900_000,
+        status: 'running',
+        startedAt: at(20),
+      })
+      .returning();
+    await db.insert(agentEvents).values({
+      companyId: orchestrator.companyId,
+      agentId: wandaId,
+      jobId: unrecorded!.id,
+      kind: 'text',
+      data: { kind: 'text', text: 'Status checked.' },
+      createdAt: at(21),
+    });
+    await patch(app, ceo, wandaId, { timer: null });
+    await minuteRound(app.ctx, at(31), () => () => {});
+    await handleNodeMessage(app.ctx, BUILTIN, { type: 'job.state', jobId: unrecorded!.id, state: 'waiting' });
+    const [closedUnrecorded] = await db.select().from(jobs).where(eq(jobs.id, unrecorded!.id));
+    expect(closedUnrecorded).toMatchObject({
+      status: 'failed',
+      error: 'lost_ending',
+      result: 'Status checked.',
+    });
+  });
+
+  it('when the node does not answer job.check, keeps the turn running and sends one alarm at 30 minutes to the watchdog and one at 2 hours to the orchestrator', async () => {
+    const { app, db, ceo, wandaId, orchestrator } = await company();
+    const [ops] = await db.select().from(departments).where(isNull(departments.parentId));
+    const [dev] = await db.insert(departments).values({ companyId: orchestrator.companyId, templateKey: 'development', roleCode: 'DEV' }).returning();
+    const watchRole = app.ctx.templates.roles.get('OPS-WATCH')!;
+    const hiredWatch = await app.inject({
+      method: 'POST',
+      url: `/api/departments/${ops!.id}/staff`,
+      payload: { people: [{ role: 'OPS-WATCH', name: 'Walt', model: '', subscription: orchestrator.subscriptionId, skills: watchRole.skills.filter(s => s.on).map(s => s.id) }] },
+      ...as(ceo),
+    });
+    const waltId = hiredWatch.json().hired[0] as string;
+    /* Finish the orchestrator's initial greeting turn so Bruno's turn is the only running one. */
+    await db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.agentId, orchestrator.id));
+    const [bruno] = await db
+      .insert(agents)
+      .values({ companyId: orchestrator.companyId, kind: 'worker', name: 'Bruno', roleKey: 'DEV-BE', departmentId: dev!.id, model: '', subscriptionId: orchestrator.subscriptionId })
+      .returning();
+    const [task] = await db
+      .insert(tasks)
+      .values({ companyId: orchestrator.companyId, number: 1, title: 'Checkout API', status: 'working', departmentId: dev!.id, assigneeAgentId: bruno!.id, executorAgentId: bruno!.id })
+      .returning();
+    const startedAt = new Date();
+    const [turn] = await db
+      .insert(jobs)
+      .values({
+        companyId: orchestrator.companyId,
+        subscriptionId: orchestrator.subscriptionId!,
+        agentId: bruno!.id,
+        taskId: task!.id,
+        kind: 'conversation',
+        prompt: 'Build POST /checkout.',
+        timeoutMs: 900_000,
+        status: 'running',
+        startedAt,
+      })
+      .returning();
+    const at = (minutes: number) => new Date(startedAt.getTime() + minutes * MIN);
+    /* Prevent Walt's regular timer from firing while we check silent-turn alarms. */
+    await db.update(agents).set({ timerAt: at(300) }).where(eq(agents.id, waltId));
+
+    const lastEventAt = at(15);
+    await db.insert(agentEvents).values({
+      companyId: orchestrator.companyId,
+      agentId: bruno!.id,
+      jobId: turn!.id,
+      kind: 'text',
+      data: { kind: 'text', text: 'Checking schema.' },
+      createdAt: lastEventAt,
+    });
+    /* An incoming message from another agent is no sign of life from Bruno's turn. */
+    await db.insert(agentEvents).values({
+      companyId: orchestrator.companyId,
+      agentId: bruno!.id,
+      jobId: turn!.id,
+      kind: 'message',
+      data: { text: 'Any progress?', from: 'agent', name: 'Wanda' },
+      createdAt: at(35),
+    });
+
+    /* At +25m (10 minutes of silence) and +30m (15 minutes of silence), the node does not answer: turn stays running, no alarm yet. */
+    await minuteRound(app.ctx, at(25), () => () => {});
+    await minuteRound(app.ctx, at(30), () => () => {});
+    expect((await db.select().from(jobs).where(eq(jobs.id, turn!.id)))[0]!.status).toBe('running');
+    expect(await db.select().from(jobs).where(eq(jobs.agentId, waltId))).toHaveLength(0);
+    expect(await db.select().from(jobs).where(eq(jobs.agentId, wandaId))).toHaveLength(0);
+
+    /* At +45m (30 minutes of silence since lastEventAt at +15m), Hornhoof sends one alarm to Walt, and the turn stays running. */
+    await minuteRound(app.ctx, at(45), () => () => {});
+    expect((await db.select().from(jobs).where(eq(jobs.id, turn!.id)))[0]!.status).toBe('running');
+    const waltTurns = await db.select().from(jobs).where(eq(jobs.agentId, waltId));
+    expect(waltTurns).toHaveLength(1);
+    for (const part of ['Bruno', 'Backend engineer', turn!.id, '#1', 'Checkout API', lastEventAt.toISOString()]) {
+      expect(waltTurns[0]!.prompt).toContain(part);
+    }
+
+    /* Further rounds before 2 hours do not repeat the 30-minute alarm. */
+    await minuteRound(app.ctx, at(50), () => () => {});
+    await minuteRound(app.ctx, at(55), () => () => {});
+    expect(await db.select().from(jobs).where(eq(jobs.agentId, waltId))).toHaveLength(1);
+
+    /* At +135m (2 hours of silence since lastEventAt at +15m), Hornhoof also alerts the orchestrator once. */
+    const orchBefore = (await db.select().from(jobs).where(eq(jobs.agentId, orchestrator.id))).length;
+    await minuteRound(app.ctx, at(135), () => () => {});
+    await minuteRound(app.ctx, at(136), () => () => {});
+    const orchTurns = await db.select().from(jobs).where(eq(jobs.agentId, orchestrator.id)).orderBy(asc(jobs.createdAt));
+    expect(orchTurns).toHaveLength(orchBefore + 1);
+    for (const part of ['Bruno', 'Backend engineer', turn!.id, '#1', 'Checkout API', lastEventAt.toISOString()]) {
+      expect(orchTurns.at(-1)!.prompt).toContain(part);
+    }
+  });
+
+  it('does not close a turn with a tool call running without a result, and at 30 minutes raises an alarm naming the tool', async () => {
+    const { app, db, ceo, orchestrator } = await company();
+    const [ops] = await db.select().from(departments).where(isNull(departments.parentId));
+    const [dev] = await db.insert(departments).values({ companyId: orchestrator.companyId, templateKey: 'development', roleCode: 'DEV' }).returning();
+    const watchRole = app.ctx.templates.roles.get('OPS-WATCH')!;
+    const hiredWatch = await app.inject({
+      method: 'POST',
+      url: `/api/departments/${ops!.id}/staff`,
+      payload: { people: [{ role: 'OPS-WATCH', name: 'Walt', model: '', subscription: orchestrator.subscriptionId, skills: watchRole.skills.filter(s => s.on).map(s => s.id) }] },
+      ...as(ceo),
+    });
+    const waltId = hiredWatch.json().hired[0] as string;
+    await db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.agentId, orchestrator.id));
+    const [bruno] = await db
+      .insert(agents)
+      .values({ companyId: orchestrator.companyId, kind: 'worker', name: 'Bruno', roleKey: 'DEV-BE', departmentId: dev!.id, model: '', subscriptionId: orchestrator.subscriptionId })
+      .returning();
+    const startedAt = new Date();
+    const at = (minutes: number) => new Date(startedAt.getTime() + minutes * MIN);
+    await db.update(agents).set({ timerAt: at(120) }).where(eq(agents.id, waltId));
+
+    const [turn] = await db
+      .insert(jobs)
+      .values({
+        companyId: orchestrator.companyId,
+        subscriptionId: orchestrator.subscriptionId!,
+        agentId: bruno!.id,
+        kind: 'conversation',
+        prompt: 'Run migration.',
+        timeoutMs: 900_000,
+        status: 'running',
+        startedAt,
+      })
+      .returning();
+    const toolStartedAt = at(5);
+    await db.insert(agentEvents).values({
+      companyId: orchestrator.companyId,
+      agentId: bruno!.id,
+      jobId: turn!.id,
+      kind: 'tool',
+      data: { kind: 'tool', name: 'Bash', input: 'npm run migrate' },
+      createdAt: toolStartedAt,
+    });
+
+    /* Even if a node reported waiting at +15m, an unfinished tool call prevents closing the turn. */
+    await minuteRound(app.ctx, at(15), () => () => {});
+    await handleNodeMessage(app.ctx, BUILTIN, { type: 'job.state', jobId: turn!.id, state: 'waiting' });
+    expect((await db.select().from(jobs).where(eq(jobs.id, turn!.id)))[0]!.status).toBe('running');
+    expect(await db.select().from(jobs).where(eq(jobs.agentId, waltId))).toHaveLength(0);
+
+    /* At +35m (30 minutes after the Bash tool call started with no tool_result), the turn stays running and Walt gets the tool alarm. */
+    await minuteRound(app.ctx, at(35), () => () => {});
+    expect((await db.select().from(jobs).where(eq(jobs.id, turn!.id)))[0]!.status).toBe('running');
+    const waltTurns = await db.select().from(jobs).where(eq(jobs.agentId, waltId));
+    expect(waltTurns).toHaveLength(1);
+    expect(waltTurns[0]!.prompt).toContain('Bash');
+    expect(waltTurns[0]!.prompt).toContain('30 minutes');
+  });
+
+  it('sends the silent-turn alarm to the head of Operations when the task watchdog is busy, off, or removed', async () => {
+    const { app, db, ceo, wandaId, orchestrator } = await company();
+    const [ops] = await db.select().from(departments).where(isNull(departments.parentId));
+    const watchRole = app.ctx.templates.roles.get('OPS-WATCH')!;
+    const hiredWatch = await app.inject({
+      method: 'POST',
+      url: `/api/departments/${ops!.id}/staff`,
+      payload: { people: [{ role: 'OPS-WATCH', name: 'Walt', model: '', subscription: orchestrator.subscriptionId, skills: watchRole.skills.filter(s => s.on).map(s => s.id) }] },
+      ...as(ceo),
+    });
+    const waltId = hiredWatch.json().hired[0] as string;
+    await db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.agentId, orchestrator.id));
+
+    const startedAt = new Date();
+    const at = (minutes: number) => new Date(startedAt.getTime() + minutes * MIN);
+    await db.update(agents).set({ timerAt: at(120) }).where(eq(agents.id, waltId));
+
+    /* Case 1: Walt (OPS-WATCH) is busy running a turn of his own when another turn hits 30 minutes of silence. */
+    const [waltBusy] = await db
+      .insert(jobs)
+      .values({
+        companyId: orchestrator.companyId,
+        subscriptionId: orchestrator.subscriptionId!,
+        agentId: waltId,
+        kind: 'conversation',
+        prompt: 'Inspecting logs.',
+        timeoutMs: 900_000,
+        status: 'running',
+        startedAt: at(20),
+      })
+      .returning();
+    const [turn1] = await db
+      .insert(jobs)
+      .values({
+        companyId: orchestrator.companyId,
+        subscriptionId: orchestrator.subscriptionId!,
+        agentId: orchestrator.id,
+        kind: 'conversation',
+        prompt: 'Plan turn 4.',
+        timeoutMs: 900_000,
+        status: 'running',
+        startedAt,
+      })
+      .returning();
+
+    await minuteRound(app.ctx, at(30), () => () => {});
+    const wandaTurns1 = await db.select().from(jobs).where(eq(jobs.agentId, wandaId));
+    expect(wandaTurns1).toHaveLength(1);
+    for (const part of ['Orchestrator', turn1!.id, startedAt.toISOString()]) {
+      expect(wandaTurns1[0]!.prompt).toContain(part);
+    }
+
+    /* Case 2: Walt is switched off when another turn hits 30 minutes of silence. */
+    await db.update(jobs).set({ status: 'done', finishedAt: at(31) }).where(eq(jobs.id, waltBusy!.id));
+    await db.update(jobs).set({ status: 'done', finishedAt: at(31) }).where(eq(jobs.id, turn1!.id));
+    await patch(app, ceo, waltId, { on: false });
+    const [turn2] = await db
+      .insert(jobs)
+      .values({
+        companyId: orchestrator.companyId,
+        subscriptionId: orchestrator.subscriptionId!,
+        agentId: orchestrator.id,
+        kind: 'conversation',
+        prompt: 'Plan turn 5.',
+        timeoutMs: 900_000,
+        status: 'running',
+        startedAt: at(40),
+      })
+      .returning();
+    await minuteRound(app.ctx, at(70), () => () => {});
+    const wandaTurns2 = await db.select().from(jobs).where(eq(jobs.agentId, wandaId)).orderBy(asc(jobs.createdAt));
+    expect(wandaTurns2).toHaveLength(2);
+    expect(wandaTurns2[1]!.prompt).toContain(turn2!.id);
+
+    /* Case 3: Walt is removed when another turn hits 30 minutes of silence. */
+    await db.update(jobs).set({ status: 'done', finishedAt: at(71) }).where(eq(jobs.id, turn2!.id));
+    expect((await app.inject({ method: 'DELETE', url: `/api/agents/${waltId}`, ...as(ceo) })).statusCode).toBe(204);
+    const [turn3] = await db
+      .insert(jobs)
+      .values({
+        companyId: orchestrator.companyId,
+        subscriptionId: orchestrator.subscriptionId!,
+        agentId: orchestrator.id,
+        kind: 'conversation',
+        prompt: 'Plan turn 6.',
+        timeoutMs: 900_000,
+        status: 'running',
+        startedAt: at(80),
+      })
+      .returning();
+    await minuteRound(app.ctx, at(110), () => () => {});
+    const wandaTurns3 = await db.select().from(jobs).where(eq(jobs.agentId, wandaId)).orderBy(asc(jobs.createdAt));
+    expect(wandaTurns3).toHaveLength(3);
+    expect(wandaTurns3[2]!.prompt).toContain(turn3!.id);
+  });
+
+  it("closes the task watchdog's own turn after 30 minutes of silence, alerts the head of Operations, and lets the watchdog's timer start its next round", async () => {
+    const { app, db, ceo, wandaId, orchestrator } = await company();
+    const [ops] = await db.select().from(departments).where(isNull(departments.parentId));
+    const watchRole = app.ctx.templates.roles.get('OPS-WATCH')!;
+    const hiredWatch = await app.inject({
+      method: 'POST',
+      url: `/api/departments/${ops!.id}/staff`,
+      payload: { people: [{ role: 'OPS-WATCH', name: 'Walt', model: '', subscription: orchestrator.subscriptionId, skills: watchRole.skills.filter(s => s.on).map(s => s.id) }] },
+      ...as(ceo),
+    });
+    const waltId = hiredWatch.json().hired[0] as string;
+    await until(async () => (await agentState(app.ctx, waltId)).ready);
+    await db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.agentId, orchestrator.id));
+    await db.insert(tasks).values({ companyId: orchestrator.companyId, number: 1, title: 'Keep watching', status: 'working' });
+
+    const [{ timerAt }] = (await db.select({ timerAt: agents.timerAt }).from(agents).where(eq(agents.id, waltId))) as [{ timerAt: Date }];
+    const at = (minutes: number) => new Date(timerAt.getTime() + minutes * MIN);
+
+    /* Walt's first round starts at +10m and emits its last event at +15m, then hangs running. */
+    expect(await timerTick(app.ctx, at(10))).toBe(1);
+    const [firstRound] = await db.select().from(jobs).where(eq(jobs.agentId, waltId));
+    expect(firstRound!.status).toBe('running');
+    const lastEventAt = at(15);
+    await db.insert(agentEvents).values({
+      companyId: orchestrator.companyId,
+      agentId: waltId,
+      jobId: firstRound!.id,
+      kind: 'text',
+      data: { kind: 'text', text: 'Checked open tasks.' },
+      createdAt: lastEventAt,
+    });
+
+    /* Before 30 minutes of silence (+30m and +44m), the running round holds the timer. */
+    expect(await timerTick(app.ctx, at(30))).toBe(0);
+    expect(await timerTick(app.ctx, at(44))).toBe(0);
+    expect(await db.select().from(jobs).where(eq(jobs.agentId, wandaId))).toHaveLength(0);
+
+    /* At +45m (30 minutes after lastEventAt at +15m), the stuck round closes, Wanda gets the alarm, and Walt's timer starts a new round. */
+    expect(await timerTick(app.ctx, at(45))).toBe(1);
+    const [closedFirst] = await db.select().from(jobs).where(eq(jobs.id, firstRound!.id));
+    expect(closedFirst!.status).toBe('failed');
+    const runningWalt = await db.select().from(jobs).where(and(eq(jobs.agentId, waltId), eq(jobs.status, 'running')));
+    expect(runningWalt).toHaveLength(1);
+    expect(runningWalt[0]!.id).not.toBe(firstRound!.id);
+    expect(runningWalt[0]!.prompt).toContain('Do your round:');
+
+    const wandaTurns = await db.select().from(jobs).where(eq(jobs.agentId, wandaId));
+    expect(wandaTurns).toHaveLength(1);
+    for (const part of ['Walt', 'Task watchdog', firstRound!.id, lastEventAt.toISOString()]) {
+      expect(wandaTurns[0]!.prompt).toContain(part);
+    }
   });
 });
