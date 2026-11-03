@@ -1,0 +1,205 @@
+import { QUIET_SIGN_MS } from '@hornhoof/protocol/map';
+import { cleanup, render } from '@testing-library/react';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
+import { LanguageProvider } from '../src/i18n';
+import type { FailureKind, ProgramRetry, ProgramView, TurnRetry } from '../src/types';
+import { AgentState, type AgentLive } from '../src/ui/AgentState';
+
+const clock = (hours: number, minutes: number) => new Date(2026, 10, 3, hours, minutes).getTime();
+const NOW = clock(14, 0);
+const SERVER_NOW = new Date(NOW).toISOString();
+
+function freezeClock() {
+  vi.useFakeTimers({ toFake: ['performance'] });
+  onTestFinished(() => {
+    vi.useRealTimers();
+  });
+}
+
+function program(
+  state: ProgramView['state'],
+  minutesAgo: number,
+  extra: { tool?: string | null; signAt?: number | null; retry?: ProgramRetry | null } = {},
+): ProgramView {
+  return {
+    state,
+    since: NOW - minutesAgo * 60_000,
+    tool: extra.tool ?? null,
+    screenAt: NOW,
+    signAt: extra.signAt ?? null,
+    retry: extra.retry ?? null,
+    reportedAt: NOW,
+  };
+}
+
+function shown(lang: 'en' | 'ru', agent: AgentLive): HTMLElement | null {
+  localStorage.setItem('hh-lang', lang);
+  const { container } = render(
+    <LanguageProvider>
+      <AgentState agent={agent} serverNow={SERVER_NOW} />
+    </LanguageProvider>,
+  );
+  const el = container.querySelector<HTMLElement>('.ast');
+  cleanup();
+  localStorage.removeItem('hh-lang');
+  return el;
+}
+
+describe('AgentState', () => {
+  it('says the program retry with and without max and next time, in English and Russian', () => {
+    freezeClock();
+    const nextAt = clock(14, 5);
+    const cases: [ProgramRetry | null, string, string][] = [
+      [
+        { attempt: 3, max: 10, nextAt },
+        'retrying, attempt 3 of 10, next at 14:05',
+        'повторяет запрос, попытка 3 из 10, следующая в 14:05',
+      ],
+      [
+        { attempt: 3, max: null, nextAt },
+        'retrying, attempt 3, next at 14:05',
+        'повторяет запрос, попытка 3, следующая в 14:05',
+      ],
+      [
+        { attempt: 3, max: 10, nextAt: null },
+        'retrying, attempt 3 of 10',
+        'повторяет запрос, попытка 3 из 10',
+      ],
+      [
+        { attempt: 3, max: null, nextAt: null },
+        'retrying, attempt 3',
+        'повторяет запрос, попытка 3',
+      ],
+      [null, 'retrying', 'повторяет запрос'],
+    ];
+    for (const [retry, enText, ruText] of cases) {
+      const agent: AgentLive = { id: 'b1', program: program('retrying', 2, { retry }), alarm: null };
+      const enEl = shown('en', agent);
+      const ruEl = shown('ru', agent);
+      expect(enEl?.textContent).toBe(enText);
+      expect(enEl?.className).toBe('ast work');
+      expect(ruEl?.textContent).toBe(ruText);
+      expect(ruEl?.className).toBe('ast work');
+    }
+  });
+
+  it('adds how long a thinking or retrying program gave no sign only past QUIET_SIGN_MS and when signAt is known', () => {
+    freezeClock();
+    const quietThinking: AgentLive = {
+      id: 'b1',
+      program: program('thinking', 32, { signAt: NOW - 31 * 60_000 }),
+      alarm: null,
+    };
+    const enThink = shown('en', quietThinking);
+    const ruThink = shown('ru', quietThinking);
+    expect(enThink?.textContent).toBe('thinking 32 min, no sign 31 min');
+    expect(enThink?.className).toBe('ast work');
+    expect(ruThink?.textContent).toBe('думает 32 мин, без признаков 31 мин');
+    expect(ruThink?.className).toBe('ast work');
+
+    const quietRetrying: AgentLive = {
+      id: 'b1',
+      program: program('retrying', 15, {
+        signAt: NOW - 12 * 60_000,
+        retry: { attempt: 3, max: 10, nextAt: clock(14, 5) },
+      }),
+      alarm: null,
+    };
+    expect(shown('en', quietRetrying)?.textContent).toBe('retrying, attempt 3 of 10, next at 14:05, no sign 12 min');
+    expect(shown('ru', quietRetrying)?.textContent).toBe('повторяет запрос, попытка 3 из 10, следующая в 14:05, без признаков 12 мин');
+
+    /* Exactly at QUIET_SIGN_MS it is not past the threshold yet; 1 ms past it is. */
+    const atBoundary: AgentLive = {
+      id: 'b1',
+      program: program('thinking', 12, { signAt: NOW - QUIET_SIGN_MS }),
+      alarm: null,
+    };
+    expect(shown('en', atBoundary)?.textContent).toBe('thinking 12 min');
+    expect(shown('ru', atBoundary)?.textContent).toBe('думает 12 мин');
+
+    const pastBoundary: AgentLive = {
+      id: 'b1',
+      program: program('thinking', 12, { signAt: NOW - QUIET_SIGN_MS - 1 }),
+      alarm: null,
+    };
+    expect(shown('en', pastBoundary)?.textContent).toBe('thinking 12 min, no sign 10 min');
+    expect(shown('ru', pastBoundary)?.textContent).toBe('думает 12 мин, без признаков 10 мин');
+
+    /* An older node sends signAt: null and keeps today's line. */
+    const olderNode: AgentLive = {
+      id: 'b1',
+      program: program('thinking', 32, { signAt: null }),
+      alarm: null,
+    };
+    expect(shown('en', olderNode)?.textContent).toBe('thinking 32 min');
+    expect(shown('ru', olderNode)?.textContent).toBe('думает 32 мин');
+
+    /* A running tool does not add the quiet-sign suffix, and the server alarm stays red. */
+    const toolRun: AgentLive = {
+      id: 'b1',
+      program: program('tool', 40, { tool: 'Bash', signAt: NOW - 31 * 60_000 }),
+      alarm: null,
+    };
+    expect(shown('en', toolRun)?.textContent).toBe('Bash running 40 min');
+    expect(shown('ru', toolRun)?.textContent).toBe('Bash работает 40 мин');
+
+    const alarmed: AgentLive = {
+      ...quietThinking,
+      alarm: { reason: 'program_stalled', since: NOW - 34 * 60_000 },
+    };
+    const alarmEl = shown('en', alarmed);
+    expect(alarmEl?.textContent).toBe('program frozen 34 min');
+    expect(alarmEl?.className).toBe('ast alarm');
+  });
+
+  it("shows Hornhoof's waiting retry when no program runs, with every failure kind in English and Russian", () => {
+    freezeClock();
+    const at = clock(14, 5);
+    const kinds: [FailureKind, string, string][] = [
+      ['overloaded', 'provider overloaded', 'провайдер перегружен'],
+      ['rate_limited', 'too many requests', 'слишком много запросов'],
+      ['usage_limit', 'plan limit reached', 'лимит тарифа'],
+      ['auth', 'sign-in needed', 'нужен вход'],
+      ['network', 'network error', 'ошибка сети'],
+      ['cut', 'answer cut off', 'ответ оборвался'],
+      ['refused', 'refused by the provider', 'отказ провайдера'],
+      ['too_big', 'too much for the model', 'слишком большой объем'],
+      ['crash', 'program crashed', 'программа упала'],
+      ['unknown', 'unknown error', 'неизвестная ошибка'],
+    ];
+    for (const [kind, enKind, ruKind] of kinds) {
+      const retry: TurnRetry = { attempt: 2, max: 4, at, kind };
+      const agent: AgentLive = { id: 'b1', program: null, alarm: null, retry, status: 'queued' };
+      const enEl = shown('en', agent);
+      const ruEl = shown('ru', agent);
+      expect(enEl?.textContent).toBe(`retry 2 of 4 at 14:05 (${enKind})`);
+      expect(enEl?.className).toBe('ast calm');
+      expect(ruEl?.textContent).toBe(`повтор 2 из 4 в 14:05 (${ruKind})`);
+      expect(ruEl?.className).toBe('ast calm');
+    }
+
+    /* Once a program runs, its own state shows instead of the waiting retry. */
+    const running: AgentLive = {
+      id: 'b1',
+      program: program('thinking', 5),
+      alarm: null,
+      retry: { attempt: 2, max: 4, at, kind: 'overloaded' },
+    };
+    expect(shown('en', running)?.textContent).toBe('thinking 5 min');
+  });
+
+  it('keeps idle calm after more than a minute instead of turning red', () => {
+    freezeClock();
+    const idleLong: AgentLive = {
+      id: 'b1',
+      program: program('idle', 5),
+      alarm: null,
+    };
+    const enEl = shown('en', idleLong);
+    const ruEl = shown('ru', idleLong);
+    expect(enEl?.textContent).toBe('waiting for input');
+    expect(enEl?.className).toBe('ast calm');
+    expect(ruEl?.textContent).toBe('ждет ввода');
+    expect(ruEl?.className).toBe('ast calm');
+  });
+});

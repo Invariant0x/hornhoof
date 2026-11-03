@@ -1,4 +1,4 @@
-import type { EmployeeStatus } from '../types';
+import type { EmployeeStatus, FailureKind } from '../types';
 import { plural } from './plural';
 
 const STATUS_ORDER: EmployeeStatus[] = ['working', 'waiting', 'queued', 'handed', 'idle', 'off'];
@@ -606,11 +606,14 @@ export const en = {
       tool: (tool: string, n: string) => `${tool} running ${n} min`,
       asking: 'asking',
       retrying: 'retrying',
+      retryAttempt: (attempt: number, max: number | null, next: string | null) =>
+        `retrying, attempt ${attempt}${max === null ? '' : ` of ${max}`}${next ? `, next at ${next}` : ''}`,
+      noSign: (line: string, n: string) => `${line}, no sign ${n} min`,
+      turnRetry: (attempt: number, max: number, at: string, kind: string) => `retry ${attempt} of ${max} at ${at} (${kind})`,
       idle: 'waiting for input',
       gone: 'no program',
       waitsForTask: 'waiting for a task',
       queued: 'in the queue',
-      lostEnd: 'turn end lost: waiting for input',
       program_stalled: (n: string) => `program frozen ${n} min`,
       node_silent: (n: string) => `node silent ${n} min`,
     },
@@ -635,8 +638,21 @@ export const en = {
     others: 'Others',
     close: 'Close',
   },
+  failures: {
+    overloaded: 'provider overloaded',
+    rate_limited: 'too many requests',
+    usage_limit: 'plan limit reached',
+    auth: 'sign-in needed',
+    network: 'network error',
+    cut: 'answer cut off',
+    refused: 'refused by the provider',
+    too_big: 'too much for the model',
+    crash: 'program crashed',
+    unknown: 'unknown error',
+  } satisfies Record<FailureKind, string>,
   agent: {
     openTerminal: 'Open terminal',
+    lastFailed: (at: string, kind: string) => `Last turn failed at ${at}: ${kind}`,
     runsOn: 'Runs on',
     onMachine: (host: string) => `Works on the machine ${host}`,
     model: 'Model',

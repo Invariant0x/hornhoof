@@ -7,17 +7,17 @@ const ROLE = { en: 'Developer', ru: 'Разработчик' };
 const BRUNO: Employee = {
   id: 'b1', name: 'Bruno', roleId: 'DEV-ENG', title: ROLE, kind: 'worker', model: '', modelName: null,
   provider: 'codex', effort: null, state: 'working', status: 'working', on: true, timer: null, task: null,
-  context: null, program: null, alarm: null,
+  context: null, program: null, alarm: null, retry: null, failure: null,
 };
 const CARD: AgentCardView = {
   id: BRUNO.id, name: BRUNO.name, kind: 'worker', role: null, department: { id: 'd2', name: 'Development' },
-  product: null, model: '', effort: null, subscription: null, machine: null, state: 'working', skills: [], parts: [],
+  product: null, model: '', effort: null, subscription: null, machine: null, state: 'working', retry: null, failure: null, skills: [], parts: [],
   raw: '', instructions: { length: 0, max: 200_000 }, runsOn: [], changes: [], interrupted: [], canEdit: false, timer: null,
 };
 const program = (state: ProgramView['state'], since: number): ProgramView => ({ state, since, tool: null, screenAt: NOW, signAt: null, retry: null, reportedAt: NOW });
 const STATES: { name: string; program: ProgramView; alarm: TurnAlarm | null; en: string; ru: string; red: boolean }[] = [
   { name: 'thinking', program: program('thinking', NOW - 12 * 60_000), alarm: null, en: 'thinking 12 min', ru: 'думает 12 мин', red: false },
-  { name: 'lost-end', program: program('idle', NOW - 61_000), alarm: null, en: 'turn end lost: waiting for input', ru: 'конец хода потерян: ждет ввода', red: true },
+  { name: 'quiet-sign', program: { ...program('thinking', NOW - 32 * 60_000), signAt: NOW - 31 * 60_000 }, alarm: null, en: 'thinking 32 min, no sign 31 min', ru: 'думает 32 мин, без признаков 31 мин', red: false },
   { name: 'alarm', program: program('thinking', NOW - 50 * 60_000), alarm: { reason: 'program_stalled', since: NOW - 34 * 60_000 }, en: 'program frozen 34 min', ru: 'программа замерла 34 мин', red: true },
 ];
 

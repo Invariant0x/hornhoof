@@ -83,8 +83,8 @@ function doingLine(t: ReturnType<typeof useT>, e: Employee): string {
   return e.status === 'idle' ? t.dept.waitsForTask : '';
 }
 
-/* What an employee's program does and the server's alarm; its chip's own lines say what its turn waits for. */
-const working = ({ id, program, alarm }: Employee): AgentLive => ({ id, program, alarm });
+/* What an employee's program does, the server's alarm and any waiting retry; its chip's own lines say what its turn waits for. */
+const working = ({ id, program, alarm, retry }: Employee): AgentLive => ({ id, program, alarm, retry });
 
 /* The tick that switches an agent off for now and on again; it sits beside the chip's button, not inside it. */
 function Switch({ e, onSwitch }: { e: Employee; onSwitch?(on: boolean): void }) {
