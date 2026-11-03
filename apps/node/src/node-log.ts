@@ -1,4 +1,5 @@
 import { NODE_LOG_BYTES, NODE_LOG_LINES } from '@hornhoof/protocol';
+import { stripVTControlCharacters } from 'node:util';
 import { HIDDEN, redact } from './redact.js';
 
 /* These are node diagnostics, not agent output. Labels protect secrets a program has not let the node learn yet. */
@@ -22,7 +23,7 @@ function byteTail(text: string): string {
 }
 
 export function nodeLog(text: string, secrets: string[]): string {
-  let clean = redact(text, secrets);
+  let clean = redact(stripVTControlCharacters(text), secrets);
   for (const [pattern, replacement] of CREDENTIALS) clean = clean.replace(pattern, replacement);
   const lines = clean.replace(/\r\n?/g, '\n').split('\n').slice(-NODE_LOG_LINES).join('\n');
   return byteTail(lines);

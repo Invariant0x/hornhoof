@@ -1,6 +1,6 @@
 import { chmodSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { NodeExit, NodeStopReason } from '@hornhoof/protocol';
+import { NodeExit, NodeStopReason, type NodeMessage } from '@hornhoof/protocol';
 import { z } from 'zod';
 import { nodeLog } from './node-log.js';
 
@@ -11,6 +11,11 @@ const Intent = z.object({ startedAt: z.iso.datetime(), reason: NodeStopReason })
 type State = z.infer<typeof State>;
 type Input = { dir: string; startedAt: string; secrets(): string[]; write(line: string): void; readOom?(): number | null };
 type Lifecycle = { previous: NodeExit; log(line: string): void; tail(): string; stop(reason: NodeStopReason): NodeExit };
+
+export function stopNode(life: Lifecycle, send: ((message: NodeMessage) => boolean) | null, startedAt: string, reason: NodeStopReason): void {
+  const exit = life.stop(reason);
+  send?.({ type: 'node.stopping', startedAt, exit });
+}
 
 /* A corrupt or missing record says nothing about the last exit. Limit reads even if a file was damaged. */
 function read(path: string): unknown {
@@ -40,11 +45,12 @@ function oomKills(): number | null {
 
 const unknownExit = (): NodeExit => ({ kind: 'unknown', reason: 'unknown', startedAt: null, at: null, log: '' });
 const wasOom = (before: number | null, now: number | null): boolean => before !== null && now !== null && now > before;
+const memoryEvidence = (before: number | null, now: number | null): string => wasOom(before, now) ? `Memory cgroup OOM kills: ${before} -> ${now}.` : '';
 
 function previousExit(state: State | null, oom: number | null, secrets: string[]): NodeExit {
   if (!state) return unknownExit();
   if (state.exit) return { ...state.exit, log: nodeLog(state.exit.log, secrets) };
-  return { startedAt: state.startedAt, at: null, kind: 'unplanned', reason: wasOom(state.oomKills, oom) ? 'out_of_memory' : 'unclean_exit', log: nodeLog(state.log, secrets) };
+  return { startedAt: state.startedAt, at: null, kind: 'unplanned', reason: 'unclean_exit', log: nodeLog(`${state.log}\n${memoryEvidence(state.oomKills, oom)}`.trimEnd(), secrets) };
 }
 
 function stopReason(dir: string, startedAt: string, fallback: NodeStopReason): NodeStopReason {
@@ -68,6 +74,7 @@ export function nodeLifecycle(input: Input): Lifecycle {
   const persist = () => keep(join(dir, JOURNAL), state);
   persist();
   const log = (line: string): void => {
+    if (state.exit) return;
     const clean = nodeLog(line, secrets());
     state = { ...state, log: nodeLog(`${state.log}\n${clean}`.trimStart(), secrets()) };
     persist();

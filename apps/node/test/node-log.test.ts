@@ -9,6 +9,11 @@ describe('the node log that leaves the machine', () => {
     expect(text).toBe('Node connected.\nkey [hidden] [hidden]\nNode disconnected, code 1006.');
   });
 
+  it('removes terminal escapes before matching an opaque secret split by color codes', () => {
+    const secret = 'opaque-provider-123456789';
+    expect(nodeLog('Node error: opaque-\u001b[31mprovider-123456789\u001b[0m', [secret])).toBe('Node error: [hidden]');
+  });
+
   it.each([
     ['Authorization: Bearer short-secret', 'short-secret'],
     ['Proxy-Authorization: Basic dXNlcjpwYXNz', 'dXNlcjpwYXNz'],

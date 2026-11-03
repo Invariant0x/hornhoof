@@ -55,10 +55,19 @@ describe('a persisted node lifecycle', () => {
     expect(next.stop('stopped')).toMatchObject({ reason: 'stopped' });
   });
 
-  it('only calls an exit OOM when a known kernel counter actually increased', () => {
+  it('ignores late callbacks from a stopped process after the next process opens its journal', () => {
+    const path = dir();
+    const first = open(path, FIRST);
+    first.stop('stopped');
+    open(path, NEXT);
+    first.log('Late close from the old socket.');
+    expect(JSON.parse(readFileSync(join(path, 'node-runtime.json'), 'utf8'))).toMatchObject({ startedAt: NEXT, exit: null });
+  });
+
+  it('reports an increased cgroup OOM counter as evidence without blaming the node process', () => {
     const path = dir();
     open(path, FIRST, () => 3);
-    expect(open(path, NEXT, () => 4).previous).toMatchObject({ kind: 'unplanned', reason: 'out_of_memory' });
+    expect(open(path, NEXT, () => 4).previous).toMatchObject({ kind: 'unplanned', reason: 'unclean_exit', log: expect.stringContaining('Memory cgroup OOM kills: 3 -> 4.') });
     const unknown = dir();
     open(unknown, FIRST);
     expect(open(unknown, NEXT, () => 4).previous).toMatchObject({ reason: 'unclean_exit' });
