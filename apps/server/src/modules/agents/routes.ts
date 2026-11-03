@@ -12,6 +12,7 @@ import { deptName } from '../departments/templates.js';
 import { machineOf } from '../nodes/nodes.js';
 import { subViews, type IsOnline, type SubView } from '../subscriptions/views.js';
 import { CLOSED, dropGate } from '../tasks/engine.js';
+import { agentProgramState, type TurnAlarm, type TurnProgram } from '../tasks/silent.js';
 import { backOn, leaveIfOff, resumeAgent } from '../tasks/wake.js';
 import { orchestratorServing, servingSubscriptions, type Serving } from '../tools/staff.js';
 import type { Lang } from '../templates/load.js';
@@ -33,6 +34,8 @@ export type AgentCard = {
   /* The machine its program is on; none on the built-in node and before it first ran. */
   machine: { id: string; hostname: string } | null;
   state: 'working' | 'sleeping' | 'needs_subscription';
+  program: TurnProgram | null;
+  alarm: TurnAlarm | null;
   skills: { id: string; title: Lang; description: Lang; on: boolean; locked: boolean; overridden: boolean; templateChanged: boolean }[];
   parts: Part[];
   raw: string;
@@ -148,6 +151,7 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
       subscription: agent.subscriptionId ? (views.get(agent.subscriptionId) ?? null) : null,
       machine: await machineOf(db, (await programNode(ctx, agent.id))?.node ?? null),
       state: running ? 'working' : agent.subscriptionId ? 'sleeping' : 'needs_subscription',
+      ...agentProgramState(ctx, running?.id),
       skills: offered.flatMap(s => {
         const skill = ctx.templates.skills.get(s.id);
         if (!skill) return [];

@@ -13,6 +13,7 @@ import { CHANNEL_MS, type Endpoint } from '../events/bus.js';
 import { workingCount } from '../events/store.js';
 import { machineOf } from '../nodes/nodes.js';
 import { pendingFor, visibleDecisions } from '../tasks/decisions.js';
+import { agentProgramState } from '../tasks/silent.js';
 import { mapLines, type MapLine } from './map-state.js';
 import { reworkTimes } from './rework.js';
 import { personViews } from '../people/views.js';
@@ -102,7 +103,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
     const views = new Map((await personViews(db, active)).map(v => [v.id, { ...v, pendingDecisions: pendingFor(decisions, me, v.id) }]));
     const inDepartment = (deptId: string) => active.filter(p => p.scopeKind !== 'company' && homes.get(p.id)!.length === 1 && homes.get(p.id)![0] === deptId).map(p => views.get(p.id)!);
     const running = await db
-      .select({ agentId: jobs.agentId, taskId: jobs.taskId, startedAt: jobs.startedAt, createdAt: jobs.createdAt })
+      .select({ id: jobs.id, agentId: jobs.agentId, taskId: jobs.taskId, startedAt: jobs.startedAt, createdAt: jobs.createdAt })
       .from(jobs)
       .where(and(eq(jobs.companyId, me.companyId), eq(jobs.status, 'running'), isNotNull(jobs.agentId)));
     const busy = new Set(running.map(j => j.agentId));
@@ -155,6 +156,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
           const sub = a.subscriptionId ? subs.get(a.subscriptionId) : undefined;
           const role = a.roleKey ? templates.roles.get(a.roleKey) : undefined;
           const now = doing(a);
+          const run = running.find(j => j.agentId === a.id);
           return {
             id: a.id,
             name: a.name,
@@ -166,6 +168,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
             provider: sub?.provider ?? null,
             effort: sub ? effortShown(sub, a, role?.effort) : null,
             state: busy.has(a.id) ? 'working' : a.subscriptionId ? 'sleeping' : 'needs_subscription',
+            ...agentProgramState(ctx, run?.id),
             context: a.contextUsed,
             status: now.status,
             on: !a.switchedOffAt,
@@ -219,6 +222,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
         model: orchestrator.model,
         effort: (orchestrator.subscriptionId && subs.has(orchestrator.subscriptionId) && effortShown(subs.get(orchestrator.subscriptionId)!, orchestrator, ORCHESTRATOR_EFFORT)) || null,
         context: orchestrator.contextUsed,
+        ...agentProgramState(ctx, running.find(j => j.agentId === orchestrator.id)?.id),
         /* His plan is at its limit until then: he waits for the reset on it, and the CEO decides whether he moves. */
         limitUntil: limitUntil((orchestrator.subscriptionId && subs.get(orchestrator.subscriptionId)?.limits) || null),
         subscription: orchestrator.subscriptionId ? await subView(db, node => hub.isOnline(node), orchestrator.subscriptionId, me) : null,

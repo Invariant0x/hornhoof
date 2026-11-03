@@ -259,8 +259,6 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       return;
     }
     if (m.type === 'job.ack') return void unconfirmed.delete(m.jobId);
-    /* What a turn's program is doing now: this node does not tell yet. */
-    if (m.type === 'job.check') return;
     if (m.type === 'tests.ack') return void unconfirmedTests.delete(m.partId);
     if (m.type === 'tests.cancel') return void testing.get(m.partId)?.stop.abort();
     if (m.type === 'tests.run') {

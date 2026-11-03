@@ -82,7 +82,6 @@ export async function timerTick(ctx: Ctx, now = new Date(), report: (err: unknow
   let started = 0;
   for (const { id } of await db.select({ id: agents.id }).from(agents).where(timed)) {
     try {
-      await checkSilentTurns(ctx, now, id);
       const queued = await onAgent(ctx, id, () => queueDueRound(ctx, id, now));
       if (!queued) continue;
       started++;
