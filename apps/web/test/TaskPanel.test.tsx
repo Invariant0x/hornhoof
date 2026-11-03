@@ -30,6 +30,24 @@ async function openTask(user: ReturnType<typeof userEvent.setup>) {
 
 describe('a task', () => {
   afterEach(() => localStorage.removeItem('hh-lang'));
+  it.each([
+    ['en', 'Run skipped: task is already closed.', ['resume after a restart', 'merge', 'continue after the program ended', 'assignment']],
+    ['ru', 'Запуск пропущен: задача уже закрыта.', ['возобновление после перезапуска', 'слияние', 'продолжение после выхода программы', 'назначение']],
+  ])('shows who was not woken and by which run in %s', async (language, heading, actions) => {
+    localStorage.setItem('hh-lang', language);
+    const user = userEvent.setup();
+    const log = ['restart', 'merge', 'continue', 'assigned'].map((wake, i) => ({ kind: 'wake_skipped', text: 'Server fallback.', data: { wake, job: i === 0 ? 'abcdefgh-0000' : null }, by: { kind: 'agent' as const, id: 'b1', name: 'Bruno' }, at: '2026-11-03T21:00:00.000Z' }));
+    shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, status: 'done', log } }] });
+    await user.click(await screen.findByRole('button', { name: /^(Tasks|Задачи)/ }));
+    await user.click(await screen.findByRole('button', { name: /#12/ }));
+    const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
+    const lines = within(within(panel).getByRole('list', { name: language === 'ru' ? 'Журнал' : 'Log' })).getAllByRole('listitem');
+    expect(lines).toHaveLength(4);
+    for (const [i, line] of lines.entries()) expect(line).toHaveTextContent(`${heading} Bruno: ${actions[i]}.`);
+    expect(lines[0]).toHaveTextContent('abcdefgh-0000');
+    expect(panel).not.toHaveTextContent('Server fallback.');
+  });
+
   it.each(['en', 'ru'])('shows an external wait with its reason and deadline in %s, then clears it after a comment', async language => {
     localStorage.setItem('hh-lang', language);
     const user = userEvent.setup();

@@ -1,8 +1,8 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agentEvents, agents, companies, jobs, people, subscriptions, tasks } from '../src/db/schema.js';
-import type { Task, WakeWhy } from '../src/modules/tasks/engine.js';
-import { discardStaleTurn, discardStaleTurns, taskForWake, taskWakeOf, waitingTaskTurn } from '../src/modules/tasks/wake-state.js';
+import { agentEvents, agents, companies, jobs, people, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
+import { lastMove, type Task, type WakeWhy } from '../src/modules/tasks/engine.js';
+import { discardStaleTurn, discardStaleTurns, repeatedTurn, repeatWake, taskForWake, taskWakeOf, waitingTaskTurn } from '../src/modules/tasks/wake-state.js';
 import { wakePrompt } from '../src/modules/tasks/wake.js';
 import { createTestDb, statements } from './helpers.js';
 
@@ -78,16 +78,76 @@ describe('task wake policy in the database', () => {
     expect(await waitingTaskTurn(c.db, c.worker.id, task.id)).toEqual({ id: job.id });
     await c.db.update(tasks).set({ status: 'done', closedAt: new Date() }).where(eq(tasks.id, task.id));
     expect(await discardStaleTurn(c.db, job)).toBe(true);
+    const skipped = await c.db.select().from(taskEvents).where(eq(taskEvents.taskId, task.id));
+    expect(skipped).toEqual([expect.objectContaining({ kind: 'wake_skipped', agentId: c.worker.id, data: { wake: 'assigned', job: job.id } })]);
+    expect(await lastMove(c.db, task.id)).toBeUndefined();
     const stopped = (await c.db.select().from(agentEvents).where(eq(agentEvents.jobId, job.id))).filter(e => e.kind === 'stopped');
     expect(stopped).toHaveLength(1);
     expect(stopped[0]!.data).toMatchObject({ reason: 'stale', task: { id: task.id, number: task.number } });
     expect(await discardStaleTurn(c.db, job)).toBe(true);
     expect((await c.db.select().from(agentEvents).where(eq(agentEvents.jobId, job.id))).filter(e => e.kind === 'stopped')).toHaveLength(1);
+    expect(await c.db.select().from(taskEvents).where(eq(taskEvents.taskId, task.id))).toHaveLength(1);
     expect(await waitingTaskTurn(c.db, c.worker.id, task.id)).toBeUndefined();
     const plain = await c.job(null);
     expect(await discardStaleTurn(c.db, plain)).toBe(false);
     expect(await discardStaleTurn(c.db, await c.job(task, null))).toBe(false);
     expect(await discardStaleTurns(c.db, [])).toBe(false);
+  });
+
+  it('repeats current work, keeping its purpose and stage while rejecting another holder, stage, merge phase or external wait', async () => {
+    const c = await fixture();
+    for (const next of [{ status: 'working' as const }, { assigneeAgentId: c.head.id }, { stage: 1 }, { merging: true }, { externalWait: { reason: 'Registry', since: new Date().toISOString(), until: new Date(Date.now() + 1000).toISOString() } }]) {
+      const task = await c.task();
+      const job = await c.job(task);
+      await c.message(job.id, task, 'assigned');
+      const [current] = await c.db.update(tasks).set(next).where(eq(tasks.id, task.id)).returning();
+      const repeated = await repeatWake(c.db, { job, task: current!, agent: c.worker }, 'restart');
+      expect(repeated !== null).toBe('status' in next);
+      if (repeated) expect(repeated).toMatchObject({ why: 'assigned', status: 'working', stage: 0, merging: false });
+      expect(await c.db.select().from(taskEvents).where(eq(taskEvents.taskId, task.id))).toEqual([]);
+    }
+  });
+
+  it('only repeats the matching failed turn, never a queued turn or a second continuation', async () => {
+    const c = await fixture();
+    const task = await c.task();
+    const job = await c.job(task);
+    expect(await repeatedTurn(c.db, job.id, 'restart')).toBeNull();
+    expect(await repeatedTurn(c.db, '00000000-0000-4000-8000-000000000099', 'continue')).toBeNull();
+    await c.db.update(jobs).set({ status: 'failed', error: 'machine_restarted' }).where(eq(jobs.id, job.id));
+    expect(await repeatedTurn(c.db, job.id, 'restart')).toMatchObject({ job: { id: job.id }, taskWake: { why: 'go_on' } });
+    expect(await repeatedTurn(c.db, job.id, 'continue')).toBeNull();
+    await c.db.update(jobs).set({ error: 'agent_failed' }).where(eq(jobs.id, job.id));
+    expect(await repeatedTurn(c.db, job.id, 'restart')).toBeNull();
+    expect(await repeatedTurn(c.db, job.id, 'continue')).toMatchObject({ job: { id: job.id }, taskWake: { why: 'go_on' } });
+    await c.db.update(jobs).set({ continueOf: job.id }).where(eq(jobs.id, job.id));
+    expect(await repeatedTurn(c.db, job.id, 'continue')).toBeNull();
+  });
+
+  it('does not repeat a comment from before the task entered the merge phase', async () => {
+    const c = await fixture();
+    const task = await c.task();
+    const job = await c.job(task);
+    await c.message(job.id, task, 'comment');
+    const [current] = await c.db.update(tasks).set({ merging: true }).where(eq(tasks.id, task.id)).returning();
+    expect(await repeatWake(c.db, { job, task: current!, agent: c.worker }, 'restart')).toBeNull();
+  });
+
+  it('repeats legacy work and legacy giver notices, and names queued retries and continuations when skipped', async () => {
+    const c = await fixture();
+    const task = await c.task();
+    const job = await c.job(task);
+    expect(await repeatWake(c.db, { job, task, agent: c.worker }, 'restart')).toMatchObject({ why: 'go_on' });
+    const closed = await c.task({ status: 'done', closedAt: new Date() });
+    const notice = await c.job(closed, c.head.id);
+    notice.prompt = `#${closed.number} "Checkout", which you gave out, passed its gates and is done.`;
+    expect(await repeatWake(c.db, { job: notice, task: closed, agent: c.head }, 'restart')).toMatchObject({ why: 'done' });
+    for (const [link, wake] of [['retryOf', 'restart'], ['continueOf', 'continue']] as const) {
+      const queued = await c.job(closed);
+      await c.db.update(jobs).set({ [link]: job.id }).where(eq(jobs.id, queued.id));
+      expect(await discardStaleTurn(c.db, queued)).toBe(true);
+      expect((await c.db.select().from(taskEvents).where(eq(taskEvents.taskId, closed.id))).find(e => (e.data as { job: string }).job === queued.id)).toMatchObject({ data: { wake, job: queued.id } });
+    }
   });
 
   it('checks every task of a batch and takes its row locks', async () => {
