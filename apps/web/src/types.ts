@@ -223,8 +223,27 @@ export type Endpoint = { kind: 'person'; id: string } | { kind: 'orchestrator' }
 
 export type AgentEventKind = 'message' | 'text' | 'tool' | 'tool_result' | 'todo' | 'proposal' | 'applied' | 'stopped' | 'failed' | 'computer';
 
-/* One line of an agent's conversation, as the server keeps it. */
-export type EventView = { seq: number; kind: AgentEventKind; data: unknown; jobId: string | null; person: { id: string; name: string } | null; at: string };
+/* Who wrote or got a message: a person (id null: the company's people at large), an agent, or Hornhoof itself. */
+export type MessageParty = {
+  kind: 'person' | 'agent' | 'hornhoof';
+  id: string | null;
+  name: string;
+  role: Lang | null;
+  department: { id: string; name: Lang } | null;
+  agentKind?: 'orchestrator' | 'head' | 'worker';
+};
+
+/* One line of an agent's conversation, as the server keeps it. message: who a message came from and went to, and whether
+   it came to this agent or went out of it; older events have none. */
+export type EventView = {
+  seq: number;
+  kind: AgentEventKind;
+  data: unknown;
+  jobId: string | null;
+  person: { id: string; name: string } | null;
+  at: string;
+  message?: { direction: 'in' | 'out'; from: MessageParty; to: MessageParty };
+};
 
 /* What the browser hears live from /api/stream. */
 export type StreamMessage =

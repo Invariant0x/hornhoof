@@ -546,6 +546,19 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .t-wel .w2 { padding-left: 18px; color: var(--muted); }
 .t-u { color: var(--muted); white-space: pre-wrap; }
 .t-u em { font-style: normal; color: var(--ink); }
+/* A message between an agent and someone else: one line that names both, its text folded under it until opened, as a
+   folded transcript is in Claude Code. */
+.t-m { display: grid; grid-template-columns: 18px 1fr; color: var(--muted); }
+.t-mh { grid-column: 1 / -1; display: grid; grid-template-columns: 18px 1fr; padding: 0; border: 0; background: none; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.t-mh > i { font-style: normal; color: var(--muted); }
+.t-m.out .t-mh > i { color: var(--cyan-ink); }
+.t-mh > span { min-width: 0; overflow-wrap: anywhere; }
+.t-mh:hover > span { color: var(--cyan-ink); }
+.t-mh:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.t-mf { grid-column: 2; font-size: 12px; }
+.t-mb { grid-column: 2; min-width: 0; margin-top: 4px; padding-left: 10px; border-left: 2px solid var(--line2); color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Above the live terminal, Hornhoof's own frame lists the same lines; the newest stays in view. */
+.t-msgs { flex: none; max-height: 30%; overflow: auto; padding: 8px 16px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
 .t-l { display: grid; grid-template-columns: 18px 1fr; }
 .t-l > i { font-style: normal; }
 .t-l > div { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
