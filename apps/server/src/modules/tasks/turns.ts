@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lte, max, notInArray } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, max, notInArray, or } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentEvents, agents, companies, departments, people, tasks, turns, type TurnMessage } from '../../db/schema.js';
 import { CLOSED, note, published, refuse, type Task, type Tx, type Wake } from './engine.js';
@@ -58,21 +58,42 @@ async function place(ctx: Live, companyId: string, items: PlanItem[]): Promise<P
   return placed;
 }
 
+/* How many of the people's messages newWords reads at a time, newest first. */
+const WORDS_PAGE = 2 * TURN_MESSAGES;
+/* Messages carry the database's time and a turn's close the server's: they may be this far apart. */
+const CLOCK_SLACK_MS = 24 * 3_600_000;
+
+/* The ids of messages turns keep that may be among those written since a time: a live turn may have taken any, a closed
+   one only messages written before it closed. */
+async function keptSince(tx: Tx, companyId: string, since: Date): Promise<Set<string>> {
+  const may = or(inArray(turns.status, ['open', 'planned']), isNull(turns.closedAt), gte(turns.closedAt, new Date(since.getTime() - CLOCK_SLACK_MS)));
+  const rows = await tx.select({ messages: turns.messages }).from(turns).where(and(eq(turns.companyId, companyId), may));
+  return new Set(rows.flatMap(t => t.messages.flatMap(m => (m.id ? [m.id] : []))));
+}
+
 /* The words of the message this run answers, and as many of the messages before it as he names, leaving out words a turn
    already keeps. A run that a task's news started answers no one, so it keeps none. Messages that came in meanwhile wait
-   for the runs that answer them. */
-async function newWords(tx: Tx, by: By, words: number): Promise<TurnMessage[]> {
+   for the runs that answer them. It reads the newest messages a page at a time, and only the turns that may keep them. */
+export async function newWords(tx: Tx, by: By, words: number): Promise<TurnMessage[]> {
   const mine = and(eq(agentEvents.agentId, by.agentId), eq(agentEvents.kind, 'message'), isNotNull(agentEvents.personId));
   const [asked] = await tx.select({ seq: agentEvents.seq }).from(agentEvents).where(and(mine, eq(agentEvents.jobId, by.jobId))).orderBy(desc(agentEvents.seq)).limit(1);
   if (!asked) return [];
-  const kept = (await tx.select({ messages: turns.messages }).from(turns).where(eq(turns.companyId, by.companyId))).flatMap(t => t.messages.flatMap(m => (m.id ? [m.id] : [])));
-  const rows = await tx
-    .select({ id: agentEvents.id, text: agentEvents.data, at: agentEvents.createdAt, by: people.name })
-    .from(agentEvents)
-    .innerJoin(people, eq(people.id, agentEvents.personId))
-    .where(and(mine, lte(agentEvents.seq, asked.seq), kept.length ? notInArray(agentEvents.id, kept) : undefined))
-    .orderBy(desc(agentEvents.seq))
-    .limit(Math.min(Math.max(words, 1), TURN_MESSAGES));
+  const want = Math.min(Math.max(words, 1), TURN_MESSAGES);
+  const rows: { id: string; text: unknown; at: Date; by: string }[] = [];
+  for (let below = asked.seq + 1; rows.length < want; ) {
+    const page = await tx
+      .select({ id: agentEvents.id, seq: agentEvents.seq, text: agentEvents.data, at: agentEvents.createdAt, by: people.name })
+      .from(agentEvents)
+      .innerJoin(people, eq(people.id, agentEvents.personId))
+      .where(and(mine, lt(agentEvents.seq, below)))
+      .orderBy(desc(agentEvents.seq))
+      .limit(WORDS_PAGE);
+    if (!page.length) break;
+    const kept = await keptSince(tx, by.companyId, page.at(-1)!.at);
+    rows.push(...page.filter(r => !kept.has(r.id)).slice(0, want - rows.length));
+    if (page.length < WORDS_PAGE) break;
+    below = page.at(-1)!.seq;
+  }
   return rows
     .reverse()
     .map(r => ({ id: r.id, by: r.by, text: typeof (r.text as { text?: unknown }).text === 'string' ? (r.text as { text: string }).text : '', at: r.at.toISOString() }))
@@ -162,8 +183,15 @@ async function announce(ctx: Live, started: Started[]): Promise<void> {
   }
 }
 
-/* Any open task of the turn, the work under its top tasks too. */
-const liveIn = (turnId: string) => and(eq(tasks.turnId, turnId), notInArray(tasks.status, [...CLOSED]));
+/* Whether the turn has any open task, the work under its top tasks too: the first one found answers, none are counted. */
+export async function liveIn(tx: Tx, companyId: string, turnId: string): Promise<boolean> {
+  const [open] = await tx
+    .select({ id: tasks.id })
+    .from(tasks)
+    .where(and(eq(tasks.companyId, companyId), eq(tasks.turnId, turnId), notInArray(tasks.status, [...CLOSED])))
+    .limit(1);
+  return Boolean(open);
+}
 
 /* Opens the lowest planned turn when none is open, and sends its tasks to their heads. An open turn with nothing left at
    its top closes first, and a planned turn whose tasks were all cancelled closes without starting, so the turns after
@@ -172,8 +200,7 @@ async function openNext(tx: Tx, companyId: string): Promise<{ turn: Turn; starte
   for (;;) {
     const [open] = await tx.select({ id: turns.id }).from(turns).where(and(eq(turns.companyId, companyId), eq(turns.status, 'open')));
     if (open) {
-      const [left] = await tx.select({ n: count() }).from(tasks).where(liveIn(open.id));
-      if (Number(left?.n ?? 0)) return null;
+      if (await liveIn(tx, companyId, open.id)) return null;
       await tx.update(turns).set({ status: 'closed', closedAt: new Date() }).where(eq(turns.id, open.id));
       continue;
     }
@@ -354,8 +381,7 @@ async function storeSettle(tx: Tx, task: Pick<Task, 'turnId' | 'companyId' | 'st
   const turnId = task.turnId!;
   const [turn] = await tx.select().from(turns).where(and(eq(turns.id, turnId), inArray(turns.status, ['open', 'planned'])));
   if (!turn) return null;
-  const [left] = await tx.select({ n: count() }).from(tasks).where(liveIn(turnId));
-  if (Number(left?.n ?? 0)) return null;
+  if (await liveIn(tx, task.companyId, turnId)) return null;
   const [closed] = await tx.update(turns).set({ status: 'closed', closedAt: new Date() }).where(eq(turns.id, turnId)).returning();
   return { closed: closed!, planned: turn.status === 'planned', opened: turn.status === 'open' ? await openNext(tx, task.companyId) : null };
 }
