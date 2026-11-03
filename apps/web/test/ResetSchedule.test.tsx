@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Subscriptions } from '../src/screens/Subscriptions';
 import type { Limits, SubView } from '../src/types';
-import { ME, mockApi, SUBS } from './api-mock';
+import { MACHINE, ME, mockApi, SUBS } from './api-mock';
 
 const NOW = Date.parse('2026-11-01T00:00:00.000Z');
 const at = (milliseconds: number) => new Date(NOW + milliseconds).toISOString();
@@ -127,8 +127,9 @@ describe('relative subscription reset times', () => {
   it('keeps provider windows separate and marks null or invalid reset times unknown', async () => {
     fixedTime();
     const claude = { ...SUBS[0]!, limits: { status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0.42, resetsAt: at(79 * HOUR) }] } };
-    const codex = { ...SUBS[1]!, limits: { status: 'allowed' as const, windows: [{ name: '120_minutes', utilization: 0.05, resetsAt: at(7 * HOUR + 5 * MINUTE) }, { name: 'five_hour', utilization: null, resetsAt: null }] } };
-    const kimi = { ...SUBS[2]!, limits: { status: 'allowed' as const, complete: true, windows: [{ name: 'five_hour', utilization: 0.88, resetsAt: at(30_000) }, { name: 'month', utilization: 0.06, resetsAt: 'not-a-time' }] } };
+    /* Working plans: a plan that does not work shows no limits. */
+    const codex = { ...SUBS[1]!, status: 'ready' as const, machines: [MACHINE], limits: { status: 'allowed' as const, windows: [{ name: '120_minutes', utilization: 0.05, resetsAt: at(7 * HOUR + 5 * MINUTE) }, { name: 'five_hour', utilization: null, resetsAt: null }] } };
+    const kimi = { ...SUBS[2]!, status: 'ready' as const, online: true, machines: [MACHINE], limits: { status: 'allowed' as const, complete: true, windows: [{ name: 'five_hour', utilization: 0.88, resetsAt: at(30_000) }, { name: 'month', utilization: 0.06, resetsAt: 'not-a-time' }] } };
     await renderSubs([claude, codex, kimi]);
     for (const button of screen.getAllByRole('button', { name: /^Open the card of / })) fireEvent.click(button);
     expect(within(screen.getByRole('article', { name: 'Claude, Ivan' })).getByText('resets in 3 days 7 h')).toBeInTheDocument();
