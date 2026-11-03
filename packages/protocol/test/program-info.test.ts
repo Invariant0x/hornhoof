@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ProgramInfo } from '../src/index.js';
+import { parseNodeMessage, parseServerMessage, ProgramInfo } from '../src/index.js';
 
 describe('managed program snapshots', () => {
   it('accepts an installed version and removes unrelated fields', () => {
@@ -16,5 +16,33 @@ describe('managed program snapshots', () => {
     { id: 'other' }, { version: '' }, { version: 'x'.repeat(65) }, { version: 2 }, { updating: 'yes' }, { failed: null },
   ])('rejects invalid program state %j', wrong => {
     expect(ProgramInfo.safeParse({ id: 'codex', version: '1.0.0', updating: false, failed: false, ...wrong }).success).toBe(false);
+  });
+});
+
+
+describe('managed program messages', () => {
+  const program = { id: 'claude', version: '2.0.0', updating: false, failed: false };
+  const messages = [
+    { type: 'hello', version: '0.5.0', loggedIn: true, running: [] },
+    { type: 'status', loggedIn: true, limits: null },
+  ];
+
+  it.each(messages)('keeps older $type messages compatible', message => {
+    expect(parseNodeMessage(JSON.stringify(message))).toEqual(message);
+  });
+
+  it.each(messages)('carries managed versions in $type', message => {
+    const states = [program, { id: 'codex', version: null, updating: true, failed: false }, { id: 'kimi', version: '1.0.0', updating: false, failed: true }];
+    expect(parseNodeMessage(JSON.stringify({ ...message, programs: states }))).toEqual({ ...message, programs: states });
+    expect(parseNodeMessage(JSON.stringify({ ...message, programs: [] }))).toEqual({ ...message, programs: [] });
+  });
+
+  it.each(messages.flatMap(message => [null, 'unknown', [{ ...program, id: 'other' }], [{ ...program, updating: 1 }], [program, program, program, program]]
+    .map(programs => ({ message, programs }))))('rejects malformed program lists in $message.type: $programs', ({ message, programs }) => {
+    expect(parseNodeMessage(JSON.stringify({ ...message, programs }))).toBeNull();
+  });
+
+  it('accepts the node command to update its programs', () => {
+    expect(parseServerMessage(JSON.stringify({ type: 'programs.update' }))).toEqual({ type: 'programs.update' });
   });
 });

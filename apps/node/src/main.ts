@@ -156,7 +156,8 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   const emit = (m: NodeMessage) => {
     if (m.type === 'job.done') keep(m.jobId, m);
     if (m.type === 'tests.done') keepTest(m.partId, m);
-    if (!send?.(m) && m.type !== 'job.done' && m.type !== 'tests.done') outbox.push(m);
+    const current = withPrograms(m, programs);
+    if (!send?.(current) && m.type !== 'job.done' && m.type !== 'tests.done') outbox.push(current);
   };
   const keep = (jobId: string, m: NodeMessage) => {
     unconfirmed.set(jobId, m);
@@ -215,10 +216,11 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   /* Which account and plan the program is signed in to, read at the start, after a sign-in and with the limits. */
   const readAccount = async () => (single?.account ? await single.account().catch(() => null) : null);
   let account = await readAccount();
+  const tellStatus = () => emit({ type: 'status', loggedIn, limits, ...(models ? { models } : {}), account });
   const status = async () => {
     /* A program that cannot list its models now keeps those it listed before. */
     models = await readModels().catch(() => models);
-    emit({ type: 'status', loggedIn, limits, ...(models ? { models } : {}), account });
+    tellStatus();
   };
 
   /* How busy the machine is, which Hornhoof weighs when it picks a machine for a test run. */
@@ -234,7 +236,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       /* Finished jobs Hornhoof has not confirmed still count as running, so the server does not give up on them. */
       const typed = host?.typedJobs() ?? [];
       const tests = [...testing.keys(), ...unconfirmedTests.keys()];
-      next({ type: 'hello', version: VERSION, loggedIn, running: [...running.keys(), ...typed, ...unconfirmed.keys()], ...(models ? { models } : {}), terminals: Boolean(host), work: Boolean(testUser), ...(testUser ? {} : { noRuns: NO_RUNS }), load: load(), tests, skillFiles: true, publicKey: keyPair.recipient, account, boot });
+      next({ type: 'hello', version: VERSION, loggedIn, running: [...running.keys(), ...typed, ...unconfirmed.keys()], ...(models ? { models } : {}), terminals: Boolean(host), work: Boolean(testUser), ...(testUser ? {} : { noRuns: NO_RUNS }), load: load(), tests, skillFiles: true, publicKey: keyPair.recipient, account, boot, programs: programs.snapshot() });
       for (const m of outbox.splice(0)) emit(m);
       for (const m of unconfirmed.values()) next(m);
       for (const m of unconfirmedTests.values()) next(m);
@@ -243,7 +245,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     onMessage: m => void handle(m).catch(err => log(`A message from Hornhoof failed: ${message(err)}`)),
     onRefused: () => log('Hornhoof does not know this machine any more. Run the install command from Hornhoof again to reconnect.'),
   });
-  void programs.update().catch(err => log(`Could not update the programs: ${message(err)}`));
+  void programs.update(tellStatus).catch(err => log(`Could not update the programs: ${message(err)}`));
 
   async function handle(m: ServerMessage) {
     if (m.type === 'remove') {
@@ -263,8 +265,8 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       stop();
       return;
     }
-    if (m.type === 'job.ack') return void unconfirmed.delete(m.jobId);
-    if (m.type === 'tests.ack') return void unconfirmedTests.delete(m.partId);
+    if (acknowledged(m, unconfirmed, unconfirmedTests)) return;
+    if (m.type === 'programs.update') return programs.update(tellStatus);
     if (m.type === 'tests.cancel') return void testing.get(m.partId)?.stop.abort();
     if (m.type === 'tests.run') {
       if (stopped || testing.has(m.partId) || unconfirmedTests.has(m.partId)) return;
@@ -520,6 +522,23 @@ const machineOnly: ProviderAdapter = {
 };
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
+/* Replayed status messages describe the current installation, never an earlier queued phase. */
+function withPrograms(message: NodeMessage, programs: ProgramUpdates): NodeMessage {
+  return message.type === 'status' ? { ...message, programs: programs.snapshot() } : message;
+}
+
+function acknowledged(message: ServerMessage, jobs: Map<string, NodeMessage>, tests: Map<string, NodeMessage>): message is Extract<ServerMessage, { type: 'job.ack' | 'tests.ack' }> {
+  if (message.type === 'job.ack') {
+    jobs.delete(message.jobId);
+    return true;
+  }
+  if (message.type === 'tests.ack') {
+    tests.delete(message.partId);
+    return true;
+  }
+  return false;
+}
 
 function runUnlessStopped(input: RunInput, run: () => Promise<RunResult>): Promise<RunResult> {
   if (input.signal?.aborted) return Promise.resolve({ ok: false, sessionId: input.sessionId, result: 'Stopped.', output: 'Stopped.', error: 'cancelled', limits: null });

@@ -59,6 +59,83 @@ const hasTmux = (() => {
   }
 })();
 
+describe('reporting managed programs', () => {
+  it('reports startup and explicit updates without stopping an active job, and coalesces requests', async () => {
+    const server = await fakeServer();
+    let version = '1.0.0';
+    const releases: (() => void)[] = [];
+    const programs = new ProgramUpdates([{ id: 'claude', readVersion: () => version, install: async () => {
+      await new Promise<void>(resolve => releases.push(resolve));
+      version = `${releases.length + 1}.0.0`;
+    } }]);
+    let finishJob: (() => void) | undefined;
+    let cancelled = false;
+    const running = { ...adapter, run: async (input: RunInput) => {
+      input.signal?.addEventListener('abort', () => { cancelled = true; });
+      await new Promise<void>(resolve => { finishJob = resolve; });
+      return adapter.run(input);
+    } };
+    const node = await runNode({ dir: nodeDir(server.url), adapter: running, programs, log: () => {} });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    expect(server.received[0]).toMatchObject({ programs: [{ id: 'claude', version: '1.0.0', updating: true, failed: false }] });
+    releases[0]!();
+    await server.wait(() => server.received.some(m => m.type === 'status' && JSON.stringify(m.programs).includes('2.0.0')));
+    server.send({ type: 'job.run', jobId: 'active-update', subscriptionId: 's1', provider: 'claude', prompt: 'finish this', sessionId: null, model: null, timeoutMs: 20000, secret: null, instructions: null, toolToken: null });
+    await server.wait(() => finishJob !== undefined);
+    server.send({ type: 'programs.update' });
+    server.send({ type: 'programs.update' });
+    server.send({ type: 'agent.say', agentKey: 'none', text: 'barrier', ref: 'updates-queued' });
+    await server.wait(() => server.received.some(m => m.type === 'agent.said' && m.ref === 'updates-queued'));
+    expect(releases).toHaveLength(2);
+    expect(server.received.filter(m => m.type === 'status').at(-1)).toMatchObject({ programs: [{ version: '2.0.0', updating: true, failed: false }] });
+    releases[1]!();
+    await server.wait(() => server.received.some(m => m.type === 'status' && JSON.stringify(m.programs).includes('3.0.0')));
+    expect(cancelled).toBe(false);
+    expect(server.received.some(m => m.type === 'job.done' && m.jobId === 'active-update')).toBe(false);
+    finishJob!();
+    await server.wait(() => server.received.some(m => m.type === 'job.done' && m.jobId === 'active-update'));
+    expect(server.received.find(m => m.type === 'job.done' && m.jobId === 'active-update')).toMatchObject({ ok: true, result: 'ready' });
+  });
+
+  it('reports an update failure without npm output and permits an explicit retry', async () => {
+    const server = await fakeServer();
+    let version = '1.0.0';
+    let attempts = 0;
+    const programs = new ProgramUpdates([{ id: 'claude', readVersion: () => version, install: async () => {
+      if (++attempts === 1) throw new Error('private npm credential');
+      version = '2.0.0';
+    } }]);
+    const node = await runNode({ dir: nodeDir(server.url), adapter, programs, log: () => {} });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    expect(server.received[0]).toMatchObject({ programs: [{ version: '1.0.0', updating: false, failed: true }] });
+    expect(JSON.stringify(server.received)).not.toContain('private npm credential');
+    server.send({ type: 'programs.update' });
+    await server.wait(() => server.received.some(m => m.type === 'status' && JSON.stringify(m.programs).includes('2.0.0')));
+    expect(server.received.filter(m => m.type === 'status').at(-1)).toMatchObject({ programs: [{ version: '2.0.0', updating: false, failed: false }] });
+  });
+
+  it('replays current snapshots after hello and reconnect instead of older queued update states', async () => {
+    const server = await fakeServer();
+    let installed = 1;
+    const programs = new ProgramUpdates([{ id: 'codex', readVersion: () => `${installed}.0.0`, install: async () => { installed++; } }]);
+    const node = await runNode({ dir: nodeDir(server.url), adapter, programs, log: () => {} });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    await server.wait(() => server.received.filter(m => m.type === 'status').length >= 2);
+    const snapshot = [{ id: 'codex', version: '2.0.0', updating: false, failed: false }];
+    expect(server.received[0]).toMatchObject({ programs: snapshot });
+    for (const status of server.received.filter(m => m.type === 'status')) expect(status.programs).toEqual(snapshot);
+    server.drop();
+    await programs.update();
+    await server.wait(() => server.received.filter(m => m.type === 'hello').length === 2, 6000);
+    const hello = server.received.findLastIndex(m => m.type === 'hello');
+    expect(server.received[hello]).toMatchObject({ programs: [{ id: 'codex', version: '3.0.0', updating: false, failed: false }] });
+    for (const status of server.received.slice(hello + 1).filter(m => m.type === 'status')) expect(status.programs).toEqual(programs.snapshot());
+  });
+});
+
 describe('a node that runs agents in terminals', () => {
   it.skipIf(!hasTmux)('passes the live word budget to the host and accepts older servers without it', async () => {
     const server = await fakeServer();
