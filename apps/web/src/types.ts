@@ -1,8 +1,8 @@
-import type { Limits, ModelOption, NodeLoad, ProgramState, ProviderId, TemplateKey } from '@hornhoof/protocol';
+import type { Limits, ModelOption, NodeLoad, ProviderId, TemplateKey } from '@hornhoof/protocol';
 import type { RoleEffort } from '@hornhoof/protocol/efforts';
-import type { WorkLine } from '@hornhoof/protocol/map';
+import type { TurnAlarm, TurnProgram, WorkLine } from '@hornhoof/protocol/map';
 
-export type { Limits, ModelOption, ProviderId, TemplateKey, WorkLine };
+export type { Limits, ModelOption, ProviderId, TemplateKey, TurnAlarm, WorkLine };
 
 /* Template text that comes in both languages. */
 export type Lang = { en: string; ru: string };
@@ -89,14 +89,7 @@ export type EmployeeStatus = 'working' | 'queued' | 'handed' | 'waiting' | 'idle
 /* The task an employee is about, for people who reach its department. */
 export type EmployeeTask = { id: string; number: number; title: string; stage: number; gateCount: number; bounces: number };
 
-/* What the program of an agent's running turn does, as its node last said: thinking, in a tool (named), asking a person,
-   waiting for input at its prompt, or gone. since: when it began; screenAt: when its screen last changed; reportedAt: the
-   node's last word. */
-export type ProgramView = { state: ProgramState; since: string; tool: string | null; screenAt: string; reportedAt: string };
-
-/* The server's one alarm about a running turn: its program and screen did not change, or its node said nothing, for half an
-   hour; since: the last change, or the node's last word. */
-export type TurnAlarm = { reason: 'program_stalled' | 'node_silent'; since: string };
+export type ProgramView = TurnProgram;
 
 /* An employee as the map lists it: the head first, then members in the order they were hired. */
 export type Employee = {

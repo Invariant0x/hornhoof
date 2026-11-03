@@ -1,3 +1,5 @@
+import type { ProgramState } from './index.js';
+
 /* The lines of the company map between a head and its people, and between the orchestrator and each department's head.
    A line is blue while the one below works on an assignment, yellow for five minutes after it gave back a result, and
    quiet otherwise. Each start of new work begins a new cycle of the line, so a result given back in an earlier cycle never
@@ -12,6 +14,20 @@ export const QUIET_ALARM_MS = 1_800_000;
 /* A program waiting for input this long in a running turn lost the turn's end: its node closes the turn then, and the map
    shows it red if the turn still runs. */
 export const LOST_END_MS = 60_000;
+
+/* A running turn's program as /api/org and /api/agents/:id give it. All times are Unix epoch milliseconds. */
+export type TurnProgram = {
+  state: ProgramState;
+  since: number;
+  tool: string | null;
+  screenAt: number;
+  reportedAt: number;
+};
+
+export type TurnAlarmReason = 'program_stalled' | 'node_silent';
+
+/* The server's alarm about a running turn; since is the last change or report, in Unix epoch milliseconds. */
+export type TurnAlarm = { reason: TurnAlarmReason; since: number };
 
 export type LineState = 'blue' | 'yellow' | 'quiet';
 
