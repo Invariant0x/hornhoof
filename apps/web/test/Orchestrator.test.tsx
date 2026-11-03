@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { AgentWindow } from '../src/screens/AgentWindow';
 import type { ComputerView, EventView, Me, Org, ShownCommand } from '../src/types';
@@ -602,5 +602,115 @@ describe('AgentWindow', () => {
     const { onClose } = open();
     fireEvent.click(await screen.findByRole('button', { name: 'Close' }));
     expect(onClose).toHaveBeenCalled();
+  });
+});
+
+describe('messages between agents and people', () => {
+  type Party = NonNullable<EventView['message']>['from'];
+  const DAVID: Party = { kind: 'person', id: 'p2', name: 'David AI', role: { en: 'CEO assistant', ru: 'Помощник CEO' }, department: null };
+  const PEOPLE: Party = { kind: 'person', id: null, name: '', role: null, department: null };
+  const HORNHOOF: Party = { kind: 'hornhoof', id: null, name: 'Hornhoof', role: null, department: null };
+  const ORCH: Party = { kind: 'agent', id: 'a1', name: 'Orchestrator', role: null, department: null, agentKind: 'orchestrator' };
+  const DEV = { id: 'd2', name: { en: 'Development', ru: 'Разработка' } };
+  const DANA: Party = { kind: 'agent', id: 'b0', name: 'Dana', role: { en: 'Head of development', ru: 'Руководитель разработки' }, department: DEV, agentKind: 'head' };
+  const BRUNO: Party = { kind: 'agent', id: 'b1', name: 'Bruno', role: { en: 'Backend engineer', ru: 'Бэкенд-разработчик' }, department: DEV, agentKind: 'worker' };
+  const msg = (seq: number, direction: 'in' | 'out', from: Party, to: Party, text: string) => ev(seq, 'message', { text }, { message: { direction, from, to } });
+  const ctrlO = (target: Element = document.body) => fireEvent.keyDown(target, { key: 'o', ctrlKey: true });
+
+  function employee(agentId: string, events: EventView[], state: object = READY) {
+    mockApi({
+      [`GET /api/agents/${agentId}`]: [200, agentId === 'b0' ? { ...CARD, id: 'b0', kind: 'head', name: 'Dana', role: { ...CARD.role!, id: 'DEV-HEAD', title: { en: 'Head of development', ru: 'Руководитель разработки' } } } : CARD],
+      [`GET /api/agents/${agentId}/events?after=0`]: [200, { events, state }],
+    });
+    render(
+      <LanguageProvider>
+        <AgentWindow me={ME} org={DEV_ORG} agentId={agentId} onClose={() => {}} />
+      </LanguageProvider>,
+    );
+  }
+
+  const ORCHESTRATOR_LOG = [
+    msg(1, 'in', DAVID, ORCH, 'Take #78 into work.\nService: answer in Russian.'),
+    msg(2, 'in', HORNHOOF, ORCH, 'David AI took an improvement into work.'),
+    msg(3, 'in', DANA, ORCH, '#49 is blocked.'),
+    msg(4, 'out', ORCH, DANA, 'Give #78 to a developer.'),
+    ev(5, 'text', { kind: 'text', text: 'Handed #78 to development.' }),
+  ];
+
+  it("shows the orchestrator's messages each as one line naming who wrote to whom, the text folded and opened by a click", async () => {
+    open({ [`GET ${EVENTS}?after=0`]: [200, { events: ORCHESTRATOR_LOG, state: READY }] });
+    const david = await screen.findByRole('button', { name: 'Message from David AI (CEO assistant) to the orchestrator' });
+    expect(screen.getByRole('button', { name: 'Hornhoof notice to the orchestrator' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Message from Dana (Head of development) to the orchestrator' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Message to Dana (Head of development) from the orchestrator' })).toBeInTheDocument();
+    /* Folded: the text is not on the screen, and the agent's own words to the person are. */
+    expect(david).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText(/Take #78 into work/)).not.toBeInTheDocument();
+    expect(screen.getByText('Handed #78 to development.')).toBeInTheDocument();
+    fireEvent.click(david);
+    expect(david).toHaveAttribute('aria-expanded', 'true');
+    /* Nothing is hidden: the service lines are in the opened text too. */
+    expect(screen.getByText(/Take #78 into work\.\s+Service: answer in Russian\./)).toBeInTheDocument();
+    expect(screen.queryByText('#49 is blocked.')).not.toBeInTheDocument();
+    fireEvent.click(david);
+    expect(screen.queryByText(/Take #78 into work/)).not.toBeInTheDocument();
+  });
+
+  it('opens every folded message with Ctrl+O and folds them again with it', async () => {
+    open({ [`GET ${EVENTS}?after=0`]: [200, { events: ORCHESTRATOR_LOG, state: READY }] });
+    await screen.findByRole('button', { name: 'Hornhoof notice to the orchestrator' });
+    ctrlO();
+    for (const text of [/Take #78 into work/, /David AI took an improvement into work/, /#49 is blocked/, /Give #78 to a developer/]) expect(screen.getByText(text)).toBeInTheDocument();
+    ctrlO(screen.getByRole('textbox', { name: 'Write to the orchestrator' }));
+    expect(screen.queryByText(/#49 is blocked/)).not.toBeInTheDocument();
+    expect(screen.getByText('Handed #78 to development.')).toBeInTheDocument();
+  });
+
+  it('takes Ctrl+O while the focus is still on the map that opened the window, but not while one types elsewhere', async () => {
+    open({ [`GET ${EVENTS}?after=0`]: [200, { events: ORCHESTRATOR_LOG, state: READY }] });
+    await screen.findByRole('button', { name: 'Hornhoof notice to the orchestrator' });
+    const chip = document.body.appendChild(document.createElement('button'));
+    const field = document.body.appendChild(document.createElement('input'));
+    onTestFinished(() => { chip.remove(); field.remove(); });
+    ctrlO(field);
+    expect(screen.queryByText(/#49 is blocked/)).not.toBeInTheDocument();
+    ctrlO(chip);
+    expect(screen.getByText(/#49 is blocked/)).toBeInTheDocument();
+  });
+
+  it("shows a head's messages the same way", async () => {
+    employee('b0', [msg(1, 'in', ORCH, DANA, 'Plan #78.'), msg(2, 'out', DANA, BRUNO, 'Take #83.')]);
+    expect(await screen.findByRole('button', { name: 'Message from the orchestrator to Dana (Head of development)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Message to Bruno (Backend engineer) from Dana (Head of development)' })).toBeInTheDocument();
+  });
+
+  it("shows an employee's messages, sent and received, in Russian", async () => {
+    localStorage.setItem('hh-lang', 'ru');
+    onTestFinished(() => localStorage.clear());
+    employee('b1', [
+      msg(1, 'in', DANA, BRUNO, 'Возьми #83.'),
+      msg(2, 'out', BRUNO, PEOPLE, 'Нужен доступ к репозиторию.'),
+      msg(3, 'in', HORNHOOF, BRUNO, '#83 ждет сдачи.'),
+      msg(4, 'out', BRUNO, ORCH, 'Готово.'),
+    ]);
+    const first = await screen.findByRole('button', { name: 'Сообщение от Dana (Руководитель разработки) для Bruno (Бэкенд-разработчик)' });
+    expect(screen.getByRole('button', { name: 'Сообщение для людей от Bruno (Бэкенд-разработчик)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Уведомление Hornhoof для Bruno (Бэкенд-разработчик)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Сообщение для оркестратора от Bruno (Бэкенд-разработчик)' })).toBeInTheDocument();
+    expect(screen.queryByText('Возьми #83.')).not.toBeInTheDocument();
+    fireEvent.click(first);
+    expect(screen.getByText('Возьми #83.')).toBeInTheDocument();
+  });
+
+  it('shows the same lines in the frame around the live terminal, and leaves Ctrl+O typed in the terminal to the program', async () => {
+    open({ [`GET ${EVENTS}?after=0`]: [200, { events: ORCHESTRATOR_LOG, state: { ...READY, terminal: true } }] });
+    expect(await screen.findByTestId('live-terminal')).toBeInTheDocument();
+    const frame = screen.getByRole('region', { name: 'Messages' });
+    const david = within(frame).getByRole('button', { name: 'Message from David AI (CEO assistant) to the orchestrator' });
+    expect(within(frame).getByRole('button', { name: 'Message to Dana (Head of development) from the orchestrator' })).toBeInTheDocument();
+    ctrlO(screen.getByRole('textbox', { name: 'Terminal input' }));
+    expect(david).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(david);
+    expect(within(frame).getByText(/Take #78 into work/)).toBeInTheDocument();
   });
 });

@@ -4,6 +4,7 @@ import { deptLabel, errorText, useLanguage, useT, type Messages } from '../i18n'
 import { useStream } from '../live';
 import { PROGRAM_NAMES, PROVIDER_NAMES } from '../providers';
 import type { AgentCardView, ComputerView, EventView, Me, OrchestratorState, Org, ShownCommand, StaffLine, StructureItem, SubView, TemplateKey } from '../types';
+import { EventMessage, isMessage, MessageFrame, useFolding } from '../ui/AgentMessage';
 import { AgentTerminal } from '../ui/AgentTerminal';
 import { CommandCard } from '../ui/CommandCard';
 import { ComputerCard, isOpen } from '../ui/ComputerCard';
@@ -307,6 +308,8 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard }:
 
   /* One card at a time: his newest proposal until it is applied, below his latest line. */
   const shown = visible(events);
+  const messages = shown.filter(isMessage);
+  const folding = useFolding(messages.map(e => e.seq), box);
   const newest = events.findLast(e => e.kind === 'proposal');
   const applied = new Set(events.filter(e => e.kind === 'applied').map(e => (e.data as Applied).proposalId));
   const open = newest && !applied.has(field(newest.data, 'proposalId')) ? newest.data : null;
@@ -379,6 +382,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard }:
   function line(e: EventView, i: number) {
     switch (e.kind) {
       case 'message':
+        if (isMessage(e)) return <EventMessage event={e} folding={folding} />;
         return (
           <div className="t-u">
             &gt; <em>{e.person?.name ?? author(field(e.data, 'from'), field(e.data, 'name'))}:</em> {field(e.data, 'text')}
@@ -521,6 +525,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard }:
           )}
         </div>
       )}
+      {!notebook && known && terminal && messages.length > 0 && <MessageFrame events={messages} folding={folding} />}
       {!notebook && known && terminal && <AgentTerminal path={`/api/agents/${agentId}/terminal`} program={sub ? PROGRAM_NAMES[sub.provider] : 'Claude'} onGone={() => setNoTerminal(true)} />}
       {!notebook && known && terminal && hasCards && (
         <div className="t-cards">
