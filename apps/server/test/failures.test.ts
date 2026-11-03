@@ -2,7 +2,7 @@ import type { Failure } from '@hornhoof/protocol';
 import { and, eq } from 'drizzle-orm';
 import { describe, expect, it, vi, onTestFinished } from 'vitest';
 import { agentEvents, jobs, tasks } from '../src/db/schema.js';
-import { enqueueTurn, insertTurn, pump } from '../src/modules/conversation/queue.js';
+import { enqueueTurn, GONE_ALONG, insertTurn, pump } from '../src/modules/conversation/queue.js';
 import { createTask } from '../src/modules/tasks/engine.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
 import { failureCompany } from './failure-company.js';
@@ -17,6 +17,22 @@ async function atWork() {
 }
 
 describe('named turn failures', () => {
+  it.each([undefined, 'network', 'refused'] as const)('checks carried tasks after %s without changing the own task follow-up', async kind => {
+    const c = await atWork();
+    const [carried] = await c.db.insert(tasks).values({ companyId: c.companyId, number: 2, title: 'Refunds', status: 'working', assigneeAgentId: c.agent.id, executorAgentId: c.agent.id }).returning();
+    await c.db.insert(jobs).values({ companyId: c.companyId, subscriptionId: c.sub.id, agentId: c.agent.id, taskId: carried!.id, kind: 'conversation', prompt: 'Handle refunds', timeoutMs: 900000, status: 'done', result: GONE_ALONG, startedAt: c.first.startedAt, finishedAt: c.first.startedAt });
+
+    await c.fail(c.first.id, kind ? failure(kind, kind !== 'refused') : undefined);
+
+    const turns = await c.turnsOf();
+    expect((await c.log(carried!.id)).some(e => e.kind === 'continued')).toBe(true);
+    expect(turns.filter(j => j.taskId === carried!.id && ['queued', 'running'].includes(j.status))).toHaveLength(1);
+    const own = turns.filter(j => j.taskId === c.task.id && j.id !== c.first.id);
+    expect(own).toHaveLength(kind === 'refused' ? 0 : 1);
+    if (kind === 'network') expect(own[0]).toMatchObject({ status: 'queued', continueOf: c.first.id, notBefore: expect.any(Date) });
+    if (kind) expect((await c.log(c.task.id)).some(e => e.kind === 'continued')).toBe(false);
+  });
+
   it.each(['overloaded', 'network', 'cut', 'rate_limited', 'unknown'] as const)('keeps %s, records why and waits a minute before continuing', async kind => {
     const c = await atWork();
     const at = new Date();
@@ -107,6 +123,30 @@ describe('named turn failures', () => {
     const at = new Date();
     await c.fail(c.first.id, failure('cut'), at);
     const expected = { retry: { attempt: 1, max: 4, at: +at + MIN, kind: 'cut' }, failure: { kind: 'cut', text: failure('cut').text, at: +at } };
+    const card = (await c.app.inject({ url: `/api/agents/${c.agent.id}`, ...c.as(c.ceo) })).json();
+    expect(card).toMatchObject(expected);
+    const org = (await c.app.inject({ url: '/api/org', ...c.as(c.ceo) })).json();
+    expect(org.departments.find((d: { id: string }) => d.id === c.dev.id).employees.find((a: { id: string }) => a.id === c.agent.id)).toMatchObject(expected);
+  });
+
+  it.each([
+    { status: 'done', error: null, named: false, shown: 'none' },
+    { status: 'done', error: null, named: true, shown: 'none' },
+    { status: 'failed', error: 'agent_failed', named: false, shown: 'none' },
+    { status: 'failed', error: 'agent_failed', named: true, shown: 'latest' },
+    { status: 'failed', error: 'cancelled', named: false, shown: 'first' },
+    { status: 'failed', error: 'removed', named: false, shown: 'first' },
+    { status: 'failed', error: 'switched_off', named: false, shown: 'first' },
+    { status: 'running', error: null, named: false, shown: 'first' },
+  ] as const)('shows $shown failure after a later $status turn with error $error and named failure $named', async ({ status, error, named, shown }) => {
+    const c = await atWork();
+    const at = new Date();
+    await c.fail(c.first.id, failure('cut'), at);
+    const later = new Date(+at + 1000);
+    await c.db.insert(jobs).values({ companyId: c.companyId, subscriptionId: c.sub.id, agentId: c.agent.id, kind: 'conversation', prompt: 'Later work', timeoutMs: 900000, status, error, failure: named ? failure('refused', false) : null, finishedAt: status === 'running' ? null : later });
+    const expectedFailure = shown === 'none' ? null : { kind: shown === 'first' ? 'cut' : 'refused', text: failure('cut').text, at: shown === 'first' ? +at : +later };
+    const expected = { failure: expectedFailure, retry: { attempt: 1, max: 4, at: +at + MIN, kind: 'cut' } };
+
     const card = (await c.app.inject({ url: `/api/agents/${c.agent.id}`, ...c.as(c.ceo) })).json();
     expect(card).toMatchObject(expected);
     const org = (await c.app.inject({ url: '/api/org', ...c.as(c.ceo) })).json();

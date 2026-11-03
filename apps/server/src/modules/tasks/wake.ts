@@ -362,13 +362,14 @@ async function heldTask(ctx: Ctx, agentId: string, taskId: string): Promise<Task
    tasks it comes after or on people.
    A turn that carried other tasks' turns along is checked on each of those tasks too, and a task the agent holds once,
    however many of them lead to it. */
-export async function checkLiveness(ctx: Ctx, jobId: string, carried: string[] = []): Promise<void> {
+export async function checkLiveness(ctx: Ctx, jobId: string, carried: string[] = [], { carriedOnly = false } = {}): Promise<void> {
   const [job] = await ctx.db.select().from(jobs).where(eq(jobs.id, jobId));
   if (!job?.taskId || !job.agentId || !job.startedAt || job.error === 'cancelled') return;
+  const own = carriedOnly ? await heldTask(ctx, job.agentId, job.taskId) : null;
   const held = new Map<string, Task>();
-  for (const taskId of [job.taskId, ...carried]) {
+  for (const taskId of carriedOnly ? carried : [job.taskId, ...carried]) {
     const task = await heldTask(ctx, job.agentId, taskId);
-    if (task && !held.has(task.id)) held.set(task.id, task);
+    if (task && task.id !== own?.id && !held.has(task.id)) held.set(task.id, task);
   }
   for (const task of held.values()) await checkHeld(ctx, { ...job, agentId: job.agentId, startedAt: job.startedAt }, task);
 }
@@ -522,7 +523,11 @@ export async function afterJob(ctx: Ctx, jobId: string): Promise<void> {
   if (!job?.agentId || job.kind !== 'conversation') return;
   if (job.status === 'failed') await recordFailedTurn(ctx, jobId, { ...job, agentId: job.agentId }, program);
   const handled = await afterFailure(ctx, jobId);
-  if (job.taskId && !handled) await afterTaskTurn(ctx, jobId, { ...job, agentId: job.agentId, taskId: job.taskId });
+  if (job.taskId) {
+    const taskTurn = { ...job, agentId: job.agentId, taskId: job.taskId };
+    if (handled) await checkLiveness(ctx, jobId, await carriedTasks(ctx, taskTurn), { carriedOnly: true });
+    else await afterTaskTurn(ctx, jobId, taskTurn);
+  }
   await explainEnded(ctx, jobId);
   await leaveIfOff(ctx, job.agentId);
   await pump(ctx, job.agentId);

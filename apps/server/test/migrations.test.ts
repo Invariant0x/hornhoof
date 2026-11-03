@@ -543,6 +543,19 @@ describe('migration 0044', () => {
 });
 
 describe('migration 0046', () => {
+  it.each([['agent_events_failure_case', 'failureCase'], ['agent_events_operations_pending', 'operationsPending']])('indexes %s only when %s is present', async (name, field) => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0044_ceo_delegate') });
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    const indexes = (await db.execute<{ indexname: string; indexdef: string }>(sql`select indexname, indexdef from pg_indexes where tablename = 'agent_events'`)).rows;
+    const index = indexes.find(i => i.indexname === name);
+    expect(index, name).toBeDefined();
+    expect(index!.indexdef).toContain(`(data ->> '${field}'::text)`);
+    expect(index!.indexdef).toContain(`WHERE ((data ->> '${field}'::text) IS NOT NULL)`);
+  });
+
   it('keeps older turns with no failure, delayed start or program restart, and stores each on new turns', async () => {
     const client = new PGlite();
     onTestFinished(() => client.close());

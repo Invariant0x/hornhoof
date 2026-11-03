@@ -1,9 +1,9 @@
 import type { Failure } from '@hornhoof/protocol';
 import type { TurnRetry } from '@hornhoof/protocol/map';
-import { and, asc, desc, eq, isNotNull, isNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentEvents, agents, departments, jobs, nodes, people, subscriptions, tasks } from '../../db/schema.js';
-import { agentState, conversationOf, enqueueTurn, insertTurn, limitUntil, onAgent, orchestratorOf } from '../conversation/queue.js';
+import { agentState, conversationOf, enqueueTurn, insertTurn, limitUntil, onAgent, orchestratorOf, STOPPED_ON_PURPOSE } from '../conversation/queue.js';
 import { turnAgain } from './again.js';
 import { continuationNote } from './endings.js';
 import { operationsWatchers, pickOpsRecipient } from './silent.js';
@@ -17,28 +17,61 @@ export type FailureState = { retry: TurnRetry | null; failure: LastFailure | nul
 const passing = (f: Failure | null) => !!f && (['overloaded', 'network', 'cut', 'rate_limited'].includes(f.kind) || (f.kind === 'unknown' && f.retryable));
 
 /* Count only this continuation's unbroken chain, never an unrelated turn of the same agent. */
-async function passingAttempts(ctx: Ctx, job: Job): Promise<number> {
+async function passingAttempts(ctx: Ctx, job: Job, history?: ReadonlyMap<string, Job>): Promise<number> {
   let n = 0;
   let current: Job | undefined = job;
   while (current?.status === 'failed' && passing(current.failure)) {
     n++;
     if (!current.continueOf) break;
-    [current] = await ctx.db.select().from(jobs).where(eq(jobs.id, current.continueOf));
+    if (history) current = history.get(current.continueOf);
+    else [current] = await ctx.db.select().from(jobs).where(eq(jobs.id, current.continueOf));
   }
   return n;
 }
 
 export async function agentFailureState(ctx: Ctx, agentId: string): Promise<FailureState> {
-  const [last] = await ctx.db.select().from(jobs).where(and(conversationOf(agentId), isNotNull(jobs.failure))).orderBy(desc(jobs.finishedAt), desc(jobs.createdAt)).limit(1);
-  const [waiting] = await ctx.db.select().from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'queued'), isNotNull(jobs.notBefore), isNotNull(jobs.continueOf))).orderBy(asc(jobs.createdAt)).limit(1);
-  const [before] = waiting?.continueOf ? await ctx.db.select().from(jobs).where(eq(jobs.id, waiting.continueOf)) : [];
-  const retry = waiting?.notBefore && before?.failure && passing(before.failure)
-    ? { attempt: await passingAttempts(ctx, before), max: RETRY_MINUTES.length, at: +waiting.notBefore, kind: before.failure.kind } : null;
-  return { retry, failure: last?.failure ? { kind: last.failure.kind, text: last.failure.text, at: +(last.finishedAt ?? last.createdAt) } : null };
+  const [agent] = await ctx.db.select({ companyId: agents.companyId }).from(agents).where(eq(agents.id, agentId));
+  return agent ? (await agentFailureStates(ctx, agent.companyId, [agentId])).get(agentId)! : { retry: null, failure: null };
+}
+
+/* Read the company together; only waiting retries need their continuation history. */
+export async function agentFailureStates(ctx: Ctx, companyId: string, agentIds: string[]): Promise<Map<string, FailureState>> {
+  if (!agentIds.length) return new Map();
+  const scope = and(eq(jobs.companyId, companyId), inArray(jobs.agentId, agentIds), eq(jobs.kind, 'conversation'));
+  const last = await ctx.db.selectDistinctOn([jobs.agentId]).from(jobs)
+    .where(and(scope, inArray(jobs.status, ['done', 'failed']), or(isNull(jobs.error), notInArray(jobs.error, STOPPED_ON_PURPOSE))))
+    .orderBy(asc(jobs.agentId), desc(sql`coalesce(${jobs.finishedAt}, ${jobs.createdAt})`), desc(jobs.createdAt));
+  const waiting = await ctx.db.selectDistinctOn([jobs.agentId]).from(jobs).where(and(scope, eq(jobs.status, 'queued'), isNotNull(jobs.notBefore), isNotNull(jobs.continueOf)))
+    .orderBy(asc(jobs.agentId), asc(jobs.createdAt));
+  const history = await retryHistory(ctx, companyId, waiting);
+  const failures = new Map(last.map(j => [j.agentId, j]));
+  const retries = new Map(waiting.map(j => [j.agentId, j]));
+  return new Map(await Promise.all(agentIds.map(async id => {
+    const ended = failures.get(id);
+    const next = retries.get(id);
+    const before = next?.continueOf ? history.get(next.continueOf) : undefined;
+    const retry = next?.notBefore && before?.failure && passing(before.failure)
+      ? { attempt: await passingAttempts(ctx, before, history), max: RETRY_MINUTES.length, at: +next.notBefore, kind: before.failure.kind } : null;
+    const failure = ended?.status === 'failed' && ended.failure ? { kind: ended.failure.kind, text: ended.failure.text, at: +(ended.finishedAt ?? ended.createdAt) } : null;
+    return [id, { retry, failure }] as const;
+  })));
+}
+
+async function retryHistory(ctx: Ctx, companyId: string, waiting: Job[]): Promise<Map<string, Job>> {
+  const ids = waiting.flatMap(j => j.continueOf ? [j.continueOf] : []);
+  if (!ids.length) return new Map();
+  const history = await ctx.db.select().from(jobs).where(inArray(jobs.id, sql`(
+    with recursive history as (
+      select id, continue_of from jobs where company_id = ${companyId} and ${inArray(jobs.id, ids)}
+      union
+      select parent.id, parent.continue_of from jobs parent join history child on parent.id = child.continue_of where parent.company_id = ${companyId}
+    ) select id from history
+  )`));
+  return new Map(history.map(j => [j.id, j]));
 }
 
 async function alreadySent(ctx: Ctx, caseId: string): Promise<boolean> {
-  const [seen] = await ctx.db.select({ id: agentEvents.id }).from(agentEvents).where(sql`${agentEvents.data}->>'failureCase' = ${caseId}`).limit(1);
+  const [seen] = await ctx.db.select({ id: agentEvents.id }).from(agentEvents).where(sql`${agentEvents.data}->>'failureCase' is not null and ${agentEvents.data}->>'failureCase' = ${caseId}`).limit(1);
   return !!seen;
 }
 
@@ -64,7 +97,7 @@ async function notifyFailure(ctx: Ctx, job: Job, text: string, caseId: string, o
   const to = pickOpsRecipient(await operationsWatchers(ctx, job.companyId), agent.id, new Set(busy.flatMap(j => j.id ? [j.id] : [])));
   if (!to) {
     if (options.waitForWatcher === false) return;
-    const [pending] = await ctx.db.select({ id: agentEvents.id }).from(agentEvents).where(sql`${agentEvents.data}->>'operationsPending' = ${caseId}`).limit(1);
+    const [pending] = await ctx.db.select({ id: agentEvents.id }).from(agentEvents).where(sql`${agentEvents.data}->>'operationsPending' is not null and ${agentEvents.data}->>'operationsPending' = ${caseId}`).limit(1);
     if (!pending) await logTurnFact(ctx, job, `No Operations watcher is available. This message waits for one: ${text}`, { operationsPending: caseId, operationsText: text, operationsTellHead: tellHead });
     return;
   }
@@ -160,7 +193,7 @@ export async function checkSignInFailures(ctx: Ctx, now = new Date()): Promise<v
 export async function sendWaitingFailureAlarms(ctx: Ctx): Promise<void> {
   const pending = await ctx.db.select({ job: jobs, caseId: sql<string>`${agentEvents.data}->>'operationsPending'`, text: sql<string>`${agentEvents.data}->>'operationsText'`, tellHead: sql<boolean>`(${agentEvents.data}->>'operationsTellHead')::boolean` })
     .from(agentEvents).innerJoin(jobs, eq(jobs.id, agentEvents.jobId))
-    .where(and(eq(agentEvents.kind, 'message'), sql`${agentEvents.data}->>'operationsPending' is not null`, sql`not exists (select 1 from agent_events sent where sent.data->>'failureCase' = ${agentEvents.data}->>'operationsPending')`));
+    .where(and(eq(agentEvents.kind, 'message'), sql`${agentEvents.data}->>'operationsPending' is not null`, sql`not exists (select 1 from agent_events sent where sent.data->>'failureCase' is not null and sent.data->>'failureCase' = ${agentEvents.data}->>'operationsPending')`));
   for (const alarm of pending) await notifyFailure(ctx, alarm.job, alarm.text, alarm.caseId, { tellHead: alarm.tellHead });
 }
 

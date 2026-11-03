@@ -13,7 +13,7 @@ import { CHANNEL_MS, type Endpoint } from '../events/bus.js';
 import { workingCount } from '../events/store.js';
 import { machineOf } from '../nodes/nodes.js';
 import { pendingFor, visibleDecisions } from '../tasks/decisions.js';
-import { agentFailureState } from '../tasks/failures.js';
+import { agentFailureStates } from '../tasks/failures.js';
 import { agentProgramState } from '../tasks/silent.js';
 import { mapLines, type MapLine } from './map-state.js';
 import { reworkTimes } from './rework.js';
@@ -151,7 +151,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
       const mine = agentIdsOf(deptId);
       return { total: mine.length, working: mine.filter(id => busy.has(id)).length };
     };
-    const failures = new Map(await Promise.all(allAgents.map(async a => [a.id, await agentFailureState(ctx, a.id)] as const)));
+    const failures = await agentFailureStates(ctx, me.companyId, allAgents.map(a => a.id));
     const employeesOf = (dept: (typeof depts)[number]) =>
       allAgents
         .filter(a => a.departmentId === dept.id && a.kind !== 'orchestrator')

@@ -379,7 +379,12 @@ export const agentEvents = pgTable(
     personId: uuid('person_id').references(() => people.id),
     createdAt: createdAt(),
   },
-  t => [index('agent_events_agent_id_seq').on(t.agentId, t.seq), index('agent_events_job_id').on(t.jobId)],
+  t => [
+    index('agent_events_agent_id_seq').on(t.agentId, t.seq),
+    index('agent_events_job_id').on(t.jobId),
+    index('agent_events_failure_case').on(sql`(data->>'failureCase')`).where(sql`data->>'failureCase' is not null`),
+    index('agent_events_operations_pending').on(sql`(data->>'operationsPending')`).where(sql`data->>'operationsPending' is not null`),
+  ],
 );
 
 export const proposals = pgTable('proposals', {

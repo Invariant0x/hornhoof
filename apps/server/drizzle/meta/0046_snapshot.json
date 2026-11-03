@@ -227,6 +227,38 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "agent_events_failure_case": {
+          "name": "agent_events_failure_case",
+          "columns": [
+            {
+              "expression": "(data->>'failureCase')",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "data->>'failureCase' is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "agent_events_operations_pending": {
+          "name": "agent_events_operations_pending",
+          "columns": [
+            {
+              "expression": "(data->>'operationsPending')",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "data->>'operationsPending' is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
