@@ -18,11 +18,19 @@ it('reads container rules with the same condition as media rules', () => {
 
 it('gives every select a shared theme-colored arrow inset from the right edge and room for text', () => {
   expect(decl('select', 'appearance')).toBe('none');
+  expect(decl('select', 'max-width')).toBe('100%');
+  expect(decl('select', 'min-width')).toBe('0');
+  expect(decl('select', 'overflow')).toBe('hidden');
+  expect(decl('select', 'text-overflow')).toBe('ellipsis');
+  expect(decl('select', 'white-space')).toBe('nowrap');
   expect(decl('select', 'background-image')).toMatch(/var\(--/);
   expect(decl('select', 'background-position')).toContain('50%');
   expect(decl('select', 'background-repeat')).toBe('no-repeat');
   expect(paddingRightPx('select')).toBeGreaterThanOrEqual(26);
   expect(decl('select:disabled', 'opacity')).toBe('.55');
+  expect(decl('.field', 'min-width')).toBe('0');
+  expect(decl('.field select', 'width')).toBe('100%');
+  expect(decl('.task-filters', 'min-width')).toBe('0');
 
   for (const sel of ['.field select', '.share select', '.staff-pick select', '.sel']) {
     for (const rule of rulesFor(sel)) {
