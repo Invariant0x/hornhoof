@@ -178,6 +178,9 @@ describe('Claude Code', () => {
   });
 
   it('compacts the conversation at the window Hornhoof set, or at its own when none is set', async () => {
+    /* The machine's own env can hold a window, as in the session of an agent that runs these tests; Hornhoof set none. */
+    vi.stubEnv('CLAUDE_CODE_AUTO_COMPACT_WINDOW', undefined);
+    onTestFinished(() => void vi.unstubAllEnvs());
     await adapter('claude').run(input({ compactWindow: 500_000 }));
     expect(lastRun().env.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBe('500000');
     await adapter('claude').run(input());
