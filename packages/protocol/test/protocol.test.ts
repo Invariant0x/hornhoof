@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { API_MODELS, CLAUDE_ALIASES, CRED_KINDS, cut, defaultEffortOf, lastBytes, MAX_INSTRUCTIONS, MAX_RUN_FILES, MAX_TEST_PARTS, OLD_NODE_INSTRUCTIONS, TAIL_BYTES, TEST_LOG_BYTES, COMPANY_TEMPLATES, COMPANY_TEMPLATE_KEYS, DEPARTMENT_TEMPLATES, TEMPLATE_KEYS, effortFor, effortsOf, modelsFor, parseNodeMessage, parseServerMessage, PROGRAM_STATES, repoFolder, type AgentEvent, type NodeMessage, type ServerMessage } from '../src/index.js';
+import { API_MODELS, CLAUDE_ALIASES, CRED_KINDS, cut, defaultEffortOf, lastBytes, MAX_INSTRUCTIONS, MAX_RUN_FILES, MAX_TEST_PARTS, OLD_NODE_INSTRUCTIONS, TAIL_BYTES, TEST_LOG_BYTES, COMPANY_TEMPLATES, COMPANY_TEMPLATE_KEYS, DEPARTMENT_TEMPLATES, TEMPLATE_KEYS, effortFor, effortsOf, modelsFor, parseNodeMessage, parseServerMessage, PROGRAM_SCREEN_MAX, PROGRAM_STATES, repoFolder, type AgentEvent, type NodeMessage, type ServerMessage } from '../src/index.js';
 import { effortsOf as light, effortFor as lightEffort } from '../src/efforts.js';
 
 const LIMITS = { status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0.38, resetsAt: '2026-10-29T21:30:00.000Z' }] };
@@ -473,6 +473,21 @@ describe('live terminals', () => {
     /* The question the node used to answer is gone. */
     expect(parseServerMessage(JSON.stringify({ type: 'job.check', jobId: 'job-1' }))).toBeNull();
     expect(parseNodeMessage(JSON.stringify({ type: 'job.state', jobId: 'job-1', state: 'waiting' }))).toBeNull();
+  });
+
+  it("carry how a turn's program that is gone ended, and its last screen", () => {
+    const gone: NodeMessage = { type: 'job.program', jobId: 'job-1', state: 'gone', since: 1_793_379_000_000, screenAt: 1_793_379_000_000, exitCode: 3, signal: null, screen: 'Error: out of memory' };
+    expect(parseNodeMessage(JSON.stringify(gone))).toEqual(gone);
+    const killed = { ...gone, exitCode: null, signal: 'SIGKILL' };
+    expect(parseNodeMessage(JSON.stringify(killed))).toEqual(killed);
+    /* A session gone whole tells neither. */
+    const unknown = { ...gone, exitCode: null, signal: null };
+    expect(parseNodeMessage(JSON.stringify(unknown))).toEqual(unknown);
+    expect(PROGRAM_SCREEN_MAX).toBe(4000);
+    expect(parseNodeMessage(JSON.stringify({ ...gone, screen: 'x'.repeat(PROGRAM_SCREEN_MAX) }))).not.toBeNull();
+    expect(parseNodeMessage(JSON.stringify({ ...gone, screen: 'x'.repeat(PROGRAM_SCREEN_MAX + 1) }))).toBeNull();
+    expect(parseNodeMessage(JSON.stringify({ ...gone, exitCode: 1.5 }))).toBeNull();
+    expect(parseNodeMessage(JSON.stringify({ ...gone, signal: 'S'.repeat(41) }))).toBeNull();
   });
 
   it("carry how full an agent's context is, as a share", () => {
