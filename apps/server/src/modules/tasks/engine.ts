@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gt, inArray, isNull, max, ne, notInArray, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gt, inArray, isNull, max, ne, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { accessOf, canReach, type Access, type Spot } from '../../auth/access.js';
 import type { Db } from '../../db/client.js';
@@ -263,6 +263,20 @@ async function refuseBelow(db: Db | Tx, task: Task, ids: string[]): Promise<void
   }
 }
 
+/* The tasks of these turns; a null among them stands for the tasks of no turn. */
+function inTurns(turnIds: (string | null)[]) {
+  const known = [...new Set(turnIds.filter((id): id is string => id !== null))];
+  return or(known.length ? inArray(tasks.turnId, known) : undefined, turnIds.includes(null) ? isNull(tasks.turnId) : undefined);
+}
+
+/* JSON lists of ids that hold any of these. */
+const holdsAny = (list: typeof tasks.after | typeof tasks.panel, ids: string[]) => sql`${list} ?| array[${sql.join(ids.map(id => sql`${id}`), sql`, `)}]::text[]`;
+
+/* The open tasks of these tasks' turns that wait as said. A task comes only after tasks of its own turn, and a merge of
+   turns moves the open tasks with the work under them, so only these turns are looked at: with an index on the turn, the
+   rest of the company's history is not read. */
+const comingAfter = (of: Task[], waits: SQL) => and(eq(tasks.companyId, of[0]!.companyId), inTurns(of.map(t => t.turnId)), waits, notInArray(tasks.status, [...CLOSED]));
+
 /* A task is done: each task that came after it and waits for nothing else any more goes on with whoever holds it, and
    its log says why. rows: the tasks that started. Two tasks it waits for done at once would each see the other still
    open, so the waiting tasks are taken first and the second to be done sees the first. */
@@ -270,7 +284,7 @@ async function startAfter(tx: Tx, done: Task): Promise<{ wakes: Wake[]; rows: Ta
   const waiting = await tx
     .select()
     .from(tasks)
-    .where(and(eq(tasks.companyId, done.companyId), sql`${tasks.after} @> ${JSON.stringify([done.id])}::jsonb`, notInArray(tasks.status, [...CLOSED])))
+    .where(comingAfter([done], sql`${tasks.after} @> ${JSON.stringify([done.id])}::jsonb`))
     .orderBy(asc(tasks.number))
     .for('update');
   const wakes: Wake[] = [];
@@ -560,6 +574,16 @@ export async function submit(ctx: Live, agentId: string, taskId: string, r: { su
 /* An API key runs the models of the maker whose plans it stands beside. */
 const MAKER: Partial<Record<string, string>> = { anthropic_api: 'claude', openai_api: 'codex' };
 
+/* The panels of the other tasks at a gate now that name any of these reviewers. A task at a gate is open, so it is in the
+   open turn or in none: the closed turns are not read. */
+async function panelsNaming(db: Db | Tx, task: Task, ids: string[]): Promise<{ panel: string[] }[]> {
+  const [open] = await db.select({ id: turns.id }).from(turns).where(and(eq(turns.companyId, task.companyId), eq(turns.status, 'open')));
+  return db
+    .select({ panel: tasks.panel })
+    .from(tasks)
+    .where(and(eq(tasks.companyId, task.companyId), inTurns([open?.id ?? null, null]), inArray(tasks.status, ['review', 'waiting']), ne(tasks.id, task.id), holdsAny(tasks.panel, ids)));
+}
+
 /* Who checks the work at a gate. Reviewers of different models find different things, so one of each maker's models
    checks the same work at once: among the live employees of the gate's role in its department that are on, for the
    task's product or for none, never the executor, the one with the fewest tasks at a gate, the oldest on a tie. The
@@ -584,12 +608,7 @@ async function panelFor(db: Db | Tx, task: Task, stage: number, again: string[] 
   const able = fit.filter(a => a.sub);
   const back = able.filter(a => again.includes(a.id));
   if (back.length) return { panel: back.map(a => a.id), idle };
-  const checking = able.length
-    ? await db
-        .select({ panel: tasks.panel })
-        .from(tasks)
-        .where(and(eq(tasks.companyId, task.companyId), inArray(tasks.status, ['review', 'waiting']), ne(tasks.id, task.id)))
-    : [];
+  const checking = able.length ? await panelsNaming(db, task, able.map(a => a.id)) : [];
   const busy = (id: string) => checking.filter(t => t.panel.includes(id)).length;
   const picked = new Map<string, string>();
   for (const a of able) {
@@ -819,12 +838,7 @@ export async function blocked(ctx: Live, agentId: string, taskId: string, why: s
 /* Open tasks that come after any of the cancelled ones keep waiting, and whoever made each hears so: its agent, or the
    orchestrator for a person's. waiting: those whose maker cancelled, who hears it in the answer instead. */
 async function afterCancelled(tx: Tx, actor: Actor, cancelled: Task[]): Promise<{ wakes: Wake[]; waiting: Task[] }> {
-  const ids = cancelled.map(t => t.id);
-  const left = await tx
-    .select()
-    .from(tasks)
-    .where(and(eq(tasks.companyId, cancelled[0]!.companyId), sql`${tasks.after} ?| array[${sql.join(ids.map(id => sql`${id}`), sql`, `)}]::text[]`, notInArray(tasks.status, [...CLOSED])))
-    .orderBy(asc(tasks.number));
+  const left = await tx.select().from(tasks).where(comingAfter(cancelled, holdsAny(tasks.after, cancelled.map(t => t.id)))).orderBy(asc(tasks.number));
   const [orchestrator] = left.some(t => !t.createdByAgentId)
     ? await tx.select({ id: agents.id }).from(agents).where(and(eq(agents.companyId, cancelled[0]!.companyId), eq(agents.kind, 'orchestrator'), isNull(agents.removedAt)))
     : [];
