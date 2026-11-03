@@ -238,15 +238,19 @@ export type MapLine = WorkLine & { departmentId: string; kind: 'department' | 'm
 
 type Turn = { id: string; agentId: string; taskIds: (string | null)[] };
 
+/* What each agent's card shows it on now: the task its turn works on, else the one it acts on next. */
+export type Cards = ReadonlyMap<string, { task: { id: string } | null }>;
+
 /* Every line of the company map as the database has it now, with the time on the database's clock after the facts were
-   read. Only running turns light a line, so only their tasks and those above them are read, not the company's history. */
-export async function mapLines(db: Db, companyId: string): Promise<{ lines: MapLine[]; serverNow: Date }> {
+   read. Only running turns light a line, so only their tasks and those above them are read, not the company's history.
+   cards: what the agents' cards show them on, for an employee's turn that carries no task. */
+export async function mapLines(db: Db, companyId: string, cards: Cards = new Map()): Promise<{ lines: MapLine[]; serverNow: Date }> {
   return db.transaction(
     async tx => {
       const staff = await tx.select().from(agents).where(and(eq(agents.companyId, companyId), isNull(agents.removedAt)));
       const parents = new Map((await tx.select({ id: departments.id, parentId: departments.parentId }).from(departments).where(eq(departments.companyId, companyId))).map(d => [d.id, d.parentId]));
       const saved = await tx.select().from(mapReturns).where(eq(mapReturns.companyId, companyId));
-      const turns = await runningTurns(tx, companyId, staff);
+      const turns = await runningTurns(tx, companyId, staff, cards);
       const f = await factsFor(tx, companyId, turns.flatMap(t => t.taskIds.filter((id): id is string => !!id)));
       const lines = project({ staff, parents, saved, turns, facts: f });
       /* The clock goes on past the start of the transaction, which now() would give. */
@@ -276,8 +280,16 @@ async function goneAlong(tx: Tx, heads: Started[]): Promise<Started[]> {
 /* The tasks a running turn carries: its own, then those of the turns that went out inside it after it started. */
 const carried = (j: Started, along: Started[]) => [j.taskId, ...along.filter(a => a.agentId === j.agentId && j.startedAt && a.startedAt && a.startedAt >= j.startedAt).map(a => a.taskId)];
 
-/* Each agent's running turn with the tasks it carries: its own, and for a head those of the turns that went out inside it. */
-async function runningTurns(tx: Tx, companyId: string, staff: Agent[]): Promise<Turn[]> {
+/* The task a running turn works on: its own, or for an employee's turn that carries none, as one a message started, the
+   task its card shows it on. */
+function workedOn(j: Started, staff: Agent[], cards: Cards): string | null {
+  if (j.taskId || staff.find(a => a.id === j.agentId)?.kind !== 'worker') return j.taskId;
+  return cards.get(j.agentId!)?.task?.id ?? null;
+}
+
+/* Each agent's running turn with the tasks it carries: the one it works on, and for a head those of the turns that went
+   out inside it. */
+async function runningTurns(tx: Tx, companyId: string, staff: Agent[], cards: Cards): Promise<Turn[]> {
   const ids = staff.map(a => a.id);
   if (!ids.length) return [];
   const running = await tx
@@ -288,7 +300,7 @@ async function runningTurns(tx: Tx, companyId: string, staff: Agent[]): Promise<
     tx,
     running.filter(j => staff.find(a => a.id === j.agentId)?.kind === 'head'),
   );
-  return running.map(j => ({ id: j.id, agentId: j.agentId!, taskIds: carried(j, along) }));
+  return running.map(j => ({ id: j.id, agentId: j.agentId!, taskIds: carried({ ...j, taskId: workedOn(j, staff, cards) }, along) }));
 }
 
 type Snapshot = { staff: Agent[]; parents: ReadonlyMap<string, string | null>; saved: Line[]; turns: Turn[]; facts: Facts };
