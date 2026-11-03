@@ -9,7 +9,8 @@ const MAX_FILE = 51 * 1024 * 1024;
 /* A person's prompt waits this long for Hornhoof to open its turn. */
 const HOOK_WAIT_MS = 10_000;
 
-export type HookHandler = (agentKey: string, event: string, body: unknown) => Promise<void> | void;
+/* A hook's answer, if any, is text the program adds to what it got, as Claude Code and Kimi Code do with a prompt hook's. */
+export type HookHandler = (agentKey: string, event: string, body: unknown) => Promise<string | void> | string | void;
 export type AgentUrls = { mcpUrl: string; attachUrl: string; hookUrl: string };
 
 const FORWARD = ['content-type', 'accept', 'mcp-protocol-version', 'mcp-session-id', 'last-event-id'];
@@ -122,6 +123,11 @@ export class Bridge {
     return found;
   }
 
+  private async hookAnswer(key: string, event: string, data: unknown): Promise<string> {
+    const answer = await Promise.race([Promise.resolve(this.onHook(key, event, data)), new Promise<void>(r => setTimeout(r, HOOK_WAIT_MS))]);
+    return typeof answer === 'string' ? answer : '';
+  }
+
   private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const [path, query] = (req.url ?? '').split(/\?(.*)/s);
     const [, kind, secret, event] = path!.split('/');
@@ -138,8 +144,7 @@ export class Bridge {
       } catch {
         /* A hook that sent no JSON still counts. */
       }
-      await Promise.race([Promise.resolve(this.onHook(key, event, data)), new Promise(r => setTimeout(r, HOOK_WAIT_MS))]);
-      return reply(res, 200, '');
+      return reply(res, 200, await this.hookAnswer(key, event, data));
     }
     if (kind !== 'mcp' && kind !== 'attach') return reply(res, 404, '');
     const token = kind === 'mcp' ? await this.tokenFor(key, req.method === 'GET' || only(body, CONNECTING)) : this.tokens.get(key);

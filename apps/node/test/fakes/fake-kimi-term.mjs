@@ -5,11 +5,14 @@
 // there is none. HANG never answers until Escape stops it, ABORT logs a stopped turn, FAIL a failed one, SLOW answers after
 // 2 s, EXIT ends the program, SECRET prints the value of FAKE_SECRET, /new starts a new session. FAKE_MCP_LIST_MS makes it
 // list its Hornhoof tools from .kimi-code/mcp.json that long after its session's workspace opened, and show "tools: ok" or
-// "tools: failed". FAKE_SIGNED_OUT shows what a signed-out Kimi shows.
+// "tools: failed". FAKE_SIGNED_OUT shows what a signed-out Kimi shows. A paste comes whole, line breaks and all, as in Kimi;
+// FAKE_KEEP_TAIL keeps only that many last characters of the first message. What its prompt hook prints goes with the
+// prompt, as in Kimi Code.
 import { createHash, randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { crash } from './crash.mjs';
+import { rawKeys, readKeys } from './keys.mjs';
 
 if (process.env.FAKE_CRASH_START) crash(process.env.FAKE_CRASH_START);
 
@@ -26,8 +29,10 @@ const config = (() => {
 })();
 const hook = (event, name, body) =>
   config.includes(`command = "hh-hook ${event}"`)
-    ? fetch(`${process.env.HH_BRIDGE}/${event}`, { method: 'POST', body: JSON.stringify({ hook_event_name: name, session_id: session, cwd: process.cwd(), ...body }) }).catch(() => {})
-    : Promise.resolve();
+    ? fetch(`${process.env.HH_BRIDGE}/${event}`, { method: 'POST', body: JSON.stringify({ hook_event_name: name, session_id: session, cwd: process.cwd(), ...body }) })
+        .then(r => r.text())
+        .catch(() => '')
+    : Promise.resolve('');
 const record = (type, payload) => appendFileSync(wireOf(session), JSON.stringify({ type, agentId: 'main', ...payload, time: Date.now() }) + '\n');
 const print = text => process.stdout.write(text);
 const prompt = () => print(`── input ${'─'.repeat(60)}\n \n${'─'.repeat(69)}\ncontext: 0% (0/256k)\x1b[2A\r `);
@@ -61,6 +66,7 @@ async function startSession(source) {
   await hook('start', 'SessionStart', { source });
 }
 
+rawKeys();
 print(`fake kimi ${session ? `resumed ${session}` : 'new'}\nWelcome to Kimi Code!\n`);
 print(process.env.FAKE_SIGNED_OUT ? 'Run /login or /provider to get started.\n' : 'Send /help for help information.\n');
 prompt();
@@ -79,7 +85,7 @@ async function take(line) {
     return;
   }
   if (!session) await startSession('startup');
-  await hook('prompt', 'UserPromptSubmit', { prompt: [{ type: 'text', text: line }], is_steer: false });
+  const context = await hook('prompt', 'UserPromptSubmit', { prompt: [{ type: 'text', text: line }], is_steer: false });
   // Opening the typed job can finish before the program is ready to take Escape.
   if (line === 'HANG typed') await new Promise(done => setTimeout(done, 100));
   if (line.includes('BLOCKED')) {
@@ -128,7 +134,7 @@ async function take(line) {
     prompt();
     return;
   }
-  const answer = line === 'SECRET' ? `the key is ${process.env.FAKE_SECRET}` : `echo: ${line}`;
+  const answer = line === 'SECRET' ? `the key is ${process.env.FAKE_SECRET}` : `echo: ${line}${context ? `\n${context}` : ''}`;
   loop({ type: 'content.part', step: 1, part: { type: 'text', text: answer } });
   if (line.includes('SWITCH')) record('config.update', { modelAlias: 'small' });
   record('token_counting.measured', { length: 2, tokens: 262144 });
@@ -138,31 +144,30 @@ async function take(line) {
 }
 
 // Kimi reads keys raw: Escape stops a running turn at once, and Enter ends a line.
-if (process.stdin.isTTY) process.stdin.setRawMode(true);
 let typed = '';
+let keepTail = Number(process.env.FAKE_KEEP_TAIL ?? 0);
 let queue = Promise.resolve();
-process.stdin.setEncoding('utf8');
-process.stdin.on('data', data => {
-  for (const ch of data) {
-    if (ch === '\u001b') {
-      if (hanging !== null) {
-        record('turn.ended', { turnId: hanging, reason: 'cancelled' });
-        hanging = null;
-        print('\r\x1b[JInterrupted\n');
-        prompt();
-      }
-      continue;
+readKeys(key => {
+  if (key === 'escape') {
+    if (hanging !== null) {
+      record('turn.ended', { turnId: hanging, reason: 'cancelled' });
+      hanging = null;
+      print('\r\x1b[JInterrupted\n');
+      prompt();
     }
-    if (ch === '\r' || ch === '\n') {
-      const line = typed.replace(/\[[0-9;]*[~A-Za-z]/g, '');
-      typed = '';
-      print('\r\x1b[J\n');
-      if (line) queue = queue.then(() => take(line));
-      continue;
-    }
-    if (ch === '\u0015') typed = '';
-    else if (ch === '\u007f') typed = typed.slice(0, -1);
-    else typed += ch;
-    print(`\r\x1b[2K ${typed}`);
+    return;
   }
+  if (key === 'enter') {
+    const line = keepTail ? typed.slice(-keepTail) : typed;
+    typed = '';
+    print('\r\x1b[J\n');
+    if (!line) return;
+    keepTail = 0;
+    queue = queue.then(() => take(line));
+    return;
+  }
+  if (key === 'kill') typed = '';
+  else if (key === 'erase') typed = typed.slice(0, -1);
+  else typed += key.text;
+  print(`\r\x1b[2K ${typed.replaceAll('\n', ' ')}`);
 });

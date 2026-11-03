@@ -88,6 +88,8 @@ type Agent = {
   busy: boolean;
   /* The program took the prompt Hornhoof typed: its prompt hook ran or its log says the turn started. */
   took?: boolean;
+  /* The prompt Hornhoof typed, until the program's prompt hook says what it got. */
+  typing?: string | null;
   limits: Limits | null;
   /* How full the context is as Hornhoof last heard it, and how many tokens Kimi's model takes in it. */
   contextUsed: number | null;
@@ -194,6 +196,10 @@ const READY: Record<'codex' | 'kimi', (screen: string) => boolean> = {
   /* The footer under Kimi's prompt, with how full its context is. */
   kimi: screen => /context: \d+%/.test(screen),
 };
+/* How long a Claude Code that said it started may take to show its input box. */
+const INPUT_WAIT_MS = 10_000;
+/* A program may change how a prompt's lines and spaces look, not its words. */
+const flat = (text: string) => text.replace(/\s+/g, ' ').trim();
 
 const hashOf = (v: unknown) => createHash('sha256').update(JSON.stringify(v)).digest('hex');
 /* What a session was told from before it started, kept in the agent's folder by the session's id. */
@@ -387,6 +393,7 @@ export class TerminalHost {
       }
       a.fresh = false;
       a.took = false;
+      a.typing = input.prompt;
       await this.opts.tmux.paste(a.name, input.prompt);
       await sleep(pasteWait(input.prompt));
       await this.opts.tmux.keys(a.name, 'Enter');
@@ -439,6 +446,7 @@ export class TerminalHost {
         }
       }
     } finally {
+      a.typing = null;
       if (starting && a.starting === starting) a.starting = null;
       if (a.turn === turn) {
         this.bridge.setToken(job.key, null);
@@ -553,7 +561,10 @@ export class TerminalHost {
       if (!(await this.opts.tmux.alive(a.name))) return false;
       const kind = job.program.kind;
       if (kind === 'claude' || kind === 'antigravity') {
-        if (await Promise.race([a.started!.promise.then(() => true), sleep(this.pollMs).then(() => false)])) return true;
+        if (await Promise.race([a.started!.promise.then(() => true), sleep(this.pollMs).then(() => false)])) {
+          await this.inputShows(a);
+          return true;
+        }
       } else {
         const screen = await this.screen(a.key);
         if (kind === 'kimi' && job.signedOut.test(screen)) return false;
@@ -566,6 +577,31 @@ export class TerminalHost {
       if (job.signedOut.test(await this.screen(a.key))) return false;
     }
     return false;
+  }
+
+  /* Claude Code can say it started before its input box is up, and loses what is typed into it until then. Hornhoof's
+     prompt goes in once the box shows, empty; a screen that never shows one goes on after a while, as before. Hornhoof's
+     own screen for Antigravity reads what is typed from its start. */
+  private async inputShows(a: Agent): Promise<void> {
+    if (a.program?.kind !== 'claude') return;
+    for (const end = Date.now() + INPUT_WAIT_MS; Date.now() < end && (await this.opts.tmux.alive(a.name)); await sleep(this.pollMs)) {
+      if (inputOf('claude', await this.opts.tmux.screen(a.name, 0, true)) === '') return;
+    }
+    /* A program that ended says why on its screen, which the turn shows. */
+    if (await this.opts.tmux.alive(a.name)) (this.opts.log ?? console.log)(`Agent ${a.key} (claude): no empty input box showed within ${INPUT_WAIT_MS / 1000} s of its start. The prompt goes in all the same.`);
+  }
+
+  /* The program's prompt hook said what it got of the prompt Hornhoof typed. Got less, the agent finds the whole of it in
+     a file of its folder, and the hook's answer, which the program adds to the prompt, says where. */
+  private async promptGot(a: Agent, got: string): Promise<string> {
+    const typed = a.typing;
+    a.typing = null;
+    if (typed == null || flat(got).includes(flat(typed))) return '';
+    const file = join(a.workDir, '.hh-messages', `${new Date().toISOString().replace(/[:.]/g, '-')}.md`);
+    await this.fs.mkdir(dirname(file));
+    await this.fs.write(file, typed);
+    (this.opts.log ?? console.log)(`Agent ${a.key} (${a.program?.kind}): the program got ${got.length} of the ${typed.length} characters Hornhoof typed. The whole text is in ${file}.`);
+    return `Hornhoof: this message reached you cut short, ${got.length} of its ${typed.length} characters. The whole message is in ${file}. Read it there before you go on.`;
   }
 
   private tailFor(a: Agent): LineTail | null {
@@ -699,7 +735,7 @@ export class TerminalHost {
     if (turn.jobId) this.opts.send({ type: 'job.event', jobId: turn.jobId, seq: turn.seq++, event: tidy(event, this.opts.secrets()) });
   }
 
-  private async hook(key: string, event: string, body: unknown): Promise<void> {
+  private async hook(key: string, event: string, body: unknown): Promise<string | void> {
     const a = this.agents.get(key);
     if (!a) return;
     const data = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
@@ -716,14 +752,18 @@ export class TerminalHost {
         if (used !== null) this.context(a, used);
         return;
       }
-      case 'prompt':
+      case 'prompt': {
         a.took = true;
+        /* Kimi Code hands the prompt as parts of a message. */
+        const prompt = typeof data.prompt === 'string' ? data.prompt : contentText(data.prompt);
+        const notice = await this.promptGot(a, prompt);
         await a.settling;
         a.busy = true;
-        /* Kimi Code hands the prompt as parts of a message. A prompt after Hornhoof's turn ended in the program is a turn
-           of its own, though the host still reads the end of that one's log. */
-        if (!a.turn || a.turn.starting || this.overIn(a)) await this.openTyped(a, typeof data.prompt === 'string' ? data.prompt : contentText(data.prompt));
-        return;
+        /* A prompt after Hornhoof's turn ended in the program is a turn of its own, though the host still reads the end of
+           that one's log. */
+        if (!a.turn || a.turn.starting || this.overIn(a)) await this.openTyped(a, prompt);
+        return notice;
+      }
       case 'stop': {
         this.drain(a);
         /* hh-agy says when Antigravity's turn was stopped with Escape, and why one failed. */

@@ -3,7 +3,8 @@
 // node how the agent's turn goes: start, prompt, stop, status. It reads the program's JSON from the last argument or from
 // stdin, posts it to the node's bridge in HH_BRIDGE and prints nothing, so a status line stays empty and Kimi adds nothing
 // to the prompt. It never fails the program's turn. hh-hook compact only prints what Claude Code adds to a conversation
-// it just compacted.
+// it just compacted, and hh-hook prompt what the bridge answers, which the program adds to the prompt: where the whole
+// message is when the program got only part of it.
 'use strict';
 
 const WAIT_MS = { prompt: 12000 };
@@ -29,12 +30,23 @@ async function main() {
   const url = process.env.HH_BRIDGE;
   if (!event || !url || !/^[a-z]+$/.test(event)) return;
   const body = process.argv[3] ?? (await readStdin());
-  await fetch(`${url}/${event}`, {
+  const res = await fetch(`${url}/${event}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: body || '{}',
     signal: AbortSignal.timeout(WAIT_MS[event] ?? 3000),
   });
+  return print(await answerOf(event, res));
+}
+
+/* What the bridge answers a prompt is for the program to add to it; the other events print nothing. */
+async function answerOf(event, res) {
+  return event === 'prompt' && res.ok ? (await res.text()).trim() : '';
+}
+
+/* Written before the exit below cuts a pipe short. */
+function print(text) {
+  return text ? new Promise(resolve => process.stdout.write(`${text}\n`, () => resolve())) : undefined;
 }
 
 main()
