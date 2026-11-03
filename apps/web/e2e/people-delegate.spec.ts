@@ -8,13 +8,16 @@ import { box, serveApi } from './api';
 type Box = Awaited<ReturnType<typeof box>>;
 
 const WHOLE = { whole: true, departments: [], teams: [] };
-/* The CEO, a person the CEO may mark as the delegate, and the delegate: each of the other two has the mark in a row of
-   three buttons. */
+/* The CEO, a person the CEO may mark as the delegate, the delegate, and a delegate switched off: each of the others has
+   the mark in a row of three buttons, the last one with Enable for Disable. */
 const PEOPLE: PersonView[] = [
   { id: 'p1', name: 'Ivan', email: 'ivan@acme.com', title: 'CEO', status: 'active', isOwner: true, access: WHOLE },
   { id: 'p2', name: 'Dana', email: 'dana@acme.com', title: 'COO', status: 'active', isOwner: false, isCeoDelegate: false, access: WHOLE },
   { id: 'p3', name: 'Ruth', email: 'ruth@acme.com', title: 'CFO', status: 'active', isOwner: false, isCeoDelegate: true, access: WHOLE },
+  { id: 'p4', name: 'Mia', email: 'mia@acme.com', title: 'CTO', status: 'disabled', isOwner: false, isCeoDelegate: true, access: WHOLE },
 ];
+/* How many buttons share the mark's line: all three on a wide screen; on a phone the row wraps, and one at least. */
+const SIZES = [{ width: 1440, beside: 3 }, { width: 375, beside: 1 }];
 const MESSAGES: Record<'en' | 'ru', Messages> = { en, ru };
 const ROUTES: Record<string, unknown> = {
   '/api/people': { people: PEOPLE },
@@ -25,10 +28,10 @@ const ROUTES: Record<string, unknown> = {
 /* Two boxes share a line of the row when they overlap from top to bottom. */
 const sameLine = (a: Box, b: Box) => a.y < b.y + b.height && b.y < a.y + a.height;
 
-async function rowOf(page: Page, t: Messages, name: string) {
+async function rowOf(page: Page, t: Messages, { name, status }: PersonView) {
   const tick = page.getByRole('checkbox', { name: t.people.ceoDelegateLabel(name), exact: true });
   const mark = tick.locator('xpath=ancestor::label[1]');
-  const names = [t.people.editLabel(name), t.people.newLinkLabel(name), t.people.disableLabel(name)];
+  const names = [t.people.editLabel(name), t.people.newLinkLabel(name), status === 'disabled' ? t.people.enableLabel(name) : t.people.disableLabel(name)];
   const edit = page.getByRole('button', { name: names[0], exact: true });
   /* Where a button's words start inside it, which is where the mark's tick should start inside the mark. */
   const textLeft = await edit.evaluate(el => {
@@ -42,7 +45,7 @@ async function rowOf(page: Page, t: Messages, name: string) {
 
 for (const lang of ['en', 'ru'] as const) {
   for (const theme of ['light', 'dark'] as const) {
-    for (const width of [1440, 375]) {
+    for (const { width, beside: least } of SIZES) {
       test(`the CEO delegate mark lines up with the row's buttons in ${lang}, ${theme}, at ${width}px`, async ({ page }, info) => {
         const t = MESSAGES[lang];
         await page.setViewportSize({ width, height: 900 });
@@ -63,14 +66,16 @@ for (const lang of ['en', 'ru'] as const) {
         await page.getByRole('button', { name: t.shell.tabs.people, exact: true }).click();
         /* The rows as people see them, taken before the checks so that a failing run shows them too. */
         await page.locator('table.ptable').screenshot({ path: info.outputPath(`people-${width}-${lang}-${theme}.png`) });
-        for (const name of ['Dana', 'Ruth']) {
-          const { mark, tick, textLeft, buttons } = await rowOf(page, t, name);
+        /* The words take their own font only once it has loaded, and with it their width. */
+        await page.evaluate(async () => { await document.fonts.ready; });
+        for (const person of PEOPLE.filter(p => !p.isOwner)) {
+          const name = person.name;
+          const { mark, tick, textLeft, buttons } = await rowOf(page, t, person);
           /* Inside, the mark keeps a button's padding and holds its tick in the middle. */
           expect(Math.abs(tick.x - mark.x - textLeft), `${name}: space before the tick`).toBeLessThanOrEqual(1);
           expect(Math.abs(tick.y + tick.height / 2 - (mark.y + mark.height / 2)), `${name}: tick in the middle of the mark`).toBeLessThanOrEqual(1);
           const beside = buttons.filter(b => sameLine(mark, b));
-          /* On a wide screen all three share the mark's line; on a phone the row wraps, and the mark keeps a button beside it. */
-          expect(beside.length, `${name}: buttons on the mark's line`).toBeGreaterThanOrEqual(width > 760 ? 3 : 1);
+          expect(beside.length, `${name}: buttons on the mark's line`).toBeGreaterThanOrEqual(least);
           for (const b of beside) {
             expect(Math.abs(mark.y - b.y), `${name}: top of the mark against a button`).toBeLessThanOrEqual(1);
             expect(Math.abs(mark.y + mark.height - (b.y + b.height)), `${name}: bottom of the mark against a button`).toBeLessThanOrEqual(1);
