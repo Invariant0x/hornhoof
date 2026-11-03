@@ -14,7 +14,10 @@ failure as a kill.
 For JavaScript and TypeScript targets, workers now copy all local JS/TS
 modules, including configuration and bootstrap modules. Dependencies and
 assets remain linked; build output and `node_modules` are not copied. Each
-worker keeps its own files. Other languages retain the upstream behavior.
+worker keeps its own files. Other languages retain the upstream module layout.
+Additional bootstrap and importer copies retain their permissions. A test
+can still launch a JS script through its shebang, and a private module does
+not become readable to other users.
 The image applies the patch before installing mutator and runs
 `test_mutator_workers.py` before the quality stage can finish.
 

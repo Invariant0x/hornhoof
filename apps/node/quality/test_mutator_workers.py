@@ -1,5 +1,6 @@
 """Regression checks for Hornhoof's patch to the pinned 0BSD mutator."""
 
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,6 +9,26 @@ from mutator.workers import create_workers
 
 
 class WorkerModulesTest(unittest.TestCase):
+    def test_additional_bootstrap_modules_remain_executable(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "component.tsx"
+            source.write_text("export const Component = () => <p>Ready</p>;\n")
+            bootstrap = root / "bootstrap.mjs"
+            bootstrap.write_text("#!/usr/bin/env node\nconsole.log('bootstrap ready');\n")
+            bootstrap.chmod(0o755)
+            private = root / "private.ts"
+            private.write_text("export const example = true;\n")
+            private.chmod(0o600)
+            worker = create_workers(
+                root / "target/run-test", root, "component.tsx", source.read_bytes(), 1
+            )[0]
+            result = subprocess.run(
+                [str(worker / "bootstrap.mjs")], capture_output=True, text=True, check=True
+            )
+            self.assertEqual(result.stdout, "bootstrap ready\n")
+            self.assertEqual((worker / "private.ts").stat().st_mode & 0o777, 0o600)
+
     def test_other_languages_keep_the_upstream_layout(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

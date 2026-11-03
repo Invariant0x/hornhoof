@@ -1,9 +1,8 @@
 --- a/src/mutator/workers.py
 +++ b/src/mutator/workers.py
-@@ -267,12 +267,25 @@
-     destination.write_bytes(original)
- 
- 
+@@ -255,0 +256 @@
++    destination.chmod((root / relative).stat().st_mode & 0o777)
+@@ -269,0 +271,13 @@
 +def worker_modules(root: Path, relative: str) -> set[str]:
 +    """Keep JS/TS bootstrap modules inside Vite's worker root too.
 +
@@ -17,13 +16,6 @@
 +    return importers_of(root, relative)
 +
 +
- def create_workers(
-     base: Path, root: Path, relative: str, original: bytes, count: int
- ) -> list[Path]:
-     created = []
-     first = relative.split("/", 1)[0]
+@@ -275 +289 @@
 -    importers = importers_of(root, relative)
 +    importers = worker_modules(root, relative)
-     for index in range(count):
-         worker = base / f"worker-{index}"
-         worker.mkdir(parents=True, exist_ok=True)
