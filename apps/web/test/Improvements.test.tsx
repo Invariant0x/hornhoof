@@ -315,6 +315,7 @@ describe('improvements', () => {
     const improvements = await screen.findByRole('button', { name: 'Improvements, 1 to decide' });
     const versions = screen.getByRole('button', { name: 'Versions' });
     const shareAccess = screen.getByRole('button', { name: 'Share access' });
+    const about = screen.getByRole('button', { name: 'About' });
     const logout = screen.getByRole('button', { name: 'Log out' });
     for (let i = 0; i < 5; i += 1) await user.tab();
     expect(improvements).toHaveFocus();
@@ -322,6 +323,8 @@ describe('improvements', () => {
     expect(versions).toHaveFocus();
     await user.tab();
     expect(shareAccess).toHaveFocus();
+    await user.tab();
+    expect(about).toHaveFocus();
     await user.tab();
     expect(logout).toHaveFocus();
     await user.keyboard('{Escape}');

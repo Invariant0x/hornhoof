@@ -117,6 +117,8 @@ export const STOPPED_ON_PURPOSE = ['cancelled', 'removed', 'switched_off'];
    recording its work, whose session this one goes on with. */
 type Turn = { companyId: string; agentId: string; prompt: string; createdBy: string | null; message?: { personId: string | null; text: string; from?: 'orchestrator' | 'agent'; name?: string; by?: string; task?: { id: string; number: number }; taskWake?: TaskWake; request?: string; timer?: true; silentJob?: string; silentReason?: TurnAlarmReason }; taskId?: string; answersCeo?: boolean; withMessage?: WithEvent; retryOf?: string; continueOf?: string };
 
+export type TurnMessage = NonNullable<Turn['message']>;
+
 /* One thing at a time per agent, so two pumps never send two turns. */
 const chains = new WeakMap<Ctx, Map<string, Promise<unknown>>>();
 

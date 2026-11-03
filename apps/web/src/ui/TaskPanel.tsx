@@ -55,6 +55,14 @@ const lineText = (t: Messages, e: TaskLogLine, when: (at: string) => string) => 
 /* What waits for the person in this task. */
 type Waiting = { requests: WaitingRequest[]; onRequestsChanged: () => void; onOpenAgent: (id: string) => void };
 
+function ExternalTaskWait({ wait }: { wait: TaskDetail['externalWait'] }) {
+  const t = useT();
+  const { language } = useLanguage();
+  if (!wait) return null;
+  const until = new Date(wait.until).toLocaleTimeString(language === 'ru' ? 'ru-RU' : 'en-GB', { hour: '2-digit', minute: '2-digit' });
+  return <p className="muted">{t.dept.tree.externalWaiting(wait.reason, until)}</p>;
+}
+
 function TaskBody({ task, onOpen, onChanged, waiting }: { task: TaskDetail; onOpen: (id: string) => void; onChanged: () => void; waiting: Waiting }) {
   const t = useT();
   const { language } = useLanguage();
@@ -78,6 +86,7 @@ function TaskBody({ task, onOpen, onChanged, waiting }: { task: TaskDetail; onOp
         <h3>{task.title}</h3>
         <p className="muted">{[placeName(t, org, task.department), task.product?.name, task.turn !== null ? t.tasks.turn(task.turn) : null].filter(Boolean).join(' / ')}</p>
         <p className={`tstate ${task.status}`}>{t.tasks.states[task.status]}</p>
+        <ExternalTaskWait wait={task.externalWait} />
         {task.createdBy && <p className="muted">{t.tasks.givenBy(task.createdBy.name)}</p>}
       </header>
       {waiting.requests.length > 0 && (

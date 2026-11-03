@@ -103,6 +103,7 @@ const toFactTask = (t: Task, repoIds: Set<string>, sees: (t: Task) => boolean): 
   number: t.number,
   title: t.title,
   status: t.status,
+  externalWait: t.externalWait,
   parentId: t.parentId,
   executorAgentId: t.executorAgentId,
   assigneeAgentId: t.assigneeAgentId,

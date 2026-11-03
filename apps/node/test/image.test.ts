@@ -7,6 +7,14 @@ const runtime = dockerfile.slice(dockerfile.lastIndexOf('\nFROM '));
 const installed = new Set([...runtime.matchAll(/apt-get install -y --no-install-recommends ([^\\\n]+)/g)].flatMap(m => m[1]!.split(/\s+/)));
 
 describe('the node image', () => {
+  it('patches mutator worker modules before installation and runs its bootstrap regression in the quality stage', () => {
+    const patch = 'patch --directory=$ub/mutator --strip=1 < /tmp/hornhoof-quality/mutator-worker-modules.patch';
+    expect(dockerfile).toContain('COPY apps/node/quality/ /tmp/hornhoof-quality/');
+    expect(dockerfile.indexOf(patch)).toBeGreaterThan(dockerfile.indexOf('fetch unclebob/mutator'));
+    expect(dockerfile.indexOf(patch)).toBeLessThan(dockerfile.indexOf('for tool in crapper dryer mutator'));
+    expect(dockerfile).toContain('$ub/mutator/.venv/bin/python /tmp/hornhoof-quality/test_mutator_workers.py;');
+  });
+
   it('carries the everyday programs agents reach for in a shell', () => {
     for (const program of ['git', 'curl', 'ripgrep', 'tmux', 'procps', 'jq', 'file', 'python3', 'python-is-python3', 'python3-pil']) expect(installed).toContain(program);
   });

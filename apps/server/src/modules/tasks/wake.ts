@@ -39,9 +39,22 @@ export function wakePrompt(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): str
   return w.note ? `${prompt}\n\n${w.note}` : prompt;
 }
 
+const READ_TASK = 'Read it with the task tool first: its body is the current truth and its log has the rest.';
+
+function assignedPrompt(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string {
+  const ref = `#${task.number} "${task.title}"`;
+  const { finish, stuck } = nextStep(task, w.agentId);
+  if (task.executorAgentId) return `${ref} is yours to do. ${READ_TASK} Do the work, then ${finish}. If you cannot go on, ${stuck}; if only a person can answer, use ask_person.`;
+  if (agent.kind === 'orchestrator') return `${ref} is yours. ${READ_TASK} Lay the work out as tasks for the departments with add_tasks or plan_turn, and report it when every part is done.`;
+  return `${ref} is your department's. ${READ_TASK} Give it out in 2-4 large self-contained pieces to different members at once with create_task, each under it (parent ${task.number}) with its executor and no gates for code: the review of the turn checks all of it once the last piece is in. Report it when they are done.`;
+}
+
+const waitEndedPrompt = (task: Task, text?: string): string =>
+  `#${task.number} "${task.title}": the wait for "${text ?? ''}" ended; check and continue.`;
+
 function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string {
   const ref = `#${task.number} "${task.title}"`;
-  const read = 'Read it with the task tool first: its body is the current truth and its log has the rest.';
+  const read = READ_TASK;
   /* What an employee wrote is marked as theirs; a person's answer or comment stays as they wrote it. */
   const said = w.text ? `:\n\n${EMPLOYEES_SAY.includes(w.why) ? quote(w.text) : w.text}\n\n` : '. ';
   const { finish, stuck } = nextStep(task, w.agentId);
@@ -49,9 +62,9 @@ function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string {
   const own = agent.kind === 'orchestrator' ? 'the turn' : 'your own task';
   switch (w.why) {
     case 'assigned':
-      if (task.executorAgentId) return `${ref} is yours to do. ${read} Do the work, then ${finish}. If you cannot go on, ${stuck}; if only a person can answer, use ask_person.`;
-      if (agent.kind === 'orchestrator') return `${ref} is yours. ${read} Lay the work out as tasks for the departments with add_tasks or plan_turn, and report it when every part is done.`;
-      return `${ref} is your department's. ${read} Give it out in 2-4 large self-contained pieces to different members at once with create_task, each under it (parent ${task.number}) with its executor and no gates for code: the review of the turn checks all of it once the last piece is in. Report it when they are done.`;
+      return assignedPrompt(agent, task, w);
+    case 'wait_ended':
+      return waitEndedPrompt(task, w.text);
     case 'review': {
       /* Its text is what this reviewer sent the work back for in the last round. */
       if (w.text) return `${ref} came back to your gate. You sent it back for${said}Check only the fixes for your own findings, then give your verdict: pass it, or send it back if one of them is still not fixed.`;
@@ -454,10 +467,12 @@ async function standIn(ctx: Ctx, agentId: string, task: Task): Promise<{ id: str
   return null;
 }
 
+const mayCheckTask = (task: Task): boolean => ['open', 'working', 'review'].includes(task.status) && !task.externalWait;
+
 async function checkHeld(ctx: Ctx, job: typeof jobs.$inferSelect & { agentId: string; startedAt: Date }, task: Task): Promise<void> {
   const { db } = ctx;
   const { agentId } = job;
-  if (!['open', 'working', 'review'].includes(task.status)) return;
+  if (!mayCheckTask(task)) return;
   /* A turn already waiting on this task, or on one it gave out, comes back to it anyway. */
   const [next] = await db
     .select({ id: jobs.id })

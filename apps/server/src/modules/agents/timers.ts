@@ -8,6 +8,7 @@ import { dropOldFiles } from '../tasks/attachments.js';
 import { reconcile } from '../tasks/reconcile.js';
 import { checkSilentTurns, SILENT_TURN_MS } from '../tasks/silent.js';
 import { wakeLeftBehind } from '../tasks/wake.js';
+import { checkExternalWaits } from '../tasks/external-wait.js';
 import { moveLeases } from '../subscriptions/lease.js';
 import { checkTestTimes } from '../testruns/runs.js';
 import type { AgentRow } from './find.js';
@@ -111,6 +112,7 @@ async function sendWaiting(ctx: Ctx): Promise<void> {
 /* What Hornhoof does every minute: due rounds, turns that task moves kept and nobody queued, turns left waiting though
    their agent is free, files of turns closed a month ago, test run times and Codex plans to move. */
 export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) => (err: unknown) => void): Promise<void> {
+  await checkExternalWaits(ctx, now).catch(failed('ending external task waits failed'));
   await Promise.all([
     timerTick(ctx, now, failed('timer round failed')).catch(failed('timer tick failed')),
     wakeLeftBehind(ctx).catch(failed('queueing left-behind turns failed')),
@@ -126,6 +128,7 @@ export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) =>
 export function startTimers(app: FastifyInstance, ctx: Ctx): void {
   const failed = (what: string) => (err: unknown) => app.log.error({ error: loggable(err) }, what);
   app.addHook('onReady', async () => {
+    void checkExternalWaits(ctx).catch(failed('ending external task waits failed'));
     void wakeLeftBehind(ctx).catch(failed('queueing left-behind turns failed'));
     void dropOldFiles(ctx.db, new Date()).catch(failed('removing the files of old turns failed'));
   });
