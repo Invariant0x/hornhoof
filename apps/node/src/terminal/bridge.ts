@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo, Socket } from 'node:net';
-import { socketOf, type Owns, type Peer } from './peer.js';
+import { socketOf, type Capture, type Owns, type Peer } from './peer.js';
 import { HookCalls } from './hook-calls.js';
 import { HookFailures, type HookRejected } from './hook-failures.js';
 
@@ -20,7 +20,7 @@ const FORWARD = ['content-type', 'accept', 'mcp-protocol-version', 'mcp-session-
 
 /* Between an agent's long-lived program and Hornhoof, on 127.0.0.1 of the node: the program keeps one address for its tools
    and its hooks, and each call goes on with the token of the turn running now. The secret in the path tells agents apart;
-   on Linux the bridge also checks that the call comes from that agent's own program. */
+   the configured process check also proves that the call comes from that agent's own program. */
 export class Bridge {
   private server: Server | null = null;
   private port = 0;
@@ -34,7 +34,7 @@ export class Bridge {
   /* What the check found for each open connection and agent: a connection's process does not change. */
   private readonly checked = new WeakMap<Socket, Map<string, Promise<boolean>>>();
 
-  private readonly accepted = new WeakMap<Socket, Promise<string | null>>();
+  private readonly accepted = new WeakMap<Socket, ReturnType<Capture>>();
   private readonly calls = new HookCalls();
   private readonly failures: HookFailures;
 
@@ -42,17 +42,21 @@ export class Bridge {
     private readonly hornhoof: string,
     private readonly onHook: HookHandler,
     private readonly owns: Owns | null = null,
-    private readonly options: { proc?: string; rejected?: HookRejected } = {},
+    private readonly options: { proc?: string; capture?: Capture; rejected?: HookRejected } = {},
   ) { this.failures = new HookFailures(options.rejected); }
 
   async start(): Promise<void> {
     const server = createServer((req, res) => void this.handle(req, res).catch(() => this.failed(req, res)));
     server.on('connection', socket => {
-      if (this.owns) this.accepted.set(socket, socketOf(this.options.proc ?? '/proc', { port: socket.remotePort ?? 0, bridgePort: socket.localPort ?? 0 }));
+      if (this.owns) this.accepted.set(socket, this.capture({ port: socket.remotePort ?? 0, bridgePort: socket.localPort ?? 0 }));
     });
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
     this.server = server;
     this.port = (server.address() as AddressInfo).port;
+  }
+
+  private capture(peer: Peer): ReturnType<Capture> {
+    return this.options.capture ? this.options.capture(peer) : socketOf(this.options.proc ?? '/proc', peer).then(acceptedInode => ({ acceptedInode }));
   }
 
   stop(): void {
@@ -139,7 +143,7 @@ export class Bridge {
     const peer: Peer = { port: req.socket.remotePort ?? 0, bridgePort: this.port };
     const hint = req.headers['x-hh-pid'];
     if (hint !== undefined) peer.pid = typeof hint === 'string' && /^[1-9][0-9]{0,9}$/.test(hint) ? Number(hint) : 0;
-    if (this.owns) peer.acceptedInode = await (this.accepted.get(req.socket) ?? socketOf(this.options.proc ?? '/proc', peer));
+    if (this.owns) Object.assign(peer, await (this.accepted.get(req.socket) ?? this.capture(peer)));
     return peer;
   }
 
