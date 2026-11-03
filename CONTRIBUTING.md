@@ -59,6 +59,15 @@ npx tsc -p apps/node/tsconfig.json --noEmit
 
 Run `tsc` for each part you changed. After a change in `packages/protocol`, rebuild it with `npx tsc -p packages/protocol/tsconfig.json` before you test the server or the node. After a change in `scripts/`, run `shellcheck` over the script.
 
+What only a real browser shows, such as where a panel lies over a page, is tested with Playwright in `apps/web/e2e`. These tests are not part of `npm test`. After a change to how the screens are laid out, run them:
+
+```sh
+npx playwright install --only-shell chromium
+npm run test:browser -w apps/web
+```
+
+The first line downloads the browser once. A Hornhoof node already has it.
+
 A change to the database schema gets a new migration from `npx drizzle-kit generate` in `apps/server`. Never edit a migration that is already on `main`.
 
 ## Rules for the code and the words

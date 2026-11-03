@@ -305,7 +305,8 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
   const chrome = useDepartmentSpace(language, panel);
   useEffect(() => {
     if (!drawer) return;
-    const close = (e: KeyboardEvent) => { if (e.key === 'Escape') setDrawer(null); };
+    /* An Escape the task panel over the drawer took closes only that panel. */
+    const close = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented) setDrawer(null); };
     document.addEventListener('keydown', close);
     return () => document.removeEventListener('keydown', close);
   }, [drawer]);
