@@ -87,11 +87,15 @@ export function failedProgramData(error: string | null, program: GoneProgram | n
   return { error, program, text };
 }
 
-export function agentProgramState(ctx: Ctx, runningJobId: string | null | undefined): { program: TurnProgram | null; alarm: TurnAlarm | null } {
-  if (!runningJobId) return { program: null, alarm: null };
+export function agentProgramState(
+  ctx: Ctx,
+  running: { id: string } | null | undefined,
+  visible?: boolean,
+): { program: TurnProgram | null; alarm: TurnAlarm | null } {
+  if (visible === false || !running) return { program: null, alarm: null };
   return {
-    program: mapOf(turnPrograms, ctx).get(runningJobId)?.program ?? null,
-    alarm: mapOf(turnAlarms, ctx).get(runningJobId) ?? null,
+    program: mapOf(turnPrograms, ctx).get(running.id)?.program ?? null,
+    alarm: mapOf(turnAlarms, ctx).get(running.id) ?? null,
   };
 }
 
@@ -229,7 +233,6 @@ function silentAlarmText(ctx: Ctx, s: SilentTurn): string {
 
 async function dispatchAlarm(ctx: Ctx, s: SilentTurn, to: Agent, now: Date): Promise<void> {
   if (await alreadyAlerted(ctx, s.job.id)) return;
-  alertedSet(ctx).add(s.job.id);
   const text = silentAlarmText(ctx, s);
   const task = s.task ? { id: s.task.id, number: s.task.number } : undefined;
   const alarmId = await enqueueTurn(ctx, {
@@ -239,6 +242,7 @@ async function dispatchAlarm(ctx: Ctx, s: SilentTurn, to: Agent, now: Date): Pro
     createdBy: null,
     message: { personId: null, text, ...(task ? { task } : {}), silentJob: s.job.id, silentReason: s.alarm.reason },
   });
+  alertedSet(ctx).add(s.job.id);
   if (now.getTime() > Date.now()) {
     await ctx.db.update(jobs).set({ startedAt: now }).where(and(eq(jobs.id, alarmId), eq(jobs.status, 'running')));
   }

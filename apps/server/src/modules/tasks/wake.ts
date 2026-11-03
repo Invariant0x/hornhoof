@@ -518,15 +518,28 @@ export async function afterJob(ctx: Ctx, jobId: string): Promise<void> {
     .from(jobs)
     .where(eq(jobs.id, jobId));
   if (!job?.agentId || job.kind !== 'conversation') return;
-  const recorded = job.status === 'failed' && (await doneIfRecorded(ctx, jobId, job));
-  if (job.status === 'failed' && !recorded) {
-    const stopped = job.error === 'cancelled';
-    await appendEvent(ctx, { companyId: job.companyId, agentId: job.agentId, jobId, kind: stopped ? 'stopped' : 'failed', data: stopped ? {} : failedProgramData(job.error, program) });
-  }
+  if (job.status === 'failed') await recordFailedTurn(ctx, jobId, { ...job, agentId: job.agentId }, program);
   if (job.taskId) await afterTaskTurn(ctx, jobId, { ...job, agentId: job.agentId, taskId: job.taskId });
   await explainEnded(ctx, jobId);
   await leaveIfOff(ctx, job.agentId);
   await pump(ctx, job.agentId);
+}
+
+async function recordFailedTurn(
+  ctx: Ctx,
+  jobId: string,
+  job: Parameters<typeof doneIfRecorded>[2] & { companyId: string; agentId: string },
+  program: ReturnType<typeof clearTurnProgram>,
+): Promise<void> {
+  if (await doneIfRecorded(ctx, jobId, job)) return;
+  const stopped = job.error === 'cancelled';
+  await appendEvent(ctx, {
+    companyId: job.companyId,
+    agentId: job.agentId,
+    jobId,
+    kind: stopped ? 'stopped' : 'failed',
+    data: stopped ? {} : failedProgramData(job.error, program),
+  });
 }
 
 /* A turn on a task a node restart cut off gets its retry waiting on the task before the task is checked, and one that

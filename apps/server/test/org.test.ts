@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { agents, companies, departments, jobs, people, subscriptions, teams } from '../src/db/schema.js';
+import { BUILTIN } from '../src/modules/nodes/hub.js';
+import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { ask, createTask, submit } from '../src/modules/tasks/engine.js';
+import { checkSilentTurns, SILENT_TURN_MS } from '../src/modules/tasks/silent.js';
 import { as, invitePerson, SETUP, setUpCompany, testApp } from './helpers.js';
 
 describe('GET /api/org', () => {
@@ -259,5 +262,87 @@ describe('GET /api/org', () => {
       teams: [{ id: inbound!.id, name: 'Inbound', departmentId: sales!.id }],
     });
     expect(org.departments.find((d: { id: string }) => d.id === dev!.id).people.map((p: { name: string }) => p.name)).toEqual(['Kate']);
+  });
+
+  it('shows program, tool, and alarm details only for agents in departments the person reaches, hiding other departments and the orchestrator', async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    const [company] = await db.select().from(companies);
+    const [sub] = await db.select().from(subscriptions);
+    const companyId = company!.id;
+    const all = await db.select().from(agents);
+    const orchestrator = all.find(a => a.kind === 'orchestrator')!;
+    const [dev, sales] = await db
+      .insert(departments)
+      .values([
+        { companyId, templateKey: 'development', roleCode: 'DEV', position: 0 },
+        { companyId, templateKey: 'sales', roleCode: 'SAL', position: 1 },
+      ])
+      .returning();
+    const [bruno, sally] = await db
+      .insert(agents)
+      .values([
+        { companyId, kind: 'worker', name: 'Bruno', roleKey: 'DEV-BE', departmentId: dev!.id, model: '', subscriptionId: sub!.id },
+        { companyId, kind: 'worker', name: 'Sally', roleKey: 'SAL-AE', departmentId: sales!.id, model: '', subscriptionId: sub!.id },
+      ])
+      .returning();
+    const startedAt = new Date('2026-11-03T10:00:00.000Z');
+    const reportedAt = new Date(startedAt.getTime() + 5 * 60_000);
+    const alarmAt = new Date(reportedAt.getTime() + SILENT_TURN_MS);
+    const [devTurn, salesTurn, orchTurn] = await db
+      .insert(jobs)
+      .values([
+        { companyId, subscriptionId: sub!.id, agentId: bruno!.id, kind: 'conversation', prompt: 'build', status: 'running', timeoutMs: 900_000, startedAt },
+        { companyId, subscriptionId: sub!.id, agentId: sally!.id, kind: 'conversation', prompt: 'sell', status: 'running', timeoutMs: 900_000, startedAt },
+        { companyId, subscriptionId: sub!.id, agentId: orchestrator.id, kind: 'conversation', prompt: 'plan', status: 'running', timeoutMs: 900_000, startedAt },
+      ])
+      .returning();
+    await handleNodeMessage(app.ctx, BUILTIN, { type: 'job.program', jobId: devTurn!.id, state: 'tool', since: reportedAt.getTime(), tool: 'Bash', screenAt: reportedAt.getTime() }, reportedAt);
+    await handleNodeMessage(
+      app.ctx,
+      BUILTIN,
+      { type: 'job.program', jobId: salesTurn!.id, state: 'tool', since: reportedAt.getTime(), tool: 'payroll.ExportSalaries', screenAt: reportedAt.getTime() },
+      reportedAt,
+    );
+    await handleNodeMessage(
+      app.ctx,
+      BUILTIN,
+      { type: 'job.program', jobId: orchTurn!.id, state: 'tool', since: reportedAt.getTime(), tool: 'company.Reorg', screenAt: reportedAt.getTime() },
+      reportedAt,
+    );
+    await checkSilentTurns(app.ctx, alarmAt);
+
+    const devPerson = await invitePerson(app, ceo, { name: 'Dev', email: 'dev@acme.com', access: { departments: [dev!.id] } });
+
+    const ceoOrg = (await app.inject({ url: '/api/org', ...as(ceo) })).json();
+    expect(ceoOrg.orchestrator.program).toMatchObject({ state: 'tool', tool: 'company.Reorg' });
+    expect(ceoOrg.orchestrator.alarm).toEqual({ reason: 'node_silent', since: reportedAt.getTime() });
+    expect(ceoOrg.departments.find((d: { id: string }) => d.id === sales!.id).employees[0]).toMatchObject({
+      program: { state: 'tool', tool: 'payroll.ExportSalaries' },
+      alarm: { reason: 'node_silent', since: reportedAt.getTime() },
+    });
+
+    const devOrg = (await app.inject({ url: '/api/org', ...as(devPerson) })).json();
+    const devEmployee = devOrg.departments.find((d: { id: string }) => d.id === dev!.id).employees[0];
+    const salesEmployee = devOrg.departments.find((d: { id: string }) => d.id === sales!.id).employees[0];
+    expect(devEmployee.program).toEqual({
+      state: 'tool',
+      since: reportedAt.getTime(),
+      tool: 'Bash',
+      screenAt: reportedAt.getTime(),
+      reportedAt: reportedAt.getTime(),
+    });
+    expect(devEmployee.alarm).toEqual({ reason: 'node_silent', since: reportedAt.getTime() });
+    expect(salesEmployee.program).toBeNull();
+    expect(salesEmployee.alarm).toBeNull();
+    expect(devOrg.orchestrator.program).toBeNull();
+    expect(devOrg.orchestrator.alarm).toBeNull();
+
+    const ownCard = await app.inject({ url: `/api/agents/${bruno!.id}`, ...as(devPerson) });
+    expect(ownCard.statusCode).toBe(200);
+    expect(ownCard.json().program).toMatchObject({ state: 'tool', tool: 'Bash' });
+    expect(ownCard.json().alarm).toEqual({ reason: 'node_silent', since: reportedAt.getTime() });
+    expect((await app.inject({ url: `/api/agents/${sally!.id}`, ...as(devPerson) })).statusCode).toBe(403);
+    expect((await app.inject({ url: '/api/agents/orchestrator', ...as(devPerson) })).statusCode).toBe(403);
   });
 });

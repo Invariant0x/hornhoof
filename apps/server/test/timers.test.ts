@@ -468,4 +468,63 @@ describe('timers', () => {
     expect(wandaTurns3).toHaveLength(3);
     expect(wandaTurns3[2]!.prompt).toContain(turn3!.id);
   });
+
+  it('retries the 30-minute alarm on the next minute round when saving the alarm fails once, then deduplicates it', async () => {
+    const { app, db, ceo, orchestrator } = await company();
+    const [ops] = await db.select().from(departments).where(isNull(departments.parentId));
+    const [dev] = await db.insert(departments).values({ companyId: orchestrator.companyId, templateKey: 'development', roleCode: 'DEV' }).returning();
+    const watchRole = app.ctx.templates.roles.get('OPS-WATCH')!;
+    const hiredWatch = await app.inject({
+      method: 'POST',
+      url: `/api/departments/${ops!.id}/staff`,
+      payload: { people: [{ role: 'OPS-WATCH', name: 'Walt', model: '', subscription: orchestrator.subscriptionId, skills: watchRole.skills.filter(s => s.on).map(s => s.id) }] },
+      ...as(ceo),
+    });
+    const waltId = hiredWatch.json().hired[0] as string;
+    await db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.agentId, orchestrator.id));
+    const [bruno] = await db
+      .insert(agents)
+      .values({ companyId: orchestrator.companyId, kind: 'worker', name: 'Bruno', roleKey: 'DEV-BE', departmentId: dev!.id, model: '', subscriptionId: orchestrator.subscriptionId })
+      .returning();
+    const startedAt = new Date();
+    const at = (minutes: number) => new Date(startedAt.getTime() + minutes * MIN);
+    await db.update(agents).set({ timerAt: at(300) }).where(eq(agents.id, waltId));
+
+    const [turn] = await db
+      .insert(jobs)
+      .values({
+        companyId: orchestrator.companyId,
+        subscriptionId: orchestrator.subscriptionId!,
+        agentId: bruno!.id,
+        kind: 'conversation',
+        prompt: 'Build POST /checkout.',
+        timeoutMs: 900_000,
+        status: 'running',
+        startedAt,
+      })
+      .returning();
+
+    const realInsert = db.insert.bind(db);
+    let failOnce = true;
+    db.insert = ((...args: Parameters<typeof db.insert>) => {
+      if (failOnce) {
+        failOnce = false;
+        throw new Error('transient db write error');
+      }
+      return realInsert(...args);
+    }) as typeof db.insert;
+
+    const errors: unknown[] = [];
+    await minuteRound(app.ctx, at(30), () => err => errors.push(err));
+    expect(errors).toHaveLength(1);
+    expect(await db.select().from(jobs).where(eq(jobs.agentId, waltId))).toHaveLength(0);
+
+    await minuteRound(app.ctx, at(31), () => () => {});
+    const waltTurns = await db.select().from(jobs).where(eq(jobs.agentId, waltId));
+    expect(waltTurns).toHaveLength(1);
+    expect(waltTurns[0]!.prompt).toContain(turn!.id);
+
+    await minuteRound(app.ctx, at(32), () => () => {});
+    expect(await db.select().from(jobs).where(eq(jobs.agentId, waltId))).toHaveLength(1);
+  });
 });
