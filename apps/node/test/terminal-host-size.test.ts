@@ -20,6 +20,8 @@ vi.mock('node:child_process', async original => {
 
 
 const clients = async () => (await tmux.run(['list-clients', '-F', '#{client_width}x#{client_height}'])).trim().split('\n').filter(Boolean).sort();
+const windowSize = async (key: string) => (await tmux.run(['list-windows', '-t', `=a-${key}`, '-F', '#{window_width}x#{window_height}'])).trim();
+const screenOf = (termId: string) => sent.flatMap(m => (m.type === 'term.data' && m.termId === termId ? [m.data] : [])).join('');
 
 describe.skipIf(!hasTmux)("a terminal's size", () => {
   afterEach(async () => {
@@ -77,5 +79,36 @@ describe.skipIf(!hasTmux)("a terminal's size", () => {
     await until(async () => (await clients()).join() === '158x20');
     await new Promise(r => setTimeout(r, 300));
     expect(await clients()).toEqual(['158x20']);
+  });
+
+  it('steps through three windows of different sizes as each smaller one resizes or closes', async () => {
+    await setUp();
+    await host.open({ type: 'term.open', termId: 'big', agentKey: 'a73', cols: 140, rows: 50, write: false });
+    await host.open({ type: 'term.open', termId: 'mid', agentKey: 'a73', cols: 100, rows: 35, write: false });
+    await host.open({ type: 'term.open', termId: 'small', agentKey: 'a73', cols: 80, rows: 20, write: false });
+    await until(async () => (await clients()).join() === '80x20,80x20,80x20');
+    expect(await windowSize('a73')).toBe('80x20');
+
+    host.close({ type: 'term.close', termId: 'small' });
+    await until(async () => (await clients()).join() === '100x35,100x35');
+    expect(await windowSize('a73')).toBe('100x35');
+
+    await host.resize({ type: 'term.resize', termId: 'mid', cols: 90, rows: 25 });
+    await until(async () => (await clients()).join() === '90x25,90x25');
+    expect(await windowSize('a73')).toBe('90x25');
+    await until(() => screenOf('big').includes('\u001b7\u001b[26;1H\u001b[J\u001b8'));
+
+    host.close({ type: 'term.close', termId: 'mid' });
+    await until(async () => (await clients()).join() === '140x50');
+    expect(await windowSize('a73')).toBe('140x50');
+  });
+
+  it('fits the narrower width and the shorter height when neither window is smaller in both', async () => {
+    await setUp();
+    await host.open({ type: 'term.open', termId: 'tall', agentKey: 'a74', cols: 80, rows: 50, write: false });
+    await host.open({ type: 'term.open', termId: 'wide', agentKey: 'a74', cols: 120, rows: 25, write: false });
+    await until(async () => (await clients()).join() === '80x25,80x25');
+    expect(await windowSize('a74')).toBe('80x25');
+    await until(() => screenOf('tall').includes('\u001b7\u001b[26;1H\u001b[J\u001b8'));
   });
 });
