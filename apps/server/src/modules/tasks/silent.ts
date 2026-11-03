@@ -2,7 +2,7 @@ import { PROGRAM_SCREEN_MAX, QUIET_ALARM_MS, type NodeMessage } from '@hornhoof/
 import type { TurnAlarm, TurnAlarmReason, TurnProgram } from '@hornhoof/protocol/map';
 import { and, asc, eq, inArray, isNotNull, isNull, ne, or, sql, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { agentEvents, agents, departments, jobs, tasks } from '../../db/schema.js';
+import { agentEvents, agents, departments, jobs, nodes, tasks } from '../../db/schema.js';
 import { enqueueTurn, liveSubscription } from '../conversation/queue.js';
 
 export const SILENT_TURN_MS = QUIET_ALARM_MS;
@@ -143,11 +143,13 @@ async function findSilentTurns(ctx: Ctx, now: Date): Promise<SilentTurn[]> {
     .from(jobs)
     .innerJoin(agents, eq(agents.id, jobs.agentId))
     .leftJoin(tasks, eq(tasks.id, jobs.taskId))
+    .leftJoin(nodes, eq(nodes.id, jobs.nodeId))
     .where(
       and(
         eq(jobs.kind, 'conversation'),
         eq(jobs.status, 'running'),
         or(ne(jobs.prompt, ''), isNotNull(jobs.taskId), isNotNull(jobs.createdBy)),
+        or(isNull(jobs.nodeId), eq(nodes.status, 'ready')),
       ),
     )
     .orderBy(asc(jobs.createdAt));

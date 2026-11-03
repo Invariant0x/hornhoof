@@ -84,6 +84,13 @@ export const en = {
     hardToGuess: 'A random name is hard to guess. The company\'s sign-in still protects what is inside.',
     skipHint: 'To go on without it, go back, turn off "Open Hornhoof on the internet", and open the link later under Share access.',
   },
+  about: {
+    menu: 'About', title: 'About Hornhoof', close: 'Close',
+    description: 'A company where people and agents work together.',
+    version: 'Version', developer: 'Developer', license: 'License', code: 'Source code', contact: 'Contact', website: 'Website',
+    issues: 'Report a bug or suggest an idea', copyright: 'Copyright (c) 2026 Ivan Korol',
+    versionFailed: 'The server version could not be loaded. Close this window and open it again to retry.',
+  },
   settings: {
     menu: 'Share access',
     title: 'Share access',

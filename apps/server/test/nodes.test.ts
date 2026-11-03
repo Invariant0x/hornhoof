@@ -330,6 +330,7 @@ describe('one plan on several machines', () => {
     await until(async () => (await status()) === 'ready');
     await app.inject({ method: 'POST', url: `/api/machines/${mac.machine.id}/disconnect`, ...as(ceo) });
     expect(await status()).toBe('needs_login');
+    expect((await db.select().from(nodes).where(eq(nodes.id, mac.nodes[0].nodeId)))[0]!.status).toBe('needs_login');
     await app.inject({ method: 'POST', url: `/api/machines/${laptop.machine.id}/disconnect`, ...as(ceo) });
     expect(await status()).toBe('waiting_machine');
   });

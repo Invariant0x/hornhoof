@@ -258,7 +258,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
     }
     case 'removed': {
       if (id.kind !== 'node') return;
-      const [node] = await db.update(nodes).set({ keyHash: null }).where(eq(nodes.id, id.nodeId)).returning({ plan: nodes.subscriptionId });
+      const [node] = await db.update(nodes).set({ keyHash: null, status: 'needs_login' }).where(eq(nodes.id, id.nodeId)).returning({ plan: nodes.subscriptionId });
       await settlePlans(db, [node?.plan ?? null]);
       ctx.hub.close(id.nodeId, 1000);
       return;
