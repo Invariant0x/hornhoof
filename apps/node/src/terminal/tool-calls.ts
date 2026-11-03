@@ -34,7 +34,7 @@ function kimiCalls(line: unknown): Calls {
   return event.type === 'tool.result' ? { began: [], ended: [id] } : none();
 }
 
-/* Codex logs an item when it completes; one that runs a tool also when it starts. */
+/* Codex logs completed items. Older logs can also contain the start of a tool. */
 function codexCalls(line: unknown): Calls {
   if (!isRecord(line) || line.type !== 'event_msg' || !isRecord(line.payload) || !isRecord(line.payload.item)) return none();
   const { type } = line.payload;
@@ -58,7 +58,7 @@ function agyCalls(line: unknown): Calls {
   const step = agyToolStep(line);
   if (!step) return none();
   const id = idOf(step.step_index);
-  return step.state === 'DONE' ? { began: [], ended: [id] } : { began: [{ id, name: agyToolName(step) }], ended: [] };
+  return step.state === 'DONE' || step.state === 'ERROR' ? { began: [], ended: [id] } : { began: [{ id, name: agyToolName(step) }], ended: [] };
 }
 
 export const CALLS: Record<TermProgram['kind'], (line: unknown) => Calls> = { claude: claudeCalls, codex: codexCalls, kimi: kimiCalls, antigravity: agyCalls };

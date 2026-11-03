@@ -47,3 +47,19 @@ describe('shared hook transport', () => {
     expect(await sendHook('status', '{}')).toBeNull();expect(calls).toHaveLength(1);
   });
 });
+
+describe('lifecycle hook delivery', () => {
+  it.each(['tool', 'tooldone', 'toolfail'])('%s tries once with a one-second timeout', async event => {
+    const calls = await bridge(503);
+    const timer = vi.spyOn(AbortSignal, 'timeout');
+    expect(await sendHook(event, '{}')).toBeNull();
+    expect(calls).toHaveLength(1);
+    expect(timer).toHaveBeenCalledWith(1000);
+  });
+  it('retries an interrupt with the same call id', async () => {
+    const calls = await bridge(503, true);
+    expect(await sendHook('interrupt', '{}')).not.toBeNull();
+    expect(calls).toHaveLength(3);
+    expect(new Set(calls.map(c => c.call)).size).toBe(1);
+  });
+});

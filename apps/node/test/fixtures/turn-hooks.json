@@ -1,0 +1,192 @@
+[
+  {
+    "program": "claude",
+    "event": "PreToolUse",
+    "input": {
+      "hook_event_name": "PreToolUse",
+      "tool_name": "Bash",
+      "tool_use_id": "toolu_01Y71H1j6gb7wLMsSCJLj7Cg"
+    }
+  },
+  {
+    "program": "claude",
+    "event": "PermissionRequest",
+    "input": {
+      "hook_event_name": "PermissionRequest",
+      "tool_name": "AskUserQuestion"
+    }
+  },
+  {
+    "program": "claude",
+    "event": "PostToolUse",
+    "input": {
+      "hook_event_name": "PostToolUse",
+      "tool_name": "AskUserQuestion",
+      "tool_use_id": "toolu_01HzBnxrdQAmEF2EuwG2REB2"
+    }
+  },
+  {
+    "program": "claude",
+    "event": "Stop",
+    "input": {
+      "hook_event_name": "Stop"
+    }
+  },
+  {
+    "program": "claude",
+    "event": "SessionEnd",
+    "input": {
+      "hook_event_name": "SessionEnd",
+      "reason": "prompt_input_exit"
+    }
+  },
+  {
+    "program": "claude",
+    "event": "StopFailure",
+    "input": {
+      "hook_event_name": "StopFailure",
+      "error": "authentication_failed",
+      "last_assistant_message": "Invalid API key \u00b7 Fix external API key"
+    }
+  },
+  {
+    "program": "claude",
+    "event": "SessionEnd",
+    "input": {
+      "hook_event_name": "SessionEnd",
+      "reason": "other"
+    }
+  },
+  {
+    "program": "claude",
+    "event": "StopFailure",
+    "input": {
+      "hook_event_name": "StopFailure",
+      "error": "server_error",
+      "last_assistant_message": "API Error: 529 Overloaded"
+    }
+  },
+  {
+    "program": "claude",
+    "event": "SessionEnd",
+    "input": {
+      "hook_event_name": "SessionEnd",
+      "reason": "other"
+    }
+  },
+  {
+    "program": "codex",
+    "event": "PreToolUse",
+    "input": {
+      "turn_id": "01a1a26f-cc8a-7e70-8480-d778e5aba87a",
+      "hook_event_name": "PreToolUse",
+      "tool_name": "Bash",
+      "tool_use_id": "exec-a3162086-8820-428f-90f1-58df3916a660"
+    }
+  },
+  {
+    "program": "codex",
+    "event": "PostToolUse",
+    "input": {
+      "turn_id": "01a1a26f-cc8a-7e70-8480-d778e5aba87a",
+      "hook_event_name": "PostToolUse",
+      "tool_name": "Bash",
+      "tool_use_id": "exec-a3162086-8820-428f-90f1-58df3916a660"
+    }
+  },
+  {
+    "program": "codex",
+    "event": "Stop",
+    "input": {
+      "turn_id": "01a1a26f-cc8a-7e70-8480-d778e5aba87a",
+      "hook_event_name": "Stop",
+      "last_assistant_message": "ok"
+    }
+  },
+  {
+    "program": "codex",
+    "event": "Interrupt",
+    "input": {
+      "turn_id": "01a1a271-0349-71c0-bc3b-684a9f45daa1",
+      "hook_event_name": "Interrupt"
+    }
+  },
+  {
+    "program": "codex",
+    "event": "SessionEnd",
+    "input": {
+      "hook_event_name": "SessionEnd",
+      "reason": "other"
+    }
+  },
+  {
+    "program": "kimi",
+    "event": "PreToolUse",
+    "input": {
+      "hook_event_name": "PreToolUse",
+      "tool_name": "Bash",
+      "tool_call_id": "call_mock1"
+    }
+  },
+  {
+    "program": "kimi",
+    "event": "PostToolUse",
+    "input": {
+      "hook_event_name": "PostToolUse",
+      "tool_name": "Bash",
+      "tool_call_id": "call_mock1"
+    }
+  },
+  {
+    "program": "kimi",
+    "event": "Stop",
+    "input": {
+      "hook_event_name": "Stop"
+    }
+  },
+  {
+    "program": "kimi",
+    "event": "SessionEnd",
+    "input": {
+      "hook_event_name": "SessionEnd",
+      "reason": "exit"
+    }
+  },
+  {
+    "program": "kimi",
+    "event": "StopFailure",
+    "input": {
+      "hook_event_name": "StopFailure",
+      "error_type": "APIProviderOverloadedError",
+      "error_message": "503 The server is overloaded, please try again later."
+    }
+  },
+  {
+    "program": "kimi",
+    "event": "StopFailure",
+    "input": {
+      "hook_event_name": "StopFailure",
+      "error_type": "APIStatusError",
+      "error_message": "401 Incorrect API key provided"
+    }
+  },
+  {
+    "program": "claude",
+    "event": "PostToolUseFailure",
+    "input": {
+      "hook_event_name": "PostToolUseFailure",
+      "tool_name": "Bash",
+      "tool_use_id": "toolu_019ajnJkBKZpZ4oBuWG4TE3e",
+      "is_interrupt": false
+    }
+  },
+  {
+    "program": "kimi",
+    "event": "PostToolUseFailure",
+    "input": {
+      "hook_event_name": "PostToolUseFailure",
+      "tool_name": "AskUserQuestion",
+      "tool_call_id": "call_ask1"
+    }
+  }
+]

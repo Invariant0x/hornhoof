@@ -1,0 +1,508 @@
+[
+  {
+    "program": "claude",
+    "kind": "overloaded",
+    "raw": {
+      "error": "overloaded",
+      "last_assistant_message": "Overloaded"
+    },
+    "source": "signals.md section 1"
+  },
+  {
+    "program": "claude",
+    "kind": "overloaded",
+    "raw": {
+      "error": "server_error",
+      "last_assistant_message": "API Error: 529 Overloaded"
+    },
+    "source": "signals.md section 1"
+  },
+  {
+    "program": "claude",
+    "kind": "rate_limited",
+    "raw": {
+      "error": "rate_limit",
+      "last_assistant_message": "Request rejected (429)"
+    },
+    "source": "signals.md section 1"
+  },
+  {
+    "program": "claude",
+    "kind": "usage_limit",
+    "raw": {
+      "error": "rate_limit",
+      "last_assistant_message": "You hit your usage limit"
+    },
+    "source": "signals.md section 1"
+  },
+  {
+    "program": "claude",
+    "kind": "usage_limit",
+    "raw": {
+      "error": "rate_limit",
+      "last_assistant_message": "5-hour limit reached"
+    },
+    "source": "signals.md section 1"
+  },
+  {
+    "program": "claude",
+    "kind": "auth",
+    "raw": {
+      "error": "authentication_failed",
+      "last_assistant_message": "Invalid API key"
+    },
+    "source": "signals.md section 1"
+  },
+  {
+    "program": "claude",
+    "kind": "auth",
+    "raw": {
+      "error": "oauth_org_not_allowed",
+      "last_assistant_message": "Organization not allowed"
+    },
+    "source": "signals.md section 1"
+  },
+  {
+    "program": "claude",
+    "kind": "network",
+    "raw": {
+      "error": "server_error",
+      "last_assistant_message": "Connection refused (ECONNREFUSED)"
+    },
+    "source": "signals.md section 1"
+  },
+  {
+    "program": "claude",
+    "kind": "network",
+    "raw": {
+      "error": "server_error",
+      "last_assistant_message": "ENOTFOUND"
+    },
+    "source": "signals.md section 1"
+  },
+  {
+    "program": "claude",
+    "kind": "network",
+    "raw": {
+      "error": "server_error",
+      "last_assistant_message": "Request timed out"
+    },
+    "source": "signals.md section 1"
+  },
+  {
+    "program": "claude",
+    "kind": "cut",
+    "raw": {
+      "error": "unknown",
+      "last_assistant_message": "API returned an empty or malformed response"
+    },
+    "source": "signals.md section 1"
+  },
+  {
+    "program": "claude",
+    "kind": "refused",
+    "raw": {
+      "error": "billing_error",
+      "last_assistant_message": "Billing failed"
+    },
+    "source": "signals.md section 1"
+  },
+  {
+    "program": "claude",
+    "kind": "refused",
+    "raw": {
+      "error": "account_on_hold",
+      "last_assistant_message": "Account on hold"
+    },
+    "source": "signals.md section 1"
+  },
+  {
+    "program": "claude",
+    "kind": "refused",
+    "raw": {
+      "error": "verification_required",
+      "last_assistant_message": "Verification required"
+    },
+    "source": "signals.md section 1"
+  },
+  {
+    "program": "claude",
+    "kind": "refused",
+    "raw": {
+      "error": "cloud_credential_error",
+      "last_assistant_message": "Credential error"
+    },
+    "source": "signals.md section 1"
+  },
+  {
+    "program": "claude",
+    "kind": "too_big",
+    "raw": {
+      "error": "max_output_tokens",
+      "last_assistant_message": "Output too long"
+    },
+    "source": "signals.md section 1"
+  },
+  {
+    "program": "claude",
+    "kind": "unknown",
+    "raw": {
+      "error": "invalid_request",
+      "last_assistant_message": "Invalid request"
+    },
+    "source": "signals.md section 1"
+  },
+  {
+    "program": "claude",
+    "kind": "unknown",
+    "raw": {
+      "error": "server_error",
+      "last_assistant_message": "Internal error"
+    },
+    "source": "signals.md section 1"
+  },
+  {
+    "program": "codex",
+    "kind": "overloaded",
+    "raw": {
+      "codex_error_info": "server_overloaded",
+      "message": "Selected model is at capacity."
+    },
+    "source": "signals.md section 2"
+  },
+  {
+    "program": "codex",
+    "kind": "overloaded",
+    "raw": {
+      "codex_error_info": {
+        "http_connection_failed": {
+          "http_status_code": 503
+        }
+      },
+      "message": "Service unavailable"
+    },
+    "source": "signals.md section 2"
+  },
+  {
+    "program": "codex",
+    "kind": "overloaded",
+    "raw": {
+      "codex_error_info": {
+        "http_connection_failed": {
+          "http_status_code": 529
+        }
+      },
+      "message": "Overloaded"
+    },
+    "source": "signals.md section 2"
+  },
+  {
+    "program": "codex",
+    "kind": "rate_limited",
+    "raw": {
+      "codex_error_info": "rate_limit_exceeded",
+      "message": "Rate limit"
+    },
+    "source": "signals.md section 2"
+  },
+  {
+    "program": "codex",
+    "kind": "rate_limited",
+    "raw": {
+      "codex_error_info": {
+        "response_too_many_failed_attempts": {
+          "http_status_code": 429
+        }
+      },
+      "message": "Too many requests"
+    },
+    "source": "signals.md section 2"
+  },
+  {
+    "program": "codex",
+    "kind": "usage_limit",
+    "raw": {
+      "codex_error_info": "usage_limit_exceeded",
+      "message": "Usage limit reached"
+    },
+    "source": "signals.md section 2"
+  },
+  {
+    "program": "codex",
+    "kind": "auth",
+    "raw": {
+      "codex_error_info": "unauthorized",
+      "message": "Unauthorized"
+    },
+    "source": "signals.md section 2"
+  },
+  {
+    "program": "codex",
+    "kind": "auth",
+    "raw": {
+      "codex_error_info": {
+        "http_connection_failed": {
+          "http_status_code": 401
+        }
+      },
+      "message": "Incorrect API key"
+    },
+    "source": "signals.md section 2"
+  },
+  {
+    "program": "codex",
+    "kind": "network",
+    "raw": {
+      "codex_error_info": "response_stream_connection_failed",
+      "message": "Connection failed"
+    },
+    "source": "signals.md section 2"
+  },
+  {
+    "program": "codex",
+    "kind": "network",
+    "raw": {
+      "codex_error_info": {
+        "http_connection_failed": {}
+      },
+      "message": "Connection refused"
+    },
+    "source": "signals.md section 2"
+  },
+  {
+    "program": "codex",
+    "kind": "cut",
+    "raw": {
+      "codex_error_info": "response_stream_disconnected",
+      "message": "Stream closed"
+    },
+    "source": "signals.md section 2"
+  },
+  {
+    "program": "codex",
+    "kind": "cut",
+    "raw": {
+      "codex_error_info": "other",
+      "message": "stream disconnected before completion"
+    },
+    "source": "signals.md section 2"
+  },
+  {
+    "program": "codex",
+    "kind": "refused",
+    "raw": {
+      "codex_error_info": "cyber_policy",
+      "message": "Refused"
+    },
+    "source": "signals.md section 2"
+  },
+  {
+    "program": "codex",
+    "kind": "refused",
+    "raw": {
+      "codex_error_info": "bio_policy",
+      "message": "Refused"
+    },
+    "source": "signals.md section 2"
+  },
+  {
+    "program": "codex",
+    "kind": "refused",
+    "raw": {
+      "codex_error_info": "misalignment_policy_violation",
+      "message": "Refused"
+    },
+    "source": "signals.md section 2"
+  },
+  {
+    "program": "codex",
+    "kind": "too_big",
+    "raw": {
+      "codex_error_info": "context_window_exceeded",
+      "message": "Context full"
+    },
+    "source": "signals.md section 2"
+  },
+  {
+    "program": "codex",
+    "kind": "too_big",
+    "raw": {
+      "codex_error_info": "session_budget_exceeded",
+      "message": "Budget exceeded"
+    },
+    "source": "signals.md section 2"
+  },
+  {
+    "program": "codex",
+    "kind": "unknown",
+    "raw": {
+      "codex_error_info": "other",
+      "message": "Unknown"
+    },
+    "source": "signals.md section 2"
+  },
+  {
+    "program": "codex",
+    "kind": "unknown",
+    "raw": {
+      "codex_error_info": {
+        "http_connection_failed": {
+          "http_status_code": 500
+        }
+      },
+      "message": "Internal error"
+    },
+    "source": "signals.md section 2"
+  },
+  {
+    "program": "codex",
+    "kind": "unknown",
+    "raw": {
+      "codex_error_info": {
+        "response_too_many_failed_attempts": {
+          "http_status_code": 500
+        }
+      },
+      "message": "Internal error"
+    },
+    "source": "signals.md section 2"
+  },
+  {
+    "program": "kimi",
+    "kind": "overloaded",
+    "raw": {
+      "code": "provider.overloaded",
+      "message": "provider.overloaded"
+    },
+    "source": "signals.md section 3"
+  },
+  {
+    "program": "kimi",
+    "kind": "rate_limited",
+    "raw": {
+      "code": "provider.rate_limit",
+      "message": "provider.rate_limit"
+    },
+    "source": "signals.md section 3"
+  },
+  {
+    "program": "kimi",
+    "kind": "auth",
+    "raw": {
+      "code": "provider.auth_error",
+      "message": "provider.auth_error"
+    },
+    "source": "signals.md section 3"
+  },
+  {
+    "program": "kimi",
+    "kind": "network",
+    "raw": {
+      "code": "provider.connection_error",
+      "message": "provider.connection_error"
+    },
+    "source": "signals.md section 3"
+  },
+  {
+    "program": "kimi",
+    "kind": "unknown",
+    "raw": {
+      "code": "provider.other",
+      "message": "provider.other"
+    },
+    "source": "signals.md section 3"
+  },
+  {
+    "program": "kimi",
+    "kind": "overloaded",
+    "raw": {
+      "error_type": "APIProviderOverloadedError",
+      "error_message": "APIProviderOverloadedError"
+    },
+    "source": "signals.md section 3"
+  },
+  {
+    "program": "kimi",
+    "kind": "rate_limited",
+    "raw": {
+      "error_type": "APIProviderRateLimitError",
+      "error_message": "APIProviderRateLimitError"
+    },
+    "source": "signals.md section 3"
+  },
+  {
+    "program": "kimi",
+    "kind": "usage_limit",
+    "raw": {
+      "error_type": "APIProviderQuotaExhaustedError",
+      "error_message": "APIProviderQuotaExhaustedError"
+    },
+    "source": "signals.md section 3"
+  },
+  {
+    "program": "kimi",
+    "kind": "network",
+    "raw": {
+      "error_type": "APIConnectionError",
+      "error_message": "APIConnectionError"
+    },
+    "source": "signals.md section 3"
+  },
+  {
+    "program": "kimi",
+    "kind": "network",
+    "raw": {
+      "error_type": "APITimeoutError",
+      "error_message": "APITimeoutError"
+    },
+    "source": "signals.md section 3"
+  },
+  {
+    "program": "antigravity",
+    "kind": "overloaded",
+    "raw": {
+      "short_error": "The server is overloaded"
+    },
+    "source": "signals.md section 4"
+  },
+  {
+    "program": "antigravity",
+    "kind": "rate_limited",
+    "raw": {
+      "short_error": "429 Too Many Requests"
+    },
+    "source": "signals.md section 4"
+  },
+  {
+    "program": "antigravity",
+    "kind": "usage_limit",
+    "raw": {
+      "short_error": "quota exhausted"
+    },
+    "source": "signals.md section 4"
+  },
+  {
+    "program": "antigravity",
+    "kind": "auth",
+    "raw": {
+      "short_error": "Please sign in"
+    },
+    "source": "signals.md section 4"
+  },
+  {
+    "program": "antigravity",
+    "kind": "network",
+    "raw": {
+      "short_error": "A network issue occurred"
+    },
+    "source": "signals.md section 4"
+  },
+  {
+    "program": "antigravity",
+    "kind": "unknown",
+    "raw": {
+      "short_error": "plan model not specified"
+    },
+    "source": "signals.md section 4"
+  }
+]

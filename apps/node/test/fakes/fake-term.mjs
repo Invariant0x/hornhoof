@@ -32,6 +32,9 @@ if (process.env.FAKE_CRASH_START) crash(process.env.FAKE_CRASH_START);
 const args = process.argv.slice(2);
 const flag = name => (args.includes(name) ? args[args.indexOf(name) + 1] : null);
 const settings = JSON.parse(flag('--settings') ?? '{}');
+import hooks from '../fixtures/turn-hooks.json' with { type: 'json' };
+const captured = name => hooks.find(h => h.program === 'claude' && h.event === name)?.input ?? {};
+const duration = () => appendFileSync(log, JSON.stringify({ type: 'system', subtype: 'turn_duration' }) + '\n');
 const HOOK = fileURLToPath(new URL('../../hh-hook.cjs', import.meta.url));
 let session = flag('--session-id') ?? flag('--resume') ?? 'none';
 const home = process.env.CLAUDE_CONFIG_DIR ?? '/tmp';
@@ -144,6 +147,7 @@ function failureBody(line) {
 
 async function apiFailure(line) {
   const body = failureBody(line);
+  appendFileSync(log, JSON.stringify({ type: 'assistant', isApiErrorMessage: true, error: body.error, message: { content: [{ type: 'text', text: body.error_details || body.last_assistant_message || 'unknown' }] } }) + '\n');
   process.stdout.write('❯ ');
   for (const group of settings.hooks?.StopFailure ?? []) {
     for (const { command } of group.hooks) {
@@ -155,6 +159,7 @@ async function apiFailure(line) {
       });
     }
   }
+  duration();
 }
 
 async function clear() {
@@ -218,8 +223,10 @@ async function answer(line, context) {
   if (!lag) write();
   process.stdout.write(`● ${text}\n❯ `);
   await hook('status', { rate_limits: { five_hour: { used_percentage: 40, resets_at: 1793379000 } }, context_window: { used_percentage: 25 } });
+  if (line.includes('LOGFIRST')) duration();
   await hook('stop', { last_assistant_message: text, transcript_path: log });
-  if (lag) setTimeout(write, line.includes('LAGLONG') ? 2500 : 300);
+  if (!lag && !line.includes('LOGFIRST')) duration();
+  if (lag) setTimeout(() => { write(); duration(); }, line.includes('LAGLONG') ? 2500 : 300);
 }
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -231,9 +238,11 @@ async function work() {
   process.stdout.write('\n❯ ');
   spinner('Thinking');
   await sleep(1500);
+  await hook('tool', { ...captured('PreToolUse'), tool_use_id: 'toolu_work', tool_name: 'Bash' });
   said('assistant', { type: 'tool_use', id: 'toolu_work', name: 'Bash', input: { command: 'make' } });
   spinner('Running make');
   await sleep(1500);
+  await hook('tooldone', { ...captured('PostToolUse'), tool_use_id: 'toolu_work', tool_name: 'Bash' });
   said('user', { type: 'tool_result', tool_use_id: 'toolu_work', content: 'built' });
   spinner('');
   said('assistant', { type: 'tool_use', id: 'toolu_ask', name: 'AskUserQuestion', input: { questions: [{ question: 'Which one?' }] } });

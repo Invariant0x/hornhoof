@@ -177,11 +177,15 @@ async function send(message) {
   if (code === 0 && result?.status === 'SUCCESS') return ended({ last_assistant_message: String(result.response ?? '').trimEnd() });
   const error = (typeof result?.error === 'string' && result.error) || errors.trim() || `Antigravity CLI ended with code ${code}.`;
   if (!result?.error) out(`\n${error}`);
-  return ended({ error });
+  const agyError = errors.split('\n').reverse().find(line => line.startsWith('AGY_ERROR: '));
+  let detail;
+  try { detail = agyError ? JSON.parse(agyError.slice('AGY_ERROR: '.length)) : undefined; } catch { /* Keep the original reason. */ }
+  return ended({ error, ...(detail ? { agy_error: detail } : {}) });
 }
 
 async function ended(how) {
   if (stopping) out(dim('\nStopped.'));
+  if (process.env.HH_AGY_LOG) appendFileSync(process.env.HH_AGY_LOG, JSON.stringify({ event: 'turn_end', ...how }) + '\n');
   await hook('stop', { ...(conversation ? { session_id: conversation } : {}), ...how });
   busy = false;
   stopping = false;

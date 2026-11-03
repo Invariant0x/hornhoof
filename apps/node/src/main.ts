@@ -291,8 +291,10 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
         const ok = host ? await host.say(m.agentKey, m.text, m.within).catch(() => false) : false;
         return void send?.({ type: 'agent.said', ref: m.ref, ok });
       }
-      case 'agent.restart':
-        return void send?.({ type: 'agent.restarted', agentKey: m.agentKey, jobId: m.jobId, ok: false, reason: 'This node cannot restart programs yet.' });
+      case 'agent.restart': {
+        const result = host ? await host.restart(m.agentKey, m.jobId, m.note) : { ok: false, reason: 'The terminal host is not running.' };
+        return void send?.({ type: 'agent.restarted', agentKey: m.agentKey, jobId: m.jobId, ...result });
+      }
       case 'cred.put':
         return inOrder(() => putCredential(m.kind, m.sealed));
       case 'cred.drop':

@@ -53,3 +53,7 @@ describe('the tool calls a line of a program’s log begins and ends', () => {
     for (const read of Object.values(CALLS)) for (const line of [null, 42, 'text', [], {}]) expect(read(line)).toEqual(none);
   });
 });
+
+it('ends an Antigravity tool in ERROR', () => {
+  expect(CALLS.antigravity({ event: 'step_update', step_update: { step_type: 'tool', step_index: 3, state: 'ERROR', tool_info: { name: 'run_command', error: 'denied' } } })).toEqual({ began: [], ended: ['3'] });
+});

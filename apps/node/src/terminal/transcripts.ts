@@ -153,7 +153,7 @@ export function codexRollout(line: unknown): RolloutNews {
 /* What a line of the main agent's log in Kimi Code tells: things to show, a turn's start, how it ended, which model runs
    and how many tokens its context holds. Kimi logs a turn's end without its answer, which is the turn's last text,
    or with an error's code and message when it failed. */
-export type WireNews = { events: AgentEvent[]; started?: true; ended?: true; aborted?: true; failed?: string; step?: true; blocked?: true; tokens?: number; model?: string };
+export type WireNews = { events: AgentEvent[]; started?: true; ended?: true; aborted?: true; failed?: string; step?: true; blocked?: true; tokens?: number; model?: string; retry?: { attempt: number; max: number | null; delayMs: number } };
 
 function loopEvents(event: Record<string, unknown>): AgentEvent[] {
   switch (event.type) {
@@ -181,6 +181,10 @@ export function kimiWire(line: unknown): WireNews {
     /* A prompt hook of the person's own said no: the prompt is over, and no turn starts or ends for it. */
     case 'prompt.completed':
       return line.reason === 'blocked' ? { events: [], failed: 'A hook in Kimi Code blocked this message.', blocked: true } : { events: [] };
+    case 'turn.step.retrying':
+      return typeof line.failedAttempt === 'number' && typeof line.delayMs === 'number'
+        ? { events: [], retry: { attempt: Math.max(1, Math.trunc(line.failedAttempt)), max: typeof line.maxAttempts === 'number' ? Math.max(1, Math.trunc(line.maxAttempts)) : null, delayMs: Math.max(0, line.delayMs) } }
+        : { events: [] };
     case 'turn.prompt':
       return { events: [], started: true };
     /* Kimi counts its context again as it grows, is compacted or a turn ends; each count is the size now. */

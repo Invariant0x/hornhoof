@@ -14,7 +14,10 @@ import failures from '../fixtures/terminal-api-failures.json' with { type: 'json
 
 if (process.env.FAKE_CRASH_START) crash(process.env.FAKE_CRASH_START);
 
+import hooks from '../fixtures/turn-hooks.json' with { type: 'json' };
 const args = process.argv.slice(2);
+let turnId;
+const hook = (event, name, body = {}) => fetch(`${process.env.HH_BRIDGE}/${event}`, { method: 'POST', body: JSON.stringify({ ...hooks.find(h => h.program === 'codex' && h.event === name)?.input, ...body, turn_id: turnId }) }).catch(() => {});
 const home = process.env.CODEX_HOME ?? '/tmp';
 const day = join(home, 'sessions', '2026', '10', '30');
 mkdirSync(day, { recursive: true });
@@ -49,6 +52,7 @@ const show = () => {
   else prompt();
 };
 let queue = Promise.resolve();
+let hanging = false;
 readKeys(key => {
   // Escape stops an answer; it is not part of the next line.
   if (key === 'escape') return;
@@ -61,6 +65,7 @@ readKeys(key => {
   input = '';
   shown = 0;
   process.stdout.write('\r\n');
+  if (hanging && process.env.FAKE_HOLD_WORDS) { prompt(); return; }
   queue = queue.then(() => take(line));
 });
 
@@ -76,8 +81,9 @@ async function work(line) {
   if (!line.includes('WORK')) return status('');
   await sleep(1500);
   const command = { type: 'CommandExecution', id: 'work-1', command: 'make' };
-  event({ type: 'item_started', item: command });
+  await hook('tool', 'PreToolUse', { tool_use_id: command.id, tool_name: 'Bash' });
   await sleep(1500);
+  await hook('tooldone', 'PostToolUse', { tool_use_id: command.id, tool_name: 'Bash' });
   event({ type: 'item_completed', item: { ...command, exit_code: 0, aggregated_output: 'built\n', status: 'completed' } });
   status('');
 }
@@ -89,12 +95,16 @@ async function take(line) {
     process.stdout.write('\n');
     status('Working (0s');
   }
-  event({ type: 'task_started', turn_id: randomUUID() });
+  if (!hanging) {
+    turnId = randomUUID();
+    event({ type: 'task_started', turn_id: turnId });
+  }
+  hanging = false;
   item('UserMessage', line);
   if (endsAtOnce(line)) return;
   if (line.includes('SLOW')) await slow();
   if (busy) await work(line);
-  answer(line);
+  await answer(line);
 }
 
 // Whether the turn ended as it started: CRASH ends the program, HANG never answers, and ABORT logs what Codex logs when a
@@ -103,18 +113,20 @@ function endsAtOnce(line) {
   const failure = failures.find(f => f.program === 'codex' && line.startsWith(f.prompt));
   if (failure) {
     if (line.includes('LONG')) process.stdout.write('screen content '.repeat(300) + '\n');
-    event(failure.line.payload);
+    event({ ...failure.line.payload, turn_id: turnId });
     prompt();
     return true;
   }
   if (line.startsWith('CRASH')) crash(line.includes('LONG') ? 'long' : '');
   if (line.includes('HANG_EXIT')) process.stdout.write('exit-test running\n');
   if (line.includes('HANG')) {
+    hanging = true;
     prompt();
     return true;
   }
   if (!line.includes('ABORT')) return false;
-  event({ type: 'turn_aborted', reason: 'interrupted' });
+  void hook('interrupt', 'Interrupt');
+  event({ type: 'turn_aborted', turn_id: turnId, reason: 'interrupted' });
   process.stdout.write('■ Conversation interrupted\n');
   prompt();
   return true;
@@ -126,11 +138,13 @@ async function slow() {
   process.stdout.write('\r\x1b[2K');
 }
 
-function answer(line) {
+async function answer(line) {
   const text = `echo: ${line}`;
   item('AgentMessage', text);
   event({ type: 'token_count', info: { last_token_usage: { total_tokens: 112000 }, model_context_window: 212000 }, rate_limits: null });
-  event({ type: 'task_complete', last_agent_message: text });
+  if (!line.includes('LOGFIRST')) await hook('stop', 'Stop', { last_assistant_message: text });
+  event({ type: 'task_complete', turn_id: turnId, last_agent_message: text });
+  if (line.includes('LOGFIRST')) await hook('stop', 'Stop', { last_assistant_message: text });
   process.stdout.write(`• ${text}\n`);
   prompt();
   if (line.includes('LATE')) setTimeout(() => event({ type: 'turn_aborted', reason: 'interrupted' }), 150);

@@ -77,11 +77,11 @@ export const ack = (key: string, jobId: string, nth = 0) => {
   host.opened({ type: 'turn.opened', agentKey: key, jobId, toolToken: `tok-${jobId}`, ref: asked?.ref });
 };
 /* A person types a line into the agent's terminal, and Hornhoof opens a turn for it. */
-export const typeTurn = async (key: string, termId: string, line: string, jobId: string) => {
+export const typeTurn = async (key: string, termId: string, line: string, jobId: string, nth = 0) => {
   await host.open({ type: 'term.open', termId, agentKey: key, cols: 80, rows: 24, write: true });
   host.input({ type: 'term.input', termId, data: `${line}\r` });
-  await until(() => sent.some(m => m.type === 'turn.open'));
-  ack(key, jobId);
+  await until(() => sent.filter(m => m.type === 'turn.open' && m.agentKey === key).length > nth);
+  ack(key, jobId, nth);
   await until(() => host.typedJobs().includes(jobId) || Boolean(done(jobId)));
 };
 
@@ -91,8 +91,16 @@ export function pastLostEndWindows() {
   return vi.spyOn(Date, 'now').mockImplementation(() => now() + 3 * LOST_END_MS + 1000);
 }
 
-/* Lose only the Stop hook, leaving the real prompt hook, transcript and terminal observer running. */
+/* Lose both end channels, leaving prompts, other log lines and the terminal observer running. */
 export function endsLost(): void {
+  for (const a of host['agents'].values()) {
+    if (!a.tail) continue;
+    const read = a.tail.read.bind(a.tail);
+    vi.spyOn(a.tail, 'read').mockImplementation(() => read().filter(line => {
+      const data = JSON.parse(line);
+      return data.subtype !== 'turn_duration' && data.event !== 'turn_end';
+    }));
+  }
   const hook = host['hook'].bind(host);
   vi.spyOn(host as unknown as { hook: typeof hook }, 'hook').mockImplementation((key, event, data) => event === 'stop' ? Promise.resolve() : hook(key, event, data));
 }

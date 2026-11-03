@@ -227,7 +227,7 @@ describe('Kimi Code in a terminal', () => {
     expect(JSON.parse(readFileSync(join(work, '.kimi-code', 'mcp.json'), 'utf8'))).toEqual({ mcpServers: { hornhoof: { transport: 'http', url: URLS.mcpUrl } } });
     const config = readFileSync(join(home, 'config.toml'), 'utf8');
     expect(config.startsWith(own)).toBe(true);
-    expect(config.match(/\[\[hooks\]\]/g)).toHaveLength(2);
+    expect(config.match(/\[\[hooks\]\]/g)).toHaveLength(9);
     expect(config).toContain('event = "SessionStart"\ncommand = "hh-hook start"');
     expect(config).toContain('event = "UserPromptSubmit"\ncommand = "hh-hook prompt"');
   });
@@ -298,5 +298,30 @@ describe('Kimi Code in a terminal', () => {
     expect(findKimiWire(home, 'session_1')).toBe(join(dir, 'wire.jsonl'));
     expect(findKimiWire(home, 'session_2')).toBeNull();
     expect(findKimiWire(home, '../x')).toBeNull();
+  });
+});
+
+describe('lifecycle hooks in launch settings', () => {
+  const launch = { bin: 'program', home: '/h', workDir: '/w', sessionId: null, model: null, instructionsFile: null, urls: URLS };
+  it('configures Claude tool, permission and session ends', () => {
+    const settings = JSON.parse(arg(claudeProgram.launch(launch).command, '--settings')!);
+    for (const [name, event] of Object.entries({ PreToolUse: 'tool', PostToolUse: 'tooldone', PostToolUseFailure: 'toolfail', PermissionRequest: 'ask', SessionEnd: 'end' })) {
+      expect(settings.hooks[name]).toEqual([{ hooks: [{ type: 'command', command: `hh-hook ${event}` }] }]);
+    }
+  });
+  it('configures exactly the five Codex hooks with inline TOML and bypasses hook trust', () => {
+    const command = codexProgram.launch(launch).command;
+    expect(command).toContain('--dangerously-bypass-hook-trust');
+    expect(command.filter(s => s.startsWith('hooks.'))).toEqual(Object.entries({ Stop: 'stop', Interrupt: 'interrupt', PreToolUse: 'tool', PostToolUse: 'tooldone', SessionEnd: 'end' }).map(([name, event]) => `hooks.${name}=[{hooks=[{type="command",command="hh-hook ${event}"}]}]`));
+  });
+  it('upgrades the two existing Kimi hooks once, including both stop events', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'hh-kimi-hooks-'));
+    const work = mkdtempSync(join(tmpdir(), 'hh-kimi-work-'));
+    writeFileSync(join(home, 'config.toml'), '[[hooks]]\nevent = "SessionStart"\ncommand = "hh-hook start"\n\n[[hooks]]\nevent = "UserPromptSubmit"\ncommand = "hh-hook prompt"\n');
+    await prepareKimi(home, work, URLS.mcpUrl);
+    await prepareKimi(home, work, URLS.mcpUrl);
+    const config = readFileSync(join(home, 'config.toml'), 'utf8');
+    expect([...config.matchAll(/event = "([^"]+)"/g)].map(m => m[1])).toEqual(['SessionStart', 'UserPromptSubmit', 'Stop', 'StopFailure', 'Interrupt', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'SessionEnd']);
+    expect(config).not.toContain('SessionHeartbeat');
   });
 });
