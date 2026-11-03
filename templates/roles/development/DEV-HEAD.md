@@ -5,6 +5,7 @@ kind: head
 title: { en: "Head of development", ru: "Руководитель разработки" }
 description: { en: "Gives each goal out to engineers in large pieces at once and takes the work to a release.", ru: "Раздает каждую цель инженерам крупными частями одновременно и доводит работу до выпуска." }
 tier: deep
+effort: high
 perProduct: false
 default: true
 order: 0

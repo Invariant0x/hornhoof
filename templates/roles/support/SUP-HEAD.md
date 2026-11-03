@@ -5,6 +5,7 @@ kind: head
 title: { en: "Head of support", ru: "Руководитель поддержки" }
 description: { en: "Runs customer support, owns the support policy and escalations, and turns ticket trends into requests for other departments.", ru: "Руководит поддержкой клиентов, отвечает за правила поддержки и эскалации и превращает частые обращения в запросы другим отделам." }
 tier: standard
+effort: medium
 perProduct: false
 default: true
 order: 10

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { API_MODELS, CLAUDE_ALIASES, CRED_KINDS, cut, defaultEffortOf, lastBytes, MAX_INSTRUCTIONS, MAX_RUN_FILES, MAX_TEST_PARTS, OLD_NODE_INSTRUCTIONS, TAIL_BYTES, TEST_LOG_BYTES, COMPANY_TEMPLATES, COMPANY_TEMPLATE_KEYS, DEPARTMENT_TEMPLATES, TEMPLATE_KEYS, effortFor, effortsOf, modelsFor, parseNodeMessage, parseServerMessage, repoFolder, type AgentEvent, type NodeMessage, type ServerMessage } from '../src/index.js';
-import { effortsOf as light, topEffort as lightTop } from '../src/efforts.js';
+import { effortsOf as light, effortFor as lightEffort } from '../src/efforts.js';
 
 const LIMITS = { status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0.38, resetsAt: '2026-10-29T21:30:00.000Z' }] };
 
@@ -320,36 +320,39 @@ describe('models', () => {
     expect(defaultEffortOf('codex', [{ id: 'gpt-6.1-sol', name: 'Sol', defaultEffort: 'low' }], 'gpt-6.1-sol')).toBe('low');
     expect(defaultEffortOf('codex', [{ id: 'gpt-6.1-sol', name: 'Sol', defaultEffort: 'low' }], '')).toBeNull();
     expect(defaultEffortOf('glm', [], '')).toBeNull();
-    expect(defaultEffortOf('kimi', [{ id: 'k3', name: 'K3', efforts: ['low', 'high'] }], 'k3')).toBe('high');
+    expect(defaultEffortOf('kimi', [{ id: 'k3', name: 'K3', efforts: ['low', 'high'] }], 'k3')).toBeNull();
     expect(modelsFor('claude', old).map(m => m.defaultEffort)).toEqual(['high', 'medium', 'medium', 'medium']);
   });
 
-  it('runs Kimi at its most unless a person picked less, and the others at their own default', () => {
-    expect(effortFor('kimi', null)).toBe('max');
-    expect(effortFor('kimi', 'low')).toBe('low');
-    expect(effortFor('codex', null)).toBeNull();
-    expect(effortFor('claude', 'xhigh')).toBe('xhigh');
+  it('leaves a model at its program default without a role effort', () => {
+    expect(effortFor(null, ['low', 'high', 'max'])).toBeNull();
+    expect(effortFor(null, [])).toBeNull();
   });
 
-  it('keeps a picked effort only while the model takes it, and runs Kimi at the most its model takes', () => {
-    expect(effortFor('kimi', 'xhigh', ['low', 'high', 'max'])).toBe('max');
-    expect(effortFor('kimi', null, ['low', 'high'])).toBe('high');
-    expect(effortFor('codex', 'ultra', ['low', 'medium'])).toBe('medium');
-    expect(effortFor('codex', 'medium', ['low', 'medium'])).toBe('medium');
+  it.each([
+    ['xhigh', ['low', 'xhigh', 'max'], 'xhigh'],
+    ['xhigh', ['low', 'high', 'max'], 'high'],
+    ['medium', ['low', 'high', 'max'], 'low'],
+    ['low', ['max', 'high'], 'high'],
+    ['xhigh', ['ultra'], 'ultra'],
+    ['max', ['ultra', 'low', 'xhigh', 'high'], 'xhigh'],
+    ['xhigh', [], null],
+  ])('fits the role effort %s to %j as %s', (role, levels, expected) => {
+    expect(effortFor(null, levels, role)).toBe(expected);
   });
 
-  it('runs Codex at the most its model takes unless a person picked a level, and at its own default while its levels are not known', () => {
+  it('keeps a supported pick or a pick whose model has no known levels', () => {
+    expect(effortFor('max', ['low', 'high', 'max'], 'xhigh')).toBe('max');
+    expect(effortFor('medium', ['low', 'medium'], 'low')).toBe('medium');
+    expect(effortFor('xhigh', [], 'medium')).toBe('xhigh');
+    expect(effortFor('xhigh', ['low', 'high', 'max'], 'medium')).toBe('low');
+    expect(effortFor('ultra', ['low', 'medium'])).toBeNull();
+  });
+
+  it("displays Codex's own default without choosing its highest level", () => {
     const sol = { id: 'gpt-6.1-sol', name: 'Sol', efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: 'medium' };
-    expect(effortFor('codex', null, sol.efforts)).toBe('xhigh');
-    expect(effortFor('codex', 'low', sol.efforts)).toBe('low');
-    expect(defaultEffortOf('codex', [sol], 'gpt-6.1-sol')).toBe('xhigh');
-    /* The Default model takes only the levels every model takes. */
-    expect(defaultEffortOf('codex', [sol, { id: 'gpt-6-luna', name: 'Luna', efforts: ['low', 'high'] }], '')).toBe('high');
-    /* Codex may not take max, so a model that names no levels runs at the program's own. */
-    expect(effortFor('codex', null, [])).toBeNull();
-    /* Claude and an OpenAI key, which pays for each token, stay at their program's default. */
-    expect(effortFor('claude', null, ['low', 'medium', 'high', 'xhigh', 'max'])).toBeNull();
-    expect(effortFor('openai_api', null, ['low', 'medium', 'high', 'xhigh', 'max'])).toBeNull();
+    expect(defaultEffortOf('codex', [sol], sol.id)).toBe('medium');
+    expect(defaultEffortOf('codex', [sol], '')).toBeNull();
   });
 
   it("lists a model's efforts, and for the Default model the levels every model that names some takes", () => {
@@ -369,10 +372,10 @@ describe('models', () => {
   });
 
   it('takes an empty list of efforts as none known, and an unknown model as the Default', () => {
-    /* No efforts known: a picked level goes through, Kimi runs at max. */
-    expect(effortFor('codex', 'high', [])).toBe('high');
-    expect(effortFor('kimi', null, [])).toBe('max');
-    expect(defaultEffortOf('kimi', [], 'k2')).toBe('max');
+    /* No efforts known: a picked level goes through, and Default sends no flag. */
+    expect(effortFor('high', [])).toBe('high');
+    expect(effortFor(null, [])).toBeNull();
+    expect(defaultEffortOf('kimi', [], 'k2')).toBeNull();
     /* A model that names no levels does not narrow what the Default model takes. */
     const models = [
       { id: 'a', name: 'A', efforts: ['low', 'high'] },
@@ -383,7 +386,7 @@ describe('models', () => {
     /* A model the subscription does not run has no default of its own. */
     expect(defaultEffortOf('codex', [{ id: 'gpt-6.1-sol', name: 'Sol', defaultEffort: 'low' }], 'gone')).toBeNull();
     expect(defaultEffortOf('claude', [], 'gone')).toBeNull();
-    expect(defaultEffortOf('kimi', [{ id: 'k', name: 'K', efforts: ['low', 'high'] }], 'gone')).toBe('high');
+    expect(defaultEffortOf('kimi', [{ id: 'k', name: 'K', efforts: ['low', 'high'] }], 'gone')).toBeNull();
   });
 
   it('keeps the shared levels of the Default model in the order the first model lists them', () => {
@@ -392,12 +395,12 @@ describe('models', () => {
       { id: 'b', name: 'B', efforts: ['max', 'low', 'high', 'xhigh'] },
     ];
     expect(effortsOf(models, null)).toEqual(['high', 'low', 'max']);
-    expect(defaultEffortOf('kimi', [{ id: 'k', name: 'K', efforts: ['high', 'low'] }, { id: 'j', name: 'J', efforts: ['low', 'high'] }], '')).toBe('low');
+    expect(defaultEffortOf('kimi', models, '')).toBeNull();
   });
 
   it('gives the web the same effort rule from a module without the message schemas', () => {
     expect(light).toBe(effortsOf);
-    expect(lightTop('codex', ['low', 'ultra'])).toBe(effortFor('codex', null, ['low', 'ultra']));
+    expect(lightEffort).toBe(effortFor);
   });
 });
 

@@ -5,6 +5,7 @@ kind: head
 title: { en: "Controller", ru: "Финансовый контролер" }
 description: { en: "Runs finance: the monthly close, the financial statements and the approval gate for every spend.", ru: "Руководит финансами: закрытие месяца, финансовая отчетность и согласование каждого расхода." }
 tier: deep
+effort: medium
 perProduct: false
 default: true
 order: 10

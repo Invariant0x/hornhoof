@@ -1,4 +1,9 @@
-import type { ModelOption, ProviderId } from './index.js';
+import type { ModelOption } from './index.js';
+
+export const ROLE_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
+export type RoleEffort = (typeof ROLE_EFFORTS)[number];
+export const ORCHESTRATOR_EFFORT: RoleEffort = 'xhigh';
+const EFFORT_ORDER = [...ROLE_EFFORTS, 'ultra'];
 
 /* The efforts a model takes. The program picks the Default model itself, and a model the subscription does not run runs
    on it, so they take only the levels every model that names some takes. It lives apart from the message schemas, so the
@@ -10,10 +15,12 @@ export function effortsOf(models: ModelOption[], model: string | null): string[]
   return named.length ? named[0]!.filter(level => named.every(list => list.includes(level))) : [];
 }
 
-/* The level Kimi and Codex run at when nobody picked one, as the CEO asked: the most their model takes. A model that names
-   no levels runs Kimi at max, and Codex, which may not take max, at its program's own. The others stay at their default. */
-export function topEffort(provider: ProviderId, efforts: string[]): string | null {
-  if (provider !== 'kimi' && provider !== 'codex') return null;
-  if (efforts.includes('max')) return 'max';
-  return efforts[efforts.length - 1] ?? (provider === 'kimi' ? 'max' : null);
+/* A person's pick stays while the model takes it. Otherwise fit the role down to a supported level, or its lowest.
+   With no role level or no known model levels, leave the program to choose. */
+export function effortFor(chosen: string | null, efforts: string[] = [], roleEffort: string | null = null): string | null {
+  if (chosen && (!efforts.length || efforts.includes(chosen))) return chosen;
+  if (!roleEffort || !efforts.length) return null;
+  const ordered = EFFORT_ORDER.filter(level => efforts.includes(level));
+  const fitted = ordered.filter(level => EFFORT_ORDER.indexOf(level) <= EFFORT_ORDER.indexOf(roleEffort));
+  return fitted.at(-1) ?? ordered[0] ?? null;
 }

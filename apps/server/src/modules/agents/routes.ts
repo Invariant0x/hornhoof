@@ -1,4 +1,4 @@
-import { effortsOf, MAX_INSTRUCTIONS, modelsFor, type ModelOption } from '@hornhoof/protocol';
+import { effortsOf, MAX_INSTRUCTIONS, modelsFor, type ModelOption, type RoleEffort } from '@hornhoof/protocol';
 import { and, asc, desc, eq, inArray, isNull, notInArray, or, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -23,11 +23,11 @@ export type AgentCard = {
   id: string;
   kind: AgentRow['kind'];
   name: string;
-  role: { id: string; title: Lang; description: Lang } | null;
+  role: { id: string; title: Lang; description: Lang; effort?: RoleEffort } | null;
   department: { id: string; name: string } | null;
   product: { id: string; name: string } | null;
   model: string;
-  /* The level a person picked, or null for the program's default (Kimi's and Codex's most). */
+  /* The level a person picked, or null to follow its role. */
   effort: string | null;
   subscription: SubView | null;
   /* The machine its program is on; none on the built-in node and before it first ran. */
@@ -129,7 +129,7 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
       id: agent.id,
       kind: agent.kind,
       name: agent.name,
-      role: role ? { id: role.id, title: role.title, description: role.description } : null,
+      role: role ? { id: role.id, title: role.title, description: role.description, effort: role.effort } : null,
       department: named(agent.departmentId),
       product: named(agent.productId),
       model: agent.model,
@@ -306,7 +306,7 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { agent, next, changed: changed.length > 0 };
   }
 
-  /* Back to the role as the templates have it now: its skills and texts. The model and subscription stay. */
+  /* Back to the role as the templates have it now: its skills, texts and effort. The model and subscription stay. */
   app.post('/api/agents/:id/reset', async req => {
     const { me, agent: found } = await agentFor(ctx, req);
     await requireEditor(me, found);
@@ -316,11 +316,12 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
       const skills = role.skills.filter(s => s.on).map(s => s.id);
       const templateHashes = Object.fromEntries([[role.id, role.hash], ...skills.map(id => [id, ctx.templates.skills.get(id)!.hash])]);
       await db.transaction(async tx => {
-        await tx.update(agents).set({ skills, overrides: {}, templateHashes }).where(eq(agents.id, agent.id));
-        await tx.insert(agentChanges).values({ companyId: agent.companyId, agentId: agent.id, ...changedBy(me), field: 'reset', before: { skills: agent.skills, overrides: agent.overrides }, after: { skills } });
+        await tx.update(agents).set({ skills, overrides: {}, templateHashes, effort: null }).where(eq(agents.id, agent.id));
+        await tx.insert(agentChanges).values({ companyId: agent.companyId, agentId: agent.id, ...changedBy(me), field: 'reset', before: { skills: agent.skills, overrides: agent.overrides, effort: agent.effort }, after: { skills, effort: null } });
       });
-      return { ...agent, skills, overrides: {}, templateHashes };
+      return { ...agent, skills, overrides: {}, templateHashes, effort: null };
     });
+    ctx.bus.publish(reset.companyId, { type: 'org' });
     return card(reset, me);
   });
 

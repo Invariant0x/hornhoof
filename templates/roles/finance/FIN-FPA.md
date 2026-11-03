@@ -5,6 +5,7 @@ kind: member
 title: { en: "Financial planning analyst", ru: "Аналитик финансового планирования" }
 description: { en: "Builds the budget, forecasts and financial model, and tracks cash and SaaS metrics.", ru: "Строит бюджет, прогнозы и финансовую модель, следит за деньгами и метриками SaaS." }
 tier: standard
+effort: high
 perProduct: false
 default: true
 order: 30

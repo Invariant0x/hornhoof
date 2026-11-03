@@ -5,6 +5,7 @@ kind: member
 title: { en: "Business analyst", ru: "Бизнес-аналитик" }
 description: { en: "Sizes markets, maps competitors and researches sectors, citing every source.", ru: "Оценивает рынки, изучает конкурентов и отрасли со ссылкой на каждый источник." }
 tier: standard
+effort: high
 perProduct: false
 default: true
 order: 30

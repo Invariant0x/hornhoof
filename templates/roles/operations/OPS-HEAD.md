@@ -5,6 +5,7 @@ kind: head
 title: { en: "Head of operations", ru: "Руководитель операционного отдела" }
 description: { en: "Runs the department that gives the company its tools, accounts, integrations and working machines.", ru: "Руководит отделом, который дает компании инструменты, учетные записи, интеграции и рабочие машины." }
 tier: standard
+effort: medium
 perProduct: false
 default: true
 order: 10

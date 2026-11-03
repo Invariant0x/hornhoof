@@ -5,6 +5,7 @@ kind: member
 title: { en: "First-line support", ru: "Первая линия поддержки" }
 description: { en: "Reads incoming tickets, sorts them and drafts replies in the customer's language.", ru: "Читает входящие обращения, сортирует их и готовит ответы на языке клиента." }
 tier: fast
+effort: medium
 perProduct: false
 default: true
 order: 20

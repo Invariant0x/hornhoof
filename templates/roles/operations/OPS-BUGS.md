@@ -5,6 +5,7 @@ kind: member
 title: { en: "Weak point collector", ru: "Сборщик слабых мест" }
 description: { en: "Wakes every few hours, reads what failed and where agents stumbled, and proposes what to install ahead, what to allow and what to fix.", ru: "Просыпается раз в несколько часов, читает, что сломалось и где агенты споткнулись, и предлагает, что установить заранее, что разрешить и что исправить." }
 tier: standard
+effort: high
 perProduct: false
 default: true
 order: 60

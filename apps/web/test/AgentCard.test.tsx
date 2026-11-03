@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import type { AgentCardView, Me } from '../src/types';
 import { AgentCard } from '../src/ui/AgentCard';
@@ -118,7 +118,7 @@ describe('AgentCard', () => {
     const { calls } = open({ 'PATCH /api/agents/b1': patched });
     const effort = await screen.findByRole('combobox', { name: 'Effort' });
     expect(effort).toHaveValue('');
-    expect(within(effort).getAllByRole('option').map(o => o.textContent)).toEqual(['Default', 'Low', 'High', 'Max']);
+    expect(within(effort).getAllByRole('option').map(o => o.textContent)).toEqual(['Default (High)', 'Low', 'High', 'Max']);
     await user.selectOptions(effort, 'max');
     await vi.waitFor(() => expect(calls.find(c => c.method === 'PATCH')?.body).toEqual({ effort: 'max' }));
     expect(screen.getByRole('combobox', { name: 'Effort' })).toHaveValue('max');
@@ -166,33 +166,54 @@ describe('AgentCard', () => {
     expect(await screen.findByText('Next round: as soon as it is free')).toBeInTheDocument();
   });
 
-  it('names the level the Default runs at: Kimi at its most', async () => {
+  it('names the role effort fitted to Kimi in Default even with a picked level', async () => {
     const kimi = { ...TEAM_KEY, id: 's-kimi', provider: 'kimi' as const };
     const k3 = { id: 'k3', name: 'K3', efforts: ['low', 'high', 'max'], defaultEffort: 'high' };
-    open({ 'GET /api/agents/b1': [200, { ...CARD, model: '', subscription: kimi, runsOn: [{ subscription: kimi, models: [k3] }] }] });
-    expect(await screen.findByRole('option', { name: 'Default (Max)' })).toBeInTheDocument();
+    open({ 'GET /api/agents/b1': [200, { ...CARD, model: '', effort: 'max', subscription: kimi, runsOn: [{ subscription: kimi, models: [k3] }] }] });
+    expect(await screen.findByRole('option', { name: 'Default (High)' })).toBeInTheDocument();
   });
 
-  it('names the level Claude Code runs its Default model at: medium on Opus 5.5', async () => {
+  it('names the role effort on the Default model of Claude Code', async () => {
     const plan = { ...TEAM_KEY, id: 's-cl', provider: 'claude' as const };
     const opus = { id: 'opus', name: 'Opus', efforts: ['low', 'medium', 'high', 'xhigh', 'max'], defaultEffort: 'medium' };
     open({ 'GET /api/agents/b1': [200, { ...CARD, model: '', subscription: plan, runsOn: [{ subscription: plan, models: [opus] }] }] });
-    expect(await screen.findByRole('option', { name: 'Default (Medium)' })).toBeInTheDocument();
+    expect(await screen.findByRole('option', { name: 'Default (Extra high)' })).toBeInTheDocument();
   });
 
-  it('names the level the Default runs at: Codex at the most its model takes', async () => {
+  it('names the role effort in Default for Codex even when it takes more', async () => {
     const codex = { ...TEAM_KEY, id: 's-cx', provider: 'codex' as const };
     const sol = { id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol', efforts: ['low', 'xhigh', 'ultra'], defaultEffort: 'low' };
     open({ 'GET /api/agents/b1': [200, { ...CARD, model: 'gpt-6.1-sol', subscription: codex, runsOn: [{ subscription: codex, models: [sol] }] }] });
     const effort = await screen.findByRole('combobox', { name: 'Effort' });
-    expect(within(effort).getAllByRole('option').map(o => o.textContent)).toEqual(['Default (Ultra)', 'Low', 'Extra high', 'Ultra']);
+    expect(within(effort).getAllByRole('option').map(o => o.textContent)).toEqual(['Default (Extra high)', 'Low', 'Extra high', 'Ultra']);
   });
 
   it("names the Default by its model's own level when the program has one", async () => {
     const plan = { ...TEAM_KEY, id: 's-cl', provider: 'claude' as const };
     const fable = { id: 'fable', name: 'Fable', efforts: ['low', 'medium', 'high', 'xhigh', 'max'], defaultEffort: 'high' };
-    open({ 'GET /api/agents/b1': [200, { ...CARD, model: 'fable', subscription: plan, runsOn: [{ subscription: plan, models: [fable] }] }] });
+    open({ 'GET /api/agents/b1': [200, { ...CARD, role: { ...CARD.role!, effort: undefined }, model: 'fable', subscription: plan, runsOn: [{ subscription: plan, models: [fable] }] }] });
     expect(await screen.findByRole('option', { name: 'Default (High)' })).toBeInTheDocument();
+  });
+
+  it('fits a medium role down to low on Kimi', async () => {
+    const kimi = { ...TEAM_KEY, id: 's-kimi', provider: 'kimi' as const };
+    const model = { id: 'k3', name: 'K3', efforts: ['low', 'high', 'max'] };
+    open({ 'GET /api/agents/b1': [200, { ...CARD, role: { ...CARD.role!, effort: 'medium' }, model: 'k3', subscription: kimi, runsOn: [{ subscription: kimi, models: [model] }] }] });
+    expect(await screen.findByRole('option', { name: 'Default (Low)' })).toBeInTheDocument();
+  });
+
+  it('names the orchestrator default as xhigh without a role file', async () => {
+    const codex = { ...TEAM_KEY, id: 's-cx', provider: 'codex' as const };
+    const model = { id: 'sol', name: 'Sol', efforts: ['low', 'xhigh', 'ultra'] };
+    open({ 'GET /api/agents/b1': [200, { ...CARD, kind: 'orchestrator', role: null, model: 'sol', subscription: codex, runsOn: [{ subscription: codex, models: [model] }] }] });
+    expect(await screen.findByRole('option', { name: 'Default (Extra high)' })).toBeInTheDocument();
+  });
+
+  it('keeps the Russian Default wording for the fitted role effort', async () => {
+    const saved = vi.spyOn(Storage.prototype, 'getItem').mockReturnValue('ru');
+    onTestFinished(() => saved.mockRestore());
+    open();
+    expect(await screen.findByRole('option', { name: 'По умолчанию (высокое)' })).toBeInTheDocument();
   });
 
   it('lets a person go back to Default when the program no longer says which levels its model takes', async () => {
@@ -226,7 +247,7 @@ describe('AgentCard', () => {
     const { calls } = open({ 'POST /api/agents/b1/reset': [200, { ...CARD, changes: [{ field: 'reset', personName: 'Ivan', byOrchestrator: false, at: '2026-10-30T09:00:00.000Z' }, ...CARD.changes] }] });
     await user.click(await screen.findByRole('button', { name: 'Reset to template' }));
     expect(calls.some(c => c.path === '/api/agents/b1/reset')).toBe(false);
-    expect(screen.getByText('Reset Bruno to the template? Its own prompt and skill changes are lost.')).toBeInTheDocument();
+    expect(screen.getByText('Reset Bruno to the template? Its own prompt, skill changes and effort choice are lost.')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Yes, reset' }));
     await vi.waitFor(() => expect(calls.some(c => c.method === 'POST' && c.path === '/api/agents/b1/reset')).toBe(true));
     expect(await screen.findByText(/Reset to the template: Ivan/)).toBeInTheDocument();
