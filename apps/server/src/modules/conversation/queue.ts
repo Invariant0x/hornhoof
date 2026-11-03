@@ -108,7 +108,8 @@ export const STOPPED_ON_PURPOSE = ['cancelled', 'removed', 'switched_off'];
 
 /* answersCeo: a note of something the CEO did, which counts as the CEO's order without a message. */
 /* withMessage: what is kept together with the message, or not at all. */
-type Turn = { companyId: string; agentId: string; prompt: string; createdBy: string | null; message?: { personId: string | null; text: string; from?: 'orchestrator' | 'agent'; name?: string; by?: string }; taskId?: string; answersCeo?: boolean; withMessage?: WithEvent };
+/* retryOf: the turn a node restart cut off, which this one runs once more. */
+type Turn = { companyId: string; agentId: string; prompt: string; createdBy: string | null; message?: { personId: string | null; text: string; from?: 'orchestrator' | 'agent'; name?: string; by?: string }; taskId?: string; answersCeo?: boolean; withMessage?: WithEvent; retryOf?: string };
 
 /* One thing at a time per agent, so two pumps never send two turns. */
 const chains = new WeakMap<Ctx, Map<string, Promise<unknown>>>();
@@ -208,6 +209,7 @@ export async function insertTurn(ctx: Ctx, t: Turn): Promise<string> {
       timeoutMs: TURN_TIMEOUT_MS,
       createdBy: t.createdBy,
       taskId: t.taskId ?? null,
+      retryOf: t.retryOf ?? null,
       answersCeo: t.answersCeo === true || (await isCeo(ctx, t.message?.personId)),
     })
     .returning({ id: jobs.id });

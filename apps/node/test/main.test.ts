@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
-import { tmpdir } from 'node:os';
+import { hostname, tmpdir, uptime } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { WebSocketServer, type WebSocket } from 'ws';
@@ -276,6 +276,28 @@ describe('runNode', () => {
     server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
     await server.wait(() => server.received.filter(m => m.type === 'status').length >= 2);
     expect(server.received.filter(m => m.type === 'status').at(-1)!.limits).toMatchObject({ status: 'rejected' });
+  });
+
+  it('says in hello how it came up: the same after a dropped connection, anew once it starts again', async () => {
+    const server = await fakeServer();
+    const dir = nodeDir(server.url);
+    const first = await runNode({ dir, adapter, log: () => {} });
+    const hellos = () => server.received.filter(m => m.type === 'hello').map(m => m.boot as { startedAt: string; machineUpAt: string; container: string });
+    await server.wait(() => hellos().length === 1);
+    const [boot] = hellos();
+    expect(boot).toEqual({ startedAt: expect.any(String), machineUpAt: expect.any(String), container: hostname() });
+    expect(Math.abs(Date.parse(boot!.machineUpAt) - (Date.now() - uptime() * 1000))).toBeLessThan(5000);
+    expect(Date.parse(boot!.startedAt)).toBeGreaterThan(Date.parse(boot!.machineUpAt));
+    server.drop();
+    await server.wait(() => hellos().length === 2);
+    expect(hellos()[1]).toEqual(boot);
+    first.stop();
+    await new Promise(r => setTimeout(r, 5));
+    const second = await runNode({ dir, adapter, log: () => {} });
+    onTestFinished(() => second.stop());
+    await server.wait(() => hellos().length === 3);
+    expect(hellos()[2]!.startedAt).not.toBe(boot!.startedAt);
+    expect(hellos()[2]!.container).toBe(boot!.container);
   });
 
   it('sends the key its sign-ins are sealed to in hello', async () => {

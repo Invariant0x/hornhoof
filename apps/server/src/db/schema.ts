@@ -1,4 +1,4 @@
-import { COMPANY_TEMPLATE_KEYS, CRED_KINDS, MACHINE_KINDS, RUN_KINDS, TEMPLATE_KEYS, type Account, type Limits, type ModelOption } from '@hornhoof/protocol';
+import { COMPANY_TEMPLATE_KEYS, CRED_KINDS, MACHINE_KINDS, RUN_KINDS, TEMPLATE_KEYS, type Account, type Boot, type Limits, type ModelOption } from '@hornhoof/protocol';
 import { sql } from 'drizzle-orm';
 import { bigserial, boolean, check, customType, index, integer, jsonb, pgTable, primaryKey, real, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
 
@@ -195,6 +195,8 @@ export const nodes = pgTable(
     publicKey: text('public_key'),
     /* The account its program is signed in to, as the program tells. */
     account: jsonb('account').$type<Account>(),
+    /* How it came up, as it said last: what tells why the turns it ran are gone when it says it again. */
+    boot: jsonb('boot').$type<Boot>(),
     createdAt: createdAt(),
   },
   t => [unique('nodes_machine_plan').on(t.machineId, t.subscriptionId).nullsNotDistinct(), index('nodes_subscription_id').on(t.subscriptionId)],
@@ -298,6 +300,13 @@ export const personAccess = pgTable(
 
 export const JOB_STATUSES = ['queued', 'running', 'done', 'failed'] as const;
 export const JOB_KINDS = ['test', 'conversation'] as const;
+/* Why a node started again, as far as Hornhoof can tell from what it said before and now: Hornhoof updated it, the machine
+   started again, its container was made anew, its program started again in the same container, or the connection broke
+   and the turn never reached it. */
+export const RESTART_CAUSES = ['update', 'machine', 'container', 'program', 'connection', 'unknown'] as const;
+export type RestartCause = (typeof RESTART_CAUSES)[number];
+/* A turn a node restart cut off: why, when Hornhoof learned it, on which node, and the number of the task it was on. */
+export type Interruption = { cause: RestartCause; at: string; node: { id: string | null; name: string }; task: number | null; versions?: { from: string; to: string } };
 
 /* One prompt sent to one subscription's node. */
 export const jobs = pgTable(
@@ -327,6 +336,9 @@ export const jobs = pgTable(
     createdBy: uuid('created_by').references(() => people.id),
     /* The task a turn works on, when a task woke the agent. */
     taskId: uuid('task_id').references((): AnyPgColumn => tasks.id),
+    /* The turn this one runs once more, after a node restart cut it off. */
+    retryOf: uuid('retry_of').references((): AnyPgColumn => jobs.id),
+    interruption: jsonb('interruption').$type<Interruption>(),
     createdAt: createdAt(),
     startedAt: timestamp('started_at', { withTimezone: true }),
     finishedAt: timestamp('finished_at', { withTimezone: true }),
@@ -458,7 +470,7 @@ export const tasks = pgTable(
   ],
 );
 
-export const TASK_EVENT_KINDS = ['created', 'assigned', 'updated', 'comment', 'submitted', 'verdict', 'report', 'blocked', 'asked', 'answered', 'reminded', 'continued', 'stuck', 'cancelled', 'done', 'started'] as const;
+export const TASK_EVENT_KINDS = ['created', 'assigned', 'updated', 'comment', 'submitted', 'verdict', 'report', 'blocked', 'asked', 'answered', 'reminded', 'continued', 'stuck', 'cancelled', 'done', 'started', 'interrupted'] as const;
 export type TaskEventKind = (typeof TASK_EVENT_KINDS)[number];
 
 /* Everything that happened to a task, with the person or agent who did it. */

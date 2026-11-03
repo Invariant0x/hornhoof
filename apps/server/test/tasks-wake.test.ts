@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import { agentEvents, agents, companies, departments, jobs, machines, nodes, people, personAccess, requests, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
 import { agentState, enqueueTurn } from '../src/modules/conversation/queue.js';
@@ -705,10 +705,22 @@ describe('a head', () => {
   it('comes back to every task that went out in a turn that failed, not only the first', async () => {
     const { db, held, together, reminded } = await busyHead();
     const [payments, refunds] = [await held('Payments'), await held('Refunds')];
-    await together([payments.id, refunds.id], { status: 'failed', error: 'machine_restarted' });
+    await together([payments.id, refunds.id], { status: 'failed', error: 'agent_failed' });
     /* A turn that broke is no silence: each of them goes on. */
     const wentOn = async (taskId: string) => (await db.select().from(taskEvents).where(and(eq(taskEvents.taskId, taskId), eq(taskEvents.kind, 'continued')))).length;
     expect([await wentOn(payments.id), await wentOn(refunds.id)]).toEqual([1, 1]);
+    expect([await reminded(payments.id), await reminded(refunds.id)]).toEqual([0, 0]);
+  });
+
+  it('runs a turn a node restart cut off once more for its own task, and the tasks that went along with it go on', async () => {
+    const { db, held, together, reminded } = await busyHead();
+    const [payments, refunds] = [await held('Payments'), await held('Refunds')];
+    await together([payments.id, refunds.id], { status: 'failed', error: 'machine_restarted' });
+    const count = async (taskId: string, kind: 'continued' | 'interrupted') => (await db.select().from(taskEvents).where(and(eq(taskEvents.taskId, taskId), eq(taskEvents.kind, kind)))).length;
+    /* Its own task gets the retry, which waits on it, so it does not go on a second way. */
+    expect([await count(payments.id, 'interrupted'), await count(payments.id, 'continued')]).toEqual([1, 0]);
+    expect((await db.select({ taskId: jobs.taskId }).from(jobs).where(isNotNull(jobs.retryOf))).map(j => j.taskId)).toEqual([payments.id]);
+    expect([await count(refunds.id, 'interrupted'), await count(refunds.id, 'continued')]).toEqual([0, 1]);
     expect([await reminded(payments.id), await reminded(refunds.id)]).toEqual([0, 0]);
   });
 
