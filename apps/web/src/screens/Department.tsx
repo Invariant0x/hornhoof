@@ -9,7 +9,7 @@ import type { Department, Employee, EmployeeStatus, Me, PersonView } from '../ty
 import { Bar, percent } from '../ui/Bar';
 import { usePanZoom, ZoomBar } from '../ui/canvas';
 import { Edge } from '../ui/Edge';
-import { AgentIcon, MapIcon, PersonIcon, ProviderMark, SpeedIcon, TreeIcon } from '../ui/icons';
+import { AgentIcon, BackIcon, MapIcon, PersonIcon, ProviderMark, SpeedIcon, TreeIcon } from '../ui/icons';
 import { NewTask } from '../ui/NewTask';
 import { PersonButton } from '../ui/PersonButton';
 import { RepoSettings } from '../ui/RepoSettings';
@@ -597,14 +597,13 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
       )}
 
       <nav className="crumbs" aria-label={deptLabel(t, d)}>
-        {/* The whole bar goes back, so nobody has to aim at the small arrow. */}
-        <button className="crumb glass" type="button" aria-label={t.dept.back} title={t.dept.back} onClick={onBack}>
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M15 5l-7 7 7 7" />
-          </svg>
+        <button className="hbtn glass ib" type="button" aria-label={t.dept.back} title={t.dept.back} onClick={onBack}>
+          <BackIcon />
+        </button>
+        <div className="crumb glass">
           <h2>{deptLabel(t, d)}</h2>
           <span className="role">{d.roleCode}</span>
-        </button>
+        </div>
       </nav>
 
       <div className="dv-acts" ref={chrome.actions} onPointerDown={e => e.stopPropagation()}>

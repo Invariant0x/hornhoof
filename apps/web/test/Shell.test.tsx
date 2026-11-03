@@ -35,6 +35,8 @@ describe('Shell', () => {
     const user = userEvent.setup();
     render(<Shell me={ME} onSignOut={() => {}} />);
     expect(screen.getAllByRole('button').filter(b => b.closest('nav')).map(b => b.textContent)).toEqual(['Map', 'Tasks', 'People', 'Subscriptions', 'Machines']);
+    expect(decl('.tabs button + button', 'border-left')).toBe('1px solid var(--line)');
+    expect(decl('.tabs button.on', 'background')).toBe('var(--glow)');
     await user.click(screen.getByRole('button', { name: 'Subscriptions' }));
     expect(await screen.findByRole('heading', { name: 'Subscriptions' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Subscriptions' })).toHaveAttribute('aria-current', 'page');
