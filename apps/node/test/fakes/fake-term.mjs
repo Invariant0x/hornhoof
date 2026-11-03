@@ -7,6 +7,7 @@
 // program, SECRET prints the value of FAKE_SECRET, MUTE says on the screen only that it will not answer and ends the turn with
 // no answer, as Codex does when its provider refuses the work. INTERRUPT logs what Claude Code logs when a person stops a turn with
 // Escape, and calls no stop hook. TICK works 3 s under a line counting the time, with Claude Code's way to stop it.
+// SPINNER works for 3 s with the current spinner and an empty prompt, without a way to stop it on screen.
 // WORK thinks, runs a command and asks a question with AskUserQuestion, 1.5 s each, as Claude Code shows and logs them,
 // and then answers. CLEAR starts a new session, as /clear does. FAKE_MCP_LIST_MS makes it list its Hornhoof
 // tools that long after it started, as Claude Code connects to its MCP servers, and show "tools: ok" or "tools: failed".
@@ -148,6 +149,7 @@ async function workFirst(line) {
     process.stdout.write('❯ ');
     await sleep(2000);
   }
+  if (line.includes('SPINNER')) await currentSpinner();
   if (line.includes('TICK')) await tick();
   if (line.includes('WORK')) await work();
 }
@@ -161,6 +163,13 @@ async function tick() {
   }
   spinner('');
   process.stdout.write('\r\x1b[2K');
+}
+
+// Claude Code 2.1.317 leaves an empty input below its spinner while the turn runs.
+async function currentSpinner() {
+  const rule = '─'.repeat(60);
+  process.stdout.write(`✻ Recombobulating… (4s · ↓ 691 tokens · thought for 1s)\n${rule}\n❯ \n${rule}\n`);
+  await sleep(3000);
 }
 
 async function answer(line, context) {
