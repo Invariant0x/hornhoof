@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it, vi, onTestFinished } from 'vitest';
-import { agentEvents, agents, jobs, machines, nodes, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
+import { agentEvents, agents, departments, jobs, machines, nodes, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
 import { enqueueTurn } from '../src/modules/conversation/queue.js';
 import { nodeIdentity } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
@@ -43,6 +43,21 @@ async function stuck(provider: 'claude' | 'codex' | 'kimi' | 'antigravity' = 'co
 }
 
 describe('restart_program', () => {
+  it('asks the node to restart a fresh session and keeps its refusal in both logs', async () => {
+    const c = await stuck();
+    await c.db.update(jobs).set({ sessionId: null }).where(eq(jobs.id, c.id));
+    c.answer(false, 'The session is not known.');
+
+    const result = await c.run();
+
+    expect(c.sent.mock.calls.some(([, msg]) => msg.type === 'agent.restart' && msg.jobId === c.id)).toBe(true);
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toBe('The session is not known.');
+    expect((await c.jobOf(c.id)).restartedAt).toBeNull();
+    expect((await c.db.select().from(taskEvents)).some(e => e.text === `${c.agent.name}: The session is not known.`)).toBe(true);
+    expect((await c.db.select().from(agentEvents)).some(e => (e.data as { text?: string }).text === 'The session is not known.')).toBe(true);
+  });
+
   it.each(['claude', 'codex', 'kimi'] as const)('restarts a silent %s once, sends the note and logs what the node said', async provider => {
     const c = await stuck(provider);
     c.answer(true);
@@ -78,14 +93,11 @@ describe('restart_program', () => {
     expect((await c.jobOf(c.id)).restartedAt).toBeNull();
   });
 
-  it('refuses an older report without a sign, a turn without a session, an offline node and a node without terminals', async () => {
+  it('refuses an older report without a sign, an offline node and a node without terminals', async () => {
     const c = await stuck();
     await handleNodeMessage(c.ctx, c.identity, { type: 'job.program', jobId: c.id, state: 'thinking', since: 1, screenAt: 1 });
     expect((await c.run()).content[0]!.text).toContain('sign');
     await c.report();
-    await c.db.update(jobs).set({ sessionId: null }).where(eq(jobs.id, c.id));
-    expect((await c.run()).content[0]!.text).toContain('session');
-    await c.db.update(jobs).set({ sessionId: 'session' }).where(eq(jobs.id, c.id));
     vi.mocked(c.ctx.hub.isOnline).mockReturnValue(false);
     expect((await c.run()).content[0]!.text).toContain('offline');
     vi.mocked(c.ctx.hub.isOnline).mockReturnValue(true);
@@ -116,6 +128,44 @@ describe('restart_program', () => {
 });
 
 describe('restart safety after the request', () => {
+  it('tells the parent department head when a nested department stays silent after restart', async () => {
+    const c = await stuck();
+    const [product] = await c.db.insert(departments).values({ companyId: c.companyId, name: 'Checkout', parentId: c.dev.id, roleCode: 'CHECKOUT' }).returning();
+    await c.db.update(agents).set({ departmentId: product!.id }).where(eq(agents.id, c.agent.id));
+    c.answer(true);
+    await c.run();
+    const restartedAt = (await c.jobOf(c.id)).restartedAt!;
+    const { checkSilentTurns } = await import('../src/modules/tasks/silent.js');
+    const now = new Date(+restartedAt + 30 * MIN);
+    await handleNodeMessage(c.ctx, c.identity, { type: 'job.program', jobId: c.id, state: 'thinking', since: +restartedAt, signAt: +restartedAt - MIN, screenAt: +restartedAt }, now);
+
+    await checkSilentTurns(c.ctx, now);
+
+    expect(await c.turnsOf(c.head.id)).toHaveLength(1);
+    const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    expect(await c.turnsOf(orchestrator!.id)).toHaveLength(0);
+    expect((await c.log(c.task.id)).some(e => e.text.includes(`${c.head.name} was told`))).toBe(true);
+  });
+
+  it.each([false, true])('applies a late restart answer with ok %s after the tool has returned', async ok => {
+    const c = await stuck();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    onTestFinished(() => vi.useRealTimers());
+    const result = c.run();
+    for (let n = 0; !c.sent.mock.calls.some(([, m]) => m.type === 'agent.restart') && n < 2000; n++) await new Promise<void>(r => setImmediate(r));
+    expect(c.sent.mock.calls.some(([, m]) => m.type === 'agent.restart')).toBe(true);
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect((await result).content[0]!.text).toContain('may have happened');
+    const reason = ok ? null : 'A tool started before the restart.';
+
+    await handleNodeMessage(c.ctx, c.identity, { type: 'agent.restarted', agentKey: c.agent.id, jobId: c.id, ok, reason });
+
+    expect((await c.jobOf(c.id)).restartedAt === null).toBe(!ok);
+    const text = ok ? 'The node restarted the program in the same session.' : reason!;
+    expect((await c.db.select().from(agentEvents)).some(e => (e.data as { text?: string }).text === text)).toBe(true);
+    expect((await c.db.select().from(taskEvents)).some(e => e.text === `${c.agent.name}: ${text}`)).toBe(true);
+  });
+
   it('accepts retrying at the exact provider threshold and ignores a reply from another node', async () => {
     const c = await stuck('codex');
     const now = Date.now();

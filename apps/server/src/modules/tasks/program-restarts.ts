@@ -1,6 +1,6 @@
 import type { NodeMessage } from '@hornhoof/protocol';
 import { RESTART_AFTER_MS } from '@hornhoof/protocol/map';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNotNull, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { jobs, subscriptions } from '../../db/schema.js';
 import { conversationOf, onAgent } from '../conversation/queue.js';
@@ -33,7 +33,6 @@ async function checkRestart(ctx: Ctx, companyId: string, agentId: string, now: n
   if (after === null) return refuse(`Hornhoof never restarts ${sub.provider}; its program must end its own wait. Tell the head if it stays silent.`);
   const quiet = now - program.signAt;
   if (quiet < after) return refuse(`The last sign was ${Math.max(0, Math.floor(quiet / 60_000))} minutes ago. ${sub.provider} needs at least ${after / 60_000} minutes without a sign before a restart.`);
-  if (!job.sessionId) return refuse('The turn has no session id. A restart could lose its work.');
   const node = identityOf(sub, job.nodeId);
   if (!node || !ctx.hub.isOnline(node)) return refuse('The turn\'s node is offline. Bring that machine online first.');
   if (!ctx.hub.hasTerminals(node)) return refuse('The turn\'s node has no live terminals. It cannot restart this program.');
@@ -65,10 +64,15 @@ export async function restartProgram(ctx: Ctx, companyId: string, agentId: strin
   const note = `Your program was restarted after ${minutes} minutes without a sign from the model. Go on from where you were.`;
   await logTurnFact(ctx, job, `Operations requested a program restart after ${minutes} minutes without a sign from the model. Hornhoof waits up to 15 seconds for the node.`);
   const reply = await waitForRestart(ctx, node, job, note);
+  const text = await recordRestartReply(ctx, job, reply);
+  return { ok: reply.ok, text };
+}
+
+async function recordRestartReply(ctx: Ctx, job: Job, reply: Reply): Promise<string> {
   if (!reply.ok && reply.confirmed) await ctx.db.update(jobs).set({ restartedAt: null }).where(eq(jobs.id, job.id));
   const text = reply.ok ? `The node restarted the program in the same session.${reply.reason ? ` ${reply.reason}` : ''}` : reply.reason ?? 'The node refused the program restart.';
   await logTurnFact(ctx, job, text, { restart: { ok: reply.ok, confirmed: reply.confirmed, reason: reply.reason } });
-  return { ok: reply.ok, text };
+  return text;
 }
 
 function waitForRestart(ctx: Ctx, node: NodeIdentity, job: Job, note: string): Promise<Reply> {
@@ -86,7 +90,15 @@ function waitForRestart(ctx: Ctx, node: NodeIdentity, job: Job, note: string): P
   }).finally(() => map.delete(job.id));
 }
 
-export function programRestarted(ctx: Ctx, node: NodeIdentity, msg: Extract<NodeMessage, { type: 'agent.restarted' }>): void {
+export async function programRestarted(ctx: Ctx, node: NodeIdentity, msg: Extract<NodeMessage, { type: 'agent.restarted' }>): Promise<void> {
   const request = waiting.get(ctx)?.get(msg.jobId);
-  if (request && request.agentId === msg.agentKey && sameNode(request.node, node)) request.done({ ok: msg.ok, reason: msg.reason, confirmed: true });
+  const reply = { ok: msg.ok, reason: msg.reason, confirmed: true };
+  if (request) {
+    if (request.agentId === msg.agentKey && sameNode(request.node, node)) request.done(reply);
+    return;
+  }
+  const [found] = await ctx.db.select({ job: jobs, sub: subscriptions }).from(jobs).innerJoin(subscriptions, eq(subscriptions.id, jobs.subscriptionId))
+    .where(and(eq(jobs.id, msg.jobId), eq(jobs.agentId, msg.agentKey), eq(jobs.kind, 'conversation'), isNotNull(jobs.restartedAt))).limit(1);
+  const owner = found && identityOf(found.sub, found.job.nodeId);
+  if (owner && sameNode(owner, node)) await recordRestartReply(ctx, found.job, reply);
 }

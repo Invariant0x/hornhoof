@@ -7,12 +7,12 @@ import { sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { notifyFailure } from '../tasks/failures.js';
 import { logTurnFact } from '../tasks/turn-log.js';
 import { enqueueTurn, nodeOfAgent, onAgent } from './queue.js';
+import { repeatedTurn, UNHEARD_NOTE, wordsForTurn } from './turn-words.js';
 
 const HOUR_MS = 3_600_000;
-const UNHEARD = 'Words sent into the running turn were not taken by the program. They go with its next turn.';
 type Job = typeof jobs.$inferSelect;
 
-/* The text already names its sender. Omit message so enqueueTurn gives it the next turn without trying live again. */
+/* Words that were already sent keep their sender, and wait for the next turn instead of trying live again. */
 export async function unheard(ctx: Ctx, node: NodeIdentity, msg: Extract<NodeMessage, { type: 'agent.unheard' }>, now: Date): Promise<void> {
   if (!z.uuid().safeParse(msg.agentKey).success) return;
   const owner = await nodeOfAgent(ctx, msg.agentKey);
@@ -21,10 +21,11 @@ export async function unheard(ctx: Ctx, node: NodeIdentity, msg: Extract<NodeMes
   if (!agent) return;
   const [original] = msg.jobId ? await ctx.db.select().from(jobs).where(and(eq(jobs.id, msg.jobId), eq(jobs.agentId, agent.id))) : [];
   if (msg.jobId && !original) return;
-  const next = await enqueueTurn(ctx, { companyId: agent.companyId, agentId: agent.id, prompt: msg.text, createdBy: null });
+  const source = original ? (await wordsForTurn(ctx, agent.id, original.id, msg.text))[0] ?? null : null;
+  const next = await enqueueTurn(ctx, { companyId: agent.companyId, agentId: agent.id, prompt: msg.text, ...await repeatedTurn(ctx, original, source) });
   const [job] = original ? [original] : await ctx.db.select().from(jobs).where(eq(jobs.id, next));
   await onAgent(ctx, agent.id, async () => {
-    await logTurnFact(ctx, job!, UNHEARD, { unheardAt: now.toISOString() });
+    await logTurnFact(ctx, job!, UNHEARD_NOTE, { unheardAt: now.toISOString() });
     await repeatedUnheard(ctx, job!, agent.name, now);
   });
 }

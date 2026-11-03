@@ -1,7 +1,8 @@
 import type { Failure } from '@hornhoof/protocol';
 import { and, eq } from 'drizzle-orm';
 import { describe, expect, it, vi, onTestFinished } from 'vitest';
-import { agentEvents, jobs, tasks } from '../src/db/schema.js';
+import { agentEvents, agents, jobs, tasks } from '../src/db/schema.js';
+import { decisionPrincipal } from '../src/modules/conversation/decision-context.js';
 import { enqueueTurn, GONE_ALONG, insertTurn, pump } from '../src/modules/conversation/queue.js';
 import { createTask } from '../src/modules/tasks/engine.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
@@ -17,6 +18,27 @@ async function atWork() {
 }
 
 describe('named turn failures', () => {
+  it.each(['overloaded', 'crash'] as const)('keeps the CEO as the principal of a %s orchestrator retry', async kind => {
+    const c = await failureCompany();
+    const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    const id = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: orchestrator!.id, prompt: 'Approve this work.', createdBy: c.sub.ownerPersonId, message: { personId: c.sub.ownerPersonId, text: 'Approve this work.' } });
+    await c.fail(id, failure(kind, kind !== 'crash'));
+    const retry = (await c.turnsOf(orchestrator!.id)).find(j => j.continueOf === id)!;
+    await c.db.update(jobs).set({ notBefore: new Date(Date.now() - 1) }).where(eq(jobs.id, retry.id));
+    await pump(c.ctx, orchestrator!.id);
+    expect(await decisionPrincipal(c.db, retry.id)).toMatchObject({ personId: c.sub.ownerPersonId });
+    expect(await c.jobOf(retry.id)).toMatchObject({ createdBy: c.sub.ownerPersonId, answersCeo: true });
+  });
+
+  it('adds no second message with the prompt when a conversation without a task is retried', async () => {
+    const c = await failureCompany();
+    const prompt = 'Answer the person once.';
+    const id = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.agent.id, prompt, createdBy: c.sub.ownerPersonId, message: { personId: c.sub.ownerPersonId, text: prompt } });
+    await c.fail(id, failure('overloaded'));
+    const messages = await c.db.select().from(agentEvents).where(and(eq(agentEvents.agentId, c.agent.id), eq(agentEvents.kind, 'message')));
+    expect(messages.filter(e => (e.data as { text: string }).text.includes(prompt))).toHaveLength(1);
+  });
+
   it.each([undefined, 'network', 'refused'] as const)('checks carried tasks after %s without changing the own task follow-up', async kind => {
     const c = await atWork();
     const [carried] = await c.db.insert(tasks).values({ companyId: c.companyId, number: 2, title: 'Refunds', status: 'working', assigneeAgentId: c.agent.id, executorAgentId: c.agent.id }).returning();

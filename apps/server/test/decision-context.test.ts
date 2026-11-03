@@ -9,9 +9,10 @@ import { decisionPrincipal, withInputLock } from '../src/modules/conversation/de
 import { said } from '../src/modules/conversation/live.js';
 import { enqueueTurn } from '../src/modules/conversation/queue.js';
 import { personParty } from '../src/modules/events/parties.js';
-import { appendEvent, appendOutgoing } from '../src/modules/events/store.js';
+import { appendEvent, appendOutgoing, earlierTalk, listEvents } from '../src/modules/events/store.js';
 import { BUILTIN } from '../src/modules/nodes/hub.js';
 import { answerDirectly, ask, createTask } from '../src/modules/tasks/engine.js';
+import { logTurnFact } from '../src/modules/tasks/turn-log.js';
 import { as, invitePerson, listen, mcp, setUpCompany, testApp, until } from './helpers.js';
 
 const TOKEN = 'tool-token-decisions-0123456789abcdef';
@@ -58,6 +59,21 @@ const call = async (client: Client, name: string, args: object) => (await client
 const text = (r: Result) => r.content[0]!.text;
 
 describe('the person an orchestrator turn answers', () => {
+  it('keeps the CEO as principal after a visible turn fact on the agent and task', async () => {
+    const c = await company();
+    const sourceSeq = await c.wrote(c.ids.ivan, 'Approve it.');
+    const text = 'Operations requested a program restart.';
+    await c.db.update(jobs).set({ answersCeo: true, taskId: c.task.id }).where(eq(jobs.id, c.job.id));
+
+    await logTurnFact(c.ctx, { ...c.job, taskId: c.task.id }, text);
+
+    expect(await decisionPrincipal(c.db, c.job.id)).toEqual({ personId: c.ids.ivan, sourceSeq });
+    expect((await listEvents(c.db, c.orchestrator.id, 0)).some(e => e.kind === 'message' && (e.data as { text?: string }).text === text)).toBe(true);
+    expect(await c.db.select().from(taskEvents).where(eq(taskEvents.taskId, c.task.id))).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'comment', text: `${c.orchestrator.name}: ${text}` })]));
+    await c.db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, c.job.id));
+    expect((await earlierTalk(c.db, c.orchestrator.id)).some(e => (e.data as { text?: string }).text === text)).toBe(false);
+  });
+
   it('is the author of the last message that came in, and nobody after a letter of an agent or a note of Hornhoof', async () => {
     const c = await company();
     expect(await decisionPrincipal(c.db, c.job.id)).toBeNull();

@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNotNull, ne, or, sql, type SQL } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, ne, or, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { accessOf } from '../../auth/access.js';
 import type { DecisionSubject } from '../../auth/decision-owner.js';
@@ -9,6 +9,7 @@ import { ApiError } from '../../errors.js';
 import { appendEvent, type WithEvent } from '../events/store.js';
 import type { NodeIdentity } from '../nodes/hub.js';
 import { sayLive } from './live.js';
+import { incomingWords } from './turn-words.js';
 
 /* The orchestrator takes a decision for a person only in a turn that answers that person: the last message that came into
    the turn, or the last Enter a person pressed in its terminal, says who it is. A message of an agent or of Hornhoof itself answers nobody, so after it the turn takes no
@@ -24,9 +25,6 @@ export type Principal = { personId: string; sourceSeq: number | null };
 /* What the orchestrator acts on when it takes a decision: its turn and the principal it found when it asked. */
 export type Delegation = { agentId: string; jobId: string; personId: string; sourceSeq: number | null };
 
-/* A copy of a letter kept on the lane of the agent that wrote it is no word to that agent. */
-const incoming = sql`coalesce(${agentEvents.data}->'_message'->>'direction', 'in') <> 'out'`;
-
 /* The orchestrator's running turn and its last two incoming words, newest first; null for any other turn, or while words
    are on their way into it. */
 async function turnWords(db: Reader, jobId: string) {
@@ -39,7 +37,7 @@ async function turnWords(db: Reader, jobId: string) {
   const said = await db
     .select({ seq: agentEvents.seq, personId: agentEvents.personId, kind: agentEvents.kind })
     .from(agentEvents)
-    .where(and(eq(agentEvents.jobId, jobId), eq(agentEvents.agentId, job.agentId!), inArray(agentEvents.kind, ['message', 'typed']), incoming))
+    .where(and(eq(agentEvents.jobId, jobId), eq(agentEvents.agentId, job.agentId!), inArray(agentEvents.kind, ['message', 'typed']), incomingWords))
     .orderBy(desc(agentEvents.seq))
     .limit(2);
   return { job, said };
