@@ -48,12 +48,23 @@ it('keeps a reply only under the queued letter, ignoring the old stream as soon 
   expect(replies[0].seq).toBeGreaterThan(letter.seq);
 });
 
-it('preserves Stop when the node races back with a successful completion', async () => {
+it.each([{}, { error: null }])('preserves Stop when the node races back with a successful completion containing %j', async error => {
   const c = await atWork();
   await c.stop();
-  await c.receive({ type: 'job.done', jobId: c.run.jobId, ok: true, sessionId: 'session-1', result: 'Late answer.', tail: '', error: null });
+  await c.receive({ type: 'job.done', jobId: c.run.jobId, ok: true, sessionId: 'session-1', result: 'Late answer.', tail: '', ...error });
   const [job] = await c.db.select().from(jobs).where(eq(jobs.id, c.run.jobId));
   expect(job).toMatchObject({ status: 'failed', error: 'cancelled', result: 'Stopped.', sessionId: 'session-1' });
+});
+
+it.each([
+  { completion: { result: 'Done.' }, expected: 'Done.' },
+  { completion: { result: '', error: null }, expected: '' },
+  { completion: {}, expected: null },
+])('accepts optional completion fields: $completion', async ({ completion, expected }) => {
+  const c = await atWork();
+  await c.receive({ type: 'job.done', jobId: c.run.jobId, ok: true, ...completion });
+  const [job] = await c.db.select().from(jobs).where(eq(jobs.id, c.run.jobId));
+  expect(job).toMatchObject({ status: 'done', error: null, result: expected });
 });
 
 it('preserves a pending Stop if the node restarts before confirming it', async () => {
