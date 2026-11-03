@@ -257,6 +257,7 @@ export const en = {
       notTaken: 'The program did not take the new sign-in, so nothing changed.',
       broke: 'The sign-in failed on this machine, so nothing changed.',
       noLogin: 'This machine cannot run the sign-in from Hornhoof. Update its node and try again.',
+      noProgram: 'The program could not be installed on this machine, so nothing changed. Check the machine\'s internet connection and free disk space, then try again.',
       other: 'The sign-in did not finish, so nothing changed. Try again.',
     },
     pasteKey: 'Paste the key',

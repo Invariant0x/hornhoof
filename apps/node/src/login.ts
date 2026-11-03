@@ -89,7 +89,7 @@ type Options = {
   pollMs?: number;
 };
 
-const { stopped: STOPPED, unfinished: UNFINISHED, notTaken: NOT_TAKEN, broke: BROKE } = SIGNIN_ERRORS;
+const { stopped: STOPPED, unfinished: UNFINISHED, notTaken: NOT_TAKEN, broke: BROKE, noProgram: NO_PROGRAM } = SIGNIN_ERRORS;
 /* The sign-in's window is never narrower: Claude Code wraps its token at the window's width, and the start of a token is
    how the node finds it to cut it from what the owner sees. */
 const MIN_COLS = 80;
@@ -167,7 +167,11 @@ export class LoginTerminal {
     if (run !== this.run) return;
     try {
       await this.opts.install?.();
-      if (run !== this.run) return;
+    } catch {
+      return this.finish(run, NO_PROGRAM);
+    }
+    if (run !== this.run) return;
+    try {
       await this.fs.mkdir(this.scratch);
       const { provider, bin, env } = this.opts.setup;
       const homeVar = provider === 'claude' ? 'CLAUDE_CONFIG_DIR' : 'CODEX_HOME';

@@ -574,6 +574,17 @@ describe('signing in to plans', () => {
     expect(screen.queryByTestId('live-terminal')).not.toBeInTheDocument();
   });
 
+  it('says what to do when the machine could not install the program to sign in with', async () => {
+    const stream = fakeStream();
+    mockApi({ ...only(codex), 'POST /api/subscriptions/s-codex/signin': [200, { nodeId: NODE, hostname: 'ivan-mbp' }] });
+    render(<Subscriptions me={ME} />);
+    await openAll();
+    await userEvent.click(await screen.findByRole('button', { name: 'Sign in to Codex' }));
+    await screen.findByRole('heading', { name: 'Signing in on ivan-mbp' });
+    stream.send({ type: 'subscription.signin', subscriptionId: 's-codex', nodeId: NODE, ok: false, error: 'The program could not be installed on this machine, so nothing changed.', owner: 'p1' });
+    expect(await screen.findByText("The program could not be installed on this machine, so nothing changed. Check the machine's internet connection and free disk space, then try again.")).toBeInTheDocument();
+  });
+
   it('stops a sign-in half way', async () => {
     fakeStream();
     const calls = mockApi({ ...only(codex), 'POST /api/subscriptions/s-codex/signin': [200, { nodeId: NODE, hostname: 'ivan-mbp' }], 'POST /api/subscriptions/s-codex/signin/stop': [204] });
