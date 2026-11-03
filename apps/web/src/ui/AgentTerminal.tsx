@@ -1,7 +1,7 @@
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal, type ITerminalOptions, type ITheme } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { useT } from '../i18n';
 
 /* Ivan's iTerm2 profile in dark mode, which the terminal repeats on any page: Claude Code and Codex run their dark theme,
@@ -21,6 +21,8 @@ const OPTIONS: ITerminalOptions = {
   drawBoldTextInBrightColors: true,
   cursorStyle: 'block',
   cursorBlink: false,
+  macOptionClickForcesSelection: true,
+  rightClickSelectsWord: false,
   scrollback: 5000,
   theme: THEME,
 };
@@ -113,10 +115,108 @@ function connectView(term: Terminal, path: string, setUp: (up: boolean) => void,
   };
 }
 
+/* SGR mouse reports carry 64 in the button code for the wheel; clicks, drags and moves never go to the program. */
+const SGR_MOUSE = /^\x1b\[<(\d+);\d+;\d+[Mm]$/;
+
+function isMouseClickOrDrag(data: string) {
+  const match = SGR_MOUSE.exec(data);
+  return match !== null && (Number(match[1]) & 64) === 0;
+}
+
+function copyByCommand(text: string) {
+  if (typeof document.execCommand !== 'function') return;
+  const area = document.createElement('textarea');
+  area.value = text;
+  area.setAttribute('readonly', '');
+  area.style.position = 'fixed';
+  area.style.opacity = '0';
+  document.body.appendChild(area);
+  area.select();
+  try {
+    document.execCommand('copy');
+  } finally {
+    area.remove();
+  }
+}
+
+function copyText(text: string) {
+  if (!text) return;
+  if (navigator.clipboard?.writeText) {
+    void navigator.clipboard.writeText(text).catch(() => copyByCommand(text));
+    return;
+  }
+  copyByCommand(text);
+}
+
+type XtermCore = {
+  _selectionService?: { shouldForceSelection: (e: MouseEvent) => boolean; enable(): void };
+  coreMouseService?: {
+    _protocols?: Record<string, { events: number }>;
+    onProtocolChange?: (fn: (events: number) => void) => { dispose(): void };
+  };
+};
+
+/* Mouse drag selects text in the browser while the wheel (bit 16) still goes to tmux for history scrolling. */
+function keepSelecting(term: Terminal) {
+  const core = (term as unknown as { _core?: XtermCore })._core;
+  const selection = core?._selectionService;
+  const mouse = core?.coreMouseService;
+  if (mouse?._protocols) {
+    for (const p of Object.values(mouse._protocols)) p.events &= 16;
+  }
+  if (!selection) return;
+  selection.shouldForceSelection = () => true;
+  const enable = () => {
+    selection.enable();
+    term.element?.classList.remove('enable-mouse-events');
+  };
+  enable();
+  mouse?.onProtocolChange?.(enable);
+}
+
+function isKeyC(e: KeyboardEvent) {
+  return e.code === 'KeyC' || e.key === 'c' || e.key === 'C' || e.keyCode === 67;
+}
+
+function isCopyChord(e: KeyboardEvent, hasSelection: boolean) {
+  if (!isKeyC(e) || e.altKey) return false;
+  if (e.metaKey && !e.ctrlKey && !e.shiftKey) return true;
+  if (e.ctrlKey && e.shiftKey && !e.metaKey) return true;
+  return e.ctrlKey && !e.shiftKey && !e.metaKey && hasSelection;
+}
+
+function selectedText(term: Terminal | null) {
+  return term?.hasSelection?.() ? (term.getSelection?.() ?? '') : '';
+}
+
+function bindCopy(term: Terminal) {
+  term.onSelectionChange?.(() => {
+    const text = selectedText(term);
+    if (text) copyText(text);
+  });
+  term.attachCustomKeyEventHandler?.(e => {
+    const text = selectedText(term);
+    if (!isCopyChord(e, text.length > 0)) return true;
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === 'keydown' && text) copyText(text);
+    return false;
+  });
+}
+
+type MenuState = { x: number; y: number; text: string };
+
+function menuPlace(e: ReactMouseEvent<HTMLDivElement>, text: string): MenuState {
+  const rect = e.currentTarget.getBoundingClientRect();
+  const x = Math.max(8, Math.min(e.clientX - rect.left, Math.max(8, (rect.width || 240) - 120)));
+  const y = Math.max(8, Math.min(e.clientY - rect.top, Math.max(8, (rect.height || 160) - 44)));
+  return { x, y, text };
+}
+
 /* What the person types goes to the session in pieces the server takes, and so does each new size of the terminal. */
 function forward(term: Terminal, send: Send) {
   term.onData(data => {
-    if (term.options.disableStdin) return;
+    if (term.options.disableStdin || isMouseClickOrDrag(data)) return;
     for (let i = 0; i < data.length; i += PIECE) send({ type: 'input', data: data.slice(i, i + PIECE) });
   });
   term.onResize(({ cols, rows }) => send({ type: 'resize', cols, rows }));
@@ -181,31 +281,81 @@ function disposeLater(term: Terminal) {
 export function AgentTerminal({ path, program, onGone }: Props) {
   const t = useT();
   const box = useRef<HTMLDivElement>(null);
+  const termRef = useRef<Terminal | null>(null);
   /* Until the view is open and the program is up, a loader hides what the session shows meanwhile. */
   const [up, setUp] = useState(false);
+  const [menu, setMenu] = useState<MenuState | null>(null);
   const gone = useRef(onGone);
   gone.current = onGone;
 
   useEffect(() => {
     const term = new Terminal(OPTIONS);
+    termRef.current = term;
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(box.current!);
+    keepSelecting(term);
+    bindCopy(term);
     fit.fit();
     const view = connectView(term, path, setUp, () => gone.current());
     forward(term, view.send);
     const unfit = keepFitted(term, fit, box.current!);
     term.focus();
     return () => {
+      termRef.current = null;
       view.end();
       unfit();
       disposeLater(term);
     };
   }, [path]);
 
+  useEffect(() => {
+    if (!menu) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      setMenu(null);
+      termRef.current?.focus();
+    };
+    const onDown = (e: MouseEvent) => {
+      if ((e.target as Element | null)?.closest?.('.t-menu')) return;
+      setMenu(null);
+    };
+    document.addEventListener('keydown', onKey, true);
+    document.addEventListener('mousedown', onDown, true);
+    return () => {
+      document.removeEventListener('keydown', onKey, true);
+      document.removeEventListener('mousedown', onDown, true);
+    };
+  }, [menu]);
+
+  function openMenu(e: ReactMouseEvent<HTMLDivElement>) {
+    e.preventDefault();
+    e.stopPropagation();
+    setMenu(menuPlace(e, selectedText(termRef.current)));
+  }
+
   return (
-    <div className="t-term">
+    <div className="t-term" onContextMenu={openMenu}>
       <div className="t-xterm" ref={box} />
+      {menu && (
+        <div className="t-menu glass" role="menu" style={{ left: menu.x, top: menu.y }}>
+          <button
+            className="t-copy"
+            type="button"
+            disabled={!menu.text}
+            onMouseDown={e => e.preventDefault()}
+            onClick={() => {
+              copyText(selectedText(termRef.current) || menu.text);
+              setMenu(null);
+              termRef.current?.focus();
+            }}
+          >
+            {t.common.copy}
+          </button>
+        </div>
+      )}
       {!up && (
         <div className="t-load" role="status">
           <span className="spinner" aria-hidden="true" />

@@ -7,6 +7,7 @@ import { agents, companies, departments, jobs, people, subscriptions, tasks } fr
 import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
+const IVAN_TO_ORCHESTRATOR = 'From Ivan (CEO) to Orchestrator:\n\n';
 
 type Screen = { ws: WebSocket; frames: { type: string; [k: string]: unknown }[]; closed: Promise<{ code: number; reason: string }> };
 
@@ -214,15 +215,18 @@ describe('a turn a person typed into the terminal', () => {
     const screen = await watch(url, ceo);
     await next(builtin, 'term.open');
     screen.ws.send(JSON.stringify({ type: 'input', data: 'what do we sell\r' }));
-    await next(builtin, 'term.input');
+    expect(await next(builtin, 'term.input')).toMatchObject({ data: 'what do we sell\r' });
     builtin.send({ type: 'turn.open', agentKey: orchestratorId, text: 'what do we sell', ref: 'r-7' });
     const opened = await next(builtin, 'turn.opened');
     expect(opened).toMatchObject({ agentKey: orchestratorId, jobId: expect.any(String), toolToken: expect.stringMatching(/^[A-Za-z0-9_-]{40,}$/), ref: 'r-7' });
     expect(await state(app, ceo)).toMatchObject({ busy: true, runningJobId: opened.jobId });
-    const message = (await events(app, ceo)).find((e: { kind: string }) => e.kind === 'message');
-    expect(message).toMatchObject({ jobId: opened.jobId, data: { text: 'what do we sell' }, person: { name: expect.any(String) } });
+    const message = (await events(app, ceo)).find((e: { kind: string; jobId: string | null }) => e.kind === 'message' && e.jobId === opened.jobId);
+    expect(message).toMatchObject({
+      jobId: opened.jobId, data: { text: 'what do we sell' }, person: { name: 'Ivan' },
+      message: { direction: 'in', from: { kind: 'person', name: 'Ivan', role: { en: 'CEO', ru: 'CEO' } }, to: { kind: 'agent', id: orchestratorId } },
+    });
     /* The CEO typed it, so the tools only the CEO may ask for work in it. */
-    expect((await app.ctx.db.select({ answersCeo: jobs.answersCeo }).from(jobs).where(eq(jobs.id, opened.jobId!)))[0]).toEqual({ answersCeo: true });
+    expect((await app.ctx.db.select({ answersCeo: jobs.answersCeo, prompt: jobs.prompt }).from(jobs).where(eq(jobs.id, opened.jobId!)))[0]).toEqual({ answersCeo: true, prompt: 'what do we sell' });
 
     const tools = await app.inject({ method: 'POST', url: '/mcp', headers: { authorization: `Bearer ${opened.toolToken}`, accept: 'application/json, text/event-stream', 'content-type': 'application/json' }, payload: { jsonrpc: '2.0', id: 1, method: 'tools/list' } });
     expect(tools.statusCode).toBe(200);
@@ -420,7 +424,7 @@ describe('opening a terminal while the plan is at its limit', () => {
     back.send({ type: 'status', loggedIn: true, limits: { status: 'allowed', windows: [] } });
     for (const queued of waiting) {
       const run = await next(back, 'job.run');
-      expect(run).toMatchObject({ jobId: queued.id, prompt: queued.prompt, sessionId: 'saved-history' });
+      expect(run).toMatchObject({ jobId: queued.id, prompt: `${IVAN_TO_ORCHESTRATOR}${queued.prompt}`, sessionId: 'saved-history' });
       back.send({ type: 'job.done', jobId: run.jobId, ok: true, sessionId: 'saved-history', result: 'Done', tail: '', error: null });
     }
     await until(async () => !(await state(app, ceo)).busy);
@@ -462,7 +466,7 @@ describe('opening a terminal while the plan is at its limit', () => {
     plan.send({ type: 'job.done', jobId: start.jobId, ok: true, sessionId: 'new-history', result: '', tail: '', error: null });
     for (const queued of waiting) {
       const run = await next(plan, 'job.run');
-      expect(run).toMatchObject({ jobId: queued.id, prompt: queued.prompt, sessionId: 'new-history' });
+      expect(run).toMatchObject({ jobId: queued.id, prompt: `${IVAN_TO_ORCHESTRATOR}${queued.prompt}`, sessionId: 'new-history' });
       plan.send({ type: 'job.done', jobId: run.jobId, ok: true, sessionId: 'new-history', result: 'Done', tail: '', error: null });
     }
     await until(async () => !(await state(app, ceo)).busy);

@@ -610,6 +610,10 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .t-term { position: relative; flex: 1 1 auto; min-height: 0; background: #15191F; overflow: hidden; }
 .t-xterm { height: 100%; }
 .t-term .xterm { height: 100%; padding: 6px 4px 4px 10px; }
+.t-menu { position: absolute; z-index: 20; padding: 4px; background: var(--surface); border: 1px solid var(--line2); box-shadow: 0 8px 24px var(--shadow); }
+.t-copy { display: block; width: 100%; padding: 6px 12px; border: 0; background: none; color: var(--ink); font-family: var(--f-display); font-size: 13px; font-weight: 600; text-align: left; white-space: nowrap; cursor: pointer; }
+.t-copy:hover:not(:disabled) { color: var(--cyan-ink); background: var(--glow); }
+.t-copy:disabled { color: var(--muted); cursor: default; }
 .t-load { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; background: #15191F; color: #dcdcdc; font-family: var(--f-body); font-size: 15px; }
 .t-load .spinner { width: 44px; height: 44px; border-width: 3px; border-color: #2b323b; border-top-color: #dcdcdc; }
 @media (prefers-reduced-motion: reduce) { .t-load .spinner { animation-duration: 3s; } }
