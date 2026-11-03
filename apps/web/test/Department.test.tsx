@@ -1087,6 +1087,8 @@ describe("what an agent's program does, and the server's alarms about its turn",
       await screen.findByRole('group');
       expect(stateOf(lane())).toHaveTextContent(text);
       expect(stateOf(lane())!.classList.contains('alarm')).toBe(alarm);
+      /* Where a phone's label cuts it short, the whole of it is a touch away. */
+      expect(stateOf(lane())).toHaveAttribute('title', text);
     });
 
     it('says in the tree that an agent without a running turn waits for a task, and nothing of it on the schema, which says so already', async () => {

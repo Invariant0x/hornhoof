@@ -1083,7 +1083,7 @@ summary.turn-head:focus-visible { outline: 2px solid var(--cyan); outline-offset
 @media (max-width: 760px) {
   .tview .lchip > .in:has(.ast) { padding: 0 6px; }
   .tview .lchip .in:has(.ast) .r2 { display: none; }
-  .tview .lchip .ast { white-space: normal; }
+  .tview .lchip .ast { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; }
 }
 .tview .lchip.tk b { font-family: var(--f-mono); font-size: 13px; font-weight: 600; }
 .tview .lchip.tk.turn b { color: var(--cyan-ink); }

@@ -57,4 +57,5 @@ it("paints what an agent does from the theme's tokens, and an alarm and the fram
   /* On a phone the tree's narrow label gives the task's line to what the agent does, which may wrap. */
   expect(decl('.tview .lchip .in:has(.ast) .r2', 'display', '(max-width: 760px)')).toBe('none');
   expect(decl('.tview .lchip .ast', 'white-space', '(max-width: 760px)')).toBe('normal');
+  expect(decl('.tview .lchip .ast', '-webkit-line-clamp', '(max-width: 760px)')).toBe('2');
 });

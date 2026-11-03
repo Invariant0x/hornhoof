@@ -44,6 +44,11 @@ describe('work tree layout', () => {
     expect(treeLayout(DEV_TREE, box, 1.25).scale).toBeCloseTo(l.scale * 1.25);
   });
 
+  it("leaves a phone's lane labels room for what the agent does in two short lines", () => {
+    expect(treeLayout(DEV_TREE, { ...box, width: 375, phone: true }, 1).labelWidth).toBe(132);
+    expect(treeLayout(DEV_TREE, box, 1).labelWidth).toBe(184);
+  });
+
   it('draws plain lines without trunks or forks, starting at creation and ending in a square', () => {
     const l = treeLayout(SALES_TREE, box, 1);
     expect(l.rows.map(r => r.type)).toEqual(['axis', 'lane', 'lane', 'lane']);

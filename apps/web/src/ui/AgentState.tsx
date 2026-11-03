@@ -55,5 +55,11 @@ export function AgentState({ agent, serverNow }: { agent: AgentLive | null | und
   const t = useT();
   const now = useServerNow(serverNow, !!(agent?.program || agent?.alarm));
   const line = lineOf(t, agent, now);
-  return line && <span className={`ast ${line.tone}`}>{line.text}</span>;
+  return (
+    line && (
+      <span className={`ast ${line.tone}`} title={line.text}>
+        {line.text}
+      </span>
+    )
+  );
 }
