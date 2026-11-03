@@ -1,5 +1,7 @@
 import { closeSync, openSync, readSync, statSync } from 'node:fs';
 import type { AgentEvent, Limits } from '@hornhoof/protocol';
+import { agyInput } from '../providers/antigravity.js';
+import type { Calls } from './tool-calls.js';
 import { contentText, inputText, isoFrom, isRecord, toolName } from '../providers/events.js';
 
 /* Follows a log file a program appends to, a whole line at a time. */
@@ -37,6 +39,36 @@ function sizeOf(file: string): number {
   } catch {
     return 0;
   }
+}
+
+type AgyStep = Calls & { events: AgentEvent[]; answered?: boolean };
+
+/* agy logs each planner response whole. The generic steps after a call are its results, in order. */
+export function agySteps(): (line: unknown) => AgyStep {
+  const pending: string[] = [];
+  return line => {
+    const news: AgyStep = { events: [], began: [], ended: [] };
+    if (!isRecord(line)) return news;
+    if (line.type === 'USER_INPUT') news.ended = pending.splice(0);
+    if (line.type === 'PLANNER_RESPONSE') {
+      news.events = agyResponse(line);
+      news.began = news.events.filter(e => e.kind === 'tool').map((e, i) => ({ id: `${line.step_index}:${i}`, name: e.name }));
+      pending.push(...news.began.map(c => c.id));
+      news.answered = news.began.length === 0;
+    }
+    if (line.type === 'GENERIC' && pending.length) {
+      news.ended.push(pending.shift()!);
+      news.events.push({ kind: 'tool_result', ok: line.status === 'DONE', summary: typeof line.content === 'string' ? line.content : '' });
+    }
+    return news;
+  };
+}
+
+function agyResponse(line: Record<string, unknown>): AgentEvent[] {
+  const events: AgentEvent[] = typeof line.content === 'string' && line.content.trim() ? [{ kind: 'text', text: line.content }] : [];
+  const calls = Array.isArray(line.tool_calls) ? line.tool_calls.filter(isRecord) : [];
+  for (const call of calls) events.push({ kind: 'tool', name: toolName(String(call.name ?? 'tool')), input: agyInput(call.args) });
+  return events;
 }
 
 const share = (percent: unknown) => (typeof percent === 'number' ? Math.min(1, Math.max(0, percent / 100)) : null);

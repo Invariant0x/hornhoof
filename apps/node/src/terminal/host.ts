@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { TERM_CHUNK, type AgentEvent, type Limits, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
 import { LOST_END_MS } from '@hornhoof/protocol/map';
-import { agyConversation, agyRules, agyStream } from '../providers/antigravity.js';
+import { agyRules } from '../providers/antigravity.js';
 import { claudeEvents, claudeInterrupted } from '../providers/claude.js';
 import { contentText } from '../providers/events.js';
 import { agentFs, ownFs, type AgentFs } from '../agent-fs.js';
@@ -20,9 +20,9 @@ import { inputOf } from './input.js';
 import { fromAgent } from './peer.js';
 import { StreamMask } from './mask.js';
 import { ProgramWatch, READY, REPORT_MS, type Pending } from './program-state.js';
-import { acceptClaudeDialogs, agyLog, claudeTranscript, findKimiWire, findRollout, prepareAgy, prepareKimi, rolloutFiles, type LaunchSpec, type TermProgram } from './programs.js';
-import { CALLS } from './tool-calls.js';
-import { claudeStatusContext, claudeStatusLimits, codexRollout, kimiWire, LineTail, type WireNews } from './transcripts.js';
+import { acceptClaudeDialogs, agyTranscript, claudeTranscript, findKimiWire, findRollout, prepareAgy, prepareKimi, rolloutFiles, type LaunchSpec, type TermProgram } from './programs.js';
+import { CALLS, type Calls } from './tool-calls.js';
+import { agySteps, claudeStatusContext, claudeStatusLimits, codexRollout, kimiWire, LineTail, type WireNews } from './transcripts.js';
 import { envFile, type Tmux } from './tmux.js';
 
 /* An agent's turn in its terminal: which program, where it keeps its sign-in, and what the runner hands every program. */
@@ -127,8 +127,12 @@ type Agent = {
   starting: Promise<unknown> | null;
   /* What a new Kimi or Antigravity session was told from before, kept by the session's id once the program names it. */
   keep: string | null;
-  /* Reads what Antigravity printed, whose answer comes in parts. */
-  agyRead: ((line: unknown) => AgentEvent[]) | null;
+  /* Reads Antigravity's transcript, pairing its calls with their results. */
+  agyRead: ReturnType<typeof agySteps> | null;
+  /* The final planner response has no tools; earlier text is not the answer a stop waits for. */
+  agyAnswered: boolean;
+  /* Interruption notices already on screen when this turn started belong to older turns. */
+  interruptions: number;
   /* The running turn's tool calls the program began and did not end yet, by id, oldest first. */
   calls: Map<string, Pending>;
 };
@@ -215,6 +219,8 @@ type Look = { at: number; call: Pending | null };
 type ObservedProgram = { watch: ProgramWatch; look: Look };
 /* A program may change how a prompt's lines and spaces look, not its words. */
 const flat = (text: string) => text.replace(/\s+/g, ' ').trim();
+
+const interruptionCount = (screen: string) => [...screen.matchAll(/Interrupted · What should Antigravity CLI do instead\?/g)].length;
 
 const hashOf = (v: unknown) => createHash('sha256').update(JSON.stringify(v)).digest('hex');
 /* What the running program was started with; a turn that needs anything else starts it again. A plan signed in to another
@@ -333,7 +339,7 @@ export class TerminalHost {
   private agent(key: string): Agent {
     let a = this.agents.get(key);
     if (!a) {
-      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, viewers: 0, up: false, watch: null, saying: Promise.resolve(), queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null, calls: new Map() };
+      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, viewers: 0, up: false, watch: null, saying: Promise.resolve(), queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null, agyAnswered: false, interruptions: 0, calls: new Map() };
       this.agents.set(key, a);
     }
     return a;
@@ -563,8 +569,17 @@ export class TerminalHost {
     Object.assign(look, { at: now, call });
     const screen = await this.opts.tmux.screen(a.name, 0, true);
     if (a.turn !== turn) return false;
-    watch.look(now, screen, call, Boolean(a.took && a.busy));
+    const state = watch.look(now, screen, call, Boolean(a.took && a.busy));
+    if (this.atInterruption(a, screen, state)) {
+      this.interrupted(a);
+      return false;
+    }
     return watch.idleFor(now) >= this.lostMs;
+  }
+
+  private atInterruption(a: Agent, screen: string, state: string): boolean {
+    if (a.program?.kind !== 'antigravity' || state !== 'idle') return false;
+    return this.stoppable(a) && interruptionCount(screen) > a.interruptions;
   }
 
   /* Hornhoof hears that the turn's program is gone, how it ended and what it showed last, without the secrets. */
@@ -657,6 +672,11 @@ export class TerminalHost {
     if (a.program?.kind === 'claude') a.tail = new LineTail(claudeTranscript(a.home, realpathSync(a.workDir), sessionId));
     if (a.program?.kind === 'kimi' || a.program?.kind === 'antigravity') {
       if (a.program.kind === 'kimi') a.tail = null;
+      else {
+        const file = agyTranscript(a.home, sessionId);
+        a.agyRead = agySteps();
+        a.tail = file ? new LineTail(file) : null;
+      }
       if (a.keep) void keepContext(this.fs, a.workDir, sessionId, a.keep).catch(() => {});
       a.keep = null;
     }
@@ -699,14 +719,14 @@ export class TerminalHost {
     return false;
   }
 
-  /* Claude Code and Hornhoof's screen for Antigravity say they started through their hook; Codex and Kimi Code are ready
-     once their prompt shows. Kimi shows its prompt also when it is not signed in, with a word to sign in. */
+  /* Claude Code says it started through its hook; the others are ready once their prompt shows. Kimi shows its prompt
+     also when it is not signed in, with a word to sign in. */
   private async ready(a: Agent, job: TermJob): Promise<boolean> {
     const end = Date.now() + this.readyMs;
     while (Date.now() < end) {
       if (!(await this.opts.tmux.alive(a.name))) return false;
       const kind = job.program.kind;
-      if (kind === 'claude' || kind === 'antigravity') {
+      if (kind === 'claude') {
         if (await Promise.race([a.started!.promise.then(() => true), sleep(this.pollMs).then(() => false)])) {
           await this.inputShows(a);
           return true;
@@ -726,8 +746,7 @@ export class TerminalHost {
   }
 
   /* Claude Code can say it started before its input box is up, and loses what is typed into it until then. Hornhoof's
-     prompt goes in once the box shows, empty; a screen that never shows one goes on after a while, as before. Hornhoof's
-     own screen for Antigravity reads what is typed from its start. */
+     prompt goes in once the box shows, empty; a screen that never shows one goes on after a while, as before. */
   private async inputShows(a: Agent): Promise<void> {
     if (a.program?.kind !== 'claude' || (await this.inputBox(a))) return;
     /* A program that ended says why on its screen, which the turn shows. */
@@ -766,10 +785,10 @@ export class TerminalHost {
       const found = findRollout(a.home, a.workDir, 0, a.sessionId);
       return found ? new LineTail(found.file, { fromEnd: true }) : null;
     }
-    /* What Antigravity prints starts anew with the program. */
     if (a.program?.kind === 'antigravity') {
-      a.agyRead = agyStream();
-      return new LineTail(agyLog(a.workDir));
+      a.agyRead = agySteps();
+      const file = a.sessionId ? agyTranscript(a.home, a.sessionId) : null;
+      return file ? new LineTail(file, { fromEnd: true }) : null;
     }
     const wire = a.program?.kind === 'kimi' && a.sessionId ? findKimiWire(a.home, a.sessionId) : null;
     return wire ? new LineTail(wire, { fromEnd: true }) : null;
@@ -796,6 +815,10 @@ export class TerminalHost {
       } catch {
         continue;
       }
+      if (a.program?.kind === 'antigravity') {
+        this.agyNews(a, data);
+        continue;
+      }
       this.called(a, data);
       if (a.program?.kind === 'claude') {
         if (this.stoppable(a) && claudeInterrupted(data)) this.interrupted(a);
@@ -804,13 +827,6 @@ export class TerminalHost {
       }
       if (a.program?.kind === 'kimi') {
         this.kimiNews(a, kimiWire(data));
-        continue;
-      }
-      /* Antigravity's turn ends through hh-agy's hook, which comes after these lines. The last of them names its
-         conversation, which goes on in the next turn also when the hook is lost. */
-      if (a.program?.kind === 'antigravity') {
-        for (const e of a.agyRead?.(data) ?? []) this.emit(a, e);
-        this.follow(a, agyConversation(data));
         continue;
       }
       const news = codexRollout(data);
@@ -834,9 +850,21 @@ export class TerminalHost {
 
   /* Tool calls a line of the program's log began and ended, for what it does now. */
   private called(a: Agent, line: unknown): void {
-    const calls = a.program ? CALLS[a.program.kind](line) : { began: [], ended: [] };
+    const kind = a.program?.kind;
+    if (kind && kind !== 'antigravity') this.recordCalls(a, CALLS[kind](line));
+  }
+
+  private recordCalls(a: Agent, calls: Calls): void {
     for (const id of calls.ended) a.calls.delete(id);
     for (const { id, name } of calls.began) if (!a.calls.has(id)) a.calls.set(id, { name, at: Date.now() });
+  }
+
+  private agyNews(a: Agent, data: unknown): void {
+    const news = a.agyRead?.(data);
+    if (!news) return;
+    this.recordCalls(a, news);
+    if (news.answered !== undefined) a.agyAnswered = news.answered;
+    for (const e of news.events) this.emit(a, e);
   }
 
   /* Kimi Code logs a turn's end without its answer, which is the text of its last step that said anything, in parts. A
@@ -868,13 +896,18 @@ export class TerminalHost {
     a.ended?.resolve(news.failed === undefined ? message : '');
   }
 
-  /* Reads the log until the turn's answer is in it. */
-  private async settle(a: Agent, message: string): Promise<void> {
-    const answer = message.trim();
+  /* Reads the log until the turn's answer is in it. A null message means agy's stop carries no answer to match. */
+  private async settle(a: Agent, message: string | null): Promise<string> {
     for (const end = Date.now() + SETTLE_MS; ; await sleep(100)) {
       this.drain(a);
-      if (a.program?.kind !== 'claude' || !answer || a.lastText?.trim() === answer || Date.now() > end) return;
+      if (this.answerRead(a, message) || Date.now() > end) return message ?? a.lastText ?? '';
     }
+  }
+
+  private answerRead(a: Agent, message: string | null): boolean {
+    if (message === null) return a.agyAnswered;
+    const answer = message.trim();
+    return a.program?.kind !== 'claude' || !answer || a.lastText?.trim() === answer;
   }
 
   /* Hornhoof hears how full the context is once it moved by a percent or more, for the bar on the map. */
@@ -922,40 +955,62 @@ export class TerminalHost {
         /* Kimi Code hands the prompt as parts of a message. */
         const prompt = typeof data.prompt === 'string' ? data.prompt : contentText(data.prompt);
         const notice = await this.promptGot(a, prompt);
-        await a.settling;
-        a.busy = true;
-        /* A prompt after Hornhoof's turn ended in the program is a turn of its own, though the host still reads the end of
-           that one's log. */
-        if (!a.turn || a.turn.starting || this.overIn(a)) await this.openTyped(a, prompt);
+        await this.prompted(a, prompt);
         return notice;
       }
-      case 'stop': {
-        this.drain(a);
-        /* hh-agy says when Antigravity's turn was stopped with Escape, and why one failed. */
-        if (data.stopped === true) {
-          if (this.stoppable(a)) this.interrupted(a);
-          else a.busy = false;
-          return;
-        }
-        a.busy = false;
-        if (typeof data.session_id === 'string') this.follow(a, data.session_id);
-        const failed = typeof data.error === 'string' && data.error ? data.error : null;
-        const message = failed === null ? String(data.last_assistant_message ?? '') : '';
-        const turn = a.turn;
-        /* The hook answers first: the program may write the rest of its log only after. */
-        if (turn?.typed) {
-          a.settling = this.settle(a, message)
-            .then(() => {
-              if (a.turn === turn) this.finishTyped(a, message, failed === null ? null : 'agent_failed', failed ?? '');
-            })
-            .finally(() => (a.settling = null));
-        } else {
-          if (failed !== null) a.failure = failed;
-          a.ended?.resolve(message);
-        }
+      case 'invocation':
+        await this.invocation(a, data);
         return;
-      }
+      case 'stop':
+        this.stoppedHook(a, data);
+        return;
     }
+  }
+
+  private async invocation(a: Agent, data: Record<string, unknown>): Promise<void> {
+    if (a.program?.kind !== 'antigravity') return;
+    if (typeof data.conversationId === 'string') this.follow(a, data.conversationId);
+    if (data.invocationNum !== 0) {
+      a.busy = true;
+      return;
+    }
+    a.typing = null;
+    await this.prompted(a, String(data.lastUserInput ?? ''));
+  }
+
+  private async prompted(a: Agent, prompt: string): Promise<void> {
+    a.took = true;
+    await a.settling;
+    if (a.program?.kind === 'antigravity') {
+      a.agyAnswered = false;
+      a.interruptions = interruptionCount(await this.opts.tmux.screen(a.name, 0, true));
+    }
+    a.busy = true;
+    /* A message queued in the program starts its own turn after the previous one ends. */
+    if (!a.turn || a.turn.starting || this.overIn(a)) await this.openTyped(a, prompt);
+  }
+
+  private stoppedHook(a: Agent, data: Record<string, unknown>): void {
+    this.drain(a);
+    a.busy = false;
+    if (typeof data.session_id === 'string') this.follow(a, data.session_id);
+    const failed = typeof data.error === 'string' && data.error ? data.error : null;
+    const message = failed !== null ? '' : a.program?.kind === 'antigravity' ? null : String(data.last_assistant_message ?? '');
+    const turn = a.turn;
+    /* The hook answers first: the program may write the rest of its log only after. */
+    if (turn?.typed || message === null) {
+      a.settling = this.settle(a, message)
+        .then(answer => {
+          if (a.turn === turn) this.endHook(a, answer, failed);
+        })
+        .finally(() => (a.settling = null));
+    } else this.endHook(a, message, failed);
+  }
+
+  private endHook(a: Agent, message: string, failed: string | null): void {
+    if (a.turn?.typed) return this.finishTyped(a, message, failed === null ? null : 'agent_failed', failed ?? '');
+    if (failed !== null) a.failure = failed;
+    a.ended?.resolve(message);
   }
 
   /* A person typed while no turn ran, or while the program started: the turn starts at once and Hornhoof opens a job for
@@ -1053,7 +1108,7 @@ export class TerminalHost {
   }
 
   private async sayIn(a: Agent, words: LiveWords): Promise<boolean> {
-    /* Antigravity takes nothing while it answers: what is typed then becomes a turn of its own after this one. */
+    /* Antigravity queues typed words as a separate turn, so these wait for Hornhoof's next turn. */
     if (a.program?.kind === 'antigravity') return false;
     await this.waitToSay(a, words);
     const input = await this.readInput(a);

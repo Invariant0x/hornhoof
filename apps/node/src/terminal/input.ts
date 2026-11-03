@@ -31,6 +31,16 @@ function boxedInput(screen: string): string | null {
   return end < 0 ? null : below.slice(0, end).trim();
 }
 
+/* The closing rule belongs to the next box too when history puts two boxes together. */
+export function agyPrompt(screen: string): { input: string; footer: string } | null {
+  screen = withoutDim(screen);
+  const boxes = [...screen.matchAll(/^[ \t]*[─━═]{2,}[ \t]*\n[ \t]*>[ \t]?([\s\S]*?)(?=\n[ \t]*[─━═]{2,}[ \t]*$)/gm)];
+  const box = boxes.at(-1);
+  if (!box) return null;
+  const footer = screen.slice(box.index! + box[0].length).split('\n')[2] ?? '';
+  return { input: box[1]!.trim(), footer: footer.trim() };
+}
+
 function promptedInput(kind: 'claude' | 'codex', screen: string): string | null {
   const marker = kind === 'claude' ? '❯' : '›';
   const prompt = [...screen.matchAll(new RegExp(`^[ \\t]*${marker}[ \\t]?(.*)$`, 'gm'))].at(-1);
@@ -42,11 +52,11 @@ function promptedInput(kind: 'claude' | 'codex', screen: string): string | null 
 /* Only the current input counts; earlier prompts belong to the conversation above it. */
 export function inputOf(kind: TermProgram['kind'], screen: string): string | null {
   if (kind === 'kimi') return boxedInput(stripEscapes(screen));
-  if (kind === 'antigravity') return null;
+  if (kind === 'antigravity') return agyPrompt(screen)?.input ?? null;
   return promptedInput(kind, withoutDim(screen));
 }
 
-/* The program waits at its prompt with nothing typed. Hornhoof's own screen for Antigravity shows its prompt as Codex does. */
+/* The program waits at its prompt with nothing typed. */
 export function atEmptyPrompt(kind: TermProgram['kind'], screen: string): boolean {
-  return (kind === 'antigravity' ? promptedInput('codex', withoutDim(screen)) : inputOf(kind, screen)) === '';
+  return inputOf(kind, screen) === '';
 }

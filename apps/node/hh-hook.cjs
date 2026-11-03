@@ -1,10 +1,11 @@
 #!/usr/bin/env node
-// hh-hook EVENT [JSON]: Claude Code's hooks and status line, Codex's notify and Kimi Code's hooks call this to tell the
-// node how the agent's turn goes: start, prompt, stop, status. It reads the program's JSON from the last argument or from
-// stdin, posts it to the node's bridge in HH_BRIDGE and prints nothing, so a status line stays empty and Kimi adds nothing
-// to the prompt. It never fails the program's turn. hh-hook compact only prints what Claude Code adds to a conversation
-// it just compacted, and hh-hook prompt what the bridge answers, which the program adds to the prompt: where the whole
-// message is when the program got only part of it.
+// hh-hook EVENT [JSON]: Claude Code's hooks and status line, Codex's notify, Kimi Code's and Antigravity's hooks tell the
+// node how the agent's turn goes: start, prompt, invocation, stop, status. It reads the program's JSON from the last
+// argument or stdin, posts it to the node's bridge in HH_BRIDGE and prints nothing, so a status line stays empty and Kimi
+// adds nothing to the prompt. Antigravity reads hook output as JSON, so invocation prints nothing. It never fails the
+// program's turn. hh-hook compact only prints what Claude Code adds to a conversation it just compacted, and hh-hook
+// prompt what the bridge answers, which the program adds to the prompt: where the whole message is when the program
+// got only part of it.
 'use strict';
 
 const { sendHook } = require('./hh-hook-send.cjs');

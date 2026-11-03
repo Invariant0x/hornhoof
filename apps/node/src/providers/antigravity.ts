@@ -70,30 +70,40 @@ export async function installAgy(tools: string, base = RELEASES, on = platform()
 
 const LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
 
-/* The models `agy models` lists, one a line as "<id>  <name>". A model it lists at several levels, such as "Gemini 4
-   Argon (High)" and "(Medium)", is one model that takes those levels by --effort, named as --model takes it; one at a
-   single level keeps its own id. */
+function agyModelLevel(name: string) {
+  const named = /^(.*\S) \((\w+)\)$/.exec(name);
+  const level = named?.[2]!.toLowerCase();
+  return named && level && LEVELS.includes(level) ? { model: named[1]!, level } : null;
+}
+
+/* Equal names alone do not mean agy accepts the same --model value. */
+function agyModelGroups(rows: ModelOption[]) {
+  const groups = new Map<string, { id: string | null; levels: string[] }>();
+  for (const row of rows) {
+    const at = agyModelLevel(row.name);
+    if (!at) continue;
+    const id = row.id.endsWith(`-${at.level}`) ? row.id.slice(0, -at.level.length - 1) : null;
+    const previous = groups.get(at.model);
+    groups.set(at.model, { id: previous && previous.id !== id ? null : id, levels: [...(previous?.levels ?? []), at.level] });
+  }
+  return groups;
+}
+
+/* agy separates each model's id and name with a TAB or at least two spaces. Rows with several levels of one name
+   become one model only when their ids share a base before the trailing -<level>: --model takes that base and --effort
+   takes a level. A single level or mismatched ids keep their own ids and names. */
 export function agyModels(listing: string): ModelOption[] {
   const rows = listing.split('\n').flatMap(line => {
-    const row = /^(\S+)\s{2,}(\S.*?)\s*$/.exec(line);
+    const row = /^(\S+)(?:\t+| {2,})(\S.*?)\s*$/.exec(line);
     return row ? [{ id: row[1]!.slice(0, 80), name: row[2]!.slice(0, 80) }] : [];
   });
-  const levelOf = (name: string) => {
-    const named = /^(.*\S) \((\w+)\)$/.exec(name);
-    const level = named?.[2]!.toLowerCase();
-    return named && level && LEVELS.includes(level) ? { model: named[1]!, level } : null;
-  };
-  const levels = new Map<string, string[]>();
-  for (const row of rows) {
-    const at = levelOf(row.name);
-    if (at) levels.set(at.model, [...(levels.get(at.model) ?? []), at.level]);
-  }
+  const groups = agyModelGroups(rows);
   const models: ModelOption[] = [];
   for (const row of rows) {
-    const at = levelOf(row.name);
-    const taken = at ? levels.get(at.model)! : [];
-    if (!at || taken.length < 2) models.push(row);
-    else if (!models.some(m => m.id === at.model)) models.push({ id: at.model, name: at.model, efforts: LEVELS.filter(l => taken.includes(l)) });
+    const at = agyModelLevel(row.name);
+    const group = at ? groups.get(at.model)! : null;
+    if (!at || !group?.id || group.levels.length < 2) models.push(row);
+    else if (!models.some(m => m.id === group.id)) models.push({ id: group.id, name: at.model, efforts: LEVELS.filter(l => group.levels.includes(l)) });
   }
   return models.slice(0, 60);
 }
@@ -123,12 +133,6 @@ export function agyStream(): (line: unknown) => AgentEvent[] {
       { kind: 'tool_result', ok: error === null, summary: error ?? contentText(info.output) },
     ];
   };
-}
-
-/* The conversation agy names in the line it prints last, with the run's result, which hh-agy goes on in; empty in others. */
-export function agyConversation(line: unknown): string {
-  const id = isRecord(line) && line.event === 'result' && isRecord(line.result) ? line.result.conversation_id : '';
-  return typeof id === 'string' ? id : '';
 }
 
 /* A tool's input as people read it: the command of a shell step, else its parameters. */

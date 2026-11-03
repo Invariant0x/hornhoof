@@ -42,13 +42,6 @@ describe('the tool calls a line of a program’s log begins and ends', () => {
     expect(CALLS.codex({ type: 'event_msg', payload: { type: 'task_started' } })).toEqual(none);
   });
 
-  it('reads Antigravity’s tool steps, at work until agy says they are done', () => {
-    const step = (state: string) => ({ event: 'step_update', step_update: { step_index: 4, state, step_type: 'tool', tool_name: 'run_command', tool_info: { name: 'run_command' } } });
-    expect(CALLS.antigravity(step('ACTIVE'))).toEqual({ began: [{ id: '4', name: 'run_command' }], ended: [] });
-    expect(lines('agy-tools').map(CALLS.antigravity)).toEqual([{ began: [], ended: ['4'] }]);
-    expect(lines('agy-resume').map(CALLS.antigravity).every(c => c.began.length === 0)).toBe(true);
-  });
-
   it('reads nothing from what is no log line', () => {
     for (const read of Object.values(CALLS)) for (const line of [null, 42, 'text', [], {}]) expect(read(line)).toEqual(none);
   });
