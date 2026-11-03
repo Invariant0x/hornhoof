@@ -40,10 +40,12 @@ COPY --from=build /app/apps/web/dist apps/web/dist
 # The tunnel container runs this image too, and frpc carries the company's public link from hornhoof.org to the app.
 # It is the client the relay is built for, taken from its own image.
 COPY --from=fatedier/frpc:v0.71.1@sha256:7a0a18bc9c83dc106a7e5213a890f521affdf90d595829c56b0ed8481377d50e /usr/bin/frpc /usr/local/bin/frpc
-# The build this image is: CI passes the product version and the commit.
+# The build this image is: CI passes the product version and the commit, and the node build the server's nodes should
+# be, which the node image of this commit carries too.
 ARG HORNHOOF_VERSION=
 ARG HORNHOOF_COMMIT=
-ENV HORNHOOF_VERSION=$HORNHOOF_VERSION HORNHOOF_COMMIT=$HORNHOOF_COMMIT
+ARG HORNHOOF_NODE_BUILD=
+ENV HORNHOOF_VERSION=$HORNHOOF_VERSION HORNHOOF_COMMIT=$HORNHOOF_COMMIT HORNHOOF_NODE_BUILD=$HORNHOOF_NODE_BUILD
 # The folder the app shares with the updater; a new volume takes this owner.
 COPY --from=deps --chown=node:node /control /control
 USER node

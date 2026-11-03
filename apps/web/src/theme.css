@@ -511,6 +511,8 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .pool-facts dd { margin: 0 0 6px; font-family: var(--f-display); font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
 /* The machine the company's server runs on: a filled badge by its name and a cyan frame. */
 .badge.lead { color: var(--on-btn); background: var(--btn); border-color: var(--btn); }
+/* A machine whose nodes are not the server's build waits for its owner to update them. */
+.badge.old { color: var(--amber-ink); }
 /* What an agent does now, wherever the map shows it; red with the cause when the server raised an alarm about its turn. */
 .ast { flex: none; display: inline-block; padding: 0 5px; border: 1px solid currentColor; font-size: 11px; font-weight: 600; line-height: 14px; color: var(--muted); white-space: nowrap; vertical-align: 1px; }
 .ast.work { color: var(--cyan-ink); }
@@ -1287,6 +1289,8 @@ summary.turn-head:focus-visible { outline: 2px solid var(--cyan); outline-offset
 .blk-side { grid-area: side; }
 .blk h4 { font-size: 14px; }
 .blk-side .machine-actions { margin-top: 4px; }
+/* A plan that does not work has one block, filling the card whatever its columns and rows, so no empty row leaves a gap. */
+.blk-fix { grid-column: 1 / -1; grid-row: 1 / -1; }
 @container card (min-width: 700px) {
   .blocks { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "facts side" "run run"; }
 }

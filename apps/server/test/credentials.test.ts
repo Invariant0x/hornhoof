@@ -4,7 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { orchestratorHeaders } from '../src/auth/internal.js';
-import { agents, companies, departments, nodes, people, planCredentials, subscriptions } from '../src/db/schema.js';
+import { agents, companies, departments, machines, nodes, people, planCredentials, subscriptions } from '../src/db/schema.js';
 import { LEASE_MOVE_MS, moveLeases } from '../src/modules/subscriptions/lease.js';
 import { companyView } from '../src/modules/tools/company.js';
 import { as, connectNode, invitePerson, listen, openStream, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
@@ -259,6 +259,44 @@ describe('signing a plan in from Hornhoof', () => {
     await until(async () => (await db.select({ k: nodes.publicKey }).from(nodes).where(eq(nodes.id, b.nodeId)))[0]?.k === KEY('b'));
     await until(() => app.ctx.hub.isReady({ kind: 'node', nodeId: a.nodeId }) && app.ctx.hub.isReady({ kind: 'node', nodeId: b.nodeId }));
     expect(await signIn()).toBe('signin_unsupported');
+  });
+
+  it('names the machines whose nodes are too old for it, with the command that updates them and no code in it', async () => {
+    const { app, ceo, plan, a, b, url } = await plans('codex');
+    /* Both machines run nodes from before machine keys, as the Mac of the CEO did. */
+    for (const n of [a, b]) (await connectNode(url, n.key)).send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], terminals: true });
+    await until(() => app.ctx.hub.isReady({ kind: 'node', nodeId: a.nodeId }) && app.ctx.hub.isReady({ kind: 'node', nodeId: b.nodeId }));
+    const res = await app.inject({ method: 'POST', url: `/api/subscriptions/${plan}/signin`, payload: { fresh: false }, ...as(ceo) });
+    expect(res.statusCode).toBe(409);
+    /* The command that connects a machine, without its one-time code: the installer then updates the nodes on it. */
+    const connect: string = (await app.inject({ method: 'POST', url: '/api/machines/command', ...as(ceo) })).json().command;
+    expect(res.json().error).toEqual({
+      code: 'conflict',
+      message: expect.stringContaining('ivan-mac, ivan-laptop'),
+      reason: 'signin_unsupported',
+      details: { machines: ['ivan-mac', 'ivan-laptop'], command: connect.split(' -s -- --join ')[0] },
+    });
+    expect(res.json().error.details.command).toBe('curl -fsSL http://localhost:8080/install.sh | bash');
+  });
+
+  it("keeps one machine, its node and the plan's sign-in when the update brings an old node back, which then signs in here", async () => {
+    const { app, db, ceo, plan, a, url } = await plans('codex');
+    const signIn = () => app.inject({ method: 'POST', url: `/api/subscriptions/${plan}/signin`, payload: { fresh: false }, ...as(ceo) });
+    const old = await connectNode(url, a.key);
+    old.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], terminals: true });
+    await until(() => app.ctx.hub.isReady({ kind: 'node', nodeId: a.nodeId }));
+    expect((await signIn()).json().error.reason).toBe('signin_unsupported');
+    const before = await db.select().from(machines);
+    /* The update replaced the node's container on its volume: it comes back with the same key and sign-in, on the new build. */
+    old.close();
+    const updated = await connectNode(url, a.key);
+    updated.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], terminals: true, publicKey: KEY('a'), build: 'c0ffee'.padEnd(40, '0') });
+    await until(async () => (await db.select({ k: nodes.publicKey }).from(nodes).where(eq(nodes.id, a.nodeId)))[0]?.k === KEY('a'));
+    expect(await db.select().from(machines)).toEqual(before);
+    expect(await db.select({ id: nodes.id, status: nodes.status }).from(nodes).where(eq(nodes.machineId, (await db.select({ id: machines.id }).from(machines).where(eq(machines.hostname, 'ivan-mac')))[0]!.id))).toEqual([{ id: a.nodeId, status: 'ready' }]);
+    expect((await db.select({ status: subscriptions.status }).from(subscriptions).where(eq(subscriptions.id, plan)))[0]!.status).toBe('ready');
+    expect((await signIn()).json()).toEqual({ nodeId: a.nodeId, hostname: 'ivan-mac' });
+    expect(await nextOf(updated, 'login.start')).toEqual({ type: 'login.start', fresh: false });
   });
 
   it('signs Kimi in with a pasted key instead of a terminal', async () => {

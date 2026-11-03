@@ -246,6 +246,8 @@ export const ru: Messages = {
     signingIn: machine => `Вход на ${machine}`,
     signingInNote: 'Этот терминал видите только вы. Пройдите шаги в нем, и Hornhoof сохранит вход для ваших других машин.',
     stopSignIn: 'Остановить вход',
+    oldNodes: hosts => `Ноды на ${hosts} старше, чем нужно для входа из Hornhoof. Чтобы обновить их, выполните эту команду в терминале на ${hosts}, затем войдите снова.`,
+    updateTrust: 'Она переводит ноды Hornhoof на этой машине на новую сборку, а их вход и файлы сохраняет.',
     signInErrors: {
       stopped: 'Вход остановлен.',
       unfinished: 'Вход закончился раньше времени, ничего не изменилось.',
@@ -297,6 +299,7 @@ export const ru: Messages = {
       limit: (at, duration) => `До ${at}, еще ${duration}. До тех пор ее агенты ждут.`,
       limitUnknown: 'Ее агенты ждут, пока лимит обновится.',
       login: (host, owner) => `На ${host}. Войти может только владелец: ${owner}.`,
+      loginOffline: host => `Нужен вход на ${host}, а машина не в сети.`,
       waiting: owner => `Владелец (${owner}) еще не выполнил команду установки.`,
     },
   },
@@ -369,6 +372,9 @@ export const ru: Messages = {
     lend: 'Отдавать под прогоны тестов',
     lent: 'Отдана под прогоны тестов',
     notLent: 'Не отдана под прогоны тестов',
+    otherBuild: 'Другая сборка',
+    otherBuildNote: (here, server) => `Ее ноды не той сборки, что у сервера (здесь ${here}, у сервера ${server}). Чтобы обновить их, выполните на ней команду установки еще раз без --join.`,
+    olderBuild: 'старая',
   },
   notebook: {
     title: 'Блокнот',
