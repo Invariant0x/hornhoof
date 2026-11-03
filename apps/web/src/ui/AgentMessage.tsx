@@ -1,7 +1,12 @@
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { useLanguage, useT, type Language, type Messages } from '../i18n';
 import type { EventView, MessageParty } from '../types';
 
 export type AgentMessageView = NonNullable<EventView['message']>;
+/* A message event that names who wrote to whom; older ones without it show as they did. */
+export type MessageEvent = EventView & { message: AgentMessageView };
+export const isMessage = (e: EventView): e is MessageEvent => e.kind === 'message' && Boolean(e.message);
+type Folding = { opened: ReadonlySet<number>; toggle(seq: number): void };
 
 /* A party as a line names it: the orchestrator and the company's people by a word that fits after "from" and "to" in
    every language, everyone else by name, with the role when it says more than the name. */
@@ -33,5 +38,64 @@ export function AgentMessage({ message, text, open, onToggle }: { message: Agent
       </button>
       {open ? <div className="t-mb">{text}</div> : <span className="t-mf">{t.window.folded(text.split('\n').length)}</span>}
     </div>
+  );
+}
+
+const isCtrlO = (e: KeyboardEvent) => e.ctrlKey && !e.altKey && !e.metaKey && e.key.toLowerCase() === 'o';
+
+/* Ctrl+O stays with the live terminal's program, and with a field outside the window. */
+function keyIsElsewhere(target: EventTarget | null, box: HTMLElement | null): boolean {
+  const el = target instanceof Element ? target : null;
+  if (el?.closest('.t-term, .xterm-helper-textarea')) return true;
+  return Boolean(el?.closest('input, textarea, select, [contenteditable="true"]') && !box?.contains(el));
+}
+
+/* The messages whose text the person opened; the rest stay one line each. Ctrl+O opens every folded message, or folds
+   them all once all are open, wherever the focus is, as in Claude Code: on the map that opened the window too. */
+export function useFolding(seqs: number[], box: RefObject<HTMLElement | null>): Folding {
+  const [opened, setOpened] = useState<ReadonlySet<number>>(() => new Set());
+  const key = seqs.join(',');
+  useEffect(() => {
+    const all = key ? key.split(',').map(Number) : [];
+    const onKey = (e: KeyboardEvent) => {
+      if (!isCtrlO(e) || !all.length || keyIsElsewhere(e.target, box.current)) return;
+      e.preventDefault();
+      setOpened(now => (all.every(seq => now.has(seq)) ? new Set() : new Set(all)));
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [key, box]);
+  const toggle = useCallback((seq: number) => {
+    setOpened(now => {
+      const next = new Set(now);
+      if (!next.delete(seq)) next.add(seq);
+      return next;
+    });
+  }, []);
+  return { opened, toggle };
+}
+
+const textOf = (data: unknown) => {
+  const text = (data as { text?: unknown } | null)?.text;
+  return typeof text === 'string' ? text : '';
+};
+
+export function EventMessage({ event, folding }: { event: MessageEvent; folding: Folding }) {
+  return <AgentMessage message={event.message} text={textOf(event.data)} open={folding.opened.has(event.seq)} onToggle={() => folding.toggle(event.seq)} />;
+}
+
+/* Hornhoof's frame over the live terminal names who wrote to whom, as the log does; the program's own screen stays as it
+   is. The newest stays in view. */
+export function MessageFrame({ events, folding }: { events: MessageEvent[]; folding: Folding }) {
+  const t = useT();
+  const frame = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    const el = frame.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [events.length]);
+  return (
+    <section ref={frame} className="t-msgs" aria-label={t.window.messages}>
+      {events.map(e => <EventMessage key={e.seq} event={e} folding={folding} />)}
+    </section>
   );
 }

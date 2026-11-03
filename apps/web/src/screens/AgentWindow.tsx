@@ -4,7 +4,7 @@ import { deptLabel, errorText, useLanguage, useT, type Messages } from '../i18n'
 import { useStream } from '../live';
 import { PROGRAM_NAMES, PROVIDER_NAMES } from '../providers';
 import type { AgentCardView, ComputerView, EventView, Me, OrchestratorState, Org, ShownCommand, StaffLine, StructureItem, SubView, TemplateKey } from '../types';
-import { AgentMessage } from '../ui/AgentMessage';
+import { EventMessage, isMessage, MessageFrame, useFolding } from '../ui/AgentMessage';
 import { AgentTerminal } from '../ui/AgentTerminal';
 import { CommandCard } from '../ui/CommandCard';
 import { ComputerCard, isOpen } from '../ui/ComputerCard';
@@ -107,9 +107,6 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard }:
   const ownsCommands = orchestrator && me.person.isOwner;
   /* Access to the computer the server runs on: the orchestrator asks, and only the CEO's screen opens or closes it. */
   const [computer, setComputer] = useState<ComputerView | null>(null);
-  /* The messages whose text the person opened; the rest stay one line each. */
-  const [opened, setOpened] = useState<ReadonlySet<number>>(() => new Set());
-  const frame = useRef<HTMLElement>(null);
   const asked = useRef<number | null>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const box = useRef<HTMLElement>(null);
@@ -311,39 +308,8 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard }:
 
   /* One card at a time: his newest proposal until it is applied, below his latest line. */
   const shown = visible(events);
-  /* Messages that name who wrote to whom; older ones without it show as they did. */
-  const messages = shown.filter(e => e.kind === 'message' && e.message);
-  const messageSeqs = messages.map(e => e.seq).join(',');
-
-  function toggleMessage(seq: number) {
-    setOpened(now => {
-      const next = new Set(now);
-      if (!next.delete(seq)) next.add(seq);
-      return next;
-    });
-  }
-
-  /* Ctrl+O opens every folded message, or folds them all once all are open, wherever the focus is, as in Claude Code: on
-     the map that opened the window too. In the live terminal the key is the program's, and in a field elsewhere it is
-     the field's. */
-  useEffect(() => {
-    const seqs = messageSeqs ? messageSeqs.split(',').map(Number) : [];
-    const onKey = (e: globalThis.KeyboardEvent) => {
-      if (!e.ctrlKey || e.altKey || e.metaKey || e.key.toLowerCase() !== 'o' || !seqs.length) return;
-      const target = e.target instanceof Element ? e.target : null;
-      if (target?.closest('.t-term, .xterm-helper-textarea')) return;
-      if (target?.closest('input, textarea, select, [contenteditable="true"]') && !box.current?.contains(target)) return;
-      e.preventDefault();
-      setOpened(now => (seqs.every(seq => now.has(seq)) ? new Set() : new Set(seqs)));
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [messageSeqs]);
-
-  useLayoutEffect(() => {
-    const el = frame.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [messageSeqs]);
+  const messages = shown.filter(isMessage);
+  const folding = useFolding(messages.map(e => e.seq), box);
   const newest = events.findLast(e => e.kind === 'proposal');
   const applied = new Set(events.filter(e => e.kind === 'applied').map(e => (e.data as Applied).proposalId));
   const open = newest && !applied.has(field(newest.data, 'proposalId')) ? newest.data : null;
@@ -416,7 +382,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard }:
   function line(e: EventView, i: number) {
     switch (e.kind) {
       case 'message':
-        if (e.message) return <AgentMessage message={e.message} text={field(e.data, 'text')} open={opened.has(e.seq)} onToggle={() => toggleMessage(e.seq)} />;
+        if (isMessage(e)) return <EventMessage event={e} folding={folding} />;
         return (
           <div className="t-u">
             &gt; <em>{e.person?.name ?? author(field(e.data, 'from'), field(e.data, 'name'))}:</em> {field(e.data, 'text')}
@@ -559,14 +525,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard }:
           )}
         </div>
       )}
-      {/* Hornhoof's frame names who wrote to whom, as the log does; the program's own screen stays as it is. */}
-      {!notebook && known && terminal && messages.length > 0 && (
-        <section ref={frame} className="t-msgs" aria-label={t.window.messages}>
-          {messages.map(e => (
-            <AgentMessage key={e.seq} message={e.message!} text={field(e.data, 'text')} open={opened.has(e.seq)} onToggle={() => toggleMessage(e.seq)} />
-          ))}
-        </section>
-      )}
+      {!notebook && known && terminal && messages.length > 0 && <MessageFrame events={messages} folding={folding} />}
       {!notebook && known && terminal && <AgentTerminal path={`/api/agents/${agentId}/terminal`} program={sub ? PROGRAM_NAMES[sub.provider] : 'Claude'} onGone={() => setNoTerminal(true)} />}
       {!notebook && known && terminal && hasCards && (
         <div className="t-cards">
