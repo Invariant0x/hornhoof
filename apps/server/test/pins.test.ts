@@ -84,4 +84,15 @@ describe('what the build runs', () => {
     expect(nodeDockerfile).not.toContain('COPY --from=deps /app /app');
     expect(nodeDockerfile).toContain('COPY --from=deps /app/node_modules node_modules');
   });
+
+  /* Coverage for crapper comes from vitest's provider, and a provider of another version than vitest refuses to load. */
+  it('installs the coverage provider with every part that runs vitest, at the version of vitest', () => {
+    const json = (path: string) => JSON.parse(read(path));
+    for (const part of ['packages/protocol', 'apps/server', 'apps/web', 'apps/node']) {
+      const dev = json(`${part}/package.json`).devDependencies;
+      expect(dev['@vitest/coverage-v8'], part).toBe(dev.vitest);
+    }
+    const lock = json('package-lock.json').packages;
+    expect(lock['node_modules/@vitest/coverage-v8']).toMatchObject({ version: lock['node_modules/vitest'].version, dev: true });
+  });
 });

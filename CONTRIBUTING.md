@@ -59,6 +59,8 @@ npx tsc -p apps/node/tsconfig.json --noEmit
 
 Run `tsc` for each part you changed. After a change in `packages/protocol`, rebuild it with `npx tsc -p packages/protocol/tsconfig.json` before you test the server or the node. After a change in `scripts/`, run `shellcheck` over the script.
 
+Coverage for crapper is `npx vitest run --coverage` in the part's folder after `npm ci`, with no `node_modules` copied in. Keep a probe with its own vite config inside the clone, or its plugins are not found.
+
 A change to the database schema gets a new migration from `npx drizzle-kit generate` in `apps/server`. Never edit a migration that is already on `main`.
 
 ## Rules for the code and the words
