@@ -41,12 +41,13 @@ async function company(env: NodeJS.ProcessEnv = {}) {
     (await db.insert(agents).values({ companyId: acme!.id, kind, name, roleKey, departmentId: dev!.id, model: '', subscriptionId: sub!.id }).returning())[0]!;
   const hana = await hire('Hana', 'head', 'DEV-HEAD');
   const bruno = await hire('Bruno', 'worker', 'DEV-BE');
-  const running = (agentId: string, token: string, answersCeo = false) =>
-    db.insert(jobs).values({ companyId: acme!.id, subscriptionId: sub!.id, agentId, kind: 'conversation', prompt: 'hi', timeoutMs: 900000, status: 'running', toolTokenHash: hashToken(token), answersCeo });
-  /* The orchestrator's turn answers the CEO, so every tool works in it. */
-  await running(orchestrator!.id, TOKEN, true);
+  const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
+  const running = (agentId: string, token: string, answersCeo = false, createdBy: string | null = null) =>
+    db.insert(jobs).values({ companyId: acme!.id, subscriptionId: sub!.id, agentId, kind: 'conversation', prompt: 'hi', timeoutMs: 900000, status: 'running', toolTokenHash: hashToken(token), answersCeo, createdBy }).returning();
+  /* The orchestrator's turn is the CEO's, who started it without a message, so every tool works in it. */
+  await running(orchestrator!.id, TOKEN, true, owner!.id);
   const task = (await createTask(app.ctx, { agentId: hana.id }, { title: 'Checkout API', brief: '', body: 'POST /checkout.', departmentId: dev!.id, assigneeAgentId: bruno.id, executor: true, gates: [] })).task;
-  return { app, db, ceo, orchestrator: orchestrator!, hana, bruno, dev: dev!, task, running };
+  return { app, db, ceo, ceoId: owner!.id, orchestrator: orchestrator!, hana, bruno, dev: dev!, task, running };
 }
 
 async function mcp(app: FastifyInstance, token = TOKEN): Promise<Client> {
@@ -274,14 +275,15 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
     expect(byPerson.statusCode).toBe(403);
   });
 
-  it('answers an employee\'s question as itself', async () => {
-    const { app, db, orchestrator, bruno, task } = await company();
+  it('answers an employee\'s question as itself, for the CEO its turn answers', async () => {
+    const { app, db, ceoId, orchestrator, bruno, task } = await company();
     const { request } = await ask(app.ctx, bruno.id, task.id, { kind: 'question', text: 'Is tax in scope?' });
     const res = await call(await mcp(app), 'answer_request', { request: request.id, answer: 'Yes, with tax.' });
     expect(res.isError).toBeFalsy();
-    expect((await db.select().from(requests).where(eq(requests.id, request.id)))[0]).toMatchObject({ status: 'answered', answeredBy: null });
+    const [job] = await db.select().from(jobs).where(eq(jobs.agentId, orchestrator.id));
+    expect((await db.select().from(requests).where(eq(requests.id, request.id)))[0]).toMatchObject({ status: 'answered', answeredBy: ceoId, answeredByAgentId: orchestrator.id, answerJobId: job!.id, answerSourceSeq: null });
     const [said] = await db.select().from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'answered')));
-    expect(said).toMatchObject({ personId: null, agentId: orchestrator.id });
+    expect(said).toMatchObject({ personId: null, agentId: orchestrator.id, data: { onBehalfOfPersonId: ceoId, jobId: job!.id, sourceSeq: null } });
   });
 
   it('hires with what the card starts with and is not woken about it', async () => {

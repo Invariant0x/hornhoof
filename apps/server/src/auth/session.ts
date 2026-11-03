@@ -35,6 +35,8 @@ export type Person = {
   isCeoDelegate: boolean;
   /* The orchestrator acting as this person, the owner: what it changes is its own. */
   via?: string;
+  /* The orchestrator takes a decision for this person, whom its turn answers: the turn and the message that says so. */
+  decision?: { jobId: string; sourceSeq: number | null };
 };
 
 /* Every sign-in also clears out everyone's expired sessions, so the table does not grow forever. A session starts only
@@ -88,7 +90,7 @@ export async function requirePerson(req: FastifyRequest, db: Db): Promise<Person
   if (inside) {
     const [owner] = await db.select(personColumns).from(people).where(eq(people.id, inside.personId));
     if (!owner || owner.status !== 'active') throw notSignedIn();
-    return { ...owner, via: inside.agentId };
+    return { ...owner, via: inside.agentId, ...(inside.decision ? { decision: inside.decision } : {}) };
   }
   const token = req.cookies[SESSION_COOKIE];
   if (!token) throw notSignedIn();

@@ -3,7 +3,7 @@ import type { Ctx } from '../../app.js';
 import { loggable } from '../../errors.js';
 import { agentChanges, agentEvents, agents, jobs, requests, subscriptions, taskEvents, tasks, testRuns } from '../../db/schema.js';
 import { agentState, conversationOf, GONE_ALONG, insertTurn, limitUntil, liveSubscription, onAgent, openTypedTurn, orchestratorOf, pump, refusedLimits, UNSENT } from '../conversation/queue.js';
-import { sayLive } from '../conversation/live.js';
+import { deliverLive } from '../conversation/decision-context.js';
 import { quote } from '../conversation/prompt.js';
 import { appendEvent, publishWorking } from '../events/store.js';
 import { identityOf, type NodeIdentity } from '../nodes/hub.js';
@@ -240,11 +240,12 @@ async function explainRequest(ctx: Ctx, w: Wake): Promise<void> {
     `${what}\n\nBefore a person answers, find out what it needs: read the task with "task", and ask ${asker} with "message_employee" when its words are not enough. ` +
     `Then call "explain_request" with request ${request.id} and a few lines for the person, in the CEO's language and plain words without IT terms: ` +
     'which task and what for, what is needed from them and why, and the ways to go with what each leads to. Do not answer it yourself unless the CEO told you how.';
-  const into = await sayLive(ctx, w.agentId, text);
   const message = { personId: null, text, task: { id: task.id, number: task.number }, request: request.id };
-  const jobId = into ?? (await insertTurn(ctx, { companyId: task.companyId, agentId: w.agentId, prompt: text, createdBy: null, message }));
   /* The request names the turn that explains it, so people see the orchestrator is on it. */
-  if (into) await appendEvent(ctx, { companyId: task.companyId, agentId: w.agentId, jobId, kind: 'message', data: { text, task: { id: task.id, number: task.number }, request: request.id } });
+  const into = await deliverLive(ctx, w.agentId, text, {}, (jobId, kept) =>
+    appendEvent(ctx, { companyId: task.companyId, agentId: w.agentId, jobId, kind: 'message', data: { text, task: { id: task.id, number: task.number }, request: request.id } }, kept).then(() => {}),
+  );
+  if (!into) await insertTurn(ctx, { companyId: task.companyId, agentId: w.agentId, prompt: text, createdBy: null, message });
   ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
   if (!into) await pump(ctx, w.agentId);
 }
@@ -313,11 +314,10 @@ async function queueWake(ctx: Ctx, w: Wake): Promise<boolean> {
   /* New words on the task the agent works on right now go into that turn. */
   if (LIVE_WAKES.includes(w.why)) {
     const text = wakePrompt(agent, task, w);
-    const into = await sayLive(ctx, agent.id, text, task.id);
-    if (into) {
-      await appendEvent(ctx, { companyId: agent.companyId, agentId: agent.id, jobId: into, kind: 'message', data: { text, task: { id: task.id, number: task.number } } });
-      return false;
-    }
+    const into = await deliverLive(ctx, agent.id, text, { taskId: task.id }, (jobId, kept) =>
+      appendEvent(ctx, { companyId: agent.companyId, agentId: agent.id, jobId, kind: 'message', data: { text, task: { id: task.id, number: task.number } } }, kept).then(() => {}),
+    );
+    if (into) return false;
   }
   /* One at a time per agent, so two moves at once still queue one turn. */
   return onAgent(ctx, agent.id, async () => {

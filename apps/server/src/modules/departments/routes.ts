@@ -3,12 +3,16 @@ import { and, asc, eq, inArray, isNotNull, isNull, max, or } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { changedBy, personOf, requireCompanyScope, requirePerson } from '../../auth/session.js';
+import { accessOf } from '../../auth/access.js';
+import type { DecisionSubject } from '../../auth/decision-owner.js';
+import { requireDecision } from '../../auth/decisions.js';
+import { changedBy, personOf, requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
 import { agentChanges, agents, companies, departments, proposals, tasks, teams } from '../../db/schema.js';
 import { encryptSecret } from '../../crypto/secrets.js';
 import { Repo } from '@hornhoof/protocol';
 import { ApiError } from '../../errors.js';
 import { placeOf, renderInstructions } from '../agents/instructions.js';
+import { delegationOf, lockedFor, stillDecides, type Delegation } from '../conversation/decision-context.js';
 import { enqueueTurn, orchestratorOf, orchestratorState } from '../conversation/queue.js';
 import { appendEvent } from '../events/store.js';
 import { checkStaff, departmentOf, HireLine, runsTier, servingSubscriptions, spotIn } from '../tools/staff.js';
@@ -62,22 +66,37 @@ function staffedNote(department: string, hired: Hired[]): string {
   ].join('\n');
 }
 
+const CARD: DecisionSubject = { source: 'proposal' };
+
 /* Departments come and go here: the CEO's click on a structure card, or the orchestrator's build_structure. */
 export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db } = ctx;
 
+  /* A card is the CEO's decision, with or without the card: the CEO's or the delegate's from their screen, or the
+     orchestrator's for the one its turn answers. */
+  async function cardDecision(me: Person): Promise<Delegation | undefined> {
+    const on = delegationOf(me);
+    requireCompanyScope(me);
+    requireDecision(CARD, me, await accessOf(db, me), me.companyId);
+    return on;
+  }
+  /* Who applied a card: the person, also when the orchestrator applied it for them. */
+  const appliedBy = (me: Person, on: Delegation | undefined) => (on ? on.personId : personOf(me));
+  const forWhom = (on: Delegation | undefined) => (on ? { onBehalfOfPersonId: on.personId, jobId: on.jobId, sourceSeq: on.sourceSeq } : {});
+
   app.post('/api/departments/build', async (req, reply) => {
     const me = await requirePerson(req, db);
-    requireCompanyScope(me);
+    const on = await cardDecision(me);
     const body = BuildBody.parse(req.body);
 
-    const result = await db.transaction(async tx => {
+    const result = await lockedFor(ctx, on, () => db.transaction(async tx => {
+      await stillDecides(tx, me.companyId, me.id, CARD, on);
       let brief = body.brief;
       let agentId: string | null = null;
       if (body.proposalId) {
         const [taken] = await tx
           .update(proposals)
-          .set({ status: 'applied', appliedBy: personOf(me), appliedAt: new Date() })
+          .set({ status: 'applied', appliedBy: appliedBy(me, on), appliedAt: new Date() })
           .where(and(eq(proposals.id, body.proposalId), eq(proposals.companyId, me.companyId), eq(proposals.kind, 'structure'), eq(proposals.status, 'pending')))
           .returning({ brief: proposals.brief, agentId: proposals.agentId });
         if (!taken) throw new ApiError(409, 'conflict', 'This card was already applied or replaced by a newer one.', 'proposal_closed');
@@ -137,7 +156,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
       }
       if (brief) await tx.update(companies).set({ brief }).where(eq(companies.id, me.companyId));
       return { created, removed, fresh, agentId };
-    });
+    }));
 
     const orchestrator = await orchestratorOf(ctx, me.companyId);
     const agentId = result.agentId ?? orchestrator?.id;
@@ -146,7 +165,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
         companyId: me.companyId,
         agentId,
         kind: 'applied',
-        data: { proposalId: body.proposalId ?? null, created: result.created, removed: result.removed },
+        data: { proposalId: body.proposalId ?? null, created: result.created, removed: result.removed, ...forWhom(on) },
         personId: personOf(me),
       });
     }
@@ -236,18 +255,19 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
   /* The CEO's click on a staff card, or the orchestrator's hire. */
   app.post('/api/departments/:id/staff', async (req, reply) => {
     const me = await requirePerson(req, db);
-    requireCompanyScope(me);
+    const on = await cardDecision(me);
     const dept = await departmentOf(db, me.companyId, IdParams.parse(req.params).id);
     if (!dept) throw new ApiError(404, 'not_found', 'This department does not exist.', 'department_unknown');
     const body = StaffBody.parse(req.body);
     const invalid = (message: string) => new ApiError(400, 'validation', message, 'staff_invalid');
 
-    const result = await db.transaction(async tx => {
+    const result = await lockedFor(ctx, on, () => db.transaction(async tx => {
+      await stillDecides(tx, me.companyId, me.id, CARD, on);
       let agentId: string | null = null;
       if (body.proposalId) {
         const [taken] = await tx
           .update(proposals)
-          .set({ status: 'applied', appliedBy: personOf(me), appliedAt: new Date() })
+          .set({ status: 'applied', appliedBy: appliedBy(me, on), appliedAt: new Date() })
           .where(and(eq(proposals.id, body.proposalId), eq(proposals.companyId, me.companyId), eq(proposals.kind, 'staff'), eq(proposals.departmentId, dept.id), eq(proposals.status, 'pending')))
           .returning({ agentId: proposals.agentId });
         if (!taken) throw new ApiError(409, 'conflict', 'This card was already applied or replaced by a newer one.', 'proposal_closed');
@@ -293,7 +313,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
         hired.push({ id: agent!.id, name: line.name, role: role.id, title: role.title.en });
       }
       return { hired, agentId };
-    });
+    }));
 
     const orchestrator = await orchestratorOf(ctx, me.companyId);
     const agentId = result.agentId ?? orchestrator?.id;
@@ -302,7 +322,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
         companyId: me.companyId,
         agentId,
         kind: 'applied',
-        data: { proposalId: body.proposalId ?? null, kind: 'staff', department: dept.id, hired: result.hired.map(({ id, name, role }) => ({ id, name, role })) },
+        data: { proposalId: body.proposalId ?? null, kind: 'staff', department: dept.id, hired: result.hired.map(({ id, name, role }) => ({ id, name, role })), ...forWhom(on) },
         personId: personOf(me),
       });
     }

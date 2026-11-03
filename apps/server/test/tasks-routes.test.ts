@@ -68,11 +68,15 @@ describe('tasks for people', () => {
   });
 
   it('comments, cancels and answers for the people of the department', async () => {
-    const { ctx, db, head, bruno, dev, oleg, maria, post, get } = await company();
+    const { ctx, db, head, bruno, dev, oleg, maria, ceo, post, get } = await company();
     const { task } = await createTask(ctx, { agentId: head.id }, { title: 'Checkout API', brief: '', body: '', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true });
     expect((await post(oleg, `/api/tasks/${task.id}/comments`, { text: 'EUR only.' })).statusCode).toBe(201);
     expect((await post(maria, `/api/tasks/${task.id}/comments`, { text: 'Hi.' })).statusCode).toBe(404);
-    const { request } = await ask(ctx, bruno.id, task.id, { kind: 'question', text: 'Which currency?' });
+    /* A question without its topic is the CEO's: the department's people take the ones about its tasks and employees. */
+    const { request: plain } = await ask(ctx, bruno.id, task.id, { kind: 'question', text: 'Which bank?' });
+    expect((await post(oleg, `/api/requests/${plain.id}`, { answer: 'Any.' })).json().error.reason).toBe('decision_not_allowed');
+    expect((await post(ceo, `/api/requests/${plain.id}`, { answer: 'Any.' })).statusCode).toBe(200);
+    const { request } = await ask(ctx, bruno.id, task.id, { kind: 'question', text: 'Which currency?', topic: 'task' });
     expect((await post(oleg, `/api/requests/${request.id}`, { approve: true })).json().error.reason).toBe('task_invalid');
     expect((await post(maria, `/api/requests/${request.id}`, { answer: 'EUR' })).statusCode).toBe(404);
     expect((await post(oleg, `/api/requests/${request.id}`, { answer: 'EUR' })).statusCode).toBe(200);
@@ -156,12 +160,12 @@ describe('tasks for people', () => {
     ]));
   });
 
-  it('shows a commit to approve to the people of the department, and lets only the whole company approve it', async () => {
+  it('shows a commit to approve to the people of the department, and lets only the CEO and the delegate approve it', async () => {
     const { ctx, head, bruno, dev, oleg, ceo, post, get } = await company();
     const { task } = await createTask(ctx, { agentId: head.id }, { title: 'Release', brief: '', body: '', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true });
     const { request } = await ask(ctx, bruno.id, task.id, { kind: 'approval', text: 'Release 0.5.0 to main.', commit: 'a'.repeat(40) });
     expect((await get(oleg, '/api/requests')).json().requests.map((r: { id: string }) => r.id)).toEqual([request.id]);
-    expect((await post(oleg, `/api/requests/${request.id}`, { approve: true })).json().error.reason).toBe('company_scope_only');
+    expect((await post(oleg, `/api/requests/${request.id}`, { approve: true })).json().error.reason).toBe('decision_not_allowed');
     expect((await post(ceo, `/api/requests/${request.id}`, { approve: true })).json().request.status).toBe('approved');
   });
 
