@@ -321,6 +321,8 @@ export const jobs = pgTable(
     nodeId: uuid('node_id').references(() => nodes.id),
     agentId: uuid('agent_id').references(() => agents.id),
     prompt: text('prompt').notNull(),
+    /* What the turn was asked before the queue composed its sent prompt. Null for turns from before this was kept. */
+    requestedPrompt: text('requested_prompt'),
     sessionId: text('session_id'),
     status: text('status', { enum: JOB_STATUSES }).notNull().default('queued'),
     result: text('result'),

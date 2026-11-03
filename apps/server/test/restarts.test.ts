@@ -64,6 +64,40 @@ async function company() {
 }
 
 describe('a turn cut off by a node restart', () => {
+  it.each([null, ''])('repeats a turn with requested text %j using the legacy sent text only for null', async requestedPrompt => {
+    const c = await company();
+    const first = await c.brunoAtWork();
+    await c.db.update(jobs).set({ requestedPrompt, prompt: 'Legacy sent work.' }).where(eq(jobs.id, first.jobId));
+
+    const retry = await nextRun(await c.restart(boot('2026-11-03T00:11:00.000Z')));
+
+    expect(retry.prompt.includes('Legacy sent work.')).toBe(requestedPrompt === null);
+    expect(retry.prompt).toContain('Hornhoof runs it once more');
+  });
+
+  it('adds the current repository and catch-up once when it repeats the requested work', async () => {
+    const c = await company();
+    await c.db.update(departments).set({ repoUrl: 'https://example.com/checkout.git', repoBranch: 'main' }).where(eq(departments.id, c.task.departmentId));
+    await c.db.insert(agentEvents).values({ companyId: c.companyId, agentId: c.bruno.id, kind: 'text', data: { text: 'Earlier checkout discussion.' } });
+    const first = await c.brunoAtWork();
+    expect(first.prompt.match(/Earlier in this conversation/g)).toHaveLength(1);
+    expect(first.prompt.match(/Your repository /g)).toHaveLength(1);
+    await c.db.update(departments).set({ repoBranch: 'checkout' }).where(eq(departments.id, c.task.departmentId));
+
+    const retry = await nextRun(await c.restart(boot('2026-11-03T00:11:00.000Z')));
+
+    expect(retry.prompt.match(/Earlier in this conversation/g)).toHaveLength(1);
+    expect(retry.prompt.match(/Your repository /g)).toHaveLength(1);
+    expect(retry.prompt).toContain('(branch checkout)');
+    expect(retry.prompt).not.toContain('(branch main)');
+    expect(retry.prompt).toContain(`#${c.task.number} "Checkout API" is yours to do`);
+    const kept = await c.jobOf(first.jobId);
+    expect(kept).toMatchObject({ prompt: first.prompt, requestedPrompt: expect.stringContaining('is yours to do') });
+    expect(kept).toHaveProperty('requestedPrompt', expect.not.stringContaining('Your repository '));
+    expect(kept).toHaveProperty('requestedPrompt', expect.not.stringContaining('Earlier in this conversation'));
+    expect(await c.jobOf(retry.jobId)).toMatchObject({ prompt: retry.prompt, retryOf: first.jobId });
+  });
+
   it('keeps why, when, where, its task and turn, and runs the turn once more, linked to the one cut off', async () => {
     const c = await company();
     const first = await c.brunoAtWork();

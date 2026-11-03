@@ -316,6 +316,13 @@
       "when": 1793682406470,
       "tag": "0044_ceo_delegate",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1793714572653,
+      "tag": "0047_requested_prompt",
+      "breakpoints": true
     }
   ]
 }
