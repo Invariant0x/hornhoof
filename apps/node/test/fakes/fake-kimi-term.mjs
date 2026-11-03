@@ -30,6 +30,7 @@ const hook = (event, name, body) =>
     : Promise.resolve();
 const record = (type, payload) => appendFileSync(wireOf(session), JSON.stringify({ type, agentId: 'main', ...payload, time: Date.now() }) + '\n');
 const print = text => process.stdout.write(text);
+const prompt = () => print(`── input ${'─'.repeat(60)}\n \n${'─'.repeat(69)}\ncontext: 0% (0/256k)\x1b[2A\r `);
 
 function listTools() {
   if (!process.env.FAKE_MCP_LIST_MS) return;
@@ -38,7 +39,8 @@ function listTools() {
     const listed = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) })
       .then(r => r.json())
       .catch(() => null);
-    print(`tools: ${listed?.result ? 'ok' : 'failed'}\n❯ `);
+    print(`tools: ${listed?.result ? 'ok' : 'failed'}\n`);
+    prompt();
   }, Number(process.env.FAKE_MCP_LIST_MS));
 }
 
@@ -61,7 +63,7 @@ async function startSession(source) {
 
 print(`fake kimi ${session ? `resumed ${session}` : 'new'}\nWelcome to Kimi Code!\n`);
 print(process.env.FAKE_SIGNED_OUT ? 'Run /login or /provider to get started.\n' : 'Send /help for help information.\n');
-print('context: 0% (0/256k)\n❯ ');
+prompt();
 if (session) {
   listTools();
   await hook('start', 'SessionStart', { source: 'resume' });
@@ -73,7 +75,7 @@ async function take(line) {
   if (line === 'EXIT') process.exit(3);
   if (line === '/new') {
     await startSession('new');
-    print('❯ ');
+    prompt();
     return;
   }
   if (!session) await startSession('startup');
@@ -83,7 +85,8 @@ async function take(line) {
   if (line.includes('BLOCKED')) {
     // A prompt hook of the person's own said no: Kimi completes the prompt as blocked and starts no turn.
     record('prompt.completed', { promptId: `p${turn}`, finishedAt: new Date().toISOString(), reason: 'blocked' });
-    print('Blocked by a hook\n❯ ');
+    print('Blocked by a hook\n');
+    prompt();
     return;
   }
   const turnId = turn++;
@@ -93,14 +96,20 @@ async function take(line) {
   if (line.includes('HANG')) {
     hanging = turnId;
     print(`waiting: ${line}\n`);
+    prompt();
     return;
   }
   if (line.includes('ABORT') || line.includes('FAIL')) {
     record('turn.ended', line.includes('FAIL') ? { turnId, reason: 'failed', error: { name: 'APIError', message: 'The plan ran out.' } } : { turnId, reason: 'cancelled' });
-    print('Interrupted\n❯ ');
+    print('Interrupted\n');
+    prompt();
     return;
   }
-  if (line.includes('SLOW')) await new Promise(r => setTimeout(r, 2000));
+  if (line.includes('SLOW')) {
+    prompt();
+    await new Promise(r => setTimeout(r, 2000));
+    print('\r\x1b[J');
+  }
   const loop = event => record('context.append_loop_event', { event: { turnId: String(turnId), ...event } });
   if (line.includes('PARTS')) {
     // A step with a tool call, then a final message in two text parts with a thought between them.
@@ -115,7 +124,8 @@ async function take(line) {
     loop({ type: 'content.part', step: 2, part: { type: 'text', text: ' second half.' } });
     loop({ type: 'step.end', step: 2 });
     record('turn.ended', { turnId, reason: 'completed' });
-    print('● first half. second half.\n❯ ');
+    print('● first half. second half.\n');
+    prompt();
     return;
   }
   const answer = line === 'SECRET' ? `the key is ${process.env.FAKE_SECRET}` : `echo: ${line}`;
@@ -123,7 +133,8 @@ async function take(line) {
   if (line.includes('SWITCH')) record('config.update', { modelAlias: 'small' });
   record('token_counting.measured', { length: 2, tokens: 262144 });
   record('turn.ended', { turnId, reason: 'completed' });
-  print(`● ${answer}\n❯ `);
+  print(`● ${answer}\n`);
+  prompt();
 }
 
 // Kimi reads keys raw: Escape stops a running turn at once, and Enter ends a line.
@@ -137,16 +148,21 @@ process.stdin.on('data', data => {
       if (hanging !== null) {
         record('turn.ended', { turnId: hanging, reason: 'cancelled' });
         hanging = null;
-        print('Interrupted\n❯ ');
+        print('\r\x1b[JInterrupted\n');
+        prompt();
       }
       continue;
     }
     if (ch === '\r' || ch === '\n') {
       const line = typed.replace(/\[[0-9;]*[~A-Za-z]/g, '');
       typed = '';
+      print('\r\x1b[J\n');
       if (line) queue = queue.then(() => take(line));
       continue;
     }
-    typed += ch;
+    if (ch === '\u0015') typed = '';
+    else if (ch === '\u007f') typed = typed.slice(0, -1);
+    else typed += ch;
+    print(`\r\x1b[2K ${typed}`);
   }
 });

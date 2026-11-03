@@ -30,24 +30,36 @@ const event = payload => {
   appendFileSync(log, JSON.stringify({ type: 'event_msg', payload }) + '\n');
 };
 const item = (type, text) => event({ type: 'item_completed', item: { type, id: randomUUID(), content: [{ type: 'text', text }] } });
+const prompt = () => process.stdout.write('\x1b[1m›\x1b[0m \x1b[2mAsk Codex to do anything\x1b[0m\r\x1b[2C');
 
-process.stdout.write('OpenAI Codex\n› ');
+process.stdout.write('OpenAI Codex\n');
+prompt();
 for await (const typed of createInterface({ input: process.stdin })) {
   const line = typed.replaceAll('\u001b', '');
   event({ type: 'task_started', turn_id: randomUUID() });
   item('UserMessage', line);
   if (line.startsWith('CRASH')) crash(line.includes('LONG') ? 'long' : '');
   if (line.includes('HANG_EXIT')) process.stdout.write('exit-test running\n');
-  if (line.includes('HANG')) continue;
+  if (line.includes('HANG')) {
+    prompt();
+    continue;
+  }
   if (line.includes('ABORT')) {
     event({ type: 'turn_aborted', reason: 'interrupted' });
-    process.stdout.write('■ Conversation interrupted\n› ');
+    process.stdout.write('■ Conversation interrupted\n');
+    prompt();
     continue;
+  }
+  if (line.includes('SLOW')) {
+    prompt();
+    await new Promise(r => setTimeout(r, 2000));
+    process.stdout.write('\r\x1b[2K');
   }
   const answer = `echo: ${line}`;
   item('AgentMessage', answer);
   event({ type: 'token_count', info: { last_token_usage: { total_tokens: 112000 }, model_context_window: 212000 }, rate_limits: null });
   event({ type: 'task_complete', last_agent_message: answer });
-  process.stdout.write(`• ${answer}\n› `);
+  process.stdout.write(`• ${answer}\n`);
+  prompt();
   if (line.includes('LATE')) setTimeout(() => event({ type: 'turn_aborted', reason: 'interrupted' }), 150);
 }

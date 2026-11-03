@@ -197,8 +197,8 @@ export class Tmux {
   }
 
   /* The screen as text with the lines above it, wrapped lines joined: the newest tmux moves a dead pane's text up there. */
-  async screen(name: string, history = 200): Promise<string> {
-    return this.run(['capture-pane', '-p', '-J', '-S', String(-history), '-t', name]).catch(() => '');
+  async screen(name: string, history = 200, styled = false): Promise<string> {
+    return this.run(['capture-pane', '-p', ...(styled ? ['-e'] : []), '-J', '-S', String(-history), '-t', name]).catch(() => '');
   }
 
   async clients(): Promise<Client[]> {

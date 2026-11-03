@@ -1,0 +1,4 @@
+OpenAI Codex
+[1;2m›[0m Earlier user message
+Working.
+[0;1m›[0m Ask Codex to do anything

@@ -7,6 +7,15 @@ import { hasTmux, until, host, sent, home, setUp, kimiJob, done, typeTurn } from
 describe.skipIf(!hasTmux)('agents in live terminals', () => {
   afterEach(async () => host?.stop());
 
+  it('takes live words from the empty input box during a turn', async () => {
+    await setUp();
+    const first = await host.run(kimiJob('live-kimi', 'warm up'));
+    const running = host.run(kimiJob('live-kimi', 'HANG', { sessionId: first.sessionId }));
+    await until(async () => (await host.screen('live-kimi')).includes('waiting: HANG'));
+    expect(await host.say('live-kimi', 'SLOW Use the new schema.')).toBe(true);
+    expect(await running).toMatchObject({ ok: true, result: 'echo: SLOW Use the new schema.' });
+  });
+
   it('runs a turn in Kimi, with the answer and limits, and opens a turn for what a person typed in it', async () => {
     await setUp();
     const first = kimiJob('k1', 'hello');

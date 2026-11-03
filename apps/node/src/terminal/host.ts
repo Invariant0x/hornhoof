@@ -14,6 +14,7 @@ import { jobDone, tidy, type RunInput, type RunResult } from '../runner.js';
 import { claudePlugins } from '../skills.js';
 import type { ProgramOutput } from '../program-exit.js';
 import { Bridge } from './bridge.js';
+import { inputOf } from './input.js';
 import { fromAgent } from './peer.js';
 import { StreamMask } from './mask.js';
 import { acceptClaudeDialogs, agyLog, claudeTranscript, findKimiWire, findRollout, prepareAgy, prepareKimi, rolloutFiles, type TermProgram } from './programs.js';
@@ -41,6 +42,7 @@ function deferred<T>(): Deferred<T> {
 }
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+const pasteWait = (text: string) => Math.min(3000, 300 + text.length / 20);
 
 function exitError(output: string | null, signedOut: RegExp | null, fallback: JobError): JobError {
   return output && signedOut?.test(output) ? 'not_logged_in' : fallback;
@@ -62,6 +64,7 @@ type Turn = {
   starting?: boolean;
 };
 type JobError = RunResult['error'];
+type LiveWords = { turn: Turn; text: string; deadline: number };
 
 type Agent = {
   key: string;
@@ -96,6 +99,7 @@ type Agent = {
   watch: NodeJS.Timeout | null;
   /* Words Hornhoof types into running turns, one after another. */
   saying: Promise<unknown>;
+  inputUnknown?: boolean;
   /* Hornhoof's turns, one after another. */
   queue: Promise<unknown>;
   /* Typed turns Hornhoof has not answered yet, oldest first. */
@@ -151,6 +155,7 @@ type Options = {
   send(m: NodeMessage): void;
   /* Values that never reach a screen people watch. */
   secrets(): string[];
+  log?(message: string): void;
   /* A session a person started by typing, kept with its folder so Hornhoof's next turn can go on with it. */
   remember?(sessionId: string, workDir: string): void;
   /* How long a program may take to show its prompt. Kimi Code takes most of a minute on a busy machine. */
@@ -290,6 +295,8 @@ export class TerminalHost {
   }
 
   private async turnIn(a: Agent, job: TermJob): Promise<RunResult> {
+    /* Clear words left in the input by a failed live delivery before this turn pastes its prompt. */
+    await a.saying;
     const { input, program } = job;
     const fail = (error: RunResult['error'], output?: string) => this.failedTurn(a, job, error, output);
     /* A turn a person typed may still run, or wait for the rest of its log; Hornhoof's turn goes in after it, or into it
@@ -381,7 +388,7 @@ export class TerminalHost {
       a.fresh = false;
       a.took = false;
       await this.opts.tmux.paste(a.name, input.prompt);
-      await sleep(Math.min(3000, 300 + input.prompt.length / 20));
+      await sleep(pasteWait(input.prompt));
       await this.opts.tmux.keys(a.name, 'Enter');
       /* On a busy machine the program can take the prompt, and even end its turn, before the key is back: it then said so
          itself, and its turn's end must not be taken back. */
@@ -825,25 +832,85 @@ export class TerminalHost {
   /* Words for the agent while its turn runs, typed into the program as a person types: Claude Code, Codex and Kimi Code
      take them into the turn at its next step. False when no turn runs or the program takes none, so Hornhoof gives them
      the next turn instead. */
-  say(key: string, text: string): Promise<boolean> {
+  say(key: string, text: string, within = Infinity): Promise<boolean> {
     const a = this.agents.get(key);
-    if (!a) return Promise.resolve(false);
-    const said = a.saying.then(() => this.sayIn(a, text));
+    if (!a?.turn) return Promise.resolve(false);
+    const words = { turn: a.turn, text, deadline: Date.now() + within };
+    const said = a.saying.then(() => this.sayIn(a, words));
     a.saying = said.catch(() => {});
     return said;
   }
 
-  private async sayIn(a: Agent, text: string): Promise<boolean> {
+  private async sayIn(a: Agent, words: LiveWords): Promise<boolean> {
     /* Antigravity takes nothing while it answers: what is typed then becomes a turn of its own after this one. */
     if (a.program?.kind === 'antigravity') return false;
+    await this.waitToSay(a, words);
+    const input = await this.readInput(a);
+    if (input || !(await this.canSay(a, words))) return false;
+    const wait = pasteWait(words.text);
+    if (Date.now() + wait >= words.deadline) return false;
+    let went = false;
+    try {
+      await this.opts.tmux.paste(a.name, words.text);
+      await sleep(wait);
+      if (!(await this.canSay(a, words))) return false;
+      await this.opts.tmux.keys(a.name, 'Enter');
+      went = input === null || await this.tookWords(a, words);
+      return went;
+    } catch {
+      return false;
+    } finally {
+      if (!went) await this.discardWords(a, words);
+    }
+  }
+
+  private async waitToSay(a: Agent, words: LiveWords): Promise<void> {
     /* Hornhoof's own prompt goes in first, or the words would join it in the program's input. */
-    for (const end = Date.now() + ENTER_TRIES * this.enterWaitMs; a.turn && !a.turn.typed && !a.took && Date.now() < end; ) await sleep(this.pollMs);
+    const end = Math.min(words.deadline, Date.now() + ENTER_TRIES * this.enterWaitMs);
+    while (a.turn === words.turn && !words.turn.typed && !a.took && Date.now() < end) {
+      this.drain(a);
+      await sleep(this.pollMs);
+    }
+  }
+
+  private wordsMayGoIn(a: Agent, words: LiveWords): boolean {
+    this.drain(a);
     /* A turn that ended in the program takes no words: typed then, they would start a turn nobody waits for. */
-    if (!a.turn || a.turn.starting || (!a.turn.typed && !a.took) || !a.busy || this.overIn(a) || !(await this.opts.tmux.alive(a.name))) return false;
-    await this.opts.tmux.paste(a.name, text);
-    await sleep(Math.min(3000, 300 + text.length / 20));
-    await this.opts.tmux.keys(a.name, 'Enter');
-    return true;
+    return a.turn === words.turn && !words.turn.starting && (words.turn.typed || Boolean(a.took)) && a.busy && !this.overIn(a) && Date.now() < words.deadline;
+  }
+
+  private async canSay(a: Agent, words: LiveWords): Promise<boolean> {
+    return this.wordsMayGoIn(a, words) && (await this.opts.tmux.alive(a.name)) && this.wordsMayGoIn(a, words);
+  }
+
+  private async readInput(a: Agent): Promise<string | null> {
+    const screen = await this.opts.tmux.screen(a.name, 0, true);
+    const input = a.program ? inputOf(a.program.kind, screen) : null;
+    if (input === null && !a.inputUnknown) {
+      a.inputUnknown = true;
+      (this.opts.log ?? console.log)(`Agent ${a.key} (${a.program?.kind}): input could not be found. Live words will use paste and Enter.`);
+    }
+    return input;
+  }
+
+  private async tookWords(a: Agent, words: LiveWords): Promise<boolean> {
+    const end = Math.min(words.deadline, Date.now() + this.enterWaitMs);
+    while (Date.now() < end) {
+      const input = await this.readInput(a);
+      if (input === null) return true;
+      if (!(await this.canSay(a, words))) return false;
+      if (!input) return true;
+      await sleep(this.pollMs);
+    }
+    return false;
+  }
+
+  private async discardWords(a: Agent, words: LiveWords): Promise<void> {
+    /* A missed Enter must not leave words for a later turn to submit. Start afresh on the next turn as well. */
+    a.hash = null;
+    if (a.turn && a.turn !== words.turn) return;
+    const erase = words.text.split('\n').flatMap((_, i) => i ? ['BSpace', 'C-u'] : ['C-u']);
+    await this.opts.tmux.keys(a.name, ...erase).catch(() => {});
   }
 
   /* Hornhoof calls off a turn a person typed: the program stops as on Escape, and the turn ends as stopped. */

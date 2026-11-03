@@ -3,9 +3,10 @@ import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it, onTestFinished } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { runNode } from '../src/main.js';
+import { TerminalHost } from '../src/terminal/host.js';
 import { claudeProgram } from '../src/terminal/programs.js';
 import { Tmux } from '../src/terminal/tmux.js';
 import type { ProviderAdapter, RunInput } from '../src/runner.js';
@@ -58,6 +59,25 @@ const hasTmux = (() => {
 })();
 
 describe('a node that runs agents in terminals', () => {
+  it.skipIf(!hasTmux)('passes the live word budget to the host and accepts older servers without it', async () => {
+    const server = await fakeServer();
+    const dir = nodeDir(server.url);
+    const tmux = new Tmux({ socket: `hh-within-${process.pid}`, env: { PATH: process.env.PATH ?? '', HOME: dir } });
+    const say = vi.spyOn(TerminalHost.prototype, 'say').mockResolvedValue(true);
+    onTestFinished(() => say.mockRestore());
+    const fake = new URL('./fakes/fake-term.mjs', import.meta.url).pathname;
+    const node = await runNode({ dir, adapter, log: () => {}, terminal: { tmux, program: claudeProgram, bin: fake, home: join(dir, 'home'), signedOut: /not logged in/i } });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    const words = { type: 'agent.say', agentKey: 'agent-1', text: 'Use the new schema.' };
+    server.send({ ...words, ref: 'budget', within: 15_000 });
+    await server.wait(() => server.received.some(m => m.type === 'agent.said' && m.ref === 'budget'));
+    expect(say).toHaveBeenLastCalledWith('agent-1', words.text, 15_000);
+    server.send({ ...words, ref: 'older' });
+    await server.wait(() => server.received.some(m => m.type === 'agent.said' && m.ref === 'older'));
+    expect(say).toHaveBeenLastCalledWith('agent-1', words.text, undefined);
+  });
+
   it.skipIf(!hasTmux)("says so, runs an agent's turn in its session, shows the session and keeps test jobs as they were", async () => {
     const server = await fakeServer();
     const dir = nodeDir(server.url);

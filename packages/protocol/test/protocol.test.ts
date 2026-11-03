@@ -438,6 +438,13 @@ describe('live terminals', () => {
     expect(parseServerMessage(JSON.stringify({ ...say, text: 'x'.repeat(100_001) }))).toBeNull();
   });
 
+  it('carry an optional time budget for words, in milliseconds', () => {
+    const say = { type: 'agent.say', agentKey: 'agent-1', text: 'Use the new schema.', ref: 'r-2', within: 15_000 };
+    expect(parseServerMessage(JSON.stringify(say))).toEqual(say);
+    expect(parseServerMessage(JSON.stringify({ ...say, within: 0 }))).toEqual({ ...say, within: 0 });
+    for (const within of [-1, 1.5, 'later', null]) expect(parseServerMessage(JSON.stringify({ ...say, within }))).toBeNull();
+  });
+
   it("carry how full an agent's context is, as a share", () => {
     const m: NodeMessage = { type: 'agent.context', agentKey: 'agent-1', used: 0.42 };
     expect(parseNodeMessage(JSON.stringify(m))).toEqual(m);

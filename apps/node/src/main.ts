@@ -171,6 +171,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
         hornhoof: state.server,
         send: m => (m.type === 'term.data' || m.type === 'term.exit' ? void send?.(m) : emit(m)),
         secrets: () => [...known],
+        log,
         remember: (sessionId, workDir) => rememberSession(dir, sessionId, workDir),
         proc: terminal.proc,
         user: terminal.user,
@@ -283,7 +284,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       case 'turn.opened':
         return host?.opened(m);
       case 'agent.say': {
-        const ok = host ? await host.say(m.agentKey, m.text).catch(() => false) : false;
+        const ok = host ? await host.say(m.agentKey, m.text, m.within).catch(() => false) : false;
         return void send?.({ type: 'agent.said', ref: m.ref, ok });
       }
       case 'cred.put':

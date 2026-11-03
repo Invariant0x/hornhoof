@@ -4,6 +4,15 @@ import { hasTmux, until, host, tmux, sent, setUp, job, codexJob, done, ack, type
 describe.skipIf(!hasTmux)('agents in live terminals', () => {
   afterEach(async () => host?.stop());
 
+  it('takes live words while its input shows the dim placeholder', async () => {
+    await setUp();
+    const first = await host.run(codexJob('live-codex', 'warm up'));
+    const running = host.run(codexJob('live-codex', 'HANG', { sessionId: first.sessionId }));
+    await until(async () => (await host.screen('live-codex')).includes('HANG'));
+    expect(await host.say('live-codex', 'SLOW Use the new schema.')).toBe(true);
+    expect(await running).toMatchObject({ ok: true, result: 'echo: SLOW Use the new schema.' });
+  });
+
   it('runs a turn in Codex and opens a turn for what a person typed in it', async () => {
     await setUp();
     const first = await host.run(codexJob('c1', 'hello'));
