@@ -103,8 +103,8 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
   tool(
     'build_structure',
     'Creates, changes and removes departments at once, as the CEO\'s click on a structure card does. brief: two to five sentences about the company, when it changed. ' +
-      'Each item is a new department { template, name?, note?, products? } (name only when a template is used a second time) or a change { department, note?, products?, remove? }: ' +
-      'products are added, remove takes a department without employees away with its products. proposalId applies a card you proposed. ' +
+      'Each item is a new department { template, name?, note?, products?, teams? } (name only when a template is used a second time) or a change { department, note?, products?, teams?, remove? }: ' +
+      'products are added, teams creates sub-units by name or renames ({ id, name }) / removes ({ id, remove: true }) existing sub-units (moving their employees back to the pipeline), remove takes a department without employees away with its products. proposalId applies a card you proposed. ' +
       'Only in a turn that answers the CEO or the CEO delegate, as their decision.',
     BuildBody.shape,
     body => ({ method: 'POST', url: '/api/departments/build', payload: body }),
@@ -135,7 +135,7 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
 
   tool(
     'change_employee',
-    'Changes an employee as its card does: name, model (\'\' for Default), effort (a level its model takes, null for its role\'s level fitted to its model), subscription (null for none), skills { id: on/off }, base (its role text, null for the template\'s), ' +
+    'Changes an employee as its card does: name, model (\'\' for Default), effort (a level its model takes, null for its role\'s level fitted to its model), subscription (null for none), team (sub-unit id in its department, or null for the pipeline), skills { id: on/off }, base (its role text, null for the template\'s), ' +
       'skillText { id: text or null }, on (false switches it off: it ends the turn it runs and takes no task turns until it is on again), ' +
       'and timer { minutes, order, forWork? } (null for none): it wakes every so many minutes, 5 to 1440, outside any task, and does what the order says; ' +
       'with forWork true it skips a round while no task is open and nothing failed since the last one.',
@@ -317,11 +317,12 @@ async function hireLines(ctx: Ctx, companyId: string, dept: Dept, lines: Hire[])
     const role = ctx.templates.roles.get(line.role);
     const product = products.find(p => p.id === line.product);
     const title = role?.title.en ?? line.role;
-    const serving = line.subscription || !role ? [] : await servingSubscriptions(ctx, companyId, spotIn(dept, line.product ?? null));
+    const serving = line.subscription || !role ? [] : await servingSubscriptions(ctx, companyId, spotIn(dept, line.product));
     out.push({
       role: line.role,
       name: line.name ?? (product ? `${title} (${deptName(product)})` : title),
-      product: line.product ?? null,
+      product: line.product,
+      team: line.team,
       model: line.model ?? '',
       subscription: line.subscription ?? serving.find(s => runsTier(s.provider, role!.tier))?.id ?? null,
       skills: role ? skillsFor(role, { ...line, checked: true }) : [],

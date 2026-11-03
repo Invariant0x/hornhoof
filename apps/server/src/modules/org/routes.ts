@@ -53,6 +53,8 @@ function reachedLines(lines: readonly MapLine[], reach: Access, allAgents: reado
     shown.filter(l => l.kind === kind && (!departmentId || l.departmentId === departmentId)).map(({ kind: _, departmentId: __, ...line }) => line);
 }
 
+const teamField = (teamId: string | null) => (teamId ? { teamId } : {});
+
 export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db, hub, templates, bus } = ctx;
   app.get('/api/org', async req => {
@@ -163,6 +165,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
             id: a.id,
             name: a.name,
             roleId: a.roleKey,
+            ...teamField(a.teamId),
             title: role?.title ?? null,
             kind: a.kind,
             model: a.model,

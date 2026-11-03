@@ -267,7 +267,7 @@ export const agents = pgTable(
 
 export type AgentOverrides = { base?: string; skills?: Record<string, string> };
 
-export const AGENT_CHANGE_FIELDS = ['name', 'model', 'effort', 'timer', 'subscription', 'skills', 'prompt', 'reset', 'hired', 'removed', 'switch'] as const;
+export const AGENT_CHANGE_FIELDS = ['name', 'model', 'effort', 'timer', 'subscription', 'skills', 'prompt', 'reset', 'hired', 'removed', 'switch', 'team'] as const;
 
 /* Every change to an employee's card: who, when, what, before and after. */
 export const agentChanges = pgTable(

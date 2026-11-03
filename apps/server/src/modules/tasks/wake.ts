@@ -414,7 +414,11 @@ const PROVIDER_NAMES: Record<string, string> = { claude: 'Claude', codex: 'Codex
    task's gates. Only an employee's work moves: a head and the orchestrator keep theirs and wait for the reset. */
 async function standIn(ctx: Ctx, agentId: string, task: Task): Promise<{ id: string; name: string; provider: string } | null> {
   if (task.executorAgentId !== agentId || task.assigneeAgentId !== agentId || task.stage !== 0 || !['open', 'working'].includes(task.status)) return null;
-  const [me] = await ctx.db.select({ agent: agents, provider: subscriptions.provider }).from(agents).innerJoin(subscriptions, eq(subscriptions.id, agents.subscriptionId)).where(eq(agents.id, agentId));
+  const [me] = await ctx.db
+    .select({ agent: agents, provider: subscriptions.provider })
+    .from(agents)
+    .innerJoin(subscriptions, eq(subscriptions.id, agents.subscriptionId))
+    .where(and(eq(agents.id, agentId), isNull(agents.teamId)));
   if (!me || me.agent.kind !== 'worker' || !me.agent.roleKey || !me.agent.departmentId) return null;
   /* What its turns did so far is in its folder on its machine and maybe not pushed, so only work none of them did
      anything on goes to another. */
@@ -427,7 +431,18 @@ async function standIn(ctx: Ctx, agentId: string, task: Task): Promise<{ id: str
     .select({ id: agents.id, name: agents.name, productId: agents.productId, provider: subscriptions.provider })
     .from(agents)
     .innerJoin(subscriptions, and(eq(subscriptions.id, agents.subscriptionId), isNull(subscriptions.removedAt)))
-    .where(and(eq(agents.departmentId, me.agent.departmentId), eq(agents.roleKey, me.agent.roleKey), eq(agents.kind, 'worker'), isNull(agents.removedAt), isNull(agents.switchedOffAt), ne(agents.id, agentId), ne(subscriptions.provider, me.provider)))
+    .where(
+      and(
+        eq(agents.departmentId, me.agent.departmentId),
+        eq(agents.roleKey, me.agent.roleKey),
+        eq(agents.kind, 'worker'),
+        isNull(agents.removedAt),
+        isNull(agents.switchedOffAt),
+        isNull(agents.teamId),
+        ne(agents.id, agentId),
+        ne(subscriptions.provider, me.provider),
+      ),
+    )
     .orderBy(asc(agents.createdAt));
   /* Only one whose turn would go out now: signed in, on a machine that is on, and with plan left for tasks. Anyone else
      would only wait in the agent's place. */
@@ -555,8 +570,8 @@ async function keepsBreaking(ctx: Ctx, jobId: string): Promise<boolean> {
 
 /* The node stops the program and reports the job as cancelled. A node that is away cannot, so the job ends here. */
 export async function cancelJob(ctx: Ctx, jobId: string): Promise<void> {
-  const [job] = await ctx.db.select({ job: jobs, sub: subscriptions }).from(jobs).innerJoin(subscriptions, eq(subscriptions.id, jobs.subscriptionId)).where(eq(jobs.id, jobId));
-  if (!job || job.job.status !== 'running') return;
+  const job = await requestCancellation(ctx, jobId);
+  if (!job) return;
   const node = identityOf(job.sub, job.job.nodeId);
   if (node && ctx.hub.send(node, { type: 'job.cancel', jobId })) return;
   const [ended] = await ctx.db
@@ -567,6 +582,14 @@ export async function cancelJob(ctx: Ctx, jobId: string): Promise<void> {
   if (!ended) return;
   await publishWorking(ctx, job.job.companyId);
   await afterJob(ctx, jobId);
+}
+
+/* Keep Stop before contacting the node: a delayed stream or completion must not undo the person's request. */
+async function requestCancellation(ctx: Ctx, jobId: string) {
+  const [job] = await ctx.db.update(jobs).set({ error: 'cancelled' }).where(and(eq(jobs.id, jobId), eq(jobs.status, 'running'))).returning();
+  if (!job) return null;
+  const [sub] = await ctx.db.select().from(subscriptions).where(eq(subscriptions.id, job.subscriptionId));
+  return sub ? { job, sub } : null;
 }
 
 /* A person typed into the agent's terminal: the turn opens, and what they typed answers what the agent asked them, out of

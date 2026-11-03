@@ -87,6 +87,26 @@ function Interruptions({ list, headingId, when }: { list: AgentCardView['interru
 
 const subLabel = (s: SubView) => servingLabel({ kind: s.kind, label: s.label, provider: s.provider, owner: s.owner.name });
 
+const hasSubUnits = (card: AgentCardView) => card.kind === 'worker' && Boolean(card.teams?.length || card.team);
+
+function SubUnitField({ card, inputId, editable, onChange }: { card: AgentCardView; inputId: string; editable: boolean; onChange(team: string | null): void }) {
+  const t = useT();
+  if (!hasSubUnits(card)) return null;
+  return (
+    <div className="field">
+      <label htmlFor={inputId}>{t.agent.subUnit}</label>
+      <select id={inputId} value={card.team?.id ?? ''} disabled={!editable} onChange={e => onChange(e.target.value || null)}>
+        <option value="">{t.agent.inPipeline}</option>
+        {(card.teams ?? []).map(tm => (
+          <option key={tm.id} value={tm.id}>
+            {tm.name}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 /* An agent's card in the side panel: where it runs, its skills and the text it runs with, with every change kept. */
 export function AgentCard({ me, agentId, live, serverNow, onClose, onTerminal }: Props) {
   const t = useT();
@@ -293,6 +313,7 @@ export function AgentCard({ me, agentId, live, serverNow, onClose, onTerminal }:
               ))}
             </select>
           </div>
+          <SubUnitField card={card} inputId={`${id}-team`} editable={editable} onChange={team => void change({ team })} />
         </div>
         {saved && (
           <p className="ac-note" role="status">

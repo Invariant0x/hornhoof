@@ -173,6 +173,8 @@ export const CARD: AgentCardView = {
   role: { id: 'DEV-BE', title: BE_TITLE, description: about('Builds the API.'), effort: 'xhigh' },
   department: { id: 'd2', name: 'Development' },
   product: null,
+  team: null,
+  teams: [],
   model: 'claude-sonnet-5-5',
   effort: null,
   subscription: TEAM_KEY,
