@@ -653,6 +653,7 @@ export const en = {
   agent: {
     openTerminal: 'Open terminal',
     lastFailed: (at: string, kind: string) => `Last turn failed at ${at}: ${kind}`,
+    lastFailedOn: (when: string, kind: string) => `Last turn failed on ${when}: ${kind}`,
     runsOn: 'Runs on',
     onMachine: (host: string) => `Works on the machine ${host}`,
     model: 'Model',
