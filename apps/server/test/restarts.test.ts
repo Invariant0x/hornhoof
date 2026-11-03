@@ -82,6 +82,11 @@ describe('a turn cut off by a node restart', () => {
     ]);
     expect(retry.prompt).toContain('restarted');
     expect(retry.prompt).toContain(`#${c.task.number} "Checkout API" is yours to do`);
+    /* The employee's window shows the retry once, from Hornhoof. */
+    const shown = await c.db.select().from(agentEvents).where(and(eq(agentEvents.jobId, retry.jobId), eq(agentEvents.kind, 'message')));
+    expect(shown).toHaveLength(1);
+    expect(shown[0]!.personId).toBeNull();
+    expect((shown[0]!.data as { text: string }).text).toContain('Hornhoof runs it once more');
     /* The task's log says it, for people and for agents that read the task. */
     const [note] = await c.notes();
     expect(note).toMatchObject({ agentId: c.bruno.id, data: { job: first.jobId, cause: 'program', retry: { job: retry.jobId, n: 1, of: 1 } } });
