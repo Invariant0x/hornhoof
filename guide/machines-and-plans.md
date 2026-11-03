@@ -62,6 +62,16 @@ Agents that share one subscription still share that user and its sign-in. So the
 - To update the nodes on a machine later, run `curl -fsSL <your Hornhoof address>/install.sh | bash` on it.
 - To remove them, end the same command with `bash -s -- --uninstall`.
 
+## Update agent programs
+
+Open a machine's card to see the versions of Claude Code, Codex and Kimi Code its nodes run. GLM uses Claude Code and follows its updates. The machine's owner, or a person with access to the whole company, can click "Update programs".
+
+The node updates its configured programs when it starts and when you press that button. There is no scheduled update. The programs' own automatic updates are disabled inside agent sessions, and agent users cannot change the shared program files.
+
+An active turn keeps running. After the update, the next turn resumes the same session using the installed version. New turns wait for an update in progress, even when it leaves the version unchanged. A failed update is marked on the card and can be retried.
+
+Versions are available only while the node is connected. An older node that does not report versions needs a Hornhoof node update first. The built-in node's programs appear on its physical server's card when that machine is registered, or on the separate built-in card for people with company access.
+
 ## Can a machine join without a plan?
 
 Yes. Open Machines, click "Connect a machine" and run the command on that machine.

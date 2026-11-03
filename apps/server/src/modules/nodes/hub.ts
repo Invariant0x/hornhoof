@@ -1,4 +1,4 @@
-import { parseNodeMessage, type NodeLoad, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
+import { parseNodeMessage, type NodeLoad, type NodeMessage, type ProgramInfo, type ServerMessage } from '@hornhoof/protocol';
 import type { WebSocket } from 'ws';
 
 /* Who is on the other end of a socket: one node on a machine, or the built-in node that runs every API key. */
@@ -23,7 +23,7 @@ const MISSED_PINGS = 3;
    terminals: the node said it runs agents in sessions people can watch. work: it runs parts of any work, not only of
    test runs. load: how busy its machine was when it last said. skillFiles: it writes a turn's skills as files. noRuns: why
    it takes no part of any run. */
-type Entry = { socket: WebSocket; missed: number; greeted: boolean; terminals: boolean; work: boolean; load: SaidLoad | null; skillFiles: boolean; noRuns: string | null };
+type Entry = { socket: WebSocket; missed: number; greeted: boolean; terminals: boolean; work: boolean; load: SaidLoad | null; skillFiles: boolean; noRuns: string | null; programs: ProgramInfo[] | null };
 
 /* A node's load and when it said it. */
 export type SaidLoad = NodeLoad & { at: number };
@@ -54,7 +54,7 @@ export class NodeHub {
   attach(id: NodeIdentity, socket: WebSocket): void {
     const key = keyOf(id);
     this.sockets.get(key)?.socket.close(4000, 'Replaced by a newer connection.');
-    const entry: Entry = { socket, missed: 0, greeted: false, terminals: false, work: false, load: null, skillFiles: false, noRuns: null };
+    const entry: Entry = { socket, missed: 0, greeted: false, terminals: false, work: false, load: null, skillFiles: false, noRuns: null, programs: null };
     this.sockets.set(key, entry);
     this.away.delete(key);
     const report = (err: unknown) => this.opts.onError?.(err);
@@ -65,6 +65,7 @@ export class NodeHub {
     });
     socket.on('message', data => {
       const msg = parseNodeMessage(String(data));
+      this.capturePrograms(entry, msg);
       if (msg?.type === 'term.data' || msg?.type === 'term.exit' || msg?.type === 'term.program') {
         try {
           this.opts.onTerminal?.(id, msg);
@@ -129,6 +130,25 @@ export class NodeHub {
   loadOf(id: NodeIdentity): SaidLoad | null {
     const entry = this.sockets.get(keyOf(id));
     return entry?.socket.readyState === 1 ? entry.load : null;
+  }
+
+  /* Program metadata belongs to this socket, including before an asynchronous hello handler finishes. */
+  private capturePrograms(entry: Entry, message: NodeMessage | null): void {
+    if (message?.type !== 'hello' && message?.type !== 'status') return;
+    entry.programs = message.programs ?? entry.programs;
+  }
+
+  programsOf(id: NodeIdentity): ProgramInfo[] | null {
+    const entry = this.sockets.get(keyOf(id));
+    return entry?.socket.readyState === 1 ? entry.programs?.map(program => ({ ...program })) ?? null : null;
+  }
+
+  updatePrograms(id: NodeIdentity): boolean {
+    const entry = this.sockets.get(keyOf(id));
+    if (!entry || !entry.greeted || entry.socket.readyState !== 1 || !entry.programs?.length) return false;
+    if (entry.programs.some(program => program.updating)) return true;
+    entry.programs = entry.programs.map(program => ({ ...program, updating: true, failed: false }));
+    return this.send(id, { type: 'programs.update' });
   }
 
   /* Online and past its hello: ready for an agent's turn. */
