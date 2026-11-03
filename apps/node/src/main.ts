@@ -275,6 +275,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       await host?.cancel(m.jobId);
       return;
     }
+    // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- job.run is handled right after the switch
     switch (m.type) {
       case 'term.open': {
         const shows = m.agentKey === LOGIN_KEY ? login : host;
@@ -452,13 +453,14 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   }
 
   /* While signed out, look again now and then, so the person sees Ready soon after signing in. */
-  const timer = setInterval(async () => {
+  const checkLogin = async () => {
     if (loggedIn || stopped || !single) return;
     if (await signedInHere()) {
       loggedIn = true;
       void status();
     }
-  }, loginCheckMs);
+  };
+  const timer = setInterval(() => void checkLogin(), loginCheckMs);
   timer.unref();
   const learning = host ? setInterval(() => void learn(), learnMs) : null;
   learning?.unref();

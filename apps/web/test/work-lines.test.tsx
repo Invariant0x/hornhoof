@@ -23,9 +23,9 @@ describe('the lines of work', () => {
     vi.useFakeTimers({ now: T + 3_600_000 });
     const { result } = renderHook(() => useWorkLines([line({ workEpoch: 3, returnedEpoch: 3, returnedAt: at(T - 2 * 60_000) })], at(T)));
     expect(result.current('o', 'h')).toBe('yellow');
-    act(() => vi.advanceTimersByTime(3 * 60_000 - 1));
+    act(() => { vi.advanceTimersByTime(3 * 60_000 - 1); });
     expect(result.current('o', 'h')).toBe('yellow');
-    act(() => vi.advanceTimersByTime(1));
+    act(() => { vi.advanceTimersByTime(1); });
     expect(result.current('o', 'h')).toBe('quiet');
   });
 
@@ -33,26 +33,26 @@ describe('the lines of work', () => {
     /* The page opens two minutes after the result; a minute later the clock goes two minutes back. */
     vi.useFakeTimers({ now: T });
     const { result } = renderHook(() => useWorkLines([line({ workEpoch: 3, returnedEpoch: 3, returnedAt: at(T - 2 * 60_000) })], at(T)));
-    act(() => vi.advanceTimersByTime(60_000));
+    act(() => { vi.advanceTimersByTime(60_000); });
     vi.setSystemTime(T - 60_000);
-    act(() => vi.advanceTimersByTime(2 * 60_000 - 1));
+    act(() => { vi.advanceTimersByTime(2 * 60_000 - 1); });
     expect(result.current('o', 'h')).toBe('yellow');
-    act(() => vi.advanceTimersByTime(1));
+    act(() => { vi.advanceTimersByTime(1); });
     expect(result.current('o', 'h')).toBe('quiet');
   });
 
   it("burn the rest of the five minutes when this computer's clock is put forward while the map is open", () => {
     vi.useFakeTimers({ now: T });
     const { result, rerender } = renderHook(() => useWorkLines([line({ workEpoch: 3, returnedEpoch: 3, returnedAt: at(T - 2 * 60_000) })], at(T)));
-    act(() => vi.advanceTimersByTime(60_000));
+    act(() => { vi.advanceTimersByTime(60_000); });
     vi.setSystemTime(T + 60 * 60_000);
     /* The map draws again for something else. */
     rerender();
     expect(result.current('o', 'h')).toBe('yellow');
-    act(() => vi.advanceTimersByTime(2 * 60_000 - 1));
+    act(() => { vi.advanceTimersByTime(2 * 60_000 - 1); });
     rerender();
     expect(result.current('o', 'h')).toBe('yellow');
-    act(() => vi.advanceTimersByTime(1));
+    act(() => { vi.advanceTimersByTime(1); });
     expect(result.current('o', 'h')).toBe('quiet');
   });
 
@@ -62,10 +62,10 @@ describe('the lines of work', () => {
       initialProps: { lines: [line({ workEpoch: 2, returnedEpoch: 2, returnedAt: at(T - 4 * 60_000) })], now: at(T) },
     });
     expect(result.current('o', 'h')).toBe('yellow');
-    act(() => vi.advanceTimersByTime(30_000));
+    act(() => { vi.advanceTimersByTime(30_000); });
     /* Another result came back just now: five minutes from it. */
     rerender({ lines: [line({ workEpoch: 2, returnedEpoch: 2, returnedAt: at(T + 30_000) })], now: at(T + 30_000) });
-    act(() => vi.advanceTimersByTime(4 * 60_000));
+    act(() => { vi.advanceTimersByTime(4 * 60_000); });
     expect(result.current('o', 'h')).toBe('yellow');
     /* New work began after it, and ended without a result. */
     rerender({ lines: [line({ workEpoch: 3, returnedEpoch: 2, returnedAt: at(T + 30_000) })], now: at(T + 4.5 * 60_000) });

@@ -70,6 +70,7 @@ export function messageData(data: unknown, message: MessageEnvelope): unknown {
 export function readMessage(data: unknown): { data: unknown; message?: MessageEnvelope } {
   const parsed = MessageEnvelopeSchema.safeParse(field(data, '_message'));
   if (!parsed.success) return { data };
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- strip the envelope field from the event payload
   const { _message, ...body } = data as Record<string, unknown>;
   return { data: body, message: parsed.data };
 }

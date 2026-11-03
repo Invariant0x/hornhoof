@@ -14,7 +14,7 @@ export function CopyButton({ text, label }: { text: string; label?: string }) {
     }
   }
   return (
-    <button className="btn small ghost" type="button" onClick={copy} aria-label={label ?? t.common.copy}>
+    <button className="btn small ghost" type="button" onClick={() => void copy()} aria-label={label ?? t.common.copy}>
       {done ? t.common.copied : (label ?? t.common.copy)}
     </button>
   );

@@ -47,7 +47,7 @@ export function KeyForm({ sub, onDone, onCancel }: { sub: SubView & { provider: 
   }
 
   return (
-    <form className="key-form" onSubmit={save}>
+    <form className="key-form" onSubmit={e => void save(e)}>
       <label>
         <span>{t.subs.keyField(provider)}</span>
         <input type="password" autoComplete="off" spellCheck={false} value={key} onChange={e => setKey(e.target.value)} />

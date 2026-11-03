@@ -69,6 +69,7 @@ export function StaffCard({ department, proposal, onCorrect, onDone, onHide, loc
         if (!live) return;
         setRoster(r);
         /* The default roster names people in English; the card names them in the person's language instead. */
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omit default English name so the card uses the localized role title
         setRows(rowsOf(r, lines.current ?? r.people.map(({ name: _name, ...line }) => line)));
       },
       err => live && setFailure(err),
@@ -152,7 +153,7 @@ export function StaffCard({ department, proposal, onCorrect, onDone, onHide, loc
       )}
       <div className="f">
         <Decides locked={locked}>
-          <button className="btn" type="button" disabled={!roster || sent || busy || !chosen.length} onClick={hire}>
+          <button className="btn" type="button" disabled={!roster || sent || busy || !chosen.length} onClick={() => void hire()}>
             {t.staff.hire(chosen.length)}
           </button>
           {!sent && proposal && onCorrect && (

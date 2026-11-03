@@ -27,7 +27,7 @@ export function Login({ onDone }: { onDone: () => void }) {
   return (
     <Card>
       <h1>{t.login.heading}</h1>
-      <form onSubmit={submit}>
+      <form onSubmit={e => void submit(e)}>
         <Field label={t.common.email}>
           {p => <input {...p} type="email" value={email} onChange={e => setEmail(e.target.value)} autoComplete="email" autoFocus required />}
         </Field>

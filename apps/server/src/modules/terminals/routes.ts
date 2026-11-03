@@ -89,7 +89,7 @@ export function terminalRoutes(app: FastifyInstance, ctx: Ctx): void {
         const at = await programNode(ctx, agentId).catch(() => undefined);
         if (at !== undefined && (!at || !sameNode(at.node, node))) socket.close(...CLOSE.nodeOffline);
       };
-      const check = setInterval(look, ctx.config.streamPingMs);
+      const check = setInterval(() => void look(), ctx.config.streamPingMs);
       const stopLooking = ctx.bus.onAccessChange(companyId, () => void look());
       socket.on('close', () => {
         clearInterval(check);

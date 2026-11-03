@@ -1,5 +1,5 @@
 import type { CredKind, ProviderId } from '@hornhoof/protocol';
-import { and, eq, inArray, isNotNull, isNull, lt, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, lt, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { nodes, planCredentials, subscriptions } from '../../db/schema.js';

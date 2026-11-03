@@ -117,6 +117,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
             busy: state.busy,
             runningSince: running?.at ?? null,
             queued: state.queued,
+            // eslint-disable-next-line @typescript-eslint/no-unused-vars -- strip internal grouping field
             tasks: held.filter(t => t.holder === a.id).map(({ holder: _, ...t }) => t),
             lastActivityAt: active?.at ?? null,
             lastTurn: last ? { status: last.status, at: last.at, error: last.error } : null,
@@ -212,6 +213,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
           failed: failed.map(({ departmentId, tail, ...f }) => ({ ...f, department: (departmentId && names.get(departmentId)) || null, tail: tail.slice(-TAIL) })),
           blocked,
           missing: missing.map(({ value, ...m }) => ({ ...value, ...m })),
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars -- strip unused tally example field
           installed: installed.map(({ value, example: _, ...i }) => ({ command: value, ...i })),
           stops,
         });
