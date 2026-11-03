@@ -582,8 +582,8 @@ export async function cancelJob(ctx: Ctx, jobId: string): Promise<void> {
 
 /* A person typed into the agent's terminal: the turn opens, and what they typed answers what the agent asked them, out of
    the agent's line, which the pump of its task's turn waits on. */
-export async function typedTurn(ctx: Ctx, node: NodeIdentity, agentId: string, text: string, personId: string | null): Promise<{ jobId: string; token: string } | null> {
-  const opened = await openTypedTurn(ctx, node, agentId, text, personId);
+export async function typedTurn(ctx: Ctx, node: NodeIdentity, agentId: string, text: string, personId: string | null, queuedFrom?: string): Promise<{ jobId: string; token: string } | null> {
+  const opened = await openTypedTurn(ctx, node, agentId, text, personId, queuedFrom);
   if (opened && personId) await wakeAll(ctx, await answerDirectly(ctx, personId, agentId, text));
   return opened;
 }

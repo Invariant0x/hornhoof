@@ -227,9 +227,24 @@ describe('Kimi Code in a terminal', () => {
     expect(JSON.parse(readFileSync(join(work, '.kimi-code', 'mcp.json'), 'utf8'))).toEqual({ mcpServers: { hornhoof: { transport: 'http', url: URLS.mcpUrl } } });
     const config = readFileSync(join(home, 'config.toml'), 'utf8');
     expect(config.startsWith(own)).toBe(true);
-    expect(config.match(/\[\[hooks\]\]/g)).toHaveLength(9);
+    expect(config.match(/\[\[hooks\]\]/g)).toHaveLength(10);
     expect(config).toContain('event = "SessionStart"\ncommand = "hh-hook start"');
     expect(config).toContain('event = "UserPromptSubmit"\ncommand = "hh-hook prompt"');
+    expect(config).toContain('event = "UserPromptQueued"\ncommand = "hh-hook queued"');
+  });
+
+  it('adds UserPromptQueued to existing hooks and leaves an installed receipt hook alone', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'hh-kimi-'));
+    const work = mkdtempSync(join(tmpdir(), 'hh-kimi-work-'));
+    await prepareKimi(home, work, URLS.mcpUrl);
+    const file = join(home, 'config.toml');
+    const old = readFileSync(file, 'utf8').replace(/\[\[hooks\]\]\nevent = "UserPromptQueued"\ncommand = "hh-hook queued"\n\n?/, '');
+    writeFileSync(file, old);
+    await prepareKimi(home, work, URLS.mcpUrl);
+    const updated = readFileSync(file, 'utf8');
+    expect(updated).toContain('event = "UserPromptQueued"\ncommand = "hh-hook queued"');
+    await prepareKimi(home, work, URLS.mcpUrl);
+    expect(readFileSync(file, 'utf8')).toBe(updated);
   });
 
   it('adds the hooks to a fresh home, and leaves settings alone that list hooks in a way more could not be added to', async () => {
@@ -321,7 +336,7 @@ describe('lifecycle hooks in launch settings', () => {
     await prepareKimi(home, work, URLS.mcpUrl);
     await prepareKimi(home, work, URLS.mcpUrl);
     const config = readFileSync(join(home, 'config.toml'), 'utf8');
-    expect([...config.matchAll(/event = "([^"]+)"/g)].map(m => m[1])).toEqual(['SessionStart', 'UserPromptSubmit', 'Stop', 'StopFailure', 'Interrupt', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'SessionEnd']);
+    expect([...config.matchAll(/event = "([^"]+)"/g)].map(m => m[1])).toEqual(['SessionStart', 'UserPromptSubmit', 'UserPromptQueued', 'Stop', 'StopFailure', 'Interrupt', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'SessionEnd']);
     expect(config).not.toContain('SessionHeartbeat');
   });
 });

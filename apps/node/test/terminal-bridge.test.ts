@@ -165,7 +165,7 @@ describe("the node's bridge to Hornhoof's tools", () => {
 });
 
 describe('lifecycle hook events', () => {
-  it.each(['tool', 'tooldone', 'toolfail', 'ask', 'interrupt', 'end'])('accepts %s', async event => {
+  it.each(['queued', 'tool', 'tooldone', 'toolfail', 'ask', 'interrupt', 'end'])('accepts %s', async event => {
     const seen: unknown[] = [];
     const bridge = new Bridge('http://127.0.0.1:9', (key, got, body) => { seen.push([key, got, body]); });
     await bridge.start();

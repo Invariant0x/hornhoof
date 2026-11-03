@@ -8,7 +8,7 @@ const PASTE_END = '\x1b[201~';
 /* A lone Escape is a key; one followed at once by "[200~" starts a paste. */
 const ESCAPE_WAIT_MS = 20;
 
-const SINGLE = { '\r': 'enter', '\n': 'enter', '\x15': 'kill', '\x7f': 'erase', '\b': 'erase' };
+const SINGLE = { '\r': 'enter', '\n': 'enter', '\x13': 'steer', '\x15': 'kill', '\x7f': 'erase', '\b': 'erase' };
 
 export function rawKeys({ ask = true } = {}) {
   if (process.stdin.isTTY) process.stdin.setRawMode(true);

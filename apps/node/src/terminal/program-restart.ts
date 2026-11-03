@@ -40,28 +40,98 @@ export function resumeCommand(kind: TermProgram['kind'], original: string[], ses
 }
 
 
-/* A cleared composer only acknowledges keys. These words wait for the program's own record of taking each message. */
+export const UNHEARD_MS = 15_000;
+const flat = (text: string) => text.replace(/\s+/g, ' ').trim();
+type WordState = 'waiting' | 'queued' | 'held' | 'taken' | 'discarded';
+export type WordReceipt = { text: string; jobId: string | null; state: WordState; accepted: boolean; sources: Set<string> };
+
+/* Keys are not receipts. Keep each live message until the program takes it, including across a restart. */
 export class TurnWords {
-  private readonly queued: string[] = [];
-  constructor(private words: string[] = []) {}
+  private readonly words: WordReceipt[] = [];
+  private readonly enqueued: string[] = [];
+  private original: string[];
+  private replayed: string | null = null;
+  private endedAt: number | null = null;
 
-  add(text: string): void { this.words.push(text); }
-  clear(): void { this.words = []; }
-  pending(): string[] { return [...this.words]; }
+  constructor(words: string[] = []) { this.original = words; }
 
-  observe(kind: TermProgram['kind'], line: Record<string, unknown>): void {
-    if (kind === 'claude' && line.type === 'queue-operation') {
-      if (line.operation === 'enqueue') this.queued.push(contentText(line.content));
-      if (line.operation === 'remove' && line.reason === 'absorbed_mid_turn') this.taken(this.queued.shift() ?? '');
+  add(text: string, jobId: string | null = null): WordReceipt {
+    const word: WordReceipt = { text, jobId, state: 'waiting', accepted: false, sources: new Set() };
+    this.words.push(word);
+    return word;
+  }
+
+  clear(): void {
+    this.original = [];
+  }
+
+  pending(): string[] { return [...this.original, ...this.words.filter(word => this.waiting(word)).map(word => word.text)]; }
+  replay(text: string): void { this.replayed = text; this.endedAt = null; }
+  end(now: number): void { this.endedAt ??= now; }
+
+  queued(text: string, source: string): boolean {
+    const word = this.words.find(word => this.waiting(word) && flat(word.text) === flat(text) && !word.sources.has(source));
+    if (!word) return false;
+    word.sources.add(source);
+    word.state = 'queued';
+    return true;
+  }
+
+  taken(text: string): boolean {
+    if (this.replayed !== null && flat(this.replayed) === flat(text)) {
+      for (const word of this.words) if (this.waiting(word)) word.state = 'taken';
+      this.replayed = null;
+      this.clear();
+      return true;
     }
-    if (kind === 'kimi' && line.type === 'turn.steer' && (line.agentId === undefined || line.agentId === 'main')) this.taken(contentText(line.input));
-    const p = isRecord(line.payload) ? line.payload : {};
-    if (kind === 'codex' && line.type === 'event_msg' && p.type === 'item_completed' && isRecord(p.item) && p.item.type === 'UserMessage') this.taken(contentText(p.item.content));
+    const original = this.original.findIndex(word => flat(word) === flat(text));
+    if (original >= 0) { this.original.splice(original, 1); return true; }
+    const word = this.words.find(word => this.waiting(word) && flat(word.text) === flat(text));
+    if (!word) return false;
+    word.state = 'taken';
+    return true;
   }
 
-  private taken(text: string): void {
-    const flat = (value: string) => value.replace(/\s+/g, ' ').trim();
-    const at = this.words.findIndex(word => flat(word) === flat(text));
-    if (at >= 0) this.words.splice(at, 1);
+  takeQueued(text: string): { jobId: string | null } | null {
+    const word = this.words.find(word => this.waiting(word) && flat(word.text) === flat(text));
+    if (!word) return null;
+    word.state = 'taken';
+    return { jobId: word.jobId };
   }
+
+  bind(jobId: string): void {
+    for (const word of this.words) word.jobId ??= jobId;
+  }
+
+  unheard(now: number, gone = false): { text: string; jobId: string | null }[] {
+    if (!gone && (this.endedAt === null || now - this.endedAt < UNHEARD_MS)) return [];
+    return this.words.filter(word => word.accepted && this.waiting(word)).map(word => {
+      word.state = 'discarded';
+      return { text: word.text, jobId: word.jobId };
+    });
+  }
+
+  observe(kind: TermProgram['kind'], line: Record<string, unknown>, turnId?: string): void {
+    if (kind === 'claude') this.claude(line);
+    if (kind === 'kimi' && (line.agentId === undefined || line.agentId === 'main')) {
+      if (line.type === 'prompt.steered') this.queued(contentText(line.input ?? line.prompt), 'wire');
+      if (line.type === 'turn.steer' && (!turnId || line.turnId === undefined || String(line.turnId) === turnId)) this.taken(contentText(line.input));
+    }
+    const p = isRecord(line.payload) ? line.payload : {};
+    if (kind === 'codex' && line.type === 'event_msg' && p.type === 'item_completed' && isRecord(p.item) && p.item.type === 'UserMessage'
+      && (!turnId || p.turn_id === undefined || p.turn_id === turnId)) this.taken(contentText(p.item.content));
+  }
+
+  private claude(line: Record<string, unknown>): void {
+    if (line.type !== 'queue-operation') return;
+    if (line.operation === 'enqueue') {
+      const text = contentText(line.content);
+      this.enqueued.push(text);
+      this.queued(text, 'transcript');
+    }
+    if (line.operation === 'remove' && line.reason === 'absorbed_mid_turn') this.taken(this.enqueued.shift() ?? contentText(line.content));
+    if (line.operation === 'dequeue') this.enqueued.shift();
+  }
+
+  private waiting(word: WordReceipt): boolean { return word.state !== 'taken' && word.state !== 'discarded'; }
 }
