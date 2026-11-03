@@ -99,7 +99,7 @@ export function useOrg(enabled = true): { org: Org | null; failure: unknown } {
   /* The lines and the counts moved while the tab was away. */
   useFetchOnReturn(enabled, load);
 
-  /* Tasks and questions move often while agents work, so they fetch the company once things settle a little. */
+  /* Batch frequent task and question changes without letting a continuous stream postpone the refresh forever. */
   const soon = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
     () => () => {
@@ -110,8 +110,7 @@ export function useOrg(enabled = true): { org: Org | null; failure: unknown } {
 
   useStream(m => {
     if (!enabled) return;
-    if (m.type === 'task' || m.type === 'requests') {
-      if (soon.current) clearTimeout(soon.current);
+    if ((m.type === 'task' || m.type === 'requests') && !soon.current) {
       soon.current = setTimeout(() => {
         soon.current = null;
         load();
