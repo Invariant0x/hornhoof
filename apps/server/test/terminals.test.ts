@@ -5,8 +5,7 @@ import WebSocket from 'ws';
 import { asc, eq } from 'drizzle-orm';
 import { agents, companies, departments, jobs, people, requests, subscriptions, tasks } from '../src/db/schema.js';
 import { decisionPrincipal } from '../src/modules/conversation/decision-context.js';
-import { ask, createTask } from '../src/modules/tasks/engine.js';
-import { as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
+import { approvalAsked, as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
 const IVAN_TO_ORCHESTRATOR = 'From Ivan (CEO) to Orchestrator:\n\n';
@@ -54,17 +53,6 @@ async function lent() {
   const [z] = await at.db.select().from(people).where(eq(people.name, 'Zed'));
   await at.db.update(subscriptions).set({ ownerPersonId: z!.id });
   return { ...at, zed, zedId: z!.id };
-}
-
-/* A worker asks the CEO to approve a merge, which only the CEO or the CEO delegate may. */
-async function approvalAsked(app: FastifyInstance, db: FastifyInstance['ctx']['db']) {
-  const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
-  const on = { companyId: orchestrator!.companyId, subscriptionId: orchestrator!.subscriptionId, model: '' };
-  const [dev] = await db.insert(departments).values({ companyId: on.companyId, templateKey: 'development', roleCode: 'DEV' }).returning();
-  const [head] = await db.insert(agents).values({ ...on, kind: 'head', name: 'Head', roleKey: 'DEV-HEAD', departmentId: dev!.id }).returning();
-  const [worker] = await db.insert(agents).values({ ...on, kind: 'worker', name: 'Worker', roleKey: 'DEV-BE', departmentId: dev!.id }).returning();
-  const { task } = await createTask(app.ctx, { agentId: head!.id }, { title: 'Checkout', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: worker!.id, executor: true, gates: [] });
-  return (await ask(app.ctx, worker!.id, task.id, { kind: 'approval', text: 'Merge?', commit: 'a'.repeat(40) })).request;
 }
 
 describe("an agent's live terminal", () => {
@@ -622,7 +610,7 @@ describe('who typed into the terminal, for the decisions of a turn', () => {
     ['Enter', ['Approve the merge.\r']],
   ])("takes the CEO's decisions from the running turn when a person without the right submits keys with %s", async (_, frames) => {
     const { app, db, url, ceo, builtin, zed, zedId } = await lent();
-    const request = await approvalAsked(app, db);
+    const request = await approvalAsked(app);
     await app.inject({ method: 'POST', url: '/api/agents/orchestrator/messages', payload: { text: 'Please continue.' }, ...as(ceo) });
     const turn = await next(builtin, 'job.run');
     const [owner] = await db.select().from(people).where(eq(people.isOwner, true));

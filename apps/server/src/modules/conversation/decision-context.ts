@@ -12,8 +12,7 @@ import { sayLive } from './live.js';
 
 /* The orchestrator takes a decision for a person only in a turn that answers that person: the last message that came into
    the turn, or the last Enter a person pressed in its terminal, says who it is. A message of an agent or of Hornhoof itself answers nobody, so after it the turn takes no
-   decision until a person with the right writes again, but for Hornhoof's note of something a person did that counts as
-   their order, which answers them until other words come in. A turn that took no message answers whoever started it. Words on
+   decision until a person with the right writes again. A turn that took no message answers whoever started it. Words on
    their way into the turn, or that went in without being kept, leave the turn without anyone's right. */
 
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
@@ -28,7 +27,9 @@ export type Delegation = { agentId: string; jobId: string; personId: string; sou
 /* A copy of a letter kept on the lane of the agent that wrote it is no word to that agent. */
 const incoming = sql`coalesce(${agentEvents.data}->'_message'->>'direction', 'in') <> 'out'`;
 
-export async function decisionPrincipal(db: Reader, jobId: string): Promise<Principal | null> {
+/* The orchestrator's running turn and its last two incoming words, newest first; null for any other turn, or while words
+   are on their way into it. */
+async function turnWords(db: Reader, jobId: string) {
   const [job] = await db
     .select({ agentId: jobs.agentId, status: jobs.status, kind: jobs.kind, pending: jobs.decisionInputPending, createdBy: jobs.createdBy, answersCeo: jobs.answersCeo, agentKind: agents.kind })
     .from(jobs)
@@ -41,21 +42,24 @@ export async function decisionPrincipal(db: Reader, jobId: string): Promise<Prin
     .where(and(eq(agentEvents.jobId, jobId), eq(agentEvents.agentId, job.agentId!), inArray(agentEvents.kind, ['message', 'typed']), incoming))
     .orderBy(desc(agentEvents.seq))
     .limit(2);
-  return answered(job, said);
+  return { job, said };
 }
 
-type Said = { seq: number; personId: string | null; kind: string };
-type Started = { createdBy: string | null; answersCeo: boolean };
+type Words = NonNullable<Awaited<ReturnType<typeof turnWords>>>;
 
-/* Whom the turn answers by its last word: the person who said it, or else whoever started it, when that word is theirs. */
-function answered(job: Started, [last, before]: Said[]): Principal | null {
-  if (last?.personId) return { personId: last.personId, sourceSeq: last.seq };
-  return theirs(job, last, before) && job.createdBy ? { personId: job.createdBy, sourceSeq: last?.seq ?? null } : null;
+export async function decisionPrincipal(db: Reader, jobId: string): Promise<Principal | null> {
+  const turn = await turnWords(db, jobId);
+  return turn && answered(turn);
 }
 
-/* A turn without words is its starter's, and so is Hornhoof's note of something they did that counts as their order, which
-   opened the turn, while nothing came after it. */
-const theirs = (job: Started, last: Said | undefined, before: Said | undefined): boolean => !last || (!before && last.kind === 'message' && job.answersCeo);
+/* Whom the turn answers by its last word: the person who said it; whoever started it when it has none. */
+function answered({ job, said: [last] }: Words): Principal | null {
+  if (last) return last.personId ? { personId: last.personId, sourceSeq: last.seq } : null;
+  return job.createdBy ? { personId: job.createdBy, sourceSeq: null } : null;
+}
+
+/* Whose click Hornhoof's note that opened the turn tells of, as their order, while nothing came after it. */
+const clickOf = ({ job, said: [last, before] }: Words): string | null => (last?.kind === 'message' && !before && job.answersCeo ? job.createdBy : null);
 
 export const contextMissing = () =>
   new ApiError(
@@ -82,15 +86,28 @@ export async function requireDecider(db: Reader, companyId: string, personId: st
   if (!p || !canDecide(subject, p, await accessOf(db, p), companyId)) throw notAllowed();
 }
 
-/* The CEO or the CEO delegate the turn answers now, or null. */
-export async function ceoPrincipal(db: Reader, jobId: string): Promise<string | null> {
-  const principal = await decisionPrincipal(db, jobId);
-  if (!principal) return null;
+/* The person, if they are the CEO or the CEO delegate now. */
+async function actingCeo(db: Reader, personId: string): Promise<string | null> {
   const [p] = await db
     .select({ status: people.status, scopeKind: people.scopeKind, isOwner: people.isOwner, isCeoDelegate: people.isCeoDelegate, companyId: people.companyId })
     .from(people)
-    .where(eq(people.id, principal.personId));
-  return p && actsAsCeo(p) ? principal.personId : null;
+    .where(eq(people.id, personId));
+  return p && actsAsCeo(p) ? personId : null;
+}
+
+/* The CEO or the CEO delegate the turn answers now, or null. */
+export async function ceoPrincipal(db: Reader, jobId: string): Promise<string | null> {
+  const principal = await decisionPrincipal(db, jobId);
+  return principal ? actingCeo(db, principal.personId) : null;
+}
+
+/* For the computer the CEO opened: the CEO or the CEO delegate the turn answers now, or whose click opening it the note
+   that opened the turn tells of, while nothing came after it. A click answers no question, so it takes no decision and
+   asks for nothing else. */
+export async function computerPrincipal(db: Reader, jobId: string): Promise<string | null> {
+  const turn = await turnWords(db, jobId);
+  const personId = turn && (answered(turn)?.personId ?? clickOf(turn));
+  return personId ? actingCeo(db, personId) : null;
 }
 
 /* Whether the turn answers the CEO or the CEO delegate, now. */
