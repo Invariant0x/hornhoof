@@ -44,6 +44,7 @@ export const ORG: Org = {
     effort: null,
     subscription: { id: 's1', provider: 'anthropic_api', kind: 'api_key', label: 'Orchestrator', status: 'ready', online: false, last4: '9f3a', owner: { id: 'p1', name: 'Ivan' }, place: { kind: 'company', id: null, name: 'Whole company' }, machines: [], limits: null, budget: null, isOrchestrator: true, accounts: [], tier: null, accountsDiffer: false, signedInOnce: false, leaseMachine: null },
     context: null,
+    program: null, alarm: null,
   },
   agents: { total: 1, working: 0 },
   people: PEOPLE.slice(0, 2),
@@ -115,8 +116,8 @@ export const DEV_ORG: Org = {
       teams: [],
       people: [PEOPLE[2]!],
       employees: [
-        { id: 'b0', name: 'Dana', roleId: 'DEV-HEAD', title: HEAD_TITLE, kind: 'head', model: '', modelName: null, provider: 'claude', effort: null, state: 'working', status: 'working', on: true, timer: null, task: null, context: null },
-        { id: 'b1', name: 'Bruno', roleId: 'DEV-BE', title: BE_TITLE, kind: 'worker', model: 'claude-sonnet-5-5', modelName: 'Claude Sonnet 5.5', provider: 'anthropic_api', effort: null, state: 'sleeping', status: 'idle', on: true, timer: null, task: null, context: null },
+        { id: 'b0', name: 'Dana', roleId: 'DEV-HEAD', title: HEAD_TITLE, kind: 'head', model: '', modelName: null, provider: 'claude', effort: null, state: 'working', status: 'working', on: true, timer: null, task: null, context: null, program: null, alarm: null },
+        { id: 'b1', name: 'Bruno', roleId: 'DEV-BE', title: BE_TITLE, kind: 'worker', model: 'claude-sonnet-5-5', modelName: 'Claude Sonnet 5.5', provider: 'anthropic_api', effort: null, state: 'sleeping', status: 'idle', on: true, timer: null, task: null, context: null, program: null, alarm: null },
       ],
       roles: [
         { id: 'DEV-HEAD', title: HEAD_TITLE, description: { en: 'Leads development.', ru: 'Ведет разработку.' }, kind: 'head', gate: null },

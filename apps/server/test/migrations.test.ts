@@ -7,7 +7,9 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { MIGRATIONS } from '../src/db/client.js';
+import { hashToken } from '../src/crypto/tokens.js';
 import { isUniqueViolation } from '../src/db/errors.js';
+import { appOn, approvalAsked, as } from './helpers.js';
 
 /* A copy of the migrations folder that stops after the given tag, as an older install would have it. */
 async function migrationsUpTo(tag: string): Promise<string> {
@@ -488,32 +490,54 @@ describe('migration 0040', () => {
 describe('migration 0044', () => {
   const C = '00000000-0000-4000-8000-000000000001';
 
-  it('makes each active person who sees the whole company, but the CEO, the CEO delegate, and nobody else', async () => {
+  it('marks nobody the CEO delegate, so people who see the whole company take no decision only the CEO takes until the CEO marks one', async () => {
     const client = new PGlite();
     onTestFinished(() => client.close());
     const db = drizzle(client);
     await migrate(db, { migrationsFolder: await migrationsUpTo('0043_turn_exits') });
     await db.execute(sql`insert into companies (id, name) values (${C}, 'Acme')`);
-    const person = (name: string, status: string, scope: string, owner: boolean) =>
-      db.execute(sql`insert into people (company_id, name, email, status, scope_kind, is_owner) values (${C}, ${name}, ${`${name.toLowerCase()}@acme.com`}, ${status}, ${scope}, ${owner})`);
-    await person('Ivan', 'active', 'company', true);
-    await person('David', 'active', 'company', false);
+    const person = async (name: string, status: string, scope: string, owner: boolean) =>
+      (await db.execute<{ id: string }>(sql`insert into people (company_id, name, email, status, scope_kind, is_owner) values (${C}, ${name}, ${`${name.toLowerCase()}@acme.com`}, ${status}, ${scope}, ${owner}) returning id`)).rows[0]!.id;
+    const ivan = await person('Ivan', 'active', 'company', true);
+    const david = await person('David', 'active', 'company', false);
+    const zoe = await person('Zoe', 'active', 'company', false);
     await person('Dana', 'active', 'listed', false);
     await person('Ilya', 'invited', 'company', false);
     await person('Olga', 'disabled', 'company', false);
 
     await migrate(db, { migrationsFolder: MIGRATIONS });
 
-    expect((await db.execute(sql`select name, is_owner, is_ceo_delegate from people order by name`)).rows).toEqual([
+    expect.soft((await db.execute(sql`select name, is_owner, is_ceo_delegate from people order by name`)).rows).toEqual([
       { name: 'Dana', is_owner: false, is_ceo_delegate: false },
-      { name: 'David', is_owner: false, is_ceo_delegate: true },
+      { name: 'David', is_owner: false, is_ceo_delegate: false },
       { name: 'Ilya', is_owner: false, is_ceo_delegate: false },
       { name: 'Ivan', is_owner: true, is_ceo_delegate: false },
       { name: 'Olga', is_owner: false, is_ceo_delegate: false },
+      { name: 'Zoe', is_owner: false, is_ceo_delegate: false },
     ]);
     await db.execute(sql`insert into people (company_id, name, email, status, scope_kind) values (${C}, 'Nina', 'nina@acme.com', 'active', 'company')`);
     expect((await db.execute(sql`select is_ceo_delegate from people where name = 'Nina'`)).rows).toEqual([{ is_ceo_delegate: false }]);
     expect((await db.execute(sql`select decision_input_pending from jobs`)).rows).toEqual([]);
     expect((await db.execute(sql`select answered_by_agent_id, answer_job_id, answer_source_seq from requests`)).rows).toEqual([]);
+
+    /* The upgraded install at work: a merge only the CEO approves waits, and only the CEO may approve it. */
+    const { app } = await appOn(client);
+    const plan = (await db.execute<{ id: string }>(sql`insert into subscriptions (company_id, provider, kind, label, owner_person_id, status) values (${C}, 'claude', 'personal', 'Ivan', ${ivan}, 'waiting_machine') returning id`)).rows[0]!.id;
+    await db.execute(sql`insert into agents (company_id, kind, name, model, subscription_id) values (${C}, 'orchestrator', 'Orchestrator', '', ${plan})`);
+    const request = await approvalAsked(app);
+    const signedIn = async (personId: string) => {
+      const token = `session-of-${personId}`;
+      await db.execute(sql`insert into sessions (token_hash, person_id, expires_at) values (${hashToken(token)}, ${personId}, now() + interval '1 day')`);
+      return token;
+    };
+    const approve = async (personId: string) => app.inject({ method: 'POST', url: `/api/requests/${request.id}`, payload: { approve: true }, ...as(await signedIn(personId)) });
+    for (const id of [david, zoe]) {
+      const refused = await approve(id);
+      expect(refused.statusCode).toBe(403);
+      expect(refused.json().error.reason).toBe('decision_not_allowed');
+    }
+    expect((await db.execute(sql`select status from requests`)).rows).toEqual([{ status: 'open' }]);
+    expect((await approve(ivan)).statusCode).toBe(200);
+    expect((await db.execute(sql`select status, answered_by from requests`)).rows).toEqual([{ status: 'approved', answered_by: ivan }]);
   });
 });

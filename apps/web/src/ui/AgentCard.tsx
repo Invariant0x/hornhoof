@@ -7,9 +7,11 @@ import { defaultEffort, PROVIDER_NAMES } from '../providers';
 import type { AgentCardView, Me, Part, SubView } from '../types';
 import { TimerSettings } from './TimerSettings';
 import { Ask } from './Ask';
+import { AgentState, type AgentLive } from './AgentState';
 import { byProvider, servingLabel } from './StaffCard';
 
-type Props = { me: Me; agentId: string; onClose(): void; onTerminal(): void };
+/* live and serverNow: what its program does and the server's alarm, as the map read them, and the server's clock then. */
+type Props = { me: Me; agentId: string; live?: AgentLive; serverNow?: string; onClose(): void; onTerminal(): void };
 
 const SKILL = /<!-- hh:skill ([a-z0-9-]+) -->\n## [^\n]*\n\n([\s\S]*?)\n<!-- \/hh:skill -->/g;
 
@@ -63,10 +65,30 @@ function draftsOf(raw: string, parts: Part[]): Record<string, string> | null {
   return drafts;
 }
 
+/* Its latest turns a node restart cut off: on which task, why and where, and whether it was a retry; nothing without one. */
+function Interruptions({ list, headingId, when }: { list: AgentCardView['interrupted']; headingId: string; when(at: string): string }) {
+  const t = useT();
+  if (!list.length) return null;
+  return (
+    <section className="ac-history" aria-labelledby={headingId}>
+      <h4 id={headingId}>{t.restarts.heading}</h4>
+      <ul>
+        {list.map(c => (
+          <li key={c.job}>
+            {c.task && `#${c.task.number}: `}
+            {cutLine(t, c, when(c.at))}
+            {c.retry && ` ${t.restarts.wasRetry}`}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 const subLabel = (s: SubView) => servingLabel({ kind: s.kind, label: s.label, provider: s.provider, owner: s.owner.name });
 
 /* An agent's card in the side panel: where it runs, its skills and the text it runs with, with every change kept. */
-export function AgentCard({ me, agentId, onClose, onTerminal }: Props) {
+export function AgentCard({ me, agentId, live, serverNow, onClose, onTerminal }: Props) {
   const t = useT();
   const { language } = useLanguage();
   const id = useId();
@@ -222,6 +244,7 @@ export function AgentCard({ me, agentId, onClose, onTerminal }: Props) {
           <p className="ac-state">
             <i className={`dot ${card.state}`} />
             {t.dept.states[card.state]}
+            <AgentState agent={live} serverNow={serverNow} />
           </p>
           <button className="btn small" type="button" onClick={onTerminal}>
             {t.agent.openTerminal}
@@ -396,20 +419,7 @@ export function AgentCard({ me, agentId, onClose, onTerminal }: Props) {
           </div>
         )}
 
-        {card.interrupted.length > 0 && (
-          <section className="ac-history" aria-labelledby={`${id}-restarts`}>
-            <h4 id={`${id}-restarts`}>{t.restarts.heading}</h4>
-            <ul>
-              {card.interrupted.map(c => (
-                <li key={c.job}>
-                  {c.task && `#${c.task.number}: `}
-                  {cutLine(t, c, when(c.at))}
-                  {c.retry && ` ${t.restarts.wasRetry}`}
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
+        <Interruptions list={card.interrupted} headingId={`${id}-restarts`} when={when} />
 
         {card.changes.length > 0 && (
           <section className="ac-history" aria-labelledby={`${id}-history`}>

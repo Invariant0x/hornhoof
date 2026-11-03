@@ -15,6 +15,7 @@ import { PersonButton } from '../ui/PersonButton';
 import { PeopleBridgeMasks, peopleMask, PeopleWires } from '../ui/PeopleWires';
 import { LiveWay, Pulse, pulseSeconds, toD, useReducedMotion, type Point } from '../ui/wires';
 import { useWorkLines } from '../ui/work-lines';
+import { AgentState } from '../ui/AgentState';
 import { clock } from './Subscriptions';
 
 /* World coordinates, laid out like the prototype: people on top, the orchestrator in the middle, departments in two columns around him. */
@@ -616,6 +617,7 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator, inside = false, 
         <div className="ticker glass" aria-live="polite" onPointerDown={e => e.stopPropagation()}>
           <span className={`live${orchestratorReady(sub) && !limitAt ? '' : ' off'}`} />
           <span className="tt">{t.map.orchestrator}</span>
+          <AgentState agent={org.orchestrator} serverNow={org.serverNow} />
           <span className="tx" title={status}>{status}</span>
           {org.orchestrator?.effort && <span className="te">{t.agent.effortLine(t.agent.efforts[org.orchestrator.effort] ?? org.orchestrator.effort)}</span>}
           {org.orchestrator?.context != null && (

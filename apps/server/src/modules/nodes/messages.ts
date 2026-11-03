@@ -28,16 +28,19 @@ function jobsOf(id: NodeIdentity, ctx: Ctx): SQL {
    A queued conversation turn still waits in Hornhoof and goes out later. */
 const ON_NODE = or(eq(jobs.status, 'running'), and(eq(jobs.status, 'queued'), eq(jobs.kind, 'test')));
 
+/* Why a node restart cut a turn off, with the number of the task it was on; nothing for a turn that failed otherwise. */
+const cutOf = (cut?: Omit<Interruption, 'task'>) =>
+  cut ? { interruption: sql`${JSON.stringify(cut)}::jsonb || jsonb_build_object('task', (select ${tasks.number} from ${tasks} where ${tasks.id} = ${jobs.taskId}))` } : {};
+
 /* Jobs of these nodes or subscriptions that a node had become failed with the reason, except the ones the node still runs.
    A failed turn goes into its conversation and the agent's next turn goes out. Turns a node restart cut off keep why,
    with the number of the task each was on. */
 export async function failOpenJobs(ctx: Ctx, scope: SQL, error: string, stillRunning: string[] = [], cut?: Omit<Interruption, 'task'>): Promise<string[]> {
   const conditions = [scope, ON_NODE];
   if (stillRunning.length) conditions.push(notInArray(jobs.id, stillRunning));
-  const taskNumber = sql`(select ${tasks.number} from ${tasks} where ${tasks.id} = ${jobs.taskId})`;
   const failed = await ctx.db
     .update(jobs)
-    .set({ status: 'failed', error, finishedAt: new Date(), ...(cut ? { interruption: sql`${JSON.stringify(cut)}::jsonb || jsonb_build_object('task', ${taskNumber})` } : {}) })
+    .set({ status: 'failed', error, finishedAt: new Date(), ...cutOf(cut) })
     .where(and(...conditions))
     .returning({ id: jobs.id, companyId: jobs.companyId });
   for (const companyId of new Set(failed.map(j => j.companyId))) await publishWorking(ctx, companyId);
@@ -69,12 +72,31 @@ async function jobStarted(ctx: Ctx, id: NodeIdentity, jobId: string, now: Date):
 /* How the turn's program ended, as the node saw it; a node from before says nothing of it. */
 const exitOf = (exit?: { code: number | null; signal: string | null }) => ({ exitCode: exit?.code ?? null, exitSignal: exit?.signal ?? null });
 
+type Hello = Extract<NodeMessage, { type: 'hello' }>;
+
+/* What a node's hello changes in its row: what it runs, whether it is signed in, and what it says of itself when it says it. */
+const helloRow = (msg: Hello, now: Date) => ({
+  version: msg.version,
+  lastSeenAt: now,
+  status: msg.loggedIn ? ('ready' as const) : ('needs_login' as const),
+  ...(msg.publicKey ? { publicKey: msg.publicKey } : {}),
+  ...(msg.account !== undefined ? { account: msg.account } : {}),
+  ...(msg.boot ? { boot: msg.boot } : {}),
+});
+
+/* Why the built-in node's turns are gone. A personal node's comes from its row, once the hello is known to be its own. */
+const builtinCut = (ctx: Ctx, id: NodeIdentity, msg: Hello, now: Date) =>
+  id.kind === 'builtin' ? interruptionOf(ctx, { id: null, name: BUILTIN_NAME, said: null }, msg, now) : undefined;
+
+const nodeCut = (ctx: Ctx, nodeId: string, row: { node: typeof nodes.$inferSelect; host: string | null }, msg: Hello, now: Date) =>
+  interruptionOf(ctx, { id: nodeId, name: row.host || 'a machine with no name', said: { version: row.node.version, boot: row.node.boot } }, msg, now);
+
 export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage): Promise<void> {
   const { db } = ctx;
   const now = new Date();
   switch (msg.type) {
     case 'hello': {
-      let cut = id.kind === 'builtin' ? interruptionOf(ctx, { id: null, name: BUILTIN_NAME, said: null }, msg, now) : undefined;
+      let cut = builtinCut(ctx, id, msg, now);
       if (id.kind === 'node') {
         const [row] = await db
           .select({ node: nodes, removedAt: subscriptions.removedAt, host: machines.hostname })
@@ -91,18 +113,8 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
         if (!row.node.keyHash) return;
         /* A node set up again has a new key: what was sealed to its old one is of no use, and gets sealed to the new one. */
         if (msg.publicKey && row.node.publicKey && msg.publicKey !== row.node.publicKey) await db.delete(planCredentials).where(eq(planCredentials.nodeId, id.nodeId));
-        cut = interruptionOf(ctx, { id: id.nodeId, name: row.host || 'a machine with no name', said: { version: row.node.version, boot: row.node.boot } }, msg, now);
-        await db
-          .update(nodes)
-          .set({
-            version: msg.version,
-            lastSeenAt: now,
-            status: msg.loggedIn ? 'ready' : 'needs_login',
-            ...(msg.publicKey ? { publicKey: msg.publicKey } : {}),
-            ...(msg.account !== undefined ? { account: msg.account } : {}),
-            ...(msg.boot ? { boot: msg.boot } : {}),
-          })
-          .where(and(eq(nodes.id, id.nodeId), liveNode));
+        cut = nodeCut(ctx, id.nodeId, row, msg, now);
+        await db.update(nodes).set(helloRow(msg, now)).where(and(eq(nodes.id, id.nodeId), liveNode));
         const plan = row.node.subscriptionId;
         if (plan && msg.models) await db.update(subscriptions).set({ models: msg.models }).where(eq(subscriptions.id, plan));
         await settlePlans(db, [plan]);

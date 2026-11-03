@@ -1,4 +1,4 @@
-import type { Limits, ModelOption, NodeLoad, ProviderId, TemplateKey } from '@hornhoof/protocol';
+import type { Limits, ModelOption, NodeLoad, ProgramState, ProviderId, TemplateKey } from '@hornhoof/protocol';
 import type { RoleEffort } from '@hornhoof/protocol/efforts';
 import type { WorkLine } from '@hornhoof/protocol/map';
 
@@ -89,6 +89,15 @@ export type EmployeeStatus = 'working' | 'queued' | 'handed' | 'waiting' | 'idle
 /* The task an employee is about, for people who reach its department. */
 export type EmployeeTask = { id: string; number: number; title: string; stage: number; gateCount: number; bounces: number };
 
+/* What the program of an agent's running turn does, as its node last said: thinking, in a tool (named), asking a person,
+   waiting for input at its prompt, or gone. since: when it began; screenAt: when its screen last changed; reportedAt: the
+   node's last word. */
+export type ProgramView = { state: ProgramState; since: string; tool: string | null; screenAt: string; reportedAt: string };
+
+/* The server's one alarm about a running turn: its program and screen did not change, or its node said nothing, for half an
+   hour; since: the last change, or the node's last word. */
+export type TurnAlarm = { reason: 'program_stalled' | 'node_silent'; since: string };
+
 /* An employee as the map lists it: the head first, then members in the order they were hired. */
 export type Employee = {
   id: string;
@@ -110,6 +119,10 @@ export type Employee = {
   task: EmployeeTask | null;
   /* How full its context was when its machine last said, from 0 to 1; null before it said. */
   context: number | null;
+  /* What the program of its running turn does, as its node said; null while it runs none. */
+  program: ProgramView | null;
+  /* The server's alarm about its running turn, or null. */
+  alarm: TurnAlarm | null;
 };
 
 /* A role a department's employees hold, in its template's order; gate: where it stands among the default gates. */
@@ -144,7 +157,7 @@ export type Repository = { url: string; branch: string; tokenLast4: string | nul
 export type Org = {
   company: Company;
   /* limitUntil: his plan is at its limit until then, and he waits for the reset. */
-  orchestrator: { id: string; name: string; model: string; effort: string | null; subscription: SubView | null; machine?: Machine | null; context: number | null; limitUntil?: string | null } | null;
+  orchestrator: { id: string; name: string; model: string; effort: string | null; subscription: SubView | null; machine?: Machine | null; context: number | null; limitUntil?: string | null; program: ProgramView | null; alarm: TurnAlarm | null } | null;
   agents: { total: number; working: number };
   /* People who see the whole company, and deputies whose reach spans more than one top-level department. */
   people: (PersonView & { deputy?: boolean; departments?: string[] })[];

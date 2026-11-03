@@ -298,7 +298,8 @@ function rowTargets(layout: TreeLayout) {
 
 export function treeLayout(tree: DepartmentTree, box: { width: number; height: number; phone: boolean }, zoom: number): TreeLayout {
   const from = windowStart(tree), rows = rowsOf(tree, box.phone, box.height);
-  const labelWidth = box.phone ? 96 : 184, tail = box.phone ? 108 : 168;
+  /* A phone's labels leave room for what the agent does in two short lines. */
+  const labelWidth = box.phone ? 132 : 184, tail = box.phone ? 108 : 168;
   const available = Math.max(140, box.width - labelWidth - tail - 12);
   const scale = Math.min(18, Math.max(box.phone ? .9 : 1.2, available / Math.max(1, secondsBetween(from, tree.now) / 60))) * zoom;
   const x = (at: string) => Math.round((12 + (Date.parse(at) - Date.parse(from)) / 60_000 * scale) * 10) / 10;

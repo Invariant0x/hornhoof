@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api';
 import { useStream } from './live';
 import type { Department, Org, PersonView } from './types';
+import type { AgentLive } from './ui/AgentState';
 
 /* What each employee does changes with its tasks and questions. */
 const SETTLE_MS = 400;
@@ -15,6 +16,19 @@ function withContext(org: Org, agentId: string, used: number): Org {
   const departments = org.departments.map(d => (d.employees.some(e => e.id === agentId) ? { ...d, employees: d.employees.map(e => (e.id === agentId ? { ...e, context: used } : e)) } : d));
   const orchestrator = org.orchestrator?.id === agentId ? { ...org.orchestrator, context: used } : org.orchestrator;
   return { ...org, orchestrator, departments };
+}
+
+/* What an agent's program does and the server's alarm, as the map read them, with the server's clock then. The orchestrator
+   goes by his window's name too. */
+export function liveOf(org: Org | null, agentId: string): { live?: AgentLive; serverNow?: string } {
+  const live = org ? agentIn(org, agentId) : undefined;
+  return live ? { live, serverNow: org!.serverNow } : {};
+}
+
+function agentIn(org: Org, agentId: string): AgentLive | undefined {
+  const orchestrator = org.orchestrator;
+  if (orchestrator && (agentId === 'orchestrator' || agentId === orchestrator.id)) return orchestrator;
+  return org.departments.flatMap(d => d.employees).find(e => e.id === agentId);
 }
 
 /* A person with a card on the map, with the department they belong to when they reach only one. */

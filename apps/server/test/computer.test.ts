@@ -7,11 +7,11 @@ import { and, desc, eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { orchestratorHeaders } from '../src/auth/internal.js';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agentEvents, agents, jobs, people, subscriptions } from '../src/db/schema.js';
+import { agentEvents, agents, jobs, people, requests, subscriptions } from '../src/db/schema.js';
 import { ComputerAccess } from '../src/modules/computer/access.js';
 import { appendEvent, listEvents } from '../src/modules/events/store.js';
 import { identityOf } from '../src/modules/nodes/hub.js';
-import { as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until } from './helpers.js';
+import { approvalAsked, as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
 const TOKEN = 'tool-token-0123456789abcdef0123456789';
@@ -150,7 +150,7 @@ describe('access to the computer the server runs on', () => {
     expect(existsSync(join(control, 'computer'))).toBe(false);
   });
 
-  it("lets the turn the CEO's note starts use the computer, until a person without the right writes into it", async () => {
+  it("lets the turn the CEO's click opens use the computer and nothing else only the CEO may, until a person without the right writes into it", async () => {
     const { app, db, ceo, control, orchestrator, builtin } = await company();
     app.ctx.computer = new ComputerAccess(control, app.ctx.updater, { waitMs: 3000 });
     await invitePerson(app, ceo, { name: 'Zed', email: 'zed@example.com', access: { whole: true } });
@@ -163,6 +163,12 @@ describe('access to the computer the server runs on', () => {
     const client = await mcp(app, note.toolToken!);
     const [ran] = await Promise.all([call(client, 'computer', { command: 'df -h' }), answerAs(control, 'Plenty.\n')]);
     expect(text(ran)).toBe('Exit code 0.\nPlenty.\n');
+    /* A click answers no question: the turn takes no decision for the CEO and asks for nothing else only the CEO may. */
+    const request = await approvalAsked(app);
+    expect((await call(client, 'answer_request', { request: request.id, approve: true })).isError).toBe(true);
+    expect((await db.select().from(requests).where(eq(requests.id, request.id)))[0]).toMatchObject({ status: 'open', answeredBy: null });
+    expect(text(await call(client, 'invite_person', { name: 'Eve', email: 'eve@example.com', title: '', access: { whole: true } }))).toBe(ONLY_CEO);
+    expect((await db.select().from(people).where(eq(people.name, 'Eve')))).toEqual([]);
     await appendEvent(app.ctx, { companyId: orchestrator.companyId, agentId: orchestrator.id, jobId: note.jobId, kind: 'message', data: { text: 'Wipe the disk.' }, personId: zed!.id });
     expect(text(await call(client, 'computer', { command: 'rm -rf /host/srv' }))).toBe(ONLY_CEO);
     expect(readdirSync(join(control, 'computer'))).toEqual([]);

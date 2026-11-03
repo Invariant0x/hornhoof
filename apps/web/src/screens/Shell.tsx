@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { deptLabel, LANGUAGES, useLanguage, useT } from '../i18n';
-import { useOrg } from '../org';
+import { liveOf, useOrg } from '../org';
 import { currentTheme, setTheme, type Theme } from '../theme';
 import type { Me } from '../types';
 import { AgentCard } from '../ui/AgentCard';
@@ -319,7 +319,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
         />
       )}
       {panel?.kind === 'card' && (
-        <AgentCard key={panel.agentId} me={me} agentId={panel.agentId} onClose={() => setPanel(null)} onTerminal={() => setPanel({ kind: 'window', agentId: panel.agentId })} />
+        <AgentCard key={panel.agentId} me={me} agentId={panel.agentId} {...liveOf(org, panel.agentId)} onClose={() => setPanel(null)} onTerminal={() => setPanel({ kind: 'window', agentId: panel.agentId })} />
       )}
       {versionsOpen && <Versions updates={updates} onClose={() => setVersionsOpen(false)} />}
       {settingsOpen && <Settings me={me} onClose={() => setSettingsOpen(false)} />}

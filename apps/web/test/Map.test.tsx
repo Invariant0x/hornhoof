@@ -76,6 +76,32 @@ describe('Map', () => {
     expect(within(ticker).getByTitle('Context 71%').querySelector('.bar')).toHaveClass('hi');
   });
 
+  it("says in the line at the bottom what the orchestrator's program does, and the server's alarm in red, in each language", async () => {
+    const now = Date.now();
+    const at = (m: number) => new Date(now - m * 60_000).toISOString();
+    const thinking = { state: 'thinking' as const, since: at(7), tool: null, screenAt: at(0), reportedAt: at(0) };
+    const cases = [
+      ['en', null, 'thinking 7 min'],
+      ['ru', null, 'думает 7 мин'],
+      ['en', { reason: 'node_silent' as const, since: at(125) }, 'node silent 125 min'],
+      ['ru', { reason: 'node_silent' as const, since: at(125) }, 'нода молчит 125 мин'],
+    ] as const;
+    for (const [lang, alarm, text] of cases) {
+      localStorage.setItem('hh-lang', lang);
+      onTestFinished(() => localStorage.removeItem('hh-lang'));
+      mockApi({ 'GET /api/org': [200, { ...ORG, serverNow: new Date(now).toISOString(), orchestrator: { ...ORG.orchestrator!, program: thinking, alarm } }] });
+      const { container, unmount } = render(<LanguageProvider><MapScreen {...PROPS} /></LanguageProvider>);
+      await screen.findByText('Ivan');
+      expect(container.querySelector('.ticker .ast')).toHaveTextContent(text);
+      expect(container.querySelector('.ticker .ast')!.classList.contains('alarm')).toBe(alarm !== null);
+      unmount();
+    }
+    mockApi({ 'GET /api/org': [200, ORG] });
+    const { container } = render(<MapScreen {...PROPS} />);
+    await screen.findByText('Ivan');
+    expect(container.querySelector('.ticker .ast')).toBeNull();
+  });
+
   it("shows in the line at the bottom that the orchestrator waits for his plan's limit to reset, and not after", async () => {
     const at = new Date(Date.now() + 3_600_000);
     mockApi({ 'GET /api/org': [200, { ...ORG, orchestrator: { ...ORG.orchestrator!, limitUntil: at.toISOString() } }] });
