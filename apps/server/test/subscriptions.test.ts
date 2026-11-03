@@ -80,7 +80,7 @@ describe('POST /api/subscriptions/connect', () => {
   });
 
   it('finishes or cleans up an unfinished plan and its node on a second connection so two connections leave one subscription and one node', async () => {
-    const { app, db, ceo } = await companyWithMaria();
+    const { app, db, ceo, development } = await companyWithMaria();
     const joinNode = (command: string, machineId: string, hostname: string) =>
       app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code: command.split('--join ')[1], machineId, hostname, os: 'darwin', arch: 'arm64' } });
 
@@ -95,6 +95,15 @@ describe('POST /api/subscriptions/connect', () => {
     expect(await db.select().from(nodes)).toHaveLength(1);
 
     const subId = second.json().subscriptions[0].id as string;
+    const [oldNode] = await db.select().from(nodes).where(eq(nodes.subscriptionId, subId));
+    const [bruno] = await db
+      .insert(agents)
+      .values({ companyId: development.companyId, kind: 'worker', name: 'Bruno', departmentId: development.id, roleKey: 'DEV-BE', model: '', subscriptionId: null, nodeId: oldNode!.id })
+      .returning();
+    const [pastJob] = await db
+      .insert(jobs)
+      .values({ companyId: development.companyId, subscriptionId: subId, nodeId: oldNode!.id, agentId: bruno!.id, prompt: 'Past work', timeoutMs: 1000, status: 'done', kind: 'conversation' })
+      .returning();
     expect((await app.inject({ method: 'DELETE', url: `/api/subscriptions/${subId}`, ...as(ceo) })).statusCode).toBe(204);
     const third = await connect(app, ceo, ['codex']);
     expect(third.statusCode).toBe(201);
@@ -102,6 +111,8 @@ describe('POST /api/subscriptions/connect', () => {
 
     expect(await db.select().from(subscriptions).where(eq(subscriptions.provider, 'codex'))).toHaveLength(1);
     expect(await db.select().from(nodes)).toHaveLength(1);
+    expect((await db.select().from(jobs).where(eq(jobs.id, pastJob!.id)))[0]).toMatchObject({ id: pastJob!.id, subscriptionId: subId, nodeId: null, status: 'done' });
+    expect((await db.select().from(agents).where(eq(agents.id, bruno!.id)))[0]!.nodeId).toBeNull();
   });
 
   it('refuses a ready plan or a plan with agents on a second connection and never touches its row or node', async () => {

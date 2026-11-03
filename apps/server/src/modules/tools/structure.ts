@@ -35,6 +35,59 @@ export const isNew = <T extends StructureItem>(item: T): item is Extract<T, NewP
 export const inPlaces = (companyId: string, dept: { parentId: string | null }, inside: string[]) =>
   and(eq(tasks.companyId, companyId), inArray(tasks.departmentId, dept.parentId ? [...inside, dept.parentId] : inside));
 
+type DeptRow = typeof departments.$inferSelect;
+
+async function checkItemTeams(db: Db, companyId: string, dept: DeptRow, list: TeamChange[] = []): Promise<string | null> {
+  const ids = list.flatMap(t => (typeof t === 'string' ? [] : [t.id]));
+  if (!ids.length) return null;
+  const existing = new Set(
+    (await db.select({ id: teams.id }).from(teams).where(and(eq(teams.companyId, companyId), eq(teams.departmentId, dept.id)))).map(t => t.id),
+  );
+  const missing = ids.find(id => !existing.has(id));
+  return missing ? `There is no sub-unit with id ${missing} in ${deptName(dept)}. Call company to see the current ids.` : null;
+}
+
+async function checkChangeItem(db: Db, companyId: string, all: DeptRow[], byId: Map<string, DeptRow>, item: ChangePart): Promise<string | null> {
+  const dept = byId.get(item.department);
+  if (!dept) return `There is no department with id ${item.department}. Call company to see the current ids.`;
+  if (!item.remove) return checkItemTeams(db, companyId, dept, item.teams);
+  if (dept.templateKey === 'operations') return 'Operations is always there and cannot be removed.';
+  const inside = [dept.id, ...all.filter(d => d.parentId === dept.id).map(d => d.id)];
+  const staffed = await db
+    .select({ id: agents.id })
+    .from(agents)
+    .where(and(or(inArray(agents.departmentId, inside), inArray(agents.productId, inside)), isNull(agents.removedAt)));
+  if (staffed.length) return `${deptName(dept)} has agents and cannot be removed.`;
+  const teamIds = (await db.select({ id: teams.id }).from(teams).where(inArray(teams.departmentId, inside))).map(t => t.id);
+  const places = [...inside, ...teamIds];
+  const [person] = await db
+    .select({ id: personAccess.id })
+    .from(personAccess)
+    .where(or(inArray(personAccess.departmentId, inside), teamIds.length ? inArray(personAccess.teamId, teamIds) : undefined));
+  if (person) return `People work in ${deptName(dept)}; move them first.`;
+  const [key] = await db.select({ id: subscriptions.id }).from(subscriptions).where(and(inArray(subscriptions.targetId, places), isNull(subscriptions.removedAt)));
+  if (key) return `An API key serves ${deptName(dept)}; point it elsewhere first.`;
+  const [busy] = await db
+    .select({ id: tasks.id })
+    .from(tasks)
+    .where(and(inPlaces(companyId, dept, inside), or(inArray(tasks.departmentId, inside), inArray(tasks.productId, inside)), notInArray(tasks.status, ['done', 'cancelled'])))
+    .limit(1);
+  if (busy) return `${deptName(dept)} has open tasks; finish or cancel them first.`;
+  return null;
+}
+
+function checkNewItem(items: StructureItem[], unnamed: Set<string | null>, hasOperations: boolean, item: NewPart): string | null {
+  if (item.template === 'operations') {
+    if (hasOperations) return 'The company already has Operations; there is only one.';
+    if (items.filter(i => isNew(i) && i.template === 'operations').length > 1) return 'Operations appears twice; there is only one.';
+  }
+  if (item.name) return null;
+  const name = TEMPLATE_TEXT[item.template].name;
+  if (unnamed.has(item.template)) return `${name} is already there. Give the new one its own name, such as "${name} Europe".`;
+  unnamed.add(item.template);
+  return null;
+}
+
 /* What is wrong with these items against the company as it is, in plain English for the agent to fix, or null. */
 export async function checkItems(db: Db, companyId: string, items: StructureItem[]): Promise<string | null> {
   const all = await db.select().from(departments).where(eq(departments.companyId, companyId));
@@ -43,42 +96,8 @@ export async function checkItems(db: Db, companyId: string, items: StructureItem
   const hasOperations = all.some(d => d.templateKey === 'operations');
 
   for (const item of items) {
-    if (!isNew(item)) {
-      const dept = byId.get(item.department);
-      if (!dept) return `There is no department with id ${item.department}. Call company to see the current ids.`;
-      if (!item.remove) continue;
-      if (dept.templateKey === 'operations') return 'Operations is always there and cannot be removed.';
-      const inside = [dept.id, ...all.filter(d => d.parentId === dept.id).map(d => d.id)];
-      const staffed = await db
-        .select({ id: agents.id })
-        .from(agents)
-        .where(and(or(inArray(agents.departmentId, inside), inArray(agents.productId, inside)), isNull(agents.removedAt)));
-      if (staffed.length) return `${deptName(dept)} has agents and cannot be removed.`;
-      const teamIds = (await db.select({ id: teams.id }).from(teams).where(inArray(teams.departmentId, inside))).map(t => t.id);
-      const places = [...inside, ...teamIds];
-      const [person] = await db
-        .select({ id: personAccess.id })
-        .from(personAccess)
-        .where(or(inArray(personAccess.departmentId, inside), teamIds.length ? inArray(personAccess.teamId, teamIds) : undefined));
-      if (person) return `People work in ${deptName(dept)}; move them first.`;
-      const [key] = await db.select({ id: subscriptions.id }).from(subscriptions).where(and(inArray(subscriptions.targetId, places), isNull(subscriptions.removedAt)));
-      if (key) return `An API key serves ${deptName(dept)}; point it elsewhere first.`;
-      const [busy] = await db
-        .select({ id: tasks.id })
-        .from(tasks)
-        .where(and(inPlaces(companyId, dept, inside), or(inArray(tasks.departmentId, inside), inArray(tasks.productId, inside)), notInArray(tasks.status, ['done', 'cancelled'])))
-        .limit(1);
-      if (busy) return `${deptName(dept)} has open tasks; finish or cancel them first.`;
-      continue;
-    }
-    if (item.template === 'operations') {
-      if (hasOperations) return 'The company already has Operations; there is only one.';
-      if (items.filter(i => isNew(i) && i.template === 'operations').length > 1) return 'Operations appears twice; there is only one.';
-    }
-    if (item.name) continue;
-    const name = TEMPLATE_TEXT[item.template].name;
-    if (unnamed.has(item.template)) return `${name} is already there. Give the new one its own name, such as "${name} Europe".`;
-    unnamed.add(item.template);
+    const problem = isNew(item) ? checkNewItem(items, unnamed, hasOperations, item) : await checkChangeItem(db, companyId, all, byId, item);
+    if (problem) return problem;
   }
   return null;
 }

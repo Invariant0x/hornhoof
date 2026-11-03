@@ -73,8 +73,18 @@ function staffedNote(department: string, hired: Hired[]): string {
 
 const CARD: DecisionSubject = { source: 'proposal' };
 
+/* Checks that a sub-unit belongs to this department of this company before changing or removing it. */
+async function requireDepartmentTeam(tx: Db | Tx, companyId: string, departmentId: string, teamId: string): Promise<void> {
+  const [team] = await tx
+    .select({ id: teams.id })
+    .from(teams)
+    .where(and(eq(teams.id, teamId), eq(teams.departmentId, departmentId), eq(teams.companyId, companyId)));
+  if (!team) throw new ApiError(404, 'not_found', 'This sub-unit does not exist.', 'unknown_place');
+}
+
 /* Removes a sub-unit and moves its live employees back into the department's pipeline. */
-async function clearTeam(tx: Db | Tx, me: Person, departmentId: string, teamId: string): Promise<string[]> {
+export async function clearTeam(tx: Db | Tx, me: Person, departmentId: string, teamId: string): Promise<string[]> {
+  await requireDepartmentTeam(tx, me.companyId, departmentId, teamId);
   const members = await tx
     .select({ id: agents.id })
     .from(agents)
@@ -85,17 +95,20 @@ async function clearTeam(tx: Db | Tx, me: Person, departmentId: string, teamId: 
   }
   await tx.delete(personAccess).where(eq(personAccess.teamId, teamId));
   await tx.update(subscriptions).set({ targetKind: 'department', targetId: departmentId }).where(and(eq(subscriptions.targetKind, 'team'), eq(subscriptions.targetId, teamId)));
-  await tx.delete(teams).where(and(eq(teams.id, teamId), eq(teams.departmentId, departmentId)));
+  await tx.delete(teams).where(and(eq(teams.id, teamId), eq(teams.departmentId, departmentId), eq(teams.companyId, me.companyId)));
   return members.map(m => m.id);
 }
 
 /* Creates, renames and removes sub-units of a department in one structure change. */
-async function applyTeams(tx: Db | Tx, me: Person, departmentId: string, list: TeamChange[] = []): Promise<string[]> {
+export async function applyTeams(tx: Db | Tx, me: Person, departmentId: string, list: TeamChange[] = []): Promise<string[]> {
   const freed: string[] = [];
   for (const t of list) {
     if (typeof t === 'string') await tx.insert(teams).values({ companyId: me.companyId, departmentId, name: t });
     else if (t.remove) freed.push(...(await clearTeam(tx, me, departmentId, t.id)));
-    else if (t.name) await tx.update(teams).set({ name: t.name }).where(and(eq(teams.id, t.id), eq(teams.departmentId, departmentId)));
+    else if (t.name) {
+      await requireDepartmentTeam(tx, me.companyId, departmentId, t.id);
+      await tx.update(teams).set({ name: t.name }).where(and(eq(teams.id, t.id), eq(teams.departmentId, departmentId), eq(teams.companyId, me.companyId)));
+    }
   }
   return freed;
 }
@@ -140,11 +153,7 @@ function teamRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     requireCompanyScope(me);
     const { id, teamId } = TeamParams.parse(req.params);
-    const freed = await db.transaction(async tx => {
-      const [team] = await tx.select({ id: teams.id }).from(teams).where(and(eq(teams.id, teamId), eq(teams.departmentId, id), eq(teams.companyId, me.companyId)));
-      if (!team) throw new ApiError(404, 'not_found', 'This sub-unit does not exist.', 'unknown_place');
-      return clearTeam(tx, me, id, teamId);
-    });
+    const freed = await db.transaction(tx => clearTeam(tx, me, id, teamId));
     await wakeFreed(ctx, me, freed);
     ctx.bus.publish(me.companyId, { type: 'org' });
     return reply.code(204).send();

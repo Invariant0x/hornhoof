@@ -3,8 +3,10 @@ import { asc, eq, isNull } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { MAX_INSTRUCTIONS, OLD_NODE_INSTRUCTIONS, parseServerMessage } from '@hornhoof/protocol';
-import { agentChanges, agents, departments, jobs, people, proposals, subscriptions } from '../src/db/schema.js';
+import { agentChanges, agents, departments, jobs, people, proposals, subscriptions, tasks, teams } from '../src/db/schema.js';
 import { instructionsOf, renderInstructions } from '../src/modules/agents/instructions.js';
+import { createTask, submit } from '../src/modules/tasks/engine.js';
+import { wakeAll } from '../src/modules/tasks/wake.js';
 import { as, invitePerson, setUpCompany, testApp } from './helpers.js';
 
 /* Development with Bruno, a backend engineer on the team key; Oleg in Development has a Codex plan. */
@@ -355,5 +357,53 @@ describe('the employee card', () => {
     const org = (await app.inject({ url: '/api/org', ...as(ceo) })).json();
     /* The reviewer is in the default roster; the architect and the red team are offered on top. */
     expect(org.departments[0].employees.map((e: { name: string }) => e.name)).toEqual(['Hana', 'Bruno', 'Rob', 'Ann', 'Rita']);
+  });
+
+  it('removes a reviewer moved into a sub-unit from the current gate panel, picks a replacement or advances the gate, drops future gates, and cancels its queued wake', async () => {
+    const { app, db, ceo, dev, teamKey, brunoId } = await company();
+    const line = (role: string, name: string) => ({
+      role,
+      name,
+      model: 'claude-sonnet-5-5',
+      subscription: teamKey,
+      skills: app.ctx.templates.roles.get(role)!.skills.filter(s => s.on).map(s => s.id),
+    });
+    const staffed = await app.inject({
+      method: 'POST',
+      url: `/api/departments/${dev.id}/staff`,
+      payload: { people: [line('DEV-HEAD', 'Hana'), line('DEV-REV', 'Rita'), line('DEV-REV', 'Rob')] },
+      ...as(ceo),
+    });
+    const [hanaId, ritaId, robId] = staffed.json().hired as [string, string, string];
+    const [urgent] = await db.insert(teams).values({ companyId: dev.companyId, departmentId: dev.id, name: 'Urgent fixes' }).returning();
+
+    const { task: atPanel } = await createTask(app.ctx, { agentId: hanaId }, { title: 'Checkout API', brief: '', body: '', departmentId: dev.id, assigneeAgentId: brunoId, executor: true, gates: [ritaId] });
+    const { task: atWork } = await createTask(app.ctx, { agentId: hanaId }, { title: 'Refund API', brief: '', body: '', departmentId: dev.id, assigneeAgentId: brunoId, executor: true, gates: [ritaId] });
+    const submitted = await submit(app.ctx, brunoId, atPanel.id, { summary: 'Done', evidence: 'npm test' });
+    await wakeAll(app.ctx, submitted.wakes);
+
+    const [beforeMove] = await db.select().from(tasks).where(eq(tasks.id, atPanel.id));
+    expect(beforeMove).toMatchObject({ status: 'review', stage: 1, panel: [ritaId], assigneeAgentId: ritaId });
+    const ritaJobsBefore = await db.select().from(jobs).where(eq(jobs.agentId, ritaId));
+    expect(ritaJobsBefore).toMatchObject([{ taskId: atPanel.id, status: 'queued' }]);
+
+    const movedRita = await patch(app, ceo, ritaId, { team: urgent!.id });
+    expect(movedRita.statusCode).toBe(200);
+
+    const [afterRita] = await db.select().from(tasks).where(eq(tasks.id, atPanel.id));
+    expect(afterRita).toMatchObject({ status: 'review', stage: 1, panel: [robId], assigneeAgentId: robId });
+    const [futureGate] = await db.select().from(tasks).where(eq(tasks.id, atWork.id));
+    expect(futureGate!.gates).toEqual([]);
+    const ritaJobsAfter = await db.select().from(jobs).where(eq(jobs.agentId, ritaId));
+    expect(ritaJobsAfter).toMatchObject([{ taskId: atPanel.id, status: 'failed', error: 'switched_off' }]);
+    const robJobsAfter = await db.select().from(jobs).where(eq(jobs.agentId, robId));
+    expect(robJobsAfter).toMatchObject([{ taskId: atPanel.id, status: 'queued' }]);
+
+    const movedRob = await patch(app, ceo, robId, { team: urgent!.id });
+    expect(movedRob.statusCode).toBe(200);
+    const [afterRob] = await db.select().from(tasks).where(eq(tasks.id, atPanel.id));
+    expect(afterRob).toMatchObject({ status: 'done', panel: [] });
+    const robJobsDone = await db.select().from(jobs).where(eq(jobs.agentId, robId));
+    expect(robJobsDone).toMatchObject([{ taskId: atPanel.id, status: 'failed', error: 'switched_off' }]);
   });
 });
