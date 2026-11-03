@@ -1,8 +1,8 @@
 // Keys as a program in raw mode reads them, for the fake programs. It asks the terminal for bracketed paste, as Claude Code,
 // Codex and Kimi Code do, so a paste comes whole, its line breaks in it, however long it is. on(key) gets { text } for what
 // was typed or pasted, or 'enter', 'escape' (also for another key's escape sequence), 'kill' (Ctrl+U) or 'erase'
-// (Backspace). ask: false reads keys without asking
-// for bracketed paste yet; bracketed() asks later, as a program does once its input box is up.
+// (Backspace). rawKeys() comes first, before the program shows where to type, as in the real programs; with ask: false it
+// does not ask for bracketed paste yet, and bracketed() asks later, as a program does once its input box is up.
 const PASTE_START = '\x1b[200~';
 const PASTE_END = '\x1b[201~';
 /* A lone Escape is a key; one followed at once by "[200~" starts a paste. */
@@ -10,9 +10,12 @@ const ESCAPE_WAIT_MS = 20;
 
 const SINGLE = { '\r': 'enter', '\n': 'enter', '\x15': 'kill', '\x7f': 'erase', '\b': 'erase' };
 
-export function readKeys(on, { ask = true } = {}) {
+export function rawKeys({ ask = true } = {}) {
   if (process.stdin.isTTY) process.stdin.setRawMode(true);
   if (ask) bracketed();
+}
+
+export function readKeys(on) {
   process.stdin.setEncoding('utf8');
   let rest = '';
   let paste = null;

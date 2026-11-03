@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { appendFileSync, mkdirSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { crash } from './crash.mjs';
-import { readKeys } from './keys.mjs';
+import { rawKeys, readKeys } from './keys.mjs';
 
 if (process.env.FAKE_CRASH_START) crash(process.env.FAKE_CRASH_START);
 
@@ -32,6 +32,7 @@ const event = payload => {
 const item = (type, text) => event({ type: 'item_completed', item: { type, id: randomUUID(), content: [{ type: 'text', text }] } });
 const prompt = () => process.stdout.write('\x1b[1m›\x1b[0m \x1b[2mAsk Codex to do anything\x1b[0m\r\x1b[2C');
 
+rawKeys();
 process.stdout.write('OpenAI Codex\n');
 prompt();
 // The composer: what is typed or pasted stays in it, over as many lines as it takes, until Enter.

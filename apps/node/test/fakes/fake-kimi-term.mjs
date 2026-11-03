@@ -12,7 +12,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { crash } from './crash.mjs';
-import { readKeys } from './keys.mjs';
+import { rawKeys, readKeys } from './keys.mjs';
 
 if (process.env.FAKE_CRASH_START) crash(process.env.FAKE_CRASH_START);
 
@@ -66,6 +66,7 @@ async function startSession(source) {
   await hook('start', 'SessionStart', { source });
 }
 
+rawKeys();
 print(`fake kimi ${session ? `resumed ${session}` : 'new'}\nWelcome to Kimi Code!\n`);
 print(process.env.FAKE_SIGNED_OUT ? 'Run /login or /provider to get started.\n' : 'Send /help for help information.\n');
 prompt();

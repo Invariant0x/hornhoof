@@ -19,7 +19,7 @@ import { randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { crash } from './crash.mjs';
-import { bracketed, readKeys } from './keys.mjs';
+import { bracketed, rawKeys, readKeys } from './keys.mjs';
 
 if (process.env.FAKE_CRASH_START) crash(process.env.FAKE_CRASH_START);
 
@@ -36,6 +36,7 @@ const hook = (event, body) =>
     .catch(() => '');
 
 const inputMs = Number(process.env.FAKE_INPUT_MS ?? 0);
+rawKeys({ ask: !inputMs });
 process.stdout.write(`fake claude ${args.includes('--resume') ? 'resumed' : 'new'} ${session}\n${inputMs ? '' : '❯ '}`);
 if (process.env.FAKE_START_MS) await new Promise(r => setTimeout(r, Number(process.env.FAKE_START_MS)));
 await hook('start', {});
@@ -92,7 +93,6 @@ readKeys(
     process.stdout.write('\r\n');
     queue = queue.then(() => take(line));
   },
-  { ask: !inputMs },
 );
 
 async function take(line) {
