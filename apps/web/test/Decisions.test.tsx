@@ -162,6 +162,66 @@ describe('the deputy CEO on People', () => {
     expect(screen.getByRole('switch', { name: 'Deputy CEO' })).not.toBeChecked();
   });
 
+  /* The deputy may change in another window while this one is open: a save that did not touch the switch leaves it. */
+  it('keeps a deputy made elsewhere when only the title is saved', async () => {
+    const calls = mockApi({ ...routes(), 'PATCH /api/people/p2': [200, { person: { ...people[1]!, isCeoDelegate: true } }] });
+    const user = userEvent.setup();
+    render(<People me={ME} />);
+    await user.click(await screen.findByRole('button', { name: 'Edit Maria' }));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    const maria = await screen.findByRole('row', { name: /^Maria\b/ });
+    expect(within(maria).getByRole('img', { name: 'Deputy CEO' })).toBeInTheDocument();
+    expect(calls.filter(c => c.method !== 'GET').map(c => `${c.method} ${c.path}`)).toEqual(['PATCH /api/people/p2']);
+  });
+
+  it('sends no deputy call from a window without the switch, whatever the deputy became meanwhile', async () => {
+    const calls = mockApi({ ...routes(), 'PATCH /api/people/p4': [200, { person: { ...people[2]!, isCeoDelegate: false } }] });
+    const user = userEvent.setup();
+    render(<People me={ZED} />);
+    await user.click(await screen.findByRole('button', { name: 'Edit Dave' }));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await vi.waitFor(() => expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument());
+    expect(calls.filter(c => c.method !== 'GET').map(c => `${c.method} ${c.path}`)).toEqual(['PATCH /api/people/p4']);
+  });
+
+  it('shows the saved title and access in the row when the deputy call fails after them', async () => {
+    const saved = { ...lena, access: { whole: true, departments: [], teams: [] } };
+    mockApi({
+      ...routes([...people, lena]),
+      'PATCH /api/people/p5': [200, { person: saved }],
+      'PUT /api/people/p5/ceo-delegate': [409, { error: { code: 'conflict', message: 'Only an active person with access to the whole company can be the CEO delegate.' } }],
+    });
+    const user = userEvent.setup();
+    render(<People me={ME} />);
+    await user.click(await screen.findByRole('button', { name: 'Edit Lena' }));
+    await user.click(screen.getByRole('switch', { name: 'Deputy CEO' }));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    expect(screen.getByRole('switch', { name: 'Deputy CEO' })).toBeInTheDocument();
+    expect(within(screen.getByRole('row', { name: /^Lena\b/ })).getByText('Whole company')).toBeInTheDocument();
+  });
+
+  it('gives back the access a person had when the deputy is switched off again in the same window', async () => {
+    const calls = mockApi({ ...routes([...people, lena]), 'PATCH /api/people/p5': [200, { person: lena }] });
+    const user = userEvent.setup();
+    render(<People me={ME} />);
+    await user.click(await screen.findByRole('button', { name: 'Edit Lena' }));
+    const deputy = screen.getByRole('switch', { name: 'Deputy CEO' });
+    await user.click(deputy);
+    await user.click(deputy);
+    expect(screen.getByRole('checkbox', { name: 'Whole company' })).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Development' })).toBeChecked();
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await vi.waitFor(() => expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument());
+    expect(calls.filter(c => c.method !== 'GET')).toEqual([{ method: 'PATCH', path: '/api/people/p5', body: { title: 'Deputy CEO', access: { departments: ['d2'], teams: [] } } }]);
+  });
+
+  it('tells the CEO under the table where the deputy is made', async () => {
+    mockApi(routes());
+    render(<People me={ME} />);
+    expect(await screen.findByText('Deputy CEO: Only you make someone the deputy or take it off, in Edit.')).toBeInTheDocument();
+  });
+
   it('offers the deputy to the CEO alone, for someone active or the deputy already, and not in the CEO\'s own window', async () => {
     const off: PersonView = { ...people[2]!, status: 'disabled' };
     mockApi(routes([people[0]!, people[1]!, off, people[3]!]));

@@ -175,7 +175,7 @@ export const en = {
     ceoDelegate: 'Deputy CEO',
     deputyShort: 'Dep',
     deputyAbout: "Takes the decisions only the CEO takes and sees the whole company. Only you change the deputy's access, status and sign-in.",
-    ceoDelegateHint: 'Takes the decisions only the CEO takes. Only you set and take off the mark.',
+    ceoDelegateHint: 'Only you make someone the deputy or take it off, in Edit.',
   },
   subs: {
     heading: 'Subscriptions',

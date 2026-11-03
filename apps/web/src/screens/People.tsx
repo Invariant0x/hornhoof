@@ -73,12 +73,21 @@ function InviteForm({ org, onSent, onClose }: { org: Org | null; onSent: (name: 
   );
 }
 
+/* What the window holds: the access, the deputy, and the access from before the deputy was switched on here. */
+type Choice = { access: AccessInput; deputy: boolean; before: AccessInput | null };
+
 /* How the window holds the deputy and the access together. A deputy sees the whole company, as the server requires: making
-   someone the deputy gives them the whole company, and a narrower access takes the deputy off. */
+   someone the deputy gives them the whole company, switching it off again gives back the access they had, and a narrower
+   access takes the deputy off. */
 const deputyRule = {
-  access: (deputy: boolean, access: AccessInput): AccessInput => (deputy ? { whole: true } : access),
-  deputy: (access: AccessInput, deputy: boolean): boolean => deputy && 'whole' in access,
+  switched: (c: Choice, on: boolean): Choice => (on ? { access: { whole: true }, deputy: true, before: c.access } : { access: c.before ?? c.access, deputy: false, before: null }),
+  accessed: (c: Choice, access: AccessInput): Choice => ({ ...c, access, deputy: c.deputy && 'whole' in access }),
 };
+
+/* Whether Save sends the deputy call: only when the switch was changed here, which only the CEO sees, and only as far as
+   the server has not got there itself, as it takes the deputy off a narrower access, or someone did in another window. */
+const deputyCall = (wanted: boolean, opened: PersonView, saved: PersonView): boolean =>
+  wanted !== Boolean(opened.isCeoDelegate) && wanted !== Boolean(saved.isCeoDelegate);
 
 /* The CEO's switch for the deputy, right after the access, with what it gives under it. */
 function DeputySwitch({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
@@ -96,23 +105,14 @@ function DeputySwitch({ on, onChange }: { on: boolean; onChange: (on: boolean) =
 }
 
 /* Your own row and the owner's take a new title only: access is not theirs to change here. deputy: the CEO may make this
-   person the deputy, or take it off, here. */
-function EditForm({ person, org, titleOnly, deputy, onSaved, onClose }: { person: PersonView; org: Org | null; titleOnly: boolean; deputy: boolean; onSaved: (p: PersonView) => void; onClose: () => void }) {
+   person the deputy, or take it off, here. onUpdated: what is saved, before the deputy's own call. */
+function EditForm({ person, org, titleOnly, deputy, onUpdated, onSaved, onClose }: { person: PersonView; org: Org | null; titleOnly: boolean; deputy: boolean; onUpdated: (p: PersonView) => void; onSaved: (p: PersonView) => void; onClose: () => void }) {
   const t = useT();
   const [title, setTitle] = useState(person.title);
-  const [access, setAccess] = useState<AccessInput>(() => accessInput(person.access));
-  const [isDeputy, setIsDeputy] = useState(Boolean(person.isCeoDelegate));
+  const [choice, setChoice] = useState<Choice>(() => ({ access: accessInput(person.access), deputy: Boolean(person.isCeoDelegate), before: null }));
+  const { access, deputy: isDeputy } = choice;
   const [failure, setFailure] = useState('');
   const [busy, setBusy] = useState(false);
-
-  const changeDeputy = (on: boolean) => {
-    setIsDeputy(on);
-    setAccess(a => deputyRule.access(on, a));
-  };
-  const changeAccess = (next: AccessInput) => {
-    setAccess(next);
-    setIsDeputy(on => deputyRule.deputy(next, on));
-  };
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -123,10 +123,9 @@ function EditForm({ person, org, titleOnly, deputy, onSaved, onClose }: { person
         `/api/people/${person.id}`,
         titleOnly ? { title: title.trim() } : { title: title.trim(), access },
       );
-      /* The deputy goes through its own call, as it always has, once the access it needs is saved. The server takes the
-         deputy off a narrower access itself. */
-      const changed = Boolean(res.person.isCeoDelegate) !== isDeputy;
-      onSaved(changed ? (await api.put<{ person: PersonView }>(`/api/people/${person.id}/ceo-delegate`, { isCeoDelegate: isDeputy })).person : res.person);
+      /* The row shows what is saved even if the deputy's own call, which needs that access, fails after it. */
+      onUpdated(res.person);
+      onSaved(deputyCall(isDeputy, person, res.person) ? (await api.put<{ person: PersonView }>(`/api/people/${person.id}/ceo-delegate`, { isCeoDelegate: isDeputy })).person : res.person);
     } catch (err) {
       setFailure(errorText(t, err));
       setBusy(false);
@@ -138,8 +137,8 @@ function EditForm({ person, org, titleOnly, deputy, onSaved, onClose }: { person
       <h2>{t.people.editHeading(person.name)}</h2>
       <form onSubmit={submit} className="panel-form">
         <Field label={t.common.title}>{p => <input {...p} value={title} onChange={e => setTitle(e.target.value)} maxLength={80} autoFocus />}</Field>
-        {!titleOnly && <AccessPicker org={org} value={access} onChange={changeAccess} />}
-        {deputy && <DeputySwitch on={isDeputy} onChange={changeDeputy} />}
+        {!titleOnly && <AccessPicker org={org} value={access} onChange={a => setChoice(c => deputyRule.accessed(c, a))} />}
+        {deputy && <DeputySwitch on={isDeputy} onChange={on => setChoice(c => deputyRule.switched(c, on))} />}
         {failure && <p className="alert" role="alert">{failure}</p>}
         <div className="actions">
           <button className="btn ghost" type="button" onClick={onClose}>{t.common.cancel}</button>
@@ -252,6 +251,7 @@ export function People({ me }: { me: Me }) {
           org={org}
           titleOnly={panel.titleOnly}
           deputy={panel.deputy}
+          onUpdated={replace}
           onSaved={person => {
             replace(person);
             setPanel(null);
