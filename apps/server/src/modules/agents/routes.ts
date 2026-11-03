@@ -5,7 +5,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { accessOf, agentSpot, canReach } from '../../auth/access.js';
 import { actorOf, changedBy, requireCompanyScope, type Person } from '../../auth/session.js';
-import { agentChanges, agents, departments, jobs, people, subscriptions, tasks, type AGENT_CHANGE_FIELDS, type Interruption, type RestartCause } from '../../db/schema.js';
+import { agentChanges, agents, departments, jobs, people, subscriptions, tasks, teams, type AGENT_CHANGE_FIELDS, type Interruption, type RestartCause } from '../../db/schema.js';
 import { ApiError, type ErrorReason } from '../../errors.js';
 import { onAgent, programNode, pump, pumpWaiting } from '../conversation/queue.js';
 import { deptName } from '../departments/templates.js';
@@ -27,6 +27,8 @@ export type AgentCard = {
   role: { id: string; title: Lang; description: Lang; effort?: RoleEffort } | null;
   department: { id: string; name: string } | null;
   product: { id: string; name: string } | null;
+  team: { id: string; name: string } | null;
+  teams: { id: string; name: string }[];
   model: string;
   /* The level a person picked, or null to follow its role. */
   effort: string | null;
@@ -62,6 +64,7 @@ export const AgentPatch = z
     model: z.string().max(80).optional(),
     effort: z.string().regex(/^[a-z]{1,16}$/).nullable().optional(),
     subscription: z.uuid().nullable().optional(),
+    team: z.uuid().nullable().optional(),
     skills: z.record(z.string().max(80), z.boolean()).optional(),
     base: Text.nullable().optional(),
     skillText: z.record(z.string().max(80), Text.nullable()).optional(),
@@ -91,6 +94,54 @@ const interruptedView = (i: CutRow): AgentCard['interrupted'][number] => ({
 });
 
 /* The employee card: who it is, where it runs, its skills and the instructions it runs with, and its latest changes. */
+async function teamCard(db: Ctx['db'], agent: AgentRow): Promise<{ team: { id: string; name: string } | null; teams: { id: string; name: string }[] }> {
+  if (agent.kind !== 'worker' || !agent.departmentId) return { team: null, teams: [] };
+  const deptTeams = await db.select({ id: teams.id, name: teams.name }).from(teams).where(eq(teams.departmentId, agent.departmentId)).orderBy(asc(teams.createdAt));
+  return { team: deptTeams.find(t => t.id === agent.teamId) ?? null, teams: deptTeams };
+}
+
+async function applyTeamPatch(db: Ctx['db'], agent: AgentRow, next: AgentRow, team: string | null | undefined, invalid: (message: string, reason: ErrorReason) => ApiError): Promise<void> {
+  if (team === undefined) return;
+  if (team !== null) {
+    if (agent.kind !== 'worker' || !agent.departmentId) throw invalid('A department head cannot be in a sub-unit.', 'unknown_place');
+    const [found] = await db.select({ id: teams.id }).from(teams).where(and(eq(teams.id, team), eq(teams.departmentId, agent.departmentId)));
+    if (!found) throw invalid('This sub-unit does not exist in this department.', 'unknown_place');
+  }
+  next.teamId = team;
+}
+
+const SCALAR_FIELDS: [Field, keyof AgentRow][] = [
+  ['name', 'name'],
+  ['model', 'model'],
+  ['effort', 'effort'],
+  ['subscription', 'subscriptionId'],
+  ['team', 'teamId'],
+];
+
+function diffAgent(agent: AgentRow, next: AgentRow): { field: Field; before: unknown; after: unknown }[] {
+  const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  const timer = (a: AgentRow) => (a.timerMinutes ? { minutes: a.timerMinutes, order: a.timerOrder, forWork: a.timerForWork } : null);
+  const changed: { field: Field; before: unknown; after: unknown }[] = SCALAR_FIELDS.filter(([, key]) => next[key] !== agent[key]).map(([field, key]) => ({ field, before: agent[key], after: next[key] }));
+  if (!same(next.skills, agent.skills)) changed.push({ field: 'skills', before: agent.skills, after: next.skills });
+  if (!same(next.overrides, agent.overrides)) changed.push({ field: 'prompt', before: agent.overrides, after: next.overrides });
+  if (next.switchedOffAt !== agent.switchedOffAt) changed.push({ field: 'switch', before: !agent.switchedOffAt, after: !next.switchedOffAt });
+  if (!same(timer(next), timer(agent))) changed.push({ field: 'timer', before: timer(agent), after: timer(next) });
+  return changed;
+}
+
+async function afterTeamMove(ctx: Ctx, me: Person, before: AgentRow, after: AgentRow): Promise<void> {
+  if (before.teamId === after.teamId) return;
+  if (after.teamId) {
+    const onGates = await ctx.db
+      .select()
+      .from(tasks)
+      .where(and(eq(tasks.companyId, after.companyId), sql`${tasks.gates} @> ${JSON.stringify([after.id])}::jsonb`, notInArray(tasks.status, [...CLOSED])));
+    for (const t of onGates) if (t.gates.slice(t.stage).includes(after.id)) await dropGate(ctx, actorOf(me), t, after.id);
+  } else {
+    await backOn(ctx, actorOf(me), after.id);
+  }
+}
+
 export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db, hub } = ctx;
   const online: IsOnline = node => hub.isOnline(node);
@@ -157,6 +208,7 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
       role: role ? { id: role.id, title: role.title, description: role.description, effort: role.effort } : null,
       department: named(agent.departmentId),
       product: named(agent.productId),
+      ...(await teamCard(db, agent)),
       model: agent.model,
       effort: agent.effort,
       subscription: agent.subscriptionId ? (views.get(agent.subscriptionId) ?? null) : null,
@@ -215,6 +267,7 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
          once no turn of it runs. */
       if (agent.switchedOffAt && !next.switchedOffAt) await backOn(ctx, actorOf(me), agent.id);
       if (!agent.switchedOffAt && next.switchedOffAt) await leaveIfOff(ctx, agent.id);
+      await afterTeamMove(ctx, me, agent, next);
     }
     return card(next, me);
   });
@@ -222,11 +275,12 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
   /* Applies a card change to the agent as it is now and records each changed field. */
   async function patched(me: Person, agent: AgentRow, body: z.infer<typeof AgentPatch>): Promise<{ agent: AgentRow; next: AgentRow; changed: boolean }> {
     const orchestrator = agent.kind === 'orchestrator';
-    if (orchestrator && (body.name !== undefined || body.skills || body.base !== undefined || body.skillText || body.on !== undefined || body.timer !== undefined)) {
+    if (orchestrator && [body.name, body.skills, body.base, body.skillText, body.on, body.timer, body.team].some(v => v !== undefined)) {
       throw invalid("The orchestrator's card changes only his model, his effort and the subscription he runs on.", 'orchestrator_card');
     }
     const next: AgentRow = { ...agent, skills: [...agent.skills], overrides: { ...agent.overrides, skills: { ...agent.overrides.skills } }, templateHashes: { ...agent.templateHashes } };
     if (body.name !== undefined) next.name = body.name;
+    await applyTeamPatch(db, agent, next, body.team, invalid);
     if (body.on !== undefined && body.on === !!agent.switchedOffAt) next.switchedOffAt = body.on ? null : new Date();
     /* A timer set or moved to another interval counts its first round from now. */
     if (body.timer !== undefined) {
@@ -296,18 +350,8 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
       throw invalid(`The instructions would be longer than ${MAX_INSTRUCTIONS} characters. Shorten the text or turn a skill off.`, 'instructions_too_long');
     }
 
-    const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
     /* One row per changed field, with who changed it. */
-    const changed: { field: Field; before: unknown; after: unknown }[] = [];
-    if (next.name !== agent.name) changed.push({ field: 'name', before: agent.name, after: next.name });
-    if (next.model !== agent.model) changed.push({ field: 'model', before: agent.model, after: next.model });
-    if (next.effort !== agent.effort) changed.push({ field: 'effort', before: agent.effort, after: next.effort });
-    if (next.subscriptionId !== agent.subscriptionId) changed.push({ field: 'subscription', before: agent.subscriptionId, after: next.subscriptionId });
-    if (!same(next.skills, agent.skills)) changed.push({ field: 'skills', before: agent.skills, after: next.skills });
-    if (!same(next.overrides, agent.overrides)) changed.push({ field: 'prompt', before: agent.overrides, after: next.overrides });
-    if (next.switchedOffAt !== agent.switchedOffAt) changed.push({ field: 'switch', before: !agent.switchedOffAt, after: !next.switchedOffAt });
-    const timer = (a: AgentRow) => (a.timerMinutes ? { minutes: a.timerMinutes, order: a.timerOrder, forWork: a.timerForWork } : null);
-    if (!same(timer(next), timer(agent))) changed.push({ field: 'timer', before: timer(agent), after: timer(next) });
+    const changed = diffAgent(agent, next);
     if (changed.length) {
       await db.transaction(async tx => {
         await tx
@@ -317,6 +361,7 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
             model: next.model,
             effort: next.effort,
             subscriptionId: next.subscriptionId,
+            teamId: next.teamId,
             skills: next.skills,
             overrides: next.overrides,
             templateHashes: next.templateHashes,

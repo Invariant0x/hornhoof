@@ -326,4 +326,24 @@ describe('AgentCard', () => {
     await user.click(screen.getByRole('button', { name: 'Save' }));
     await vi.waitFor(() => expect(calls.find(c => c.method === 'PATCH')?.body).toEqual({ base: 'You build the billing API.', skillText: { 'dev-tdd': 'Write it first.' } }));
   });
+
+  it('moves an employee into a sub-unit and back to the pipeline from its card', async () => {
+    const user = userEvent.setup();
+    const teams = [{ id: 'u1', name: 'Urgent fixes' }];
+    const { calls } = open({
+      'GET /api/agents/b1': [200, { ...CARD, team: null, teams }],
+      'PATCH /api/agents/b1': (body: unknown) => {
+        const t = (body as { team?: string | null }).team;
+        return [200, { ...CARD, teams, team: t ? teams[0]! : null }];
+      },
+    });
+    const pick = await screen.findByRole('combobox', { name: 'Sub-unit' });
+    expect(pick).toHaveValue('');
+    await user.selectOptions(pick, 'u1');
+    await vi.waitFor(() => expect(calls.find(c => c.method === 'PATCH')?.body).toEqual({ team: 'u1' }));
+    expect(screen.getByRole('combobox', { name: 'Sub-unit' })).toHaveValue('u1');
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Sub-unit' }), '');
+    await vi.waitFor(() => expect(calls.filter(c => c.method === 'PATCH')[1]?.body).toEqual({ team: null }));
+    expect(screen.getByRole('combobox', { name: 'Sub-unit' })).toHaveValue('');
+  });
 });

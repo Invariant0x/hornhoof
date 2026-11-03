@@ -1,7 +1,7 @@
 import { DEPARTMENT_TEMPLATES } from '@hornhoof/protocol';
 import { and, asc, eq, inArray, isNull, ne } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
-import { agents, companies, departments, nodes, people, subscriptions } from '../../db/schema.js';
+import { agents, companies, departments, nodes, people, subscriptions, teams } from '../../db/schema.js';
 import { liveNode } from '../nodes/nodes.js';
 import { agreed } from '../subscriptions/views.js';
 import { employeeOrder } from '../agents/order.js';
@@ -24,6 +24,7 @@ export async function companyView(db: Db, templates: Templates, companyId: strin
   const told = subs.length ? await db.select({ subscriptionId: nodes.subscriptionId, account: nodes.account }).from(nodes).where(and(inArray(nodes.subscriptionId, subs.map(s => s.id)), liveNode)) : [];
   const tierOf = (id: string) => agreed(told.filter(n => n.subscriptionId === id && n.account).map(n => n.account!)).tier;
   const staff = await db.select().from(agents).where(and(eq(agents.companyId, companyId), ne(agents.kind, 'orchestrator'), isNull(agents.removedAt)));
+  const allTeams = await db.select().from(teams).where(eq(teams.companyId, companyId)).orderBy(asc(teams.createdAt));
   /* Each department's employees, so a head knows its team: role, product and what it runs on. The id is what create_task
      takes as the executor, the role id what it takes as a gate. */
   const employeesOf = (dept: (typeof depts)[number]) =>
@@ -37,6 +38,7 @@ export async function companyView(db: Db, templates: Templates, companyId: strin
         role: (a.roleKey && templates.roles.get(a.roleKey)?.title.en) || null,
         kind: a.kind,
         product: (a.productId && deptName(depts.find(p => p.id === a.productId)!)) || null,
+        teamId: a.teamId,
         provider: subs.find(s => s.id === a.subscriptionId)?.provider ?? null,
         model: a.model || null,
         /* Off for now: it takes no work until a person switches it on. */
@@ -54,6 +56,7 @@ export async function companyView(db: Db, templates: Templates, companyId: strin
         template: d.templateKey,
         about: d.about,
         products: depts.filter(p => p.parentId === d.id).map(p => ({ id: p.id, name: deptName(p) })),
+        teams: allTeams.filter(t => t.departmentId === d.id).map(t => ({ id: t.id, name: t.name })),
         employees: employeesOf(d),
       })),
     subscriptions: subs.map(s => ({

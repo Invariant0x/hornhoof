@@ -133,7 +133,7 @@ async function reviewDue(db: Db | Tx, parent: Task): Promise<{ covered: Task[]; 
 
 /* The gate roles of a department in their order, by the first employee of each, one that is on before one that is off. */
 export async function gateLeads(db: Db | Tx, templates: Ctx['templates'], departmentId: string, executor: string): Promise<string[]> {
-  const staff = await db.select().from(agents).where(and(eq(agents.departmentId, departmentId), isNull(agents.removedAt))).orderBy(asc(agents.createdAt));
+  const staff = await db.select().from(agents).where(and(eq(agents.departmentId, departmentId), isNull(agents.removedAt), isNull(agents.teamId))).orderBy(asc(agents.createdAt));
   const gate = (a: typeof agents.$inferSelect) => (a.roleKey ? templates.roles.get(a.roleKey)?.gate : null) ?? null;
   const seen = new Set<string>();
   return staff
@@ -600,7 +600,7 @@ async function panelFor(db: Db | Tx, task: Task, stage: number, again: string[] 
     .select({ id: agents.id, name: agents.name, productId: agents.productId, sub: subscriptions.id, provider: subscriptions.provider })
     .from(agents)
     .leftJoin(subscriptions, and(eq(subscriptions.id, agents.subscriptionId), isNull(subscriptions.removedAt)))
-    .where(and(same, isNull(agents.removedAt), isNull(agents.switchedOffAt)))
+    .where(and(same, isNull(agents.removedAt), isNull(agents.switchedOffAt), isNull(agents.teamId)))
     .orderBy(asc(agents.createdAt));
   const product = task.productId ?? lead.productId;
   const fit = rows.filter(a => a.id !== task.executorAgentId && (!a.productId || a.productId === product));
@@ -645,7 +645,7 @@ async function roleOn(db: Db | Tx, named: string): Promise<boolean> {
   const [lead] = await db.select().from(agents).where(eq(agents.id, named));
   if (!lead) return false;
   const same = lead.roleKey && lead.departmentId ? and(eq(agents.departmentId, lead.departmentId), eq(agents.roleKey, lead.roleKey)) : eq(agents.id, lead.id);
-  const [on] = await db.select({ id: agents.id }).from(agents).where(and(same, isNull(agents.removedAt), isNull(agents.switchedOffAt))).limit(1);
+  const [on] = await db.select({ id: agents.id }).from(agents).where(and(same, isNull(agents.removedAt), isNull(agents.switchedOffAt), isNull(agents.teamId)));
   return Boolean(on);
 }
 

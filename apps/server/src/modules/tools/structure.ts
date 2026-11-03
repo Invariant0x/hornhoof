@@ -8,11 +8,13 @@ import { deptName, TEMPLATE_TEXT } from '../departments/templates.js';
 const Name = z.string().trim().min(1).max(60);
 const Note = z.string().max(160);
 const Products = z.array(Name).max(10);
+export const TeamChange = z.union([Name, z.object({ id: z.uuid(), name: Name.optional(), remove: z.boolean().optional() })]);
+export type TeamChange = z.infer<typeof TeamChange>;
 
 /* A department to create from a template. name only when the template is used a second time, such as "Sales Europe". */
-export const NewItem = z.object({ template: z.enum(TEMPLATE_KEYS), name: Name.optional(), checked: z.boolean(), note: Note, products: Products.optional() });
-/* A change to a department that exists: products to add under it, or its removal. */
-export const ChangeItem = z.object({ department: z.uuid(), checked: z.boolean(), note: Note, products: Products.optional(), remove: z.boolean().optional() });
+export const NewItem = z.object({ template: z.enum(TEMPLATE_KEYS), name: Name.optional(), checked: z.boolean(), note: Note, products: Products.optional(), teams: Products.optional() });
+/* A change to a department that exists: products to add under it, sub-units to create, rename or remove, or its removal. */
+export const ChangeItem = z.object({ department: z.uuid(), checked: z.boolean(), note: Note, products: Products.optional(), teams: z.array(TeamChange).max(10).optional(), remove: z.boolean().optional() });
 export const Proposal = z.object({ brief: z.string().trim().min(1).max(1500), items: z.array(z.union([NewItem, ChangeItem])).min(1).max(20) });
 
 export type NewItem = z.infer<typeof NewItem>;
