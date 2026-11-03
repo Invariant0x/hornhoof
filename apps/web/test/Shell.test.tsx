@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
@@ -14,6 +14,9 @@ function renderShell() {
     </LanguageProvider>,
   );
 }
+
+/* A tab of the main navigation, apart from the buttons of the same name inside a page. */
+const tab = (name: string) => within(screen.getByRole('navigation')).getByRole('button', { name });
 
 afterEach(() => {
   localStorage.clear();
@@ -42,11 +45,11 @@ describe('Shell', () => {
     const user = userEvent.setup();
     render(<Shell me={ME} onSignOut={() => {}} />);
     expect(screen.getByRole('main')).not.toHaveClass('page');
-    for (const tab of ['Tasks', 'People', 'Subscriptions', 'Machines']) {
-      await user.click(screen.getByRole('button', { name: tab }));
+    for (const name of ['Tasks', 'People', 'Subscriptions', 'Machines']) {
+      await user.click(tab(name));
       expect(screen.getByRole('main')).toHaveClass('page');
     }
-    await user.click(screen.getByRole('button', { name: 'Map' }));
+    await user.click(tab('Map'));
     expect(screen.getByRole('main')).not.toHaveClass('page');
     /* A band in the page's own color stays at the top of what scrolls, as tall as the bar and the gap above it, and
        takes no room from the page. */
@@ -62,10 +65,10 @@ describe('Shell', () => {
     mockApi({ 'GET /api/org': [200, ORG], 'GET /api/subscriptions': [200, { subscriptions: SUBS }], 'GET /api/machines': [200, { machines: MACHINES }] });
     const user = userEvent.setup();
     render(<Shell me={ME} onSignOut={() => {}} />);
-    await user.click(screen.getByRole('button', { name: 'Machines' }));
+    await user.click(tab('Machines'));
     expect(await screen.findByRole('heading', { name: 'Machines' })).toBeInTheDocument();
-    expect(await screen.findByRole('article', { name: 'ivan-mbp' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Machines' })).toHaveAttribute('aria-current', 'page');
+    expect(await screen.findByRole('button', { name: 'Open the card of ivan-mbp' })).toBeInTheDocument();
+    expect(tab('Machines')).toHaveAttribute('aria-current', 'page');
   });
 
   it('speaks the saved language and switches it from the account menu', async () => {

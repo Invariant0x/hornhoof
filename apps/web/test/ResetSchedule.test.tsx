@@ -31,7 +31,7 @@ async function renderSubs(subscriptions: SubView[], language: 'en' | 'ru' = 'en'
 async function renderLimits(limits: Limits, language: 'en' | 'ru' = 'en') {
   await renderSubs([{ ...SUBS[0]!, limits }], language);
   fireEvent.click(screen.getByRole('button', { name: /^(Open the card of |Открыть карточку )Claude$/ }));
-  return screen.getByRole('article', { name: 'Claude' }).querySelector('.gauges')!;
+  return screen.getByRole('article', { name: 'Claude, Ivan' }).querySelector('.gauges')!;
 }
 
 afterEach(() => {
@@ -53,14 +53,14 @@ describe('relative subscription reset times', () => {
       ],
     });
     const [five, seven, two, month, one] = [...list.querySelectorAll('.gauge')];
-    expect(five).toHaveTextContent('5 hours10%usedresets in 3 days 7 hours');
+    expect(five).toHaveTextContent('5 hours10%usedresets in 3 days 7 h');
     expect(seven).toHaveTextContent('7 days20%usedresets in 2 days');
-    expect(two).toHaveTextContent('2 hours30%usedresets in 7 hours 5 minutes');
+    expect(two).toHaveTextContent('2 hours30%usedresets in 7 h 5 min');
     expect(month).toHaveTextContent('Month40%usedresets in less than a minute');
     expect(one).toHaveTextContent('1 day50%usedresets in 1 day');
   });
 
-  it('uses English singular and plural units at exact boundaries', async () => {
+  it('uses short English units for hours and minutes and plurals for days', async () => {
     fixedTime();
     const list = await renderLimits({
       status: 'allowed',
@@ -76,32 +76,32 @@ describe('relative subscription reset times', () => {
     const items = [...list.querySelectorAll('.gauge')];
     expect(items[0]).toHaveTextContent('resets in 1 day');
     expect(items[1]).toHaveTextContent('resets in 2 days');
-    expect(items[2]).toHaveTextContent('resets in 1 hour');
-    expect(items[3]).toHaveTextContent('resets in 2 hours');
-    expect(items[4]).toHaveTextContent('resets in 1 minute');
-    expect(items[5]).toHaveTextContent('resets in 2 minutes');
+    expect(items[2]).toHaveTextContent('resets in 1 h');
+    expect(items[3]).toHaveTextContent('resets in 2 h');
+    expect(items[4]).toHaveTextContent('resets in 1 min');
+    expect(items[5]).toHaveTextContent('resets in 2 min');
   });
 
   it.each([
-    { milliseconds: MINUTE, expected: '1 минута' },
-    { milliseconds: 2 * MINUTE, expected: '2 минуты' },
-    { milliseconds: 5 * MINUTE, expected: '5 минут' },
-    { milliseconds: 11 * MINUTE, expected: '11 минут' },
-    { milliseconds: 21 * MINUTE, expected: '21 минута' },
-    { milliseconds: HOUR, expected: '1 час' },
-    { milliseconds: 2 * HOUR, expected: '2 часа' },
-    { milliseconds: 5 * HOUR, expected: '5 часов' },
-    { milliseconds: 11 * HOUR, expected: '11 часов' },
-    { milliseconds: 21 * HOUR, expected: '21 час' },
+    { milliseconds: MINUTE, expected: '1 мин' },
+    { milliseconds: 2 * MINUTE, expected: '2 мин' },
+    { milliseconds: 5 * MINUTE, expected: '5 мин' },
+    { milliseconds: 11 * MINUTE, expected: '11 мин' },
+    { milliseconds: 21 * MINUTE, expected: '21 мин' },
+    { milliseconds: HOUR, expected: '1 ч' },
+    { milliseconds: 2 * HOUR, expected: '2 ч' },
+    { milliseconds: 5 * HOUR, expected: '5 ч' },
+    { milliseconds: 11 * HOUR, expected: '11 ч' },
+    { milliseconds: 21 * HOUR, expected: '21 ч' },
     { milliseconds: DAY, expected: '1 день' },
     { milliseconds: 2 * DAY, expected: '2 дня' },
     { milliseconds: 5 * DAY, expected: '5 дней' },
     { milliseconds: 11 * DAY, expected: '11 дней' },
     { milliseconds: 21 * DAY, expected: '21 день' },
-  ])('uses Russian plurals for $expected', async ({ milliseconds, expected }) => {
+  ])('uses short Russian units for hours and minutes and plurals for days: $expected', async ({ milliseconds, expected }) => {
     fixedTime();
     const list = await renderLimits({ status: 'allowed', windows: [{ name: 'five_hour', utilization: 0.1, resetsAt: at(milliseconds) }] }, 'ru');
-    expect(list).toHaveTextContent(`До сброса ${expected}`);
+    expect(list).toHaveTextContent(`до сброса ${expected}`);
   });
 
   it('updates an open view across day and past boundaries without a reload', async () => {
@@ -118,7 +118,7 @@ describe('relative subscription reset times', () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(31_000);
     });
-    expect(list).toHaveTextContent('5 hours10%usedresets in 23 hours 59 minutes');
+    expect(list).toHaveTextContent('5 hours10%usedresets in 23 h 59 min');
     expect(list).toHaveTextContent('7 daysNo data yetReset time unknown');
     expect(list).not.toHaveTextContent(/resets in -/);
     expect(list).not.toHaveTextContent(/restored/i);
@@ -131,10 +131,10 @@ describe('relative subscription reset times', () => {
     const kimi = { ...SUBS[2]!, limits: { status: 'allowed' as const, complete: true, windows: [{ name: 'five_hour', utilization: 0.88, resetsAt: at(30_000) }, { name: 'month', utilization: 0.06, resetsAt: 'not-a-time' }] } };
     await renderSubs([claude, codex, kimi]);
     for (const button of screen.getAllByRole('button', { name: /^Open the card of / })) fireEvent.click(button);
-    expect(within(screen.getByRole('article', { name: 'Claude' })).getByText('resets in 3 days 7 hours')).toBeInTheDocument();
-    expect(within(screen.getByRole('article', { name: 'Codex' })).getByText('resets in 7 hours 5 minutes')).toBeInTheDocument();
-    expect(within(screen.getByRole('article', { name: 'Codex' })).getByText('Reset time unknown')).toBeInTheDocument();
-    expect(within(screen.getByRole('article', { name: 'Kimi' })).getByText('resets in less than a minute')).toBeInTheDocument();
-    expect(within(screen.getByRole('article', { name: 'Kimi' })).getByText('Reset time unknown')).toBeInTheDocument();
+    expect(within(screen.getByRole('article', { name: 'Claude, Ivan' })).getByText('resets in 3 days 7 h')).toBeInTheDocument();
+    expect(within(screen.getByRole('article', { name: 'Codex, Ivan' })).getByText('resets in 7 h 5 min')).toBeInTheDocument();
+    expect(within(screen.getByRole('article', { name: 'Codex, Ivan' })).getByText('Reset time unknown')).toBeInTheDocument();
+    expect(within(screen.getByRole('article', { name: 'Kimi, Ivan' })).getByText('resets in less than a minute')).toBeInTheDocument();
+    expect(within(screen.getByRole('article', { name: 'Kimi, Ivan' })).getByText('Reset time unknown')).toBeInTheDocument();
   });
 });
