@@ -23,7 +23,7 @@ import { ProgramWatch, READY, REPORT_MS, programState, type Pending } from './pr
 import { acceptClaudeDialogs, agyLog, claudeTranscript, findKimiWire, findRollout, prepareAgy, prepareKimi, rolloutFiles, type LaunchSpec, type TermProgram } from './programs.js';
 import { FAILURE, failure } from './failures.js';
 import { TurnEnds, hookCalls, claudeEnd, type TurnEnd } from './turn-signals.js';
-import { restartRefusal, resumeCommand, TurnWords, type WordReceipt } from './program-restart.js';
+import { claudeWordReceipt, restartRefusal, resumeCommand, TurnWords, type WordReceipt } from './program-restart.js';
 import { CALLS } from './tool-calls.js';
 import { claudeStatusContext, claudeStatusLimits, codexRollout, kimiWire, LineTail, type WireNews } from './transcripts.js';
 import { envFile, type Tmux } from './tmux.js';
@@ -113,8 +113,10 @@ type Agent = {
   /* Words Hornhoof types into running turns, one after another. */
   saying: Promise<unknown>;
   waitingWords: TurnWords[];
+  /* Claude's queue, in the order its log enqueued the words. */
+  enqueuedWords: string[];
   /* Ended turns whose waiting words stay owned until their job.done goes out. */
-  finishing: Set<Turn>;
+  finishing: Map<Turn, Deferred<void>>;
   dequeued: boolean;
   inputUnknown?: boolean;
   /* Hornhoof's turns, one after another. */
@@ -250,6 +252,7 @@ function startedState({ program, home, input }: TermJob, spec: LaunchSpec): Part
     oldLogs: program.kind === 'codex' && !spec.sessionId ? rolloutFiles(home) : null,
     keep: namesLater ? (input.context ?? null) : null,
     contextSize: program.kind === 'kimi' ? kimiWindow(home, input.model) : null,
+    enqueuedWords: [],
   };
 }
 /* What a session was told from before it started, kept in the agent's folder by the session's id. */
@@ -348,7 +351,7 @@ export class TerminalHost {
   private agent(key: string): Agent {
     let a = this.agents.get(key);
     if (!a) {
-      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, viewers: 0, up: false, watch: null, saying: Promise.resolve(), waitingWords: [], finishing: new Set(), dequeued: false, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null, calls: new Map(), closedCalls: new Set(), question: null, ends: new TurnEnds(), signAt: 0, retry: null, apiError: null, restarting: false, launch: null, programTurnId: undefined };
+      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, viewers: 0, up: false, watch: null, saying: Promise.resolve(), waitingWords: [], enqueuedWords: [], finishing: new Map(), dequeued: false, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null, calls: new Map(), closedCalls: new Set(), question: null, ends: new TurnEnds(), signAt: 0, retry: null, apiError: null, restarting: false, launch: null, programTurnId: undefined };
       this.agents.set(key, a);
     }
     return a;
@@ -645,8 +648,10 @@ export class TerminalHost {
     if (a.turn !== turn) return;
     a.busy = false;
     this.programEnded(a);
-    a.failure = failure('crash', 'The program exited during the turn.');
-    this.finishTyped(a, '', exitError(ended?.output ?? null, a.signedOut, 'agent_failed'), ended?.output ?? '', ended?.programOutput);
+    if (!turn?.ending) {
+      a.failure = failure('crash', 'The program exited during the turn.');
+      this.finishTyped(a, '', exitError(ended?.output ?? null, a.signedOut, 'agent_failed'), ended?.output ?? '', ended?.programOutput);
+    }
     this.unwatch(a);
   }
 
@@ -679,9 +684,9 @@ export class TerminalHost {
   }
 
   /* A stop in the log counts for the running turn once its prompt went in: one logged before is the last turn's. */
-  /* Hornhoof's turn ended in the program, and the host only reads the rest of its log. */
+  /* The turn ended in the program, and the host only reads the rest of its log. */
   private overIn(a: Agent): boolean {
-    return Boolean(a.turn && !a.turn.typed && !a.turn.starting && a.ended?.settled);
+    return Boolean(a.turn?.ending);
   }
 
   private stoppable(a: Agent): boolean {
@@ -720,14 +725,20 @@ export class TerminalHost {
     a.stopped = end.status === 'stopped';
     a.failure = end.failure ?? null;
     const turn = a.turn;
-    if (turn) turn.ending = end;
+    if (turn) {
+      turn.ending = end;
+      if (turn.words?.waitingForTurn(Date.now())) {
+        a.finishing.set(turn, deferred());
+      }
+    }
     if (!turn?.typed) return a.ended?.resolve(end.message);
     const error = a.stopped ? 'cancelled' : end.failure ? (end.failure.kind === 'auth' || a.signedOut?.test(end.failure.text) ? 'not_logged_in' : 'agent_failed') : null;
-    const settling = this.settle(a, end.message).then(() => this.waitForWords(a, turn)).then(() => {
-      this.finishTyped(a, end.message, error, end.failure?.text ?? '', undefined, turn);
-    });
+    const settling = this.settle(a, end.message);
     a.settling = settling;
     void settling.finally(() => { if (a.settling === settling) a.settling = null; });
+    void settling.then(() => this.waitForWords(a, turn)).then(() => {
+      this.finishTyped(a, end.message, error, end.failure?.text ?? '', undefined, turn);
+    });
   }
 
   private tookTurn(a: Agent, id?: string): void {
@@ -829,7 +840,6 @@ export class TerminalHost {
   /* What the program wrote to its log since last time: events for the turn, Codex's limits, session and turn end. */
   private drain(a: Agent): void {
     if (a.restarting) return;
-    this.reportUnheard(a);
     if (!a.tail && a.program?.kind === 'codex') {
       const found = findRollout(a.home, a.workDir, a.startedAt - 2000, null, a.oldLogs ?? undefined);
       if (found) {
@@ -851,7 +861,7 @@ export class TerminalHost {
         continue;
       }
       const raw = isRecord(data) ? data : {};
-      if (a.program && !this.overIn(a)) a.turn?.words?.observe(a.program.kind, raw, a.programTurnId);
+      this.receivedWords(a, raw);
       this.called(a, data);
       if (a.program?.kind === 'claude') {
         if (raw.type === 'queue-operation' && raw.operation === 'dequeue') a.dequeued = true;
@@ -902,9 +912,21 @@ export class TerminalHost {
     this.reportUnheard(a);
   }
 
+  private receivedWords(a: Agent, line: Record<string, unknown>): void {
+    if (a.program?.kind === 'claude') {
+      const receipt = claudeWordReceipt(line, a.enqueuedWords);
+      if (!receipt) return;
+      for (const words of a.waitingWords) {
+        if (receipt.state === 'queued' ? words.queued(receipt.text, 'transcript') : words.taken(receipt.text)) break;
+      }
+    } else if (a.program && !this.overIn(a)) {
+      a.turn?.words?.observe(a.program.kind, line, a.programTurnId);
+    }
+  }
+
   private reportUnheard(a: Agent, gone = false): void {
     for (const words of a.waitingWords) {
-      if (!gone && [...a.finishing].some(turn => turn.words === words)) continue;
+      if (!gone && [...a.finishing.keys()].some(turn => turn.words === words)) continue;
       for (const entry of words.unheard(Date.now(), gone)) {
         /* Start afresh before the next prompt, so words still held by the TUI cannot be submitted a second time. */
         a.hash = null;
@@ -917,8 +939,7 @@ export class TerminalHost {
   /* The program may start its queued words on the next log read. Open that turn before giving up the old job. */
   private async waitForWords(a: Agent, turn: Turn): Promise<void> {
     if (!turn.words?.waitingForTurn(Date.now())) return;
-    a.finishing.add(turn);
-    while (turn.words.waitingForTurn(Date.now()) && await this.opts.tmux.alive(a.name)) {
+    while (a.turn === turn && turn.words.waitingForTurn(Date.now()) && await this.opts.tmux.alive(a.name)) {
       await sleep(this.pollMs);
       this.drain(a);
     }
@@ -927,7 +948,10 @@ export class TerminalHost {
   /* Called after job.done was sent, including when the runner read limits or secrets after the turn ended. */
   completed(jobId: string): void {
     for (const a of this.agents.values()) {
-      for (const turn of a.finishing) if (turn.jobId === jobId) a.finishing.delete(turn);
+      for (const [turn, finished] of a.finishing) if (turn.jobId === jobId) {
+        a.finishing.delete(turn);
+        finished.resolve();
+      }
       this.reportUnheard(a);
     }
   }
@@ -1105,6 +1129,7 @@ export class TerminalHost {
       const taken = words.takeQueued(text);
       if (taken) { queuedFrom = taken.jobId; break; }
     }
+    const finishing = queuedFrom ? [] : [...a.finishing.values()].map(finished => finished.promise);
     const start = a.starting;
     a.fresh = false;
     if (!fromLog) this.drain(a);
@@ -1132,6 +1157,7 @@ export class TerminalHost {
       });
       await start;
     }
+    if (finishing.length) await Promise.all(finishing);
     this.opts.send({ type: 'turn.open', agentKey: a.key, text: text.slice(0, 100_000), ref: turn.ref, ...(queuedFrom ? { queuedFrom } : {}) });
     await answered();
   }
@@ -1313,6 +1339,7 @@ export class TerminalHost {
       if (!(await this.ready(a, job))) throw new Error('The restarted program did not become ready.');
       this.programIs(a, true);
       a.tail = this.tailFor(a);
+      a.enqueuedWords = [];
       a.ends.begin();
       a.retry = null;
       const text = [note, ...(turn.words?.pending() ?? [])].filter(Boolean).join('\n\n');
