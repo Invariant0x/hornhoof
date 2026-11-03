@@ -109,20 +109,25 @@ function PlanMachines({ sub: s, now }: { sub: SubView; now: number }) {
   const t = useT();
   const { language } = useLanguage();
   if (s.kind === 'api_key') return <ul className="plist"><li><MachineMark /><span className="nm"><b>{t.subs.builtin}</b><small>{t.cards.builtinSmall}</small></span></li></ul>;
-  const line = s.status === 'needs_login' ? null : signinLine(t, language, s);
+  const line = signinLine(t, language, s);
   return <>{s.machines.length ? <ul className="plist" aria-label={t.subs.machinesOf(subName(t, s))}>{s.machines.map(m => <li key={m.id}><MachineMark /><span className="nm"><b>{m.hostname}</b><small>{s.owner.name}, {planStateOnMachine(t, language, m, s.limits, now)}</small></span></li>)}</ul> : <p className="part-note">{t.subs.noMachine}</p>}{line && <p className="part-note">{line}</p>}</>;
 }
 
-function stateLine(t: Messages, language: Language, s: SubView, now: number): string | null {
-  const state = stateOf(s, now);
-  if (state === 'limit') {
-    const limit = limitState(s.limits, now);
-    const at = clock(language, limit.resetsAt);
-    const duration = resetDurationAt(t, limit.resetsAt, now);
-    return at && duration ? t.cards.notes.limit(at, duration) : t.cards.notes.limitUnknown;
-  }
-  if (state === 'needs_login') return t.cards.notes.login(s.machines.find(m => m.online)?.hostname ?? s.machines[0]?.hostname ?? '', s.owner.name);
-  return state === 'waiting_machine' ? t.cards.notes.waiting(s.owner.name) : null;
+/* What the head of the card says under the state: until when a plan at its limit waits. */
+function limitLine(t: Messages, language: Language, s: SubView, now: number): string | null {
+  if (stateOf(s, now) !== 'limit') return null;
+  const limit = limitState(s.limits, now);
+  const at = clock(language, limit.resetsAt);
+  const duration = resetDurationAt(t, limit.resetsAt, now);
+  return at && duration ? t.cards.notes.limit(at, duration) : t.cards.notes.limitUnknown;
+}
+
+/* What keeps a plan that is not ready from working, and where: it waits for its machine, or for its sign-in on a machine
+   that is online, or on one that is not. */
+function fixWords(t: Messages, s: SubView): string {
+  if (s.status === 'waiting_machine') return t.cards.notes.waiting(s.owner.name);
+  const online = s.machines.find(m => m.online);
+  return online ? t.cards.notes.login(online.hostname, s.owner.name) : t.cards.notes.loginOffline(s.machines[0]?.hostname ?? '');
 }
 
 function PlanAccount({ sub: s }: { sub: SubView }) {
@@ -219,7 +224,7 @@ function TestButtons({ sub: s, me, controls: c }: PlanProps) {
   const t = useT();
   const name = subName(t, s);
   return <>
-    {s.status === 'ready' && s.online && <button className="act" type="button" aria-label={t.subs.runTestLabel(name)} disabled={c.test?.phase === 'running'} onClick={() => c.runTest(s)}>{t.subs.runTest}</button>}
+    {s.online && <button className="act" type="button" aria-label={t.subs.runTestLabel(name)} disabled={c.test?.phase === 'running'} onClick={() => c.runTest(s)}>{t.subs.runTest}</button>}
     {me.person.scopeKind === 'company' && s.place.kind === 'company' && !s.isOrchestrator && <button className="act" type="button" aria-label={t.subs.useForOrchestratorLabel(name)} onClick={() => c.makeOrchestrator(s)}>{t.subs.useForOrchestrator}</button>}
   </>;
 }
@@ -297,29 +302,63 @@ function SignInNote({ note }: { note: SignNote | null }) {
   </>;
 }
 
+/* Remove asks first. */
+function RemoveAsk({ sub: s, controls: c }: Omit<PlanProps, 'me'>) {
+  const t = useT();
+  const name = subName(t, s);
+  return c.asking ? <Ask text={s.kind === 'api_key' ? t.subs.removeKeyAsk(name) : t.subs.removeAsk(name)} yes={t.subs.yesRemove} onYes={() => c.remove(s)} onNo={() => c.setConfirm(null)} /> : null;
+}
+
+/* A plan works once it is ready. Until then, or while its sign-in has found nodes too old for it, all there is to show is
+   what is wrong and what to do: its card is one block. */
+const needsFix = (s: SubView, note: SignNote | null): boolean => s.status !== 'ready' || Boolean(note?.command);
+
+/* The card of a plan that does not work, in one block across it: what is wrong and where, or the nodes too old for its
+   sign-in with the command that updates them, then what to do about it and Remove. */
+function PlanFix(props: PlanProps) {
+  const t = useT();
+  const { sub: s, controls: c } = props;
+  return (
+    <section className="blk blk-fix">
+      {!c.note?.command && <p>{fixWords(t, s)}</p>}
+      <SignInNote note={c.note} />
+      <div className="machine-actions"><SignInButton {...props} /><KeyButton {...props} /><RemoveButtons {...props} /></div>
+      <RemoveAsk sub={s} controls={c} />
+    </section>
+  );
+}
+
+/* The card of a plan that works: the plan and its limits, the agents on it, and its machines with what to do. */
+function PlanWorking({ sub: s, me, controls, now }: PlanProps & { now: number }) {
+  const t = useT();
+  return <>
+    <section className="blk blk-facts">
+      <h4>{t.cards.aboutPlan}</h4>
+      <Part title={t.subs.limits}><LimitMeters sub={s} now={now} /></Part>
+      <PlanAccount sub={s} />
+    </section>
+    <RunningNow title={t.cards.agentsOn} label={t.cards.agentsOn} agents={s.agents ?? []} me={me} plan />
+    <section className="blk blk-side">
+      <h4>{t.cards.machinesOf}</h4>
+      <PlanMachines sub={s} now={now} />
+      <PlanSettings sub={s} me={me} controls={controls} />
+      <PlanButtons sub={s} me={me} controls={controls} />
+      <SignInNote note={controls.note} />
+      <RemoveAsk sub={s} controls={controls} />
+      {controls.test && <TestResult test={controls.test} />}
+    </section>
+  </>;
+}
+
 function SubscriptionDetails({ sub: s, me, controls, now }: PlanProps & { now: number }) {
   const t = useT();
   const { language } = useLanguage();
   const name = subName(t, s);
   return (
     <CardFrame label={`${name}, ${s.owner.name}`} accent={s.isOrchestrator}
-      head={<CardHead mark={<ProviderMark provider={s.provider} />} name={name} tier={s.tier} badges={s.isOrchestrator && <span className="badge">{t.subs.orchestrator}</span>} state={<SubscriptionStatus sub={s} now={now} />} line={stateLine(t, language, s, now)} />}
+      head={<CardHead mark={<ProviderMark provider={s.provider} />} name={name} tier={s.tier} badges={s.isOrchestrator && <span className="badge">{t.subs.orchestrator}</span>} state={<SubscriptionStatus sub={s} now={now} />} line={limitLine(t, language, s, now)} />}
       extra={<PlanExtra sub={s} controls={controls} />}>
-      <section className="blk blk-facts">
-        <h4>{t.cards.aboutPlan}</h4>
-        <Part title={t.subs.limits}><LimitMeters sub={s} now={now} /></Part>
-        <PlanAccount sub={s} />
-      </section>
-      <RunningNow title={t.cards.agentsOn} label={t.cards.agentsOn} agents={s.agents ?? []} me={me} plan />
-      <section className="blk blk-side">
-        <h4>{t.cards.machinesOf}</h4>
-        <PlanMachines sub={s} now={now} />
-        <PlanSettings sub={s} me={me} controls={controls} />
-        <PlanButtons sub={s} me={me} controls={controls} />
-        <SignInNote note={controls.note} />
-        {controls.asking && <Ask text={s.kind === 'api_key' ? t.subs.removeKeyAsk(name) : t.subs.removeAsk(name)} yes={t.subs.yesRemove} onYes={() => controls.remove(s)} onNo={() => controls.setConfirm(null)} />}
-        {controls.test && <TestResult test={controls.test} />}
-      </section>
+      {needsFix(s, controls.note) ? <PlanFix sub={s} me={me} controls={controls} /> : <PlanWorking sub={s} me={me} controls={controls} now={now} />}
     </CardFrame>
   );
 }

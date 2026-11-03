@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Subscriptions } from '../src/screens/Subscriptions';
-import type { Me } from '../src/types';
+import type { Me, SubView } from '../src/types';
 import { armor, Decrypter, generateX25519Identity, identityToRecipient } from 'age-encryption';
 import { ME, MACHINE, mockApi, SUBS } from './api-mock';
 import { decl } from './css';
@@ -49,10 +49,10 @@ describe('Subscriptions', () => {
     expect(machines.textContent).toContain(language === 'en' ? 'laptopIvan, waiting for the login' : 'laptopIvan, ждет входа');
     expect(machines.textContent).toContain(language === 'en' ? 'towerIvan, offline' : 'towerIvan, не в сети');
     const login = rowOf('Codex');
-    expect(login.querySelector('.stline')?.textContent).toContain(language === 'en' ? 'On ivan-mbp. Only Ivan can sign in.' : 'На ivan-mbp. Войти может только владелец: Ivan.');
+    expect(login.querySelector('.blk-fix')?.textContent).toContain(language === 'en' ? 'On ivan-mbp. Only Ivan can sign in.' : 'На ivan-mbp. Войти может только владелец: Ivan.');
     const waiting = rowOf('Kimi');
-    expect(waiting.querySelector('.stline')?.textContent).toContain(language === 'en' ? 'Ivan has not run the install command yet.' : 'Владелец (Ivan) еще не выполнил команду установки.');
-    expect(waiting.querySelector('.blk-side')?.textContent).toContain(language === 'en' ? 'No machine yet' : 'Машины пока нет');
+    expect(waiting.querySelector('.blk-fix')?.textContent).toContain(language === 'en' ? 'Ivan has not run the install command yet.' : 'Владелец (Ivan) еще не выполнил команду установки.');
+    expect(within(screen.getByRole('row', { name: 'Kimi' })).getByText(language === 'en' ? 'No machine yet' : 'Машины пока нет')).toBeInTheDocument();
     const key = screen.getAllByRole('article').find(article => article.querySelector('.plist')?.textContent === `${builtin}${comesWith}`);
     expect.soft(key).toBeDefined();
     expect(plan).toHaveAccessibleName('Claude, Ivan');
@@ -62,7 +62,7 @@ describe('Subscriptions', () => {
     lists({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[1]!, signedInOnce: true, machines: [MACHINE, { ...SUBS[1]!.machines[0]!, id: 'login', hostname: 'laptop' }] }] }] });
     render(<Subscriptions me={ME} />);
     await openAll();
-    expect(rowOf('Codex').querySelector('.blk-side .part-note')).toBeNull();
+    expect(within(rowOf('Codex')).queryByText(/^Signed in once/)).not.toBeInTheDocument();
   });
 
   it('uses the refined Russian plan words in unavailable meters', async () => {
@@ -211,7 +211,8 @@ describe('Subscriptions', () => {
     const claude = { status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0.3, resetsAt: null }, { name: 'seven_day_opus', utilization: 1, resetsAt: null }] };
     const codex = { status: 'allowed' as const, windows: [{ name: 'seven_day', utilization: 0.73, resetsAt: null }], complete: true };
     const kimi = { status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0.88, resetsAt: null }, { name: 'month', utilization: 0.06, resetsAt: null }], complete: true };
-    const subs = [{ ...SUBS[0]!, limits: claude }, { ...SUBS[1]!, limits: codex }, { ...SUBS[2]!, limits: kimi }, SUBS[3]!];
+    /* Working plans: a plan that does not work shows no limits. */
+    const subs = [{ ...SUBS[0]!, limits: claude }, { ...SUBS[1]!, status: 'ready' as const, machines: [MACHINE], limits: codex }, { ...SUBS[2]!, status: 'ready' as const, online: true, machines: [MACHINE], limits: kimi }, SUBS[3]!];
     mockApi({ 'GET /api/subscriptions': [200, { subscriptions: subs }] });
     render(<Subscriptions me={ME} />);
     await openAll();
@@ -418,21 +419,22 @@ describe('Subscriptions', () => {
 
   it('shows the states in Russian', async () => {
     localStorage.setItem('hh-lang', 'ru');
-    lists();
+    /* A working plan that has sent no limits yet: a plan that does not work shows no meters. */
+    lists({ 'GET /api/subscriptions': [200, { subscriptions: [...SUBS, { ...SUBS[0]!, id: 's-glm', provider: 'glm', label: 'GLM', limits: null, agents: [] }] }] });
     render(
       <LanguageProvider>
         <Subscriptions me={ME} />
       </LanguageProvider>,
     );
     await openAll();
-    expect(within(screen.getByRole('table')).getAllByText('Готова')).toHaveLength(4);
+    expect(within(screen.getByRole('table')).getAllByText('Готова')).toHaveLength(6);
     expect(within(rowOf('Codex')).getByText('Ждет входа')).toBeInTheDocument();
     expect(within(rowOf('Kimi')).getByText('Ждет машину')).toBeInTheDocument();
     const [five, seven] = meterRows(rowOf('Claude'));
     expect(five).toHaveTextContent(/^5 часов42%использованодо сброса /);
     expect(seven).toHaveTextContent(/^7 дней10%использованоВремя сброса неизвестно$/);
-    const [codexFive] = meterRows(rowOf('Codex'));
-    expect(codexFive).toHaveTextContent(/^5 часовПока нет данных$/);
+    const [glmFive] = meterRows(rowOf('GLM'));
+    expect(glmFive).toHaveTextContent(/^5 часовПока нет данных$/);
     expect(within(rowOf('Ключ Anthropic, заканчивается на 9f3a')).getByText('Оплата по факту, без лимитов тарифа')).toBeInTheDocument();
   });
 });
@@ -728,5 +730,134 @@ describe('signing in to plans', () => {
     expect(within(row).getByRole('button', { name: 'Войти в Claude с другим аккаунтом' })).toHaveTextContent('Войти в другой аккаунт');
     expect(within(rowOf('Codex')).getByText('Codex работает на одной машине за раз; сейчас на ivan-mbp')).toBeInTheDocument();
     expect(within(rowOf('Codex')).getByText('Codex, Free: новым моделям нужен Plus или Pro')).toBeInTheDocument();
+  });
+});
+
+/* A plan that does not work yet, as it waits for its machine or its sign-in, or whose sign-in found nodes too old for it,
+   has nothing else to show: its card is one block across, saying what is wrong and where, with what to do and Remove. */
+describe('the card of a plan that does not work', () => {
+  const [claude, codex, kimi, key] = SUBS as [SubView, SubView, SubView, SubView];
+  const UPDATE = 'curl -fsSL https://hq.acme.com/install.sh | bash';
+  const OLD = { error: { code: 'conflict', message: 'The nodes on ivan-mbp are older than the sign-in from Hornhoof needs.', reason: 'signin_unsupported', details: { machines: ['ivan-mbp'], command: UPDATE } } };
+  const OLD_TEXT = 'The nodes on ivan-mbp are older than the sign-in from Hornhoof needs. To update them, run this command in a terminal on ivan-mbp, then sign in again.';
+  const only = (...subs: SubView[]) => ({ 'GET /api/subscriptions': [200, { subscriptions: subs }] as [number, unknown] });
+  const THREE = ['blk blk-facts', 'blk blk-run', 'blk blk-side'];
+  const blocks = (card: HTMLElement) => [...card.querySelectorAll('.blocks > .blk')].map(b => b.className);
+  const buttons = (part: HTMLElement) => within(part).getAllByRole('button').map(b => b.textContent);
+  /* What a working plan's card has, and the card of one that does not work leaves out. */
+  const workingParts = (card: HTMLElement) => [
+    ...['Limits', 'Owner and account', 'Settings', 'Machines of this plan'].filter(name => within(card).queryByRole('heading', { name })),
+    ...(within(card).queryByRole('region', { name: 'Agents on it' }) ? ['Agents on it'] : []),
+    ...within(card).queryAllByRole('button', { name: /^(Run a test on |Use .+ for the orchestrator$)/ }).map(b => b.textContent),
+  ];
+
+  it('shows a plan waiting for its sign-in as one block across the card: why and where, Sign in and Remove', async () => {
+    mockApi(only(codex));
+    render(<Subscriptions me={ME} />);
+    await openAll();
+    const card = screen.getByRole('article', { name: 'Codex, Ivan' });
+    expect(blocks(card)).toEqual(['blk blk-fix']);
+    expect(workingParts(card)).toEqual([]);
+    const block = card.querySelector<HTMLElement>('.blk-fix')!;
+    expect(block.firstElementChild).toHaveTextContent('On ivan-mbp. Only Ivan can sign in.');
+    expect(buttons(block)).toEqual(['Sign in', 'Remove']);
+    /* Said once, in the block, and not in the card's head as well. */
+    expect(within(card).getAllByText('On ivan-mbp. Only Ivan can sign in.')).toHaveLength(1);
+    expect(decl('.blk-fix', 'grid-column')).toBe('1 / -1');
+  });
+
+  it.each([
+    ['en', 'It needs a sign-in on ivan-mbp, and the machine is offline.', 'Remove'],
+    ['ru', 'Нужен вход на ivan-mbp, а машина не в сети.', 'Удалить'],
+  ])('says in %s that a plan waiting for its sign-in has its machine offline, with Remove alone', async (language, words, remove) => {
+    localStorage.setItem('hh-lang', language);
+    mockApi(only({ ...codex, online: false, machines: [{ ...codex.machines[0]!, online: false }] }));
+    render(<LanguageProvider><Subscriptions me={ME} /></LanguageProvider>);
+    await openAll();
+    const card = screen.getByRole('article', { name: 'Codex, Ivan' });
+    expect(blocks(card)).toEqual(['blk blk-fix']);
+    expect(card.querySelector('.blk-fix')!.firstElementChild).toHaveTextContent(words);
+    expect(buttons(card)).toEqual([remove]);
+  });
+
+  it('shows a plan waiting for its machine as one block: who has not run the command, New command and Remove', async () => {
+    mockApi(only(kimi));
+    render(<Subscriptions me={ME} />);
+    await openAll();
+    const card = screen.getByRole('article', { name: 'Kimi, Ivan' });
+    expect(blocks(card)).toEqual(['blk blk-fix']);
+    expect(workingParts(card)).toEqual([]);
+    expect(card.querySelector('.blk-fix')!.firstElementChild).toHaveTextContent('Ivan has not run the install command yet.');
+    expect(buttons(card)).toEqual(['New command', 'Remove']);
+  });
+
+  it("turns a working plan's card into the block when its sign-in finds old nodes, and back into the card after a reload", async () => {
+    const ready = { ...codex, status: 'ready' as const, machines: [MACHINE] };
+    mockApi({ ...only(ready), 'POST /api/subscriptions/s-codex/signin': [409, OLD] });
+    const { unmount } = render(<Subscriptions me={ME} />);
+    await openAll();
+    const card = screen.getByRole('article', { name: 'Codex, Ivan' });
+    expect(blocks(card)).toEqual(THREE);
+    expect(workingParts(card)).toEqual(['Limits', 'Owner and account', 'Settings', 'Machines of this plan', 'Agents on it', 'Run a test', 'Use for the orchestrator']);
+    await userEvent.click(within(card).getByRole('button', { name: 'Sign in to Codex' }));
+    await vi.waitFor(() => expect(blocks(card)).toEqual(['blk blk-fix']));
+    expect(workingParts(card)).toEqual([]);
+    /* The machine and why, the command with Copy, and Sign in and Remove under them. */
+    const block = card.querySelector<HTMLElement>('.blk-fix')!;
+    expect(block.firstElementChild).toHaveTextContent(OLD_TEXT);
+    expect(within(block).getByText(UPDATE)).toBeInTheDocument();
+    expect(buttons(block)).toEqual(['Copy', 'Sign in', 'Remove']);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    /* The screen alone keeps it: opened again, the card is the working plan's. */
+    unmount();
+    render(<Subscriptions me={ME} />);
+    await openAll();
+    const again = screen.getByRole('article', { name: 'Codex, Ivan' });
+    expect(blocks(again)).toEqual(THREE);
+    expect(within(again).queryByText(UPDATE)).not.toBeInTheDocument();
+  });
+
+  it('puts the old nodes and their command in place of the why, in the block of a plan waiting for its sign-in', async () => {
+    mockApi({ ...only(codex), 'POST /api/subscriptions/s-codex/signin': [409, OLD] });
+    render(<Subscriptions me={ME} />);
+    await openAll();
+    const card = screen.getByRole('article', { name: 'Codex, Ivan' });
+    await userEvent.click(within(card).getByRole('button', { name: 'Sign in to Codex' }));
+    const block = card.querySelector<HTMLElement>('.blk-fix')!;
+    await vi.waitFor(() => expect(block.firstElementChild).toHaveTextContent(OLD_TEXT));
+    expect(within(card).queryByText('On ivan-mbp. Only Ivan can sign in.')).not.toBeInTheDocument();
+    expect(buttons(block)).toEqual(['Copy', 'Sign in', 'Remove']);
+    expect(blocks(card)).toEqual(['blk blk-fix']);
+  });
+
+  it.each([
+    ['ready', claude],
+    ['at its limit', { ...claude, limits: { status: 'rejected' as const, windows: [{ name: 'five_hour', utilization: 1, resetsAt: '2099-10-29T18:00:00.000Z' }] } }],
+    ['with its machine offline', { ...claude, online: false, machines: [{ ...MACHINE, online: false }] }],
+    ['of a key whose built-in node is offline', { ...key, online: false }],
+  ])('keeps the three blocks of the card for a plan %s', async (_, sub) => {
+    mockApi(only(sub));
+    render(<Subscriptions me={ME} />);
+    await openAll();
+    const [card] = screen.getAllByRole('article');
+    expect(blocks(card!)).toEqual(THREE);
+  });
+
+  it('says nothing under the state of a working plan that is not at its limit', async () => {
+    mockApi(only(claude));
+    render(<Subscriptions me={ME} />);
+    await openAll();
+    expect(screen.getByRole('article', { name: 'Claude, Ivan' }).querySelector('.stline')).toHaveTextContent(/^Ready$/);
+  });
+
+  it("asks before removing a working plan's key from its card, then sends DELETE", async () => {
+    const calls = mockApi({ ...only(key), 'DELETE /api/subscriptions/s-key': [204] });
+    render(<Subscriptions me={ME} />);
+    await openAll();
+    const side = screen.getByRole('article', { name: 'Anthropic key ending 9f3a, Ivan' }).querySelector<HTMLElement>('.blk-side')!;
+    await userEvent.click(within(side).getByRole('button', { name: 'Remove Anthropic key ending 9f3a' }));
+    expect(within(side).getByText('Remove Anthropic key ending 9f3a? The key is deleted from Hornhoof.')).toBeInTheDocument();
+    await userEvent.click(within(side).getByRole('button', { name: 'Yes, remove' }));
+    expect(calls.find(c => c.method === 'DELETE')).toEqual({ method: 'DELETE', path: '/api/subscriptions/s-key', body: undefined });
   });
 });
