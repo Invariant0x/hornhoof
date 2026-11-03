@@ -730,6 +730,56 @@ async function showTree(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe('Department work tree', () => {
+  it.each([375, 1440])('shows an external event reason and deadline as a calm wait at %ipx', async width => {
+    vi.stubGlobal('innerWidth', width);
+    onTestFinished(() => { vi.unstubAllGlobals(); });
+    const user = userEvent.setup();
+    const externalWait = { reason: 'Image build', since: '2026-10-30T14:00:00.000Z', until: '2026-10-30T14:50:00.000Z' };
+    const line = { ...DEV_TREE.lines[0]!, mergedAt: null, doneAt: null, externalWait, waitsFor: [],
+      segments: [{ kind: 'after' as const, from: externalWait.since, to: null, externalWait }] };
+    shell(treeRoute({ ...DEV_TREE, lines: [line] }), TREE_ORG);
+    const graph = await showTree(user);
+    const label = within(document.querySelector('.tv-labs') as HTMLElement).getByRole('button', { name: /Bruno/ });
+    expect(label).toHaveTextContent('waits: Image build, until 14:50');
+    expect(label.querySelector('.ast')).not.toHaveClass('alarm');
+    await user.click(graph.querySelector('[data-row="b1"]')!);
+    const card = screen.getByRole('dialog', { name: /42/ });
+    expect(within(card).getByText('waits: Image build, until 14:50', { exact: true })).not.toHaveClass('bad');
+  });
+
+  it.each([
+    { kind: 'lost', program: { state: 'idle', since: Date.parse(DEV_TREE.turn!.startedAt), tool: null }, text: 'turn end lost since 09:00: waiting for input', red: true },
+    { kind: 'alarm', alarm: { reason: 'program_stalled', since: Date.parse(DEV_TREE.turn!.startedAt) }, text: 'program frozen since 09:00', red: true },
+    { kind: 'queued', waitsForAgent: { id: 'head', name: 'Hana' }, text: 'waits for Hana since 09:00', red: false },
+    { kind: 'unknown', text: 'no data', red: false },
+  ] as const)('shows $kind with its cause and time in the task card and keeps its timeline distinct', async state => {
+    const user = userEvent.setup();
+    const segment = { ...state, from: DEV_TREE.turn!.startedAt, to: null };
+    const line = { ...DEV_TREE.lines[0]!, mergedAt: null, doneAt: null, createdAt: segment.from, cutAt: segment.from, segments: [segment] };
+    shell(treeRoute({ ...DEV_TREE, lines: [line] }), TREE_ORG);
+    const graph = await showTree(user);
+    await user.click(graph.querySelector('[data-row="b1"]')!);
+    const card = screen.getByRole('dialog', { name: /42/ });
+    const status = within(card).getByText(state.text, { exact: true });
+    expect(status).toBeInTheDocument();
+    expect(status.classList.contains('bad')).toBe(state.red);
+    expect(graph.querySelector('.seg')).toHaveClass({ lost: 'ls', alarm: 'al', queued: 'q', unknown: 'u' }[state.kind]!);
+  });
+
+  it('shows interrupted time, queued message time and missing data separately in Speed', async () => {
+    const user = userEvent.setup();
+    const tree = { ...DEV_TREE, time: [{ agent: DEV_TREE.lines[0]!.agent, work: 2400, after: 0, person: 0, stall: 0, lost: 15749, alarm: 0, queued: 29950, unknown: 60 }] };
+    shell(treeRoute(tree), TREE_ORG);
+    await flyIn(user);
+    await user.click(screen.getByRole('button', { name: 'Speed' }));
+    const speed = screen.getByRole('complementary', { name: 'Speed' });
+    await within(speed).findByText('Interrupted', { exact: true });
+    expect(within(speed).getByText('Queued', { selector: '.sum dt' })).toBeInTheDocument();
+    expect(within(speed).getByText('No data', { selector: '.sum dt' })).toBeInTheDocument();
+    expect(speed.querySelector('.sum')).toHaveTextContent('4 h 22 min');
+    expect(speed.querySelector('.sum')).toHaveTextContent('8 h 19 min');
+  });
+
   it.each(['develop', undefined])('names the trunk and its card for repository branch %s', async branch => {
     const user = userEvent.setup();
     const departments = TREE_ORG.departments.map(d => ({
@@ -860,7 +910,7 @@ describe('Department work tree', () => {
     await user.click(screen.getByRole('button', { name: 'Speed' }));
     const speed = screen.getByRole('complementary', { name: 'Speed' });
     await within(speed).findByRole('button', { name: /Bruno/ });
-    expect(speed.querySelectorAll('.sum dd')).toHaveLength(3);
+    expect(speed.querySelectorAll('.sum dd')).toHaveLength(6);
     await user.click(within(speed).getByRole('button', { name: /Bruno/ }));
     await screen.findByRole('group', { name: 'Tree of turn 3' });
     expect(screen.getByRole('dialog', { name: /42/ })).toBeInTheDocument();

@@ -176,10 +176,11 @@ export async function treeFacts(db: Db, companyId: string, departmentId: string,
     .where(inArray(requests.taskId, taskIds))
     .orderBy(asc(requests.createdAt));
 
-  const signs = await readSigns(db, taskIds, turn.openedAt ?? turn.createdAt);
+  const from = turn.openedAt ?? turn.createdAt;
+  const signs = await readSigns(db, taskIds, from);
   const jobStates = await readJobStates(db, taskIds);
   const agentIds = collectAgentIds(turnTasks, events, asks);
-  const history = await readTurnHistory(db, companyId, agentIds, turn.openedAt ?? turn.createdAt);
+  const history = await readTurnHistory(db, companyId, agentIds, from);
   const agentRows = agentIds.length
     ? await db.select({ id: agents.id, name: agents.name, createdAt: agents.createdAt }).from(agents).where(inArray(agents.id, agentIds)).orderBy(asc(agents.createdAt))
     : [];

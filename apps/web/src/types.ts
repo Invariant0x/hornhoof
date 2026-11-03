@@ -503,8 +503,9 @@ export type UpdatesView = {
 /* A note of the company notebook or a department's, and who wrote it last: a person, the orchestrator or the head. */
 export type NoteView = { number: number; text: string; by: { kind: 'orchestrator' } | { kind: 'person' | 'agent'; id: string; name: string } | null; updatedAt: string };
 
-export type SegmentKind = 'work' | 'after' | 'person' | 'stall';
-export type TreeSegment = { kind: SegmentKind; from: string; to: string | null };
+export type SegmentKind = 'work' | 'after' | 'person' | 'stall' | 'lost' | 'alarm' | 'queued' | 'unknown';
+export type ExternalWait = { reason: string; since: string; until: string };
+export type TreeSegment = { kind: SegmentKind; from: string; to: string | null; program?: Pick<TurnProgram, 'state' | 'since' | 'tool'>; alarm?: TurnAlarm; waitsForAgent?: TreeAgent; externalWait?: ExternalWait };
 export type TreeMove = { kind: string; at: string; text: string };
 export type TreeAgent = { id: string; name: string };
 export type TreeLine = {
@@ -523,12 +524,13 @@ export type TreeLine = {
   moves: TreeMove[];
   lastActionAt: string | null;
   live: boolean;
+  externalWait?: ExternalWait | null;
 };
 export type TreeVerdict = { at: string; pass: boolean; findings: number | null };
 export type TreeReviewer = { agent: TreeAgent; verdict: TreeVerdict | null; segments: TreeSegment[]; lastActionAt: string | null; live: boolean };
 export type TreeReview = { taskId: string; number: number; openedAt: string; closedAt: string | null; head: TreeAgent; reviewers: TreeReviewer[] };
-export type AgentTime = { agent: TreeAgent; work: number; after: number; person: number; stall: number };
-export type IdleStretch = { agent: TreeAgent; taskId: string; number: number; title: string; kind: Exclude<SegmentKind, 'work'>; from: string; to: string | null; waitsFor: number[]; question: string | null };
+export type AgentTime = { agent: TreeAgent; work: number; after: number; person: number; stall: number; lost?: number; alarm?: number; queued?: number; unknown?: number };
+export type IdleStretch = { agent: TreeAgent; taskId: string; number: number; title: string; kind: Exclude<SegmentKind, 'work'>; from: string; to: string | null; waitsFor: number[]; question: string | null; program?: TreeSegment['program']; alarm?: TurnAlarm; waitsForAgent?: TreeAgent; externalWait?: ExternalWait };
 export type DepartmentTree = {
   now: string;
   turn: { id: string; number: number; branch: string; startedAt: string } | null;
@@ -537,6 +539,7 @@ export type DepartmentTree = {
   lines: TreeLine[];
   review: TreeReview | null;
   reviews?: TreeReview[];
+  waiting?: { agent: TreeAgent; waitsForAgent: TreeAgent; from: string; kind: 'stall' | 'after'; taskId: string; number: number; title: string }[];
   time: AgentTime[];
   idle: IdleStretch[];
 };

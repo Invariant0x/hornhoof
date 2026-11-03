@@ -51,6 +51,69 @@ function assertAllLinesCovered(tree: DepartmentTree): void {
 }
 
 describe('workTree', () => {
+  it('shows an explicit external wait as ordinary waiting until its deadline', () => {
+    const externalWait = { reason: 'Image build', since: iso(20), until: iso(60) };
+    const facts = baseFacts({ tasks: [{ id: 't1', number: 1, title: 'Checkout', status: 'working', parentId: null, executorAgentId: 'head', after: [],
+      inRepository: true, createdAt: at(0), closedAt: null, externalWait }], turns: [{ id: 'j1', taskId: 't1', agentId: 'head', createdAt: at(0), startedAt: at(0), finishedAt: null,
+      status: 'running', history: [{ at: at(0), program: { state: 'thinking', since: at(0).getTime(), tool: null }, alarm: null }] }] });
+    const tree = workTree(facts, at(40));
+    expect(tree.lines[0]!.segments.at(-1)).toEqual({ kind: 'after', from: iso(20), to: null, externalWait });
+    expect(tree.time[0]).toMatchObject({ work: 1200, after: 1200, lost: 0, alarm: 0 });
+    facts.turns![0]!.history[0]!.program!.state = 'idle';
+    facts.tasks.push({ id: 'finished-child', number: 2, title: 'Finished child', status: 'done', parentId: 't1', executorAgentId: 'mira', after: [], inRepository: true, createdAt: at(1), closedAt: at(10) });
+    expect(workTree(facts, at(40)).waiting).toEqual([]);
+  });
+
+  it('counts a review summary queued for its head even though the head is not a reviewer', () => {
+    const facts = baseFacts({ tasks: [
+      { id: 'head-task', number: 109, title: 'Department work', status: 'working', parentId: null, executorAgentId: null, assigneeAgentId: 'head', after: [], inRepository: true, createdAt: at(0), closedAt: null },
+      { id: 'r90', number: 90, title: 'Review', status: 'done', parentId: null, executorAgentId: 'head', after: [], inRepository: true, createdAt: at(10), closedAt: at(20) },
+    ], events: [
+      { taskId: 'r90', agentId: 'head', kind: 'created', text: '', data: { turnReview: true, panel: ['mira'] }, createdAt: at(10) },
+      { taskId: 'r90', agentId: 'mira', kind: 'verdict', text: '', data: { pass: true, findings: 0 }, createdAt: at(20) },
+    ], turns: [
+      { id: 'head-job', taskId: 'head-task', agentId: 'head', createdAt: at(0), startedAt: at(0), finishedAt: null, status: 'running', history: [{ at: at(0), program: { state: 'idle', since: at(0).getTime(), tool: null }, alarm: null }] },
+      { id: 'review-message', taskId: 'r90', agentId: 'head', createdAt: at(20), startedAt: null, finishedAt: null, status: 'queued', history: [] },
+    ] });
+    const tree = workTree(facts, at(40));
+    expect(tree.time.find(t => t.agent.id === 'head')).toMatchObject({ lost: 2400, queued: 1200 });
+    expect(tree.waiting.find(w => w.agent.id === 'mira')).toMatchObject({ waitsForAgent: { id: 'head', name: 'Nika' }, from: iso(20) });
+  });
+
+  it('names the head a finished worker is waiting for, from the time its own work ended', () => {
+    const tasks: TreeFacts['tasks'] = [
+      { id: 'head-task', number: 109, title: 'Whole department turn', status: 'working', parentId: null,
+        executorAgentId: null, assigneeAgentId: 'head', after: [], inRepository: true, createdAt: at(0), closedAt: null },
+      { id: 'mira-task', number: 110, title: 'Checkout', status: 'done', parentId: 'head-task',
+        executorAgentId: 'mira', after: [], inRepository: true, createdAt: at(1), closedAt: at(10) },
+    ];
+    const facts = baseFacts({ tasks, turns: [
+      { id: 'head-job', taskId: 'head-task', agentId: 'head', createdAt: at(0), startedAt: at(0), finishedAt: null, status: 'running',
+        history: [{ at: at(0), program: { state: 'idle', since: at(0).getTime(), tool: null }, alarm: null }] },
+      { id: 'mira-job', taskId: 'mira-task', agentId: 'mira', createdAt: at(1), startedAt: at(1), finishedAt: at(10), status: 'done',
+        history: [{ at: at(1), program: { state: 'thinking', since: at(1).getTime(), tool: null }, alarm: null }] },
+    ] });
+    const tree = workTree(facts, at(40));
+    expect(tree.waiting).toEqual([{ agent: { id: 'mira', name: 'Mira' }, waitsForAgent: { id: 'head', name: 'Nika' }, from: iso(10), kind: 'stall', taskId: 'mira-task', number: 110, title: 'Checkout' }]);
+    expect(tree.time.find(t => t.agent.id === 'mira')).toMatchObject({ work: 540, stall: 1800, lost: 0 });
+    facts.turns![0]!.history.push({ at: at(35), program: { state: 'thinking', since: at(35).getTime(), tool: null }, alarm: null });
+    const resumed = workTree(facts, at(40));
+    expect(resumed.waiting).toEqual([]);
+    expect(resumed.idle).toContainEqual(expect.objectContaining({ agent: { id: 'mira', name: 'Mira' }, from: iso(10), to: iso(35), waitsForAgent: { id: 'head', name: 'Nika' } }));
+    expect(resumed.time.find(t => t.agent.id === 'mira')).toMatchObject({ stall: 1500 });
+    facts.turns!.push({ id: 'next-mira-job', taskId: null, agentId: 'mira', createdAt: at(20), startedAt: at(20), finishedAt: null, status: 'running', history: [] });
+    expect(workTree(facts, at(40)).waiting).toEqual([]);
+    facts.turns!.at(-1)!.finishedAt = at(25);
+    facts.turns!.at(-1)!.status = 'done';
+    facts.turns![0]!.history.push({ at: at(40), program: { state: 'idle', since: at(40).getTime(), tool: null }, alarm: null });
+    const later = workTree(facts, at(60));
+    expect(later.waiting).toEqual([expect.objectContaining({ agent: { id: 'mira', name: 'Mira' }, from: iso(40) })]);
+    expect(later.idle.filter(i => i.agent.id === 'mira' && i.waitsForAgent).map(i => [i.from, i.to])).toEqual([
+      [iso(40), null], [iso(25), iso(35)], [iso(10), iso(20)],
+    ]);
+    expect(later.time.find(t => t.agent.id === 'mira')).toMatchObject({ stall: 2400 });
+  });
+
   it('keeps the department head assignment even when it has no member executor', () => {
     const tree = workTree(baseFacts({ tasks: [{ id: 'head-task', number: 109, title: 'Whole department turn', status: 'working', parentId: null,
       executorAgentId: null, assigneeAgentId: 'head', after: [], inRepository: true, createdAt: at(0), closedAt: null }] }), at(40));
@@ -637,6 +700,7 @@ describe('workTree', () => {
       lines: [],
       review: null,
       reviews: [],
+      waiting: [],
       time: [],
       idle: [],
     });

@@ -7,6 +7,7 @@ import {
   type TreeLayout, type TreeBadge, type TreeMark, type TreePick, type TreeRow, type TreeTarget,
 } from './tree';
 import { TreeCardBody, TreeWho } from './TreeCard';
+import { segmentText } from './tree-state';
 import { AgentState } from '../ui/AgentState';
 
 type Props = {
@@ -65,34 +66,53 @@ function Mark({ m }: { m: TreeMark }) {
   return <circle className={m.cls} cx={x} cy={y} r={r[kind]} />;
 }
 
-function Badge({ badge: b }: { badge: TreeBadge }) {
-  const L = useT().dept.tree;
-  const text = b.kind === 'after' ? b.waitsFor.map(L.after).join(', ') : L.dur(b.minutes);
-  const width = Math.ceil(text.length * 6.7 + 14 + (b.kind === 'after' ? 0 : 12)), x = b.x, y = b.y;
+function badgeText(t: ReturnType<typeof useT>, badge: TreeBadge): string {
+  if (badge.kind === 'after' && !badge.waitsForAgent && !badge.externalWait) return badge.waitsFor.map(t.dept.tree.after).join(', ');
+  return segmentText(t, { ...badge, to: null }, new Date(Date.parse(badge.from) + badge.minutes * 60_000).toISOString());
+}
+
+function badgeWidth(text: string, badge: TreeBadge, phone: boolean): number {
+  if (phone) return 156;
+  return Math.ceil(text.length * 6.7 + 14 + (badge.kind === 'after' ? 0 : 12));
+}
+
+function BadgeCopy({ text, x, y, width, phone }: { text: string; x: number; y: number; width: number; phone: boolean }) {
+  if (phone) return <foreignObject x={x} y={y - 20} width={width} height="40"><div className="bdg-copy">{text}</div></foreignObject>;
+  return <text className="bdg-t" x={x} y={y + .5}>{text}</text>;
+}
+
+const badgeHalf = (phone: boolean) => phone ? 24 : 10;
+
+function Badge({ badge: b, phone }: { badge: TreeBadge; phone: boolean }) {
+  const t = useT();
+  const text = badgeText(t, b);
+  const width = badgeWidth(text, b, phone), x = b.x, y = b.y;
+  const half = badgeHalf(phone);
   const points = [
-    `${x},${y - 10}`, `${x + width - 5},${y - 10}`, `${x + width},${y - 5}`,
-    `${x + width},${y + 10}`, `${x + 5},${y + 10}`, `${x},${y + 5}`,
+    `${x},${y - half}`, `${x + width - 5},${y - half}`, `${x + width},${y - half + 5}`,
+    `${x + width},${y + half}`, `${x + 5},${y + half}`, `${x},${y + half - 5}`,
   ].join(' ');
   return (
     <g className={`bdg ${idleClass(b.kind)}`}>
+      <title>{text}</title>
       <polygon points={points} />
       {b.kind === 'stall' && <path className="bdg-i" d={`M${x + 8.5} ${y - 3.5}v7M${x + 12.5} ${y - 3.5}v7`} />}
       {b.kind === 'person' && <text className="bdg-q" x={x + 10.5} y={y}>?</text>}
-      <text className="bdg-t" x={x + (b.kind === 'after' ? 7 : 19)} y={y + .5}>{text}</text>
+      <BadgeCopy text={text} x={x + (b.kind === 'after' ? 7 : 19)} y={y} width={width - 26} phone={phone} />
     </g>
   );
 }
 
 function LegendSymbol({ index, repository }: { index: number; repository: boolean }) {
-  if (index < 5) {
+  if (index < 9) {
     return (
       <>
-        <path className={`seg ${['w', 'af', 'ps', 'st', 'w'][index]}`} d="M2 8H32" />
-        {(index === 0 || index === 4) && <circle className={index ? 'mv' : 'pt'} cx="20" cy="8" r="3" />}
+        <path className={`seg ${['w', 'af', 'ps', 'st', 'ls', 'al', 'q', 'u', 'w'][index]}`} d="M2 8H32" />
+        {(index === 0 || index === 8) && <circle className={index ? 'mv' : 'pt'} cx="20" cy="8" r="3" />}
       </>
     );
   }
-  if (index === 6) {
+  if (index === 10) {
     return (
       <>
         <circle className="ring a" cx="9" cy="8" r="7" />
@@ -122,7 +142,7 @@ function LegendSymbol({ index, repository }: { index: number; repository: boolea
 function Legend({ tree }: { tree: DepartmentTree }) {
   const [open, setOpen] = useState(false), L = useT().dept.tree;
   const labels = [
-    L.lg.w, L.lg.af, L.lg.ps, L.lg.st, L.lg.mv,
+    L.lg.w, L.lg.af, L.lg.ps, L.lg.st, L.lg.ls, L.lg.al, L.lg.q, L.lg.u, L.lg.mv,
     tree.repository ? L.lg.mg(tree.turn!.branch) : L.lg.dn,
     ...(tree.repository ? [L.lg.vd] : []),
   ];
@@ -146,15 +166,18 @@ function Legend({ tree }: { tree: DepartmentTree }) {
   );
 }
 
+function reviewLabel(pick: TreePick, review: NonNullable<DepartmentTree['review']>, tree: DepartmentTree, department: Department, L: ReturnType<typeof useT>['dept']['tree']): string {
+  const who = department.employees.find(e => e.id === pick.agentId)?.name ?? review.reviewers.find(r => r.agent.id === pick.agentId)?.agent.name;
+  const label = `#${review.number} ${L.reviewH(tree.turn!.number)}`;
+  return who ? `${who}, ${label}` : label;
+}
+
 function pickLabel(pick: TreePick, tree: DepartmentTree, department: Department, L: ReturnType<typeof useT>['dept']['tree']): string {
   const row = tree.lines.find(l => l.taskId === pick.taskId);
   if (row) return `${department.employees.find(e => e.id === row.agent.id)?.name ?? row.agent.name}, #${row.number} ${row.title}`;
-  if (pick.agentId) {
-    const employee = department.employees.find(e => e.id === pick.agentId);
-    const reviewer = reviewsOf(tree).flatMap(r => r.reviewers).find(r => r.agent.id === pick.agentId);
-    return employee?.name ?? reviewer?.agent.name ?? '';
-  }
-  if (pick.kind === 'review') return L.reviewH(tree.turn!.number);
+  const review = reviewsOf(tree).find(r => r.taskId === pick.taskId);
+  if (review) return reviewLabel(pick, review, tree, department, L);
+  if (pick.agentId) return department.employees.find(e => e.id === pick.agentId)?.name ?? '';
   if (pick.kind === 'main') return trunkBranch(department);
   return tree.turn!.branch;
 }
@@ -164,37 +187,57 @@ function LaneState({ agent, department, now }: { agent: TreeAgent; department: D
   return <AgentState agent={department.employees.find(e => e.id === agent.id)} serverNow={now} />;
 }
 
-function Label({ row, tree, department }: { row: TreeRow; tree: DepartmentTree; department: Department }) {
+function ExternalWaitState({ wait }: { wait: NonNullable<DepartmentTree['lines'][number]['externalWait']> }) {
+  const text = useT().dept.tree.externalWaiting(wait.reason, treeClock(wait.until));
+  return <span className="ast calm" title={text}>{text}</span>;
+}
+
+function LaneDescription({ agent, tree, department }: { agent: TreeAgent; tree: DepartmentTree; department: Department }) {
   const L = useT().dept.tree;
+  const external = tree.lines.findLast(l => l.agent.id === agent.id && l.externalWait)?.externalWait;
+  if (external && external.until > tree.now) return <ExternalWaitState wait={external} />;
+  const wait = tree.waiting?.find(w => w.agent.id === agent.id);
+  if (!wait) return <LaneState agent={agent} department={department} now={tree.now} />;
+  const text = L.waitingFor(wait.waitsForAgent.name, treeClock(wait.from));
+  return <span className="ast calm" title={text}>{text}</span>;
+}
+
+function Label({ row, tree, department }: { row: TreeRow; tree: DepartmentTree; department: Department }) {
+  const L = useT().dept.tree, number = row.line?.number ?? row.review?.number;
   if (!row.agent) return <b>{row.type === 'main' ? trunkBranch(department) : tree.turn!.branch}</b>;
   return (
     <>
-      <span className="r1"><b><TreeWho agent={row.agent} department={department} /></b></span>
+      <span className="r1"><b><TreeWho agent={row.agent} department={department} /></b><small className="tv-task">#{number}</small></span>
       <span className="r2">
-        #{row.line?.number ?? row.review?.number}
+        #{number}
         <span className="tv-title"> {row.line?.title ?? (tree.turn ? L.reviewH(tree.turn.number) : '')}</span>
       </span>
-      <LaneState agent={row.agent} department={department} now={tree.now} />
+      <LaneDescription agent={row.agent} department={department} tree={tree} />
     </>
   );
 }
 
 type CanvasProps = Pick<Props, 'tree' | 'department'> & {
+  phone: boolean;
   layout: TreeLayout;
   selected: TreePick | null;
   select(pick: TreePick, e: MouseEvent): void;
 };
 
+function samePick(a: TreePick | null, b: TreePick): boolean {
+  return !!a && a.kind === b.kind && a.agentId === b.agentId && a.taskId === b.taskId && a.moveIndex === b.moveIndex;
+}
+
 function Target({ hit, tree, department, selected, select }: Omit<CanvasProps, 'layout'> & { hit: TreeTarget }) {
-  const L = useT().dept.tree;
-  const on = selected && selected.kind === hit.pick.kind
-    && selected.agentId === hit.pick.agentId && selected.moveIndex === hit.pick.moveIndex;
+  const t = useT(), L = t.dept.tree;
+  const on = samePick(selected, hit.pick);
+  const label = hit.segment ? `${pickLabel(hit.pick, tree, department, L)}: ${segmentText(t, hit.segment, tree.now)}` : pickLabel(hit.pick, tree, department, L);
   const props = {
     className: `${hit.round ? 'hit' : 'rowhit'}${on ? ' on' : ''}`,
     'data-row': hit.row,
     role: 'button',
     tabIndex: 0,
-    'aria-label': pickLabel(hit.pick, tree, department, L),
+    'aria-label': label,
     onClick: (e: MouseEvent) => select(hit.pick, e),
     onKeyDown(e: React.KeyboardEvent<SVGElement>) {
       if (e.key !== 'Enter' && e.key !== ' ') return;
@@ -203,8 +246,8 @@ function Target({ hit, tree, department, selected, select }: Omit<CanvasProps, '
     },
   };
   return hit.round
-    ? <circle {...props} cx={hit.x} cy={hit.y} r={hit.width / 2} />
-    : <rect {...props} x={hit.x} y={hit.y} width={hit.width} height={hit.height} />;
+    ? <circle {...props} cx={hit.x} cy={hit.y} r={hit.width / 2}><title>{label}</title></circle>
+    : <rect {...props} x={hit.x} y={hit.y} width={hit.width} height={hit.height}><title>{label}</title></rect>;
 }
 
 function Graph(props: CanvasProps) {
@@ -232,7 +275,7 @@ function Graph(props: CanvasProps) {
           .filter(p => p.kind === kind)
           .map((p, i) => <path key={`${kind}${i}`} className={`${p.cls}${p.dim ? ' dn' : ''}`} d={toD(p.points)} />))}
         {layout.marks.map((m, i) => <g key={i} className={m.dim ? 'dn' : undefined}><Mark m={m} /></g>)}
-        {layout.badges.map(b => <Badge key={b.row} badge={b} />)}
+        {layout.badges.map(b => <Badge key={b.row} badge={b} phone={props.phone} />)}
         {!still && layout.pulses.map((pts, i) => <Pulse key={i} pts={pts} speed={60} />)}
         <rect className="g-now-chip" x={layout.nowX - 25} y="4" width="50" height="18" />
         <text className="g-now-t" x={layout.nowX} y="13.5">{treeClock(tree.now)}</text>
@@ -376,23 +419,20 @@ function FloatingCard({ selection, card, box, tree, department, onOpenTask, onCl
   );
 }
 
-function orderedTree(tree: DepartmentTree, department: Department): DepartmentTree {
-  const ranks = new Map(department.employees.map((e, i) => [e.id, i]));
-  const rank = (id: string) => ranks.get(id) ?? ranks.size;
-  return { ...tree, lines: [...tree.lines].sort((a, b) => rank(a.agent.id) - rank(b.agent.id)) };
+function fitBadges(layout: TreeLayout, t: ReturnType<typeof useT>, phone: boolean): TreeLayout {
+  return { ...layout, width: Math.max(layout.width, ...layout.badges.map(b => b.x + badgeWidth(badgeText(t, b), b, phone) + 12)) };
 }
 
 export function TreeView(props: Props) {
   const { tree, department, zoom, fit } = props, t = useT();
   const root = useRef<HTMLDivElement>(null), scroll = useRef<HTMLDivElement>(null);
   const box = useTreeBox(root);
-  const ordered = useMemo(() => orderedTree(tree, department), [tree, department]);
-  const layout = useMemo(() => treeLayout(ordered, box, zoom), [ordered, box, zoom]);
+  const layout = useMemo(() => fitBadges(treeLayout(tree, { ...box, agentOrder: department.employees.map(e => e.id) }, zoom), t, box.phone), [tree, department, box, zoom, t]);
   const { selection, card, select, close } = useTreeSelection(root, props, layout, box.width);
   useLayoutEffect(() => {
     if (scroll.current) scroll.current.scrollLeft = scroll.current.scrollWidth;
   }, [fit, box, zoom]);
-  const canvas = { layout, tree, department, selected: selection?.pick ?? null, select };
+  const canvas = { layout, tree, department, phone: box.phone, selected: selection?.pick ?? null, select };
   return (
     <div className="tview" ref={root}>
       {!tree.turn ? <p className="tv-empty glass">{t.dept.treeNoTurn}</p> : (

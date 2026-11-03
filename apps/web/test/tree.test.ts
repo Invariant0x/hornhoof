@@ -1,11 +1,39 @@
 import { describe, expect, it } from 'vitest';
-import { treeLayout } from '../src/screens/tree';
+import { currentTaskNumber, treeLayout } from '../src/screens/tree';
 import { DEV_TREE, REVIEW_TREE, SALES_TREE } from './api-mock';
 
 const box = { width: 1100, height: 640, phone: false };
 const minutes = (a: string, b: string) => (Date.parse(a) - Date.parse(b)) / 60_000;
 
 describe('work tree layout', () => {
+  it('labels a running assignment ahead of a newer task still waiting in the queue', () => {
+    const running = { ...DEV_TREE.lines[0]!, taskId: 'running', live: true, mergedAt: null };
+    const queued = { ...running, taskId: 'queued', live: false, createdAt: DEV_TREE.now };
+    const layout = treeLayout({ ...DEV_TREE, lines: [running, queued] }, box, 1);
+    expect(layout.rows.find(r => r.agent?.id === running.agent.id)?.line?.taskId).toBe('running');
+  });
+
+  it('keeps the department lane order when a reviewer starts a later task', () => {
+    const order = REVIEW_TREE.review!.reviewers.map(r => r.agent.id).concat(REVIEW_TREE.lines.map(l => l.agent.id));
+    const layout = treeLayout(REVIEW_TREE, { ...box, agentOrder: order }, 1);
+    expect(layout.rows.filter(r => r.type === 'lane').map(r => r.agent!.id)).toEqual(order);
+  });
+
+  it('keeps a finished wait for the head on the lane after the head resumes', () => {
+    const line = DEV_TREE.lines[0]!;
+    const waiting = { agent: line.agent, taskId: line.taskId, number: line.number, title: line.title, kind: 'stall' as const,
+      from: '2026-10-30T11:00:00.000Z', to: '2026-10-30T12:00:00.000Z', waitsForAgent: { id: 'h', name: 'Hana' }, waitsFor: [], question: null };
+    const layout = treeLayout({ ...DEV_TREE, idle: [waiting], waiting: [] }, box, 1);
+    expect(layout.targets).toContainEqual(expect.objectContaining({ segment: waiting, row: line.agent.id }));
+    expect(layout.badges.some(b => b.waitsForAgent)).toBe(false);
+  });
+
+  it('uses the same current task number for lanes and Speed, including a review-only agent', () => {
+    expect(currentTaskNumber(REVIEW_TREE, REVIEW_TREE.lines[0]!.agent.id)).toBe(REVIEW_TREE.lines[0]!.number);
+    expect(currentTaskNumber(REVIEW_TREE, REVIEW_TREE.review!.reviewers[0]!.agent.id)).toBe(REVIEW_TREE.review!.number);
+    expect(currentTaskNumber(REVIEW_TREE, 'not-in-this-turn')).toBeUndefined();
+  });
+
   it('keeps all 38 tasks in time order on one lane, labelled by the current task', () => {
     const lines = Array.from({ length: 38 }, (_, i) => {
       const from = new Date(Date.parse(DEV_TREE.turn!.startedAt) + i * 480_000).toISOString();
@@ -25,7 +53,8 @@ describe('work tree layout', () => {
     const first = { ...REVIEW_TREE.review!, taskId: 'r90', number: 90, openedAt: DEV_TREE.turn!.startedAt,
       closedAt: REVIEW_TREE.review!.openedAt };
     for (const stage of ['review', 'work'] as const) {
-      const tree = { ...REVIEW_TREE, stage, reviews: [first, REVIEW_TREE.review!] };
+      const last = { ...REVIEW_TREE.review!, closedAt: stage === 'work' ? REVIEW_TREE.now : null, reviewers: REVIEW_TREE.review!.reviewers.map(r => ({ ...r, live: stage === 'review' && r.live })) };
+      const tree = { ...REVIEW_TREE, stage, reviews: [first, last] };
       const layout = treeLayout(tree, box, 1);
       const agentIds = new Set([...tree.lines.map(l => l.agent.id), ...first.reviewers.map(r => r.agent.id)]);
       expect(layout.rows.filter(r => r.type === 'lane').map(r => r.agent!.id)).toEqual([...agentIds]);

@@ -1,7 +1,7 @@
 import { LOST_END_MS } from '@hornhoof/protocol/map';
 import type { jobs } from '../../db/schema.js';
 import type { ProgramChange } from './silent.js';
-import type { SegmentKind, TreeAgent, TreeSegment } from './tree.js';
+import type { ExternalWait, SegmentKind, TreeAgent, TreeSegment } from './tree.js';
 
 export type ProgramPoint = ProgramChange & { at: Date };
 export type FactTurn = Pick<typeof jobs.$inferSelect, 'id' | 'taskId' | 'createdAt' | 'startedAt' | 'finishedAt' | 'status'> & {
@@ -72,16 +72,20 @@ function covers(segment: TreeSegment, from: number, to: number, end: number): bo
   return Date.parse(segment.from) <= from && (segment.to ? Date.parse(segment.to) : end) >= to;
 }
 
+function sameDetails(a: TreeSegment, b: TreeSegment): boolean {
+  return a.kind === b.kind && a.program === b.program && a.alarm === b.alarm && a.waitsForAgent === b.waitsForAgent && a.externalWait === b.externalWait;
+}
+
 function appendSegment(out: TreeSegment[], segment: TreeSegment): void {
   const previous = out.at(-1);
-  if (previous && previous.to === segment.from && previous.kind === segment.kind && previous.program === segment.program
-    && previous.alarm === segment.alarm && previous.waitsForAgent === segment.waitsForAgent) previous.to = segment.to;
+  if (previous && previous.to === segment.from && sameDetails(previous, segment)) previous.to = segment.to;
   else out.push(segment);
 }
 
 function partition(base: TreeSegment[], overlays: TreeSegment[], now: Date): TreeSegment[] {
   const start = Date.parse(base[0]!.from), end = Date.parse(base.at(-1)!.to ?? now.toISOString());
   const all = [...base, ...overlays];
+  if (start === end) return [{ ...all.filter(s => covers(s, start, end, end)).at(-1)!, from: base[0]!.from, to: base.at(-1)!.to }];
   const bounds = [...new Set([start, end, ...all.flatMap(s => [Date.parse(s.from), Date.parse(s.to ?? now.toISOString())])])]
     .filter(at => start <= at && at <= end).sort((a, b) => a - b);
   const out: TreeSegment[] = [];
@@ -109,4 +113,11 @@ export function countedSegments(segments: TreeSegment[], now: Date): TreeSegment
   const from = states.map(s => s.from).sort()[0]!;
   const to = states.map(s => s.to ?? now.toISOString()).sort().at(-1)!;
   return [...partition([{ kind: 'unknown', from, to }], states, now), ...queued];
+}
+
+/* An explicit task wait is a normal dependency wait, independent of a program's silence. */
+export function withExternalWait(base: TreeSegment[], wait: ExternalWait | null | undefined, now: Date): TreeSegment[] {
+  if (!wait) return base;
+  const to = Date.parse(wait.until) > now.getTime() ? null : wait.until;
+  return partition(base, [{ kind: 'after', from: wait.since, to, externalWait: wait }], now);
 }
