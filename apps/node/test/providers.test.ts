@@ -14,7 +14,7 @@ import { adapterFor } from '../src/providers/index.js';
 import { claudeEvents, claudeInterrupted, limitsFrom } from '../src/providers/claude.js';
 import { codexEvents, codexRateLimits } from '../src/providers/codex.js';
 import { kimiContextSize, kimiEvents, kimiModels } from '../src/providers/kimi.js';
-import { agyModels, agyStream, installAgy } from '../src/providers/antigravity.js';
+import { agyConversation, agyModels, agyStream, installAgy } from '../src/providers/antigravity.js';
 import { childEnv, lastUrl } from '../src/providers/process.js';
 import { runJob, type RunInput } from '../src/runner.js';
 
@@ -930,6 +930,12 @@ describe('live events', () => {
       { kind: 'tool', name: 'run_command', input: 'false' },
       { kind: 'tool_result', ok: false, summary: 'exit status 1' },
     ]);
+  });
+
+  it('read the conversation Antigravity names with the result of its run, and none from its other lines', () => {
+    expect(linesOf('agy-new').map(agyConversation).filter(Boolean)).toEqual(['c3b66b04-872b-4fbe-a3a4-058a026ef20a']);
+    expect(linesOf('agy-tools').map(agyConversation)).toEqual(['']);
+    for (const line of [null, { event: 'result', result: { conversation_id: 42 } }, { event: 'result' }]) expect(agyConversation(line)).toBe('');
   });
 
   it('keep the names of built-in tools and show a shell command as it is', () => {

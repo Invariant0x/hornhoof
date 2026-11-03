@@ -72,7 +72,15 @@ const textOf = (content: unknown) =>
     : '';
 const json = (v: unknown) => (typeof v === 'string' ? v : JSON.stringify(v ?? {}));
 
+/* The tool a Codex item runs, by the name people read: a command, a change of files, or a tool of an MCP server. */
+export function codexTool(item: Record<string, unknown>): string | null {
+  if (item.type === 'CommandExecution') return 'Bash';
+  if (item.type === 'FileChange') return 'Edit';
+  return item.type === 'McpToolCall' ? `${String(item.server ?? '')}.${String(item.tool ?? '')}` : null;
+}
+
 function itemEvents(item: Record<string, unknown>): AgentEvent[] {
+  const name = String(codexTool(item));
   switch (item.type) {
     case 'AgentMessage': {
       const text = textOf(item.content);
@@ -80,18 +88,18 @@ function itemEvents(item: Record<string, unknown>): AgentEvent[] {
     }
     case 'CommandExecution':
       return [
-        { kind: 'tool', name: 'Bash', input: String(item.command ?? '') },
+        { kind: 'tool', name, input: String(item.command ?? '') },
         { kind: 'tool_result', ok: item.exit_code === 0, summary: String(item.aggregated_output ?? '') },
       ];
     case 'FileChange':
       return [
-        { kind: 'tool', name: 'Edit', input: Object.keys(isRecord(item.changes) ? item.changes : {}).join(', ') },
+        { kind: 'tool', name, input: Object.keys(isRecord(item.changes) ? item.changes : {}).join(', ') },
         { kind: 'tool_result', ok: item.status === 'completed', summary: String(item.stdout || item.stderr || '') },
       ];
     case 'McpToolCall': {
       const error = isRecord(item.error) ? String(item.error.message ?? '') : '';
       return [
-        { kind: 'tool', name: `${String(item.server ?? '')}.${String(item.tool ?? '')}`, input: json(item.arguments) },
+        { kind: 'tool', name, input: json(item.arguments) },
         { kind: 'tool_result', ok: item.status === 'completed', summary: error || textOf(isRecord(item.result) ? item.result.content : undefined) },
       ];
     }

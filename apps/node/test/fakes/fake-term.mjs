@@ -6,7 +6,9 @@
 // answers (as when a person stops it with Escape: no stop hook), EXIT ends the
 // program, SECRET prints the value of FAKE_SECRET, MUTE says on the screen only that it will not answer and ends the turn with
 // no answer, as Codex does when its provider refuses the work. INTERRUPT logs what Claude Code logs when a person stops a turn with
-// Escape, and calls no stop hook. TICK works 3 s under a line counting the time. CLEAR starts a new session, as /clear does. FAKE_MCP_LIST_MS makes it list its Hornhoof
+// Escape, and calls no stop hook. TICK works 3 s under a line counting the time, with Claude Code's way to stop it.
+// WORK thinks, runs a command and asks a question with AskUserQuestion, 1.5 s each, as Claude Code shows and logs them,
+// and then answers. CLEAR starts a new session, as /clear does. FAKE_MCP_LIST_MS makes it list its Hornhoof
 // tools that long after it started, as Claude Code connects to its MCP servers, and show "tools: ok" or "tools: failed".
 // FAKE_LOSE_ENTER misses the first Enter, as Claude Code just started can: the line stays in its input until the next one.
 // FAKE_START_MS makes it say it started that long after it shows, as Claude Code can while it loads. FAKE_DEAF_MS makes
@@ -127,12 +129,15 @@ async function take(line) {
   }
   // TICK works for 3 s with its prompt empty under a line that counts the time, as Claude Code's spinner does.
   if (line.includes('TICK')) {
+    process.stdout.write('\n❯ ');
     for (let i = 0; i < 12; i++) {
-      process.stdout.write(`✻ Working ${i * 250} ms\n❯ `);
-      await new Promise(r => setTimeout(r, 250));
+      spinner(`Working ${i * 250} ms`);
+      await sleep(250);
     }
-    process.stdout.write('\n');
+    spinner('');
+    process.stdout.write('\r\x1b[2K');
   }
+  if (line.includes('WORK')) await work();
   const answer = line === 'SECRET' ? `the key is ${process.env.FAKE_SECRET}` : `echo: ${line}${context ? `\n${context}` : ''}`;
   const write = () => appendFileSync(log, JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: answer }] } }) + '\n');
   if (!line.includes('LAG')) write();
@@ -140,4 +145,24 @@ async function take(line) {
   await hook('status', { rate_limits: { five_hour: { used_percentage: 40, resets_at: 1793379000 } }, context_window: { used_percentage: 25 } });
   await hook('stop', { last_assistant_message: answer, transcript_path: log });
   if (line.includes('LAG')) setTimeout(write, line.includes('LAGLONG') ? 2500 : 300);
+}
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+// Claude Code's spinner, redrawn in place over the empty input under it, and gone once the work is.
+const spinner = what => process.stdout.write(`\x1b[1A\r\x1b[2K${what ? `✻ ${what}… (esc to interrupt)` : ''}\r\n\x1b[2K❯ `);
+const said = (type, block) => appendFileSync(log, JSON.stringify({ type, message: { role: type, content: [block] } }) + '\n');
+
+async function work() {
+  process.stdout.write('\n❯ ');
+  spinner('Thinking');
+  await sleep(1500);
+  said('assistant', { type: 'tool_use', id: 'toolu_work', name: 'Bash', input: { command: 'make' } });
+  spinner('Running make');
+  await sleep(1500);
+  said('user', { type: 'tool_result', tool_use_id: 'toolu_work', content: 'built' });
+  spinner('');
+  said('assistant', { type: 'tool_use', id: 'toolu_ask', name: 'AskUserQuestion', input: { questions: [{ question: 'Which one?' }] } });
+  process.stdout.write('\rWhich one?\r\n❯ 1. Yes\r\n  2. No\r\nEnter to select · Esc to cancel\r\n');
+  await sleep(1500);
+  said('user', { type: 'tool_result', tool_use_id: 'toolu_ask', content: 'Yes' });
 }

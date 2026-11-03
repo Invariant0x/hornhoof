@@ -3,7 +3,7 @@
 // message, as Kimi does, keeps the session log under KIMI_CODE_HOME/sessions, calls the hooks named in its config.toml
 // with Kimi's snake_case input, and answers each line with "echo: LINE". -S resumes a session, or fails as Kimi does when
 // there is none. HANG never answers until Escape stops it, ABORT logs a stopped turn, FAIL a failed one, SLOW answers after
-// 2 s, EXIT ends the program, SECRET prints the value of FAKE_SECRET, /new starts a new session. FAKE_MCP_LIST_MS makes it
+// 2 s, WORK thinks and runs a command, 1.5 s each, as Kimi logs them, and then answers, EXIT ends the program, SECRET prints the value of FAKE_SECRET, /new starts a new session. FAKE_MCP_LIST_MS makes it
 // list its Hornhoof tools from .kimi-code/mcp.json that long after its session's workspace opened, and show "tools: ok" or
 // "tools: failed". FAKE_SIGNED_OUT shows what a signed-out Kimi shows. A paste comes whole, line breaks and all, as in Kimi;
 // FAKE_KEEP_TAIL keeps only that many last characters of the first message. What its prompt hook prints goes with the
@@ -117,6 +117,12 @@ async function take(line) {
     print('\r\x1b[J');
   }
   const loop = event => record('context.append_loop_event', { event: { turnId: String(turnId), ...event } });
+  if (line.includes('WORK')) {
+    await new Promise(r => setTimeout(r, 1500));
+    loop({ type: 'tool.call', step: 1, toolCallId: 'work-1', name: 'Bash', args: { command: 'make' } });
+    await new Promise(r => setTimeout(r, 1500));
+    loop({ type: 'tool.result', step: 1, toolCallId: 'work-1', result: { output: 'built', isError: false } });
+  }
   if (line.includes('PARTS')) {
     // A step with a tool call, then a final message in two text parts with a thought between them.
     loop({ type: 'step.begin', step: 1 });
