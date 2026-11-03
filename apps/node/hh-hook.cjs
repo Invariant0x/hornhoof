@@ -7,7 +7,10 @@
 // message is when the program got only part of it.
 'use strict';
 
-const WAIT_MS = { prompt: 12000 };
+/* How long a call waits for the node. The node takes it only once it found that the call comes from the agent's own
+   program, which can take seconds on a busy machine, and a call that gives up first is lost. Word that a turn ended
+   ends it at once, where the node would see it only a minute later by itself, so it waits the longest. */
+const WAIT_MS = { prompt: 12000, stop: 60000 };
 const AFTER_COMPACT =
   'Hornhoof: your conversation was just compacted, so details of it may be gone. Before you go on, read again what your instructions say to read after a compaction.';
 
