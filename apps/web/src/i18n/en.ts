@@ -381,6 +381,11 @@ export const en = {
     lend: 'Lend to test runs',
     lent: 'Lent to test runs',
     notLent: 'Not lent to test runs',
+    /* Its nodes are of another build than the one the server's nodes are: here is a list of theirs, or olderBuild for
+       nodes from before builds. */
+    otherBuild: 'Other build',
+    otherBuildNote: (here: string, server: string) => `Its nodes are not the server's build (${here} here, ${server} on the server). To update them, run the install command on it again without --join.`,
+    olderBuild: 'an older one',
   },
   notebook: {
     title: 'Notebook',

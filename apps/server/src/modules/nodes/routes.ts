@@ -18,7 +18,7 @@ import { createNodeCode } from './codes.js';
 import { commandFor } from './command.js';
 import { disconnectMachines } from './disconnect.js';
 import { BUILTIN, nodeIdentity } from './hub.js';
-import { builtinMachine, liveNode, settlePlans } from './nodes.js';
+import { builtinMachine, liveNode, otherBuild, settlePlans } from './nodes.js';
 
 const JoinBody = z.object({
   code: z.string().min(1).max(200),
@@ -250,6 +250,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
         kind: m.kind,
         owner: { id: m.ownerId, name: m.ownerName },
         ...machineState(hub, on(m.id).map(n => n.id)),
+        otherBuild: otherBuild(hub, on(m.id).map(n => n.id), config.nodeBuild),
         lastSeenAt: latest(on(m.id).map(n => n.lastSeenAt)),
         plans: on(m.id).flatMap(n => (n.subscriptionId && n.provider ? [{ id: n.subscriptionId, provider: n.provider, status: n.status, online: hub.isOnline(nodeIdentity(n.id)) }] : [])),
         lendsTests: m.lendsTests,
