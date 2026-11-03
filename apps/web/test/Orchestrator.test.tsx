@@ -280,7 +280,7 @@ describe('AgentWindow', () => {
 
   describe('access to the computer', () => {
     const ASKED: ComputerView = { available: true, until: null, asked: { reason: 'Restart the nodes outside AppArmor.', at: '2026-11-02T10:00:00Z' } };
-    const OPEN: ComputerView = { available: true, until: '2026-11-03T10:00:00.000Z', asked: null };
+    const OPEN: ComputerView = { available: true, until: new Date(Date.now() + 86_400_000).toISOString(), asked: null };
     const CLOSED: ComputerView = { available: true, until: null, asked: null };
 
     it("shows the CEO the orchestrator's request next to his terminal and opens access for a day with one click", async () => {
