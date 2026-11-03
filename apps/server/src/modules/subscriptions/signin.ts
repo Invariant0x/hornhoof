@@ -7,6 +7,8 @@ import type { Ctx } from '../../app.js';
 import { requirePerson } from '../../auth/session.js';
 import { machines, nodes, subscriptions } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
+import { publicUrl } from '../link/link.js';
+import { updateCommand } from '../nodes/command.js';
 import { nodeIdentity, type NodeIdentity } from '../nodes/hub.js';
 import { liveNode } from '../nodes/nodes.js';
 import { CLOSE } from '../terminals/relay.js';
@@ -30,9 +32,13 @@ const FromBrowser = z.discriminatedUnion('type', [
 const unknown = () => new ApiError(404, 'not_found', 'This subscription does not exist.', 'subscription_unknown');
 const notOwner = () => new ApiError(403, 'forbidden', 'Only the owner of this plan signs it in.', 'not_owner');
 const noNode = () => new ApiError(409, 'conflict', 'No machine of this plan is online. Turn one of them on and try again.', 'no_node_online');
-/* Online, but from before machine keys or with no terminals: the node cannot run a sign-in Hornhoof can seal. */
-const unsupported = () =>
-  new ApiError(409, 'conflict', 'The machine of this plan is online, but its node cannot run the sign-in from Hornhoof. Update the nodes on that machine and try again.', 'signin_unsupported');
+/* Online, but from before machine keys or with no terminals: the node cannot run a sign-in Hornhoof can seal. The
+   error names the machines, each with one node of the plan, and gives the command that updates their nodes, which
+   holds no code. */
+function unsupported(machines: string[], command: string) {
+  const message = `The nodes on ${machines.join(', ')} are older than the sign-in from Hornhoof needs. To update them, run this in a terminal there, then try again: ${command}`;
+  return new ApiError(409, 'conflict', message, 'signin_unsupported', { machines, command });
+}
 
 /* A plan's owner signs it in from Hornhoof: in a terminal on one of their machines that is online, which nobody else
    opens or watches, the CEO neither. Never the orchestrator for them: a fresh sign-in signs the program out first. */
@@ -67,7 +73,8 @@ export function signinRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { nodeId, fresh } = SigninBody.parse(req.body ?? {});
     const { online, able } = await onlineNodes(sub.id);
     const node = nodeId ? able.find(n => n.nodeId === nodeId) : able[0];
-    if (!node) throw online.length ? unsupported() : noNode();
+    const old = online.filter(n => !able.includes(n)).map(n => n.hostname);
+    if (!node) throw old.length ? unsupported(old, updateCommand(await publicUrl(db, ctx.config))) : noNode();
     if (!hub.send(nodeIdentity(node.nodeId), { type: 'login.start', fresh })) throw noNode();
     return { nodeId: node.nodeId, hostname: node.hostname };
   });

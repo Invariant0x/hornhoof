@@ -614,17 +614,52 @@ describe('signing in to plans', () => {
     expect(screen.queryByTestId('live-terminal')).not.toBeInTheDocument();
   });
 
-  it('says under the plan, in plain words, why a sign-in cannot start, instead of at the top of the page', async () => {
+  /* A server that names no machine or gives no command gets the plain words, and no command box. */
+  it.each([
+    ['no details', undefined],
+    ['no machines', { command: 'curl -fsSL https://hq.acme.com/install.sh | bash' }],
+    ['no command', { machines: ['ivan-mbp'] }],
+  ])('says under the plan, in plain words, why a sign-in cannot start, instead of at the top of the page, with %s', async (_, details) => {
     const ready = { ...codex, status: 'ready' as const, machines: [MACHINE] };
-    const unsupported = { error: { code: 'conflict', message: 'The machine of this plan is online, but its node cannot run the sign-in.', reason: 'signin_unsupported' } };
-    mockApi({ ...only(ready), 'POST /api/subscriptions/s-codex/signin': [409, unsupported] });
+    const unsupported = { error: { code: 'conflict', message: 'The machine of this plan is online, but its node cannot run the sign-in.', reason: 'signin_unsupported', ...(details ? { details } : {}) } };
+    mockApi({ ...only(ready, SUBS[0]!), 'POST /api/subscriptions/s-codex/signin': [409, unsupported] });
     render(<Subscriptions me={ME} />);
     await openAll();
     await userEvent.click(await screen.findByRole('button', { name: 'Sign in to Codex' }));
     const card = screen.getByRole('article', { name: 'Codex, Ivan' });
-    expect(await within(card).findByText('The machine is online, but its node cannot sign in from Hornhoof yet. Update the nodes on that machine, then try again.')).toBeInTheDocument();
+    const words = 'The machine is online, but its node cannot sign in from Hornhoof yet. Update the nodes on that machine, then try again.';
+    expect(await within(card).findByText(words)).toBeInTheDocument();
+    expect(within(card).queryByRole('button', { name: 'Copy' })).not.toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(within(card).getByRole('button', { name: 'Sign in to Codex' })).toBeInTheDocument();
+    /* Under the plan whose button was pressed alone. */
+    expect(within(screen.getByRole('article', { name: 'Claude, Ivan' })).queryByText(words)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['en', 'Sign in to Codex', 'The nodes on ivan-mbp are older than the sign-in from Hornhoof needs. To update them, run this command in a terminal on ivan-mbp, then sign in again.', 'Copy', 'It moves the Hornhoof nodes on that machine to the new build and keeps their sign-ins and files.'],
+    ['ru', 'Войти в Codex', 'Ноды на ivan-mbp старше, чем нужно для входа из Hornhoof. Чтобы обновить их, выполните эту команду в терминале на ivan-mbp, затем войдите снова.', 'Копировать', 'Она переводит ноды Hornhoof на этой машине на новую сборку, а их вход и файлы сохраняет.'],
+  ])('names the machine whose nodes are too old for the sign-in, with the command that updates them to copy, in %s', async (language, signIn, text, copy, trust) => {
+    localStorage.setItem('hh-lang', language);
+    const update = 'curl -fsSL https://hq.acme.com/install.sh | bash';
+    const old = { error: { code: 'conflict', message: 'The nodes on ivan-mbp are older than the sign-in from Hornhoof needs.', reason: 'signin_unsupported', details: { machines: ['ivan-mbp'], command: update } } };
+    mockApi({ ...only({ ...codex, status: 'ready' as const, machines: [MACHINE] }), 'POST /api/subscriptions/s-codex/signin': [409, old] });
+    const copied: string[] = [];
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn((t: string) => { copied.push(t); return Promise.resolve(); }) } });
+    render(<LanguageProvider><Subscriptions me={ME} /></LanguageProvider>);
+    await openAll();
+    await userEvent.click(await screen.findByRole('button', { name: signIn }));
+    const card = screen.getByRole('article', { name: 'Codex, Ivan' });
+    expect(await within(card).findByText(text)).toBeInTheDocument();
+    expect(within(card).getByText(update)).toBeInTheDocument();
+    expect(within(card).getByText(trust)).toBeInTheDocument();
+    await userEvent.click(within(card).getByRole('button', { name: copy }));
+    expect(copied).toEqual([update]);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    /* The next try starts clean: the note and its command go once the sign-in starts. */
+    mockApi({ ...only({ ...codex, status: 'ready' as const, machines: [MACHINE] }), 'POST /api/subscriptions/s-codex/signin': [200, { nodeId: NODE, hostname: 'ivan-mbp' }] });
+    await userEvent.click(within(card).getByRole('button', { name: signIn }));
+    await vi.waitFor(() => expect(within(card).queryByText(update)).not.toBeInTheDocument());
   });
 
   it('says in Russian that no machine of the plan is online to sign in on', async () => {

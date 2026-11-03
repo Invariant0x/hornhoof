@@ -7,8 +7,12 @@ import type { Db } from '../../db/client.js';
 import { nodeCodes } from '../../db/schema.js';
 import { publicUrl } from '../link/link.js';
 
+/* The command that updates every node on a computer that joined: the installer without a code moves them to the new
+   image with their volumes, so each keeps its key and sign-in. It holds no code, so anyone may see it. */
+export const updateCommand = (publicUrl: string): string => `curl -fsSL ${publicUrl}/install.sh | bash`;
+
 /* The one command a person runs on their computer. The installer sets up Docker if needed, then the node. */
-export const installCommand = (publicUrl: string, code: string): string => `curl -fsSL ${publicUrl}/install.sh | bash -s -- --join ${code}`;
+export const installCommand = (publicUrl: string, code: string): string => `${updateCommand(publicUrl)} -s -- --join ${code}`;
 
 /* What the orchestrator hears of a command he asked for. */
 export const SHOWN_TO_CEO = 'The command is shown to the CEO in this window; it works once, for 24 hours.';

@@ -254,6 +254,9 @@ export const en = {
     signingIn: (machine: string) => `Signing in on ${machine}`,
     signingInNote: 'Only you see this terminal. Follow the steps in it, and Hornhoof keeps the sign-in for your other machines.',
     stopSignIn: 'Stop the sign-in',
+    /* Its machines are online, but their nodes are from before the sign-in from Hornhoof. */
+    oldNodes: (hosts: string) => `The nodes on ${hosts} are older than the sign-in from Hornhoof needs. To update them, run this command in a terminal on ${hosts}, then sign in again.`,
+    updateTrust: 'It moves the Hornhoof nodes on that machine to the new build and keeps their sign-ins and files.',
     signInErrors: {
       stopped: 'The sign-in was stopped.',
       unfinished: 'The sign-in ended before it finished, so nothing changed.',
