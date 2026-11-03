@@ -13,8 +13,8 @@ export type AgentLive = { id: string; program: ProgramView | null; alarm: TurnAl
 type Tone = 'alarm' | 'work' | 'person' | 'calm';
 type Line = { tone: Tone; text: string };
 
-const minutes = (now: number, at: string) => {
-  const n = Math.floor((now - Date.parse(at)) / MINUTE_MS);
+const minutes = (now: number, at: number) => {
+  const n = Math.floor((now - at) / MINUTE_MS);
   return n < 1 ? '<1' : String(n);
 };
 
@@ -34,7 +34,7 @@ function programLine(say: Messages['dept']['now'], p: ProgramView, now: number):
   if (p.state === 'tool') return { tone: 'work', text: say.tool(p.tool ?? '', minutes(now, p.since)) };
   if (p.state === 'asking') return { tone: 'person', text: say.asking };
   if (p.state === 'gone') return { tone: 'calm', text: say.gone };
-  return now - Date.parse(p.since) >= LOST_END_MS ? { tone: 'alarm', text: say.lostEnd } : { tone: 'calm', text: say.idle };
+  return now - p.since >= LOST_END_MS ? { tone: 'alarm', text: say.lostEnd } : { tone: 'calm', text: say.idle };
 }
 
 /* The server's time now: its clock when the map was read, carried on by this page's steady clock, drawn again every tick

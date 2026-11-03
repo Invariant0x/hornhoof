@@ -1,4 +1,5 @@
-import { PROGRAM_SCREEN_MAX, QUIET_ALARM_MS, type NodeMessage, type ProgramState } from '@hornhoof/protocol';
+import { PROGRAM_SCREEN_MAX, QUIET_ALARM_MS, type NodeMessage } from '@hornhoof/protocol';
+import type { TurnAlarm, TurnAlarmReason, TurnProgram } from '@hornhoof/protocol/map';
 import { and, asc, eq, inArray, isNotNull, isNull, ne, or, sql, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentEvents, agents, departments, jobs, tasks } from '../../db/schema.js';
@@ -6,20 +7,7 @@ import { enqueueTurn, liveSubscription } from '../conversation/queue.js';
 
 export const SILENT_TURN_MS = QUIET_ALARM_MS;
 
-export type TurnProgram = {
-  state: ProgramState;
-  since: number;
-  tool: string | null;
-  screenAt: number;
-  reportedAt: number;
-};
-
-export type TurnAlarmReason = 'program_stalled' | 'node_silent';
-
-export type TurnAlarm = {
-  reason: TurnAlarmReason;
-  since: number;
-};
+export type { TurnAlarm, TurnAlarmReason, TurnProgram } from '@hornhoof/protocol/map';
 
 type Agent = typeof agents.$inferSelect;
 type Job = typeof jobs.$inferSelect;

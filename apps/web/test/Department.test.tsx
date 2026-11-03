@@ -1036,7 +1036,7 @@ it('anchors a card opened from Speed beside the clicked row', async () => {
 
 describe("what an agent's program does, and the server's alarms about its turn", () => {
   type Live = Pick<Employee, 'program' | 'alarm'> & Partial<Pick<Employee, 'status'>>;
-  const ago = (now: number, minutes: number) => new Date(now - minutes * 60_000).toISOString();
+  const ago = (now: number, minutes: number) => now - minutes * 60_000;
   /* The company with Bruno's program and alarm as given, on a server clock at now. */
   function live(now: number, bruno: Live, base: Org = TREE_ORG): Org {
     return { ...base, serverNow: new Date(now).toISOString(), departments: base.departments.map(d => ({ ...d, employees: d.employees.map(e => (e.id === 'b1' ? { ...e, ...bruno } : e)) })) };
