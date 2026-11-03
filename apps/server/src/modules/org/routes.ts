@@ -170,7 +170,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
             provider: sub?.provider ?? null,
             effort: sub ? effortShown(sub, a, role?.effort) : null,
             state: busy.has(a.id) ? 'working' : a.subscriptionId ? 'sleeping' : 'needs_subscription',
-            ...agentProgramState(ctx, run?.id),
+            ...agentProgramState(ctx, run, canReach(reach, spotAmong(a, depts))),
             context: a.contextUsed,
             status: now.status,
             on: !a.switchedOffAt,
@@ -224,7 +224,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
         model: orchestrator.model,
         effort: (orchestrator.subscriptionId && subs.has(orchestrator.subscriptionId) && effortShown(subs.get(orchestrator.subscriptionId)!, orchestrator, ORCHESTRATOR_EFFORT)) || null,
         context: orchestrator.contextUsed,
-        ...agentProgramState(ctx, running.find(j => j.agentId === orchestrator.id)?.id),
+        ...agentProgramState(ctx, running.find(j => j.agentId === orchestrator.id), reach.whole),
         /* His plan is at its limit until then: he waits for the reset on it, and the CEO decides whether he moves. */
         limitUntil: limitUntil((orchestrator.subscriptionId && subs.get(orchestrator.subscriptionId)?.limits) || null),
         subscription: orchestrator.subscriptionId ? await subView(db, node => hub.isOnline(node), orchestrator.subscriptionId, me) : null,

@@ -706,6 +706,6 @@ export async function agentState(ctx: Ctx, agentId: string): Promise<AgentState>
     runningJobId: running?.id ?? null,
     queued: Number(waiting?.n ?? 0),
     terminal,
-    ...agentProgramState(ctx, running?.id),
+    ...agentProgramState(ctx, running),
   };
 }

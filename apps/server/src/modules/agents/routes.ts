@@ -162,7 +162,7 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
       subscription: agent.subscriptionId ? (views.get(agent.subscriptionId) ?? null) : null,
       machine: await machineOf(db, (await programNode(ctx, agent.id))?.node ?? null),
       state: running ? 'working' : agent.subscriptionId ? 'sleeping' : 'needs_subscription',
-      ...agentProgramState(ctx, running?.id),
+      ...agentProgramState(ctx, running),
       skills: offered.flatMap(s => {
         const skill = ctx.templates.skills.get(s.id);
         if (!skill) return [];
