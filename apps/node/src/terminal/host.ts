@@ -4,7 +4,6 @@ import { readFileSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { TERM_CHUNK, type AgentEvent, type Limits, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
-import { LOST_END_MS } from '@hornhoof/protocol/map';
 import { agyConversation, agyRules, agyStream } from '../providers/antigravity.js';
 import { claudeEvents, claudeInterrupted } from '../providers/claude.js';
 import { contentText } from '../providers/events.js';
@@ -176,9 +175,7 @@ type Options = {
   toolsMs?: number;
   /* How long the host waits for the program to take a prompt before it presses Enter again. */
   enterWaitMs?: number;
-  /* How long a program may wait for what to type in a turn of Hornhoof's it never said ended, before the host ends the
-     turn; how often the host looks at what it does, and tells Hornhoof again what it does when nothing changed. */
-  lostMs?: number;
+  /* How often the host observes the program and reports its state again when nothing changed. */
   lookMs?: number;
   reportMs?: number;
   cols?: number;
@@ -207,7 +204,7 @@ const INPUT_WAIT_MS = 10_000;
 /* How often the host looks at what the program of a running turn does, besides each time it begins or ends a tool. */
 const LOOK_MS = 5000;
 /* What the options leave out: how long the host waits for what, and the terminal's size. */
-const DEFAULTS = { readyMs: 120_000, pollMs: 500, openMs: 8000, toolsMs: 15_000, enterWaitMs: 4000, lostMs: LOST_END_MS, reportMs: REPORT_MS, cols: 160, rows: 48 };
+const DEFAULTS = { readyMs: 120_000, pollMs: 500, openMs: 8000, toolsMs: 15_000, enterWaitMs: 4000, reportMs: REPORT_MS, cols: 160, rows: 48 };
 /* The options given, without those set to nothing. */
 const defined = (opts: Options): Partial<Options> => Object.fromEntries(Object.entries(opts).filter(([, value]) => value !== undefined));
 /* When the host last looked at the program, and the tool it ran then. */
@@ -265,7 +262,6 @@ export class TerminalHost {
   private readonly openMs: number;
   private readonly toolsMs: number;
   private readonly enterWaitMs: number;
-  private readonly lostMs: number;
   private readonly lookMs: number;
   private readonly reportMs: number;
   /* Views being opened, and those Hornhoof closed meanwhile. */
@@ -292,8 +288,7 @@ export class TerminalHost {
     this.openMs = set.openMs;
     this.toolsMs = set.toolsMs;
     this.enterWaitMs = set.enterWaitMs;
-    this.lostMs = set.lostMs;
-    this.lookMs = opts.lookMs ?? Math.min(this.lostMs / 4, LOOK_MS);
+    this.lookMs = opts.lookMs ?? LOOK_MS;
     this.reportMs = set.reportMs;
     this.cols = set.cols;
     this.rows = set.rows;
@@ -500,10 +495,9 @@ export class TerminalHost {
     return null;
   }
 
-  /* Waits for the turn to end: the program says so, a person stops it, the program is gone, or it waits for what to type
-     in a turn whose end was lost on the way. */
+  /* Waits for the turn to end: the program says so, a person stops it, or the program is gone. */
   private async turnEnd(a: Agent, job: TermJob, ended: Deferred<string>): Promise<RunResult> {
-    const { watch, look } = this.observeProgram(a, job.input.jobId);
+    const { watch, look } = this.observeProgram(job.input.jobId);
     for (;;) {
       this.drain(a);
       const message = await Promise.race([ended.promise, sleep(this.pollMs).then(() => null)]);
@@ -511,13 +505,13 @@ export class TerminalHost {
       /* A program stopped with Escape does not say its turn ended: it waits for the next prompt. */
       if (job.input.signal?.aborted) return await this.stopTurn(a, job, ended);
       if (!(await this.opts.tmux.alive(a.name))) return await this.programGone(a, job, watch);
-      if (await this.lostEnd(a, watch, look)) this.endUnsaid(a);
+      await this.reportProgram(a, watch, look);
     }
   }
 
-  /* Both entry paths follow the same program state and lost-end clock. Every opened turn has a running program. */
-  private observeProgram(a: Agent, jobId: string | null | undefined): ObservedProgram {
-    return { watch: new ProgramWatch(jobId, a.program!.kind, m => this.opts.send(m), this.reportMs, () => this.opts.secrets()), look: { at: Date.now(), call: null } };
+  /* Both entry paths report the same program state. */
+  private observeProgram(jobId: string | null | undefined): ObservedProgram {
+    return { watch: new ProgramWatch(jobId, m => this.opts.send(m), this.reportMs, () => this.opts.secrets()), look: { at: Date.now(), call: null } };
   }
 
   /* The program said the turn ended: stopped by a person, failed, or with its answer, which the turn waits to read. */
@@ -552,19 +546,16 @@ export class TerminalHost {
     return await this.failedTurn(a, job, job.signedOut.test(screen) ? 'not_logged_in' : 'agent_failed', screen);
   }
 
-  /* Looks at what the program does, at once when it began or ended a tool or Hornhoof is due to hear again, else every
-     lookMs, and tells Hornhoof. True once it waited for what to type for lostMs of Hornhoof's turn: the word that the turn
-     ended was lost on the way. */
-  private async lostEnd(a: Agent, watch: ProgramWatch, look: Look): Promise<boolean> {
+  /* Reports the program's own state when its call changes or a report is due, else every lookMs. The screen is diagnostic. */
+  private async reportProgram(a: Agent, watch: ProgramWatch, look: Look): Promise<void> {
     const turn = a.turn;
     const now = Date.now();
     const call = a.calls.values().next().value ?? null;
-    if (call === look.call && now - look.at < this.lookMs && !watch.due(now)) return false;
+    if (call === look.call && now - look.at < this.lookMs && !watch.due(now)) return;
     Object.assign(look, { at: now, call });
     const screen = await this.opts.tmux.screen(a.name, 0, true);
-    if (a.turn !== turn) return false;
+    if (a.turn !== turn) return;
     watch.look(now, screen, call, Boolean(a.took && a.busy));
-    return watch.idleFor(now) >= this.lostMs;
   }
 
   /* Hornhoof hears that the turn's program is gone, how it ended and what it showed last, without the secrets. */
@@ -578,24 +569,14 @@ export class TerminalHost {
     watch.gone(Date.now(), ended ? { code: ended.code, signal: signalName(ended.signal) } : null, redact(plainOutput(redact(screen, secrets)), secrets));
   }
 
-  /* The turn ends as the program would have said it ended, with its last answer; nothing reaches the program, which waits
-     for its next turn. */
-  private endUnsaid(a: Agent): void {
-    this.log(`Agent ${a.key} (${a.program?.kind}): end seen without hook. The program waited for what to type ${Math.round(this.lostMs / 1000)} s into Hornhoof's turn, which ends with its last answer.`);
-    a.busy = false;
-    const message = a.lastText ?? '';
-    this.finishTyped(a, message);
-    a.ended?.resolve(message);
-  }
-
   private async failedTurn(a: Agent, job: TermJob, error: RunResult['error'], output?: string): Promise<RunResult> {
     const ended = error === 'agent_failed' || error === 'not_logged_in' ? await this.opts.tmux.exitSnapshot(a.name) : null;
     const details = ended?.output ?? output ?? await this.screen(job.key);
     return { ok: false, sessionId: a.sessionId, result: '', output: details, programOutput: ended?.programOutput, error: exitError(ended?.output ?? null, job.signedOut, error), limits: a.limits };
   }
 
-  /* While its program runs the host reads the agent's log, where a turn a person typed into Codex shows, and ends a typed
-     turn whose program ended or that ran too long. Hornhoof's own turns look after themselves. */
+  /* While its program runs the host reads the agent's log and reports typed turns, ending them if the program is gone.
+     Hornhoof's own turns look after themselves. */
   private watch(a: Agent): void {
     if (a.watch) return;
     let looking = false;
@@ -627,8 +608,7 @@ export class TerminalHost {
   private async lookTyped(a: Agent, turn: Turn | null): Promise<void> {
     const observed = turn?.observed;
     if (!observed) return;
-    const lost = await this.lostEnd(a, observed.watch, observed.look);
-    if (lost && a.turn === turn) this.endUnsaid(a);
+    await this.reportProgram(a, observed.watch, observed.look);
   }
 
   private async endedTyped(a: Agent): Promise<void> {
@@ -969,7 +949,7 @@ export class TerminalHost {
     a.lastText = null;
     a.stepSaid = false;
     const turn: Turn = { jobId: null, onEvent: () => {}, typed: true, seq: 0, ref: randomUUID(), early: [], over: null, opened: deferred() };
-    turn.observed = this.observeProgram(a, null);
+    turn.observed = this.observeProgram(null);
     a.turn = turn;
     a.unopened.push(turn);
     this.watch(a);

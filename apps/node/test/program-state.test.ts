@@ -1,61 +1,62 @@
 import { readFileSync } from 'node:fs';
 import { PROGRAM_SCREEN_MAX, type NodeMessage } from '@hornhoof/protocol';
 import { describe, expect, it } from 'vitest';
-import { BUSY, lastScreen, programState, ProgramWatch, REPORT_MS } from '../src/terminal/program-state.js';
+import { lastScreen, programState, ProgramWatch, REPORT_MS } from '../src/terminal/program-state.js';
 
 const fixture = (name: string) => readFileSync(new URL(`./fixtures/${name}.txt`, import.meta.url), 'utf8');
 const RULE = '─'.repeat(50);
 const bash = { name: 'Bash', at: 1000 };
 
-/* What each program shows at work and at its empty prompt, as the fakes show it after the programs. */
+/* Empty prompt lines stay on screen while the programs work. */
 const SCREENS = {
-  claude: { working: `❯ Fix the build\n✻ Thinking… (12s · ↓ 1.2k tokens · esc to interrupt)\n${RULE}\n❯ \n${RULE}`, waiting: fixture('claude-idle-screen') },
-  codex: { working: `› Fix the build\n• Working (12s • esc to interrupt)\n\n\x1b[0;1m›\x1b[0m \x1b[2mAsk Codex to do anything\x1b[0m`, waiting: fixture('codex-busy-screen') },
+  claude: { working: `✻ Recombobulating… (4s · ↓ 691 tokens · thought for 1s)\n${RULE}\n❯ \n${RULE}`, waiting: fixture('claude-idle-screen') },
+  codex: { working: fixture('codex-busy-screen'), waiting: fixture('codex-busy-screen') },
   kimi: { working: fixture('kimi-empty-screen'), waiting: fixture('kimi-empty-screen') },
-  antigravity: { working: `\x1b[1m›\x1b[22m Fix the build\nLooking at the build`, waiting: `\x1b[1m›\x1b[22m Fix the build\nThe build passes.\n\n\x1b[1m›\x1b[22m ` },
+  antigravity: { working: `› Fix the build\nLooking at the build\n› `, waiting: `› Fix the build\nThe build passes.\n\n› ` },
 } as const;
+const KINDS = Object.keys(SCREENS) as (keyof typeof SCREENS)[];
 
-describe('what a program does, as its node sees it', () => {
-  it.each(Object.keys(SCREENS) as (keyof typeof SCREENS)[])('tells each state of %s from its screen and its log', kind => {
+describe('what a program reports about its work', () => {
+  it.each(KINDS)('keeps %s thinking at an empty prompt while its turn runs', kind => {
+    const { working } = SCREENS[kind];
+    expect(working).not.toContain('esc to interrupt');
+    expect(programState(working, null, true)).toBe('thinking');
+  });
+
+  it.each(KINDS)('keeps %s idle without a running turn, whatever its screen shows', kind => {
     const { working, waiting } = SCREENS[kind];
-    /* Kimi Code's screen does not tell; its log says when its turn runs. */
-    const logged = kind === 'kimi';
-    expect(programState(kind, working, null, logged)).toBe('thinking');
-    expect(programState(kind, waiting, null, false)).toBe('idle');
-    expect(programState(kind, working, bash, logged)).toBe('tool');
-    expect(programState(kind, working, { name: 'AskUserQuestion', at: 1000 }, logged)).toBe('asking');
-    expect(programState(kind, null, bash, logged)).toBe('gone');
-    /* A tool whose result never reached the log does not keep a program at its empty prompt at work. */
-    expect(programState(kind, waiting, bash, false)).toBe('idle');
+    for (const screen of [working, waiting, `${working}\nesc to interrupt`, `${waiting}half a line`]) {
+      expect(programState(screen, null, false)).toBe('idle');
+      expect(programState(screen, bash, false)).toBe('idle');
+    }
   });
 
-  it('shows Claude Code and Codex at work by the way to stop them, Kimi Code by its log and Antigravity by its prompt that is not there', () => {
-    expect(BUSY.claude(SCREENS.claude.working, false)).toBe(true);
-    expect(BUSY.codex(SCREENS.codex.working, false)).toBe(true);
-    expect(BUSY.kimi(SCREENS.kimi.working, true)).toBe(true);
-    expect(BUSY.antigravity(SCREENS.antigravity.working, false)).toBe(true);
-    /* Only Kimi Code's screen does not tell, so only its log counts. */
-    for (const kind of ['claude', 'codex', 'kimi', 'antigravity'] as const) expect(BUSY[kind](SCREENS[kind].waiting, kind !== 'kimi')).toBe(false);
+  it.each(KINDS.flatMap(kind => [
+    { kind, name: 'Bash', state: 'tool' },
+    { kind, name: 'AskUserQuestion', state: 'asking' },
+  ] as const))('reports $state for $kind at an empty prompt', ({ kind, name, state }) => {
+    expect(programState(SCREENS[kind].working, { name, at: 1000 }, true)).toBe(state);
   });
 
-  it('keeps a prompt with words typed in it from counting as waiting for what to type', () => {
-    expect(programState('claude', `${RULE}\n❯ half a line\n${RULE}`, null, false)).toBe('thinking');
+  it.each(KINDS)('reports %s gone when there is no program', kind => {
+    expect(programState(null, bash, true)).toBe('gone');
+    expect(programState(null, null, false)).toBe('gone');
   });
 });
 
 describe("the node's word on what a turn's program does", () => {
   const watched = (jobId: string | null = 'job-1') => {
     const sent: NodeMessage[] = [];
-    return { sent, watch: new ProgramWatch(jobId, 'claude', m => sent.push(m)) };
+    return { sent, watch: new ProgramWatch(jobId, m => sent.push(m)) };
   };
   const { working, waiting } = SCREENS.claude;
 
   it('goes out once for each change of state or tool, with since when and when the screen last changed', () => {
     const { sent, watch } = watched();
-    expect(watch.look(1000, working, null, false)).toBe('thinking');
-    watch.look(2000, `${working}.`, null, false);
-    watch.look(3000, `${working}.`, bash, false);
-    watch.look(4000, `${working}.`, { name: 'Read', at: 3500 }, false);
+    expect(watch.look(1000, working, null, true)).toBe('thinking');
+    watch.look(2000, `${working}.`, null, true);
+    watch.look(3000, `${working}.`, bash, true);
+    watch.look(4000, `${working}.`, { name: 'Read', at: 3500 }, true);
     watch.look(5000, waiting, null, false);
     expect(sent).toEqual([
       { type: 'job.program', jobId: 'job-1', state: 'thinking', since: 1000, screenAt: 1000 },
@@ -65,27 +66,33 @@ describe("the node's word on what a turn's program does", () => {
     ]);
   });
 
-  it('goes out again once a minute while nothing changes, no more often, and tells how long the program waits', () => {
+  it('goes out again once a minute while nothing changes, no more often, and keeps the same state start', () => {
     const { sent, watch } = watched();
     watch.look(0, waiting, null, false);
     for (let at = 5000; at < 3 * REPORT_MS; at += 5000) watch.look(at, waiting, null, false);
     expect(sent.map(m => (m as { screenAt: number }).screenAt)).toEqual([0, 0, 0]);
     expect(sent).toHaveLength(3);
-    expect(watch.idleFor(3 * REPORT_MS - 5000)).toBe(3 * REPORT_MS - 5000);
+    expect(sent.every(m => m.type === 'job.program' && m.since === 0)).toBe(true);
     /* The host looks again as the next word is due. */
     expect([watch.due(3 * REPORT_MS - 1), watch.due(3 * REPORT_MS)]).toEqual([false, true]);
   });
 
   it('keeps a program that thinks long, its screen moving and its log quiet, thinking', () => {
     const { sent, watch } = watched();
-    for (let at = 0; at <= 5 * REPORT_MS; at += 5000) watch.look(at, `${working} ${at}`, null, false);
+    for (let at = 0; at <= 5 * REPORT_MS; at += 5000) watch.look(at, `${working} ${at}`, null, true);
     expect(new Set(sent.map(m => (m as { state: string }).state))).toEqual(new Set(['thinking']));
-    expect(watch.idleFor(5 * REPORT_MS)).toBe(0);
+  });
+
+  it('reports a pending script as a tool for twenty minutes at an empty prompt', () => {
+    const { sent, watch } = watched();
+    for (let at = 1000; at <= 20 * REPORT_MS + 1000; at += REPORT_MS) watch.look(at, working, bash, true);
+    expect(sent).toHaveLength(21);
+    expect(sent.every(m => m.type === 'job.program' && m.state === 'tool' && m.tool === 'Bash' && m.since === 1000)).toBe(true);
   });
 
   it('tells a program gone with how it ended and its last screen', () => {
     const { sent, watch } = watched();
-    watch.look(1000, working, bash, false);
+    watch.look(1000, working, bash, true);
     watch.gone(2000, { code: 3, signal: null }, 'fake claude\nError: out of memory\n\n\n');
     watch.gone(2500, null, '');
     expect(sent.slice(1)).toEqual([
@@ -93,7 +100,6 @@ describe("the node's word on what a turn's program does", () => {
       /* A session gone whole tells neither how it ended. */
       { type: 'job.program', jobId: 'job-1', state: 'gone', since: 2000, screenAt: 2000, exitCode: null, signal: null, screen: '' },
     ]);
-    expect(watch.idleFor(3000)).toBe(0);
   });
 
   it("keeps a gone program's last 40 lines, at most as much as Hornhoof takes", () => {
@@ -112,6 +118,5 @@ describe("the node's word on what a turn's program does", () => {
     expect(watch.due(0)).toBe(false);
     watch.look(0, waiting, null, false);
     expect(sent).toEqual([]);
-    expect(watch.idleFor(1000)).toBe(1000);
   });
 });

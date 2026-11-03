@@ -1,10 +1,6 @@
 import { PROGRAM_SCREEN_MAX, type NodeMessage, type ProgramExit, type ProgramState } from '@hornhoof/protocol';
-import { stripEscapes } from '../providers/process.js';
 import { redact } from '../redact.js';
-import { atEmptyPrompt } from './input.js';
-import type { TermProgram } from './programs.js';
 
-type Kind = TermProgram['kind'];
 /* A tool the program called and has no result for yet, and since when, by the node's clock. */
 export type Pending = { name: string; at: number };
 
@@ -16,24 +12,13 @@ export const READY: Record<'codex' | 'kimi', (screen: string) => boolean> = {
   kimi: screen => /context: \d+%/.test(screen),
 };
 
-/* A program at work shows it, so a long thought whose log is quiet is no lost end. Claude Code and Codex show how to stop
-   them under their spinner; Hornhoof's screen for Antigravity shows its prompt again only once agy answered; Kimi Code's
-   screen does not tell, so its log does: running is that it said it took the turn and not yet that the turn ended. */
-export const BUSY: Record<Kind, (screen: string, running: boolean) => boolean> = {
-  claude: screen => /esc to interrupt/i.test(stripEscapes(screen)),
-  codex: screen => /esc to interrupt/i.test(stripEscapes(screen)),
-  kimi: (_screen, running) => running,
-  antigravity: screen => !atEmptyPrompt('antigravity', screen),
-};
-
 /* Tools that put a question to a person and wait for the answer. The programs run without asking leave for their tools. */
 const QUESTIONS = new Set(['AskUserQuestion']);
 
-/* What the program does now: gone with its session; waiting for what to type at its empty prompt, not at work, whatever
-   its log still owes; asking or running the oldest tool it has no result for; else thinking. */
-export function programState(kind: Kind, screen: string | null, pending: Pending | null, running: boolean): ProgramState {
+/* Only the program's hooks and log say whether its turn runs and which call is pending. Its screen says only if it is gone. */
+export function programState(screen: string | null, pending: Pending | null, running: boolean): ProgramState {
   if (screen === null) return 'gone';
-  if (!BUSY[kind](screen, running) && atEmptyPrompt(kind, screen)) return 'idle';
+  if (!running) return 'idle';
   if (pending) return QUESTIONS.has(pending.name) ? 'asking' : 'tool';
   return 'thinking';
 }
@@ -71,7 +56,6 @@ export class ProgramWatch {
 
   constructor(
     private jobId: string | null | undefined,
-    private readonly kind: Kind,
     private readonly send: (m: NodeMessage) => void,
     private readonly reportMs = REPORT_MS,
     private readonly secrets: () => string[] = () => [],
@@ -86,7 +70,7 @@ export class ProgramWatch {
 
   look(now: number, screen: string | null, pending: Pending | null, running: boolean): ProgramState {
     if (screen !== this.screen) Object.assign(this, { screen, screenAt: now });
-    const state = programState(this.kind, screen, pending, running);
+    const state = programState(screen, pending, running);
     /* Only a tool or a question has a call to tell. */
     const call = state === 'tool' || state === 'asking' ? pending : null;
     if (this.changed(now, state, call) || this.due(now)) this.tell(now);
@@ -112,11 +96,6 @@ export class ProgramWatch {
   /* Hornhoof is due to hear again what the program does, once it heard it first. */
   due(now: number): boolean {
     return this.state !== null && now - this.toldAt >= this.reportMs;
-  }
-
-  /* How long the program has waited for what to type, or 0 while it does anything else. */
-  idleFor(now: number): number {
-    return this.state === 'idle' ? now - this.since : 0;
   }
 
   private tell(now: number): void {

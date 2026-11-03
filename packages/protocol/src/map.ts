@@ -11,8 +11,7 @@ export const RETURN_MS = 300_000;
 export const REWORK_MS = 600_000;
 /* A running turn with no event for this long is an alarm: the server's watch raises it, and the map marks the agent. */
 export const QUIET_ALARM_MS = 1_800_000;
-/* A program waiting for input this long in a running turn lost the turn's end: its node closes the turn then, and the map
-   shows it red if the turn still runs. */
+/* The map marks a program red when it reports idle this long while its turn still runs. */
 export const LOST_END_MS = 60_000;
 
 /* A running turn's program as /api/org and /api/agents/:id give it. All times are Unix epoch milliseconds. */
