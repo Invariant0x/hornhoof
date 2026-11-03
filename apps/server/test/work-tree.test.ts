@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { workTree, type DepartmentTree, type TreeFacts, type TreeLine } from '../src/modules/tasks/tree.js';
+import { agentTime, workTree, type DepartmentTree, type TreeFacts, type TreeLine } from '../src/modules/tasks/tree.js';
 
 const T0 = Date.parse('2026-05-01T09:00:00.000Z');
 const at = (minutes: number): Date => new Date(T0 + minutes * 60_000);
@@ -87,10 +87,12 @@ describe('workTree', () => {
       { taskId: 'r90', agentId: 'head', kind: 'created', text: '', data: { turnReview: true, panel: ['mira'] }, createdAt: at(10) },
       { taskId: 'r90', agentId: 'mira', kind: 'verdict', text: '', data: { pass: true, findings: 0 }, createdAt: at(20) },
     ], turns: [
-      { id: 'head-job', taskId: 'head-task', agentId: 'head', createdAt: at(0), startedAt: at(0), finishedAt: null, status: 'running', history: [{ at: at(0), program: { state: 'idle', since: at(0).getTime(), tool: null }, alarm: null }] },
+      { id: 'head-job', taskId: null, agentId: 'head', createdAt: at(0), startedAt: at(0), finishedAt: null, status: 'running', history: [{ at: at(0), program: { state: 'idle', since: at(0).getTime(), tool: null }, alarm: null }] },
       { id: 'review-message', taskId: 'r90', agentId: 'head', createdAt: at(20), startedAt: null, finishedAt: null, status: 'queued', history: [] },
     ] });
     const tree = workTree(facts, at(40));
+    expect(tree.activity).toContainEqual(expect.objectContaining({ jobId: 'head-job', agent: { id: 'head', name: 'Nika' }, task: null, segments: [expect.objectContaining({ kind: 'lost', from: iso(0), to: null })] }));
+    expect(tree.activity).toContainEqual(expect.objectContaining({ jobId: 'review-message', task: { id: 'r90', number: 90, title: 'Review' } }));
     expect(tree.time.find(t => t.agent.id === 'head')).toMatchObject({ lost: 2400, queued: 1200 });
     expect(tree.waiting.find(w => w.agent.id === 'mira')).toMatchObject({ waitsForAgent: { id: 'head', name: 'Nika' }, from: iso(20), taskId: 'r90', number: 90, title: 'Review' });
   });
@@ -156,6 +158,48 @@ describe('workTree', () => {
     expect(workTree(facts, at(40)).waiting).toEqual(expected);
   });
 
+  it('keeps hidden agents, hidden task turns and earlier-turn tasks out of unlinked activity', () => {
+    const task = (id: string, number: number, executorAgentId: string, visible: boolean): TreeFacts['tasks'][number] => ({
+      id, number, executorAgentId, visible, title: id, status: 'working', parentId: null, after: [], inRepository: true, createdAt: at(0), closedAt: null,
+    });
+    const job = (id: string, agentId: string, taskId: string | null): NonNullable<TreeFacts['turns']>[number] => ({ id, agentId, taskId,
+      createdAt: at(0), startedAt: at(0), finishedAt: null, status: 'running',
+      history: [{ at: at(0), program: { state: 'thinking', since: at(0).getTime(), tool: null }, alarm: null }] });
+    const facts = baseFacts({ tasks: [task('visible', 1, 'mira', true), task('hidden-agent-task', 2, 'timur', false), task('hidden-mira-task', 3, 'mira', false)],
+      turns: [job('visible-unlinked', 'mira', null), job('hidden-agent', 'timur', 'hidden-agent-task'),
+        job('hidden-task', 'mira', 'hidden-mira-task'), job('outside-this-turn', 'mira', 'earlier-task')] });
+    const tree = workTree(facts, at(40));
+    expect(tree.lines.map(l => l.taskId)).toEqual(['visible']);
+    expect(tree.activity.map(a => a.jobId)).toEqual(['visible-unlinked']);
+    expect(tree.time.map(t => t.agent.id)).toEqual(['mira']);
+    expect(tree.time[0]).toMatchObject({ work: 2400 });
+  });
+
+  it('shows a newly assigned task before any time or program report has arrived', () => {
+    const facts = waitingFacts();
+    facts.tasks = [facts.tasks[0]!];
+    facts.turns = [];
+    const tree = workTree(facts, at(0));
+    expect(tree.lines[0]!.segments).toEqual([{ kind: 'unknown', from: iso(0), to: null }]);
+  });
+
+  it.each(['work', 'after', 'person', 'stall', 'lost', 'alarm', 'queued', 'unknown'] as const)('rounds %s elapsed time without phantom milliseconds', kind => {
+    for (const [ms, expected] of [[499, 0], [500, 1]]) {
+      const zero = { work: 0, after: 0, person: 0, stall: 0, lost: 0, alarm: 0, queued: 0, unknown: 0 };
+      const end = new Date(at(0).getTime() + ms!);
+      const totals = agentTime(baseFacts().agents, [{ agentId: 'head', segments: [{ kind, from: iso(0), to: end.toISOString() }] }], at(0), end);
+      expect(totals[0]).toMatchObject({ ...zero, [kind]: expected });
+    }
+  });
+
+  it('does not make activity from a turn cancelled before it started with no elapsed time or program evidence', () => {
+    const facts = baseFacts({ tasks: [{ id: 'r90', number: 90, title: 'Review', status: 'review', parentId: null,
+      executorAgentId: 'head', after: [], inRepository: true, createdAt: at(10), closedAt: null }],
+      events: [{ taskId: 'r90', agentId: 'head', kind: 'created', text: '', data: { turnReview: true, panel: ['mira'] }, createdAt: at(10) }],
+      turns: [{ id: 'never-started', agentId: 'head', taskId: null, createdAt: at(10), startedAt: null, finishedAt: at(10), status: 'failed', history: [] }] });
+    expect(workTree(facts, at(40)).activity).toEqual([]);
+  });
+
   it('keeps the department head assignment even when it has no member executor', () => {
     const tree = workTree(baseFacts({ tasks: [{ id: 'head-task', number: 109, title: 'Whole department turn', status: 'working', parentId: null,
       executorAgentId: null, assigneeAgentId: 'head', after: [], inRepository: true, createdAt: at(0), closedAt: null }] }), at(40));
@@ -219,6 +263,8 @@ describe('workTree', () => {
       { taskId: `t${number}`, agentId: 'head', kind: 'created' as const, text: '', data: { turnReview: true, panel: ['vera'] }, createdAt: at(10 + i * 20) },
       { taskId: `t${number}`, agentId: 'vera', kind: 'verdict' as const, text: '', data: { pass: i === 1, findings: i === 1 ? 0 : 2 }, createdAt: at(18 + i * 20) },
     ]);
+    for (const task of facts.tasks.filter(t => t.number === 90 || t.number === 121)) task.createdAt = at(10);
+    facts.tasks.reverse();
     const tree = workTree(facts, at(45));
     expect(tree.reviews.map(r => r.number)).toEqual([90, 121]);
     expect(tree.reviews.map(r => r.reviewers[0]!.verdict?.findings)).toEqual([2, 0]);
@@ -743,6 +789,7 @@ describe('workTree', () => {
       review: null,
       reviews: [],
       waiting: [],
+      activity: [],
       time: [],
       idle: [],
     });

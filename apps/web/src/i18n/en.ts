@@ -488,6 +488,7 @@ export const en = {
     treeNoTurn: 'No turn is open now.',
     tree: {
       treeAria: (n: number) => `Tree of turn ${n}`,
+      noTask: 'No task',
       lgH: 'Key',
       lg: { ls: 'turn end lost', al: 'program or node alarm', q: 'message waiting in the queue', u: 'no recorded state', w: 'working', af: 'waits for another task', ps: 'waits for a person\'s answer', st: 'waiting for a task', mv: 'a move on the task', dn: 'task handed in', vd: 'review of the turn: findings or clean', mg: (branch: string) => `handed in and merged into ${branch}` },
       after: (n: number) => 'waits for #' + n,

@@ -46,6 +46,7 @@ export type TreeLine = {
 export type TreeVerdict = { at: string; pass: boolean; findings: number | null };
 export type TreeReviewer = { agent: TreeAgent; verdict: TreeVerdict | null; segments: TreeSegment[]; lastActionAt: string | null; live: boolean };
 export type TreeReview = { taskId: string; number: number; openedAt: string; closedAt: string | null; head: TreeAgent; reviewers: TreeReviewer[] };
+export type TreeActivity = { jobId: string; agent: TreeAgent; task: Pick<FactRelatedTask, 'id' | 'number' | 'title'> | null; segments: TreeSegment[] };
 /* Seconds of each kind from the start of the turn to now, over all of the agent's lines and review lines. */
 export type AgentTime = { agent: TreeAgent; work: number; after: number; person: number; stall: number; lost: number; alarm: number; queued: number; unknown: number };
 export type IdleStretch = {
@@ -74,6 +75,7 @@ export type DepartmentTree = {
   review: TreeReview | null;
   reviews: TreeReview[];
   waiting: TreeWait[];
+  activity: TreeActivity[];
   time: AgentTime[];
   idle: IdleStretch[];
 };
@@ -550,12 +552,20 @@ function unrepresentedTurn(turn: FactTurn, known: Set<string>, visible: Set<stri
   return !known.has(`${turn.taskId}:${turn.agentId}`);
 }
 
-function observedTime(facts: TreeFacts, ix: Indexed, lines: TreeLine[], reviews: TreeReview[], now: Date): { agentId: string; segments: TreeSegment[] }[] {
+type ObservedEntry = TreeActivity & { agentId: string };
+
+function observedEntry(turn: FactTurn, agent: TreeAgent, ix: Indexed, now: Date): ObservedEntry {
+  const task = ix.tasks.get(turn.taskId ?? ''), who = { id: agent.id, name: agent.name };
+  return { agentId: agent.id, jobId: turn.id, agent: who, task: task ? { id: task.id, number: task.number, title: task.title } : null,
+    segments: countedSegments(turnSegments(turn, who, now), now) };
+}
+
+function observedTime(facts: TreeFacts, ix: Indexed, lines: TreeLine[], reviews: TreeReview[], now: Date): ObservedEntry[] {
   const known = representedPairs(lines, reviews), visible = participants(lines, reviews);
   return turnsOf(facts).filter(turn => unrepresentedTurn(turn, known, visible, ix)).flatMap(turn => {
     const agent = ix.agents.get(turn.agentId);
-    return agent ? [{ agentId: agent.id, segments: turnSegments(turn, agent, now) }] : [];
-  });
+    return agent ? [observedEntry(turn, agent, ix, now)] : [];
+  }).filter(entry => entry.segments.length > 0);
 }
 
 function waitSource(wait: WaitSpan): IdleSource {
@@ -568,7 +578,7 @@ function taskOrder(a: FactTask, b: FactTask): number {
 
 export function workTree(facts: TreeFacts, now: Date): DepartmentTree {
   if (!facts.turn) {
-    return { now: now.toISOString(), turn: null, repository: facts.repository, stage: 'work', lines: [], review: null, reviews: [], waiting: [], time: [], idle: [] };
+    return { now: now.toISOString(), turn: null, repository: facts.repository, stage: 'work', lines: [], review: null, reviews: [], waiting: [], activity: [], time: [], idle: [] };
   }
   const ix = indexFacts(facts);
   const reviews = reviewCreatedMap(facts.tasks, ix);
@@ -592,7 +602,8 @@ export function workTree(facts: TreeFacts, now: Date): DepartmentTree {
   const waiting = spans.flatMap(({ to, ...wait }) => to === null ? [wait] : []);
   const waitingSources = spans.map(waitSource);
   const turnStarted = facts.turn.openedAt ?? facts.turn.createdAt;
-  const timeEntries = [...lines.map(l => ({ agentId: l.agent.id, segments: l.segments })), ...builtReviews.flatMap(r => r.timeEntries), ...observedTime(facts, ix, lines, reviewRows, now), ...waitingSources.map(w => ({ agentId: w.agent.id, segments: w.segments }))];
+  const observed = observedTime(facts, ix, lines, reviewRows, now);
+  const timeEntries = [...lines.map(l => ({ agentId: l.agent.id, segments: l.segments })), ...builtReviews.flatMap(r => r.timeEntries), ...observed, ...waitingSources.map(w => ({ agentId: w.agent.id, segments: w.segments }))];
 
   return {
     now: now.toISOString(),
@@ -608,6 +619,7 @@ export function workTree(facts: TreeFacts, now: Date): DepartmentTree {
     review: rev.review,
     reviews: reviewRows,
     waiting,
+    activity: observed.map(({ jobId, agent, task, segments }) => ({ jobId, agent, task, segments })),
     time: agentTime(facts.agents, timeEntries, turnStarted, now),
     idle: idleStretches([...builtLines.map(b => b.idle), ...builtReviews.flatMap(r => r.idles), ...waitingSources], now),
   };

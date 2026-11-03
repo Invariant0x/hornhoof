@@ -3,7 +3,7 @@ import { useT } from '../i18n';
 import type { AgentTime, Department, DepartmentTree, IdleStretch, TreeAgent } from '../types';
 import { segmentText } from './tree-state';
 import { TreeWho } from './TreeCard';
-import { idleClass, currentTaskNumber, reviewsOf, SEGMENT_CLASS, secondsBetween, treeClock } from './tree';
+import { agentSegments, idleClass, currentTaskNumber, SEGMENT_CLASS, secondsBetween, treeClock } from './tree';
 
 type Props = { tree: DepartmentTree; department: Department; onAgent(id: string, top: number): void };
 const amount = ({ work, after, person, stall, lost = 0, alarm = 0, queued = 0, unknown = 0 }: AgentTime) => [work, after + person, stall, lost + alarm, queued, unknown];
@@ -11,10 +11,7 @@ const amount = ({ work, after, person, stall, lost = 0, alarm = 0, queued = 0, u
 function Strip({ tree, agent }: { tree: DepartmentTree; agent: TreeAgent }) {
   const L = useT().dept.tree, start = tree.turn!.startedAt;
   const duration = Math.max(1, secondsBetween(start, tree.now));
-  const segments = [
-    ...tree.lines.filter(l => l.agent.id === agent.id).flatMap(l => l.segments),
-    ...reviewsOf(tree).flatMap(review => review.reviewers.filter(r => r.agent.id === agent.id).flatMap(r => r.segments)),
-  ];
+  const segments = agentSegments(tree, agent.id);
   const time = tree.time.find(a => a.agent.id === agent.id)!;
   const label = `${agent.name}: ${amount(time).map((n, i) => `${L.cols[i + 1]} ${L.dur(n / 60)}`).join(', ')}`;
   return (
@@ -43,6 +40,11 @@ function amountClass(time: AgentTime, value: number, index: number): string {
   return '';
 }
 
+function taskLabel(tree: DepartmentTree, agentId: string, noTask: string): string {
+  const number = currentTaskNumber(tree, agentId);
+  return number === undefined ? noTask : `#${number}`;
+}
+
 function SpeedRow({ time, tree, department, onAgent }: Props & { time: AgentTime }) {
   const L = useT().dept.tree;
   return (
@@ -54,7 +56,7 @@ function SpeedRow({ time, tree, department, onAgent }: Props & { time: AgentTime
       >
         <span className="who">
           <b><TreeWho agent={time.agent} department={department} /></b>
-          <small>#{currentTaskNumber(tree, time.agent.id)}</small>
+          <small>{taskLabel(tree, time.agent.id, L.noTask)}</small>
         </span>
         {amount(time).map((n, i) => (
           <span key={i} className={`n ${amountClass(time, n, i)}`} data-label={L.cols[i + 1]} aria-label={`${L.cols[i + 1]} ${L.dur(n / 60)}`}>{n ? L.dur(n / 60) : '0'}</span>

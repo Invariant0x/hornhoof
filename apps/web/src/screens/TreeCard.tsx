@@ -173,10 +173,31 @@ function MoveCard({ tree, department, pick, line, onOpenTask }: Props & { line: 
   );
 }
 
+function pickedActivity(tree: DepartmentTree, pick: TreePick) {
+  const activity = (tree.activity ?? []).find(a => a.jobId === pick.jobId);
+  return activity ? { ...activity, segment: activity.segments[pick.segmentIndex ?? 0] } : null;
+}
+
+function ActivityCard({ tree, department, pick, onOpenTask }: Props) {
+  const t = useT(), L = t.dept.tree, activity = pickedActivity(tree, pick);
+  if (!activity?.segment) return null;
+  const { segment, task } = activity;
+  const when = segment.to ? L.idleClosed(treeClock(segment.from), treeClock(segment.to)) : L.idleOpen(treeClock(segment.from)) + L.idleGoing;
+  return <>
+    <h4><TreeWho agent={activity.agent} department={department} /></h4>
+    <Details pairs={[[L.cWhat, task ? `#${task.number} ${task.title}` : L.noTask],
+      [L.cNow, <span className={`tstate ${segmentTone(segment)}`}>{segmentText(t, segment, segment.to ?? tree.now)}</span>], [L.cWhen, when]]} />
+    {task && <div className="acts"><button type="button" className="btn ghost" onClick={() => onOpenTask(task.id)}>{L.openTask}</button></div>}
+  </>;
+}
+
+const isReviewPick = (pick: TreePick) => pick.kind === 'review' || pick.kind === 'reviewer';
+
 export function TreeCardBody(props: Props) {
   const { tree, pick, department } = props, L = useT().dept.tree;
   const line = tree.lines.find(l => l.taskId === pick.taskId);
-  if (pick.kind === 'review' || pick.kind === 'reviewer') return reviewsOf(tree).length > 0 && <ReviewCard {...props} />;
+  if (isReviewPick(pick)) return reviewsOf(tree).length > 0 && <ReviewCard {...props} />;
+  if (pick.kind === 'activity') return <ActivityCard {...props} />;
   if (pick.kind === 'main') {
     return (
       <>

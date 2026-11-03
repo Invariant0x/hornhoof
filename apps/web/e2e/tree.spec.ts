@@ -50,6 +50,14 @@ for (const lang of ['en', 'ru'] as const) {
           await expect(graph.locator('.seg.al').first()).toHaveCSS('stroke', theme === 'light' ? 'rgb(211, 47, 47)' : 'rgb(255, 107, 107)');
           expect(await graph.evaluate(svg => [...svg.querySelectorAll<SVGGraphicsElement>('.bdg')].every(b => b.getBBox().x + b.getBBox().width <= (svg as SVGSVGElement).viewBox.baseVal.width))).toBe(true);
           expect(await graph.locator('.ic-ok').count()).toBeGreaterThanOrEqual(during ? 4 : 5);
+          const oldAlarm = graph.getByRole('button', { name: lang === 'en' ? /Hana: program frozen since 06:11/ : /Hana: программа замерла с 06:11/ }).first();
+          await oldAlarm.scrollIntoViewIfNeeded();
+          await oldAlarm.focus();
+          await page.keyboard.press('Enter');
+          const stateCard = page.getByRole('dialog', { name: 'Hana', exact: true });
+          await expect(stateCard).toContainText(lang === 'en' ? 'No task' : 'Нет задачи');
+          await expect(stateCard.getByRole('button', { name: lang === 'en' ? 'Open the task' : 'Открыть задачу' })).toHaveCount(0);
+          await page.keyboard.press('Escape');
           const oldTask = graph.getByRole('button', { name: /#62 Night checkout work/ }).first();
           await oldTask.scrollIntoViewIfNeeded();
           await oldTask.focus();
@@ -144,4 +152,44 @@ for (const lang of ['en', 'ru'] as const) {
       expect(errors).toEqual([]);
     });
   }
+}
+
+for (const lang of ['en', 'ru'] as const) {
+  test(`program history stays out of conversation lines in ${lang}`, async ({ page }, info) => {
+    const theme = lang === 'en' ? 'light' : 'dark';
+    await page.setViewportSize({ width: lang === 'en' ? 375 : 1440, height: 900 });
+    await page.addInitScript(({ lang, theme }) => {
+      localStorage.setItem('hh-lang', lang);
+      localStorage.setItem('hh-theme', theme);
+    }, { lang, theme });
+    await serveApi(page);
+    const errors: string[] = [];
+    page.on('pageerror', e => errors.push(e.message));
+    page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
+    await page.route('**/api/**', route => {
+      const url = new URL(route.request().url()), path = url.pathname + url.search;
+      const event = (seq: number, kind: string, data: unknown) => ({ seq, kind, data, at: '2026-11-03T10:00:00Z', jobId: 'j1', person: null });
+      const state = { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 };
+      const routes: Record<string, unknown> = {
+        '/api/agents/orchestrator/events?after=0': { events: [event(1, 'text', { text: 'Starting checkout.' }),
+          event(2, 'program', { program: { state: 'thinking', since: Date.parse('2026-11-03T10:00:00Z'), tool: null }, alarm: null }),
+          event(3, 'text', { text: 'Checkout is ready.' })], state },
+        '/api/agents/orchestrator/events?after=3': { events: [], state },
+        '/api/agents/orchestrator/start': { started: false },
+        '/api/nodes/commands': { commands: [] },
+        '/api/computer': { available: false, until: null, asked: null },
+        '/api/version': { version: '0.5.0', commit: 'task-148' },
+        '/api/updates': { current: { version: '0.5.0', commit: 'task-148' }, available: false, latest: null, updater: { status: null, waiting: null } },
+      };
+      return path in routes ? route.fulfill({ json: routes[path] }) : route.fallback();
+    });
+    await page.goto('/');
+    await page.getByRole('button', { name: lang === 'en' ? 'Tasks' : 'Задачи', exact: true }).click();
+    await page.getByRole('button', { name: lang === 'en' ? 'Write to the orchestrator' : 'Написать оркестратору', exact: true }).click();
+    const panel = page.getByRole('complementary', { name: lang === 'en' ? 'Orchestrator' : 'Оркестратор' });
+    await expect(panel.getByText('Checkout is ready.', { exact: true })).toBeVisible();
+    await expect(panel.locator('.t-line')).toHaveCount(2);
+    await page.screenshot({ path: info.outputPath(`program-log-${lang}-${theme}.png`) });
+    expect(errors).toEqual([]);
+  });
 }

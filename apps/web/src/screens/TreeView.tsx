@@ -3,7 +3,7 @@ import { useT } from '../i18n';
 import type { Department, DepartmentTree, TreeAgent } from '../types';
 import { Pulse, toD, useReducedMotion } from '../ui/wires';
 import {
-  idleClass, treeClock, treeLayout, latestLines, trunkBranch, reviewsOf,
+  idleClass, treeClock, treeLayout, latestLines, trunkBranch, reviewsOf, rowTaskNumber, statePriority,
   type TreeLayout, type TreeBadge, type TreeMark, type TreePick, type TreeRow, type TreeTarget,
 } from './tree';
 import { TreeCardBody, TreeWho } from './TreeCard';
@@ -192,9 +192,9 @@ function ExternalWaitState({ wait }: { wait: NonNullable<DepartmentTree['lines']
   return <span className="ast calm" title={text}>{text}</span>;
 }
 
-function LaneDescription({ agent, tree, department }: { agent: TreeAgent; tree: DepartmentTree; department: Department }) {
+function LaneDescription({ agent, tree, department, line }: { agent: TreeAgent; tree: DepartmentTree; department: Department; line?: DepartmentTree['lines'][number] }) {
   const L = useT().dept.tree;
-  const external = tree.lines.findLast(l => l.agent.id === agent.id && l.externalWait)?.externalWait;
+  const external = line?.externalWait;
   if (external && external.until > tree.now) return <ExternalWaitState wait={external} />;
   const wait = tree.waiting?.find(w => w.agent.id === agent.id);
   if (!wait) return <LaneState agent={agent} department={department} now={tree.now} />;
@@ -202,19 +202,30 @@ function LaneDescription({ agent, tree, department }: { agent: TreeAgent; tree: 
   return <span className="ast calm" title={text}>{text}</span>;
 }
 
+function rowTitle(row: TreeRow, tree: DepartmentTree, L: ReturnType<typeof useT>['dept']['tree']): string {
+  if (row.line) return row.line.title;
+  if (row.review) return L.reviewH(tree.turn!.number);
+  return row.activity?.task?.title ?? L.noTask;
+}
+
+function RowTask({ row, tree }: { row: TreeRow; tree: DepartmentTree }) {
+  const L = useT().dept.tree, number = rowTaskNumber(row);
+  return <>{number !== undefined && `#${number}`}<span className="tv-title"> {rowTitle(row, tree, L)}</span></>;
+}
+
+function shortTask(row: TreeRow, noTask: string): string {
+  const number = rowTaskNumber(row);
+  return number === undefined ? noTask : `#${number}`;
+}
+
 function Label({ row, tree, department }: { row: TreeRow; tree: DepartmentTree; department: Department }) {
-  const L = useT().dept.tree, number = row.line?.number ?? row.review?.number;
+  const L = useT().dept.tree;
   if (!row.agent) return <b>{row.type === 'main' ? trunkBranch(department) : tree.turn!.branch}</b>;
-  return (
-    <>
-      <span className="r1"><b><TreeWho agent={row.agent} department={department} /></b><small className="tv-task">#{number}</small></span>
-      <span className="r2">
-        #{number}
-        <span className="tv-title"> {row.line?.title ?? (tree.turn ? L.reviewH(tree.turn.number) : '')}</span>
-      </span>
-      <LaneDescription agent={row.agent} department={department} tree={tree} />
-    </>
-  );
+  return <>
+    <span className="r1"><b><TreeWho agent={row.agent} department={department} /></b><small className="tv-task">{shortTask(row, L.noTask)}</small></span>
+    <span className="r2"><RowTask row={row} tree={tree} /></span>
+    <LaneDescription agent={row.agent} department={department} tree={tree} line={row.line} />
+  </>;
 }
 
 type CanvasProps = Pick<Props, 'tree' | 'department'> & {
@@ -224,8 +235,24 @@ type CanvasProps = Pick<Props, 'tree' | 'department'> & {
   select(pick: TreePick, e: MouseEvent): void;
 };
 
+function pickKey(pick: TreePick): string {
+  return JSON.stringify([pick.kind, pick.agentId, pick.taskId, pick.moveIndex, pick.jobId, pick.segmentIndex]);
+}
+
 function samePick(a: TreePick | null, b: TreePick): boolean {
-  return !!a && a.kind === b.kind && a.agentId === b.agentId && a.taskId === b.taskId && a.moveIndex === b.moveIndex;
+  return !!a && pickKey(a) === pickKey(b);
+}
+
+function hitPriority(hit: TreeTarget): number {
+  return hit.segment ? statePriority(hit.segment.kind) : -2;
+}
+
+function pathPriority(path: TreeLayout['paths'][number]): number {
+  return path.segmentKind === undefined ? -2 : statePriority(path.segmentKind);
+}
+
+function graphPaths(layout: TreeLayout, kind: string) {
+  return layout.paths.filter(p => p.kind === kind).sort((a, b) => pathPriority(a) - pathPriority(b));
 }
 
 function Target({ hit, tree, department, selected, select }: Omit<CanvasProps, 'layout'> & { hit: TreeTarget }) {
@@ -253,7 +280,7 @@ function Target({ hit, tree, department, selected, select }: Omit<CanvasProps, '
 function Graph(props: CanvasProps) {
   const { layout, tree } = props, L = useT().dept.tree, still = useReducedMotion();
   const targets = (round: boolean) => layout.targets
-    .filter(h => h.round === round)
+    .filter(h => h.round === round).sort((a, b) => hitPriority(a) - hitPriority(b))
     .map((hit, i) => <Target key={i} {...props} hit={hit} />);
   return (
     <svg
@@ -271,8 +298,7 @@ function Graph(props: CanvasProps) {
       </g>
       {targets(false)}
       <g className="nohit">
-        {['main', 'turn', 'segment', 'bridge', 'fork', 'merge'].map(kind => layout.paths
-          .filter(p => p.kind === kind)
+        {['main', 'turn', 'segment', 'bridge', 'fork', 'merge'].map(kind => graphPaths(layout, kind)
           .map((p, i) => <path key={`${kind}${i}`} className={`${p.cls}${p.dim ? ' dn' : ''}`} d={toD(p.points)} />))}
         {layout.marks.map((m, i) => <g key={i} className={m.dim ? 'dn' : undefined}><Mark m={m} /></g>)}
         {layout.badges.map(b => <Badge key={b.row} badge={b} phone={props.phone} />)}
