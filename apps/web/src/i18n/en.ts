@@ -194,6 +194,8 @@ export const en = {
     runThis: 'Run this in a terminal on the machine the agents should use. It installs Docker if needed, starts a node for each plan and opens the sign-in links.',
     trust: 'Agents will run on this machine with your subscription. People with access to this Hornhoof can give them work.',
     joinOnce: 'The command works once, for 24 hours. The nodes keep running in the background after the terminal is closed.',
+    joinUntil: (at: string) => `The command works once, until ${at}. The nodes keep running in the background after the terminal is closed.`,
+    cancelCommand: 'Cancel',
     skip: 'Skip for now',
     columns: { subscription: 'Subscription', place: 'Place', machine: 'Machines', status: 'Status', actions: 'Actions' },
     machinesOf: (name: string) => `Machines of ${name}`,

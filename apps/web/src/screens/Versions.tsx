@@ -3,7 +3,8 @@ import { errorText, useLanguage, useT } from '../i18n';
 import type { Build } from '../types';
 import type { Updates } from '../updates';
 import { UpdateProgress } from '../ui/UpdateProgress';
-import { versionText } from '../ui/VersionMark';
+import { buildText, versionText } from '../ui/VersionMark';
+import { updateTargetText, versionedStatus } from '../ui/UpdateVersion';
 
 /* The builds Hornhoof can run, the one it runs, and the update under way or the last one's end. */
 export function Versions({ updates, onClose }: { updates: Updates; onClose: () => void }) {
@@ -64,13 +65,13 @@ export function Versions({ updates, onClose }: { updates: Updates; onClose: () =
           <span className="muted">{view.error ? t.updates.checkFailed : view.checkedAt && t.updates.checkedAt(new Intl.DateTimeFormat(language, { hour: '2-digit', minute: '2-digit' }).format(new Date(view.checkedAt)))}</span>
         </div>
         {!updater.present && <p className="update-note">{t.updates.missing}</p>}
-        {updates.starting && !status && <UpdateProgress version={latest?.version ?? ''} step={null} starting offline={updates.offline} />}
+        {updates.starting && !status && <UpdateProgress version={updateTargetText(updates)} step={null} starting offline={updates.offline} />}
         {status && (
           <div className="update-progress">
             {updates.starting || status.state === 'running' ? (
-              <UpdateProgress version={updates.starting ? (latest?.version ?? '') : status.version} step={updates.starting ? null : status.step} starting={updates.starting} offline={updates.offline} />
+              <UpdateProgress version={updateTargetText(updates)} step={updates.starting ? null : status.step} starting={updates.starting} offline={updates.offline} />
             ) : (
-              <p>{t.updates.result(status, current.version)}</p>
+              <p>{t.updates.result(versionedStatus(status), versionText(current))}</p>
             )}
             {status.log && <pre>{status.log}</pre>}
           </div>
@@ -80,7 +81,7 @@ export function Versions({ updates, onClose }: { updates: Updates; onClose: () =
           {rows.map(b => (
             <li key={b.tag}>
               <div>
-                <b>{b.version || b.tag}</b>
+                <b>{buildText(b)}</b>
                 {b.tag === 'latest' && <span className="muted">{t.updates.newest}</span>}
                 {b.title && <span>{b.title}</span>}
                 <span className="muted">{b.created.slice(0, 10)}</span>
@@ -103,7 +104,7 @@ export function Versions({ updates, onClose }: { updates: Updates; onClose: () =
           <div className="update-confirm">
             <p>{t.updates.pastMigration}</p>
             <div className="actions">
-              <button className="btn small" type="button" onClick={() => void install(confirm)}>{t.updates.goBack(confirm.version || confirm.tag)}</button>
+              <button className="btn small" type="button" onClick={() => void install(confirm)}>{t.updates.goBack(buildText(confirm))}</button>
               <button className="btn small ghost" type="button" onClick={() => setConfirm(null)}>{t.common.cancel}</button>
             </div>
           </div>

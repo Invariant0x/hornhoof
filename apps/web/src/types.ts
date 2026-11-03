@@ -474,7 +474,7 @@ export type Running = {
 /* machine: the hostname of the machine the server runs on, when that computer joined as a machine. */
 /* canAnswer: this person opens, closes or declines it; an older server sends none, as only the CEO saw it. */
 export type ComputerView = { available: boolean; until: string | null; asked: { reason: string; at: string } | null; machine?: string | null; canAnswer?: boolean };
-export type ShownCommand = { id: string; kind: 'machine' | 'plans' | 'add'; plans: string[]; machine: string | null; command: string; expiresAt: string };
+export type ShownCommand = { id: string; kind: 'machine' | 'plans' | 'add'; plans: string[]; machineId?: string | null; machine: string | null; command: string; expiresAt: string };
 
 /* The node that comes with the server, for those who see the whole company. */
 /* machine: the company's machine it runs on, when the server is on one; the pool counts that computer once. */
@@ -495,7 +495,7 @@ export type JobView = {
 /* A published build of Hornhoof, from the registry. */
 export type Build = { tag: string; version: string; commit: string; created: string; title: string; migrations: number };
 export type UpdateStep = 'backup' | 'pull' | 'install' | 'health' | 'rollback' | 'finished';
-export type UpdaterStatus = { id: string; version: string; state: 'running' | 'done' | 'failed' | 'rolled_back'; step: UpdateStep; log: string; at: string };
+export type UpdaterStatus = { id: string; version: string; commit?: string; state: 'running' | 'done' | 'failed' | 'rolled_back'; step: UpdateStep; log: string; at: string };
 export type UpdatesView = {
   current: { version: string; commit: string; migrations: number };
   available: boolean;
@@ -503,7 +503,7 @@ export type UpdatesView = {
   latest: Build | null;
   versions: Build[];
   error: string | null;
-  updater: { present: boolean; status: UpdaterStatus | null; waiting: { version: string } | null };
+  updater: { present: boolean; status: UpdaterStatus | null; waiting: { version: string; commit?: string } | null };
 };
 
 /* A note of the company notebook or a department's, and who wrote it last: a person, the orchestrator or the head. */

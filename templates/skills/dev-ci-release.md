@@ -11,6 +11,13 @@ sources: [addyosmani/agent-skills skills/ci-cd-and-automation/SKILL.md, wshobson
 
 **Fixing CI.** Read the failing job's log from the top of the first error. Reproduce it locally with the same command. Fix the cause; never skip, mute or retry a check to get green. Note flaky jobs and hand them to tests.
 
+**Version scheme.** Follow the project's own scheme. If it has none, use SemVer syntax `X.N.P` with one version for the repository and all its packages:
+- A turn N ships as `X.N.0`, even if it contains only fixes. N stays the turn number after 1.0, without resetting: an approved first-digit increase from `0.150.0` gives `1.150.0`.
+- Each release between turns increases P once, however many fixes it contains: three fixes in one release after `0.5.0` give `0.5.1`.
+- Only the CEO decides to increase X. The head proposes it for an incompatible change: reinstalling or manual machine steps, old nodes unable to use the new server, unsafe rollback, or removing something people used. Before 1.0, an incompatible change may keep X; explain the required steps under **Before you update** rather than increasing X without approval.
+
+**Release notes and checks.** Put the newest release first in `CHANGELOG.md`, with its version, date, one plain summary, and short Added, Changed and Fixed entries (dev-release-notes). Include **Before you update** for incompatible changes. Before asking for the CEO's exact-commit approval, set the version, write these notes, and run the project's release check (`check-release`). Create the version tag and Release only from the approved merge into main.
+
 **A release.**
 1. Only changes that passed every gate are in it.
 2. Bump the version where the project keeps it, following its scheme.

@@ -6,7 +6,7 @@ import { PROVIDER_NAMES } from '../providers';
 import type { BuiltinView, MachineView, Me, Running, SubView } from '../types';
 import { Ask } from '../ui/Ask';
 import { Bar } from '../ui/Bar';
-import { CommandBox } from '../ui/CommandBox';
+import { ActiveCommandPanel, CommandBox, CommandLifetime, hideShownCommand, liveCommand, loadMachineCommands, openCommandIds, toActiveCommand, type ActiveCommand } from '../ui/CommandBox';
 import { Edge } from '../ui/Edge';
 import { CardFrame, CardHead, EmptyBox, Facts, Gauge, MachineMark, Part } from '../ui/Cards';
 import { ProviderMark } from '../ui/icons';
@@ -21,9 +21,6 @@ const REFRESH_MS = 5000;
 const GIB = 1024 ** 3;
 /* Docker's system on a Mac keeps a little of what it is given, so only a clear gap says it was set smaller. */
 const SMALLER = 1.1;
-
-/* A plan being added to a machine: first which one, then the command to run there. */
-type Adding = { machineId: string; command: string | null } | null;
 
 const SYSTEMS: Record<string, string> = { darwin: 'macOS', linux: 'Linux' };
 
@@ -171,14 +168,15 @@ function Leader() {
 }
 
 type MachineControls = {
-  adding: Adding;
+  picking: string | null;
+  addCommands: Record<string, ActiveCommand>;
   confirm: string | null;
-  setAdding: (adding: Adding) => void;
+  setPicking: (machineId: string | null) => void;
   setConfirm: (id: string | null) => void;
   addPlan: (machine: MachineView, sub: SubView) => unknown;
+  cancelAdd: (machineId: string, id: string) => unknown;
   lend: (machine: MachineView, value: boolean) => unknown;
   disconnect: (machine: MachineView) => unknown;
-  done: () => void;
   refresh: () => Promise<void>;
 };
 
@@ -193,50 +191,51 @@ function LendSetting({ machine, editable, onChange }: { machine: MachineView; ed
   return <Part title={t.tables.settings}><Facts items={[[t.tables.tests, value]]} /></Part>;
 }
 
-function PlanPicker({ machine, addable, add, controls }: { machine: MachineView; addable: SubView[]; add: Adding; controls: MachineControls }) {
+function PlanPicker({ machine, addable, shown, picking, controls }: { machine: MachineView; addable: SubView[]; shown: ActiveCommand | null; picking: boolean; controls: MachineControls }) {
   const t = useT();
-  if (!add) return null;
-  if (add.command) return (
+  if (shown) return (
     <div className="add-plan">
       <p className="muted">{t.machines.runOn(machine.hostname)}</p>
-      <CommandBox command={add.command} />
-      <p className="muted">{t.subs.joinOnce}</p>
-      <div className="actions"><button className="btn small" type="button" onClick={controls.done}>{t.common.done}</button></div>
+      <CommandBox command={shown.command} />
+      <CommandLifetime expiresAt={shown.expiresAt} />
+      <div className="actions"><button className="btn small ghost" type="button" onClick={() => controls.cancelAdd(machine.id, shown.id)}>{t.subs.cancelCommand}</button></div>
     </div>
   );
+  if (!picking) return null;
   return (
     <div className="ask">
       <span>{t.machines.addPlanAsk(machine.hostname)}</span>
       {addable.map(s => <button key={s.id} className="btn small" type="button" aria-label={t.machines.addPlanTo(subName(t, s), machine.hostname)} onClick={() => controls.addPlan(machine, s)}>{subName(t, s)}</button>)}
-      <button className="btn small ghost" type="button" onClick={() => controls.setAdding(null)}>{t.common.cancel}</button>
+      <button className="btn small ghost" type="button" onClick={() => controls.setPicking(null)}>{t.common.cancel}</button>
     </div>
   );
 }
 
-function MachineSettings({ machine: m, editable, addable, add, controls }: { machine: MachineView; editable: boolean; addable: SubView[]; add: Adding; controls: MachineControls }) {
+function MachineSettings({ machine: m, editable, addable, busy, controls }: { machine: MachineView; editable: boolean; addable: SubView[]; busy: boolean; controls: MachineControls }) {
   const t = useT();
   return <>
     <LendSetting machine={m} editable={editable} onChange={value => controls.lend(m, value)} />
     <div className="machine-actions">
-      {addable.length > 0 && !add && <button className="act" type="button" aria-label={t.machines.addPlanLabel(m.hostname)} onClick={() => controls.setAdding({ machineId: m.id, command: null })}>{t.machines.addPlan}</button>}
+      {addable.length > 0 && !busy && <button className="act" type="button" aria-label={t.machines.addPlanLabel(m.hostname)} onClick={() => controls.setPicking(m.id)}>{t.machines.addPlan}</button>}
       {editable && <button className="act danger" type="button" aria-label={t.machines.disconnectLabel(m.hostname)} onClick={() => controls.setConfirm(m.id)}>{t.machines.disconnect}</button>}
     </div>
     {controls.confirm === m.id && <Ask text={t.machines.disconnectAsk(m.hostname)} yes={t.machines.yesDisconnect} onYes={() => controls.disconnect(m)} onNo={() => controls.setConfirm(null)} />}
   </>;
 }
 
-function MachineDetails({ row, subs, me, controls }: { row: MachineRow; subs: SubView[]; me: Me; controls: MachineControls }) {
+function MachineDetails({ row, subs, me, now, controls }: { row: MachineRow; subs: SubView[]; me: Me; now: number; controls: MachineControls }) {
   const t = useT();
   const { language } = useLanguage();
   const m = row.source;
   const mine = m?.owner.id === me.person.id;
   const editable = me.person.scopeKind === 'company' || mine;
   const addable = m && mine ? subs.filter(s => s.kind === 'personal' && s.owner.id === me.person.id && !m.plans.some(p => p.id === s.id)) : [];
-  const add = controls.adding?.machineId === row.id ? controls.adding : null;
+  const shown = liveCommand(controls.addCommands[row.id], now);
+  const picking = controls.picking === row.id;
   return (
     <CardFrame label={row.hostname} accent={row.server}
       head={<CardHead mark={<MachineMark />} name={row.hostname} badges={row.server && <Leader />} state={<span className={`status ${row.online ? 'ready' : 'offline'}`}>{row.online ? t.machines.online : t.cards.offline}</span>} line={!row.online && lastSeen(t, language, row.lastSeenAt)} />}
-      extra={m && <PlanPicker machine={m} addable={addable} add={add} controls={controls} />}>
+      extra={m && <PlanPicker machine={m} addable={addable} shown={shown} picking={picking} controls={controls} />}>
       <section className="blk blk-facts">
         <h4>{t.cards.aboutMachine}</h4>
         <Part title={t.cards.resources}>
@@ -251,7 +250,7 @@ function MachineDetails({ row, subs, me, controls }: { row: MachineRow; subs: Su
       <section className="blk blk-side">
         <h4>{t.cards.plansOn}</h4>
         <PlansOnMachine row={row} subs={subs} />
-        {m && <MachineSettings machine={m} editable={editable} addable={addable} add={add} controls={controls} />}
+        {m && <MachineSettings machine={m} editable={editable} addable={addable} busy={Boolean(shown || picking)} controls={controls} />}
       </section>
     </CardFrame>
   );
@@ -260,12 +259,14 @@ function MachineDetails({ row, subs, me, controls }: { row: MachineRow; subs: Su
 export function Machines({ me }: { me: Me }) {
   const t = useT();
   const { language } = useLanguage();
+  const now = useNow();
   const [machines, setMachines] = useState<MachineView[] | null>(null);
   const [builtin, setBuiltin] = useState<BuiltinView | null>(null);
   const [subs, setSubs] = useState<SubView[]>([]);
-  const [command, setCommand] = useState<string | null>(null);
+  const [command, setCommand] = useState<ActiveCommand | null>(null);
+  const [addCommands, setAddCommands] = useState<Record<string, ActiveCommand>>({});
   const [confirm, setConfirm] = useState<string | null>(null);
-  const [adding, setAdding] = useState<Adding>(null);
+  const [picking, setPicking] = useState<string | null>(null);
   const [failure, setFailure] = useState<unknown>(null);
   const live = useRef(true);
 
@@ -278,7 +279,11 @@ export function Machines({ me }: { me: Me }) {
 
   const load = useCallback(async () => {
     try {
-      const [hosts, list] = await Promise.all([api.get<{ machines: MachineView[]; builtin?: BuiltinView | null }>('/api/machines'), api.get<{ subscriptions: SubView[] }>('/api/subscriptions')]);
+      const [hosts, list] = await Promise.all([
+        api.get<{ machines: MachineView[]; builtin?: BuiltinView | null }>('/api/machines'),
+        api.get<{ subscriptions: SubView[] }>('/api/subscriptions'),
+        loadMachineCommands(live, setCommand, setAddCommands),
+      ]);
       if (!live.current) return;
       setMachines(hosts.machines);
       setBuiltin(hosts.builtin ?? null);
@@ -306,13 +311,31 @@ export function Machines({ me }: { me: Me }) {
 
   const machineCommand = () =>
     run(async () => {
-      setCommand((await api.post<{ command: string }>('/api/machines/command')).command);
+      const res = await api.post<{ id?: string; command: string; expiresAt?: string }>('/api/machines/command');
+      setCommand(toActiveCommand(res));
+    });
+
+  const cancelMachine = (id: string) =>
+    run(async () => {
+      await hideShownCommand(id);
+      setCommand(null);
     });
 
   const addPlan = (m: MachineView, sub: SubView) =>
     run(async () => {
-      const { command } = await api.post<{ command: string }>(`/api/machines/${m.id}/plans`, { subscription: sub.id });
-      setAdding({ machineId: m.id, command });
+      const res = await api.post<{ id?: string; command: string; expiresAt?: string }>(`/api/machines/${m.id}/plans`, { subscription: sub.id });
+      setPicking(null);
+      setAddCommands(all => ({ ...all, [m.id]: toActiveCommand(res) }));
+    });
+
+  const cancelAdd = (machineId: string, id: string) =>
+    run(async () => {
+      await hideShownCommand(id);
+      setAddCommands(all => {
+        const next = { ...all };
+        delete next[machineId];
+        return next;
+      });
     });
 
   const lend = (m: MachineView, lendsTests: boolean) =>
@@ -334,6 +357,8 @@ export function Machines({ me }: { me: Me }) {
   const apart = host ? null : builtin;
   const loads = [...(machines ?? []).map(m => (m === host ? (m.load ?? builtin!.load) : m.load)), apart?.load ?? null].filter((l): l is NodeLoad => l !== null);
   const online = (machines ?? []).filter(m => m.online || (m === host && builtin!.online)).length + (apart?.online ? 1 : 0);
+  const activeCommand = liveCommand(command, now);
+  const openIds = openCommandIds(addCommands, now);
 
   return (
     <section className="people machines">
@@ -342,32 +367,21 @@ export function Machines({ me }: { me: Me }) {
           <h1>{t.machines.heading}</h1>
           <p className="muted">{t.machines.intro}</p>
         </div>
-        {!command && (
+        {!activeCommand && (
           <div className="head-actions">
             <button className="btn" type="button" onClick={() => void machineCommand()}>{t.machines.connect}</button>
           </div>
         )}
       </header>
 
-      {command && (
-        <Edge className="panel" cut={12}>
-          <h2>{t.machines.connectHeading}</h2>
-          <p className="muted">{t.machines.runThis}</p>
-          <CommandBox command={command} trust={t.machines.trust} />
-          <p className="muted">{t.subs.joinOnce}</p>
-          <div className="actions">
-            <button
-              className="btn"
-              type="button"
-              onClick={() => {
-                setCommand(null);
-                void load();
-              }}
-            >
-              {t.common.done}
-            </button>
-          </div>
-        </Edge>
+      {activeCommand && (
+        <ActiveCommandPanel
+          heading={t.machines.connectHeading}
+          run={t.machines.runThis}
+          trust={t.machines.trust}
+          shown={activeCommand}
+          onCancel={() => void cancelMachine(activeCommand.id)}
+        />
       )}
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
 
@@ -378,12 +392,12 @@ export function Machines({ me }: { me: Me }) {
           rows={machineRows(machines, builtin, subs, t.machines.builtin)}
           columns={machineColumns(t, language)}
           name={row => row.hostname}
+          openIds={openIds}
           initialSort={{ key: 'status', direction: 1 }}
           search={{ placeholder: t.tables.searchMachines, text: row => machineSearch(t, language, subs, row), count: t.tables.machineCount }}
           filters={machineFilters(t)}
-          card={row => <MachineDetails row={row} subs={subs} me={me} controls={{
-            adding, confirm, setAdding, setConfirm, addPlan, lend, disconnect, refresh: load,
-            done: () => { setAdding(null); void load(); },
+          card={row => <MachineDetails row={row} subs={subs} me={me} now={now} controls={{
+            picking, addCommands, confirm, setPicking, setConfirm, addPlan, cancelAdd, lend, disconnect, refresh: load,
           }} />}
         />
       )}

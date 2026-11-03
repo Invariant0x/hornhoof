@@ -31,7 +31,7 @@ for (const language of ['en', 'ru']) for (const theme of ['light', 'dark']) for 
     };
     await open();
     const dialog = page.getByRole('dialog', { name: language === 'en' ? 'About Hornhoof' : 'О программе Hornhoof' });
-    await expect(dialog.getByText('0.5.0 · abc1234')).toBeVisible();
+    await expect(dialog.getByText('0.5.0 (abc1234)')).toBeVisible();
     await expect(dialog.getByRole('link')).toHaveCount(4);
     await expect(dialog).toBeFocused();
     await page.keyboard.press('Shift+Tab');

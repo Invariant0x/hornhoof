@@ -94,8 +94,10 @@ describe('the move path in a company with a long history', () => {
   it('reads and locks only the tasks of the open turn and of none, with the index on the turn that its migration adds', async () => {
     const c = await company();
     const client = (c.db as unknown as { $client: PGlite }).$client;
-    /* The index a separate migration adds; without it Postgres reads the company's tasks to find a turn's. */
-    await client.exec('create index tasks_turn_id on tasks (turn_id); analyze tasks;');
+    /* The migrated index keeps Postgres from reading the company's tasks to find a turn's. */
+    const indexes = await client.query<{ indexdef: string }>("select indexdef from pg_indexes where schemaname = 'public' and tablename = 'tasks' and indexname = 'tasks_turn_id'");
+    expect(indexes.rows).toEqual([{ indexdef: 'CREATE INDEX tasks_turn_id ON public.tasks USING btree (turn_id)' }]);
+    await client.exec('analyze tasks;');
     const api = await c.member('Checkout API', c.bruno.id);
     const schema = await c.member('Database schema', c.bruno.id);
     const docs = await c.member('Docs', c.tess.id, [api.id]);

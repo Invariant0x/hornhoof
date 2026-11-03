@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
 
-export type Version = { version: string; commit: string };
+export type Version = { version: string; commit?: string };
 type VersionState = { version: Version | null; failed: boolean };
 
 /* One source for loading the running build, including the smaller authenticated About response. */
@@ -25,7 +25,9 @@ export function useVersion(): Version | null {
   return useVersionState('/api/version').version;
 }
 
-export const versionText = ({ version, commit }: Version) => `${version} · ${commit.slice(0, 7)}`;
+const shortCommit = (commit?: string) => commit?.slice(0, 7) || '?';
+export const versionText = ({ version, commit }: Version) => `${version} (${shortCommit(commit)})`;
+export const buildText = (build: Version & { tag: string }) => versionText({ version: build.version || build.tag, commit: build.commit });
 
 /* Small and muted in the bottom right of every screen. */
 export function VersionMark() {

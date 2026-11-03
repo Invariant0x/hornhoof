@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api';
 import type { UpdatesView } from './types';
+import type { Version } from './ui/VersionMark';
 
 /* A seam for tests: the page reloads once the server runs another build. */
 export const page = { reload: () => window.location.reload() };
@@ -14,6 +15,7 @@ export type Updates = {
   busy: boolean;
   /* An update was asked for and the updater has not reported on it yet. */
   starting: boolean;
+  target: Version | null;
   /* The server stopped answering while an update runs: it is restarting. */
   offline: boolean;
   /* An update is being asked for and the server has not answered yet. */
@@ -23,10 +25,16 @@ export type Updates = {
   callOff(): Promise<void>;
 };
 
+function requestedBuild(view: UpdatesView | null, tag: string): Version {
+  const build = tag === 'latest' ? view?.latest : view?.versions.find(b => b.tag === tag);
+  if (!build) return { version: tag };
+  return { version: build.version || build.tag, commit: build.commit };
+}
+
 /* What Hornhoof knows about newer builds and the updater, for people who see the whole company. */
 export function useUpdates(enabled: boolean): Updates {
   const [view, setView] = useState<UpdatesView | null>(null);
-  const [sent, setSent] = useState<string | null>(null);
+  const [sent, setSent] = useState<(Version & { id: string }) | null>(null);
   const [offline, setOffline] = useState(false);
   const [asking, setAsking] = useState(false);
   const boot = useRef<string | null>(null);
@@ -51,9 +59,9 @@ export function useUpdates(enabled: boolean): Updates {
 
   const status = view?.updater.status;
   /* A sent request counts until the updater reports on it. */
-  const answered = sent !== null && status?.id === sent && status.state !== 'running';
+  const answered = sent !== null && status?.id === sent.id && status.state !== 'running';
   const busy = (sent !== null && !answered) || status?.state === 'running' || Boolean(view?.updater.waiting);
-  const starting = sent !== null && status?.id !== sent;
+  const starting = sent !== null && status?.id !== sent.id;
   busyNow.current = busy;
 
   useEffect(() => {
@@ -71,6 +79,7 @@ export function useUpdates(enabled: boolean): Updates {
     view,
     busy,
     starting,
+    target: sent,
     offline,
     asking,
     check: async () => take(await api.post<UpdatesView>('/api/updates/check')),
@@ -80,8 +89,9 @@ export function useUpdates(enabled: boolean): Updates {
       askingNow.current = true;
       setAsking(true);
       try {
+        const target = requestedBuild(view, version);
         const { id } = await api.post<{ id: string }>('/api/updates', { version, whenIdle });
-        if (!whenIdle) setSent(id);
+        if (!whenIdle) setSent({ id, ...target });
         await load();
       } finally {
         askingNow.current = false;

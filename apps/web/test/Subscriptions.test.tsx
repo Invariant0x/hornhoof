@@ -417,6 +417,57 @@ describe('Subscriptions', () => {
     expect(within(rowOf('Claude')).queryByRole('button', { name: /New command/ })).not.toBeInTheDocument();
   });
 
+  it('keeps an unused subscription command visible across tab switches and reloads with its expiry, Copy and Cancel, and hides it on join, expiry or Cancel', async () => {
+    const expiresAt = new Date(Date.now() + 3600_000).toISOString();
+    const shown = { id: 'c'.repeat(64), kind: 'plans' as const, plans: ['Claude'], machine: null, command: COMMAND, expiresAt };
+    let active: (typeof shown)[] = [];
+    const calls = lists({
+      'POST /api/subscriptions/connect': () => {
+        active = [shown];
+        return [201, { subscriptions: [], id: shown.id, command: COMMAND, expiresAt }];
+      },
+      'GET /api/nodes/commands': () => [200, { commands: active }],
+      [`POST /api/nodes/commands/${shown.id}/hide`]: () => {
+        active = [];
+        return [204];
+      },
+    });
+    const user = userEvent.setup();
+    const first = render(<LanguageProvider><Subscriptions me={ME} /></LanguageProvider>);
+    await user.click(await screen.findByRole('button', { name: 'Connect a subscription' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Claude' }));
+    await user.click(screen.getByRole('button', { name: 'Get the command' }));
+    expect(await screen.findByText(COMMAND)).toBeInTheDocument();
+    expect(screen.getByText(/^The command works once, until .+\. The nodes keep running in the background after the terminal is closed\.$/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+
+    /* Switching away to Machines and back, or reloading the page, keeps the same command on screen. */
+    first.unmount();
+    const afterTab = render(<LanguageProvider><Subscriptions me={ME} /></LanguageProvider>);
+    expect(await screen.findByText(COMMAND)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+
+    /* Russian labels for expiration, Copy and Cancel after reload. */
+    afterTab.unmount();
+    localStorage.setItem('hh-lang', 'ru');
+    const inRu = render(<LanguageProvider><Subscriptions me={ME} /></LanguageProvider>);
+    expect(await screen.findByText(COMMAND)).toBeInTheDocument();
+    expect(screen.getByText(/^Команда сработает один раз, до .+\. Ноды продолжат работать в фоне и после закрытия терминала\.$/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Копировать' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Отменить' }));
+    expect(calls).toContainEqual({ method: 'POST', path: `/api/nodes/commands/${shown.id}/hide`, body: undefined });
+    await vi.waitFor(() => expect(screen.queryByText(COMMAND)).not.toBeInTheDocument());
+    inRu.unmount();
+
+    /* After a machine joins or the command expires, reload shows no command. */
+    localStorage.removeItem('hh-lang');
+    render(<LanguageProvider><Subscriptions me={ME} /></LanguageProvider>);
+    await screen.findByRole('table');
+    expect(screen.queryByText(COMMAND)).not.toBeInTheDocument();
+  });
+
   it('shows the states in Russian', async () => {
     localStorage.setItem('hh-lang', 'ru');
     lists();
