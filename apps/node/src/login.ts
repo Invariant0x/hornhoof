@@ -165,12 +165,7 @@ export class LoginTerminal {
     this.stopWatch();
     await this.end();
     if (run !== this.run) return;
-    try {
-      await this.opts.install?.();
-    } catch {
-      return this.finish(run, NO_PROGRAM);
-    }
-    if (run !== this.run) return;
+    if (!(await this.installed(run)) || run !== this.run) return;
     try {
       await this.fs.mkdir(this.scratch);
       const { provider, bin, env } = this.opts.setup;
@@ -184,6 +179,17 @@ export class LoginTerminal {
     }
     this.watch = setInterval(() => void this.look(run), this.pollMs);
     this.watch.unref();
+  }
+
+  /* The plan's program, installed when it is missing; false once the sign-in ended because it could not be. */
+  private async installed(run: number): Promise<boolean> {
+    try {
+      await this.opts.install?.();
+      return true;
+    } catch {
+      await this.finish(run, NO_PROGRAM);
+      return false;
+    }
   }
 
   private stopWatch(): void {
