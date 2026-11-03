@@ -9,6 +9,9 @@ export const RETURN_MS = 300_000;
 export const REWORK_MS = 600_000;
 /* A running turn with no event for this long is an alarm: the server's watch raises it, and the map marks the agent. */
 export const QUIET_ALARM_MS = 1_800_000;
+/* A program waiting for input this long in a running turn lost the turn's end: its node closes the turn then, and the map
+   shows it red if the turn still runs. */
+export const LOST_END_MS = 60_000;
 
 export type LineState = 'blue' | 'yellow' | 'quiet';
 
