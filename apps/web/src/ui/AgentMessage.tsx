@@ -50,11 +50,12 @@ function keyIsElsewhere(target: EventTarget | null, box: HTMLElement | null): bo
   return Boolean(el?.closest('input, textarea, select, [contenteditable="true"]') && !box?.contains(el));
 }
 
-/* The messages whose text the person opened; the rest stay one line each. Ctrl+O opens every folded message, or folds
-   them all once all are open, wherever the focus is, as in Claude Code: on the map that opened the window too. */
-export function useFolding(seqs: number[], box: RefObject<HTMLElement | null>): Folding {
+/* The messages whose text the person opened; the rest stay one line each. While they are on screen (on), Ctrl+O opens
+   every folded message, or folds them all once all are open, wherever the focus is, as in Claude Code: on the map that
+   opened the window too. */
+export function useFolding(seqs: number[], box: RefObject<HTMLElement | null>, on: boolean): Folding {
   const [opened, setOpened] = useState<ReadonlySet<number>>(() => new Set());
-  const key = seqs.join(',');
+  const key = on ? seqs.join(',') : '';
   useEffect(() => {
     const all = key ? key.split(',').map(Number) : [];
     const onKey = (e: KeyboardEvent) => {

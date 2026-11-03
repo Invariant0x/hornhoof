@@ -354,7 +354,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard }:
   const shown = visible(events);
   const messages = shown.filter(isMessage);
   /* Only the log folds messages; the live terminal has the whole window, and its program has Ctrl+O. */
-  const folding = useFolding(terminal ? [] : messages.map(e => e.seq), box);
+  const folding = useFolding(messages.map(e => e.seq), box, !terminal);
   const newest = events.findLast(e => e.kind === 'proposal');
   const applied = new Set(events.filter(e => e.kind === 'applied').map(e => (e.data as Applied).proposalId));
   const open = newest && !applied.has(field(newest.data, 'proposalId')) ? newest.data : null;
