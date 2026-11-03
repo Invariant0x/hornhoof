@@ -17,7 +17,7 @@ import { plainOutput, signalName, type ProgramOutput } from '../program-exit.js'
 import { redact } from '../redact.js';
 import { Bridge, type AgentUrls } from './bridge.js';
 import { inputOf } from './input.js';
-import { fromAgent } from './peer.js';
+import { procOwner, type OwnerFactory, type Ownership, type Panes } from './peer.js';
 import { StreamMask } from './mask.js';
 import { ProgramWatch, READY, REPORT_MS, type Pending } from './program-state.js';
 import { acceptClaudeDialogs, agyTranscript, claudeTranscript, findKimiWire, findRollout, prepareAgy, prepareKimi, rolloutFiles, type LaunchSpec, type TermProgram } from './programs.js';
@@ -189,6 +189,7 @@ type Options = {
   rows?: number;
   /* Where Linux tells which process holds a connection, so the bridge takes tool calls only from the agent's own program. */
   proc?: string;
+  owner?: OwnerFactory;
   /* On a node that runs as root, the user the agents' programs run as, and how the node does file work in their folders. */
   user?: JobUser | null;
   fs?: AgentFs;
@@ -286,9 +287,9 @@ export class TerminalHost {
   private readonly rows: number;
 
   constructor(private readonly opts: Options) {
-    const owns = opts.proc ? fromAgent(key => this.panes(key), opts.proc) : null;
-    this.bridge = new Bridge(opts.hornhoof, (key, event, body) => this.hook(key, event, body), owns, {
-      proc: opts.proc, rejected: (key, event, reason) => this.hookRejected(key, event, reason),
+    const owner = ownership(opts, key => this.panes(key));
+    this.bridge = new Bridge(opts.hornhoof, (key, event, body) => this.hook(key, event, body), owner.owns, {
+      capture: owner.capture, rejected: (key, event, reason) => this.hookRejected(key, event, reason),
     });
     this.fs = opts.fs ?? (opts.user ? agentFs(opts.user) : ownFs);
     this.plugins = opts.plugins ?? claudePlugins();
@@ -1393,6 +1394,11 @@ export async function parentOf(pid: number): Promise<number | null> {
   } catch {
     return new Promise(resolve => execFile('ps', ['-o', 'ppid=', '-p', String(pid)], (err, out) => resolve(err ? null : Number(out.trim()))));
   }
+}
+
+function ownership(options: Options, panes: Panes): Ownership {
+  if (options.owner) return options.owner(panes);
+  return options.proc ? procOwner(options.proc)(panes) : { owns: null };
 }
 
 /* How many tokens the model Kimi starts with takes in its context, from its settings. */

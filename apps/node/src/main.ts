@@ -27,6 +27,8 @@ import { childEnv, firstLine } from './providers/process.js';
 import { TerminalHost } from './terminal/host.js';
 import { agyProgram, claudeProgram, codexProgram, kimiProgram, type TermProgram } from './terminal/programs.js';
 import { Tmux } from './terminal/tmux.js';
+import { procOwner, type OwnerFactory } from './terminal/peer.js';
+import { macOwner, type Command } from './terminal/mac-peer.js';
 
 export const VERSION: string = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
@@ -57,7 +59,7 @@ type TestsDone = Extract<NodeMessage, { type: 'tests.done' }>;
 const NO_RUNS = 'This node has no user of its own for runs, which it gets only when it runs as root with the rights to switch users, so it takes no part of any run.';
 
 /* Agents of a personal Claude Code, Codex or Kimi Code plan run in tmux sessions people can watch and type into. */
-export type TerminalSetup = { tmux: Tmux; program: TermProgram; bin: string; home: string; signedOut: RegExp; proc?: string; user?: JobUser | null; fs?: AgentFs };
+export type TerminalSetup = { tmux: Tmux; program: TermProgram; bin: string; home: string; signedOut: RegExp; owner?: OwnerFactory; user?: JobUser | null; fs?: AgentFs };
 
 type RunOptions = {
   dir: string;
@@ -177,7 +179,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
         secrets: () => [...known],
         log,
         remember: (sessionId, workDir) => rememberSession(dir, sessionId, workDir),
-        proc: terminal.proc,
+        owner: terminal.owner,
         user: terminal.user,
         fs: terminal.fs,
       })
@@ -630,14 +632,19 @@ function terminalFor(dir: string, provider: ProviderId, user: JobUser | null, fs
   const tools = join(dir, 'tools');
   const home = join(dir, 'home');
   const tmux = new Tmux({ env: childEnv(tools, { HOME: process.env.HOME ?? home }), recordingsDir: join(dir, '.hh-recordings') });
-  /* Nodes run on Linux, where the bridge can tell which agent's program calls it. */
-  const proc = process.platform === 'linux' && existsSync('/proc/net/tcp') ? '/proc' : undefined;
+  const owner = terminalOwner();
   const bin = join(tools, 'bin', programFor(provider).bin);
   const signs = provider === 'claude' || provider === 'codex' ? provider : null;
   const login: LoginSetup | undefined = signs
     ? { provider: signs, bin, tmux: new Tmux({ socket: 'hh-signin', env: childEnv(tools, { HOME: process.env.HOME ?? home }), recordingsDir: join(dir, '.hh-recordings') }), env: childEnv(tools, {}), user, fs }
     : undefined;
-  return { terminal: { tmux, ...known, bin, home, proc, user, fs }, ...(login ? { login } : {}) };
+  return { terminal: { tmux, ...known, bin, home, owner, user, fs }, ...(login ? { login } : {}) };
+}
+
+/* Select the operating system's connection proof once; the host receives it as a dependency. */
+export function terminalOwner(on: NodeJS.Platform = process.platform, run?: Command): OwnerFactory | undefined {
+  const owners: Partial<Record<NodeJS.Platform, OwnerFactory>> = { linux: procOwner('/proc'), darwin: macOwner(run) };
+  return owners[on];
 }
 
 async function run(dir: string, builtinMode: boolean, io: Io): Promise<number | { stop(): void }> {

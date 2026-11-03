@@ -1,10 +1,18 @@
 import { readdir, readFile, readlink } from 'node:fs/promises';
 import { join } from 'node:path';
 
-/* A connection to the bridge as Linux sees it: the caller's port and the bridge's, both on 127.0.0.1. */
-export type Peer = { port: number; bridgePort: number; pid?: number; acceptedInode?: string | null };
+/* A connection to the bridge: the caller's port and the bridge's, both on 127.0.0.1. */
+export type Peer = { port: number; bridgePort: number; pid?: number; acceptedInode?: string | null; acceptedPid?: number | null };
 /* Whether the connection comes from the agent's own program. */
 export type Owns = (key: string, peer: Peer) => Promise<boolean>;
+export type Capture = (peer: Peer) => Promise<Pick<Peer, 'acceptedInode' | 'acceptedPid'>>;
+export type Panes = (key: string) => Promise<number[]>;
+export type Ownership = { owns: Owns | null; capture?: Capture };
+export type OwnerFactory = (panes: Panes) => Ownership;
+
+export function procOwner(proc: string): OwnerFactory {
+  return panes => ({ owns: fromAgent(panes, proc), capture: async peer => ({ acceptedInode: await socketOf(proc, peer) }) });
+}
 
 const LOCAL = '0100007F';
 const hex = (port: number) => port.toString(16).toUpperCase().padStart(4, '0');
