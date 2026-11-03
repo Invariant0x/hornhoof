@@ -49,7 +49,7 @@ describe('the tracker', () => {
     expect(turn).toHaveTextContent('2 of 5 tasks done');
     expect(within(turn).getByRole('button', { name: /#12/ })).toHaveTextContent('In review');
     for (const name of ['Start turn', 'Close turn']) expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
-    /* The only fields are the answers to what agents ask. */
+    /* Decision text fields stay in the waiting section. */
     const waiting = screen.getByRole('region', { name: 'Waiting for you' });
     for (const box of screen.queryAllByRole('textbox')) expect(waiting).toContainElement(box);
   });
@@ -253,6 +253,99 @@ describe('the tracker', () => {
       await new Promise(r => setTimeout(r, 50));
     });
     expect(screen.getByRole('button', { name: /#11/ })).toHaveTextContent('Gate 1 of 3');
+  });
+});
+
+describe('task search', () => {
+  const archived = { ...PLANNED, id: 'abcdef14-1234-4567-8901-123456789abc', status: 'done', turn: 2 };
+  const mention = { ...SUBTASK, title: 'Notes for #14', brief: 'Check 14 payments.' };
+
+  it.each(['14', '#14'])('puts the exact task number first for %s, ahead of word matches', async query => {
+    const user = userEvent.setup();
+    shell({ [`GET ${ALL}`]: [200, { tasks: [mention, { ...PLANNED, id: 't114', number: 114 }, archived] }] });
+    await openTasks(user);
+    await user.type(screen.getByRole('searchbox', { name: 'Search tasks' }), query);
+    const results = screen.getByRole('region', { name: 'Search results' });
+    const matches = within(results).getAllByRole('button');
+    expect(matches).toHaveLength(2);
+    expect(matches[0]).toHaveTextContent('#14 Refund button');
+    expect(matches[0]).toBeVisible();
+    expect(matches[1]).toHaveTextContent('#13 Notes for #14');
+    expect(within(results).queryByRole('button', { name: /#114/ })).not.toBeInTheDocument();
+  });
+
+  it.each(['abcdef14-1234-4567-8901-123456789abc', 'ABCDEF14'])('finds a task by its id or prefix: %s', async query => {
+    const user = userEvent.setup();
+    shell({ [`GET ${ALL}`]: [200, { tasks: [...TASKS, archived] }] });
+    await openTasks(user);
+    await user.type(screen.getByRole('searchbox', { name: 'Search tasks' }), query);
+    const results = screen.getByRole('region', { name: 'Search results' });
+    expect(within(results).getAllByRole('button')).toHaveLength(1);
+    expect(within(results).getByRole('button', { name: /#14 Refund button/ })).toBeVisible();
+  });
+
+  it('does not use id prefixes shorter than eight characters', async () => {
+    const user = userEvent.setup();
+    shell({ [`GET ${ALL}`]: [200, { tasks: [archived] }] });
+    await openTasks(user);
+    await user.type(screen.getByRole('searchbox', { name: 'Search tasks' }), 'abcdef1');
+    expect(screen.getByRole('status')).toHaveTextContent('No tasks found');
+  });
+
+  it.each([
+    ['  CHECKOUT   payments  ', 'Checkout API'],
+    ['ОпЛаТа карта', 'Оплата заказа'],
+  ])('requires every word across the title and brief, ignoring case: %s', async (query, title) => {
+    const user = userEvent.setup();
+    const russian = { ...PLANNED, title: 'Оплата заказа', brief: 'Банковская карта', status: 'cancelled' };
+    shell({ [`GET ${ALL}`]: [200, { tasks: [...TASKS, russian] }] });
+    await openTasks(user);
+    await user.type(screen.getByRole('searchbox', { name: 'Search tasks' }), query);
+    const results = screen.getByRole('region', { name: 'Search results' });
+    expect(within(results).getAllByRole('button')).toHaveLength(1);
+    expect(within(results).getByRole('button', { name: new RegExp(title) })).toBeVisible();
+  });
+
+  it('shows no matches without changing the decisions waiting for the person', async () => {
+    const user = userEvent.setup();
+    shell();
+    await openTasks(user);
+    await user.type(screen.getByRole('searchbox', { name: 'Search tasks' }), 'Checkout missing');
+    expect(screen.getByRole('status')).toHaveTextContent('No tasks found');
+    expect(screen.queryByRole('button', { name: /#12 Checkout API/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Waiting for you' })).toHaveTextContent('Stripe or Adyen?');
+  });
+
+  it('keeps the department filter when searching and clearing, then restores the ordinary tracker', async () => {
+    const user = userEvent.setup();
+    shell({
+      [`GET ${ALL}`]: [200, { tasks: [TASKS[0], { ...PLANNED, title: 'Checkout marketing', department: { id: 'd1', name: 'Marketing' } }] }],
+      'GET /api/tasks?status=all&department=d2': [200, { tasks: [TASKS[0]] }],
+    });
+    await openTasks(user);
+    const search = screen.getByRole('searchbox', { name: 'Search tasks' });
+    await user.type(search, 'checkout');
+    expect(within(screen.getByRole('region', { name: 'Search results' })).getAllByRole('button')).toHaveLength(2);
+    await user.selectOptions(screen.getByLabelText('Department'), 'd2');
+    await waitFor(() => expect(within(screen.getByRole('region', { name: 'Search results' })).getAllByRole('button')).toHaveLength(1));
+    expect(screen.queryByRole('button', { name: /Checkout marketing/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Clear search' }));
+    expect(search).toHaveValue('');
+    expect(search).toHaveFocus();
+    expect(screen.getByLabelText('Department')).toHaveValue('d2');
+    expect(screen.queryByRole('region', { name: 'Search results' })).not.toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: 'Turn 3' })).getByRole('button', { name: /Checkout API/ })).toBeVisible();
+    await user.type(search, '   ');
+    expect(screen.queryByRole('region', { name: 'Search results' })).not.toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Turn 3' })).toBeVisible();
+  });
+
+  it('offers search even when there are no departments', async () => {
+    const user = userEvent.setup();
+    shell({ 'GET /api/org': [200, { ...DEV_ORG, departments: [] }] });
+    await openTasks(user);
+    await user.type(screen.getByRole('searchbox', { name: 'Search tasks' }), 'cart');
+    expect(within(screen.getByRole('region', { name: 'Search results' })).getByRole('button', { name: /Cart page/ })).toBeVisible();
   });
 });
 

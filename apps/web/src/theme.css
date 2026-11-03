@@ -953,7 +953,11 @@ summary.turn-head:focus-visible { outline: 2px solid var(--cyan); outline-offset
 .req-commit-link { justify-self: start; }
 .tp-wait { display: grid; gap: 8px; }
 .task-filters { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px; }
-.task-filters .field { min-width: 240px; }
+.task-filters .field { flex: 1 1 240px; min-width: 0; }
+.task-search { position: relative; min-width: 0; }
+.task-search input { width: 100%; min-width: 0; padding-right: 44px; }
+.task-search input::-webkit-search-cancel-button { display: none; }
+.task-search .zbtn { position: absolute; right: 0; top: 0; height: 40px; }
 .trow { display: grid; gap: 4px; width: 100%; padding: 10px 14px; background: var(--surface); border: 1px solid var(--line); color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .trow:hover, .trow.on { border-color: var(--cyan); box-shadow: inset 3px 0 0 var(--cyan); }
 .trow:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
