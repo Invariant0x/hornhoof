@@ -57,7 +57,9 @@ describe('updating the programs on a machine', () => {
     onTestFinished(() => send.mockRestore());
     const auth = actor === 'delegated' ? { headers: orchestratorHeaders(f.ownerId, '00000000-0000-4000-8000-000000000009') } : as(f[actor === 'owner' ? 'owner' : 'ceo']);
     const request = () => f.app.inject({ method: 'POST', url: `/api/machines/${f.machine.machine.id}/programs/update`, ...auth });
-    expect((await request()).statusCode).toBe(202);
+    const accepted = await request();
+    expect(accepted.statusCode).toBe(202);
+    expect(accepted.json()).toEqual({ updating: true });
     expect(await first.next()).toEqual({ type: 'programs.update' });
     let message = await second.next();
     while (message.type !== 'programs.update') message = await second.next();
@@ -91,11 +93,13 @@ describe('updating the programs on a machine', () => {
 
   it('merges matching versions while preserving different versions and partial failures', async () => {
     const f = await liveCompany();
-    await f.connect(f.machine.nodes[0]!.key, [{ ...claude, failed: true }, codex]);
-    await f.connect(f.machine.nodes[1]!.key, [claude, { ...codex, version: '3.0.0' }]);
+    const olderCodex = { ...codex, version: '0.5.0' };
+    const newerCodex = { ...codex, version: '0.6.0' };
+    await f.connect(f.machine.nodes[0]!.key, [newerCodex, claude]);
+    await f.connect(f.machine.nodes[1]!.key, [olderCodex, { ...claude, failed: true }]);
     for (const row of f.machine.nodes) await until(() => f.app.ctx.hub.isReady(nodeIdentity(row.nodeId)));
     expect((await f.machineView()).machines[0].programs).toEqual([
-      { ...claude, failed: true }, codex, { ...codex, version: '3.0.0' },
+      { ...claude, failed: true }, olderCodex, newerCodex,
     ]);
   });
 

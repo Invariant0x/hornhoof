@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import type { NodeMessage } from '@hornhoof/protocol';
 import type { WebSocket } from 'ws';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { BUILTIN, NodeHub } from '../src/modules/nodes/hub.js';
 
 describe('the node hub', () => {
@@ -49,5 +49,65 @@ describe('the node hub', () => {
     hub.attach(node, Object.assign(new EventEmitter(), { readyState: 1, close() {}, ping() {} }) as unknown as WebSocket);
     expect(hub.awaySince(node)).toBeNull();
     hub.stop();
+  });
+});
+
+
+describe('live program metadata in the hub', () => {
+  it('requires a greeting, keeps snapshots isolated and coalesces update commands', () => {
+    const hub = new NodeHub({ pingMs: 60_000, onClose: async () => {}, onMessage: async () => {} });
+    onTestFinished(() => hub.stop());
+    const sent: unknown[] = [];
+    const socket = Object.assign(new EventEmitter(), { readyState: 1, close() {}, ping() {}, send(text: string) { sent.push(JSON.parse(text)); } });
+    expect(hub.programsOf(BUILTIN)).toBeNull();
+    expect(hub.updatePrograms(BUILTIN)).toBe(false);
+    hub.attach(BUILTIN, socket as unknown as WebSocket);
+    expect(hub.takesSkillFiles(BUILTIN)).toBe(false);
+    expect(hub.updatePrograms(BUILTIN)).toBe(false);
+    expect(() => socket.emit('message', '{broken')).not.toThrow();
+    expect(() => socket.emit('message', JSON.stringify({ type: 'unknown' }))).not.toThrow();
+    const programs = [{ id: 'claude', version: '1.0.0', updating: false, failed: true }];
+    socket.emit('message', JSON.stringify({ type: 'status', loggedIn: true, limits: null, programs }));
+    expect(hub.programsOf(BUILTIN)).toEqual(programs);
+    expect(hub.updatePrograms(BUILTIN)).toBe(false);
+    hub.greet(BUILTIN);
+    const snapshot = hub.programsOf(BUILTIN)!;
+    snapshot[0]!.version = 'changed outside';
+    expect(hub.programsOf(BUILTIN)).toEqual(programs);
+    expect(hub.updatePrograms(BUILTIN)).toBe(true);
+    expect(sent).toEqual([{ type: 'programs.update' }]);
+    expect(hub.programsOf(BUILTIN)).toEqual([{ ...programs[0], updating: true, failed: false }]);
+    expect(hub.updatePrograms(BUILTIN)).toBe(true);
+    expect(sent).toHaveLength(1);
+    socket.emit('message', JSON.stringify({ type: 'status', loggedIn: true, limits: null, programs: [] }));
+    expect(hub.programsOf(BUILTIN)).toEqual([]);
+    expect(hub.updatePrograms(BUILTIN)).toBe(false);
+    socket.readyState = 3;
+    expect(hub.programsOf(BUILTIN)).toBeNull();
+    expect(hub.updatePrograms(BUILTIN)).toBe(false);
+    const older = Object.assign(new EventEmitter(), { readyState: 1, close() {}, ping() {} });
+    hub.attach(BUILTIN, older as unknown as WebSocket);
+    hub.greet(BUILTIN);
+    expect(hub.programsOf(BUILTIN)).toBeNull();
+    expect(hub.updatePrograms(BUILTIN)).toBe(false);
+  });
+
+  it('allows three full ping intervals for a new socket to reply', async () => {
+    vi.useFakeTimers();
+    const terminate = vi.fn();
+    const ping = vi.fn();
+    const hub = new NodeHub({ pingMs: 1000, onClose: async () => {}, onMessage: async () => {} });
+    const socket = Object.assign(new EventEmitter(), { readyState: 1, close() {}, ping, terminate });
+    hub.attach(BUILTIN, socket as unknown as WebSocket);
+    try {
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(ping).toHaveBeenCalledTimes(3);
+      expect(terminate).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(terminate).toHaveBeenCalledOnce();
+    } finally {
+      hub.stop();
+      vi.useRealTimers();
+    }
   });
 });

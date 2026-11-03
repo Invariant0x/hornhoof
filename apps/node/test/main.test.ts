@@ -154,6 +154,29 @@ describe('reporting managed programs', () => {
 });
 
 describe('a node that runs agents in terminals', () => {
+  it.each([
+    ['a personal node without an agent session', true, null],
+    ['an API agent workspace without a terminal', false, 'api-agent'],
+  ] as const)('keeps the runtime timeout for %s', async (_name, terminal, key) => {
+    const server = await fakeServer();
+    const dir = nodeDir(server.url);
+    let release!: () => void;
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    const tmux = new Tmux({ socket: `hh-program-timeout-${process.pid}`, env: { PATH: process.env.PATH ?? '', HOME: dir } });
+    const node = await runNode({ dir, log: () => {}, adapter: { ...adapter, run: async input => { await pending; return adapter.run(input); } },
+      ...(terminal ? { terminal: { tmux, program: claudeProgram, bin: new URL('./fakes/fake-term.mjs', import.meta.url).pathname, home: join(dir, 'home'), signedOut: /not logged in/i } } : {}),
+    });
+    onTestFinished(() => node.stop());
+    try {
+      await server.wait(() => server.received.some(m => m.type === 'hello'));
+      server.send({ type: 'job.run', jobId: 'runtime-timeout', subscriptionId: 's1', provider: 'claude', prompt: 'Use a runtime timeout.', sessionId: null, model: null, timeoutMs: 80, secret: null, instructions: null, toolToken: null, ...(key ? { workspace: { key, repo: null } } : {}) });
+      await server.wait(() => server.received.some(m => m.type === 'job.done' && m.jobId === 'runtime-timeout'));
+      expect(server.received.find(m => m.type === 'job.done' && m.jobId === 'runtime-timeout')).toMatchObject({ ok: false, error: 'timeout' });
+    } finally {
+      release();
+    }
+  });
+
   it.skipIf(!hasTmux)('passes the live word budget to the host and accepts older servers without it', async () => {
     const server = await fakeServer();
     const dir = nodeDir(server.url);
