@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api';
 import { useStream, type LiveMessage } from './live';
 import { deptLabel, type Messages } from './i18n';
-import type { AgentRef, Decisions, Improvement, Lang, Org, TaskDetail, TaskLine, TaskPlace, TurnView } from './types';
+import type { AgentRef, DepartmentTree, Decisions, Improvement, Lang, Org, TaskDetail, TaskLine, TaskPlace, TurnView } from './types';
 
 /* Fetches the path, again whenever a stream message says it may have changed. undefined until the first answer. */
 function useLive<T>(path: string | null, pick: (body: never) => T, refresh: (m: LiveMessage) => boolean): { data: T | undefined; failure: unknown; load: () => void } {
@@ -93,4 +93,16 @@ export function placeName(t: Messages, org: Org | null | undefined, place: TaskP
 export function roleAfter(a: Pick<AgentRef, 'name' | 'role'>, language: keyof Lang): string {
   const role = a.role?.[language];
   return role && role !== a.name ? `, ${role}` : '';
+}
+
+/* Only an open tree or Speed drawer keeps the department clock fresh. */
+export function useDepartmentTree(departmentId: string, on: boolean) {
+  const result = useLive(on ? `/api/departments/${departmentId}/tree` : null, (b: { tree: DepartmentTree }) => b.tree,
+    m => m.type === 'task' && (m.spot?.departmentId === departmentId || m.spot?.parentId === departmentId));
+  useEffect(() => {
+    if (!on) return;
+    const timer = setInterval(result.load, 60_000);
+    return () => clearInterval(timer);
+  }, [on, result.load]);
+  return { tree: result.data, failure: result.failure, load: result.load };
 }

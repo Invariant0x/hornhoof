@@ -1,21 +1,23 @@
 import type { LineState } from '@hornhoof/protocol/map';
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { api } from '../api';
 import { deptLabel, errorText, useLanguage, useT } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
 import { useStream } from '../live';
-import { useTasks } from '../tasks';
+import { useDepartmentTree, useTasks } from '../tasks';
 import type { Department, Employee, EmployeeStatus, Me, PersonView } from '../types';
 import { Bar, percent } from '../ui/Bar';
 import { usePanZoom, ZoomBar } from '../ui/canvas';
 import { Edge } from '../ui/Edge';
-import { AgentIcon, PersonIcon, ProviderMark } from '../ui/icons';
+import { AgentIcon, MapIcon, PersonIcon, ProviderMark, SpeedIcon, TreeIcon } from '../ui/icons';
 import { NewTask } from '../ui/NewTask';
 import { PersonButton } from '../ui/PersonButton';
 import { RepoSettings } from '../ui/RepoSettings';
 import { byState, TaskRow } from '../ui/TaskRow';
 import { LiveWay, Pulse, pulseSeconds, toD, useReducedMotion, type Point } from '../ui/wires';
 import { useWorkLines } from '../ui/work-lines';
+import { TreeView } from './TreeView';
+import { SpeedPanel } from './SpeedPanel';
 import { arrowD, CH, CW, CY, FT, FW, HH, HW, PH, PW, schemaLayout, stepPaths, type Line, type Schema } from './schema';
 
 type Props = {
@@ -240,6 +242,43 @@ function DeptTasks({ department: d, head, canGive, selected, onOpenTask }: { dep
   );
 }
 
+function DrawerHead({ title, onClose }: { title: string; onClose(): void }) {
+  const t = useT();
+  return (
+    <div className="dv-drawer-h">
+      <b>{title}</b>
+      <button className="zbtn" type="button" aria-label={t.dept.close} onClick={onClose}>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+      </button>
+    </div>
+  );
+}
+
+/* Wrapped actions determine the tree's floor and the ticker's remaining room. */
+function useDepartmentSpace(language: string, panel: Props['panel']) {
+  const root = useRef<HTMLDivElement>(null), actions = useRef<HTMLDivElement>(null);
+  const [space, setSpace] = useState({ right: 16, bottom: 228, tickerHidden: false });
+  useLayoutEffect(() => {
+    const el = root.current, acts = actions.current;
+    if (!el || !acts) return;
+    const measure = () => {
+      const phone = window.innerWidth <= NARROW;
+      const width = el.clientWidth || window.innerWidth;
+      const right = phone ? 16 : acts.offsetWidth + 32;
+      const bottom = phone && el.clientHeight ? el.clientHeight - acts.offsetTop + 8 : 228;
+      setSpace({ right, bottom, tickerHidden: !phone && width - right - 212 < 220 });
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    observer.observe(acts);
+    return () => observer.disconnect();
+  }, [language, panel]);
+  const style = { '--ticker-right': `${space.right}px`, '--tree-bottom': `${space.bottom}px` } as CSSProperties;
+  return { root, actions, style, tickerHidden: space.tickerHidden };
+}
+
 /* Inside a department: its schema as in the prototype. The head on top, a frame per role in stages left to right through
    the gates, and the way back from them. Tasks, the repository, products and people open in a drawer at the left. */
 export function DepartmentView({ me, department: d, deputies, selected, selectedTask, panel, serverNow, onBack, onHire, onOpen, onOpenTask, onOpenDecisions }: Props) {
@@ -257,12 +296,24 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
   const mine = reach.find(p => p.id === me.person.id);
   const sees = company || !!mine;
   const canGive = company || !!mine?.access.departments.some(x => x.id === d.id);
-  const [drawer, setDrawer] = useState<'tasks' | 'about' | null>(null);
+  const [tree, setTree] = useState(false);
+  const [drawer, setDrawer] = useState<'tasks' | 'about' | 'speed' | null>(null);
+  const { tree: workTree, failure: treeFailure } = useDepartmentTree(d.id, sees && (tree || drawer === 'speed'));
+  const [treeZoom, setTreeZoom] = useState(1);
+  const [treeFit, setTreeFit] = useState(0);
+  const [openAgent, setOpenAgent] = useState<{ id: string; key: number; top: number } | null>(null);
+  const chrome = useDepartmentSpace(language, panel);
+  useEffect(() => {
+    if (!drawer) return;
+    const close = (e: KeyboardEvent) => { if (e.key === 'Escape') setDrawer(null); };
+    document.addEventListener('keydown', close);
+    return () => document.removeEventListener('keydown', close);
+  }, [drawer]);
 
   const s = useMemo(() => schemaLayout(d, reach.length), [d, reach.length]);
   const paths = useMemo(() => stepPaths(s), [s]);
   const box = useRef<HTMLDivElement>(null);
-  const { view, setView, zoomAt, handlers, dragged } = usePanZoom(box, d.id, { min: MIN_K, max: MAX_K });
+  const { view, setView, zoomAt, handlers, dragged } = usePanZoom(box, `${d.id}:${tree}`, { min: MIN_K, max: MAX_K });
   const covered = panel ? COVER[panel] : 0;
 
   /* Opens at a readable size from the left when the schema is wider than the screen, as the prototype does; Fit shows all of it. */
@@ -289,7 +340,7 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
     const ro = new ResizeObserver(() => place(false));
     ro.observe(el);
     return () => ro.disconnect();
-  }, [place]);
+  }, [place, tree]);
 
   /* The line from the head to each employee: blue while it works on the head's task, yellow for five minutes after it gave
      a result back, as the server keeps them. */
@@ -416,10 +467,32 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
     transition: still || !view.smooth ? 'none' : 'transform .8s cubic-bezier(.3,.7,.2,1)',
     ['--k' as string]: far ? Math.min(2, Math.max(1, 0.72 / view.k)).toFixed(3) : '1',
   } as CSSProperties;
+  const drawerTitle = drawer === 'speed' ? t.dept.speed : drawer === 'tasks' ? t.dept.tasksButton : t.dept.about;
+  const treeButton = tree ? t.dept.mapButton : t.dept.treeButton;
   const lines = (...cls: Line['cls'][]) => s.lines.filter(l => cls.includes(l.cls)).map((l, i) => <Wire key={`${l.cls}${i}`} l={l} />);
 
+  function openTreeAgent(id: string, top: number) {
+    setTree(true);
+    setOpenAgent(previous => ({ id, top, key: (previous?.key ?? 0) + 1 }));
+  }
+
+  function changeZoom(factor: number) {
+    if (tree) setTreeZoom(k => Math.max(.5, Math.min(3, k * factor)));
+    else zoomAt(factor);
+  }
+
+  function fitCanvas() {
+    if (!tree) return place(true);
+    setTreeZoom(1);
+    setTreeFit(n => n + 1);
+  }
+
   return (
-    <div className="dview">
+    <div className={`dview${drawer === 'speed' && !panel ? ' spd-open' : ''}`} ref={chrome.root} style={chrome.style}>
+      {tree && (workTree ? (
+        <TreeView tree={workTree} department={d} zoom={treeZoom} fit={treeFit} openAgent={openAgent} onOpenTask={onOpenTask} />
+      ) : <div className="tview"><p className="tv-empty glass">{treeFailure ? errorText(t, treeFailure) : t.common.loading}</p></div>)}
+      {!tree && (
       <div className={`dcanvas${far ? ' far' : ''}`} ref={box} role="region" aria-label={t.dept.schema} {...handlers}>
         <div className="world" style={worldStyle}>
           {s.frames.map(f => (
@@ -518,6 +591,8 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
         {!d.employees.some(e => e.kind !== 'head') && <p className="dv-empty glass">{t.dept.noMembers}</p>}
       </div>
 
+      )}
+
       <nav className="crumbs" aria-label={deptLabel(t, d)}>
         {/* The whole bar goes back, so nobody has to aim at the small arrow. */}
         <button className="crumb glass" type="button" aria-label={t.dept.back} title={t.dept.back} onClick={onBack}>
@@ -529,7 +604,11 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
         </button>
       </nav>
 
-      <div className="dv-acts" onPointerDown={e => e.stopPropagation()}>
+      <div className="dv-acts" ref={chrome.actions} onPointerDown={e => e.stopPropagation()}>
+        {sees && <>
+          <button className="hbtn glass ib" type="button" aria-label={treeButton} title={treeButton} onClick={() => setTree(!tree)}>{tree ? <MapIcon /> : <TreeIcon />}</button>
+          <button className={`hbtn glass ib${drawer === 'speed' ? ' on' : ''}`} type="button" aria-label={t.dept.speed} title={t.dept.speed} aria-expanded={drawer === 'speed'} onClick={() => setDrawer(drawer === 'speed' ? null : 'speed')}><SpeedIcon /></button>
+        </>}
         {sees && (
           <button className={`hbtn glass${drawer === 'tasks' ? ' on' : ''}`} type="button" aria-expanded={drawer === 'tasks'} onClick={() => setDrawer(drawer === 'tasks' ? null : 'tasks')}>
             {t.dept.tasksButton}
@@ -546,15 +625,9 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
       </div>
 
       {drawer && (
-        <aside className="dv-drawer" aria-label={drawer === 'tasks' ? t.dept.tasksButton : t.dept.about}>
-          <div className="dv-drawer-h">
-            <b>{drawer === 'tasks' ? t.dept.tasksButton : t.dept.about}</b>
-            <button className="zbtn" type="button" aria-label={t.dept.close} onClick={() => setDrawer(null)}>
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M6 6l12 12M18 6L6 18" />
-              </svg>
-            </button>
-          </div>
+        <aside className={`dv-drawer${drawer === 'speed' ? ` spd${panel ? '' : ' right'}` : ''}`} aria-label={drawerTitle}>
+          <DrawerHead title={drawerTitle} onClose={() => setDrawer(null)} />
+          {drawer === 'speed' ? (workTree ? <SpeedPanel tree={workTree} department={d} onAgent={openTreeAgent} /> : <div className="dv-drawer-b">{treeFailure ? errorText(t, treeFailure) : t.common.loading}</div>) : (
           <div className="dv-drawer-b">
             {drawer === 'tasks' && sees && <DeptTasks department={d} head={head} canGive={canGive} selected={selectedTask} onOpenTask={onOpenTask} />}
             {drawer === 'about' && (
@@ -596,12 +669,13 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
               </>
             )}
           </div>
+          )}
         </aside>
       )}
 
-      <ZoomBar k={view.k} onZoom={f => zoomAt(f)} onFit={() => place(true)} />
+      <ZoomBar k={tree ? treeZoom : view.k} step={tree ? 1.25 : 1.2} onZoom={changeZoom} onFit={fitCanvas} />
       {/* A panel at the right takes the room the line needs. */}
-      {!panel && (
+      {!panel && !chrome.tickerHidden && (
         <div className="ticker glass" aria-live="polite" onPointerDown={e => e.stopPropagation()}>
           <span className="live" />
           {said && <span className="tt">{said.at}</span>}

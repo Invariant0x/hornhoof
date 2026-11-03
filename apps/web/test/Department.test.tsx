@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
@@ -6,9 +6,10 @@ import { ru } from '../src/i18n/ru';
 import { Shell } from '../src/screens/Shell';
 import { schemaLayout, stepPaths } from '../src/screens/schema';
 import { RepoSettings } from '../src/ui/RepoSettings';
+import { useDepartmentTree } from '../src/tasks';
 import { toD } from '../src/ui/wires';
 import type { Me, Org } from '../src/types';
-import { CARD, decisions, DEV_ORG, ME, mockApi, REQUESTS, ROSTER, TASK_DETAIL, TASKS } from './api-mock';
+import { CARD, decisions, DEV_ORG, DEV_TREE, REVIEW_TREE, TREE_ORG, ME, mockApi, REQUESTS, ROSTER, TASK_DETAIL, TASKS } from './api-mock';
 import { decl, px, rulesFor } from './css';
 import { fakeStream } from './fake-stream';
 
@@ -680,4 +681,318 @@ describe('Department view', () => {
       expect(calls.find(c => c.method === 'PUT')).toEqual({ method: 'PUT', path: '/api/departments/pd1/repository', body: { url: 'https://github.com/acme/mascot.git', branch: 'main', token: 'ghp_mascot5678' } }),
     );
   });
+});
+
+const TREE_PATH = '/api/departments/d2/tree';
+const treeRoute = (tree = DEV_TREE): Record<string, [number, unknown]> => ({ [`GET ${TREE_PATH}`]: [200, { tree }] });
+
+async function showTree(user: ReturnType<typeof userEvent.setup>) {
+  await flyIn(user);
+  await user.click(screen.getByRole('button', { name: 'Tree' }));
+  return screen.findByRole('group', { name: 'Tree of turn 3' });
+}
+
+describe('Department work tree', () => {
+  it.each(['develop', undefined])('names the trunk and its card for repository branch %s', async branch => {
+    const user = userEvent.setup();
+    const departments = TREE_ORG.departments.map(d => ({
+      ...d,
+      repository: branch ? { ...REPO, branch } : undefined,
+    }));
+    shell(treeRoute(), { ...TREE_ORG, departments });
+    const graph = await showTree(user);
+    const name = branch ?? 'main';
+    const labels = document.querySelector('.tv-labs') as HTMLElement;
+    expect(within(labels).getByRole('button', { name })).toHaveClass('lchip');
+    await user.click(within(graph).getByRole('button', { name }));
+    const card = screen.getByRole('dialog', { name });
+    expect(within(card).getByRole('heading', { level: 4, name })).toBeInTheDocument();
+  });
+
+  it.each(['tree', 'speed'])('closes a card opened from %s before Speed on separate Escapes', async source => {
+    const user = userEvent.setup();
+    shell(treeRoute(), TREE_ORG);
+    const graph = source === 'tree' ? await showTree(user) : null;
+    if (!graph) await flyIn(user);
+    const button = screen.getByRole('button', { name: 'Speed' });
+    await user.click(button);
+    const speed = screen.getByRole('complementary', { name: 'Speed' });
+    const row = await within(speed).findByRole('button', { name: /Bruno/ });
+    await user.click(graph ? graph.querySelector('[data-row="b1"]')! : row);
+    expect(await screen.findByRole('dialog', { name: /42/ })).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(speed).toBeInTheDocument();
+    expect(button).toHaveAttribute('aria-expanded', 'true');
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('complementary', { name: 'Speed' })).not.toBeInTheDocument();
+    expect(button).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('places named square icons first, swaps the schema, and keeps focus on Map', async () => {
+    const user = userEvent.setup();
+    const calls = shell(treeRoute(), TREE_ORG);
+    await flyIn(user);
+    const tree = screen.getByRole('button', { name: 'Tree' });
+    const speed = screen.getByRole('button', { name: 'Speed' });
+    expect([...tree.parentElement!.children].slice(0, 3)).toEqual([tree, speed, screen.getByRole('button', { name: 'Department tasks' })]);
+    for (const button of [tree, speed]) {
+      expect(button).toHaveClass('hbtn', 'glass', 'ib');
+      expect(button).toHaveAttribute('title', button.getAttribute('aria-label'));
+      expect(button).toHaveTextContent('');
+    }
+    expect(tree).not.toHaveAttribute('aria-pressed');
+    await user.click(tree);
+    await screen.findByRole('group', { name: 'Tree of turn 3' });
+    expect(screen.queryByRole('region', { name: 'Department schema' })).not.toBeInTheDocument();
+    expect(within(document.querySelector('.dview') as HTMLElement).getByRole('button', { name: 'Map' })).toHaveFocus();
+    expect(calls.filter(c => c.path === TREE_PATH)).toHaveLength(1);
+    await user.click(tree);
+    expect(screen.getByRole('region', { name: 'Department schema' })).toBeInTheDocument();
+  });
+
+  it('closes Speed with X, its button and Escape, keeping its open appearance', async () => {
+    const user = userEvent.setup();
+    shell(treeRoute());
+    await flyIn(user);
+    const speed = screen.getByRole('button', { name: 'Speed' });
+    for (const close of ['x', 'button', 'escape']) {
+      await user.click(speed);
+      const panel = screen.getByRole('complementary', { name: 'Speed' });
+      expect(panel).toHaveClass('dv-drawer', 'spd', 'right');
+      expect(within(panel).getByText('Speed', { selector: 'b' })).toBeInTheDocument();
+      expect(speed).toHaveClass('on');
+      expect(speed).toHaveAttribute('aria-expanded', 'true');
+      if (close === 'x') await user.click(within(panel).getByRole('button', { name: 'Close' }));
+      if (close === 'button') await user.click(speed);
+      if (close === 'escape') await user.keyboard('{Escape}');
+      expect(screen.queryByRole('complementary', { name: 'Speed' })).not.toBeInTheDocument();
+      expect(speed).toHaveAttribute('aria-expanded', 'false');
+    }
+  });
+
+  it('places Speed on the left while an agent card covers the right', async () => {
+    const user = userEvent.setup();
+    shell({ ...treeRoute(), 'GET /api/agents/b1/card': [200, CARD] });
+    await flyIn(user);
+    await user.click(within(screen.getByRole('region', { name: 'Members' })).getByRole('button', { name: /Bruno/ }));
+    await user.click(screen.getByRole('button', { name: 'Speed' }));
+    expect(screen.getByRole('complementary', { name: 'Speed' })).not.toHaveClass('right');
+  });
+
+  it.each(['tab', 'back'])('resets the tree and drawer when leaving through %s', async way => {
+    const user = userEvent.setup();
+    shell({ ...treeRoute(), 'GET /api/tasks?status=open': [200, { tasks: [] }], 'GET /api/turns': [200, { turns: [] }] });
+    await showTree(user);
+    await user.click(screen.getByRole('button', { name: 'Speed' }));
+    if (way === 'back') await user.click(screen.getByRole('button', { name: 'Back to the map' }));
+    else {
+      await user.click(screen.getByRole('button', { name: 'Tasks' }));
+      await user.click(within(screen.getByRole('navigation', { name: 'Sections' })).getByRole('button', { name: 'Map' }));
+    }
+    if (!screen.queryByRole('heading', { level: 2, name: 'Development' })) await flyIn(user);
+    expect(screen.getByRole('region', { name: 'Department schema' })).toBeInTheDocument();
+    expect(screen.queryByRole('complementary', { name: 'Speed' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Tree' })).toBeInTheDocument();
+  });
+
+  it('opens a line card and its task, and closes the card on Escape or outside clicks', async () => {
+    const user = userEvent.setup();
+    shell({ ...treeRoute(), 'GET /api/tasks/b42': [200, { task: { ...TASK_DETAIL, id: 'b42', number: 42 } }] }, TREE_ORG);
+    const tree = await showTree(user);
+    await user.click(tree.querySelector('[data-row="b1"]')!);
+    let card = screen.getByRole('dialog', { name: /42/ });
+    expect(card).toHaveClass('tv-card');
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog', { name: /42/ })).not.toBeInTheDocument();
+    await user.click(tree.querySelector('[data-row="b1"]')!);
+    await user.click(within(document.querySelector('.dview') as HTMLElement).getByRole('button', { name: 'Map' }));
+    expect(screen.queryByRole('dialog', { name: /42/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Tree' }));
+    const next = await screen.findByRole('group', { name: 'Tree of turn 3' });
+    await user.click(next.querySelector('[data-row="b1"]')!);
+    card = screen.getByRole('dialog', { name: /42/ });
+    await user.click(within(card).getByRole('button', { name: 'Open the task' }));
+    expect(await screen.findByRole('heading', { name: /#42/ })).toBeInTheDocument();
+  });
+
+  it('shows whole-turn totals, opens a card from Speed, and lists open idle stretches first', async () => {
+    const user = userEvent.setup();
+    shell(treeRoute(), TREE_ORG);
+    await flyIn(user);
+    await user.click(screen.getByRole('button', { name: 'Speed' }));
+    const speed = screen.getByRole('complementary', { name: 'Speed' });
+    await within(speed).findByRole('button', { name: /Bruno/ });
+    expect(speed.querySelectorAll('.sum dd')).toHaveLength(3);
+    await user.click(within(speed).getByRole('button', { name: /Bruno/ }));
+    await screen.findByRole('group', { name: 'Tree of turn 3' });
+    expect(screen.getByRole('dialog', { name: /42/ })).toBeInTheDocument();
+    await user.click(within(speed).getByRole('tab', { name: 'Idle' }));
+    const idle = [...speed.querySelectorAll('.idle')];
+    expect(idle.slice(0, 3).every(e => e.textContent!.includes('still going'))).toBe(true);
+    expect(idle[3]).toHaveTextContent('Timur');
+  });
+
+  it('runs a dot only with motion enabled, and uses 1.25 minute zoom steps', async () => {
+    const user = userEvent.setup();
+    shell(treeRoute());
+    await showTree(user);
+    expect(document.querySelector('.tview animateMotion')).toBeInTheDocument();
+    await user.click(within(document.querySelector('.dview') as HTMLElement).getByRole('button', { name: 'Zoom in' }));
+    expect(document.querySelector('.dview .zoom')).toHaveTextContent('125%');
+    await user.click(within(document.querySelector('.dview') as HTMLElement).getByRole('button', { name: 'Show everything' }));
+    expect(document.querySelector('.dview .zoom')).toHaveTextContent('100%');
+  });
+
+  it('does not run a live dot under reduced motion', async () => {
+    vi.stubGlobal('matchMedia', () => ({ matches: true, addEventListener() {}, removeEventListener() {} }));
+    const user = userEvent.setup();
+    shell(treeRoute());
+    await showTree(user);
+    expect(document.querySelector('.tview animateMotion')).not.toBeInTheDocument();
+  });
+
+  it('reloads for this department or its parent, and ignores tasks elsewhere', async () => {
+    const stream = fakeStream();
+    const user = userEvent.setup();
+    const calls = shell(treeRoute());
+    await showTree(user);
+    const count = () => calls.filter(c => c.path === TREE_PATH).length;
+    stream.send({ type: 'task', id: 'b42', spot: { departmentId: 'other' } });
+    await act(async () => {});
+    expect(count()).toBe(1);
+    stream.send({ type: 'task', id: 'b42', spot: { departmentId: 'd2' } });
+    await waitFor(() => expect(count()).toBe(2));
+    stream.send({ type: 'task', id: 'b42', spot: { departmentId: 'product', parentId: 'd2' } });
+    await waitFor(() => expect(count()).toBe(3));
+  });
+
+  it('refreshes every minute only while the tree data is on', async () => {
+    vi.useFakeTimers();
+    onTestFinished(() => { vi.useRealTimers(); });
+    const calls = mockApi(treeRoute());
+    const { rerender, unmount } = renderHook(({ on }) => useDepartmentTree('d2', on), { initialProps: { on: true } });
+    await act(async () => {});
+    expect(calls).toHaveLength(1);
+    await act(async () => { vi.advanceTimersByTime(60_000); });
+    expect(calls).toHaveLength(2);
+    rerender({ on: false });
+    await act(async () => { vi.advanceTimersByTime(120_000); });
+    expect(calls).toHaveLength(2);
+    unmount();
+  });
+
+  it('names the buttons and explains a missing turn in Russian', async () => {
+    localStorage.setItem('hh-lang', 'ru');
+    onTestFinished(() => localStorage.removeItem('hh-lang'));
+    const user = userEvent.setup();
+    shell(treeRoute({ ...DEV_TREE, turn: null }));
+    await user.click(await screen.findByRole('button', { name: /Разработка/ }));
+    await user.click(screen.getByRole('button', { name: 'Дерево' }));
+    expect(await screen.findByText('Сейчас нет открытого хода.')).toBeInTheDocument();
+    expect(within(document.querySelector('.dview') as HTMLElement).getByRole('button', { name: 'Карта' })).toHaveAttribute('title', 'Карта');
+    expect(screen.getByRole('button', { name: 'Скорость' })).toHaveAttribute('title', 'Скорость');
+  });
+
+  it('keeps the approved icon, phone sheet and reduced-motion CSS', () => {
+    expect(decl('.hbtn.ib', 'width')).toBe('44px');
+    expect(decl('.dv-drawer.spd', 'bottom', '(max-width: 760px)')).toBe('0');
+    expect(decl('.dv-drawer.spd', 'height', '(max-width: 760px)')).toBe('76%');
+    for (const selector of ['.tview .hd-d', '.tview .hd-c.ps', '.tview .ring.br']) {
+      expect(decl(selector, 'animation', '(prefers-reduced-motion: reduce)')).toBe('none');
+    }
+  });
+});
+
+it('shows failed unnumbered review verdicts in amber and opens review details', async () => {
+  const user = userEvent.setup();
+  const review = REVIEW_TREE.review!;
+  const tree = { ...REVIEW_TREE, review: { ...review, reviewers: review.reviewers.map((r, i) => i === 0 ? { ...r, verdict: { at: r.verdict!.at, pass: false, findings: null } } : r) } };
+  shell(treeRoute(tree), TREE_ORG);
+  const graph = await showTree(user);
+  const amber = graph.querySelector('.ring.a');
+  expect(amber).toBeInTheDocument();
+  expect(amber!.parentElement!.querySelector('.ic-ok')).not.toBeInTheDocument();
+  await user.click(graph.querySelector('[data-row="b6"]')!);
+  expect(screen.getByRole('dialog')).toHaveTextContent('Verdict: changes needed');
+  expect(screen.getByRole('dialog')).toHaveTextContent('Checked for');
+});
+
+it('measures wrapped actions for the tree floor and hides a ticker under 220 pixels', async () => {
+  const callbacks: (() => void)[] = [];
+  vi.stubGlobal('ResizeObserver', class {
+    constructor(callback: () => void) { callbacks.push(callback); }
+    observe() {}
+    disconnect() {}
+  });
+  const user = userEvent.setup();
+  shell(treeRoute());
+  await flyIn(user);
+  const root = document.querySelector('.dview') as HTMLElement;
+  const actions = root.querySelector('.dv-acts')!;
+  Object.defineProperties(root, { clientWidth: { configurable: true, value: 1200 }, clientHeight: { configurable: true, value: 700 } });
+  Object.defineProperties(actions, { offsetWidth: { configurable: true, value: 543 }, offsetLeft: { configurable: true, value: 641 }, offsetTop: { configurable: true, value: 500 } });
+  act(() => callbacks.forEach(fn => fn()));
+  expect(root.style.getPropertyValue('--ticker-right')).toBe('575px');
+  expect(root.querySelector('.ticker')).toBeInTheDocument();
+  Object.defineProperty(root, 'clientWidth', { configurable: true, value: 900 });
+  act(() => callbacks.forEach(fn => fn()));
+  expect(root.querySelector('.ticker')).not.toBeInTheDocument();
+  vi.stubGlobal('innerWidth', 360);
+  act(() => callbacks.forEach(fn => fn()));
+  expect(root.style.getPropertyValue('--tree-bottom')).toBe('208px');
+});
+
+it('keeps a dismissed Speed card closed after live data changes', async () => {
+  const user = userEvent.setup(), stream = fakeStream();
+  shell(treeRoute(), TREE_ORG);
+  await flyIn(user);
+  await user.click(screen.getByRole('button', { name: 'Speed' }));
+  const speed = screen.getByRole('complementary', { name: 'Speed' });
+  await user.click(await within(speed).findByRole('button', { name: /Bruno/ }));
+  expect(await screen.findByRole('dialog')).toBeInTheDocument();
+  await user.keyboard('{Escape}');
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  stream.send({ type: 'task', id: 'b42', spot: { departmentId: 'd2' } });
+  await act(async () => {});
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+});
+
+it('places a short card below its point when it fits there', async () => {
+  const user = userEvent.setup();
+  shell(treeRoute());
+  const graph = await showTree(user);
+  const hit = graph.querySelector('[data-row="b1"]')!;
+  vi.spyOn(hit, 'getBoundingClientRect').mockReturnValue({ x: 200, y: 150, left: 200, right: 500, top: 150, bottom: 200, width: 300, height: 50, toJSON() {} });
+  const descriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')!;
+  Object.defineProperty(HTMLElement.prototype, 'offsetHeight', { configurable: true, get() { return this.classList.contains('tv-card') ? 180 : 0; } });
+  onTestFinished(() => { Object.defineProperty(HTMLElement.prototype, 'offsetHeight', descriptor); });
+  await user.click(hit);
+  expect(screen.getByRole('dialog')).toHaveStyle({ top: '208px' });
+});
+
+it('shows the task number beside an agent in Speed and keeps an after-task card neutral', async () => {
+  const user = userEvent.setup();
+  shell(treeRoute(), TREE_ORG);
+  await flyIn(user);
+  await user.click(screen.getByRole('button', { name: 'Speed' }));
+  const speed = screen.getByRole('complementary', { name: 'Speed' });
+  const bruno = await within(speed).findByRole('button', { name: /Bruno/ });
+  expect(bruno).toHaveTextContent('#42');
+  await user.click(within(speed).getByRole('button', { name: /Ostap/ }));
+  const card = await screen.findByRole('dialog');
+  expect(card).toHaveTextContent('Waits for #49');
+  expect(card.querySelector('.tstate')).not.toHaveClass('w');
+});
+
+it('anchors a card opened from Speed beside the clicked row', async () => {
+  const user = userEvent.setup();
+  shell(treeRoute(), TREE_ORG);
+  await flyIn(user);
+  await user.click(screen.getByRole('button', { name: 'Speed' }));
+  const speed = screen.getByRole('complementary', { name: 'Speed' });
+  const row = await within(speed).findByRole('button', { name: /Bruno/ });
+  vi.spyOn(row, 'getBoundingClientRect').mockReturnValue({ x: 700, y: 280, left: 700, right: 1000, top: 280, bottom: 320, width: 300, height: 40, toJSON() {} });
+  await user.click(row);
+  expect(await screen.findByRole('dialog')).toHaveStyle({ top: '260px' });
 });

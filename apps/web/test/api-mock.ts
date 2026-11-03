@@ -1,5 +1,5 @@
 import { vi } from 'vitest';
-import type { AgentCardView, Decisions, MachineView, Me, Org, PersonView, Roster, Serving, SubView, TaskDetail, TaskLine, TurnView, WaitingRequest } from '../src/types';
+import type { AgentCardView, AgentTime, DepartmentTree, Decisions, IdleStretch, SegmentKind, TreeAgent, TreeLine, TreeReview, TreeSegment, MachineView, Me, Org, PersonView, Roster, Serving, SubView, TaskDetail, TaskLine, TurnView, WaitingRequest } from '../src/types';
 
 type Reply = [status: number, body?: unknown];
 type Route = Reply | ((body: unknown) => Reply | Promise<Reply>);
@@ -263,3 +263,202 @@ export const TURN: TurnView = {
 };
 export const PLANNED_TURN: TurnView = { ...TURN, id: 'u4', number: 4, title: 'Refunds', goal: 'Money goes back.', status: 'planned', messages: [], openedAt: null, tasks: { total: 1, done: 0 } };
 export const FINISHED_TURN: TurnView = { ...TURN, id: 'u2', number: 2, title: 'Login', goal: 'People sign in.', status: 'closed', messages: [], closedAt: '2026-10-29T20:00:00.000Z', tasks: { total: 1, done: 1 } };
+
+
+/* The approved example, timed from 09:00 on one day. TREE_ORG adds its other employees to Development. */
+type TreeExample = {
+  id: string; agent: TreeAgent; number: number; part: number; created: number; cut?: number; merged?: number; done?: number; after?: number;
+  title: string; segments: [number, number, SegmentKind][]; moves: [number, string, string][];
+};
+
+const treeAt = (minute: number) => new Date(Date.UTC(2026, 9, 30, 9, minute)).toISOString();
+const TREE_TURN = { id: 'u3', number: 3, branch: 'turn-3', startedAt: treeAt(0) };
+
+const DEV_EXAMPLES: TreeExample[] = [
+  {
+    id: 'b42',
+    agent: { id: 'b1', name: 'Bruno' },
+    number: 42,
+    part: 41,
+    created: 20,
+    cut: 20,
+    merged: 190,
+    title: 'Payment gateway on the server',
+    segments: [ [ 20, 190, 'work' ] ],
+    moves: [
+      [ 70, 'comment', 'The gateway charges a test card' ],
+      [ 140, 'comment', 'Bank replies and retries on a dropped line are done' ]
+    ]
+  },
+  {
+    id: 'b43',
+    agent: { id: 'b2', name: 'Timur' },
+    number: 43,
+    part: 41,
+    created: 22,
+    cut: 22,
+    merged: 360,
+    title: 'Payment screen in the app',
+    segments: [ [ 22, 108, 'work' ], [ 108, 150, 'stall' ], [ 150, 360, 'work' ] ],
+    moves: [
+      [ 60, 'comment', 'Screen layout and the card number field' ],
+      [ 150, 'comment', 'Checking the card number and expiry date' ],
+      [ 230, 'comment', 'Payment done and error screens' ],
+      [ 300, 'comment', 'Dark theme and texts in two languages' ]
+    ]
+  },
+  {
+    id: 'b44',
+    agent: { id: 'b3', name: 'Lev' },
+    number: 44,
+    part: 41,
+    created: 25,
+    cut: 25,
+    merged: 410,
+    title: 'Receipts and emails after payment',
+    segments: [ [ 25, 190, 'work' ], [ 190, 340, 'stall' ], [ 340, 410, 'work' ] ],
+    moves: [
+      [ 80, 'comment', 'Receipt template and the email after payment' ],
+      [ 185, 'comment', 'Receipt as a PDF, sending emails is next' ],
+      [ 340, 'comment', 'Emails go out through a queue' ]
+    ]
+  },
+  {
+    id: 'b49',
+    agent: { id: 'b4', name: 'Eva' },
+    number: 49,
+    part: 48,
+    created: 95,
+    cut: 95,
+    merged: 375,
+    title: 'Refunds on the server',
+    segments: [ [ 95, 270, 'work' ], [ 270, 335, 'person' ], [ 335, 375, 'work' ] ],
+    moves: [
+      [ 160, 'comment', 'Partial refunds and the refund log' ],
+      [ 270, 'asked', 'How many days after paying may a customer get the money back: 14 or 30?' ],
+      [ 335, 'answered', '30 days, as in the contract.' ]
+    ]
+  },
+  {
+    id: 'b50',
+    agent: { id: 'b5', name: 'Ostap' },
+    number: 50,
+    part: 48,
+    created: 100,
+    cut: 375,
+    merged: 435,
+    after: 49,
+    title: 'Refund button in the app',
+    segments: [ [ 100, 375, 'after' ], [ 375, 435, 'work' ] ],
+    moves: [ [ 375, 'started', '' ], [ 405, 'comment', 'The refund confirmation window' ] ]
+  }
+];
+
+const SALES_EXAMPLES: TreeExample[] = [
+  {
+    id: 's61',
+    agent: { id: 's1', name: 'Nina' },
+    number: 61,
+    part: 60,
+    created: 30,
+    title: 'An email to customers about the new payment',
+    segments: [ [ 30, 900, 'work' ] ],
+    moves: [
+      [ 120, 'comment', 'The email draft is ready' ],
+      [ 250, 'comment', 'The email is shorter and plainer now' ]
+    ]
+  },
+  {
+    id: 's62',
+    agent: { id: 's2', name: 'Artem' },
+    number: 62,
+    part: 60,
+    created: 35,
+    done: 190,
+    title: 'Customers for the first email',
+    segments: [ [ 35, 190, 'work' ] ],
+    moves: [
+      [ 100, 'comment', 'Picked those who paid in the last year' ],
+      [ 190, 'report', 'The list is ready: 240 customers' ]
+    ]
+  },
+  {
+    id: 's63',
+    agent: { id: 's3', name: 'Sonya' },
+    number: 63,
+    part: 60,
+    created: 40,
+    title: 'Answers to common questions about payment',
+    segments: [ [ 40, 270, 'work' ], [ 270, 900, 'stall' ] ],
+    moves: [ [ 150, 'comment', 'First answers about payment' ], [ 265, 'comment', 'Answers about refunds' ] ]
+  }
+];
+
+function exampleSegments(segments: TreeExample['segments'], now: number): TreeSegment[] {
+  return segments.filter(s => s[0] < now).map(([from, to, kind]) => ({ kind, from: treeAt(from), to: to <= now ? treeAt(to) : null }));
+}
+
+function exampleLine(e: TreeExample, now: number, repository: boolean): TreeLine {
+  const end = (at: number | undefined) => at != null && at <= now ? treeAt(at) : null;
+  const segments = exampleSegments(e.segments, now);
+  const active = currentExampleSegment(segments, treeAt(now));
+  const live = e.agent.id === 'b2' && now === 320 || e.agent.id === 's1';
+  return {
+    taskId: e.id, number: e.number, title: e.title, agent: e.agent,
+    part: { id: 't' + e.part, number: e.part, title: e.part === 41 ? 'Card payments' : e.part === 48 ? 'Refunds' : 'Tell customers about card payments' },
+    branch: repository && end(e.cut) ? 'task-' + e.number : null,
+    createdAt: treeAt(e.created), cutAt: end(e.cut), mergedAt: end(e.merged), doneAt: end(e.done),
+    waitsFor: e.after ? [e.after] : [], segments,
+    moves: e.moves.filter(m => m[0] <= now).map(([at, kind, text]) => ({ at: treeAt(at), kind, text })),
+    lastActionAt: live ? treeAt(now - 1) : active?.from ?? treeAt(e.created), live,
+  };
+}
+
+const currentExampleSegment = (segments: TreeSegment[], now: string) => segments.find(s => s.from <= now && (!s.to || s.to > now));
+const exampleSeconds = (from: string, to: string) => (Date.parse(to) - Date.parse(from)) / 1000;
+
+function exampleTime(agent: TreeAgent, segments: TreeSegment[], now: string): AgentTime {
+  const seconds = (kind: SegmentKind) => segments.filter(s => s.kind === kind).reduce((n, s) => n + exampleSeconds(s.from, s.to ?? now), 0);
+  return { agent, work: seconds('work'), after: seconds('after'), person: seconds('person'), stall: seconds('stall') };
+}
+
+function exampleIdle(lines: TreeLine[], now: string): IdleStretch[] {
+  const idle = lines.flatMap(line => line.segments.filter((s): s is TreeSegment & { kind: IdleStretch['kind'] } => s.kind !== 'work').map(s => ({
+    agent: line.agent, taskId: line.taskId, number: line.number, title: line.title, kind: s.kind, from: s.from, to: s.to,
+    waitsFor: line.waitsFor, question: s.kind === 'person' ? line.moves.find(m => m.kind === 'asked')?.text ?? null : null,
+  })));
+  const rank = { stall: 0, person: 1, after: 2 };
+  const length = (i: IdleStretch) => exampleSeconds(i.from, i.to ?? now);
+  return idle.sort((a, b) => Number(!!a.to) - Number(!!b.to) || (!a.to ? rank[a.kind] - rank[b.kind] : 0) || length(b) - length(a));
+}
+
+function exampleReview(): TreeReview {
+  const panel: [TreeAgent, number, number][] = [
+    [{ id: 'b6', name: 'Vera' }, 454, 2], [{ id: 'b7', name: 'Gleb' }, 472, 3], [{ id: 'b8', name: 'Rita' }, 451, 0],
+  ];
+  return { taskId: 'r54', number: 54, openedAt: treeAt(435), closedAt: null, head: { id: 'b0', name: 'Dana' },
+    reviewers: panel.map(([agent, end, findings]) => ({
+      agent, verdict: end <= 460 ? { at: treeAt(end), pass: findings === 0, findings } : null,
+      segments: exampleSegments([[435, end, 'work']], 460), lastActionAt: treeAt(Math.min(459, end)), live: end > 460,
+    })),
+  };
+}
+
+function exampleTree(examples: TreeExample[], now: number, repository: boolean, review: TreeReview | null = null): DepartmentTree {
+  const lines = examples.map(e => exampleLine(e, now, repository)), at = treeAt(now);
+  const time = [...lines.map(l => exampleTime(l.agent, l.segments, at)), ...(review?.reviewers ?? []).map(r => exampleTime(r.agent, r.segments, at))];
+  return { now: at, turn: TREE_TURN, repository, stage: review ? 'review' : 'work', lines, review, time, idle: exampleIdle(lines, at) };
+}
+
+export const DEV_TREE = exampleTree(DEV_EXAMPLES, 320, true);
+export const REVIEW_TREE = exampleTree(DEV_EXAMPLES, 460, true, exampleReview());
+export const SALES_TREE = exampleTree(SALES_EXAMPLES, 320, false);
+
+/* Extra employees keep existing two-person schema examples small. */
+export const TREE_ORG: Org = {
+  ...DEV_ORG,
+  departments: DEV_ORG.departments.map(d => ({ ...d, employees: [
+    ...d.employees,
+    ...[...DEV_TREE.time, ...REVIEW_TREE.time].filter((a, i, all) => !d.employees.some(e => e.id === a.agent.id) && all.findIndex(b => b.agent.id === a.agent.id) === i).map(a => ({ ...d.employees[1]!, ...a.agent })),
+  ] })),
+};

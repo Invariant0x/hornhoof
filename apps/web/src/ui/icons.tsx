@@ -64,3 +64,15 @@ export function ProviderMark({ provider }: { provider: ProviderId | null }) {
     </svg>
   );
 }
+
+export function TreeIcon() {
+  return (<svg viewBox="0 0 24 24" aria-hidden="true"><path className="t" d="M1.5 5H22.5"/><path className="c" d="M10 5V10.5L11.5 12H17M4.5 5V17.5L6 19H17"/><rect className="cf" x="17" y="10" width="4" height="4"/><rect className="cf" x="17" y="17" width="4" height="4"/></svg>);
+}
+
+export function MapIcon() {
+  return (<svg viewBox="0 0 24 24" aria-hidden="true"><path className="c" d="M7 2.5h8.5L17 4v4.5H8.5L7 7z"/><path d="M12 8.5V11.5M5.75 15v-1.5l2-2h8.5l2 2V15"/><path d="M2 15h6l1.5 1.5v5H3.5L2 20zM14.5 15h6l1.5 1.5v5h-6L14.5 20z"/></svg>);
+}
+
+export function SpeedIcon() {
+  return (<svg viewBox="0 0 24 24" aria-hidden="true"><path className="gb" pathLength="4" d="M3 17A9 9 0 0 1 21 17"/><path className="gl" pathLength="3" d="M3 17A9 9 0 0 1 18.36 10.64"/><path d="M1.5 21H22.5M12 17l4.2-4.2"/><rect className="kf" x="10.2" y="15.2" width="3.6" height="3.6"/></svg>);
+}
