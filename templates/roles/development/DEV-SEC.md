@@ -5,6 +5,7 @@ kind: member
 title: { en: "Security engineer", ru: "Инженер по безопасности" }
 description: { en: "Checks that changes and plans keep data, access and secrets protected, and plans how new features are protected.", ru: "Проверяет, что изменения и планы защищают данные, доступы и секреты, и продумывает защиту новых функций." }
 tier: deep
+effort: xhigh
 perProduct: false
 default: true
 order: 70

@@ -218,7 +218,7 @@ describe('a plan sign-in in a terminal on the node', () => {
     expect(server.received.filter(m => m.type === 'login.done')).toHaveLength(1);
   });
 
-  it.skipIf(!hasTmux)('installs its program before the sign-in, and says the sign-in failed when it cannot', async () => {
+  it.skipIf(!hasTmux)('installs its program before the sign-in, and says the program could not be installed when it cannot', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'hh-login-'));
     let installs = 0;
     const { server, calls } = await node('claude', {}, dir, { install: async () => { installs++; throw new Error('npm: offline'); } });
@@ -228,7 +228,7 @@ describe('a plan sign-in in a terminal on the node', () => {
     server.send({ type: 'login.start', fresh: false });
     await until(() => Boolean(server.done()));
     expect(installs).toBeGreaterThan(before);
-    expect(server.done()).toMatchObject({ ok: false, error: 'The sign-in failed on this machine, so nothing changed.' });
+    expect(server.done()).toMatchObject({ ok: false, error: 'The program could not be installed on this machine, so nothing changed.' });
     expect(calls().some(c => c.argv.join(' ') === 'setup-token')).toBe(false);
   });
 

@@ -5,6 +5,7 @@ kind: member
 title: { en: "Product UI designer", ru: "Дизайнер интерфейса продукта" }
 description: { en: "Designs one product's screens and flows inside the shared design system.", ru: "Проектирует экраны и сценарии одного продукта в рамках общей дизайн-системы." }
 tier: standard
+effort: high
 perProduct: true
 default: true
 order: 30

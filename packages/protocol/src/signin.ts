@@ -6,6 +6,7 @@ export const SIGNIN_ERRORS = {
   notTaken: 'The program did not take the new sign-in, so nothing changed.',
   broke: 'The sign-in failed on this machine, so nothing changed.',
   noLogin: 'This machine cannot run the sign-in for its plan from Hornhoof.',
+  noProgram: 'The program could not be installed on this machine, so nothing changed.',
 } as const;
 
 export type SigninError = keyof typeof SIGNIN_ERRORS;

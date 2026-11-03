@@ -1,4 +1,4 @@
-import { defaultEffortOf, effortFor, effortsOf, modelsFor, type ModelOption, type ProviderId } from '@hornhoof/protocol';
+import { defaultEffortOf, effortFor, effortsOf, modelsFor, ORCHESTRATOR_EFFORT, type ModelOption, type ProviderId } from '@hornhoof/protocol';
 import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, notInArray } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import type { Ctx } from '../../app.js';
@@ -18,11 +18,10 @@ import { reworkTimes } from './rework.js';
 import { personViews } from '../people/views.js';
 import { subView } from '../subscriptions/views.js';
 
-/* The level an agent thinks at, as far as Hornhoof knows: the one it was set to or Kimi's and Codex's most, else its
-   model's default. */
-function effortShown(sub: { provider: ProviderId; models: ModelOption[] | null }, agent: { model: string; effort: string | null }): string | null {
+/* Show the level sent to the program, or its own default when Hornhoof knows it. */
+function effortShown(sub: { provider: ProviderId; models: ModelOption[] | null }, agent: { model: string; effort: string | null }, roleEffort?: string): string | null {
   const models = modelsFor(sub.provider, sub.models);
-  return effortFor(sub.provider, agent.effort, effortsOf(models, agent.model)) ?? defaultEffortOf(sub.provider, models, agent.model);
+  return effortFor(agent.effort, effortsOf(models, agent.model), roleEffort) ?? defaultEffortOf(sub.provider, models, agent.model);
 }
 
 type AgentRow = typeof agents.$inferSelect;
@@ -150,17 +149,18 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
         .sort(employeeOrder(templates, dept.templateKey))
         .map(a => {
           const sub = a.subscriptionId ? subs.get(a.subscriptionId) : undefined;
+          const role = a.roleKey ? templates.roles.get(a.roleKey) : undefined;
           const now = doing(a);
           return {
             id: a.id,
             name: a.name,
             roleId: a.roleKey,
-            title: (a.roleKey && templates.roles.get(a.roleKey)?.title) || null,
+            title: role?.title ?? null,
             kind: a.kind,
             model: a.model,
             modelName: (a.model && sub && modelsFor(sub.provider, sub.models).find(m => m.id === a.model)?.name) || null,
             provider: sub?.provider ?? null,
-            effort: sub ? effortShown(sub, a) : null,
+            effort: sub ? effortShown(sub, a, role?.effort) : null,
             state: busy.has(a.id) ? 'working' : a.subscriptionId ? 'sleeping' : 'needs_subscription',
             context: a.contextUsed,
             status: now.status,
@@ -213,7 +213,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
         id: orchestrator.id,
         name: orchestrator.name,
         model: orchestrator.model,
-        effort: (orchestrator.subscriptionId && subs.has(orchestrator.subscriptionId) && effortShown(subs.get(orchestrator.subscriptionId)!, orchestrator)) || null,
+        effort: (orchestrator.subscriptionId && subs.has(orchestrator.subscriptionId) && effortShown(subs.get(orchestrator.subscriptionId)!, orchestrator, ORCHESTRATOR_EFFORT)) || null,
         context: orchestrator.contextUsed,
         /* His plan is at its limit until then: he waits for the reset on it, and the CEO decides whether he moves. */
         limitUntil: limitUntil((orchestrator.subscriptionId && subs.get(orchestrator.subscriptionId)?.limits) || null),

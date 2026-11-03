@@ -169,7 +169,7 @@ export const CARD: AgentCardView = {
   id: 'b1',
   kind: 'worker',
   name: 'Bruno',
-  role: { id: 'DEV-BE', title: BE_TITLE, description: about('Builds the API.') },
+  role: { id: 'DEV-BE', title: BE_TITLE, description: about('Builds the API.'), effort: 'xhigh' },
   department: { id: 'd2', name: 'Development' },
   product: null,
   model: 'claude-sonnet-5-5',

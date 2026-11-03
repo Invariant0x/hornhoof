@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { SIGNIN_ERRORS, type SigninError } from '@hornhoof/protocol/signin';
 import { useT, type Messages } from '../i18n';
 import { useStream } from '../live';
@@ -23,12 +24,17 @@ type Props = {
    machine says the sign-in finished or gave up. */
 export function SignInPanel({ subId, program, nodeId, hostname, onEnd, onStop }: Props) {
   const t = useT();
+  const box = useRef<HTMLDivElement>(null);
+  /* It opens under the plan's card, often below the screen's edge: without this, pressing Sign in seems to do nothing. */
+  useEffect(() => {
+    box.current?.scrollIntoView?.({ block: 'nearest' });
+  }, []);
   useStream(m => {
     if (m.type !== 'subscription.signin' || m.subscriptionId !== subId || m.nodeId !== nodeId) return;
     onEnd(m.ok ? null : signInError(t, m.error));
   });
   return (
-    <div className="signin">
+    <div className="signin" ref={box}>
       <h3>{t.subs.signingIn(hostname)}</h3>
       <p className="muted">{t.subs.signingInNote}</p>
       <AgentTerminal

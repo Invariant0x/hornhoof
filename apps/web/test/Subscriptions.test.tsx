@@ -574,6 +574,35 @@ describe('signing in to plans', () => {
     expect(screen.queryByTestId('live-terminal')).not.toBeInTheDocument();
   });
 
+  it('brings the sign-in window into view when it opens, below a long card', async () => {
+    const shown: Element[] = [];
+    const before = Element.prototype.scrollIntoView;
+    /* As Chromium's does, it gives back a promise. */
+    Element.prototype.scrollIntoView = function (this: Element) { shown.push(this); return Promise.resolve() as unknown as void; };
+    onTestFinished(() => void (Element.prototype.scrollIntoView = before));
+    fakeStream();
+    mockApi({ ...only({ ...codex, status: 'ready', machines: [MACHINE] }), 'POST /api/subscriptions/s-codex/signin': [200, { nodeId: NODE, hostname: 'ivan-mbp' }], 'POST /api/subscriptions/s-codex/signin/stop': [204] });
+    render(<Subscriptions me={ME} />);
+    await openAll();
+    await userEvent.click(await screen.findByRole('button', { name: 'Sign in to Codex' }));
+    const heading = await screen.findByRole('heading', { name: 'Signing in on ivan-mbp' });
+    await vi.waitFor(() => expect(shown.some(node => node.contains(heading))).toBe(true));
+    /* Closing it must not trip over what scrolling gave back. */
+    await userEvent.click(screen.getByRole('button', { name: 'Stop the sign-in' }));
+    await vi.waitFor(() => expect(screen.queryByRole('heading', { name: 'Signing in on ivan-mbp' })).not.toBeInTheDocument());
+  });
+
+  it('says what to do when the machine could not install the program to sign in with', async () => {
+    const stream = fakeStream();
+    mockApi({ ...only(codex), 'POST /api/subscriptions/s-codex/signin': [200, { nodeId: NODE, hostname: 'ivan-mbp' }] });
+    render(<Subscriptions me={ME} />);
+    await openAll();
+    await userEvent.click(await screen.findByRole('button', { name: 'Sign in to Codex' }));
+    await screen.findByRole('heading', { name: 'Signing in on ivan-mbp' });
+    stream.send({ type: 'subscription.signin', subscriptionId: 's-codex', nodeId: NODE, ok: false, error: 'The program could not be installed on this machine, so nothing changed.', owner: 'p1' });
+    expect(await screen.findByText("The program could not be installed on this machine, so nothing changed. Check the machine's internet connection and free disk space, then try again.")).toBeInTheDocument();
+  });
+
   it('stops a sign-in half way', async () => {
     fakeStream();
     const calls = mockApi({ ...only(codex), 'POST /api/subscriptions/s-codex/signin': [200, { nodeId: NODE, hostname: 'ivan-mbp' }], 'POST /api/subscriptions/s-codex/signin/stop': [204] });
@@ -583,6 +612,31 @@ describe('signing in to plans', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Stop the sign-in' }));
     expect(calls.find(c => c.path.endsWith('/signin/stop'))).toEqual({ method: 'POST', path: '/api/subscriptions/s-codex/signin/stop', body: { nodeId: NODE } });
     expect(screen.queryByTestId('live-terminal')).not.toBeInTheDocument();
+  });
+
+  it('says under the plan, in plain words, why a sign-in cannot start, instead of at the top of the page', async () => {
+    const ready = { ...codex, status: 'ready' as const, machines: [MACHINE] };
+    const unsupported = { error: { code: 'conflict', message: 'The machine of this plan is online, but its node cannot run the sign-in.', reason: 'signin_unsupported' } };
+    mockApi({ ...only(ready), 'POST /api/subscriptions/s-codex/signin': [409, unsupported] });
+    render(<Subscriptions me={ME} />);
+    await openAll();
+    await userEvent.click(await screen.findByRole('button', { name: 'Sign in to Codex' }));
+    const card = screen.getByRole('article', { name: 'Codex, Ivan' });
+    expect(await within(card).findByText('The machine is online, but its node cannot sign in from Hornhoof yet. Update the nodes on that machine, then try again.')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(within(card).getByRole('button', { name: 'Sign in to Codex' })).toBeInTheDocument();
+  });
+
+  it('says in Russian that no machine of the plan is online to sign in on', async () => {
+    localStorage.setItem('hh-lang', 'ru');
+    const ready = { ...codex, status: 'ready' as const, machines: [MACHINE] };
+    const offline = { error: { code: 'conflict', message: 'No machine of this plan is online.', reason: 'no_node_online' } };
+    mockApi({ ...only(ready), 'POST /api/subscriptions/s-codex/signin': [409, offline] });
+    render(<LanguageProvider><Subscriptions me={ME} /></LanguageProvider>);
+    await openAll();
+    await userEvent.click(await screen.findByRole('button', { name: 'Войти в Codex' }));
+    const card = screen.getByRole('article', { name: 'Codex, Ivan' });
+    expect(await within(card).findByText('Ни одна машина этой подписки не в сети. Включите одну из них и попробуйте еще раз.')).toBeInTheDocument();
   });
 
   it('offers no sign-in for a plan of another person, or one with no machine online', async () => {

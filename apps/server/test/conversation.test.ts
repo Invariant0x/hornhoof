@@ -49,7 +49,7 @@ describe('the orchestrator\'s conversation', () => {
     const { app, ceo, builtin } = await live();
     expect((await start(app, ceo)).json()).toEqual({ started: true });
     const run = await nextRun(builtin);
-    expect(run).toMatchObject({ prompt: FIRST_TURN, sessionId: null, timeoutMs: 2 * 3_600_000 });
+    expect(run).toMatchObject({ prompt: FIRST_TURN, effort: 'xhigh', sessionId: null, timeoutMs: 2 * 3_600_000 });
     expect(run.instructions?.startsWith(ORCHESTRATOR_INSTRUCTIONS)).toBe(true);
     expect(run.toolToken).toMatch(/^[A-Za-z0-9_-]{40,}$/);
     expect((await start(app, ceo)).json()).toEqual({ started: false });
@@ -286,13 +286,13 @@ describe('the orchestrator\'s conversation', () => {
     expect((await runOf(bruno.id)).compactWindow).toBe(500_000);
   });
 
-  it('runs him on a Kimi plan at its most, and at the effort a person picks in the same session', async () => {
+  it("fits his xhigh to a Kimi plan, and keeps a person's pick in the same session", async () => {
     const models = [{ id: 'kimi-code/k3', name: 'K3', efforts: ['low', 'high', 'max'], defaultEffort: 'high' }];
     const { app, ceo, mac } = await onMac('0.3.0', 'kimi', { models });
     await until(async () => (await state(app, ceo)).ready);
     await say(app, ceo, 'First');
     const first = await nextRun(mac);
-    expect(first.effort).toBe('max');
+    expect(first.effort).toBe('high');
     await finish(mac, first, 'sess-k');
     await until(async () => !(await state(app, ceo)).busy);
     const r = await app.inject({ method: 'PATCH', url: '/api/agents/orchestrator', payload: { effort: 'low' }, ...as(ceo) });
@@ -301,8 +301,8 @@ describe('the orchestrator\'s conversation', () => {
     expect(await nextRun(mac)).toMatchObject({ effort: 'low', sessionId: 'sess-k' });
   });
 
-  it('runs him on a Codex plan at the most its model takes', async () => {
-    const models = [{ id: 'gpt-6.1-sol', name: 'Sol', efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: 'medium' }];
+  it('runs him on a Codex plan at xhigh even when it takes more', async () => {
+    const models = [{ id: 'gpt-6.1-sol', name: 'Sol', efforts: ['low', 'medium', 'high', 'xhigh', 'ultra'], defaultEffort: 'medium' }];
     const { app, ceo, mac } = await onMac('0.3.0', 'codex', { models });
     await until(async () => (await state(app, ceo)).ready);
     await say(app, ceo, 'First');
@@ -494,23 +494,34 @@ describe("an employee's conversation", () => {
   const sayTo = (app: FastifyInstance, token: string, id: string, text: string) => app.inject({ method: 'POST', url: `/api/agents/${id}/messages`, payload: { text }, ...as(token) });
   const stateOf = async (app: FastifyInstance, token: string, id: string) => (await app.inject({ url: `/api/agents/${id}/events`, ...as(token) })).json().state;
 
-  /* A backend engineer in Development on the orchestrator's key, as hiring will make one. */
-  async function withEmployee() {
+  /* An employee in Development on the orchestrator's key, as hiring will make one. */
+  async function withEmployee(kind: 'head' | 'worker' = 'worker') {
     const company = await live();
     const { db, app } = company;
     const [acme] = await db.select().from(companies);
     const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
     const [dev] = await db.insert(departments).values({ companyId: acme!.id, name: null, templateKey: 'development', roleCode: 'DEV' }).returning();
     const [sales] = await db.insert(departments).values({ companyId: acme!.id, name: null, templateKey: 'sales', roleCode: 'SAL' }).returning();
-    const role = app.ctx.templates.roles.get('DEV-BE')!;
+    const role = app.ctx.templates.roles.get(kind === 'head' ? 'DEV-HEAD' : 'DEV-BE')!;
     const hire = async (name: string, departmentId: string, subscriptionId: string | null = orchestrator!.subscriptionId) =>
       (
         await db
           .insert(agents)
-          .values({ companyId: acme!.id, kind: 'worker', name, model: 'sonnet', departmentId, subscriptionId, roleKey: role.id, skills: role.skills.filter(s => s.on).map(s => s.id) })
+          .values({ companyId: acme!.id, kind, name, model: 'sonnet', departmentId, subscriptionId, roleKey: role.id, skills: role.skills.filter(s => s.on).map(s => s.id) })
           .returning()
       )[0]!;
     return { ...company, dev: dev!, sales: sales!, hire, bruno: await hire('Bruno', dev!.id) };
+  }
+
+  async function inNewCompanyTurn(kind: 'head' | 'orchestrator') {
+    const company = await withEmployee('head');
+    const { app, db, ceo, builtin, bruno } = company;
+    const id = kind === 'head' ? bruno.id : 'orchestrator';
+    await sayTo(app, ceo, id, 'We agreed to support card payments.');
+    await finish(builtin, await nextRun(builtin), 'sess-1');
+    await until(async () => !(await stateOf(app, ceo, id)).busy);
+    await db.insert(turns).values({ companyId: bruno.companyId, number: 1, goal: 'Card payments.', status: 'open', openedAt: new Date() });
+    return { ...company, id };
   }
 
   it('ends a turn whose instructions are longer than a machine takes at once, saying so, and sends nothing', async () => {
@@ -564,7 +575,25 @@ describe("an employee's conversation", () => {
     expect(fresh.prompt.endsWith('Ivan (CEO): And now?')).toBe(true);
   });
 
-  it('starts an employee in a clean session when a new turn of the company opens, and goes on in it during the turn', async () => {
+  it.each(['head', 'orchestrator'] as const)('keeps the %s session when a new turn of the company opens', async kind => {
+    const { app, ceo, builtin, id } = await inNewCompanyTurn(kind);
+    await sayTo(app, ceo, id, 'The new turn starts.');
+    expect(await nextRun(builtin)).toMatchObject({ sessionId: 'sess-1', prompt: 'Ivan (CEO): The new turn starts.' });
+  });
+
+  it('catches up the head in a new company turn when its instructions changed', async () => {
+    const { app, db, ceo, builtin, id } = await inNewCompanyTurn('head');
+    await db.update(agents).set({ overrides: { base: 'Keep track of the billing agreements.' } }).where(eq(agents.id, id));
+    await sayTo(app, ceo, id, 'The new turn starts.');
+    const fresh = await nextRun(builtin);
+    expect(fresh.sessionId).toBeNull();
+    expect(fresh.instructions).toContain('Keep track of the billing agreements.');
+    expect(fresh.prompt).toMatch(/^Earlier in this conversation/);
+    expect(fresh.prompt).toContain('Ivan:\n> We agreed to support card payments.');
+    expect(fresh.prompt.endsWith('Ivan (CEO): The new turn starts.')).toBe(true);
+  });
+
+  it('starts a member in a clean session when a new turn of the company opens, and goes on in it during the turn', async () => {
     const { app, db, ceo, builtin, bruno } = await withEmployee();
     await sayTo(app, ceo, bruno.id, 'Hello');
     await finish(builtin, await nextRun(builtin), 'sess-1');
@@ -573,8 +602,7 @@ describe("an employee's conversation", () => {
     await sayTo(app, ceo, bruno.id, 'The new turn starts.');
     const fresh = await nextRun(builtin);
     expect(fresh.sessionId).toBeNull();
-    expect(fresh.prompt).not.toMatch(/Earlier in this conversation/);
-    expect(fresh.prompt.endsWith('The new turn starts.')).toBe(true);
+    expect(fresh.prompt).toBe('Ivan (CEO): The new turn starts.');
     await finish(builtin, fresh, 'sess-2');
     await until(async () => !(await stateOf(app, ceo, bruno.id)).busy);
     await sayTo(app, ceo, bruno.id, 'Still you?');
@@ -620,16 +648,42 @@ describe("an employee's conversation", () => {
     expect(agent!.model).toBe('claude-opus-5-5');
   });
 
-  it('runs an employee at the effort it was set to, in the same session, and Claude at its own default', async () => {
+  it("runs an employee at its role effort and keeps a person's pick in the same session", async () => {
     const { app, ceo, builtin, bruno } = await withEmployee();
     await sayTo(app, ceo, bruno.id, 'Hello');
     const first = await nextRun(builtin);
-    expect(first.effort).toBeNull();
+    expect(first.effort).toBe('xhigh');
     await finish(builtin, first, 'sess-1');
     await until(async () => !(await stateOf(app, ceo, bruno.id)).busy);
     expect((await app.inject({ method: 'PATCH', url: `/api/agents/${bruno.id}`, payload: { effort: 'max' }, ...as(ceo) })).statusCode).toBe(200);
     await sayTo(app, ceo, bruno.id, 'Think hard');
-    expect(await nextRun(builtin)).toMatchObject({ effort: 'max', sessionId: 'sess-1' });
+    const picked = await nextRun(builtin);
+    expect(picked).toMatchObject({ effort: 'max', sessionId: 'sess-1' });
+    await finish(builtin, picked);
+    await until(async () => !(await stateOf(app, ceo, bruno.id)).busy);
+    expect((await app.inject({ method: 'POST', url: `/api/agents/${bruno.id}/reset`, ...as(ceo) })).json().effort).toBeNull();
+    await sayTo(app, ceo, bruno.id, 'Use the role again');
+    expect((await nextRun(builtin)).effort).toBe('xhigh');
+  });
+
+  it.each([
+    ['codex', 'DEV-BE', ['low', 'high', 'xhigh', 'ultra'], 'xhigh'],
+    ['kimi', 'DEV-SEC', ['low', 'high', 'max'], 'high'],
+    ['antigravity', 'DEV-BE', [], null],
+  ])('runs a %s employee with role %s at its fitted effort', async (provider, roleKey, efforts, expected) => {
+    const { app, db, ceo, builtin, bruno } = await withEmployee();
+    const model = { id: 'test-model', name: 'Test model', efforts };
+    await db.update(subscriptions).set({ provider, models: efforts.length ? [model] : [] }).where(eq(subscriptions.id, bruno.subscriptionId!));
+    await db.update(agents).set({ roleKey, model: model.id }).where(eq(agents.id, bruno.id));
+    await sayTo(app, ceo, bruno.id, 'Hello');
+    expect((await nextRun(builtin)).effort).toBe(expected);
+  });
+
+  it('leaves a role without an effort at the program default', async () => {
+    const { app, ceo, builtin, bruno } = await withEmployee();
+    app.ctx.templates.roles.set('DEV-BE', { ...app.ctx.templates.roles.get('DEV-BE')!, effort: undefined });
+    await sayTo(app, ceo, bruno.id, 'Hello');
+    expect((await nextRun(builtin)).effort).toBeNull();
   });
 
   it('stops an employee while it works', async () => {

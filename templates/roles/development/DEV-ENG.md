@@ -5,6 +5,7 @@ kind: member
 title: { en: "Developer", ru: "Разработчик" }
 description: { en: "Builds a whole feature end to end: plan, server, interface, tests and docs, on one branch.", ru: "Делает функцию целиком: план, серверную часть, интерфейс, тесты и документацию, в одной ветке." }
 tier: standard
+effort: xhigh
 perProduct: false
 default: true
 order: 15
