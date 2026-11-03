@@ -6,6 +6,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AgentEvent, NodeMessage } from '@hornhoof/protocol';
+import { LOST_END_MS } from '@hornhoof/protocol/map';
+import { vi } from 'vitest';
 import { SCREEN_SIGNED_OUT } from '../src/providers/kimi.js';
 import { TerminalHost, type TermJob } from '../src/terminal/host.js';
 import { claudeProgram, codexProgram, kimiProgram } from '../src/terminal/programs.js';
@@ -82,6 +84,18 @@ export const typeTurn = async (key: string, termId: string, line: string, jobId:
   ack(key, jobId);
   await until(() => host.typedJobs().includes(jobId) || Boolean(done(jobId)));
 };
+
+/* Advance only the host's clock past three former lost-end windows; tmux and real timers keep running. */
+export function pastLostEndWindows() {
+  const now = Date.now.bind(Date);
+  return vi.spyOn(Date, 'now').mockImplementation(() => now() + 3 * LOST_END_MS + 1000);
+}
+
+/* Lose only the Stop hook, leaving the real prompt hook, transcript and terminal observer running. */
+export function endsLost(): void {
+  const hook = host['hook'].bind(host);
+  vi.spyOn(host as unknown as { hook: typeof hook }, 'hook').mockImplementation((key, event, data) => event === 'stop' ? Promise.resolve() : hook(key, event, data));
+}
 
 /* A Hornhoof that answers every tool call, and the tokens they came with. */
 export async function withTools(test: (auths: string[]) => Promise<void>) {

@@ -4,11 +4,13 @@
 // person stops a turn with Escape; LATE answers, then logs a stop of that turn a moment later. TICK works 3 s under
 // Codex's status line, with its way to stop it; WORK thinks and runs a command, 1.5 s each, and then answers. Like Codex, a new session
 // writes its log only once the first message comes. A paste comes whole, line breaks and all, as in Codex.
+// APIFAIL prompts replay API failures captured from Codex, without a Stop hook; LONG prints a long screen first.
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, mkdirSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { crash } from './crash.mjs';
 import { rawKeys, readKeys } from './keys.mjs';
+import failures from '../fixtures/terminal-api-failures.json' with { type: 'json' };
 
 if (process.env.FAKE_CRASH_START) crash(process.env.FAKE_CRASH_START);
 
@@ -98,6 +100,13 @@ async function take(line) {
 // Whether the turn ended as it started: CRASH ends the program, HANG never answers, and ABORT logs what Codex logs when a
 // person stops a turn with Escape.
 function endsAtOnce(line) {
+  const failure = failures.find(f => f.program === 'codex' && line.startsWith(f.prompt));
+  if (failure) {
+    if (line.includes('LONG')) process.stdout.write('screen content '.repeat(300) + '\n');
+    event(failure.line.payload);
+    prompt();
+    return true;
+  }
   if (line.startsWith('CRASH')) crash(line.includes('LONG') ? 'long' : '');
   if (line.includes('HANG_EXIT')) process.stdout.write('exit-test running\n');
   if (line.includes('HANG')) {
