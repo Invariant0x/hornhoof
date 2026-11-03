@@ -45,3 +45,8 @@ export function inputOf(kind: TermProgram['kind'], screen: string): string | nul
   if (kind === 'antigravity') return null;
   return promptedInput(kind, withoutDim(screen));
 }
+
+/* The program waits at its prompt with nothing typed. Hornhoof's own screen for Antigravity shows its prompt as Codex does. */
+export function atEmptyPrompt(kind: TermProgram['kind'], screen: string): boolean {
+  return (kind === 'antigravity' ? promptedInput('codex', withoutDim(screen)) : inputOf(kind, screen)) === '';
+}

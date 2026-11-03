@@ -306,6 +306,10 @@ const MAX_ENVELOPES = 20;
 export const Boot = z.object({ startedAt: z.iso.datetime(), machineUpAt: z.iso.datetime(), container: z.string().min(1).max(200) });
 export type Boot = z.infer<typeof Boot>;
 
+/* How an agent's program ended: its exit code, or the signal that ended it, by name, such as SIGTERM. */
+export const ProgramExit = z.object({ code: z.number().int().nullable(), signal: z.string().max(40).nullable() });
+export type ProgramExit = z.infer<typeof ProgramExit>;
+
 const NodeMessage = z.discriminatedUnion('type', [
   /* terminals: the node runs agents in sessions people can watch and type into. */
   /* tests: the parts of test runs it runs, or ran and Hornhoof has not confirmed. */
@@ -361,6 +365,8 @@ const NodeMessage = z.discriminatedUnion('type', [
     result: z.string(),
     tail: z.string(),
     error: z.enum(JOB_ERRORS).nullable(),
+    /* How the agent's program ended, when the node saw it end: its exit code, or the name of the signal that ended it. */
+    exit: ProgramExit.optional(),
   }),
   z.object({ type: z.literal('job.event'), jobId: z.string(), seq: z.number().int().min(0), event: AgentEvent }),
   z.object({ type: z.literal('removed') }),

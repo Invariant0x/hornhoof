@@ -11,6 +11,9 @@ import { Recordings, type ExitSnapshot } from './recordings.js';
 
 /* How agent sessions look and behave: no tmux bar, the wheel scrolls, the size is the smallest window's of the people
    watching (the node gives them all that size), colours pass through, and a finished program leaves its last screen. */
+/* How long a program asked to end may take before it is killed. */
+const STOP_GRACE_MS = 3000;
+
 const OPTIONS: string[][] = [
   ['status', 'off'],
   ['mouse', 'on'],
@@ -217,6 +220,17 @@ export class Tmux {
     if (!(await this.alive(name))) return null;
     const pid = Number((await this.run(['display-message', '-p', '-t', name, '#{pane_pid}']).catch(() => '')).trim());
     return pid > 0 ? pid : null;
+  }
+
+  /* Ends the program in the session's pane, and whatever it started: TERM to its process group, KILL to what is left after
+     graceMs. The pane stays, dead, so how the program ended can be read. tmux sends them, as the user it runs as. */
+  async stop(name: string, graceMs = STOP_GRACE_MS): Promise<void> {
+    const pid = await this.programPid(name);
+    if (!pid) return;
+    const signal = (sig: 'TERM' | 'KILL') => this.run(['run-shell', `kill -s ${sig} -- -${pid} 2>/dev/null || kill -s ${sig} ${pid} 2>/dev/null; true`]).catch(() => '');
+    await signal('TERM');
+    for (const end = Date.now() + graceMs; Date.now() < end; await new Promise(r => setTimeout(r, 50))) if (!(await this.alive(name))) return;
+    await signal('KILL');
   }
 
   async kill(name: string): Promise<void> {

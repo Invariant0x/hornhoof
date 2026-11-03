@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { AgentEvent, ServerMessage } from '@hornhoof/protocol';
 import { describe, expect, it } from 'vitest';
 import { ownFs } from '../src/agent-fs.js';
-import { runJob, type ProviderAdapter, type RunInput, type RunResult } from '../src/runner.js';
+import { jobDone, runJob, type ProviderAdapter, type RunInput, type RunResult } from '../src/runner.js';
 import { readSessions } from '../src/state.js';
 
 const SECRET = 'oauth-token-0123456789abcdef';
@@ -243,5 +243,19 @@ describe('runJob', () => {
     setTimeout(() => stop.abort(), 50);
     const done = await runJob(adapter, job(), dir, { signal: stop.signal });
     expect(done).toMatchObject({ ok: false, error: 'cancelled', result: 'Stopped.' });
+  });
+});
+
+describe('jobDone', () => {
+  const ended = (programOutput?: RunResult['programOutput']): RunResult => ({ ok: false, sessionId: 's1', result: '', output: 'gone', error: 'agent_failed', limits: null, ...(programOutput ? { programOutput } : {}) });
+
+  it('says how the program ended, a signal by its name', () => {
+    expect(jobDone('j1', ended({ text: 'gone', code: null, signal: 15, at: '2026-11-03T04:00:00.000Z', complete: true }), []).exit).toEqual({ code: null, signal: 'SIGTERM' });
+    expect(jobDone('j1', ended({ text: 'gone', code: 2, signal: null, at: '2026-11-03T04:00:00.000Z', complete: true }), []).exit).toEqual({ code: 2, signal: null });
+    expect(jobDone('j1', ended({ text: 'gone', code: null, signal: 'SIGKILL', at: '2026-11-03T04:00:00.000Z', complete: true }), []).exit).toEqual({ code: null, signal: 'SIGKILL' });
+  });
+
+  it('says nothing of an end the node did not see', () => {
+    expect(jobDone('j1', ended(), [])).not.toHaveProperty('exit');
   });
 });
