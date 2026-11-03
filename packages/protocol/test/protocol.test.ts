@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { API_MODELS, CLAUDE_ALIASES, CRED_KINDS, cut, defaultEffortOf, lastBytes, MAX_INSTRUCTIONS, MAX_RUN_FILES, MAX_TEST_PARTS, OLD_NODE_INSTRUCTIONS, TAIL_BYTES, TEST_LOG_BYTES, COMPANY_TEMPLATES, COMPANY_TEMPLATE_KEYS, DEPARTMENT_TEMPLATES, TEMPLATE_KEYS, effortFor, effortsOf, modelsFor, parseNodeMessage, parseServerMessage, repoFolder, type AgentEvent, type NodeMessage, type ServerMessage } from '../src/index.js';
+import { API_MODELS, CLAUDE_ALIASES, CRED_KINDS, cut, defaultEffortOf, JOB_STATES, lastBytes, MAX_INSTRUCTIONS, MAX_RUN_FILES, MAX_TEST_PARTS, OLD_NODE_INSTRUCTIONS, TAIL_BYTES, TEST_LOG_BYTES, COMPANY_TEMPLATES, COMPANY_TEMPLATE_KEYS, DEPARTMENT_TEMPLATES, TEMPLATE_KEYS, effortFor, effortsOf, modelsFor, parseNodeMessage, parseServerMessage, repoFolder, type AgentEvent, type NodeMessage, type ServerMessage } from '../src/index.js';
 import { effortsOf as light, effortFor as lightEffort } from '../src/efforts.js';
 
 const LIMITS = { status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0.38, resetsAt: '2026-10-29T21:30:00.000Z' }] };
@@ -454,6 +454,18 @@ describe('live terminals', () => {
     expect(parseServerMessage(JSON.stringify(say))).toEqual(say);
     expect(parseServerMessage(JSON.stringify({ ...say, within: 0 }))).toEqual({ ...say, within: 0 });
     for (const within of [-1, 1.5, 'later', null]) expect(parseServerMessage(JSON.stringify({ ...say, within }))).toBeNull();
+  });
+
+  it("ask what a turn's program is doing now, and carry the node's answer: at work, waiting at its prompt, or gone", () => {
+    const check: ServerMessage = { type: 'job.check', jobId: 'job-1' };
+    expect(parseServerMessage(JSON.stringify(check))).toEqual(check);
+    for (const state of JOB_STATES) {
+      const m: NodeMessage = { type: 'job.state', jobId: 'job-1', state };
+      expect(parseNodeMessage(JSON.stringify(m))).toEqual(m);
+    }
+    expect(JOB_STATES).toEqual(['working', 'waiting', 'gone']);
+    expect(parseNodeMessage(JSON.stringify({ type: 'job.state', jobId: 'job-1', state: 'asleep' }))).toBeNull();
+    expect(parseServerMessage(JSON.stringify({ type: 'job.check', jobId: '' }))).toBeNull();
   });
 
   it("carry how full an agent's context is, as a share", () => {

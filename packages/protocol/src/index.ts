@@ -8,6 +8,12 @@ export type ProviderId = (typeof PROVIDER_IDS)[number];
 export const JOB_ERRORS = ['timeout', 'agent_failed', 'not_logged_in', 'cancelled'] as const;
 export type JobError = (typeof JOB_ERRORS)[number];
 
+/* What a turn's program is doing now, as its node sees it: at work, with a tool or the model; waiting at its prompt with
+   nothing typed, whether it answered or not; or gone: no program runs the turn on the node, as its session ended or the
+   node does not know the turn. */
+export const JOB_STATES = ['working', 'waiting', 'gone'] as const;
+export type JobState = (typeof JOB_STATES)[number];
+
 /* Why a part of a run ended other than with its command passing: it failed, ran out of time, was stopped, the branch
    could not be cloned, or the task's files could not be fetched. */
 export const TEST_ERRORS = ['failed', 'timeout', 'cancelled', 'clone_failed', 'files_failed'] as const;
@@ -369,6 +375,8 @@ const NodeMessage = z.discriminatedUnion('type', [
     exit: ProgramExit.optional(),
   }),
   z.object({ type: z.literal('job.event'), jobId: z.string(), seq: z.number().int().min(0), event: AgentEvent }),
+  /* The node's answer to job.check, at once. */
+  z.object({ type: z.literal('job.state'), jobId: z.string(), state: z.enum(JOB_STATES) }),
   z.object({ type: z.literal('removed') }),
   z.object({ type: z.literal('term.data'), termId: TermId, data: z.string().max(4 * TERM_CHUNK) }),
   z.object({ type: z.literal('term.exit'), termId: TermId }),
@@ -453,6 +461,8 @@ const ServerMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('job.cancel'), jobId: Id }),
   /* Hornhoof has the job's end: the node stops sending it again after each reconnect. */
   z.object({ type: z.literal('job.ack'), jobId: Id }),
+  /* What the program of a turn that runs long without a word is doing now: the node answers job.state. */
+  z.object({ type: z.literal('job.check'), jobId: Id }),
   z.object({ type: z.literal('remove') }),
   /* A sign-in sealed to this node's key, which it opens and keeps where its program reads it; drop removes it. */
   z.object({ type: z.literal('cred.put'), kind: CredKind, version: z.number().int().min(1), sealed: Sealed }),
