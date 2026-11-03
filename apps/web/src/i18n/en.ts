@@ -948,6 +948,7 @@ export const en = {
     code_used: 'This install command was already used or has expired. Get a new one in Hornhoof.',
     machine_unknown: 'This machine is no longer connected. Reload the page.',
     machine_offline: 'The machine for this subscription is offline. Start it and try again.',
+    programs_unavailable: 'Programs cannot be updated on this machine right now.',
     needs_login: 'Sign in to this subscription on its machine first.',
     job_unknown: 'This check no longer exists.',
     too_many_attempts: 'Too many attempts. Wait up to an hour, then try again.',

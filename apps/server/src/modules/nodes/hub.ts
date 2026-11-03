@@ -143,6 +143,14 @@ export class NodeHub {
     return entry?.socket.readyState === 1 ? entry.programs?.map(program => ({ ...program })) ?? null : null;
   }
 
+  updatePrograms(id: NodeIdentity): boolean {
+    const entry = this.sockets.get(keyOf(id));
+    if (!entry || !entry.greeted || entry.socket.readyState !== 1 || !entry.programs?.length) return false;
+    if (entry.programs.some(program => program.updating)) return true;
+    entry.programs = entry.programs.map(program => ({ ...program, updating: true, failed: false }));
+    return this.send(id, { type: 'programs.update' });
+  }
+
   /* Online and past its hello: ready for an agent's turn. */
   isReady(id: NodeIdentity): boolean {
     const entry = this.sockets.get(keyOf(id));
