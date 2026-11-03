@@ -1,9 +1,18 @@
 import { useId, useState } from 'react';
 import { api } from '../api';
-import { useLanguage, useT } from '../i18n';
+import { errorText, useLanguage, useT } from '../i18n';
 import type { Department, Employee, Team } from '../types';
 
 export type EmployeeGroup = { key: string; title: string; members: Employee[] };
+
+async function runAction(onFail: (err: unknown) => void, work: () => Promise<unknown>) {
+  onFail(null);
+  try {
+    await work();
+  } catch (err) {
+    onFail(err);
+  }
+}
 
 /* Groups a department's employees for its list: each sub-unit under its own name first, then pipeline roles in order. */
 export function employeeGroups(d: Department, language: 'en' | 'ru', othersLabel: string): EmployeeGroup[] {
@@ -25,6 +34,7 @@ export function DeptEmployeeList({ department: d, company }: { department: Depar
   const t = useT();
   const { language } = useLanguage();
   const id = useId();
+  const [failure, setFailure] = useState<unknown>(null);
   const groups = employeeGroups(d, language, t.dept.others);
   if (!groups.length) return null;
   const canMove = company && d.teams.length > 0;
@@ -39,7 +49,11 @@ export function DeptEmployeeList({ department: d, company }: { department: Depar
               <li key={e.id}>
                 <b>{e.name}</b>
                 {canMove && (
-                  <select aria-label={t.dept.subUnitOf(e.name)} value={e.teamId ?? ''} onChange={ev => void api.patch(`/api/agents/${e.id}`, { team: ev.target.value || null })}>
+                  <select
+                    aria-label={t.dept.subUnitOf(e.name)}
+                    value={e.teamId ?? ''}
+                    onChange={ev => void runAction(setFailure, () => api.patch(`/api/agents/${e.id}`, { team: ev.target.value || null }))}
+                  >
                     <option value="">{t.dept.inPipeline}</option>
                     {d.teams.map(tm => (
                       <option key={tm.id} value={tm.id}>
@@ -53,18 +67,25 @@ export function DeptEmployeeList({ department: d, company }: { department: Depar
           </ul>
         </div>
       ))}
+      {failure !== null && (
+        <p className="alert" role="alert">
+          {errorText(t, failure)}
+        </p>
+      )}
     </section>
   );
 }
 
-function SubUnitRow({ departmentId, team }: { departmentId: string; team: Team }) {
+function SubUnitRow({ departmentId, team, onFail }: { departmentId: string; team: Team; onFail: (err: unknown) => void }) {
   const t = useT();
   const id = useId();
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(team.name);
   async function save() {
-    await api.patch(`/api/departments/${departmentId}/teams/${team.id}`, { name: name.trim() });
-    setRenaming(false);
+    await runAction(onFail, async () => {
+      await api.patch(`/api/departments/${departmentId}/teams/${team.id}`, { name: name.trim() });
+      setRenaming(false);
+    });
   }
   return (
     <li>
@@ -85,7 +106,7 @@ function SubUnitRow({ departmentId, team }: { departmentId: string; team: Team }
             <button className="btn small ghost" type="button" onClick={() => { setName(team.name); setRenaming(true); }}>
               {t.dept.renameSubUnit}
             </button>
-            <button className="btn small ghost" type="button" onClick={() => void api.del(`/api/departments/${departmentId}/teams/${team.id}`)}>
+            <button className="btn small ghost" type="button" onClick={() => void runAction(onFail, () => api.del(`/api/departments/${departmentId}/teams/${team.id}`))}>
               {t.dept.deleteSubUnit}
             </button>
           </div>
@@ -100,11 +121,14 @@ export function DeptSubUnits({ department: d, company }: { department: Departmen
   const id = useId();
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState('');
+  const [failure, setFailure] = useState<unknown>(null);
   if (!company) return null;
   async function create() {
-    await api.post(`/api/departments/${d.id}/teams`, { name: name.trim() });
-    setName('');
-    setAdding(false);
+    await runAction(setFailure, async () => {
+      await api.post(`/api/departments/${d.id}/teams`, { name: name.trim() });
+      setName('');
+      setAdding(false);
+    });
   }
   return (
     <section aria-labelledby={`${id}-sub`}>
@@ -119,7 +143,7 @@ export function DeptSubUnits({ department: d, company }: { department: Departmen
       {d.teams.length > 0 ? (
         <ul className="dv-list">
           {d.teams.map(tm => (
-            <SubUnitRow key={tm.id} departmentId={d.id} team={tm} />
+            <SubUnitRow key={tm.id} departmentId={d.id} team={tm} onFail={setFailure} />
           ))}
         </ul>
       ) : (
@@ -135,6 +159,11 @@ export function DeptSubUnits({ department: d, company }: { department: Departmen
             {t.dept.addSubUnit}
           </button>
         </div>
+      )}
+      {failure !== null && (
+        <p className="alert" role="alert">
+          {errorText(t, failure)}
+        </p>
       )}
     </section>
   );

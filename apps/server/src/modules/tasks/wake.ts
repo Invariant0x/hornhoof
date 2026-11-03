@@ -7,7 +7,7 @@ import { deliverLive } from '../conversation/decision-context.js';
 import { quote } from '../conversation/prompt.js';
 import { appendEvent, publishWorking } from '../events/store.js';
 import { identityOf, type NodeIdentity } from '../nodes/hub.js';
-import { answerDirectly, brokeDown, CLOSED, GATE_ROUNDS, handOver, lastMove, leaveWork, NOT_A_MOVE, openAfter, regateWaiting, reviewWake, silentTurn, taskSpot, wentOn, type Actor, type Task, type Wake, type WakeWhy } from './engine.js';
+import { answerDirectly, brokeDown, CLOSED, GATE_ROUNDS, handOver, lastMove, leaveGates, leaveWork, NOT_A_MOVE, openAfter, regateWaiting, reviewWake, silentTurn, taskSpot, wentOn, type Actor, type Task, type Wake, type WakeWhy } from './engine.js';
 import { wakeQueued, wakesLeft } from './outbox.js';
 import { taskForWake, taskWakeOf, waitingTaskTurn } from './wake-state.js';
 import { carriedTasks, continueOnce, doneIfRecorded } from './endings.js';
@@ -190,6 +190,21 @@ export async function backOn(ctx: Ctx, actor: Actor, agentId: string): Promise<v
   const regated = await regateWaiting(ctx, actor, agent, `${agent.name} was switched on.`);
   await wakeAll(ctx, await settled(ctx, agent.companyId, regated.wakes, regated.closed));
   await pump(ctx, agentId);
+}
+
+/* An employee moved into a sub-unit leaves every gate it stood at, and queued turns for those gates end. */
+export async function leaveForTeam(ctx: Ctx, actor: Actor, agent: { id: string; name: string; companyId: string }): Promise<void> {
+  const left = await leaveGates(ctx, actor, agent);
+  const regated = await regateWaiting(ctx, actor, agent, `${agent.name} moved to a sub-unit.`);
+  const wakes = [...left.wakes, ...regated.wakes];
+  const closed = [...left.closed, ...regated.closed];
+  if (left.handed.length) {
+    await ctx.db
+      .update(jobs)
+      .set({ status: 'failed', error: 'switched_off', finishedAt: new Date() })
+      .where(and(eq(jobs.agentId, agent.id), eq(jobs.status, 'queued'), inArray(jobs.taskId, left.handed)));
+  }
+  await wakeAll(ctx, await settled(ctx, agent.companyId, wakes, closed));
 }
 
 /* Queues a turn for every agent a task move needs, one per agent and task: a turn already waiting reads the task as it is

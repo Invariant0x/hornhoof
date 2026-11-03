@@ -1,8 +1,9 @@
 import { eq, isNull } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agentEvents, agents, companies, departments, jobs, proposals, tasks } from '../src/db/schema.js';
-import { as, connectNode, invitePerson, listen, openStream, SETUP, setUpCompany, statements, testApp, until, type FakeNode } from './helpers.js';
+import { agentEvents, agents, companies, departments, jobs, people, personAccess, proposals, subscriptions, tasks, teams } from '../src/db/schema.js';
+import { as, connectNode, invitePerson, listen, openStream, SETUP, setUpCompany, statements, TEST_API_KEY, testApp, until, type FakeNode } from './helpers.js';
 import { rowsRead, statementReads } from './rows-read.js';
+import { applyTeams } from '../src/modules/departments/routes.js';
 import { checkItems } from '../src/modules/tools/structure.js';
 
 const NODE_KEY = 'k'.repeat(40);
@@ -138,6 +139,60 @@ describe('POST /api/departments/build', () => {
     const refused = await build(app, ceo, { items: [{ department: support!.id, note: '', remove: true }] });
     expect(refused.statusCode).toBe(400);
     expect(refused.json().error.reason).toBe('structure_invalid');
+  });
+
+  it('refuses removing or renaming a sub-unit of another department and keeps its access and subscription target', async () => {
+    const { app, db, ceo, acme } = await withOrchestrator();
+    await build(app, ceo, { items: [{ template: 'development' }, { template: 'sales' }] });
+    const [dev] = await db.select().from(departments).where(eq(departments.templateKey, 'development'));
+    const [sales] = await db.select().from(departments).where(eq(departments.templateKey, 'sales'));
+    const [inbound] = await db.insert(teams).values({ companyId: acme.id, departmentId: sales!.id, name: 'Inbound' }).returning();
+    await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { teams: [inbound!.id] } });
+    const keyRes = await app.inject({
+      method: 'POST',
+      url: '/api/subscriptions',
+      payload: { provider: 'anthropic_api', kind: 'api_key', label: 'Inbound key', apiKey: TEST_API_KEY, target: { kind: 'team', id: inbound!.id } },
+      ...as(ceo),
+    });
+    expect(keyRes.statusCode).toBe(201);
+    const keyId = keyRes.json().subscription.id as string;
+
+    const removeForeign = await build(app, ceo, {
+      items: [{ department: dev!.id, note: '', teams: ['Valid team', { id: inbound!.id, remove: true }] }],
+    });
+    expect(removeForeign.statusCode).toBe(400);
+    expect(removeForeign.json().error.reason).toBe('structure_invalid');
+
+    const renameForeign = await build(app, ceo, {
+      items: [{ department: dev!.id, note: '', teams: [{ id: inbound!.id, name: 'Stolen' }] }],
+    });
+    expect(renameForeign.statusCode).toBe(400);
+    expect(renameForeign.json().error.reason).toBe('structure_invalid');
+
+    const deleteRoute = await app.inject({ method: 'DELETE', url: `/api/departments/${dev!.id}/teams/${inbound!.id}`, ...as(ceo) });
+    expect(deleteRoute.statusCode).toBe(404);
+    expect(deleteRoute.json().error.reason).toBe('unknown_place');
+
+    const [ceoPerson] = await db.select().from(people).where(eq(people.isOwner, true));
+    await expect(
+      db.transaction(tx => applyTeams(tx, ceoPerson!, dev!.id, ['Rolled back', { id: inbound!.id, remove: true }])),
+    ).rejects.toMatchObject({ status: 404, reason: 'unknown_place' });
+    await expect(
+      db.transaction(tx => applyTeams(tx, ceoPerson!, dev!.id, ['Rolled back', { id: inbound!.id, name: 'Stolen' }])),
+    ).rejects.toMatchObject({ status: 404, reason: 'unknown_place' });
+
+    expect(await db.select().from(teams).where(eq(teams.departmentId, dev!.id))).toEqual([]);
+    const [stillThere] = await db.select().from(teams).where(eq(teams.id, inbound!.id));
+    expect(stillThere).toMatchObject({ departmentId: sales!.id, name: 'Inbound' });
+    expect(await db.select().from(personAccess).where(eq(personAccess.teamId, inbound!.id))).toHaveLength(1);
+    const [sub] = await db.select().from(subscriptions).where(eq(subscriptions.id, keyId));
+    expect(sub).toMatchObject({ targetKind: 'team', targetId: inbound!.id });
+
+    const renameOwn = await build(app, ceo, { items: [{ department: sales!.id, note: '', teams: [{ id: inbound!.id, name: 'Inbound EU' }] }] });
+    expect(renameOwn.statusCode).toBe(201);
+    const removeOwn = await build(app, ceo, { items: [{ department: sales!.id, note: '', teams: [{ id: inbound!.id, remove: true }] }] });
+    expect(removeOwn.statusCode).toBe(201);
+    expect(await db.select().from(teams).where(eq(teams.id, inbound!.id))).toEqual([]);
   });
 
   it('is only for people who see the whole company', async () => {

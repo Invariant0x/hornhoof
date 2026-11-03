@@ -78,6 +78,8 @@ async function clearPlanNodes(tx: Db, resetIds: string[]): Promise<void> {
   if (!resetIds.length) return;
   const goneNodes = tx.select({ id: nodes.id }).from(nodes).where(inArray(nodes.subscriptionId, resetIds));
   await tx.update(subscriptions).set({ removedAt: null, status: 'waiting_machine', leaseNodeId: null }).where(inArray(subscriptions.id, resetIds));
+  await tx.update(agents).set({ nodeId: null }).where(inArray(agents.nodeId, goneNodes));
+  await tx.update(jobs).set({ nodeId: null }).where(inArray(jobs.nodeId, goneNodes));
   await tx.update(testParts).set({ nodeId: null }).where(inArray(testParts.nodeId, goneNodes));
   await tx.delete(planCredentials).where(inArray(planCredentials.subscriptionId, resetIds));
   await tx.delete(nodes).where(inArray(nodes.subscriptionId, resetIds));
