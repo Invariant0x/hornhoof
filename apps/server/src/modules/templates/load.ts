@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { TEMPLATE_KEYS, type TemplateKey } from '@hornhoof/protocol';
+import { ROLE_EFFORTS, TEMPLATE_KEYS, type RoleEffort, type TemplateKey } from '@hornhoof/protocol';
 import { parse } from 'yaml';
 import { z } from 'zod';
 
@@ -27,6 +27,7 @@ export type Role = {
   title: Lang;
   description: Lang;
   tier: 'deep' | 'standard' | 'fast';
+  effort?: RoleEffort;
   perProduct: boolean;
   inDefault: boolean;
   /* Where the role stands among its department's default gates; none for a role that is not a gate. */
@@ -64,6 +65,7 @@ const RoleHead = z.object({
   title: LangText,
   description: LangText,
   tier: z.enum(['deep', 'standard', 'fast']),
+  effort: z.enum(ROLE_EFFORTS).optional(),
   perProduct: z.boolean().default(false),
   default: z.boolean().default(true),
   /* Where the role stands in its roster, after the head. */
@@ -129,6 +131,7 @@ export function loadTemplates(dir: string): Templates {
         title: r.title,
         description: r.description,
         tier: r.tier,
+        effort: r.effort,
         perProduct: r.perProduct,
         inDefault: r.default,
         gate: r.gate ?? null,

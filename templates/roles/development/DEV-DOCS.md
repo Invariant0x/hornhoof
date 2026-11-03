@@ -5,6 +5,7 @@ kind: member
 title: { en: "Technical writer", ru: "Технический писатель" }
 description: { en: "Keeps the README, guides and release notes true to the product.", ru: "Поддерживает README, руководства и заметки к выпуску в соответствии с продуктом." }
 tier: standard
+effort: medium
 perProduct: false
 default: false
 order: 100

@@ -63,6 +63,16 @@ const call = async (client: Client, name: string, args: object) => (await client
 const text = (res: Result) => res.content[0]!.text;
 
 describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
+  it.each([
+    ['change_employee', "null for its role's level"],
+    ['change_orchestrator', 'null for xhigh'],
+    ['reset_employee', 'its skills, texts and effort'],
+  ])('describes the role effort in %s', async (name, words) => {
+    const { app } = await company();
+    const tools = (await (await mcp(app)).listTools()).tools;
+    expect(tools.find(t => t.name === name)!.description).toContain(words);
+  });
+
   it("sets an employee's timer and takes it away", async () => {
     const { app, db, bruno } = await company();
     const client = await mcp(app);

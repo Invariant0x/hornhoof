@@ -5,6 +5,7 @@ kind: member
 title: { en: "Task watchdog", ru: "Сторож задач" }
 description: { en: "Wakes on a timer, checks that every agent moves its tasks and reports, and nudges the ones that are stuck.", ru: "Просыпается по таймеру, проверяет, что каждый агент двигает свои задачи и отчитывается, и подталкивает застрявших." }
 tier: fast
+effort: medium
 perProduct: false
 default: true
 order: 50

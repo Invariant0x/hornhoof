@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { effortsOf, topEffort } from './efforts.js';
 
 /* Messages between the Hornhoof server and its nodes, one JSON object per WebSocket frame. */
 
@@ -102,24 +101,15 @@ export const CLAUDE_ALIASES: ModelOption[] = [
   { id: 'haiku', name: 'Haiku', efforts: EFFORTS, defaultEffort: 'medium' },
 ];
 
-/* The effort an agent runs at: what a person picked while its model takes it, else Kimi and Codex at the most their model
-   takes and the others at their program's default. No efforts known takes what was picked, and Kimi's max. */
-export function effortFor(provider: ProviderId, chosen: string | null, efforts: string[] = []): string | null {
-  const kept = chosen && (!efforts.length || efforts.includes(chosen)) ? chosen : null;
-  return kept ?? topEffort(provider, efforts);
-}
-
-/* The efforts a model takes, from a module of its own that the web takes too. */
-export { effortsOf };
+/* Effort rules live apart from the message schemas so the web uses the same ones. */
+export { effortFor, effortsOf, ORCHESTRATOR_EFFORT, ROLE_EFFORTS, type RoleEffort } from './efforts.js';
 export { lineState, yellowUntil, RETURN_MS, type LineFacts, type LineState, type WorkLine } from './map.js';
 
 const pick = (defaultEffort: string | undefined) => (defaultEffort ? { defaultEffort } : {});
 
-/* The level an agent runs at when nobody picked one, when Hornhoof knows it: Kimi and Codex at the most their model takes,
-   Claude Code as its docs give it, even for a node's older list, and the others as their node reported. */
+/* The model's own default for display: Claude Code as its docs give it, even for a node's older list, and the others as
+   their node reported. This does not choose a level for a run. */
 export function defaultEffortOf(provider: ProviderId, models: ModelOption[], model: string | null): string | null {
-  const top = topEffort(provider, effortsOf(models, model));
-  if (top) return top;
   const claude = provider === 'claude' || provider === 'anthropic_api';
   if (!model) return claude ? CLAUDE_DEFAULT_EFFORT : null;
   const known = claude ? [...CLAUDE_ALIASES, ...API_MODELS.anthropic_api] : [];

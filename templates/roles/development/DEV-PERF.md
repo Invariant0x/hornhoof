@@ -5,6 +5,7 @@ kind: member
 title: { en: "Performance engineer", ru: "Инженер по производительности" }
 description: { en: "Measures what is slow and makes it fast, proving the gain with numbers.", ru: "Измеряет, что работает медленно, и ускоряет это, доказывая выигрыш цифрами." }
 tier: standard
+effort: xhigh
 perProduct: false
 default: false
 order: 110

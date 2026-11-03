@@ -5,6 +5,7 @@ kind: member
 title: { en: "Social media manager", ru: "Менеджер социальных сетей" }
 description: { en: "Drafts posts for each social network and keeps track of what the community says.", ru: "Готовит посты для каждой соцсети и следит за тем, что говорят о компании в сообществах." }
 tier: fast
+effort: medium
 perProduct: false
 default: true
 order: 40

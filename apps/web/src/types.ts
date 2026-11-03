@@ -1,4 +1,5 @@
 import type { Limits, ModelOption, NodeLoad, ProviderId, TemplateKey } from '@hornhoof/protocol';
+import type { RoleEffort } from '@hornhoof/protocol/efforts';
 import type { WorkLine } from '@hornhoof/protocol/map';
 
 export type { Limits, ModelOption, ProviderId, TemplateKey, WorkLine };
@@ -174,7 +175,7 @@ export type AgentCardView = {
   id: string;
   kind: 'orchestrator' | 'head' | 'worker';
   name: string;
-  role: { id: string; title: Lang; description: Lang } | null;
+  role: { id: string; title: Lang; description: Lang; effort?: RoleEffort } | null;
   department: { id: string; name: string } | null;
   product: { id: string; name: string } | null;
   model: string;
