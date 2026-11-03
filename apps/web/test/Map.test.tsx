@@ -378,6 +378,35 @@ describe('Map', () => {
     expect(container.querySelector('.wires path[data-work="d2"]')).toBeNull();
   });
 
+  it.each(['task', 'requests'])('keeps work lines fresh while %s events keep arriving faster than the refresh delay', async type => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    onTestFinished(() => { vi.useRealTimers(); });
+    const stream = fakeStream();
+    let working = true;
+    mockApi({ 'GET /api/org': () => [200, {
+      ...ORG,
+      serverNow: new Date().toISOString(),
+      workLines: [{ upstreamAgentId: 'a1', downstreamAgentId: 'h1', working, workEpoch: 1, returnedEpoch: null, returnedAt: null }],
+      departments: [dept({ id: 'd1', name: 'Sales', employees: [head('h1')] })],
+    }] });
+    const { container } = render(<MapScreen {...PROPS} />);
+    await screen.findByText('agents working');
+    const line = () => container.querySelector('.wires path[data-work="d1"]');
+    expect(line()).toHaveClass('c');
+    working = false;
+    for (let i = 0; i < 10; i++) {
+      stream.send({ type, id: 'task1' });
+      await act(() => vi.advanceTimersByTimeAsync(100));
+    }
+    expect(line()).not.toBeInTheDocument();
+    working = true;
+    for (let i = 0; i < 10; i++) {
+      stream.send({ type, id: 'task1' });
+      await act(() => vi.advanceTimersByTimeAsync(100));
+    }
+    expect(line()).toHaveClass('c');
+  });
+
   it('turns the line yellow over its whole length when the head gave a result back, for what is left of five minutes', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     onTestFinished(() => {
