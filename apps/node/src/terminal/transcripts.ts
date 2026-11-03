@@ -5,7 +5,8 @@ import { contentText, inputText, isoFrom, isRecord, toolName } from '../provider
 /* Follows a log file a program appends to, a whole line at a time. */
 export class LineTail {
   private offset: number;
-  private partial = '';
+  /* The start of a line the program has not ended yet. It waits as bytes, since a read can stop inside a letter. */
+  private partial = Buffer.alloc(0);
 
   constructor(
     private readonly file: string,
@@ -19,15 +20,17 @@ export class LineTail {
     if (size <= this.offset) return [];
     const buf = Buffer.alloc(size - this.offset);
     const fd = openSync(this.file, 'r');
+    let got: number;
     try {
-      readSync(fd, buf, 0, buf.length, this.offset);
+      got = readSync(fd, buf, 0, buf.length, this.offset);
     } finally {
       closeSync(fd);
     }
-    this.offset = size;
-    const lines = (this.partial + buf.toString('utf8')).split('\n');
-    this.partial = lines.pop() ?? '';
-    return lines.filter(l => l.trim());
+    this.offset += got;
+    const bytes = Buffer.concat([this.partial, buf.subarray(0, got)]);
+    const end = bytes.lastIndexOf(0x0a) + 1;
+    this.partial = Buffer.from(bytes.subarray(end));
+    return bytes.subarray(0, end).toString('utf8').split('\n').filter(l => l.trim());
   }
 }
 
