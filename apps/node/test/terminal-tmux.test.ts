@@ -24,6 +24,14 @@ describe.skipIf(!hasTmux)('tmux sessions for agents', () => {
   const tmux = new Tmux({ socket, env: { PATH: process.env.PATH ?? '', HOME: tmpdir(), NODE_KEY: 'leak' } });
   afterEach(async () => tmux.stopAll());
 
+  it('preserves dim input placeholders when a styled screen is requested', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-tmux-'));
+    await tmux.launch('styled', { cwd: dir, command: ['sh', '-c', 'printf "\\033[1m›\\033[0m \\033[2mAsk Codex to do anything\\033[0m\\n"; sleep 30'], cols: 80, rows: 24 });
+    await until(async () => (await tmux.screen('styled')).includes('Ask Codex'));
+    expect(await tmux.screen('styled', 0, true)).toMatch(/\x1b\[[0-9;]*2mAsk Codex/);
+    expect(await tmux.screen('styled', 0)).not.toContain('\x1b');
+  });
+
   it('starts a program in its own session, pastes a prompt into it and reads its screen', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'hh-tmux-'));
     await tmux.launch('a-1', { cwd: dir, command: ['sh', '-c', 'printf "ready\\n"; read line; printf "got:%s\\n" "$line"; sleep 30'], cols: 80, rows: 24 });

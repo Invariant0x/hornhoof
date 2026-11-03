@@ -70,7 +70,10 @@ for await (const typed of createInterface({ input: process.stdin })) {
   await hook('prompt', { prompt: line });
   if (line.startsWith('CRASH')) crash(line.includes('LONG') ? 'long' : '');
   if (line.includes('HANG_EXIT')) process.stdout.write('exit-test running\n');
-  if (line.includes('HANG')) continue;
+  if (line.includes('HANG')) {
+    process.stdout.write('❯ ');
+    continue;
+  }
   if (line.includes('INTERRUPT')) {
     appendFileSync(log, JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: '[Request interrupted by user]' }] } }) + '\n');
     process.stdout.write('  ⎿  Interrupted\n❯ ');
@@ -81,7 +84,10 @@ for await (const typed of createInterface({ input: process.stdin })) {
     await hook('stop', { last_assistant_message: '', transcript_path: log });
     continue;
   }
-  if (line.includes('SLOW')) await new Promise(r => setTimeout(r, 2000));
+  if (line.includes('SLOW')) {
+    process.stdout.write('❯ ');
+    await new Promise(r => setTimeout(r, 2000));
+  }
   const answer = line === 'SECRET' ? `the key is ${process.env.FAKE_SECRET}` : `echo: ${line}`;
   const write = () => appendFileSync(log, JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: answer }] } }) + '\n');
   if (!line.includes('LAG')) write();

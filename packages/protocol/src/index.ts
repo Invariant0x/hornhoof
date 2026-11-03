@@ -492,8 +492,9 @@ const ServerMessage = z.discriminatedUnion('type', [
   /* Hornhoof has the part's end: the node stops sending it again after each reconnect. */
   z.object({ type: z.literal('tests.ack'), partId: Id }),
   /* Words for an agent whose turn runs, from its head, another agent, the orchestrator or a person's window: typed into
-     the program as a person types, so the turn takes them in. */
-  z.object({ type: z.literal('agent.say'), agentKey: Id, text: z.string().max(100_000), ref: z.string().max(64) }),
+     the program as a person types, so the turn takes them in. The optional within budget, in milliseconds from receipt,
+     limits how long the node can wait to type them without depending on the server's clock. */
+  z.object({ type: z.literal('agent.say'), agentKey: Id, text: z.string().max(100_000), ref: z.string().max(64), within: z.number().int().nonnegative().optional() }),
 ]);
 export type ServerMessage = z.infer<typeof ServerMessage>;
 
