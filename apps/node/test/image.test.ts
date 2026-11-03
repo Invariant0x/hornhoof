@@ -8,7 +8,7 @@ const installed = new Set([...runtime.matchAll(/apt-get install -y --no-install-
 
 describe('the node image', () => {
   it('carries the everyday programs agents reach for in a shell', () => {
-    for (const program of ['git', 'curl', 'ripgrep', 'tmux', 'procps', 'jq', 'file', 'python3']) expect(installed).toContain(program);
+    for (const program of ['git', 'curl', 'ripgrep', 'tmux', 'procps', 'jq', 'file', 'python3', 'python-is-python3', 'python3-pil']) expect(installed).toContain(program);
   });
 
   it("keeps the agent programs on the PATH of a login shell, which Debian's /etc/profile sets again", () => {
