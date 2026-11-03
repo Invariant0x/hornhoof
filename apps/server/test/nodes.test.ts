@@ -431,3 +431,62 @@ describe('node config', () => {
     expect(config.nodePingMs).toBe(500);
   });
 });
+
+describe('active commands for the person who made them', () => {
+  it('keeps person-made commands encrypted, shows them only to their author across reloads, and invalidates cancelled codes in all three places', async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { whole: true } });
+    const commandsOf = async (token: string) =>
+      (await app.inject({ url: '/api/nodes/commands', ...as(token) })).json().commands as {
+        id: string;
+        kind: 'plans' | 'machine' | 'add';
+        plans: string[];
+        machineId: string | null;
+        machine: string | null;
+        command: string;
+        expiresAt: string;
+      }[];
+
+    const firstPlan = (await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude'] }, ...as(ceo) })).json();
+    const subId = firstPlan.subscriptions[0].id as string;
+    const planCmd = (await app.inject({ method: 'POST', url: `/api/subscriptions/${subId}/command`, ...as(ceo) })).json();
+    const firstMachine = (await app.inject({ method: 'POST', url: '/api/machines/command', ...as(ceo) })).json();
+    const joined = (await join(app, codeOf(firstMachine.command))).json();
+    const machineCmd = (await app.inject({ method: 'POST', url: '/api/machines/command', ...as(ceo) })).json();
+    const addCmd = (await app.inject({ method: 'POST', url: `/api/machines/${joined.machine.id}/plans`, payload: { subscription: subId }, ...as(ceo) })).json();
+
+    for (const made of [firstPlan, planCmd, machineCmd, addCmd]) {
+      expect(made).toMatchObject({ id: hashToken(codeOf(made.command)), command: expect.any(String), expiresAt: expect.any(String) });
+    }
+
+    const stored = JSON.stringify(await db.select().from(nodeCodes));
+    for (const made of [firstPlan, planCmd, machineCmd, addCmd]) {
+      expect(stored).not.toContain(codeOf(made.command));
+      expect(stored).not.toContain(made.command);
+    }
+
+    const active = await commandsOf(ceo);
+    expect(active).toEqual([
+      { id: planCmd.id, kind: 'plans', plans: ['Claude'], machineId: null, machine: null, command: planCmd.command, expiresAt: planCmd.expiresAt },
+      { id: machineCmd.id, kind: 'machine', plans: [], machineId: null, machine: null, command: machineCmd.command, expiresAt: machineCmd.expiresAt },
+      { id: addCmd.id, kind: 'add', plans: ['Claude'], machineId: joined.machine.id, machine: 'ivan-mac', command: addCmd.command, expiresAt: addCmd.expiresAt },
+    ]);
+
+    expect(await commandsOf(maria)).toEqual([]);
+    const mariaPlan = (await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['kimi'] }, ...as(maria) })).json();
+    expect((await commandsOf(maria)).map(c => c.id)).toEqual([mariaPlan.id]);
+    expect((await commandsOf(ceo)).map(c => c.id)).toEqual([planCmd.id, machineCmd.id, addCmd.id]);
+
+    await db.update(nodeCodes).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(nodeCodes.codeHash, mariaPlan.id));
+    expect(await commandsOf(maria)).toEqual([]);
+
+    for (const made of [planCmd, machineCmd, addCmd]) {
+      expect((await app.inject({ method: 'POST', url: `/api/nodes/commands/${made.id}/hide`, ...as(ceo) })).statusCode).toBe(204);
+      const attempt = await join(app, codeOf(made.command), made === addCmd ? {} : { machineId: 'other-mac-9999', hostname: 'other' });
+      expect(attempt.statusCode).toBe(410);
+      expect(attempt.json().error.reason).toBe('code_used');
+    }
+    expect(await commandsOf(ceo)).toEqual([]);
+  });
+});

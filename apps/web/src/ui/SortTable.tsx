@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react';
 import { useLanguage, useT } from '../i18n';
 import { Edge } from './Edge';
 import { matchesFilters, TableTools, type FilterGroup, type Selections, type TableSearch } from './TableTools';
@@ -13,6 +13,7 @@ type Props<T> = {
   card: (row: T) => ReactNode;
   search?: TableSearch<T>;
   filters?: FilterGroup<T>[];
+  openIds?: readonly string[];
 };
 type SortControls<T> = { columns: TableColumn<T>[]; sort: Sort; choose: (column: TableColumn<T>) => void };
 
@@ -52,7 +53,18 @@ function ResultLine({ filtered, count, shown, all, clear }: { filtered: boolean;
   return <p className="result" role="status">{filtered ? <>{t.tables.shown(shown, all)} <button className="linkbtn" type="button" onClick={clear}>{t.tables.clear}</button></> : count}</p>;
 }
 
-export function SortTable<T extends { id: string }>({ rows, columns, name, initialSort, card, search, filters = [] }: Props<T>) {
+function useAutoOpen<T extends { id: string }>(openIds: readonly string[] | undefined, rows: readonly T[], setOpen: Dispatch<SetStateAction<Set<string>>>) {
+  const seen = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const active = new Set(openIds);
+    seen.current = new Set([...seen.current].filter(id => active.has(id)));
+    const fresh = [...active].filter(id => !seen.current.has(id) && rows.some(r => r.id === id));
+    for (const id of fresh) seen.current.add(id);
+    if (fresh.length) setOpen(prev => new Set([...prev, ...fresh]));
+  }, [openIds, rows, setOpen]);
+}
+
+export function SortTable<T extends { id: string }>({ rows, columns, name, initialSort, card, search, filters = [], openIds }: Props<T>) {
   const t = useT();
   const { language } = useLanguage();
   const [query, setQuery] = useState('');
@@ -73,6 +85,7 @@ export function SortTable<T extends { id: string }>({ rows, columns, name, initi
     setOrder(previous => orderRows(rows, previous, true).map(r => r.id));
     setOpen(previous => new Set([...previous].filter(id => rows.some(r => r.id === id))));
   }, [rows]);
+  useAutoOpen(openIds, rows, setOpen);
 
   function toggleFilter(key: string, value: string) {
     setSelected(previous => {

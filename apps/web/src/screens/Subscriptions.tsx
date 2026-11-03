@@ -4,9 +4,8 @@ import { errorText, useLanguage, useT, type Language, type Messages } from '../i
 import { PROGRAM_NAMES, PROVIDER_NAMES } from '../providers';
 import type { JobView, Me, SubView } from '../types';
 import { Ask } from '../ui/Ask';
-import { CommandBox } from '../ui/CommandBox';
+import { ActiveCommandPanel, hideShownCommand, livePanel, loadPlansCommand, toActiveCommand, type CommandPanelState } from '../ui/CommandBox';
 import { ConnectPanel } from '../ui/ConnectPanel';
-import { Edge } from '../ui/Edge';
 import { isKeyPlan, KeyForm } from '../ui/KeyForm';
 import { resetDurationAt, useNow } from '../ui/reset';
 import { SignInPanel } from '../ui/SignInPanel';
@@ -24,7 +23,6 @@ const POLL_LIMIT_MS = 150_000;
 const REFRESH_MS = 5000;
 
 type Test = { phase: 'running' } | { phase: 'done'; text: string } | { phase: 'failed'; text: string; tail: string | null };
-type Panel = { kind: 'connect' } | { kind: 'command'; command: string } | null;
 /* A sign-in the owner runs now, in a terminal on one of the plan's machines. */
 type Signing = { subId: string; nodeId: string; hostname: string };
 
@@ -309,12 +307,46 @@ function SubscriptionDetails({ sub: s, me, controls, now }: PlanProps & { now: n
   );
 }
 
+function SubscriptionConnect({
+  panel,
+  setPanel,
+  onLoaded,
+  onCancel,
+}: {
+  panel: CommandPanelState;
+  setPanel: (next: CommandPanelState) => void;
+  onLoaded: () => void;
+  onCancel: (id: string) => void;
+}) {
+  const t = useT();
+  if (panel?.kind === 'connect') {
+    return (
+      <ConnectPanel
+        onCommand={shown => {
+          setPanel({ kind: 'command', shown });
+          onLoaded();
+        }}
+        onDone={() => {
+          setPanel(null);
+          onLoaded();
+        }}
+        onSkip={() => setPanel(null)}
+        skipLabel={t.common.cancel}
+      />
+    );
+  }
+  if (panel?.kind === 'command') {
+    return <ActiveCommandPanel heading={t.subs.connectHeading} run={t.subs.runThis} shown={panel.shown} onCancel={() => onCancel(panel.shown.id)} />;
+  }
+  return null;
+}
+
 export function Subscriptions({ me }: { me: Me }) {
   const t = useT();
   const { language } = useLanguage();
   const now = useNow();
   const [subs, setSubs] = useState<SubView[] | null>(null);
-  const [panel, setPanel] = useState<Panel>(null);
+  const [panel, setPanel] = useState<CommandPanelState>(null);
   const [confirm, setConfirm] = useState<string | null>(null);
   const [tests, setTests] = useState<Record<string, Test>>({});
   const [failure, setFailure] = useState<unknown>(null);
@@ -332,7 +364,7 @@ export function Subscriptions({ me }: { me: Me }) {
 
   const load = useCallback(async () => {
     try {
-      const list = await api.get<{ subscriptions: SubView[] }>('/api/subscriptions');
+      const [list] = await Promise.all([api.get<{ subscriptions: SubView[] }>('/api/subscriptions'), loadPlansCommand(live, setPanel)]);
       if (!live.current) return;
       setSubs(list.subscriptions);
     } catch (err) {
@@ -389,8 +421,14 @@ export function Subscriptions({ me }: { me: Me }) {
 
   const newCommand = (sub: SubView) =>
     run(async () => {
-      const { command } = await api.post<{ command: string }>(`/api/subscriptions/${sub.id}/command`);
-      setPanel({ kind: 'command', command });
+      const res = await api.post<{ id?: string; command: string; expiresAt?: string }>(`/api/subscriptions/${sub.id}/command`);
+      setPanel({ kind: 'command', shown: toActiveCommand(res) });
+    });
+
+  const cancelCommand = (id: string) =>
+    run(async () => {
+      await hideShownCommand(id);
+      setPanel(null);
     });
 
   const signIn = (sub: SubView, fresh: boolean) => startSignIn(t, sub, fresh, setSigning, setSignNote);
@@ -414,6 +452,8 @@ export function Subscriptions({ me }: { me: Me }) {
       await load();
     });
 
+  const activePanel = livePanel(panel, now);
+
   return (
     <section className="people subs">
       <header className="people-head">
@@ -421,43 +461,14 @@ export function Subscriptions({ me }: { me: Me }) {
           <h1>{t.subs.heading}</h1>
           <p className="muted">{t.subs.intro}</p>
         </div>
-        {!panel && (
+        {!activePanel && (
           <div className="head-actions">
             <button className="btn" type="button" onClick={() => setPanel({ kind: 'connect' })}>{t.subs.connect}</button>
           </div>
         )}
       </header>
 
-      {panel?.kind === 'connect' && (
-        <ConnectPanel
-          onDone={() => {
-            setPanel(null);
-            void load();
-          }}
-          onSkip={() => setPanel(null)}
-          skipLabel={t.common.cancel}
-        />
-      )}
-      {panel?.kind === 'command' && (
-        <Edge className="panel" cut={12}>
-          <h2>{t.subs.newCommand}</h2>
-          <p className="muted">{t.subs.runThis}</p>
-          <CommandBox command={panel.command} />
-          <p className="muted">{t.subs.joinOnce}</p>
-          <div className="actions">
-            <button
-              className="btn"
-              type="button"
-              onClick={() => {
-                setPanel(null);
-                void load();
-              }}
-            >
-              {t.common.done}
-            </button>
-          </div>
-        </Edge>
-      )}
+      <SubscriptionConnect panel={activePanel} setPanel={setPanel} onLoaded={() => void load()} onCancel={id => void cancelCommand(id)} />
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
 
       {subs && subs.length === 0 && <p className="muted">{t.subs.empty}</p>}

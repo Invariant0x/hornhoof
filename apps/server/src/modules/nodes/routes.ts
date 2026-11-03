@@ -171,7 +171,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/api/nodes/commands', async req => {
     const me = await ownScreen(req);
     const rows = await db
-      .select({ id: nodeCodes.codeHash, commandEnc: nodeCodes.commandEnc, subscriptionIds: nodeCodes.subscriptionIds, machine: machines.hostname, expiresAt: nodeCodes.expiresAt })
+      .select({ id: nodeCodes.codeHash, commandEnc: nodeCodes.commandEnc, subscriptionIds: nodeCodes.subscriptionIds, machineId: nodeCodes.machineId, machine: machines.hostname, expiresAt: nodeCodes.expiresAt })
       .from(nodeCodes)
       .leftJoin(machines, eq(machines.id, nodeCodes.machineId))
       .where(and(eq(nodeCodes.personId, me.id), isNotNull(nodeCodes.commandEnc), isNull(nodeCodes.usedAt), gt(nodeCodes.expiresAt, new Date())))
@@ -183,6 +183,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
         id: r.id,
         kind: r.machine ? 'add' : r.subscriptionIds.length ? 'plans' : 'machine',
         plans: r.subscriptionIds.flatMap(id => plans.filter(p => p.id === id).map(p => p.label)),
+        machineId: r.machineId,
         machine: r.machine,
         command: decryptSecret(r.commandEnc!, config.secret),
         expiresAt: r.expiresAt.toISOString(),
@@ -195,7 +196,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { id } = CommandParams.parse(req.params);
     const hidden = await db
       .update(nodeCodes)
-      .set({ commandEnc: null })
+      .set({ commandEnc: null, usedAt: new Date() })
       .where(and(eq(nodeCodes.codeHash, id), eq(nodeCodes.personId, me.id)))
       .returning({ id: nodeCodes.codeHash });
     if (!hidden.length) throw new ApiError(404, 'not_found', 'This command is not shown any more.', 'code_unknown');
