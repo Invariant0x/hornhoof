@@ -530,7 +530,7 @@ export class TerminalHost {
       return await this.failedTurn(a, job, 'cancelled');
     }
     if (a.failure !== null) {
-      const output = `${a.failure}\n\n${await this.screen(job.key)}`;
+      const output = `${await this.screen(job.key)}\n\n${a.failure}`;
       return await this.failedTurn(a, job, job.signedOut.test(a.failure) ? 'not_logged_in' : 'agent_failed', output);
     }
     await this.settle(a, message);
@@ -676,6 +676,14 @@ export class TerminalHost {
     a.ended?.resolve('');
   }
 
+  /* An API error ends the turn while the program stays ready for the next prompt. */
+  private turnFailed(a: Agent, reason: string): void {
+    a.busy = false;
+    if (a.turn?.typed) return this.finishTyped(a, '', a.signedOut?.test(reason) ? 'not_logged_in' : 'agent_failed', reason);
+    a.failure = reason;
+    a.ended?.resolve('');
+  }
+
   /* Whether within enterWaitMs the program took the prompt Hornhoof typed, ended its turn or ended itself, or the turn
      was called off: the turn goes on from there without another Enter. */
   private async tookPrompt(a: Agent, signal?: AbortSignal): Promise<boolean> {
@@ -810,7 +818,11 @@ export class TerminalHost {
       if (news.session) a.sessionId = news.session.id;
       if (news.started) a.busy = a.took = true;
       /* A stop logged before the running turn's prompt went in belongs to the last turn. */
-      if (news.aborted && !this.stoppable(a)) continue;
+      if ((news.aborted || news.failed !== undefined) && !this.stoppable(a)) continue;
+      if (news.failed !== undefined) {
+        this.turnFailed(a, news.failed);
+        continue;
+      }
       if (news.ended || news.aborted) {
         const message = news.ended?.message ?? '';
         a.busy = false;
@@ -849,12 +861,12 @@ export class TerminalHost {
       if (!a.turn) a.busy = false;
       return;
     }
-    a.busy = false;
     if (news.aborted) return this.interrupted(a);
+    if (news.failed !== undefined) return this.turnFailed(a, news.failed);
+    a.busy = false;
     const message = a.lastText ?? '';
-    if (a.turn?.typed) return this.finishTyped(a, news.failed === undefined ? message : '', news.failed === undefined ? null : 'agent_failed');
-    if (news.failed !== undefined) a.failure = news.failed;
-    a.ended?.resolve(news.failed === undefined ? message : '');
+    if (a.turn?.typed) return this.finishTyped(a, message);
+    a.ended?.resolve(message);
   }
 
   /* Reads the log until the turn's answer is in it. */
