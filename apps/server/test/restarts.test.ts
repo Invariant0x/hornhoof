@@ -1,4 +1,4 @@
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, inArray } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agentEvents, agents, companies, departments, jobs, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
 import { identityOf } from '../src/modules/nodes/hub.js';
@@ -127,6 +127,47 @@ describe('a turn cut off by a node restart', () => {
     await until(async () => (await c.turnsOf(c.olga.id)).length === 1);
     expect(await c.turnsOf(c.rob.id)).toEqual([]);
     expect((await c.notes())[1]).toMatchObject({ data: { called: { id: c.olga.id, name: 'Olga' } } });
+  });
+
+  it('lets the turn that already waits on the task be the retry, rather than queue one more', async () => {
+    const c = await company();
+    const first = await c.brunoAtWork();
+    const [waiting] = await c.db.insert(jobs).values({ companyId: c.companyId, subscriptionId: c.sub.id, agentId: c.bruno.id, taskId: c.task.id, kind: 'conversation', prompt: 'Hana answered your question.', timeoutMs: 60_000 }).returning();
+    const node = await c.restart(boot('2026-11-03T00:11:00.000Z'));
+    const retry = await nextRun(node);
+    expect(retry.jobId).toBe(waiting!.id);
+    expect(retry.prompt).toContain('Hornhoof runs it once more');
+    expect(retry.prompt).toContain('Hana answered your question.');
+    expect((await c.turnsOf(c.bruno.id)).map(j => ({ id: j.id, retryOf: j.retryOf }))).toEqual([
+      { id: first.jobId, retryOf: null },
+      { id: waiting!.id, retryOf: first.jobId },
+    ]);
+    expect((await c.notes())[0]).toMatchObject({ data: { retry: { job: waiting!.id, n: 1, of: 1 } } });
+  });
+
+  it('says in the log that the turn could not run again when its agent has no subscription', async () => {
+    const c = await company();
+    const first = await c.brunoAtWork();
+    await c.db.update(agents).set({ subscriptionId: null }).where(eq(agents.id, c.bruno.id));
+    await c.restart(boot('2026-11-03T00:11:00.000Z'));
+    await until(async () => (await c.notes()).length === 1);
+    const [note] = await c.notes();
+    expect(note).toMatchObject({ data: { job: first.jobId, retry: null } });
+    expect(note!.text).toContain('could not run it again');
+    expect((await c.turnsOf(c.bruno.id)).map(j => j.id)).toEqual([first.jobId]);
+  });
+
+  it('says in the log that nobody in Operations is on, and wakes nobody, when both of them are off', async () => {
+    const c = await company();
+    await c.db.update(agents).set({ switchedOffAt: new Date() }).where(inArray(agents.id, [c.rob.id, c.olga.id]));
+    await c.brunoAtWork();
+    const retry = await nextRun(await c.restart(boot('2026-11-03T00:11:00.000Z')));
+    await c.restart(boot('2026-11-03T00:20:00.000Z'));
+    await until(async () => (await c.notes()).length === 2);
+    const second = (await c.notes())[1]!;
+    expect(second).toMatchObject({ data: { job: retry.jobId, called: null } });
+    expect(second.text).toContain('nobody in Operations is on');
+    expect([...(await c.turnsOf(c.rob.id)), ...(await c.turnsOf(c.olga.id))]).toEqual([]);
   });
 
   it('goes on as before after a turn that ended with another error', async () => {
