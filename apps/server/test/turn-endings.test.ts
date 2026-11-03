@@ -1,8 +1,9 @@
 import { and, asc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agentEvents, agents, companies, departments, jobs, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
+import { agentEvents, agents, companies, departments, jobs, people, subscriptions, taskEvents, tasks, turns } from '../src/db/schema.js';
+import { GONE_ALONG } from '../src/modules/conversation/queue.js';
 import { identityOf } from '../src/modules/nodes/hub.js';
-import { createTask, submit, verdict } from '../src/modules/tasks/engine.js';
+import { createTask, report, submit, verdict } from '../src/modules/tasks/engine.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
 import { connectNode, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
@@ -54,7 +55,7 @@ async function company() {
   /* The node says the turn's program ended without its work done, as it ended. */
   const failed = async (run: Run, exit: Exit, more: { sessionId?: string | null; tail?: string; error?: 'agent_failed' | 'timeout' } = {}) => {
     node.send({ type: 'job.done', jobId: run.jobId, ok: false, sessionId: more.sessionId ?? null, result: '', tail: more.tail ?? 'Program ended.', error: more.error ?? 'agent_failed', exit });
-    await until(async () => (await jobOf(run.jobId)).finishedAt !== null);
+    await until(() => node.acks.includes(run.jobId));
   };
   const ended = async (run: Run) => {
     node.send({ type: 'job.done', jobId: run.jobId, ok: true, sessionId: null, result: 'Done.', tail: '', error: null });
@@ -129,6 +130,71 @@ describe("a turn whose program ended without the work done", () => {
     await c.settle();
     expect((await c.turnsOf(c.bruno.id)).filter(j => j.continueOf === more.jobId)).toEqual([]);
     expect((await c.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, c.task.id), eq(taskEvents.kind, 'continued')))).filter(e => (e.data as { continuation?: string }).continuation)).toHaveLength(1);
+  });
+
+  it('is not done by what the agent recorded on another task while it ran, and goes on', async () => {
+    const c = await company();
+    const other = (await createTask(c.ctx, { agentId: c.hana.id }, { title: 'Refund email', brief: '', body: 'Send it.', departmentId: c.task.departmentId, assigneeAgentId: c.bruno.id })).task;
+    const work = await c.brunoAtWork();
+    /* While his turn on the checkout runs, he reports on the refund email, and nothing on the checkout. */
+    await report(c.ctx, c.bruno.id, other.id, { done: true, summary: 'Refund email sent.' });
+    await c.failed(work, { code: 1, signal: null }, { sessionId: 'bruno-session' });
+    expect(await c.jobOf(work.jobId)).toMatchObject({ status: 'failed', error: 'agent_failed' });
+    const more = await c.nextTurn(c.bruno.id, 1);
+    expect(await c.jobOf(more.jobId)).toMatchObject({ taskId: c.task.id, continueOf: work.jobId });
+    expect(await c.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, c.task.id), eq(taskEvents.kind, 'report')))).toEqual([]);
+  });
+
+  it("is done by what a head recorded on a task whose turn went out inside it", async () => {
+    const c = await company();
+    const [ceo] = await c.db.select().from(people);
+    const held = async (title: string) => (await createTask(c.ctx, { personId: ceo!.id }, { title, brief: '', body: '', departmentId: c.task.departmentId, assigneeAgentId: c.hana.id })).task;
+    const [payments, refunds] = [await held('Payments'), await held('Refunds')];
+    /* Hold the head busy so both task wakes go out together. */
+    const [busy] = await c.db.insert(jobs).values({ companyId: c.companyId, subscriptionId: c.sub.id, agentId: c.hana.id, kind: 'conversation', prompt: 'Plan the turn.', timeoutMs: 60_000, status: 'running', startedAt: new Date() }).returning();
+    await wakeAll(c.ctx, [payments, refunds].map(task => ({ agentId: c.hana.id, taskId: task.id, why: 'assigned' })));
+    await c.ended({ type: 'job.run', jobId: busy!.id, prompt: 'Plan the turn.', sessionId: null });
+    const work = await c.nextTurn(c.hana.id, 1);
+    await until(async () => (await c.turnsOf(c.hana.id)).some(j => j.taskId === refunds.id && j.result === GONE_ALONG));
+    await report(c.ctx, c.hana.id, refunds.id, { done: true, summary: 'Refunds shipped.' });
+    await c.failed(work, { code: 1, signal: null });
+    expect(await c.jobOf(work.jobId)).toMatchObject({ status: 'done', error: null, exitCode: 1 });
+  });
+
+  it('carries the original work when a head continues inside another task turn without its old session', async () => {
+    const c = await company();
+    const [ceo] = await c.db.select().from(people);
+    const held = async (title: string) => (await createTask(c.ctx, { personId: ceo!.id }, { title, brief: '', body: '', departmentId: c.task.departmentId, assigneeAgentId: c.hana.id })).task;
+    const [payments, refunds] = [await held('Payments'), await held('Refunds')];
+    await wakeAll(c.ctx, [{ agentId: c.hana.id, taskId: payments.id, why: 'assigned' }]);
+    const work = await c.nextTurn(c.hana.id);
+    await wakeAll(c.ctx, [{ agentId: c.hana.id, taskId: refunds.id, why: 'assigned' }]);
+    await c.db.update(agents).set({ overrides: { base: 'Write the test first, then the code.' } }).where(eq(agents.id, c.hana.id));
+    /* The old assignment is outside the bounded catch-up history. */
+    await c.db.insert(agentEvents).values(Array.from({ length: 25 }, (_, i) => ({ companyId: c.companyId, agentId: c.hana.id, jobId: work.jobId, kind: 'text', data: { text: `Planning step ${i}.` } })));
+    await c.failed(work, { code: 1, signal: null }, { sessionId: 'hana-session' });
+    const more = await c.nextTurn(c.hana.id, 1);
+    expect(await c.jobOf(more.jobId)).toMatchObject({ taskId: refunds.id });
+    expect(more.sessionId).toBeNull();
+    expect(more.prompt).toContain(`#${payments.number} "Payments" is your department's`);
+  });
+
+  it('carries what the turn was asked when its session cannot go on, as his instructions changed meanwhile', async () => {
+    const c = await company();
+    /* Bruno last finished a turn before the company's turn opened, so a new session of his starts clean, with no catch-up. */
+    const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000);
+    await c.db.insert(jobs).values({ companyId: c.companyId, subscriptionId: c.sub.id, agentId: c.bruno.id, kind: 'conversation', prompt: 'Earlier work.', timeoutMs: 60_000, status: 'done', sessionId: 'earlier-session', createdAt: ago(60), startedAt: ago(60), finishedAt: ago(55) });
+    await c.db.insert(turns).values({ companyId: c.companyId, number: 1, title: 'Checkout', goal: '', status: 'open', messages: [], createdByAgentId: orchestrator!.id, openedAt: ago(30) });
+    await wakeAll(c.ctx, [{ agentId: c.bruno.id, taskId: c.task.id, why: 'assigned' }]);
+    const work = await c.nextTurn(c.bruno.id, 1);
+    await c.db.update(agents).set({ overrides: { base: 'Write the test first, then the code.' } }).where(eq(agents.id, c.bruno.id));
+    await c.failed(work, { code: 1, signal: null }, { sessionId: 'bruno-session' });
+    const more = await c.nextTurn(c.bruno.id, 2);
+    expect(await c.jobOf(more.jobId)).toMatchObject({ continueOf: work.jobId });
+    expect(more.sessionId).toBeNull();
+    expect(more.prompt).toContain('without recording');
+    expect(more.prompt).toContain(`#${c.task.number} "Checkout API" is yours to do`);
   });
 
   it('starts anew with the same work when its program never named a session to go on in', async () => {
