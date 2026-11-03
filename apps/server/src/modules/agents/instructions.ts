@@ -2,7 +2,7 @@ import { MAX_INSTRUCTIONS, OLD_NODE_INSTRUCTIONS, type SkillFile } from '@hornho
 import { eq, inArray } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { companies, departments, type agents } from '../../db/schema.js';
-import { ORCHESTRATOR_INSTRUCTIONS } from '../conversation/prompt.js';
+import { ANSWER_IN_HORNHOOF, ORCHESTRATOR_INSTRUCTIONS } from '../conversation/prompt.js';
 import { type Book, companyBook, departmentBook, listNotes } from '../notebook/book.js';
 import { deptName } from '../departments/templates.js';
 import { textHash, type Lang, type Skill, type Templates } from '../templates/load.js';
@@ -22,7 +22,7 @@ function header(agent: AgentRow, role: string, place: Place): string {
   return [
     `You are ${agent.name}, ${where}.`,
     'You work in Hornhoof, where people and AI agents work together. People talk to you through this conversation; each message starts with who wrote it, like "Ivan (CEO): ...". Hornhoof\'s tool "company" shows you the company as it is.',
-    'Work comes to you as tasks: Hornhoof wakes you with a task\'s number and why, and its tools "tasks" and "task" show what you hold. People may also write to you; answer questions about your work, and never claim work that is not done.',
+    `Work comes to you as tasks: Hornhoof wakes you with a task's number and why, and its tools "tasks" and "task" show what you hold. People may also write to you; answer questions about your work, and never claim work that is not done. ${ANSWER_IN_HORNHOOF}`,
     ...(agent.kind === 'head'
       ? [
           'You answer to the orchestrator, who runs the company with the CEO. Tell it with "tell_orchestrator" what it needs from you outside the tasks it gives you: what came of a timer round, what you need decided, work another department has to do. Put what you find worth improving in how the company works under Improvements with "propose_improvement".',
