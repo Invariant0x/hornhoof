@@ -64,6 +64,7 @@ export type DepartmentTree = {
   stage: 'work' | 'review';
   lines: TreeLine[];
   review: TreeReview | null;
+  reviews: TreeReview[];
   time: AgentTime[];
   idle: IdleStretch[];
 };
@@ -521,14 +522,15 @@ const isLineTask = (t: FactTask, reviews: Map<string, unknown>): boolean =>
 
 export function workTree(facts: TreeFacts, now: Date): DepartmentTree {
   if (!facts.turn) {
-    return { now: now.toISOString(), turn: null, repository: facts.repository, stage: 'work', lines: [], review: null, time: [], idle: [] };
+    return { now: now.toISOString(), turn: null, repository: facts.repository, stage: 'work', lines: [], review: null, reviews: [], time: [], idle: [] };
   }
   const ix = indexFacts(facts);
   const reviews = reviewCreatedMap(facts.tasks, ix);
-  const latestReview = [...facts.tasks]
+  const builtReviews = [...facts.tasks]
     .filter(t => reviews.has(t.id))
-    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.number - a.number)[0];
-  const rev = latestReview ? buildReview(latestReview, reviews.get(latestReview.id)!, ix, now) : NO_REVIEW;
+    .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.number - b.number)
+    .map(t => buildReview(t, reviews.get(t.id)!, ix, now));
+  const rev = builtReviews.at(-1) ?? NO_REVIEW;
 
   const builtLines = [...facts.tasks]
     .filter(t => isLineTask(t, reviews))
@@ -540,7 +542,7 @@ export function workTree(facts: TreeFacts, now: Date): DepartmentTree {
 
   const lines = builtLines.map(b => b.line);
   const turnStarted = facts.turn.openedAt ?? facts.turn.createdAt;
-  const timeEntries = [...lines.map(l => ({ agentId: l.agent.id, segments: l.segments })), ...rev.timeEntries];
+  const timeEntries = [...lines.map(l => ({ agentId: l.agent.id, segments: l.segments })), ...builtReviews.flatMap(r => r.timeEntries)];
 
   return {
     now: now.toISOString(),
@@ -554,7 +556,8 @@ export function workTree(facts: TreeFacts, now: Date): DepartmentTree {
     stage: rev.stage,
     lines,
     review: rev.review,
+    reviews: builtReviews.flatMap(r => r.review ? [r.review] : []),
     time: agentTime(facts.agents, timeEntries, turnStarted, now),
-    idle: idleStretches([...builtLines.map(b => b.idle), ...rev.idles], now),
+    idle: idleStretches([...builtLines.map(b => b.idle), ...builtReviews.flatMap(r => r.idles)], now),
   };
 }

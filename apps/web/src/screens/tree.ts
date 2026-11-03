@@ -1,9 +1,10 @@
 import type {
-  Department, DepartmentTree, SegmentKind, TreeAgent, TreeLine, TreeMove, TreeReviewer, TreeSegment, TreeVerdict,
+  Department, DepartmentTree, SegmentKind, TreeAgent, TreeLine, TreeMove, TreeReview, TreeReviewer, TreeSegment, TreeVerdict,
 } from '../types';
 import type { Point } from '../ui/wires';
 
 export const SEGMENT_CLASS: Record<SegmentKind, string> = { work: 'w', after: 'af', person: 'ps', stall: 'st' };
+export const reviewsOf = (tree: DepartmentTree): TreeReview[] => tree.reviews ?? (tree.review ? [tree.review] : []);
 export const trunkBranch = (department: Department) => department.repository?.branch ?? 'main';
 export const treeClock = (at: string) => new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
 export const secondsBetween = (from: string, to: string) => Math.max(0, (Date.parse(to) - Date.parse(from)) / 1000);
@@ -35,6 +36,10 @@ export type TreeRow = {
   agent?: TreeAgent;
   line?: TreeLine;
   reviewer?: TreeReviewer;
+  review?: TreeReview;
+  lines?: TreeLine[];
+  reviews?: { review: TreeReview; reviewer: TreeReviewer }[];
+  current?: boolean;
   pick?: TreePick;
 };
 export type TreePath = {
@@ -83,21 +88,30 @@ type Drawing = { tree: DepartmentTree; layout: TreeLayout; turnY: number };
 const R = 8;
 const center = (r: TreeRow) => r.y + r.h / 2;
 
-function lanesOf(tree: DepartmentTree): Omit<TreeRow, 'y' | 'h'>[] {
-  if (tree.stage === 'review') {
-    return (tree.review?.reviewers ?? []).map(reviewer => ({
-      type: 'lane',
-      agent: reviewer.agent,
-      reviewer,
-      pick: { kind: 'reviewer', agentId: reviewer.agent.id },
-    }));
+type Lane = Omit<TreeRow, 'y' | 'h'>;
+
+function laneFor(lanes: Map<string, Lane>, agent: TreeAgent): Lane {
+  const row = lanes.get(agent.id) ?? { type: 'lane', agent, lines: [], reviews: [] };
+  lanes.set(agent.id, row);
+  return row;
+}
+
+function labelledLane(row: Lane): Lane {
+  row.lines!.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const line = row.lines!.at(-1), last = row.reviews!.at(-1);
+  if (last && (!line || last.review.openedAt >= line.createdAt)) {
+    return { ...row, reviewer: last.reviewer, review: last.review, pick: { kind: 'reviewer', taskId: last.review.taskId, agentId: row.agent!.id } };
   }
-  return latestLines(tree.lines).map(line => ({
-    type: 'lane',
-    agent: line.agent,
-    line,
-    pick: { kind: 'line', taskId: line.taskId, agentId: line.agent.id },
-  }));
+  return { ...row, line, pick: { kind: 'line', taskId: line!.taskId, agentId: row.agent!.id } };
+}
+
+function lanesOf(tree: DepartmentTree): Lane[] {
+  const lanes = new Map<string, Lane>();
+  for (const line of tree.lines) laneFor(lanes, line.agent).lines!.push(line);
+  for (const review of reviewsOf(tree)) {
+    for (const reviewer of review.reviewers) laneFor(lanes, reviewer.agent).reviews!.push({ review, reviewer });
+  }
+  return [...lanes.values()].map(labelledLane);
 }
 
 function rowsOf(tree: DepartmentTree, phone: boolean, height: number): TreeRow[] {
@@ -122,9 +136,7 @@ function rowsOf(tree: DepartmentTree, phone: boolean, height: number): TreeRow[]
 }
 
 function windowStart(tree: DepartmentTree): string {
-  if (tree.stage === 'review' && tree.review) return new Date(Date.parse(tree.review.openedAt) - 600_000).toISOString();
-  const first = tree.repository ? tree.turn?.startedAt : tree.lines.map(l => l.createdAt).sort()[0];
-  return new Date(Date.parse(first ?? tree.turn?.startedAt ?? tree.now) - 720_000).toISOString();
+  return new Date(Date.parse(tree.turn?.startedAt ?? tree.now) - 720_000).toISOString();
 }
 
 function path(d: Drawing, kind: TreePath['kind'], cls: string, points: Point[], row?: string, dim = false) {
@@ -219,6 +231,10 @@ function moves(d: Drawing, row: TreeRow, line: TreeLine, dim: boolean) {
   });
 }
 
+function currentHead(d: Drawing, row: TreeRow, list: TreeSegment[], waitsFor: number[] = []) {
+  if (row.current !== false) head(d, row, list, waitsFor);
+}
+
 function workLane(d: Drawing, row: TreeRow) {
   const line = row.line!, plain = !d.tree.repository || !line.branch;
   const stopped = plain ? line.doneAt : line.mergedAt;
@@ -238,7 +254,7 @@ function workLane(d: Drawing, row: TreeRow) {
   if (!plain) connections(d, row, line, end, done);
   moves(d, row, line, done);
   if (plain && done) mark(d, { kind: 'done', x: d.layout.x(end), y: center(row), cls: 'sq', pick: row.pick! });
-  if (!done) head(d, row, line.segments, line.waitsFor);
+  if (!done) currentHead(d, row, line.segments, line.waitsFor);
 }
 
 function reviewLane(d: Drawing, row: TreeRow, openedAt: string) {
@@ -259,21 +275,26 @@ function reviewLane(d: Drawing, row: TreeRow, openedAt: string) {
       pick: row.pick!,
     });
   } else {
-    head(d, row, reviewer.segments);
+    currentHead(d, row, reviewer.segments);
   }
 }
 
-function reviewLanes(d: Drawing) {
-  const review = d.tree.review;
-  if (!review) return;
-  const x = d.layout.x(review.openedAt);
-  for (const row of d.layout.rows.filter(r => r.reviewer)) reviewLane(d, row, review.openedAt);
-  if (d.tree.repository) mark(d, { kind: 'review', x, y: d.turnY, cls: 'via okf', pick: { kind: 'review' } });
+function drawLane(d: Drawing, row: TreeRow) {
+  for (const line of row.lines ?? []) {
+    workLane(d, { ...row, line, current: row.pick?.taskId === line.taskId, pick: { kind: 'line', agentId: line.agent.id, taskId: line.taskId } });
+  }
+  for (const { review, reviewer } of row.reviews ?? []) {
+    reviewLane(d, { ...row, reviewer, current: row.pick?.taskId === review.taskId && !review.closedAt, pick: { kind: 'reviewer', agentId: reviewer.agent.id, taskId: review.taskId } }, review.openedAt);
+  }
+}
+
+function reviewMark(d: Drawing, review: TreeReview) {
+  if (d.tree.repository) mark(d, { kind: 'review', x: d.layout.x(review.openedAt), y: d.turnY, cls: 'via okf', pick: { kind: 'review', taskId: review.taskId } });
 }
 
 function gridLines(d: Drawing) {
   const { tree, layout: l } = d;
-  const step = tree.stage === 'review' ? 600_000 : 3_600_000;
+  const step = 3_600_000;
   for (let at = Math.ceil(Date.parse(l.from) / step) * step; at < Date.parse(tree.now); at += step) {
     const time = new Date(at).toISOString(), gx = l.x(time);
     path(d, 'grid', 'g-hr', [[gx, 26], [gx, l.height]]);
@@ -311,8 +332,8 @@ export function treeLayout(tree: DepartmentTree, box: { width: number; height: n
   const d: Drawing = { tree, layout, turnY: center(rows.find(r => r.type === 'turn') ?? rows[0]!) };
   gridLines(d);
   trunks(d);
-  if (tree.stage === 'review') reviewLanes(d);
-  else rows.filter(r => r.line).forEach(r => workLane(d, r));
+  rows.filter(r => r.agent).forEach(r => drawLane(d, r));
+  reviewsOf(tree).forEach(r => reviewMark(d, r));
   rowTargets(layout);
   return layout;
 }

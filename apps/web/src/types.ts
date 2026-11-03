@@ -536,6 +536,7 @@ export type DepartmentTree = {
   stage: 'work' | 'review';
   lines: TreeLine[];
   review: TreeReview | null;
+  reviews?: TreeReview[];
   time: AgentTime[];
   idle: IdleStretch[];
 };

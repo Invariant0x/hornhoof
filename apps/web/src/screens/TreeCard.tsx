@@ -2,7 +2,7 @@ import { Fragment, type ReactNode } from 'react';
 import { useT } from '../i18n';
 import type { Department, DepartmentTree, TreeAgent, TreeLine, TreeSegment } from '../types';
 import { ProviderMark } from '../ui/icons';
-import { currentSegment, secondsBetween, treeClock, trunkBranch, type TreePick } from './tree';
+import { currentSegment, secondsBetween, treeClock, trunkBranch, reviewsOf, type TreePick } from './tree';
 
 type Props = { tree: DepartmentTree; department: Department; pick: TreePick; onOpenTask(id: string): void };
 
@@ -95,7 +95,7 @@ function WorkCard({ tree, department, line, onOpenTask }: Omit<Props, 'pick'> & 
 }
 
 function ReviewCard({ tree, department, pick, onOpenTask }: Props) {
-  const L = useT().dept.tree, review = tree.review!;
+  const L = useT().dept.tree, review = reviewsOf(tree).find(r => r.taskId === pick.taskId) ?? tree.review!;
   const reviewer = review.reviewers.find(r => r.agent.id === pick.agentId);
   const pairs: [string, ReactNode][] = [[L.cWhat, L.reviewWhat(tree.turn!.branch)]];
   if (reviewer) {
@@ -174,7 +174,7 @@ function MoveCard({ tree, department, pick, line, onOpenTask }: Props & { line: 
 export function TreeCardBody(props: Props) {
   const { tree, pick, department } = props, L = useT().dept.tree;
   const line = tree.lines.find(l => l.taskId === pick.taskId);
-  if (pick.kind === 'review' || pick.kind === 'reviewer') return tree.review && <ReviewCard {...props} />;
+  if (pick.kind === 'review' || pick.kind === 'reviewer') return reviewsOf(tree).length > 0 && <ReviewCard {...props} />;
   if (pick.kind === 'main') {
     return (
       <>

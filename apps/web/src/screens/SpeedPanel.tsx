@@ -2,7 +2,7 @@ import { useId, useState } from 'react';
 import { useT } from '../i18n';
 import type { AgentTime, Department, DepartmentTree, IdleStretch, SegmentKind, TreeAgent } from '../types';
 import { TreeWho } from './TreeCard';
-import { idleClass, latestLines, SEGMENT_CLASS, secondsBetween, treeClock } from './tree';
+import { idleClass, latestLines, reviewsOf, SEGMENT_CLASS, secondsBetween, treeClock } from './tree';
 
 type Props = { tree: DepartmentTree; department: Department; onAgent(id: string, top: number): void };
 const amount = (time: AgentTime) => [time.work, time.after + time.person, time.stall];
@@ -17,7 +17,7 @@ function Strip({ tree, agent }: { tree: DepartmentTree; agent: TreeAgent }) {
   const duration = Math.max(1, secondsBetween(start, tree.now));
   const segments = [
     ...tree.lines.filter(l => l.agent.id === agent.id).flatMap(l => l.segments),
-    ...(tree.review?.reviewers.find(r => r.agent.id === agent.id)?.segments ?? []),
+    ...reviewsOf(tree).flatMap(review => review.reviewers.filter(r => r.agent.id === agent.id).flatMap(r => r.segments)),
   ];
   const time = tree.time.find(a => a.agent.id === agent.id)!;
   const label = `${agent.name}: ${amount(time).map((n, i) => `${L.cols[i + 1]} ${L.dur(n / 60)}`).join(', ')}`;

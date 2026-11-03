@@ -51,6 +51,25 @@ function assertAllLinesCovered(tree: DepartmentTree): void {
 }
 
 describe('workTree', () => {
+  it('keeps both turn reviews, their verdicts, fixes and the final check in time order', () => {
+    const task = (number: number, executorAgentId: string, created: number, closed: number | null): TreeFacts['tasks'][number] => ({
+      id: `t${number}`, number, title: `Task ${number}`, status: closed === null ? 'review' : 'done', parentId: null,
+      executorAgentId, after: [], inRepository: true, createdAt: at(created), closedAt: closed === null ? null : at(closed),
+    });
+    const facts = baseFacts({ tasks: [task(90, 'head', 10, 20), task(100, 'mira', 20, 30), task(121, 'head', 30, null), task(135, 'rita', 40, null)] });
+    facts.events = [90, 121].flatMap((number, i) => [
+      { taskId: `t${number}`, agentId: 'head', kind: 'created' as const, text: '', data: { turnReview: true, panel: ['vera'] }, createdAt: at(10 + i * 20) },
+      { taskId: `t${number}`, agentId: 'vera', kind: 'verdict' as const, text: '', data: { pass: i === 1, findings: i === 1 ? 0 : 2 }, createdAt: at(18 + i * 20) },
+    ]);
+    const tree = workTree(facts, at(45));
+    expect(tree.reviews.map(r => r.number)).toEqual([90, 121]);
+    expect(tree.reviews.map(r => r.reviewers[0]!.verdict?.findings)).toEqual([2, 0]);
+    expect(tree.lines.map(l => l.number)).toEqual([100, 135]);
+    expect(tree.stage).toBe('review');
+    expect(tree.review?.number).toBe(121);
+    expect(tree.time.find(t => t.agent.id === 'vera')?.work).toBe(16 * 60);
+  });
+
   it('marks 42 silent minutes as stall from the last sign, keeps 29 silent minutes as work, and ignores nudges', () => {
     expect(STALL_MS).toBe(30 * 60_000);
     const facts = baseFacts({
@@ -605,6 +624,7 @@ describe('workTree', () => {
       stage: 'work',
       lines: [],
       review: null,
+      reviews: [],
       time: [],
       idle: [],
     });

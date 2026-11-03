@@ -3,7 +3,7 @@ import { useT } from '../i18n';
 import type { Department, DepartmentTree, TreeAgent } from '../types';
 import { Pulse, toD, useReducedMotion } from '../ui/wires';
 import {
-  idleClass, treeClock, treeLayout, latestLines, trunkBranch,
+  idleClass, treeClock, treeLayout, latestLines, trunkBranch, reviewsOf,
   type TreeLayout, type TreeBadge, type TreeMark, type TreePick, type TreeRow, type TreeTarget,
 } from './tree';
 import { TreeCardBody, TreeWho } from './TreeCard';
@@ -151,7 +151,7 @@ function pickLabel(pick: TreePick, tree: DepartmentTree, department: Department,
   if (row) return `${department.employees.find(e => e.id === row.agent.id)?.name ?? row.agent.name}, #${row.number} ${row.title}`;
   if (pick.agentId) {
     const employee = department.employees.find(e => e.id === pick.agentId);
-    const reviewer = tree.review?.reviewers.find(r => r.agent.id === pick.agentId);
+    const reviewer = reviewsOf(tree).flatMap(r => r.reviewers).find(r => r.agent.id === pick.agentId);
     return employee?.name ?? reviewer?.agent.name ?? '';
   }
   if (pick.kind === 'review') return L.reviewH(tree.turn!.number);
@@ -171,7 +171,7 @@ function Label({ row, tree, department }: { row: TreeRow; tree: DepartmentTree; 
     <>
       <span className="r1"><b><TreeWho agent={row.agent} department={department} /></b></span>
       <span className="r2">
-        #{row.line?.number ?? tree.review?.number}
+        #{row.line?.number ?? row.review?.number}
         <span className="tv-title"> {row.line?.title ?? (tree.turn ? L.reviewH(tree.turn.number) : '')}</span>
       </span>
       <LaneState agent={row.agent} department={department} now={tree.now} />

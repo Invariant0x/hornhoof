@@ -6,7 +6,36 @@ const box = { width: 1100, height: 640, phone: false };
 const minutes = (a: string, b: string) => (Date.parse(a) - Date.parse(b)) / 60_000;
 
 describe('work tree layout', () => {
-  it('keeps one latest line per agent in input order, with merged lanes dimmed', () => {
+  it('keeps all 38 tasks in time order on one lane, labelled by the current task', () => {
+    const lines = Array.from({ length: 38 }, (_, i) => {
+      const from = new Date(Date.parse(DEV_TREE.turn!.startedAt) + i * 480_000).toISOString();
+      const to = new Date(Date.parse(from) + 480_000).toISOString();
+      return { ...DEV_TREE.lines[0]!, taskId: `night-${i}`, number: 62 + i, createdAt: from, cutAt: from,
+        mergedAt: i < 37 ? to : null, doneAt: null, segments: [{ kind: 'work' as const, from, to: i < 37 ? to : null }], moves: [] };
+    });
+    const layout = treeLayout({ ...DEV_TREE, lines: lines.reverse() }, box, 1);
+    const lanes = layout.rows.filter(r => r.type === 'lane');
+    expect(lanes).toHaveLength(1);
+    expect(lanes[0]!.line?.taskId).toBe('night-37');
+    expect(layout.marks.filter(m => m.kind === 'fork' && m.pick.kind === 'line').map(m => m.pick.taskId)).toEqual(Array.from({ length: 38 }, (_, i) => `night-${i}`));
+    expect(layout.paths.filter(p => p.kind === 'segment')).toHaveLength(38);
+  });
+
+  it('keeps developers and every review in the same lanes during and after review', () => {
+    const first = { ...REVIEW_TREE.review!, taskId: 'r90', number: 90, openedAt: DEV_TREE.turn!.startedAt,
+      closedAt: REVIEW_TREE.review!.openedAt };
+    for (const stage of ['review', 'work'] as const) {
+      const tree = { ...REVIEW_TREE, stage, reviews: [first, REVIEW_TREE.review!] };
+      const layout = treeLayout(tree, box, 1);
+      const agentIds = new Set([...tree.lines.map(l => l.agent.id), ...first.reviewers.map(r => r.agent.id)]);
+      expect(layout.rows.filter(r => r.type === 'lane').map(r => r.agent!.id)).toEqual([...agentIds]);
+      expect(layout.from).toBe(treeLayout(DEV_TREE, box, 1).from);
+      expect(layout.marks.filter(m => m.kind === 'review').map(m => m.pick.taskId)).toEqual(['r90', 'r54']);
+      expect(layout.marks.filter(m => m.kind === 'verdict')).toHaveLength(4);
+    }
+  });
+
+  it('labels each agent by its latest line and keeps historical lines dimmed', () => {
     const old = { ...DEV_TREE.lines[0]!, taskId: 'old', createdAt: '2026-10-30T09:01:00.000Z' };
     const layout = treeLayout({ ...DEV_TREE, lines: [old, ...DEV_TREE.lines] }, box, 1);
     const lanes = layout.rows.filter(r => r.type === 'lane');
@@ -26,18 +55,18 @@ describe('work tree layout', () => {
     expect(l.marks).toContainEqual(expect.objectContaining({ kind: 'merge', x: mx, y: yt }));
   });
 
-  it('shows only reviewers, all forking at the review opening and ending at their verdicts', () => {
+  it('keeps developer lanes while reviewers fork at the review opening and end at verdicts', () => {
     const l = treeLayout(REVIEW_TREE, box, 1);
-    expect(l.rows.filter(r => r.type === 'lane').map(r => r.agent?.id)).toEqual(REVIEW_TREE.review!.reviewers.map(r => r.agent.id));
-    expect(l.paths.filter(p => p.kind === 'fork').every(p => p.points[0]![0] === l.x(REVIEW_TREE.review!.openedAt))).toBe(true);
+    expect(l.rows.filter(r => r.type === 'lane').map(r => r.agent?.id)).toEqual([...REVIEW_TREE.lines.map(r => r.agent.id), ...REVIEW_TREE.review!.reviewers.map(r => r.agent.id)]);
+    expect(l.paths.filter(p => p.kind === 'fork' && REVIEW_TREE.review!.reviewers.some(r => r.agent.id === p.row)).every(p => p.points[0]![0] === l.x(REVIEW_TREE.review!.openedAt))).toBe(true);
     expect(l.marks.filter(m => m.kind === 'verdict').map(m => m.verdict?.findings)).toEqual([2, 0]);
     expect(l.marks).toContainEqual(expect.objectContaining({ kind: 'review', x: l.x(REVIEW_TREE.review!.openedAt) }));
   });
 
-  it('starts the windows before the stage and clamps the minute scale before zoom', () => {
+  it('starts every window before the turn and clamps the minute scale before zoom', () => {
     const l = treeLayout(DEV_TREE, box, 1);
     expect(minutes(DEV_TREE.turn!.startedAt, l.from)).toBe(12);
-    expect(minutes(REVIEW_TREE.review!.openedAt, treeLayout(REVIEW_TREE, box, 1).from)).toBe(10);
+    expect(minutes(REVIEW_TREE.turn!.startedAt, treeLayout(REVIEW_TREE, box, 1).from)).toBe(12);
     expect(treeLayout(DEV_TREE, { ...box, width: 300 }, 1).scale).toBe(1.2);
     expect(treeLayout(DEV_TREE, { ...box, width: 300, phone: true }, 1).scale).toBe(.9);
     expect(treeLayout(DEV_TREE, { ...box, width: 100000 }, 1).scale).toBe(18);
@@ -53,7 +82,7 @@ describe('work tree layout', () => {
     const l = treeLayout(SALES_TREE, box, 1);
     expect(l.rows.map(r => r.type)).toEqual(['axis', 'lane', 'lane', 'lane']);
     expect(l.paths.some(p => p.kind === 'fork' || p.kind === 'merge')).toBe(false);
-    expect(minutes(SALES_TREE.lines[0]!.createdAt, l.from)).toBe(12);
+    expect(minutes(SALES_TREE.turn!.startedAt, l.from)).toBe(12);
     expect(l.marks).toContainEqual(expect.objectContaining({ kind: 'start', x: l.x(SALES_TREE.lines[0]!.createdAt) }));
     expect(l.marks.some(m => m.kind === 'done')).toBe(true);
   });
@@ -74,7 +103,7 @@ it('breathes only unanswered question rings, keeps historical stalls, and pulses
   expect(l.pulses).toHaveLength(1);
   expect(l.pulses.every(pts => pts[1]![0] - pts[0]![0] <= 200)).toBe(true);
   const next = treeLayout(REVIEW_TREE, box, 1);
-  expect(next.marks.some(m => m.move?.kind === 'asked')).toBe(false);
+  expect(next.marks.some(m => m.move?.kind === 'asked')).toBe(true);
 });
 
 it('does not fork an uncut task even in a department with a repository', () => {
@@ -88,5 +117,5 @@ it('keeps review lines plain too when there is no repository', () => {
   const l = treeLayout(tree, box, 1);
   expect(l.rows.some(r => r.type === 'main' || r.type === 'turn')).toBe(false);
   expect(l.paths.some(p => p.kind === 'fork' || p.kind === 'merge')).toBe(false);
-  expect(l.marks.filter(m => m.kind === 'start')).toHaveLength(tree.review!.reviewers.length);
+  expect(l.marks.filter(m => m.kind === 'start')).toHaveLength(tree.lines.length + tree.review!.reviewers.length);
 });
