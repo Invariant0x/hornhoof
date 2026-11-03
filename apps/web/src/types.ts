@@ -67,6 +67,8 @@ export type SubView = {
   signedInOnce: boolean;
   /* The machine a Codex plan signed in once runs on now, one at a time. */
   leaseMachine: string | null;
+  /* Included by the subscriptions list only. Other views of a plan omit its agents. */
+  agents?: RunningAgent[];
 };
 
 export type PlanAccount = { nodeId: string; hostname: string; tier: string | null; email?: string | null };
@@ -399,8 +401,20 @@ export type MachineView = {
 
 /* What runs on a machine now: the employees whose program is there, busy while a turn of theirs runs, and the parts of
    runs it takes, of tests or of other work. */
+export type RunningAgent = {
+  id: string;
+  name: string;
+  busy: boolean;
+  title: Lang | null;
+  department: { id: string; name: string } | null;
+  provider: ProviderId;
+  since: string | null;
+  task: { number: number; title: string } | null;
+  withCeo: boolean;
+};
+
 export type Running = {
-  agents: { id: string; name: string; busy: boolean }[];
+  agents: RunningAgent[];
   parts: { run: number; kind: 'tests' | 'work'; task: number | null; part: number; parts: number; agent: string | null; startedAt: string | null }[];
 };
 

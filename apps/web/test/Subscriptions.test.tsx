@@ -1,4 +1,4 @@
-import { act, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
@@ -18,17 +18,71 @@ const TRUST = 'Agents will run on this machine with your subscription. People wi
 
 const lists = (extra: Parameters<typeof mockApi>[0] = {}) => mockApi({ 'GET /api/subscriptions': [200, { subscriptions: SUBS }], ...extra });
 
-const rowOf = (name: string) => screen.getByRole('row', { name: new RegExp(`^${name}\\b`) });
+const rowOf = (name: string) => screen.queryByRole('article', { name: new RegExp(`^${name}, `) }) ?? screen.getByRole('row', { name: new RegExp(`^${name}\\b`) });
+const openAll = async () => {
+  await screen.findByRole('table');
+  for (const button of screen.getAllByRole('button', { name: /^(Open the card of |Открыть карточку )/ })) fireEvent.click(button);
+};
+const meterRows = (card: HTMLElement) => [...card.querySelectorAll('.gauge')];
 
 afterEach(() => localStorage.clear());
 
 describe('Subscriptions', () => {
-  it("keeps the table to the page on a laptop: a plan's buttons take more lines, and the reset time goes under its bar", () => {
-    /* In one line, a plan's three buttons made the table wider than the page from a phone up to a wide screen. */
-    expect(decl('.subs .row-actions', 'white-space')).toBe('normal');
-    expect(decl('.subs .row-actions .act', 'white-space')).toBe('nowrap');
-    /* Below a wide screen, when a window resets goes under its bar instead of beside it. */
-    expect(decl('.limit-bars li > span:last-child', 'grid-column', '(max-width: 1000px)')).toBe('1 / -1');
+  it.each([
+    ['en', 'Until ', ', in 2 h 10 min. Its agents wait until then.', 'resets in 2 h 10 min', 'Ivan, limit reached until ', 'Built-in node', 'comes with the server'],
+    ['ru', 'До ', ', еще 2 ч 10 мин. До тех пор ее агенты ждут.', 'до сброса 2 ч 10 мин', 'Ivan, лимит исчерпан до ', 'Встроенная нода', 'идет вместе с сервером'],
+  ])('uses the quoted state, meter and machine-list wording in %s', async (language, until, sentence, reset, localState, builtin, comesWith) => {
+    localStorage.setItem('hh-lang', language);
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date('2026-11-02T10:00:00Z'));
+    onTestFinished(() => { vi.useRealTimers(); });
+    const limits = { status: 'rejected', windows: [{ name: 'five_hour', utilization: 1, resetsAt: new Date(Date.now() + 130 * 60_000).toISOString() }] };
+    lists({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, limits, machines: [MACHINE, { ...MACHINE, id: 'login', hostname: 'laptop', status: 'needs_login' }, { ...MACHINE, id: 'off', hostname: 'tower', online: false }] }, ...SUBS.slice(1)] }] });
+    render(<LanguageProvider><Subscriptions me={ME} /></LanguageProvider>);
+    await openAll();
+    const plan = rowOf('Claude');
+    const line = plan.querySelector('.stline > span:last-child')!;
+    expect.soft(line.textContent).toMatch(new RegExp(`^${until}.+${sentence.replaceAll('.', '\\.')}$`));
+    expect.soft(plan.querySelector('.g-s')?.textContent).toBe(reset);
+    const machines = plan.querySelector('.plist')!;
+    expect.soft(machines.textContent).toContain(localState);
+    expect(machines.textContent).toContain(language === 'en' ? 'laptopIvan, waiting for the login' : 'laptopIvan, ждет входа');
+    expect(machines.textContent).toContain(language === 'en' ? 'towerIvan, offline' : 'towerIvan, не в сети');
+    const login = rowOf('Codex');
+    expect(login.querySelector('.stline')?.textContent).toContain(language === 'en' ? 'On ivan-mbp. Only Ivan can sign in.' : 'На ivan-mbp. Войти может только владелец: Ivan.');
+    const waiting = rowOf('Kimi');
+    expect(waiting.querySelector('.stline')?.textContent).toContain(language === 'en' ? 'Ivan has not run the install command yet.' : 'Владелец (Ivan) еще не выполнил команду установки.');
+    expect(waiting.querySelector('.blk-side')?.textContent).toContain(language === 'en' ? 'No machine yet' : 'Машины пока нет');
+    const key = screen.getAllByRole('article').find(article => article.querySelector('.plist')?.textContent === `${builtin}${comesWith}`);
+    expect.soft(key).toBeDefined();
+    expect(plan).toHaveAccessibleName('Claude, Ivan');
+  });
+
+  it('omits the sign-in line while waiting for the login', async () => {
+    lists({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[1]!, signedInOnce: true, machines: [MACHINE, { ...SUBS[1]!.machines[0]!, id: 'login', hostname: 'laptop' }] }] }] });
+    render(<Subscriptions me={ME} />);
+    await openAll();
+    expect(rowOf('Codex').querySelector('.blk-side .part-note')).toBeNull();
+  });
+
+  it('uses the refined Russian plan words in unavailable meters', async () => {
+    localStorage.setItem('hh-lang', 'ru');
+    lists({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, limits: { status: 'allowed', complete: true, windows: [] } }, SUBS[3]!] }] });
+    render(<LanguageProvider><Subscriptions me={ME} /></LanguageProvider>);
+    await openAll();
+    expect.soft(meterRows(rowOf('Claude')).map(meter => meter.textContent)).toEqual(['5 часовНет у этого тарифа', '7 днейНет у этого тарифа']);
+    expect.soft(meterRows(rowOf('Claude')).every(meter => !meter.querySelector('.bar'))).toBe(true);
+    expect(within(rowOf('Ключ Anthropic, заканчивается на 9f3a')).getByText('Оплата по факту, без лимитов тарифа')).toBeInTheDocument();
+  });
+
+  it('uses full page width, card blocks at 700 and 1180, single meters under 300, and mobile sort buttons', () => {
+    expect(decl('.people.machines', 'max-width')).toBe('none');
+    expect(decl('.people.subs', 'max-width')).toBe('none');
+    expect(decl('.facts dd small', 'display')).toBe('block');
+    expect(decl('.blocks', 'grid-template-areas', 'card (min-width: 700px)')).toBe('"facts side" "run run"');
+    expect(decl('.blocks', 'grid-template-areas', 'card (min-width: 1180px)')).toBe('"facts run side"');
+    expect(decl('.gauges', 'grid-template-columns', 'card (max-width: 300px)')).toBe('minmax(0, 1fr)');
+    expect(decl('.sortbar', 'display', 'tbl (max-width: 780px)')).toBe('flex');
   });
 
   it('lists each subscription with its place, machine, state and limits', async () => {
@@ -47,13 +101,85 @@ describe('Subscriptions', () => {
     expect(screen.queryByRole('heading', { name: 'Machines' })).not.toBeInTheDocument();
   });
 
+  it('opens independent cards from cells, keeps controls inside them open, and accents the orchestrator card', async () => {
+    const { agents: _, ...updated } = SUBS[0]!;
+    const calls = lists({ 'PATCH /api/subscriptions/s-claude': [200, { subscription: { ...updated, budget: 80 } }] });
+    render(<Subscriptions me={ME} />);
+    const claude = await screen.findByRole('row', { name: 'Claude' });
+    expect(screen.queryByRole('article')).not.toBeInTheDocument();
+    expect(within(claude).getAllByRole('button')).toHaveLength(1);
+    await userEvent.click(within(claude).getByText('Ivan'));
+    const button = screen.getByRole('button', { name: 'Open the card of Claude' });
+    expect(button).toHaveAttribute('aria-expanded', 'true');
+    const card = screen.getByRole('article', { name: 'Claude, Ivan' });
+    expect(card.closest('tr')?.previousElementSibling).toBe(claude);
+    expect(within(card).getByRole('region', { name: 'Agents on it' })).toHaveTextContent('2 agents, 1 working');
+    expect(within(card).getByRole('region', { name: 'Development' })).toHaveTextContent('Bruno');
+    expect(within(card).getByTitle('Checkout API')).toHaveTextContent('#12');
+    await userEvent.selectOptions(within(card).getByRole('combobox'), '80');
+    expect(calls.some(c => c.method === 'PATCH')).toBe(true);
+    expect(within(card).getByRole('region', { name: 'Agents on it' })).toHaveTextContent('2 agents, 1 working');
+    expect(button).toHaveAttribute('aria-expanded', 'true');
+    await userEvent.click(screen.getByRole('button', { name: 'Open the card of Anthropic key ending 9f3a' }));
+    const key = screen.getByRole('article', { name: 'Anthropic key ending 9f3a, Ivan' });
+    expect(key.querySelector('.machine')).toHaveClass('accent');
+    expect(key.querySelector('.corner')).toBeInTheDocument();
+    expect(screen.getAllByRole('article')).toHaveLength(2);
+    await userEvent.click(button);
+    expect(button).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getAllByRole('article')).toHaveLength(1);
+  });
+
+  it('sorts statuses with problems first, and uses the same limit and state sentences in the card', async () => {
+    const limits = { status: 'rejected' as const, windows: [{ name: 'five_hour', utilization: 1, resetsAt: new Date(Date.now() + 80 * 60_000).toISOString() }] };
+    lists({ 'GET /api/subscriptions': [200, { subscriptions: [
+      { ...SUBS[0]!, limits }, SUBS[1]!, SUBS[2]!, { ...SUBS[3]!, online: false },
+      { ...SUBS[0]!, id: 'off', provider: 'glm', online: false },
+    ] }] });
+    render(<Subscriptions me={ME} />);
+    await screen.findByRole('table');
+    const order = () => screen.getAllByRole('row').filter(r => r.classList.contains('rm')).map(r => r.getAttribute('aria-label'));
+    expect(order()).toEqual(['Anthropic key ending 9f3a', 'GLM', 'Codex', 'Claude', 'Kimi']);
+    expect(within(screen.getByRole('row', { name: 'Claude' })).getByText(/^until /)).toBeInTheDocument();
+    const header = within(screen.getByRole('columnheader', { name: 'Status' })).getByRole('button');
+    expect(header.closest('th')).toHaveAttribute('aria-sort', 'ascending');
+    await userEvent.click(header);
+    expect(order()).toEqual(['Kimi', 'Claude', 'Codex', 'GLM', 'Anthropic key ending 9f3a']);
+    await openAll();
+    expect(within(rowOf('Claude')).getByText(/^Until .+Its agents wait until then\.$/)).toBeInTheDocument();
+    expect(rowOf('Claude').querySelector('.card-h .until')).not.toBeInTheDocument();
+    expect(within(rowOf('Claude')).getByRole('group', { name: /^Limit reached, resets in / })).toBeInTheDocument();
+    expect(within(rowOf('Codex')).getByText('On ivan-mbp. Only Ivan can sign in.')).toBeInTheDocument();
+    expect(within(rowOf('Kimi')).getByText('Ivan has not run the install command yet.')).toBeInTheDocument();
+    expect(within(rowOf('Claude')).getByRole('heading', { name: 'Owner and account' })).toBeInTheDocument();
+  });
+
+  it('keeps refreshed subscription values in place while a card is open, then sorts after the last closes', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    onTestFinished(() => { vi.useRealTimers(); });
+    let count = 0;
+    lists({ 'GET /api/subscriptions': () => [200, { subscriptions: [SUBS[0]!, { ...SUBS[1]!, status: ++count > 1 ? 'ready' : 'needs_login' }] }] });
+    render(<Subscriptions me={ME} />);
+    await screen.findByRole('table');
+    const order = () => screen.getAllByRole('row').filter(r => r.classList.contains('rm')).map(r => r.getAttribute('aria-label'));
+    expect(order()).toEqual(['Codex', 'Claude']);
+    const button = screen.getByRole('button', { name: 'Open the card of Claude' });
+    await userEvent.click(button);
+    await act(() => vi.advanceTimersByTimeAsync(5000));
+    expect(order()).toEqual(['Codex', 'Claude']);
+    expect(button).toHaveAttribute('aria-expanded', 'true');
+    await userEvent.click(button);
+    expect(order()).toEqual(['Claude', 'Codex']);
+  });
+
   it('lists every machine a plan runs on, saying on which it waits', async () => {
     const laptop = { id: 'm3', hostname: 'ivan-laptop', status: 'needs_login' as const, online: true };
     const tower = { id: 'm4', hostname: 'ivan-tower', status: 'ready' as const, online: false };
     mockApi({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, machines: [SUBS[0]!.machines[0]!, laptop, tower] }] }] });
     render(<Subscriptions me={ME} />);
-    const machines = within(within(await screen.findByRole('row', { name: /^Claude\b/ })).getByRole('list', { name: 'Machines of Claude' })).getAllByRole('listitem');
-    expect(machines.map(m => m.textContent)).toEqual(['ivan-mbp', 'ivan-laptop, waiting for the login', 'ivan-tower, offline']);
+    await openAll();
+    const machines = within(within(rowOf('Claude')).getByRole('list', { name: 'Machines of Claude' })).getAllByRole('listitem');
+    expect(machines.map(m => m.textContent)).toEqual(['ivan-mbpIvan, ready', 'ivan-laptopIvan, waiting for the login', 'ivan-towerIvan, offline']);
   });
 
   it("shows each window of a plan's limits as a bar with its share and when it resets", async () => {
@@ -69,14 +195,14 @@ describe('Subscriptions', () => {
     };
     mockApi({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, limits }] }] });
     render(<Subscriptions me={ME} />);
-    const list = within(await screen.findByRole('row', { name: /^Claude\b/ })).getByRole('list', { name: 'Limits' });
-    const [five, seven, two, month, ...rest] = within(list).getAllByRole('listitem');
-    expect(five).toHaveTextContent(/^5 hours42%resets in /);
+    await openAll();
+    const [five, seven, two, month, ...rest] = meterRows(rowOf('Claude'));
+    expect(five).toHaveTextContent(/^5 hours42%usedresets in /);
     expect(five!.querySelector('.bar')).not.toHaveClass('hi');
-    expect(seven).toHaveTextContent(/^7 days93%Reset time unknown$/);
+    expect(seven).toHaveTextContent(/^7 days93%usedReset time unknown$/);
     expect(seven!.querySelector('.bar')).toHaveClass('max');
-    expect(two).toHaveTextContent(/^2 hours5%Reset time unknown$/);
-    expect(month).toHaveTextContent(/^Month6%Reset time unknown$/);
+    expect(two).toHaveTextContent(/^2 hours5%usedReset time unknown$/);
+    expect(month).toHaveTextContent(/^Month6%usedReset time unknown$/);
     expect(rest).toEqual([]);
   });
 
@@ -88,16 +214,17 @@ describe('Subscriptions', () => {
     const subs = [{ ...SUBS[0]!, limits: claude }, { ...SUBS[1]!, limits: codex }, { ...SUBS[2]!, limits: kimi }, SUBS[3]!];
     mockApi({ 'GET /api/subscriptions': [200, { subscriptions: subs }] });
     render(<Subscriptions me={ME} />);
-    const rows = async (name: string) => within(within(await screen.findByRole('row', { name: new RegExp(`^${name}\\b`) })).getByRole('list', { name: 'Limits' })).getAllByRole('listitem');
+    await openAll();
+    const rows = async (name: string) => meterRows(rowOf(name));
     const [claudeFive, claudeSeven, ...claudeMore] = await rows('Claude');
-    expect(claudeFive).toHaveTextContent(/^5 hours30%Reset time unknown$/);
+    expect(claudeFive).toHaveTextContent(/^5 hours30%usedReset time unknown$/);
     expect(claudeSeven).toHaveTextContent(/^7 daysNo data yet$/);
-    expect(claudeSeven!.querySelector('.bar')).toHaveClass('none');
-    expect(claudeMore.map(r => r.textContent)).toEqual(['7 days, Opus100%Reset time unknown']);
+    expect(claudeSeven!.querySelector('.bar')).not.toBeInTheDocument();
+    expect(claudeMore.map(r => r.textContent)).toEqual(['7 days, Opus100%usedReset time unknown']);
     const [codexFive, codexSeven] = await rows('Codex');
     expect(codexFive).toHaveTextContent(/^5 hoursNot on this plan$/);
-    expect(codexSeven).toHaveTextContent(/^7 days73%Reset time unknown$/);
-    expect((await rows('Kimi')).map(r => r.textContent)).toEqual(['5 hours88%Reset time unknown', '7 daysNot on this plan', 'Month6%Reset time unknown']);
+    expect(codexSeven).toHaveTextContent(/^7 days73%usedReset time unknown$/);
+    expect((await rows('Kimi')).map(r => r.textContent)).toEqual(['5 hours88%usedReset time unknown', '7 daysNot on this plan', 'Month6%usedReset time unknown']);
     const key = rowOf('Anthropic key ending 9f3a');
     expect(within(key).getByText('Pay as you go, no plan limits')).toBeInTheDocument();
     expect(within(key).queryByRole('list', { name: 'Limits' })).not.toBeInTheDocument();
@@ -107,7 +234,8 @@ describe('Subscriptions', () => {
     const limits = { status: 'rejected' as const, windows: [{ name: 'five_hour', utilization: 1, resetsAt: '2099-10-29T18:00:00.000Z' }] };
     mockApi({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, limits }] }] });
     render(<Subscriptions me={ME} />);
-    expect(within(await screen.findByRole('row', { name: /^Claude\b/ })).getByText(/^Limit reached, resets in /)).toBeInTheDocument();
+    await openAll();
+    expect(within(rowOf('Claude')).getByText('Limit reached')).toBeInTheDocument();
   });
 
   it('shows a window that started over since the plan last spoke as not known yet, and no reached limit for it', async () => {
@@ -118,10 +246,11 @@ describe('Subscriptions', () => {
     };
     mockApi({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, limits }] }] });
     render(<Subscriptions me={ME} />);
-    const row = await screen.findByRole('row', { name: /^Claude\b/ });
-    const [five, seven] = within(within(row).getByRole('list', { name: 'Limits' })).getAllByRole('listitem');
+    await openAll();
+    const row = rowOf('Claude');
+    const [five, seven] = meterRows(row);
     expect(five).toHaveTextContent(/^5 hoursNo data yetReset time unknown$/);
-    expect(seven).toHaveTextContent(/^7 days40%resets in /);
+    expect(seven).toHaveTextContent(/^7 days40%usedresets in /);
     expect(within(row).queryByText(/^Limit reached/)).not.toBeInTheDocument();
   });
 
@@ -132,19 +261,22 @@ describe('Subscriptions', () => {
     };
     mockApi({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, limits }] }] });
     render(<Subscriptions me={ME} />);
-    expect(within(await screen.findByRole('row', { name: /^Claude\b/ })).getByText(/^Limit reached, resets in /)).toBeInTheDocument();
+    await openAll();
+    expect(within(rowOf('Claude')).getByText('Limit reached')).toBeInTheDocument();
   });
 
   it('says Built-in node offline for an API key whose node is down', async () => {
     mockApi({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[3]!, online: false }] }], 'GET /api/machines': [200, { machines: [] }] });
     render(<Subscriptions me={ME} />);
-    expect(await screen.findByText('Built-in node offline')).toBeInTheDocument();
+    await openAll();
+    expect(within(rowOf('Anthropic key ending 9f3a')).getByText('Built-in node offline')).toBeInTheDocument();
   });
 
   it('says Machine offline when the node is not connected', async () => {
     mockApi({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, online: false }] }], 'GET /api/machines': [200, { machines: [] }] });
     render(<Subscriptions me={ME} />);
-    expect(await screen.findByText('Machine offline')).toBeInTheDocument();
+    await openAll();
+    expect(within(rowOf('Claude')).getByText('Machine offline')).toBeInTheDocument();
     expect(within(rowOf('Claude')).queryByRole('button', { name: /Run a test/ })).not.toBeInTheDocument();
   });
 
@@ -170,6 +302,7 @@ describe('Subscriptions', () => {
     const calls = lists({ 'POST /api/subscriptions/connect': [201, { subscriptions: [], command: COMMAND }] });
     const user = userEvent.setup();
     render(<Subscriptions me={ME} />);
+    await openAll();
     await user.click(await screen.findByRole('button', { name: 'Connect a subscription' }));
     expect(screen.getByRole('button', { name: 'Get the command' })).toBeDisabled();
     await user.click(screen.getByRole('checkbox', { name: 'Claude' }));
@@ -186,6 +319,7 @@ describe('Subscriptions', () => {
     const calls = lists({ 'POST /api/subscriptions/connect': [201, { subscriptions: [], command: COMMAND }] });
     const user = userEvent.setup();
     render(<Subscriptions me={ME} />);
+    await openAll();
     await user.click(await screen.findByRole('button', { name: 'Connect a subscription' }));
     const google = screen.getByRole('checkbox', { name: 'Antigravity' });
     expect(google).toHaveAccessibleDescription('Google AI Pro or Ultra plan');
@@ -208,6 +342,7 @@ describe('Subscriptions', () => {
     });
     const user = userEvent.setup();
     render(<Subscriptions me={ME} />);
+    await openAll();
     await user.click(await screen.findByRole('button', { name: 'Run a test on Claude' }));
     expect(await screen.findByText('Answered "ready" in 3.2 s on ivan-mbp.', {}, { timeout: 4000 })).toBeInTheDocument();
     expect(calls.filter(c => c.path === '/api/jobs/j1')).toHaveLength(2);
@@ -218,6 +353,7 @@ describe('Subscriptions', () => {
     lists({ 'POST /api/subscriptions/s-claude/test': [201, { job: { ...job, status: 'queued' } }], 'GET /api/jobs/j2': [200, { job }] });
     const user = userEvent.setup();
     render(<Subscriptions me={ME} />);
+    await openAll();
     await user.click(await screen.findByRole('button', { name: 'Run a test on Claude' }));
     expect(await screen.findByText('The agent stopped with an error.', {}, { timeout: 4000 })).toBeInTheDocument();
     expect(screen.getByText('Show the output')).toBeInTheDocument();
@@ -228,6 +364,7 @@ describe('Subscriptions', () => {
     const calls = lists({ 'DELETE /api/subscriptions/s-kimi': [204] });
     const user = userEvent.setup();
     render(<Subscriptions me={ME} />);
+    await openAll();
     await user.click(await screen.findByRole('button', { name: 'Remove Kimi' }));
     expect(screen.getByText('Remove Kimi? Its login will be deleted from the machine.')).toBeInTheDocument();
     expect(calls.some(c => c.method === 'DELETE')).toBe(false);
@@ -239,6 +376,7 @@ describe('Subscriptions', () => {
     const calls = lists({ 'POST /api/subscriptions/s-claude/orchestrator': [200, { subscription: { ...SUBS[0]!, isOrchestrator: true } }] });
     const user = userEvent.setup();
     render(<Subscriptions me={ME} />);
+    await openAll();
     await user.click(await screen.findByRole('button', { name: 'Use Claude for the orchestrator' }));
     expect(calls.find(c => c.method === 'POST')!.path).toBe('/api/subscriptions/s-claude/orchestrator');
     expect(await within(rowOf('Claude')).findByText('Orchestrator')).toBeInTheDocument();
@@ -249,7 +387,8 @@ describe('Subscriptions', () => {
     const calls = lists({ 'PATCH /api/subscriptions/s-claude': [200, { subscription: { ...SUBS[0]!, budget: 80 } }] });
     const user = userEvent.setup();
     render(<Subscriptions me={ME} />);
-    const share = await within(await screen.findByRole('row', { name: /^Claude\b/ })).findByRole('combobox', { name: 'Share of Claude for tasks' });
+    await openAll();
+    const share = await within(rowOf('Claude')).findByRole('combobox', { name: 'Share of Claude for tasks' });
     expect(share).toHaveValue('');
     await user.selectOptions(share, '80');
     await vi.waitFor(() => expect(calls.find(c => c.method === 'PATCH')).toMatchObject({ path: '/api/subscriptions/s-claude', body: { budget: 80 } }));
@@ -261,7 +400,8 @@ describe('Subscriptions', () => {
     lists();
     const lead: Me = { ...ME, person: { ...ME.person, scopeKind: 'listed', isOwner: false } };
     render(<Subscriptions me={lead} />);
-    await screen.findByRole('row', { name: /^Claude\b/ });
+    await openAll();
+    rowOf('Claude');
     expect(screen.queryByRole('button', { name: /for the orchestrator/ })).not.toBeInTheDocument();
   });
 
@@ -269,6 +409,7 @@ describe('Subscriptions', () => {
     const calls = lists({ 'POST /api/subscriptions/s-kimi/command': [201, { command: COMMAND }] });
     const user = userEvent.setup();
     render(<Subscriptions me={ME} />);
+    await openAll();
     await user.click(await screen.findByRole('button', { name: 'New command for Kimi' }));
     expect(calls.find(c => c.method === 'POST')!.path).toBe('/api/subscriptions/s-kimi/command');
     expect(await screen.findByText(COMMAND)).toBeInTheDocument();
@@ -283,15 +424,68 @@ describe('Subscriptions', () => {
         <Subscriptions me={ME} />
       </LanguageProvider>,
     );
-    expect(await screen.findAllByText('Готова')).toHaveLength(2);
-    expect(screen.getByText('Ждет входа')).toBeInTheDocument();
-    expect(screen.getByText('Ждет машину')).toBeInTheDocument();
-    const [five, seven] = within(within(rowOf('Claude')).getByRole('list', { name: 'Лимиты' })).getAllByRole('listitem');
-    expect(five).toHaveTextContent(/^5 часов42%До сброса /);
-    expect(seven).toHaveTextContent(/^7 дней10%Время сброса неизвестно$/);
-    const [codexFive] = within(within(rowOf('Codex')).getByRole('list', { name: 'Лимиты' })).getAllByRole('listitem');
+    await openAll();
+    expect(within(screen.getByRole('table')).getAllByText('Готова')).toHaveLength(4);
+    expect(within(rowOf('Codex')).getByText('Ждет входа')).toBeInTheDocument();
+    expect(within(rowOf('Kimi')).getByText('Ждет машину')).toBeInTheDocument();
+    const [five, seven] = meterRows(rowOf('Claude'));
+    expect(five).toHaveTextContent(/^5 часов42%использованодо сброса /);
+    expect(seven).toHaveTextContent(/^7 дней10%использованоВремя сброса неизвестно$/);
+    const [codexFive] = meterRows(rowOf('Codex'));
     expect(codexFive).toHaveTextContent(/^5 часовПока нет данных$/);
-    expect(within(rowOf('Ключ Anthropic')).getByText('Оплата по факту, без лимитов плана')).toBeInTheDocument();
+    expect(within(rowOf('Ключ Anthropic, заканчивается на 9f3a')).getByText('Оплата по факту, без лимитов тарифа')).toBeInTheDocument();
+  });
+});
+
+describe('subscription search and filters', () => {
+  it('searches agents and machines without closing matching cards, then clears the query', async () => {
+    lists();
+    render(<Subscriptions me={ME} />);
+    expect(await screen.findByText('4 subscriptions')).toBeInTheDocument();
+    const search = screen.getByRole('searchbox', { name: 'Search' });
+    await userEvent.click(screen.getByRole('button', { name: 'Open the card of Claude' }));
+    await userEvent.type(search, 'bRuNo');
+    expect(screen.getByText('Showing 1 of 4')).toBeInTheDocument();
+    expect(screen.getByRole('article', { name: 'Claude, Ivan' })).toBeInTheDocument();
+    await userEvent.clear(search);
+    await userEvent.type(search, 'ivan-mbp');
+    expect(screen.getByText('Showing 2 of 4')).toBeInTheDocument();
+    await userEvent.clear(search);
+    await userEvent.type(search, 'missing');
+    expect(screen.getByText('Nothing matches. Change the search or clear the filters.')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
+    expect(screen.getByText('4 subscriptions')).toBeInTheDocument();
+    expect(screen.getByRole('article', { name: 'Claude, Ivan' })).toBeInTheDocument();
+  });
+
+  it('widens providers in one group and combines provider, owner and status filters', async () => {
+    lists({ 'GET /api/subscriptions': [200, { subscriptions: [SUBS[0]!, SUBS[1]!, { ...SUBS[2]!, owner: { id: 'p2', name: 'Maria' } }, SUBS[3]!] }] });
+    render(<Subscriptions me={ME} />);
+    await screen.findByRole('table');
+    const provider = screen.getByRole('group', { name: 'Provider' });
+    await userEvent.click(within(provider).getByRole('button', { name: /Claude.*2/ }));
+    expect(screen.getByText('Showing 2 of 4')).toBeInTheDocument();
+    await userEvent.click(within(provider).getByRole('button', { name: /Codex.*1/ }));
+    expect(screen.getByText('Showing 3 of 4')).toBeInTheDocument();
+    await userEvent.click(within(screen.getByRole('group', { name: 'Owner' })).getByRole('button', { name: /^Ivan/ }));
+    await userEvent.click(within(screen.getByRole('group', { name: 'Status' })).getByRole('button', { name: /^Waiting for the login/ }));
+    expect(screen.getByText('Showing 1 of 4')).toBeInTheDocument();
+    expect(screen.getByRole('row', { name: 'Codex' })).toBeInTheDocument();
+  });
+
+  it('searches key endings, tiers, account addresses and where the plan serves', async () => {
+    lists({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, tier: 'max', accounts: [{ nodeId: 'n1', hostname: 'ivan-mbp', tier: 'max', email: 'private@acme.com' }], place: { kind: 'department', id: 'd1', name: 'Marketing' } }, SUBS[3]!] }] });
+    render(<Subscriptions me={ME} />);
+    await screen.findByRole('table');
+    const search = screen.getByRole('searchbox');
+    for (const query of ['9f3a', 'max', 'private@acme.com', 'Marketing']) {
+      await userEvent.clear(search);
+      await userEvent.type(search, query);
+      expect(screen.getByText('Showing 1 of 2')).toBeInTheDocument();
+    }
+    expect(screen.queryByRole('group', { name: 'Provider' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Owner' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Status' })).not.toBeInTheDocument();
   });
 });
 
@@ -305,13 +499,15 @@ describe('signing in to plans', () => {
   it("says a plan signed in once runs on any of its owner's machines, and how many are online", async () => {
     mockApi(only({ ...claude, signedInOnce: true, machines: [MACHINE, LAPTOP, { ...LAPTOP, id: 'm4', hostname: 'ivan-tower', online: false }] }));
     render(<Subscriptions me={ME} />);
-    expect(within(await screen.findByRole('row', { name: /^Claude\b/ })).getByText("Signed in once, runs on any of Ivan's machines (2 online)")).toBeInTheDocument();
+    await openAll();
+    expect(within(rowOf('Claude')).getByText("Signed in once, runs on any of Ivan's machines (2 online)")).toBeInTheDocument();
   });
 
   it('says a plan signed in on its machine by hand runs only there', async () => {
     mockApi(only(claude));
     render(<Subscriptions me={ME} />);
-    const row = await screen.findByRole('row', { name: /^Claude\b/ });
+    await openAll();
+    const row = rowOf('Claude');
     expect(within(row).getByText('Signed in on ivan-mbp only')).toBeInTheDocument();
     expect(within(row).queryByText(/^Signed in once/)).not.toBeInTheDocument();
   });
@@ -319,7 +515,8 @@ describe('signing in to plans', () => {
   it('says a Codex plan signed in once runs on one machine at a time, and on which', async () => {
     mockApi(only({ ...codex, status: 'ready', signedInOnce: true, leaseMachine: 'ivan-laptop', machines: [MACHINE, LAPTOP] }));
     render(<Subscriptions me={ME} />);
-    const row = await screen.findByRole('row', { name: /^Codex\b/ });
+    await openAll();
+    const row = rowOf('Codex');
     expect(within(row).getByText('Codex runs on one machine at a time; now on ivan-laptop')).toBeInTheDocument();
     expect(within(row).queryByText(/^Signed in once/)).not.toBeInTheDocument();
   });
@@ -328,7 +525,8 @@ describe('signing in to plans', () => {
     const free = { ...codex, status: 'ready' as const, tier: 'free', accounts: [{ nodeId: NODE, hostname: 'ivan-mbp', tier: 'free' }] };
     mockApi(only({ ...claude, signedInOnce: true }, free));
     render(<Subscriptions me={ME} />);
-    expect(within(await screen.findByRole('row', { name: /^Claude\b/ })).getByText('Claude, one-year sign-in')).toBeInTheDocument();
+    await openAll();
+    expect(within(rowOf('Claude')).getByText('Claude, one-year sign-in')).toBeInTheDocument();
     expect(within(rowOf('Codex')).getByText('Codex, Free: newer models need Plus or Pro')).toBeInTheDocument();
   });
 
@@ -340,7 +538,8 @@ describe('signing in to plans', () => {
     ];
     mockApi(only({ ...claude, machines: [MACHINE, LAPTOP], accounts, accountsDiffer: true }, pro));
     render(<Subscriptions me={ME} />);
-    expect(within(await screen.findByRole('row', { name: /^Codex\b/ })).getByText('Codex, Pro')).toBeInTheDocument();
+    await openAll();
+    expect(within(rowOf('Codex')).getByText('Codex, Pro')).toBeInTheDocument();
     expect(within(rowOf('Claude')).getByText('ivan-mbp and ivan-laptop are signed in to different accounts')).toBeInTheDocument();
   });
 
@@ -348,6 +547,7 @@ describe('signing in to plans', () => {
     const stream = fakeStream();
     const calls = mockApi({ ...only({ ...claude, signedInOnce: true }), 'POST /api/subscriptions/s-claude/signin': [200, { nodeId: NODE, hostname: 'ivan-mbp' }] });
     render(<Subscriptions me={ME} />);
+    await openAll();
     await userEvent.click(await screen.findByRole('button', { name: 'Sign in to Claude with another account' }));
     expect(calls.find(c => c.method === 'POST')).toEqual({ method: 'POST', path: '/api/subscriptions/s-claude/signin', body: { fresh: true } });
     expect(await screen.findByRole('heading', { name: 'Signing in on ivan-mbp' })).toBeInTheDocument();
@@ -364,6 +564,7 @@ describe('signing in to plans', () => {
     const stream = fakeStream();
     const calls = mockApi({ ...only(codex), 'POST /api/subscriptions/s-codex/signin': [200, { nodeId: NODE, hostname: 'ivan-mbp' }] });
     render(<Subscriptions me={ME} />);
+    await openAll();
     await userEvent.click(await screen.findByRole('button', { name: 'Sign in to Codex' }));
     expect(calls.find(c => c.method === 'POST')!.body).toEqual({ fresh: false });
     await screen.findByRole('heading', { name: 'Signing in on ivan-mbp' });
@@ -377,6 +578,7 @@ describe('signing in to plans', () => {
     fakeStream();
     const calls = mockApi({ ...only(codex), 'POST /api/subscriptions/s-codex/signin': [200, { nodeId: NODE, hostname: 'ivan-mbp' }], 'POST /api/subscriptions/s-codex/signin/stop': [204] });
     render(<Subscriptions me={ME} />);
+    await openAll();
     await userEvent.click(await screen.findByRole('button', { name: 'Sign in to Codex' }));
     await userEvent.click(await screen.findByRole('button', { name: 'Stop the sign-in' }));
     expect(calls.find(c => c.path.endsWith('/signin/stop'))).toEqual({ method: 'POST', path: '/api/subscriptions/s-codex/signin/stop', body: { nodeId: NODE } });
@@ -386,7 +588,8 @@ describe('signing in to plans', () => {
   it('offers no sign-in for a plan of another person, or one with no machine online', async () => {
     mockApi(only({ ...codex, owner: { id: 'p4', name: 'Oleg' } }, { ...claude, online: false, machines: [{ ...MACHINE, online: false }] }));
     render(<Subscriptions me={ME} />);
-    await screen.findByRole('row', { name: /^Codex\b/ });
+    await openAll();
+    rowOf('Codex');
     expect(screen.queryByRole('button', { name: /^Sign in to / })).not.toBeInTheDocument();
   });
 
@@ -400,6 +603,7 @@ describe('signing in to plans', () => {
       'POST /api/subscriptions/s-kimi/credential': [200, { stored: 1 }],
     });
     render(<Subscriptions me={ME} />);
+    await openAll();
     await userEvent.click(await screen.findByRole('button', { name: 'Paste the key for Kimi' }));
     expect(screen.getByRole('link', { name: /Kimi/ })).toHaveAttribute('href', 'https://www.kimi.com/code/console');
     await userEvent.type(screen.getByLabelText('Kimi key'), KEY);
@@ -425,7 +629,8 @@ describe('signing in to plans', () => {
         <Subscriptions me={ME} />
       </LanguageProvider>,
     );
-    const row = await screen.findByRole('row', { name: /^Claude\b/ });
+    await openAll();
+    const row = rowOf('Claude');
     expect(within(row).getByText('Вход выполнен один раз, работает на любой машине Ivan (на связи: 2)')).toBeInTheDocument();
     expect(within(row).getByText('Claude, вход на год')).toBeInTheDocument();
     expect(within(row).getByRole('button', { name: 'Войти в Claude с другим аккаунтом' })).toHaveTextContent('Войти в другой аккаунт');

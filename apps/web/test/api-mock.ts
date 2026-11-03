@@ -1,5 +1,5 @@
 import { vi } from 'vitest';
-import type { AgentCardView, AgentTime, DepartmentTree, Decisions, IdleStretch, SegmentKind, TreeAgent, TreeLine, TreeReview, TreeSegment, MachineView, Me, Org, PersonView, Roster, Serving, SubView, TaskDetail, TaskLine, TurnView, WaitingRequest } from '../src/types';
+import type { AgentCardView, AgentTime, DepartmentTree, Decisions, IdleStretch, SegmentKind, TreeAgent, TreeLine, TreeReview, TreeSegment, MachineView, Me, Org, PersonView, Roster, RunningAgent, Serving, SubView, TaskDetail, TaskLine, TurnView, WaitingRequest } from '../src/types';
 
 type Reply = [status: number, body?: unknown];
 type Route = Reply | ((body: unknown) => Reply | Promise<Reply>);
@@ -58,13 +58,18 @@ export const ORG_WITH_TEAMS: Org = {
   ],
 };
 
+export const RUNNING_AGENTS: RunningAgent[] = [
+  { id: 'b1', name: 'Bruno', busy: true, title: { en: 'Backend engineer', ru: 'Бэкенд-разработчик' }, department: { id: 'd2', name: 'Development' }, provider: 'claude', since: new Date(Date.now() - 12 * 60_000).toISOString(), task: { number: 12, title: 'Checkout API' }, withCeo: false },
+  { id: 'b2', name: 'Vera', busy: false, title: { en: 'Reviewer', ru: 'Рецензент' }, department: { id: 'd2', name: 'Development' }, provider: 'claude', since: null, task: null, withCeo: false },
+];
+
 const SUB_BASE = { kind: 'personal' as const, last4: null, owner: { id: 'p1', name: 'Ivan' }, place: { kind: 'company' as const, id: null, name: 'Whole company' }, limits: null, budget: null, isOrchestrator: false, accounts: [], tier: null, accountsDiffer: false, signedInOnce: false, leaseMachine: null };
 
 export const MACHINE = { id: 'm1', hostname: 'ivan-mbp', status: 'ready' as const, online: true };
 
 export const SUBS: SubView[] = [
   {
-    ...SUB_BASE, id: 's-claude', provider: 'claude', label: 'Claude', status: 'ready', online: true, machines: [MACHINE],
+    ...SUB_BASE, agents: RUNNING_AGENTS, id: 's-claude', provider: 'claude', label: 'Claude', status: 'ready', online: true, machines: [MACHINE],
     limits: { status: 'allowed', windows: [{ name: 'five_hour', utilization: 0.42, resetsAt: '2099-10-29T18:00:00.000Z' }, { name: 'seven_day', utilization: 0.1, resetsAt: null }] },
   },
   { ...SUB_BASE, id: 's-codex', provider: 'codex', label: 'Codex', status: 'needs_login', online: true, machines: [{ ...MACHINE, status: 'needs_login' }] },
@@ -81,7 +86,7 @@ export const MACHINES: MachineView[] = [
     load: { cpus: 8, load: 2, memFree: 6 * GIB, memTotal: 12 * GIB, tests: 1, jobs: 2, cpuModel: 'Apple M2 Pro', diskFree: 120 * GIB, diskTotal: 460 * GIB, hostCpus: 10, hostMemory: 32 * GIB },
     lendsTests: true,
     running: {
-      agents: [{ id: 'b1', name: 'Bruno', busy: true }, { id: 'b2', name: 'Vera', busy: false }],
+      agents: RUNNING_AGENTS,
       parts: [{ run: 3, kind: 'tests', task: 12, part: 1, parts: 2, agent: 'Bruno', startedAt: '2026-11-01T10:00:00.000Z' }],
     } },
   { id: 'm2', hostname: 'build-box', os: 'linux', arch: 'x86_64', owner: { id: 'p2', name: 'Maria' }, online: false, lastSeenAt: new Date(Date.now() - 5 * 60_000).toISOString(), plans: [], load: null, lendsTests: false,

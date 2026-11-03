@@ -8,8 +8,9 @@ import { requirePerson } from '../../auth/session.js';
 import { decryptSecret } from '../../crypto/secrets.js';
 import type { Db } from '../../db/client.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
-import { agents, jobs, machines, nodeCodes, nodes, people, subscriptions, tasks, testParts, testRuns, type Provider } from '../../db/schema.js';
+import { agents, machines, nodeCodes, nodes, people, subscriptions, tasks, testParts, testRuns, type Provider } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
+import { runningAgents } from '../agents/running.js';
 import { publicUrl } from '../link/link.js';
 import { machineNodes, machineState, together } from '../testruns/load.js';
 import { pumpTests } from '../testruns/runs.js';
@@ -215,18 +216,8 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     const latest = (seen: (Date | null)[]) => seen.reduce<Date | null>((a, b) => (b && (!a || b > a) ? b : a), null);
     /* What runs on each machine now: the employees whose program lives there, busy while a turn of theirs runs, and the
        parts of test and work runs it takes. A company key's employees are on the built-in node. */
-    const placed = await db
-      .select({
-        id: agents.id,
-        name: agents.name,
-        nodeId: agents.nodeId,
-        builtin: sql<boolean>`${subscriptions.kind} = 'api_key'`,
-        busy: sql<boolean>`exists (select 1 from ${jobs} where ${jobs.agentId} = ${agents.id} and ${jobs.status} = 'running')`,
-      })
-      .from(agents)
-      .leftJoin(subscriptions, eq(subscriptions.id, agents.subscriptionId))
-      .where(and(eq(agents.companyId, me.companyId), isNull(agents.removedAt), isNull(subscriptions.removedAt), isNotNull(agents.subscriptionId)))
-      .orderBy(asc(agents.name), asc(agents.id));
+    const placed = await runningAgents(ctx, me);
+    const serverMachine = me.scopeKind === 'company' ? await builtinMachine(db, config.hostId, me.companyId) : null;
     const parts = await db
       .select({ machineId: testParts.machineId, builtin: testParts.builtin, run: testRuns.number, kind: testRuns.kind, task: tasks.number, part: testParts.part, parts: testRuns.parts, agent: agents.name, startedAt: testParts.startedAt })
       .from(testParts)
@@ -236,7 +227,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
       .where(and(eq(testParts.companyId, me.companyId), eq(testParts.status, 'running')))
       .orderBy(asc(testParts.startedAt), asc(testRuns.number), asc(testParts.part));
     const running = (holds: (a: (typeof placed)[number]) => boolean, runs: (p: (typeof parts)[number]) => boolean) => ({
-      agents: placed.filter(holds).map(a => ({ id: a.id, name: a.name, busy: Boolean(a.busy) })),
+      agents: placed.filter(holds).map(a => a.view),
       parts: parts.filter(runs).map(({ machineId: _, builtin: __, ...p }) => p),
     });
     return {
@@ -248,7 +239,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
               online: hub.isOnline(BUILTIN),
               load: together([hub.loadOf(BUILTIN)]),
               running: running(a => Boolean(a.builtin), p => p.builtin),
-              machine: await builtinMachine(db, config.hostId, me.companyId),
+              machine: serverMachine,
             }
           : null,
       machines: rows.map(m => ({
@@ -262,7 +253,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
         lastSeenAt: latest(on(m.id).map(n => n.lastSeenAt)),
         plans: on(m.id).flatMap(n => (n.subscriptionId && n.provider ? [{ id: n.subscriptionId, provider: n.provider, status: n.status, online: hub.isOnline(nodeIdentity(n.id)) }] : [])),
         lendsTests: m.lendsTests,
-        running: running(a => on(m.id).some(n => n.id === a.nodeId), p => p.machineId === m.id),
+        running: running(a => (a.builtin && serverMachine?.id === m.id) || on(m.id).some(n => n.id === a.nodeId), p => p.machineId === m.id || (p.builtin && serverMachine?.id === m.id)),
       })),
     };
   });

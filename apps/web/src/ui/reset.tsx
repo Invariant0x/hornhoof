@@ -9,14 +9,14 @@ export function resetDuration(t: Messages, milliseconds: number): string {
   const days = Math.floor(minutes / (24 * 60));
   if (days) {
     const hours = Math.floor((minutes % (24 * 60)) / 60);
-    return [t.subs.days(days), hours ? t.subs.hours(hours) : null].filter(Boolean).join(' ');
+    return [t.subs.days(days), hours ? t.cards.hours(hours) : null].filter(Boolean).join(' ');
   }
   const hours = Math.floor(minutes / 60);
   if (hours) {
     const rest = minutes % 60;
-    return [t.subs.hours(hours), rest ? t.subs.minutes(rest) : null].filter(Boolean).join(' ');
+    return [t.cards.hours(hours), rest ? t.cards.minutes(rest) : null].filter(Boolean).join(' ');
   }
-  return t.subs.minutes(minutes);
+  return t.cards.minutes(minutes);
 }
 
 export function resetDurationAt(t: Messages, iso: string | null, now: number): string | null {

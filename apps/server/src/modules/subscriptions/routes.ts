@@ -7,6 +7,7 @@ import { requireCompanyScope, requirePerson, type Person } from '../../auth/sess
 import { encryptSecret } from '../../crypto/secrets.js';
 import { agents, departments, jobs, machines, nodes, people, planCredentials, subscriptions, teams, testParts } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
+import { runningAgents } from '../agents/running.js';
 import { servesWholeCompany } from '../tools/staff.js';
 import { orchestratorOf, pumpWaiting } from '../conversation/queue.js';
 import { createNodeCode } from '../nodes/codes.js';
@@ -91,7 +92,9 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/api/subscriptions', async req => {
     const me = await requirePerson(req, db);
     const all = await subViews(db, online, undefined, me);
-    return { subscriptions: me.scopeKind === 'company' ? all : all.filter(s => s.owner.id === me.id) };
+    const placed = await runningAgents(ctx, me);
+    const visible = me.scopeKind === 'company' ? all : all.filter(s => s.owner.id === me.id);
+    return { subscriptions: visible.map(s => ({ ...s, agents: placed.filter(a => a.subscriptionId === s.id).map(a => a.view) })) };
   });
 
   app.post('/api/subscriptions', async (req, reply) => {

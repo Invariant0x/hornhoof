@@ -1,4 +1,4 @@
-import { act, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Subscriptions } from '../src/screens/Subscriptions';
@@ -30,8 +30,8 @@ async function renderSubs(subscriptions: SubView[], language: 'en' | 'ru' = 'en'
 
 async function renderLimits(limits: Limits, language: 'en' | 'ru' = 'en') {
   await renderSubs([{ ...SUBS[0]!, limits }], language);
-  const row = screen.getByRole('row', { name: /^Claude\b/ });
-  return within(row).getByRole('list', { name: language === 'ru' ? 'Лимиты' : 'Limits' });
+  fireEvent.click(screen.getByRole('button', { name: /^(Open the card of |Открыть карточку )Claude$/ }));
+  return screen.getByRole('article', { name: 'Claude' }).querySelector('.gauges')!;
 }
 
 afterEach(() => {
@@ -52,12 +52,12 @@ describe('relative subscription reset times', () => {
         { name: 'one_day', utilization: 0.5, resetsAt: at(DAY + 30_000) },
       ],
     });
-    const [five, seven, two, month, one] = within(list).getAllByRole('listitem');
-    expect(five).toHaveTextContent('5 hours10%resets in 3 days 7 hours');
-    expect(seven).toHaveTextContent('7 days20%resets in 2 days');
-    expect(two).toHaveTextContent('2 hours30%resets in 7 hours 5 minutes');
-    expect(month).toHaveTextContent('Month40%resets in less than a minute');
-    expect(one).toHaveTextContent('1 day50%resets in 1 day');
+    const [five, seven, two, month, one] = [...list.querySelectorAll('.gauge')];
+    expect(five).toHaveTextContent('5 hours10%usedresets in 3 days 7 hours');
+    expect(seven).toHaveTextContent('7 days20%usedresets in 2 days');
+    expect(two).toHaveTextContent('2 hours30%usedresets in 7 hours 5 minutes');
+    expect(month).toHaveTextContent('Month40%usedresets in less than a minute');
+    expect(one).toHaveTextContent('1 day50%usedresets in 1 day');
   });
 
   it('uses English singular and plural units at exact boundaries', async () => {
@@ -73,7 +73,7 @@ describe('relative subscription reset times', () => {
         { name: '60_minutes', utilization: 0.6, resetsAt: at(2 * MINUTE) },
       ],
     });
-    const items = within(list).getAllByRole('listitem');
+    const items = [...list.querySelectorAll('.gauge')];
     expect(items[0]).toHaveTextContent('resets in 1 day');
     expect(items[1]).toHaveTextContent('resets in 2 days');
     expect(items[2]).toHaveTextContent('resets in 1 hour');
@@ -113,12 +113,12 @@ describe('relative subscription reset times', () => {
         { name: 'seven_day', utilization: 0.2, resetsAt: at(30_000) },
       ],
     });
-    expect(list).toHaveTextContent('5 hours10%resets in 1 day');
-    expect(list).toHaveTextContent('7 days20%resets in less than a minute');
+    expect(list).toHaveTextContent('5 hours10%usedresets in 1 day');
+    expect(list).toHaveTextContent('7 days20%usedresets in less than a minute');
     await act(async () => {
       await vi.advanceTimersByTimeAsync(31_000);
     });
-    expect(list).toHaveTextContent('5 hours10%resets in 23 hours 59 minutes');
+    expect(list).toHaveTextContent('5 hours10%usedresets in 23 hours 59 minutes');
     expect(list).toHaveTextContent('7 daysNo data yetReset time unknown');
     expect(list).not.toHaveTextContent(/resets in -/);
     expect(list).not.toHaveTextContent(/restored/i);
@@ -130,10 +130,11 @@ describe('relative subscription reset times', () => {
     const codex = { ...SUBS[1]!, limits: { status: 'allowed' as const, windows: [{ name: '120_minutes', utilization: 0.05, resetsAt: at(7 * HOUR + 5 * MINUTE) }, { name: 'five_hour', utilization: null, resetsAt: null }] } };
     const kimi = { ...SUBS[2]!, limits: { status: 'allowed' as const, complete: true, windows: [{ name: 'five_hour', utilization: 0.88, resetsAt: at(30_000) }, { name: 'month', utilization: 0.06, resetsAt: 'not-a-time' }] } };
     await renderSubs([claude, codex, kimi]);
-    expect(within(screen.getByRole('row', { name: /^Claude\b/ })).getByText('resets in 3 days 7 hours')).toBeInTheDocument();
-    expect(within(screen.getByRole('row', { name: /^Codex\b/ })).getByText('resets in 7 hours 5 minutes')).toBeInTheDocument();
-    expect(within(screen.getByRole('row', { name: /^Codex\b/ })).getByText('Reset time unknown')).toBeInTheDocument();
-    expect(within(screen.getByRole('row', { name: /^Kimi\b/ })).getByText('resets in less than a minute')).toBeInTheDocument();
-    expect(within(screen.getByRole('row', { name: /^Kimi\b/ })).getByText('Reset time unknown')).toBeInTheDocument();
+    for (const button of screen.getAllByRole('button', { name: /^Open the card of / })) fireEvent.click(button);
+    expect(within(screen.getByRole('article', { name: 'Claude' })).getByText('resets in 3 days 7 hours')).toBeInTheDocument();
+    expect(within(screen.getByRole('article', { name: 'Codex' })).getByText('resets in 7 hours 5 minutes')).toBeInTheDocument();
+    expect(within(screen.getByRole('article', { name: 'Codex' })).getByText('Reset time unknown')).toBeInTheDocument();
+    expect(within(screen.getByRole('article', { name: 'Kimi' })).getByText('resets in less than a minute')).toBeInTheDocument();
+    expect(within(screen.getByRole('article', { name: 'Kimi' })).getByText('Reset time unknown')).toBeInTheDocument();
   });
 });
