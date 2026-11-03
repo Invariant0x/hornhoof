@@ -400,14 +400,15 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
     server.registerTool(
       'verdict',
       {
-        description: 'Your verdict as the gate a task stands at: pass sends it to the next gate (or finishes it), changes sends it back to its executor. comment: your reasons, always.',
-        inputSchema: { task: Ref, pass: z.boolean(), comment: z.string().trim().min(1).max(4000) },
+        description:
+          'Your verdict as the gate a task stands at: pass sends it to the next gate (or finishes it), changes sends it back to its executor. comment: your reasons, always. findings: how many separate problems your comment names, 0 when there are none.',
+        inputSchema: { task: Ref, pass: z.boolean(), comment: z.string().trim().min(1).max(4000), findings: z.number().int().min(0).max(99).optional() },
       },
-      async ({ task: ref, pass, comment: why }) =>
+      async ({ task: ref, pass, comment: why, findings }) =>
         run(async () => {
           const { task } = await find(ref);
           plain(task, why);
-          const moved = await verdict(ctx, job.agentId, task.id, { pass, comment: why });
+          const moved = await verdict(ctx, job.agentId, task.id, { pass, comment: why, findings });
           return { text: `Recorded. ${await where(moved.task)}`, moved };
         }),
     );

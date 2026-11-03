@@ -1,7 +1,7 @@
 import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, companies, departments, jobs, people, subscriptions, tasks, turns } from '../src/db/schema.js';
+import { agents, companies, departments, jobs, people, subscriptions, taskEvents, tasks, turns } from '../src/db/schema.js';
 import { answer, ask, createTask, leaveWork, submit, verdict, type Moved } from '../src/modules/tasks/engine.js';
 import { taskDetail } from '../src/modules/tasks/views.js';
 import { resumeAgent, wakePrompt } from '../src/modules/tasks/wake.js';
@@ -267,5 +267,34 @@ describe('the review of a turn', () => {
       expect(woken(last)).toEqual([[head.id, 'subtasks']]);
       expect(await reviews()).toHaveLength(0);
     }
+  });
+
+  it('stores findings in the verdict event data when given through the tool, and leaves it out otherwise', async () => {
+    const { db, bruno, kai, rita, rex, sid, member, merged, reviews, tools } = await company();
+    await merged(bruno.id, (await member(bruno.id, 'Checkout API')).id);
+    await merged(kai.id, (await member(kai.id, 'Checkout page')).id);
+    const [review] = await reviews();
+    const ritaRes = await (await tools(rita!)).callTool({
+      name: 'verdict',
+      arguments: { task: review!.number, pass: false, comment: 'Two problems in checkout.', findings: 2 },
+    });
+    expect(ritaRes.isError).toBeFalsy();
+    const rexRes = await (await tools(rex!)).callTool({
+      name: 'verdict',
+      arguments: { task: review!.number, pass: true, comment: 'Looks good.' },
+    });
+    expect(rexRes.isError).toBeFalsy();
+    const sidRes = await (await tools(sid!)).callTool({
+      name: 'verdict',
+      arguments: { task: review!.number, pass: true, comment: 'No issues.', findings: 0 },
+    });
+    expect(sidRes.isError).toBeFalsy();
+
+    const events = await db.select().from(taskEvents).where(and(eq(taskEvents.taskId, review!.id), eq(taskEvents.kind, 'verdict')));
+    const byAgent = new Map(events.map(e => [e.agentId, e.data]));
+    expect(byAgent.get(rita!.id)).toEqual({ pass: false, stage: 1, round: 0, findings: 2 });
+    expect(byAgent.get(rex!.id)).toEqual({ pass: true, stage: 1, round: 0 });
+    expect('findings' in byAgent.get(rex!.id)!).toBe(false);
+    expect(byAgent.get(sid!.id)).toEqual({ pass: true, stage: 1, round: 0, findings: 0 });
   });
 });
