@@ -17,6 +17,7 @@ import { byState, TaskRow } from '../ui/TaskRow';
 import { LiveWay, Pulse, pulseSeconds, toD, useReducedMotion, type Point } from '../ui/wires';
 import { useWorkLines } from '../ui/work-lines';
 import { useRework } from '../ui/use-rework';
+import { AgentState, type AgentLive } from '../ui/AgentState';
 import { TreeView } from './TreeView';
 import { SpeedPanel } from './SpeedPanel';
 import { arrowD, CH, CW, CY, FT, FW, HH, HW, PH, PW, schemaLayout, stepPaths, type Line, type Schema } from './schema';
@@ -82,6 +83,9 @@ function doingLine(t: ReturnType<typeof useT>, e: Employee): string {
   return e.status === 'idle' ? t.dept.waitsForTask : '';
 }
 
+/* What an employee's program does and the server's alarm; its chip's own lines say what its turn waits for. */
+const working = ({ id, program, alarm }: Employee): AgentLive => ({ id, program, alarm });
+
 /* The tick that switches an agent off for now and on again; it sits beside the chip's button, not inside it. */
 function Switch({ e, onSwitch }: { e: Employee; onSwitch?(on: boolean): void }) {
   const t = useT();
@@ -99,7 +103,7 @@ function Switch({ e, onSwitch }: { e: Employee; onSwitch?(on: boolean): void }) 
   );
 }
 
-function Chip({ e, x, y, on, flash, onOpen, onSwitch }: { e: Employee; x: number; y: number; on: boolean; flash: boolean; onOpen(): void; onSwitch?(on: boolean): void }) {
+function Chip({ e, x, y, on, flash, serverNow, onOpen, onSwitch }: { e: Employee; x: number; y: number; on: boolean; flash: boolean; serverNow?: string; onOpen(): void; onSwitch?(on: boolean): void }) {
   const t = useT();
   return (
     <div className={`sslot${e.on ? '' : ' off'}${onSwitch ? ' has-sw' : ''}`} style={{ left: x, top: y, width: CW, height: CH }}>
@@ -117,7 +121,10 @@ function Chip({ e, x, y, on, flash, onOpen, onSwitch }: { e: Employee; x: number
             <span className="st" title={t.dept.status[e.status]}>{t.dept.status[e.status]}</span>
           </span>
           <span className="r2">{modelLine(t, e)}</span>
-          <span className="r3">{doingLine(t, e)}</span>
+          <span className="r3">
+            <AgentState agent={working(e)} serverNow={serverNow} />
+            {doingLine(t, e)}
+          </span>
           {e.context !== null && <Bar used={e.context} className="cx" title={t.dept.contextUsed(percent(e.context))} />}
         </Edge>
       </button>
@@ -126,7 +133,7 @@ function Chip({ e, x, y, on, flash, onOpen, onSwitch }: { e: Employee; x: number
   );
 }
 
-function HeadCard({ d, head, stats, on, flash, onOpen, onSwitch }: { d: Department; head: Employee | null; stats: string; on: boolean; flash: boolean; onOpen(id: string): void; onSwitch?(on: boolean): void }) {
+function HeadCard({ d, head, stats, on, flash, serverNow, onOpen, onSwitch }: { d: Department; head: Employee | null; stats: string; on: boolean; flash: boolean; serverNow?: string; onOpen(id: string): void; onSwitch?(on: boolean): void }) {
   const t = useT();
   const { language } = useLanguage();
   const style = { left: 0, top: 0, width: HW, height: HH };
@@ -158,6 +165,7 @@ function HeadCard({ d, head, stats, on, flash, onOpen, onSwitch }: { d: Departme
           <span className="meta">{stats}</span>
           <span className="hx">
             <span className="st">{t.dept.status[head.status]}</span>
+            <AgentState agent={working(head)} serverNow={serverNow} />
             <span className="hx-task">{doingLine(t, head)}</span>
           </span>
           {head.context !== null && (
@@ -569,6 +577,7 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
               stats={stats}
               on={!!s.head && selected === s.head.id}
               flash={!!s.head && flashing.has(s.head.id)}
+              serverNow={serverNow}
               onOpen={open}
               onSwitch={s.head && canGive ? flip(s.head) : undefined}
             />
@@ -592,7 +601,7 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
             </h3>
             {s.frames.flatMap(f =>
               f.members.map(m => (
-                <Chip key={m.e.id} e={shown(m.e)} x={m.x} y={m.y} on={selected === m.e.id} flash={flashing.has(m.e.id)} onOpen={() => open(m.e.id)} onSwitch={canGive ? flip(m.e) : undefined} />
+                <Chip key={m.e.id} e={shown(m.e)} x={m.x} y={m.y} on={selected === m.e.id} flash={flashing.has(m.e.id)} serverNow={serverNow} onOpen={() => open(m.e.id)} onSwitch={canGive ? flip(m.e) : undefined} />
               )),
             )}
           </section>

@@ -4,6 +4,7 @@
   --ink: #0F1B27; --muted: #4C5A68;
   --p-claude: #C2593A; --p-kimi: #1667E0; --p-glm: #3D47D6; --p-antigravity: #1E8E3E;
   --cyan: #00A3BD; --cyan-ink: #00768A; --amber: #E08A00; --amber-ink: #9A5A00; --pink: #E0307F; --pink-ink: #B0185F; --ok: #1E8E4E;
+  --red: #D32F2F; --on-red: #FFFFFF;
   --idle: #C5D0DB; --dot: rgba(30, 60, 90, .17); --glow: rgba(0, 163, 189, .10);
   --btn: #00768A; --on-btn: #FFFFFF; --hud: rgba(240, 244, 247, .88); --shadow: rgba(20, 40, 60, .18);
   --f-display: 'Tektur', 'Onest', system-ui, sans-serif;
@@ -17,6 +18,7 @@
     --ink: #E3EAF1; --muted: #93A0AE;
     --p-claude: #F08A66; --p-kimi: #5E9BFF; --p-glm: #8D95FF; --p-antigravity: #6DD58C;
     --cyan: #46E0EF; --cyan-ink: #6FE9F5; --amber: #FFB54A; --amber-ink: #FFC36E; --pink: #FF62AA; --pink-ink: #FF8CC2; --ok: #5FD08A;
+    --red: #FF6B6B; --on-red: #2A0606;
     --idle: #2C3744; --dot: rgba(140, 175, 205, .15); --glow: rgba(70, 224, 239, .10);
     --btn: #46E0EF; --on-btn: #05222A; --hud: rgba(23, 30, 39, .84); --shadow: rgba(0, 0, 0, .45);
     color-scheme: dark;
@@ -27,6 +29,7 @@
   --ink: #E3EAF1; --muted: #93A0AE;
   --p-claude: #F08A66; --p-kimi: #5E9BFF; --p-glm: #8D95FF; --p-antigravity: #6DD58C;
   --cyan: #46E0EF; --cyan-ink: #6FE9F5; --amber: #FFB54A; --amber-ink: #FFC36E; --pink: #FF62AA; --pink-ink: #FF8CC2; --ok: #5FD08A;
+  --red: #FF6B6B; --on-red: #2A0606;
   --idle: #2C3744; --dot: rgba(140, 175, 205, .15); --glow: rgba(70, 224, 239, .10);
   --btn: #46E0EF; --on-btn: #05222A; --hud: rgba(23, 30, 39, .84); --shadow: rgba(0, 0, 0, .45);
   color-scheme: dark;
@@ -506,6 +509,11 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .pool-facts dd { margin: 0 0 6px; font-family: var(--f-display); font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
 /* The machine the company's server runs on: a filled badge by its name and a cyan frame. */
 .badge.lead { color: var(--on-btn); background: var(--btn); border-color: var(--btn); }
+/* What an agent does now, wherever the map shows it; red with the cause when the server raised an alarm about its turn. */
+.ast { flex: none; display: inline-block; padding: 0 5px; border: 1px solid currentColor; font-size: 11px; font-weight: 600; line-height: 14px; color: var(--muted); white-space: nowrap; vertical-align: 1px; }
+.ast.work { color: var(--cyan-ink); }
+.ast.person { color: var(--pink-ink); }
+.ast.alarm { border-color: var(--red); color: var(--on-red); background: var(--red); }
 .machine > .edge-in > p { margin: 0; }
 .facts { display: grid; grid-template-columns: 8.5em minmax(0, 1fr); gap: 6px 12px; margin: 0; font-size: 13.5px; }
 .facts dt { color: var(--muted); }
@@ -747,6 +755,8 @@ button.shead, button.schip { cursor: pointer; }
 .s-h .st { color: var(--pink-ink); }
 .s-o .st { color: var(--amber-ink); }
 .schip.s-h > .edge { background: var(--pink); }
+.schip:has(.ast.alarm) > .edge, .shead:has(.ast.alarm) > .edge { background: var(--red); }
+.schip .r3 .ast { margin-right: 6px; }
 button.shead:hover > .edge, button.schip:hover > .edge { background: var(--line2); }
 .shead.on > .edge, .schip.on > .edge, button.shead:focus-visible > .edge, button.schip:focus-visible > .edge { background: var(--cyan); }
 button.shead:focus-visible, button.schip:focus-visible { outline: none; }
@@ -766,6 +776,7 @@ button.shead:focus-visible, button.schip:focus-visible { outline: none; }
 .far .schip.s-q .edge-in { background: color-mix(in srgb, var(--cyan) 9%, var(--surface)); }
 .far .schip.s-r .edge-in { background: color-mix(in srgb, var(--amber) 20%, var(--surface)); }
 .far .schip.s-h .edge-in { background: color-mix(in srgb, var(--pink) 24%, var(--surface)); }
+.far .schip:has(.ast.alarm) .edge-in { background: color-mix(in srgb, var(--red) 24%, var(--surface)); }
 /* The people who reach the department, at the right of the head. */
 .pchip > .edge { height: 100%; }
 .pchip .edge-in { display: flex; align-items: center; gap: 10px; padding: 0 14px; }
@@ -838,7 +849,7 @@ body:has(.dview) .version-mark { display: none; }
 .ac-head h3 { font-size: 22px; }
 .ac-head p { margin: 0; }
 .ac-head .btn { margin-top: 8px; }
-.ac-state { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.ac-state { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
 .ac-pick { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; min-width: 0; }
 .ac-note { margin: -8px 0 0; font-size: 13px; color: var(--ok); }
 .acard h4 { margin: 0 0 8px; font-family: var(--f-display); font-size: 15px; font-weight: 600; }
@@ -1060,12 +1071,20 @@ summary.turn-head:focus-visible { outline: 2px solid var(--cyan); outline-offset
 .tview .lchip { --cut: 8px; position: absolute; left: 0; right: 10px; display: block; padding: 1px; border: 0; background: var(--line2); cursor: pointer; text-align: left; clip-path: polygon(0 0, calc(100% - var(--cut)) 0, 100% var(--cut), 100% 100%, var(--cut) 100%, 0 calc(100% - var(--cut))); }
 .tview .lchip > .in { display: flex; flex-direction: column; justify-content: center; gap: 1px; height: 100%; padding: 0 10px; background: var(--hud); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); clip-path: inherit; }
 .tview .lchip:hover { background: var(--muted); }
+.tview .lchip:has(.ast.alarm) { background: var(--red); }
 .tview .lchip.on { background: var(--cyan); }
 .tview .lchip.on > .in { background: color-mix(in srgb, var(--cyan) 10%, var(--surface)); }
 .tview .lchip:focus-visible { outline: none; background: var(--cyan); }
 .tview .lchip .r1 { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .tview .lchip .r1 b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--f-display); font-size: 13.5px; font-weight: 600; }
 .tview .lchip .r2 { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tview .lchip .ast { align-self: flex-start; max-width: 100%; box-sizing: border-box; overflow: hidden; text-overflow: ellipsis; padding: 0 4px; font-size: 10.5px; line-height: 13px; }
+/* A phone's lane label is narrow: what the agent does takes the task's line and wraps. */
+@media (max-width: 760px) {
+  .tview .lchip > .in:has(.ast) { padding: 0 6px; }
+  .tview .lchip .in:has(.ast) .r2 { display: none; }
+  .tview .lchip .ast { white-space: normal; }
+}
 .tview .lchip.tk b { font-family: var(--f-mono); font-size: 13px; font-weight: 600; }
 .tview .lchip.tk.turn b { color: var(--cyan-ink); }
 .tview .g-hr { stroke: var(--line); stroke-width: 1; stroke-dasharray: 2 5; }

@@ -7,9 +7,11 @@ import { defaultEffort, PROVIDER_NAMES } from '../providers';
 import type { AgentCardView, Me, Part, SubView } from '../types';
 import { TimerSettings } from './TimerSettings';
 import { Ask } from './Ask';
+import { AgentState, type AgentLive } from './AgentState';
 import { byProvider, servingLabel } from './StaffCard';
 
-type Props = { me: Me; agentId: string; onClose(): void; onTerminal(): void };
+/* live and serverNow: what its program does and the server's alarm, as the map read them, and the server's clock then. */
+type Props = { me: Me; agentId: string; live?: AgentLive; serverNow?: string; onClose(): void; onTerminal(): void };
 
 const SKILL = /<!-- hh:skill ([a-z0-9-]+) -->\n## [^\n]*\n\n([\s\S]*?)\n<!-- \/hh:skill -->/g;
 
@@ -66,7 +68,7 @@ function draftsOf(raw: string, parts: Part[]): Record<string, string> | null {
 const subLabel = (s: SubView) => servingLabel({ kind: s.kind, label: s.label, provider: s.provider, owner: s.owner.name });
 
 /* An agent's card in the side panel: where it runs, its skills and the text it runs with, with every change kept. */
-export function AgentCard({ me, agentId, onClose, onTerminal }: Props) {
+export function AgentCard({ me, agentId, live, serverNow, onClose, onTerminal }: Props) {
   const t = useT();
   const { language } = useLanguage();
   const id = useId();
@@ -222,6 +224,7 @@ export function AgentCard({ me, agentId, onClose, onTerminal }: Props) {
           <p className="ac-state">
             <i className={`dot ${card.state}`} />
             {t.dept.states[card.state]}
+            <AgentState agent={live} serverNow={serverNow} />
           </p>
           <button className="btn small" type="button" onClick={onTerminal}>
             {t.agent.openTerminal}

@@ -40,3 +40,21 @@ it('gives every select a shared theme-colored arrow inset from the right edge an
     expect(right, `${sel} must keep right padding for the arrow`).toBeGreaterThanOrEqual(26);
   }
 });
+
+it("paints what an agent does from the theme's tokens, and an alarm and the frame around it red, light and dark", () => {
+  expect(decl('.ast', 'color')).toBe('var(--muted)');
+  expect(decl('.ast.work', 'color')).toBe('var(--cyan-ink)');
+  expect(decl('.ast.person', 'color')).toBe('var(--pink-ink)');
+  expect(decl('.ast.alarm', 'background')).toBe('var(--red)');
+  expect(decl('.ast.alarm', 'color')).toBe('var(--on-red)');
+  for (const frame of ['.schip:has(.ast.alarm) > .edge', '.shead:has(.ast.alarm) > .edge', '.tview .lchip:has(.ast.alarm)']) expect(decl(frame, 'background')).toBe('var(--red)');
+  const dark = '(prefers-color-scheme: dark)';
+  for (const [selector, media] of [[':root', null], [':root:not([data-theme="light"])', dark], [':root[data-theme="dark"]', null]] as const) {
+    expect(decl(selector, '--red', media), selector).toMatch(/^#[0-9A-F]{6}$/);
+    expect(decl(selector, '--on-red', media), selector).toMatch(/^#[0-9A-F]{6}$/);
+  }
+  expect(decl(':root', '--red')).not.toBe(decl(':root[data-theme="dark"]', '--red'));
+  /* On a phone the tree's narrow label gives the task's line to what the agent does, which may wrap. */
+  expect(decl('.tview .lchip .in:has(.ast) .r2', 'display', '(max-width: 760px)')).toBe('none');
+  expect(decl('.tview .lchip .ast', 'white-space', '(max-width: 760px)')).toBe('normal');
+});

@@ -1,12 +1,13 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type RefObject } from 'react';
 import { useT } from '../i18n';
-import type { Department, DepartmentTree } from '../types';
+import type { Department, DepartmentTree, TreeAgent } from '../types';
 import { Pulse, toD, useReducedMotion } from '../ui/wires';
 import {
   idleClass, treeClock, treeLayout, latestLines, trunkBranch,
   type TreeLayout, type TreeBadge, type TreeMark, type TreePick, type TreeRow, type TreeTarget,
 } from './tree';
 import { TreeCardBody, TreeWho } from './TreeCard';
+import { AgentState } from '../ui/AgentState';
 
 type Props = {
   tree: DepartmentTree;
@@ -158,6 +159,11 @@ function pickLabel(pick: TreePick, tree: DepartmentTree, department: Department,
   return tree.turn!.branch;
 }
 
+/* What a lane's agent does now: its program, the server's alarm in red, or what its turn waits for. */
+function LaneState({ agent, department, now }: { agent: TreeAgent; department: Department; now: string }) {
+  return <AgentState agent={department.employees.find(e => e.id === agent.id)} serverNow={now} />;
+}
+
 function Label({ row, tree, department }: { row: TreeRow; tree: DepartmentTree; department: Department }) {
   const L = useT().dept.tree;
   if (!row.agent) return <b>{row.type === 'main' ? trunkBranch(department) : tree.turn!.branch}</b>;
@@ -168,6 +174,7 @@ function Label({ row, tree, department }: { row: TreeRow; tree: DepartmentTree; 
         #{row.line?.number ?? tree.review?.number}
         <span className="tv-title"> {row.line?.title ?? (tree.turn ? L.reviewH(tree.turn.number) : '')}</span>
       </span>
+      <LaneState agent={row.agent} department={department} now={tree.now} />
     </>
   );
 }
