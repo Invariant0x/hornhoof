@@ -433,6 +433,7 @@ export const turns = pgTable(
 
 export const TASK_STATUSES = ['planned', 'open', 'working', 'review', 'waiting', 'blocked', 'done', 'cancelled'] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
+export type ExternalWait = { reason: string; since: string; until: string };
 
 /* A piece of work: the title and brief for people, the body every agent reads as the current truth, and its gates. */
 export const tasks = pgTable(
@@ -464,6 +465,8 @@ export const tasks = pgTable(
     bounces: integer('bounces').notNull().default(0),
     /* Task turns in a row that ended without moving the task. */
     silent: integer('silent').notNull().default(0),
+    /* Waiting for an external event, without changing who holds the task or its workflow stage. */
+    externalWait: jsonb('external_wait').$type<ExternalWait>(),
     /* Grows with every move, so two moves that read the same task cannot both land. */
     version: integer('version').notNull().default(0),
     createdByPersonId: uuid('created_by_person_id').references(() => people.id),
@@ -479,6 +482,7 @@ export const tasks = pgTable(
     index('tasks_parent_id').on(t.parentId),
     index('tasks_turn_id').on(t.turnId),
     index('tasks_product_id').on(t.productId),
+    index('tasks_external_wait_until').on(sql`(${t.externalWait}->>'until')`).where(sql`${t.externalWait} IS NOT NULL`),
     /* What no move makes: a gate with no executor behind it, counts below zero, a closed task without its time, a task
        under itself, gates that are not lists. */
     check('tasks_review_has_executor', sql`${t.status} <> 'review' OR ${t.executorAgentId} IS NOT NULL`),
@@ -549,6 +553,8 @@ export const pendingWakes = pgTable(
     companyId: companyId(),
     agentId: uuid('agent_id').notNull().references(() => agents.id),
     taskId: uuid('task_id').notNull().references(() => tasks.id),
+    /* A timed wake is obsolete once another task move replaced the action it names. */
+    taskVersion: integer('task_version'),
     why: text('why').notNull(),
     text: text('text'),
     note: text('note'),

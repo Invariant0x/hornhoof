@@ -14,6 +14,17 @@ const roles = [...templates.roles.values()];
 const skills = [...templates.skills.values()];
 
 describe('templates', () => {
+  it('teaches heads and members to end a turn with wait_for for external events, and the orchestrator to bind readiness messages to a task', () => {
+    for (const id of ['hh-lead-tasks', 'hh-task-flow']) {
+      const body = templates.skills.get(id)!.body;
+      expect(body, id).toContain('wait_for');
+      expect(body, id).toMatch(/external event/);
+      expect(body, id).toMatch(/two hours/);
+      expect(body, id).toMatch(/end the turn/);
+    }
+    expect(orchestratorSteady(templates).text).toMatch(/message_employee[\s\S]*optional task[\s\S]*external wait/);
+  });
+
   it('loads every role and skill', () => {
     expect(roles.length).toBeGreaterThanOrEqual(30);
     expect(skills.length).toBeGreaterThanOrEqual(40);

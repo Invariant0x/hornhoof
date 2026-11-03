@@ -213,7 +213,8 @@ describe('Department view', () => {
     expect(work()).toBeNull();
   });
 
-  it('runs a dot once along the way a message between two of its agents took, and leaves no way running', async () => {
+  it.each([false, true])('runs a message dot until arrival, reduced motion %s', async reduce => {
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: reduce && query.includes('reduce'), addEventListener() {}, removeEventListener() {} }));
     const user = userEvent.setup();
     const stream = fakeStream();
     const [dev] = DEV_ORG.departments;
@@ -226,7 +227,10 @@ describe('Department view', () => {
       stream.send({ type: 'pulse', from: { kind: 'agent', id: 'x0', departmentId: 'other' }, to: { kind: 'agent', id: 'x1', departmentId: 'other' } });
       const dots = [...document.querySelectorAll('.dview circle.pt animateMotion')];
       expect(dots.map(m => [m.getAttribute('path'), m.getAttribute('repeatCount')])).toEqual([[toD(stepPaths(schemaLayout(dev!, 1)).toMember('b1')!), '1']]);
-      act(() => { vi.advanceTimersByTime(10_000); });
+      const duration = parseFloat(dots[0]!.getAttribute('dur')!) * 1000;
+      act(() => { vi.advanceTimersByTime(duration / 2); });
+      expect(dots[0]).toBeInTheDocument();
+      act(() => { vi.advanceTimersByTime(duration / 2 + 20); });
       expect(document.querySelectorAll('.dview circle.pt, .dview .wires path.live')).toHaveLength(0);
     } finally {
       vi.useRealTimers();
@@ -1025,12 +1029,24 @@ describe('Department work tree', () => {
     expect(document.querySelector('.dview .zoom')).toHaveTextContent('100%');
   });
 
-  it('does not run a live dot under reduced motion', async () => {
-    vi.stubGlobal('matchMedia', () => ({ matches: true, addEventListener() {}, removeEventListener() {} }));
+  it('keeps the same tree dot when reduced motion slows it down', async () => {
+    let reduce = false;
+    const changes = new Set<() => void>();
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      get matches() { return reduce && query.includes('reduced-motion'); },
+      addEventListener(_event: string, update: () => void) { changes.add(update); },
+      removeEventListener(_event: string, update: () => void) { changes.delete(update); },
+    }));
     const user = userEvent.setup();
     shell(treeRoute());
     await showTree(user);
-    expect(document.querySelector('.tview animateMotion')).not.toBeInTheDocument();
+    const dot = document.querySelector('.tview circle.pt')!;
+    expect(dot).toBeInTheDocument();
+    const motion = dot.querySelector('animateMotion')!;
+    const normal = parseFloat(motion.getAttribute('dur')!);
+    act(() => { reduce = true; changes.forEach(update => update()); });
+    expect(document.querySelector('.tview circle.pt')).toBe(dot);
+    expect(parseFloat(motion.getAttribute('dur')!)).toBeCloseTo(normal * 4, 1);
   });
 
   it('reloads for this department or its parent, and ignores tasks elsewhere', async () => {

@@ -23,6 +23,7 @@ describe('Claude Code in a terminal', () => {
     expect(JSON.parse(arg(command, '--mcp-config')!)).toEqual({ mcpServers: { hornhoof: { type: 'http', url: URLS.mcpUrl } } });
     const settings = JSON.parse(arg(command, '--settings')!);
     expect(settings.hooks.Stop[0].hooks[0].command).toBe('hh-hook stop');
+    expect(settings.hooks.StopFailure).toEqual([{ hooks: [{ type: 'command', command: 'hh-hook stop' }] }]);
     expect(settings.hooks.UserPromptSubmit[0].hooks[0].command).toBe('hh-hook prompt');
     expect(settings.hooks.SessionStart[0].hooks[0].command).toBe('hh-hook start');
     /* After compacting its conversation it hears to read the company again. */

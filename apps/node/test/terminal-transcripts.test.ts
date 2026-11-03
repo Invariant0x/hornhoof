@@ -2,12 +2,44 @@ import { appendFileSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import failures from './fixtures/terminal-api-failures.json';
+import { SIGNED_OUT as CODEX_SIGNED_OUT } from '../src/providers/codex.js';
+import { SCREEN_SIGNED_OUT as KIMI_SIGNED_OUT } from '../src/providers/kimi.js';
 import { claudeStatusContext, claudeStatusLimits, claudeUsageLimits, codexRollout, kimiUsageLimits, kimiWire, LineTail } from '../src/terminal/transcripts.js';
 
 const item = (it: object) => ({ type: 'event_msg', payload: { type: 'item_completed', item: it } });
 const loop = (event: object) => ({ type: 'context.append_loop_event', agentId: 'main', event, time: 1 });
 
 describe("Codex's session log", () => {
+  it.each(failures.filter(f => f.program === 'codex'))('reads the real $prompt failure with its kind and message', ({ line, reason }) => {
+    expect(codexRollout(line)).toEqual({ events: [], failed: reason });
+  });
+
+  it.each([
+    [{ message: 'Overloaded' }, 'Overloaded'],
+    [{ codex_error_info: {}, message: 'Overloaded' }, 'Overloaded'],
+    [{ codex_error_info: 'other' }, 'other'],
+    [{ codex_error_info: { http_connection_failed: { http_status_code: 503 } } }, 'http_connection_failed 503'],
+    [{}, 'unknown'],
+    [{ message: '' }, 'unknown'],
+  ])('keeps an incomplete error as a nonempty failure: %j', (error, reason) => {
+    expect(codexRollout({ type: 'event_msg', payload: { type: 'task_complete', last_agent_message: null, error } })).toEqual({ events: [], failed: reason });
+  });
+
+  it('keeps a normal completion, including an empty answer', () => {
+    for (const message of ['ok', null]) {
+      expect(codexRollout({ type: 'event_msg', payload: { type: 'task_complete', last_agent_message: message } })).toEqual({ events: [], ended: { message: message ?? '' } });
+    }
+  });
+
+  it('recognizes the unauthorized kind without matching ordinary screen text', () => {
+    expect(CODEX_SIGNED_OUT.test('unauthorized: Your access token could not be refreshed. Please log out and sign in again.')).toBe(true);
+    expect(CODEX_SIGNED_OUT.test('Checking unauthorized requests in the tests')).toBe(false);
+    expect(CODEX_SIGNED_OUT.test('The request was unauthorized')).toBe(false);
+    expect(CODEX_SIGNED_OUT.test('The test prints unauthorized: false')).toBe(false);
+    expect(CODEX_SIGNED_OUT.test('OpenAI Codex\n  unauthorized: Your access token could not be refreshed.')).toBe(true);
+  });
+
   it('shows its messages, commands, file changes and Hornhoof tool calls', () => {
     expect(codexRollout(item({ type: 'AgentMessage', content: [{ type: 'Text', text: 'Fixing ' }, { type: 'Text', text: 'the build.' }] }))).toEqual({ events: [{ kind: 'text', text: 'Fixing the build.' }] });
     expect(codexRollout(item({ type: 'CommandExecution', command: 'npm test', aggregated_output: '12 passed', exit_code: 0, status: 'completed' })).events).toEqual([
@@ -62,6 +94,16 @@ describe("Codex's session log", () => {
 });
 
 describe("Kimi Code's session log", () => {
+  it.each(failures.filter(f => f.program === 'kimi'))('reads the real $prompt failure with its code and message', ({ line, reason }) => {
+    expect(kimiWire(line)).toEqual({ events: [], failed: reason });
+  });
+
+  it('recognizes an authentication code without treating a login page as signed out', () => {
+    expect(KIMI_SIGNED_OUT.test('provider.auth_error: 401 Incorrect API key provided')).toBe(true);
+    expect(KIMI_SIGNED_OUT.test('Editing the /login page')).toBe(false);
+    expect(KIMI_SIGNED_OUT.test('providerXauth_error')).toBe(false);
+  });
+
   it('shows its text, tool calls and their results, without its thinking', () => {
     expect(kimiWire(loop({ type: 'content.part', turnId: '0', step: 1, part: { type: 'text', text: 'Fixing the build.' } }))).toEqual({ events: [{ kind: 'text', text: 'Fixing the build.' }] });
     expect(kimiWire(loop({ type: 'content.part', turnId: '0', step: 1, part: { type: 'think', think: 'Hmm.' } }))).toEqual({ events: [] });

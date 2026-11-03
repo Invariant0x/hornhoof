@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type RefObject } from 'react';
 import { useT } from '../i18n';
 import type { Department, DepartmentTree, TreeAgent } from '../types';
-import { Pulse, toD, useReducedMotion } from '../ui/wires';
+import { Pulse, motionSpeed, toD, useReducedMotion } from '../ui/wires';
 import {
   idleClass, treeClock, treeLayout, latestLines, trunkBranch, reviewsOf, rowTaskNumber, statePriority,
   type TreeLayout, type TreeBadge, type TreeMark, type TreePick, type TreeRow, type TreeTarget,
@@ -302,7 +302,7 @@ function Graph(props: CanvasProps) {
           .map((p, i) => <path key={`${kind}${i}`} className={`${p.cls}${p.dim ? ' dn' : ''}`} d={toD(p.points)} />))}
         {layout.marks.map((m, i) => <g key={i} className={m.dim ? 'dn' : undefined}><Mark m={m} /></g>)}
         {layout.badges.map(b => <Badge key={b.row} badge={b} phone={props.phone} />)}
-        {!still && layout.pulses.map((pts, i) => <Pulse key={i} pts={pts} speed={60} />)}
+        {layout.pulses.map((pts, i) => <Pulse key={i} pts={pts} speed={motionSpeed(60, still)} />)}
         <rect className="g-now-chip" x={layout.nowX - 25} y="4" width="50" height="18" />
         <text className="g-now-t" x={layout.nowX} y="13.5">{treeClock(tree.now)}</text>
       </g>

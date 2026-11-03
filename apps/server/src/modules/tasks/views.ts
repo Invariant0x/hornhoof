@@ -26,6 +26,7 @@ export type TaskLine = {
   parentId: string | null;
   /* The numbers of the tasks it comes after that are not done yet: until they are, it waits. */
   waitsFor: number[];
+  externalWait?: Task['externalWait'];
   createdAt: string;
   updatedAt: string;
 };
@@ -112,6 +113,7 @@ const line = (t: Task, n: Names, sees: (t: Task) => boolean): TaskLine => ({
   turn: n.turn(t.turnId),
   parentId: t.parentId,
   waitsFor: n.after(t).filter(a => a.status !== 'done' && sees(a)).map(a => a.number),
+  externalWait: t.externalWait,
   createdAt: t.createdAt.toISOString(),
   updatedAt: t.updatedAt.toISOString(),
 });

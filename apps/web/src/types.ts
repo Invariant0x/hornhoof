@@ -290,6 +290,7 @@ export type TaskLine = {
   title: string;
   brief: string;
   status: TaskStatus;
+  externalWait?: ExternalWait | null;
   department: TaskPlace;
   product: TaskPlace;
   assignee: AgentRef | null;
