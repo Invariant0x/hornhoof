@@ -1,45 +1,16 @@
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { accessOf, canReach, WHOLE, type Access, type Spot } from '../../auth/access.js';
+import { decisionOwner, type Candidate, type DecisionSubject } from '../../auth/decision-owner.js';
 import type { Person } from '../../auth/session.js';
-import { agents, departments, people, personAccess, proposals, requests, tasks, type DecisionTopic, type REQUEST_KINDS } from '../../db/schema.js';
+import { agents, departments, people, personAccess, proposals, requests, tasks } from '../../db/schema.js';
 import { ownsComputer, type Asked } from '../computer/access.js';
 import { taskSpot } from './engine.js';
 
-/* Who decides what waits for people, and what each person may see of it. The owner only says whose card counts a decision
-   and whose filter shows it: who may read or answer it stays as the existing routes check it. */
+/* What waits for people, as each person may see it: whose card counts each decision and whose filter shows it, and whether
+   this person may take it (auth/decisions.ts). */
 
-export type Candidate = { id: string; status: Person['status']; isOwner: boolean; access: Access };
-
-/* A request of an agent on a task, a card of the orchestrator, or its request for the computer the server runs on. */
-export type DecisionSubject =
-  | { source: 'request'; kind: (typeof REQUEST_KINDS)[number]; topic: DecisionTopic | null; spot: Spot }
-  | { source: 'proposal' }
-  | { source: 'computer_access' };
-
-/* The topics a department's own person decides; every other one, and one not given, is the CEO's. */
-const DEPARTMENTAL: readonly DecisionTopic[] = ['task', 'employee'];
-
-function ceoOf(people: readonly Candidate[]): string {
-  const ceo = people.find(p => p.isOwner && p.status === 'active');
-  if (!ceo) throw new Error('The company has no active CEO to give its decisions to.');
-  return ceo.id;
-}
-
-/* Whether a person's access lists the place itself or the department holding it. A team, or the whole company, is not a
-   department's own. */
-const listsPlace = (access: Access, spot: Spot) =>
-  !access.whole && Boolean((spot.departmentId && access.departments.has(spot.departmentId)) || (spot.parentId && access.departments.has(spot.parentId)));
-
-/* A question on a department's task or employee goes to the one active person, other than the CEO, whose access lists that
-   department or the product it is about; with nobody or with several such people, to the CEO. People who see the whole
-   company decide like the CEO and are no department's own. Approvals, the CEO's topics, unknown topics, the orchestrator's
-   own tasks, its cards and its request for the computer go to the CEO. */
-export function decisionOwner(d: DecisionSubject, people: readonly Candidate[]): string {
-  if (d.source !== 'request' || d.kind === 'approval' || !d.topic || !DEPARTMENTAL.includes(d.topic) || !d.spot.departmentId) return ceoOf(people);
-  const own = people.filter(p => p.status === 'active' && !p.isOwner && listsPlace(p.access, d.spot));
-  return own.length === 1 ? own[0]!.id : ceoOf(people);
-}
+export { DEPARTMENTAL, decisionOwner, decisionPlace, listsPlace, type Candidate, type DecisionSubject } from '../../auth/decision-owner.js';
 
 type RequestRow = typeof requests.$inferSelect;
 type TaskRow = typeof tasks.$inferSelect;

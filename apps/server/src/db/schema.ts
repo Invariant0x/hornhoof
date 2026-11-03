@@ -1,6 +1,6 @@
 import { COMPANY_TEMPLATE_KEYS, CRED_KINDS, MACHINE_KINDS, RUN_KINDS, TEMPLATE_KEYS, type Account, type Boot, type Limits, type ModelOption } from '@hornhoof/protocol';
 import { sql } from 'drizzle-orm';
-import { bigserial, boolean, check, customType, index, integer, jsonb, pgTable, primaryKey, real, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
+import { bigint, bigserial, boolean, check, customType, index, integer, jsonb, pgTable, primaryKey, real, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
 
 const id = () => uuid('id').primaryKey().defaultRandom();
 const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow();
@@ -35,6 +35,8 @@ export const people = pgTable(
     status: text('status', { enum: ['active', 'invited', 'disabled'] }).notNull(),
     scopeKind: text('scope_kind', { enum: SCOPE_KINDS }).notNull(),
     isOwner: boolean('is_owner').notNull().default(false),
+    /* The CEO's delegate takes the CEO's decisions, while active with the whole company. Only the CEO sets it. */
+    isCeoDelegate: boolean('is_ceo_delegate').notNull().default(false),
     createdAt: createdAt(),
   },
   t => [index('people_company_id').on(t.companyId)],
@@ -331,6 +333,8 @@ export const jobs = pgTable(
     /* The turn carries a message of the company's owner, so the tools for people, access, money and the company's reach
        work in it. A turn an employee, a timer or a task woke does not. */
     answersCeo: boolean('answers_ceo').notNull().default(false),
+    /* Words for the running turn are on their way, or went in without being kept: no decision is taken in it by anyone's word. */
+    decisionInputPending: boolean('decision_input_pending').notNull().default(false),
     /* The hash of the instructions it ran with; a change starts a fresh session. */
     instructionsHash: text('instructions_hash'),
     createdBy: uuid('created_by').references(() => people.id),
@@ -571,6 +575,10 @@ export const requests = pgTable(
     status: text('status', { enum: REQUEST_STATUSES }).notNull().default('open'),
     answer: text('answer'),
     answeredBy: uuid('answered_by').references(() => people.id),
+    /* When the orchestrator answered for that person: itself, its turn and the message of the person it acted on. */
+    answeredByAgentId: uuid('answered_by_agent_id').references(() => agents.id),
+    answerJobId: uuid('answer_job_id').references(() => jobs.id),
+    answerSourceSeq: bigint('answer_source_seq', { mode: 'number' }),
     /* The orchestrator's words for people: what is needed from them, why, and the ways to go, in plain words. */
     explained: text('explained'),
     /* What it is about; none on requests from before topics, which go to the CEO. */
