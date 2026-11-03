@@ -280,6 +280,31 @@ describe('updates', () => {
     expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.waiting).toBeNull();
   });
 
+  it('waits for the agents by default, and sends the update at once when whenIdle is false', async () => {
+    const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' } });
+    const { app, db, ceo, control } = await company(registry);
+    updaterAlive(control);
+    const [acme] = await db.select().from(companies);
+    const [sub] = await db.select().from(subscriptions);
+    const [orchestrator] = await db.select().from(agents);
+    const [job] = await db
+      .insert(jobs)
+      .values({ companyId: acme!.id, subscriptionId: sub!.id, agentId: orchestrator!.id, prompt: 'build', status: 'running', timeoutMs: 1000 })
+      .returning();
+    const res = await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest' }, ...as(ceo) });
+    expect(res.statusCode).toBe(202);
+    expect(request(control)).toBeNull();
+    expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.waiting).toEqual({ version: '0.4.1' });
+    await db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, job!.id));
+    await publishWorking(app.ctx, acme!.id);
+    await expect.poll(() => request(control)).toEqual(asked(registry, res.json().id));
+
+    await db.insert(jobs).values({ companyId: acme!.id, subscriptionId: sub!.id, agentId: orchestrator!.id, prompt: 'build 2', status: 'running', timeoutMs: 1000 });
+    const now = await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: false }, ...as(ceo) });
+    expect(now.statusCode).toBe(202);
+    expect(request(control)).toEqual(asked(registry, now.json().id));
+  });
+
   it('holds new turns of the company while its update waits for the agents, and lets them go when it is called off', async () => {
     const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' } });
     const { app, db, ceo, control } = await company(registry);

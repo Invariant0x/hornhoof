@@ -73,17 +73,23 @@ jobs:
           context: .
           file: ${{ matrix.file }}
           platforms: linux/amd64,linux/arm64
-          push: true
+          # The node image goes out through its own output, so the push and the timestamps it rewrites are one export.
+          push: ${{ matrix.name != 'hornhoof-node' }}
           # The source label links each package to this repository on GitHub; the rest tell Hornhoof what a build is.
+          # The node image carries none of a commit's own labels, timestamps or provenance, so its digest changes only
+          # when its own layers change.
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.version=${{ steps.build.outputs.version }}
-            org.opencontainers.image.revision=${{ github.sha }}
-            io.hornhoof.title=${{ steps.build.outputs.title }}
-            io.hornhoof.migrations=${{ steps.build.outputs.migrations }}
+            ${{ matrix.name != 'hornhoof-node' && format('org.opencontainers.image.version={0}', steps.build.outputs.version) || '' }}
+            ${{ matrix.name != 'hornhoof-node' && format('org.opencontainers.image.revision={0}', github.sha) || '' }}
+            ${{ matrix.name != 'hornhoof-node' && format('io.hornhoof.title={0}', steps.build.outputs.title) || '' }}
+            ${{ matrix.name != 'hornhoof-node' && format('io.hornhoof.migrations={0}', steps.build.outputs.migrations) || '' }}
           build-args: |
-            HORNHOOF_VERSION=${{ steps.build.outputs.version }}
-            HORNHOOF_COMMIT=${{ github.sha }}
+            ${{ matrix.name == 'hornhoof' && format('HORNHOOF_VERSION={0}', steps.build.outputs.version) || '' }}
+            ${{ matrix.name == 'hornhoof' && format('HORNHOOF_COMMIT={0}', github.sha) || '' }}
+            ${{ matrix.name == 'hornhoof-node' && 'SOURCE_DATE_EPOCH=315532800' || '' }}
+          outputs: ${{ matrix.name == 'hornhoof-node' && 'type=registry,rewrite-timestamp=true' || '' }}
+          provenance: ${{ matrix.name != 'hornhoof-node' }}
           # Every company updates to latest, so only a build of main moves it and the version; a run started by hand from a
           # branch pushes its commit's tag alone. The action skips the empty lines.
           tags: |

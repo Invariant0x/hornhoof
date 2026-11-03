@@ -22,7 +22,8 @@ COPY packages/protocol/package.json packages/protocol/
 COPY apps/server/package.json apps/server/
 COPY apps/node/package.json apps/node/
 COPY apps/web/package.json apps/web/
-RUN npm ci --omit=dev --workspace apps/node --workspace packages/protocol && npm cache clean --force
+RUN npm ci --omit=dev --workspace apps/node --workspace packages/protocol && npm cache clean --force \
+  && rm -rf node_modules/.package-lock.json node_modules/@hornhoof/server node_modules/@hornhoof/web
 
 # A browser for agents: Playwright with Chromium's headless shell for the target, and the Debian packages it needs.
 # Playwright picks the download by the machine it runs on; the override names the target instead.
@@ -43,6 +44,8 @@ RUN target="debian12-$(case "$TARGETARCH" in amd64) echo x64 ;; *) echo "$TARGET
 # (MIT), which Claude Code loads as its plugin and the node copies as skills for the other programs. All at pinned
 # commits. The grammars the tools parse with come along, so they run without fetching anything.
 FROM node:22.23.4-bookworm-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da AS quality
+# Fixed timestamp so pip wheel archives and Python bytecode headers stay byte-for-byte identical across builds.
+ARG SOURCE_DATE_EPOCH=315532800
 ENV TREE_SITTER_LANGUAGE_PACK_CACHE_DIR=/opt/hornhoof/grammars
 ARG CRAPPER_COMMIT=6fd92c4c9bcc56efb64a2f8743d5a2993bcfd42d
 ARG DRYER_COMMIT=66ff6d21a42c04afcad89c78a80066176d1294b0
@@ -88,7 +91,9 @@ COPY --from=browser /opt/ms-playwright /opt/ms-playwright
 COPY --from=browser /usr/local/lib/node_modules/playwright /usr/local/lib/node_modules/playwright
 ENV NODE_ENV=production
 WORKDIR /app
-COPY --from=deps /app /app
+COPY --from=deps /app/node_modules node_modules
+COPY packages/protocol/package.json packages/protocol/package.json
+COPY apps/node/package.json apps/node/package.json
 COPY --from=build /app/packages/protocol/dist packages/protocol/dist
 COPY --from=build /app/apps/node/dist apps/node/dist
 # git asks this for a repository's password; the node gives each turn its token in HH_GIT_PASSWORD.
@@ -111,9 +116,6 @@ RUN printf '%s\n' 'case ":$PATH:" in *:/data/tools/bin:*) ;; *) PATH=/data/tools
 # Agent programs are installed into /data/tools at first use and keep their sign-in in /data/home.
 # Set last, so nothing the build writes lands in /data.
 ENV PATH=/data/tools/bin:$PATH HOME=/data/home
-ARG HORNHOOF_VERSION=
-ARG HORNHOOF_COMMIT=
-ENV HORNHOOF_VERSION=$HORNHOOF_VERSION HORNHOOF_COMMIT=$HORNHOOF_COMMIT
 # Personal nodes run as node. The built-in node overrides the user to root in compose.yaml, to run each company key as its own user.
 USER node
 VOLUME /data

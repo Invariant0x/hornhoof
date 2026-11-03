@@ -59,4 +59,29 @@ describe('what the build runs', () => {
       'image: ${HORNHOOF_UPDATER_REF:-ghcr.io/invariant0x/hornhoof-updater:latest}',
     ]);
   });
+
+  /* An unchanged node image keeps the same digest across releases so running agent programs stay up during an update. */
+  it('builds the node image reproducibly without per-commit labels, timestamps or provenance', () => {
+    const workflow = read('.github/workflows/images.yml');
+    for (const label of ['org.opencontainers.image.version', 'org.opencontainers.image.revision', 'io.hornhoof.title', 'io.hornhoof.migrations']) {
+      const line = workflow.split('\n').find(l => l.includes(label));
+      expect(line).toContain("matrix.name != 'hornhoof-node'");
+    }
+    for (const arg of ['HORNHOOF_VERSION=', 'HORNHOOF_COMMIT=']) {
+      const line = workflow.split('\n').find(l => l.includes(arg));
+      expect(line).toContain("matrix.name == 'hornhoof'");
+    }
+    expect(workflow).toMatch(/matrix\.name == 'hornhoof-node' && 'SOURCE_DATE_EPOCH=\d+'/);
+    /* One export pushes the node image with its timestamps rewritten, not a second push next to it. */
+    expect(workflow).toContain("push: ${{ matrix.name != 'hornhoof-node' }}");
+    expect(workflow).toContain("outputs: ${{ matrix.name == 'hornhoof-node' && 'type=registry,rewrite-timestamp=true' || '' }}");
+    expect(workflow).toContain("provenance: ${{ matrix.name != 'hornhoof-node' }}");
+
+    const nodeDockerfile = read('apps/node/Dockerfile');
+    expect(nodeDockerfile).not.toMatch(/\bHORNHOOF_(VERSION|COMMIT)\b/);
+    expect(nodeDockerfile).toMatch(/^ARG SOURCE_DATE_EPOCH=\d+$/m);
+    expect(nodeDockerfile).toContain('rm -rf node_modules/.package-lock.json node_modules/@hornhoof/server node_modules/@hornhoof/web');
+    expect(nodeDockerfile).not.toContain('COPY --from=deps /app /app');
+    expect(nodeDockerfile).toContain('COPY --from=deps /app/node_modules node_modules');
+  });
 });

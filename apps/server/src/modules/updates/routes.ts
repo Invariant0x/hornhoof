@@ -10,7 +10,7 @@ import { holdTurns } from './drain.js';
 import type { UpdateRequest, UpdaterView } from './control.js';
 import type { Build } from './registry.js';
 
-export const UpdateBody = z.object({ version: z.string().min(1).max(128), whenIdle: z.boolean().default(false) });
+export const UpdateBody = z.object({ version: z.string().min(1).max(128), whenIdle: z.boolean().default(true) });
 const FULL_SHA = /^[0-9a-f]{40}$/;
 /* While an update waits for the agents, the working count is checked when it changes and this often besides. */
 const IDLE_CHECK_MS = 30_000;
