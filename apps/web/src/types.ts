@@ -447,6 +447,9 @@ export type MachineView = {
   running: Running;
   /* Older servers omit program snapshots. */
   programs?: ProgramInfo[] | null;
+  /* The node builds of its nodes online that are not the server's own node build, null for one that says none; null
+     while all are, or while the server tells none apart. */
+  otherBuild?: { server: string; nodes: (string | null)[] } | null;
 };
 
 /* What runs on a machine now: the employees whose program is there, busy while a turn of theirs runs, and the parts of

@@ -2,7 +2,7 @@ import { and, asc, eq, inArray, isNotNull, isNull, lte, sql } from 'drizzle-orm'
 import { hashToken } from '../../crypto/tokens.js';
 import type { Db } from '../../db/client.js';
 import { machines, nodes, subscriptions } from '../../db/schema.js';
-import type { NodeIdentity } from './hub.js';
+import { nodeIdentity, type NodeHub, type NodeIdentity } from './hub.js';
 
 /* A node that still has its key: its machine is connected and Hornhoof has not taken the node back. */
 export const liveNode = isNotNull(nodes.keyHash);
@@ -18,6 +18,16 @@ export async function expireStaleNodes(db: Db, now = new Date()): Promise<void> 
     .where(and(eq(nodes.status, 'ready'), lte(nodes.lastSeenAt, cutoff)))
     .returning({ subscriptionId: nodes.subscriptionId });
   await settlePlans(db, stale.map(n => n.subscriptionId));
+}
+
+/* The node builds of a machine's ready nodes that are not the one the server's nodes should be, each once; none while
+   all are, or while the server does not know its own and so tells none apart. A node that says no build is from before
+   nodes said one, so it is not of the server's build either. */
+export function otherBuild(hub: NodeHub, ids: string[], server: string | null): { server: string; nodes: (string | null)[] } | null {
+  if (!server) return null;
+  const said = ids.map(nodeIdentity).filter(id => hub.isReady(id)).map(id => hub.buildOf(id));
+  const other = [...new Set(said.filter(build => build !== server))];
+  return other.length ? { server, nodes: other } : null;
 }
 
 /* Never selects key_hash, so it cannot leak into a response. */

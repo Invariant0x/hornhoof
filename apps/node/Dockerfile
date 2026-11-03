@@ -132,5 +132,9 @@ ENV PATH=/data/tools/bin:$PATH HOME=/data/home
 # Personal nodes run as node. The built-in node overrides the user to root in compose.yaml, to run each company key as its own user.
 USER node
 VOLUME /data
+# The node build, which the node says in its hello: the last commit that changed this image's files, never the commit of
+# the build itself, so an unchanged image keeps its digest.
+ARG HORNHOOF_NODE_BUILD=
+ENV HORNHOOF_NODE_BUILD=$HORNHOOF_NODE_BUILD
 ENTRYPOINT ["node", "/app/apps/node/dist/main.js"]
 CMD ["run"]

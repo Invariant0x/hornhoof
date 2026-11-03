@@ -267,6 +267,9 @@ export const en = {
     signingIn: (machine: string) => `Signing in on ${machine}`,
     signingInNote: 'Only you see this terminal. Follow the steps in it, and Hornhoof keeps the sign-in for your other machines.',
     stopSignIn: 'Stop the sign-in',
+    /* Its machines are online, but their nodes are from before the sign-in from Hornhoof. */
+    oldNodes: (hosts: string) => `The nodes on ${hosts} are older than the sign-in from Hornhoof needs. To update them, run this command in a terminal on ${hosts}, then sign in again.`,
+    updateTrust: 'It moves the Hornhoof nodes on that machine to the new build and keeps their sign-ins and files.',
     signInErrors: {
       stopped: 'The sign-in was stopped.',
       unfinished: 'The sign-in ended before it finished, so nothing changed.',
@@ -404,6 +407,11 @@ export const en = {
     lend: 'Lend to test runs',
     lent: 'Lent to test runs',
     notLent: 'Not lent to test runs',
+    /* Its nodes are of another build than the one the server's nodes are: here is a list of theirs, or olderBuild for
+       nodes from before builds. */
+    otherBuild: 'Other build',
+    otherBuildNote: (here: string, server: string) => `Its nodes are not the server's build (${here} here, ${server} on the server). To update them, run the install command on it again without --join.`,
+    olderBuild: 'an older one',
   },
   notebook: {
     title: 'Notebook',

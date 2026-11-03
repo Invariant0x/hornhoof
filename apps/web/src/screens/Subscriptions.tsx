@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { api } from '../api';
+import { api, ApiFailure } from '../api';
 import { errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
 import { PROGRAM_NAMES, PROVIDER_NAMES } from '../providers';
 import type { JobView, Me, ShownCommand, SubView } from '../types';
 import { Ask } from '../ui/Ask';
-import type { ActiveCommand } from '../ui/CommandBox';
+import { CommandBox, type ActiveCommand } from '../ui/CommandBox';
 import { usePlanCommands } from './use-plan-commands';
 import { commandForPlan, SubscriptionCommandBlocks, SubscriptionInstall } from './SubscriptionCommands';
 import { ConnectPanel } from '../ui/ConnectPanel';
@@ -185,7 +185,7 @@ type PlanControls = {
   test: Test | undefined;
   asking: boolean;
   signing: Signing | null;
-  note: string | null;
+  note: SignNote | null;
   keying: boolean;
   setBudget: (sub: SubView, budget: number | null) => unknown;
   runTest: (sub: SubView) => unknown;
@@ -259,7 +259,21 @@ function PlanExtra({ sub: s, controls: c }: Omit<PlanProps, 'me'>) {
   </>;
 }
 
-type SignNote = { subId: string; text: string };
+/* command: the one that updates the nodes on the machines the text names. */
+type SignNote = { subId: string; text: string; command?: string };
+
+/* The machines whose nodes are too old for the sign-in, and the command that updates them, as the server names them. */
+function oldNodes(err: unknown): { machines: string[]; command: string } | null {
+  if (!(err instanceof ApiFailure) || err.reason !== 'signin_unsupported') return null;
+  const { machines, command } = err.details ?? {};
+  return Array.isArray(machines) && typeof command === 'string' ? { machines, command } : null;
+}
+
+/* What a sign-in that cannot start says under its plan: why, and for nodes too old for it, the command to update them. */
+function signNoteOf(t: Messages, subId: string, err: unknown): SignNote {
+  const old = oldNodes(err);
+  return old ? { subId, text: t.subs.oldNodes(old.machines.join(', ')), command: old.command } : { subId, text: errorText(t, err) };
+}
 
 /* A sign-in that cannot start says why next to the button that was pressed, not at the top of the page. */
 async function startSignIn(t: Messages, sub: SubView, fresh: boolean, started: (s: Signing) => void, note: (n: SignNote | null) => void): Promise<void> {
@@ -268,17 +282,18 @@ async function startSignIn(t: Messages, sub: SubView, fresh: boolean, started: (
     const { nodeId, hostname } = await api.post<{ nodeId: string; hostname: string }>(`/api/subscriptions/${sub.id}/signin`, { fresh });
     started({ subId: sub.id, nodeId, hostname });
   } catch (err) {
-    note({ subId: sub.id, text: errorText(t, err) });
+    note(signNoteOf(t, sub.id, err));
   }
 }
 
-/* Why the plan's last sign-in did not start or finish, under its buttons. */
-function SignInNote({ text }: { text: string | null }) {
-  return text ? (
-    <p className="test failed" role="status">
-      {text}
-    </p>
-  ) : null;
+/* Why the plan's last sign-in did not start or finish, under its buttons, with the command that helps when there is one. */
+function SignInNote({ note }: { note: SignNote | null }) {
+  const t = useT();
+  if (!note) return null;
+  return <>
+    <p className="test failed" role="status">{note.text}</p>
+    {note.command && <CommandBox command={note.command} trust={t.subs.updateTrust} />}
+  </>;
 }
 
 function SubscriptionDetails({ sub: s, me, controls, now }: PlanProps & { now: number }) {
@@ -301,7 +316,7 @@ function SubscriptionDetails({ sub: s, me, controls, now }: PlanProps & { now: n
         <SubscriptionInstall sub={s} ownerId={me.person.id} command={controls.command} onNew={() => controls.newCommand(s)} />
         <PlanSettings sub={s} me={me} controls={controls} />
         <PlanButtons sub={s} me={me} controls={controls} />
-        <SignInNote text={controls.note} />
+        <SignInNote note={controls.note} />
         {controls.asking && <Ask text={s.kind === 'api_key' ? t.subs.removeKeyAsk(name) : t.subs.removeAsk(name)} yes={t.subs.yesRemove} onYes={() => controls.remove(s)} onNo={() => controls.setConfirm(null)} />}
         {controls.test && <TestResult test={controls.test} />}
       </section>
@@ -425,7 +440,7 @@ export function Subscriptions({ me }: { me: Me }) {
             command: commands ? commandForPlan(commands, s, now) : undefined,
             test: tests[s.id], asking: confirm === s.id,
             signing: signing?.subId === s.id ? signing : null,
-            note: signNote?.subId === s.id ? signNote.text : null,
+            note: signNote?.subId === s.id ? signNote : null,
             keying: keyFor === s.id,
             setBudget, runTest, makeOrchestrator, signIn, setKeyFor, newCommand, setConfirm, remove, endSignIn, stopSignIn,
             done: () => { setKeyFor(null); void load(); },

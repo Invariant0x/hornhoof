@@ -85,6 +85,25 @@ describe('what the build runs', () => {
     expect(nodeDockerfile).toContain('COPY --from=deps /app/node_modules node_modules');
   });
 
+  /* The server marks nodes of another build than its own nodes: it needs the build each of them is, which a node image
+     carries only as the last commit that changed its files, so an unchanged node image keeps its digest. */
+  it('gives the node image and the server the same node build, the last commit that changed what the node image is made of', () => {
+    const workflow = read('.github/workflows/images.yml');
+    /* The images job alone, up to the next job: another job may check out the whole history for reasons of its own. */
+    const images = workflow.split(/\n(?= {2}[\w-]+:\n)/).find(part => part.startsWith('  images:'))!;
+    /* git log finds the last commit that changed a file only in the whole history: a shallow clone has one commit. */
+    expect(images).toMatch(/uses: actions\/checkout@[0-9a-f]{40} # v[\d.]+\n {8}with:\n {10}fetch-depth: 0\n/);
+    /* Its own line, so a failing script fails the step instead of passing an empty build on. */
+    expect(images).toContain('node=$(bash scripts/node-build.sh)\n');
+    expect(images).toContain('echo "node=$node" >> "$GITHUB_OUTPUT"');
+    const arg = images.split('\n').find(l => l.includes('HORNHOOF_NODE_BUILD='));
+    expect(arg).toContain("matrix.name != 'hornhoof-updater' && format('HORNHOOF_NODE_BUILD={0}', steps.build.outputs.node)");
+    expect(read('Dockerfile')).toMatch(/^ARG HORNHOOF_NODE_BUILD=\n/m);
+    expect(read('Dockerfile')).toMatch(/^ENV .*HORNHOOF_NODE_BUILD=\$HORNHOOF_NODE_BUILD/m);
+    const nodeDockerfile = read('apps/node/Dockerfile');
+    expect(nodeDockerfile).toMatch(/^ARG HORNHOOF_NODE_BUILD=\nENV HORNHOOF_NODE_BUILD=\$HORNHOOF_NODE_BUILD\n/m);
+  });
+
   /* Coverage for crapper comes from vitest's provider, and a provider of another version than vitest refuses to load. */
   it('installs the coverage provider with every part that runs vitest, at the version of vitest', () => {
     const json = (path: string) => JSON.parse(read(path));
