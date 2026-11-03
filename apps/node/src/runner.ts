@@ -4,7 +4,7 @@ import { cut, lastBytes, type Account, type AgentEvent, type JobError, type Limi
 import { agentFs, ownFs, type AgentFs } from './agent-fs.js';
 import type { JobUser } from './isolation.js';
 import { redact } from './redact.js';
-import { plainOutput, programEnded, type ProgramOutput } from './program-exit.js';
+import { plainOutput, programEnded, signalName, type ProgramOutput } from './program-exit.js';
 import { placeSkills, superpowersIn } from './skills.js';
 import { readSessions, rememberSession } from './state.js';
 import { prepareRepo, type Git } from './workspace.js';
@@ -74,6 +74,7 @@ export function jobDone(jobId: string, res: RunResult, secrets: string[]): JobDo
   return {
     type: 'job.done', jobId, ok: res.ok, sessionId: res.sessionId,
     result: redact(res.result, secrets), tail: lastBytes(redact(output, secrets)), error: res.error,
+    ...(program ? { exit: { code: program.code, signal: signalName(program.signal) } } : {}),
   };
 }
 

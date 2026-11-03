@@ -14,7 +14,7 @@ import { jobDone, tidy, type RunInput, type RunResult } from '../runner.js';
 import { claudePlugins } from '../skills.js';
 import type { ProgramOutput } from '../program-exit.js';
 import { Bridge } from './bridge.js';
-import { inputOf } from './input.js';
+import { atEmptyPrompt, inputOf } from './input.js';
 import { fromAgent } from './peer.js';
 import { StreamMask } from './mask.js';
 import { acceptClaudeDialogs, agyLog, claudeTranscript, findKimiWire, findRollout, prepareAgy, prepareKimi, rolloutFiles, type TermProgram } from './programs.js';
@@ -169,6 +169,9 @@ type Options = {
   toolsMs?: number;
   /* How long the host waits for the program to take a prompt before it presses Enter again. */
   enterWaitMs?: number;
+  /* How long a program may wait at its empty prompt, its screen still, in a turn of Hornhoof's it did not end, before the
+     host ends it. */
+  idleMs?: number;
   cols?: number;
   rows?: number;
   /* Where Linux tells which process holds a connection, so the bridge takes tool calls only from the agent's own program. */
@@ -198,6 +201,13 @@ const READY: Record<'codex' | 'kimi', (screen: string) => boolean> = {
 };
 /* How long a Claude Code that said it started may take to show its input box. */
 const INPUT_WAIT_MS = 10_000;
+/* A program at work moves its screen every second, with its spinner and the time it has worked; one at its empty prompt
+   with a still screen this long waits for what to do, though Hornhoof's turn in it never ended. */
+const IDLE_MS = 5 * 60_000;
+/* How often the host looks whether the screen of a program at work still moves. */
+const IDLE_LOOK_MS = 5000;
+/* What a program's screen showed last, since when, and when the host last looked. */
+type Still = { screen: string; since: number; looked: number };
 /* A program may change how a prompt's lines and spaces look, not its words. */
 const flat = (text: string) => text.replace(/\s+/g, ' ').trim();
 
@@ -232,6 +242,7 @@ export class TerminalHost {
   private readonly openMs: number;
   private readonly toolsMs: number;
   private readonly enterWaitMs: number;
+  private readonly idleMs: number;
   /* Views being opened, and those Hornhoof closed meanwhile. */
   private readonly viewsOpening = new Set<string>();
   private readonly viewsClosed = new Set<string>();
@@ -253,6 +264,7 @@ export class TerminalHost {
     this.openMs = opts.openMs ?? 8000;
     this.toolsMs = opts.toolsMs ?? 15_000;
     this.enterWaitMs = opts.enterWaitMs ?? 4000;
+    this.idleMs = opts.idleMs ?? IDLE_MS;
     this.cols = opts.cols ?? 160;
     this.rows = opts.rows ?? 48;
   }
@@ -413,6 +425,8 @@ export class TerminalHost {
         await this.opts.tmux.keys(a.name, 'Enter');
       }
 
+      /* The first look comes a while into the turn: a program that just took its prompt is at work. */
+      const still: Still = { screen: '', since: Date.now(), looked: Date.now() };
       for (;;) {
         this.drain(a);
         const message = await Promise.race([a.ended.promise, sleep(this.pollMs).then(() => null)]);
@@ -444,6 +458,7 @@ export class TerminalHost {
           const screen = await this.screen(job.key);
           return await fail(job.signedOut.test(screen) ? 'not_logged_in' : 'agent_failed', screen);
         }
+        if (await this.waitsAtPrompt(a, program.kind, still)) return await this.endWaiting(a, job);
       }
     } finally {
       a.typing = null;
@@ -454,6 +469,31 @@ export class TerminalHost {
         a.ended = null;
       }
     }
+  }
+
+  /* The program sits at its empty prompt and its screen stood still for idleMs: it waits for what to do. */
+  private async waitsAtPrompt(a: Agent, kind: TermProgram['kind'], still: Still): Promise<boolean> {
+    const now = Date.now();
+    if (now - still.looked < Math.min(this.idleMs / 4, IDLE_LOOK_MS)) return false;
+    still.looked = now;
+    const screen = await this.opts.tmux.screen(a.name, 0, true);
+    if (screen !== still.screen) {
+      Object.assign(still, { screen, since: now });
+      return false;
+    }
+    return now - still.since >= this.idleMs && atEmptyPrompt(kind, screen);
+  }
+
+  /* A program that waits at its prompt in Hornhoof's turn ends, so the turn and its session do not hang: the turn fails with
+     how the program ended and why, and the next turn starts the program again in its session. */
+  private async endWaiting(a: Agent, job: TermJob): Promise<RunResult> {
+    const why = `The program waited at its prompt for ${Math.round(this.idleMs / 1000)} s without ending Hornhoof's turn, so Hornhoof ended it.`;
+    const screen = await this.screen(job.key);
+    a.busy = false;
+    await this.opts.tmux.stop(a.name);
+    this.programEnded(a);
+    const res = await this.failedTurn(a, job, 'agent_failed', `${screen}\n\n${why}`);
+    return res.programOutput ? { ...res, programOutput: { ...res.programOutput, text: `${res.programOutput.text}\n${why}` } } : res;
   }
 
   private async failedTurn(a: Agent, job: TermJob, error: RunResult['error'], output?: string): Promise<RunResult> {

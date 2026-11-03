@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { inputOf } from '../src/terminal/input.js';
+import { atEmptyPrompt, inputOf } from '../src/terminal/input.js';
 
 const screen = (name: string) => readFileSync(new URL(`./fixtures/${name}-screen.txt`, import.meta.url), 'utf8');
 
@@ -58,5 +58,27 @@ describe('the input shown by a terminal program', () => {
   it('strips escapes without confusing color values with dim text', () => {
     expect(inputOf('codex', '\x1b[1m›\x1b[0m \x1b[38;2;0;2;0mabc\x1b[0m\n')).toBe('abc');
     expect(inputOf('codex', '› \x1b[2;38;2;0;2;0mSuggestion\x1b[22mabc\x1b[0m\n')).toBe('abc');
+  });
+});
+
+describe('a terminal program at its prompt with nothing typed', () => {
+  it('shows so in Claude Code, Codex and Kimi Code with an empty input, and not with words in it', () => {
+    expect(atEmptyPrompt('claude', screen('claude-idle'))).toBe(true);
+    expect(atEmptyPrompt('claude', screen('claude-busy').replace('❯ \n', '❯ abc\n'))).toBe(false);
+    expect(atEmptyPrompt('codex', screen('codex-busy'))).toBe(true);
+    expect(atEmptyPrompt('codex', screen('codex-typed'))).toBe(false);
+    expect(atEmptyPrompt('kimi', screen('kimi-empty'))).toBe(true);
+    expect(atEmptyPrompt('kimi', screen('kimi-typed'))).toBe(false);
+  });
+
+  it("reads Hornhoof's own screen for Antigravity, whose prompt is a bold ›", () => {
+    expect(atEmptyPrompt('antigravity', 'agy: done.\n\x1b[1m›\x1b[22m ')).toBe(true);
+    expect(atEmptyPrompt('antigravity', 'agy: done.\n\x1b[1m›\x1b[22m go on')).toBe(false);
+    expect(atEmptyPrompt('antigravity', '\x1b[1m›\x1b[22m fix the tests\nagy: running the tests')).toBe(false);
+  });
+
+  it('is not so on a screen with no prompt yet', () => {
+    expect(atEmptyPrompt('claude', 'Loading...')).toBe(false);
+    expect(atEmptyPrompt('kimi', 'Loading...')).toBe(false);
   });
 });

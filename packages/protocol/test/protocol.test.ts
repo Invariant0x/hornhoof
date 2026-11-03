@@ -13,6 +13,8 @@ const NODE: NodeMessage[] = [
   { type: 'job.started', jobId: 'job-1' },
   { type: 'job.done', jobId: 'job-1', ok: true, sessionId: 'abc', result: 'ready', tail: '', error: null },
   { type: 'job.done', jobId: 'job-2', ok: false, sessionId: null, result: '', tail: 'boom', error: 'timeout' },
+  { type: 'job.done', jobId: 'job-3', ok: false, sessionId: 'abc', result: '', tail: 'boom', error: 'agent_failed', exit: { code: 1, signal: null } },
+  { type: 'job.done', jobId: 'job-4', ok: false, sessionId: null, result: '', tail: '', error: 'agent_failed', exit: { code: null, signal: 'SIGTERM' } },
   { type: 'removed' },
   { type: 'job.event', jobId: 'job-1', seq: 0, event: { kind: 'text', text: 'Hello' } },
   { type: 'job.event', jobId: 'job-1', seq: 1, event: { kind: 'tool', name: 'propose_structure', input: '{"brief":"Shoes"}' } },
@@ -38,6 +40,12 @@ describe('node messages', () => {
     expect(parseNodeMessage(JSON.stringify({ type: 'hack' }))).toBeNull();
     expect(parseNodeMessage(JSON.stringify({ type: 'job.done', jobId: 'x', ok: true }))).toBeNull();
     expect(parseNodeMessage(JSON.stringify({ type: 'status', loggedIn: true, limits: { status: 'fine', windows: [] } }))).toBeNull();
+  });
+
+  it("refuse a job's end whose program exit is not a whole code and a signal's name", () => {
+    const done = { type: 'job.done', jobId: 'x', ok: false, sessionId: null, result: '', tail: '', error: 'agent_failed' };
+    expect(parseNodeMessage(JSON.stringify({ ...done, exit: { code: 1.5, signal: null } }))).toBeNull();
+    expect(parseNodeMessage(JSON.stringify({ ...done, exit: { code: null, signal: 'S'.repeat(41) } }))).toBeNull();
   });
 });
 

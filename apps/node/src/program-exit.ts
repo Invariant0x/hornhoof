@@ -6,11 +6,17 @@ export type ProgramOutput = ProgramExit & { text: string; complete: boolean };
 
 export const plainOutput = (output: string): string => stripEscapes(output).replace(/\r/g, '');
 
+/* A signal by its name, such as SIGTERM, as Hornhoof keeps it; a number this system has no name for stays a number. */
+export function signalName(signal: ProgramExit['signal']): string | null {
+  if (typeof signal !== 'number') return signal;
+  return Object.entries(constants.signals).find(([, value]) => value === signal)?.[0] ?? String(signal);
+}
+
 function signalText(signal: ProgramExit['signal']): string {
   if (signal === null) return 'none';
   const number = typeof signal === 'number' ? signal : constants.signals[signal];
-  const name = typeof signal === 'string' ? signal : Object.entries(constants.signals).find(([, value]) => value === number)?.[0];
-  return `${name?.replace(/^SIG/, '') ?? 'UNKNOWN'} (${number})`;
+  const name = signalName(signal);
+  return `${/^\d+$/.test(name!) ? 'UNKNOWN' : name!.replace(/^SIG/, '')} (${number})`;
 }
 
 /* Capture and exit information go last, so both survive the job tail and the failure collector's shorter preview. */

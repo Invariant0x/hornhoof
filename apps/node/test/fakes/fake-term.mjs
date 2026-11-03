@@ -6,7 +6,7 @@
 // answers (as when a person stops it with Escape: no stop hook), EXIT ends the
 // program, SECRET prints the value of FAKE_SECRET, MUTE says on the screen only that it will not answer and ends the turn with
 // no answer, as Codex does when its provider refuses the work. INTERRUPT logs what Claude Code logs when a person stops a turn with
-// Escape, and calls no stop hook. CLEAR starts a new session, as /clear does. FAKE_MCP_LIST_MS makes it list its Hornhoof
+// Escape, and calls no stop hook. TICK works 3 s under a line counting the time. CLEAR starts a new session, as /clear does. FAKE_MCP_LIST_MS makes it list its Hornhoof
 // tools that long after it started, as Claude Code connects to its MCP servers, and show "tools: ok" or "tools: failed".
 // FAKE_LOSE_ENTER misses the first Enter, as Claude Code just started can: the line stays in its input until the next one.
 // FAKE_START_MS makes it say it started that long after it shows, as Claude Code can while it loads. FAKE_DEAF_MS makes
@@ -124,6 +124,14 @@ async function take(line) {
   if (line.includes('SLOW')) {
     process.stdout.write('❯ ');
     await new Promise(r => setTimeout(r, 2000));
+  }
+  // TICK works for 3 s with its prompt empty under a line that counts the time, as Claude Code's spinner does.
+  if (line.includes('TICK')) {
+    for (let i = 0; i < 12; i++) {
+      process.stdout.write(`✻ Working ${i * 250} ms\n❯ `);
+      await new Promise(r => setTimeout(r, 250));
+    }
+    process.stdout.write('\n');
   }
   const answer = line === 'SECRET' ? `the key is ${process.env.FAKE_SECRET}` : `echo: ${line}${context ? `\n${context}` : ''}`;
   const write = () => appendFileSync(log, JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: answer }] } }) + '\n');

@@ -81,6 +81,7 @@ describe('redaction before the program output line boundary', () => {
   function check(done: Extract<NodeMessage, { type: 'job.done' }>) {
     expect(done.error).toBe('agent_failed');
     expect('programOutput' in done).toBe(false);
+    expect(done.exit).toEqual({ code: 3, signal: null });
     expect(done.tail.includes(suffix)).toBe(false);
     expect(done.tail.includes('[hidden]')).toBe(true);
     expect(done.tail.split('\n').filter(line => line.startsWith('ordinary-'))).toHaveLength(49);
