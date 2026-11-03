@@ -14,7 +14,7 @@ import { NewTask } from '../ui/NewTask';
 import { PersonButton } from '../ui/PersonButton';
 import { RepoSettings } from '../ui/RepoSettings';
 import { byState, TaskRow } from '../ui/TaskRow';
-import { Pulse, pulseSeconds, toD, useReducedMotion, type Point } from '../ui/wires';
+import { LiveWay, Pulse, pulseSeconds, toD, useReducedMotion, type Point } from '../ui/wires';
 import { useWorkLines } from '../ui/work-lines';
 import { arrowD, CH, CW, CY, FT, FW, HH, HW, PH, PW, schemaLayout, stepPaths, type Line, type Schema } from './schema';
 
@@ -176,16 +176,18 @@ function Wire({ l }: { l: Line }) {
   );
 }
 
-/* One solid path from the head's card to each employee's, so its color fills the whole way at any zoom: blue while the
-   employee works on the head's task, yellow for five minutes after it gave a result back. */
-function MemberLines({ s, toMember, stateOf }: { s: Schema; toMember(id: string): Point[] | null; stateOf(up: string, down: string): LineState }) {
+/* The way from the head's card to each employee's runs while the employee works on the head's task, down to the employee,
+   and for five minutes after it gave a result back, up to the head. */
+function MemberLines({ s, toMember, stateOf, still }: { s: Schema; toMember(id: string): Point[] | null; stateOf(up: string, down: string): LineState; still: boolean }) {
   const head = s.head;
   if (!head) return null;
   return s.frames.flatMap(f =>
     f.members.map(m => {
       const state = stateOf(head.id, m.e.id);
-      const pts = state === 'quiet' ? null : toMember(m.e.id);
-      return pts && <path key={m.e.id} className={`tr work ${state}`} data-work={m.e.id} d={toD(pts)} />;
+      const down = state === 'quiet' ? null : toMember(m.e.id);
+      if (!down) return null;
+      const back = state === 'yellow';
+      return <LiveWay key={m.e.id} pts={back ? [...down].reverse() : down} speed={PULSE_SPEED} tone={back ? 'a' : 'c'} still={still} data={{ 'data-work': m.e.id }} />;
     }),
   );
 }
@@ -454,7 +456,7 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
             ))}
             {lines('rl')}
             {s.report && <Wire l={{ cls: 'pl', pts: s.report.pts, arrow: true }} />}
-            <MemberLines s={s} toMember={paths.toMember} stateOf={stateOf} />
+            <MemberLines s={s} toMember={paths.toMember} stateOf={stateOf} still={still} />
             {shots.map(x => (
               <Pulse key={x.key} pts={x.pts} speed={PULSE_SPEED} once tone={x.tone} />
             ))}

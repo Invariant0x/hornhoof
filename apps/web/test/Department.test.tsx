@@ -12,6 +12,10 @@ import { CARD, decisions, DEV_ORG, ME, mockApi, REQUESTS, ROSTER, TASK_DETAIL, T
 import { decl, px, rulesFor } from './css';
 import { fakeStream } from './fake-stream';
 
+/* The dots that keep running along one way of the department's schema. */
+const runningDots = (tone: 'c' | 'a', d: string) =>
+  [...document.querySelectorAll(`.dview circle.pt.${tone} animateMotion`)].filter(m => m.getAttribute('path') === d && m.getAttribute('repeatCount') === 'indefinite');
+
 const EVENTS = '/api/agents/orchestrator/events?after=0';
 const READY = { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 };
 const DEV_TASKS = 'GET /api/tasks?status=open&department=d2';
@@ -174,10 +178,12 @@ describe('Department view', () => {
     const lines = [{ upstreamAgentId: 'b0', downstreamAgentId: 'b1', working: true, workEpoch: 1, returnedEpoch: null, returnedAt: null }];
     shell({}, { ...DEV_ORG, serverNow: new Date().toISOString(), departments: [{ ...dev!, workLines: lines }] });
     await flyIn(user);
-    const work = document.querySelector('.wires path.work[data-work="b1"]');
-    expect(work).toHaveClass('blue');
-    /* From inside the head's card down the bus and the role's spine into the employee's. */
-    expect(work!.getAttribute('d')).toBe(toD(stepPaths(schemaLayout(dev!, 1)).toMember('b1')!));
+    const work = document.querySelector('.wires path[data-work="b1"]');
+    /* Dashes run from inside the head's card down the bus and the role's spine into the employee's, with two dots on them. */
+    expect(work).toHaveClass('tr', 'live', 'c');
+    const d = toD(stepPaths(schemaLayout(dev!, 1)).toMember('b1')!);
+    expect(work!.getAttribute('d')).toBe(d);
+    expect(runningDots('c', d)).toHaveLength(2);
   });
 
   it('turns the line yellow over its whole length when the employee gave a result back, for what is left of five minutes', async () => {
@@ -191,8 +197,12 @@ describe('Department view', () => {
     const lines = [{ upstreamAgentId: 'b0', downstreamAgentId: 'b1', working: false, workEpoch: 4, returnedEpoch: 4, returnedAt: new Date(now - 4.5 * 60_000).toISOString() }];
     shell({}, { ...DEV_ORG, serverNow: new Date(now).toISOString(), departments: [{ ...dev!, workLines: lines }] });
     await flyIn(user);
-    const work = () => document.querySelector('.wires path.work[data-work="b1"]');
-    expect(work()).toHaveClass('yellow');
+    const work = () => document.querySelector('.wires path[data-work="b1"]');
+    /* Amber dashes and dots run back up, from the employee's card to the head's. */
+    expect(work()).toHaveClass('tr', 'live', 'a');
+    const back = [...stepPaths(schemaLayout(dev!, 1)).toMember('b1')!].reverse();
+    expect(work()!.getAttribute('d')).toBe(toD(back));
+    expect(runningDots('a', toD(back))).toHaveLength(2);
     await act(() => vi.advanceTimersByTimeAsync(30_000));
     expect(work()).toBeNull();
   });

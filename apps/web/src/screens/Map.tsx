@@ -11,7 +11,7 @@ import { usePanZoom, ZoomBar } from '../ui/canvas';
 import { Edge } from '../ui/Edge';
 import { LogoMark, PersonIcon } from '../ui/icons';
 import { PersonButton } from '../ui/PersonButton';
-import { Pulse, pulseSeconds, toD, useReducedMotion, type Point } from '../ui/wires';
+import { LiveWay, Pulse, pulseSeconds, toD, useReducedMotion, type Point } from '../ui/wires';
 import { useWorkLines } from '../ui/work-lines';
 import { clock } from './Subscriptions';
 
@@ -209,27 +209,24 @@ function contentBounds(org: Org): { x0: number; y0: number; x1: number; y1: numb
 
 type Shot = { key: number; pts: Point[]; tone: 'c' | 'a' };
 
-/* One solid path over each department's whole trace, so its color fills it at any zoom: blue while its head works on the
-   orchestrator's task, yellow for five minutes after it gave a result back. */
-function WorkLines({ org, spots, stateOf }: { org: Org; spots: DeptSpot[]; stateOf(up: string, down: string): LineState }) {
+/* The way to each department runs while its head works on the orchestrator's task, down the trace to the card, and for
+   five minutes after it gave a result back, up the trace to the hub. */
+function WorkLines({ org, spots, stateOf, still }: { org: Org; spots: DeptSpot[]; stateOf(up: string, down: string): LineState; still: boolean }) {
   const orchestrator = org.orchestrator;
   if (!orchestrator) return null;
   return org.departments.map((d, i) => {
     const head = d.employees.find(e => e.kind === 'head');
     const state = head ? stateOf(orchestrator.id, head.id) : 'quiet';
-    return state !== 'quiet' && <path key={d.id} className={`tr work ${state}`} data-work={d.id} d={toD(spots[i]!.path)} />;
+    if (state === 'quiet') return null;
+    const down = spots[i]!.path;
+    const back = state === 'yellow';
+    return <LiveWay key={d.id} pts={back ? [...down].reverse() : down} speed={PULSE_SPEED} tone={back ? 'a' : 'c'} still={still} data={{ 'data-work': d.id }} />;
   });
 }
 
-/* Each person decisions wait for gets a signal of their own: a solid amber way from the hub to their card, with a dot
-   running toward them unless the person watching asks for less motion. */
+/* Each person decisions wait for gets a way of their own, running amber from the hub to their card. */
 function DecisionSignals({ ways, still }: { ways: { id: string; pts: Point[] }[]; still: boolean }) {
-  return ways.map(w => (
-    <g key={w.id}>
-      <path className="tr ask" data-ask={w.id} d={toD(w.pts)} />
-      {!still && <Pulse pts={w.pts} speed={PULSE_SPEED} tone="a" />}
-    </g>
-  ));
+  return ways.map(w => <LiveWay key={w.id} pts={w.pts} speed={PULSE_SPEED} tone="a" still={still} data={{ 'data-ask': w.id }} />);
 }
 
 /* The line under a person's name: their title, else the department they belong to or what they reach. */
@@ -452,7 +449,7 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator, inside = false, 
             <path key={depts[i]!.id} className="tr" data-wire={depts[i]!.id} d={toD(s.path)} />
           ))}
           {spots.map((s, i) => s.path.length > 2 && <circle key={depts[i]!.id} className="via" cx={s.path[2]![0]} cy={s.path[2]![1]} r="4" />)}
-          <WorkLines org={org} spots={spots} stateOf={stateOf} />
+          <WorkLines org={org} spots={spots} stateOf={stateOf} still={still} />
           <DecisionSignals ways={asked} still={still} />
           {shots.map(s => (
             <Pulse key={s.key} pts={s.pts} speed={PULSE_SPEED} once tone={s.tone} />

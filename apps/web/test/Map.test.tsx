@@ -33,6 +33,11 @@ const STATES: [string, SubView | null, string, string][] = [
 
 
 /* The dots that run once, one per message; the signal to a person decisions wait for keeps running and is not counted. */
+/* The dots that keep running along one way, by where each starts on it: null at the start, a negative begin further on. */
+const runningDots = (container: HTMLElement, tone: 'c' | 'a', d: string) =>
+  [...container.querySelectorAll(`circle.pt.${tone} animateMotion`)].filter(m => m.getAttribute('path') === d && m.getAttribute('repeatCount') === 'indefinite' && m.getAttribute('keyPoints') === null).map(m => m.getAttribute('begin'));
+/* The same SVG path, drawn from its last point to its first. */
+const backwards = (d: string) => `M ${d.slice(2).split(' L ').reverse().join(' L ')}`;
 const shots = (container: HTMLElement, tone: 'c' | 'a') => [...container.querySelectorAll(`circle.pt.${tone}`)].filter(c => c.querySelector('animateMotion')?.getAttribute('repeatCount') === '1');
 describe('orchestratorStatus', () => {
   it.each(STATES)('says where the orchestrator runs: %s', (_, sub, english, russian) => {
@@ -235,14 +240,13 @@ describe('Map', () => {
     expect(maria).not.toHaveClass('attn');
     expect(maria.querySelector('.chip-count')).toBeNull();
     /* One signal per person, each from the hub's edge down to the bottom of their card, with a dot running that way. */
-    const signals = [...container.querySelectorAll('.wires path.ask')];
+    const signals = [...container.querySelectorAll('.wires path[data-ask]')];
     expect(signals.map(s => s.getAttribute('data-ask'))).toEqual(['p1', 'p4']);
     for (const s of signals) {
       const d = s.getAttribute('d')!;
       expect(d.startsWith('M 600 300 ')).toBe(true);
-      const runs = [...container.querySelectorAll('circle.pt.a animateMotion')].filter(m => m.getAttribute('path') === d);
-      expect(runs.map(m => m.getAttribute('repeatCount'))).toEqual(['indefinite']);
-      expect(runs[0]!.getAttribute('keyPoints')).toBeNull();
+      expect(s).toHaveClass('tr', 'live', 'a');
+      expect(runningDots(container, 'a', d)).toHaveLength(2);
     }
     expect(container.querySelector('.hub')).toHaveClass('attn');
     fireEvent.click(dan);
@@ -262,7 +266,7 @@ describe('Map', () => {
     counts = { p1: 0, p2: 0, p4: 0 };
     stream.send({ type: 'requests' });
     expect(await screen.findByRole('button', { name: 'Dan: no decisions wait' })).not.toHaveClass('attn');
-    expect(container.querySelectorAll('.chip-count, .wires path.ask, .attn')).toHaveLength(0);
+    expect(container.querySelectorAll('.chip-count, .wires path[data-ask], .attn')).toHaveLength(0);
   });
 
   it('keeps the signal and the blinking calm and still for a person who asks for less motion', async () => {
@@ -270,7 +274,7 @@ describe('Map', () => {
     mockApi({ 'GET /api/org': [200, waiting({ p1: 0, p2: 0, p4: 3 })] });
     const { container } = render(<MapScreen {...PROPS} />);
     expect(await screen.findByRole('button', { name: 'Dan: 3 decisions wait' })).toHaveClass('attn');
-    expect(container.querySelectorAll('.wires path.ask')).toHaveLength(1);
+    expect(container.querySelectorAll('.wires path[data-ask]')).toHaveLength(1);
     expect(container.querySelectorAll('animateMotion')).toHaveLength(0);
   });
 
@@ -343,7 +347,7 @@ describe('Map', () => {
       expect(shots(container, 'c')).toHaveLength(1);
       act(() => vi.advanceTimersByTime(10_000));
       expect(container.querySelectorAll('circle.pt')).toHaveLength(0);
-      expect(container.querySelectorAll('.wires path.live, .wires path.work')).toHaveLength(0);
+      expect(container.querySelectorAll('.wires path.live, .wires path[data-work]')).toHaveLength(0);
     } finally {
       vi.useRealTimers();
     }
@@ -362,11 +366,12 @@ describe('Map', () => {
     mockApi({ 'GET /api/org': [200, org] });
     const { container } = render(<MapScreen {...PROPS} />);
     await screen.findByText('Sales');
-    const work = container.querySelector('.wires path.work[data-work="d1"]');
-    expect(work).toHaveClass('blue');
-    /* The whole trace, from the hub to the card. */
+    const work = container.querySelector('.wires path[data-work="d1"]');
+    /* Dashes run along the whole trace from the hub to the card, as on every live way. */
+    expect(work).toHaveClass('tr', 'live', 'c');
     expect(work!.getAttribute('d')).toBe(container.querySelector('.wires [data-wire="d1"]')!.getAttribute('d'));
-    expect(container.querySelector('.wires path.work[data-work="d2"]')).toBeNull();
+    expect(runningDots(container, 'c', work!.getAttribute('d')!)).toEqual([null, expect.stringMatching(/^-\d+\.\d\ds$/)]);
+    expect(container.querySelector('.wires path[data-work="d2"]')).toBeNull();
   });
 
   it('turns the line yellow over its whole length when the head gave a result back, for what is left of five minutes', async () => {
@@ -385,11 +390,14 @@ describe('Map', () => {
     mockApi({ 'GET /api/org': [200, org] });
     const { container } = render(<MapScreen {...PROPS} />);
     await screen.findByText('Sales');
-    const work = () => container.querySelector('.wires path.work[data-work="d1"]');
-    expect(work()).toHaveClass('yellow');
-    expect(work()!.getAttribute('d')).toBe(container.querySelector('.wires [data-wire="d1"]')!.getAttribute('d'));
+    const work = () => container.querySelector('.wires path[data-work="d1"]');
+    /* Amber dashes and dots run back up the trace, from the card to the hub. */
+    expect(work()).toHaveClass('tr', 'live', 'a');
+    const trace = container.querySelector('.wires [data-wire="d1"]')!.getAttribute('d')!;
+    expect(work()!.getAttribute('d')).toBe(backwards(trace));
+    expect(runningDots(container, 'a', backwards(trace))).toHaveLength(2);
     await act(() => vi.advanceTimersByTimeAsync(2.5 * 60_000));
-    expect(work()).toHaveClass('yellow');
+    expect(work()).toHaveClass('live', 'a');
     await act(() => vi.advanceTimersByTimeAsync(30_000));
     expect(work()).toBeNull();
   });
