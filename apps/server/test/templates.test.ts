@@ -394,6 +394,9 @@ describe('templates', () => {
 
   it('starts work that waits for another by itself, and has each executor merge into the turn branch', () => {
     for (const id of ['hh-lead-tasks', 'hh-break-down']) expect(templates.skills.get(id)!.body, id).toContain('`after`');
+    expect(templates.skills.get('hh-lead-tasks')!.body).toMatch(/touch(es)? the same files or records goes to the same member, as one batch/);
+    expect(templates.skills.get('hh-lead-tasks')!.body).toMatch(/between different members is only for a finished result/);
+    expect(templates.skills.get('hh-lead-tasks')!.body).toMatch(/moves or stays with the one it waits on, including when handing work to new employees/);
     for (const id of ['dev-gates', 'dev-ci-release', 'dev-worktrees']) expect(templates.skills.get(id)!.body, id).toContain("the turn's branch");
     expect(templates.roles.get('DEV-OPS')!.body).toContain("the turn's branch");
     expect([...roles, ...skills].map(x => x.body).join('\n')).not.toMatch(/merge the turn's task branches/);
