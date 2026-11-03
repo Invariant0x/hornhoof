@@ -44,6 +44,12 @@ describe('Russian vocabulary', () => {
   it('calls them машина and нода everywhere', () => {
     expect(textsOf(ru).filter(t => /узел|узл|компьютер/i.test(t))).toEqual([]);
   });
+
+  it('writes е without dots and uses no em dashes in either language', () => {
+    expect(textsOf(ru).filter(t => /[\u0451\u0401]/.test(t))).toEqual([]);
+    expect(textsOf(en).filter(t => t.includes('\u2014'))).toEqual([]);
+    expect(textsOf(ru).filter(t => t.includes('\u2014'))).toEqual([]);
+  });
 });
 
 describe('The agent in the center', () => {

@@ -1,8 +1,8 @@
-import type { Limits, ModelOption, NodeLoad, ProviderId, TemplateKey } from '@hornhoof/protocol';
+import type { FailureKind, Limits, ModelOption, NodeLoad, ProviderId, TemplateKey } from '@hornhoof/protocol';
 import type { RoleEffort } from '@hornhoof/protocol/efforts';
-import type { TurnAlarm, TurnProgram, WorkLine } from '@hornhoof/protocol/map';
+import type { ProgramRetry, TurnAlarm, TurnProgram, TurnRetry, WorkLine } from '@hornhoof/protocol/map';
 
-export type { Limits, ModelOption, ProviderId, TemplateKey, TurnAlarm, WorkLine };
+export type { FailureKind, Limits, ModelOption, ProgramRetry, ProviderId, TemplateKey, TurnAlarm, TurnRetry, WorkLine };
 
 /* Template text that comes in both languages. */
 export type Lang = { en: string; ru: string };
@@ -91,6 +91,9 @@ export type EmployeeTask = { id: string; number: number; title: string; stage: n
 
 export type ProgramView = TurnProgram;
 
+/* The latest failed turn of an agent, as /api/org and /api/agents/:id give it; at is Unix epoch milliseconds. */
+export type TurnFailure = { kind: FailureKind; text: string; at: number };
+
 /* An employee as the map lists it: the head first, then members in the order they were hired. */
 export type Employee = {
   id: string;
@@ -116,6 +119,10 @@ export type Employee = {
   program: ProgramView | null;
   /* The server's alarm about its running turn, or null. */
   alarm: TurnAlarm | null;
+  /* Hornhoof's waiting retry after a failed turn, or null. */
+  retry: TurnRetry | null;
+  /* Its latest failed turn, or null. */
+  failure: TurnFailure | null;
 };
 
 /* A role a department's employees hold, in its template's order; gate: where it stands among the default gates. */
@@ -150,7 +157,7 @@ export type Repository = { url: string; branch: string; tokenLast4: string | nul
 export type Org = {
   company: Company;
   /* limitUntil: his plan is at its limit until then, and he waits for the reset. */
-  orchestrator: { id: string; name: string; model: string; effort: string | null; subscription: SubView | null; machine?: Machine | null; context: number | null; limitUntil?: string | null; program: ProgramView | null; alarm: TurnAlarm | null } | null;
+  orchestrator: { id: string; name: string; model: string; effort: string | null; subscription: SubView | null; machine?: Machine | null; context: number | null; limitUntil?: string | null; program: ProgramView | null; alarm: TurnAlarm | null; retry: TurnRetry | null; failure: TurnFailure | null } | null;
   agents: { total: number; working: number };
   /* People who see the whole company, and deputies whose reach spans more than one top-level department. */
   people: (PersonView & { deputy?: boolean; departments?: string[] })[];
@@ -200,6 +207,10 @@ export type AgentCardView = {
   /* The machine its program runs on; none before its first turn, or on a key. */
   machine: Machine | null;
   state: AgentState;
+  program?: ProgramView | null;
+  alarm?: TurnAlarm | null;
+  retry: TurnRetry | null;
+  failure: TurnFailure | null;
   skills: CardSkill[];
   parts: Part[];
   raw: string;

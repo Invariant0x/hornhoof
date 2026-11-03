@@ -845,11 +845,15 @@ body:has(.dview) .version-mark { display: none; }
    keeps its width and place under it. */
 .body.page ~ .acard, .body.page ~ .orch { bottom: 0; }
 .ac-body { flex: 1 1 auto; min-height: 0; overflow: auto; display: grid; gap: 18px; align-content: start; padding: 16px 18px 20px; }
-.ac-head { display: grid; gap: 4px; justify-items: start; }
+.ac-head { display: grid; gap: 4px; justify-items: start; min-width: 0; }
 .ac-head h3 { font-size: 22px; }
 .ac-head p { margin: 0; }
 .ac-head .btn { margin-top: 8px; }
 .ac-state { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.ac-state .ast { flex: 0 1 auto; max-width: 100%; box-sizing: border-box; white-space: normal; }
+.ac-failure { max-width: 100%; font-size: 12.5px; color: var(--pink-ink); }
+.ac-failure summary { cursor: pointer; overflow-wrap: anywhere; }
+.ac-failure pre { margin: 6px 0 0; padding: 8px 10px; max-height: 160px; overflow: auto; border: 1px solid var(--line2); background: var(--surface2); color: var(--ink); font-family: var(--f-mono); font-size: 12px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
 .ac-pick { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; min-width: 0; }
 .ac-note { margin: -8px 0 0; font-size: 13px; color: var(--ok); }
 .acard h4 { margin: 0 0 8px; font-family: var(--f-display); font-size: 15px; font-weight: 600; }

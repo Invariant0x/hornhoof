@@ -52,6 +52,59 @@ describe('AgentCard', () => {
     expect(screen.queryByRole('region', { name: 'Turns cut off by a node restart' })).not.toBeInTheDocument();
   });
 
+  it('shows the latest failed turn under the state in English and Russian, with tooltip and collapsed details clipped to 300 characters', async () => {
+    const at = new Date(2026, 10, 3, 14, 2).getTime();
+    const rawText = `529 Overloaded: ${'x'.repeat(340)}`;
+    const clipped = `${rawText.slice(0, 299)}…`;
+    expect(clipped).toHaveLength(300);
+
+    for (const [lang, expected] of [
+      ['en', 'Last turn failed at 14:02: provider overloaded'],
+      ['ru', 'Последний ход не удался в 14:02: провайдер перегружен'],
+    ] as const) {
+      localStorage.setItem('hh-lang', lang);
+      open({ 'GET /api/agents/b1': [200, { ...CARD, failure: { kind: 'overloaded', text: rawText, at } }] });
+      const summary = await screen.findByText(expected);
+      expect(summary).toHaveAttribute('title', clipped);
+      const details = summary.closest('details');
+      expect(details).not.toBeNull();
+      expect(details).not.toHaveAttribute('open');
+      expect(details?.previousElementSibling).toHaveClass('ac-state');
+      const pre = details?.querySelector('pre');
+      expect(pre?.textContent).toBe(clipped);
+      expect(pre?.textContent).toHaveLength(300);
+      cleanup();
+      localStorage.removeItem('hh-lang');
+    }
+
+    open({ 'GET /api/agents/b1': [200, { ...CARD, failure: { kind: 'rate_limited', text: '429 Too Many Requests', at } }] });
+    const shortLine = await screen.findByText('Last turn failed at 14:02: too many requests');
+    expect(shortLine).toHaveAttribute('title', '429 Too Many Requests');
+    expect(shortLine.closest('details')?.querySelector('pre')?.textContent).toBe('429 Too Many Requests');
+  });
+
+  it('shows nothing under the state when failure is null, and shows a waiting retry on the state line', async () => {
+    open();
+    await screen.findByRole('heading', { name: 'Bruno' });
+    expect(screen.queryByText(/Last turn failed/)).not.toBeInTheDocument();
+    expect(document.querySelector('.ac-failure')).toBeNull();
+    cleanup();
+
+    const retryAt = new Date(2026, 10, 3, 14, 5).getTime();
+    for (const [lang, expected] of [
+      ['en', 'retry 2 of 4 at 14:05 (provider overloaded)'],
+      ['ru', 'повтор 2 из 4 в 14:05 (провайдер перегружен)'],
+    ] as const) {
+      localStorage.setItem('hh-lang', lang);
+      open({ 'GET /api/agents/b1': [200, { ...CARD, retry: { attempt: 2, max: 4, at: retryAt, kind: 'overloaded' } }] });
+      const line = await screen.findByText(expected);
+      expect(line.closest('.ac-state')).not.toBeNull();
+      expect(line).toHaveClass('ast', 'calm');
+      cleanup();
+      localStorage.removeItem('hh-lang');
+    }
+  });
+
   it('shows the skills as a checklist with locked core skills', async () => {
     const user = userEvent.setup();
     const { calls } = open({ 'PATCH /api/agents/b1': [200, CARD] });
