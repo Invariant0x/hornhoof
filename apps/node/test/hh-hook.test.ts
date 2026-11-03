@@ -27,6 +27,7 @@ describe('hh-hook', () => {
     try {
       expect((await run('node', [HOOK, 'prompt', '{"prompt":"hi"}'], { env })).stdout).toBe('said to /prompt\n');
       expect((await run('node', [HOOK, 'status', '{}'], { env })).stdout).toBe('');
+      expect((await run('node', [HOOK, 'invocation', '{}'], { env })).stdout).toBe('');
     } finally {
       bridge.close();
     }

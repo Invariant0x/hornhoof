@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import type { Limits } from '@hornhoof/protocol';
 import { ownFs, type AgentFs } from '../agent-fs.js';
 import { CRED_FILES } from '../credentials.js';
@@ -130,29 +129,25 @@ export const kimiProgram: TermProgram = {
   limits: kimiPlanLimits,
 };
 
-/* The terminal of an agent on Antigravity CLI, which runs agy's print mode for each message. */
-export const AGY_SCREEN = fileURLToPath(new URL('../../hh-agy.cjs', import.meta.url));
-
-/* Where hh-agy puts what agy prints, for the host to read. */
-export const agyLog = (workDir: string) => join(workDir, '.hh-agy.jsonl');
-
 export const agyProgram: TermProgram = {
   kind: 'antigravity',
   launch({ bin, home, workDir, sessionId, model, effort, urls }) {
-    /* agy names a new conversation with the first message, and hh-agy tells the host when the turn ends. */
-    const command = [process.execPath, AGY_SCREEN, bin, ...(sessionId ? ['--conversation', sessionId] : []), ...(model ? ['--model', model] : []), ...(effort ? ['--effort', effort] : [])];
+    /* agy names a new conversation in its first invocation hook. */
+    const command = [bin, ...(sessionId ? ['--conversation', sessionId] : []), ...(model ? ['--model', model] : []), ...(effort ? ['--effort', effort] : []), '--dangerously-skip-permissions', '--settings', JSON.stringify({ trustedWorkspaces: [workDir] })];
     /* agy keeps everything in HOME, and leaves the program in the node's tools folder as the node installed it. */
-    return { command, env: { HOME: home, AGY_CLI_DISABLE_AUTO_UPDATE: 'true', HH_AGY_LOG: agyLog(workDir), ...bridgeEnv(urls) }, sessionId };
+    return { command, env: { HOME: home, AGY_CLI_DISABLE_AUTO_UPDATE: 'true', ...bridgeEnv(urls) }, sessionId };
   },
 };
 
-/* agy reads its MCP servers from the agent folder's .agents/mcp_config.json; the bridge adds the turn's token. Its log
-   starts empty with the program. */
+/* agy reads tools and hooks from the agent folder's .agents; the bridge adds the turn's token. */
 export async function prepareAgy(workDir: string, mcpUrl: string, fs: AgentFs = ownFs): Promise<void> {
   const dir = join(workDir, '.agents');
   await fs.mkdir(dir);
   await fs.write(join(dir, 'mcp_config.json'), JSON.stringify({ mcpServers: { hornhoof: { serverUrl: mcpUrl } } }, null, 2));
-  await fs.write(agyLog(workDir), '');
+  await fs.write(join(dir, 'hooks.json'), JSON.stringify({ hornhoof: {
+    PreInvocation: [{ type: 'command', command: 'hh-hook invocation' }],
+    Stop: [{ type: 'command', command: 'hh-hook stop' }],
+  } }, null, 2));
 }
 
 /* Hornhoof's hooks in Kimi's settings: the start names the session, the prompt opens a person's turn before Kimi goes on. */
@@ -300,4 +295,9 @@ export function findRollout(home: string, workDir: string, since: number, sessio
     }
   }
   return null;
+}
+
+/* agy keeps each conversation's transcript under its HOME; a hook cannot choose another file. */
+export function agyTranscript(home: string, sessionId: string): string | null {
+  return /^[\w-]+$/.test(sessionId) ? join(home, '.gemini', 'antigravity-cli', 'brain', sessionId, '.system_generated', 'logs', 'transcript_full.jsonl') : null;
 }

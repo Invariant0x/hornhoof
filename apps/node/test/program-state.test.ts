@@ -1,9 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { PROGRAM_SCREEN_MAX, type NodeMessage } from '@hornhoof/protocol';
 import { describe, expect, it } from 'vitest';
-import { BUSY, lastScreen, programState, ProgramWatch, REPORT_MS } from '../src/terminal/program-state.js';
+import { BUSY, READY, lastScreen, programState, ProgramWatch, REPORT_MS } from '../src/terminal/program-state.js';
 
 const fixture = (name: string) => readFileSync(new URL(`./fixtures/${name}.txt`, import.meta.url), 'utf8');
+const agy = (name: string) => readFileSync(new URL(`./fixtures/agy-tui/screen-${name}`, import.meta.url), 'utf8');
 const RULE = '─'.repeat(50);
 const bash = { name: 'Bash', at: 1000 };
 
@@ -12,7 +13,7 @@ const SCREENS = {
   claude: { working: `❯ Fix the build\n✻ Thinking… (12s · ↓ 1.2k tokens · esc to interrupt)\n${RULE}\n❯ \n${RULE}`, waiting: fixture('claude-idle-screen') },
   codex: { working: `› Fix the build\n• Working (12s • esc to interrupt)\n\n\x1b[0;1m›\x1b[0m \x1b[2mAsk Codex to do anything\x1b[0m`, waiting: fixture('codex-busy-screen') },
   kimi: { working: fixture('kimi-empty-screen'), waiting: fixture('kimi-empty-screen') },
-  antigravity: { working: `\x1b[1m›\x1b[22m Fix the build\nLooking at the build`, waiting: `\x1b[1m›\x1b[22m Fix the build\nThe build passes.\n\n\x1b[1m›\x1b[22m ` },
+  antigravity: { working: agy('busy.ansi'), waiting: agy('idle.ansi') },
 } as const;
 
 describe('what a program does, as its node sees it', () => {
@@ -29,13 +30,32 @@ describe('what a program does, as its node sees it', () => {
     expect(programState(kind, waiting, bash, false)).toBe('idle');
   });
 
-  it('shows Claude Code and Codex at work by the way to stop them, Kimi Code by its log and Antigravity by its prompt that is not there', () => {
+  it('shows Claude Code and Codex at work by the way to stop them, Kimi Code by its log and Antigravity by its signs of work', () => {
     expect(BUSY.claude(SCREENS.claude.working, false)).toBe(true);
     expect(BUSY.codex(SCREENS.codex.working, false)).toBe(true);
     expect(BUSY.kimi(SCREENS.kimi.working, true)).toBe(true);
     expect(BUSY.antigravity(SCREENS.antigravity.working, false)).toBe(true);
     /* Only Kimi Code's screen does not tell, so only its log counts. */
     for (const kind of ['claude', 'codex', 'kimi', 'antigravity'] as const) expect(BUSY[kind](SCREENS[kind].waiting, kind !== 'kimi')).toBe(false);
+  });
+
+  it.each([
+    ['idle.ansi', true, false], ['busy.ansi', false, true], ['queued.txt', false, true],
+    ['interrupted.txt', true, false], ['trust.ansi', false, false],
+  ] as const)('reads Antigravity readiness and work from %s', (name, ready, busy) => {
+    expect(READY.antigravity(agy(name))).toBe(ready);
+    expect(BUSY.antigravity(agy(name), true)).toBe(busy);
+  });
+
+  it('recognizes each Antigravity sign of work on its own', () => {
+    for (const text of ['esc to cancel', '▸ next (alt+m to send immediately)', '⣾  Generating...', '⡿  Running command...']) {
+      expect(BUSY.antigravity(text, false)).toBe(true);
+    }
+    expect(BUSY.antigravity('> unfinished input', true)).toBe(false);
+  });
+
+  it('requires the ready footer below the Antigravity input rather than in its history', () => {
+    expect(READY.antigravity(`? for shortcuts\n${agy('busy.ansi')}`)).toBe(false);
   });
 
   it('keeps a prompt with words typed in it from counting as waiting for what to type', () => {

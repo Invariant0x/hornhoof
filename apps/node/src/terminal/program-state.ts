@@ -1,29 +1,27 @@
 import { PROGRAM_SCREEN_MAX, type NodeMessage, type ProgramExit, type ProgramState } from '@hornhoof/protocol';
 import { stripEscapes } from '../providers/process.js';
 import { redact } from '../redact.js';
-import { atEmptyPrompt } from './input.js';
+import { agyPrompt, atEmptyPrompt } from './input.js';
 import type { TermProgram } from './programs.js';
 
 type Kind = TermProgram['kind'];
 /* A tool the program called and has no result for yet, and since when, by the node's clock. */
 export type Pending = { name: string; at: number };
 
-/* A program is ready for its first prompt once its screen shows this; Claude Code and Hornhoof's screen for Antigravity
-   say so through their hook instead. */
-export const READY: Record<'codex' | 'kimi', (screen: string) => boolean> = {
+/* A program is ready for its first prompt once its screen shows this; Claude Code says so through its hook. */
+export const READY: Record<Exclude<Kind, 'claude'>, (screen: string) => boolean> = {
+  antigravity: screen => agyPrompt(screen)?.footer.startsWith('? for shortcuts') ?? false,
   codex: screen => /OpenAI Codex/.test(screen) && /›/.test(screen),
   /* The footer under Kimi's prompt, with how full its context is. */
   kimi: screen => /context: \d+%/.test(screen),
 };
 
-/* A program at work shows it, so a long thought whose log is quiet is no lost end. Claude Code and Codex show how to stop
-   them under their spinner; Hornhoof's screen for Antigravity shows its prompt again only once agy answered; Kimi Code's
-   screen does not tell, so its log does: running is that it said it took the turn and not yet that the turn ended. */
+/* A program at work shows how to stop it or a spinner. Kimi Code's log says whether its turn runs. */
 export const BUSY: Record<Kind, (screen: string, running: boolean) => boolean> = {
   claude: screen => /esc to interrupt/i.test(stripEscapes(screen)),
   codex: screen => /esc to interrupt/i.test(stripEscapes(screen)),
   kimi: (_screen, running) => running,
-  antigravity: screen => !atEmptyPrompt('antigravity', screen),
+  antigravity: screen => /esc to cancel|^\s*▸ .+\(alt\+m to send immediately\)|^\s*[\u2800-\u28ff]\s+\S/m.test(stripEscapes(screen)),
 };
 
 /* Tools that put a question to a person and wait for the answer. The programs run without asking leave for their tools. */

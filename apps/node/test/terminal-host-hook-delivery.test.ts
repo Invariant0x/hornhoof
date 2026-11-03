@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { agyProgram } from '../src/terminal/programs.js';
 import { hasTmux, host, tmux, home, setUp, job } from './terminal-host-helpers.js';
 const HOOK_TERM = fileURLToPath(new URL('./fakes/fake-hook-term.mjs', import.meta.url));
-const AGY = fileURLToPath(new URL('./fakes/agy', import.meta.url));
+const AGY = fileURLToPath(new URL('./fakes/fake-agy-term.mjs', import.meta.url));
 
 describe.skipIf(!hasTmux)('turns ended by a delayed hook', () => {
   afterEach(async () => { vi.restoreAllMocks();await host?.stop(); });
@@ -23,7 +23,7 @@ describe.skipIf(!hasTmux)('turns ended by a delayed hook', () => {
     const result = await host.run(task);
     expect(result.ok).toBe(true);
     expect(result.error).toBeNull();
-    expect(result.result).toMatch(kind === 'claude' ? /^Delivered by hh-hook\.$/ : /^Git rebase/);
+    expect(result.result).toMatch(kind === 'claude' ? /^Delivered by hh-hook\.$/ : /^FINISHED$/);
     expect(await tmux.alive(`a-${key}`)).toBe(true);
   }, 35000);
 });

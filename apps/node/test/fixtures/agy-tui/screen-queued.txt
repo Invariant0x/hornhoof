@@ -1,0 +1,9 @@
+> Run the shell command: sleep 8; echo slept. Then reply FINISHED.
+○ Running (sleep 8; echo slept) (ctrl+o to expand)
+⡿  Running command...
+└ Tip: You can switch conversations with /resume.
+▸ Also say BANANA. (alt+m to send immediately)
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+>
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Press up to edit queued messages                                                                  Gemini 4 Argon · low

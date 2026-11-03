@@ -8,7 +8,7 @@ import { agyProgram } from '../src/terminal/programs.js';
 import { hasTmux, home, host, sent, setUp, job, codexJob, kimiJob, tmux, until } from './terminal-host-helpers.js';
 
 /* What the program of Hornhoof's turn does goes to Hornhoof as it changes, and again while nothing changes. */
-const FAKE_AGY = fileURLToPath(new URL('./fakes/agy', import.meta.url));
+const FAKE_AGY = fileURLToPath(new URL('./fakes/fake-agy-term.mjs', import.meta.url));
 const agyJob = (key: string, prompt: string, more: Partial<TermJob['input']> = {}) => ({ ...job(key, prompt, more), program: agyProgram, bin: FAKE_AGY, home: join(home, 'agy', key), signedOut: AGY_SIGNED_OUT });
 const jobs = { claude: job, codex: codexJob, kimi: kimiJob, antigravity: agyJob };
 type Told = Extract<NodeMessage, { type: 'job.program' }>;
@@ -36,7 +36,7 @@ describe.skipIf(!hasTmux)("what a turn's program does, as the host tells Hornhoo
     await setUp({ lookMs: 200 });
     const jobId = `job-work-${kind}`;
     const started = Date.now();
-    expect(await host.run(jobs[kind](`work-${kind}`, 'WORK here', { jobId }))).toMatchObject({ ok: true, result: expect.stringContaining(kind === 'antigravity' ? 'Git rebase' : 'echo: WORK here') });
+    expect(await host.run(jobs[kind](`work-${kind}`, 'WORK here', { jobId }))).toMatchObject({ ok: true, result: expect.stringContaining(kind === 'antigravity' ? 'FINISHED' : 'echo: WORK here') });
     const messages = told(jobId);
     expect(inOrder(messages.map(said), [...seen])).toBe(true);
     /* Nothing changed between two messages a minute apart only. */

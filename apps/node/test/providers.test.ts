@@ -14,7 +14,7 @@ import { adapterFor } from '../src/providers/index.js';
 import { claudeEvents, claudeInterrupted, limitsFrom } from '../src/providers/claude.js';
 import { codexEvents, codexRateLimits } from '../src/providers/codex.js';
 import { kimiContextSize, kimiEvents, kimiModels } from '../src/providers/kimi.js';
-import { agyConversation, agyModels, agyStream, installAgy } from '../src/providers/antigravity.js';
+import { agyModels, agyStream, installAgy } from '../src/providers/antigravity.js';
 import { childEnv, lastUrl } from '../src/providers/process.js';
 import { runJob, type RunInput } from '../src/runner.js';
 
@@ -413,13 +413,31 @@ describe('models', () => {
   it("groups the models agy lists by the levels in their names, and keeps one with a single level by its own id", () => {
     const listed = agyModels(readFileSync(new URL('./fixtures/agy-models.txt', import.meta.url), 'utf8'));
     expect(listed).toEqual([
-      { id: 'Gemini 4 Argon', name: 'Gemini 4 Argon', efforts: ['medium', 'high'] },
-      { id: 'Gemini 3.8 Flash', name: 'Gemini 3.8 Flash', efforts: ['medium', 'high'] },
-      { id: 'Gemini 3.7 Flash', name: 'Gemini 3.7 Flash', efforts: ['medium', 'high'] },
-      { id: 'Gemini 3.6 Flash', name: 'Gemini 3.6 Flash', efforts: ['medium', 'high'] },
+      { id: 'gemini-4-argon', name: 'Gemini 4 Argon', efforts: ['medium', 'high'] },
+      { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash', efforts: ['medium', 'high'] },
+      { id: 'gemini-3.7-flash', name: 'Gemini 3.7 Flash', efforts: ['medium', 'high'] },
+      { id: 'gemini-3.6-flash', name: 'Gemini 3.6 Flash', efforts: ['medium', 'high'] },
       { id: 'gemini-3.1-pro-high', name: 'Gemini 3.1 Pro (High)' },
     ]);
     expect(agyModels('claude-opus-5-5-thinking   Claude Opus 5.5 (Thinking)\nno columns here\n')).toEqual([{ id: 'claude-opus-5-5-thinking', name: 'Claude Opus 5.5 (Thinking)' }]);
+  });
+
+  it('reads the TAB columns agy prints outside a terminal, past its fetching message', () => {
+    const listed = agyModels(readFileSync(new URL('./fixtures/agy-models-tabs.txt', import.meta.url), 'utf8'));
+    expect(listed).toEqual([
+      { id: 'gemini-4-argon', name: 'Gemini 4 Argon', efforts: ['low', 'medium', 'high'] },
+      { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash', efforts: ['low', 'medium', 'high'] },
+      { id: 'claude-opus-5-5', name: 'Claude Opus 5.5', efforts: ['low', 'medium', 'high'] },
+      { id: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5', efforts: ['low', 'medium', 'high'] },
+      { id: 'gpt-oss-120b-medium', name: 'GPT-OSS 120B (Medium)' },
+    ]);
+  });
+
+  it.each(['another-model-medium', 'model-medium-preview'])('keeps rows with the same name separate when their ids have no common level base (%s)', mediumId => {
+    expect(agyModels(`model-high   Shared Model (High)\n${mediumId}   Shared Model (Medium)\n`)).toEqual([
+      { id: 'model-high', name: 'Shared Model (High)' },
+      { id: mediumId, name: 'Shared Model (Medium)' },
+    ]);
   });
 
   it('lists the Codex models its plan shows in its picker', async () => {
@@ -681,7 +699,7 @@ describe('Antigravity CLI', () => {
     writeFileSync(join(home, 'fake-signed-in'), '');
     expect(await a.loggedIn()).toBe(true);
     const listed = await a.models!();
-    expect(listed[0]).toEqual({ id: 'Gemini 4 Argon', name: 'Gemini 4 Argon', efforts: ['medium', 'high'] });
+    expect(listed[0]).toEqual({ id: 'gemini-4-argon', name: 'Gemini 4 Argon', efforts: ['medium', 'high'] });
     /* A sign-in that went away keeps the models agy listed before. */
     rmSync(join(home, 'fake-signed-in'));
     expect(await a.models!()).toEqual(listed);
@@ -930,12 +948,6 @@ describe('live events', () => {
       { kind: 'tool', name: 'run_command', input: 'false' },
       { kind: 'tool_result', ok: false, summary: 'exit status 1' },
     ]);
-  });
-
-  it('read the conversation Antigravity names with the result of its run, and none from its other lines', () => {
-    expect(linesOf('agy-new').map(agyConversation).filter(Boolean)).toEqual(['c3b66b04-872b-4fbe-a3a4-058a026ef20a']);
-    expect(linesOf('agy-tools').map(agyConversation)).toEqual(['']);
-    for (const line of [null, { event: 'result', result: { conversation_id: 42 } }, { event: 'result' }]) expect(agyConversation(line)).toBe('');
   });
 
   it('keep the names of built-in tools and show a shell command as it is', () => {

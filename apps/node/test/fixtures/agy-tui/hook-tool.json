@@ -1,0 +1,20 @@
+{
+  "artifactDirectoryPath": "/data/home/.gemini/antigravity-cli/brain/6e0dbdf4-0b9b-4d8b-8beb-448b0f350c4b",
+  "conversationId": "6e0dbdf4-0b9b-4d8b-8beb-448b0f350c4b",
+  "error": "",
+  "lastUserInput": "Run the shell command: sleep 8; echo slept. Then reply FINISHED.",
+  "modelName": "gemini-4-argon-low",
+  "stepIdx": 2,
+  "toolCall": {
+    "args": {
+      "CommandLine": "sleep 8; echo slept",
+      "WaitMsBeforeAsync": 10000,
+      "toolSummary": "Sleep 8s and echo slept"
+    },
+    "name": "run_command"
+  },
+  "transcriptPath": "/data/home/.gemini/antigravity-cli/brain/6e0dbdf4-0b9b-4d8b-8beb-448b0f350c4b/.system_generated/logs/transcript_full.jsonl",
+  "workspacePaths": [
+    "/data/work/agents/a1"
+  ]
+}
