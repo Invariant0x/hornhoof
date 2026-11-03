@@ -9,7 +9,7 @@ export const UNHEARD_NOTE = 'Words sent into the running turn were not taken by 
 /* Sent copies and Hornhoof's visible facts are no words into a turn. */
 export const incomingWords = sql`coalesce(${agentEvents.data}->'_message'->>'direction', 'in') <> 'out' and coalesce(${agentEvents.data}->>'turnFact', 'false') <> 'true'`;
 export type TurnWords = { personId: string | null; data: unknown };
-type Standing = Pick<typeof jobs.$inferSelect, 'id' | 'agentId' | 'createdBy' | 'answersCeo'>;
+type Standing = Pick<typeof jobs.$inferSelect, 'id' | 'agentId' | 'createdBy' | 'answersCeo' | 'decisionInputPending'>;
 export type RepeatedTurn = { createdBy: string | null; answersCeo: boolean; repeated: TurnWords };
 const flat = (text: string) => text.replace(/\s+/g, ' ').trim();
 
@@ -24,8 +24,13 @@ export async function wordsForTurn(ctx: Pick<Ctx, 'db'>, agentId: string, jobId:
   });
 }
 
-/* The next turn keeps the same standing and a hidden record of the words, without sending or showing a new message. */
+/* The next turn keeps a hidden record of the words, but never restores a person the original no longer answers. */
 export async function repeatedTurn(ctx: Pick<Ctx, 'db'>, job: Standing | undefined, source?: TurnWords | null): Promise<RepeatedTurn> {
-  const words = source === undefined && job?.agentId ? (await wordsForTurn(ctx, job.agentId, job.id))[0] : source;
-  return { createdBy: job?.createdBy ?? null, answersCeo: job?.answersCeo ?? false, repeated: words ?? { personId: job?.createdBy ?? null, data: {} } };
+  const last = job?.agentId ? (await wordsForTurn(ctx, job.agentId, job.id))[0] : undefined;
+  const personId = job?.decisionInputPending ? null : last ? last.personId : job?.createdBy ?? null;
+  const words = source === undefined ? last ?? { personId, data: {} } : source;
+  return {
+    createdBy: job?.createdBy ?? null, answersCeo: job?.answersCeo ?? false,
+    repeated: { personId: words?.personId === personId ? personId : null, data: words?.data ?? {} },
+  };
 }
