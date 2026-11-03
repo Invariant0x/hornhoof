@@ -32,6 +32,7 @@ export type ErrorReason =
   | 'already_on_machine'
   | 'already_connected'
   | 'no_node_online'
+  | 'signin_unsupported'
   | 'needs_login'
   | 'job_unknown'
   | 'too_many_attempts'

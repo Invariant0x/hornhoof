@@ -247,6 +247,20 @@ describe('signing a plan in from Hornhoof', () => {
     await expect(nextOf(na, 'login.start', 300)).rejects.toThrow();
   });
 
+  it('says whether no machine of the plan is online, or the online ones cannot run the sign-in', async () => {
+    const { app, db, ceo, plan, a, b, url } = await plans('codex');
+    const signIn = async () => (await app.inject({ method: 'POST', url: `/api/subscriptions/${plan}/signin`, payload: { fresh: false }, ...as(ceo) })).json().error.reason;
+    expect(await signIn()).toBe('no_node_online');
+    /* The Mac's node is from before machine keys, and the laptop's shows no terminals. */
+    const na = await connectNode(url, a.key);
+    na.send({ type: 'hello', version: '0.8.0', loggedIn: true, running: [], terminals: true });
+    const nb = await connectNode(url, b.key);
+    nb.send({ type: 'hello', version: '0.9.0', loggedIn: true, running: [], publicKey: KEY('b'), terminals: false });
+    await until(async () => (await db.select({ k: nodes.publicKey }).from(nodes).where(eq(nodes.id, b.nodeId)))[0]?.k === KEY('b'));
+    await until(() => app.ctx.hub.isReady({ kind: 'node', nodeId: a.nodeId }) && app.ctx.hub.isReady({ kind: 'node', nodeId: b.nodeId }));
+    expect(await signIn()).toBe('signin_unsupported');
+  });
+
   it('signs Kimi in with a pasted key instead of a terminal', async () => {
     const { app, ceo, plan, a, online } = await plans('kimi');
     await online(a, KEY('a'), false);

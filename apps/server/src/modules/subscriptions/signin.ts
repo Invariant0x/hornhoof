@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { TERM_CHUNK } from '@hornhoof/protocol';
-import { and, eq, isNotNull, isNull } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -29,7 +29,10 @@ const FromBrowser = z.discriminatedUnion('type', [
 
 const unknown = () => new ApiError(404, 'not_found', 'This subscription does not exist.', 'subscription_unknown');
 const notOwner = () => new ApiError(403, 'forbidden', 'Only the owner of this plan signs it in.', 'not_owner');
-const noNode = () => new ApiError(409, 'conflict', 'No machine of this plan is online with a terminal. Start one of them and try again.', 'no_node_online');
+const noNode = () => new ApiError(409, 'conflict', 'No machine of this plan is online. Turn one of them on and try again.', 'no_node_online');
+/* Online, but from before machine keys or with no terminals: the node cannot run a sign-in Hornhoof can seal. */
+const unsupported = () =>
+  new ApiError(409, 'conflict', 'The machine of this plan is online, but its node cannot run the sign-in from Hornhoof. Update the nodes on that machine and try again.', 'signin_unsupported');
 
 /* A plan's owner signs it in from Hornhoof: in a terminal on one of their machines that is online, which nobody else
    opens or watches, the CEO neither. Never the orchestrator for them: a fresh sign-in signs the program out first. */
@@ -44,15 +47,17 @@ export function signinRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { me, sub };
   }
 
-  /* The plan's live nodes that are online with a terminal and a key the new sign-in is sealed to, oldest first. */
+  /* The plan's live nodes that are online, oldest first, and of them the ones with a terminal and a key the new sign-in
+     is sealed to. */
   async function onlineNodes(planId: string) {
     const rows = await db
-      .select({ nodeId: nodes.id, hostname: machines.hostname })
+      .select({ nodeId: nodes.id, hostname: machines.hostname, publicKey: nodes.publicKey })
       .from(nodes)
       .innerJoin(machines, eq(machines.id, nodes.machineId))
-      .where(and(eq(nodes.subscriptionId, planId), liveNode, isNotNull(nodes.publicKey)))
+      .where(and(eq(nodes.subscriptionId, planId), liveNode))
       .orderBy(nodes.createdAt);
-    return rows.filter(r => hub.isReady(nodeIdentity(r.nodeId)) && hub.hasTerminals(nodeIdentity(r.nodeId)));
+    const online = rows.filter(r => hub.isReady(nodeIdentity(r.nodeId)));
+    return { online, able: online.filter(r => r.publicKey !== null && hub.hasTerminals(nodeIdentity(r.nodeId))) };
   }
 
   app.post('/api/subscriptions/:id/signin', async req => {
@@ -60,9 +65,10 @@ export function signinRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (sub.kind !== 'personal' || !TERMINAL_SIGNIN.has(sub.provider))
       throw new ApiError(400, 'validation', 'This plan signs in with a pasted key or on its machine, not in a sign-in terminal.', 'wrong_kind');
     const { nodeId, fresh } = SigninBody.parse(req.body ?? {});
-    const online = await onlineNodes(sub.id);
-    const node = nodeId ? online.find(n => n.nodeId === nodeId) : online[0];
-    if (!node || !hub.send(nodeIdentity(node.nodeId), { type: 'login.start', fresh })) throw noNode();
+    const { online, able } = await onlineNodes(sub.id);
+    const node = nodeId ? able.find(n => n.nodeId === nodeId) : able[0];
+    if (!node) throw online.length ? unsupported() : noNode();
+    if (!hub.send(nodeIdentity(node.nodeId), { type: 'login.start', fresh })) throw noNode();
     return { nodeId: node.nodeId, hostname: node.hostname };
   });
 
