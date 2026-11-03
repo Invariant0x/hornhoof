@@ -11,12 +11,15 @@
 // FAKE_LOSE_ENTER misses the first Enter, as Claude Code just started can: the line stays in its input until the next one.
 // FAKE_START_MS makes it say it started that long after it shows, as Claude Code can while it loads. FAKE_DEAF_MS makes
 // it keep what is typed in its input without taking Enter for that long after it started, as Claude Code does while it
-// loads a long session it resumed. FAKE_DEAF_ONCE_MS does so only the first time it starts in its folder.
+// loads a long session it resumed. FAKE_DEAF_ONCE_MS does so only the first time it starts in its folder. FAKE_INPUT_MS
+// makes it say it started that long before its input box shows, as Claude Code can while it still starts: what is typed
+// meanwhile is lost. FAKE_KEEP_TAIL keeps only that many last characters of the first message, as Claude Code once did
+// with a message typed while it started. What its prompt hook answers goes with the prompt, as in Claude Code.
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { createInterface } from 'node:readline';
 import { crash } from './crash.mjs';
+import { bracketed, readKeys } from './keys.mjs';
 
 if (process.env.FAKE_CRASH_START) crash(process.env.FAKE_CRASH_START);
 
@@ -27,9 +30,13 @@ const home = process.env.CLAUDE_CONFIG_DIR ?? '/tmp';
 const logOf = id => join(home, 'projects', process.cwd().replace(/[^A-Za-z0-9]/g, '-'), `${id}.jsonl`);
 let log = logOf(session);
 mkdirSync(dirname(log), { recursive: true });
-const hook = (event, body) => fetch(`${process.env.HH_BRIDGE}/${event}`, { method: 'POST', body: JSON.stringify({ session_id: session, ...body }) }).catch(() => {});
+const hook = (event, body) =>
+  fetch(`${process.env.HH_BRIDGE}/${event}`, { method: 'POST', body: JSON.stringify({ session_id: session, ...body }) })
+    .then(r => r.text())
+    .catch(() => '');
 
-process.stdout.write(`fake claude ${args.includes('--resume') ? 'resumed' : 'new'} ${session}\n❯ `);
+const inputMs = Number(process.env.FAKE_INPUT_MS ?? 0);
+process.stdout.write(`fake claude ${args.includes('--resume') ? 'resumed' : 'new'} ${session}\n${inputMs ? '' : '❯ '}`);
 if (process.env.FAKE_START_MS) await new Promise(r => setTimeout(r, Number(process.env.FAKE_START_MS)));
 await hook('start', {});
 if (process.env.FAKE_MCP_LIST_MS) {
@@ -41,54 +48,84 @@ if (process.env.FAKE_MCP_LIST_MS) {
     process.stdout.write(`tools: ${listed?.result ? 'ok' : 'failed'}\n❯ `);
   }, Number(process.env.FAKE_MCP_LIST_MS));
 }
-let kept = process.env.FAKE_LOSE_ENTER ? '' : null;
+let loseEnter = Boolean(process.env.FAKE_LOSE_ENTER);
+let keepTail = Number(process.env.FAKE_KEEP_TAIL ?? 0);
 const deafOnce = process.env.FAKE_DEAF_ONCE_MS && !existsSync('.fake-deaf') ? Number(process.env.FAKE_DEAF_ONCE_MS) : 0;
 if (deafOnce) writeFileSync('.fake-deaf', '');
 const deafUntil = Date.now() + Number(process.env.FAKE_DEAF_MS ?? 0) + deafOnce;
-for await (const typed of createInterface({ input: process.stdin })) {
-  if (Date.now() < deafUntil) {
-    kept = `${kept ?? ''}${typed}`;
-    continue;
-  }
-  if (kept === '') {
-    kept = typed;
-    continue;
-  }
-  // Escape stops an answer; it is not part of the next line.
-  const line = `${kept ?? ''}${typed}`.replaceAll('\u001b', '');
-  kept = null;
-  // An Enter into an empty input does nothing.
-  if (!line) continue;
+const inputAt = Date.now() + inputMs;
+if (inputMs)
+  setTimeout(() => {
+    process.stdout.write('❯ ');
+    bracketed();
+  }, inputMs);
+
+// The input box: what is typed or pasted stays in it, over as many lines as it takes, until Enter.
+let input = '';
+let shown = 0;
+const show = () => {
+  const lines = input.split('\n');
+  process.stdout.write(`${shown ? `\x1b[${shown}A` : ''}\r\x1b[J❯ ${lines.join('\r\n')}`);
+  shown = lines.length - 1;
+};
+let queue = Promise.resolve();
+readKeys(
+  key => {
+    if (Date.now() < inputAt) return;
+    // Escape stops an answer; it is not part of the next line.
+    if (key === 'escape') return;
+    if (key === 'kill') input = input.slice(0, input.lastIndexOf('\n') + 1);
+    else if (key === 'erase') input = input.slice(0, -1);
+    else if (key !== 'enter') input += key.text;
+    if (key !== 'enter') return show();
+    if (Date.now() < deafUntil) return;
+    if (loseEnter) {
+      loseEnter = false;
+      return;
+    }
+    const line = keepTail ? input.slice(-keepTail) : input;
+    // An Enter into an empty input does nothing.
+    if (!line) return;
+    keepTail = 0;
+    input = '';
+    shown = 0;
+    process.stdout.write('\r\n');
+    queue = queue.then(() => take(line));
+  },
+  { ask: !inputMs },
+);
+
+async function take(line) {
   if (line === 'EXIT') process.exit(3);
   if (line === 'CLEAR') {
     session = randomUUID();
     log = logOf(session);
     process.stdout.write('❯ ');
     await hook('start', { source: 'clear' });
-    continue;
+    return;
   }
-  await hook('prompt', { prompt: line });
+  const context = await hook('prompt', { prompt: line });
   if (line.startsWith('CRASH')) crash(line.includes('LONG') ? 'long' : '');
   if (line.includes('HANG_EXIT')) process.stdout.write('exit-test running\n');
   if (line.includes('HANG')) {
     process.stdout.write('❯ ');
-    continue;
+    return;
   }
   if (line.includes('INTERRUPT')) {
     appendFileSync(log, JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: '[Request interrupted by user]' }] } }) + '\n');
     process.stdout.write('  ⎿  Interrupted\n❯ ');
-    continue;
+    return;
   }
   if (line.includes('MUTE')) {
     process.stdout.write("■ This content can't be shown.\n❯ ");
     await hook('stop', { last_assistant_message: '', transcript_path: log });
-    continue;
+    return;
   }
   if (line.includes('SLOW')) {
     process.stdout.write('❯ ');
     await new Promise(r => setTimeout(r, 2000));
   }
-  const answer = line === 'SECRET' ? `the key is ${process.env.FAKE_SECRET}` : `echo: ${line}`;
+  const answer = line === 'SECRET' ? `the key is ${process.env.FAKE_SECRET}` : `echo: ${line}${context ? `\n${context}` : ''}`;
   const write = () => appendFileSync(log, JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: answer }] } }) + '\n');
   if (!line.includes('LAG')) write();
   process.stdout.write(`● ${answer}\n❯ `);
