@@ -744,7 +744,8 @@ async function closeGate(ctx: Live, task: Task, n: Note, given: Given[]): Promis
   const wakes: Wake[] = away
     ? [{ agentId: away, taskId: task.id, why: 'switched', text: `${name} does it and is switched off, and gate ${task.stage} sent it back with changes to make: ${reasons}\n\nGive it to someone who is on with update_task, or tell the CEO it waits for ${name}.` }]
     : [{ agentId: task.executorAgentId!, taskId: task.id, why: 'changes', text: reasons }];
-  const row = await move(ctx, task, { status: 'open', stage: 0, panel: [], assigneeAgentId: away ?? task.executorAgentId, bounces: task.bounces + 1, silent: 0 }, n, async tx => {
+  const rework: Note = { ...n, data: { ...n.data, rework: true } };
+  const row = await move(ctx, task, { status: 'open', stage: 0, panel: [], assigneeAgentId: away ?? task.executorAgentId, bounces: task.bounces + 1, silent: 0 }, rework, async tx => {
     wakes.push(...(await stuckAtGate(tx, task, task.stage, actorId)));
     await keepWakes(tx, task.companyId, wakes);
   });

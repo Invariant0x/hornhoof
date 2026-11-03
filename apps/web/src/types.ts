@@ -116,6 +116,8 @@ export type Department = {
   id: string;
   /* The lines from its head to each employee: who works on the head's task now, and who just gave a result back. */
   workLines?: WorkLine[];
+  /* Last completed return from a gate to the executor, on the server's clock. */
+  reworkAt?: string | null;
   name: string | null;
   templateKey: TemplateKey | null;
   roleCode: string;
