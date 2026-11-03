@@ -65,6 +65,9 @@ async function jobStarted(ctx: Ctx, id: NodeIdentity, jobId: string, now: Date):
   if (onTask(started.row)) await startWork(ctx, jobId);
 }
 
+/* How the turn's program ended, as the node saw it; a node from before says nothing of it. */
+const exitOf = (exit?: { code: number | null; signal: string | null }) => ({ exitCode: exit?.code ?? null, exitSignal: exit?.signal ?? null });
+
 export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage): Promise<void> {
   const { db } = ctx;
   const now = new Date();
@@ -184,6 +187,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
           result: msg.result,
           tail: lastBytes(msg.tail),
           error: msg.error,
+          ...exitOf(msg.exit),
           sessionId: msg.sessionId,
           finishedAt: now,
         })

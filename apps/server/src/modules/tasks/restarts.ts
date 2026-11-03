@@ -1,7 +1,8 @@
 import { and, asc, eq, inArray, isNull, or } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, departments, jobs, taskEvents, tasks, type Interruption, type RestartCause } from '../../db/schema.js';
-import { enqueueTurn, insertTurn, liveSubscription, NoSubscription, onAgent } from '../conversation/queue.js';
+import { enqueueTurn, liveSubscription, onAgent } from '../conversation/queue.js';
+import { turnAgain } from './again.js';
 import { published } from './engine.js';
 
 /* Why a node restarted, in words for the agents and the task's log. */
@@ -50,26 +51,9 @@ export async function afterRestart(ctx: Ctx, jobId: string): Promise<'retried' |
 
 async function retry(ctx: Ctx, { job, task, agent, cut }: Ended): Promise<void> {
   const note = `Your last turn on #${task.number} "${task.title}" ${cutOff(cut)}. Hornhoof runs it once more: check what that turn already did, then go on.`;
-  const retried = await onAgent(ctx, agent.id, () => queueRetry(ctx, { job, task, agent }, note));
+  const retried = await onAgent(ctx, agent.id, () => turnAgain(ctx, { job, task, agent }, note, { retryOf: job.id }));
   const again = retried ? `Hornhoof runs it again: retry 1 of ${RETRIES}, turn ${retried}.` : `Hornhoof could not run it again: ${agent.name} has no subscription.`;
   await logCut(ctx, task, agent, cut, `${agent.name}'s turn ${job.id} ${cutOff(cut)}. ${again}`, { retry: retried ? { job: retried, n: 1, of: RETRIES } : null });
-}
-
-/* The turn once more, or the turn that already waits on the task, which takes its place. None when the agent has no
-   subscription to take it. */
-async function queueRetry(ctx: Ctx, { job, task, agent }: Omit<Ended, 'cut'>, note: string): Promise<string | null> {
-  const [waiting] = await ctx.db.select().from(jobs).where(and(eq(jobs.agentId, agent.id), eq(jobs.taskId, task.id), eq(jobs.status, 'queued'))).orderBy(asc(jobs.createdAt)).limit(1);
-  if (waiting) {
-    await ctx.db.update(jobs).set({ retryOf: job.id, prompt: `${note}\n\n${waiting.prompt}` }).where(eq(jobs.id, waiting.id));
-    return waiting.id;
-  }
-  const prompt = `${note}\n\n${job.prompt}`;
-  try {
-    return await insertTurn(ctx, { companyId: job.companyId, agentId: agent.id, prompt, createdBy: null, taskId: task.id, retryOf: job.id, message: { personId: null, text: prompt, task: { id: task.id, number: task.number } } });
-  } catch (err) {
-    if (err instanceof NoSubscription) return null;
-    throw err;
-  }
 }
 
 /* Operations' reliability engineer who is on, or else its head who is on: either needs a plan to take the turn. */

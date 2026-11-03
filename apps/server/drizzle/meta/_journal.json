@@ -302,6 +302,13 @@
       "when": 1793675688481,
       "tag": "0042_turn_restarts",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1793680326456,
+      "tag": "0043_turn_exits",
+      "breakpoints": true
     }
   ]
 }

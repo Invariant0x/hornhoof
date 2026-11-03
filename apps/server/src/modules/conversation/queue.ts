@@ -108,8 +108,9 @@ export const STOPPED_ON_PURPOSE = ['cancelled', 'removed', 'switched_off'];
 
 /* answersCeo: a note of something the CEO did, which counts as the CEO's order without a message. */
 /* withMessage: what is kept together with the message, or not at all. */
-/* retryOf: the turn a node restart cut off, which this one runs once more. */
-type Turn = { companyId: string; agentId: string; prompt: string; createdBy: string | null; message?: { personId: string | null; text: string; from?: 'orchestrator' | 'agent'; name?: string; by?: string; task?: { id: string; number: number }; request?: string; timer?: true }; taskId?: string; answersCeo?: boolean; withMessage?: WithEvent; retryOf?: string };
+/* retryOf: the turn a node restart cut off, which this one runs once more. continueOf: the turn that ended without
+   recording its work, whose session this one goes on with. */
+type Turn = { companyId: string; agentId: string; prompt: string; createdBy: string | null; message?: { personId: string | null; text: string; from?: 'orchestrator' | 'agent'; name?: string; by?: string; task?: { id: string; number: number }; request?: string; timer?: true }; taskId?: string; answersCeo?: boolean; withMessage?: WithEvent; retryOf?: string; continueOf?: string };
 
 /* One thing at a time per agent, so two pumps never send two turns. */
 const chains = new WeakMap<Ctx, Map<string, Promise<unknown>>>();
@@ -210,6 +211,7 @@ export async function insertTurn(ctx: Ctx, t: Turn): Promise<string> {
       createdBy: t.createdBy,
       taskId: t.taskId ?? null,
       retryOf: t.retryOf ?? null,
+      continueOf: t.continueOf ?? null,
       answersCeo: t.answersCeo === true || (await isCeo(ctx, t.message?.personId)),
     })
     .returning({ id: jobs.id });
@@ -315,13 +317,30 @@ function keepsSessionAcrossTurns(kind: string): boolean {
   return kind === 'orchestrator' || kind === 'head';
 }
 
+/* The session of the turn this one goes on from, when it can go on there: the same plan, node and instructions. */
+async function continuedSession(ctx: Ctx, jobId: string | null, on: { subscriptionId: string; nodeId: string | null }, instructionsHash: string): Promise<string | null> {
+  if (!jobId) return null;
+  const [from] = await ctx.db.select({ subscriptionId: jobs.subscriptionId, nodeId: jobs.nodeId, sessionId: jobs.sessionId, instructionsHash: jobs.instructionsHash }).from(jobs).where(eq(jobs.id, jobId));
+  return from?.sessionId && from.subscriptionId === on.subscriptionId && from.nodeId === on.nodeId && from.instructionsHash === instructionsHash ? from.sessionId : null;
+}
+
+type Agent = { id: string; companyId: string; kind: string; name: string };
+type On = { subscriptionId: string; nodeId: string | null };
+type Session = { sessionId: string | null; catchUp: string | null };
+
+/* continueOf: a turn that goes on from one that ended without its work recorded goes on in that turn's session. */
+async function sessionFor(ctx: Ctx, agent: Agent, on: On, instructionsHash: string, continueOf: string | null): Promise<Session> {
+  const going = await continuedSession(ctx, continueOf, on, instructionsHash);
+  return going ? { sessionId: going, catchUp: null } : lastSession(ctx, agent, on, instructionsHash);
+}
+
 /* A new session catches up from the conversation. The last finished turn's session goes on only on the same subscription
    and node with the same instructions: another machine does not have it, and changed instructions would not reach a
    session that already has the old ones. A turn that ran out of time or was stopped in its session finished too, the
    session whole; one that broke, or was called off before it ran, leaves the session before it. Members start each company
    turn in a clean session with no catch-up. The orchestrator and department heads keep their session across turns and
    compact it when it fills. */
-async function sessionFor(ctx: Ctx, agent: { id: string; companyId: string; kind: string; name: string }, on: { subscriptionId: string; nodeId: string | null }, instructionsHash: string): Promise<{ sessionId: string | null; catchUp: string | null }> {
+async function lastSession(ctx: Ctx, agent: Agent, on: On, instructionsHash: string): Promise<Session> {
   const [last] = await ctx.db
     .select({ subscriptionId: jobs.subscriptionId, nodeId: jobs.nodeId, sessionId: jobs.sessionId, instructionsHash: jobs.instructionsHash, startedAt: jobs.startedAt })
     .from(jobs)
@@ -538,7 +557,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   const effort = effortFor(agent.effort, effortsOf(models, model), roleEffort);
   /* The hash covers the model too, so a new model starts a fresh session like new instructions do. */
   const runHash = model ? textHash(`${instructions.hash}:${model}`) : instructions.hash;
-  const { sessionId, catchUp } = await sessionFor(ctx, agent, { subscriptionId: sub.id, nodeId: place.nodeId }, runHash);
+  const { sessionId, catchUp } = await sessionFor(ctx, agent, { subscriptionId: sub.id, nodeId: place.nodeId }, runHash, job.continueOf);
   const said = repo ? `${asked}\n\n${repoLine(repo)}` : asked;
   /* A turn that types nothing only starts the program, for a person to talk to it: what was said before and where the
      repository is go with its instructions instead. */

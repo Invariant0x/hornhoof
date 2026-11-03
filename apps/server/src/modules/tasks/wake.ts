@@ -9,6 +9,7 @@ import { appendEvent, publishWorking } from '../events/store.js';
 import { identityOf, type NodeIdentity } from '../nodes/hub.js';
 import { answerDirectly, brokeDown, CLOSED, GATE_ROUNDS, handOver, lastMove, leaveWork, NOT_A_MOVE, openAfter, published, regateWaiting, reviewWake, silentTurn, taskSpot, wentOn, type Actor, type Task, type Wake, type WakeWhy } from './engine.js';
 import { wakeQueued, wakesLeft } from './outbox.js';
+import { continueOnce, doneIfRecorded } from './endings.js';
 import { afterRestart } from './restarts.js';
 import { settle, tell } from './turns.js';
 
@@ -525,7 +526,7 @@ export async function afterJob(ctx: Ctx, jobId: string): Promise<void> {
     .from(jobs)
     .where(eq(jobs.id, jobId));
   if (!job?.agentId || job.kind !== 'conversation') return;
-  if (job.status === 'failed') {
+  if (job.status === 'failed' && !(await doneIfRecorded(ctx, jobId, job))) {
     const stopped = job.error === 'cancelled';
     await appendEvent(ctx, { companyId: job.companyId, agentId: job.agentId, jobId, kind: stopped ? 'stopped' : 'failed', data: stopped ? {} : { error: job.error } });
   }
@@ -535,11 +536,18 @@ export async function afterJob(ctx: Ctx, jobId: string): Promise<void> {
   await pump(ctx, job.agentId);
 }
 
-/* A turn on a task a node restart cut off gets its retry waiting on the task before the task is checked, so nothing else
-   runs it again; a retry cut off too runs no more. */
+/* A turn on a task a node restart cut off gets its retry waiting on the task before the task is checked, and one that
+   failed without recording its work its continuation, so nothing else runs it again; a retry cut off too runs no more. */
 async function afterTaskTurn(ctx: Ctx, jobId: string, job: Parameters<typeof carriedTasks>[1] & { error: string | null }): Promise<void> {
-  const restarted = job.error === 'machine_restarted' ? await afterRestart(ctx, jobId) : null;
-  if (restarted !== 'called') await checkLiveness(ctx, jobId, await carriedTasks(ctx, job));
+  const ended = job.error === 'machine_restarted' ? await afterRestart(ctx, jobId) : (await keepsBreaking(ctx, jobId)) ? null : await continueOnce(ctx, jobId);
+  if (ended !== 'called') await checkLiveness(ctx, jobId, await carriedTasks(ctx, job));
+}
+
+/* The turn broke as it started, the last of QUICK_CRASHES in a row on its task: going on would only break again, so the
+   task stops for whoever gave it out instead. */
+async function keepsBreaking(ctx: Ctx, jobId: string): Promise<boolean> {
+  const [row] = await ctx.db.select({ job: jobs, task: tasks }).from(jobs).innerJoin(tasks, eq(tasks.id, jobs.taskId)).where(eq(jobs.id, jobId));
+  return Boolean(row?.job.agentId && crashed(row.job) && (await crashesInRow(ctx, row.job.agentId, row.task)) >= QUICK_CRASHES);
 }
 
 /* The node stops the program and reports the job as cancelled. A node that is away cannot, so the job ends here. */

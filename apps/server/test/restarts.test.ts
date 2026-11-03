@@ -180,10 +180,12 @@ describe('a turn cut off by a node restart', () => {
     const first = await c.brunoAtWork();
     c.node().send({ type: 'job.done', jobId: first.jobId, ok: false, result: 'The program exited with code 1.', sessionId: null, tail: '', error: 'agent_failed' });
     await until(async () => (await c.jobOf(first.jobId)).status === 'failed');
+    /* No restart: the turn goes on as one whose program failed before it recorded its work does, linked to it by continueOf. */
     const next = await nextRun(c.node());
-    expect(next.prompt).toContain('ended before the work did');
+    expect(next.prompt).toContain('without recording');
     const turns = await c.turnsOf(c.bruno.id);
     expect(turns.map(j => j.retryOf)).toEqual([null, null]);
+    expect(turns.map(j => j.continueOf)).toEqual([null, first.jobId]);
     expect(turns[0]!.interruption).toBeNull();
     expect(await c.notes()).toEqual([]);
     expect((await c.db.select({ kind: taskEvents.kind }).from(taskEvents).where(eq(taskEvents.taskId, c.task.id))).map(e => e.kind)).toContain('continued');

@@ -339,6 +339,11 @@ export const jobs = pgTable(
     /* The turn this one runs once more, after a node restart cut it off. */
     retryOf: uuid('retry_of').references((): AnyPgColumn => jobs.id),
     interruption: jsonb('interruption').$type<Interruption>(),
+    /* How the agent's program ended, as its node saw it: the exit code, or the name of the signal that ended it. */
+    exitCode: integer('exit_code'),
+    exitSignal: text('exit_signal'),
+    /* The turn whose session this one goes on with once, after that turn ended without recording what it was woken for. */
+    continueOf: uuid('continue_of').references((): AnyPgColumn => jobs.id),
     createdAt: createdAt(),
     startedAt: timestamp('started_at', { withTimezone: true }),
     finishedAt: timestamp('finished_at', { withTimezone: true }),
