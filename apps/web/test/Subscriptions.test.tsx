@@ -574,6 +574,24 @@ describe('signing in to plans', () => {
     expect(screen.queryByTestId('live-terminal')).not.toBeInTheDocument();
   });
 
+  it('brings the sign-in window into view when it opens, below a long card', async () => {
+    const shown: Element[] = [];
+    const before = Element.prototype.scrollIntoView;
+    /* As Chromium's does, it gives back a promise. */
+    Element.prototype.scrollIntoView = function (this: Element) { shown.push(this); return Promise.resolve() as unknown as void; };
+    onTestFinished(() => void (Element.prototype.scrollIntoView = before));
+    fakeStream();
+    mockApi({ ...only({ ...codex, status: 'ready', machines: [MACHINE] }), 'POST /api/subscriptions/s-codex/signin': [200, { nodeId: NODE, hostname: 'ivan-mbp' }], 'POST /api/subscriptions/s-codex/signin/stop': [204] });
+    render(<Subscriptions me={ME} />);
+    await openAll();
+    await userEvent.click(await screen.findByRole('button', { name: 'Sign in to Codex' }));
+    const heading = await screen.findByRole('heading', { name: 'Signing in on ivan-mbp' });
+    await vi.waitFor(() => expect(shown.some(node => node.contains(heading))).toBe(true));
+    /* Closing it must not trip over what scrolling gave back. */
+    await userEvent.click(screen.getByRole('button', { name: 'Stop the sign-in' }));
+    await vi.waitFor(() => expect(screen.queryByRole('heading', { name: 'Signing in on ivan-mbp' })).not.toBeInTheDocument());
+  });
+
   it('says what to do when the machine could not install the program to sign in with', async () => {
     const stream = fakeStream();
     mockApi({ ...only(codex), 'POST /api/subscriptions/s-codex/signin': [200, { nodeId: NODE, hostname: 'ivan-mbp' }] });
