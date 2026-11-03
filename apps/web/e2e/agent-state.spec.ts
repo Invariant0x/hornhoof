@@ -14,7 +14,7 @@ const CARD: AgentCardView = {
   product: null, model: '', effort: null, subscription: null, machine: null, state: 'working', skills: [], parts: [],
   raw: '', instructions: { length: 0, max: 200_000 }, runsOn: [], changes: [], interrupted: [], canEdit: false, timer: null,
 };
-const program = (state: ProgramView['state'], since: number): ProgramView => ({ state, since, tool: null, screenAt: NOW, reportedAt: NOW });
+const program = (state: ProgramView['state'], since: number): ProgramView => ({ state, since, tool: null, screenAt: NOW, signAt: null, retry: null, reportedAt: NOW });
 const STATES: { name: string; program: ProgramView; alarm: TurnAlarm | null; en: string; ru: string; red: boolean }[] = [
   { name: 'thinking', program: program('thinking', NOW - 12 * 60_000), alarm: null, en: 'thinking 12 min', ru: 'думает 12 мин', red: false },
   { name: 'lost-end', program: program('idle', NOW - 61_000), alarm: null, en: 'turn end lost: waiting for input', ru: 'конец хода потерян: ждет ввода', red: true },

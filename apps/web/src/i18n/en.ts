@@ -605,6 +605,7 @@ export const en = {
       thinking: (n: string) => `thinking ${n} min`,
       tool: (tool: string, n: string) => `${tool} running ${n} min`,
       asking: 'asking',
+      retrying: 'retrying',
       idle: 'waiting for input',
       gone: 'no program',
       waitsForTask: 'waiting for a task',

@@ -1041,11 +1041,12 @@ describe("what an agent's program does, and the server's alarms about its turn",
   function live(now: number, bruno: Live, base: Org = TREE_ORG): Org {
     return { ...base, serverNow: new Date(now).toISOString(), departments: base.departments.map(d => ({ ...d, employees: d.employees.map(e => (e.id === 'b1' ? { ...e, ...bruno } : e)) })) };
   }
-  const program = (now: number, state: ProgramView['state'], minutes: number, tool: string | null = null): ProgramView => ({ state, since: ago(now, minutes), tool, screenAt: ago(now, 0), reportedAt: ago(now, 0) });
+  const program = (now: number, state: ProgramView['state'], minutes: number, tool: string | null = null): ProgramView => ({ state, since: ago(now, minutes), tool, screenAt: ago(now, 0), signAt: null, retry: null, reportedAt: ago(now, 0) });
   const STATES: [string, (now: number) => Live, string, string, boolean][] = [
     ['thinking', now => ({ program: program(now, 'thinking', 12), alarm: null }), 'thinking 12 min', 'думает 12 мин', false],
     ['a tool', now => ({ program: program(now, 'tool', 40, 'Bash'), alarm: null }), 'Bash running 40 min', 'Bash работает 40 мин', false],
     ['asking', now => ({ program: program(now, 'asking', 3), alarm: null }), 'asking', 'спрашивает', false],
+    ['retrying', now => ({ program: program(now, 'retrying', 3), alarm: null }), 'retrying', 'повторяет запрос', false],
     ['waiting for input for 59 s', now => ({ program: program(now, 'idle', 59 / 60), alarm: null }), 'waiting for input', 'ждет ввода', false],
     ['a lost turn end after 61 s of it', now => ({ program: program(now, 'idle', 61 / 60), alarm: null }), 'turn end lost: waiting for input', 'конец хода потерян: ждет ввода', true],
     ['a frozen program', now => ({ program: program(now, 'thinking', 50), alarm: { reason: 'program_stalled', since: ago(now, 34) } }), 'program frozen 34 min', 'программа замерла 34 мин', true],

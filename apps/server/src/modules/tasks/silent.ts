@@ -54,7 +54,7 @@ export async function recordJobProgram(
   ctx.bus.publish(job.companyId, { type: 'org' });
 }
 
-const programOf = (msg: ProgramReport, now: Date): TurnProgram => ({ state: msg.state, since: msg.since, tool: msg.tool ?? null, screenAt: msg.screenAt, reportedAt: now.getTime() });
+const programOf = (msg: ProgramReport, now: Date): TurnProgram => ({ state: msg.state, since: msg.since, tool: msg.tool ?? null, screenAt: msg.screenAt, signAt: msg.signAt ?? null, retry: msg.retry ?? null, reportedAt: now.getTime() });
 
 function goneProgram(msg: ProgramReport): GoneProgram | null {
   if (msg.state !== 'gone') return null;

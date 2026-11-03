@@ -33,6 +33,7 @@ function programLine(say: Messages['dept']['now'], p: ProgramView, now: number):
   if (p.state === 'thinking') return { tone: 'work', text: say.thinking(minutes(now, p.since)) };
   if (p.state === 'tool') return { tone: 'work', text: say.tool(p.tool ?? '', minutes(now, p.since)) };
   if (p.state === 'asking') return { tone: 'person', text: say.asking };
+  if (p.state === 'retrying') return { tone: 'work', text: say.retrying };
   if (p.state === 'gone') return { tone: 'calm', text: say.gone };
   return now - p.since >= LOST_END_MS ? { tone: 'alarm', text: say.lostEnd } : { tone: 'calm', text: say.idle };
 }

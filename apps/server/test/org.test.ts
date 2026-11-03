@@ -330,6 +330,8 @@ describe('GET /api/org', () => {
       since: reportedAt.getTime(),
       tool: 'Bash',
       screenAt: reportedAt.getTime(),
+      signAt: null,
+      retry: null,
       reportedAt: reportedAt.getTime(),
     });
     expect(devEmployee.alarm).toEqual({ reason: 'node_silent', since: reportedAt.getTime() });

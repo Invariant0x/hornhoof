@@ -587,6 +587,7 @@ export const ru: Messages = {
       thinking: n => `думает ${n} мин`,
       tool: (tool, n) => `${tool} работает ${n} мин`,
       asking: 'спрашивает',
+      retrying: 'повторяет запрос',
       idle: 'ждет ввода',
       gone: 'программы нет',
       waitsForTask: 'ждет задачу',

@@ -79,7 +79,7 @@ describe('Map', () => {
   it("says in the line at the bottom what the orchestrator's program does, and the server's alarm in red, in each language", async () => {
     const now = Date.now();
     const at = (m: number) => now - m * 60_000;
-    const thinking = { state: 'thinking' as const, since: at(7), tool: null, screenAt: at(0), reportedAt: at(0) };
+    const thinking = { state: 'thinking' as const, since: at(7), tool: null, screenAt: at(0), signAt: null, retry: null, reportedAt: at(0) };
     const cases = [
       ['en', null, 'thinking 7 min'],
       ['ru', null, 'думает 7 мин'],
