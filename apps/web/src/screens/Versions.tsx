@@ -80,7 +80,7 @@ export function Versions({ updates, onClose }: { updates: Updates; onClose: () =
           {rows.map(b => (
             <li key={b.tag}>
               <div>
-                <b>{b.version || b.tag}</b>
+                <b>{versionText({ version: b.version || b.tag, commit: b.commit })}</b>
                 {b.tag === 'latest' && <span className="muted">{t.updates.newest}</span>}
                 {b.title && <span>{b.title}</span>}
                 <span className="muted">{b.created.slice(0, 10)}</span>

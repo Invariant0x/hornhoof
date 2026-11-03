@@ -140,12 +140,21 @@ describe('updates', () => {
     render(<Shell me={ME} onSignOut={() => {}} />);
     const dialog = await openVersions(user);
     const rows = within(dialog).getAllByRole('listitem');
-    expect(rows.map(r => r.querySelector('b')!.textContent)).toEqual(['0.4.1', '0.4.0', '0.3.0']);
+    expect(rows.map(r => r.querySelector('b')!.textContent)).toEqual(['0.4.1 (bbbbbbb)', '0.4.0 (aaaaaaa)', '0.3.0 (ccccccc)']);
     expect(rows[1]).toHaveTextContent('Running now');
     expect(within(rows[1]!).queryByRole('button')).not.toBeInTheDocument();
     expect(within(rows[0]!).getByRole('button', { name: 'Install' })).toBeInTheDocument();
     expect(rows[2]).toHaveTextContent('Build the company');
-    expect(within(dialog).getByText(/Running now: 0\.4\.0 · aaaaaaa/)).toBeInTheDocument();
+    expect(within(dialog).getByText('Running now: 0.4.0 (aaaaaaa)')).toBeInTheDocument();
+  });
+
+  it('shows the release version for latest and falls back to the tag for an unversioned build', async () => {
+    const view = updates({ latest: build('0.5.0', 'd'.repeat(40), { tag: 'latest' }), versions: [build('', 'e'.repeat(40), { tag: 'snapshot' })] });
+    mockApi({ 'GET /api/org': [200, ORG], 'GET /api/updates': [200, view] });
+    const user = userEvent.setup();
+    render(<Shell me={ME} onSignOut={() => {}} />);
+    const dialog = await openVersions(user);
+    expect(within(dialog).getAllByRole('listitem').map(r => r.querySelector('b')!.textContent)).toEqual(['0.5.0 (ddddddd)', 'snapshot (eeeeeee)']);
   });
 
   it('warns before going back past a database change', async () => {

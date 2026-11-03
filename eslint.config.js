@@ -37,4 +37,14 @@ export default [
       '@typescript-eslint/switch-exhaustiveness-check': 'error',
     },
   },
+  {
+    files: ['scripts/**/*.mjs'],
+    languageOptions: { globals: { process: 'readonly' } },
+    rules: {
+      'no-unused-vars': 'error',
+      'no-undef': 'error',
+      'no-unreachable': 'error',
+      'no-constant-binary-expression': 'error',
+    },
+  },
 ];

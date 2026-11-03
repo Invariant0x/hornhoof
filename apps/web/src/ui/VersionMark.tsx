@@ -25,7 +25,7 @@ export function useVersion(): Version | null {
   return useVersionState('/api/version').version;
 }
 
-export const versionText = ({ version, commit }: Version) => `${version} · ${commit.slice(0, 7)}`;
+export const versionText = ({ version, commit }: Version) => `${version} (${commit.slice(0, 7)})`;
 
 /* Small and muted in the bottom right of every screen. */
 export function VersionMark() {

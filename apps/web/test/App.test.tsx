@@ -29,7 +29,7 @@ describe('App', () => {
     mockApi({ 'GET /api/setup': [200, { needed: false }], 'GET /api/me': [401, signedOut], 'GET /api/version': [200, { version: '0.4.0', commit: 'abc1234def', migrations: 5 }] });
     render(<App />);
     expect(await screen.findByRole('heading', { name: 'Log in' })).toBeInTheDocument();
-    expect(await screen.findByText('0.4.0 · abc1234')).toHaveClass('version-mark');
+    expect(await screen.findByText('0.4.0 (abc1234)')).toHaveClass('version-mark');
   });
 
   it('opens the workspace once the person logs in', async () => {
