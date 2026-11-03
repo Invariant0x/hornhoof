@@ -16,7 +16,8 @@ import { jobRoutes } from './modules/jobs/routes.js';
 import { PublicLinks } from './modules/link/link.js';
 import { linkRoutes } from './modules/link/routes.js';
 import { NodeHub } from './modules/nodes/hub.js';
-import { handleNodeClose, handleNodeMessage } from './modules/nodes/messages.js';
+import { handleNodeClose } from './modules/nodes/messages.js';
+import { receiveNodeMessage } from './modules/nodes/lifecycle.js';
 import { nodeRoutes } from './modules/nodes/routes.js';
 import { nodeSocket, SOCKET_OPTIONS } from './modules/nodes/socket.js';
 import { orgRoutes } from './modules/org/routes.js';
@@ -78,7 +79,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   app.decorate('ctx', ctx);
   ctx.hub = new NodeHub({
     pingMs: deps.config.nodePingMs,
-    onMessage: (id, msg) => handleNodeMessage(ctx, id, msg),
+    onMessage: (id, msg) => receiveNodeMessage(ctx, id, msg),
     onTerminal: (id, msg) => ctx.terminals.fromNode(id, msg),
     onClose: id => handleNodeClose(ctx, id),
     onError: err => app.log.error({ error: loggable(err) }, 'A node message failed.'),

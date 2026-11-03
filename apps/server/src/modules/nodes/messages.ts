@@ -2,7 +2,7 @@ import { lastBytes, type NodeMessage } from '@hornhoof/protocol';
 import { and, eq, inArray, isNull, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { agents, jobs, machines, nodes, planCredentials, subscriptions, tasks, type Interruption } from '../../db/schema.js';
+import { agents, jobs, machines, nodes, planCredentials, subscriptions, tasks } from '../../db/schema.js';
 import { said } from '../conversation/live.js';
 import { nodeOfAgent, pumpWaiting, refusedLimits, startProgram } from '../conversation/queue.js';
 import { workStarts } from '../org/map-state.js';
@@ -14,7 +14,8 @@ import { partDone, partStarted, pumpTests, testsHello } from '../testruns/runs.j
 import { sameNode, type NodeIdentity } from './hub.js';
 import { deliver, pushCredentials, signedIn, storeEnvelopes } from '../subscriptions/credentials.js';
 import { liveNode, settlePlans } from './nodes.js';
-import { BUILTIN_NAME, interruptionOf } from './restarts.js';
+import { builtinInterruption, interruptionOf } from './restarts.js';
+import { interruptionValue, type RestartCut } from './restart-evidence.js';
 import { hookRejected } from './hook-rejections.js';
 
 const OPEN_JOBS = ['queued', 'running'] as const;
@@ -32,13 +33,13 @@ function jobsOf(id: NodeIdentity, ctx: Ctx): SQL {
 const ON_NODE = or(eq(jobs.status, 'running'), and(eq(jobs.status, 'queued'), eq(jobs.kind, 'test')));
 
 /* Why a node restart cut a turn off, with the number of the task it was on; nothing for a turn that failed otherwise. */
-const cutOf = (cut?: Omit<Interruption, 'task'>) =>
-  cut ? { interruption: sql`${JSON.stringify(cut)}::jsonb || jsonb_build_object('task', (select ${tasks.number} from ${tasks} where ${tasks.id} = ${jobs.taskId}))` } : {};
+const cutOf = (cut?: RestartCut) =>
+  cut ? { interruption: sql`(${interruptionValue(cut)}) || jsonb_build_object('task', (select ${tasks.number} from ${tasks} where ${tasks.id} = ${jobs.taskId}))` } : {};
 
 /* Jobs of these nodes or subscriptions that a node had become failed with the reason, except the ones the node still runs.
    A failed turn goes into its conversation and the agent's next turn goes out. Turns a node restart cut off keep why,
    with the number of the task each was on. */
-export async function failOpenJobs(ctx: Ctx, scope: SQL, error: string, stillRunning: string[] = [], cut?: Omit<Interruption, 'task'>): Promise<string[]> {
+export async function failOpenJobs(ctx: Ctx, scope: SQL, error: string, stillRunning: string[] = [], cut?: RestartCut): Promise<string[]> {
   const conditions = [scope, ON_NODE];
   if (stillRunning.length) conditions.push(notInArray(jobs.id, stillRunning));
   const failed = await ctx.db
@@ -89,17 +90,17 @@ const helloRow = (msg: Hello, now: Date) => ({
 
 /* Why the built-in node's turns are gone. A personal node's comes from its row, once the hello is known to be its own. */
 const builtinCut = (ctx: Ctx, id: NodeIdentity, msg: Hello, now: Date) =>
-  id.kind === 'builtin' ? interruptionOf(ctx, { id: null, name: BUILTIN_NAME, said: null }, msg, now) : undefined;
+  id.kind === 'builtin' ? builtinInterruption(ctx, msg, now) : undefined;
 
 const nodeCut = (ctx: Ctx, nodeId: string, row: { node: typeof nodes.$inferSelect; host: string | null }, msg: Hello, now: Date) =>
-  interruptionOf(ctx, { id: nodeId, name: row.host || 'a machine with no name', said: { version: row.node.version, boot: row.node.boot } }, msg, now);
+  interruptionOf(ctx, { id: nodeId, name: row.host || 'a machine with no name', machine: { id: row.node.machineId, name: row.host }, said: { version: row.node.version, boot: row.node.boot } }, msg, now);
 
 export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage, now = new Date()): Promise<void> {
   const { db } = ctx;
   // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- term.* messages are routed by the terminal hub
   switch (msg.type) {
     case 'hello': {
-      let cut = builtinCut(ctx, id, msg, now);
+      let cut = await builtinCut(ctx, id, msg, now);
       if (id.kind === 'node') {
         const [row] = await db
           .select({ node: nodes, removedAt: subscriptions.removedAt, host: machines.hostname })

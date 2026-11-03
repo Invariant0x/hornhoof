@@ -1,4 +1,4 @@
-import { COMPANY_TEMPLATE_KEYS, CRED_KINDS, MACHINE_KINDS, RUN_KINDS, TEMPLATE_KEYS, type Account, type Boot, type Limits, type ModelOption } from '@hornhoof/protocol';
+import { COMPANY_TEMPLATE_KEYS, CRED_KINDS, MACHINE_KINDS, RUN_KINDS, TEMPLATE_KEYS, type Account, type Boot, type Limits, type ModelOption, type NodeExit } from '@hornhoof/protocol';
 import { sql } from 'drizzle-orm';
 import { bigint, bigserial, boolean, check, customType, index, integer, jsonb, pgTable, primaryKey, real, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
 
@@ -198,7 +198,7 @@ export const nodes = pgTable(
     /* The account its program is signed in to, as the program tells. */
     account: jsonb('account').$type<Account>(),
     /* How it came up, as it said last: what tells why the turns it ran are gone when it says it again. */
-    boot: jsonb('boot').$type<Boot>(),
+    boot: jsonb('boot').$type<Boot & { stopped?: NodeExit }>(),
     createdAt: createdAt(),
   },
   t => [unique('nodes_machine_plan').on(t.machineId, t.subscriptionId).nullsNotDistinct(), index('nodes_subscription_id').on(t.subscriptionId)],
@@ -308,7 +308,7 @@ export const JOB_KINDS = ['test', 'conversation'] as const;
 export const RESTART_CAUSES = ['server', 'update', 'machine', 'container', 'program', 'connection', 'unknown'] as const;
 export type RestartCause = (typeof RESTART_CAUSES)[number];
 /* A turn a node restart cut off: why, when Hornhoof learned it, on which node, and the number of the task it was on. */
-export type Interruption = { cause: RestartCause; at: string; node: { id: string | null; name: string }; task: number | null; versions?: { from: string; to: string } };
+export type Interruption = { cause: RestartCause; at: string; node: { id: string | null; name: string }; task: number | null; versions?: { from: string; to: string }; machine?: { id: string | null; name: string | null }; diagnosis?: NodeExit };
 
 /* One prompt sent to one subscription's node. */
 export const jobs = pgTable(

@@ -34,6 +34,11 @@ describe('the node log that leaves the machine', () => {
     expect(text).toContain('Node restarts.');
   });
 
+  it('removes an unfinished private key through the end of the message', () => {
+    const text = nodeLog('Node failure.\n-----BEGIN PRIVATE KEY-----\nunfinished-private-block-secret', []);
+    expect(text).toBe('Node failure.\n[hidden]');
+  });
+
   it('keeps the last 80 lines within 16384 UTF-8 bytes, after redaction', () => {
     const token = 'secret-across-tail-boundary-'.repeat(700);
     const lines = Array.from({ length: 100 }, (_, i) => `Node line ${i}: ${'界'.repeat(100)}`);

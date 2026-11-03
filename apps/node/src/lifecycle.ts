@@ -2,7 +2,7 @@ import { chmodSync, readFileSync, renameSync, statSync, writeFileSync } from 'no
 import { join } from 'node:path';
 import { NodeExit, NodeStopReason, type NodeMessage } from '@hornhoof/protocol';
 import { z } from 'zod';
-import { nodeLog } from './node-log.js';
+import { nodeLog, nodeLogStream } from './node-log.js';
 
 const JOURNAL = 'node-runtime.json';
 const INTENT = 'node-stop-intent.json';
@@ -71,11 +71,12 @@ export function nodeLifecycle(input: Input): Lifecycle {
   const parsed = State.safeParse(read(join(dir, JOURNAL)));
   const previous = previousExit(parsed.success ? parsed.data : null, oom, secrets());
   let state: State = { startedAt, oomKills: oom, log: '', exit: null };
+  const cleanLine = nodeLogStream();
   const persist = () => keep(join(dir, JOURNAL), state);
   persist();
   const log = (line: string): void => {
     if (state.exit) return;
-    const clean = nodeLog(line, secrets());
+    const clean = cleanLine(line, secrets());
     state = { ...state, log: nodeLog(`${state.log}\n${clean}`.trimStart(), secrets()) };
     persist();
     write(clean);

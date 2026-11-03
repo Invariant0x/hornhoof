@@ -4,7 +4,7 @@ import { HIDDEN, redact } from './redact.js';
 
 /* These are node diagnostics, not agent output. Labels protect secrets a program has not let the node learn yet. */
 const CREDENTIALS: readonly [RegExp, string][] = [
-  [/-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----[\s\S]*?-----END (?:[A-Z]+ )?PRIVATE KEY-----/g, HIDDEN],
+  [/-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----[\s\S]*?(?:-----END (?:[A-Z]+ )?PRIVATE KEY-----|$)/g, HIDDEN],
   [/\b(?:Proxy-Authorization|Authorization|Cookie|Set-Cookie)\s*:[^\r\n]*/gi, HIDDEN],
   [/\b(?:Bearer|Basic)\s+[^\s,;]+/gi, HIDDEN],
   [/(["']?(?:access[_-]?token|refresh[_-]?token|id[_-]?token|token|api[_-]?key|key|password|passwd|secret|client[_-]?secret|credential)["']?\s*[:=]\s*)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;}&]+)/gi, `$1${HIDDEN}`],
@@ -27,4 +27,18 @@ export function nodeLog(text: string, secrets: string[]): string {
   for (const [pattern, replacement] of CREDENTIALS) clean = clean.replace(pattern, replacement);
   const lines = clean.replace(/\r\n?/g, '\n').split('\n').slice(-NODE_LOG_LINES).join('\n');
   return byteTail(lines);
+}
+
+/* A private key may span callbacks. Hide it from its opening line until its closing line arrives. */
+export function nodeLogStream(): (text: string, secrets: string[]) => string {
+  let privateKey = false;
+  return (text, secrets) => {
+    const lines = stripVTControlCharacters(text).split(/\r?\n/).map(line => {
+      if (/-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----/.test(line)) privateKey = true;
+      const clean = privateKey ? HIDDEN : line;
+      if (/-----END (?:[A-Z]+ )?PRIVATE KEY-----/.test(line)) privateKey = false;
+      return clean;
+    });
+    return nodeLog(lines.join('\n'), secrets);
+  };
 }

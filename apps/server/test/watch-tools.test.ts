@@ -41,6 +41,14 @@ const call = async (client: Client, name: string, args: object = {}) => (await c
 const names = async (client: Client) => (await client.listTools()).tools.map(t => t.name);
 
 describe('tools a skill grants', () => {
+  it('exposes node restart evidence to the failure collector separately from agent output', async () => {
+    const { app, db, acme, sub, bruno, task } = await company(['ops-failure-review']);
+    const interruption = { cause: 'container' as const, at: new Date().toISOString(), task: task.number, node: { id: null, name: 'the built-in node' }, machine: { id: 'machine-id', name: 'a-host' }, diagnosis: { kind: 'planned', reason: 'hornhoof_update', startedAt: null, at: null, log: 'Stopping node: hornhoof_update.' } };
+    await db.insert(jobs).values({ companyId: acme.id, subscriptionId: sub.id, agentId: bruno.id, taskId: task.id, kind: 'conversation', prompt: 'Check.', timeoutMs: 1, status: 'failed', error: 'machine_restarted', tail: 'Last agent output.', interruption, finishedAt: new Date() });
+    const result = JSON.parse((await call(await mcp(app, TOKEN), 'failures')).content[0]!.text);
+    expect(result.failed).toEqual([expect.objectContaining({ agent: 'Bruno', error: 'machine_restarted', tail: 'Last agent output.', interruption })]);
+  });
+
   it('are not there for an employee without such a skill', async () => {
     const { app } = await company([]);
     const tools = await names(await mcp(app, TOKEN));

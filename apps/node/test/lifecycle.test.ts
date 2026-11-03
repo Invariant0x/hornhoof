@@ -83,4 +83,17 @@ describe('a persisted node lifecycle', () => {
     expect(stored.log).toBe(life.tail());
     expect(stored.log).toContain('Node diagnostic 99');
   });
+
+  it('redacts a private key arriving in separate messages before any persistence or output', () => {
+    const path = dir();
+    const output: string[] = [];
+    const life = open(path, FIRST, () => null, line => output.push(line));
+    life.log('-----BEGIN PRIVATE KEY-----');
+    life.log('private-key-body-split-across-messages');
+    expect(readFileSync(join(path, 'node-runtime.json'), 'utf8')).not.toContain('private-key-body');
+    expect(output.join('\n')).not.toContain('private-key-body');
+    life.log('-----END PRIVATE KEY-----');
+    life.log('Connection closed.');
+    expect(life.tail()).toContain('Connection closed.');
+  });
 });

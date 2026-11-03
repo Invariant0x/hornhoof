@@ -141,7 +141,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
       {
         description:
           'What went wrong in the last hours: the turns that failed, newest first, with the agent, the error, the end of its output and the task, and the tasks blocked now, ' +
-          'with what their holder said when it stopped and how its last turn on the task ended. ' +
+          'with what their holder said when it stopped and how its last turn on the task ended. Node restart interruptions include the machine, diagnosis and sanitized node log. ' +
           'Turns people or Hornhoof stopped on purpose are left out. Also where agents stumbled, each with when and on which task it was seen last: commands and modules ' +
           'a shell or a program said were not installed (the same words read in a file count for nothing), the tools they installed by hand, ' +
           'and the questions and stuck tasks they stopped on for people, with the answer and how their last turn on the task ended.',
@@ -150,7 +150,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
       async ({ hours }) => {
         const names = await deptNames();
         const failed = await db
-          .select({ agent: agents.name, departmentId: agents.departmentId, at: jobs.finishedAt, error: jobs.error, tail: jobs.tail, task: tasks.number })
+          .select({ agent: agents.name, departmentId: agents.departmentId, at: jobs.finishedAt, error: jobs.error, tail: jobs.tail, task: tasks.number, interruption: jobs.interruption })
           .from(jobs)
           .innerJoin(agents, eq(agents.id, jobs.agentId))
           .leftJoin(tasks, eq(tasks.id, jobs.taskId))
