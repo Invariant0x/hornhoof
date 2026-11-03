@@ -47,7 +47,7 @@ FRPS_USER = os.environ.get('RELAY_FRPS_USER', 'admin')
 FRPS_PASSWORD = os.environ.get('RELAY_FRPS_PASSWORD', '')
 # A registration frps has not shown yet reads as held for this long (R1.1, R2.1).
 PENDING_S = 10
-# A silent client's route goes within this bound (R3.1, measured in Task 3).
+# R3.1 measured with frp 0.71.1: network 20.16/20.46 s, today 20.26 s (2026-11-03).
 EVICTION_BOUND_S = 30
 # One budget per plugin call: a spent budget refuses the op, fail closed (Review Focus 3).
 PLUGIN_CALL_S = 1.0

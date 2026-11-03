@@ -16,8 +16,10 @@ auth.token = ""
 
 transport.tcpMux = true
 transport.maxPoolCount = 5
-# A client that stops sending heartbeats (or whose binding was released or blocked) is dropped after 90 s.
-transport.heartbeatTimeout = 90
+# tcpMux keepalive drops a silent client within 30 s.
+# Heartbeats, where a client still sends them, are checked by the plugin as before.
+transport.tcpMuxKeepaliveInterval = 10
+transport.heartbeatTimeout = -1
 
 log.to = "console"
 log.level = "info"
