@@ -15,6 +15,7 @@ import { sameNode, type NodeIdentity } from './hub.js';
 import { deliver, pushCredentials, signedIn, storeEnvelopes } from '../subscriptions/credentials.js';
 import { liveNode, settlePlans } from './nodes.js';
 import { BUILTIN_NAME, interruptionOf } from './restarts.js';
+import { hookRejected } from './hook-rejections.js';
 
 const OPEN_JOBS = ['queued', 'running'] as const;
 
@@ -239,6 +240,9 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       return;
     case 'agent.said':
       said(ctx, id, msg.ref, msg.ok);
+      return;
+    case 'agent.hook_rejected':
+      await hookRejected(ctx, id, msg, jobsOf(id, ctx));
       return;
     /* Only the node the agent's program is on tells how full its context is. */
     case 'agent.context': {

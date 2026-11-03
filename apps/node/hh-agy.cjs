@@ -9,7 +9,7 @@
 const { spawn } = require('node:child_process');
 const { appendFileSync } = require('node:fs');
 
-const WAIT_MS = { prompt: 12000 };
+const { sendHook } = require('./hh-hook-send.cjs');
 const STOP_MS = 3000;
 const PASTE_START = '\x1b[200~';
 const PASTE_END = '\x1b[201~';
@@ -27,14 +27,7 @@ const dim = text => `\x1b[2m${text}\x1b[22m`;
 
 /* Tells the node; never fails the screen. */
 async function hook(event, body) {
-  const url = process.env.HH_BRIDGE;
-  if (!url) return;
-  await fetch(`${url}/${event}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(WAIT_MS[event] ?? 3000),
-  }).catch(() => {});
+  await sendHook(event, JSON.stringify(body));
 }
 
 let line = '';

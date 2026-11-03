@@ -1,14 +1,17 @@
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { fromAgent } from '../src/terminal/peer.js';
 
 const hex = (port: number) => port.toString(16).toUpperCase().padStart(4, '0');
+const folders: string[] = [];
+afterEach(() => folders.splice(0).forEach(folder => rmSync(folder, { recursive: true, force: true })));
 
 /* A /proc with two agents' panes, 10 and 20, and the processes under them. */
 function fakeProc(socket: { port: number; bridgePort: number; inode: number }, holder: number) {
   const proc = mkdtempSync(join(tmpdir(), 'hh-proc-'));
+  folders.push(proc);
   mkdirSync(join(proc, 'net'));
   writeFileSync(
     join(proc, 'net', 'tcp'),
@@ -45,6 +48,30 @@ describe('which agent a connection to the bridge comes from', () => {
     expect(await owns('agent-1', socket)).toBe(true);
     expect(await owns('agent-2', socket)).toBe(false);
     expect(await owns('agent-3', socket)).toBe(false);
+  });
+
+  it('requires the hinted pid to hold this connection, even when the actual caller belongs to the agent', async () => {
+    const owns = fromAgent(panes, fakeProc(socket, 12));
+    expect(await owns('agent-1', { ...socket, pid: 21 })).toBe(false);
+    expect(await owns('agent-1', { ...socket, pid: 0 })).toBe(false);
+  });
+
+  it('accepts a verified pane root at pid 1', async () => {
+    expect(await fromAgent(async () => [1], fakeProc(socket, 1))('agent-1', { ...socket, pid: 1 })).toBe(true);
+    expect(await fromAgent(async () => [1], fakeProc(socket, 12))('agent-1', { ...socket, pid: 12 })).toBe(true);
+  });
+
+  it('refuses another agent borrowing the pid of the target agent', async () => {
+    const owns = fromAgent(panes, fakeProc(socket, 21));
+    expect(await owns('agent-1', { ...socket, pid: 12 })).toBe(false);
+    expect(await owns('agent-2', { ...socket, pid: 12 })).toBe(false);
+  });
+
+  it('verifies the socket inode captured at accept even after the TCP table changes', async () => {
+    const proc = fakeProc(socket, 12);
+    writeFileSync(join(proc, 'net', 'tcp'), '');
+    const owns = fromAgent(panes, proc);
+    expect(await owns('agent-1', { ...socket, pid: 12, acceptedInode: String(socket.inode) })).toBe(true);
   });
 
   it("refuses a connection from another agent's processes, one it cannot find and one held outside every pane", async () => {

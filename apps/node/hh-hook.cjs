@@ -7,7 +7,7 @@
 // message is when the program got only part of it.
 'use strict';
 
-const WAIT_MS = { prompt: 12000 };
+const { sendHook } = require('./hh-hook-send.cjs');
 const AFTER_COMPACT =
   'Hornhoof: your conversation was just compacted, so details of it may be gone. Before you go on, read again what your instructions say to read after a compaction.';
 
@@ -30,12 +30,8 @@ async function main() {
   const url = process.env.HH_BRIDGE;
   if (!event || !url || !/^[a-z]+$/.test(event)) return;
   const body = process.argv[3] ?? (await readStdin());
-  const res = await fetch(`${url}/${event}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: body || '{}',
-    signal: AbortSignal.timeout(WAIT_MS[event] ?? 3000),
-  });
+  const res = await sendHook(event, body || '{}');
+  if (!res) return;
   return print(await answerOf(event, res));
 }
 
@@ -50,5 +46,5 @@ function print(text) {
 }
 
 main()
-  .catch(() => {})
+  .catch(() => new Promise(resolve => process.stderr.write('Hook delivery failed.\n', resolve)))
   .finally(() => process.exit(0));
