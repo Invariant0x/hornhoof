@@ -471,6 +471,8 @@ export const tasks = pgTable(
     index('tasks_department_id').on(t.departmentId),
     index('tasks_assignee').on(t.assigneeAgentId),
     index('tasks_parent_id').on(t.parentId),
+    index('tasks_turn_id').on(t.turnId),
+    index('tasks_product_id').on(t.productId),
     /* What no move makes: a gate with no executor behind it, counts below zero, a closed task without its time, a task
        under itself, gates that are not lists. */
     check('tasks_review_has_executor', sql`${t.status} <> 'review' OR ${t.executorAgentId} IS NOT NULL`),
