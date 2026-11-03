@@ -9,7 +9,7 @@ import { agentChanges, agents, companies, departments, jobs, people, requests, s
 import { pumpWaiting } from '../src/modules/conversation/queue.js';
 import { afterJob } from '../src/modules/tasks/wake.js';
 import { identityOf } from '../src/modules/nodes/hub.js';
-import { answer, ask, createTask, submit, verdict } from '../src/modules/tasks/engine.js';
+import { answer, ask, createTask, submit, updateTask, verdict } from '../src/modules/tasks/engine.js';
 import { wakeAll, wakePrompt } from '../src/modules/tasks/wake.js';
 import { as, connectNode, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
@@ -100,18 +100,26 @@ describe('switching an agent off and on', () => {
     expect(res.json().error.reason).toBe('orchestrator_card');
   });
 
-  it("keeps a switched-off employee's task turns waiting and sends them when it is on again", async () => {
-    const { ctx, db, builtin, bruno, patch, memberTask, jobsOf } = await company();
+  it('keeps work with the head until it is assigned again after an employee returns', async () => {
+    const { ctx, db, builtin, hana, bruno, patch, memberTask, jobsOf } = await company();
     const task = await memberTask();
     await patch(bruno.id, { on: false });
     await wakeAll(ctx, [{ agentId: bruno.id, taskId: task.id, why: 'assigned' }]);
     await pumpWaiting(ctx);
-    expect((await jobsOf(bruno.id)).map(j => j.status)).toEqual(['queued']);
+    expect(await jobsOf(bruno.id)).toEqual([]);
+    expect((await db.select().from(tasks).where(eq(tasks.id, task.id)))[0]).toMatchObject({ assigneeAgentId: hana.id });
+    const head = await nextRun(builtin);
+    expect((await jobsOf(hana.id)).map(j => ({ id: j.id, status: j.status }))).toEqual([{ id: head.jobId, status: 'running' }]);
+    expect(head.prompt).toContain(`#${task.number}`);
+    expect(head.prompt).toContain('Bruno does it and was switched off');
     await patch(bruno.id, { on: true });
-    /* The head hears first that the work came back to it; Bruno's turn goes out once it is on. */
+    expect(await jobsOf(bruno.id)).toEqual([]);
+    expect((await jobsOf(hana.id)).map(j => j.id)).toEqual([head.jobId]);
+    const assigned = await updateTask(ctx, hana.id, task.id, { executor: bruno.id });
+    await wakeAll(ctx, assigned.wakes);
     const mine = (await jobsOf(bruno.id))[0]!.id;
-    let run = await nextRun(builtin);
-    while (run.jobId !== mine) run = await nextRun(builtin);
+    const run = await nextRun(builtin);
+    expect(run.jobId).toBe(mine);
     expect((await db.select().from(jobs).where(eq(jobs.id, run.jobId)))[0]!.status).toBe('running');
   });
 
