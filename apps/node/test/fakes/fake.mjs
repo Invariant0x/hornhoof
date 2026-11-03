@@ -13,7 +13,7 @@ const LOGGED_ENV = [
 const LOGIN_URL = 'https://login.example.test/device?code=ABC';
 
 /* What a message to agy's print mode asks of the fake, for the live terminal tests, where one program sends many. */
-const AGY_ASKS = { HANG: 'hang', FAIL: 'fail', TOOLS: 'tools' };
+const AGY_ASKS = { HANG: 'hang', FAIL: 'fail', TOOLS: 'tools', TICK: 'tick', WORK: 'work' };
 
 export function run(name) {
   const argv = process.argv.slice(2);
@@ -150,6 +150,26 @@ export function run(name) {
     return void print('agy-new');
   }
   if (mode === 'tools') return void print(`${name}-tools`);
+  if (mode === 'tick' && name === 'agy') {
+    /* Works for 4 s, telling only on the screen how long, as on stderr, which agy's print mode keeps out of its stream. */
+    let worked = 0;
+    const tick = setInterval(() => process.stderr.write(`Working ${(worked += 250)} ms\n`), 250);
+    return void setTimeout(() => {
+      clearInterval(tick);
+      print('agy-new');
+    }, 4000);
+  }
+  if (mode === 'work' && name === 'agy') {
+    /* Thinks for 1.5 s, then runs a command for 1.5 s, as agy updates a tool step while it runs and once it is done. */
+    const step = state => process.stdout.write(JSON.stringify({ event: 'step_update', step_update: { step_index: 2, state, step_type: 'tool', tool_name: 'run_command', tool_info: { name: 'run_command', parameters: { CommandLine: 'make' }, ...(state === 'DONE' ? { output: 'built\n' } : {}) } } }) + '\n');
+    return void setTimeout(() => {
+      step('ACTIVE');
+      setTimeout(() => {
+        step('DONE');
+        print('agy-new');
+      }, 1500);
+    }, 1500);
+  }
   if (mode === 'odd-lines') {
     /* Valid JSON that is no event: the node goes on to the real output after it. */
     process.stdout.write('null\n[]\n"text"\n42\n');

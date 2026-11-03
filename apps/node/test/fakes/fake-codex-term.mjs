@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Plays Codex in a terminal for the host tests: shows its prompt, keeps a session log under CODEX_HOME/sessions as Codex
 // does, and answers each line typed or pasted with "echo: LINE". HANG never answers, ABORT logs what Codex logs when a
-// person stops a turn with Escape; LATE answers, then logs a stop of that turn a moment later. Like Codex, a new session
+// person stops a turn with Escape; LATE answers, then logs a stop of that turn a moment later. TICK works 3 s under
+// Codex's status line, with its way to stop it; WORK thinks and runs a command, 1.5 s each, and then answers. Like Codex, a new session
 // writes its log only once the first message comes. A paste comes whole, line breaks and all, as in Codex.
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, mkdirSync, readdirSync } from 'node:fs';
@@ -61,7 +62,30 @@ readKeys(key => {
   queue = queue.then(() => take(line));
 });
 
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+// Codex's status line over its composer while it works, gone once it is done.
+const status = what => {
+  process.stdout.write(`\x1b[1A\r\x1b[2K${what ? `• ${what} (esc to interrupt)` : ''}\r\n\x1b[2K`);
+  prompt();
+};
+
+async function work(line) {
+  if (line.includes('TICK')) for (let i = 1; i <= 12; i++, await sleep(250)) status(`Working (${i * 250} ms`);
+  if (!line.includes('WORK')) return status('');
+  await sleep(1500);
+  const command = { type: 'CommandExecution', id: 'work-1', command: 'make' };
+  event({ type: 'item_started', item: command });
+  await sleep(1500);
+  event({ type: 'item_completed', item: { ...command, exit_code: 0, aggregated_output: 'built\n', status: 'completed' } });
+  status('');
+}
+
 async function take(line) {
+  // Codex shows that it works as it takes the line.
+  if (line.includes('TICK') || line.includes('WORK')) {
+    process.stdout.write('\n');
+    status('Working (0s');
+  }
   event({ type: 'task_started', turn_id: randomUUID() });
   item('UserMessage', line);
   if (line.startsWith('CRASH')) crash(line.includes('LONG') ? 'long' : '');
@@ -81,6 +105,7 @@ async function take(line) {
     await new Promise(r => setTimeout(r, 2000));
     process.stdout.write('\r\x1b[2K');
   }
+  if (line.includes('TICK') || line.includes('WORK')) await work(line);
   const answer = `echo: ${line}`;
   item('AgentMessage', answer);
   event({ type: 'token_count', info: { last_token_usage: { total_tokens: 112000 }, model_context_window: 212000 }, rate_limits: null });

@@ -125,6 +125,12 @@ export function agyStream(): (line: unknown) => AgentEvent[] {
   };
 }
 
+/* The conversation agy names in the line it prints last, with the run's result, which hh-agy goes on in; empty in others. */
+export function agyConversation(line: unknown): string {
+  const id = isRecord(line) && line.event === 'result' && isRecord(line.result) ? line.result.conversation_id : '';
+  return typeof id === 'string' ? id : '';
+}
+
 /* A tool's input as people read it: the command of a shell step, else its parameters. */
 export function agyInput(parameters: unknown): string {
   return isRecord(parameters) && typeof parameters.CommandLine === 'string' ? parameters.CommandLine : inputText(parameters);

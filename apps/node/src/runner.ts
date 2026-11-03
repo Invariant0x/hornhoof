@@ -12,6 +12,8 @@ import { prepareRepo, type Git } from './workspace.js';
 export type RunInput = {
   /* The agent whose turn this is, from its workspace; a test job has none. */
   agentKey?: string | null;
+  /* Hornhoof's job this turn runs, which the node tells what the turn's program does. */
+  jobId?: string | null;
   prompt: string;
   sessionId: string | null;
   model: string | null;
@@ -171,6 +173,7 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
     const env = repoEnv || attachEnv ? { ...repoEnv, ...attachEnv } : undefined;
     const input: RunInput = {
       agentKey: msg.workspace?.key ?? null,
+      jobId: msg.jobId,
       prompt: msg.prompt,
       sessionId,
       model: msg.model,

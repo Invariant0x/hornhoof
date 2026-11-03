@@ -4,7 +4,8 @@ import { readFileSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { TERM_CHUNK, type AgentEvent, type Limits, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
-import { agyRules, agyStream } from '../providers/antigravity.js';
+import { LOST_END_MS } from '@hornhoof/protocol/map';
+import { agyConversation, agyRules, agyStream } from '../providers/antigravity.js';
 import { claudeEvents, claudeInterrupted } from '../providers/claude.js';
 import { contentText } from '../providers/events.js';
 import { agentFs, ownFs, type AgentFs } from '../agent-fs.js';
@@ -12,12 +13,15 @@ import { asAgent, type JobUser } from '../isolation.js';
 import { kimiContextSize } from '../providers/kimi.js';
 import { jobDone, tidy, type RunInput, type RunResult } from '../runner.js';
 import { claudePlugins } from '../skills.js';
-import type { ProgramOutput } from '../program-exit.js';
+import { plainOutput, signalName, type ProgramOutput } from '../program-exit.js';
+import { redact } from '../redact.js';
 import { Bridge } from './bridge.js';
-import { atEmptyPrompt, inputOf } from './input.js';
+import { inputOf } from './input.js';
 import { fromAgent } from './peer.js';
 import { StreamMask } from './mask.js';
+import { ProgramWatch, READY, REPORT_MS, type Pending } from './program-state.js';
 import { acceptClaudeDialogs, agyLog, claudeTranscript, findKimiWire, findRollout, prepareAgy, prepareKimi, rolloutFiles, type TermProgram } from './programs.js';
+import { CALLS } from './tool-calls.js';
 import { claudeStatusContext, claudeStatusLimits, codexRollout, kimiWire, LineTail, type WireNews } from './transcripts.js';
 import { envFile, type Tmux } from './tmux.js';
 
@@ -124,6 +128,8 @@ type Agent = {
   keep: string | null;
   /* Reads what Antigravity printed, whose answer comes in parts. */
   agyRead: ((line: unknown) => AgentEvent[]) | null;
+  /* The running turn's tool calls the program began and did not end yet, by id, oldest first. */
+  calls: Map<string, Pending>;
 };
 
 type Size = { cols: number; rows: number };
@@ -169,9 +175,11 @@ type Options = {
   toolsMs?: number;
   /* How long the host waits for the program to take a prompt before it presses Enter again. */
   enterWaitMs?: number;
-  /* How long a program may wait at its empty prompt, its screen still, in a turn of Hornhoof's it did not end, before the
-     host ends it. */
-  idleMs?: number;
+  /* How long a program may wait for what to type in a turn of Hornhoof's it never said ended, before the host ends the
+     turn; how often the host looks at what it does, and tells Hornhoof again what it does when nothing changed. */
+  lostMs?: number;
+  lookMs?: number;
+  reportMs?: number;
   cols?: number;
   rows?: number;
   /* Where Linux tells which process holds a connection, so the bridge takes tool calls only from the agent's own program. */
@@ -193,21 +201,12 @@ const EARLY_MAX = 1000;
 const SETTLE_MS = 3000;
 /* How long the plan's limits may take to come after a turn of a program that does not log them. */
 const LIMITS_WAIT_MS = 3000;
-/* A program is ready for its first prompt once its screen shows this; Claude Code says so through its hook instead. */
-const READY: Record<'codex' | 'kimi', (screen: string) => boolean> = {
-  codex: screen => /OpenAI Codex/.test(screen) && /›/.test(screen),
-  /* The footer under Kimi's prompt, with how full its context is. */
-  kimi: screen => /context: \d+%/.test(screen),
-};
 /* How long a Claude Code that said it started may take to show its input box. */
 const INPUT_WAIT_MS = 10_000;
-/* A program at work moves its screen every second, with its spinner and the time it has worked; one at its empty prompt
-   with a still screen this long waits for what to do, though Hornhoof's turn in it never ended. */
-const IDLE_MS = 5 * 60_000;
-/* How often the host looks whether the screen of a program at work still moves. */
-const IDLE_LOOK_MS = 5000;
-/* What a program's screen showed last, since when, and when the host last looked. */
-type Still = { screen: string; since: number; looked: number };
+/* How often the host looks at what the program of a running turn does, besides each time it begins or ends a tool. */
+const LOOK_MS = 5000;
+/* When the host last looked at the program, and the tool it ran then. */
+type Look = { at: number; call: Pending | null };
 /* A program may change how a prompt's lines and spaces look, not its words. */
 const flat = (text: string) => text.replace(/\s+/g, ' ').trim();
 
@@ -242,7 +241,9 @@ export class TerminalHost {
   private readonly openMs: number;
   private readonly toolsMs: number;
   private readonly enterWaitMs: number;
-  private readonly idleMs: number;
+  private readonly lostMs: number;
+  private readonly lookMs: number;
+  private readonly reportMs: number;
   /* Views being opened, and those Hornhoof closed meanwhile. */
   private readonly viewsOpening = new Set<string>();
   private readonly viewsClosed = new Set<string>();
@@ -264,7 +265,9 @@ export class TerminalHost {
     this.openMs = opts.openMs ?? 8000;
     this.toolsMs = opts.toolsMs ?? 15_000;
     this.enterWaitMs = opts.enterWaitMs ?? 4000;
-    this.idleMs = opts.idleMs ?? IDLE_MS;
+    this.lostMs = opts.lostMs ?? LOST_END_MS;
+    this.lookMs = opts.lookMs ?? Math.min(this.lostMs / 4, LOOK_MS);
+    this.reportMs = opts.reportMs ?? REPORT_MS;
     this.cols = opts.cols ?? 160;
     this.rows = opts.rows ?? 48;
   }
@@ -298,7 +301,7 @@ export class TerminalHost {
   private agent(key: string): Agent {
     let a = this.agents.get(key);
     if (!a) {
-      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, viewers: 0, up: false, watch: null, saying: Promise.resolve(), queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null };
+      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, viewers: 0, up: false, watch: null, saying: Promise.resolve(), queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null, calls: new Map() };
       this.agents.set(key, a);
     }
     return a;
@@ -363,6 +366,7 @@ export class TerminalHost {
     this.drain(a);
     a.lastText = null;
     a.stepSaid = false;
+    a.calls.clear();
     this.bridge.setToken(job.key, input.tools?.token ?? null);
     const starting = input.prompt ? null : (tools ?? Promise.resolve());
     const turn: Turn = { jobId: null, onEvent: input.onEvent ?? (() => {}), typed: false, seq: 0, ...(starting ? { starting: true } : {}) };
@@ -425,8 +429,9 @@ export class TerminalHost {
         await this.opts.tmux.keys(a.name, 'Enter');
       }
 
-      /* The first look comes a while into the turn: a program that just took its prompt is at work. */
-      const still: Still = { screen: '', since: Date.now(), looked: Date.now() };
+      const watch = new ProgramWatch(input.jobId, program.kind, m => this.opts.send(m), this.reportMs);
+      /* The first look comes a while into the turn, or as the program calls a tool: one that just took its prompt is at work. */
+      const look: Look = { at: Date.now(), call: null };
       for (;;) {
         this.drain(a);
         const message = await Promise.race([a.ended.promise, sleep(this.pollMs).then(() => null)]);
@@ -456,9 +461,10 @@ export class TerminalHost {
           a.busy = false;
           this.programEnded(a);
           const screen = await this.screen(job.key);
+          await this.toldGone(a, watch, screen);
           return await fail(job.signedOut.test(screen) ? 'not_logged_in' : 'agent_failed', screen);
         }
-        if (await this.waitsAtPrompt(a, program.kind, still)) return await this.endWaiting(a, job);
+        if (await this.lostEnd(a, watch, look)) this.endUnsaid(a);
       }
     } finally {
       a.typing = null;
@@ -471,29 +477,31 @@ export class TerminalHost {
     }
   }
 
-  /* The program sits at its empty prompt and its screen stood still for idleMs: it waits for what to do. */
-  private async waitsAtPrompt(a: Agent, kind: TermProgram['kind'], still: Still): Promise<boolean> {
+  /* Looks at what the program does, at once when it began or ended a tool or Hornhoof is due to hear again, else every
+     lookMs, and tells Hornhoof. True once it waited for what to type for lostMs of Hornhoof's turn: the word that the turn
+     ended was lost on the way. */
+  private async lostEnd(a: Agent, watch: ProgramWatch, look: Look): Promise<boolean> {
     const now = Date.now();
-    if (now - still.looked < Math.min(this.idleMs / 4, IDLE_LOOK_MS)) return false;
-    still.looked = now;
-    const screen = await this.opts.tmux.screen(a.name, 0, true);
-    if (screen !== still.screen) {
-      Object.assign(still, { screen, since: now });
-      return false;
-    }
-    return now - still.since >= this.idleMs && atEmptyPrompt(kind, screen);
+    const call = a.calls.values().next().value ?? null;
+    if (call === look.call && now - look.at < this.lookMs && !watch.due(now)) return false;
+    Object.assign(look, { at: now, call });
+    watch.look(now, await this.opts.tmux.screen(a.name, 0, true), call, Boolean(a.took && a.busy));
+    return watch.idleFor(now) >= this.lostMs;
   }
 
-  /* A program that waits at its prompt in Hornhoof's turn ends, so the turn and its session do not hang: the turn fails with
-     how the program ended and why, and the next turn starts the program again in its session. */
-  private async endWaiting(a: Agent, job: TermJob): Promise<RunResult> {
-    const why = `The program waited at its prompt for ${Math.round(this.idleMs / 1000)} s without ending Hornhoof's turn, so Hornhoof ended it.`;
-    const screen = await this.screen(job.key);
+  /* Hornhoof hears that the turn's program is gone, how it ended and what it showed last, without the secrets. */
+  private async toldGone(a: Agent, watch: ProgramWatch, screen: string): Promise<void> {
+    const ended = (await this.opts.tmux.exitSnapshot(a.name))?.programOutput;
+    const secrets = this.opts.secrets();
+    watch.gone(Date.now(), ended ? { code: ended.code, signal: signalName(ended.signal) } : null, redact(plainOutput(redact(screen, secrets)), secrets));
+  }
+
+  /* The turn ends as the program would have said it ended, with its last answer; nothing reaches the program, which waits
+     for its next turn. */
+  private endUnsaid(a: Agent): void {
+    (this.opts.log ?? console.log)(`Agent ${a.key} (${a.program?.kind}): end seen without hook. The program waited for what to type ${Math.round(this.lostMs / 1000)} s into Hornhoof's turn, which ends with its last answer.`);
     a.busy = false;
-    await this.opts.tmux.stop(a.name);
-    this.programEnded(a);
-    const res = await this.failedTurn(a, job, 'agent_failed', `${screen}\n\n${why}`);
-    return res.programOutput ? { ...res, programOutput: { ...res.programOutput, text: `${res.programOutput.text}\n${why}` } } : res;
+    a.ended?.resolve(a.lastText ?? '');
   }
 
   private async failedTurn(a: Agent, job: TermJob, error: RunResult['error'], output?: string): Promise<RunResult> {
@@ -681,6 +689,7 @@ export class TerminalHost {
       } catch {
         continue;
       }
+      this.called(a, data);
       if (a.program?.kind === 'claude') {
         if (this.stoppable(a) && claudeInterrupted(data)) this.interrupted(a);
         for (const e of claudeEvents(data)) this.emit(a, e);
@@ -690,9 +699,11 @@ export class TerminalHost {
         this.kimiNews(a, kimiWire(data));
         continue;
       }
-      /* Antigravity's turn ends through hh-agy's hook, which comes after these lines. */
+      /* Antigravity's turn ends through hh-agy's hook, which comes after these lines. The last of them names its
+         conversation, which goes on in the next turn also when the hook is lost. */
       if (a.program?.kind === 'antigravity') {
         for (const e of a.agyRead?.(data) ?? []) this.emit(a, e);
+        this.follow(a, agyConversation(data));
         continue;
       }
       const news = codexRollout(data);
@@ -712,6 +723,13 @@ export class TerminalHost {
         else if (a.turn) a.ended?.resolve(message);
       }
     }
+  }
+
+  /* Tool calls a line of the program's log began and ended, for what it does now. */
+  private called(a: Agent, line: unknown): void {
+    const calls = a.program ? CALLS[a.program.kind](line) : { began: [], ended: [] };
+    for (const id of calls.ended) a.calls.delete(id);
+    for (const { id, name } of calls.began) if (!a.calls.has(id)) a.calls.set(id, { name, at: Date.now() });
   }
 
   /* Kimi Code logs a turn's end without its answer, which is the text of its last step that said anything, in parts. A
