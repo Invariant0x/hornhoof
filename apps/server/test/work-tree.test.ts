@@ -50,6 +50,21 @@ function assertAllLinesCovered(tree: DepartmentTree): void {
   for (const line of tree.lines) assertCoversWithoutGaps(line, tree.now);
 }
 
+function waitingFacts(): TreeFacts {
+  const tasks: TreeFacts['tasks'] = [
+    { id: 'head-task', number: 109, title: 'Whole department turn', status: 'working', parentId: null,
+      executorAgentId: null, assigneeAgentId: 'head', after: [], inRepository: true, createdAt: at(0), closedAt: null },
+    { id: 'mira-task', number: 110, title: 'Checkout', status: 'done', parentId: 'head-task',
+      executorAgentId: 'mira', after: [], inRepository: true, createdAt: at(1), closedAt: at(10) },
+  ];
+  return baseFacts({ tasks, turns: [
+    { id: 'head-job', taskId: 'head-task', agentId: 'head', createdAt: at(0), startedAt: at(0), finishedAt: null, status: 'running',
+      history: [{ at: at(0), program: { state: 'idle', since: at(0).getTime(), tool: null }, alarm: null }] },
+    { id: 'mira-job', taskId: 'mira-task', agentId: 'mira', createdAt: at(1), startedAt: at(1), finishedAt: at(10), status: 'done',
+      history: [{ at: at(1), program: { state: 'thinking', since: at(1).getTime(), tool: null }, alarm: null }] },
+  ] });
+}
+
 describe('workTree', () => {
   it('shows an explicit external wait as ordinary waiting until its deadline', () => {
     const externalWait = { reason: 'Image build', since: iso(20), until: iso(60) };
@@ -77,22 +92,11 @@ describe('workTree', () => {
     ] });
     const tree = workTree(facts, at(40));
     expect(tree.time.find(t => t.agent.id === 'head')).toMatchObject({ lost: 2400, queued: 1200 });
-    expect(tree.waiting.find(w => w.agent.id === 'mira')).toMatchObject({ waitsForAgent: { id: 'head', name: 'Nika' }, from: iso(20) });
+    expect(tree.waiting.find(w => w.agent.id === 'mira')).toMatchObject({ waitsForAgent: { id: 'head', name: 'Nika' }, from: iso(20), taskId: 'r90', number: 90, title: 'Review' });
   });
 
   it('names the head a finished worker is waiting for, from the time its own work ended', () => {
-    const tasks: TreeFacts['tasks'] = [
-      { id: 'head-task', number: 109, title: 'Whole department turn', status: 'working', parentId: null,
-        executorAgentId: null, assigneeAgentId: 'head', after: [], inRepository: true, createdAt: at(0), closedAt: null },
-      { id: 'mira-task', number: 110, title: 'Checkout', status: 'done', parentId: 'head-task',
-        executorAgentId: 'mira', after: [], inRepository: true, createdAt: at(1), closedAt: at(10) },
-    ];
-    const facts = baseFacts({ tasks, turns: [
-      { id: 'head-job', taskId: 'head-task', agentId: 'head', createdAt: at(0), startedAt: at(0), finishedAt: null, status: 'running',
-        history: [{ at: at(0), program: { state: 'idle', since: at(0).getTime(), tool: null }, alarm: null }] },
-      { id: 'mira-job', taskId: 'mira-task', agentId: 'mira', createdAt: at(1), startedAt: at(1), finishedAt: at(10), status: 'done',
-        history: [{ at: at(1), program: { state: 'thinking', since: at(1).getTime(), tool: null }, alarm: null }] },
-    ] });
+    const facts = waitingFacts();
     const tree = workTree(facts, at(40));
     expect(tree.waiting).toEqual([{ agent: { id: 'mira', name: 'Mira' }, waitsForAgent: { id: 'head', name: 'Nika' }, from: iso(10), kind: 'stall', taskId: 'mira-task', number: 110, title: 'Checkout' }]);
     expect(tree.time.find(t => t.agent.id === 'mira')).toMatchObject({ work: 540, stall: 1800, lost: 0 });
@@ -112,6 +116,44 @@ describe('workTree', () => {
       [iso(40), null], [iso(25), iso(35)], [iso(10), iso(20)],
     ]);
     expect(later.time.find(t => t.agent.id === 'mira')).toMatchObject({ stall: 2400 });
+  });
+
+  it('does not assign a future upstream problem to an earlier free interval, regardless of job order', () => {
+    const facts = waitingFacts();
+    facts.turns![0]!.history = [
+      { at: at(0), program: { state: 'thinking', since: at(0).getTime(), tool: null }, alarm: null },
+      { at: at(30), program: { state: 'idle', since: at(30).getTime(), tool: null }, alarm: null },
+    ];
+    for (const [start, end] of [[20, 40], [50, 55]]) facts.turns!.push({ id: `next-${start}`, agentId: 'mira', taskId: null,
+      createdAt: at(start!), startedAt: at(start!), finishedAt: at(end!), status: 'done', history: [] });
+    facts.turns!.reverse();
+    const tree = workTree(facts, at(60));
+    expect(tree.waiting).toEqual([expect.objectContaining({ agent: { id: 'mira', name: 'Mira' }, from: iso(55) })]);
+    expect(tree.idle.filter(i => i.agent.id === 'mira' && i.waitsForAgent).map(i => [i.from, i.to])).toEqual([[iso(55), null], [iso(40), iso(50)]]);
+    expect(tree.time.find(t => t.agent.id === 'mira')).toMatchObject({ stall: 900 });
+  });
+
+  it('ends an idle wait when a new job is queued at the current instant', () => {
+    const facts = waitingFacts();
+    facts.turns!.push({ id: 'new-now', agentId: 'mira', taskId: null, createdAt: at(40), startedAt: null, finishedAt: null, status: 'queued', history: [] });
+    const tree = workTree(facts, at(40));
+    expect(tree.waiting).toEqual([]);
+    expect(tree.idle).toContainEqual(expect.objectContaining({ agent: { id: 'mira', name: 'Mira' }, from: iso(10), to: iso(40), waitsForAgent: { id: 'head', name: 'Nika' } }));
+  });
+
+  it('names the actual prerequisite and keeps another employee external wait independent', () => {
+    const task = (id: string, number: number, executorAgentId: string, created: number): TreeFacts['tasks'][number] => ({
+      id, number, executorAgentId, title: id, status: 'working', parentId: null, after: [], inRepository: true, createdAt: at(created), closedAt: null,
+    });
+    const facts = baseFacts({ tasks: [task('unrelated', 1, 'head', 0), task('upstream', 2, 'timur', 0),
+      { ...task('waiting', 3, 'mira', 10), status: 'waiting', after: ['upstream'] },
+      { ...task('external', 4, 'ostap', 5), externalWait: { reason: 'Image build', since: iso(15), until: iso(60) } },
+    ], turns: [{ id: 'timur-job', agentId: 'timur', taskId: 'upstream', createdAt: at(0), startedAt: at(0), finishedAt: null, status: 'running',
+      history: [{ at: at(0), program: { state: 'idle', since: at(0).getTime(), tool: null }, alarm: null }] }] });
+    const expected = [expect.objectContaining({ agent: { id: 'mira', name: 'Mira' }, waitsForAgent: { id: 'timur', name: 'Timur' }, from: iso(10), kind: 'after', taskId: 'waiting', number: 3 })];
+    expect(workTree(facts, at(40)).waiting).toEqual(expected);
+    facts.tasks[1]!.externalWait = { reason: 'Earlier wait', since: iso(20), until: iso(40) };
+    expect(workTree(facts, at(40)).waiting).toEqual(expected);
   });
 
   it('keeps the department head assignment even when it has no member executor', () => {

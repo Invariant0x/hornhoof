@@ -46,7 +46,7 @@ function visible(events: EventView[]): EventView[] {
   let call = '';
   return events.filter(e => {
     if (e.kind === 'tool') call = field(e.data, 'name');
-    if (e.kind === 'proposal') return false;
+    if (['proposal', 'program'].includes(e.kind)) return false;
     if (e.kind === 'tool' || e.kind === 'tool_result') return call !== LOADER;
     return true;
   });
