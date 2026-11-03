@@ -2,7 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { and, asc, count, desc, eq, gte, inArray, isNull, notInArray } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { agents, DECISION_TOPICS, departments, jobs, requests, tasks } from '../../db/schema.js';
+import { agents, DECISION_TOPICS, departments, jobs, requests, tasks, type DecisionTopic } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { ask, blocked, cancel, CLOSED, comment, createTask, gateLeads, inRepository, listed, openAfter, refuse, report, submit, taskSpot, updateTask, verdict, type Moved, type Task } from './engine.js';
 import { carriesFile, encodedHint } from './attachments.js';
@@ -49,6 +49,14 @@ const After = z
   .max(10)
   .describe('Tasks of this turn that must be done first, by number. The task waits, and its executor is woken by itself once the last of them is done.');
 const Improvement = z.uuid().describe("The improvement these tasks take into work after a person's instruction, from improvements.");
+
+type Question = { kind: 'question' | 'approval' | 'choice'; text: string; topic?: DecisionTopic };
+
+/* Keep the outgoing question with the person responsible for its decision card. */
+async function recordQuestion(ctx: Ctx, job: ToolJob, task: Task, { kind, text, topic }: Question): Promise<void> {
+  const personId = await decisionPerson(ctx, job.companyId, { source: 'request', kind, topic: topic ?? null, spot: taskSpot(task) });
+  await appendOutgoing(ctx, { ...job, jobId: job.id, text, to: await personParty(ctx, job.companyId, personId) });
+}
 
 /* The tools an agent gets for tasks, by its kind. Each one checks that the task is the agent's to move. */
 export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): void {
@@ -208,8 +216,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         const kind = commit ? 'approval' : options?.length ? 'choice' : 'question';
         const ways = options?.map(o => ({ label: o.label, image: o.image ?? null }));
         const moved = await ask(ctx, job.agentId, task.id, { kind, text: question, ...(commit ? { commit } : {}), images, options: ways, link: link ?? null, topic });
-        const personId = await decisionPerson(ctx, job.companyId, { source: 'request', kind, topic: topic ?? null, spot: taskSpot(task) });
-        await appendOutgoing(ctx, { ...job, jobId: job.id, text: question, to: await personParty(ctx, job.companyId, personId) });
+        await recordQuestion(ctx, job, task, { kind, text: question, topic });
         return { text: `Asked. #${task.number} waits for a person's answer; you will be woken with it.`, moved };
       }),
   );

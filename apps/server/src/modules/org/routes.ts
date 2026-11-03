@@ -27,6 +27,10 @@ function effortShown(sub: { provider: ProviderId; models: ModelOption[] | null }
 type AgentRow = typeof agents.$inferSelect;
 type DeptRow = typeof departments.$inferSelect;
 
+function reworkAt(times: ReadonlyMap<string, string>, departmentId: string): string | null {
+  return times.get(departmentId) ?? null;
+}
+
 /* Where an employee works, as agentSpot says, from the departments already read: its product inside its department when it
    has one. */
 const spotAmong = (agent: AgentRow, depts: readonly DeptRow[]): Spot =>
@@ -246,7 +250,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
             .map(t => ({ id: t.id, name: t.name, about: t.about, stage: t.stage, gate: t.gate })),
           live: inside(d.id),
           workLines: linesOf('member', d.id),
-          reworkAt: reworks.get(d.id) ?? null,
+          reworkAt: reworkAt(reworks, d.id),
         })),
     };
   });
