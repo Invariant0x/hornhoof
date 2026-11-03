@@ -184,7 +184,7 @@ export type CardSkill = { id: string; title: Lang; description: Lang; on: boolea
 
 /* An agent's card: what it is, where it runs and the text it runs with. The orchestrator has no role and no skills. */
 /* Why a node restarted, as far as Hornhoof could tell. */
-export type RestartCause = 'update' | 'machine' | 'container' | 'program' | 'connection' | 'unknown';
+export type RestartCause = 'server' | 'update' | 'machine' | 'container' | 'program' | 'connection' | 'unknown';
 
 export type AgentCardView = {
   id: string;

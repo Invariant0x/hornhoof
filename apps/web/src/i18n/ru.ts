@@ -806,6 +806,7 @@ export const ru: Messages = {
     heading: 'Ходы, прерванные перезапуском ноды',
     builtin: 'Встроенная нода',
     causes: {
+      server: 'Сервер Hornhoof перезапустился.',
       update: 'Hornhoof обновил ее.',
       machine: 'Ее машина перезапустилась.',
       container: 'Ее контейнер создан заново: так бывает при обновлении Hornhoof или новой установке.',

@@ -817,6 +817,7 @@ export const en = {
     heading: 'Turns cut off by a node restart',
     builtin: 'The built-in node',
     causes: {
+      server: 'The Hornhoof server started again.',
       update: 'Hornhoof updated it.',
       machine: 'Its machine started again.',
       container: 'Its container was created again, as an update of Hornhoof or a new install does.',
