@@ -7,7 +7,7 @@ import type { ProgramOutput } from '../program-exit.js';
 import { KEEP_BYTES, writePrivate } from '../providers/process.js';
 
 export type ExitSnapshot = { output: string; complete: boolean; programOutput?: ProgramOutput };
-export type Recording = { name: string; file: string; ready: string; flush: string; ended: Promise<ExitSnapshot | null> | null };
+export type Recording = { name: string; file: string; ready: string; flush: string; position: string; ended: Promise<ExitSnapshot | null> | null };
 
 const digest = (name: string): string => createHash('sha256').update(name).digest('hex');
 const capturePath = (file: string): boolean => isAbsolute(file) && !file.includes('\0') && /^\.hh-output-[a-f0-9]{16}\.log$/.test(basename(file));
@@ -15,7 +15,7 @@ const manifest = z.object({ name: z.string().min(1).max(256), file: z.string().r
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 /* A replaced recording cannot make the node follow a link, block on a pipe or read an unbounded file. */
-export function recorded(file: string, limit = KEEP_BYTES): string | null {
+function recordedBytes(file: string, limit: number): Buffer | null {
   let fd: number | undefined;
   try {
     fd = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
@@ -23,12 +23,57 @@ export function recorded(file: string, limit = KEEP_BYTES): string | null {
     if (!stat.isFile()) return null;
     const bytes = Math.min(stat.size, limit);
     const buffer = Buffer.alloc(bytes);
-    return buffer.subarray(0, readSync(fd, buffer, 0, bytes, stat.size - bytes)).toString('utf8');
+    return buffer.subarray(0, readSync(fd, buffer, 0, bytes, stat.size - bytes));
   } catch {
     return null;
   } finally {
     if (fd !== undefined) closeSync(fd);
   }
+}
+
+export function recorded(file: string, limit = KEEP_BYTES): string | null {
+  return recordedBytes(file, limit)?.toString('utf8') ?? null;
+}
+
+export type RecordingCursor = { file: string; offset: number };
+type Position = { bytes: Buffer; generation: number; end: number; size: number };
+
+/* Odd generations bracket a writer's append or trim. A reader accepts one stable, fully published generation. */
+function positionOf(file: string): Position | null {
+  const bytes = recordedBytes(file, 24);
+  if (bytes?.length !== 24) return null;
+  const generation = bytes.readDoubleBE(0);
+  const end = bytes.readDoubleBE(8);
+  const size = bytes.readDoubleBE(16);
+  if (![generation, end, size].every(n => Number.isSafeInteger(n) && n >= 0) || generation % 2 || size > end) return null;
+  return { bytes, generation, end, size };
+}
+
+export function recordingCursor(recording: Recording): RecordingCursor | null {
+  const before = positionOf(recording.position);
+  const after = positionOf(recording.position);
+  return before && after && before.bytes.equals(after.bytes) ? { file: recording.file, offset: after.end } : null;
+}
+
+function readPublished(recording: Recording): { bytes: Buffer; end: number } | null {
+  const before = positionOf(recording.position);
+  if (!before) return null;
+  const bytes = recordedBytes(recording.file, KEEP_BYTES);
+  const after = positionOf(recording.position);
+  if (!bytes || !after || !before.bytes.equals(after.bytes) || bytes.length !== Math.min(after.size, KEEP_BYTES)) return null;
+  return { bytes, end: after.end };
+}
+
+export function recordedAfter(recording: Recording, cursor: RecordingCursor): string | null {
+  if (cursor.file !== recording.file) return null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const published = readPublished(recording);
+    if (!published || cursor.offset > published.end) continue;
+    const { bytes, end } = published;
+    const skip = Math.max(0, cursor.offset - (end - bytes.length));
+    return bytes.subarray(skip).toString('utf8');
+  }
+  return null;
 }
 
 function privateDirectory(dir: string): void {
@@ -78,6 +123,7 @@ export class Recordings {
     writePrivate(file, '', this.user);
     writePrivate(recording.ready, '', this.user);
     writePrivate(recording.flush, '', this.user);
+    writePrivate(recording.position, '', this.user);
     return recording;
   }
 
@@ -91,7 +137,7 @@ export class Recordings {
   private remember(name: string, file: string): Recording {
     const known = this.active.get(name);
     if (known?.file === file) return known;
-    const recording: Recording = { name, file, ready: `${file}.ready`, flush: `${file}.flush`, ended: null };
+    const recording: Recording = { name, file, ready: `${file}.ready`, flush: `${file}.flush`, position: `${file}.position`, ended: null };
     this.active.set(name, recording);
     return recording;
   }
@@ -166,7 +212,7 @@ export class Recordings {
   remove(name: string): void {
     const recording = this.get(name);
     if (!recording) return;
-    for (const file of [recording.file, recording.ready, recording.flush, this.path(name)]) rmSync(file, { force: true });
+    for (const file of [recording.file, recording.ready, recording.flush, recording.position, this.path(name)]) rmSync(file, { force: true });
     this.active.delete(name);
   }
 }

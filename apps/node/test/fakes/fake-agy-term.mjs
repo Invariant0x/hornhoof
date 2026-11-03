@@ -53,7 +53,7 @@ class AgyTerminal {
     if (typed) text = text.replace(/>(\x1b\[[0-9;]*m)?\n(?=(?:\x1b\[[0-9;]*m)?─)/, (_, style = '') => `>${style} ${typed}\n`);
     if (this.active) text = text.replace('Run the shell command: sleep 8; echo slept. Then reply FINISHED.', this.active.line);
     if (this.queued.length) text = text.replace('Also say BANANA.', this.queued[0]);
-    if (process.env.FAKE_OLD_AGY_ERROR && !this.oldErrorShown) text = 'AGY_ERROR: {"short_error":"The server is overloaded","retryable":false}\n' + text;
+    if (process.env.FAKE_OLD_AGY_ERROR && !this.oldErrorShown) text = 'AGY_ERROR: {"short_error":"The server is overloaded","retryable":false,"old":true}\n' + text;
     if (process.env.FAKE_OLD_INTERRUPTED) text = '⎿  Interrupted · What should Antigravity CLI do instead?\n' + text;
     process.stdout.write(`\x1b[0m\x1b[2J\x1b[H${text}\x1b[0m`);
     this.oldErrorShown = true;
@@ -100,6 +100,7 @@ class AgyTerminal {
     const { line } = turn;
     const answer = this.lines[line.includes('BANANA') ? 5 : 3];
     if (!line.includes('LAG')) this.write(answer);
+    if (line.includes('ROLLOVER')) await new Promise(resolve => process.stdout.write('x'.repeat(3 * 256 * 1024) + '\n', resolve));
     if (line.includes('APIFAIL') && !line.includes('NO_DETAIL')) process.stderr.write('AGY_ERROR: {"short_error":"The server is overloaded","retryable":false}\n');
     if (!line.includes('NO_STOP')) await this.hook('Stop', 'hook-stop.json', line, { error: line.includes('APIFAIL') ? 'The server is overloaded' : line.includes('FAIL') ? 'invalid model selection' : '' });
     if (line.includes('LAG')) { await sleep(250); this.write(answer); }

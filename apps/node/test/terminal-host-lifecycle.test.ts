@@ -104,6 +104,21 @@ describe.skipIf(!hasTmux)('Antigravity turn evidence', () => {
       await host.cancel('job-agy-lost-failure');
     }
   });
+  it.each(['Stop', 'lost Stop'])('classifies one fresh failure after the recording rolls over with %s', async channel => {
+    const { agyProgram } = await import('../src/terminal/programs.js');
+    await setUp({ lookMs: 50 });
+    await host.run({ ...job('agy-rollover', '', { env: { FAKE_OLD_AGY_ERROR: '1' } }), program: agyProgram, home: join(home, 'agy', 'agy-rollover'), bin: fileURLToPath(new URL('./fakes/fake-agy-term.mjs', import.meta.url)) });
+    await typeTurn('agy-rollover', 'view', `APIFAIL_ROLLOVER${channel === 'lost Stop' ? '_NO_STOP' : ''}`, 'job-agy-rollover');
+    try {
+      await until(() => Boolean(done('job-agy-rollover')), 5000);
+      expect(tmux.programOutput('a-agy-rollover')).not.toContain('"old":true');
+      expect(done('job-agy-rollover')).toMatchObject({ ok: false, failure: { kind: 'overloaded', retryable: false, text: 'The server is overloaded' } });
+      await host['hook']('agy-rollover', 'stop', { error: 'The server is overloaded' });
+      expect(sent.filter(m => m.type === 'job.done' && m.jobId === 'job-agy-rollover')).toHaveLength(1);
+    } finally {
+      await host.cancel('job-agy-rollover');
+    }
+  });
   it('does not reuse an older AGY_ERROR with the same reason', async () => {
     const { agyProgram } = await import('../src/terminal/programs.js');
     await setUp();

@@ -43,6 +43,34 @@ async function stuck(provider: 'claude' | 'codex' | 'kimi' | 'antigravity' = 'co
 }
 
 describe('restart_program', () => {
+  it.each(['thinking', 'idle'] as const)('sends a native agy turn left %s by a lost successful Stop to Operations', async state => {
+    const c = await stuck('antigravity');
+    await c.report(state, 31);
+    const { agentProgramState, checkSilentTurns } = await import('../src/modules/tasks/silent.js');
+    await checkSilentTurns(c.ctx);
+    expect(agentProgramState(c.ctx, { id: c.id }).alarm).toMatchObject({ reason: 'program_stalled' });
+    const notices = await c.turnsOf(c.watcher.id);
+    expect(notices).toHaveLength(1);
+    expect(notices[0]!.prompt).toContain('restart_program is not allowed');
+    expect((await c.run()).isError).toBe(true);
+    expect(c.sent.mock.calls.some(([, m]) => m.type === 'agent.restart')).toBe(false);
+    expect((await c.jobOf(c.id)).status).toBe('running');
+    await checkSilentTurns(c.ctx);
+    expect(await c.turnsOf(c.watcher.id)).toHaveLength(1);
+  });
+
+  it('stops an obsolete native agy turn with a lost successful Stop instead of alerting Operations', async () => {
+    const c = await stuck('antigravity');
+    await c.report('thinking', 31);
+    await c.db.update(tasks).set({ status: 'done', closedAt: new Date(), assigneeAgentId: null }).where(eq(tasks.id, c.task.id));
+    const { checkSilentTurns } = await import('../src/modules/tasks/silent.js');
+    await checkSilentTurns(c.ctx);
+    expect(await c.jobOf(c.id)).toMatchObject({ status: 'failed', error: 'stale' });
+    expect(c.sent.mock.calls).toContainEqual([c.identity, { type: 'job.cancel', jobId: c.id }]);
+    expect(await c.turnsOf(c.watcher.id)).toEqual([]);
+    expect((await c.log(c.task.id)).filter(e => e.kind === 'wake_skipped')).toHaveLength(1);
+  });
+
   it('keeps a giver notification valid after its task closed', async () => {
     const c = await stuck();
     await c.db.update(tasks).set({ status: 'done', closedAt: new Date(), assigneeAgentId: null, createdByAgentId: c.agent.id }).where(eq(tasks.id, c.task.id));

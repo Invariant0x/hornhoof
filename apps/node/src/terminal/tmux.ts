@@ -8,7 +8,7 @@ import type { JobUser } from '../isolation.js';
 import { agentEnv, RESET_AGENT_ENV } from '../agent-env.js';
 import { withProgramExit, type ProgramExit } from '../program-exit.js';
 import { KEEP_BYTES } from '../providers/process.js';
-import { recorded, Recordings, type ExitSnapshot } from './recordings.js';
+import { recorded, recordedAfter, recordingCursor, Recordings, type ExitSnapshot, type RecordingCursor } from './recordings.js';
 
 /* How agent sessions look and behave: no tmux bar, the wheel scrolls, the size is the smallest window's of the people
    watching (the node gives them all that size), colours pass through, and a finished program leaves its last screen. */
@@ -145,7 +145,7 @@ export class Tmux {
 
   private async capture(name: string, dir: string): Promise<void> {
     const recording = this.recordings.create(name, dir);
-    const command = [process.execPath, CAPTURE, recording.file, recording.ready, recording.flush, String(KEEP_BYTES), this.socket, name].map(quote).join(' ');
+    const command = [process.execPath, CAPTURE, recording.file, recording.ready, recording.flush, String(KEEP_BYTES), this.socket, name, recording.position].map(quote).join(' ');
     await this.run(['pipe-pane', '-t', name, `exec ${command}`]);
     if (!(await this.recordings.wait(recording, 'ready', 5000))) throw new Error('The terminal output recorder did not start.');
   }
@@ -160,9 +160,18 @@ export class Tmux {
   }
 
   /* Local evidence while a program runs, including stderr its next screen redraw erased. */
-  programOutput(name: string): string | null {
+  programOutput(name: string, after?: RecordingCursor): string | null {
     const recording = this.recordings.get(name);
-    return recording ? recorded(recording.file) : null;
+    return recording ? after ? recordedAfter(recording, after) : recorded(recording.file) : null;
+  }
+
+  async programCursor(name: string): Promise<RecordingCursor | null> {
+    const recording = this.recordings.get(name);
+    if (!recording) return null;
+    for (const deadline = Date.now() + 1000;; await new Promise(resolve => setTimeout(resolve, 10))) {
+      const cursor = recordingCursor(recording);
+      if (cursor || Date.now() >= deadline) return cursor;
+    }
   }
 
   private async readEnd(name: string): Promise<ExitSnapshot | null> {

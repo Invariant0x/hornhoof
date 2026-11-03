@@ -13,12 +13,6 @@ describe('Antigravity native failure diagnostics', () => {
   it('leaves a failure without a diagnostic to its Stop hook', () => {
     expect(agyError('A tool failed.\n', 'overloaded')).toBeNull();
   });
-  it('keeps diagnostics already visible before this invocation out of its failure', () => {
-    const previous = 'AGY_ERROR: {"short_error":"overloaded","retryable":false}\n';
-    expect(agyError(previous + 'working\n', 'overloaded', previous)).toBeNull();
-    expect(agyError(previous + previous, 'overloaded', previous)).toEqual({ short_error: 'overloaded', retryable: false });
-  });
-
   it('reads a valid failure without requiring a surviving Stop hook', () => {
     expect(agyError('AGY_ERROR: {"short_error":"overloaded","retryable":false}\n', undefined)).toEqual({ short_error: 'overloaded', retryable: false });
     expect(agyError('AGY_ERROR: {"short_error":42,"retryable":false}\n', undefined)).toBeNull();

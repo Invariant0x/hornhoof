@@ -133,11 +133,19 @@ describe.skipIf(!hasTmux)("Antigravity's own terminal", () => {
     await until(() => turn.events.some(e => e.kind === 'text' && e.text === 'FINISHED'));
     const keys = vi.spyOn(tmux, 'keys');
     const reports = () => sent.filter(m => m.type === 'job.program' && m.jobId === 'job-lost');
+    /* The final transcript read updates signAt before the next report publishes it. */
+    const afterAnswer = reports().length;
+    await until(() => reports().length > afterAnswer);
+    const signAt = reports().at(-1)!.signAt;
+    expect(Number.isFinite(signAt)).toBe(true);
+    await host.open({ type: 'term.open', termId: 'wlost', agentKey: 'lost', cols: 120, rows: 40, write: true });
+    host.input({ type: 'term.input', termId: 'wlost', data: 'redraw' });
     const before = reports().length;
     const clock = pastLostEndWindows();
     await until(() => reports().length > before);
     expect(ended).toBe(false);
-    expect(reports().at(-1)).toMatchObject({ state: 'thinking' });
+    expect(reports().at(-1)).toMatchObject({ type: 'job.program', jobId: 'job-lost', state: 'thinking', signAt });
+    expect(done('job-lost')).toBeUndefined();
     expect(keys).not.toHaveBeenCalled();
     clock.mockRestore();
     stop.abort();

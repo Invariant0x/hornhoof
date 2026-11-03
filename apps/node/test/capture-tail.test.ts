@@ -2,7 +2,7 @@ import { createRequire } from 'node:module';
 import { describe, expect, it } from 'vitest';
 
 const { tail } = createRequire(import.meta.url)('../hh-capture.cjs') as {
-  tail(fd: number, limit: number, io: { write(fd: number, data: Buffer, offset: number, length: number, at: number): number; truncate(fd: number, size: number): void }): ((chunk: Buffer) => void) & { end(): void };
+  tail(fd: number, limit: number, io: { write(fd: number, data: Buffer, offset: number, length: number, at: number): number; truncate(fd: number, size: number): void; publish?(position: { generation: number; end: number; size: number }): void }): ((chunk: Buffer) => void) & { end(): void };
 };
 
 /* A file the recorder writes through, kept in memory. */
@@ -42,6 +42,20 @@ describe('the terminal output recorder', () => {
     const all = Array.from({ length: 50 }, (_, i) => `line ${i} ${'y'.repeat(200)}\n`).join('');
     for (let at = 0; at < all.length; at += 300) keep(Buffer.from(all.slice(at, at + 300)));
     expect(f.text().slice(-4096)).toBe(all.slice(-4096));
+  });
+
+  it('publishes monotonic byte positions around each append and trim', () => {
+    const f = file();
+    const positions: { generation: number; end: number; size: number }[] = [];
+    const keep = tail(3, 4, { ...f.io, publish: position => positions.push(position) });
+    keep(Buffer.from('old'));
+    keep(Buffer.from('abcdefghij'));
+    keep.end();
+    expect(positions).toEqual([
+      { generation: 1, end: 0, size: 0 }, { generation: 2, end: 3, size: 3 },
+      { generation: 3, end: 3, size: 3 }, { generation: 4, end: 13, size: 4 },
+    ]);
+    expect(f.text()).toBe('ghij');
   });
 
   it('cuts its file back to the limit once the program is over', () => {

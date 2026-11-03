@@ -26,6 +26,7 @@ import { TurnEnds, hookCalls, claudeEnd, type TurnEnd } from './turn-signals.js'
 import { claudeWordReceipt, restartRefusal, resumeCommand, TurnWords, type WordReceipt } from './program-restart.js';
 import { CALLS } from './tool-calls.js';
 import { agyError, agySteps, claudeStatusContext, claudeStatusLimits, codexRollout, kimiWire, LineTail, type WireNews } from './transcripts.js';
+import type { RecordingCursor } from './recordings.js';
 import { envFile, type Tmux } from './tmux.js';
 
 /* An agent's turn in its terminal: which program, where it keeps its sign-in, and what the runner hands every program. */
@@ -148,7 +149,7 @@ type Agent = {
   /* The final planner response has no tools; earlier text is not the answer a stop waits for. */
   agyAnswered: boolean;
   /* Diagnostics visible before this invocation cannot classify its failure. */
-  agyBefore: string;
+  agyCursor: RecordingCursor | null;
   /* Interruption notices already on screen when this turn started belong to older turns. */
   interruptions: number;
   /* The running turn's tool calls the program began and did not end yet, by id, oldest first. */
@@ -370,7 +371,7 @@ export class TerminalHost {
   private agent(key: string): Agent {
     let a = this.agents.get(key);
     if (!a) {
-      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, draining: false, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, viewers: 0, up: false, watch: null, saying: Promise.resolve(), waitingWords: [], enqueuedWords: [], unheardTimers: new Map(), dequeued: false, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null, agyAnswered: false, agyBefore: '', interruptions: 0, calls: new Map(), closedCalls: new Set(), question: null, ends: new TurnEnds(), signAt: 0, retry: null, apiError: null, restarting: false, launch: null, programTurnId: undefined };
+      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, draining: false, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, viewers: 0, up: false, watch: null, saying: Promise.resolve(), waitingWords: [], enqueuedWords: [], unheardTimers: new Map(), dequeued: false, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null, agyAnswered: false, agyCursor: null, interruptions: 0, calls: new Map(), closedCalls: new Set(), question: null, ends: new TurnEnds(), signAt: 0, retry: null, apiError: null, restarting: false, launch: null, programTurnId: undefined };
       this.agents.set(key, a);
     }
     return a;
@@ -630,9 +631,13 @@ export class TerminalHost {
     this.agyFailed(a);
   }
 
+  private agyOutput(a: Agent): string {
+    return a.agyCursor ? plainOutput(this.opts.tmux.programOutput(a.name, a.agyCursor) ?? '') : '';
+  }
+
   private agyFailed(a: Agent): void {
     if (a.program?.kind !== 'antigravity' || !this.stoppable(a)) return;
-    const raw = agyError(plainOutput(this.opts.tmux.programOutput(a.name) ?? ''), undefined, a.agyBefore);
+    const raw = agyError(this.agyOutput(a), undefined);
     if (!raw) return;
     a.signAt = Date.now();
     const detail = FAILURE.antigravity(raw);
@@ -1175,7 +1180,7 @@ export class TerminalHost {
         if (data.stopped === true) return this.interrupted(a, id);
         const failed = data.hook_event_name === 'StopFailure' || Boolean(data.error) || Boolean(data.error_type);
         if (failed) {
-          const raw = isRecord(data.agy_error) ? data.agy_error : a.program?.kind === 'antigravity' ? agyError(plainOutput(this.opts.tmux.programOutput(a.name) ?? ''), data.error, a.agyBefore) ?? data : data;
+          const raw = isRecord(data.agy_error) ? data.agy_error : a.program?.kind === 'antigravity' ? agyError(this.agyOutput(a), data.error) ?? data : data;
           const detail = a.program ? FAILURE[a.program.kind](raw) : failure('unknown', String(data.error));
           return this.turnFailed(a, detail.text, detail, id);
         }
@@ -1208,7 +1213,8 @@ export class TerminalHost {
     await a.settling;
     if (a.program?.kind === 'antigravity') {
       a.agyAnswered = false;
-      a.agyBefore = plainOutput(this.opts.tmux.programOutput(a.name) ?? '');
+      /* Invocation 0 waits here before agy dispatches the message, including during a recorder append or trim. */
+      a.agyCursor = await this.opts.tmux.programCursor(a.name);
       a.interruptions = interruptionCount(await this.opts.tmux.screen(a.name, 0, true));
     }
     a.busy = true;

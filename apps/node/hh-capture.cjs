@@ -8,10 +8,13 @@ function tail(fd, limit, io = { write: writeSync, truncate: ftruncateSync }) {
   const kept = [];
   let keptBytes = 0;
   let size = 0;
+  let end = 0;
+  let generation = 0;
+  const publish = () => io.publish?.({ generation: ++generation, end, size });
   const writeAll = (data, at) => {
     for (let done = 0; done < data.length;) done += io.write(fd, data, done, data.length - done, at + done);
   };
-  const keep = chunk => {
+  const append = chunk => {
     kept.push(chunk);
     keptBytes += chunk.length;
     while (kept.length > 1 && keptBytes - kept[0].length >= limit) keptBytes -= kept.shift().length;
@@ -26,14 +29,22 @@ function tail(fd, limit, io = { write: writeSync, truncate: ftruncateSync }) {
     writeAll(cut, 0);
     size = cut.length;
   };
+  const keep = chunk => {
+    publish();
+    append(chunk);
+    end += chunk.length;
+    publish();
+  };
   /* Once the program is over the file holds no more than the limit. */
   keep.end = () => {
     if (size <= limit) return;
+    publish();
     const last = Buffer.concat(kept);
     const cut = last.subarray(Math.max(0, last.length - limit));
     io.truncate(fd, 0);
     writeAll(cut, 0);
     size = cut.length;
+    publish();
   };
   return keep;
 }
@@ -41,13 +52,26 @@ function tail(fd, limit, io = { write: writeSync, truncate: ftruncateSync }) {
 if (require.main === module) record();
 
 function record() {
-const [file, ready, flush, bytes, socket, session] = process.argv.slice(2);
+const [file, ready, flush, bytes, socket, session, position] = process.argv.slice(2);
 const limit = Number(bytes);
-if (!file || !ready || !flush || !socket || !session || !Number.isSafeInteger(limit) || limit <= 0) throw new Error('Invalid output capture arguments.');
+if (!file || !ready || !flush || !socket || !session || !position || !Number.isSafeInteger(limit) || limit <= 0) throw new Error('Invalid output capture arguments.');
 const fd = openSync(file, constants.O_WRONLY | constants.O_NOFOLLOW);
 const readyFd = openSync(ready, constants.O_WRONLY | constants.O_NOFOLLOW);
 
-const keep = tail(fd, limit);
+const positionFd = openSync(position, constants.O_WRONLY | constants.O_NOFOLLOW);
+const publish = ({ generation, end, size }) => {
+  const data = Buffer.alloc(24);
+  data.writeDoubleBE(generation, 0);
+  data.writeDoubleBE(end, 8);
+  data.writeDoubleBE(size, 16);
+  /* Mark a write before its bytes change; publish its even generation only after both bounds are complete. */
+  const parts = generation % 2 ? [[0, 8], [8, 16]] : [[8, 16], [0, 8]];
+  for (const [at, length] of parts) {
+    for (let done = 0; done < length;) done += writeSync(positionFd, data, at + done, length - done, at + done);
+  }
+};
+publish({ generation: 0, end: 0, size: 0 });
+const keep = tail(fd, limit, { write: writeSync, truncate: ftruncateSync, publish });
 let closed = false;
 
 function requested() {
@@ -87,6 +111,7 @@ function finish() {
   drainKernel();
   keep.end();
   closeSync(fd);
+  closeSync(positionFd);
   writeSync(readyFd, 'ended', 0, 'utf8');
   closeSync(readyFd);
   closed = true;
@@ -100,6 +125,7 @@ function close() {
   closed = true;
   clearInterval(poll);
   closeSync(fd);
+  closeSync(positionFd);
   closeSync(readyFd);
   process.stdin.destroy();
   removeIfSessionEnded();
@@ -112,6 +138,7 @@ function removeIfSessionEnded() {
     rmSync(file, { force: true });
     rmSync(ready, { force: true });
     rmSync(flush, { force: true });
+    rmSync(position, { force: true });
   }
 }
 process.stdin.on('data', keep);

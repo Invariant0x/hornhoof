@@ -78,8 +78,8 @@ function agyResponse(line: Record<string, unknown>): AgentEvent[] {
 /* The native terminal keeps agy's stderr. Only a detail for this Stop's reason belongs to its failure. */
 const agyErrors = (output: string) => output.split('\n').filter(line => line.includes('AGY_ERROR: '));
 
-export function agyError(output: string, reason: unknown, before = ''): Record<string, unknown> | null {
-  const line = agyErrors(output).slice(agyErrors(before).length).at(-1);
+export function agyError(output: string, reason: unknown): Record<string, unknown> | null {
+  const line = agyErrors(output).at(-1);
   if (!line) return null;
   try {
     const detail: unknown = JSON.parse(line.slice(line.indexOf('AGY_ERROR: ') + 'AGY_ERROR: '.length));

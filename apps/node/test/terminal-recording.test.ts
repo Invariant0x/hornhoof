@@ -86,6 +86,41 @@ describe.skipIf(!hasTmux)('terminal output recording lifecycle', () => {
     expect(tmux.programOutput('agent')).toContain('AGY_ERROR: {"short_error":"overloaded","retryable":false}');
   });
 
+  it('reads only bytes after a cursor even when its old output rolls out of the tail', async () => {
+    const { tmux, dir } = fixture();
+    const old = 'AGY_ERROR: {"short_error":"old","retryable":false}\n';
+    const fresh = 'AGY_ERROR: {"short_error":"fresh network failure","retryable":true}\n';
+    await tmux.launch('agent', {
+      cwd: dir, outputDir: dir, cols: 80, rows: 24,
+      command: [process.execPath, '-e', `process.stdout.write(${JSON.stringify(old + 'ready\n')}); process.stdin.on('data', () => process.stdout.write('x'.repeat(3 * 256 * 1024) + ${JSON.stringify('\n' + fresh)}));`],
+    });
+    await until(() => tmux.programOutput('agent')?.includes('ready') ?? false);
+    const cursor = (await tmux.programCursor('agent'))!;
+    expect(cursor).not.toBeNull();
+    expect(tmux.programOutput('agent', cursor)).toBe('');
+    await tmux.keys('agent', 'Enter');
+    await until(() => tmux.programOutput('agent', cursor)?.includes('fresh network failure') ?? false);
+    expect(tmux.programOutput('agent')).not.toContain('"short_error":"old"');
+    expect(tmux.programOutput('agent', cursor)).toContain(fresh.replace(/\n$/, ''));
+  });
+
+  it('waits for a transient recorder write before capturing the invocation cursor', async () => {
+    const { tmux, dir } = fixture();
+    await launch(tmux, dir);
+    await until(() => tmux.programOutput('agent')?.includes('running') ?? false);
+    const position = recordingFiles(dir).find(file => file.endsWith('.position'))!;
+    const published = readFileSync(position);
+    const changing = Buffer.from(published);
+    changing.writeDoubleBE(published.readDoubleBE(0) + 1, 0);
+    writeFileSync(position, changing);
+    let settled = false;
+    const cursor = Promise.resolve(tmux.programCursor('agent')).then(value => { settled = true; return value; });
+    await sleep(30);
+    expect(settled).toBe(false);
+    writeFileSync(position, published);
+    expect(await cursor).toMatchObject({ offset: published.readDoubleBE(8) });
+  });
+
   it('waits for a delayed recorder before returning and caching the final output', async () => {
     const { tmux, dir } = fixture();
     await launch(tmux, dir);
