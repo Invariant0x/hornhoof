@@ -18,6 +18,8 @@ export type JobState = (typeof JOB_STATES)[number];
    asks a person a question or for leave, waits for what to type with nothing typed, or is gone, its session over. */
 export const PROGRAM_STATES = ['thinking', 'tool', 'asking', 'idle', 'gone'] as const;
 export type ProgramState = (typeof PROGRAM_STATES)[number];
+/* The most of a gone program's last screen a node tells: its last 40 lines, cut to this many characters. */
+export const PROGRAM_SCREEN_MAX = 4000;
 
 /* Why a part of a run ended other than with its command passing: it failed, ran out of time, was stopped, the branch
    could not be cloned, or the task's files could not be fetched. */
@@ -384,7 +386,9 @@ const NodeMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('job.state'), jobId: z.string(), state: z.enum(JOB_STATES) }),
   /* What the turn's program does now: sent at each change of its state or tool, and while the turn runs at least once a
      minute, so Hornhoof knows the node is there and whether the screen moved. since: when the state began; tool: the
-     tool it runs; screenAt: when its screen last changed. Times are the node's, in milliseconds since 1970. */
+     tool it runs; screenAt: when its screen last changed. Times are the node's, in milliseconds since 1970. A program that
+     is gone says how it ended, its exit code or the signal that ended it, null both when its session went whole, and
+     its last screen. */
   z.object({
     type: z.literal('job.program'),
     jobId: z.string(),
@@ -392,6 +396,9 @@ const NodeMessage = z.discriminatedUnion('type', [
     since: z.number().int().nonnegative(),
     tool: z.string().max(100).optional(),
     screenAt: z.number().int().nonnegative(),
+    exitCode: ProgramExit.shape.code.optional(),
+    signal: ProgramExit.shape.signal.optional(),
+    screen: z.string().max(PROGRAM_SCREEN_MAX).optional(),
   }),
   z.object({ type: z.literal('removed') }),
   z.object({ type: z.literal('term.data'), termId: TermId, data: z.string().max(4 * TERM_CHUNK) }),
