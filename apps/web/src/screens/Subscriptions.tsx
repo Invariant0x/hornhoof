@@ -260,6 +260,28 @@ function PlanExtra({ sub: s, controls: c }: Omit<PlanProps, 'me'>) {
   </>;
 }
 
+type SignNote = { subId: string; text: string };
+
+/* A sign-in that cannot start says why next to the button that was pressed, not at the top of the page. */
+async function startSignIn(t: Messages, sub: SubView, fresh: boolean, started: (s: Signing) => void, note: (n: SignNote | null) => void): Promise<void> {
+  note(null);
+  try {
+    const { nodeId, hostname } = await api.post<{ nodeId: string; hostname: string }>(`/api/subscriptions/${sub.id}/signin`, { fresh });
+    started({ subId: sub.id, nodeId, hostname });
+  } catch (err) {
+    note({ subId: sub.id, text: errorText(t, err) });
+  }
+}
+
+/* Why the plan's last sign-in did not start or finish, under its buttons. */
+function SignInNote({ text }: { text: string | null }) {
+  return text ? (
+    <p className="test failed" role="status">
+      {text}
+    </p>
+  ) : null;
+}
+
 function SubscriptionDetails({ sub: s, me, controls, now }: PlanProps & { now: number }) {
   const t = useT();
   const { language } = useLanguage();
@@ -279,7 +301,7 @@ function SubscriptionDetails({ sub: s, me, controls, now }: PlanProps & { now: n
         <PlanMachines sub={s} now={now} />
         <PlanSettings sub={s} me={me} controls={controls} />
         <PlanButtons sub={s} me={me} controls={controls} />
-        {controls.note && <p className="test failed" role="status">{controls.note}</p>}
+        <SignInNote text={controls.note} />
         {controls.asking && <Ask text={s.kind === 'api_key' ? t.subs.removeKeyAsk(name) : t.subs.removeAsk(name)} yes={t.subs.yesRemove} onYes={() => controls.remove(s)} onNo={() => controls.setConfirm(null)} />}
         {controls.test && <TestResult test={controls.test} />}
       </section>
@@ -298,7 +320,7 @@ export function Subscriptions({ me }: { me: Me }) {
   const [failure, setFailure] = useState<unknown>(null);
   const [signing, setSigning] = useState<Signing | null>(null);
   /* Why the last sign-in of a plan did not finish. */
-  const [signNote, setSignNote] = useState<{ subId: string; text: string } | null>(null);
+  const [signNote, setSignNote] = useState<SignNote | null>(null);
   const [keyFor, setKeyFor] = useState<string | null>(null);
   const live = useRef(true);
   useEffect(() => {
@@ -371,16 +393,7 @@ export function Subscriptions({ me }: { me: Me }) {
       setPanel({ kind: 'command', command });
     });
 
-  /* A sign-in that cannot start says why next to the button that was pressed, not at the top of the page. */
-  async function signIn(sub: SubView, fresh: boolean) {
-    setSignNote(null);
-    try {
-      const { nodeId, hostname } = await api.post<{ nodeId: string; hostname: string }>(`/api/subscriptions/${sub.id}/signin`, { fresh });
-      setSigning({ subId: sub.id, nodeId, hostname });
-    } catch (err) {
-      setSignNote({ subId: sub.id, text: errorText(t, err) });
-    }
-  }
+  const signIn = (sub: SubView, fresh: boolean) => startSignIn(t, sub, fresh, setSigning, setSignNote);
 
   const stopSignIn = (on: Signing) =>
     run(async () => {

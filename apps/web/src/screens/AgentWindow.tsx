@@ -73,22 +73,30 @@ export type StaffAsk = { id: string; name: string; at: number };
 /* agentId: 'orchestrator' or an employee's id. staff: the CEO's "+ Hire", for the orchestrator's window only. */
 type Props = { me: Me; org: Org; agentId: string; staff?: StaffAsk | null; onClose(): void; onCard?(): void };
 
+type CardRight = { id: string; canAnswer: boolean };
+
+/* What /api/requests says of the card, or the fallback for a card it no longer lists. */
+const rightIn = (d: Decisions, id: string, fallback: boolean): CardRight => ({ id, canAnswer: d.proposals.find(p => p.id === id)?.canAnswer ?? fallback });
+
+/* An answer counts only for the card it was given for. */
+const rightFor = (right: CardRight | null, id: string | null, fallback: boolean): boolean => (right?.id === id ? right.canAnswer : fallback);
+
 /* Whether this person takes the orchestrator's open card, as /api/requests says of that card; until it says, or for a card
    it no longer lists, as /api/me says of the CEO's decisions. */
 function useCardRight(id: string | null, fallback: boolean): boolean {
-  const [right, setRight] = useState<{ id: string; canAnswer: boolean } | null>(null);
+  const [right, setRight] = useState<CardRight | null>(null);
   useEffect(() => {
     if (!id) return;
     let live = true;
     api.get<Decisions>('/api/requests').then(
-      d => live && setRight({ id, canAnswer: d.proposals.find(p => p.id === id)?.canAnswer ?? fallback }),
+      d => live && setRight(rightIn(d, id, fallback)),
       () => {},
     );
     return () => {
       live = false;
     };
   }, [id, fallback]);
-  return right?.id === id ? right.canAnswer : fallback;
+  return rightFor(right, id, fallback);
 }
 
 /* The cards are the CEO's decisions: someone else reads them without their buttons. The orchestrator's open card goes by
@@ -560,8 +568,12 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard }:
           )}
         </div>
       )}
-      {!notebook && known && terminal && messages.length > 0 && <MessageFrame events={messages} folding={folding} />}
-      {!notebook && known && terminal && <AgentTerminal path={`/api/agents/${agentId}/terminal`} program={sub ? PROGRAM_NAMES[sub.provider] : 'Claude'} onGone={() => setNoTerminal(true)} />}
+      {!notebook && known && terminal && (
+        <>
+          <MessageFrame events={messages} folding={folding} />
+          <AgentTerminal path={`/api/agents/${agentId}/terminal`} program={sub ? PROGRAM_NAMES[sub.provider] : 'Claude'} onGone={() => setNoTerminal(true)} />
+        </>
+      )}
       {!notebook && known && terminal && hasCards && (
         <div className="t-cards">
           {cards}

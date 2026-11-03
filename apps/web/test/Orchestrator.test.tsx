@@ -280,7 +280,7 @@ describe('AgentWindow', () => {
 
   describe('access to the computer', () => {
     const ASKED: ComputerView = { available: true, until: null, asked: { reason: 'Restart the nodes outside AppArmor.', at: '2026-11-02T10:00:00Z' } };
-    const OPEN: ComputerView = { available: true, until: '2026-11-03T10:00:00.000Z', asked: null };
+    const OPEN: ComputerView = { available: true, until: new Date(Date.now() + 86_400_000).toISOString(), asked: null };
     const CLOSED: ComputerView = { available: true, until: null, asked: null };
 
     it("shows the CEO the orchestrator's request next to his terminal and opens access for a day with one click", async () => {
@@ -723,5 +723,65 @@ describe('messages between agents and people', () => {
     expect(david).toHaveAttribute('aria-expanded', 'false');
     fireEvent.click(david);
     expect(within(frame).getByText(/Take #78 into work/)).toBeInTheDocument();
+  });
+
+  it('leaves the whole window to the live terminal while no message names who wrote to whom', async () => {
+    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [ev(1, 'message', { text: 'Before senders were kept' }, { person: IVAN })], state: { ...READY, terminal: true } }] });
+    expect(await screen.findByTestId('live-terminal')).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Messages' })).not.toBeInTheDocument();
+  });
+});
+
+describe("who takes the orchestrator's card", () => {
+  const card = (seq: number, id: string) => ev(seq, 'proposal', { proposalId: id, brief: 'Acme.', items: [{ template: 'operations', checked: true, note: '' }] });
+  const listed = (proposals: { id: string; canAnswer: boolean }[]) => [200, { requests: [], proposals, computerAccess: null, counts: { byPerson: {}, byAgent: {}, total: 0 } }];
+  const DANA: Me = { ...ME, person: { ...ME.person, id: 'p3', isOwner: false }, canDecideCompany: false };
+  const LOCKED = 'Decided by the CEO or the CEO delegate.';
+
+  function show(me: Me, requests: unknown, events: EventView[] = [card(1, 'pr1')]) {
+    const calls = mockApi({
+      [`GET ${EVENTS}?after=0`]: [200, { events, state: READY }],
+      'POST /api/agents/orchestrator/start': [200, { started: false }],
+      'GET /api/requests': requests as [number, unknown],
+    });
+    render(
+      <LanguageProvider>
+        <AgentWindow me={me} org={ORG} agentId="orchestrator" onClose={vi.fn()} />
+      </LanguageProvider>,
+    );
+    return calls;
+  }
+
+  it('goes by what /api/requests says of the card over what /api/me says of the CEO decisions', async () => {
+    show(ME, listed([{ id: 'pr1', canAnswer: false }]));
+    expect(await screen.findByText(LOCKED)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Correct in words' })).not.toBeInTheDocument();
+  });
+
+  it('lets someone the CEO decisions are not for take a card /api/requests gives them', async () => {
+    show(DANA, listed([{ id: 'pr1', canAnswer: true }]));
+    expect(await screen.findByRole('button', { name: 'Correct in words' })).toBeInTheDocument();
+    expect(screen.queryByText(LOCKED)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['a card it does not list', listed([{ id: 'other', canAnswer: true }])],
+    ['an answer that did not come', [500, { error: { code: 'internal', message: 'Something went wrong.' } }]],
+  ])('goes by the CEO decisions for %s', async (_, requests) => {
+    const calls = show(DANA, requests);
+    await vi.waitFor(() => expect(calls).toContainEqual({ method: 'GET', path: '/api/requests', body: undefined }));
+    expect(await screen.findByText(LOCKED)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Correct in words' })).not.toBeInTheDocument();
+  });
+
+  it("does not carry the answer for one card over to the next while the next one's answer is on its way", async () => {
+    const stream = fakeStream();
+    let asked = 0;
+    show(ME, async () => (++asked === 1 ? listed([{ id: 'pr1', canAnswer: false }]) : new Promise(() => {})));
+    expect(await screen.findByText(LOCKED)).toBeInTheDocument();
+    stream.send({ type: 'agent_event', agentId: 'a1', event: card(2, 'pr2') });
+    expect(await screen.findByRole('button', { name: 'Correct in words' })).toBeInTheDocument();
+    expect(screen.queryByText(LOCKED)).not.toBeInTheDocument();
+    expect(asked).toBe(2);
   });
 });
