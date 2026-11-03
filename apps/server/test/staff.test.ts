@@ -7,7 +7,7 @@ import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { runsTier } from '../src/modules/tools/staff.js';
-import { agentChanges, agentEvents, agents, companies, departments, jobs, people, proposals, subscriptions } from '../src/db/schema.js';
+import { agentChanges, agentEvents, agents, companies, departments, jobs, people, proposals, subscriptions, teams } from '../src/db/schema.js';
 import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
@@ -254,5 +254,63 @@ describe('staffing', () => {
     let run = await builtin.next();
     while (run.type !== 'job.run') run = await builtin.next();
     expect(run.prompt).toContain('Hired in Sales: Sasha (Head of sales)');
+  });
+
+  it('hires and moves an employee into a sub-unit of its own department, and refuses a sub-unit of another department, a missing sub-unit, or a head in a sub-unit', async () => {
+    const c = await company();
+    const client = await tools(c);
+    const [urgent] = await c.db.insert(teams).values({ companyId: c.companyId, departmentId: c.dev.id, name: 'Urgent fixes' }).returning();
+    const [inbound] = await c.db.insert(teams).values({ companyId: c.companyId, departmentId: c.sales.id, name: 'Inbound' }).returning();
+    const missingTeam = '00000000-0000-4000-8000-000000000099';
+    const beSkills = c.app.ctx.templates.roles.get('DEV-BE')!.skills.filter(s => s.on).map(s => s.id);
+    const headSkills = c.app.ctx.templates.roles.get('DEV-HEAD')!.skills.filter(s => s.on).map(s => s.id);
+
+    for (const [line, message] of [
+      [{ role: 'DEV-HEAD', name: 'Hanna', team: urgent!.id, model: '', subscription: c.teamKey, skills: headSkills }, 'head cannot be in a sub-unit'],
+      [{ role: 'DEV-BE', name: 'Bruno', team: inbound!.id, model: '', subscription: c.teamKey, skills: beSkills }, inbound!.id],
+      [{ role: 'DEV-BE', name: 'Bruno', team: missingTeam, model: '', subscription: c.teamKey, skills: beSkills }, missingTeam],
+    ] as const) {
+      const badHire = await hire(c.app, c.ceo, c.dev.id, { people: [line] });
+      expect(badHire.statusCode).toBe(400);
+      expect(badHire.json().error.reason).toBe('staff_invalid');
+      expect(badHire.json().error.message).toContain(message);
+
+      const badProposal = await client.callTool({ name: 'propose_staff', arguments: { department: c.dev.id, brief: 'x', people: [{ checked: true, role: line.role, team: line.team }] } });
+      expect(failed(badProposal)).toBe(true);
+      expect(text(badProposal)).toContain(message);
+    }
+
+    const validProposal = await client.callTool({
+      name: 'propose_staff',
+      arguments: { department: c.dev.id, brief: 'Urgent lane.', people: [{ checked: true, role: 'DEV-BE', name: 'Simon', team: urgent!.id, subscription: c.teamKey }] },
+    });
+    expect(failed(validProposal)).toBe(false);
+
+    const hired = await hire(c.app, c.ceo, c.dev.id, {
+      people: [
+        { role: 'DEV-HEAD', name: 'Hanna', model: '', subscription: c.teamKey, skills: headSkills },
+        { role: 'DEV-BE', name: 'Simon', team: urgent!.id, model: '', subscription: c.teamKey, skills: beSkills },
+        { role: 'DEV-BE', name: 'Bruno', model: '', subscription: c.teamKey, skills: beSkills },
+      ],
+    });
+    expect(hired.statusCode).toBe(201);
+    const [hannaId, simonId, brunoId] = hired.json().hired as [string, string, string];
+    expect((await c.db.select().from(agents).where(eq(agents.id, simonId)))[0]!.teamId).toBe(urgent!.id);
+
+    for (const badMove of [
+      { id: hannaId, team: urgent!.id },
+      { id: brunoId, team: inbound!.id },
+      { id: brunoId, team: missingTeam },
+    ]) {
+      const patchRes = await c.app.inject({ method: 'PATCH', url: `/api/agents/${badMove.id}`, payload: { team: badMove.team }, ...as(c.ceo) });
+      expect(patchRes.statusCode).toBe(400);
+      expect(patchRes.json().error.reason).toBe('unknown_place');
+      const toolRes = await client.callTool({ name: 'change_employee', arguments: { employee: badMove.id, team: badMove.team } });
+      expect(failed(toolRes)).toBe(true);
+    }
+
+    const movedIn = await c.app.inject({ method: 'PATCH', url: `/api/agents/${brunoId}`, payload: { team: urgent!.id }, ...as(c.ceo) });
+    expect(movedIn.statusCode).toBe(200);
+    expect((await c.db.select().from(agents).where(eq(agents.id, brunoId)))[0]!.teamId).toBe(urgent!.id);
   });
 });

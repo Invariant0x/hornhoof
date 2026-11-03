@@ -936,6 +936,48 @@ export async function leaveWork(ctx: Live, actor: Actor, agent: Leaver): Promise
   return { wakes, handed, closed };
 }
 
+/* An employee moved into a sub-unit leaves the current gate panels and future gates of open tasks. */
+export async function leaveGates(ctx: Live, actor: Actor, agent: Leaver): Promise<{ wakes: Wake[]; handed: string[]; closed: Task[] }> {
+  const open = await ctx.db.select().from(tasks).where(and(eq(tasks.companyId, agent.companyId), notInArray(tasks.status, [...CLOSED, 'planned']))).orderBy(asc(tasks.number));
+  const n: Note = { kind: 'updated', actor, text: `${agent.name} moved to a sub-unit.`, data: { fields: ['assignee'] } };
+  const wakes: Wake[] = [];
+  const handed: string[] = [];
+  const closed: Task[] = [];
+  for (const found of open) {
+    const current = found.gates.slice(found.stage).includes(agent.id) ? await dropGate(ctx, actor, found, agent.id) : found;
+    const left = await onFresh(ctx, current, task => leaveGate(ctx, n, agent, task));
+    if (!left) continue;
+    handed.push(current.id);
+    wakes.push(...left.wakes);
+    if (left.closed) closed.push(left.closed);
+  }
+  return { wakes, handed, closed };
+}
+
+const closedTask = (task: Task): Task | null => (CLOSED.includes(task.status) ? task : null);
+
+/* The agent leaves the panel of a task's current gate; null when it is not on the panel. */
+async function leaveGate(ctx: Live, n: Note, agent: Leaver, task: Task): Promise<{ wakes: Wake[]; closed: Task | null } | null> {
+  if (task.stage < 1 || !task.panel.includes(agent.id)) return null;
+  const panel = task.panel.filter(id => id !== agent.id);
+  /* Someone else at the gate asked a person, so someone is left to decide it. */
+  if (task.status === 'waiting' && (!panel.length || (await asked(ctx.db, task, agent.id)))) return null;
+  if (panel.length) {
+    await move(ctx, task, { panel, assigneeAgentId: panel[0]! }, n);
+    return { wakes: [], closed: null };
+  }
+  const given = await gateVerdicts(ctx.db, task);
+  /* The review of a turn closes as its last reviewer leaves, with whatever verdicts it has. */
+  if (given.length || (await isTurnReview(ctx.db, task.id))) {
+    const moved = await closeGate(ctx, task, n, given);
+    return { wakes: moved.wakes, closed: closedTask(moved.task) };
+  }
+  /* Nobody left at the gate: it goes on without its role when nobody of it is on, else waits with whoever gave the work. */
+  const gate = await atGate(ctx.db, task, task.stage);
+  const row = await move(ctx, task, gate.set, n, undefined, gate.wakes);
+  return { wakes: gate.wakes, closed: closedTask(row) };
+}
+
 /* The agent leaves one task; null when it does not hold it. */
 async function leaveTask(ctx: Live, n: Note, agent: Leaver, task: Task): Promise<{ wakes: Wake[]; closed: Task | null } | null> {
   if (CLOSED.includes(task.status) || task.status === 'planned') return null;
@@ -945,24 +987,7 @@ async function leaveTask(ctx: Live, n: Note, agent: Leaver, task: Task): Promise
     await move(ctx, task, { assigneeAgentId: task.createdByAgentId, status: task.status === 'working' ? 'open' : task.status }, n, undefined, wakes);
     return { wakes, closed: null };
   }
-  if (task.stage < 1 || !task.panel.includes(agent.id)) return null;
-  const panel = task.panel.filter(id => id !== agent.id);
-  /* Someone else at the gate asked a person, so someone is left to decide it. */
-  if (task.status === 'waiting' && !panel.length) return null;
-  if (panel.length) {
-    await move(ctx, task, { panel, assigneeAgentId: panel[0]! }, n);
-    return { wakes: [], closed: null };
-  }
-  const given = await gateVerdicts(ctx.db, task);
-  /* The review of a turn closes as its last reviewer leaves, with whatever verdicts it has. */
-  if (given.length || (await isTurnReview(ctx.db, task.id))) {
-    const moved = await closeGate(ctx, task, n, given);
-    return { wakes: moved.wakes, closed: CLOSED.includes(moved.task.status) ? moved.task : null };
-  }
-  /* Nobody left at the gate: it goes on without its role when nobody of it is on, else waits with whoever gave the work. */
-  const gate = await atGate(ctx.db, task, task.stage);
-  const row = await move(ctx, task, gate.set, n, undefined, gate.wakes);
-  return { wakes: gate.wakes, closed: CLOSED.includes(row.status) ? row : null };
+  return leaveGate(ctx, n, agent, task);
 }
 
 /* Tasks that wait at a gate with nobody able to check them go on once that changes: someone of its role was switched on,

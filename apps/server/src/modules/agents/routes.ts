@@ -14,7 +14,7 @@ import { subViews, type IsOnline, type SubView } from '../subscriptions/views.js
 import { agentFailureState, type FailureState } from '../tasks/failures.js';
 import { CLOSED, dropGate } from '../tasks/engine.js';
 import { agentProgramState, type TurnAlarm, type TurnProgram } from '../tasks/silent.js';
-import { backOn, leaveIfOff, resumeAgent } from '../tasks/wake.js';
+import { backOn, leaveForTeam, leaveIfOff, resumeAgent } from '../tasks/wake.js';
 import { orchestratorServing, servingSubscriptions, type Serving } from '../tools/staff.js';
 import type { Lang } from '../templates/load.js';
 import { agentFor, type AgentRow } from './find.js';
@@ -132,15 +132,8 @@ function diffAgent(agent: AgentRow, next: AgentRow): { field: Field; before: unk
 
 async function afterTeamMove(ctx: Ctx, me: Person, before: AgentRow, after: AgentRow): Promise<void> {
   if (before.teamId === after.teamId) return;
-  if (after.teamId) {
-    const onGates = await ctx.db
-      .select()
-      .from(tasks)
-      .where(and(eq(tasks.companyId, after.companyId), sql`${tasks.gates} @> ${JSON.stringify([after.id])}::jsonb`, notInArray(tasks.status, [...CLOSED])));
-    for (const t of onGates) if (t.gates.slice(t.stage).includes(after.id)) await dropGate(ctx, actorOf(me), t, after.id);
-  } else {
-    await backOn(ctx, actorOf(me), after.id);
-  }
+  if (after.teamId) await leaveForTeam(ctx, actorOf(me), after);
+  else await backOn(ctx, actorOf(me), after.id);
 }
 
 export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
