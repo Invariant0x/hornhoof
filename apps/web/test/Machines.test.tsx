@@ -45,6 +45,24 @@ describe('Machines', () => {
     expect(fact(mac, 'Claude Code')).toBe('2.1.0');
   });
 
+  it('retains an active add-plan command after refreshing program versions', async () => {
+    const command = { id: '3'.repeat(64), kind: 'add', plans: ['Kimi'], machineId: 'm1', machine: 'ivan-mbp', command: `${COMMAND}-ADD`, expiresAt: new Date(Date.now() + 3600_000).toISOString() };
+    const calls = lists({
+      'GET /api/machines': [200, { machines: [{ ...MACHINES[0]!, programs: [{ id: 'claude', version: '2.1.0', updating: false, failed: false }] }], builtin: null }],
+      'GET /api/nodes/commands': [200, { commands: [command] }],
+      'POST /api/machines/m1/programs/update': [202, { updating: true }],
+    });
+    render(<Machines me={ME} />);
+    const mac = await screen.findByRole('article', { name: 'ivan-mbp' });
+    expect(await within(mac).findByText(command.command)).toBeInTheDocument();
+    const update = within(mac).getByRole('button', { name: 'Update programs' });
+    await userEvent.setup().click(update);
+    await vi.waitFor(() => expect(calls.filter(c => c.method === 'GET' && c.path === '/api/nodes/commands').length).toBeGreaterThanOrEqual(2));
+    await vi.waitFor(() => expect(update).toBeEnabled());
+    expect(within(mac).getByText(command.command)).toBeInTheDocument();
+    expect(calls.some(c => c.path.endsWith('/hide'))).toBe(false);
+  });
+
   it('updates programs on the virtual built-in card through its own action', async () => {
     const calls = lists({ 'POST /api/machines/builtin/programs/update': [202, { updating: true }] },
       { ...BUILTIN, programs: [{ id: 'codex', version: '3.0.0', updating: false, failed: false }] });

@@ -12,7 +12,7 @@ const INITIAL: ProgramInfo[] = [
 const VERSION = { version: '0.5.0', commit: 'abc1234' };
 const GIB = 1024 ** 3;
 
-async function prepare(page: Page, language: string, theme: string, options: { online?: boolean; programs?: ProgramInfo[] | null; readonly?: boolean; hostname?: string } = {}) {
+async function prepare(page: Page, language: string, theme: string, options: { online?: boolean; programs?: ProgramInfo[] | null; readonly?: boolean; hostname?: string; activeCommand?: boolean } = {}) {
   await serveApi(page);
   await page.addInitScript(({ language, theme }) => {
     localStorage.setItem('hh-lang', language);
@@ -34,6 +34,8 @@ async function prepare(page: Page, language: string, theme: string, options: { o
   };
   await page.route('**/api/machines', route => route.fulfill({ json: { machines: [{ ...machine, programs }], builtin: null } }));
   await page.route('**/api/subscriptions', route => route.fulfill({ json: { subscriptions: plans } }));
+  const commands = options.activeCommand ? [{ id: 'a'.repeat(64), kind: 'add', plans: ['Kimi'], machineId: 'm1', machine: hostname, command: 'connect-the-pending-plan', expiresAt: new Date(Date.now() + 3600_000).toISOString() }] : [];
+  await page.route('**/api/nodes/commands', route => route.fulfill({ json: { commands } }));
   await page.route('**/api/version', route => route.fulfill({ json: VERSION }));
   await page.route('**/api/updates', route => route.fulfill({ json: {
     current: { ...VERSION, migrations: 51 }, available: false, checkedAt: null, latest: null, versions: [], error: null,
@@ -51,7 +53,7 @@ async function prepare(page: Page, language: string, theme: string, options: { o
   });
   await page.goto('/');
   await page.getByRole('button', { name: language === 'en' ? 'Machines' : 'Машины', exact: true }).click();
-  await page.getByRole('button', { name: `${language === 'en' ? 'Open the card of' : 'Открыть карточку'} ${hostname}`, exact: true }).click();
+  if (!options.activeCommand) await page.getByRole('button', { name: `${language === 'en' ? 'Open the card of' : 'Открыть карточку'} ${hostname}`, exact: true }).click();
   return { card: page.getByRole('article', { name: hostname }), release, requests: () => requests };
 }
 
@@ -130,4 +132,16 @@ test('a person who cannot change the machine sees versions without an update but
   const { card } = await prepare(page, 'en', 'light', { readonly: true });
   await expect(card.getByText('2.0.0', { exact: true })).toBeVisible();
   await expect(card.getByRole('button', { name: 'Update programs' })).toHaveCount(0);
+});
+
+
+test('keeps an active connection command while updating the programs', async ({ page }) => {
+  const { card, release } = await prepare(page, 'en', 'light', { activeCommand: true });
+  await expect(card.getByText('connect-the-pending-plan')).toBeVisible();
+  await card.getByRole('button', { name: 'Update programs', exact: true }).click();
+  release();
+  await expect(card.getByText('2.0.1', { exact: true })).toBeVisible();
+  await expect(card.getByText('connect-the-pending-plan')).toBeVisible();
+  await expect(card.getByRole('button', { name: 'Copy', exact: true })).toBeVisible();
+  await expect(card.getByRole('button', { name: 'Cancel', exact: true })).toBeVisible();
 });
