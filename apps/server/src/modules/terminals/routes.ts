@@ -4,9 +4,10 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agentFor } from '../agents/find.js';
-import { typedInto } from '../conversation/decision-context.js';
+import { enterPressed } from '../conversation/decision-context.js';
 import { programNode, windowNode } from '../conversation/queue.js';
 import { sameNode, type NodeIdentity } from '../nodes/hub.js';
+import { readKeys } from './keys.js';
 import { CLOSE } from './relay.js';
 
 const cols = z.coerce.number().int().min(10).max(500);
@@ -54,15 +55,15 @@ export function terminalRoutes(app: FastifyInstance, ctx: Ctx): void {
 
       /* Frames go on in the order they came, as one waits for the person's Enter to be kept. */
       let frames = Promise.resolve();
+      let unread = '';
       const frame = async (data: z.infer<typeof FromBrowser>) => {
         if (data.type === 'resize') return void ctx.hub.send(node, { type: 'term.resize', termId, cols: data.cols, rows: data.rows });
         if (!write) return;
-        /* A prompt goes in with Enter; scrolling and clicks send keys too. What the person sends with it is their word in
-           the running turn from now on, kept before the keys reach it. */
-        if (data.data.includes('\r')) {
-          ctx.terminals.typing(agentId, personId, node);
-          await typedInto(ctx, agentId, personId);
-        }
+        /* A prompt goes in with Enter, in any of its forms; scrolling and clicks send keys too. Where the person's Enter
+           counts is kept before the keys reach the program. */
+        const keys = readKeys(unread, data.data);
+        unread = keys.rest;
+        if (keys.enter) await enterPressed(ctx, agentId, personId, node);
         ctx.hub.send(node, { type: 'term.input', termId, data: data.data });
       };
       socket.on('message', raw => {

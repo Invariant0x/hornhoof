@@ -72,6 +72,13 @@ export class TerminalRelay {
     return last.personId;
   }
 
+  /* An Enter that waited to open a turn and opens none now, and the person who pressed it if it still counted. */
+  drop(agentId: string): string | null {
+    const last = this.typed.get(agentId);
+    this.typed.delete(agentId);
+    return last && Date.now() - last.at < TYPED_MS ? last.personId : null;
+  }
+
   stop(): void {
     for (const view of this.views.values()) end(view.socket, CLOSE.stopping);
     this.views.clear();

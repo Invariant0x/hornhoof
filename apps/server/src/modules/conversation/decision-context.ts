@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, ne, or, sql, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { accessOf } from '../../auth/access.js';
 import type { DecisionSubject } from '../../auth/decision-owner.js';
@@ -7,6 +7,7 @@ import type { Db } from '../../db/client.js';
 import { agentEvents, agents, jobs, people } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { appendEvent, type WithEvent } from '../events/store.js';
+import type { NodeIdentity } from '../nodes/hub.js';
 import { sayLive } from './live.js';
 
 /* The orchestrator takes a decision for a person only in a turn that answers that person: the last message that came into
@@ -148,17 +149,46 @@ export async function stillDecides(db: Reader, companyId: string, personId: stri
   await requireDecider(db, companyId, on?.personId ?? personId, subject);
 }
 
-/* A person pressed Enter in the terminal of the orchestrator's running turn: what they typed is their word in it, so the
-   turn answers them from now on. Kept under the lock before the keys go on, once as long as the turn answers them. */
-export async function typedInto(ctx: Pick<Ctx, 'db' | 'bus' | 'templates'>, agentId: string, personId: string): Promise<void> {
+/* The agent's turn that runs with words of its own: not one that only starts the program, which a typed turn takes over. */
+async function turnWithWords(db: Reader, where: SQL) {
+  const [job] = await db
+    .select({ id: jobs.id, companyId: jobs.companyId, agentId: agents.id, agentKind: agents.kind })
+    .from(jobs)
+    .innerJoin(agents, eq(agents.id, jobs.agentId))
+    .where(and(where, eq(jobs.kind, 'conversation'), eq(jobs.status, 'running'), or(ne(jobs.prompt, ''), isNotNull(jobs.taskId))))
+    .limit(1);
+  return job;
+}
+
+type Turn = NonNullable<Awaited<ReturnType<typeof turnWithWords>>>;
+
+/* The orchestrator's turn answers this person from now on, or nobody: marked once as long as it does. */
+async function answersFromNow(ctx: Pick<Ctx, 'db' | 'bus' | 'templates'>, turn: Turn, personId: string | null): Promise<void> {
+  if (turn.agentKind !== 'orchestrator' || ((await decisionPrincipal(ctx.db, turn.id))?.personId ?? null) === personId) return;
+  await appendEvent(ctx, { companyId: turn.companyId, agentId: turn.agentId, jobId: turn.id, kind: 'typed', data: {}, personId });
+}
+
+type Typing = Pick<Ctx, 'db' | 'bus' | 'templates' | 'terminals'>;
+
+/* A person pressed Enter in the agent's terminal, settled under the lock before the keys go on. In the turn that runs,
+   what they typed goes into it: the orchestrator's answers them from now on, and no Enter from before opens a turn after
+   it. While none runs, or the program only starts, the Enter may open one turn of theirs. Never both. */
+export async function enterPressed(ctx: Typing, agentId: string, personId: string, node: NodeIdentity): Promise<void> {
   await withInputLock(ctx, agentId, async () => {
-    const [job] = await ctx.db
-      .select({ id: jobs.id, companyId: jobs.companyId })
-      .from(jobs)
-      .innerJoin(agents, eq(agents.id, jobs.agentId))
-      .where(and(eq(jobs.agentId, agentId), eq(jobs.kind, 'conversation'), eq(jobs.status, 'running'), eq(agents.kind, 'orchestrator')))
-      .limit(1);
-    if (!job || (await decisionPrincipal(ctx.db, job.id))?.personId === personId) return;
-    await appendEvent(ctx, { companyId: job.companyId, agentId, jobId: job.id, kind: 'typed', data: {}, personId });
+    const turn = await turnWithWords(ctx.db, eq(jobs.agentId, agentId));
+    if (!turn) return ctx.terminals.typing(agentId, personId, node);
+    ctx.terminals.drop(agentId);
+    await answersFromNow(ctx, turn, personId);
+  });
+}
+
+/* A turn with words of its own started while an Enter waited to open one. What was typed may go into this turn instead,
+   so it opens none later; and unless the orchestrator's turn answers that person already, it answers nobody until a
+   person writes to it again. */
+export async function turnStarted(ctx: Typing, agentId: string, jobId: string): Promise<void> {
+  await withInputLock(ctx, agentId, async () => {
+    const pressed = ctx.terminals.drop(agentId);
+    const turn = pressed ? await turnWithWords(ctx.db, eq(jobs.id, jobId)) : undefined;
+    if (turn && (await decisionPrincipal(ctx.db, turn.id))?.personId !== pressed) await answersFromNow(ctx, turn, null);
   });
 }
