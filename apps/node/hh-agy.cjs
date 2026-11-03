@@ -9,10 +9,7 @@
 const { spawn } = require('node:child_process');
 const { appendFileSync } = require('node:fs');
 
-/* How long a call waits for the node. The node takes it only once it found that the call comes from the agent's own
-   program, which can take seconds on a busy machine, and a call that gives up first is lost. Word that a turn ended
-   ends it at once, where the node would see it only a minute later by itself, so it waits the longest. */
-const WAIT_MS = { prompt: 12000, stop: 60000 };
+const WAIT_MS = { prompt: 12000 };
 const STOP_MS = 3000;
 const PASTE_START = '\x1b[200~';
 const PASTE_END = '\x1b[201~';
