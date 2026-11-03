@@ -112,7 +112,7 @@ describe('words for an agent at work', () => {
   it('types a message into the turn that runs, and opens no turn for it', async () => {
     const c = await atWork();
     expect(await enqueueTurn(c.ctx, message(c))).toBe(c.run.id);
-    expect(c.says).toEqual([{ agentKey: c.bruno.id, text: 'Hana (Head of development): Use the new schema.' }]);
+    expect(c.says).toEqual([{ agentKey: c.bruno.id, text: 'From Hana (Head of development, Development) to Bruno (Backend engineer, Development):\n\nHana (Head of development): Use the new schema.' }]);
     expect(await queuedOf(c, c.bruno.id)).toEqual([]);
     const [shown] = await c.db.select().from(agentEvents).where(and(eq(agentEvents.agentId, c.bruno.id), eq(agentEvents.kind, 'message')));
     expect(shown).toMatchObject({ jobId: c.run.id, data: { text: 'Use the new schema.', name: 'Hana' } });

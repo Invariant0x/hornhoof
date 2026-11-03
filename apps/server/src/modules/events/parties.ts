@@ -3,7 +3,6 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, departments, people } from '../../db/schema.js';
 import { deptName } from '../departments/templates.js';
-import type { Lang } from '../templates/load.js';
 
 const LangText = z.object({ en: z.string(), ru: z.string() });
 const Party = z.object({
@@ -17,7 +16,6 @@ export type MessageEnvelope = z.infer<typeof MessageEnvelopeSchema>;
 export type PartyContext = Pick<Ctx, 'db' | 'templates'>;
 
 export const HORNHOOF: MessageParty = { kind: 'hornhoof', id: null, name: 'Hornhoof', role: null, department: null };
-export const PEOPLE: MessageParty = { kind: 'person', id: null, name: '', role: null, department: null };
 
 const DEPARTMENT_RU = {
   operations: 'Операции', development: 'Разработка', marketing: 'Маркетинг', sales: 'Продажи',
@@ -28,10 +26,18 @@ const DEPARTMENT_RU = {
 export async function agentParty(ctx: PartyContext, companyId: string, agentId: string): Promise<MessageParty> {
   const [agent] = await ctx.db.select().from(agents).where(and(eq(agents.id, agentId), eq(agents.companyId, companyId)));
   if (!agent) throw new Error('The message agent does not exist in this company.');
-  const role = agent.kind === 'orchestrator' ? { en: 'Orchestrator', ru: 'Оркестратор' } : ctx.templates.roles.get(agent.roleKey ?? '')?.title ?? null;
-  const [dept] = agent.departmentId ? await ctx.db.select().from(departments).where(eq(departments.id, agent.departmentId)) : [];
-  const name = dept && { en: deptName(dept), ru: dept.name ?? (dept.templateKey ? DEPARTMENT_RU[dept.templateKey] : '') };
-  return { kind: 'agent', id: agent.id, name: agent.name, role, department: dept && name ? { id: dept.id, name } : null, agentKind: agent.kind };
+  return { kind: 'agent', id: agent.id, name: agent.name, role: agentRole(ctx, agent), department: await agentDepartment(ctx, agent.departmentId), agentKind: agent.kind };
+}
+
+function agentRole(ctx: PartyContext, agent: typeof agents.$inferSelect) {
+  return agent.kind === 'orchestrator' ? { en: 'Orchestrator', ru: 'Оркестратор' } : ctx.templates.roles.get(agent.roleKey ?? '')?.title ?? null;
+}
+
+async function agentDepartment(ctx: PartyContext, id: string | null): Promise<MessageParty['department']> {
+  if (!id) return null;
+  const [dept] = await ctx.db.select().from(departments).where(eq(departments.id, id));
+  if (!dept) return null;
+  return { id: dept.id, name: { en: deptName(dept), ru: dept.name ?? (dept.templateKey ? DEPARTMENT_RU[dept.templateKey] : '') } };
 }
 
 export async function personParty(ctx: PartyContext, companyId: string, personId: string): Promise<MessageParty> {

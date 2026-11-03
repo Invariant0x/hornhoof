@@ -5,6 +5,7 @@ import { hashToken } from '../src/crypto/tokens.js';
 import { agents, companies, departments, jobs, people, requests, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
 import { createTask, type Task } from '../src/modules/tasks/engine.js';
 import { TASK_ANSWER } from '../src/modules/tasks/tools.js';
+import { listEvents } from '../src/modules/events/store.js';
 import { wakePrompt } from '../src/modules/tasks/wake.js';
 import { listen, mcp, setUpCompany, testApp } from './helpers.js';
 
@@ -139,6 +140,15 @@ describe('task tools', () => {
 });
 
 describe('asking a person', () => {
+  it('keeps the question as an outgoing message to its responsible person', async () => {
+    const { ctx, db, dev, head, bruno, ceo, tools } = await company();
+    const { task } = await createTask(ctx, { agentId: head.id }, { title: 'Checkout API', brief: '', body: '', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true, gates: [] });
+    const asked = await call(await tools(bruno), 'ask_person', { task: task.number, question: 'Which cards do we take?' });
+    expect(asked.isError).toBeFalsy();
+    const outgoing = (await listEvents(db, bruno.id, 0)).find(e => e.message?.direction === 'out');
+    expect(outgoing).toMatchObject({ kind: 'message', data: { text: 'Which cards do we take?' }, message: { direction: 'out', from: { kind: 'agent', id: bruno.id, agentKind: 'worker' }, to: { kind: 'person', id: ceo.id, name: 'Ivan', role: { en: 'CEO', ru: 'CEO' } } } });
+  });
+
   it('keeps what the question is about, and takes no topic it does not know', async () => {
     const { ctx, db, dev, head, bruno, tools } = await company();
     const task = (await createTask(ctx, { agentId: head.id }, { title: 'Checkout API', brief: '', body: '', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true, gates: [] })).task;

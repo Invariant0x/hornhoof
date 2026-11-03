@@ -1,7 +1,9 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { appendEvent } from '../events/store.js';
+import { appendEvent, appendOutgoing } from '../events/store.js';
+import { personParty } from '../events/parties.js';
+import { decisionPerson } from '../tasks/decisions.js';
 import { ONLY_CEO } from '../tools/control.js';
 import type { ToolJob } from '../tools/job.js';
 import { onMachine, RUN_DEFAULT_S, RUN_MAX_S, serverMachine, type Waited } from './access.js';
@@ -36,6 +38,8 @@ export function registerComputerTools(server: McpServer, ctx: Ctx, job: ToolJob)
       ctx.computer.ask(reason);
       ctx.bus.publish(job.companyId, { type: 'computer' });
       await appendEvent(ctx, { companyId: job.companyId, agentId: job.agentId, jobId: job.id, kind: 'computer', data: { state: 'asked', reason, ...onMachine(await serverMachine(ctx, job.companyId)) } });
+      const personId = await decisionPerson(ctx, job.companyId, { source: 'computer_access' });
+      await appendOutgoing(ctx, { ...job, jobId: job.id, text: reason, to: await personParty(ctx, job.companyId, personId) });
       return say('The CEO sees your request in your window and opens access with one click. You get a note then and go on; until then go on with other work or end your turn.');
     },
   );

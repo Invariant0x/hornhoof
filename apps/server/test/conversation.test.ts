@@ -5,11 +5,13 @@ import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { agents, companies, departments, jobs, people, subscriptions, turns } from '../src/db/schema.js';
 import { renderInstructions } from '../src/modules/agents/instructions.js';
 import { FIRST_TURN, FIRST_TURN_TEMPLATE, ORCHESTRATOR_INSTRUCTIONS } from '../src/modules/conversation/prompt.js';
-import { pumpWaiting } from '../src/modules/conversation/queue.js';
+import { enqueueTurn, pumpWaiting } from '../src/modules/conversation/queue.js';
 import { holdTurns } from '../src/modules/updates/drain.js';
 import { as, connectNode, invitePerson, listen, openStream, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
+const IVAN_TO_ORCHESTRATOR = 'From Ivan (CEO) to Orchestrator:\n\n';
+const IVAN_TO_BRUNO = 'From Ivan (CEO) to Bruno (Backend engineer, Development):\n\n';
 
 type Run = { type: 'job.run'; jobId: string; prompt: string; sessionId: string | null; model: string | null; effort?: string | null; compactWindow?: number; instructions: string | null; toolToken: string | null; timeoutMs: number; skills?: { name: string }[] };
 
@@ -45,11 +47,45 @@ const quiet = async (node: FakeNode) => {
 };
 
 describe('the orchestrator\'s conversation', () => {
+  it('starts a typed person message with its sender, role and recipient', async () => {
+    const { app, ceo, builtin } = await live();
+    await say(app, ceo, 'Keep the service instructions.');
+    const run = await nextRun(builtin);
+    expect(run.prompt.split('\n')[0]).toBe('From Ivan (CEO) to Orchestrator:');
+    expect(run.prompt).toContain('Keep the service instructions.');
+    const [message] = await events(app, ceo);
+    expect(message.data.text).toBe('Keep the service instructions.');
+    expect(message.message).toMatchObject({ direction: 'in', from: { kind: 'person', role: { en: 'CEO' } }, to: { agentKind: 'orchestrator' } });
+  });
+
+  it('starts a head letter with its real role and department, while keeping every quoted line', async () => {
+    const { app, db, builtin } = await live();
+    const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    const [dev] = await db.insert(departments).values({ companyId: orchestrator!.companyId, templateKey: 'development', roleCode: 'DEV' }).returning();
+    const [head] = await db.insert(agents).values({ companyId: orchestrator!.companyId, subscriptionId: orchestrator!.subscriptionId, departmentId: dev!.id, kind: 'head', name: 'Hana', roleKey: 'DEV-HEAD', model: '' }).returning();
+    await enqueueTurn(app.ctx, { companyId: orchestrator!.companyId, agentId: orchestrator!.id, createdBy: null, prompt: 'Hana wrote:\n\n> Tests pass.\n> Keep the service instructions.', message: { personId: null, from: 'agent', by: head!.id, name: 'Hana', text: 'Tests pass.\nKeep the service instructions.' } });
+    const run = await nextRun(builtin);
+    expect(run.prompt.split('\n')[0]).toBe('From Hana (Head of development, Development) to Orchestrator:');
+    expect(run.prompt).toContain('> Tests pass.\n> Keep the service instructions.');
+  });
+
+  it('starts a Hornhoof notice with both ends and retains it in the window', async () => {
+    const { app, db, ceo, builtin } = await live();
+    const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    await enqueueTurn(app.ctx, { companyId: orchestrator!.companyId, agentId: orchestrator!.id, createdBy: null, prompt: 'Read the task and its log before continuing.' });
+    const run = await nextRun(builtin);
+    expect(run.prompt.split('\n')[0]).toBe('From Hornhoof to Orchestrator:');
+    expect(run.prompt).toContain('Read the task and its log before continuing.');
+    const [message] = await events(app, ceo);
+    expect(message.message).toMatchObject({ direction: 'in', from: { kind: 'hornhoof' }, to: { id: orchestrator!.id } });
+    expect(message.data.text).toBe('Read the task and its log before continuing.');
+  });
+
   it('starts with a greeting turn that carries his instructions and a tool token, once', async () => {
     const { app, ceo, builtin } = await live();
     expect((await start(app, ceo)).json()).toEqual({ started: true });
     const run = await nextRun(builtin);
-    expect(run).toMatchObject({ prompt: FIRST_TURN, effort: 'xhigh', sessionId: null, timeoutMs: 2 * 3_600_000 });
+    expect(run).toMatchObject({ prompt: `From Hornhoof to Orchestrator:\n\n${FIRST_TURN}`, effort: 'xhigh', sessionId: null, timeoutMs: 2 * 3_600_000 });
     expect(run.instructions?.startsWith(ORCHESTRATOR_INSTRUCTIONS)).toBe(true);
     expect(run.toolToken).toMatch(/^[A-Za-z0-9_-]{40,}$/);
     expect((await start(app, ceo)).json()).toEqual({ started: false });
@@ -69,7 +105,7 @@ describe('the orchestrator\'s conversation', () => {
     await db.update(companies).set({ template: 'studio' }).where(eq(companies.id, acme!.id));
     await db.insert(departments).values({ companyId: acme!.id, name: null, templateKey: 'development', roleCode: 'DEV' });
     expect((await start(app, ceo)).json()).toEqual({ started: true });
-    expect((await nextRun(builtin)).prompt).toBe(FIRST_TURN_TEMPLATE);
+    expect((await nextRun(builtin)).prompt).toBe(`From Hornhoof to Orchestrator:\n\n${FIRST_TURN_TEMPLATE}`);
     expect((await start(app, ceo)).json()).toEqual({ started: false });
   });
 
@@ -81,13 +117,13 @@ describe('the orchestrator\'s conversation', () => {
     builtin.send({ type: 'job.started', jobId: run.jobId });
     builtin.send({ type: 'job.event', jobId: run.jobId, seq: 0, event: { kind: 'text', text: 'Hello, Ivan. What does Acme do?' } });
     builtin.send({ type: 'job.event', jobId: run.jobId, seq: 1, event: { kind: 'tool', name: 'hornhoof.company', input: '{}' } });
-    await until(async () => (await events(app, ceo)).length === 2);
+    await until(async () => (await events(app, ceo)).length === 3);
     const log = await events(app, ceo);
-    expect(log.map((e: { kind: string }) => e.kind)).toEqual(['text', 'tool']);
-    expect(log[0]).toMatchObject({ jobId: run.jobId, data: { kind: 'text', text: 'Hello, Ivan. What does Acme do?' } });
-    expect(log[1].seq).toBeGreaterThan(log[0].seq);
-    expect((await events(app, ceo, log[0].seq)).map((e: { kind: string }) => e.kind)).toEqual(['tool']);
-    await until(() => stream.messages.filter(m => m.type === 'agent_event').length === 2);
+    expect(log.map((e: { kind: string }) => e.kind)).toEqual(['message', 'text', 'tool']);
+    expect(log[1]).toMatchObject({ jobId: run.jobId, data: { kind: 'text', text: 'Hello, Ivan. What does Acme do?' } });
+    expect(log[2].seq).toBeGreaterThan(log[1].seq);
+    expect((await events(app, ceo, log[1].seq)).map((e: { kind: string }) => e.kind)).toEqual(['tool']);
+    await until(() => stream.messages.filter(m => m.type === 'agent_event').length === 3);
   });
 
   it('puts a turn back in line when sending it breaks, and sends it on the next try', async () => {
@@ -130,9 +166,9 @@ describe('the orchestrator\'s conversation', () => {
     expect(await quiet(builtin)).toBe(0);
     await finish(builtin, first, 'sess-1');
     const second = await nextRun(builtin);
-    expect(second).toMatchObject({ prompt: 'Ivan (CEO): We make characters for schools', sessionId: 'sess-1' });
+    expect(second).toMatchObject({ prompt: `${IVAN_TO_ORCHESTRATOR}Ivan (CEO): We make characters for schools`, sessionId: 'sess-1' });
     const log = await events(app, ceo);
-    expect(log.find((e: { kind: string }) => e.kind === 'message')).toMatchObject({ person: { name: 'Ivan' }, data: { text: 'We make characters for schools' }, jobId: second.jobId });
+    expect(log.find((e: { kind: string; person: unknown }) => e.kind === 'message' && e.person)).toMatchObject({ person: { name: 'Ivan' }, data: { text: 'We make characters for schools' }, jobId: second.jobId });
   });
 
   it('goes on in the session of a turn that ran out of time or was stopped, and not of one that broke or never ran', async () => {
@@ -166,9 +202,9 @@ describe('the orchestrator\'s conversation', () => {
     await say(app, olga, 'And parents later');
     await finish(builtin, first);
     const second = await nextRun(builtin);
-    expect(second.prompt).toBe('Ivan (CEO): Schools first');
+    expect(second.prompt).toBe(`${IVAN_TO_ORCHESTRATOR}Ivan (CEO): Schools first`);
     await finish(builtin, second);
-    expect((await nextRun(builtin)).prompt).toBe('Olga (Deputy): And parents later');
+    expect((await nextRun(builtin)).prompt).toBe('From Olga (Deputy) to Orchestrator:\n\nOlga (Deputy): And parents later');
   });
 
   it('opens a new session with the earlier conversation when he moves to another subscription', async () => {
@@ -187,8 +223,8 @@ describe('the orchestrator\'s conversation', () => {
     await say(app, ceo, 'What next?');
     const run = await nextRun(builtin);
     expect(run.sessionId).toBeNull();
-    expect(run.prompt).toMatch(/^Earlier in this conversation/);
-    expect(run.prompt).toContain('Ivan:\n> We sell shoes');
+    expect(run.prompt).toMatch(/^From Ivan \(CEO\) to [^\n]+:\n\nEarlier in this conversation/);
+    expect(run.prompt).toContain('From Ivan (CEO) to Orchestrator:\n> We sell shoes');
     expect(run.prompt.endsWith('Ivan (CEO): What next?')).toBe(true);
     expect(run.prompt.match(/What next\?/g)).toHaveLength(1);
   });
@@ -200,7 +236,9 @@ describe('the orchestrator\'s conversation', () => {
     await say(app, ceo, 'Still there?');
     builtin.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [] });
     const next = await nextRun(builtin);
-    expect(next.prompt).toBe('Ivan (CEO): Still there?');
+    expect(next.prompt).toMatch(/^From Ivan \(CEO\) to Orchestrator:\n\nEarlier in this conversation/);
+    expect(next.prompt.endsWith('Ivan (CEO): Still there?')).toBe(true);
+    expect(next.sessionId).toBeNull();
     expect((await events(app, ceo)).find((e: { kind: string }) => e.kind === 'failed')).toMatchObject({ data: { error: 'machine_restarted' } });
   });
 
@@ -263,7 +301,7 @@ describe('the orchestrator\'s conversation', () => {
     updated.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [] });
     await until(async () => (await state(app, ceo)).ready);
     await say(app, ceo, 'Hello');
-    expect((await nextRun(updated)).prompt).toBe('Ivan (CEO): Hello');
+    expect((await nextRun(updated)).prompt).toBe(`${IVAN_TO_ORCHESTRATOR}Ivan (CEO): Hello`);
   });
 
   it('lets a worker compact its conversation at half a million tokens, while heads and the orchestrator keep the full window', async () => {
@@ -363,7 +401,7 @@ describe('the orchestrator\'s conversation', () => {
     expect((await say(app, ceo, 'Go on')).statusCode).toBe(202);
     expect(await quiet(mac)).toBe(0);
     expect((await state(app, ceo)).queued).toBe(1);
-    expect((await nextRun(mac)).prompt).toBe('Ivan (CEO): Go on');
+    expect((await nextRun(mac)).prompt).toBe(`${IVAN_TO_ORCHESTRATOR}Ivan (CEO): Go on`);
     expect((await state(app, ceo)).limitUntil).toBeNull();
   });
 
@@ -544,7 +582,7 @@ describe("an employee's conversation", () => {
     expect(res.statusCode).toBe(202);
     const run = await nextRun(builtin);
     const expected = renderInstructions(app.ctx.templates, bruno, { company: 'Acme', department: 'Development', product: null });
-    expect(run).toMatchObject({ prompt: 'Ivan (CEO): What do you own?', instructions: expected.text, sessionId: null });
+    expect(run).toMatchObject({ prompt: `${IVAN_TO_BRUNO}Ivan (CEO): What do you own?`, instructions: expected.text, sessionId: null });
     expect(run.instructions).toContain('You are Bruno, the Backend engineer of the Development department at Acme.');
     /* Skills that are not core rules go as files the program reads when it needs them. */
     expect(expected.skills.length).toBeGreaterThan(0);
@@ -571,14 +609,15 @@ describe("an employee's conversation", () => {
     const fresh = await nextRun(builtin);
     expect(fresh.sessionId).toBeNull();
     expect(fresh.instructions).toContain('You own the billing API.');
-    expect(fresh.prompt).toMatch(/^Earlier in this conversation/);
+    expect(fresh.prompt).toMatch(/^From Ivan \(CEO\) to [^\n]+:\n\nEarlier in this conversation/);
     expect(fresh.prompt.endsWith('Ivan (CEO): And now?')).toBe(true);
   });
 
   it.each(['head', 'orchestrator'] as const)('keeps the %s session when a new turn of the company opens', async kind => {
     const { app, ceo, builtin, id } = await inNewCompanyTurn(kind);
     await sayTo(app, ceo, id, 'The new turn starts.');
-    expect(await nextRun(builtin)).toMatchObject({ sessionId: 'sess-1', prompt: 'Ivan (CEO): The new turn starts.' });
+    const recipient = kind === 'head' ? 'Bruno (Head of development, Development)' : 'Orchestrator';
+    expect(await nextRun(builtin)).toMatchObject({ sessionId: 'sess-1', prompt: `From Ivan (CEO) to ${recipient}:\n\nIvan (CEO): The new turn starts.` });
   });
 
   it('catches up the head in a new company turn when its instructions changed', async () => {
@@ -588,8 +627,8 @@ describe("an employee's conversation", () => {
     const fresh = await nextRun(builtin);
     expect(fresh.sessionId).toBeNull();
     expect(fresh.instructions).toContain('Keep track of the billing agreements.');
-    expect(fresh.prompt).toMatch(/^Earlier in this conversation/);
-    expect(fresh.prompt).toContain('Ivan:\n> We agreed to support card payments.');
+    expect(fresh.prompt).toMatch(/^From Ivan \(CEO\) to [^\n]+:\n\nEarlier in this conversation/);
+    expect(fresh.prompt).toContain('From Ivan (CEO) to Bruno (Head of development, Development):\n> We agreed to support card payments.');
     expect(fresh.prompt.endsWith('Ivan (CEO): The new turn starts.')).toBe(true);
   });
 
@@ -602,7 +641,7 @@ describe("an employee's conversation", () => {
     await sayTo(app, ceo, bruno.id, 'The new turn starts.');
     const fresh = await nextRun(builtin);
     expect(fresh.sessionId).toBeNull();
-    expect(fresh.prompt).toBe('Ivan (CEO): The new turn starts.');
+    expect(fresh.prompt).toBe(`${IVAN_TO_BRUNO}Ivan (CEO): The new turn starts.`);
     await finish(builtin, fresh, 'sess-2');
     await until(async () => !(await stateOf(app, ceo, bruno.id)).busy);
     await sayTo(app, ceo, bruno.id, 'Still you?');
@@ -624,7 +663,7 @@ describe("an employee's conversation", () => {
     const seller = await hire('Sam', sales.id);
     const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { departments: [dev.id] } });
     expect((await sayTo(app, maria, bruno.id, 'Hi Bruno')).statusCode).toBe(202);
-    expect((await nextRun(builtin)).prompt).toBe('Maria: Hi Bruno');
+    expect((await nextRun(builtin)).prompt).toBe('From Maria to Bruno (Backend engineer, Development):\n\nMaria: Hi Bruno');
     for (const res of [await sayTo(app, maria, seller.id, 'Hi Sam'), await app.inject({ url: `/api/agents/${seller.id}/events`, ...as(maria) })]) {
       expect(res.statusCode).toBe(403);
       expect(res.json().error.reason).toBe('not_your_department');
@@ -709,7 +748,7 @@ describe("an employee's conversation", () => {
     const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
     expect((await sayTo(app, ceo, orchestrator!.id, 'Hello')).statusCode).toBe(202);
     const run = await nextRun(builtin);
-    expect(run.prompt).toBe('Ivan (CEO): Hello');
+    expect(run.prompt).toBe(`${IVAN_TO_ORCHESTRATOR}Ivan (CEO): Hello`);
     expect(run.instructions?.startsWith(ORCHESTRATOR_INSTRUCTIONS)).toBe(true);
   });
 });

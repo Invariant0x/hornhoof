@@ -4,12 +4,15 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, DECISION_TOPICS, departments, jobs, requests, tasks } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import { ask, blocked, cancel, CLOSED, comment, createTask, gateLeads, inRepository, listed, openAfter, refuse, report, submit, updateTask, verdict, type Moved, type Task } from './engine.js';
+import { ask, blocked, cancel, CLOSED, comment, createTask, gateLeads, inRepository, listed, openAfter, refuse, report, submit, taskSpot, updateTask, verdict, type Moved, type Task } from './engine.js';
 import { carriesFile, encodedHint } from './attachments.js';
 import { taskByRef, taskDetail, taskLines, type TaskDetail } from './views.js';
 import { addTasks, editTurn, mergeTurn, planTurn, settle, tell, TURN_MESSAGES, turnName, turnRows } from './turns.js';
 import { stopTurns, wakeAll } from './wake.js';
 import { orchestratorOf } from '../conversation/queue.js';
+import { appendOutgoing } from '../events/store.js';
+import { personParty } from '../events/parties.js';
+import { decisionPerson } from './decisions.js';
 
 export type ToolJob = { id: string; companyId: string; agentId: string; agentKind: 'orchestrator' | 'head' | 'worker' };
 type Agent = typeof agents.$inferSelect;
@@ -205,6 +208,8 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         const kind = commit ? 'approval' : options?.length ? 'choice' : 'question';
         const ways = options?.map(o => ({ label: o.label, image: o.image ?? null }));
         const moved = await ask(ctx, job.agentId, task.id, { kind, text: question, ...(commit ? { commit } : {}), images, options: ways, link: link ?? null, topic });
+        const personId = await decisionPerson(ctx, job.companyId, { source: 'request', kind, topic: topic ?? null, spot: taskSpot(task) });
+        await appendOutgoing(ctx, { ...job, jobId: job.id, text: question, to: await personParty(ctx, job.companyId, personId) });
         return { text: `Asked. #${task.number} waits for a person's answer; you will be woken with it.`, moved };
       }),
   );

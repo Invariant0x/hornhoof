@@ -239,9 +239,10 @@ async function explainRequest(ctx: Ctx, w: Wake): Promise<void> {
     `Then call "explain_request" with request ${request.id} and a few lines for the person, in the CEO's language and plain words without IT terms: ` +
     'which task and what for, what is needed from them and why, and the ways to go with what each leads to. Do not answer it yourself unless the CEO told you how.';
   const into = await sayLive(ctx, w.agentId, text);
-  const jobId = into ?? (await insertTurn(ctx, { companyId: task.companyId, agentId: w.agentId, prompt: text, createdBy: null }));
+  const message = { personId: null, text, task: { id: task.id, number: task.number }, request: request.id };
+  const jobId = into ?? (await insertTurn(ctx, { companyId: task.companyId, agentId: w.agentId, prompt: text, createdBy: null, message }));
   /* The request names the turn that explains it, so people see the orchestrator is on it. */
-  await appendEvent(ctx, { companyId: task.companyId, agentId: w.agentId, jobId, kind: 'message', data: { text, task: { id: task.id, number: task.number }, request: request.id } });
+  if (into) await appendEvent(ctx, { companyId: task.companyId, agentId: w.agentId, jobId, kind: 'message', data: { text, task: { id: task.id, number: task.number }, request: request.id } });
   ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
   if (!into) await pump(ctx, w.agentId);
 }
@@ -325,12 +326,15 @@ async function queueWake(ctx: Ctx, w: Wake): Promise<boolean> {
       .limit(1);
     if (waiting) {
       /* A run's result is not in the task, so the turn that waits carries it along. */
-      if (w.why === 'tests' || w.why === 'work') await db.update(jobs).set({ prompt: sql`${jobs.prompt} || ${`\n\n${wakePrompt(agent, task, w)}`}` }).where(eq(jobs.id, waiting.id));
+      if (w.why === 'tests' || w.why === 'work') {
+        const text = wakePrompt(agent, task, w);
+        await db.update(jobs).set({ prompt: sql`${jobs.prompt} || ${`\n\n${text}`}` }).where(eq(jobs.id, waiting.id));
+        await appendEvent(ctx, { companyId: agent.companyId, agentId: agent.id, jobId: waiting.id, kind: 'message', data: { text, task: { id: task.id, number: task.number } } });
+      }
       return false;
     }
     const prompt = wakePrompt(agent, task, w);
-    const jobId = await insertTurn(ctx, { companyId: agent.companyId, agentId: agent.id, prompt, createdBy: null, taskId: task.id });
-    await appendEvent(ctx, { companyId: agent.companyId, agentId: agent.id, jobId, kind: 'message', data: { text: prompt, task: { id: task.id, number: task.number } } });
+    await insertTurn(ctx, { companyId: agent.companyId, agentId: agent.id, prompt, createdBy: null, taskId: task.id, message: { personId: null, text: prompt, task: { id: task.id, number: task.number } } });
     return true;
   });
 }

@@ -83,7 +83,7 @@ describe('tools a skill grants', () => {
     const nudge = await call(client, 'message_employee', { employee: bruno.id, text: 'Task #1 has had no report for an hour. Report or say what blocks you.' });
     expect(nudge.content[0]!.text).toBe("Sent to Bruno.");
     const [turn] = await db.select().from(jobs).where(and(eq(jobs.agentId, bruno.id), inArray(jobs.status, ['queued', 'running'])));
-    expect(turn!.prompt).toBe('Wendy (Reliability engineer) wrote:\n\n> Task #1 has had no report for an hour. Report or say what blocks you.');
+    expect(turn!.prompt).toBe('From Wendy (Reliability engineer, Operations) to Bruno (Backend engineer, Development):\n\nWendy (Reliability engineer) wrote:\n\n> Task #1 has had no report for an hour. Report or say what blocks you.');
     const [said] = await db.select().from(agentEvents).where(and(eq(agentEvents.agentId, bruno.id), eq(agentEvents.kind, 'message')));
     expect(said!.data).toMatchObject({ text: 'Task #1 has had no report for an hour. Report or say what blocks you.', from: 'agent', name: 'Wendy' });
     /* The map runs it from Operations to Development. */
