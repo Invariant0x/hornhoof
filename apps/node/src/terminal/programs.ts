@@ -58,7 +58,7 @@ export const claudeProgram: TermProgram = {
     const id = sessionId ?? randomUUID();
     const settings = {
       /* After compacting its conversation, Claude Code adds what hh-hook compact prints, which sends it back to its tools. */
-      hooks: { SessionStart: [...hook('start'), { matcher: 'compact', ...hook('compact')[0]! }], UserPromptSubmit: hook('prompt'), Stop: hook('stop'), StopFailure: hook('stop') },
+      hooks: { SessionStart: [...hook('start'), { matcher: 'compact', ...hook('compact')[0]! }], UserPromptSubmit: hook('prompt'), Stop: hook('stop'), StopFailure: hook('stop'), PreToolUse: hook('tool'), PostToolUse: hook('tooldone'), PostToolUseFailure: hook('toolfail'), PermissionRequest: hook('ask'), SessionEnd: hook('end') },
       /* The status line hears the plan's limits; it shows nothing. */
       statusLine: { type: 'command', command: 'hh-hook status' },
     };
@@ -86,7 +86,8 @@ export const codexProgram: TermProgram = {
   kind: 'codex',
   launch({ bin, home, workDir, sessionId, model, effort, urls }) {
     const config = ['-c', `mcp_servers.hornhoof.url=${JSON.stringify(urls.mcpUrl)}`, ...WHOLE_AGENTS_MD, ...(effort ? ['-c', `model_reasoning_effort=${JSON.stringify(effort)}`] : [])];
-    const rest = ['--dangerously-bypass-approvals-and-sandbox', ...config, ...(model ? ['-m', model] : [])];
+    const hooks = Object.entries({ Stop: 'stop', Interrupt: 'interrupt', PreToolUse: 'tool', PostToolUse: 'tooldone', SessionEnd: 'end' }).flatMap(([name, event]) => ['-c', `hooks.${name}=[{hooks=[{type="command",command="hh-hook ${event}"}]}]`]);
+    const rest = ['--dangerously-bypass-approvals-and-sandbox', '--dangerously-bypass-hook-trust', ...hooks, ...config, ...(model ? ['-m', model] : [])];
     /* A resumed session works in the folder it started in, which is the pane's. */
     const command = sessionId ? [bin, 'resume', sessionId, ...rest] : [bin, rest[0]!, '-C', workDir, ...rest.slice(1)];
     return { command, env: { CODEX_HOME: home, ...bridgeEnv(urls) }, sessionId };
@@ -159,6 +160,13 @@ export async function prepareAgy(workDir: string, mcpUrl: string, fs: AgentFs = 
 const KIMI_HOOKS = [
   ['SessionStart', 'start'],
   ['UserPromptSubmit', 'prompt'],
+  ['Stop', 'stop'],
+  ['StopFailure', 'stop'],
+  ['Interrupt', 'interrupt'],
+  ['PreToolUse', 'tool'],
+  ['PostToolUse', 'tooldone'],
+  ['PostToolUseFailure', 'toolfail'],
+  ['SessionEnd', 'end'],
 ] as const;
 
 /* Kimi has no flags for tools or hooks. Its tools come from the agent folder's .kimi-code/mcp.json, through the bridge,
@@ -171,7 +179,8 @@ export async function prepareKimi(home: string, workDir: string, mcpUrl: string,
   const file = join(home, 'config.toml');
   /* A home that was never signed in has none yet. */
   const config = (await fs.read(file)) ?? '';
-  const missing = KIMI_HOOKS.filter(([, event]) => !new RegExp(`hh-hook ${event}\\b`).test(config));
+  const entries = config.split(/\[\[hooks\]\]/).slice(1);
+  const missing = KIMI_HOOKS.filter(([name, event]) => !entries.some(entry => new RegExp(`event\\s*=\\s*"${name}"`).test(entry) && entry.includes(`"hh-hook ${event}"`)));
   if (!missing.length || /^\s*hooks\s*=/m.test(config)) return;
   const added = missing.map(([name, event]) => `[[hooks]]\nevent = "${name}"\ncommand = "hh-hook ${event}"\n`).join('\n');
   await fs.mkdir(home);

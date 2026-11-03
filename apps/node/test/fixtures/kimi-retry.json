@@ -1,0 +1,9 @@
+{
+  "type": "turn.step.retrying",
+  "agentId": "main",
+  "turnId": 0,
+  "failedAttempt": 1,
+  "nextAttempt": 2,
+  "maxAttempts": 10,
+  "delayMs": 545.1397309349115
+}

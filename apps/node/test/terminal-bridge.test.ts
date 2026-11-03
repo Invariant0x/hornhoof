@@ -163,3 +163,17 @@ describe("the node's bridge to Hornhoof's tools", () => {
     expect(asked[0]!.port).toBeGreaterThan(0);
   });
 });
+
+describe('lifecycle hook events', () => {
+  it.each(['tool', 'tooldone', 'toolfail', 'ask', 'interrupt', 'end'])('accepts %s', async event => {
+    const seen: unknown[] = [];
+    const bridge = new Bridge('http://127.0.0.1:9', (key, got, body) => { seen.push([key, got, body]); });
+    await bridge.start();
+    try {
+      const res = await fetch(`${bridge.agent('agent').hookUrl}/${event}`, { method: 'POST', body: '{"tool_name":"Bash"}' });
+      expect(res.status).toBe(200);
+      expect(await res.text()).toBe('');
+      expect(seen).toEqual([['agent', event, { tool_name: 'Bash' }]]);
+    } finally { bridge.stop(); }
+  });
+});

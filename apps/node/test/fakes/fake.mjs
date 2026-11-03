@@ -13,7 +13,7 @@ const LOGGED_ENV = [
 const LOGIN_URL = 'https://login.example.test/device?code=ABC';
 
 /* What a message to agy's print mode asks of the fake, for the live terminal tests, where one program sends many. */
-const AGY_ASKS = { HANG: 'hang', FAIL: 'fail', TOOLS: 'tools', TICK: 'tick', WORK: 'work', CUT: 'cut' };
+const AGY_ASKS = { HANG: 'hang', FAIL: 'fail', TOOLS: 'tools', TICK: 'tick', WORK: 'work', CUT: 'cut', APIFAIL: 'apifail' };
 
 export function run(name) {
   const argv = process.argv.slice(2);
@@ -171,6 +171,13 @@ function failedRun(name, print) {
 
 /* agy's print runs that the live terminal tests ask for by their message's first word. */
 const AGY_RUNS = {
+  apifail: () => {
+    agyToolStep('ACTIVE');
+    agyToolStep('ERROR');
+    process.stdout.write(JSON.stringify({ event: 'result', result: { status: 'ERROR', error: 'The server is overloaded', finished_reason: 'error' } }) + '\n');
+    process.stderr.write('AGY_ERROR: {"short_error":"The server is overloaded","retryable":false}\n');
+    process.exitCode = 3;
+  },
   /* A tool step from agy's docs, then a whole turn, so the run ends with a result. */
   tools: print => {
     print('agy-tools');
