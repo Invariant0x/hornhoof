@@ -1,4 +1,5 @@
 import type { EventView } from '../events/store.js';
+import type { MessageEnvelope, MessageParty } from '../events/parties.js';
 
 /* His standing role, sent with every turn. Always English; he answers in the language people write in. */
 export const ORCHESTRATOR_INSTRUCTIONS = `You are the Orchestrator of a company that runs in Hornhoof, where people and AI agents work together. The person who owns the company is the CEO; other people with access to the whole company may write to you too. Each message starts with who wrote it, like "Ivan (CEO): ...".
@@ -40,6 +41,23 @@ export const quote = (text: string): string =>
     .map(line => `> ${line}`)
     .join('\n');
 
+/* Identity stays on one physical line even when a display name contains whitespace. */
+function partyLine(party: MessageParty): string {
+  const name = party.name || 'People';
+  const details = [party.role?.en !== name ? party.role?.en : null, party.department?.name.en].filter(Boolean);
+  return `${name}${details.length ? ` (${details.join(', ')})` : ''}`.replace(/\s+/g, ' ').trim();
+}
+
+export function messageHeading(message: MessageEnvelope): string {
+  return `From ${partyLine(message.from)} to ${partyLine(message.to)}:`;
+}
+
+/* Applied after history and service instructions are composed, on both queued and live delivery paths. */
+export function addressed(text: string, message: MessageEnvelope): string {
+  const heading = messageHeading(message);
+  return text.startsWith(`${heading}\n`) ? text : `${heading}\n\n${text}`;
+}
+
 /* An employee's message to another agent, which reads it as the employee's words, not as orders. */
 export function wrote(author: { name: string; title: string }, text: string): string {
   return `${author.title ? `${author.name} (${author.title})` : author.name} wrote:\n\n${quote(text)}`;
@@ -67,7 +85,7 @@ export function preface(events: EventView[], agentName = 'Orchestrator'): string
   const lines = events
     .filter(e => e.kind === 'message' || e.kind === 'text')
     .slice(-PREFACE_EVENTS)
-    .map(e => `${senderOf(e, agentName)}:\n${quote(textOf(e.data))}`);
+    .map(e => `${e.message ? messageHeading(e.message) : `${senderOf(e, agentName)}:`}\n${quote(textOf(e.data))}`);
   const kept: string[] = [];
   let bytes = 0;
   for (const line of lines.reverse()) {

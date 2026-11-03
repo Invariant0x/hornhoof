@@ -12,6 +12,7 @@ import { orchestratorHeaders } from '../src/auth/internal.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agents, jobs, people, subscriptions } from '../src/db/schema.js';
 import { ComputerAccess } from '../src/modules/computer/access.js';
+import { listEvents } from '../src/modules/events/store.js';
 import { identityOf } from '../src/modules/nodes/hub.js';
 import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until } from './helpers.js';
 
@@ -66,6 +67,14 @@ async function answerAs(control: string, output: string, exit = 0) {
 }
 
 describe('access to the computer the server runs on', () => {
+  it('keeps the access question as an outgoing message from the orchestrator to the CEO', async () => {
+    const { app, db, orchestrator } = await company();
+    const [ceo] = await db.select().from(people).where(eq(people.isOwner, true));
+    expect((await call(await mcp(app), 'ask_computer_access', { reason: 'Restart the nodes outside AppArmor.' })).isError).toBeFalsy();
+    const outgoing = (await listEvents(db, orchestrator.id, 0)).find(e => e.message?.direction === 'out');
+    expect(outgoing).toMatchObject({ kind: 'message', data: { text: 'Restart the nodes outside AppArmor.' }, message: { direction: 'out', from: { kind: 'agent', id: orchestrator.id, agentKind: 'orchestrator' }, to: { kind: 'person', id: ceo!.id, name: 'Ivan', role: { en: 'CEO', ru: 'CEO' } } } });
+  });
+
   it('opens for a day with one click of the CEO when the orchestrator asks, and the orchestrator goes on by itself', async () => {
     const { app, db, ceo, control, orchestrator } = await company();
     const asked = await call(await mcp(app), 'ask_computer_access', { reason: 'Restart the nodes outside AppArmor.' });

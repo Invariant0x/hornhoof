@@ -73,6 +73,11 @@ async function candidates(ctx: Pick<Ctx, 'db'>, companyId: string): Promise<Cand
   });
 }
 
+/* The addressee of a question uses the same ownership policy as its decision card. */
+export async function decisionPerson(ctx: Pick<Ctx, 'db'>, companyId: string, subject: DecisionSubject): Promise<string> {
+  return decisionOwner(subject, await candidates(ctx, companyId));
+}
+
 const byTimeAndId = <T extends { createdAt: Date; id: string }>(a: T, b: T) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id);
 
 function counted(owners: { ownerPersonId: string; agentId: string }[]): Counts {

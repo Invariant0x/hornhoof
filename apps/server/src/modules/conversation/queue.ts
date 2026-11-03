@@ -10,13 +10,13 @@ import { turnsHeld } from '../updates/drain.js';
 import { sayLive } from './live.js';
 import { BUILTIN, identityOf, nodeIdentity, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { liveNode, planNodes, type NodeRow } from '../nodes/nodes.js';
-import { appendEvent, earlierTalk, publishWorking, type WithEvent } from '../events/store.js';
+import { appendEvent, earlierTalk, messageForJob, publishWorking, type WithEvent } from '../events/store.js';
 import { instructionsOf } from '../agents/instructions.js';
 import { repoFor, repoLine } from '../departments/repository.js';
 import { textHash } from '../templates/load.js';
 import { openAfter, startWork } from '../tasks/engine.js';
 import { workStarts } from '../org/map-state.js';
-import { preface } from './prompt.js';
+import { addressed, preface } from './prompt.js';
 import { ABOUT_AS_FREE, freedom } from '../testruns/pick.js';
 
 /* Workers compact their conversation at half a million tokens, which keeps their turns quick; heads and the orchestrator
@@ -108,7 +108,7 @@ export const STOPPED_ON_PURPOSE = ['cancelled', 'removed', 'switched_off'];
 
 /* answersCeo: a note of something the CEO did, which counts as the CEO's order without a message. */
 /* withMessage: what is kept together with the message, or not at all. */
-type Turn = { companyId: string; agentId: string; prompt: string; createdBy: string | null; message?: { personId: string | null; text: string; from?: 'orchestrator' | 'agent'; name?: string; by?: string }; taskId?: string; answersCeo?: boolean; withMessage?: WithEvent };
+type Turn = { companyId: string; agentId: string; prompt: string; createdBy: string | null; message?: { personId: string | null; text: string; from?: 'orchestrator' | 'agent'; name?: string; by?: string; task?: { id: string; number: number }; request?: string; timer?: true }; taskId?: string; answersCeo?: boolean; withMessage?: WithEvent };
 
 /* One thing at a time per agent, so two pumps never send two turns. */
 const chains = new WeakMap<Ctx, Map<string, Promise<unknown>>>();
@@ -217,15 +217,16 @@ export async function insertTurn(ctx: Ctx, t: Turn): Promise<string> {
 
 /* An employee's message carries its name for the window and its id in by. */
 async function showMessage(ctx: Ctx, t: Turn, jobId: string): Promise<void> {
-  if (!t.message) return;
-  const { personId, ...data } = t.message;
+  const message = t.message ?? { personId: null, text: t.prompt };
+  if (!message.text.trim()) return;
+  const { personId, ...data } = message;
   await appendEvent(ctx, { companyId: t.companyId, agentId: t.agentId, jobId, kind: 'message', data, personId }, t.withMessage);
 }
 
 /* Stores the turn, then sends it if he is free. A message for an agent at work goes into the turn it runs instead, and a
    turn that took the CEO's message answers the CEO from then on. */
 export async function enqueueTurn(ctx: Ctx, t: Turn): Promise<string> {
-  const into = t.message && !t.taskId ? await sayLive(ctx, t.agentId, t.prompt) : null;
+  const into = t.message && !t.taskId ? await sayLive(ctx, t.agentId, t.prompt, undefined, { personId: t.message.personId, data: t.message }) : null;
   if (into) {
     if (await isCeo(ctx, t.message?.personId)) await ctx.db.update(jobs).set({ answersCeo: true }).where(eq(jobs.id, into));
     await showMessage(ctx, t, into);
@@ -539,7 +540,8 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   const said = repo ? `${asked}\n\n${repoLine(repo)}` : asked;
   /* A turn that types nothing only starts the program, for a person to talk to it: what was said before and where the
      repository is go with its instructions instead. */
-  const prompt = !job.prompt ? '' : catchUp ? `${catchUp}\n\n${said}` : said;
+  const composed = catchUp ? `${catchUp}\n\n${said}` : said;
+  const prompt = job.prompt ? addressed(composed, await messageForJob(ctx, { id: job.id, companyId: job.companyId, agentId })) : '';
   const token = newToken();
   /* Running from the moment it is sent: the token works for its tools at once, and the next turn waits. */
   const taken = await take(ctx, job, along, { subscriptionId: sub.id, nodeId: place.nodeId, prompt, toolTokenHash: hashToken(token), instructionsHash: runHash });

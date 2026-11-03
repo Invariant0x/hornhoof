@@ -29,6 +29,15 @@ describe('words for a live turn', () => {
     vi.restoreAllMocks();
   });
 
+  it('starts words typed into a running terminal with the Hornhoof sender and actual recipient', async () => {
+    const c = await atWork();
+    const pending = sayLive(c.ctx, c.agent.id, 'Keep the service instructions.');
+    const message = await c.message;
+    said(c.ctx, BUILTIN, message.ref, true);
+    expect(await pending).toBe(c.run.id);
+    expect(message.text).toBe('From Hornhoof to Orchestrator:\n\nKeep the service instructions.');
+  });
+
   it('gives the node a relative budget independent of the server clock', async () => {
     const c = await atWork();
     vi.useFakeTimers();

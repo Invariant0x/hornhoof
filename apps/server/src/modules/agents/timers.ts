@@ -3,7 +3,6 @@ import type { FastifyInstance } from 'fastify';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, tasks } from '../../db/schema.js';
 import { loggable } from '../../errors.js';
-import { appendEvent } from '../events/store.js';
 import { agentState, insertTurn, liveSubscription, onAgent, pump, pumpWaiting, STOPPED_ON_PURPOSE } from '../conversation/queue.js';
 import { dropOldFiles } from '../tasks/attachments.js';
 import { wakeLeftBehind } from '../tasks/wake.js';
@@ -74,8 +73,7 @@ export async function timerTick(ctx: Ctx, now = new Date(), report: (err: unknow
           return false;
         }
         const prompt = roundPrompt(agent);
-        const jobId = await insertTurn(ctx, { companyId: agent.companyId, agentId: id, prompt, createdBy: null });
-        await appendEvent(ctx, { companyId: agent.companyId, agentId: id, jobId, kind: 'message', data: { text: prompt, timer: true } });
+        await insertTurn(ctx, { companyId: agent.companyId, agentId: id, prompt, createdBy: null, message: { personId: null, text: prompt, timer: true } });
         await db.update(agents).set({ timerAt: now }).where(eq(agents.id, id));
         return true;
       });
