@@ -13,6 +13,6 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   reporter: 'list',
   use: { baseURL: `http://localhost:${PORT}`, trace: 'retain-on-failure' },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'], channel: process.env.PLAYWRIGHT_CHANNEL } }],
   webServer: { command: `vite --port ${PORT} --strictPort`, url: `http://localhost:${PORT}`, reuseExistingServer: !process.env.CI },
 });
