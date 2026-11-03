@@ -25,7 +25,7 @@ const until = async (check: () => boolean, ms = 20_000) => {
 
 /* agy signs in only from its own screen, so the node answers that screen in tmux for the person. */
 function signIn() {
-  const dir = mkdtempSync(join(tmpdir(), 'hh-agy-login-'));
+  const dir = mkdtempSync(join(tmpdir(), 'agy-login-'));
   const output = new PassThrough();
   let printed = '';
   output.on('data', c => (printed += c));

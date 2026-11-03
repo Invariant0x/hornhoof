@@ -189,7 +189,7 @@ describe('Antigravity CLI in a terminal', () => {
   });
 
   it('writes MCP and invocation and stop hooks in the agent folder without a print log', async () => {
-    const work = mkdtempSync(join(tmpdir(), 'hh-agy-work-'));
+    const work = mkdtempSync(join(tmpdir(), 'agy-work-'));
     await prepareAgy(work, URLS.mcpUrl);
     expect(JSON.parse(readFileSync(join(work, '.agents', 'mcp_config.json'), 'utf8'))).toEqual({ mcpServers: { hornhoof: { serverUrl: URLS.mcpUrl } } });
     expect(JSON.parse(readFileSync(join(work, '.agents', 'hooks.json'), 'utf8'))).toEqual({ hornhoof: {
