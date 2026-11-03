@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { agents, companies, departments, people, subscriptions, taskEvents, tasks, turns } from '../src/db/schema.js';
 import { cancel, createTask, submit, verdict } from '../src/modules/tasks/engine.js';
 import { setUpCompany, statements, testApp } from './helpers.js';
+import { readIn, type PlanNode } from './rows-read.js';
 
 const TURNS = 50;
 const PER_TURN = 40;
@@ -128,14 +129,9 @@ describe('the move path in a company with a long history', () => {
   });
 });
 
-type PlanNode = { 'Relation Name'?: string; 'Actual Rows': number; 'Actual Loops': number; 'Rows Removed by Filter'?: number; 'Rows Removed by Index Recheck'?: number; Plans?: PlanNode[] };
-
 /* The rows of tasks a statement reads, as Postgres counts them running it: what each scan of tasks gives on and what its
    filter drops. */
 async function tasksRead(client: PGlite, s: { sql: string; params: unknown[] }): Promise<number> {
   const res = await client.query<{ 'QUERY PLAN': { Plan: PlanNode }[] }>(`explain (analyze, format json) ${s.sql}`, s.params);
-  const walk = (n: PlanNode): number =>
-    (n['Relation Name'] === 'tasks' ? (n['Actual Rows'] + (n['Rows Removed by Filter'] ?? 0) + (n['Rows Removed by Index Recheck'] ?? 0)) * n['Actual Loops'] : 0) +
-    (n.Plans ?? []).reduce((sum, p) => sum + walk(p), 0);
-  return walk(res.rows[0]!['QUERY PLAN'][0]!.Plan);
+  return readIn(res.rows[0]!['QUERY PLAN'][0]!.Plan, 'tasks');
 }

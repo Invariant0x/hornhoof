@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, max, notInArray, or } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lte, max, notInArray, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentEvents, agents, companies, departments, people, tasks, turns, type TurnMessage } from '../../db/schema.js';
 import { CLOSED, note, published, refuse, type Task, type Tx, type Wake } from './engine.js';
@@ -58,42 +58,28 @@ async function place(ctx: Live, companyId: string, items: PlanItem[]): Promise<P
   return placed;
 }
 
-/* How many of the people's messages newWords reads at a time, newest first. */
-const WORDS_PAGE = 2 * TURN_MESSAGES;
-/* Messages carry the database's time and a turn's close the server's: they may be this far apart. */
-const CLOCK_SLACK_MS = 24 * 3_600_000;
-
-/* The ids of messages turns keep that may be among those written since a time: a live turn may have taken any, a closed
-   one only messages written before it closed. */
-async function keptSince(tx: Tx, companyId: string, since: Date): Promise<Set<string>> {
-  const may = or(inArray(turns.status, ['open', 'planned']), isNull(turns.closedAt), gte(turns.closedAt, new Date(since.getTime() - CLOCK_SLACK_MS)));
-  const rows = await tx.select({ messages: turns.messages }).from(turns).where(and(eq(turns.companyId, companyId), may));
-  return new Set(rows.flatMap(t => t.messages.flatMap(m => (m.id ? [m.id] : []))));
+/* A scalar subquery: Postgres builds the set once, inside the database, regardless of how many messages it checks.
+   Membership uses event ids alone: message and close timestamps may come from different clocks. */
+function keptIds(tx: Tx, companyId: string) {
+  const kept = tx.select({ id: sql<string>`jsonb_array_elements(${turns.messages})->>'id'`.as('id') }).from(turns).where(eq(turns.companyId, companyId)).as('kept');
+  return tx.select({ ids: sql`coalesce(jsonb_object_agg(${kept.id}, true), '{}'::jsonb)` }).from(kept).where(isNotNull(kept.id));
 }
 
 /* The words of the message this run answers, and as many of the messages before it as he names, leaving out words a turn
    already keeps. A run that a task's news started answers no one, so it keeps none. Messages that came in meanwhile wait
-   for the runs that answer them. It reads the newest messages a page at a time, and only the turns that may keep them. */
+   for the runs that answer them. Only the selected words leave the database. Keep this under the company lock so two
+   planners cannot take the same message. */
 export async function newWords(tx: Tx, by: By, words: number): Promise<TurnMessage[]> {
   const mine = and(eq(agentEvents.agentId, by.agentId), eq(agentEvents.kind, 'message'), isNotNull(agentEvents.personId));
   const [asked] = await tx.select({ seq: agentEvents.seq }).from(agentEvents).where(and(mine, eq(agentEvents.jobId, by.jobId))).orderBy(desc(agentEvents.seq)).limit(1);
   if (!asked) return [];
-  const want = Math.min(Math.max(words, 1), TURN_MESSAGES);
-  const rows: { id: string; text: unknown; at: Date; by: string }[] = [];
-  for (let below = asked.seq + 1; rows.length < want; ) {
-    const page = await tx
-      .select({ id: agentEvents.id, seq: agentEvents.seq, text: agentEvents.data, at: agentEvents.createdAt, by: people.name })
-      .from(agentEvents)
-      .innerJoin(people, eq(people.id, agentEvents.personId))
-      .where(and(mine, lt(agentEvents.seq, below)))
-      .orderBy(desc(agentEvents.seq))
-      .limit(WORDS_PAGE);
-    if (!page.length) break;
-    const kept = await keptSince(tx, by.companyId, page.at(-1)!.at);
-    rows.push(...page.filter(r => !kept.has(r.id)).slice(0, want - rows.length));
-    if (page.length < WORDS_PAGE) break;
-    below = page.at(-1)!.seq;
-  }
+  const rows = await tx
+    .select({ id: agentEvents.id, text: agentEvents.data, at: agentEvents.createdAt, by: people.name })
+    .from(agentEvents)
+    .innerJoin(people, eq(people.id, agentEvents.personId))
+    .where(and(mine, lte(agentEvents.seq, asked.seq), sql`not (${keptIds(tx, by.companyId)} ? ${agentEvents.id}::text)`))
+    .orderBy(desc(agentEvents.seq))
+    .limit(Math.min(Math.max(words, 1), TURN_MESSAGES));
   return rows
     .reverse()
     .map(r => ({ id: r.id, by: r.by, text: typeof (r.text as { text?: unknown }).text === 'string' ? (r.text as { text: string }).text : '', at: r.at.toISOString() }))

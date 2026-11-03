@@ -20,10 +20,10 @@ export async function rowsRead<T>(db: Db, tables: string[], run: () => Promise<T
   return { result, read: Object.fromEntries(tables.map(t => [t, (after.get(t) ?? 0) - (before.get(t) ?? 0)])) };
 }
 
-type PlanNode = { 'Relation Name'?: string; 'Actual Rows'?: number; 'Actual Loops'?: number; 'Rows Removed by Filter'?: number; 'Rows Removed by Index Recheck'?: number; Plans?: PlanNode[] };
+export type PlanNode = { 'Relation Name'?: string; 'Actual Rows'?: number; 'Actual Loops'?: number; 'Rows Removed by Filter'?: number; 'Rows Removed by Index Recheck'?: number; Plans?: PlanNode[] };
 
 /* The rows a node of a plan and those below it read from the table: those it gave on and those its conditions dropped. */
-function readIn(node: PlanNode, table: string): number {
+export function readIn(node: PlanNode, table: string): number {
   const own = node['Relation Name'] === table ? ((node['Actual Rows'] ?? 0) + (node['Rows Removed by Filter'] ?? 0) + (node['Rows Removed by Index Recheck'] ?? 0)) * (node['Actual Loops'] ?? 1) : 0;
   return own + (node.Plans ?? []).reduce((n, p) => n + readIn(p, table), 0);
 }
