@@ -13,7 +13,7 @@ const LOGGED_ENV = [
 const LOGIN_URL = 'https://login.example.test/device?code=ABC';
 
 /* What a message to agy's print mode asks of the fake, for the live terminal tests, where one program sends many. */
-const AGY_ASKS = { HANG: 'hang', FAIL: 'fail', TOOLS: 'tools', TICK: 'tick', WORK: 'work' };
+const AGY_ASKS = { HANG: 'hang', FAIL: 'fail', TOOLS: 'tools', TICK: 'tick', WORK: 'work', CUT: 'cut' };
 
 export function run(name) {
   const argv = process.argv.slice(2);
@@ -194,6 +194,12 @@ const AGY_RUNS = {
         print('agy-new');
       }, 1500);
     }, 1500);
+  },
+  /* Starts a command and then prints nothing more, never ending, as agy did when its stream broke off mid-turn with a 503
+     from its backend while its work went on. */
+  cut: () => {
+    agyToolStep('ACTIVE');
+    setInterval(() => {}, 1000);
   },
 };
 
