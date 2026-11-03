@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { envFile, Tmux } from '../src/terminal/tmux.js';
 
@@ -23,6 +24,31 @@ describe.skipIf(!hasTmux)('tmux sessions for agents', () => {
   const socket = `hh-test-${process.pid}`;
   const tmux = new Tmux({ socket, env: { PATH: process.env.PATH ?? '', HOME: tmpdir(), NODE_KEY: 'leak' } });
   afterEach(async () => tmux.stopAll());
+
+  async function pasted(text: string): Promise<unknown[]> {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-tmux-'));
+    const file = join(dir, 'keys.jsonl');
+    const reader = fileURLToPath(new URL('./fakes/paste-reader.mjs', import.meta.url));
+    await tmux.launch('paste', { cwd: dir, command: [process.execPath, reader, file], cols: 80, rows: 24 });
+    await until(async () => (await tmux.screen('paste')).includes('ready'));
+    await tmux.paste('paste', text);
+    await tmux.keys('paste', 'Enter');
+    await until(async () => (await tmux.screen('paste')).includes('received'));
+    return readFileSync(file, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+  }
+
+  it('keeps an embedded paste terminator and the following lines inside one paste', async () => {
+    expect(await pasted('before\x1b[201~after\nnext')).toEqual([{ text: 'before[201~after\nnext' }, 'enter']);
+  });
+
+  it('removes control characters from pasted text while keeping newlines, tabs and Unicode', async () => {
+    const controls = '\x00\x01\x02\x03\x04\x05\x06\x07\x08\x0b\x0c\x0d\x0e\x0f'
+      + '\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f'
+      + '\x7f\x80\x81\x82\x83\x84\x85\x86\x87\x88\x89\x8a\x8b\x8c\x8d\x8e\x8f'
+      + '\x90\x91\x92\x93\x94\x95\x96\x97\x98\x99\x9a\x9b\x9c\x9d\x9e\x9f';
+    expect(await pasted(`a\x1b[31mred\x1b[0m\x1b[2J\x1b[3;4H${controls}\n\tz\u00a0🙂`))
+      .toEqual([{ text: 'a[31mred[0m[2J[3;4H\n\tz\u00a0🙂' }, 'enter']);
+  });
 
   it('preserves dim input placeholders when a styled screen is requested', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'hh-tmux-'));
