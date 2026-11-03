@@ -1,4 +1,5 @@
 import type { PGlite } from '@electric-sql/pglite';
+import { randomUUID } from 'node:crypto';
 import { and, count, desc, eq, isNotNull, lte, notInArray, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agentEvents, agents, companies, departments, jobs, people, subscriptions, tasks, turns, type TurnMessage } from '../src/db/schema.js';
@@ -13,6 +14,18 @@ const TURNS = 50;
 const TASKS = 2000;
 const KEPT = 3;
 const DAY = 86_400_000;
+const WORD_COUNTS = [[-1, 1], [0, 1], [1, 1], [2, 2], [3, 3], [4, 4], [5, 5], [6, 6], [7, 6]] as const;
+
+type Word = { text: string; at: number; run?: boolean };
+type Speaker = { companyId: string; agentId: string; subscriptionId: string; personId: string; name: string };
+
+function wordRows(by: Speaker, word: Word) {
+  const jobId = word.run ? randomUUID() : null;
+  const event = { id: randomUUID(), companyId: by.companyId, agentId: by.agentId, jobId, kind: 'message' as const, data: { text: word.text }, personId: by.personId, createdAt: new Date(word.at) };
+  const job = jobId ? { id: jobId, companyId: by.companyId, subscriptionId: by.subscriptionId, agentId: by.agentId, kind: 'conversation' as const, prompt: word.text, timeoutMs: 60_000, status: 'done' as const } : null;
+  const message = { id: event.id, by: by.name, text: word.text, at: event.createdAt.toISOString() } satisfies TurnMessage;
+  return { job, event, message };
+}
 
 async function conversation() {
   const { app, db } = await testApp();
@@ -24,27 +37,39 @@ async function conversation() {
   const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
   /* The orchestrator's runs that answer a message, by the message they answer. */
   const runs: string[] = [];
-  const say = async (text: string, at: number, run = false) => {
-    const [job] = run ? await db.insert(jobs).values({ companyId, subscriptionId: sub!.id, agentId: orchestrator!.id, kind: 'conversation', prompt: text, timeoutMs: 60_000, status: 'done' }).returning() : [];
-    if (job) runs.push(job.id);
-    const [e] = await db.insert(agentEvents).values({ companyId, agentId: orchestrator!.id, jobId: job?.id ?? null, kind: 'message', data: { text }, personId: ceo!.id, createdAt: new Date(at) }).returning();
-    return { id: e!.id, by: ceo!.name, text, at: e!.createdAt.toISOString() } satisfies TurnMessage;
+  const speaker = { companyId, agentId: orchestrator!.id, subscriptionId: sub!.id, personId: ceo!.id, name: ceo!.name };
+  const sayMany = async (words: Word[]) => {
+    const rows = words.map(w => wordRows(speaker, w));
+    const answered = rows.flatMap(r => r.job ? [r.job] : []);
+    if (answered.length) await db.insert(jobs).values(answered);
+    await db.insert(agentEvents).values(rows.map(r => r.event));
+    runs.push(...answered.map(j => j.id));
+    return rows.map(r => r.message);
   };
+  const say = async (text: string, at: number, run = false) => (await sayMany([{ text, at, run }]))[0]!;
   const by = (jobId = runs.at(-1)!): By => ({ companyId, agentId: orchestrator!.id, jobId });
-  return { app, db, companyId, agentId: orchestrator!.id, ceo: ceo!, runs, say, by };
+  return { app, db, companyId, agentId: orchestrator!.id, ceo: ceo!, runs, say, sayMany, by };
 }
 
 type Conversation = Awaited<ReturnType<typeof conversation>>;
 
-async function historicalTurn(c: Conversation, n: number, day: number) {
-  const kept: TurnMessage[] = [];
-  for (let k = 0; k < KEPT; k++) kept.push(await c.say(`Turn ${n}, point ${k}.`, day + k * 60_000, k === KEPT - 1));
-  await c.say(`Thanks for turn ${n - 1}.`, day + 3_600_000, n % 10 === 0);
-  const open = n === TURNS;
-  await c.db.insert(turns).values({ companyId: c.companyId, number: n, title: `Turn ${n}`, goal: '', status: open ? 'open' : 'closed', messages: kept, createdByAgentId: c.agentId, openedAt: new Date(day), closedAt: open ? null : new Date(day + DAY / 2) });
+function historicalWords(start: number, now: number): Word[] {
+  const words: Word[] = [];
+  for (let n = 1; n <= TURNS; n++) {
+    const day = start + n * DAY;
+    for (let k = 0; k < KEPT; k++) words.push({ text: `Turn ${n}, point ${k}.`, at: day + k * 60_000, run: k === KEPT - 1 });
+    words.push({ text: `Thanks for turn ${n - 1}.`, at: day + 3_600_000, run: n % 10 === 0 });
+  }
+  for (let k = 0; k < 3; k++) words.push({ text: `New point ${k}.`, at: now + k * 1000, run: k === 2 });
+  return words;
 }
 
-async function historicalTasks(c: Conversation, all: { id: string; number: number }[], start: number) {
+function historicalTurn(c: Conversation, n: number, day: number, messages: TurnMessage[]): typeof turns.$inferInsert {
+  const open = n === TURNS;
+  return { companyId: c.companyId, number: n, title: `Turn ${n}`, goal: '', status: open ? 'open' : 'closed', messages, createdByAgentId: c.agentId, openedAt: new Date(day), closedAt: open ? null : new Date(day + DAY / 2) };
+}
+
+async function historicalTasks(c: Conversation, turnIds: Map<number, string>, start: number) {
   const [dev] = await c.db.insert(departments).values({ companyId: c.companyId, templateKey: 'development', roleCode: 'DEV' }).returning();
   const each = TASKS / TURNS;
   await c.db.insert(tasks).values(
@@ -53,7 +78,7 @@ async function historicalTasks(c: Conversation, all: { id: string; number: numbe
       /* The open turn's work: some of it done, the rest still at work. */
       const status = n < TURNS ? 'done' : i % 2 ? 'working' : 'done';
       const at = new Date(start + n * DAY);
-      return { companyId: c.companyId, number: i + 1, turnId: all.find(t => t.number === n)!.id, departmentId: dev!.id, title: `Task ${i + 1}`, brief: '', body: '', status, updatedAt: at, closedAt: status === 'done' ? at : null } as const;
+      return { companyId: c.companyId, number: i + 1, turnId: turnIds.get(n)!, departmentId: dev!.id, title: `Task ${i + 1}`, brief: '', body: '', status, updatedAt: at, closedAt: status === 'done' ? at : null } as const;
     }),
   );
 }
@@ -61,13 +86,12 @@ async function historicalTasks(c: Conversation, all: { id: string; number: numbe
 async function history() {
   const c = await conversation();
   const start = Date.now() - (TURNS + 2) * DAY;
-  for (let n = 1; n <= TURNS; n++) await historicalTurn(c, n, start + n * DAY);
-  const all = await c.db.select({ id: turns.id, number: turns.number }).from(turns).where(eq(turns.companyId, c.companyId));
-  await historicalTasks(c, all, start);
   /* What people wrote since the open turn began, the last of it the message the orchestrator answers now. */
-  const now = Date.now() - 60_000;
-  for (let k = 0; k < 3; k++) await c.say(`New point ${k}.`, now + k * 1000, k === 2);
-  const turnOf = (n: number) => all.find(t => t.number === n)!.id;
+  const messages = await c.sayMany(historicalWords(start, Date.now() - 60_000));
+  const all = await c.db.insert(turns).values(Array.from({ length: TURNS }, (_, i) => historicalTurn(c, i + 1, start + (i + 1) * DAY, messages.slice(i * (KEPT + 1), i * (KEPT + 1) + KEPT)))).returning({ id: turns.id, number: turns.number });
+  const turnIds = new Map(all.map(t => [t.number, t.id]));
+  await historicalTasks(c, turnIds, start);
+  const turnOf = (n: number) => turnIds.get(n)!;
   return { ...c, turnOf };
 }
 
@@ -198,12 +222,27 @@ describe('the people\'s words a turn keeps, over a long history', () => {
   });
 
   it('are the same as before for every number of words, also for a run that answered a message long ago', async () => {
+    const ran = statements();
     const h = await history();
-    for (const jobId of h.runs)
-      for (let words = -1; words <= TURN_MESSAGES + 1; words++) {
-        const [before, now] = await h.db.transaction(async tx => [await everyTurnsWords(tx, h.by(jobId), words), await newWords(tx, h.by(jobId), words)]);
-        expect(now, `run ${h.runs.indexOf(jobId)}, ${words} words`).toEqual(before);
+    const fixtureQueries = ran.splice(0).length;
+    /* Bound the fixture and oracle work without relying on the machine's wall-clock speed. */
+    expect(fixtureQueries, 'history setup query budget').toBeLessThanOrEqual(32);
+    let cases = 0;
+    await h.db.transaction(async tx => {
+      for (const [run, jobId] of h.runs.entries()) {
+        /* Every fixture message is nonblank: shorter requests end with the same newest words. Calculate the old
+           answer once per run, then keep every word-count comparison against the real newWords query. */
+        const before = await everyTurnsWords(tx, h.by(jobId), TURN_MESSAGES);
+        for (const [words, count] of WORD_COUNTS) {
+          const now = await newWords(tx, h.by(jobId), words);
+          expect(now, `run ${run}, ${words} words`).toEqual(before.slice(-count));
+          cases++;
+        }
       }
+    });
+    expect(cases).toBe(504);
+    expect(ran.length, 'comparison query budget').toBeLessThanOrEqual(1500);
+    console.info('Turn word comparisons:', { fixtureQueries, comparisonQueries: ran.length, cases });
   });
 
   it('reads turn membership once inside the database and only the newest events it needs', async () => {
