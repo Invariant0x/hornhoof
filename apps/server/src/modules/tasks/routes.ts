@@ -12,6 +12,9 @@ import { deptName } from '../departments/templates.js';
 import { departmentNames, visibleDecisions, type Decisions } from './decisions.js';
 import { answer, cancel, CLOSED, comment, createTask, refuse, taskSpot, type Task } from './engine.js';
 import { commitUrl, picturesOf } from './attachments.js';
+import { departmentOf } from '../tools/staff.js';
+import { workTree } from './tree.js';
+import { treeFacts } from './tree-facts.js';
 import { taskDetail, taskLines } from './views.js';
 import { settle, tell, turnRows, type Turn } from './turns.js';
 import { leaveIfOff, stopTurns, wakeAll } from './wake.js';
@@ -285,5 +288,23 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const [turn] = await db.select().from(turns).where(and(eq(turns.companyId, me.companyId), eq(turns.status, 'open')));
     return { turn: await turnView(turn, me.scopeKind === 'company') };
+  });
+
+  app.get('/api/departments/:id/tree', async req => {
+    const me = await requirePerson(req, db);
+    const { id } = IdParams.parse(req.params);
+    const dept = await departmentOf(db, me.companyId, id);
+    if (!dept) throw refuse(404, 'department_unknown', 'This department does not exist.');
+    const access = await accessOf(db, me);
+    const sees = (t: Pick<Task, 'departmentId' | 'productId'>) => reaches(access, t);
+    if (!canReach(access, { departmentId: dept.id, parentId: null })) {
+      const spots = await db
+        .selectDistinct({ departmentId: tasks.departmentId, productId: tasks.productId })
+        .from(tasks)
+        .where(and(eq(tasks.companyId, me.companyId), eq(tasks.departmentId, dept.id)));
+      if (!spots.some(sees)) throw refuse(404, 'department_unknown', 'This department does not exist.');
+    }
+    const facts = await treeFacts(db, me.companyId, dept.id, sees);
+    return { tree: workTree(facts, new Date()) };
   });
 }

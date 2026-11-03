@@ -707,14 +707,15 @@ async function asked(db: Db, task: Task, agentId: string): Promise<boolean> {
 }
 
 /* A reviewer at the task's gate gives its verdict. The gate decides once its whole panel has. */
-export async function verdict(ctx: Live, agentId: string, taskId: string, v: { pass: boolean; comment: string }): Promise<Moved> {
+export async function verdict(ctx: Live, agentId: string, taskId: string, v: { pass: boolean; comment: string; findings?: number }): Promise<Moved> {
   const task = await loadTask(ctx.db, taskId);
   stillOpen(task);
   if (!['review', 'waiting'].includes(task.status) || task.stage < 1 || !task.panel.includes(agentId) || task.executorAgentId === agentId) throw notYours(task, 'is not at your gate');
   if (!v.comment.trim()) throw refuse(400, 'task_invalid', 'A verdict needs its reasons.');
   /* The others at the gate go on while one of them waits for a person; that one decides once the answer is in. */
   if (task.status === 'waiting' && (await asked(ctx.db, task, agentId))) throw refuse(409, 'task_invalid', `#${task.number} waits for the answer to your question first.`);
-  const n: Note = { kind: 'verdict', actor: { agentId }, text: v.comment.trim(), data: { pass: v.pass, stage: task.stage, round: task.bounces }, returned: true };
+  const data = { pass: v.pass, stage: task.stage, round: task.bounces, ...(v.findings !== undefined ? { findings: v.findings } : {}) };
+  const n: Note = { kind: 'verdict', actor: { agentId }, text: v.comment.trim(), data, returned: true };
   const panel = task.panel.filter(id => id !== agentId);
   if (panel.length) return { task: await move(ctx, task, { panel, assigneeAgentId: panel[0]!, silent: 0 }, n), wakes: [] };
   const [me] = await ctx.db.select({ name: agents.name }).from(agents).where(eq(agents.id, agentId));
