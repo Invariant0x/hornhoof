@@ -489,6 +489,20 @@ describe('Department view', () => {
     expect(await screen.findByRole('complementary', { name: '#12 Checkout API' })).toBeInTheDocument();
   });
 
+  it("closes a task opened from the department's tasks before them, on separate Escapes", async () => {
+    const user = userEvent.setup();
+    shell({ [DEV_TASKS]: [200, { tasks: TASKS }], 'GET /api/tasks/t12': [200, { task: TASK_DETAIL }] });
+    await flyIn(user);
+    await drawer(user, 'Department tasks');
+    await user.click(await within(screen.getByRole('region', { name: 'Tasks' })).findByRole('button', { name: /#12 Checkout API/ }));
+    await screen.findByRole('complementary', { name: '#12 Checkout API' });
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('complementary', { name: '#12 Checkout API' })).not.toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Tasks' })).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('region', { name: 'Tasks' })).not.toBeInTheDocument();
+  });
+
   it('names an assignee once when it is called after its role', async () => {
     const user = userEvent.setup();
     const head = { id: 'b0', name: 'Head of development', kind: 'head' as const, role: { en: 'Head of development', ru: 'Руководитель разработки' } };

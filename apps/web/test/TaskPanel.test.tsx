@@ -209,4 +209,15 @@ describe('a task', () => {
     await user.click(within(panel).getByRole('button', { name: /#13 Refunds/ }));
     expect(await screen.findByRole('complementary', { name: '#13 Refunds' })).toBeInTheDocument();
   });
+
+  it('closes with its cross and with Escape', async () => {
+    const user = userEvent.setup();
+    shell();
+    await user.click(within(await openTask(user)).getByRole('button', { name: 'Close' }));
+    expect(screen.queryByRole('complementary', { name: '#12 Checkout API' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /#12/ }));
+    await screen.findByRole('complementary', { name: '#12 Checkout API' });
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('complementary', { name: '#12 Checkout API' })).not.toBeInTheDocument();
+  });
 });

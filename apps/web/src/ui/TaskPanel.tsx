@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { api } from '../api';
 import { errorText, useLanguage, useT, type Messages } from '../i18n';
 import { useOrg } from '../org';
@@ -233,6 +233,16 @@ export function TaskPanel({ taskId, onClose, onOpen, ...waiting }: { taskId: str
   const t = useT();
   const { task, failure, load } = useTask(taskId);
   const title = task ? `#${task.number} ${task.title}` : t.tasks.heading;
+  /* Escape closes the panel before what lies under it, such as a department's tasks, which leave an Escape it took alone. */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return;
+      e.preventDefault();
+      onClose();
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, [onClose]);
   return (
     <aside className="acard tpanel" aria-label={title} aria-busy={!task && failure === null}>
       <div className="t-bar">

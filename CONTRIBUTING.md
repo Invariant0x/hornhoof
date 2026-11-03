@@ -61,6 +61,15 @@ Run `tsc` for each part you changed. After a change in `packages/protocol`, rebu
 
 Coverage for crapper is `npx vitest run --coverage` in the part's folder after `npm ci`, with no `node_modules` copied in. Keep a probe with its own vite config inside the clone, or its plugins are not found.
 
+What only a real browser shows, such as where a panel lies over a page, is tested with Playwright in `apps/web/e2e`. These tests are not part of `npm test`. After a change to how the screens are laid out, run them:
+
+```sh
+npx playwright install --only-shell chromium
+npm run test:browser -w apps/web
+```
+
+The first line downloads the browser once. A Hornhoof node already has it.
+
 A change to the database schema gets a new migration from `npx drizzle-kit generate` in `apps/server`. Never edit a migration that is already on `main`.
 
 ## Rules for the code and the words

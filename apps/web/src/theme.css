@@ -794,6 +794,9 @@ body:has(.dview) .version-mark { display: none; }
 
 /* An agent's card in the right panel. */
 .acard { position: fixed; z-index: 9; top: 68px; right: 16px; bottom: 76px; width: 460px; box-sizing: border-box; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-top: 2px solid var(--cyan); box-shadow: 0 24px 60px var(--shadow); }
+/* A page has no strip at the bottom: there a card, task or window lies over it down to the bottom of the window, and the page
+   keeps its width and place under it. */
+.body.page ~ .acard, .body.page ~ .orch { bottom: 0; }
 .ac-body { flex: 1 1 auto; min-height: 0; overflow: auto; display: grid; gap: 18px; align-content: start; padding: 16px 18px 20px; }
 .ac-head { display: grid; gap: 4px; justify-items: start; }
 .ac-head h3 { font-size: 22px; }
@@ -860,7 +863,6 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
 
 /* The tracker: what waits for people, then the turns with their tasks. */
 .tasks { max-width: 1040px; margin: 0 auto; padding: 84px 16px 48px; display: grid; gap: 22px; }
-.body.with-task .tasks { padding-right: 508px; }
 .nav-count { display: inline-grid; place-items: center; min-width: 18px; height: 18px; margin-left: 6px; padding: 0 5px; box-sizing: border-box; background: var(--pink); color: #fff; font-family: var(--f-body); font-size: 11px; font-weight: 700; vertical-align: 1px; }
 .linkish { padding: 0; border: 0; background: none; color: var(--cyan-ink); font: inherit; text-align: left; cursor: pointer; }
 .linkish:hover { text-decoration: underline; }
@@ -997,7 +999,6 @@ summary.turn-head:focus-visible { outline: 2px solid var(--cyan); outline-offset
 .tp-comment { display: grid; gap: 8px; }
 .tp-comment .btn { justify-self: start; }
 .tp-ask { font-size: 13px; align-self: center; }
-@media (max-width: 1180px) { .body.with-task .tasks { padding-right: 16px; } }
 
 /* Work tree */
 .hbtn.ib { flex: none; width: 44px; height: 44px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
