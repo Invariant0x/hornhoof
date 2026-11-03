@@ -73,6 +73,40 @@ async function company() {
 }
 
 describe("a turn whose program ended without the work done", () => {
+  it.each([null, ''])('continues a turn with requested text %j using the legacy sent text only for null', async requestedPrompt => {
+    const c = await company();
+    const work = await c.brunoAtWork();
+    await c.db.update(jobs).set({ requestedPrompt, prompt: 'Legacy sent work.' }).where(eq(jobs.id, work.jobId));
+
+    await c.failed(work, { code: 1, signal: null });
+    const more = await c.nextTurn(c.bruno.id, 1);
+
+    expect(more.prompt.includes('Legacy sent work.')).toBe(requestedPrompt === null);
+    expect(more.prompt).toContain('without recording');
+  });
+
+  it.each([null, 'bruno-session'])('adds current queue context once when continuing work from session %s anew', async sessionId => {
+    const c = await company();
+    await c.db.update(departments).set({ repoUrl: 'https://example.com/checkout.git', repoBranch: 'main' }).where(eq(departments.id, c.task.departmentId));
+    await c.db.insert(agentEvents).values({ companyId: c.companyId, agentId: c.bruno.id, kind: 'text', data: { text: 'Earlier checkout discussion.' } });
+    const work = await c.brunoAtWork();
+    expect(work.prompt.match(/Earlier in this conversation/g)).toHaveLength(1);
+    expect(work.prompt.match(/Your repository /g)).toHaveLength(1);
+    await c.db.update(departments).set({ repoBranch: 'checkout' }).where(eq(departments.id, c.task.departmentId));
+    await c.db.update(agents).set({ overrides: { base: 'Write the test first, then the code.' } }).where(eq(agents.id, c.bruno.id));
+
+    await c.failed(work, { code: 1, signal: null }, { sessionId });
+    const more = await c.nextTurn(c.bruno.id, 1);
+
+    expect(more.sessionId).toBeNull();
+    expect(more.prompt.match(/Earlier in this conversation/g)).toHaveLength(1);
+    expect(more.prompt.match(/Your repository /g)).toHaveLength(1);
+    expect(more.prompt).toContain('(branch checkout)');
+    expect(more.prompt).not.toContain('(branch main)');
+    expect(more.prompt).toContain(`#${c.task.number} "Checkout API" is yours to do`);
+    expect(await c.jobOf(more.jobId)).toMatchObject({ prompt: more.prompt, continueOf: work.jobId });
+  });
+
   it('is done when the turn recorded its verdict before its program exited with an error, and runs no more', async () => {
     const c = await company();
     const work = await c.brunoAtWork();

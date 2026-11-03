@@ -18,6 +18,7 @@ import { openAfter, startWork } from '../tasks/engine.js';
 import { agentProgramState, type TurnAlarm, type TurnAlarmReason, type TurnProgram } from '../tasks/silent.js';
 import { workStarts } from '../org/map-state.js';
 import { addressed, preface } from './prompt.js';
+import { requestedPromptOf } from './requested-prompt.js';
 import { ABOUT_AS_FREE, freedom } from '../testruns/pick.js';
 
 /* Workers compact their conversation at half a million tokens, which keeps their turns quick; heads and the orchestrator
@@ -339,10 +340,10 @@ type Continuation = { sessionId: string | null; originalPrompt: string | null };
 /* The turn this one goes on from: its session, when it can go on there, on the same plan and node with the same
    instructions; otherwise what that turn was asked. */
 async function continuedFrom(ctx: Ctx, jobId: string, on: On, instructionsHash: string): Promise<Continuation> {
-  const [from] = await ctx.db.select({ subscriptionId: jobs.subscriptionId, nodeId: jobs.nodeId, sessionId: jobs.sessionId, instructionsHash: jobs.instructionsHash, prompt: jobs.prompt }).from(jobs).where(eq(jobs.id, jobId));
+  const [from] = await ctx.db.select({ subscriptionId: jobs.subscriptionId, nodeId: jobs.nodeId, sessionId: jobs.sessionId, instructionsHash: jobs.instructionsHash, prompt: jobs.prompt, requestedPrompt: jobs.requestedPrompt }).from(jobs).where(eq(jobs.id, jobId));
   if (!from) return { sessionId: null, originalPrompt: null };
   const goesOn = from.subscriptionId === on.subscriptionId && from.nodeId === on.nodeId && from.instructionsHash === instructionsHash;
-  return { sessionId: goesOn ? from.sessionId : null, originalPrompt: from.prompt };
+  return { sessionId: goesOn ? from.sessionId : null, originalPrompt: requestedPromptOf(from) };
 }
 
 /* continueOf: a turn that goes on from one that ended without its work recorded goes on in that turn's session, or, when
@@ -507,7 +508,7 @@ async function unsent(ctx: Ctx, job: { id: string; companyId: string }, why: { e
 
 /* A turn that waited for the agent and goes out inside its turn. */
 type Along = Pick<typeof jobs.$inferSelect, 'id' | 'prompt' | 'taskId' | 'continueOf'>;
-type Queued = Pick<typeof jobs.$inferSelect, 'id' | 'companyId' | 'agentId' | 'taskId'>;
+type Queued = Pick<typeof jobs.$inferSelect, 'id' | 'companyId' | 'agentId' | 'taskId' | 'prompt'>;
 /* What a turn goes out with: where it runs and what it says. */
 type Sending = Pick<typeof jobs.$inferInsert, 'subscriptionId' | 'nodeId' | 'prompt' | 'toolTokenHash' | 'instructionsHash'>;
 
@@ -524,7 +525,7 @@ async function take(ctx: Ctx, job: Queued, along: readonly Along[], sending: Sen
   return ctx.db.transaction(async tx => {
     const [row] = await tx
       .update(jobs)
-      .set({ ...sending, status: 'running', startedAt: new Date() })
+      .set({ ...sending, requestedPrompt: job.prompt, status: 'running', startedAt: new Date() })
       .where(and(eq(jobs.id, job.id), eq(jobs.status, 'queued')))
       .returning({ id: jobs.id });
     return row ? { lines: await workStarts(tx, { id: job.id, companyId: job.companyId, agentId: job.agentId, taskIds: [job.taskId, ...along.map(a => a.taskId)] }) } : null;
