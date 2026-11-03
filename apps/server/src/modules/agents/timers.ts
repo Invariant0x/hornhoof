@@ -5,11 +5,14 @@ import { agents, jobs, tasks } from '../../db/schema.js';
 import { loggable } from '../../errors.js';
 import { agentState, insertTurn, liveSubscription, onAgent, pump, pumpWaiting, STOPPED_ON_PURPOSE } from '../conversation/queue.js';
 import { dropOldFiles } from '../tasks/attachments.js';
-import { wakeLeftBehind } from '../tasks/wake.js';
 import { reconcile } from '../tasks/reconcile.js';
+import { checkSilentTurns, SILENT_TURN_MS } from '../tasks/silent.js';
+import { wakeLeftBehind } from '../tasks/wake.js';
 import { moveLeases } from '../subscriptions/lease.js';
 import { checkTestTimes } from '../testruns/runs.js';
 import type { AgentRow } from './find.js';
+
+export { checkSilentTurns, SILENT_TURN_MS };
 
 export { TIMER_MAX, TIMER_MIN, TIMER_ORDER_MAX } from '../templates/load.js';
 /* Hornhoof looks for due rounds this often. */
@@ -51,6 +54,26 @@ const every = (minutes: number) => (minutes % 60 === 0 ? `${minutes / 60} ${minu
 export const roundPrompt = (a: Pick<AgentRow, 'timerMinutes' | 'timerOrder'>) =>
   `Hornhoof woke you on your timer, which runs every ${every(a.timerMinutes ?? 0)}, outside any task. Do your round:\n\n${a.timerOrder ?? ''}`;
 
+async function queueDueRound(ctx: Ctx, id: string, now: Date): Promise<string | false> {
+  const { db } = ctx;
+  const [agent] = await db.select().from(agents).where(and(eq(agents.id, id), timed));
+  if (!agent || !due(agent, now) || !(await liveSubscription(ctx, id)) || !(await agentState(ctx, id)).ready) return false;
+  const [open] = await db
+    .select({ id: jobs.id })
+    .from(jobs)
+    .where(and(eq(jobs.agentId, id), inArray(jobs.status, ['queued', 'running'])))
+    .limit(1);
+  if (open) return false;
+  if (agent.timerForWork && !(await workFor(ctx, agent))) {
+    await db.update(agents).set({ timerAt: now }).where(eq(agents.id, id));
+    return false;
+  }
+  const prompt = roundPrompt(agent);
+  const jobId = await insertTurn(ctx, { companyId: agent.companyId, agentId: id, prompt, createdBy: null, message: { personId: null, text: prompt, timer: true } });
+  await db.update(agents).set({ timerAt: now }).where(eq(agents.id, id));
+  return jobId;
+}
+
 /* Starts a round for each employee whose timer is due at `now`: one that is on, ready to run and has no turn waiting or
    running, looked at again once its line is free. A busy one is tried again on the next tick; a timer for work with
    nothing to look at skips its round. Returns how many rounds it started. */
@@ -59,28 +82,13 @@ export async function timerTick(ctx: Ctx, now = new Date(), report: (err: unknow
   let started = 0;
   for (const { id } of await db.select({ id: agents.id }).from(agents).where(timed)) {
     try {
-      const queued = await onAgent(ctx, id, async () => {
-        const [agent] = await db.select().from(agents).where(and(eq(agents.id, id), timed));
-        if (!agent || !due(agent, now) || !(await liveSubscription(ctx, id)) || !(await agentState(ctx, id)).ready) return false;
-        const [open] = await db
-          .select({ id: jobs.id })
-          .from(jobs)
-          .where(and(eq(jobs.agentId, id), inArray(jobs.status, ['queued', 'running'])))
-          .limit(1);
-        if (open) return false;
-        if (agent.timerForWork && !(await workFor(ctx, agent))) {
-          await db.update(agents).set({ timerAt: now }).where(eq(agents.id, id));
-          return false;
-        }
-        const prompt = roundPrompt(agent);
-        await insertTurn(ctx, { companyId: agent.companyId, agentId: id, prompt, createdBy: null, message: { personId: null, text: prompt, timer: true } });
-        await db.update(agents).set({ timerAt: now }).where(eq(agents.id, id));
-        return true;
-      });
+      await checkSilentTurns(ctx, now, id);
+      const queued = await onAgent(ctx, id, () => queueDueRound(ctx, id, now));
       if (!queued) continue;
       started++;
       /* Outside the agent's line, which the pump waits on. */
       await pump(ctx, id);
+      if (now.getTime() > Date.now()) await db.update(jobs).set({ startedAt: now }).where(and(eq(jobs.id, queued), eq(jobs.status, 'running')));
     } catch (err) {
       /* One employee's trouble does not keep the others from their rounds. */
       report(err);

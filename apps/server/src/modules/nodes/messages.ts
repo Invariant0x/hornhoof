@@ -7,6 +7,7 @@ import { said } from '../conversation/live.js';
 import { nodeOfAgent, pumpWaiting, refusedLimits, startProgram } from '../conversation/queue.js';
 import { workStarts } from '../org/map-state.js';
 import { startWork } from '../tasks/engine.js';
+import { handleJobState } from '../tasks/silent.js';
 import { afterJob, typedTurn } from '../tasks/wake.js';
 import { appendEvent, publishWorking } from '../events/store.js';
 import { partDone, partStarted, pumpTests, testsHello } from '../testruns/runs.js';
@@ -178,6 +179,9 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
     }
     case 'job.started':
       await jobStarted(ctx, id, msg.jobId, now);
+      return;
+    case 'job.state':
+      await handleJobState(ctx, id, msg.jobId, msg.state, now, jobsOf(id, ctx));
       return;
     case 'job.done': {
       const finished = await db

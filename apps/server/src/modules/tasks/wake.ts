@@ -526,9 +526,12 @@ export async function afterJob(ctx: Ctx, jobId: string): Promise<void> {
     .from(jobs)
     .where(eq(jobs.id, jobId));
   if (!job?.agentId || job.kind !== 'conversation') return;
-  if (job.status === 'failed' && !(await doneIfRecorded(ctx, jobId, job))) {
+  const recorded = job.status === 'failed' && (await doneIfRecorded(ctx, jobId, job));
+  if (job.status === 'failed' && !recorded) {
     const stopped = job.error === 'cancelled';
     await appendEvent(ctx, { companyId: job.companyId, agentId: job.agentId, jobId, kind: stopped ? 'stopped' : 'failed', data: stopped ? {} : { error: job.error } });
+  } else if (recorded && job.error === 'lost_ending') {
+    await appendEvent(ctx, { companyId: job.companyId, agentId: job.agentId, jobId, kind: 'stopped', data: { error: 'lost_ending', reason: 'lost_ending' } });
   }
   if (job.taskId) await afterTaskTurn(ctx, jobId, { ...job, agentId: job.agentId, taskId: job.taskId });
   await explainEnded(ctx, jobId);
