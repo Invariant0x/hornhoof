@@ -119,4 +119,3 @@ describe('the CEO delegate on People', () => {
     expect(screen.getAllByText('Заместитель CEO').length).toBeGreaterThan(0);
   });
 });
-
