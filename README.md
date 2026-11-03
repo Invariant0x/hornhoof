@@ -30,7 +30,8 @@ For each link, the relay keeps:
 - when and from which address it was made;
 - when its tunnel was last seen;
 - whether it is blocked, when it was blocked, and why;
-- which client holds its route, with that client's run id, since when, and in which registration (a counter that grows by one at every registration); the route's state (pending, held, empty) and type (http, https). The relay reads whether a route is live from frps itself, so it never answers "empty" for a name it is not sure of.
+- which client holds its route, with that client's run id, since when, and in which registration (a counter that grows by one at every registration); the route's state (pending, held, empty) and type (http, https). The relay reads whether a route is live from frps itself, so it never answers "empty" for a name it is not sure of;
+- its sync record: on or off, the copy's machine, its epoch, the registration it came in and when. Only the live route's holder can set a newer epoch. The relay commits it to SQLite with full synchronization before answering, and keeps it across restarts.
 
 For each address, it also keeps the times of new links made in the last hour, to limit how many it can make. The relay's database is SQLite.
 

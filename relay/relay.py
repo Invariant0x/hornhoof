@@ -6,6 +6,7 @@ Public API (Caddy sends https://hornhoof.org/api/* here):
   POST   /api/v1/bindings          {name?} -> 201 {name, url, key, tunnel}
   DELETE /api/v1/bindings/{name}   Authorization: Bearer <key> -> 204
   GET    /api/v1/links/{name}/route Authorization: Bearer <key> -> 200 {state, client, since, generation, ...}
+  POST   /api/v1/links/{name}/sync  Authorization: Bearer <key> {client, generation, state, copy, epoch} -> 200 {sync}
   GET    /api/v1/health            -> 200 {ok, frps, relayStarted} while frps takes logins, else 503
 frps plugin (local only): POST /frp/handler?op=Login|NewProxy|Ping
 Admin (as the service user): relay.py admin list|show|ban|unban|release|banned-caddy ...
@@ -86,6 +87,7 @@ def db() -> sqlite3.Connection:
     if conn is None:
         conn = sqlite3.connect(DB_PATH, timeout=10, isolation_level=None)
         conn.execute('PRAGMA journal_mode=WAL')
+        conn.execute('PRAGMA synchronous=FULL')
         conn.execute('PRAGMA busy_timeout=10000')
         _local.conn = conn
     return conn
@@ -111,6 +113,14 @@ def init_db() -> None:
             type TEXT NOT NULL CHECK (type IN ('http', 'https')),
             state TEXT NOT NULL CHECK (state IN ('pending', 'held', 'empty')),
             since INTEGER NOT NULL
+        )''', ())
+    write('''CREATE TABLE IF NOT EXISTS sync (
+            name TEXT PRIMARY KEY,
+            state TEXT NOT NULL CHECK (state IN ('on', 'off')),
+            copy TEXT,
+            epoch INTEGER NOT NULL,
+            generation INTEGER NOT NULL,
+            at INTEGER NOT NULL
         )''', ())
 
 
@@ -346,7 +356,70 @@ def route_body(name: str, row) -> dict:
         client = row[1] if state == 'held' else None
         generation = row[0]
     return {'state': state, 'client': client, 'since': since, 'generation': generation,
-            'relayStarted': relay_started(), 'evictionBound': EVICTION_BOUND_S, 'sync': None}
+            'relayStarted': relay_started(), 'evictionBound': EVICTION_BOUND_S, 'sync': sync_of(name)}
+
+
+def sync_of(name: str) -> dict:
+    """The last committed sync record, or the R2.4 default when no holder has set one."""
+    row = db().execute('SELECT state, copy, epoch, generation, at FROM sync WHERE name = ?',
+                       (name,)).fetchone()
+    if row is None:
+        return {'state': 'off', 'copy': None, 'epoch': 0, 'generation': 0, 'at': None}
+    return dict(zip(('state', 'copy', 'epoch', 'generation', 'at'), row))
+
+
+def sync_text(value: object) -> bool:
+    return isinstance(value, str) and 1 <= len(value) <= 100
+
+
+def sync_integer(value: object) -> bool:
+    """A positive SQLite INTEGER, excluding JSON booleans."""
+    return type(value) is int and 1 <= value <= 2 ** 63 - 1
+
+
+def sync_copy(state: str, copy: object) -> bool:
+    return sync_text(copy) or (state == 'off' and copy is None)
+
+
+def valid_sync_body(body: object) -> bool:
+    """Validate the complete R2.4 body, including exact fields and JSON integer types."""
+    if not isinstance(body, dict) or set(body) != {'client', 'generation', 'state', 'copy', 'epoch'}:
+        return False
+    return all((sync_text(body['client']), sync_integer(body['generation']),
+                body['state'] in ('on', 'off'), sync_copy(body['state'], body['copy']),
+                sync_integer(body['epoch'])))
+
+
+def sync_holder(name: str, body: dict) -> bool:
+    """An online frps route must name this registration; a pending row cannot set sync."""
+    route = locked_route_of(name)
+    row = db().execute('SELECT state FROM routes WHERE name = ?', (name,)).fetchone()
+    return (row == ('held',) and route['client'] == body['client']
+            and route['generation'] == body['generation'])
+
+
+def store_sync(name: str, body: dict) -> bool:
+    """Commit only while the checked registration still holds; never overwrite a newer epoch."""
+    write('INSERT INTO sync (name, state, copy, epoch, generation, at) '
+          'SELECT name, ?, ?, ?, generation, ? FROM routes '
+          "WHERE name = ? AND generation = ? AND client = ? AND state = 'held' "
+          'ON CONFLICT(name) DO UPDATE SET state = excluded.state, copy = excluded.copy, '
+          'epoch = excluded.epoch, generation = excluded.generation, at = excluded.at '
+          'WHERE excluded.epoch > sync.epoch',
+          (body['state'], body['copy'], body['epoch'], now(), name, body['generation'], body['client']))
+    return db().execute('SELECT changes()').fetchone()[0] == 1
+
+
+def set_sync(name: str, body: dict) -> tuple[str | None, dict | None]:
+    """Serialize the frps holder check and committed write against the name's registrations."""
+    with route_lock(name):
+        if not sync_holder(name, body):
+            return 'not_holder', None
+        if body['epoch'] <= sync_of(name)['epoch']:
+            return 'stale_epoch', None
+        if not store_sync(name, body):
+            return 'not_holder', None
+        return None, sync_of(name)
 
 
 def locked_route_of(name: str) -> dict:
@@ -693,18 +766,46 @@ class Handler(BaseHTTPRequestHandler):
             body['reason'] = reason
         return self.send_json(200, body)
 
-    def route_answer(self, name: str):
-        """GET /api/v1/links/<name>/route: who holds the name (R2.1), never a guess (R2.3)."""
+    def authorize_link(self, name: str) -> bool:
+        """Authenticate link API calls with the same 404 and wrong-key rate limit as route."""
         row = db().execute('SELECT key_hash FROM bindings WHERE name = ?', (name,)).fetchone()
         if row is None:
-            return self.error(404, 'not_found', f'There is no binding {name}.')
+            self.error(404, 'not_found', f'There is no binding {name}.')
+            return False
         key = self.bearer_key()
         if not key or not hmac.compare_digest(row[0], key_hash(key)):
-            return self.wrong_key(self.client_ip())
+            self.wrong_key(self.client_ip())
+            return False
+        return True
+
+    def route_answer(self, name: str) -> None:
+        """GET /api/v1/links/<name>/route: who holds the name (R2.1), never a guess (R2.3)."""
+        if not self.authorize_link(name):
+            return
         try:
             return self.send_json(200, route_of(name))
         except (FrpsUnknown, WriteBusy):
             return self.error(503, 'unknown', 'The relay cannot tell whether the route is live.')
+
+    def sync_answer(self, name: str) -> None:
+        """R2.4: accept a validated sync record only from the live route's holder."""
+        if not self.authorize_link(name):
+            return
+        if (self.headers.get('Content-Type') or '').split(';')[0].strip().lower() != 'application/json':
+            return self.error(415, 'unsupported_media_type', 'Send the body as application/json.')
+        try:
+            body = self.read_json()
+        except ValueError:
+            return self.error(400, 'invalid', 'The body is not valid JSON.')
+        if not valid_sync_body(body):
+            return self.error(400, 'invalid', 'Send client, generation, state, copy and epoch.')
+        try:
+            conflict, record = set_sync(name, body)
+        except FrpsUnknown:
+            return self.error(503, 'unknown', 'The relay cannot tell whether the route is live.')
+        if conflict is not None:
+            return self.send_json(409, {'error': conflict})
+        return self.send_json(200, {'sync': record})
 
     def health_answer(self):
         """GET /api/v1/health (R4.1): 200 only while frps takes logins, else 503; never a guess."""
@@ -740,12 +841,14 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             return '', {}, f'relay error: {type(e).__name__}'
 
-    def do_POST(self):
+    def do_POST(self) -> None:
         parts = self.path_parts()
         if parts == ['frp', 'handler']:
             return self.handle_plugin()
         if parts == ['api', 'v1', 'bindings']:
             return self.create_binding()
+        if parts[:3] == ['api', 'v1', 'links'] and len(parts) == 5 and parts[4] == 'sync':
+            return self.sync_answer(parts[3].lower())
         self.error(404, 'not_found', 'Not found.')
 
     def create_binding(self):
