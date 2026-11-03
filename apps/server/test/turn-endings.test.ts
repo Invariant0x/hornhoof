@@ -73,6 +73,17 @@ async function company() {
 }
 
 describe("a turn whose program ended without the work done", () => {
+  it.each(['done', 'cancelled'] as const)('logs a skipped continuation when the task became %s during the turn', async status => {
+    const c = await company();
+    const work = await c.brunoAtWork();
+    await c.db.update(tasks).set({ status, closedAt: new Date(), assigneeAgentId: null }).where(eq(tasks.id, c.task.id));
+    await c.failed(work, { code: 1, signal: null });
+    const log = await c.db.select().from(taskEvents).where(eq(taskEvents.taskId, c.task.id));
+    expect(log.filter(e => e.kind === 'wake_skipped')).toEqual([expect.objectContaining({ agentId: c.bruno.id, data: { wake: 'continue', job: work.jobId } })]);
+    expect((await c.turnsOf(c.bruno.id)).map(j => j.id)).toEqual([work.jobId]);
+    expect(await c.turnsOf(c.hana.id)).toEqual([]);
+  });
+
   it.each([null, ''])('continues a turn with requested text %j using the legacy sent text only for null', async requestedPrompt => {
     const c = await company();
     const work = await c.brunoAtWork();

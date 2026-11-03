@@ -49,8 +49,21 @@ function cutText(t: Messages, data: unknown, when: (at: string) => string): stri
   return `${cutLine(t, { node: named, cause, job }, when(at))} ${then}`;
 }
 
-/* What a log line says under its title: Hornhoof's line about a cut-off turn in the person's language, else its own text. */
-const lineText = (t: Messages, e: TaskLogLine, when: (at: string) => string) => (e.kind === 'interrupted' && cutText(t, e.data, when)) || e.text;
+function skippedText(t: Messages, e: TaskLogLine): string {
+  const wake = field(e.data, 'wake');
+  if (typeof wake !== 'string') return e.text;
+  const run = t.tasks.skippedRuns[wake] ?? t.tasks.skippedRuns.task!;
+  const text = t.tasks.skippedRun(authorOf(t, e), run);
+  const job = field(e.data, 'job');
+  return typeof job === 'string' ? `${text} ${t.tasks.skippedJob(job)}` : text;
+}
+
+/* System log lines use the person's language; employees' own words stay as they wrote them. */
+const systemText: Record<string, (t: Messages, e: TaskLogLine, when: (at: string) => string) => string | null> = {
+  wake_skipped: skippedText,
+  interrupted: (t, e, when) => cutText(t, e.data, when),
+};
+const lineText = (t: Messages, e: TaskLogLine, when: (at: string) => string): string => systemText[e.kind]?.(t, e, when) || e.text;
 
 /* What waits for the person in this task. */
 type Waiting = { requests: WaitingRequest[]; onRequestsChanged: () => void; onOpenAgent: (id: string) => void };

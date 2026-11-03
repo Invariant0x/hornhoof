@@ -66,6 +66,54 @@ async function company() {
 }
 
 describe('a turn cut off by a node restart', () => {
+  it('retries a legacy completion notice using its requested words, before the queue added its sender', async () => {
+    const c = await company();
+    await c.db.update(tasks).set({ status: 'done', closedAt: new Date(), assigneeAgentId: null }).where(eq(tasks.id, c.task.id));
+    await wakeAll(c.ctx, [{ agentId: c.hana.id, taskId: c.task.id, why: 'done' }]);
+    const first = await nextRun(c.node());
+    await c.db.update(agentEvents).set({ data: { text: 'A legacy completion notice.' } }).where(and(eq(agentEvents.jobId, first.jobId), eq(agentEvents.kind, 'message')));
+    await c.restart(boot('2026-11-03T00:11:00.000Z'));
+    await until(() => c.ctx.hub.isReady(BUILTIN));
+    expect((await c.turnsOf(c.hana.id)).map(j => j.retryOf)).toEqual([null, first.jobId]);
+    const retry = await nextRun(c.node());
+    expect(await c.jobOf(retry.jobId)).toMatchObject({ agentId: c.hana.id, status: 'running' });
+  });
+
+  it.each(['done', 'reported', 'reviewed'] as const)('still delivers a %s notice to the giver and retries it after a restart', async why => {
+    const c = await company();
+    await c.db.update(tasks).set({ status: 'done', closedAt: new Date(), assigneeAgentId: null }).where(eq(tasks.id, c.task.id));
+    await wakeAll(c.ctx, [{ agentId: c.hana.id, taskId: c.task.id, why, text: 'Checked.' }]);
+    const first = await nextRun(c.node());
+    const retry = await nextRun(await c.restart(boot('2026-11-03T00:11:00.000Z')));
+    expect(await c.jobOf(retry.jobId)).toMatchObject({ agentId: c.hana.id, taskId: c.task.id, retryOf: first.jobId, status: 'running' });
+    expect((await c.db.select().from(taskEvents).where(eq(taskEvents.taskId, c.task.id))).filter(e => e.kind === 'wake_skipped')).toEqual([]);
+    expect(await c.turnsOf(c.bruno.id)).toEqual([]);
+  });
+
+  it.each(['done', 'cancelled'] as const)('skips a restart after the running task became %s, with a task log line and no wake', async status => {
+    const c = await company();
+    const first = await c.brunoAtWork();
+    await c.db.update(tasks).set({ status, closedAt: new Date(), assigneeAgentId: null }).where(eq(tasks.id, c.task.id));
+    await c.restart(boot('2026-11-03T00:11:00.000Z', 'c0ffee000001', '2026-11-03T00:09:00.000Z'));
+    await until(() => c.ctx.hub.isReady(BUILTIN));
+    const log = await c.db.select().from(taskEvents).where(eq(taskEvents.taskId, c.task.id));
+    expect(log.filter(e => e.kind === 'wake_skipped')).toEqual([expect.objectContaining({ agentId: c.bruno.id, text: expect.stringContaining('task is already closed'), data: expect.objectContaining({ job: first.jobId, wake: 'restart' }) })]);
+    expect((await c.turnsOf(c.bruno.id)).map(j => j.id)).toEqual([first.jobId]);
+    expect([...(await c.turnsOf(c.hana.id)), ...(await c.turnsOf(c.rob.id)), ...(await c.turnsOf(c.olga.id))]).toEqual([]);
+    expect(log.filter(e => e.kind === 'interrupted')).toEqual([]);
+  });
+
+  it('does not call Operations when a retry was cut off after the task closed', async () => {
+    const c = await company();
+    await c.brunoAtWork();
+    const retry = await nextRun(await c.restart(boot('2026-11-03T00:11:00.000Z')));
+    await c.db.update(tasks).set({ status: 'done', closedAt: new Date() }).where(eq(tasks.id, c.task.id));
+    await c.restart(boot('2026-11-03T00:20:00.000Z'));
+    await until(() => c.ctx.hub.isReady(BUILTIN));
+    expect([...(await c.turnsOf(c.rob.id)), ...(await c.turnsOf(c.olga.id))]).toEqual([]);
+    expect((await c.db.select().from(taskEvents).where(eq(taskEvents.taskId, c.task.id))).filter(e => e.kind === 'wake_skipped')).toEqual([expect.objectContaining({ data: { job: retry.jobId, wake: 'restart' } })]);
+  });
+
   it.each([null, ''])('repeats a turn with requested text %j using the legacy sent text only for null', async requestedPrompt => {
     const c = await company();
     const first = await c.brunoAtWork();

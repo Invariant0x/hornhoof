@@ -1,17 +1,16 @@
 import { and, eq, gte, inArray, lte, ne } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { agents, jobs, taskEvents, tasks } from '../../db/schema.js';
+import { jobs, taskEvents } from '../../db/schema.js';
 import { conversationOf, GONE_ALONG, onAgent } from '../conversation/queue.js';
 import { turnAgain } from './again.js';
 import { published } from './engine.js';
+import { repeatedTurn } from './wake-state.js';
 
 /* What an agent records on a task for what it was woken for: its work handed in, a verdict, a report, why it is blocked,
    or a question to people. */
 const RECORDED = ['submitted', 'verdict', 'report', 'blocked', 'asked'] as const;
 /* Ends of a turn's program that can come after the turn recorded its work all the same. */
 const UNFINISHED = ['agent_failed', 'timeout'];
-/* A task the agent may still be at, as the continuation needs. */
-const AT_WORK = ['open', 'working', 'review'];
 
 type Ended = Pick<typeof jobs.$inferSelect, 'agentId' | 'status' | 'error' | 'taskId' | 'startedAt' | 'finishedAt'>;
 
@@ -53,8 +52,8 @@ function howEnded(job: Pick<typeof jobs.$inferSelect, 'exitCode' | 'exitSignal'>
    takes along as it goes out. One that was such a continuation already does not; its end goes on as any failed turn's.
    Says whether it went on. */
 export async function continueOnce(ctx: Ctx, jobId: string): Promise<'continued' | null> {
-  const [found] = await ctx.db.select({ job: jobs, task: tasks, agent: agents }).from(jobs).innerJoin(tasks, eq(tasks.id, jobs.taskId)).innerJoin(agents, eq(agents.id, jobs.agentId)).where(eq(jobs.id, jobId));
-  if (!found || found.job.status !== 'failed' || found.job.error !== 'agent_failed' || found.job.continueOf || !AT_WORK.includes(found.task.status)) return null;
+  const found = await repeatedTurn(ctx.db, jobId, 'continue');
+  if (!found) return null;
   const { job, task, agent } = found;
   const how = howEnded(job);
   const note =

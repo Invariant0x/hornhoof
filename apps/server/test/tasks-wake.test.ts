@@ -39,6 +39,20 @@ async function company(env?: NodeJS.ProcessEnv) {
   return { app, owner, ctx, db, sub: sub!, ceo: ceo!, dev: dev!, orchestrator: orchestrator!, head, bruno, rita, memberTask, turnsOf, finish };
 }
 
+describe('a delayed merge wake on a closed task', () => {
+  it.each(['done', 'cancelled'] as const)('logs a skipped merge on %s without waking anyone', async status => {
+    const c = await company();
+    const task = await c.memberTask();
+    await c.db.update(tasks).set({ status, closedAt: new Date(), assigneeAgentId: null }).where(eq(tasks.id, task.id));
+    await c.db.insert(taskEvents).values({ companyId: task.companyId, taskId: task.id, agentId: c.bruno.id, kind: 'submitted', text: 'Merged.', data: { merged: true } });
+    await wakeAll(c.ctx, [{ agentId: c.bruno.id, taskId: task.id, why: 'merge', text: 'turn-5' }]);
+    expect(await c.db.select().from(jobs)).toEqual([]);
+    const log = await c.db.select().from(taskEvents).where(eq(taskEvents.taskId, task.id));
+    expect(log.filter(e => e.kind === 'wake_skipped')).toEqual([expect.objectContaining({ agentId: c.bruno.id, text: 'Run skipped: task is already closed. Bruno: merge.', data: { wake: 'merge', job: null } })]);
+    expect(await c.db.select().from(agentEvents)).toEqual([]);
+  });
+});
+
 describe('a person who speaks to an agent directly', () => {
   /* Bruno ends turns on his task without moving it until Hornhoof asks a person how he should go on. */
   async function stuck() {

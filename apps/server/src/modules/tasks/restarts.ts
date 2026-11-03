@@ -4,6 +4,7 @@ import { agents, departments, jobs, taskEvents, tasks, type Interruption, type R
 import { enqueueTurn, liveSubscription, onAgent } from '../conversation/queue.js';
 import { turnAgain } from './again.js';
 import { published } from './engine.js';
+import { repeatedTurn, type TaskWake } from './wake-state.js';
 
 /* Why a node restarted, in words for the agents and the task's log. */
 const CAUSES: Record<RestartCause, string> = {
@@ -39,8 +40,8 @@ const keptCut = (job: Job, task: Task): Cut => ({
    engineer is off or missing. The task stays with its agent either way, and its log says what happened. Says whether a
    person in Operations was called, so nothing else runs the turn again. */
 export async function afterRestart(ctx: Ctx, jobId: string): Promise<'retried' | 'called' | null> {
-  const [found] = await ctx.db.select({ job: jobs, task: tasks, agent: agents }).from(jobs).innerJoin(tasks, eq(tasks.id, jobs.taskId)).innerJoin(agents, eq(agents.id, jobs.agentId)).where(eq(jobs.id, jobId));
-  if (!found || found.job.error !== 'machine_restarted') return null;
+  const found = await repeatedTurn(ctx.db, jobId, 'restart');
+  if (!found) return null;
   const ended = { ...found, cut: keptCut(found.job, found.task) };
   if (found.job.retryOf) {
     await callOperations(ctx, ended);
@@ -50,9 +51,9 @@ export async function afterRestart(ctx: Ctx, jobId: string): Promise<'retried' |
   return 'retried';
 }
 
-async function retry(ctx: Ctx, { job, task, agent, cut }: Ended): Promise<void> {
+async function retry(ctx: Ctx, { job, task, agent, cut, taskWake }: Ended & { taskWake: TaskWake }): Promise<void> {
   const note = `Your last turn on #${task.number} "${task.title}" ${cutOff(cut)}. Hornhoof runs it once more: check what that turn already did, then go on.`;
-  const retried = await onAgent(ctx, agent.id, () => turnAgain(ctx, { job, task, agent }, note, { retryOf: job.id }));
+  const retried = await onAgent(ctx, agent.id, () => turnAgain(ctx, { job, task, agent, taskWake }, note, { retryOf: job.id }));
   const again = retried ? `Hornhoof runs it again: retry 1 of ${RETRIES}, turn ${retried}.` : `Hornhoof could not run it again: ${agent.name} has no subscription.`;
   await logCut(ctx, task, agent, cut, `${agent.name}'s turn ${job.id} on #${task.number} ${cutOff(cut)}. ${again}`, { retry: retried ? { job: retried, n: 1, of: RETRIES } : null });
 }
