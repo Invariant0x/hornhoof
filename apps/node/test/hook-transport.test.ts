@@ -1,0 +1,49 @@
+import { createRequire } from 'node:module';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+const { sendHook } = createRequire(import.meta.url)('../hh-hook-send.cjs');
+const timeout = AbortSignal.timeout.bind(AbortSignal);
+const close: (() => void)[] = [];
+afterEach(() => { close.splice(0).forEach(fn => fn());vi.unstubAllEnvs();vi.restoreAllMocks(); });
+
+async function bridge(status: number | 'timeout' | 'disconnect', recover = false) {
+  const calls: { call: string; pid: string; body: string }[] = [];
+  const server = createServer((req, res) => {
+    let body = '';req.setEncoding('utf8').on('data', s => body += s).on('end', () => {
+      calls.push({ call: String(req.headers['x-hh-call']), pid: String(req.headers['x-hh-pid']), body });
+      if (recover && calls.length === 3) return void res.end('done');
+      if (status === 'timeout') return;
+      if (status === 'disconnect') return res.destroy();
+      res.writeHead(status).end('');
+    });
+  });
+  await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+  close.push(() => { server.closeAllConnections();server.close(); });
+  vi.stubEnv('HH_BRIDGE', `http://127.0.0.1:${(server.address() as AddressInfo).port}`);
+  return calls;
+}
+
+describe('shared hook transport', () => {
+  it('does nothing without a bridge', async () => {
+    vi.stubEnv('HH_BRIDGE', '');expect(await sendHook('stop', '{}')).toBeNull();
+  });
+  it('recovers from server errors with the same id and body', async () => {
+    const calls = await bridge(503, true);
+    const res = await sendHook('stop', '{"answer":"Done"}');
+    expect(await res.text()).toBe('done');
+    expect(calls).toHaveLength(3);
+    expect(new Set(calls.map(c => c.call)).size).toBe(1);
+    expect(calls.every(c => c.pid === String(process.pid) && c.body === '{"answer":"Done"}')).toBe(true);
+  });
+  it.each([403, 'disconnect', 'timeout'] as const)('reports a final %s failure and remains bounded', async status => {
+    const calls = await bridge(status);
+    vi.spyOn(AbortSignal, 'timeout').mockImplementation(() => timeout(50));
+    expect(await sendHook('stop', '{}')).toBeNull();
+    expect(calls).toHaveLength(status === 403 ? 1 : 3);
+  });
+  it('does not retry non-stop hooks', async () => {
+    const calls = await bridge(503);
+    expect(await sendHook('status', '{}')).toBeNull();expect(calls).toHaveLength(1);
+  });
+});

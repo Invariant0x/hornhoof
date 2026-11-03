@@ -1,7 +1,9 @@
 import { randomBytes } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo, Socket } from 'node:net';
-import type { Owns } from './peer.js';
+import { socketOf, type Owns, type Peer } from './peer.js';
+import { HookCalls } from './hook-calls.js';
+import { HookFailures, type HookRejected } from './hook-failures.js';
 
 /* Hook and tool calls are short; a file an agent puts on a task is the biggest thing that passes, up to Hornhoof's 50 MB. */
 const MAX_BODY = 4 * 1024 * 1024;
@@ -13,6 +15,7 @@ const HOOK_WAIT_MS = 10_000;
 export type HookHandler = (agentKey: string, event: string, body: unknown) => Promise<string | void> | string | void;
 export type AgentUrls = { mcpUrl: string; attachUrl: string; hookUrl: string };
 
+const HOOKS = new Set(['start', 'prompt', 'stop', 'status']);
 const FORWARD = ['content-type', 'accept', 'mcp-protocol-version', 'mcp-session-id', 'last-event-id'];
 
 /* Between an agent's long-lived program and Hornhoof, on 127.0.0.1 of the node: the program keeps one address for its tools
@@ -31,14 +34,22 @@ export class Bridge {
   /* What the check found for each open connection and agent: a connection's process does not change. */
   private readonly checked = new WeakMap<Socket, Map<string, Promise<boolean>>>();
 
+  private readonly accepted = new WeakMap<Socket, Promise<string | null>>();
+  private readonly calls = new HookCalls();
+  private readonly failures: HookFailures;
+
   constructor(
     private readonly hornhoof: string,
     private readonly onHook: HookHandler,
     private readonly owns: Owns | null = null,
-  ) {}
+    private readonly options: { proc?: string; rejected?: HookRejected } = {},
+  ) { this.failures = new HookFailures(options.rejected); }
 
   async start(): Promise<void> {
-    const server = createServer((req, res) => void this.handle(req, res).catch(() => reply(res, 502, '')));
+    const server = createServer((req, res) => void this.handle(req, res).catch(() => this.failed(req, res)));
+    server.on('connection', socket => {
+      if (this.owns) this.accepted.set(socket, socketOf(this.options.proc ?? '/proc', { port: socket.remotePort ?? 0, bridgePort: socket.localPort ?? 0 }));
+    });
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
     this.server = server;
     this.port = (server.address() as AddressInfo).port;
@@ -111,16 +122,35 @@ export class Bridge {
     });
   }
 
-  private fromOwner(key: string, socket: Socket): Promise<boolean> {
+  private fromOwner(key: string, socket: Socket, peer: Peer): Promise<boolean> {
     if (!this.owns) return Promise.resolve(true);
     const known = this.checked.get(socket) ?? new Map<string, Promise<boolean>>();
     this.checked.set(socket, known);
-    let found = known.get(key);
+    const hint = `${key}:${peer.pid ?? 'legacy'}`;
+    let found = known.get(hint);
     if (!found) {
-      found = this.owns(key, { port: socket.remotePort ?? 0, bridgePort: this.port }).catch(() => false);
-      known.set(key, found);
+      found = this.owns(key, peer).catch(() => false);
+      known.set(hint, found);
     }
     return found;
+  }
+
+  private async peer(req: IncomingMessage): Promise<Peer> {
+    const peer: Peer = { port: req.socket.remotePort ?? 0, bridgePort: this.port };
+    const hint = req.headers['x-hh-pid'];
+    if (hint !== undefined) peer.pid = typeof hint === 'string' && /^[1-9][0-9]{0,9}$/.test(hint) ? Number(hint) : 0;
+    if (this.owns) peer.acceptedInode = await (this.accepted.get(req.socket) ?? socketOf(this.options.proc ?? '/proc', peer));
+    return peer;
+  }
+
+  private refused(req: IncomingMessage, res: ServerResponse, status: number, reason: string): void {
+    const [, kind, secret, rawEvent] = (req.url ?? '').split('?')[0]!.split('/');
+    if (kind === 'hook') this.failures.reject(this.bySecret.get(secret ?? '') ?? null, HOOKS.has(rawEvent ?? '') ? rawEvent! : 'unknown', reason);
+    reply(res, status, '');
+  }
+
+  private failed(req: IncomingMessage, res: ServerResponse): void {
+    this.refused(req, res, 502, 'request failed');
   }
 
   private async hookAnswer(key: string, event: string, data: unknown): Promise<string> {
@@ -128,23 +158,39 @@ export class Bridge {
     return typeof answer === 'string' ? answer : '';
   }
 
+  private async hookCall(req: IncomingMessage, res: ServerResponse, key: string, event: string, data: unknown): Promise<void> {
+    if (!HOOKS.has(event)) return this.refused(req, res, 404, 'unknown hook event');
+    const id = req.headers['x-hh-call'];
+    if (id !== undefined && (typeof id !== 'string' || !/^[A-Za-z0-9-]{1,80}$/.test(id))) return this.refused(req, res, 400, 'invalid hook call id');
+    const answer = await this.calls.run(key, event, id, () => this.hookAnswer(key, event, data));
+    if (answer.status !== 200) return this.refused(req, res, answer.status, hookFailure(answer.status));
+    reply(res, answer.status, answer.text);
+  }
+
   private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const [path, query] = (req.url ?? '').split(/\?(.*)/s);
     const [, kind, secret, event] = path!.split('/');
     const key = secret ? this.bySecret.get(secret) : undefined;
-    if (!key || !kind) return reply(res, 404, '');
-    if (!(await this.fromOwner(key, req.socket))) return reply(res, 403, '');
+    if (!key || !kind) return this.refused(req, res, 404, 'unknown bridge address');
+    const peer = await this.peer(req);
+    const owned = this.fromOwner(key, req.socket, peer);
     /* Under the picture address: pictures and files sent, and a task's file downloaded at /file. */
     if (kind === 'attach' && event !== undefined && event !== 'file') return reply(res, 404, '');
-    const body = await readBody(req, kind === 'attach' ? MAX_FILE : MAX_BODY);
-    if (kind === 'hook' && event) {
+    /* Capture the inode first, then keep the bounded body while ancestry is checked. A completed body survives the
+       caller closing its socket; it is never applied until ownership succeeds. */
+    const reading = readBody(req, kind === 'attach' ? MAX_FILE : MAX_BODY);
+    void reading.catch(() => {});
+    if (!(await owned)) return this.refused(req, res, 403, 'owner check failed');
+    const body = await reading;
+    if (kind === 'hook') {
+      if (!event) return this.refused(req, res, 404, 'unknown hook event');
       let data: unknown = null;
       try {
         data = JSON.parse(body.toString('utf8') || 'null');
       } catch {
         /* A hook that sent no JSON still counts. */
       }
-      return reply(res, 200, await this.hookAnswer(key, event, data));
+      return this.hookCall(req, res, key, event, data);
     }
     if (kind !== 'mcp' && kind !== 'attach') return reply(res, 404, '');
     const token = kind === 'mcp' ? await this.tokenFor(key, req.method === 'GET' || only(body, CONNECTING)) : this.tokens.get(key);
@@ -168,6 +214,7 @@ export class Bridge {
 }
 
 function reply(res: ServerResponse, status: number, body: string): void {
+  if (res.destroyed || res.writableEnded) return;
   if (res.headersSent) {
     res.end();
     return;
@@ -228,4 +275,10 @@ function readBody(req: IncomingMessage, max: number): Promise<Buffer> {
     req.on('end', () => resolve(Buffer.concat(chunks)));
     req.on('error', reject);
   });
+}
+
+function hookFailure(status: number): string {
+  if (status === 409) return 'hook call id reused for another event';
+  if (status === 429) return 'too many recent hook calls';
+  return 'hook handler failed';
 }

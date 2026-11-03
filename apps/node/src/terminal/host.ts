@@ -257,7 +257,9 @@ export class TerminalHost {
 
   constructor(private readonly opts: Options) {
     const owns = opts.proc ? fromAgent(key => this.panes(key), opts.proc) : null;
-    this.bridge = new Bridge(opts.hornhoof, (key, event, body) => this.hook(key, event, body), owns);
+    this.bridge = new Bridge(opts.hornhoof, (key, event, body) => this.hook(key, event, body), owns, {
+      proc: opts.proc, rejected: (key, event, reason) => this.hookRejected(key, event, reason),
+    });
     this.fs = opts.fs ?? (opts.user ? agentFs(opts.user) : ownFs);
     this.plugins = opts.plugins ?? claudePlugins();
     this.readyMs = opts.readyMs ?? 120_000;
@@ -270,6 +272,11 @@ export class TerminalHost {
     this.reportMs = opts.reportMs ?? REPORT_MS;
     this.cols = opts.cols ?? 160;
     this.rows = opts.rows ?? 48;
+  }
+
+  private hookRejected(key: string | null, event: string, reason: string): void {
+    (this.opts.log ?? console.log)(`Hook ${event} rejected: ${reason}${key ? ` (agent ${key})` : ''}`);
+    if (key) this.opts.send({ type: 'agent.hook_rejected', agentKey: key, event, reason });
   }
 
   start(): Promise<void> {

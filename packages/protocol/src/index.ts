@@ -403,6 +403,13 @@ const NodeMessage = z.discriminatedUnion('type', [
   /* Someone who may type opened the window of an agent whose program does not run: Hornhoof starts it with a turn that
      types nothing. */
   z.object({ type: z.literal('agent.start'), agentKey: z.string().regex(/^[A-Za-z0-9-]{1,64}$/) }),
+  /* A hook refusal is diagnostic, not an answer or a change to the turn's state. */
+  z.object({
+    type: z.literal('agent.hook_rejected'),
+    agentKey: z.string().regex(/^[A-Za-z0-9-]{1,64}$/),
+    event: z.string().regex(/^[a-z]{1,20}$/),
+    reason: z.string().min(1).max(300),
+  }),
   /* How full the agent's context is now, as its program counts it: a share from 0 to 1. */
   z.object({ type: z.literal('agent.context'), agentKey: z.string().regex(/^[A-Za-z0-9-]{1,64}$/), used: z.number().min(0).max(1) }),
   /* Whether Hornhoof's words named by ref went into the agent's running turn; if not, they wait for its next one. */
