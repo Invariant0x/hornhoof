@@ -5,13 +5,16 @@ Public API (Caddy sends https://hornhoof.org/api/* here):
   GET    /api/v1/names/{name}      -> 200 {name, free, reason?: taken|reserved|invalid}
   POST   /api/v1/bindings          {name?} -> 201 {name, url, key, tunnel}
   DELETE /api/v1/bindings/{name}   Authorization: Bearer <key> -> 204
+  GET    /api/v1/links/{name}/route Authorization: Bearer <key> -> 200 {state, client, since, generation, ...}
 frps plugin (local only): POST /frp/handler?op=Login|NewProxy|Ping
 Admin (as the service user): relay.py admin list|show|ban|unban|release|banned-caddy ...
 
 Standard library only. State: SQLite in /var/lib/hornhoof-relay/relay.db. Keys are stored as SHA-256 hashes.
 """
+import base64
 import hashlib
 import hmac
+import http.client
 import json
 import os
 import re
@@ -21,6 +24,7 @@ import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlsplit
 
 DOMAIN = 'hornhoof.org'
 DB_PATH = os.environ.get('RELAY_DB', '/var/lib/hornhoof-relay/relay.db')
@@ -37,6 +41,17 @@ CHECKS_PER_IP_MINUTE = 60
 BAD_KEYS_PER_IP_HOUR = 30
 MAX_BODY = 4096
 
+# frps's dashboard API (loopback only): the one source for whether a route is live.
+RELAY_FRPS_API = os.environ.get('RELAY_FRPS_API', 'http://127.0.0.1:7500')
+FRPS_USER = os.environ.get('RELAY_FRPS_USER', 'admin')
+FRPS_PASSWORD = os.environ.get('RELAY_FRPS_PASSWORD', '')
+# A registration frps has not shown yet reads as held for this long (R1.1, R2.1).
+PENDING_S = 10
+# A silent client's route goes within this bound (R3.1, measured in Task 3).
+EVICTION_BOUND_S = 30
+# One budget per plugin call: a spent budget refuses the op, fail closed (Review Focus 3).
+PLUGIN_CALL_S = 1.0
+
 LABEL = re.compile(r'^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$')
 RANDOM_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789'
 
@@ -50,6 +65,14 @@ def key_hash(key: str) -> str:
 
 
 _local = threading.local()
+# One deadline per plugin call: the lock and every dashboard read draw from the time left.
+call_state = threading.local()
+
+
+def call_deadline() -> float | None:
+    """Seconds left in the current plugin call's budget; None outside plugin calls."""
+    end = getattr(call_state, 'end', None)
+    return None if end is None else max(0.0, end - time.monotonic())
 
 
 def db() -> sqlite3.Connection:
@@ -75,6 +98,15 @@ def init_db() -> None:
         );
         CREATE TABLE IF NOT EXISTS creations (ip TEXT NOT NULL, at INTEGER NOT NULL);
         CREATE INDEX IF NOT EXISTS creations_at ON creations(at);
+        CREATE TABLE IF NOT EXISTS routes (
+            name TEXT PRIMARY KEY,
+            generation INTEGER NOT NULL,
+            client TEXT NOT NULL,
+            run_id TEXT NOT NULL,
+            type TEXT NOT NULL CHECK (type IN ('http', 'https')),
+            state TEXT NOT NULL CHECK (state IN ('pending', 'held', 'empty')),
+            since INTEGER NOT NULL
+        );
     ''')
 
 
@@ -108,6 +140,287 @@ def check_name(name: str):
     if row is None:
         return None
     return 'reserved' if row[0] else 'taken'
+
+
+# relayStarted is the process start until the frps watcher lands (Task 4).
+STARTED = now()
+
+
+class FrpsUnknown(Exception):
+    """frps's dashboard gave no trustworthy answer about a route: read unknown, never empty."""
+
+
+def _dash_get(path: str) -> tuple[int, bytes]:
+    """One dashboard read with a 0.5 s timeout; less when the plugin call's budget is nearly spent.
+
+    Any error, timeout or a spent budget is FrpsUnknown.
+    """
+    parsed = urlsplit(RELAY_FRPS_API)
+    host = parsed.hostname or '127.0.0.1'
+    port = parsed.port or (443 if parsed.scheme == 'https' else 80)
+    kind = http.client.HTTPSConnection if parsed.scheme == 'https' else http.client.HTTPConnection
+    left = call_deadline()
+    if left is not None and left <= 0:
+        raise FrpsUnknown(f'{path}: plugin call budget spent')
+    connection = kind(host, port, timeout=0.5 if left is None else min(0.5, left))
+    try:
+        token = base64.b64encode(f'{FRPS_USER}:{FRPS_PASSWORD}'.encode()).decode()
+        connection.request('GET', path, headers={'Authorization': f'Basic {token}'})
+        response = connection.getresponse()
+        return response.status, response.read()
+    except (OSError, http.client.HTTPException) as e:
+        raise FrpsUnknown(f'{path}: {type(e).__name__}') from None
+    finally:
+        connection.close()
+
+
+def dash_answer(name: str, proxy_type: str) -> tuple[str, str] | None:
+    """One proxy type's dashboard record: (status, clientID), None on 404, FrpsUnknown otherwise.
+
+    A record is trusted only with a status of online or offline and a non-empty clientID:
+    a missing field reads as unknown, never as empty.
+    """
+    status, body = _dash_get(f'/api/proxy/{proxy_type}/{name}')
+    if status == 404:
+        return None
+    if status != 200:
+        raise FrpsUnknown(f'dashboard answered {status} for {proxy_type} {name}')
+    try:
+        answer = json.loads(body)
+        route_status = answer['status']
+        client_id = answer['clientID']
+    except (ValueError, KeyError, TypeError):
+        raise FrpsUnknown(f'dashboard body for {proxy_type} {name} has no route record') from None
+    if route_status not in ('online', 'offline') or not isinstance(client_id, str) or not client_id:
+        raise FrpsUnknown(f'dashboard body for {proxy_type} {name} is not a route record')
+    return route_status, client_id
+
+
+def frps_route(name: str) -> tuple[str, str | None, str | None]:
+    """frps's own view of a name's route: ('online'|'offline', clientID, type), or ('absent', None, None).
+
+    Both proxy types are read: a name holds one route of either type, and two records is unknown.
+    """
+    http = dash_answer(name, 'http')
+    https = dash_answer(name, 'https')
+    if http is not None and https is not None:
+        raise FrpsUnknown(f'dashboard shows both http and https routes for {name}')
+    for proxy_type, answer in (('http', http), ('https', https)):
+        if answer is not None:
+            return answer[0], answer[1], proxy_type
+    return 'absent', None, None
+
+
+def check_route_holder(name: str, row, status: str, client_id: str | None, proxy_type: str | None) -> None:
+    """An online route must match the relay's own record, else the answer is unknown, never empty (R2.3).
+
+    A missing row means the record was lost while frps holds the route: unknown too.
+    """
+    if status != 'online':
+        return
+    matches = (row is not None and proxy_type == row[3]
+               and client_id == (row[2] if row[1] == 'legacy' else row[1]))
+    if matches:
+        return
+    log_line(f'route of {name} is online outside the relay record')
+    raise FrpsUnknown(f'frps route of {name} does not match the relay record')
+
+
+def execute_bounded(statement: str, params: tuple) -> sqlite3.Cursor:
+    """Run one write with SQLite's busy wait bounded by the plugin call's remaining budget."""
+    conn = db()
+    left = call_deadline()
+    conn.execute(f'PRAGMA busy_timeout = {10000 if left is None else int(left * 1000)}')
+    try:
+        return conn.execute(statement, params)
+    finally:
+        conn.execute('PRAGMA busy_timeout = 10000')
+
+
+def straighten_route(name: str, row, status: str, t: int) -> None:
+    """Move the row to what frps shows; each UPDATE is guarded by the generation as read, so a row
+    rewritten since we read frps keeps its newer registration. The per-name lock is held.
+
+    A pending row younger than PENDING_S is a registration frps has not shown yet: it reads held
+    even when frps still shows the previous registration's offline record, because frps keeps that
+    record until the new one shows. Only an online record turns it held, age or absence empties it.
+    """
+    state, generation = row[4], row[0]
+    if status == 'online':
+        execute_bounded("UPDATE routes SET state = 'held' WHERE name = ? AND generation = ? "
+                        "AND state IN ('pending', 'empty')", (name, generation))
+    elif state == 'held':
+        execute_bounded("UPDATE routes SET state = 'empty', since = ? WHERE name = ? AND generation = ? "
+                        "AND state = 'held'", (t, name, generation))
+    elif state == 'pending' and t - row[5] > PENDING_S:
+        execute_bounded("UPDATE routes SET state = 'empty', since = ? WHERE name = ? AND generation = ? "
+                        "AND state = 'pending'", (t, name, generation))
+
+
+def route_body(name: str, row) -> dict:
+    """The R2.1 answer from a routes row; a name with no row is empty at generation 0."""
+    if row is None:
+        binding = db().execute('SELECT created_at FROM bindings WHERE name = ?', (name,)).fetchone()
+        since = binding[0] if binding else None
+        state, client, generation = 'empty', None, 0
+    else:
+        since = row[5]
+        state = 'empty' if row[4] == 'empty' else 'held'
+        client = row[1] if state == 'held' else None
+        generation = row[0]
+    return {'state': state, 'client': client, 'since': since, 'generation': generation,
+            'relayStarted': STARTED, 'evictionBound': EVICTION_BOUND_S, 'sync': None}
+
+
+def locked_route_of(name: str) -> dict:
+    """The R2.1 body with the per-name lock already held: the row straightened against frps."""
+    status, client_id, proxy_type = frps_route(name)
+    row = db().execute('SELECT generation, client, run_id, type, state, since FROM routes WHERE name = ?',
+                       (name,)).fetchone()
+    if row is not None:
+        check_route_holder(name, row, status, client_id, proxy_type)
+        try:
+            straighten_route(name, row, status, now())
+        except sqlite3.Error as e:
+            raise FrpsUnknown(f'route store is not writable: {type(e).__name__}') from None
+        row = db().execute('SELECT generation, client, run_id, type, state, since FROM routes WHERE name = ?',
+                           (name,)).fetchone()
+    else:
+        check_route_holder(name, None, status, client_id, proxy_type)
+    return route_body(name, row)
+
+
+def route_of(name: str) -> dict:
+    """The R2.1 body for a name: the routes row straightened against what frps shows right now.
+
+    The per-name lock serializes every read-and-straighten against registrations.
+    """
+    with route_lock(name):
+        return locked_route_of(name)
+
+
+_route_locks_guard = threading.Lock()
+_route_locks: dict[str, threading.Lock] = {}
+
+
+def route_lock(name: str) -> threading.Lock:
+    with _route_locks_guard:
+        lock = _route_locks.get(name)
+        if lock is None:
+            lock = threading.Lock()
+            _route_locks[name] = lock
+    return lock
+
+
+def hold_route_lock(name: str) -> bool:
+    """Take the per-name lock within the plugin call's remaining budget; False when the budget ran out."""
+    lock = route_lock(name)
+    left = call_deadline()
+    if left is None:
+        lock.acquire()
+        return True
+    return left > 0 and lock.acquire(timeout=left)
+
+
+def register_route(name: str, content: dict) -> str | None:
+    """Record a registration the plugin let through; a reason when the name cannot be taken (R1.1)."""
+    user = content.get('user') or {}
+    if not hold_route_lock(name):
+        return 'relay error: frps does not answer'
+    try:
+        return register_locked(name, content, user)
+    finally:
+        route_lock(name).release()
+
+
+def register_locked(name: str, content: dict, user: dict) -> str | None:
+    """The locked half of register_route: refuse a held name, else record the registration."""
+    try:
+        held = locked_route_of(name)['state'] == 'held'
+    except FrpsUnknown:
+        return 'relay error: frps does not answer'
+    if held:
+        return f'router config conflict: {name} is held'
+    return upsert_route(name, content, user)
+
+
+def upsert_route(name: str, content: dict, user: dict) -> str | None:
+    """Write the pending row for a let-through registration; a refusal when the call's budget ran out."""
+    left = call_deadline()
+    if left is not None and left <= 0:
+        return 'relay error: frps does not answer'
+    row = db().execute('SELECT generation FROM routes WHERE name = ?', (name,)).fetchone()
+    generation = (row[0] if row else 0) + 1
+    metas = user.get('metas') or {}
+    try:
+        execute_bounded(
+            'INSERT INTO routes (name, generation, client, run_id, type, state, since) VALUES (?, ?, ?, ?, ?, ?, ?) '
+            'ON CONFLICT(name) DO UPDATE SET generation = excluded.generation, client = excluded.client, '
+            'run_id = excluded.run_id, type = excluded.type, state = excluded.state, since = excluded.since',
+            (name, generation, metas.get('client') or 'legacy', user.get('run_id') or '',
+             content.get('proxy_type') or 'http', 'pending', now()))
+    except sqlite3.Error:
+        return 'relay error: frps does not answer'
+    return None
+
+
+def shared_route_fields(content: dict) -> str | None:
+    """R1.2: a name is one company's one route, never shared or split across locations or users."""
+    for field in ('locations', 'route_by_http_user', 'group'):
+        if content.get(field):
+            return f'{field} is not allowed'
+    return None
+
+
+def proxy_check(name: str, content: dict) -> str | None:
+    """Today's NewProxy checks, then whether this registration may hold the name; None lets it through."""
+    if (content.get('user') or {}).get('user'):
+        return 'set no user in the tunnel config'
+    if content.get('proxy_type') != 'http':
+        return 'only http proxies are allowed'
+    if content.get('proxy_name') != name:
+        return f'the proxy must be named {name}'
+    if content.get('subdomain') != name:
+        return f'this key serves only {name}.{DOMAIN}'
+    if content.get('custom_domains'):
+        return 'custom domains are not allowed'
+    reason = shared_route_fields(content)
+    if reason is not None:
+        return reason
+    return register_route(name, content)
+
+
+def trace_run_id(op: str, content: dict) -> str:
+    user = content.get('user') or {}
+    run_id = content.get('run_id') if op == 'Login' else user.get('run_id')
+    return run_id if isinstance(run_id, str) else ''
+
+
+def trace_client(op: str, content: dict) -> str:
+    user = content.get('user') or {}
+    metas = content.get('metas') if op == 'Login' else user.get('metas')
+    client = metas.get('client') if isinstance(metas, dict) else None
+    return client if isinstance(client, str) and client else 'legacy'
+
+
+def trace_plugin(op: str, content: dict, result: dict, started: float) -> None:
+    """With RELAY_TRACE=1, one JSON line per plugin call: no key, no metas beyond client."""
+    if not os.environ.get('RELAY_TRACE'):
+        return
+    line = {'op': op, 'proxy_name': content.get('proxy_name') or '', 'run_id': trace_run_id(op, content),
+            'client': trace_client(op, content), 'ms': round((time.monotonic() - started) * 1000, 1),
+            'reject': bool(result.get('reject'))}
+    log_line('TRACE ' + json.dumps(line))
+
+
+_print_lock = threading.Lock()
+
+
+def log_line(text: str) -> None:
+    """One complete line on stdout, written atomically so concurrent relay threads never interleave."""
+    with _print_lock:
+        sys.stdout.write(text + '\n')
+        sys.stdout.flush()
 
 
 class Window:
@@ -201,6 +514,15 @@ def touch(name: str) -> None:
 
 
 def plugin(op: str, content: dict) -> dict:
+    """One plugin call gets one 1 s budget; a spent budget refuses the op, fail closed (Review Focus 3)."""
+    call_state.end = time.monotonic() + PLUGIN_CALL_S
+    try:
+        return plugin_decide(op, content)
+    finally:
+        call_state.end = None
+
+
+def plugin_decide(op: str, content: dict) -> dict:
     if op == 'Login':
         metas = content.get('metas') or {}
     else:
@@ -208,17 +530,7 @@ def plugin(op: str, content: dict) -> dict:
     name, key = metas.get('name'), metas.get('key')
     reason = binding_ok(name, key)
     if reason is None and op == 'NewProxy':
-        user = (content.get('user') or {}).get('user') or ''
-        if user:
-            reason = 'set no user in the tunnel config'
-        elif content.get('proxy_type') != 'http':
-            reason = 'only http proxies are allowed'
-        elif content.get('proxy_name') != name:
-            reason = f'the proxy must be named {name}'
-        elif content.get('subdomain') != name:
-            reason = f'this key serves only {name}.{DOMAIN}'
-        elif content.get('custom_domains'):
-            reason = 'custom domains are not allowed'
+        reason = proxy_check(name, content)
     if reason is not None:
         return {'reject': True, 'reject_reason': reason}
     touch(name)
@@ -262,33 +574,82 @@ class Handler(BaseHTTPRequestHandler):
     def path_parts(self):
         return [p for p in self.path.split('?', 1)[0].split('/') if p]
 
+    def bearer_key(self) -> str:
+        auth = self.headers.get('Authorization') or ''
+        return auth[7:].strip() if auth.lower().startswith('bearer ') else ''
+
+    def wrong_key(self, ip: str):
+        """The 401 for a bad key, counted like DELETE; 429 once an address passes 30 bad keys in an hour."""
+        wait = bad_keys.allow(ip)
+        if wait:
+            return self.error(429, 'rate_limited', 'Too many wrong keys, try again later.', {'Retry-After': str(wait)})
+        return self.error(401, 'unauthorized', 'Send the binding key as Authorization: Bearer <key>.')
+
     def do_GET(self):
         parts = self.path_parts()
         if parts[:3] == ['api', 'v1', 'names'] and len(parts) == 4:
-            wait = name_checks.allow(self.client_ip())
-            if wait:
-                return self.error(429, 'rate_limited', 'Too many checks, try again later.', {'Retry-After': str(wait)})
-            name = parts[3].lower()
-            reason = check_name(name)
-            body = {'name': name, 'free': reason is None}
-            if reason:
-                body['reason'] = reason
-            return self.send_json(200, body)
+            return self.name_answer(parts[3].lower())
+        if parts[:3] == ['api', 'v1', 'links'] and len(parts) == 5 and parts[4] == 'route':
+            return self.route_answer(parts[3].lower())
         if parts == ['api', 'v1', 'health']:
             return self.send_json(200, {'ok': True})
         self.error(404, 'not_found', 'Not found.')
 
+    def name_answer(self, name: str):
+        wait = name_checks.allow(self.client_ip())
+        if wait:
+            return self.error(429, 'rate_limited', 'Too many checks, try again later.', {'Retry-After': str(wait)})
+        reason = check_name(name)
+        body = {'name': name, 'free': reason is None}
+        if reason:
+            body['reason'] = reason
+        return self.send_json(200, body)
+
+    def route_answer(self, name: str):
+        """GET /api/v1/links/<name>/route: who holds the name (R2.1), never a guess (R2.3)."""
+        row = db().execute('SELECT key_hash FROM bindings WHERE name = ?', (name,)).fetchone()
+        if row is None:
+            return self.error(404, 'not_found', f'There is no binding {name}.')
+        key = self.bearer_key()
+        if not key or not hmac.compare_digest(row[0], key_hash(key)):
+            return self.wrong_key(self.client_ip())
+        try:
+            return self.send_json(200, route_of(name))
+        except FrpsUnknown:
+            return self.error(503, 'unknown', 'The relay cannot tell whether the route is live.')
+
+    def handle_plugin(self):
+        # frps only: Caddy never routes /frp/ here and always adds X-Forwarded-For.
+        if self.headers.get('X-Forwarded-For') or self.client_address[0] != '127.0.0.1':
+            return self.error(403, 'forbidden', 'Forbidden.')
+        op, content, err = self.plugin_request()
+        if err is not None:
+            return self.send_json(200, {'reject': True, 'reject_reason': err})
+        started = time.monotonic()
+        try:
+            result = plugin(op, content)
+        except Exception as e:  # never let a bad plugin call through
+            result = {'reject': True, 'reject_reason': f'relay error: {type(e).__name__}'}
+        trace_plugin(op, content, result, started)
+        return self.send_json(200, result)
+
+    def plugin_request(self) -> tuple[str, dict, str | None]:
+        """Parse the plugin body into (op, content, error reason)."""
+        try:
+            req = self.read_json()
+            if not isinstance(req, dict):
+                raise TypeError('plugin request is not an object')
+            content = req.get('content')
+            if not isinstance(content, dict):
+                content = {}
+            return req.get('op', ''), content, None
+        except Exception as e:
+            return '', {}, f'relay error: {type(e).__name__}'
+
     def do_POST(self):
         parts = self.path_parts()
         if parts == ['frp', 'handler']:
-            # frps only: Caddy never routes /frp/ here and always adds X-Forwarded-For.
-            if self.headers.get('X-Forwarded-For') or self.client_address[0] != '127.0.0.1':
-                return self.error(403, 'forbidden', 'Forbidden.')
-            try:
-                req = self.read_json()
-                return self.send_json(200, plugin(req.get('op', ''), req.get('content') or {}))
-            except Exception as e:  # never let a bad plugin call through
-                return self.send_json(200, {'reject': True, 'reject_reason': f'relay error: {type(e).__name__}'})
+            return self.handle_plugin()
         if parts == ['api', 'v1', 'bindings']:
             return self.create_binding()
         self.error(404, 'not_found', 'Not found.')
@@ -333,7 +694,7 @@ class Handler(BaseHTTPRequestHandler):
             conn.execute('INSERT INTO bindings (name, key_hash, created_at, created_ip) VALUES (?, ?, ?, ?)',
                          (name, key_hash(key), t, ip))
             conn.execute('INSERT INTO creations (ip, at) VALUES (?, ?)', (ip, t))
-        print(f'bound {name} for {ip}', flush=True)
+        log_line(f'bound {name} for {ip}')
         self.send_json(201, {'name': name, 'url': f'https://{name}.{DOMAIN}', 'key': key,
                              'tunnel': tunnel_info(name, key)})
 
@@ -342,21 +703,16 @@ class Handler(BaseHTTPRequestHandler):
         if not (parts[:3] == ['api', 'v1', 'bindings'] and len(parts) == 4):
             return self.error(404, 'not_found', 'Not found.')
         name = parts[3].lower()
-        ip = self.client_ip()
-        auth = self.headers.get('Authorization') or ''
-        key = auth[7:].strip() if auth.lower().startswith('bearer ') else ''
         row = db().execute('SELECT key_hash, banned_at FROM bindings WHERE name = ?', (name,)).fetchone()
         if row is None:
             return self.error(404, 'not_found', f'There is no binding {name}.')
+        key = self.bearer_key()
         if not key or not hmac.compare_digest(row[0], key_hash(key)):
-            wait = bad_keys.allow(ip)
-            if wait:
-                return self.error(429, 'rate_limited', 'Too many wrong keys, try again later.', {'Retry-After': str(wait)})
-            return self.error(401, 'unauthorized', 'Send the binding key as Authorization: Bearer <key>.')
+            return self.wrong_key(self.client_ip())
         if row[1]:
             return self.error(403, 'blocked', f'{name}.{DOMAIN} is blocked and cannot be released.')
         db().execute('DELETE FROM bindings WHERE name = ?', (name,))
-        print(f'released {name} for {ip}', flush=True)
+        log_line(f'released {name} for {self.client_ip()}')
         self.send_json(204)
 
 

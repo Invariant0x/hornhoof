@@ -22,7 +22,10 @@ class FrpFactsTests(unittest.TestCase):
         self.assertTrue(first.started('acme'), first.log())
         second = self.stack.client('acme', self.binding['key'])
         self.assertFalse(second.started('acme', within=2), second.log())
-        self.assertIn('proxy [acme] already exists', second.log())
+        # The relay refuses the duplicate registration before frps sees it (R1.1), so frps
+        # no longer answers 'proxy [acme] already exists'; it accepts the retry once the
+        # first client below stops and the relay lets the registration through.
+        self.assertIn('router config conflict: acme is held', second.log())
         first.stop()
         started = time.monotonic()
         self.assertTrue(second.started('acme', within=40), second.log())
@@ -39,6 +42,12 @@ class FrpFactsTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(route['status'], 'online')
         self.assertEqual(route['clientID'], 'acme-3f2a9c1b-link')
+        # Read the route through the relay while this client is online, so its routes row
+        # is held (not pending) before the client stops: an offline record does not empty
+        # a pending row within PENDING_S (R2.1), it reads held (R1.1).
+        status, route = self.stack.api('GET', '/api/v1/links/acme/route', key=self.binding['key'])
+        self.assertEqual(status, 200)
+        self.assertEqual(route['state'], 'held')
         first.stop()
         self.assertTrue(_wait(lambda: self.stack.dash(path)[1].get('status') == 'offline', 5))
         status, route = self.stack.dash(path)
