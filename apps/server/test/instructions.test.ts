@@ -1,7 +1,7 @@
 import { OLD_NODE_INSTRUCTIONS } from '@hornhoof/protocol';
 import { describe, expect, it } from 'vitest';
 import type { agents } from '../src/db/schema.js';
-import { renderInstructions } from '../src/modules/agents/instructions.js';
+import { orchestratorSteady, renderInstructions } from '../src/modules/agents/instructions.js';
 import { textHash, type Role, type Skill, type SkillKind, type Templates } from '../src/modules/templates/load.js';
 
 const skill = (id: string, title: string, body: string, kind: SkillKind = 'procedure', description = ''): Skill => ({
@@ -121,6 +121,14 @@ describe('renderInstructions', () => {
     expect(head).toContain('is whoever gave you the task: the orchestrator, or the person who wrote to you');
     expect(head).toContain('A task the orchestrator gave you is already approved');
     expect(head).toContain('you and your architects use it only when a task asks for a design');
+  });
+
+  it("tells employees and the orchestrator that Claude Code's SendMessage reaches no one in Hornhoof", () => {
+    const told = [renderInstructions(T, agent(), PLACE).text, renderInstructions(T, agent({ kind: 'head' }), PLACE).text, orchestratorSteady(T).text];
+    for (const text of told) {
+      expect(text).toContain('When you run in Claude Code, never answer with its SendMessage tool: what it sends reaches no one in Hornhoof.');
+      expect(text).toContain("Answer in your reply or with Hornhoof's tools.");
+    }
   });
 
   it('keeps every skill whole in the text for a node that writes no skill files, as before', () => {

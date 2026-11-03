@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useState, type RefObject } from 'react';
 import { useLanguage, useT, type Language, type Messages } from '../i18n';
 import type { EventView, MessageParty } from '../types';
 
@@ -50,11 +50,12 @@ function keyIsElsewhere(target: EventTarget | null, box: HTMLElement | null): bo
   return Boolean(el?.closest('input, textarea, select, [contenteditable="true"]') && !box?.contains(el));
 }
 
-/* The messages whose text the person opened; the rest stay one line each. Ctrl+O opens every folded message, or folds
-   them all once all are open, wherever the focus is, as in Claude Code: on the map that opened the window too. */
-export function useFolding(seqs: number[], box: RefObject<HTMLElement | null>): Folding {
+/* The messages whose text the person opened; the rest stay one line each. While they are on screen (on), Ctrl+O opens
+   every folded message, or folds them all once all are open, wherever the focus is, as in Claude Code: on the map that
+   opened the window too. */
+export function useFolding(seqs: number[], box: RefObject<HTMLElement | null>, on: boolean): Folding {
   const [opened, setOpened] = useState<ReadonlySet<number>>(() => new Set());
-  const key = seqs.join(',');
+  const key = on ? seqs.join(',') : '';
   useEffect(() => {
     const all = key ? key.split(',').map(Number) : [];
     const onKey = (e: KeyboardEvent) => {
@@ -82,22 +83,4 @@ const textOf = (data: unknown) => {
 
 export function EventMessage({ event, folding }: { event: MessageEvent; folding: Folding }) {
   return <AgentMessage message={event.message} text={textOf(event.data)} open={folding.opened.has(event.seq)} onToggle={() => folding.toggle(event.seq)} />;
-}
-
-/* Hornhoof's frame over the live terminal names who wrote to whom, as the log does; the program's own screen stays as it
-   is. The newest stays in view. */
-export function MessageFrame({ events, folding }: { events: MessageEvent[]; folding: Folding }) {
-  const t = useT();
-  const frame = useRef<HTMLElement>(null);
-  useLayoutEffect(() => {
-    const el = frame.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [events.length]);
-  /* No message, no frame: the terminal keeps the whole window. */
-  if (!events.length) return null;
-  return (
-    <section ref={frame} className="t-msgs" aria-label={t.window.messages}>
-      {events.map(e => <EventMessage key={e.seq} event={e} folding={folding} />)}
-    </section>
-  );
 }
