@@ -10,7 +10,8 @@ import { UpdateBanner } from '../ui/UpdateBanner';
 import { useVersion, versionText } from '../ui/VersionMark';
 import { useDecisions, useImprovements } from '../tasks';
 import { TaskPanel } from '../ui/TaskPanel';
-import { useUpdates } from '../updates';
+import { useUpdates, type Updates } from '../updates';
+import { About } from './About';
 import { AgentWindow, type StaffAsk } from './AgentWindow';
 import { DepartmentView } from './Department';
 import { Improvements } from './Improvements';
@@ -27,6 +28,16 @@ type Tab = 'map' | 'tasks' | 'people' | 'subscriptions' | 'machines' | 'improvem
 type Panel = { kind: 'window' | 'card'; agentId: string } | { kind: 'task'; taskId: string } | null;
 const TABS: Tab[] = ['map', 'tasks', 'people', 'subscriptions', 'machines'];
 const THEMES: Theme[] = ['light', 'dark'];
+type AccountDialogName = 'about' | 'versions' | 'settings';
+
+function AccountDialog({ active, me, updates, onClose }: { active: AccountDialogName | null; me: Me; updates: Updates; onClose: () => void }) {
+  if (!active) return null;
+  return {
+    about: <About onClose={onClose} />,
+    versions: <Versions updates={updates} onClose={onClose} />,
+    settings: <Settings me={me} onClose={onClose} />,
+  }[active];
+}
 
 /* onImprovements, onVersions and onSettings: only for people who see the whole company. */
 function AccountMenu({
@@ -36,6 +47,7 @@ function AccountMenu({
   onImprovements,
   onVersions,
   onSettings,
+  onAbout,
   toDecide,
 }: {
   me: Me;
@@ -44,6 +56,7 @@ function AccountMenu({
   onImprovements?: () => void;
   onVersions?: () => void;
   onSettings?: () => void;
+  onAbout: () => void;
   toDecide: number;
 }) {
   const t = useT();
@@ -121,6 +134,9 @@ function AccountMenu({
           {t.settings.menu}
         </button>
       )}
+      <button className="btn small ghost" type="button" onClick={() => { onClose(); onAbout(); }}>
+        {t.about.menu}
+      </button>
       <button
         className="btn small ghost"
         type="button"
@@ -180,8 +196,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   const { improvements, failure: improvementsFailure, load: loadImprovements } = useImprovements(company);
   const toDecide = improvements?.filter(i => i.status === 'open').length ?? 0;
   const agentPanel = panel && panel.kind !== 'task' ? panel : null;
-  const [versionsOpen, setVersionsOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [accountDialog, setAccountDialog] = useState<AccountDialogName | null>(null);
   const account = useRef<HTMLDivElement>(null);
   const accountButton = useRef<HTMLButtonElement>(null);
 
@@ -244,11 +259,11 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
             <button ref={accountButton} className="avatar glass" type="button" aria-label={t.shell.account} aria-expanded={menu} onClick={() => setMenu(!menu)}>
               {me.person.name.trim().charAt(0).toUpperCase()}
             </button>
-            {menu && <AccountMenu me={me} onClose={() => setMenu(false)} onSignOut={() => void signOut()} onImprovements={company ? () => setTab('improvements') : undefined} onVersions={company ? () => setVersionsOpen(true) : undefined} onSettings={company ? () => setSettingsOpen(true) : undefined} toDecide={toDecide} />}
+            {menu && <AccountMenu me={me} onClose={() => setMenu(false)} onSignOut={() => void signOut()} onImprovements={company ? () => setTab('improvements') : undefined} onVersions={company ? () => setAccountDialog('versions') : undefined} onSettings={company ? () => setAccountDialog('settings') : undefined} onAbout={() => setAccountDialog('about')} toDecide={toDecide} />}
           </div>
         </div>
       </header>
-      {company && <UpdateBanner updates={updates} onDetails={() => setVersionsOpen(true)} />}
+      {company && <UpdateBanner updates={updates} onDetails={() => setAccountDialog('versions')} />}
       <main className={`body${tab === 'map' ? '' : ' page'}${panel ? ` with-${panel.kind}` : ''}`}>
         {tab === 'map' && (
           <MapScreen
@@ -321,8 +336,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
       {panel?.kind === 'card' && (
         <AgentCard key={panel.agentId} me={me} agentId={panel.agentId} {...liveOf(org, panel.agentId)} onClose={() => setPanel(null)} onTerminal={() => setPanel({ kind: 'window', agentId: panel.agentId })} />
       )}
-      {versionsOpen && <Versions updates={updates} onClose={() => setVersionsOpen(false)} />}
-      {settingsOpen && <Settings me={me} onClose={() => setSettingsOpen(false)} />}
+      <AccountDialog active={accountDialog} me={me} updates={updates} onClose={() => { setAccountDialog(null); accountButton.current?.focus(); }} />
     </div>
   );
 }
