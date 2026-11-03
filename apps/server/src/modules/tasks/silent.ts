@@ -99,6 +99,10 @@ function alarmForTurn(job: Job, program: TurnProgram | null, nowMs: number): Tur
   return nowMs - startedAt >= SILENT_TURN_MS ? { reason: 'node_silent', since: startedAt } : null;
 }
 
+function alarmForTask(job: Job, program: TurnProgram | null, task: { externalWait: typeof tasks.$inferSelect.externalWait } | null, nowMs: number): TurnAlarm | null {
+  return task?.externalWait ? null : alarmForTurn(job, program, nowMs);
+}
+
 const sameAlarm = (a: TurnAlarm | null, b: TurnAlarm | null) => a?.reason === b?.reason && a?.since === b?.since;
 
 function updateTurnAlarm(ctx: Ctx, job: Job, alarm: TurnAlarm | null): void {
@@ -111,7 +115,7 @@ function updateTurnAlarm(ctx: Ctx, job: Job, alarm: TurnAlarm | null): void {
 
 async function findSilentTurns(ctx: Ctx, now: Date): Promise<SilentTurn[]> {
   const rows = await ctx.db
-    .select({ job: jobs, agent: agents, task: { id: tasks.id, number: tasks.number, title: tasks.title } })
+    .select({ job: jobs, agent: agents, task: { id: tasks.id, number: tasks.number, title: tasks.title, externalWait: tasks.externalWait } })
     .from(jobs)
     .innerJoin(agents, eq(agents.id, jobs.agentId))
     .leftJoin(tasks, eq(tasks.id, jobs.taskId))
@@ -128,7 +132,7 @@ async function findSilentTurns(ctx: Ctx, now: Date): Promise<SilentTurn[]> {
   const silent: SilentTurn[] = [];
   for (const { job, agent, task } of rows) {
     const program = programs.get(job.id)?.program ?? null;
-    const alarm = alarmForTurn(job, program, nowMs);
+    const alarm = alarmForTask(job, program, task, nowMs);
     updateTurnAlarm(ctx, job, alarm);
     if (alarm) silent.push({ job, agent, task: task?.id ? task : null, program, alarm });
   }

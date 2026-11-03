@@ -549,6 +549,8 @@ export const pendingWakes = pgTable(
     companyId: companyId(),
     agentId: uuid('agent_id').notNull().references(() => agents.id),
     taskId: uuid('task_id').notNull().references(() => tasks.id),
+    /* A timed wake is obsolete once another task move replaced the action it names. */
+    taskVersion: integer('task_version'),
     why: text('why').notNull(),
     text: text('text'),
     note: text('note'),

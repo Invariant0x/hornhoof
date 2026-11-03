@@ -35,10 +35,16 @@ describe('migration 0050', () => {
     const company = (await db.execute<{ id: string }>(sql`insert into companies (name) values ('Acme') returning id`)).rows[0]!.id;
     await db.execute(sql`insert into tasks (company_id, number, title, status, silent, version)
       select ${company}, n, 'Task ' || n, 'working', 2, 7 from generate_series(1, 150) n`);
+    const agent = (await db.execute<{ id: string }>(sql`insert into agents (company_id, kind, name, model) values (${company}, 'worker', 'Bruno', '') returning id`)).rows[0]!.id;
+    await db.execute(sql`insert into pending_wakes (company_id, agent_id, task_id, why, text, note)
+      select ${company}, ${agent}, id, 'tests', '', '' from tasks where number = 1`);
     const before = (await db.execute(sql`select to_jsonb(t) as data from tasks t order by number`)).rows;
+    const beforeWakes = (await db.execute(sql`select to_jsonb(w) as data from pending_wakes w order by id`)).rows;
     await migrate(db, { migrationsFolder: MIGRATIONS });
     await migrate(db, { migrationsFolder: MIGRATIONS });
     expect((await db.execute(sql`select to_jsonb(t) - 'external_wait' as data from tasks t order by number`)).rows).toEqual(before);
+    expect((await db.execute(sql`select to_jsonb(w) - 'task_version' as data from pending_wakes w order by id`)).rows).toEqual(beforeWakes);
+    expect((await db.execute(sql`select task_version from pending_wakes`)).rows).toEqual([{ task_version: null }]);
     const rows = (await db.execute(sql`select * from tasks order by number`)).rows;
     expect(rows).toHaveLength(150);
     for (const row of rows) expect(row).toHaveProperty('external_wait', null);

@@ -15,6 +15,7 @@ import { SHOWN_TO_CEO } from '../nodes/command.js';
 import { LendBody } from '../nodes/routes.js';
 import { NOTE_MAX, NoteBody } from '../notebook/book.js';
 import { carriesFile, encodedHint } from '../tasks/attachments.js';
+import { MESSAGE_TASK_HINT, TaskReference } from '../tasks/external-wait.js';
 import { InviteBody, PersonPatch } from '../people/routes.js';
 import { BudgetBody, ConnectBody, SubscriptionBody } from '../subscriptions/routes.js';
 import { UpdateBody } from '../updates/routes.js';
@@ -155,9 +156,9 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
   tool('fire_employee', 'Removes an employee from the company. Its history stays. Not while it works or holds tasks.', { employee: Id('employee') }, ({ employee }) => ({ method: 'DELETE', url: `/api/agents/${employee}` }));
   tool(
     'message_employee',
-    'Writes to an employee in its own window, as yourself. It reads it in its next turn, or at once when it is free.',
-    { employee: Id('employee'), text: z.string().trim().min(1).max(4000) },
-    ({ employee, text }) => (carriesFile(text) ? encodedHint() : { method: 'POST', url: `/api/agents/${employee}/messages`, payload: { text } }),
+    'Writes to an employee in its own window, as yourself. It reads it in its next turn, or at once when it is free.' + MESSAGE_TASK_HINT,
+    { employee: Id('employee'), text: z.string().trim().min(1).max(4000), task: TaskReference.optional() },
+    ({ employee, text, task }) => (carriesFile(text) ? encodedHint() : { method: 'POST', url: `/api/agents/${employee}/messages`, payload: { text, task } }),
   );
   tool('stop_employee', 'Stops the turn an employee runs now, as Esc in its window does.', { employee: Id('employee') }, ({ employee }) => ({ method: 'POST', url: `/api/agents/${employee}/stop` }));
 

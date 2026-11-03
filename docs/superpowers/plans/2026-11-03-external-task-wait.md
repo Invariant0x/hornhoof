@@ -41,17 +41,17 @@
 
 ## Task 2: Quiet waiting, durable expiry and early messages
 
-**Files:** tasks/external-wait.ts; tasks/engine.ts; tasks/wake.ts; tasks/wake-state.ts; tasks/reconcile.ts; tasks/silent.ts; agents/timers.ts; conversation/routes.ts; tools/watch.ts; tools/control.ts; test/external-wait.test.ts and relevant existing tests.
+**Files:** schema.ts and unshipped0050 metadata; tasks/external-wait.ts; tasks/engine.ts; tasks/wake.ts; tasks/wake-state.ts; tasks/outbox.ts; tasks/silent.ts; agents/timers.ts; conversation/queue.ts and routes.ts; tools/watch.ts; tools/control.ts; test/external-wait.test.ts and relevant existing tests.
 
-**Interfaces:** checkExternalWaits(ctx, now?) returns the number expired and queues through the wake outbox. messageTask(ctx, recipientId, reference, actor) returns the current bound task and clears its wait. Optional task in employee and orchestrator messages is a task reference. New wait_ended wake carries the reason and produces one sentence identifying the task.
+**Interfaces:** checkExternalWaits(ctx, now?) returns the number expired and queues through the wake outbox. queueTaskMessage(ctx, {companyId, agentId, task?, actor, text}, turn) stores a bound message on the agent line before clearing its wait; unbound messages keep ordinary live delivery. waitFor uses the same line and refuses to hide an unread queued task message. Optional task in employee and orchestrator messages is a task reference. New wait_ended wake carries the reason and expected task version and produces one sentence identifying the task; pending_wakes.task_version persists that version. Messages retain their recipient/stage across status-only changes.
 
-- [ ] Write tests: three silent turns cause zero reminders/requests; reconcile and program alarms preserve the wait. Run RED.
-- [ ] Suppress liveness, reconciliation and program alarms while the persisted wait exists. Guard silentTurn as well. Run GREEN.
-- [ ] Write tests for expiry once across repeated ticks/restart, exact reason text, ordinary liveness after expiry, and queued expiry discarded after close/transfer/new wait. Run RED.
-- [ ] Expire through versioned task moves and durable wakes; run on startup and the minute sweep. Prevent action wakes while a task waits. Run GREEN.
-- [ ] Write tests for comments, employee messages with task, orchestrator messages with task, person answers, and unbound/unrelated messages. Run RED.
-- [ ] Add message binding and the optional parameter to both message tools, clear only the named task's wait, and preserve normal message delivery. Run GREEN.
-- [ ] Run changed queue, message, liveness and timer tests plus server tsc; commit the increment.
+- [x] Write tests: three silent turns cause zero reminders/requests; reconcile and program alarms preserve the wait. Run RED.
+- [x] Suppress liveness, reconciliation and program alarms while the persisted wait exists. Guard silentTurn as well. Run GREEN.
+- [x] Write tests for expiry once across repeated ticks/restart, exact reason text, ordinary liveness after expiry, and queued expiry discarded after close/transfer/new wait. Run RED.
+- [x] Expire through versioned task moves and durable wakes; run on startup and the minute sweep. Prevent action wakes while a task waits. Run GREEN.
+- [x] Write tests for comments, employee messages with task, orchestrator messages with task, person answers, and unbound/unrelated messages. Run RED.
+- [x] Add message binding and the optional parameter to both message tools, clear only the named task's wait, and preserve normal message delivery. Run GREEN.
+- [x] Run changed queue, message, liveness and timer tests plus server tsc; commit the increment.
 
 ## Task 3: Task views, tree facts, template and user evidence
 

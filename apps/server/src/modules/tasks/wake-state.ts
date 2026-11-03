@@ -5,7 +5,7 @@ import { agentEvents, agents, jobs, tasks, TASK_STATUSES } from '../../db/schema
 import { CLOSED, type Task, type Tx, type Wake } from './engine.js';
 
 /* Kept in the wake's existing message JSON, so its purpose and phase survive a server restart. */
-const State = z.object({ why: z.string(), status: z.enum(TASK_STATUSES), stage: z.number().int().nonnegative(), merging: z.boolean() });
+const State = z.object({ why: z.string(), status: z.enum(TASK_STATUSES), stage: z.number().int().nonnegative(), merging: z.boolean(), version: z.number().int().nonnegative().optional() });
 export type TaskWake = z.infer<typeof State>;
 type TaskTurn = { id: string; agentId: string | null; taskId: string | null };
 type Store = Db | Tx;
@@ -14,7 +14,7 @@ const NOTICES = new Set(['done', 'reported', 'cancelled', 'turn', 'reviewed', 'r
 const GIVER_NEWS = new Set(['blocked', 'stuck_at_gate', 'tests', 'work']);
 const REVIEW = new Set(['review', 'turn_review']);
 
-export const taskWakeOf = (task: Task, wake: Pick<Wake, 'why'>): TaskWake => ({ why: wake.why, status: task.status, stage: task.stage, merging: task.merging });
+export const taskWakeOf = (task: Task, wake: Pick<Wake, 'why' | 'version'>): TaskWake => ({ why: wake.why, status: task.status, stage: task.stage, merging: task.merging, version: wake.version });
 
 /* Legacy turns have no snapshot. Only their known server-written notice prefixes identify a notice to the giver. */
 const isNotice = (state: TaskWake | null): boolean => state !== null && NOTICES.has(state.why);
@@ -36,7 +36,12 @@ function legacyReport(task: Task, prompt: string): boolean {
 }
 
 const samePhase = (task: Task, state: TaskWake | null): boolean =>
-  state === null || (state.status === task.status && state.stage === task.stage && state.merging === task.merging);
+  state === null || (sameStatus(task, state) && state.stage === task.stage && state.merging === task.merging && sameVersion(task, state));
+
+/* Messages follow their recipient through status changes within the same workflow stage. */
+const sameStatus = (task: Task, state: TaskWake): boolean => state.why === 'message' || state.status === task.status;
+
+const sameVersion = (task: Task, state: TaskWake): boolean => state.version === undefined || state.version === task.version;
 
 const onTask = (task: Task, agentId: string): boolean => task.assigneeAgentId === agentId || task.panel.includes(agentId);
 const assignment = (task: Task, agentId: string): boolean => ['open', 'working'].includes(task.status) && !task.merging && task.assigneeAgentId === agentId;
@@ -52,7 +57,7 @@ function recipient(task: Task, agentId: string, why = ''): boolean {
 
 function applies(task: Task, agentId: string, state: TaskWake | null): boolean {
   if (isNotice(state)) return true;
-  return !CLOSED.includes(task.status) && samePhase(task, state) && recipient(task, agentId, state?.why);
+  return !task.externalWait && !CLOSED.includes(task.status) && samePhase(task, state) && recipient(task, agentId, state?.why);
 }
 
 /* Validate again when a delayed outbox wake is queued, before it can reach a live terminal. */

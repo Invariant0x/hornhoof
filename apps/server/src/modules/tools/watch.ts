@@ -2,6 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { and, desc, eq, gte, inArray, isNotNull, isNull, ne, notInArray, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
+import { ApiError } from '../../errors.js';
 import { agentEvents, agents, departments, jobs, requests, taskEvents, tasks } from '../../db/schema.js';
 import { wrote } from '../conversation/prompt.js';
 import { agentState, carrierOf, enqueueTurn, GONE_ALONG, orchestratorOf, STOPPED_ON_PURPOSE } from '../conversation/queue.js';
@@ -10,6 +11,7 @@ import type { WithEvent } from '../events/store.js';
 import { returnAlongLine } from '../org/map-state.js';
 import { carriesFile, encodedHint } from '../tasks/attachments.js';
 import { CLOSED } from '../tasks/engine.js';
+import { queueTaskMessage, MESSAGE_TASK_HINT, TaskReference } from '../tasks/external-wait.js';
 import type { Grant } from '../templates/load.js';
 import { INSTALL_HINT, installsIn, MISSING_HINT, missingIn, type Missing } from './stumbles.js';
 
@@ -30,6 +32,11 @@ const sent = new WeakMap<Ctx, Map<string, number>>();
 const SENT_KEPT = 500;
 
 const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
+
+function taskMessageFailure(error: unknown): ReturnType<typeof say> {
+  if (error instanceof ApiError) return say(error.message, true);
+  throw error;
+}
 const json = (value: unknown) => say(JSON.stringify(value));
 const hoursAgo = (hours: number) => new Date(Date.now() - hours * 3_600_000);
 
@@ -284,12 +291,12 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
   server.registerTool(
     'message_employee',
     {
-      description: anywhere
+      description: (anywhere
         ? `Writes to another employee, as you, into its window: one at work gets it at once in the turn it runs, one that is not in its next turn. Use it to nudge a stuck agent or to tell a head. One turn sends at most ${TURN_NUDGES}.`
-        : `Writes to another employee of your department, as you, into its window: one at work gets it at once in the turn it runs, one that is not in its next turn. Ask the one whose work yours builds on, or the one whose findings you do not understand, instead of waiting for your head. One turn sends at most ${TURN_NUDGES}.`,
-      inputSchema: { employee: z.uuid().describe("The employee's id, from agents or company."), text: z.string().trim().min(1).max(4000) },
+        : `Writes to another employee of your department, as you, into its window: one at work gets it at once in the turn it runs, one that is not in its next turn. Ask the one whose work yours builds on, or the one whose findings you do not understand, instead of waiting for your head. One turn sends at most ${TURN_NUDGES}.`) + MESSAGE_TASK_HINT,
+      inputSchema: { employee: z.uuid().describe("The employee's id, from agents or company."), text: z.string().trim().min(1).max(4000), task: TaskReference.optional() },
     },
-    async ({ employee, text }) => {
+    async ({ employee, text, task: ref }) => {
       if (carriesFile(text)) return say(encodedHint(), true);
       const [me] = await db.select().from(agents).where(eq(agents.id, job.agentId));
       const [target] = await db.select().from(agents).where(and(eq(agents.id, employee), eq(agents.companyId, job.companyId), isNull(agents.removedAt)));
@@ -301,25 +308,26 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
       if (!(await agentState(ctx, target.id)).ready) return say(`${target.name} cannot run now. Tell your head, who tells the CEO.`, true);
       if (!(await counted(me.id))) return say(`One turn sends at most ${TURN_NUDGES} messages. Go on in your next round.`, true);
       const back = givingBack(ctx, job.companyId, me.id, target.id);
-      await enqueueTurn(ctx, {
-        companyId: job.companyId,
-        agentId: target.id,
-        prompt: wrote({ name: me.name, title: roleTitle(me.roleKey) ?? '' }, text),
-        createdBy: null,
-        message: { personId: null, text, from: 'agent', name: me.name, by: me.id },
-        withMessage: back.withMessage,
-      });
-      back.told();
-      /* The map runs it between the two departments, or the card between the two agents of one. */
-      if (me.departmentId && target.departmentId) {
-        const same = me.departmentId === target.departmentId;
-        ctx.bus.publish(job.companyId, {
-          type: 'pulse',
-          from: same ? { kind: 'agent', id: me.id, departmentId: me.departmentId } : { kind: 'department', id: me.departmentId },
-          to: same ? { kind: 'agent', id: target.id, departmentId: target.departmentId } : { kind: 'department', id: target.departmentId },
-        });
-      }
-      return say(`Sent to ${target.name}.`);
+      return queueTaskMessage(ctx, { companyId: job.companyId, agentId: target.id, task: ref, actor: { agentId: me.id }, text }, {
+          companyId: job.companyId,
+          agentId: target.id,
+          prompt: wrote({ name: me.name, title: roleTitle(me.roleKey) ?? '' }, text),
+          createdBy: null,
+          message: { personId: null, text, from: 'agent', name: me.name, by: me.id },
+          withMessage: back.withMessage,
+        }).then(() => {
+        back.told();
+        /* The map runs it between the two departments, or the card between the two agents of one. */
+        if (me.departmentId && target.departmentId) {
+          const same = me.departmentId === target.departmentId;
+          ctx.bus.publish(job.companyId, {
+            type: 'pulse',
+            from: same ? { kind: 'agent', id: me.id, departmentId: me.departmentId } : { kind: 'department', id: me.departmentId },
+            to: same ? { kind: 'agent', id: target.id, departmentId: target.departmentId } : { kind: 'department', id: target.departmentId },
+          });
+        }
+        return say(`Sent to ${target.name}.`);
+      }, taskMessageFailure);
     },
   );
 }
