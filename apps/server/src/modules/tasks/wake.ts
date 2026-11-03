@@ -9,6 +9,7 @@ import { appendEvent, publishWorking } from '../events/store.js';
 import { identityOf, type NodeIdentity } from '../nodes/hub.js';
 import { answerDirectly, brokeDown, CLOSED, GATE_ROUNDS, handOver, lastMove, leaveWork, NOT_A_MOVE, openAfter, published, regateWaiting, reviewWake, silentTurn, taskSpot, wentOn, type Actor, type Task, type Wake, type WakeWhy } from './engine.js';
 import { wakeQueued, wakesLeft } from './outbox.js';
+import { taskForWake, taskWakeOf, waitingTaskTurn } from './wake-state.js';
 import { carriedTasks, continueOnce, doneIfRecorded } from './endings.js';
 import { afterRestart } from './restarts.js';
 import { clearTurnProgram, failedProgramData } from './silent.js';
@@ -309,7 +310,7 @@ async function queueWake(ctx: Ctx, w: Wake): Promise<boolean> {
   const { db } = ctx;
   const [agent] = await db.select().from(agents).where(and(eq(agents.id, w.agentId), isNull(agents.removedAt)));
   if (!agent || !(await liveSubscription(ctx, agent.id))) return false;
-  const [task] = await db.select().from(tasks).where(eq(tasks.id, w.taskId));
+  const task = await taskForWake(db, w);
   if (!task) return false;
   if (TO_WORK.includes(w.why) && w.agentId === task.assigneeAgentId && (await openAfter(db, task)).length) return false;
   /* New words on the task the agent works on right now go into that turn. */
@@ -322,11 +323,7 @@ async function queueWake(ctx: Ctx, w: Wake): Promise<boolean> {
   }
   /* One at a time per agent, so two moves at once still queue one turn. */
   return onAgent(ctx, agent.id, async () => {
-    const [waiting] = await db
-      .select({ id: jobs.id })
-      .from(jobs)
-      .where(and(eq(jobs.agentId, agent.id), eq(jobs.taskId, task.id), eq(jobs.status, 'queued')))
-      .limit(1);
+    const waiting = await waitingTaskTurn(db, agent.id, task.id);
     if (waiting) {
       /* A run's result is not in the task, so the turn that waits carries it along. */
       if (w.why === 'tests' || w.why === 'work') {
@@ -337,7 +334,7 @@ async function queueWake(ctx: Ctx, w: Wake): Promise<boolean> {
       return false;
     }
     const prompt = wakePrompt(agent, task, w);
-    await insertTurn(ctx, { companyId: agent.companyId, agentId: agent.id, prompt, createdBy: null, taskId: task.id, message: { personId: null, text: prompt, task: { id: task.id, number: task.number } } });
+    await insertTurn(ctx, { companyId: agent.companyId, agentId: agent.id, prompt, createdBy: null, taskId: task.id, message: { personId: null, text: prompt, task: { id: task.id, number: task.number }, taskWake: taskWakeOf(task, w) } });
     return true;
   });
 }

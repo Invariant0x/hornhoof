@@ -121,12 +121,13 @@ export async function workingCount(db: Db, companyId: string): Promise<number> {
 
 /* The last people's messages and his answers from turns that are over, oldest first, for a new session to catch up. */
 export async function earlierTalk(db: Db, agentId: string, limit = 20): Promise<EventView[]> {
-  const open = db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, agentId), inArray(jobs.status, ['queued', 'running'])));
+  /* Stale wakes stay in the log, but were never spoken: a new session must not receive them as catch-up instructions. */
+  const unspoken = db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, agentId), or(inArray(jobs.status, ['queued', 'running']), eq(jobs.error, 'stale'))));
   const rows = await db
     .select(columns)
     .from(agentEvents)
     .leftJoin(people, eq(people.id, agentEvents.personId))
-    .where(and(eq(agentEvents.agentId, agentId), inArray(agentEvents.kind, ['message', 'text']), or(isNull(agentEvents.jobId), notInArray(agentEvents.jobId, open))))
+    .where(and(eq(agentEvents.agentId, agentId), inArray(agentEvents.kind, ['message', 'text']), or(isNull(agentEvents.jobId), notInArray(agentEvents.jobId, unspoken))))
     .orderBy(desc(agentEvents.seq))
     .limit(limit);
   return rows.reverse().map(view);
