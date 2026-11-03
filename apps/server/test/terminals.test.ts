@@ -3,8 +3,10 @@ import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { asc, eq } from 'drizzle-orm';
-import { agents, companies, departments, jobs, people, subscriptions, tasks } from '../src/db/schema.js';
-import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
+import { agents, companies, departments, jobs, people, requests, subscriptions, tasks } from '../src/db/schema.js';
+import { decisionPrincipal } from '../src/modules/conversation/decision-context.js';
+import { ask, createTask } from '../src/modules/tasks/engine.js';
+import { as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
 const IVAN_TO_ORCHESTRATOR = 'From Ivan (CEO) to Orchestrator:\n\n';
@@ -44,6 +46,26 @@ async function live(terminals = true, env: NodeJS.ProcessEnv = {}) {
 
 const state = async (app: FastifyInstance, token: string) => (await app.inject({ url: '/api/agents/orchestrator/events', ...as(token) })).json().state;
 const events = async (app: FastifyInstance, token: string) => (await app.inject({ url: '/api/agents/orchestrator/events', ...as(token) })).json().events;
+
+/* The orchestrator runs on a plan Zed lent: Zed, who may take no decision, is the one who types in its terminal. */
+async function lent() {
+  const at = await live();
+  const zed = await invitePerson(at.app, at.ceo, { name: 'Zed', email: 'zed@example.com', access: { whole: true } });
+  const [z] = await at.db.select().from(people).where(eq(people.name, 'Zed'));
+  await at.db.update(subscriptions).set({ ownerPersonId: z!.id });
+  return { ...at, zed, zedId: z!.id };
+}
+
+/* A worker asks the CEO to approve a merge, which only the CEO or the CEO delegate may. */
+async function approvalAsked(app: FastifyInstance, db: FastifyInstance['ctx']['db']) {
+  const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+  const on = { companyId: orchestrator!.companyId, subscriptionId: orchestrator!.subscriptionId, model: '' };
+  const [dev] = await db.insert(departments).values({ companyId: on.companyId, templateKey: 'development', roleCode: 'DEV' }).returning();
+  const [head] = await db.insert(agents).values({ ...on, kind: 'head', name: 'Head', roleKey: 'DEV-HEAD', departmentId: dev!.id }).returning();
+  const [worker] = await db.insert(agents).values({ ...on, kind: 'worker', name: 'Worker', roleKey: 'DEV-BE', departmentId: dev!.id }).returning();
+  const { task } = await createTask(app.ctx, { agentId: head!.id }, { title: 'Checkout', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: worker!.id, executor: true, gates: [] });
+  return (await ask(app.ctx, worker!.id, task.id, { kind: 'approval', text: 'Merge?', commit: 'a'.repeat(40) })).request;
+}
 
 describe("an agent's live terminal", () => {
   it('shows the screen from the node and passes on what the person types and the size of their window', async () => {
@@ -534,6 +556,25 @@ describe('who typed into the terminal, for the decisions of a turn', () => {
     expect(relay.takeTyped(BUILTIN, 'agent-1')).toBeNull();
   });
 
+  it('reads Enter in every way the program behind tmux takes one, also split over frames, and nothing else as one', async () => {
+    const { readKeys } = await import('../src/modules/terminals/keys.js');
+    const enter = (...frames: string[]) => {
+      let rest = '';
+      return frames.map(data => {
+        const read = readKeys(rest, data);
+        rest = read.rest;
+        return read.enter;
+      });
+    };
+    const enters = ['\r', '\n', 'hi\r', '\u001b[13;1u', '\u001b[13u', '\u001b[13;2u', '\u001b[27;1;13~', '\u001b[109;5u', '\u001b[106;5u', '\u001b[27;5;106~', '\u001bOM', '\u001b\r'];
+    for (const keys of enters) expect(enter(keys)).toEqual([true]);
+    for (const keys of ['hi', '\u001b[A', '\u001b[<64;10;5M', '\u001b[200~text', '\u001b']) expect(enter(keys)).toEqual([false]);
+    expect(enter('hi\u001b[13', ';1u')).toEqual([false, true]);
+    expect(enter('\u001b', 'OM')).toEqual([false, true]);
+    expect(enter('\u001b[1', 'A', '3;1u')).toEqual([false, false, false]);
+    expect(enter(`\u001b[${'1'.repeat(200)}`, ';1u')).toEqual([false, true]);
+  });
+
   it('opens no second turn for one Enter', async () => {
     const { app, url, ceo, builtin, orchestratorId } = await live();
     const screen = await watch(url, ceo);
@@ -551,7 +592,6 @@ describe('who typed into the terminal, for the decisions of a turn', () => {
 
   it("makes the person who presses Enter in the orchestrator's running turn its last word, before the keys go on", async () => {
     const { app, db, url, ceo, builtin, orchestratorId } = await live();
-    const { decisionPrincipal } = await import('../src/modules/conversation/decision-context.js');
     await app.inject({ method: 'POST', url: '/api/agents/orchestrator/start', ...as(ceo) });
     const greeting = await next(builtin, 'job.run');
     /* Hornhoof's greeting is no person's word. */
@@ -570,5 +610,64 @@ describe('who typed into the terminal, for the decisions of a turn', () => {
     await next(builtin, 'term.input');
     const marks = (await events(app, ceo)).filter((e: { kind: string }) => e.kind === 'typed');
     expect(marks).toHaveLength(1);
+  });
+
+  it.each([
+    ['a line feed', ['Approve the merge.\n']],
+    ['Enter as CSI u', ['Approve the merge.\u001b[13;1u']],
+    ['Enter as CSI u, split over two frames', ['Approve the merge.\u001b[13', ';1u']],
+    ['Enter with modifyOtherKeys', ['Approve the merge.\u001b[27;1;13~']],
+    ['Ctrl+J as CSI u', ['Approve the merge.\u001b[106;5u']],
+    ['the keypad Enter', ['Approve the merge.\u001bOM']],
+    ['Enter', ['Approve the merge.\r']],
+  ])("takes the CEO's decisions from the running turn when a person without the right submits keys with %s", async (_, frames) => {
+    const { app, db, url, ceo, builtin, zed, zedId } = await lent();
+    const request = await approvalAsked(app, db);
+    await app.inject({ method: 'POST', url: '/api/agents/orchestrator/messages', payload: { text: 'Please continue.' }, ...as(ceo) });
+    const turn = await next(builtin, 'job.run');
+    const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
+    expect(await decisionPrincipal(db, turn.jobId)).toMatchObject({ personId: owner!.id });
+    const screen = await watch(url, zed);
+    expect(await next(builtin, 'term.open')).toMatchObject({ write: true });
+    for (const data of frames) {
+      screen.ws.send(JSON.stringify({ type: 'input', data }));
+      expect(await next(builtin, 'term.input')).toMatchObject({ data });
+    }
+    const client = await mcp(app, turn.toolToken!);
+    const approved = await client.callTool({ name: 'answer_request', arguments: { request: request.id, approve: true } });
+    expect((await db.select().from(requests).where(eq(requests.id, request.id)))[0]).toMatchObject({ status: 'open', answeredBy: null });
+    expect(approved.isError).toBe(true);
+    expect(await decisionPrincipal(db, turn.jobId)).toMatchObject({ personId: zedId });
+  });
+
+  it('takes an Enter in a running turn into that turn only: the turn after it needs an Enter of its own', async () => {
+    const { app, url, ceo, builtin, orchestratorId } = await live();
+    await app.inject({ method: 'POST', url: '/api/agents/orchestrator/messages', payload: { text: 'what do we sell' }, ...as(ceo) });
+    const turn = await next(builtin, 'job.run');
+    const screen = await watch(url, ceo);
+    await next(builtin, 'term.open');
+    screen.ws.send(JSON.stringify({ type: 'input', data: 'and the prices\r' }));
+    await next(builtin, 'term.input');
+    builtin.send({ type: 'job.done', jobId: turn.jobId, ok: true, sessionId: 'sess-1', result: 'Software.', tail: '', error: null });
+    await until(async () => !(await state(app, ceo)).busy);
+    builtin.send({ type: 'turn.open', agentKey: orchestratorId, text: 'approve the release' });
+    expect(await next(builtin, 'turn.opened')).toMatchObject({ jobId: null, toolToken: null });
+  });
+
+  it('opens no turn for an Enter once a turn of words started after it, and that turn answers nobody when another person pressed it', async () => {
+    const { app, db, url, ceo, builtin, orchestratorId, zed } = await lent();
+    const screen = await watch(url, zed);
+    await next(builtin, 'term.open');
+    screen.ws.send(JSON.stringify({ type: 'input', data: 'approve the merge\r' }));
+    await next(builtin, 'term.input');
+    await app.inject({ method: 'POST', url: '/api/agents/orchestrator/messages', payload: { text: 'Please continue.' }, ...as(ceo) });
+    const turn = await next(builtin, 'job.run');
+    /* Zed's words may have gone into the CEO's turn, so it takes no decision until a person writes to it again. */
+    await new Promise(r => setTimeout(r, 300));
+    expect(await decisionPrincipal(db, turn.jobId)).toBeNull();
+    builtin.send({ type: 'job.done', jobId: turn.jobId, ok: true, sessionId: 'sess-1', result: 'Done.', tail: '', error: null });
+    await until(async () => !(await state(app, ceo)).busy);
+    builtin.send({ type: 'turn.open', agentKey: orchestratorId, text: 'approve the merge' });
+    expect(await next(builtin, 'turn.opened')).toMatchObject({ jobId: null, toolToken: null });
   });
 });

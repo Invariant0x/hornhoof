@@ -7,7 +7,7 @@ import { hashToken, newToken } from '../../crypto/tokens.js';
 import { agents, jobs, nodes, people, subscriptions, tasks, turns } from '../../db/schema.js';
 import { dispatchJob } from '../jobs/dispatch.js';
 import { turnsHeld } from '../updates/drain.js';
-import { alsoKept, deliverLive, inputKept } from './decision-context.js';
+import { alsoKept, deliverLive, inputKept, turnStarted } from './decision-context.js';
 import { BUILTIN, identityOf, nodeIdentity, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { liveNode, planNodes, type NodeRow } from '../nodes/nodes.js';
 import { appendEvent, earlierTalk, messageForJob, publishWorking, type WithEvent } from '../events/store.js';
@@ -513,6 +513,13 @@ async function take(ctx: Ctx, job: Queued, along: readonly Along[], sending: Sen
   });
 }
 
+/* A turn with words of its own is taken: an Enter that waited to open a turn of its own is settled with it. Not waited for,
+   as what holds the agent's input lock may wait for its line. */
+function wentOutWithWords(ctx: Ctx, agentId: string, job: Queued & { prompt: string }): void {
+  if (!job.prompt && !job.taskId) return;
+  void turnStarted(ctx, agentId, job.id).catch(err => ctx.log.error({ error: loggable(err) }, 'An Enter that waited could not be settled.'));
+}
+
 /* The turn went out: its task and those that went along with it are at work, and the map reads its lines again once the
    turn carries them all. */
 async function wentOut(ctx: Ctx, job: Queued, along: readonly Along[], lines: { companyId: string } | null): Promise<void> {
@@ -577,6 +584,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   /* Running from the moment it is sent: the token works for its tools at once, and the next turn waits. */
   const taken = await take(ctx, job, along, { subscriptionId: sub.id, nodeId: place.nodeId, prompt, toolTokenHash: hashToken(token), instructionsHash: runHash });
   if (!taken) return;
+  wentOutWithWords(ctx, agentId, job);
   /* The agent stays on this machine from now on. */
   if (place.moves) await db.update(agents).set({ nodeId: place.nodeId }).where(eq(agents.id, agentId));
   let sent = false;
