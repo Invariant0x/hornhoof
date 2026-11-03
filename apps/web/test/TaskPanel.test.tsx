@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
@@ -169,6 +169,39 @@ describe('a task', () => {
       expect(within(after).getByRole('button', { name: /#11 Cart page/ })).toBeInTheDocument();
       expect(panel).toHaveTextContent(words.started);
       unmount();
+      localStorage.removeItem('hh-lang');
+    }
+  });
+
+  it('says in its log, in each language, why a node restart cut a turn off, the retry, and who was called when it happened again', async () => {
+    const bruno = { kind: 'agent' as const, id: 'b1', name: 'Bruno' };
+    const first = 'aaaaaaaa-0000-4000-8000-000000000001';
+    const retry = 'bbbbbbbb-0000-4000-8000-000000000002';
+    const cut = {
+      ...TASK_DETAIL,
+      log: [
+        ...TASK_DETAIL.log,
+        { kind: 'interrupted', text: `Bruno's turn ${first} was cut off.`, data: { job: first, cause: 'program', at: '2026-11-03T00:11:00.000Z', node: { id: null, name: 'the built-in node' }, retry: { job: retry, n: 1, of: 1 } }, by: bruno, at: '2026-11-03T00:11:00.000Z' },
+        { kind: 'interrupted', text: `Bruno's turn ${retry} was cut off.`, data: { job: retry, cause: 'container', at: '2026-11-03T00:20:00.000Z', node: { id: 'n1', name: 'ivan-mbp' }, first: { job: first, cause: 'program', at: '2026-11-03T00:11:00.000Z' }, called: { id: 'r1', name: 'Rob' } }, by: bruno, at: '2026-11-03T00:20:00.000Z' },
+      ],
+    };
+    for (const [lang, words] of [
+      ['en', { title: "Bruno's turn was cut off by a node restart", first: ['The built-in node, ', 'Its program started again after a crash or a restart of its container.', 'Turn aaaaaaaa.', 'Retry 1 of 1.'], again: ['ivan-mbp, ', 'Its container was created again, as an update of Hornhoof or a new install does.', 'Turn bbbbbbbb.', 'The retry was cut off too, so it is not run a third time. Rob of Operations was called.'] }],
+      ['ru', { title: 'Ход Bruno прерван перезапуском ноды', first: ['Встроенная нода, ', 'Ее программа перезапустилась после сбоя или перезапуска контейнера.', 'Ход aaaaaaaa.', 'Повтор 1 из 1.'], again: ['ivan-mbp, ', 'Ее контейнер создан заново: так бывает при обновлении Hornhoof или новой установке.', 'Ход bbbbbbbb.', 'Повтор тоже прерван, третьего запуска нет. Позвали Rob из Операций.'] }],
+    ] as const) {
+      localStorage.setItem('hh-lang', lang);
+      const user = userEvent.setup();
+      shell({ 'GET /api/tasks/t12': [200, { task: cut }] });
+      await user.click(await screen.findByRole('button', { name: lang === 'en' ? /^Tasks/ : /^Задачи/ }));
+      await user.click(await screen.findByRole('button', { name: /#12/ }));
+      const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
+      await within(panel).findAllByRole('listitem');
+      const lines = within(panel).getAllByRole('listitem').map(li => li.textContent!).filter(text => text.includes(words.title));
+      expect(lines).toHaveLength(2);
+      for (const said of words.first) expect(lines[0]).toContain(said);
+      for (const said of words.again) expect(lines[1]).toContain(said);
+      expect(panel).not.toHaveTextContent('was cut off.');
+      cleanup();
       localStorage.removeItem('hh-lang');
     }
   });

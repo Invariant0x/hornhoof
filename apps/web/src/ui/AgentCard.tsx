@@ -1,6 +1,7 @@
 import { useEffect, useId, useState } from 'react';
 import { api } from '../api';
 import { errorText, useLanguage, useT } from '../i18n';
+import { cutLine } from '../restarts';
 import { effortsOf } from '@hornhoof/protocol/efforts';
 import { defaultEffort, PROVIDER_NAMES } from '../providers';
 import type { AgentCardView, Me, Part, SubView } from '../types';
@@ -392,6 +393,21 @@ export function AgentCard({ me, agentId, onClose, onTerminal }: Props) {
               </>
             )}
           </div>
+        )}
+
+        {card.interrupted.length > 0 && (
+          <section className="ac-history" aria-labelledby={`${id}-restarts`}>
+            <h4 id={`${id}-restarts`}>{t.restarts.heading}</h4>
+            <ul>
+              {card.interrupted.map(c => (
+                <li key={c.job}>
+                  {c.task && `#${c.task.number}: `}
+                  {cutLine(t, c, when(c.at))}
+                  {c.retry && ` ${t.restarts.wasRetry}`}
+                </li>
+              ))}
+            </ul>
+          </section>
         )}
 
         {card.changes.length > 0 && (

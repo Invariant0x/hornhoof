@@ -1,11 +1,11 @@
 import { effortsOf, MAX_INSTRUCTIONS, modelsFor, type ModelOption } from '@hornhoof/protocol';
-import { and, asc, desc, eq, inArray, isNull, notInArray, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { accessOf, agentSpot, canReach } from '../../auth/access.js';
 import { actorOf, changedBy, requireCompanyScope, type Person } from '../../auth/session.js';
-import { agentChanges, agents, departments, jobs, people, subscriptions, tasks, type AGENT_CHANGE_FIELDS } from '../../db/schema.js';
+import { agentChanges, agents, departments, jobs, people, subscriptions, tasks, type AGENT_CHANGE_FIELDS, type RestartCause } from '../../db/schema.js';
 import { ApiError, type ErrorReason } from '../../errors.js';
 import { onAgent, programNode, pump, pumpWaiting } from '../conversation/queue.js';
 import { deptName } from '../departments/templates.js';
@@ -40,6 +40,9 @@ export type AgentCard = {
   instructions: { length: number; max: number };
   runsOn: { subscription: SubView; models: ModelOption[] }[];
   changes: { field: string; personName: string | null; byOrchestrator: boolean; at: string; before: unknown; after: unknown }[];
+  /* Its latest turns a node restart cut off: why, when, on which node (none for the built-in one) and task, and whether the
+     turn was a retry already. */
+  interrupted: { job: string; at: string; cause: RestartCause; node: string | null; task: { id: string; number: number } | null; retry: boolean }[];
   /* The whole company or the agent's department may change it; only the whole company removes it. */
   canEdit: boolean;
   /* Off for now: it takes no task turns. */
@@ -71,6 +74,7 @@ export const AgentPatch = z
 type Field = (typeof AGENT_CHANGE_FIELDS)[number];
 
 const CHANGES_SHOWN = 20;
+const INTERRUPTED_SHOWN = 5;
 
 /* The employee card: who it is, where it runs, its skills and the instructions it runs with, and its latest changes. */
 export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
@@ -125,6 +129,13 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
       .where(eq(agentChanges.agentId, agent.id))
       .orderBy(desc(agentChanges.createdAt))
       .limit(CHANGES_SHOWN);
+    const interrupted = await db
+      .select({ job: jobs.id, cut: jobs.interruption, retryOf: jobs.retryOf, taskId: tasks.id, number: tasks.number })
+      .from(jobs)
+      .leftJoin(tasks, eq(tasks.id, jobs.taskId))
+      .where(and(eq(jobs.agentId, agent.id), isNotNull(jobs.interruption)))
+      .orderBy(desc(jobs.finishedAt), desc(jobs.createdAt))
+      .limit(INTERRUPTED_SHOWN);
     return {
       id: agent.id,
       kind: agent.kind,
@@ -161,6 +172,7 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
         return view ? [{ subscription: view, models: s.models }] : [];
       }),
       changes: changes.map(c => ({ ...c, at: c.at.toISOString() })),
+      interrupted: interrupted.map(i => ({ job: i.job, at: i.cut!.at, cause: i.cut!.cause, node: i.cut!.node.id ? i.cut!.node.name : null, task: i.taskId ? { id: i.taskId, number: i.number! } : null, retry: i.retryOf !== null })),
       canEdit: await mayEdit(me, agent),
       on: !agent.switchedOffAt,
       timer: timerOf(agent),

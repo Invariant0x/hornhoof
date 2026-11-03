@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { api } from '../api';
 import { errorText, useLanguage, useT, type Messages } from '../i18n';
 import { useOrg } from '../org';
+import { cutLine } from '../restarts';
 import { placeName, roleAfter, useTask } from '../tasks';
 import type { AgentRef, TaskDetail, TaskLogLine, WaitingRequest } from '../types';
 import { Field } from './Field';
@@ -22,6 +23,24 @@ function eventTitle(t: Messages, e: TaskLogLine): string {
     default:
       return e.kind in ev ? ev[e.kind as keyof typeof ev](by) : by;
   }
+}
+
+/* Hornhoof's line about a turn a node restart cut off, in the person's language, from what it kept: where, when and why,
+   then the retry, or who in Operations was called when the retry was cut off too. Its English text is for the agents. */
+function cutText(t: Messages, data: unknown, when: (at: string) => string): string | null {
+  const [job, cause, at, node] = [field(data, 'job'), field(data, 'cause'), field(data, 'at'), field(data, 'node')];
+  if (typeof job !== 'string' || typeof cause !== 'string' || typeof at !== 'string') return null;
+  const named = field(node, 'id') ? String(field(node, 'name')) : null;
+  const [retry, called] = [field(data, 'retry'), field(data, 'called')];
+  const then =
+    field(data, 'first') !== undefined
+      ? called
+        ? t.restarts.called(String(field(called, 'name')))
+        : t.restarts.nobody
+      : retry
+        ? t.restarts.retry(Number(field(retry, 'n')), Number(field(retry, 'of')))
+        : t.restarts.notRetried;
+  return `${cutLine(t, { node: named, cause, job }, when(at))} ${then}`;
 }
 
 /* What waits for the person in this task. */
@@ -151,12 +170,13 @@ function TaskBody({ task, onOpen, onChanged, waiting }: { task: TaskDetail; onOp
         <ol className="tp-log" aria-label={t.tasks.log}>
           {task.log.map((e, i) => {
             const evidence = field(e.data, 'evidence');
+            const said = (e.kind === 'interrupted' && cutText(t, e.data, when)) || e.text;
             return (
               <li key={i} className={e.kind}>
                 <span className="tp-ev">
                   {eventTitle(t, e)} <time dateTime={e.at}>{when(e.at)}</time>
                 </span>
-                {e.text && e.kind !== 'created' && <p>{e.text}</p>}
+                {said && e.kind !== 'created' && <p>{said}</p>}
                 {typeof evidence === 'string' && evidence && (
                   <p className="tp-evidence">
                     {t.tasks.evidence}: {evidence}

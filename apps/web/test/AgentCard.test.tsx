@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
@@ -23,6 +23,33 @@ describe('AgentCard', () => {
   it('says the orchestrator made a change, and what it was', async () => {
     open({ 'GET /api/agents/b1': [200, { ...CARD, changes: [{ field: 'switch', personName: null, byOrchestrator: true, at: '2026-10-30T09:00:00.000Z' }] }] });
     expect(await screen.findByText(/^Switched on or off: Orchestrator, /)).toBeInTheDocument();
+  });
+
+  it('lists its turns a node restart cut off, why, where and on which task, in each language', async () => {
+    const interrupted = [
+      { job: 'bbbbbbbb-0000-4000-8000-000000000002', at: '2026-11-03T00:20:00.000Z', cause: 'container' as const, node: 'ivan-mbp', task: { id: 't12', number: 12 }, retry: true },
+      { job: 'aaaaaaaa-0000-4000-8000-000000000001', at: '2026-11-03T00:11:00.000Z', cause: 'unknown' as const, node: null, task: null, retry: false },
+    ];
+    for (const [lang, words] of [
+      ['en', { heading: 'Turns cut off by a node restart', latest: ['#12', 'ivan-mbp, ', 'Its container was created again', 'Turn bbbbbbbb.', 'It was a retry.'], earlier: ['The built-in node, ', 'Why it restarted is not known.', 'Turn aaaaaaaa.'] }],
+      ['ru', { heading: 'Ходы, прерванные перезапуском ноды', latest: ['#12', 'ivan-mbp, ', 'Ее контейнер создан заново', 'Ход bbbbbbbb.', 'Это был повтор.'], earlier: ['Встроенная нода, ', 'Причина перезапуска неизвестна.', 'Ход aaaaaaaa.'] }],
+    ] as const) {
+      localStorage.setItem('hh-lang', lang);
+      open({ 'GET /api/agents/b1': [200, { ...CARD, interrupted }] });
+      const list = within(await screen.findByRole('region', { name: words.heading })).getAllByRole('listitem').map(li => li.textContent!);
+      expect(list).toHaveLength(2);
+      for (const said of words.latest) expect(list[0]).toContain(said);
+      for (const said of words.earlier) expect(list[1]).toContain(said);
+      expect(list[1]).not.toContain('#');
+      cleanup();
+      localStorage.removeItem('hh-lang');
+    }
+  });
+
+  it('shows no restarts when none cut its turns off', async () => {
+    open();
+    await screen.findByRole('heading', { name: 'Bruno' });
+    expect(screen.queryByRole('region', { name: 'Turns cut off by a node restart' })).not.toBeInTheDocument();
   });
 
   it('shows the skills as a checklist with locked core skills', async () => {

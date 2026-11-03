@@ -5,7 +5,7 @@ import { identityOf } from '../src/modules/nodes/hub.js';
 import { restartCause } from '../src/modules/nodes/restarts.js';
 import { createTask } from '../src/modules/tasks/engine.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
-import { connectNode, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
+import { as, connectNode, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
 const MACHINE_UP = '2026-11-01T08:00:00.000Z';
@@ -26,7 +26,7 @@ async function nextRun(node: FakeNode): Promise<Run> {
 async function company() {
   const { app, db } = await testApp({ NODE_KEY });
   const url = await listen(app);
-  await setUpCompany(app);
+  const ceo = await setUpCompany(app);
   const [acme] = await db.select().from(companies);
   const companyId = acme!.id;
   const [sub] = await db.select().from(subscriptions);
@@ -60,7 +60,7 @@ async function company() {
     await wakeAll(ctx, [{ agentId: bruno.id, taskId: task.id, why: 'assigned' }]);
     return nextRun(node);
   };
-  return { app, db, ctx, companyId, sub: sub!, node: () => node, hana, bruno, olga, rob, task, turnsOf, jobOf, notes, restart, brunoAtWork };
+  return { app, db, ctx, ceo, companyId, sub: sub!, node: () => node, hana, bruno, olga, rob, task, turnsOf, jobOf, notes, restart, brunoAtWork };
 }
 
 describe('a turn cut off by a node restart', () => {
@@ -141,6 +141,19 @@ describe('a turn cut off by a node restart', () => {
     expect(turns[0]!.interruption).toBeNull();
     expect(await c.notes()).toEqual([]);
     expect((await c.db.select({ kind: taskEvents.kind }).from(taskEvents).where(eq(taskEvents.taskId, c.task.id))).map(e => e.kind)).toContain('continued');
+  });
+
+  it("shows the turns a node restart cut off on the employee's card, the latest first", async () => {
+    const c = await company();
+    const first = await c.brunoAtWork();
+    const retry = await nextRun(await c.restart(boot('2026-11-03T00:11:00.000Z')));
+    await c.restart(boot('2026-11-03T00:20:00.000Z', 'c0ffee000002'));
+    await until(async () => (await c.jobOf(retry.jobId)).status === 'failed');
+    const card = (await c.app.inject({ url: `/api/agents/${c.bruno.id}`, ...as(c.ceo) })).json();
+    expect(card.interrupted).toEqual([
+      { job: retry.jobId, at: expect.any(String), cause: 'container', node: null, task: { id: c.task.id, number: c.task.number }, retry: true },
+      { job: first.jobId, at: expect.any(String), cause: 'program', node: null, task: { id: c.task.id, number: c.task.number }, retry: false },
+    ]);
   });
 
   it('keeps why a turn without a task was cut off, and leaves it to its next round', async () => {
