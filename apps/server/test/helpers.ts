@@ -80,16 +80,19 @@ function agentSqlOn(client: PGlite): AgentSql {
 }
 
 export async function testApp(env: NodeJS.ProcessEnv = {}, logger?: Deps['logger']): Promise<{ app: FastifyInstance; db: Db; config: Config }> {
-  const { client, db } = await openTestDb();
-  let app: FastifyInstance | undefined;
-  /* The app closes first, since stopping it can still write to the database. */
-  onTestFinished(async () => {
-    await app?.close();
-    await client.close();
-  });
+  const { client } = await openTestDb();
+  onTestFinished(() => client.close());
+  return appOn(client, env, logger);
+}
+
+/* The app on a database the test opened, which closes after the app: test hooks run last first, and stopping the app can
+   still write to it. */
+export async function appOn(client: PGlite, env: NodeJS.ProcessEnv = {}, logger?: Deps['logger']): Promise<{ app: FastifyInstance; db: Db; config: Config }> {
+  const db = drizzle(client, { schema }) as unknown as Db;
   /* Tests never reach the real registry unless they ask. */
   const config = loadConfig({ HORNHOOF_SECRET: TEST_SECRET, UPDATE_CHECK_MS: '0', ...env });
-  app = await buildApp({ db, config, logger, agentSql: agentSqlOn(client) });
+  const app = await buildApp({ db, config, logger, agentSql: agentSqlOn(client) });
+  onTestFinished(() => app.close());
   return { app, db, config };
 }
 
@@ -108,7 +111,6 @@ export const as = (token: string) => ({ cookies: { hh_session: token } });
 
 type Access = { whole: true } | { departments?: string[]; teams?: string[] };
 
-/* Invites a person, accepts the invite with a password and returns their session token. */
 /* A worker of a new Development department asks the CEO to approve a merge, which only the CEO or the CEO delegate may. */
 export async function approvalAsked(app: FastifyInstance) {
   const { db } = app.ctx;
@@ -121,6 +123,7 @@ export async function approvalAsked(app: FastifyInstance) {
   return (await ask(app.ctx, worker!.id, task.id, { kind: 'approval', text: 'Merge?', commit: 'a'.repeat(40) })).request;
 }
 
+/* Invites a person, accepts the invite with a password and returns their session token. */
 export async function invitePerson(app: FastifyInstance, ceoToken: string, input: { name: string; email: string; access: Access }): Promise<string> {
   const invited = await app.inject({ method: 'POST', url: '/api/people/invite', payload: { ...input, title: '' }, ...as(ceoToken) });
   if (invited.statusCode !== 201) throw new Error(`Invite failed with ${invited.statusCode}: ${invited.body}`);
