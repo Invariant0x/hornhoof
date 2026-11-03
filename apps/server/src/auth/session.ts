@@ -20,6 +20,7 @@ export const personColumns = {
   status: people.status,
   scopeKind: people.scopeKind,
   isOwner: people.isOwner,
+  isCeoDelegate: people.isCeoDelegate,
 };
 
 export type Person = {
@@ -31,6 +32,7 @@ export type Person = {
   status: 'active' | 'invited' | 'disabled';
   scopeKind: ScopeKind;
   isOwner: boolean;
+  isCeoDelegate: boolean;
   /* The orchestrator acting as this person, the owner: what it changes is its own. */
   via?: string;
 };

@@ -244,3 +244,102 @@ describe('POST /api/people/:id/invite', () => {
     expect((await reinvite(app, ceo, '00000000-0000-4000-8000-000000000000')).statusCode).toBe(404);
   });
 });
+
+describe('PUT /api/people/:id/ceo-delegate', () => {
+  const mark = (app: FastifyInstance, token: string, id: string, isCeoDelegate: unknown) => app.inject({ method: 'PUT', url: `/api/people/${id}/ceo-delegate`, payload: { isCeoDelegate }, ...as(token) });
+  const me = async (app: FastifyInstance, token: string) => (await app.inject({ url: '/api/me', ...as(token) })).json();
+
+  it('lets the CEO set and take off the mark of a person with the whole company, and says so in /api/me and /api/people', async () => {
+    const { app } = await testApp();
+    const ceo = await setUpCompany(app);
+    const maria = await inviteAndAccept(app, ceo, { name: 'Maria', email: 'maria@acme.com', title: '', access: { whole: true } });
+    expect((await me(app, maria.token)).canDecideCompany).toBe(false);
+    expect((await me(app, ceo)).canDecideCompany).toBe(true);
+
+    const set = await mark(app, ceo, maria.id, true);
+    expect(set.statusCode).toBe(200);
+    expect(set.json().person).toMatchObject({ id: maria.id, isCeoDelegate: true });
+    expect(await mark(app, ceo, maria.id, true).then(r => r.statusCode)).toBe(200);
+    expect((await me(app, maria.token))).toMatchObject({ person: { isCeoDelegate: true }, canDecideCompany: true });
+    const listed = (await app.inject({ url: '/api/people', ...as(maria.token) })).json().people;
+    expect(listed.find((p: { id: string }) => p.id === maria.id).isCeoDelegate).toBe(true);
+
+    const off = await mark(app, ceo, maria.id, false);
+    expect(off.json().person.isCeoDelegate).toBe(false);
+    expect((await me(app, maria.token)).canDecideCompany).toBe(false);
+  });
+
+  it('gives no mark to a new invite, nor to a person who does not see the whole company', async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    const { departmentId } = await addTeam(db);
+    const nina = await invite(app, ceo, { name: 'Nina', email: 'nina@acme.com', title: '', access: { whole: true } });
+    expect(nina.json().person.isCeoDelegate).toBe(false);
+    const dana = await inviteAndAccept(app, ceo, { name: 'Dana', email: 'dana@acme.com', title: '', access: { departments: [departmentId] } });
+    const refused = await mark(app, ceo, dana.id, true);
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json().error.reason).toBe('delegate_requires_company_access');
+    expect((await mark(app, ceo, nina.json().person.id, true)).statusCode).toBe(409);
+    expect((await mark(app, ceo, nina.json().person.id, false)).statusCode).toBe(200);
+  });
+
+  it('is the real CEO\'s alone: not a person of the whole company, not the delegate, not the orchestrator, not for the CEO', async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    const maria = await inviteAndAccept(app, ceo, { name: 'Maria', email: 'maria@acme.com', title: '', access: { whole: true } });
+    const olga = await inviteAndAccept(app, ceo, { name: 'Olga', email: 'olga@acme.com', title: '', access: { whole: true } });
+    const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
+    expect((await mark(app, olga.token, maria.id, true)).statusCode).toBe(403);
+    expect((await mark(app, olga.token, olga.id, true)).statusCode).toBe(403);
+    await mark(app, ceo, maria.id, true);
+    expect((await mark(app, maria.token, olga.id, true)).statusCode).toBe(403);
+    expect((await mark(app, ceo, owner!.id, true)).json().error.reason).toBe('owner_locked');
+    const { orchestratorHeaders } = await import('../src/auth/internal.js');
+    const viaOrchestrator = await app.inject({ method: 'PUT', url: `/api/people/${olga.id}/ceo-delegate`, payload: { isCeoDelegate: true }, headers: orchestratorHeaders(owner!.id, '00000000-0000-4000-8000-000000000009') });
+    expect(viaOrchestrator.statusCode).toBe(403);
+    expect((await mark(app, ceo, '00000000-0000-4000-8000-000000000000', true)).statusCode).toBe(404);
+    expect((await app.inject({ method: 'PUT', url: `/api/people/${olga.id}/ceo-delegate`, payload: { isCeoDelegate: true, isOwner: true }, ...as(ceo) })).statusCode).toBe(400);
+    const [still] = await db.select().from(people).where(eq(people.id, olga.id));
+    expect(still!.isCeoDelegate).toBe(false);
+  });
+
+  it('takes the mark off for good when the delegate is disabled, sent a new invite or loses the whole company', async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    const { departmentId } = await addTeam(db);
+    const delegateOf = async (id: string) => (await db.select().from(people).where(eq(people.id, id)))[0]!.isCeoDelegate;
+    const a = await inviteAndAccept(app, ceo, { name: 'A', email: 'a@acme.com', title: '', access: { whole: true } });
+    const b = await inviteAndAccept(app, ceo, { name: 'B', email: 'b@acme.com', title: '', access: { whole: true } });
+    const c = await inviteAndAccept(app, ceo, { name: 'C', email: 'c@acme.com', title: '', access: { whole: true } });
+    for (const p of [a, b, c]) await mark(app, ceo, p.id, true);
+    for (const p of [a, b, c]) expect(await delegateOf(p.id)).toBe(true);
+
+    await app.inject({ method: 'PATCH', url: `/api/people/${a.id}`, payload: { status: 'disabled' }, ...as(ceo) });
+    await app.inject({ method: 'PATCH', url: `/api/people/${a.id}`, payload: { status: 'active' }, ...as(ceo) });
+    expect(await delegateOf(a.id)).toBe(false);
+    await app.inject({ method: 'POST', url: `/api/people/${b.id}/invite`, ...as(ceo) });
+    expect(await delegateOf(b.id)).toBe(false);
+    await app.inject({ method: 'PATCH', url: `/api/people/${c.id}`, payload: { access: { departments: [departmentId] } }, ...as(ceo) });
+    await app.inject({ method: 'PATCH', url: `/api/people/${c.id}`, payload: { access: { whole: true } }, ...as(ceo) });
+    expect(await delegateOf(c.id)).toBe(false);
+  });
+
+  it('lets only the CEO change the access or status of the delegate, or send them a new invite', async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    const { departmentId } = await addTeam(db);
+    const maria = await inviteAndAccept(app, ceo, { name: 'Maria', email: 'maria@acme.com', title: '', access: { whole: true } });
+    const olga = await inviteAndAccept(app, ceo, { name: 'Olga', email: 'olga@acme.com', title: '', access: { whole: true } });
+    await mark(app, ceo, maria.id, true);
+    for (const payload of [{ status: 'disabled' }, { access: { departments: [departmentId] } }]) {
+      const res = await app.inject({ method: 'PATCH', url: `/api/people/${maria.id}`, payload, ...as(olga.token) });
+      expect(res.statusCode).toBe(403);
+      expect(res.json().error.reason).toBe('owner_locked');
+    }
+    const reinvite = await app.inject({ method: 'POST', url: `/api/people/${maria.id}/invite`, ...as(olga.token) });
+    expect(reinvite.statusCode).toBe(403);
+    const [still] = await db.select().from(people).where(eq(people.id, maria.id));
+    expect(still).toMatchObject({ status: 'active', scopeKind: 'company', isCeoDelegate: true });
+    expect((await app.inject({ method: 'PATCH', url: `/api/people/${maria.id}`, payload: { title: 'Deputy' }, ...as(olga.token) })).statusCode).toBe(200);
+  });
+});

@@ -33,6 +33,8 @@ export const PersonPatch = z.object({
   status: z.enum(['active', 'disabled']).optional(),
 });
 
+const DelegateBody = z.object({ isCeoDelegate: z.boolean() }).strict();
+
 const IdParams = z.object({ id: z.uuid() });
 const TokenParams = z.object({ token: z.string().min(1).max(100) });
 
@@ -46,13 +48,15 @@ const inviteFor = (token: string, by: Pick<Person, 'id' | 'companyId'>, personId
 
 const notFound = () => new ApiError(404, 'not_found', 'This invite does not exist.', 'invite_unknown');
 const gone = () => new ApiError(410, 'gone', 'This invite has already been used or has expired. Ask for a new one.', 'invite_used');
+/* The delegate takes the CEO's decisions, so whoever could change their access, status or sign-in could take them too. */
+const delegateLocked = () => new ApiError(403, 'forbidden', 'Only the CEO changes the access or status of the CEO delegate.', 'owner_locked');
 
 /* A fresh link for someone already in the company. It doubles as a password reset, so old access ends here. The person's
    row changes before the sessions go, so a sign-in that holds it finishes first and its session is deleted too. */
 export async function reinvite(db: Db, personId: string, by: Pick<Person, 'id' | 'companyId'>): Promise<{ token: string; person: Person }> {
   const token = newToken();
   const person = await db.transaction(async tx => {
-    const [row] = await tx.update(people).set({ status: 'invited', passwordHash: null }).where(eq(people.id, personId)).returning(personColumns);
+    const [row] = await tx.update(people).set({ status: 'invited', passwordHash: null, isCeoDelegate: false }).where(eq(people.id, personId)).returning(personColumns);
     await tx.update(invites).set({ usedAt: new Date() }).where(and(eq(invites.personId, personId), isNull(invites.usedAt)));
     await tx.delete(sessions).where(eq(sessions.personId, personId));
     await tx.insert(invites).values(inviteFor(token, by, personId));
@@ -145,6 +149,7 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (!target) throw new ApiError(404, 'not_found', 'This person does not exist.', 'person_unknown');
     if (target.isOwner) throw new ApiError(403, 'forbidden', 'The owner cannot be sent a new invite.', 'owner_locked');
     if (target.id === me.id) throw new ApiError(403, 'forbidden', 'You cannot send a new invite to yourself.', 'self_locked');
+    if (target.isCeoDelegate && !me.isOwner) throw delegateLocked();
 
     const { token, person } = await reinvite(db, id, me);
     ctx.bus.accessChanged(me.companyId);
@@ -203,12 +208,15 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
       throw new ApiError(403, 'forbidden', target.isOwner ? 'The owner cannot be disabled.' : 'You cannot disable yourself.', target.isOwner ? 'owner_locked' : 'self_locked');
     }
     if (body.access && target.isOwner) throw new ApiError(403, 'forbidden', 'The owner always has access to the whole company.', 'owner_locked');
+    if ((body.access || body.status) && target.isCeoDelegate && !me.isOwner) throw delegateLocked();
     if (body.access) await checkAccess(db, me.companyId, body.access);
 
     const changes: Partial<typeof people.$inferInsert> = {};
     if (body.title !== undefined) changes.title = body.title;
     /* A person who never set a password goes back to waiting for their invite. */
     if (body.status) changes.status = body.status === 'active' && !target.passwordHash ? 'invited' : body.status;
+    /* The mark goes with the whole company and an active account, and does not come back with them. */
+    if (changes.status === 'disabled' || (body.access && !('whole' in body.access))) changes.isCeoDelegate = false;
 
     const person = await db.transaction(async tx => {
       if (Object.keys(changes).length) await tx.update(people).set(changes).where(eq(people.id, id));
@@ -224,6 +232,32 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
     }
     if (changes.status === 'disabled' || body.access) await releasePlansOf(ctx, person, me);
     if (changes.status || body.access) {
+      ctx.bus.accessChanged(me.companyId);
+      ctx.bus.publish(me.companyId, { type: 'org' });
+    }
+    return { person: await personView(db, person) };
+  });
+
+  /* The CEO marks the delegate, who then takes the CEO's decisions, and takes the mark off: only from the CEO's own
+     screen, never the orchestrator's tool. The mark needs an active person with the whole company. */
+  app.put('/api/people/:id/ceo-delegate', async req => {
+    const me = await requirePerson(req, db);
+    if (!me.isOwner || me.via) throw new ApiError(403, 'forbidden', 'Only the CEO marks the CEO delegate.', 'not_owner');
+    const { id } = IdParams.parse(req.params);
+    const { isCeoDelegate } = DelegateBody.parse(req.body);
+    const [target] = await db.select(personColumns).from(people).where(and(eq(people.id, id), eq(people.companyId, me.companyId)));
+    if (!target) throw new ApiError(404, 'not_found', 'This person does not exist.', 'person_unknown');
+    if (target.isOwner) throw new ApiError(403, 'forbidden', 'The CEO takes the CEO\'s decisions already.', 'owner_locked');
+    if (isCeoDelegate && (target.status !== 'active' || target.scopeKind !== 'company')) {
+      throw new ApiError(409, 'conflict', 'Only an active person with access to the whole company can be the CEO delegate.', 'delegate_requires_company_access');
+    }
+    const [person] = await db
+      .update(people)
+      .set({ isCeoDelegate })
+      .where(and(eq(people.id, id), isCeoDelegate ? and(eq(people.status, 'active'), eq(people.scopeKind, 'company')) : undefined))
+      .returning(personColumns);
+    if (!person) throw new ApiError(409, 'conflict', 'Only an active person with access to the whole company can be the CEO delegate.', 'delegate_requires_company_access');
+    if (person.isCeoDelegate !== target.isCeoDelegate) {
       ctx.bus.accessChanged(me.companyId);
       ctx.bus.publish(me.companyId, { type: 'org' });
     }
