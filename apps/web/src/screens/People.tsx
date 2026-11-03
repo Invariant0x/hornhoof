@@ -149,6 +149,10 @@ export function People({ me }: { me: Me }) {
   const setStatus = (person: PersonView, status: 'active' | 'disabled') =>
     run(async () => replace((await api.patch<{ person: PersonView }>(`/api/people/${person.id}`, { status })).person));
 
+  /* The CEO marks the delegate, who then takes the CEO's decisions, and takes the mark off. */
+  const setDelegate = (person: PersonView, isCeoDelegate: boolean) =>
+    run(async () => replace((await api.put<{ person: PersonView }>(`/api/people/${person.id}/ceo-delegate`, { isCeoDelegate })).person));
+
   const newLink = (person: PersonView) =>
     run(async () => {
       const res = await api.post<{ person: PersonView; inviteUrl: string }>(`/api/people/${person.id}/invite`);
@@ -207,17 +211,32 @@ export function People({ me }: { me: Me }) {
           </thead>
           <tbody>
             {people.map(p => {
-              const manageable = canManage && !p.isOwner && p.id !== me.person.id;
-              const titleOnly = !manageable && (p.id === me.person.id || (canManage && p.isOwner));
+              /* The delegate's access, status and sign-in are the CEO's alone to change, as is the mark. */
+              const delegateLocked = Boolean(p.isCeoDelegate) && !me.person.isOwner;
+              const manageable = canManage && !p.isOwner && p.id !== me.person.id && !delegateLocked;
+              const titleOnly = !manageable && (p.id === me.person.id || (canManage && (p.isOwner || delegateLocked)));
+              const marks = me.person.isOwner && !p.isOwner && (Boolean(p.isCeoDelegate) || (p.status === 'active' && p.access.whole));
               return (
                 <tr key={p.id} className={p.status}>
                   <td>
                     <span className="pname"><PersonIcon />{p.name}</span>
+                    {p.isCeoDelegate && (
+                      <>
+                        {' '}
+                        <em className="t-card-tag">{t.people.ceoDelegate}</em>
+                      </>
+                    )}
                   </td>
                   <td>{p.title}</td>
                   <td>{accessText(t, p.access, org)}</td>
                   <td><span className={`status ${p.status}`}>{t.people.status[p.status]}</span></td>
                   <td className="row-actions">
+                    {marks && (
+                      <label className="act delegate" title={t.people.ceoDelegateHint}>
+                        <input type="checkbox" checked={Boolean(p.isCeoDelegate)} aria-label={t.people.ceoDelegateLabel(p.name)} onChange={e => void setDelegate(p, e.target.checked)} />
+                        {t.people.ceoDelegate}
+                      </label>
+                    )}
                     {(manageable || titleOnly) && (
                       <button className="act" type="button" aria-label={t.people.editLabel(p.name)} onClick={() => setPanel({ kind: 'edit', person: p, titleOnly })}>{t.people.edit}</button>
                     )}
@@ -238,6 +257,7 @@ export function People({ me }: { me: Me }) {
           </tbody>
         </table>
       )}
+      {me.person.isOwner && <p className="muted">{t.people.ceoDelegate}: {t.people.ceoDelegateHint}</p>}
       <p className="muted people-foot"><AgentIcon /> {t.people.agentsNote}</p>
     </section>
   );

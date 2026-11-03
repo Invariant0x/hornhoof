@@ -19,11 +19,14 @@ export type Person = {
   status: 'active' | 'invited' | 'disabled';
   scopeKind: ScopeKind;
   isOwner: boolean;
+  /* The CEO's delegate takes the CEO's decisions; only the CEO sets it. An older server sends none. */
+  isCeoDelegate?: boolean;
 };
 
 export type Company = { id: string; name: string };
 
-export type Me = { person: Person; company: Company };
+/* canDecideCompany: this person takes the decisions only the CEO takes, the orchestrator's cards among them. */
+export type Me = { person: Person; company: Company; canDecideCompany?: boolean };
 
 export type PersonView = {
   id: string;
@@ -32,6 +35,7 @@ export type PersonView = {
   title: string;
   status: Person['status'];
   isOwner: boolean;
+  isCeoDelegate?: boolean;
   access: AccessView;
   /* On the map: how many decisions wait for this person among those the viewer sees; null when the viewer cannot see them. */
   pendingDecisions?: number | null;
@@ -293,7 +297,8 @@ export type TaskLine = {
   updatedAt: string;
 };
 
-export type TaskLogLine = { kind: string; text: string; data: unknown; by: { kind: 'person' | 'agent'; id: string; name: string } | null; at: string };
+/* by.for: the person the orchestrator acted for. */
+export type TaskLogLine = { kind: string; text: string; data: unknown; by: { kind: 'person' | 'agent'; id: string; name: string; for?: { id: string; name: string } } | null; at: string };
 export type TaskRequest = { id: string; kind: 'question' | 'approval' | 'stuck'; text: string; commit: string | null; status: string; answer: string | null; agent: AgentRef | null; at: string };
 
 export type TaskDetail = TaskLine & {
@@ -362,11 +367,15 @@ export type WaitingRequest = {
   at: string;
   agent: { id: string; name: string };
   task: { id: string; number: number; title: string; department: TaskPlace };
-  /* The person whose decision it is: whose card counts it and whose filter shows it. Who may answer stays as before. */
+  /* The person whose decision it is: whose card counts it and whose filter shows it. */
   ownerPersonId: string;
-  /* Whether this person may answer it here; an approval is for people who see the whole company. */
+  /* Whether this person may take it; the server checks it again. Who takes it; an older server sends none. */
   canAnswer: boolean;
+  decidedBy?: DecidedBy;
 };
+
+/* Who takes a decision: the CEO and the CEO delegate, or also the people of its department. */
+export type DecidedBy = { kind: 'ceo_and_delegate' | 'department_and_ceo'; department: { id: string; name: string } | null };
 
 /* A card of the orchestrator that waits for people: a structure to build, or people to hire into a department. */
 export type ProposalDecision = {
@@ -377,10 +386,12 @@ export type ProposalDecision = {
   at: string;
   ownerPersonId: string;
   canAnswer: boolean;
+  decidedBy?: DecidedBy;
 } & ({ kind: 'structure'; items: StructureItem[] } | { kind: 'staff'; items: StaffLine[] });
 
-/* The orchestrator's request for the computer the server runs on, which only the CEO sees and answers. */
-export type ComputerAccessDecision = { kind: 'computer_access'; id: 'server'; agent: { id: string; name: string }; ownerPersonId: string; canAnswer: true; at: string; view: ComputerView };
+/* The orchestrator's request for the computer the server runs on, which people of the whole company see and the CEO and
+   the delegate answer. */
+export type ComputerAccessDecision = { kind: 'computer_access'; id: 'server'; agent: { id: string; name: string }; ownerPersonId: string; canAnswer: boolean; decidedBy?: DecidedBy; at: string; view: ComputerView };
 
 /* Everything that waits for people as /api/requests shows it to this person, and the counts of all of it: per owner, per
    asking agent and in total. */
@@ -449,7 +460,8 @@ export type Running = {
    to connect plans, or to add a plan to a machine. */
 /* Access to the computer the server runs on: whether Hornhoof reaches it, until when it is open, what the orchestrator asked it for. */
 /* machine: the hostname of the machine the server runs on, when that computer joined as a machine. */
-export type ComputerView = { available: boolean; until: string | null; asked: { reason: string; at: string } | null; machine?: string | null };
+/* canAnswer: this person opens, closes or declines it; an older server sends none, as only the CEO saw it. */
+export type ComputerView = { available: boolean; until: string | null; asked: { reason: string; at: string } | null; machine?: string | null; canAnswer?: boolean };
 export type ShownCommand = { id: string; kind: 'machine' | 'plans' | 'add'; plans: string[]; machine: string | null; command: string; expiresAt: string };
 
 /* The node that comes with the server, for those who see the whole company. */

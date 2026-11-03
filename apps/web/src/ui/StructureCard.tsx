@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { api } from '../api';
 import { deptLabel, errorText, useT, type Messages } from '../i18n';
 import { TEMPLATES } from '../templates';
-import type { NewItem, Org, StructureItem, TemplateKey } from '../types';
+import type { DecidedBy, NewItem, Org, StructureItem, TemplateKey } from '../types';
+import { DecidedByNote } from './DecidedBy';
 
 type Props = {
   proposal?: { id: string; brief: string; items: StructureItem[] };
@@ -14,11 +15,13 @@ type Props = {
   onDone?(): void;
   /* Only the hand-made card can be put away; his proposal stays until it is applied or replaced. */
   onHide?(): void;
+  /* Someone who may not take the card reads it, with who takes it, and changes nothing. */
+  locked?: DecidedBy;
 };
 
 const isNew = (item: StructureItem): item is NewItem => 'template' in item;
 /* Operations is always there: a new one cannot be left out. */
-const locked = (item: StructureItem) => isNew(item) && item.template === 'operations';
+const fixed = (item: StructureItem) => isNew(item) && item.template === 'operations';
 
 function nameOf(t: Messages, item: StructureItem, departments: Org['departments']): string {
   if (isNew(item)) return item.name ?? t.templates[item.template].name;
@@ -27,12 +30,12 @@ function nameOf(t: Messages, item: StructureItem, departments: Org['departments'
 }
 
 /* The orchestrator's proposal, or the hand-made one: ticks, and one click that creates them. */
-export function StructureCard({ proposal, manual, departments, onCorrect, onDone, onHide }: Props) {
+export function StructureCard({ proposal, manual, departments, onCorrect, onDone, onHide, locked }: Props) {
   const t = useT();
   const [items] = useState<StructureItem[]>(
     () => proposal?.items ?? TEMPLATES.filter(x => !manual?.existing.includes(x.key)).map(x => ({ template: x.key, checked: x.ticked, note: '' })),
   );
-  const [ticks, setTicks] = useState(() => items.map(i => i.checked || locked(i)));
+  const [ticks, setTicks] = useState(() => items.map(i => i.checked || fixed(i)));
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState(false);
   const [failure, setFailure] = useState<unknown>(null);
@@ -60,12 +63,12 @@ export function StructureCard({ proposal, manual, departments, onCorrect, onDone
       {items.map((item, i) => {
         const note = item.note || (isNew(item) ? t.templates[item.template].description : '');
         return (
-          <label key={i} className={locked(item) ? 'lock' : ''}>
+          <label key={i} className={fixed(item) ? 'lock' : ''}>
             <input
               type="checkbox"
               data-template={isNew(item) ? item.template : undefined}
               checked={ticks[i]}
-              disabled={sent || locked(item)}
+              disabled={sent || !!locked || fixed(item)}
               onChange={e => setTicks(ticks.map((v, j) => (j === i ? e.target.checked : v)))}
             />
             <span>
@@ -86,11 +89,14 @@ export function StructureCard({ proposal, manual, departments, onCorrect, onDone
           {errorText(t, failure)}
         </p>
       )}
+      {locked && <DecidedByNote by={locked} />}
       <div className="f">
-        <button className="btn" type="button" disabled={sent || busy || !chosen.length} onClick={create}>
-          {label}
-        </button>
-        {!sent && (
+        {!locked && (
+          <button className="btn" type="button" disabled={sent || busy || !chosen.length} onClick={create}>
+            {label}
+          </button>
+        )}
+        {!sent && !locked && (
           <button className="btn ghost" type="button" onClick={onCorrect}>
             {t.card.correct}
           </button>

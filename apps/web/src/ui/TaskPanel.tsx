@@ -13,7 +13,8 @@ const field = (data: unknown, key: string): unknown => (data && typeof data === 
 
 /* A log line in words: who did what, with its text and, for work handed in, the evidence. */
 function eventTitle(t: Messages, e: TaskLogLine): string {
-  const by = e.by?.name ?? t.window.hornhoof;
+  /* The orchestrator answering for a person says for whom. */
+  const by = e.by?.for ? t.tasks.actedFor(t.window.orchestrator, e.by.for.name) : (e.by?.name ?? t.window.hornhoof);
   const ev = t.tasks.events;
   switch (e.kind) {
     case 'verdict':

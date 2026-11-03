@@ -2,12 +2,13 @@ import { useState, type FormEvent } from 'react';
 import { api } from '../api';
 import { errorText, useT } from '../i18n';
 import type { TaskPlace, WaitingRequest } from '../types';
+import { DecidedByNote } from './DecidedBy';
 import { Field } from './Field';
 import { Markdown } from './Markdown';
 
-/* Whether words to the agent in its window or terminal answer any of these: a question and a stuck task take them, a pick
-   and a commit to approve do not. */
-export const wordsAnswer = (requests: WaitingRequest[]) => requests.some(r => r.kind === 'question' || r.kind === 'stuck');
+/* Whether this person's words to the agent in its window or terminal answer any of these: a question and a stuck task they
+   may take take them, a pick and a commit to approve do not. */
+export const wordsAnswer = (requests: WaitingRequest[]) => requests.some(r => r.canAnswer && (r.kind === 'question' || r.kind === 'stuck'));
 
 /* A picture an agent showed, as people who reach its task load it. */
 const picture = (id: string) => `/api/attachments/${id}`;
@@ -19,7 +20,7 @@ const formOf = (request: WaitingRequest): WaitingRequest['kind'] | null => (requ
 type Shared = { onOpenTask: (id: string) => void; onOpenAgent: (id: string) => void; placeName: (p: TaskPlace) => string };
 
 /* One thing an agent waits for: a question to answer, a commit to approve, or a task it is stuck on. Its answers show only
-   to a person the server lets answer it: an approval to people who see the whole company. */
+   to a person the server lets take it; anyone else reads who takes it. */
 function RequestItem({ request, onDone, onOpenTask, onOpenAgent, placeName }: Shared & { request: WaitingRequest; onDone: () => void }) {
   const t = useT();
   const [text, setText] = useState('');
@@ -120,10 +121,17 @@ function RequestItem({ request, onDone, onOpenTask, onOpenAgent, placeName }: Sh
           </div>
         </form>
       )}
-      {request.kind === 'approval' && !request.canAnswer && (
+      {!request.canAnswer && (
         <div className="req-form">
-          <Commit request={request} />
-          <p className="muted">{t.tasks.approvedByCompany}</p>
+          {request.kind === 'approval' && <Commit request={request} />}
+          {request.kind === 'choice' && (
+            <ul className="req-ways">
+              {request.options.map((o, i) => (
+                <li key={i}>{o.label}</li>
+              ))}
+            </ul>
+          )}
+          <DecidedByNote by={request.decidedBy} />
         </div>
       )}
       {form === 'approval' && (
