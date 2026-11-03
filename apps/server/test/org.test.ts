@@ -224,4 +224,40 @@ describe('GET /api/org', () => {
     const org = (await app.inject({ url: '/api/org', cookies: { hh_session: res.cookies[0]!.value } })).json();
     expect(org.orchestrator.subscription).toBeNull();
   });
+
+  it('gives each deputy the top-level department ids they reach, products and teams included', async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    const [company] = await db.select().from(companies);
+    const companyId = company!.id;
+    const [dev, sales, support] = await db
+      .insert(departments)
+      .values([
+        { companyId, name: 'Development', roleCode: 'DEV', position: 0 },
+        { companyId, name: 'Sales', roleCode: 'SAL', position: 1 },
+        { companyId, name: 'Support', roleCode: 'SUP', position: 2 },
+      ])
+      .returning();
+    const [mascot] = await db.insert(departments).values({ companyId, name: 'Mascot', parentId: dev!.id, roleCode: 'DEV', position: 3 }).returning();
+    const [inbound] = await db.insert(teams).values({ companyId, departmentId: sales!.id, name: 'Inbound', stage: 0 }).returning();
+
+    await invitePerson(app, ceo, { name: 'Oleg', email: 'oleg@acme.com', access: { departments: [sales!.id, support!.id] } });
+    await invitePerson(app, ceo, { name: 'Mira', email: 'mira@acme.com', access: { departments: [mascot!.id], teams: [inbound!.id] } });
+    await invitePerson(app, ceo, { name: 'Kate', email: 'kate@acme.com', access: { departments: [mascot!.id] } });
+
+    const org = (await app.inject({ url: '/api/org', ...as(ceo) })).json();
+    const byName = Object.fromEntries(org.people.map((p: { name: string; deputy: boolean; departments?: string[] }) => [p.name, { deputy: p.deputy, departments: p.departments }]));
+    expect(byName).toEqual({
+      Ivan: { deputy: false, departments: undefined },
+      Oleg: { deputy: true, departments: [sales!.id, support!.id] },
+      Mira: { deputy: true, departments: [dev!.id, sales!.id] },
+    });
+    const mira = org.people.find((p: { name: string }) => p.name === 'Mira');
+    expect(mira.access).toEqual({
+      whole: false,
+      departments: [{ id: mascot!.id, name: 'Mascot' }],
+      teams: [{ id: inbound!.id, name: 'Inbound', departmentId: sales!.id }],
+    });
+    expect(org.departments.find((d: { id: string }) => d.id === dev!.id).people.map((p: { name: string }) => p.name)).toEqual(['Kate']);
+  });
 });

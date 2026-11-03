@@ -78,6 +78,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
     /* The map shows the turn's short name. */
     const turn = open && { id: open.id, number: open.number, goal: open.title || open.goal };
     const allTeams = await db.select().from(teams).orderBy(asc(teams.stage), asc(teams.createdAt));
+    const topDepts = depts.filter(d => !d.parentId);
     /* A listed person counts each place as its top-level department: a product as the department holding it, a team as its department. */
     const topOf = (deptId: string | undefined) => {
       const d = depts.find(x => x.id === deptId);
@@ -85,14 +86,17 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
     };
     const access = await db.select().from(personAccess);
     const homes = new Map(
-      active.map(p => [p.id, new Set(access.filter(a => a.personId === p.id).map(a => topOf(a.departmentId ?? allTeams.find(t => t.id === a.teamId)?.departmentId)))]),
+      active.map(p => {
+        const reached = new Set(access.filter(a => a.personId === p.id).map(a => topOf(a.departmentId ?? allTeams.find(t => t.id === a.teamId)?.departmentId)));
+        return [p.id, topDepts.filter(d => reached.has(d.id)).map(d => d.id)];
+      }),
     );
-    /* People who see the whole company or more than one department sit next to the CEO; the rest in their department. */
-    const nextToCeo = active.filter(p => p.scopeKind === 'company' || homes.get(p.id)!.size > 1);
+    /* People who see the whole company or more than one department go in org.people; the rest in their department. */
+    const nextToCeo = active.filter(p => p.scopeKind === 'company' || homes.get(p.id)!.length > 1);
     /* Each card counts the decisions waiting for its person that the viewer sees, as the decisions screen lists them. */
     const decisions = await visibleDecisions(ctx, me);
     const views = new Map((await personViews(db, active)).map(v => [v.id, { ...v, pendingDecisions: pendingFor(decisions, me, v.id) }]));
-    const inDepartment = (deptId: string) => active.filter(p => p.scopeKind !== 'company' && homes.get(p.id)!.size === 1 && homes.get(p.id)!.has(deptId)).map(p => views.get(p.id)!);
+    const inDepartment = (deptId: string) => active.filter(p => p.scopeKind !== 'company' && homes.get(p.id)!.length === 1 && homes.get(p.id)![0] === deptId).map(p => views.get(p.id)!);
     const running = await db
       .select({ agentId: jobs.agentId, taskId: jobs.taskId, startedAt: jobs.startedAt, createdAt: jobs.createdAt })
       .from(jobs)
@@ -216,11 +220,13 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
       },
       agents: { total: allAgents.length, working: await workingCount(db, me.companyId) },
       turn: turn ?? null,
-      people: nextToCeo.map(p => ({ ...views.get(p.id)!, deputy: p.scopeKind !== 'company' })),
+      people: nextToCeo.map(p =>
+        p.scopeKind === 'company'
+          ? { ...views.get(p.id)!, deputy: false }
+          : { ...views.get(p.id)!, deputy: true, departments: homes.get(p.id)! },
+      ),
       /* Products are departments inside a department; the map shows only the top level and lists the products on it. */
-      departments: depts
-        .filter(d => !d.parentId)
-        .map(d => ({
+      departments: topDepts.map(d => ({
           id: d.id,
           name: d.name,
           templateKey: d.templateKey,

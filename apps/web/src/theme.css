@@ -337,6 +337,10 @@ button, input, select { font: inherit; color: inherit; }
 .chip span { display: grid; min-width: 0; line-height: 1.2; }
 .chip b { font-family: var(--f-display); font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chip small { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dept-chips { left: 0; top: 0; margin: 0; padding: 0; list-style: none; }
+.dept-chips > li { position: absolute; }
+.dept-chips .chip > .edge-in { gap: 8px; padding: 0 10px; }
+.dept-chips .chip .ic { width: 16px; height: 16px; }
 /* The orchestrator hub from the prototype: a turning dashed ring, a half gauge of 24 segments and the share of agents at work. */
 .hub { color: var(--ink); border-radius: 50%; }
 .hub > .hub-art { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }

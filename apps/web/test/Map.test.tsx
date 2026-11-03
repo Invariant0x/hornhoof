@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
-import { orchestratorStatus, deptLayout, MapScreen } from '../src/screens/Map';
+import { orchestratorStatus, deptLayout, pulsePath, MapScreen } from '../src/screens/Map';
 import type { SubView } from '../src/types';
 import { LanguageProvider } from '../src/i18n';
 import type { Department, Employee, Me } from '../src/types';
@@ -110,11 +110,13 @@ describe('Map', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
-  it('shows a deputy next to the CEO on the map', async () => {
-    const oleg = { ...PEOPLE[2]!, id: 'p5', name: 'Oleg', title: '', access: { whole: false, departments: [{ id: 'd1', name: 'Marketing' }, { id: 'd2', name: 'Development' }], teams: [] }, deputy: true };
+  it('shows a multi-department deputy in the department strip while whole-company deputies stay on top', async () => {
+    const oleg = { ...PEOPLE[2]!, id: 'p5', name: 'Oleg', title: '', access: { whole: false, departments: [{ id: 'd1', name: 'Marketing' }, { id: 'd2', name: 'Development' }], teams: [] }, deputy: true, departments: ['d1', 'd2'] };
     mockApi({ 'GET /api/org': [200, { ...ORG_WITH_TEAMS, people: [...ORG.people, oleg] }] });
-    render(<MapScreen {...PROPS} />);
+    const { container } = render(<MapScreen {...PROPS} />);
     expect((await screen.findByText('Oleg')).closest('li')).toHaveTextContent('Deputy: Marketing, Development');
+    expect(container.querySelector('.dept-chips')).toContainElement(screen.getByText('Oleg'));
+    expect(container.querySelector('.chips')).toContainElement(screen.getByText('Maria'));
     expect(screen.getByText('Maria').closest('li')).toHaveTextContent('Deputy CEO');
   });
 
@@ -228,7 +230,7 @@ describe('Map', () => {
     expect(opened).toBe(2);
   });
 
-  it('puts a count on the card of each person decisions wait for, runs an amber signal from the hub to them, and opens their decisions', async () => {
+  it('puts a count on the card of each person decisions wait for, runs an amber signal to them, and opens their decisions', async () => {
     const onOpenDecisions = vi.fn();
     mockApi({ 'GET /api/org': [200, waiting({ p1: 1, p2: 0, p4: 2 })] });
     const { container } = render(<MapScreen {...PROPS} onOpenDecisions={onOpenDecisions} />);
@@ -239,12 +241,13 @@ describe('Map', () => {
     const maria = screen.getByRole('button', { name: 'Maria: no decisions wait' });
     expect(maria).not.toHaveClass('attn');
     expect(maria.querySelector('.chip-count')).toBeNull();
-    /* One signal per person, each from the hub's edge down to the bottom of their card, with a dot running that way. */
+    /* Whole-company people get their way from the hub; department people get theirs from their department. */
     const signals = [...container.querySelectorAll('.wires path[data-ask]')];
     expect(signals.map(s => s.getAttribute('data-ask'))).toEqual(['p1', 'p4']);
+    expect(signals[0]!.getAttribute('d')!.startsWith('M 600 300 ')).toBe(true);
+    expect(signals[1]!.getAttribute('d')).toBe('M 110 200 L 70 200');
     for (const s of signals) {
       const d = s.getAttribute('d')!;
-      expect(d.startsWith('M 600 300 ')).toBe(true);
       expect(s).toHaveClass('tr', 'live', 'a');
       expect(runningDots(container, 'a', d)).toHaveLength(2);
     }
@@ -255,13 +258,14 @@ describe('Map', () => {
     expect(onOpenDecisions).toHaveBeenLastCalledWith('p2');
   });
 
-  it('gives a person with one department a card on the map too, once, and keeps the count when the map is fetched again', async () => {
+  it('gives a person with one department a card beside it, once, and keeps the count when the map is fetched again', async () => {
     const stream = fakeStream();
     let counts: Record<string, number> = { p1: 0, p2: 0, p4: 1 };
     mockApi({ 'GET /api/org': () => [200, waiting(counts)] });
     const { container } = render(<MapScreen {...PROPS} />);
     expect(await screen.findByRole('button', { name: 'Dan: 1 decision waits' })).toBeInTheDocument();
-    expect([...container.querySelectorAll('.chips li b')].map(b => b.textContent)).toEqual(['Ivan', 'Maria', 'Dan']);
+    expect([...container.querySelectorAll('.chips li b')].map(b => b.textContent)).toEqual(['Ivan', 'Maria']);
+    expect([...container.querySelectorAll('.dept-chips li b')].map(b => b.textContent)).toEqual(['Dan']);
     /* The last decision was answered: the count, the blinking and the signals go out. */
     counts = { p1: 0, p2: 0, p4: 0 };
     stream.send({ type: 'requests' });
@@ -555,6 +559,180 @@ describe('Map', () => {
     mockApi({ 'GET /api/org': [200, { ...ORG, orchestrator: { ...ORG.orchestrator, subscription: null } }] });
     render(<MapScreen {...PROPS} />);
     expect(await screen.findByText('Needs a subscription to start')).toBeInTheDocument();
+  });
+
+  it('places department people beside or under their departments on ordinary traces, leaving whole-company people on top', async () => {
+    const dan = { ...PEOPLE[2]!, id: 'p4', name: 'Dan', title: 'Sales lead', status: 'active' as const };
+    const oleg = {
+      ...PEOPLE[2]!,
+      id: 'p5',
+      name: 'Oleg',
+      title: '',
+      status: 'active' as const,
+      deputy: true,
+      departments: ['d1', 'd2'],
+      access: { whole: false, departments: [{ id: 'd1', name: 'Sales' }, { id: 'd2', name: 'Support' }], teams: [] },
+    };
+    const org = {
+      ...ORG,
+      people: [...ORG.people, oleg],
+      departments: [
+        dept({ id: 'd1', name: 'Sales', people: [dan] }),
+        dept({ id: 'd2', name: 'Support' }),
+        dept({ id: 'd3', name: 'Design' }),
+      ],
+    };
+    mockApi({ 'GET /api/org': [200, org] });
+    const { container } = render(<MapScreen {...PROPS} />);
+    await screen.findByText('Dan');
+    expect([...container.querySelectorAll('.chips li b')].map(b => b.textContent)).toEqual(['Ivan', 'Maria']);
+    expect([...container.querySelectorAll('.dept-chips li b')].map(b => b.textContent)).toEqual(['Dan', 'Oleg']);
+
+    const danLi = screen.getByText('Dan').closest('li') as HTMLElement;
+    expect(danLi.style.left).toBe('-86px');
+    expect(danLi.style.top).toBe('176px');
+    expect(danLi.style.width).toBe('156px');
+    expect(danLi.style.height).toBe('48px');
+
+    const danWire = container.querySelector('.wires path.tr[data-person="p4"]')!;
+    expect(danWire.getAttribute('class')).toBe('tr');
+    expect(danWire.getAttribute('d')).toBe('M 110 200 L 70 200');
+  });
+
+  it('runs pulses along a department person line and sends waiting decision signals from the waiting department', async () => {
+    const stream = fakeStream();
+    const waiter: Employee = { ...DEV_ORG.departments[0]!.employees[0]!, id: 'e2', name: 'Waiter', status: 'waiting' };
+    const dan = { ...PEOPLE[2]!, id: 'p4', name: 'Dan', title: '', status: 'active' as const, pendingDecisions: 0 };
+    const oleg = {
+      ...PEOPLE[2]!,
+      id: 'p5',
+      name: 'Oleg',
+      title: '',
+      status: 'active' as const,
+      deputy: true,
+      departments: ['d1', 'd3'],
+      pendingDecisions: 1,
+      access: { whole: false, departments: [{ id: 'd1', name: 'Sales' }, { id: 'd3', name: 'Support' }], teams: [] },
+    };
+    const org = {
+      ...ORG,
+      people: [...ORG.people.map(p => ({ ...p, pendingDecisions: 0 })), oleg],
+      departments: [
+        dept({ id: 'd1', name: 'Sales', people: [dan] }),
+        dept({ id: 'd2', name: 'Design' }),
+        dept({ id: 'd3', name: 'Support', employees: [waiter] }),
+      ],
+    };
+    expect(pulsePath({ kind: 'person', id: 'p4' }, { kind: 'department', id: 'd1' }, org)).toEqual([[70, 200], [110, 200]]);
+    expect(pulsePath({ kind: 'department', id: 'd1' }, { kind: 'person', id: 'p4' }, org)).toEqual([[110, 200], [70, 200]]);
+    expect(pulsePath({ kind: 'person', id: 'p4' }, { kind: 'orchestrator' }, org)).toBeNull();
+
+    mockApi({ 'GET /api/org': [200, org] });
+    const { container } = render(<MapScreen {...PROPS} />);
+    await screen.findByText('Oleg');
+
+    /* Oleg looks after Sales (row 0) and Support (row 1) in the left column; Support waits, so the signal starts on Support (y=574). */
+    const ask = container.querySelector('.wires path[data-ask="p5"]')!;
+    expect(ask.getAttribute('d')).toBe('M 110 574 L 96 574 L 96 420 L 70 420');
+    expect(ask).toHaveClass('tr', 'live', 'a');
+    expect(runningDots(container, 'a', ask.getAttribute('d')!)).toHaveLength(2);
+
+    vi.useFakeTimers();
+    try {
+      stream.send({ type: 'pulse', from: { kind: 'person', id: 'p4' }, to: { kind: 'department', id: 'd1' } });
+      expect(shots(container, 'c')).toHaveLength(1);
+      expect(shots(container, 'c')[0]!.querySelector('animateMotion')!.getAttribute('path')).toBe('M 70 200 L 110 200');
+      stream.send({ type: 'pulse', from: { kind: 'department', id: 'd1' }, to: { kind: 'person', id: 'p4' } });
+      expect(shots(container, 'a')).toHaveLength(1);
+      expect(shots(container, 'a')[0]!.querySelector('animateMotion')!.getAttribute('path')).toBe('M 110 200 L 70 200');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('includes docked department chips in the Fit bounds', async () => {
+    const scaleOf = async (withDeptPerson: boolean) => {
+      const dan = { ...PEOPLE[2]!, id: 'p4', name: 'Dan', title: '', status: 'active' as const };
+      const org = {
+        ...ORG,
+        departments: [
+          dept({ id: 'd1', name: 'Sales', people: withDeptPerson ? [dan] : [] }),
+          dept({ id: 'd2', name: 'Support', people: withDeptPerson ? [{ ...dan, id: 'p6', name: 'Eva' }] : [] }),
+        ],
+      };
+      mockApi({ 'GET /api/org': [200, org] });
+      const { container, unmount } = render(<MapScreen {...PROPS} />);
+      await screen.findByText('agents working');
+      const mapEl = container.querySelector('.map') as HTMLElement;
+      Object.defineProperty(mapEl, 'clientWidth', { value: 1100, configurable: true });
+      Object.defineProperty(mapEl, 'clientHeight', { value: 900, configurable: true });
+      fireEvent.click(screen.getByRole('button', { name: 'Show everything' }));
+      const world = container.querySelector('.world') as HTMLElement;
+      const k = Number(/scale\(([^)]+)\)/.exec(world.style.transform)![1]);
+      unmount();
+      return k;
+    };
+    const withoutDocked = await scaleOf(false);
+    const withDocked = await scaleOf(true);
+    expect(withDocked).toBeLessThan(withoutDocked);
+  });
+
+  it.each([360, 1100])('fits every stacked chip and strip route inside a %i px map', async width => {
+    const dan = { ...PEOPLE[2]!, title: '', status: 'active' as const };
+    const ids = ['d1', 'd2', 'd3', 'd4', 'd5', 'd6'];
+    const org = {
+      ...ORG,
+      people: [...ORG.people, { ...dan, id: 'strip', name: 'Strip', deputy: true, departments: ['d1', 'd4'] }],
+      departments: ids.map(id => dept({ id, name: id, people: Array.from({ length: 3 }, (_, i) => ({ ...dan, id: `${id}:${i}`, name: `${id}:${i}` })) })),
+    };
+    mockApi({ 'GET /api/org': [200, org] });
+    const { container } = render(<MapScreen {...PROPS} />);
+    await screen.findByText('Strip');
+    const map = container.querySelector<HTMLElement>('.map')!;
+    Object.defineProperty(map, 'clientWidth', { value: width, configurable: true });
+    Object.defineProperty(map, 'clientHeight', { value: 900, configurable: true });
+    fireEvent.click(screen.getByRole('button', { name: 'Show everything' }));
+    const transform = container.querySelector<HTMLElement>('.world')!.style.transform;
+    const [, tx, ty, scale] = /translate\(([^p]+)px, ([^p]+)px\) scale\(([^)]+)\)/.exec(transform)!;
+    const points = [...container.querySelectorAll<HTMLElement>('.dept-chips li')].flatMap(c => [
+      [parseFloat(c.style.left), parseFloat(c.style.top)],
+      [parseFloat(c.style.left) + parseFloat(c.style.width), parseFloat(c.style.top) + parseFloat(c.style.height)],
+    ]);
+    for (const path of container.querySelectorAll('.wires path[data-person]')) {
+      const coords = path.getAttribute('d')!.match(/-?\d+(?:\.\d+)?/g)!.map(Number);
+      for (let i = 0; i < coords.length; i += 2) points.push([coords[i]!, coords[i + 1]!]);
+    }
+    for (const [x, y] of points) {
+      expect(Number(tx) + x! * Number(scale)).toBeGreaterThanOrEqual(31.99);
+      expect(Number(tx) + x! * Number(scale)).toBeLessThanOrEqual(width - 31.99);
+      expect(Number(ty) + y! * Number(scale)).toBeGreaterThanOrEqual(75.99);
+      expect(Number(ty) + y! * Number(scale)).toBeLessThanOrEqual(828.01);
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }));
+    const zoomed = container.querySelector<HTMLElement>('.world')!.style.transform;
+    expect(Number(/scale\(([^)]+)\)/.exec(zoomed)![1])).toBeCloseTo(Number(scale) * 1.2);
+  });
+
+  it('keeps bridge gaps clear while a department decision and its message animate', async () => {
+    const stream = fakeStream();
+    const person = { ...PEOPLE[2]!, title: '', deputy: true, status: 'active' as const };
+    const org = {
+      ...ORG,
+      people: [...ORG.people, { ...person, id: 'gutter', name: 'Gutter', departments: ['d1', 'd3'] },
+        { ...person, id: 'strip', name: 'Strip', departments: ['d1', 'd4'], pendingDecisions: 1 }],
+      departments: ['d1', 'd2', 'd3', 'd4', 'd5', 'd6'].map(id => dept({ id, name: id })),
+    };
+    mockApi({ 'GET /api/org': [200, org] });
+    const { container } = render(<MapScreen {...PROPS} />);
+    await screen.findByText('Strip');
+    const ask = container.querySelector('.wires path[data-ask="strip"]')!;
+    expect(ask).toHaveClass('tr', 'live', 'a');
+    const mask = ask.closest('g[mask]')?.getAttribute('mask');
+    expect(mask).toMatch(/^url\(#.+\)$/);
+    const id = mask!.slice(5, -1);
+    expect(container.querySelector(`[id="${id}"] path[stroke="black"]`)).not.toBeNull();
+    stream.send({ type: 'pulse', from: { kind: 'department', id: 'd1' }, to: { kind: 'person', id: 'strip' } });
+    expect(shots(container, 'a')[0]!.closest('g[mask]')).toHaveAttribute('mask', mask);
   });
 });
 

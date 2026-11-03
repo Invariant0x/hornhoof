@@ -1,9 +1,10 @@
 import type { LineState } from '@hornhoof/protocol/map';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { deptLabel, errorText, useLanguage, useT, type Messages } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
 import { useStream, type LiveMessage } from '../live';
-import { mapPeople, useOrg, type MapPerson } from '../org';
+import { peopleLayout, rowCenters, type PeopleLayout, type PersonChip } from '../map-people';
+import { departmentPeople, mapPeople, useOrg, wholeCompanyPeople, type MapPerson } from '../org';
 import type { Department, Employee, EmployeeStatus, Endpoint, Me, Org, SubView } from '../types';
 import { accessText } from '../ui/AccessPicker';
 import { Bar, percent } from '../ui/Bar';
@@ -11,6 +12,7 @@ import { usePanZoom, ZoomBar } from '../ui/canvas';
 import { Edge } from '../ui/Edge';
 import { LogoMark, PersonIcon } from '../ui/icons';
 import { PersonButton } from '../ui/PersonButton';
+import { PeopleBridgeMasks, peopleMask, PeopleWires } from '../ui/PeopleWires';
 import { LiveWay, Pulse, pulseSeconds, toD, useReducedMotion, type Point } from '../ui/wires';
 import { useWorkLines } from '../ui/work-lines';
 import { clock } from './Subscriptions';
@@ -87,12 +89,7 @@ const busY = (n: number) => chipsTop(n) + CHIP_H + 14;
 const TURN_TOP = CY + HUB + 10, TURN_W = 2 * BEND - 16, TURN_H = 56;
 
 const chipsWidth = (n: number) => n * CHIP_W + Math.max(0, n - 1) * CHIP_GAP;
-
-/* The centers of the people chips, left to right. */
-function chipCenters(n: number): number[] {
-  const left = CX - chipsWidth(n) / 2 + CHIP_W / 2;
-  return Array.from({ length: n }, (_, i) => left + i * (CHIP_W + CHIP_GAP));
-}
+const chipCenters = (n: number) => rowCenters(n, CHIP_W, CHIP_GAP);
 
 /* One gauge segment lights per 1/24 of the agents at work, and at least one while any agent works. */
 function gaugeArc(working: number, total: number): { d: string; n: number } {
@@ -107,9 +104,18 @@ const GAUGE_TRACK: Point[] = Array.from({ length: 37 }, (_, i) => {
   return [120 + 103 * Math.cos(a), 120 + 103 * Math.sin(a)];
 });
 
-/* The way from the hub's edge down to a person's card. */
-function toPerson(org: Org, id: string): Point[] | null {
-  const people = mapPeople(org);
+function deptPeopleOf(org: Org, spots = deptLayout(org.departments.length)): PeopleLayout {
+  const named = org.departments.map((d, i) => ({ id: d.id, ...spots[i]! }));
+  return peopleLayout(named, departmentPeople(org));
+}
+
+function topDeptId(org: Org, deptId: string): string | undefined {
+  return org.departments.find(d => d.id === deptId || d.products.some(pr => pr.id === deptId))?.id;
+}
+
+/* The way from the hub's edge up to a whole-company person's card on the top row. */
+function toTopPerson(org: Org, id: string): Point[] | null {
+  const people = wholeCompanyPeople(org);
   const i = people.findIndex(p => p.id === id);
   if (i < 0) return null;
   const x = chipCenters(people.length)[i]!;
@@ -117,26 +123,58 @@ function toPerson(org: Org, id: string): Point[] | null {
   return [[CX, CY - HUB], [CX, busY(n)], [x, busY(n)], [x, chipsTop(n) + CHIP_H]];
 }
 
-/* The ways from the hub to each person decisions wait for. */
-function decisionWays(org: Org): { id: string; pts: Point[] }[] {
+function deptDecisionRoutes(org: Org, placed: PeopleLayout, personId: string): Point[][] {
+  const routes = placed.routes.filter(r => r.personId === personId);
+  if (!routes.length) return [];
+  const waitingIds = new Set(org.departments.filter(d => d.employees.some(e => e.status === 'waiting')).map(d => d.id));
+  const matched = routes.filter(r => waitingIds.has(r.deptId));
+  return (matched.length ? matched : [routes[0]!]).map(r => r.pts);
+}
+
+/* The ways to each person decisions wait for: from the hub for whole-company people, from their department otherwise. */
+function decisionWays(org: Org, placed: PeopleLayout): { key: string; id: string; pts: Point[] }[] {
   return mapPeople(org).flatMap(p => {
-    const pts = p.pendingDecisions ? toPerson(org, p.id) : null;
-    return pts ? [{ id: p.id, pts }] : [];
+    if (!p.pendingDecisions) return [];
+    const topPts = toTopPerson(org, p.id);
+    if (topPts) return [{ key: p.id, id: p.id, pts: topPts }];
+    return deptDecisionRoutes(org, placed, p.id).map((pts, i) => ({ key: `${p.id}:${i}`, id: p.id, pts }));
   });
 }
 
-/* The way from an endpoint to the hub: up from a person's chip, or in from a department along its trace. */
+const isDeptPerson = (org: Org, id: string) => !wholeCompanyPeople(org).some(p => p.id === id);
+
+function deptPersonRoute(org: Org, personId: string, deptEndpointId: string): Point[] | null {
+  const deptId = topDeptId(org, deptEndpointId);
+  const route = deptId ? deptPeopleOf(org).routes.find(r => r.personId === personId && r.deptId === deptId) : undefined;
+  return route?.pts ?? null;
+}
+
+function deptPersonPulse(from: Endpoint, to: Endpoint, org: Org): Point[] | null | undefined {
+  if (from.kind === 'person' && isDeptPerson(org, from.id)) {
+    const pts = to.kind === 'department' ? deptPersonRoute(org, from.id, to.id) : null;
+    return pts ? [...pts].reverse() : null;
+  }
+  if (to.kind === 'person' && isDeptPerson(org, to.id)) {
+    return from.kind === 'department' ? deptPersonRoute(org, to.id, from.id) : null;
+  }
+  return undefined;
+}
+
+/* The way from an endpoint to the hub: down from a top-row person's chip, or in from a department along its trace. */
 function toHub(e: Endpoint, org: Org): Point[] | null {
   if (e.kind === 'orchestrator') return [];
   /* Agents inside one department run on its card. */
   if (e.kind === 'agent') return null;
-  if (e.kind === 'person') return toPerson(org, e.id)?.reverse() ?? null;
-  const i = org.departments.findIndex(d => d.id === e.id);
+  if (e.kind === 'person') return toTopPerson(org, e.id)?.reverse() ?? null;
+  const topId = topDeptId(org, e.id);
+  const i = topId ? org.departments.findIndex(d => d.id === topId) : -1;
   return i < 0 ? null : [...deptLayout(org.departments.length)[i]!.path].reverse();
 }
 
 /* The points a message's pulse runs along, or null when one end is not on the map. */
 export function pulsePath(from: Endpoint, to: Endpoint, org: Org): Point[] | null {
+  const direct = deptPersonPulse(from, to, org);
+  if (direct !== undefined) return direct;
   const a = toHub(from, org), b = toHub(to, org);
   if (!a || !b) return null;
   const pts = [...a, ...[...b].reverse()];
@@ -193,21 +231,30 @@ function deptClass(d: Department, flashing: boolean): string {
 
 const orchestratorReady = (sub: SubView | null) => !!sub && sub.status === 'ready' && (sub.kind === 'api_key' || sub.online);
 
+function expandBox(b: { x0: number; y0: number; x1: number; y1: number }, x0: number, y0: number, x1: number, y1: number) {
+  b.x0 = Math.min(b.x0, x0);
+  b.y0 = Math.min(b.y0, y0);
+  b.x1 = Math.max(b.x1, x1);
+  b.y1 = Math.max(b.y1, y1);
+}
+
 /* The part of the world that has something on it, so Fit fills the screen with it. */
 function contentBounds(org: Org): { x0: number; y0: number; x1: number; y1: number } {
-  const half = Math.max(chipsWidth(mapPeople(org).length) / 2, 260);
+  const topPeople = wholeCompanyPeople(org);
+  const half = Math.max(chipsWidth(topPeople.length) / 2, 260);
   const n = org.departments.length;
-  const turn = org.turn ? TURN_H : 0;
-  const b = { x0: CX - half, x1: CX + half, y0: chipsTop(n), y1: BELOW + turn + (n ? 0 : 120) };
-  for (const s of deptLayout(org.departments.length)) {
-    b.x0 = Math.min(b.x0, s.x);
-    b.x1 = Math.max(b.x1, s.x + s.w);
-    b.y1 = Math.max(b.y1, s.y + s.h);
-  }
+  const b = { x0: CX - half, x1: CX + half, y0: topPeople.length ? chipsTop(n) : CY - HUB, y1: BELOW + (org.turn ? TURN_H : 0) + (n ? 0 : 120) };
+  const spots = deptLayout(n);
+  spots.forEach(s => expandBox(b, s.x, s.y, s.x + s.w, s.y + s.h));
+  const placed = deptPeopleOf(org, spots);
+  placed.chips.forEach(c => expandBox(b, c.x, c.y, c.x + c.w, c.y + c.h));
+  placed.wires.forEach(w => w.pts.forEach(([x, y]) => expandBox(b, x, y, x, y)));
   return b;
 }
 
-type Shot = { key: number; pts: Point[]; tone: 'c' | 'a' };
+type Shot = { key: number; pts: Point[]; tone: 'c' | 'a'; personId?: string };
+
+const pulsePersonId = (from: Endpoint, to: Endpoint) => from.kind === 'person' ? from.id : to.kind === 'person' ? to.id : undefined;
 
 /* The way to each department runs while its head works on the orchestrator's task, down the trace to the card, and for
    five minutes after it gave a result back, up the trace to the hub. */
@@ -224,9 +271,13 @@ function WorkLines({ org, spots, stateOf, still }: { org: Org; spots: DeptSpot[]
   });
 }
 
-/* Each person decisions wait for gets a way of their own, running amber from the hub to their card. */
-function DecisionSignals({ ways, still }: { ways: { id: string; pts: Point[] }[]; still: boolean }) {
-  return ways.map(w => <LiveWay key={w.id} pts={w.pts} speed={PULSE_SPEED} tone="a" still={still} data={{ 'data-ask': w.id }} />);
+/* Decisions run amber from the hub or the person's department, with the same bridges as the quiet trace. */
+function DecisionSignals({ ways, still, placed, prefix }: { ways: { key: string; id: string; pts: Point[] }[]; still: boolean; placed: PeopleLayout; prefix: string }) {
+  return ways.map(w => (
+    <g key={w.key} mask={peopleMask(placed, prefix, w.id)}>
+      <LiveWay pts={w.pts} speed={PULSE_SPEED} tone="a" still={still} data={{ 'data-ask': w.id }} />
+    </g>
+  ));
 }
 
 /* The line under a person's name: their title, else the department they belong to or what they reach. */
@@ -236,24 +287,50 @@ function personDetail(t: Messages, p: MapPerson, org: Org): string {
   return p.deputy ? t.map.deputy(accessText(t, p.access, org)) : t.map.wholeCompany;
 }
 
-/* The people on the top row, each card opening the decisions waiting for that person. */
+function PersonChipCard({ org, person, cut, onOpen }: { org: Org; person: MapPerson; cut: number; onOpen(personId: string): void }) {
+  const t = useT();
+  return (
+    <PersonButton person={person} onOpen={() => onOpen(person.id)}>
+      <Edge cut={cut} className="chip">
+        <PersonIcon label={t.map.person} />
+        <span>
+          <b>{person.name}</b>
+          <small>{personDetail(t, person, org)}</small>
+        </span>
+      </Edge>
+    </PersonButton>
+  );
+}
+
+/* Whole-company people on the top row, each card opening the decisions waiting for that person. */
 function PeopleRow({ org, people, top, onOpen }: { org: Org; people: MapPerson[]; top: number; onOpen(personId: string): void }) {
   const t = useT();
+  if (!people.length) return null;
   return (
     <ul className="chips" style={{ left: CX - chipsWidth(people.length) / 2, top, gap: CHIP_GAP }} aria-label={t.map.leaders}>
       {people.map(p => (
         <li key={p.id} style={{ width: CHIP_W, height: CHIP_H }}>
-          <PersonButton person={p} onOpen={() => onOpen(p.id)}>
-            <Edge cut={8} className="chip">
-              <PersonIcon label={t.map.person} />
-              <span>
-                <b>{p.name}</b>
-                <small>{personDetail(t, p, org)}</small>
-              </span>
-            </Edge>
-          </PersonButton>
+          <PersonChipCard org={org} person={p} cut={8} onOpen={onOpen} />
         </li>
       ))}
+    </ul>
+  );
+}
+
+/* Department people docked beside their cards or placed in the strip under the lowest row. */
+function DeptPeopleChips({ org, chips, byId, onOpen }: { org: Org; chips: PersonChip[]; byId: Map<string, MapPerson>; onOpen(personId: string): void }) {
+  const t = useT();
+  if (!chips.length) return null;
+  return (
+    <ul className="dept-chips" aria-label={t.dept.people}>
+      {chips.flatMap(c => {
+        const p = byId.get(c.id);
+        return p ? (
+          <li key={c.id} style={{ left: c.x, top: c.y, width: c.w, height: c.h }}>
+            <PersonChipCard org={org} person={p} cut={8} onOpen={onOpen} />
+          </li>
+        ) : [];
+      })}
     </ul>
   );
 }
@@ -266,11 +343,13 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator, inside = false, 
   const t = useT();
   const { language } = useLanguage();
   const still = useReducedMotion();
+  const wirePrefix = useId();
   const company = me.person.scopeKind === 'company';
   const { org, failure } = useOrg();
   const [shots, setShots] = useState<Shot[]>([]);
+  const [minZoom, setMinZoom] = useState(MIN_K);
   const box = useRef<HTMLDivElement>(null);
-  const { view, setView, zoomAt, handlers, dragged } = usePanZoom(box, org, { min: MIN_K, max: MAX_K });
+  const { view, setView, zoomAt, handlers, dragged } = usePanZoom(box, org, { min: minZoom, max: MAX_K });
   const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
   const shotKey = useRef(0);
   const held = useRef<{ m: Extract<LiveMessage, { type: 'pulse' }>; at: number }[]>([]);
@@ -308,7 +387,7 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator, inside = false, 
   const fire = useCallback(
     (pts: Point[], m: Extract<LiveMessage, { type: 'pulse' }>) => {
       const key = ++shotKey.current;
-      setShots(s => [...s, { key, pts, tone: pulseTone(m.from, m.to) }]);
+      setShots(s => [...s, { key, pts, tone: pulseTone(m.from, m.to), personId: pulsePersonId(m.from, m.to) }]);
       if (m.from.kind === 'department') flash(m.from.id);
       const id = setTimeout(() => {
         timers.current.delete(id);
@@ -351,7 +430,8 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator, inside = false, 
     const padX = 32, padTop = 76, padBottom = 72;
     const width = el.clientWidth - (windowOpen && el.clientWidth > NARROW ? WINDOW_W : 0);
     const room = el.clientHeight - padTop - padBottom;
-    const k = Math.max(MIN_K, Math.min((width - padX * 2) / (x1 - x0), room / (y1 - y0), 1.15));
+    const k = Math.min((width - padX * 2) / (x1 - x0), room / (y1 - y0), 1.15);
+    setMinZoom(Math.min(MIN_K, k));
     setView({ k, x: (width - (x1 - x0) * k) / 2 - x0 * k, y: padTop + (room - (y1 - y0) * k) / 2 - y0 * k, smooth: true });
   }, [org, windowOpen, inside, setView]);
 
@@ -392,10 +472,14 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator, inside = false, 
   const status = orchestratorStatus(t, sub, limitAt);
   const spots = deptLayout(depts.length);
   const top = chipsTop(depts.length), bus = busY(depts.length);
-  const people = mapPeople(org);
-  const chips = chipCenters(people.length);
-  /* The hub blinks while decisions wait for anyone on the map. */
-  const asked = decisionWays(org);
+  const allPeople = mapPeople(org);
+  const peopleById = new Map(allPeople.map(p => [p.id, p]));
+  const topPeople = wholeCompanyPeople(org);
+  const chips = chipCenters(topPeople.length);
+  const placed = deptPeopleOf(org, spots);
+  /* The hub blinks while decisions wait for whole-company people wired to it. */
+  const asked = decisionWays(org, placed);
+  const hubAsked = topPeople.some(p => (p.pendingDecisions ?? 0) > 0);
   const gauge = gaugeArc(org.agents.working, org.agents.total);
   const hubPlace = { left: CX - HUB, top: CY - HUB, width: HUB * 2, height: HUB * 2 };
   const hubArt = (
@@ -435,6 +519,7 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator, inside = false, 
       >
         <div className="halo" style={{ left: CX - 260, top: CY - 260, width: 520, height: 520 }} />
         <svg className="wires" width={W} height={H} viewBox={`0 0 ${W} ${H}`} aria-hidden="true">
+          <PeopleBridgeMasks placed={placed} prefix={wirePrefix} />
           {chips.length > 0 && (
             <>
               <path className="tr" d={`M ${chips[0]} ${top + CHIP_H} V ${bus} H ${chips[chips.length - 1]} V ${top + CHIP_H}`} />
@@ -449,21 +534,26 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator, inside = false, 
             <path key={depts[i]!.id} className="tr" data-wire={depts[i]!.id} d={toD(s.path)} />
           ))}
           {spots.map((s, i) => s.path.length > 2 && <circle key={depts[i]!.id} className="via" cx={s.path[2]![0]} cy={s.path[2]![1]} r="4" />)}
+          <PeopleWires placed={placed} />
           <WorkLines org={org} spots={spots} stateOf={stateOf} still={still} />
-          <DecisionSignals ways={asked} still={still} />
+
+          <DecisionSignals ways={asked} still={still} placed={placed} prefix={wirePrefix} />
           {shots.map(s => (
-            <Pulse key={s.key} pts={s.pts} speed={PULSE_SPEED} once tone={s.tone} />
+            <g key={s.key} mask={peopleMask(placed, wirePrefix, s.personId)}>
+              <Pulse pts={s.pts} speed={PULSE_SPEED} once tone={s.tone} />
+            </g>
           ))}
         </svg>
 
-        <PeopleRow org={org} people={people} top={top} onOpen={openDecisions} />
+        <PeopleRow org={org} people={topPeople} top={top} onOpen={openDecisions} />
+        <DeptPeopleChips org={org} chips={placed.chips} byId={peopleById} onOpen={openDecisions} />
 
         {company ? (
-          <button className={`hub${windowOpen ? ' on' : ''}${asked.length ? ' attn' : ''}`} type="button" style={hubPlace} aria-label={t.map.openOrchestrator} onPointerDown={e => e.stopPropagation()} onClick={onOpenOrchestrator}>
+          <button className={`hub${windowOpen ? ' on' : ''}${hubAsked ? ' attn' : ''}`} type="button" style={hubPlace} aria-label={t.map.openOrchestrator} onPointerDown={e => e.stopPropagation()} onClick={onOpenOrchestrator}>
             {hubArt}
           </button>
         ) : (
-          <div className={`hub${asked.length ? ' attn' : ''}`} style={hubPlace}>
+          <div className={`hub${hubAsked ? ' attn' : ''}`} style={hubPlace}>
             {hubArt}
           </div>
         )}

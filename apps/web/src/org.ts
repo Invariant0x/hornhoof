@@ -17,17 +17,39 @@ function withContext(org: Org, agentId: string, used: number): Org {
   return { ...org, orchestrator, departments };
 }
 
-/* A person on the map's top row, with the department they belong to when they reach only one. */
-export type MapPerson = PersonView & { deputy?: boolean; home?: Department };
+/* A person with a card on the map, with the department they belong to when they reach only one. */
+export type MapPerson = PersonView & { deputy?: boolean; departments?: string[]; home?: Department };
 
-/* Everyone with a card on the map's top row, each once: the people next to the CEO, then the people of one department in
-   the order of the departments. The server places them; the map only lines them up, so every card is reachable from the
-   hub, and the decisions screen names whoever it shows. */
+/* Everyone with a card on the map, each once: whole-company people and deputies first, then single-department people in
+   department order, so the decisions screen names whoever a card opens. */
 export function mapPeople(org: Org | null): MapPerson[] {
   if (!org) return [];
   const seen = new Set<string>();
   const all: MapPerson[] = [...org.people, ...org.departments.flatMap(d => d.people.map(p => ({ ...p, home: d })))];
   return all.filter(p => !seen.has(p.id) && !!seen.add(p.id));
+}
+
+function reachesDept(d: Department, p: Org['people'][number]): boolean {
+  const hasId = (id: string) => d.id === id || d.products.some(pr => pr.id === id);
+  return p.access.departments.some(a => hasId(a.id)) || p.access.teams.some(t => hasId(t.departmentId));
+}
+
+function deputyDepartments(org: Org, p: Org['people'][number]): string[] {
+  return p.departments ?? org.departments.filter(d => reachesDept(d, p)).map(d => d.id);
+}
+
+/* Whole-company people who keep the top row above the hub. */
+export function wholeCompanyPeople(org: Org | null): MapPerson[] {
+  return org ? org.people.filter(p => !p.deputy) : [];
+}
+
+/* People placed beside or under the departments they look after, each once. */
+export function departmentPeople(org: Org | null): (MapPerson & { departments: string[] })[] {
+  if (!org) return [];
+  const seen = new Set<string>();
+  const single = org.departments.flatMap(d => d.people.map(p => ({ ...p, home: d, departments: [d.id] })));
+  const multi = org.people.filter(p => p.deputy).map(p => ({ ...p, departments: deputyDepartments(org, p) }));
+  return [...single, ...multi].filter(p => !seen.has(p.id) && !!seen.add(p.id));
 }
 
 /* A tab that comes back from the background, or a computer from sleep, fetches again: what it shows moved meanwhile. */
