@@ -19,7 +19,7 @@ import { hookRejected } from './hook-rejections.js';
 
 const OPEN_JOBS = ['queued', 'running'] as const;
 
-const completionValue = (value: unknown, stopped: string): SQL => sql`case when ${jobs.error} = 'cancelled' then ${stopped} else ${value} end`;
+const completionValue = (value: unknown, stopped: string): SQL => sql`case when ${jobs.error} = 'cancelled' then ${stopped} else ${value ?? null} end`;
 
 /* A node may only touch the jobs sent to it; the built-in node those of API keys. */
 function jobsOf(id: NodeIdentity, ctx: Ctx): SQL {
