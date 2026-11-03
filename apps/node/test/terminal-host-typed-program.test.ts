@@ -7,7 +7,7 @@ import { ack, done, hasTmux, home, host, job, SECRET, sent, setUp, tmux, typeTur
 
 type Report = Extract<NodeMessage, { type: 'job.program' }>;
 const reports = (id: string) => sent.filter((m): m is Report => m.type === 'job.program' && m.jobId === id);
-const AGY = fileURLToPath(new URL('./fakes/agy', import.meta.url));
+const AGY = fileURLToPath(new URL('./fakes/fake-agy-term.mjs', import.meta.url));
 
 /* Simulate only the lost Stop; the real program, prompt hook, transcript and tmux observer keep running. */
 function loseStop(): void {
@@ -36,7 +36,7 @@ describe.skipIf(!hasTmux)('observing turns people type in a terminal', () => {
     const keys = vi.spyOn(tmux, 'keys');
     const kill = vi.spyOn(tmux, 'kill');
     await until(() => Boolean(done('typed-job')), 6000);
-    expect(done('typed-job')).toMatchObject({ ok: true, error: null, result: expect.stringContaining(kind === 'claude' ? 'echo: hello' : 'Git rebase') });
+    expect(done('typed-job')).toMatchObject({ ok: true, error: null, result: expect.stringContaining(kind === 'claude' ? 'echo: hello' : 'FINISHED') });
     expect(reports('typed-job').at(-1)).toMatchObject({ state: 'idle' });
     expect(host.typedJobs()).toEqual([]);
     expect(await tmux.programPid(`a-${key}`)).toBe(pid);

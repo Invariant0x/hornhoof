@@ -1,15 +1,11 @@
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Bridge } from '../src/terminal/bridge.js';
 import { fromAgent } from '../src/terminal/peer.js';
 
 const HOOK = fileURLToPath(new URL('../hh-hook.cjs', import.meta.url));
-const AGY = fileURLToPath(new URL('../hh-agy.cjs', import.meta.url));
-const FAKE_AGY = fileURLToPath(new URL('./fakes/agy', import.meta.url));
 /* Longer than a hook used to wait: how long a busy machine may take to tell whose a call is. */
 const BUSY_MS = 3500;
 
@@ -42,16 +38,4 @@ describe.skipIf(!existsSync('/proc/net/tcp'))('word that a turn ended, on a busy
     await vi.waitFor(() => expect(b.checked).toHaveLength(1), { timeout: BUSY_MS + 2000 });
     expect(b.heard).toEqual([{ event: 'stop', body: { last_assistant_message: 'Done.' } }]);
   }, 20_000);
-
-  it("reaches the node from Hornhoof's screen for Antigravity, once agy answered, though the bridge takes a while", async () => {
-    const b = await busyBridge();
-    const dir = mkdtempSync(join(tmpdir(), 'hh-agy-'));
-    const agy = spawn('node', [AGY, FAKE_AGY], { cwd: dir, env: { PATH: process.env.PATH, HOME: dir, HH_BRIDGE: b.url }, stdio: ['pipe', 'ignore', 'ignore'] });
-    closers.push(() => b.bridge.stop(), () => void agy.kill('SIGKILL'));
-    agy.stdin.write('hello\r');
-    /* Its start, the message and the end: each call the bridge looked at. */
-    await vi.waitFor(() => expect(b.checked).toHaveLength(3), { timeout: 4 * BUSY_MS + 5000 });
-    expect(b.heard.map(h => h.event)).toContain('prompt');
-    expect(b.heard).toContainEqual({ event: 'stop', body: { session_id: expect.any(String), last_assistant_message: expect.stringMatching(/^Git rebase/) } });
-  }, 30_000);
 });

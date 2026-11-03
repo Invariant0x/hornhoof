@@ -14,8 +14,7 @@ import { hasTmux, home, host, sent, setUp, job, codexJob, kimiJob, tmux } from '
    work shows it, so a long thought whose log is quiet keeps its turn. */
 const LOST_MS = 1500;
 const STILL_WAITING = 'still waiting';
-const FAKE_AGY = fileURLToPath(new URL('./fakes/agy', import.meta.url));
-const AGY_NEW = 'c3b66b04-872b-4fbe-a3a4-058a026ef20a';
+const FAKE_AGY = fileURLToPath(new URL('./fakes/fake-agy-term.mjs', import.meta.url));
 const UNSAID = 'end seen without hook';
 
 const within = (run: Promise<RunResult>, ms: number) => Promise.race([run, new Promise<typeof STILL_WAITING>(r => setTimeout(() => r(STILL_WAITING), ms))]);
@@ -50,7 +49,7 @@ describe.skipIf(!hasTmux)('a turn whose end its program never said', () => {
 
   it.each([
     ['claude', 'echo: hello', 'echo: next'],
-    ['antigravity', 'Git rebase destructively rewrites', 'apple'],
+    ['antigravity', 'FINISHED', 'FINISHED'],
   ] as const)('of %s that answered ends with its last answer, and the program and its session go on untouched', async (kind, answer, next) => {
     const logs: string[] = [];
     await setUp({ lostMs: LOST_MS, log: m => logs.push(m) });
@@ -62,7 +61,7 @@ describe.skipIf(!hasTmux)('a turn whose end its program never said', () => {
     const pid = await pidOf(key);
     const ended = await within(run, 20_000);
     expect(ended).toMatchObject({ ok: true, error: null, result: expect.stringContaining(answer), output: '' });
-    if (kind === 'antigravity') expect((ended as RunResult).sessionId).toBe(AGY_NEW);
+    if (kind === 'antigravity') expect((ended as RunResult).sessionId).toEqual(expect.any(String));
     expect(logs.filter(l => l.includes(UNSAID))).toEqual([expect.stringMatching(new RegExp(`^Agent ${key} \\(${kind}\\): ${UNSAID}\\.`))]);
     expect(states(`job-${key}`).at(-1)).toBe('idle');
     untouched(touched);
@@ -102,7 +101,7 @@ describe.skipIf(!hasTmux)('a turn whose end its program never said', () => {
     expect(await run).toMatchObject({ ok: false, error: 'cancelled' });
   });
 
-  /* agy's stream can break off mid-turn, as with a 503 from its backend, while agy works on and never says the turn
+  /* agy's transcript can break off mid-turn while agy works on and never says the turn
      ended. The node tells no lie about it: no wait for what to type, no end, and the screen's time stands with the
      screen. Hornhoof's alarm on a program that stood still takes the turn from there. */
   it('of Antigravity whose output broke off mid-tool stays open, and tells the tool with a screen that stood still', async () => {
@@ -125,7 +124,7 @@ describe.skipIf(!hasTmux)('a turn whose end its program never said', () => {
   it.each([
     ['claude', 'echo: TICK here'],
     ['codex', 'echo: TICK here'],
-    ['antigravity', 'Git rebase destructively rewrites'],
+    ['antigravity', 'FINISHED'],
   ] as const)('of %s at work, its screen moving and its log quiet, is no lost end', async (kind, answer) => {
     const logs: string[] = [];
     await setUp({ lostMs: LOST_MS, log: m => logs.push(m) });

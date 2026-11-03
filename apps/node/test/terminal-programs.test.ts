@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { ownFs, type AgentFs } from '../src/agent-fs.js';
 import { credentialSecrets } from '../src/credentials.js';
 import { StreamMask } from '../src/terminal/mask.js';
-import { acceptClaudeDialogs, AGY_SCREEN, agyProgram, claudePlanLimits, claudeProgram, claudeTranscript, codexProgram, findKimiWire, findRollout, kimiPlanLimits, kimiProgram, prepareAgy, prepareKimi } from '../src/terminal/programs.js';
+import { acceptClaudeDialogs, agyProgram, claudePlanLimits, claudeProgram, claudeTranscript, codexProgram, findKimiWire, findRollout, kimiPlanLimits, kimiProgram, prepareAgy, prepareKimi } from '../src/terminal/programs.js';
 
 const URLS = { mcpUrl: 'http://127.0.0.1:5000/mcp/s3cr3t', attachUrl: 'http://127.0.0.1:5000/attach/s3cr3t', hookUrl: 'http://127.0.0.1:5000/hook/s3cr3t' };
 const arg = (cmd: string[], flag: string) => cmd[cmd.indexOf(flag) + 1];
@@ -176,23 +176,26 @@ describe('Codex in a terminal', () => {
 });
 
 describe('Antigravity CLI in a terminal', () => {
-  it("runs agy's print mode from Hornhoof's screen, going on with its conversation, model and effort", () => {
-    const first = agyProgram.launch({ bin: '/t/agy', home: '/h', workDir: '/w/g1', sessionId: null, model: 'Gemini 4 Argon', effort: 'high', instructionsFile: null, urls: URLS });
-    expect(first.command).toEqual([process.execPath, AGY_SCREEN, '/t/agy', '--model', 'Gemini 4 Argon', '--effort', 'high']);
-    /* agy names a new conversation when the first message starts it. */
+  it('runs agy itself with session trust, model and effort, and resumes its conversation', () => {
+    const base = { bin: '/t/agy', home: '/h', workDir: '/w/g1', instructionsFile: null, urls: URLS };
+    const trust = ['--dangerously-skip-permissions', '--settings', JSON.stringify({ trustedWorkspaces: ['/w/g1'] })];
+    const first = agyProgram.launch({ ...base, sessionId: null, model: 'gemini-4-argon', effort: 'high' });
+    expect(first.command).toEqual(['/t/agy', '--model', 'gemini-4-argon', '--effort', 'high', ...trust]);
     expect(first.sessionId).toBeNull();
-    expect(first.env).toMatchObject({ HOME: '/h', AGY_CLI_DISABLE_AUTO_UPDATE: 'true', HH_AGY_LOG: '/w/g1/.hh-agy.jsonl', HH_BRIDGE: URLS.hookUrl, HH_ATTACH_URL: URLS.attachUrl });
-    const again = agyProgram.launch({ bin: '/t/agy', home: '/h', workDir: '/w/g1', sessionId: 'c3b66b04-872b-4fbe-a3a4-058a026ef20a', model: null, effort: null, instructionsFile: null, urls: URLS });
-    expect(again.command).toEqual([process.execPath, AGY_SCREEN, '/t/agy', '--conversation', 'c3b66b04-872b-4fbe-a3a4-058a026ef20a']);
-    expect(again.sessionId).toBe('c3b66b04-872b-4fbe-a3a4-058a026ef20a');
+    expect(first.env).toEqual({ HOME: '/h', AGY_CLI_DISABLE_AUTO_UPDATE: 'true', HH_BRIDGE: URLS.hookUrl, HH_ATTACH_URL: URLS.attachUrl, HH_ATTACH_PASS: 'bridge', COLORTERM: 'truecolor' });
+    const again = agyProgram.launch({ ...base, sessionId: 'conversation-1', model: null });
+    expect(again.command).toEqual(['/t/agy', '--conversation', 'conversation-1', ...trust]);
+    expect(again.sessionId).toBe('conversation-1');
   });
 
-  it('gives the agent folder the bridge for tools and an empty log for what agy prints', async () => {
+  it('writes MCP and invocation and stop hooks in the agent folder without a print log', async () => {
     const work = mkdtempSync(join(tmpdir(), 'hh-agy-work-'));
-    writeFileSync(join(work, '.hh-agy.jsonl'), '{"event":"result"}\n');
     await prepareAgy(work, URLS.mcpUrl);
     expect(JSON.parse(readFileSync(join(work, '.agents', 'mcp_config.json'), 'utf8'))).toEqual({ mcpServers: { hornhoof: { serverUrl: URLS.mcpUrl } } });
-    expect(readFileSync(join(work, '.hh-agy.jsonl'), 'utf8')).toBe('');
+    expect(JSON.parse(readFileSync(join(work, '.agents', 'hooks.json'), 'utf8'))).toEqual({ hornhoof: {
+      PreInvocation: [{ type: 'command', command: 'hh-hook invocation' }], Stop: [{ type: 'command', command: 'hh-hook stop' }],
+    } });
+    expect(existsSync(join(work, '.hh-agy.jsonl'))).toBe(false);
   });
 });
 

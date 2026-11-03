@@ -71,10 +71,20 @@ describe('a terminal program at its prompt with nothing typed', () => {
     expect(atEmptyPrompt('kimi', screen('kimi-typed'))).toBe(false);
   });
 
-  it("reads Hornhoof's own screen for Antigravity, whose prompt is a bold ›", () => {
-    expect(atEmptyPrompt('antigravity', 'agy: done.\n\x1b[1m›\x1b[22m ')).toBe(true);
-    expect(atEmptyPrompt('antigravity', 'agy: done.\n\x1b[1m›\x1b[22m go on')).toBe(false);
-    expect(atEmptyPrompt('antigravity', '\x1b[1m›\x1b[22m fix the tests\nagy: running the tests')).toBe(false);
+  it.each(['idle.ansi', 'busy.ansi', 'queued.txt', 'interrupted.txt'])('reads the Antigravity input between its rules in %s', name => {
+    const captured = readFileSync(new URL(`./fixtures/agy-tui/screen-${name}`, import.meta.url), 'utf8');
+    expect(inputOf('antigravity', captured)).toBe('');
+    expect(atEmptyPrompt('antigravity', captured)).toBe(true);
+    const typed = captured.replace(/>(\x1b\[[0-9;]*m)?\n(?=(?:\x1b\[[0-9;]*m)?─)/, '> abc\nsecond line\n');
+    expect(inputOf('antigravity', typed)).toBe('abc\nsecond line');
+    expect(atEmptyPrompt('antigravity', typed)).toBe(false);
+  });
+
+  it('requires both Antigravity input rules and ignores its trust question', () => {
+    const trust = readFileSync(new URL('./fixtures/agy-tui/screen-trust.ansi', import.meta.url), 'utf8');
+    expect(inputOf('antigravity', trust)).toBeNull();
+    expect(atEmptyPrompt('antigravity', trust)).toBe(false);
+    expect(inputOf('antigravity', '───\n> incomplete')).toBeNull();
   });
 
   it('is not so on a screen with no prompt yet', () => {

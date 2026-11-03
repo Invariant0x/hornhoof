@@ -18,6 +18,14 @@ async function opened(onHook: ConstructorParameters<typeof Bridge>[1], owns: Con
 }
 
 describe('hook delivery through the bridge', () => {
+  it('accepts Antigravity invocation hooks with their payload intact', async () => {
+    const heard: unknown[] = [];
+    const b = await opened((_key, event, body) => void heard.push({ event, body }));
+    const body = { invocationNum: 0, conversationId: 'agy-1', lastUserInput: 'hello' };
+    expect((await fetch(b.url + '/invocation', { method: 'POST', body: JSON.stringify(body) })).status).toBe(200);
+    expect(heard).toEqual([{ event: 'invocation', body }]);
+  });
+
   it.skipIf(!existsSync('/proc/net/tcp'))('accepts a legacy caller without a pid and denies malformed pid hints', async () => {
     let calls = 0;
     const b = await opened(() => { calls++; }, fromAgent(async () => [process.pid]));
