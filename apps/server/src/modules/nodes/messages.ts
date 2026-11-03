@@ -7,6 +7,7 @@ import { said } from '../conversation/live.js';
 import { nodeOfAgent, pumpWaiting, refusedLimits, startProgram } from '../conversation/queue.js';
 import { workStarts } from '../org/map-state.js';
 import { startWork } from '../tasks/engine.js';
+import { programRestarted } from '../tasks/program-restarts.js';
 import { recordJobProgram } from '../tasks/silent.js';
 import { afterJob, typedTurn } from '../tasks/wake.js';
 import { appendEvent, publishWorking } from '../events/store.js';
@@ -202,7 +203,8 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
           status: msg.ok ? 'done' : 'failed',
           result: msg.result,
           tail: lastBytes(msg.tail),
-          error: msg.error,
+          error: msg.failure?.kind === 'auth' ? 'not_logged_in' : msg.error,
+          failure: msg.failure ?? null,
           ...exitOf(msg.exit),
           sessionId: msg.sessionId,
           finishedAt: now,
@@ -211,15 +213,15 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
         .returning({ companyId: jobs.companyId });
       for (const { companyId } of finished) await publishWorking(ctx, companyId);
       /* The login ran out on this machine: it waits for one before the next turn could go out and fail too. */
-      if (finished.length && msg.error === 'not_logged_in' && id.kind === 'node') {
+      if (finished.length && (msg.error === 'not_logged_in' || msg.failure?.kind === 'auth') && id.kind === 'node') {
         const [node] = await db.update(nodes).set({ status: 'needs_login' }).where(eq(nodes.id, id.nodeId)).returning({ plan: nodes.subscriptionId });
         await settlePlans(db, [node?.plan ?? null]);
       }
       /* A program that stopped at the plan's usage limit holds the plan's turns, as a plan that says so itself does, and the
          map says until when. */
-      if (finished.length && msg.error === 'agent_failed' && id.kind === 'node') {
-        const [sub] = await db.select({ id: subscriptions.id, limits: subscriptions.limits }).from(nodes).innerJoin(subscriptions, eq(subscriptions.id, nodes.subscriptionId)).where(eq(nodes.id, id.nodeId));
-        const held = sub && refusedLimits(`${msg.result}\n${msg.tail}`, sub.limits ?? null, now.getTime());
+      if (finished.length && (msg.failure?.kind === 'usage_limit' || (!msg.failure && msg.error === 'agent_failed' && id.kind === 'node'))) {
+        const [sub] = await db.select({ id: subscriptions.id, limits: subscriptions.limits }).from(jobs).innerJoin(subscriptions, eq(subscriptions.id, jobs.subscriptionId)).where(eq(jobs.id, msg.jobId));
+        const held = sub && refusedLimits(`${msg.result}\n${msg.tail}`, sub.limits ?? null, now.getTime(), msg.failure?.kind === 'usage_limit');
         if (held) {
           await db.update(subscriptions).set({ limits: held }).where(eq(subscriptions.id, sub.id));
           for (const { companyId } of finished) ctx.bus.publish(companyId, { type: 'org' });
@@ -237,6 +239,9 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
     }
     case 'agent.start':
       await startProgram(ctx, id, msg.agentKey);
+      return;
+    case 'agent.restarted':
+      programRestarted(ctx, id, msg);
       return;
     case 'agent.said':
       said(ctx, id, msg.ref, msg.ok);

@@ -1,9 +1,11 @@
 import { PROGRAM_SCREEN_MAX, QUIET_ALARM_MS, type NodeMessage } from '@hornhoof/protocol';
-import type { TurnAlarm, TurnAlarmReason, TurnProgram } from '@hornhoof/protocol/map';
+import { TOOL_QUIET_ALARM_MS, type TurnAlarm, type TurnAlarmReason, type TurnProgram } from '@hornhoof/protocol/map';
 import { and, asc, eq, inArray, isNotNull, isNull, ne, or, sql, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentEvents, agents, departments, jobs, tasks } from '../../db/schema.js';
-import { enqueueTurn, liveSubscription } from '../conversation/queue.js';
+import { enqueueTurn, liveSubscription, orchestratorOf } from '../conversation/queue.js';
+import { programRestartStatus } from './program-restarts.js';
+import { logTurnFact } from './turn-log.js';
 
 export const SILENT_TURN_MS = QUIET_ALARM_MS;
 
@@ -89,6 +91,11 @@ export function agentProgramState(
 
 function alarmForProgram(program: TurnProgram, nowMs: number): TurnAlarm | null {
   if (nowMs - program.reportedAt >= SILENT_TURN_MS) return { reason: 'node_silent', since: program.reportedAt };
+  if (program.signAt !== null) {
+    if (program.state === 'asking') return null;
+    const threshold = program.state === 'tool' ? TOOL_QUIET_ALARM_MS : SILENT_TURN_MS;
+    return nowMs - program.signAt >= threshold ? { reason: 'program_stalled', since: program.signAt } : null;
+  }
   const lastChange = Math.max(program.since, program.screenAt);
   return nowMs - lastChange >= SILENT_TURN_MS ? { reason: 'program_stalled', since: lastChange } : null;
 }
@@ -147,7 +154,7 @@ async function alreadyAlerted(ctx: Ctx, jobId: string): Promise<boolean> {
   return Boolean(row);
 }
 
-async function operationsWatchers(ctx: Ctx, companyId: string): Promise<Agent[]> {
+export async function operationsWatchers(ctx: Ctx, companyId: string): Promise<Agent[]> {
   const ops = ctx.db.select({ id: departments.id }).from(departments).where(and(eq(departments.companyId, companyId), eq(departments.templateKey, 'operations')));
   const rows = await ctx.db
     .select()
@@ -182,7 +189,7 @@ const isFreeWatchdog = (a: Agent, stuckId: string, unavailable: ReadonlySet<stri
   a.roleKey === 'OPS-WATCH' && a.id !== stuckId && !unavailable.has(a.id);
 const isOpsHead = (a: Agent, stuckId: string) => (a.kind === 'head' || a.roleKey === 'OPS-HEAD') && a.id !== stuckId;
 
-function pickOpsRecipient(able: Agent[], stuckAgentId: string, unavailable: ReadonlySet<string>): Agent | null {
+export function pickOpsRecipient(able: Agent[], stuckAgentId: string, unavailable: ReadonlySet<string>): Agent | null {
   return able.find(a => isFreeWatchdog(a, stuckAgentId, unavailable)) ?? able.find(a => isOpsHead(a, stuckAgentId)) ?? null;
 }
 
@@ -208,35 +215,51 @@ const reasonLabel = (reason: TurnAlarmReason) =>
     ? 'program_stalled (program state and screen unchanged for 30 minutes)'
     : 'node_silent (node has not reported for 30 minutes)';
 
-function silentAlarmText(ctx: Ctx, s: SilentTurn): string {
+async function silentAlarmText(ctx: Ctx, s: SilentTurn, now: Date): Promise<string> {
   const who = agentLabel(ctx, s.agent);
   const where = s.task ? `on #${s.task.number} "${s.task.title}"` : 'outside any task';
   const iso = new Date(s.alarm.since).toISOString();
+  const program = s.program;
+  const stateSince = program ? new Date(program.since).toISOString() : 'unreported';
+  const sign = program?.signAt != null ? new Date(program.signAt).toISOString() : 'unreported by this node';
+  const retry = program?.retry ? `${program.retry.attempt} of ${program.retry.max ?? 'an unknown maximum'}, next at ${program.retry.nextAt === null ? 'an unknown time' : new Date(program.retry.nextAt).toISOString()}` : 'none reported';
+  const restart = await programRestartStatus(ctx, s.job.companyId, s.agent.id, +now);
+  const action = restart.allowed ? 'Use restart_program now to resume this session safely.' : `restart_program is not allowed now: ${restart.reason} Tell the head these facts if the program stays silent.`;
   return (
-    `Hornhoof: ${who} triggered a 30-minute turn alarm in turn ${s.job.id} (${where}). ` +
-    `Program state: ${programLabel(s.program)}. Last change: ${when(iso)} (${iso}). ` +
-    `Reason: ${reasonLabel(s.alarm.reason)}. Check ${s.agent.name} and nudge it with message_employee or tell your head.`
+    `Hornhoof: ${who} triggered a turn alarm in turn ${s.job.id} (${where}). ` +
+    `Program state: ${programLabel(program)}, since ${stateSince}. Last change: ${when(iso)} (${iso}). ` +
+    `Last sign: ${sign}. Program retry: ${retry}. ` +
+    `Reason: ${program?.signAt != null && s.alarm.reason === 'program_stalled' ? 'program_stalled (program gave no sign of life)' : reasonLabel(s.alarm.reason)}. ${action}`
   );
 }
 
-async function dispatchAlarm(ctx: Ctx, s: SilentTurn, to: Agent, now: Date): Promise<void> {
-  if (await alreadyAlerted(ctx, s.job.id)) return;
-  const text = silentAlarmText(ctx, s);
+async function dispatchAlarm(ctx: Ctx, s: SilentTurn, to: Agent, now: Date, caseId = s.job.id): Promise<void> {
+  if (await alreadyAlerted(ctx, caseId)) return;
+  const text = await silentAlarmText(ctx, s, now);
   const task = s.task ? { id: s.task.id, number: s.task.number } : undefined;
   const alarmId = await enqueueTurn(ctx, {
     companyId: s.job.companyId,
     agentId: to.id,
     prompt: text,
     createdBy: null,
-    message: { personId: null, text, ...(task ? { task } : {}), silentJob: s.job.id, silentReason: s.alarm.reason },
+    message: { personId: null, text, ...(task ? { task } : {}), silentJob: caseId, silentReason: s.alarm.reason },
   });
-  alertedSet(ctx).add(s.job.id);
+  alertedSet(ctx).add(caseId);
+  await logTurnFact(ctx, s.job, `${to.name} was told about the silent program: ${text}`, { silentCase: caseId, to: to.id });
   if (now.getTime() > Date.now()) {
     await ctx.db.update(jobs).set({ startedAt: now }).where(and(eq(jobs.id, alarmId), eq(jobs.status, 'running')));
   }
 }
 
 async function sendTurnAlarm(ctx: Ctx, s: SilentTurn, unavailable: ReadonlySet<string>, now: Date): Promise<void> {
+  if (s.job.restartedAt) {
+    const since = Math.max(+s.job.restartedAt, s.program?.signAt ?? 0);
+    if (+now - since < SILENT_TURN_MS) return;
+    const [head] = s.agent.departmentId ? await ctx.db.select().from(agents).where(and(eq(agents.departmentId, s.agent.departmentId), eq(agents.kind, 'head'), isNull(agents.removedAt), isNull(agents.switchedOffAt))).limit(1) : [];
+    const to = head && head.id !== s.agent.id ? head : await orchestratorOf(ctx, s.job.companyId);
+    if (to && to.id !== s.agent.id) await dispatchAlarm(ctx, s, to, now, `${s.job.id}:after_restart`);
+    return;
+  }
   const able = await operationsWatchers(ctx, s.job.companyId);
   const opsTo = pickOpsRecipient(able, s.agent.id, unavailable);
   if (opsTo) await dispatchAlarm(ctx, s, opsTo, now);

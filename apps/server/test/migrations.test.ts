@@ -541,3 +541,20 @@ describe('migration 0044', () => {
     expect((await db.execute(sql`select status, answered_by from requests`)).rows).toEqual([{ status: 'approved', answered_by: ivan }]);
   });
 });
+
+describe('migration 0046', () => {
+  it('keeps older turns with no failure, delayed start or program restart, and stores each on new turns', async () => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0044_ceo_delegate') });
+    await db.execute(sql`insert into companies (name) values ('Acme')`);
+    await db.execute(sql`insert into people (company_id, name, email, status, scope_kind) select id, 'Ivan', 'ivan@acme.com', 'active', 'company' from companies`);
+    await db.execute(sql`insert into subscriptions (company_id, provider, kind, label, owner_person_id, status) select company_id, 'codex', 'personal', 'Plan', id, 'ready' from people`);
+    await db.execute(sql`insert into jobs (company_id, subscription_id, prompt, timeout_ms) select company_id, id, 'Work', 900000 from subscriptions`);
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    expect((await db.execute(sql`select failure, not_before, restarted_at from jobs`)).rows).toEqual([{ failure: null, not_before: null, restarted_at: null }]);
+    await db.execute(sql`update jobs set failure = '{"kind":"network","text":"Offline","retryable":true}', not_before = '2026-11-03T12:01:00Z', restarted_at = '2026-11-03T12:00:00Z'`);
+    expect((await db.execute(sql`select failure->>'kind' as kind, not_before > restarted_at as waits from jobs`)).rows).toEqual([{ kind: 'network', waits: true }]);
+  });
+});

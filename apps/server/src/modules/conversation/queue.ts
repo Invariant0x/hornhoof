@@ -17,6 +17,7 @@ import { textHash } from '../templates/load.js';
 import { openAfter, startWork } from '../tasks/engine.js';
 import { agentProgramState, type TurnAlarm, type TurnAlarmReason, type TurnProgram } from '../tasks/silent.js';
 import { workStarts } from '../org/map-state.js';
+import { agentFailureState, type FailureState } from '../tasks/failures.js';
 import { addressed, preface } from './prompt.js';
 import { ABOUT_AS_FREE, freedom } from '../testruns/pick.js';
 
@@ -28,7 +29,7 @@ export const WORKER_COMPACT_WINDOW = 500_000;
    nobody gives, so the agent's next turns are not stuck behind it; the agent goes on in the same session. */
 export const TURN_TIMEOUT_MS = 2 * 3_600_000;
 
-export type AgentState = {
+export type AgentState = FailureState & {
   ready: boolean;
   /* Its plan is at its limit until then: its turns wait in line, and people may still write to it. */
   limitUntil: string | null;
@@ -79,9 +80,9 @@ function againIn(text: string, now: number): string | null {
 
 /* The plan's limits once a turn ended on a refusal for its usage limit, or null when it did not: the window it names is
    full until the time the program gives, the reset the plan said before, or a quarter of an hour. */
-export function refusedLimits(output: string, limits: Limits | null, now = Date.now()): Limits | null {
+export function refusedLimits(output: string, limits: Limits | null, now = Date.now(), usageLimit = false): Limits | null {
   const end = output.slice(-1500);
-  if (!REFUSED.test(end)) return null;
+  if (!usageLimit && !REFUSED.test(end)) return null;
   const name = /\b(?:weekly|7-day|seven-day)\b/i.test(end) ? 'seven_day' : 'five_hour';
   const known = limits?.windows.find(w => w.name === name)?.resetsAt;
   const resetsAt = againIn(end, now) ?? (known && Date.parse(known) > now ? known : new Date(now + LIMIT_PROBE_MS).toISOString());
@@ -90,16 +91,16 @@ export function refusedLimits(output: string, limits: Limits | null, now = Date.
 
 /* Wakes the agent's line once its plan's limit starts over. */
 const resets = new WeakMap<Ctx, Map<string, { at: string; timer: NodeJS.Timeout }>>();
-function pumpAt(ctx: Ctx, agentId: string, at: string): void {
+function pumpAt(ctx: Ctx, agentId: string, at: string, grace = LIMIT_GRACE_MS): void {
   const timers = resets.get(ctx) ?? new Map<string, { at: string; timer: NodeJS.Timeout }>();
   resets.set(ctx, timers);
   if (timers.get(agentId)?.at === at) return;
   clearTimeout(timers.get(agentId)?.timer);
   /* A timer holds at most about 24 days: a longer wait wakes once then and sets itself again. */
-  const wait = Date.parse(at) - Date.now() + LIMIT_GRACE_MS;
+  const wait = Date.parse(at) - Date.now() + grace;
   const timer = setTimeout(() => {
     timers.delete(agentId);
-    if (wait > LONGEST_TIMER_MS) return pumpAt(ctx, agentId, at);
+    if (wait > LONGEST_TIMER_MS) return pumpAt(ctx, agentId, at, grace);
     void pump(ctx, agentId).catch(() => {});
   }, Math.min(wait, LONGEST_TIMER_MS));
   timer.unref();
@@ -113,7 +114,7 @@ export const STOPPED_ON_PURPOSE = ['cancelled', 'removed', 'switched_off'];
 /* withMessage: what is kept together with the message, or not at all. */
 /* retryOf: the turn a node restart cut off, which this one runs once more. continueOf: the turn that ended without
    recording its work, whose session this one goes on with. */
-type Turn = { companyId: string; agentId: string; prompt: string; createdBy: string | null; message?: { personId: string | null; text: string; from?: 'orchestrator' | 'agent'; name?: string; by?: string; task?: { id: string; number: number }; request?: string; timer?: true; silentJob?: string; silentReason?: TurnAlarmReason }; taskId?: string; answersCeo?: boolean; withMessage?: WithEvent; retryOf?: string; continueOf?: string };
+type Turn = { companyId: string; agentId: string; prompt: string; createdBy: string | null; message?: { personId: string | null; text: string; from?: 'orchestrator' | 'agent'; name?: string; by?: string; task?: { id: string; number: number }; request?: string; timer?: true; failureCase?: string; silentJob?: string; silentReason?: TurnAlarmReason }; taskId?: string; answersCeo?: boolean; withMessage?: WithEvent; retryOf?: string; continueOf?: string; notBefore?: Date | null };
 
 /* One thing at a time per agent, so two pumps never send two turns. */
 const chains = new WeakMap<Ctx, Map<string, Promise<unknown>>>();
@@ -215,6 +216,7 @@ export async function insertTurn(ctx: Ctx, t: Turn): Promise<string> {
       taskId: t.taskId ?? null,
       retryOf: t.retryOf ?? null,
       continueOf: t.continueOf ?? null,
+      notBefore: t.notBefore ?? null,
       answersCeo: t.answersCeo === true || (await isCeo(ctx, t.message?.personId)),
       /* Until its message is kept, a turn sent at once answers nobody. */
       decisionInputPending: shownOf(t) !== null,
@@ -445,7 +447,7 @@ function alongWith(ctx: Ctx, agentId: string, jobId: string) {
   return ctx.db
     .select({ id: jobs.id, prompt: jobs.prompt, taskId: jobs.taskId, continueOf: jobs.continueOf })
     .from(jobs)
-    .where(and(conversationOf(agentId), eq(jobs.status, 'queued'), isNotNull(jobs.taskId), ne(jobs.id, jobId)))
+    .where(and(conversationOf(agentId), eq(jobs.status, 'queued'), or(isNull(jobs.notBefore), lte(jobs.notBefore, new Date(Date.now()))), isNotNull(jobs.taskId), ne(jobs.id, jobId)))
     .orderBy(asc(jobs.createdAt));
 }
 
@@ -509,7 +511,7 @@ async function unsent(ctx: Ctx, job: { id: string; companyId: string }, why: { e
 type Along = Pick<typeof jobs.$inferSelect, 'id' | 'prompt' | 'taskId' | 'continueOf'>;
 type Queued = Pick<typeof jobs.$inferSelect, 'id' | 'companyId' | 'agentId' | 'taskId'>;
 /* What a turn goes out with: where it runs and what it says. */
-type Sending = Pick<typeof jobs.$inferInsert, 'subscriptionId' | 'nodeId' | 'prompt' | 'toolTokenHash' | 'instructionsHash'>;
+type Sending = Pick<typeof jobs.$inferInsert, 'subscriptionId' | 'nodeId' | 'prompt' | 'sessionId' | 'toolTokenHash' | 'instructionsHash'>;
 
 /* A continuation carried inside another task's turn takes its original work along too. */
 async function promptAlong(ctx: Ctx, job: Along, on: On, instructionsHash: string): Promise<string> {
@@ -546,6 +548,15 @@ async function wentOut(ctx: Ctx, job: Queued, along: readonly Along[], lines: { 
   if (lines) ctx.bus.publish(lines.companyId, { type: 'org' });
 }
 
+/* A delayed retry holds the whole line, including personal messages while task turns are held back. */
+async function waitsForRetry(ctx: Ctx, agentId: string): Promise<boolean> {
+  const [retry] = await ctx.db.select({ at: jobs.notBefore }).from(jobs)
+    .where(and(conversationOf(agentId), eq(jobs.status, 'queued'), isNotNull(jobs.notBefore))).orderBy(asc(jobs.createdAt)).limit(1);
+  if (!retry?.at || +retry.at <= Date.now()) return false;
+  pumpAt(ctx, agentId, retry.at.toISOString(), 0);
+  return true;
+}
+
 async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   const { db } = ctx;
   const [running] = await db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
@@ -556,6 +567,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   if (!agent || !(await placement(ctx, agent, sub))) return;
   /* An update waits for the turns that run: new ones start after it, the orchestrator's go on. */
   if (agent.kind !== 'orchestrator' && turnsHeld(ctx, agent.companyId)) return;
+  if (await waitsForRetry(ctx, agentId)) return;
   /* Real turns wait for the limit; an empty start can still open the saved program. Past the share set for tasks only
      task turns wait. */
   const until = limitUntil(sub.limits);
@@ -566,9 +578,10 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
     .select()
     .from(jobs)
     .where(and(conversationOf(agentId), eq(jobs.status, 'queued'), until ? programStart : undefined, agent.switchedOffAt || spent ? isNull(jobs.taskId) : undefined))
-    .orderBy(asc(jobs.createdAt))
+    .orderBy(desc(sql`${jobs.notBefore} is not null`), asc(jobs.createdAt))
     .limit(1);
   if (!job) return;
+  if (job.notBefore && +job.notBefore > Date.now()) return pumpAt(ctx, agentId, job.notBefore.toISOString(), 0);
   if (await heldBack(ctx, job)) return sendNext(ctx, agentId);
   const repo = await repoFor(ctx, agent);
   const place = await placement(ctx, agent, sub, repo ? REPOSITORY_NODE : CONVERSATION_NODE);
@@ -602,7 +615,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   const prompt = job.prompt ? addressed(composed, await messageForJob(ctx, { id: job.id, companyId: job.companyId, agentId })) : '';
   const token = newToken();
   /* Running from the moment it is sent: the token works for its tools at once, and the next turn waits. */
-  const taken = await take(ctx, job, along, { subscriptionId: sub.id, nodeId: place.nodeId, prompt, toolTokenHash: hashToken(token), instructionsHash: runHash });
+  const taken = await take(ctx, job, along, { subscriptionId: sub.id, nodeId: place.nodeId, prompt, sessionId, toolTokenHash: hashToken(token), instructionsHash: runHash });
   if (!taken) return;
   wentOutWithWords(ctx, agentId, job);
   /* The agent stays on this machine from now on. */
@@ -633,7 +646,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
     ctx.log.error({ error: loggable(err) }, 'A turn could not go out and waits for the next try.');
   }
   if (sent) return wentOut(ctx, job, along, taken.lines);
-  await db.update(jobs).set({ status: 'queued', startedAt: null, nodeId: null, prompt: job.prompt, toolTokenHash: null, instructionsHash: null }).where(and(eq(jobs.id, job.id), eq(jobs.status, 'running')));
+  await db.update(jobs).set({ status: 'queued', startedAt: null, nodeId: null, prompt: job.prompt, sessionId: job.sessionId, toolTokenHash: null, instructionsHash: null }).where(and(eq(jobs.id, job.id), eq(jobs.status, 'running')));
   await publishWorking(ctx, job.companyId);
 }
 
@@ -666,7 +679,7 @@ export async function orchestratorOf(ctx: Ctx, companyId: string) {
 
 export async function orchestratorState(ctx: Ctx, companyId: string): Promise<AgentState> {
   const agent = await orchestratorOf(ctx, companyId);
-  if (!agent) return { ready: false, limitUntil: null, budgetUntil: null, reason: 'no_subscription', busy: false, runningJobId: null, queued: 0, terminal: false, program: null, alarm: null };
+  if (!agent) return { ready: false, limitUntil: null, budgetUntil: null, reason: 'no_subscription', busy: false, runningJobId: null, queued: 0, terminal: false, program: null, alarm: null, retry: null, failure: null };
   return agentState(ctx, agent.id);
 }
 
@@ -707,5 +720,6 @@ export async function agentState(ctx: Ctx, agentId: string): Promise<AgentState>
     queued: Number(waiting?.n ?? 0),
     terminal,
     ...agentProgramState(ctx, running),
+    ...await agentFailureState(ctx, agentId),
   };
 }

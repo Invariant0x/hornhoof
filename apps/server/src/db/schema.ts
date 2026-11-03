@@ -1,4 +1,4 @@
-import { COMPANY_TEMPLATE_KEYS, CRED_KINDS, MACHINE_KINDS, RUN_KINDS, TEMPLATE_KEYS, type Account, type Boot, type Limits, type ModelOption } from '@hornhoof/protocol';
+import { COMPANY_TEMPLATE_KEYS, CRED_KINDS, MACHINE_KINDS, RUN_KINDS, TEMPLATE_KEYS, type Account, type Boot, type Failure, type Limits, type ModelOption } from '@hornhoof/protocol';
 import { sql } from 'drizzle-orm';
 import { bigint, bigserial, boolean, check, customType, index, integer, jsonb, pgTable, primaryKey, real, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
 
@@ -326,6 +326,9 @@ export const jobs = pgTable(
     result: text('result'),
     tail: text('tail').notNull().default(''),
     error: text('error'),
+    failure: jsonb('failure').$type<Failure>(),
+    notBefore: timestamp('not_before', { withTimezone: true }),
+    restartedAt: timestamp('restarted_at', { withTimezone: true }),
     timeoutMs: integer('timeout_ms').notNull(),
     kind: text('kind', { enum: JOB_KINDS }).notNull().default('test'),
     /* The job's Hornhoof tools present this token; it works only while the job runs. */

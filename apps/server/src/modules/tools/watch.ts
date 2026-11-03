@@ -9,6 +9,7 @@ import { deptName } from '../departments/templates.js';
 import type { WithEvent } from '../events/store.js';
 import { returnAlongLine } from '../org/map-state.js';
 import { carriesFile, encodedHint } from '../tasks/attachments.js';
+import { programRestartStatus, restartProgram } from '../tasks/program-restarts.js';
 import { CLOSED } from '../tasks/engine.js';
 import type { Grant } from '../templates/load.js';
 import { INSTALL_HINT, installsIn, MISSING_HINT, missingIn, type Missing } from './stumbles.js';
@@ -69,13 +70,23 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
   const deptNames = async () => new Map((await db.select().from(departments).where(eq(departments.companyId, job.companyId))).map(d => [d.id, deptName(d)]));
   const roleTitle = (roleKey: string | null) => (roleKey && ctx.templates.roles.get(roleKey)?.title.en) || null;
 
+  if (grants.has('restart_program')) {
+    server.registerTool('restart_program', {
+      description: 'Restart a program that has stopped giving signs of life, in the same session. Hornhoof checks its state, the time without a sign, its node and session, and allows only one restart per turn. Read agents first.',
+      inputSchema: { employee: z.uuid().describe("The agent's id from agents.") },
+    }, async ({ employee }) => {
+      const result = await restartProgram(ctx, job.companyId, employee);
+      return say(result.text, !result.ok);
+    });
+  }
+
   if (grants.has('agents')) {
     server.registerTool(
       'agents',
       {
         description:
           'Every agent of the company as it is now: department, role, whether it is on and ready (and why not), until when its plan is at its limit, whether a turn runs and since when, ' +
-          'turns waiting, the open tasks it holds with when each last moved, its last activity and how its last turn ended.',
+          'turns waiting, the open tasks it holds with when each last moved, its last activity, how its last turn ended, program state and signs of life, failures, waiting retries, and whether a safe program restart is allowed with the reason when it is not.',
       },
       async () => {
         const staff = await db.select().from(agents).where(and(eq(agents.companyId, job.companyId), isNull(agents.removedAt)));
@@ -117,6 +128,11 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
             busy: state.busy,
             runningSince: running?.at ?? null,
             queued: state.queued,
+            program: state.program,
+            alarm: state.alarm,
+            failure: state.failure,
+            retry: state.retry,
+            restart: await programRestartStatus(ctx, job.companyId, a.id),
             tasks: held.filter(t => t.holder === a.id).map(({ holder: _, ...t }) => t),
             lastActivityAt: active?.at ?? null,
             lastTurn: last ? { status: last.status, at: last.at, error: last.error } : null,
