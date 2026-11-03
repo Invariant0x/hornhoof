@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { NodeMessage } from '@hornhoof/protocol';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -16,7 +16,8 @@ describe.skipIf(!hasTmux)('untrusted tool names in live program diagnostics', ()
     const sessionId = '6321ee6d-f4b7-4269-b3b4-4580bb4ea5c0';
     const stop = new AbortController();
     const running = job('private-tool', 'TICK here', { jobId: 'private-tool-job', sessionId, signal: stop.signal });
-    const file = join(home, 'projects', running.input.workDir.replace(/[^A-Za-z0-9]/g, '-'), `${sessionId}.jsonl`);
+    mkdirSync(running.input.workDir, { recursive: true });
+    const file = join(home, 'projects', realpathSync(running.input.workDir).replace(/[^A-Za-z0-9]/g, '-'), `${sessionId}.jsonl`);
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, '');
     const run = host.run(running);
