@@ -1,0 +1,417 @@
+import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { eq, sql } from 'drizzle-orm';
+import { describe, expect, it } from 'vitest';
+import { hashToken } from '../src/crypto/tokens.js';
+import { agents, companies, departments, jobs, requests, subscriptions, tasks } from '../src/db/schema.js';
+import { cancel, createTask, silentTurn, updateTask } from '../src/modules/tasks/engine.js';
+import { checkLiveness, wakeAll } from '../src/modules/tasks/wake.js';
+import { agentProgramState, checkSilentTurns } from '../src/modules/tasks/silent.js';
+import { minuteRound } from '../src/modules/agents/timers.js';
+import { keepWakes, wakesLeft } from '../src/modules/tasks/outbox.js';
+import { discardStaleTurn } from '../src/modules/tasks/wake-state.js';
+import { checkExternalWaits, waitFor } from '../src/modules/tasks/external-wait.js';
+import { identityOf } from '../src/modules/nodes/hub.js';
+import { as, connectNode, listen, mcp, setUpCompany, testApp, until } from './helpers.js';
+
+const NODE_KEY = 'external-wait-test-node-key-0123456789abcdef';
+
+async function fixture(env?: NodeJS.ProcessEnv) {
+  const { app, db } = await testApp(env);
+  const url = await listen(app);
+  const owner = await setUpCompany(app);
+  const [company] = await db.select().from(companies);
+  const [sub] = await db.select().from(subscriptions);
+  const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+  const [department] = await db.insert(departments).values({ companyId: company!.id, templateKey: 'development', roleCode: 'DEV' }).returning();
+  const [head, worker, peer] = await db.insert(agents).values([
+    { companyId: company!.id, departmentId: department!.id, kind: 'head', roleKey: 'DEV-HEAD', name: 'Hana', model: '', subscriptionId: sub!.id },
+    { companyId: company!.id, departmentId: department!.id, kind: 'worker', roleKey: 'DEV-BE', name: 'Bruno', model: '', subscriptionId: sub!.id },
+    { companyId: company!.id, departmentId: department!.id, kind: 'worker', roleKey: 'DEV-BE', name: 'Rita', model: '', subscriptionId: sub!.id },
+  ]).returning();
+  const clients = new Map<string, Client>();
+  const tools = async (agentId = worker!.id) => {
+    const existing = clients.get(agentId);
+    if (existing) return existing;
+    const token = `external-wait-${agentId}-test-token`;
+    await db.insert(jobs).values({ companyId: company!.id, subscriptionId: sub!.id, agentId, kind: 'conversation', prompt: 'Work.', timeoutMs: 900000, status: 'running', startedAt: new Date(), toolTokenHash: hashToken(token) });
+    const client = await mcp(app, token);
+    clients.set(agentId, client);
+    return client;
+  };
+  const task = async (holder = worker!.id) => (await createTask(app.ctx, { agentId: head!.id }, { title: 'Publish images', brief: '', body: '', departmentId: department!.id, assigneeAgentId: holder, executor: true, gates: [] })).task;
+  const read = async (id: string) => (await db.select().from(tasks).where(eq(tasks.id, id)))[0]!;
+  const wait = async (ref: number | string, reason: string, until: string, agentId = worker!.id) => {
+    const client = await tools(agentId);
+    expect((await client.listTools()).tools.map(t => t.name)).toContain('wait_for');
+    return await client.callTool({ name: 'wait_for', arguments: { task: ref, reason, until } }) as { isError?: boolean; content: { text: string }[] };
+  };
+  return { app, ctx: app.ctx, db, owner, url, company: company!, sub: sub!, orchestrator: orchestrator!, department: department!, head: head!, worker: worker!, peer: peer!, task, read, tools, wait };
+}
+
+async function messaging() {
+  const c = await fixture({ NODE_KEY });
+  const node = await connectNode(c.url, NODE_KEY);
+  node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [] });
+  await until(() => c.ctx.hub.isReady(identityOf(c.sub, null)));
+  return { ...c, node };
+}
+
+describe('external task wait', () => {
+  it('stores the holder wait for two hours without changing the workflow status', async () => {
+    const c = await fixture();
+    const task = await c.task();
+    await c.db.update(tasks).set({ silent: 2 }).where(eq(tasks.id, task.id));
+    const since = Date.now();
+    const until = new Date(since + 2 * 3_600_000).toISOString();
+    const result = await c.wait(task.number, '  Images on the registry  ', until.replace('Z', '+00:00'));
+    expect(result.isError).toBeFalsy();
+    const row = await c.read(task.id);
+    expect(row).toMatchObject({ status: 'open', assigneeAgentId: c.worker.id, silent: 0, externalWait: { reason: 'Images on the registry', until } });
+    expect(Date.parse(row.externalWait!.since)).toBeGreaterThanOrEqual(since);
+    expect(Date.parse(row.externalWait!.since)).toBeLessThanOrEqual(Date.now());
+    const detail = await (await c.tools()).callTool({ name: 'task', arguments: { task: task.number } }) as { content: { text: string }[] };
+    expect(JSON.parse(detail.content[0]!.text).externalWait).toEqual(row.externalWait);
+    expect((await c.db.select().from(jobs)).filter(j => j.taskId === task.id)).toEqual([]);
+  });
+
+  it('refuses invalid reasons and deadlines without changing the task', async () => {
+    const c = await fixture();
+    const task = await c.task();
+    const future = new Date(Date.now() + 60_000).toISOString();
+    const inputs = [
+      ['', future], ['First line\nSecond line', future], ['First line\rSecond line', future], ['First\u2028Second', future], ['x'.repeat(601), future],
+      ['Images', 'not a date'], ['Images', new Date(Date.now() - 1000).toISOString()],
+      ['Images', new Date(Date.now() + 2 * 3_600_000 + 60_000).toISOString()],
+    ];
+    for (const [reason, until] of inputs) {
+      const result = await c.wait(task.number, reason!, until!);
+      expect(result.isError, `${reason} ${until}`).toBe(true);
+      expect(await c.read(task.id)).toMatchObject({ externalWait: null, version: task.version, silent: 0 });
+    }
+  });
+
+  it('refuses another holder and closed or planned tasks', async () => {
+    const c = await fixture();
+    const task = await c.task();
+    const until = new Date(Date.now() + 60_000).toISOString();
+    expect((await c.wait(task.number, 'Images', until, c.peer.id)).isError).toBe(true);
+    for (const status of ['done', 'cancelled', 'planned'] as const) {
+      await c.db.update(tasks).set({ status, closedAt: new Date() }).where(eq(tasks.id, task.id));
+      expect((await c.wait(task.number, 'Images', until)).isError).toBe(true);
+      expect((await c.read(task.id)).externalWait).toBeNull();
+    }
+    const [outside] = await c.db.insert(departments).values({ companyId: c.company.id, roleCode: 'SAL', templateKey: 'sales' }).returning();
+    const [other] = await c.db.insert(tasks).values({ companyId: c.company.id, departmentId: outside!.id, number: 9999, title: 'Their work' }).returning();
+    expect((await c.wait(other!.id, 'Images', until)).isError).toBe(true);
+    expect((await c.read(other!.id)).externalWait).toBeNull();
+  });
+
+  it('ends the previous wait when work is submitted, blocked or cancelled', async () => {
+    const c = await fixture();
+    const client = await c.tools();
+    for (const action of ['submit', 'blocked', 'cancel'] as const) {
+      const task = await c.task();
+      expect((await c.wait(task.number, 'Images', new Date(Date.now() + 60_000).toISOString())).isError).toBeFalsy();
+      if (action === 'cancel') await cancel(c.ctx, { agentId: c.head.id }, task.id, 'No longer needed.');
+      else {
+        const args = action === 'submit' ? { summary: 'Published.', evidence: 'Checked.' } : { why: 'The build needs a decision.' };
+        const result = await client.callTool({ name: action, arguments: { task: task.number, ...args } });
+        expect(result.isError).toBeFalsy();
+      }
+      expect((await c.read(task.id)).externalWait).toBeNull();
+    }
+  });
+
+  it.each(['done', 'failed'] as const)('does not count three %s task turns or ask people while the task waits', async status => {
+    const c = await fixture();
+    const task = await c.task();
+    await c.wait(task.number, 'Images', new Date(Date.now() + 3_600_000).toISOString());
+    for (let n = 0; n < 3; n++) {
+      const startedAt = new Date(Date.now() + 1000);
+      const [job] = await c.db.insert(jobs).values({ companyId: c.company.id, subscriptionId: c.sub.id, agentId: c.worker.id, taskId: task.id, kind: 'conversation', prompt: 'Wait for images.', timeoutMs: 900000, status, startedAt, finishedAt: new Date(startedAt.getTime() + 1000) }).returning();
+      await checkLiveness(c.ctx, job!.id);
+    }
+    expect(await c.read(task.id)).toMatchObject({ status: 'open', silent: 0, externalWait: { reason: 'Images' } });
+    expect((await c.db.select().from(jobs).where(eq(jobs.taskId, task.id))).filter(j => j.status === 'queued')).toEqual([]);
+    expect(await c.db.select().from(requests).where(eq(requests.taskId, task.id))).toEqual([]);
+  });
+
+  it('leaves direct silent-turn checks quiet during the wait', async () => {
+    const c = await fixture();
+    const task = await c.task();
+    await c.wait(task.number, 'Images', new Date(Date.now() + 3_600_000).toISOString());
+    for (let n = 0; n < 3; n++) expect((await silentTurn(c.ctx, c.worker.id, await c.read(task.id))).wakes).toEqual([]);
+    expect((await c.read(task.id)).silent).toBe(0);
+    expect(await c.db.select().from(requests).where(eq(requests.taskId, task.id))).toEqual([]);
+  });
+
+  it('shows no program alarm for a task waiting for an external event', async () => {
+    const c = await fixture();
+    const task = await c.task();
+    await c.wait(task.number, 'Images', new Date(Date.now() + 2 * 3_600_000).toISOString());
+    const [job] = await c.db.insert(jobs).values({ companyId: c.company.id, subscriptionId: c.sub.id, agentId: c.worker.id, taskId: task.id, kind: 'conversation', prompt: 'Wait for images.', timeoutMs: 900000, status: 'running', startedAt: new Date() }).returning();
+    await checkSilentTurns(c.ctx, new Date(Date.now() + 31 * 60_000));
+    expect(agentProgramState(c.ctx, job).alarm).toBeNull();
+  });
+
+  it('wakes once at the deadline across repeated sweeps and a new server context, then resumes ordinary rules', async () => {
+    const c = await fixture();
+    const task = await c.task();
+    const until = new Date(Date.now() + 30_000);
+    await c.wait(task.number, 'Images', until.toISOString());
+    const failed = (what: string) => (error: unknown) => { throw new Error(what, { cause: error }); };
+    await minuteRound(c.ctx, new Date(until.getTime() - 1), failed);
+    expect(await c.db.select().from(jobs).where(eq(jobs.taskId, task.id))).toEqual([]);
+    await minuteRound(c.ctx, until, failed);
+    const queued = await c.db.select().from(jobs).where(eq(jobs.taskId, task.id));
+    expect(queued).toHaveLength(1);
+    expect(queued[0]!.prompt).toBe(`#${task.number} "Publish images": the wait for "Images" ended; check and continue.`);
+    expect(await c.read(task.id)).toMatchObject({ externalWait: null, silent: 0 });
+    await minuteRound({ ...c.ctx }, new Date(until.getTime() + 60_000), failed);
+    await minuteRound(c.ctx, new Date(until.getTime() + 120_000), failed);
+    expect(await c.db.select().from(jobs).where(eq(jobs.taskId, task.id))).toHaveLength(1);
+    const moved = await silentTurn(c.ctx, c.worker.id, await c.read(task.id));
+    expect(moved.task.silent).toBe(1);
+    expect(moved.wakes).toEqual([{ agentId: c.worker.id, taskId: task.id, why: 'reminder' }]);
+  });
+
+  it('does not take a timeout turn after its task closes or starts waiting again', async () => {
+    const c = await fixture();
+    const failed = (what: string) => (error: unknown) => { throw new Error(what, { cause: error }); };
+    for (const action of ['close', 'wait again'] as const) {
+      const task = await c.task();
+      const until = new Date(Date.now() + 30_000);
+      await c.wait(task.number, 'Images', until.toISOString());
+      await minuteRound(c.ctx, until, failed);
+      const [job] = await c.db.select().from(jobs).where(eq(jobs.taskId, task.id));
+      expect(job).toBeDefined();
+      if (action === 'close') await cancel(c.ctx, { agentId: c.head.id }, task.id, 'No longer needed.');
+      else {
+        await c.wait(task.number, 'Deployment', new Date(Date.now() + 3_600_000).toISOString());
+        await (await c.tools(c.head.id)).callTool({ name: 'comment', arguments: { task: task.number, text: 'The deployment is ready.' } });
+        expect((await c.read(task.id)).externalWait).toBeNull();
+      }
+      expect(await discardStaleTurn(c.db, job!)).toBe(true);
+      expect((await c.db.select().from(jobs).where(eq(jobs.id, job!.id)))[0]).toMatchObject({ error: 'stale', startedAt: null });
+    }
+  });
+
+  it('keeps the expected task version in the durable wake outbox', async () => {
+    const c = await fixture();
+    const task = await c.task();
+    await keepWakes(c.db, c.company.id, [{ agentId: c.worker.id, taskId: task.id, why: 'assigned', version: task.version, text: '', note: '' }]);
+    expect(await wakesLeft(c.db, new Date(Date.now() + 1000))).toContainEqual({ agentId: c.worker.id, taskId: task.id, why: 'assigned', version: task.version, text: '', note: '' });
+  });
+
+  it('refuses a versioned wake if the task changed before queueing', async () => {
+    const c = await fixture();
+    const task = await c.task();
+    await updateTask(c.ctx, c.head.id, task.id, { title: 'A newer instruction' });
+    await wakeAll(c.ctx, [{ agentId: c.worker.id, taskId: task.id, why: 'assigned', version: task.version }]);
+    expect(await c.db.select().from(jobs).where(eq(jobs.taskId, task.id))).toEqual([]);
+  });
+
+  it('refuses a versioned queued wake if the task changed before take', async () => {
+    const c = await fixture();
+    const task = await c.task();
+    await wakeAll(c.ctx, [{ agentId: c.worker.id, taskId: task.id, why: 'assigned', version: task.version }]);
+    const [job] = await c.db.select().from(jobs).where(eq(jobs.taskId, task.id));
+    expect(job).toBeDefined();
+    await updateTask(c.ctx, c.head.id, task.id, { title: 'A newer instruction' });
+    expect(await discardStaleTurn(c.db, job!)).toBe(true);
+  });
+
+  it.each(['person', 'head', 'orchestrator'] as const)('ends a wait and wakes its holder on a %s comment', async sender => {
+    const c = await fixture();
+    const task = await c.task();
+    await c.wait(task.number, 'Images', new Date(Date.now() + 3_600_000).toISOString());
+    if (sender === 'person') {
+      const response = await c.app.inject({ method: 'POST', url: `/api/tasks/${task.id}/comments`, payload: { text: 'Images are ready.' }, ...as(c.owner) });
+      expect(response.statusCode).toBe(201);
+    } else {
+      const result = await (await c.tools(c[sender].id)).callTool({ name: 'comment', arguments: { task: task.number, text: 'Images are ready.' } });
+      expect(result.isError).toBeFalsy();
+    }
+    expect((await c.read(task.id)).externalWait).toBeNull();
+    expect((await c.read(task.id)).silent).toBe(0);
+    const turns = await c.db.select().from(jobs).where(eq(jobs.taskId, task.id));
+    expect(turns).toHaveLength(1);
+    expect(turns[0]!.prompt).toContain('Images are ready.');
+  });
+
+  it.each(['head', 'orchestrator'] as const)('ends only the named wait on a %s message with task', async sender => {
+    const c = await messaging();
+    const task = await c.task();
+    const other = await c.task();
+    const deadline = new Date(Date.now() + 3_600_000).toISOString();
+    await c.wait(task.number, 'Images', deadline);
+    await c.wait(other.number, 'Deployment', deadline);
+    const client = await c.tools(c[sender].id);
+    const result = await client.callTool({ name: 'message_employee', arguments: { employee: c.worker.id, task: task.number, text: 'Images are ready.' } });
+    expect(result.isError).toBeFalsy();
+    expect((await c.read(task.id)).silent).toBe(0);
+    expect((await c.read(task.id)).externalWait).toBeNull();
+    expect((await c.read(other.id)).externalWait).toMatchObject({ reason: 'Deployment' });
+    if (sender === 'head') expect(c.ctx.bus.channels(c.company.id)).toContainEqual(expect.objectContaining({
+      from: { kind: 'agent', id: c.head.id, departmentId: c.department.id },
+      to: { kind: 'agent', id: c.worker.id, departmentId: c.department.id },
+    }));
+    expect(c.ctx.bus.channels(c.company.id)).not.toContainEqual(expect.objectContaining({
+      from: { kind: 'department', id: c.department.id }, to: { kind: 'department', id: c.department.id },
+    }));
+    const turns = await c.db.select().from(jobs).where(eq(jobs.taskId, task.id));
+    expect(turns).toHaveLength(1);
+    expect(turns[0]!.prompt).toContain('Images are ready.');
+  });
+
+  it.each(['head', 'orchestrator'] as const)('keeps the wait on a %s message without task, even when its text names the task', async sender => {
+    const c = await messaging();
+    const task = await c.task();
+    await c.wait(task.number, 'Images', new Date(Date.now() + 3_600_000).toISOString());
+    const result = await (await c.tools(c[sender].id)).callTool({ name: 'message_employee', arguments: { employee: c.worker.id, text: `#${task.number}: another topic.` } });
+    expect(result.isError).toBeFalsy();
+    expect((await c.read(task.id)).externalWait).toMatchObject({ reason: 'Images' });
+    expect(await c.db.select().from(jobs).where(eq(jobs.taskId, task.id))).toEqual([]);
+  });
+
+  it.each(['head', 'orchestrator'] as const)('describes task binding and refuses a blank %s message without resuming work', async sender => {
+    const c = await messaging();
+    const task = await c.task();
+    await c.wait(task.number, 'Images', new Date(Date.now() + 3_600_000).toISOString());
+    const client = await c.tools(c[sender].id);
+    const messageTool = (await client.listTools()).tools.find(t => t.name === 'message_employee')!;
+    expect(messageTool.description).toContain('With task, the message concerns that task and ends its external wait.');
+    expect(messageTool.inputSchema.properties?.text).toMatchObject({ type: 'string', minLength: 1 });
+    const result = await client.callTool({ name: 'message_employee', arguments: { employee: c.worker.id, task: task.number, text: ' ' } });
+    expect(result.isError).toBe(true);
+    expect((await c.read(task.id)).externalWait).toMatchObject({ reason: 'Images' });
+    expect(await c.db.select().from(jobs).where(eq(jobs.taskId, task.id))).toEqual([]);
+  });
+
+  it('ends the wait when a person answers ask_person on the task', async () => {
+    const c = await fixture();
+    const task = await c.task();
+    const result = await (await c.tools()).callTool({ name: 'ask_person', arguments: { task: task.number, question: 'May I publish?', topic: 'task' } });
+    expect(result.isError).toBeFalsy();
+    const another = await (await c.tools()).callTool({ name: 'ask_person', arguments: { task: task.number, question: 'Which region?', topic: 'task' } });
+    expect(another.isError).toBeFalsy();
+    await c.wait(task.number, 'Images', new Date(Date.now() + 3_600_000).toISOString());
+    const [request] = await c.db.select().from(requests).where(eq(requests.taskId, task.id));
+    const response = await c.app.inject({ method: 'POST', url: `/api/requests/${request!.id}`, payload: { answer: 'The images are ready.' }, ...as(c.owner) });
+    expect(response.statusCode).toBe(200);
+    expect(await c.read(task.id)).toMatchObject({ externalWait: null, silent: 0, status: 'waiting' });
+    expect((await c.db.select().from(jobs).where(eq(jobs.taskId, task.id))).map(j => j.prompt)).toContainEqual(expect.stringContaining('The images are ready.'));
+  });
+
+  it('clears external waits in children when the parent task is cancelled', async () => {
+    const c = await fixture();
+    const parent = (await createTask(c.ctx, { agentId: c.orchestrator.id }, { title: 'Publish', brief: '', body: '', departmentId: c.department.id, assigneeAgentId: c.head.id })).task;
+    const child = (await createTask(c.ctx, { agentId: c.head.id }, { title: 'Images', brief: '', body: '', departmentId: c.department.id, parentId: parent.id, assigneeAgentId: c.worker.id, executor: true, gates: [] })).task;
+    const deadline = new Date(Date.now() + 3_600_000).toISOString();
+    expect((await c.wait(parent.number, 'Registry', deadline, c.head.id)).isError).toBeFalsy();
+    expect((await c.wait(child.number, 'Images', deadline)).isError).toBeFalsy();
+    await cancel(c.ctx, { agentId: c.orchestrator.id }, parent.id, 'No longer needed.');
+    expect(await c.read(parent.id)).toMatchObject({ status: 'cancelled', externalWait: null });
+    expect(await c.read(child.id)).toMatchObject({ status: 'cancelled', externalWait: null });
+  });
+
+  it('keeps a task message current when work starts, but drops it after reassignment', async () => {
+    const c = await messaging();
+    const task = await c.task();
+    await c.wait(task.number, 'Images', new Date(Date.now() + 3_600_000).toISOString());
+    const result = await (await c.tools(c.head.id)).callTool({ name: 'message_employee', arguments: { employee: c.worker.id, task: task.number, text: 'Images are ready.' } });
+    expect(result.isError).toBeFalsy();
+    const [job] = await c.db.select().from(jobs).where(eq(jobs.taskId, task.id));
+    expect(job).toBeDefined();
+    await c.db.update(tasks).set({ status: 'working', version: sql`${tasks.version} + 1` }).where(eq(tasks.id, task.id));
+    expect(await discardStaleTurn(c.db, job!)).toBe(false);
+    await c.db.update(tasks).set({ assigneeAgentId: c.peer.id }).where(eq(tasks.id, task.id));
+    expect(await discardStaleTurn(c.db, job!)).toBe(true);
+  });
+
+  it('refuses a new wait while an unread task message is queued', async () => {
+    const c = await messaging();
+    const task = await c.task();
+    await c.tools();
+    const sent = await (await c.tools(c.head.id)).callTool({ name: 'message_employee', arguments: { employee: c.worker.id, task: task.number, text: 'Images are already ready.' } });
+    expect(sent.isError).toBeFalsy();
+    const result = await c.wait(task.number, 'Images', new Date(Date.now() + 3_600_000).toISOString());
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain('message');
+    expect((await c.read(task.id)).externalWait).toBeNull();
+  });
+
+  it('accepts the exact two-hour boundary and refuses one millisecond more', async () => {
+    const c = await fixture();
+    const task = await c.task();
+    const now = new Date();
+    const until = new Date(now.getTime() + 2 * 3_600_000).toISOString();
+    expect((await waitFor(c.ctx, c.worker.id, task.id, { reason: 'Images', until }, now)).task.externalWait).toMatchObject({ until });
+    await expect(waitFor(c.ctx, c.worker.id, task.id, { reason: 'Images', until: new Date(Date.parse(until) + 1).toISOString() }, now)).rejects.toMatchObject({ reason: 'task_invalid' });
+  });
+
+  it('refuses a deadline equal to now and accepts one millisecond in the future', async () => {
+    const c = await fixture();
+    const task = await c.task();
+    const now = new Date('2026-11-03T10:00:00.000Z');
+    await expect(waitFor(c.ctx, c.worker.id, task.id, { reason: 'Images', until: now.toISOString() }, now)).rejects.toMatchObject({ reason: 'task_invalid' });
+    const until = new Date(now.getTime() + 1).toISOString();
+    await waitFor(c.ctx, c.worker.id, task.id, { reason: 'Images', until }, now);
+    expect((await c.read(task.id)).externalWait).toMatchObject({ until });
+  });
+
+  it('leaves an orphaned due wait alone until a holder can receive its wake', async () => {
+    const c = await fixture();
+    const task = await c.task();
+    await c.db.update(tasks).set({ assigneeAgentId: null, externalWait: { reason: 'Images', since: '2026-11-03T09:00:00.000Z', until: '2026-11-03T10:00:00.000Z' } }).where(eq(tasks.id, task.id));
+    expect(await checkExternalWaits(c.ctx, new Date('2026-11-03T10:00:00.001Z'))).toBe(0);
+    expect((await c.read(task.id)).externalWait?.reason).toBe('Images');
+  });
+
+  it('ends a wait once when two server sweeps race', async () => {
+    const c = await fixture();
+    const task = await c.task();
+    const until = new Date(Date.now() + 30_000);
+    await c.wait(task.number, 'Images', until.toISOString());
+    const counts = await Promise.all([checkExternalWaits(c.ctx, until), checkExternalWaits({ ...c.ctx }, until)]);
+    expect(counts.sort()).toEqual([0, 1]);
+    expect(await c.db.select().from(jobs).where(eq(jobs.taskId, task.id))).toHaveLength(1);
+  });
+
+  it('keeps its own comment quiet while it waits', async () => {
+    const c = await fixture();
+    const task = await c.task();
+    await c.wait(task.number, 'Images', new Date(Date.now() + 3_600_000).toISOString());
+    const result = await (await c.tools()).callTool({ name: 'comment', arguments: { task: task.number, text: 'The registry is still working.' } });
+    expect(result.isError).toBeFalsy();
+    expect((await c.read(task.id)).externalWait).toMatchObject({ reason: 'Images' });
+    expect(await c.db.select().from(jobs).where(eq(jobs.taskId, task.id))).toEqual([]);
+  });
+
+  it.each(['head', 'orchestrator'] as const)('refuses invalid task bindings on a %s message without clearing another wait', async sender => {
+    const c = await messaging();
+    const task = await c.task();
+    await c.wait(task.number, 'Images', new Date(Date.now() + 3_600_000).toISOString());
+    const client = await c.tools(c[sender].id);
+    for (const input of [{ employee: c.peer.id, task: task.number }, { employee: c.worker.id, task: 9999 }]) {
+      const result = await client.callTool({ name: 'message_employee', arguments: { ...input, text: 'Images are ready.' } });
+      expect(result.isError).toBe(true);
+      expect((await c.read(task.id)).externalWait).toMatchObject({ reason: 'Images' });
+    }
+    expect(await c.db.select().from(jobs).where(eq(jobs.taskId, task.id))).toEqual([]);
+  });
+
+  it('keeps a concurrent task message visible when wait_for races with it', async () => {
+    const c = await messaging();
+    const task = await c.task();
+    const worker = await c.tools();
+    const head = await c.tools(c.head.id);
+    const [, sent] = await Promise.all([
+      worker.callTool({ name: 'wait_for', arguments: { task: task.number, reason: 'Images', until: new Date(Date.now() + 3_600_000).toISOString() } }),
+      head.callTool({ name: 'message_employee', arguments: { employee: c.worker.id, task: task.number, text: 'Images are ready.' } }),
+    ]);
+    expect(sent.isError).toBeFalsy();
+    expect((await c.read(task.id)).externalWait).toBeNull();
+    expect(await c.db.select().from(jobs).where(eq(jobs.taskId, task.id))).toHaveLength(1);
+  });
+});

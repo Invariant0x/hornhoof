@@ -418,7 +418,6 @@ export const en = {
     notice: (to: string) => `Hornhoof notice to ${to}`,
     theOrchestrator: 'the orchestrator',
     people: 'people',
-    messages: 'Messages',
     folded: (n: number) => `+${n} ${plural('en', n, { one: 'line', other: 'lines' })} (Ctrl+O to open)`,
     hint: 'Enter to send, Shift+Enter for a new line',
     working: 'Working…',

@@ -5,6 +5,7 @@ import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agents, companies, departments, jobs, people, subscriptions, taskEvents, tasks, turns } from '../src/db/schema.js';
 import { createTask, submit, verdict } from '../src/modules/tasks/engine.js';
 import type { DepartmentTree } from '../src/modules/tasks/tree.js';
+import { treeFacts } from '../src/modules/tasks/tree-facts.js';
 import { as, invitePerson, listen, mcp, setUpCompany, statements, testApp } from './helpers.js';
 
 async function company({ openTurn = true, openedMinutesAgo = 120 } = {}) {
@@ -75,6 +76,28 @@ async function company({ openTurn = true, openedMinutesAgo = 120 } = {}) {
 }
 
 describe('GET /api/departments/:id/tree', () => {
+  it('shows a holder external wait in task details, tree facts and the calm tree state, then removes it after a comment', async () => {
+    const c = await company();
+    const task = await c.member(c.bruno.id, 'Publish images');
+    const client = await c.tools(c.bruno);
+    const until = new Date(Date.now() + 3_600_000).toISOString();
+    const result = await client.callTool({ name: 'wait_for', arguments: { task: task.number, reason: 'Images on the registry', until } });
+    expect(result.isError).toBeFalsy();
+    const [row] = await c.db.select().from(tasks).where(eq(tasks.id, task.id));
+    const facts = await treeFacts(c.db, c.companyId, c.dev.id, () => true);
+    expect(facts.tasks.find(t => t.id === task.id)?.externalWait).toEqual(row!.externalWait);
+    const detail = await c.app.inject({ url: `/api/tasks/${task.id}`, ...as(c.ceoToken) });
+    expect(detail.json().task.externalWait).toEqual(row!.externalWait);
+    const readTree = async () => (await c.app.inject({ url: `/api/departments/${c.dev.id}/tree`, ...as(c.ceoToken) })).json<{ tree: DepartmentTree }>().tree;
+    const line = (await readTree()).lines.find(l => l.taskId === task.id)!;
+    expect(line.externalWait).toEqual(row!.externalWait);
+    expect(line.segments.at(-1)).toMatchObject({ kind: 'after', externalWait: row!.externalWait });
+    const comment = await c.app.inject({ method: 'POST', url: `/api/tasks/${task.id}/comments`, payload: { text: 'Images are ready.' }, ...as(c.ceoToken) });
+    expect(comment.statusCode).toBe(201);
+    expect((await treeFacts(c.db, c.companyId, c.dev.id, () => true)).tasks.find(t => t.id === task.id)?.externalWait).toBeNull();
+    expect((await readTree()).lines.find(l => l.taskId === task.id)?.externalWait).toBeNull();
+  });
+
   it('reads the same reported program history for the tree and Speed', async () => {
     const c = await company();
     const task = await c.member(c.bruno.id, 'Checkout API');

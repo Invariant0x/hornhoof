@@ -6,6 +6,16 @@ const box = { width: 1100, height: 640, phone: false };
 const minutes = (a: string, b: string) => (Date.parse(a) - Date.parse(b)) / 60_000;
 
 describe('work tree layout', () => {
+  it('keeps a live signal on a short work interval at phone scale', () => {
+    const line = { ...DEV_TREE.lines[0]!, createdAt: '2026-10-30T11:30:00.000Z', cutAt: '2026-10-30T11:30:00.000Z',
+      mergedAt: null, doneAt: null, live: true, moves: [], segments: [{ kind: 'work' as const, from: '2026-10-30T11:30:00.000Z', to: null }] };
+    const tree = { ...DEV_TREE, now: '2026-10-30T12:00:00.000Z', turn: { ...DEV_TREE.turn!, startedAt: '2026-10-30T00:00:00.000Z' },
+      lines: [line], reviews: [], review: null, waiting: [], activity: [], idle: [] };
+    const layout = treeLayout(tree, { width: 375, height: 1000, phone: true }, 1);
+    expect(layout.pulses).toHaveLength(1);
+    expect(layout.pulses[0]![1]![0] - layout.pulses[0]![0]![0]).toBeCloseTo(19);
+  });
+
   it('labels a running assignment ahead of a newer task still waiting in the queue', () => {
     const running = { ...DEV_TREE.lines[0]!, taskId: 'running', live: true, mergedAt: null };
     const queued = { ...running, taskId: 'queued', live: false, createdAt: DEV_TREE.now };

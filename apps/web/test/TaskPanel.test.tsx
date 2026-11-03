@@ -1,6 +1,6 @@
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Shell } from '../src/screens/Shell';
 import { CARD, decisions, DEV_ORG, ME, mockApi, REQUESTS, TASK_DETAIL, TASKS, TURN } from './api-mock';
@@ -29,6 +29,25 @@ async function openTask(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe('a task', () => {
+  afterEach(() => localStorage.removeItem('hh-lang'));
+  it.each(['en', 'ru'])('shows an external wait with its reason and deadline in %s, then clears it after a comment', async language => {
+    localStorage.setItem('hh-lang', language);
+    const user = userEvent.setup();
+    const externalWait = { reason: 'Images on the registry', since: '2026-11-03T10:00:00.000Z', until: '2026-11-03T11:30:00.000Z' };
+    shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, externalWait } }] });
+    await user.click(await screen.findByRole('button', { name: /^(Tasks|Задачи)/ }));
+    await user.click(await screen.findByRole('button', { name: /#12/ }));
+    const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
+    const clock = new Date(externalWait.until).toLocaleTimeString(language === 'ru' ? 'ru-RU' : 'en-GB', { hour: '2-digit', minute: '2-digit' });
+    const text = language === 'ru' ? `ждет: Images on the registry, до ${clock}` : `waits: Images on the registry, until ${clock}`;
+    expect(within(panel).getByText(text)).toHaveClass('muted');
+    mockApi({ 'POST /api/tasks/t12/comments': [201, { task: TASK_DETAIL }], 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, externalWait: null } }] });
+    await user.type(within(panel).getByLabelText(language === 'ru' ? 'Комментарий' : 'Comment'), 'Images ready.');
+    await user.click(within(panel).getByRole('button', { name: language === 'ru' ? 'Добавить комментарий' : 'Add comment' }));
+    await waitFor(() => expect(within(panel).queryByText(text)).toBeNull());
+    localStorage.removeItem('hh-lang');
+  });
+
   it("puts what waits for the person at the top, the orchestrator's plain question above the answer, and says that writing to the agent counts too", async () => {
     const user = userEvent.setup();
     const plain = 'Bruno cannot finish the checkout because the tests fail on the payment provider. He needs the provider keys, or a yes to leave those tests for later.';

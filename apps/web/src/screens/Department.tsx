@@ -15,7 +15,7 @@ import { PersonButton } from '../ui/PersonButton';
 import { RepoSettings } from '../ui/RepoSettings';
 import { DeptEmployeeList, DeptSubUnits, employeeGroups } from '../ui/SubUnits';
 import { byState, TaskRow } from '../ui/TaskRow';
-import { LiveWay, Pulse, pulseSeconds, toD, useReducedMotion, type Point } from '../ui/wires';
+import { LiveWay, Pulse, motionSpeed, pulseSeconds, toD, useReducedMotion, type Point } from '../ui/wires';
 import { useWorkLines } from '../ui/work-lines';
 import { useRework } from '../ui/use-rework';
 import { AgentState, type AgentLive } from '../ui/AgentState';
@@ -375,7 +375,7 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
 
   /* Real changes only: an employee's chip flashes, a pulse runs where its work went, and the line below says what happened. */
   const seen = useRef<Seen | null>(null);
-  const [shots, setShots] = useState<Shot[]>([]);
+  const [shots, setShots] = useState<(Shot & { speed: number })[]>([]);
   const [flashing, setFlashing] = useState<Set<string>>(new Set());
   const [said, setSaid] = useState<Said>(null);
   const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
@@ -400,9 +400,10 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
   /* Dots that run once, each taken away when it gets there. */
   const shoot = useCallback(
     (fired: Shot[]) => {
-      if (!fired.length || still) return;
-      setShots(x => [...x, ...fired]);
-      for (const f of fired) later(pulseSeconds(f.pts, PULSE_SPEED) * 1000, () => setShots(x => x.filter(y => y.key !== f.key)));
+      if (!fired.length) return;
+      const speed = motionSpeed(PULSE_SPEED, still);
+      setShots(x => [...x, ...fired.map(f => ({ ...f, speed }))]);
+      for (const f of fired) later(pulseSeconds(f.pts, speed) * 1000, () => setShots(x => x.filter(y => y.key !== f.key)));
     },
     [still, later],
   );
@@ -554,7 +555,7 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
             {s.report && <Wire l={{ cls: 'pl', pts: s.report.pts, arrow: true }} />}
             <MemberLines s={s} toMember={paths.toMember} stateOf={stateOf} still={still} />
             {shots.map(x => (
-              <Pulse key={x.key} pts={x.pts} speed={PULSE_SPEED} once tone={x.tone} />
+              <Pulse key={x.key} pts={x.pts} speed={x.speed} once tone={x.tone} />
             ))}
           </svg>
           {s.gates.map(g => (
