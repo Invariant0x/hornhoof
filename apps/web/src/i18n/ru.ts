@@ -165,7 +165,8 @@ export const ru: Messages = {
     disableLabel: name => `Отключить ${name}`,
     agentsNote: 'Агентов здесь нет. Они на карте, внутри своих отделов.',
     ceoDelegate: 'Заместитель CEO',
-    ceoDelegateLabel: name => `Заместитель CEO: ${name}`,
+    deputyShort: 'Зам',
+    deputyAbout: 'Принимает решения, которые принимает только CEO, и видит всю компанию. Доступ, статус и вход заместителя меняете только вы.',
     ceoDelegateHint: 'Принимает решения, которые принимает только CEO. Ставите и снимаете отметку только вы.',
   },
   subs: {
