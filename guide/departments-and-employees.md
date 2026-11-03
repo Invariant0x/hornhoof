@@ -58,9 +58,9 @@ Opening the window of an employee whose program does not run starts it, so the o
 
 ![An employee's terminal](../.github/assets/terminal.gif)
 
-## Why does Antigravity look different?
+## How does Hornhoof follow Antigravity?
 
-Antigravity's own screen tells Hornhoof neither its answers nor its steps. So there each message goes to Antigravity's print mode, and the window shows its answer and steps as they come.
+Antigravity runs its own screen too. Hornhoof reads its hooks and conversation transcript to show answers and steps.
 
 A line typed while it works goes after the running turn.
 

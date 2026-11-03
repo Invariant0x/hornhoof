@@ -108,9 +108,6 @@ COPY apps/node/hh-hook-send.cjs /usr/local/bin/hh-hook-send.cjs
 # The terminal's private, bounded raw output survives programs leaving their alternate screen.
 COPY apps/node/hh-capture.cjs /app/apps/node/hh-capture.cjs
 COPY apps/node/hh-fs.cjs /app/apps/node/hh-fs.cjs
-# The terminal of an agent on Antigravity CLI, which runs agy's print mode for each message.
-COPY apps/node/hh-agy.cjs /app/apps/node/hh-agy.cjs
-COPY apps/node/hh-hook-send.cjs /app/apps/node/hh-hook-send.cjs
 RUN mkdir -p /data && chown node:node /data
 # Agent programs run their commands in login shells, where Debian's /etc/profile sets PATH again: the tools folder goes
 # back in front, so an agent finds codex, claude, kimi and agy by name.

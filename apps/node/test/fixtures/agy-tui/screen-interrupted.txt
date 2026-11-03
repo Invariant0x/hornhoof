@@ -1,0 +1,7 @@
+> Run the shell command: sleep 30; echo late. Then reply LATE.
+● Ran (sleep 30; echo late) (ctrl+o to expand)
+  ⎿  Interrupted · What should Antigravity CLI do instead?
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+>
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+? for shortcuts                                                                                     Gemini 4 Argon · low

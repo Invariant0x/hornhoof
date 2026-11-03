@@ -1,47 +1,133 @@
 #!/usr/bin/env node
-// Plays Antigravity CLI 1.4.12 for a person who is not signed in, for the sign-in tests: the screens recorded from agy in
-// a container. Enter picks Google OAuth and shows Google's link; the code "good-code" signs in, any other gets Google's
-// answer to a wrong code; what agy shows once signed in was not recorded, so the screen is left empty. `agy models` answers
-// as agy does, signed in or not.
-import { existsSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+// Plays agy's own terminal from the recorded screens, hooks and transcript. Login keeps its own recorded flow.
+import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { rawKeys, readKeys } from './keys.mjs';
 
-const URL =
-  'https://accounts.google.com/o/oauth2/auth?access_type=offline&client_id=1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com' +
-  '&code_challenge=FAKE-challenge&code_challenge_method=S256&prompt=consent&redirect_uri=https%3A%2F%2Fantigravity.google%2Foauth-callback' +
-  '&response_type=code&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcloud-platform+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.email' +
-  '+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.profile+openid&state=FAKE-state';
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const fixture = name => readFileSync(new URL(`../fixtures/agy-tui/${name}`, import.meta.url), 'utf8');
+const trace = data => {
+  if (process.env.FAKE_LOG) appendFileSync(process.env.FAKE_LOG, JSON.stringify(data) + '\n');
+};
 
-const signedIn = join(process.env.HOME ?? '/tmp', 'fake-signed-in');
-
-if (process.argv[2] === 'models') {
-  if (existsSync(signedIn)) {
-    process.stdout.write('Fetching available models...\ngemini-4-argon-high       Gemini 4 Argon (High)\n');
-    process.exit(0);
-  }
-  process.stdout.write('Fetching available models...\n');
-  process.stderr.write('Error: Please sign in to view available models. Launch the CLI without arguments to sign in.\n');
-  process.exit(1);
+async function runHook(command, payload) {
+  const args = command.split(' ');
+  const bin = args.shift();
+  const child = bin === 'hh-hook' ? spawn(process.execPath, [fileURLToPath(new URL('../../hh-hook.cjs', import.meta.url)), ...args]) : spawn(bin, args);
+  let stdout = '';
+  child.stdout.setEncoding('utf8').on('data', data => stdout += data);
+  child.stderr.pipe(process.stderr);
+  const exited = new Promise(resolve => child.once('exit', resolve));
+  child.stdin.end(JSON.stringify(payload));
+  await exited;
+  return stdout;
 }
 
-const LOGO = '     ▄▀▀▄\n    ▀▀▀▀▀▀\n   ▀▀▀▀▀▀▀▀\n  ▄▀▀    ▀▀▄\n ▄▀▀      ▀▀▄\n\n';
-const show = text => process.stdout.write(`\x1b[2J\x1b[H${LOGO}${text}`);
+class AgyTerminal {
+  input = '';
+  active = null;
+  queued = [];
+  lines = fixture('transcript.jsonl').trim().split('\n').map(JSON.parse);
 
-let screen = 'methods';
-let code = '';
-show(' Welcome to the Antigravity CLI. You are currently not signed in.\n Select login method:\n > 1. Google OAuth\n   2. Use a Google Cloud project\n\n   ↑/↓ Navigate · enter Select\n');
-process.stdin.setRawMode(true);
-process.stdin.on('data', chunk => {
-  for (const key of chunk.toString()) {
-    if (screen === 'methods' && key === '\r') {
-      screen = 'code';
-      show(` Your browser should open automatically. If not:\n ${URL}\n\n If you aren't automatically redirected, paste the authorization code below:\n authorization code...\n\n  shift+up/down Navigate\n`);
-    } else if (screen === 'code' && key === '\r') {
-      screen = 'done';
-      if (code === 'good-code') {
-        writeFileSync(signedIn, '');
-        show('');
-      } else show(' Got an error: token exchange failed: oauth2: "invalid_grant" "Bad Request"\n Press any key to go back.\n\n  shift+up/down Navigate\n');
-    } else if (screen === 'code') code += key;
+  constructor() {
+    const args = process.argv.slice(2);
+    this.id = args.includes('--conversation') ? args[args.indexOf('--conversation') + 1] : randomUUID();
+    this.log = join(process.env.HOME, '.gemini', 'antigravity-cli', 'brain', this.id, '.system_generated', 'logs', 'transcript_full.jsonl');
+    mkdirSync(dirname(this.log), { recursive: true });
+    this.hooks = JSON.parse(readFileSync(join(process.cwd(), '.agents', 'hooks.json'), 'utf8')).hornhoof;
+    trace({ argv: args, home: process.env.HOME, agentsMd: readFileSync('AGENTS.md', 'utf8'), hooks: this.hooks });
+    rawKeys();
+    this.display();
+    readKeys(key => this.key(key));
   }
-});
+
+  write(line) {
+    appendFileSync(this.log, JSON.stringify(line) + '\n');
+  }
+
+  show(name, typed = '') {
+    let text = fixture(`screen-${name}`).trimEnd();
+    if (typed) text = text.replace(/>(\x1b\[[0-9;]*m)?\n(?=(?:\x1b\[[0-9;]*m)?─)/, (_, style = '') => `>${style} ${typed}\n`);
+    if (this.active) text = text.replace('Run the shell command: sleep 8; echo slept. Then reply FINISHED.', this.active.line);
+    if (this.queued.length) text = text.replace('Also say BANANA.', this.queued[0]);
+    if (process.env.FAKE_OLD_INTERRUPTED) text = '⎿  Interrupted · What should Antigravity CLI do instead?\n' + text;
+    process.stdout.write(`\x1b[0m\x1b[2J\x1b[H${text}\x1b[0m`);
+  }
+
+  display() {
+    this.show(this.queued.length ? 'queued.txt' : this.active ? 'busy.ansi' : 'idle.ansi', this.input);
+  }
+
+  async hook(name, sample, line, extra = {}) {
+    const payload = { ...JSON.parse(fixture(sample)), conversationId: this.id, lastUserInput: line, ...extra };
+    for (const command of this.hooks[name] ?? []) {
+      const stdout = await runHook(command.command, payload);
+      trace({ hook: name, payload, stdout });
+    }
+  }
+
+  async take(line) {
+    const turn = { line };
+    this.active = turn;
+    this.display();
+    await this.hook('PreInvocation', 'hook-pre.json', line);
+    if (this.active !== turn) return;
+    this.write({ ...this.lines[line.includes('BANANA') ? 4 : 0], content: `<USER_REQUEST>\n${line}\n</USER_REQUEST>` });
+    if (line.includes('HANG')) return;
+    if (await this.work(turn)) await this.finish(turn);
+  }
+
+  async work(turn) {
+    const { line } = turn;
+    await sleep(line.includes('TICK') || line.includes('WORK') ? 1500 : 200);
+    if (this.active !== turn) return false;
+    if (line.includes('BANANA')) return true;
+    this.write(line.includes('LAG_TEXT') ? { ...this.lines[1], content: 'Checking the command.' } : this.lines[1]);
+    if (line.includes('CUT')) return false;
+    await sleep(line.includes('WORK') ? 1500 : 150);
+    if (this.active !== turn) return false;
+    this.write(this.lines[2]);
+    await this.hook('PreInvocation', 'hook-pre-after-tool.json', line);
+    return this.active === turn;
+  }
+
+  async finish(turn) {
+    const { line } = turn;
+    const answer = this.lines[line.includes('BANANA') ? 5 : 3];
+    if (!line.includes('LAG')) this.write(answer);
+    if (!line.includes('NO_STOP')) await this.hook('Stop', 'hook-stop.json', line, { error: line.includes('FAIL') ? 'invalid model selection' : '' });
+    if (line.includes('LAG')) { await sleep(250); this.write(answer); }
+    if (this.active !== turn) return;
+    this.active = null;
+    this.display();
+    if (this.queued.length) void this.take(this.queued.shift());
+  }
+
+  interrupt() {
+    if (!this.active) return;
+    this.active = null;
+    this.queued.length = 0;
+    this.input = '';
+    this.show('interrupted.txt');
+    trace({ interrupted: true });
+  }
+
+  key(key) {
+    if (key === 'escape') return this.interrupt();
+    if (key === 'kill') this.input = this.input.slice(0, this.input.lastIndexOf('\n') + 1);
+    else if (key === 'erase') this.input = this.input.slice(0, -1);
+    else if (key !== 'enter') this.input += key.text;
+    if (key !== 'enter') return this.display();
+    const line = this.input;
+    this.input = '';
+    if (!line) return;
+    if (this.active) { this.queued.push(line); this.display(); }
+    else void this.take(line);
+  }
+}
+
+if (!process.argv.includes('--dangerously-skip-permissions')) await import('./fake-agy-login.mjs');
+else new AgyTerminal();

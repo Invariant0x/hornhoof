@@ -45,20 +45,4 @@ function codexCalls(line: unknown): Calls {
   return type === 'item_completed' ? { began: [], ended: [idOf(item.id)] } : none();
 }
 
-/* The tool step a line of agy's stream updates, with its index. */
-function agyToolStep(line: unknown): Record<string, unknown> | null {
-  const step = isRecord(line) && line.event === 'step_update' ? line.step_update : null;
-  return isRecord(step) && step.step_type === 'tool' && idOf(step.step_index) ? step : null;
-}
-
-const agyToolName = (step: Record<string, unknown>) => toolName(String((isRecord(step.tool_info) ? step.tool_info.name : null) ?? step.tool_name ?? 'tool'));
-
-/* agy updates each step of its answer by its index while it runs, and once more when it is done. */
-function agyCalls(line: unknown): Calls {
-  const step = agyToolStep(line);
-  if (!step) return none();
-  const id = idOf(step.step_index);
-  return step.state === 'DONE' ? { began: [], ended: [id] } : { began: [{ id, name: agyToolName(step) }], ended: [] };
-}
-
-export const CALLS: Record<TermProgram['kind'], (line: unknown) => Calls> = { claude: claudeCalls, codex: codexCalls, kimi: kimiCalls, antigravity: agyCalls };
+export const CALLS: Record<Exclude<TermProgram['kind'], 'antigravity'>, (line: unknown) => Calls> = { claude: claudeCalls, codex: codexCalls, kimi: kimiCalls };
