@@ -43,7 +43,7 @@ describe('the task engine', () => {
     const aside = await comment(ctx, { agentId: rita.id }, task.id, 'I would ask too.');
     expect([aside.wakes, (await read(task.id)).status]).toEqual([[], 'blocked']);
     const answered = await comment(ctx, { agentId: head.id }, task.id, 'Euros only.');
-    expect(answered.task).toMatchObject({ status: 'open', assigneeAgentId: bruno.id });
+    expect(answered.task).toMatchObject({ status: 'open', assigneeAgentId: bruno.id, silent: 0 });
     expect(answered.wakes).toEqual([{ agentId: bruno.id, taskId: task.id, why: 'unblocked', text: 'Euros only.' }]);
     const [me] = await db.select().from(agents).where(eq(agents.id, bruno.id));
     const prompt = wakePrompt(me!, answered.task, answered.wakes[0]!);

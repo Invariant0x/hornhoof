@@ -199,8 +199,8 @@ describe('external task wait', () => {
   it('keeps the expected task version in the durable wake outbox', async () => {
     const c = await fixture();
     const task = await c.task();
-    await keepWakes(c.db, c.company.id, [{ agentId: c.worker.id, taskId: task.id, why: 'assigned', version: task.version }]);
-    expect(await wakesLeft(c.db, new Date(Date.now() + 1000))).toContainEqual({ agentId: c.worker.id, taskId: task.id, why: 'assigned', version: task.version });
+    await keepWakes(c.db, c.company.id, [{ agentId: c.worker.id, taskId: task.id, why: 'assigned', version: task.version, text: '', note: '' }]);
+    expect(await wakesLeft(c.db, new Date(Date.now() + 1000))).toContainEqual({ agentId: c.worker.id, taskId: task.id, why: 'assigned', version: task.version, text: '', note: '' });
   });
 
   it('refuses a versioned wake if the task changed before queueing', async () => {
@@ -233,6 +233,7 @@ describe('external task wait', () => {
       expect(result.isError).toBeFalsy();
     }
     expect((await c.read(task.id)).externalWait).toBeNull();
+    expect((await c.read(task.id)).silent).toBe(0);
     const turns = await c.db.select().from(jobs).where(eq(jobs.taskId, task.id));
     expect(turns).toHaveLength(1);
     expect(turns[0]!.prompt).toContain('Images are ready.');
@@ -248,6 +249,7 @@ describe('external task wait', () => {
     const client = await c.tools(c[sender].id);
     const result = await client.callTool({ name: 'message_employee', arguments: { employee: c.worker.id, task: task.number, text: 'Images are ready.' } });
     expect(result.isError).toBeFalsy();
+    expect((await c.read(task.id)).silent).toBe(0);
     expect((await c.read(task.id)).externalWait).toBeNull();
     expect((await c.read(other.id)).externalWait).toMatchObject({ reason: 'Deployment' });
     const turns = await c.db.select().from(jobs).where(eq(jobs.taskId, task.id));
@@ -270,11 +272,13 @@ describe('external task wait', () => {
     const task = await c.task();
     const result = await (await c.tools()).callTool({ name: 'ask_person', arguments: { task: task.number, question: 'May I publish?', topic: 'task' } });
     expect(result.isError).toBeFalsy();
+    const another = await (await c.tools()).callTool({ name: 'ask_person', arguments: { task: task.number, question: 'Which region?', topic: 'task' } });
+    expect(another.isError).toBeFalsy();
     await c.wait(task.number, 'Images', new Date(Date.now() + 3_600_000).toISOString());
     const [request] = await c.db.select().from(requests).where(eq(requests.taskId, task.id));
     const response = await c.app.inject({ method: 'POST', url: `/api/requests/${request!.id}`, payload: { answer: 'The images are ready.' }, ...as(c.owner) });
     expect(response.statusCode).toBe(200);
-    expect((await c.read(task.id)).externalWait).toBeNull();
+    expect(await c.read(task.id)).toMatchObject({ externalWait: null, silent: 0, status: 'waiting' });
     expect((await c.db.select().from(jobs).where(eq(jobs.taskId, task.id))).map(j => j.prompt)).toContainEqual(expect.stringContaining('The images are ready.'));
   });
 
@@ -323,6 +327,24 @@ describe('external task wait', () => {
     const until = new Date(now.getTime() + 2 * 3_600_000).toISOString();
     expect((await waitFor(c.ctx, c.worker.id, task.id, { reason: 'Images', until }, now)).task.externalWait).toMatchObject({ until });
     await expect(waitFor(c.ctx, c.worker.id, task.id, { reason: 'Images', until: new Date(Date.parse(until) + 1).toISOString() }, now)).rejects.toMatchObject({ reason: 'task_invalid' });
+  });
+
+  it('refuses a deadline equal to now and accepts one millisecond in the future', async () => {
+    const c = await fixture();
+    const task = await c.task();
+    const now = new Date('2026-11-03T10:00:00.000Z');
+    await expect(waitFor(c.ctx, c.worker.id, task.id, { reason: 'Images', until: now.toISOString() }, now)).rejects.toMatchObject({ reason: 'task_invalid' });
+    const until = new Date(now.getTime() + 1).toISOString();
+    await waitFor(c.ctx, c.worker.id, task.id, { reason: 'Images', until }, now);
+    expect((await c.read(task.id)).externalWait).toMatchObject({ until });
+  });
+
+  it('leaves an orphaned due wait alone until a holder can receive its wake', async () => {
+    const c = await fixture();
+    const task = await c.task();
+    await c.db.update(tasks).set({ assigneeAgentId: null, externalWait: { reason: 'Images', since: '2026-11-03T09:00:00.000Z', until: '2026-11-03T10:00:00.000Z' } }).where(eq(tasks.id, task.id));
+    expect(await checkExternalWaits(c.ctx, new Date('2026-11-03T10:00:00.001Z'))).toBe(0);
+    expect((await c.read(task.id)).externalWait?.reason).toBe('Images');
   });
 
   it('ends a wait once when two server sweeps race', async () => {
