@@ -45,7 +45,8 @@ export const quote = (text: string): string =>
     .map(line => `> ${line}`)
     .join('\n');
 
-const nameOf = (party: MessageParty): string => party.name || 'People';
+const PEOPLE = 'People';
+const nameOf = (party: MessageParty): string => party.name || PEOPLE;
 /* The role, when it says more than the name, and the department. */
 const detailsOf = (party: MessageParty): string[] => [party.role?.en !== nameOf(party) ? party.role?.en : null, party.department?.name.en].filter((d): d is string => Boolean(d));
 const oneLine = (text: string): string => text.replace(/\s+/g, ' ').trim();
@@ -70,8 +71,11 @@ const tagless = (text: string): string => text.replace(/<(\s*\/?\s*teammate-mess
    its teammate_id; the sender's role and what the message is about are its summary. Claude Code shows it so only with
    its agent teams switched on and only for a short paste, so no turn is written this way yet. */
 export function teammateMessage(text: string, from: MessageParty, about: string | null): string {
-  const summary = [detailsOf(from).join(', '), about].filter(Boolean).join(': ') || nameOf(from);
-  return `<teammate-message teammate_id="${attribute(nameOf(from))}" summary="${attribute(summary)}">\n${tagless(text)}\n</teammate-message>`;
+  /* Each part is trimmed before it counts: an attribute of only spaces comes out empty, and Claude Code reads no empty one. */
+  const name = oneLine(nameOf(from)) || PEOPLE;
+  const details = detailsOf(from).map(oneLine).filter(Boolean).join(', ');
+  const summary = [details, oneLine(about ?? '')].filter(Boolean).join(': ') || name;
+  return `<teammate-message teammate_id="${attribute(name)}" summary="${attribute(summary)}">\n${tagless(text)}\n</teammate-message>`;
 }
 
 /* Applied after history and service instructions are composed, on both queued and live delivery paths. */
