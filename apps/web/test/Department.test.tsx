@@ -74,23 +74,27 @@ describe('Department view', () => {
     expect(screen.queryByRole('heading', { level: 2, name: 'Development' })).not.toBeInTheDocument();
   });
 
-  it('goes back to the map from anywhere in the department bar, not only from the small arrow', async () => {
+  it('keeps the back button separate from the department caption plaque', async () => {
     const user = userEvent.setup();
     shell();
     const title = await flyIn(user);
     const bar = screen.getByRole('navigation', { name: 'Development' });
     const back = within(bar).getByRole('button', { name: 'Back to the map' });
+    const plaque = title.closest('.crumb') as HTMLElement;
     expect(within(bar).getAllByRole('button')).toEqual([back]);
     expect(bar).not.toHaveClass('glass');
-    expect(back).toHaveClass('glass');
-    expect(back).toContainElement(title);
-    expect(back).toContainElement(within(bar).getByText('CTO'));
-    expect(decl('.crumbs', 'padding')).toBeUndefined();
-    expect(decl('.crumb', 'border')).toBeUndefined();
-    expect(decl('.crumb', 'width')).toBe('100%');
-    expect(decl('.crumb', 'height')).toBe('100%');
-    expect(decl('.crumb', 'cursor')).toBe('pointer');
+    expect(back).toHaveClass('hbtn', 'glass', 'ib');
+    expect(back).toHaveAttribute('title', 'Back to the map');
+    expect(back).toHaveTextContent('');
+    expect(plaque).not.toBe(back);
+    expect(plaque.tagName).toBe('DIV');
+    expect(plaque).toHaveClass('crumb', 'glass');
+    expect(plaque).toContainElement(title);
+    expect(plaque).toContainElement(within(bar).getByText('CTO'));
+    expect(decl('.crumb', 'cursor')).toBeUndefined();
     await user.click(within(bar).getByText('CTO'));
+    expect(screen.getByRole('heading', { level: 2, name: 'Development' })).toBeInTheDocument();
+    await user.click(back);
     expect(screen.queryByRole('heading', { level: 2, name: 'Development' })).not.toBeInTheDocument();
   });
 

@@ -229,14 +229,15 @@ select:disabled { opacity: .55; }
 .glass { background: var(--hud); border: 1px solid var(--line); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
 .tb-brand { justify-self: start; display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; }
 .tb-brand svg { width: 24px; height: 24px; flex: none; }
-.tabs { display: flex; height: 44px; padding: 0 4px; }
+.tabs { display: flex; height: 44px; box-sizing: border-box; padding: 0; }
 .tabs button {
-  height: 42px; padding: 0 14px; border: 0; background: none; cursor: pointer;
+  height: 100%; padding: 0 14px; border: 0; background: none; cursor: pointer;
   font-family: var(--f-display); font-size: 14px; font-weight: 600; color: var(--muted);
   box-shadow: inset 0 -2px 0 transparent;
 }
+.tabs button + button { border-left: 1px solid var(--line); }
 .tabs button:hover { color: var(--ink); }
-.tabs button.on { color: var(--ink); box-shadow: inset 0 -2px 0 var(--cyan); }
+.tabs button.on { color: var(--cyan-ink); background: var(--glow); box-shadow: inset 0 -2px 0 var(--cyan); }
 .tb-right { justify-self: end; display: flex; align-items: center; gap: 8px; }
 .account { position: relative; }
 .avatar { width: 44px; height: 44px; cursor: pointer; color: var(--ink); font-family: var(--f-display); font-size: 15px; font-weight: 600; }
@@ -520,9 +521,9 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 @media (max-width: 420px) {
   .topbar { left: 12px; right: 12px; gap: 6px; grid-template-columns: minmax(0, 1fr) auto; }
   .tb-brand { display: none; }
-  .tabs { justify-self: start; max-width: 100%; min-width: 0; padding: 0 2px; overflow-x: auto; scrollbar-width: none; }
+  .tabs { justify-self: start; max-width: 100%; min-width: 0; padding: 0; overflow-x: auto; scrollbar-width: none; }
   .tabs::-webkit-scrollbar { display: none; }
-  .tabs button { flex: none; padding: 0 5px; font-size: 12px; white-space: nowrap; }
+  .tabs button { flex: none; padding: 0 6px; font-size: 12px; white-space: nowrap; }
 }
 
 /* The structure card in the orchestrator's window. */
@@ -763,12 +764,9 @@ button.shead:focus-visible, button.schip:focus-visible { outline: none; }
 .pchip .pn span { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dv-empty { position: absolute; left: 50%; bottom: 76px; transform: translateX(-50%); margin: 0; padding: 10px 16px; font-size: 13px; color: var(--muted); }
 /* The department's name next to the logo, its actions bottom right and the drawer they open at the left. */
-.crumbs { position: absolute; z-index: 3; top: 12px; left: 68px; display: flex; height: 44px; max-width: calc(50% - 280px); min-width: 0; }
+.crumbs { position: absolute; z-index: 3; top: 12px; left: 68px; display: flex; align-items: center; gap: 8px; height: 44px; max-width: calc(50% - 280px); min-width: 0; }
 .crumbs h2 { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; color: var(--cyan-ink); }
-.crumb { display: flex; align-items: center; gap: 10px; width: 100%; height: 100%; min-width: 0; padding: 0 14px 0 0; color: var(--ink); cursor: pointer; }
-.crumb:hover { color: var(--cyan-ink); }
-.crumb:hover h2 { text-decoration: underline; text-underline-offset: 3px; }
-.crumb svg { flex: none; width: 42px; height: 42px; padding: 12px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.crumb { display: flex; align-items: center; gap: 10px; height: 44px; box-sizing: border-box; min-width: 0; padding: 0 14px; color: var(--ink); }
 .dv-acts { position: absolute; z-index: 3; right: 16px; bottom: 16px; display: flex; align-items: center; gap: 8px; }
 /* A window, card or task ends above the strip the zoom and the actions sit in, so with one open the actions move along
    that strip to right after the zoom, out from under it at any width; on a phone the window covers the whole screen. */

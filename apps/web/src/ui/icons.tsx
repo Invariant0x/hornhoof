@@ -65,6 +65,10 @@ export function ProviderMark({ provider }: { provider: ProviderId | null }) {
   );
 }
 
+export function BackIcon() {
+  return (<svg viewBox="0 0 24 24" aria-hidden="true"><path className="c" d="M4.5 12H20"/><path d="M11 5 4 12l7 7"/></svg>);
+}
+
 export function TreeIcon() {
   return (<svg viewBox="0 0 24 24" aria-hidden="true"><path className="t" d="M1.5 5H22.5"/><path className="c" d="M10 5V10.5L11.5 12H17M4.5 5V17.5L6 19H17"/><rect className="cf" x="17" y="10" width="4" height="4"/><rect className="cf" x="17" y="17" width="4" height="4"/></svg>);
 }
