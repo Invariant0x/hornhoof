@@ -296,6 +296,15 @@ const Load = z.object({
 export type NodeLoad = z.infer<typeof Load>;
 export const LOAD_MS = 20_000;
 
+/* Installed agent programs and an update in progress on the connected node. */
+export const ProgramInfo = z.object({
+  id: z.enum(['claude', 'codex', 'kimi']),
+  version: z.string().min(1).max(64).nullable(),
+  updating: z.boolean(),
+  failed: z.boolean(),
+});
+export type ProgramInfo = z.infer<typeof ProgramInfo>;
+
 /* What a plan's sign-in is on a node: Claude's long token, Codex's auth file (on one machine at a time), Kimi's and GLM's
    keys. Hornhoof keeps each only sealed to one node's public key, so it can never read them. */
 export const CRED_KINDS = ['claude_token', 'codex_auth', 'kimi_key', 'glm_key'] as const;

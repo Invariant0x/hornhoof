@@ -10,6 +10,7 @@ import { withProgramExit } from '../program-exit.js';
 import { contentText, inputText, isoFrom, isRecord, objectLine } from './events.js';
 import { childEnv, ensureDir, exitsCleanly, installPackage, interactiveLogin, runProgram, tokensIn, withEfforts, writePrivate } from './process.js';
 import { CODEX_NO_AUTO_UPDATE } from './session-updates.js';
+import { NPM_PACKAGES } from './packages.js';
 
 /* Codex serves a ChatGPT plan, or a company OpenAI key on the built-in node. */
 type Options = { home: string; tools: string; bin?: string; secret?: string | null; mode: 'plan' | 'api_key'; user?: JobUser | null };
@@ -140,7 +141,7 @@ export function codexAdapter({ home, tools, bin = join(tools, 'bin', 'codex'), s
 
   return {
     async install() {
-      await installPackage(tools, '@openai/codex');
+      await installPackage(tools, NPM_PACKAGES.codex);
     },
 
     /* Codex keeps the models a plan offers in its home; the ones its picker shows are visibility "list". */

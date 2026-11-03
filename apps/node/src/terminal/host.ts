@@ -25,7 +25,7 @@ import { agySteps, claudeStatusContext, claudeStatusLimits, codexRollout, kimiWi
 import { envFile, type Tmux } from './tmux.js';
 
 /* An agent's turn in its terminal: which program, where it keeps its sign-in, and what the runner hands every program. */
-export type TermJob = { key: string; program: TermProgram; bin: string; home: string; signedOut: RegExp; input: RunInput };
+export type TermJob = { key: string; program: TermProgram; bin: string; home: string; signedOut: RegExp; input: RunInput; version?: () => Promise<string | null> };
 
 type Msg<T extends ServerMessage['type']> = Extract<ServerMessage, { type: T }>;
 type Deferred<T> = { promise: Promise<T>; resolve(v: T): void; settled: boolean };
@@ -236,9 +236,10 @@ const hashOf = (v: unknown) => createHash('sha256').update(JSON.stringify(v)).di
 /* What the running program was started with; a turn that needs anything else starts it again. A plan signed in to another
    account in Hornhoof reaches a running Claude Code only when it starts again, which it does between turns, in the same
    session. */
-function launchHash({ program, bin, input }: TermJob, spec: LaunchSpec): string {
+const noVersion = async (): Promise<null> => null;
+async function launchHash({ program, bin, input, version = noVersion }: TermJob, spec: LaunchSpec): Promise<string> {
   const signedAs = spec.env.CLAUDE_CODE_OAUTH_TOKEN ? hashOf(spec.env.CLAUDE_CODE_OAUTH_TOKEN) : null;
-  return hashOf({ kind: program.kind, bin, model: input.model, effort: input.effort ?? null, compactWindow: input.compactWindow ?? null, instructions: input.instructions, env: lasting(input.env), signedAs });
+  return hashOf({ kind: program.kind, bin, version: await version(), model: input.model, effort: input.effort ?? null, compactWindow: input.compactWindow ?? null, instructions: input.instructions, env: lasting(input.env), signedAs });
 }
 /* An agent's state as its program starts for a turn. Kimi Code and Antigravity name a new session only once it starts,
    and what it was told from before is kept by that name. */
@@ -375,7 +376,8 @@ export class TerminalHost {
     const urls = this.bridge.agent(job.key);
     const instructionsFile = await this.writeInstructions(job);
     const spec = program.launch({ bin: job.bin, home: job.home, workDir: input.workDir, sessionId: input.sessionId, model: input.model, effort: input.effort, compactWindow: input.compactWindow, instructionsFile, urls, plugins: this.plugins });
-    const hash = launchHash(job, spec);
+    const hash = await this.versionedHash(a, job, spec);
+    if (input.signal?.aborted) return this.failedTurn(a, job, 'cancelled');
     const goesOn = await this.goesOn(a, input.sessionId, hash);
     /* A program started with nothing to type gets its tools before its turn ends, while Hornhoof still answers for them.
        Kimi Code connects to its tools only once it has a session, which a new one gets with the first message, and
@@ -399,9 +401,7 @@ export class TerminalHost {
     try {
       const failed = goesOn ? null : await this.startProgram(a, job, spec, hash, urls);
       if (failed) return failed;
-      /* Nothing to type: the turn only starts the program for the person who opened its window. */
-      if (!input.prompt) return await this.started(a, turn, tools, goesOn ? null : input.sessionId === null);
-      return (await this.typePrompt(a, job, input.prompt)) ?? (await this.turnEnd(a, job, a.ended));
+      return await this.runRequested(a, job, turn, tools, goesOn, a.ended);
     } finally {
       a.typing = null;
       if (starting && a.starting === starting) a.starting = null;
@@ -411,6 +411,22 @@ export class TerminalHost {
         a.ended = null;
       }
     }
+  }
+
+  private async versionedHash(a: Agent, job: TermJob, spec: LaunchSpec): Promise<string> {
+    let hash = await launchHash(job, spec);
+    /* A person may start a turn while npm runs, including when the installed version stays the same. */
+    while (job.version && a.busy && !job.input.signal?.aborted) {
+      await this.waitForTurn(a, job);
+      hash = await launchHash(job, spec);
+    }
+    return hash;
+  }
+
+  private async runRequested(a: Agent, job: TermJob, turn: Turn, tools: Promise<unknown> | null, goesOn: boolean, ended: Deferred<string>): Promise<RunResult> {
+    /* Nothing to type: the turn only starts the program for the person who opened its window. */
+    if (!job.input.prompt) return this.started(a, turn, tools, goesOn ? null : job.input.sessionId === null);
+    return (await this.typePrompt(a, job, job.input.prompt)) ?? this.turnEnd(a, job, ended);
   }
 
   private async waitForTurn(a: Agent, job: TermJob): Promise<void> {

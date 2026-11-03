@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it, onTestFinished } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { command } from '../src/main.js';
 import { markRemoved, readState } from '../src/state.js';
@@ -25,6 +25,7 @@ beforeEach(() => {
   process.env.HORNHOOF_DATA = data;
   process.env.FAKE_LOG = logFile;
   delete process.env.FAKE_MODE;
+  fakeNpm(true);
 });
 
 afterEach(() => {
@@ -58,7 +59,19 @@ function installFake(name: string) {
 function fakeNpm(ok: boolean) {
   mkdirSync(bin, { recursive: true });
   const body = ok
-    ? `echo "$@" >> "${data}/npm.log"\nln -s "${FAKES}claude" "${bin}/claude"\n`
+    ? `printf '%s\\n' "$*" >> "$4/../npm.log"
+case "$5" in
+  @anthropic-ai/claude-code*) name=claude; package=@anthropic-ai/claude-code ;;
+  @openai/codex*) name=codex; package=@openai/codex ;;
+  @moonshot-ai/kimi-code*) name=kimi; package=@moonshot-ai/kimi-code ;;
+  *) exit 78 ;;
+esac
+fixtures='${FAKES.replaceAll("'", "'\\''")}'
+ln -sf "$fixtures$name" "$4/bin/$name"
+mkdir -p "$4/lib/node_modules/$package"
+printf '{"version":"2.0.0"}' > "$4/lib/node_modules/$package/package.json"
+id -u > "$4/../npm.uid"
+`
     : `echo "npm error 404 Not Found" >&2\nexit 1\n`;
   writeFileSync(join(bin, 'npm'), `#!/bin/sh\n${body}`);
   chmodSync(join(bin, 'npm'), 0o755);
@@ -225,11 +238,38 @@ describe('run --builtin', () => {
     expect(claude.env).toMatchObject({ CLAUDE_CONFIG_DIR: join(data, 'subs', 'sub-a'), ANTHROPIC_API_KEY: 'company-anthropic-key-000000' });
     expect(codex.env).toMatchObject({ CODEX_HOME: join(data, 'subs', 'sub-b'), CODEX_API_KEY: 'company-openai-key-0000000000' });
     expect(claude.env).not.toHaveProperty('NODE_KEY');
+    expect(readFileSync(join(data, 'npm.log'), 'utf8').trim().split('\n')).toEqual([
+      `install -g --prefix ${join(data, 'tools')} @anthropic-ai/claude-code@latest`,
+      `install -g --prefix ${join(data, 'tools')} @openai/codex@latest`,
+    ]);
 
     server.send({ type: 'remove' });
     await new Promise(r => setTimeout(r, 200));
     expect(server.received.some(m => m.type === 'removed')).toBe(false);
     expect(existsSync(join(data, 'removed'))).toBe(false);
+  });
+});
+
+describe('program updates at node startup', () => {
+  it.each([
+    ['claude', '@anthropic-ai/claude-code'],
+    ['codex', '@openai/codex'],
+    ['kimi', '@moonshot-ai/kimi-code'],
+  ])('updates an already-installed %s as the tools owner', async (provider, packageName) => {
+    const server = await fakeServer();
+    await run(['set-key'], `${server.url} sub-1 ${provider} ${KEY}\n`);
+    installFake(provider);
+    writeFileSync(join(bin, 'tmux'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+    vi.stubEnv('PATH', `${bin}:${process.env.PATH ?? ''}`);
+    onTestFinished(() => vi.unstubAllEnvs());
+    const node = await command(['run'], io().io);
+    if (typeof node === 'number') throw new Error(`run ended with ${node}`);
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    await server.wait(() => existsSync(join(data, 'npm.uid')));
+    expect(readFileSync(join(data, 'npm.log'), 'utf8').trim()).toBe(`install -g --prefix ${join(data, 'tools')} ${packageName}@latest`);
+    expect(Number(readFileSync(join(data, 'npm.uid'), 'utf8').trim())).toBe(statSync(join(data, 'tools')).uid);
+    expect(JSON.parse(readFileSync(join(data, 'tools', 'lib', 'node_modules', packageName, 'package.json'), 'utf8'))).toEqual({ version: '2.0.0' });
   });
 });
 

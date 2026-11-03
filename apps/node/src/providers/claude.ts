@@ -12,6 +12,7 @@ import { claudePlanLimits, planToken } from '../terminal/programs.js';
 import { contentText, inputText, isoFrom, isRecord, objectLine, toolName } from './events.js';
 import { askHidden, childEnv, ensureDir, exitsCleanly, installPackage, interactiveLogin, readPrivate, runProgram, tokensIn, writePrivate } from './process.js';
 import { CLAUDE_NO_AUTO_UPDATE } from './session-updates.js';
+import { NPM_PACKAGES } from './packages.js';
 
 /* Claude Code serves three kinds of subscription: a personal plan, a company Anthropic key, and a GLM Coding Plan through Z.ai's Anthropic-compatible endpoint. */
 export type ClaudeMode = 'plan' | 'api_key' | 'glm';
@@ -98,7 +99,7 @@ export function claudeAdapter({ home, tools, bin = join(tools, 'bin', 'claude'),
 
   return {
     async install() {
-      await installPackage(tools, '@anthropic-ai/claude-code');
+      await installPackage(tools, NPM_PACKAGES.claude);
     },
 
     /* Z.ai maps the aliases to its GLM models, so a GLM plan offers only the default. */

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { runNode } from '../src/main.js';
+import { ProgramUpdates } from '../src/program-updates.js';
 import { TerminalHost } from '../src/terminal/host.js';
 import { claudeProgram } from '../src/terminal/programs.js';
 import { Tmux } from '../src/terminal/tmux.js';
@@ -401,6 +402,32 @@ describe('runNode', () => {
     ]);
     expect(server.received.find(m => m.type === 'job.event')).toMatchObject({ jobId: 'j1', event: { kind: 'text', text: 'Hello' } });
     expect(seen!.tools).toEqual({ url: `${server.url}/mcp`, token: 'tool-token-0123456789' });
+  });
+
+  it('does not run a job cancelled while its program update is pending', async () => {
+    const server = await fakeServer();
+    let release!: () => void;
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    const programs = new ProgramUpdates([{ id: 'claude', install: () => pending, readVersion: () => '1.0.0' }]);
+    const started: string[] = [];
+    const node = await runNode({ dir: nodeDir(server.url), programs, log: () => {}, adapter: {
+      ...adapter, run: async input => { started.push(input.prompt); return adapter.run(input); },
+    } });
+    onTestFinished(() => node.stop());
+    try {
+      await server.wait(() => server.received.some(m => m.type === 'hello'));
+      server.send({ type: 'job.run', jobId: 'waiting-update', subscriptionId: 's1', provider: 'claude', prompt: 'Do not run this.', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
+      await server.wait(() => server.received.some(m => m.type === 'job.started'));
+      expect(started).toEqual([]);
+      server.send({ type: 'job.cancel', jobId: 'waiting-update' });
+      server.send({ type: 'agent.say', agentKey: 'unused', text: 'barrier', ref: 'after-cancel' });
+      await server.wait(() => server.received.some(m => m.type === 'agent.said' && m.ref === 'after-cancel'));
+    } finally {
+      release();
+    }
+    await server.wait(() => server.received.some(m => m.type === 'job.done' && m.jobId === 'waiting-update'));
+    expect(server.received.find(m => m.type === 'job.done' && m.jobId === 'waiting-update')).toMatchObject({ ok: false, error: 'cancelled' });
+    expect(started).toEqual([]);
   });
 
   it('calls a running job off when Hornhoof asks and ignores ids it does not run', async () => {
