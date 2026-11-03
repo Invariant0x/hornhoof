@@ -26,7 +26,7 @@ describe.skipIf(!hasTmux)('Claude Code turns ended by StopFailure', () => {
     const started = Date.now();
     const result = await host.run(job('api', prompt, { sessionId: first.sessionId }));
     expect(result).toMatchObject({ ok: false, error: 'agent_failed', result: '', sessionId: first.sessionId });
-    expect(result.output.startsWith(`${reason}\n\n`)).toBe(true);
+    expect(result.output.endsWith(`\n\n${reason}`)).toBe(true);
     expect(Date.now() - started).toBeLessThan(5000);
     expect(keys.mock.calls.flatMap(([, ...keys]) => keys)).toEqual(['Enter']);
     expect(kill).not.toHaveBeenCalled();
