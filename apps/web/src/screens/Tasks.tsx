@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { deptLabel, errorText, useT } from '../i18n';
 import { mapPeople, useOrg } from '../org';
 import { placeName, useTasks, useTurns } from '../tasks';
+import { searchTasks } from '../task-search';
 import type { Decisions, Org, ProposalDecision, TaskLine, TaskStatus, TurnView } from '../types';
 import { ComputerCard } from '../ui/ComputerCard';
 import { Field } from '../ui/Field';
@@ -26,6 +27,62 @@ type Props = {
 const CLOSED: TaskStatus[] = ['done', 'cancelled'];
 
 type Rows = { selected: string | null; onOpenTask: (id: string) => void; place: (task: TaskLine) => string };
+
+function TaskSearch({ query, onChange }: { query: string; onChange: (query: string) => void }) {
+  const t = useT();
+  const input = useRef<HTMLInputElement>(null);
+  return (
+    <Field label={t.tasks.search}>
+      {p => (
+        <div className="task-search">
+          <input {...p} ref={input} type="search" autoComplete="off" placeholder={t.tasks.searchPlaceholder} value={query} onChange={e => onChange(e.target.value)} />
+          {query && (
+            <button className="zbtn" type="button" aria-label={t.tasks.clearSearch} title={t.tasks.clearSearch} onClick={() => { onChange(''); input.current?.focus(); }}>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+            </button>
+          )}
+        </div>
+      )}
+    </Field>
+  );
+}
+
+function TaskFilters({ departments, department, onDepartment, query, onQuery }: {
+  departments: Org['departments']; department: string | null; onDepartment: (department: string | null) => void; query: string; onQuery: (query: string) => void;
+}) {
+  const t = useT();
+  return (
+    <div className="task-filters">
+      {departments.length > 0 && (
+        <Field label={t.tasks.department}>
+          {p => (
+            <select {...p} value={department ?? ''} onChange={e => onDepartment(e.target.value || null)}>
+              <option value="">{t.tasks.allDepartments}</option>
+              {departments.map(d => <option key={d.id} value={d.id}>{deptLabel(t, d)}</option>)}
+            </select>
+          )}
+        </Field>
+      )}
+      <TaskSearch query={query} onChange={onQuery} />
+    </div>
+  );
+}
+
+function SearchResults({ tasks, query, rows }: { tasks: TaskLine[] | undefined; query: string; rows: Rows }) {
+  const t = useT();
+  const matches = tasks && searchTasks(tasks, query);
+  return (
+    <section className="turns" aria-label={t.tasks.searchResults}>
+      <h2>{t.tasks.searchResults}</h2>
+      {matches && !matches.length && <p className="muted" role="status">{t.tasks.noSearchResults}</p>}
+      <ul className="ttree">
+        {matches?.map(task => (
+          <li key={task.id}><TaskRow task={task} on={rows.selected === task.id} place={rows.place(task)} onOpen={rows.onOpenTask} /></li>
+        ))}
+      </ul>
+    </section>
+  );
+}
 
 /* Tasks under the task they serve, in the order they were laid out; a task whose parent is not listed stands at the top. */
 function TaskTree({ tasks, rows, under = null }: { tasks: TaskLine[]; rows: Rows; under?: string | null }) {
@@ -99,6 +156,51 @@ function Turn({ turn, tasks, rows }: { turn: TurnView; tasks: TaskLine[]; rows: 
       <header className="turn-head">{head}</header>
       {body}
     </section>
+  );
+}
+
+function TurnSection({ title, turns, tasks, rows }: { title: string; turns: TurnView[]; tasks: TaskLine[]; rows: Rows }) {
+  if (!turns.length) return null;
+  return (
+    <section className="turns" aria-label={title}>
+      <h2>{title}</h2>
+      {turns.map(turn => <Turn key={turn.id} turn={turn} tasks={tasks.filter(x => x.turn === turn.number)} rows={rows} />)}
+    </section>
+  );
+}
+
+function OutsideTasks({ tasks, rows, closed = false }: { tasks: TaskLine[]; rows: Rows; closed?: boolean }) {
+  const t = useT();
+  if (!tasks.length) return null;
+  if (closed) return (
+    <details className="turns folded">
+      <summary>{t.tasks.closedOutside(tasks.length)}</summary>
+      <TaskTree tasks={tasks} rows={rows} />
+    </details>
+  );
+  return (
+    <section className="turns" aria-label={t.tasks.outsideTurns}>
+      <h2>{t.tasks.outsideTurns}</h2>
+      <TaskTree tasks={tasks} rows={rows} />
+    </section>
+  );
+}
+
+/* Clearing search brings back the turns and folded archives in their usual order. */
+function TaskGroups({ tasks = [], turns, rows }: { tasks: TaskLine[] | undefined; turns: TurnView[] | undefined; rows: Rows }) {
+  const t = useT();
+  const outside = tasks.filter(x => x.turn === null);
+  const openOutside = outside.filter(x => !CLOSED.includes(x.status));
+  const listedTurns = turns ?? [];
+  return (
+    <>
+      {turns && !turns.length && !openOutside.length && <p className="muted">{t.tasks.noTurns}</p>}
+      {listedTurns.filter(x => x.status === 'open').map(turn => <Turn key={turn.id} turn={turn} tasks={tasks.filter(x => x.turn === turn.number)} rows={rows} />)}
+      <TurnSection title={t.tasks.nextTurns} turns={listedTurns.filter(x => x.status === 'planned')} tasks={tasks} rows={rows} />
+      <OutsideTasks tasks={openOutside} rows={rows} />
+      <TurnSection title={t.tasks.finishedTurns} turns={listedTurns.filter(x => x.status === 'closed').reverse()} tasks={tasks} rows={rows} />
+      <OutsideTasks tasks={outside.filter(x => CLOSED.includes(x.status))} rows={rows} closed />
+    </>
   );
 }
 
@@ -189,16 +291,11 @@ export function Tasks({ decisions, onDecisionsChanged, personId, onClearPerson, 
   const t = useT();
   const { org } = useOrg();
   const [department, setDepartment] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
   const { tasks, failure } = useTasks({ status: 'all', department });
   const { turns, failure: turnsFailure } = useTurns();
   const place = (p: TaskLine['department']) => placeName(t, org, p);
   const rows: Rows = { selected, onOpenTask, place: task => [place(task.department), task.product?.name].filter(Boolean).join(' / ') };
-  const of = (turn: TurnView) => tasks?.filter(x => x.turn === turn.number) ?? [];
-  const running = turns?.filter(x => x.status === 'open') ?? [];
-  const planned = turns?.filter(x => x.status === 'planned') ?? [];
-  const finished = turns?.filter(x => x.status === 'closed').reverse() ?? [];
-  const outside = tasks?.filter(x => x.turn === null && !CLOSED.includes(x.status)) ?? [];
-  const outsideClosed = tasks?.filter(x => x.turn === null && CLOSED.includes(x.status)) ?? [];
   const broken = failure ?? turnsFailure;
 
   return (
@@ -227,60 +324,13 @@ export function Tasks({ decisions, onDecisionsChanged, personId, onClearPerson, 
         place={place}
       />
 
-      {!!org?.departments.length && (
-        <div className="task-filters">
-          <Field label={t.tasks.department}>
-            {p => (
-              <select {...p} value={department ?? ''} onChange={e => setDepartment(e.target.value || null)}>
-                <option value="">{t.tasks.allDepartments}</option>
-                {org.departments.map(d => (
-                  <option key={d.id} value={d.id}>
-                    {deptLabel(t, d)}
-                  </option>
-                ))}
-              </select>
-            )}
-          </Field>
-        </div>
-      )}
+      <TaskFilters departments={org?.departments ?? []} department={department} onDepartment={setDepartment} query={query} onQuery={setQuery} />
 
       {broken !== null && <p className="alert" role="alert">{errorText(t, broken)}</p>}
-      {turns && !turns.length && !outside.length && <p className="muted">{t.tasks.noTurns}</p>}
-
-      {running.map(turn => (
-        <Turn key={turn.id} turn={turn} tasks={of(turn)} rows={rows} />
-      ))}
-
-      {planned.length > 0 && (
-        <section className="turns" aria-label={t.tasks.nextTurns}>
-          <h2>{t.tasks.nextTurns}</h2>
-          {planned.map(turn => (
-            <Turn key={turn.id} turn={turn} tasks={of(turn)} rows={rows} />
-          ))}
-        </section>
-      )}
-
-      {outside.length > 0 && (
-        <section className="turns" aria-label={t.tasks.outsideTurns}>
-          <h2>{t.tasks.outsideTurns}</h2>
-          <TaskTree tasks={outside} rows={rows} />
-        </section>
-      )}
-
-      {finished.length > 0 && (
-        <section className="turns" aria-label={t.tasks.finishedTurns}>
-          <h2>{t.tasks.finishedTurns}</h2>
-          {finished.map(turn => (
-            <Turn key={turn.id} turn={turn} tasks={of(turn)} rows={rows} />
-          ))}
-        </section>
-      )}
-
-      {outsideClosed.length > 0 && (
-        <details className="turns folded">
-          <summary>{t.tasks.closedOutside(outsideClosed.length)}</summary>
-          <TaskTree tasks={outsideClosed} rows={rows} />
-        </details>
+      {query.trim() ? (
+        <SearchResults tasks={tasks} query={query} rows={rows} />
+      ) : (
+        <TaskGroups tasks={tasks} turns={turns} rows={rows} />
       )}
     </section>
   );
