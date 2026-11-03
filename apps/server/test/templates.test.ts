@@ -416,6 +416,21 @@ describe('templates', () => {
     for (const text of builders) expect(text).toMatch(/no Docker/);
   });
 
+  it('adds missing quality checks to the project in one task instead of installing them in an agent home folder', () => {
+    const all = [...roles, ...skills].map(x => x.body).join('\n');
+    expect(all).not.toContain('install what is missing in your home folder');
+    for (const id of ['dev-engineering-rules', 'dev-language-rules']) {
+      const text = templates.skills.get(id)!.body;
+      expect(text, id).toMatch(/do not install .* locally or work around .* tell the head of Development/i);
+      for (const example of ['@vitest/coverage-v8', 'same version as vitest', 'pytest-cov', 'cargo-llvm-cov', 'Go has coverage built in', 'typescript-eslint', 'ruff', 'clippy', 'golangci-lint']) {
+        expect(text, `${id}: ${example}`).toContain(example);
+      }
+    }
+    const lead = templates.skills.get('hh-lead-tasks')!.body;
+    expect(lead).toMatch(/first turn on a new project and when a new repository arrives/);
+    expect(lead).toMatch(/one task that adds everything missing to the project itself/);
+  });
+
   it('credits every source a skill names in SOURCES.md', () => {
     const credits = readFileSync(`${DIR}/SOURCES.md`, 'utf8');
     for (const s of skills) for (const src of s.sources) expect(credits, `${s.id} ${src}`).toContain(src.split(' ')[0]);
