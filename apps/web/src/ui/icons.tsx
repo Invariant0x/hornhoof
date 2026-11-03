@@ -20,6 +20,17 @@ export function PersonIcon({ label }: { label?: string }) {
   );
 }
 
+/* The deputy CEO's sign: a boss's top hat, with its brim and band. */
+export function DeputyIcon() {
+  return (
+    <svg className="ic" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M1.5 12.5h13" />
+      <path d="M4.5 12.5V4.2c0-.4.3-.7.7-.7h5.6c.4 0 .7.3.7.7v8.3" />
+      <path d="M4.5 9.8h7" />
+    </svg>
+  );
+}
+
 export function LogoMark({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 30 30" aria-hidden="true">
