@@ -15,12 +15,12 @@ import { jobDone, tidy, type RunInput, type RunResult } from '../runner.js';
 import { claudePlugins } from '../skills.js';
 import { plainOutput, signalName, type ProgramOutput } from '../program-exit.js';
 import { redact } from '../redact.js';
-import { Bridge } from './bridge.js';
+import { Bridge, type AgentUrls } from './bridge.js';
 import { inputOf } from './input.js';
 import { fromAgent } from './peer.js';
 import { StreamMask } from './mask.js';
 import { ProgramWatch, READY, REPORT_MS, type Pending } from './program-state.js';
-import { acceptClaudeDialogs, agyLog, claudeTranscript, findKimiWire, findRollout, prepareAgy, prepareKimi, rolloutFiles, type TermProgram } from './programs.js';
+import { acceptClaudeDialogs, agyLog, claudeTranscript, findKimiWire, findRollout, prepareAgy, prepareKimi, rolloutFiles, type LaunchSpec, type TermProgram } from './programs.js';
 import { CALLS } from './tool-calls.js';
 import { claudeStatusContext, claudeStatusLimits, codexRollout, kimiWire, LineTail, type WireNews } from './transcripts.js';
 import { envFile, type Tmux } from './tmux.js';
@@ -205,12 +205,34 @@ const LIMITS_WAIT_MS = 3000;
 const INPUT_WAIT_MS = 10_000;
 /* How often the host looks at what the program of a running turn does, besides each time it begins or ends a tool. */
 const LOOK_MS = 5000;
+/* What the options leave out: how long the host waits for what, and the terminal's size. */
+const DEFAULTS = { readyMs: 120_000, pollMs: 500, openMs: 8000, toolsMs: 15_000, enterWaitMs: 4000, lostMs: LOST_END_MS, reportMs: REPORT_MS, cols: 160, rows: 48 };
+/* The options given, without those set to nothing. */
+const defined = (opts: Options): Partial<Options> => Object.fromEntries(Object.entries(opts).filter(([, value]) => value !== undefined));
 /* When the host last looked at the program, and the tool it ran then. */
 type Look = { at: number; call: Pending | null };
 /* A program may change how a prompt's lines and spaces look, not its words. */
 const flat = (text: string) => text.replace(/\s+/g, ' ').trim();
 
 const hashOf = (v: unknown) => createHash('sha256').update(JSON.stringify(v)).digest('hex');
+/* What the running program was started with; a turn that needs anything else starts it again. A plan signed in to another
+   account in Hornhoof reaches a running Claude Code only when it starts again, which it does between turns, in the same
+   session. */
+function launchHash({ program, bin, input }: TermJob, spec: LaunchSpec): string {
+  const signedAs = spec.env.CLAUDE_CODE_OAUTH_TOKEN ? hashOf(spec.env.CLAUDE_CODE_OAUTH_TOKEN) : null;
+  return hashOf({ kind: program.kind, bin, model: input.model, effort: input.effort ?? null, compactWindow: input.compactWindow ?? null, instructions: input.instructions, env: lasting(input.env), signedAs });
+}
+/* An agent's state as its program starts for a turn. Kimi Code and Antigravity name a new session only once it starts,
+   and what it was told from before is kept by that name. */
+function startedState({ program, home, input }: TermJob, spec: LaunchSpec): Partial<Agent> {
+  const namesLater = (program.kind === 'kimi' || program.kind === 'antigravity') && !input.sessionId;
+  return {
+    program, home, workDir: input.workDir, sessionId: spec.sessionId, cleared: new Set(), startedAt: Date.now(), started: deferred<void>(), fresh: false,
+    oldLogs: program.kind === 'codex' && !spec.sessionId ? rolloutFiles(home) : null,
+    keep: namesLater ? (input.context ?? null) : null,
+    contextSize: program.kind === 'kimi' ? kimiWindow(home, input.model) : null,
+  };
+}
 /* What a session was told from before it started, kept in the agent's folder by the session's id. */
 const contextFile = (workDir: string, sessionId: string) => (/^[\w-]+$/.test(sessionId) ? join(workDir, '.hh-context', `${sessionId}.md`) : null);
 
@@ -260,16 +282,17 @@ export class TerminalHost {
     this.bridge = new Bridge(opts.hornhoof, (key, event, body) => this.hook(key, event, body), owns);
     this.fs = opts.fs ?? (opts.user ? agentFs(opts.user) : ownFs);
     this.plugins = opts.plugins ?? claudePlugins();
-    this.readyMs = opts.readyMs ?? 120_000;
-    this.pollMs = opts.pollMs ?? 500;
-    this.openMs = opts.openMs ?? 8000;
-    this.toolsMs = opts.toolsMs ?? 15_000;
-    this.enterWaitMs = opts.enterWaitMs ?? 4000;
-    this.lostMs = opts.lostMs ?? LOST_END_MS;
+    const set = { ...DEFAULTS, ...defined(opts) };
+    this.readyMs = set.readyMs;
+    this.pollMs = set.pollMs;
+    this.openMs = set.openMs;
+    this.toolsMs = set.toolsMs;
+    this.enterWaitMs = set.enterWaitMs;
+    this.lostMs = set.lostMs;
     this.lookMs = opts.lookMs ?? Math.min(this.lostMs / 4, LOOK_MS);
-    this.reportMs = opts.reportMs ?? REPORT_MS;
-    this.cols = opts.cols ?? 160;
-    this.rows = opts.rows ?? 48;
+    this.reportMs = set.reportMs;
+    this.cols = set.cols;
+    this.rows = set.rows;
   }
 
   start(): Promise<void> {
@@ -319,7 +342,6 @@ export class TerminalHost {
     /* Clear words left in the input by a failed live delivery before this turn pastes its prompt. */
     await a.saying;
     const { input, program } = job;
-    const fail = (error: RunResult['error'], output?: string) => this.failedTurn(a, job, error, output);
     /* A turn a person typed may still run, or wait for the rest of its log; Hornhoof's turn goes in after it, or into it
        once the time Hornhoof gave this turn is over. Nothing stops the program: only its own end or a person does. */
     const deadline = Date.now() + input.timeoutMs;
@@ -329,36 +351,13 @@ export class TerminalHost {
 
     await this.fs.mkdir(input.workDir);
     const urls = this.bridge.agent(job.key);
-    let instructionsFile: string | null = null;
-    /* The conversation from before reaches a program that starts now; it is not part of its instructions' hash. Claude Code
-       keeps only what was said in its log, so what a new session was told from before goes with it to every resume. So it
-       does for Kimi Code, which may read AGENTS.md afresh for a session it resumes. */
-    const kept = program.kind !== 'codex' && input.sessionId ? await keptContext(this.fs, input.workDir, input.sessionId) : null;
-    const context = kept && input.context && !kept.includes(input.context) ? `${kept}\n\n${input.context}` : (kept ?? input.context);
-    const told = [input.instructions, context, input.guidance].filter(Boolean).join('\n\n');
-    const file = join(input.workDir, '.hh-instructions.md');
-    if (told && program.kind === 'claude') {
-      instructionsFile = file;
-      await this.fs.write(file, told + '\n');
-    }
-    /* Codex, Kimi Code and Antigravity read AGENTS.md in the folder they start in, agy only its start. */
-    if (told && program.kind !== 'claude') {
-      const { rules, whole } = program.kind === 'antigravity' ? agyRules(told, file) : { rules: told, whole: null };
-      if (whole) await this.fs.write(file, whole + '\n');
-      await this.fs.write(join(input.workDir, 'AGENTS.md'), rules + '\n');
-    }
+    const instructionsFile = await this.writeInstructions(job);
     const spec = program.launch({ bin: job.bin, home: job.home, workDir: input.workDir, sessionId: input.sessionId, model: input.model, effort: input.effort, compactWindow: input.compactWindow, instructionsFile, urls, plugins: this.plugins });
-    /* A plan signed in to another account in Hornhoof reaches a running Claude Code only when it starts again, which it
-       does between turns, in the same session. */
-    const signedAs = spec.env.CLAUDE_CODE_OAUTH_TOKEN ? hashOf(spec.env.CLAUDE_CODE_OAUTH_TOKEN) : null;
-    const hash = hashOf({ kind: program.kind, bin: job.bin, model: input.model, effort: input.effort ?? null, compactWindow: input.compactWindow ?? null, instructions: input.instructions, env: lasting(input.env), signedAs });
-    /* A new session asked for goes on in a program started for a person that nothing was said in yet. */
-    const sameSession = input.sessionId === null ? a.fresh : input.sessionId === a.sessionId || a.cleared.has(input.sessionId);
-    const goesOn = sameSession && a.hash === hash && (await this.opts.tmux.alive(a.name));
+    const hash = launchHash(job, spec);
+    const goesOn = await this.goesOn(a, input.sessionId, hash);
     /* A program started with nothing to type gets its tools before its turn ends, while Hornhoof still answers for them.
        Kimi Code connects to its tools only once it has a session, which a new one gets with the first message, and
        Antigravity only while it answers a message. */
-    const namesLater = (program.kind === 'kimi' || program.kind === 'antigravity') && !input.sessionId;
     const lazy = (program.kind === 'kimi' && !input.sessionId) || program.kind === 'antigravity';
     const tools = !goesOn && !input.prompt && input.tools && !lazy ? this.bridge.listed(job.key, this.toolsMs) : null;
 
@@ -376,96 +375,11 @@ export class TerminalHost {
     a.stopped = false;
     a.failure = null;
     try {
-      if (!goesOn) {
-        this.programIs(a, false);
-        if (program.kind === 'claude') await acceptClaudeDialogs(job.home, input.workDir, this.fs);
-        if (program.kind === 'kimi') await prepareKimi(job.home, input.workDir, urls.mcpUrl, this.fs);
-        if (program.kind === 'antigravity') await prepareAgy(input.workDir, urls.mcpUrl, this.fs);
-        /* A person's first message into a new Kimi session, or into Antigravity, reaches its tools a moment before Hornhoof
-           opens their turn. */
-        this.bridge.waitForTurns(job.key, program.kind === 'kimi' || program.kind === 'antigravity' ? this.openMs + 2000 : 0);
-        Object.assign(a, { program, home: job.home, workDir: input.workDir, hash, sessionId: spec.sessionId, cleared: new Set(), oldLogs: program.kind === 'codex' && !spec.sessionId ? rolloutFiles(job.home) : null, startedAt: Date.now(), started: deferred<void>(), fresh: false, keep: namesLater ? (input.context ?? null) : null, contextSize: program.kind === 'kimi' ? kimiWindow(job.home, input.model) : null });
-        if (program.kind === 'claude' && !input.sessionId && input.context && spec.sessionId) await keepContext(this.fs, input.workDir, spec.sessionId, input.context);
-        a.tail = this.tailFor(a);
-        const env = { ...lasting(input.env), ...spec.env };
-        const scratch = this.opts.tmux.scratch();
-        await this.opts.tmux.launch(a.name, { cwd: input.workDir, command: this.asAgent(spec.command), cols: this.cols, rows: this.rows, envFile: envFile(scratch, env), outputDir: scratch });
-        this.watch(a);
-        if (!(await this.ready(a, job))) {
-          const screen = await this.screen(job.key);
-          /* Its screen says why, which the loader would hide. */
-          this.showViews(a);
-          return await fail(job.signedOut.test(screen) ? 'not_logged_in' : 'agent_failed', screen);
-        }
-        this.programIs(a, true);
-      }
+      const failed = goesOn ? null : await this.startProgram(a, job, spec, hash, urls);
+      if (failed) return failed;
       /* Nothing to type: the turn only starts the program for the person who opened its window. */
-      if (!input.prompt) {
-        await tools;
-        /* A person typed meanwhile: the program goes on with their turn, and the session is theirs to name. */
-        if (a.turn !== turn) return { ok: true, sessionId: null, result: '', output: '', error: null, limits: a.limits };
-        if (!goesOn) a.fresh = input.sessionId === null;
-        return { ok: true, sessionId: a.fresh ? null : a.sessionId, result: '', output: '', error: null, limits: a.limits };
-      }
-      a.fresh = false;
-      a.took = false;
-      a.typing = input.prompt;
-      await this.opts.tmux.paste(a.name, input.prompt);
-      await sleep(pasteWait(input.prompt));
-      await this.opts.tmux.keys(a.name, 'Enter');
-      /* On a busy machine the program can take the prompt, and even end its turn, before the key is back: it then said so
-         itself, and its turn's end must not be taken back. */
-      if (!a.took) a.busy = true;
-      /* A program that just started, or that still loads a long session it resumed, can miss the Enter and keep the prompt
-         in its input: Enter again until it takes it. An Enter into an empty input does nothing. One that never takes it
-         ends the turn with its screen, which says why, rather than leave the turn waiting for nothing. */
-      for (const end = Date.now() + this.readyMs; !(await this.tookPrompt(a, input.signal)); ) {
-        if (Date.now() >= end) {
-          a.busy = false;
-          /* Its input still holds the prompt, so the next turn starts the program anew, resuming the session. */
-          a.hash = null;
-          return await fail('agent_failed', `The program did not take Hornhoof's prompt within ${Math.round(this.readyMs / 1000)} s.\n\n${await this.screen(job.key)}`);
-        }
-        await this.opts.tmux.keys(a.name, 'Enter');
-      }
-
-      const watch = new ProgramWatch(input.jobId, program.kind, m => this.opts.send(m), this.reportMs);
-      /* The first look comes a while into the turn, or as the program calls a tool: one that just took its prompt is at work. */
-      const look: Look = { at: Date.now(), call: null };
-      for (;;) {
-        this.drain(a);
-        const message = await Promise.race([a.ended.promise, sleep(this.pollMs).then(() => null)]);
-        if (message !== null) {
-          if (a.stopped) {
-            a.busy = false;
-            return await fail('cancelled');
-          }
-          if (a.failure !== null) {
-            const output = `${a.failure}\n\n${await this.screen(job.key)}`;
-            return await fail(job.signedOut.test(a.failure) ? 'not_logged_in' : 'agent_failed', output);
-          }
-          await this.settle(a, message);
-          await this.planLimits(a);
-          /* A turn that ended with no answer keeps its screen, which says why, as when the provider refused the work. */
-          const output = message.trim() ? '' : await this.screen(job.key);
-          return { ok: true, sessionId: a.sessionId, result: message, output, error: null, limits: a.limits };
-        }
-        /* A program stopped with Escape does not say its turn ended: it waits for the next prompt. */
-        if (input.signal?.aborted) {
-          await this.opts.tmux.keys(a.name, 'Escape');
-          await Promise.race([a.ended.promise, sleep(STOP_WAIT_MS)]);
-          a.busy = false;
-          return await fail('cancelled');
-        }
-        if (!(await this.opts.tmux.alive(a.name))) {
-          a.busy = false;
-          this.programEnded(a);
-          const screen = await this.screen(job.key);
-          await this.toldGone(a, watch, screen);
-          return await fail(job.signedOut.test(screen) ? 'not_logged_in' : 'agent_failed', screen);
-        }
-        if (await this.lostEnd(a, watch, look)) this.endUnsaid(a);
-      }
+      if (!input.prompt) return await this.started(a, turn, tools, goesOn ? null : input.sessionId === null);
+      return (await this.typePrompt(a, job, input.prompt)) ?? (await this.turnEnd(a, job, a.ended));
     } finally {
       a.typing = null;
       if (starting && a.starting === starting) a.starting = null;
@@ -475,6 +389,155 @@ export class TerminalHost {
         a.ended = null;
       }
     }
+  }
+
+  /* What the agent is told before its turn. The conversation from before reaches a program that starts now; it is not part
+     of its instructions' hash. Claude Code keeps only what was said in its log, so what a new session was told from before
+     goes with it to every resume. So it does for Kimi Code, which may read AGENTS.md afresh for a session it resumes. */
+  private async toldOf({ program, input }: TermJob): Promise<string> {
+    const kept = program.kind !== 'codex' && input.sessionId ? await keptContext(this.fs, input.workDir, input.sessionId) : null;
+    const context = kept && input.context && !kept.includes(input.context) ? `${kept}\n\n${input.context}` : (kept ?? input.context);
+    return [input.instructions, context, input.guidance].filter(Boolean).join('\n\n');
+  }
+
+  /* Claude Code reads what it is told from the file it starts with, which this returns. Codex, Kimi Code and Antigravity
+     read AGENTS.md in the folder they start in, agy only its start. */
+  private async writeInstructions(job: TermJob): Promise<string | null> {
+    const told = await this.toldOf(job);
+    const file = join(job.input.workDir, '.hh-instructions.md');
+    if (!told) return null;
+    if (job.program.kind === 'claude') {
+      await this.fs.write(file, told + '\n');
+      return file;
+    }
+    const { rules, whole } = job.program.kind === 'antigravity' ? agyRules(told, file) : { rules: told, whole: null };
+    if (whole) await this.fs.write(file, whole + '\n');
+    await this.fs.write(join(job.input.workDir, 'AGENTS.md'), rules + '\n');
+    return null;
+  }
+
+  /* The program runs as this turn would start it, in the session it asks for. A new session asked for goes on in a program
+     started for a person that nothing was said in yet. */
+  private async goesOn(a: Agent, sessionId: string | null, hash: string): Promise<boolean> {
+    const sameSession = sessionId === null ? a.fresh : sessionId === a.sessionId || a.cleared.has(sessionId);
+    return sameSession && a.hash === hash && (await this.opts.tmux.alive(a.name));
+  }
+
+  /* Starts the program for the turn. One that never shows it is ready ends the turn with its screen, which says why. */
+  private async startProgram(a: Agent, job: TermJob, spec: LaunchSpec, hash: string, urls: AgentUrls): Promise<RunResult | null> {
+    const { input } = job;
+    this.programIs(a, false);
+    await this.prepare(job, urls);
+    Object.assign(a, { ...startedState(job, spec), hash });
+    if (job.program.kind === 'claude' && !input.sessionId) await this.keepNew(input, spec.sessionId);
+    a.tail = this.tailFor(a);
+    const env = { ...lasting(input.env), ...spec.env };
+    const scratch = this.opts.tmux.scratch();
+    await this.opts.tmux.launch(a.name, { cwd: input.workDir, command: this.asAgent(spec.command), cols: this.cols, rows: this.rows, envFile: envFile(scratch, env), outputDir: scratch });
+    this.watch(a);
+    if (await this.ready(a, job)) {
+      this.programIs(a, true);
+      return null;
+    }
+    const screen = await this.screen(job.key);
+    /* Its screen says why, which the loader would hide. */
+    this.showViews(a);
+    return await this.failedTurn(a, job, job.signedOut.test(screen) ? 'not_logged_in' : 'agent_failed', screen);
+  }
+
+  /* What each program needs in its folders before it starts. A person's first message into a new Kimi session, or into
+     Antigravity, reaches its tools a moment before Hornhoof opens their turn. */
+  private async prepare({ key, home, program, input }: TermJob, urls: AgentUrls): Promise<void> {
+    if (program.kind === 'claude') await acceptClaudeDialogs(home, input.workDir, this.fs);
+    if (program.kind === 'kimi') await prepareKimi(home, input.workDir, urls.mcpUrl, this.fs);
+    if (program.kind === 'antigravity') await prepareAgy(input.workDir, urls.mcpUrl, this.fs);
+    this.bridge.waitForTurns(key, program.kind === 'kimi' || program.kind === 'antigravity' ? this.openMs + 2000 : 0);
+  }
+
+  /* What a new Claude Code session was told from before goes with it to every resume. */
+  private async keepNew(input: RunInput, sessionId: string | null): Promise<void> {
+    if (input.context && sessionId) await keepContext(this.fs, input.workDir, sessionId, input.context);
+  }
+
+  /* A turn with nothing to type ends once the program has its tools. A person who typed meanwhile goes on with their turn,
+     and the session is theirs to name. fresh: whether a program started now waits for a new session. */
+  private async started(a: Agent, turn: Turn, tools: Promise<unknown> | null, fresh: boolean | null): Promise<RunResult> {
+    await tools;
+    if (a.turn !== turn) return { ok: true, sessionId: null, result: '', output: '', error: null, limits: a.limits };
+    if (fresh !== null) a.fresh = fresh;
+    return { ok: true, sessionId: a.fresh ? null : a.sessionId, result: '', output: '', error: null, limits: a.limits };
+  }
+
+  /* Types Hornhoof's prompt. A program that just started, or that still loads a long session it resumed, can miss the
+     Enter and keep the prompt in its input: Enter again until it takes it. An Enter into an empty input does nothing. One
+     that never takes it ends the turn with its screen, which says why, rather than leave the turn waiting for nothing. */
+  private async typePrompt(a: Agent, job: TermJob, prompt: string): Promise<RunResult | null> {
+    a.fresh = false;
+    a.took = false;
+    a.typing = prompt;
+    await this.opts.tmux.paste(a.name, prompt);
+    await sleep(pasteWait(prompt));
+    await this.opts.tmux.keys(a.name, 'Enter');
+    /* On a busy machine the program can take the prompt, and even end its turn, before the key is back: it then said so
+       itself, and its turn's end must not be taken back. */
+    if (!a.took) a.busy = true;
+    for (const end = Date.now() + this.readyMs; !(await this.tookPrompt(a, job.input.signal)); await this.opts.tmux.keys(a.name, 'Enter')) {
+      if (Date.now() < end) continue;
+      a.busy = false;
+      /* Its input still holds the prompt, so the next turn starts the program anew, resuming the session. */
+      a.hash = null;
+      return await this.failedTurn(a, job, 'agent_failed', `The program did not take Hornhoof's prompt within ${Math.round(this.readyMs / 1000)} s.\n\n${await this.screen(job.key)}`);
+    }
+    return null;
+  }
+
+  /* Waits for the turn to end: the program says so, a person stops it, the program is gone, or it waits for what to type
+     in a turn whose end was lost on the way. */
+  private async turnEnd(a: Agent, job: TermJob, ended: Deferred<string>): Promise<RunResult> {
+    const watch = new ProgramWatch(job.input.jobId, job.program.kind, m => this.opts.send(m), this.reportMs);
+    /* The first look comes a while into the turn, or as the program calls a tool: one that just took its prompt is at work. */
+    const look: Look = { at: Date.now(), call: null };
+    for (;;) {
+      this.drain(a);
+      const message = await Promise.race([ended.promise, sleep(this.pollMs).then(() => null)]);
+      if (message !== null) return await this.saidEnded(a, job, message);
+      /* A program stopped with Escape does not say its turn ended: it waits for the next prompt. */
+      if (job.input.signal?.aborted) return await this.stopTurn(a, job, ended);
+      if (!(await this.opts.tmux.alive(a.name))) return await this.programGone(a, job, watch);
+      if (await this.lostEnd(a, watch, look)) this.endUnsaid(a);
+    }
+  }
+
+  /* The program said the turn ended: stopped by a person, failed, or with its answer, which the turn waits to read. */
+  private async saidEnded(a: Agent, job: TermJob, message: string): Promise<RunResult> {
+    if (a.stopped) {
+      a.busy = false;
+      return await this.failedTurn(a, job, 'cancelled');
+    }
+    if (a.failure !== null) {
+      const output = `${a.failure}\n\n${await this.screen(job.key)}`;
+      return await this.failedTurn(a, job, job.signedOut.test(a.failure) ? 'not_logged_in' : 'agent_failed', output);
+    }
+    await this.settle(a, message);
+    await this.planLimits(a);
+    /* A turn that ended with no answer keeps its screen, which says why, as when the provider refused the work. */
+    const output = message.trim() ? '' : await this.screen(job.key);
+    return { ok: true, sessionId: a.sessionId, result: message, output, error: null, limits: a.limits };
+  }
+
+  private async stopTurn(a: Agent, job: TermJob, ended: Deferred<string>): Promise<RunResult> {
+    await this.opts.tmux.keys(a.name, 'Escape');
+    await Promise.race([ended.promise, sleep(STOP_WAIT_MS)]);
+    a.busy = false;
+    return await this.failedTurn(a, job, 'cancelled');
+  }
+
+  private async programGone(a: Agent, job: TermJob, watch: ProgramWatch): Promise<RunResult> {
+    a.busy = false;
+    this.programEnded(a);
+    const screen = await this.screen(job.key);
+    await this.toldGone(a, watch, screen);
+    return await this.failedTurn(a, job, job.signedOut.test(screen) ? 'not_logged_in' : 'agent_failed', screen);
   }
 
   /* Looks at what the program does, at once when it began or ended a tool or Hornhoof is due to hear again, else every
@@ -499,7 +562,7 @@ export class TerminalHost {
   /* The turn ends as the program would have said it ended, with its last answer; nothing reaches the program, which waits
      for its next turn. */
   private endUnsaid(a: Agent): void {
-    (this.opts.log ?? console.log)(`Agent ${a.key} (${a.program?.kind}): end seen without hook. The program waited for what to type ${Math.round(this.lostMs / 1000)} s into Hornhoof's turn, which ends with its last answer.`);
+    this.log(`Agent ${a.key} (${a.program?.kind}): end seen without hook. The program waited for what to type ${Math.round(this.lostMs / 1000)} s into Hornhoof's turn, which ends with its last answer.`);
     a.busy = false;
     a.ended?.resolve(a.lastText ?? '');
   }
@@ -631,12 +694,21 @@ export class TerminalHost {
      prompt goes in once the box shows, empty; a screen that never shows one goes on after a while, as before. Hornhoof's
      own screen for Antigravity reads what is typed from its start. */
   private async inputShows(a: Agent): Promise<void> {
-    if (a.program?.kind !== 'claude') return;
-    for (const end = Date.now() + INPUT_WAIT_MS; Date.now() < end && (await this.opts.tmux.alive(a.name)); await sleep(this.pollMs)) {
-      if (inputOf('claude', await this.opts.tmux.screen(a.name, 0, true)) === '') return;
-    }
+    if (a.program?.kind !== 'claude' || (await this.inputBox(a))) return;
     /* A program that ended says why on its screen, which the turn shows. */
-    if (await this.opts.tmux.alive(a.name)) (this.opts.log ?? console.log)(`Agent ${a.key} (claude): no empty input box showed within ${INPUT_WAIT_MS / 1000} s of its start. The prompt goes in all the same.`);
+    if (await this.opts.tmux.alive(a.name)) this.log(`Agent ${a.key} (claude): no empty input box showed within ${INPUT_WAIT_MS / 1000} s of its start. The prompt goes in all the same.`);
+  }
+
+  /* Whether Claude Code's input box shows, empty, within INPUT_WAIT_MS while the program runs. */
+  private async inputBox(a: Agent): Promise<boolean> {
+    for (const end = Date.now() + INPUT_WAIT_MS; Date.now() < end && (await this.opts.tmux.alive(a.name)); await sleep(this.pollMs)) {
+      if (inputOf('claude', await this.opts.tmux.screen(a.name, 0, true)) === '') return true;
+    }
+    return false;
+  }
+
+  private log(message: string): void {
+    (this.opts.log ?? console.log)(message);
   }
 
   /* The program's prompt hook said what it got of the prompt Hornhoof typed. Got less, the agent finds the whole of it in
@@ -648,7 +720,7 @@ export class TerminalHost {
     const file = join(a.workDir, '.hh-messages', `${new Date().toISOString().replace(/[:.]/g, '-')}.md`);
     await this.fs.mkdir(dirname(file));
     await this.fs.write(file, typed);
-    (this.opts.log ?? console.log)(`Agent ${a.key} (${a.program?.kind}): the program got ${got.length} of the ${typed.length} characters Hornhoof typed. The whole text is in ${file}.`);
+    this.log(`Agent ${a.key} (${a.program?.kind}): the program got ${got.length} of the ${typed.length} characters Hornhoof typed. The whole text is in ${file}.`);
     return `Hornhoof: this message reached you cut short, ${got.length} of its ${typed.length} characters. The whole message is in ${file}. Read it there before you go on.`;
   }
 
@@ -986,7 +1058,7 @@ export class TerminalHost {
     const input = a.program ? inputOf(a.program.kind, screen) : null;
     if (input === null && !a.inputUnknown) {
       a.inputUnknown = true;
-      (this.opts.log ?? console.log)(`Agent ${a.key} (${a.program?.kind}): input could not be found. Live words will use paste and Enter.`);
+      this.log(`Agent ${a.key} (${a.program?.kind}): input could not be found. Live words will use paste and Enter.`);
     }
     return input;
   }

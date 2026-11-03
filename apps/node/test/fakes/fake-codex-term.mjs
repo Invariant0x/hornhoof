@@ -81,36 +81,48 @@ async function work(line) {
 }
 
 async function take(line) {
+  const busy = line.includes('TICK') || line.includes('WORK');
   // Codex shows that it works as it takes the line.
-  if (line.includes('TICK') || line.includes('WORK')) {
+  if (busy) {
     process.stdout.write('\n');
     status('Working (0s');
   }
   event({ type: 'task_started', turn_id: randomUUID() });
   item('UserMessage', line);
+  if (endsAtOnce(line)) return;
+  if (line.includes('SLOW')) await slow();
+  if (busy) await work(line);
+  answer(line);
+}
+
+// Whether the turn ended as it started: CRASH ends the program, HANG never answers, and ABORT logs what Codex logs when a
+// person stops a turn with Escape.
+function endsAtOnce(line) {
   if (line.startsWith('CRASH')) crash(line.includes('LONG') ? 'long' : '');
   if (line.includes('HANG_EXIT')) process.stdout.write('exit-test running\n');
   if (line.includes('HANG')) {
     prompt();
-    return;
+    return true;
   }
-  if (line.includes('ABORT')) {
-    event({ type: 'turn_aborted', reason: 'interrupted' });
-    process.stdout.write('■ Conversation interrupted\n');
-    prompt();
-    return;
-  }
-  if (line.includes('SLOW')) {
-    prompt();
-    await new Promise(r => setTimeout(r, 2000));
-    process.stdout.write('\r\x1b[2K');
-  }
-  if (line.includes('TICK') || line.includes('WORK')) await work(line);
-  const answer = `echo: ${line}`;
-  item('AgentMessage', answer);
+  if (!line.includes('ABORT')) return false;
+  event({ type: 'turn_aborted', reason: 'interrupted' });
+  process.stdout.write('■ Conversation interrupted\n');
+  prompt();
+  return true;
+}
+
+async function slow() {
+  prompt();
+  await sleep(2000);
+  process.stdout.write('\r\x1b[2K');
+}
+
+function answer(line) {
+  const text = `echo: ${line}`;
+  item('AgentMessage', text);
   event({ type: 'token_count', info: { last_token_usage: { total_tokens: 112000 }, model_context_window: 212000 }, rate_limits: null });
-  event({ type: 'task_complete', last_agent_message: answer });
-  process.stdout.write(`• ${answer}\n`);
+  event({ type: 'task_complete', last_agent_message: text });
+  process.stdout.write(`• ${text}\n`);
   prompt();
   if (line.includes('LATE')) setTimeout(() => event({ type: 'turn_aborted', reason: 'interrupted' }), 150);
 }
