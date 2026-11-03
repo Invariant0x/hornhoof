@@ -44,6 +44,19 @@ const flat = (text: string) => text.replace(/\s+/g, ' ').trim();
 type WordState = 'waiting' | 'queued' | 'held' | 'taken' | 'discarded';
 export type WordReceipt = { text: string; jobId: string | null; state: WordState; accepted: boolean; sources: Set<string> };
 
+/* Claude can omit the words from a removal; its queue belongs to the program, across turns. */
+export function claudeWordReceipt(line: Record<string, unknown>, enqueued: string[]): { state: 'queued' | 'taken'; text: string } | null {
+  if (line.type !== 'queue-operation') return null;
+  const text = contentText(line.content);
+  if (line.operation === 'enqueue') {
+    enqueued.push(text);
+    return { state: 'queued', text };
+  }
+  if (line.operation === 'remove' && line.reason === 'absorbed_mid_turn') return { state: 'taken', text: enqueued.shift() ?? text };
+  if (line.operation === 'dequeue') enqueued.shift();
+  return null;
+}
+
 /* Keys are not receipts. Keep each live message until the program takes it, including across a restart. */
 export class TurnWords {
   private readonly words: WordReceipt[] = [];
@@ -127,14 +140,9 @@ export class TurnWords {
   }
 
   private claude(line: Record<string, unknown>): void {
-    if (line.type !== 'queue-operation') return;
-    if (line.operation === 'enqueue') {
-      const text = contentText(line.content);
-      this.enqueued.push(text);
-      this.queued(text, 'transcript');
-    }
-    if (line.operation === 'remove' && line.reason === 'absorbed_mid_turn') this.taken(this.enqueued.shift() ?? contentText(line.content));
-    if (line.operation === 'dequeue') this.enqueued.shift();
+    const receipt = claudeWordReceipt(line, this.enqueued);
+    if (receipt?.state === 'queued') this.queued(receipt.text, 'transcript');
+    if (receipt?.state === 'taken') this.taken(receipt.text);
   }
 
   private waiting(word: WordReceipt): boolean { return word.state !== 'taken' && word.state !== 'discarded'; }
