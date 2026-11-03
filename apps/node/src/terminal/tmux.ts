@@ -5,6 +5,7 @@ import { constants, homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { JobUser } from '../isolation.js';
+import { agentEnv, RESET_AGENT_ENV } from '../agent-env.js';
 import { withProgramExit, type ProgramExit } from '../program-exit.js';
 import { KEEP_BYTES } from '../providers/process.js';
 import { Recordings, type ExitSnapshot } from './recordings.js';
@@ -54,7 +55,8 @@ export function envFile(dir: string, env: Record<string, string>): string {
   return file;
 }
 
-const FROM_ENV_FILE = 'set -a; . "$0"; set +a; rm -f "$0"; exec "$@"';
+const FROM_ENV_FILE = `${RESET_AGENT_ENV}; set -a; . "$0"; set +a; rm -f "$0"; exec "$@"`;
+const FROM_MACHINE = `${RESET_AGENT_ENV}; exec "$@"`;
 const WAIT_FOR_CAPTURE = 'IFS= read -r ready; exec "$@"';
 const CAPTURE = fileURLToPath(new URL('../../hh-capture.cjs', import.meta.url));
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
@@ -80,7 +82,7 @@ export class Tmux {
 
   constructor({ socket = 'hh', env, user = null, recordingsDir = join(env.HOME ?? homedir(), '.hh-recordings'), flushTimeoutMs = 5000 }: Options) {
     this.socket = socket;
-    this.env = { LANG: 'C.UTF-8', ...withoutNodeSecrets(env) };
+    this.env = { LANG: 'C.UTF-8', ...agentEnv(env) };
     this.user = user;
     this.recordings = new Recordings(recordingsDir, socket, user);
     this.flushTimeoutMs = flushTimeoutMs;
@@ -120,7 +122,7 @@ export class Tmux {
 
   /* Starts the program in a new session, or in place of whatever the session ran before. */
   async launch(name: string, { cwd, command, cols, rows, envFile: file, outputDir }: Launch): Promise<void> {
-    const argv = file ? ['sh', '-c', FROM_ENV_FILE, file, ...command] : command;
+    const argv = file ? ['sh', '-c', FROM_ENV_FILE, file, ...command] : ['sh', '-c', FROM_MACHINE, 'hh-program', ...command];
     const has = await this.has(name);
     if (has) await this.ended(name);
     /* The program starts only after its recorder is listening, including programs that exit immediately. */
@@ -246,10 +248,4 @@ export class Tmux {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
   }
-}
-
-function withoutNodeSecrets(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const out: NodeJS.ProcessEnv = {};
-  for (const [k, v] of Object.entries(env)) if (k !== 'NODE_KEY' && !k.startsWith('HORNHOOF_')) out[k] = v;
-  return out;
 }
