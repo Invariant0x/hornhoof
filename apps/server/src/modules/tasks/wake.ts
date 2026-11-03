@@ -13,6 +13,7 @@ import { taskForWake, taskWakeOf, waitingTaskTurn } from './wake-state.js';
 import { carriedTasks, continueOnce, doneIfRecorded } from './endings.js';
 import { afterRestart } from './restarts.js';
 import { clearTurnProgram, failedProgramData } from './silent.js';
+import { afterFailure } from './failures.js';
 import { settle, tell } from './turns.js';
 
 export { SILENT_TURNS, startWork } from './engine.js';
@@ -371,13 +372,14 @@ async function heldTask(ctx: Ctx, agentId: string, taskId: string): Promise<Task
    tasks it comes after or on people.
    A turn that carried other tasks' turns along is checked on each of those tasks too, and a task the agent holds once,
    however many of them lead to it. */
-export async function checkLiveness(ctx: Ctx, jobId: string, carried: string[] = []): Promise<void> {
+export async function checkLiveness(ctx: Ctx, jobId: string, carried: string[] = [], { carriedOnly = false } = {}): Promise<void> {
   const [job] = await ctx.db.select().from(jobs).where(eq(jobs.id, jobId));
   if (!job?.taskId || !job.agentId || !job.startedAt || job.error === 'cancelled') return;
+  const own = carriedOnly ? await heldTask(ctx, job.agentId, job.taskId) : null;
   const held = new Map<string, Task>();
-  for (const taskId of [job.taskId, ...carried]) {
+  for (const taskId of carriedOnly ? carried : [job.taskId, ...carried]) {
     const task = await heldTask(ctx, job.agentId, taskId);
-    if (task && !held.has(task.id)) held.set(task.id, task);
+    if (task && task.id !== own?.id && !held.has(task.id)) held.set(task.id, task);
   }
   for (const task of held.values()) await checkHeld(ctx, { ...job, agentId: job.agentId, startedAt: job.startedAt }, task);
 }
@@ -386,11 +388,12 @@ export async function checkLiveness(ctx: Ctx, jobId: string, carried: string[] =
 export const QUICK_CRASH_MS = 3 * 60_000;
 export const QUICK_CRASHES = 3;
 
-type Ended = Pick<typeof jobs.$inferSelect, 'status' | 'error' | 'startedAt' | 'finishedAt' | 'result' | 'tail'>;
+type Ended = Pick<typeof jobs.$inferSelect, 'status' | 'error' | 'startedAt' | 'finishedAt' | 'result' | 'tail' | 'failure'>;
 
 /* A turn that broke as it started: not one stopped on purpose or out of time, nor one the plan refused for its limit. */
 const crashed = (j: Ended) =>
   j.status === 'failed' &&
+  (!j.failure || j.failure.kind === 'crash') &&
   !['timeout', 'cancelled', 'removed', 'switched_off', 'handed_on', 'waiting'].includes(j.error ?? '') &&
   !!j.startedAt &&
   !!j.finishedAt &&
@@ -405,7 +408,7 @@ const refusedAtStart = (j: Ended) =>
 async function crashesInRow(ctx: Ctx, agentId: string, task: Task): Promise<number> {
   const moved = await lastMove(ctx.db, task.id);
   const rows = await ctx.db
-    .select({ status: jobs.status, error: jobs.error, startedAt: jobs.startedAt, finishedAt: jobs.finishedAt, result: jobs.result, tail: jobs.tail })
+    .select({ status: jobs.status, error: jobs.error, startedAt: jobs.startedAt, finishedAt: jobs.finishedAt, result: jobs.result, tail: jobs.tail, failure: jobs.failure })
     .from(jobs)
     .where(and(conversationOf(agentId), eq(jobs.taskId, task.id), isNotNull(jobs.startedAt), inArray(jobs.status, ['done', 'failed']), moved ? gt(jobs.finishedAt, moved.createdAt) : undefined))
     .orderBy(desc(jobs.startedAt))
@@ -436,7 +439,7 @@ async function standIn(ctx: Ctx, agentId: string, task: Task): Promise<{ id: str
   /* What its turns did so far is in its folder on its machine and maybe not pushed, so only work none of them did
      anything on goes to another. */
   const ran = await ctx.db
-    .select({ status: jobs.status, error: jobs.error, startedAt: jobs.startedAt, finishedAt: jobs.finishedAt, result: jobs.result, tail: jobs.tail })
+    .select({ status: jobs.status, error: jobs.error, startedAt: jobs.startedAt, finishedAt: jobs.finishedAt, result: jobs.result, tail: jobs.tail, failure: jobs.failure })
     .from(jobs)
     .where(and(eq(jobs.agentId, agentId), eq(jobs.taskId, task.id), isNotNull(jobs.startedAt)));
   if (ran.some(j => !refusedAtStart(j))) return null;
@@ -541,12 +544,17 @@ async function checkHeld(ctx: Ctx, job: typeof jobs.$inferSelect & { agentId: st
 export async function afterJob(ctx: Ctx, jobId: string): Promise<void> {
   const program = clearTurnProgram(ctx, jobId);
   const [job] = await ctx.db
-    .select({ companyId: jobs.companyId, agentId: jobs.agentId, kind: jobs.kind, status: jobs.status, error: jobs.error, taskId: jobs.taskId, startedAt: jobs.startedAt, finishedAt: jobs.finishedAt })
+    .select({ companyId: jobs.companyId, agentId: jobs.agentId, kind: jobs.kind, status: jobs.status, error: jobs.error, taskId: jobs.taskId, startedAt: jobs.startedAt, finishedAt: jobs.finishedAt, failure: jobs.failure })
     .from(jobs)
     .where(eq(jobs.id, jobId));
   if (!job?.agentId || job.kind !== 'conversation') return;
   if (job.status === 'failed') await recordFailedTurn(ctx, jobId, { ...job, agentId: job.agentId }, program);
-  if (job.taskId) await afterTaskTurn(ctx, jobId, { ...job, agentId: job.agentId, taskId: job.taskId });
+  const handled = await afterFailure(ctx, jobId);
+  if (job.taskId) {
+    const taskTurn = { ...job, agentId: job.agentId, taskId: job.taskId };
+    if (handled) await checkLiveness(ctx, jobId, await carriedTasks(ctx, taskTurn), { carriedOnly: true });
+    else await afterTaskTurn(ctx, jobId, taskTurn);
+  }
   await explainEnded(ctx, jobId);
   await leaveIfOff(ctx, job.agentId);
   await pump(ctx, job.agentId);
@@ -555,7 +563,7 @@ export async function afterJob(ctx: Ctx, jobId: string): Promise<void> {
 async function recordFailedTurn(
   ctx: Ctx,
   jobId: string,
-  job: Parameters<typeof doneIfRecorded>[2] & { companyId: string; agentId: string },
+  job: Parameters<typeof doneIfRecorded>[2] & { companyId: string; agentId: string; failure: typeof jobs.$inferSelect['failure'] },
   program: ReturnType<typeof clearTurnProgram>,
 ): Promise<void> {
   if (await doneIfRecorded(ctx, jobId, job)) return;
@@ -565,7 +573,7 @@ async function recordFailedTurn(
     agentId: job.agentId,
     jobId,
     kind: stopped ? 'stopped' : 'failed',
-    data: stopped ? {} : failedProgramData(job.error, program),
+    data: stopped ? {} : { ...failedProgramData(job.error, program), ...(job.failure ? { failure: job.failure } : {}) },
   });
 }
 
@@ -609,8 +617,8 @@ async function requestCancellation(ctx: Ctx, jobId: string) {
 
 /* A person typed into the agent's terminal: the turn opens, and what they typed answers what the agent asked them, out of
    the agent's line, which the pump of its task's turn waits on. */
-export async function typedTurn(ctx: Ctx, node: NodeIdentity, agentId: string, text: string, personId: string | null): Promise<{ jobId: string; token: string } | null> {
-  const opened = await openTypedTurn(ctx, node, agentId, text, personId);
+export async function typedTurn(ctx: Ctx, node: NodeIdentity, agentId: string, text: string, personId: string | null, queuedFrom?: string): Promise<{ jobId: string; token: string } | null> {
+  const opened = await openTypedTurn(ctx, node, agentId, text, personId, queuedFrom);
   if (opened && personId) await wakeAll(ctx, await answerDirectly(ctx, personId, agentId, text));
   return opened;
 }

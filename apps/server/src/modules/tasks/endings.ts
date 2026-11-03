@@ -56,9 +56,7 @@ export async function continueOnce(ctx: Ctx, jobId: string): Promise<'continued'
   if (!found) return null;
   const { job, task, agent } = found;
   const how = howEnded(job);
-  const note =
-    `Your last turn on #${task.number} "${task.title}" ended without recording what it was woken for: ${how}. ` +
-    'Finish that work now and record it with your Hornhoof tool: hand it in, give your verdict, report, say why you are blocked or ask people, whichever the turn was for.';
+  const note = continuationNote(job, task);
   const next = await onAgent(ctx, agent.id, () => turnAgain(ctx, found, note, { continueOf: job.id }, note));
   const then = next ? `Hornhoof goes on with it once: turn ${next}.` : `Hornhoof could not go on with it: ${agent.name} has no subscription.`;
   await ctx.db.insert(taskEvents).values({
@@ -71,4 +69,10 @@ export async function continueOnce(ctx: Ctx, jobId: string): Promise<'continued'
   });
   published(ctx, task);
   return next ? 'continued' : null;
+}
+
+export function continuationNote(job: Pick<typeof jobs.$inferSelect, 'exitCode' | 'exitSignal'>, task: { number: number; title: string }): string {
+  const how = howEnded(job);
+  return `Your last turn on #${task.number} "${task.title}" ended without recording what it was woken for: ${how}. ` +
+    'Finish that work now and record it with your Hornhoof tool: hand it in, give your verdict, report, say why you are blocked or ask people, whichever the turn was for.';
 }

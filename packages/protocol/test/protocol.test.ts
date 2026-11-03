@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { API_MODELS, CLAUDE_ALIASES, CRED_KINDS, cut, defaultEffortOf, lastBytes, MAX_INSTRUCTIONS, MAX_RUN_FILES, MAX_TEST_PARTS, OLD_NODE_INSTRUCTIONS, TAIL_BYTES, TEST_LOG_BYTES, COMPANY_TEMPLATES, COMPANY_TEMPLATE_KEYS, DEPARTMENT_TEMPLATES, TEMPLATE_KEYS, effortFor, effortsOf, modelsFor, parseNodeMessage, parseServerMessage, PROGRAM_SCREEN_MAX, PROGRAM_STATES, repoFolder, type AgentEvent, type NodeMessage, type ServerMessage } from '../src/index.js';
 import { effortsOf as light, effortFor as lightEffort } from '../src/efforts.js';
+import * as protocol from '../src/index.js';
 
 const LIMITS = { status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0.38, resetsAt: '2026-10-29T21:30:00.000Z' }] };
+
+it('shares the 15 second window for a program to start queued words after a turn ends', () => {
+  expect(protocol.UNHEARD_MS).toBe(15_000);
+});
 
 const NODE: NodeMessage[] = [
   { type: 'hello', version: '0.2.0', loggedIn: true, running: ['job-1'] },
@@ -31,6 +36,25 @@ const SERVER: ServerMessage[] = [
 ];
 
 describe('node messages', () => {
+  it('carries waiting words on a job end and still accepts older nodes', () => {
+    const done = { type: 'job.done', jobId: 'job-1', ok: true, sessionId: null, result: '', tail: '', error: null };
+    for (const message of [done, { ...done, wordsWaiting: true }, { ...done, wordsWaiting: false }]) {
+      expect(parseNodeMessage(JSON.stringify(message))).toEqual(message);
+    }
+    expect(parseNodeMessage(JSON.stringify({ ...done, wordsWaiting: 'yes' }))).toBeNull();
+  });
+
+  it('keeps the original job of a turn the program starts from queued live words', () => {
+    const message = { type: 'turn.open', agentKey: 'agent-1', text: 'Queued words.', queuedFrom: 'job-1', ref: 'next' };
+    expect(parseNodeMessage(JSON.stringify(message))).toEqual(message);
+  });
+  it.each(['job-1', null])('carries unheard words with job %s and bounds their text like agent.say', jobId => {
+    const message = { type: 'agent.unheard', agentKey: 'agent-1', jobId, text: 'From Hornhoof:\n\nKeep these words.' };
+    expect(parseNodeMessage(JSON.stringify(message))).toEqual(message);
+    expect(parseNodeMessage(JSON.stringify({ ...message, text: 'x'.repeat(100_000) }))).not.toBeNull();
+    expect(parseNodeMessage(JSON.stringify({ ...message, text: 'x'.repeat(100_001) }))).toBeNull();
+  });
+
   it('round-trip through JSON', () => {
     for (const m of NODE) expect(parseNodeMessage(JSON.stringify(m))).toEqual(m);
   });
@@ -46,6 +70,29 @@ describe('node messages', () => {
     const done = { type: 'job.done', jobId: 'x', ok: false, sessionId: null, result: '', tail: '', error: 'agent_failed' };
     expect(parseNodeMessage(JSON.stringify({ ...done, exit: { code: 1.5, signal: null } }))).toBeNull();
     expect(parseNodeMessage(JSON.stringify({ ...done, exit: { code: null, signal: 'S'.repeat(41) } }))).toBeNull();
+  });
+});
+
+describe('turn failures', () => {
+  const done: NodeMessage = { type: 'job.done', jobId: 'job-1', ok: false, sessionId: 'abc', result: '', tail: '', error: 'agent_failed' };
+
+  it.each(['overloaded', 'rate_limited', 'usage_limit', 'auth', 'network', 'cut', 'refused', 'too_big', 'crash', 'unknown'])('carry a failed turn whose program reports %s', kind => {
+    const m = { ...done, failure: { kind, text: 'The program said why it failed.', retryable: true } };
+    expect(parseNodeMessage(JSON.stringify(m))).toEqual(m);
+  });
+
+  it('still take the end of a turn from a node before failure kinds', () => {
+    expect(parseNodeMessage(JSON.stringify(done))).toEqual(done);
+  });
+
+  it('refuse a failure with an unknown kind', () => {
+    expect(parseNodeMessage(JSON.stringify({ ...done, failure: { kind: 'busy', text: 'Busy now.', retryable: true } }))).toBeNull();
+  });
+
+  it("keep at most 2000 characters of the program's own words for a failure", () => {
+    const m = { ...done, failure: { kind: 'unknown', text: 'x'.repeat(2000), retryable: false } };
+    expect(parseNodeMessage(JSON.stringify({ ...m, failure: { ...m.failure, text: 'x'.repeat(2001) } }))).toBeNull();
+    expect(parseNodeMessage(JSON.stringify(m))).toEqual(m);
   });
 });
 
@@ -456,12 +503,24 @@ describe('live terminals', () => {
     for (const within of [-1, 1.5, 'later', null]) expect(parseServerMessage(JSON.stringify({ ...say, within }))).toBeNull();
   });
 
+  it("carry a restart of an agent's program and how it went", () => {
+    const restart: ServerMessage = { type: 'agent.restart', agentKey: 'agent-1', jobId: 'job-1', note: 'Your program was restarted.' };
+    const done: NodeMessage = { type: 'agent.restarted', agentKey: 'agent-1', jobId: 'job-1', ok: true, reason: null };
+    const refused: NodeMessage = { ...done, ok: false, reason: 'A tool is running.' };
+    expect(parseServerMessage(JSON.stringify(restart))).toEqual(restart);
+    expect(parseNodeMessage(JSON.stringify(done))).toEqual(done);
+    expect(parseNodeMessage(JSON.stringify(refused))).toEqual(refused);
+    expect(parseServerMessage(JSON.stringify({ ...restart, agentKey: '../x' }))).toBeNull();
+    expect(parseServerMessage(JSON.stringify({ ...restart, note: 'x'.repeat(4001) }))).toBeNull();
+    expect(parseNodeMessage(JSON.stringify({ ...done, reason: 'x'.repeat(301) }))).toBeNull();
+  });
+
   it("carry what a turn's program does now, as its node sees it, with since when and when its screen last changed", () => {
     for (const state of PROGRAM_STATES) {
       const m: NodeMessage = { type: 'job.program', jobId: 'job-1', state, since: 1_793_379_000_000, screenAt: 1_793_379_030_000 };
       expect(parseNodeMessage(JSON.stringify(m))).toEqual(m);
     }
-    expect(PROGRAM_STATES).toEqual(['thinking', 'tool', 'asking', 'idle', 'gone']);
+    expect(PROGRAM_STATES).toEqual(['thinking', 'tool', 'asking', 'retrying', 'idle', 'gone']);
     const tool: NodeMessage = { type: 'job.program', jobId: 'job-1', state: 'tool', since: 1_793_379_000_000, tool: 'Bash', screenAt: 1_793_379_030_000 };
     expect(parseNodeMessage(JSON.stringify(tool))).toEqual(tool);
     expect(parseNodeMessage(JSON.stringify({ ...tool, tool: 'x'.repeat(101) }))).toBeNull();
@@ -473,6 +532,23 @@ describe('live terminals', () => {
     /* The question the node used to answer is gone. */
     expect(parseServerMessage(JSON.stringify({ type: 'job.check', jobId: 'job-1' }))).toBeNull();
     expect(parseNodeMessage(JSON.stringify({ type: 'job.state', jobId: 'job-1', state: 'waiting' }))).toBeNull();
+  });
+
+  it("carry a program's own retry and its last sign of life", () => {
+    const m: NodeMessage = { type: 'job.program', jobId: 'job-1', state: 'retrying', since: 1_793_379_000_000, screenAt: 1_793_379_030_000, signAt: 1_793_379_040_000, retry: { attempt: 2, max: 5, nextAt: 1_793_379_050_000 } };
+    expect(parseNodeMessage(JSON.stringify(m))).toEqual(m);
+    const unknown = { ...m, retry: { attempt: 1, max: null, nextAt: null } };
+    expect(parseNodeMessage(JSON.stringify(unknown))).toEqual(unknown);
+  });
+
+  it('take a retrying program without the optional sign and retry details', () => {
+    const m: NodeMessage = { type: 'job.program', jobId: 'job-1', state: 'retrying', since: 1_793_379_000_000, screenAt: 1_793_379_030_000 };
+    expect(parseNodeMessage(JSON.stringify(m))).toEqual(m);
+  });
+
+  it('refuse a program retry whose attempt is zero', () => {
+    const m = { type: 'job.program', jobId: 'job-1', state: 'retrying', since: 1_793_379_000_000, screenAt: 1_793_379_030_000, retry: { attempt: 0, max: 5, nextAt: null } };
+    expect(parseNodeMessage(JSON.stringify(m))).toBeNull();
   });
 
   it("carry how a turn's program that is gone ended, and its last screen", () => {

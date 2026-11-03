@@ -69,6 +69,16 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     expect(await host.run(kimiJob('k6', 'PARTS'))).toMatchObject({ ok: true, result: 'first half. second half.' });
   });
 
+  it('waits for the last Kimi wire part after Stop in Hornhoof and typed turns', async () => {
+    await setUp();
+    const res = await host.run(kimiJob('late-parts', 'PARTS_HOOKFIRST'));
+    expect(res).toMatchObject({ ok: true, result: 'first half. second half.' });
+    await typeTurn('late-parts', 'late-view', 'PARTS_HOOKFIRST', 'late-job');
+    await until(() => Boolean(done('late-job')));
+    expect(done('late-job')).toMatchObject({ ok: true, result: 'first half. second half.' });
+    expect(sent.filter(m => m.type === 'job.done' && m.jobId === 'late-job')).toHaveLength(1);
+  });
+
   it("fails a turn whose prompt one of Kimi's own hooks blocked, at once, and takes the next turn", async () => {
     await setUp();
     const started = Date.now();

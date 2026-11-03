@@ -89,7 +89,7 @@ export async function repeatedTurn(db: Db, jobId: string, run: Repeat): Promise<
 
 /* A running turn may have started work or received messages since it was queued. Keep its purpose and workflow stage,
    but refresh the status and version for the next turn. Legacy notices retain their exception for the task's giver. */
-export async function repeatWake(db: Db, { job, task, agent }: Ended, run: Repeat): Promise<TaskWake | null> {
+export async function repeatWake(db: Db, { job, task, agent }: Ended, run: string): Promise<TaskWake | null> {
   const before = await stateOf(db, job.id);
   const why = before ? before.why : (legacyNotice(task, agent.id, agent.kind, requestedPromptOf(job)) ? 'done' : 'go_on');
   const state = { ...before, why, status: task.status, stage: before?.stage ?? task.stage, merging: before?.merging ?? task.merging, version: task.version };
@@ -105,7 +105,7 @@ async function logSkipped(db: Store, task: Task, agentId: string, wake: string, 
 
 async function stateOf(db: Store, jobId: string): Promise<TaskWake | null> {
   const [message] = await db.select({ data: agentEvents.data }).from(agentEvents)
-    .where(and(eq(agentEvents.jobId, jobId), eq(agentEvents.kind, 'message'))).orderBy(asc(agentEvents.seq)).limit(1);
+    .where(and(eq(agentEvents.jobId, jobId), inArray(agentEvents.kind, ['message', 'typed']))).orderBy(asc(agentEvents.seq)).limit(1);
   const parsed = z.object({ taskWake: State }).safeParse(message?.data);
   return parsed.success ? parsed.data.taskWake : null;
 }
@@ -119,19 +119,21 @@ export async function discardStaleTurn(db: Store, job: TaskTurn): Promise<boolea
   const state = await stateOf(db, job.id);
   if (state === null && legacyNotice(row.task, job.agentId, row.kind, row.job.prompt)) return false;
   if (applies(row.task, job.agentId, state)) return false;
-  await recordStale(db, job.id, job.agentId, row.task, runOf(row.job, state));
+  await recordStale(db, job.id, job.agentId, row.task, runOf(row.job, state), 'queued');
   return true;
 }
 
 const runOf = (job: typeof jobs.$inferSelect, state: TaskWake | null): string => job.retryOf ? 'restart' : job.continueOf ? 'continue' : state ? state.why : 'task';
 
-async function recordStale(db: Store, jobId: string, agentId: string, task: Task, run: string): Promise<void> {
+export async function recordStale(db: Store, jobId: string, agentId: string, task: Task, run: string, status: 'queued' | 'running'): Promise<boolean> {
   const text = `Stale turn: #${task.number} no longer waits for this action from the agent.`;
   const [ended] = await db.update(jobs).set({ status: 'failed', error: 'stale', result: text, finishedAt: new Date() })
-    .where(and(eq(jobs.id, jobId), eq(jobs.status, 'queued'))).returning({ id: jobs.id });
-  if (!ended) return;
+    .where(and(eq(jobs.id, jobId), eq(jobs.status, status))).returning({ id: jobs.id });
+  if (!ended) return false;
   await db.insert(agentEvents).values({ companyId: task.companyId, agentId, jobId, kind: 'stopped', data: { reason: 'stale', text, task: { id: task.id, number: task.number } } });
-  await logSkipped(db, task, agentId, run, jobId);
+  /* A running turn was already logged by repeatWake; queued work reaches this path directly. */
+  if (status === 'queued') await logSkipped(db, task, agentId, run, jobId);
+  return true;
 }
 
 /* take holds these task rows until it claims the jobs. A concurrent task move cannot slip between the check and claim. */

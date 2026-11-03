@@ -557,7 +557,7 @@ type ObservedEntry = TreeActivity & { agentId: string };
 function observedEntry(turn: FactTurn, agent: TreeAgent, ix: Indexed, now: Date): ObservedEntry {
   const task = ix.tasks.get(turn.taskId ?? ''), who = { id: agent.id, name: agent.name };
   return { agentId: agent.id, jobId: turn.id, agent: who, task: task ? { id: task.id, number: task.number, title: task.title } : null,
-    segments: countedSegments(turnSegments(turn, who, now), now) };
+    segments: countedSegments(turnSegments(turn, who), now) };
 }
 
 function observedTime(facts: TreeFacts, ix: Indexed, lines: TreeLine[], reviews: TreeReview[], now: Date): ObservedEntry[] {

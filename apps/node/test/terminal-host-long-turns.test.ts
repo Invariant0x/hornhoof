@@ -20,7 +20,10 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     await setUp();
     await host.run(job('a7', 'warm up'));
     const running = host.run(job('a7', 'HANG'));
-    await until(async () => (await host.screen('a7')).includes('HANG'));
+    await until(async () => {
+      const screen = await host.screen('a7');
+      return screen.includes('HANG') && screen.trimEnd().endsWith('❯');
+    });
     expect(await host.say('a7', 'SLOW Use the new schema.')).toBe(true);
     expect(await running).toMatchObject({ ok: true, result: 'echo: SLOW Use the new schema.' });
     expect(sent.filter(m => m.type === 'turn.open')).toEqual([]);

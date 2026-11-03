@@ -1,6 +1,6 @@
 {
   "id": "c8fd7e75-84b3-4acd-847a-97623831c5ec",
-  "prevId": "bc067f3d-5545-49d8-831b-900d53ed6755",
+  "prevId": "8f15c283-a8e8-4ba8-abc2-f36f2f1456c7",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -224,6 +224,38 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "agent_events_failure_case": {
+          "name": "agent_events_failure_case",
+          "columns": [
+            {
+              "expression": "(data->>'failureCase')",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "data->>'failureCase' is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "agent_events_operations_pending": {
+          "name": "agent_events_operations_pending",
+          "columns": [
+            {
+              "expression": "(data->>'operationsPending')",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "data->>'operationsPending' is not null",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -1404,6 +1436,24 @@
         },
         "finished_at": {
           "name": "finished_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "failure": {
+          "name": "failure",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "not_before": {
+          "name": "not_before",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "restarted_at": {
+          "name": "restarted_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false

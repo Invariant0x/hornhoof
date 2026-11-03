@@ -16,8 +16,22 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     const turn = host.run(job('a14', 'hello', { env: { FAKE_SECRET: SECRET, FAKE_DEAF_MS: '60000' } }));
     const late = new Promise(r => setTimeout(() => r('still waiting'), 8000));
     const res = await Promise.race([turn, late]);
-    expect(res).toMatchObject({ ok: false, error: 'agent_failed' });
+    expect(res).toMatchObject({ ok: false, error: 'agent_failed', failure: { kind: 'unknown', retryable: true } });
     expect((res as { output: string }).output).toContain('did not take');
+  });
+
+  it('retries a node-made failure when the live program never showed it is ready', async () => {
+    await setUp({ readyMs: 500 });
+    const res = await host.run(job('late-start', 'hello', { env: { FAKE_SECRET: SECRET, FAKE_START_MS: '60000' } }));
+    expect(await tmux.alive('a-late-start')).toBe(true);
+    expect(res).toMatchObject({ ok: false, error: 'agent_failed', failure: { kind: 'unknown', retryable: true } });
+  });
+
+  it('keeps a node-made startup failure as crash when the program exited', async () => {
+    await setUp();
+    const res = await host.run(job('crashed-start', 'hello', { env: { FAKE_SECRET: SECRET, FAKE_CRASH_START: 'crash' } }));
+    expect(await tmux.alive('a-crashed-start')).toBe(false);
+    expect(res).toMatchObject({ ok: false, error: 'agent_failed', failure: { kind: 'crash', retryable: true } });
   });
 
   it('starts the program anew for the next turn after one it never took, resuming the session', async () => {

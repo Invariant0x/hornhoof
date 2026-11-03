@@ -26,7 +26,7 @@ function idleWindows(turns: FactTurn[], agentId: string, from: number, now: numb
 }
 
 function problemWindows(facts: TreeFacts, agent: TreeAgent, now: Date): Window[] {
-  const segments = (facts.turns ?? []).filter(t => t.agentId === agent.id).flatMap(t => turnSegments(t, agent, now));
+  const segments = (facts.turns ?? []).filter(t => t.agentId === agent.id).flatMap(t => turnSegments(t, agent));
   const external = externalStart(facts, agent.id, now);
   return countedSegments(segments, now).filter(s => s.kind === 'lost' || s.kind === 'alarm').map(s => ({
     from: Date.parse(s.from), to: s.to ? Math.min(Date.parse(s.to), external) : Number.isFinite(external) ? external : null,

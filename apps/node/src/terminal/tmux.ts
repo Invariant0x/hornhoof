@@ -8,7 +8,7 @@ import type { JobUser } from '../isolation.js';
 import { agentEnv, RESET_AGENT_ENV } from '../agent-env.js';
 import { withProgramExit, type ProgramExit } from '../program-exit.js';
 import { KEEP_BYTES } from '../providers/process.js';
-import { Recordings, type ExitSnapshot } from './recordings.js';
+import { recorded, Recordings, type ExitSnapshot } from './recordings.js';
 
 /* How agent sessions look and behave: no tmux bar, the wheel scrolls, the size is the smallest window's of the people
    watching (the node gives them all that size), colours pass through, and a finished program leaves its last screen. */
@@ -157,6 +157,12 @@ export class Tmux {
 
   exitSnapshot(name: string): Promise<ExitSnapshot | null> {
     return this.recordings.snapshot(name, () => this.readEnd(name));
+  }
+
+  /* Local evidence while a program runs, including stderr its next screen redraw erased. */
+  programOutput(name: string): string | null {
+    const recording = this.recordings.get(name);
+    return recording ? recorded(recording.file) : null;
   }
 
   private async readEnd(name: string): Promise<ExitSnapshot | null> {

@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { CALLS } from '../src/terminal/tool-calls.js';
+import { agySteps } from '../src/terminal/transcripts.js';
 
 const lines = (name: string) =>
   readFileSync(new URL(`./fixtures/${name}.jsonl`, import.meta.url), 'utf8')
@@ -45,4 +46,10 @@ describe('the tool calls a line of a program’s log begins and ends', () => {
   it('reads nothing from what is no log line', () => {
     for (const read of Object.values(CALLS)) for (const line of [null, 42, 'text', [], {}]) expect(read(line)).toEqual(none);
   });
+});
+
+it('ends an Antigravity tool in ERROR', () => {
+  const read = agySteps();
+  expect(read({ type: 'PLANNER_RESPONSE', step_index: 3, tool_calls: [{ name: 'run_command', args: { CommandLine: 'make' } }] }).began).toEqual([{ id: '3:0', name: 'run_command' }]);
+  expect(read({ type: 'GENERIC', status: 'ERROR', content: 'denied' })).toEqual({ began: [], ended: ['3:0'], events: [{ kind: 'tool_result', ok: false, summary: 'denied' }] });
 });

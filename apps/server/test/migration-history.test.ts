@@ -1,0 +1,107 @@
+import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { PGlite } from '@electric-sql/pglite';
+import { sql } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/pglite';
+import { migrate } from 'drizzle-orm/pglite/migrator';
+import { describe, expect, it, onTestFinished } from 'vitest';
+import { applyMissingMigrations, MIGRATIONS } from '../src/db/client.js';
+
+type Entry = { idx: number; version: string; when: number; tag: string; breakpoints: boolean };
+const mainHistory = [{ idx: 46, when: 1793700000000, tag: '0046_turn_failures' }];
+const turnHistory = [
+  { idx: 45, when: 1793714531704, tag: '0045_task_lookup_indexes' },
+  { idx: 47, when: 1793714572653, tag: '0047_requested_prompt' },
+  { idx: 49, when: 1793716912449, tag: '0049_turn_program_history' },
+  { idx: 50, when: 1793727699000, tag: '0050_external_wait' },
+  { idx: 51, when: 1793727700000, tag: '0051_unfinished_subscription_tails' },
+  { idx: 52, when: 1793739121203, tag: '0052_dismissed_command_blocks' },
+];
+
+async function oldMigrations(history: typeof mainHistory): Promise<string> {
+  const folder = await mkdtemp(join(tmpdir(), 'hh-migration-history-'));
+  onTestFinished(() => rm(folder, { recursive: true, force: true }));
+  await cp(MIGRATIONS, folder, { recursive: true });
+  const file = join(folder, 'meta', '_journal.json');
+  const journal = JSON.parse(await readFile(file, 'utf8')) as { entries: Entry[] };
+  journal.entries = [
+    ...journal.entries.filter(entry => Number(entry.tag.slice(0, 4)) <= 44),
+    ...history.map(entry => ({ ...entry, version: '7', breakpoints: true })),
+  ];
+  await writeFile(file, JSON.stringify(journal));
+  return folder;
+}
+
+describe('migration histories merged in turn 5', () => {
+  it.each(['main', 'turn-5'] as const)('upgrades an existing %s installation with all retained rows and one record per migration', async branch => {
+    const source = new PGlite();
+    onTestFinished(() => source.close());
+    const oldDb = drizzle(source);
+    await migrate(oldDb, { migrationsFolder: await oldMigrations(branch === 'main' ? mainHistory : turnHistory) });
+    await source.exec(`
+      insert into companies (id, name) values ('00000000-0000-4000-8000-000000000001', 'Retained company');
+      insert into people (id, company_id, name, email, status, scope_kind)
+        values ('00000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-000000000001', 'Ivan', 'ivan@example.com', 'active', 'company');
+      insert into subscriptions (id, company_id, provider, kind, label, owner_person_id, status)
+        values ('00000000-0000-4000-8000-000000000003', '00000000-0000-4000-8000-000000000001', 'codex', 'personal', 'Retained plan', '00000000-0000-4000-8000-000000000002', 'ready');
+      insert into agents (id, company_id, kind, name, model, subscription_id)
+        values ('00000000-0000-4000-8000-000000000004', '00000000-0000-4000-8000-000000000001', 'worker', 'Developer', '', '00000000-0000-4000-8000-000000000003');
+      insert into tasks (id, company_id, number, title, status, version)
+        values ('00000000-0000-4000-8000-000000000005', '00000000-0000-4000-8000-000000000001', 1, 'Retained task', 'working', 7);
+      insert into jobs (id, company_id, subscription_id, agent_id, task_id, prompt, timeout_ms, status, interruption)
+        values ('00000000-0000-4000-8000-000000000006', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000003',
+          '00000000-0000-4000-8000-000000000004', '00000000-0000-4000-8000-000000000005', 'Keep these words', 60000, 'failed',
+          '{"cause":"machine","at":"2026-11-03T12:00:00Z","node":{"id":null,"name":"Machine"},"task":1,"machine":{"id":null,"name":"Machine"},"diagnosis":{"kind":"unplanned","reason":"unclean_exit","startedAt":null,"at":null,"log":"Retained exit log"}}');
+      insert into agent_events (company_id, agent_id, job_id, kind, data)
+        values ('00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000004', '00000000-0000-4000-8000-000000000006',
+          'message', '{"text":"Retained words","failureCase":"retained-failure","operationsPending":"retained-alarm","silentJob":"00000000-0000-4000-8000-000000000006"}');
+      insert into node_codes (code_hash, company_id, person_id, subscription_ids, command_enc, expires_at)
+        values ('retained-code', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000002',
+          array['00000000-0000-4000-8000-000000000003']::uuid[], 'retained-command', '2026-11-04T12:00:00Z');
+    `);
+    if (branch === 'main') {
+      await source.exec(`update jobs set failure = '{"kind":"network","text":"Retained failure","retryable":true}',
+        not_before = '2026-11-03T12:01:00Z', restarted_at = '2026-11-03T12:00:00Z'`);
+    } else {
+      await source.exec(`update jobs set requested_prompt = 'Original requested words';
+        update tasks set external_wait = '{"until":"2026-11-04T12:00:00Z","reason":"Retained wait"}';
+        update node_codes set dismissed_subscription_ids = array['00000000-0000-4000-8000-000000000003']::uuid[];`);
+    }
+    const newColumns = branch === 'main'
+      ? { jobs: ['requested_prompt'], tasks: ['external_wait'], node_codes: ['dismissed_subscription_ids'] }
+      : { jobs: ['failure', 'not_before', 'restarted_at'], tasks: [], node_codes: [] };
+    const tables = ['companies', 'people', 'subscriptions', 'agents', 'tasks', 'jobs', 'agent_events', 'node_codes'] as const;
+    const before = await Promise.all(tables.map(table => source.query(`select to_jsonb(r) as row from ${table} r`)));
+    const recordedBefore = (await oldDb.execute(sql`select id, hash, created_at from drizzle.__drizzle_migrations order by id`)).rows;
+
+    const copy = new PGlite({ loadDataDir: await source.dumpDataDir('none') });
+    onTestFinished(() => copy.close());
+    const db = drizzle(copy);
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await applyMissingMigrations(db, { migrationsFolder: MIGRATIONS });
+
+    for (const [index, table] of tables.entries()) {
+      const omitted = table in newColumns ? newColumns[table as keyof typeof newColumns] : [];
+      const after = await copy.query(`select to_jsonb(r) - $1::text[] as row from ${table} r`, [omitted]);
+      expect(after.rows, table).toEqual(before[index]!.rows);
+    }
+    const recorded = (await db.execute(sql`select id, hash, created_at from drizzle.__drizzle_migrations order by id`)).rows;
+    expect(recorded).toEqual(expect.arrayContaining(recordedBefore));
+    expect(recorded).toHaveLength(52);
+    expect(new Set(recorded.map(row => Number(row.created_at))).size).toBe(52);
+    expect(recorded.map(row => Number(row.created_at))).toEqual(expect.arrayContaining([
+      1793700000000, 1793714531704, 1793714572653, 1793716912449, 1793727699000, 1793727700000, 1793739121203,
+    ]));
+    const indexes = await copy.query<{ indexname: string }>(`select indexname from pg_indexes where indexname in (
+      'agent_events_failure_case', 'agent_events_operations_pending', 'agent_events_program_history', 'agent_events_silent_job',
+      'tasks_turn_id', 'tasks_product_id', 'tasks_external_wait_until', 'node_codes_active_owner')`);
+    expect(indexes.rows).toHaveLength(8);
+
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await applyMissingMigrations(db, { migrationsFolder: MIGRATIONS });
+    expect((await db.execute(sql`select id, hash, created_at from drizzle.__drizzle_migrations order by id`)).rows).toEqual(recorded);
+    const sourceRecorded = (await oldDb.execute(sql`select id, hash, created_at from drizzle.__drizzle_migrations order by id`)).rows;
+    expect(sourceRecorded).toEqual(recordedBefore);
+  });
+});

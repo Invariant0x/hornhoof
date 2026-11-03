@@ -11,6 +11,7 @@ import { onAgent, programNode, pump, pumpWaiting } from '../conversation/queue.j
 import { deptName } from '../departments/templates.js';
 import { machineOf } from '../nodes/nodes.js';
 import { subViews, type IsOnline, type SubView } from '../subscriptions/views.js';
+import { agentFailureState, type FailureState } from '../tasks/failures.js';
 import { CLOSED, dropGate } from '../tasks/engine.js';
 import { agentProgramState, type TurnAlarm, type TurnProgram } from '../tasks/silent.js';
 import { backOn, leaveIfOff, resumeAgent } from '../tasks/wake.js';
@@ -20,7 +21,7 @@ import { agentFor, type AgentRow } from './find.js';
 import { instructionsOf, renderInstructions, placeOf, type Part } from './instructions.js';
 import { TIMER_MAX, TIMER_MIN, TIMER_ORDER_MAX, timerOf } from './timers.js';
 
-export type AgentCard = {
+export type AgentCard = FailureState & {
   id: string;
   kind: AgentRow['kind'];
   name: string;
@@ -215,6 +216,7 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
       machine: await machineOf(db, (await programNode(ctx, agent.id))?.node ?? null),
       state: running ? 'working' : agent.subscriptionId ? 'sleeping' : 'needs_subscription',
       ...agentProgramState(ctx, running),
+      ...await agentFailureState(ctx, agent.id),
       skills: offered.flatMap(s => {
         const skill = ctx.templates.skills.get(s.id);
         if (!skill) return [];

@@ -7,7 +7,7 @@ test.use({ video: { mode: 'on', size: { width: 1440, height: 1000 } } });
 
 async function serveMotion(page: Page) {
   const { org, department, tree } = wholeTurn(true);
-  org.orchestrator = { id: 'orchestrator', name: 'Orchestrator', model: '', effort: null, subscription: null, context: null, program: null, alarm: null };
+  org.orchestrator = { id: 'orchestrator', name: 'Orchestrator', model: '', effort: null, subscription: null, context: null, program: null, alarm: null, retry: null, failure: null };
   org.workLines = [{ upstreamAgentId: 'orchestrator', downstreamAgentId: 'a0', working: true, workEpoch: 1, returnedEpoch: null, returnedAt: null }];
   department.workLines = [{ upstreamAgentId: 'a0', downstreamAgentId: 'a7', working: true, workEpoch: 1, returnedEpoch: null, returnedAt: null }];
   await serveApi(page);

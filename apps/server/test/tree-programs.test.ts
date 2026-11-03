@@ -1,5 +1,4 @@
 import { expect, it } from 'vitest';
-import { LOST_END_MS } from '@hornhoof/protocol/map';
 import { countedSegments, withExternalWait, withPrograms, type FactTurn, type ProgramPoint } from '../src/modules/tasks/tree-programs.js';
 
 const date = (ms: number) => new Date(Date.parse('2026-11-03T00:00:00.000Z') + ms);
@@ -18,14 +17,14 @@ it('keeps the state of a turn that has just started, before any time has elapsed
 });
 
 it.each([
-  ['thinking', 'work'], ['tool', 'work'], ['asking', 'person'], ['gone', 'lost'], ['idle', 'stall'],
+  ['thinking', 'work'], ['retrying', 'work'], ['tool', 'work'], ['asking', 'person'], ['gone', 'lost'], ['idle', 'stall'],
 ] as const)('counts recorded %s as %s, without inferring it from silence', (state, kind) => {
   expect(withPrograms(base, [turn([point(state, 0)])], agent, date(1000))).toMatchObject([{ kind, from: iso(0), to: null }]);
 });
 
-it('marks recorded idle as a lost end at the same protocol threshold as the live view', () => {
-  expect(withPrograms(base, [turn([point('idle', 0)])], agent, date(LOST_END_MS - 1))[0]!.kind).toBe('stall');
-  expect(withPrograms(base, [turn([point('idle', 0)])], agent, date(LOST_END_MS))[0]!.kind).toBe('lost');
+it('keeps idle calm at any age until the program reports its end, as in the live view', () => {
+  expect(withPrograms(base, [turn([point('idle', 0)])], agent, date(60_000))[0]!.kind).toBe('stall');
+  expect(withPrograms(base, [turn([point('idle', 0)])], agent, date(3_600_000))[0]!.kind).toBe('stall');
 });
 
 it('ends an alarm when it is cleared and resumes the same recorded work state', () => {

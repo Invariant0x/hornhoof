@@ -1,5 +1,5 @@
 import type { AgentEvent } from '@hornhoof/protocol';
-import { and, asc, countDistinct, desc, eq, gt, inArray, isNotNull, isNull, notInArray, or, type SQL } from 'drizzle-orm';
+import { and, asc, countDistinct, desc, eq, gt, inArray, isNotNull, isNull, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { agentSpot } from '../../auth/access.js';
@@ -118,7 +118,7 @@ export async function listEvents(db: Db, agentId: string, after: number, limit =
 /* A queued turn's sender snapshot, with trusted legacy ids for turns queued before message envelopes existed. */
 export async function messageForJob(ctx: Pick<Ctx, 'db' | 'templates'>, job: { id: string; companyId: string; agentId: string }): Promise<MessageEnvelope> {
   const [row] = await ctx.db.select({ data: agentEvents.data, personId: agentEvents.personId }).from(agentEvents)
-    .where(and(eq(agentEvents.jobId, job.id), eq(agentEvents.kind, 'message'))).orderBy(asc(agentEvents.seq)).limit(1);
+    .where(and(eq(agentEvents.jobId, job.id), or(eq(agentEvents.kind, 'message'), and(eq(agentEvents.kind, 'typed'), sql`${agentEvents.data}->'_message' is not null`)))).orderBy(asc(agentEvents.seq)).limit(1);
   const saved = row && readMessage(row.data).message;
   return saved ?? incomingEnvelope(ctx, job.companyId, job.agentId, row?.personId, row?.data);
 }
@@ -140,7 +140,7 @@ export async function earlierTalk(db: Db, agentId: string, limit = 20): Promise<
     .select(columns)
     .from(agentEvents)
     .leftJoin(people, eq(people.id, agentEvents.personId))
-    .where(and(eq(agentEvents.agentId, agentId), inArray(agentEvents.kind, ['message', 'text']), or(isNull(agentEvents.jobId), notInArray(agentEvents.jobId, unspoken))))
+    .where(and(eq(agentEvents.agentId, agentId), inArray(agentEvents.kind, ['message', 'text']), sql`coalesce(${agentEvents.data}->>'turnFact', 'false') <> 'true'`, or(isNull(agentEvents.jobId), notInArray(agentEvents.jobId, unspoken))))
     .orderBy(desc(agentEvents.seq))
     .limit(limit);
   return rows.reverse().map(view);

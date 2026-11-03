@@ -72,6 +72,20 @@ describe.skipIf(!hasTmux)('terminal output recording lifecycle', () => {
     for (const tmux of instances.splice(0)) await tmux.stopAll();
   });
 
+  it('keeps a live stderr failure after the program erases its screen', async () => {
+    const { tmux, dir } = fixture();
+    expect(tmux.programOutput('missing')).toBeNull();
+    await tmux.launch('agent', {
+      cwd: dir, outputDir: dir, cols: 80, rows: 24,
+      command: [process.execPath, '-e', `process.stderr.write(${JSON.stringify('AGY_ERROR: {"short_error":"overloaded","retryable":false}\n')}); process.stdout.write("\\x1b[2J\\x1b[3J\\x1b[Hready"); process.stdin.resume();`],
+    });
+    await until(async () => (await tmux.screen('agent')).includes('ready'));
+    await until(() => tmux.programOutput('agent')?.includes('AGY_ERROR: ') ?? false);
+    expect(await tmux.alive('agent')).toBe(true);
+    expect(await tmux.screen('agent')).not.toContain('AGY_ERROR');
+    expect(tmux.programOutput('agent')).toContain('AGY_ERROR: {"short_error":"overloaded","retryable":false}');
+  });
+
   it('waits for a delayed recorder before returning and caching the final output', async () => {
     const { tmux, dir } = fixture();
     await launch(tmux, dir);

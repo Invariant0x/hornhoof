@@ -35,7 +35,7 @@ function untouched(touched: ReturnType<typeof touches>) {
 describe.skipIf(!hasTmux)('turns end only on an explicit signal', () => {
   afterEach(async () => { vi.restoreAllMocks(); await host?.stop(); });
 
-  it.each(['claude', 'antigravity'] as const)('keeps %s open when its Stop is lost, with its program and session untouched, until a person stops it', async kind => {
+  it.each(['claude', 'antigravity'] as const)('keeps %s open when both end channels are lost, with its program and session untouched, until a person stops it', async kind => {
     await setUp({ lookMs: 50, reportMs: 100 });
     const key = `lost-${kind}`;
     const first = await host.run(jobs[kind](key, 'first'));

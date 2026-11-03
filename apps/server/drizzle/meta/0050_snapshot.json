@@ -265,6 +265,38 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "agent_events_failure_case": {
+          "name": "agent_events_failure_case",
+          "columns": [
+            {
+              "expression": "(data->>'failureCase')",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "data->>'failureCase' is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "agent_events_operations_pending": {
+          "name": "agent_events_operations_pending",
+          "columns": [
+            {
+              "expression": "(data->>'operationsPending')",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "data->>'operationsPending' is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -1448,6 +1480,24 @@
         },
         "finished_at": {
           "name": "finished_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "failure": {
+          "name": "failure",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "not_before": {
+          "name": "not_before",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "restarted_at": {
+          "name": "restarted_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false

@@ -1,4 +1,3 @@
-import { LOST_END_MS } from '@hornhoof/protocol/map';
 import type { jobs } from '../../db/schema.js';
 import type { ProgramChange } from './silent.js';
 import type { ExternalWait, SegmentKind, TreeAgent, TreeSegment } from './tree.js';
@@ -10,13 +9,14 @@ export type FactTurn = Pick<typeof jobs.$inferSelect, 'id' | 'taskId' | 'created
 };
 type ReportedProgram = NonNullable<ProgramChange['program']>;
 
-function programKind(program: ReportedProgram, end: number): SegmentKind {
+function programKind(program: ReportedProgram): SegmentKind {
   switch (program.state) {
     case 'thinking':
+    case 'retrying':
     case 'tool': return 'work';
     case 'asking': return 'person';
     case 'gone': return 'lost';
-    case 'idle': return end - program.since >= LOST_END_MS ? 'lost' : 'stall';
+    case 'idle': return 'stall';
   }
 }
 
@@ -28,12 +28,12 @@ function changedPrograms(points: ProgramPoint[]): ReportedProgram[] {
   return out;
 }
 
-function programSegments(turn: FactTurn, end: number): TreeSegment[] {
+function programSegments(turn: FactTurn): TreeSegment[] {
   const programs = changedPrograms(turn.history);
   return programs.map((program, i) => {
     const next = programs[i + 1];
     const to = next ? new Date(next.since).toISOString() : turn.finishedAt?.toISOString() ?? null;
-    return { kind: programKind(program, next?.since ?? end), from: new Date(program.since).toISOString(), to, program };
+    return { kind: programKind(program), from: new Date(program.since).toISOString(), to, program };
   });
 }
 
@@ -62,10 +62,9 @@ function queuedSegment(turn: FactTurn, agent: TreeAgent): TreeSegment[] {
   return [{ kind: 'queued', from: turn.createdAt.toISOString(), to: to?.toISOString() ?? null, waitsForAgent: agent }];
 }
 
-export function turnSegments(turn: FactTurn, agent: TreeAgent, now: Date): TreeSegment[] {
-  const end = (turn.finishedAt ?? now).getTime();
+export function turnSegments(turn: FactTurn, agent: TreeAgent): TreeSegment[] {
   const running: TreeSegment[] = turn.startedAt ? [{ kind: 'unknown', from: turn.startedAt.toISOString(), to: turn.finishedAt?.toISOString() ?? null }] : [];
-  return [...queuedSegment(turn, agent), ...running, ...programSegments(turn, end), ...alarmSegments(turn)];
+  return [...queuedSegment(turn, agent), ...running, ...programSegments(turn), ...alarmSegments(turn)];
 }
 
 function covers(segment: TreeSegment, from: number, to: number, end: number): boolean {
@@ -100,7 +99,7 @@ function partition(base: TreeSegment[], overlays: TreeSegment[], now: Date): Tre
 /* Only observed programs and alarms fill historical work. A gap in that evidence remains unknown. */
 export function withPrograms(base: TreeSegment[], turns: FactTurn[], agent: TreeAgent, now: Date): TreeSegment[] {
   if (!turns.length) return base;
-  return partition(base, turns.flatMap(turn => turnSegments(turn, agent, now)), now);
+  return partition(base, turns.flatMap(turn => turnSegments(turn, agent)), now);
 }
 
 const TIME_RANK: Record<SegmentKind, number> = { unknown: 0, stall: 1, after: 2, person: 3, work: 4, lost: 5, alarm: 6, queued: 7 };

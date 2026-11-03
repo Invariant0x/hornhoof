@@ -1,0 +1,230 @@
+import type { Failure } from '@hornhoof/protocol';
+import type { TurnRetry } from '@hornhoof/protocol/map';
+import { and, asc, desc, eq, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm';
+import type { Ctx } from '../../app.js';
+import { agentEvents, agents, departments, jobs, nodes, people, subscriptions, tasks } from '../../db/schema.js';
+import { agentState, enqueueTurn, insertTurn, limitUntil, onAgent, orchestratorOf, STOPPED_ON_PURPOSE } from '../conversation/queue.js';
+import { turnAgain } from './again.js';
+import { repeatedTurn } from '../conversation/turn-words.js';
+import { continuationNote } from './endings.js';
+import { operationsWatchers, pickOpsRecipient } from './silent.js';
+import { logTurnFact } from './turn-log.js';
+import { repeatWake } from './wake-state.js';
+import { requestedPromptOf } from '../conversation/requested-prompt.js';
+
+const RETRY_MINUTES = [1, 2, 5, 10];
+type Job = typeof jobs.$inferSelect;
+type TaskTurn = Parameters<typeof turnAgain>[1];
+export type LastFailure = { kind: Failure['kind']; text: string; at: number };
+export type FailureState = { retry: TurnRetry | null; failure: LastFailure | null };
+
+const passing = (f: Failure | null) => !!f && (['overloaded', 'network', 'cut', 'rate_limited'].includes(f.kind) || (f.kind === 'unknown' && f.retryable));
+
+/* Count only this continuation's unbroken chain, never an unrelated turn of the same agent. */
+async function passingAttempts(ctx: Ctx, job: Job, history?: ReadonlyMap<string, Job>): Promise<number> {
+  let n = 0;
+  let current: Job | undefined = job;
+  while (current?.status === 'failed' && passing(current.failure)) {
+    n++;
+    if (!current.continueOf) break;
+    if (history) current = history.get(current.continueOf);
+    else [current] = await ctx.db.select().from(jobs).where(eq(jobs.id, current.continueOf));
+  }
+  return n;
+}
+
+export async function agentFailureState(ctx: Ctx, agentId: string): Promise<FailureState> {
+  const [agent] = await ctx.db.select({ companyId: agents.companyId }).from(agents).where(eq(agents.id, agentId));
+  return agent ? (await agentFailureStates(ctx, agent.companyId, [agentId])).get(agentId)! : { retry: null, failure: null };
+}
+
+/* Read the company together; only waiting retries need their continuation history. */
+export async function agentFailureStates(ctx: Ctx, companyId: string, agentIds: string[]): Promise<Map<string, FailureState>> {
+  if (!agentIds.length) return new Map();
+  const scope = and(eq(jobs.companyId, companyId), inArray(jobs.agentId, agentIds), eq(jobs.kind, 'conversation'));
+  const last = await ctx.db.selectDistinctOn([jobs.agentId]).from(jobs)
+    .where(and(scope, inArray(jobs.status, ['done', 'failed']), or(isNull(jobs.error), notInArray(jobs.error, STOPPED_ON_PURPOSE))))
+    .orderBy(asc(jobs.agentId), desc(sql`coalesce(${jobs.finishedAt}, ${jobs.createdAt})`), desc(jobs.createdAt));
+  const waiting = await ctx.db.selectDistinctOn([jobs.agentId]).from(jobs).where(and(scope, eq(jobs.status, 'queued'), isNotNull(jobs.notBefore), isNotNull(jobs.continueOf)))
+    .orderBy(asc(jobs.agentId), asc(jobs.createdAt));
+  const history = await retryHistory(ctx, companyId, waiting);
+  const failures = new Map(last.map(j => [j.agentId, j]));
+  const retries = new Map(waiting.map(j => [j.agentId, j]));
+  return new Map(await Promise.all(agentIds.map(async id => {
+    const ended = failures.get(id);
+    const next = retries.get(id);
+    const before = next?.continueOf ? history.get(next.continueOf) : undefined;
+    const retry = next?.notBefore && before?.failure && passing(before.failure)
+      ? { attempt: await passingAttempts(ctx, before, history), max: RETRY_MINUTES.length, at: +next.notBefore, kind: before.failure.kind } : null;
+    const failure = ended?.status === 'failed' && ended.failure ? { kind: ended.failure.kind, text: ended.failure.text, at: +(ended.finishedAt ?? ended.createdAt) } : null;
+    return [id, { retry, failure }] as const;
+  })));
+}
+
+async function retryHistory(ctx: Ctx, companyId: string, waiting: Job[]): Promise<Map<string, Job>> {
+  const ids = waiting.flatMap(j => j.continueOf ? [j.continueOf] : []);
+  if (!ids.length) return new Map();
+  const history = await ctx.db.select().from(jobs).where(inArray(jobs.id, sql`(
+    with recursive history as (
+      select id, continue_of from jobs where company_id = ${companyId} and ${inArray(jobs.id, ids)}
+      union
+      select parent.id, parent.continue_of from jobs parent join history child on parent.id = child.continue_of where parent.company_id = ${companyId}
+    ) select id from history
+  )`));
+  return new Map(history.map(j => [j.id, j]));
+}
+
+async function alreadySent(ctx: Ctx, caseId: string): Promise<boolean> {
+  const [seen] = await ctx.db.select({ id: agentEvents.id }).from(agentEvents).where(sql`${agentEvents.data}->>'failureCase' is not null and ${agentEvents.data}->>'failureCase' = ${caseId}`).limit(1);
+  return !!seen;
+}
+
+export async function headOf(ctx: Ctx, agent: typeof agents.$inferSelect) {
+  const [dept] = agent.departmentId ? await ctx.db.select().from(departments).where(eq(departments.id, agent.departmentId)) : [];
+  const [head] = dept ? await ctx.db.select().from(agents).where(and(eq(agents.departmentId, dept.parentId ?? dept.id), eq(agents.kind, 'head'), isNull(agents.removedAt), isNull(agents.switchedOffAt))).limit(1) : [];
+  return head && head.id !== agent.id ? head : orchestratorOf(ctx, agent.companyId);
+}
+
+/* Use the silence watch's Operations selection and keep the case in its message across server restarts. */
+export async function notifyFailure(ctx: Ctx, job: Job, text: string, caseId: string, options: { tellHead?: boolean; waitForWatcher?: boolean } = {}): Promise<void> {
+  const tellHead = options.tellHead === true;
+  if (!job.agentId) return;
+  const [agent] = await ctx.db.select().from(agents).where(eq(agents.id, job.agentId));
+  if (!agent) return;
+  const head = tellHead ? await headOf(ctx, agent) : null;
+  if (head && head.id !== agent.id && !await alreadySent(ctx, `${caseId}:head`)) {
+    await sendFailureMessage(ctx, job, head.id, text, `${caseId}:head`);
+    await logTurnFact(ctx, job, `${head.name}, the head, was told: ${text}`);
+  }
+  if (await alreadySent(ctx, caseId)) return;
+  const busy = await ctx.db.select({ id: jobs.agentId }).from(jobs).where(and(eq(jobs.status, 'running'), eq(jobs.kind, 'conversation')));
+  const to = pickOpsRecipient(await operationsWatchers(ctx, job.companyId), agent.id, new Set(busy.flatMap(j => j.id ? [j.id] : [])));
+  if (!to) {
+    if (options.waitForWatcher === false) return;
+    const [pending] = await ctx.db.select({ id: agentEvents.id }).from(agentEvents).where(sql`${agentEvents.data}->>'operationsPending' is not null and ${agentEvents.data}->>'operationsPending' = ${caseId}`).limit(1);
+    if (!pending) await logTurnFact(ctx, job, `No Operations watcher is available. This message waits for one: ${text}`, { operationsPending: caseId, operationsText: text, operationsTellHead: tellHead });
+    return;
+  }
+  if (to.id !== head?.id) await sendFailureMessage(ctx, job, to.id, text, caseId);
+  await logTurnFact(ctx, job, `Operations was told: ${text}`, { failureCase: caseId, operations: to.id });
+}
+
+async function sendFailureMessage(ctx: Ctx, job: Job, agentId: string, text: string, caseId: string): Promise<void> {
+  await enqueueTurn(ctx, { companyId: job.companyId, agentId, prompt: text, createdBy: null, message: { personId: null, text, failureCase: caseId } });
+}
+
+async function retryTurn(ctx: Ctx, job: Job, at: Date | null, next: string, taskTurn?: TaskTurn): Promise<void> {
+  if (!job.agentId) return;
+  const [agent] = taskTurn ? [taskTurn.agent] : await ctx.db.select().from(agents).where(eq(agents.id, job.agentId));
+  const task = taskTurn?.task;
+  if (!agent) return;
+  const why = `The last try failed (${job.failure!.kind}): ${job.failure!.text.replace(/\s+/g, ' ').trim()}`;
+  const note = task ? `${continuationNote(job, task)}\n${why}` : why;
+  const prompt = task ? note : `${note}\n\n${requestedPromptOf(job)}`;
+  const id = await onAgent(ctx, agent.id, async () => {
+    const [existing] = await ctx.db.select({ id: jobs.id }).from(jobs).where(eq(jobs.continueOf, job.id)).limit(1);
+    if (existing) return existing.id;
+    const repeated = await repeatedTurn(ctx, job);
+    return taskTurn ? turnAgain(ctx, taskTurn, note, { continueOf: job.id }, prompt, at, repeated) : insertTurn(ctx, {
+      companyId: job.companyId, agentId: agent.id, prompt, ...repeated, continueOf: job.id, notBefore: at,
+    });
+  });
+  await logTurnFact(ctx, job, `${why}. ${id ? next : 'The agent has no plan to continue.'}`, { continuation: id, at: at?.toISOString() ?? null });
+}
+
+/* True means this named failure decided the follow-up. Old nodes and crashes on tasks keep the existing path. */
+export async function afterFailure(ctx: Ctx, jobId: string): Promise<boolean> {
+  const [job] = await ctx.db.select().from(jobs).where(eq(jobs.id, jobId));
+  if (job?.status !== 'failed' || !job.failure || !job.agentId) return false;
+  const taskTurn = await failureTaskTurn(ctx, job);
+  if (taskTurn === null) return true;
+  return applyFailure(ctx, job, job.failure, taskTurn);
+}
+
+async function applyFailure(ctx: Ctx, job: Job, failure: Failure, taskTurn?: TaskTurn): Promise<boolean> {
+  if (passing(failure)) await retryPassingFailure(ctx, job, taskTurn);
+  else if (failure.kind === 'usage_limit' || failure.kind === 'auth') await holdFailedTurn(ctx, job, taskTurn);
+  else if (failure.kind === 'crash') {
+    await logTurnFact(ctx, job, `The program crashed: ${failure.text}. Hornhoof checks whether it can go on once.`);
+    if (job.taskId) return false;
+    await continueConversation(ctx, job);
+  } else await stopFailedTurn(ctx, job);
+  return true;
+}
+
+/* Named failures use the same task policy as restart/legacy continuations before any retry or Operations notice. */
+async function failureTaskTurn(ctx: Ctx, job: Job): Promise<TaskTurn | null | undefined> {
+  if (!job.taskId) return undefined;
+  const [found] = await ctx.db.select({ task: tasks, agent: agents }).from(tasks).innerJoin(agents, eq(agents.id, job.agentId!)).where(eq(tasks.id, job.taskId));
+  if (!found) return null;
+  const taskWake = await repeatWake(ctx.db, { job, ...found }, 'continue');
+  return taskWake ? { job, ...found, taskWake } : null;
+}
+
+async function retryPassingFailure(ctx: Ctx, job: Job, taskTurn?: TaskTurn): Promise<void> {
+  const attempt = await passingAttempts(ctx, job);
+  const minutes = RETRY_MINUTES[attempt - 1];
+  if (minutes !== undefined) {
+    const at = new Date(+(job.finishedAt ?? new Date()) + minutes * 60_000);
+    return retryTurn(ctx, job, at, `Retry ${attempt} of 4 waits until ${at.toISOString()}, in the same session.`, taskTurn);
+  }
+  await logTurnFact(ctx, job, `The turn failed (${job.failure!.kind}): ${job.failure!.text}. All 4 retries were used. The task stays where it is. Ask Operations to find the cause.`);
+  await notifyFailure(ctx, job, await failureFacts(ctx, job, 'All 4 retries were used. Find the cause and tell the head when the work can go on.'), `retries:${job.id}`);
+}
+
+async function holdFailedTurn(ctx: Ctx, job: Job, taskTurn?: TaskTurn): Promise<void> {
+  const [plan] = await ctx.db.select().from(subscriptions).where(eq(subscriptions.id, job.subscriptionId));
+  const reset = limitUntil(plan?.limits ?? null);
+  const next = job.failure!.kind === 'auth' ? 'The turn waits for the plan owner to sign in on its machine.' : `The plan holds its turns until its usage limit resets${reset ? ` at ${reset}` : ''}, then this turn goes on.`;
+  await retryTurn(ctx, job, null, next, taskTurn);
+}
+
+async function continueConversation(ctx: Ctx, job: Job): Promise<void> {
+  if (!job.continueOf) return retryTurn(ctx, job, null, 'Hornhoof continues this conversation once in its session.');
+  await notifyFailure(ctx, job, await failureFacts(ctx, job, 'The continuation crashed too. Check the program and tell the head how this conversation can go on.'), `crash:${job.id}`, { tellHead: true });
+}
+
+async function stopFailedTurn(ctx: Ctx, job: Job): Promise<void> {
+  await logTurnFact(ctx, job, `The turn failed (${job.failure!.kind}): ${job.failure!.text}. No retry will run. The head and Operations need to decide how to go on.`);
+  await notifyFailure(ctx, job, await failureFacts(ctx, job, 'No retry will run. Check the provider refusal or reduce the work with the head before trying again.'), `failure:${job.id}`, { tellHead: true });
+}
+
+async function failureFacts(ctx: Ctx, job: Job, next: string): Promise<string> {
+  const [agent] = await ctx.db.select().from(agents).where(eq(agents.id, job.agentId!));
+  const [task] = job.taskId ? await ctx.db.select().from(tasks).where(eq(tasks.id, job.taskId)) : [];
+  return `Hornhoof: ${agent?.name}'s turn ${job.id} failed at ${(job.finishedAt ?? job.createdAt).toISOString()} (${job.failure!.kind}): ${job.failure!.text}. ${task ? `Task #${task.number} "${task.title}" stays with its agent.` : 'This conversation has no task.'} ${next}`;
+}
+
+/* A sign-in that has not healed while turns wait deserves one message, naming the person who can renew it. */
+export async function checkSignInFailures(ctx: Ctx, now = new Date()): Promise<void> {
+  const failed = await ctx.db.select({ job: jobs, owner: people.name, plan: subscriptions.label })
+    .from(jobs).innerJoin(subscriptions, eq(subscriptions.id, jobs.subscriptionId)).innerJoin(people, eq(people.id, subscriptions.ownerPersonId))
+    .innerJoin(nodes, eq(nodes.id, jobs.nodeId)).where(and(eq(jobs.error, 'not_logged_in'), eq(nodes.status, 'needs_login'))).orderBy(desc(jobs.finishedAt));
+  const seen = new Set<string>();
+  for (const { job, owner, plan } of failed) {
+    if (!job.nodeId || seen.has(job.nodeId)) continue;
+    seen.add(job.nodeId);
+    if (!job.finishedAt || +now - +job.finishedAt < 3_600_000) continue;
+    if (await waitsForSignIn(ctx, job.subscriptionId)) await notifyFailure(ctx, job, `Hornhoof: plan "${plan}", owned by ${owner}, still needs a sign-in on node ${job.nodeId} since ${job.finishedAt.toISOString()}. Turns have waited for an hour. Ask ${owner} to sign in on that machine.`, `login:${job.id}`, { waitForWatcher: false });
+  }
+}
+
+/* An unavailable watcher must not lose a case that will not produce another failed turn. */
+export async function sendWaitingFailureAlarms(ctx: Ctx): Promise<void> {
+  const pending = await ctx.db.select({ job: jobs, caseId: sql<string>`${agentEvents.data}->>'operationsPending'`, text: sql<string>`${agentEvents.data}->>'operationsText'`, tellHead: sql<boolean>`(${agentEvents.data}->>'operationsTellHead')::boolean` })
+    .from(agentEvents).innerJoin(jobs, eq(jobs.id, agentEvents.jobId))
+    .where(and(eq(agentEvents.kind, 'message'), sql`${agentEvents.data}->>'operationsPending' is not null`, sql`not exists (select 1 from agent_events sent where sent.data->>'failureCase' is not null and sent.data->>'failureCase' = ${agentEvents.data}->>'operationsPending')`));
+  for (const alarm of pending) {
+    if (await failureTaskTurn(ctx, alarm.job) === null) {
+      await logTurnFact(ctx, alarm.job, 'The delayed Operations notice was skipped because the task no longer waits for this turn.', { failureCase: alarm.caseId, failureSkipped: true });
+      continue;
+    }
+    await notifyFailure(ctx, alarm.job, alarm.text, alarm.caseId, { tellHead: alarm.tellHead });
+  }
+}
+
+async function waitsForSignIn(ctx: Ctx, subscriptionId: string): Promise<boolean> {
+  const waiting = await ctx.db.selectDistinct({ agentId: jobs.agentId }).from(jobs).where(and(eq(jobs.subscriptionId, subscriptionId), eq(jobs.status, 'queued')));
+  for (const turn of waiting) if (turn.agentId && (await agentState(ctx, turn.agentId)).reason === 'needs_login') return true;
+  return false;
+}

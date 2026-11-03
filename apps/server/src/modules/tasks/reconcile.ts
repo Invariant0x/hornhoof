@@ -6,6 +6,7 @@ import { identityOf } from '../nodes/hub.js';
 import { failOpenJobs } from '../nodes/messages.js';
 import { expireStaleNodes } from '../nodes/nodes.js';
 import { CLOSED, gateVerdicts, giver, lastMove, openAfter, reviewWake, stuckAtGate, type Task, type Wake } from './engine.js';
+import { checkSignInFailures, sendWaitingFailureAlarms } from './failures.js';
 import { checkSilentTurns, SILENT_TURN_MS } from './silent.js';
 import { wakeAll } from './wake.js';
 
@@ -103,6 +104,8 @@ export async function reconcile(ctx: Ctx, now = new Date()): Promise<void> {
     await failAwayTurns(ctx, now);
     await wakeMissing(ctx, now);
     await checkSilentTurns(ctx, now);
+    await checkSignInFailures(ctx, now);
+    await sendWaitingFailureAlarms(ctx);
   } finally {
     reconciling.delete(ctx);
   }

@@ -1,4 +1,5 @@
 import { PROGRAM_SCREEN_MAX, type NodeMessage, type ProgramExit, type ProgramState } from '@hornhoof/protocol';
+import type { ProgramRetry } from '@hornhoof/protocol/map';
 import { redact } from '../redact.js';
 import { agyPrompt } from './input.js';
 import type { TermProgram } from './programs.js';
@@ -6,7 +7,7 @@ import type { TermProgram } from './programs.js';
 type Kind = TermProgram['kind'];
 
 /* A tool the program called and has no result for yet, and since when, by the node's clock. */
-export type Pending = { name: string; at: number };
+export type Pending = { name: string; at: number; asking?: boolean };
 
 /* A program is ready for its first prompt once its screen shows this; Claude Code says so through its hook. */
 export const READY: Record<Exclude<Kind, 'claude'>, (screen: string) => boolean> = {
@@ -20,11 +21,11 @@ export const READY: Record<Exclude<Kind, 'claude'>, (screen: string) => boolean>
 const QUESTIONS = new Set(['AskUserQuestion']);
 
 /* Only the program's hooks and log say whether its turn runs and which call is pending. Its screen says only if it is gone. */
-export function programState(screen: string | null, pending: Pending | null, running: boolean): ProgramState {
+export function programState(screen: string | null, pending: Pending | null, running: boolean, retry: ProgramRetry | null = null): ProgramState {
   if (screen === null) return 'gone';
   if (!running) return 'idle';
-  if (pending) return QUESTIONS.has(pending.name) ? 'asking' : 'tool';
-  return 'thinking';
+  if (pending) return pending.asking || QUESTIONS.has(pending.name) ? 'asking' : 'tool';
+  return retry ? 'retrying' : 'thinking';
 }
 
 /* The last 40 lines a gone program showed, rows left blank counted as one, cut to what Hornhoof takes of them. */
@@ -52,6 +53,8 @@ function diagnostics(fields: Diagnostics, secrets: string[]): Diagnostics {
 export class ProgramWatch {
   private screen: string | null = null;
   private screenAt = 0;
+  private signAt: number | undefined;
+  private retry: ProgramRetry | null = null;
   private state: ProgramState | null = null;
   private tool: string | undefined;
   private since = 0;
@@ -72,12 +75,15 @@ export class ProgramWatch {
     this.tell(now);
   }
 
-  look(now: number, screen: string | null, pending: Pending | null, running: boolean): ProgramState {
+  look(now: number, screen: string | null, pending: Pending | null, running: boolean, signAt?: number, retry: ProgramRetry | null = null): ProgramState {
     if (screen !== this.screen) Object.assign(this, { screen, screenAt: now });
-    const state = programState(screen, pending, running);
+    const retryChanged = JSON.stringify(this.retry) !== JSON.stringify(retry);
+    this.signAt = signAt;
+    this.retry = retry;
+    const state = programState(screen, pending, running, retry);
     /* Only a tool or a question has a call to tell. */
     const call = state === 'tool' || state === 'asking' ? pending : null;
-    if (this.changed(now, state, call) || this.due(now)) this.tell(now);
+    if (this.changed(now, state, call) || retryChanged || this.due(now)) this.tell(now);
     return state;
   }
 
@@ -90,7 +96,9 @@ export class ProgramWatch {
   }
 
   /* The program is gone: Hornhoof hears how it ended, null both when its session went whole, and what it showed last. */
-  gone(now: number, exit: ProgramExit | null, screen: string): void {
+  gone(now: number, exit: ProgramExit | null, screen: string, signAt = this.signAt): void {
+    this.signAt = signAt;
+    this.retry = null;
     if (this.screen !== null) Object.assign(this, { screen: null, screenAt: now });
     this.changed(now, 'gone', null);
     this.ended = { exitCode: exit?.code ?? null, signal: exit?.signal ?? null, screen };
@@ -106,6 +114,6 @@ export class ProgramWatch {
     this.toldAt = now;
     if (!this.jobId || !this.state) return;
     const detail = diagnostics({ ...(this.tool ? { tool: this.tool } : {}), ...this.ended }, this.secrets());
-    this.send({ type: 'job.program', jobId: this.jobId, state: this.state, since: this.since, screenAt: this.screenAt, ...detail });
+    this.send({ type: 'job.program', jobId: this.jobId, state: this.state, since: this.since, screenAt: this.screenAt, ...(this.signAt !== undefined ? { signAt: this.signAt } : {}), ...(this.state === 'retrying' && this.retry ? { retry: this.retry } : {}), ...detail });
   }
 }

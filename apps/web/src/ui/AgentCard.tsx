@@ -7,11 +7,14 @@ import { defaultEffort, PROVIDER_NAMES } from '../providers';
 import type { AgentCardView, Me, Part, SubView } from '../types';
 import { TimerSettings } from './TimerSettings';
 import { Ask } from './Ask';
-import { AgentState, type AgentLive } from './AgentState';
+import { AgentState, clockAt, type AgentLive } from './AgentState';
 import { byProvider, servingLabel } from './StaffCard';
 
 /* live and serverNow: what its program does and the server's alarm, as the map read them, and the server's clock then. */
 type Props = { me: Me; agentId: string; live?: AgentLive; serverNow?: string; onClose(): void; onTerminal(): void };
+
+const FAILURE_TEXT_MAX = 300;
+const clip = (text: string, max: number) => (text.length <= max ? text : `${text.slice(0, max - 1)}…`);
 
 const SKILL = /<!-- hh:skill ([a-z0-9-]+) -->\n## [^\n]*\n\n([\s\S]*?)\n<!-- \/hh:skill -->/g;
 
@@ -233,9 +236,19 @@ export function AgentCard({ me, agentId, live, serverNow, onClose, onTerminal }:
   const effortName = (level: string) => t.agent.efforts[level] ?? level;
   const where = [card.department?.name, card.product?.name].filter(Boolean).join(', ');
   const dirty = rawDraft !== null ? rawDraft !== card.raw : Object.keys(drafts).length > 0;
-  const when = (at: string) => new Date(at).toLocaleString(language === 'ru' ? 'ru-RU' : 'en-GB', { dateStyle: 'short', timeStyle: 'short' });
+  const when = (at: string | number) => new Date(at).toLocaleString(language === 'ru' ? 'ru-RU' : 'en-GB', { dateStyle: 'short', timeStyle: 'short' });
   const count = (n: number) => n.toLocaleString(language === 'ru' ? 'ru-RU' : 'en-GB');
   const editable = card.canEdit;
+  const stateAgent: AgentLive = live
+    ? { ...live, retry: live.retry === undefined ? card.retry : live.retry }
+    : { id: card.id, program: card.program ?? null, alarm: card.alarm ?? null, retry: card.retry };
+  const failureToday = card.failure !== null && new Date(card.failure.at).toDateString() === new Date().toDateString();
+  const failureLine =
+    card.failure &&
+    (failureToday
+      ? t.agent.lastFailed(clockAt(card.failure.at), t.failures[card.failure.kind])
+      : t.agent.lastFailedOn(when(card.failure.at), t.failures[card.failure.kind]));
+  const failureText = card.failure ? clip(card.failure.text, FAILURE_TEXT_MAX) : '';
 
   /* An edit carries over to the other view; a raw text with broken markers stays in the raw view until it is fixed. */
   function showRaw(next: boolean) {
@@ -264,8 +277,17 @@ export function AgentCard({ me, agentId, live, serverNow, onClose, onTerminal }:
           <p className="ac-state">
             <i className={`dot ${card.state}`} />
             {t.dept.states[card.state]}
-            <AgentState agent={live} serverNow={serverNow} />
+            <AgentState agent={stateAgent} serverNow={serverNow} />
           </p>
+          {failureLine &&
+            (failureText ? (
+              <details className="ac-failure">
+                <summary title={failureText}>{failureLine}</summary>
+                <pre>{failureText}</pre>
+              </details>
+            ) : (
+              <p className="ac-failure">{failureLine}</p>
+            ))}
           <button className="btn small" type="button" onClick={onTerminal}>
             {t.agent.openTerminal}
           </button>

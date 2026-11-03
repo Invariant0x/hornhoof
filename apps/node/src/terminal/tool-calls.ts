@@ -34,7 +34,7 @@ function kimiCalls(line: unknown): Calls {
   return event.type === 'tool.result' ? { began: [], ended: [id] } : none();
 }
 
-/* Codex logs an item when it completes; one that runs a tool also when it starts. */
+/* Codex logs completed items. Older logs can also contain the start of a tool. */
 function codexCalls(line: unknown): Calls {
   if (!isRecord(line) || line.type !== 'event_msg' || !isRecord(line.payload) || !isRecord(line.payload.item)) return none();
   const { type } = line.payload;

@@ -4,9 +4,11 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, machines, nodes, planCredentials, subscriptions, tasks } from '../../db/schema.js';
 import { said } from '../conversation/live.js';
-import { nodeOfAgent, pumpWaiting, refusedLimits, startProgram } from '../conversation/queue.js';
+import { unheard } from '../conversation/unheard.js';
+import { holdForWords, nodeOfAgent, onAgent, pumpWaiting, refusedLimits, startProgram } from '../conversation/queue.js';
 import { workStarts } from '../org/map-state.js';
 import { startWork } from '../tasks/engine.js';
+import { programRestarted } from '../tasks/program-restarts.js';
 import { recordJobProgram } from '../tasks/silent.js';
 import { afterJob, typedTurn } from '../tasks/wake.js';
 import { appendTurnEvent, publishWorking } from '../events/store.js';
@@ -20,7 +22,7 @@ import { hookRejected } from './hook-rejections.js';
 
 const OPEN_JOBS = ['queued', 'running'] as const;
 
-const completionValue = (value: unknown, stopped: string): SQL => sql`case when ${jobs.error} = 'cancelled' then ${stopped} else ${value ?? null} end`;
+const completionValue = (value: unknown, stopped: string | null): SQL => sql`case when ${jobs.error} = 'cancelled' then ${stopped} else ${value ?? null} end`;
 
 /* A node may only touch the jobs sent to it; the built-in node those of API keys. */
 function jobsOf(id: NodeIdentity, ctx: Ctx): SQL {
@@ -31,6 +33,31 @@ function jobsOf(id: NodeIdentity, ctx: Ctx): SQL {
 /* Jobs a node has or had: running ones, and test jobs, which go out the moment they are made.
    A queued conversation turn still waits in Hornhoof and goes out later. */
 const ON_NODE = or(eq(jobs.status, 'running'), and(eq(jobs.status, 'queued'), eq(jobs.kind, 'test')));
+
+async function jobEnded(ctx: Ctx, id: NodeIdentity, msg: Extract<NodeMessage, { type: 'job.done' }>, now: Date) {
+  const [job] = await ctx.db.select({ agentId: jobs.agentId }).from(jobs).where(and(eq(jobs.id, msg.jobId), jobsOf(id, ctx)));
+  const finish = async () => {
+    const finished = await ctx.db
+      .update(jobs)
+      .set({
+        status: completionValue(msg.ok ? 'done' : 'failed', 'failed'),
+        result: completionValue(msg.result, 'Stopped.'),
+        tail: lastBytes(msg.tail),
+        error: completionValue(msg.failure?.kind === 'auth' ? 'not_logged_in' : msg.error, 'cancelled'),
+        failure: completionValue(sql`${JSON.stringify(msg.failure ?? null)}::jsonb`, null),
+        ...exitOf(msg.exit),
+        sessionId: msg.sessionId,
+        finishedAt: now,
+      })
+      .where(and(eq(jobs.id, msg.jobId), inArray(jobs.status, OPEN_JOBS), jobsOf(id, ctx)))
+      .returning({ companyId: jobs.companyId, agentId: jobs.agentId, kind: jobs.kind });
+    if (msg.wordsWaiting) for (const job of finished) {
+      if (job.agentId && job.kind === 'conversation') holdForWords(ctx, job.agentId, msg.jobId, now);
+    }
+    return finished;
+  };
+  return job?.agentId ? onAgent(ctx, job.agentId, finish) : finish();
+}
 
 /* Why a node restart cut a turn off, with the number of the task it was on; nothing for a turn that failed otherwise. */
 const cutOf = (cut?: RestartCut) =>
@@ -196,30 +223,18 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       await recordJobProgram(ctx, msg, now, jobsOf(id, ctx));
       return;
     case 'job.done': {
-      const finished = await db
-        .update(jobs)
-        .set({
-          status: completionValue(msg.ok ? 'done' : 'failed', 'failed'),
-          result: completionValue(msg.result, 'Stopped.'),
-          tail: lastBytes(msg.tail),
-          error: completionValue(msg.error, 'cancelled'),
-          ...exitOf(msg.exit),
-          sessionId: msg.sessionId,
-          finishedAt: now,
-        })
-        .where(and(eq(jobs.id, msg.jobId), inArray(jobs.status, OPEN_JOBS), jobsOf(id, ctx)))
-        .returning({ companyId: jobs.companyId });
+      const finished = await jobEnded(ctx, id, msg, now);
       for (const { companyId } of finished) await publishWorking(ctx, companyId);
       /* The login ran out on this machine: it waits for one before the next turn could go out and fail too. */
-      if (finished.length && msg.error === 'not_logged_in' && id.kind === 'node') {
+      if (finished.length && (msg.error === 'not_logged_in' || msg.failure?.kind === 'auth') && id.kind === 'node') {
         const [node] = await db.update(nodes).set({ status: 'needs_login' }).where(eq(nodes.id, id.nodeId)).returning({ plan: nodes.subscriptionId });
         await settlePlans(db, [node?.plan ?? null]);
       }
       /* A program that stopped at the plan's usage limit holds the plan's turns, as a plan that says so itself does, and the
          map says until when. */
-      if (finished.length && msg.error === 'agent_failed' && id.kind === 'node') {
-        const [sub] = await db.select({ id: subscriptions.id, limits: subscriptions.limits }).from(nodes).innerJoin(subscriptions, eq(subscriptions.id, nodes.subscriptionId)).where(eq(nodes.id, id.nodeId));
-        const held = sub && refusedLimits(`${msg.result}\n${msg.tail}`, sub.limits ?? null, now.getTime());
+      if (finished.length && (msg.failure?.kind === 'usage_limit' || (!msg.failure && msg.error === 'agent_failed' && id.kind === 'node'))) {
+        const [sub] = await db.select({ id: subscriptions.id, limits: subscriptions.limits }).from(jobs).innerJoin(subscriptions, eq(subscriptions.id, jobs.subscriptionId)).where(eq(jobs.id, msg.jobId));
+        const held = sub && refusedLimits(`${msg.result}\n${msg.tail}`, sub.limits ?? null, now.getTime(), msg.failure?.kind === 'usage_limit');
         if (held) {
           await db.update(subscriptions).set({ limits: held }).where(eq(subscriptions.id, sub.id));
           for (const { companyId } of finished) ctx.bus.publish(companyId, { type: 'org' });
@@ -231,15 +246,21 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       return;
     }
     case 'turn.open': {
-      const opened = await typedTurn(ctx, id, msg.agentKey, msg.text, ctx.terminals.takeTyped(id, msg.agentKey));
+      const opened = await typedTurn(ctx, id, msg.agentKey, msg.text, ctx.terminals.takeTyped(id, msg.agentKey), msg.queuedFrom);
       ctx.hub.send(id, { type: 'turn.opened', agentKey: msg.agentKey, jobId: opened?.jobId ?? null, toolToken: opened?.token ?? null, ...(msg.ref ? { ref: msg.ref } : {}) });
       return;
     }
     case 'agent.start':
       await startProgram(ctx, id, msg.agentKey);
       return;
+    case 'agent.restarted':
+      await programRestarted(ctx, id, msg);
+      return;
     case 'agent.said':
       said(ctx, id, msg.ref, msg.ok);
+      return;
+    case 'agent.unheard':
+      await unheard(ctx, id, msg, now);
       return;
     case 'agent.hook_rejected':
       await hookRejected(ctx, id, msg, jobsOf(id, ctx));

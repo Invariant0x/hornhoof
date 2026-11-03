@@ -11,12 +11,25 @@ export type ProviderId = (typeof PROVIDER_IDS)[number];
 export const JOB_ERRORS = ['timeout', 'agent_failed', 'not_logged_in', 'cancelled'] as const;
 export type JobError = (typeof JOB_ERRORS)[number];
 
-/* What a turn's program does now, as its node sees it on the program's screen and in its log: it thinks, runs a tool,
-   asks a person a question or for leave, waits for what to type with nothing typed, or is gone, its session over. */
-export const PROGRAM_STATES = ['thinking', 'tool', 'asking', 'idle', 'gone'] as const;
+/* Why a turn's program failed, in one list for every program: the model is busy, too many requests now, the plan's
+   window is used up, the sign-in no longer works, the service could not be reached, the answer broke off, the
+   provider will not do this work, the context or output is too big, the program itself is gone, or anything else. */
+export const FAILURE_KINDS = ['overloaded', 'rate_limited', 'usage_limit', 'auth', 'network', 'cut', 'refused', 'too_big', 'crash', 'unknown'] as const;
+export type FailureKind = (typeof FAILURE_KINDS)[number];
+/* A failed turn's kind, the program's own words for it, cut to size, and whether the program called it worth trying again. */
+export const Failure = z.object({ kind: z.enum(FAILURE_KINDS), text: z.string().max(2000), retryable: z.boolean() });
+export type Failure = z.infer<typeof Failure>;
+
+/* What a turn's program does now, from its own hooks and log, never from its screen: it thinks, runs a tool, asks a person
+   a question or for leave, tries the model again after an error as its log says, waits for what to type with nothing
+   typed, or is gone, its session over. */
+export const PROGRAM_STATES = ['thinking', 'tool', 'asking', 'retrying', 'idle', 'gone'] as const;
 export type ProgramState = (typeof PROGRAM_STATES)[number];
 /* The most of a gone program's last screen a node tells: its last 40 lines, cut to this many characters. */
 export const PROGRAM_SCREEN_MAX = 4000;
+
+/* How long after a turn ends the program may still start its own turn with words it kept. */
+export const UNHEARD_MS = 15_000;
 
 /* Why a part of a run ended other than with its command passing: it failed, ran out of time, was stopped, the branch
    could not be cloned, or the task's files could not be fetched. */
@@ -394,15 +407,20 @@ const NodeMessage = z.discriminatedUnion('type', [
     result: z.string(),
     tail: z.string(),
     error: z.enum(JOB_ERRORS).nullable(),
+    /* The ended turn's words are still queued or held by the program; older nodes send none. */
+    wordsWaiting: z.boolean().optional(),
+    /* Set on a failed turn whose program said why; older nodes send none. */
+    failure: Failure.optional(),
     /* How the agent's program ended, when the node saw it end: its exit code, or the name of the signal that ended it. */
     exit: ProgramExit.optional(),
   }),
   z.object({ type: z.literal('job.event'), jobId: z.string(), seq: z.number().int().min(0), event: AgentEvent }),
   /* What the turn's program does now: sent at each change of its state or tool, and while the turn runs at least once a
-     minute, so Hornhoof knows the node is there and whether the screen moved. since: when the state began; tool: the
-     tool it runs; screenAt: when its screen last changed. Times are the node's, in milliseconds since 1970. A program that
-     is gone says how it ended, its exit code or the signal that ended it, null both when its session went whole, and
-     its last screen. */
+     minute, so Hornhoof knows the node is there. since: when the state began; tool: the tool it runs; signAt: when the
+     program last gave any sign of life, a hook call or a line in its log; retry: its own retry while retrying. Older
+     nodes send neither signAt nor retry. screenAt: when its screen last changed, now only for people to see. Times are
+     the node's, in milliseconds since 1970. A program that is gone says how it ended, its exit code or the signal that
+     ended it, null both when its session went whole, and its last screen. */
   z.object({
     type: z.literal('job.program'),
     jobId: z.string(),
@@ -410,6 +428,8 @@ const NodeMessage = z.discriminatedUnion('type', [
     since: z.number().int().nonnegative(),
     tool: z.string().max(100).optional(),
     screenAt: z.number().int().nonnegative(),
+    signAt: z.number().int().nonnegative().optional(),
+    retry: z.object({ attempt: z.number().int().min(1), max: z.number().int().min(1).nullable(), nextAt: z.number().int().nonnegative().nullable() }).optional(),
     exitCode: ProgramExit.shape.code.optional(),
     signal: ProgramExit.shape.signal.optional(),
     screen: z.string().max(PROGRAM_SCREEN_MAX).optional(),
@@ -421,7 +441,7 @@ const NodeMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('term.program'), termId: TermId, running: z.boolean() }),
   /* A person typed to an agent that had no turn running: Hornhoof opens one so the agent has its tools. ref names the
      typed turn, and Hornhoof's answer carries it back. */
-  z.object({ type: z.literal('turn.open'), agentKey: z.string().regex(/^[A-Za-z0-9-]{1,64}$/), text: z.string().max(100_000), ref: z.string().max(64).optional() }),
+  z.object({ type: z.literal('turn.open'), queuedFrom: Id.optional(), agentKey: z.string().regex(/^[A-Za-z0-9-]{1,64}$/), text: z.string().max(100_000), ref: z.string().max(64).optional() }),
   /* Someone who may type opened the window of an agent whose program does not run: Hornhoof starts it with a turn that
      types nothing. */
   z.object({ type: z.literal('agent.start'), agentKey: z.string().regex(/^[A-Za-z0-9-]{1,64}$/) }),
@@ -435,7 +455,11 @@ const NodeMessage = z.discriminatedUnion('type', [
   /* How full the agent's context is now, as its program counts it: a share from 0 to 1. */
   z.object({ type: z.literal('agent.context'), agentKey: z.string().regex(/^[A-Za-z0-9-]{1,64}$/), used: z.number().min(0).max(1) }),
   /* Whether Hornhoof's words named by ref went into the agent's running turn; if not, they wait for its next one. */
+  /* Said ok means the program recorded the words, or Codex holds them. Unheard follows if they never entered a turn. */
   z.object({ type: z.literal('agent.said'), ref: z.string().max(64), ok: z.boolean() }),
+  z.object({ type: z.literal('agent.unheard'), agentKey: Id, jobId: Id.nullable(), text: z.string().max(100_000) }),
+  /* How a restart Hornhoof asked for went: done, or why the node did not do it. */
+  z.object({ type: z.literal('agent.restarted'), agentKey: Id, jobId: Id, ok: z.boolean(), reason: z.string().max(300).nullable() }),
 ]);
 export type NodeMessage = z.infer<typeof NodeMessage>;
 
@@ -549,6 +573,9 @@ const ServerMessage = z.discriminatedUnion('type', [
      the program as a person types, so the turn takes them in. The optional within budget, in milliseconds from receipt,
      limits how long the node can wait to type them without depending on the server's clock. */
   z.object({ type: z.literal('agent.say'), agentKey: Id, text: z.string().max(100_000), ref: z.string().max(64), within: z.number().int().nonnegative().optional() }),
+  /* Restart the agent's program in the same session, when it cannot come back by itself. The node checks the same
+     conditions against its own events first, then types the note and the turn's words the program had not taken in. */
+  z.object({ type: z.literal('agent.restart'), agentKey: Id, jobId: Id, note: z.string().max(4000) }),
 ]);
 export type ServerMessage = z.infer<typeof ServerMessage>;
 
