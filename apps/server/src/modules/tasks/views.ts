@@ -130,6 +130,16 @@ async function forWhom(db: Ctx['db'], data: Record<string, unknown>[]): Promise<
   return new Map((await db.select({ id: people.id, name: people.name }).from(people).where(inArray(people.id, ids))).map(p => [p.id, p]));
 }
 
+/* Who wrote a line of the log: a person, or an agent with the person it acted for. */
+function byOf(n: Names, actedFor: Map<string, { id: string; name: string }>) {
+  return (personId: string | null, personName: string | null, agentId: string | null, data: Record<string, unknown>): LogLine['by'] => {
+    if (personId) return { kind: 'person', id: personId, name: personName ?? '' };
+    if (!agentId) return null;
+    const whom = typeof data.onBehalfOfPersonId === 'string' ? actedFor.get(data.onBehalfOfPersonId) : undefined;
+    return { kind: 'agent', id: agentId, name: n.agent(agentId)?.name ?? '', ...(whom ? { for: whom } : {}) };
+  };
+}
+
 /* One task as people and agents read it: the body, its gates with where it stands, what it was split into, and its log.
    The task it serves and the tasks under it show only when the reader may see them too. */
 export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates'>, task: Task, sees: (t: Task) => boolean): Promise<TaskDetail> {
@@ -156,13 +166,7 @@ export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates'>, task: Task,
   const n = await names(ctx, [task, ...subs], [...(reviewers ?? []), ...events.map(e => e.agentId), ...asks.map(r => r.agentId), ...files.map(f => f.agentId)].filter((x): x is string => Boolean(x)));
   /* Only what this reader may see of what the task comes after. */
   const after = n.after(task).filter(sees);
-  const actedFor = await forWhom(db, events.map(e => e.data));
-  const by = (personId: string | null, personName: string | null, agentId: string | null, data: Record<string, unknown>): LogLine['by'] => {
-    if (personId) return { kind: 'person', id: personId, name: personName ?? '' };
-    if (!agentId) return null;
-    const whom = typeof data.onBehalfOfPersonId === 'string' ? actedFor.get(data.onBehalfOfPersonId) : undefined;
-    return { kind: 'agent', id: agentId, name: n.agent(agentId)?.name ?? '', ...(whom ? { for: whom } : {}) };
-  };
+  const by = byOf(n, await forWhom(db, events.map(e => e.data)));
   return {
     ...line(task, n, sees),
     body: task.body,

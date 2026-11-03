@@ -69,6 +69,12 @@ function decidedByView(d: DecidedBy, places: Places) {
   return { kind: d.kind, department: place ? { id: place.id, name: deptName(place) } : null };
 }
 
+/* The departments the cards are for and the requests' departments decide. */
+function placesOf(cards: Decisions['proposals'], mine: Decisions['requests']): string[] {
+  const ids = [...cards.map(c => c.proposal.departmentId), ...mine.map(r => r.decidedBy.departmentId)];
+  return ids.filter((id): id is string => id !== null);
+}
+
 /* An orchestrator's pending card, answered with its own build or staff click. */
 function proposalView({ proposal: p, ownerPersonId, canAnswer, decidedBy }: Decisions['proposals'][number], names: Map<string, string>, places: Places) {
   const place = p.departmentId ? places.get(p.departmentId) : undefined;
@@ -206,10 +212,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const cards = decisions.proposals.filter(p => picked(p.ownerPersonId));
     const computer = decisions.computer && picked(decisions.computer.ownerPersonId) ? decisions.computer : null;
     const names = await agentNames(db, [...mine.map(r => r.request.agentId), ...cards.map(c => c.proposal.agentId), ...(computer ? [computer.agentId] : [])]);
-    const places = await departmentNames(ctx, [
-      ...cards.flatMap(c => (c.proposal.departmentId ? [c.proposal.departmentId] : [])),
-      ...mine.flatMap(r => (r.decidedBy.departmentId ? [r.decidedBy.departmentId] : [])),
-    ]);
+    const places = await departmentNames(ctx, placesOf(cards, mine));
     const pictures = await picturesOf(db, mine.map(r => r.request));
     const commits = await Promise.all(mine.map(r => commitUrl(db, r.task, r.request.commit)));
     const explaining = await explainingOf(db, me.companyId, mine.filter(r => !r.request.explained).map(r => r.request.id));

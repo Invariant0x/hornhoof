@@ -72,26 +72,40 @@ const DESCRIPTIONS: Record<SqlMode, string> = {
     `with secrets (${SECRETS}), so name columns instead of * on those tables. ${READ_ONLY} Each statement comes back as { rows, changed }.`,
 };
 
+/* What the tool says of itself, and why a read-only call refused a write, in each mode. */
+const DESCRIBED: Record<SqlMode, string> = {
+  write: `${DESCRIPTIONS.write} In a turn that answers neither the CEO nor the CEO delegate it only reads.`,
+  read: DESCRIPTIONS.read,
+};
+const WHY_READ_ONLY: Record<SqlMode, string> = { write: READS_IN_THIS_TURN, read: READ_ONLY };
+
+/* The mode a call runs in: the orchestrator's changes rows only in a turn that answers the CEO or the delegate. */
+async function modeNow(ctx: Ctx, job: ToolJob, mode: SqlMode): Promise<SqlMode> {
+  if (mode === 'read') return 'read';
+  return (await answersCeoOrDelegate(ctx.db, job.id)) ? 'write' : 'read';
+}
+
+async function runSql(ctx: Ctx, agentSql: NonNullable<Ctx['agentSql']>, job: ToolJob, sql: string, mode: SqlMode) {
+  const now = await modeNow(ctx, job, mode);
+  try {
+    const answers = await agentSql.run(sql, now);
+    if (answers.some(a => a.changed > 0)) ctx.bus.publish(job.companyId, { type: 'org' });
+    const body = JSON.stringify(answers);
+    return say(body.length > MAX_ANSWER ? `${body.slice(0, MAX_ANSWER)}\n[cut at ${MAX_ANSWER} characters]` : body);
+  } catch (err) {
+    return say(refusal(err as Error, now, WHY_READ_ONLY[mode]), true);
+  }
+}
+
 /* SQL on Hornhoof's own database, for what the other tools do not reach: the orchestrator's changes rows, the head of
    Operations' only reads. The orchestrator's only reads too in a turn that answers neither the CEO nor the delegate, as
    the turn answers when the call runs, under the input lock words for the turn take. The map is told to look again after
    a change. */
 export function registerDatabaseTool(server: McpServer, ctx: Ctx, job: ToolJob, mode: SqlMode): void {
-  const description = mode === 'write' ? `${DESCRIPTIONS.write} In a turn that answers neither the CEO nor the CEO delegate it only reads.` : DESCRIPTIONS.read;
-  server.registerTool('database', { description, inputSchema: { sql: z.string().trim().min(1).max(20_000) } }, async ({ sql }) => {
+  server.registerTool('database', { description: DESCRIBED[mode], inputSchema: { sql: z.string().trim().min(1).max(20_000) } }, async ({ sql }) => {
     const agentSql = ctx.agentSql;
     if (!agentSql) return say("This Hornhoof's database does not let Hornhoof make the role this tool runs as.", true);
-    const run = async () => {
-      const now: SqlMode = mode === 'write' && !(await answersCeoOrDelegate(ctx.db, job.id)) ? 'read' : mode;
-      try {
-        const answers = await agentSql.run(sql, now);
-        if (answers.some(a => a.changed > 0)) ctx.bus.publish(job.companyId, { type: 'org' });
-        const body = JSON.stringify(answers);
-        return say(body.length > MAX_ANSWER ? `${body.slice(0, MAX_ANSWER)}\n[cut at ${MAX_ANSWER} characters]` : body);
-      } catch (err) {
-        return say(refusal(err as Error, now, mode === 'write' ? READS_IN_THIS_TURN : READ_ONLY), true);
-      }
-    };
+    const run = () => runSql(ctx, agentSql, job, sql, mode);
     return mode === 'write' ? withInputLock(ctx, job.agentId, run) : run();
   });
 }

@@ -449,7 +449,7 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
   .ptable td { padding: 2px 14px; border: 0; }
   .row-actions { text-align: left; }
   /* The actions wrap on a narrow screen instead of pushing it sideways. */
-  .row-actions { display: flex; flex-wrap: wrap; gap: 8px; white-space: normal; }
+  .ptable td.row-actions { display: flex; flex-wrap: wrap; gap: 8px; width: auto; white-space: normal; }
   .row-actions .act + .act { margin-left: 0; }
 }
 

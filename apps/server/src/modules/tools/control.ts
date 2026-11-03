@@ -83,19 +83,6 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
     return answered(res);
   }
 
-  /* A decision goes as the person this turn answers, found from the turn itself; the route checks the turn again and that
-     person's right while it keeps the decision. */
-  async function decide({ method, url, payload }: Call) {
-    const principal = await decisionPrincipal(ctx.db, job.id);
-    if (!principal) return say(NO_PRINCIPAL, true);
-    const headers = orchestratorDecisionHeaders({ ...principal, agentId: job.agentId, jobId: job.id });
-    const res = await app.inject({ method, url, headers, ...(payload === undefined ? {} : { payload: payload as object }) });
-    const reason = reasonOf(res.body);
-    if (reason === 'decision_not_allowed') return say(NOT_THEIRS, true);
-    if (reason === 'decision_context_missing') return say(NO_PRINCIPAL, true);
-    return answered(res);
-  }
-
   /* One tool for one screen action. The id fields name the thing in the address; the rest is the body. A call that
      cannot be made comes back as the reason. */
   const register = server.registerTool.bind(server) as (name: string, config: { description: string; inputSchema: z.ZodRawShape }, cb: (a: never) => Promise<ReturnType<typeof say>>) => unknown;
@@ -104,7 +91,7 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
       if (CEO_ONLY.has(name) && !job.answersCeo) return say(ONLY_CEO, true);
       const made = await call(a);
       if (typeof made === 'string') return say(made, true);
-      const answer = DECIDES.has(name) ? await decide(made) : await send(made);
+      const answer = DECIDES.has(name) ? await decide(ctx, app, job, made) : await send(made);
       return SHOWS_COMMAND.has(name) && !answer.isError ? say(SHOWN_TO_CEO) : answer;
     });
 
@@ -349,6 +336,20 @@ async function hireLines(ctx: Ctx, companyId: string, dept: Dept, lines: Hire[])
     });
   }
   return out;
+}
+
+/* Why a decision did not go through, in the orchestrator's words; nothing for any other answer. */
+const REFUSED: Record<string, string> = { decision_not_allowed: NOT_THEIRS, decision_context_missing: NO_PRINCIPAL };
+
+/* A decision goes as the person this turn answers, found from the turn itself; the route checks the turn again and that
+   person's right while it keeps the decision. */
+async function decide(ctx: Ctx, app: FastifyInstance, job: ToolJob, { method, url, payload }: Call) {
+  const principal = await decisionPrincipal(ctx.db, job.id);
+  if (!principal) return say(NO_PRINCIPAL, true);
+  const headers = orchestratorDecisionHeaders({ ...principal, agentId: job.agentId, jobId: job.id });
+  const res = await app.inject({ method, url, headers, ...(payload === undefined ? {} : { payload: payload as object }) });
+  const refused = REFUSED[reasonOf(res.body) ?? ''];
+  return refused ? say(refused, true) : answered(res);
 }
 
 const errorBody = (body: string): { message?: string; reason?: string } | undefined => {

@@ -3,7 +3,7 @@ import { api } from '../api';
 import { deptLabel, errorText, useT, type Messages } from '../i18n';
 import { TEMPLATES } from '../templates';
 import type { DecidedBy, NewItem, Org, StructureItem, TemplateKey } from '../types';
-import { DecidedByNote } from './DecidedBy';
+import { Decides, frozenBy } from './DecidedBy';
 
 type Props = {
   proposal?: { id: string; brief: string; items: StructureItem[] };
@@ -68,7 +68,7 @@ export function StructureCard({ proposal, manual, departments, onCorrect, onDone
               type="checkbox"
               data-template={isNew(item) ? item.template : undefined}
               checked={ticks[i]}
-              disabled={sent || !!locked || fixed(item)}
+              disabled={frozenBy(sent, locked) || fixed(item)}
               onChange={e => setTicks(ticks.map((v, j) => (j === i ? e.target.checked : v)))}
             />
             <span>
@@ -89,18 +89,17 @@ export function StructureCard({ proposal, manual, departments, onCorrect, onDone
           {errorText(t, failure)}
         </p>
       )}
-      {locked && <DecidedByNote by={locked} />}
       <div className="f">
-        {!locked && (
+        <Decides locked={locked}>
           <button className="btn" type="button" disabled={sent || busy || !chosen.length} onClick={create}>
             {label}
           </button>
-        )}
-        {!sent && !locked && (
-          <button className="btn ghost" type="button" onClick={onCorrect}>
-            {t.card.correct}
-          </button>
-        )}
+          {!sent && (
+            <button className="btn ghost" type="button" onClick={onCorrect}>
+              {t.card.correct}
+            </button>
+          )}
+        </Decides>
         {!sent && onHide && (
           <button className="btn ghost" type="button" onClick={onHide}>
             {t.card.hide}

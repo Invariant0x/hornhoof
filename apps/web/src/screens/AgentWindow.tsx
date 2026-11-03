@@ -3,7 +3,7 @@ import { api } from '../api';
 import { deptLabel, errorText, useLanguage, useT, type Messages } from '../i18n';
 import { useStream } from '../live';
 import { PROGRAM_NAMES, PROVIDER_NAMES } from '../providers';
-import type { AgentCardView, ComputerView, Decisions, EventView, Me, OrchestratorState, Org, ShownCommand, StaffLine, StructureItem, SubView, TemplateKey } from '../types';
+import type { AgentCardView, ComputerView, DecidedBy, Decisions, EventView, Me, OrchestratorState, Org, ShownCommand, StaffLine, StructureItem, SubView, TemplateKey } from '../types';
 import { EventMessage, isMessage, MessageFrame, useFolding } from '../ui/AgentMessage';
 import { AgentTerminal } from '../ui/AgentTerminal';
 import { CommandCard } from '../ui/CommandCard';
@@ -91,6 +91,26 @@ function useCardRight(id: string | null, fallback: boolean): boolean {
   return right?.id === id ? right.canAnswer : fallback;
 }
 
+/* The cards are the CEO's decisions: someone else reads them without their buttons. The orchestrator's open card goes by
+   what /api/requests says of it, the hand-made ones by what /api/me says of the CEO's decisions. */
+function useCardLocks(me: Me, open: unknown): { cardLock?: DecidedBy; handLock?: DecidedBy } {
+  const decidesCompany = me.canDecideCompany ?? me.person.isOwner;
+  const cardRight = useCardRight(open ? field(open, 'proposalId') : null, decidesCompany);
+  return { cardLock: cardRight ? undefined : CEO_DECIDES, handLock: decidesCompany ? undefined : CEO_DECIDES };
+}
+
+/* What the orchestrator's window shows a person besides the conversation. The machine commands he asked Hornhoof for
+   are the CEO's alone. Access to the computer the server runs on: the orchestrator asks, people of the whole company
+   see it, and the CEO's or the delegate's screen opens or closes it. */
+const cardsFor = (me: Me, orchestrator: boolean) => ({ ownsCommands: orchestrator && me.person.isOwner, seesComputer: orchestrator && me.person.scopeKind === 'company' });
+
+/* Loads them; null for what this person does not get, or what did not load. */
+const loadCards = (ownsCommands: boolean, seesComputer: boolean) =>
+  Promise.all([
+    ownsCommands ? api.get<{ commands: ShownCommand[] }>('/api/nodes/commands').catch(() => null) : null,
+    seesComputer ? api.get<ComputerView>('/api/computer').catch(() => null) : null,
+  ]);
+
 /* The request for the computer changed, here or on another of the CEO's screens: what the window shows of it loads again. */
 function useComputerChanges(load: () => Promise<void>): void {
   useStream(m => {
@@ -123,10 +143,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard }:
   /* The machine commands he asked Hornhoof for. They are the CEO's alone: only the CEO's screen gets them, and shows them
      here, apart from his conversation. */
   const [commands, setCommands] = useState<ShownCommand[]>([]);
-  const ownsCommands = orchestrator && me.person.isOwner;
-  /* Access to the computer the server runs on: the orchestrator asks, people of the whole company see it, and the CEO's
-     or the delegate's screen opens or closes it. */
-  const seesComputer = orchestrator && me.person.scopeKind === 'company';
+  const { ownsCommands, seesComputer } = cardsFor(me, orchestrator);
   const [computer, setComputer] = useState<ComputerView | null>(null);
   const asked = useRef<number | null>(null);
   const input = useRef<HTMLTextAreaElement>(null);
@@ -168,10 +185,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard }:
   }, []);
 
   const loadCommands = useCallback(async () => {
-    const [res, access] = await Promise.all([
-      ownsCommands ? api.get<{ commands: ShownCommand[] }>('/api/nodes/commands').catch(() => null) : null,
-      seesComputer ? api.get<ComputerView>('/api/computer').catch(() => null) : null,
-    ]);
+    const [res, access] = await loadCards(ownsCommands, seesComputer);
     if (!mounted.current) return;
     if (res) setCommands(res.commands);
     if (access) setComputer(access);
@@ -348,11 +362,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard }:
   const where = [model || t.agent.default, orchestratorStatus(t, sub), machine?.hostname].filter(Boolean).join(', ');
   const hasTerminal = Boolean(state?.terminal) && !noTerminal;
   const terminal = hasTerminal && !asLog;
-  /* The cards are the CEO's decisions: someone else reads them without their buttons. */
-  const decidesCompany = me.canDecideCompany ?? me.person.isOwner;
-  const cardRight = useCardRight(open ? field(open, 'proposalId') : null, decidesCompany);
-  const cardLock = cardRight ? undefined : CEO_DECIDES;
-  const handLock = decidesCompany ? undefined : CEO_DECIDES;
+  const { cardLock, handLock } = useCardLocks(me, open);
 
   const cards = (
     <>

@@ -1,6 +1,6 @@
 import { and, asc, count, desc, eq, gt, inArray, isNull, max, ne, notInArray, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { accessOf, canReach, type Spot } from '../../auth/access.js';
+import { accessOf, canReach, type Access, type Spot } from '../../auth/access.js';
 import type { Db } from '../../db/client.js';
 import { agents, attachments, companies, departments, jobs, people, requests, subscriptions, taskEvents, tasks, turns, type DecisionTopic, type RequestOption, type TaskEventKind } from '../../db/schema.js';
 import { ApiError, type ErrorReason } from '../../errors.js';
@@ -1262,6 +1262,18 @@ async function mayAnswer(tx: Tx, actor: Actor, found: Request, task: Task, on?: 
   return personId;
 }
 
+/* What the request and its log keep of the orchestrator's answer for a person: which turn, on whose words. */
+function auditOf(on: Delegation | undefined) {
+  if (!on) return { audit: {}, forWhom: {} };
+  return {
+    audit: { answeredByAgentId: on.agentId, answerJobId: on.jobId, answerSourceSeq: on.sourceSeq },
+    forWhom: { onBehalfOfPersonId: on.personId, jobId: on.jobId, sourceSeq: on.sourceSeq },
+  };
+}
+
+/* The answers someone else took first, or a right that went meanwhile: the words still reach the agent. */
+const PASSED_OVER = new Set<ErrorReason | undefined>(['request_closed', 'decision_not_allowed']);
+
 /* A person answers: the request closes, the task goes on where it stood, and the agent that asked wakes with the answer.
    on: the orchestrator answers for the person its turn answers, under that agent's input lock. */
 export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answer, on?: Delegation): Promise<{ request: Request; task: Task; wakes: Wake[] }> {
@@ -1296,14 +1308,13 @@ export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answ
        is now, not as it was read before: one closed meanwhile stays closed. */
     const [current] = await tx.select({ status: tasks.status, stage: tasks.stage }).from(tasks).where(eq(tasks.id, task.id)).for('update');
     const answeredBy = await mayAnswer(tx, actor, found, task, on);
-    const audit = on ? { answeredByAgentId: on.agentId, answerJobId: on.jobId, answerSourceSeq: on.sourceSeq } : {};
+    const { audit, forWhom } = auditOf(on);
     const [request] = await tx
       .update(requests)
       .set({ status, answer: text || null, picked: option ? a.pick! : null, answeredBy, ...audit, answeredAt: new Date() })
       .where(and(eq(requests.id, requestId), eq(requests.status, 'open')))
       .returning();
     if (!request) throw refuse(409, 'request_closed', 'This request is answered already.');
-    const forWhom = on ? { onBehalfOfPersonId: on.personId, jobId: on.jobId, sourceSeq: on.sourceSeq } : {};
     await note(tx, task, { kind: 'answered', actor, text: said, data: { requestId, kind: found.kind, status, ...forWhom } });
     const [left] = await tx.select({ n: count() }).from(requests).where(and(eq(requests.taskId, task.id), eq(requests.status, 'open')));
     if (current?.status === 'waiting' && !Number(left?.n ?? 0)) {
@@ -1334,6 +1345,11 @@ export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answ
 /* As long as an answer given in the task may be. */
 const ANSWER_MAX = 4000;
 
+/* Whether a person's words take this open request: they reach its task and may take its decision. */
+function takes(person: Parameters<typeof canDecide>[1], access: Access, r: Parameters<typeof requestSubject>[0] & Parameters<typeof requestSubject>[1] & { companyId: string }): boolean {
+  return canReach(access, taskSpot(r)) && canDecide(requestSubject(r, r), person, access, r.companyId);
+}
+
 /* A person spoke to the agent directly, in its window or its terminal: what they said answers the questions it asked people
    and tells it how to go on where it was stuck, on the tasks that person reaches. A commit to approve and a choice wait for
    their own answer. The task's own turn still follows, which watches that the task moves. */
@@ -1355,12 +1371,12 @@ export async function answerDirectly(ctx: Live, personId: string, agentId: strin
   const wakes: Wake[] = [];
   for (const r of open) {
     /* Only what this person may take: the words still reach the agent, and someone else's question stays open. */
-    if (!canReach(access, taskSpot(r)) || !canDecide(requestSubject(r, r), person, access, r.companyId)) continue;
+    if (!takes(person, access, r)) continue;
     try {
       wakes.push(...(await answer(ctx, { personId }, r.id, { answer: said })).wakes);
     } catch (err) {
       /* Someone answered it in the task meanwhile, or the person's right went meanwhile. */
-      if (!(err instanceof ApiError && (err.reason === 'request_closed' || err.reason === 'decision_not_allowed'))) throw err;
+      if (!(err instanceof ApiError && PASSED_OVER.has(err.reason))) throw err;
     }
   }
   return wakes;

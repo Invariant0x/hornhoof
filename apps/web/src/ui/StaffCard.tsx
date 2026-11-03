@@ -3,7 +3,7 @@ import { api } from '../api';
 import { errorText, useLanguage, useT } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
 import type { DecidedBy, ProviderId, RoleOption, Roster, Serving, StaffLine } from '../types';
-import { DecidedByNote } from './DecidedBy';
+import { Decides, frozenBy } from './DecidedBy';
 
 type Props = {
   department: { id: string; name: string };
@@ -109,11 +109,11 @@ export function StaffCard({ department, proposal, onCorrect, onDone, onHide, loc
       {rows.map((r, i) => {
         const name = nameOf(r);
         const sub = roster?.subscriptions.find(s => s.id === r.subscription);
-        const off = sent || !!locked || !r.checked;
+        const off = frozenBy(sent, locked) || !r.checked;
         return (
           <div key={i} className="staff-row">
             <label>
-              <input type="checkbox" checked={r.checked} disabled={sent || !!locked} onChange={e => update(i, { checked: e.target.checked })} />
+              <input type="checkbox" checked={r.checked} disabled={frozenBy(sent, locked)} onChange={e => update(i, { checked: e.target.checked })} />
               <span>
                 <b>{name}</b>
                 {r.role.kind === 'head' && <em className="t-card-tag">{t.dept.head}</em>}
@@ -150,18 +150,17 @@ export function StaffCard({ department, proposal, onCorrect, onDone, onHide, loc
           {errorText(t, failure)}
         </p>
       )}
-      {locked && <DecidedByNote by={locked} />}
       <div className="f">
-        {!locked && (
+        <Decides locked={locked}>
           <button className="btn" type="button" disabled={!roster || sent || busy || !chosen.length} onClick={hire}>
             {t.staff.hire(chosen.length)}
           </button>
-        )}
-        {!sent && !locked && proposal && onCorrect && (
-          <button className="btn ghost" type="button" onClick={onCorrect}>
-            {t.card.correct}
-          </button>
-        )}
+          {!sent && proposal && onCorrect && (
+            <button className="btn ghost" type="button" onClick={onCorrect}>
+              {t.card.correct}
+            </button>
+          )}
+        </Decides>
         {!sent && onHide && (
           <button className="btn ghost" type="button" onClick={onHide}>
             {t.card.hide}

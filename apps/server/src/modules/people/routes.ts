@@ -50,6 +50,32 @@ const notFound = () => new ApiError(404, 'not_found', 'This invite does not exis
 const gone = () => new ApiError(410, 'gone', 'This invite has already been used or has expired. Ask for a new one.', 'invite_used');
 /* The delegate takes the CEO's decisions, so whoever could change their access, status or sign-in could take them too. */
 const delegateLocked = () => new ApiError(403, 'forbidden', 'Only the CEO changes the access or status of the CEO delegate.', 'owner_locked');
+const notDelegable = () => new ApiError(409, 'conflict', 'Only an active person with access to the whole company can be the CEO delegate.', 'delegate_requires_company_access');
+/* Who may hold the mark: an active person with the whole company. */
+const DELEGABLE = and(eq(people.status, 'active'), eq(people.scopeKind, 'company'));
+
+type Patch = z.infer<typeof PersonPatch>;
+
+/* Only the CEO changes the access or status of the delegate. */
+function guardDelegate(me: Person, target: { isCeoDelegate: boolean }, body: Patch): void {
+  const touches = body.access !== undefined || body.status !== undefined;
+  if (touches && target.isCeoDelegate && !me.isOwner) throw delegateLocked();
+}
+
+/* The mark goes with the whole company and an active account, and does not come back with them. */
+function markAfter(status: string | undefined, body: Patch): { isCeoDelegate?: false } {
+  const narrowed = body.access !== undefined && !('whole' in body.access);
+  return status === 'disabled' || narrowed ? { isCeoDelegate: false } : {};
+}
+
+/* The person the CEO marks or unmarks: one of the company, not the CEO, and able to hold the mark when it is set. */
+async function delegateTarget(db: Db, me: Person, id: string, isCeoDelegate: boolean): Promise<Person> {
+  const [target] = await db.select(personColumns).from(people).where(and(eq(people.id, id), eq(people.companyId, me.companyId)));
+  if (!target) throw new ApiError(404, 'not_found', 'This person does not exist.', 'person_unknown');
+  if (target.isOwner) throw new ApiError(403, 'forbidden', "The CEO takes the CEO's decisions already.", 'owner_locked');
+  if (isCeoDelegate && (target.status !== 'active' || target.scopeKind !== 'company')) throw notDelegable();
+  return target;
+}
 
 /* A fresh link for someone already in the company. It doubles as a password reset, so old access ends here. The person's
    row changes before the sessions go, so a sign-in that holds it finishes first and its session is deleted too. */
@@ -208,15 +234,14 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
       throw new ApiError(403, 'forbidden', target.isOwner ? 'The owner cannot be disabled.' : 'You cannot disable yourself.', target.isOwner ? 'owner_locked' : 'self_locked');
     }
     if (body.access && target.isOwner) throw new ApiError(403, 'forbidden', 'The owner always has access to the whole company.', 'owner_locked');
-    if ((body.access || body.status) && target.isCeoDelegate && !me.isOwner) throw delegateLocked();
+    guardDelegate(me, target, body);
     if (body.access) await checkAccess(db, me.companyId, body.access);
 
     const changes: Partial<typeof people.$inferInsert> = {};
     if (body.title !== undefined) changes.title = body.title;
     /* A person who never set a password goes back to waiting for their invite. */
     if (body.status) changes.status = body.status === 'active' && !target.passwordHash ? 'invited' : body.status;
-    /* The mark goes with the whole company and an active account, and does not come back with them. */
-    if (changes.status === 'disabled' || (body.access && !('whole' in body.access))) changes.isCeoDelegate = false;
+    Object.assign(changes, markAfter(changes.status, body));
 
     const person = await db.transaction(async tx => {
       if (Object.keys(changes).length) await tx.update(people).set(changes).where(eq(people.id, id));
@@ -245,18 +270,14 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (!me.isOwner || me.via) throw new ApiError(403, 'forbidden', 'Only the CEO marks the CEO delegate.', 'not_owner');
     const { id } = IdParams.parse(req.params);
     const { isCeoDelegate } = DelegateBody.parse(req.body);
-    const [target] = await db.select(personColumns).from(people).where(and(eq(people.id, id), eq(people.companyId, me.companyId)));
-    if (!target) throw new ApiError(404, 'not_found', 'This person does not exist.', 'person_unknown');
-    if (target.isOwner) throw new ApiError(403, 'forbidden', 'The CEO takes the CEO\'s decisions already.', 'owner_locked');
-    if (isCeoDelegate && (target.status !== 'active' || target.scopeKind !== 'company')) {
-      throw new ApiError(409, 'conflict', 'Only an active person with access to the whole company can be the CEO delegate.', 'delegate_requires_company_access');
-    }
+    const target = await delegateTarget(db, me, id, isCeoDelegate);
+    /* Set only while the person can still hold it, as they are when it is written. */
     const [person] = await db
       .update(people)
       .set({ isCeoDelegate })
-      .where(and(eq(people.id, id), isCeoDelegate ? and(eq(people.status, 'active'), eq(people.scopeKind, 'company')) : undefined))
+      .where(and(eq(people.id, id), isCeoDelegate ? DELEGABLE : undefined))
       .returning(personColumns);
-    if (!person) throw new ApiError(409, 'conflict', 'Only an active person with access to the whole company can be the CEO delegate.', 'delegate_requires_company_access');
+    if (!person) throw notDelegable();
     if (person.isCeoDelegate !== target.isCeoDelegate) {
       ctx.bus.accessChanged(me.companyId);
       ctx.bus.publish(me.companyId, { type: 'org' });

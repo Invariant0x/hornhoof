@@ -238,11 +238,14 @@ function PersonFilter({ name, onClear }: { name: string; onClear: () => void }) 
 
 const nothing = () => {};
 
+/* Who takes a card this person may not take; nothing for one they take. */
+const lockOf = (card: ProposalDecision) => (card.canAnswer ? undefined : (card.decidedBy ?? CEO_DECIDES));
+
 /* An orchestrator's card as his window shows it: a structure to build, or people to hire into a department. Correcting it
    in words opens his window. */
 function ProposalCard({ card, org, onCorrect = nothing, onDone }: { card: ProposalDecision; org: Org | null; onCorrect?: () => void; onDone: () => void }) {
   const t = useT();
-  const locked = card.canAnswer ? undefined : (card.decidedBy ?? CEO_DECIDES);
+  const locked = lockOf(card);
   if (card.kind === 'structure') return <StructureCard proposal={{ id: card.id, brief: card.brief, items: card.items }} departments={org?.departments ?? []} onCorrect={onCorrect} onDone={onDone} locked={locked} />;
   if (!card.department) return null;
   const known = org?.departments.find(d => d.id === card.department!.id);

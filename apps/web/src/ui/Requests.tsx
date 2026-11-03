@@ -19,6 +19,23 @@ const formOf = (request: WaitingRequest): WaitingRequest['kind'] | null => (requ
 /* onOpenAgent opens the asking agent's window, to see in its terminal what it did. */
 type Shared = { onOpenTask: (id: string) => void; onOpenAgent: (id: string) => void; placeName: (p: TaskPlace) => string };
 
+/* A request for someone who may not take it: the commit or the ways it offers, and who takes it. */
+function ReadOnly({ request }: { request: WaitingRequest }) {
+  return (
+    <div className="req-form">
+      {request.kind === 'approval' && <Commit request={request} />}
+      {request.kind === 'choice' && (
+        <ul className="req-ways">
+          {request.options.map((o, i) => (
+            <li key={i}>{o.label}</li>
+          ))}
+        </ul>
+      )}
+      <DecidedByNote by={request.decidedBy} />
+    </div>
+  );
+}
+
 /* One thing an agent waits for: a question to answer, a commit to approve, or a task it is stuck on. Its answers show only
    to a person the server lets take it; anyone else reads who takes it. */
 function RequestItem({ request, onDone, onOpenTask, onOpenAgent, placeName }: Shared & { request: WaitingRequest; onDone: () => void }) {
@@ -121,19 +138,7 @@ function RequestItem({ request, onDone, onOpenTask, onOpenAgent, placeName }: Sh
           </div>
         </form>
       )}
-      {!request.canAnswer && (
-        <div className="req-form">
-          {request.kind === 'approval' && <Commit request={request} />}
-          {request.kind === 'choice' && (
-            <ul className="req-ways">
-              {request.options.map((o, i) => (
-                <li key={i}>{o.label}</li>
-              ))}
-            </ul>
-          )}
-          <DecidedByNote by={request.decidedBy} />
-        </div>
-      )}
+      {!request.canAnswer && <ReadOnly request={request} />}
       {form === 'approval' && (
         <div className="req-form">
           <Commit request={request} />
