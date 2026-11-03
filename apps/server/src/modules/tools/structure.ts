@@ -27,6 +27,12 @@ export type StructureItem = NewPart | ChangePart;
 
 export const isNew = <T extends StructureItem>(item: T): item is Extract<T, NewPart> => 'template' in item;
 
+/* The tasks a department and its products can hold: those in it, and for a product those in the department holding it.
+   A task's product is always in the task's department, which creating a task checks and nothing changes later, so the
+   department's index finds them all and the company's other tasks are not read. */
+export const inPlaces = (companyId: string, dept: { parentId: string | null }, inside: string[]) =>
+  and(eq(tasks.companyId, companyId), inArray(tasks.departmentId, dept.parentId ? [...inside, dept.parentId] : inside));
+
 /* What is wrong with these items against the company as it is, in plain English for the agent to fix, or null. */
 export async function checkItems(db: Db, companyId: string, items: StructureItem[]): Promise<string | null> {
   const all = await db.select().from(departments).where(eq(departments.companyId, companyId));
@@ -55,7 +61,11 @@ export async function checkItems(db: Db, companyId: string, items: StructureItem
       if (person) return `People work in ${deptName(dept)}; move them first.`;
       const [key] = await db.select({ id: subscriptions.id }).from(subscriptions).where(and(inArray(subscriptions.targetId, places), isNull(subscriptions.removedAt)));
       if (key) return `An API key serves ${deptName(dept)}; point it elsewhere first.`;
-      const [busy] = await db.select({ id: tasks.id }).from(tasks).where(and(or(inArray(tasks.departmentId, inside), inArray(tasks.productId, inside)), notInArray(tasks.status, ['done', 'cancelled'])));
+      const [busy] = await db
+        .select({ id: tasks.id })
+        .from(tasks)
+        .where(and(inPlaces(companyId, dept, inside), or(inArray(tasks.departmentId, inside), inArray(tasks.productId, inside)), notInArray(tasks.status, ['done', 'cancelled'])))
+        .limit(1);
       if (busy) return `${deptName(dept)} has open tasks; finish or cancel them first.`;
       continue;
     }

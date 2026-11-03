@@ -239,7 +239,7 @@ export type MapLine = WorkLine & { departmentId: string; kind: 'department' | 'm
 type Turn = { id: string; agentId: string; taskIds: (string | null)[] };
 
 /* Every line of the company map as the database has it now, with the time on the database's clock after the facts were
-   read. */
+   read. Only running turns light a line, so only their tasks and those above them are read, not the company's history. */
 export async function mapLines(db: Db, companyId: string): Promise<{ lines: MapLine[]; serverNow: Date }> {
   return db.transaction(
     async tx => {
@@ -247,11 +247,7 @@ export async function mapLines(db: Db, companyId: string): Promise<{ lines: MapL
       const parents = new Map((await tx.select({ id: departments.id, parentId: departments.parentId }).from(departments).where(eq(departments.companyId, companyId))).map(d => [d.id, d.parentId]));
       const saved = await tx.select().from(mapReturns).where(eq(mapReturns.companyId, companyId));
       const turns = await runningTurns(tx, companyId, staff);
-      const open = await tx
-        .select({ id: tasks.id })
-        .from(tasks)
-        .where(and(eq(tasks.companyId, companyId), notInArray(tasks.status, ['done', 'cancelled'])));
-      const f = await factsFor(tx, companyId, [...open.map(t => t.id), ...turns.flatMap(t => t.taskIds.filter((id): id is string => !!id))]);
+      const f = await factsFor(tx, companyId, turns.flatMap(t => t.taskIds.filter((id): id is string => !!id)));
       const lines = project({ staff, parents, saved, turns, facts: f });
       /* The clock goes on past the start of the transaction, which now() would give. */
       const [clock] = await tx

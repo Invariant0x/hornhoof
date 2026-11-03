@@ -7,14 +7,15 @@ import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { buildApp } from '../src/app.js';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agentEvents, agents, companies, departments, jobs, mapReturns, people, subscriptions, taskEvents } from '../src/db/schema.js';
+import { agentEvents, agents, companies, departments, jobs, mapReturns, people, subscriptions, taskEvents, tasks, turns } from '../src/db/schema.js';
 import { GONE_ALONG, pump } from '../src/modules/conversation/queue.js';
-import { recordMapReturn, workStarts } from '../src/modules/org/map-state.js';
+import { mapLines, recordMapReturn, returnAlongLine, workStarts, type MapLine } from '../src/modules/org/map-state.js';
 import { ask, brokeDown, comment, createTask, leaveWork, loadTask, report, startWork, submit, verdict } from '../src/modules/tasks/engine.js';
 import { agentState } from '../src/modules/conversation/queue.js';
 import { afterJob, wakeAll } from '../src/modules/tasks/wake.js';
 import type { Db } from '../src/db/client.js';
 import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
+import { rowsRead } from './rows-read.js';
 
 type Org = { serverNow: string; workLines: WorkLine[]; departments: { id: string; workLines: WorkLine[]; reworkAt: string | null }[] };
 
@@ -531,5 +532,104 @@ describe('a turn the queue takes', () => {
     } finally {
       await again.close();
     }
+  });
+});
+
+describe('the lines of a company with a long history', () => {
+  const HEAD_TURNS = 300;
+
+  /* 50 closed turns with 2000 tasks of the department, some still blocked or planned; 500 finished turns of each employee
+     and 300 of the head; and the lines of 30 employees who left. */
+  async function history(c: Awaited<ReturnType<typeof company>>) {
+    const { db, acme, sub, dev, hana, bruno, felix, rita, hire } = c;
+    const closed = await db
+      .insert(turns)
+      .values(Array.from({ length: 50 }, (_, i) => ({ companyId: acme.id, number: i + 1, goal: `Goal ${i + 1}`, status: 'closed' as const })))
+      .returning({ id: turns.id });
+    const statusOf = (i: number) => (i % 50 === 0 ? 'blocked' : i % 50 === 1 ? 'planned' : i % 2 ? 'done' : 'cancelled');
+    for (let from = 0; from < 2000; from += 500) {
+      await db.insert(tasks).values(
+        Array.from({ length: 500 }, (_, k) => {
+          const i = from + k;
+          const status = statusOf(i);
+          const closedAt = status === 'done' || status === 'cancelled' ? new Date(Date.now() - 86_400_000) : null;
+          return { companyId: acme.id, number: 10_000 + i, turnId: closed[i % 50]!.id, departmentId: dev.id, title: `Old ${i}`, status, closedAt, executorAgentId: i % 3 ? bruno.id : null };
+        }),
+      );
+    }
+    const finished = (agentId: string, n: number) =>
+      db.insert(jobs).values(Array.from({ length: n }, () => ({ companyId: acme.id, subscriptionId: sub.id, agentId, kind: 'conversation' as const, prompt: 'old', status: 'done' as const, startedAt: new Date(Date.now() - 86_400_000), timeoutMs: 900000 })));
+    await finished(bruno.id, 500);
+    await finished(felix.id, 500);
+    await finished(rita.id, 500);
+    await finished(hana.id, HEAD_TURNS);
+    for (let i = 0; i < 30; i++) {
+      const gone = await hire(`Gone ${i}`, 'worker', 'DEV-BE', dev.id, { removedAt: new Date() });
+      await db.insert(mapReturns).values({ companyId: acme.id, upstreamAgentId: hana.id, downstreamAgentId: gone.id, workEpoch: 3, returnedEpoch: 3, returnedAt: new Date(), sourceKey: `gone-${i}` });
+    }
+  }
+
+  /* Bruno works on his task, Felix gave his back and his turn still ends, Rita runs a turn on a task that waits for Bruno's,
+     and Hana works on the department task. */
+  async function now(c: Awaited<ReturnType<typeof company>>) {
+    const { ctx, db, hana, bruno, felix, rita, top, member, run } = c;
+    const api = await member('Checkout API', bruno.id);
+    const docs = await member('Docs', felix.id);
+    const later = (await createTask(ctx, { agentId: hana.id }, { title: 'Release', brief: '', body: '', departmentId: c.dev.id, parentId: top.id, assigneeAgentId: rita.id, executor: true, after: [api.id] })).task;
+    await run(bruno.id, api.id);
+    await run(felix.id, docs.id);
+    await db.transaction(tx => returnAlongLine(tx, { agentId: felix.id, sourceKey: 'docs-1', sourceTaskId: docs.id, returnedAt: new Date('2026-11-03T05:00:00Z') }));
+    await run(rita.id, later.id);
+    await run(hana.id, top.id);
+  }
+
+  const named = (c: Awaited<ReturnType<typeof company>>, lines: MapLine[]) => {
+    const names = new Map([c.orchestrator, c.hana, c.bruno, c.felix, c.rita].map(a => [a.id, a.name]));
+    return lines
+      .map(l => ({ line: `${names.get(l.upstreamAgentId) ?? '?'} > ${names.get(l.downstreamAgentId) ?? '?'}`, kind: l.kind, working: l.working, workEpoch: l.workEpoch, returnedEpoch: l.returnedEpoch, returnedAt: l.returnedAt }))
+      .sort((a, b) => a.line.localeCompare(b.line));
+  };
+
+  /* What the lines were before the reads took only what the lines need now. */
+  const EXPECTED = [
+    { line: 'Hana > Bruno', kind: 'member', working: true, workEpoch: 1, returnedEpoch: null, returnedAt: null },
+    { line: 'Hana > Felix', kind: 'member', working: false, workEpoch: 1, returnedEpoch: 1, returnedAt: '2026-11-03T05:00:00.000Z' },
+    { line: 'Hana > Rita', kind: 'member', working: false, workEpoch: 0, returnedEpoch: null, returnedAt: null },
+    { line: 'Orchestrator > Hana', kind: 'department', working: true, workEpoch: 3, returnedEpoch: null, returnedAt: null },
+  ];
+
+  it('gives the same lines as with a short one', async () => {
+    const c = await company();
+    await history(c);
+    await now(c);
+    const { lines } = await mapLines(c.db, c.acme.id);
+    expect(named(c, lines)).toEqual(EXPECTED);
+  });
+
+  it('reads the running turns and their tasks, not the history', async () => {
+    const c = await company();
+    await history(c);
+    await now(c);
+    const { result, read } = await rowsRead(c.db, ['tasks', 'jobs'], () => mapLines(c.db, c.acme.id));
+    expect(named(c, result.lines)).toEqual(EXPECTED);
+    /* The four running turns' tasks and the department task above them, not the 2000 of the closed turns. */
+    expect(read.tasks).toBeLessThanOrEqual(10);
+    /* The running turns and the head's earlier ones: the turns that went out inside its running one are known only by
+       the time they started, which no index of jobs holds yet. The employees' 1500 earlier turns stay unread. */
+    expect(read.jobs).toBeLessThanOrEqual(HEAD_TURNS + 10);
+  });
+
+  it('locks only the lines of a new turn as it starts', async () => {
+    const c = await company();
+    await history(c);
+    /* The lines among 45 agents who left, 1980 of them: enough that Postgres looks a line up by its key instead of reading
+       the whole small table, as it does on a live database. */
+    const gone = await Promise.all(Array.from({ length: 45 }, (_, i) => c.hire(`Left ${i}`, 'worker', 'DEV-BE', c.dev.id, { removedAt: new Date() })));
+    await c.db.insert(mapReturns).values(gone.flatMap(up => gone.filter(down => down.id !== up.id).map(down => ({ companyId: c.acme.id, upstreamAgentId: up.id, downstreamAgentId: down.id, workEpoch: 3, returnedEpoch: 3, returnedAt: new Date(), sourceKey: `${up.name}>${down.name}` }))));
+    const task = await c.member('Checkout API', c.bruno.id);
+    const { read } = await rowsRead(c.db, ['tasks', 'map_returns'], () => c.run(c.bruno.id, task.id));
+    /* Bruno's line and the department's, each locked by its key. */
+    expect(read.map_returns).toBeLessThanOrEqual(8);
+    expect(read.tasks).toBeLessThanOrEqual(10);
   });
 });
