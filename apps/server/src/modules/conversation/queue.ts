@@ -15,6 +15,7 @@ import { instructionsOf } from '../agents/instructions.js';
 import { repoFor, repoLine } from '../departments/repository.js';
 import { textHash } from '../templates/load.js';
 import { openAfter, startWork } from '../tasks/engine.js';
+import { agentProgramState, type TurnAlarm, type TurnAlarmReason, type TurnProgram } from '../tasks/silent.js';
 import { workStarts } from '../org/map-state.js';
 import { addressed, preface } from './prompt.js';
 import { ABOUT_AS_FREE, freedom } from '../testruns/pick.js';
@@ -39,6 +40,8 @@ export type AgentState = {
   queued: number;
   /* Its node shows the agent's live terminal. */
   terminal: boolean;
+  program: TurnProgram | null;
+  alarm: TurnAlarm | null;
 };
 
 /* How long after a plan's limit starts over its waiting turns go out, so the program sees the new limit. */
@@ -110,7 +113,7 @@ export const STOPPED_ON_PURPOSE = ['cancelled', 'removed', 'switched_off'];
 /* withMessage: what is kept together with the message, or not at all. */
 /* retryOf: the turn a node restart cut off, which this one runs once more. continueOf: the turn that ended without
    recording its work, whose session this one goes on with. */
-type Turn = { companyId: string; agentId: string; prompt: string; createdBy: string | null; message?: { personId: string | null; text: string; from?: 'orchestrator' | 'agent'; name?: string; by?: string; task?: { id: string; number: number }; request?: string; timer?: true; silentJob?: string; silentThreshold?: '30m' | '2h'; tool?: string }; taskId?: string; answersCeo?: boolean; withMessage?: WithEvent; retryOf?: string; continueOf?: string };
+type Turn = { companyId: string; agentId: string; prompt: string; createdBy: string | null; message?: { personId: string | null; text: string; from?: 'orchestrator' | 'agent'; name?: string; by?: string; task?: { id: string; number: number }; request?: string; timer?: true; silentJob?: string; silentReason?: TurnAlarmReason }; taskId?: string; answersCeo?: boolean; withMessage?: WithEvent; retryOf?: string; continueOf?: string };
 
 /* One thing at a time per agent, so two pumps never send two turns. */
 const chains = new WeakMap<Ctx, Map<string, Promise<unknown>>>();
@@ -354,7 +357,7 @@ async function lastSession(ctx: Ctx, agent: Agent, on: On, instructionsHash: str
   const [last] = await ctx.db
     .select({ subscriptionId: jobs.subscriptionId, nodeId: jobs.nodeId, sessionId: jobs.sessionId, instructionsHash: jobs.instructionsHash, startedAt: jobs.startedAt })
     .from(jobs)
-    .where(and(conversationOf(agent.id), or(eq(jobs.status, 'done'), and(eq(jobs.status, 'failed'), inArray(jobs.error, ['timeout', 'cancelled', 'lost_ending']), isNotNull(jobs.sessionId)))))
+    .where(and(conversationOf(agent.id), or(eq(jobs.status, 'done'), and(eq(jobs.status, 'failed'), inArray(jobs.error, ['timeout', 'cancelled']), isNotNull(jobs.sessionId)))))
     .orderBy(desc(jobs.finishedAt))
     .limit(1);
   const [turn] = await ctx.db
@@ -646,7 +649,7 @@ export async function orchestratorOf(ctx: Ctx, companyId: string) {
 
 export async function orchestratorState(ctx: Ctx, companyId: string): Promise<AgentState> {
   const agent = await orchestratorOf(ctx, companyId);
-  if (!agent) return { ready: false, limitUntil: null, budgetUntil: null, reason: 'no_subscription', busy: false, runningJobId: null, queued: 0, terminal: false };
+  if (!agent) return { ready: false, limitUntil: null, budgetUntil: null, reason: 'no_subscription', busy: false, runningJobId: null, queued: 0, terminal: false, program: null, alarm: null };
   return agentState(ctx, agent.id);
 }
 
@@ -677,5 +680,15 @@ export async function agentState(ctx: Ctx, agentId: string): Promise<AgentState>
      its next turn would go to, where the window starts it. */
   const shown = (await programNode(ctx, agentId))?.node ?? (sub && agent ? ((await placement(ctx, agent, sub))?.node ?? null) : null);
   const terminal = Boolean(shown && ctx.hub.hasTerminals(shown));
-  return { ready: reason === null, limitUntil: sub ? limitUntil(sub.limits) : null, budgetUntil: sub ? budgetUntil(sub.limits, sub.budget) : null, reason, busy: Boolean(running), runningJobId: running?.id ?? null, queued: Number(waiting?.n ?? 0), terminal };
+  return {
+    ready: reason === null,
+    limitUntil: sub ? limitUntil(sub.limits) : null,
+    budgetUntil: sub ? budgetUntil(sub.limits, sub.budget) : null,
+    reason,
+    busy: Boolean(running),
+    runningJobId: running?.id ?? null,
+    queued: Number(waiting?.n ?? 0),
+    terminal,
+    ...agentProgramState(ctx, running?.id),
+  };
 }

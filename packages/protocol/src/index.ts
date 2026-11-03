@@ -8,12 +8,6 @@ export type ProviderId = (typeof PROVIDER_IDS)[number];
 export const JOB_ERRORS = ['timeout', 'agent_failed', 'not_logged_in', 'cancelled'] as const;
 export type JobError = (typeof JOB_ERRORS)[number];
 
-/* What a turn's program is doing now, as its node sees it: at work, with a tool or the model; waiting at its prompt with
-   nothing typed, whether it answered or not; or gone: no program runs the turn on the node, as its session ended or the
-   node does not know the turn. */
-export const JOB_STATES = ['working', 'waiting', 'gone'] as const;
-export type JobState = (typeof JOB_STATES)[number];
-
 /* What a turn's program does now, as its node sees it on the program's screen and in its log: it thinks, runs a tool,
    asks a person a question or for leave, waits for what to type with nothing typed, or is gone, its session over. */
 export const PROGRAM_STATES = ['thinking', 'tool', 'asking', 'idle', 'gone'] as const;
@@ -114,7 +108,7 @@ export const CLAUDE_ALIASES: ModelOption[] = [
 
 /* Effort rules live apart from the message schemas so the web uses the same ones. */
 export { effortFor, effortsOf, ORCHESTRATOR_EFFORT, ROLE_EFFORTS, type RoleEffort } from './efforts.js';
-export { lineState, yellowUntil, RETURN_MS, type LineFacts, type LineState, type WorkLine } from './map.js';
+export { lineState, yellowUntil, QUIET_ALARM_MS, RETURN_MS, type LineFacts, type LineState, type WorkLine } from './map.js';
 
 const pick = (defaultEffort: string | undefined) => (defaultEffort ? { defaultEffort } : {});
 
@@ -380,8 +374,6 @@ const NodeMessage = z.discriminatedUnion('type', [
     exit: ProgramExit.optional(),
   }),
   z.object({ type: z.literal('job.event'), jobId: z.string(), seq: z.number().int().min(0), event: AgentEvent }),
-  /* The node's answer to job.check, at once. */
-  z.object({ type: z.literal('job.state'), jobId: z.string(), state: z.enum(JOB_STATES) }),
   /* What the turn's program does now: sent at each change of its state or tool, and while the turn runs at least once a
      minute, so Hornhoof knows the node is there and whether the screen moved. since: when the state began; tool: the
      tool it runs; screenAt: when its screen last changed. Times are the node's, in milliseconds since 1970. */
@@ -477,8 +469,6 @@ const ServerMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('job.cancel'), jobId: Id }),
   /* Hornhoof has the job's end: the node stops sending it again after each reconnect. */
   z.object({ type: z.literal('job.ack'), jobId: Id }),
-  /* What the program of a turn that runs long without a word is doing now: the node answers job.state. */
-  z.object({ type: z.literal('job.check'), jobId: Id }),
   z.object({ type: z.literal('remove') }),
   /* A sign-in sealed to this node's key, which it opens and keeps where its program reads it; drop removes it. */
   z.object({ type: z.literal('cred.put'), kind: CredKind, version: z.number().int().min(1), sealed: Sealed }),

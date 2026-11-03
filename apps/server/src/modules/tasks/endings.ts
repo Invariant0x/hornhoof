@@ -9,7 +9,7 @@ import { published } from './engine.js';
    or a question to people. */
 const RECORDED = ['submitted', 'verdict', 'report', 'blocked', 'asked'] as const;
 /* Ends of a turn's program that can come after the turn recorded its work all the same. */
-const UNFINISHED = ['agent_failed', 'timeout', 'lost_ending'];
+const UNFINISHED = ['agent_failed', 'timeout'];
 /* A task the agent may still be at, as the continuation needs. */
 const AT_WORK = ['open', 'working', 'review'];
 

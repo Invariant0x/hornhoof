@@ -7,7 +7,7 @@ import { said } from '../conversation/live.js';
 import { nodeOfAgent, pumpWaiting, refusedLimits, startProgram } from '../conversation/queue.js';
 import { workStarts } from '../org/map-state.js';
 import { startWork } from '../tasks/engine.js';
-import { handleJobState } from '../tasks/silent.js';
+import { recordJobProgram } from '../tasks/silent.js';
 import { afterJob, typedTurn } from '../tasks/wake.js';
 import { appendEvent, publishWorking } from '../events/store.js';
 import { partDone, partStarted, pumpTests, testsHello } from '../testruns/runs.js';
@@ -91,9 +91,8 @@ const builtinCut = (ctx: Ctx, id: NodeIdentity, msg: Hello, now: Date) =>
 const nodeCut = (ctx: Ctx, nodeId: string, row: { node: typeof nodes.$inferSelect; host: string | null }, msg: Hello, now: Date) =>
   interruptionOf(ctx, { id: nodeId, name: row.host || 'a machine with no name', said: { version: row.node.version, boot: row.node.boot } }, msg, now);
 
-export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage): Promise<void> {
+export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage, now = new Date()): Promise<void> {
   const { db } = ctx;
-  const now = new Date();
   switch (msg.type) {
     case 'hello': {
       let cut = builtinCut(ctx, id, msg, now);
@@ -192,8 +191,8 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
     case 'job.started':
       await jobStarted(ctx, id, msg.jobId, now);
       return;
-    case 'job.state':
-      await handleJobState(ctx, id, msg.jobId, msg.state, now, jobsOf(id, ctx));
+    case 'job.program':
+      await recordJobProgram(ctx, msg, now, jobsOf(id, ctx));
       return;
     case 'job.done': {
       const finished = await db
