@@ -1,6 +1,6 @@
 import cookie from '@fastify/cookie';
 import websocket from '@fastify/websocket';
-import Fastify, { type FastifyBaseLogger, type FastifyInstance, type FastifyServerOptions } from 'fastify';
+import Fastify, { LogController, type FastifyBaseLogger, type FastifyInstance, type FastifyServerOptions } from 'fastify';
 import type { Config } from './config.js';
 import { loggable, registerErrorHandling } from './errors.js';
 import { authRoutes } from './modules/auth/routes.js';
@@ -70,7 +70,7 @@ declare module 'fastify' {
 }
 
 export async function buildApp(deps: Deps): Promise<FastifyInstance> {
-  const app = Fastify({ logger: deps.logger ?? false, disableRequestLogging: true });
+  const app = Fastify({ logger: deps.logger ?? false, logController: new LogController({ disableRequestLogging: true }) });
   const web = hasWebApp(deps.config.webDist);
   addSecurityHeaders(app);
   registerErrorHandling(app, web ? webAppRoutes : undefined);
