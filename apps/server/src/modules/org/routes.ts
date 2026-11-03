@@ -13,6 +13,7 @@ import { CHANNEL_MS, type Endpoint } from '../events/bus.js';
 import { workingCount } from '../events/store.js';
 import { machineOf } from '../nodes/nodes.js';
 import { pendingFor, visibleDecisions } from '../tasks/decisions.js';
+import { agentFailureStates } from '../tasks/failures.js';
 import { agentProgramState } from '../tasks/silent.js';
 import { mapLines, type MapLine } from './map-state.js';
 import { reworkTimes } from './rework.js';
@@ -150,6 +151,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
       const mine = agentIdsOf(deptId);
       return { total: mine.length, working: mine.filter(id => busy.has(id)).length };
     };
+    const failures = await agentFailureStates(ctx, me.companyId, allAgents.map(a => a.id));
     const employeesOf = (dept: (typeof depts)[number]) =>
       allAgents
         .filter(a => a.departmentId === dept.id && a.kind !== 'orchestrator')
@@ -171,6 +173,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
             effort: sub ? effortShown(sub, a, role?.effort) : null,
             state: busy.has(a.id) ? 'working' : a.subscriptionId ? 'sleeping' : 'needs_subscription',
             ...agentProgramState(ctx, run, canReach(reach, spotAmong(a, depts))),
+            ...(canReach(reach, spotAmong(a, depts)) ? failures.get(a.id)! : { retry: null, failure: null }),
             context: a.contextUsed,
             status: now.status,
             on: !a.switchedOffAt,
@@ -225,6 +228,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
         effort: (orchestrator.subscriptionId && subs.has(orchestrator.subscriptionId) && effortShown(subs.get(orchestrator.subscriptionId)!, orchestrator, ORCHESTRATOR_EFFORT)) || null,
         context: orchestrator.contextUsed,
         ...agentProgramState(ctx, running.find(j => j.agentId === orchestrator.id), reach.whole),
+        ...(reach.whole ? failures.get(orchestrator.id)! : { retry: null, failure: null }),
         /* His plan is at its limit until then: he waits for the reset on it, and the CEO decides whether he moves. */
         limitUntil: limitUntil((orchestrator.subscriptionId && subs.get(orchestrator.subscriptionId)?.limits) || null),
         subscription: orchestrator.subscriptionId ? await subView(db, node => hub.isOnline(node), orchestrator.subscriptionId, me) : null,

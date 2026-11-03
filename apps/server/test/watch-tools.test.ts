@@ -45,7 +45,7 @@ describe('tools a skill grants', () => {
     const { app } = await company([]);
     const tools = await names(await mcp(app, TOKEN));
     expect(tools).toContain('tasks');
-    for (const name of ['agents', 'failures']) expect(tools).not.toContain(name);
+    for (const name of ['agents', 'failures', 'restart_program']) expect(tools).not.toContain(name);
   });
 
   it('let any employee write to the people of its own department, and only to them', async () => {
@@ -64,7 +64,7 @@ describe('tools a skill grants', () => {
     const { app, db, bruno, task, wendy } = await company(['ops-task-watch']);
     const client = await mcp(app, TOKEN);
     const tools = await names(client);
-    expect(tools).toEqual(expect.arrayContaining(['agents', 'message_employee']));
+    expect(tools).toEqual(expect.arrayContaining(['agents', 'message_employee', 'restart_program']));
     expect(tools).not.toContain('failures');
     const all = JSON.parse((await call(client, 'agents')).content[0]!.text) as { name: string; department: string | null; on: boolean; busy: boolean; tasks: { number: number; status: string }[] }[];
     expect(all.map(a => a.name)).toEqual(expect.arrayContaining(['Orchestrator', 'Wendy', 'Hana', 'Bruno']));

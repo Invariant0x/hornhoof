@@ -15,6 +15,8 @@ import { basename, join } from 'node:path';
 import { crash } from './crash.mjs';
 import { rawKeys, readKeys } from './keys.mjs';
 import failures from '../fixtures/terminal-api-failures.json' with { type: 'json' };
+import hooks from '../fixtures/turn-hooks.json' with { type: 'json' };
+const captured = name => hooks.find(h => h.program === 'kimi' && h.event === name)?.input ?? {};
 
 if (process.env.FAKE_CRASH_START) crash(process.env.FAKE_CRASH_START);
 
@@ -31,7 +33,7 @@ const config = (() => {
 })();
 const hook = (event, name, body) =>
   config.includes(`command = "hh-hook ${event}"`)
-    ? fetch(`${process.env.HH_BRIDGE}/${event}`, { method: 'POST', body: JSON.stringify({ hook_event_name: name, session_id: session, cwd: process.cwd(), ...body }) })
+    ? fetch(`${process.env.HH_BRIDGE}/${event}`, { method: 'POST', body: JSON.stringify({ ...captured(name), hook_event_name: name, session_id: session, cwd: process.cwd(), ...body }) })
         .then(r => r.text())
         .catch(() => '')
     : Promise.resolve('');
@@ -80,7 +82,7 @@ if (session) {
 let turn = 0;
 let hanging = null;
 async function take(line) {
-  if (line === 'EXIT') process.exit(3);
+  if (line === 'EXIT') { await hook('end', 'SessionEnd', { reason: 'exit' }); process.exit(3); }
   if (line === '/new') return newSession();
   if (!session) await startSession('startup');
   const context = await hook('prompt', 'UserPromptSubmit', { prompt: [{ type: 'text', text: line }], is_steer: false });
@@ -89,10 +91,10 @@ async function take(line) {
   if (line.includes('BLOCKED')) return blocked();
   const turnId = turn++;
   record('turn.prompt', { input: [{ type: 'text', text: line }], origin: { kind: 'user' } });
-  if (endsAtOnce(line, turnId)) return;
+  if (await endsAtOnce(line, turnId)) return;
   await workFirst(line, turnId);
-  if (line.includes('PARTS')) return parts(turnId);
-  answer(line, turnId, context);
+  if (line.includes('PARTS')) return parts(turnId, line.includes('HOOKFIRST'));
+  await answer(line, turnId, context);
 }
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -112,11 +114,13 @@ function blocked() {
 
 // Whether the turn ended as it started: CRASH ends the program, HANG waits until Escape stops it, ABORT logs a stopped
 // turn and FAIL a failed one.
-function endsAtOnce(line, turnId) {
+async function endsAtOnce(line, turnId) {
   const failure = failures.find(f => f.program === 'kimi' && line.startsWith(f.prompt));
   if (failure) {
     const { type, ...body } = failure.line;
+    if (line.includes('HOOKFIRST')) await hook('stop', 'StopFailure', { error_type: body.error.name, error_message: body.error.message });
     record(type, { ...body, turnId });
+    if (!line.includes('HOOKFIRST')) await hook('stop', 'StopFailure', { error_type: body.error.name, error_message: body.error.message });
     prompt();
     return true;
   }
@@ -126,6 +130,7 @@ function endsAtOnce(line, turnId) {
     hanging = turnId;
     print(`waiting: ${line}\n`);
   } else if (line.includes('ABORT') || line.includes('FAIL')) {
+    if (line.includes('ABORT')) await hook('interrupt', 'Interrupt', { turn_id: turnId, reason: 'cancelled' });
     record('turn.ended', line.includes('FAIL') ? { turnId, reason: 'failed', error: { name: 'APIError', message: 'The plan ran out.' } } : { turnId, reason: 'cancelled' });
     print('Interrupted\n');
   } else return false;
@@ -141,13 +146,15 @@ async function workFirst(line, turnId) {
   }
   if (!line.includes('WORK')) return;
   await sleep(1500);
+  await hook('tool', 'PreToolUse', { tool_call_id: 'work-1', tool_name: 'Bash' });
   loop(turnId, { type: 'tool.call', step: 1, toolCallId: 'work-1', name: 'Bash', args: { command: 'make' } });
   await sleep(1500);
+  await hook('tooldone', 'PostToolUse', { tool_call_id: 'work-1', tool_name: 'Bash' });
   loop(turnId, { type: 'tool.result', step: 1, toolCallId: 'work-1', result: { output: 'built', isError: false } });
 }
 
 // A step with a tool call, then a final message in two text parts with a thought between them.
-function parts(turnId) {
+async function parts(turnId, hookFirst) {
   loop(turnId, { type: 'step.begin', step: 1 });
   loop(turnId, { type: 'content.part', step: 1, part: { type: 'text', text: 'Looking.' } });
   loop(turnId, { type: 'tool.call', step: 1, toolCallId: 'c1', name: 'Bash', args: { command: 'ls' } });
@@ -155,20 +162,26 @@ function parts(turnId) {
   loop(turnId, { type: 'step.end', step: 1 });
   loop(turnId, { type: 'step.begin', step: 2 });
   loop(turnId, { type: 'content.part', step: 2, part: { type: 'text', text: 'first half.' } });
+  const stopping = hookFirst ? hook('stop', 'Stop', { turn_id: String(turnId) }) : null;
+  if (hookFirst) await sleep(300);
   loop(turnId, { type: 'content.part', step: 2, part: { type: 'think', think: 'More.' } });
   loop(turnId, { type: 'content.part', step: 2, part: { type: 'text', text: ' second half.' } });
   loop(turnId, { type: 'step.end', step: 2 });
   record('turn.ended', { turnId, reason: 'completed' });
+  await stopping;
   print('● first half. second half.\n');
   prompt();
 }
 
-function answer(line, turnId, context) {
+async function answer(line, turnId, context) {
   const text = line === 'SECRET' ? `the key is ${process.env.FAKE_SECRET}` : `echo: ${line}${context ? `\n${context}` : ''}`;
   loop(turnId, { type: 'content.part', step: 1, part: { type: 'text', text } });
   if (line.includes('SWITCH')) record('config.update', { modelAlias: 'small' });
   record('token_counting.measured', { length: 2, tokens: 262144 });
+  const stopping = !line.includes('LOGFIRST') ? hook('stop', 'Stop', {}) : null;
   record('turn.ended', { turnId, reason: 'completed' });
+  await stopping;
+  if (line.includes('LOGFIRST')) await hook('stop', 'Stop', {});
   print(`● ${text}\n`);
   prompt();
 }
@@ -180,11 +193,29 @@ let queue = Promise.resolve();
 readKeys(key => {
   if (key === 'escape') {
     if (hanging !== null) {
+      void hook('interrupt', 'Interrupt', { turn_id: hanging, reason: 'cancelled' });
       record('turn.ended', { turnId: hanging, reason: 'cancelled' });
       hanging = null;
       print('\r\x1b[JInterrupted\n');
       prompt();
     }
+    return;
+  }
+  if (key === 'steer') {
+    const text = typed;
+    typed = '';
+    print('\r\x1b[J\n');
+    if (!text || hanging === null) return prompt();
+    queue = queue.then(async () => {
+      await hook('queued', 'UserPromptQueued', { prompt: [{ type: 'text', text }], is_steer: true });
+      record('prompt.steered', { input: [{ type: 'text', text }] });
+      if (process.env.FAKE_HOLD_WORDS) return prompt();
+      const turnId = hanging;
+      record('turn.steer', { turnId, input: [{ type: 'text', text }], origin: { inTurn: true } });
+      hanging = null;
+      await workFirst(text, turnId);
+      await answer(text, turnId, '');
+    });
     return;
   }
   if (key === 'enter') {

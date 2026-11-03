@@ -20,6 +20,7 @@ async function atWork(takePrompt = true) {
   let input = '';
   let history = '';
   let take = takePrompt;
+  let initial = true;
   const record = (payload: object) => appendFileSync(log, JSON.stringify({ type: 'event_msg', payload }) + '\n');
   vi.spyOn(tmux, 'scratch').mockReturnValue(home);
   vi.spyOn(tmux, 'launch').mockImplementation(async () => {
@@ -34,9 +35,11 @@ async function atWork(takePrompt = true) {
     for (const key of pressed) {
       if (key === 'C-u') input = input.slice(0, input.lastIndexOf('\n') + 1);
       if (key === 'BSpace') input = input.slice(0, -1);
-      if (key !== 'Enter' || !take) continue;
+      if (key !== 'Enter' || !take || !input) continue;
+      const text = input;
       input = '';
-      record({ type: 'task_started', turn_id: 'turn' });
+      if (initial) { record({ type: 'task_started', turn_id: 'turn' }); initial = false; }
+      record({ type: 'item_completed', turn_id: 'turn', item: { type: 'UserMessage', content: [{ type: 'text', text }] } });
     }
   });
   const host = new TerminalHost({ tmux, hornhoof: 'http://127.0.0.1:9', send: () => {}, secrets: () => [], log: logMessage, pollMs: 10, enterWaitMs: 100, plugins: [] });
@@ -45,6 +48,7 @@ async function atWork(takePrompt = true) {
   const turns = [running];
   const finish = () => record({ type: 'task_complete', last_agent_message: 'Done.' });
   cleanups.push(async () => {
+    alive.mockResolvedValue(false);
     finish();
     await Promise.all(turns);
     await host.stop();
@@ -55,6 +59,7 @@ async function atWork(takePrompt = true) {
   keys.mockClear();
   screen.mockClear();
   const next = () => {
+    initial = true;
     const turn = host.run(job);
     turns.push(turn);
     return turn;
@@ -91,34 +96,18 @@ describe('words typed into a running turn', () => {
     expect(c.paste).not.toHaveBeenCalled();
   });
 
-  it('says no if the turn ends while Enter is sent', async () => {
+  it('keeps Codex words held if the turn ends while Enter is sent', async () => {
     const c = await atWork();
-    c.keys.mockImplementationOnce(async () => {
-      c.finish();
-      await c.running;
-    });
-    expect(await c.host.say('say', 'Use the new schema.')).toBe(false);
+    c.keys.mockImplementationOnce(async () => { c.finish(); await c.running; });
+    expect(await c.host.say('say', 'Use the new schema.')).toBe(true);
   });
 
-  it('says no and clears the input when the program misses Enter', async () => {
+  it.each(['Use the new schema.', '\nUse the new schema.', 'First line.\nSecond line.'])('keeps silent Codex input held after two keys: %s', async text => {
     const c = await atWork();
     c.take(false);
-    expect(await c.host.say('say', 'Use the new schema.')).toBe(false);
-    expect(await c.host.screen('say')).not.toContain('Use the new schema.');
-  });
-
-  it('does not mistake the empty first line of a multiline input for words that went in', async () => {
-    const c = await atWork();
-    c.take(false);
-    expect(await c.host.say('say', '\nUse the new schema.')).toBe(false);
-    expect(await c.host.screen('say')).not.toContain('Use the new schema.');
-  });
-
-  it('clears every line of words that did not go in', async () => {
-    const c = await atWork();
-    c.take(false);
-    expect(await c.host.say('say', 'First line.\nSecond line.')).toBe(false);
-    expect(await c.host.screen('say')).not.toContain('First line.');
+    expect(await c.host.say('say', text)).toBe(true);
+    expect(c.keys.mock.calls.filter(([, key]) => key === 'Enter')).toHaveLength(2);
+    expect(await c.host.screen('say')).toContain(text);
   });
 
   it('pastes and presses Enter on an unknown screen, and logs the fallback once for the agent', async () => {
@@ -163,11 +152,11 @@ describe('words typed into a running turn', () => {
     expect(c.paste).not.toHaveBeenCalled();
   });
 
-  it('falls back if the input disappears after Enter', async () => {
+  it('uses the receipt if the input disappears after Enter', async () => {
     const c = await atWork();
     c.screen.mockResolvedValueOnce('OpenAI Codex\n› \n').mockResolvedValue('Input is hidden.');
     expect(await c.host.say('say', 'Use the new schema.')).toBe(true);
-    expect(c.logMessage).toHaveBeenCalledOnce();
+    expect(c.logMessage).not.toHaveBeenCalled();
   });
 
   it('keeps the fallback answer when the turn ends as Enter goes in', async () => {
@@ -180,14 +169,15 @@ describe('words typed into a running turn', () => {
     expect(await c.host.say('say', 'Use the new schema.')).toBe(true);
   });
 
-  it('checks the turn after reading the screen', async () => {
+  it('checks the turn after reading the input before typing', async () => {
     const c = await atWork();
-    c.screen.mockResolvedValueOnce('OpenAI Codex\n› \n').mockImplementationOnce(async () => {
+    c.screen.mockImplementationOnce(async () => {
       c.finish();
       await c.running;
       return 'OpenAI Codex\n› \n';
     });
     expect(await c.host.say('say', 'Use the new schema.')).toBe(false);
+    expect(c.paste).not.toHaveBeenCalled();
   });
 
   it('clears words left by a paste that failed halfway through', async () => {
@@ -207,11 +197,11 @@ describe('words typed into a running turn', () => {
     expect(await c.host.say('say', 'Use the new schema.')).toBe(true);
   });
 
-  it('waits for the input to clear after Enter', async () => {
+  it('uses the program receipt even if the screen still shows the words', async () => {
     const c = await atWork();
     c.screen.mockResolvedValueOnce('OpenAI Codex\n› \n').mockResolvedValueOnce('OpenAI Codex\n› Use the new schema.\n');
     expect(await c.host.say('say', 'Use the new schema.')).toBe(true);
-    expect(c.screen).toHaveBeenCalledTimes(3);
+    expect(c.keys.mock.calls.filter(([, key]) => key === 'Enter')).toHaveLength(1);
   });
 
   it.each([-15_000, 15_000])('starts its budget on a node whose clock differs by %i ms', async offset => {

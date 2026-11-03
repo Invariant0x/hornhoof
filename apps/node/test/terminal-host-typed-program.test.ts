@@ -18,7 +18,7 @@ async function typeWithoutAck(key: string, text: string): Promise<void> {
 describe.skipIf(!hasTmux)('observing turns people type in a terminal', () => {
   afterEach(async () => { vi.restoreAllMocks(); await host?.stop(); });
 
-  it.each(['claude', 'antigravity'] as const)('keeps a lost %s Stop open until a person cancels it, without touching the program', async kind => {
+  it.each(['claude', 'antigravity'] as const)('keeps lost %s end channels open until a person cancels it, without touching the program', async kind => {
     await setUp({ lookMs: 50, reportMs: 100 });
     const key = `typed-${kind}`;
     const start = job(key, '');
@@ -70,7 +70,7 @@ describe.skipIf(!hasTmux)('observing turns people type in a terminal', () => {
     expect(stopHook.mock.calls.some(([, event]) => event === 'stop')).toBe(true);
   });
 
-  it('keeps an unconfirmed typed turn open when its Stop is lost, then reports it under its confirmed job id', async () => {
+  it('keeps an unconfirmed typed turn open when both end channels are lost, then reports it under its confirmed job id', async () => {
     await setUp({ lookMs: 50, openMs: 50 });
     await host.run(job('late', ''));
     endsLost();

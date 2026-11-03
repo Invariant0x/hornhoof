@@ -1,7 +1,7 @@
 'use strict';
 
 const { randomUUID } = require('node:crypto');
-const WAIT_MS = { prompt: 12000, stop: 15000 };
+const WAIT_MS = { prompt: 12000, stop: 15000, interrupt: 15000, tool: 1000, tooldone: 1000, toolfail: 1000 };
 
 class HookResponseError extends Error {
   constructor(status) {
@@ -32,7 +32,7 @@ async function sendHook(event, body) {
   const url = process.env.HH_BRIDGE;
   if (!url) return null;
   const call = randomUUID();
-  const tries = event === 'stop' ? 3 : 1;
+  const tries = event === 'stop' || event === 'interrupt' ? 3 : 1;
   let last;
   for (let attempt = 0; attempt < tries; attempt++) {
     try {

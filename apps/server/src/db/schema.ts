@@ -1,4 +1,4 @@
-import { COMPANY_TEMPLATE_KEYS, CRED_KINDS, MACHINE_KINDS, RUN_KINDS, TEMPLATE_KEYS, type Account, type Boot, type Limits, type ModelOption } from '@hornhoof/protocol';
+import { COMPANY_TEMPLATE_KEYS, CRED_KINDS, MACHINE_KINDS, RUN_KINDS, TEMPLATE_KEYS, type Account, type Boot, type Failure, type Limits, type ModelOption } from '@hornhoof/protocol';
 import { sql } from 'drizzle-orm';
 import { bigint, bigserial, boolean, check, customType, index, integer, jsonb, pgTable, primaryKey, real, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
 
@@ -326,6 +326,9 @@ export const jobs = pgTable(
     result: text('result'),
     tail: text('tail').notNull().default(''),
     error: text('error'),
+    failure: jsonb('failure').$type<Failure>(),
+    notBefore: timestamp('not_before', { withTimezone: true }),
+    restartedAt: timestamp('restarted_at', { withTimezone: true }),
     timeoutMs: integer('timeout_ms').notNull(),
     kind: text('kind', { enum: JOB_KINDS }).notNull().default('test'),
     /* The job's Hornhoof tools present this token; it works only while the job runs. */
@@ -357,7 +360,8 @@ export const jobs = pgTable(
 
 /* computer: the orchestrator asked for the computer the server runs on, or the CEO opened, closed or declined it. typed: a
    person pressed Enter in the terminal of the running turn, so what they typed is their word in it; the window shows
-   what the program shows instead. */
+   what the program shows instead. Repeated words keep their author and envelope as typed, without showing or sending
+   another message. */
 export const AGENT_EVENT_KINDS = ['message', 'text', 'tool', 'tool_result', 'todo', 'proposal', 'applied', 'stopped', 'failed', 'computer', 'typed', 'hook_rejected'] as const;
 export type AgentEventKind = (typeof AGENT_EVENT_KINDS)[number];
 
@@ -376,7 +380,12 @@ export const agentEvents = pgTable(
     personId: uuid('person_id').references(() => people.id),
     createdAt: createdAt(),
   },
-  t => [index('agent_events_agent_id_seq').on(t.agentId, t.seq), index('agent_events_job_id').on(t.jobId)],
+  t => [
+    index('agent_events_agent_id_seq').on(t.agentId, t.seq),
+    index('agent_events_job_id').on(t.jobId),
+    index('agent_events_failure_case').on(sql`(data->>'failureCase')`).where(sql`data->>'failureCase' is not null`),
+    index('agent_events_operations_pending').on(sql`(data->>'operationsPending')`).where(sql`data->>'operationsPending' is not null`),
+  ],
 );
 
 export const proposals = pgTable('proposals', {

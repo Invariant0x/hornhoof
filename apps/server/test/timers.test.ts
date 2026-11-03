@@ -190,6 +190,8 @@ describe('timers', () => {
       since: at(2).getTime(),
       tool: 'Bash',
       screenAt: at(3).getTime(),
+      signAt: null,
+      retry: null,
       reportedAt: at(3).getTime(),
     };
     const org = (await app.inject({ url: '/api/org', ...as(ceo) })).json();

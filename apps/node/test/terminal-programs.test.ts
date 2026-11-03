@@ -227,9 +227,24 @@ describe('Kimi Code in a terminal', () => {
     expect(JSON.parse(readFileSync(join(work, '.kimi-code', 'mcp.json'), 'utf8'))).toEqual({ mcpServers: { hornhoof: { transport: 'http', url: URLS.mcpUrl } } });
     const config = readFileSync(join(home, 'config.toml'), 'utf8');
     expect(config.startsWith(own)).toBe(true);
-    expect(config.match(/\[\[hooks\]\]/g)).toHaveLength(2);
+    expect(config.match(/\[\[hooks\]\]/g)).toHaveLength(10);
     expect(config).toContain('event = "SessionStart"\ncommand = "hh-hook start"');
     expect(config).toContain('event = "UserPromptSubmit"\ncommand = "hh-hook prompt"');
+    expect(config).toContain('event = "UserPromptQueued"\ncommand = "hh-hook queued"');
+  });
+
+  it('adds UserPromptQueued to existing hooks and leaves an installed receipt hook alone', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'hh-kimi-'));
+    const work = mkdtempSync(join(tmpdir(), 'hh-kimi-work-'));
+    await prepareKimi(home, work, URLS.mcpUrl);
+    const file = join(home, 'config.toml');
+    const old = readFileSync(file, 'utf8').replace(/\[\[hooks\]\]\nevent = "UserPromptQueued"\ncommand = "hh-hook queued"\n\n?/, '');
+    writeFileSync(file, old);
+    await prepareKimi(home, work, URLS.mcpUrl);
+    const updated = readFileSync(file, 'utf8');
+    expect(updated).toContain('event = "UserPromptQueued"\ncommand = "hh-hook queued"');
+    await prepareKimi(home, work, URLS.mcpUrl);
+    expect(readFileSync(file, 'utf8')).toBe(updated);
   });
 
   it('adds the hooks to a fresh home, and leaves settings alone that list hooks in a way more could not be added to', async () => {
@@ -298,5 +313,30 @@ describe('Kimi Code in a terminal', () => {
     expect(findKimiWire(home, 'session_1')).toBe(join(dir, 'wire.jsonl'));
     expect(findKimiWire(home, 'session_2')).toBeNull();
     expect(findKimiWire(home, '../x')).toBeNull();
+  });
+});
+
+describe('lifecycle hooks in launch settings', () => {
+  const launch = { bin: 'program', home: '/h', workDir: '/w', sessionId: null, model: null, instructionsFile: null, urls: URLS };
+  it('configures Claude tool, permission and session ends', () => {
+    const settings = JSON.parse(arg(claudeProgram.launch(launch).command, '--settings')!);
+    for (const [name, event] of Object.entries({ PreToolUse: 'tool', PostToolUse: 'tooldone', PostToolUseFailure: 'toolfail', PermissionRequest: 'ask', SessionEnd: 'end' })) {
+      expect(settings.hooks[name]).toEqual([{ hooks: [{ type: 'command', command: `hh-hook ${event}` }] }]);
+    }
+  });
+  it('configures exactly the five Codex hooks with inline TOML and bypasses hook trust', () => {
+    const command = codexProgram.launch(launch).command;
+    expect(command).toContain('--dangerously-bypass-hook-trust');
+    expect(command.filter(s => s.startsWith('hooks.'))).toEqual(Object.entries({ Stop: 'stop', Interrupt: 'interrupt', PreToolUse: 'tool', PostToolUse: 'tooldone', SessionEnd: 'end' }).map(([name, event]) => `hooks.${name}=[{hooks=[{type="command",command="hh-hook ${event}"}]}]`));
+  });
+  it('upgrades the two existing Kimi hooks once, including both stop events', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'hh-kimi-hooks-'));
+    const work = mkdtempSync(join(tmpdir(), 'hh-kimi-work-'));
+    writeFileSync(join(home, 'config.toml'), '[[hooks]]\nevent = "SessionStart"\ncommand = "hh-hook start"\n\n[[hooks]]\nevent = "UserPromptSubmit"\ncommand = "hh-hook prompt"\n');
+    await prepareKimi(home, work, URLS.mcpUrl);
+    await prepareKimi(home, work, URLS.mcpUrl);
+    const config = readFileSync(join(home, 'config.toml'), 'utf8');
+    expect([...config.matchAll(/event = "([^"]+)"/g)].map(m => m[1])).toEqual(['SessionStart', 'UserPromptSubmit', 'UserPromptQueued', 'Stop', 'StopFailure', 'Interrupt', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'SessionEnd']);
+    expect(config).not.toContain('SessionHeartbeat');
   });
 });

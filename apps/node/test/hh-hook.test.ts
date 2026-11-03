@@ -26,7 +26,9 @@ describe('hh-hook', () => {
     const env = { PATH: process.env.PATH, HH_BRIDGE: `http://127.0.0.1:${(bridge.address() as AddressInfo).port}` };
     try {
       expect((await run('node', [HOOK, 'prompt', '{"prompt":"hi"}'], { env })).stdout).toBe('said to /prompt\n');
-      expect((await run('node', [HOOK, 'status', '{}'], { env })).stdout).toBe('');
+      for (const event of ['status', 'tool', 'tooldone', 'toolfail', 'ask', 'interrupt', 'end']) {
+        expect((await run('node', [HOOK, event, '{}'], { env })).stdout).toBe('');
+      }
     } finally {
       bridge.close();
     }

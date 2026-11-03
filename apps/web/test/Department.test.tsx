@@ -1035,19 +1035,22 @@ it('anchors a card opened from Speed beside the clicked row', async () => {
 });
 
 describe("what an agent's program does, and the server's alarms about its turn", () => {
-  type Live = Pick<Employee, 'program' | 'alarm'> & Partial<Pick<Employee, 'status'>>;
+  type Live = Pick<Employee, 'program' | 'alarm'> & Partial<Pick<Employee, 'status' | 'retry'>>;
   const ago = (now: number, minutes: number) => now - minutes * 60_000;
   /* The company with Bruno's program and alarm as given, on a server clock at now. */
   function live(now: number, bruno: Live, base: Org = TREE_ORG): Org {
     return { ...base, serverNow: new Date(now).toISOString(), departments: base.departments.map(d => ({ ...d, employees: d.employees.map(e => (e.id === 'b1' ? { ...e, ...bruno } : e)) })) };
   }
-  const program = (now: number, state: ProgramView['state'], minutes: number, tool: string | null = null): ProgramView => ({ state, since: ago(now, minutes), tool, screenAt: ago(now, 0), reportedAt: ago(now, 0) });
+  const program = (now: number, state: ProgramView['state'], minutes: number, tool: string | null = null): ProgramView => ({ state, since: ago(now, minutes), tool, screenAt: ago(now, 0), signAt: null, retry: null, reportedAt: ago(now, 0) });
+  const retryAt = new Date(2026, 10, 3, 14, 5).getTime();
   const STATES: [string, (now: number) => Live, string, string, boolean][] = [
     ['thinking', now => ({ program: program(now, 'thinking', 12), alarm: null }), 'thinking 12 min', 'думает 12 мин', false],
+    ['thinking with no sign', now => ({ program: { ...program(now, 'thinking', 32), signAt: ago(now, 31) }, alarm: null }), 'thinking 32 min, no sign 31 min', 'думает 32 мин, без признаков 31 мин', false],
     ['a tool', now => ({ program: program(now, 'tool', 40, 'Bash'), alarm: null }), 'Bash running 40 min', 'Bash работает 40 мин', false],
     ['asking', now => ({ program: program(now, 'asking', 3), alarm: null }), 'asking', 'спрашивает', false],
-    ['waiting for input for 59 s', now => ({ program: program(now, 'idle', 59 / 60), alarm: null }), 'waiting for input', 'ждет ввода', false],
-    ['a lost turn end after 61 s of it', now => ({ program: program(now, 'idle', 61 / 60), alarm: null }), 'turn end lost: waiting for input', 'конец хода потерян: ждет ввода', true],
+    ['retrying', now => ({ program: program(now, 'retrying', 3), alarm: null }), 'retrying', 'повторяет запрос', false],
+    ['a waiting retry', () => ({ program: null, alarm: null, retry: { attempt: 2, max: 4, at: retryAt, kind: 'overloaded' } }), 'retry 2 of 4 at 14:05 (provider overloaded)', 'повтор 2 из 4 в 14:05 (провайдер перегружен)', false],
+    ['waiting for input after 5 min', now => ({ program: program(now, 'idle', 5), alarm: null }), 'waiting for input', 'ждет ввода', false],
     ['a frozen program', now => ({ program: program(now, 'thinking', 50), alarm: { reason: 'program_stalled', since: ago(now, 34) } }), 'program frozen 34 min', 'программа замерла 34 мин', true],
     ['a silent node', now => ({ program: program(now, 'tool', 45, 'Bash'), alarm: { reason: 'node_silent', since: ago(now, 31) } }), 'node silent 31 min', 'нода молчит 31 мин', true],
   ];
@@ -1105,7 +1108,7 @@ describe("what an agent's program does, and the server's alarms about its turn",
     });
   });
 
-  it('counts the minutes on without a reload, turns a long wait for input red, and follows the server when it says the company changed', async () => {
+  it('counts the minutes on without a reload, keeps a long wait for input calm, and follows the server when it says the company changed', async () => {
     const user = heldClock();
     const stream = fakeStream();
     const now = Date.now();
@@ -1115,14 +1118,14 @@ describe("what an agent's program does, and the server's alarms about its turn",
     expect(stateOf(bruno())).toHaveTextContent('thinking 12 min');
     await act(() => vi.advanceTimersByTimeAsync(60_000));
     expect(stateOf(bruno())).toHaveTextContent('thinking 13 min');
-    /* It waits for input from the minute the held clock just passed. */
+    /* It waits for input from the minute the held clock just passed, and stays calm past a minute. */
     org = live(now, { program: program(now, 'idle', -1), alarm: null }, DEV_ORG);
     stream.send({ type: 'org' });
     await vi.waitFor(() => expect(stateOf(bruno())).toHaveTextContent('waiting for input'));
     expect(stateOf(bruno())).not.toHaveClass('alarm');
     await act(() => vi.advanceTimersByTimeAsync(60_000));
-    expect(stateOf(bruno())).toHaveTextContent('turn end lost: waiting for input');
-    expect(stateOf(bruno())).toHaveClass('alarm');
+    expect(stateOf(bruno())).toHaveTextContent('waiting for input');
+    expect(stateOf(bruno())).not.toHaveClass('alarm');
     org = live(now, { program: null, alarm: null }, DEV_ORG);
     stream.send({ type: 'working', working: 0 });
     await vi.waitFor(() => expect(stateOf(bruno())).toBeNull());

@@ -4,9 +4,44 @@ import { BUILTIN } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { ask, createTask, submit } from '../src/modules/tasks/engine.js';
 import { checkSilentTurns, SILENT_TURN_MS } from '../src/modules/tasks/silent.js';
-import { as, invitePerson, SETUP, setUpCompany, testApp } from './helpers.js';
+import { failureCompany } from './failure-company.js';
+import { as, invitePerson, SETUP, setUpCompany, statements, testApp } from './helpers.js';
 
 describe('GET /api/org', () => {
+  it('reads failure state with the same number of queries as the company grows', async () => {
+    const c = await failureCompany();
+    const seen = statements();
+    expect((await c.app.inject({ url: '/api/org', ...as(c.ceo) })).statusCode).toBe(200);
+    const before = seen.length;
+    await c.db.insert(agents).values(Array.from({ length: 6 }, (_, i) => ({ companyId: c.companyId, name: `Employee ${i}`, kind: 'worker' as const, departmentId: c.dev.id, model: '' })));
+    seen.length = 0;
+    expect((await c.app.inject({ url: '/api/org', ...as(c.ceo) })).statusCode).toBe(200);
+    expect(seen).toHaveLength(before);
+  });
+
+  it('gives each agent its own failure and retry chain', async () => {
+    const c = await failureCompany();
+    const at = new Date();
+    const base = { companyId: c.companyId, subscriptionId: c.sub.id, kind: 'conversation' as const, prompt: 'Work', timeoutMs: 900000, status: 'failed' as const, finishedAt: at };
+    const [cut, refused, network] = await c.db.insert(jobs).values([
+      { ...base, agentId: c.agent.id, failure: { kind: 'cut', text: 'Connection ended.', retryable: true } },
+      { ...base, agentId: c.head.id, failure: { kind: 'refused', text: 'Work refused.', retryable: false } },
+      { ...base, agentId: c.watcher.id, failure: { kind: 'network', text: 'Offline.', retryable: true } },
+    ]).returning();
+    const [again] = await c.db.insert(jobs).values({ ...base, agentId: c.watcher.id, failure: network!.failure, continueOf: network!.id }).returning();
+    await c.db.insert(jobs).values([
+      { ...base, agentId: c.agent.id, status: 'queued', finishedAt: null, continueOf: cut!.id, notBefore: new Date(+at + 60000) },
+      { ...base, agentId: c.watcher.id, status: 'queued', finishedAt: null, continueOf: again!.id, notBefore: new Date(+at + 120000) },
+    ]);
+
+    const org = (await c.app.inject({ url: '/api/org', ...as(c.ceo) })).json();
+    const employees = org.departments.flatMap((d: { employees: { id: string }[] }) => d.employees);
+    expect(employees.find((a: { id: string }) => a.id === c.agent.id)).toMatchObject({ failure: { kind: 'cut', text: cut!.failure!.text, at: +at }, retry: { attempt: 1, max: 4, at: +at + 60000, kind: 'cut' } });
+    expect(employees.find((a: { id: string }) => a.id === c.head.id)).toMatchObject({ failure: { kind: 'refused', text: refused!.failure!.text, at: +at }, retry: null });
+    expect(employees.find((a: { id: string }) => a.id === c.watcher.id)).toMatchObject({ failure: { kind: 'network', text: network!.failure!.text, at: +at }, retry: { attempt: 2, max: 4, at: +at + 120000, kind: 'network' } });
+    expect(org.orchestrator).toMatchObject({ failure: null, retry: null });
+  });
+
   it('shows the orchestrator with its active API key subscription', async () => {
     const { app } = await testApp();
     const ceo = await setUpCompany(app);
@@ -330,6 +365,8 @@ describe('GET /api/org', () => {
       since: reportedAt.getTime(),
       tool: 'Bash',
       screenAt: reportedAt.getTime(),
+      signAt: null,
+      retry: null,
       reportedAt: reportedAt.getTime(),
     });
     expect(devEmployee.alarm).toEqual({ reason: 'node_silent', since: reportedAt.getTime() });

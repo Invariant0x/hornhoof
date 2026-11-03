@@ -5,7 +5,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import type { TestProject } from 'vitest/node';
-import { MIGRATIONS } from '../src/db/client.js';
+import { applyMissingMigrations, MIGRATIONS } from '../src/db/client.js';
 import * as schema from '../src/db/schema.js';
 
 declare module 'vitest' {
@@ -22,7 +22,9 @@ export default async function setup(project: TestProject): Promise<() => void> {
   const file = join(dir, 'migrated.tar');
   const client = new PGlite();
   try {
-    await migrate(drizzle(client, { schema }), { migrationsFolder: MIGRATIONS });
+    const db = drizzle(client, { schema });
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await applyMissingMigrations(db, { migrationsFolder: MIGRATIONS });
     writeFileSync(file, Buffer.from(await (await client.dumpDataDir('none')).arrayBuffer()));
   } finally {
     await client.close();

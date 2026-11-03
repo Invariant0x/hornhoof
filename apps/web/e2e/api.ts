@@ -12,7 +12,7 @@ const BRUNO = { id: 'b1', name: 'Bruno', kind: 'worker' as const, role: { en: 'D
 
 const ORG: Org = {
   company: ME.company,
-  orchestrator: { id: 'a1', name: 'Orchestrator', model: 'claude-opus-5-5', effort: null, subscription: null, context: null, program: null, alarm: null },
+  orchestrator: { id: 'a1', name: 'Orchestrator', model: 'claude-opus-5-5', effort: null, subscription: null, context: null, program: null, alarm: null, retry: null, failure: null },
   agents: { total: 1, working: 1 },
   people: [],
   departments: [
